@@ -8,6 +8,7 @@ import type {
 	Texture2DUpload,
 } from "../renderer/resource-manager";
 import type { DatAssetId } from "../game-types";
+import { TERRAIN_TYPE_COUNT } from "../terrain/pcode";
 import type { TexturePreparer } from "./texture-preparer";
 import {
 	type GeneratedTextureKey,
@@ -18,6 +19,8 @@ import {
 	type TextureKey,
 	type TextureFact,
 	type TexturePurpose,
+	TexturePurpose as TexturePurposeValue,
+	type TerrainColorPalette,
 	isTextureArrayKey,
 	isGeneratedTextureKey,
 	isAssetTextureKey,
@@ -39,14 +42,31 @@ export interface TextureArrayLayerSource {
 }
 
 /** Complete immutable source used to create one texture array atomically. */
-export interface TextureArraySource {
+interface TextureArraySourceBase {
 	readonly key: TextureArrayKey;
-	readonly purpose: TexturePurpose;
 	readonly width: number;
 	readonly height: number;
 	/** Ordered layers whose indices remain stable for the array lifetime. */
 	readonly layers: readonly TextureArrayLayerSource[];
 }
+
+/** Terrain-color array pixels and the CPU palette published under one identity. */
+export interface TerrainColorTextureArraySource extends TextureArraySourceBase {
+	readonly purpose: TexturePurposeValue.TerrainColor;
+	readonly palette: TerrainColorPalette;
+}
+
+/** Array source whose purpose owns no CPU terrain palette. */
+export interface ConventionalTextureArraySource extends TextureArraySourceBase {
+	readonly purpose:
+		| TexturePurposeValue.TerrainBlendMask
+		| TexturePurposeValue.TerrainRoadMask;
+}
+
+/** Complete immutable source used to create one texture array atomically. */
+export type TextureArraySource =
+	| TerrainColorTextureArraySource
+	| ConventionalTextureArraySource;
 
 /** Complete immutable source used to create one unpacked texture atomically. */
 export interface AssetTextureSource {
@@ -63,10 +83,27 @@ export interface AssetTextureSource {
 }
 
 /** Backend array resource plus deterministic DAT-source layer assignments. */
-export interface TextureArrayBinding {
+interface TextureArrayBindingBase {
 	readonly resource: TextureArrayResourceKey;
 	readonly layersByAssetId: ReadonlyMap<DatAssetId, number>;
 }
+
+/** Atomically published terrain-color GPU array and CPU palette. */
+export interface TerrainColorTextureArrayBinding extends TextureArrayBindingBase {
+	readonly purpose: TexturePurposeValue.TerrainColor;
+	readonly palette: TerrainColorPalette;
+}
+
+/** Array binding with no terrain-palette consumer. */
+export interface ConventionalTextureArrayBinding extends TextureArrayBindingBase {
+	readonly purpose:
+		| TexturePurposeValue.TerrainBlendMask
+		| TexturePurposeValue.TerrainRoadMask;
+}
+
+export type TextureArrayBinding =
+	| TerrainColorTextureArrayBinding
+	| ConventionalTextureArrayBinding;
 
 /** Backend atlas resource and page-relative placement for one logical texture. */
 export interface TextureAtlasBinding {
@@ -329,12 +366,24 @@ export class TextureManager<TOwnerId extends string = string> {
 			throw cause;
 		}
 
-		this.#textureArrays.set(source.key, {
+		const binding = {
 			layersByAssetId: new Map(
 				source.layers.map(({ sourceAssetId }, layer) => [sourceAssetId, layer]),
 			),
 			resource,
-		});
+		};
+		if (source.purpose === TexturePurposeValue.TerrainColor) {
+			this.#textureArrays.set(source.key, {
+				...binding,
+				palette: source.palette,
+				purpose: source.purpose,
+			});
+		} else {
+			this.#textureArrays.set(source.key, {
+				...binding,
+				purpose: source.purpose,
+			});
+		}
 	}
 
 	getAtlasBinding(texture: AssetTextureKey): TextureAtlasBinding {
@@ -363,6 +412,17 @@ export class TextureManager<TOwnerId extends string = string> {
 		const array = this.#textureArrays.get(key);
 		if (!array) throw new Error(`Texture array ${key} does not exist.`);
 		return array;
+	}
+
+	/** Return the atomically published terrain-color array and its matching CPU palette. */
+	getTerrainColorTextureArrayBinding(
+		key: TextureArrayKey,
+	): TerrainColorTextureArrayBinding {
+		const binding = this.getTextureArrayBinding(key);
+		if (binding.purpose !== TexturePurposeValue.TerrainColor) {
+			throw new Error(`Texture array ${key} is not a terrain-color binding.`);
+		}
+		return binding;
 	}
 
 	/** Check whether a complete logical texture is currently device-backed. */
@@ -434,6 +494,17 @@ export class TextureManager<TOwnerId extends string = string> {
 		) {
 			throw new Error(
 				`Texture preparer returned incompatible array membership for ${fact.key}.`,
+			);
+		}
+		if (fact.purpose === TexturePurposeValue.TerrainColor) {
+			if (!("palette" in source)) {
+				throw new Error(
+					`Texture preparer returned no terrain palette for ${fact.key}.`,
+				);
+			}
+		} else if ("palette" in source) {
+			throw new Error(
+				`Texture preparer returned a terrain palette for ${fact.key}.`,
 			);
 		}
 	}
@@ -531,6 +602,37 @@ function validateTextureArraySource(source: TextureArraySource): void {
 		throw new Error(
 			`Texture array ${source.key} contains duplicate DAT sources.`,
 		);
+	}
+	if (source.purpose === TexturePurposeValue.TerrainColor) {
+		validateTerrainColorPalette(source.palette, source.key);
+	}
+}
+
+function validateTerrainColorPalette(
+	palette: TerrainColorPalette,
+	key: TextureArrayKey,
+): void {
+	if (!(palette.colors instanceof Float32Array)) {
+		throw new Error(
+			`Terrain color array ${key} palette must use Float32Array storage.`,
+		);
+	}
+	if (palette.colors.length !== TERRAIN_TYPE_COUNT * 3) {
+		throw new Error(
+			`Terrain color array ${key} must carry exactly ${TERRAIN_TYPE_COUNT} RGB entries.`,
+		);
+	}
+	for (const channel of palette.colors) {
+		if (!Number.isFinite(channel)) {
+			throw new Error(
+				`Terrain color array ${key} contains a non-finite palette channel.`,
+			);
+		}
+		if (channel < 0 || channel > 1) {
+			throw new Error(
+				`Terrain color array ${key} contains an out-of-range palette channel.`,
+			);
+		}
 	}
 }
 

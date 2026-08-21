@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+	ROAD_TERRAIN_TYPE,
+	TERRAIN_COLOR_CODES,
+	TERRAIN_MATERIAL_CODES,
+	TERRAIN_TYPE_COUNT,
 	roadCodeAt,
 	rotationsToMatch,
 	selectRoadAlphaMap,
@@ -10,6 +14,16 @@ import {
 } from "./pcode";
 
 describe("terrain pcode", () => {
+	it("enumerates the complete color and road material domains", () => {
+		expect(TERRAIN_COLOR_CODES).toEqual(
+			Array.from({ length: TERRAIN_TYPE_COUNT }, (_, code) => code),
+		);
+		expect(TERRAIN_MATERIAL_CODES).toEqual([
+			...TERRAIN_COLOR_CODES,
+			ROAD_TERRAIN_TYPE,
+		]);
+	});
+
 	it("decodes retail corner packing and derives terrain overlay shapes", () => {
 		const pcode = packPcode([1, 2, 3, 0], [4, 5, 6, 7]);
 		expect(terrainCodeAt(pcode, "southwest")).toBe(4);

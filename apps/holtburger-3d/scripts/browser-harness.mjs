@@ -106,6 +106,7 @@ try {
 						relocationSequence: result.relocationSequence,
 						relocationState: result.relocationState,
 						metrics: result.state.metrics,
+						terrainGlTrace: result.state.terrainGlTrace,
 						ready: result.state.ready,
 						screenshotPath: options.screenshotPath,
 						isolateAuthoredDynamics: options.isolateAuthoredDynamics,
@@ -128,6 +129,9 @@ try {
 		throw new Error(
 			`Browser harness observed browser errors: ${browserErrors.map(({ text }) => text).join(" | ")}`,
 		);
+	}
+	if (options.traceTerrainGl) {
+		assertTerrainGlTrace(result.state);
 	}
 	if (options.modeCycle) {
 		assertModeCycle(result.initialState, result.modeCycleStates);
@@ -217,6 +221,7 @@ function parseArgs(args) {
 		ambientOcclusion: null,
 		ambientOcclusionCycle: false,
 		ambientOcclusionCoverage: false,
+		traceTerrainGl: false,
 		vitePort: DEFAULT_VITE_PORT,
 		staticLights: true,
 		weather: true,
@@ -626,6 +631,9 @@ function parseArgs(args) {
 			case "--gpu":
 				parsed.gpu = true;
 				break;
+			case "--trace-terrain-gl":
+				parsed.traceTerrainGl = true;
+				break;
 			case "--ambient-occlusion":
 				parsed.ambientOcclusion = true;
 				break;
@@ -1028,6 +1036,8 @@ Options:
   --filtering-cycle      Change filtering during loading, then cycle supported modes without reload.
   --gpu                  Render on the real GPU adapter instead of SwiftShader. Required for
                          any timing used as performance evidence.
+  --trace-terrain-gl     Assert that the far-terrain program binds no texture state and uploads
+                         exactly one terrain palette per activation.
   --vite-port <port>     Vite port to start or reuse. Change it when another worktree is running
                          a harness, or its server will silently serve that worktree's build.
   --no-static-lights     Disable authored outdoor lamps, for same-scene A/B of their cost.
@@ -1245,6 +1255,7 @@ function briefHarnessReport(result) {
 		entityPopulation: result.entityPopulation,
 		envCellLayers: summarizeEnvCellLayers(staticObjects?.envCellLayers ?? []),
 		finalMetrics: result.state.metrics,
+		terrainGlTrace: result.state.terrainGlTrace,
 		ambientOcclusionCoverageCensus: result.state.ambientOcclusionCoverageCensus,
 		frameProfile: result.state.frameProfile,
 		tickProfile: result.state.tickProfile,
@@ -1252,6 +1263,7 @@ function briefHarnessReport(result) {
 		portalScopeAtlasExecutorFixture: result.state.portalScopeAtlasExecutor,
 		portalExecution: result.portalExecution,
 		initialMetrics: result.initialState.metrics,
+		initialTerrainWorker: result.initialState.terrainWorker,
 		initialCamera: result.initialState.camera,
 		modeCycleMetrics: result.modeCycleStates.map((state) => state.metrics),
 		ambientOcclusionCycleMetrics: result.ambientOcclusionCycleStates.map(
@@ -1287,8 +1299,48 @@ function briefHarnessReport(result) {
 						textureResidentSourceCount:
 							staticObjects.texture.residentSourceCount,
 					},
+		// Atlas workload controls must travel with streaming timings in brief evidence runs.
+		texture: staticObjects?.texture ?? null,
+		terrainWorker: result.state.terrainWorker,
 		timing: result.state.timing,
 	};
+}
+
+function assertTerrainGlTrace(state) {
+	const trace = state.terrainGlTrace;
+	if (trace === null) {
+		throw new Error(
+			"Terrain GL tracing was requested but produced no snapshot.",
+		);
+	}
+	if (trace.farProgramActivationCount === 0 || trace.farDrawCount === 0) {
+		throw new Error(
+			`Terrain GL trace did not observe a far-terrain submission: ${JSON.stringify(trace)}.`,
+		);
+	}
+	if (
+		trace.farDrawActiveTextureCount !== 0 ||
+		trace.farDrawTextureBindCount !== 0 ||
+		trace.farDrawSamplerBindCount !== 0
+	) {
+		throw new Error(
+			`Far terrain touched texture state while active: ${JSON.stringify(trace)}.`,
+		);
+	}
+	if (trace.farPaletteUploadCount !== trace.farProgramActivationCount) {
+		throw new Error(
+			`Far terrain must upload one palette per activation: ${JSON.stringify(trace)}.`,
+		);
+	}
+	if (
+		state.metrics.farTerrainDraws > 0 &&
+		state.metrics.farTerrainDraws === state.metrics.terrainFrameInputs &&
+		trace.nearProgramActivationCount !== 0
+	) {
+		throw new Error(
+			`Far-only terrain activated the near program: ${JSON.stringify(trace)}.`,
+		);
+	}
 }
 
 function summarizeEntityLifecycle(lifecycle) {
@@ -1790,7 +1842,8 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		options.followFlightLandblockId === null
 			? ""
 			: "&audioTrace=1";
-	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&cameraHeight=${encodeURIComponent(options.cameraHeight)}&viewportWidth=${encodeURIComponent(options.viewportWidth)}&viewportHeight=${encodeURIComponent(options.viewportHeight)}${dynamicIsolation}${dynamicExclusion}${attachmentExclusion}${fixture}${timeOfDay}${dayGroup}${particleSeed}${frameIntervalMs}${captureFrame}${audioTrace}`;
+	const terrainGlTrace = options.traceTerrainGl ? "&traceTerrainGl=true" : "";
+	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&cameraHeight=${encodeURIComponent(options.cameraHeight)}&viewportWidth=${encodeURIComponent(options.viewportWidth)}&viewportHeight=${encodeURIComponent(options.viewportHeight)}${dynamicIsolation}${dynamicExclusion}${attachmentExclusion}${fixture}${timeOfDay}${dayGroup}${particleSeed}${frameIntervalMs}${captureFrame}${audioTrace}${terrainGlTrace}`;
 	const chrome = startChild(options.chromePath, [
 		"--remote-debugging-port=0",
 		`--user-data-dir=${userDataDirectory}`,
@@ -2402,6 +2455,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				staticLayerPublicationCount:
 					state.staticObjects.staticLayerPublicationCount,
 				outdoorLightScopeCount: state.staticObjects.outdoorLightScopeCount,
+				terrainWorker: state.terrainWorker,
 				texture: state.staticObjects.texture,
 				timing: state.timing,
 			});
@@ -2489,6 +2543,13 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				[true],
 			);
 		}
+		if (options.traceTerrainGl) {
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.resetTerrainGlTrace",
+				[],
+			);
+		}
 		let cpuProfile = null;
 		await startCpuProfile();
 		if (options.measureMs > 0) {
@@ -2498,7 +2559,11 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				[],
 			);
 			await delay(options.measureMs);
-		} else if (options.profileRenderer || options.cpuProfilePath) {
+		} else if (
+			options.profileRenderer ||
+			options.cpuProfilePath ||
+			options.traceTerrainGl
+		) {
 			await delay(250);
 		}
 		if (options.cpuProfilePath) {

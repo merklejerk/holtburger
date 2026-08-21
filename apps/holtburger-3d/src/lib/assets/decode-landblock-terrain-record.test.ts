@@ -127,16 +127,29 @@ describe("decodeLandblockTerrainRecord", () => {
 		};
 
 		const presentation = resolveActiveRegionTerrainPresentation(activeRegion);
+		const repeated = resolveActiveRegionTerrainPresentation(activeRegion);
 
+		expect(repeated).toBe(presentation);
 		expect(presentation.detailRoles.map(({ role }) => role)).toEqual([
 			"landscape",
 			"building",
 			"environment",
 			"object",
 		]);
-		expect(presentation.composition.terrainTypes.at(-1)?.terrainType).toBe(
-			0x20,
-		);
+		expect(
+			presentation.terrain.composition.terrainMaterials.authored.at(-1)
+				?.terrainType,
+		).toBe(0x20);
+		expect(
+			presentation.terrain.composition.terrainMaterials.byCode[4]?.terrainType,
+		).toBe(0);
+		expect(
+			presentation.terrain.composition.terrainMaterials.byCode[0x20]
+				?.terrainType,
+		).toBe(0x20);
+		expect(
+			presentation.terrain.textures.colors.sourceAssetIdsByTerrainCode,
+		).toHaveLength(32);
 	});
 });
 

@@ -4,6 +4,8 @@ export interface TerrainGeometryData {
 	readonly positions: Float32Array;
 	readonly normals: Float32Array;
 	readonly textureCoordinates: Float32Array;
+	/** One authored terrain type code for each terrain vertex. */
+	readonly terrainColorCodes: Uint8Array;
 	readonly indices: Uint16Array | Uint32Array;
 }
 

@@ -81,13 +81,35 @@ export type TextureKey =
 	| TextureArrayKey
 	| GeneratedTextureKey;
 
-/** Complete source identity for one immutable texture-array resource. */
-export interface TextureArrayFact {
+interface TextureArrayFactBase {
 	readonly kind: "array";
 	readonly key: TextureArrayKey;
-	readonly purpose: TexturePurpose;
 	readonly sourceAssetIds: readonly DatAssetId[];
 }
+
+/** Exact normalized RGB lookup indexed by authored terrain code 0..31. */
+export interface TerrainColorPalette {
+	readonly colors: Float32Array;
+}
+
+/** Terrain-color array identity plus the complete regional code-to-source join. */
+export interface TerrainColorTextureArrayFact extends TextureArrayFactBase {
+	readonly purpose: TexturePurpose.TerrainColor;
+	/** One source identity for each authored terrain code in numeric order. */
+	readonly sourceAssetIdsByTerrainCode: readonly DatAssetId[];
+}
+
+/** Array purposes with no CPU-side terrain palette publication. */
+export interface ConventionalTextureArrayFact extends TextureArrayFactBase {
+	readonly purpose:
+		| TexturePurpose.TerrainBlendMask
+		| TexturePurpose.TerrainRoadMask;
+}
+
+/** Complete source identity for one immutable texture-array resource. */
+export type TextureArrayFact =
+	| TerrainColorTextureArrayFact
+	| ConventionalTextureArrayFact;
 
 /** Complete source identity for one DAT-backed two-dimensional logical texture. */
 export interface AssetTextureFact {

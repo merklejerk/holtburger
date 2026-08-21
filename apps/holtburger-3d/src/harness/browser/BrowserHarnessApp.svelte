@@ -40,6 +40,7 @@
 		type StaticObjectLayerRuntimeDiagnostics,
 		type StaticObjectRuntimeDiagnostics,
 	} from "../../lib/game/runtime/game-runtime";
+	import type { ClosedWorkerPoolDiagnostics } from "../../lib/game/workers/closed-worker";
 	import { RuntimeTickProfiler } from "../../lib/game/runtime/runtime-tick-profiler";
 	import { LandblockLayerKind } from "../../lib/game/runtime/scene-interest";
 	import { ActiveRegionStaticDetailOwner } from "../../lib/game/resolution/active-region-static-detail";
@@ -75,6 +76,10 @@
 		DynamicEntityView,
 	} from "../../lib/game/runtime/dynamic-entity-feed";
 	import { HttpExplorerEntityHost } from "./http-explorer-entity-host";
+	import {
+		installTerrainGlTrace,
+		type TerrainGlTrace,
+	} from "./terrain-gl-trace";
 
 	const CAMERA_FOV_DEGREES = 90;
 	const CAMERA_NEAR = 0.5;
@@ -114,6 +119,7 @@
 	}
 
 	const query = new URLSearchParams(window.location.search);
+	const TRACE_TERRAIN_GL = query.get("traceTerrainGl") === "true";
 	/** Sits above the runtime's conservative ±510 outdoor terrain bound. */
 	const cameraHeightSource = query.get("cameraHeight");
 	const CAMERA_HEIGHT =
@@ -333,6 +339,8 @@
 		) => void;
 		/** Reset steady-state frame timing after asynchronous content publication settles. */
 		readonly resetTiming: () => void;
+		/** Reset harness-only terrain GL counters after the requested scene is configured. */
+		readonly resetTerrainGlTrace: () => void;
 		/** Explicitly enable or tear down renderer CPU/GPU profiling. */
 		readonly setFrameProfiling: (enabled: boolean) => void;
 		/** Toggle near-field ambient occlusion without rebuilding content. */
@@ -454,6 +462,10 @@
 		/** Browser main-thread timing facts accumulated during this harness session. */
 		readonly timing: BrowserHarnessTiming;
 		readonly staticObjects: StaticObjectRuntimeDiagnostics | null;
+		/** Dedicated terrain generation queue and transfer facts. */
+		readonly terrainWorker: ClosedWorkerPoolDiagnostics | null;
+		/** Harness-only calls observed while the far terrain program was active. */
+		readonly terrainGlTrace: TerrainGlTrace | null;
 		/** Layer-separated static diagnostics prove outdoor-static lifetimes stay distinct. */
 		readonly staticObjectLayers: {
 			readonly buildings: readonly StaticObjectLayerRuntimeDiagnostics[];
@@ -487,6 +499,8 @@
 		readonly durationMs: number;
 		/** Outdoor static layer publications that landed during the flight window. */
 		readonly staticLayerPublicationCount: number;
+		/** Cumulative dedicated terrain-worker facts at flight completion. */
+		readonly terrainWorker: ClosedWorkerPoolDiagnostics;
 		/** Frame timing accumulated across the flight; reset when the flight starts. */
 		readonly timing: BrowserHarnessTiming;
 	}
@@ -898,6 +912,7 @@
 			staticLayerPublicationCount:
 				runtime.getStaticObjectRuntimeDiagnostics()
 					.staticLayerPublicationCount - flight.startPublicationCount,
+			terrainWorker: runtime.getTerrainWorkerDiagnostics(),
 			timing: timingSnapshot(),
 		});
 	}
@@ -1507,6 +1522,7 @@
 			| undefined;
 		let device: WebGL2Device | undefined;
 		let staticDetailOwner: ActiveRegionStaticDetailOwner | undefined;
+		const terrainGlTrace = TRACE_TERRAIN_GL ? installTerrainGlTrace() : null;
 		const hostGlobal = globalThis as typeof globalThis & HarnessGlobal;
 		const start = async (): Promise<void> => {
 			try {
@@ -1703,6 +1719,7 @@
 					setOffscreenAnimationSampleIntervalSeconds,
 					setTextureFiltering,
 					resetTiming,
+					resetTerrainGlTrace: () => terrainGlTrace?.reset(),
 					spawnExplorerEntity,
 					spawnExplorerEntityFleet,
 					despawnExplorerEntityFleet,
@@ -1747,6 +1764,8 @@
 									) ?? [],
 							},
 							staticObjects,
+							terrainWorker: runtime?.getTerrainWorkerDiagnostics() ?? null,
+							terrainGlTrace: terrainGlTrace?.snapshot() ?? null,
 							sourceBatches:
 								contentSource?.getLandblockSourceBatchDiagnostics() ?? [],
 							spawnedEntities,
@@ -1826,6 +1845,7 @@
 			destroyed = true;
 			if (frameHandle !== undefined) window.cancelAnimationFrame(frameHandle);
 			longTaskObserver?.disconnect();
+			terrainGlTrace?.destroy();
 			delete hostGlobal.__HOLTBURGER_3D_BROWSER_HARNESS__;
 			staticDetailOwner?.teardown();
 			void runtime?.destroy().finally(async () => {

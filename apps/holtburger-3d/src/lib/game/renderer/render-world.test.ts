@@ -8,6 +8,7 @@ import type {
 } from "../scene";
 import { INCLUDE_ALL_SCENE_CULLING_GROUPS } from "../scene";
 import type { TerrainDrawUnit } from "../terrain/types";
+import { TERRAIN_TYPE_COUNT } from "../terrain/pcode";
 import type { TextureArrayBinding } from "../textures/texture-manager";
 import type {
 	GeneratedTextureKey,
@@ -23,7 +24,7 @@ import type { GeometryKey, ObjectGeometryKey } from "../geometry/types";
 import type { StaticGeometryKey } from "../systems/static-resources";
 import type { StaticObjectRenderable } from "../commit/artifacts";
 import type { ObjectMaterialBinding } from "../commit/artifacts";
-import { TextureWrapMode } from "../textures/types";
+import { TexturePurpose, TextureWrapMode } from "../textures/types";
 import { landblockVec3 } from "../../assets/ac-frame";
 import type {
 	PartVisualTemplateKey,
@@ -54,8 +55,15 @@ const PLACEMENT = {
 const TEXTURE_2D = "texture-2d-resource:1" as Texture2DResourceKey;
 const ARRAY = {
 	layersByAssetId: new Map(),
+	purpose: TexturePurpose.TerrainBlendMask,
 	resource: "texture-array-resource:1",
 } as TextureArrayBinding;
+const COLOR_ARRAY = {
+	layersByAssetId: new Map(),
+	palette: { colors: new Float32Array(TERRAIN_TYPE_COUNT * 3) },
+	purpose: TexturePurpose.TerrainColor,
+	resource: "texture-array-resource:2",
+} as const;
 
 describe("RenderWorld", () => {
 	it("exposes only renderer queries over live runtime systems", () => {
@@ -134,6 +142,7 @@ describe("RenderWorld", () => {
 					calls.push("texture-array");
 					return ARRAY;
 				},
+				getTerrainColorTextureArrayBinding: () => COLOR_ARRAY,
 			},
 		});
 

@@ -10,7 +10,11 @@ import { LandblockLayerKind } from "../runtime/scene-interest";
 import {
 	resolveTerrainTextureFacts,
 	type TerrainCompositionFacts,
+	type TerrainMaterialType,
+	type TerrainPresentationSource,
 } from "./types";
+import { compileTerrainCompositionTable } from "./composition-table";
+import { resolveTerrainMaterialTable } from "./terrain-materials";
 
 const DETAIL_ROLE_NAMES = [
 	"landscape",
@@ -19,8 +23,29 @@ const DETAIL_ROLE_NAMES = [
 	"object",
 ] as const;
 
+const PRESENTATIONS_BY_ACTIVE_REGION = new WeakMap<
+	ActiveRegionSource,
+	ResolvedActiveRegionTerrainPresentation
+>();
+const DETAIL_ROLES_BY_ACTIVE_REGION = new WeakMap<
+	ActiveRegionSource,
+	ResolvedRegionTerrainDetailRoles
+>();
+
+/** Ordered detail roles with the required landscape role fixed at index zero. */
+type ResolvedRegionTerrainDetailRoles = readonly [
+	ResolvedRegionTerrainDetailRole,
+	...ResolvedRegionTerrainDetailRole[],
+];
+
+/** Complete immutable terrain presentation derived once for one active-region source value. */
+export interface ResolvedActiveRegionTerrainPresentation {
+	readonly detailRoles: readonly ResolvedRegionTerrainDetailRole[];
+	readonly terrain: TerrainPresentationSource;
+}
+
 /** One frontend-resolved terrain detail role retained from ordered TexMerge descriptors. */
-export interface ResolvedRegionTerrainDetailRole {
+interface ResolvedRegionTerrainDetailRole {
 	readonly role: (typeof DETAIL_ROLE_NAMES)[number];
 	readonly sourceTerrainTextureIndex: number;
 	readonly textureId: DatAssetId;
@@ -77,47 +102,60 @@ export function resolveOutdoorTerrainLayer(
 			terrainSamples: raw.terrainSamples,
 			tileSize: OUTDOOR_TERRAIN_TILE_SIZE,
 		},
-		presentation: {
-			composition: presentation.composition,
-			textures: resolveTerrainTextureFacts(presentation.composition),
-		},
+		presentation: presentation.terrain,
 	};
 }
 
-/** Port the existing Rust terrain projection from installed TexMerge records. */
-export function resolveActiveRegionTerrainPresentation(
+/** Resolve the ordered detail roles without requiring unrelated terrain composition arrays. */
+export function resolveActiveRegionTerrainDetailRoles(
 	activeRegion: ActiveRegionSource,
-): {
-	readonly composition: TerrainCompositionFacts;
-	readonly detailRoles: readonly ResolvedRegionTerrainDetailRole[];
-} {
-	const terrain = activeRegion.data.terrain;
-	if (terrain === null) {
-		throw new Error("Installed active region has no terrain payload.");
-	}
-	if (terrain.landSurface.kind !== "texture-merge") {
-		throw new Error(
-			"Installed active region uses palette-shift terrain, which the WebGL terrain renderer does not support.",
-		);
-	}
-	const textureMerge = terrain.landSurface;
-	const detailRoles = textureMerge.terrainTextures
-		.slice(0, DETAIL_ROLE_NAMES.length)
-		.map((texture, sourceTerrainTextureIndex) => ({
-			role: DETAIL_ROLE_NAMES[sourceTerrainTextureIndex]!,
-			sourceTerrainTextureIndex,
-			textureId: asSurfaceTextureAssetId(texture.detailTextureId),
-			tiling: requirePositiveTiling(texture.detailTiling, "terrain detail"),
-		}));
+): ResolvedRegionTerrainDetailRoles {
+	const existing = DETAIL_ROLES_BY_ACTIVE_REGION.get(activeRegion);
+	if (existing) return existing;
+	const textureMerge = requireTextureMerge(activeRegion);
+	const detailRoles = DETAIL_ROLE_NAMES.flatMap(
+		(role, sourceTerrainTextureIndex) => {
+			const texture = textureMerge.terrainTextures[sourceTerrainTextureIndex];
+			return texture === undefined
+				? []
+				: [
+						{
+							role,
+							sourceTerrainTextureIndex,
+							textureId: asSurfaceTextureAssetId(texture.detailTextureId),
+							tiling: requirePositiveTiling(
+								texture.detailTiling,
+								"terrain detail",
+							),
+						},
+					];
+		},
+	);
 	const landscapeDetail = detailRoles[0];
 	if (landscapeDetail === undefined) {
 		throw new Error(
 			"Installed active region has no landscape detail terrain descriptor.",
 		);
 	}
-	const composition: TerrainCompositionFacts = {
-		activeRegionKey: `${activeRegion.provenance.sourceRecordId}@${activeRegion.provenance.version}`,
-		terrainTypes: textureMerge.terrainTextures.map((texture) => ({
+	const resolved: ResolvedRegionTerrainDetailRoles = Object.freeze([
+		landscapeDetail,
+		...detailRoles.slice(1),
+	]);
+	DETAIL_ROLES_BY_ACTIVE_REGION.set(activeRegion, resolved);
+	return resolved;
+}
+
+/** Resolve the complete renderer-facing terrain presentation once per active-region value. */
+export function resolveActiveRegionTerrainPresentation(
+	activeRegion: ActiveRegionSource,
+): ResolvedActiveRegionTerrainPresentation {
+	const existing = PRESENTATIONS_BY_ACTIVE_REGION.get(activeRegion);
+	if (existing) return existing;
+	const textureMerge = requireTextureMerge(activeRegion);
+	const detailRoles = resolveActiveRegionTerrainDetailRoles(activeRegion);
+	const landscapeDetail = detailRoles[0];
+	const authoredTerrainMaterials = textureMerge.terrainTextures.map(
+		(texture): TerrainMaterialType => ({
 			terrainType: texture.terrainType,
 			colorTextureId: asSurfaceTextureAssetId(texture.colorTextureId),
 			tiling: requirePositiveTiling(texture.tiling, "terrain color"),
@@ -129,7 +167,11 @@ export function resolveActiveRegionTerrainPresentation(
 				minVertexHue: texture.minVertexHue,
 				maxVertexHue: texture.maxVertexHue,
 			},
-		})),
+		}),
+	);
+	const composition: TerrainCompositionFacts = {
+		activeRegionKey: `${activeRegion.provenance.sourceRecordId}@${activeRegion.provenance.version}`,
+		terrainMaterials: resolveTerrainMaterialTable(authoredTerrainMaterials),
 		cornerTerrainAlphaMaps: textureMerge.cornerTerrainMaps.map((map) => ({
 			terrainCode: map.terrainCode,
 			blendMaskTextureId: asSurfaceTextureAssetId(map.surfaceTextureId),
@@ -147,7 +189,30 @@ export function resolveActiveRegionTerrainPresentation(
 			tiling: landscapeDetail.tiling,
 		},
 	};
-	return { composition, detailRoles };
+	const textures = resolveTerrainTextureFacts(composition);
+	const presentation = {
+		detailRoles,
+		terrain: {
+			composition,
+			compositionTable: compileTerrainCompositionTable(composition, textures),
+			textures,
+		},
+	} as const;
+	PRESENTATIONS_BY_ACTIVE_REGION.set(activeRegion, presentation);
+	return presentation;
+}
+
+function requireTextureMerge(activeRegion: ActiveRegionSource) {
+	const terrain = activeRegion.data.terrain;
+	if (terrain === null) {
+		throw new Error("Installed active region has no terrain payload.");
+	}
+	if (terrain.landSurface.kind !== "texture-merge") {
+		throw new Error(
+			"Installed active region uses palette-shift terrain, which the WebGL terrain renderer does not support.",
+		);
+	}
+	return terrain.landSurface;
 }
 
 function asSurfaceTextureAssetId(id: string): DatAssetId {

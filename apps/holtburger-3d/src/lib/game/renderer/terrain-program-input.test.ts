@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { TERRAIN_TYPE_COUNT } from "../terrain/pcode";
 import type { TextureArrayBinding } from "../textures/texture-manager";
+import { TexturePurpose } from "../textures/types";
 import {
 	assertSharedTerrainRegion,
 	type TerrainProgramInput,
@@ -69,8 +71,11 @@ describe("assertSharedTerrainRegion", () => {
 
 function createTextureArrayBinding(
 	resource: TextureArrayBinding["resource"],
+	purpose:
+		| TexturePurpose.TerrainBlendMask
+		| TexturePurpose.TerrainRoadMask = TexturePurpose.TerrainBlendMask,
 ): TextureArrayBinding {
-	return { resource, layersByAssetId: new Map() };
+	return { resource, layersByAssetId: new Map(), purpose };
 }
 
 function createProgramInput(): TerrainProgramInput {
@@ -79,9 +84,17 @@ function createProgramInput(): TerrainProgramInput {
 		surfaceField: "texture-2d-resource:2",
 		composition: "texture-2d-resource:3",
 		textures: {
-			colors: createTextureArrayBinding("texture-array-resource:4"),
+			colors: {
+				layersByAssetId: new Map(),
+				palette: { colors: new Float32Array(TERRAIN_TYPE_COUNT * 3) },
+				purpose: TexturePurpose.TerrainColor,
+				resource: "texture-array-resource:4",
+			},
 			blendMasks: createTextureArrayBinding("texture-array-resource:5"),
-			roadMasks: createTextureArrayBinding("texture-array-resource:6"),
+			roadMasks: createTextureArrayBinding(
+				"texture-array-resource:6",
+				TexturePurpose.TerrainRoadMask,
+			),
 			detail: "texture-2d-resource:7",
 		},
 	};

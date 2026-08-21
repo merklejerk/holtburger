@@ -10,10 +10,16 @@ const shaderSourcePath = join(
 	scriptDirectory,
 	"../src/lib/game/renderer/webgl2-terrain-program.ts",
 );
+const farShaderSourcePath = join(
+	scriptDirectory,
+	"../src/lib/game/renderer/webgl2-far-terrain-program.ts",
+);
 /** Shared GLSL blocks the shaders interpolate, by exported constant name. */
 const sharedGlslModules = {
 	WEBGL2_DISTANCE_FOG_GLSL: "../src/lib/game/renderer/webgl2-fog.ts",
 	WEBGL2_SCENE_LIGHTING_GLSL: "../src/lib/game/renderer/webgl2-lighting.ts",
+	WEBGL2_DIRECTIONAL_LIGHTING_GLSL:
+		"../src/lib/game/renderer/webgl2-lighting.ts",
 	POINT_LIGHT_FALLOFF_GLSL:
 		"../src/lib/game/environment/point-light-falloff.ts",
 };
@@ -23,8 +29,10 @@ const sharedConstantModules = [
 	"../src/lib/game/environment/runtime-lights.ts",
 	"../src/lib/game/landblocks.ts",
 	"../src/lib/game/renderer/webgl2-lighting.ts",
+	"../src/lib/game/terrain/pcode.ts",
 ];
 const source = await readFile(shaderSourcePath, "utf8");
+const farSource = await readFile(farShaderSourcePath, "utf8");
 const substitutions = new Map(
 	await Promise.all(
 		Object.entries(sharedGlslModules).map(async ([name, relativePath]) => {
@@ -52,6 +60,25 @@ for (const relativePath of sharedConstantModules) {
 	)) {
 		substitutions.set(match[1], match[2]);
 	}
+	const numericArrayLengths = new Map(
+		[
+			...moduleSource.matchAll(
+				/export const ([A-Z][A-Z0-9_]*) = \[([0-9,\s-]+)\] as const;/g,
+			),
+		].map((match) => [
+			match[1],
+			match[2]
+				.split(",")
+				.map((value) => value.trim())
+				.filter(Boolean).length,
+		]),
+	);
+	for (const match of moduleSource.matchAll(
+		/export const ([A-Z][A-Z0-9_]*) = ([A-Z][A-Z0-9_]*)\.length;/g,
+	)) {
+		const length = numericArrayLengths.get(match[2]);
+		if (length !== undefined) substitutions.set(match[1], String(length));
+	}
 }
 const temporaryDirectory = await mkdtemp(
 	join(tmpdir(), "holtburger-terrain-shader-"),
@@ -60,22 +87,47 @@ const temporaryDirectory = await mkdtemp(
 try {
 	const vertexPath = join(temporaryDirectory, "terrain.vert");
 	const fragmentPath = join(temporaryDirectory, "terrain.frag");
+	const farVertexPath = join(temporaryDirectory, "far-terrain.vert");
+	const farFragmentPath = join(temporaryDirectory, "far-terrain.frag");
 	await Promise.all([
-		writeFile(vertexPath, extractShader(source, "TERRAIN_VERTEX_SHADER")),
-		writeFile(fragmentPath, extractShader(source, "TERRAIN_FRAGMENT_SHADER")),
+		writeFile(
+			vertexPath,
+			extractShader(source, "TERRAIN_VERTEX_SHADER", shaderSourcePath),
+		),
+		writeFile(
+			fragmentPath,
+			extractShader(source, "TERRAIN_FRAGMENT_SHADER", shaderSourcePath),
+		),
+		writeFile(
+			farVertexPath,
+			extractShader(
+				farSource,
+				"WEBGL2_FAR_TERRAIN_VERTEX_SHADER",
+				farShaderSourcePath,
+			),
+		),
+		writeFile(
+			farFragmentPath,
+			extractShader(
+				farSource,
+				"WEBGL2_FAR_TERRAIN_FRAGMENT_SHADER",
+				farShaderSourcePath,
+			),
+		),
 	]);
 	await run("glslangValidator", ["-l", vertexPath, fragmentPath]);
+	await run("glslangValidator", ["-l", farVertexPath, farFragmentPath]);
 } finally {
 	await rm(temporaryDirectory, { force: true, recursive: true });
 }
 
 /** Extract one embedded template-literal shader without relying on source line numbers. */
-function extractShader(sourceText, name) {
+function extractShader(sourceText, name, sourcePath) {
 	const match = sourceText.match(
 		new RegExp("const " + name + " = `([\\s\\S]*?)`;"),
 	);
 	if (match?.[1] === undefined) {
-		throw new Error(`Could not find ${name} in ${shaderSourcePath}.`);
+		throw new Error(`Could not find ${name} in ${sourcePath}.`);
 	}
 	return resolveInterpolations(match[1]);
 }

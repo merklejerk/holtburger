@@ -1196,11 +1196,11 @@ async function createArchiveParticleArtifacts(
 		clock: () => timeSeconds,
 		partFrameOf: (target, partIndex) =>
 			partTargets.get(`${target.targetId}\0${partIndex}`) ?? null,
-		renderAnchorOrigin: () => sceneVector3([0, 0, 0]),
 		resolveEmitter: (id) => emitterRepository.getReady(id),
 		roll: seededRoll(7),
 		sceneOriginOf: (target) => origins.get(target.targetId) ?? null,
 		sceneRotationOf: (target) => rotations.get(target.targetId) ?? null,
+		targetLives: (target) => origins.has(target.targetId),
 	});
 	const router = new BehaviorEventRouter(
 		{
@@ -1358,19 +1358,19 @@ function snapshotArchiveParticleWorkload(
 ): readonly ArchiveScopedParticleWorkload[] {
 	return Object.freeze(
 		particles
-			.collectCohorts(({ targetId }) => sceneNodeIdOf(targetId))
-			.map((cohort) => {
-				const key = scopeByTargetId.get(cohort.renderOwner);
+			.collectDrawRanges(({ targetId }) => sceneNodeIdOf(targetId))
+			.map((range) => {
+				const key = scopeByTargetId.get(range.renderOwner);
 				if (!key) {
 					throw new Error(
-						`Particle cohort owner ${cohort.renderOwner} has no authored scope.`,
+						`Particle range owner ${range.renderOwner} has no authored scope.`,
 					);
 				}
 				return Object.freeze({
-					batchKey: `${cohort.hwGfxObjId}\0${cohort.motionType}`,
-					instanceCount: cohort.particles.length,
+					batchKey: `${range.hwGfxObjId}\0${range.motionType}`,
+					instanceCount: range.count,
 					scopeKey: key,
-					sourceKey: `${cohort.renderOwner}\0${cohort.hwGfxObjId}\0${cohort.motionType}`,
+					sourceKey: `${range.renderOwner}\0${range.hwGfxObjId}\0${range.motionType}`,
 				});
 			}),
 	);

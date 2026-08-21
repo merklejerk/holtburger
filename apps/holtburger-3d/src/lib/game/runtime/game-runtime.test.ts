@@ -30,6 +30,18 @@ import type { SceneAvailabilityEvent } from "./scene-availability";
 import type { DynamicEntityView } from "./dynamic-entity-feed";
 import type { DynamicEntityVisualSource } from "../../assets/dynamic-entity-visual-source";
 import type { DecodedStaticPresentation } from "../../assets/decode-static-source-record";
+import type {
+	ClosedWorkerPort,
+	ClosedWorkerRequest,
+	ClosedWorkerResponse,
+} from "../workers/closed-worker";
+import { generateTerrain } from "../terrain/terrain-generator";
+import { validateTerrainGenerationValues } from "../terrain/terrain-generation-validation";
+import {
+	terrainWorkerResultTransferables,
+	type TerrainWorkerJob,
+	type TerrainWorkerResult,
+} from "../terrain/terrain-worker-contract";
 
 /** No runtime test stages a particle mesh, so any load here is a defect worth surfacing. */
 const PARTICLE_MESH_SOURCE: ParticleMeshSource = {
@@ -168,8 +180,9 @@ describe("GameRuntime view and interest control", () => {
 			droppedLights: 0,
 			staticLightBinds: 0,
 			terrainLightMaskUploads: 0,
-			solidTerrainDraws: 0,
-			solidTerrainCutoffLandblocks: null,
+			farTerrainDraws: 0,
+			farTerrainPaletteUploads: 0,
+			farTerrainCutoffLandblocks: null,
 			objectLightingBinds: 0,
 			objectTextureBinds: 0,
 		};
@@ -202,7 +215,7 @@ describe("GameRuntime view and interest control", () => {
 			buildRenderer: async () => renderer,
 			resources: TEST_RESOURCES,
 		};
-		const runtime = await GameRuntime.build(
+		const runtime = await buildGameRuntimeForTest(
 			device,
 			pipeline,
 			{} as TexturePixelSource,
@@ -355,7 +368,7 @@ describe("GameRuntime view and interest control", () => {
 			}),
 			resources: TEST_RESOURCES,
 		};
-		const runtime = await GameRuntime.build(
+		const runtime = await buildGameRuntimeForTest(
 			device,
 			pipeline,
 			{} as TexturePixelSource,
@@ -387,7 +400,7 @@ describe("GameRuntime view and interest control", () => {
 			}),
 			resources: TEST_RESOURCES,
 		};
-		const runtime = await GameRuntime.build(
+		const runtime = await buildGameRuntimeForTest(
 			device,
 			pipeline,
 			{} as TexturePixelSource,
@@ -432,7 +445,7 @@ describe("GameRuntime view and interest control", () => {
 			}),
 			resources: TEST_RESOURCES,
 		};
-		const runtime = await GameRuntime.build(
+		const runtime = await buildGameRuntimeForTest(
 			device,
 			pipeline,
 			{} as TexturePixelSource,
@@ -474,7 +487,7 @@ describe("GameRuntime view and interest control", () => {
 			}),
 			resources: TEST_RESOURCES,
 		};
-		const runtime = await GameRuntime.build(
+		const runtime = await buildGameRuntimeForTest(
 			device,
 			pipeline,
 			{} as TexturePixelSource,
@@ -508,7 +521,7 @@ describe("GameRuntime view and interest control", () => {
 			}),
 			resources: TEST_RESOURCES,
 		};
-		const runtime = await GameRuntime.build(
+		const runtime = await buildGameRuntimeForTest(
 			device,
 			pipeline,
 			{} as TexturePixelSource,
@@ -562,7 +575,7 @@ describe("GameRuntime view and interest control", () => {
 			}),
 			resources: TEST_RESOURCES,
 		};
-		const runtime = await GameRuntime.build(
+		const runtime = await buildGameRuntimeForTest(
 			device,
 			pipeline,
 			{} as TexturePixelSource,
@@ -608,7 +621,7 @@ describe("GameRuntime view and interest control", () => {
 			}),
 			resources: TEST_RESOURCES,
 		};
-		const runtime = await GameRuntime.build(
+		const runtime = await buildGameRuntimeForTest(
 			device,
 			pipeline,
 			{} as TexturePixelSource,
@@ -779,7 +792,7 @@ async function buildSpawnRuntime(
 		}),
 		resources: TEST_RESOURCES,
 	};
-	return GameRuntime.build(
+	return buildGameRuntimeForTest(
 		device,
 		{ prepareLandblockLayers: async () => [] },
 		{} as TexturePixelSource,
@@ -791,6 +804,89 @@ async function buildSpawnRuntime(
 		PARTICLE_MESH_SOURCE,
 		dynamicEntityVisualSource,
 	);
+}
+
+async function buildGameRuntimeForTest(
+	...parameters: Parameters<typeof GameRuntime.build>
+): Promise<GameRuntime> {
+	const [
+		device,
+		commitPipeline,
+		texturePixelSource,
+		animationSource,
+		physicsScriptSource,
+		audioDevice,
+		particleEmitterSource,
+		soundTableSource,
+		particleMeshSource,
+		dynamicEntityVisualSource,
+		roll,
+		tickProfiler,
+	] = parameters;
+	return GameRuntime.build(
+		device,
+		commitPipeline,
+		texturePixelSource,
+		animationSource,
+		physicsScriptSource,
+		audioDevice,
+		particleEmitterSource,
+		soundTableSource,
+		particleMeshSource,
+		dynamicEntityVisualSource,
+		roll,
+		tickProfiler,
+		{ createTerrainWorker: () => new TestTerrainWorkerPort() },
+	);
+}
+
+/** Executes the production terrain kernel behind the same closed transport used by the browser. */
+class TestTerrainWorkerPort implements ClosedWorkerPort {
+	onerror: ((event: ErrorEvent) => void) | null = null;
+	onmessage:
+		| ((event: MessageEvent<ClosedWorkerResponse<unknown>>) => void)
+		| null = null;
+	#terminated = false;
+
+	postMessage(
+		message: ClosedWorkerRequest<unknown>,
+		transfer: readonly Transferable[],
+	): void {
+		if (this.#terminated) throw new Error("Test terrain worker is terminated.");
+		const request = structuredClone(
+			message as ClosedWorkerRequest<TerrainWorkerJob>,
+			{ transfer: [...transfer] },
+		);
+		queueMicrotask(() => {
+			try {
+				const result = generateTerrain(request.input);
+				validateTerrainGenerationValues(result);
+				const response = structuredClone(
+					{
+						id: request.id,
+						ok: true,
+						result,
+					} satisfies ClosedWorkerResponse<TerrainWorkerResult>,
+					{ transfer: terrainWorkerResultTransferables(result) },
+				);
+				this.onmessage?.({ data: response } as MessageEvent<
+					ClosedWorkerResponse<unknown>
+				>);
+			} catch (cause) {
+				this.onmessage?.({
+					data: {
+						error: cause instanceof Error ? cause.message : String(cause),
+						id: request.id,
+						ok: false,
+					},
+				} as MessageEvent<ClosedWorkerResponse<unknown>>);
+			}
+		});
+	}
+
+	terminate(): void {
+		this.#terminated = true;
+	}
 }
 
 function spawnedEntity(

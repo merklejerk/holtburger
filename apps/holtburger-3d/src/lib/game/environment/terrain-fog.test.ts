@@ -3,7 +3,7 @@ import { FRONTEND_TUNING } from "../../frontend-tuning";
 import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
 import {
 	resolveTerrainCoverageFog,
-	solidTerrainCutoffLandblocks,
+	farTerrainCutoffLandblocks,
 } from "./terrain-fog";
 
 const AUTHORED_FOG = {
@@ -38,13 +38,13 @@ describe("resolveTerrainCoverageFog", () => {
 	});
 });
 
-describe("solidTerrainCutoffLandblocks", () => {
+describe("farTerrainCutoffLandblocks", () => {
 	it("converts the configured fog coverage into a whole landblock ring", () => {
 		const fog = resolveTerrainCoverageFog(AUTHORED_FOG, { terrainRadius: 8 });
 		if (fog === null) throw new Error("Coverage fog must resolve.");
-		const coverage = FRONTEND_TUNING.rendering.solidTerrainFogCoverage;
+		const coverage = FRONTEND_TUNING.rendering.farTerrainFogCoverage;
 
-		expect(solidTerrainCutoffLandblocks(fog)).toBe(
+		expect(farTerrainCutoffLandblocks(fog)).toBe(
 			Math.ceil(
 				(fog.near + (fog.far - fog.near) * coverage) /
 					OUTDOOR_LANDBLOCK_WORLD_SIZE,
@@ -56,17 +56,17 @@ describe("solidTerrainCutoffLandblocks", () => {
 		for (const terrainRadius of [0, 1, 2, 4, 8]) {
 			const fog = resolveTerrainCoverageFog(AUTHORED_FOG, { terrainRadius });
 			if (fog === null) throw new Error("Coverage fog must resolve.");
-			expect(solidTerrainCutoffLandblocks(fog)).toBeLessThanOrEqual(
+			expect(farTerrainCutoffLandblocks(fog)).toBeLessThanOrEqual(
 				terrainRadius + 1,
 			);
 		}
 	});
 
 	it("grows the ring as the residency window grows", () => {
-		const nearRing = solidTerrainCutoffLandblocks(
+		const nearRing = farTerrainCutoffLandblocks(
 			resolveTerrainCoverageFog(AUTHORED_FOG, { terrainRadius: 2 }),
 		);
-		const farRing = solidTerrainCutoffLandblocks(
+		const farRing = farTerrainCutoffLandblocks(
 			resolveTerrainCoverageFog(AUTHORED_FOG, { terrainRadius: 8 }),
 		);
 		if (nearRing === null || farRing === null) {
@@ -77,6 +77,6 @@ describe("solidTerrainCutoffLandblocks", () => {
 	});
 
 	it("never renders terrain flat when fog is disabled", () => {
-		expect(solidTerrainCutoffLandblocks(null)).toBeNull();
+		expect(farTerrainCutoffLandblocks(null)).toBeNull();
 	});
 });

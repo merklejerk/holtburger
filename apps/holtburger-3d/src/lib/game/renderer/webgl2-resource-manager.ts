@@ -14,6 +14,7 @@ import {
 import { TexturePixelFormat } from "../textures/types";
 import type { RenderGeometryData } from "./geometry";
 import { OBJECT_BAKED_LIGHT_ATTRIBUTE } from "./webgl2-object-program";
+import { TERRAIN_COLOR_CODE_ATTRIBUTE } from "./webgl2-terrain-program";
 
 /** WebGL draw binding retained for one semantic geometry resource. */
 export interface WebGL2GeometryBinding {
@@ -275,6 +276,16 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 					uploadFloatAttribute(gl, 2, 2, geometry.textureCoordinates),
 				);
 			}
+			if (geometry.kind === "terrain") {
+				buffers.push(
+					uploadIntegerAttribute(
+						gl,
+						TERRAIN_COLOR_CODE_ATTRIBUTE,
+						1,
+						geometry.terrainColorCodes,
+					),
+				);
+			}
 			if (geometry.kind === "object" && geometry.bakedLight) {
 				buffers.push(
 					uploadFloatAttribute(
@@ -503,6 +514,20 @@ function uploadFloatAttribute(
 	return buffer;
 }
 
+function uploadIntegerAttribute(
+	gl: WebGL2RenderingContext,
+	location: number,
+	components: number,
+	data: Uint8Array,
+): WebGLBuffer {
+	const buffer = requireBuffer(gl);
+	gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+	gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+	gl.enableVertexAttribArray(location);
+	gl.vertexAttribIPointer(location, components, gl.UNSIGNED_BYTE, 0, 0);
+	return buffer;
+}
+
 function requireBuffer(gl: WebGL2RenderingContext): WebGLBuffer {
 	const buffer = gl.createBuffer();
 	if (!buffer) throw new Error("Failed to allocate geometry buffer.");
@@ -525,6 +550,12 @@ function validateGeometry(geometry: RenderGeometryData): void {
 		if (geometry.textureCoordinates.length !== vertexCount * 2) {
 			throw new Error(`${geometry.kind} UV count does not match positions.`);
 		}
+	}
+	if (
+		geometry.kind === "terrain" &&
+		geometry.terrainColorCodes.length !== vertexCount
+	) {
+		throw new Error("Terrain color-code count does not match positions.");
 	}
 }
 

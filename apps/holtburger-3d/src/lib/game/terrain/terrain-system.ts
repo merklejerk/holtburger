@@ -19,12 +19,10 @@ import type {
 	TextureManager,
 } from "../textures/texture-manager";
 import {
-	compileTerrainCompositionTable,
 	TERRAIN_COMPOSITION_TABLE_HEIGHT,
 	type TerrainCompositionTable,
 } from "./composition-table";
 import type { TerrainGenerator } from "./terrain-generator";
-import { MAXIMUM_TERRAIN_CODE } from "./terrain-sample";
 import {
 	sampleTerrainSurface,
 	type TerrainSurfaceSample,
@@ -32,7 +30,6 @@ import {
 import {
 	terrainGeneratedTextureKeys,
 	terrainTextureKeysFromFacts,
-	TERRAIN_GRID_CELLS,
 	type RealizedTerrainResources,
 	type TerrainDrawUnit,
 	type TerrainGeneratedTextureKeys,
@@ -224,12 +221,10 @@ export class TerrainSystem<
 	#buildDrawUnit(
 		landblockId: LandblockId,
 		source: ResolvedTerrainSource<TOwnerId>,
-		resources: RealizedTerrainResources,
 	): TerrainDrawUnit {
 		return {
 			composition: source.generatedTextures.composition,
 			coordinates: getLandblockCoordinates(landblockId),
-			dominantTerrainCode: resources.dominantTerrainCode,
 			geometry: source.geometry,
 			landblockId,
 			surfaceField: source.generatedTextures.surfaceField,
@@ -296,11 +291,7 @@ export class TerrainSystem<
 				kind: "realized",
 				source: installation.source,
 				resources,
-				drawUnit: this.#buildDrawUnit(
-					landblockId,
-					installation.source,
-					resources,
-				),
+				drawUnit: this.#buildDrawUnit(landblockId, installation.source),
 			});
 			this.#syncSceneBoundsForLandblock(landblockId);
 		} catch (error) {
@@ -320,7 +311,6 @@ export class TerrainSystem<
 		source: ResolvedTerrainSource<TOwnerId>,
 		result: TerrainGenerationResult,
 	): RealizedTerrainResources {
-		validateTerrainGenerationResult(result);
 		this.#geometry.upsertGeometry({
 			geometry: result.geometry,
 			key: source.geometry,
@@ -333,18 +323,15 @@ export class TerrainSystem<
 		]);
 		return {
 			bounds: result.bounds,
-			dominantTerrainCode: result.dominantTerrainCode,
 		};
 	}
 
 	#publishComposition(source: ResolvedTerrainSource<TOwnerId>): void {
-		const table = compileTerrainCompositionTable(
-			source.input.presentation.composition,
-			source.input.presentation.textures,
-		);
 		const composition: GeneratedTextureSource = {
 			key: source.generatedTextures.composition,
-			upload: createTerrainCompositionUpload(table),
+			upload: createTerrainCompositionUpload(
+				source.input.presentation.compositionTable,
+			),
 		};
 		this.#textures.upsertGeneratedTextures([composition]);
 	}
@@ -406,56 +393,6 @@ export class TerrainSystem<
 				this.#scene.updateBounds(nodeId, installation.resources.bounds);
 			}
 		}
-	}
-}
-
-function validateTerrainGenerationResult(
-	result: TerrainGenerationResult,
-): void {
-	const vertexCount = result.geometry.positions.length / 3;
-	if (
-		!Number.isInteger(vertexCount) ||
-		result.geometry.normals.length !== result.geometry.positions.length ||
-		result.geometry.textureCoordinates.length !== vertexCount * 2
-	) {
-		throw new Error(
-			"Terrain generation geometry has incompatible attribute lengths.",
-		);
-	}
-	if (
-		[...result.geometry.positions, ...result.geometry.normals].some(
-			(value) => !Number.isFinite(value),
-		) ||
-		[...result.geometry.textureCoordinates].some(
-			(value) => !Number.isFinite(value),
-		) ||
-		[...result.geometry.indices].some((index) => index >= vertexCount)
-	) {
-		throw new Error(
-			"Terrain generation geometry contains invalid attribute or index values.",
-		);
-	}
-	const field = result.surfaceField;
-	if (
-		field.width !== TERRAIN_GRID_CELLS ||
-		field.height !== TERRAIN_GRID_CELLS ||
-		field.cellPcodes.length !== field.width * field.height
-	) {
-		throw new Error(
-			"Terrain surface field does not match the authored cell grid.",
-		);
-	}
-	// The flat-terrain path feeds this straight to the fragment program as a composition-table
-	// column. Generation is behind a replaceable port, so a bad value would otherwise surface as an
-	// out-of-range texel fetch rather than as the contract violation it is.
-	if (
-		!Number.isInteger(result.dominantTerrainCode) ||
-		result.dominantTerrainCode < 0 ||
-		result.dominantTerrainCode > MAXIMUM_TERRAIN_CODE
-	) {
-		throw new Error(
-			`Terrain dominant code ${result.dominantTerrainCode} is outside the authored terrain-code range.`,
-		);
 	}
 }
 

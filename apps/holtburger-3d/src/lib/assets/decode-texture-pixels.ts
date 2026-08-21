@@ -1,5 +1,6 @@
 import {
 	TexturePixelFormat,
+	TexturePurpose,
 	texturePurposePolicy,
 } from "../game/textures/types";
 import type {
@@ -30,6 +31,7 @@ interface TexturePixelsManifest {
 		readonly format: "rgba8" | "r8" | "rg8";
 		readonly width: number;
 		readonly height: number;
+		readonly meanRgb?: unknown;
 	};
 	readonly sections: readonly PixelSection[];
 }
@@ -123,11 +125,61 @@ export function decodeTexturePixels(
 		sourceAssetId: request.sourceAssetId,
 		width: manifest.surface.width,
 	};
-	return {
-		kind: request.kind,
-		purpose: request.purpose,
-		surface,
-	};
+	if (request.purpose === TexturePurpose.TerrainColor) {
+		const meanRgb = decodeMeanRgb(manifest.surface.meanRgb);
+		return {
+			kind: "prepared-texture-surface",
+			purpose: request.purpose,
+			surface: { ...surface, meanRgb },
+		};
+	}
+	if ("meanRgb" in manifest.surface) {
+		throw new Error(
+			`Texture-pixel response for ${request.purpose} must not carry terrain-color mean metadata.`,
+		);
+	}
+	switch (request.kind) {
+		case "prepared-texture-surface":
+			return { kind: request.kind, purpose: request.purpose, surface };
+		case "prepared-object-texture":
+			return { kind: request.kind, purpose: request.purpose, surface };
+		case "prepared-object-palette":
+			return { kind: request.kind, purpose: request.purpose, surface };
+	}
+}
+
+function decodeMeanRgb(value: unknown): readonly [number, number, number] {
+	if (!Array.isArray(value)) {
+		throw new Error(
+			"Terrain-color texture response requires a mean RGB array.",
+		);
+	}
+	if (value.length !== 3) {
+		throw new Error(
+			"Terrain-color texture response requires exactly three mean RGB channels.",
+		);
+	}
+	return [
+		decodeMeanRgbChannel(value[0]),
+		decodeMeanRgbChannel(value[1]),
+		decodeMeanRgbChannel(value[2]),
+	];
+}
+
+function decodeMeanRgbChannel(value: unknown): number {
+	if (typeof value !== "number") {
+		throw new Error(
+			"Terrain-color texture response contains a non-numeric mean RGB channel.",
+		);
+	}
+	// JSON numbers are finite by construction; the replaceable pixel-source boundary validates
+	// non-finite values that can be supplied by an in-process implementation.
+	if (value < 0 || value > 1) {
+		throw new Error(
+			"Terrain-color texture response contains an out-of-range mean RGB channel.",
+		);
+	}
+	return value;
 }
 
 function parseManifest(serialized: string): TexturePixelsManifest {

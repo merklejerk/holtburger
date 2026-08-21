@@ -14,10 +14,17 @@ import type {
 import { AABB3, Mat4, Vec3 } from "../math/types";
 import { SceneGraph, type SceneNodeId } from "../scene";
 import { TextureManager } from "../textures/texture-manager";
-import type { TexturePreparer } from "../textures/texture-preparer";
-import type { TextureFact } from "../textures/types";
+import type {
+	PreparedTextureSource,
+	TexturePreparer,
+} from "../textures/texture-preparer";
+import { TexturePurpose, type TextureFact } from "../textures/types";
 import type { TerrainGenerator } from "./terrain-generator";
+import type { ClosedWorkerPoolDiagnostics } from "../workers/closed-worker";
 import { TerrainSystem } from "./terrain-system";
+import { compileTerrainCompositionTable } from "./composition-table";
+import { resolveTerrainMaterialTable } from "./terrain-materials";
+import { TERRAIN_TYPE_COUNT } from "./pcode";
 import { resolveTerrainTextureFacts, TERRAIN_GRID_CELLS } from "./types";
 import type { TerrainGenerationResult, TerrainGenerationSource } from "./types";
 
@@ -122,6 +129,40 @@ describe("TerrainSystem", () => {
 		]);
 	});
 
+	it("publishes no draw unit until the complete regional palette becomes resident", async () => {
+		const generator = new DeferredTerrainGenerator();
+		const resources = new FakeRendererResourceManager();
+		const preparer = new DeferredTerrainTexturePreparer();
+		const terrain = new TerrainSystem<string, string>(
+			new SceneGraph(),
+			generator,
+			new GeometryManager<string>(resources),
+			new TextureManager(resources, preparer),
+			(landblockId) => `terrain-resource:${landblockId}`,
+		);
+		const installation = createInstallation();
+		const nodeId = installTerrain(terrain, installation);
+
+		generator.resolve(createGenerationResult());
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(
+			resources.created.some((key) => key.startsWith("geometry-resource:")),
+		).toBe(true);
+		expect(terrain.getDrawUnit(nodeId)).toBeNull();
+
+		preparer.resolveConventionalTextures();
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(terrain.getDrawUnit(nodeId)).toBeNull();
+
+		preparer.resolveTerrainColor();
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(terrain.getDrawUnit(nodeId)).not.toBeNull();
+		expect(generator.inputs).toHaveLength(1);
+	});
+
 	it("releases source-owned resources when generated surface realization fails", async () => {
 		const generator = new DeferredTerrainGenerator();
 		const resources = new FakeRendererResourceManager();
@@ -146,6 +187,55 @@ describe("TerrainSystem", () => {
 			"texture-2d-resource:0",
 			"geometry-resource:0",
 		]);
+	});
+
+	it("discards a generation result that settles after its installation is evicted", async () => {
+		const generator = new DeferredTerrainGenerator();
+		const resources = new FakeRendererResourceManager();
+		const terrain = createTerrainSystem(generator, resources);
+		const installation = createInstallation();
+		const nodeId = installTerrain(terrain, installation);
+		const reportError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+		terrain.removeOwner(ownerId(installation.landblockId));
+		generator.resolve(createGenerationResult());
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(terrain.getDrawUnit(nodeId)).toBeNull();
+		expect(resources.created).toEqual(["texture-2d-resource:0"]);
+		expect(resources.released).toEqual(["texture-2d-resource:0"]);
+		expect(reportError).not.toHaveBeenCalled();
+		reportError.mockRestore();
+	});
+
+	it("discards both running and queued generation after their installations are evicted", async () => {
+		const generator = new QueuedTerrainGenerator();
+		const resources = new FakeRendererResourceManager();
+		const terrain = createTerrainSystem(generator, resources);
+		const running = createInstallation("0x1111ffff");
+		const queued = createInstallation("0x1211ffff");
+		const runningNodeId = installTerrain(terrain, running);
+		const queuedNodeId = installTerrain(terrain, queued);
+		const reportError = vi.spyOn(console, "error").mockImplementation(() => {});
+		expect(generator.states).toEqual(["running", "queued"]);
+
+		terrain.removeOwner(ownerId(running.landblockId));
+		terrain.removeOwner(ownerId(queued.landblockId));
+		generator.completeRunning(createGenerationResult());
+		await Promise.resolve();
+		expect(generator.states).toEqual(["running"]);
+		generator.completeRunning(createGenerationResult());
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(terrain.getDrawUnit(runningNodeId)).toBeNull();
+		expect(terrain.getDrawUnit(queuedNodeId)).toBeNull();
+		expect(
+			resources.created.filter((key) => key.startsWith("geometry-resource:")),
+		).toEqual([]);
+		expect(reportError).not.toHaveBeenCalled();
+		reportError.mockRestore();
 	});
 });
 
@@ -195,15 +285,16 @@ function createInstallation(landblockId = "0x1111ffff") {
 		sideTerrainAlphaMaps: [
 			{ blendMaskTextureId: "0x05000002", terrainCode: 3 },
 		],
-		terrainTypes: [
+		terrainMaterials: resolveTerrainMaterialTable([
 			{
 				colorTextureId: "0x05000001",
 				colorVariation: TERRAIN_VARIATION,
 				terrainType: 0,
 				tiling: 1,
 			},
-		],
+		]),
 	} as const;
+	const textures = resolveTerrainTextureFacts(composition);
 	return {
 		generation: {
 			cellDiagonals: new Uint8Array(64),
@@ -217,7 +308,8 @@ function createInstallation(landblockId = "0x1111ffff") {
 		landblockId,
 		presentation: {
 			composition,
-			textures: resolveTerrainTextureFacts(composition),
+			compositionTable: compileTerrainCompositionTable(composition, textures),
+			textures,
 		},
 	} as const;
 }
@@ -234,12 +326,12 @@ const TERRAIN_VARIATION = {
 function createGenerationResult(): TerrainGenerationResult {
 	return {
 		bounds: GENERATED_BOUNDS,
-		dominantTerrainCode: 3,
 		geometry: {
 			indices: new Uint16Array([0, 1, 2]),
 			kind: "terrain",
 			normals: new Float32Array(9),
 			positions: new Float32Array(9),
+			terrainColorCodes: new Uint8Array(3),
 			textureCoordinates: new Float32Array(6),
 		},
 		surfaceField: {
@@ -266,11 +358,77 @@ class DeferredTerrainGenerator implements TerrainGenerator {
 		this.#resolve(result);
 	}
 
+	getDiagnostics(): ClosedWorkerPoolDiagnostics {
+		return {
+			activeJobCount: 0,
+			completedJobCount: 0,
+			peakQueuedJobCount: 0,
+			queuedJobCount: 0,
+			totalExecutionDurationMs: 0,
+			totalQueueDelayMs: 0,
+			transferredBytes: 0,
+			workerCount: 1,
+		};
+	}
+
+	async destroy(): Promise<void> {}
+}
+
+/** One-slot scheduler fixture that makes running versus queued settlement explicit. */
+class QueuedTerrainGenerator implements TerrainGenerator {
+	readonly #jobs: {
+		resolve: (result: TerrainGenerationResult) => void;
+		state: "queued" | "running";
+	}[] = [];
+
+	get states(): readonly ("queued" | "running")[] {
+		return this.#jobs.map(({ state }) => state);
+	}
+
+	generate(): Promise<TerrainGenerationResult> {
+		return new Promise((resolve) => {
+			this.#jobs.push({
+				resolve,
+				state: this.#jobs.some(({ state }) => state === "running")
+					? "queued"
+					: "running",
+			});
+		});
+	}
+
+	completeRunning(result: TerrainGenerationResult): void {
+		const runningIndex = this.#jobs.findIndex(
+			({ state }) => state === "running",
+		);
+		if (runningIndex < 0) throw new Error("Terrain generation is not running.");
+		const running = this.#jobs[runningIndex];
+		if (!running) throw new Error("Running terrain job disappeared.");
+		this.#jobs.splice(runningIndex, 1);
+		running.resolve(result);
+		if (this.#jobs[0]) this.#jobs[0].state = "running";
+	}
+
+	getDiagnostics(): ClosedWorkerPoolDiagnostics {
+		return {
+			activeJobCount: this.#jobs.some(({ state }) => state === "running")
+				? 1
+				: 0,
+			completedJobCount: 0,
+			peakQueuedJobCount: 1,
+			queuedJobCount: this.#jobs.filter(({ state }) => state === "queued")
+				.length,
+			totalExecutionDurationMs: 0,
+			totalQueueDelayMs: 0,
+			transferredBytes: 0,
+			workerCount: 1,
+		};
+	}
+
 	async destroy(): Promise<void> {}
 }
 
 class FixtureTexturePreparer implements TexturePreparer {
-	async prepare(fact: TextureFact) {
+	async prepare(fact: TextureFact): Promise<PreparedTextureSource> {
 		if (fact.kind === "asset") {
 			return {
 				height: 2,
@@ -281,7 +439,7 @@ class FixtureTexturePreparer implements TexturePreparer {
 				width: 2,
 			};
 		}
-		return {
+		const source = {
 			height: 2,
 			key: fact.key,
 			layers: fact.sourceAssetIds.map((sourceAssetId) => ({
@@ -291,6 +449,14 @@ class FixtureTexturePreparer implements TexturePreparer {
 			purpose: fact.purpose,
 			width: 2,
 		};
+		if (fact.purpose === TexturePurpose.TerrainColor) {
+			return {
+				...source,
+				palette: { colors: new Float32Array(TERRAIN_TYPE_COUNT * 3) },
+				purpose: fact.purpose,
+			};
+		}
+		return { ...source, purpose: fact.purpose };
 	}
 
 	async destroy(): Promise<void> {}
@@ -313,6 +479,71 @@ class PendingTexturePreparer implements TexturePreparer {
 	}
 
 	async destroy(): Promise<void> {}
+}
+
+class DeferredTerrainTexturePreparer implements TexturePreparer {
+	readonly #pending: {
+		fact: TextureFact;
+		resolve: (source: PreparedTextureSource) => void;
+	}[] = [];
+
+	prepare(fact: TextureFact): Promise<PreparedTextureSource> {
+		return new Promise((resolve) => this.#pending.push({ fact, resolve }));
+	}
+
+	resolveConventionalTextures(): void {
+		this.#resolveMatching(
+			({ purpose }) => purpose !== TexturePurpose.TerrainColor,
+		);
+	}
+
+	resolveTerrainColor(): void {
+		this.#resolveMatching(
+			({ purpose }) => purpose === TexturePurpose.TerrainColor,
+		);
+	}
+
+	#resolveMatching(predicate: (fact: TextureFact) => boolean): void {
+		for (let index = this.#pending.length - 1; index >= 0; index -= 1) {
+			const pending = this.#pending[index];
+			if (!pending) throw new Error("Pending terrain texture disappeared.");
+			if (!predicate(pending.fact)) continue;
+			this.#pending.splice(index, 1);
+			pending.resolve(preparedTextureSource(pending.fact));
+		}
+	}
+
+	async destroy(): Promise<void> {}
+}
+
+function preparedTextureSource(fact: TextureFact): PreparedTextureSource {
+	if (fact.kind === "asset") {
+		return {
+			height: 2,
+			key: fact.key,
+			pixels: new Uint8Array(16),
+			purpose: fact.purpose,
+			sourceAssetId: fact.sourceAssetId,
+			width: 2,
+		};
+	}
+	const source = {
+		height: 2,
+		key: fact.key,
+		layers: fact.sourceAssetIds.map((sourceAssetId) => ({
+			pixels: new Uint8Array(16),
+			sourceAssetId,
+		})),
+		width: 2,
+	};
+	if (fact.purpose === TexturePurpose.TerrainColor) {
+		return {
+			...source,
+			palette: { colors: new Float32Array(TERRAIN_TYPE_COUNT * 3) },
+			purpose: fact.purpose,
+		};
+	}
+	return { ...source, purpose: fact.purpose };
 }
 
 class FakeRendererResourceManager implements RendererResourceManager {

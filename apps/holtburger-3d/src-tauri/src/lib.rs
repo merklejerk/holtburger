@@ -702,18 +702,27 @@ async fn build_texture_pixels_response(
         }
         _ => anyhow::bail!("unsupported texture request kind {:?}", request.kind),
     };
+    let surface = TexturePixelsSurfaceFields {
+        source_record_id,
+        format: prepared.format.name(),
+        width: prepared.width,
+        height: prepared.height,
+    };
+    let surface = if request.purpose == "terrain-color" {
+        TexturePixelsSurfaceManifest::TerrainColor {
+            surface,
+            mean_rgb: mean_rgb_rgba8(prepared.width, prepared.height, &prepared.pixels)?,
+        }
+    } else {
+        TexturePixelsSurfaceManifest::Conventional(surface)
+    };
     let manifest = TexturePixelsManifest {
         transport: "holtburger-texture-pixels",
         byte_order: "little-endian",
         section_byte_offset_base: "section-data",
         source_asset_id,
         purpose: request.purpose,
-        surface: TexturePixelsSurfaceManifest {
-            source_record_id,
-            format: prepared.format.name(),
-            width: prepared.width,
-            height: prepared.height,
-        },
+        surface,
         sections: vec![BinarySectionManifest {
             name: "pixels",
             scalar_type: "u8",
@@ -1644,11 +1653,61 @@ struct TexturePixelsManifest {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TexturePixelsSurfaceManifest {
+struct TexturePixelsSurfaceFields {
     source_record_id: String,
     format: &'static str,
     width: u32,
     height: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+enum TexturePixelsSurfaceManifest {
+    /// Terrain color alone carries the required source-surface mean used by the frontend palette.
+    TerrainColor {
+        #[serde(flatten)]
+        surface: TexturePixelsSurfaceFields,
+        #[serde(rename = "meanRgb")]
+        mean_rgb: [f32; 3],
+    },
+    /// Every unrelated texture purpose preserves the existing surface manifest shape.
+    Conventional(TexturePixelsSurfaceFields),
+}
+
+/// Compute one normalized RGB mean from complete RGBA8 level-zero pixels.
+fn mean_rgb_rgba8(width: u32, height: u32, pixels: &[u8]) -> Result<[f32; 3]> {
+    let texel_count = usize::try_from(u64::from(width) * u64::from(height))?;
+    let expected_byte_length = texel_count
+        .checked_mul(4)
+        .context("terrain-color RGBA8 byte length overflowed")?;
+    if texel_count == 0 || pixels.len() != expected_byte_length {
+        anyhow::bail!("terrain-color mean requires complete non-empty RGBA8 pixels");
+    }
+    mean_rgb_from_rgba8_texels(
+        texel_count,
+        pixels
+            .chunks_exact(4)
+            .map(|texel| [texel[0], texel[1], texel[2], texel[3]]),
+    )
+}
+
+fn mean_rgb_from_rgba8_texels(
+    expected_texel_count: usize,
+    texels: impl IntoIterator<Item = [u8; 4]>,
+) -> Result<[f32; 3]> {
+    let mut sums = [0_u64; 3];
+    let mut texel_count = 0_usize;
+    for texel in texels {
+        sums[0] += u64::from(texel[0]);
+        sums[1] += u64::from(texel[1]);
+        sums[2] += u64::from(texel[2]);
+        texel_count += 1;
+    }
+    if texel_count == 0 || texel_count != expected_texel_count {
+        anyhow::bail!("terrain-color mean received an incompatible texel count");
+    }
+    let normalization = 1.0_f64 / (texel_count as f64 * f64::from(u8::MAX));
+    Ok(sums.map(|sum| (sum as f64 * normalization) as f32))
 }
 
 fn terrain_sections(terrain: &LandblockTerrain) -> Vec<BinarySectionManifest> {
@@ -2163,12 +2222,12 @@ mod tests {
             section_byte_offset_base: "section-data",
             source_asset_id: "surface-texture/0x05000001".to_string(),
             purpose: "terrain-blend-mask".to_string(),
-            surface: TexturePixelsSurfaceManifest {
+            surface: TexturePixelsSurfaceManifest::Conventional(TexturePixelsSurfaceFields {
                 source_record_id: "0x06000001".to_string(),
                 format: "r8",
                 width: 2,
                 height: 2,
-            },
+            }),
             sections: vec![BinarySectionManifest {
                 name: "pixels",
                 scalar_type: "u8",
@@ -2182,6 +2241,11 @@ mod tests {
 
         assert_eq!(&bytes[..4], TEXTURE_PIXELS_BINARY_MAGIC);
         let manifest_length = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
+        let encoded_manifest: serde_json::Value = serde_json::from_slice(
+            &bytes[BINARY_ENVELOPE_HEADER_LEN..BINARY_ENVELOPE_HEADER_LEN + manifest_length],
+        )
+        .expect("texture manifest should remain JSON");
+        assert!(encoded_manifest["surface"].get("meanRgb").is_none());
         assert_eq!(
             u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize,
             bytes.len()
@@ -2267,10 +2331,46 @@ mod tests {
             serde_json::from_slice(&bytes[BINARY_ENVELOPE_HEADER_LEN..section_data_offset])
                 .expect("response manifest should decode");
         assert_eq!(manifest["surface"]["format"], "rgba8");
+        let mean = manifest["surface"]["meanRgb"]
+            .as_array()
+            .expect("terrain color should carry a mean RGB");
+        assert!((mean[0].as_f64().unwrap() - 9.0 / 255.0).abs() < 1.0e-6);
+        assert!((mean[1].as_f64().unwrap() - 8.0 / 255.0).abs() < 1.0e-6);
+        assert!((mean[2].as_f64().unwrap() - 7.0 / 255.0).abs() < 1.0e-6);
         assert_eq!(
             &bytes[section_data_offset..section_data_offset + 4],
             &[3, 2, 1, 4]
         );
+    }
+
+    #[test]
+    fn texture_mean_uses_wide_rgba8_channel_sums_and_ignores_alpha() {
+        let mean = mean_rgb_rgba8(
+            3,
+            2,
+            &[
+                255, 0, 127, 0, 0, 255, 127, 255, 255, 0, 127, 1, 0, 255, 127, 2, 255, 0, 127, 3,
+                0, 255, 127, 4,
+            ],
+        )
+        .expect("complete non-square RGBA8 pixels should have a mean");
+        assert!((mean[0] - 0.5).abs() < f32::EPSILON);
+        assert!((mean[1] - 0.5).abs() < f32::EPSILON);
+        assert!((mean[2] - 127.0 / 255.0).abs() < f32::EPSILON);
+
+        let wide_texel_count = usize::try_from(u64::from(u32::MAX) / u64::from(u8::MAX) + 1)
+            .expect("wide fixture count should fit usize");
+        let wide_mean = mean_rgb_from_rgba8_texels(
+            wide_texel_count,
+            std::iter::repeat_n([255, 1, 0, 255], wide_texel_count),
+        )
+        .expect("channel sums larger than u32 should remain exact");
+        assert_eq!(wide_mean[0], 1.0);
+        assert!((wide_mean[1] - 1.0 / 255.0).abs() < f32::EPSILON);
+        assert_eq!(wide_mean[2], 0.0);
+
+        assert!(mean_rgb_rgba8(0, 0, &[]).is_err());
+        assert!(mean_rgb_rgba8(1, 1, &[1, 2, 3]).is_err());
     }
 
     #[tokio::test]

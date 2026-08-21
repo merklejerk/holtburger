@@ -34,16 +34,18 @@ import {
 } from "../renderer/renderer";
 import { RenderWorld } from "../renderer/render-world";
 import type { RendererResourceManager } from "../renderer/resource-manager";
+import type {
+	ClosedWorkerPoolDiagnostics,
+	ClosedWorkerPort,
+} from "../workers/closed-worker";
 import {
 	SceneGraph,
 	type ScenePlacement,
 	type SceneNodeId,
 	type SceneResidency,
 } from "../scene";
-import {
-	InlineTerrainGenerator,
-	type TerrainGenerator,
-} from "../terrain/terrain-generator";
+import type { TerrainGenerator } from "../terrain/terrain-generator";
+import { WorkerTerrainGenerator } from "../terrain/terrain-worker-client";
 import { TerrainSystem } from "../terrain/terrain-system";
 import { StaticObjectSystem } from "../systems/static-object-system";
 import { DynamicEntitySystem } from "../systems/dynamic-entity-system";
@@ -292,6 +294,11 @@ export interface GameRuntimeDependencies {
 	 * two runs of the same build differ enough that screenshots cannot resolve a rendering change.
 	 */
 	readonly roll?: UniformRoll;
+}
+
+/** Browser worker constructors replaceable by Node integration tests without inline algorithms. */
+export interface GameRuntimeWorkerFactories {
+	readonly createTerrainWorker: () => ClosedWorkerPort;
 }
 
 /** Device boundary used by runtime to construct its private renderer facade. */
@@ -1142,9 +1149,14 @@ export class GameRuntime {
 		dynamicEntityVisualSource: DynamicEntityVisualSource | null,
 		roll?: UniformRoll,
 		tickProfiler?: RuntimeTickProfiler,
+		workerFactories?: GameRuntimeWorkerFactories,
 	): Promise<GameRuntime> {
 		const [terrainGenerator, texturePreparer] = await Promise.all([
-			InlineTerrainGenerator.build(),
+			workerFactories === undefined
+				? WorkerTerrainGenerator.build()
+				: new WorkerTerrainGenerator({
+						createWorker: workerFactories.createTerrainWorker,
+					}),
 			WorkerTexturePreparer.build(texturePixelSource),
 		]);
 		const runtime = new GameRuntime(device.resources, commitPipeline, {
@@ -1727,6 +1739,11 @@ export class GameRuntime {
 	/** Return one consistent read of the active renderer's optional diagnostics capability. */
 	getRendererFrameDiagnostics(): RendererFrameDiagnosticsSnapshot | null {
 		return this.#renderer?.frameDiagnostics?.snapshot() ?? null;
+	}
+
+	/** Dedicated terrain-worker queue and transfer facts for streaming diagnostics. */
+	getTerrainWorkerDiagnostics(): ClosedWorkerPoolDiagnostics {
+		return this.#terrainGenerator.getDiagnostics();
 	}
 
 	/** Explicitly enable or tear down renderer profiling for diagnostic frontends. */

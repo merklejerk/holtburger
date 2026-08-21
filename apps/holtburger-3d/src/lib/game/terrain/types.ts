@@ -18,7 +18,13 @@ import {
 	type TerrainSurfaceTextureKey,
 	type TextureArrayFact,
 	type TextureArrayKey,
+	type TerrainColorTextureArrayFact,
 } from "../textures/types";
+import {
+	TERRAIN_COLOR_CODES,
+	TERRAIN_MATERIAL_CODES,
+	type TerrainMaterialCode,
+} from "./pcode";
 
 /** Number of canonical authored cells along either outdoor landblock terrain axis. */
 export const TERRAIN_GRID_CELLS = OUTDOOR_TERRAIN_GRID_CELLS;
@@ -39,6 +45,14 @@ export interface TerrainMaterialType {
 	readonly colorTextureId: DatAssetId;
 	readonly tiling: number;
 	readonly colorVariation: TerrainColorVariation;
+}
+
+/** Authored terrain descriptors and their complete fallback-resolved code lookup. */
+export interface TerrainMaterialTable {
+	/** Source descriptors in active-region order; index zero owns missing-code fallback policy. */
+	readonly authored: readonly TerrainMaterialType[];
+	/** One resolved descriptor for each near-composition terrain code, including road type 0x20. */
+	readonly byCode: Readonly<Record<TerrainMaterialCode, TerrainMaterialType>>;
 }
 
 /** One canonical terrain-overlay alpha map selected and rotated from a terrain pcode. */
@@ -63,7 +77,7 @@ export interface TerrainLandscapeDetail {
 export interface TerrainCompositionFacts {
 	/** Immutable active-region provenance used only for renderer resource ownership. */
 	readonly activeRegionKey: string;
-	readonly terrainTypes: readonly TerrainMaterialType[];
+	readonly terrainMaterials: TerrainMaterialTable;
 	readonly cornerTerrainAlphaMaps: readonly TerrainAlphaMap[];
 	readonly sideTerrainAlphaMaps: readonly TerrainAlphaMap[];
 	readonly roadAlphaMaps: readonly TerrainRoadAlphaMap[];
@@ -90,7 +104,7 @@ export interface TerrainGenerationSource {
 
 /** Stable regional texture identities required by one terrain source. */
 export interface ResolvedTerrainTextureFacts {
-	readonly colors: TextureArrayFact;
+	readonly colors: TerrainColorTextureArrayFact;
 	readonly blendMasks: TextureArrayFact;
 	readonly roadMasks: TextureArrayFact;
 	readonly detail: AssetTextureFact;
@@ -99,6 +113,8 @@ export interface ResolvedTerrainTextureFacts {
 /** Stable regional presentation facts retained beside one generated terrain source. */
 export interface TerrainPresentationSource {
 	readonly composition: TerrainCompositionFacts;
+	/** Regional lookup payload compiled once, never during individual landblock publication. */
+	readonly compositionTable: import("./composition-table").TerrainCompositionTable;
 	readonly textures: ResolvedTerrainTextureFacts;
 }
 
@@ -131,8 +147,6 @@ export interface TerrainGenerationResult {
 	readonly geometry: TerrainGeometryData;
 	/** Landblock-local bounds of the generated mesh. */
 	readonly bounds: AABB3;
-	/** Terrain code covering the most of this landblock, used when it renders flat at distance. */
-	readonly dominantTerrainCode: number;
 	readonly surfaceField: TerrainPcodeField;
 }
 
@@ -147,8 +161,6 @@ export interface TerrainSourceInstallation {
 export interface RealizedTerrainResources {
 	/** Landblock-local bounds of the generated mesh, published to the scene graph. */
 	readonly bounds: AABB3;
-	/** Terrain code standing in for the whole landblock once it renders flat at distance. */
-	readonly dominantTerrainCode: number;
 }
 
 /** One selected terrain submission ready for renderer resource resolution and drawing. */
@@ -158,8 +170,6 @@ export interface TerrainDrawUnit {
 	readonly coordinates: LandblockCoordinates;
 	readonly geometry: TerrainGeometryKey;
 	readonly surfaceField: TerrainSurfaceTextureKey;
-	/** Terrain code the fragment program composites from when this landblock renders flat. */
-	readonly dominantTerrainCode: number;
 	readonly textures: TerrainTextureKeys;
 	/** Stable regional lookup texture interpreted by the terrain fragment program. */
 	readonly composition: TerrainCompositionTextureKey;
@@ -170,14 +180,23 @@ export function resolveTerrainTextureFacts(
 	composition: TerrainCompositionFacts,
 ): ResolvedTerrainTextureFacts {
 	const arrayIdentity = `terrain-active-region:${composition.activeRegionKey}`;
+	const sourceAssetIdsByTerrainCode = TERRAIN_COLOR_CODES.map(
+		(terrainCode) =>
+			composition.terrainMaterials.byCode[terrainCode].colorTextureId,
+	);
 	return {
-		colors: createTextureArrayFact(
-			TexturePurpose.TerrainColor,
-			arrayIdentity,
-			uniqueTextureIds(
-				composition.terrainTypes.map(({ colorTextureId }) => colorTextureId),
+		colors: {
+			kind: "array",
+			key: createTextureArrayKey(TexturePurpose.TerrainColor, arrayIdentity),
+			purpose: TexturePurpose.TerrainColor,
+			sourceAssetIds: uniqueTextureIds(
+				TERRAIN_MATERIAL_CODES.map(
+					(terrainCode) =>
+						composition.terrainMaterials.byCode[terrainCode].colorTextureId,
+				),
 			),
-		),
+			sourceAssetIdsByTerrainCode,
+		},
 		blendMasks: createTextureArrayFact(
 			TexturePurpose.TerrainBlendMask,
 			arrayIdentity,
@@ -237,7 +256,7 @@ export function terrainGeneratedTextureKeys(
 }
 
 function createTextureArrayFact(
-	purpose: TexturePurpose,
+	purpose: TexturePurpose.TerrainBlendMask | TexturePurpose.TerrainRoadMask,
 	arrayIdentity: string,
 	sourceAssetIds: readonly DatAssetId[],
 ): TextureArrayFact {

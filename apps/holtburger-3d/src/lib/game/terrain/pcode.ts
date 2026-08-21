@@ -1,9 +1,21 @@
 import type { TerrainAlphaMap, TerrainRoadAlphaMap } from "./types";
 
+/** Every five-bit authored terrain color code in canonical numeric order. */
+export const TERRAIN_COLOR_CODES = [
+	0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
+	22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+] as const;
 /** Number of terrain types addressable by the five-bit terrain portion of a pcode. */
-export const TERRAIN_TYPE_COUNT = 32;
+export const TERRAIN_TYPE_COUNT = TERRAIN_COLOR_CODES.length;
 /** Terrain descriptor reserved by retail for the common road color surface. */
 export const ROAD_TERRAIN_TYPE = 0x20;
+/** Complete material lookup domain: authored color codes followed by retail's road surface. */
+export const TERRAIN_MATERIAL_CODES = [
+	...TERRAIN_COLOR_CODES,
+	ROAD_TERRAIN_TYPE,
+] as const;
+/** One code admitted by the complete active-region terrain material lookup. */
+export type TerrainMaterialCode = (typeof TERRAIN_MATERIAL_CODES)[number];
 
 /** Ordered pcode corners match retail's southwest, southeast, northeast, northwest packing. */
 export type TerrainPcodeCorner =

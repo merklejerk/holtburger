@@ -969,9 +969,9 @@ impl SpatialScene {
             collision_reports,
         };
         let mut tentative = body;
+        // The accepted pose is already final, physical omega included; re-integrating it here would
+        // rotate the body twice.
         tentative.pose = commit.pose;
-        tentative.pose.rotation =
-            integrate_angular_velocity(tentative.pose.rotation, tentative.omega, delta_seconds);
         tentative.velocity = commit.velocity;
         tentative.contact = commit.contact;
         let physical = tentative

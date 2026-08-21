@@ -2,7 +2,7 @@
 
 use super::character_kinematics::{CharacterJumpKinematics, CharacterMovementKinematics};
 use super::character_motion::{JumpAttempt, JumpChargeProfile, JumpExtent};
-use super::movement_types::{Gait, LateralMotion, LongitudinalMotion, MotionState};
+use super::movement_types::{CharacterDrive, Gait, LateralMotion, LongitudinalMotion};
 use holtburger_common::Vector3;
 use holtburger_protocol::messages::movement::MotionStance;
 use thiserror::Error;
@@ -122,14 +122,14 @@ pub fn resolve_character_jump(
 /// Resolves ordinary supported drive from the same axis composition sampled by a later jump.
 pub fn resolve_character_drive(
     kinematics: CharacterMovementKinematics,
-    drive: MotionState,
+    drive: CharacterDrive,
     heading: f32,
 ) -> Result<Vector3, CharacterDriveResolutionError> {
     world_planar_velocity(resolve_local_planar_velocity(drive, kinematics), heading)
 }
 
 fn resolve_local_planar_velocity(
-    drive: MotionState,
+    drive: CharacterDrive,
     kinematics: CharacterMovementKinematics,
 ) -> Vector3 {
     let running = drive.gait == Gait::Run;
@@ -217,7 +217,7 @@ mod tests {
         CharacterJumpKinematics::new(movement, 4.2125).unwrap()
     }
 
-    fn attempt(drive: MotionState) -> JumpAttempt {
+    fn attempt(drive: CharacterDrive) -> JumpAttempt {
         JumpAttempt {
             drive,
             extent: JumpExtent::MAXIMUM,
@@ -289,7 +289,7 @@ mod tests {
 
     #[test]
     fn readiness_and_heading_failures_are_distinct() {
-        let attempt = attempt(MotionState::default());
+        let attempt = attempt(CharacterDrive::default());
         for (readiness, expected) in [
             (
                 CharacterJumpReadiness::Airborne,
@@ -325,7 +325,7 @@ mod tests {
         let movement = kinematics().movement();
         let drive = resolve_character_drive(
             movement,
-            MotionState::builder().run().forward().build(),
+            CharacterDrive::builder().run().forward().build(),
             0.0,
         )
         .unwrap();
@@ -333,7 +333,7 @@ mod tests {
         assert_close(drive.y, 0.0);
         assert_eq!(drive.z, 0.0);
         assert_eq!(
-            resolve_character_drive(movement, MotionState::default(), f32::NAN),
+            resolve_character_drive(movement, CharacterDrive::default(), f32::NAN),
             Err(CharacterDriveResolutionError::InvalidHeading)
         );
     }
@@ -342,14 +342,14 @@ mod tests {
     fn walk_run_backward_strafe_and_diagonal_share_one_axis_composition() {
         let walk = resolve_character_jump(
             kinematics(),
-            attempt(MotionState::builder().walk().forward().build()),
+            attempt(CharacterDrive::builder().walk().forward().build()),
             0.0,
             CharacterJumpReadiness::Supported,
         )
         .unwrap();
         let run = resolve_character_jump(
             kinematics(),
-            attempt(MotionState::builder().run().forward().build()),
+            attempt(CharacterDrive::builder().run().forward().build()),
             0.0,
             CharacterJumpReadiness::Supported,
         )
@@ -360,7 +360,7 @@ mod tests {
 
         let backward = resolve_character_jump(
             kinematics(),
-            attempt(MotionState::builder().walk().backstep().build()),
+            attempt(CharacterDrive::builder().walk().backstep().build()),
             0.0,
             CharacterJumpReadiness::Supported,
         )
@@ -369,7 +369,7 @@ mod tests {
 
         let strafe = resolve_character_jump(
             kinematics(),
-            attempt(MotionState::builder().walk().strafe_right().build()),
+            attempt(CharacterDrive::builder().walk().strafe_right().build()),
             0.0,
             CharacterJumpReadiness::Supported,
         )
@@ -379,7 +379,7 @@ mod tests {
         let diagonal = resolve_character_jump(
             kinematics(),
             attempt(
-                MotionState::builder()
+                CharacterDrive::builder()
                     .run()
                     .forward()
                     .strafe_right()
@@ -405,7 +405,7 @@ mod tests {
         let resolved = resolve_character_jump(
             kinematics(),
             attempt(
-                MotionState::builder()
+                CharacterDrive::builder()
                     .run()
                     .forward()
                     .strafe_right()
@@ -423,7 +423,7 @@ mod tests {
     #[test]
     fn requested_extent_scales_height_before_the_retail_floor() {
         let minimum_attempt = JumpAttempt {
-            drive: MotionState::default(),
+            drive: CharacterDrive::default(),
             extent: JumpExtent::MINIMUM,
             standing_long_jump: true,
         };
@@ -438,7 +438,7 @@ mod tests {
 
         let full = resolve_character_jump(
             kinematics(),
-            attempt(MotionState::default()),
+            attempt(CharacterDrive::default()),
             0.0,
             CharacterJumpReadiness::Supported,
         )
@@ -455,7 +455,7 @@ mod tests {
                 SequencedCharacterMotionEvent {
                     sequence: CharacterMotionSequence(sequence),
                     event: CharacterMotionEvent::BeginJump {
-                        drive: MotionState::default(),
+                        drive: CharacterDrive::default(),
                     },
                 },
                 CharacterMotionContact::Walkable,
@@ -465,7 +465,7 @@ mod tests {
                 SequencedCharacterMotionEvent {
                     sequence: CharacterMotionSequence(sequence + 1),
                     event: CharacterMotionEvent::ReleaseJump {
-                        drive: MotionState::default(),
+                        drive: CharacterDrive::default(),
                         extent: JumpExtent::MAXIMUM,
                     },
                 },
@@ -507,31 +507,31 @@ mod tests {
     fn production_launch_matches_the_independent_retail_oracle_matrix() {
         let cases = [
             (
-                MotionState::builder().walk().forward().build(),
+                CharacterDrive::builder().walk().forward().build(),
                 1.0,
                 0.0,
                 false,
             ),
             (
-                MotionState::builder().run().forward().build(),
+                CharacterDrive::builder().run().forward().build(),
                 1.0,
                 0.0,
                 true,
             ),
             (
-                MotionState::builder().run().backstep().build(),
+                CharacterDrive::builder().run().backstep().build(),
                 -1.0,
                 0.0,
                 true,
             ),
             (
-                MotionState::builder().walk().strafe_left().build(),
+                CharacterDrive::builder().walk().strafe_left().build(),
                 0.0,
                 -1.0,
                 false,
             ),
             (
-                MotionState::builder()
+                CharacterDrive::builder()
                     .run()
                     .forward()
                     .strafe_right()
@@ -557,7 +557,7 @@ mod tests {
         let expected_vertical = oracle_vertical_launch(1.0, 300.0, 1.0, 1.0);
         let resolved = resolve_character_jump(
             kinematics(),
-            attempt(MotionState::default()),
+            attempt(CharacterDrive::default()),
             0.0,
             CharacterJumpReadiness::Supported,
         )

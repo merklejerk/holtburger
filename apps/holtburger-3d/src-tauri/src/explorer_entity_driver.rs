@@ -949,6 +949,7 @@ fn template_definition_input(
         },
         content: DynamicEntityContent {
             setup_did: content.setup_did,
+            motion_table_did: template.motion_table_did,
             sound_table_did: template.sound_table_did,
             physics_effect_table_did: template.physics_effect_table_did,
         },
@@ -1239,7 +1240,10 @@ mod tests {
         use crate::weenie_appearance::test_support::{synthetic_char_gen, synthetic_clothing};
 
         let simulation = Arc::new(HostSimulationRuntime::new(Arc::new(EmptyCollisionSource)));
-        let entities = Arc::new(ExplorerEntityRuntime::new(Arc::clone(&simulation)));
+        let entities = Arc::new(ExplorerEntityRuntime::new(
+            Arc::clone(&simulation),
+            Default::default(),
+        ));
         let mut clothing = BTreeMap::new();
         clothing.insert(0x1000_0001, synthetic_clothing(0x0200_0001));
         clothing.insert(0x1000_0002, synthetic_clothing(0x0200_0002));
@@ -1267,7 +1271,10 @@ mod tests {
         physical: FixturePhysical,
     ) -> (Arc<ExplorerEntityRuntime>, ExplorerEntityDriver) {
         let simulation = Arc::new(HostSimulationRuntime::new(Arc::new(EmptyCollisionSource)));
-        let entities = Arc::new(ExplorerEntityRuntime::new(Arc::clone(&simulation)));
+        let entities = Arc::new(ExplorerEntityRuntime::new(
+            Arc::clone(&simulation),
+            Default::default(),
+        ));
         let driver = ExplorerEntityDriver::new(
             catalog,
             Arc::new(FixtureContent {

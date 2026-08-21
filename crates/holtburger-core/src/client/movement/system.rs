@@ -5,7 +5,7 @@ use super::common::{
     normalize_heading, raw_motion_state_with_motion_style, signed_heading_delta,
 };
 use crate::client::movement_types::{
-    AutonomousDriveIntent, LongitudinalMotion, MotionState, MotionStyle, MovementPacketMetadata,
+    AutonomousDriveIntent, CharacterDrive, LongitudinalMotion, MotionStyle, MovementPacketMetadata,
     PlayerDriveIntent, Turn,
 };
 use anyhow::Result;
@@ -134,9 +134,9 @@ pub(crate) struct MovementSystem {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum QueuedDriveCommand {
-    ManualSet(MotionState),
+    ManualSet(CharacterDrive),
     ManualPulse {
-        state: MotionState,
+        state: CharacterDrive,
         duration: Duration,
     },
     Autonomous(AutonomousDriveIntent),
@@ -152,7 +152,7 @@ enum QueuedDriveCommand {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum ActiveDriveIntent {
-    Manual(MotionState),
+    Manual(CharacterDrive),
     Autonomous(AutonomousDriveIntent),
 }
 
@@ -163,7 +163,7 @@ struct ActiveDriveState {
 }
 
 impl ActiveDriveState {
-    fn manual(state: MotionState, until: Option<Instant>) -> Self {
+    fn manual(state: CharacterDrive, until: Option<Instant>) -> Self {
         Self {
             intent: ActiveDriveIntent::Manual(state),
             until,
@@ -180,7 +180,7 @@ impl ActiveDriveState {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct ServerMotionIntent {
-    state: MotionState,
+    state: CharacterDrive,
     motion_style: MotionStyle,
 }
 
@@ -196,7 +196,7 @@ pub(crate) struct ServerControlledProjection {
     pub speed_mps: f32,
 }
 
-fn server_motion_intent(state: MotionState, motion_style: MotionStyle) -> ServerMotionIntent {
+fn server_motion_intent(state: CharacterDrive, motion_style: MotionStyle) -> ServerMotionIntent {
     ServerMotionIntent {
         state,
         motion_style,
@@ -334,7 +334,7 @@ impl MovementSystem {
     fn autonomous_wire_motion_state(
         world: &WorldState,
         intent: AutonomousDriveIntent,
-    ) -> Option<MotionState> {
+    ) -> Option<CharacterDrive> {
         let current_heading = world
             .local_player_runtime_pose()
             .unwrap_or_default()
@@ -372,7 +372,7 @@ impl MovementSystem {
 
         // The shared solver owns local realization, but ACE still needs a
         // MoveToState edge so observers receive motion-state broadcasts.
-        Some(MotionState {
+        Some(CharacterDrive {
             gait: intent.gait,
             longitudinal,
             lateral: None,
@@ -681,7 +681,7 @@ impl MovementSystem {
 
     async fn execute_motion_state_at(
         &mut self,
-        state: MotionState,
+        state: CharacterDrive,
         world: &mut WorldState,
         session: &mut Session,
         now: Instant,
@@ -725,7 +725,7 @@ impl MovementSystem {
 
     async fn execute_motion_state_with_metadata_at(
         &mut self,
-        state: MotionState,
+        state: CharacterDrive,
         metadata: MovementPacketMetadata,
         world: &mut WorldState,
         session: &mut Session,
@@ -917,7 +917,7 @@ impl MovementSystem {
 
     fn should_send_motion_state_pulse(
         &self,
-        state: MotionState,
+        state: CharacterDrive,
         motion_style: MotionStyle,
     ) -> bool {
         if !self.server_motion_active {
@@ -930,7 +930,7 @@ impl MovementSystem {
     async fn send_motion_state_pulse(
         world: &WorldState,
         session: &mut Session,
-        state: MotionState,
+        state: CharacterDrive,
         metadata: MovementPacketMetadata,
     ) -> Result<()> {
         let data = holtburger_protocol::messages::game_action::MoveToStateActionData {

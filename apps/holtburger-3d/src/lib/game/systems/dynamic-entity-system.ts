@@ -47,13 +47,20 @@ import {
 } from "./object-visual-template-repository";
 import {
 	AnimationAssetRepository,
+	type PreparedAnimation,
 	type PreparedAnimationHandle,
+	type PreparedMotionClosure,
 } from "../animation/animation-asset-repository";
+import type { DatAssetId } from "../game-types";
 import { expandBounds } from "../math/geometry-utils";
 import {
 	prepareDynamicAnimation,
 	type PreparedDynamicAnimation,
 } from "../animation/prepared-dynamic-animation";
+import {
+	prepareMotionPlayback,
+	type PreparedMotionPlayback,
+} from "../animation/prepared-motion-playback";
 import type { DynamicEntityPlacementSystem } from "./dynamic-entity-placement-system";
 import type { RuntimeLight } from "../environment/runtime-lights";
 import { resolveObjectRuntimeLights } from "../environment/object-runtime-lights";
@@ -85,6 +92,15 @@ interface DynamicEntityRecord {
 	 * every other per-entity resource, and so a superseded generation cannot leak one.
 	 */
 	scriptClosure: PreparedPhysicsScriptClosure | null;
+	/** Every animation this entity's motion table reaches, staged before activation. */
+	motionClosure: PreparedMotionClosure | null;
+	/**
+	 * The playable subset of that closure and the one bound covering it.
+	 *
+	 * Present exactly when the entity animates from a motion table, which is also when its played
+	 * clip can change at runtime.
+	 */
+	motionPlayback: PreparedMotionPlayback | null;
 	/**
 	 * Emitter definitions named by this resident's script closure.
 	 *
@@ -152,6 +168,7 @@ interface PreparedDynamicEntity {
 	readonly source: DynamicPresentationSource;
 	/** Staged script closure, or `null` for a resident whose setup owns no default script. */
 	readonly scriptClosure: PreparedPhysicsScriptClosure | null;
+	readonly motionClosure: PreparedMotionClosure | null;
 	/** The resident's installed sound table, or `null` when its setup installs none. */
 	readonly soundTable: DecodedSoundTable | null;
 }
@@ -281,6 +298,15 @@ export class DynamicEntitySystem<
 			// Transitive `CallPES` and emitter staging happens here, before activation, so nothing
 			// reached mid-playback can trigger a load at frame time.
 			entities.map((entity) => this.#stageBehaviorAssets(entity)),
+			// The motion table's whole closure stages on the same terms: a body transitions into
+			// clips it has not played, and a transition must not trigger a load at frame time.
+			entities.map((entity) =>
+				entity.source.behavior.motionTableId === null
+					? Promise.resolve(null)
+					: this.#animations.acquireMotionClosure(
+							entity.source.behavior.motionTableId,
+						),
+			),
 		);
 		this.#pendingPreparations.add(preparationPromise);
 		const ready = preparationPromise
@@ -337,6 +363,7 @@ export class DynamicEntitySystem<
 						animation: entity.preparedAnimation,
 						nodeId: entity.rootNodeId,
 						scriptClosure: entity.scriptClosure,
+						motionClosure: entity.motionClosure,
 						soundTable: entity.soundTableHandle?.asset ?? null,
 						source: entity.source,
 					};
@@ -385,6 +412,8 @@ export class DynamicEntitySystem<
 		const record: DynamicEntityRecord = {
 			animationHandle: null,
 			emitterHandles: [],
+			motionClosure: null,
+			motionPlayback: null,
 			scriptClosure: null,
 			soundTableHandle: null,
 			articulatedPose: pose,
@@ -641,6 +670,29 @@ export class DynamicEntitySystem<
 		return this.#entities.get(nodeId)?.preparedAnimation ?? null;
 	}
 
+	/**
+	 * Resolve one animation from a motion-driven entity's staged closure.
+	 *
+	 * `null` means the closure reached this animation and refused it as unplayable, which
+	 * `prepareMotionPlayback` already complained about; the caller keeps the current pose. Throws
+	 * for an entity with no motion playback at all, because the host names a clip only for a body
+	 * whose motion table this entity staged, so a mismatch there is a contract defect rather than
+	 * a content one.
+	 */
+	getMotionClip(
+		nodeId: SceneNodeId,
+		animationId: DatAssetId,
+	): PreparedAnimation | null {
+		const entity = this.#entities.get(nodeId);
+		if (!entity) throw new Error(`Dynamic entity ${nodeId} does not exist.`);
+		if (entity.motionPlayback === null) {
+			throw new Error(
+				`Dynamic entity ${nodeId} was named clip ${animationId} but staged no motion table.`,
+			);
+		}
+		return entity.motionPlayback.clips.get(animationId) ?? null;
+	}
+
 	getDiagnostics() {
 		const prepared = [...this.#entities.values()].map(
 			(entity) => entity.preparedAnimation,
@@ -817,19 +869,25 @@ export class DynamicEntitySystem<
 		templateOwnerId: TTemplateOwnerId,
 		animationPreparations: readonly Promise<PreparedAnimationHandle | null>[],
 		scriptPreparations: readonly Promise<StagedBehaviorAssets | null>[],
+		motionPreparations: readonly Promise<PreparedMotionClosure | null>[],
 	): Promise<"ready" | "superseded"> {
 		// Settled separately rather than in one array so each lane keeps its own result type; a
 		// single `allSettled` would widen them into a union the release paths cannot discriminate.
-		const [templateResult, animationResults, scriptResults] = await Promise.all(
-			[
+		const [templateResult, animationResults, scriptResults, motionResults] =
+			await Promise.all([
 				Promise.allSettled([preparation.completion]).then(
 					(results) => results[0]!,
 				),
 				Promise.allSettled(animationPreparations),
 				Promise.allSettled(scriptPreparations),
-			],
-		);
-		const settled = [templateResult, ...animationResults, ...scriptResults];
+				Promise.allSettled(motionPreparations),
+			]);
+		const settled = [
+			templateResult,
+			...animationResults,
+			...scriptResults,
+			...motionResults,
+		];
 		// Everything acquired must be releasable on any failure path, including a closure whose
 		// sibling animation rejected.
 		const acquiredHandles = animationResults.flatMap((result) =>
@@ -842,12 +900,18 @@ export class DynamicEntitySystem<
 				? [result.value]
 				: [],
 		);
+		const acquiredMotionClosures = motionResults.flatMap((result) =>
+			result.status === "fulfilled" && result.value !== null
+				? [result.value]
+				: [],
+		);
 		const releaseBehaviorAssets = () => {
 			for (const staged of acquiredBehaviorAssets) {
 				staged.closure.release();
 				staged.soundTableHandle?.release();
 				for (const handle of staged.emitterHandles) handle.release();
 			}
+			for (const closure of acquiredMotionClosures) closure.release();
 		};
 		const current =
 			!this.#destroyed && this.#ownerGenerations.get(ownerId) === generation;
@@ -892,27 +956,52 @@ export class DynamicEntitySystem<
 						`Script closure for ${entity.source.identity} settled without a result.`,
 					);
 				}
+				const motionResult = motionResults[index];
+				if (motionResult?.status !== "fulfilled") {
+					throw new Error(
+						`Motion closure for ${entity.source.identity} settled without a result.`,
+					);
+				}
 
 				const staticBounds = staticPresentationBounds(entity.source);
+				// A body driven by a motion table plays many clips over its life, so its bound is the
+				// union across the whole closure — computed once, never churning on a transition.
+				// Setup-default playback keeps the single-clip bound it always had.
+				const motionPlayback =
+					motionResult.value === null
+						? null
+						: prepareMotionPlayback(
+								motionResult.value,
+								template,
+								entity.source.scale,
+								staticBounds,
+							);
 				return {
+					motionPlayback,
 					animation:
-						animationResult.value === null
+						motionPlayback !== null
 							? ({
 									kind: "none",
-									localBounds: staticBounds,
+									localBounds: motionPlayback.localBounds,
 								} as const)
-							: prepareDynamicAnimation(
-									animationResult.value.asset,
-									template,
-									entity.source.scale,
-									staticBounds,
-								),
+							: animationResult.value === null
+								? ({
+										kind: "none",
+										localBounds: staticBounds,
+									} as const)
+								: prepareDynamicAnimation(
+										animationResult.value.asset,
+										template,
+										entity.source.scale,
+										staticBounds,
+									),
 					handle: animationResult.value,
 					parts: mergePreparedParts(entity.renderable.parts, template.parts),
 					effectPartCount: template.parts.length,
 					emitterHandles: scriptResult.value?.emitterHandles ?? [],
 					soundTableHandle: scriptResult.value?.soundTableHandle ?? null,
 					scriptClosure: scriptResult.value?.closure ?? null,
+					motionClosure: motionResult.value,
 				};
 			});
 			preparation.commit(templateOwnerId);
@@ -925,6 +1014,8 @@ export class DynamicEntitySystem<
 				this.#effects.install(entity.rootNodeId, result.effectPartCount);
 				entity.animationHandle = result.handle;
 				entity.scriptClosure = result.scriptClosure;
+				entity.motionClosure = result.motionClosure;
+				entity.motionPlayback = result.motionPlayback;
 				entity.emitterHandles = result.emitterHandles;
 				entity.soundTableHandle = result.soundTableHandle;
 				entity.preparedAnimation = result.animation;
@@ -1085,6 +1176,9 @@ export class DynamicEntitySystem<
 		entity.animationHandle = null;
 		entity.scriptClosure?.release();
 		entity.scriptClosure = null;
+		entity.motionClosure?.release();
+		entity.motionClosure = null;
+		entity.motionPlayback = null;
 		for (const handle of entity.emitterHandles) handle.release();
 		entity.emitterHandles = [];
 		entity.soundTableHandle?.release();

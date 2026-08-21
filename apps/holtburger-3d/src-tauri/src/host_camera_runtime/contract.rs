@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, ensure};
 use holtburger_core::client::movement_types::{
-    Gait, LateralMotion, LongitudinalMotion, MotionState, Turn,
+    CharacterDrive, Gait, LateralMotion, LongitudinalMotion, Turn,
 };
 use holtburger_core::{CharacterJumpKinematics, CharacterMovementKinematics, JumpChargeProfile};
 use serde::{Deserialize, Serialize};
@@ -264,8 +264,8 @@ pub enum GroundedCameraTurn {
 }
 
 impl GroundedCameraDriveRequest {
-    pub(super) fn resolve(self) -> MotionState {
-        MotionState {
+    pub(super) fn resolve(self) -> CharacterDrive {
+        CharacterDrive {
             gait: match self.gait {
                 GroundedCameraGait::Walk => Gait::Walk,
                 GroundedCameraGait::Run => Gait::Run,

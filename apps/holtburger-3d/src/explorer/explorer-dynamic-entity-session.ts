@@ -12,6 +12,11 @@ import {
 	type ExplorerEntitySpawnRequest,
 	type LaunchExplorerEntityRequest,
 } from "./explorer-entity-commands";
+import {
+	decodeExplorerPossession,
+	type ExplorerMotionOrder,
+	type ExplorerPossession,
+} from "./explorer-entity-possession";
 
 const DYNAMIC_ENTITY_EVENT = "explorer-dynamic-entity";
 
@@ -133,6 +138,36 @@ export class ExplorerDynamicEntitySession {
 		);
 		await this.#waitForCurrent(receipt, true, afterRevision);
 		return receipt;
+	}
+
+	/**
+	 * Possess one spawned entity so commands reach it, or release with `null`.
+	 *
+	 * Possession is not a registry mutation, so it publishes no snapshot and is not awaited against
+	 * one: the entity is unchanged, only who is driving it.
+	 */
+	async possess(guid: number | null): Promise<ExplorerPossession> {
+		return decodeExplorerPossession(
+			await this.#transport.invoke("possess_explorer_entity", {
+				request: { guid },
+			}),
+		);
+	}
+
+	/**
+	 * Replace the order the possessed entity performs from the next host tick.
+	 *
+	 * Resolves to whether anything is possessed, so a caller can tell "the order was accepted" from
+	 * "nothing is listening" without a second round trip.
+	 */
+	async setMotionOrder(order: ExplorerMotionOrder): Promise<boolean> {
+		const accepted = await this.#transport.invoke(
+			"set_explorer_entity_motion",
+			{
+				request: order,
+			},
+		);
+		return accepted === true;
 	}
 
 	/** Observe accepted current-state changes without creating another entity authority. */

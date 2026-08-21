@@ -7,14 +7,19 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Context;
 use holtburger_common::Guid;
+use holtburger_content::MotionSequenceCatalog;
 use holtburger_core::{
     DynamicEntityBodyCommitOutcome, DynamicEntityBodyOperationError,
     DynamicEntityBodyRemovalOutcome, DynamicEntityBodyReplacementOutcome, DynamicEntityDefinition,
     DynamicEntityInitialState, DynamicEntityLaunchPlan, DynamicEntityProjectionInput,
     dynamic_entity_projection_input_from_body,
 };
+use holtburger_world::motion::{
+    MotionOrder, MotionRuntimeRegistry, PlayingMotionClip, authored_grounded_actuation,
+};
 use holtburger_world::{
-    CollisionReportOutcome, DynamicPhysicalBodyDefinition, RuntimeSpatialBodyView, SpatialBodyId,
+    CollisionReportOutcome, DynamicPhysicalBodyDefinition, RuntimeSpatialBodyView, SpatialBody,
+    SpatialBodyId,
 };
 use holtburger_world::{
     EffectiveEntityPhysicsState, EntityPhysicalIntent, EntityPhysicsTransitionContext,
@@ -209,6 +214,8 @@ pub struct ExplorerEntityProjection {
 
 /// One accepted fixed-tick body path paired with its still-current semantic generation.
 pub struct ExplorerEntityPhysicalTick {
+    /// Clip this entity started playing on this tick, present only when it changed.
+    pub clip: Option<holtburger_world::motion::PlayingMotionClip>,
     /// Current instance generation held stable across the collection transaction.
     pub generation: u64,
     /// Source-neutral semantic/body projection read from the committed body without relocking.
@@ -288,6 +295,128 @@ pub struct ExplorerEntityRegistry {
     entities: BTreeMap<Guid, ExplorerEntityInstance>,
     allocator: ExplorerGuidAllocator,
     next_generation: Option<u64>,
+    /// Authored-motion playback and possession.
+    ///
+    /// Kept inside the registry rather than beside it so one lock covers both: the collection tick
+    /// holds the registry across a whole simulation transaction, and a second lock would invite an
+    /// ordering bug for no benefit. This is also the plan's rule — producer registries retain
+    /// semantic state — and it is what keeps the Explorer and the client separate authorities over
+    /// the same shared contract.
+    motion: ExplorerMotionState,
+}
+
+/// Which entity is being driven, what it has been told to do, and where its playback is.
+#[derive(Debug, Default)]
+struct ExplorerMotionState {
+    playback: MotionRuntimeRegistry,
+    /// Entity currently receiving commands, if any. One at a time: the Explorer possesses, it does
+    /// not command a fleet.
+    possessed: Option<Guid>,
+    /// Newest order the frontend issued. Reapplied every tick, which is what makes it idempotent —
+    /// re-issuing the motion already running is a no-op selection.
+    order: MotionOrder,
+    /// Clip each body was last published as playing, so only changes are republished.
+    playing: BTreeMap<Guid, PlayingMotionClip>,
+}
+
+impl ExplorerMotionState {
+    /// Clips that changed since the previous call, drained so each change publishes once.
+    ///
+    /// Tracking the previous clip here rather than making the receiver diff keeps "a projection
+    /// arrived" and "the clip changed" the same event.
+    fn take_changed_clips(&mut self, live: &BTreeSet<Guid>) -> BTreeMap<Guid, PlayingMotionClip> {
+        self.playing.retain(|guid, _| live.contains(guid));
+        let mut changed = BTreeMap::new();
+        for guid in live {
+            let Some(clip) = self.playback.playing_clip(*guid) else {
+                self.playing.remove(guid);
+                continue;
+            };
+            if self.playing.insert(*guid, clip) != Some(clip) {
+                changed.insert(*guid, clip);
+            }
+        }
+        changed
+    }
+
+    fn release(&mut self) {
+        if let Some(guid) = self.possessed.take() {
+            self.playback.forget(guid);
+        }
+        self.order = MotionOrder::default();
+    }
+}
+
+/// What possessing an entity told the caller about it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExplorerPossession {
+    pub guid: Guid,
+    /// Table the entity animates from, absent when neither it nor its setup declares one.
+    pub motion_table_id: Option<u32>,
+    /// Locomotion commands this entity's table actually models, in a stable order.
+    ///
+    /// Read from the contract rather than assumed, because a door and a creature model different
+    /// sets and the UX should refuse what the table cannot do before the command is issued.
+    pub modelled_commands: Vec<u32>,
+}
+
+/// One tick's authored drive for the possessed entity.
+struct PossessedDrive {
+    guid: Guid,
+    offset: holtburger_common::RigidTransform,
+    object_scale: f32,
+}
+
+impl PossessedDrive {
+    /// Builds the actuation, falling back to coasting for a body the authored path cannot drive.
+    ///
+    /// Only grounded bodies take authored drive: a free-sphere body is ballistic and has no support
+    /// to gate translation against, which is retail's own rule rather than a simplification.
+    fn actuation(
+        &self,
+        body: &SpatialBody,
+        delta_seconds: f32,
+    ) -> anyhow::Result<holtburger_world::PhysicalBodyActuation> {
+        let grounded = body.physical.as_ref().is_some_and(|physical| {
+            matches!(
+                physical.definition,
+                holtburger_world::PhysicalBodyDefinition::Grounded { .. }
+            )
+        });
+        if !grounded {
+            return crate::host_simulation_runtime::dynamic_entity_coasting_actuation(
+                body,
+                delta_seconds,
+            );
+        }
+        Ok(authored_grounded_actuation(
+            self.offset,
+            body.pose,
+            body.contact,
+            self.object_scale,
+            delta_seconds,
+        )?)
+    }
+}
+
+/// Locomotion commands a table models, in a stable order for a UX to render.
+fn modelled_commands(table: &holtburger_content::MotionSequenceTable) -> Vec<u32> {
+    const LOCOMOTION: [u32; 7] = [
+        0x4500_0005, // walk forward
+        0x4500_0006, // walk backwards
+        0x4400_0007, // run forward
+        0x6500_000D, // turn right
+        0x6500_000E, // turn left
+        0x6500_000F, // sidestep right
+        0x6500_0010, // sidestep left
+    ];
+    let style = table.default_style;
+    LOCOMOTION
+        .into_iter()
+        .filter(|command| {
+            table.cycle(style, *command).is_some() || table.modifier(style, *command).is_some()
+        })
+        .collect()
 }
 
 impl Default for ExplorerEntityRegistry {
@@ -302,6 +431,7 @@ impl ExplorerEntityRegistry {
             entities: BTreeMap::new(),
             allocator: ExplorerGuidAllocator::new(start, end),
             next_generation: Some(1),
+            motion: ExplorerMotionState::default(),
         }
     }
 
@@ -403,22 +533,39 @@ pub struct ExplorerEntityRuntime {
     // retire between solve acceptance and projection and no callback inverts the lock order.
     registry: Mutex<ExplorerEntityRegistry>,
     simulation: Arc<HostSimulationRuntime>,
+    /// Shared motion contract, projected once at startup and read by every possession.
+    motion_catalog: Arc<MotionSequenceCatalog>,
 }
 
 impl ExplorerEntityRuntime {
     /// Composes an empty Explorer registry over the app's canonical host simulation runtime.
-    pub fn new(simulation: Arc<HostSimulationRuntime>) -> Self {
+    pub fn new(
+        simulation: Arc<HostSimulationRuntime>,
+        motion_catalog: Arc<MotionSequenceCatalog>,
+    ) -> Self {
         Self {
             registry: Mutex::new(ExplorerEntityRegistry::default()),
             simulation,
+            motion_catalog,
         }
     }
 
     #[cfg(test)]
     fn with_guid_range(simulation: Arc<HostSimulationRuntime>, start: u32, end: u32) -> Self {
+        Self::with_guid_range_and_motion(simulation, start, end, Default::default())
+    }
+
+    #[cfg(test)]
+    fn with_guid_range_and_motion(
+        simulation: Arc<HostSimulationRuntime>,
+        start: u32,
+        end: u32,
+        motion_catalog: Arc<MotionSequenceCatalog>,
+    ) -> Self {
         Self {
             registry: Mutex::new(ExplorerEntityRegistry::with_guid_range(start, end)),
             simulation,
+            motion_catalog,
         }
     }
 
@@ -774,6 +921,175 @@ impl ExplorerEntityRuntime {
     ///
     /// Only frontend-relevant body/path changes leave this boundary. Stable entities still remain
     /// in the scene-owned scan; Phase 5A may skip their integration without a second active set.
+    /// Possesses one spawned entity, so commands and the follow camera target it.
+    ///
+    /// Possession is exclusive: taking a new entity releases the previous one and discards its
+    /// playback, because a cursor means nothing once nothing is driving it.
+    pub fn possess(&self, guid: Guid) -> Result<ExplorerPossession, ExplorerEntityRuntimeError> {
+        let mut registry = self
+            .registry
+            .lock()
+            .expect("Explorer entity registry lock poisoned");
+        let instance = registry
+            .entities
+            .get(&guid)
+            .ok_or(ExplorerEntityRuntimeError::NotRegistered { guid })?;
+        let motion_table_id = self.motion_table_for(&instance.definition);
+
+        registry.motion.release();
+        registry.motion.possessed = Some(guid);
+
+        Ok(ExplorerPossession {
+            guid,
+            motion_table_id,
+            modelled_commands: motion_table_id
+                .and_then(|id| self.motion_catalog.table(id))
+                .map(modelled_commands)
+                .unwrap_or_default(),
+        })
+    }
+
+    /// Releases whatever is possessed, leaving the entity in the world under its own physics.
+    ///
+    /// The released entity's planar velocity is cleared. Authored drive is per-tick and is not
+    /// momentum, so once authorship ends there is nothing for the horizontal motion to have come
+    /// from; leaving it would let a walk cycle coast on after the command that produced it. Vertical
+    /// velocity survives, because falling is real physical momentum the authored path never wrote.
+    pub fn release_possession(&self, now: std::time::Instant) -> Option<Guid> {
+        let mut registry = self
+            .registry
+            .lock()
+            .expect("Explorer entity registry lock poisoned");
+        let released = registry.motion.possessed;
+        registry.motion.release();
+
+        if let Some(guid) = released {
+            self.clear_authored_momentum(SpatialBodyId::Entity(guid), now);
+        }
+        released
+    }
+
+    fn clear_authored_momentum(&self, body_id: SpatialBodyId, now: std::time::Instant) {
+        let Some(body) = self.simulation.physical_body_view(body_id) else {
+            return;
+        };
+        // Align-path facing is a response policy, not a kinematic fact; the entity keeps whatever it
+        // had, so this replacement carries the same answer the body already holds.
+        let align_path = self
+            .simulation
+            .physical_body_align_path(body_id)
+            .unwrap_or(false);
+        let Some(kinematics) = holtburger_world::DynamicBodyKinematics::new(
+            holtburger_common::Vector3::new(0.0, 0.0, body.velocity.z),
+            body.acceleration,
+            body.omega,
+            align_path,
+        ) else {
+            return;
+        };
+        let _ = self
+            .simulation
+            .apply_dynamic_entity_kinematics(body_id, kinematics, now);
+    }
+
+    /// Replaces the order the possessed entity performs from the next tick onward.
+    pub fn set_motion_order(&self, order: MotionOrder) -> Option<Guid> {
+        let mut registry = self
+            .registry
+            .lock()
+            .expect("Explorer entity registry lock poisoned");
+        registry.motion.order = order;
+        registry.motion.possessed
+    }
+
+    /// The motion table an entity animates from: its own property, or the default its setup installs.
+    fn motion_table_for(&self, definition: &DynamicEntityDefinition) -> Option<u32> {
+        definition.content.motion_table_did.or_else(|| {
+            self.motion_catalog
+                .default_motion_table_for_setup(definition.content.setup_did)
+        })
+    }
+
+    /// Advances every entity's authored playback by one tick and returns the possessed drive.
+    ///
+    /// Every entity plays, not only the possessed one: an unpossessed entity idles from its motion
+    /// table's default style and substate, which is what retail installs for any non-static object
+    /// (`CPhysicsObj::InitDefaults`, `acclient.c:309099-309103`). Only the possessed entity receives
+    /// a command; the rest hold their idle.
+    ///
+    /// An entity whose table is absent from the contract, or which declares none, simply has no
+    /// playback. That is not a failure — it is an object that does not animate.
+    fn advance_entity_motion(
+        &self,
+        registry: &mut ExplorerEntityRegistry,
+        delta_seconds: f32,
+    ) -> Option<PossessedDrive> {
+        let possessed = registry.motion.possessed;
+        if possessed.is_some_and(|guid| !registry.entities.contains_key(&guid)) {
+            // The possessed entity retired underneath us; drop the possession with it.
+            registry.motion.release();
+        }
+        let possessed = registry.motion.possessed;
+        let order = registry.motion.order;
+
+        let driving: Vec<(Guid, u32, f32, MotionOrder)> = registry
+            .entities
+            .iter()
+            .filter_map(|(guid, instance)| {
+                Some((
+                    *guid,
+                    self.motion_table_for(&instance.definition)?,
+                    instance.definition.object_scale,
+                    if possessed == Some(*guid) {
+                        order
+                    } else {
+                        MotionOrder::default()
+                    },
+                ))
+            })
+            .collect();
+
+        let live: BTreeSet<Guid> = driving.iter().map(|(guid, _, _, _)| *guid).collect();
+        registry
+            .motion
+            .playback
+            .retain_bodies(|guid| live.contains(&guid));
+
+        let mut drive = None;
+        for (guid, motion_table_id, object_scale, order) in driving {
+            let Some(table) = self.motion_catalog.table(motion_table_id) else {
+                continue;
+            };
+            let offset = registry
+                .motion
+                .playback
+                .drive(table, guid, order, delta_seconds)
+                .offset;
+
+            // A body that proved stable support has dropped out of the collection scan. Whether it
+            // should be back in is a property of what its playback installed, not of how large this
+            // tick's offset came out — the same distinction Phase 3 settled for the client basis.
+            let moving = registry
+                .motion
+                .playback
+                .get(guid)
+                .is_some_and(|runtime| runtime.sequence().contributes_motion());
+            if moving {
+                self.simulation
+                    .wake_dynamic_body(SpatialBodyId::Entity(guid));
+            }
+
+            if possessed == Some(guid) {
+                drive = Some(PossessedDrive {
+                    guid,
+                    offset,
+                    object_scale,
+                });
+            }
+        }
+        drive
+    }
+
     pub fn tick_physical_collection(
         &self,
         delta_seconds: f32,
@@ -783,12 +1099,37 @@ impl ExplorerEntityRuntime {
             .registry
             .lock()
             .expect("Explorer entity registry lock poisoned");
+        // Authored playback advances once, before the solve reads anything from it.
+        let authored = self.advance_entity_motion(&mut registry, delta_seconds);
+        // Sampled after the advance, because the advance is what changes the clip. Only entities
+        // whose clip actually changed are published: a receiver swaps on arrival rather than
+        // diffing, so an unchanged clip must not be resent.
+        let live: BTreeSet<Guid> = registry.entities.keys().copied().collect();
+        // A clip change is a change worth publishing even when the body did not move: an entity can
+        // transition between idles standing still, and the receiver would otherwise never hear.
+        let changed_clips = registry.motion.take_changed_clips(&live);
         self.simulation
-            .tick_dynamic_entity_collection(delta_seconds, now)?
+            .tick_dynamic_entity_collection(delta_seconds, now, |body| match &authored {
+                Some(drive) if body.id == SpatialBodyId::Entity(drive.guid) => {
+                    drive.actuation(body, delta_seconds)
+                }
+                _ => crate::host_simulation_runtime::dynamic_entity_coasting_actuation(
+                    body,
+                    delta_seconds,
+                ),
+            })?
             .bodies
             .into_iter()
-            .filter(physical_tick_changed)
+            .filter(|solved| {
+                physical_tick_changed(solved)
+                    || solved
+                        .current
+                        .id
+                        .authoritative_guid()
+                        .is_some_and(|guid| changed_clips.contains_key(&guid))
+            })
             .map(|solved| {
+                let changed_clips = &changed_clips;
                 let SpatialBodyId::Entity(guid) = solved.current.id else {
                     anyhow::bail!("dynamic-entity collection returned a non-entity body")
                 };
@@ -808,6 +1149,7 @@ impl ExplorerEntityRuntime {
                     &solved.current,
                 )?;
                 Ok(ExplorerEntityPhysicalTick {
+                    clip: changed_clips.get(&guid).copied(),
                     generation: instance.generation,
                     input,
                     solved,
@@ -970,6 +1312,15 @@ fn validate_transition_replacement(
 
 #[cfg(test)]
 mod tests {
+    /// Every scheduled body coasts, for tests that do not care about drive.
+    fn coasting(
+        delta_seconds: f32,
+    ) -> impl Fn(&SpatialBody) -> anyhow::Result<holtburger_world::PhysicalBodyActuation> {
+        move |body| {
+            crate::host_simulation_runtime::dynamic_entity_coasting_actuation(body, delta_seconds)
+        }
+    }
+
     use super::*;
     use anyhow::Result;
     use holtburger_common::position::WorldPosition;
@@ -1016,6 +1367,7 @@ mod tests {
                 weenie_type: WeenieType::Creature,
             },
             content: DynamicEntityContent {
+                motion_table_did: None,
                 setup_did: 0x0200_0001,
                 sound_table_did: None,
                 physics_effect_table_did: None,
@@ -1333,7 +1685,7 @@ mod tests {
 
         let baseline_at = Instant::now();
         let baseline = simulation
-            .tick_dynamic_entity_collection(0.1, baseline_at)
+            .tick_dynamic_entity_collection(0.1, baseline_at, coasting(0.1))
             .unwrap();
         assert!(baseline.collision_reports.is_empty());
         simulation
@@ -1351,6 +1703,7 @@ mod tests {
             .tick_dynamic_entity_collection(
                 0.1,
                 baseline_at + std::time::Duration::from_millis(200),
+                coasting(0.1),
             )
             .unwrap();
         assert_eq!(collection.collision_reports.len(), 2);
@@ -1675,6 +2028,295 @@ mod tests {
         );
     }
 
+    /// Serves flat ground so a fixture body can prove stable support.
+    struct FlatGround;
+
+    impl crate::host_simulation_runtime::CollisionSource for FlatGround {
+        fn load_collision(&self, landblock_id: u32) -> Result<Option<LandblockCollisionAsset>> {
+            Ok(Some(LandblockCollisionAsset {
+                landblock_id,
+                terrain: holtburger_content::TerrainCollisionSurface::from_terrain(
+                    &holtburger_content::LandblockTerrain {
+                        grid_size: 9,
+                        tile_size: 24.0,
+                        height_indices: vec![0; 81],
+                        heights: vec![0.0; 81],
+                        terrain_samples: vec![0; 81],
+                        cell_diagonals: holtburger_content::TerrainCellDiagonals::for_landblock(
+                            landblock_id,
+                        ),
+                    },
+                )?,
+                static_geometry: holtburger_content::LandblockColliders::default(),
+            }))
+        }
+    }
+
+    const WALK_TABLE: u32 = 0x0900_0001;
+    const WALK_STYLE: u32 = 0x8000_003D;
+    const WALK_STAND: u32 = 0x4500_0003;
+    const WALK_FORWARD: u32 = 0x4500_0005;
+    const WALK_ANIM: u32 = 0x0300_0002;
+
+    /// A table whose walk cycle authors root motion along local Y, which is what a real walk does.
+    fn walking_catalog() -> Arc<MotionSequenceCatalog> {
+        use holtburger_dat::file_type::animation::AnimationFlags;
+        use holtburger_dat::file_type::motion_table::{AnimData, MotionData, MotionDataFlags};
+        use holtburger_dat::file_type::setup_model::AnimationFrame;
+        use holtburger_dat::file_type::{Animation, MotionTable};
+        use holtburger_dat::graphics::Frame;
+
+        let clip = |anim_id: u32| MotionData {
+            bitfield: 0,
+            flags: MotionDataFlags::empty(),
+            anims: vec![AnimData {
+                anim_id,
+                low_frame: 0,
+                high_frame: -1,
+                framerate: 4.0,
+            }],
+            velocity: None,
+            omega: None,
+        };
+        let animation = |id: u32, step: f32| Animation {
+            id,
+            flags: AnimationFlags::POS_FRAMES,
+            num_parts: 0,
+            num_frames: 4,
+            pos_frames: (0..4)
+                .map(|_| Frame {
+                    origin: Vector3::new(0.0, step, 0.0),
+                    orientation: Quaternion::identity(),
+                })
+                .collect(),
+            part_frames: (0..4)
+                .map(|_| AnimationFrame {
+                    frames: Vec::new(),
+                    hooks: Vec::new(),
+                })
+                .collect(),
+        };
+
+        let mut cycles = std::collections::HashMap::new();
+        cycles.insert(
+            MotionTable::cycle_key(WALK_STYLE, WALK_STAND),
+            clip(0x0300_0001),
+        );
+        cycles.insert(
+            MotionTable::cycle_key(WALK_STYLE, WALK_FORWARD),
+            clip(WALK_ANIM),
+        );
+
+        Arc::new(
+            MotionSequenceCatalog::assemble(
+                [MotionTable {
+                    id: WALK_TABLE,
+                    default_style: WALK_STYLE,
+                    style_defaults: std::collections::HashMap::from([(WALK_STYLE, WALK_STAND)]),
+                    cycles,
+                    modifiers: std::collections::HashMap::new(),
+                    links: std::collections::HashMap::new(),
+                }],
+                [animation(0x0300_0001, 0.0), animation(WALK_ANIM, 1.0)],
+                [],
+            )
+            .expect("walking fixture should assemble"),
+        )
+    }
+
+    fn walking_runtime() -> (Arc<HostSimulationRuntime>, ExplorerEntityRuntime, Guid) {
+        let simulation = Arc::new(HostSimulationRuntime::new(Arc::new(FlatGround)));
+        let runtime = ExplorerEntityRuntime::with_guid_range_and_motion(
+            Arc::clone(&simulation),
+            0xf000_0090,
+            0xf000_00a0,
+            walking_catalog(),
+        );
+        let session = simulation.reserve_interest_session();
+        simulation
+            .replace_interest(crate::host_simulation_runtime::SimulationInterestRequest {
+                session,
+                revision: 1,
+                landblock_ids: vec!["0xda55ffff".to_owned()],
+            })
+            .unwrap();
+
+        let guid = runtime.reserve_guid().unwrap();
+        let mut definition = definition(guid, 1, 0.0);
+        definition.content.motion_table_did = Some(WALK_TABLE);
+        runtime
+            .spawn_prepared(
+                definition,
+                EntityPhysicalIntent::Simulated,
+                Some(physical()),
+            )
+            .unwrap();
+        (simulation, runtime, guid)
+    }
+
+    use std::time::Duration;
+
+    fn settle(simulation: &HostSimulationRuntime, start: Instant) -> Instant {
+        for step in 0..240 {
+            let now = start + std::time::Duration::from_millis(step * 33);
+            if simulation
+                .tick_dynamic_entity_collection(1.0 / 30.0, now, coasting(1.0 / 30.0))
+                .unwrap()
+                .bodies
+                .is_empty()
+            {
+                return now;
+            }
+        }
+        panic!("the grounded fixture body must settle before possession");
+    }
+
+    fn walk_order() -> MotionOrder {
+        MotionOrder {
+            style: Some(holtburger_world::motion::MotionCommand(WALK_STYLE)),
+            forward: Some((holtburger_world::motion::MotionCommand(WALK_FORWARD), 1.0)),
+            sidestep: None,
+            turn: None,
+        }
+    }
+
+    /// The payoff of the whole plan, at the Explorer boundary: a possessed entity commanded to walk
+    /// travels under its animation's authored root motion, with no velocity stored anywhere.
+    #[test]
+    fn a_possessed_entity_walks_on_its_authored_root_motion() {
+        let (simulation, runtime, guid) = walking_runtime();
+        let settled_at = settle(&simulation, Instant::now());
+        let before = simulation
+            .physical_body_snapshot(SpatialBodyId::Entity(guid))
+            .expect("the possessed body must exist")
+            .pose
+            .coords;
+
+        let possession = runtime.possess(guid).unwrap();
+        assert_eq!(possession.motion_table_id, Some(WALK_TABLE));
+        assert!(possession.modelled_commands.contains(&WALK_FORWARD));
+        runtime.set_motion_order(walk_order());
+
+        for step in 1..=15 {
+            runtime
+                .tick_physical_collection(
+                    1.0 / 30.0,
+                    settled_at + std::time::Duration::from_millis(step * 33),
+                )
+                .unwrap();
+        }
+
+        let after = simulation
+            .physical_body_snapshot(SpatialBodyId::Entity(guid))
+            .expect("the possessed body must still exist")
+            .pose
+            .coords;
+        assert!(
+            (after - before).length() > 0.5,
+            "a possessed entity ordered to walk must travel: {before:?} -> {after:?}"
+        );
+    }
+
+    /// The clip is published when it changes and not otherwise, because a receiver swaps on arrival
+    /// rather than diffing. Resending an unchanged clip would restart it every tick.
+    #[test]
+    fn a_playing_clip_publishes_on_change_and_not_again() {
+        let (simulation, runtime, guid) = walking_runtime();
+        let settled_at = settle(&simulation, Instant::now());
+        runtime.possess(guid).unwrap();
+
+        // The first tick after spawn announces the idle the entity is already playing.
+        let first = runtime
+            .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(33))
+            .unwrap();
+        assert!(
+            first.iter().any(|tick| tick.clip.is_some()),
+            "the first tick announces the clip"
+        );
+
+        runtime.set_motion_order(walk_order());
+        let mut announcements = 0usize;
+        let mut animations = Vec::new();
+        for step in 2..=20 {
+            for tick in runtime
+                .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(step * 33))
+                .unwrap()
+            {
+                if let Some(clip) = tick.clip {
+                    announcements += 1;
+                    animations.push(clip.animation_id);
+                }
+            }
+        }
+
+        assert!(
+            announcements >= 1,
+            "commanding a walk changes the clip at least once"
+        );
+        assert!(
+            announcements <= 4,
+            "only transitions announce, not every tick: {announcements} announcements over 19 ticks"
+        );
+        assert!(
+            animations.windows(2).all(|pair| pair[0] != pair[1]),
+            "the same clip is never announced twice in a row: {animations:?}"
+        );
+    }
+
+    /// Releasing possession stops the entity: authored drive is per-tick, so nothing survives it.
+    #[test]
+    fn releasing_possession_stops_authored_travel() {
+        let (simulation, runtime, guid) = walking_runtime();
+        let settled_at = settle(&simulation, Instant::now());
+        runtime.possess(guid).unwrap();
+        runtime.set_motion_order(walk_order());
+        for step in 1..=15 {
+            runtime
+                .tick_physical_collection(
+                    1.0 / 30.0,
+                    settled_at + std::time::Duration::from_millis(step * 33),
+                )
+                .unwrap();
+        }
+
+        let released_at = settled_at + std::time::Duration::from_millis(600);
+        assert_eq!(runtime.release_possession(released_at), Some(guid));
+        let before = simulation
+            .physical_body_snapshot(SpatialBodyId::Entity(guid))
+            .unwrap()
+            .pose
+            .coords;
+        for step in 1..=15 {
+            runtime
+                .tick_physical_collection(
+                    1.0 / 30.0,
+                    released_at + std::time::Duration::from_millis(step * 33),
+                )
+                .unwrap();
+        }
+        let after = simulation
+            .physical_body_snapshot(SpatialBodyId::Entity(guid))
+            .unwrap()
+            .pose
+            .coords;
+
+        assert!(
+            (after - before).length() < 0.05,
+            "a released entity keeps no authored momentum: {before:?} -> {after:?}"
+        );
+    }
+
+    /// The UX must be able to refuse what a table cannot do, so the modelled set is read from the
+    /// contract rather than assumed from the command vocabulary.
+    #[test]
+    fn possession_reports_only_the_commands_the_table_models() {
+        let (_simulation, runtime, guid) = walking_runtime();
+
+        let possession = runtime.possess(guid).unwrap();
+
+        assert_eq!(possession.modelled_commands, vec![WALK_FORWARD]);
+    }
+
     /// A settled body stops integrating, so a change to the loaded static world would otherwise
     /// leave it resting on collision geometry that no longer exists. The host wakes the whole
     /// settled population conservatively; this proves that wiring, not just the scene primitive.
@@ -1734,7 +2376,7 @@ mod tests {
         for step in 0..240 {
             let now = start + std::time::Duration::from_millis(step * 33);
             let tick = simulation
-                .tick_dynamic_entity_collection(1.0 / 30.0, now)
+                .tick_dynamic_entity_collection(1.0 / 30.0, now, coasting(1.0 / 30.0))
                 .unwrap();
             if tick.bodies.is_empty() {
                 settled_at = Some(now);
@@ -1744,7 +2386,7 @@ mod tests {
         let settled_at = settled_at.expect("the grounded fixture body must settle");
         assert!(
             simulation
-                .tick_dynamic_entity_collection(1.0 / 30.0, settled_at)
+                .tick_dynamic_entity_collection(1.0 / 30.0, settled_at, coasting(1.0 / 30.0))
                 .unwrap()
                 .bodies
                 .is_empty(),
@@ -1762,7 +2404,7 @@ mod tests {
 
         assert!(
             !simulation
-                .tick_dynamic_entity_collection(1.0 / 30.0, settled_at)
+                .tick_dynamic_entity_collection(1.0 / 30.0, settled_at, coasting(1.0 / 30.0))
                 .unwrap()
                 .bodies
                 .is_empty(),

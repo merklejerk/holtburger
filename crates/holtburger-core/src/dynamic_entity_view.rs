@@ -258,6 +258,33 @@ pub struct DynamicEntityAdvance {
     pub kind: DynamicEntityPlacementAdvanceKind,
     /// Host-accepted path evaluated by presentation at render cadence.
     pub path: DynamicEntityPlacedPath,
+    /// Clip the host started playing on this tick, if it changed.
+    ///
+    /// Published on **change**, not every tick: clip identity changes only at a transition, so a
+    /// receiver swaps on arrival rather than diffing against what it already holds. `None` means
+    /// "keep playing whatever you have" — including for an entity that never animated at all.
+    ///
+    /// Deliberately narrow: the receiver advances within this clip's window at render rate,
+    /// lapping back to its entry frame at the far bound, and never selects the next one. Which clip
+    /// follows is link resolution against host state, so a clip change arrives only as a later
+    /// projection. Lapping rather than holding is required, not a choice: a looping clip is
+    /// projected once and never re-sent, so a receiver that held would freeze every idle.
+    pub clip: Option<DynamicEntityPlayingClip>,
+}
+
+/// The clip the host has one entity playing, projected for presentation.
+///
+/// Carries no frame number. Host and receiver both advance by `framerate x dt`, so a phase offset
+/// never accumulates, and entering a clip re-anchors both at the same frame regardless.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DynamicEntityPlayingClip {
+    pub animation_id: u32,
+    /// Rate to advance at. Negative plays the window backwards.
+    pub framerate: f32,
+    /// Inclusive traversal bounds, already resolved against the animation's frame count.
+    pub low_frame: i32,
+    pub high_frame: i32,
 }
 
 /// At most one ordered changed-entity publication for one host fixed tick.

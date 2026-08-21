@@ -64,7 +64,8 @@ export type PreparedBehaviorCommand =
 	  }
 	| {
 			readonly kind: "replace-object";
-			readonly rawPayload: Uint8Array;
+			readonly partIndex: number;
+			readonly gfxObjId: DatAssetId;
 	  }
 	| {
 			readonly kind: "semantic";
@@ -100,7 +101,18 @@ interface TransparentPartValues {
 /** Payload retained for commands that decode but have no execution owner. */
 type UnimplementedCommandPayload =
 	| { readonly kind: "no-payload" }
-	| { readonly kind: "raw"; readonly bytes: Uint8Array };
+	| { readonly kind: "raw"; readonly bytes: Uint8Array }
+	/** Melee volume the host arms; the frontend has no combat state to apply it to. */
+	| {
+			readonly kind: "attack";
+			readonly partIndex: number;
+			readonly left: readonly [number, number];
+			readonly right: readonly [number, number];
+			readonly radius: number;
+			readonly height: number;
+	  }
+	/** Collision-state toggle the host owns; the frontend does not collide. */
+	| { readonly kind: "ethereal"; readonly ethereal: boolean };
 
 /** Stable diagnostic label for one command, used by observation and provenance records. */
 export function behaviorCommandLabel(command: PreparedBehaviorCommand): string {

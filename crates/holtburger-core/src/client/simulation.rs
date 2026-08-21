@@ -74,6 +74,9 @@ impl ClientSimulationSystem {
             return Vec::new();
         }
 
+        // Authored playback advances once per tick, before any basis is read from it.
+        world.advance_authored_motion(dt);
+
         let Some(request) = self.build_solve_request(now, dt, world, movement) else {
             return Vec::new();
         };

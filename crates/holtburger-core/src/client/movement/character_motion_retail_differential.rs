@@ -7,7 +7,7 @@ use holtburger_common::Vector3;
 use holtburger_protocol::messages::movement::MotionStance;
 
 use super::common::turn_rate_scalar_for_state;
-use crate::client::movement_types::{Gait as MotionGait, MotionState};
+use crate::client::movement_types::{CharacterDrive, Gait as MotionGait};
 
 /// Normal power-bar duration from `ClientCombatSystem::GetPowerBarLevel` (`acclient.c:390379`).
 const NORMAL_CHARGE_SECONDS: f32 = 1.0;
@@ -283,14 +283,14 @@ fn turn_rate_uses_only_gait_and_an_explicit_command_override() {
         (Gait::Walk, Some(0.75)),
         (Gait::Run, Some(0.75)),
     ] {
-        let state = MotionState {
+        let state = CharacterDrive {
             gait: match gait {
                 Gait::Walk => MotionGait::Walk,
                 Gait::Run => MotionGait::Run,
             },
             turning: Some(crate::client::movement_types::Turn::Left),
             turn_rate_scalar: explicit_rate,
-            ..MotionState::default()
+            ..CharacterDrive::default()
         };
         assert_close(
             turn_rate_scalar_for_state(state),

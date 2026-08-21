@@ -62,6 +62,7 @@ function resident(
 			kind: "none",
 			physicsScriptId: null,
 			physicsScriptTableId: null,
+			motionTableId: null,
 			soundTableId: null,
 		},
 		identity: { kind: "authored", sourceId: `synthetic-blended:${index}` },

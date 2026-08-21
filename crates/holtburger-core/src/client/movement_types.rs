@@ -73,8 +73,20 @@ pub enum Turn {
     Right,
 }
 
+/// What a controller is asking a character to do, in semantic axes rather than motion commands.
+///
+/// Named for the drive it is, not the state it is not. This was `MotionState` until the vocabulary
+/// sweep, which collided with `holtburger_world::motion::MotionState` — retail's actual motion-table
+/// state machine (`style`, `substate`, modifiers). That type is named after the decompile
+/// deliberately so anyone cross-reading lands there; this one was the misnomer.
+///
+/// Deliberately *not* merged into `holtburger_world::motion::MotionOrder`, despite both carrying
+/// four locomotion axes. An order names concrete motion-table commands and speed multipliers; this
+/// names intent with no motion-table knowledge at all. Collapsing them would push table vocabulary
+/// into the controller layer, and the mapping between them is exactly what the resolvers exist to
+/// perform.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct MotionState {
+pub struct CharacterDrive {
     pub gait: Gait,
     /// Active forward/backward motion, independent from sidestepping.
     pub longitudinal: Option<LongitudinalMotion>,
@@ -85,7 +97,7 @@ pub struct MotionState {
     pub turn_rate_scalar: Option<f32>,
 }
 
-impl Default for MotionState {
+impl Default for CharacterDrive {
     fn default() -> Self {
         Self {
             gait: Gait::Walk,
@@ -97,9 +109,9 @@ impl Default for MotionState {
     }
 }
 
-impl MotionState {
-    pub fn builder() -> MotionStateBuilder {
-        MotionStateBuilder::default()
+impl CharacterDrive {
+    pub fn builder() -> CharacterDriveBuilder {
+        CharacterDriveBuilder::default()
     }
 
     /// Returns whether any translation or turn command is active.
@@ -118,66 +130,66 @@ impl MotionState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct MotionStateBuilder {
-    state: MotionState,
+pub struct CharacterDriveBuilder {
+    drive: CharacterDrive,
 }
 
-impl MotionStateBuilder {
+impl CharacterDriveBuilder {
     pub fn walk(mut self) -> Self {
-        self.state.gait = Gait::Walk;
+        self.drive.gait = Gait::Walk;
         self
     }
 
     pub fn run(mut self) -> Self {
-        self.state.gait = Gait::Run;
+        self.drive.gait = Gait::Run;
         self
     }
 
     pub fn forward(mut self) -> Self {
-        self.state.longitudinal = Some(LongitudinalMotion::Forward);
+        self.drive.longitudinal = Some(LongitudinalMotion::Forward);
         self
     }
 
     pub fn backstep(mut self) -> Self {
-        self.state.longitudinal = Some(LongitudinalMotion::Backward);
+        self.drive.longitudinal = Some(LongitudinalMotion::Backward);
         self
     }
 
     pub fn strafe_left(mut self) -> Self {
-        self.state.lateral = Some(LateralMotion::Left);
+        self.drive.lateral = Some(LateralMotion::Left);
         self
     }
 
     pub fn strafe_right(mut self) -> Self {
-        self.state.lateral = Some(LateralMotion::Right);
+        self.drive.lateral = Some(LateralMotion::Right);
         self
     }
 
     pub fn turn_left(mut self) -> Self {
-        self.state.turning = Some(Turn::Left);
+        self.drive.turning = Some(Turn::Left);
         self
     }
 
     pub fn turn_right(mut self) -> Self {
-        self.state.turning = Some(Turn::Right);
+        self.drive.turning = Some(Turn::Right);
         self
     }
 
     pub fn with_turn_rate_scalar(mut self, turn_rate_scalar: f32) -> Self {
-        self.state.turn_rate_scalar = Some(turn_rate_scalar);
+        self.drive.turn_rate_scalar = Some(turn_rate_scalar);
         self
     }
 
-    pub fn build(self) -> MotionState {
-        self.state
+    pub fn build(self) -> CharacterDrive {
+        self.drive
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PlayerDriveIntent {
-    ManualHeld(MotionState),
+    ManualHeld(CharacterDrive),
     ManualPulse {
-        state: MotionState,
+        state: CharacterDrive,
         duration: Duration,
     },
     Autonomous(AutonomousDriveIntent),
@@ -228,7 +240,7 @@ mod tests {
 
     #[test]
     fn motion_state_builder_builds_resolved_motion_state() {
-        let state = MotionState::builder()
+        let state = CharacterDrive::builder()
             .run()
             .forward()
             .turn_left()
@@ -244,7 +256,7 @@ mod tests {
 
     #[test]
     fn motion_state_defaults_to_walk_with_no_axes() {
-        let state = MotionState::default();
+        let state = CharacterDrive::default();
 
         assert_eq!(state.gait, Gait::Walk);
         assert_eq!(state.longitudinal, None);
@@ -256,12 +268,16 @@ mod tests {
     #[test]
     fn manual_held_intent_preserves_resolved_state() {
         let intent = PlayerDriveIntent::ManualHeld(
-            MotionState::builder().run().forward().turn_right().build(),
+            CharacterDrive::builder()
+                .run()
+                .forward()
+                .turn_right()
+                .build(),
         );
 
         assert_eq!(
             intent,
-            PlayerDriveIntent::ManualHeld(MotionState {
+            PlayerDriveIntent::ManualHeld(CharacterDrive {
                 gait: Gait::Run,
                 longitudinal: Some(LongitudinalMotion::Forward),
                 lateral: None,
@@ -274,14 +290,14 @@ mod tests {
     #[test]
     fn manual_pulse_intent_preserves_duration_and_state() {
         let intent = PlayerDriveIntent::ManualPulse {
-            state: MotionState::builder().walk().forward().build(),
+            state: CharacterDrive::builder().walk().forward().build(),
             duration: Duration::from_millis(120),
         };
 
         assert_eq!(
             intent,
             PlayerDriveIntent::ManualPulse {
-                state: MotionState {
+                state: CharacterDrive {
                     gait: Gait::Walk,
                     longitudinal: Some(LongitudinalMotion::Forward),
                     lateral: None,
@@ -305,13 +321,13 @@ mod tests {
         assert_ne!(
             PlayerDriveIntent::Stop,
             PlayerDriveIntent::ManualPulse {
-                state: MotionState::builder().walk().forward().build(),
+                state: CharacterDrive::builder().walk().forward().build(),
                 duration: Duration::from_millis(120),
             }
         );
         assert_ne!(
             PlayerDriveIntent::Stop,
-            PlayerDriveIntent::ManualHeld(MotionState::builder().walk().forward().build())
+            PlayerDriveIntent::ManualHeld(CharacterDrive::builder().walk().forward().build())
         );
     }
 

@@ -147,11 +147,14 @@ Outcome:
   populated landblock, plus census-selected target geometry, narrow-phase contact/response, bounded
   incremental convergence, an evidence-selected continuous-contact rule, and retained collision
   start/end reporting.
-- The Explorer milestone leaves existing `MotionKinematics` and client command projection unchanged.
-  Spawned roots move through physical vectors or explicit relocation, no semantic Explorer operation
-  selects authored root motion, and setup-default position-frame root transforms are temporarily
-  ignored under the measured one-WCID retail divergence. The dedicated
-  `holtburger-authored-root-motion-physics-integration-plan.md` owns the later shared clean cutover.
+- ~~The Explorer milestone leaves existing `MotionKinematics` and client command projection
+  unchanged.~~ **Superseded 2026-08-20** by
+  `holtburger-authored-root-motion-physics-integration-plan.md`, which completed that cutover:
+  `MotionKinematics` is deleted, the `MotionSequence` contract replaces it, a possessed Explorer
+  entity selects authored root motion through the shared command surface, and the frontend follows
+  the projected clip. The setup-default position-frame divergence is *not* closed by that work and
+  remains recorded there as debt: it affects `SetupModel::default_animation` residents, which have
+  no host body to route authored root motion through.
 - The frontend executes plans and sparse placement anchors without consuming raw motion tables or
   per-frame host transforms.
 - Dynamic entities reuse the authored visual, behavior, effect, presentation, and renderer systems.

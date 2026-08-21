@@ -470,7 +470,7 @@ For holtburger's shared runtime, observer reconstruction should split responsibi
 - authoritative pose comes from `UpdatePosition` / `EntityMoved`
 - sticky locomotion intent comes from `UpdateMotion` / `EntityMotionUpdated`
 - retained velocity and angular velocity come from `VectorUpdate` / `EntityKinematicsUpdated`
-- grounded command kinematics come from the required `holtburger/core:MotionKinematics` asset emitted by `dat2hba`
+- grounded command kinematics are reduced from the `MotionSequence` contract, which `holtburger-content` projects from raw motion tables and animations
 
 That last point matters. ACE often does not send a usable grounded meters-per-second value for ordinary locomotion, and observer-facing `UpdatePosition` anchors may omit velocity entirely. So a client that wants stable remote grounded simulation cannot rely on packet velocity alone.
 
@@ -481,7 +481,11 @@ The runtime rule should be:
 3. Use retained server velocity and omega for bounded dead reckoning when the actor is airborne, server-controlled, or lacks a resolvable grounded command path.
 4. Suspend or snap projection instead of guessing when teleport, force-position, despawn, landblock change, or missing required kinematics invalidate the prior simulation state.
 
-The derived `MotionKinematics` asset is the canonical source for step 2. Runtime consumers should not reopen raw motion tables, setup models, or animation payloads just to recover grounded movement rates.
+The `MotionSequence` contract is the canonical source for step 2. Runtime consumers read the contract
+rather than reopening raw motion tables, setup models, or animation payloads themselves; the contract
+is projected once and shared. Where a cycle authors no explicit velocity, `holtburger-world` reduces
+its authored root motion to a mean forward speed for this velocity-shaped consumer — a summary of the
+contract, never a competing source.
 
 #### Quick lifecycle table
 

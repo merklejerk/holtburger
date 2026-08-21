@@ -1,10 +1,11 @@
+use crate::motion::MotionRuntimeRegistry;
 use holtburger_common::properties::{
     EnchantmentTypeFlags, EquipMask, PropertyFloat, PropertyInt, PropertyInt64, PropertyString,
     WorldObjectExt as _, WorldObjectPropertyAccessors, WorldObjectPropertyAccessorsMut,
 };
 use holtburger_common::{Guid, ParentLocation};
-use holtburger_content::SoulEmoteCatalog;
-use holtburger_dat::file_type::{MotionKinematics, SkillTable, XpTable};
+use holtburger_content::{MotionSequenceCatalog, SoulEmoteCatalog};
+use holtburger_dat::file_type::{SkillTable, XpTable};
 use holtburger_protocol::messages::GameMessage;
 use holtburger_protocol::messages::combat::CombatMode;
 use std::sync::Arc;
@@ -61,7 +62,12 @@ pub struct WorldState {
     pub skill_table: Arc<SkillTable>,
     pub spell_catalog: Arc<SpellCatalog>,
     pub soul_emote_catalog: Arc<SoulEmoteCatalog>,
-    pub motion_kinematics: Arc<MotionKinematics>,
+    pub motion_sequences: Arc<MotionSequenceCatalog>,
+    /// Authored-motion playback for every entity this client simulates.
+    ///
+    /// Advanced once per tick by `advance_authored_motion`; the solver basis reads the result
+    /// rather than producing it.
+    pub motion_runtimes: MotionRuntimeRegistry,
     pub scene: SpatialScene,
     pub vendor: Option<VendorState>,
     pub fellowship: Option<FellowshipState>,
@@ -402,7 +408,8 @@ impl WorldState {
             skill_table: Arc::clone(&bootstrap.skill_table),
             spell_catalog: bootstrap.spell_catalog(),
             soul_emote_catalog: Arc::clone(&bootstrap.soul_emote_catalog),
-            motion_kinematics: Arc::clone(&bootstrap.motion_kinematics),
+            motion_sequences: Arc::clone(&bootstrap.motion_sequences),
+            motion_runtimes: MotionRuntimeRegistry::new(),
             scene: SpatialScene::new_with_physics(spatial_physics),
             vendor: None,
             fellowship: None,
@@ -425,8 +432,8 @@ impl WorldState {
     }
 
     #[cfg(any(test, feature = "test-support"))]
-    pub fn set_motion_kinematics(&mut self, motion_kinematics: MotionKinematics) {
-        self.motion_kinematics = Arc::new(motion_kinematics);
+    pub fn set_motion_sequences(&mut self, motion_sequences: MotionSequenceCatalog) {
+        self.motion_sequences = Arc::new(motion_sequences);
     }
 
     pub fn current_server_time(&self) -> f64 {

@@ -1447,6 +1447,47 @@ function summarizeEntityLifecycleState(state) {
 	};
 }
 
+/**
+ * Ask the host the boom's own question in two directions from a settled entity.
+ *
+ * Downward must be stopped by the terrain the entity is standing on, and upward must complete: a
+ * query that answered the same in both directions would be reporting a constant rather than
+ * measuring geometry, which no camera-level assertion would distinguish.
+ */
+async function probeBoomSweep(client, pose) {
+	if (!pose) return null;
+	// The entity reports AC landblock-local coordinates; the sweep takes canonical scene axes.
+	const blockX = (pose.landblockId >>> 24) & 0xff;
+	const blockY = (pose.landblockId >>> 16) & 0xff;
+	const origin = [
+		blockX * 192 + pose.coords.x,
+		pose.coords.z + 1,
+		-(blockY * 192 + pose.coords.y),
+	];
+	const sweep = (direction) =>
+		evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.sweepSphereDistance",
+			[origin, direction, 6, 0.3],
+		);
+	return {
+		origin,
+		requestedDistance: 6,
+		up: await sweep([0, 1, 0]),
+		down: await sweep([0, -1, 0]),
+	};
+}
+
+/** The most recent accepted pose across every advance batch, or null before any tick. */
+function latestEntityPose(advanceEvents) {
+	for (let index = advanceEvents.length - 1; index >= 0; index -= 1) {
+		const advance = advanceEvents[index]?.batch?.advances?.[0];
+		const pose = advance?.entity?.placement?.pose;
+		if (pose) return pose;
+	}
+	return null;
+}
+
 function summarizeEnvCellLayers(envCellLayers) {
 	return envCellLayers.reduce(
 		(summary, layer) => ({
@@ -1877,6 +1918,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		const entityAdvanceEvents = [];
 		let spawnedEntityState = null;
 		let completedEntityState = null;
+		let boomSweepProbe = null;
 		if (options.spawnWcid !== null && options.entityShowcaseCount === 0) {
 			spawnedEntity = await evaluate(
 				client,
@@ -1928,6 +1970,14 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				client,
 				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
 				[],
+			);
+			// The settled pose, not the spawn pose: a simulated body falls to terrain over its first
+			// ticks, and probing where it *was* measures empty air a few metres up.
+			boomSweepProbe = await probeBoomSweep(
+				client,
+				latestEntityPose(entityAdvanceEvents) ??
+					spawnedEntity?.placement?.pose ??
+					null,
 			);
 		}
 		let entityShowcase = null;
@@ -2505,6 +2555,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 					? null
 					: {
 							advances: entityAdvanceEvents,
+							boomSweepProbe,
 							completedState: completedEntityState,
 							launched: launchedEntity,
 							relocated: relocatedEntity,

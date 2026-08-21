@@ -71,11 +71,17 @@ function base(guid: number): Omit<DynamicEntityView, "placement"> {
 		identity: { guid, wcid: 42, name: "Entity" },
 		presentation: {
 			content: {
+				motionTableDid: null,
 				setupDid: 0x02000001,
 				soundTableDid: null,
 				physicsEffectTableDid: null,
 			},
-			appearance: { subPalettes: [], textureChanges: [], partChanges: [] },
+			appearance: {
+				paletteDid: null,
+				subPalettes: [],
+				textureChanges: [],
+				partChanges: [],
+			},
 			objectScale: 1,
 		},
 		physics: {
@@ -84,7 +90,7 @@ function base(guid: number): Omit<DynamicEntityView, "placement"> {
 			noDraw: false,
 			hidden: false,
 			cloaked: false,
-			ethereal: false,
+			lighting: false,
 			defaultAnimation: false,
 			defaultScript: false,
 		},

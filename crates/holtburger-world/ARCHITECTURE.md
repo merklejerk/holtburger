@@ -205,6 +205,34 @@ Dynamic entities extend the same scene without a second store or solver:
   transition ends. It is not a diagnostic history, and expiry is serviced with an injected clock
   even while a body is settled.
 
+### Authored motion ([src/motion/](src/motion/))
+Files: [state.rs](src/motion/state.rs), [sequence.rs](src/motion/sequence.rs),
+[selection.rs](src/motion/selection.rs), [registry.rs](src/motion/registry.rs),
+[actuation.rs](src/motion/actuation.rs)
+
+Retail's motion-table state machine and sequence playback, ported as values a caller owns rather
+than as a service. Nothing here caches, records history, or reaches back into content.
+
+- `MotionState` is retail's actual motion state — `style`, `substate`, `substate_mod`, and the
+  modifier stack (`acclient.c:327700-327730`). Named after the decompile deliberately, so anyone
+  cross-reading lands here. The controller-intent type in `holtburger-core` is `CharacterDrive`; it
+  used to share this name, which is why the collision is worth stating.
+- `MotionOrder` is what a body has been ordered to perform this tick, independent of who ordered it:
+  a style plus forward, sidestep, and turn commands with speed *multipliers*. Distinct from
+  `CharacterDrive`, which carries the same four axes as semantic intent with no motion-table
+  vocabulary; the mapping between them is what the resolvers exist to perform.
+- `MotionSequenceRuntime` is retail's `CSequence` (`acclient.c:326110-327216`): the installed clips
+  and the cursor into them. `advance` returns what one tick produced — a single exactly-composed
+  rigid offset plus the simulation hooks the departed frames fired — rather than a sample of it,
+  matching retail's compose-then-apply-once structure.
+- `selection.rs` ports retail's motion selection, including link resolution and `re_modify`. Its
+  loop reproduces a retail quirk rather than correcting it; the marker there carries the citation.
+- `MotionRuntimeRegistry` holds per-body playback for one authority, and `actuation.rs` converts a
+  tick's authored offset into the solver's drive basis.
+
+Playback is *not* frontend animation. Only simulation-relevant facts live here; articulated part
+frames never enter this crate.
+
 ### Lifecycle / retention helpers
 Files: [src/state/liveness.rs](src/state/liveness.rs), [src/state/mutations.rs](src/state/mutations.rs)
 

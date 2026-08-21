@@ -265,6 +265,19 @@ impl GroundedBodyActuation {
         Ok(self)
     }
 
+    /// Planar drive this actuation supplies, or the zero vector while coasting.
+    pub fn supported_planar_velocity(&self) -> Vector3 {
+        match self.supported_motion {
+            GroundedSupportedMotion::Driven(velocity) => velocity,
+            GroundedSupportedMotion::Coasting => Vector3::zero(),
+        }
+    }
+
+    /// Absolute world heading this actuation asks the body to face, if it asks at all.
+    pub fn control_heading(&self) -> Option<f32> {
+        self.control_heading
+    }
+
     /// Applies the controller's absolute world heading without changing ballistic velocity.
     pub fn with_control_heading(
         mut self,
@@ -771,6 +784,28 @@ pub(super) fn solve_physical_body_tick(
         .physical
         .as_ref()
         .context("spatial body has no physical definition")?;
+    let mut commit = solve_physical_body_response(scene, body, physical, actuation, delta_seconds)?;
+
+    // Retained physical omega rotates the *accepted world frame*, globally, after the response has
+    // chosen the body's facing — retail's `Frame::grotate` on the already-composed frame
+    // (`acclient.c:306106-306153`). Authored rotation is the opposite case and has already been
+    // applied locally, as the body's control heading.
+    //
+    // Derived here so the accepted pose is final. Both the scene commit and dynamic contact used to
+    // re-integrate it from retained omega themselves, which made the tick's end orientation a fact
+    // computed in three places.
+    commit.pose.rotation =
+        super::scene::integrate_angular_velocity(commit.pose.rotation, body.omega, delta_seconds);
+    Ok(commit)
+}
+
+fn solve_physical_body_response(
+    scene: &CollisionScene,
+    body: &SpatialBody,
+    physical: &PhysicalBodyState,
+    actuation: PhysicalBodyActuation,
+    delta_seconds: f32,
+) -> Result<PhysicalBodyTickCommit> {
     match (physical.definition, &physical.response) {
         (
             PhysicalBodyDefinition::FreeSphere { sphere, config },
@@ -1640,6 +1675,63 @@ mod tests {
                 },
                 config: GROUNDED_CONFIG,
             }
+        );
+    }
+
+    /// The tick's end orientation is produced once, by the solver, with retained physical omega
+    /// already integrated into the accepted pose.
+    ///
+    /// It used to be reconstructed twice more — by the scene commit and by dynamic contact — each
+    /// re-integrating omega from the body. Those reconstructions agreed only by coincidence of
+    /// identical arithmetic; sampling the accepted rotation instead makes them the same fact.
+    #[test]
+    fn the_accepted_pose_carries_the_ticks_physical_rotation() {
+        let scene = CollisionScene::new();
+        let definition = PhysicalBodyDefinition::free_sphere(
+            PhysicalSphereSet::new(sphere(0.0, 0.3), None).unwrap(),
+            FLY_CONFIG,
+        )
+        .unwrap();
+        let mut body = SpatialBody::new(
+            crate::SpatialBodyId::Ephemeral(1),
+            WorldPosition {
+                landblock_id: Guid(0x0101_FFFF),
+                coords: Vector3::new(10.0, 10.0, 10.0),
+                rotation: Quaternion::identity(),
+            },
+            std::time::Instant::now(),
+        );
+        body.omega = Vector3::new(0.0, 0.0, 1.0);
+        body.physical = Some(PhysicalBodyState::new(
+            definition,
+            PhysicalCollisionFilter::ALL,
+            PhysicalBodyResponsePolicy {
+                restitution: PhysicalRestitution::Inelastic,
+                friction: PhysicalFriction::DEFAULT,
+                surface_motion: PhysicalSurfaceMotion::Stable,
+                align_path: false,
+            },
+            None,
+        ));
+
+        let commit = solve_physical_body_tick(
+            &scene,
+            &body,
+            PhysicalBodyActuation::free_flight(Vector3::zero()).unwrap(),
+            0.5,
+        )
+        .expect("a free sphere in an empty scene solves");
+
+        let expected = super::super::scene::integrate_angular_velocity(
+            Quaternion::identity(),
+            body.omega,
+            0.5,
+        );
+        assert!((commit.pose.rotation.w - expected.w).abs() < 1e-6);
+        assert!((commit.pose.rotation.z - expected.z).abs() < 1e-6);
+        assert!(
+            (commit.pose.rotation.to_heading() - Quaternion::identity().to_heading()).abs() > 1e-3,
+            "a body with retained omega ends the tick rotated"
         );
     }
 

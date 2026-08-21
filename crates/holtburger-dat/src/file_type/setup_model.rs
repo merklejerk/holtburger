@@ -17,6 +17,12 @@ fn decode_error<R: Seek>(reader: &mut R, message: String) -> binrw::Error {
     }
 }
 
+/// `AnimationDone` carries no payload, so it is identified by hook type rather than by variant.
+const ANIMATION_DONE_HOOK_TYPE: u32 = 4;
+
+/// `GfxObj` file-id space that replace-object hooks encode relative to.
+const GFX_OBJ_KNOWN_TYPE: u32 = 0x0100_0000;
+
 #[derive(Debug, Clone, BinRead, BinWrite)]
 #[br(little)]
 #[bw(little)]
@@ -67,7 +73,9 @@ pub struct AnimationHook {
 pub enum AnimationHookPayload {
     NoPayload,
     Raw(Vec<u8>),
-    ReplaceObject(Vec<u8>),
+    Attack(AttackConeHookPayload),
+    Ethereal(EtherealHookPayload),
+    ReplaceObject(ReplaceObjectHookPayload),
     SetOmega(SetOmegaHookPayload),
     TransparentPart(TransparentPartHookPayload),
     TextureVelocity(TextureVelocityHookPayload),
@@ -77,6 +85,45 @@ pub enum AnimationHookPayload {
     CreateParticle(CreateParticleHookPayload),
     CallPes(CallPesHookPayload),
     SoundTweaked(SoundTweakedHookPayload),
+}
+
+/// Melee attack volume the animation arms for the frames this hook spans.
+///
+/// Field order proven from ACE `AttackCone::Unpack`; the left and right terms are 2D directions in
+/// the attacking part's frame. Carried for a future combat system; nothing consumes it today.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AttackConeHookPayload {
+    /// Setup part the cone is anchored to; `-1` addresses the whole object.
+    ///
+    /// Signed because retail passes it straight to `AttackManager::NewAttack`
+    /// (`acclient.c:308215`) and ACE types it `int`. The sentinel is the common case: 675 of the
+    /// 1,047 attack hooks in referenced content use it.
+    pub part_index: i32,
+    pub left_x: f32,
+    pub left_y: f32,
+    pub right_x: f32,
+    pub right_y: f32,
+    pub radius: f32,
+    pub height: f32,
+}
+
+/// Collision-state toggle retail applies with `CPhysicsObj::set_ethereal`
+/// (`acclient.c:328623-328626`).
+///
+/// Stored on the wire as `i32`; every hook in retail content stores exactly 0 or 1, so the decoded
+/// form is a bool and any other value is a decode error rather than a silent truncation.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EtherealHookPayload {
+    pub ethereal: bool,
+}
+
+/// Swaps one setup part's graphics object mid-animation.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ReplaceObjectHookPayload {
+    /// Index of the setup part whose graphics object is replaced.
+    pub part_index: u16,
+    /// Full `GfxObj` file id, unpacked from the wire's known-type-relative encoding.
+    pub gfx_obj_id: u32,
 }
 
 /// Sound-type key resolved against the owning object's installed `SoundTable`.
@@ -194,10 +241,10 @@ impl AnimationHook {
             2 => AnimationHookPayload::SoundTable(SoundTableHookPayload {
                 sound_type: u32::read_le(reader)?,
             }),
-            3 => AnimationHookPayload::Raw(read_exact_payload(reader, 28)?), // Attack (AttackCone)
-            4 => AnimationHookPayload::NoPayload,                            // AnimationDone
+            3 => AnimationHookPayload::Attack(read_attack_cone_payload(reader)?),
+            4 => AnimationHookPayload::NoPayload, // AnimationDone
             5 => AnimationHookPayload::ReplaceObject(read_replace_object_payload(reader)?),
-            6 => AnimationHookPayload::Raw(read_exact_payload(reader, 4)?), // Ethereal (Ethereal: i32)
+            6 => AnimationHookPayload::Ethereal(read_ethereal_payload(reader)?),
             7 => AnimationHookPayload::TransparentPart(read_transparent_part_payload(reader)?),
             8 => AnimationHookPayload::Raw(read_exact_payload(reader, 12)?), // Luminous
             9 => AnimationHookPayload::Raw(read_exact_payload(reader, 16)?), // LuminousPart
@@ -243,6 +290,22 @@ impl AnimationHook {
         })
     }
 
+    /// Whether a host simulation reads this hook, as opposed to a renderer.
+    ///
+    /// The simulation set is the one ACE walks server-side: attack cones, animation completion,
+    /// object replacement, ethereal toggles, scale ramps, and omega changes. Everything else —
+    /// sound, particles, lighting, translucency, texture velocity, PES scripts — is presentation.
+    pub fn is_simulation_relevant(&self) -> bool {
+        matches!(
+            self.payload,
+            AnimationHookPayload::Attack(_)
+                | AnimationHookPayload::Ethereal(_)
+                | AnimationHookPayload::ReplaceObject(_)
+                | AnimationHookPayload::Scale(_)
+                | AnimationHookPayload::SetOmega(_)
+        ) || self.hook_type == ANIMATION_DONE_HOOK_TYPE
+    }
+
     pub fn write<W: Write + Seek>(&self, writer: &mut W) -> BinResult<()> {
         self.hook_type.write_le(writer)?;
         self.direction.write_le(writer)?;
@@ -255,9 +318,23 @@ impl AnimationHookPayload {
     fn write<W: Write + Seek>(&self, writer: &mut W) -> BinResult<()> {
         match self {
             Self::NoPayload => Ok(()),
-            Self::Raw(data) | Self::ReplaceObject(data) => {
+            Self::Raw(data) => {
                 writer.write_all(data)?;
                 Ok(())
+            }
+            Self::Attack(payload) => {
+                payload.part_index.write_le(writer)?;
+                payload.left_x.write_le(writer)?;
+                payload.left_y.write_le(writer)?;
+                payload.right_x.write_le(writer)?;
+                payload.right_y.write_le(writer)?;
+                payload.radius.write_le(writer)?;
+                payload.height.write_le(writer)
+            }
+            Self::Ethereal(payload) => i32::from(payload.ethereal).write_le(writer),
+            Self::ReplaceObject(payload) => {
+                payload.part_index.write_le(writer)?;
+                write_known_type_data_id(writer, payload.gfx_obj_id, GFX_OBJ_KNOWN_TYPE)
             }
             Self::SetOmega(payload) => {
                 payload.omega.x.write_le(writer)?;
@@ -413,22 +490,80 @@ fn read_sound_tweaked_payload<R: Read + Seek>(
     Ok(payload)
 }
 
-fn read_replace_object_payload<R: Read + Seek>(reader: &mut R) -> BinResult<Vec<u8>> {
-    let mut data = Vec::with_capacity(6);
-
-    let part_index = u16::read_le(reader)?;
-    data.extend_from_slice(&part_index.to_le_bytes());
-
-    // ACE reads the replacement part as ReadAsDataIDOfKnownType(0x01000000),
-    // which is stored as either a 2-byte or 4-byte packed suffix.
-    let upper = u16::read_le(reader)?;
-    data.extend_from_slice(&upper.to_le_bytes());
-    if (upper & 0x8000) != 0 {
-        let lower = u16::read_le(reader)?;
-        data.extend_from_slice(&lower.to_le_bytes());
+fn read_attack_cone_payload<R: Read + Seek>(reader: &mut R) -> BinResult<AttackConeHookPayload> {
+    let payload = AttackConeHookPayload {
+        part_index: i32::read_le(reader)?,
+        left_x: f32::read_le(reader)?,
+        left_y: f32::read_le(reader)?,
+        right_x: f32::read_le(reader)?,
+        right_y: f32::read_le(reader)?,
+        radius: f32::read_le(reader)?,
+        height: f32::read_le(reader)?,
+    };
+    let finite = [
+        payload.left_x,
+        payload.left_y,
+        payload.right_x,
+        payload.right_y,
+        payload.radius,
+        payload.height,
+    ]
+    .iter()
+    .all(|value| value.is_finite());
+    if !finite {
+        return Err(decode_error(
+            reader,
+            "Attack payload contains a non-finite value".to_owned(),
+        ));
     }
+    Ok(payload)
+}
 
-    Ok(data)
+fn read_ethereal_payload<R: Read + Seek>(reader: &mut R) -> BinResult<EtherealHookPayload> {
+    match i32::read_le(reader)? {
+        0 => Ok(EtherealHookPayload { ethereal: false }),
+        1 => Ok(EtherealHookPayload { ethereal: true }),
+        other => Err(decode_error(
+            reader,
+            format!("Ethereal payload is neither 0 nor 1: {other}"),
+        )),
+    }
+}
+
+fn read_replace_object_payload<R: Read + Seek>(
+    reader: &mut R,
+) -> BinResult<ReplaceObjectHookPayload> {
+    Ok(ReplaceObjectHookPayload {
+        part_index: u16::read_le(reader)?,
+        gfx_obj_id: read_known_type_data_id(reader, GFX_OBJ_KNOWN_TYPE)?,
+    })
+}
+
+/// Reads the wire's known-type-relative data id: a bare 15-bit offset, or a 30-bit offset split
+/// across two words when the high bit of the first word is set.
+///
+/// Mirrors ACE `BinaryReaderExtensions.ReadAsDataIDOfKnownType`.
+fn read_known_type_data_id<R: Read + Seek>(reader: &mut R, known_type: u32) -> BinResult<u32> {
+    let upper = u16::read_le(reader)?;
+    if upper & 0x8000 == 0 {
+        return Ok(known_type + u32::from(upper));
+    }
+    let lower = u16::read_le(reader)?;
+    Ok(known_type + ((u32::from(upper & 0x3FFF) << 16) | u32::from(lower)))
+}
+
+/// Inverse of `read_known_type_data_id`, choosing the same encoding width the reader accepts.
+fn write_known_type_data_id<W: Write + Seek>(
+    writer: &mut W,
+    data_id: u32,
+    known_type: u32,
+) -> BinResult<()> {
+    let relative = data_id.wrapping_sub(known_type);
+    if relative < 0x8000 {
+        return (relative as u16).write_le(writer);
+    }
+    (((relative >> 16) as u16) | 0x8000).write_le(writer)?;
+    (relative as u16).write_le(writer)
 }
 
 #[derive(Debug, Clone)]
@@ -852,6 +987,19 @@ mod tests {
         assert_eq!(unpacked.default_script_table, Some(0x0E00_0123));
     }
 
+    /// Reads a hook and re-emits it, so payload decoding and encoding are proven against the same
+    /// bytes rather than against each other.
+    fn round_trip_hook(bytes: Vec<u8>, expectation: &'static str) -> AnimationHook {
+        let hook = AnimationHook::read(&mut Cursor::new(bytes.clone())).expect(expectation);
+
+        let mut written = Vec::new();
+        hook.write(&mut Cursor::new(&mut written))
+            .expect("hook should re-emit");
+        assert_eq!(written, bytes, "{expectation}: re-emitted bytes differ");
+
+        hook
+    }
+
     #[test]
     fn animation_hook_replace_object_reads_compact_known_type_payload_without_desync() {
         let mut bytes = Vec::new();
@@ -860,14 +1008,19 @@ mod tests {
         bytes.extend_from_slice(&7u16.to_le_bytes());
         bytes.extend_from_slice(&0x1234u16.to_le_bytes());
 
-        let hook = AnimationHook::read(&mut Cursor::new(bytes))
-            .expect("replace-object hook with compact part id should parse");
+        let hook = round_trip_hook(
+            bytes,
+            "replace-object hook with compact part id should parse",
+        );
 
         assert_eq!(hook.hook_type, 5);
         assert_eq!(hook.direction, 0);
         assert_eq!(
             hook.payload,
-            AnimationHookPayload::ReplaceObject(vec![0x07, 0x00, 0x34, 0x12])
+            AnimationHookPayload::ReplaceObject(ReplaceObjectHookPayload {
+                part_index: 7,
+                gfx_obj_id: 0x0100_1234,
+            })
         );
     }
 
@@ -880,15 +1033,73 @@ mod tests {
         bytes.extend_from_slice(&0x8001u16.to_le_bytes());
         bytes.extend_from_slice(&0x2345u16.to_le_bytes());
 
-        let hook = AnimationHook::read(&mut Cursor::new(bytes))
-            .expect("replace-object hook with extended part id should parse");
+        let hook = round_trip_hook(
+            bytes,
+            "replace-object hook with extended part id should parse",
+        );
 
         assert_eq!(hook.hook_type, 5);
         assert_eq!(hook.direction, 1);
         assert_eq!(
             hook.payload,
-            AnimationHookPayload::ReplaceObject(vec![0x09, 0x00, 0x01, 0x80, 0x45, 0x23])
+            AnimationHookPayload::ReplaceObject(ReplaceObjectHookPayload {
+                part_index: 9,
+                gfx_obj_id: 0x0101_2345,
+            })
         );
+    }
+
+    #[test]
+    fn animation_hook_attack_reads_typed_cone_with_the_whole_object_sentinel() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&3u32.to_le_bytes());
+        bytes.extend_from_slice(&0i32.to_le_bytes());
+        bytes.extend_from_slice(&(-1i32).to_le_bytes());
+        for value in [-0.5f32, 0.25, 0.75, -0.125, 1.5, 2.25] {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+
+        let hook = round_trip_hook(bytes, "attack hook should parse");
+
+        assert_eq!(
+            hook.payload,
+            AnimationHookPayload::Attack(AttackConeHookPayload {
+                part_index: -1,
+                left_x: -0.5,
+                left_y: 0.25,
+                right_x: 0.75,
+                right_y: -0.125,
+                radius: 1.5,
+                height: 2.25,
+            })
+        );
+    }
+
+    #[test]
+    fn animation_hook_ethereal_reads_boolean_payload() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&6u32.to_le_bytes());
+        bytes.extend_from_slice(&(-1i32).to_le_bytes());
+        bytes.extend_from_slice(&1i32.to_le_bytes());
+
+        let hook = round_trip_hook(bytes, "ethereal hook should parse");
+
+        assert_eq!(hook.direction, -1);
+        assert_eq!(
+            hook.payload,
+            AnimationHookPayload::Ethereal(EtherealHookPayload { ethereal: true })
+        );
+    }
+
+    #[test]
+    fn animation_hook_ethereal_rejects_values_outside_the_boolean_range() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&6u32.to_le_bytes());
+        bytes.extend_from_slice(&0i32.to_le_bytes());
+        bytes.extend_from_slice(&2i32.to_le_bytes());
+
+        AnimationHook::read(&mut Cursor::new(bytes))
+            .expect_err("an ethereal payload of 2 should not decode as a bool");
     }
 
     #[test]

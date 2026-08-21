@@ -262,7 +262,7 @@ async fn later_manual_drive_wins_over_queued_autonomous_drive() {
         now,
     );
     movement.enqueue_drive_intent(
-        PlayerDriveIntent::ManualHeld(MotionState::builder().run().forward().build()),
+        PlayerDriveIntent::ManualHeld(CharacterDrive::builder().run().forward().build()),
         now,
     );
 
@@ -278,7 +278,7 @@ async fn later_manual_drive_wins_over_queued_autonomous_drive() {
     assert!(matches!(
         movement.active_drive,
         Some(ActiveDriveState {
-            intent: ActiveDriveIntent::Manual(MotionState {
+            intent: ActiveDriveIntent::Manual(CharacterDrive {
                 gait: Gait::Run,
                 longitudinal: Some(LongitudinalMotion::Forward),
                 ..
@@ -377,7 +377,11 @@ fn motion_state_raw_motion_state_adds_right_turn_when_requested() {
 
     let raw_motion_state = build_motion_state_raw_motion_state(
         &world,
-        MotionState::builder().run().forward().turn_right().build(),
+        CharacterDrive::builder()
+            .run()
+            .forward()
+            .turn_right()
+            .build(),
         MotionStyle::PreserveServer,
     );
 
@@ -406,7 +410,7 @@ fn motion_state_raw_motion_state_uses_player_run_rate_scalar_for_forward_speed()
 
     let raw_motion_state = build_motion_state_raw_motion_state(
         &world,
-        MotionState::builder().run().forward().build(),
+        CharacterDrive::builder().run().forward().build(),
         MotionStyle::PreserveServer,
     );
 
@@ -432,7 +436,11 @@ fn motion_state_raw_motion_state_adds_left_turn_when_requested() {
 
     let raw_motion_state = build_motion_state_raw_motion_state(
         &world,
-        MotionState::builder().run().forward().turn_left().build(),
+        CharacterDrive::builder()
+            .run()
+            .forward()
+            .turn_left()
+            .build(),
         MotionStyle::PreserveServer,
     );
 
@@ -460,7 +468,7 @@ fn motion_state_raw_motion_state_omits_turn_when_not_requested() {
 
     let raw_motion_state = build_motion_state_raw_motion_state(
         &world,
-        MotionState::builder().run().forward().build(),
+        CharacterDrive::builder().run().forward().build(),
         MotionStyle::PreserveServer,
     );
 
@@ -493,7 +501,7 @@ fn current_local_solve_body_input_uses_shared_resolved_manual_run_speed() {
 
     let mut movement = MovementSystem::new();
     movement.active_drive = Some(ActiveDriveState::manual(
-        MotionState::builder().run().forward().build(),
+        CharacterDrive::builder().run().forward().build(),
         None,
     ));
 
@@ -525,7 +533,7 @@ fn current_local_solve_body_input_uses_shared_turn_omega_for_turn_in_place() {
 
     let mut movement = MovementSystem::new();
     movement.active_drive = Some(ActiveDriveState::manual(
-        MotionState::builder().walk().turn_left().build(),
+        CharacterDrive::builder().walk().turn_left().build(),
         None,
     ));
 
@@ -554,7 +562,11 @@ fn current_local_solve_body_input_requires_authoritative_spawn_pose() {
 fn stop_pulse_is_still_required_when_server_motion_is_active() {
     let mut movement = MovementSystem::new();
     movement.note_server_motion_sent(server_motion_intent(
-        MotionState::builder().run().forward().turn_right().build(),
+        CharacterDrive::builder()
+            .run()
+            .forward()
+            .turn_right()
+            .build(),
         MotionStyle::PreserveServer,
     ));
 
@@ -565,7 +577,11 @@ fn stop_pulse_is_still_required_when_server_motion_is_active() {
 fn note_server_motion_cleared_resets_drive_tracking() {
     let mut movement = MovementSystem::new();
     movement.note_server_motion_sent(server_motion_intent(
-        MotionState::builder().run().forward().turn_right().build(),
+        CharacterDrive::builder()
+            .run()
+            .forward()
+            .turn_right()
+            .build(),
         MotionStyle::PreserveServer,
     ));
 
@@ -579,14 +595,24 @@ fn note_server_motion_cleared_resets_drive_tracking() {
 fn unchanged_motion_intent_does_not_require_server_refresh() {
     let mut movement = MovementSystem::new();
     movement.note_server_motion_sent(server_motion_intent(
-        MotionState::builder().run().forward().turn_right().build(),
+        CharacterDrive::builder()
+            .run()
+            .forward()
+            .turn_right()
+            .build(),
         MotionStyle::PreserveServer,
     ));
 
-    assert!(!movement.should_send_motion_state_pulse(
-        MotionState::builder().run().forward().turn_right().build(),
-        MotionStyle::PreserveServer,
-    ));
+    assert!(
+        !movement.should_send_motion_state_pulse(
+            CharacterDrive::builder()
+                .run()
+                .forward()
+                .turn_right()
+                .build(),
+            MotionStyle::PreserveServer,
+        )
+    );
 }
 
 #[test]
@@ -712,7 +738,7 @@ async fn stop_after_active_drive_sends_stop_pulse_then_final_position_sync() {
 
     movement
         .execute_motion_state_at(
-            MotionState::builder().run().forward().build(),
+            CharacterDrive::builder().run().forward().build(),
             &mut world,
             &mut session,
             Instant::now(),
@@ -753,7 +779,11 @@ async fn stop_without_active_drive_does_not_send_final_position_sync() {
     let mut movement = MovementSystem::new();
     let mut session = Session::new_test();
     movement.note_server_motion_sent(server_motion_intent(
-        MotionState::builder().run().forward().turn_right().build(),
+        CharacterDrive::builder()
+            .run()
+            .forward()
+            .turn_right()
+            .build(),
         MotionStyle::PreserveServer,
     ));
 
@@ -787,7 +817,11 @@ async fn unchanged_motion_state_requests_do_not_resend_motion_pulses() {
     let mut movement = MovementSystem::new();
     let mut session = Session::new_test();
     let start = Instant::now();
-    let state = MotionState::builder().run().forward().turn_right().build();
+    let state = CharacterDrive::builder()
+        .run()
+        .forward()
+        .turn_right()
+        .build();
 
     movement
         .execute_motion_state_with_metadata_at(
@@ -833,7 +867,7 @@ async fn held_run_input_ticks_once_for_wire_and_keeps_local_vectors_consistent()
     let start = Instant::now();
 
     movement.enqueue_drive_intent(
-        PlayerDriveIntent::ManualHeld(MotionState::builder().run().forward().build()),
+        PlayerDriveIntent::ManualHeld(CharacterDrive::builder().run().forward().build()),
         start,
     );
 
@@ -887,7 +921,7 @@ async fn pulsed_run_input_expires_on_tick_and_sends_stop_transition() {
 
     movement.enqueue_drive_intent(
         PlayerDriveIntent::ManualPulse {
-            state: MotionState::builder().run().forward().build(),
+            state: CharacterDrive::builder().run().forward().build(),
             duration: Duration::from_millis(50),
         },
         start,
@@ -1005,7 +1039,7 @@ async fn stop_input_clears_held_run_and_sends_stop_transition() {
     let start = Instant::now();
 
     movement.enqueue_drive_intent(
-        PlayerDriveIntent::ManualHeld(MotionState::builder().run().forward().build()),
+        PlayerDriveIntent::ManualHeld(CharacterDrive::builder().run().forward().build()),
         start,
     );
     movement
@@ -1207,7 +1241,7 @@ async fn manual_motion_updates_server_motion_tracking_state() {
     let mut movement = MovementSystem::new();
     let mut session = Session::new_test();
     let start = Instant::now();
-    let state = MotionState::builder().run().forward().build();
+    let state = CharacterDrive::builder().run().forward().build();
 
     movement.enqueue_drive_intent(PlayerDriveIntent::ManualHeld(state), start);
     movement
@@ -1604,7 +1638,11 @@ async fn stop_without_active_drive_keeps_autonomous_position_heartbeat_armed() {
     let mut session = Session::new_test();
     let now = Instant::now();
     movement.note_server_motion_sent(server_motion_intent(
-        MotionState::builder().run().forward().turn_right().build(),
+        CharacterDrive::builder()
+            .run()
+            .forward()
+            .turn_right()
+            .build(),
         MotionStyle::PreserveServer,
     ));
     movement.refresh_autonomous_position_heartbeat_schedule(now, &world);

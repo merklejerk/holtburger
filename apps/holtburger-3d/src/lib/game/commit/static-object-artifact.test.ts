@@ -211,6 +211,7 @@ function litResident(x: number, y: number, z: number) {
 			animationId: null,
 			physicsScriptId: null,
 			physicsScriptTableId: null,
+			motionTableId: null,
 			soundTableId: null,
 		},
 		placement: {

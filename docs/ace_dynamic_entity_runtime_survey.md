@@ -216,7 +216,7 @@ operation requires a positive speed; template loading itself does not invent a f
 The regenerated `.hwc` version-1 payload retains both fields. Linear and angular velocity vectors
 remain live entity state and do not belong in the template catalog.
 
-The derived `MotionKinematics` asset contains 57 setup defaults, 436 motion tables, and 18,451 cyclic
+The motion representation covers 57 setup defaults, 436 motion tables, and 18,451 cyclic
 stance/command entries. Of those entries, 1,822 carry velocity with magnitude 0-15.99999 m/s and
 1,056 carry omega with magnitude 1-18 rad/s. ACE and retail still cap live velocity at 50 m/s.
 Gravity contributes the proven 9.8 m/s² acceleration; protocol/live state may carry another finite
@@ -394,7 +394,8 @@ There is no named consumer requiring a new broadcast channel, acknowledgement pr
 state store.
 
 Current `EntityMotionSnapshot` covers stance, simultaneous forward/sidestep/turn commands and speeds,
-plus turn-to-heading/object directives. `MotionKinematics` resolves cycle velocity/omega. It is enough
+plus turn-to-heading/object directives. The `MotionSequence` contract resolves cycle velocity/omega,
+along with the authored root track and clip windows the reduced asset used to discard. It is enough
 for spawn-at-rest and basic stand/move/turn/stop. It does not represent move-to-position/object path
 progress, animation transition phase, queued sequence state, start frame, or framerate. Those are
 shared locomotion gaps, not reasons to widen the dynamic-entity creation contract. The active

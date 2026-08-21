@@ -4,7 +4,7 @@ use super::{
     SpatialSolveRequest,
 };
 use holtburger_common::position::{METERS_PER_LANDBLOCK, WorldPosition};
-use holtburger_common::{Guid, Quaternion, Vector3};
+use holtburger_common::{Guid, Quaternion, RigidTransform, Vector3};
 use std::f32::consts::{PI, TAU};
 use std::time::Duration;
 
@@ -13,19 +13,20 @@ const EPSILON: f32 = 1e-4;
 fn velocity_kinematics_for_input(input: &SolveBodyInput) -> (Vector3, Vector3) {
     match input.basis {
         Some(SolveProjectionBasis::Velocity { velocity, omega }) => (velocity, omega),
-        Some(SolveProjectionBasis::GroundedMotion { .. }) | None => {
+        Some(SolveProjectionBasis::AuthoredDrive { .. }) | None => {
             (Vector3::zero(), Vector3::zero())
         }
     }
 }
 
-fn grounded_kinematics_for_input(input: &SolveBodyInput) -> Option<(Vector3, Vector3)> {
+/// The authored offset this body is driving with, if it has one.
+///
+/// Both arms are named rather than wildcarded so a future basis variant fails to compile here
+/// instead of being absorbed as `None`, which would leave the body motionless with no diagnostic.
+fn authored_drive_for_input(input: &SolveBodyInput) -> Option<RigidTransform> {
     match input.basis {
-        Some(SolveProjectionBasis::GroundedMotion {
-            desired_local_velocity,
-            desired_local_omega,
-        }) => Some((desired_local_velocity, desired_local_omega)),
-        _ => None,
+        Some(SolveProjectionBasis::AuthoredDrive { offset }) => Some(offset),
+        Some(SolveProjectionBasis::Velocity { .. }) | None => None,
     }
 }
 
@@ -211,47 +212,72 @@ fn signed_heading_delta(current_heading: f32, desired_heading: f32) -> f32 {
     delta
 }
 
-fn world_velocity_from_local_basis(local_velocity: Vector3, heading: f32) -> Vector3 {
-    let forward = Vector3::new(-heading.cos(), heading.sin(), 0.0);
-    let right = Vector3::new(heading.sin(), heading.cos(), 0.0);
-
-    (forward * local_velocity.x)
-        + (right * local_velocity.y)
-        + Vector3::new(0.0, 0.0, local_velocity.z)
-}
-
-fn advance_grounded_body_kinematics(
+/// Advances a body driven by an authored rigid offset.
+///
+/// This solver has no collision, so it reduces the offset the way retail reduces its own accepted
+/// path for the following tick: displacement over `dt` becomes the body's velocity
+/// (`acclient.c:310890-310905`). That is an in-character interpretation for a solver at this
+/// fidelity, and it is a reduction of an exact per-tick quantity rather than of the content.
+fn advance_authored_body_kinematics(
     input: &SolveBodyInput,
-    desired_local_velocity: Vector3,
-    desired_local_omega: Vector3,
+    offset: RigidTransform,
     dt: Duration,
 ) -> SolvedBodyKinematics {
     let dt_secs = dt.as_secs_f32().max(0.0);
-    let current_heading = input.pose.rotation.to_heading();
-    let world_velocity = world_velocity_from_local_basis(desired_local_velocity, current_heading);
+    let gated = gate_authored_offset(offset, input.contact, 1.0);
+    let world_delta = input.pose.rotation.rotate_vector(gated.translation);
+    let next_rotation = input.pose.rotation.multiply(&gated.rotation);
+    let heading_delta =
+        signed_heading_delta(input.pose.rotation.to_heading(), next_rotation.to_heading());
 
     if dt_secs <= f32::EPSILON {
         return SolvedBodyKinematics {
             body_id: input.body_id,
             pose: input.pose,
-            velocity: world_velocity,
-            omega: desired_local_omega,
+            velocity: Vector3::zero(),
+            omega: Vector3::zero(),
             contact: input.contact,
             projection_state: None,
         };
     }
 
-    let next_heading = normalize_heading(current_heading + (desired_local_omega.z * dt_secs));
-    let mut next_pose = project_pose_by_velocity(input.pose, world_velocity, dt_secs, None);
-    next_pose.rotation = Quaternion::from_heading(next_heading);
+    let velocity = world_delta / dt_secs;
+    let mut next_pose = project_pose_by_offset(input.pose, world_delta, None);
+    next_pose.rotation = Quaternion::from_heading(next_rotation.to_heading());
 
     SolvedBodyKinematics {
         body_id: input.body_id,
         pose: next_pose,
-        velocity: world_velocity,
-        omega: desired_local_omega,
+        velocity,
+        omega: Vector3::new(0.0, 0.0, heading_delta / dt_secs),
         contact: input.contact,
         projection_state: None,
+    }
+}
+
+/// Applies retail's support gate to an authored offset.
+///
+/// `CPhysicsObj::UpdatePositionInternal` (`acclient.c:308282-308292`) multiplies the accumulated
+/// offset's origin by the object's scale while the body has walkable support and by **zero**
+/// otherwise, and never touches the rotation either way. So an airborne body keeps turning under
+/// authored rotation while contributing no authored translation, and object scale multiplies
+/// translation only.
+///
+/// The gate is evaluated once per update on the already-composed offset, so a support change during
+/// the physics step does not retroactively re-gate this tick.
+pub fn gate_authored_offset(
+    offset: RigidTransform,
+    contact: ContactState,
+    object_scale: f32,
+) -> RigidTransform {
+    let admitted = matches!(contact, ContactState::Grounded);
+    RigidTransform {
+        translation: if admitted {
+            offset.translation * object_scale
+        } else {
+            Vector3::zero()
+        },
+        rotation: offset.rotation,
     }
 }
 
@@ -384,15 +410,8 @@ impl SpatialPhysics for BasicSpatialPhysics {
                     && let Some(control) = request.local_drive.as_ref()
                 {
                     solve_self_player_local_drive(body, control, request.dt, scene)
-                } else if let Some((desired_local_velocity, desired_local_omega)) =
-                    grounded_kinematics_for_input(body)
-                {
-                    advance_grounded_body_kinematics(
-                        body,
-                        desired_local_velocity,
-                        desired_local_omega,
-                        request.dt,
-                    )
+                } else if let Some(offset) = authored_drive_for_input(body) {
+                    advance_authored_body_kinematics(body, offset, request.dt)
                 } else {
                     advance_body_kinematics(body, request.dt)
                 }

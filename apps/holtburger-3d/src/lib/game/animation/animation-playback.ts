@@ -2,7 +2,30 @@ import type { PreparedAnimation } from "./animation-asset-repository";
 import { createRotationMat4 } from "../math/matrices";
 import { Mat4, Quat, Vec3 } from "../math/types";
 
-export type PlaybackDirection = "forward" | "backward";
+/**
+ * Retail's smallest framerate that advances a cursor (`acclient.c:327122`).
+ *
+ * Mirrored from the host sequence runtime so a reversed clip is entered at the same frame on both
+ * ends of the projection. Unrelated to the rotation epsilon further down, which happens to share
+ * the value.
+ */
+const ADVANCING_FRAMERATE_EPSILON = 0.0002;
+
+/**
+ * One prepared animation traversed over an inclusive frame window at a signed rate.
+ *
+ * The three facts are inseparable: a window only means something against the animation it indexes,
+ * and the rate's sign decides which end of that window playback enters at. A setup-default
+ * animation is the whole-range case; a motion table names every other window.
+ */
+export interface PlayingClip {
+	readonly animation: PreparedAnimation;
+	/** Inclusive traversal bounds within the animation's frames. */
+	readonly lowFrame: number;
+	readonly highFrame: number;
+	/** Negative traverses the window backwards; zero holds the entry frame. */
+	readonly framesPerSecond: number;
+}
 
 /** Pure cyclic traversal result; hooks belong to departed frames, never interpolation endpoints. */
 export interface CyclicFrameAdvance {
@@ -10,29 +33,74 @@ export interface CyclicFrameAdvance {
 	readonly departedFrames: readonly number[];
 }
 
-/** Traverse one cyclic clip iteratively while preserving retail's seam-hook exclusions. */
-export function advanceCyclicFrame(
-	framePosition: number,
-	elapsedFrames: number,
-	frameCount: number,
-	direction: PlaybackDirection,
-): CyclicFrameAdvance {
-	if (!Number.isFinite(framePosition) || !Number.isFinite(elapsedFrames))
-		throw new Error("Animation frame traversal requires finite values.");
-	if (!Number.isInteger(frameCount) || frameCount <= 0)
+/** Bind a traversal window to the animation it indexes, rejecting one that does not fit. */
+export function playingClip(
+	animation: PreparedAnimation,
+	lowFrame: number,
+	highFrame: number,
+	framesPerSecond: number,
+): PlayingClip {
+	if (!Number.isInteger(lowFrame) || !Number.isInteger(highFrame))
+		throw new Error(`Clip window for ${animation.id} must be whole frames.`);
+	if (lowFrame < 0 || lowFrame > highFrame || highFrame >= animation.frameCount)
 		throw new Error(
-			"Animation frame traversal requires a positive frame count.",
+			`Clip window [${lowFrame}, ${highFrame}] does not fit animation ${animation.id}'s ${animation.frameCount} frames.`,
 		);
-	if (elapsedFrames < 0)
+	if (!Number.isFinite(framesPerSecond))
+		throw new Error(`Clip rate for ${animation.id} must be finite.`);
+	return { animation, framesPerSecond, highFrame, lowFrame };
+}
+
+/** The whole animation forward at its authored rate, which is the setup-default resident's clip. */
+export function wholeAnimationClip(animation: PreparedAnimation): PlayingClip {
+	return playingClip(
+		animation,
+		0,
+		animation.frameCount - 1,
+		animation.framesPerSecond,
+	);
+}
+
+/**
+ * Frame playback enters a clip at, and returns to when it laps.
+ *
+ * A reversed clip starts just inside the high frame rather than on it, so the first departure
+ * leaves the high frame rather than skipping it — retail's `AnimSequenceNode::get_starting_frame`
+ * (`acclient.c:327012-327021`), matched here so the host sequence and the rendered clip agree on
+ * the entry pose without exchanging a frame number.
+ */
+export function clipEntryFrame(clip: PlayingClip): number {
+	return clip.framesPerSecond >= 0
+		? clip.lowFrame
+		: clip.highFrame + 1 - ADVANCING_FRAMERATE_EPSILON;
+}
+
+/**
+ * Traverse one clip's window iteratively while preserving retail's seam-hook exclusions.
+ *
+ * Reaching the far bound laps back to the entry frame rather than stopping. A motion table's
+ * looping clip is projected once and never re-sent, so holding at the bound would freeze every
+ * idle; the host's own sequence laps a lone cyclic node exactly this way. A one-shot transition
+ * laps too, for at most the one host tick before the successor clip arrives.
+ */
+export function advanceCyclicFrame(
+	clip: PlayingClip,
+	framePosition: number,
+	elapsedSeconds: number,
+): CyclicFrameAdvance {
+	if (!Number.isFinite(framePosition) || !Number.isFinite(elapsedSeconds))
+		throw new Error("Animation frame traversal requires finite values.");
+	if (elapsedSeconds < 0)
 		throw new Error("Animation frame traversal cannot consume negative time.");
-	let position = modulo(framePosition, frameCount);
-	let remaining = elapsedFrames;
+	let position = normalizeClipFrame(clip, framePosition);
+	let remaining = Math.abs(elapsedSeconds * clip.framesPerSecond);
+	const forward = clip.framesPerSecond >= 0;
 	const departedFrames: number[] = [];
 	while (remaining > 0) {
-		if (direction === "forward") {
-			const seamDistance = frameCount - position;
+		if (forward) {
+			const seamDistance = clip.highFrame + 1 - position;
 			const end =
-				remaining >= seamDistance ? frameCount - 1 : position + remaining;
+				remaining >= seamDistance ? clip.highFrame : position + remaining;
 			for (
 				let frame = Math.floor(position);
 				frame < Math.floor(end);
@@ -43,9 +111,9 @@ export function advanceCyclicFrame(
 			if (remaining < seamDistance)
 				return { departedFrames, framePosition: end };
 			remaining -= seamDistance;
-			position = 0;
 		} else {
-			if (remaining <= position) {
+			const seamDistance = position - clip.lowFrame;
+			if (remaining <= seamDistance) {
 				const end = position - remaining;
 				for (
 					let frame = Math.floor(position);
@@ -56,24 +124,30 @@ export function advanceCyclicFrame(
 				}
 				return { departedFrames, framePosition: end };
 			}
-			for (let frame = Math.floor(position); frame > 0; frame -= 1)
+			for (
+				let frame = Math.floor(position);
+				frame > clip.lowFrame;
+				frame -= 1
+			) {
 				departedFrames.push(frame);
-			remaining -= position;
-			position = frameCount - 1;
+			}
+			remaining -= seamDistance;
 		}
+		position = clipEntryFrame(clip);
 	}
 	return { departedFrames, framePosition: position };
 }
 
 /** Sample frame-major rigid part poses without changing semantic frame or hook state. */
 export function sampleAnimationPose(
-	animation: PreparedAnimation,
+	clip: PlayingClip,
 	framePosition: number,
 ): readonly Mat4[] {
-	const normalized = modulo(framePosition, animation.frameCount);
+	const { animation } = clip;
+	const normalized = normalizeClipFrame(clip, framePosition);
 	const lowerFrame = Math.floor(normalized);
 	// Part indices need not identify spatially continuous geometry across a cyclic seam.
-	const upperFrame = Math.min(lowerFrame + 1, animation.frameCount - 1);
+	const upperFrame = Math.min(lowerFrame + 1, clip.highFrame);
 	const fraction = normalized - lowerFrame;
 	const parts: Mat4[] = [];
 	for (let part = 0; part < animation.partCount; part += 1) {
@@ -86,6 +160,12 @@ export function sampleAnimationPose(
 		parts.push(interpolateRigidTransform(lower, upper, fraction));
 	}
 	return parts;
+}
+
+/** Fold any position back into `[lowFrame, highFrame + 1)`, so traversal is total. */
+function normalizeClipFrame(clip: PlayingClip, framePosition: number): number {
+	const span = clip.highFrame - clip.lowFrame + 1;
+	return clip.lowFrame + modulo(framePosition - clip.lowFrame, span);
 }
 
 /** Interpolate translation linearly and orientation spherically between two rigid transforms. */
@@ -122,9 +202,13 @@ export function rotationVectorQuaternion(rotation: Vec3): Quat {
 	);
 }
 
+/** Smallest rotation vector retail's `Frame::grotate` treats as a rotation at all. */
+const ROTATION_VECTOR_EPSILON = 0.0002;
+
 /** Retail `Frame::grotate` ignores committed rotation vectors below its authored epsilon. */
 export function retailRotationVectorQuaternion(rotation: Vec3): Quat {
-	return Math.hypot(rotation.x, rotation.y, rotation.z) < 0.0002
+	return Math.hypot(rotation.x, rotation.y, rotation.z) <
+		ROTATION_VECTOR_EPSILON
 		? Quat.identity()
 		: rotationVectorQuaternion(rotation);
 }

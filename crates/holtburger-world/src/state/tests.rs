@@ -12,6 +12,7 @@ use crate::{
     SpatialBodyEvent, SpatialBodyId, SpatialSampleMode, WorldBootstrap,
 };
 
+use crate::state::motion_resolution::test_support::{FixtureCycle, explicit_motion_catalog};
 use crate::stats::{Skill, SkillType, TrainingLevel};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
@@ -21,14 +22,9 @@ use holtburger_common::properties::{
 use holtburger_common::{
     CharacterOption, CharacterOptions1, CharacterOptions2, ParentLocation, Placement, Quaternion,
 };
-use holtburger_content::SoulEmoteCatalog;
-use holtburger_dat::file_type::{
-    MotionCommandKinematics, MotionKinematics, MotionKinematicsTable, MotionTable, SkillTable,
-    SpellTable, XpTable,
-};
-use holtburger_dat::{
-    DatFileType, EOR_PORTAL_NAMESPACE, HOLTBURGER_CORE_NAMESPACE, HbaReader, HbaWriter,
-};
+use holtburger_content::{MotionSequenceCatalog, SoulEmoteCatalog};
+use holtburger_dat::file_type::{MotionTable, SkillTable, SpellTable, XpTable};
+use holtburger_dat::{DatFileType, EOR_PORTAL_NAMESPACE, HbaReader, HbaWriter};
 use holtburger_protocol::messages::game_event::{GameEvent, GameEventMessage};
 use holtburger_protocol::messages::movement::{
     InterpretedMotionCommand, InterpretedMotionState, MotionStance, MovementStateFlags,
@@ -47,14 +43,6 @@ use tempfile::tempdir;
 
 fn repo_assets_hba_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../dats/assets.hba")
-}
-
-fn test_motion_kinematics_bytes() -> Vec<u8> {
-    let mut bytes = std::io::Cursor::new(Vec::new());
-    MotionKinematics::new()
-        .write(&mut bytes)
-        .expect("test motion kinematics asset should write");
-    bytes.into_inner()
 }
 
 fn write_micro_portal_hba(path: &Path) -> bool {
@@ -93,82 +81,56 @@ fn write_micro_portal_hba(path: &Path) -> bool {
     }
 
     writer
-        .add(
-            HOLTBURGER_CORE_NAMESPACE,
-            MotionKinematics::FILE_ID,
-            DatFileType::MotionKinematics as u32,
-            test_motion_kinematics_bytes(),
-        )
-        .expect("motion kinematics table should be added to test HBA");
-
-    writer
         .write(path)
         .expect("micro portal.hba should be written");
 
     true
 }
 
-fn motion_kinematics_asset_with_table(
+fn motion_catalog_with_table(
     motion_table_id: u32,
     default_style: u32,
     walk_velocity: Option<Vector3>,
     run_velocity: Option<Vector3>,
     turn_left_omega: Option<Vector3>,
     turn_right_omega: Option<Vector3>,
-) -> MotionKinematics {
-    let mut asset = MotionKinematics::new();
-    let mut table = MotionKinematicsTable::new(motion_table_id, default_style);
-
-    if let Some(velocity) = walk_velocity {
-        table.insert_cycle_kinematics(
-            default_style,
-            MotionTable::WALK_FORWARD_COMMAND,
-            MotionCommandKinematics {
-                velocity: Some(velocity),
-                omega: None,
-            },
-        );
-    }
-
-    if let Some(velocity) = run_velocity {
-        table.insert_cycle_kinematics(
-            default_style,
-            MotionTable::RUN_FORWARD_COMMAND,
-            MotionCommandKinematics {
-                velocity: Some(velocity),
-                omega: None,
-            },
-        );
-    }
-
-    if let Some(omega) = turn_left_omega {
-        table.insert_cycle_kinematics(
-            default_style,
-            MotionTable::TURN_LEFT_COMMAND,
-            MotionCommandKinematics {
-                velocity: None,
-                omega: Some(omega),
-            },
-        );
-    }
-
-    if let Some(omega) = turn_right_omega {
-        table.insert_cycle_kinematics(
-            default_style,
-            MotionTable::TURN_RIGHT_COMMAND,
-            MotionCommandKinematics {
-                velocity: None,
-                omega: Some(omega),
-            },
-        );
-    }
-
-    asset.motion_tables.insert(motion_table_id, table);
-    asset
+) -> MotionSequenceCatalog {
+    motion_catalog_with_setup_defaults(
+        motion_table_id,
+        default_style,
+        walk_velocity,
+        run_velocity,
+        turn_left_omega,
+        turn_right_omega,
+        [],
+    )
 }
 
-fn test_motion_kinematics_asset(motion_table_id: u32) -> MotionKinematics {
-    motion_kinematics_asset_with_table(
+fn motion_catalog_with_setup_defaults(
+    motion_table_id: u32,
+    default_style: u32,
+    walk_velocity: Option<Vector3>,
+    run_velocity: Option<Vector3>,
+    turn_left_omega: Option<Vector3>,
+    turn_right_omega: Option<Vector3>,
+    setup_defaults: impl IntoIterator<Item = (u32, u32)>,
+) -> MotionSequenceCatalog {
+    let cycles = [
+        walk_velocity
+            .map(|velocity| FixtureCycle::moving(MotionTable::WALK_FORWARD_COMMAND, velocity)),
+        run_velocity
+            .map(|velocity| FixtureCycle::moving(MotionTable::RUN_FORWARD_COMMAND, velocity)),
+        turn_left_omega.map(|omega| FixtureCycle::turning(MotionTable::TURN_LEFT_COMMAND, omega)),
+        turn_right_omega.map(|omega| FixtureCycle::turning(MotionTable::TURN_RIGHT_COMMAND, omega)),
+    ]
+    .into_iter()
+    .flatten();
+
+    explicit_motion_catalog(motion_table_id, default_style, cycles, setup_defaults)
+}
+
+fn test_motion_catalog(motion_table_id: u32) -> MotionSequenceCatalog {
+    motion_catalog_with_table(
         motion_table_id,
         MotionStance::NonCombat as u32,
         Some(Vector3::new(1.0, 0.0, 0.0)),
@@ -202,7 +164,7 @@ fn resolve_player_motion_table_profile_prefers_direct_motion_table_property() {
 
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0001);
-    state.set_motion_kinematics(test_motion_kinematics_asset(motion_table_id));
+    state.set_motion_sequences(test_motion_catalog(motion_table_id));
     state.player.guid = player_guid;
 
     let mut player = Entity::new(player_guid, "Player".to_string(), WorldPosition::default());
@@ -240,11 +202,15 @@ fn resolve_player_motion_table_profile_falls_back_to_setup_model_default() {
 
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0002);
-    let mut motion_kinematics = test_motion_kinematics_asset(motion_table_id);
-    motion_kinematics
-        .setup_model_defaults
-        .insert(setup_model_id, motion_table_id);
-    state.set_motion_kinematics(motion_kinematics);
+    state.set_motion_sequences(motion_catalog_with_setup_defaults(
+        motion_table_id,
+        MotionStance::NonCombat as u32,
+        Some(Vector3::new(1.0, 0.0, 0.0)),
+        Some(Vector3::new(2.5, 0.0, 0.0)),
+        Some(Vector3::new(0.0, 0.0, -1.5)),
+        Some(Vector3::new(0.0, 0.0, 1.5)),
+        [(setup_model_id, motion_table_id)],
+    ));
     state.player.guid = player_guid;
 
     let mut player = Entity::new(player_guid, "Player".to_string(), WorldPosition::default());
@@ -275,12 +241,12 @@ fn resolve_player_motion_table_profile_falls_back_to_setup_model_default() {
 }
 
 #[test]
-fn resolve_player_motion_table_profile_reads_run_speed_from_required_motion_kinematics_asset() {
+fn resolve_player_motion_table_profile_reads_run_speed_from_the_motion_contract() {
     let motion_table_id = 0x0900_0023;
 
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0004);
-    state.set_motion_kinematics(test_motion_kinematics_asset(motion_table_id));
+    state.set_motion_sequences(test_motion_catalog(motion_table_id));
     state.player.guid = player_guid;
 
     let mut player = Entity::new(player_guid, "Player".to_string(), WorldPosition::default());
@@ -336,7 +302,7 @@ fn resolve_self_movement_capabilities_combines_run_rate_and_motion_table_kinemat
 
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0100);
-    state.set_motion_kinematics(test_motion_kinematics_asset(motion_table_id));
+    state.set_motion_sequences(test_motion_catalog(motion_table_id));
     state.player.guid = player_guid;
     seed_player_run_skill(&mut state, 800);
 
@@ -398,7 +364,7 @@ fn resolve_self_movement_capabilities_reports_missing_required_kinematics() {
 
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0101);
-    state.set_motion_kinematics(motion_kinematics_asset_with_table(
+    state.set_motion_sequences(motion_catalog_with_table(
         motion_table_id,
         MotionStance::NonCombat as u32,
         Some(Vector3::new(1.0, 0.0, 0.0)),
@@ -438,7 +404,7 @@ fn resolve_self_movement_capabilities_falls_back_when_walk_velocity_is_missing()
 
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0102);
-    state.set_motion_kinematics(motion_kinematics_asset_with_table(
+    state.set_motion_sequences(motion_catalog_with_table(
         motion_table_id,
         MotionStance::NonCombat as u32,
         None,
@@ -469,7 +435,7 @@ fn resolve_self_movement_capabilities_derives_left_turn_from_right_turn_omega() 
     let motion_table_id: u32 = 0x0900_0024;
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0103);
-    state.set_motion_kinematics(motion_kinematics_asset_with_table(
+    state.set_motion_sequences(motion_catalog_with_table(
         motion_table_id,
         MotionStance::NonCombat as u32,
         Some(Vector3::new(1.0, 0.0, 0.0)),
@@ -512,7 +478,7 @@ fn resolve_body_projection_input_uses_grounded_motion_snapshot_without_vector_up
     };
 
     let mut state = WorldState::synthetic();
-    state.set_motion_kinematics(test_motion_kinematics_asset(motion_table_id));
+    state.set_motion_sequences(test_motion_catalog(motion_table_id));
 
     let mut entity = Entity::new(guid, "Remote".to_string(), pose);
     entity.properties.set_did_prop(
@@ -548,19 +514,24 @@ fn resolve_body_projection_input_uses_grounded_motion_snapshot_without_vector_up
             .apply_runtime_body_contact(SpatialBodyId::Entity(guid), ContactState::Grounded)
     );
 
+    // Playback is advanced once per tick before any basis is read from it.
+    state.advance_authored_motion(std::time::Duration::from_secs_f32(0.5));
+
     let input = state
         .resolve_body_projection_input(SpatialBodyId::Entity(guid))
         .expect("guid-backed remote body should resolve projection input");
 
     assert_eq!(input.contact, ContactState::Grounded);
-    assert!(matches!(
-        input.basis,
-        Some(SolveProjectionBasis::GroundedMotion {
-            desired_local_velocity,
-            desired_local_omega,
-        }) if desired_local_velocity == Vector3::new(3.5, 0.0, 0.0)
-            && desired_local_omega == Vector3::new(0.0, 0.0, 0.75)
-    ));
+    let Some(SolveProjectionBasis::AuthoredDrive { offset }) = input.basis else {
+        panic!("a grounded body performing a motion should drive from its authored offset");
+    };
+    // The fixture puts turn commands in cycles, so retail's substate branch claims the turn and it
+    // displaces the run: the surviving contribution is the turn's omega at its ordered speed.
+    assert_eq!(offset.translation, Vector3::zero());
+    assert!(
+        offset.rotation.to_heading().abs() > 1e-4,
+        "the authored offset carries the turn as a rotation, not as an angular velocity"
+    );
 }
 
 #[test]
@@ -1091,18 +1062,12 @@ fn test_micro_portal_bundle_supports_runtime_table_lookups() {
             .expect("micro bundle should contain XP table"),
     ))
     .expect("XP table should parse");
-    let motion_kinematics = MotionKinematics::read(&mut std::io::Cursor::new(
-        archive
-            .get_file_in_namespace(HOLTBURGER_CORE_NAMESPACE, MotionKinematics::FILE_ID)
-            .expect("micro bundle should contain motion kinematics"),
-    ))
-    .expect("motion kinematics should parse");
 
     let mut state = WorldState::new(Arc::new(WorldBootstrap::new(
         skill_table,
         spell_table,
         xp_table,
-        motion_kinematics,
+        MotionSequenceCatalog::default(),
         SoulEmoteCatalog::default(),
     )));
 
@@ -1206,73 +1171,6 @@ fn test_micro_portal_bundle_supports_runtime_table_lookups() {
         expected_costs
     );
     assert!(updated_skill.trained_cost > 0 || updated_skill.specialized_cost > 0);
-}
-
-#[test]
-fn repo_portal_bundle_supports_default_player_motion_table_profile() {
-    let portal_path = repo_assets_hba_path();
-    if !portal_path.is_file() {
-        eprintln!(
-            "skipping motion-table integration probe; missing repo-local {}",
-            portal_path.display()
-        );
-        return;
-    }
-
-    let provider = match HbaReader::open(&portal_path) {
-        Ok(provider) => Arc::new(provider),
-        Err(error) => {
-            eprintln!(
-                "skipping motion-table integration probe; repo-local {} is not an HBA v2 fixture yet: {}",
-                portal_path.display(),
-                error
-            );
-            return;
-        }
-    };
-    let mut state = WorldState::synthetic();
-    let player_guid = Guid(0x5000_0200);
-    let motion_kinematics_bytes = match provider
-        .get_file_in_namespace(HOLTBURGER_CORE_NAMESPACE, MotionKinematics::FILE_ID)
-    {
-        Ok(bytes) => bytes,
-        Err(_) => {
-            eprintln!(
-                "skipping motion-table integration probe; repo-local {} does not yet contain holtburger/core motion kinematics",
-                portal_path.display()
-            );
-            return;
-        }
-    };
-    state.set_motion_kinematics(
-        MotionKinematics::read(&mut std::io::Cursor::new(motion_kinematics_bytes))
-            .expect("repo motion kinematics asset should parse"),
-    );
-    state.player.guid = player_guid;
-
-    let mut player = Entity::new(player_guid, "Player".to_string(), WorldPosition::default());
-    player.properties.set_did_prop(
-        holtburger_common::properties::PropertyDataId::MotionTable,
-        Guid(0x0900_0001),
-    );
-    state.entities.insert(player);
-
-    let resolved = state.resolve_player_motion_table_profile();
-    match resolved {
-        Ok(profile) => {
-            eprintln!(
-                "resolved repo motion-table profile: run={:?} walk={:?} turn_right={:?}",
-                profile.movement_profile.run_forward,
-                profile.movement_profile.walk_forward,
-                profile.movement_profile.turn_right,
-            );
-        }
-        Err(error) => {
-            panic!(
-                "repo assets bundle failed to resolve eor/portal motion table 0x09000001: {error}"
-            )
-        }
-    }
 }
 
 #[test]

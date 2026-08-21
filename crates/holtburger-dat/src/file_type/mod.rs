@@ -6,7 +6,6 @@ pub mod env_cell;
 pub mod environment;
 pub mod gfx_obj;
 pub mod material;
-pub mod motion_kinematics;
 pub mod motion_table;
 pub mod particle_emitter_info;
 pub mod physics_script;
@@ -33,8 +32,7 @@ pub use material::{
     PaletteSet, PixelFormatId, RenderSurface, SubPalette, SurfaceTexture, SurfaceType,
     TextureMapChange,
 };
-pub use motion_kinematics::{MotionKinematics, MotionKinematicsTable};
-pub use motion_table::{MotionCommandKinematics, MotionTable, MotionTableMovementProfile};
+pub use motion_table::MotionTable;
 pub use particle_emitter_info::{EmitterTrigger, ParticleEmitterInfo, ParticleMotion};
 pub use physics_script::{PhysicsScript, PhysicsScriptRecord};
 pub use region::{REGION_DESC_FILE_ID, RegionDesc};
@@ -47,8 +45,6 @@ pub use wave::{Wave, WaveFormat, WaveHeader};
 pub use xp_table::XpTable;
 
 use std::fmt;
-
-pub const MOTION_KINEMATICS_TYPE_ID: u32 = 0xFFFF_FF01;
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -76,7 +72,6 @@ pub enum DatFileType {
     LanguageString = 0x31,
     Font = 0x40,
     Custom = 0xFFFF_FF00,
-    MotionKinematics = MOTION_KINEMATICS_TYPE_ID,
 
     // Cell Range (Suffix)
     Landblock = 0xFE, // XXYYFFFF (using FE as internal marker for simplicity or specific logic)
@@ -183,7 +178,6 @@ impl DatFileType {
             0xFE01 => DatFileType::Iteration,
             0xFF => DatFileType::LandblockInfo,
             0xFFFF_FF00 => DatFileType::Custom,
-            MOTION_KINEMATICS_TYPE_ID => DatFileType::MotionKinematics,
             _ => DatFileType::Unknown,
         }
     }
@@ -214,7 +208,6 @@ impl fmt::Display for DatFileType {
             DatFileType::LanguageString => "LanguageString",
             DatFileType::Font => "Font",
             DatFileType::Custom => "Custom",
-            DatFileType::MotionKinematics => "MotionKinematics",
             DatFileType::Landblock => "Landblock (Terrain)",
             DatFileType::LandblockInfo => "LandblockInfo (Static)",
             DatFileType::IndoorCell => "IndoorCell",
@@ -254,10 +247,6 @@ mod tests {
 
         assert_eq!(DatFileType::from_type_id(0x0E), DatFileType::Table);
         assert_eq!(DatFileType::from_type_id(0xFFFF_FF00), DatFileType::Custom);
-        assert_eq!(
-            DatFileType::from_type_id(MOTION_KINEMATICS_TYPE_ID),
-            DatFileType::MotionKinematics
-        );
         assert_eq!(DatFileType::from_type_id(0xDEADBEEF), DatFileType::Unknown);
     }
 

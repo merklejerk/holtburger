@@ -38,6 +38,7 @@
 	import {
 		ExplorerCameraCoordinator,
 		type ExplorerCameraFocusStatus,
+		type ExplorerCameraResidencySync,
 	} from "./explorer-camera-coordinator";
 	import {
 		FreeFlyCameraController,
@@ -50,11 +51,25 @@
 		type ExplorerCameraMode,
 		type PhysicalCameraMode,
 		type PhysicalCameraLocalMovement,
+		type PhysicalCameraPlacement,
 	} from "../lib/game/motion/host-physical-camera-path";
 	import {
 		GroundedCharacterInput,
+		type GroundedCharacterDrive,
 		type GroundedCharacterEdge,
 	} from "./grounded-character-input";
+	import {
+		MOTION_STYLE,
+		motionOrderFromDrive,
+		restrictToModelled,
+		type ExplorerPossession,
+		type MotionStyleName,
+	} from "./explorer-entity-possession";
+	import {
+		BoomCameraSession,
+		type BoomFollowTarget,
+	} from "./boom-camera-session";
+	import { tauriBoomSweepSource } from "./boom-sweep-source";
 	import {
 		PhysicalCameraSession,
 		type PhysicalCameraStatus,
@@ -111,6 +126,8 @@
 	let cameraCoordinator: ExplorerCameraCoordinator | undefined;
 	let physicalCameraSession: PhysicalCameraSession | undefined;
 	let groundedCharacterInput: GroundedCharacterInput | undefined;
+	let explorerPossession = $state<ExplorerPossession | null>(null);
+	let possessedStance = $state<MotionStyleName>("nonCombat");
 	let simulationInterestController: SimulationInterestController | undefined;
 	let dynamicEntitySession: ExplorerDynamicEntitySession | undefined;
 	let unsubscribeDynamicEntities: (() => void) | undefined;
@@ -480,6 +497,13 @@
 	}
 
 	function sendPhysicalCameraWheel(localUpDistance: number): void {
+		if (boomCameraSession) {
+			// While possessed the wheel zooms the boom rather than lifting a free camera.
+			pendingBoomZoom -=
+				localUpDistance *
+				FRONTEND_TUNING.explorer.camera.boom.zoomMetersPerWheelUnit;
+			return;
+		}
 		const session = physicalCameraSession;
 		const controller = cameraController;
 		if (!session?.running || !controller) return;
@@ -524,13 +548,17 @@
 	}
 
 	function handleCameraCharacterInput(input: CameraCharacterInput): void {
-		const characterInput = groundedCharacterInput;
-		if (cameraMode !== "grounded-walk" || characterInput === undefined) return;
+		// A possessed entity takes the drive keys; otherwise the grounded camera does. They are
+		// never both driven, so possession simply wins while it is held.
+		const owner =
+			possessionInput ??
+			(cameraMode === "grounded-walk" ? groundedCharacterInput : undefined);
+		if (owner === undefined) return;
 		if (input.kind === "reset") {
-			characterInput.reset();
+			owner.reset();
 			return;
 		}
-		characterInput.applyKey(input.key, input.pressed, input.repeat);
+		owner.applyKey(input.key, input.pressed, input.repeat);
 	}
 
 	async function enterPhysicalCamera(mode: PhysicalCameraMode): Promise<void> {
@@ -750,6 +778,203 @@
 		);
 		await session.spawn(request);
 		await dynamicEntityReconciliation;
+	}
+
+	/// Charge window the possession drive owner is constructed with. Nothing consumes a possessed
+	/// jump yet, so this only has to be a valid positive duration.
+	const POSSESSION_JUMP_CHARGE_MS = 1000;
+	/// Drive with no axis held, used when a stance changes while no key is down.
+	const IDLE_DRIVE: GroundedCharacterDrive = {
+		gait: "run",
+		lateral: null,
+		longitudinal: null,
+		turn: null,
+	};
+
+	/// Drive owner for the possessed entity, alive only while something is possessed.
+	///
+	/// Deliberately separate from the camera's owner: possession routes the same four axes to an
+	/// entity, and coupling it to grounded-walk camera mode would make driving an entity depend on
+	/// which camera happens to be running.
+	let possessionInput: GroundedCharacterInput | undefined;
+
+	/// Third-person boom, alive exactly while an entity is possessed.
+	///
+	/// Owns only the boom's length. Orbit stays with the look controller, which already produces
+	/// yaw and pitch from pointer input and keeps them continuous across possession and release.
+	let boomCameraSession: BoomCameraSession | undefined;
+	/// Wheel zoom accumulated between frames, consumed as a rate by the next boom advance.
+	///
+	/// A failing sweep reports through `physicalCameraError` rather than a parallel channel: it is
+	/// the same "the camera cannot reach the host" condition, already surfaced in the world panel.
+	let pendingBoomZoom = 0;
+
+	function beginBoomCamera(): void {
+		// The same authority transfer a physical camera performs: the drive keys belong to the
+		// possessed entity, so free fly must stop translating or both would consume them.
+		cameraController?.setLocalTranslationEnabled(false);
+		boomCameraSession?.dispose();
+		pendingBoomZoom = 0;
+		lastBoomFrameAt = null;
+		boomCameraSession = new BoomCameraSession(
+			{
+				onSweepError: (error) => (physicalCameraError = errorMessage(error)),
+				sweepRadius: FRONTEND_TUNING.explorer.camera.boom.sweepRadius,
+				sweeps: tauriBoomSweepSource(),
+				tuning: FRONTEND_TUNING.explorer.camera.boom,
+			},
+			FRONTEND_TUNING.explorer.camera.boom.defaultDistance,
+		);
+	}
+
+	function endBoomCamera(): void {
+		// Free fly resumes from wherever the boom left the camera, because `applyPresentedPosition`
+		// has been writing that position every frame; only translation authority returns here.
+		if (boomCameraSession && physicalCameraSession === undefined) {
+			cameraController?.setLocalTranslationEnabled(true);
+		}
+		boomCameraSession?.dispose();
+		boomCameraSession = undefined;
+		pendingBoomZoom = 0;
+		lastBoomFrameAt = null;
+	}
+
+	/// Route one frame to whichever camera currently owns position.
+	///
+	/// Three owners in priority order, and the order matters: a boom outranks a physical session
+	/// because possession is the more specific state. A possessed entity that is momentarily
+	/// unpresented — an ordinary condition while presentation reconciles — falls through to free
+	/// fly, which holds still rather than drifting, since the boom has been writing its position
+	/// into the controller every frame and possession has taken the drive keys away.
+	function syncActiveCamera(
+		physicalPlacement: PhysicalCameraPlacement | null,
+		nowMs: number,
+	): ExplorerCameraResidencySync | undefined {
+		const boomTarget = boomCameraSession ? boomFollowTarget() : null;
+		if (boomTarget) return syncBoomCamera(boomTarget, nowMs);
+		if (physicalCameraSession || cameraModePending)
+			return cameraCoordinator?.syncPhysicalCamera(physicalPlacement);
+		return cameraCoordinator?.syncFreeFlyCamera();
+	}
+
+	/// Last frame instant the boom advanced at, so its rates are wall-clock rather than per frame.
+	let lastBoomFrameAt: number | null = null;
+
+	/// Advance the boom one frame and hand the resulting pose to the coordinator.
+	///
+	/// The look controller keeps owning orientation, exactly as it does under a physical camera:
+	/// only the camera's *position* is taken over while something is possessed.
+	function syncBoomCamera(target: BoomFollowTarget, nowMs: number) {
+		const boom = boomCameraSession;
+		const controller = cameraController;
+		const coordinator = cameraCoordinator;
+		if (!boom || !controller || !coordinator) return undefined;
+		const orientation = controller.snapshotState();
+		const elapsedSeconds =
+			lastBoomFrameAt === null
+				? 0
+				: Math.min(
+						(nowMs - lastBoomFrameAt) / 1_000,
+						FRONTEND_TUNING.explorer.camera.controls.maximumFrameDeltaSeconds,
+					);
+		lastBoomFrameAt = nowMs;
+		const zoomMetersPerSecond =
+			elapsedSeconds > 0 ? pendingBoomZoom / elapsedSeconds : 0;
+		pendingBoomZoom = 0;
+		const position = boom.advance(
+			target,
+			orientation,
+			{ zoomMetersPerSecond },
+			elapsedSeconds,
+		);
+		controller.applyPresentedPosition(position);
+		return coordinator.syncBoomCamera(
+			position,
+			orientation.yawRadians,
+			orientation.pitchRadians,
+		);
+	}
+
+	/// Resolve the boom's follow target from the entity the scene is actually drawing.
+	///
+	/// Reads the scene graph rather than the last host pose, so the camera tracks the same
+	/// interpolated position the entity renders at instead of stepping at the host tick rate.
+	function boomFollowTarget(): BoomFollowTarget | null {
+		const runtime = gameRuntime;
+		const held = explorerPossession;
+		if (!runtime || held === null || held.guid === null) return null;
+		const origin = runtime.spawnedDynamicEntityOrigin(held.guid);
+		return origin === null
+			? null
+			: {
+					anchorHeight: FRONTEND_TUNING.explorer.camera.boom.anchorHeight,
+					origin,
+				};
+	}
+
+	function sendPossessedOrder(): void {
+		const session = dynamicEntitySession;
+		const input = possessionInput;
+		const held = explorerPossession;
+		if (
+			!session ||
+			input === undefined ||
+			held === null ||
+			held.guid === null
+		) {
+			return;
+		}
+		const order = restrictToModelled(
+			motionOrderFromDrive(input.drive(), MOTION_STYLE[possessedStance]),
+			held,
+		);
+		void session.setMotionOrder(order).catch((error: unknown) => {
+			spawnedEntityPresentationError = errorMessage(error);
+		});
+	}
+
+	async function possessExplorerEntity(
+		guid: number | null,
+	): Promise<ExplorerPossession> {
+		const session = dynamicEntitySession;
+		if (!session)
+			throw new Error("Explorer possession requires an active runtime.");
+		const possession = await session.possess(guid);
+		explorerPossession = possession.guid === null ? null : possession;
+		if (possession.guid === null) {
+			possessionInput = undefined;
+			endBoomCamera();
+			return possession;
+		}
+		beginBoomCamera();
+		possessionInput = new GroundedCharacterInput({
+			fullChargeDurationMs: POSSESSION_JUMP_CHARGE_MS,
+			now: () => performance.now(),
+			onDrive: () => sendPossessedOrder(),
+			// Jump and reset edges have no possessed-entity consumer yet: the entity command surface
+			// carries locomotion only, and a launch is a separate host operation.
+			onEdge: () => {},
+		});
+		// The newly possessed entity holds whatever stance the panel last selected.
+		await setExplorerEntityStance(MOTION_STYLE[possessedStance]);
+		return possession;
+	}
+
+	async function setExplorerEntityStance(style: number): Promise<void> {
+		const session = dynamicEntitySession;
+		const held = explorerPossession;
+		if (!session || held === null) return;
+		const name = (Object.keys(MOTION_STYLE) as MotionStyleName[]).find(
+			(candidate) => MOTION_STYLE[candidate] === style,
+		);
+		if (name !== undefined) possessedStance = name;
+		const input = possessionInput;
+		await session.setMotionOrder(
+			restrictToModelled(
+				motionOrderFromDrive(input?.drive() ?? IDLE_DRIVE, style),
+				held,
+			),
+		);
 	}
 
 	async function despawnExplorerEntity(
@@ -995,10 +1220,10 @@
 						);
 					}
 					gameRuntime.tick();
-					const residencySync =
-						physicalCameraSession || cameraModePending
-							? cameraCoordinator?.syncPhysicalCamera(physicalPlacement)
-							: cameraCoordinator?.syncFreeFlyCamera();
+					const residencySync = syncActiveCamera(
+						physicalPlacement,
+						tickStartedAt,
+					);
 					if (!residencySync) {
 						throw new Error(
 							"Explorer camera coordinator is unavailable during rendering.",
@@ -1137,6 +1362,9 @@
 			{spawnedEntityPresentationError}
 			{spawnExplorerEntity}
 			{despawnExplorerEntity}
+			{possessExplorerEntity}
+			{setExplorerEntityStance}
+			{explorerPossession}
 		/>
 	</div>
 </div>

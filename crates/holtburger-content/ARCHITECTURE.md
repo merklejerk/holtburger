@@ -96,6 +96,28 @@ derives those shadow references transactionally from independently assembled lan
 `ContentAssetService::resolve_collision` in `holtburger-core` is the sole complete product
 composition path.
 
+### Motion Contract ([src/motion_sequence.rs](src/motion_sequence.rs))
+
+`MotionSequenceCatalog` projects the raw motion representation — motion tables, animations, and
+setup models — into the shape runtime consumers actually need. It is a projection, not an asset:
+nothing about motion is baked into the archive, and the catalog is rebuilt in memory from the same
+records the archive carries in every profile.
+
+A `MotionSequence` resolves one motion-table entry into ordered `MotionClip`s. Each clip binds an
+animation to an inclusive traversal window and a signed rate, with retail's window normalization
+already applied — `-1` means the last frame, bounds clamp to the animation, and an inverted pair
+raises the high bound rather than playing backwards. Consumers therefore never re-derive a window,
+and a clip is unrepresentable without the animation it indexes.
+
+Each animation carries only its *simulation facts*: a `RootMotionTrack` of per-frame authored root
+offsets and a `MotionHookTrack` of the hooks that affect simulation. Articulated part frames are
+deliberately absent — they are presentation, and a frontend loads them separately through the asset
+pipeline. `Animation::read_simulation_facts` seeks past them rather than materialising them, which
+is what keeps catalog construction from allocating tens of megabytes it would immediately discard.
+
+`reachable_animation_ids` spans cycles, modifiers, and links, and is the closure a frontend stages
+before an entity animating from a table may activate.
+
 ## Ownership Boundary
 
 ### What Belongs Here

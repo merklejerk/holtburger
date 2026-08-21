@@ -1,5 +1,5 @@
 use crate::client::movement_types::{
-    Gait, LateralMotion, LongitudinalMotion, MotionState, MotionStyle, MovementPacketMetadata,
+    CharacterDrive, Gait, LateralMotion, LongitudinalMotion, MotionStyle, MovementPacketMetadata,
     Turn, planar_velocity_for_heading,
 };
 use holtburger_common::{Guid, Vector3};
@@ -110,7 +110,7 @@ pub(super) fn build_autonomous_position(
     })
 }
 
-fn hold_key_for_motion_state(state: MotionState) -> HoldKey {
+fn hold_key_for_motion_state(state: CharacterDrive) -> HoldKey {
     match state.gait {
         Gait::Run => HoldKey::Run,
         Gait::Walk => HoldKey::None,
@@ -149,7 +149,7 @@ fn turn_motion_command_for_state(turn: Turn) -> u32 {
 
 pub(super) fn build_motion_state_raw_motion_state(
     world: &WorldState,
-    state: MotionState,
+    state: CharacterDrive,
     motion_style: MotionStyle,
 ) -> RawMotionState {
     let run_rate_scalar = player_run_rate_scalar(world);
@@ -193,7 +193,7 @@ pub(super) fn build_motion_state_raw_motion_state(
 }
 
 fn local_longitudinal_speed_for_state(
-    state: MotionState,
+    state: CharacterDrive,
     capabilities: &SelfMovementCapabilities,
 ) -> f32 {
     match (state.gait, state.longitudinal) {
@@ -206,7 +206,7 @@ fn local_longitudinal_speed_for_state(
 
 pub(super) fn local_velocity_for_state(
     current_heading: f32,
-    state: MotionState,
+    state: CharacterDrive,
     capabilities: &SelfMovementCapabilities,
 ) -> Vector3 {
     let longitudinal = match state.longitudinal {
@@ -237,7 +237,7 @@ pub(super) fn local_velocity_for_state(
     }
 }
 
-pub(super) fn turn_rate_scalar_for_state(state: MotionState) -> f32 {
+pub(super) fn turn_rate_scalar_for_state(state: CharacterDrive) -> f32 {
     state.turn_rate_scalar.unwrap_or(match state.gait {
         Gait::Run => RUN_HELD_TURN_RATE_SCALAR,
         Gait::Walk => NON_RUN_HELD_TURN_RATE_SCALAR,
@@ -249,7 +249,7 @@ fn local_turn_omega(base_omega: Vector3, turn_rate_scalar: f32) -> Vector3 {
 }
 
 pub(super) fn local_omega_for_state(
-    state: MotionState,
+    state: CharacterDrive,
     capabilities: &SelfMovementCapabilities,
 ) -> Vector3 {
     match state.turning {
@@ -296,7 +296,7 @@ mod tests {
 
         assert_eq!(
             local_omega_for_state(
-                MotionState {
+                CharacterDrive {
                     gait: Gait::Run,
                     longitudinal: None,
                     lateral: None,
@@ -315,7 +315,7 @@ mod tests {
 
         assert_eq!(
             local_omega_for_state(
-                MotionState {
+                CharacterDrive {
                     gait: Gait::Walk,
                     longitudinal: None,
                     lateral: None,
@@ -333,7 +333,7 @@ mod tests {
         let world = WorldState::synthetic();
         let raw = build_motion_state_raw_motion_state(
             &world,
-            MotionState::builder()
+            CharacterDrive::builder()
                 .walk()
                 .forward()
                 .strafe_left()
@@ -351,7 +351,7 @@ mod tests {
     fn local_velocity_composes_longitudinal_and_lateral_axes() {
         let velocity = local_velocity_for_state(
             0.0,
-            MotionState::builder()
+            CharacterDrive::builder()
                 .walk()
                 .forward()
                 .strafe_left()

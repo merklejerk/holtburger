@@ -18,6 +18,7 @@ function entity(
 		identity: { guid, wcid: 42, name: "Drudge" },
 		presentation: {
 			content: {
+				motionTableDid: null,
 				setupDid: 0x02000001,
 				soundTableDid: null,
 				physicsEffectTableDid: null,
@@ -81,6 +82,8 @@ function advanced(
 			durationMs: 1000 / 30,
 			advances: [
 				{
+					// The host always sends this field; `null` means "keep playing whatever you have".
+					clip: null,
 					entity: value,
 					kind: "integrated",
 					path: {
@@ -154,11 +157,13 @@ describe("dynamic-entity view contract", () => {
 		).toThrow("advance targets attached GUID");
 	});
 
-	it("freezes the physics-only view shape crossing the Tauri boundary", () => {
-		// The milestone's scoped command surface cannot select authored root motion, so the
-		// focused feed carries no semantic motion object and no raw motion-table identity.
-		// Growing this contract is a deliberate plan decision, not a passthrough: even a host
-		// that emits such fields cannot deliver them past this boundary.
+	it("carries the motion table and still drops fields the contract does not declare", () => {
+		// The motion-table identity is now part of the contract: an entity names the table it
+		// animates from, and the frontend stages that table's closure before activation. The
+		// capability boundary that used to strip it was removed with possession.
+		//
+		// What has not changed is that this is a contract, not a passthrough. A host that emits a
+		// field this schema does not declare cannot deliver it past this boundary.
 		const view = entity(1, 1);
 		const decoded = decodeDynamicEntityView({
 			...view,
@@ -175,7 +180,9 @@ describe("dynamic-entity view contract", () => {
 			"placement",
 			"presentation",
 		]);
+		expect(decoded.presentation.content.motionTableDid).toBe(0x09000001);
 		expect(Object.keys(decoded.presentation.content).sort()).toEqual([
+			"motionTableDid",
 			"physicsEffectTableDid",
 			"setupDid",
 			"soundTableDid",

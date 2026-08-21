@@ -102,6 +102,39 @@ export const FRONTEND_TUNING = {
 				/** Local-up movement applied per normalized browser wheel unit. */
 				wheelLocalUpUnitsPerDelta: -0.025,
 			},
+			/**
+			 * Third-person boom arm used while an entity is possessed.
+			 *
+			 * The camera is not a physical body in this mode: these drive spherical state about the
+			 * possessed entity's head, and the host only answers how far the boom may reach.
+			 */
+			boom: {
+				/** Height above the entity's root the boom pivots about. */
+				anchorHeight: 1.5,
+				/** Distance a newly possessed entity is watched from. */
+				defaultDistance: 4.5,
+				/**
+				 * Seconds for the rendered distance to ease back out once geometry clears.
+				 *
+				 * Pull-in has no matching constant on purpose: it is immediate, because easing
+				 * inward would render frames inside a wall.
+				 */
+				easeOutSeconds: 0.35,
+				/**
+				 * Hard-coupled to the host's `FREE_SPHERE_FLY_CONFIG` budget: 0.25 m substeps over
+				 * 32 substeps bounds one sweep at 8 m, and the host **refuses** a longer request
+				 * rather than answering short. Raising this without raising that budget leaves the
+				 * boom permanently unclamped — it would clip through geometry, reporting only a
+				 * console error per frame. Change both or neither.
+				 */
+				maximumDistance: 8,
+				/** Closest the boom may sit, so a pinned camera stops at the entity's back. */
+				minimumDistance: 1.2,
+				/** Sphere the host sweeps the boom with; matches the retail viewer sphere. */
+				sweepRadius: 0.3,
+				/** Zoom rate per normalized browser wheel unit. */
+				zoomMetersPerWheelUnit: 0.01,
+			},
 			/** Projection shared by Explorer-controlled primary views. */
 			framing: { fov: 60, near: 0.5, far: 2_000 },
 			/** Initial orientation before automatic scene focus or manual input. */

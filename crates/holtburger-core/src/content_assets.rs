@@ -80,7 +80,9 @@ pub enum ContentAsset {
     LandblockInteriorSystem(Option<Arc<LandblockInteriorSystemAsset>>),
     TerrainMaterial(Box<ResolvedTerrainMaterialTable>),
     RegionRenderProfile(Box<ResolvedRegionRenderProfile>),
-    Animation(Box<Animation>),
+    /// Shared rather than owned: warming one motion table acquires hundreds of animations, and
+    /// tables overlap heavily, so two entities must not each decode the same record.
+    Animation(Arc<Animation>),
     PhysicsScript(Box<PhysicsScript>),
     ParticleEmitterInfo(Box<ParticleEmitterInfo>),
     Wave(Box<Wave>),
@@ -326,19 +328,11 @@ impl ContentAssetService {
                         })?,
                 )),
             ),
-            ContentAssetRequest::Animation(animation_id) => {
-                let resource = self
-                    .content
-                    .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, animation_id))
-                    .with_context(|| {
-                        format!("Could not load Animation 0x{animation_id:08X}")
-                    })?;
-                Ok(ContentAsset::Animation(Box::new(
-                    Animation::read(&mut Cursor::new(resource.bytes)).with_context(|| {
-                        format!("Could not parse Animation 0x{animation_id:08X}")
-                    })?,
-                )))
-            }
+            ContentAssetRequest::Animation(animation_id) => Ok(ContentAsset::Animation(
+                self.decode_cache
+                    .animation(&self.content, animation_id)
+                    .with_context(|| format!("Could not load Animation 0x{animation_id:08X}"))?,
+            )),
             ContentAssetRequest::PhysicsScript(script_id) => {
                 let resource = self
                     .content
@@ -730,6 +724,39 @@ mod tests {
         assert_eq!(animation.num_parts, 1);
         assert_eq!(animation.num_frames, 1);
         assert_eq!(animation.part_frames.len(), 1);
+    }
+
+    /// Two requests for one animation must share a decode, because warming a motion table asks for
+    /// hundreds of them and tables overlap 9.2x across the archive.
+    #[test]
+    fn repeated_animation_requests_share_one_decoded_record() {
+        let animation_id = 0x0300_0001;
+        let repository = ContentRepository::from_mounts(vec![Arc::new(
+            InMemoryResourceSource::default().with_file(
+                EOR_PORTAL_NAMESPACE,
+                animation_id,
+                animation_bytes(animation_id),
+            ),
+        )]);
+        let service = test_service(repository);
+
+        let ContentAsset::Animation(first) = service
+            .load(ContentAssetRequest::Animation(animation_id))
+            .expect("animation should load")
+        else {
+            panic!("content asset service returned mismatched animation asset");
+        };
+        let ContentAsset::Animation(second) = service
+            .load(ContentAssetRequest::Animation(animation_id))
+            .expect("animation should load again")
+        else {
+            panic!("content asset service returned mismatched animation asset");
+        };
+
+        assert!(
+            Arc::ptr_eq(&first, &second),
+            "a repeated request must hand back the same decoded record, not a second copy"
+        );
     }
 
     #[test]

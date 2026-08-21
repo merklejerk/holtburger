@@ -157,6 +157,18 @@ pub fn retail_player_grounded_profile(
 /// The retail render-viewer as a free-flying sphere: retail's viewer sphere radius
 /// (`acclient.c:139301-139305`) with a controlled-kinematic clip response (zero elasticity: clip
 /// the incoming normal without rebound).
+/// Anti-tunneling and separation budgets for one small free-flying sphere.
+///
+/// Shared by the viewer body and by ad-hoc sphere sweeps, so a query and the body that may travel
+/// the same path resolve geometry identically. The 0.25 m substep over 32 substeps bounds any one
+/// solve at 8 m.
+pub const FREE_SPHERE_FLY_CONFIG: PhysicalFlyConfig = PhysicalFlyConfig {
+    maximum_substep_distance: 0.25,
+    maximum_substeps: 32,
+    maximum_contact_passes: 8,
+    separation_epsilon: 0.000_5,
+};
+
 pub fn physical_fly_viewer_profile() -> Result<ResolvedBodyProfile, PhysicalBodyDefinitionError> {
     let spheres = PhysicalSphereSet::new(
         Sphere {
@@ -165,15 +177,7 @@ pub fn physical_fly_viewer_profile() -> Result<ResolvedBodyProfile, PhysicalBody
         },
         None,
     )?;
-    let definition = PhysicalBodyDefinition::free_sphere(
-        spheres,
-        PhysicalFlyConfig {
-            maximum_substep_distance: 0.25,
-            maximum_substeps: 32,
-            maximum_contact_passes: 8,
-            separation_epsilon: 0.000_5,
-        },
-    )?;
+    let definition = PhysicalBodyDefinition::free_sphere(spheres, FREE_SPHERE_FLY_CONFIG)?;
     Ok(ResolvedBodyProfile {
         definition,
         response_policy: stable_policy(PhysicalElasticity::ZERO),

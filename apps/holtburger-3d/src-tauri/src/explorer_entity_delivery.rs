@@ -20,6 +20,18 @@ use crate::explorer_entity_runtime::{
 };
 use crate::placed_motion_presentation::present_placed_motion_point;
 
+/// Projects the host's playing clip into the frontend transport shape.
+fn project_playing_clip(
+    clip: holtburger_world::motion::PlayingMotionClip,
+) -> holtburger_core::DynamicEntityPlayingClip {
+    holtburger_core::DynamicEntityPlayingClip {
+        animation_id: clip.animation_id,
+        framerate: clip.framerate,
+        low_frame: clip.low_frame,
+        high_frame: clip.high_frame,
+    }
+}
+
 /// One Tauri event name for snapshots and incremental entity changes.
 pub const EXPLORER_DYNAMIC_ENTITY_EVENT: &str = "explorer-dynamic-entity";
 
@@ -111,6 +123,7 @@ impl ExplorerEntityDelivery {
                     tick.solved.current.pose,
                 )?;
                 Ok(DynamicEntityAdvance {
+                    clip: tick.clip.map(project_playing_clip),
                     entity: Box::new(project_dynamic_entity_view(
                         DynamicEntityViewSource::from_projection(tick.generation, tick.input),
                     )),
@@ -155,6 +168,9 @@ impl ExplorerEntityDelivery {
                 self.host_time(),
                 0.0,
                 vec![DynamicEntityAdvance {
+                    // A correction moves the body; it does not change which clip is playing, and
+                    // the receiver keeps whatever projection it already holds.
+                    clip: None,
                     entity: Box::new(entity),
                     kind,
                     path: DynamicEntityPlacedPath {
@@ -288,7 +304,7 @@ mod tests {
     fn delivery() -> Arc<ExplorerEntityDelivery> {
         let simulation = Arc::new(HostSimulationRuntime::new(Arc::new(EmptyCollisionSource)));
         Arc::new(ExplorerEntityDelivery::new(Arc::new(
-            ExplorerEntityRuntime::new(simulation),
+            ExplorerEntityRuntime::new(simulation, Default::default()),
         )))
     }
 

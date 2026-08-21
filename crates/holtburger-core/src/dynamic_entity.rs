@@ -57,6 +57,12 @@ pub struct DynamicEntityIdentity {
 pub struct DynamicEntityContent {
     /// SetupModel identity that owns parts, volumes, and default behavior.
     pub setup_did: u32,
+    /// Optional MotionTable identity that owns this entity's authored motion.
+    ///
+    /// Absent means the entity declares none of its own and falls back to the default its setup
+    /// model installs, which is what retail's `CPhysicsObj::InitDefaults` does
+    /// (`acclient.c:309099-309103`). Only 57 setups declare one, so the fallback is narrow but real.
+    pub motion_table_did: Option<u32>,
     /// Optional SoundTable identity used by presentation effects.
     pub sound_table_did: Option<u32>,
     /// Optional PhysicsEffectTable identity used by presentation effects.
@@ -1148,6 +1154,7 @@ mod tests {
                 weenie_type: WeenieType::Creature,
             },
             content: DynamicEntityContent {
+                motion_table_did: None,
                 setup_did: 0x0200_0001,
                 sound_table_did: None,
                 physics_effect_table_did: None,

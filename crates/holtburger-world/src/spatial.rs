@@ -17,7 +17,7 @@ mod volume_query;
 
 pub use physics::{
     BasicSpatialPhysics, NoopSpatialPhysics, SpatialPhysics, advance_body_kinematics,
-    project_pose_forward_distance,
+    gate_authored_offset, project_pose_forward_distance,
 };
 pub use scene::{DynamicBodyRelocationOutcome, SpatialScene};
 pub use types::*;

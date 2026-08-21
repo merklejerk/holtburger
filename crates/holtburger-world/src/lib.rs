@@ -23,6 +23,7 @@ pub mod hydration;
 mod identify;
 pub mod inspect;
 pub mod magic;
+pub mod motion;
 pub mod player;
 pub mod spatial;
 pub mod spell;
@@ -80,7 +81,8 @@ pub use spatial::{
     resolve_physical_body_cell, solve_grounded, solve_physical_fly,
 };
 pub use state::{
-    PlayerMotionTableLookupError, PlayerMotionTableResolution, PlayerMotionTableSource,
-    RequiredSelfMovementKinematics, SelfMovementCapabilities, SelfMovementCapabilitiesError,
-    SelfMovementKinematics, SelfMovementKinematicsError,
+    MotionCommandKinematics, MotionTableMovementProfile, PlayerMotionTableLookupError,
+    PlayerMotionTableResolution, PlayerMotionTableSource, RequiredSelfMovementKinematics,
+    SelfMovementCapabilities, SelfMovementCapabilitiesError, SelfMovementKinematics,
+    SelfMovementKinematicsError,
 };

@@ -2978,7 +2978,7 @@ fn set_state_dynamic_definition() -> crate::DynamicPhysicalBodyDefinition {
             None,
         )
         .unwrap(),
-        crate::PhysicalFlyConfig {
+        crate::FreeSphereConfig {
             maximum_substep_distance: 0.25,
             maximum_substeps: 8,
             maximum_contact_passes: 4,

@@ -532,10 +532,11 @@ function parseArgs(args) {
 				parsed.envCellCameraId = requireValue(args, ++index, arg);
 				break;
 			case "--env-cell-position":
-				parsed.envCellCameraPosition = parsePoint(
-					requireValue(args, ++index, arg),
-					arg,
-				);
+				{
+					const value = requireValue(args, ++index, arg);
+					parsed.envCellCameraPosition =
+						value === "center" ? value : parsePoint(value, arg);
+				}
 				break;
 			case "--render-scale":
 				parsed.renderScale = Number(requireValue(args, ++index, arg));
@@ -901,6 +902,11 @@ function parseArgs(args) {
 			"Portal execution requires an EnvCell camera and position.",
 		);
 	}
+	if (parsed.executePortal && parsed.envCellCameraPosition === "center") {
+		throw new Error(
+			"--execute-portal requires an explicit --env-cell-position.",
+		);
+	}
 	if (parsed.spawnSimulated && parsed.spawnWcid === null) {
 		throw new Error("--spawn-simulated requires --spawn-wcid.");
 	}
@@ -1031,7 +1037,8 @@ Options:
   --env-cell-camera <hex>
                          Authoritative EnvCell residency for the continuous camera.
   --env-cell-position <x,y,z>
-                         Canonical position for the EnvCell camera.
+                         Canonical position for the EnvCell camera, or center to derive the
+                         contained authored bounds center through the runtime.
   --minimum-portal-footprint-css-pixel-area <px2>
                          Override the production recursive portal-footprint cutoff.
   --minimum-object-footprint-css-pixel-area <px2>
@@ -1342,6 +1349,38 @@ function briefHarnessReport(result) {
 
 function summarizePossessionScenario(scenario) {
 	if (scenario === null) return null;
+	const playableBoomTicks = scenario.boom.ticks.filter(
+		(tick) => tick.kind === "advanced" || tick.kind === "reseeded",
+	);
+	const cameraEndpoints = playableBoomTicks.map(
+		(tick) => tick.path.legs.at(-1).end.position,
+	);
+	const cameraVerticalVelocities = adjacentDifferences(
+		cameraEndpoints.map((pose) => pose.coords.z),
+		scenario.boom.tickMs / 1_000,
+	);
+	const cameraVerticalAccelerations = adjacentDifferences(
+		cameraVerticalVelocities,
+		scenario.boom.tickMs / 1_000,
+	);
+	const renderedReach = playableBoomTicks.map((tick) => tick.renderedReach);
+	const repeatedStepTicks = scenario.boom.repeatedStepTickRange
+		? playableBoomTicks.slice(
+				scenario.boom.repeatedStepTickRange.start,
+				scenario.boom.repeatedStepTickRange.end,
+			)
+		: [];
+	const repeatedStepEndpoints = repeatedStepTicks.map(
+		(tick) => tick.path.legs.at(-1).end.position,
+	);
+	const repeatedStepVerticalVelocities = adjacentDifferences(
+		repeatedStepEndpoints.map((pose) => pose.coords.z),
+		scenario.boom.tickMs / 1_000,
+	);
+	const repeatedStepVerticalAccelerations = adjacentDifferences(
+		repeatedStepVerticalVelocities,
+		scenario.boom.tickMs / 1_000,
+	);
 	return {
 		backward: {
 			from: entityCoordinates(scenario.initial),
@@ -1355,6 +1394,113 @@ function summarizePossessionScenario(scenario) {
 			toYaw: entityYawRadians(scenario.combined.entity),
 		},
 		control: scenario.controlProbe,
+		boom: {
+			framing: scenario.boom.framing,
+			frameState:
+				scenario.boom.frameStates.length === 0
+					? null
+					: {
+							cameraEnvCellIds: uniqueCellIds(
+								scenario.boom.frameStates
+									.map((state) => state.camera?.envCellId)
+									.filter((cellId) => cellId != null),
+							),
+							minimumVisibleEnvCellScopeCount: Math.min(
+								...scenario.boom.frameStates
+									.filter((state) => state.camera?.envCellId != null)
+									.map((state) => state.metrics.visibleEnvCellScopeCount),
+							),
+							minimumVisibleEnvCellShells: Math.min(
+								...scenario.boom.frameStates
+									.filter((state) => state.camera?.envCellId != null)
+									.map((state) => state.metrics.visibleEnvCellShells),
+							),
+							sampleCount: scenario.boom.frameStates.length,
+						},
+			cameraCellIds: uniqueCellIds(
+				playableBoomTicks.flatMap((tick) => [
+					tick.path.initial.position.landblockId,
+					...tick.path.legs.map((leg) => leg.end.position.landblockId),
+				]),
+			),
+			identity: scenario.boom.identity,
+			intentReceipts: scenario.boom.intentReceipts,
+			pathCount: playableBoomTicks.length,
+			reseeds: playableBoomTicks
+				.filter((tick) => tick.kind === "reseeded")
+				.map((tick) => ({ reason: tick.reason, sequence: tick.sequence })),
+			sequence: playableBoomTicks.map((tick) => tick.sequence),
+			desiredReach: playableBoomTicks.map((tick) => tick.desiredReach),
+			renderedReach: {
+				maximum: renderedReach.length ? Math.max(...renderedReach) : null,
+				minimum: renderedReach.length ? Math.min(...renderedReach) : null,
+				directionReversals: directionReversals(renderedReach),
+			},
+			targetCellIds: uniqueCellIds(scenario.boom.targetCellIds),
+			maximumAbsoluteVerticalVelocity: maximumAbsolute(
+				cameraVerticalVelocities,
+			),
+			maximumAbsoluteVerticalAcceleration: maximumAbsolute(
+				cameraVerticalAccelerations,
+			),
+			maximumLegCount: playableBoomTicks.length
+				? Math.max(...playableBoomTicks.map((tick) => tick.path.legs.length))
+				: 0,
+			maximumDiagnostics: playableBoomTicks.reduce(
+				(maximum, tick) => ({
+					contactPasses: Math.max(
+						maximum.contactPasses,
+						tick.diagnostics.contactPasses,
+					),
+					controlLegs: Math.max(
+						maximum.controlLegs,
+						tick.diagnostics.controlLegs,
+					),
+					radialCasts: Math.max(
+						maximum.radialCasts,
+						tick.diagnostics.radialCasts,
+					),
+					transitSubsteps: Math.max(
+						maximum.transitSubsteps,
+						tick.diagnostics.transitSubsteps,
+					),
+				}),
+				{
+					contactPasses: 0,
+					controlLegs: 0,
+					radialCasts: 0,
+					transitSubsteps: 0,
+				},
+			),
+			postReleasePublishedBoom:
+				scenario.boom.postReleaseEnvelope?.boom !== undefined &&
+				scenario.boom.postReleaseEnvelope?.boom !== null,
+			releaseCamera: {
+				distance: cameraDistance(
+					scenario.boom.releaseCamera.before,
+					scenario.boom.releaseCamera.after,
+				),
+				fromEnvCellId: scenario.boom.releaseCamera.before.envCellId,
+				toEnvCellId: scenario.boom.releaseCamera.after.envCellId,
+			},
+			repeatedSteps:
+				repeatedStepTicks.length === 0
+					? null
+					: {
+							maximumAbsoluteVerticalAcceleration: maximumAbsolute(
+								repeatedStepVerticalAccelerations,
+							),
+							maximumAbsoluteVerticalVelocity: maximumAbsolute(
+								repeatedStepVerticalVelocities,
+							),
+							pathCount: repeatedStepTicks.length,
+							reachDirectionReversals: directionReversals(
+								repeatedStepTicks.map((tick) => tick.renderedReach),
+							),
+						},
+			route: compactResidencyRoute(scenario.boom.route),
+			stopAfterRelease: scenario.boom.stopAfterRelease,
+		},
 		jump: {
 			begin: scenario.begin,
 			chargedMotion: scenario.charged.probe,
@@ -1377,6 +1523,50 @@ function summarizePossessionScenario(scenario) {
 			startYaw: entityYawRadians(scenario.turnStart),
 		},
 	};
+}
+
+function adjacentDifferences(values, durationSeconds) {
+	return values
+		.slice(1)
+		.map((value, index) => (value - values[index]) / durationSeconds);
+}
+
+function directionReversals(values) {
+	let previousDirection = 0;
+	let reversals = 0;
+	for (let index = 1; index < values.length; index += 1) {
+		const delta = values[index] - values[index - 1];
+		const direction = Math.abs(delta) <= 1e-5 ? 0 : Math.sign(delta);
+		if (direction === 0) continue;
+		if (previousDirection !== 0 && direction !== previousDirection)
+			reversals += 1;
+		previousDirection = direction;
+	}
+	return reversals;
+}
+
+function maximumAbsolute(values) {
+	return values.length ? Math.max(...values.map(Math.abs)) : 0;
+}
+
+function uniqueCellIds(values) {
+	return [...new Set(values)].map(
+		(value) => `0x${(value >>> 0).toString(16).padStart(8, "0")}`,
+	);
+}
+
+function compactResidencyRoute(route) {
+	return route
+		.filter(
+			(step, index) =>
+				index === 0 ||
+				step.phase !== route[index - 1].phase ||
+				step.entityCellId !== route[index - 1].entityCellId,
+		)
+		.map((step) => ({
+			phase: step.phase,
+			entityCellId: uniqueCellIds([step.entityCellId])[0],
+		}));
 }
 
 function assertTerrainGlTrace(state) {
@@ -1453,7 +1643,9 @@ function summarizeEntityLifecycle(lifecycle) {
 }
 
 function summarizeEntityAdvances(events) {
-	const changed = events.filter((event) => event !== null);
+	const changed = events
+		.map((envelope) => envelope?.entityEvent ?? null)
+		.filter((event) => event !== null);
 	const summarize = (event) =>
 		event === undefined
 			? null
@@ -1475,7 +1667,13 @@ function summarizeEntityAdvances(events) {
 	};
 }
 
-async function runPossessionScenario(client, spawned, requestedTickMs) {
+async function runPossessionScenario(
+	client,
+	spawned,
+	requestedTickMs,
+	initialCamera,
+	captureFrameState,
+) {
 	const tickMs = Math.min(50, requestedTickMs);
 	const invoke = (method, args = []) =>
 		evaluate(
@@ -1483,8 +1681,13 @@ async function runPossessionScenario(client, spawned, requestedTickMs) {
 			`globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.${method}`,
 			args,
 		);
+	if (captureFrameState) {
+		await invoke("setEnvCellRenderMode", ["portal"]);
+		await invoke("probeNextFrameState");
+	}
 	let settledState = null;
-	for (let tick = 0; tick < 240; tick += 1) {
+	// The default outdoor camera can seed the fixture several hundred metres above support.
+	for (let tick = 0; tick < 480; tick += 1) {
 		await invoke("tickExplorerEntities", [tickMs]);
 		settledState = await invoke("state");
 		if (
@@ -1496,15 +1699,58 @@ async function runPossessionScenario(client, spawned, requestedTickMs) {
 		throw new Error("Possession scenario did not execute a settling tick.");
 	let current = exactHarnessEntity(settledState, spawned);
 	if (current.placement.contact !== "grounded")
-		throw new Error("Possession scenario body did not settle onto terrain.");
+		throw new Error(
+			`Possession scenario body did not settle onto terrain: ${JSON.stringify(current.placement)}.`,
+		);
 	const possession = await invoke("possessExplorerEntity", [
 		spawned.identity.guid,
 	]);
+	const boomDirection = await invoke("kinematicBoomDirection");
+	const orbitDirection =
+		Math.hypot(boomDirection[0], boomDirection[1]) > 1e-6
+			? [-boomDirection[1], boomDirection[0], 0]
+			: [1, 0, 0];
+	const boomIdentity = await invoke("startKinematicBoom", [
+		{
+			possessionGeneration: possession.possessionGeneration,
+			guid: possession.guid,
+			entityGeneration: possession.entityGeneration,
+			initialReach: 4.5,
+			inputSequence: 0,
+			viewDirection: boomDirection,
+			cumulativeZoomDisplacement: 0,
+		},
+	]);
+	const boomIntentReceipts = [];
+	for (const intent of [
+		{
+			inputSequence: 1,
+			viewDirection: orbitDirection,
+			cumulativeZoomDisplacement: -0.025,
+		},
+		{
+			inputSequence: 2,
+			viewDirection: boomDirection,
+			cumulativeZoomDisplacement: -0.075,
+		},
+		{
+			inputSequence: 1,
+			viewDirection: [-1, 0, 0],
+			cumulativeZoomDisplacement: -0.025,
+		},
+	]) {
+		boomIntentReceipts.push(
+			await invoke("setKinematicBoomIntent", [{ ...boomIdentity, ...intent }]),
+		);
+	}
 	const controlProbe = await invoke("probeThirdPersonControls");
 	const stance = possession.acceptedStance;
 	let revision = 0;
 	let sequence = 0;
 	const outcomes = [];
+	const boomTicks = [];
+	const boomTargetCellIds = [];
+	const boomFrameStates = [];
 	const drive = (longitudinal = null, turn = null, lateral = null) => ({
 		gait: "run",
 		lateral,
@@ -1526,19 +1772,134 @@ async function runPossessionScenario(client, spawned, requestedTickMs) {
 				`Possession scenario intent ${revision} returned ${result}.`,
 			);
 	};
-	const advance = async (count) => {
+	const advance = async (count, sampleFrameState = false) => {
 		for (let index = 0; index < count; index += 1) {
 			const response = await invoke("tickPossession", [tickMs]);
 			outcomes.push(...response.outcomes);
+			if (response.envelope?.boom) boomTicks.push(response.envelope.boom);
+			if (captureFrameState && sampleFrameState) {
+				boomFrameStates.push(await invoke("probeNextFrameState"));
+			}
+			const targetAdvance = response.envelope?.entityEvent?.batch.advances.find(
+				(advance) => advance.entity.identity.guid === possession.guid,
+			);
+			if (targetAdvance) {
+				boomTargetCellIds.push(
+					targetAdvance.path.initial.pose.landblockId,
+					...targetAdvance.path.legs.map((leg) => leg.end.pose.landblockId),
+				);
+			}
 			current = latestPossessionEntity(response, current);
 		}
 		const probe = await invoke("possessionMotionProbe");
 		return { entity: current, probe };
 	};
+	const boomRoute = [];
+	let repeatedStepTickRange = null;
+	if (initialCamera.envCellId === "0xda550177") {
+		await setDrive(drive(null, "left"));
+		for (let tick = 0; tick < 40; tick += 1) {
+			const advanced = await advance(1, true);
+			boomRoute.push({
+				phase: "turn-to-exit",
+				entityCellId: advanced.entity.placement.pose.landblockId,
+			});
+			if (entityYawRadians(advanced.entity) >= Math.PI / 2 - 0.1) break;
+		}
+		await setDrive(drive("forward"));
+		for (let tick = 0; tick < 240; tick += 1) {
+			const advanced = await advance(1, true);
+			const entityCellId = advanced.entity.placement.pose.landblockId;
+			boomRoute.push({ phase: "walk-out", entityCellId });
+			const selector = entityCellId & 0xffff;
+			if (selector < 0x0100 || selector === 0xffff) break;
+		}
+		await setDrive(drive());
+		await advance(1, true);
+		await setDrive(drive(null, "right"));
+		for (let tick = 0; tick < 40; tick += 1) {
+			const advanced = await advance(1, true);
+			boomRoute.push({
+				phase: "turn-back-inside",
+				entityCellId: advanced.entity.placement.pose.landblockId,
+			});
+			if (entityYawRadians(advanced.entity) <= -Math.PI / 2 + 0.1) break;
+		}
+		await setDrive(drive("forward"));
+		for (let tick = 0; tick < 240; tick += 1) {
+			const advanced = await advance(1, true);
+			const entityCellId = advanced.entity.placement.pose.landblockId;
+			boomRoute.push({ phase: "walk-to-lower-cell", entityCellId });
+			if (entityCellId === 0xda550179) break;
+		}
+		if (current.placement.pose.landblockId !== 0xda550179) {
+			throw new Error(
+				`Possession boom route did not reach EnvCell 0xda550179; final pose ${JSON.stringify(current.placement.pose)}, route ${JSON.stringify(compactResidencyRoute(boomRoute))}.`,
+			);
+		}
+		await setDrive(drive());
+		await advance(8);
+		const stepStart = boomTicks.length;
+		for (let cycle = 0; cycle < 2; cycle += 1) {
+			for (const [longitudinal, targetCell, phase] of [
+				["backward", 0xda550177, `step-up-${cycle + 1}`],
+				["forward", 0xda550179, `step-down-${cycle + 1}`],
+			]) {
+				await setDrive(drive(longitudinal));
+				for (let tick = 0; tick < 240; tick += 1) {
+					const advanced = await advance(1);
+					const entityCellId = advanced.entity.placement.pose.landblockId;
+					boomRoute.push({ phase, entityCellId });
+					if (entityCellId === targetCell) break;
+				}
+				if (current.placement.pose.landblockId !== targetCell) {
+					throw new Error(
+						`Possession repeated-step route did not reach 0x${targetCell.toString(16)}; final pose ${JSON.stringify(current.placement.pose)}.`,
+					);
+				}
+				await setDrive(drive());
+				await advance(8);
+			}
+		}
+		repeatedStepTickRange = { end: boomTicks.length, start: stepStart };
+		await setDrive(drive("backward"));
+		for (let tick = 0; tick < 240; tick += 1) {
+			const advanced = await advance(1);
+			const entityCellId = advanced.entity.placement.pose.landblockId;
+			boomRoute.push({ phase: "return-outdoors", entityCellId });
+			const selector = entityCellId & 0xffff;
+			if (selector < 0x0100 || selector === 0xffff) break;
+		}
+		const selector = current.placement.pose.landblockId & 0xffff;
+		if (selector >= 0x0100 && selector !== 0xffff) {
+			throw new Error(
+				`Possession repeated-step route did not return outdoors; final pose ${JSON.stringify(current.placement.pose)}.`,
+			);
+		}
+		await setDrive(drive());
+		await advance(8);
+		await setDrive(drive(null, "left"));
+		for (let tick = 0; tick < 40; tick += 1) {
+			await advance(1);
+			if (entityYawRadians(current) >= -0.1) break;
+		}
+		await setDrive(drive());
+		await advance(8);
+	}
 
 	const initial = current;
 	await setDrive(drive("backward"));
-	const backward = await advance(4);
+	let backward = await advance(1);
+	for (let tick = 1; tick < 60; tick += 1) {
+		const heading = entityYawRadians(initial);
+		const from = entityCoordinates(initial);
+		const to = entityCoordinates(backward.entity);
+		const projection =
+			(to.x - from.x) * -Math.sin(heading) +
+			(to.y - from.y) * Math.cos(heading);
+		if (projection < -0.01) break;
+		backward = await advance(1);
+	}
 
 	await setDrive(drive());
 	await advance(1);
@@ -1601,12 +1962,36 @@ async function runPossessionScenario(client, spawned, requestedTickMs) {
 	}
 	const restoredStart = current;
 	const restored = await advance(3);
+	// Playback retains at most an active path and one successor. Wait beyond both endpoints, then
+	// require one actual frame so a long renderer task cannot leave final evidence visually stale.
+	await delay(tickMs * 5);
+	await invoke("probeNextFrameState");
+	const framing = await invoke("probeBoomFraming", [possession.guid]);
+	const cameraBeforeRelease = (await invoke("state")).camera;
 	await invoke("possessExplorerEntity", [null]);
+	const postReleaseEnvelope = await invoke("tickExplorerEntities", [tickMs]);
+	const stopAfterRelease = await invoke("stopKinematicBoom", [boomIdentity]);
+	await delay(tickMs * 2);
+	const cameraAfterRelease = (await invoke("state")).camera;
 
 	return {
 		backward,
 		backwardOnly,
 		begin,
+		boom: {
+			frameStates: boomFrameStates,
+			framing,
+			identity: boomIdentity,
+			intentReceipts: boomIntentReceipts,
+			postReleaseEnvelope,
+			releaseCamera: { after: cameraAfterRelease, before: cameraBeforeRelease },
+			repeatedStepTickRange,
+			route: boomRoute,
+			stopAfterRelease,
+			targetCellIds: boomTargetCellIds,
+			tickMs,
+			ticks: boomTicks,
+		},
 		charged,
 		combined,
 		combinedStart,
@@ -1649,6 +2034,100 @@ function assertPossessionScenario(scenario) {
 		throw new Error(
 			"Possessed S did not retain a reversed authored clip rate.",
 		);
+	const playableBoomTicks = scenario.boom.ticks.filter(
+		(tick) => tick.kind === "advanced" || tick.kind === "reseeded",
+	);
+	if (
+		JSON.stringify(scenario.boom.intentReceipts) !==
+		JSON.stringify(["accepted", "accepted", "ignored-stale"])
+	)
+		throw new Error(
+			`Host kinematic boom intent receipts were not accepted/accepted/stale: ${JSON.stringify(scenario.boom.intentReceipts)}.`,
+		);
+	if (playableBoomTicks.length === 0)
+		throw new Error("Host kinematic boom published no playable path.");
+	const failedBoomTick = scenario.boom.ticks.find(
+		(tick) => tick.kind === "failed",
+	);
+	if (failedBoomTick !== undefined)
+		throw new Error(
+			`Host kinematic boom published terminal failure: ${JSON.stringify(failedBoomTick)}.`,
+		);
+	const invalidBoomTick = playableBoomTicks.find(
+		(tick, index) =>
+			tick.boomGeneration !== scenario.boom.identity.boomGeneration ||
+			tick.possessionGeneration !==
+				scenario.boom.identity.possessionGeneration ||
+			tick.guid !== scenario.boom.identity.guid ||
+			tick.entityGeneration !== scenario.boom.identity.entityGeneration ||
+			tick.sequence !== index + 1 ||
+			tick.path.legs.length === 0 ||
+			tick.path.legs.at(-1)?.endFraction !== 1,
+	);
+	if (invalidBoomTick !== undefined)
+		throw new Error(
+			`Host kinematic boom published an invalid identity, sequence, or path: ${JSON.stringify(invalidBoomTick)}.`,
+		);
+	if (Math.abs(playableBoomTicks[0].desiredReach - 4.425) > 1e-5)
+		throw new Error(
+			`Host kinematic boom lost cumulative zoom input: ${playableBoomTicks[0].desiredReach}.`,
+		);
+	if (scenario.boom.postReleaseEnvelope?.boom != null)
+		throw new Error("Host kinematic boom published after possession release.");
+	if (scenario.boom.stopAfterRelease !== false)
+		throw new Error("Released host kinematic boom remained stoppable.");
+	const releaseCameraDistance = cameraDistance(
+		scenario.boom.releaseCamera.before,
+		scenario.boom.releaseCamera.after,
+	);
+	if (releaseCameraDistance > 1e-6)
+		throw new Error(
+			`Host kinematic boom release moved the camera by ${releaseCameraDistance} m.`,
+		);
+	if (scenario.boom.framing.planarForwardProjection < -0.01)
+		throw new Error(
+			`Host kinematic boom placed the camera ahead of its target: ${JSON.stringify(scenario.boom.framing)}.`,
+		);
+	if (
+		scenario.boom.framing.planarCameraToTargetDistance > 0.05 &&
+		scenario.boom.framing.planarForwardAlignment < 0.95
+	)
+		throw new Error(
+			`Host kinematic boom lost path-aligned framing: ${JSON.stringify(scenario.boom.framing)}.`,
+		);
+	if (
+		scenario.boom.releaseCamera.before.envCellId !==
+		scenario.boom.releaseCamera.after.envCellId
+	)
+		throw new Error(
+			`Host kinematic boom release changed camera residency: ${JSON.stringify(scenario.boom.releaseCamera)}.`,
+		);
+	const invalidPortalFrame = scenario.boom.frameStates.find(
+		(state) =>
+			state.camera === null ||
+			state.metrics === null ||
+			state.envCellRenderMode !== "portal" ||
+			state.metrics.envCellRenderMode !== "portal" ||
+			state.metrics.viewCount !== 1 ||
+			(state.camera.envCellId !== null &&
+				(state.metrics.visibleEnvCellScopeCount < 1 ||
+					state.metrics.visibleEnvCellShells < 1)),
+	);
+	if (invalidPortalFrame !== undefined) {
+		throw new Error(
+			`Portal-mode boom frame lost its camera or base-scene selection state: ${JSON.stringify(invalidPortalFrame)}.`,
+		);
+	}
+	if (
+		scenario.boom.route.length > 0 &&
+		![0xda550177, 0xda550178, 0xda55002d, 0xda550179].every((cellId) =>
+			scenario.boom.targetCellIds.includes(cellId),
+		)
+	) {
+		throw new Error(
+			`Possession boom route omitted an authored target residency: ${JSON.stringify(scenario.boom.targetCellIds)}.`,
+		);
+	}
 	if (
 		scenario.controlProbe.cameraYawAfterKeyboardTurn !==
 			scenario.controlProbe.cameraYawBefore ||
@@ -1656,10 +2135,8 @@ function assertPossessionScenario(scenario) {
 			scenario.controlProbe.cameraYawBefore ||
 		scenario.controlProbe.characterInputCountAfterKeyboard !== 1 ||
 		scenario.controlProbe.characterInputCountAfterPointerAndWheel !== 1 ||
-		!(
-			(scenario.controlProbe.boomDesiredAfter ?? 0) >
-			(scenario.controlProbe.boomDesiredBefore ?? 0)
-		)
+		!Number.isFinite(scenario.controlProbe.boomZoomDisplacement) ||
+		scenario.controlProbe.boomZoomDisplacement === 0
 	)
 		throw new Error(
 			`Third-person input ownership probe failed: ${JSON.stringify(scenario.controlProbe)}.`,
@@ -1775,8 +2252,9 @@ function exactHarnessEntity(state, expected) {
 }
 
 function latestPossessionEntity(response, previous) {
-	if (response.event === null) return previous;
-	const advance = response.event.batch.advances.find(
+	if (response.envelope === null || response.envelope.entityEvent === null)
+		return previous;
+	const advance = response.envelope.entityEvent.batch.advances.find(
 		(candidate) =>
 			candidate.entity.identity.guid === previous.identity.guid &&
 			candidate.entity.generation === previous.generation,
@@ -1808,6 +2286,14 @@ function planarDistance(first, second) {
 	return Math.hypot(b.x - a.x, b.y - a.y);
 }
 
+function cameraDistance(first, second) {
+	return Math.hypot(
+		second.position[0] - first.position[0],
+		second.position[1] - first.position[1],
+		second.position[2] - first.position[2],
+	);
+}
+
 function assertPlanarStill(first, second, label) {
 	if (planarDistance(first, second) > 0.01)
 		throw new Error(`${label} unexpectedly translated the possessed body.`);
@@ -1824,8 +2310,10 @@ function assertLaunchedEntityLifecycle(result) {
 	if (Math.hypot(velocity.x, velocity.y, velocity.z) <= 0) {
 		throw new Error("Launch scenario returned zero current velocity.");
 	}
-	const advance = lifecycle.advances.find((event) => event !== null);
-	if (advance === undefined || advance.kind !== "advanced") {
+	const advance = lifecycle.advances.find(
+		(envelope) => envelope?.entityEvent !== null,
+	)?.entityEvent;
+	if (advance === undefined || advance === null) {
 		throw new Error(
 			"Launch scenario produced no changed-entity advance batch.",
 		);
@@ -1910,47 +2398,6 @@ function summarizeEntityLifecycleState(state) {
 						templateCount: dynamics.dynamics.templates.templateCount,
 					},
 	};
-}
-
-/**
- * Ask the host the boom's own question in two directions from a settled entity.
- *
- * Downward must be stopped by the terrain the entity is standing on, and upward must complete: a
- * query that answered the same in both directions would be reporting a constant rather than
- * measuring geometry, which no camera-level assertion would distinguish.
- */
-async function probeBoomSweep(client, pose) {
-	if (!pose) return null;
-	// The entity reports AC landblock-local coordinates; the sweep takes canonical scene axes.
-	const blockX = (pose.landblockId >>> 24) & 0xff;
-	const blockY = (pose.landblockId >>> 16) & 0xff;
-	const origin = [
-		blockX * 192 + pose.coords.x,
-		pose.coords.z + 1,
-		-(blockY * 192 + pose.coords.y),
-	];
-	const sweep = (direction) =>
-		evaluate(
-			client,
-			"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.sweepSphereDistance",
-			[origin, direction, 6, 0.3],
-		);
-	return {
-		origin,
-		requestedDistance: 6,
-		up: await sweep([0, 1, 0]),
-		down: await sweep([0, -1, 0]),
-	};
-}
-
-/** The most recent accepted pose across every advance batch, or null before any tick. */
-function latestEntityPose(advanceEvents) {
-	for (let index = advanceEvents.length - 1; index >= 0; index -= 1) {
-		const advance = advanceEvents[index]?.batch?.advances?.[0];
-		const pose = advance?.entity?.placement?.pose;
-		if (pose) return pose;
-	}
-	return null;
 }
 
 function summarizeEnvCellLayers(envCellLayers) {
@@ -2211,6 +2658,38 @@ async function hopToLandblock(client, options, landblockId, settleMs) {
 	);
 }
 
+async function placeEnvCellCamera(client, options) {
+	if (
+		options.envCellCameraId === null ||
+		options.envCellCameraPosition === null
+	) {
+		throw new Error(
+			"EnvCell camera placement requires a complete option pair.",
+		);
+	}
+	if (options.envCellCameraPosition === "center") {
+		return evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.focusExplorerEnvCell",
+			[
+				options.envCellCameraId,
+				options.cameraYawDegrees,
+				options.cameraPitchDegrees,
+			],
+		);
+	}
+	return evaluate(
+		client,
+		"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setEnvCellCamera",
+		[
+			options.envCellCameraId,
+			options.envCellCameraPosition,
+			options.cameraYawDegrees,
+			options.cameraPitchDegrees,
+		],
+	);
+}
+
 async function runHarness({ contentHostUrl, viteUrl }) {
 	const userDataDirectory = await mkdtemp(
 		join(tmpdir(), "holtburger-3d-browser-harness-"),
@@ -2377,6 +2856,13 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			);
 			await delay(250);
 		}
+		if (
+			options.possessionScenario &&
+			options.envCellCameraId !== null &&
+			options.envCellCameraPosition !== null
+		) {
+			await placeEnvCellCamera(client, options);
+		}
 		const initialState = await evaluate(
 			client,
 			"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
@@ -2388,7 +2874,6 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		const entityAdvanceEvents = [];
 		let spawnedEntityState = null;
 		let completedEntityState = null;
-		let boomSweepProbe = null;
 		let possessionScenario = null;
 		if (options.spawnWcid !== null && options.entityShowcaseCount === 0) {
 			spawnedEntity = await evaluate(
@@ -2409,6 +2894,8 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 					client,
 					spawnedEntity,
 					options.entityTickMs,
+					initialState.camera,
+					options.frameMode === "portal",
 				);
 			}
 			if (options.launchDirection !== null) {
@@ -2448,14 +2935,6 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				client,
 				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
 				[],
-			);
-			// The settled pose, not the spawn pose: a simulated body falls to terrain over its first
-			// ticks, and probing where it *was* measures empty air a few metres up.
-			boomSweepProbe = await probeBoomSweep(
-				client,
-				latestEntityPose(entityAdvanceEvents) ??
-					spawnedEntity?.placement?.pose ??
-					null,
 			);
 		}
 		let entityShowcase = null;
@@ -2648,16 +3127,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			(options.frameMode !== null || options.modeCycle) &&
 			options.envCellCameraId !== null
 		) {
-			await evaluate(
-				client,
-				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setEnvCellCamera",
-				[
-					options.envCellCameraId,
-					options.envCellCameraPosition,
-					options.cameraYawDegrees,
-					options.cameraPitchDegrees,
-				],
-			);
+			await placeEnvCellCamera(client, options);
 		}
 		const modeCycleStates = [];
 		const ambientOcclusionCycleStates = [];
@@ -3053,7 +3523,6 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 					? null
 					: {
 							advances: entityAdvanceEvents,
-							boomSweepProbe,
 							completedState: completedEntityState,
 							launched: launchedEntity,
 							relocated: relocatedEntity,

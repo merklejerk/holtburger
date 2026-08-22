@@ -32,6 +32,7 @@ pub mod explorer_possession_control;
 pub mod explorer_weenie_catalog;
 pub mod gfx_obj_geometry;
 mod host_fixed_tick_runtime;
+pub mod host_kinematic_boom_runtime;
 mod host_physical_fly_runtime;
 pub mod host_simulation_runtime;
 pub mod interior_seam;
@@ -809,6 +810,15 @@ fn parse_typed_asset_id(raw_asset_id: &str, prefix: &str, expected_type: u32) ->
 }
 
 fn parse_typed_dat_id(raw_id: &str, expected_type: u32) -> Result<u32> {
+    let id = parse_hex_id(raw_id, "asset id")?;
+    if id >> 24 != expected_type {
+        anyhow::bail!("asset id must identify DAT family 0x{expected_type:02X}");
+    }
+    Ok(id)
+}
+
+/// Parse the common textual representation without imposing domain-specific bit semantics.
+fn parse_hex_id(raw_id: &str, label: &str) -> Result<u32> {
     let raw_hex = raw_id
         .strip_prefix("0x")
         .or_else(|| raw_id.strip_prefix("0X"))
@@ -818,12 +828,10 @@ fn parse_typed_dat_id(raw_id: &str, expected_type: u32) -> Result<u32> {
             .chars()
             .all(|character| character.is_ascii_hexdigit())
     {
-        anyhow::bail!("asset id must contain exactly eight hexadecimal digits");
+        anyhow::bail!("{label} must contain exactly eight hexadecimal digits");
     }
-    let id = u32::from_str_radix(raw_hex, 16).context("asset id is not hexadecimal")?;
-    if id >> 24 != expected_type {
-        anyhow::bail!("asset id must identify DAT family 0x{expected_type:02X}");
-    }
+    let id =
+        u32::from_str_radix(raw_hex, 16).with_context(|| format!("{label} is not hexadecimal"))?;
     Ok(id)
 }
 
@@ -908,66 +916,6 @@ fn stop_physical_fly(
     session: u64,
 ) {
     runtime.stop(session);
-}
-
-/// One frontend sweep request in canonical scene axes.
-///
-/// Names geometry and a budget only. What the answer is used for — a boom arm, a placement probe,
-/// a line-of-sight test — is the caller's policy, and the host does not model it.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SphereSweepRequest {
-    /// Canonical scene-space start point.
-    pub origin: [f32; 3],
-    /// Interior cell containing `origin`, or absent while outdoors.
-    pub env_cell_id: Option<String>,
-    /// Canonical scene-space direction; normalized host-side.
-    pub direction: [f32; 3],
-    /// Maximum distance to travel in meters.
-    pub distance: f32,
-    /// Positive swept-sphere radius in meters.
-    pub radius: f32,
-}
-
-/// Resolve one frontend sweep request against the live collision scene.
-///
-/// Shared by the Tauri command and the dev content host so the browser harness asks the identical
-/// question with identical validation. An earlier copy in the dev host parsed the EnvCell without
-/// checking its type, which would have let the harness accept input the app rejects — exactly the
-/// divergence that makes harness evidence untrustworthy.
-pub fn resolve_sphere_sweep(
-    simulation: &host_simulation_runtime::HostSimulationRuntime,
-    request: SphereSweepRequest,
-) -> Result<f32> {
-    let cell = request
-        .env_cell_id
-        .as_deref()
-        .map(|cell| parse_typed_dat_id(cell, 0x01).map(holtburger_common::Guid))
-        .transpose()?;
-    simulation.sweep_sphere_distance(host_simulation_runtime::SphereSweepQuery {
-        origin: placed_motion_presentation::scene_point_to_pose(request.origin)?,
-        cell,
-        direction: placed_motion_presentation::scene_direction_to_ac(request.direction)?,
-        distance: request.distance,
-        radius: request.radius,
-        config: holtburger_core::FREE_SPHERE_FLY_CONFIG,
-    })
-}
-
-/// How far a sphere travels from a point before static geometry stops it.
-///
-/// Static collision only, like every free-flight solve. Registers nothing and retains nothing, so
-/// a caller may ask every tick.
-#[tauri::command]
-async fn sweep_sphere_distance(
-    simulation: tauri::State<'_, Arc<host_simulation_runtime::HostSimulationRuntime>>,
-    request: SphereSweepRequest,
-) -> Result<f32, String> {
-    let simulation = Arc::clone(&simulation);
-    tokio::task::spawn_blocking(move || resolve_sphere_sweep(&simulation, request))
-        .await
-        .map_err(|error| format!("sphere sweep task failed: {error}"))?
-        .map_err(format_error)
 }
 
 /// Replaces the complete frontend-owned collision simulation interest.
@@ -1406,6 +1354,33 @@ async fn queue_explorer_possession_event(
     entities
         .queue_possession_event(request.resolve()?)
         .map_err(|error| error.to_string())
+}
+
+/// Starts the host-owned boom against one exact active possession.
+#[tauri::command]
+async fn start_kinematic_boom(
+    boom: tauri::State<'_, Arc<host_kinematic_boom_runtime::HostKinematicBoomRuntime>>,
+    request: host_kinematic_boom_runtime::HostKinematicBoomStartRequest,
+) -> Result<host_kinematic_boom_runtime::HostKinematicBoomStartReceipt, String> {
+    boom.start(request).map_err(format_error)
+}
+
+/// Replaces semantic boom intent for one exact generation tuple.
+#[tauri::command]
+async fn set_kinematic_boom_intent(
+    boom: tauri::State<'_, Arc<host_kinematic_boom_runtime::HostKinematicBoomRuntime>>,
+    request: host_kinematic_boom_runtime::HostKinematicBoomIntentRequest,
+) -> Result<host_kinematic_boom_runtime::HostKinematicBoomIntentReceipt, String> {
+    boom.set_intent(request).map_err(format_error)
+}
+
+/// Stops exactly one boom generation without invalidating a replacement.
+#[tauri::command]
+async fn stop_kinematic_boom(
+    boom: tauri::State<'_, Arc<host_kinematic_boom_runtime::HostKinematicBoomRuntime>>,
+    request: host_kinematic_boom_runtime::HostKinematicBoomIdentity,
+) -> Result<bool, String> {
+    Ok(boom.stop(request))
 }
 
 /// Clears the Explorer registry/body population and publishes an empty reconstruction snapshot.
@@ -1930,6 +1905,13 @@ pub fn run() {
     let explorer_entity_delivery = Arc::new(explorer_entity_delivery::ExplorerEntityDelivery::new(
         Arc::clone(&explorer_entities),
     ));
+    let kinematic_boom_runtime = Arc::new(
+        host_kinematic_boom_runtime::HostKinematicBoomRuntime::new(
+            Arc::clone(&explorer_entities),
+            Arc::clone(&simulation),
+        )
+        .expect("failed to construct standard host kinematic boom profile"),
+    );
     let fixed_tick_runtime = Arc::new(host_fixed_tick_runtime::HostFixedTickRuntime::new());
     let explorer_entity_tick_slot = fixed_tick_runtime.reserve_slot();
     let physical_fly_runtime = Arc::new(host_physical_fly_runtime::HostPhysicalFlyRuntime::new(
@@ -1939,6 +1921,7 @@ pub fn run() {
     let fixed_tick_runtime_for_setup = Arc::clone(&fixed_tick_runtime);
     let explorer_entities_for_setup = Arc::clone(&explorer_entities);
     let explorer_entity_delivery_for_setup = Arc::clone(&explorer_entity_delivery);
+    let kinematic_boom_runtime_for_setup = Arc::clone(&kinematic_boom_runtime);
     tauri::Builder::default()
         .setup(move |app| {
             fixed_tick_runtime_for_setup.install(
@@ -1946,6 +1929,7 @@ pub fn run() {
                 Arc::new(explorer_entity_simulation::ExplorerEntitySimulation::new(
                     explorer_entities_for_setup,
                     explorer_entity_delivery_for_setup,
+                    kinematic_boom_runtime_for_setup,
                     Arc::new(
                         explorer_entity_simulation::TauriDynamicEntityEventSink::new(
                             app.handle().clone(),
@@ -1962,6 +1946,7 @@ pub fn run() {
         .manage(explorer_entities)
         .manage(explorer_entity_driver)
         .manage(explorer_entity_delivery)
+        .manage(kinematic_boom_runtime)
         .manage(fixed_tick_runtime)
         .manage(physical_fly_runtime)
         .invoke_handler(tauri::generate_handler![
@@ -1975,10 +1960,12 @@ pub fn run() {
             relocate_explorer_entity,
             reset_explorer_entities,
             load_motion_table_closure,
-            sweep_sphere_distance,
             possess_explorer_entity,
             set_explorer_possession_intent,
             queue_explorer_possession_event,
+            start_kinematic_boom,
+            set_kinematic_boom_intent,
+            stop_kinematic_boom,
             start_simulation_interest_session,
             replace_simulation_interest,
             start_physical_fly,

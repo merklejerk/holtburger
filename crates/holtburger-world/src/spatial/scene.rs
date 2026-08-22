@@ -1321,11 +1321,11 @@ mod physical_body_tests {
         CollisionReportClassification, CollisionReportPhase, DynamicBodyCollisionDefinition,
         DynamicPhysicalBodyDefinition, EdgeProtection, EntityCollisionParticipation,
         EntityCollisionReportPolicy, EntityDynamicCollisionPolicy, EntityPhysicsScheduling,
-        GroundSupport, GroundedBodyActuation, GroundedConfig, GroundedLaunch,
+        FreeSphereConfig, GroundSupport, GroundedBodyActuation, GroundedConfig, GroundedLaunch,
         PhysicalBodyDefinition, PhysicalBodyResponsePolicy, PhysicalBodyResponseState,
-        PhysicalBodySceneResidency, PhysicalBodyTickStatus, PhysicalElasticity, PhysicalFlyConfig,
-        PhysicalFriction, PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion,
-        PreparedEntityBspPart, PreparedEntityTargetGeometry, RETAIL_WALKABLE_NORMAL_Z,
+        PhysicalBodySceneResidency, PhysicalBodyTickStatus, PhysicalElasticity, PhysicalFriction,
+        PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion, PreparedEntityBspPart,
+        PreparedEntityTargetGeometry, RETAIL_WALKABLE_NORMAL_Z,
     };
     use holtburger_common::properties::WeenieType;
     use holtburger_common::{Plane, Quaternion, Sphere};
@@ -1339,7 +1339,7 @@ mod physical_body_tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    const FLY_CONFIG: PhysicalFlyConfig = PhysicalFlyConfig {
+    const FLY_CONFIG: FreeSphereConfig = FreeSphereConfig {
         maximum_substep_distance: 0.25,
         maximum_substeps: 32,
         maximum_contact_passes: 8,

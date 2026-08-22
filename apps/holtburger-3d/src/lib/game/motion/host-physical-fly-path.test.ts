@@ -168,7 +168,7 @@ describe("evaluateHostPhysicalFlyPath", () => {
 				}),
 				0,
 			),
-		).toThrow("end at tick fraction one");
+		).toThrow("end at transaction fraction one");
 	});
 });
 

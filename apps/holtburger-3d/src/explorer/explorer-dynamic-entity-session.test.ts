@@ -62,8 +62,12 @@ class FakeTransport implements ExplorerDynamicEntityTransport {
 		this.handlers.get("explorer-dynamic-entity")?.(event);
 	}
 
-	emitPossessionOutcome(outcome: unknown): void {
-		this.handlers.get("explorer-possession-event-outcome")?.(outcome);
+	emitPossessionOutcomes(outcomes: unknown): void {
+		this.handlers.get("explorer-possession-event-outcomes")?.(outcomes);
+	}
+
+	emitFixedTick(envelope: unknown): void {
+		this.handlers.get("explorer-fixed-tick")?.(envelope);
 	}
 }
 
@@ -112,6 +116,13 @@ function entity(guid: number) {
 	};
 }
 
+function worldPoint(pose: ReturnType<typeof entity>["placement"]["pose"]) {
+	return {
+		landblockId: pose.landblockId,
+		coords: { ...pose.coords },
+	};
+}
+
 describe("ExplorerDynamicEntitySession", () => {
 	it("waits for a same-generation mutation event instead of mistaking prior state for completion", async () => {
 		const transport = new FakeTransport();
@@ -145,9 +156,10 @@ describe("ExplorerDynamicEntitySession", () => {
 		const transport = new FakeTransport();
 		const session = new ExplorerDynamicEntitySession(transport);
 		await session.start();
-		expect(transport.calls.slice(0, 3)).toEqual([
+		expect(transport.calls.slice(0, 4)).toEqual([
 			"listen:explorer-dynamic-entity",
-			"listen:explorer-possession-event-outcome",
+			"listen:explorer-fixed-tick",
+			"listen:explorer-possession-event-outcomes",
 			"invoke:request_explorer_dynamic_entity_snapshot",
 		]);
 		expect(
@@ -162,7 +174,7 @@ describe("ExplorerDynamicEntitySession", () => {
 		).toEqual([3]);
 		expect(
 			transport.calls.filter((call) => call.startsWith("listen:")),
-		).toHaveLength(4);
+		).toHaveLength(6);
 	});
 
 	it("notifies subscribers only when an accepted event changes the mirror", async () => {
@@ -192,11 +204,18 @@ describe("ExplorerDynamicEntitySession", () => {
 		session.subscribePossessionOutcomes((outcome) => outcomes.push(outcome));
 		await session.start();
 
-		transport.emitPossessionOutcome({
-			possessionGeneration: 4,
-			sequence: 2,
-			result: { kind: "rejected", reason: "airborne" },
-		});
+		transport.emitPossessionOutcomes([
+			{
+				possessionGeneration: 4,
+				sequence: 2,
+				result: { kind: "rejected", reason: "airborne" },
+			},
+			{
+				possessionGeneration: 4,
+				sequence: 3,
+				result: { kind: "reset" },
+			},
+		]);
 
 		expect(outcomes).toEqual([
 			{
@@ -204,7 +223,93 @@ describe("ExplorerDynamicEntitySession", () => {
 				sequence: 2,
 				result: { kind: "rejected", reason: "airborne" },
 			},
+			{
+				possessionGeneration: 4,
+				sequence: 3,
+				result: { kind: "reset" },
+			},
 		]);
+	});
+
+	it("delivers entity and boom paths with one receipt instant and drops stale epochs", async () => {
+		const transport = new FakeTransport();
+		const session = new ExplorerDynamicEntitySession(
+			transport,
+			undefined,
+			() => 1_234,
+		);
+		const receipts: unknown[] = [];
+		session.subscribeFixedTicks((receipt) => receipts.push(receipt));
+		await session.start();
+		const moved = entity(2);
+		moved.placement.pose.coords.x = 4;
+		const envelope = {
+			epoch: 7,
+			hostTime: { seconds: 2 },
+			durationMs: 32,
+			entityAdvances: [
+				{
+					clip: null,
+					entity: moved,
+					kind: "integrated",
+					path: {
+						initial: { pose: entity(2).placement.pose },
+						legs: [{ endFraction: 1, end: { pose: moved.placement.pose } }],
+					},
+				},
+			],
+			boom: {
+				kind: "advanced",
+				boomGeneration: 4,
+				possessionGeneration: 3,
+				guid: 2,
+				entityGeneration: 1,
+				sequence: 1,
+				targetSphereRole: "primary",
+				effectiveCameraRadius: 0.25,
+				desiredReach: 4.5,
+				renderedReach: 3.75,
+				path: {
+					initial: {
+						position: worldPoint(entity(2).placement.pose),
+						visualPivot: worldPoint(entity(2).placement.pose),
+					},
+					legs: [
+						{
+							endFraction: 1,
+							end: {
+								position: worldPoint(moved.placement.pose),
+								visualPivot: worldPoint(moved.placement.pose),
+							},
+						},
+					],
+				},
+				diagnostics: {
+					controlLegs: 1,
+					radialCasts: 1,
+					transitSubsteps: 1,
+					contactPasses: 0,
+				},
+			},
+		};
+
+		transport.emitFixedTick(envelope);
+		transport.emitFixedTick(envelope);
+
+		expect(receipts).toHaveLength(1);
+		expect(receipts[0]).toMatchObject({
+			receivedAtMs: 1_234,
+			envelope: {
+				epoch: 7,
+				durationMs: 32,
+				entityEvent: { kind: "advanced" },
+				boom: { kind: "advanced", sequence: 1 },
+			},
+		});
+		expect(session.mirror.entities()[0]?.placement).toMatchObject({
+			kind: "world",
+			pose: { coords: { x: 4 } },
+		});
 	});
 });
 

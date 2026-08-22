@@ -252,6 +252,8 @@ pub struct ExplorerEntityProjection {
 
 /// One accepted fixed-tick body path paired with its still-current semantic generation.
 pub struct ExplorerEntityPhysicalTick {
+    /// Whether frontend entity presentation consumes this tick; host-side followers ignore this.
+    pub publish: bool,
     /// Clip this entity started playing on this tick, present only when it changed.
     pub clip: Option<holtburger_world::motion::PlayingMotionClip>,
     /// Possession lifecycle edges committed with this exact body solve.
@@ -262,6 +264,25 @@ pub struct ExplorerEntityPhysicalTick {
     pub input: DynamicEntityProjectionInput,
     /// Complete accepted solver path and immutable collision snapshot used by the solve.
     pub solved: HostPhysicalBodyTick,
+}
+
+/// Exact possessed identity whose accepted body path belongs to this collection epoch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExplorerPossessedBodyEpoch {
+    /// Possessed entity identity.
+    pub guid: Guid,
+    /// Exact semantic generation protected by the registry lock for the whole solve.
+    pub entity_generation: u64,
+    /// Exact possession ownership generation protected by the same transaction.
+    pub possession_generation: u64,
+}
+
+/// Complete host-facing entity collection result before frontend publication filtering.
+pub struct ExplorerEntityCollectionTick {
+    /// Every scheduled accepted body tick, including stable possessed-body evidence.
+    pub ticks: Vec<ExplorerEntityPhysicalTick>,
+    /// Possessed identity for this epoch, absent after release or retirement.
+    pub possession: Option<ExplorerPossessedBodyEpoch>,
 }
 
 /// Committed semantic/body facts from one complete effective-state replacement.
@@ -1343,8 +1364,8 @@ impl ExplorerEntityRuntime {
 
     /// Advances every eligible physical instance in one generation-stable collection transaction.
     ///
-    /// Only frontend-relevant body/path changes leave this boundary. Stable entities still remain
-    /// in the scene-owned scan; Phase 5A may skip their integration without a second active set.
+    /// Every accepted body tick leaves this host boundary. `publish` records the existing frontend
+    /// filter without deleting stable possessed-body evidence needed by same-epoch followers.
     /// Possesses one spawned entity, so commands and the follow camera target it.
     ///
     /// Possession is exclusive: taking a new entity releases the previous one and discards its
@@ -1561,6 +1582,23 @@ impl ExplorerEntityRuntime {
         })
     }
 
+    /// Whether all identity dimensions still name the one active possession.
+    pub fn has_possession(&self, expected: ExplorerPossessedBodyEpoch) -> bool {
+        let registry = self
+            .registry
+            .lock()
+            .expect("Explorer entity registry lock poisoned");
+        registry.motion.active.as_ref().is_some_and(|active| {
+            active.guid == expected.guid
+                && active.entity_generation == expected.entity_generation
+                && active.generation == expected.possession_generation
+                && registry
+                    .entities
+                    .get(&active.guid)
+                    .is_some_and(|entity| entity.generation == active.entity_generation)
+        })
+    }
+
     /// The motion table an entity animates from: its own property, or the default its setup installs.
     fn motion_table_for(&self, definition: &DynamicEntityDefinition) -> Option<u32> {
         definition.content.motion_table_did.or_else(|| {
@@ -1645,7 +1683,7 @@ impl ExplorerEntityRuntime {
         &self,
         delta_seconds: f32,
         now: std::time::Instant,
-    ) -> anyhow::Result<Vec<ExplorerEntityPhysicalTick>> {
+    ) -> anyhow::Result<ExplorerEntityCollectionTick> {
         let mut registry = self
             .registry
             .lock()
@@ -1663,6 +1701,12 @@ impl ExplorerEntityRuntime {
                     .cloned(),
             ))
         });
+        if let Some((active, _, _)) = &possession {
+            // A possessed target is also a host-follow anchor. It must author a held path every
+            // epoch even after ordinary dynamic settling would remove it from the active scan.
+            self.simulation
+                .wake_dynamic_body(SpatialBodyId::Entity(active.guid));
+        }
         let mut proposal = None;
         let collection =
             self.simulation
@@ -1726,15 +1770,9 @@ impl ExplorerEntityRuntime {
         let live: BTreeSet<Guid> = registry.entities.keys().copied().collect();
         let changed_clips = registry.motion.take_changed_clips(&live);
         let outcome_guids: BTreeSet<Guid> = possession_outcomes.keys().copied().collect();
-        collection
+        let ticks = collection
             .bodies
             .into_iter()
-            .filter(|solved| {
-                physical_tick_changed(solved)
-                    || solved.current.id.authoritative_guid().is_some_and(|guid| {
-                        changed_clips.contains_key(&guid) || outcome_guids.contains(&guid)
-                    })
-            })
             .map(|solved| {
                 let changed_clips = &changed_clips;
                 let SpatialBodyId::Entity(guid) = solved.current.id else {
@@ -1755,7 +1793,11 @@ impl ExplorerEntityRuntime {
                     &instance.definition,
                     &solved.current,
                 )?;
+                let publish = physical_tick_changed(&solved)
+                    || changed_clips.contains_key(&guid)
+                    || outcome_guids.contains(&guid);
                 Ok(ExplorerEntityPhysicalTick {
+                    publish,
                     clip: changed_clips.get(&guid).copied(),
                     possession_event_outcomes: possession_outcomes
                         .remove(&guid)
@@ -1765,7 +1807,18 @@ impl ExplorerEntityRuntime {
                     solved,
                 })
             })
-            .collect()
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        let possession = possession.and_then(|(active, _, _)| {
+            ticks
+                .iter()
+                .any(|tick| tick.solved.current.id == SpatialBodyId::Entity(active.guid))
+                .then_some(ExplorerPossessedBodyEpoch {
+                    guid: active.guid,
+                    entity_generation: active.entity_generation,
+                    possession_generation: active.generation,
+                })
+        });
+        Ok(ExplorerEntityCollectionTick { ticks, possession })
     }
 
     /// Tests whether an asynchronous outcome still targets the current live generation.
@@ -1946,10 +1999,10 @@ mod tests {
     use holtburger_world::{
         DynamicBodyCollisionDefinition, EdgeProtection, EntityAppearance,
         EntityCollisionParticipation, EntityCollisionReportPolicy, EntityDynamicCollisionPolicy,
-        EntityPhysicsScheduling, PhysicalBodyDefinition, PhysicalBodyParticipation,
-        PhysicalBodyResponsePolicy, PhysicalElasticity, PhysicalFlyConfig, PhysicalFriction,
-        PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion, PhysicsAttachment,
-        PreparedEntityTargetGeometry, resolve_effective_entity_physics_state,
+        EntityPhysicsScheduling, FreeSphereConfig, PhysicalBodyDefinition,
+        PhysicalBodyParticipation, PhysicalBodyResponsePolicy, PhysicalElasticity,
+        PhysicalFriction, PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion,
+        PhysicsAttachment, PreparedEntityTargetGeometry, resolve_effective_entity_physics_state,
     };
     use std::time::Instant;
 
@@ -2016,7 +2069,7 @@ mod tests {
         child
     }
 
-    fn physical() -> DynamicPhysicalBodyDefinition {
+    fn physical_with_upper(upper_constraint: Option<Sphere>) -> DynamicPhysicalBodyDefinition {
         let response_policy = PhysicalBodyResponsePolicy {
             restitution: PhysicalRestitution::Elastic(PhysicalElasticity::DEFAULT),
             friction: PhysicalFriction::DEFAULT,
@@ -2029,7 +2082,7 @@ mod tests {
                     center: Vector3::new(0.0, 0.0, 0.5),
                     radius: 0.5,
                 },
-                None,
+                upper_constraint,
             )
             .unwrap(),
             EdgeProtection::Creature,
@@ -2069,6 +2122,10 @@ mod tests {
         }
     }
 
+    fn physical() -> DynamicPhysicalBodyDefinition {
+        physical_with_upper(None)
+    }
+
     fn physical_with_ball_target() -> DynamicPhysicalBodyDefinition {
         let mut physical = physical();
         physical.entity_collision.target_geometry.fallback_shapes =
@@ -2090,7 +2147,7 @@ mod tests {
                 None,
             )
             .unwrap(),
-            PhysicalFlyConfig {
+            FreeSphereConfig {
                 maximum_substep_distance: 0.25,
                 maximum_substeps: 32,
                 maximum_contact_passes: 8,
@@ -2206,6 +2263,7 @@ mod tests {
 
         assert_eq!(
             ticks
+                .ticks
                 .iter()
                 .map(|tick| (tick.input.identity.guid, tick.generation))
                 .collect::<Vec<_>>(),
@@ -2214,7 +2272,7 @@ mod tests {
                 (second_active_guid, second.instance.generation),
             ]
         );
-        assert!(ticks.iter().all(|tick| {
+        assert!(ticks.ticks.iter().all(|tick| {
             tick.solved.result.motion.path.anchor() == Guid(0xda55_ffff)
                 && tick.solved.result.motion.path.legs().last().is_some()
         }));
@@ -2261,6 +2319,7 @@ mod tests {
             .tick_physical_collection(0.1, Instant::now())
             .unwrap();
         let mover_tick = ticks
+            .ticks
             .iter()
             .find(|tick| tick.input.identity.guid == mover_guid)
             .unwrap();
@@ -2761,6 +2820,13 @@ mod tests {
     fn walking_runtime_with_catalog(
         catalog: Arc<MotionSequenceCatalog>,
     ) -> (Arc<HostSimulationRuntime>, ExplorerEntityRuntime, Guid) {
+        walking_runtime_with_body(catalog, physical())
+    }
+
+    fn walking_runtime_with_body(
+        catalog: Arc<MotionSequenceCatalog>,
+        body: DynamicPhysicalBodyDefinition,
+    ) -> (Arc<HostSimulationRuntime>, ExplorerEntityRuntime, Guid) {
         let simulation = Arc::new(HostSimulationRuntime::new(Arc::new(FlatGround)));
         let runtime = ExplorerEntityRuntime::with_guid_range_and_motion(
             Arc::clone(&simulation),
@@ -2781,11 +2847,7 @@ mod tests {
         let mut definition = definition(guid, 1, 0.0);
         definition.content.motion_table_did = Some(WALK_TABLE);
         runtime
-            .spawn_prepared(
-                definition,
-                EntityPhysicalIntent::Simulated,
-                Some(physical()),
-            )
+            .spawn_prepared(definition, EntityPhysicalIntent::Simulated, Some(body))
             .unwrap();
         (simulation, runtime, guid)
     }
@@ -2875,7 +2937,7 @@ mod tests {
             .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(33))
             .unwrap();
         assert!(
-            first.iter().any(|tick| tick.clip.is_some()),
+            first.ticks.iter().any(|tick| tick.clip.is_some()),
             "the first tick announces the clip"
         );
 
@@ -2886,6 +2948,7 @@ mod tests {
             for tick in runtime
                 .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(step * 33))
                 .unwrap()
+                .ticks
             {
                 if let Some(clip) = tick.clip {
                     announcements += 1;
@@ -3080,7 +3143,7 @@ mod tests {
         let charged = runtime
             .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(33))
             .unwrap();
-        assert!(charged.iter().any(|tick| {
+        assert!(charged.ticks.iter().any(|tick| {
             tick.possession_event_outcomes.iter().any(|outcome| {
                 matches!(
                     outcome.result,
@@ -3104,7 +3167,7 @@ mod tests {
         let launched = runtime
             .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(66))
             .unwrap();
-        assert!(launched.iter().any(|tick| {
+        assert!(launched.ticks.iter().any(|tick| {
             tick.possession_event_outcomes.iter().any(|outcome| {
                 matches!(
                     outcome.result,
@@ -3127,6 +3190,7 @@ mod tests {
                 .unwrap();
             assert!(
                 ticks
+                    .ticks
                     .iter()
                     .flat_map(|tick| &tick.possession_event_outcomes)
                     .all(|outcome| !matches!(
@@ -3144,6 +3208,7 @@ mod tests {
                 saw_airborne_turn = true;
             }
             restored_walk_clip |= ticks
+                .ticks
                 .iter()
                 .any(|tick| tick.clip.is_some_and(|clip| clip.animation_id == WALK_ANIM));
             if body.contact == ContactState::Grounded && step > 3 {
@@ -3188,7 +3253,7 @@ mod tests {
         let charged = runtime
             .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(33))
             .unwrap();
-        assert!(charged.iter().any(|tick| {
+        assert!(charged.ticks.iter().any(|tick| {
             tick.clip
                 .is_some_and(|clip| clip.animation_id == READY_ANIM)
         }));
@@ -3208,7 +3273,7 @@ mod tests {
         let launched = runtime
             .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(66))
             .unwrap();
-        assert!(launched.iter().any(|tick| {
+        assert!(launched.ticks.iter().any(|tick| {
             tick.clip
                 .is_some_and(|clip| clip.animation_id == FALLING_ANIM)
         }));
@@ -3263,11 +3328,11 @@ mod tests {
         let held = runtime
             .tick_physical_collection(1.0, settled_at + Duration::from_secs(1))
             .unwrap();
-        assert!(held.iter().all(|tick| {
+        assert!(held.ticks.iter().all(|tick| {
             tick.solved.current.id != SpatialBodyId::Entity(guid)
                 || tick.solved.result.motion.status != PhysicalBodyTickStatus::Solved
         }));
-        assert!(held.iter().all(|tick| {
+        assert!(held.ticks.iter().all(|tick| {
             tick.possession_event_outcomes.iter().all(|outcome| {
                 !matches!(
                     outcome.result,
@@ -3291,7 +3356,7 @@ mod tests {
         let retried = runtime
             .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(1_033))
             .unwrap();
-        assert!(retried.iter().any(|tick| {
+        assert!(retried.ticks.iter().any(|tick| {
             tick.possession_event_outcomes.iter().any(|outcome| {
                 matches!(
                     outcome.result,
@@ -3631,5 +3696,225 @@ mod tests {
                 .is_empty(),
             "a loaded static-world collision change must wake settled bodies before the next solve"
         );
+    }
+
+    #[test]
+    fn host_boom_follows_exact_possession_without_registering_a_camera_body() {
+        use crate::host_kinematic_boom_runtime::{
+            HostKinematicBoomIntentReceipt, HostKinematicBoomIntentRequest,
+            HostKinematicBoomRuntime, HostKinematicBoomStartRequest,
+            HostKinematicBoomTargetSphereRole, HostKinematicBoomTick,
+        };
+
+        let upper = Sphere {
+            center: Vector3::new(0.0, 0.0, 1.2),
+            radius: 0.20,
+        };
+        let (simulation, entities, guid) =
+            walking_runtime_with_body(walking_catalog(), physical_with_upper(Some(upper)));
+        let entities = Arc::new(entities);
+        let possession = entities.possess(guid).unwrap();
+        let boom =
+            HostKinematicBoomRuntime::new(Arc::clone(&entities), Arc::clone(&simulation)).unwrap();
+        let body_count = simulation.registered_body_count();
+        assert_eq!(body_count, 1, "the fixture owns only its possessed body");
+
+        let receipt = boom
+            .start(HostKinematicBoomStartRequest {
+                possession_generation: possession.possession_generation,
+                guid,
+                entity_generation: possession.entity_generation,
+                initial_reach: 4.0,
+                input_sequence: 1,
+                view_direction: [0.0, -1.0, 0.0],
+                cumulative_zoom_displacement: 0.0,
+            })
+            .unwrap();
+        assert_eq!(simulation.registered_body_count(), body_count);
+        assert_eq!(
+            boom.set_intent(HostKinematicBoomIntentRequest {
+                identity: receipt.identity,
+                input_sequence: 1,
+                view_direction: [1.0, 0.0, 0.0],
+                cumulative_zoom_displacement: 1.0,
+            })
+            .unwrap(),
+            HostKinematicBoomIntentReceipt::IgnoredStale
+        );
+        assert_eq!(
+            boom.set_intent(HostKinematicBoomIntentRequest {
+                identity: receipt.identity,
+                input_sequence: 2,
+                view_direction: [1.0, 0.0, 0.0],
+                cumulative_zoom_displacement: 1.0,
+            })
+            .unwrap(),
+            HostKinematicBoomIntentReceipt::Accepted
+        );
+
+        let started_at = Instant::now();
+        let collection = entities
+            .tick_physical_collection(1.0 / 30.0, started_at)
+            .unwrap();
+        let tick = boom.advance(&collection, 1.0 / 30.0).unwrap().unwrap();
+        let HostKinematicBoomTick::Advanced {
+            identity,
+            sequence,
+            target_sphere_role,
+            effective_camera_radius,
+            path,
+            ..
+        } = tick
+        else {
+            panic!("an empty flat scene must accept the first boom path")
+        };
+        assert_eq!(identity, receipt.identity);
+        assert_eq!(sequence, 1);
+        assert_eq!(
+            target_sphere_role,
+            HostKinematicBoomTargetSphereRole::UpperConstraint
+        );
+        assert_eq!(effective_camera_radius, upper.radius);
+        assert_eq!(path.legs.last().unwrap().end_fraction, 1.0);
+        assert!(path.initial.visual_pivot.coords.z.is_finite());
+        assert_eq!(simulation.registered_body_count(), body_count);
+
+        assert_eq!(
+            boom.set_intent(HostKinematicBoomIntentRequest {
+                identity: receipt.identity,
+                input_sequence: 3,
+                view_direction: [0.0, 1.0, 0.0],
+                cumulative_zoom_displacement: 1.0,
+            })
+            .unwrap(),
+            HostKinematicBoomIntentReceipt::Accepted
+        );
+
+        let replacement_possession = entities.possess(guid).unwrap();
+        let replacement = boom
+            .start(HostKinematicBoomStartRequest {
+                possession_generation: replacement_possession.possession_generation,
+                guid,
+                entity_generation: replacement_possession.entity_generation,
+                initial_reach: 4.0,
+                input_sequence: 1,
+                view_direction: [0.0, -1.0, 0.0],
+                cumulative_zoom_displacement: 0.0,
+            })
+            .unwrap();
+        assert!(replacement.identity.boom_generation > receipt.identity.boom_generation);
+        assert!(
+            !boom.stop(receipt.identity),
+            "a stale stop must preserve the replacement"
+        );
+        let replacement_collection = entities
+            .tick_physical_collection(
+                1.0 / 30.0,
+                started_at + std::time::Duration::from_millis(33),
+            )
+            .unwrap();
+        assert!(matches!(
+            boom.advance(&replacement_collection, 1.0 / 30.0).unwrap(),
+            Some(HostKinematicBoomTick::Advanced { identity, .. })
+                if identity == replacement.identity
+        ));
+
+        entities
+            .release_possession(started_at + std::time::Duration::from_millis(34))
+            .unwrap();
+        let released_collection = entities
+            .tick_physical_collection(
+                1.0 / 30.0,
+                started_at + std::time::Duration::from_millis(66),
+            )
+            .unwrap();
+        assert!(
+            boom.advance(&released_collection, 1.0 / 30.0)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            boom.advance(&released_collection, 1.0 / 30.0)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(simulation.registered_body_count(), body_count);
+    }
+
+    #[test]
+    fn host_boom_emits_a_terminal_budget_failure_once() {
+        use crate::host_kinematic_boom_runtime::{
+            HostKinematicBoomFailureKind, HostKinematicBoomIntentReceipt,
+            HostKinematicBoomIntentRequest, HostKinematicBoomRuntime,
+            HostKinematicBoomStartRequest, HostKinematicBoomTick,
+        };
+        use holtburger_core::{KinematicBoomProfile, KinematicBoomProfileDefinition};
+        use holtburger_world::StaticSphereCastConfig;
+
+        let (simulation, entities, guid) = walking_runtime();
+        let entities = Arc::new(entities);
+        let possession = entities.possess(guid).unwrap();
+        let profile = KinematicBoomProfile::new(KinematicBoomProfileDefinition {
+            minimum_reach: 1.2,
+            maximum_reach: 8.0,
+            vertical_pivot_half_life: 0.08,
+            maximum_vertical_pivot_lag: 0.30,
+            clearance_recovery_half_life: 0.10,
+            clearance_hysteresis: 0.05,
+            maximum_control_leg_displacement: 0.01,
+            maximum_control_legs: 1,
+            radial_cast: StaticSphereCastConfig {
+                maximum_substep_distance: 0.25,
+                maximum_substeps: 40,
+                surface_clearance: 0.000_5,
+            },
+            transit: FreeSphereConfig {
+                maximum_substep_distance: 0.25,
+                maximum_substeps: 64,
+                maximum_contact_passes: 8,
+                separation_epsilon: 0.000_5,
+            },
+        })
+        .unwrap();
+        let boom = HostKinematicBoomRuntime::with_profile(
+            Arc::clone(&entities),
+            Arc::clone(&simulation),
+            profile,
+        );
+        let receipt = boom
+            .start(HostKinematicBoomStartRequest {
+                possession_generation: possession.possession_generation,
+                guid,
+                entity_generation: possession.entity_generation,
+                initial_reach: 4.0,
+                input_sequence: 1,
+                view_direction: [0.0, -1.0, 0.0],
+                cumulative_zoom_displacement: 0.0,
+            })
+            .unwrap();
+        assert_eq!(
+            boom.set_intent(HostKinematicBoomIntentRequest {
+                identity: receipt.identity,
+                input_sequence: 2,
+                view_direction: [0.0, 1.0, 0.0],
+                cumulative_zoom_displacement: 0.0,
+            })
+            .unwrap(),
+            HostKinematicBoomIntentReceipt::Accepted
+        );
+        let collection = entities
+            .tick_physical_collection(1.0 / 30.0, Instant::now())
+            .unwrap();
+        assert!(matches!(
+            boom.advance(&collection, 1.0 / 30.0).unwrap(),
+            Some(HostKinematicBoomTick::Failed {
+                identity,
+                sequence: 1,
+                failure: HostKinematicBoomFailureKind::ControlLegBudget,
+                ..
+            }) if identity == receipt.identity
+        ));
+        assert!(boom.advance(&collection, 1.0 / 30.0).unwrap().is_none());
+        assert_eq!(simulation.registered_body_count(), 1);
     }
 }

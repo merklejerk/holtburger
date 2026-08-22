@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { DynamicEntityView } from "../lib/game/runtime/dynamic-entity-feed";
+	import type { HostKinematicBoomStatus } from "./host-kinematic-boom-session";
 	import {
 		EXPLORER_SPAWN_DISTANCE,
 		type ExplorerCatalogCapability,
@@ -23,6 +24,7 @@
 		/** Change the stance the possessed entity holds. */
 		readonly setStance: (style: number) => Promise<void>;
 		readonly possession: ExplorerPossession | null;
+		readonly boomCameraStatus: HostKinematicBoomStatus | null;
 	}
 
 	let {
@@ -35,6 +37,7 @@
 		possess,
 		setStance,
 		possession,
+		boomCameraStatus,
 	}: Props = $props();
 	async function togglePossession(): Promise<void> {
 		if (pending || selected === null) return;
@@ -125,6 +128,20 @@
 
 	function formatGuid(guid: number): string {
 		return `0x${guid.toString(16).padStart(8, "0")}`;
+	}
+
+	function formatBoomStatus(status: HostKinematicBoomStatus): string {
+		if (status.kind === "stopped") return "stopped";
+		if (status.kind === "awaiting-registration") return "registering with host";
+		if (status.kind === "awaiting-first-path") {
+			return `generation ${status.identity.boomGeneration}; awaiting first path`;
+		}
+		if (status.kind === "failed") {
+			return `generation ${status.identity.boomGeneration}; terminal ${status.failure}; holding last safe pose`;
+		}
+		const recovery =
+			status.reseedReason === null ? "" : `; reseeded ${status.reseedReason}`;
+		return `generation ${status.identity.boomGeneration}; path ${status.sequence}; ${status.targetSphereRole}; reach ${status.renderedReach.toFixed(2)}/${status.desiredReach.toFixed(2)}m; radius ${status.effectiveCameraRadius.toFixed(2)}m; dropped ${status.droppedPaths}${recovery}`;
 	}
 </script>
 
@@ -308,6 +325,12 @@
 			</div>
 
 			{#if selectedIsPossessed && possession !== null && possession.guid !== null}
+				{#if boomCameraStatus !== null}
+					<div class="ac-param-row">
+						<span class="ac-param-key">Boom camera</span>
+						<code>{formatBoomStatus(boomCameraStatus)}</code>
+					</div>
+				{/if}
 				<div class="ac-param-row">
 					<span class="ac-param-key">Motion table</span>
 					<code>{possession.motionTableId}</code>

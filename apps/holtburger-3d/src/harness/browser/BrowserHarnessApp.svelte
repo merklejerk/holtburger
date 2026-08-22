@@ -2,12 +2,6 @@
 	import { onMount } from "svelte";
 	import { resolveExplorerOutdoorFocusPose } from "../../explorer/explorer-camera-framing";
 	import { FrontendCameraController } from "../../lib/game/controls/frontend-camera-controller";
-	import {
-		advanceBoomState,
-		initialBoomState,
-	} from "../../lib/game/controls/boom-camera-controller";
-	import type { BoomSweepSource } from "../../lib/game/controls/boom-sweep-source";
-	import { httpBoomSweepSource } from "./http-boom-sweep-source";
 	import { FRONTEND_TUNING } from "../../lib/frontend-tuning";
 	import {
 		createColorGradeParameters,
@@ -30,6 +24,7 @@
 	} from "../../lib/game/landblocks";
 	import {
 		createCameraAxesRadians,
+		createCameraLookAtAngles,
 		createCameraRotationRadians,
 	} from "../../lib/game/math/camera-orientation";
 	import { sceneVec3, sceneVector3 } from "../../lib/assets/ac-frame";
@@ -68,10 +63,14 @@
 		type TextureFilteringPolicy,
 	} from "../../lib/game/renderer/texture-filtering-policy";
 	import { resolveSceneEnvironment } from "../../lib/game/environment/scene-environment";
+	import { resolvePhysicalFlyViewDirection } from "../../lib/game/motion/host-physical-fly-path";
+	import type { HostCameraPlacement } from "../../lib/game/motion/host-placed-path";
 	import {
-		resolvePhysicalFlyViewDirection,
-		type PhysicalFlyPlacement,
-	} from "../../lib/game/motion/host-physical-fly-path";
+		decodeHostKinematicBoomIntentReceipt,
+		resolveKinematicBoomDirection,
+		type HostKinematicBoomIdentity,
+	} from "../../lib/game/motion/host-kinematic-boom-path";
+	import { spawnedDynamicPlacement } from "../../lib/game/runtime/spawned-dynamic-presentation";
 	import {
 		createExplorerLaunchRequest,
 		createExplorerRelocationRequest,
@@ -82,7 +81,15 @@
 		DynamicEntityEvent,
 		DynamicEntityView,
 	} from "../../lib/game/runtime/dynamic-entity-feed";
-	import { HttpExplorerEntityHost } from "./http-explorer-entity-host";
+	import {
+		HttpExplorerEntityHost,
+		type HttpKinematicBoomIntentRequest,
+		type HttpKinematicBoomStartRequest,
+	} from "./http-explorer-entity-host";
+	import {
+		HostKinematicBoomSession,
+		type HostKinematicBoomTransport,
+	} from "../../explorer/host-kinematic-boom-session";
 	import type {
 		ExplorerPossession,
 		ExplorerPossessionEventRequest,
@@ -91,6 +98,7 @@
 		PossessionMotionProbe,
 	} from "../../explorer/explorer-entity-possession";
 	import type { PossessionTickResponse } from "./http-explorer-entity-host";
+	import type { ExplorerFixedTickEnvelope } from "../../explorer/explorer-fixed-tick";
 	import {
 		installTerrainGlTrace,
 		type TerrainGlTrace,
@@ -324,6 +332,12 @@
 		readonly focusExplorerOutdoor: (
 			landblockId: string,
 		) => BrowserHarnessCameraEvidence;
+		/** Place the camera at the contained bounds center of one authored EnvCell. */
+		readonly focusExplorerEnvCell: (
+			envCellId: string,
+			cameraYawDegrees: number,
+			cameraPitchDegrees: number,
+		) => BrowserHarnessCameraEvidence;
 		/** Place the continuous camera at one authoritative EnvCell pose. */
 		readonly setEnvCellCamera: (
 			envCellId: string,
@@ -390,18 +404,6 @@
 		) => Promise<readonly DynamicEntityView[]>;
 		/** Retire every live harness-spawned generation through the same host lifecycle. */
 		readonly despawnExplorerEntityFleet: () => Promise<number>;
-		/**
-		 * Ask the host how far a sphere travels from a scene point before static geometry stops it.
-		 *
-		 * The same query the third-person boom clamps against, exposed directly so a probe can
-		 * assert it against real loaded collision rather than only through camera behaviour.
-		 */
-		readonly sweepSphereDistance: (
-			origin: readonly [number, number, number],
-			direction: readonly [number, number, number],
-			distance: number,
-			radius: number,
-		) => Promise<number>;
 		/** Apply catalog-authored launch speed/spin to one exact generation. */
 		readonly launchExplorerEntity: (
 			guid: number,
@@ -411,7 +413,7 @@
 		/** Advance the host collection by one explicit deterministic duration. */
 		readonly tickExplorerEntities: (
 			durationMilliseconds: number,
-		) => Promise<DynamicEntityEvent | null>;
+		) => Promise<ExplorerFixedTickEnvelope | null>;
 		/** Acquire or release exact host possession without browser input synthesis. */
 		readonly possessExplorerEntity: (
 			guid: number | null,
@@ -430,10 +432,35 @@
 		) => Promise<PossessionTickResponse>;
 		/** Read the host's exact active stance/substate/modifier/clip projection. */
 		readonly possessionMotionProbe: () => Promise<PossessionMotionProbe | null>;
+		/** Register one exact boom generation through the production-shaped host adapter. */
+		readonly startKinematicBoom: (
+			request: HttpKinematicBoomStartRequest,
+		) => Promise<HostKinematicBoomIdentity>;
+		/** Replace semantic boom intent while retaining cumulative wheel displacement. */
+		readonly setKinematicBoomIntent: (
+			request: HttpKinematicBoomIntentRequest,
+		) => Promise<"accepted" | "ignored-stale">;
+		/** Stop one exact boom generation without affecting a replacement generation. */
+		readonly stopKinematicBoom: (
+			identity: HostKinematicBoomIdentity,
+		) => Promise<boolean>;
+		/** Read the production pivot-to-camera direction for the current harness view. */
+		readonly kinematicBoomDirection: () => readonly [number, number, number];
+		/** Measure whether one possessed target is in front of the presented boom camera. */
+		readonly probeBoomFraming: (guid: number) => {
+			readonly planarCameraToTargetDistance: number;
+			readonly planarForwardAlignment: number;
+			readonly planarForwardProjection: number;
+		};
+		/** Wait for presentation and return camera plus renderer selection state. */
+		readonly probeNextFrameState: () => Promise<{
+			readonly camera: BrowserHarnessCameraEvidence | null;
+			readonly envCellRenderMode: "flat" | "portal";
+			readonly metrics: FrameSelectionMetrics | null;
+		}>;
 		/** Exercise the compiled shared third-person router/look/boom ownership in-browser. */
 		readonly probeThirdPersonControls: () => {
-			readonly boomDesiredAfter: number;
-			readonly boomDesiredBefore: number;
+			readonly boomZoomDisplacement: number;
 			readonly cameraYawAfterKeyboardTurn: number;
 			readonly cameraYawAfterPointerOrbit: number;
 			readonly cameraYawBefore: number;
@@ -579,7 +606,10 @@
 		readonly near: number;
 		readonly pitchDegrees: number;
 		readonly policy:
-			"explicit-env-cell" | "explicit-outdoor" | "explorer-outdoor-focus";
+			| "explicit-env-cell"
+			| "explicit-outdoor"
+			| "explorer-outdoor-focus"
+			| "host-boom";
 		readonly position: readonly [number, number, number];
 		readonly yawDegrees: number;
 	}
@@ -641,10 +671,10 @@
 	});
 	let contentSource: HttpLandblockContentSource | undefined;
 	let entityHost: HttpExplorerEntityHost | undefined;
-	let boomSweeps: BoomSweepSource = {
-		sweep: () =>
-			Promise.reject(new Error("Harness sweep source is not built yet.")),
-	};
+	let boomCameraSession: HostKinematicBoomSession | undefined;
+	let boomInputSequence = 0;
+	let boomCumulativeZoomDisplacement = 0;
+	let boomStopResult = false;
 	let spawnedEntities: readonly DynamicEntityView[] = [];
 	let runtime: GameRuntime | undefined;
 	let renderer: WebGL2Renderer | undefined;
@@ -1037,6 +1067,41 @@
 		};
 	}
 
+	function focusExplorerEnvCell(
+		rawEnvCellId: string,
+		cameraYawDegrees: number,
+		cameraPitchDegrees: number,
+	): BrowserHarnessCameraEvidence {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		const envCellId = parseEnvCellId(rawEnvCellId, "EnvCell focus");
+		const landblockId = `${envCellId.slice(0, 6)}ffff` as LandblockId;
+		const residency = { envCellId, landblockId };
+		const bounds = runtime.queryEnvCellBounds(residency);
+		if (bounds === null) {
+			throw new Error(`EnvCell focus cannot find bounds for ${envCellId}.`);
+		}
+		const position = new Vec3(
+			(bounds.min.x + bounds.max.x) * 0.5,
+			(bounds.min.y + bounds.max.y) * 0.5,
+			(bounds.min.z + bounds.max.z) * 0.5,
+		);
+		if (runtime.queryEnvCellPointContainment(residency, position) !== true) {
+			throw new Error(
+				`EnvCell focus bounds center is not contained by ${envCellId}.`,
+			);
+		}
+		setEnvCellCamera(
+			envCellId,
+			[position.x, position.y, position.z],
+			cameraYawDegrees,
+			cameraPitchDegrees,
+		);
+		if (cameraEvidence === null) {
+			throw new Error("EnvCell focus did not retain camera evidence.");
+		}
+		return cameraEvidence;
+	}
+
 	function setEnvCellRenderMode(envCellRenderMode: "flat" | "portal"): void {
 		if (!runtime) throw new Error("Browser harness runtime is not ready.");
 		frameSettings = { ...frameSettings, envCellRenderMode };
@@ -1095,7 +1160,7 @@
 	}
 
 	function entityScenarioAnchor(): {
-		readonly placement: PhysicalFlyPlacement;
+		readonly placement: HostCameraPlacement;
 		readonly direction: readonly [number, number, number];
 	} {
 		if (cameraEvidence === null)
@@ -1116,6 +1181,54 @@
 				right: [axes.right.x, axes.right.y, axes.right.z],
 				up: [axes.up.x, axes.up.y, axes.up.z],
 			}),
+		};
+	}
+
+	function kinematicBoomDirection(): readonly [number, number, number] {
+		return resolveKinematicBoomDirection(entityScenarioAnchor().direction);
+	}
+
+	function probeBoomFraming(guid: number): {
+		readonly planarCameraToTargetDistance: number;
+		readonly planarForwardAlignment: number;
+		readonly planarForwardProjection: number;
+	} {
+		const camera = cameraEvidence;
+		if (camera === null)
+			throw new Error("Boom framing probe requires a presented camera.");
+		const entity = spawnedEntities.find(
+			(candidate) => candidate.identity.guid === guid,
+		);
+		if (entity === undefined)
+			throw new Error(`Boom framing probe could not find entity ${guid}.`);
+		const placement = spawnedDynamicPlacement(entity);
+		const owner = createLandblockWorldOrigin(placement.landblockId);
+		const target = new Vec3(
+			owner.x + placement.localTransform.m41,
+			placement.localTransform.m42,
+			owner.z + placement.localTransform.m43,
+		);
+		const cameraToTarget = new Vec3(
+			target.x - camera.position[0],
+			0,
+			target.z - camera.position[2],
+		);
+		const distance = Math.hypot(cameraToTarget.x, cameraToTarget.z);
+		const axes = createCameraAxesRadians(
+			(camera.yawDegrees * Math.PI) / 180,
+			(camera.pitchDegrees * Math.PI) / 180,
+		);
+		const horizontalForwardLength = Math.hypot(axes.forward.x, axes.forward.z);
+		const forwardProjection =
+			horizontalForwardLength === 0
+				? 0
+				: (cameraToTarget.x * axes.forward.x +
+						cameraToTarget.z * axes.forward.z) /
+					horizontalForwardLength;
+		return {
+			planarCameraToTargetDistance: distance,
+			planarForwardAlignment: distance === 0 ? 0 : forwardProjection / distance,
+			planarForwardProjection: forwardProjection,
 		};
 	}
 
@@ -1198,34 +1311,20 @@
 		return entity;
 	}
 
-	async function sweepSphereDistance(
-		origin: readonly [number, number, number],
-		direction: readonly [number, number, number],
-		distance: number,
-		radius: number,
-	): Promise<number> {
-		return boomSweeps.sweep({
-			direction: new Vec3(direction[0], direction[1], direction[2]),
-			distance,
-			envCellId: null,
-			origin: sceneVec3(new Vec3(origin[0], origin[1], origin[2])),
-			radius,
-		});
-	}
-
 	async function tickExplorerEntities(
 		durationMilliseconds: number,
-	): Promise<DynamicEntityEvent | null> {
+	): Promise<ExplorerFixedTickEnvelope | null> {
 		if (!runtime || !entityHost)
 			throw new Error(
 				"Browser harness entity tick requires an active runtime.",
 			);
 		if (!Number.isFinite(durationMilliseconds) || durationMilliseconds <= 0)
 			throw new Error("Entity tick duration must be positive and finite.");
-		const event = await entityHost.tick(durationMilliseconds);
-		if (event === null) return null;
-		applyDynamicEntityAdvanceEvent(event);
-		return event;
+		const envelope = await entityHost.tick(durationMilliseconds);
+		if (envelope?.entityEvent) {
+			applyDynamicEntityAdvanceEvent(envelope.entityEvent);
+		}
+		return envelope;
 	}
 
 	async function possessExplorerEntity(
@@ -1260,7 +1359,17 @@
 		if (!Number.isFinite(durationMilliseconds) || durationMilliseconds <= 0)
 			throw new Error("Possession tick duration must be positive and finite.");
 		const response = await entityHost.tickPossession(durationMilliseconds);
-		if (response.event !== null) applyDynamicEntityAdvanceEvent(response.event);
+		const receivedAtMs = performance.now();
+		if (response.envelope?.entityEvent) {
+			applyDynamicEntityAdvanceEvent(response.envelope.entityEvent);
+		}
+		if (response.envelope?.boom) {
+			boomCameraSession?.receive(
+				response.envelope.boom,
+				response.envelope.durationMs,
+				receivedAtMs,
+			);
+		}
 		return response;
 	}
 
@@ -1268,6 +1377,172 @@
 		if (!entityHost)
 			throw new Error("Browser harness possession requires an active host.");
 		return entityHost.possessionMotionProbe();
+	}
+
+	async function startKinematicBoom(
+		request: HttpKinematicBoomStartRequest,
+	): Promise<HostKinematicBoomIdentity> {
+		if (!entityHost)
+			throw new Error(
+				"Browser harness kinematic boom requires an active host.",
+			);
+		if (
+			request.inputSequence !== 0 ||
+			request.cumulativeZoomDisplacement !== 0
+		) {
+			throw new Error(
+				"Browser harness frontend boom must start at input sequence and cumulative zoom zero.",
+			);
+		}
+		const session = new HostKinematicBoomSession(boomTransport(entityHost));
+		await session.start(
+			{
+				possessionGeneration: request.possessionGeneration,
+				guid: request.guid,
+				entityGeneration: request.entityGeneration,
+			},
+			request.initialReach,
+			request.viewDirection,
+		);
+		const status = session.status();
+		if (status.kind !== "awaiting-first-path") {
+			throw new Error("Browser harness boom did not retain its registration.");
+		}
+		boomCameraSession = session;
+		boomInputSequence = 0;
+		boomCumulativeZoomDisplacement = 0;
+		return status.identity;
+	}
+
+	async function setKinematicBoomIntent(
+		request: HttpKinematicBoomIntentRequest,
+	): Promise<"accepted" | "ignored-stale"> {
+		if (!entityHost)
+			throw new Error(
+				"Browser harness kinematic boom requires an active host.",
+			);
+		const session = boomCameraSession;
+		if (session === undefined) {
+			throw new Error("Browser harness frontend boom is not registered.");
+		}
+		if (request.inputSequence <= boomInputSequence) {
+			return decodeHostKinematicBoomIntentReceipt(
+				await entityHost.setKinematicBoomIntent(request),
+			);
+		}
+		if (request.inputSequence !== boomInputSequence + 1) {
+			throw new Error(
+				"Browser harness boom input sequence must be contiguous.",
+			);
+		}
+		await session.setIntent(
+			request.viewDirection,
+			request.cumulativeZoomDisplacement - boomCumulativeZoomDisplacement,
+		);
+		boomInputSequence = request.inputSequence;
+		boomCumulativeZoomDisplacement = request.cumulativeZoomDisplacement;
+		return "accepted";
+	}
+
+	async function stopKinematicBoom(
+		identity: HostKinematicBoomIdentity,
+	): Promise<boolean> {
+		if (!entityHost)
+			throw new Error(
+				"Browser harness kinematic boom requires an active host.",
+			);
+		const session = boomCameraSession;
+		if (session === undefined) return entityHost.stopKinematicBoom(identity);
+		await session.stop();
+		boomCameraSession = undefined;
+		return boomStopResult;
+	}
+
+	function boomTransport(
+		host: HttpExplorerEntityHost,
+	): HostKinematicBoomTransport {
+		return {
+			invoke: async (command, args) => {
+				const request = args?.request;
+				if (command === "start_kinematic_boom") {
+					return host.startKinematicBoom(
+						request as HttpKinematicBoomStartRequest,
+					);
+				}
+				if (command === "set_kinematic_boom_intent") {
+					return host.setKinematicBoomIntent(
+						request as HttpKinematicBoomIntentRequest,
+					);
+				}
+				if (command === "stop_kinematic_boom") {
+					boomStopResult = await host.stopKinematicBoom(
+						request as HostKinematicBoomIdentity,
+					);
+					return boomStopResult;
+				}
+				throw new Error(`Unknown browser boom command ${command}.`);
+			},
+		};
+	}
+
+	function syncHarnessBoomCamera(nowMs: number): void {
+		const activeRuntime = runtime;
+		const evidence = cameraEvidence;
+		const presentation = boomCameraSession?.presentation(nowMs);
+		if (
+			activeRuntime === undefined ||
+			evidence === null ||
+			presentation == null
+		)
+			return;
+		const { placement, visualPivot } = presentation;
+		const orientation = createCameraLookAtAngles(
+			placement.position,
+			visualPivot,
+		);
+		const rotation = createCameraRotationRadians(
+			orientation.yawRadians,
+			orientation.pitchRadians,
+		);
+		applyHarnessCamera(activeRuntime, {
+			far: evidence.far,
+			fov: evidence.fov,
+			near: evidence.near,
+			placement: {
+				envCellId: placement.residency.envCellId,
+				landblockId: placement.residency.landblockId,
+				position: placement.position,
+				rotation,
+			},
+		});
+		cameraEvidence = {
+			...evidence,
+			envCellId: placement.residency.envCellId,
+			landblockId: placement.residency.landblockId,
+			policy: "host-boom",
+			pitchDegrees: (orientation.pitchRadians * 180) / Math.PI,
+			position: [
+				placement.position.x,
+				placement.position.y,
+				placement.position.z,
+			],
+			yawDegrees: (orientation.yawRadians * 180) / Math.PI,
+		};
+	}
+
+	async function probeNextFrameState(): Promise<{
+		readonly camera: BrowserHarnessCameraEvidence | null;
+		readonly envCellRenderMode: "flat" | "portal";
+		readonly metrics: FrameSelectionMetrics | null;
+	}> {
+		await new Promise<void>((resolve) =>
+			window.requestAnimationFrame(() => resolve()),
+		);
+		return {
+			camera: cameraEvidence,
+			envCellRenderMode: frameSettings.envCellRenderMode,
+			metrics: runtime?.getRendererFrameDiagnostics()?.selectionMetrics ?? null,
+		};
 	}
 
 	function probeThirdPersonControls() {
@@ -1320,22 +1595,11 @@
 		const cameraYawAfterPointerOrbit = controller.snapshotState().yawRadians;
 		dispatch("wheel", { deltaX: 0, deltaY: 100, shiftKey: false });
 		const characterInputCountAfterPointerAndWheel = routedCharacterInput.length;
-		const tuning = {
-			easeOutSeconds: 0.2,
-			maximumDistance: 10,
-			minimumDistance: 1,
-		};
-		const boomBefore = initialBoomState(3, tuning);
-		const boomAfter = advanceBoomState(
-			boomBefore,
-			{ zoomMetersPerSecond: wheelDistance / 0.1 },
-			0.1,
-			tuning,
-		);
 		controller.dispose();
 		return {
-			boomDesiredAfter: boomAfter.desiredDistance,
-			boomDesiredBefore: boomBefore.desiredDistance,
+			boomZoomDisplacement:
+				-wheelDistance *
+				FRONTEND_TUNING.explorer.camera.boom.zoomMetersPerWheelUnit,
 			cameraYawAfterKeyboardTurn,
 			cameraYawAfterPointerOrbit,
 			cameraYawBefore,
@@ -1699,7 +1963,6 @@
 			try {
 				contentSource = await HttpLandblockContentSource.build(hostUrl);
 				entityHost = new HttpExplorerEntityHost(hostUrl);
-				boomSweeps = httpBoomSweepSource(hostUrl);
 				const landblockSource = ISOLATE_AUTHORED_DYNAMICS
 					? new DynamicOnlyLandblockSource(contentSource)
 					: EXCLUDE_AUTHORED_DYNAMICS
@@ -1867,9 +2130,12 @@
 				hostGlobal.__HOLTBURGER_3D_BROWSER_HARNESS__ = {
 					clearSceneInterest,
 					despawnExplorerEntity,
+					focusExplorerEnvCell,
 					focusExplorerOutdoor,
 					launchExplorerEntity,
 					probeAudioFlyby,
+					probeNextFrameState,
+					probeBoomFraming,
 					probePortalExecution,
 					relocateExplorerEntity,
 					requestSceneInterest,
@@ -1901,7 +2167,10 @@
 					probeThirdPersonControls,
 					queuePossessionEvent,
 					setPossessionIntent,
-					sweepSphereDistance,
+					setKinematicBoomIntent,
+					startKinematicBoom,
+					stopKinematicBoom,
+					kinematicBoomDirection,
 					tickExplorerEntities,
 					tickPossession,
 					state: () => {
@@ -1973,6 +2242,7 @@
 					}
 					lastFrameAt = now;
 					advanceFollowFlight(now);
+					syncHarnessBoomCamera(now);
 					const tickStartedAt = performance.now();
 					runtime.tick();
 					const renderStartedAt = performance.now();

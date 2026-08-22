@@ -10,10 +10,10 @@ use thiserror::Error;
 use super::{
     CellTransitRequest, CollisionPlacement, CollisionQueryError, CollisionReportOutcome,
     CollisionScene, ContactState, DynamicBodyCollisionDefinition, DynamicPhysicalBodyDefinition,
+    FreeSphereBudget, FreeSphereConfig, FreeSphereOutcome, FreeSphereRequest, FreeSphereState,
     GroundState, GroundSupport, GroundedBody, GroundedBodySpheres, GroundedBudget, GroundedConfig,
-    GroundedOutcome, GroundedRequest, GroundedSphere, MotionWaypoint, PhysicalFlyBody,
-    PhysicalFlyBudget, PhysicalFlyConfig, PhysicalFlyOutcome, PhysicalFlyRequest, PlacedMotionPath,
-    PlacedMotionPathRequest, SettlePermission, SpatialBody, solve_grounded, solve_physical_fly,
+    GroundedOutcome, GroundedRequest, GroundedSphere, MotionWaypoint, PlacedMotionPath,
+    PlacedMotionPathRequest, SettlePermission, SpatialBody, solve_free_sphere, solve_grounded,
 };
 
 /// Retail's canonical velocity floor (`PhysicsGlobals.SmallVelocity`) squared.
@@ -592,7 +592,7 @@ pub enum PhysicalBodyDefinition {
         /// Validated body-local collision sphere.
         sphere: GroundedSphere,
         /// Finite solver budgets and separation policy.
-        config: PhysicalFlyConfig,
+        config: FreeSphereConfig,
     },
     /// Gravity, support, steps, and edge response over an asymmetric sphere set.
     Grounded {
@@ -607,7 +607,7 @@ impl PhysicalBodyDefinition {
     /// Combines a validated single-sphere shape with free three-dimensional response.
     pub fn free_sphere(
         spheres: PhysicalSphereSet,
-        config: PhysicalFlyConfig,
+        config: FreeSphereConfig,
     ) -> Result<Self, PhysicalBodyDefinitionError> {
         validate_physical_fly_config(config)?;
         Ok(Self::FreeSphere {
@@ -747,7 +747,7 @@ struct FreeSphereTickState {
     /// Body-local collision sphere.
     sphere: GroundedSphere,
     /// Finite free-flight solver policy.
-    config: PhysicalFlyConfig,
+    config: FreeSphereConfig,
     /// Retained mutable collision and facing response.
     response_policy: PhysicalBodyResponsePolicy,
     /// Body-owned optional collision-domain exclusions.
@@ -870,11 +870,11 @@ fn solve_free_sphere_tick(
     let offset = body.pose.rotation.rotate_vector(state.sphere.center);
     let mut sphere_pose = body.pose;
     sphere_pose.coords = sphere_pose.coords + offset;
-    let outcome = solve_physical_fly(
+    let outcome = solve_free_sphere(
         scene,
         state.config,
-        PhysicalFlyRequest {
-            body: PhysicalFlyBody {
+        FreeSphereRequest {
+            body: FreeSphereState {
                 pose: sphere_pose,
                 cell: state.cell,
                 radius: state.sphere.radius,
@@ -884,7 +884,7 @@ fn solve_free_sphere_tick(
         },
     )?;
     match outcome {
-        PhysicalFlyOutcome::Solved {
+        FreeSphereOutcome::Solved {
             body: solved,
             achieved_displacement,
             collision_normal,
@@ -942,7 +942,7 @@ fn solve_free_sphere_tick(
                 residual_contacts: false,
             })
         }
-        PhysicalFlyOutcome::BudgetExceeded {
+        FreeSphereOutcome::BudgetExceeded {
             budget,
             substeps,
             contact_passes,
@@ -1304,10 +1304,10 @@ fn body_reference_pose(
         .context("could not reanchor solved body reference")
 }
 
-fn free_budget_status(budget: PhysicalFlyBudget) -> PhysicalBodyTickStatus {
+fn free_budget_status(budget: FreeSphereBudget) -> PhysicalBodyTickStatus {
     match budget {
-        PhysicalFlyBudget::Substeps => PhysicalBodyTickStatus::SubstepBudgetExceeded,
-        PhysicalFlyBudget::Contacts => PhysicalBodyTickStatus::ContactBudgetExceeded,
+        FreeSphereBudget::Substeps => PhysicalBodyTickStatus::SubstepBudgetExceeded,
+        FreeSphereBudget::Contacts => PhysicalBodyTickStatus::ContactBudgetExceeded,
     }
 }
 
@@ -1489,7 +1489,7 @@ fn apply_grounded_facing(
 }
 
 fn validate_physical_fly_config(
-    config: PhysicalFlyConfig,
+    config: FreeSphereConfig,
 ) -> std::result::Result<(), PhysicalBodyDefinitionError> {
     if !config.maximum_substep_distance.is_finite()
         || config.maximum_substep_distance <= 0.0
@@ -1616,9 +1616,9 @@ mod restitution_retail_differential;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{EdgeProtection, GroundedConfig, PhysicalFlyConfig, RETAIL_WALKABLE_NORMAL_Z};
+    use crate::{EdgeProtection, FreeSphereConfig, GroundedConfig, RETAIL_WALKABLE_NORMAL_Z};
 
-    const FLY_CONFIG: PhysicalFlyConfig = PhysicalFlyConfig {
+    const FLY_CONFIG: FreeSphereConfig = FreeSphereConfig {
         maximum_substep_distance: 0.25,
         maximum_substeps: 8,
         maximum_contact_passes: 4,

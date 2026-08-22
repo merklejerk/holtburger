@@ -14,7 +14,7 @@ import {
 } from "./explorer-entity-commands";
 import {
 	decodeExplorerPossession,
-	decodePossessionEventOutcome,
+	decodePossessionEventOutcomes,
 	decodePossessionEventQueueReceipt,
 	decodePossessionIntentResult,
 	type ExplorerPossession,
@@ -24,9 +24,20 @@ import {
 	type PossessionEventOutcome,
 	type PossessionIntentResult,
 } from "./explorer-entity-possession";
+import {
+	decodeExplorerFixedTickEnvelope,
+	type ExplorerFixedTickEnvelope,
+} from "./explorer-fixed-tick";
 
 const DYNAMIC_ENTITY_EVENT = "explorer-dynamic-entity";
-const POSSESSION_EVENT_OUTCOME = "explorer-possession-event-outcome";
+const FIXED_TICK_EVENT = "explorer-fixed-tick";
+const POSSESSION_EVENT_OUTCOMES = "explorer-possession-event-outcomes";
+
+/** One atomic host envelope paired with the single browser receipt instant both consumers use. */
+export interface ExplorerFixedTickReceipt {
+	readonly envelope: ExplorerFixedTickEnvelope;
+	readonly receivedAtMs: number;
+}
 
 /** Injectable Tauri boundary for listener-before-request hydration and focused commands. */
 export interface ExplorerDynamicEntityTransport {
@@ -42,6 +53,9 @@ export class ExplorerDynamicEntitySession {
 	readonly mirror: DynamicEntityMirror;
 	readonly #transport: ExplorerDynamicEntityTransport;
 	readonly #listeners = new Set<(event: DynamicEntityEvent) => void>();
+	readonly #fixedTickListeners = new Set<
+		(receipt: ExplorerFixedTickReceipt) => void
+	>();
 	readonly #possessionOutcomeListeners = new Set<
 		(outcome: PossessionEventOutcome) => void
 	>();
@@ -50,15 +64,19 @@ export class ExplorerDynamicEntitySession {
 		readonly resolve: () => void;
 		readonly reject: (reason: Error) => void;
 	}>();
-	#unlisten: readonly [() => void, () => void] | null = null;
+	#unlisten: readonly (() => void)[] | null = null;
 	#acceptedRevision = 0;
+	#highestFixedTickEpoch = 0;
+	readonly #now: () => number;
 
 	constructor(
 		transport: ExplorerDynamicEntityTransport,
 		mirror = new DynamicEntityMirror(),
+		now = () => performance.now(),
 	) {
 		this.#transport = transport;
 		this.mirror = mirror;
+		this.#now = now;
 	}
 
 	/** Register the listener first, then request the complete current snapshot. */
@@ -69,17 +87,23 @@ export class ExplorerDynamicEntitySession {
 			DYNAMIC_ENTITY_EVENT,
 			(payload) => this.#receive(payload),
 		);
+		let unlistenFixed: (() => void) | null = null;
 		let unlistenPossession: (() => void) | null = null;
 		try {
-			unlistenPossession = await this.#transport.listen(
-				POSSESSION_EVENT_OUTCOME,
-				(payload) => this.#receivePossessionOutcome(payload),
+			unlistenFixed = await this.#transport.listen(
+				FIXED_TICK_EVENT,
+				(payload) => this.#receiveFixedTick(payload),
 			);
-			this.#unlisten = [unlistenDynamic, unlistenPossession];
+			unlistenPossession = await this.#transport.listen(
+				POSSESSION_EVENT_OUTCOMES,
+				(payload) => this.#receivePossessionOutcomes(payload),
+			);
+			this.#unlisten = [unlistenDynamic, unlistenFixed, unlistenPossession];
 			await this.#transport.invoke("request_explorer_dynamic_entity_snapshot");
 		} catch (error) {
 			this.#unlisten = null;
 			unlistenPossession?.();
+			unlistenFixed?.();
 			unlistenDynamic();
 			throw error;
 		}
@@ -89,6 +113,7 @@ export class ExplorerDynamicEntitySession {
 	stop(): void {
 		for (const unlisten of this.#unlisten ?? []) unlisten();
 		this.#unlisten = null;
+		this.#highestFixedTickEpoch = 0;
 		this.mirror.awaitSnapshot();
 		for (const waiter of this.#waiters) {
 			waiter.reject(
@@ -199,6 +224,14 @@ export class ExplorerDynamicEntitySession {
 		return () => this.#listeners.delete(listener);
 	}
 
+	/** Observe integrated entity and boom paths with one browser playback origin. */
+	subscribeFixedTicks(
+		listener: (receipt: ExplorerFixedTickReceipt) => void,
+	): () => void {
+		this.#fixedTickListeners.add(listener);
+		return () => this.#fixedTickListeners.delete(listener);
+	}
+
 	/** Observe fixed-tick lifecycle outcomes for the active possession generation. */
 	subscribePossessionOutcomes(
 		listener: (outcome: PossessionEventOutcome) => void,
@@ -219,9 +252,30 @@ export class ExplorerDynamicEntitySession {
 		}
 	}
 
-	#receivePossessionOutcome(payload: unknown): void {
-		const outcome = decodePossessionEventOutcome(payload);
-		for (const listener of this.#possessionOutcomeListeners) listener(outcome);
+	#receivePossessionOutcomes(payload: unknown): void {
+		for (const outcome of decodePossessionEventOutcomes(payload)) {
+			for (const listener of this.#possessionOutcomeListeners)
+				listener(outcome);
+		}
+	}
+
+	#receiveFixedTick(payload: unknown): void {
+		const envelope = decodeExplorerFixedTickEnvelope(payload);
+		if (
+			envelope.epoch <= this.#highestFixedTickEpoch ||
+			this.mirror.isAwaitingSnapshot()
+		) {
+			return;
+		}
+		this.#highestFixedTickEpoch = envelope.epoch;
+		if (
+			envelope.entityEvent !== null &&
+			this.mirror.apply(envelope.entityEvent)
+		) {
+			this.#acceptedRevision += 1;
+		}
+		const receipt = { envelope, receivedAtMs: this.#now() };
+		for (const listener of this.#fixedTickListeners) listener(receipt);
 	}
 
 	/** Pair command completion with the focused event the host publishes before returning. */
@@ -255,9 +309,7 @@ export function tauriExplorerDynamicEntityTransport(): ExplorerDynamicEntityTran
 	return {
 		listen: async (event, handler) => {
 			const { listen } = await import("@tauri-apps/api/event");
-			return listen<DynamicEntityEvent>(event, ({ payload }) =>
-				handler(payload),
-			);
+			return listen<unknown>(event, ({ payload }) => handler(payload));
 		},
 		invoke: async (command, args) => {
 			const { invoke } = await import("@tauri-apps/api/core");

@@ -4,6 +4,7 @@ import {
 	OUTDOOR_LANDBLOCK_WORLD_SIZE,
 } from "../lib/game/landblocks";
 import { Vec3 } from "../lib/game/math/types";
+import { createCameraLookAtAngles } from "../lib/game/math/camera-orientation";
 import { FRONTEND_TUNING } from "../lib/frontend-tuning";
 import type { FreeFlyCameraPose } from "../lib/game/controls/frontend-camera-controller";
 
@@ -41,16 +42,8 @@ export function resolveExplorerOutdoorFocusPose(
 }
 
 function createLookAtPose(position: Vec3, target: Vec3): FreeFlyCameraPose {
-	const lookX = target.x - position.x;
-	const lookY = target.y - position.y;
-	const lookZ = target.z - position.z;
-	const length = Math.hypot(lookX, lookY, lookZ);
-	if (length === 0) {
-		throw new Error("Automatic camera focus target matches its position.");
-	}
 	return {
-		pitchRadians: Math.asin(lookY / length),
+		...createCameraLookAtAngles(position, target),
 		position,
-		yawRadians: Math.atan2(lookX, -lookZ),
 	};
 }

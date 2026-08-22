@@ -11,6 +11,30 @@ export interface CameraAxes {
 	readonly up: Vec3;
 }
 
+/** Renderer yaw/pitch that aims one world-space camera position at a distinct target. */
+export interface CameraLookAngles {
+	readonly yawRadians: number;
+	readonly pitchRadians: number;
+}
+
+/** Derive the renderer's canonical look angles from an exact camera/target pair. */
+export function createCameraLookAtAngles(
+	position: Vec3,
+	target: Vec3,
+): CameraLookAngles {
+	const lookX = target.x - position.x;
+	const lookY = target.y - position.y;
+	const lookZ = target.z - position.z;
+	const length = Math.hypot(lookX, lookY, lookZ);
+	if (!Number.isFinite(length) || length <= Number.EPSILON) {
+		throw new Error("Camera look-at target must be finite and distinct.");
+	}
+	return {
+		pitchRadians: Math.asin(lookY / length),
+		yawRadians: Math.atan2(lookX, -lookZ),
+	};
+}
+
 /** Derive the legacy-compatible world-space axes for yaw and pitch in radians. */
 export function createCameraAxesRadians(
 	yaw: number,

@@ -30,10 +30,36 @@ import {
 	type PossessionIntentResult,
 	type PossessionMotionProbe,
 } from "../../explorer/explorer-entity-possession";
+import {
+	decodeExplorerFixedTickEnvelope,
+	type ExplorerFixedTickEnvelope,
+} from "../../explorer/explorer-fixed-tick";
+import {
+	decodeHostKinematicBoomIdentity,
+	type HostKinematicBoomIdentity,
+} from "../../lib/game/motion/host-kinematic-boom-path";
 
 export interface PossessionTickResponse {
-	readonly event: DynamicEntityEvent | null;
+	readonly envelope: ExplorerFixedTickEnvelope | null;
 	readonly outcomes: readonly PossessionEventOutcome[];
+}
+
+/** Browser-harness registration request mirroring the production Tauri command shape. */
+export interface HttpKinematicBoomStartRequest {
+	readonly possessionGeneration: number;
+	readonly guid: number;
+	readonly entityGeneration: number;
+	readonly initialReach: number;
+	readonly inputSequence: number;
+	readonly viewDirection: readonly [number, number, number];
+	readonly cumulativeZoomDisplacement: number;
+}
+
+/** Browser-harness intent request mirroring the production Tauri command shape. */
+export interface HttpKinematicBoomIntentRequest extends HostKinematicBoomIdentity {
+	readonly inputSequence: number;
+	readonly viewDirection: readonly [number, number, number];
+	readonly cumulativeZoomDisplacement: number;
 }
 
 /** Harness-only HTTP adapter over the same app-local Explorer driver used by Tauri commands. */
@@ -111,6 +137,34 @@ export class HttpExplorerEntityHost {
 		);
 	}
 
+	async startKinematicBoom(
+		request: HttpKinematicBoomStartRequest,
+	): Promise<HostKinematicBoomIdentity> {
+		return decodeHostKinematicBoomIdentity(
+			await postJson(this.#baseUrl, "kinematic-boom/start", request),
+		);
+	}
+
+	async setKinematicBoomIntent(
+		request: HttpKinematicBoomIntentRequest,
+	): Promise<unknown> {
+		return postJson(this.#baseUrl, "kinematic-boom/intent", request);
+	}
+
+	async stopKinematicBoom(
+		identity: HostKinematicBoomIdentity,
+	): Promise<boolean> {
+		const value = await postJson(
+			this.#baseUrl,
+			"kinematic-boom/stop",
+			identity,
+		);
+		if (typeof value !== "boolean") {
+			throw new Error("Kinematic boom host returned an invalid stop receipt.");
+		}
+		return value;
+	}
+
 	/** Advances one possession tick while retaining lifecycle outcomes beside body delivery. */
 	async tickPossession(
 		durationMilliseconds: number,
@@ -124,10 +178,10 @@ export class HttpExplorerEntityHost {
 		if (!Array.isArray(response.outcomes))
 			throw new Error("Possession tick outcomes must be an array.");
 		return {
-			event:
-				response.event === null
+			envelope:
+				response.envelope === null
 					? null
-					: decodeDynamicEntityEvent(response.event),
+					: decodeExplorerFixedTickEnvelope(response.envelope),
 			outcomes: response.outcomes.map(decodePossessionEventOutcome),
 		};
 	}
@@ -139,11 +193,13 @@ export class HttpExplorerEntityHost {
 	}
 
 	/** Advances one exact harness-controlled epoch; null means no frontend-relevant change. */
-	async tick(durationMilliseconds: number): Promise<DynamicEntityEvent | null> {
+	async tick(
+		durationMilliseconds: number,
+	): Promise<ExplorerFixedTickEnvelope | null> {
 		const value = await postJson(this.#baseUrl, "explorer-entity-tick", {
 			durationMilliseconds,
 		});
-		return value === null ? null : decodeDynamicEntityEvent(value);
+		return value === null ? null : decodeExplorerFixedTickEnvelope(value);
 	}
 
 	async #replaceSimulationInterest(

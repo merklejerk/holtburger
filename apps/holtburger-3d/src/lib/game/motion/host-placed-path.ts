@@ -1,12 +1,23 @@
+import type { SceneVec3 } from "../../assets/ac-frame";
+import type { SceneResidency } from "../scene";
+
+/** Canonical camera position paired atomically with host-authoritative scene residency. */
+export interface HostCameraPlacement {
+	/** Camera position retained in canonical scene space. */
+	readonly position: SceneVec3;
+	/** Host-supplied portal placement paired with the exact position. */
+	readonly residency: SceneResidency;
+}
+
 /** One host-authored placed path leg ending at an authoritative point. */
 interface HostPlacedPathLeg<Point> {
-	/** Strictly increasing normalized fixed-tick fraction in `(0, 1]`. */
+	/** Strictly increasing normalized transaction fraction in `(0, 1]`. */
 	readonly endFraction: number;
 	/** Point and placement facts that become authoritative at this boundary. */
 	readonly end: Point;
 }
 
-/** Source-neutral nonempty placed path through one fixed host tick. */
+/** Source-neutral nonempty placed path through one host transaction. */
 export interface HostPlacedPath<Point> {
 	/** Authoritative point at normalized fraction zero. */
 	readonly initial: Point;
@@ -78,6 +89,6 @@ export function validateHostPlacedPathShape<Point>(
 		previous = leg.endFraction;
 	}
 	if (previous !== 1) {
-		throw new Error("Host placed path must end at tick fraction one.");
+		throw new Error("Host placed path must end at transaction fraction one.");
 	}
 }

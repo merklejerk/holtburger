@@ -5,10 +5,11 @@ use holtburger_dat::file_type::SetupModel;
 #[cfg(test)]
 use holtburger_world::PhysicalCollisionFilter;
 use holtburger_world::{
-    EdgeProtection, GroundedConfig, PhysicalBodyDefinition, PhysicalBodyDefinitionError,
-    PhysicalBodyResponsePolicy, PhysicalElasticity, PhysicalFlyConfig, PhysicalFriction,
+    EdgeProtection, FreeSphereConfig, GroundedConfig, PhysicalBodyDefinition,
+    PhysicalBodyDefinitionError, PhysicalBodyResponsePolicy, PhysicalElasticity, PhysicalFriction,
     PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion,
     RETAIL_AIRBORNE_STEP_DOWN_HEIGHT, RETAIL_LANDING_NORMAL_Z, RETAIL_WALKABLE_NORMAL_Z,
+    StaticSphereCastConfig,
 };
 use thiserror::Error;
 
@@ -159,14 +160,19 @@ pub fn retail_player_grounded_profile(
 /// the incoming normal without rebound).
 /// Anti-tunneling and separation budgets for one small free-flying sphere.
 ///
-/// Shared by the viewer body and by ad-hoc sphere sweeps, so a query and the body that may travel
-/// the same path resolve geometry identically. The 0.25 m substep over 32 substeps bounds any one
-/// solve at 8 m.
-pub const FREE_SPHERE_FLY_CONFIG: PhysicalFlyConfig = PhysicalFlyConfig {
+/// The 0.25 m substep over 32 substeps bounds any one solve at 8 m.
+pub const FREE_SPHERE_FLY_CONFIG: FreeSphereConfig = FreeSphereConfig {
     maximum_substep_distance: 0.25,
     maximum_substeps: 32,
     maximum_contact_passes: 8,
     separation_epsilon: 0.000_5,
+};
+
+/// Boom-style casts share the retail viewer's anti-tunneling scale without inheriting its slide.
+pub const STATIC_SPHERE_CAST_CONFIG: StaticSphereCastConfig = StaticSphereCastConfig {
+    maximum_substep_distance: FREE_SPHERE_FLY_CONFIG.maximum_substep_distance,
+    maximum_substeps: FREE_SPHERE_FLY_CONFIG.maximum_substeps,
+    surface_clearance: FREE_SPHERE_FLY_CONFIG.separation_epsilon,
 };
 
 pub fn physical_fly_viewer_profile() -> Result<ResolvedBodyProfile, PhysicalBodyDefinitionError> {

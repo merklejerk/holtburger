@@ -9,34 +9,46 @@ This crate translates complex network packets into meaningful gameplay events wi
 ## Key Components
 
 ### 1. The Client ([src/client/mod.rs](src/client/mod.rs))
+
 The top-level entry point. It instantiates the `Session` (networking) from `holtburger-session` and the `WorldState` (data graph) from `holtburger-world`, driving the main async event loop.
 
 #### Bootstrap & Config
+
 To instantiate a client, we use the `ClientBuilder` ([src/client/builder.rs](src/client/builder.rs)). This configures credentials, server endpoints, optional debug features, and runtime asset loading. `ClientRuntimeBuilder::load_assets(&ContentRepository)` is where the builder reads the specific startup assets it needs and assembles `WorldBootstrap`.
 
 #### Event Streams
+
 We use a narrow runtime surface that keeps protocol and UI concerns distinct without inventing an extra public bus:
 
 1. **Session bytes / decoded `GameMessage`**: `holtburger-session` hands reassembled payload bytes to core, and core decodes them into protocol types at the core-to-world boundary.
 2. **`WorldEvent`** (World): World-layer events emitted by `holtburger-world`, including authoritative mutations and packet-scoped processing outcomes.
 3. **`ClientViewEvent`** ([src/client/types.rs](src/client/types.rs)): The unified semantic delta-event feed exposed to frontends, scripts, and harnesses.
-    - Consumers (like `holtburger-cli`) subscribe to `ClientViewEvent` because it broadcasts granular semantic deltas (like `PropertyUpdated { guid, update }`) instead of massive `Box<Entity>` clones.
-    - Low-level raw packet dumping, when needed for diagnostics, is configured explicitly through `ClientRuntimeBuilder::message_dump_dir(...)` instead of a general-purpose runtime event bus.
+   - Consumers (like `holtburger-cli`) subscribe to `ClientViewEvent` because it broadcasts granular semantic deltas (like `PropertyUpdated { guid, update }`) instead of massive `Box<Entity>` clones.
+   - Low-level raw packet dumping, when needed for diagnostics, is configured explicitly through `ClientRuntimeBuilder::message_dump_dir(...)` instead of a general-purpose runtime event bus.
 
 #### Interaction
+
 - **ClientCommand**: Commands sent from the UI to the engine (e.g., `DriveMovement`, `Use`). Handled in [src/client/commands.rs](src/client/commands.rs).
-- **Producer-Only Pattern**: The Core Engine is strictly *producer-only* for the public event streams. It never consumes its own broadcast events internally (that would introduce latency and state drift). It uses synchronous direct logic to move from decoded protocol -> state -> view.
+- **Producer-Only Pattern**: The Core Engine is strictly _producer-only_ for the public event streams. It never consumes its own broadcast events internally (that would introduce latency and state drift). It uses synchronous direct logic to move from decoded protocol -> state -> view.
 
 ### Command and Controller Boundary
 
 The core crate exposes two layers of client-facing behavior:
 
 1. **Primitives**: low-level commands and systems that directly map to protocol or authoritative local-state responsibilities.
-    - Examples: `DriveMovement(MovementCommand::...)`, snap-facing, resolved motion-state execution, movement prediction, position sync, and handling server-controlled movement.
+   - Examples: `DriveMovement(MovementCommand::...)`, snap-facing, resolved motion-state execution, movement prediction, position sync, and handling server-controlled movement.
 2. **Controllers**: optional, reusable higher-level behaviors built on top of those primitives.
-    - Examples: approach a target until an arrival distance, maintain combat range, desired-attack maintenance, combat-facing assistance, or sticky-melee steering.
+   - Examples: approach a target until an arrival distance, maintain combat range, desired-attack maintenance, combat-facing assistance, or sticky-melee steering.
 
 Applications are free to use these controllers, ignore them, or layer their own policies above the primitive command surface. The core crate should not force every client into one control model, but it may provide shared controllers when the behavior is likely to be useful across a TUI, a 3D client, tools, or automated harnesses.
+
+[`KinematicBoomController`](src/kinematic_boom.rs) is one such reusable behavior. It retains
+third-person reach, filtered target-pivot, clearance-recovery, and last-safe camera state while
+delegating static collision queries and placed-path authoring to an injected world collision
+snapshot. It is not a registered spatial body and owns no scheduler, possession lifecycle,
+transport, pointer gesture, or presentation clock. Applications adapt their actor path into target
+samples, advance the controller on their chosen fixed timeline, and publish the resulting
+collision-safe camera path with authoritative residency.
 
 The current primitive movement surface lives in [src/client/movement_types.rs](src/client/movement_types.rs). It defines resolved movement commands built around a composite `MotionState`, plus one-shot `SnapFacing` and `Stop`. A motion state represents longitudinal, lateral, and turn axes independently, so diagonal translation does not require a named locomotion variant. [src/client/movement/mod.rs](src/client/movement/mod.rs) remains the sole executor boundary that owns local prediction, packet-edge synthesis, and direct server-facing movement behavior.
 
@@ -96,9 +108,11 @@ It intentionally does not standardize a scheduler, claim system, universal reaso
 ### 2. Specialized Systems
 
 #### Auth & Connection ([src/client/auth.rs](src/client/auth.rs))
+
 Manages the multi-stage handshake with GLS (Global Login Service) and the World server. Handles ticket exchange and character selection.
 
 #### Movement ([src/client/movement/mod.rs](src/client/movement/mod.rs))
+
 The `MovementSystem` runs on the shared fixed 30ms client physics cadence. It ingests resolved movement commands, calculates client-side prediction, and pushes reliable synchronization with the server's authoritative position.
 
 Today, this module owns resolved motion expiry, edge-based movement packet emission, stop-pulse obligations, snap-facing execution, and server-controlled movement reconciliation. Reusable approach behavior lives in [src/client/controllers/approach_target.rs](src/client/controllers/approach_target.rs), and navigation translates those controller outputs into resolved `MovementCommand` values before crossing into the movement executor.
@@ -110,21 +124,21 @@ Combat automation now follows the same pattern from [src/client/controllers/comb
 Movement in `holtburger-core` should converge on three distinct layers:
 
 1. **Protocol and authority plumbing**
-    - Format and send movement-related game actions.
-    - Handle server-driven movement and forced reposition.
-    - Maintain prediction and synchronization with the authoritative server state.
-    - Cache server-authored motion-style state needed to build correct outbound movement packets.
-    - Decide when locomotion intent actually implies a new server-visible movement edge or clear.
+   - Format and send movement-related game actions.
+   - Handle server-driven movement and forced reposition.
+   - Maintain prediction and synchronization with the authoritative server state.
+   - Cache server-authored motion-style state needed to build correct outbound movement packets.
+   - Decide when locomotion intent actually implies a new server-visible movement edge or clear.
 2. **Primitive client actions**
-    - Set heading through a one-shot snap-facing command when a frontend wants an immediate observer-visible reorientation.
-    - Start, pulse, or stop locomotion through resolved `MovementCommand` values backed by one composite `MotionState`.
-    - Express longitudinal, lateral, and turning axes together in one coherent actuator state while still allowing turn-only motion.
-    - Interpret ordered jump lifecycle edges without owning keyboard state, a charge clock, actor capabilities, or body physics.
+   - Set heading through a one-shot snap-facing command when a frontend wants an immediate observer-visible reorientation.
+   - Start, pulse, or stop locomotion through resolved `MovementCommand` values backed by one composite `MotionState`.
+   - Express longitudinal, lateral, and turning axes together in one coherent actuator state while still allowing turn-only motion.
+   - Interpret ordered jump lifecycle edges without owning keyboard state, a charge clock, actor capabilities, or body physics.
 3. **Optional reusable controllers**
-    - Approach target until arrival distance.
-    - Follow or maintain range.
-    - Combat-facing assist.
-    - Shared retry cadence and cancellation rules.
+   - Approach target until arrival distance.
+   - Follow or maintain range.
+   - Combat-facing assist.
+   - Shared retry cadence and cancellation rules.
 
 This structure keeps the core crate powerful without baking one frontend's control policy directly into the engine loop.
 
@@ -168,6 +182,7 @@ sequenceDiagram
 ## 🛠️ Developer Onboarding
 
 ### Adding a new Message Handler
+
 1. **Identify**: Find the opcode in the ACE Server source (ground truth).
 2. **Update Protocol**: Add the message structure to `holtburger-protocol`.
 3. **Handle in Core**: Add a case to the core loop in [src/client/messages.rs](src/client/messages.rs).
@@ -175,6 +190,7 @@ sequenceDiagram
 5. **Map to View**: Update the direct `ClientViewEvent` emission in [src/client/messages.rs](src/client/messages.rs) or `emit_world_view_projection` inside [src/client/mod.rs](src/client/mod.rs) to share the new delta with the UI.
 
 ### Adding or Refactoring a Reusable Controller
+
 1. **Prove the behavior is shared**: Confirm that the behavior is likely useful across multiple clients or modes of control.
 2. **Identify the primitive surface**: Separate the controller's decision-making from the low-level commands it needs to emit.
 3. **Make state explicit**: Keep controller state isolated from the transport and world-plumbing responsibilities.
@@ -187,15 +203,15 @@ sequenceDiagram
 We do not need a flag day refactor. The current movement behavior can evolve incrementally:
 
 1. **Document current controllers explicitly**
-    - Document how frontends own reusable controllers and submit emitted plans or direct intents for execution.
+   - Document how frontends own reusable controllers and submit emitted plans or direct intents for execution.
 2. **Separate primitive helpers from controller logic**
-    - Extract helpers for heading changes, locomotion state, stop/cancel, and sync from the current approach loop.
+   - Extract helpers for heading changes, locomotion state, stop/cancel, and sync from the current approach loop.
 3. **Isolate controller state**
-    - Keep approach-specific state and heuristics grouped together behind a clearer controller boundary.
+   - Keep approach-specific state and heuristics grouped together behind a clearer controller boundary.
 4. **Introduce additional reusable controllers**
-    - Examples include combat-facing assistance or maintain-range behavior.
+   - Examples include combat-facing assistance or maintain-range behavior.
 5. **Let applications arbitrate controller usage**
-    - Frontends decide when to invoke or suspend a controller based on local UX needs.
+   - Frontends decide when to invoke or suspend a controller based on local UX needs.
 
 The end state is a core library that owns robust movement and interaction primitives, plus a catalog of optional higher-level controllers that clients can compose as needed.
 
@@ -231,6 +247,7 @@ Two producer registries remain intentionally distinct — `WorldState` for the n
 app-local registry for the Explorer — and neither is generalized into a universal store.
 
 ## Dependencies
+
 - **`holtburger-session`**: Network tracking, transport, and packet parsing.
 - **`holtburger-world`**: The World State graph and entity tracking.
 - **`holtburger-protocol`**: Binary packet structures.

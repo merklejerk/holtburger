@@ -9,21 +9,22 @@ The refactor goal was simple: **handlers orchestrate, models mutate**.
 ## Core Design Rules
 
 - **No transport ownership**: this crate does not own UDP/session concerns. It receives decoded
-    messages from `holtburger-core`.
+  messages from `holtburger-core`.
 - **Feature-based routing**: protocol dispatch is grouped by gameplay/domain concern under
-    [src/handlers](src/handlers), not by whichever state struct happens to hold most of the fields.
+  [src/handlers](src/handlers), not by whichever state struct happens to hold most of the fields.
 - **Stable facade**: callers still enter through `WorldState::handle_message()`, but that method is
-    now just a facade over the handler layer.
+  now just a facade over the handler layer.
 - **Narrow mutation surfaces**: handlers call focused mutation helpers on `PlayerState` and
-    `WorldState` instead of open-coding state changes.
+  `WorldState` instead of open-coding state changes.
 - **One world authority**: player world/object state lives on the player `Entity` in
-    `WorldState.entities`; `PlayerState` is reserved for local-player/session overlays.
+  `WorldState.entities`; `PlayerState` is reserved for local-player/session overlays.
 - **Retention is part of authority**: whether an entity stays visible to the client is determined by
-    `WorldState` retention/lifecycle rules, not by ad hoc handler-local cleanup.
+  `WorldState` retention/lifecycle rules, not by ad hoc handler-local cleanup.
 
 ## Ownership Split
 
 ### `handlers/` — protocol orchestration
+
 Files: [src/handlers](src/handlers)
 
 This layer is responsible for turning decoded protocol messages into state mutations and
@@ -42,6 +43,7 @@ Key rule: routing order is explicit and meaningful. Shared flows preserve
 **player-first, world-second, event-last** ordering, and `routing.rs` is where that precedence lives.
 
 ### `PlayerState` — player-local model
+
 File: [src/player/mod.rs](src/player/mod.rs)
 
 `PlayerState` owns session-local player data:
@@ -57,6 +59,7 @@ authoritative entity snapshot. Its job is to expose mutation helpers that encode
 invariants, sequence tracking, and derived-stat recalculation.
 
 ### `WorldState` — authoritative world graph
+
 File: [src/state/mod.rs](src/state/mod.rs)
 
 `WorldState` owns the rest of the authoritative world model:
@@ -71,13 +74,15 @@ File: [src/state/mod.rs](src/state/mod.rs)
 delegate into the handler layer and return emitted `WorldEvent`s.
 
 ### Entities & Hydration
+
 Files: [src/entity.rs](src/entity.rs), [src/hydration.rs](src/hydration.rs)
 
 - **`EntityManager`** stores every hydrated object currently known to the client.
 - **Hydration** merges partial updates into complete entity state as object descriptions and
-    property updates arrive over time.
+  property updates arrive over time.
 
 ### Spatial / Physics helpers
+
 Files: [src/spatial.rs](src/spatial.rs), [src/spatial](src/spatial)
 
 These modules own movement-facing invariants:
@@ -124,9 +129,10 @@ existing implicit `tick()` policy:
   interest and registered bodies cannot alter it.
 - BSP planes and polygons transform into landblock-local query space. The body sphere remains
   spherical even for non-uniformly scaled SetupModel parts.
-- `solve_physical_fly` is an explicit bounded operation over one requested displacement. It owns no
-  gravity, support, walkability, step, slope, or ledge behavior and does not run from `tick()` until
-  the app-local Phase 1c host registers and drives a camera body.
+- `solve_free_sphere` is an explicit bounded operation over one requested displacement. It owns no
+  gravity, support, walkability, step, slope, or ledge behavior and never runs implicitly from
+  `tick()`. Registered physical-fly bodies and unregistered kinematic controllers call it
+  explicitly; the solver neither owns their lifecycle nor distinguishes their purpose.
 - `solve_grounded` is a separate bounded response over one required lower/support sphere and one
   optional upper/constraint sphere. It alone owns gravity, walkability, the committed ground
   state, one next-substep sliding normal, and achieved velocity. A solve-local set counts distinct
@@ -206,6 +212,7 @@ Dynamic entities extend the same scene without a second store or solver:
   even while a body is settled.
 
 ### Authored motion ([src/motion/](src/motion/))
+
 Files: [state.rs](src/motion/state.rs), [sequence.rs](src/motion/sequence.rs),
 [selection.rs](src/motion/selection.rs), [registry.rs](src/motion/registry.rs),
 [actuation.rs](src/motion/actuation.rs)
@@ -218,7 +225,7 @@ than as a service. Nothing here caches, records history, or reaches back into co
   cross-reading lands here. The controller-intent type in `holtburger-core` is `CharacterDrive`; it
   used to share this name, which is why the collision is worth stating.
 - `MotionOrder` is what a body has been ordered to perform this tick, independent of who ordered it:
-  a style plus forward, sidestep, and turn commands with speed *multipliers*. Distinct from
+  a style plus forward, sidestep, and turn commands with speed _multipliers_. Distinct from
   `CharacterDrive`, which carries the same four axes as semantic intent with no motion-table
   vocabulary; the mapping between them is what the resolvers exist to perform.
 - `MotionSequenceRuntime` is retail's `CSequence` (`acclient.c:326110-327216`): the installed clips
@@ -231,10 +238,11 @@ than as a service. Nothing here caches, records history, or reaches back into co
 - `MotionRuntimeRegistry` holds per-body playback for one authority, and `actuation.rs` converts a
   tick's authored offset into the solver's drive basis.
 
-Playback is *not* frontend animation. Only simulation-relevant facts live here; articulated part
+Playback is _not_ frontend animation. Only simulation-relevant facts live here; articulated part
 frames never enter this crate.
 
 ### Lifecycle / retention helpers
+
 Files: [src/state/liveness.rs](src/state/liveness.rs), [src/state/mutations.rs](src/state/mutations.rs)
 
 These modules own the rules for when entities stay in the client-visible graph versus when they can
@@ -246,6 +254,7 @@ be pruned:
 - lifecycle-aware entity upsert and eviction
 
 ### Query traits and projection-facing logic
+
 File: [src/context.rs](src/context.rs)
 
 `WorldContext` and `WorldContextExt` provide a pure query boundary for higher-level logic. That lets
@@ -285,11 +294,12 @@ sequenceDiagram
 4. The relevant feature handler applies mutations through `PlayerState` or `WorldState` helpers.
 5. Handlers emit `WorldEvent`s describing the observable outcome.
 6. Final event decoration, currently including spell-name resolution, happens in the routing layer
-    before control returns to the caller.
+   before control returns to the caller.
 
 ## Important Invariants
 
 ### Player authority invariant
+
 The current player's world/object state lives on the player entity in `WorldState.entities`.
 
 Anything that changes the player's physical position or velocity must update that entity through
@@ -297,12 +307,14 @@ the `WorldState` movement helpers so the authoritative entity state and the runt
 in sync. `PlayerState` is for local-player overlays and sequencing, not duplicate world storage.
 
 ### Handler boundary
+
 Handlers should orchestrate domain flows; they should not become mini state stores.
 
 If a handler needs to do a multi-step update repeatedly, extract a named helper on the owning state
 type instead of open-coding the mutation logic again.
 
 ### Bootstrap split invariant
+
 `PlayerDescription` is intentionally a shared flow:
 
 - the `player` handler hydrates the session-local player model first
@@ -311,6 +323,7 @@ type instead of open-coding the mutation logic again.
 That ordering avoids world helpers reading partially hydrated player state.
 
 ### Entity retention invariant
+
 Entity lifetime is not just spawn/despawn.
 
 - open-container previews
@@ -324,6 +337,7 @@ If you change entity ownership or visibility rules, update retention reconciliat
 world helpers rather than layering on handler-specific cleanup.
 
 ### Event emission boundary
+
 `WorldEvent` emission should describe meaningful observable changes or packet-scoped processing outcomes after mutation, not serve as a
 shadow source of truth.
 
@@ -346,7 +360,7 @@ When introducing a new tracked domain:
 - This crate is not the protocol decoder.
 - This crate is not the transport/session owner.
 - This crate should not regress into model-owned router code just because a flow touches many
-    fields.
+  fields.
 
 ## Dependencies
 

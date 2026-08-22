@@ -1,4 +1,4 @@
-//! Bounded collision-aware free flight for one spherical body.
+//! Bounded static-collision movement for unregistered spheres and collinear sphere casts.
 
 use anyhow::{Result, ensure};
 use holtburger_common::position::WorldPosition;
@@ -12,9 +12,9 @@ use super::collision::{
     landblock_key, separating_displacement,
 };
 
-/// Explicit safety budgets for one physical-fly solve.
+/// Explicit safety budgets for one free-sphere displacement solve.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct PhysicalFlyConfig {
+pub struct FreeSphereConfig {
     /// Maximum world-meter length of one collision substep.
     pub maximum_substep_distance: f32,
     /// Maximum number of substeps accepted for one requested displacement.
@@ -25,9 +25,52 @@ pub struct PhysicalFlyConfig {
     pub separation_epsilon: f32,
 }
 
-/// One registered physical-fly sphere and its atomically committed cell context.
+/// Finite work and surface-clearance policy for one collinear static sphere cast.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct PhysicalFlyBody {
+pub struct StaticSphereCastConfig {
+    /// Maximum world-meter length of one anti-tunneling probe.
+    pub maximum_substep_distance: f32,
+    /// Maximum number of probes accepted for one requested cast.
+    pub maximum_substeps: usize,
+    /// Distance retained before the first obstructed point after refinement.
+    pub surface_clearance: f32,
+}
+
+/// One sphere cast that may transit portals but may never slide away from its authored ray.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StaticSphereCastRequest {
+    /// Start pose carrying the outdoor landblock frame for the cast.
+    pub origin: WorldPosition,
+    /// Prior interior cell used to seed portal traversal around `origin`, or `None` outdoors.
+    pub cell: Option<Guid>,
+    /// Cast direction; normalized internally.
+    pub direction: Vector3,
+    /// Maximum distance to test along `direction`.
+    pub distance: f32,
+    /// Positive sphere radius.
+    pub radius: f32,
+    /// Optional collision-domain exclusions owned by the querying sphere.
+    pub filter: PhysicalCollisionFilter,
+}
+
+/// Farthest collision-safe point reached on one cast ray and its authoritative placement.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StaticSphereCastOutcome {
+    /// Interior cell containing the cast's origin sphere after portal transit.
+    pub origin_cell: Option<Guid>,
+    /// Collision-safe pose, normalized to its final outdoor owner.
+    pub pose: WorldPosition,
+    /// Interior cell committed by portal transit, or `None` while outdoors.
+    pub cell: Option<Guid>,
+    /// Distance from the requested origin to `pose` along the cast ray.
+    pub distance: f32,
+    /// Whether static geometry shortened the requested cast.
+    pub obstructed: bool,
+}
+
+/// One unregistered free sphere and its atomically committed cell context.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FreeSphereState {
     /// Current solved pose.
     pub pose: WorldPosition,
     /// Current interior cell, or `None` while outdoors.
@@ -36,11 +79,11 @@ pub struct PhysicalFlyBody {
     pub radius: f32,
 }
 
-/// One desired physical-fly displacement.
+/// One desired free-sphere displacement.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct PhysicalFlyRequest {
+pub struct FreeSphereRequest {
     /// Last safely committed body state.
-    pub body: PhysicalFlyBody,
+    pub body: FreeSphereState,
     /// World-space displacement requested for this solve.
     pub displacement: Vector3,
     /// Body-owned optional collision-domain exclusions.
@@ -49,20 +92,20 @@ pub struct PhysicalFlyRequest {
 
 /// Which finite solver budget refused a request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PhysicalFlyBudget {
+pub enum FreeSphereBudget {
     /// The displacement requires more anti-tunneling substeps than configured.
     Substeps,
     /// Contact separation did not converge inside one substep's pass budget.
     Contacts,
 }
 
-/// Observable result of one physical-fly solve.
+/// Observable result of one free-sphere solve.
 #[derive(Debug, Clone, PartialEq)]
-pub enum PhysicalFlyOutcome {
+pub enum FreeSphereOutcome {
     /// The requested displacement completed, possibly after collision separation and sliding.
     Solved {
         /// Atomically committed body state.
-        body: PhysicalFlyBody,
+        body: FreeSphereState,
         /// Actual world-space displacement from the request's starting pose.
         achieved_displacement: Vector3,
         /// Strongest unit contact normal opposing the requested displacement, if any.
@@ -77,9 +120,9 @@ pub enum PhysicalFlyOutcome {
     /// A finite safety budget was reached; the last safe state is held.
     BudgetExceeded {
         /// Last safely committed body state.
-        body: PhysicalFlyBody,
+        body: FreeSphereState,
         /// Budget that stopped the solve.
-        budget: PhysicalFlyBudget,
+        budget: FreeSphereBudget,
         /// Completed substeps before the stop.
         substeps: usize,
         /// Contact passes evaluated before the stop.
@@ -87,12 +130,12 @@ pub enum PhysicalFlyOutcome {
     },
 }
 
-/// Solves one bounded physical-fly displacement without grounded behavior.
-pub fn solve_physical_fly(
+/// Solves one bounded free-sphere displacement without grounded behavior.
+pub fn solve_free_sphere(
     scene: &CollisionScene,
-    config: PhysicalFlyConfig,
-    request: PhysicalFlyRequest,
-) -> Result<PhysicalFlyOutcome> {
+    config: FreeSphereConfig,
+    request: FreeSphereRequest,
+) -> Result<FreeSphereOutcome> {
     validate(config, request.body.radius, request.displacement)?;
     let anchor = landblock_key(request.body.pose.landblock_id);
     let start = request.body.pose.coords;
@@ -103,9 +146,9 @@ pub fn solve_physical_fly(
         (distance / config.maximum_substep_distance).ceil() as usize
     };
     if required_substeps > config.maximum_substeps {
-        return Ok(PhysicalFlyOutcome::BudgetExceeded {
+        return Ok(FreeSphereOutcome::BudgetExceeded {
             body: request.body,
-            budget: PhysicalFlyBudget::Substeps,
+            budget: FreeSphereBudget::Substeps,
             substeps: 0,
             contact_passes: 0,
         });
@@ -155,9 +198,9 @@ pub fn solve_physical_fly(
         }
 
         if !converged {
-            return Ok(PhysicalFlyOutcome::BudgetExceeded {
+            return Ok(FreeSphereOutcome::BudgetExceeded {
                 body,
-                budget: PhysicalFlyBudget::Contacts,
+                budget: FreeSphereBudget::Contacts,
                 substeps: completed_substeps,
                 contact_passes,
             });
@@ -178,7 +221,7 @@ pub fn solve_physical_fly(
         });
     }
 
-    Ok(PhysicalFlyOutcome::Solved {
+    Ok(FreeSphereOutcome::Solved {
         body,
         achieved_displacement: current - start,
         collision_normal,
@@ -186,6 +229,164 @@ pub fn solve_physical_fly(
         substeps: required_substeps,
         contact_passes,
     })
+}
+
+/// Cast one sphere strictly along a ray, stopping before the first static obstruction.
+///
+/// This deliberately does not reuse free-flight's solved displacement: free flight separates and
+/// then continues tangentially after contact, while a boom-style clearance query must answer only
+/// how much of its original ray is collision-free. Portal transit remains authoritative and is
+/// returned beside the final point so callers never have to infer residency from containment.
+pub fn cast_static_sphere(
+    scene: &CollisionScene,
+    config: StaticSphereCastConfig,
+    request: StaticSphereCastRequest,
+) -> Result<StaticSphereCastOutcome> {
+    validate_static_sphere_cast(config, request)?;
+    let direction = request.direction / request.direction.length();
+    let anchor = landblock_key(request.origin.landblock_id);
+    let start = request.origin.coords;
+    let mut current_distance = 0.0;
+    let mut current = start;
+    let mut current_cell = request.cell;
+    let initial_placement = transit_sphere(scene, anchor, current_cell, current, request.radius)?;
+
+    ensure!(
+        placement_contacts(
+            scene,
+            anchor,
+            current,
+            request.radius,
+            &initial_placement,
+            request.filter,
+        )?
+        .is_empty(),
+        "static sphere cast origin overlaps collision geometry"
+    );
+    let origin_cell = initial_placement.committed_cell();
+    current_cell = origin_cell;
+
+    while current_distance < request.distance {
+        let next_distance =
+            (current_distance + config.maximum_substep_distance).min(request.distance);
+        let next = start + direction * next_distance;
+        let next_placement = transit_sphere(scene, anchor, current_cell, next, request.radius)?;
+        if sphere_cast_segment_is_clear(
+            scene,
+            anchor,
+            current,
+            next,
+            request.radius,
+            &next_placement,
+            request.filter,
+        )? {
+            current = next;
+            current_distance = next_distance;
+            current_cell = next_placement.committed_cell();
+            continue;
+        }
+
+        let mut clear_distance = current_distance;
+        let mut blocked_distance = next_distance;
+        while blocked_distance - clear_distance > config.surface_clearance {
+            let candidate_distance = (clear_distance + blocked_distance) * 0.5;
+            let candidate = start + direction * candidate_distance;
+            let candidate_placement =
+                transit_sphere(scene, anchor, current_cell, candidate, request.radius)?;
+            if sphere_cast_segment_is_clear(
+                scene,
+                anchor,
+                current,
+                candidate,
+                request.radius,
+                &candidate_placement,
+                request.filter,
+            )? {
+                clear_distance = candidate_distance;
+            } else {
+                blocked_distance = candidate_distance;
+            }
+        }
+
+        let safe_distance = (clear_distance - config.surface_clearance).max(current_distance);
+        let safe = start + direction * safe_distance;
+        let safe_placement = transit_sphere(scene, anchor, current_cell, safe, request.radius)?;
+        return Ok(static_sphere_cast_outcome(
+            anchor,
+            request.origin,
+            origin_cell,
+            safe,
+            safe_placement,
+            safe_distance,
+            true,
+        ));
+    }
+
+    let placement = transit_sphere(scene, anchor, current_cell, current, request.radius)?;
+    Ok(static_sphere_cast_outcome(
+        anchor,
+        request.origin,
+        origin_cell,
+        current,
+        placement,
+        current_distance,
+        false,
+    ))
+}
+
+fn sphere_cast_segment_is_clear(
+    scene: &CollisionScene,
+    anchor: Guid,
+    start: Vector3,
+    end: Vector3,
+    radius: f32,
+    placement: &CollisionPlacement,
+    filter: PhysicalCollisionFilter,
+) -> Result<bool> {
+    let sweep = SphereSweep {
+        anchor,
+        start,
+        end,
+        radius,
+    };
+    Ok(
+        movement_contacts(scene, sweep, placement, filter)?.is_empty()
+            && placement_contacts(scene, anchor, end, radius, placement, filter)?.is_empty(),
+    )
+}
+
+fn transit_sphere(
+    scene: &CollisionScene,
+    anchor: Guid,
+    previous_cell: Option<Guid>,
+    center: Vector3,
+    radius: f32,
+) -> Result<CollisionPlacement> {
+    Ok(scene.transit_cell(CellTransitRequest {
+        previous_cell,
+        anchor,
+        center,
+        radius,
+    })?)
+}
+
+fn static_sphere_cast_outcome(
+    anchor: Guid,
+    original: WorldPosition,
+    origin_cell: Option<Guid>,
+    point: Vector3,
+    placement: CollisionPlacement,
+    distance: f32,
+    obstructed: bool,
+) -> StaticSphereCastOutcome {
+    let cell = placement.committed_cell();
+    StaticSphereCastOutcome {
+        origin_cell,
+        pose: pose_for_commit(anchor, point, original, cell),
+        cell,
+        distance,
+        obstructed,
+    }
 }
 
 fn movement_contacts(
@@ -252,7 +453,7 @@ fn remember_collision_normal(
 fn transit(
     scene: &CollisionScene,
     anchor: Guid,
-    body: PhysicalFlyBody,
+    body: FreeSphereState,
     center: Vector3,
 ) -> Result<CollisionPlacement> {
     Ok(scene.transit_cell(CellTransitRequest {
@@ -276,14 +477,14 @@ fn pose_for_commit(
     pose
 }
 
-fn validate(config: PhysicalFlyConfig, radius: f32, displacement: Vector3) -> Result<()> {
+fn validate(config: FreeSphereConfig, radius: f32, displacement: Vector3) -> Result<()> {
     ensure!(
         radius.is_finite() && radius > 0.0,
         "physical-fly radius must be finite and positive"
     );
     ensure!(
         displacement.x.is_finite() && displacement.y.is_finite() && displacement.z.is_finite(),
-        "physical-fly displacement must be finite"
+        "free-sphere displacement must be finite"
     );
     ensure!(
         config.maximum_substep_distance.is_finite() && config.maximum_substep_distance > 0.0,
@@ -300,6 +501,46 @@ fn validate(config: PhysicalFlyConfig, radius: f32, displacement: Vector3) -> Re
     ensure!(
         config.separation_epsilon.is_finite() && config.separation_epsilon > 0.0,
         "physical-fly separation epsilon must be finite and positive"
+    );
+    Ok(())
+}
+
+fn validate_static_sphere_cast(
+    config: StaticSphereCastConfig,
+    request: StaticSphereCastRequest,
+) -> Result<()> {
+    ensure!(
+        request.direction.x.is_finite()
+            && request.direction.y.is_finite()
+            && request.direction.z.is_finite()
+            && request.direction.length() > f32::EPSILON,
+        "static sphere cast direction must be non-zero and finite"
+    );
+    ensure!(
+        request.distance.is_finite() && request.distance >= 0.0,
+        "static sphere cast distance must be finite and non-negative"
+    );
+    ensure!(
+        request.radius.is_finite() && request.radius > 0.0,
+        "static sphere cast radius must be finite and positive"
+    );
+    ensure!(
+        config.maximum_substep_distance.is_finite() && config.maximum_substep_distance > 0.0,
+        "static sphere cast maximum substep distance must be finite and positive"
+    );
+    ensure!(
+        config.maximum_substeps > 0,
+        "static sphere cast requires at least one substep"
+    );
+    ensure!(
+        config.surface_clearance.is_finite() && config.surface_clearance > 0.0,
+        "static sphere cast surface clearance must be finite and positive"
+    );
+    ensure!(
+        request.distance <= config.maximum_substep_distance * config.maximum_substeps as f32,
+        "static sphere cast distance {} exceeds the configured budget {}",
+        request.distance,
+        config.maximum_substep_distance * config.maximum_substeps as f32
     );
     Ok(())
 }
@@ -325,12 +566,20 @@ mod tests {
     const EAST: u32 = 0xdb55_ffff;
     const WATER_TERRAIN_SAMPLE: u16 = 0x10 << 2;
 
-    fn config() -> PhysicalFlyConfig {
-        PhysicalFlyConfig {
+    fn config() -> FreeSphereConfig {
+        FreeSphereConfig {
             maximum_substep_distance: 0.5,
             maximum_substeps: 64,
             maximum_contact_passes: 8,
             separation_epsilon: 0.000_5,
+        }
+    }
+
+    fn cast_config() -> StaticSphereCastConfig {
+        StaticSphereCastConfig {
+            maximum_substep_distance: 0.5,
+            maximum_substeps: 64,
+            surface_clearance: 0.000_5,
         }
     }
 
@@ -343,8 +592,8 @@ mod tests {
         .normalize_outdoor_cell()
     }
 
-    fn body(local: Vector3) -> PhysicalFlyBody {
-        PhysicalFlyBody {
+    fn body(local: Vector3) -> FreeSphereState {
+        FreeSphereState {
             pose: pose(LANDBLOCK, local),
             cell: None,
             radius: 1.0,
@@ -563,15 +812,36 @@ mod tests {
 
     fn solve(
         scene: &CollisionScene,
-        body: PhysicalFlyBody,
+        body: FreeSphereState,
         displacement: Vector3,
-    ) -> PhysicalFlyOutcome {
-        solve_physical_fly(
+    ) -> FreeSphereOutcome {
+        solve_free_sphere(
             scene,
             config(),
-            PhysicalFlyRequest {
+            FreeSphereRequest {
                 body,
                 displacement,
+                filter: PhysicalCollisionFilter::ALL,
+            },
+        )
+        .unwrap()
+    }
+
+    fn cast(
+        scene: &CollisionScene,
+        body: FreeSphereState,
+        direction: Vector3,
+        distance: f32,
+    ) -> StaticSphereCastOutcome {
+        cast_static_sphere(
+            scene,
+            cast_config(),
+            StaticSphereCastRequest {
+                origin: body.pose,
+                cell: body.cell,
+                direction,
+                distance,
+                radius: body.radius,
                 filter: PhysicalCollisionFilter::ALL,
             },
         )
@@ -595,9 +865,9 @@ mod tests {
         scene
     }
 
-    fn solved(outcome: PhysicalFlyOutcome) -> PhysicalFlyBody {
+    fn solved(outcome: FreeSphereOutcome) -> FreeSphereState {
         match outcome {
-            PhysicalFlyOutcome::Solved { body, .. } => body,
+            FreeSphereOutcome::Solved { body, .. } => body,
             other => panic!("expected solved physical fly, got {other:?}"),
         }
     }
@@ -612,10 +882,10 @@ mod tests {
         let blocked = solved(solve(&scene, original, Vector3::new(1.0, 0.0, 0.0)));
         assert_eq!(landblock_key(blocked.pose.landblock_id), Guid(LANDBLOCK));
 
-        let exempt = solve_physical_fly(
+        let exempt = solve_free_sphere(
             &scene,
             config(),
-            PhysicalFlyRequest {
+            FreeSphereRequest {
                 body: original,
                 displacement: Vector3::new(1.0, 0.0, 0.0),
                 filter: PhysicalCollisionFilter::excluding(
@@ -630,7 +900,7 @@ mod tests {
     #[test]
     fn open_motion_preserves_full_three_dimensional_intent() {
         let displacement = Vector3::new(2.0, -3.0, 4.0);
-        let PhysicalFlyOutcome::Solved { body, motion, .. } = solve(
+        let FreeSphereOutcome::Solved { body, motion, .. } = solve(
             &scene(Vec::new()),
             body(Vector3::new(50.0, 50.0, 10.0)),
             displacement,
@@ -658,7 +928,7 @@ mod tests {
     #[test]
     fn wall_impact_stops_normal_motion_and_preserves_oblique_slide() {
         let scene = scene(vec![wall_x(10.0)]);
-        let PhysicalFlyOutcome::Solved {
+        let FreeSphereOutcome::Solved {
             body,
             collision_normal,
             ..
@@ -673,6 +943,61 @@ mod tests {
         assert!((body.pose.coords.x - 9.0).abs() < 0.002, "{body:?}");
         assert!((body.pose.coords.y - 24.0).abs() < 0.002, "{body:?}");
         assert_eq!(collision_normal, Some(Vector3::new(-1.0, 0.0, 0.0)));
+    }
+
+    #[test]
+    fn static_sphere_cast_stops_on_its_ray_instead_of_reprojecting_slide_distance() {
+        let scene = scene(vec![wall_x(10.0)]);
+        let direction = Vector3::new(6.0, 4.0, 0.0);
+
+        let outcome = cast(
+            &scene,
+            body(Vector3::new(7.0, 20.0, 5.0)),
+            direction,
+            direction.length(),
+        );
+
+        assert!(outcome.obstructed);
+        assert!((outcome.pose.coords.x - 9.0).abs() < 0.002, "{outcome:?}");
+        assert!((outcome.pose.coords.y - (20.0 + 4.0 / 3.0)).abs() < 0.002);
+        assert!(outcome.distance < 2.405);
+    }
+
+    #[test]
+    fn static_sphere_cast_may_stop_closer_than_a_frontend_boom_minimum() {
+        let outcome = cast(
+            &scene(vec![wall_x(8.5)]),
+            body(Vector3::new(7.0, 20.0, 5.0)),
+            Vector3::new(1.0, 0.0, 0.0),
+            6.0,
+        );
+
+        assert!(outcome.obstructed);
+        assert!((outcome.distance - 0.5).abs() < 0.002, "{outcome:?}");
+        assert!(outcome.pose.coords.x < 7.501);
+    }
+
+    #[test]
+    fn static_sphere_cast_rejects_an_origin_that_is_already_inside_geometry() {
+        let result = cast_static_sphere(
+            &scene(vec![wall_x(10.0)]),
+            cast_config(),
+            StaticSphereCastRequest {
+                origin: pose(LANDBLOCK, Vector3::new(10.5, 20.0, 5.0)),
+                cell: None,
+                direction: Vector3::new(-1.0, 0.0, 0.0),
+                distance: 2.0,
+                radius: 1.0,
+                filter: PhysicalCollisionFilter::ALL,
+            },
+        );
+
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("origin overlaps collision geometry")
+        );
     }
 
     #[test]
@@ -753,7 +1078,7 @@ mod tests {
             Vector3::new(0.0, 0.0, -8.0),
         ));
         assert!((floor.pose.coords.z - 1.0).abs() < 0.002);
-        let PhysicalFlyOutcome::Solved {
+        let FreeSphereOutcome::Solved {
             body: ceiling,
             collision_normal,
             ..
@@ -781,10 +1106,10 @@ mod tests {
             .unwrap();
 
         let floor = solved(
-            solve_physical_fly(
+            solve_free_sphere(
                 &collision,
                 config(),
-                PhysicalFlyRequest {
+                FreeSphereRequest {
                     body: body(Vector3::new(50.0, 50.0, 5.0)),
                     displacement: Vector3::new(0.0, 0.0, -8.0),
                     filter: PhysicalCollisionFilter::excluding(
@@ -799,7 +1124,7 @@ mod tests {
     }
 
     #[test]
-    fn physical_fly_crosses_a_missing_owner_as_open_space() {
+    fn free_sphere_crosses_a_missing_owner_as_open_space() {
         let original = body(Vector3::new(50.0, 50.0, 5.0));
         let mut scene = CollisionScene::new();
         for owner in test_halo_owners(&[LANDBLOCK]) {
@@ -819,10 +1144,10 @@ mod tests {
         let original = body(Vector3::new(5.0, 20.0, 5.0));
         let mut limited = config();
         limited.maximum_substeps = 2;
-        let outcome = solve_physical_fly(
+        let outcome = solve_free_sphere(
             &scene(vec![wall_x(10.0)]),
             limited,
-            PhysicalFlyRequest {
+            FreeSphereRequest {
                 body: original,
                 displacement: Vector3::new(20.0, 0.0, 0.0),
                 filter: PhysicalCollisionFilter::ALL,
@@ -831,9 +1156,9 @@ mod tests {
         .unwrap();
         assert_eq!(
             outcome,
-            PhysicalFlyOutcome::BudgetExceeded {
+            FreeSphereOutcome::BudgetExceeded {
                 body: original,
-                budget: PhysicalFlyBudget::Substeps,
+                budget: FreeSphereBudget::Substeps,
                 substeps: 0,
                 contact_passes: 0,
             }
@@ -854,10 +1179,10 @@ mod tests {
         let original = body(Vector3::new(10.25, 20.0, 5.0));
         let mut limited = config();
         limited.maximum_contact_passes = 2;
-        let outcome = solve_physical_fly(
+        let outcome = solve_free_sphere(
             &scene(vec![left, right]),
             limited,
-            PhysicalFlyRequest {
+            FreeSphereRequest {
                 body: original,
                 displacement: Vector3::new(0.1, 0.0, 0.0),
                 filter: PhysicalCollisionFilter::ALL,
@@ -866,8 +1191,8 @@ mod tests {
         .unwrap();
         assert!(matches!(
             outcome,
-            PhysicalFlyOutcome::BudgetExceeded {
-                budget: PhysicalFlyBudget::Contacts,
+            FreeSphereOutcome::BudgetExceeded {
+                budget: FreeSphereBudget::Contacts,
                 contact_passes: 2,
                 ..
             }
@@ -1033,5 +1358,18 @@ mod tests {
         let outdoors = solved(solve(&scene, neighbor, Vector3::new(10.0, 0.0, 0.0)));
         assert_eq!(outdoors.cell, None);
         assert!(!outdoors.pose.is_indoors(), "{outdoors:?}");
+
+        let cast_neighbor = cast(&scene, inside, Vector3::new(1.0, 0.0, 0.0), 4.0);
+        assert!(!cast_neighbor.obstructed);
+        assert_eq!(cast_neighbor.origin_cell, Some(Guid(0xda55_0100)));
+        assert_eq!(cast_neighbor.cell, Some(Guid(0xda55_0101)));
+        assert_eq!(cast_neighbor.pose.landblock_id, Guid(0xda55_0101));
+
+        let mut adjacent_hint = body(Vector3::new(11.0, 20.0, 5.0));
+        adjacent_hint.cell = Some(Guid(0xda55_0100));
+        adjacent_hint.pose.landblock_id = Guid(0xda55_0100);
+        let cast_inside_neighbor = cast(&scene, adjacent_hint, Vector3::new(1.0, 0.0, 0.0), 4.0);
+        assert_eq!(cast_inside_neighbor.origin_cell, Some(Guid(0xda55_0101)));
+        assert_eq!(cast_inside_neighbor.cell, Some(Guid(0xda55_0101)));
     }
 }

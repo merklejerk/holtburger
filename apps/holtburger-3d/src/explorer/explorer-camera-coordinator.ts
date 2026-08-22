@@ -1,13 +1,9 @@
 import type { LandblockId } from "../lib/game/game-types";
-import {
-	sceneVec3,
-	sceneVector3,
-	type SceneVec3,
-} from "../lib/assets/ac-frame";
+import { sceneVec3, sceneVector3 } from "../lib/assets/ac-frame";
 import { Vec3 } from "../lib/game/math/types";
 import { createCameraRotationRadians } from "../lib/game/math/camera-orientation";
 import { GameRuntime } from "../lib/game/runtime/game-runtime";
-import type { PhysicalFlyPlacement } from "../lib/game/motion/host-physical-fly-path";
+import type { HostCameraPlacement } from "../lib/game/motion/host-placed-path";
 import type { SceneInterestRevision } from "../lib/game/runtime/scene-availability";
 import type { SceneAvailabilityEvent } from "../lib/game/runtime/scene-availability";
 import { LandblockLayerKind } from "../lib/game/runtime/scene-interest";
@@ -98,7 +94,7 @@ export class ExplorerCameraCoordinator {
 	#anchor: ExplorerSceneInterestSnapshot | null = null;
 	#lastResidency: SceneResidency | null = null;
 	/** Exact position/residency most recently applied to the runtime camera. */
-	#presentedPlacement: PhysicalFlyPlacement | null = null;
+	#presentedPlacement: HostCameraPlacement | null = null;
 	/** Last host placement announced to the Explorer status panel. */
 	#lastReportedHostResidency: SceneResidency | null = null;
 	/** One host-owned residency carried across the physical-to-free-fly authority handoff. */
@@ -263,15 +259,10 @@ export class ExplorerCameraCoordinator {
 	}
 
 	/**
-	 * Apply one boom-derived pose, resolving residency the way free fly does.
-	 *
-	 * The frontend computed this position, so the host has no residency opinion about it — unlike
-	 * `syncPhysicalCamera`, where the solver committed a cell. The boom's own orientation is used
-	 * rather than the free-fly controller's, because while possessed the operator is orbiting the
-	 * entity rather than steering a free camera.
+	 * Apply one host-authored boom presentation with residency and path-aligned look orientation.
 	 */
 	syncBoomCamera(
-		position: SceneVec3,
+		placement: HostCameraPlacement,
 		yawRadians: number,
 		pitchRadians: number,
 	): ExplorerCameraResidencySync {
@@ -279,27 +270,20 @@ export class ExplorerCameraCoordinator {
 		const state = {
 			...this.#controller.snapshotState(),
 			pitchRadians,
-			position,
+			position: placement.position,
 			yawRadians,
 		};
-		const resolution = resolveExplorerPointResidency(
-			this.#runtime.queryWorldPointResidencyCandidates(position),
+		return this.#syncKnownResidency(
+			state,
+			placement.position,
+			placement.residency,
+			"host-boom-camera",
 		);
-		const location = { position, residency: resolution };
-		if (resolution.kind !== "resolved") {
-			// A boom can legitimately swing outside resident topology for a frame while the entity
-			// crosses a boundary; holding the previous frame beats reporting a camera error.
-			return { location, renderable: false };
-		}
-		this.#lastResolutionIssue = null;
-		this.#lastResidency = resolution.residency;
-		this.#applyCamera(createCamera(resolution.residency, state));
-		return { location, renderable: true };
 	}
 
 	/** Apply one host-owned physical placement without re-deriving its portal residency. */
 	syncPhysicalCamera(
-		placement: PhysicalFlyPlacement | null,
+		placement: HostCameraPlacement | null,
 	): ExplorerCameraResidencySync {
 		if (placement === null) {
 			this.#reportResolutionIssue("Waiting for first host camera placement.");
@@ -321,7 +305,7 @@ export class ExplorerCameraCoordinator {
 	}
 
 	/** Copy the exact placement currently applied to the renderer for an authority handoff. */
-	presentedPlacement(): PhysicalFlyPlacement | null {
+	presentedPlacement(): HostCameraPlacement | null {
 		const placement = this.#presentedPlacement;
 		return placement === null
 			? null
@@ -335,7 +319,7 @@ export class ExplorerCameraCoordinator {
 		state: FreeFlyCameraState,
 		position: Vec3,
 		residency: SceneResidency,
-		source: "host-physical-camera" | "physical-handoff",
+		source: "host-boom-camera" | "host-physical-camera" | "physical-handoff",
 	): ExplorerCameraResidencySync {
 		if (
 			residency.envCellId !== null &&

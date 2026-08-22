@@ -163,35 +163,35 @@ pub struct SphereSweep {
     pub radius: f32,
 }
 
-/// One candidate body's authoritative placement and every collision cell reached by its
+/// One candidate body's authoritative resident cell and every spatial domain reached by its
 /// spheres.
 ///
 /// Retail commits the cell containing sphere zero's center separately from the `CELLARRAY` used
 /// to query collision. Keeping both facts together prevents query families from inventing
 /// different terrain/interior selection rules.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CollisionPlacement {
+pub struct SpatialMembership {
     committed_cell: Option<Guid>,
     reaches_outdoors: bool,
-    reached_interior_cells: Vec<Guid>,
+    reached_env_cells: Vec<Guid>,
 }
 
-impl CollisionPlacement {
-    /// Placement for a body wholly in outdoor land cells.
+impl SpatialMembership {
+    /// Membership for a body wholly in outdoor land cells.
     pub fn outdoor() -> Self {
         Self {
             committed_cell: None,
             reaches_outdoors: true,
-            reached_interior_cells: Vec::new(),
+            reached_env_cells: Vec::new(),
         }
     }
 
-    /// Placement for a body wholly in one EnvCell.
+    /// Membership for a body wholly in one EnvCell.
     pub fn interior(cell: Guid) -> Self {
         Self {
             committed_cell: Some(cell),
             reaches_outdoors: false,
-            reached_interior_cells: vec![cell],
+            reached_env_cells: vec![cell],
         }
     }
 
@@ -206,22 +206,22 @@ impl CollisionPlacement {
     }
 
     /// Deduplicated EnvCells reached by any body sphere.
-    pub fn reached_interior_cells(&self) -> &[Guid] {
-        &self.reached_interior_cells
+    pub fn reached_env_cells(&self) -> &[Guid] {
+        &self.reached_env_cells
     }
 
     pub(super) fn merge_reached(mut self, other: Self) -> Self {
         self.reaches_outdoors |= other.reaches_outdoors;
-        for cell in other.reached_interior_cells {
-            if !self.reached_interior_cells.contains(&cell) {
-                self.reached_interior_cells.push(cell);
+        for cell in other.reached_env_cells {
+            if !self.reached_env_cells.contains(&cell) {
+                self.reached_env_cells.push(cell);
             }
         }
         self
     }
 
     fn reaches_interior_in(&self, owner: Guid) -> bool {
-        self.reached_interior_cells
+        self.reached_env_cells
             .iter()
             .any(|cell| landblock_key(*cell) == owner)
     }
@@ -233,7 +233,7 @@ pub struct MovementObstructionRequest<'a> {
     /// Swept sphere being tested.
     pub sweep: SphereSweep,
     /// Candidate placement selecting the collision domains visible to this query.
-    pub placement: &'a CollisionPlacement,
+    pub placement: &'a SpatialMembership,
 }
 
 /// Grounded movement query that preserves two-sided polygon identity.
@@ -242,7 +242,7 @@ pub struct GroundedObstructionRequest<'a> {
     /// Swept sphere being tested.
     pub sweep: SphereSweep,
     /// Candidate placement selecting the collision domains visible to this query.
-    pub placement: &'a CollisionPlacement,
+    pub placement: &'a SpatialMembership,
 }
 
 /// Directionless placement-confirmation query.
@@ -255,7 +255,7 @@ pub struct PlacementRequest<'a> {
     /// Positive body radius in meters.
     pub radius: f32,
     /// Candidate placement selecting the collision domains visible to this query.
-    pub placement: &'a CollisionPlacement,
+    pub placement: &'a SpatialMembership,
 }
 
 /// Directional support probe for the grounded lower sphere.
@@ -272,7 +272,7 @@ pub struct SupportRequest<'a> {
     /// Maximum vertical distance a penetrated walkable plane may lift the sphere.
     pub maximum_rise: f32,
     /// Candidate placement selecting the collision domains visible to this query.
-    pub placement: &'a CollisionPlacement,
+    pub placement: &'a SpatialMembership,
 }
 
 /// Body-primary directional query for optional filtered movement restrictions.
@@ -281,7 +281,7 @@ pub struct MovementRestrictionRequest<'a> {
     /// Swept primary sphere whose center selects retail land restrictions.
     pub sweep: SphereSweep,
     /// Candidate placement selecting whether outdoor restrictions participate.
-    pub placement: &'a CollisionPlacement,
+    pub placement: &'a SpatialMembership,
     /// Body-owned optional collision-domain exclusions.
     pub filter: PhysicalCollisionFilter,
 }
@@ -296,7 +296,7 @@ pub struct PlacementRestrictionRequest<'a> {
     /// Positive primary-sphere radius used to select installed restrictions.
     pub radius: f32,
     /// Candidate placement selecting whether outdoor restrictions participate.
-    pub placement: &'a CollisionPlacement,
+    pub placement: &'a SpatialMembership,
     /// Body-owned optional collision-domain exclusions.
     pub filter: PhysicalCollisionFilter,
 }
@@ -309,7 +309,7 @@ struct StaticContactRequest<'a> {
     center: Vector3,
     radius: f32,
     movement: Option<Vector3>,
-    placement: &'a CollisionPlacement,
+    placement: &'a SpatialMembership,
 }
 
 /// Prior-cell-aware interior transit query.
@@ -381,11 +381,11 @@ pub enum PlacementRecovery {
     },
 }
 
-/// One position paired with the complete collision placement valid at that position.
+/// One position paired with the complete spatial membership valid at that position.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlacedMotionPoint {
     center: Vector3,
-    placement: CollisionPlacement,
+    placement: SpatialMembership,
     recovery: Option<PlacementRecovery>,
 }
 
@@ -396,7 +396,7 @@ impl PlacedMotionPoint {
     }
 
     /// Authoritative cell and collision domains at `center`.
-    pub fn placement(&self) -> &CollisionPlacement {
+    pub fn placement(&self) -> &SpatialMembership {
         &self.placement
     }
 
@@ -480,7 +480,7 @@ struct ColliderReference {
     collider_index: usize,
 }
 
-/// One selected static collider and the retail BSP leaf policy for this collision placement.
+/// One selected static collider and the retail BSP leaf policy for this spatial membership.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct SelectedCollider {
     /// Stable reference to source-owned collider geometry.
@@ -706,7 +706,7 @@ impl StaticShadowIndex {
     fn selected_colliders(
         &self,
         query_cells: GlobalCellRange,
-        placement: &CollisionPlacement,
+        placement: &SpatialMembership,
     ) -> Vec<ColliderReference> {
         let mut selected = Vec::new();
         if placement.reaches_outdoors {
@@ -716,7 +716,7 @@ impl StaticShadowIndex {
                 }
             }
         }
-        for cell in &placement.reached_interior_cells {
+        for cell in &placement.reached_env_cells {
             if let Some(colliders) = self.interior_colliders.get(cell) {
                 selected.extend(colliders.iter().copied());
             }
@@ -849,7 +849,7 @@ impl CollisionScene {
         &self,
         anchor: Guid,
         center: Vector3,
-        placement: &CollisionPlacement,
+        placement: &SpatialMembership,
         filter: PhysicalCollisionFilter,
     ) -> bool {
         if !entirely_water_restriction_participates(placement, filter) {
@@ -1164,7 +1164,7 @@ impl CollisionScene {
     pub fn transit_cell(
         &self,
         request: CellTransitRequest,
-    ) -> Result<CollisionPlacement, CollisionQueryError> {
+    ) -> Result<SpatialMembership, CollisionQueryError> {
         let sweep = SphereSweep {
             anchor: request.anchor,
             start: request.center,
@@ -1181,15 +1181,15 @@ impl CollisionScene {
         &self,
         request: CellTransitRequest,
         touched: &[Guid],
-    ) -> CollisionPlacement {
+    ) -> SpatialMembership {
         let mut placement = if request.previous_cell.is_some() {
-            CollisionPlacement {
+            SpatialMembership {
                 committed_cell: None,
                 reaches_outdoors: false,
-                reached_interior_cells: Vec::new(),
+                reached_env_cells: Vec::new(),
             }
         } else {
-            CollisionPlacement::outdoor()
+            SpatialMembership::outdoor()
         };
 
         if let Some(previous_cell) = request.previous_cell {
@@ -1202,7 +1202,7 @@ impl CollisionScene {
                     .any(|volume| volume.cell_selector == (previous_cell.0 & 0xffff) as u16)
             {
                 let local = anchor_to_landblock(request.center, request.anchor, owner);
-                placement.reached_interior_cells.push(previous_cell);
+                placement.reached_env_cells.push(previous_cell);
                 expand_reached_cells(asset, owner, local, request.radius, &mut placement);
                 placement.committed_cell = containing_reached_cell(asset, local, &placement);
                 if !placement.reaches_outdoors {
@@ -1224,9 +1224,9 @@ impl CollisionScene {
                 let cell = Guid((owner.0 & 0xffff_0000) | u32::from(volume.cell_selector));
                 if is_outdoor_entry
                     && volume_reaches(volume, local, request.radius)
-                    && !placement.reached_interior_cells.contains(&cell)
+                    && !placement.reached_env_cells.contains(&cell)
                 {
-                    placement.reached_interior_cells.push(cell);
+                    placement.reached_env_cells.push(cell);
                 }
             }
             expand_reached_cells(asset, owner, local, request.radius, &mut placement);
@@ -1241,7 +1241,7 @@ impl CollisionScene {
     ///
     /// This operation does not solve collision or predict future motion. Callers provide every
     /// accepted bend. The scene only inserts directed portal boundaries and derives the complete
-    /// collision placement valid at each retained point.
+    /// spatial membership valid at each retained point.
     pub fn transit_motion_path(
         &self,
         request: PlacedMotionPathRequest<'_>,
@@ -1377,7 +1377,7 @@ impl CollisionScene {
         center: Vector3,
         radius: f32,
         committed_cell: Option<Guid>,
-    ) -> Result<(CollisionPlacement, Option<PlacementRecovery>), CollisionQueryError> {
+    ) -> Result<(SpatialMembership, Option<PlacementRecovery>), CollisionQueryError> {
         let mut placement = self.transit_cell(CellTransitRequest {
             previous_cell: committed_cell,
             anchor,
@@ -1412,8 +1412,8 @@ impl CollisionScene {
         placement.committed_cell = committed_cell;
         match committed_cell {
             Some(cell) => {
-                if !placement.reached_interior_cells.contains(&cell) {
-                    placement.reached_interior_cells.push(cell);
+                if !placement.reached_env_cells.contains(&cell) {
+                    placement.reached_env_cells.push(cell);
                 }
             }
             None => placement.reaches_outdoors = true,
@@ -1626,7 +1626,7 @@ impl CollisionScene {
         );
         let mut candidates =
             placement
-                .reached_interior_cells()
+                .reached_env_cells()
                 .iter()
                 .copied()
                 .filter(|cell| *cell != source_cell)
@@ -1849,7 +1849,7 @@ impl CollisionScene {
     fn selected_colliders(
         &self,
         query_cells: GlobalCellRange,
-        placement: &CollisionPlacement,
+        placement: &SpatialMembership,
     ) -> Vec<SelectedCollider> {
         self.shadows
             .selected_colliders(query_cells, placement)
@@ -2102,11 +2102,11 @@ fn expand_reached_cells(
     owner: Guid,
     landblock_point: Vector3,
     radius: f32,
-    placement: &mut CollisionPlacement,
+    placement: &mut SpatialMembership,
 ) {
     let mut index = 0;
-    while index < placement.reached_interior_cells.len() {
-        let source_cell = placement.reached_interior_cells[index];
+    while index < placement.reached_env_cells.len() {
+        let source_cell = placement.reached_env_cells[index];
         index += 1;
         if landblock_key(source_cell) != owner {
             continue;
@@ -2140,9 +2140,9 @@ fn expand_reached_cells(
                     let target_cell =
                         Guid((owner.0 & 0xffff_0000) | u32::from(target.cell_selector));
                     if volume_reaches(target, landblock_point, radius)
-                        && !placement.reached_interior_cells.contains(&target_cell)
+                        && !placement.reached_env_cells.contains(&target_cell)
                     {
-                        placement.reached_interior_cells.push(target_cell);
+                        placement.reached_env_cells.push(target_cell);
                     }
                 }
             }
@@ -2153,20 +2153,16 @@ fn expand_reached_cells(
 fn containing_reached_cell(
     asset: &LandblockCollisionAsset,
     landblock_point: Vector3,
-    placement: &CollisionPlacement,
+    placement: &SpatialMembership,
 ) -> Option<Guid> {
-    placement
-        .reached_interior_cells
-        .iter()
-        .copied()
-        .find(|cell| {
-            asset
-                .static_geometry
-                .cell_volumes
-                .iter()
-                .find(|volume| volume.cell_selector == (cell.0 & 0xffff) as u16)
-                .is_some_and(|volume| volume_reaches(volume, landblock_point, 0.0))
-        })
+    placement.reached_env_cells.iter().copied().find(|cell| {
+        asset
+            .static_geometry
+            .cell_volumes
+            .iter()
+            .find(|volume| volume.cell_selector == (cell.0 & 0xffff) as u16)
+            .is_some_and(|volume| volume_reaches(volume, landblock_point, 0.0))
+    })
 }
 
 /// Retains, in order, the tail elements from `start` that satisfy the predicate.
@@ -2453,7 +2449,7 @@ fn inside_landblock_xy(point: Vector3) -> bool {
 }
 
 fn entirely_water_restriction_participates(
-    placement: &CollisionPlacement,
+    placement: &SpatialMembership,
     filter: PhysicalCollisionFilter,
 ) -> bool {
     placement.reaches_outdoors
@@ -2600,7 +2596,7 @@ mod tests {
         anchor: Guid,
         center: Vector3,
         radius: f32,
-        placement: &CollisionPlacement,
+        placement: &SpatialMembership,
     ) -> Vec<(u32, u32, u32, u32)> {
         let mut contacts = Vec::new();
         for (owner, asset) in &scene.landblocks {
@@ -2620,7 +2616,7 @@ mod tests {
                     | StaticColliderPlacement::OutdoorGenerated { .. }
                     | StaticColliderPlacement::BuildingShell { .. } => placement.reaches_outdoors,
                     StaticColliderPlacement::EnvCellShell { cell_id } => placement
-                        .reached_interior_cells
+                        .reached_env_cells
                         .contains(&Guid((owner.0 & 0xffff_0000) | (cell_id & 0xffff))),
                     // Indoor statics shadow through reached-cell traversal; the seam cases this
                     // differential covers are outdoor, so restrict the oracle to outdoor kinds.
@@ -2693,7 +2689,7 @@ mod tests {
             })
             .unwrap();
 
-        let placement = CollisionPlacement::outdoor();
+        let placement = SpatialMembership::outdoor();
         let mut total_contacts = 0usize;
         for (x, y, z) in [
             (96.0, 96.0, -20.0),
@@ -2783,7 +2779,7 @@ mod tests {
                 .unwrap();
         }
 
-        let placement = CollisionPlacement::outdoor();
+        let placement = SpatialMembership::outdoor();
         let mut total_contacts = 0usize;
         // Anchor-west probes spanning both owners, including straight over the seam and points
         // near the varied collider rows.
@@ -2968,7 +2964,7 @@ mod tests {
             end: Vector3::new(192.1, 96.0, 50.0),
             radius: 0.25,
         };
-        let placement = CollisionPlacement::outdoor();
+        let placement = SpatialMembership::outdoor();
         let contacts = scene
             .movement_restrictions(MovementRestrictionRequest {
                 sweep,
@@ -3016,7 +3012,7 @@ mod tests {
         assert_eq!(
             scene.movement_obstructions(MovementObstructionRequest {
                 sweep: request,
-                placement: &CollisionPlacement::outdoor(),
+                placement: &SpatialMembership::outdoor(),
             }),
             Err(CollisionQueryError::InvalidRadius)
         );
@@ -3027,7 +3023,7 @@ mod tests {
                     radius: 1.0,
                     ..request
                 },
-                placement: &CollisionPlacement::outdoor(),
+                placement: &SpatialMembership::outdoor(),
             }),
             Err(CollisionQueryError::NonFiniteCenter)
         );
@@ -3038,7 +3034,7 @@ mod tests {
                 radius: 1.0,
                 maximum_drop: -1.0,
                 maximum_rise: 0.0,
-                placement: &CollisionPlacement::outdoor(),
+                placement: &SpatialMembership::outdoor(),
             }),
             Err(CollisionQueryError::InvalidDistance)
         );
@@ -3049,7 +3045,7 @@ mod tests {
                 radius: 1.0,
                 maximum_drop: 0.0,
                 maximum_rise: f32::NAN,
-                placement: &CollisionPlacement::outdoor(),
+                placement: &SpatialMembership::outdoor(),
             }),
             Err(CollisionQueryError::InvalidDistance)
         );
@@ -3066,7 +3062,7 @@ mod tests {
                     end: Vector3::new(f32::MAX, f32::MIN, 20.0),
                     radius: 0.25,
                 },
-                placement: &CollisionPlacement::outdoor(),
+                placement: &SpatialMembership::outdoor(),
             })
             .unwrap();
 
@@ -3204,10 +3200,7 @@ mod tests {
 
         assert_eq!(placement.committed_cell(), Some(target_cell));
         assert!(placement.reaches_outdoors());
-        assert_eq!(
-            placement.reached_interior_cells(),
-            &[source_cell, target_cell]
-        );
+        assert_eq!(placement.reached_env_cells(), &[source_cell, target_cell]);
     }
 
     #[test]
@@ -3315,12 +3308,8 @@ mod tests {
         let boundary = path.legs()[0].end().placement();
         assert_eq!(boundary.committed_cell(), None);
         assert!(
-            boundary
-                .reached_interior_cells()
-                .contains(&Guid(0xda55_010b))
-                && boundary
-                    .reached_interior_cells()
-                    .contains(&Guid(0xda55_010c))
+            boundary.reached_env_cells().contains(&Guid(0xda55_010b))
+                && boundary.reached_env_cells().contains(&Guid(0xda55_010c))
         );
         assert_eq!(path.final_point().placement().committed_cell(), None);
     }
@@ -3814,7 +3803,7 @@ mod tests {
             vec![volume(0x0100, Vec::new()), volume(0x0101, Vec::new())],
         );
 
-        let outdoors = CollisionPlacement::outdoor();
+        let outdoors = SpatialMembership::outdoor();
         assert_eq!(
             scene
                 .shadows
@@ -3822,7 +3811,7 @@ mod tests {
             references([0, 1])
         );
 
-        let interior = CollisionPlacement::interior(cell);
+        let interior = SpatialMembership::interior(cell);
         assert_eq!(
             scene
                 .shadows
@@ -3830,7 +3819,7 @@ mod tests {
             references([2, 3])
         );
 
-        let straddling = CollisionPlacement::outdoor().merge_reached(interior);
+        let straddling = SpatialMembership::outdoor().merge_reached(interior);
         assert_eq!(
             scene
                 .shadows
@@ -3891,13 +3880,13 @@ mod tests {
         assert_eq!(
             scene
                 .shadows
-                .selected_colliders(owner_cells(owner), &CollisionPlacement::interior(source)),
+                .selected_colliders(owner_cells(owner), &SpatialMembership::interior(source)),
             references([0, 1])
         );
         assert_eq!(
             scene
                 .shadows
-                .selected_colliders(owner_cells(owner), &CollisionPlacement::interior(target)),
+                .selected_colliders(owner_cells(owner), &SpatialMembership::interior(target)),
             references([0, 1]),
             "every part follows the authored placement's union membership"
         );
@@ -3950,7 +3939,7 @@ mod tests {
         assert_eq!(
             scene.shadows.selected_colliders(
                 owner_cells(target_owner),
-                &CollisionPlacement::interior(target_cell)
+                &SpatialMembership::interior(target_cell)
             ),
             [ColliderReference {
                 owner: source_owner,
@@ -3964,7 +3953,7 @@ mod tests {
                 .shadows
                 .selected_colliders(
                     owner_cells(target_owner),
-                    &CollisionPlacement::interior(target_cell)
+                    &SpatialMembership::interior(target_cell)
                 )
                 .is_empty(),
             "eviction retained a dangling cross-owner static shadow"
@@ -4013,7 +4002,7 @@ mod tests {
         assert_eq!(
             scene
                 .shadows
-                .selected_colliders(owner_cells(original_owner), &CollisionPlacement::outdoor()),
+                .selected_colliders(owner_cells(original_owner), &SpatialMembership::outdoor()),
             references([0]),
             "failed rebuild replaced the previously committed shadow index"
         );

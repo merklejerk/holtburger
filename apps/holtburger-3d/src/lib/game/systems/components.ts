@@ -31,16 +31,12 @@ export interface RigidPartDrawUnit {
 	readonly templatePartKey: PartVisualTemplateKey;
 }
 
-/** Residency boundary within which visible object instances may share one draw submission. */
-export interface ObjectRenderDomain {
-	readonly key: string;
-	readonly landblockId: LandblockId;
-	readonly scope: SceneScope;
-}
-
 /** Renderer-neutral visible rigid-part instance emitted from one selected dynamic root. */
 export interface VisibleRigidPartContribution {
-	readonly domain: ObjectRenderDomain;
+	/** Landblock coordinate frame containing `instance.sourceToLandblock`. */
+	readonly landblockId: LandblockId;
+	/** Source-domain scopes reached by the owning entity's accepted spatial geometry. */
+	readonly renderScopes: readonly SceneScope[];
 	/** Stable authored draw unit; its identity is a cache key, so it is never cloned per frame. */
 	readonly drawUnit: RigidPartDrawUnit;
 	/**

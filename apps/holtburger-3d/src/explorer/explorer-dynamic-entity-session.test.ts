@@ -102,6 +102,10 @@ function entity(guid: number) {
 		},
 		placement: {
 			kind: "world" as const,
+			spatialMembership: {
+				reachesOutdoors: true,
+				reachedEnvCellIds: [],
+			},
 			pose: {
 				landblockId: 0xda550001,
 				coords: { x: 1, y: 2, z: 3 },
@@ -253,8 +257,19 @@ describe("ExplorerDynamicEntitySession", () => {
 					entity: moved,
 					kind: "integrated",
 					path: {
-						initial: { pose: entity(2).placement.pose },
-						legs: [{ endFraction: 1, end: { pose: moved.placement.pose } }],
+						initial: {
+							pose: entity(2).placement.pose,
+							spatialMembership: entity(2).placement.spatialMembership,
+						},
+						legs: [
+							{
+								endFraction: 1,
+								end: {
+									pose: moved.placement.pose,
+									spatialMembership: moved.placement.spatialMembership,
+								},
+							},
+						],
 					},
 				},
 			],

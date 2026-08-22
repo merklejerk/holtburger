@@ -6,10 +6,11 @@ import { Vec3 } from "../math/types";
 import type { PlacedDynamicPresentationSource } from "../systems/dynamic-presentation-source";
 import type {
 	DynamicEntityAttachedPlacement,
+	DynamicEntityAdvance,
 	DynamicEntityView,
 	DynamicEntityWorldPlacement,
 } from "./dynamic-entity-feed";
-import type { ScenePlacement } from "../scene";
+import type { SceneScope, SceneSpatialPlacement } from "../scene";
 
 /** Join one host-projected live entity with its separately resolved immutable visual closure. */
 export function adaptSpawnedDynamicPresentation(
@@ -55,24 +56,28 @@ export function adaptSpawnedDynamicPresentation(
 /** Convert one host-accepted AC pose without re-resolving portal residency in the frontend. */
 export function spawnedDynamicPlacement(
 	entity: DynamicEntityView,
-): ScenePlacement {
+): SceneSpatialPlacement {
 	if (entity.placement.kind !== "world") {
 		throw new Error(
 			`Attached dynamic entity ${formatGuid(entity.identity.guid)} has no world placement.`,
 		);
 	}
-	return spawnedDynamicPlacementFromPose(entity.placement.pose);
+	return spawnedDynamicPlacementFromPoint(entity.placement);
 }
 
-/** Convert one host-authored root pose while preserving its exact placement selector. */
-export function spawnedDynamicPlacementFromPose(
-	pose: DynamicEntityWorldPlacement["pose"],
-): ScenePlacement {
+/** Convert one host-authored root point without re-deriving its plural spatial membership. */
+export function spawnedDynamicPlacementFromPoint(
+	point: DynamicEntityWorldPlacement | DynamicEntityAdvance["path"]["initial"],
+): SceneSpatialPlacement {
+	const { pose, spatialMembership } = point;
 	const cellId = pose.landblockId >>> 0;
 	const selector = cellId & 0xffff;
+	const landblockId = datAssetId(
+		(cellId & 0xffff_0000) | 0xffff,
+	) as LandblockId;
 	return {
 		envCellId: selector >= 0x0100 ? (datAssetId(cellId) as EnvCellId) : null,
-		landblockId: datAssetId((cellId & 0xffff_0000) | 0xffff) as LandblockId,
+		landblockId,
 		localTransform: acFrameTransform(
 			{
 				origin: [pose.coords.x, pose.coords.y, pose.coords.z],
@@ -85,27 +90,32 @@ export function spawnedDynamicPlacementFromPose(
 			},
 			[1, 1, 1],
 		),
+		spatialMembership: {
+			scopes: spatialMembershipScopes(spatialMembership),
+		},
 	};
 }
 
 /** Interpolate one placement-stable half-open path leg in its starting residency. */
 export function interpolateSpawnedDynamicPlacement(
-	start: DynamicEntityWorldPlacement["pose"],
-	end: DynamicEntityWorldPlacement["pose"],
+	start: DynamicEntityAdvance["path"]["initial"],
+	end: DynamicEntityAdvance["path"]["initial"],
 	fraction: number,
-): ScenePlacement {
-	const startPlacement = spawnedDynamicPlacementFromPose(start);
-	const startOwner = landblockCoordinates(start.landblockId);
-	const endOwner = landblockCoordinates(end.landblockId);
+): SceneSpatialPlacement {
+	const startPlacement = spawnedDynamicPlacementFromPoint(start);
+	const startOwner = landblockCoordinates(start.pose.landblockId);
+	const endOwner = landblockCoordinates(end.pose.landblockId);
 	const startWorldX =
-		startOwner.x * OUTDOOR_LANDBLOCK_WORLD_SIZE + start.coords.x;
+		startOwner.x * OUTDOOR_LANDBLOCK_WORLD_SIZE + start.pose.coords.x;
 	const startWorldY =
-		startOwner.y * OUTDOOR_LANDBLOCK_WORLD_SIZE + start.coords.y;
-	const endWorldX = endOwner.x * OUTDOOR_LANDBLOCK_WORLD_SIZE + end.coords.x;
-	const endWorldY = endOwner.y * OUTDOOR_LANDBLOCK_WORLD_SIZE + end.coords.y;
+		startOwner.y * OUTDOOR_LANDBLOCK_WORLD_SIZE + start.pose.coords.y;
+	const endWorldX =
+		endOwner.x * OUTDOOR_LANDBLOCK_WORLD_SIZE + end.pose.coords.x;
+	const endWorldY =
+		endOwner.y * OUTDOOR_LANDBLOCK_WORLD_SIZE + end.pose.coords.y;
 	const rotation = interpolateQuaternion(
-		start.rotation,
-		end.rotation,
+		start.pose.rotation,
+		end.pose.rotation,
 		fraction,
 	);
 	return {
@@ -114,15 +124,41 @@ export function interpolateSpawnedDynamicPlacement(
 		localTransform: acFrameTransform(
 			{
 				origin: [
-					start.coords.x + (endWorldX - startWorldX) * fraction,
-					start.coords.y + (endWorldY - startWorldY) * fraction,
-					start.coords.z + (end.coords.z - start.coords.z) * fraction,
+					start.pose.coords.x + (endWorldX - startWorldX) * fraction,
+					start.pose.coords.y + (endWorldY - startWorldY) * fraction,
+					start.pose.coords.z +
+						(end.pose.coords.z - start.pose.coords.z) * fraction,
 				],
 				orientation: [rotation.w, rotation.x, rotation.y, rotation.z],
 			},
 			[1, 1, 1],
 		),
+		spatialMembership: startPlacement.spatialMembership,
 	};
+}
+
+function spatialMembershipScopes(
+	membership: DynamicEntityWorldPlacement["spatialMembership"],
+): readonly SceneScope[] {
+	const scopes: SceneScope[] = membership.reachesOutdoors
+		? [{ kind: "outdoor" }]
+		: [];
+	for (const rawEnvCellId of membership.reachedEnvCellIds) {
+		const envCellId = rawEnvCellId >>> 0;
+		if ((envCellId & 0xffff) < 0x0100) {
+			throw new Error(
+				`Dynamic spatial membership contains non-EnvCell 0x${envCellId.toString(16).padStart(8, "0")}.`,
+			);
+		}
+		scopes.push({
+			envCellId: datAssetId(envCellId) as EnvCellId,
+			kind: "env-cell",
+			landblockId: datAssetId(
+				(envCellId & 0xffff_0000) | 0xffff,
+			) as LandblockId,
+		});
+	}
+	return scopes;
 }
 
 /** Numeric DAT key for one typed feed placement. */

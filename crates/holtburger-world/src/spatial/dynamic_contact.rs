@@ -21,9 +21,9 @@ use super::physical_body::{
 };
 use super::volume_query::{placed_ball_contact, placed_cylinder_contact};
 use super::{
-    CollisionPlacement, CollisionScene, DynamicBodyPhysicsStateChange, MotionWaypoint,
-    MotionWaypointPlacement, PhysicalBodyActuation, PhysicalBodyResponseState, PhysicalRestitution,
-    SpatialBody, SpatialBodyId,
+    CollisionScene, DynamicBodyPhysicsStateChange, MotionWaypoint, MotionWaypointPlacement,
+    PhysicalBodyActuation, PhysicalBodyResponseState, PhysicalRestitution, SpatialBody,
+    SpatialBodyId, SpatialMembership,
 };
 use crate::EntityCollisionParticipation;
 
@@ -442,7 +442,7 @@ fn swept_mover_placement(
     collision: &CollisionScene,
     mover: &SpatialBody,
     commit: &PhysicalBodyTickCommit,
-) -> Result<CollisionPlacement> {
+) -> Result<SpatialMembership> {
     let mut placement = commit.motion.path.initial().placement().clone();
     for leg in commit.motion.path.legs() {
         placement = placement.merge_reached(leg.end().placement().clone());

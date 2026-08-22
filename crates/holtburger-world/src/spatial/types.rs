@@ -287,6 +287,25 @@ impl SpatialBody {
         }
     }
 
+    /// Complete source-domain membership accepted atomically with the current root pose.
+    ///
+    /// Solver-participating entities retain the exact sphere-reached membership used by the
+    /// accepted collision transaction. Pose-only bodies have no wider geometry to evaluate, so
+    /// their authoritative cell selector is their complete known membership.
+    pub fn spatial_membership(&self) -> super::SpatialMembership {
+        self.physical
+            .as_ref()
+            .and_then(|physical| physical.dynamic.as_ref())
+            .map(|dynamic| dynamic.placement.clone())
+            .unwrap_or_else(|| {
+                if self.pose.is_indoors() {
+                    super::SpatialMembership::interior(self.pose.landblock_id)
+                } else {
+                    super::SpatialMembership::outdoor()
+                }
+            })
+    }
+
     pub fn spatial_sample(&self) -> Option<SpatialEntitySample> {
         let guid = self.id.authoritative_guid()?;
         let authoritative_pose = self.authoritative_pose.unwrap_or(self.pose);

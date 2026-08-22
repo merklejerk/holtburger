@@ -411,10 +411,9 @@ describe("DynamicEntitySystem authored ownership", () => {
 		expect(first).toHaveLength(1);
 		expect(second).toHaveLength(1);
 		expect(first?.[0]?.drawUnit.batchKey).toBe(second?.[0]?.drawUnit.batchKey);
-		expect(first?.[0]?.domain).toMatchObject({
-			key: "0x0001ffff/outdoor",
+		expect(first?.[0]).toMatchObject({
 			landblockId: "0x0001ffff",
-			scope: { kind: "outdoor" },
+			renderScopes: [{ kind: "outdoor" }],
 		});
 		expect(first?.[0]?.instance.sourceToLandblock).toMatchObject({
 			m11: 2,
@@ -888,6 +887,7 @@ function source(
 			envCellId: null,
 			landblockId: "0x0001ffff",
 			localTransform: Mat4.identity(),
+			spatialMembership: { scopes: [{ kind: "outdoor" }] },
 		},
 		source: {
 			behavior: {

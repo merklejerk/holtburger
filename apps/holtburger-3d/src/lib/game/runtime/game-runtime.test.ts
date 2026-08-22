@@ -913,12 +913,16 @@ function spawnedEntity(
 		},
 		placement: {
 			kind: "world",
+			spatialMembership: {
+				reachesOutdoors: true,
+				reachedEnvCellIds: [],
+			},
 			acceleration: { x: 0, y: 0, z: 0 },
 			contact: "unknown",
 			omega: { x: 0, y: 0, z: 0 },
 			pose: {
 				coords: { x: guid, y: 2, z: 3 },
-				landblockId: 0x0001ffff,
+				landblockId: 0x00010001,
 				rotation: { w: 1, x: 0, y: 0, z: 0 },
 			},
 			sampleMode: "authoritative-only",

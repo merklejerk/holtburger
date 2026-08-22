@@ -139,6 +139,10 @@ import {
 } from "./compiled-object-draws";
 import type { PreparedPortalProjection } from "./portal-view-window";
 import type { PortalScopeWindowCullInput } from "./portal-scope-window-culler";
+import {
+	type DynamicRenderDomainSelection,
+	selectedDynamicRenderScopeKeys,
+} from "./dynamic-render-scopes";
 import type { WebGL2TextureFilteringSupport } from "./webgl2-texture-filtering-support";
 import { FRONTEND_TUNING } from "../../frontend-tuning";
 import {
@@ -1237,6 +1241,7 @@ export class WebGL2Renderer implements Renderer {
 			visible.entries,
 			frameSettings,
 			profile,
+			frame.atlas.visibility,
 		);
 		const particlesByScope = this.#particleBatcher.route(
 			`scope-atlas:${frame.atlas.visibility.topologyRevision}`,
@@ -1473,6 +1478,7 @@ export class WebGL2Renderer implements Renderer {
 			visible.entries,
 			frameSettings,
 			profile,
+			null,
 		);
 		const routed = this.#particleBatcher.route(
 			FLAT_PARTICLE_DOMAIN,
@@ -1499,6 +1505,7 @@ export class WebGL2Renderer implements Renderer {
 		visibleEntries: readonly SceneNodeId[],
 		frameSettings: FrameSettings,
 		profile: WebGL2FrameProfileCapture | null,
+		portalVisibility: DynamicRenderDomainSelection | null,
 	): PreparedSceneContributions {
 		const resolutionStartedAt = profile?.beginCpuPhase();
 		const terrain: TerrainFrameInput[] = [];
@@ -1557,9 +1564,15 @@ export class WebGL2Renderer implements Renderer {
 				for (const resolved of this.#world.resolveDynamicContributions(
 					dynamicContributions,
 				)) {
-					const { domain, drawUnit, instance, ordering, transparentSort } =
-						resolved.drawUnit;
-					retainOffset(domain.landblockId);
+					const {
+						drawUnit,
+						instance,
+						landblockId,
+						ordering,
+						renderScopes,
+						transparentSort,
+					} = resolved.drawUnit;
+					retainOffset(landblockId);
 					const compiled = this.#compiledDraws.resolveDraw(
 						drawUnit,
 						ordering,
@@ -1573,30 +1586,36 @@ export class WebGL2Renderer implements Renderer {
 								ordering,
 							}),
 					);
-					objects.push(
-						createObjectSubmission(
-							{
-								cullFaceOverride: null,
-								drawKind: "instanced",
-								geometry: resolved.geometry,
-								indexCount: drawUnit.indexCount,
-								indexStart: drawUnit.indexStart,
-								instances: {
-									cohortKey: `${domain.key}/${drawUnit.batchKey}`,
-									instance,
-									kind: "frame-template",
-								},
-								landblockId: domain.landblockId,
-								localToLandblock: instance.sourceToLandblock,
-								material: drawUnit.material,
-								ordering,
-								renderScopeKey: scopeKey(domain.scope),
-								source: "dynamic",
-								transparentSort,
-							},
-							compiled,
-						),
+					const renderScopeKeys = selectedDynamicRenderScopeKeys(
+						renderScopes,
+						portalVisibility,
 					);
+					for (const renderScopeKey of renderScopeKeys) {
+						objects.push(
+							createObjectSubmission(
+								{
+									cullFaceOverride: null,
+									drawKind: "instanced",
+									geometry: resolved.geometry,
+									indexCount: drawUnit.indexCount,
+									indexStart: drawUnit.indexStart,
+									instances: {
+										cohortKey: `${landblockId}/${renderScopeKey}/${drawUnit.batchKey}`,
+										instance,
+										kind: "frame-template",
+									},
+									landblockId,
+									localToLandblock: instance.sourceToLandblock,
+									material: drawUnit.material,
+									ordering,
+									renderScopeKey,
+									source: "dynamic",
+									transparentSort,
+								},
+								compiled,
+							),
+						);
+					}
 				}
 				continue;
 			}

@@ -28,7 +28,7 @@ use holtburger_world::{
     PhysicalBodyReconfigurationOutcome, PhysicalBodyResponsePolicy, PhysicalBodyState,
     PhysicalCollisionFilter, PhysicalElasticity, PhysicalFriction, PhysicalRestitution,
     PhysicalSphereSet, PhysicalSurfaceMotion, PreparedEntityBspPart, PreparedEntityTargetGeometry,
-    RuntimeSpatialBodyView, SpatialBody, SpatialBodyId, SpatialScene,
+    RuntimeSpatialBodyView, SpatialBody, SpatialBodyId, SpatialMembership, SpatialScene,
     resolve_effective_entity_physics_state,
 };
 use serde::{Deserialize, Serialize};
@@ -395,11 +395,32 @@ pub struct DynamicEntityProjectionInput {
     pub placement: EntityPlacement<DynamicEntityWorldProjection>,
 }
 
+/// Frontend-reconstructible source-domain membership accepted with one world placement.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DynamicEntitySpatialMembership {
+    /// Whether the accepted body geometry reaches any outdoor land cell.
+    pub reaches_outdoors: bool,
+    /// Deduplicated EnvCells reached by the accepted body geometry.
+    pub reached_env_cell_ids: Vec<Guid>,
+}
+
+impl From<&SpatialMembership> for DynamicEntitySpatialMembership {
+    fn from(membership: &SpatialMembership) -> Self {
+        Self {
+            reaches_outdoors: membership.reaches_outdoors(),
+            reached_env_cell_ids: membership.reached_env_cells().to_vec(),
+        }
+    }
+}
+
 /// Complete solver-owned world arm used by dynamic-entity projection.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DynamicEntityWorldProjection {
     /// Current canonical body view.
     pub body: RuntimeSpatialBodyView,
+    /// Complete source-domain membership accepted atomically with `body.runtime_pose`.
+    pub spatial_membership: DynamicEntitySpatialMembership,
     /// Current local physical participation derived from the body.
     pub participation: PhysicalBodyParticipation,
 }
@@ -593,6 +614,7 @@ pub fn dynamic_entity_projection_input_from_body(
         definition,
         EntityPlacement::World(DynamicEntityWorldProjection {
             body: body.runtime_view(),
+            spatial_membership: DynamicEntitySpatialMembership::from(&body.spatial_membership()),
             participation: participation(body.physical.is_some()),
         }),
     ))

@@ -68,7 +68,7 @@ fn probe_transit_cell(label: &str, previous_cell: Option<Guid>, x: f32) {
             cell_label(placement.committed_cell()),
             placement.reaches_outdoors(),
             placement
-                .reached_interior_cells()
+                .reached_env_cells()
                 .iter()
                 .filter_map(|cell| cell_label(Some(*cell)))
                 .collect::<Vec<_>>(),

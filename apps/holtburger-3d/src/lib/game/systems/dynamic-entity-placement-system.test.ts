@@ -18,6 +18,7 @@ describe("DynamicEntityPlacementSystem", () => {
 				envCellId: null,
 				landblockId: "0x0102ffff",
 				localTransform: Mat4.identity(),
+				spatialMembership: { scopes: [{ kind: "outdoor" }] },
 			},
 			AABB3.zero(),
 		);
@@ -27,6 +28,15 @@ describe("DynamicEntityPlacementSystem", () => {
 			envCellId: "0x03040123",
 			landblockId: "0x0304ffff",
 			localTransform: moved,
+			spatialMembership: {
+				scopes: [
+					{
+						envCellId: "0x03040123",
+						kind: "env-cell",
+						landblockId: "0x0304ffff",
+					},
+				],
+			},
 		});
 		expect(scene.getResolvedPlacement(root)).toMatchObject({
 			envCellId: "0x03040123",
@@ -46,6 +56,7 @@ describe("DynamicEntityPlacementSystem", () => {
 				envCellId: null,
 				landblockId: "0x0102ffff",
 				localTransform: Mat4.identity(),
+				spatialMembership: { scopes: [{ kind: "outdoor" }] },
 			}),
 		).toThrow("does not own root");
 
@@ -62,6 +73,7 @@ describe("DynamicEntityPlacementSystem", () => {
 				envCellId: null,
 				landblockId: "0x0102ffff",
 				localTransform: Mat4.identity(),
+				spatialMembership: { scopes: [{ kind: "outdoor" }] },
 			},
 			null,
 		);
@@ -85,9 +97,67 @@ describe("DynamicEntityPlacementSystem", () => {
 			envCellId: null,
 			landblockId: "0x0102ffff",
 			localTransform: corrected,
+			spatialMembership: { scopes: [{ kind: "outdoor" }] },
 		});
 		placements.advance(3_050);
 		expect(scene.getResolvedPlacement(root)?.localToLandblock.m41).toBe(101);
+	});
+
+	it("keeps path-point membership atomic across a portal transition", () => {
+		const scene = new SceneGraph();
+		scene.upsertEnvCellScope({
+			containmentPlanes: new Float32Array(),
+			landblockBounds: AABB3.zero(),
+			potentiallyVisibleEnvCellIds: new Set(),
+			scope: {
+				envCellId: "0x01020100",
+				kind: "env-cell",
+				landblockId: "0x0102ffff",
+			},
+			seenOutside: false,
+			structureToLandblock: Mat4.identity(),
+			visibilityIslandId: "env-cell-island:0x01020100",
+		});
+		const placements = new DynamicEntityPlacementSystem(scene);
+		const root = placements.createRoot(
+			{
+				envCellId: null,
+				landblockId: "0x0102ffff",
+				localTransform: Mat4.identity(),
+				spatialMembership: { scopes: [{ kind: "outdoor" }] },
+			},
+			null,
+		);
+		const crossing = advance(0, 10);
+		crossing.path.initial.spatialMembership = {
+			reachesOutdoors: true,
+			reachedEnvCellIds: [0x01020100],
+		};
+		crossing.path.legs[0]!.end.pose.landblockId = 0x01020100;
+		crossing.path.legs[0]!.end.spatialMembership = {
+			reachesOutdoors: false,
+			reachedEnvCellIds: [0x01020100],
+		};
+
+		placements.applyPath(root, crossing, 100, 1_000);
+		placements.advance(1_050);
+		expect(scene.getResolvedSpatialMembership(root)?.scopes).toEqual([
+			{ kind: "outdoor" },
+			{
+				envCellId: "0x01020100",
+				kind: "env-cell",
+				landblockId: "0x0102ffff",
+			},
+		]);
+
+		placements.advance(1_100);
+		expect(scene.getResolvedSpatialMembership(root)?.scopes).toEqual([
+			{
+				envCellId: "0x01020100",
+				kind: "env-cell",
+				landblockId: "0x0102ffff",
+			},
+		]);
 	});
 });
 
@@ -98,8 +168,19 @@ function advance(startX: number, endX: number): DynamicEntityAdvance {
 		entity,
 		kind: "integrated",
 		path: {
-			initial: { pose: dynamicEntity(startX).placement.pose },
-			legs: [{ endFraction: 1, end: { pose: entity.placement.pose } }],
+			initial: {
+				pose: dynamicEntity(startX).placement.pose,
+				spatialMembership: entity.placement.spatialMembership,
+			},
+			legs: [
+				{
+					endFraction: 1,
+					end: {
+						pose: entity.placement.pose,
+						spatialMembership: entity.placement.spatialMembership,
+					},
+				},
+			],
 		},
 	};
 }
@@ -122,6 +203,10 @@ function dynamicEntity(
 		},
 		placement: {
 			kind: "world",
+			spatialMembership: {
+				reachesOutdoors: true,
+				reachedEnvCellIds: [],
+			},
 			acceleration: { x: 0, y: 0, z: 0 },
 			contact: "airborne",
 			omega: { x: 0, y: 0, z: 0 },

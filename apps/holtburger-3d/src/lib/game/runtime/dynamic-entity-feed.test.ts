@@ -43,6 +43,10 @@ function entity(
 		},
 		placement: {
 			kind: "world",
+			spatialMembership: {
+				reachesOutdoors: true,
+				reachedEnvCellIds: [],
+			},
 			pose: {
 				landblockId: 0xda550001,
 				coords: { x: 1, y: 2, z: 3 },
@@ -87,11 +91,17 @@ function advanced(
 					entity: value,
 					kind: "integrated",
 					path: {
-						initial: { pose: value.placement.pose },
+						initial: {
+							pose: value.placement.pose,
+							spatialMembership: value.placement.spatialMembership,
+						},
 						legs: [
 							{
 								endFraction: 1,
-								end: { pose: value.placement.pose },
+								end: {
+									pose: value.placement.pose,
+									spatialMembership: value.placement.spatialMembership,
+								},
 							},
 						],
 					},

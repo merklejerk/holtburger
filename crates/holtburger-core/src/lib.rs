@@ -44,7 +44,7 @@ pub use dynamic_entity::{
     DynamicEntityDefinition, DynamicEntityDefinitionError, DynamicEntityDefinitionInput,
     DynamicEntityIdentity, DynamicEntityInitialState, DynamicEntityLaunchError,
     DynamicEntityLaunchPlan, DynamicEntityPhysicalPreparationError, DynamicEntityProjectionInput,
-    DynamicEntitySetupPreparation, DynamicEntityWorldProjection,
+    DynamicEntitySetupPreparation, DynamicEntitySpatialMembership, DynamicEntityWorldProjection,
     apply_dynamic_entity_physics_transition, dynamic_entity_projection_input,
     dynamic_entity_projection_input_from_body, install_dynamic_entity_body,
     material_appearance_input, prepare_dynamic_entity_physics, prepare_dynamic_entity_setup,

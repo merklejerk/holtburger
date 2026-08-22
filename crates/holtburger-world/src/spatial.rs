@@ -28,12 +28,12 @@ pub(crate) use physics::project_pose_by_velocity;
 #[cfg(test)]
 mod tests;
 pub use collision::{
-    CellTransitRequest, CollisionPlacement, CollisionQueryError, CollisionScene,
-    CollisionSceneUpdateError, GroundedObstruction, GroundedObstructionRequest, MotionWaypoint,
-    MotionWaypointPlacement, MovementObstructionRequest, MovementRestrictionRequest,
-    PlacedMotionLeg, PlacedMotionPath, PlacedMotionPathRequest, PlacedMotionPoint,
-    PlacementRecovery, PlacementRequest, PlacementRestrictionRequest, SphereSweep, StaticContact,
-    SupportContact, SupportFeature, SupportRequest,
+    CellTransitRequest, CollisionQueryError, CollisionScene, CollisionSceneUpdateError,
+    GroundedObstruction, GroundedObstructionRequest, MotionWaypoint, MotionWaypointPlacement,
+    MovementObstructionRequest, MovementRestrictionRequest, PlacedMotionLeg, PlacedMotionPath,
+    PlacedMotionPathRequest, PlacedMotionPoint, PlacementRecovery, PlacementRequest,
+    PlacementRestrictionRequest, SpatialMembership, SphereSweep, StaticContact, SupportContact,
+    SupportFeature, SupportRequest,
 };
 pub use collision_report::{
     CollisionReportClassification, CollisionReportContact, CollisionReportOutcome,

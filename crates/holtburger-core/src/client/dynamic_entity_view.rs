@@ -9,8 +9,8 @@ use thiserror::Error;
 
 use crate::{
     DynamicEntityContent, DynamicEntityEvent, DynamicEntityHostTime, DynamicEntityIdentityView,
-    DynamicEntitySnapshot, DynamicEntityViewSource, DynamicEntityWorldProjection,
-    project_dynamic_entity_view,
+    DynamicEntitySnapshot, DynamicEntitySpatialMembership, DynamicEntityViewSource,
+    DynamicEntityWorldProjection, project_dynamic_entity_view,
 };
 
 use super::{ClientRuntime, ClientViewEvent};
@@ -63,20 +63,21 @@ pub fn project_client_dynamic_entity(
         let body_id = world
             .runtime_body_id_for_guid(guid)
             .ok_or(ClientDynamicEntityViewError::MissingBody { guid: guid.0 })?;
-        let body = world
-            .runtime_body_view(body_id)
-            .ok_or(ClientDynamicEntityViewError::MissingBody { guid: guid.0 })?;
-        let participation = if world
+        let spatial_body = world
             .scene
             .body(body_id)
-            .is_some_and(|body| body.physical.is_some())
-        {
+            .ok_or(ClientDynamicEntityViewError::MissingBody { guid: guid.0 })?;
+        let body = spatial_body.runtime_view();
+        let participation = if spatial_body.physical.is_some() {
             PhysicalBodyParticipation::Physical
         } else {
             PhysicalBodyParticipation::PoseOnly
         };
         EntityPlacement::World(DynamicEntityWorldProjection {
             body,
+            spatial_membership: DynamicEntitySpatialMembership::from(
+                &spatial_body.spatial_membership(),
+            ),
             participation,
         })
     };
@@ -243,6 +244,10 @@ mod tests {
                 physics,
                 placement: EntityPlacement::World(DynamicEntityWorldProjection {
                     body,
+                    spatial_membership: DynamicEntitySpatialMembership {
+                        reaches_outdoors: true,
+                        reached_env_cell_ids: Vec::new(),
+                    },
                     participation: PhysicalBodyParticipation::PoseOnly,
                 }),
             },

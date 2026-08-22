@@ -12,7 +12,8 @@ use holtburger_core::{
     DynamicEntityAdvance, DynamicEntityAdvanceBatch, DynamicEntityClipCompletion,
     DynamicEntityEvent, DynamicEntityHostTime, DynamicEntityPathLeg, DynamicEntityPathPoint,
     DynamicEntityPlacedPath, DynamicEntityPlacementAdvanceKind, DynamicEntitySnapshot,
-    DynamicEntityView, DynamicEntityViewSource, project_dynamic_entity_view,
+    DynamicEntitySpatialMembership, DynamicEntityView, DynamicEntityViewSource,
+    project_dynamic_entity_view,
 };
 use holtburger_world::{PlacedMotionPath, PlacedMotionPoint};
 use serde::Serialize;
@@ -174,17 +175,23 @@ impl ExplorerEntityDelivery {
             "correction publication cannot masquerade as integrated motion"
         );
         let entity = self.entity(guid)?;
-        let pose = match entity.placement {
-            holtburger_core::DynamicEntityPlacementView::World { pose, .. } => pose,
+        let point = match &entity.placement {
+            holtburger_core::DynamicEntityPlacementView::World {
+                pose,
+                spatial_membership,
+                ..
+            } => DynamicEntityPathPoint {
+                pose: *pose,
+                spatial_membership: spatial_membership.clone(),
+            },
             holtburger_core::DynamicEntityPlacementView::Attached { parent, .. } => {
                 return Err(ExplorerEntityRuntimeError::AttachedOperation {
                     guid,
-                    parent,
+                    parent: *parent,
                     operation: "correction publication",
                 });
             }
         };
-        let point = DynamicEntityPathPoint { pose };
         Ok(DynamicEntityEvent::Advanced {
             batch: DynamicEntityAdvanceBatch::new(
                 self.host_time(),
@@ -196,7 +203,7 @@ impl ExplorerEntityDelivery {
                     entity: Box::new(entity),
                     kind,
                     path: DynamicEntityPlacedPath {
-                        initial: point,
+                        initial: point.clone(),
                         legs: vec![DynamicEntityPathLeg {
                             end_fraction: 1.0,
                             end: point,
@@ -272,6 +279,7 @@ fn serialize_entity_path_point(
 ) -> Result<DynamicEntityPathPoint> {
     Ok(DynamicEntityPathPoint {
         pose: present_placed_motion_pose(path, point, rotation)?,
+        spatial_membership: DynamicEntitySpatialMembership::from(point.placement()),
     })
 }
 

@@ -624,6 +624,55 @@ describe("SceneGraph", () => {
 		expect(visible.entries).not.toContain(cellOne);
 	});
 
+	it("indexes plural spatial membership without returning one node twice", () => {
+		const scene = new SceneGraph();
+		const cell = envCellScope("0x0001ffff", "cell-1");
+		scene.upsertEnvCellScope({
+			containmentPlanes: new Float32Array(),
+			landblockBounds: AABB3.zero(),
+			potentiallyVisibleEnvCellIds: new Set(),
+			scope: cell,
+			seenOutside: false,
+			structureToLandblock: Mat4.identity(),
+			visibilityIslandId: "env-cell-island:cell-1",
+		});
+		const entity = scene.createNode({
+			envCellId: null,
+			landblockId: "0x0001ffff",
+			localBounds: AABB3.zero(),
+			localTransform: Mat4.identity(),
+			parentId: null,
+			spatialMembership: { scopes: [outdoorScope(), cell] },
+		});
+
+		expect(queryScopes(scene, outdoorScope()).entries).toEqual([entity]);
+		expect(queryScopes(scene, cell).entries).toEqual([entity]);
+		expect(queryScopes(scene, outdoorScope(), cell).entries).toEqual([entity]);
+	});
+
+	it("rejects duplicate scopes in spatial membership", () => {
+		const scene = new SceneGraph();
+
+		expect(() =>
+			scene.createNode({
+				...rootInput,
+				spatialMembership: { scopes: [outdoorScope(), outdoorScope()] },
+			}),
+		).toThrow("repeats scope outdoor");
+	});
+
+	it("rejects spatial membership that omits the authoritative resident scope", () => {
+		const scene = new SceneGraph();
+
+		expect(() =>
+			scene.createNode({
+				...rootInput,
+				envCellId: "cell-1",
+				spatialMembership: { scopes: [outdoorScope()] },
+			}),
+		).toThrow("omits resident scope cell-1");
+	});
+
 	it("rejects an explicit EnvCell scope that is not resident", () => {
 		const scene = new SceneGraph();
 

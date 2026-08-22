@@ -6,10 +6,10 @@ use holtburger_common::{Guid, Vector3};
 
 use super::PhysicalCollisionFilter;
 use super::collision::{
-    CellTransitRequest, CollisionPlacement, CollisionScene, MotionWaypoint,
-    MovementObstructionRequest, MovementRestrictionRequest, PlacementRequest,
-    PlacementRestrictionRequest, SphereSweep, StaticContact, anchor_point_to_outdoor_position,
-    landblock_key, separating_displacement,
+    CellTransitRequest, CollisionScene, MotionWaypoint, MovementObstructionRequest,
+    MovementRestrictionRequest, PlacementRequest, PlacementRestrictionRequest, SpatialMembership,
+    SphereSweep, StaticContact, anchor_point_to_outdoor_position, landblock_key,
+    separating_displacement,
 };
 
 /// Explicit safety budgets for one free-sphere displacement solve.
@@ -340,7 +340,7 @@ fn sphere_cast_segment_is_clear(
     start: Vector3,
     end: Vector3,
     radius: f32,
-    placement: &CollisionPlacement,
+    placement: &SpatialMembership,
     filter: PhysicalCollisionFilter,
 ) -> Result<bool> {
     let sweep = SphereSweep {
@@ -361,7 +361,7 @@ fn transit_sphere(
     previous_cell: Option<Guid>,
     center: Vector3,
     radius: f32,
-) -> Result<CollisionPlacement> {
+) -> Result<SpatialMembership> {
     Ok(scene.transit_cell(CellTransitRequest {
         previous_cell,
         anchor,
@@ -375,7 +375,7 @@ fn static_sphere_cast_outcome(
     original: WorldPosition,
     origin_cell: Option<Guid>,
     point: Vector3,
-    placement: CollisionPlacement,
+    placement: SpatialMembership,
     distance: f32,
     obstructed: bool,
 ) -> StaticSphereCastOutcome {
@@ -392,7 +392,7 @@ fn static_sphere_cast_outcome(
 fn movement_contacts(
     scene: &CollisionScene,
     sweep: SphereSweep,
-    placement: &CollisionPlacement,
+    placement: &SpatialMembership,
     filter: PhysicalCollisionFilter,
 ) -> Result<Vec<StaticContact>> {
     let mut contacts =
@@ -410,7 +410,7 @@ fn placement_contacts(
     anchor: Guid,
     center: Vector3,
     radius: f32,
-    placement: &CollisionPlacement,
+    placement: &SpatialMembership,
     filter: PhysicalCollisionFilter,
 ) -> Result<Vec<StaticContact>> {
     let mut contacts = scene.placement_contacts(PlacementRequest {
@@ -455,7 +455,7 @@ fn transit(
     anchor: Guid,
     body: FreeSphereState,
     center: Vector3,
-) -> Result<CollisionPlacement> {
+) -> Result<SpatialMembership> {
     Ok(scene.transit_cell(CellTransitRequest {
         previous_cell: body.cell,
         anchor,

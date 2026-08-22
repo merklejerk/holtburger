@@ -39,6 +39,10 @@ function world(guid: number): DynamicEntityView {
 		...base(guid),
 		placement: {
 			kind: "world",
+			spatialMembership: {
+				reachesOutdoors: true,
+				reachedEnvCellIds: [],
+			},
 			pose: {
 				landblockId: 0xda550001,
 				coords: { x: 0, y: 0, z: 0 },

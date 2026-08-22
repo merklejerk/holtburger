@@ -11,7 +11,7 @@
 use holtburger_common::Vector3;
 use holtburger_content::{MotionSequence, MotionSequenceTable};
 
-use super::sequence::{MotionSequenceRuntime, SequenceNode};
+use super::sequence::{MotionSequenceRuntime, SequenceNode, SubstateSelection};
 use super::state::{MotionCommand, MotionState};
 
 /// Smallest speed multiplier treated as nonzero, matching retail's physics epsilon.
@@ -264,6 +264,7 @@ fn select_style(
 
     sequence.clear_physics();
     sequence.remove_cyclic_clips();
+    sequence.forget_substate_selections();
     add_motion(sequence, exit, speed_mod);
     add_motion(sequence, link, speed_mod);
     add_motion(sequence, through_default_style, speed_mod);
@@ -346,20 +347,26 @@ fn select_substate(
 
     sequence.clear_physics();
     sequence.remove_cyclic_clips();
+    let selection = SubstateSelection {
+        style: state.style,
+        target: command,
+    };
+    let appended_from = sequence.clip_count();
 
     if through_default.is_some() {
-        add_motion(sequence, link, state.substate_mod);
-        add_motion(sequence, through_default, speed_mod);
+        add_substate_motion(sequence, link, state.substate_mod, selection);
+        add_substate_motion(sequence, through_default, speed_mod, selection);
     } else {
         // Leaving a reversed substate for a forward one plays the single transition backwards.
         let mut link_speed = speed_mod;
         if state.substate_mod < 0.0 && speed_mod > 0.0 {
             link_speed *= -1.0;
         }
-        add_motion(sequence, link, link_speed);
+        add_substate_motion(sequence, link, link_speed, selection);
     }
 
-    add_motion(sequence, Some(cycle), speed_mod);
+    add_substate_motion(sequence, Some(cycle), speed_mod, selection);
+    sequence.collapse_redundant_substate_suffix(selection, appended_from);
 
     // A modifier that was promoted to substate keeps running as a modifier once displaced.
     if state.substate != command
@@ -462,6 +469,25 @@ fn get_link(
 /// Retail *assigns* rather than accumulating here, so the last motion installed owns the explicit
 /// vectors; only modifiers combine and subtract.
 fn add_motion(sequence: &mut MotionSequenceRuntime, motion: Option<&MotionSequence>, speed: f32) {
+    install_motion(sequence, motion, speed, None);
+}
+
+/// Installs one motion with the same-style substate selection that owns its live clips.
+fn add_substate_motion(
+    sequence: &mut MotionSequenceRuntime,
+    motion: Option<&MotionSequence>,
+    speed: f32,
+    selection: SubstateSelection,
+) {
+    install_motion(sequence, motion, speed, Some(selection));
+}
+
+fn install_motion(
+    sequence: &mut MotionSequenceRuntime,
+    motion: Option<&MotionSequence>,
+    speed: f32,
+    substate_selection: Option<SubstateSelection>,
+) {
     let Some(motion) = motion else {
         return;
     };
@@ -470,7 +496,12 @@ fn add_motion(sequence: &mut MotionSequenceRuntime, motion: Option<&MotionSequen
         motion.omega.unwrap_or_else(Vector3::zero) * speed,
     );
     for clip in &motion.clips {
-        sequence.append(SequenceNode::install(clip, speed));
+        let node = SequenceNode::install(clip, speed);
+        if let Some(selection) = substate_selection {
+            sequence.append_for_substate(node, selection);
+        } else {
+            sequence.append(node);
+        }
     }
 }
 

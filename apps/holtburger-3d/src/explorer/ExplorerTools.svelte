@@ -27,6 +27,7 @@
 	import type { ExplorerCatalogCapability } from "./explorer-entity-commands";
 	import type { ExplorerPossession } from "./explorer-entity-possession";
 	import type { DynamicEntityView } from "../lib/game/runtime/dynamic-entity-feed";
+	import type { HostKinematicBoomStatus } from "./host-kinematic-boom-session";
 
 	type ExplorerTabId =
 		"world" | "grading" | "frame" | "textures" | "assets" | "entities" | "logs";
@@ -131,6 +132,7 @@
 		) => Promise<ExplorerPossession>;
 		readonly setExplorerEntityStance: (style: number) => Promise<void>;
 		readonly explorerPossession: ExplorerPossession | null;
+		readonly boomCameraStatus: HostKinematicBoomStatus | null;
 	}
 
 	let {
@@ -190,6 +192,7 @@
 		possessExplorerEntity,
 		setExplorerEntityStance,
 		explorerPossession,
+		boomCameraStatus,
 	}: Props = $props();
 
 	const tabs: readonly ExplorerTab[] = [
@@ -358,6 +361,7 @@
 								possess={possessExplorerEntity}
 								setStance={setExplorerEntityStance}
 								possession={explorerPossession}
+								{boomCameraStatus}
 							/>
 						{:else}
 							<p>{activeTab.stub}</p>

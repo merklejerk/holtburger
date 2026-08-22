@@ -12,12 +12,12 @@ use holtburger_content::{
 use holtburger_core::ContentAssetService;
 use holtburger_dat::physics::BspNode;
 use holtburger_world::{
-    CellTransitRequest, CollisionPlacement, CollisionScene, EdgeProtection, GroundState,
-    GroundedBody, GroundedBodySpheres, GroundedConfig, GroundedObstructionRequest, GroundedOutcome,
+    CellTransitRequest, CollisionPlacement, CollisionScene, EdgeProtection, FreeSphereConfig,
+    FreeSphereOutcome, FreeSphereRequest, FreeSphereState, GroundState, GroundedBody,
+    GroundedBodySpheres, GroundedConfig, GroundedObstructionRequest, GroundedOutcome,
     GroundedRequest, GroundedSphere, MotionWaypoint, MotionWaypointPlacement,
-    PhysicalCollisionFilter, PhysicalFlyBody, PhysicalFlyConfig, PhysicalFlyOutcome,
-    PhysicalFlyRequest, PlacedMotionPathRequest, PlacementRequest, RETAIL_WALKABLE_NORMAL_Z,
-    SphereSweep, SupportRequest, solve_grounded, solve_physical_fly,
+    PhysicalCollisionFilter, PlacedMotionPathRequest, PlacementRequest, RETAIL_WALKABLE_NORMAL_Z,
+    SphereSweep, SupportRequest, solve_free_sphere, solve_grounded,
 };
 
 const HOST_TICK_SECONDS: f32 = 1.0 / 30.0;
@@ -35,7 +35,7 @@ const HUMAN_RADIUS: f32 = 0.480;
 const FOOT_CLEARANCE: f32 = HUMAN_RADIUS - SUPPORT_CENTER_Z;
 /// Mirrors Explorer's radius-two application simulation-interest policy.
 const SIMULATION_INTEREST_RADIUS: i32 = 2;
-const PHYSICAL_FLY_CONFIG: PhysicalFlyConfig = PhysicalFlyConfig {
+const PHYSICAL_FLY_CONFIG: FreeSphereConfig = FreeSphereConfig {
     maximum_substep_distance: PHYSICAL_FLY_RADIUS,
     maximum_substeps: 32,
     maximum_contact_passes: 8,
@@ -662,7 +662,7 @@ struct OutsidePortalWaypoint {
 #[derive(Debug)]
 struct PhysicalFlyPortalTrace {
     /// Last atomically committed physical-fly body.
-    body: PhysicalFlyBody,
+    body: FreeSphereState,
     /// First EnvCell committed during the drive, when entry occurred.
     entered_cell: Option<Guid>,
     /// Final camera-viewer cell from continuous placed-motion traversal.
@@ -783,7 +783,7 @@ fn format_cell(cell: Option<Guid>) -> String {
     cell.map_or_else(|| "outdoor".to_owned(), |cell| format!("0x{:08X}", cell.0))
 }
 
-/// Separates invalid diagnostic setup from a valid physical-fly solver trace.
+/// Separates invalid diagnostic setup from a valid free-sphere solver trace.
 enum PhysicalFlyPortalAttempt {
     /// The synthetic seed overlaps authored collision before any request is solved.
     InvalidStart { contacts: usize },
@@ -931,7 +931,7 @@ fn traverse_physical_fly_portal(
     direction: Vector3,
 ) -> Result<PhysicalFlyPortalAttempt> {
     let start = waypoint.center - direction * 1.25;
-    let mut body = PhysicalFlyBody {
+    let mut body = FreeSphereState {
         pose: WorldPosition {
             landblock_id: Guid(landblock_id),
             coords: start,
@@ -984,10 +984,10 @@ fn traverse_physical_fly_portal(
     let mut placement_transitions = Vec::new();
     for tick in 0..30 {
         let previous = body;
-        let solved = solved_physical_fly(solve_physical_fly(
+        let solved = solved_free_sphere(solve_free_sphere(
             scene,
             PHYSICAL_FLY_CONFIG,
-            PhysicalFlyRequest {
+            FreeSphereRequest {
                 body,
                 displacement: direction * WALK_SPEED * HOST_TICK_SECONDS,
                 filter: PhysicalCollisionFilter::ALL,
@@ -1023,9 +1023,9 @@ fn traverse_physical_fly_portal(
 }
 
 /// Physical-fly facts needed after one successful bounded solve.
-struct SolvedPhysicalFly {
+struct SolvedFreeSphere {
     /// Atomically committed body.
-    body: PhysicalFlyBody,
+    body: FreeSphereState,
     /// Collision substeps consumed by the solve.
     substeps: usize,
     /// Contact-separation passes consumed by the solve.
@@ -1034,27 +1034,27 @@ struct SolvedPhysicalFly {
     motion: Vec<MotionWaypoint>,
 }
 
-fn solved_physical_fly(outcome: PhysicalFlyOutcome) -> Result<SolvedPhysicalFly> {
+fn solved_free_sphere(outcome: FreeSphereOutcome) -> Result<SolvedFreeSphere> {
     match outcome {
-        PhysicalFlyOutcome::Solved {
+        FreeSphereOutcome::Solved {
             body,
             motion,
             substeps,
             contact_passes,
             ..
-        } => Ok(SolvedPhysicalFly {
+        } => Ok(SolvedFreeSphere {
             body,
             substeps,
             contact_passes,
             motion,
         }),
-        PhysicalFlyOutcome::BudgetExceeded {
+        FreeSphereOutcome::BudgetExceeded {
             body,
             budget,
             substeps,
             contact_passes,
         } => anyhow::bail!(
-            "physical-fly portal trace exceeded its {budget:?} budget at ({:.3},{:.3},{:.3}) cell={} after {substeps} substeps/{contact_passes} passes",
+            "free-sphere portal trace exceeded its {budget:?} budget at ({:.3},{:.3},{:.3}) cell={} after {substeps} substeps/{contact_passes} passes",
             body.pose.coords.x,
             body.pose.coords.y,
             body.pose.coords.z,
@@ -1066,11 +1066,11 @@ fn solved_physical_fly(outcome: PhysicalFlyOutcome) -> Result<SolvedPhysicalFly>
 
 fn exit_physical_fly_portal(
     scene: &CollisionScene,
-    mut body: PhysicalFlyBody,
+    mut body: FreeSphereState,
     mut viewer_cell: Option<Guid>,
     entry_direction: Vector3,
 ) -> Result<(
-    PhysicalFlyBody,
+    FreeSphereState,
     Option<Guid>,
     usize,
     Vec<PlacementLegTransition>,
@@ -1080,10 +1080,10 @@ fn exit_physical_fly_portal(
     let mut placement_transitions = Vec::new();
     for tick in 0..60 {
         let previous = body;
-        let solved = solved_physical_fly(solve_physical_fly(
+        let solved = solved_free_sphere(solve_free_sphere(
             scene,
             PHYSICAL_FLY_CONFIG,
-            PhysicalFlyRequest {
+            FreeSphereRequest {
                 body,
                 displacement: entry_direction * -WALK_SPEED * HOST_TICK_SECONDS,
                 filter: PhysicalCollisionFilter::ALL,

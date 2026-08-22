@@ -4,6 +4,7 @@ pub mod content_assets;
 pub mod dynamic_entity;
 pub mod dynamic_entity_view;
 pub mod errors;
+pub mod kinematic_boom;
 pub mod physical_body_definition;
 pub mod soul_emote_motion;
 
@@ -59,9 +60,17 @@ pub use dynamic_entity_view::{
     PhysicalBodyParticipationView, project_dynamic_entity_view,
 };
 pub use holtburger_content::LandblockCollisionAsset;
+pub use kinematic_boom::{
+    KinematicBoomAdvance, KinematicBoomCollisionSeed, KinematicBoomController,
+    KinematicBoomDiagnostics, KinematicBoomFailureKind, KinematicBoomInputError,
+    KinematicBoomIntent, KinematicBoomIntentAcceptance, KinematicBoomOutcome,
+    KinematicBoomPlacement, KinematicBoomProfile, KinematicBoomProfileDefinition,
+    KinematicBoomProfileError, KinematicBoomReseedReason, KinematicBoomTargetSample,
+};
 pub use physical_body_definition::{
     FREE_SPHERE_FLY_CONFIG, RETAIL_DUMMY_MOTION_SPHERE, ResolvedBodyProfile,
-    SetupPhysicalShapeError, physical_fly_viewer_profile, resolve_setup_physical_spheres,
-    retail_grounded_body, retail_grounded_body_with_policy, retail_player_grounded_profile,
+    STATIC_SPHERE_CAST_CONFIG, SetupPhysicalShapeError, physical_fly_viewer_profile,
+    resolve_setup_physical_spheres, retail_grounded_body, retail_grounded_body_with_policy,
+    retail_player_grounded_profile,
 };
 pub use soul_emote_motion::motion_command_for_soul_emote_pose;

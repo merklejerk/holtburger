@@ -147,12 +147,21 @@ const possessionEventOutcome = z
 	})
 	.strict();
 
+const possessionEventOutcomes = z.array(possessionEventOutcome).nonempty();
+
 export type PossessionEventOutcome = z.infer<typeof possessionEventOutcome>;
 
 export function decodePossessionEventOutcome(
 	value: unknown,
 ): PossessionEventOutcome {
 	return possessionEventOutcome.parse(value);
+}
+
+/** Validate one non-empty fixed-tick publication without discarding its transaction boundary. */
+export function decodePossessionEventOutcomes(
+	value: unknown,
+): PossessionEventOutcome[] {
+	return possessionEventOutcomes.parse(value);
 }
 
 const possessionEventQueueReceipt = z

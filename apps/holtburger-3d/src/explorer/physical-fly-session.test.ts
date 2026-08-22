@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { sceneVec3 } from "../lib/assets/ac-frame";
 import { Vec3 } from "../lib/game/math/types";
 import type { HostPhysicalFlyPath } from "../lib/game/motion/host-physical-fly-path";
-import type { PhysicalFlyPlacement } from "../lib/game/motion/host-physical-fly-path";
+import type { HostCameraPlacement } from "../lib/game/motion/host-placed-path";
 import {
 	PhysicalFlySession,
 	type HostPhysicalFlyFailure,
@@ -102,7 +102,7 @@ function placement(
 		20,
 		-(0x55 * 192 + 96),
 	],
-): PhysicalFlyPlacement {
+): HostCameraPlacement {
 	return {
 		position: sceneVec3(new Vec3(...position)),
 		residency: { envCellId: null, landblockId: "0xda55ffff" },

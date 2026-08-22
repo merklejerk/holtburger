@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
 	createCameraAxesRadians,
+	createCameraLookAtAngles,
 	createCameraRotation,
 	createCameraRotationRadians,
 } from "./camera-orientation";
 import { createViewMat4, transformPoint3 } from "./matrices";
 import { Vec3 } from "./types";
+import { normalizeVec3, subtractVec3 } from "./vector-utils";
 
 describe("camera orientation", () => {
 	it("returns identity at zero yaw and pitch", () => {
@@ -42,5 +44,23 @@ describe("camera orientation", () => {
 			expect(rendered.y).toBeCloseTo(0);
 			expect(rendered.z).toBeCloseTo(-1);
 		}
+	});
+
+	it("derives look angles whose forward axis reaches the target", () => {
+		const position = new Vec3(4, 2, -3);
+		const target = new Vec3(7, 6, -8);
+		const angles = createCameraLookAtAngles(position, target);
+		const forward = createCameraAxesRadians(
+			angles.yawRadians,
+			angles.pitchRadians,
+		).forward;
+		const expected = normalizeVec3(subtractVec3(target, position));
+
+		expect(forward.x).toBeCloseTo(expected.x);
+		expect(forward.y).toBeCloseTo(expected.y);
+		expect(forward.z).toBeCloseTo(expected.z);
+		expect(() => createCameraLookAtAngles(position, position)).toThrow(
+			"finite and distinct",
+		);
 	});
 });

@@ -8,6 +8,7 @@ import type { SceneResidency } from "../scene";
 import { Vec3 } from "../math/types";
 import {
 	evaluateHostPlacedPath,
+	type HostCameraPlacement,
 	type HostPlacedPath,
 	validateHostPlacedPath,
 } from "./host-placed-path";
@@ -64,14 +65,6 @@ export interface HostPhysicalFlyPath extends HostPlacedPath<HostPhysicalFlyPathP
 	readonly solveDurationMs: number;
 }
 
-/** Canonical presented position and authoritative residency evaluated from one host path. */
-export interface PhysicalFlyPlacement {
-	/** Camera position retained in canonical scene space. */
-	readonly position: SceneVec3;
-	/** Host-supplied portal placement paired atomically with the path position. */
-	readonly residency: SceneResidency;
-}
-
 /**
  * Evaluates one host path without extending it or independently classifying portal placement.
  *
@@ -80,7 +73,7 @@ export interface PhysicalFlyPlacement {
 export function evaluateHostPhysicalFlyPath(
 	path: HostPhysicalFlyPath,
 	elapsedMs: number,
-): PhysicalFlyPlacement {
+): HostCameraPlacement {
 	return evaluateHostPlacedPath(path, path.durationMs, elapsedMs, {
 		interpolate: interpolatePathPoints,
 		present: pathPointPlacement,
@@ -96,7 +89,7 @@ function interpolatePathPoints(
 	start: HostPhysicalFlyPathPoint,
 	end: HostPhysicalFlyPathPoint,
 	fraction: number,
-): PhysicalFlyPlacement {
+): HostCameraPlacement {
 	const startPosition = pathPointPosition(start);
 	const endPosition = pathPointPosition(end);
 	return {
@@ -114,15 +107,23 @@ function interpolatePathPoints(
 
 function pathPointPlacement(
 	point: HostPhysicalFlyPathPoint,
-): PhysicalFlyPlacement {
+): HostCameraPlacement {
 	return { position: pathPointPosition(point), residency: point.residency };
 }
 
 function pathPointPosition(point: HostPhysicalFlyPathPoint): SceneVec3 {
-	const owner = getLandblockCoordinates(point.residency.landblockId);
-	const acX = owner.x * OUTDOOR_LANDBLOCK_WORLD_SIZE + point.origin[0];
-	const acY = owner.y * OUTDOOR_LANDBLOCK_WORLD_SIZE + point.origin[1];
-	return sceneVec3(new Vec3(acX, point.origin[2], -acY));
+	return scenePositionFromHostPlacement(point.origin, point.residency);
+}
+
+/** Convert one host-authored AC-local origin paired with its authoritative residency. */
+function scenePositionFromHostPlacement(
+	origin: readonly [number, number, number],
+	residency: SceneResidency,
+): SceneVec3 {
+	const owner = getLandblockCoordinates(residency.landblockId);
+	const acX = owner.x * OUTDOOR_LANDBLOCK_WORLD_SIZE + origin[0];
+	const acY = owner.y * OUTDOOR_LANDBLOCK_WORLD_SIZE + origin[1];
+	return sceneVec3(new Vec3(acX, origin[2], -acY));
 }
 
 /** Explorer camera axes in canonical scene coordinates. */

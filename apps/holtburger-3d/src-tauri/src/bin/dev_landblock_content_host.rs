@@ -2,23 +2,28 @@ use anyhow::Context;
 use holtburger_3d::{
     ExplorerPossessionEventWireRequest, ExplorerPossessionIntentWireRequest,
     ExplorerPossessionReceipt, LandblockSourceLayer, LoadTexturePixelsRequest,
-    PossessExplorerEntityRequest, SphereSweepRequest,
+    PossessExplorerEntityRequest,
     dynamic_entity_visual_source::load_dynamic_entity_visual_source_bytes,
     explorer_entity_delivery::ExplorerEntityDelivery,
+    explorer_entity_delivery::ExplorerFixedTickEnvelope,
     explorer_entity_driver::{
         DatExplorerEntityContentPreparer, ExplorerEntityDriver, ExplorerEntityLaunchRequest,
         ExplorerEntityRelocationRequest, ExplorerEntitySpawnRequest, SystemExplorerEntityClock,
     },
     explorer_entity_runtime::{ExplorerEntityRuntime, PossessionEventOutcome},
     explorer_weenie_catalog::ExplorerWeenieCatalog,
+    host_kinematic_boom_runtime::{
+        HostKinematicBoomIdentity, HostKinematicBoomIntentRequest, HostKinematicBoomRuntime,
+        HostKinematicBoomStartRequest,
+    },
     host_simulation_runtime::{CollisionSource, HostSimulationRuntime, SimulationInterestRequest},
     load_active_region_data_bytes, load_animation_bytes, load_landblock_source_batch_bytes,
     load_motion_table_closure_ids, load_particle_emitter_bytes, load_particle_meshes_bytes,
     load_physics_script_bytes, load_sky_source_bytes, load_sound_table_bytes,
-    load_texture_pixels_bytes, resolve_sphere_sweep,
+    load_texture_pixels_bytes,
 };
 use holtburger_content::{ContentDecodeCache, ContentRepository};
-use holtburger_core::{ContentAssetRuntime, ContentAssetService, DynamicEntityEvent};
+use holtburger_core::{ContentAssetRuntime, ContentAssetService};
 use holtburger_world::EntityAppearance;
 use serde::{Deserialize, Serialize};
 use std::{path::Path, sync::Arc, time::Duration, time::Instant};
@@ -106,7 +111,7 @@ struct ExplorerEntityTickRequest {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ExplorerPossessionTickResponse {
-    event: Option<DynamicEntityEvent>,
+    envelope: Option<ExplorerFixedTickEnvelope>,
     outcomes: Vec<PossessionEventOutcome>,
 }
 
@@ -118,6 +123,7 @@ struct DevHostState {
     delivery: Arc<ExplorerEntityDelivery>,
     runtime: Arc<ExplorerEntityRuntime>,
     simulation: Arc<HostSimulationRuntime>,
+    boom: Arc<HostKinematicBoomRuntime>,
 }
 
 #[tokio::main]
@@ -197,21 +203,6 @@ async fn handle_connection(mut stream: TcpStream, state: &DevHostState) -> anyho
             match load_animation_bytes(runtime, &request.animation_id).await {
                 Ok(bytes) => {
                     write_response(&mut stream, 200, "application/octet-stream", &bytes).await
-                }
-                Err(error) => write_error(&mut stream, error).await,
-            }
-        }
-        ("POST", "/sphere-sweep") => {
-            let request = serde_json::from_slice::<SphereSweepRequest>(&request.body)?;
-            match resolve_sphere_sweep(&state.simulation, request) {
-                Ok(distance) => {
-                    write_response(
-                        &mut stream,
-                        200,
-                        "application/json",
-                        &serde_json::to_vec(&distance)?,
-                    )
-                    .await
                 }
                 Err(error) => write_error(&mut stream, error).await,
             }
@@ -422,11 +413,15 @@ async fn handle_connection(mut stream: TcpStream, state: &DevHostState) -> anyho
                     .runtime
                     .tick_physical_collection(duration.as_secs_f32(), Instant::now())?;
                 let outcomes = ticks
+                    .ticks
                     .iter()
                     .flat_map(|tick| tick.possession_event_outcomes.iter().copied())
                     .collect();
-                let event = state.delivery.advanced(ticks, duration)?;
-                Ok(ExplorerPossessionTickResponse { event, outcomes })
+                let boom = state.boom.advance(&ticks, duration.as_secs_f32())?;
+                let envelope = state
+                    .delivery
+                    .fixed_tick_envelope(ticks.ticks, boom, duration)?;
+                Ok(ExplorerPossessionTickResponse { envelope, outcomes })
             });
             match result {
                 Ok(response) => {
@@ -462,7 +457,10 @@ async fn handle_connection(mut stream: TcpStream, state: &DevHostState) -> anyho
                 let ticks = state
                     .runtime
                     .tick_physical_collection(duration.as_secs_f32(), Instant::now())?;
-                state.delivery.advanced(ticks, duration)
+                let boom = state.boom.advance(&ticks, duration.as_secs_f32())?;
+                state
+                    .delivery
+                    .fixed_tick_envelope(ticks.ticks, boom, duration)
             });
             match result {
                 Ok(event) => {
@@ -476,6 +474,46 @@ async fn handle_connection(mut stream: TcpStream, state: &DevHostState) -> anyho
                 }
                 Err(error) => write_error(&mut stream, error).await,
             }
+        }
+        ("POST", "/kinematic-boom/start") => {
+            let request = serde_json::from_slice::<HostKinematicBoomStartRequest>(&request.body)?;
+            match state.boom.start(request) {
+                Ok(receipt) => {
+                    write_response(
+                        &mut stream,
+                        200,
+                        "application/json",
+                        &serde_json::to_vec(&receipt)?,
+                    )
+                    .await
+                }
+                Err(error) => write_error(&mut stream, error).await,
+            }
+        }
+        ("POST", "/kinematic-boom/intent") => {
+            let request = serde_json::from_slice::<HostKinematicBoomIntentRequest>(&request.body)?;
+            match state.boom.set_intent(request) {
+                Ok(receipt) => {
+                    write_response(
+                        &mut stream,
+                        200,
+                        "application/json",
+                        &serde_json::to_vec(&receipt)?,
+                    )
+                    .await
+                }
+                Err(error) => write_error(&mut stream, error).await,
+            }
+        }
+        ("POST", "/kinematic-boom/stop") => {
+            let request = serde_json::from_slice::<HostKinematicBoomIdentity>(&request.body)?;
+            write_response(
+                &mut stream,
+                200,
+                "application/json",
+                &serde_json::to_vec(&state.boom.stop(request))?,
+            )
+            .await
         }
         ("POST", "/explorer-entity-relocate") => {
             let request = serde_json::from_slice::<ExplorerEntityRelocationRequest>(&request.body)?;
@@ -554,6 +592,10 @@ fn discover_host_state() -> anyhow::Result<DevHostState> {
         Arc::clone(&runtime),
         Arc::clone(&simulation),
     ));
+    let boom = Arc::new(HostKinematicBoomRuntime::new(
+        Arc::clone(&runtime),
+        Arc::clone(&simulation),
+    )?);
     Ok(DevHostState {
         content,
         motion: motion_catalog,
@@ -561,6 +603,7 @@ fn discover_host_state() -> anyhow::Result<DevHostState> {
         entities,
         runtime,
         simulation,
+        boom,
     })
 }
 

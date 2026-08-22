@@ -7,9 +7,9 @@ mod differential_fixtures;
 mod dynamic_body;
 mod dynamic_contact;
 mod dynamic_index;
+mod free_sphere;
 mod grounded;
 mod physical_body;
-mod physical_fly;
 mod physics;
 mod scene;
 mod types;
@@ -46,6 +46,11 @@ pub use dynamic_body::{
 pub use dynamic_contact::{
     DynamicContactBudgetExceeded, MAXIMUM_DYNAMIC_SLICE_DISTANCE, MAXIMUM_DYNAMIC_SLICES,
 };
+pub use free_sphere::{
+    FreeSphereBudget, FreeSphereConfig, FreeSphereOutcome, FreeSphereRequest, FreeSphereState,
+    StaticSphereCastConfig, StaticSphereCastOutcome, StaticSphereCastRequest, cast_static_sphere,
+    solve_free_sphere,
+};
 pub use grounded::{
     EdgeProtection, GroundState, GroundSupport, GroundedBody, GroundedBodySpheres, GroundedBudget,
     GroundedConfig, GroundedOutcome, GroundedRequest, GroundedSphere,
@@ -62,8 +67,4 @@ pub use physical_body::{
     PhysicalBodyState, PhysicalBodyTickResult, PhysicalBodyTickStatus, PhysicalCollisionExclusions,
     PhysicalCollisionFilter, PhysicalElasticity, PhysicalFriction, PhysicalRestitution,
     PhysicalSphereSet, PhysicalSurfaceMotion, resolve_physical_body_cell,
-};
-pub use physical_fly::{
-    PhysicalFlyBody, PhysicalFlyBudget, PhysicalFlyConfig, PhysicalFlyOutcome, PhysicalFlyRequest,
-    solve_physical_fly,
 };

@@ -5,7 +5,7 @@ use holtburger_common::position::{
     MAX_OUTDOOR_LANDBLOCK_AXIS, METERS_PER_LANDBLOCK, WorldPosition, outdoor_landblock_owner_at,
 };
 use holtburger_common::{Guid, Quaternion, Vector3};
-use holtburger_world::PlacedMotionPoint;
+use holtburger_world::{PlacedMotionPath, PlacedMotionPoint};
 
 /// One placed point expressed in the local coordinates of its authoritative outdoor owner.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -81,6 +81,79 @@ pub fn present_placed_motion_point(
         cell,
         coords: reanchor_point(point.center(), landblock_key(anchor), owner),
     })
+}
+
+/// Projects one placed path point into a complete authoritative world pose.
+pub fn present_placed_motion_pose(
+    path: &PlacedMotionPath,
+    point: &PlacedMotionPoint,
+    rotation: Quaternion,
+) -> Result<WorldPosition> {
+    let presented = present_placed_motion_point(path.anchor(), point)?;
+    let mut pose = WorldPosition {
+        landblock_id: Guid(presented.owner.0 & 0xffff_0000),
+        coords: presented.coords,
+        rotation,
+    }
+    .normalize_outdoor_cell();
+    if let Some(cell) = presented.cell {
+        pose.landblock_id = cell;
+    }
+    Ok(pose)
+}
+
+/// Shortest-arc normalized interpolation for a host-authored path rotation boundary.
+pub fn interpolate_rotation(
+    start: Quaternion,
+    mut end: Quaternion,
+    fraction: f32,
+) -> Result<Quaternion> {
+    ensure!(
+        fraction.is_finite() && (0.0..=1.0).contains(&fraction),
+        "placed-motion rotation fraction must be finite and normalized"
+    );
+    let dot = start.w * end.w + start.x * end.x + start.y * end.y + start.z * end.z;
+    if dot < 0.0 {
+        end = Quaternion {
+            w: -end.w,
+            x: -end.x,
+            y: -end.y,
+            z: -end.z,
+        };
+    }
+    let candidate = Quaternion {
+        w: start.w + (end.w - start.w) * fraction,
+        x: start.x + (end.x - start.x) * fraction,
+        y: start.y + (end.y - start.y) * fraction,
+        z: start.z + (end.z - start.z) * fraction,
+    };
+    let length = (candidate.w * candidate.w
+        + candidate.x * candidate.x
+        + candidate.y * candidate.y
+        + candidate.z * candidate.z)
+        .sqrt();
+    ensure!(
+        length.is_finite() && length > f32::EPSILON,
+        "placed-motion rotation must be finite and nonzero"
+    );
+    Ok(Quaternion {
+        w: candidate.w / length,
+        x: candidate.x / length,
+        y: candidate.y / length,
+        z: candidate.z / length,
+    })
+}
+
+/// Project one collision-normalized pose without re-running cell containment or portal traversal.
+pub fn present_world_position(
+    pose: WorldPosition,
+    cell: Option<Guid>,
+) -> PresentedPlacedMotionPoint {
+    PresentedPlacedMotionPoint {
+        owner: landblock_key(pose.landblock_id),
+        cell,
+        coords: pose.coords,
+    }
 }
 
 /// Reanchors one landblock-local point without changing its AC axes.

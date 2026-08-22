@@ -271,6 +271,60 @@ describe("ExplorerCameraCoordinator", () => {
 		coordinator.dispose();
 	});
 
+	it("uses boom-cast residency without re-running ambiguous point containment", () => {
+		const setPrimaryCamera = vi.fn();
+		const queryWorldPointResidencyCandidates = vi.fn();
+		const { runtime } = createRuntime({
+			hasEnvCellScope: () => true,
+			queryWorldPointResidencyCandidates,
+			setPrimaryCamera,
+		});
+		const coordinator = new ExplorerCameraCoordinator(
+			runtime,
+			{
+				setAutomaticPose: vi.fn(),
+				snapshotState: () => ({
+					hasManualControl: false,
+					pitchRadians: 0,
+					position: new Vec3(1, 2, 3),
+					yawRadians: 0,
+				}),
+			} as unknown as FreeFlyCameraController,
+			() => {},
+		);
+		const position = sceneVec3(new Vec3(39_576, 22, -28_584));
+
+		const sync = coordinator.syncBoomCamera(
+			{
+				position,
+				residency: {
+					envCellId: "0xce940109",
+					landblockId: "0xce94ffff",
+				},
+			},
+			1.2,
+			-0.3,
+		);
+
+		expect(queryWorldPointResidencyCandidates).not.toHaveBeenCalled();
+		expect(sync).toEqual({
+			location: {
+				position,
+				residency: {
+					kind: "resolved",
+					residency: {
+						envCellId: "0xce940109",
+						landblockId: "0xce94ffff",
+					},
+					source: "host-boom-camera",
+				},
+			},
+			renderable: true,
+		});
+		expect(setPrimaryCamera).toHaveBeenCalledOnce();
+		coordinator.dispose();
+	});
+
 	it("holds an unavailable host EnvCell without falling back to overlap or outdoors", () => {
 		const setPrimaryCamera = vi.fn();
 		const queryWorldPointResidencyCandidates = vi.fn();

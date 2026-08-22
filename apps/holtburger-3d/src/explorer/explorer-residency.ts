@@ -11,6 +11,7 @@ export type ExplorerResidencyResolution =
 			readonly source:
 				| "cell-containment"
 				| "explicit-env-cell"
+				| "host-boom-camera"
 				| "host-physical-camera"
 				| "outdoor"
 				| "physical-handoff";

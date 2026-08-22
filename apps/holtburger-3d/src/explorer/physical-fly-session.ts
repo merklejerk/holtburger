@@ -2,11 +2,11 @@ import {
 	evaluateHostPhysicalFlyPath,
 	type HostPhysicalFlyPath,
 	type PhysicalFlyGroundState,
-	type PhysicalFlyPlacement,
 	type PhysicalFlyTickStatus,
 	type PhysicalFlySceneResidency,
 	validateHostPhysicalFlyPath,
 } from "../lib/game/motion/host-physical-fly-path";
+import type { HostCameraPlacement } from "../lib/game/motion/host-placed-path";
 import type { EnvCellId } from "../lib/game/game-types";
 import { FRONTEND_TUNING } from "../lib/frontend-tuning";
 
@@ -93,7 +93,7 @@ export class PhysicalFlySession {
 	}
 
 	/** Registers the listener before starting the host so the first path cannot be missed. */
-	async start(placement: PhysicalFlyPlacement): Promise<void> {
+	async start(placement: HostCameraPlacement): Promise<void> {
 		if (this.#unlisten !== null) return;
 		const unlistenMotion = await this.#transport.listenMotion(
 			"host://physical-fly-motion",
@@ -200,7 +200,7 @@ export class PhysicalFlySession {
 		await this.setIntent(worldVelocity);
 	}
 
-	placement(): PhysicalFlyPlacement | null {
+	placement(): HostCameraPlacement | null {
 		const now = this.#transport.now();
 		this.#advancePlayback(now);
 		if (this.#activePath === null) return null;

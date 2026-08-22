@@ -1,6 +1,6 @@
 # Architectural Snapshot: holtburger-3d
 
-_Last updated: 2026-08-09_
+_Last updated: 2026-08-22_
 
 ## Tech Lead North Stars
 
@@ -245,6 +245,14 @@ The explorer uses candidate containment only for best-effort initial/free-fly pl
 camera and future actor placement paths are solved by the host against `holtburger-world` collision
 topology; frontend scene code does not maintain a second actor portal traversal. Renderer visibility
 still consumes the retained directed aperture topology from an already-known placement.
+
+Possessed third-person camera placement follows the same authority boundary without registering a
+camera body. The app host advances the shared kinematic-boom controller immediately after the
+possessed entity on one fixed tick, then publishes camera positions, authoritative residency, and
+the controller's filtered visual pivot in one placed path. The frontend retains raw pointer
+orientation only as the next semantic intent; rendered position and pivot are interpolated together,
+and the Explorer derives a look-at orientation from that pair. It performs no collision query,
+position prediction, containment repair, or independent boom simulation.
 
 ## 6. Authored and Effective Apertures
 

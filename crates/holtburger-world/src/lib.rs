@@ -51,7 +51,7 @@ pub use entity_physics::{
 pub use events::{DerivedStatsData, FellowshipActivity, PlayerInfoData, WorldEvent};
 pub use spatial::{
     AuthoritativeBodyKinematics, AuthoritativeBodySync, BasicSpatialPhysics, CellTransitRequest,
-    CollisionPlacement, CollisionQueryError, CollisionReportClassification, CollisionReportContact,
+    CollisionQueryError, CollisionReportClassification, CollisionReportContact,
     CollisionReportOutcome, CollisionReportPhase, CollisionReportSource, CollisionScene,
     CollisionSceneUpdateError, ContactState, DynamicBodyCollisionDefinition, DynamicBodyKinematics,
     DynamicBodyPhysicsStateChange, DynamicBodyRelocationOutcome, DynamicContactBudgetExceeded,
@@ -74,9 +74,9 @@ pub use spatial::{
     RETAIL_AIRBORNE_STEP_DOWN_HEIGHT, RETAIL_LANDING_NORMAL_Z, RETAIL_WALKABLE_NORMAL_Z,
     RuntimeBodyResetCause, RuntimeSpatialBodyView, SelfPlayerDriveProjectionState,
     SettlePermission, SolveBodyInput, SolveProjectionBasis, SolvedBodyKinematics, SpatialBody,
-    SpatialBodyEvent, SpatialBodyId, SpatialEntitySample, SpatialPhysics, SpatialSampleMode,
-    SpatialSamplingConfig, SpatialSamplingState, SpatialScene, SpatialSolveBatch,
-    SpatialSolveRequest, SphereSweep, StaticContact, StaticSphereCastConfig,
+    SpatialBodyEvent, SpatialBodyId, SpatialEntitySample, SpatialMembership, SpatialPhysics,
+    SpatialSampleMode, SpatialSamplingConfig, SpatialSamplingState, SpatialScene,
+    SpatialSolveBatch, SpatialSolveRequest, SphereSweep, StaticContact, StaticSphereCastConfig,
     StaticSphereCastOutcome, StaticSphereCastRequest, SupportContact, SupportFeature,
     SupportRequest, advance_body_kinematics, cast_static_sphere, gate_authored_offset,
     project_pose_forward_distance, resolve_physical_body_cell, solve_free_sphere, solve_grounded,

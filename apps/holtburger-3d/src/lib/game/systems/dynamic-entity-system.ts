@@ -22,8 +22,7 @@ import {
 } from "../math/matrices";
 import { landblockVec3 } from "../../assets/ac-frame";
 import type { SceneGraph, SceneNodeId } from "../scene";
-import type { ScenePlacement } from "../scene";
-import { scopeKey } from "../scene/scope";
+import type { SceneSpatialPlacement } from "../scene";
 import {
 	type ParentLocation,
 	RESTING_PLACEMENT_KEY,
@@ -465,14 +464,17 @@ export class DynamicEntitySystem<
 	}
 
 	/** Copy one live entity's resolved object placement for synchronous child staging. */
-	resolvedRootPlacement(rootNodeId: SceneNodeId): ScenePlacement | null {
+	resolvedRootPlacement(rootNodeId: SceneNodeId): SceneSpatialPlacement | null {
 		if (!this.#entities.has(rootNodeId)) return null;
 		const resolved = this.#scene.getResolvedPlacement(rootNodeId);
-		if (!resolved) return null;
+		const spatialMembership =
+			this.#scene.getResolvedSpatialMembership(rootNodeId);
+		if (!resolved || !spatialMembership) return null;
 		return {
 			envCellId: resolved.envCellId,
 			landblockId: resolved.landblockId,
 			localTransform: resolved.localToLandblock,
+			spatialMembership,
 		};
 	}
 
@@ -557,7 +559,7 @@ export class DynamicEntitySystem<
 		return this.#entities.get(nodeId)?.publishedPresentationBounds ?? null;
 	}
 
-	/** Resolve every active rigid part into the selected entity's current render domain. */
+	/** Resolve every active rigid part with the selected entity's plural source-domain scopes. */
 	getVisibleContributions(
 		nodeId: SceneNodeId,
 	): readonly VisibleRigidPartContribution[] | null {
@@ -570,7 +572,10 @@ export class DynamicEntitySystem<
 			// Retail sets the skip-draw bit only at exactly full translucency.
 			if (translucency === 1) return [];
 			const placement = this.#scene.getResolvedPlacement(part.nodeId);
-			if (!placement) {
+			const spatialMembership = this.#scene.getResolvedSpatialMembership(
+				part.nodeId,
+			);
+			if (!placement || !spatialMembership) {
 				throw new Error(`Dynamic part node ${part.nodeId} no longer exists.`);
 			}
 			return part.drawUnits.map((activeDrawUnit) => {
@@ -580,16 +585,13 @@ export class DynamicEntitySystem<
 						? "transparent"
 						: drawUnit.ordering;
 				return {
-					domain: {
-						key: `${placement.landblockId}/${scopeKey(placement.scope)}`,
-						landblockId: placement.landblockId,
-						scope: placement.scope,
-					},
 					// The draw unit is passed by reference, never cloned to carry an overridden
 					// ordering: consumers cache compiled facts against its identity, and an
 					// effect can hold a part translucent indefinitely.
 					drawUnit,
+					landblockId: placement.landblockId,
 					ordering,
+					renderScopes: spatialMembership.scopes,
 					instance: {
 						color: { a: 1 - translucency, b: 1, g: 1, r: 1 },
 						sourceToLandblock: placement.localToLandblock,
@@ -616,7 +618,7 @@ export class DynamicEntitySystem<
 	}
 
 	/** Apply one complete producer placement through the sole dynamic-root writer. */
-	updatePlacement(nodeId: SceneNodeId, placement: ScenePlacement): void {
+	updatePlacement(nodeId: SceneNodeId, placement: SceneSpatialPlacement): void {
 		if (!this.#entities.has(nodeId))
 			throw new Error(`Dynamic entity ${nodeId} does not exist.`);
 		this.#placements.updateRoot(nodeId, placement);

@@ -386,7 +386,7 @@ impl SpatialScene {
         anchor: Guid,
         minimum: Vector3,
         maximum: Vector3,
-        placement: &super::CollisionPlacement,
+        placement: &super::SpatialMembership,
     ) -> Vec<SpatialBodyId> {
         self.dynamic_shadows
             .candidates(mover, anchor, minimum, maximum, placement)
@@ -1959,7 +1959,7 @@ mod physical_body_tests {
                     Guid(0xda55_ffff),
                     Vector3::new(-1.0, -1.0, -1.0),
                     Vector3::new(1.0, 1.0, 1.0),
-                    &crate::CollisionPlacement::outdoor(),
+                    &crate::SpatialMembership::outdoor(),
                 )
                 .len(),
             300
@@ -2011,7 +2011,7 @@ mod physical_body_tests {
                 Guid(0xdb55_ffff),
                 Vector3::new(0.0, 11.0, 0.0),
                 Vector3::new(1.0, 13.0, 2.0),
-                &crate::CollisionPlacement::outdoor(),
+                &crate::SpatialMembership::outdoor(),
             ),
             [target]
         );
@@ -2050,14 +2050,14 @@ mod physical_body_tests {
             Guid(0xda55_ffff),
             Vector3::new(0.0, 11.0, 0.0),
             Vector3::new(1.0, 13.0, 2.0),
-            &crate::CollisionPlacement::outdoor(),
+            &crate::SpatialMembership::outdoor(),
         );
         let full_sweep = scene.dynamic_candidates_for_extent(
             SpatialBodyId::Ephemeral(999),
             Guid(0xda55_ffff),
             Vector3::new(0.0, 11.0, 0.0),
             Vector3::new(99.0, 13.0, 2.0),
-            &crate::CollisionPlacement::outdoor(),
+            &crate::SpatialMembership::outdoor(),
         );
 
         assert!(initial_cell_only.len() < 50);
@@ -2112,9 +2112,9 @@ mod physical_body_tests {
             .dynamic
             .as_mut()
             .unwrap()
-            .placement = crate::CollisionPlacement::outdoor()
-            .merge_reached(crate::CollisionPlacement::interior(interior_a))
-            .merge_reached(crate::CollisionPlacement::interior(interior_b));
+            .placement = crate::SpatialMembership::outdoor()
+            .merge_reached(crate::SpatialMembership::interior(interior_a))
+            .merge_reached(crate::SpatialMembership::interior(interior_b));
 
         scene.register_body(SpatialBody::new(
             cylinder_id,
@@ -2154,7 +2154,7 @@ mod physical_body_tests {
                 Guid(0xda55_ffff),
                 Vector3::zero(),
                 Vector3::zero(),
-                &crate::CollisionPlacement::interior(interior_b),
+                &crate::SpatialMembership::interior(interior_b),
             ),
             [bsp_id]
         );
@@ -2165,7 +2165,7 @@ mod physical_body_tests {
                     Guid(0xda55_ffff),
                     Vector3::zero(),
                     Vector3::zero(),
-                    &crate::CollisionPlacement::interior(Guid(0xda55_0102)),
+                    &crate::SpatialMembership::interior(Guid(0xda55_0102)),
                 )
                 .is_empty()
         );

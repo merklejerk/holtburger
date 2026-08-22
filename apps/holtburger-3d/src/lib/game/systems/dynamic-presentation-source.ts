@@ -2,7 +2,7 @@ import type { DatAssetId } from "../game-types";
 import type { AABB3, Vec3 } from "../math/types";
 import type { ResolvedObjectBehavior } from "../resolution/landblock-layer";
 import type { ResolvedObjectPresentation } from "../resolution/presentation";
-import type { ScenePlacement } from "../scene";
+import type { SceneSpatialPlacement } from "../scene";
 
 /** Immutable visual and setup-default behavior facts shared by every dynamic producer. */
 export interface DynamicPresentationSource {
@@ -23,5 +23,5 @@ export interface DynamicPresentationSource {
 /** One dynamic presentation plus producer-owned initial scene placement. */
 export interface PlacedDynamicPresentationSource {
 	readonly source: DynamicPresentationSource;
-	readonly placement: ScenePlacement;
+	readonly placement: SceneSpatialPlacement;
 }

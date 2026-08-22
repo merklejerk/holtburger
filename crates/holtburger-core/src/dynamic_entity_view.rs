@@ -8,7 +8,10 @@ use holtburger_world::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{DynamicEntityContent, DynamicEntityProjectionInput, DynamicEntityWorldProjection};
+use crate::{
+    DynamicEntityContent, DynamicEntityProjectionInput, DynamicEntitySpatialMembership,
+    DynamicEntityWorldProjection,
+};
 
 /// One monotonic host instant used to align snapshot/event facts with frontend time.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -100,7 +103,7 @@ pub enum DynamicEntitySampleModeView {
 }
 
 /// Serializable mutually exclusive world-motion or attachment placement.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(
     tag = "kind",
     rename_all = "kebab-case",
@@ -111,6 +114,8 @@ pub enum DynamicEntityPlacementView {
     World {
         /// Current accepted root pose; its cell ID is also the current residency.
         pose: WorldPosition,
+        /// Complete source-domain membership accepted atomically with `pose`.
+        spatial_membership: DynamicEntitySpatialMembership,
         /// Current world-space linear velocity.
         velocity: Vector3,
         /// Current world-space linear acceleration.
@@ -221,15 +226,17 @@ pub enum DynamicEntityPlacementAdvanceKind {
 }
 
 /// One authoritative entity root pose at a placed-path boundary.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DynamicEntityPathPoint {
     /// Root pose whose cell selector and coordinates become authoritative together.
     pub pose: WorldPosition,
+    /// Complete source-domain membership accepted atomically with `pose`.
+    pub spatial_membership: DynamicEntitySpatialMembership,
 }
 
 /// One placement-stable entity path leg ending at an authoritative root pose.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DynamicEntityPathLeg {
     /// Strictly increasing normalized fixed-tick fraction in `(0, 1]`.
@@ -342,24 +349,27 @@ pub enum DynamicEntityEvent {
 /// Projects one semantic/body join without consulting either producer registry.
 pub fn project_dynamic_entity_view(source: DynamicEntityViewSource) -> DynamicEntityView {
     let presentation = source.physics.presentation;
-    let participation = match source.placement {
-        EntityPlacement::World(world) => world.participation,
-        EntityPlacement::Attached(_) => PhysicalBodyParticipation::PoseOnly,
-    };
-    let placement = match source.placement {
-        EntityPlacement::World(world) => DynamicEntityPlacementView::World {
-            pose: world.body.runtime_pose,
-            velocity: world.body.velocity,
-            acceleration: world.body.acceleration,
-            omega: world.body.omega,
-            contact: world.body.contact.into(),
-            sample_mode: world.body.sample_mode.into(),
-        },
-        EntityPlacement::Attached(attachment) => DynamicEntityPlacementView::Attached {
-            parent: attachment.parent,
-            parent_location: attachment.location,
-            placement: attachment.placement,
-        },
+    let (placement, participation) = match source.placement {
+        EntityPlacement::World(world) => (
+            DynamicEntityPlacementView::World {
+                pose: world.body.runtime_pose,
+                spatial_membership: world.spatial_membership,
+                velocity: world.body.velocity,
+                acceleration: world.body.acceleration,
+                omega: world.body.omega,
+                contact: world.body.contact.into(),
+                sample_mode: world.body.sample_mode.into(),
+            },
+            world.participation,
+        ),
+        EntityPlacement::Attached(attachment) => (
+            DynamicEntityPlacementView::Attached {
+                parent: attachment.parent,
+                parent_location: attachment.location,
+                placement: attachment.placement,
+            },
+            PhysicalBodyParticipation::PoseOnly,
+        ),
     };
     DynamicEntityView {
         generation: source.generation,

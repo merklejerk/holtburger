@@ -8,12 +8,13 @@ use holtburger_common::{Guid, Quaternion, Sphere, Vector3};
 use thiserror::Error;
 
 use super::{
-    CellTransitRequest, CollisionPlacement, CollisionQueryError, CollisionReportOutcome,
-    CollisionScene, ContactState, DynamicBodyCollisionDefinition, DynamicPhysicalBodyDefinition,
-    FreeSphereBudget, FreeSphereConfig, FreeSphereOutcome, FreeSphereRequest, FreeSphereState,
-    GroundState, GroundSupport, GroundedBody, GroundedBodySpheres, GroundedBudget, GroundedConfig,
+    CellTransitRequest, CollisionQueryError, CollisionReportOutcome, CollisionScene, ContactState,
+    DynamicBodyCollisionDefinition, DynamicPhysicalBodyDefinition, FreeSphereBudget,
+    FreeSphereConfig, FreeSphereOutcome, FreeSphereRequest, FreeSphereState, GroundState,
+    GroundSupport, GroundedBody, GroundedBodySpheres, GroundedBudget, GroundedConfig,
     GroundedOutcome, GroundedRequest, GroundedSphere, MotionWaypoint, PlacedMotionPath,
-    PlacedMotionPathRequest, SettlePermission, SpatialBody, solve_free_sphere, solve_grounded,
+    PlacedMotionPathRequest, SettlePermission, SpatialBody, SpatialMembership, solve_free_sphere,
+    solve_grounded,
 };
 
 /// Retail's canonical velocity floor (`PhysicsGlobals.SmallVelocity`) squared.
@@ -378,7 +379,7 @@ pub(crate) struct DynamicBodyRuntimeState {
     /// Solver-owned activity, independent from semantic and presentation state.
     pub(crate) activity: DynamicBodyActivity,
     /// Complete collision-domain membership accepted for the current root pose.
-    pub(crate) placement: CollisionPlacement,
+    pub(crate) placement: SpatialMembership,
 }
 
 /// Physical definition and response memory owned by one spatial body.
@@ -471,7 +472,7 @@ impl PhysicalBodyState {
         state.dynamic = Some(DynamicBodyRuntimeState {
             collision: entity_collision,
             activity: DynamicBodyActivity::Active,
-            placement: cell.map_or_else(CollisionPlacement::outdoor, CollisionPlacement::interior),
+            placement: cell.map_or_else(SpatialMembership::outdoor, SpatialMembership::interior),
         });
         state
     }
@@ -1571,7 +1572,7 @@ pub(crate) fn resolve_physical_body_placement(
     pose: WorldPosition,
     definition: PhysicalBodyDefinition,
     seed_cell: Option<Guid>,
-) -> Result<CollisionPlacement, CollisionQueryError> {
+) -> Result<SpatialMembership, CollisionQueryError> {
     let primary = definition.spheres().primary();
     let anchor = Guid((pose.landblock_id.0 & 0xffff_0000) | 0xffff);
     let center = pose.coords + pose.rotation.rotate_vector(primary.center);

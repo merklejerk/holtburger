@@ -266,11 +266,6 @@ function dynamicContribution(
 	alpha = 1,
 ): VisibleRigidPartContribution {
 	return {
-		domain: {
-			key: "0x0001ffff/outdoor",
-			landblockId: "0x0001ffff",
-			scope: { kind: "outdoor" },
-		},
 		drawUnit: {
 			batchKey: "part/range",
 			geometry: "object-geometry:fixture" as ObjectGeometryKey,
@@ -281,6 +276,8 @@ function dynamicContribution(
 			partIndex: 0,
 			templatePartKey: "part-visual-template:fixture" as PartVisualTemplateKey,
 		},
+		landblockId: "0x0001ffff",
+		renderScopes: [{ kind: "outdoor" }],
 		instance: {
 			color: { a: alpha, b: 1, g: 1, r: 1 },
 			sourceToLandblock: Mat4.identity(),

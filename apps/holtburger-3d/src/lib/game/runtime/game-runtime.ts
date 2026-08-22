@@ -41,6 +41,7 @@ import type {
 import {
 	SceneGraph,
 	type ScenePlacement,
+	type SceneSpatialPlacement,
 	type SceneNodeId,
 	type SceneResidency,
 } from "../scene";
@@ -1414,7 +1415,9 @@ export class GameRuntime {
 	}
 
 	/** Resolve the temporary world placement needed only while an attached visual is staged. */
-	#spawnedStagingPlacement(entity: DynamicEntityView): ScenePlacement | null {
+	#spawnedStagingPlacement(
+		entity: DynamicEntityView,
+	): SceneSpatialPlacement | null {
 		if (entity.placement.kind === "world")
 			return spawnedDynamicPlacement(entity);
 		const parent = this.#spawnedPresentations.get(entity.placement.parent);

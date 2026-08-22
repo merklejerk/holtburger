@@ -4,7 +4,7 @@ import type {
 	DynamicEntityAdvance,
 	DynamicEntityAdvanceBatch,
 } from "../runtime/dynamic-entity-feed";
-import type { SceneGraph, SceneNodeId, ScenePlacement } from "../scene";
+import type { SceneGraph, SceneNodeId, SceneSpatialPlacement } from "../scene";
 
 interface ActiveDynamicEntityPath {
 	readonly advance: DynamicEntityAdvance;
@@ -24,7 +24,7 @@ export class DynamicEntityPlacementSystem {
 
 	/** Create one staged root at the producer's accepted placement. */
 	createRoot(
-		placement: ScenePlacement,
+		placement: SceneSpatialPlacement,
 		localBounds: AABB3 | null,
 	): SceneNodeId {
 		const nodeId = this.#scene.createNode({
@@ -38,10 +38,10 @@ export class DynamicEntityPlacementSystem {
 	}
 
 	/** Apply one complete accepted root placement; residency and transform stay atomic. */
-	updateRoot(nodeId: SceneNodeId, placement: ScenePlacement): void {
+	updateRoot(nodeId: SceneNodeId, placement: SceneSpatialPlacement): void {
 		this.#requireRoot(nodeId);
 		this.#activePaths.delete(nodeId);
-		this.#scene.updateRootPlacement(nodeId, placement);
+		this.#scene.updateRootSpatialPlacement(nodeId, placement);
 	}
 
 	/** Replace transient playback with one newer host-accepted path or discontinuous correction. */
@@ -54,14 +54,14 @@ export class DynamicEntityPlacementSystem {
 		this.#requireRoot(nodeId);
 		if (advance.kind === "integrated") {
 			this.#activePaths.set(nodeId, { advance, durationMs, startedAtMs });
-			this.#scene.updateRootPlacement(
+			this.#scene.updateRootSpatialPlacement(
 				nodeId,
 				evaluateHostDynamicEntityPath(advance, durationMs, 0),
 			);
 			return;
 		}
 		this.#activePaths.delete(nodeId);
-		this.#scene.updateRootPlacement(
+		this.#scene.updateRootSpatialPlacement(
 			nodeId,
 			evaluateHostDynamicEntityPath(advance, durationMs, durationMs),
 		);
@@ -71,7 +71,7 @@ export class DynamicEntityPlacementSystem {
 	advance(nowMs: number): void {
 		for (const [nodeId, active] of this.#activePaths) {
 			const elapsedMs = nowMs - active.startedAtMs;
-			this.#scene.updateRootPlacement(
+			this.#scene.updateRootSpatialPlacement(
 				nodeId,
 				evaluateHostDynamicEntityPath(
 					active.advance,

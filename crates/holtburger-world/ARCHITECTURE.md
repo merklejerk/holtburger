@@ -118,7 +118,7 @@ existing implicit `tick()` policy:
 - Coverage, movement obstruction, lower-sphere support, placement confirmation, and prior-cell
   transit are separate typed query families. Queries return geometry facts without choosing
   grounded policy, and missing coverage is a result rather than a collision miss.
-- `CollisionPlacement` carries the lower-center-committed EnvCell, every EnvCell reached by the
+- `SpatialMembership` carries the lower-center-committed EnvCell, every EnvCell reached by the
   retained sphere set, and outdoor reach. All query families select terrain, outdoor objects,
   building shells, EnvCell shells, and indoor statics from that one contract; they never infer a
   collision domain independently.

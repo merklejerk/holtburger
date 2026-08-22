@@ -26,8 +26,8 @@ use super::{
 use crate::spatial::collision::CollisionScene;
 use crate::spatial::physical_body::grounded_settle_permission;
 use crate::{
-    CellTransitRequest, CollisionPlacement, ContactState, EdgeProtection,
-    GroundedObstructionRequest, PhysicalCollisionFilter, SphereSweep, SupportRequest,
+    CellTransitRequest, ContactState, EdgeProtection, GroundedObstructionRequest,
+    PhysicalCollisionFilter, SpatialMembership, SphereSweep, SupportRequest,
 };
 use holtburger_common::position::WorldPosition;
 
@@ -493,7 +493,7 @@ fn authored_crest_plane_not_radial_edge_normal_controls_grounded_response() {
                 end: center,
                 radius: 0.5,
             },
-            placement: &crate::CollisionPlacement::outdoor(),
+            placement: &crate::SpatialMembership::outdoor(),
         })
         .unwrap();
     let contact = contacts
@@ -709,7 +709,7 @@ fn lowered_step_down_rebuild_reaches_horizontal_portal_support() {
         })
         .unwrap();
     assert!(
-        candidate_placement.reached_interior_cells().is_empty(),
+        candidate_placement.reached_env_cells().is_empty(),
         "fixture candidate already reached the destination cell"
     );
 
@@ -722,7 +722,7 @@ fn lowered_step_down_rebuild_reaches_horizontal_portal_support() {
         })
         .unwrap();
     assert_eq!(
-        lowered_placement.reached_interior_cells(),
+        lowered_placement.reached_env_cells(),
         &[Guid(CELL)],
         "lowering the retail step-down transaction did not expose the destination cell"
     );
@@ -771,10 +771,7 @@ fn lowered_step_down_rebuild_reaches_horizontal_portal_support() {
         "portal step-down diverged from retail: expected={expected:?} settled={settled:?}"
     );
     assert!(
-        settled
-            .placement
-            .reached_interior_cells()
-            .contains(&Guid(CELL)),
+        settled.placement.reached_env_cells().contains(&Guid(CELL)),
         "the accepted ramp pose lost the destination collision domain"
     );
     assert_eq!(
@@ -792,7 +789,7 @@ fn portal_straddling_building_keeps_walkable_polygons_after_center_solid_is_disa
     ramp.source_placement = StaticColliderPlacement::BuildingShell { source_index: 0 };
     let scene = scene(vec![ramp]);
     let placement =
-        CollisionPlacement::outdoor().merge_reached(CollisionPlacement::interior(Guid(CELL)));
+        SpatialMembership::outdoor().merge_reached(SpatialMembership::interior(Guid(CELL)));
     let supports = scene
         .support_contacts(SupportRequest {
             anchor: Guid(LANDBLOCK),

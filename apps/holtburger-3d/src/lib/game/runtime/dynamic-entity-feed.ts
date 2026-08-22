@@ -27,6 +27,11 @@ const worldPositionSchema = z.object({
 	rotation: quaternionSchema,
 });
 
+const spatialMembershipSchema = z.object({
+	reachesOutdoors: z.boolean(),
+	reachedEnvCellIds: z.array(guid),
+});
+
 const appearanceSchema = z.object({
 	paletteDid: guid.nullable(),
 	subPalettes: z.array(
@@ -110,6 +115,7 @@ const dynamicEntityPlacementSchema = z.discriminatedUnion("kind", [
 		.object({
 			kind: z.literal("world"),
 			pose: worldPositionSchema,
+			spatialMembership: spatialMembershipSchema,
 			velocity: vector3Schema,
 			acceleration: vector3Schema,
 			omega: vector3Schema,
@@ -170,7 +176,10 @@ const dynamicEntitySnapshotSchema = z.object({
 	entities: z.array(dynamicEntityViewSchema),
 });
 
-const dynamicEntityPathPointSchema = z.object({ pose: worldPositionSchema });
+const dynamicEntityPathPointSchema = z.object({
+	pose: worldPositionSchema,
+	spatialMembership: spatialMembershipSchema,
+});
 const dynamicEntityPathSchema = z.object({
 	initial: dynamicEntityPathPointSchema,
 	legs: z

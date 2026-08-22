@@ -11,7 +11,7 @@ import {
 import type { DynamicEntityView } from "./dynamic-entity-feed";
 
 describe("dynamic presentation producer adapters", () => {
-	it("passes authored facts and placement through without reinterpretation", () => {
+	it("adds resident-only membership to authored placement without reinterpreting its facts", () => {
 		const visual = fixtureVisual();
 		const behavior = {
 			animationId: "0x03000001",
@@ -37,7 +37,11 @@ describe("dynamic presentation producer adapters", () => {
 		};
 
 		const adapted = adaptAuthoredDynamicPresentation(authored);
-		expect(adapted.placement).toBe(placement);
+		expect(adapted.placement).toMatchObject({
+			...placement,
+			spatialMembership: { scopes: [{ kind: "outdoor" }] },
+		});
+		expect(adapted.placement.localTransform).toBe(placement.localTransform);
 		expect(adapted.source.presentation).toBe(visual.presentation);
 		expect(adapted.source).toMatchObject({
 			behavior,
@@ -61,6 +65,15 @@ describe("dynamic presentation producer adapters", () => {
 			envCellId: "0x01020123",
 			landblockId: "0x0102ffff",
 			localTransform: { m41: 10, m42: 30, m43: -20 },
+			spatialMembership: {
+				scopes: [
+					{
+						envCellId: "0x01020123",
+						kind: "env-cell",
+						landblockId: "0x0102ffff",
+					},
+				],
+			},
 		});
 		expect(spawnedDynamicPlacement(entity)).toEqual(adapted.placement);
 	});
@@ -70,6 +83,39 @@ describe("dynamic presentation producer adapters", () => {
 		expect(() =>
 			adaptSpawnedDynamicPresentation(fixtureEntity(), visual),
 		).toThrow("expected 0x02000001");
+	});
+
+	it("preserves outdoor and EnvCell membership for a portal-straddling spawn", () => {
+		const entity = fixtureEntity();
+		if (entity.placement.kind !== "world") {
+			throw new Error("Expected a world-placement fixture.");
+		}
+		entity.placement.spatialMembership = {
+			reachesOutdoors: true,
+			reachedEnvCellIds: [0x01020123],
+		};
+
+		expect(spawnedDynamicPlacement(entity).spatialMembership.scopes).toEqual([
+			{ kind: "outdoor" },
+			{
+				envCellId: "0x01020123",
+				kind: "env-cell",
+				landblockId: "0x0102ffff",
+			},
+		]);
+	});
+
+	it("rejects non-EnvCell ids in host spatial membership", () => {
+		const entity = fixtureEntity();
+		if (entity.placement.kind !== "world") {
+			throw new Error("Expected a world-placement fixture.");
+		}
+		entity.placement.spatialMembership = {
+			reachesOutdoors: false,
+			reachedEnvCellIds: [0x01020001],
+		};
+
+		expect(() => spawnedDynamicPlacement(entity)).toThrow("non-EnvCell");
 	});
 });
 
@@ -115,6 +161,10 @@ function fixtureEntity(): DynamicEntityView {
 		},
 		placement: {
 			kind: "world",
+			spatialMembership: {
+				reachesOutdoors: false,
+				reachedEnvCellIds: [0x01020123],
+			},
 			acceleration: { x: 0, y: 0, z: 0 },
 			contact: "unknown",
 			omega: { x: 0, y: 0, z: 0 },

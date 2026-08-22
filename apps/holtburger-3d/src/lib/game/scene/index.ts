@@ -128,6 +128,17 @@ export interface ScenePlacement extends SceneResidency {
 	readonly localTransform: Mat4;
 }
 
+/** Host-derived scopes reached by one placed object's complete spatial geometry. */
+export interface SceneSpatialMembership {
+	/** Deduplicated source-domain scopes; the authoritative residency scope is always included. */
+	readonly scopes: readonly SceneScope[];
+}
+
+/** Atomic dynamic-root placement and its host-derived plural spatial membership. */
+export interface SceneSpatialPlacement extends ScenePlacement {
+	readonly spatialMembership: SceneSpatialMembership;
+}
+
 /** Residency and flattened transform for any node in a transform tree. */
 export interface ResolvedScenePlacement extends SceneResidency {
 	/** Query scope derived from the root residency. */
@@ -170,6 +181,7 @@ interface SceneNodeFields {
 /** Canonical node shape; children inherit landblock/env-cell placement from their root. */
 export type SceneNode = SceneNodeFields & { readonly id: SceneNodeId } & (
 		| (SceneResidency & {
+				readonly spatialMembership: SceneSpatialMembership;
 				readonly parentId: null;
 		  })
 		| {
@@ -181,6 +193,7 @@ export type SceneNode = SceneNodeFields & { readonly id: SceneNodeId } & (
 export type SceneNodeInput = SceneNodeFields &
 	(
 		| (SceneResidency & {
+				readonly spatialMembership?: SceneSpatialMembership;
 				readonly parentId: null;
 		  })
 		| {

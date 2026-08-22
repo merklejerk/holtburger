@@ -8,7 +8,7 @@ use holtburger_common::{Guid, Vector3};
 use holtburger_content::{CollisionBox, LandblockPlacement, PlacedCollisionShape};
 
 use super::cell_index::GlobalCellRange;
-use super::{CollisionPlacement, SpatialBody, SpatialBodyId};
+use super::{SpatialBody, SpatialBodyId, SpatialMembership};
 use crate::EntityCollisionParticipation;
 
 /// Scene-owned dynamic equivalent of retail's outdoor and EnvCell shadow lists.
@@ -61,7 +61,7 @@ impl DynamicShadowIndex {
                     }
                 }
             }
-            for cell in dynamic.placement.reached_interior_cells() {
+            for cell in dynamic.placement.reached_env_cells() {
                 index.interior_cells.entry(*cell).or_default().push(body.id);
             }
         }
@@ -83,7 +83,7 @@ impl DynamicShadowIndex {
         anchor: Guid,
         minimum: Vector3,
         maximum: Vector3,
-        placement: &CollisionPlacement,
+        placement: &SpatialMembership,
     ) -> Vec<SpatialBodyId> {
         let mut selected = Vec::new();
         if placement.reaches_outdoors() {
@@ -93,7 +93,7 @@ impl DynamicShadowIndex {
                 }
             }
         }
-        for cell in placement.reached_interior_cells() {
+        for cell in placement.reached_env_cells() {
             if let Some(bodies) = self.interior_cells.get(cell) {
                 selected.extend(bodies.iter().copied());
             }

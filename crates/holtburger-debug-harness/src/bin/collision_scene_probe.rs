@@ -12,12 +12,12 @@ use holtburger_content::{
 use holtburger_core::ContentAssetService;
 use holtburger_dat::physics::BspNode;
 use holtburger_world::{
-    CellTransitRequest, CollisionPlacement, CollisionScene, EdgeProtection, FreeSphereConfig,
-    FreeSphereOutcome, FreeSphereRequest, FreeSphereState, GroundState, GroundedBody,
-    GroundedBodySpheres, GroundedConfig, GroundedObstructionRequest, GroundedOutcome,
-    GroundedRequest, GroundedSphere, MotionWaypoint, MotionWaypointPlacement,
-    PhysicalCollisionFilter, PlacedMotionPathRequest, PlacementRequest, RETAIL_WALKABLE_NORMAL_Z,
-    SphereSweep, SupportRequest, solve_free_sphere, solve_grounded,
+    CellTransitRequest, CollisionScene, EdgeProtection, FreeSphereConfig, FreeSphereOutcome,
+    FreeSphereRequest, FreeSphereState, GroundState, GroundedBody, GroundedBodySpheres,
+    GroundedConfig, GroundedObstructionRequest, GroundedOutcome, GroundedRequest, GroundedSphere,
+    MotionWaypoint, MotionWaypointPlacement, PhysicalCollisionFilter, PlacedMotionPathRequest,
+    PlacementRequest, RETAIL_WALKABLE_NORMAL_Z, SpatialMembership, SphereSweep, SupportRequest,
+    solve_free_sphere, solve_grounded,
 };
 
 const HOST_TICK_SECONDS: f32 = 1.0 / 30.0;
@@ -355,7 +355,7 @@ fn main() -> Result<()> {
         anchor: Guid(landblock.landblock_id),
         center: Vector3::new(96.0, 96.0, 600.0),
         radius: 0.5,
-        placement: &CollisionPlacement::outdoor(),
+        placement: &SpatialMembership::outdoor(),
     })?;
     println!(
         "world_query high_altitude_placement_contacts={}",
@@ -570,7 +570,7 @@ fn benchmark_static_queries(
     query_count: usize,
 ) -> Result<()> {
     let anchor = Guid(landblock_id);
-    let placement = CollisionPlacement::outdoor();
+    let placement = SpatialMembership::outdoor();
     // Deterministic low-discrepancy walk over the landblock interior at a plausible body height.
     let position = |index: usize| {
         let golden = 0.618_034_f32;

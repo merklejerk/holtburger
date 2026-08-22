@@ -5,10 +5,10 @@ use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Vector3};
 
 use super::collision::{
-    CellTransitRequest, CollisionPlacement, CollisionScene, GroundedObstruction,
-    GroundedObstructionRequest, MotionWaypoint, MovementRestrictionRequest, PlacementRequest,
-    PlacementRestrictionRequest, SphereSweep, StaticContact, SupportContact, SupportFeature,
-    SupportRequest, anchor_point_to_outdoor_position, landblock_key, separating_displacement,
+    CellTransitRequest, CollisionScene, GroundedObstruction, GroundedObstructionRequest,
+    MotionWaypoint, MovementRestrictionRequest, PlacementRequest, PlacementRestrictionRequest,
+    SpatialMembership, SphereSweep, StaticContact, SupportContact, SupportFeature, SupportRequest,
+    anchor_point_to_outdoor_position, landblock_key, separating_displacement,
 };
 
 /// Retail's minimum upward surface-normal component for walkable support.
@@ -247,14 +247,14 @@ struct RoleContacts {
 /// One tentative grounded move with its inseparable placement and obstruction facts.
 struct MovementCandidate {
     center: Vector3,
-    placement: CollisionPlacement,
+    placement: SpatialMembership,
     contacts: Vec<RoleContacts>,
 }
 
 #[derive(Debug, Clone)]
 struct SupportedPlacement {
     body_center: Vector3,
-    placement: CollisionPlacement,
+    placement: SpatialMembership,
     support: GroundSupport,
 }
 
@@ -702,7 +702,7 @@ fn settle_candidate(
     context: GroundedSolveContext<'_>,
     body: &GroundedBody,
     candidate: Vector3,
-    candidate_placement: CollisionPlacement,
+    candidate_placement: SpatialMembership,
     maximum_drop: f32,
     acceptance_normal_z: f32,
 ) -> Result<SettleResult> {
@@ -833,7 +833,7 @@ fn landing_candidate(
     context: GroundedSolveContext<'_>,
     body: &GroundedBody,
     candidate: Vector3,
-    candidate_placement: CollisionPlacement,
+    candidate_placement: SpatialMembership,
 ) -> Result<SettleResult> {
     settle_candidate(
         context,
@@ -882,7 +882,7 @@ fn step_down_candidate(
     context: GroundedSolveContext<'_>,
     body: &GroundedBody,
     candidate: Vector3,
-    candidate_placement: CollisionPlacement,
+    candidate_placement: SpatialMembership,
 ) -> Result<SettleResult> {
     settle_candidate(
         context,
@@ -959,7 +959,7 @@ fn movement_contacts(
     context: GroundedSolveContext<'_>,
     body_start: Vector3,
     body_end: Vector3,
-    placement: &CollisionPlacement,
+    placement: &SpatialMembership,
 ) -> Result<Vec<RoleContacts>> {
     let mut result = Vec::new();
     for (role, sphere) in role_spheres(context.spheres) {
@@ -1008,7 +1008,7 @@ fn placement_contacts(
     body_center: Vector3,
     pose: WorldPosition,
     spheres: GroundedBodySpheres,
-    placement: &CollisionPlacement,
+    placement: &SpatialMembership,
     filter: super::PhysicalCollisionFilter,
 ) -> Result<Vec<RoleContacts>> {
     let mut result = Vec::new();
@@ -1131,7 +1131,7 @@ fn transit_pair(
     pose: WorldPosition,
     spheres: GroundedBodySpheres,
     body_center: Vector3,
-) -> Result<CollisionPlacement> {
+) -> Result<SpatialMembership> {
     let lower = scene.transit_cell(CellTransitRequest {
         previous_cell: body.cell,
         anchor,
@@ -1754,7 +1754,7 @@ mod tests {
             context,
             Vector3::new(191.0, 96.0, 2.0),
             Vector3::new(191.2, 96.0, 2.0),
-            &CollisionPlacement::outdoor(),
+            &SpatialMembership::outdoor(),
         )
         .unwrap();
 

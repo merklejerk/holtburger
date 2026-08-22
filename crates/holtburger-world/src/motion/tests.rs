@@ -264,10 +264,10 @@ fn stopping_a_substate_returns_to_the_styles_default() {
     assert_eq!(animation_ids(&body.sequence), vec![LINK_ANIM, STAND_ANIM]);
 }
 
-/// A transition the cursor has not reached yet is not discarded by the next command: the new
-/// transition queues behind it, so an interrupted change still plays out in order.
+/// Different pending destinations retain their authored order until a later selection supersedes
+/// them.
 #[test]
-fn interrupting_an_unplayed_transition_queues_the_next_one_behind_it() {
+fn distinct_unplayed_substate_transitions_remain_ordered() {
     let catalog = catalog();
     let table = catalog.table(0x0900_0001).expect("table");
     let mut body = standing(table);
@@ -291,6 +291,64 @@ fn interrupting_an_unplayed_transition_queues_the_next_one_behind_it() {
         vec![LINK_ANIM, LINK_ANIM, STAND_ANIM]
     );
     assert!(!body.sequence.is_cyclic());
+}
+
+/// Retail removes the transition suffix between two pending selections of the same substate
+/// (`MotionTableManager::remove_redundant_links`, `acclient.c:317225-317290`).
+#[test]
+fn reselecting_a_pending_substate_collapses_the_redundant_suffix() {
+    let catalog = catalog();
+    let table = catalog.table(0x0900_0001).expect("table");
+    let mut body = standing(table);
+    select_motion(
+        table,
+        &mut body.state,
+        &mut body.sequence,
+        MotionCommand(WALK),
+        1.0,
+    );
+    stop_motion(
+        table,
+        &mut body.state,
+        &mut body.sequence,
+        MotionCommand(WALK),
+    );
+
+    select_motion(
+        table,
+        &mut body.state,
+        &mut body.sequence,
+        MotionCommand(WALK),
+        1.0,
+    );
+
+    assert_eq!(body.state.substate, MotionCommand(WALK));
+    assert_eq!(animation_ids(&body.sequence), vec![LINK_ANIM, WALK_ANIM]);
+    assert!(!body.sequence.is_cyclic());
+}
+
+/// Repeated press/release edges may reach distinct host ticks, but their transition history must
+/// remain bounded when the final held input repeats the pending forward destination.
+#[test]
+fn repeated_forward_taps_then_hold_do_not_accumulate_a_transition_backlog() {
+    let catalog = catalog();
+    let table = catalog.table(0x0900_0001).expect("table");
+    let mut body = BodyMotionRuntime::new(table);
+    let order = |forward| MotionOrder {
+        style: Some(MotionCommand(STYLE)),
+        forward,
+        sidestep: None,
+        turn: None,
+    };
+
+    for _ in 0..3 {
+        body.drive(table, order(Some((MotionCommand(WALK), 1.0))), 1.0 / 30.0);
+        body.drive(table, order(None), 1.0 / 30.0);
+    }
+    body.drive(table, order(Some((MotionCommand(WALK), 1.0))), 1.0 / 30.0);
+
+    assert_eq!(body.state().substate, MotionCommand(WALK));
+    assert_eq!(animation_ids(body.sequence()), vec![LINK_ANIM, WALK_ANIM]);
 }
 
 /// Transition clips the cursor has passed are dropped, so an interrupted body does not accumulate

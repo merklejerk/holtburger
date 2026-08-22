@@ -9,7 +9,7 @@ use holtburger_common::{RigidTransform, Vector3};
 use holtburger_content::{MotionClip, MotionHook, MotionHookDirection};
 use std::sync::Arc;
 
-use super::MotionAnimationRef;
+use super::{MotionAnimationRef, MotionCommand};
 
 /// Smallest framerate retail treats as advancing the cursor (`acclient.c:327122`).
 ///
@@ -28,6 +28,8 @@ pub struct SequenceNode {
     low_frame: i32,
     high_frame: i32,
     framerate: f32,
+    /// Same-style substate selection that installed this live clip, when one exists.
+    substate_selection: Option<SubstateSelection>,
 }
 
 impl SequenceNode {
@@ -42,6 +44,7 @@ impl SequenceNode {
             low_frame: clip.low_frame as i32,
             high_frame: clip.high_frame as i32,
             framerate: clip.framerate * speed,
+            substate_selection: None,
         }
     }
 
@@ -109,6 +112,15 @@ impl SequenceNode {
             })
             .collect()
     }
+}
+
+/// Semantic destination shared by every clip installed for one substate selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct SubstateSelection {
+    /// Style in which the target substate was selected.
+    pub style: MotionCommand,
+    /// Selected locomotion substate.
+    pub target: MotionCommand,
 }
 
 /// One simulation hook a departed frame fired, with the clip it came from.
@@ -293,6 +305,74 @@ impl MotionSequenceRuntime {
         }
     }
 
+    /// Appends one clip owned by an exact same-style substate selection.
+    pub(super) fn append_for_substate(
+        &mut self,
+        mut node: SequenceNode,
+        selection: SubstateSelection,
+    ) {
+        node.substate_selection = Some(selection);
+        self.append(node);
+    }
+
+    /// Number of clips currently retained, used to delimit one newly appended selection.
+    pub(super) fn clip_count(&self) -> usize {
+        self.nodes.len()
+    }
+
+    /// Prevents a later return to a style from collapsing through the intervening style change.
+    pub(super) fn forget_substate_selections(&mut self) {
+        for node in &mut self.nodes {
+            node.substate_selection = None;
+        }
+    }
+
+    /// Removes the redundant transition suffix between an earlier and newly repeated substate.
+    ///
+    /// Retail performs the equivalent reduction after appending a motion
+    /// (`MotionTableManager::remove_redundant_links`, `acclient.c:317225-317290`). Keeping the
+    /// selection on each live clip lets the sequence remove the exact range without a parallel
+    /// command queue or per-command animation counts.
+    pub(super) fn collapse_redundant_substate_suffix(
+        &mut self,
+        selection: SubstateSelection,
+        appended_from: usize,
+    ) {
+        let Some(first_cyclic) = self.first_cyclic else {
+            return;
+        };
+        let Some(retain_through) = self.nodes[..appended_from]
+            .iter()
+            .rposition(|node| node.substate_selection == Some(selection))
+        else {
+            return;
+        };
+        let remove_start = retain_through + 1;
+        if remove_start >= first_cyclic {
+            return;
+        }
+
+        let removed = first_cyclic - remove_start;
+        let current = self.current;
+        self.nodes.drain(remove_start..first_cyclic);
+        let first_cyclic = first_cyclic - removed;
+        self.first_cyclic = Some(first_cyclic);
+        self.current = current.map(|current| {
+            if current < remove_start {
+                current
+            } else if current < remove_start + removed {
+                first_cyclic
+            } else {
+                current - removed
+            }
+        });
+        if current
+            .is_some_and(|current| current >= remove_start && current < remove_start + removed)
+        {
+            self.frame_number = self.nodes[first_cyclic].starting_frame();
+        }
+    }
+
     /// Scales the rate of every looping clip, swapping windows when the direction flips.
     pub fn multiply_cyclic_framerate(&mut self, multiplier: f32) {
         let Some(first_cyclic) = self.first_cyclic else {
@@ -336,32 +416,6 @@ impl MotionSequenceRuntime {
         }
         self.nodes.truncate(first_cyclic);
         self.first_cyclic = self.nodes.len().checked_sub(1);
-    }
-
-    /// Removes up to `count` transition clips immediately before the looping tail.
-    pub fn remove_link_clips(&mut self, count: usize) {
-        for _ in 0..count {
-            let Some(first_cyclic) = self.first_cyclic else {
-                return;
-            };
-            if first_cyclic == 0 {
-                return;
-            }
-            let removed = first_cyclic - 1;
-            if self.current == Some(removed) {
-                self.current = Some(first_cyclic);
-                self.frame_number = self.nodes[first_cyclic].starting_frame();
-            }
-            self.nodes.remove(removed);
-            self.first_cyclic = Some(first_cyclic - 1);
-            self.current = self.current.map(|current| {
-                if current > removed {
-                    current - 1
-                } else {
-                    current
-                }
-            });
-        }
     }
 
     /// Advances the cursor by one tick of elapsed time and returns the tick's contribution.

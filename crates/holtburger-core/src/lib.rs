@@ -62,7 +62,7 @@ pub use dynamic_entity_view::{
 pub use holtburger_content::LandblockCollisionAsset;
 pub use kinematic_boom::{
     KinematicBoomAdvance, KinematicBoomCollisionSeed, KinematicBoomController,
-    KinematicBoomDiagnostics, KinematicBoomFailureKind, KinematicBoomInputError,
+    KinematicBoomDiagnostics, KinematicBoomHoldReason, KinematicBoomInputError,
     KinematicBoomIntent, KinematicBoomIntentAcceptance, KinematicBoomOutcome,
     KinematicBoomPlacement, KinematicBoomProfile, KinematicBoomProfileDefinition,
     KinematicBoomProfileError, KinematicBoomReseedReason, KinematicBoomTargetSample,

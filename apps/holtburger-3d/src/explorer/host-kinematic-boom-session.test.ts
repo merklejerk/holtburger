@@ -89,14 +89,21 @@ function advance(
 	);
 }
 
-function failure(identity: HostKinematicBoomIdentity = IDENTITY) {
+function held(identity: HostKinematicBoomIdentity = IDENTITY) {
 	return decodeHostKinematicBoomTick(
 		{
-			kind: "failed",
+			kind: "held",
 			...identity,
 			sequence: 1,
-			failure: "clearance-sweep",
-			held: pathPoint(12, 0xda550177),
+			targetSphereRole: "primary",
+			effectiveCameraRadius: 0.25,
+			desiredReach: 4.5,
+			renderedReach: 3.75,
+			path: {
+				initial: pathPoint(12, 0xda550177),
+				legs: [{ endFraction: 1, end: pathPoint(12, 0xda550177) }],
+			},
+			reason: "clearance-sweep",
 			diagnostics: {
 				controlLegs: 1,
 				clearanceSweeps: 0,
@@ -242,18 +249,18 @@ describe("HostKinematicBoomSession", () => {
 			kind: "active",
 			sequence: 3,
 			renderedReach: 0,
-			reseedReason: "placement-recovery",
+			recovery: { kind: "reseeded", reason: "placement-recovery" },
 		});
 
 		session.receive(advance(4, 50, 51), 32, 103);
 		expect(session.status()).toMatchObject({
 			kind: "active",
 			sequence: 4,
-			reseedReason: null,
+			recovery: null,
 		});
 	});
 
-	it("ignores stale identities, holds one terminal safe pose, and stops exactly", async () => {
+	it("ignores stale identities, recovers after a held path, and stops exactly", async () => {
 		const transport = new RecordingTransport();
 		const session = new HostKinematicBoomSession(transport);
 		await session.start(TARGET, DISTANCE, [0, 1, 0]);
@@ -261,13 +268,22 @@ describe("HostKinematicBoomSession", () => {
 		session.receive(advance(1, 100, 101, stale), 32, 0);
 		expect(session.presentation(0)).toBeNull();
 
-		session.receive(failure(), 32, 10);
-		const held = session.presentation(10);
-		session.receive(advance(1, 30, 31), 32, 11);
-		expect(session.presentation(1_000)).toEqual(held);
+		session.receive(held(), 32, 10);
+		const heldPresentation = session.presentation(10);
+		expect(session.presentation(1_000)).toEqual(heldPresentation);
 		expect(session.status()).toMatchObject({
-			kind: "failed",
-			failure: "clearance-sweep",
+			kind: "active",
+			recovery: { kind: "held", reason: "clearance-sweep" },
+		});
+
+		session.receive(advance(2, 12, 13), 32, 11);
+		expect(session.presentation(58)?.placement.position.x).toBeGreaterThan(
+			heldPresentation!.placement.position.x,
+		);
+		expect(session.status()).toMatchObject({
+			kind: "active",
+			sequence: 2,
+			recovery: null,
 		});
 
 		await session.stop();

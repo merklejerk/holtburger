@@ -52,13 +52,12 @@ const diagnosticsSchema = z
 		contactPasses: z.number().int().nonnegative().safe(),
 	})
 	.strict();
-const failureSchema = z.enum([
+const holdReasonSchema = z.enum([
 	"clearance-sweep",
 	"free-sphere-query",
-	"maximum-reach",
 	"target-contract",
 	"controller-input",
-	"sequence-exhausted",
+	"path-projection",
 ]);
 const reseedReasonSchema = z.enum(["placed-path", "placement-recovery"]);
 const tickSchema = z.discriminatedUnion("kind", [
@@ -91,11 +90,15 @@ const tickSchema = z.discriminatedUnion("kind", [
 		.strict(),
 	z
 		.object({
-			kind: z.literal("failed"),
+			kind: z.literal("held"),
 			...identityFields,
 			sequence,
-			failure: failureSchema,
-			held: pathPointSchema,
+			targetSphereRole: z.enum(["primary", "upper-constraint"]),
+			effectiveCameraRadius: finiteNumber.positive().max(0.25),
+			desiredReach: finiteNumber.nonnegative(),
+			renderedReach: finiteNumber.nonnegative(),
+			path: pathSchema,
+			reason: holdReasonSchema,
 			diagnostics: diagnosticsSchema,
 		})
 		.strict(),
@@ -108,7 +111,7 @@ export type HostKinematicBoomIdentity = Pick<
 	"boomGeneration" | "possessionGeneration" | "guid" | "entityGeneration"
 >;
 
-/** One validated host camera tick, either an advancing path or a terminal safe hold. */
+/** One validated host camera tick carrying continuous, reseeded, or recoverably held placement. */
 export type HostKinematicBoomTick = z.infer<typeof tickSchema>;
 
 /** Result of one semantic latest-wins input command. */
@@ -122,17 +125,11 @@ export interface HostKinematicBoomPresentation {
 	readonly visualPivot: SceneVec3;
 }
 
-/** Successful host camera tick narrowed for bounded playback. */
-export type HostKinematicBoomAdvance = Extract<
-	HostKinematicBoomTick,
-	{ kind: "advanced" | "reseeded" }
->;
-
 /** Placement-authoring condition recovered through an explicit target-seed discontinuity. */
 export type HostKinematicBoomReseedReason = z.infer<typeof reseedReasonSchema>;
 
-/** Machine-readable terminal failure kind surfaced without frontend recovery policy. */
-export type HostKinematicBoomFailure = z.infer<typeof failureSchema>;
+/** Machine-readable reason one recoverable tick held its last collision-safe placement. */
+export type HostKinematicBoomHoldReason = z.infer<typeof holdReasonSchema>;
 
 /**
  * Convert the camera's AC-world look direction into the boom's pivot-to-camera direction.
@@ -155,13 +152,13 @@ export function decodeHostKinematicBoomTick(
 	durationMs: number,
 ): HostKinematicBoomTick {
 	const tick = tickSchema.parse(value);
-	if (tick.kind !== "failed") validateHostPlacedPath(tick.path, durationMs);
+	validateHostPlacedPath(tick.path, durationMs);
 	if (
-		tick.kind === "reseeded" &&
+		(tick.kind === "reseeded" || tick.kind === "held") &&
 		!tick.path.legs.every(({ end }) => samePathPoint(end, tick.path.initial))
 	) {
 		throw new Error(
-			"Host boom reseed path must remain at its initial placement.",
+			"Host boom discontinuity path must remain at its initial placement.",
 		);
 	}
 	return tick;
@@ -223,13 +220,6 @@ export function evaluateHostKinematicBoomPath(
 		},
 		present: presentationFromPoint,
 	});
-}
-
-/** Present the exact last safe camera/pivot pair carried by a terminal result. */
-export function hostKinematicBoomHeldPresentation(
-	tick: Extract<HostKinematicBoomTick, { kind: "failed" }>,
-): HostKinematicBoomPresentation {
-	return presentationFromPoint(tick.held);
 }
 
 function presentationFromPoint(

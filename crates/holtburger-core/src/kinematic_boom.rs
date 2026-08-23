@@ -31,7 +31,7 @@ pub struct KinematicBoomProfile {
 pub struct KinematicBoomProfileDefinition {
     /// Closest operator-requested reach in meters.
     pub minimum_reach: f32,
-    /// Farthest camera reach in meters.
+    /// Farthest operator-requested radial target in meters; physical placement remains elastic.
     pub maximum_reach: f32,
     /// Exponential half-life for target-induced vertical pivot motion.
     pub vertical_pivot_half_life: f32,
@@ -225,12 +225,11 @@ pub enum KinematicBoomInputError {
     InvalidTargetPath,
 }
 
-/// Machine-readable reason a staged tick retained its prior collision-safe placement.
+/// Machine-readable reason one recoverable tick retained its prior collision-safe placement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum KinematicBoomFailureKind {
+pub enum KinematicBoomHoldReason {
     ClearanceSweep,
     FreeSphereQuery,
-    MaximumReach,
 }
 
 /// Topology failure that caused a successful discontinuous reset to the target seed.
@@ -272,8 +271,8 @@ pub enum KinematicBoomOutcome {
         advance: KinematicBoomAdvance,
         diagnostics: KinematicBoomDiagnostics,
     },
-    Failed {
-        kind: KinematicBoomFailureKind,
+    Held {
+        reason: KinematicBoomHoldReason,
         held: KinematicBoomPlacement,
         diagnostics: KinematicBoomDiagnostics,
     },
@@ -454,7 +453,7 @@ impl KinematicBoomController {
                         diagnostics.contact_passes += leg_diagnostics.contact_passes;
                         motion
                     }
-                    Err(kind) => return Ok(failed(self.camera, kind, diagnostics)),
+                    Err(reason) => return Ok(held(self.camera, reason, diagnostics)),
                 };
                 append_reanchored_motion(
                     &mut waypoints,
@@ -561,10 +560,10 @@ impl KinematicBoomController {
         scene: &CollisionScene,
         direction: Vector3,
         delta_seconds: f32,
-    ) -> Result<ControlLegMotion, KinematicBoomFailureKind> {
+    ) -> Result<ControlLegMotion, KinematicBoomHoldReason> {
         let clearance = self.cast_to_reach(scene, direction, self.desired_reach)?;
         let clearance_reach = placement_distance(clearance.pose, self.filtered_visual_pivot)
-            .map_err(|_| KinematicBoomFailureKind::ClearanceSweep)?;
+            .map_err(|_| KinematicBoomHoldReason::ClearanceSweep)?;
         if clearance_reach < self.rendered_reach {
             self.rendered_reach = clearance_reach;
         } else if self.desired_reach - clearance_reach <= self.profile.surface_clearance
@@ -578,11 +577,11 @@ impl KinematicBoomController {
 
         let radial = self.cast_to_reach(scene, direction, self.rendered_reach)?;
         self.rendered_reach = placement_distance(radial.pose, self.filtered_visual_pivot)
-            .map_err(|_| KinematicBoomFailureKind::ClearanceSweep)?
+            .map_err(|_| KinematicBoomHoldReason::ClearanceSweep)?
             .min(self.profile.maximum_reach);
         let camera_start = self.camera;
         let displacement = placement_displacement(camera_start.pose, radial.pose)
-            .map_err(|_| KinematicBoomFailureKind::FreeSphereQuery)?;
+            .map_err(|_| KinematicBoomHoldReason::FreeSphereQuery)?;
         let outcome = solve_free_sphere(
             scene,
             self.profile.transit,
@@ -596,7 +595,7 @@ impl KinematicBoomController {
                 filter: PhysicalCollisionFilter::ALL,
             },
         )
-        .map_err(|_| KinematicBoomFailureKind::FreeSphereQuery)?;
+        .map_err(|_| KinematicBoomHoldReason::FreeSphereQuery)?;
         let (body, motion, substeps, contact_passes) = match outcome {
             FreeSphereOutcome::Solved {
                 body,
@@ -615,28 +614,12 @@ impl KinematicBoomController {
         };
         {
             let solve_anchor = owner(camera_start.pose.landblock_id);
-            if motion.iter().any(|waypoint| {
-                let waypoint_pose = WorldPosition {
-                    landblock_id: solve_anchor,
-                    coords: waypoint.center,
-                    rotation: Quaternion::identity(),
-                };
-                placement_distance(waypoint_pose, self.filtered_visual_pivot).map_or(
-                    true,
-                    |reach| {
-                        reach > self.profile.maximum_reach + self.profile.transit.separation_epsilon
-                    },
-                )
-            }) {
-                return Err(KinematicBoomFailureKind::MaximumReach);
-            }
             self.camera = KinematicBoomPlacement {
                 pose: body.pose,
                 cell: body.cell,
             };
             self.rendered_reach = placement_distance(body.pose, self.filtered_visual_pivot)
-                .map_err(|_| KinematicBoomFailureKind::FreeSphereQuery)?
-                .min(self.profile.maximum_reach);
+                .map_err(|_| KinematicBoomHoldReason::FreeSphereQuery)?;
             Ok(ControlLegMotion {
                 anchor: solve_anchor,
                 waypoints: motion,
@@ -655,13 +638,13 @@ impl KinematicBoomController {
         scene: &CollisionScene,
         direction: Vector3,
         reach: f32,
-    ) -> Result<KinematicBoomPlacement, KinematicBoomFailureKind> {
+    ) -> Result<KinematicBoomPlacement, KinematicBoomHoldReason> {
         let seed = self.collision_seed.placement;
         let anchor = owner(seed.pose.landblock_id);
         let seed_pose =
-            reanchor(seed.pose, anchor).map_err(|_| KinematicBoomFailureKind::ClearanceSweep)?;
+            reanchor(seed.pose, anchor).map_err(|_| KinematicBoomHoldReason::ClearanceSweep)?;
         let pivot = reanchor(self.filtered_visual_pivot, anchor)
-            .map_err(|_| KinematicBoomFailureKind::ClearanceSweep)?;
+            .map_err(|_| KinematicBoomHoldReason::ClearanceSweep)?;
         let ray = pivot.coords + direction * reach - seed_pose.coords;
         let ray_length = ray.length();
         if ray_length <= DIRECTION_EPSILON {
@@ -677,7 +660,7 @@ impl KinematicBoomController {
                 radius: self.collision_seed.camera_radius,
                 filter: PhysicalCollisionFilter::ALL,
             })
-            .map_err(|_| KinematicBoomFailureKind::ClearanceSweep)?;
+            .map_err(|_| KinematicBoomHoldReason::ClearanceSweep)?;
         let safe_distance = hit.map_or(ray_length, |hit| {
             (ray_length * hit.time_of_impact - self.profile.surface_clearance).max(0.0)
         });
@@ -694,13 +677,13 @@ impl KinematicBoomController {
                     placement: holtburger_world::MotionWaypointPlacement::Traverse,
                 }],
             })
-            .map_err(|_| KinematicBoomFailureKind::ClearanceSweep)?;
+            .map_err(|_| KinematicBoomHoldReason::ClearanceSweep)?;
         let final_point = path.final_point();
         let mut pose = seed_pose;
         pose.coords = final_point.center();
         pose = pose
             .normalize_outdoor_landblock_frame()
-            .map_err(|_| KinematicBoomFailureKind::ClearanceSweep)?;
+            .map_err(|_| KinematicBoomHoldReason::ClearanceSweep)?;
         Ok(KinematicBoomPlacement {
             pose,
             cell: final_point.placement().committed_cell(),
@@ -907,13 +890,13 @@ fn decay_fraction(delta_seconds: f32, half_life: f32) -> f32 {
     1.0 - 2.0_f32.powf(-delta_seconds / half_life)
 }
 
-fn failed(
+fn held(
     held: KinematicBoomPlacement,
-    kind: KinematicBoomFailureKind,
+    reason: KinematicBoomHoldReason,
     diagnostics: KinematicBoomDiagnostics,
 ) -> KinematicBoomOutcome {
-    KinematicBoomOutcome::Failed {
-        kind,
+    KinematicBoomOutcome::Held {
+        reason,
         held,
         diagnostics,
     }
@@ -1348,6 +1331,62 @@ mod tests {
             KinematicBoomOutcome::Advanced { .. }
         ));
         assert_eq!(controller.desired_reach(), 32.0);
+    }
+
+    #[test]
+    fn maximum_reach_remains_elastic_while_the_target_moves_sideways() {
+        let mut definition = profile_definition(64);
+        definition.maximum_reach = 32.0;
+        let mut controller = KinematicBoomController::new(
+            KinematicBoomProfile::new(definition).unwrap(),
+            sample().visual_pivot,
+            sample().collision_seed,
+            32.0,
+            KinematicBoomIntent {
+                sequence: 0,
+                view_direction: Vector3::new(1.0, 0.0, 0.0),
+                cumulative_zoom_displacement: 0.0,
+            },
+        )
+        .unwrap();
+        let scene = CollisionScene::new();
+        settle_reach(&mut controller, &scene, sample());
+
+        let mut moved = sample();
+        moved.visual_pivot.coords.y += 0.5;
+        moved.collision_seed.placement.pose.coords.y += 0.5;
+        let outcome = controller.advance(&scene, 1.0 / 30.0, &[moved]).unwrap();
+
+        assert!(matches!(outcome, KinematicBoomOutcome::Advanced { .. }));
+        assert!((controller.rendered_reach() - 32.0).abs() < 1.0e-4);
+    }
+
+    #[test]
+    fn overextended_camera_retracts_instead_of_invalidating_the_tick() {
+        let mut definition = profile_definition(64);
+        definition.maximum_reach = 32.0;
+        let mut controller = KinematicBoomController::new(
+            KinematicBoomProfile::new(definition).unwrap(),
+            sample().visual_pivot,
+            sample().collision_seed,
+            32.0,
+            KinematicBoomIntent {
+                sequence: 0,
+                view_direction: Vector3::new(1.0, 0.0, 0.0),
+                cumulative_zoom_displacement: 0.0,
+            },
+        )
+        .unwrap();
+        let scene = CollisionScene::new();
+        settle_reach(&mut controller, &scene, sample());
+        controller.camera.pose.coords.x += 0.25;
+        controller.rendered_reach = 32.25;
+
+        let outcome = controller.advance(&scene, 1.0 / 30.0, &[sample()]).unwrap();
+
+        assert!(matches!(outcome, KinematicBoomOutcome::Advanced { .. }));
+        assert!(controller.rendered_reach() < 32.25);
+        assert!(controller.rendered_reach() >= controller.desired_reach());
     }
 
     #[test]

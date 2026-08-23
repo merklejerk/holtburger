@@ -3280,7 +3280,7 @@ mod tests {
     }
 
     #[test]
-    fn dynamic_contact_budget_hold_retries_the_uncommitted_release_edge() {
+    fn dynamic_contact_work_limit_does_not_defer_the_release_edge() {
         let (simulation, runtime, guid) = walking_runtime();
         let settled_at = settle(&simulation, Instant::now());
         let possession = runtime.possess(guid).unwrap();
@@ -3325,40 +3325,30 @@ mod tests {
             })
             .unwrap();
 
-        let held = runtime
+        let limited = runtime
             .tick_physical_collection(1.0, settled_at + Duration::from_secs(1))
             .unwrap();
-        assert!(held.ticks.iter().all(|tick| {
-            tick.solved.current.id != SpatialBodyId::Entity(guid)
-                || tick.solved.result.motion.status != PhysicalBodyTickStatus::Solved
-        }));
-        assert!(held.ticks.iter().all(|tick| {
-            tick.possession_event_outcomes.iter().all(|outcome| {
-                !matches!(
-                    outcome.result,
-                    PossessionEventOutcomeKind::JumpReleased { .. }
-                )
-            })
-        }));
         assert!(
-            simulation
-                .physical_body_snapshot(SpatialBodyId::Entity(guid))
-                .unwrap()
-                .velocity
-                .z
-                <= 0.0,
-            "a budget-held proposal must not launch the canonical body"
+            limited.ticks.iter().any(|tick| {
+                tick.possession_event_outcomes.iter().any(|outcome| {
+                    matches!(
+                        outcome.result,
+                        PossessionEventOutcomeKind::JumpReleased { .. }
+                    )
+                })
+            }),
+            "a dynamic work limit must not roll back the accepted release edge"
         );
 
         runtime
             .despawn(peer_guid, peer.instance.generation)
             .unwrap();
-        let retried = runtime
+        let next = runtime
             .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(1_033))
             .unwrap();
-        assert!(retried.ticks.iter().any(|tick| {
-            tick.possession_event_outcomes.iter().any(|outcome| {
-                matches!(
+        assert!(next.ticks.iter().all(|tick| {
+            tick.possession_event_outcomes.iter().all(|outcome| {
+                !matches!(
                     outcome.result,
                     PossessionEventOutcomeKind::JumpReleased { .. }
                 )
@@ -3725,6 +3715,8 @@ mod tests {
                 guid,
                 entity_generation: possession.entity_generation,
                 initial_reach: 4.0,
+                minimum_reach: 1.2,
+                maximum_reach: 4.25,
                 input_sequence: 1,
                 view_direction: [0.0, -1.0, 0.0],
                 cumulative_zoom_displacement: 0.0,
@@ -3762,6 +3754,7 @@ mod tests {
             sequence,
             target_sphere_role,
             effective_camera_radius,
+            desired_reach,
             path,
             ..
         } = tick
@@ -3775,6 +3768,7 @@ mod tests {
             HostKinematicBoomTargetSphereRole::UpperConstraint
         );
         assert_eq!(effective_camera_radius, upper.radius);
+        assert_eq!(desired_reach, 4.25);
         assert_eq!(path.legs.last().unwrap().end_fraction, 1.0);
         assert!(path.initial.visual_pivot.coords.z.is_finite());
         assert_eq!(simulation.registered_body_count(), body_count);
@@ -3797,6 +3791,8 @@ mod tests {
                 guid,
                 entity_generation: replacement_possession.entity_generation,
                 initial_reach: 4.0,
+                minimum_reach: 1.2,
+                maximum_reach: 8.0,
                 input_sequence: 1,
                 view_direction: [0.0, -1.0, 0.0],
                 cumulative_zoom_displacement: 0.0,
@@ -3842,14 +3838,13 @@ mod tests {
     }
 
     #[test]
-    fn host_boom_emits_a_terminal_budget_failure_once() {
+    fn host_boom_retains_session_while_control_work_is_limited() {
         use crate::host_kinematic_boom_runtime::{
-            HostKinematicBoomFailureKind, HostKinematicBoomIntentReceipt,
+            HostKinematicBoomDiagnostics, HostKinematicBoomIntentReceipt,
             HostKinematicBoomIntentRequest, HostKinematicBoomRuntime,
             HostKinematicBoomStartRequest, HostKinematicBoomTick,
         };
         use holtburger_core::{KinematicBoomProfile, KinematicBoomProfileDefinition};
-        use holtburger_world::StaticSphereCastConfig;
 
         let (simulation, entities, guid) = walking_runtime();
         let entities = Arc::new(entities);
@@ -3863,11 +3858,7 @@ mod tests {
             clearance_hysteresis: 0.05,
             maximum_control_leg_displacement: 0.01,
             maximum_control_legs: 1,
-            radial_cast: StaticSphereCastConfig {
-                maximum_substep_distance: 0.25,
-                maximum_substeps: 40,
-                surface_clearance: 0.000_5,
-            },
+            surface_clearance: 0.000_5,
             transit: FreeSphereConfig {
                 maximum_substep_distance: 0.25,
                 maximum_substeps: 64,
@@ -3887,6 +3878,8 @@ mod tests {
                 guid,
                 entity_generation: possession.entity_generation,
                 initial_reach: 4.0,
+                minimum_reach: 1.2,
+                maximum_reach: 8.0,
                 input_sequence: 1,
                 view_direction: [0.0, -1.0, 0.0],
                 cumulative_zoom_displacement: 0.0,
@@ -3907,14 +3900,21 @@ mod tests {
             .unwrap();
         assert!(matches!(
             boom.advance(&collection, 1.0 / 30.0).unwrap(),
-            Some(HostKinematicBoomTick::Failed {
+            Some(HostKinematicBoomTick::Advanced {
                 identity,
                 sequence: 1,
-                failure: HostKinematicBoomFailureKind::ControlLegBudget,
+                diagnostics: HostKinematicBoomDiagnostics { control_legs: 1, .. },
                 ..
             }) if identity == receipt.identity
         ));
-        assert!(boom.advance(&collection, 1.0 / 30.0).unwrap().is_none());
+        assert!(matches!(
+            boom.advance(&collection, 1.0 / 30.0).unwrap(),
+            Some(HostKinematicBoomTick::Advanced {
+                identity,
+                sequence: 2,
+                ..
+            }) if identity == receipt.identity
+        ));
         assert_eq!(simulation.registered_body_count(), 1);
     }
 }

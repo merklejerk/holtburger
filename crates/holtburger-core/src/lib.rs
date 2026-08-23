@@ -69,8 +69,7 @@ pub use kinematic_boom::{
 };
 pub use physical_body_definition::{
     FREE_SPHERE_FLY_CONFIG, RETAIL_DUMMY_MOTION_SPHERE, ResolvedBodyProfile,
-    STATIC_SPHERE_CAST_CONFIG, SetupPhysicalShapeError, physical_fly_viewer_profile,
-    resolve_setup_physical_spheres, retail_grounded_body, retail_grounded_body_with_policy,
-    retail_player_grounded_profile,
+    SetupPhysicalShapeError, physical_fly_viewer_profile, resolve_setup_physical_spheres,
+    retail_grounded_body, retail_grounded_body_with_policy, retail_player_grounded_profile,
 };
 pub use soul_emote_motion::motion_command_for_soul_emote_pose;

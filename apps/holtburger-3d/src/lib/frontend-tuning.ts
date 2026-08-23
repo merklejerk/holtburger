@@ -91,13 +91,17 @@ export const FRONTEND_TUNING = {
 			},
 			/** Explorer gesture and initial-framing choices sent to the host-owned boom. */
 			boom: {
-				/** Initial operator-requested reach; the host validates and clamps it. */
-				defaultDistance: 4.5,
-				/** DOM wheel normalization; cumulative distance and collision policy belong to the host. */
-				zoomMetersPerWheelUnit: 0.01,
+				/** Interdependent operator reach bounds, validated and enforced by the host. */
+				distance: {
+					initial: 4.5,
+					maximum: 32,
+					minimum: 1.2,
+				},
+				/** Multiplier from the normalized free-camera wheel distance to boom zoom distance. */
+				zoomDistanceMultiplier: 0.25,
 			},
 			/** Projection shared by Explorer-controlled primary views. */
-			framing: { fov: 60, near: 0.5, far: 2_000 },
+			framing: { fov: 75, near: 0.5, far: 2_000 },
 			/** Initial orientation before automatic scene focus or manual input. */
 			initialOrientation: { pitchRadians: -0.45, yawRadians: 0 },
 			outdoorFocus: {

@@ -1053,6 +1053,7 @@ fn solved_free_sphere(outcome: FreeSphereOutcome) -> Result<SolvedFreeSphere> {
             budget,
             substeps,
             contact_passes,
+            ..
         } => anyhow::bail!(
             "free-sphere portal trace exceeded its {budget:?} budget at ({:.3},{:.3},{:.3}) cell={} after {substeps} substeps/{contact_passes} passes",
             body.pose.coords.x,
@@ -1275,6 +1276,7 @@ fn emit_grounded_route_tick(
             substeps,
             contact_passes,
             constraint_count,
+            ..
         } => {
             println!(
                 "grounded_explicit phase={phase} tick={tick} status=budget_exceeded budget={budget:?} final=({:.6},{:.6},{:.6}) cell={} ground={} body_velocity=({:.6},{:.6},{:.6}) constraints={constraint_count} substeps={substeps} contact_passes={contact_passes}",
@@ -1913,6 +1915,7 @@ fn solved_grounded(outcome: GroundedOutcome) -> Result<SolvedGrounded> {
             substeps,
             contact_passes,
             constraint_count,
+            ..
         } => {
             anyhow::bail!(
                 "grounded portal trace exceeded its {budget:?} budget at ({:.3},{:.3},{:.3}) cell={} ground={} constraints={} after {substeps} substeps/{contact_passes} passes",

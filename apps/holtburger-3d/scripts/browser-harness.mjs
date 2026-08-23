@@ -1456,9 +1456,9 @@ function summarizePossessionScenario(scenario) {
 						maximum.controlLegs,
 						tick.diagnostics.controlLegs,
 					),
-					radialCasts: Math.max(
-						maximum.radialCasts,
-						tick.diagnostics.radialCasts,
+					clearanceSweeps: Math.max(
+						maximum.clearanceSweeps,
+						tick.diagnostics.clearanceSweeps,
 					),
 					transitSubsteps: Math.max(
 						maximum.transitSubsteps,
@@ -1468,7 +1468,7 @@ function summarizePossessionScenario(scenario) {
 				{
 					contactPasses: 0,
 					controlLegs: 0,
-					radialCasts: 0,
+					clearanceSweeps: 0,
 					transitSubsteps: 0,
 				},
 			),
@@ -1716,6 +1716,8 @@ async function runPossessionScenario(
 			guid: possession.guid,
 			entityGeneration: possession.entityGeneration,
 			initialReach: 4.5,
+			minimumReach: 1.2,
+			maximumReach: 32,
 			inputSequence: 0,
 			viewDirection: boomDirection,
 			cumulativeZoomDisplacement: 0,
@@ -1731,7 +1733,7 @@ async function runPossessionScenario(
 		{
 			inputSequence: 2,
 			viewDirection: boomDirection,
-			cumulativeZoomDisplacement: -0.075,
+			cumulativeZoomDisplacement: 27.5,
 		},
 		{
 			inputSequence: 1,
@@ -2068,7 +2070,7 @@ function assertPossessionScenario(scenario) {
 		throw new Error(
 			`Host kinematic boom published an invalid identity, sequence, or path: ${JSON.stringify(invalidBoomTick)}.`,
 		);
-	if (Math.abs(playableBoomTicks[0].desiredReach - 4.425) > 1e-5)
+	if (Math.abs(playableBoomTicks[0].desiredReach - 32) > 1e-5)
 		throw new Error(
 			`Host kinematic boom lost cumulative zoom input: ${playableBoomTicks[0].desiredReach}.`,
 		);

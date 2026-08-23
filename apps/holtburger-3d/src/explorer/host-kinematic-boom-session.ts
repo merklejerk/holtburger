@@ -19,6 +19,13 @@ export interface HostKinematicBoomTarget {
 	readonly entityGeneration: number;
 }
 
+/** Complete operator-requested distance policy validated again at the host boundary. */
+export interface HostKinematicBoomDistancePolicy {
+	readonly initial: number;
+	readonly minimum: number;
+	readonly maximum: number;
+}
+
 /** Injectable command boundary; fixed-tick delivery remains owned by the entity session. */
 export interface HostKinematicBoomTransport {
 	invoke(command: string, args?: Record<string, unknown>): Promise<unknown>;
@@ -94,11 +101,11 @@ export class HostKinematicBoomSession {
 	/** Replace any prior generation and register against one exact current possession. */
 	async start(
 		target: HostKinematicBoomTarget,
-		initialReach: number,
+		distance: HostKinematicBoomDistancePolicy,
 		viewDirection: readonly [number, number, number],
 	): Promise<void> {
 		validateTarget(target);
-		validateReach(initialReach);
+		validateDistancePolicy(distance);
 		validateDirection(viewDirection);
 		const revision = ++this.#lifecycleRevision;
 		const previous = this.#identity;
@@ -118,7 +125,9 @@ export class HostKinematicBoomSession {
 						possessionGeneration: target.possessionGeneration,
 						guid: target.guid,
 						entityGeneration: target.entityGeneration,
-						initialReach,
+						initialReach: distance.initial,
+						minimumReach: distance.minimum,
+						maximumReach: distance.maximum,
 						inputSequence: 0,
 						viewDirection,
 						cumulativeZoomDisplacement: 0,
@@ -440,9 +449,20 @@ function validateTarget(target: HostKinematicBoomTarget): void {
 	}
 }
 
-function validateReach(reach: number): void {
-	if (!Number.isFinite(reach))
-		throw new Error("Boom initial reach must be finite.");
+function validateDistancePolicy(policy: HostKinematicBoomDistancePolicy): void {
+	if (
+		!Number.isFinite(policy.minimum) ||
+		policy.minimum < 0 ||
+		!Number.isFinite(policy.maximum) ||
+		policy.maximum < policy.minimum ||
+		!Number.isFinite(policy.initial) ||
+		policy.initial < policy.minimum ||
+		policy.initial > policy.maximum
+	) {
+		throw new Error(
+			"Boom distance policy requires finite ordered bounds containing the initial distance.",
+		);
+	}
 }
 
 function validateDirection(direction: readonly [number, number, number]): void {

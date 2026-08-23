@@ -15,6 +15,7 @@ const TARGET = {
 	entityGeneration: 2,
 } as const;
 const IDENTITY = { ...TARGET, boomGeneration: 4 } as const;
+const DISTANCE = { initial: 4.5, minimum: 1.2, maximum: 8 } as const;
 
 class RecordingTransport implements HostKinematicBoomTransport {
 	readonly calls: Array<{
@@ -79,7 +80,7 @@ function advance(
 			},
 			diagnostics: {
 				controlLegs: 1,
-				radialCasts: 1,
+				clearanceSweeps: 1,
 				transitSubsteps: 1,
 				contactPasses: 0,
 			},
@@ -94,11 +95,11 @@ function failure(identity: HostKinematicBoomIdentity = IDENTITY) {
 			kind: "failed",
 			...identity,
 			sequence: 1,
-			failure: "control-leg-budget",
+			failure: "clearance-sweep",
 			held: pathPoint(12, 0xda550177),
 			diagnostics: {
 				controlLegs: 1,
-				radialCasts: 0,
+				clearanceSweeps: 0,
 				transitSubsteps: 0,
 				contactPasses: 0,
 			},
@@ -124,7 +125,7 @@ function reseed(sequence: number, x: number) {
 			reason: "placement-recovery",
 			diagnostics: {
 				controlLegs: 2,
-				radialCasts: 4,
+				clearanceSweeps: 4,
 				transitSubsteps: 2,
 				contactPasses: 2,
 			},
@@ -134,12 +135,34 @@ function reseed(sequence: number, x: number) {
 }
 
 describe("HostKinematicBoomSession", () => {
+	it("registers the complete distance policy with the host", async () => {
+		const transport = new RecordingTransport();
+		const session = new HostKinematicBoomSession(transport);
+
+		await session.start(TARGET, DISTANCE, [0, 1, 0]);
+
+		expect(transport.calls[0]).toEqual({
+			command: "start_kinematic_boom",
+			args: {
+				request: {
+					...TARGET,
+					initialReach: 4.5,
+					minimumReach: 1.2,
+					maximumReach: 8,
+					inputSequence: 0,
+					viewDirection: [0, 1, 0],
+					cumulativeZoomDisplacement: 0,
+				},
+			},
+		});
+	});
+
 	it("retains a first path received before registration and samples from the shared receipt", async () => {
 		const registration = deferred<HostKinematicBoomIdentity>();
 		const transport = new RecordingTransport();
 		transport.startResponse = registration.promise;
 		const session = new HostKinematicBoomSession(transport);
-		const started = session.start(TARGET, 4.5, [0, 1, 0]);
+		const started = session.start(TARGET, DISTANCE, [0, 1, 0]);
 
 		session.receive(advance(1), 32, 100);
 		registration.resolve(IDENTITY);
@@ -159,7 +182,7 @@ describe("HostKinematicBoomSession", () => {
 		const transport = new RecordingTransport();
 		transport.startResponse = registration.promise;
 		const session = new HostKinematicBoomSession(transport);
-		const started = session.start(TARGET, 4.5, [0, 1, 0]);
+		const started = session.start(TARGET, DISTANCE, [0, 1, 0]);
 
 		await session.setIntent([0, 1, 0], 0.75);
 		registration.resolve(IDENTITY);
@@ -189,7 +212,7 @@ describe("HostKinematicBoomSession", () => {
 
 	it("bounds fixed playback to current and successor and restarts from newest explicit input", async () => {
 		const session = new HostKinematicBoomSession(new RecordingTransport());
-		await session.start(TARGET, 4.5, [0, 1, 0]);
+		await session.start(TARGET, DISTANCE, [0, 1, 0]);
 		session.receive(advance(1, 10, 11), 32, 100);
 		const firstX = session.presentation(100)!.placement.position.x;
 		session.receive(advance(2, 11, 12), 32, 101);
@@ -207,7 +230,7 @@ describe("HostKinematicBoomSession", () => {
 
 	it("flushes interpolation history and snaps to an explicit host reseed", async () => {
 		const session = new HostKinematicBoomSession(new RecordingTransport());
-		await session.start(TARGET, 4.5, [0, 1, 0]);
+		await session.start(TARGET, DISTANCE, [0, 1, 0]);
 		session.receive(advance(1, 10, 11), 32, 100);
 		session.receive(advance(2, 11, 12), 32, 101);
 		session.receive(reseed(3, 50), 32, 102);
@@ -233,7 +256,7 @@ describe("HostKinematicBoomSession", () => {
 	it("ignores stale identities, holds one terminal safe pose, and stops exactly", async () => {
 		const transport = new RecordingTransport();
 		const session = new HostKinematicBoomSession(transport);
-		await session.start(TARGET, 4.5, [0, 1, 0]);
+		await session.start(TARGET, DISTANCE, [0, 1, 0]);
 		const stale = { ...IDENTITY, boomGeneration: 3 };
 		session.receive(advance(1, 100, 101, stale), 32, 0);
 		expect(session.presentation(0)).toBeNull();
@@ -244,7 +267,7 @@ describe("HostKinematicBoomSession", () => {
 		expect(session.presentation(1_000)).toEqual(held);
 		expect(session.status()).toMatchObject({
 			kind: "failed",
-			failure: "control-leg-budget",
+			failure: "clearance-sweep",
 		});
 
 		await session.stop();

@@ -29,6 +29,7 @@ const PROPERTY_DID_EYES_PALETTE: u16 = 16;
 const PROPERTY_DID_SKIN_PALETTE: u16 = 17;
 const PROPERTY_DID_HEAD_OBJECT: u16 = 18;
 
+const PROPERTY_FLOAT_SHADE: u16 = 12;
 const PROPERTY_FLOAT_MAXIMUM_VELOCITY: u16 = 26;
 const PROPERTY_FLOAT_ROTATION_SPEED: u16 = 27;
 const PROPERTY_FLOAT_DEFAULT_SCALE: u16 = 39;
@@ -42,6 +43,7 @@ const PROPERTY_INT_CLOTHING_PRIORITY: u16 = 4;
 const PROPERTY_INT_VALID_LOCATIONS: u16 = 9;
 const PROPERTY_INT_GENDER: u16 = 113;
 const PROPERTY_INT_HERITAGE_GROUP: u16 = 188;
+const PROPERTY_INT_PALETTE_TEMPLATE: u16 = 3;
 const PROPERTY_STRING_NAME: u16 = 1;
 const PROPERTY_STRING_SEX: u16 = 3;
 const PROPERTY_STRING_HERITAGE_GROUP_NAME: u16 = 4;
@@ -190,13 +192,13 @@ fn load_rows(connection: &mut Conn) -> Result<AceWorldRows> {
             .context("could not query ACE table weenie_properties_d_i_d")?,
         floats: connection
             .query_map(
-                "SELECT object_Id, type, value FROM weenie_properties_float WHERE type IN (26, 27, 39, 78, 79) ORDER BY object_Id, type",
+                "SELECT object_Id, type, value FROM weenie_properties_float WHERE type IN (12, 26, 27, 39, 78, 79) ORDER BY object_Id, type",
                 |(wcid, property_type, value)| ScalarRow { wcid, property_type, value },
             )
             .context("could not query ACE table weenie_properties_float")?,
         ints: connection
             .query_map(
-                "SELECT object_Id, type, value FROM weenie_properties_int WHERE type IN (1, 4, 9, 46, 93, 113, 188) ORDER BY object_Id, type",
+                "SELECT object_Id, type, value FROM weenie_properties_int WHERE type IN (1, 3, 4, 9, 46, 93, 113, 188) ORDER BY object_Id, type",
                 |(wcid, property_type, value)| ScalarRow { wcid, property_type, value },
             )
             .context("could not query ACE table weenie_properties_int")?,
@@ -355,6 +357,7 @@ fn project_rows(rows: AceWorldRows) -> std::result::Result<Vec<WeenieTemplate>, 
             PROPERTY_FLOAT_DEFAULT_SCALE => ("default_scale", &mut template.default_scale),
             PROPERTY_FLOAT_FRICTION => ("friction", &mut template.friction),
             PROPERTY_FLOAT_ELASTICITY => ("elasticity", &mut template.elasticity),
+            PROPERTY_FLOAT_SHADE => ("appearance.shade", &mut template.appearance.shade),
             property_type => {
                 return Err(ProjectionError::UnexpectedProperty {
                     wcid: row.wcid,
@@ -376,6 +379,25 @@ fn project_rows(rows: AceWorldRows) -> std::result::Result<Vec<WeenieTemplate>, 
                     row.wcid,
                     "weenie_properties_int",
                     "physics.base_mask",
+                )?;
+            }
+            PROPERTY_INT_PALETTE_TEMPLATE => {
+                // A `PaletteTemplate` is a CLO table key, never negative; a negative one would be
+                // authored corruption rather than an absent property.
+                let value =
+                    u32::try_from(row.value).map_err(|_| ProjectionError::ValueOutOfRange {
+                        wcid: row.wcid,
+                        table: "weenie_properties_int",
+                        field: "appearance.palette_template",
+                        value: row.value.unsigned_abs().into(),
+                        target: "u32",
+                    })?;
+                set_once(
+                    &mut template.appearance.palette_template,
+                    value,
+                    row.wcid,
+                    "weenie_properties_int",
+                    "appearance.palette_template",
                 )?;
             }
             PROPERTY_INT_ITEM_TYPE => set_once(
@@ -774,6 +796,16 @@ mod tests {
             property_type: PROPERTY_BOOL_IS_FROZEN,
             value: 0,
         });
+        rows.ints.push(ScalarRow {
+            wcid: 42,
+            property_type: PROPERTY_INT_PALETTE_TEMPLATE,
+            value: 61,
+        });
+        rows.floats.push(ScalarRow {
+            wcid: 42,
+            property_type: PROPERTY_FLOAT_SHADE,
+            value: 0.5,
+        });
         rows.palettes.extend([
             PaletteRow {
                 wcid: 42,
@@ -796,7 +828,32 @@ mod tests {
         assert_eq!(template.physics.base_mask, Some(u32::MAX));
         assert_eq!(template.physics.overrides.frozen, Some(false));
         assert_eq!(template.appearance.default_combat_style, Some(2));
+        assert_eq!(template.appearance.palette_template, Some(61));
+        assert_eq!(template.appearance.shade, Some(0.5));
         assert_eq!(template.sub_palettes[0].sub_palette_did, 1);
+    }
+
+    /// A `PaletteTemplate` is a CLO table key. A negative one is authored corruption, and must be
+    /// reported rather than folded into an absent property or wrapped into a huge key.
+    #[test]
+    fn negative_palette_template_is_rejected_naming_the_field() {
+        let mut rows = base_rows();
+        rows.ints.push(ScalarRow {
+            wcid: 42,
+            property_type: PROPERTY_INT_PALETTE_TEMPLATE,
+            value: -3,
+        });
+
+        let error = project_rows(rows).unwrap_err();
+
+        assert!(matches!(
+            error,
+            ProjectionError::ValueOutOfRange {
+                wcid: 42,
+                field: "appearance.palette_template",
+                ..
+            }
+        ));
     }
 
     #[test]

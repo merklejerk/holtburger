@@ -46,6 +46,8 @@ fn template(wcid: u32) -> WeenieTemplate {
             default_combat_style: Some(2),
             clothing_priority: Some(65_536),
             valid_locations: Some(384),
+            palette_template: Some(61),
+            shade: Some(0.5),
         },
         wielded: vec![
             WieldEntry {
@@ -178,6 +180,8 @@ fn absent_zero_and_false_survive_round_trip_distinctly() {
     absent.appearance.default_combat_style = None;
     absent.appearance.clothing_priority = None;
     absent.appearance.sex = None;
+    absent.appearance.palette_template = None;
+    absent.appearance.shade = None;
     let mut explicit = template(2);
     explicit.physics.base_mask = Some(0);
     explicit.physics.overrides.frozen = Some(false);
@@ -188,6 +192,8 @@ fn absent_zero_and_false_survive_round_trip_distinctly() {
     explicit.appearance.default_combat_style = Some(0);
     explicit.appearance.clothing_priority = Some(0);
     explicit.appearance.sex = Some(String::new());
+    explicit.appearance.palette_template = Some(0);
+    explicit.appearance.shade = Some(0.0);
 
     write_catalog_atomic(&path, "ACE-World-test", &[absent, explicit]).unwrap();
 
@@ -207,11 +213,15 @@ fn absent_zero_and_false_survive_round_trip_distinctly() {
     assert_eq!(absent.appearance.default_combat_style, None);
     assert_eq!(absent.appearance.clothing_priority, None);
     assert_eq!(absent.appearance.sex, None);
+    assert_eq!(absent.appearance.palette_template, None);
+    assert_eq!(absent.appearance.shade, None);
     assert_eq!(explicit.appearance.skin_palette_did, Some(0));
     assert_eq!(explicit.appearance.heritage_group, Some(0));
     assert_eq!(explicit.appearance.default_combat_style, Some(0));
     assert_eq!(explicit.appearance.clothing_priority, Some(0));
     assert_eq!(explicit.appearance.sex.as_deref(), Some(""));
+    assert_eq!(explicit.appearance.palette_template, Some(0));
+    assert_eq!(explicit.appearance.shade, Some(0.0));
 }
 
 /// Wielded entries are positional: probability grouping depends on source order, so the codec

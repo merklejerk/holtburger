@@ -7,8 +7,45 @@ use crate::polygon_geometry::{RenderAabb, RenderVec3, ac_to_render};
 
 /// Retail's portal-plane side tolerance, shared by projection and later portal queries.
 pub const PORTAL_PLANE_EPSILON: f32 = 0.0002;
-/// Source-planarity tolerance covering retail-constructed planes in the audited canonical archive.
-pub const PORTAL_SOURCE_PLANARITY_EPSILON: f32 = 0.0005;
+
+/// Budget for authored slop between a portal polygon's vertices and its own averaged plane.
+///
+/// Retail never validates this: `CPolygon::make_plane` (`acclient.c:344776`) builds the averaged
+/// plane and clips against it unconditionally. We validate anyway so a malformed decode fails
+/// loudly rather than producing a silently wrong aperture, which means the budget has to admit
+/// every polygon the shipped archive actually authors.
+///
+/// Sized against the complete authored population rather than a sample. Across all 772
+/// Environments in the unpruned portal namespace, 7,997 CellStruct portal polygons deviate by at
+/// most `0.0025`; 7,993 of them stay under `0.0005`. The four outliers are all in Environment
+/// `0x0D000573`, whose two diagonal apertures place one quad corner at `x = -8.15` while the other
+/// three sit at `x = -8.14` — a one-centimetre authoring typo in cells roughly ten metres across.
+/// The separate 910-piece GfxObj building aperture census peaks at `0.00039577`. This value leaves
+/// roughly 2x headroom over the worst authored case and still sits far below any deviation a
+/// player could observe.
+///
+/// An earlier `0.0005` was sized from the building census alone and then applied to CellStruct
+/// portals, which rejected every cell of Environment `0x0D000573` outright.
+pub const PORTAL_SOURCE_PLANARITY_EPSILON: f32 = 0.005;
+
+/// Float rounding a rigid placement can accumulate on a plane-distance evaluation.
+///
+/// Landblock-space coordinates reach the low hundreds, where one f32 ulp is about `3.05e-5`, and a
+/// rotate-translate-then-dot chain accumulates a handful of them. Measured across all 1,353,166
+/// placed portal instances in the archive's 542,275 indoor cells, the worst deviation an authored
+/// aperture gained by being placed was `0.00012207` — exactly four of those ulps. Only 33 instances
+/// exceeded `0.0001` and none reached `0.0002`. This budget keeps roughly 4x headroom over that
+/// worst case while staying an order of magnitude under the authored budget, so transform drift can
+/// never mask a genuinely malformed polygon.
+const PORTAL_TRANSFORM_ROUNDING_EPSILON: f32 = 0.0005;
+
+/// Budget for a placed aperture's vertices against its transformed plane.
+///
+/// A rigid placement preserves planar deviation, so an aperture carries its authored slop through
+/// the transform and may exceed it only by rounding. Deriving the total keeps this check from
+/// silently re-litigating the authored budget.
+pub const PORTAL_TRANSFORM_COPLANARITY_EPSILON: f32 =
+    PORTAL_SOURCE_PLANARITY_EPSILON + PORTAL_TRANSFORM_ROUNDING_EPSILON;
 
 /// One material-free authored portal aperture in renderer coordinates.
 #[derive(Debug, Clone, PartialEq)]
@@ -156,8 +193,8 @@ pub fn transform_aperture(
     };
     for (offset, position) in positions.iter().copied().enumerate() {
         ensure!(
-            plane_distance(plane, position).abs() <= PORTAL_SOURCE_PLANARITY_EPSILON,
-            "transformed portal vertex {offset} is not coplanar within {PORTAL_SOURCE_PLANARITY_EPSILON}"
+            plane_distance(plane, position).abs() <= PORTAL_TRANSFORM_COPLANARITY_EPSILON,
+            "transformed portal vertex {offset} is not coplanar within {PORTAL_TRANSFORM_COPLANARITY_EPSILON}"
         );
     }
     Ok(PortalAperture {
@@ -320,17 +357,45 @@ mod tests {
 
     #[test]
     fn rejects_non_coplanar_aperture() {
+        // The averaged plane splits one lifted corner across all four vertices, so the resulting
+        // deviation is a quarter of the lift. Scale the lift off the budget itself to keep this
+        // test honest if the census ever moves the constant.
+        let lift = PORTAL_SOURCE_PLANARITY_EPSILON * 20.0;
         let positions = [
             Vector3::new(0.0, 0.0, 0.0),
             Vector3::new(1.0, 0.0, 0.0),
             Vector3::new(1.0, 1.0, 0.0),
-            Vector3::new(0.0, 1.0, 0.01),
+            Vector3::new(0.0, 1.0, lift),
         ];
 
         let error = build_portal_aperture(&vertex_array(&positions), 4, &polygon(positions.len()))
             .unwrap_err();
 
         assert!(error.to_string().contains("maximum planar deviation"));
+    }
+
+    /// Environment `0x0D000573` CellStruct `0x0002` polygon `7`, the worst-deviating portal polygon
+    /// in the shipped archive: one quad corner authored at `x = -8.15` against three at `x = -8.14`.
+    /// It is the case that sized `PORTAL_SOURCE_PLANARITY_EPSILON`, so it is also the case that
+    /// must keep projecting.
+    #[test]
+    fn accepts_worst_authored_planar_deviation() {
+        let positions = [
+            Vector3::new(-8.15, -8.07, 3.66),
+            Vector3::new(-8.14, -8.07, 1.15484e-9),
+            Vector3::new(-8.14, -10.67, -1.53892e-7),
+            Vector3::new(-8.14, -10.67, 3.66),
+        ];
+        let vertices = vertex_array(&positions);
+
+        let deviation =
+            portal_planarity_deviation(&vertices, 7, &polygon(positions.len())).unwrap();
+        let aperture = build_portal_aperture(&vertices, 7, &polygon(positions.len())).unwrap();
+
+        // Above the tolerance the building-aperture census produced, and inside the archive-wide one.
+        assert!(deviation > 0.0005, "unexpected deviation {deviation}");
+        assert!(deviation <= PORTAL_SOURCE_PLANARITY_EPSILON);
+        assert_eq!(aperture.positions.len(), 4);
     }
 
     #[test]

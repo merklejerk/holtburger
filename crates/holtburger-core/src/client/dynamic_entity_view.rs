@@ -95,6 +95,7 @@ pub fn project_client_dynamic_entity(
         object_scale,
         physics: entity.physics,
         placement,
+        playing_clip: world.motion_runtimes.playing_clip(guid),
     }))
 }
 
@@ -251,6 +252,7 @@ mod tests {
                     participation: PhysicalBodyParticipation::PoseOnly,
                 }),
             },
+            world.motion_runtimes.playing_clip(guid),
         ));
 
         assert_eq!(client, explorer);

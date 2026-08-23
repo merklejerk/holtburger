@@ -164,7 +164,6 @@ describe("DynamicEntityPlacementSystem", () => {
 function advance(startX: number, endX: number): DynamicEntityAdvance {
 	const entity = dynamicEntity(endX);
 	return {
-		clip: null,
 		entity,
 		kind: "integrated",
 		path: {
@@ -190,6 +189,7 @@ function dynamicEntity(
 ): DynamicEntityView & { placement: DynamicEntityWorldPlacement } {
 	return {
 		generation: 1,
+		playingClip: null,
 		identity: { guid: 1, name: "Entity", wcid: 1 },
 		physics: {
 			cloaked: false,

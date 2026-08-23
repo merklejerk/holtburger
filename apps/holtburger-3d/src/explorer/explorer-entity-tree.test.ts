@@ -72,6 +72,7 @@ function attached(guid: number, parent: number): DynamicEntityView {
 function base(guid: number): Omit<DynamicEntityView, "placement"> {
 	return {
 		generation: 1,
+		playingClip: null,
 		identity: { guid, wcid: 42, name: "Entity" },
 		presentation: {
 			content: {

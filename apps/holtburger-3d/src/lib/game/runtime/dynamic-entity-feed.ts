@@ -138,6 +138,26 @@ const dynamicEntityPlacementSchema = z.discriminatedUnion("kind", [
 		.strict(),
 ]);
 
+/**
+ * The clip the host has an entity playing, projected for presentation.
+ *
+ * Narrow on purpose: the frontend advances within this clip's window at render rate, obeys the
+ * host-derived terminal behavior, and never chooses the next clip. Which clip follows is link
+ * resolution against host state the frontend does not have, so a successor arrives only as a
+ * later view.
+ *
+ * There is no frame number. Host and frontend both advance by `framerate * dt`, so a phase offset
+ * never accumulates, and entering a clip re-anchors both at the same frame regardless.
+ */
+const dynamicEntityPlayingClipSchema = z.object({
+	animationId: guid,
+	completion: z.enum(["hold", "loop"]),
+	/** Negative plays the window backwards; zero holds. */
+	framerate: finiteNumber,
+	highFrame: z.number().int(),
+	lowFrame: z.number().int(),
+});
+
 const dynamicEntityViewSchema = z.object({
 	generation: nonNegativeInteger,
 	identity: z.object({
@@ -167,6 +187,14 @@ const dynamicEntityViewSchema = z.object({
 		defaultScript: z.boolean(),
 	}),
 	placement: dynamicEntityPlacementSchema,
+	/**
+	 * Clip this entity is playing right now, or `null` when it animates nothing.
+	 *
+	 * A level, not an edge: every view states the current clip, so an entity realized late — or
+	 * re-realized from a snapshot — starts playing without having witnessed the transition that
+	 * selected it. Applying it is idempotent; swap only when it differs from what is playing.
+	 */
+	playingClip: dynamicEntityPlayingClipSchema.nullable(),
 });
 
 const hostTimeSchema = z.object({ seconds: finiteNumber.nonnegative() });
@@ -192,34 +220,7 @@ const dynamicEntityPathSchema = z.object({
 		.nonempty(),
 });
 
-/**
- * The clip the host has an entity playing, projected for presentation.
- *
- * Narrow on purpose: the frontend advances within this clip's window at render rate, obeys the
- * host-derived terminal behavior, and never chooses the next clip. Which clip follows is link
- * resolution against host state the frontend does not have, so a clip change arrives only as a
- * later projection.
- *
- * There is no frame number. Host and frontend both advance by `framerate * dt`, so a phase offset
- * never accumulates, and entering a clip re-anchors both at the same frame regardless.
- */
-const dynamicEntityPlayingClipSchema = z.object({
-	animationId: guid,
-	completion: z.enum(["hold", "loop"]),
-	/** Negative plays the window backwards; zero holds. */
-	framerate: finiteNumber,
-	highFrame: z.number().int(),
-	lowFrame: z.number().int(),
-});
-
 const dynamicEntityAdvanceSchema = z.object({
-	/**
-	 * Present only when the clip changed on this tick.
-	 *
-	 * `null` means "keep playing whatever you have", which covers an unchanged clip, an entity that
-	 * never animated, and a correction that moves without replaying.
-	 */
-	clip: dynamicEntityPlayingClipSchema.nullable(),
 	entity: dynamicEntityViewSchema,
 	kind: z.enum(["integrated", "teleport", "reset"]),
 	path: dynamicEntityPathSchema,

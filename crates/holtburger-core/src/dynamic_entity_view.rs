@@ -2,6 +2,7 @@
 
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, ParentLocation, Placement, Vector3};
+use holtburger_world::motion::{MotionClipCompletion, PlayingMotionClip};
 use holtburger_world::{
     ContactState, EffectiveEntityPhysicsState, EntityAppearance, EntityPlacement,
     PhysicalBodyParticipation, SpatialSampleMode,
@@ -155,11 +156,20 @@ pub struct DynamicEntityViewSource {
     pub physics: EffectiveEntityPhysicsState,
     /// Current mutually exclusive solver state or parent-owned attachment.
     pub placement: EntityPlacement<DynamicEntityWorldProjection>,
+    /// Clip the producer's playback currently has this entity playing.
+    pub playing_clip: Option<PlayingMotionClip>,
 }
 
 impl DynamicEntityViewSource {
     /// Adapts the shared Explorer/body join without leaking producer registry state.
-    pub fn from_projection(generation: u64, input: DynamicEntityProjectionInput) -> Self {
+    ///
+    /// Playback is a third producer alongside semantics and the body, so it arrives beside the
+    /// definition/body join rather than inside it.
+    pub fn from_projection(
+        generation: u64,
+        input: DynamicEntityProjectionInput,
+        playing_clip: Option<PlayingMotionClip>,
+    ) -> Self {
         Self {
             generation,
             identity: DynamicEntityIdentityView {
@@ -172,6 +182,7 @@ impl DynamicEntityViewSource {
             object_scale: input.object_scale,
             physics: input.physics,
             placement: input.placement,
+            playing_clip,
         }
     }
 }
@@ -190,6 +201,14 @@ pub struct DynamicEntityView {
     pub physics: DynamicEntityPhysicsView,
     /// Current canonical placement and kinematics.
     pub placement: DynamicEntityPlacementView,
+    /// Clip this entity is playing right now, or `None` when it animates nothing.
+    ///
+    /// A level, not an edge: every view that reaches a consumer states the current clip, so a
+    /// consumer that realizes an entity late — or re-realizes one from a snapshot — starts it
+    /// playing without having witnessed the transition that selected it. This is the shape the
+    /// retail protocol uses, where `CreateObject` carries `PhysicsDescriptionFlag.Movement` with
+    /// the object's current motion state (`WorldObject_Networking.cs:306`).
+    pub playing_clip: Option<DynamicEntityPlayingClip>,
 }
 
 /// One complete replacement snapshot; no replay history is required to reconstruct it.
@@ -265,22 +284,17 @@ pub struct DynamicEntityAdvance {
     pub kind: DynamicEntityPlacementAdvanceKind,
     /// Host-accepted path evaluated by presentation at render cadence.
     pub path: DynamicEntityPlacedPath,
-    /// Clip the host started playing on this tick, if it changed.
-    ///
-    /// Published on **change**, not every tick: the playing projection changes only at a sequence
-    /// boundary, so a receiver swaps on arrival rather than diffing against what it already holds.
-    /// `None` means "keep playing whatever you have" — including for an entity that never animated.
-    ///
-    /// Deliberately narrow: the receiver advances within this clip's window at render rate and
-    /// obeys its projected completion behavior, but never selects the next clip. Which clip follows
-    /// is link resolution against host state, so a clip change arrives only as a later projection.
-    pub clip: Option<DynamicEntityPlayingClip>,
 }
 
 /// The clip the host has one entity playing, projected for presentation.
 ///
 /// Carries no frame number. Host and receiver both advance by `framerate x dt`, so a phase offset
 /// never accumulates, and entering a clip re-anchors both at the same frame regardless.
+///
+/// Deliberately narrow: the receiver advances within this clip's window at render rate and obeys
+/// its projected completion behavior, but never selects the next clip. Which clip follows is link
+/// resolution against host state the receiver does not have, so a successor arrives only as a
+/// later view.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DynamicEntityPlayingClip {
@@ -294,6 +308,18 @@ pub struct DynamicEntityPlayingClip {
     pub completion: DynamicEntityClipCompletion,
 }
 
+impl From<PlayingMotionClip> for DynamicEntityPlayingClip {
+    fn from(clip: PlayingMotionClip) -> Self {
+        Self {
+            animation_id: clip.animation_id,
+            framerate: clip.framerate,
+            low_frame: clip.low_frame,
+            high_frame: clip.high_frame,
+            completion: clip.completion.into(),
+        }
+    }
+}
+
 /// Presentation behavior when a projected motion clip reaches its far boundary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -302,6 +328,15 @@ pub enum DynamicEntityClipCompletion {
     Hold,
     /// Re-enter the clip because it is part of the authoritative looping tail.
     Loop,
+}
+
+impl From<MotionClipCompletion> for DynamicEntityClipCompletion {
+    fn from(completion: MotionClipCompletion) -> Self {
+        match completion {
+            MotionClipCompletion::Hold => Self::Hold,
+            MotionClipCompletion::Loop => Self::Loop,
+        }
+    }
 }
 
 /// At most one ordered changed-entity publication for one host fixed tick.
@@ -390,6 +425,7 @@ pub fn project_dynamic_entity_view(source: DynamicEntityViewSource) -> DynamicEn
             default_script: presentation.default_script,
         },
         placement,
+        playing_clip: source.playing_clip.map(DynamicEntityPlayingClip::from),
     }
 }
 

@@ -326,6 +326,28 @@ interface SpawnedDynamicPresentationRecord {
 	readonly nodeId: SceneNodeId;
 	readonly ownerId: SpawnedDynamicOwnerId;
 	readonly visualKey: string;
+	/**
+	 * Clip level this presentation last applied, so a restated level is not re-entered.
+	 *
+	 * Mutable because it tracks what this record is doing, not what it is. Every other field
+	 * identifies the record and is fixed for its lifetime.
+	 */
+	playingClip: DynamicEntityPlayingClip | null;
+}
+
+/** Whether two clip levels name the same playback, so restating one changes nothing. */
+function samePlayingClip(
+	current: DynamicEntityPlayingClip | null,
+	next: DynamicEntityPlayingClip,
+): boolean {
+	return (
+		current !== null &&
+		current.animationId === next.animationId &&
+		current.framerate === next.framerate &&
+		current.lowFrame === next.lowFrame &&
+		current.highFrame === next.highFrame &&
+		current.completion === next.completion
+	);
 }
 
 interface CachedDynamicVisual {
@@ -1283,9 +1305,7 @@ export class GameRuntime {
 			this.#spawnedDesiredEntities.set(guid, entity);
 			const installed = this.#spawnedPresentations.get(guid);
 			if (installed?.generation !== entity.generation) continue;
-			this.#applySpawnedPresentationState(installed.nodeId, entity);
-			if (advance.clip !== null)
-				this.#playSpawnedDynamicClip(installed, advance.clip);
+			this.#applySpawnedPresentationState(installed, entity);
 			this.#dynamics.updatePlacementPath(
 				installed.nodeId,
 				advance,
@@ -1296,16 +1316,27 @@ export class GameRuntime {
 	}
 
 	/**
-	 * Swap one entity's rendered clip to the one the host just started playing.
+	 * Swap one entity's rendered clip to the level its latest view states.
 	 *
-	 * The host projects a clip only on change, and the entity's whole motion closure was staged
-	 * before it activated, so this resolves from memory and loads nothing. An unplayable clip was
-	 * already complained about at preparation and simply leaves the current pose in place.
+	 * Idempotent, because a view restates the current level on every tick and re-entering a clip
+	 * would restart it. That is what lets an entity realized late start playing correctly: the
+	 * level is applied at install from whatever view is current, with no transition to have
+	 * witnessed. The entity's whole motion closure was staged before it activated, so this resolves
+	 * from memory and loads nothing. An unplayable clip was already complained about at preparation
+	 * and simply leaves the current pose in place.
+	 *
+	 * A `null` level names an entity with no playback at all, and there is no stop: the host drops
+	 * an entity's playback only along with the entity, so nothing that has played can reach one.
+	 *
+	 * The level is recorded before the clip resolves, so an unplayable one is refused once rather
+	 * than re-attempted on every view that restates it.
 	 */
-	#playSpawnedDynamicClip(
+	#applySpawnedDynamicClip(
 		installed: SpawnedDynamicPresentationRecord,
-		clip: DynamicEntityPlayingClip,
+		clip: DynamicEntityPlayingClip | null,
 	): void {
+		if (clip === null || samePlayingClip(installed.playingClip, clip)) return;
+		installed.playingClip = clip;
 		const animation = this.#dynamics.getMotionClip(
 			installed.nodeId,
 			datAssetId(clip.animationId),
@@ -1340,7 +1371,7 @@ export class GameRuntime {
 					`Dynamic entity ${formatDynamicGuid(guid)} changed immutable visual facts without changing generation.`,
 				);
 			}
-			this.#applySpawnedDynamicState(installedCurrent.nodeId, entity);
+			this.#applySpawnedDynamicState(installedCurrent, entity);
 			return;
 		}
 		const resolved = await visual;
@@ -1368,13 +1399,15 @@ export class GameRuntime {
 			);
 		}
 		activation.commit();
-		this.#spawnedPresentations.set(guid, {
+		const installed: SpawnedDynamicPresentationRecord = {
 			behaviorGeneration: activation.generation,
 			generation: entity.generation,
 			nodeId,
 			ownerId,
 			visualKey,
-		});
+			playingClip: null,
+		};
+		this.#spawnedPresentations.set(guid, installed);
 		if (entity.placement.kind === "attached") {
 			const parent = this.#spawnedPresentations.get(entity.placement.parent);
 			if (!parent) {
@@ -1401,17 +1434,21 @@ export class GameRuntime {
 				`Dynamic entity ${formatDynamicGuid(guid)} changed generation during synchronous activation commit.`,
 			);
 		}
-		this.#applySpawnedDynamicState(nodeId, latestDesired);
+		this.#applySpawnedDynamicState(installed, latestDesired);
 	}
 
+	/** Apply everything one view says about an installed presentation, placement included. */
 	#applySpawnedDynamicState(
-		nodeId: SceneNodeId,
+		installed: SpawnedDynamicPresentationRecord,
 		entity: DynamicEntityView,
 	): void {
 		if (entity.placement.kind === "world") {
-			this.#dynamics.updatePlacement(nodeId, spawnedDynamicPlacement(entity));
+			this.#dynamics.updatePlacement(
+				installed.nodeId,
+				spawnedDynamicPlacement(entity),
+			);
 		}
-		this.#applySpawnedPresentationState(nodeId, entity);
+		this.#applySpawnedPresentationState(installed, entity);
 	}
 
 	/** Resolve the temporary world placement needed only while an attached visual is staged. */
@@ -1425,16 +1462,24 @@ export class GameRuntime {
 		return this.#dynamics.resolvedRootPlacement(parent.nodeId);
 	}
 
+	/**
+	 * Apply what one view says a presentation should look like and be playing.
+	 *
+	 * Both are levels the view restates every time it arrives, and every path that applies a view
+	 * to an installed presentation goes through here. Keeping them together is what stops a path
+	 * from carrying visibility forward while leaving playback on whatever it happened to catch.
+	 */
 	#applySpawnedPresentationState(
-		nodeId: SceneNodeId,
+		installed: SpawnedDynamicPresentationRecord,
 		entity: DynamicEntityView,
 	): void {
-		this.#dynamics.updatePresentationState(nodeId, {
+		this.#dynamics.updatePresentationState(installed.nodeId, {
 			cloaked: entity.physics.cloaked,
 			hidden: entity.physics.hidden,
 			lighting: entity.physics.lighting,
 			noDraw: entity.physics.noDraw,
 		});
+		this.#applySpawnedDynamicClip(installed, entity.playingClip);
 	}
 
 	#retainSpawnedVisual(

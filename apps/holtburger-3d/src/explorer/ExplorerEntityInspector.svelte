@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { DynamicEntityView } from "../lib/game/runtime/dynamic-entity-feed";
-	import type { HostKinematicBoomStatus } from "./host-kinematic-boom-session";
+	import type { HostKinematicBoomStatus } from "../lib/game/camera/host-kinematic-boom-session";
 	import {
 		explorerEntityOperationTargets,
 		explorerEntitySelection,
@@ -132,7 +132,11 @@
 			status.recovery === null
 				? ""
 				: `; ${status.recovery.kind} ${status.recovery.reason}`;
-		return `generation ${status.identity.boomGeneration}; path ${status.sequence}; ${status.targetSphereRole}; reach ${status.renderedReach.toFixed(2)}/${status.desiredReach.toFixed(2)}m; radius ${status.effectiveCameraRadius.toFixed(2)}m; dropped ${status.droppedPaths}${recovery}`;
+		const clearance =
+			status.clearance === null
+				? "clearance awaiting initial proof"
+				: `projection ${status.clearance.projectionRevision}; radius ${status.clearance.radius.toFixed(2)}m`;
+		return `generation ${status.identity.boomGeneration}; path ${status.sequence}; ${status.targetSphereRole}; reach ${status.renderedReach.toFixed(2)}/${status.desiredReach.toFixed(2)}m; ${clearance}; dropped ${status.droppedPaths}${recovery}`;
 	}
 
 	function motionStyleName(style: number): MotionStyleName | null {

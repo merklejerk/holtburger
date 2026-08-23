@@ -6,11 +6,11 @@ use anyhow::{Context, Result, ensure};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion, Vector3};
 use holtburger_core::{
-    KinematicBoomAdvance, KinematicBoomCollisionSeed, KinematicBoomController,
-    KinematicBoomDiagnostics, KinematicBoomHoldReason, KinematicBoomIntent,
-    KinematicBoomIntentAcceptance, KinematicBoomOutcome, KinematicBoomPlacement,
-    KinematicBoomProfile, KinematicBoomProfileDefinition, KinematicBoomReseedReason,
-    KinematicBoomTargetSample,
+    KinematicBoomAdvance, KinematicBoomClearance, KinematicBoomController,
+    KinematicBoomDiagnostics, KinematicBoomHoldReason, KinematicBoomIntent, KinematicBoomOutcome,
+    KinematicBoomPlacement, KinematicBoomProfile, KinematicBoomProfileDefinition,
+    KinematicBoomReseedReason, KinematicBoomTargetSample, KinematicBoomTargetSeed,
+    KinematicBoomUpdateAcceptance,
 };
 use holtburger_world::{CellTransitRequest, FreeSphereConfig, PlacedMotionPath};
 use serde::{Deserialize, Serialize};
@@ -25,8 +25,6 @@ use crate::placed_motion_presentation::{
 };
 
 const VISUAL_PIVOT_HEIGHT: f32 = 1.5;
-const NOMINAL_CAMERA_RADIUS: f32 = 0.25;
-
 /// Exact boom, possession, and entity generations carried by every command and output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -73,6 +71,23 @@ pub struct HostKinematicBoomStartRequest {
     pub view_direction: [f32; 3],
     /// Initial cumulative zoom displacement in meters.
     pub cumulative_zoom_displacement: f32,
+    /// Initial frontend-authored projection revision.
+    pub projection_revision: u64,
+    /// Projection-derived eye-centered collision radius.
+    pub clearance_radius: f32,
+}
+
+/// Latest-wins projection clearance targeted to one exact boom ownership tuple.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostKinematicBoomClearanceRequest {
+    /// Exact runtime identity.
+    #[serde(flatten)]
+    pub identity: HostKinematicBoomIdentity,
+    /// Positive frontend-authored projection revision.
+    pub projection_revision: u64,
+    /// Positive projection-derived eye-centered radius.
+    pub clearance_radius: f32,
 }
 
 /// Latest-wins semantic input targeted to one exact boom ownership tuple.
@@ -102,11 +117,30 @@ pub struct HostKinematicBoomStartReceipt {
 /// Result of one generation-targeted semantic input command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum HostKinematicBoomIntentReceipt {
+pub enum HostKinematicBoomUpdateReceipt {
     /// A newer intent replaced the retained semantic direction and zoom total.
     Accepted,
     /// The command did not target the current identity or carry a newer input sequence.
     IgnoredStale,
+}
+
+/// Projection clearance proven by the accompanying camera placement.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostKinematicBoomClearance {
+    /// Exact frontend projection revision acknowledged by the host.
+    pub projection_revision: u64,
+    /// Collision radius committed for that revision.
+    pub radius: f32,
+}
+
+impl From<KinematicBoomClearance> for HostKinematicBoomClearance {
+    fn from(value: KinematicBoomClearance) -> Self {
+        Self {
+            projection_revision: value.revision,
+            radius: value.radius,
+        }
+    }
 }
 
 /// Which accepted target sphere anchors radial collision queries.
@@ -211,12 +245,13 @@ impl From<KinematicBoomHoldReason> for HostKinematicBoomHoldReason {
     }
 }
 
-/// Placement-authoring discontinuity recovered by resetting to the accepted target seed.
+/// Placement-authoring discontinuity recovered at a full-envelope-safe target-adjacent placement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum HostKinematicBoomReseedReason {
     PlacedPath,
     PlacementRecovery,
+    ClearanceRecovery,
 }
 
 impl From<KinematicBoomReseedReason> for HostKinematicBoomReseedReason {
@@ -224,6 +259,7 @@ impl From<KinematicBoomReseedReason> for HostKinematicBoomReseedReason {
         match value {
             KinematicBoomReseedReason::PlacedPath => Self::PlacedPath,
             KinematicBoomReseedReason::PlacementRecovery => Self::PlacementRecovery,
+            KinematicBoomReseedReason::ClearanceRecovery => Self::ClearanceRecovery,
         }
     }
 }
@@ -245,8 +281,8 @@ pub enum HostKinematicBoomTick {
         sequence: u64,
         /// Target sphere selected from the accepted physical body definition.
         target_sphere_role: HostKinematicBoomTargetSphereRole,
-        /// Collision radius, which can shrink but never grow during this boom generation.
-        effective_camera_radius: f32,
+        /// Projection clearance proven by this path, absent only before initial acknowledgement.
+        clearance: Option<HostKinematicBoomClearance>,
         /// Latest operator-requested reach after cumulative zoom and host clamping.
         desired_reach: f32,
         /// Collision-constrained reach committed by the controller for this transaction.
@@ -265,11 +301,11 @@ pub enum HostKinematicBoomTick {
         sequence: u64,
         /// Target sphere selected from the accepted physical body definition.
         target_sphere_role: HostKinematicBoomTargetSphereRole,
-        /// Collision radius, which can shrink but never grow during this boom generation.
-        effective_camera_radius: f32,
+        /// Projection clearance proven by this placement.
+        clearance: Option<HostKinematicBoomClearance>,
         /// Latest operator-requested reach after cumulative zoom and host clamping.
         desired_reach: f32,
-        /// Zero reach committed at the target seed for this discontinuity.
+        /// Reach committed at the recovered full-envelope-safe placement.
         rendered_reach: f32,
         /// One-point path used to present the authoritative reseed placement.
         path: HostKinematicBoomPlacedPath,
@@ -287,8 +323,8 @@ pub enum HostKinematicBoomTick {
         sequence: u64,
         /// Target sphere selected from the latest accepted physical body definition.
         target_sphere_role: HostKinematicBoomTargetSphereRole,
-        /// Collision radius retained by the active generation.
-        effective_camera_radius: f32,
+        /// Projection clearance retained by the active generation, if initialized.
+        clearance: Option<HostKinematicBoomClearance>,
         /// Latest operator-requested reach after cumulative zoom and host clamping.
         desired_reach: f32,
         /// Actual reach of the retained collision-safe camera placement.
@@ -311,10 +347,8 @@ struct ActiveHostKinematicBoom {
     sequence: u64,
     /// Sphere role selected from the latest accepted body definition.
     target_sphere_role: HostKinematicBoomTargetSphereRole,
-    /// Monotonically nonincreasing collision radius.
-    effective_camera_radius: f32,
     /// Last committed collision-seed residency.
-    collision_seed_cell: Option<Guid>,
+    target_seed_cell: Option<Guid>,
 }
 
 #[derive(Default)]
@@ -386,15 +420,13 @@ impl HostKinematicBoomRuntime {
             .context("kinematic boom target has no physical body")?;
         let collision = self.simulation.snapshot();
         let selected = selected_target_sphere(&body)?;
-        let effective_camera_radius = next_effective_camera_radius(NOMINAL_CAMERA_RADIUS, selected);
-        let seed = collision_seed(
+        let seed = target_seed(
             &collision,
             body.pose,
             body.physical
                 .as_ref()
                 .and_then(|physical| physical.response.cell()),
             selected,
-            effective_camera_radius,
         )?;
         let visual_pivot = visual_pivot(body.pose);
         let mut state = self.state.lock().expect("kinematic boom lock poisoned");
@@ -415,6 +447,10 @@ impl HostKinematicBoomRuntime {
             profile,
             visual_pivot,
             seed,
+            KinematicBoomClearance {
+                revision: request.projection_revision,
+                radius: request.clearance_radius,
+            },
             request.initial_reach,
             intent(
                 request.input_sequence,
@@ -427,8 +463,7 @@ impl HostKinematicBoomRuntime {
             controller,
             sequence: 0,
             target_sphere_role: selected.role,
-            effective_camera_radius,
-            collision_seed_cell: seed.placement.cell,
+            target_seed_cell: seed.placement.cell,
         });
         Ok(HostKinematicBoomStartReceipt { identity })
     }
@@ -437,22 +472,47 @@ impl HostKinematicBoomRuntime {
     pub fn set_intent(
         &self,
         request: HostKinematicBoomIntentRequest,
-    ) -> Result<HostKinematicBoomIntentReceipt> {
+    ) -> Result<HostKinematicBoomUpdateReceipt> {
         let mut state = self.state.lock().expect("kinematic boom lock poisoned");
         let Some(active) = state.active.as_mut() else {
-            return Ok(HostKinematicBoomIntentReceipt::IgnoredStale);
+            return Ok(HostKinematicBoomUpdateReceipt::IgnoredStale);
         };
         if active.identity != request.identity {
-            return Ok(HostKinematicBoomIntentReceipt::IgnoredStale);
+            return Ok(HostKinematicBoomUpdateReceipt::IgnoredStale);
         }
         match active.controller.accept_intent(intent(
             request.input_sequence,
             request.view_direction,
             request.cumulative_zoom_displacement,
         ))? {
-            KinematicBoomIntentAcceptance::Accepted => Ok(HostKinematicBoomIntentReceipt::Accepted),
-            KinematicBoomIntentAcceptance::Stale => {
-                Ok(HostKinematicBoomIntentReceipt::IgnoredStale)
+            KinematicBoomUpdateAcceptance::Accepted => Ok(HostKinematicBoomUpdateReceipt::Accepted),
+            KinematicBoomUpdateAcceptance::Stale => {
+                Ok(HostKinematicBoomUpdateReceipt::IgnoredStale)
+            }
+        }
+    }
+
+    /// Replaces the pending projection clearance without disturbing semantic orbit/zoom input.
+    pub fn set_clearance(
+        &self,
+        request: HostKinematicBoomClearanceRequest,
+    ) -> Result<HostKinematicBoomUpdateReceipt> {
+        let mut state = self.state.lock().expect("kinematic boom lock poisoned");
+        let Some(active) = state.active.as_mut() else {
+            return Ok(HostKinematicBoomUpdateReceipt::IgnoredStale);
+        };
+        if active.identity != request.identity {
+            return Ok(HostKinematicBoomUpdateReceipt::IgnoredStale);
+        }
+        match active
+            .controller
+            .request_clearance(KinematicBoomClearance {
+                revision: request.projection_revision,
+                radius: request.clearance_radius,
+            })? {
+            KinematicBoomUpdateAcceptance::Accepted => Ok(HostKinematicBoomUpdateReceipt::Accepted),
+            KinematicBoomUpdateAcceptance::Stale => {
+                Ok(HostKinematicBoomUpdateReceipt::IgnoredStale)
             }
         }
     }
@@ -501,22 +561,19 @@ impl HostKinematicBoomRuntime {
             );
             return Ok(Some(tick));
         };
-        let (samples, selected, radius, final_seed_cell) = match target_samples(
-            target_tick,
-            active.collision_seed_cell,
-            active.effective_camera_radius,
-        ) {
-            Ok(value) => value,
-            Err(error) => {
-                eprintln!("kinematic boom target adaptation failed: {error:#}");
-                let tick = project_hold(
-                    active,
-                    HostKinematicBoomHoldReason::TargetContract,
-                    KinematicBoomDiagnostics::default(),
-                );
-                return Ok(Some(tick));
-            }
-        };
+        let (samples, selected, final_seed_cell) =
+            match target_samples(target_tick, active.target_seed_cell) {
+                Ok(value) => value,
+                Err(error) => {
+                    eprintln!("kinematic boom target adaptation failed: {error:#}");
+                    let tick = project_hold(
+                        active,
+                        HostKinematicBoomHoldReason::TargetContract,
+                        KinematicBoomDiagnostics::default(),
+                    );
+                    return Ok(Some(tick));
+                }
+            };
         let initial_visual_pivot = active.controller.visual_pivot();
         let outcome = match active.controller.advance(
             &target_tick.solved.collision,
@@ -539,8 +596,7 @@ impl HostKinematicBoomRuntime {
             // its previous controller transaction, so advancing only the adapter would manufacture
             // an internally inconsistent recovery baseline.
             active.target_sphere_role = selected;
-            active.effective_camera_radius = radius;
-            active.collision_seed_cell = final_seed_cell;
+            active.target_seed_cell = final_seed_cell;
         }
         let tick = project_outcome(active, initial_visual_pivot, outcome);
         Ok(Some(tick))
@@ -561,6 +617,7 @@ fn project_hold(
         active,
         sequence,
         active.controller.camera(),
+        active.controller.committed_clearance(),
         reason,
         diagnostics,
     )
@@ -570,6 +627,7 @@ fn hold_tick(
     active: &ActiveHostKinematicBoom,
     sequence: u64,
     held: KinematicBoomPlacement,
+    clearance: Option<KinematicBoomClearance>,
     reason: HostKinematicBoomHoldReason,
     diagnostics: KinematicBoomDiagnostics,
 ) -> HostKinematicBoomTick {
@@ -577,7 +635,7 @@ fn hold_tick(
         identity: active.identity,
         sequence,
         target_sphere_role: active.target_sphere_role,
-        effective_camera_radius: active.effective_camera_radius,
+        clearance: clearance.map(Into::into),
         desired_reach: active.controller.desired_reach(),
         rendered_reach: active.controller.rendered_reach(),
         path: stationary_path(held, active.controller.visual_pivot()),
@@ -599,6 +657,7 @@ fn project_outcome(
     match outcome {
         KinematicBoomOutcome::Advanced {
             advance,
+            clearance,
             diagnostics,
         } => match advance {
             KinematicBoomAdvance::Continuous { path } => match serialize_path(
@@ -610,7 +669,7 @@ fn project_outcome(
                     identity: active.identity,
                     sequence,
                     target_sphere_role: active.target_sphere_role,
-                    effective_camera_radius: active.effective_camera_radius,
+                    clearance: clearance.map(Into::into),
                     desired_reach: active.controller.desired_reach(),
                     rendered_reach: active.controller.rendered_reach(),
                     path,
@@ -622,6 +681,7 @@ fn project_outcome(
                         active,
                         sequence,
                         active.controller.camera(),
+                        clearance,
                         HostKinematicBoomHoldReason::PathProjection,
                         diagnostics,
                     )
@@ -632,7 +692,7 @@ fn project_outcome(
                     identity: active.identity,
                     sequence,
                     target_sphere_role: active.target_sphere_role,
-                    effective_camera_radius: active.effective_camera_radius,
+                    clearance: clearance.map(Into::into),
                     desired_reach: active.controller.desired_reach(),
                     rendered_reach: active.controller.rendered_reach(),
                     path: stationary_path(placement, active.controller.visual_pivot()),
@@ -644,8 +704,16 @@ fn project_outcome(
         KinematicBoomOutcome::Held {
             reason,
             held,
+            clearance,
             diagnostics,
-        } => hold_tick(active, sequence, held, reason.into(), diagnostics),
+        } => hold_tick(
+            active,
+            sequence,
+            held,
+            clearance,
+            reason.into(),
+            diagnostics,
+        ),
     }
 }
 
@@ -681,20 +749,19 @@ fn visual_pivot(mut pose: WorldPosition) -> WorldPosition {
     pose
 }
 
-fn collision_seed(
+fn target_seed(
     scene: &holtburger_world::CollisionScene,
     body_pose: WorldPosition,
     previous_cell: Option<Guid>,
     selected: SelectedTargetSphere,
-    camera_radius: f32,
-) -> Result<KinematicBoomCollisionSeed> {
+) -> Result<KinematicBoomTargetSeed> {
     let mut pose = body_pose;
     pose.coords = pose.coords + pose.rotation.rotate_vector(selected.center);
     let placement = scene.transit_cell(CellTransitRequest {
         previous_cell,
         anchor: Guid((pose.landblock_id.0 & 0xffff_0000) | 0xffff),
         center: pose.coords,
-        radius: camera_radius,
+        radius: selected.radius,
     })?;
     let cell = placement.committed_cell();
     if let Some(cell) = cell {
@@ -702,24 +769,20 @@ fn collision_seed(
     } else {
         pose = pose.normalize_outdoor_landblock_frame()?;
     }
-    Ok(KinematicBoomCollisionSeed {
+    Ok(KinematicBoomTargetSeed {
         placement: KinematicBoomPlacement { pose, cell },
-        camera_radius,
     })
 }
 
 fn target_samples(
     tick: &ExplorerEntityPhysicalTick,
     mut seed_cell: Option<Guid>,
-    current_radius: f32,
 ) -> Result<(
     Vec<KinematicBoomTargetSample>,
     HostKinematicBoomTargetSphereRole,
-    f32,
     Option<Guid>,
 )> {
     let selected = selected_target_sphere(&tick.solved.current)?;
-    let radius = next_effective_camera_radius(current_radius, selected);
     let path = &tick.solved.result.motion.path;
     let mut samples = Vec::with_capacity(path.legs().len());
     for leg in path.legs() {
@@ -729,12 +792,12 @@ fn target_samples(
             leg.end_fraction(),
         )?;
         let pose = present_placed_motion_pose(path, leg.end(), rotation)?;
-        let seed = collision_seed(&tick.solved.collision, pose, seed_cell, selected, radius)?;
+        let seed = target_seed(&tick.solved.collision, pose, seed_cell, selected)?;
         seed_cell = seed.placement.cell;
         samples.push(KinematicBoomTargetSample {
             end_fraction: leg.end_fraction(),
             visual_pivot: visual_pivot(pose),
-            collision_seed: seed,
+            target_seed: seed,
         });
     }
     ensure!(
@@ -743,11 +806,7 @@ fn target_samples(
             .is_some_and(|sample| sample.end_fraction == 1.0),
         "possessed target path must be nonempty and normalized"
     );
-    Ok((samples, selected.role, radius, seed_cell))
-}
-
-fn next_effective_camera_radius(current_radius: f32, selected: SelectedTargetSphere) -> f32 {
-    current_radius.min(NOMINAL_CAMERA_RADIUS.min(selected.radius))
+    Ok((samples, selected.role, seed_cell))
 }
 
 fn serialize_path(
@@ -879,24 +938,6 @@ mod tests {
     }
 
     #[test]
-    fn accepted_target_definition_changes_can_only_shrink_camera_radius() {
-        let sphere = |radius| SelectedTargetSphere {
-            role: HostKinematicBoomTargetSphereRole::Primary,
-            center: Vector3::zero(),
-            radius,
-        };
-
-        let initial = next_effective_camera_radius(NOMINAL_CAMERA_RADIUS, sphere(0.20));
-        let after_larger_definition = next_effective_camera_radius(initial, sphere(0.50));
-        let after_smaller_definition =
-            next_effective_camera_radius(after_larger_definition, sphere(0.10));
-
-        assert_eq!(initial, 0.20);
-        assert_eq!(after_larger_definition, initial);
-        assert_eq!(after_smaller_definition, 0.10);
-    }
-
-    #[test]
     fn tick_transport_uses_one_camel_case_app_contract() {
         let value = serde_json::to_value(HostKinematicBoomTick::Advanced {
             identity: HostKinematicBoomIdentity {
@@ -907,7 +948,10 @@ mod tests {
             },
             sequence: 5,
             target_sphere_role: HostKinematicBoomTargetSphereRole::UpperConstraint,
-            effective_camera_radius: 0.2,
+            clearance: Some(HostKinematicBoomClearance {
+                projection_revision: 7,
+                radius: 0.9,
+            }),
             desired_reach: 4.5,
             rendered_reach: 3.75,
             path: HostKinematicBoomPlacedPath {
@@ -924,12 +968,12 @@ mod tests {
 
         assert_eq!(object["kind"], "advanced");
         assert_eq!(object["targetSphereRole"], "upper-constraint");
-        assert!(object.contains_key("effectiveCameraRadius"));
+        assert_eq!(object["clearance"]["projectionRevision"], 7);
+        assert_eq!(object["clearance"]["radius"], f64::from(0.9_f32));
         assert_eq!(object["desiredReach"], 4.5);
         assert_eq!(object["renderedReach"], 3.75);
         assert_eq!(object["path"]["initial"]["position"]["coords"]["x"], 1.0);
         assert_eq!(object["path"]["initial"]["visualPivot"]["coords"]["z"], 6.0);
         assert!(!object.contains_key("target_sphere_role"));
-        assert!(!object.contains_key("effective_camera_radius"));
     }
 }

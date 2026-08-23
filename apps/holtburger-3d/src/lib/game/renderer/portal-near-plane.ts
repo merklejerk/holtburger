@@ -1,5 +1,6 @@
 import type { Camera } from "../runtime/types";
 import { Quat, Vec3 } from "../math/types";
+import { resolveNearPlaneHalfExtents } from "../camera/projection-clearance";
 import {
 	type PlanarAperture,
 	type PlanarAperturePlane,
@@ -55,21 +56,10 @@ export function createCameraNearClipVolume(
 	pose: { readonly position: Vec3; readonly rotation: Quat },
 	aspectRatio: number,
 ): CameraNearClipVolume {
-	if (
-		!Number.isFinite(camera.fov) ||
-		camera.fov <= 0 ||
-		camera.fov >= 180 ||
-		!Number.isFinite(camera.near) ||
-		camera.near <= 0 ||
-		!Number.isFinite(aspectRatio) ||
-		aspectRatio <= 0
-	) {
-		throw new Error(
-			"Camera near-plane projection facts must be finite and positive.",
-		);
-	}
-	const halfHeight = camera.near * Math.tan((camera.fov * Math.PI) / 360);
-	const halfWidth = halfHeight * aspectRatio;
+	const { height: halfHeight, width: halfWidth } = resolveNearPlaneHalfExtents(
+		camera,
+		aspectRatio,
+	);
 	const localCorners = [
 		new Vec3(-halfWidth, -halfHeight, -camera.near),
 		new Vec3(halfWidth, -halfHeight, -camera.near),

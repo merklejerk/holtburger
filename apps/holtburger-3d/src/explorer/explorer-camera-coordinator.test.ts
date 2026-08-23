@@ -4,9 +4,10 @@ import type { GameRuntime } from "../lib/game/runtime/game-runtime";
 import type { SceneAvailabilityEvent } from "../lib/game/runtime/scene-availability";
 import { LandblockLayerKind } from "../lib/game/runtime/scene-interest";
 import type { SceneInterestRadii } from "../lib/game/runtime/types";
+import { createProjectionClearanceRevision } from "../lib/game/camera/projection-clearance";
 import { AABB3, Vec3 } from "../lib/game/math/types";
 import type { ScenePointResidencyCandidates } from "../lib/game/scene";
-import type { FrontendCameraController as FreeFlyCameraController } from "../lib/game/controls/frontend-camera-controller";
+import type { ExplorerCameraInputController as FreeFlyCameraController } from "./explorer-camera-input-controller";
 import { ExplorerCameraCoordinator } from "./explorer-camera-coordinator";
 
 const TEST_RADII: SceneInterestRadii = {
@@ -16,6 +17,11 @@ const TEST_RADII: SceneInterestRadii = {
 	generatedObjectRadius: 0,
 	terrainRadius: 0,
 };
+const TEST_PROJECTION = createProjectionClearanceRevision(
+	1,
+	{ fov: 75, near: 0.5 },
+	{ height: 720, width: 1_280 },
+);
 
 describe("ExplorerCameraCoordinator", () => {
 	it("focuses an explicitly selected valid EnvCell at its contained bounds center", () => {
@@ -109,22 +115,22 @@ describe("ExplorerCameraCoordinator", () => {
 			() => {},
 		);
 
-		coordinator.syncFreeFlyCamera();
+		coordinator.syncFreeFlyCamera(TEST_PROJECTION);
 		expect(setAudioListener).toHaveBeenCalledTimes(1);
 
 		// Off leaves the listener wherever it was rather than moving it somewhere arbitrary.
 		coordinator.setAudioFollowsCamera(false);
-		coordinator.syncFreeFlyCamera();
+		coordinator.syncFreeFlyCamera(TEST_PROJECTION);
 		expect(setAudioListener).toHaveBeenCalledTimes(1);
 
 		coordinator.setAudioFollowsCamera(true);
-		coordinator.syncFreeFlyCamera();
+		coordinator.syncFreeFlyCamera(TEST_PROJECTION);
 		expect(setAudioListener).toHaveBeenCalledTimes(2);
 		coordinator.dispose();
 	});
 
 	it("surfaces overlapping containment as ambiguity without choosing a cell", () => {
-		const setPrimaryCamera = vi.fn();
+		const setPrimaryView = vi.fn();
 		const statuses: string[] = [];
 		const state = {
 			hasManualControl: false,
@@ -151,7 +157,7 @@ describe("ExplorerCameraCoordinator", () => {
 					landblockId: "0x0102ffff",
 				},
 			}),
-			setPrimaryCamera,
+			setPrimaryView,
 		});
 		const coordinator = new ExplorerCameraCoordinator(
 			runtime,
@@ -162,9 +168,9 @@ describe("ExplorerCameraCoordinator", () => {
 			(status) => statuses.push(status),
 		);
 
-		const sync = coordinator.syncFreeFlyCamera();
+		const sync = coordinator.syncFreeFlyCamera(TEST_PROJECTION);
 
-		expect(setPrimaryCamera).not.toHaveBeenCalled();
+		expect(setPrimaryView).not.toHaveBeenCalled();
 		expect(sync).toMatchObject({
 			location: { residency: { kind: "ambiguous" } },
 			renderable: false,
@@ -176,7 +182,7 @@ describe("ExplorerCameraCoordinator", () => {
 	});
 
 	it("uses the host CE94 portal placement instead of overlapping point containment", () => {
-		const setPrimaryCamera = vi.fn();
+		const setPrimaryView = vi.fn();
 		const statuses: string[] = [];
 		const queryWorldPointResidencyCandidates = vi.fn(() => ({
 			envCells: [
@@ -199,7 +205,7 @@ describe("ExplorerCameraCoordinator", () => {
 		const { runtime } = createRuntime({
 			hasEnvCellScope: () => true,
 			queryWorldPointResidencyCandidates,
-			setPrimaryCamera,
+			setPrimaryView,
 		});
 		const coordinator = new ExplorerCameraCoordinator(
 			runtime,
@@ -221,18 +227,24 @@ describe("ExplorerCameraCoordinator", () => {
 			"0xce940108",
 			"0xce940109",
 		] as const) {
-			coordinator.syncPhysicalCamera({
-				position,
-				residency: { envCellId, landblockId: "0xce94ffff" },
-			});
+			coordinator.syncPhysicalCamera(
+				{
+					position,
+					residency: { envCellId, landblockId: "0xce94ffff" },
+				},
+				TEST_PROJECTION,
+			);
 		}
-		const sync = coordinator.syncPhysicalCamera({
-			position,
-			residency: {
-				envCellId: "0xce940109",
-				landblockId: "0xce94ffff",
+		const sync = coordinator.syncPhysicalCamera(
+			{
+				position,
+				residency: {
+					envCellId: "0xce940109",
+					landblockId: "0xce94ffff",
+				},
 			},
-		});
+			TEST_PROJECTION,
+		);
 
 		expect(queryWorldPointResidencyCandidates).not.toHaveBeenCalled();
 		expect(statuses).toEqual([
@@ -253,12 +265,15 @@ describe("ExplorerCameraCoordinator", () => {
 			},
 			renderable: true,
 		});
-		expect(setPrimaryCamera).toHaveBeenCalledWith(
+		expect(setPrimaryView).toHaveBeenCalledWith(
 			expect.objectContaining({
-				placement: expect.objectContaining({
-					envCellId: "0xce940109",
-					landblockId: "0xce94ffff",
+				camera: expect.objectContaining({
+					placement: expect.objectContaining({
+						envCellId: "0xce940109",
+						landblockId: "0xce94ffff",
+					}),
 				}),
+				extent: TEST_PROJECTION.extent,
 			}),
 		);
 		expect(coordinator.presentedPlacement()).toEqual({
@@ -272,12 +287,12 @@ describe("ExplorerCameraCoordinator", () => {
 	});
 
 	it("uses boom-cast residency without re-running ambiguous point containment", () => {
-		const setPrimaryCamera = vi.fn();
+		const setPrimaryView = vi.fn();
 		const queryWorldPointResidencyCandidates = vi.fn();
 		const { runtime } = createRuntime({
 			hasEnvCellScope: () => true,
 			queryWorldPointResidencyCandidates,
-			setPrimaryCamera,
+			setPrimaryView,
 		});
 		const coordinator = new ExplorerCameraCoordinator(
 			runtime,
@@ -304,6 +319,7 @@ describe("ExplorerCameraCoordinator", () => {
 			},
 			1.2,
 			-0.3,
+			TEST_PROJECTION,
 		);
 
 		expect(queryWorldPointResidencyCandidates).not.toHaveBeenCalled();
@@ -321,18 +337,18 @@ describe("ExplorerCameraCoordinator", () => {
 			},
 			renderable: true,
 		});
-		expect(setPrimaryCamera).toHaveBeenCalledOnce();
+		expect(setPrimaryView).toHaveBeenCalledOnce();
 		coordinator.dispose();
 	});
 
 	it("holds an unavailable host EnvCell without falling back to overlap or outdoors", () => {
-		const setPrimaryCamera = vi.fn();
+		const setPrimaryView = vi.fn();
 		const queryWorldPointResidencyCandidates = vi.fn();
 		const statuses: string[] = [];
 		const { runtime } = createRuntime({
 			hasEnvCellScope: () => false,
 			queryWorldPointResidencyCandidates,
-			setPrimaryCamera,
+			setPrimaryView,
 		});
 		const coordinator = new ExplorerCameraCoordinator(
 			runtime,
@@ -348,20 +364,23 @@ describe("ExplorerCameraCoordinator", () => {
 			(status) => statuses.push(status),
 		);
 
-		const sync = coordinator.syncPhysicalCamera({
-			position: sceneVec3(new Vec3(39_576, 22, -28_584)),
-			residency: {
-				envCellId: "0xce940109",
-				landblockId: "0xce94ffff",
+		const sync = coordinator.syncPhysicalCamera(
+			{
+				position: sceneVec3(new Vec3(39_576, 22, -28_584)),
+				residency: {
+					envCellId: "0xce940109",
+					landblockId: "0xce94ffff",
+				},
 			},
-		});
+			TEST_PROJECTION,
+		);
 
 		expect(sync).toMatchObject({
 			location: { residency: { kind: "topology-unavailable" } },
 			renderable: false,
 		});
 		expect(queryWorldPointResidencyCandidates).not.toHaveBeenCalled();
-		expect(setPrimaryCamera).not.toHaveBeenCalled();
+		expect(setPrimaryView).not.toHaveBeenCalled();
 		expect(statuses).toEqual([
 			"Host-selected EnvCell 0xce940109 is unavailable for camera rendering.",
 		]);
@@ -389,17 +408,20 @@ describe("ExplorerCameraCoordinator", () => {
 			(status) => statuses.push(status),
 		);
 
-		expect(coordinator.syncPhysicalCamera(null)).toEqual({
+		expect(coordinator.syncPhysicalCamera(null, TEST_PROJECTION)).toEqual({
 			location: null,
 			renderable: false,
 		});
-		coordinator.syncPhysicalCamera({
-			position: sceneVec3(new Vec3(39_576, 22, -28_584)),
-			residency: {
-				envCellId: "0xce940109",
-				landblockId: "0xce94ffff",
+		coordinator.syncPhysicalCamera(
+			{
+				position: sceneVec3(new Vec3(39_576, 22, -28_584)),
+				residency: {
+					envCellId: "0xce940109",
+					landblockId: "0xce94ffff",
+				},
 			},
-		});
+			TEST_PROJECTION,
+		);
 		expect(queryWorldPointResidencyCandidates).not.toHaveBeenCalled();
 		expect(statuses).toEqual([
 			"Waiting for first host camera placement.",
@@ -409,7 +431,7 @@ describe("ExplorerCameraCoordinator", () => {
 	});
 
 	it("carries the last host residency across the first free-fly frame", () => {
-		const setPrimaryCamera = vi.fn();
+		const setPrimaryView = vi.fn();
 		const queryWorldPointResidencyCandidates = vi.fn(() => ({
 			envCells: [
 				{
@@ -437,7 +459,7 @@ describe("ExplorerCameraCoordinator", () => {
 		const { runtime } = createRuntime({
 			hasEnvCellScope: () => true,
 			queryWorldPointResidencyCandidates,
-			setPrimaryCamera,
+			setPrimaryView,
 		});
 		const coordinator = new ExplorerCameraCoordinator(
 			runtime,
@@ -455,9 +477,9 @@ describe("ExplorerCameraCoordinator", () => {
 			},
 		};
 
-		coordinator.syncPhysicalCamera(placement);
+		coordinator.syncPhysicalCamera(placement, TEST_PROJECTION);
 		coordinator.seedFreeFlyResidency(placement.residency);
-		const handoff = coordinator.syncFreeFlyCamera();
+		const handoff = coordinator.syncFreeFlyCamera(TEST_PROJECTION);
 
 		expect(handoff).toMatchObject({
 			location: {
@@ -470,22 +492,25 @@ describe("ExplorerCameraCoordinator", () => {
 			renderable: true,
 		});
 		expect(queryWorldPointResidencyCandidates).not.toHaveBeenCalled();
-		const laterFreeFly = coordinator.syncFreeFlyCamera();
+		const laterFreeFly = coordinator.syncFreeFlyCamera(TEST_PROJECTION);
 		expect(laterFreeFly.location?.residency.kind).toBe("ambiguous");
 		expect(laterFreeFly.renderable).toBe(true);
 		expect(queryWorldPointResidencyCandidates).toHaveBeenCalledOnce();
-		expect(setPrimaryCamera).toHaveBeenLastCalledWith(
+		expect(setPrimaryView).toHaveBeenLastCalledWith(
 			expect.objectContaining({
-				placement: expect.objectContaining({
-					envCellId: "0xce940109",
+				camera: expect.objectContaining({
+					placement: expect.objectContaining({
+						envCellId: "0xce940109",
+					}),
 				}),
+				extent: TEST_PROJECTION.extent,
 			}),
 		);
 		coordinator.dispose();
 	});
 
 	it("reclassifies an evicted EnvCell camera as outdoor before rendering", () => {
-		const setPrimaryCamera = vi.fn();
+		const setPrimaryView = vi.fn();
 		const state = {
 			hasManualControl: false,
 			pitchRadians: 0,
@@ -506,7 +531,7 @@ describe("ExplorerCameraCoordinator", () => {
 					: [],
 				outdoor: { envCellId: null, landblockId: "0x0102ffff" },
 			}),
-			setPrimaryCamera,
+			setPrimaryView,
 		});
 		const coordinator = new ExplorerCameraCoordinator(
 			runtime,
@@ -517,9 +542,11 @@ describe("ExplorerCameraCoordinator", () => {
 			vi.fn(),
 		);
 
-		expect(coordinator.syncFreeFlyCamera().renderable).toBe(true);
+		expect(coordinator.syncFreeFlyCamera(TEST_PROJECTION).renderable).toBe(
+			true,
+		);
 		envCellResident = false;
-		const sync = coordinator.syncFreeFlyCamera();
+		const sync = coordinator.syncFreeFlyCamera(TEST_PROJECTION);
 
 		expect(sync).toMatchObject({
 			location: {
@@ -534,19 +561,22 @@ describe("ExplorerCameraCoordinator", () => {
 			},
 			renderable: true,
 		});
-		expect(setPrimaryCamera).toHaveBeenLastCalledWith(
+		expect(setPrimaryView).toHaveBeenLastCalledWith(
 			expect.objectContaining({
-				placement: expect.objectContaining({
-					envCellId: null,
-					landblockId: "0x0102ffff",
+				camera: expect.objectContaining({
+					placement: expect.objectContaining({
+						envCellId: null,
+						landblockId: "0x0102ffff",
+					}),
 				}),
+				extent: TEST_PROJECTION.extent,
 			}),
 		);
 		coordinator.dispose();
 	});
 
 	it("does not reuse an evicted last residency when live containment is ambiguous", () => {
-		const setPrimaryCamera = vi.fn();
+		const setPrimaryView = vi.fn();
 		const state = {
 			hasManualControl: false,
 			pitchRadians: 0,
@@ -565,7 +595,7 @@ describe("ExplorerCameraCoordinator", () => {
 				envCells: candidates,
 				outdoor: { envCellId: null, landblockId: "0x0102ffff" },
 			}),
-			setPrimaryCamera,
+			setPrimaryView,
 		});
 		const coordinator = new ExplorerCameraCoordinator(
 			runtime,
@@ -576,7 +606,7 @@ describe("ExplorerCameraCoordinator", () => {
 			vi.fn(),
 		);
 
-		coordinator.syncFreeFlyCamera();
+		coordinator.syncFreeFlyCamera(TEST_PROJECTION);
 		candidates = [
 			{
 				containsPoint: true,
@@ -589,10 +619,10 @@ describe("ExplorerCameraCoordinator", () => {
 				landblockId: "0x0102ffff",
 			},
 		];
-		const sync = coordinator.syncFreeFlyCamera();
+		const sync = coordinator.syncFreeFlyCamera(TEST_PROJECTION);
 
 		expect(sync.renderable).toBe(false);
-		expect(setPrimaryCamera).toHaveBeenCalledOnce();
+		expect(setPrimaryView).toHaveBeenCalledOnce();
 		coordinator.dispose();
 	});
 
@@ -621,7 +651,7 @@ describe("ExplorerCameraCoordinator", () => {
 			TEST_RADII,
 		);
 
-		coordinator.syncFreeFlyCamera();
+		coordinator.syncFreeFlyCamera(TEST_PROJECTION);
 
 		expect(statuses).toEqual([
 			"Waiting for environment-cell topology for initial camera placement.",
@@ -793,7 +823,7 @@ function createRuntime(
 		queryOutdoorTerrainSurface: GameRuntime["queryOutdoorTerrainSurface"];
 		queryWorldPointResidencyCandidates: GameRuntime["queryWorldPointResidencyCandidates"];
 		setAudioListener: GameRuntime["setAudioListener"];
-		setPrimaryCamera: GameRuntime["setPrimaryCamera"];
+		setPrimaryView: GameRuntime["setPrimaryView"];
 		updateSceneInterest: GameRuntime["updateSceneInterest"];
 	}> = {},
 ): {
@@ -816,7 +846,7 @@ function createRuntime(
 				outdoor: { envCellId: null, landblockId: "0x0102ffff" },
 			})),
 		setAudioListener: overrides.setAudioListener ?? vi.fn(),
-		setPrimaryCamera: overrides.setPrimaryCamera ?? vi.fn(),
+		setPrimaryView: overrides.setPrimaryView ?? vi.fn(),
 		subscribeSceneAvailability: (
 			nextListener: (event: SceneAvailabilityEvent) => void,
 		) => {

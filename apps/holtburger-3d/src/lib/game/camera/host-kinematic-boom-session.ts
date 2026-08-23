@@ -1,6 +1,6 @@
 import {
 	decodeHostKinematicBoomIdentity,
-	decodeHostKinematicBoomIntentReceipt,
+	decodeHostKinematicBoomUpdateReceipt,
 	evaluateHostKinematicBoomPath,
 	sameHostKinematicBoomIdentity,
 	type HostKinematicBoomHoldReason,
@@ -8,7 +8,8 @@ import {
 	type HostKinematicBoomReseedReason,
 	type HostKinematicBoomPresentation,
 	type HostKinematicBoomTick,
-} from "../lib/game/motion/host-kinematic-boom-path";
+} from "../motion/host-kinematic-boom-path";
+import type { ProjectionClearanceRevision } from "./projection-clearance";
 
 /** Possessed entity tuple required before the host will create a boom generation. */
 export interface HostKinematicBoomTarget {
@@ -42,7 +43,7 @@ export type HostKinematicBoomStatus =
 			readonly identity: HostKinematicBoomIdentity;
 			readonly sequence: number;
 			readonly targetSphereRole: HostKinematicBoomTick["targetSphereRole"];
-			readonly effectiveCameraRadius: number;
+			readonly clearance: HostKinematicBoomTick["clearance"];
 			readonly desiredReach: number;
 			readonly renderedReach: number;
 			readonly recovery:
@@ -89,6 +90,8 @@ export class HostKinematicBoomSession {
 	#cumulativeZoomDisplacement = 0;
 	#lastSubmittedDirection: readonly [number, number, number] | null = null;
 	#lastSubmittedZoomDisplacement = 0;
+	#lastRequestedProjectionRevision = 0;
+	#projectionRevisions = new Map<number, ProjectionClearanceRevision>();
 
 	constructor(transport: HostKinematicBoomTransport) {
 		this.#transport = transport;
@@ -99,15 +102,19 @@ export class HostKinematicBoomSession {
 		target: HostKinematicBoomTarget,
 		distance: HostKinematicBoomDistancePolicy,
 		viewDirection: readonly [number, number, number],
+		projection: ProjectionClearanceRevision,
 	): Promise<void> {
 		validateTarget(target);
 		validateDistancePolicy(distance);
 		validateDirection(viewDirection);
+		validateProjection(projection);
 		const revision = ++this.#lifecycleRevision;
 		const previous = this.#identity;
 		this.#resetSession();
 		this.#registrationPending = true;
 		this.#lastSubmittedDirection = [...viewDirection];
+		this.#lastRequestedProjectionRevision = projection.revision;
+		this.#projectionRevisions.set(projection.revision, projection);
 		if (previous !== null) {
 			await this.#transport.invoke("stop_kinematic_boom", {
 				request: previous,
@@ -127,6 +134,8 @@ export class HostKinematicBoomSession {
 						inputSequence: 0,
 						viewDirection,
 						cumulativeZoomDisplacement: 0,
+						projectionRevision: projection.revision,
+						clearanceRadius: projection.clearanceRadius,
 					},
 				}),
 			);
@@ -150,6 +159,13 @@ export class HostKinematicBoomSession {
 			}
 			this.#identity = identity;
 			this.#registrationPending = false;
+			const latestProjection = [...this.#projectionRevisions.values()].at(-1);
+			if (
+				latestProjection !== undefined &&
+				latestProjection.revision > projection.revision
+			) {
+				await this.#submitClearance(latestProjection, identity);
+			}
 			const pending = [...this.#preRegistrationOutputs.values()].sort(
 				(left, right) => left.tick.sequence - right.tick.sequence,
 			);
@@ -163,6 +179,54 @@ export class HostKinematicBoomSession {
 			if (revision === this.#lifecycleRevision) this.#resetSession();
 			throw error;
 		}
+	}
+
+	/** Submit a newer projection envelope without coupling it to orbit or zoom sequencing. */
+	async setClearance(projection: ProjectionClearanceRevision): Promise<void> {
+		validateProjection(projection);
+		if (projection.revision <= this.#lastRequestedProjectionRevision) return;
+		this.#lastRequestedProjectionRevision = projection.revision;
+		this.#projectionRevisions.set(projection.revision, projection);
+		const identity = this.#identity;
+		if (identity === null) return;
+		try {
+			await this.#submitClearance(projection, identity);
+		} catch (error) {
+			if (
+				this.#identity !== null &&
+				sameHostKinematicBoomIdentity(this.#identity, identity) &&
+				this.#lastRequestedProjectionRevision === projection.revision
+			) {
+				const activeProjection = this.#activeProjection();
+				this.#lastRequestedProjectionRevision =
+					activeProjection === null ? 0 : activeProjection.revision;
+			}
+			throw error;
+		}
+	}
+
+	async #submitClearance(
+		projection: ProjectionClearanceRevision,
+		identity: HostKinematicBoomIdentity,
+	): Promise<void> {
+		decodeHostKinematicBoomUpdateReceipt(
+			await this.#transport.invoke("set_kinematic_boom_clearance", {
+				request: {
+					...identity,
+					projectionRevision: projection.revision,
+					clearanceRadius: projection.clearanceRadius,
+				},
+			}),
+		);
+	}
+
+	/** Complete frontend projection most recently acknowledged by a host camera path. */
+	acknowledgedProjection(nowMs: number): ProjectionClearanceRevision | null {
+		if (!Number.isFinite(nowMs)) {
+			throw new Error("Boom projection sample time must be finite.");
+		}
+		this.#advancePlayback(nowMs);
+		return this.#activeProjection();
 	}
 
 	/** Detach presentation state first, then stop exactly the generation that was owned. */
@@ -207,7 +271,7 @@ export class HostKinematicBoomSession {
 		this.#lastSubmittedDirection = [...viewDirection];
 		this.#lastSubmittedZoomDisplacement = cumulativeZoomDisplacement;
 		try {
-			decodeHostKinematicBoomIntentReceipt(
+			decodeHostKinematicBoomUpdateReceipt(
 				await this.#transport.invoke("set_kinematic_boom_intent", {
 					request: {
 						...identity,
@@ -285,7 +349,7 @@ export class HostKinematicBoomSession {
 			identity,
 			sequence: latest.sequence,
 			targetSphereRole: latest.targetSphereRole,
-			effectiveCameraRadius: latest.effectiveCameraRadius,
+			clearance: latest.clearance,
 			desiredReach: latest.desiredReach,
 			renderedReach: latest.renderedReach,
 			recovery:
@@ -316,7 +380,17 @@ export class HostKinematicBoomSession {
 	#acceptOutput(received: ReceivedBoomTick): void {
 		const tick = received.tick;
 		this.#latestPath = tick;
+		if (tick.clearance === null) return;
+		const projection = this.#projectionRevisions.get(
+			tick.clearance.projectionRevision,
+		);
+		if (projection === undefined) {
+			throw new Error(
+				`Host acknowledged unknown camera projection revision ${tick.clearance.projectionRevision}.`,
+			);
+		}
 		this.#acceptPath(tick, received.durationMs, received.receivedAtMs);
+		this.#pruneProjectionRevisions();
 	}
 
 	#acceptPath(
@@ -378,6 +452,27 @@ export class HostKinematicBoomSession {
 		this.#activeStartedAtMs += active.durationMs;
 		this.#active = this.#pending;
 		this.#pending = null;
+		this.#pruneProjectionRevisions();
+	}
+
+	#activeProjection(): ProjectionClearanceRevision | null {
+		const clearance = this.#active?.tick.clearance;
+		if (clearance == null) return null;
+		const projection = this.#projectionRevisions.get(
+			clearance.projectionRevision,
+		);
+		return projection === undefined ? null : projection;
+	}
+
+	#pruneProjectionRevisions(): void {
+		const retained = new Set([this.#lastRequestedProjectionRevision]);
+		for (const playback of [this.#active, this.#pending]) {
+			const revision = playback?.tick.clearance?.projectionRevision;
+			if (revision !== undefined) retained.add(revision);
+		}
+		for (const revision of this.#projectionRevisions.keys()) {
+			if (!retained.has(revision)) this.#projectionRevisions.delete(revision);
+		}
 	}
 
 	#boundPreRegistrationOutputs(): void {
@@ -402,6 +497,8 @@ export class HostKinematicBoomSession {
 		this.#cumulativeZoomDisplacement = 0;
 		this.#lastSubmittedDirection = null;
 		this.#lastSubmittedZoomDisplacement = 0;
+		this.#lastRequestedProjectionRevision = 0;
+		this.#projectionRevisions.clear();
 	}
 }
 
@@ -453,6 +550,19 @@ function validateDirection(direction: readonly [number, number, number]): void {
 		Math.hypot(...direction) <= Number.EPSILON
 	) {
 		throw new Error("Boom view direction must be finite and nonzero.");
+	}
+}
+
+function validateProjection(projection: ProjectionClearanceRevision): void {
+	if (
+		!Number.isSafeInteger(projection.revision) ||
+		projection.revision <= 0 ||
+		!Number.isFinite(projection.clearanceRadius) ||
+		projection.clearanceRadius <= 0
+	) {
+		throw new Error(
+			"Boom projection clearance requires a positive revision and radius.",
+		);
 	}
 }
 

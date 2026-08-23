@@ -1,41 +1,9 @@
-/** Positive pixel extent shared by renderer-owned WebGL2 targets. */
-export interface WebGL2RenderExtent {
-	readonly height: number;
-	readonly width: number;
-}
-
 interface WebGL2AllocationBindings {
 	readonly activeTexture: GLenum;
 	readonly activeTextureBinding: WebGLTexture | null;
 	readonly drawFramebuffer: WebGLFramebuffer | null;
 	readonly readFramebuffer: WebGLFramebuffer | null;
 	readonly texture0Binding: WebGLTexture | null;
-}
-
-/** Reject malformed target dimensions before any WebGL state or resource mutation. */
-export function validateWebGL2RenderExtent(
-	extent: WebGL2RenderExtent,
-	owner: string,
-): void {
-	validateWebGL2RenderDimensions(extent.width, extent.height, owner);
-}
-
-/** Validate scalar dimensions without manufacturing an extent record on a hot resize check. */
-export function validateWebGL2RenderDimensions(
-	width: number,
-	height: number,
-	owner: string,
-): void {
-	if (
-		!Number.isSafeInteger(width) ||
-		!Number.isSafeInteger(height) ||
-		width <= 0 ||
-		height <= 0
-	) {
-		throw new Error(
-			`${owner} extent must contain positive integers within the safe range.`,
-		);
-	}
 }
 
 /** Run target allocation without leaking its framebuffer or texture bindings to the caller. */

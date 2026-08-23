@@ -3,9 +3,10 @@
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion, Vector3};
 use holtburger_world::{
-    CollisionScene, FreeSphereConfig, FreeSphereOutcome, FreeSphereRequest, FreeSphereState,
-    MotionWaypoint, MotionWaypointPlacement, PhysicalCollisionFilter, PlacedMotionPath,
-    PlacedMotionPathRequest, StaticSphereSweepRequest, solve_free_sphere,
+    CollisionScene, FreeSphereConfig, FreeSphereOutcome, FreeSphereRequest,
+    FreeSphereSettleOutcome, FreeSphereState, MotionWaypoint, MotionWaypointPlacement,
+    PhysicalCollisionFilter, PlacedMotionPath, PlacedMotionPathRequest, StaticSphereSweepRequest,
+    settle_free_sphere, solve_free_sphere,
 };
 use thiserror::Error;
 
@@ -166,13 +167,20 @@ pub struct KinematicBoomPlacement {
     pub cell: Option<Guid>,
 }
 
-/// Collision-safe target sphere center and the effective camera radius it proves safe.
+/// Accepted target-sphere center used to author radial camera intent.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct KinematicBoomCollisionSeed {
+pub struct KinematicBoomTargetSeed {
     /// Accepted target-sphere center and residency.
     pub placement: KinematicBoomPlacement,
-    /// Effective camera radius proven safe at the seed.
-    pub camera_radius: f32,
+}
+
+/// One validated projection-derived camera collision envelope.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct KinematicBoomClearance {
+    /// Positive monotonic projection revision authored by the camera frontend.
+    pub revision: u64,
+    /// Positive eye-centered radius containing the complete near-plane pyramid.
+    pub radius: f32,
 }
 
 /// One exact target boundary sampled from the accepted possessed-body path.
@@ -183,7 +191,7 @@ pub struct KinematicBoomTargetSample {
     /// Presentation pivot before controller-owned vertical damping.
     pub visual_pivot: WorldPosition,
     /// Accepted target sphere center, distinct from the visual pivot.
-    pub collision_seed: KinematicBoomCollisionSeed,
+    pub target_seed: KinematicBoomTargetSeed,
 }
 
 /// Latest semantic boom input; zoom is the session's signed cumulative displacement in meters.
@@ -197,9 +205,9 @@ pub struct KinematicBoomIntent {
     pub cumulative_zoom_displacement: f32,
 }
 
-/// Whether a semantic command changed the retained latest-wins intent.
+/// Whether a latest-wins boom input changed its independently sequenced state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum KinematicBoomIntentAcceptance {
+pub enum KinematicBoomUpdateAcceptance {
     Accepted,
     Stale,
 }
@@ -215,10 +223,10 @@ pub enum KinematicBoomInputError {
     InvalidInitialReach,
     #[error("kinematic boom target pose must be finite and non-null")]
     InvalidTargetPose,
-    #[error("kinematic boom collision seed radius must be finite and positive")]
-    InvalidCollisionSeedRadius,
-    #[error("kinematic boom collision seed radius may only shrink within a session")]
-    EnlargedCollisionSeedRadius,
+    #[error("kinematic boom projection clearance revision must be positive")]
+    InvalidClearanceRevision,
+    #[error("kinematic boom projection clearance radius must be finite and positive")]
+    InvalidClearanceRadius,
     #[error("kinematic boom tick duration must be finite and positive")]
     InvalidTickDuration,
     #[error("kinematic boom tick requires a non-empty target path ending at one")]
@@ -232,11 +240,13 @@ pub enum KinematicBoomHoldReason {
     FreeSphereQuery,
 }
 
-/// Topology failure that caused a successful discontinuous reset to the target seed.
+/// Failure recovered by a successful discontinuous reset to a full-envelope-safe placement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KinematicBoomReseedReason {
     PlacedPath,
     PlacementRecovery,
+    /// Initial projection clearance was proven away from the unpresented target seed.
+    ClearanceRecovery,
 }
 
 /// Camera motion committed by one successful controller tick.
@@ -244,7 +254,7 @@ pub enum KinematicBoomReseedReason {
 pub enum KinematicBoomAdvance {
     /// Collision-safe motion connected continuously from the prior camera placement.
     Continuous { path: PlacedMotionPath },
-    /// Explicit discontinuity to the latest accepted collision-safe target seed.
+    /// Explicit discontinuity to a full-envelope-safe placement near the latest target seed.
     Reseeded {
         placement: KinematicBoomPlacement,
         reason: KinematicBoomReseedReason,
@@ -269,11 +279,15 @@ pub struct KinematicBoomDiagnostics {
 pub enum KinematicBoomOutcome {
     Advanced {
         advance: KinematicBoomAdvance,
+        /// Projection clearance proven by the published camera placement, if initialized.
+        clearance: Option<KinematicBoomClearance>,
         diagnostics: KinematicBoomDiagnostics,
     },
     Held {
         reason: KinematicBoomHoldReason,
         held: KinematicBoomPlacement,
+        /// Last projection clearance still proven by the held camera placement, if initialized.
+        clearance: Option<KinematicBoomClearance>,
         diagnostics: KinematicBoomDiagnostics,
     },
 }
@@ -284,7 +298,9 @@ pub struct KinematicBoomController {
     profile: KinematicBoomProfile,
     raw_visual_pivot: WorldPosition,
     filtered_visual_pivot: WorldPosition,
-    collision_seed: KinematicBoomCollisionSeed,
+    target_seed: KinematicBoomTargetSeed,
+    requested_clearance: KinematicBoomClearance,
+    committed_clearance: Option<KinematicBoomClearance>,
     desired_reach: f32,
     rendered_reach: f32,
     sampled_view_direction: Vector3,
@@ -293,16 +309,18 @@ pub struct KinematicBoomController {
 }
 
 impl KinematicBoomController {
-    /// Starts at the proven-safe target seed; the first tick authors all camera travel away from it.
+    /// Starts at an accepted target seed that remains unpresentable until the first clearance proof.
     pub fn new(
         profile: KinematicBoomProfile,
         visual_pivot: WorldPosition,
-        collision_seed: KinematicBoomCollisionSeed,
+        target_seed: KinematicBoomTargetSeed,
+        initial_clearance: KinematicBoomClearance,
         initial_reach: f32,
         intent: KinematicBoomIntent,
     ) -> Result<Self, KinematicBoomInputError> {
         validate_pose(visual_pivot)?;
-        validate_seed(collision_seed)?;
+        validate_seed(target_seed)?;
+        validate_clearance(initial_clearance)?;
         let view_direction = validate_direction(intent.view_direction)?;
         if !initial_reach.is_finite() {
             return Err(KinematicBoomInputError::InvalidInitialReach);
@@ -315,7 +333,9 @@ impl KinematicBoomController {
             profile,
             raw_visual_pivot: visual_pivot,
             filtered_visual_pivot: visual_pivot,
-            collision_seed,
+            target_seed,
+            requested_clearance: initial_clearance,
+            committed_clearance: None,
             desired_reach,
             rendered_reach: 0.0,
             sampled_view_direction: view_direction,
@@ -323,17 +343,35 @@ impl KinematicBoomController {
                 view_direction,
                 ..intent
             },
-            camera: collision_seed.placement,
+            camera: target_seed.placement,
         })
+    }
+
+    /// Retains only the latest valid projection-clearance request for this boom session.
+    pub fn request_clearance(
+        &mut self,
+        clearance: KinematicBoomClearance,
+    ) -> Result<KinematicBoomUpdateAcceptance, KinematicBoomInputError> {
+        validate_clearance(clearance)?;
+        if clearance.revision <= self.requested_clearance.revision {
+            return Ok(KinematicBoomUpdateAcceptance::Stale);
+        }
+        self.requested_clearance = clearance;
+        Ok(KinematicBoomUpdateAcceptance::Accepted)
+    }
+
+    /// Projection clearance currently proven by the committed camera placement.
+    pub fn committed_clearance(&self) -> Option<KinematicBoomClearance> {
+        self.committed_clearance
     }
 
     /// Accepts only a newer sequence and consumes its cumulative zoom delta exactly once.
     pub fn accept_intent(
         &mut self,
         intent: KinematicBoomIntent,
-    ) -> Result<KinematicBoomIntentAcceptance, KinematicBoomInputError> {
+    ) -> Result<KinematicBoomUpdateAcceptance, KinematicBoomInputError> {
         if intent.sequence <= self.intent.sequence {
-            return Ok(KinematicBoomIntentAcceptance::Stale);
+            return Ok(KinematicBoomUpdateAcceptance::Stale);
         }
         let view_direction = validate_direction(intent.view_direction)?;
         if !intent.cumulative_zoom_displacement.is_finite() {
@@ -350,7 +388,7 @@ impl KinematicBoomController {
             view_direction,
             ..intent
         };
-        Ok(KinematicBoomIntentAcceptance::Accepted)
+        Ok(KinematicBoomUpdateAcceptance::Accepted)
     }
 
     /// Last collision-safe camera placement committed by the controller.
@@ -380,11 +418,15 @@ impl KinematicBoomController {
         duration_seconds: f32,
         target_samples: &[KinematicBoomTargetSample],
     ) -> Result<KinematicBoomOutcome, KinematicBoomInputError> {
-        validate_tick(
-            duration_seconds,
-            target_samples,
-            self.collision_seed.camera_radius,
-        )?;
+        validate_tick(duration_seconds, target_samples)?;
+        if self.committed_clearance.is_none() {
+            return Ok(self.initialize_clearance(scene));
+        }
+        if self.requested_clearance.radius <= self.clearance_radius() {
+            self.committed_clearance = Some(self.requested_clearance);
+        } else if let Some(outcome) = self.advance_clearance_growth(scene) {
+            return Ok(outcome);
+        }
         let mut staged = self.clone();
         let tick_anchor = owner(self.camera.pose.landblock_id);
         let tick_start = reanchor(self.camera.pose, tick_anchor)?;
@@ -395,7 +437,7 @@ impl KinematicBoomController {
 
         'samples: for sample in target_samples {
             let raw_start = staged.raw_visual_pivot;
-            let seed_start = staged.collision_seed;
+            let seed_start = staged.target_seed;
             let segment_fraction = sample.end_fraction - segment_start_fraction;
             let segment_seconds = duration_seconds * segment_fraction;
             let legs = required_control_legs(ControlLegSpan {
@@ -404,7 +446,7 @@ impl KinematicBoomController {
                 pivot_start: raw_start,
                 pivot_end: sample.visual_pivot,
                 seed_start: seed_start.placement.pose,
-                seed_end: sample.collision_seed.placement.pose,
+                seed_end: sample.target_seed.placement.pose,
                 direction_start: start_direction,
                 direction_end: self.intent.view_direction,
                 tick_fraction: segment_fraction,
@@ -419,19 +461,18 @@ impl KinematicBoomController {
                 let raw_pivot = interpolate_pose(raw_start, sample.visual_pivot, local_fraction)?;
                 let seed_pose = interpolate_pose(
                     seed_start.placement.pose,
-                    sample.collision_seed.placement.pose,
+                    sample.target_seed.placement.pose,
                     local_fraction,
                 )?;
-                let seed = KinematicBoomCollisionSeed {
+                let seed = KinematicBoomTargetSeed {
                     placement: KinematicBoomPlacement {
                         pose: seed_pose,
                         cell: if leg == legs {
-                            sample.collision_seed.placement.cell
+                            sample.target_seed.placement.cell
                         } else {
                             seed_start.placement.cell
                         },
                     },
-                    camera_radius: sample.collision_seed.camera_radius,
                 };
                 let direction = spherical_interpolate(
                     start_direction,
@@ -440,7 +481,7 @@ impl KinematicBoomController {
                 );
                 staged.filter_pivot(raw_pivot, step_seconds);
                 staged.raw_visual_pivot = raw_pivot;
-                staged.collision_seed = seed;
+                staged.target_seed = seed;
                 staged.sampled_view_direction = direction;
                 diagnostics.control_legs += 1;
 
@@ -453,7 +494,14 @@ impl KinematicBoomController {
                         diagnostics.contact_passes += leg_diagnostics.contact_passes;
                         motion
                     }
-                    Err(reason) => return Ok(held(self.camera, reason, diagnostics)),
+                    Err(reason) => {
+                        return Ok(held(
+                            self.camera,
+                            self.committed_clearance,
+                            reason,
+                            diagnostics,
+                        ));
+                    }
                 };
                 append_reanchored_motion(
                     &mut waypoints,
@@ -486,6 +534,226 @@ impl KinematicBoomController {
         )
     }
 
+    /// Proves the first projection envelope before any camera placement is published.
+    fn initialize_clearance(&mut self, scene: &CollisionScene) -> KinematicBoomOutcome {
+        let requested = self.requested_clearance;
+        let outcome = settle_free_sphere(
+            scene,
+            self.profile.transit,
+            FreeSphereState {
+                pose: self.target_seed.placement.pose,
+                cell: self.target_seed.placement.cell,
+                radius: requested.radius,
+            },
+            PhysicalCollisionFilter::ALL,
+        );
+        let FreeSphereSettleOutcome::Settled {
+            body,
+            contact_passes,
+            ..
+        } = (match outcome {
+            Ok(outcome) => outcome,
+            Err(_) => {
+                return held(
+                    self.camera,
+                    None,
+                    KinematicBoomHoldReason::FreeSphereQuery,
+                    KinematicBoomDiagnostics::default(),
+                );
+            }
+        })
+        else {
+            return held(
+                self.camera,
+                None,
+                KinematicBoomHoldReason::FreeSphereQuery,
+                KinematicBoomDiagnostics {
+                    contact_passes: self.profile.transit.maximum_contact_passes,
+                    ..KinematicBoomDiagnostics::default()
+                },
+            );
+        };
+        let camera = KinematicBoomPlacement {
+            pose: body.pose,
+            cell: body.cell,
+        };
+        let Ok(rendered_reach) = placement_distance(camera.pose, self.filtered_visual_pivot) else {
+            return held(
+                self.camera,
+                None,
+                KinematicBoomHoldReason::FreeSphereQuery,
+                KinematicBoomDiagnostics {
+                    contact_passes,
+                    ..KinematicBoomDiagnostics::default()
+                },
+            );
+        };
+        self.camera = camera;
+        self.rendered_reach = rendered_reach.min(self.profile.maximum_reach);
+        self.committed_clearance = Some(requested);
+        KinematicBoomOutcome::Advanced {
+            advance: KinematicBoomAdvance::Reseeded {
+                placement: self.camera,
+                reason: KinematicBoomReseedReason::ClearanceRecovery,
+            },
+            clearance: self.committed_clearance,
+            diagnostics: KinematicBoomDiagnostics {
+                contact_passes,
+                ..KinematicBoomDiagnostics::default()
+            },
+        }
+    }
+
+    /// Advances one old-envelope-safe leg toward a placement that can admit a larger projection.
+    fn advance_clearance_growth(&mut self, scene: &CollisionScene) -> Option<KinematicBoomOutcome> {
+        let requested = self.requested_clearance;
+        let committed = self.committed_clearance?;
+        let candidate = match settle_free_sphere(
+            scene,
+            self.profile.transit,
+            FreeSphereState {
+                pose: self.camera.pose,
+                cell: self.camera.cell,
+                radius: requested.radius,
+            },
+            PhysicalCollisionFilter::ALL,
+        ) {
+            Ok(FreeSphereSettleOutcome::Settled {
+                body, separation, ..
+            }) => {
+                if separation.length() <= f32::EPSILON {
+                    self.committed_clearance = Some(requested);
+                    return None;
+                }
+                body
+            }
+            Ok(FreeSphereSettleOutcome::BudgetExceeded { .. }) => return None,
+            Err(_) => {
+                return Some(held(
+                    self.camera,
+                    Some(committed),
+                    KinematicBoomHoldReason::FreeSphereQuery,
+                    KinematicBoomDiagnostics::default(),
+                ));
+            }
+        };
+        let start = self.camera;
+        let displacement = match placement_displacement(start.pose, candidate.pose) {
+            Ok(displacement) => displacement,
+            Err(_) => {
+                return Some(held(
+                    self.camera,
+                    Some(committed),
+                    KinematicBoomHoldReason::FreeSphereQuery,
+                    KinematicBoomDiagnostics::default(),
+                ));
+            }
+        };
+        let solve = match solve_free_sphere(
+            scene,
+            self.profile.transit,
+            FreeSphereRequest {
+                body: FreeSphereState {
+                    pose: start.pose,
+                    cell: start.cell,
+                    radius: committed.radius,
+                },
+                displacement,
+                filter: PhysicalCollisionFilter::ALL,
+            },
+        ) {
+            Ok(outcome) => outcome,
+            Err(_) => {
+                return Some(held(
+                    self.camera,
+                    Some(committed),
+                    KinematicBoomHoldReason::FreeSphereQuery,
+                    KinematicBoomDiagnostics::default(),
+                ));
+            }
+        };
+        let (body, motion, substeps, contact_passes) = match solve {
+            FreeSphereOutcome::Solved {
+                body,
+                motion,
+                substeps,
+                contact_passes,
+                ..
+            }
+            | FreeSphereOutcome::BudgetExceeded {
+                body,
+                motion,
+                substeps,
+                contact_passes,
+                ..
+            } => (body, motion, substeps, contact_passes),
+        };
+        let anchor = owner(start.pose.landblock_id);
+        let start_pose = match reanchor(start.pose, anchor) {
+            Ok(pose) => pose,
+            Err(_) => {
+                return Some(held(
+                    self.camera,
+                    Some(committed),
+                    KinematicBoomHoldReason::FreeSphereQuery,
+                    KinematicBoomDiagnostics::default(),
+                ));
+            }
+        };
+        let path = match scene.transit_motion_path(PlacedMotionPathRequest {
+            previous_cell: start.cell,
+            anchor,
+            start: start_pose.coords,
+            radius: committed.radius,
+            waypoints: &motion,
+        }) {
+            Ok(path) if !path.has_recovery() => path,
+            _ => {
+                return Some(held(
+                    self.camera,
+                    Some(committed),
+                    KinematicBoomHoldReason::FreeSphereQuery,
+                    KinematicBoomDiagnostics::default(),
+                ));
+            }
+        };
+        let mut staged = self.clone();
+        staged.camera = KinematicBoomPlacement {
+            pose: body.pose,
+            cell: body.cell,
+        };
+        let Ok(rendered_reach) =
+            placement_distance(staged.camera.pose, staged.filtered_visual_pivot)
+        else {
+            return Some(held(
+                self.camera,
+                Some(committed),
+                KinematicBoomHoldReason::FreeSphereQuery,
+                KinematicBoomDiagnostics::default(),
+            ));
+        };
+        staged.rendered_reach = rendered_reach.min(staged.profile.maximum_reach);
+        // This path was solved with the old envelope, so it must retain the old acknowledgement.
+        // The next tick observes that the requested sphere already fits at this endpoint, commits
+        // it before ordinary motion, and publishes only paths solved with the new radius.
+        *self = staged;
+        Some(KinematicBoomOutcome::Advanced {
+            advance: KinematicBoomAdvance::Continuous { path },
+            clearance: self.committed_clearance,
+            diagnostics: KinematicBoomDiagnostics {
+                transit_substeps: substeps,
+                contact_passes,
+                ..KinematicBoomDiagnostics::default()
+            },
+        })
+    }
+
+    fn clearance_radius(&self) -> f32 {
+        self.committed_clearance
+            .expect("initialized boom motion always has committed projection clearance")
+            .radius
+    }
+
     /// Authors placement for one staged camera transaction and commits it atomically.
     fn commit_staged_motion(
         &mut self,
@@ -500,12 +768,13 @@ impl KinematicBoomController {
             previous_cell: self.camera.cell,
             anchor,
             start: start.coords,
-            radius: self.collision_seed.camera_radius,
+            radius: self.clearance_radius(),
             waypoints: &waypoints,
         }) {
             Ok(path) if !path.has_recovery() => KinematicBoomAdvance::Continuous { path },
             Ok(_) => {
                 return Ok(self.commit_reseed(
+                    scene,
                     staged,
                     KinematicBoomReseedReason::PlacementRecovery,
                     diagnostics,
@@ -513,6 +782,7 @@ impl KinematicBoomController {
             }
             Err(_) => {
                 return Ok(self.commit_reseed(
+                    scene,
                     staged,
                     KinematicBoomReseedReason::PlacedPath,
                     diagnostics,
@@ -522,23 +792,66 @@ impl KinematicBoomController {
         *self = staged;
         Ok(KinematicBoomOutcome::Advanced {
             advance,
+            clearance: self.committed_clearance,
             diagnostics,
         })
     }
 
-    /// Commit the current target seed as a zero-reach discontinuity after topology authoring fails.
+    /// Recover a discontinuity only after proving the full camera envelope near the target seed.
     fn commit_reseed(
         &mut self,
+        scene: &CollisionScene,
         mut staged: Self,
         reason: KinematicBoomReseedReason,
         diagnostics: KinematicBoomDiagnostics,
     ) -> KinematicBoomOutcome {
-        staged.camera = staged.collision_seed.placement;
-        staged.rendered_reach = 0.0;
+        let clearance = staged.committed_clearance;
+        let Some(clearance) = clearance else {
+            return held(
+                self.camera,
+                None,
+                KinematicBoomHoldReason::FreeSphereQuery,
+                diagnostics,
+            );
+        };
+        let settled = settle_free_sphere(
+            scene,
+            staged.profile.transit,
+            FreeSphereState {
+                pose: staged.target_seed.placement.pose,
+                cell: staged.target_seed.placement.cell,
+                radius: clearance.radius,
+            },
+            PhysicalCollisionFilter::ALL,
+        );
+        let Ok(FreeSphereSettleOutcome::Settled { body, .. }) = settled else {
+            return held(
+                self.camera,
+                self.committed_clearance,
+                KinematicBoomHoldReason::FreeSphereQuery,
+                diagnostics,
+            );
+        };
+        staged.camera = KinematicBoomPlacement {
+            pose: body.pose,
+            cell: body.cell,
+        };
+        let Ok(rendered_reach) =
+            placement_distance(staged.camera.pose, staged.filtered_visual_pivot)
+        else {
+            return held(
+                self.camera,
+                self.committed_clearance,
+                KinematicBoomHoldReason::FreeSphereQuery,
+                diagnostics,
+            );
+        };
+        staged.rendered_reach = rendered_reach.min(staged.profile.maximum_reach);
         let placement = staged.camera;
         *self = staged;
         KinematicBoomOutcome::Advanced {
             advance: KinematicBoomAdvance::Reseeded { placement, reason },
+            clearance: self.committed_clearance,
             diagnostics,
         }
     }
@@ -589,7 +902,7 @@ impl KinematicBoomController {
                 body: FreeSphereState {
                     pose: camera_start.pose,
                     cell: camera_start.cell,
-                    radius: self.collision_seed.camera_radius,
+                    radius: self.clearance_radius(),
                 },
                 displacement,
                 filter: PhysicalCollisionFilter::ALL,
@@ -639,7 +952,7 @@ impl KinematicBoomController {
         direction: Vector3,
         reach: f32,
     ) -> Result<KinematicBoomPlacement, KinematicBoomHoldReason> {
-        let seed = self.collision_seed.placement;
+        let seed = self.target_seed.placement;
         let anchor = owner(seed.pose.landblock_id);
         let seed_pose =
             reanchor(seed.pose, anchor).map_err(|_| KinematicBoomHoldReason::ClearanceSweep)?;
@@ -657,7 +970,7 @@ impl KinematicBoomController {
                 start: seed_pose.coords,
                 end: requested_end,
                 previous_cell: seed.cell,
-                radius: self.collision_seed.camera_radius,
+                radius: self.clearance_radius(),
                 filter: PhysicalCollisionFilter::ALL,
             })
             .map_err(|_| KinematicBoomHoldReason::ClearanceSweep)?;
@@ -670,7 +983,7 @@ impl KinematicBoomController {
                 previous_cell: seed.cell,
                 anchor,
                 start: seed_pose.coords,
-                radius: self.collision_seed.camera_radius,
+                radius: self.clearance_radius(),
                 waypoints: &[MotionWaypoint {
                     center: safe,
                     end_fraction: 1.0,
@@ -753,13 +1066,11 @@ fn append_reanchored_motion(
 fn validate_tick(
     duration_seconds: f32,
     samples: &[KinematicBoomTargetSample],
-    current_radius: f32,
 ) -> Result<(), KinematicBoomInputError> {
     if !duration_seconds.is_finite() || duration_seconds <= 0.0 {
         return Err(KinematicBoomInputError::InvalidTickDuration);
     }
     let mut previous = 0.0;
-    let mut previous_radius = current_radius;
     for sample in samples {
         if !sample.end_fraction.is_finite()
             || sample.end_fraction <= previous
@@ -768,11 +1079,7 @@ fn validate_tick(
             return Err(KinematicBoomInputError::InvalidTargetPath);
         }
         validate_pose(sample.visual_pivot)?;
-        validate_seed(sample.collision_seed)?;
-        if sample.collision_seed.camera_radius > previous_radius + f32::EPSILON {
-            return Err(KinematicBoomInputError::EnlargedCollisionSeedRadius);
-        }
-        previous_radius = sample.collision_seed.camera_radius;
+        validate_seed(sample.target_seed)?;
         previous = sample.end_fraction;
     }
     if samples.is_empty() || previous != 1.0 {
@@ -793,10 +1100,16 @@ fn validate_pose(pose: WorldPosition) -> Result<(), KinematicBoomInputError> {
     Ok(())
 }
 
-fn validate_seed(seed: KinematicBoomCollisionSeed) -> Result<(), KinematicBoomInputError> {
-    validate_pose(seed.placement.pose)?;
-    if !seed.camera_radius.is_finite() || seed.camera_radius <= 0.0 {
-        return Err(KinematicBoomInputError::InvalidCollisionSeedRadius);
+fn validate_seed(seed: KinematicBoomTargetSeed) -> Result<(), KinematicBoomInputError> {
+    validate_pose(seed.placement.pose)
+}
+
+fn validate_clearance(clearance: KinematicBoomClearance) -> Result<(), KinematicBoomInputError> {
+    if clearance.revision == 0 {
+        return Err(KinematicBoomInputError::InvalidClearanceRevision);
+    }
+    if !clearance.radius.is_finite() || clearance.radius <= 0.0 {
+        return Err(KinematicBoomInputError::InvalidClearanceRadius);
     }
     Ok(())
 }
@@ -892,12 +1205,14 @@ fn decay_fraction(delta_seconds: f32, half_life: f32) -> f32 {
 
 fn held(
     held: KinematicBoomPlacement,
+    clearance: Option<KinematicBoomClearance>,
     reason: KinematicBoomHoldReason,
     diagnostics: KinematicBoomDiagnostics,
 ) -> KinematicBoomOutcome {
     KinematicBoomOutcome::Held {
         reason,
         held,
+        clearance,
         diagnostics,
     }
 }
@@ -950,14 +1265,17 @@ mod tests {
         }
     }
 
-    fn seed(coords: Vector3) -> KinematicBoomCollisionSeed {
-        KinematicBoomCollisionSeed {
+    fn seed(coords: Vector3) -> KinematicBoomTargetSeed {
+        KinematicBoomTargetSeed {
             placement: KinematicBoomPlacement {
                 pose: pose(coords),
                 cell: None,
             },
-            camera_radius: 0.25,
         }
+    }
+
+    fn clearance(revision: u64, radius: f32) -> KinematicBoomClearance {
+        KinematicBoomClearance { revision, radius }
     }
 
     fn controller(maximum_control_legs: usize) -> KinematicBoomController {
@@ -965,6 +1283,7 @@ mod tests {
             profile(maximum_control_legs),
             pose(Vector3::new(20.0, 20.0, 2.0)),
             seed(Vector3::new(20.0, 20.0, 1.0)),
+            clearance(1, 0.25),
             4.5,
             KinematicBoomIntent {
                 sequence: 0,
@@ -979,7 +1298,7 @@ mod tests {
         KinematicBoomTargetSample {
             end_fraction: 1.0,
             visual_pivot: pose(Vector3::new(20.0, 20.0, 2.0)),
-            collision_seed: seed(Vector3::new(20.0, 20.0, 1.0)),
+            target_seed: seed(Vector3::new(20.0, 20.0, 1.0)),
         }
     }
 
@@ -987,7 +1306,7 @@ mod tests {
         KinematicBoomTargetSample {
             end_fraction: 1.0,
             visual_pivot: pose(Vector3::new(7.0, 20.0, 2.0)),
-            collision_seed: seed(Vector3::new(7.0, 20.0, 1.0)),
+            target_seed: seed(Vector3::new(7.0, 20.0, 1.0)),
         }
     }
 
@@ -995,7 +1314,8 @@ mod tests {
         KinematicBoomController::new(
             profile(64),
             wall_sample().visual_pivot,
-            wall_sample().collision_seed,
+            wall_sample().target_seed,
+            clearance(1, 0.25),
             4.5,
             KinematicBoomIntent {
                 sequence: 0,
@@ -1030,10 +1350,13 @@ mod tests {
     }
 
     fn wall_x(x: f32) -> PlacedCollider {
-        let plane = Plane {
+        wall(Plane {
             normal: Vector3::new(1.0, 0.0, 0.0),
             d: -x,
-        };
+        })
+    }
+
+    fn wall(plane: Plane) -> PlacedCollider {
         let surface_point = plane.normal * (-plane.d / plane.normal.length_squared());
         let outward = plane.normal * -1.0;
         let tangent = outward.cross(&Vector3::new(0.0, 0.0, 1.0));
@@ -1092,6 +1415,10 @@ mod tests {
     }
 
     fn wall_scene() -> CollisionScene {
+        collision_scene(vec![wall_x(10.0)])
+    }
+
+    fn collision_scene(colliders: Vec<PlacedCollider>) -> CollisionScene {
         let mut scene = CollisionScene::new();
         let owner_x = (LANDBLOCK >> 24) as i32;
         let owner_y = ((LANDBLOCK >> 16) & 0xff) as i32;
@@ -1102,7 +1429,7 @@ mod tests {
                     .insert(collision_asset(
                         landblock,
                         if landblock == LANDBLOCK {
-                            vec![wall_x(10.0)]
+                            colliders.clone()
                         } else {
                             Vec::new()
                         },
@@ -1113,15 +1440,161 @@ mod tests {
         scene
     }
 
+    fn stationary_controller(
+        center: Vector3,
+        initial_clearance: KinematicBoomClearance,
+    ) -> KinematicBoomController {
+        let mut definition = profile_definition(64);
+        definition.minimum_reach = 0.0;
+        definition.maximum_reach = 0.0;
+        KinematicBoomController::new(
+            KinematicBoomProfile::new(definition).unwrap(),
+            pose(center),
+            seed(center),
+            initial_clearance,
+            0.0,
+            KinematicBoomIntent {
+                sequence: 0,
+                view_direction: Vector3::new(1.0, 0.0, 0.0),
+                cumulative_zoom_displacement: 0.0,
+            },
+        )
+        .unwrap()
+    }
+
+    fn stationary_sample(center: Vector3) -> KinematicBoomTargetSample {
+        KinematicBoomTargetSample {
+            end_fraction: 1.0,
+            visual_pivot: pose(center),
+            target_seed: seed(center),
+        }
+    }
+
     fn settle_reach(
         controller: &mut KinematicBoomController,
         scene: &CollisionScene,
         target: KinematicBoomTargetSample,
     ) {
+        initialize(controller, scene, target);
         for _ in 0..60 {
             let outcome = controller.advance(scene, 1.0 / 30.0, &[target]).unwrap();
             assert!(matches!(outcome, KinematicBoomOutcome::Advanced { .. }));
         }
+    }
+
+    fn initialize(
+        controller: &mut KinematicBoomController,
+        scene: &CollisionScene,
+        target: KinematicBoomTargetSample,
+    ) {
+        if controller.committed_clearance().is_some() {
+            return;
+        }
+        let outcome = controller.advance(scene, 1.0 / 30.0, &[target]).unwrap();
+        assert!(matches!(
+            outcome,
+            KinematicBoomOutcome::Advanced {
+                advance: KinematicBoomAdvance::Reseeded {
+                    reason: KinematicBoomReseedReason::ClearanceRecovery,
+                    ..
+                },
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn projection_clearance_grows_in_open_space_and_shrinks_without_camera_motion() {
+        let center = Vector3::new(20.0, 20.0, 5.0);
+        let target = stationary_sample(center);
+        let scene = collision_scene(Vec::new());
+        let mut controller = stationary_controller(center, clearance(1, 0.25));
+        initialize(&mut controller, &scene, target);
+
+        assert_eq!(
+            controller.request_clearance(clearance(2, 0.5)).unwrap(),
+            KinematicBoomUpdateAcceptance::Accepted
+        );
+        assert_eq!(
+            controller.request_clearance(clearance(3, 0.9)).unwrap(),
+            KinematicBoomUpdateAcceptance::Accepted
+        );
+        assert_eq!(
+            controller.request_clearance(clearance(2, 0.4)).unwrap(),
+            KinematicBoomUpdateAcceptance::Stale
+        );
+        let grown = controller.advance(&scene, 1.0 / 30.0, &[target]).unwrap();
+        assert!(matches!(
+            grown,
+            KinematicBoomOutcome::Advanced {
+                clearance: Some(KinematicBoomClearance {
+                    revision: 3,
+                    radius: 0.9,
+                }),
+                ..
+            }
+        ));
+
+        let before_shrink = controller.camera();
+        controller.request_clearance(clearance(4, 0.1)).unwrap();
+        controller.advance(&scene, 1.0 / 30.0, &[target]).unwrap();
+        assert_eq!(controller.camera(), before_shrink);
+        assert_eq!(controller.committed_clearance(), Some(clearance(4, 0.1)));
+    }
+
+    #[test]
+    fn projection_clearance_growth_separates_from_a_wall_and_corner() {
+        let wall_y = wall(Plane {
+            normal: Vector3::new(0.0, 1.0, 0.0),
+            d: -10.0,
+        });
+        for (scene, center) in [
+            (
+                collision_scene(vec![wall_x(10.0)]),
+                Vector3::new(9.7, 20.0, 5.0),
+            ),
+            (
+                collision_scene(vec![wall_x(10.0), wall_y]),
+                Vector3::new(9.7, 9.7, 5.0),
+            ),
+        ] {
+            let target = stationary_sample(center);
+            let mut controller = stationary_controller(center, clearance(1, 0.25));
+            initialize(&mut controller, &scene, target);
+            controller.request_clearance(clearance(2, 1.0)).unwrap();
+
+            let outcome = controller.advance(&scene, 1.0 / 30.0, &[target]).unwrap();
+
+            assert!(matches!(outcome, KinematicBoomOutcome::Advanced { .. }));
+            assert_eq!(controller.committed_clearance(), Some(clearance(1, 0.25)));
+            controller.advance(&scene, 1.0 / 30.0, &[target]).unwrap();
+            assert_eq!(controller.committed_clearance(), Some(clearance(2, 1.0)));
+            assert!(controller.camera().pose.coords.x <= 9.001);
+            if center.y < 10.0 {
+                assert!(controller.camera().pose.coords.y <= 9.001);
+            }
+        }
+    }
+
+    #[test]
+    fn impossible_growth_retains_latest_request_and_old_safe_clearance() {
+        let west_wall = wall(Plane {
+            normal: Vector3::new(-1.0, 0.0, 0.0),
+            d: 9.6,
+        });
+        let scene = collision_scene(vec![west_wall, wall_x(10.0)]);
+        let center = Vector3::new(9.8, 20.0, 5.0);
+        let target = stationary_sample(center);
+        let mut controller = stationary_controller(center, clearance(1, 0.1));
+        initialize(&mut controller, &scene, target);
+        controller.request_clearance(clearance(2, 0.3)).unwrap();
+
+        for _ in 0..3 {
+            let outcome = controller.advance(&scene, 1.0 / 30.0, &[target]).unwrap();
+            assert!(matches!(outcome, KinematicBoomOutcome::Advanced { .. }));
+            assert_eq!(controller.committed_clearance(), Some(clearance(1, 0.1)));
+        }
+        assert_eq!(controller.requested_clearance, clearance(2, 0.3));
     }
 
     #[test]
@@ -1135,7 +1608,7 @@ mod tests {
                     cumulative_zoom_displacement: 2.0,
                 })
                 .unwrap(),
-            KinematicBoomIntentAcceptance::Accepted
+            KinematicBoomUpdateAcceptance::Accepted
         );
         assert_eq!(controller.desired_reach(), 6.5);
         assert_eq!(
@@ -1146,7 +1619,7 @@ mod tests {
                     cumulative_zoom_displacement: 7.0,
                 })
                 .unwrap(),
-            KinematicBoomIntentAcceptance::Stale
+            KinematicBoomUpdateAcceptance::Stale
         );
         assert_eq!(controller.desired_reach(), 6.5);
     }
@@ -1214,30 +1687,31 @@ mod tests {
                 profile(64),
                 pose(Vector3::new(f32::NAN, 0.0, 0.0)),
                 seed(Vector3::zero()),
+                clearance(1, 0.25),
                 4.5,
                 initial,
             )
             .unwrap_err(),
             KinematicBoomInputError::InvalidTargetPose
         );
-        let mut invalid_seed = seed(Vector3::zero());
-        invalid_seed.camera_radius = 0.0;
         assert_eq!(
             KinematicBoomController::new(
                 profile(64),
                 pose(Vector3::zero()),
-                invalid_seed,
+                seed(Vector3::zero()),
+                clearance(1, 0.0),
                 4.5,
                 initial,
             )
             .unwrap_err(),
-            KinematicBoomInputError::InvalidCollisionSeedRadius
+            KinematicBoomInputError::InvalidClearanceRadius
         );
         assert_eq!(
             KinematicBoomController::new(
                 profile(64),
                 pose(Vector3::zero()),
                 seed(Vector3::zero()),
+                clearance(1, 0.25),
                 f32::NAN,
                 initial,
             )
@@ -1266,13 +1740,9 @@ mod tests {
                 .unwrap_err(),
             KinematicBoomInputError::InvalidCumulativeZoom
         );
-        let mut enlarged = sample();
-        enlarged.collision_seed.camera_radius = 0.3;
         assert_eq!(
-            controller
-                .advance(&CollisionScene::new(), 1.0 / 30.0, &[enlarged])
-                .unwrap_err(),
-            KinematicBoomInputError::EnlargedCollisionSeedRadius
+            controller.request_clearance(clearance(2, 0.0)).unwrap_err(),
+            KinematicBoomInputError::InvalidClearanceRadius
         );
         assert_eq!(
             controller
@@ -1292,6 +1762,7 @@ mod tests {
     fn empty_scene_emits_a_nonempty_normalized_path_and_advances_recovery_monotonically() {
         let mut controller = controller(64);
         let scene = CollisionScene::new();
+        initialize(&mut controller, &scene, sample());
         let first = controller.advance(&scene, 1.0 / 30.0, &[sample()]).unwrap();
         let KinematicBoomOutcome::Advanced {
             advance: KinematicBoomAdvance::Continuous { path },
@@ -1314,7 +1785,8 @@ mod tests {
         let mut controller = KinematicBoomController::new(
             KinematicBoomProfile::new(definition).unwrap(),
             sample().visual_pivot,
-            sample().collision_seed,
+            sample().target_seed,
+            clearance(1, 0.25),
             32.0,
             KinematicBoomIntent {
                 sequence: 0,
@@ -1340,7 +1812,8 @@ mod tests {
         let mut controller = KinematicBoomController::new(
             KinematicBoomProfile::new(definition).unwrap(),
             sample().visual_pivot,
-            sample().collision_seed,
+            sample().target_seed,
+            clearance(1, 0.25),
             32.0,
             KinematicBoomIntent {
                 sequence: 0,
@@ -1354,7 +1827,7 @@ mod tests {
 
         let mut moved = sample();
         moved.visual_pivot.coords.y += 0.5;
-        moved.collision_seed.placement.pose.coords.y += 0.5;
+        moved.target_seed.placement.pose.coords.y += 0.5;
         let outcome = controller.advance(&scene, 1.0 / 30.0, &[moved]).unwrap();
 
         assert!(matches!(outcome, KinematicBoomOutcome::Advanced { .. }));
@@ -1368,7 +1841,8 @@ mod tests {
         let mut controller = KinematicBoomController::new(
             KinematicBoomProfile::new(definition).unwrap(),
             sample().visual_pivot,
-            sample().collision_seed,
+            sample().target_seed,
+            clearance(1, 0.25),
             32.0,
             KinematicBoomIntent {
                 sequence: 0,
@@ -1397,7 +1871,8 @@ mod tests {
         let mut controller = KinematicBoomController::new(
             KinematicBoomProfile::new(definition).unwrap(),
             sample().visual_pivot,
-            sample().collision_seed,
+            sample().target_seed,
+            clearance(1, 0.25),
             32.0,
             KinematicBoomIntent {
                 sequence: 0,
@@ -1406,6 +1881,7 @@ mod tests {
             },
         )
         .unwrap();
+        initialize(&mut controller, &CollisionScene::new(), sample());
         let initial = controller.camera().pose;
 
         assert!(matches!(
@@ -1433,9 +1909,10 @@ mod tests {
     #[test]
     fn control_budget_commits_one_prefix_and_continues_next_tick() {
         let mut controller = controller(1);
+        initialize(&mut controller, &CollisionScene::new(), sample());
         let mut moved = sample();
         moved.visual_pivot.coords.x += 2.0;
-        moved.collision_seed.placement.pose.coords.x += 2.0;
+        moved.target_seed.placement.pose.coords.x += 2.0;
 
         let first = controller
             .advance(&CollisionScene::new(), 1.0 / 30.0, &[moved])
@@ -1473,6 +1950,7 @@ mod tests {
     fn equivalent_recovery_duration_is_independent_of_tick_splits() {
         let scene = CollisionScene::new();
         let mut one = controller(64);
+        initialize(&mut one, &scene, sample());
         let mut two = one.clone();
         one.advance(&scene, 1.0 / 15.0, &[sample()]).unwrap();
         two.advance(&scene, 1.0 / 30.0, &[sample()]).unwrap();
@@ -1489,14 +1967,15 @@ mod tests {
     fn equivalent_target_motion_is_independent_of_internal_sample_splits() {
         let scene = CollisionScene::new();
         let mut one = controller(64);
+        initialize(&mut one, &scene, sample());
         let mut two = one.clone();
         let mut end = sample();
         end.visual_pivot.coords.x += 1.0;
-        end.collision_seed.placement.pose.coords.x += 1.0;
+        end.target_seed.placement.pose.coords.x += 1.0;
         let mut midpoint = end;
         midpoint.end_fraction = 0.5;
         midpoint.visual_pivot.coords.x -= 0.5;
-        midpoint.collision_seed.placement.pose.coords.x -= 0.5;
+        midpoint.target_seed.placement.pose.coords.x -= 0.5;
 
         one.advance(&scene, 1.0 / 30.0, &[end]).unwrap();
         two.advance(&scene, 1.0 / 30.0, &[midpoint, end]).unwrap();
@@ -1528,6 +2007,7 @@ mod tests {
         let KinematicBoomOutcome::Advanced {
             advance: KinematicBoomAdvance::Continuous { path },
             diagnostics,
+            ..
         } = outcome
         else {
             panic!("rapid orbit must remain solvable")
@@ -1573,7 +2053,7 @@ mod tests {
         for step in 1..=6 {
             let mut target = wall_sample();
             target.visual_pivot.coords.y += step as f32 * 0.1;
-            target.collision_seed.placement.pose.coords.y += step as f32 * 0.1;
+            target.target_seed.placement.pose.coords.y += step as f32 * 0.1;
             let outcome = controller.advance(&scene, 1.0 / 30.0, &[target]).unwrap();
             assert!(matches!(outcome, KinematicBoomOutcome::Advanced { .. }));
             let camera = controller.camera().pose.coords;
@@ -1603,7 +2083,7 @@ mod tests {
         let before = controller.camera().pose.coords.z;
         let mut stepped = sample();
         stepped.visual_pivot.coords.z += 0.6;
-        stepped.collision_seed.placement.pose.coords.z += 0.6;
+        stepped.target_seed.placement.pose.coords.z += 0.6;
         controller.advance(&scene, 1.0 / 30.0, &[stepped]).unwrap();
         let first = controller.camera().pose.coords.z;
         assert!(

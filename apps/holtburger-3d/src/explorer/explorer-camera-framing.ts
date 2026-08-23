@@ -6,7 +6,7 @@ import {
 import { Vec3 } from "../lib/game/math/types";
 import { createCameraLookAtAngles } from "../lib/game/math/camera-orientation";
 import { FRONTEND_TUNING } from "../lib/frontend-tuning";
-import type { FreeFlyCameraPose } from "../lib/game/controls/frontend-camera-controller";
+import type { FreeFlyCameraPose } from "./explorer-camera-input-controller";
 
 /** Minimal terrain query needed to reproduce the Explorer's automatic outdoor camera policy. */
 export interface ExplorerOutdoorSurfaceQuery {

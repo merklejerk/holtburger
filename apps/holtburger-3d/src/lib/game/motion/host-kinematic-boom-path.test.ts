@@ -25,7 +25,7 @@ function advanced() {
 		entityGeneration: 2,
 		sequence: 5,
 		targetSphereRole: "upper-constraint",
-		effectiveCameraRadius: 0.2,
+		clearance: { projectionRevision: 3, radius: 0.9 },
 		desiredReach: 4.5,
 		renderedReach: 3.75,
 		path: {
@@ -75,12 +75,12 @@ describe("host kinematic boom path", () => {
 		expect(endpoint.visualPivot.x - middle.visualPivot.x).toBeCloseTo(2);
 	});
 
-	it("rejects malformed work, radius, and path contracts before presentation", () => {
+	it("rejects malformed work, clearance, and path contracts before presentation", () => {
 		expect(() =>
 			decodeHostKinematicBoomTick(
 				{
 					...advanced(),
-					effectiveCameraRadius: 0.3,
+					clearance: { projectionRevision: 3, radius: -0.3 },
 					desiredReach: 4.5,
 					renderedReach: 3.75,
 				},
@@ -110,7 +110,7 @@ describe("host kinematic boom path", () => {
 		).toThrow();
 	});
 
-	it("accepts only a zero-reach stationary reseed path", () => {
+	it("accepts a nonnegative-reach stationary safe reseed path", () => {
 		const stationary = point(0xda550178, 12, 18);
 		const value = {
 			...advanced(),
@@ -123,9 +123,10 @@ describe("host kinematic boom path", () => {
 			},
 		};
 		expect(decodeHostKinematicBoomTick(value, 32).kind).toBe("reseeded");
-		expect(() =>
-			decodeHostKinematicBoomTick({ ...value, renderedReach: 0.1 }, 32),
-		).toThrow();
+		expect(
+			decodeHostKinematicBoomTick({ ...value, renderedReach: 0.1 }, 32)
+				.renderedReach,
+		).toBe(0.1);
 		expect(() =>
 			decodeHostKinematicBoomTick(
 				{

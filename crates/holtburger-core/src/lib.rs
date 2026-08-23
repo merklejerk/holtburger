@@ -61,11 +61,11 @@ pub use dynamic_entity_view::{
 };
 pub use holtburger_content::LandblockCollisionAsset;
 pub use kinematic_boom::{
-    KinematicBoomAdvance, KinematicBoomCollisionSeed, KinematicBoomController,
+    KinematicBoomAdvance, KinematicBoomClearance, KinematicBoomController,
     KinematicBoomDiagnostics, KinematicBoomHoldReason, KinematicBoomInputError,
-    KinematicBoomIntent, KinematicBoomIntentAcceptance, KinematicBoomOutcome,
-    KinematicBoomPlacement, KinematicBoomProfile, KinematicBoomProfileDefinition,
-    KinematicBoomProfileError, KinematicBoomReseedReason, KinematicBoomTargetSample,
+    KinematicBoomIntent, KinematicBoomOutcome, KinematicBoomPlacement, KinematicBoomProfile,
+    KinematicBoomProfileDefinition, KinematicBoomProfileError, KinematicBoomReseedReason,
+    KinematicBoomTargetSample, KinematicBoomTargetSeed, KinematicBoomUpdateAcceptance,
 };
 pub use physical_body_definition::{
     FREE_SPHERE_FLY_CONFIG, RETAIL_DUMMY_MOTION_SPHERE, ResolvedBodyProfile,

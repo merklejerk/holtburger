@@ -47,6 +47,25 @@ pub struct FreeSphereRequest {
     pub filter: PhysicalCollisionFilter,
 }
 
+/// Result of bounded directionless separation for one stationary free sphere.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FreeSphereSettleOutcome {
+    /// The complete requested sphere is overlap-free at the returned authoritative placement.
+    Settled {
+        /// Separated sphere state; its radius is the requested radius.
+        body: FreeSphereState,
+        /// World-space offset from the requested starting center.
+        separation: Vector3,
+        /// Placement-contact passes evaluated.
+        contact_passes: usize,
+    },
+    /// No safe placement was proven within the configured contact-pass budget.
+    BudgetExceeded {
+        /// Placement-contact passes evaluated before refusing the request.
+        contact_passes: usize,
+    },
+}
+
 /// Which finite solver budget refused a request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FreeSphereBudget {
@@ -201,6 +220,47 @@ pub fn solve_free_sphere(
         substeps: required_substeps,
         contact_passes,
     })
+}
+
+/// Separates a stationary sphere using undirected placement contacts and a finite pass budget.
+///
+/// Unlike [`solve_free_sphere`], this function does not author a transit path. Callers that need
+/// continuous motion to the returned placement must solve that leg independently with their
+/// already-committed collision envelope.
+pub fn settle_free_sphere(
+    scene: &CollisionScene,
+    config: FreeSphereConfig,
+    body: FreeSphereState,
+    filter: PhysicalCollisionFilter,
+) -> Result<FreeSphereSettleOutcome> {
+    validate(config, body.radius, Vector3::zero())?;
+    let anchor = landblock_key(body.pose.landblock_id);
+    let start = body.pose.coords;
+    let mut center = start;
+    let mut placement = transit(scene, anchor, body, center)?;
+
+    for contact_passes in 0..=config.maximum_contact_passes {
+        let contacts = placement_contacts(scene, anchor, center, body.radius, &placement, filter)?;
+        if contacts.is_empty() {
+            let cell = placement.committed_cell();
+            return Ok(FreeSphereSettleOutcome::Settled {
+                body: FreeSphereState {
+                    pose: pose_for_commit(anchor, center, body.pose, cell),
+                    cell,
+                    radius: body.radius,
+                },
+                separation: center - start,
+                contact_passes,
+            });
+        }
+        if contact_passes == config.maximum_contact_passes {
+            return Ok(FreeSphereSettleOutcome::BudgetExceeded { contact_passes });
+        }
+        center = center + separating_displacement(&contacts, config.separation_epsilon);
+        placement = transit(scene, anchor, body, center)?;
+    }
+
+    unreachable!("the inclusive contact-pass loop always settles or exhausts its budget")
 }
 
 /// Closes a partial solve's normalized tick without inventing unevaluated geometry.
@@ -630,6 +690,81 @@ mod tests {
             FreeSphereOutcome::Solved { body, .. } => body,
             other => panic!("expected solved physical fly, got {other:?}"),
         }
+    }
+
+    fn settled(outcome: FreeSphereSettleOutcome) -> FreeSphereState {
+        match outcome {
+            FreeSphereSettleOutcome::Settled { body, .. } => body,
+            other => panic!("expected settled free sphere, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stationary_settle_preserves_an_open_placement() {
+        let original = body(Vector3::new(20.0, 20.0, 5.0));
+        let outcome = settle_free_sphere(
+            &scene(Vec::new()),
+            config(),
+            original,
+            PhysicalCollisionFilter::ALL,
+        )
+        .unwrap();
+
+        let result = settled(outcome);
+        assert_eq!(result.pose.coords, original.pose.coords);
+        assert_eq!(result.cell, original.cell);
+        assert_eq!(result.radius, original.radius);
+    }
+
+    #[test]
+    fn stationary_settle_separates_from_a_wall_and_corner() {
+        let wall_y = half_space(
+            Plane {
+                normal: Vector3::new(0.0, 1.0, 0.0),
+                d: -10.0,
+            },
+            true,
+            false,
+        );
+        let original = body(Vector3::new(9.8, 9.8, 5.0));
+        let result = settled(
+            settle_free_sphere(
+                &scene(vec![wall_x(10.0), wall_y]),
+                config(),
+                original,
+                PhysicalCollisionFilter::ALL,
+            )
+            .unwrap(),
+        );
+
+        assert!((result.pose.coords.x - 8.999_5).abs() < 0.002, "{result:?}");
+        assert!((result.pose.coords.y - 8.999_5).abs() < 0.002, "{result:?}");
+    }
+
+    #[test]
+    fn stationary_settle_refuses_to_publish_an_impossible_corridor_placement() {
+        let west_wall = half_space(
+            Plane {
+                normal: Vector3::new(1.0, 0.0, 0.0),
+                d: -9.6,
+            },
+            false,
+            false,
+        );
+        let outcome = settle_free_sphere(
+            &scene(vec![west_wall, wall_x(10.0)]),
+            config(),
+            body(Vector3::new(9.8, 20.0, 5.0)),
+            PhysicalCollisionFilter::ALL,
+        )
+        .unwrap();
+
+        assert_eq!(
+            outcome,
+            FreeSphereSettleOutcome::BudgetExceeded {
+                contact_passes: config().maximum_contact_passes,
+            }
+        );
     }
 
     #[test]

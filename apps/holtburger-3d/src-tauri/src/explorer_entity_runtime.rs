@@ -3691,10 +3691,9 @@ mod tests {
     #[test]
     fn host_boom_follows_exact_possession_without_registering_a_camera_body() {
         use crate::host_kinematic_boom_runtime::{
-            HostKinematicBoomHoldReason, HostKinematicBoomIntentReceipt,
-            HostKinematicBoomIntentRequest, HostKinematicBoomRuntime,
+            HostKinematicBoomHoldReason, HostKinematicBoomIntentRequest, HostKinematicBoomRuntime,
             HostKinematicBoomStartRequest, HostKinematicBoomTargetSphereRole,
-            HostKinematicBoomTick,
+            HostKinematicBoomTick, HostKinematicBoomUpdateReceipt,
         };
 
         let upper = Sphere {
@@ -3721,6 +3720,8 @@ mod tests {
                 input_sequence: 1,
                 view_direction: [0.0, -1.0, 0.0],
                 cumulative_zoom_displacement: 0.0,
+                projection_revision: 1,
+                clearance_radius: 0.25,
             })
             .unwrap();
         assert_eq!(simulation.registered_body_count(), body_count);
@@ -3732,7 +3733,7 @@ mod tests {
                 cumulative_zoom_displacement: 1.0,
             })
             .unwrap(),
-            HostKinematicBoomIntentReceipt::IgnoredStale
+            HostKinematicBoomUpdateReceipt::IgnoredStale
         );
         assert_eq!(
             boom.set_intent(HostKinematicBoomIntentRequest {
@@ -3742,19 +3743,27 @@ mod tests {
                 cumulative_zoom_displacement: 1.0,
             })
             .unwrap(),
-            HostKinematicBoomIntentReceipt::Accepted
+            HostKinematicBoomUpdateReceipt::Accepted
         );
 
         let started_at = Instant::now();
         let collection = entities
             .tick_physical_collection(1.0 / 30.0, started_at)
             .unwrap();
+        let initial_tick = boom.advance(&collection, 1.0 / 30.0).unwrap().unwrap();
+        assert!(matches!(
+            initial_tick,
+            HostKinematicBoomTick::Reseeded {
+                reason: crate::host_kinematic_boom_runtime::HostKinematicBoomReseedReason::ClearanceRecovery,
+                ..
+            }
+        ));
         let tick = boom.advance(&collection, 1.0 / 30.0).unwrap().unwrap();
         let HostKinematicBoomTick::Advanced {
             identity,
             sequence,
             target_sphere_role,
-            effective_camera_radius,
+            clearance,
             desired_reach,
             path,
             ..
@@ -3763,12 +3772,12 @@ mod tests {
             panic!("an empty flat scene must accept the first boom path")
         };
         assert_eq!(identity, receipt.identity);
-        assert_eq!(sequence, 1);
+        assert_eq!(sequence, 2);
         assert_eq!(
             target_sphere_role,
             HostKinematicBoomTargetSphereRole::UpperConstraint
         );
-        assert_eq!(effective_camera_radius, upper.radius);
+        assert_eq!(clearance.unwrap().radius, 0.25);
         assert_eq!(desired_reach, 4.25);
         assert_eq!(path.legs.last().unwrap().end_fraction, 1.0);
         assert!(path.initial.visual_pivot.coords.z.is_finite());
@@ -3786,7 +3795,7 @@ mod tests {
             boom.advance(&missing_target, 1.0 / 30.0).unwrap(),
             Some(HostKinematicBoomTick::Held {
                 identity,
-                sequence: 2,
+                sequence: 3,
                 reason: HostKinematicBoomHoldReason::TargetContract,
                 ..
             }) if identity == receipt.identity
@@ -3800,13 +3809,13 @@ mod tests {
                 cumulative_zoom_displacement: 1.0,
             })
             .unwrap(),
-            HostKinematicBoomIntentReceipt::Accepted
+            HostKinematicBoomUpdateReceipt::Accepted
         );
         assert!(matches!(
             boom.advance(&collection, 1.0 / 30.0).unwrap(),
             Some(HostKinematicBoomTick::Advanced {
                 identity,
-                sequence: 3,
+                sequence: 4,
                 ..
             }) if identity == receipt.identity
         ));
@@ -3823,6 +3832,8 @@ mod tests {
                 input_sequence: 1,
                 view_direction: [0.0, -1.0, 0.0],
                 cumulative_zoom_displacement: 0.0,
+                projection_revision: 1,
+                clearance_radius: 0.25,
             })
             .unwrap();
         assert!(replacement.identity.boom_generation > receipt.identity.boom_generation);
@@ -3838,7 +3849,7 @@ mod tests {
             .unwrap();
         assert!(matches!(
             boom.advance(&replacement_collection, 1.0 / 30.0).unwrap(),
-            Some(HostKinematicBoomTick::Advanced { identity, .. })
+            Some(HostKinematicBoomTick::Reseeded { identity, .. })
                 if identity == replacement.identity
         ));
 
@@ -3867,9 +3878,8 @@ mod tests {
     #[test]
     fn host_boom_retains_session_while_control_work_is_limited() {
         use crate::host_kinematic_boom_runtime::{
-            HostKinematicBoomDiagnostics, HostKinematicBoomIntentReceipt,
-            HostKinematicBoomIntentRequest, HostKinematicBoomRuntime,
-            HostKinematicBoomStartRequest, HostKinematicBoomTick,
+            HostKinematicBoomDiagnostics, HostKinematicBoomIntentRequest, HostKinematicBoomRuntime,
+            HostKinematicBoomStartRequest, HostKinematicBoomTick, HostKinematicBoomUpdateReceipt,
         };
         use holtburger_core::{KinematicBoomProfile, KinematicBoomProfileDefinition};
 
@@ -3910,6 +3920,8 @@ mod tests {
                 input_sequence: 1,
                 view_direction: [0.0, -1.0, 0.0],
                 cumulative_zoom_displacement: 0.0,
+                projection_revision: 1,
+                clearance_radius: 0.25,
             })
             .unwrap();
         assert_eq!(
@@ -3920,17 +3932,16 @@ mod tests {
                 cumulative_zoom_displacement: 0.0,
             })
             .unwrap(),
-            HostKinematicBoomIntentReceipt::Accepted
+            HostKinematicBoomUpdateReceipt::Accepted
         );
         let collection = entities
             .tick_physical_collection(1.0 / 30.0, Instant::now())
             .unwrap();
         assert!(matches!(
             boom.advance(&collection, 1.0 / 30.0).unwrap(),
-            Some(HostKinematicBoomTick::Advanced {
+            Some(HostKinematicBoomTick::Reseeded {
                 identity,
                 sequence: 1,
-                diagnostics: HostKinematicBoomDiagnostics { control_legs: 1, .. },
                 ..
             }) if identity == receipt.identity
         ));
@@ -3939,6 +3950,15 @@ mod tests {
             Some(HostKinematicBoomTick::Advanced {
                 identity,
                 sequence: 2,
+                diagnostics: HostKinematicBoomDiagnostics { control_legs: 1, .. },
+                ..
+            }) if identity == receipt.identity
+        ));
+        assert!(matches!(
+            boom.advance(&collection, 1.0 / 30.0).unwrap(),
+            Some(HostKinematicBoomTick::Advanced {
+                identity,
+                sequence: 3,
                 ..
             }) if identity == receipt.identity
         ));

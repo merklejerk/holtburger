@@ -1,9 +1,9 @@
-import { FRONTEND_TUNING } from "../../frontend-tuning";
-import { createCameraAxesRadians } from "../math/camera-orientation";
-import { Vec3 } from "../math/types";
-import { clamp, normalizeVec3, scaleVec3 } from "../math/vector-utils";
-import { CameraLookController } from "./camera-look-controller";
-import { THIRD_PERSON_CHARACTER_CONTROL_PROFILE } from "./third-person-character-profile";
+import { FRONTEND_TUNING } from "../lib/frontend-tuning";
+import { createCameraAxesRadians } from "../lib/game/math/camera-orientation";
+import { Vec3 } from "../lib/game/math/types";
+import { clamp, normalizeVec3, scaleVec3 } from "../lib/game/math/vector-utils";
+import { CameraLookController } from "../lib/game/controls/camera-look-controller";
+import { THIRD_PERSON_CHARACTER_CONTROL_PROFILE } from "../lib/game/controls/third-person-character-profile";
 
 type DragMode = "pan" | "rotate";
 type MovementKey =
@@ -41,11 +41,15 @@ export type FrontendControlScheme =
 	| { readonly kind: "physical-fly" }
 	| { readonly kind: "possessed-character" };
 
-export interface FrontendCameraControllerOptions {
+export interface ExplorerCameraInputControllerOptions {
 	readonly canvas: HTMLCanvasElement;
 	readonly onChange: (state: FreeFlyCameraState) => void;
 	/** Sends wheel translation to the current host-owned camera policy. */
 	readonly onPhysicalWheel: (localUpDistance: number) => void;
+	/** Forwards raw orbit deltas only while Explorer has delegated to possession camera policy. */
+	readonly onPossessionOrbit: (deltaX: number, deltaY: number) => void;
+	/** Forwards wheel distance only while Explorer has delegated to possession camera policy. */
+	readonly onPossessionWheel: (localUpDistance: number) => void;
 	/** Publishes normalized raw character keys without assigning grounded semantics here. */
 	readonly onCharacterInput: (input: CharacterKeyInput) => void;
 	/** Resolves the app regime's complete keyboard-yaw rate without teaching this controller its modes. */
@@ -76,10 +80,12 @@ const CAMERA_CONTROL_TUNING = FRONTEND_TUNING.explorer.camera.controls;
  * Explorer-local port of the legacy fly controls: left drag rotates, middle/right drag pans,
  * wheel moves along local up, WASD-style keys fly, and Shift slows every movement.
  */
-export class FrontendCameraController {
+export class ExplorerCameraInputController {
 	readonly #canvas: HTMLCanvasElement;
 	readonly #onChange: (state: FreeFlyCameraState) => void;
 	readonly #onPhysicalWheel: (localUpDistance: number) => void;
+	readonly #onPossessionOrbit: (deltaX: number, deltaY: number) => void;
+	readonly #onPossessionWheel: (localUpDistance: number) => void;
 	readonly #onCharacterInput: (input: CharacterKeyInput) => void;
 	readonly #keyboardYawRadiansPerSecond: (shiftActive: boolean) => number;
 	readonly #requestAnimationFrame: (callback: FrameRequestCallback) => number;
@@ -94,10 +100,12 @@ export class FrontendCameraController {
 	readonly #look = new CameraLookController(DEFAULT_STATE);
 	#state: FreeFlyCameraState = DEFAULT_STATE;
 
-	constructor(options: FrontendCameraControllerOptions) {
+	constructor(options: ExplorerCameraInputControllerOptions) {
 		this.#canvas = options.canvas;
 		this.#onChange = options.onChange;
 		this.#onPhysicalWheel = options.onPhysicalWheel;
+		this.#onPossessionOrbit = options.onPossessionOrbit;
+		this.#onPossessionWheel = options.onPossessionWheel;
 		this.#onCharacterInput = options.onCharacterInput;
 		this.#keyboardYawRadiansPerSecond =
 			options.keyboardYawRadiansPerSecond ??
@@ -221,6 +229,11 @@ export class FrontendCameraController {
 			? 1
 			: this.#speedMultiplier(event.shiftKey);
 		if (drag.mode === "rotate") {
+			if (this.#isCharacterScheme()) {
+				this.#onPossessionOrbit(deltaX, deltaY);
+				event.preventDefault();
+				return;
+			}
 			const look = this.#look.rotate(
 				deltaX,
 				deltaY,
@@ -272,7 +285,10 @@ export class FrontendCameraController {
 			CAMERA_CONTROL_TUNING.wheelLocalUpUnitsPerDelta *
 			(this.#isCharacterScheme() ? 1 : this.#speedMultiplier(event.shiftKey));
 		if (this.#scheme.kind !== "free-fly") {
-			if (distance !== 0) this.#onPhysicalWheel(distance);
+			if (distance !== 0) {
+				if (this.#isCharacterScheme()) this.#onPossessionWheel(distance);
+				else this.#onPhysicalWheel(distance);
+			}
 			event.preventDefault();
 			return;
 		}

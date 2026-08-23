@@ -1,9 +1,9 @@
+import { withPreservedWebGL2AllocationBindings } from "./webgl2-render-target";
 import {
-	type WebGL2RenderExtent,
-	validateWebGL2RenderDimensions,
-	validateWebGL2RenderExtent,
-	withPreservedWebGL2AllocationBindings,
-} from "./webgl2-render-target";
+	type RenderExtent,
+	validateRenderDimensions,
+	validateRenderExtent,
+} from "./render-extent";
 
 const FLAT_SCENE_BYTES_PER_PIXEL = 8;
 
@@ -11,7 +11,7 @@ const FLAT_SCENE_BYTES_PER_PIXEL = 8;
 export interface WebGL2FlatSceneTargetSet {
 	readonly color: WebGLTexture;
 	readonly depth: WebGLTexture;
-	readonly extent: WebGL2RenderExtent;
+	readonly extent: RenderExtent;
 	readonly framebuffer: WebGLFramebuffer;
 }
 
@@ -22,7 +22,7 @@ export interface WebGL2FlatSceneTargetDiagnostics {
 	readonly activeTextureCount: number;
 	readonly allocatedGenerationCount: number;
 	readonly disposedGenerationCount: number;
-	readonly extent: WebGL2RenderExtent | null;
+	readonly extent: RenderExtent | null;
 }
 
 /** Renderer-owned RGBA8 and D24 attachments for the unconditional flat presentation path. */
@@ -38,15 +38,15 @@ export class WebGL2FlatSceneTarget {
 	}
 
 	/** Allocate or reuse one complete target generation without publishing partial resources. */
-	resize(extent: WebGL2RenderExtent): WebGL2FlatSceneTargetSet {
-		validateWebGL2RenderExtent(extent, "Flat scene target");
+	resize(extent: RenderExtent): WebGL2FlatSceneTargetSet {
+		validateRenderExtent(extent, "Flat scene target");
 		return this.resizeDimensions(extent.width, extent.height);
 	}
 
 	/** Reuse a generation from scalar frame dimensions without allocating an extent record. */
 	resizeDimensions(width: number, height: number): WebGL2FlatSceneTargetSet {
 		this.#assertAlive();
-		validateWebGL2RenderDimensions(width, height, "Flat scene target");
+		validateRenderDimensions(width, height, "Flat scene target");
 		flatSceneTargetByteLengthFromDimensions(width, height);
 		const current = this.#target;
 		if (
@@ -145,8 +145,8 @@ export class WebGL2FlatSceneTarget {
 }
 
 /** Exact configured color/depth texture bytes, excluding framebuffer metadata. */
-export function flatSceneTargetByteLength(extent: WebGL2RenderExtent): number {
-	validateWebGL2RenderExtent(extent, "Flat scene target");
+export function flatSceneTargetByteLength(extent: RenderExtent): number {
+	validateRenderExtent(extent, "Flat scene target");
 	return flatSceneTargetByteLengthFromDimensions(extent.width, extent.height);
 }
 
@@ -163,7 +163,7 @@ function flatSceneTargetByteLengthFromDimensions(
 
 function allocateTarget(
 	gl: WebGL2RenderingContext,
-	extent: WebGL2RenderExtent,
+	extent: RenderExtent,
 ): WebGL2FlatSceneTargetSet {
 	const framebuffer = gl.createFramebuffer();
 	if (!framebuffer)
@@ -221,7 +221,7 @@ function initializeTexture(
 	gl: WebGL2RenderingContext,
 	texture: WebGLTexture,
 	internalFormat: GLenum,
-	extent: WebGL2RenderExtent,
+	extent: RenderExtent,
 ): void {
 	gl.activeTexture(gl.TEXTURE0);
 	gl.bindTexture(gl.TEXTURE_2D, texture);

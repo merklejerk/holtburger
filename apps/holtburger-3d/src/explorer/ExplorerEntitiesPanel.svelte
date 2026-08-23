@@ -3,7 +3,7 @@
 	import ExplorerEntityInspector from "./ExplorerEntityInspector.svelte";
 	import ExplorerEntityList from "./ExplorerEntityList.svelte";
 	import ExplorerEntitySpawnComposer from "./ExplorerEntitySpawnComposer.svelte";
-	import type { HostKinematicBoomStatus } from "./host-kinematic-boom-session";
+	import type { HostKinematicBoomStatus } from "../lib/game/camera/host-kinematic-boom-session";
 	import type {
 		ExplorerCatalogCapability,
 		ExplorerWeenieSearchRequest,

@@ -1386,8 +1386,17 @@ async fn start_kinematic_boom(
 async fn set_kinematic_boom_intent(
     boom: tauri::State<'_, Arc<host_kinematic_boom_runtime::HostKinematicBoomRuntime>>,
     request: host_kinematic_boom_runtime::HostKinematicBoomIntentRequest,
-) -> Result<host_kinematic_boom_runtime::HostKinematicBoomIntentReceipt, String> {
+) -> Result<host_kinematic_boom_runtime::HostKinematicBoomUpdateReceipt, String> {
     boom.set_intent(request).map_err(format_error)
+}
+
+/// Replaces projection clearance for one exact generation tuple.
+#[tauri::command]
+async fn set_kinematic_boom_clearance(
+    boom: tauri::State<'_, Arc<host_kinematic_boom_runtime::HostKinematicBoomRuntime>>,
+    request: host_kinematic_boom_runtime::HostKinematicBoomClearanceRequest,
+) -> Result<host_kinematic_boom_runtime::HostKinematicBoomUpdateReceipt, String> {
+    boom.set_clearance(request).map_err(format_error)
 }
 
 /// Stops exactly one boom generation without invalidating a replacement.
@@ -1982,6 +1991,7 @@ pub fn run() {
             queue_explorer_possession_event,
             start_kinematic_boom,
             set_kinematic_boom_intent,
+            set_kinematic_boom_clearance,
             stop_kinematic_boom,
             start_simulation_interest_session,
             replace_simulation_interest,

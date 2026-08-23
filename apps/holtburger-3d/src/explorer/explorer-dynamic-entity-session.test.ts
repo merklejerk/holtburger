@@ -307,7 +307,7 @@ describe("ExplorerDynamicEntitySession", () => {
 				entityGeneration: 1,
 				sequence: 1,
 				targetSphereRole: "primary",
-				effectiveCameraRadius: 0.25,
+				clearance: { projectionRevision: 1, radius: 0.25 },
 				desiredReach: 4.5,
 				renderedReach: 3.75,
 				path: {

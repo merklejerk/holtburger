@@ -55,6 +55,8 @@ export interface HttpKinematicBoomStartRequest {
 	readonly inputSequence: number;
 	readonly viewDirection: readonly [number, number, number];
 	readonly cumulativeZoomDisplacement: number;
+	readonly projectionRevision: number;
+	readonly clearanceRadius: number;
 }
 
 /** Browser-harness intent request mirroring the production Tauri command shape. */
@@ -62,6 +64,12 @@ export interface HttpKinematicBoomIntentRequest extends HostKinematicBoomIdentit
 	readonly inputSequence: number;
 	readonly viewDirection: readonly [number, number, number];
 	readonly cumulativeZoomDisplacement: number;
+}
+
+/** Browser-harness projection-clearance request mirroring the production Tauri command shape. */
+export interface HttpKinematicBoomClearanceRequest extends HostKinematicBoomIdentity {
+	readonly projectionRevision: number;
+	readonly clearanceRadius: number;
 }
 
 /** Harness-only HTTP adapter over the same app-local Explorer driver used by Tauri commands. */
@@ -151,6 +159,12 @@ export class HttpExplorerEntityHost {
 		request: HttpKinematicBoomIntentRequest,
 	): Promise<unknown> {
 		return postJson(this.#baseUrl, "kinematic-boom/intent", request);
+	}
+
+	async setKinematicBoomClearance(
+		request: HttpKinematicBoomClearanceRequest,
+	): Promise<unknown> {
+		return postJson(this.#baseUrl, "kinematic-boom/clearance", request);
 	}
 
 	async stopKinematicBoom(

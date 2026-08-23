@@ -8,14 +8,15 @@ import type { SceneInterestRevision } from "../lib/game/runtime/scene-availabili
 import type { SceneAvailabilityEvent } from "../lib/game/runtime/scene-availability";
 import { LandblockLayerKind } from "../lib/game/runtime/scene-interest";
 import type { Camera } from "../lib/game/runtime/types";
+import type { ProjectionClearanceRevision } from "../lib/game/camera/projection-clearance";
 import type { SceneInterestRadii } from "../lib/game/runtime/types";
 import type { SceneResidency } from "../lib/game/scene";
 import { FRONTEND_TUNING } from "../lib/frontend-tuning";
 import {
-	FrontendCameraController,
+	ExplorerCameraInputController,
 	type FreeFlyCameraPose,
 	type FreeFlyCameraState,
-} from "../lib/game/controls/frontend-camera-controller";
+} from "./explorer-camera-input-controller";
 import {
 	resolveExplorerPointResidency,
 	resolveExplicitExplorerEnvCell,
@@ -80,7 +81,7 @@ export class ExplorerCameraCoordinator {
 	readonly #runtime: GameRuntime;
 	/** Explorer default: the free camera carries the ears, which is what a viewer expects. */
 	#audioFollowsCamera = true;
-	readonly #controller: FrontendCameraController;
+	readonly #controller: ExplorerCameraInputController;
 	readonly #onStatus: (status: ExplorerCameraFocusStatus) => void;
 	readonly #unsubscribeAvailability: () => void;
 	#pending: PendingFocus | null = null;
@@ -104,7 +105,7 @@ export class ExplorerCameraCoordinator {
 
 	constructor(
 		runtime: GameRuntime,
-		controller: FrontendCameraController,
+		controller: ExplorerCameraInputController,
 		onStatus: (status: ExplorerCameraFocusStatus) => void,
 	) {
 		this.#runtime = runtime;
@@ -207,7 +208,9 @@ export class ExplorerCameraCoordinator {
 	}
 
 	/** Re-resolve a frontend-owned free-fly pose and update the render camera once. */
-	syncFreeFlyCamera(): ExplorerCameraResidencySync {
+	syncFreeFlyCamera(
+		projection: ProjectionClearanceRevision,
+	): ExplorerCameraResidencySync {
 		this.#lastReportedHostResidency = null;
 		const state = this.#controller.snapshotState();
 		const handoffResidency = this.#pendingFreeFlyResidency;
@@ -218,6 +221,7 @@ export class ExplorerCameraCoordinator {
 				state.position,
 				handoffResidency,
 				"physical-handoff",
+				projection,
 			);
 		}
 		const resolution = resolveExplorerPointResidency(
@@ -227,7 +231,10 @@ export class ExplorerCameraCoordinator {
 		if (resolution.kind === "resolved") {
 			this.#lastResolutionIssue = null;
 			this.#lastResidency = resolution.residency;
-			this.#applyCamera(createCamera(resolution.residency, state));
+			this.#applyCamera(
+				createCamera(resolution.residency, state, projection),
+				projection,
+			);
 			return { location, renderable: true };
 		}
 		if (resolution.kind === "ambiguous") {
@@ -252,7 +259,10 @@ export class ExplorerCameraCoordinator {
 					candidate.landblockId === lastResidency.landblockId,
 			)
 		) {
-			this.#applyCamera(createCamera(lastResidency, state));
+			this.#applyCamera(
+				createCamera(lastResidency, state, projection),
+				projection,
+			);
 			return { location, renderable: true };
 		}
 		return { location, renderable: false };
@@ -265,6 +275,7 @@ export class ExplorerCameraCoordinator {
 		placement: HostCameraPlacement,
 		yawRadians: number,
 		pitchRadians: number,
+		projection: ProjectionClearanceRevision,
 	): ExplorerCameraResidencySync {
 		this.#lastReportedHostResidency = null;
 		const state = {
@@ -278,12 +289,14 @@ export class ExplorerCameraCoordinator {
 			placement.position,
 			placement.residency,
 			"host-boom-camera",
+			projection,
 		);
 	}
 
 	/** Apply one host-owned physical placement without re-deriving its portal residency. */
 	syncPhysicalCamera(
 		placement: HostCameraPlacement | null,
+		projection: ProjectionClearanceRevision,
 	): ExplorerCameraResidencySync {
 		if (placement === null) {
 			this.#reportResolutionIssue("Waiting for first host camera placement.");
@@ -296,6 +309,7 @@ export class ExplorerCameraCoordinator {
 			position,
 			placement.residency,
 			"host-physical-camera",
+			projection,
 		);
 	}
 
@@ -320,6 +334,7 @@ export class ExplorerCameraCoordinator {
 		position: Vec3,
 		residency: SceneResidency,
 		source: "host-boom-camera" | "host-physical-camera" | "physical-handoff",
+		projection: ProjectionClearanceRevision,
 	): ExplorerCameraResidencySync {
 		if (
 			residency.envCellId !== null &&
@@ -347,7 +362,10 @@ export class ExplorerCameraCoordinator {
 		const resolvedAnIssue = this.#lastResolutionIssue !== null;
 		this.#lastResolutionIssue = null;
 		this.#lastResidency = residency;
-		this.#applyCamera(createCamera(residency, { ...state, position }));
+		this.#applyCamera(
+			createCamera(residency, { ...state, position }, projection),
+			projection,
+		);
 		const hostPlacementChanged =
 			source === "host-physical-camera" &&
 			!sameResidency(this.#lastReportedHostResidency, residency);
@@ -374,8 +392,8 @@ export class ExplorerCameraCoordinator {
 		this.#audioFollowsCamera = follows;
 	}
 
-	#applyCamera(camera: Camera): void {
-		this.#runtime.setPrimaryCamera(camera);
+	#applyCamera(camera: Camera, projection: ProjectionClearanceRevision): void {
+		this.#runtime.setPrimaryView({ camera, extent: projection.extent });
 		this.#presentedPlacement = {
 			position: sceneVec3(camera.placement.position.clone()),
 			residency: {
@@ -540,9 +558,12 @@ export class ExplorerCameraCoordinator {
 function createCamera(
 	residency: SceneResidency,
 	state: FreeFlyCameraState,
+	projection: ProjectionClearanceRevision,
 ): Camera {
 	return {
-		...FRONTEND_TUNING.explorer.camera.framing,
+		far: FRONTEND_TUNING.explorer.camera.framing.far,
+		fov: projection.fov,
+		near: projection.near,
 		placement: {
 			...residency,
 			// The controller works in canonical scene coordinates; the same value resolves

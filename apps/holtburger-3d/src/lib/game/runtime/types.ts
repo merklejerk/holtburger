@@ -2,6 +2,7 @@ import type { EnvCellId } from "../game-types";
 import type { SceneVec3, SceneVector3 } from "../../assets/ac-frame";
 import type { Quat } from "../math/types";
 import type { SceneResidency } from "../scene";
+import type { RenderExtent } from "../renderer/render-extent";
 
 export interface SceneInterestRadii {
 	/** Outdoor terrain radius; terrain is always enabled for an active interest. */
@@ -59,4 +60,10 @@ export interface Camera {
 	readonly far: number;
 	/** Pose used by visibility and anchor-relative rendering. */
 	readonly placement: CameraPlacement;
+}
+
+/** One camera projection and the exact drawing extent authorized to render it. */
+export interface PrimaryCameraView {
+	readonly camera: Camera;
+	readonly extent: RenderExtent;
 }

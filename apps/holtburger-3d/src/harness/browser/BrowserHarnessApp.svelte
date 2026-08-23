@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { onMount } from "svelte";
+	import { onMount, tick as svelteTick } from "svelte";
 	import { resolveExplorerOutdoorFocusPose } from "../../explorer/explorer-camera-framing";
-	import { FrontendCameraController } from "../../lib/game/controls/frontend-camera-controller";
+	import { ExplorerCameraInputController } from "../../explorer/explorer-camera-input-controller";
 	import { FRONTEND_TUNING } from "../../lib/frontend-tuning";
 	import {
 		createColorGradeParameters,
@@ -30,6 +30,10 @@
 	import { sceneVec3, sceneVector3 } from "../../lib/assets/ac-frame";
 	import type { Camera } from "../../lib/game/runtime/types";
 	import type { SceneInterestRadii } from "../../lib/game/runtime/types";
+	import {
+		createProjectionClearanceRevision,
+		type ProjectionClearanceRevision,
+	} from "../../lib/game/camera/projection-clearance";
 	import { Vec3 } from "../../lib/game/math/types";
 	import {
 		WebGL2Device,
@@ -53,6 +57,7 @@
 		type RendererFrameProfile,
 	} from "../../lib/game/renderer/renderer";
 	import { validateRenderScale } from "../../lib/game/renderer/render-scale";
+	import type { RenderExtent } from "../../lib/game/renderer/render-extent";
 	import type {
 		PortalExecutionProbeResult,
 		WebGL2Renderer,
@@ -66,7 +71,7 @@
 	import { resolvePhysicalFlyViewDirection } from "../../lib/game/motion/host-physical-fly-path";
 	import type { HostCameraPlacement } from "../../lib/game/motion/host-placed-path";
 	import {
-		decodeHostKinematicBoomIntentReceipt,
+		decodeHostKinematicBoomUpdateReceipt,
 		resolveKinematicBoomDirection,
 		type HostKinematicBoomIdentity,
 	} from "../../lib/game/motion/host-kinematic-boom-path";
@@ -83,13 +88,14 @@
 	} from "../../lib/game/runtime/dynamic-entity-feed";
 	import {
 		HttpExplorerEntityHost,
+		type HttpKinematicBoomClearanceRequest,
 		type HttpKinematicBoomIntentRequest,
 		type HttpKinematicBoomStartRequest,
 	} from "./http-explorer-entity-host";
 	import {
 		HostKinematicBoomSession,
 		type HostKinematicBoomTransport,
-	} from "../../explorer/host-kinematic-boom-session";
+	} from "../../lib/game/camera/host-kinematic-boom-session";
 	import type {
 		ExplorerPossession,
 		ExplorerPossessionEventRequest,
@@ -131,8 +137,21 @@
 	 * Without this the harness never places the listener, so every trigger reports `inaudible` and
 	 * the audio path cannot be exercised at all.
 	 */
-	function applyHarnessCamera(target: GameRuntime, camera: Camera): void {
-		target.setPrimaryCamera(camera);
+	function applyHarnessCamera(
+		target: GameRuntime,
+		camera: Camera,
+		extent?: RenderExtent,
+	): void {
+		const canvas = canvasElement;
+		if (canvas === null) {
+			throw new Error("Browser harness camera requires a mounted canvas.");
+		}
+		target.setPrimaryView({
+			camera,
+			extent:
+				extent ??
+				target.resolveViewportExtent(canvas.clientWidth, canvas.clientHeight),
+		});
 		const { position, rotation, envCellId } = camera.placement;
 		target.setAudioListener({
 			position: sceneVector3([position.x, position.y, position.z]),
@@ -147,12 +166,12 @@
 	const cameraHeightSource = query.get("cameraHeight");
 	const CAMERA_HEIGHT =
 		cameraHeightSource === null ? 600 : Number(cameraHeightSource);
-	const VIEWPORT_WIDTH = parsePositiveIntegerQuery(
+	const INITIAL_VIEWPORT_WIDTH = parsePositiveIntegerQuery(
 		query,
 		"viewportWidth",
 		1_280,
 	);
-	const VIEWPORT_HEIGHT = parsePositiveIntegerQuery(
+	const INITIAL_VIEWPORT_HEIGHT = parsePositiveIntegerQuery(
 		query,
 		"viewportHeight",
 		720,
@@ -434,12 +453,21 @@
 		readonly possessionMotionProbe: () => Promise<PossessionMotionProbe | null>;
 		/** Register one exact boom generation through the production-shaped host adapter. */
 		readonly startKinematicBoom: (
-			request: HttpKinematicBoomStartRequest,
+			request: Omit<
+				HttpKinematicBoomStartRequest,
+				"clearanceRadius" | "projectionRevision"
+			>,
 		) => Promise<HostKinematicBoomIdentity>;
 		/** Replace semantic boom intent while retaining cumulative wheel displacement. */
 		readonly setKinematicBoomIntent: (
 			request: HttpKinematicBoomIntentRequest,
 		) => Promise<"accepted" | "ignored-stale">;
+		/** Resize the canvas and request the matching runtime-FOV projection from the active boom. */
+		readonly reprojectKinematicBoom: (
+			width: number,
+			height: number,
+			fov: number,
+		) => Promise<ProjectionClearanceRevision>;
 		/** Stop one exact boom generation without affecting a replacement generation. */
 		readonly stopKinematicBoom: (
 			identity: HostKinematicBoomIdentity,
@@ -454,6 +482,10 @@
 		};
 		/** Wait for presentation and return camera plus renderer selection state. */
 		readonly probeNextFrameState: () => Promise<{
+			readonly boomProjection: {
+				readonly active: ProjectionClearanceRevision | null;
+				readonly requested: ProjectionClearanceRevision | null;
+			};
 			readonly camera: BrowserHarnessCameraEvidence | null;
 			readonly envCellRenderMode: "flat" | "portal";
 			readonly metrics: FrameSelectionMetrics | null;
@@ -462,10 +494,10 @@
 		readonly probeThirdPersonControls: () => {
 			readonly boomZoomDisplacement: number;
 			readonly cameraYawAfterKeyboardTurn: number;
-			readonly cameraYawAfterPointerOrbit: number;
 			readonly cameraYawBefore: number;
 			readonly characterInputCountAfterKeyboard: number;
 			readonly characterInputCountAfterPointerAndWheel: number;
+			readonly possessionOrbitDelta: readonly [number, number] | null;
 		};
 		/** Apply a host-resolved discontinuity and synchronously snap frontend placement. */
 		readonly relocateExplorerEntity: (
@@ -675,6 +707,11 @@
 	let boomInputSequence = 0;
 	let boomCumulativeZoomDisplacement = 0;
 	let boomStopResult = false;
+	let boomProjectionRevision = 0;
+	let requestedBoomProjection: ProjectionClearanceRevision | null = null;
+	let activeBoomProjection: ProjectionClearanceRevision | null = null;
+	let viewportWidth = $state(INITIAL_VIEWPORT_WIDTH);
+	let viewportHeight = $state(INITIAL_VIEWPORT_HEIGHT);
 	let spawnedEntities: readonly DynamicEntityView[] = [];
 	let runtime: GameRuntime | undefined;
 	let renderer: WebGL2Renderer | undefined;
@@ -1380,7 +1417,10 @@
 	}
 
 	async function startKinematicBoom(
-		request: HttpKinematicBoomStartRequest,
+		request: Omit<
+			HttpKinematicBoomStartRequest,
+			"clearanceRadius" | "projectionRevision"
+		>,
 	): Promise<HostKinematicBoomIdentity> {
 		if (!entityHost)
 			throw new Error(
@@ -1395,6 +1435,27 @@
 			);
 		}
 		const session = new HostKinematicBoomSession(boomTransport(entityHost));
+		const activeRuntime = runtime;
+		const canvas = canvasElement;
+		const evidence = cameraEvidence;
+		if (activeRuntime === undefined || canvas === null || evidence === null) {
+			throw new Error(
+				"Browser harness boom requires an active camera viewport.",
+			);
+		}
+		const revision = ++boomProjectionRevision;
+		if (!Number.isSafeInteger(revision)) {
+			throw new Error("Browser harness boom projection revision exhausted.");
+		}
+		const projection = createProjectionClearanceRevision(
+			revision,
+			{ fov: evidence.fov, near: evidence.near },
+			activeRuntime.resolveViewportExtent(
+				canvas.clientWidth,
+				canvas.clientHeight,
+			),
+		);
+		requestedBoomProjection = projection;
 		await session.start(
 			{
 				possessionGeneration: request.possessionGeneration,
@@ -1407,6 +1468,7 @@
 				maximum: request.maximumReach,
 			},
 			request.viewDirection,
+			projection,
 		);
 		const status = session.status();
 		if (status.kind !== "awaiting-first-path") {
@@ -1416,6 +1478,55 @@
 		boomInputSequence = 0;
 		boomCumulativeZoomDisplacement = 0;
 		return status.identity;
+	}
+
+	async function reprojectKinematicBoom(
+		width: number,
+		height: number,
+		fov: number,
+	): Promise<ProjectionClearanceRevision> {
+		if (
+			!Number.isSafeInteger(width) ||
+			width <= 0 ||
+			!Number.isSafeInteger(height) ||
+			height <= 0
+		) {
+			throw new Error(
+				"Browser harness viewport extent must be positive integers.",
+			);
+		}
+		const session = boomCameraSession;
+		const activeRuntime = runtime;
+		const canvas = canvasElement;
+		const evidence = cameraEvidence;
+		if (
+			session === undefined ||
+			activeRuntime === undefined ||
+			canvas === null ||
+			evidence === null
+		) {
+			throw new Error(
+				"Browser harness reproject requires an active boom viewport.",
+			);
+		}
+		viewportWidth = width;
+		viewportHeight = height;
+		await svelteTick();
+		const revision = ++boomProjectionRevision;
+		if (!Number.isSafeInteger(revision)) {
+			throw new Error("Browser harness boom projection revision exhausted.");
+		}
+		const projection = createProjectionClearanceRevision(
+			revision,
+			{ fov, near: evidence.near },
+			activeRuntime.resolveViewportExtent(
+				canvas.clientWidth,
+				canvas.clientHeight,
+			),
+		);
+		requestedBoomProjection = projection;
+		await session.setClearance(projection);
+		return projection;
 	}
 
 	async function setKinematicBoomIntent(
@@ -1430,7 +1541,7 @@
 			throw new Error("Browser harness frontend boom is not registered.");
 		}
 		if (request.inputSequence <= boomInputSequence) {
-			return decodeHostKinematicBoomIntentReceipt(
+			return decodeHostKinematicBoomUpdateReceipt(
 				await entityHost.setKinematicBoomIntent(request),
 			);
 		}
@@ -1459,6 +1570,8 @@
 		if (session === undefined) return entityHost.stopKinematicBoom(identity);
 		await session.stop();
 		boomCameraSession = undefined;
+		requestedBoomProjection = null;
+		activeBoomProjection = null;
 		return boomStopResult;
 	}
 
@@ -1478,6 +1591,11 @@
 						request as HttpKinematicBoomIntentRequest,
 					);
 				}
+				if (command === "set_kinematic_boom_clearance") {
+					return host.setKinematicBoomClearance(
+						request as HttpKinematicBoomClearanceRequest,
+					);
+				}
 				if (command === "stop_kinematic_boom") {
 					boomStopResult = await host.stopKinematicBoom(
 						request as HostKinematicBoomIdentity,
@@ -1492,13 +1610,17 @@
 	function syncHarnessBoomCamera(nowMs: number): void {
 		const activeRuntime = runtime;
 		const evidence = cameraEvidence;
-		const presentation = boomCameraSession?.presentation(nowMs);
+		const session = boomCameraSession;
+		const presentation = session?.presentation(nowMs);
+		const projection = session?.acknowledgedProjection(nowMs) ?? null;
 		if (
 			activeRuntime === undefined ||
 			evidence === null ||
-			presentation == null
+			presentation == null ||
+			projection === null
 		)
 			return;
+		activeBoomProjection = projection;
 		const { placement, visualPivot } = presentation;
 		const orientation = createCameraLookAtAngles(
 			placement.position,
@@ -1508,19 +1630,25 @@
 			orientation.yawRadians,
 			orientation.pitchRadians,
 		);
-		applyHarnessCamera(activeRuntime, {
-			far: evidence.far,
-			fov: evidence.fov,
-			near: evidence.near,
-			placement: {
-				envCellId: placement.residency.envCellId,
-				landblockId: placement.residency.landblockId,
-				position: placement.position,
-				rotation,
+		applyHarnessCamera(
+			activeRuntime,
+			{
+				far: evidence.far,
+				fov: projection.fov,
+				near: projection.near,
+				placement: {
+					envCellId: placement.residency.envCellId,
+					landblockId: placement.residency.landblockId,
+					position: placement.position,
+					rotation,
+				},
 			},
-		});
+			projection.extent,
+		);
 		cameraEvidence = {
 			...evidence,
+			fov: projection.fov,
+			near: projection.near,
 			envCellId: placement.residency.envCellId,
 			landblockId: placement.residency.landblockId,
 			policy: "host-boom",
@@ -1535,6 +1663,10 @@
 	}
 
 	async function probeNextFrameState(): Promise<{
+		readonly boomProjection: {
+			readonly active: ProjectionClearanceRevision | null;
+			readonly requested: ProjectionClearanceRevision | null;
+		};
 		readonly camera: BrowserHarnessCameraEvidence | null;
 		readonly envCellRenderMode: "flat" | "portal";
 		readonly metrics: FrameSelectionMetrics | null;
@@ -1543,15 +1675,22 @@
 			window.requestAnimationFrame(() => resolve()),
 		);
 		return {
+			boomProjection: {
+				active: activeBoomProjection,
+				requested: requestedBoomProjection,
+			},
 			camera: cameraEvidence,
 			envCellRenderMode: frameSettings.envCellRenderMode,
 			metrics: runtime?.getRendererFrameDiagnostics()?.selectionMetrics ?? null,
 		};
 	}
 
-	function probeThirdPersonControls() {
+	function probeThirdPersonControls(): ReturnType<
+		BrowserHarnessApi["probeThirdPersonControls"]
+	> {
 		const listeners = new Map<string, EventListener>();
 		const routedCharacterInput: unknown[] = [];
+		let possessionOrbitDelta: readonly [number, number] | null = null;
 		let wheelDistance = 0;
 		const canvas = {
 			addEventListener(
@@ -1571,11 +1710,14 @@
 				preventDefault() {},
 				...event,
 			} as Event);
-		const controller = new FrontendCameraController({
+		const controller = new ExplorerCameraInputController({
 			canvas,
 			onChange() {},
 			onCharacterInput: (input) => routedCharacterInput.push(input),
 			onPhysicalWheel: (distance) => (wheelDistance = distance),
+			onPossessionOrbit: (deltaX, deltaY) =>
+				(possessionOrbitDelta = [deltaX, deltaY]),
+			onPossessionWheel: (distance) => (wheelDistance = distance),
 			requestAnimationFrame: () => 1,
 			cancelAnimationFrame() {},
 		});
@@ -1596,7 +1738,6 @@
 			pointerId: 1,
 			shiftKey: false,
 		});
-		const cameraYawAfterPointerOrbit = controller.snapshotState().yawRadians;
 		dispatch("wheel", { deltaX: 0, deltaY: 100, shiftKey: false });
 		const characterInputCountAfterPointerAndWheel = routedCharacterInput.length;
 		controller.dispose();
@@ -1605,10 +1746,10 @@
 				-wheelDistance *
 				FRONTEND_TUNING.explorer.camera.boom.zoomDistanceMultiplier,
 			cameraYawAfterKeyboardTurn,
-			cameraYawAfterPointerOrbit,
 			cameraYawBefore,
 			characterInputCountAfterKeyboard,
 			characterInputCountAfterPointerAndWheel,
+			possessionOrbitDelta,
 		};
 	}
 
@@ -1878,7 +2019,11 @@
 		cameraYawDegrees: number,
 		cameraPitchDegrees: number,
 	): PortalExecutionProbeResult {
-		if (!renderer) throw new Error("Browser harness renderer is not ready.");
+		const activeRuntime = runtime;
+		const canvas = canvasElement;
+		if (!renderer || activeRuntime === undefined || canvas === null) {
+			throw new Error("Browser harness renderer and viewport are not ready.");
+		}
 		if (
 			position.length !== 3 ||
 			!position.every(Number.isFinite) ||
@@ -1907,6 +2052,10 @@
 				},
 			},
 			{ envCellId, kind: "env-cell", landblockId },
+			activeRuntime.resolveViewportExtent(
+				canvas.clientWidth,
+				canvas.clientHeight,
+			),
 		);
 	}
 
@@ -2172,6 +2321,7 @@
 					queuePossessionEvent,
 					setPossessionIntent,
 					setKinematicBoomIntent,
+					reprojectKinematicBoom,
 					startKinematicBoom,
 					stopKinematicBoom,
 					kinematicBoomDirection,
@@ -2183,6 +2333,10 @@
 						const frameDiagnostics =
 							runtime?.getRendererFrameDiagnostics() ?? null;
 						return {
+							boomProjection: {
+								active: activeBoomProjection,
+								requested: requestedBoomProjection,
+							},
 							ambientOcclusionCoverageCensus:
 								renderer?.getAmbientOcclusionCoverageCensus() ?? null,
 							authoredDynamics:
@@ -2234,6 +2388,12 @@
 				};
 				const frame = (): void => {
 					if (!runtime || destroyed) return;
+					// The driving script authors the first camera together with scene interest.
+					// Keep the render loop dormant until that complete primary view exists.
+					if (cameraEvidence === null) {
+						frameHandle = window.requestAnimationFrame(frame);
+						return;
+					}
 					const now = performance.now();
 					if (lastFrameAt !== undefined) {
 						timing = {
@@ -2311,8 +2471,8 @@
 <canvas
 	bind:this={canvasElement}
 	aria-label="Browser harness render viewport"
-	style:height={`${VIEWPORT_HEIGHT}px`}
-	style:width={`${VIEWPORT_WIDTH}px`}
+	style:height={`${viewportHeight}px`}
+	style:width={`${viewportWidth}px`}
 ></canvas>
 
 <style>

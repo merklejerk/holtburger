@@ -7,7 +7,8 @@ use crate::codec::{HEADER_LENGTH, INDEX_ENTRY_LENGTH, MAX_STRING_BYTES};
 use crate::{
     AnimPartChange, CATALOG_FORMAT_VERSION, CatalogLookupError, CatalogOpenError,
     CatalogWriteError, PhysicsBoolOverrides, SubPalette, TemplateAppearance, TemplatePhysics,
-    TextureChange, WeenieCatalog, WeenieTemplate, WieldEntry, write_catalog_atomic,
+    TextureChange, WeenieCatalog, WeenieTemplate, WeenieTemplateIdentity, WieldEntry,
+    write_catalog_atomic,
 };
 
 fn template(wcid: u32) -> WeenieTemplate {
@@ -142,6 +143,33 @@ fn record_census_exposes_only_sorted_identity_and_encoded_size() {
         [2, 9]
     );
     assert!(records.iter().all(|record| record.encoded_length > 0));
+}
+
+#[test]
+fn identity_scan_decodes_only_canonical_identity_prefixes() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("identities.hwc");
+    let mut unnamed = template(9);
+    unnamed.name = None;
+    write_catalog_atomic(&path, &[unnamed, template(2)]).unwrap();
+
+    let catalog = WeenieCatalog::open(path).unwrap();
+
+    assert_eq!(
+        catalog.template_identities().unwrap(),
+        [
+            WeenieTemplateIdentity {
+                wcid: 2,
+                class_name: "wcid_2_class".to_owned(),
+                name: Some("WCID 2".to_owned()),
+            },
+            WeenieTemplateIdentity {
+                wcid: 9,
+                class_name: "wcid_9_class".to_owned(),
+                name: None,
+            },
+        ]
+    );
 }
 
 #[test]
@@ -449,6 +477,27 @@ fn malformed_record_is_reported_at_lookup() {
         CatalogLookupError::MalformedRecord { wcid: 1, .. }
     ));
     assert!(error.to_string().contains("invalid option tag 3"));
+
+    let identity_error = catalog.template_identities().unwrap_err();
+    assert!(identity_error.to_string().contains("invalid option tag 3"));
+}
+
+#[test]
+fn identity_scan_rejects_invalid_prefix_utf8_with_the_indexed_wcid() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("malformed-identity-utf8.hwc");
+    write_catalog_atomic(&path, &[template(7)]).unwrap();
+    mutate(&path, |bytes| {
+        let payload_offset = read_u64(bytes, 24) as usize;
+        let class_name_offset = payload_offset + 4 + 4 + 4;
+        bytes[class_name_offset] = 0xff;
+    });
+
+    let catalog = WeenieCatalog::open(path).unwrap();
+    let error = catalog.template_identities().unwrap_err();
+
+    assert!(error.to_string().contains("WCID 7 identity"));
+    assert!(error.to_string().contains("class_name is not UTF-8"));
 }
 
 fn canonicalized(mut value: WeenieTemplate) -> WeenieTemplate {

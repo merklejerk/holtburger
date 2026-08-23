@@ -7,6 +7,11 @@ architecture against real client data. The primary client route is still a
 minimal shell while gameplay-facing application work catches up with the
 underlying runtime.
 
+Explorer weenie discovery remains app-local: the Tauri host lazily indexes the optional offline
+catalog and returns bounded ranked identity results to the Entities picker. The browser commits one
+exact WCID and the existing numeric spawn path remains the sole mutation contract; neither complete
+catalog records nor fuzzy scores cross the adapter.
+
 Use `npm run harness:browser -- ...` for non-interactive browser, runtime,
 renderer, content-lifecycle, and WebGL verification. The harness is an
 agent-operated diagnostic playground and is not limited to terrain scenarios.

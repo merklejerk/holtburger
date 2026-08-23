@@ -975,6 +975,22 @@ fn explorer_catalog_capability(
     driver.catalog_capability()
 }
 
+/// Returns one bounded host-ranked catalog result set without touching entity state.
+#[tauri::command]
+async fn search_explorer_weenies(
+    driver: tauri::State<'_, Arc<explorer_entity_driver::ExplorerEntityDriver>>,
+    request: explorer_weenie_catalog::ExplorerWeenieSearchRequest,
+) -> Result<Vec<explorer_weenie_catalog::ExplorerWeenieSearchResult>, String> {
+    let driver = Arc::clone(&driver);
+    tokio::task::spawn_blocking(move || {
+        driver
+            .search_weenies(&request)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Explorer weenie search task failed: {error}"))?
+}
+
 /// Emits one complete current snapshot after the frontend has installed its listener.
 #[tauri::command]
 fn request_explorer_dynamic_entity_snapshot(
@@ -1952,6 +1968,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             host_status,
             explorer_catalog_capability,
+            search_explorer_weenies,
             request_explorer_dynamic_entity_snapshot,
             spawn_explorer_entity,
             despawn_explorer_entity,

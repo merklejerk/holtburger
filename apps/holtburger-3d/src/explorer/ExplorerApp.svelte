@@ -71,6 +71,11 @@
 		tauriHostKinematicBoomTransport,
 		type HostKinematicBoomStatus,
 	} from "./host-kinematic-boom-session";
+	import {
+		findSelectedExplorerEntity,
+		refreshesExplorerEntityPanel,
+		type ExplorerEntitySelection,
+	} from "./explorer-entity-panel-state";
 	import { resolveKinematicBoomDirection } from "../lib/game/motion/host-kinematic-boom-path";
 	import { createCameraLookAtAngles } from "../lib/game/math/camera-orientation";
 	import {
@@ -87,8 +92,9 @@
 	} from "./explorer-dynamic-entity-session";
 	import {
 		createExplorerSpawnRequest,
-		parseExplorerWcid,
 		type ExplorerCatalogCapability,
+		type ExplorerWeenieSearchRequest,
+		type ExplorerWeenieSearchResult,
 	} from "./explorer-entity-commands";
 	import type {
 		DynamicEntityEvent,
@@ -636,12 +642,32 @@
 		);
 	}
 
-	/** Project the one authoritative mirror into Svelte and the shared presentation runtime. */
+	/** Publish a cold panel snapshot and retire possession if its exact generation disappeared. */
+	function publishExplorerEntityPanelSnapshot(): readonly DynamicEntityView[] {
+		const session = dynamicEntitySession;
+		if (session === undefined) return [];
+		const entities = session.mirror.entities();
+		spawnedEntities = entities;
+		const held = explorerPossession;
+		if (
+			held !== null &&
+			held.guid !== null &&
+			!entities.some(
+				(entity) =>
+					entity.identity.guid === held.guid &&
+					entity.generation === held.entityGeneration,
+			)
+		) {
+			retireFrontendPossession();
+		}
+		return entities;
+	}
+
+	/** Project lifecycle state from the one authoritative mirror into Svelte and presentation. */
 	function reconcileSpawnedEntities(): Promise<void> {
 		const session = dynamicEntitySession;
 		if (session === undefined) return Promise.resolve();
-		const entities = session.mirror.entities();
-		spawnedEntities = entities;
+		const entities = publishExplorerEntityPanelSnapshot();
 		const runtime = gameRuntime;
 		if (runtime === undefined) return Promise.resolve();
 		const revision = ++dynamicEntityReconciliationRevision;
@@ -658,25 +684,13 @@
 
 	/** Route high-frequency accepted paths without restarting visual resource reconciliation. */
 	function acceptDynamicEntityEvent(event: DynamicEntityEvent): void {
-		const session = dynamicEntitySession;
-		if (session === undefined) return;
-		spawnedEntities = session.mirror.entities();
-		const held = explorerPossession;
-		if (
-			held !== null &&
-			held.guid !== null &&
-			!spawnedEntities.some(
-				(entity) =>
-					entity.identity.guid === held.guid &&
-					entity.generation === held.entityGeneration,
-			)
-		) {
-			retireFrontendPossession();
-		}
+		if (dynamicEntitySession === undefined) return;
 		if (event.kind !== "advanced") {
 			void reconcileSpawnedEntities();
 			return;
 		}
+		if (refreshesExplorerEntityPanel(event))
+			publishExplorerEntityPanelSnapshot();
 		const runtime = gameRuntime;
 		if (runtime === undefined) return;
 		try {
@@ -694,20 +708,8 @@
 	}: ExplorerFixedTickReceipt): void {
 		const entityEvent = envelope.entityEvent;
 		if (entityEvent !== null) {
-			const session = dynamicEntitySession;
-			if (session !== undefined) spawnedEntities = session.mirror.entities();
-			const held = explorerPossession;
-			if (
-				held !== null &&
-				held.guid !== null &&
-				!spawnedEntities.some(
-					(entity) =>
-						entity.identity.guid === held.guid &&
-						entity.generation === held.entityGeneration,
-				)
-			) {
-				retireFrontendPossession();
-			}
+			if (refreshesExplorerEntityPanel(entityEvent))
+				publishExplorerEntityPanelSnapshot();
 			try {
 				gameRuntime?.applySpawnedDynamicEntityAdvances(
 					entityEvent.batch,
@@ -728,7 +730,7 @@
 	}
 
 	async function spawnExplorerEntity(
-		rawWcid: string,
+		wcid: number,
 		distance: number,
 	): Promise<void> {
 		const session = dynamicEntitySession;
@@ -740,7 +742,7 @@
 		if (placement === null)
 			throw new Error("Spawn requires a currently presented camera placement.");
 		const request = createExplorerSpawnRequest(
-			parseExplorerWcid(rawWcid),
+			wcid,
 			placement,
 			physicalCameraInput(controller).viewDirection,
 			distance,
@@ -748,6 +750,15 @@
 		);
 		await session.spawn(request);
 		await dynamicEntityReconciliation;
+	}
+
+	async function searchExplorerWeenies(
+		request: ExplorerWeenieSearchRequest,
+	): Promise<readonly ExplorerWeenieSearchResult[]> {
+		const session = dynamicEntitySession;
+		if (!session)
+			throw new Error("Explorer weenie search requires an active runtime.");
+		return session.searchWeenies(request);
 	}
 
 	/// Drive with no axis held, used when a stance changes while no key is down.
@@ -771,8 +782,6 @@
 	/// Owns only the boom's length. Orbit stays with the look controller, which already produces
 	/// yaw and pitch from pointer input and keeps them continuous across possession and release.
 	let boomCameraSession: HostKinematicBoomSession | undefined;
-	/** Live policy evidence shown beside the possessed entity while debugging camera placement. */
-	let boomCameraStatus = $state<HostKinematicBoomStatus | null>(null);
 	/// Session-total wheel displacement is accumulated host-side; this is only the unsent frame delta.
 	///
 	/// Command transport failures report through the existing camera-host error surface.
@@ -790,7 +799,6 @@
 		const previous = boomCameraSession;
 		boomCameraSession = undefined;
 		await previous?.stop();
-		boomCameraStatus = null;
 		pendingBoomZoom = 0;
 		const controller = cameraController;
 		if (controller === undefined) {
@@ -813,7 +821,6 @@
 				physicalCameraInput(controller).viewDirection,
 			),
 		);
-		if (boomCameraSession === boom) boomCameraStatus = boom.status();
 	}
 
 	async function endBoomCamera(): Promise<void> {
@@ -821,10 +828,24 @@
 		// has been writing that position every frame; only translation authority returns here.
 		const boom = boomCameraSession;
 		boomCameraSession = undefined;
-		boomCameraStatus = null;
 		pendingBoomZoom = 0;
 		restoreCameraControlScheme();
 		await boom?.stop();
+	}
+
+	/** Pull-only diagnostic read; callers choose an explicit low-frequency sampling policy. */
+	function readBoomCameraStatus(): HostKinematicBoomStatus | null {
+		return boomCameraSession?.status() ?? null;
+	}
+
+	/** Pull one exact current generation for disclosure-scoped volatile diagnostics. */
+	function readExplorerEntity(
+		selection: ExplorerEntitySelection,
+	): DynamicEntityView | null {
+		const session = dynamicEntitySession;
+		return session === undefined
+			? null
+			: findSelectedExplorerEntity(session.mirror.entities(), selection);
 	}
 
 	/// Route one frame to whichever camera currently owns position.
@@ -868,7 +889,6 @@
 				if (boomCameraSession === boom)
 					physicalCameraError = errorMessage(error);
 			});
-		boomCameraStatus = boom.status();
 		const presentation = boom.presentation(nowMs);
 		if (presentation === null) {
 			const placement = coordinator.presentedPlacement();
@@ -1128,7 +1148,6 @@
 			cameraController = undefined;
 			physicalCameraSession = undefined;
 			boomCameraSession = undefined;
-			boomCameraStatus = null;
 			dynamicEntitySession = undefined;
 			unsubscribeDynamicEntities = undefined;
 			unsubscribeFixedTicks = undefined;
@@ -1453,11 +1472,13 @@
 			{spawnedEntities}
 			{spawnedEntityPresentationError}
 			{spawnExplorerEntity}
+			{searchExplorerWeenies}
 			{despawnExplorerEntity}
 			{possessExplorerEntity}
 			{setExplorerEntityStance}
 			{explorerPossession}
-			{boomCameraStatus}
+			{readExplorerEntity}
+			{readBoomCameraStatus}
 		/>
 	</div>
 </div>

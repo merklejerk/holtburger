@@ -6,11 +6,15 @@ import {
 import {
 	decodeExplorerCatalogCapability,
 	decodeExplorerEntityMutationReceipt,
+	decodeExplorerWeenieSearchRequest,
+	decodeExplorerWeenieSearchResults,
 	type ExplorerCatalogCapability,
 	type ExplorerEntityMutationReceipt,
 	type ExplorerEntityRelocationRequest,
 	type ExplorerEntitySpawnRequest,
 	type LaunchExplorerEntityRequest,
+	type ExplorerWeenieSearchRequest,
+	type ExplorerWeenieSearchResult,
 } from "./explorer-entity-commands";
 import {
 	decodeExplorerPossession,
@@ -127,6 +131,18 @@ export class ExplorerDynamicEntitySession {
 	async catalogCapability(): Promise<ExplorerCatalogCapability> {
 		return decodeExplorerCatalogCapability(
 			await this.#transport.invoke("explorer_catalog_capability"),
+		);
+	}
+
+	/** Search the host-owned catalog index and validate its bounded ordered identities. */
+	async searchWeenies(
+		request: ExplorerWeenieSearchRequest,
+	): Promise<readonly ExplorerWeenieSearchResult[]> {
+		const validatedRequest = decodeExplorerWeenieSearchRequest(request);
+		return decodeExplorerWeenieSearchResults(
+			await this.#transport.invoke("search_explorer_weenies", {
+				request: validatedRequest,
+			}),
 		);
 	}
 

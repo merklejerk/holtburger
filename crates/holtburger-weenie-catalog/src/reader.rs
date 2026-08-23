@@ -5,11 +5,11 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 use crate::CATALOG_FORMAT_VERSION;
-use crate::WeenieTemplate;
 use crate::codec::{
     HEADER_LENGTH, Header, INDEX_ENTRY_LENGTH, IndexEntry, MAX_CATALOG_RECORDS, MAX_RECORD_BYTES,
-    decode_template,
+    decode_template, decode_template_identity,
 };
+use crate::{WeenieTemplate, WeenieTemplateIdentity};
 
 /// Fully validated catalog handle with only the fixed index retained in memory.
 #[derive(Debug)]
@@ -17,6 +17,8 @@ pub struct WeenieCatalog {
     file: File,
     path: PathBuf,
     index: Vec<IndexEntry>,
+    payload_offset: u64,
+    payload_length: u64,
 }
 
 /// Public census metadata for one catalog record; payload offsets remain an implementation detail.
@@ -82,7 +84,13 @@ impl WeenieCatalog {
         }
         validate_index(&path, header, &index)?;
 
-        Ok(Self { file, path, index })
+        Ok(Self {
+            file,
+            path,
+            index,
+            payload_offset: header.payload_offset,
+            payload_length: header.payload_length,
+        })
     }
 
     /// Number of indexed WCID records.
@@ -101,6 +109,86 @@ impl WeenieCatalog {
             wcid: entry.wcid,
             encoded_length: entry.payload_length,
         })
+    }
+
+    /// Reads every template's identity prefix in canonical WCID order with one payload-region read.
+    ///
+    /// The returned values are intentionally insufficient to prepare an entity. Exact lookup remains
+    /// the only API that validates and decodes the complete template payload.
+    pub fn template_identities(
+        &self,
+    ) -> Result<Vec<WeenieTemplateIdentity>, CatalogIdentityReadError> {
+        let payload_length = usize::try_from(self.payload_length).map_err(|_| {
+            CatalogIdentityReadError::MalformedRecord {
+                path: self.path.clone(),
+                wcid: self.index.first().map_or(0, |entry| entry.wcid),
+                reason: "catalog payload length does not fit usize".to_owned(),
+            }
+        })?;
+        let mut payloads = vec![0_u8; payload_length];
+        read_exact_at(&self.file, &mut payloads, self.payload_offset).map_err(|source| {
+            CatalogIdentityReadError::Read {
+                path: self.path.clone(),
+                source,
+            }
+        })?;
+
+        self.index
+            .iter()
+            .map(|entry| {
+                let relative_offset = entry
+                    .payload_offset
+                    .checked_sub(self.payload_offset)
+                    .ok_or(CatalogIdentityReadError::MalformedRecord {
+                        path: self.path.clone(),
+                        wcid: entry.wcid,
+                        reason: "record payload precedes catalog payload region".to_owned(),
+                    })?;
+                let start = usize::try_from(relative_offset).map_err(|_| {
+                    CatalogIdentityReadError::MalformedRecord {
+                        path: self.path.clone(),
+                        wcid: entry.wcid,
+                        reason: "record payload offset does not fit usize".to_owned(),
+                    }
+                })?;
+                let length = usize::try_from(entry.payload_length).map_err(|_| {
+                    CatalogIdentityReadError::MalformedRecord {
+                        path: self.path.clone(),
+                        wcid: entry.wcid,
+                        reason: "record length does not fit usize".to_owned(),
+                    }
+                })?;
+                let end = start.checked_add(length).ok_or_else(|| {
+                    CatalogIdentityReadError::MalformedRecord {
+                        path: self.path.clone(),
+                        wcid: entry.wcid,
+                        reason: "record payload range overflow".to_owned(),
+                    }
+                })?;
+                let payload = payloads.get(start..end).ok_or_else(|| {
+                    CatalogIdentityReadError::MalformedRecord {
+                        path: self.path.clone(),
+                        wcid: entry.wcid,
+                        reason: "record payload exceeds catalog payload region".to_owned(),
+                    }
+                })?;
+                let identity = decode_template_identity(payload).map_err(|error| {
+                    CatalogIdentityReadError::MalformedRecord {
+                        path: self.path.clone(),
+                        wcid: entry.wcid,
+                        reason: error.to_string(),
+                    }
+                })?;
+                if identity.wcid != entry.wcid {
+                    return Err(CatalogIdentityReadError::MalformedRecord {
+                        path: self.path.clone(),
+                        wcid: entry.wcid,
+                        reason: format!("record identity is WCID {}", identity.wcid),
+                    });
+                }
+                Ok(identity)
+            })
+            .collect()
     }
 
     /// Resolves one WCID with binary search and one positioned payload read.
@@ -355,6 +443,30 @@ pub enum CatalogLookupError {
         /// Catalog path.
         path: PathBuf,
         /// Requested WCID.
+        wcid: u32,
+        /// Exact violated invariant.
+        reason: String,
+    },
+}
+
+/// Failure while scanning the identity prefixes of the validated catalog payload region.
+#[derive(Debug, Error)]
+pub enum CatalogIdentityReadError {
+    /// The contiguous payload region could not be read.
+    #[error("could not read weenie identity catalog at {path}: {source}")]
+    Read {
+        /// Catalog path.
+        path: PathBuf,
+        /// Underlying filesystem failure.
+        #[source]
+        source: io::Error,
+    },
+    /// One indexed payload violates the identity-prefix codec.
+    #[error("WCID {wcid} identity in weenie catalog at {path} is malformed: {reason}")]
+    MalformedRecord {
+        /// Catalog path.
+        path: PathBuf,
+        /// Indexed WCID whose prefix failed.
         wcid: u32,
         /// Exact violated invariant.
         reason: String,

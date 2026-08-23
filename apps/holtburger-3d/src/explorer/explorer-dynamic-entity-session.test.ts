@@ -128,6 +128,32 @@ function worldPoint(pose: ReturnType<typeof entity>["placement"]["pose"]) {
 }
 
 describe("ExplorerDynamicEntitySession", () => {
+	it("sends the exact search envelope and rejects malformed host identities", async () => {
+		const transport = new RecordingTransport();
+		transport.responses.set("search_explorer_weenies", [
+			{ wcid: 42, name: "Drudge", className: "drudge" },
+		]);
+		const session = new ExplorerDynamicEntitySession(transport);
+
+		await expect(
+			session.searchWeenies({ query: "drudg", limit: 12 }),
+		).resolves.toEqual([{ wcid: 42, name: "Drudge", className: "drudge" }]);
+		expect(transport.invocations).toEqual([
+			["search_explorer_weenies", { request: { query: "drudg", limit: 12 } }],
+		]);
+		await expect(
+			session.searchWeenies({ query: "drudg", limit: 0 }),
+		).rejects.toThrow();
+		expect(transport.invocations).toHaveLength(1);
+
+		transport.responses.set("search_explorer_weenies", [
+			{ wcid: 42, name: "Drudge" },
+		]);
+		await expect(
+			session.searchWeenies({ query: "drudg", limit: 12 }),
+		).rejects.toThrow();
+	});
+
 	it("waits for a same-generation mutation event instead of mistaking prior state for completion", async () => {
 		const transport = new FakeTransport();
 		const session = new ExplorerDynamicEntitySession(transport);

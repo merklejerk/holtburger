@@ -437,6 +437,8 @@ fn encode_appearance(
     encoder.optional_i32(appearance.default_combat_style);
     encoder.optional_i32(appearance.clothing_priority);
     encoder.optional_i32(appearance.valid_locations);
+    encoder.optional_u32(appearance.palette_template);
+    encoder.optional_f64(appearance.shade, "appearance.shade")?;
     Ok(())
 }
 
@@ -461,6 +463,8 @@ fn decode_appearance(decoder: &mut Decoder<'_>) -> Result<TemplateAppearance, Co
         default_combat_style: decoder.optional_i32("appearance.default_combat_style")?,
         clothing_priority: decoder.optional_i32("appearance.clothing_priority")?,
         valid_locations: decoder.optional_i32("appearance.valid_locations")?,
+        palette_template: decoder.optional_u32("appearance.palette_template")?,
+        shade: decoder.optional_f64("appearance.shade")?,
     })
 }
 

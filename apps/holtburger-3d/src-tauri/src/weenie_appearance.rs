@@ -14,7 +14,7 @@
 //!    guards (`Creature.cs:181`), discarding the weenie's own value.
 
 use holtburger_dat::file_type::char_gen::{CharGen, CharacterGenGender};
-use holtburger_dat::file_type::{ClothingTable, ObjDesc};
+use holtburger_dat::file_type::{ClothingBuildObjDescError, ClothingTable, ObjDesc};
 use holtburger_weenie_catalog::{TemplateAppearance, WieldEntry};
 use holtburger_world::{
     EntityAppearance, EntityPartChange, EntitySubPalette, EntityTextureChange, PaintedWieldedItem,
@@ -367,6 +367,97 @@ const GENDER_NAMES: [(&str, i32); 2] = [("Male", 1), ("Female", 2)];
 /// row's `shade` column carries a selection probability instead of a CLO shade.
 const DESTINATION_TREASURE: i32 = 8;
 
+/// A `create_list` row naming no weenie, which content uses to spend a probability chunk's
+/// remaining mass on "nothing". ACE selects such a row like any other and only drops it afterwards,
+/// when `WorldObjectFactory` fails to create the weenie (`Creature_Equipment.cs:622-624`), so the
+/// row must keep taking part in the selection walk before it is discarded.
+const EMPTY_WIELD_WCID: u32 = 0;
+
+/// The template key `ClothingTable::build_obj_desc` reads as "this garment contributes parts and
+/// textures but no palette layer", matching retail's own early return (`acclient.c:444343`).
+const NO_PALETTE_TEMPLATE: u32 = 0;
+
+/// Whether a shade can select a palette at all.
+///
+/// Retail refuses to index a palette set outside `[0, 1]` (`acclient.c:449254`), our `PaletteSet`
+/// applies the same bound, and ACE returns zero from the same guard. Content authors shades outside
+/// it, so this is an authored fact to read rather than a failure to report.
+fn selects_a_palette(shade: f64) -> bool {
+    (0.0..=1.0).contains(&shade)
+}
+
+/// The CLO palette selection for one application of a clothing table.
+///
+/// The selection reaches a garment from two different carriers — the weenie's own properties, or a
+/// wield row overlaid on the created item's properties — which ACE resolves in two different places.
+/// Carrying the resolved answer as one value keeps that resolution at the layer that owns it instead
+/// of re-deriving it at each call site, which is exactly how the wield row's palette came to be read
+/// without its fallback.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ClothingPaletteSelection {
+    /// `PropertyInt::PaletteTemplate`. Absence is distinct from `Some(0)` at the source, though both
+    /// resolve to "no palette layer" once composed (`acclient.c:444343`).
+    pub palette_template: Option<u32>,
+    /// `PropertyFloat::Shade`, the hue handed to a CLO palette set.
+    pub shade: Option<f64>,
+}
+
+impl ClothingPaletteSelection {
+    /// The palette a weenie selects through its own `ClothingBase`.
+    pub fn from_own_properties(appearance: &TemplateAppearance) -> Self {
+        Self {
+            palette_template: appearance.palette_template,
+            shade: appearance.shade,
+        }
+    }
+
+    /// The palette a wielded item selects once its wield row is overlaid on its own properties.
+    ///
+    /// ACE creates the item from its weenie and then overwrites only what the row authored: the
+    /// row's palette wins when positive, and its shade wins only on a non-treasure row, where that
+    /// column is a shade rather than a selection probability
+    /// (`WorldObjectFactory.cs:409-414`). No decompile counterpart exists — the client never sees a
+    /// `create_list` — but two retail comparisons agree with it, WCIDs 25709 and 11506.
+    pub fn overlay(entry: &WieldEntry, item: &TemplateAppearance) -> Self {
+        Self {
+            palette_template: (entry.palette_template > 0)
+                .then_some(entry.palette_template)
+                .or(item.palette_template),
+            shade: if entry.destination_type & DESTINATION_TREASURE == 0 {
+                Some(entry.shade)
+            } else {
+                item.shade
+            },
+        }
+    }
+
+    /// The key handed to `ClothingTable::build_obj_desc`, which reads zero as "no palette layer".
+    fn template_key(self) -> u32 {
+        self.palette_template.unwrap_or(NO_PALETTE_TEMPLATE)
+    }
+
+    /// The hue handed to the palette set; ACE defaults an unauthored shade to zero
+    /// (`WorldObject_Networking.cs:956-958`).
+    fn hue(self) -> f64 {
+        self.shade.unwrap_or_default()
+    }
+}
+
+/// One clothing base to apply, and the weenie that owns it.
+///
+/// `wcid` and `clothing_base_did` are both bare identifiers that would transpose silently, so they
+/// travel with the palette selection they are always resolved alongside rather than as three loose
+/// arguments.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ClothingSource {
+    /// The weenie whose clothing base this is: a wielded item, or the wearer painting itself.
+    pub wcid: u32,
+    /// `PropertyDataId::ClothingBase`.
+    pub clothing_base_did: u32,
+    /// The palette this application selects.
+    pub palette: ClothingPaletteSelection,
+}
+
 /// One wielded item's facts, joined from its own catalog template by the caller.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WieldedItem {
@@ -378,10 +469,19 @@ pub struct WieldedItem {
     pub classification: Option<WieldedItemClassification>,
     /// `PropertyInt::ClothingPriority` coverage mask, used to order clothing.
     pub clothing_priority: Option<i32>,
-    /// `PaletteTemplate` selector from the wield row; zero is unset.
-    pub palette_template: u32,
-    /// CLO shade from the wield row.
-    pub shade: f64,
+    /// Palette selection resolved once from the wield row and the item's own properties.
+    pub palette: ClothingPaletteSelection,
+}
+
+impl WieldedItem {
+    /// The clothing base this item applies, absent when it carries none and so paints nothing.
+    pub fn clothing_source(&self) -> Option<ClothingSource> {
+        Some(ClothingSource {
+            wcid: self.wcid,
+            clothing_base_did: self.clothing_base_did?,
+            palette: self.palette,
+        })
+    }
 }
 
 /// Selects the wield rows that actually dress the wearer this spawn.
@@ -390,6 +490,10 @@ pub struct WieldedItem {
 /// probability in source order and one row per 0-1 chunk is selected, mirroring
 /// `Creature_Equipment.CreateListSelect`; the same seeded stream keeps the outcome stable per
 /// spawn.
+///
+/// Every returned row names a real weenie: [`EMPTY_WIELD_WCID`] rows take part in the walk, so
+/// they still spend their probability mass, and are discarded only once it has been spent. That
+/// postcondition is what lets the caller treat an unresolvable WCID as a hard error.
 pub fn select_wielded(entries: &[WieldEntry], seed: u64) -> Vec<WieldEntry> {
     let mut roll = Roll::new(seed);
     let mut draw = roll.unit();
@@ -416,22 +520,50 @@ pub fn select_wielded(entries: &[WieldEntry], seed: u64) -> Vec<WieldEntry> {
         chunk_selected = true;
         selected.push(*entry);
     }
+    selected.retain(|entry| entry.wcid != EMPTY_WIELD_WCID);
     selected
 }
 
-/// Merge worn clothing and armor onto an already-resolved body appearance.
+/// Everything worn equipment contributes, in ACE's layer order, held apart from the body.
+///
+/// ACE discards this entire layer when it turns out to paint nothing and the wearer has a
+/// `ClothingBase` of its own (`Creature_Networking.cs:239`), so the merge yields it rather than
+/// folding it straight into the body appearance.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct WornEquipmentLayer(Vec<ObjDesc>);
+
+impl WornEquipmentLayer {
+    /// ACE's `coverage.Count == 0` test, which asks what was painted rather than what was worn.
+    ///
+    /// A garment whose clothing table dresses this setup with no object effects — a pure recolour,
+    /// which is exactly the shape of the rabbit tables — adds no coverage entry in ACE, and neither
+    /// does one whose table does not dress this body at all.
+    pub fn paints_body(&self) -> bool {
+        self.0
+            .iter()
+            .any(|obj_desc| !obj_desc.anim_part_changes.is_empty())
+    }
+
+    /// Layer these garments onto an already-resolved body appearance, in order.
+    pub fn apply(&self, appearance: &mut EntityAppearance) {
+        for obj_desc in &self.0 {
+            push_clothing_obj_desc(appearance, obj_desc);
+        }
+    }
+}
+
+/// Resolve worn clothing and armor against one wearer's setup.
 ///
 /// Items are ordered as `Creature_Networking.CalculateObjDesc` orders them: clothing by its
 /// authored `ClothingPriority`, then armor by the coverage its clothing table paints. An item
 /// whose clothing table does not dress this setup is skipped, exactly as ACE skips it, because
 /// that is authored content rather than an error.
-pub fn merge_worn_equipment(
-    appearance: &mut EntityAppearance,
+pub fn resolve_worn_equipment(
     setup_did: u32,
     items: &[WieldedItem],
     clothing_table: impl Fn(u32) -> Option<ClothingTable>,
     palette_set: impl Fn(u32, f64) -> Option<u32>,
-) -> Result<(), WornEquipmentError> {
+) -> Result<WornEquipmentLayer, ClothingError> {
     let mut clothing = Vec::new();
     let mut armor = Vec::new();
     for item in items {
@@ -442,7 +574,7 @@ pub fn merge_worn_equipment(
         let Some(clothing_base_did) = item.clothing_base_did else {
             continue;
         };
-        let table = clothing_table(clothing_base_did).ok_or(WornEquipmentError::MissingTable {
+        let table = clothing_table(clothing_base_did).ok_or(ClothingError::MissingTable {
             wcid: item.wcid,
             clothing_base_did,
         })?;
@@ -460,97 +592,131 @@ pub fn merge_worn_equipment(
     clothing.sort_by_key(|(priority, item, _)| (*priority, item.wcid));
     armor.sort_by_key(|(coverage, item, _)| (*coverage, item.wcid));
 
+    let mut layer = WornEquipmentLayer::default();
+
     for (_, item, table) in clothing.into_iter().chain(
         armor
             .into_iter()
             .map(|(coverage, item, table)| (coverage as i32, item, table)),
     ) {
         let obj_desc =
-            build_clothing(&table, setup_did, &item, &palette_set).map_err(|source| {
-                WornEquipmentError::Build {
+            build_clothing(&table, setup_did, item.palette, &palette_set).map_err(|message| {
+                ClothingError::Build {
                     wcid: item.wcid,
-                    message: source,
+                    message,
                 }
             })?;
-        push_clothing_obj_desc(appearance, &obj_desc);
+        layer.0.push(obj_desc);
     }
-    Ok(())
+    Ok(layer)
 }
 
-/// Apply one item's `ClothingBase` to its own setup for separate child rendering.
+/// Apply one `ClothingBase` to one setup, layering the result onto an appearance.
 ///
-/// Held items use CLO for their own palette/model variants, never to paint the wearer. The wield
-/// row supplies the same palette template and shade ACE passes while constructing the child.
-pub fn merge_item_clothing(
+/// This is ACE's base `CalculateObjDesc` (`WorldObject_Networking.cs:916-973`) reduced to the part
+/// that produces appearance rows. Three callers share it: a weenie painting itself, a held item
+/// painting its own model, and — through [`resolve_worn_equipment`] — a garment painting its
+/// wearer. They differ only in which setup they dress and where the palette selection came from,
+/// so the mechanism belongs here once rather than at each call site.
+pub fn apply_clothing_base(
     appearance: &mut EntityAppearance,
     setup_did: u32,
-    item: &WieldedItem,
+    source: ClothingSource,
     clothing_table: impl Fn(u32) -> Option<ClothingTable>,
     palette_set: impl Fn(u32, f64) -> Option<u32>,
-) -> Result<(), WornEquipmentError> {
-    let Some(clothing_base_did) = item.clothing_base_did else {
-        return Ok(());
-    };
-    let table = clothing_table(clothing_base_did).ok_or(WornEquipmentError::MissingTable {
-        wcid: item.wcid,
+) -> Result<(), ClothingError> {
+    let ClothingSource {
+        wcid,
+        clothing_base_did,
+        palette,
+    } = source;
+    let table = clothing_table(clothing_base_did).ok_or(ClothingError::MissingTable {
+        wcid,
         clothing_base_did,
     })?;
-    let obj_desc = build_clothing(&table, setup_did, item, &palette_set).map_err(|source| {
-        WornEquipmentError::Build {
-            wcid: item.wcid,
-            message: source,
-        }
-    })?;
+    let obj_desc = build_clothing(&table, setup_did, palette, &palette_set)
+        .map_err(|message| ClothingError::Build { wcid, message })?;
     push_clothing_obj_desc(appearance, &obj_desc);
     Ok(())
 }
 
-/// Build one garment's ObjDesc, applying ACE's palette-template fallback.
+/// Build one garment's ObjDesc, separating content's authored gaps from real failures.
 ///
-/// `ClothingTable::build_obj_desc` rejects an absent palette template, but ACE substitutes the
-/// first defined effect and simply skips palettes when a garment defines none
-/// (`WorldObject_Networking.cs:946-951`). That substitution is server policy rather than format
-/// semantics, so it lives here instead of in the decoder.
+/// Retail's `ClothingTable::BuildObjDesc` treats three authored conditions as ordinary no-ops, and
+/// this wrapper must not be stricter than the primitive it wraps:
+///
+/// - a table that does not dress this body returns success with the ObjDesc untouched
+///   (`acclient.c:444330-444331`), which ACE matches by skipping its clothing block
+///   (`WorldObject_Networking.cs:923`);
+/// - a zero template key yields parts and textures but no palettes (`acclient.c:444343`);
+/// - a template key absent from the table yields the same (`acclient.c:444345-444347`).
+///
+/// ACE substitutes the table's first defined template in that last case
+/// (`WorldObject_Networking.cs:948-951`). We deliberately do not. Retail defines no such fallback,
+/// and WCID 17 Gromnie confirms it observationally: its own template 71 is absent from table
+/// `0x100000AF`, retail leaves it unpainted, and ACE's substitution would have replaced all 2048
+/// palette entries. Census 2026-08-22: 274 weenies request an absent template.
 fn build_clothing(
     table: &ClothingTable,
     setup_did: u32,
-    item: &WieldedItem,
+    palette: ClothingPaletteSelection,
     palette_set: &impl Fn(u32, f64) -> Option<u32>,
 ) -> Result<ObjDesc, String> {
     let resolver = |set: u32, hue: f64| {
-        palette_set(set, hue).ok_or(
-            holtburger_dat::file_type::ClothingBuildObjDescError::MissingPaletteSet {
-                palette_set_id: set,
-            },
-        )
+        palette_set(set, hue).ok_or(ClothingBuildObjDescError::MissingPaletteSet {
+            palette_set_id: set,
+        })
     };
-    let requested = item.palette_template;
-    match table.build_obj_desc(setup_did, requested, item.shade, resolver) {
+    let hue = palette.hue();
+    // RETAIL DIVERGENCE: retail range-checks the shade and hands back an invalid palette DID for
+    // anything outside [0, 1] (`acclient.c:449254-449262`). That invalid subpalette then makes
+    // `Palette::Modify` abandon the *entire* subpalette list (`acclient.c:349808,349824`), so
+    // `CPartArray::SetPalette` recolours nothing at all on the object (`acclient.c:314006-314021`).
+    // We skip only this template's ranges instead of poisoning the object. Census 2026-08-22: both
+    // shipped cases are wield rows on WCIDs 31365 and 28701 carrying shades 14 and 1.2, and both
+    // are held weapons whose whole subpalette set comes from this one template at this one shade —
+    // so every entry is invalid under either reading and both produce an unrecoloured object. A
+    // held weapon is its own physics object, so neither can poison a wearer's skin, hair, or eye
+    // palettes. Reproducing the poisoning would mean giving `EntityAppearance` a failed state for
+    // two objects that look identical either way. It becomes observable only if content ever pairs
+    // an out-of-range shade with other, valid subpalettes on one object.
+    let requested = if selects_a_palette(hue) {
+        palette.template_key()
+    } else {
+        NO_PALETTE_TEMPLATE
+    };
+    match table.build_obj_desc(setup_did, requested, hue, resolver) {
         Ok(obj_desc) => Ok(obj_desc),
-        Err(holtburger_dat::file_type::ClothingBuildObjDescError::MissingPaletteTemplate {
-            ..
-        }) => {
-            // ACE's fallback: the first defined template, or no palette layer at all.
-            let fallback = table.palette_templates.keys().next().copied().unwrap_or(0);
-            table
-                .build_obj_desc(setup_did, fallback, item.shade, resolver)
-                .map_err(|source| format!("{source:?}"))
-        }
+        // Retail returns before applying anything when the table does not dress this body, so
+        // nothing survives. Census 2026-08-22: 60 of the 854 wielded items carrying a
+        // `ClothingBase` name such a table, all reached through the held path, which passes the
+        // item's own setup rather than the wearer's.
+        Err(ClothingBuildObjDescError::MissingClothingBase { .. }) => Ok(ObjDesc::empty()),
+        // Retail applies the parts and textures *first* and only then misses the template lookup,
+        // leaving them in the ObjDesc it already mutated (`acclient.c:444341-444347`). Rebuilding
+        // without a palette layer reproduces that exactly; returning an empty ObjDesc would drop
+        // the garment's model.
+        Err(ClothingBuildObjDescError::MissingPaletteTemplate { .. }) => table
+            .build_obj_desc(setup_did, NO_PALETTE_TEMPLATE, hue, resolver)
+            .map_err(|source| format!("{source:?}")),
         Err(source) => Err(format!("{source:?}")),
     }
 }
 
-/// A wielded item that cannot be resolved at all, as distinct from one that simply does not dress
+/// A clothing base that cannot be resolved at all, as distinct from one that simply does not dress
 /// this body.
+///
+/// The `wcid` names whichever weenie owns the failing clothing base: a wielded item on the worn and
+/// held paths, and the wearer itself when it paints through its own.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum WornEquipmentError {
-    /// The item names a clothing table absent from mounted content.
+pub enum ClothingError {
+    /// The weenie names a clothing table absent from mounted content.
     MissingTable { wcid: u32, clothing_base_did: u32 },
     /// The clothing table exists but could not produce an ObjDesc.
     Build { wcid: u32, message: String },
 }
 
-impl std::fmt::Display for WornEquipmentError {
+impl std::fmt::Display for ClothingError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::MissingTable {
@@ -558,16 +724,16 @@ impl std::fmt::Display for WornEquipmentError {
                 clothing_base_did,
             } => write!(
                 formatter,
-                "wielded item {wcid} names missing clothing table 0x{clothing_base_did:08X}"
+                "WCID {wcid} names missing clothing table 0x{clothing_base_did:08X}"
             ),
             Self::Build { wcid, message } => {
-                write!(formatter, "wielded item {wcid} clothing failed: {message}")
+                write!(formatter, "WCID {wcid} clothing failed: {message}")
             }
         }
     }
 }
 
-impl std::error::Error for WornEquipmentError {}
+impl std::error::Error for ClothingError {}
 
 fn push_clothing_obj_desc(appearance: &mut EntityAppearance, obj_desc: &ObjDesc) {
     for change in &obj_desc.anim_part_changes {
@@ -634,8 +800,8 @@ pub mod test_support {
     use super::*;
     use holtburger_dat::file_type::char_gen::{EyeStrip, FaceStrip, HairStyle, HeritageGroup};
     use holtburger_dat::file_type::{
-        AnimationPartChange, CloObjectEffect, CloTextureEffect, ClothingBase, SubPalette,
-        TextureMapChange,
+        AnimationPartChange, CloObjectEffect, CloPaletteTemplate, CloSubpalEffect,
+        CloSubpaletteRange, CloTextureEffect, ClothingBase, SubPalette, TextureMapChange,
     };
     use std::collections::{BTreeMap, HashMap};
 
@@ -776,6 +942,43 @@ pub mod test_support {
 
     pub fn synthetic_clothing(setup: u32) -> ClothingTable {
         clothing_for(setup, PART_CHEST, (0x0500_0020, 0x0500_0021), 0x0100_0020)
+    }
+
+    /// A garment that dresses `setup` and defines exactly one palette template, so a test can tell
+    /// a skipped palette layer apart from a table that never offered one.
+    pub fn clothing_with_palette_template(
+        setup: u32,
+        key: u32,
+        palette_set_id: u32,
+    ) -> ClothingTable {
+        let mut table = clothing_for(setup, PART_CHEST, (0x0500_0001, 0x0500_0002), 0x0100_0001);
+        table.palette_templates.insert(
+            key,
+            CloPaletteTemplate {
+                icon_id: 0,
+                subpal_effects: vec![CloSubpalEffect {
+                    palette_set_id,
+                    ranges: vec![CloSubpaletteRange {
+                        offset: 0,
+                        num_colors: 16,
+                    }],
+                }],
+            },
+        );
+        table
+    }
+
+    /// A table shaped like the rabbit's: it dresses `setup` and defines a palette template, but
+    /// carries no object effects, so it recolours without painting any body part.
+    pub fn pure_recolour_clothing(setup: u32, key: u32, palette_set_id: u32) -> ClothingTable {
+        let mut table = clothing_with_palette_template(setup, key, palette_set_id);
+        table.clothing_bases.insert(
+            setup,
+            ClothingBase {
+                object_effects: Vec::new(),
+            },
+        );
+        table
     }
 }
 
@@ -1050,7 +1253,10 @@ mod tests {
 
 #[cfg(test)]
 mod equipment_tests {
-    use super::test_support::{PART_CHEST, PART_LEFT_FOOT, clothing_for};
+    use super::test_support::{
+        PART_CHEST, PART_LEFT_FOOT, clothing_for, clothing_with_palette_template,
+        pure_recolour_clothing,
+    };
     use super::*;
     use holtburger_common::properties::ItemType;
     use holtburger_world::{WieldedItemSlotFacts, classify_wielded_item};
@@ -1083,9 +1289,17 @@ mod equipment_tests {
             })
             .unwrap(),
             clothing_priority: None,
-            palette_template: 0,
-            shade: 0.0,
+            palette: ClothingPaletteSelection::default(),
         }
+    }
+
+    /// A wielded item whose row-overlaid selection is already resolved.
+    fn painted(mut item: WieldedItem, palette_template: u32, shade: f64) -> WieldedItem {
+        item.palette = ClothingPaletteSelection {
+            palette_template: Some(palette_template),
+            shade: Some(shade),
+        };
+        item
     }
 
     fn empty_appearance() -> EntityAppearance {
@@ -1102,8 +1316,7 @@ mod equipment_tests {
         let mut appearance = empty_appearance();
         let shirt = item(130, 0x1000_0001, 0x1E);
 
-        merge_worn_equipment(
-            &mut appearance,
+        resolve_worn_equipment(
             HUMAN_MALE,
             &[shirt],
             |_| {
@@ -1116,7 +1329,8 @@ mod equipment_tests {
             },
             |_, _| Some(0x0400_0001),
         )
-        .unwrap();
+        .unwrap()
+        .apply(&mut appearance);
 
         assert_eq!(appearance.part_changes.len(), 1);
         assert_eq!(appearance.texture_changes.len(), 1);
@@ -1129,14 +1343,14 @@ mod equipment_tests {
         let mut appearance = empty_appearance();
         let robe = item(2593, 0x1000_0002, 0x1E);
 
-        merge_worn_equipment(
-            &mut appearance,
+        resolve_worn_equipment(
             HUMAN_MALE,
             &[robe],
             |_| Some(clothing_for(OTHER_BODY, PART_CHEST, (1, 2), 3)),
             |_, _| Some(0x0400_0001),
         )
-        .unwrap();
+        .unwrap()
+        .apply(&mut appearance);
 
         assert_eq!(appearance, empty_appearance());
     }
@@ -1144,21 +1358,15 @@ mod equipment_tests {
     /// A missing clothing table is a real content failure and must be loud.
     #[test]
     fn missing_clothing_table_fails_loudly_naming_the_item() {
-        let mut appearance = empty_appearance();
         let boots = item(115, 0x1000_00FF, 0x180);
 
-        let error = merge_worn_equipment(
-            &mut appearance,
-            HUMAN_MALE,
-            &[boots],
-            |_| None,
-            |_, _| Some(0x0400_0001),
-        )
-        .unwrap_err();
+        let error =
+            resolve_worn_equipment(HUMAN_MALE, &[boots], |_| None, |_, _| Some(0x0400_0001))
+                .unwrap_err();
 
         assert!(matches!(
             error,
-            WornEquipmentError::MissingTable { wcid: 115, .. }
+            ClothingError::MissingTable { wcid: 115, .. }
         ));
         assert!(error.to_string().contains("115"));
     }
@@ -1171,8 +1379,7 @@ mod equipment_tests {
         let boots = item(115, 0x1000_0007, 0x180);
         let tunic = item(2593, 0x1000_0001, 0x1E);
 
-        merge_worn_equipment(
-            &mut appearance,
+        resolve_worn_equipment(
             HUMAN_MALE,
             &[boots, tunic],
             |clothing_base| {
@@ -1194,7 +1401,8 @@ mod equipment_tests {
             },
             |_, _| Some(0x0400_0001),
         )
-        .unwrap();
+        .unwrap()
+        .apply(&mut appearance);
 
         let order: Vec<u32> = appearance
             .texture_changes
@@ -1216,16 +1424,137 @@ mod equipment_tests {
         // Royal Guard's Sword of Lost Light: a real held item with a ClothingBase.
         let sword = typed_item(24611, 0x1000_0001, Some(0x1), 0x10_0000);
 
-        merge_worn_equipment(
-            &mut appearance,
+        resolve_worn_equipment(
             HUMAN_MALE,
             &[sword],
             |_| panic!("held items must be classified before CLO lookup"),
             |_, _| panic!("held items must not resolve a CLO palette"),
         )
+        .unwrap()
+        .apply(&mut appearance);
+
+        assert_eq!(appearance, empty_appearance());
+    }
+
+    /// The held path passes the item's own setup, and 60 shipped wielded items name a clothing
+    /// table that does not dress it. That omission is authored content, exactly as it is for a
+    /// garment on a body it does not fit, so it must yield no changes rather than fail the spawn.
+    #[test]
+    fn held_item_clothing_without_a_mapping_for_its_own_setup_is_skipped() {
+        let mut appearance = empty_appearance();
+        // Assassin's Acid Simi: a real held weapon whose CLO table dresses no setup of its own.
+        let simi = typed_item(12194, 0x1000_00F6, Some(0x1), 0x10_0000);
+
+        apply_clothing_base(
+            &mut appearance,
+            OTHER_BODY,
+            simi.clothing_source().unwrap(),
+            |_| Some(clothing_for(HUMAN_MALE, PART_CHEST, (1, 2), 3)),
+            |_, _| Some(0x0400_0001),
+        )
         .unwrap();
 
         assert_eq!(appearance, empty_appearance());
+    }
+
+    /// Two shipped wield rows carry shades of 14 and 1.2. Retail will not index a palette set
+    /// outside `[0, 1]`, so the garment keeps its parts and textures and gains no palette rather
+    /// than failing the spawn.
+    #[test]
+    fn a_shade_outside_the_selectable_range_skips_the_palette_layer() {
+        let mut appearance = empty_appearance();
+        let trident = painted(typed_item(7772, 0x1000_0001, Some(0x1), 0x10_0000), 4, 14.0);
+
+        apply_clothing_base(
+            &mut appearance,
+            HUMAN_MALE,
+            trident.clothing_source().unwrap(),
+            |_| Some(clothing_with_palette_template(HUMAN_MALE, 4, 0x0F00_0001)),
+            |_, _| panic!("an unselectable shade must never reach a palette set"),
+        )
+        .unwrap();
+
+        assert_eq!(appearance.part_changes.len(), 1);
+        assert_eq!(appearance.texture_changes.len(), 1);
+        assert!(
+            appearance.sub_palettes.is_empty(),
+            "no palette may be selected on an out-of-range shade"
+        );
+    }
+
+    /// A wield row authoring no palette leaves the item's own `PaletteTemplate` standing, because
+    /// ACE only overwrites the created item's property when the row's value is positive
+    /// (`WorldObjectFactory.cs:409-410`). Confirmed against retail on WCIDs 25709 and 11506;
+    /// census 2026-08-22: 1,484 shipped rows depend on it.
+    #[test]
+    fn a_zero_row_palette_keeps_the_items_own_template() {
+        let item = TemplateAppearance {
+            palette_template: Some(14),
+            shade: Some(0.66),
+            ..TemplateAppearance::default()
+        };
+        let row = WieldEntry {
+            wcid: 25702,
+            destination_type: 2,
+            palette_template: 0,
+            shade: 0.0,
+        };
+
+        let selection = ClothingPaletteSelection::overlay(&row, &item);
+
+        assert_eq!(selection.palette_template, Some(14));
+        // A non-treasure row's shade column is a shade, and ACE assigns it unconditionally.
+        assert_eq!(selection.shade, Some(0.0));
+    }
+
+    /// A positive row palette wins, and on a treasure row the `shade` column is a selection
+    /// probability rather than a hue, so the item keeps its own (`WorldObjectFactory.cs:412-414`).
+    /// Census 2026-08-22: 393 treasure rows carry an item with a `ClothingBase`.
+    #[test]
+    fn a_treasure_row_keeps_the_items_own_shade() {
+        let item = TemplateAppearance {
+            palette_template: Some(14),
+            shade: Some(0.66),
+            ..TemplateAppearance::default()
+        };
+        let row = WieldEntry {
+            wcid: 25702,
+            destination_type: 10,
+            palette_template: 20,
+            shade: 0.1,
+        };
+
+        let selection = ClothingPaletteSelection::overlay(&row, &item);
+
+        assert_eq!(selection.palette_template, Some(20));
+        assert_eq!(
+            selection.shade,
+            Some(0.66),
+            "0.1 is a probability, not a hue"
+        );
+    }
+
+    /// ACE counts coverage from CLO object effects, so a garment that only recolours paints no body
+    /// part and cannot suppress the wearer's own clothing (`Creature_Networking.cs:239`).
+    #[test]
+    fn a_pure_recolour_garment_paints_no_body_part() {
+        let shirt = painted(item(130, 0x1000_0001, 0x1E), 61, 0.5);
+
+        let layer = resolve_worn_equipment(
+            HUMAN_MALE,
+            &[shirt],
+            |_| Some(pure_recolour_clothing(HUMAN_MALE, 61, 0x0F00_0001)),
+            |set, hue| Some(set ^ ((hue * 1024.0) as u32)),
+        )
+        .unwrap();
+
+        assert!(!layer.paints_body());
+        let mut appearance = empty_appearance();
+        layer.apply(&mut appearance);
+        assert!(
+            !appearance.sub_palettes.is_empty(),
+            "the recolour itself still resolved"
+        );
     }
 
     /// Ordinary wields always apply; treasure rows compete inside a probability chunk and the
@@ -1265,25 +1594,82 @@ mod equipment_tests {
         assert_eq!(chosen, 1, "exactly one treasure row per probability chunk");
     }
 
-    /// ACE substitutes the first defined palette effect when the requested template is absent, and
-    /// skips palettes entirely when a garment defines none. Neither case is a failure.
+    /// A zero-WCID row is how content spends part of a probability chunk on "no item". It must
+    /// still compete for the chunk — otherwise the rows it outbids would be promoted in its place —
+    /// and must never reach the caller, which treats an unresolvable WCID as a hard error.
     #[test]
-    fn absent_palette_template_falls_back_instead_of_failing() {
-        let mut appearance = empty_appearance();
-        let mut shirt = item(130, 0x1000_0001, 0x1E);
-        shirt.palette_template = 5;
-        shirt.shade = 0.67;
+    fn empty_wield_rows_spend_their_probability_and_never_escape() {
+        let empty = WieldEntry {
+            wcid: EMPTY_WIELD_WCID,
+            destination_type: 10,
+            palette_template: 0,
+            shade: 0.5,
+        };
+        let item = WieldEntry {
+            wcid: 300,
+            destination_type: 10,
+            palette_template: 0,
+            shade: 0.5,
+        };
 
-        merge_worn_equipment(
-            &mut appearance,
+        // The two rows split one chunk, so the item wins exactly the draws the empty row loses.
+        // Dropping the empty row before the walk would invert that, for every seed.
+        for seed in 0..64u64 {
+            let with_empty = select_wielded(&[empty, item], seed);
+            let without_empty = select_wielded(&[item], seed);
+
+            assert!(
+                with_empty
+                    .iter()
+                    .all(|entry| entry.wcid != EMPTY_WIELD_WCID),
+                "an empty row must never reach the caller"
+            );
+            assert_ne!(
+                with_empty, without_empty,
+                "the empty row must consume its share of the chunk"
+            );
+        }
+
+        assert!(
+            (0..64u64).any(|seed| select_wielded(&[empty, item], seed).is_empty()),
+            "the empty row must sometimes win its chunk"
+        );
+        assert!(
+            (0..64u64).any(|seed| select_wielded(&[empty, item], seed).len() == 1),
+            "the item must sometimes win its chunk"
+        );
+
+        // Every shipped row of this shape but one carries shade 0, which makes it an unconditional
+        // selection rather than a probability entry. It must be dropped just the same.
+        let unconditional = WieldEntry {
+            shade: 0.0,
+            ..empty
+        };
+        assert!(select_wielded(&[unconditional], 1).is_empty());
+    }
+
+    /// A palette template absent from the table paints no palette, and is not a failure. Retail
+    /// looks the key up, misses, and leaves the ObjDesc with the parts and textures it already
+    /// applied (`acclient.c:444345-444347`); ACE's first-defined-template substitution is not
+    /// reproduced, because WCID 17 shows retail leaving such a weenie unpainted.
+    #[test]
+    fn an_absent_palette_template_paints_no_palette_without_failing() {
+        let mut appearance = empty_appearance();
+        let shirt = painted(item(130, 0x1000_0001, 0x1E), 5, 0.67);
+
+        resolve_worn_equipment(
             HUMAN_MALE,
             &[shirt],
-            |_| Some(clothing_for(HUMAN_MALE, PART_CHEST, (1, 2), 3)),
-            |_, _| Some(0x0400_0001),
+            // Defines template 9, never the requested 5.
+            |_| Some(clothing_with_palette_template(HUMAN_MALE, 9, 0x0F00_0001)),
+            |_, _| panic!("an absent template must not be substituted with another"),
         )
-        .expect("a garment with no palette templates must still paint its model and textures");
+        .expect("a garment missing the requested template must still paint its model and textures")
+        .apply(&mut appearance);
 
         assert_eq!(appearance.texture_changes.len(), 1);
+        assert_eq!(appearance.part_changes.len(), 1);
+        assert!(appearance.sub_palettes.is_empty());
     }
 
     #[test]
@@ -1292,14 +1678,14 @@ mod equipment_tests {
         let mut trinket = item(999, 0, 0x1E);
         trinket.clothing_base_did = None;
 
-        merge_worn_equipment(
-            &mut appearance,
+        resolve_worn_equipment(
             HUMAN_MALE,
             &[trinket],
             |_| panic!("an item without a clothing base must not be looked up"),
             |_, _| Some(0x0400_0001),
         )
-        .unwrap();
+        .unwrap()
+        .apply(&mut appearance);
 
         assert_eq!(appearance, empty_appearance());
     }

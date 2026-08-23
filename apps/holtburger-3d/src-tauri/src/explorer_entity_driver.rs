@@ -39,9 +39,9 @@ use crate::explorer_weenie_catalog::{
 };
 use crate::host_simulation_runtime::HostSimulationRuntime;
 use crate::weenie_appearance::{
-    WieldedItem, WornEquipmentError, merge_item_clothing, merge_worn_equipment,
+    ClothingError, ClothingPaletteSelection, ClothingSource, WieldedItem, apply_clothing_base,
     requires_character_generation, resolve_authored_appearance, resolve_template_appearance,
-    select_wielded,
+    resolve_worn_equipment, select_wielded,
 };
 
 struct SelectedWieldedItem {
@@ -166,11 +166,8 @@ pub enum ExplorerEntityDriverError {
         item_wcid: u32,
         source: WieldedItemClassificationError,
     },
-    /// A wielded item's clothing could not be resolved.
-    WornEquipment {
-        wcid: u32,
-        source: WornEquipmentError,
-    },
+    /// A clothing base could not be resolved, whether the wearer's own or a wielded item's.
+    Clothing { wcid: u32, source: ClothingError },
 }
 
 impl From<ExplorerAppearanceContentError> for ExplorerEntityDriverError {
@@ -220,8 +217,8 @@ impl Display for ExplorerEntityDriverError {
                 formatter,
                 "WCID {wcid} wielded item {item_wcid} cannot be classified: {source}"
             ),
-            Self::WornEquipment { wcid, source } => {
-                write!(formatter, "WCID {wcid} equipment failed: {source}")
+            Self::Clothing { wcid, source } => {
+                write!(formatter, "WCID {wcid} clothing failed: {source}")
             }
         }
     }
@@ -578,17 +575,21 @@ impl ExplorerEntityDriver {
             let mut appearance =
                 resolve_authored_appearance(template.palette_base_did, &template.appearance);
             append_template_obj_desc(&mut appearance, &template);
-            merge_item_clothing(
-                &mut appearance,
-                content.setup_did,
-                &selected.item,
-                |clothing_base| self.content.clothing_table(clothing_base),
-                |set, hue| self.content.palette_set(set, hue),
-            )
-            .map_err(|source| ExplorerEntityDriverError::WornEquipment {
-                wcid: template.wcid,
-                source,
-            })?;
+            // A held item is its own object: it paints its own setup through its own ClothingBase,
+            // exactly as ACE's base `CalculateObjDesc` does for any non-creature.
+            if let Some(source) = selected.item.clothing_source() {
+                apply_clothing_base(
+                    &mut appearance,
+                    content.setup_did,
+                    source,
+                    |clothing_base| self.content.clothing_table(clothing_base),
+                    |set, hue| self.content.palette_set(set, hue),
+                )
+                .map_err(|source| ExplorerEntityDriverError::Clothing {
+                    wcid: template.wcid,
+                    source,
+                })?;
+            }
             children.push(DynamicEntityDefinition::prepare(
                 template_definition_input(
                     &template,
@@ -808,8 +809,7 @@ impl ExplorerEntityDriver {
                     }
                 })?,
                 clothing_priority: item.appearance.clothing_priority,
-                palette_template: entry.palette_template,
-                shade: entry.shade,
+                palette: ClothingPaletteSelection::overlay(entry, &item.appearance),
             };
             wielded_items.push(SelectedWieldedItem {
                 template: item,
@@ -821,28 +821,61 @@ impl ExplorerEntityDriver {
             .iter()
             .map(|selected| selected.item)
             .collect::<Vec<_>>();
-        let painted = items.iter().any(|item| {
-            item.clothing_base_did.is_some()
-                && matches!(
-                    item.classification,
-                    Some(WieldedItemClassification::Painted(_))
-                )
+        // ACE's `eo`: the equipped objects that can cover the model at all
+        // (`Creature_Networking.cs:127`). Membership is by wield slot, not by carrying a clothing
+        // table; census 2026-08-22 found zero wield rows in a paintable slot whose item lacks a
+        // `ClothingBase`, so the two readings coincide on shipped content.
+        let equipped_paintable = items.iter().any(|item| {
+            matches!(
+                item.classification,
+                Some(WieldedItemClassification::Painted(_))
+            )
         });
-        if painted {
-            merge_worn_equipment(
+        // ACE consults the template's own ObjDesc rows only when nothing paintable is equipped, and
+        // returns immediately when it finds any (`Creature_Networking.cs:129-141`).
+        let has_biota_rows = !template.sub_palettes.is_empty()
+            || !template.texture_changes.is_empty()
+            || !template.anim_part_changes.is_empty();
+        if !equipped_paintable && has_biota_rows {
+            append_template_obj_desc(&mut appearance, template);
+            return Ok(ResolvedSpawnAppearance {
+                wearer: appearance,
+                wielded: wielded_items,
+            });
+        }
+
+        let worn = resolve_worn_equipment(
+            setup_did,
+            &items,
+            |clothing_base| self.content.clothing_table(clothing_base),
+            |set, hue| self.content.palette_set(set, hue),
+        )
+        .map_err(|source| ExplorerEntityDriverError::Clothing {
+            wcid: template.wcid,
+            source,
+        })?;
+
+        match (worn.paints_body(), template.appearance.clothing_base_did) {
+            // Nothing worn actually painted the body, so the wearer paints itself
+            // (`Creature_Networking.cs:239` into `WorldObject_Networking.cs:916-973`). ACE also
+            // discards the worn layer here; we simply never apply it, which is the same result for
+            // every case this plan measured.
+            (false, Some(clothing_base_did)) => apply_clothing_base(
                 &mut appearance,
                 setup_did,
-                &items,
+                ClothingSource {
+                    wcid: template.wcid,
+                    clothing_base_did,
+                    palette: ClothingPaletteSelection::from_own_properties(&template.appearance),
+                },
                 |clothing_base| self.content.clothing_table(clothing_base),
                 |set, hue| self.content.palette_set(set, hue),
             )
-            .map_err(|source| ExplorerEntityDriverError::WornEquipment {
+            .map_err(|source| ExplorerEntityDriverError::Clothing {
                 wcid: template.wcid,
                 source,
-            })?;
-        } else {
-            // ACE's no-equipment fallback: the template's own ObjDesc rows dress the body.
-            append_template_obj_desc(&mut appearance, template);
+            })?,
+            _ => worn.apply(&mut appearance),
         }
         Ok(ResolvedSpawnAppearance {
             wearer: appearance,
@@ -1237,7 +1270,10 @@ mod tests {
     fn driver_with_appearance(
         templates: Vec<WeenieTemplate>,
     ) -> (Arc<ExplorerEntityRuntime>, ExplorerEntityDriver) {
-        use crate::weenie_appearance::test_support::{synthetic_char_gen, synthetic_clothing};
+        use crate::weenie_appearance::test_support::{
+            clothing_with_palette_template, pure_recolour_clothing, synthetic_char_gen,
+            synthetic_clothing,
+        };
 
         let simulation = Arc::new(HostSimulationRuntime::new(Arc::new(EmptyCollisionSource)));
         let entities = Arc::new(ExplorerEntityRuntime::new(
@@ -1249,6 +1285,16 @@ mod tests {
         let mut clothing = BTreeMap::new();
         clothing.insert(0x1000_0001, synthetic_clothing(0x0200_0001));
         clothing.insert(0x1000_0002, synthetic_clothing(0x0200_0002));
+        // Paints a chest part and offers template 61, so it both covers and recolours.
+        clothing.insert(
+            0x1000_0003,
+            clothing_with_palette_template(0x0200_0001, 61, 0x0F00_0001),
+        );
+        // The rabbit's shape: recolours through template 61 while painting no body part.
+        clothing.insert(
+            0x1000_0004,
+            pure_recolour_clothing(0x0200_0001, 61, 0x0F00_0001),
+        );
         let driver = ExplorerEntityDriver::new(
             Arc::new(MemoryCatalog {
                 templates: templates
@@ -1688,6 +1734,127 @@ mod tests {
         assert_eq!(
             survivor[0].input.placement.world().unwrap().participation,
             holtburger_world::PhysicalBodyParticipation::PoseOnly
+        );
+    }
+
+    /// The White Rabbit case: a weenie wearing nothing paints itself through its own
+    /// `ClothingBase`, which is ACE's base `CalculateObjDesc` reached from
+    /// `Creature_Networking.cs:239`. Census 2026-08-22: 12,331 shipped weenies carry the facts this
+    /// path reads.
+    #[test]
+    fn a_weenie_that_wears_nothing_paints_itself_through_its_own_clothing_base() {
+        let mut rabbit = template(2568);
+        rabbit.appearance.clothing_base_did = Some(0x1000_0004);
+        rabbit.appearance.palette_template = Some(61);
+        rabbit.appearance.shade = Some(0.5);
+
+        let (_entities, driver) = driver_with_appearance(vec![rabbit]);
+        let spawned = driver
+            .spawn_by_wcid(request(2568, EntityPhysicalIntent::PoseOnly))
+            .unwrap();
+
+        assert!(
+            !spawned
+                .instance
+                .definition
+                .appearance
+                .sub_palettes
+                .is_empty(),
+            "the weenie's own ClothingBase must recolour it"
+        );
+    }
+
+    /// The Black Rabbit invariant: the same clothing base with no authored template or shade paints
+    /// no palette. Retail selects nothing for a zero key (`acclient.c:444343`), and 1,479 shipped
+    /// weenies carry a `ClothingBase` with neither property.
+    #[test]
+    fn a_weenie_authoring_no_palette_facts_keeps_its_base_palette() {
+        let mut rabbit = template(2566);
+        rabbit.appearance.clothing_base_did = Some(0x1000_0004);
+
+        let (_entities, driver) = driver_with_appearance(vec![rabbit]);
+        let spawned = driver
+            .spawn_by_wcid(request(2566, EntityPhysicalIntent::PoseOnly))
+            .unwrap();
+
+        assert!(
+            spawned
+                .instance
+                .definition
+                .appearance
+                .sub_palettes
+                .is_empty(),
+            "an unauthored palette template must select nothing"
+        );
+    }
+
+    /// Worn equipment that paints a body part suppresses the wearer's own clothing base, exactly as
+    /// ACE only falls back to the base path when its coverage set is empty.
+    #[test]
+    fn worn_equipment_that_paints_suppresses_the_wearers_own_clothing_base() {
+        let mut wearer = template(3921);
+        wearer.appearance.clothing_base_did = Some(0x1000_0004);
+        wearer.appearance.palette_template = Some(61);
+        wearer.appearance.shade = Some(0.5);
+        wearer.wielded = vec![WieldEntry {
+            wcid: 130,
+            destination_type: 2,
+            palette_template: 0,
+            shade: 0.0,
+        }];
+        let mut shirt = template(130);
+        shirt.appearance.clothing_base_did = Some(0x1000_0001);
+        shirt.appearance.item_type = Some(ItemType::CLOTHING.bits() as i32);
+        shirt.appearance.valid_locations = Some(0x1E);
+
+        let (_entities, driver) = driver_with_appearance(vec![wearer, shirt]);
+        let spawned = driver
+            .spawn_by_wcid(request(3921, EntityPhysicalIntent::PoseOnly))
+            .unwrap();
+        let appearance = &spawned.instance.definition.appearance;
+
+        // The shirt paints a part; `synthetic_clothing` defines no palette template, so the only
+        // way a subpalette could appear here is the wearer's own clothing base leaking through.
+        assert!(!appearance.part_changes.is_empty());
+        assert!(
+            appearance.sub_palettes.is_empty(),
+            "a painted body must not also apply the wearer's own clothing base"
+        );
+    }
+
+    /// Worn equipment that only recolours paints no body part, so ACE's coverage set stays empty and
+    /// the wearer's own clothing base still applies. This is the distinction between what was worn
+    /// and what was painted.
+    #[test]
+    fn worn_equipment_that_paints_nothing_yields_to_the_wearers_own_clothing_base() {
+        let mut wearer = template(3921);
+        wearer.appearance.clothing_base_did = Some(0x1000_0003);
+        wearer.appearance.palette_template = Some(61);
+        wearer.appearance.shade = Some(0.5);
+        wearer.wielded = vec![WieldEntry {
+            wcid: 130,
+            destination_type: 2,
+            palette_template: 0,
+            shade: 0.0,
+        }];
+        let mut shirt = template(130);
+        // A pure recolour: dresses this body, paints no part.
+        shirt.appearance.clothing_base_did = Some(0x1000_0004);
+        shirt.appearance.item_type = Some(ItemType::CLOTHING.bits() as i32);
+        shirt.appearance.valid_locations = Some(0x1E);
+
+        let (_entities, driver) = driver_with_appearance(vec![wearer, shirt]);
+        let spawned = driver
+            .spawn_by_wcid(request(3921, EntityPhysicalIntent::PoseOnly))
+            .unwrap();
+        let appearance = &spawned.instance.definition.appearance;
+
+        assert!(
+            appearance
+                .part_changes
+                .iter()
+                .any(|change| change.part_index != 0x10),
+            "the wearer's own clothing base painted its body"
         );
     }
 

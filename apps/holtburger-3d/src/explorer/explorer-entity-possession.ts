@@ -43,6 +43,14 @@ const possessionStanceCapability = z.object({
 	walk: locomotionSource,
 });
 
+const possessionRunRateCapability = z
+	.object({
+		initial: z.number().finite(),
+		maximum: z.number().finite(),
+		minimum: z.number().finite(),
+	})
+	.strict();
+
 /** Capability and target-presentation quality for one host-modelled stance. */
 export type PossessionStanceCapability = z.infer<
 	typeof possessionStanceCapability
@@ -54,6 +62,7 @@ const activePossession = z.object({
 	guid: unsigned32,
 	motionTableId: datId,
 	possessionGeneration: generation,
+	runRateCapability: possessionRunRateCapability,
 	stances: z.array(possessionStanceCapability),
 });
 
@@ -63,6 +72,7 @@ const releasedPossession = z.object({
 	guid: z.null(),
 	motionTableId: z.null(),
 	possessionGeneration: generation,
+	runRateCapability: z.null(),
 	stances: z.array(possessionStanceCapability).length(0),
 });
 
@@ -74,6 +84,12 @@ const explorerPossessionSchema = z.union([
 /** What the host reported about the current possession ownership epoch. */
 export type ExplorerPossession = z.infer<typeof explorerPossessionSchema>;
 
+/** Mutable accepted controls for one exact live possession generation. */
+export interface ExplorerPossessionControls {
+	readonly stance: number;
+	readonly runRateScalar: number;
+}
+
 export function decodeExplorerPossession(value: unknown): ExplorerPossession {
 	return explorerPossessionSchema.parse(value);
 }
@@ -83,6 +99,7 @@ export interface ExplorerPossessionIntent {
 	readonly drive: CharacterDrive;
 	readonly possessionGeneration: number;
 	readonly revision: number;
+	readonly runRateScalar: number;
 	readonly stance: number;
 }
 
@@ -198,9 +215,12 @@ const possessionMotionProbe = z
 			.strict()
 			.nullable(),
 		entityGeneration: generation,
+		effectivePlanarSpeed: z.number().finite().nullable(),
 		guid: unsigned32,
 		modifiers: z.array(possessionActiveMotionProbe),
+		physicalStatus: z.enum(["solved", "substep-budget-exceeded"]).nullable(),
 		possessionGeneration: generation,
+		requestedRunRate: z.number().finite(),
 		style: unsigned32,
 		substate: possessionActiveMotionProbe,
 	})

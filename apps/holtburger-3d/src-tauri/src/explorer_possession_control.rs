@@ -18,6 +18,64 @@ use thiserror::Error;
 
 const PHYSICAL_CHANNEL_EPSILON: f32 = 1.0e-4;
 
+/// Host-owned run-rate scalar exposed to Explorer possession.
+///
+/// This is deliberately narrower than the shared character kinematics type: the Explorer owns
+/// the `1.0..=10.0` product range, while shared crates only consume an already-resolved scalar.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct PossessionRunRateScalar(f32);
+
+impl PossessionRunRateScalar {
+    pub const INITIAL: Self = Self(1.0);
+    pub const MINIMUM: Self = Self(1.0);
+    // RETAIL DIVERGENCE: retail's command adjustment reads `my_run_rate` for forward and
+    // sidestep but its resolved skill/burden path naturally tops out around 4.5
+    // (`acclient.c:329739-329787`, `:329792-329849`). Explorer intentionally exposes a 10x
+    // operator capability instead of rebuilding a fake skill model; correcting this to 4.5
+    // would remove the requested high-speed inspection surface. The 2026-08-23 Phase 0 census
+    // covered 37,119 template/stance cohorts (28 exceed the current 32-substep budget), and only
+    // explicitly Explorer-possessed entities can observe this divergence.
+    pub const MAXIMUM: Self = Self(10.0);
+
+    pub fn new(value: f32) -> Result<Self, PossessionRunRateError> {
+        if !value.is_finite() || !(Self::MINIMUM.0..=Self::MAXIMUM.0).contains(&value) {
+            return Err(PossessionRunRateError::Invalid);
+        }
+        Ok(Self(value))
+    }
+
+    pub const fn value(self) -> f32 {
+        self.0
+    }
+}
+
+/// Invalid host-owned possession run-rate input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum PossessionRunRateError {
+    #[error("possession run-rate scalar must be finite and within 1.0..=10.0")]
+    Invalid,
+}
+
+/// Bounds the Explorer-owned run-rate capability advertised with an active possession.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PossessionRunRateCapability {
+    /// Scalar applied to a newly accepted possession before any slider input.
+    pub initial: f32,
+    /// Lowest scalar the host accepts for this possession contract.
+    pub minimum: f32,
+    /// Highest scalar the host accepts for this possession contract.
+    pub maximum: f32,
+}
+
+impl PossessionRunRateCapability {
+    pub const STANDARD: Self = Self {
+        initial: PossessionRunRateScalar::INITIAL.value(),
+        minimum: PossessionRunRateScalar::MINIMUM.value(),
+        maximum: PossessionRunRateScalar::MAXIMUM.value(),
+    };
+}
+
 /// Explorer stances exposed by the current possession UI, in stable display/fallback order.
 pub const OFFERED_POSSESSION_STANCES: [MotionStance; 8] = [
     MotionStance::HandCombat,
@@ -154,11 +212,44 @@ impl PossessionFallbackMotionProfile {
     }
 }
 
+/// One internally consistent possession snapshot: the selected scalar and all kinematics derived
+/// from the rate travel together so playback, fallback actuation, and jump release cannot diverge.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PossessionResolvedKinematics {
+    /// Validated Explorer scalar that produced the movement/jump facts below.
+    run_rate: PossessionRunRateScalar,
+    /// Character jump facts reconstructed from the rate-one base profile.
+    jump: CharacterJumpKinematics,
+}
+
+impl PossessionResolvedKinematics {
+    fn from_base(
+        base_jump: CharacterJumpKinematics,
+        run_rate: PossessionRunRateScalar,
+    ) -> Result<Self, holtburger_core::CharacterKinematicsError> {
+        let movement = CharacterMovementKinematics::new(
+            base_jump.movement().base_walk_forward_speed(),
+            base_jump.movement().base_run_forward_speed(),
+            run_rate.value(),
+        )?;
+        let jump = CharacterJumpKinematics::new(movement, base_jump.full_extent_jump_height())?;
+        Ok(Self { run_rate, jump })
+    }
+
+    pub const fn run_rate(self) -> PossessionRunRateScalar {
+        self.run_rate
+    }
+
+    pub const fn jump(self) -> CharacterJumpKinematics {
+        self.jump
+    }
+}
+
 /// Complete numeric policy injected into one Explorer possession runtime.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ExplorerPossessionControlProfile {
-    /// Physical charge and launch policy shared with the reusable character controller.
-    pub jump: CharacterJumpKinematics,
+    /// Rate-one physical charge and launch policy shared with the reusable character controller.
+    pub base_jump: CharacterJumpKinematics,
     /// Explorer-owned body rates used only where target content cannot supply a channel.
     pub fallback: PossessionFallbackMotionProfile,
 }
@@ -168,7 +259,7 @@ impl ExplorerPossessionControlProfile {
     pub fn standard() -> Result<Self, PossessionControlProfileError> {
         let movement = CharacterMovementKinematics::new(3.12, 4.0, 1.0)
             .map_err(PossessionControlProfileError::JumpKinematics)?;
-        let jump = CharacterJumpKinematics::new(movement, 8.425)
+        let base_jump = CharacterJumpKinematics::new(movement, 8.425)
             .map_err(PossessionControlProfileError::JumpKinematics)?;
 
         // RETAIL DIVERGENCE: retail adjusts only commands the actor's own table can perform
@@ -179,7 +270,25 @@ impl ExplorerPossessionControlProfile {
         // 7,788 projected creatures: non-combat fallback reaches 1,477 walk/run, 2,650 sidestep,
         // and 1,191 turn stance-template pairs; the complete matrix is retained in the plan.
         let fallback = PossessionFallbackMotionProfile::new(2.6, 4.0, 1.2, 1.5)?;
-        Ok(Self { jump, fallback })
+        Ok(Self {
+            base_jump,
+            fallback,
+        })
+    }
+
+    fn resolve_kinematics(
+        self,
+        run_rate: f32,
+    ) -> Result<PossessionResolvedKinematics, PossessionIntentError> {
+        let run_rate = PossessionRunRateScalar::new(run_rate)
+            .map_err(PossessionIntentError::InvalidRunRateScalar)?;
+        PossessionResolvedKinematics::from_base(self.base_jump, run_rate)
+            .map_err(PossessionIntentError::InvalidKinematics)
+    }
+
+    fn initial_kinematics(self) -> Result<PossessionResolvedKinematics, PossessionIntentError> {
+        PossessionResolvedKinematics::from_base(self.base_jump, PossessionRunRateScalar::INITIAL)
+            .map_err(PossessionIntentError::InvalidKinematics)
     }
 }
 
@@ -338,6 +447,19 @@ impl PossessionCapabilities {
     }
 }
 
+/// Complete unvalidated input snapshot shared by replaceable intents and ordered lifecycle edges.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PossessionIntentSnapshot {
+    /// Frontend coalescing revision associated with this snapshot.
+    pub revision: u64,
+    /// Host-modelled full motion-table style command.
+    pub stance: u32,
+    /// Unadjusted semantic character input retained for lifecycle restoration.
+    pub drive: CharacterDrive,
+    /// Run-rate scalar validated before the snapshot enters active possession state.
+    pub run_rate_scalar: f32,
+}
+
 /// Host-validated semantic intent plus its one authoritative adjusted order.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ResolvedPossessionIntent {
@@ -347,6 +469,8 @@ pub struct ResolvedPossessionIntent {
     pub stance: u32,
     /// Unadjusted semantic character input retained for lifecycle restoration.
     pub drive: CharacterDrive,
+    /// Rate-resolved movement and jump facts captured atomically with this intent.
+    pub kinematics: PossessionResolvedKinematics,
     /// Once-derived signed rates shared by playback and physical actuation.
     pub axes: AdjustedCharacterAxes,
     /// Target-presentable portion of the adjusted order; fallback never borrows player clips.
@@ -425,7 +549,8 @@ impl ActivePossession {
             gait: Gait::Run,
             ..CharacterDrive::default()
         };
-        let intent = resolve_intent(0, initial.style, drive, initial, profile.jump)?;
+        let kinematics = profile.initial_kinematics()?;
+        let intent = resolve_intent(0, initial.style, drive, initial, kinematics)?;
         Ok(Self {
             guid,
             entity_generation,
@@ -442,44 +567,56 @@ impl ActivePossession {
 
     pub fn replace_intent(
         &mut self,
-        revision: u64,
-        stance: u32,
-        drive: CharacterDrive,
+        snapshot: PossessionIntentSnapshot,
         profile: ExplorerPossessionControlProfile,
     ) -> Result<PossessionIntentReplaceResult, PossessionIntentError> {
-        if revision <= self.latest_intent.revision {
+        if snapshot.revision <= self.latest_intent.revision {
             return Ok(PossessionIntentReplaceResult::IgnoredStaleRevision);
         }
-        let capability = self
-            .capabilities
-            .get(stance)
-            .ok_or(PossessionIntentError::UnmodelledStance { stance })?;
-        self.latest_intent = resolve_intent(revision, stance, drive, capability, profile.jump)?;
+        let capability = self.capabilities.get(snapshot.stance).ok_or(
+            PossessionIntentError::UnmodelledStance {
+                stance: snapshot.stance,
+            },
+        )?;
+        let kinematics = profile.resolve_kinematics(snapshot.run_rate_scalar)?;
+        self.latest_intent = resolve_intent(
+            snapshot.revision,
+            snapshot.stance,
+            snapshot.drive,
+            capability,
+            kinematics,
+        )?;
         Ok(PossessionIntentReplaceResult::Accepted)
     }
 
     pub fn queue_event(
         &mut self,
         sequence: u64,
-        revision: u64,
-        stance: u32,
-        drive: CharacterDrive,
+        snapshot: PossessionIntentSnapshot,
         event: PossessionLifecycleEvent,
         profile: ExplorerPossessionControlProfile,
     ) -> Result<PossessionEventQueueResult, PossessionIntentError> {
         if sequence < self.next_event_sequence || self.pending_events.contains_key(&sequence) {
             return Ok(PossessionEventQueueResult::IgnoredDuplicate);
         }
-        let capability = self
-            .capabilities
-            .get(stance)
-            .ok_or(PossessionIntentError::UnmodelledStance { stance })?;
-        let intent = resolve_intent(revision, stance, drive, capability, profile.jump)?;
+        let capability = self.capabilities.get(snapshot.stance).ok_or(
+            PossessionIntentError::UnmodelledStance {
+                stance: snapshot.stance,
+            },
+        )?;
+        let kinematics = profile.resolve_kinematics(snapshot.run_rate_scalar)?;
+        let intent = resolve_intent(
+            snapshot.revision,
+            snapshot.stance,
+            snapshot.drive,
+            capability,
+            kinematics,
+        )?;
         self.pending_events.insert(
             sequence,
             PendingPossessionEvent {
                 intent,
-                event: event.with_drive(drive),
+                event: event.with_drive(snapshot.drive),
             },
         );
         Ok(PossessionEventQueueResult::Queued)
@@ -489,7 +626,6 @@ impl ActivePossession {
     pub fn resolve_effective_intent(
         &self,
         drive: CharacterDrive,
-        profile: ExplorerPossessionControlProfile,
     ) -> Result<ResolvedPossessionIntent, PossessionIntentError> {
         let capability = self
             .capabilities
@@ -500,7 +636,7 @@ impl ActivePossession {
             self.applied_intent.stance,
             drive,
             capability,
-            profile.jump,
+            self.applied_intent.kinematics,
         )
     }
 }
@@ -527,6 +663,10 @@ pub enum PossessionIntentError {
     NoModelledStance,
     #[error("motion table does not model offered possession stance 0x{stance:08X}")]
     UnmodelledStance { stance: u32 },
+    #[error("invalid possession run-rate scalar: {0}")]
+    InvalidRunRateScalar(#[source] PossessionRunRateError),
+    #[error(transparent)]
+    InvalidKinematics(holtburger_core::CharacterKinematicsError),
     #[error(transparent)]
     InvalidAxes(holtburger_core::CharacterAxisAdjustmentError),
 }
@@ -536,9 +676,9 @@ fn resolve_intent(
     stance: u32,
     drive: CharacterDrive,
     capability: PossessionStanceCapability,
-    kinematics: CharacterJumpKinematics,
+    kinematics: PossessionResolvedKinematics,
 ) -> Result<ResolvedPossessionIntent, PossessionIntentError> {
-    let axes = adjust_character_axes(drive, kinematics.movement())
+    let axes = adjust_character_axes(drive, kinematics.jump().movement())
         .map_err(PossessionIntentError::InvalidAxes)?;
     let forward = axes.forward().and_then(|forward| {
         capability
@@ -560,6 +700,7 @@ fn resolve_intent(
         revision,
         stance,
         drive,
+        kinematics,
         axes,
         visible_order: MotionOrder {
             style: Some(MotionCommand(stance)),
@@ -641,6 +782,7 @@ mod tests {
     use super::*;
     use holtburger_common::{Guid, Quaternion, Vector3};
     use holtburger_content::MotionSequenceCatalog;
+    use holtburger_core::{CharacterJumpReadiness, JumpAttempt, resolve_character_jump};
     use holtburger_dat::file_type::animation::AnimationFlags;
     use holtburger_dat::file_type::motion_table::{AnimData, MotionData, MotionDataFlags};
     use holtburger_dat::file_type::setup_model::AnimationFrame;
@@ -652,6 +794,20 @@ mod tests {
     const DUAL_WIELD: u32 = MotionStance::DualWieldCombat as u32;
     const STAND: u32 = 0x4500_0003;
     const READY: u32 = 0x4000_003C;
+
+    fn intent_snapshot(
+        revision: u64,
+        stance: u32,
+        drive: CharacterDrive,
+        run_rate_scalar: f32,
+    ) -> PossessionIntentSnapshot {
+        PossessionIntentSnapshot {
+            revision,
+            stance,
+            drive,
+            run_rate_scalar,
+        }
+    }
 
     fn motion(
         animation: u32,
@@ -754,7 +910,7 @@ mod tests {
         assert_eq!(profile.fallback.run_speed(), 4.0);
         assert_eq!(profile.fallback.sidestep_speed(), 1.2);
         assert_eq!(profile.fallback.turn_rate(), 1.5);
-        assert_eq!(profile.jump.movement().base_walk_forward_speed(), 3.12);
+        assert_eq!(profile.base_jump.movement().base_walk_forward_speed(), 3.12);
     }
 
     #[test]
@@ -834,7 +990,7 @@ mod tests {
             .build();
 
         assert_eq!(
-            active.replace_intent(1, NON_COMBAT, drive, profile),
+            active.replace_intent(intent_snapshot(1, NON_COMBAT, drive, 1.0), profile),
             Ok(PossessionIntentReplaceResult::Accepted)
         );
         assert_eq!(
@@ -858,7 +1014,10 @@ mod tests {
 
         let accepted = active.latest_intent;
         assert_eq!(
-            active.replace_intent(2, MotionStance::BowCombat as u32, drive, profile),
+            active.replace_intent(
+                intent_snapshot(2, MotionStance::BowCombat as u32, drive, 1.0),
+                profile,
+            ),
             Err(PossessionIntentError::UnmodelledStance {
                 stance: MotionStance::BowCombat as u32
             })
@@ -868,7 +1027,10 @@ mod tests {
             "a rejected revision is atomic"
         );
         assert_eq!(
-            active.replace_intent(1, NON_COMBAT, CharacterDrive::default(), profile),
+            active.replace_intent(
+                intent_snapshot(1, NON_COMBAT, CharacterDrive::default(), 1.0),
+                profile,
+            ),
             Ok(PossessionIntentReplaceResult::IgnoredStaleRevision)
         );
         assert_eq!(active.latest_intent, accepted);
@@ -892,9 +1054,7 @@ mod tests {
         assert_eq!(
             active.queue_event(
                 2,
-                2,
-                NON_COMBAT,
-                drive,
+                intent_snapshot(2, NON_COMBAT, drive, 1.0),
                 PossessionLifecycleEvent::Reset,
                 profile
             ),
@@ -907,9 +1067,7 @@ mod tests {
         assert_eq!(
             active.queue_event(
                 2,
-                3,
-                NON_COMBAT,
-                drive,
+                intent_snapshot(3, NON_COMBAT, drive, 1.0),
                 PossessionLifecycleEvent::Reset,
                 profile
             ),
@@ -918,9 +1076,7 @@ mod tests {
         assert_eq!(
             active.queue_event(
                 0,
-                1,
-                NON_COMBAT,
-                drive,
+                intent_snapshot(1, NON_COMBAT, drive, 1.0),
                 PossessionLifecycleEvent::BeginJump,
                 profile
             ),
@@ -931,5 +1087,171 @@ mod tests {
             vec![0, 2],
             "a later edge stays queued behind the missing contiguous sequence"
         );
+    }
+
+    #[test]
+    fn run_rate_scalar_accepts_only_the_inclusive_host_range() {
+        for value in [1.0, 10.0] {
+            assert!(PossessionRunRateScalar::new(value).is_ok());
+        }
+        for value in [0.999, 10.001, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            assert_eq!(
+                PossessionRunRateScalar::new(value),
+                Err(PossessionRunRateError::Invalid)
+            );
+        }
+    }
+
+    #[test]
+    fn rate_resolved_kinematics_keeps_walk_and_jump_height_but_scales_run() {
+        let profile = ExplorerPossessionControlProfile::standard().expect("profile");
+        let rate_one = profile.resolve_kinematics(1.0).expect("rate one");
+        let rate_ten = profile.resolve_kinematics(10.0).expect("rate ten");
+        assert_eq!(rate_one.run_rate().value(), 1.0);
+        assert_eq!(rate_ten.run_rate().value(), 10.0);
+        assert_eq!(
+            rate_one.jump().movement().base_walk_forward_speed(),
+            rate_ten.jump().movement().base_walk_forward_speed()
+        );
+        assert_eq!(
+            rate_one.jump().full_extent_jump_height(),
+            rate_ten.jump().full_extent_jump_height()
+        );
+        assert_eq!(rate_ten.jump().movement().run_rate_scalar(), 10.0);
+    }
+
+    #[test]
+    fn ten_x_uses_retail_axis_rules_without_scaling_walk_or_turn() {
+        let catalog = capability_catalog();
+        let profile = ExplorerPossessionControlProfile::standard().expect("profile");
+        let mut active = ActivePossession::new(
+            Guid(0xf000_0001),
+            7,
+            9,
+            TABLE,
+            catalog.table(TABLE).expect("table"),
+            profile,
+        )
+        .expect("possession");
+
+        active
+            .replace_intent(
+                intent_snapshot(
+                    1,
+                    NON_COMBAT,
+                    CharacterDrive::builder()
+                        .walk()
+                        .forward()
+                        .turn_right()
+                        .build(),
+                    10.0,
+                ),
+                profile,
+            )
+            .expect("walk intent");
+        assert_eq!(
+            active.latest_intent.axes.forward(),
+            Some(holtburger_core::AdjustedForwardAxis::Walk { speed_mod: 1.0 })
+        );
+        assert_eq!(
+            active.latest_intent.axes.turn(),
+            Some((MotionCommand::TURN, 1.0))
+        );
+
+        active
+            .replace_intent(
+                intent_snapshot(
+                    2,
+                    NON_COMBAT,
+                    CharacterDrive::builder().run().forward().build(),
+                    10.0,
+                ),
+                profile,
+            )
+            .expect("run intent");
+        assert_eq!(
+            active.latest_intent.axes.forward(),
+            Some(holtburger_core::AdjustedForwardAxis::Run { speed_mod: 10.0 })
+        );
+
+        active
+            .replace_intent(
+                intent_snapshot(
+                    3,
+                    NON_COMBAT,
+                    CharacterDrive::builder()
+                        .run()
+                        .backstep()
+                        .strafe_left()
+                        .turn_left()
+                        .build(),
+                    10.0,
+                ),
+                profile,
+            )
+            .expect("run backward/sidestep intent");
+        assert_eq!(
+            active.latest_intent.axes.forward(),
+            Some(holtburger_core::AdjustedForwardAxis::Walk { speed_mod: -6.5 })
+        );
+        assert_eq!(
+            active.latest_intent.axes.sidestep(),
+            Some((MotionCommand::SIDESTEP, -3.0))
+        );
+        assert_eq!(
+            active.latest_intent.axes.turn(),
+            Some((MotionCommand::TURN, -1.5))
+        );
+    }
+
+    #[test]
+    fn jump_rate_scales_planar_launch_but_not_vertical_launch() {
+        let profile = ExplorerPossessionControlProfile::standard().expect("profile");
+        let one = profile.resolve_kinematics(1.0).expect("rate one").jump();
+        let ten = profile.resolve_kinematics(10.0).expect("rate ten").jump();
+        let attempt = JumpAttempt {
+            drive: CharacterDrive::builder().run().forward().build(),
+            extent: JumpExtent::MAXIMUM,
+            standing_long_jump: false,
+        };
+        let one_launch =
+            resolve_character_jump(one, attempt, 0.0, CharacterJumpReadiness::Supported)
+                .expect("rate-one jump");
+        let ten_launch =
+            resolve_character_jump(ten, attempt, 0.0, CharacterJumpReadiness::Supported)
+                .expect("ten-x jump");
+        assert!(ten_launch.local_velocity().y > one_launch.local_velocity().y);
+        assert_eq!(ten_launch.local_velocity().z, one_launch.local_velocity().z);
+    }
+
+    #[test]
+    fn invalid_run_rate_does_not_mutate_the_latest_intent() {
+        let catalog = capability_catalog();
+        let profile = ExplorerPossessionControlProfile::standard().expect("profile");
+        let mut active = ActivePossession::new(
+            Guid(0xf000_0001),
+            7,
+            9,
+            TABLE,
+            catalog.table(TABLE).expect("table"),
+            profile,
+        )
+        .expect("possession");
+        let before = active.latest_intent;
+        assert_eq!(
+            active.replace_intent(
+                intent_snapshot(
+                    1,
+                    NON_COMBAT,
+                    CharacterDrive::builder().run().forward().build(),
+                    f32::INFINITY,
+                ),
+                profile,
+            ),
+            Err(PossessionIntentError::InvalidRunRateScalar(
+                PossessionRunRateError::Invalid
+            ))
+        );
+        assert_eq!(active.latest_intent, before);
     }
 }

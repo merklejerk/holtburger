@@ -363,6 +363,7 @@ describe("possession", () => {
 			guid: 0xf0000001,
 			motionTableId: "0x09000001",
 			possessionGeneration: 9,
+			runRateCapability: { initial: 1, maximum: 10, minimum: 1 },
 			stances: [
 				{
 					chargeDurationMs: 1_000,
@@ -398,6 +399,7 @@ describe("possession", () => {
 			guid: null,
 			motionTableId: null,
 			possessionGeneration: 10,
+			runRateCapability: null,
 			stances: [],
 		});
 		const session = new ExplorerDynamicEntitySession(transport);
@@ -426,6 +428,7 @@ describe("possession", () => {
 			},
 			possessionGeneration: 9,
 			revision: 3,
+			runRateScalar: 1,
 			stance: 0x8000003d,
 		};
 
@@ -437,5 +440,33 @@ describe("possession", () => {
 				sequence: 0,
 			}),
 		).toEqual({ result: "queued", outcomes: [] });
+	});
+
+	it("decodes the host-applied possession motion probe", async () => {
+		const transport = new RecordingTransport();
+		transport.responses.set("explorer_possession_motion_probe", {
+			clip: {
+				animationId: 0x03000002,
+				completion: "loop",
+				framerate: 40,
+				highFrame: 3,
+				lowFrame: 0,
+			},
+			entityGeneration: 7,
+			effectivePlanarSpeed: 7.68,
+			guid: 0xf0000001,
+			modifiers: [],
+			physicalStatus: "substep-budget-exceeded",
+			possessionGeneration: 9,
+			requestedRunRate: 10,
+			style: 0x8000003d,
+			substate: { command: 0x44000007, speed: 10 },
+		});
+		const session = new ExplorerDynamicEntitySession(transport);
+
+		expect(await session.possessionMotionProbe()).toMatchObject({
+			physicalStatus: "substep-budget-exceeded",
+			requestedRunRate: 10,
+		});
 	});
 });

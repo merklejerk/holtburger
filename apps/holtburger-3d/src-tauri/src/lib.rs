@@ -1009,6 +1009,14 @@ fn request_explorer_dynamic_entity_snapshot(
     })
 }
 
+/// Returns one pull-only possession playback/physical sample for the Inspector diagnostics.
+#[tauri::command]
+fn explorer_possession_motion_probe(
+    entities: tauri::State<'_, Arc<explorer_entity_runtime::ExplorerEntityRuntime>>,
+) -> Option<explorer_entity_runtime::ExplorerPossessionMotionProbe> {
+    entities.possession_motion_probe()
+}
+
 /// Prepares one catalog WCID and publishes the complete wearer/child registry generation.
 #[tauri::command]
 async fn spawn_explorer_entity(
@@ -1232,6 +1240,7 @@ pub struct ExplorerPossessionReceipt {
     pub possession_generation: u64,
     pub motion_table_id: Option<String>,
     pub accepted_stance: Option<u32>,
+    pub run_rate_capability: Option<explorer_possession_control::PossessionRunRateCapability>,
     pub stances: Vec<explorer_possession_control::PossessionStanceCapability>,
 }
 
@@ -1243,6 +1252,7 @@ impl ExplorerPossessionReceipt {
             possession_generation: possession.possession_generation,
             motion_table_id: Some(format!("0x{:08x}", possession.motion_table_id)),
             accepted_stance: Some(possession.accepted_stance),
+            run_rate_capability: Some(possession.run_rate_capability),
             stances: possession.stances,
         }
     }
@@ -1254,6 +1264,7 @@ impl ExplorerPossessionReceipt {
             possession_generation,
             motion_table_id: None,
             accepted_stance: None,
+            run_rate_capability: None,
             stances: Vec::new(),
         }
     }
@@ -1267,16 +1278,22 @@ pub struct ExplorerPossessionIntentWireRequest {
     revision: u64,
     stance: u32,
     drive: explorer_possession_control::CharacterDriveRequest,
+    run_rate_scalar: f32,
 }
 
 impl ExplorerPossessionIntentWireRequest {
-    pub fn resolve(self) -> explorer_entity_runtime::ExplorerPossessionIntentRequest {
-        explorer_entity_runtime::ExplorerPossessionIntentRequest {
+    pub fn resolve(
+        self,
+    ) -> Result<explorer_entity_runtime::ExplorerPossessionIntentRequest, String> {
+        explorer_possession_control::PossessionRunRateScalar::new(self.run_rate_scalar)
+            .map_err(|error| error.to_string())?;
+        Ok(explorer_entity_runtime::ExplorerPossessionIntentRequest {
             possession_generation: self.possession_generation,
             revision: self.revision,
             stance: self.stance,
             drive: self.drive.resolve(),
-        }
+            run_rate_scalar: self.run_rate_scalar,
+        })
     }
 }
 
@@ -1298,6 +1315,7 @@ pub struct ExplorerPossessionEventWireRequest {
     revision: u64,
     stance: u32,
     drive: explorer_possession_control::CharacterDriveRequest,
+    run_rate_scalar: f32,
     #[serde(flatten)]
     event: ExplorerPossessionEventKind,
 }
@@ -1306,6 +1324,8 @@ impl ExplorerPossessionEventWireRequest {
     pub fn resolve(
         self,
     ) -> Result<explorer_entity_runtime::ExplorerPossessionEventRequest, String> {
+        explorer_possession_control::PossessionRunRateScalar::new(self.run_rate_scalar)
+            .map_err(|error| error.to_string())?;
         let event = match self.event {
             ExplorerPossessionEventKind::BeginJump => {
                 explorer_possession_control::PossessionLifecycleEvent::BeginJump
@@ -1326,6 +1346,7 @@ impl ExplorerPossessionEventWireRequest {
             revision: self.revision,
             stance: self.stance,
             drive: self.drive.resolve(),
+            run_rate_scalar: self.run_rate_scalar,
             event,
         })
     }
@@ -1357,7 +1378,7 @@ async fn set_explorer_possession_intent(
     request: ExplorerPossessionIntentWireRequest,
 ) -> Result<explorer_possession_control::PossessionIntentReplaceResult, String> {
     entities
-        .replace_possession_intent(request.resolve())
+        .replace_possession_intent(request.resolve()?)
         .map_err(|error| error.to_string())
 }
 
@@ -1979,6 +2000,7 @@ pub fn run() {
             explorer_catalog_capability,
             search_explorer_weenies,
             request_explorer_dynamic_entity_snapshot,
+            explorer_possession_motion_probe,
             spawn_explorer_entity,
             despawn_explorer_entity,
             replace_explorer_entity_physics_state,
@@ -2024,6 +2046,46 @@ mod tests {
     use holtburger_dat::file_type::region::{GameTime, LandDefs, RegionDesc};
     use holtburger_dat::{DatFileType, EOR_PORTAL_NAMESPACE, HbaWriter};
     use tempfile::tempdir;
+
+    fn wire_drive() -> explorer_possession_control::CharacterDriveRequest {
+        explorer_possession_control::CharacterDriveRequest {
+            gait: explorer_possession_control::CharacterGaitRequest::Run,
+            longitudinal: Some(explorer_possession_control::CharacterLongitudinalRequest::Forward),
+            lateral: None,
+            turn: None,
+        }
+    }
+
+    #[test]
+    fn possession_wire_requests_reject_non_finite_or_out_of_range_run_rates() {
+        for run_rate_scalar in [f32::NAN, f32::INFINITY, 0.5, 10.001] {
+            let request = ExplorerPossessionIntentWireRequest {
+                possession_generation: 1,
+                revision: 1,
+                stance: 0x8000_003d,
+                drive: wire_drive(),
+                run_rate_scalar,
+            };
+            assert!(
+                request.resolve().is_err(),
+                "wire intent must reject {run_rate_scalar:?}"
+            );
+
+            let event = ExplorerPossessionEventWireRequest {
+                possession_generation: 1,
+                sequence: 0,
+                revision: 1,
+                stance: 0x8000_003d,
+                drive: wire_drive(),
+                run_rate_scalar,
+                event: ExplorerPossessionEventKind::BeginJump,
+            };
+            assert!(
+                event.resolve().is_err(),
+                "wire lifecycle edge must reject {run_rate_scalar:?}"
+            );
+        }
+    }
 
     #[test]
     fn terrain_source_binary_aligns_and_describes_each_grid_section() {

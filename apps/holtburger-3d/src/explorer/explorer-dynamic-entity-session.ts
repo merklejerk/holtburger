@@ -21,12 +21,14 @@ import {
 	decodePossessionEventOutcomes,
 	decodePossessionEventQueueReceipt,
 	decodePossessionIntentResult,
+	decodePossessionMotionProbe,
 	type ExplorerPossession,
 	type ExplorerPossessionEventRequest,
 	type ExplorerPossessionIntent,
 	type PossessionEventQueueReceipt,
 	type PossessionEventOutcome,
 	type PossessionIntentResult,
+	type PossessionMotionProbe,
 } from "./explorer-entity-possession";
 import {
 	decodeExplorerFixedTickEnvelope,
@@ -231,6 +233,13 @@ export class ExplorerDynamicEntitySession {
 			await this.#transport.invoke("queue_explorer_possession_event", {
 				request,
 			}),
+		);
+	}
+
+	/** Read the host-applied possession playback and physical status for sampled diagnostics. */
+	async possessionMotionProbe(): Promise<PossessionMotionProbe | null> {
+		return decodePossessionMotionProbe(
+			await this.#transport.invoke("explorer_possession_motion_probe"),
 		);
 	}
 

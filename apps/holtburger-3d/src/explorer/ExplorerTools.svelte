@@ -29,7 +29,11 @@
 		ExplorerWeenieSearchRequest,
 		ExplorerWeenieSearchResult,
 	} from "./explorer-entity-commands";
-	import type { ExplorerPossession } from "./explorer-entity-possession";
+	import type {
+		ExplorerPossession,
+		ExplorerPossessionControls,
+		PossessionMotionProbe,
+	} from "./explorer-entity-possession";
 	import type { DynamicEntityView } from "../lib/game/runtime/dynamic-entity-feed";
 	import type { HostKinematicBoomStatus } from "../lib/game/camera/host-kinematic-boom-session";
 	import type { ExplorerEntitySelection } from "./explorer-entity-panel-state";
@@ -136,7 +140,10 @@
 			guid: number | null,
 		) => Promise<ExplorerPossession>;
 		readonly setExplorerEntityStance: (style: number) => Promise<void>;
+		readonly setExplorerEntityRunRate: (value: number) => Promise<void>;
 		readonly explorerPossession: ExplorerPossession | null;
+		readonly explorerPossessionControls: ExplorerPossessionControls | null;
+		readonly readPossessionMotionProbe: () => Promise<PossessionMotionProbe | null>;
 		/** Pull one exact current entity only for disclosure-scoped volatile diagnostics. */
 		readonly readExplorerEntity: (
 			selection: ExplorerEntitySelection,
@@ -202,7 +209,10 @@
 		despawnExplorerEntity,
 		possessExplorerEntity,
 		setExplorerEntityStance,
+		setExplorerEntityRunRate,
 		explorerPossession,
+		explorerPossessionControls,
+		readPossessionMotionProbe,
 		readExplorerEntity,
 		readBoomCameraStatus,
 	}: Props = $props();
@@ -356,7 +366,10 @@
 								despawn={despawnExplorerEntity}
 								possess={possessExplorerEntity}
 								setStance={setExplorerEntityStance}
+								setRunRate={setExplorerEntityRunRate}
 								possession={explorerPossession}
+								possessionControls={explorerPossessionControls}
+								{readPossessionMotionProbe}
 								{readExplorerEntity}
 								{readBoomCameraStatus}
 							/>

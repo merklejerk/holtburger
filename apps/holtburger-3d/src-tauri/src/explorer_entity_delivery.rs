@@ -9,11 +9,10 @@ use anyhow::{Result, anyhow, ensure};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion};
 use holtburger_core::{
-    DynamicEntityAdvance, DynamicEntityAdvanceBatch, DynamicEntityClipCompletion,
-    DynamicEntityEvent, DynamicEntityHostTime, DynamicEntityPathLeg, DynamicEntityPathPoint,
-    DynamicEntityPlacedPath, DynamicEntityPlacementAdvanceKind, DynamicEntitySnapshot,
-    DynamicEntitySpatialMembership, DynamicEntityView, DynamicEntityViewSource,
-    project_dynamic_entity_view,
+    DynamicEntityAdvance, DynamicEntityAdvanceBatch, DynamicEntityEvent, DynamicEntityHostTime,
+    DynamicEntityPathLeg, DynamicEntityPathPoint, DynamicEntityPlacedPath,
+    DynamicEntityPlacementAdvanceKind, DynamicEntitySnapshot, DynamicEntitySpatialMembership,
+    DynamicEntityView, DynamicEntityViewSource, project_dynamic_entity_view,
 };
 use holtburger_world::{PlacedMotionPath, PlacedMotionPoint};
 use serde::Serialize;
@@ -23,29 +22,6 @@ use crate::explorer_entity_runtime::{
 };
 use crate::host_kinematic_boom_runtime::HostKinematicBoomTick;
 use crate::placed_motion_presentation::{interpolate_rotation, present_placed_motion_pose};
-
-/// Projects the host's playing clip into the frontend transport shape.
-fn project_playing_clip(
-    clip: holtburger_world::motion::PlayingMotionClip,
-) -> holtburger_core::DynamicEntityPlayingClip {
-    holtburger_core::DynamicEntityPlayingClip {
-        animation_id: clip.animation_id,
-        framerate: clip.framerate,
-        low_frame: clip.low_frame,
-        high_frame: clip.high_frame,
-        completion: project_clip_completion(clip.completion),
-    }
-}
-
-/// Maps the authoritative sequence fact into the transport-owned enum without reinterpretation.
-pub(crate) fn project_clip_completion(
-    completion: holtburger_world::motion::MotionClipCompletion,
-) -> DynamicEntityClipCompletion {
-    match completion {
-        holtburger_world::motion::MotionClipCompletion::Hold => DynamicEntityClipCompletion::Hold,
-        holtburger_world::motion::MotionClipCompletion::Loop => DynamicEntityClipCompletion::Loop,
-    }
-}
 
 /// One Tauri event name for snapshots and incremental entity changes.
 pub const EXPLORER_DYNAMIC_ENTITY_EVENT: &str = "explorer-dynamic-entity";
@@ -100,7 +76,11 @@ impl ExplorerEntityDelivery {
     pub fn entity(&self, guid: Guid) -> Result<DynamicEntityView, ExplorerEntityRuntimeError> {
         let projection = self.entities.project(guid)?;
         Ok(project_dynamic_entity_view(
-            DynamicEntityViewSource::from_projection(projection.generation, projection.input),
+            DynamicEntityViewSource::from_projection(
+                projection.generation,
+                projection.input,
+                projection.playing_clip,
+            ),
         ))
     }
 
@@ -114,6 +94,7 @@ impl ExplorerEntityDelivery {
                 project_dynamic_entity_view(DynamicEntityViewSource::from_projection(
                     projection.generation,
                     projection.input,
+                    projection.playing_clip,
                 ))
             })
             .collect();
@@ -197,9 +178,6 @@ impl ExplorerEntityDelivery {
                 self.host_time(),
                 0.0,
                 vec![DynamicEntityAdvance {
-                    // A correction moves the body; it does not change which clip is playing, and
-                    // the receiver keeps whatever projection it already holds.
-                    clip: None,
                     entity: Box::new(entity),
                     kind,
                     path: DynamicEntityPlacedPath {
@@ -233,9 +211,12 @@ fn project_entity_advances(
                 tick.solved.current.pose,
             )?;
             Ok(DynamicEntityAdvance {
-                clip: tick.clip.map(project_playing_clip),
                 entity: Box::new(project_dynamic_entity_view(
-                    DynamicEntityViewSource::from_projection(tick.generation, tick.input),
+                    DynamicEntityViewSource::from_projection(
+                        tick.generation,
+                        tick.input,
+                        tick.playing_clip,
+                    ),
                 )),
                 kind: DynamicEntityPlacementAdvanceKind::Integrated,
                 path,

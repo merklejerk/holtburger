@@ -7,7 +7,7 @@ use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion, Vector3};
 use holtburger_core::{
     KinematicBoomAdvance, KinematicBoomCollisionSeed, KinematicBoomController,
-    KinematicBoomDiagnostics, KinematicBoomFailureKind, KinematicBoomIntent,
+    KinematicBoomDiagnostics, KinematicBoomHoldReason, KinematicBoomIntent,
     KinematicBoomIntentAcceptance, KinematicBoomOutcome, KinematicBoomPlacement,
     KinematicBoomProfile, KinematicBoomProfileDefinition, KinematicBoomReseedReason,
     KinematicBoomTargetSample,
@@ -191,24 +191,22 @@ impl From<KinematicBoomDiagnostics> for HostKinematicBoomDiagnostics {
     }
 }
 
-/// Machine-readable terminal controller or collision failure.
+/// Machine-readable reason a recoverable tick held its last safe placement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum HostKinematicBoomFailureKind {
+pub enum HostKinematicBoomHoldReason {
     ClearanceSweep,
     FreeSphereQuery,
-    MaximumReach,
     TargetContract,
     ControllerInput,
-    SequenceExhausted,
+    PathProjection,
 }
 
-impl From<KinematicBoomFailureKind> for HostKinematicBoomFailureKind {
-    fn from(value: KinematicBoomFailureKind) -> Self {
+impl From<KinematicBoomHoldReason> for HostKinematicBoomHoldReason {
+    fn from(value: KinematicBoomHoldReason) -> Self {
         match value {
-            KinematicBoomFailureKind::ClearanceSweep => Self::ClearanceSweep,
-            KinematicBoomFailureKind::FreeSphereQuery => Self::FreeSphereQuery,
-            KinematicBoomFailureKind::MaximumReach => Self::MaximumReach,
+            KinematicBoomHoldReason::ClearanceSweep => Self::ClearanceSweep,
+            KinematicBoomHoldReason::FreeSphereQuery => Self::FreeSphereQuery,
         }
     }
 }
@@ -280,18 +278,26 @@ pub enum HostKinematicBoomTick {
         /// Finite-work counters consumed before reseeding.
         diagnostics: HostKinematicBoomDiagnostics,
     },
-    /// One terminal failure; the runtime retires the generation before returning it.
-    Failed {
-        /// Exact runtime identity that failed.
+    /// Recoverable stationary tick; the same generation retries from this safe placement.
+    Held {
+        /// Exact runtime identity that remains active.
         #[serde(flatten)]
         identity: HostKinematicBoomIdentity,
-        /// Monotonic host-authored result sequence.
+        /// Monotonic host-authored camera path sequence.
         sequence: u64,
-        /// Machine-readable terminal cause.
-        failure: HostKinematicBoomFailureKind,
-        /// Last committed safe placement to hold in the frontend.
-        held: HostKinematicBoomPathPoint,
-        /// Work completed before the terminal failure.
+        /// Target sphere selected from the latest accepted physical body definition.
+        target_sphere_role: HostKinematicBoomTargetSphereRole,
+        /// Collision radius retained by the active generation.
+        effective_camera_radius: f32,
+        /// Latest operator-requested reach after cumulative zoom and host clamping.
+        desired_reach: f32,
+        /// Actual reach of the retained collision-safe camera placement.
+        rendered_reach: f32,
+        /// Stationary path at the authoritative retained placement.
+        path: HostKinematicBoomPlacedPath,
+        /// Machine-readable reason the tick could not advance continuously.
+        reason: HostKinematicBoomHoldReason,
+        /// Work completed before holding.
         diagnostics: HostKinematicBoomDiagnostics,
     },
 }
@@ -345,7 +351,7 @@ impl HostKinematicBoomRuntime {
         })
     }
 
-    /// Composes a runtime with an explicit validated profile for finite-work failure tests.
+    /// Composes a runtime with an explicit validated profile for finite-work recovery tests.
     #[cfg(test)]
     pub(crate) fn with_profile(
         entities: Arc<ExplorerEntityRuntime>,
@@ -473,16 +479,27 @@ impl HostKinematicBoomRuntime {
         duration_seconds: f32,
     ) -> Result<Option<HostKinematicBoomTick>> {
         let mut state = self.state.lock().expect("kinematic boom lock poisoned");
-        let Some(mut active) = state.active.take() else {
+        let Some(identity) = state.active.as_ref().map(|active| active.identity) else {
             return Ok(None);
         };
-        if collection.possession != Some(active.identity.possession()) {
+        if collection.possession != Some(identity.possession()) {
+            state.active = None;
             return Ok(None);
         }
+        let active = state
+            .active
+            .as_mut()
+            .expect("current possession retained its active boom");
         let Some(target_tick) = collection.ticks.iter().find(|tick| {
             tick.solved.current.id == holtburger_world::SpatialBodyId::Entity(active.identity.guid)
         }) else {
-            return Ok(None);
+            eprintln!("kinematic boom target is absent from its current possession collection");
+            let tick = project_hold(
+                active,
+                HostKinematicBoomHoldReason::TargetContract,
+                KinematicBoomDiagnostics::default(),
+            );
+            return Ok(Some(tick));
         };
         let (samples, selected, radius, final_seed_cell) = match target_samples(
             target_tick,
@@ -492,11 +509,12 @@ impl HostKinematicBoomRuntime {
             Ok(value) => value,
             Err(error) => {
                 eprintln!("kinematic boom target adaptation failed: {error:#}");
-                return Ok(Some(project_failure(
-                    &mut active,
-                    HostKinematicBoomFailureKind::TargetContract,
+                let tick = project_hold(
+                    active,
+                    HostKinematicBoomHoldReason::TargetContract,
                     KinematicBoomDiagnostics::default(),
-                )));
+                );
+                return Ok(Some(tick));
             }
         };
         let initial_visual_pivot = active.controller.visual_pivot();
@@ -508,38 +526,62 @@ impl HostKinematicBoomRuntime {
             Ok(outcome) => outcome,
             Err(error) => {
                 eprintln!("kinematic boom controller input failed: {error:#}");
-                return Ok(Some(project_failure(
-                    &mut active,
-                    HostKinematicBoomFailureKind::ControllerInput,
+                let tick = project_hold(
+                    active,
+                    HostKinematicBoomHoldReason::ControllerInput,
                     KinematicBoomDiagnostics::default(),
-                )));
+                );
+                return Ok(Some(tick));
             }
         };
-        active.target_sphere_role = selected;
-        active.effective_camera_radius = radius;
-        active.collision_seed_cell = final_seed_cell;
-        let (tick, retained) = project_outcome(&mut active, initial_visual_pivot, outcome);
-        if retained {
-            state.active = Some(active);
+        if matches!(&outcome, KinematicBoomOutcome::Advanced { .. }) {
+            // These adapter facts describe the controller's committed seed. A held core tick keeps
+            // its previous controller transaction, so advancing only the adapter would manufacture
+            // an internally inconsistent recovery baseline.
+            active.target_sphere_role = selected;
+            active.effective_camera_radius = radius;
+            active.collision_seed_cell = final_seed_cell;
         }
+        let tick = project_outcome(active, initial_visual_pivot, outcome);
         Ok(Some(tick))
     }
 }
 
-fn project_failure(
+fn project_hold(
     active: &mut ActiveHostKinematicBoom,
-    failure: HostKinematicBoomFailureKind,
+    reason: HostKinematicBoomHoldReason,
     diagnostics: KinematicBoomDiagnostics,
 ) -> HostKinematicBoomTick {
-    active.sequence = active.sequence.saturating_add(1);
-    HostKinematicBoomTick::Failed {
+    let sequence = active
+        .sequence
+        .checked_add(1)
+        .expect("active boom output sequence exhausted");
+    active.sequence = sequence;
+    hold_tick(
+        active,
+        sequence,
+        active.controller.camera(),
+        reason,
+        diagnostics,
+    )
+}
+
+fn hold_tick(
+    active: &ActiveHostKinematicBoom,
+    sequence: u64,
+    held: KinematicBoomPlacement,
+    reason: HostKinematicBoomHoldReason,
+    diagnostics: KinematicBoomDiagnostics,
+) -> HostKinematicBoomTick {
+    HostKinematicBoomTick::Held {
         identity: active.identity,
-        sequence: active.sequence,
-        failure,
-        held: path_point(
-            active.controller.camera().pose,
-            active.controller.visual_pivot(),
-        ),
+        sequence,
+        target_sphere_role: active.target_sphere_role,
+        effective_camera_radius: active.effective_camera_radius,
+        desired_reach: active.controller.desired_reach(),
+        rendered_reach: active.controller.rendered_reach(),
+        path: stationary_path(held, active.controller.visual_pivot()),
+        reason,
         diagnostics: diagnostics.into(),
     }
 }
@@ -548,86 +590,62 @@ fn project_outcome(
     active: &mut ActiveHostKinematicBoom,
     initial_visual_pivot: WorldPosition,
     outcome: KinematicBoomOutcome,
-) -> (HostKinematicBoomTick, bool) {
-    let Some(sequence) = active.sequence.checked_add(1) else {
-        return (
-            project_failure(
-                active,
-                HostKinematicBoomFailureKind::SequenceExhausted,
-                KinematicBoomDiagnostics::default(),
-            ),
-            false,
-        );
-    };
+) -> HostKinematicBoomTick {
+    let sequence = active
+        .sequence
+        .checked_add(1)
+        .expect("active boom output sequence exhausted");
     active.sequence = sequence;
     match outcome {
         KinematicBoomOutcome::Advanced {
             advance,
             diagnostics,
-        } => {
-            let tick = match advance {
-                KinematicBoomAdvance::Continuous { path } => match serialize_path(
-                    &path,
-                    initial_visual_pivot,
-                    active.controller.visual_pivot(),
-                ) {
-                    Ok(path) => HostKinematicBoomTick::Advanced {
-                        identity: active.identity,
-                        sequence,
-                        target_sphere_role: active.target_sphere_role,
-                        effective_camera_radius: active.effective_camera_radius,
-                        desired_reach: active.controller.desired_reach(),
-                        rendered_reach: active.controller.rendered_reach(),
-                        path,
-                        diagnostics: diagnostics.into(),
-                    },
-                    Err(error) => {
-                        eprintln!("kinematic boom path projection failed: {error:#}");
-                        return (
-                            HostKinematicBoomTick::Failed {
-                                identity: active.identity,
-                                sequence,
-                                failure: HostKinematicBoomFailureKind::TargetContract,
-                                held: path_point(
-                                    active.controller.camera().pose,
-                                    active.controller.visual_pivot(),
-                                ),
-                                diagnostics: diagnostics.into(),
-                            },
-                            false,
-                        );
-                    }
+        } => match advance {
+            KinematicBoomAdvance::Continuous { path } => match serialize_path(
+                &path,
+                initial_visual_pivot,
+                active.controller.visual_pivot(),
+            ) {
+                Ok(path) => HostKinematicBoomTick::Advanced {
+                    identity: active.identity,
+                    sequence,
+                    target_sphere_role: active.target_sphere_role,
+                    effective_camera_radius: active.effective_camera_radius,
+                    desired_reach: active.controller.desired_reach(),
+                    rendered_reach: active.controller.rendered_reach(),
+                    path,
+                    diagnostics: diagnostics.into(),
                 },
-                KinematicBoomAdvance::Reseeded { placement, reason } => {
-                    HostKinematicBoomTick::Reseeded {
-                        identity: active.identity,
+                Err(error) => {
+                    eprintln!("kinematic boom path projection failed: {error:#}");
+                    hold_tick(
+                        active,
                         sequence,
-                        target_sphere_role: active.target_sphere_role,
-                        effective_camera_radius: active.effective_camera_radius,
-                        desired_reach: active.controller.desired_reach(),
-                        rendered_reach: active.controller.rendered_reach(),
-                        path: stationary_path(placement, active.controller.visual_pivot()),
-                        reason: reason.into(),
-                        diagnostics: diagnostics.into(),
-                    }
+                        active.controller.camera(),
+                        HostKinematicBoomHoldReason::PathProjection,
+                        diagnostics,
+                    )
                 }
-            };
-            (tick, true)
-        }
-        KinematicBoomOutcome::Failed {
-            kind,
+            },
+            KinematicBoomAdvance::Reseeded { placement, reason } => {
+                HostKinematicBoomTick::Reseeded {
+                    identity: active.identity,
+                    sequence,
+                    target_sphere_role: active.target_sphere_role,
+                    effective_camera_radius: active.effective_camera_radius,
+                    desired_reach: active.controller.desired_reach(),
+                    rendered_reach: active.controller.rendered_reach(),
+                    path: stationary_path(placement, active.controller.visual_pivot()),
+                    reason: reason.into(),
+                    diagnostics: diagnostics.into(),
+                }
+            }
+        },
+        KinematicBoomOutcome::Held {
+            reason,
             held,
             diagnostics,
-        } => (
-            HostKinematicBoomTick::Failed {
-                identity: active.identity,
-                sequence,
-                failure: kind.into(),
-                held: path_point(held.pose, active.controller.visual_pivot()),
-                diagnostics: diagnostics.into(),
-            },
-            false,
-        ),
+        } => hold_tick(active, sequence, held, reason.into(), diagnostics),
     }
 }
 

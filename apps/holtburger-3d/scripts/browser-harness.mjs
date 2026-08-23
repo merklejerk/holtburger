@@ -1349,9 +1349,7 @@ function briefHarnessReport(result) {
 
 function summarizePossessionScenario(scenario) {
 	if (scenario === null) return null;
-	const playableBoomTicks = scenario.boom.ticks.filter(
-		(tick) => tick.kind === "advanced" || tick.kind === "reseeded",
-	);
+	const playableBoomTicks = scenario.boom.ticks;
 	const cameraEndpoints = playableBoomTicks.map(
 		(tick) => tick.path.legs.at(-1).end.position,
 	);
@@ -1426,6 +1424,9 @@ function summarizePossessionScenario(scenario) {
 			identity: scenario.boom.identity,
 			intentReceipts: scenario.boom.intentReceipts,
 			pathCount: playableBoomTicks.length,
+			holds: playableBoomTicks
+				.filter((tick) => tick.kind === "held")
+				.map((tick) => ({ reason: tick.reason, sequence: tick.sequence })),
 			reseeds: playableBoomTicks
 				.filter((tick) => tick.kind === "reseeded")
 				.map((tick) => ({ reason: tick.reason, sequence: tick.sequence })),
@@ -1912,8 +1913,28 @@ async function runPossessionScenario(
 	const right = await advance(4);
 
 	await setDrive(drive("backward", "left"));
+	boomIntentReceipts.push(
+		await invoke("setKinematicBoomIntent", [
+			{
+				...boomIdentity,
+				inputSequence: 3,
+				viewDirection: orbitDirection,
+				cumulativeZoomDisplacement: 27.5,
+			},
+		]),
+	);
 	const combinedStart = current;
 	const combined = await advance(4);
+	boomIntentReceipts.push(
+		await invoke("setKinematicBoomIntent", [
+			{
+				...boomIdentity,
+				inputSequence: 4,
+				viewDirection: boomDirection,
+				cumulativeZoomDisplacement: 27.5,
+			},
+		]),
+	);
 	await setDrive(drive(null, "left"));
 	const turnOnly = await advance(3);
 	await setDrive(drive("backward"));
@@ -2036,25 +2057,22 @@ function assertPossessionScenario(scenario) {
 		throw new Error(
 			"Possessed S did not retain a reversed authored clip rate.",
 		);
-	const playableBoomTicks = scenario.boom.ticks.filter(
-		(tick) => tick.kind === "advanced" || tick.kind === "reseeded",
-	);
+	const playableBoomTicks = scenario.boom.ticks;
 	if (
 		JSON.stringify(scenario.boom.intentReceipts) !==
-		JSON.stringify(["accepted", "accepted", "ignored-stale"])
+		JSON.stringify([
+			"accepted",
+			"accepted",
+			"ignored-stale",
+			"accepted",
+			"accepted",
+		])
 	)
 		throw new Error(
 			`Host kinematic boom intent receipts were not accepted/accepted/stale: ${JSON.stringify(scenario.boom.intentReceipts)}.`,
 		);
 	if (playableBoomTicks.length === 0)
 		throw new Error("Host kinematic boom published no playable path.");
-	const failedBoomTick = scenario.boom.ticks.find(
-		(tick) => tick.kind === "failed",
-	);
-	if (failedBoomTick !== undefined)
-		throw new Error(
-			`Host kinematic boom published terminal failure: ${JSON.stringify(failedBoomTick)}.`,
-		);
 	const invalidBoomTick = playableBoomTicks.find(
 		(tick, index) =>
 			tick.boomGeneration !== scenario.boom.identity.boomGeneration ||

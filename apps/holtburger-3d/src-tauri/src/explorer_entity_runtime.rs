@@ -3691,9 +3691,10 @@ mod tests {
     #[test]
     fn host_boom_follows_exact_possession_without_registering_a_camera_body() {
         use crate::host_kinematic_boom_runtime::{
-            HostKinematicBoomIntentReceipt, HostKinematicBoomIntentRequest,
-            HostKinematicBoomRuntime, HostKinematicBoomStartRequest,
-            HostKinematicBoomTargetSphereRole, HostKinematicBoomTick,
+            HostKinematicBoomHoldReason, HostKinematicBoomIntentReceipt,
+            HostKinematicBoomIntentRequest, HostKinematicBoomRuntime,
+            HostKinematicBoomStartRequest, HostKinematicBoomTargetSphereRole,
+            HostKinematicBoomTick,
         };
 
         let upper = Sphere {
@@ -3773,6 +3774,24 @@ mod tests {
         assert!(path.initial.visual_pivot.coords.z.is_finite());
         assert_eq!(simulation.registered_body_count(), body_count);
 
+        let missing_target = ExplorerEntityCollectionTick {
+            ticks: Vec::new(),
+            possession: Some(ExplorerPossessedBodyEpoch {
+                guid,
+                entity_generation: possession.entity_generation,
+                possession_generation: possession.possession_generation,
+            }),
+        };
+        assert!(matches!(
+            boom.advance(&missing_target, 1.0 / 30.0).unwrap(),
+            Some(HostKinematicBoomTick::Held {
+                identity,
+                sequence: 2,
+                reason: HostKinematicBoomHoldReason::TargetContract,
+                ..
+            }) if identity == receipt.identity
+        ));
+
         assert_eq!(
             boom.set_intent(HostKinematicBoomIntentRequest {
                 identity: receipt.identity,
@@ -3783,6 +3802,14 @@ mod tests {
             .unwrap(),
             HostKinematicBoomIntentReceipt::Accepted
         );
+        assert!(matches!(
+            boom.advance(&collection, 1.0 / 30.0).unwrap(),
+            Some(HostKinematicBoomTick::Advanced {
+                identity,
+                sequence: 3,
+                ..
+            }) if identity == receipt.identity
+        ));
 
         let replacement_possession = entities.possess(guid).unwrap();
         let replacement = boom

@@ -144,4 +144,24 @@ describe("host kinematic boom path", () => {
 			),
 		).toThrow("must remain at its initial placement");
 	});
+
+	it("accepts a recoverable stationary hold with actual elastic reach", () => {
+		const stationary = point(0xda550178, 12, 18);
+		const tick = decodeHostKinematicBoomTick(
+			{
+				...advanced(),
+				kind: "held",
+				renderedReach: 4.75,
+				reason: "clearance-sweep",
+				path: {
+					initial: stationary,
+					legs: [{ endFraction: 1, end: stationary }],
+				},
+			},
+			32,
+		);
+
+		expect(tick.kind).toBe("held");
+		expect(tick.renderedReach).toBe(4.75);
+	});
 });

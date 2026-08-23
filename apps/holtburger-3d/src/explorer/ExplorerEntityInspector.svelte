@@ -128,11 +128,10 @@
 		if (status.kind === "awaiting-first-path") {
 			return `generation ${status.identity.boomGeneration}; awaiting first path`;
 		}
-		if (status.kind === "failed") {
-			return `generation ${status.identity.boomGeneration}; terminal ${status.failure}; holding last safe pose`;
-		}
 		const recovery =
-			status.reseedReason === null ? "" : `; reseeded ${status.reseedReason}`;
+			status.recovery === null
+				? ""
+				: `; ${status.recovery.kind} ${status.recovery.reason}`;
 		return `generation ${status.identity.boomGeneration}; path ${status.sequence}; ${status.targetSphereRole}; reach ${status.renderedReach.toFixed(2)}/${status.desiredReach.toFixed(2)}m; radius ${status.effectiveCameraRadius.toFixed(2)}m; dropped ${status.droppedPaths}${recovery}`;
 	}
 

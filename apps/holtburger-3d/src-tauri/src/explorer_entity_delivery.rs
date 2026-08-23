@@ -62,7 +62,7 @@ pub struct ExplorerFixedTickEnvelope {
     pub duration_ms: f64,
     /// Frontend-relevant entity advances; stable host-follow targets are omitted here only.
     pub entity_advances: Vec<DynamicEntityAdvance>,
-    /// Optional boom path or terminal failure for this exact epoch.
+    /// Optional continuous or recoverable boom path for this exact epoch.
     pub boom: Option<HostKinematicBoomTick>,
 }
 

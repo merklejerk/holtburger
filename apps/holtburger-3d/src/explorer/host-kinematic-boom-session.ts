@@ -2,14 +2,12 @@ import {
 	decodeHostKinematicBoomIdentity,
 	decodeHostKinematicBoomIntentReceipt,
 	evaluateHostKinematicBoomPath,
-	hostKinematicBoomHeldPresentation,
 	sameHostKinematicBoomIdentity,
-	type HostKinematicBoomAdvance,
-	type HostKinematicBoomFailure,
+	type HostKinematicBoomHoldReason,
 	type HostKinematicBoomIdentity,
 	type HostKinematicBoomReseedReason,
-	type HostKinematicBoomTick,
 	type HostKinematicBoomPresentation,
+	type HostKinematicBoomTick,
 } from "../lib/game/motion/host-kinematic-boom-path";
 
 /** Possessed entity tuple required before the host will create a boom generation. */
@@ -43,22 +41,22 @@ export type HostKinematicBoomStatus =
 			readonly kind: "active";
 			readonly identity: HostKinematicBoomIdentity;
 			readonly sequence: number;
-			readonly targetSphereRole: HostKinematicBoomAdvance["targetSphereRole"];
+			readonly targetSphereRole: HostKinematicBoomTick["targetSphereRole"];
 			readonly effectiveCameraRadius: number;
 			readonly desiredReach: number;
 			readonly renderedReach: number;
-			readonly reseedReason: HostKinematicBoomReseedReason | null;
+			readonly recovery:
+				| {
+						readonly kind: "held";
+						readonly reason: HostKinematicBoomHoldReason;
+				  }
+				| {
+						readonly kind: "reseeded";
+						readonly reason: HostKinematicBoomReseedReason;
+				  }
+				| null;
 			readonly droppedPaths: number;
-			readonly diagnostics: HostKinematicBoomAdvance["diagnostics"];
-	  }
-	| {
-			readonly kind: "failed";
-			readonly identity: HostKinematicBoomIdentity;
-			readonly failure: HostKinematicBoomFailure;
-			readonly diagnostics: Extract<
-				HostKinematicBoomTick,
-				{ kind: "failed" }
-			>["diagnostics"];
+			readonly diagnostics: HostKinematicBoomTick["diagnostics"];
 	  };
 
 interface ReceivedBoomTick {
@@ -68,7 +66,7 @@ interface ReceivedBoomTick {
 }
 
 interface PlaybackPath {
-	readonly tick: HostKinematicBoomAdvance;
+	readonly tick: HostKinematicBoomTick;
 	readonly durationMs: number;
 }
 
@@ -86,9 +84,7 @@ export class HostKinematicBoomSession {
 	#pending: PlaybackPath | null = null;
 	#activeStartedAtMs = 0;
 	#droppedPaths = 0;
-	#latestAdvance: HostKinematicBoomAdvance | null = null;
-	#terminal: Extract<HostKinematicBoomTick, { kind: "failed" }> | null = null;
-	#terminalPresentation: HostKinematicBoomPresentation | null = null;
+	#latestPath: HostKinematicBoomTick | null = null;
 	#nextInputSequence = 1;
 	#cumulativeZoomDisplacement = 0;
 	#lastSubmittedDirection: readonly [number, number, number] | null = null;
@@ -195,7 +191,7 @@ export class HostKinematicBoomSession {
 			throw new Error("Boom cumulative zoom displacement overflowed.");
 		}
 		const identity = this.#identity;
-		if (identity === null || this.#terminal !== null) return;
+		if (identity === null) return;
 		if (
 			this.#lastSubmittedDirection !== null &&
 			vectorsEqual(viewDirection, this.#lastSubmittedDirection) &&
@@ -264,7 +260,6 @@ export class HostKinematicBoomSession {
 	presentation(nowMs: number): HostKinematicBoomPresentation | null {
 		if (!Number.isFinite(nowMs))
 			throw new Error("Boom sample time must be finite.");
-		if (this.#terminalPresentation !== null) return this.#terminalPresentation;
 		this.#advancePlayback(nowMs);
 		const active = this.#active;
 		if (active === null) return null;
@@ -283,15 +278,7 @@ export class HostKinematicBoomSession {
 				? { kind: "awaiting-registration" }
 				: { kind: "stopped" };
 		}
-		if (this.#terminal !== null) {
-			return {
-				kind: "failed",
-				identity,
-				failure: this.#terminal.failure,
-				diagnostics: this.#terminal.diagnostics,
-			};
-		}
-		const latest = this.#latestAdvance;
+		const latest = this.#latestPath;
 		if (latest === null) return { kind: "awaiting-first-path", identity };
 		return {
 			kind: "active",
@@ -301,7 +288,12 @@ export class HostKinematicBoomSession {
 			effectiveCameraRadius: latest.effectiveCameraRadius,
 			desiredReach: latest.desiredReach,
 			renderedReach: latest.renderedReach,
-			reseedReason: latest.kind === "reseeded" ? latest.reason : null,
+			recovery:
+				latest.kind === "held"
+					? { kind: "held", reason: latest.reason }
+					: latest.kind === "reseeded"
+						? { kind: "reseeded", reason: latest.reason }
+						: null,
 			droppedPaths: this.#droppedPaths,
 			diagnostics: latest.diagnostics,
 		};
@@ -312,7 +304,6 @@ export class HostKinematicBoomSession {
 	}
 
 	#receiveCurrentOutput(received: ReceivedBoomTick): void {
-		if (this.#terminal !== null) return;
 		const sequence = received.tick.sequence;
 		if (sequence <= this.#highestSequence) return;
 		if (sequence > this.#highestSequence + 1) {
@@ -324,24 +315,17 @@ export class HostKinematicBoomSession {
 
 	#acceptOutput(received: ReceivedBoomTick): void {
 		const tick = received.tick;
-		if (tick.kind === "failed") {
-			this.#terminal = tick;
-			this.#terminalPresentation = hostKinematicBoomHeldPresentation(tick);
-			this.#active = null;
-			this.#pending = null;
-			return;
-		}
-		this.#latestAdvance = tick;
-		this.#acceptAdvance(tick, received.durationMs, received.receivedAtMs);
+		this.#latestPath = tick;
+		this.#acceptPath(tick, received.durationMs, received.receivedAtMs);
 	}
 
-	#acceptAdvance(
-		tick: HostKinematicBoomAdvance,
+	#acceptPath(
+		tick: HostKinematicBoomTick,
 		durationMs: number,
 		receivedAtMs: number,
 	): void {
 		const path = { tick, durationMs };
-		if (tick.kind === "reseeded") {
+		if (tick.kind !== "advanced") {
 			this.#active = path;
 			this.#pending = null;
 			this.#activeStartedAtMs = receivedAtMs;
@@ -413,9 +397,7 @@ export class HostKinematicBoomSession {
 		this.#pending = null;
 		this.#activeStartedAtMs = 0;
 		this.#droppedPaths = 0;
-		this.#latestAdvance = null;
-		this.#terminal = null;
-		this.#terminalPresentation = null;
+		this.#latestPath = null;
 		this.#nextInputSequence = 1;
 		this.#cumulativeZoomDisplacement = 0;
 		this.#lastSubmittedDirection = null;

@@ -164,10 +164,7 @@ pub(crate) fn encode_template(template: &WeenieTemplate) -> Result<Vec<u8>, Code
 
 pub(crate) fn decode_template(bytes: &[u8]) -> Result<WeenieTemplate, CodecError> {
     let mut decoder = Decoder::new(bytes);
-    let wcid = decoder.u32()?;
-    let weenie_type = decoder.i32()?;
-    let class_name = decoder.string("class_name")?;
-    let name = decoder.optional_string("name")?;
+    let (identity, weenie_type) = decode_template_identity_fields(&mut decoder)?;
     let setup_did = decoder.optional_u32("setup_did")?;
     let motion_table_did = decoder.optional_u32("motion_table_did")?;
     let sound_table_did = decoder.optional_u32("sound_table_did")?;
@@ -221,10 +218,10 @@ pub(crate) fn decode_template(bytes: &[u8]) -> Result<WeenieTemplate, CodecError
     decoder.finish()?;
 
     let template = WeenieTemplate {
-        wcid,
-        class_name,
+        wcid: identity.wcid,
+        class_name: identity.class_name,
         weenie_type,
-        name,
+        name: identity.name,
         setup_did,
         motion_table_did,
         sound_table_did,
@@ -247,6 +244,31 @@ pub(crate) fn decode_template(bytes: &[u8]) -> Result<WeenieTemplate, CodecError
     };
     validate_template(&template)?;
     Ok(template)
+}
+
+/// Decodes only the stable identity prefix; the remaining payload is intentionally untouched.
+pub(crate) fn decode_template_identity(
+    bytes: &[u8],
+) -> Result<crate::WeenieTemplateIdentity, CodecError> {
+    let mut decoder = Decoder::new(bytes);
+    decode_template_identity_fields(&mut decoder).map(|(identity, _weenie_type)| identity)
+}
+
+fn decode_template_identity_fields(
+    decoder: &mut Decoder<'_>,
+) -> Result<(crate::WeenieTemplateIdentity, i32), CodecError> {
+    let wcid = decoder.u32()?;
+    let weenie_type = decoder.i32()?;
+    let class_name = decoder.string("class_name")?;
+    let name = decoder.optional_string("name")?;
+    Ok((
+        crate::WeenieTemplateIdentity {
+            wcid,
+            class_name,
+            name,
+        },
+        weenie_type,
+    ))
 }
 
 fn validate_template(template: &WeenieTemplate) -> Result<(), CodecError> {

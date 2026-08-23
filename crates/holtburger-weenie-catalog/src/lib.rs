@@ -7,9 +7,12 @@ mod writer;
 
 pub use model::{
     AnimPartChange, PhysicsBoolOverrides, SubPalette, TemplateAppearance, TemplatePhysics,
-    TextureChange, WeenieTemplate, WieldEntry,
+    TextureChange, WeenieTemplate, WeenieTemplateIdentity, WieldEntry,
 };
-pub use reader::{CatalogLookupError, CatalogOpenError, CatalogRecordInfo, WeenieCatalog};
+pub use reader::{
+    CatalogIdentityReadError, CatalogLookupError, CatalogOpenError, CatalogRecordInfo,
+    WeenieCatalog,
+};
 pub use writer::{CatalogWriteError, write_catalog_atomic};
 
 /// Conventional extension for Holtburger weenie catalog assets.

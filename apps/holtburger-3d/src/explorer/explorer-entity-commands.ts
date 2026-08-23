@@ -6,6 +6,9 @@ import {
 	OUTDOOR_LANDBLOCK_WORLD_SIZE,
 } from "../lib/game/landblocks";
 
+/** Frontend request/result ceiling mirrored by the independently enforced host boundary. */
+export const EXPLORER_WEENIE_SEARCH_RESULT_LIMIT = 32;
+
 const unsigned32 = z.number().int().min(0).max(0xffff_ffff);
 const generation = z.number().int().nonnegative();
 
@@ -28,11 +31,49 @@ const explorerEntityMutationReceiptSchema = z.object({
 	generation,
 });
 
+const explorerWeenieSearchResultSchema = z.object({
+	wcid: unsigned32,
+	name: z.string().min(1),
+	className: z.string().min(1),
+});
+
+const explorerWeenieSearchResultsSchema = z
+	.array(explorerWeenieSearchResultSchema)
+	.max(EXPLORER_WEENIE_SEARCH_RESULT_LIMIT)
+	.superRefine((results, context) => {
+		const wcids = new Set<number>();
+		for (const [index, result] of results.entries()) {
+			if (wcids.has(result.wcid)) {
+				context.addIssue({
+					code: "custom",
+					message: `Duplicate search-result WCID ${result.wcid}.`,
+					path: [index, "wcid"],
+				});
+			}
+			wcids.add(result.wcid);
+		}
+	});
+
+const explorerWeenieSearchRequestSchema = z.object({
+	query: z.string(),
+	limit: z.number().int().positive().max(EXPLORER_WEENIE_SEARCH_RESULT_LIMIT),
+});
+
 export type ExplorerCatalogCapability = z.infer<
 	typeof explorerCatalogCapabilitySchema
 >;
 export type ExplorerEntityMutationReceipt = z.infer<
 	typeof explorerEntityMutationReceiptSchema
+>;
+
+/** One validated host search request; the host remains authoritative for hard bounds and ordering. */
+export type ExplorerWeenieSearchRequest = z.infer<
+	typeof explorerWeenieSearchRequestSchema
+>;
+
+/** Exact catalog identity presented by the Explorer weenie picker. */
+export type ExplorerWeenieSearchResult = z.infer<
+	typeof explorerWeenieSearchResultSchema
 >;
 
 /** Complete explicit host request for one Explorer-local catalog spawn. */
@@ -104,6 +145,20 @@ export function decodeExplorerEntityMutationReceipt(
 	value: unknown,
 ): ExplorerEntityMutationReceipt {
 	return explorerEntityMutationReceiptSchema.parse(value);
+}
+
+/** Validate a bounded ordered host result before it reaches picker state. */
+export function decodeExplorerWeenieSearchResults(
+	value: unknown,
+): readonly ExplorerWeenieSearchResult[] {
+	return explorerWeenieSearchResultsSchema.parse(value);
+}
+
+/** Validate a frontend-authored request before it crosses the injected transport. */
+export function decodeExplorerWeenieSearchRequest(
+	value: unknown,
+): ExplorerWeenieSearchRequest {
+	return explorerWeenieSearchRequestSchema.parse(value);
 }
 
 /**

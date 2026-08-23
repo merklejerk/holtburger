@@ -24,10 +24,15 @@
 	import type { ExplorerCameraMode } from "../lib/game/motion/host-physical-fly-path";
 	import ExplorerGradingPanel from "./ExplorerGradingPanel.svelte";
 	import ExplorerEntitiesPanel from "./ExplorerEntitiesPanel.svelte";
-	import type { ExplorerCatalogCapability } from "./explorer-entity-commands";
+	import type {
+		ExplorerCatalogCapability,
+		ExplorerWeenieSearchRequest,
+		ExplorerWeenieSearchResult,
+	} from "./explorer-entity-commands";
 	import type { ExplorerPossession } from "./explorer-entity-possession";
 	import type { DynamicEntityView } from "../lib/game/runtime/dynamic-entity-feed";
 	import type { HostKinematicBoomStatus } from "./host-kinematic-boom-session";
+	import type { ExplorerEntitySelection } from "./explorer-entity-panel-state";
 
 	type ExplorerTabId =
 		"world" | "grading" | "frame" | "textures" | "assets" | "entities" | "logs";
@@ -120,9 +125,12 @@
 		readonly spawnedEntities: readonly DynamicEntityView[];
 		readonly spawnedEntityPresentationError: string | null;
 		readonly spawnExplorerEntity: (
-			wcid: string,
+			wcid: number,
 			distance: number,
 		) => Promise<void>;
+		readonly searchExplorerWeenies: (
+			request: ExplorerWeenieSearchRequest,
+		) => Promise<readonly ExplorerWeenieSearchResult[]>;
 		readonly despawnExplorerEntity: (
 			entity: DynamicEntityView,
 		) => Promise<void>;
@@ -132,7 +140,12 @@
 		) => Promise<ExplorerPossession>;
 		readonly setExplorerEntityStance: (style: number) => Promise<void>;
 		readonly explorerPossession: ExplorerPossession | null;
-		readonly boomCameraStatus: HostKinematicBoomStatus | null;
+		/** Pull one exact current entity only for disclosure-scoped volatile diagnostics. */
+		readonly readExplorerEntity: (
+			selection: ExplorerEntitySelection,
+		) => DynamicEntityView | null;
+		/** Pull current boom diagnostics without subscribing the tool tree to render frames. */
+		readonly readBoomCameraStatus: () => HostKinematicBoomStatus | null;
 	}
 
 	let {
@@ -188,11 +201,13 @@
 		spawnedEntities,
 		spawnedEntityPresentationError,
 		spawnExplorerEntity,
+		searchExplorerWeenies,
 		despawnExplorerEntity,
 		possessExplorerEntity,
 		setExplorerEntityStance,
 		explorerPossession,
-		boomCameraStatus,
+		readExplorerEntity,
+		readBoomCameraStatus,
 	}: Props = $props();
 
 	const tabs: readonly ExplorerTab[] = [
@@ -357,11 +372,13 @@
 								entities={spawnedEntities}
 								presentationError={spawnedEntityPresentationError}
 								spawn={spawnExplorerEntity}
+								search={searchExplorerWeenies}
 								despawn={despawnExplorerEntity}
 								possess={possessExplorerEntity}
 								setStance={setExplorerEntityStance}
 								possession={explorerPossession}
-								{boomCameraStatus}
+								{readExplorerEntity}
+								{readBoomCameraStatus}
 							/>
 						{:else}
 							<p>{activeTab.stub}</p>

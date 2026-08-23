@@ -35,7 +35,8 @@ use crate::explorer_entity_runtime::{
     ExplorerEntityRuntimeError, ExplorerEntitySpawnOutcome,
 };
 use crate::explorer_weenie_catalog::{
-    ExplorerCatalogCapability, ExplorerCatalogLookupError, ExplorerWeenieCatalogSource,
+    ExplorerCatalogCapability, ExplorerCatalogLookupError, ExplorerCatalogSearchError,
+    ExplorerWeenieCatalogSource, ExplorerWeenieSearchRequest, ExplorerWeenieSearchResult,
 };
 use crate::host_simulation_runtime::HostSimulationRuntime;
 use crate::weenie_appearance::{
@@ -431,6 +432,14 @@ impl ExplorerEntityDriver {
     /// Returns catalog capability without touching entity or solver state.
     pub fn catalog_capability(&self) -> ExplorerCatalogCapability {
         self.catalog.capability()
+    }
+
+    /// Returns one bounded catalog ordering without serializing against entity mutations.
+    pub fn search_weenies(
+        &self,
+        request: &ExplorerWeenieSearchRequest,
+    ) -> Result<Vec<ExplorerWeenieSearchResult>, ExplorerCatalogSearchError> {
+        self.catalog.search(request)
     }
 
     /// Looks up, validates, places, and publishes one WCID under a fresh Explorer identity.
@@ -1077,6 +1086,28 @@ mod tests {
 
         fn lookup(&self, wcid: u32) -> Result<Option<WeenieTemplate>, ExplorerCatalogLookupError> {
             Ok(self.templates.get(&wcid).cloned())
+        }
+
+        fn search(
+            &self,
+            request: &ExplorerWeenieSearchRequest,
+        ) -> Result<Vec<ExplorerWeenieSearchResult>, ExplorerCatalogSearchError> {
+            let query = request.query.to_lowercase();
+            Ok(self
+                .templates
+                .values()
+                .filter_map(|template| {
+                    let name = template.name.as_ref()?;
+                    (name.to_lowercase().contains(&query)
+                        || template.class_name.to_lowercase().contains(&query))
+                    .then(|| ExplorerWeenieSearchResult {
+                        wcid: template.wcid,
+                        name: name.clone(),
+                        class_name: template.class_name.clone(),
+                    })
+                })
+                .take(request.limit)
+                .collect())
         }
     }
 
@@ -2079,6 +2110,15 @@ mod tests {
                 _wcid: u32,
             ) -> Result<Option<WeenieTemplate>, ExplorerCatalogLookupError> {
                 Err(ExplorerCatalogLookupError::Unavailable {
+                    reason: "no weenie catalog beside the selected content".to_owned(),
+                })
+            }
+
+            fn search(
+                &self,
+                _request: &ExplorerWeenieSearchRequest,
+            ) -> Result<Vec<ExplorerWeenieSearchResult>, ExplorerCatalogSearchError> {
+                Err(ExplorerCatalogSearchError::Unavailable {
                     reason: "no weenie catalog beside the selected content".to_owned(),
                 })
             }

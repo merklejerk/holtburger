@@ -1,3 +1,18 @@
+/// Search- and census-facing identity prefix shared by every encoded weenie template.
+///
+/// This deliberately excludes template behavior and appearance. Consumers that need those facts
+/// must perform an exact WCID lookup rather than turning this lightweight projection into a second
+/// template representation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WeenieTemplateIdentity {
+    /// Weenie class identifier and catalog lookup key.
+    pub wcid: u32,
+    /// Exact ACE template class name; useful for disambiguating duplicate display names.
+    pub class_name: String,
+    /// Optional authored `PropertyString::Name` display name.
+    pub name: Option<String>,
+}
+
 /// Static ACE World template facts retained by the Explorer weenie catalog.
 #[derive(Clone, Debug, PartialEq)]
 pub struct WeenieTemplate {

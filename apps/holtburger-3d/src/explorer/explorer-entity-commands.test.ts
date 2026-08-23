@@ -5,7 +5,10 @@ import { Vec3 } from "../lib/game/math/types";
 import {
 	createExplorerLaunchRequest,
 	createExplorerSpawnRequest,
+	decodeExplorerWeenieSearchRequest,
+	decodeExplorerWeenieSearchResults,
 	EXPLORER_SPAWN_DISTANCE,
+	EXPLORER_WEENIE_SEARCH_RESULT_LIMIT,
 	isExplorerSpawnDistanceOnStep,
 	parseExplorerWcid,
 } from "./explorer-entity-commands";
@@ -29,6 +32,38 @@ describe("Explorer entity commands", () => {
 		expect(parseExplorerWcid("0x2A")).toBe(42);
 		expect(() => parseExplorerWcid("2a")).toThrow("decimal or prefixed");
 		expect(() => parseExplorerWcid("0x100000000")).toThrow("unsigned 32-bit");
+	});
+
+	it("decodes only complete bounded-result identities", () => {
+		const result = { wcid: 42, name: "Drudge", className: "drudge" };
+		expect(decodeExplorerWeenieSearchResults([result])).toEqual([result]);
+		expect(() =>
+			decodeExplorerWeenieSearchResults([
+				{ wcid: -1, name: "Drudge", className: "drudge" },
+			]),
+		).toThrow();
+		expect(() =>
+			decodeExplorerWeenieSearchResults([
+				{ wcid: 42, name: "", className: "drudge" },
+			]),
+		).toThrow();
+		expect(() =>
+			decodeExplorerWeenieSearchResults(
+				Array.from(
+					{ length: EXPLORER_WEENIE_SEARCH_RESULT_LIMIT + 1 },
+					() => result,
+				),
+			),
+		).toThrow();
+		expect(() => decodeExplorerWeenieSearchResults([result, result])).toThrow(
+			"Duplicate search-result WCID",
+		);
+		expect(() =>
+			decodeExplorerWeenieSearchRequest({
+				query: "drudge",
+				limit: EXPLORER_WEENIE_SEARCH_RESULT_LIMIT + 1,
+			}),
+		).toThrow();
 	});
 
 	it("snapshots an indoor camera into its owner frame and normalizes the view vector", () => {

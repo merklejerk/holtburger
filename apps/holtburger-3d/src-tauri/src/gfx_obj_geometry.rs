@@ -7,9 +7,16 @@ use holtburger_dat::physics::BspNode;
 use crate::polygon_geometry::{
     PolygonSetGeometry, RenderAabb, RenderVec3, build_polygon_set_geometry,
 };
-use crate::portal_geometry::{
-    PORTAL_SOURCE_PLANARITY_EPSILON, PortalAperture, RenderPlane, build_portal_aperture,
-};
+use crate::portal_geometry::{PortalAperture, RenderPlane, build_portal_aperture};
+
+/// Equality tolerance deciding whether two authored aperture polygons name the same plane.
+///
+/// This is a classifier, not a slop budget: it selects which of a building portal's polygon pieces
+/// merge into one logical aperture, so widening it silently merges apertures that retail keeps
+/// apart. Across the 910 canonical GfxObj aperture pieces it resolves 217 GfxObjs into 904 logical
+/// apertures, the widest surviving multipart case being GfxObj `0x0100228C` portal `0` with seven
+/// coplanar pieces.
+const APERTURE_PLANE_EQUALITY_EPSILON: f32 = 0.0005;
 
 /// One drawing-BSP building aperture selected by its authored building-portal index.
 #[derive(Debug, Clone, PartialEq)]
@@ -149,8 +156,8 @@ fn planes_are_equivalent(left: RenderPlane, right: RenderPlane) -> bool {
         z: left.normal.z - right.normal.z,
     };
     delta.x * delta.x + delta.y * delta.y + delta.z * delta.z
-        <= PORTAL_SOURCE_PLANARITY_EPSILON * PORTAL_SOURCE_PLANARITY_EPSILON
-        && (left.d - right.d).abs() <= PORTAL_SOURCE_PLANARITY_EPSILON
+        <= APERTURE_PLANE_EQUALITY_EPSILON * APERTURE_PLANE_EQUALITY_EPSILON
+        && (left.d - right.d).abs() <= APERTURE_PLANE_EQUALITY_EPSILON
 }
 
 fn union_bounds(left: RenderAabb, right: RenderAabb) -> RenderAabb {

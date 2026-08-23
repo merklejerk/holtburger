@@ -225,6 +225,8 @@ describe("DynamicEntityMirror", () => {
 		expect(mirror.entities().map((value) => value.identity.guid)).toEqual([
 			1, 2,
 		]);
+		expect(mirror.entity(2, 1)).toEqual(entity(2, 1));
+		expect(mirror.entity(2, 2)).toBeNull();
 		expect(mirror.isAwaitingSnapshot()).toBe(false);
 		expect(mirror.hostTimeSeconds(12)).toBe(3);
 

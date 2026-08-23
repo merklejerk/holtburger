@@ -2221,7 +2221,13 @@ function assertPossessionScenario(scenario) {
 		scenario.controlProbe.characterInputCountAfterKeyboard !== 1 ||
 		scenario.controlProbe.characterInputCountAfterPointerAndWheel !== 1 ||
 		!Number.isFinite(scenario.controlProbe.boomZoomDisplacement) ||
-		scenario.controlProbe.boomZoomDisplacement === 0
+		scenario.controlProbe.boomZoomDisplacement === 0 ||
+		Math.abs(scenario.controlProbe.recenterBeforeYaw) > 1e-6 ||
+		Math.abs(scenario.controlProbe.recenterMidYaw + Math.PI / 4) > 1e-6 ||
+		Math.abs(scenario.controlProbe.recenterAfterYaw + Math.PI / 2) > 1e-6 ||
+		Math.abs(scenario.controlProbe.recenterTrackingYaw + Math.PI / 2 - 0.4) >
+			1e-6 ||
+		Math.abs(scenario.controlProbe.recenterPitch + 0.4) > 1e-6
 	)
 		throw new Error(
 			`Third-person input ownership probe failed: ${JSON.stringify(scenario.controlProbe)}.`,

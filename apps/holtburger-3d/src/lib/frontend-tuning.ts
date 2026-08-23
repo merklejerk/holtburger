@@ -97,6 +97,10 @@ export const FRONTEND_TUNING = {
 					maximum: 32,
 					minimum: 1.2,
 				},
+				/** Continuous translation before the possession camera returns behind the entity. */
+				recenterDelayMs: 1_000,
+				/** Desired rear-facing transition duration; zero would produce an instantaneous snap. */
+				recenterDurationMs: 200,
 				/** Multiplier from the normalized free-camera wheel distance to boom zoom distance. */
 				zoomDistanceMultiplier: 0.25,
 			},

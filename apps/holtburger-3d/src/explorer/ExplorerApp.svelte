@@ -80,7 +80,10 @@
 		refreshesExplorerEntityPanel,
 		type ExplorerEntitySelection,
 	} from "./explorer-entity-panel-state";
-	import { createCameraLookAtAngles } from "../lib/game/math/camera-orientation";
+	import {
+		createCameraLookAtAngles,
+		createEntityFacingCameraYaw,
+	} from "../lib/game/math/camera-orientation";
 	import {
 		PhysicalFlySession,
 		type PhysicalFlyStatus,
@@ -814,6 +817,10 @@
 				pitchRadiansPerPixel: controls.pointerPitchRadiansPerPixel,
 				yawRadiansPerPixel: controls.pointerYawRadiansPerPixel,
 			},
+			recenter: {
+				delayMs: FRONTEND_TUNING.explorer.camera.boom.recenterDelayMs,
+				durationMs: FRONTEND_TUNING.explorer.camera.boom.recenterDurationMs,
+			},
 			transport: tauriHostKinematicBoomTransport(),
 		});
 		boomCameraSession = boom;
@@ -900,10 +907,13 @@
 		const controller = cameraController;
 		const coordinator = cameraCoordinator;
 		if (!boom || !controller || !coordinator) return undefined;
+		void boom
+			.synchronize(projection, nowMs, possessedEntityFacingCameraYaw())
+			.catch((error: unknown) => {
+				if (boomCameraSession === boom)
+					physicalCameraError = errorMessage(error);
+			});
 		const desiredOrientation = boom.desiredLook();
-		void boom.synchronize(projection).catch((error: unknown) => {
-			if (boomCameraSession === boom) physicalCameraError = errorMessage(error);
-		});
 		const presentation = boom.presentation(nowMs);
 		const acknowledgedProjection = boom.acknowledgedProjection(nowMs);
 		if (acknowledgedProjection === null) {
@@ -987,6 +997,34 @@
 			.catch((error: unknown) => {
 				spawnedEntityPresentationError = errorMessage(error);
 			});
+	}
+
+	function setPossessionTranslationIntent(drive: CharacterDrive): void {
+		boomCameraSession?.setTranslationIntent(
+			drive.longitudinal !== null || drive.lateral !== null,
+			performance.now(),
+		);
+		sendPossessedIntent();
+	}
+
+	function possessedEntityFacingCameraYaw(): number {
+		const held = explorerPossession;
+		const session = dynamicEntitySession;
+		if (
+			held === null ||
+			held.guid === null ||
+			held.entityGeneration === null ||
+			session === undefined
+		) {
+			throw new Error("Possession camera requires an active possessed entity.");
+		}
+		const entity = session.mirror.entity(held.guid, held.entityGeneration);
+		if (entity === null || entity.placement.kind !== "world") {
+			throw new Error(
+				"Possession camera requires the possessed entity's current world pose.",
+			);
+		}
+		return createEntityFacingCameraYaw(entity.placement.pose.rotation);
 	}
 
 	function acceptPossessionEventOutcome(outcome: PossessionEventOutcome): void {
@@ -1099,7 +1137,7 @@
 		possessionInput = new CharacterInputController({
 			fullChargeDurationMs: capability.chargeDurationMs,
 			now: () => performance.now(),
-			onDrive: () => sendPossessedIntent(),
+			onDrive: setPossessionTranslationIntent,
 			onEdge: queuePossessedEdge,
 		});
 		try {
@@ -1351,7 +1389,7 @@
 					onCharacterInput: handleCameraCharacterInput,
 					onPhysicalWheel: routeCameraWheel,
 					onPossessionOrbit(deltaX, deltaY) {
-						boomCameraSession?.orbit(deltaX, deltaY);
+						boomCameraSession?.orbit(deltaX, deltaY, performance.now());
 					},
 					onPossessionWheel: routeCameraWheel,
 				});

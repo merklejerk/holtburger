@@ -17,6 +17,43 @@ export interface CameraLookAngles {
 	readonly pitchRadians: number;
 }
 
+/** AC-authored entity orientation as received by the dynamic-entity feed. */
+export interface AcEntityRotation {
+	readonly w: number;
+	readonly x: number;
+	readonly y: number;
+	readonly z: number;
+}
+
+/**
+ * Derive the renderer yaw for a camera looking from behind an AC entity.
+ *
+ * AC's local forward axis is +Y and its quaternion is Z-up. The returned renderer yaw points in
+ * that same forward direction, which places the camera behind the entity while preserving the
+ * camera's independent pitch. This is intentionally a horizontal projection: an entity's pitch
+ * or roll must not make the third-person camera orbit vertically.
+ */
+export function createEntityFacingCameraYaw(
+	rotation: AcEntityRotation,
+): number {
+	const magnitude = Math.hypot(rotation.w, rotation.x, rotation.y, rotation.z);
+	if (!Number.isFinite(magnitude) || magnitude <= Number.EPSILON) {
+		throw new Error("Entity orientation must be finite and non-zero.");
+	}
+	const w = rotation.w / magnitude;
+	const x = rotation.x / magnitude;
+	const y = rotation.y / magnitude;
+	const z = rotation.z / magnitude;
+	// Rotate AC's local +Y forward vector by the same quaternion convention as the host.
+	const forwardX = 2 * (x * y - w * z);
+	const forwardY = 1 - 2 * (x * x + z * z);
+	const planarMagnitude = Math.hypot(forwardX, forwardY);
+	if (!Number.isFinite(planarMagnitude) || planarMagnitude <= Number.EPSILON) {
+		throw new Error("Entity orientation has no horizontal facing direction.");
+	}
+	return Math.atan2(forwardX / planarMagnitude, forwardY / planarMagnitude);
+}
+
 /** Derive the renderer's canonical look angles from an exact camera/target pair. */
 export function createCameraLookAtAngles(
 	position: Vec3,

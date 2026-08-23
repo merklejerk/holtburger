@@ -1401,7 +1401,11 @@
 				guid: request.guid,
 				entityGeneration: request.entityGeneration,
 			},
-			request.initialReach,
+			{
+				initial: request.initialReach,
+				minimum: request.minimumReach,
+				maximum: request.maximumReach,
+			},
 			request.viewDirection,
 		);
 		const status = session.status();
@@ -1599,7 +1603,7 @@
 		return {
 			boomZoomDisplacement:
 				-wheelDistance *
-				FRONTEND_TUNING.explorer.camera.boom.zoomMetersPerWheelUnit,
+				FRONTEND_TUNING.explorer.camera.boom.zoomDistanceMultiplier,
 			cameraYawAfterKeyboardTurn,
 			cameraYawAfterPointerOrbit,
 			cameraYawBefore,

@@ -47,16 +47,13 @@ const identityFields = {
 const diagnosticsSchema = z
 	.object({
 		controlLegs: z.number().int().nonnegative().safe(),
-		radialCasts: z.number().int().nonnegative().safe(),
+		clearanceSweeps: z.number().int().nonnegative().safe(),
 		transitSubsteps: z.number().int().nonnegative().safe(),
 		contactPasses: z.number().int().nonnegative().safe(),
 	})
 	.strict();
 const failureSchema = z.enum([
-	"control-leg-budget",
-	"radial-cast",
-	"free-sphere-substeps",
-	"free-sphere-contacts",
+	"clearance-sweep",
 	"free-sphere-query",
 	"maximum-reach",
 	"target-contract",

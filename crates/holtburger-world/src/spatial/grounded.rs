@@ -217,10 +217,16 @@ pub enum GroundedOutcome {
         /// Whether the final committed body placement still intersects static environment geometry.
         residual_contacts: bool,
     },
-    /// A finite safety budget was reached; the last safe state is held.
+    /// A finite safety budget was reached after committing the safe prefix it could evaluate.
     BudgetExceeded {
-        /// Last safely committed body state.
+        /// Body state at the end of the evaluated safe prefix.
         body: GroundedBody,
+        /// Achieved velocity across the full tick interval.
+        achieved_velocity: Vector3,
+        /// Strongest unit contact normal opposing this tick's active velocity, if any.
+        collision_normal: Option<Vector3>,
+        /// Evaluated motion followed by a stationary leg through the remainder of the tick.
+        motion: Vec<MotionWaypoint>,
         /// Budget that stopped the solve.
         budget: GroundedBudget,
         /// Completed substeps before the stop.
@@ -229,6 +235,8 @@ pub enum GroundedOutcome {
         contact_passes: usize,
         /// Distinct non-walkable planes encountered before the stop.
         constraint_count: usize,
+        /// Whether the final committed body placement still intersects static geometry.
+        residual_contacts: bool,
     },
 }
 
@@ -339,17 +347,8 @@ pub fn solve_grounded(
     } else {
         (distance / config.maximum_substep_distance).ceil() as usize
     };
-    if required_substeps > config.maximum_substeps {
-        return Ok(GroundedOutcome::BudgetExceeded {
-            body: request.body,
-            budget: GroundedBudget::Substeps,
-            substeps: 0,
-            contact_passes: 0,
-            constraint_count: 0,
-        });
-    }
-
     let substep = displacement / required_substeps as f32;
+    let evaluated_substeps = required_substeps.min(config.maximum_substeps);
     let mut body = request.body;
     body.velocity = next_velocity;
     // Retail carries one collision normal into the next substep, then clears it before collision
@@ -359,11 +358,11 @@ pub fn solve_grounded(
     // Diagnostics retain distinct planes encountered by this solve, but never feed motion.
     let mut encountered_constraints = Vec::new();
     let mut current = start;
-    let mut motion = Vec::with_capacity(required_substeps);
+    let mut motion = Vec::with_capacity(evaluated_substeps + 1);
     let mut contact_passes = 0;
     let mut collision_normal = None;
 
-    'substeps: for completed_substeps in 0..required_substeps {
+    'substeps: for completed_substeps in 0..evaluated_substeps {
         let prior_ground = body.ground;
         let prior_support = prior_ground.walkable_support();
         let mut constrained_substep = apply_sliding_normal(substep, sliding_normal.take());
@@ -645,16 +644,35 @@ pub fn solve_grounded(
     .iter()
     .any(|entry| !entry.contacts.is_empty());
     let achieved_velocity = (current - start) / request.delta_seconds;
-    Ok(GroundedOutcome::Solved {
-        achieved_velocity,
-        collision_normal,
-        body,
-        motion,
-        substeps: required_substeps,
-        contact_passes,
-        constraint_count: encountered_constraints.len(),
-        residual_contacts,
-    })
+    if evaluated_substeps < required_substeps {
+        motion.push(MotionWaypoint {
+            center: current,
+            end_fraction: 1.0,
+            placement: super::collision::MotionWaypointPlacement::Committed(body.cell),
+        });
+        Ok(GroundedOutcome::BudgetExceeded {
+            achieved_velocity,
+            collision_normal,
+            body,
+            motion,
+            budget: GroundedBudget::Substeps,
+            substeps: evaluated_substeps,
+            contact_passes,
+            constraint_count: encountered_constraints.len(),
+            residual_contacts,
+        })
+    } else {
+        Ok(GroundedOutcome::Solved {
+            achieved_velocity,
+            collision_normal,
+            body,
+            motion,
+            substeps: required_substeps,
+            contact_passes,
+            constraint_count: encountered_constraints.len(),
+            residual_contacts,
+        })
+    }
 }
 
 fn remember_collision_normal(
@@ -1649,6 +1667,42 @@ mod tests {
             },
         )
         .unwrap()
+    }
+
+    #[test]
+    fn substep_budget_commits_the_evaluated_grounded_prefix() {
+        let mut limited = config();
+        limited.gravity = 0.0;
+        limited.maximum_substeps = 2;
+        let mut original = body(Vector3::new(20.0, 20.0, 5.0), None);
+        original.velocity = Vector3::new(10.0, 0.0, 0.0);
+
+        let outcome = solve_with_config(
+            &scene(Vec::new()),
+            limited,
+            original,
+            pair(),
+            Vector3::zero(),
+            1.0,
+        );
+        let GroundedOutcome::BudgetExceeded {
+            body,
+            achieved_velocity,
+            motion,
+            budget,
+            substeps,
+            ..
+        } = outcome
+        else {
+            panic!("oversized grounded solve unexpectedly completed")
+        };
+        assert_eq!(budget, GroundedBudget::Substeps);
+        assert_eq!(substeps, 2);
+        assert_eq!(body.pose.coords, Vector3::new(20.5, 20.0, 5.0));
+        assert_eq!(achieved_velocity, Vector3::new(0.5, 0.0, 0.0));
+        assert_eq!(motion.len(), 3);
+        assert_eq!(motion.last().unwrap().end_fraction, 1.0);
+        assert_eq!(motion.last().unwrap().center, body.pose.coords);
     }
 
     #[test]

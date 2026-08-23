@@ -3,10 +3,9 @@
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion, Vector3};
 use holtburger_world::{
-    CollisionScene, FreeSphereBudget, FreeSphereConfig, FreeSphereOutcome, FreeSphereRequest,
-    FreeSphereState, MotionWaypoint, PhysicalCollisionFilter, PlacedMotionPath,
-    PlacedMotionPathRequest, StaticSphereCastConfig, StaticSphereCastRequest, cast_static_sphere,
-    solve_free_sphere,
+    CollisionScene, FreeSphereConfig, FreeSphereOutcome, FreeSphereRequest, FreeSphereState,
+    MotionWaypoint, MotionWaypointPlacement, PhysicalCollisionFilter, PlacedMotionPath,
+    PlacedMotionPathRequest, StaticSphereSweepRequest, solve_free_sphere,
 };
 use thiserror::Error;
 
@@ -23,7 +22,7 @@ pub struct KinematicBoomProfile {
     clearance_hysteresis: f32,
     maximum_control_leg_displacement: f32,
     maximum_control_legs: usize,
-    radial_cast: StaticSphereCastConfig,
+    surface_clearance: f32,
     transit: FreeSphereConfig,
 }
 
@@ -46,8 +45,8 @@ pub struct KinematicBoomProfileDefinition {
     pub maximum_control_leg_displacement: f32,
     /// Maximum internal control legs admitted for one solve transaction.
     pub maximum_control_legs: usize,
-    /// Strict radial-cast work and clearance policy.
-    pub radial_cast: StaticSphereCastConfig,
+    /// Distance retained before the first obstructing surface.
+    pub surface_clearance: f32,
     /// Sliding camera-transit work and separation policy.
     pub transit: FreeSphereConfig,
 }
@@ -66,7 +65,7 @@ impl KinematicBoomProfile {
             clearance_hysteresis,
             maximum_control_leg_displacement,
             maximum_control_legs,
-            radial_cast,
+            surface_clearance,
             transit,
         } = definition;
         if !minimum_reach.is_finite() || minimum_reach < 0.0 {
@@ -94,7 +93,9 @@ impl KinematicBoomProfile {
         if maximum_control_legs == 0 {
             return Err(KinematicBoomProfileError::EmptyControlLegBudget);
         }
-        validate_cast_config(radial_cast)?;
+        if !surface_clearance.is_finite() || surface_clearance <= 0.0 {
+            return Err(KinematicBoomProfileError::InvalidSurfaceClearance);
+        }
         validate_transit_config(transit)?;
         Ok(Self {
             minimum_reach,
@@ -105,8 +106,28 @@ impl KinematicBoomProfile {
             clearance_hysteresis,
             maximum_control_leg_displacement,
             maximum_control_legs,
-            radial_cast,
+            surface_clearance,
             transit,
+        })
+    }
+
+    /// Revalidates operator reach bounds while preserving the profile's collision and work policy.
+    pub fn with_reach_limits(
+        self,
+        minimum_reach: f32,
+        maximum_reach: f32,
+    ) -> Result<Self, KinematicBoomProfileError> {
+        Self::new(KinematicBoomProfileDefinition {
+            minimum_reach,
+            maximum_reach,
+            vertical_pivot_half_life: self.vertical_pivot_half_life,
+            maximum_vertical_pivot_lag: self.maximum_vertical_pivot_lag,
+            clearance_recovery_half_life: self.clearance_recovery_half_life,
+            clearance_hysteresis: self.clearance_hysteresis,
+            maximum_control_leg_displacement: self.maximum_control_leg_displacement,
+            maximum_control_legs: self.maximum_control_legs,
+            surface_clearance: self.surface_clearance,
+            transit: self.transit,
         })
     }
 }
@@ -130,8 +151,8 @@ pub enum KinematicBoomProfileError {
     InvalidControlLegDisplacement,
     #[error("kinematic boom requires at least one control leg")]
     EmptyControlLegBudget,
-    #[error("kinematic boom radial-cast configuration is invalid")]
-    InvalidRadialCastConfig,
+    #[error("kinematic boom surface clearance must be finite and positive")]
+    InvalidSurfaceClearance,
     #[error("kinematic boom free-sphere transit configuration is invalid")]
     InvalidTransitConfig,
 }
@@ -207,10 +228,7 @@ pub enum KinematicBoomInputError {
 /// Machine-readable reason a staged tick retained its prior collision-safe placement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KinematicBoomFailureKind {
-    ControlLegBudget,
-    RadialCast,
-    FreeSphereSubsteps,
-    FreeSphereContacts,
+    ClearanceSweep,
     FreeSphereQuery,
     MaximumReach,
 }
@@ -239,8 +257,8 @@ pub enum KinematicBoomAdvance {
 pub struct KinematicBoomDiagnostics {
     /// Internal target/orbit control legs evaluated.
     pub control_legs: usize,
-    /// Strict radial casts evaluated; successful control legs currently use two.
-    pub radial_casts: usize,
+    /// Continuous clearance sweeps evaluated; successful control legs currently use two.
+    pub clearance_sweeps: usize,
     /// Free-sphere anti-tunneling substeps evaluated.
     pub transit_substeps: usize,
     /// Free-sphere contact-separation passes evaluated.
@@ -376,7 +394,7 @@ impl KinematicBoomController {
         let mut diagnostics = KinematicBoomDiagnostics::default();
         let mut segment_start_fraction = 0.0;
 
-        for sample in target_samples {
+        'samples: for sample in target_samples {
             let raw_start = staged.raw_visual_pivot;
             let seed_start = staged.collision_seed;
             let segment_fraction = sample.end_fraction - segment_start_fraction;
@@ -392,15 +410,10 @@ impl KinematicBoomController {
                 direction_end: self.intent.view_direction,
                 tick_fraction: segment_fraction,
             })?;
-            if legs > self.profile.maximum_control_legs - diagnostics.control_legs {
-                return Ok(failed(
-                    self.camera,
-                    KinematicBoomFailureKind::ControlLegBudget,
-                    diagnostics,
-                ));
-            }
+            let remaining_legs = self.profile.maximum_control_legs - diagnostics.control_legs;
+            let evaluated_legs = legs.min(remaining_legs);
 
-            for leg in 1..=legs {
+            for leg in 1..=evaluated_legs {
                 let local_fraction = leg as f32 / legs as f32;
                 let end_fraction = segment_start_fraction + segment_fraction * local_fraction;
                 let step_seconds = segment_seconds / legs as f32;
@@ -429,13 +442,14 @@ impl KinematicBoomController {
                 staged.filter_pivot(raw_pivot, step_seconds);
                 staged.raw_visual_pivot = raw_pivot;
                 staged.collision_seed = seed;
+                staged.sampled_view_direction = direction;
                 diagnostics.control_legs += 1;
 
                 let result = staged.advance_control_leg(scene, direction, step_seconds);
                 let motion = match result {
                     Ok(motion) => {
                         let leg_diagnostics = motion.diagnostics;
-                        diagnostics.radial_casts += leg_diagnostics.radial_casts;
+                        diagnostics.clearance_sweeps += leg_diagnostics.clearance_sweeps;
                         diagnostics.transit_substeps += leg_diagnostics.transit_substeps;
                         diagnostics.contact_passes += leg_diagnostics.contact_passes;
                         motion
@@ -450,6 +464,15 @@ impl KinematicBoomController {
                     segment_start_fraction + segment_fraction * (leg - 1) as f32 / legs as f32,
                     end_fraction,
                 )?;
+            }
+            if evaluated_legs < legs {
+                let held = reanchor(staged.camera.pose, tick_anchor)?;
+                waypoints.push(MotionWaypoint {
+                    center: held.coords,
+                    end_fraction: 1.0,
+                    placement: MotionWaypointPlacement::Committed(staged.camera.cell),
+                });
+                break 'samples;
             }
             segment_start_fraction = sample.end_fraction;
         }
@@ -468,7 +491,7 @@ impl KinematicBoomController {
     fn commit_staged_motion(
         &mut self,
         scene: &CollisionScene,
-        mut staged: Self,
+        staged: Self,
         anchor: Guid,
         start: WorldPosition,
         waypoints: Vec<MotionWaypoint>,
@@ -497,7 +520,6 @@ impl KinematicBoomController {
                 ));
             }
         };
-        staged.sampled_view_direction = self.intent.view_direction;
         *self = staged;
         Ok(KinematicBoomOutcome::Advanced {
             advance,
@@ -514,7 +536,6 @@ impl KinematicBoomController {
     ) -> KinematicBoomOutcome {
         staged.camera = staged.collision_seed.placement;
         staged.rendered_reach = 0.0;
-        staged.sampled_view_direction = self.intent.view_direction;
         let placement = staged.camera;
         *self = staged;
         KinematicBoomOutcome::Advanced {
@@ -543,10 +564,10 @@ impl KinematicBoomController {
     ) -> Result<ControlLegMotion, KinematicBoomFailureKind> {
         let clearance = self.cast_to_reach(scene, direction, self.desired_reach)?;
         let clearance_reach = placement_distance(clearance.pose, self.filtered_visual_pivot)
-            .map_err(|_| KinematicBoomFailureKind::RadialCast)?;
+            .map_err(|_| KinematicBoomFailureKind::ClearanceSweep)?;
         if clearance_reach < self.rendered_reach {
             self.rendered_reach = clearance_reach;
-        } else if self.desired_reach - clearance_reach <= self.profile.radial_cast.surface_clearance
+        } else if self.desired_reach - clearance_reach <= self.profile.surface_clearance
             || clearance_reach >= self.rendered_reach + self.profile.clearance_hysteresis
         {
             let target = self.desired_reach.min(clearance_reach);
@@ -557,7 +578,7 @@ impl KinematicBoomController {
 
         let radial = self.cast_to_reach(scene, direction, self.rendered_reach)?;
         self.rendered_reach = placement_distance(radial.pose, self.filtered_visual_pivot)
-            .map_err(|_| KinematicBoomFailureKind::RadialCast)?
+            .map_err(|_| KinematicBoomFailureKind::ClearanceSweep)?
             .min(self.profile.maximum_reach);
         let camera_start = self.camera;
         let displacement = placement_displacement(camera_start.pose, radial.pose)
@@ -576,54 +597,56 @@ impl KinematicBoomController {
             },
         )
         .map_err(|_| KinematicBoomFailureKind::FreeSphereQuery)?;
-        match outcome {
+        let (body, motion, substeps, contact_passes) = match outcome {
             FreeSphereOutcome::Solved {
                 body,
                 motion,
                 substeps,
                 contact_passes,
                 ..
-            } => {
-                let solve_anchor = owner(camera_start.pose.landblock_id);
-                if motion.iter().any(|waypoint| {
-                    let waypoint_pose = WorldPosition {
-                        landblock_id: solve_anchor,
-                        coords: waypoint.center,
-                        rotation: Quaternion::identity(),
-                    };
-                    placement_distance(waypoint_pose, self.filtered_visual_pivot).map_or(
-                        true,
-                        |reach| {
-                            reach
-                                > self.profile.maximum_reach
-                                    + self.profile.transit.separation_epsilon
-                        },
-                    )
-                }) {
-                    return Err(KinematicBoomFailureKind::MaximumReach);
-                }
-                self.camera = KinematicBoomPlacement {
-                    pose: body.pose,
-                    cell: body.cell,
-                };
-                self.rendered_reach = placement_distance(body.pose, self.filtered_visual_pivot)
-                    .map_err(|_| KinematicBoomFailureKind::FreeSphereQuery)?
-                    .min(self.profile.maximum_reach);
-                Ok(ControlLegMotion {
-                    anchor: solve_anchor,
-                    waypoints: motion,
-                    diagnostics: KinematicBoomDiagnostics {
-                        control_legs: 0,
-                        radial_casts: 2,
-                        transit_substeps: substeps,
-                        contact_passes,
-                    },
-                })
             }
-            FreeSphereOutcome::BudgetExceeded { budget, .. } => Err(match budget {
-                FreeSphereBudget::Substeps => KinematicBoomFailureKind::FreeSphereSubsteps,
-                FreeSphereBudget::Contacts => KinematicBoomFailureKind::FreeSphereContacts,
-            }),
+            | FreeSphereOutcome::BudgetExceeded {
+                body,
+                motion,
+                substeps,
+                contact_passes,
+                ..
+            } => (body, motion, substeps, contact_passes),
+        };
+        {
+            let solve_anchor = owner(camera_start.pose.landblock_id);
+            if motion.iter().any(|waypoint| {
+                let waypoint_pose = WorldPosition {
+                    landblock_id: solve_anchor,
+                    coords: waypoint.center,
+                    rotation: Quaternion::identity(),
+                };
+                placement_distance(waypoint_pose, self.filtered_visual_pivot).map_or(
+                    true,
+                    |reach| {
+                        reach > self.profile.maximum_reach + self.profile.transit.separation_epsilon
+                    },
+                )
+            }) {
+                return Err(KinematicBoomFailureKind::MaximumReach);
+            }
+            self.camera = KinematicBoomPlacement {
+                pose: body.pose,
+                cell: body.cell,
+            };
+            self.rendered_reach = placement_distance(body.pose, self.filtered_visual_pivot)
+                .map_err(|_| KinematicBoomFailureKind::FreeSphereQuery)?
+                .min(self.profile.maximum_reach);
+            Ok(ControlLegMotion {
+                anchor: solve_anchor,
+                waypoints: motion,
+                diagnostics: KinematicBoomDiagnostics {
+                    control_legs: 0,
+                    clearance_sweeps: 2,
+                    transit_substeps: substeps,
+                    contact_passes,
+                },
+            })
         }
     }
 
@@ -636,29 +659,51 @@ impl KinematicBoomController {
         let seed = self.collision_seed.placement;
         let anchor = owner(seed.pose.landblock_id);
         let seed_pose =
-            reanchor(seed.pose, anchor).map_err(|_| KinematicBoomFailureKind::RadialCast)?;
+            reanchor(seed.pose, anchor).map_err(|_| KinematicBoomFailureKind::ClearanceSweep)?;
         let pivot = reanchor(self.filtered_visual_pivot, anchor)
-            .map_err(|_| KinematicBoomFailureKind::RadialCast)?;
+            .map_err(|_| KinematicBoomFailureKind::ClearanceSweep)?;
         let ray = pivot.coords + direction * reach - seed_pose.coords;
-        if ray.length() <= DIRECTION_EPSILON {
+        let ray_length = ray.length();
+        if ray_length <= DIRECTION_EPSILON {
             return Ok(seed);
         }
-        let outcome = cast_static_sphere(
-            scene,
-            self.profile.radial_cast,
-            StaticSphereCastRequest {
-                origin: seed_pose,
-                cell: seed.cell,
-                direction: ray,
-                distance: ray.length(),
+        let requested_end = seed_pose.coords + ray;
+        let hit = scene
+            .sweep_static_sphere(StaticSphereSweepRequest {
+                anchor,
+                start: seed_pose.coords,
+                end: requested_end,
+                previous_cell: seed.cell,
                 radius: self.collision_seed.camera_radius,
                 filter: PhysicalCollisionFilter::ALL,
-            },
-        )
-        .map_err(|_| KinematicBoomFailureKind::RadialCast)?;
+            })
+            .map_err(|_| KinematicBoomFailureKind::ClearanceSweep)?;
+        let safe_distance = hit.map_or(ray_length, |hit| {
+            (ray_length * hit.time_of_impact - self.profile.surface_clearance).max(0.0)
+        });
+        let safe = seed_pose.coords + ray * (safe_distance / ray_length);
+        let path = scene
+            .transit_motion_path(PlacedMotionPathRequest {
+                previous_cell: seed.cell,
+                anchor,
+                start: seed_pose.coords,
+                radius: self.collision_seed.camera_radius,
+                waypoints: &[MotionWaypoint {
+                    center: safe,
+                    end_fraction: 1.0,
+                    placement: holtburger_world::MotionWaypointPlacement::Traverse,
+                }],
+            })
+            .map_err(|_| KinematicBoomFailureKind::ClearanceSweep)?;
+        let final_point = path.final_point();
+        let mut pose = seed_pose;
+        pose.coords = final_point.center();
+        pose = pose
+            .normalize_outdoor_landblock_frame()
+            .map_err(|_| KinematicBoomFailureKind::ClearanceSweep)?;
         Ok(KinematicBoomPlacement {
-            pose: outcome.pose,
-            cell: outcome.cell,
+            pose,
+            cell: final_point.placement().committed_cell(),
         })
     }
 }
@@ -784,18 +829,6 @@ fn validate_direction(direction: Vector3) -> Result<Vector3, KinematicBoomInputE
     Ok(direction.normalize())
 }
 
-fn validate_cast_config(config: StaticSphereCastConfig) -> Result<(), KinematicBoomProfileError> {
-    if !config.maximum_substep_distance.is_finite()
-        || config.maximum_substep_distance <= 0.0
-        || config.maximum_substeps == 0
-        || !config.surface_clearance.is_finite()
-        || config.surface_clearance <= 0.0
-    {
-        return Err(KinematicBoomProfileError::InvalidRadialCastConfig);
-    }
-    Ok(())
-}
-
 fn validate_transit_config(config: FreeSphereConfig) -> Result<(), KinematicBoomProfileError> {
     if !config.maximum_substep_distance.is_finite()
         || config.maximum_substep_distance <= 0.0
@@ -912,11 +945,7 @@ mod tests {
             clearance_hysteresis: 0.05,
             maximum_control_leg_displacement: 0.5,
             maximum_control_legs,
-            radial_cast: StaticSphereCastConfig {
-                maximum_substep_distance: 0.25,
-                maximum_substeps: 40,
-                surface_clearance: 0.000_5,
-            },
+            surface_clearance: 0.000_5,
             transit: FreeSphereConfig {
                 maximum_substep_distance: 0.25,
                 maximum_substeps: 64,
@@ -1176,8 +1205,8 @@ mod tests {
                 value.maximum_control_legs = 0;
             }),
             (
-                KinematicBoomProfileError::InvalidRadialCastConfig,
-                |value| value.radial_cast.maximum_substeps = 0,
+                KinematicBoomProfileError::InvalidSurfaceClearance,
+                |value| value.surface_clearance = 0.0,
             ),
             (KinematicBoomProfileError::InvalidTransitConfig, |value| {
                 value.transit.maximum_contact_passes = 0
@@ -1296,24 +1325,99 @@ mod tests {
     }
 
     #[test]
-    fn control_budget_failure_retains_the_complete_prior_state() {
+    fn clearance_sweep_accepts_reach_beyond_the_removed_sample_budget() {
+        let mut definition = profile_definition(64);
+        definition.maximum_reach = 32.0;
+        let mut controller = KinematicBoomController::new(
+            KinematicBoomProfile::new(definition).unwrap(),
+            sample().visual_pivot,
+            sample().collision_seed,
+            32.0,
+            KinematicBoomIntent {
+                sequence: 0,
+                view_direction: Vector3::new(1.0, 0.0, 0.0),
+                cumulative_zoom_displacement: 0.0,
+            },
+        )
+        .unwrap();
+
+        assert!(matches!(
+            controller
+                .advance(&CollisionScene::new(), 1.0 / 30.0, &[sample()])
+                .unwrap(),
+            KinematicBoomOutcome::Advanced { .. }
+        ));
+        assert_eq!(controller.desired_reach(), 32.0);
+    }
+
+    #[test]
+    fn transit_budget_commits_safe_prefix_and_continues_next_tick() {
+        let mut definition = profile_definition(64);
+        definition.maximum_reach = 32.0;
+        definition.transit.maximum_substeps = 1;
+        let mut controller = KinematicBoomController::new(
+            KinematicBoomProfile::new(definition).unwrap(),
+            sample().visual_pivot,
+            sample().collision_seed,
+            32.0,
+            KinematicBoomIntent {
+                sequence: 0,
+                view_direction: Vector3::new(1.0, 0.0, 0.0),
+                cumulative_zoom_displacement: 0.0,
+            },
+        )
+        .unwrap();
+        let initial = controller.camera().pose;
+
+        assert!(matches!(
+            controller
+                .advance(&CollisionScene::new(), 1.0 / 30.0, &[sample()])
+                .unwrap(),
+            KinematicBoomOutcome::Advanced { .. }
+        ));
+        let first = controller.camera().pose;
+        let first_displacement = placement_distance(initial, first).unwrap();
+        assert!(first_displacement > 0.0);
+        assert!(first_displacement <= definition.transit.maximum_substep_distance + 1.0e-5);
+
+        assert!(matches!(
+            controller
+                .advance(&CollisionScene::new(), 1.0 / 30.0, &[sample()])
+                .unwrap(),
+            KinematicBoomOutcome::Advanced { .. }
+        ));
+        assert!(
+            placement_distance(initial, controller.camera().pose).unwrap() > first_displacement
+        );
+    }
+
+    #[test]
+    fn control_budget_commits_one_prefix_and_continues_next_tick() {
         let mut controller = controller(1);
-        let before = controller.camera();
         let mut moved = sample();
         moved.visual_pivot.coords.x += 2.0;
         moved.collision_seed.placement.pose.coords.x += 2.0;
 
-        assert_eq!(
-            controller
-                .advance(&CollisionScene::new(), 1.0 / 30.0, &[moved])
-                .unwrap(),
-            KinematicBoomOutcome::Failed {
-                kind: KinematicBoomFailureKind::ControlLegBudget,
-                held: before,
-                diagnostics: KinematicBoomDiagnostics::default(),
+        let first = controller
+            .advance(&CollisionScene::new(), 1.0 / 30.0, &[moved])
+            .unwrap();
+        assert!(matches!(
+            first,
+            KinematicBoomOutcome::Advanced {
+                diagnostics: KinematicBoomDiagnostics {
+                    control_legs: 1,
+                    ..
+                },
+                ..
             }
-        );
-        assert_eq!(controller.camera(), before);
+        ));
+        assert_eq!(controller.raw_visual_pivot.coords.x, 20.5);
+
+        let second = controller
+            .advance(&CollisionScene::new(), 1.0 / 30.0, &[moved])
+            .unwrap();
+        assert!(matches!(second, KinematicBoomOutcome::Advanced { .. }));
+        assert_eq!(controller.raw_visual_pivot.coords.x, 21.0);
     }
 
     #[test]

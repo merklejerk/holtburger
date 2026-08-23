@@ -301,7 +301,7 @@ describe("ExplorerDynamicEntitySession", () => {
 				},
 				diagnostics: {
 					controlLegs: 1,
-					radialCasts: 1,
+					clearanceSweeps: 1,
 					transitSubsteps: 1,
 					contactPasses: 0,
 				},

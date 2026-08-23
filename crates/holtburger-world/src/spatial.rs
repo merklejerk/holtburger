@@ -32,8 +32,8 @@ pub use collision::{
     GroundedObstruction, GroundedObstructionRequest, MotionWaypoint, MotionWaypointPlacement,
     MovementObstructionRequest, MovementRestrictionRequest, PlacedMotionLeg, PlacedMotionPath,
     PlacedMotionPathRequest, PlacedMotionPoint, PlacementRecovery, PlacementRequest,
-    PlacementRestrictionRequest, SpatialMembership, SphereSweep, StaticContact, SupportContact,
-    SupportFeature, SupportRequest,
+    PlacementRestrictionRequest, SpatialMembership, SphereSweep, StaticContact,
+    StaticSphereSweepHit, StaticSphereSweepRequest, SupportContact, SupportFeature, SupportRequest,
 };
 pub use collision_report::{
     CollisionReportClassification, CollisionReportContact, CollisionReportOutcome,
@@ -43,12 +43,9 @@ pub use dynamic_body::{
     DynamicBodyCollisionDefinition, DynamicPhysicalBodyDefinition, PreparedEntityBspPart,
     PreparedEntityTargetGeometry,
 };
-pub use dynamic_contact::{
-    DynamicContactBudgetExceeded, MAXIMUM_DYNAMIC_SLICE_DISTANCE, MAXIMUM_DYNAMIC_SLICES,
-};
+pub use dynamic_contact::{MAXIMUM_DYNAMIC_SLICE_DISTANCE, MAXIMUM_DYNAMIC_SLICES};
 pub use free_sphere::{
     FreeSphereBudget, FreeSphereConfig, FreeSphereOutcome, FreeSphereRequest, FreeSphereState,
-    StaticSphereCastConfig, StaticSphereCastOutcome, StaticSphereCastRequest, cast_static_sphere,
     solve_free_sphere,
 };
 pub use grounded::{

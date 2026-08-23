@@ -12,9 +12,7 @@ use holtburger_core::{
     KinematicBoomProfile, KinematicBoomProfileDefinition, KinematicBoomReseedReason,
     KinematicBoomTargetSample,
 };
-use holtburger_world::{
-    CellTransitRequest, FreeSphereConfig, PlacedMotionPath, StaticSphereCastConfig,
-};
+use holtburger_world::{CellTransitRequest, FreeSphereConfig, PlacedMotionPath};
 use serde::{Deserialize, Serialize};
 
 use crate::explorer_entity_runtime::{
@@ -65,6 +63,10 @@ pub struct HostKinematicBoomStartRequest {
     pub entity_generation: u64,
     /// Initial operator reach before collision.
     pub initial_reach: f32,
+    /// Closest operator-requested reach.
+    pub minimum_reach: f32,
+    /// Farthest operator-requested reach.
+    pub maximum_reach: f32,
     /// Initial monotonic semantic input sequence.
     pub input_sequence: u64,
     /// Initial AC-world pivot-to-camera direction.
@@ -170,8 +172,8 @@ pub struct HostKinematicBoomPlacedPath {
 pub struct HostKinematicBoomDiagnostics {
     /// Number of semantic control legs solved during the transaction.
     pub control_legs: usize,
-    /// Number of strict pivot-ray sphere casts performed.
-    pub radial_casts: usize,
+    /// Number of continuous pivot-ray clearance sweeps performed.
+    pub clearance_sweeps: usize,
     /// Number of free-sphere transit substeps performed.
     pub transit_substeps: usize,
     /// Number of free-sphere contact-resolution passes performed.
@@ -182,7 +184,7 @@ impl From<KinematicBoomDiagnostics> for HostKinematicBoomDiagnostics {
     fn from(value: KinematicBoomDiagnostics) -> Self {
         Self {
             control_legs: value.control_legs,
-            radial_casts: value.radial_casts,
+            clearance_sweeps: value.clearance_sweeps,
             transit_substeps: value.transit_substeps,
             contact_passes: value.contact_passes,
         }
@@ -193,10 +195,7 @@ impl From<KinematicBoomDiagnostics> for HostKinematicBoomDiagnostics {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum HostKinematicBoomFailureKind {
-    ControlLegBudget,
-    RadialCast,
-    FreeSphereSubsteps,
-    FreeSphereContacts,
+    ClearanceSweep,
     FreeSphereQuery,
     MaximumReach,
     TargetContract,
@@ -207,10 +206,7 @@ pub enum HostKinematicBoomFailureKind {
 impl From<KinematicBoomFailureKind> for HostKinematicBoomFailureKind {
     fn from(value: KinematicBoomFailureKind) -> Self {
         match value {
-            KinematicBoomFailureKind::ControlLegBudget => Self::ControlLegBudget,
-            KinematicBoomFailureKind::RadialCast => Self::RadialCast,
-            KinematicBoomFailureKind::FreeSphereSubsteps => Self::FreeSphereSubsteps,
-            KinematicBoomFailureKind::FreeSphereContacts => Self::FreeSphereContacts,
+            KinematicBoomFailureKind::ClearanceSweep => Self::ClearanceSweep,
             KinematicBoomFailureKind::FreeSphereQuery => Self::FreeSphereQuery,
             KinematicBoomFailureKind::MaximumReach => Self::MaximumReach,
         }
@@ -406,8 +402,11 @@ impl HostKinematicBoomRuntime {
             guid: request.guid,
             entity_generation: request.entity_generation,
         };
+        let profile = self
+            .profile
+            .with_reach_limits(request.minimum_reach, request.maximum_reach)?;
         let controller = KinematicBoomController::new(
-            self.profile,
+            profile,
             visual_pivot,
             seed,
             request.initial_reach,
@@ -832,11 +831,7 @@ fn standard_profile() -> Result<KinematicBoomProfile> {
         clearance_hysteresis: 0.05,
         maximum_control_leg_displacement: 0.50,
         maximum_control_legs: 64,
-        radial_cast: StaticSphereCastConfig {
-            maximum_substep_distance: 0.25,
-            maximum_substeps: 40,
-            surface_clearance: 0.000_5,
-        },
+        surface_clearance: 0.000_5,
         transit: FreeSphereConfig {
             maximum_substep_distance: 0.25,
             maximum_substeps: 64,

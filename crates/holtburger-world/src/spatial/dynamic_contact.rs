@@ -7,7 +7,6 @@ use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::PhysicsState;
 use holtburger_common::{Guid, Quaternion, Vector3};
 use holtburger_content::{CollisionShape, PlacedCollisionShape};
-use thiserror::Error;
 
 use super::bsp_query::{ShapeContact, placed_polygon_contacts, placed_solid_contacts};
 use super::collision_report::{
@@ -37,24 +36,6 @@ pub const MAXIMUM_DYNAMIC_SLICES: usize = 128;
 pub(crate) struct DynamicTickStartBody {
     pub(crate) body: SpatialBody,
     pub(crate) planned: Option<PhysicalBodyTickCommit>,
-}
-
-/// Dynamic narrow-phase work that exceeds the census-sized finite budget.
-#[derive(Debug, Clone, PartialEq, Error)]
-#[error(
-    "dynamic contact {mover:?} -> {peer:?} requires {required_slices} slices for {relative_path_length:.6}m relative travel (limit {maximum_slices})"
-)]
-pub struct DynamicContactBudgetExceeded {
-    /// Directional body whose solve was rejected.
-    pub mover: SpatialBodyId,
-    /// Candidate peer responsible for the rejected work.
-    pub peer: SpatialBodyId,
-    /// Conservative relative translation plus rotational travel.
-    pub relative_path_length: f32,
-    /// Slices required at the pair's collision scale.
-    pub required_slices: usize,
-    /// Runtime finite budget.
-    pub maximum_slices: usize,
 }
 
 /// Blocking peer accepted by one directional solve.
@@ -109,6 +90,7 @@ pub(crate) fn resolve_dynamic_contacts(
 
     let mut selected = None::<SelectedBlockingContact>;
     let mut sampled_report_touches = Vec::new();
+    let mut accepted_fraction = 1.0_f32;
     for peer_id in candidates {
         let Some(peer) = tick_start.get(&peer_id) else {
             continue;
@@ -148,18 +130,11 @@ pub(crate) fn resolve_dynamic_contacts(
             .minimum_collision_scale()?
             .min(MAXIMUM_DYNAMIC_SLICE_DISTANCE);
         let required_slices = required_dynamic_slices(relative_path_length, slice_distance);
-        if required_slices > MAXIMUM_DYNAMIC_SLICES {
-            return Err(DynamicContactBudgetExceeded {
-                mover: mover.id,
-                peer: peer_id,
-                relative_path_length,
-                required_slices,
-                maximum_slices: MAXIMUM_DYNAMIC_SLICES,
-            }
-            .into());
-        }
+        let evaluated_slices = required_slices.min(MAXIMUM_DYNAMIC_SLICES);
+        let evaluated_fraction = evaluated_slices as f32 / required_slices as f32;
+        accepted_fraction = accepted_fraction.min(evaluated_fraction);
 
-        let Some(contact) = pair.first_contact(required_slices)? else {
+        let Some(contact) = pair.first_contact(evaluated_slices, evaluated_fraction)? else {
             continue;
         };
         if mover_report_eligible {
@@ -196,10 +171,21 @@ pub(crate) fn resolve_dynamic_contacts(
         }
     }
 
+    let selected = selected.filter(|contact| contact.fraction <= accepted_fraction);
     let Some(selected) = selected else {
+        if accepted_fraction < 1.0 {
+            apply_budgeted_prefix(
+                collision,
+                mover,
+                commit,
+                actuation,
+                delta_seconds,
+                accepted_fraction,
+            )?;
+        }
         return Ok(DynamicContactResolution {
             response: None,
-            report_touches: accepted_report_touches(sampled_report_touches, 1.0),
+            report_touches: accepted_report_touches(sampled_report_touches, accepted_fraction),
         });
     };
     let report_touches = accepted_report_touches(sampled_report_touches, selected.fraction);
@@ -364,9 +350,9 @@ impl<'a> PairTrajectories<'a> {
         Ok(selected)
     }
 
-    fn first_contact(&self, slices: usize) -> Result<Option<SampledContact>> {
+    fn first_contact(&self, slices: usize, end_fraction: f32) -> Result<Option<SampledContact>> {
         for index in 0..=slices {
-            let fraction = index as f32 / slices as f32;
+            let fraction = index as f32 / slices as f32 * end_fraction;
             let mover_pose = self.mover_pose(fraction)?;
             let peer_pose = self.peer_pose(fraction)?;
             let shapes = placed_target_shapes(&self.peer.body, peer_pose, self.anchor)?;
@@ -436,6 +422,68 @@ impl<'a> PairTrajectories<'a> {
             .as_ref()
             .map_or(self.peer.body.velocity, |planned| planned.velocity)
     }
+}
+
+fn apply_budgeted_prefix(
+    collision: &CollisionScene,
+    mover: &SpatialBody,
+    commit: &mut PhysicalBodyTickCommit,
+    actuation: &PhysicalBodyActuation,
+    delta_seconds: f32,
+    accepted_fraction: f32,
+) -> Result<()> {
+    let partial = solve_physical_body_tick(
+        collision,
+        mover,
+        actuation.clone(),
+        delta_seconds * accepted_fraction,
+    )?;
+    let endpoint = partial.motion.path.final_point().center();
+    let mut waypoints = partial
+        .motion
+        .path
+        .legs()
+        .iter()
+        .filter(|leg| leg.end_fraction() < 1.0)
+        .map(|leg| MotionWaypoint {
+            center: leg.end().center(),
+            end_fraction: leg.end_fraction() * accepted_fraction,
+            placement: MotionWaypointPlacement::Committed(leg.end().placement().committed_cell()),
+        })
+        .collect::<Vec<_>>();
+    waypoints.push(MotionWaypoint {
+        center: endpoint,
+        end_fraction: accepted_fraction,
+        placement: MotionWaypointPlacement::Committed(
+            partial
+                .motion
+                .path
+                .final_point()
+                .placement()
+                .committed_cell(),
+        ),
+    });
+    waypoints.push(MotionWaypoint {
+        center: endpoint,
+        end_fraction: 1.0,
+        placement: MotionWaypointPlacement::Traverse,
+    });
+    let physical = mover
+        .physical
+        .as_ref()
+        .context("dynamic mover lost its physical definition")?;
+    let path = trace_body_reference_path(
+        collision,
+        mover.pose,
+        physical.response.cell(),
+        physical.definition.spheres().primary(),
+        &waypoints,
+        false,
+    )?;
+    *commit = partial;
+    commit.motion.path = path;
+    commit.motion.status = super::PhysicalBodyTickStatus::SubstepBudgetExceeded;
+    Ok(())
 }
 
 fn swept_mover_placement(

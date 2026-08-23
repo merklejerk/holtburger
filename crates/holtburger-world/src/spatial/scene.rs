@@ -3338,7 +3338,7 @@ mod physical_body_tests {
     }
 
     #[test]
-    fn over_budget_pair_rejects_only_the_directional_mover_before_commit() {
+    fn over_budget_pair_commits_the_directional_movers_evaluated_prefix() {
         let now = Instant::now();
         let mover = SpatialBodyId::Entity(Guid(0x7000_0001));
         let target = SpatialBodyId::Entity(Guid(0x7000_0002));
@@ -3361,7 +3361,7 @@ mod physical_body_tests {
         install_free_dynamic(
             &mut scene,
             target,
-            Vector3::new(3.0, 0.0, 0.0),
+            Vector3::new(7.8, 0.0, 0.0),
             Vector3::zero(),
             geometry(),
             now,
@@ -3390,7 +3390,7 @@ mod physical_body_tests {
             .unwrap()
             .1
             .clone();
-        let error = scene
+        let result = scene
             .tick_dynamic_physical_body_transaction(
                 mover,
                 &collision,
@@ -3399,14 +3399,15 @@ mod physical_body_tests {
                 now + Duration::from_secs(1),
                 |_, _| Ok(()),
             )
-            .unwrap_err();
-        let budget = error
-            .downcast_ref::<crate::DynamicContactBudgetExceeded>()
             .unwrap();
-        assert_eq!(budget.mover, mover);
-        assert_eq!(budget.peer, target);
-        assert_eq!(budget.required_slices, 140);
-        assert_eq!(scene.body(mover).unwrap().pose.coords, Vector3::zero());
+        assert_eq!(
+            result.0.motion.status,
+            PhysicalBodyTickStatus::SubstepBudgetExceeded
+        );
+        assert_eq!(
+            scene.body(mover).unwrap().pose.coords,
+            Vector3::new(6.4, 0.0, 0.0)
+        );
         assert_eq!(
             scene.body(mover).unwrap().velocity,
             Vector3::new(7.0, 0.0, 0.0)
@@ -4619,7 +4620,7 @@ mod physical_body_tests {
     }
 
     #[test]
-    fn held_body_commits_placement_only_recovery_without_geometric_motion() {
+    fn budget_limited_body_commits_safe_prefix_with_placement_recovery() {
         let cell = Guid(0xda55_0100);
         let mut collision = collision_scene(None);
         collision
@@ -4677,7 +4678,7 @@ mod physical_body_tests {
 
         assert_eq!(motion.status, PhysicalBodyTickStatus::SubstepBudgetExceeded);
         assert!(motion.path.has_recovery());
-        assert_eq!(committed.pose.coords, start);
+        assert_eq!(committed.pose.coords, start + Vector3::new(8.0, 0.0, 0.0));
         assert!(!committed.pose.is_indoors());
         assert_eq!(committed.physical.as_ref().unwrap().response.cell(), None);
     }

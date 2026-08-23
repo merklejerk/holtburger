@@ -9,7 +9,6 @@ use holtburger_world::{
     PhysicalBodyDefinitionError, PhysicalBodyResponsePolicy, PhysicalElasticity, PhysicalFriction,
     PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion,
     RETAIL_AIRBORNE_STEP_DOWN_HEIGHT, RETAIL_LANDING_NORMAL_Z, RETAIL_WALKABLE_NORMAL_Z,
-    StaticSphereCastConfig,
 };
 use thiserror::Error;
 
@@ -166,13 +165,6 @@ pub const FREE_SPHERE_FLY_CONFIG: FreeSphereConfig = FreeSphereConfig {
     maximum_substeps: 32,
     maximum_contact_passes: 8,
     separation_epsilon: 0.000_5,
-};
-
-/// Boom-style casts share the retail viewer's anti-tunneling scale without inheriting its slide.
-pub const STATIC_SPHERE_CAST_CONFIG: StaticSphereCastConfig = StaticSphereCastConfig {
-    maximum_substep_distance: FREE_SPHERE_FLY_CONFIG.maximum_substep_distance,
-    maximum_substeps: FREE_SPHERE_FLY_CONFIG.maximum_substeps,
-    surface_clearance: FREE_SPHERE_FLY_CONFIG.separation_epsilon,
 };
 
 pub fn physical_fly_viewer_profile() -> Result<ResolvedBodyProfile, PhysicalBodyDefinitionError> {

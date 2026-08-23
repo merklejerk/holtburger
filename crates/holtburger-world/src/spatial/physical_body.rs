@@ -757,19 +757,6 @@ struct FreeSphereTickState {
     cell: Option<Guid>,
 }
 
-#[derive(Debug, Clone, Copy)]
-/// Observable result facts retained when a finite solver budget stops the tick.
-struct HeldTickDiagnostics {
-    /// Budget category that prevented ordinary completion.
-    status: PhysicalBodyTickStatus,
-    /// Distinct non-walkable constraints encountered before the stop.
-    constraint_count: usize,
-    /// Completed anti-tunneling subdivisions.
-    substeps: usize,
-    /// Completed contact-separation passes.
-    contact_passes: usize,
-}
-
 /// Solves one registered body without mutating the canonical store until every query completes.
 pub(super) fn solve_physical_body_tick(
     scene: &CollisionScene,
@@ -867,7 +854,6 @@ fn solve_free_sphere_tick(
     desired_velocity: Vector3,
     delta_seconds: f32,
 ) -> Result<PhysicalBodyTickCommit> {
-    let response = PhysicalBodyResponseState::FreeSphere { cell: state.cell };
     let offset = body.pose.rotation.rotate_vector(state.sphere.center);
     let mut sphere_pose = body.pose;
     sphere_pose.coords = sphere_pose.coords + offset;
@@ -884,83 +870,87 @@ fn solve_free_sphere_tick(
             filter: state.collision_filter,
         },
     )?;
-    match outcome {
-        FreeSphereOutcome::Solved {
-            body: solved,
-            achieved_displacement,
-            collision_normal,
-            motion,
-            substeps,
-            contact_passes,
-        } => {
-            let path = trace_body_reference_path(
-                scene,
-                body.pose,
-                state.cell,
-                state.sphere,
-                &motion,
-                true,
-            )?;
-            let committed_cell = path.final_point().placement().committed_cell();
-            ensure!(
-                committed_cell == solved.cell || path.has_recovery(),
-                "free-sphere placed path ended in {committed_cell:?}, but collision response committed {:?}",
-                solved.cell
-            );
-            let mut pose = body_reference_pose(solved.pose, committed_cell, offset)?;
-            let velocity = collision_response(CollisionResponseInput {
-                incoming: desired_velocity,
-                achieved_velocity: achieved_displacement / delta_seconds,
-                restitution: state.response_policy.restitution,
-                collision_normal,
-                previously_walkable: false,
-                current_support_normal: None,
-                surface_motion: state.response_policy.surface_motion,
-                stationary_fall_frames: 0,
-            })
-            .velocity;
-            apply_automatic_facing(
-                &mut pose,
+    let (solved, achieved_displacement, collision_normal, motion, substeps, contact_passes, status) =
+        match outcome {
+            FreeSphereOutcome::Solved {
+                body: solved,
                 achieved_displacement,
-                velocity,
-                state.response_policy,
-            );
-            Ok(PhysicalBodyTickCommit {
-                pose,
-                velocity,
-                contact: ContactState::Airborne,
-                response: PhysicalBodyResponseState::FreeSphere {
-                    cell: committed_cell,
-                },
-                motion: PhysicalBodyMotion {
-                    path,
-                    status: PhysicalBodyTickStatus::Solved,
-                    constraint_count: 0,
-                    substeps,
-                    contact_passes,
-                },
-                environment_contact: collision_normal.is_some(),
-                residual_contacts: false,
-            })
-        }
-        FreeSphereOutcome::BudgetExceeded {
-            budget,
-            substeps,
-            contact_passes,
-            ..
-        } => held_motion_commit(
-            scene,
-            body,
-            response,
-            state.sphere,
-            HeldTickDiagnostics {
-                status: free_budget_status(budget),
-                constraint_count: 0,
+                collision_normal,
+                motion,
                 substeps,
                 contact_passes,
-            },
-        ),
-    }
+            } => (
+                solved,
+                achieved_displacement,
+                collision_normal,
+                motion,
+                substeps,
+                contact_passes,
+                PhysicalBodyTickStatus::Solved,
+            ),
+            FreeSphereOutcome::BudgetExceeded {
+                body: solved,
+                achieved_displacement,
+                collision_normal,
+                motion,
+                budget,
+                substeps,
+                contact_passes,
+            } => (
+                solved,
+                achieved_displacement,
+                collision_normal,
+                motion,
+                substeps,
+                contact_passes,
+                free_budget_status(budget),
+            ),
+        };
+    let path =
+        trace_body_reference_path(scene, body.pose, state.cell, state.sphere, &motion, true)?;
+    let committed_cell = path.final_point().placement().committed_cell();
+    ensure!(
+        committed_cell == solved.cell || path.has_recovery(),
+        "free-sphere placed path ended in {committed_cell:?}, but collision response committed {:?}",
+        solved.cell
+    );
+    let mut pose = body_reference_pose(solved.pose, committed_cell, offset)?;
+    let velocity = collision_response(CollisionResponseInput {
+        incoming: desired_velocity,
+        // A budget-limited prefix occupies only part of the tick geometrically; dividing by the
+        // complete interval turns the work bound into an explicit effective speed clamp.
+        achieved_velocity: achieved_displacement / delta_seconds,
+        restitution: state.response_policy.restitution,
+        collision_normal,
+        previously_walkable: false,
+        current_support_normal: None,
+        surface_motion: state.response_policy.surface_motion,
+        stationary_fall_frames: 0,
+    })
+    .velocity;
+    apply_automatic_facing(
+        &mut pose,
+        achieved_displacement,
+        velocity,
+        state.response_policy,
+    );
+    Ok(PhysicalBodyTickCommit {
+        pose,
+        velocity,
+        contact: ContactState::Airborne,
+        response: PhysicalBodyResponseState::FreeSphere {
+            cell: committed_cell,
+        },
+        motion: PhysicalBodyMotion {
+            path,
+            status,
+            constraint_count: 0,
+            substeps,
+            contact_passes,
+        },
+        environment_contact: collision_normal.is_some(),
+        residual_contacts: false,
+    })
 }
 
 fn solve_grounded_body_tick(
@@ -970,11 +960,6 @@ fn solve_grounded_body_tick(
     actuation: GroundedBodyActuation,
     delta_seconds: f32,
 ) -> Result<PhysicalBodyTickCommit> {
-    let response = PhysicalBodyResponseState::Grounded {
-        cell: state.cell,
-        ground: state.ground,
-        stationary_fall_frames: state.stationary_fall_frames,
-    };
     let mut grounded_body = GroundedBody {
         pose: body.pose,
         cell: state.cell,
@@ -1056,9 +1041,19 @@ fn solve_grounded_body_tick(
             filter: state.collision_filter,
         },
     )?;
-    match outcome {
+    let (
+        solved,
+        achieved_velocity,
+        collision_normal,
+        motion,
+        substeps,
+        contact_passes,
+        constraint_count,
+        residual_contacts,
+        status,
+    ) = match outcome {
         GroundedOutcome::Solved {
-            body: solved,
+            body,
             achieved_velocity,
             collision_normal,
             motion,
@@ -1066,101 +1061,113 @@ fn solve_grounded_body_tick(
             contact_passes,
             constraint_count,
             residual_contacts,
-        } => {
-            let path = trace_body_reference_path(
-                scene,
-                body.pose,
-                state.cell,
-                state.spheres.support,
-                &motion,
-                false,
-            )?;
-            let committed_cell = path.final_point().placement().committed_cell();
-            let recovered = path.has_recovery();
-            ensure!(
-                committed_cell == solved.cell || recovered,
-                "grounded placed path ended in {committed_cell:?}, but collision response committed {:?}",
-                solved.cell
-            );
-            let mut pose = body_reference_pose(solved.pose, committed_cell, Vector3::zero())?;
-            // Ground identity belongs to the collision domain that produced it. A recovered
-            // placement deliberately drops that memory so the next ordinary tick reacquires it.
-            let mut ground = if recovered {
-                GroundState::Airborne
-            } else {
-                solved.ground
-            };
-            let stationary_fall_frames = next_stationary_fall_frames(
-                state.stationary_fall_frames,
-                state.ground.walkable_support(),
-                ground.walkable_support(),
-                collision_normal,
-                achieved_velocity,
-            );
-            let collision_response = collision_response(CollisionResponseInput {
-                incoming: solved.velocity,
-                achieved_velocity,
-                restitution: state.response_policy.restitution,
-                collision_normal,
-                previously_walkable: state.ground.walkable_support().is_some(),
-                current_support_normal: ground.walkable_support().map(|current| current.normal),
-                surface_motion: state.response_policy.surface_motion,
-                stationary_fall_frames,
-            });
-            if collision_response.separates_from_support {
-                ground = GroundState::Airborne;
-            }
-            let velocity = collision_response.velocity;
-            apply_grounded_facing(
-                &mut pose,
-                achieved_velocity * delta_seconds,
-                velocity,
-                state.response_policy,
-                actuation.control_heading,
-            );
-            Ok(PhysicalBodyTickCommit {
-                pose,
-                velocity,
-                contact: match ground {
-                    GroundState::Supported(_) => ContactState::Grounded,
-                    GroundState::Sliding(_) => ContactState::Sliding,
-                    GroundState::Airborne => ContactState::Airborne,
-                },
-                response: PhysicalBodyResponseState::Grounded {
-                    cell: committed_cell,
-                    ground,
-                    stationary_fall_frames,
-                },
-                motion: PhysicalBodyMotion {
-                    path,
-                    status: PhysicalBodyTickStatus::Solved,
-                    constraint_count,
-                    substeps,
-                    contact_passes,
-                },
-                environment_contact: collision_normal.is_some() || ground.contact_plane().is_some(),
-                residual_contacts,
-            })
-        }
+        } => (
+            body,
+            achieved_velocity,
+            collision_normal,
+            motion,
+            substeps,
+            contact_passes,
+            constraint_count,
+            residual_contacts,
+            PhysicalBodyTickStatus::Solved,
+        ),
         GroundedOutcome::BudgetExceeded {
+            body,
+            achieved_velocity,
+            collision_normal,
+            motion,
             budget,
             substeps,
             contact_passes,
             constraint_count,
-            ..
-        } => held_motion_commit(
-            scene,
+            residual_contacts,
+        } => (
             body,
-            response,
-            state.spheres.support,
-            HeldTickDiagnostics {
-                status: grounded_budget_status(budget),
-                constraint_count,
-                substeps,
-                contact_passes,
-            },
+            achieved_velocity,
+            collision_normal,
+            motion,
+            substeps,
+            contact_passes,
+            constraint_count,
+            residual_contacts,
+            grounded_budget_status(budget),
         ),
+    };
+    let path = trace_body_reference_path(
+        scene,
+        body.pose,
+        state.cell,
+        state.spheres.support,
+        &motion,
+        false,
+    )?;
+    let committed_cell = path.final_point().placement().committed_cell();
+    let recovered = path.has_recovery();
+    ensure!(
+        committed_cell == solved.cell || recovered,
+        "grounded placed path ended in {committed_cell:?}, but collision response committed {:?}",
+        solved.cell
+    );
+    let mut pose = body_reference_pose(solved.pose, committed_cell, Vector3::zero())?;
+    // Ground identity belongs to the collision domain that produced it. A recovered placement
+    // deliberately drops that memory so the next ordinary tick reacquires it.
+    let mut ground = if recovered {
+        GroundState::Airborne
+    } else {
+        solved.ground
+    };
+    let stationary_fall_frames = next_stationary_fall_frames(
+        state.stationary_fall_frames,
+        state.ground.walkable_support(),
+        ground.walkable_support(),
+        collision_normal,
+        achieved_velocity,
+    );
+    let collision_response = collision_response(CollisionResponseInput {
+        incoming: solved.velocity,
+        achieved_velocity,
+        restitution: state.response_policy.restitution,
+        collision_normal,
+        previously_walkable: state.ground.walkable_support().is_some(),
+        current_support_normal: ground.walkable_support().map(|current| current.normal),
+        surface_motion: state.response_policy.surface_motion,
+        stationary_fall_frames,
+    });
+    if collision_response.separates_from_support {
+        ground = GroundState::Airborne;
     }
+    let velocity = collision_response.velocity;
+    apply_grounded_facing(
+        &mut pose,
+        achieved_velocity * delta_seconds,
+        velocity,
+        state.response_policy,
+        actuation.control_heading,
+    );
+    Ok(PhysicalBodyTickCommit {
+        pose,
+        velocity,
+        contact: match ground {
+            GroundState::Supported(_) => ContactState::Grounded,
+            GroundState::Sliding(_) => ContactState::Sliding,
+            GroundState::Airborne => ContactState::Airborne,
+        },
+        response: PhysicalBodyResponseState::Grounded {
+            cell: committed_cell,
+            ground,
+            stationary_fall_frames,
+        },
+        motion: PhysicalBodyMotion {
+            path,
+            status,
+            constraint_count,
+            substeps,
+            contact_passes,
+        },
+        environment_contact: collision_normal.is_some() || ground.contact_plane().is_some(),
+        residual_contacts,
+    })
 }
 
 fn canonical_retained_velocity(velocity: Vector3) -> Vector3 {
@@ -1223,71 +1230,6 @@ pub(super) fn trace_body_reference_path(
             waypoints: &sphere_motion,
         })?
         .translated(offset * -1.0))
-}
-
-fn held_motion_commit(
-    scene: &CollisionScene,
-    body: &SpatialBody,
-    response: PhysicalBodyResponseState,
-    primary: GroundedSphere,
-    diagnostics: HeldTickDiagnostics,
-) -> Result<PhysicalBodyTickCommit> {
-    let path = trace_body_reference_path(
-        scene,
-        body.pose,
-        response.cell(),
-        primary,
-        &[MotionWaypoint {
-            center: body.pose.coords,
-            end_fraction: 1.0,
-            placement: super::collision::MotionWaypointPlacement::Committed(response.cell()),
-        }],
-        false,
-    )?;
-    let committed_cell = path.final_point().placement().committed_cell();
-    let recovered = path.has_recovery();
-    let pose = if recovered {
-        body_reference_pose(body.pose, committed_cell, Vector3::zero())?
-    } else {
-        body.pose
-    };
-    let response = match response {
-        PhysicalBodyResponseState::FreeSphere { .. } => PhysicalBodyResponseState::FreeSphere {
-            cell: committed_cell,
-        },
-        PhysicalBodyResponseState::Grounded {
-            ground,
-            stationary_fall_frames,
-            ..
-        } => PhysicalBodyResponseState::Grounded {
-            cell: committed_cell,
-            ground: if recovered {
-                GroundState::Airborne
-            } else {
-                ground
-            },
-            stationary_fall_frames: if recovered { 0 } else { stationary_fall_frames },
-        },
-    };
-    Ok(PhysicalBodyTickCommit {
-        pose,
-        velocity: body.velocity,
-        contact: if recovered {
-            ContactState::Airborne
-        } else {
-            body.contact
-        },
-        response,
-        motion: PhysicalBodyMotion {
-            path,
-            status: diagnostics.status,
-            constraint_count: diagnostics.constraint_count,
-            substeps: diagnostics.substeps,
-            contact_passes: diagnostics.contact_passes,
-        },
-        environment_contact: false,
-        residual_contacts: false,
-    })
 }
 
 fn body_reference_pose(

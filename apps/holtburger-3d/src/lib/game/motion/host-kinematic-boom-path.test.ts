@@ -39,7 +39,7 @@ function advanced() {
 		},
 		diagnostics: {
 			controlLegs: 1,
-			radialCasts: 1,
+			clearanceSweeps: 1,
 			transitSubsteps: 2,
 			contactPasses: 0,
 		},

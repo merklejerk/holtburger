@@ -1,5 +1,9 @@
 //! Resident static collision geometry and explicit query families.
 
+mod static_sphere_sweep;
+
+pub use static_sphere_sweep::{StaticSphereSweepHit, StaticSphereSweepRequest};
+
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
@@ -37,6 +41,9 @@ pub enum CollisionQueryError {
     /// A bounded probe distance is non-finite or negative.
     #[error("collision query distance must be finite and non-negative")]
     InvalidDistance,
+    /// The collision backend does not support one authored static shape pairing.
+    #[error("static sphere sweep reached an unsupported collision shape pairing")]
+    UnsupportedSphereSweep,
     /// A placed-motion request supplied no accepted geometric leg.
     #[error("placed-motion path must contain at least one waypoint")]
     EmptyMotionPath,
@@ -2531,9 +2538,9 @@ mod tests {
 
     use holtburger_common::{Plane, Quaternion, Sphere};
     use holtburger_content::{
-        BspSolid, ColliderScale, CollisionBox, CollisionShape, LandblockColliders,
-        LandblockPlacement, OutdoorBuildingTransit, StaticColliderPlacement,
-        TerrainCollisionSurface,
+        BspSolid, ColliderScale, CollisionBall, CollisionBox, CollisionCylinder, CollisionPolygon,
+        CollisionShape, LandblockColliders, LandblockPlacement, OutdoorBuildingTransit,
+        StaticColliderPlacement, TerrainCollisionSurface,
     };
     use holtburger_dat::physics::{BspLeaf, BspNode};
 
@@ -2583,6 +2590,192 @@ mod tests {
             Vector3::new(0.0, 0.0, 0.0),
             Vector3::new(191.9, 191.9, 0.0),
         )
+    }
+
+    fn outdoor_asset(owner: Guid, colliders: Vec<PlacedCollider>) -> LandblockCollisionAsset {
+        LandblockCollisionAsset {
+            landblock_id: owner.0,
+            terrain: TerrainCollisionSurface::empty(),
+            static_geometry: LandblockColliders {
+                colliders,
+                cell_volumes: Vec::new(),
+            },
+        }
+    }
+
+    fn sweep(
+        scene: &CollisionScene,
+        owner: Guid,
+        start: Vector3,
+        end: Vector3,
+        radius: f32,
+    ) -> StaticSphereSweepHit {
+        scene
+            .sweep_static_sphere(StaticSphereSweepRequest {
+                anchor: owner,
+                start,
+                end,
+                previous_cell: None,
+                radius,
+                filter: PhysicalCollisionFilter::ALL,
+            })
+            .unwrap()
+            .expect("fixture sweep must hit")
+    }
+
+    #[test]
+    fn static_sphere_sweep_finds_ball_and_cylinder_time_of_impact() {
+        let owner = Guid(0xda55_ffff);
+        for shape in [
+            Arc::new(CollisionShape::Ball(CollisionBall {
+                center: Vector3::zero(),
+                radius: 1.0,
+            })),
+            Arc::new(CollisionShape::Cylinder(CollisionCylinder {
+                low_point: Vector3::new(0.0, 0.0, -2.0),
+                radius: 1.0,
+                height: 4.0,
+            })),
+        ] {
+            let collider = PlacedCollider::new(
+                shape,
+                LandblockPlacement {
+                    origin: Vector3::new(5.0, 10.0, 10.0),
+                    orientation: Quaternion::identity(),
+                },
+                ColliderScale::uniform(1.0).unwrap(),
+                StaticColliderPlacement::OutdoorExplicit { source_index: 0 },
+            )
+            .unwrap();
+            let mut scene = CollisionScene::new();
+            scene.insert(outdoor_asset(owner, vec![collider])).unwrap();
+
+            let hit = sweep(
+                &scene,
+                owner,
+                Vector3::new(0.0, 10.0, 10.0),
+                Vector3::new(10.0, 10.0, 10.0),
+                0.5,
+            );
+            assert!((hit.time_of_impact - 0.35).abs() < 0.000_1, "{hit:?}");
+        }
+    }
+
+    #[test]
+    fn static_sphere_sweep_finds_a_thin_bsp_polygon_without_endpoint_overlap() {
+        let owner = Guid(0xda55_ffff);
+        let vertices = vec![
+            Vector3::new(5.0, 8.0, 8.0),
+            Vector3::new(5.0, 8.0, 12.0),
+            Vector3::new(5.0, 12.0, 12.0),
+            Vector3::new(5.0, 12.0, 8.0),
+        ];
+        let bounds = Sphere {
+            center: Vector3::new(5.0, 10.0, 10.0),
+            radius: 3.0,
+        };
+        let collider = PlacedCollider::new(
+            Arc::new(CollisionShape::Bsp(BspSolid {
+                bsp: BspNode::Leaf(BspLeaf {
+                    index: 0,
+                    solid: 0,
+                    sphere: Some(bounds),
+                    poly_ids: vec![1],
+                }),
+                bounds,
+                box_bounds: CollisionBox::from_points(vertices.iter().copied()).unwrap(),
+                polygons: HashMap::from([(
+                    1,
+                    CollisionPolygon {
+                        vertices,
+                        normal: Vector3::new(-1.0, 0.0, 0.0),
+                        d: 5.0,
+                    },
+                )]),
+            })),
+            LandblockPlacement {
+                origin: Vector3::zero(),
+                orientation: Quaternion::identity(),
+            },
+            ColliderScale::uniform(1.0).unwrap(),
+            StaticColliderPlacement::OutdoorExplicit { source_index: 0 },
+        )
+        .unwrap();
+        let mut scene = CollisionScene::new();
+        scene.insert(outdoor_asset(owner, vec![collider])).unwrap();
+
+        let hit = sweep(
+            &scene,
+            owner,
+            Vector3::new(0.0, 10.0, 10.0),
+            Vector3::new(10.0, 10.0, 10.0),
+            0.5,
+        );
+        assert!((hit.time_of_impact - 0.45).abs() < 0.000_1, "{hit:?}");
+        assert_eq!(hit.normal, Vector3::new(-1.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn static_sphere_sweep_finds_terrain_time_of_impact() {
+        let owner = Guid(0xda55_ffff);
+        let terrain =
+            TerrainCollisionSurface::from_terrain(&holtburger_content::LandblockTerrain {
+                grid_size: 9,
+                tile_size: 24.0,
+                height_indices: vec![0; 81],
+                heights: vec![0.0; 81],
+                terrain_samples: vec![0; 81],
+                cell_diagonals: holtburger_content::TerrainCellDiagonals::for_landblock(owner.0),
+            })
+            .unwrap();
+        let mut scene = CollisionScene::new();
+        scene
+            .insert(LandblockCollisionAsset {
+                landblock_id: owner.0,
+                terrain,
+                static_geometry: LandblockColliders::default(),
+            })
+            .unwrap();
+
+        let hit = sweep(
+            &scene,
+            owner,
+            Vector3::new(96.0, 96.0, 5.0),
+            Vector3::new(96.0, 96.0, -5.0),
+            0.5,
+        );
+        assert!((hit.time_of_impact - 0.45).abs() < 0.000_1, "{hit:?}");
+        assert_eq!(hit.normal, Vector3::new(0.0, 0.0, 1.0));
+    }
+
+    #[test]
+    fn static_sphere_sweep_finds_an_entirely_water_boundary() {
+        let west = Guid(0xda55_ffff);
+        let east = Guid(0xdb55_ffff);
+        let mut scene = CollisionScene::new();
+        scene.insert(outdoor_asset(west, Vec::new())).unwrap();
+        scene
+            .insert(LandblockCollisionAsset {
+                landblock_id: east.0,
+                terrain: TerrainCollisionSurface {
+                    cells: Vec::new(),
+                    entirely_water: true,
+                    maximum_height: f32::NEG_INFINITY,
+                    maximum_planar_shift_ratio: 0.0,
+                },
+                static_geometry: LandblockColliders::default(),
+            })
+            .unwrap();
+
+        let hit = sweep(
+            &scene,
+            west,
+            Vector3::new(190.0, 96.0, 10.0),
+            Vector3::new(194.0, 96.0, 10.0),
+            0.5,
+        );
+        assert!((hit.time_of_impact - 0.5).abs() < f32::EPSILON, "{hit:?}");
+        assert_eq!(hit.normal, Vector3::new(-1.0, 0.0, 0.0));
     }
 
     /// Test-only full-scan oracle: every resident collider and terrain triangle, no selection.

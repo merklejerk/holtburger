@@ -50,6 +50,8 @@ export interface HttpKinematicBoomStartRequest {
 	readonly guid: number;
 	readonly entityGeneration: number;
 	readonly initialReach: number;
+	readonly minimumReach: number;
+	readonly maximumReach: number;
 	readonly inputSequence: number;
 	readonly viewDirection: readonly [number, number, number];
 	readonly cumulativeZoomDisplacement: number;

@@ -16,10 +16,10 @@ use holtburger_core::{
 };
 use holtburger_world::{
     CollisionReportOutcome, CollisionScene, DynamicBodyKinematics, DynamicBodyRelocationOutcome,
-    DynamicContactBudgetExceeded, DynamicPhysicalBodyDefinition, EntityPhysicsTransitionDecision,
-    GroundedBodyActuation, PhysicalBodyActuation, PhysicalBodyDefinition,
-    PhysicalBodyResponsePolicy, PhysicalBodyTickResult, PhysicalCollisionFilter, PlacedMotionPath,
-    PlacementRecovery, RuntimeSpatialBodyView, SpatialBody, SpatialBodyId, SpatialScene,
+    DynamicPhysicalBodyDefinition, EntityPhysicsTransitionDecision, GroundedBodyActuation,
+    PhysicalBodyActuation, PhysicalBodyDefinition, PhysicalBodyResponsePolicy,
+    PhysicalBodyTickResult, PhysicalCollisionFilter, PlacedMotionPath, PlacementRecovery,
+    RuntimeSpatialBodyView, SpatialBody, SpatialBodyId, SpatialScene,
 };
 use serde::{Deserialize, Serialize};
 
@@ -400,17 +400,8 @@ impl HostSimulationRuntime {
                 },
                 |_| Ok(()),
             );
-            match solved {
-                Ok((tick, ())) => ticks.push(tick),
-                Err(error)
-                    if error
-                        .downcast_ref::<DynamicContactBudgetExceeded>()
-                        .is_some() =>
-                {
-                    eprintln!("Explorer dynamic-entity solve rejected: {error:#}");
-                }
-                Err(error) => return Err(error),
-            }
+            let (tick, ()) = solved?;
+            ticks.push(tick);
         }
         let mut collision_reports = ticks
             .iter()

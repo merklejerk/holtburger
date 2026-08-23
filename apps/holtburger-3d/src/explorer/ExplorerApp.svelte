@@ -492,7 +492,7 @@
 			// While possessed the wheel zooms the boom rather than lifting a free camera.
 			pendingBoomZoom -=
 				localUpDistance *
-				FRONTEND_TUNING.explorer.camera.boom.zoomMetersPerWheelUnit;
+				FRONTEND_TUNING.explorer.camera.boom.zoomDistanceMultiplier;
 			return;
 		}
 		const session = physicalCameraSession;
@@ -812,7 +812,7 @@
 				guid: possession.guid,
 				entityGeneration: possession.entityGeneration,
 			},
-			FRONTEND_TUNING.explorer.camera.boom.defaultDistance,
+			FRONTEND_TUNING.explorer.camera.boom.distance,
 			resolveKinematicBoomDirection(
 				physicalCameraInput(controller).viewDirection,
 			),

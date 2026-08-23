@@ -6,19 +6,17 @@ use tempfile::NamedTempFile;
 use thiserror::Error;
 
 use crate::codec::{
-    HEADER_LENGTH, Header, INDEX_ENTRY_LENGTH, IndexEntry, MAX_CATALOG_RECORDS,
-    MAX_PROVENANCE_BYTES, MAX_RECORD_BYTES, encode_template,
+    HEADER_LENGTH, Header, INDEX_ENTRY_LENGTH, IndexEntry, MAX_CATALOG_RECORDS, MAX_RECORD_BYTES,
+    encode_template,
 };
 use crate::{CATALOG_FORMAT_VERSION, WeenieCatalog, WeenieTemplate};
 
 /// Writes, reopens, validates, and atomically publishes one deterministic catalog.
 pub fn write_catalog_atomic(
     path: impl AsRef<Path>,
-    provenance: &str,
     templates: &[WeenieTemplate],
 ) -> Result<(), CatalogWriteError> {
     let path = path.as_ref();
-    validate_provenance(provenance)?;
     validate_record_count(templates.len())?;
 
     let mut templates = templates.to_vec();
@@ -45,19 +43,12 @@ pub fn write_catalog_atomic(
         return Err(CatalogWriteError::DuplicateWcid { wcid: pair[0].wcid });
     }
 
-    let provenance_length =
-        u32::try_from(provenance.len()).map_err(|_| CatalogWriteError::ProvenanceLength {
-            length: provenance.len(),
-            limit: MAX_PROVENANCE_BYTES,
-        })?;
     let record_count =
         u32::try_from(templates.len()).map_err(|_| CatalogWriteError::RecordCount {
             count: templates.len(),
             limit: MAX_CATALOG_RECORDS,
         })?;
-    let payload_offset = (HEADER_LENGTH as u64)
-        .checked_add(u64::from(provenance_length))
-        .ok_or(CatalogWriteError::FileLengthOverflow)?;
+    let payload_offset = HEADER_LENGTH as u64;
 
     let mut payloads = Vec::with_capacity(templates.len());
     let mut index = Vec::with_capacity(templates.len());
@@ -85,15 +76,14 @@ pub fn write_catalog_atomic(
         payloads.push(payload);
     }
     let index_offset = next_offset;
-    let payload_length = index_offset
-        .checked_sub(payload_offset)
-        .ok_or(CatalogWriteError::FileLengthOverflow)?;
+    // `next_offset` starts at `payload_offset` and only grows, so this cannot underflow. The
+    // reachable overflow bounds are the checked additions above and the index length below.
+    let payload_length = index_offset - payload_offset;
     let index_length = (index.len() as u64)
         .checked_mul(INDEX_ENTRY_LENGTH as u64)
         .ok_or(CatalogWriteError::FileLengthOverflow)?;
     let header = Header {
         version: CATALOG_FORMAT_VERSION,
-        provenance_length,
         record_count,
         payload_offset,
         payload_length,
@@ -112,7 +102,6 @@ pub fn write_catalog_atomic(
         })?;
     temporary
         .write_all(&header.encode())
-        .and_then(|()| temporary.write_all(provenance.as_bytes()))
         .map_err(|source| write_error(path, source))?;
     for payload in &payloads {
         temporary
@@ -136,10 +125,14 @@ pub fn write_catalog_atomic(
             reason: source.to_string(),
         }
     })?;
-    if reopened.provenance() != provenance || reopened.len() != templates.len() {
+    if reopened.len() != templates.len() {
         return Err(CatalogWriteError::ReopenValidation {
             path: path.to_path_buf(),
-            reason: "reopened catalog metadata differs from the requested catalog".to_owned(),
+            reason: format!(
+                "reopened catalog holds {} records, not the requested {}",
+                reopened.len(),
+                templates.len()
+            ),
         });
     }
     for expected in &templates {
@@ -175,16 +168,6 @@ pub fn write_catalog_atomic(
         parent: parent.to_path_buf(),
         source,
     })?;
-    Ok(())
-}
-
-fn validate_provenance(provenance: &str) -> Result<(), CatalogWriteError> {
-    if provenance.is_empty() || provenance.len() > MAX_PROVENANCE_BYTES {
-        return Err(CatalogWriteError::ProvenanceLength {
-            length: provenance.len(),
-            limit: MAX_PROVENANCE_BYTES,
-        });
-    }
     Ok(())
 }
 
@@ -229,14 +212,6 @@ fn sync_parent(_parent: &Path) -> io::Result<()> {
 /// Failure while validating, encoding, or atomically publishing a catalog.
 #[derive(Debug, Error)]
 pub enum CatalogWriteError {
-    /// Provenance must be nonempty and fit the portable header contract.
-    #[error("catalog provenance encoded length {length} is outside 1..={limit}")]
-    ProvenanceLength {
-        /// UTF-8 encoded length.
-        length: usize,
-        /// Format limit.
-        limit: usize,
-    },
     /// The catalog contains more records than its validated runtime bound.
     #[error("catalog record count {count} exceeds limit {limit}")]
     RecordCount {
@@ -324,14 +299,6 @@ mod tests {
 
     #[test]
     fn portable_writer_limits_have_reachable_distinct_rejections() {
-        assert!(matches!(
-            validate_provenance(""),
-            Err(CatalogWriteError::ProvenanceLength { length: 0, .. })
-        ));
-        assert!(matches!(
-            validate_provenance(&"x".repeat(MAX_PROVENANCE_BYTES + 1)),
-            Err(CatalogWriteError::ProvenanceLength { .. })
-        ));
         assert!(matches!(
             validate_record_count(MAX_CATALOG_RECORDS + 1),
             Err(CatalogWriteError::RecordCount { .. })

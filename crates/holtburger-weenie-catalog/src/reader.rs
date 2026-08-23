@@ -7,16 +7,15 @@ use thiserror::Error;
 use crate::CATALOG_FORMAT_VERSION;
 use crate::WeenieTemplate;
 use crate::codec::{
-    HEADER_LENGTH, Header, INDEX_ENTRY_LENGTH, IndexEntry, MAX_CATALOG_RECORDS,
-    MAX_PROVENANCE_BYTES, MAX_RECORD_BYTES, decode_template,
+    HEADER_LENGTH, Header, INDEX_ENTRY_LENGTH, IndexEntry, MAX_CATALOG_RECORDS, MAX_RECORD_BYTES,
+    decode_template,
 };
 
-/// Fully validated catalog handle with only provenance and the fixed index retained in memory.
+/// Fully validated catalog handle with only the fixed index retained in memory.
 #[derive(Debug)]
 pub struct WeenieCatalog {
     file: File,
     path: PathBuf,
-    provenance: String,
     index: Vec<IndexEntry>,
 }
 
@@ -30,7 +29,7 @@ pub struct CatalogRecordInfo {
 }
 
 impl WeenieCatalog {
-    /// Opens a catalog and validates its complete header, provenance, index, and file layout.
+    /// Opens a catalog and validates its complete header, index, and file layout.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, CatalogOpenError> {
         let path = path.as_ref().to_path_buf();
         let file = File::open(&path).map_err(|source| CatalogOpenError::Unavailable {
@@ -66,21 +65,6 @@ impl WeenieCatalog {
         }
         validate_header(&path, header, file_length)?;
 
-        let provenance_length = usize::try_from(header.provenance_length)
-            .map_err(|_| corrupt(&path, "provenance length does not fit usize"))?;
-        let mut provenance_bytes = vec![0_u8; provenance_length];
-        read_exact_at(&file, &mut provenance_bytes, HEADER_LENGTH as u64).map_err(|source| {
-            CatalogOpenError::Read {
-                path: path.clone(),
-                source,
-            }
-        })?;
-        let provenance = String::from_utf8(provenance_bytes)
-            .map_err(|error| corrupt(&path, format!("provenance is not UTF-8: {error}")))?;
-        if provenance.is_empty() {
-            return Err(corrupt(&path, "provenance must not be empty"));
-        }
-
         let index_length = usize::try_from(header.index_length)
             .map_err(|_| corrupt(&path, "index length does not fit usize"))?;
         let mut index_bytes = vec![0_u8; index_length];
@@ -98,17 +82,7 @@ impl WeenieCatalog {
         }
         validate_index(&path, header, &index)?;
 
-        Ok(Self {
-            file,
-            path,
-            provenance,
-            index,
-        })
-    }
-
-    /// Canonical source revision or operator label embedded by the exporter.
-    pub fn provenance(&self) -> &str {
-        &self.provenance
+        Ok(Self { file, path, index })
     }
 
     /// Number of indexed WCID records.
@@ -168,14 +142,6 @@ impl WeenieCatalog {
 }
 
 fn validate_header(path: &Path, header: Header, file_length: u64) -> Result<(), CatalogOpenError> {
-    let provenance_length = usize::try_from(header.provenance_length)
-        .map_err(|_| corrupt(path, "provenance length does not fit usize"))?;
-    if provenance_length == 0 || provenance_length > MAX_PROVENANCE_BYTES {
-        return Err(corrupt(
-            path,
-            format!("provenance length {provenance_length} is outside 1..={MAX_PROVENANCE_BYTES}"),
-        ));
-    }
     let record_count = usize::try_from(header.record_count)
         .map_err(|_| corrupt(path, "record count does not fit usize"))?;
     if record_count > MAX_CATALOG_RECORDS {
@@ -184,14 +150,11 @@ fn validate_header(path: &Path, header: Header, file_length: u64) -> Result<(), 
             format!("record count {record_count} exceeds limit {MAX_CATALOG_RECORDS}"),
         ));
     }
-    let expected_payload_offset = (HEADER_LENGTH as u64)
-        .checked_add(u64::from(header.provenance_length))
-        .ok_or_else(|| corrupt(path, "payload offset overflow"))?;
-    if header.payload_offset != expected_payload_offset {
+    if header.payload_offset != HEADER_LENGTH as u64 {
         return Err(corrupt(
             path,
             format!(
-                "payload offset {} does not follow provenance at {expected_payload_offset}",
+                "payload offset {} does not follow the header at {HEADER_LENGTH}",
                 header.payload_offset
             ),
         ));

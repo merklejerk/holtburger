@@ -48,9 +48,12 @@ pub struct WeenieTemplate {
 /// These are raw authored facts. Deriving an ObjDesc from them requires DAT content (CharGen,
 /// PaletteSet, ClothingTable) and is deliberately not the catalog's job, exactly as the catalog
 /// retains physics inputs without calculating the effective mask.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// `Eq` is deliberately absent: `shade` is an authored float, exactly as on [`WieldEntry`] and
+/// [`WeenieTemplate`].
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct TemplateAppearance {
-    /// `PropertyDataId::ClothingBase`; present on wearable items, not on their wearers.
+    /// `PropertyDataId::ClothingBase`. Carried both by wearable items, which paint their wearer,
+    /// and by weenies that paint themselves with it when nothing worn covers them.
     pub clothing_base_did: Option<u32>,
     /// `PropertyDataId::HeadObject`.
     pub head_object_did: Option<u32>,
@@ -89,6 +92,15 @@ pub struct TemplateAppearance {
     pub clothing_priority: Option<i32>,
     /// `PropertyInt::ValidLocations`; an `EquipMask` selecting the wield slot.
     pub valid_locations: Option<i32>,
+    /// `PropertyInt::PaletteTemplate`; selects the CLO palette-template effect applied through this
+    /// weenie's own `ClothingBase`, and the fallback when a wield row authors no palette. Absence
+    /// is distinct from `Some(0)`: only a positive row value overrides it
+    /// (`WorldObjectFactory.cs:409-410`).
+    pub palette_template: Option<u32>,
+    /// `PropertyFloat::Shade`; the hue handed to a CLO palette set. Absence is distinct from
+    /// `Some(0.0)` because a non-treasure wield row overwrites it unconditionally while a treasure
+    /// row leaves the item's own value standing (`WorldObjectFactory.cs:412-414`).
+    pub shade: Option<f64>,
 }
 
 /// One `weenie_properties_create_list` entry that a creature wields.

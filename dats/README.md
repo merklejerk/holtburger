@@ -22,8 +22,9 @@ It remains a separate host-only flat file rather than an HBA namespace. Generate
 atomically with:
 
 ```bash
-cargo run -p holtburger-tools --features weenie-catalog-export \
-	--bin export-weenie-catalog -- \
-	--database-url-env ACE_WORLD_SQL_URL \
-	--provenance <ACE-World-revision-or-operator-label>
+export ACE_WORLD_SQL_URL='mysql://<user>:<password>@127.0.0.1:3306/ace_world'
+cargo run -p holtburger-tools --bin export-weenie-catalog
 ```
+
+Pass `--database-url <URL>` to skip the environment variable, or `--database-url-env <NAME>` to read
+a differently named one.

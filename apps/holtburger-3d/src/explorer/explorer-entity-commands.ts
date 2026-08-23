@@ -13,7 +13,6 @@ const explorerCatalogCapabilitySchema = z.discriminatedUnion("status", [
 	z.object({
 		status: z.literal("available"),
 		path: z.string(),
-		provenance: z.string(),
 		recordCount: z.number().int().nonnegative(),
 	}),
 	z.object({

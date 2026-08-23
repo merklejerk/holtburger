@@ -63,12 +63,12 @@ const PROPERTY_BOOL_ALLOW_EDGE_SLIDE: u16 = 42;
 const PROPERTY_BOOL_NO_DRAW: u16 = 71;
 
 /// Reads the selected ACE World tables over one connection and atomically publishes a catalog.
-pub fn export_weenie_catalog(database_url: &str, provenance: &str, output: &Path) -> Result<usize> {
+pub fn export_weenie_catalog(database_url: &str, output: &Path) -> Result<usize> {
     let options = Opts::from_url(database_url).context("could not parse ACE World database URL")?;
     let mut connection = Conn::new(options).context("could not connect to ACE World database")?;
     let rows = load_rows(&mut connection)?;
     let templates = project_rows(rows).context("could not project ACE World weenie templates")?;
-    write_catalog_atomic(output, provenance, &templates)
+    write_catalog_atomic(output, &templates)
         .with_context(|| format!("could not publish weenie catalog at {}", output.display()))?;
     Ok(templates.len())
 }
@@ -890,7 +890,7 @@ mod tests {
         let directory = tempdir().unwrap();
         let path = directory.path().join("projection.hwc");
 
-        write_catalog_atomic(&path, "ACE-World-projection-fixture", &templates).unwrap();
+        write_catalog_atomic(&path, &templates).unwrap();
 
         let catalog = WeenieCatalog::open(path).unwrap();
         let decoded = catalog.lookup(42).unwrap().unwrap();

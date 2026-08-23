@@ -15,7 +15,7 @@ pub use writer::{CatalogWriteError, write_catalog_atomic};
 /// Conventional extension for Holtburger weenie catalog assets.
 pub const CATALOG_EXTENSION: &str = "hwc";
 /// Current portable file-format version.
-pub const CATALOG_FORMAT_VERSION: u32 = 5;
+pub const CATALOG_FORMAT_VERSION: u32 = 6;
 
 #[cfg(test)]
 mod tests;

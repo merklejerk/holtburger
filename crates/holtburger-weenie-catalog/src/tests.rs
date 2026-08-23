@@ -117,14 +117,13 @@ fn template(wcid: u32) -> WeenieTemplate {
 }
 
 #[test]
-fn empty_catalog_reopens_with_provenance() {
+fn empty_catalog_reopens_as_a_valid_empty_catalog() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("empty.hwc");
 
-    write_catalog_atomic(&path, "ACE-World-test", &[]).unwrap();
+    write_catalog_atomic(&path, &[]).unwrap();
 
     let catalog = WeenieCatalog::open(path).unwrap();
-    assert_eq!(catalog.provenance(), "ACE-World-test");
     assert!(catalog.is_empty());
     assert!(catalog.lookup(0).unwrap().is_none());
 }
@@ -133,7 +132,7 @@ fn empty_catalog_reopens_with_provenance() {
 fn record_census_exposes_only_sorted_identity_and_encoded_size() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("census.hwc");
-    write_catalog_atomic(&path, "ACE-World-test", &[template(9), template(2)]).unwrap();
+    write_catalog_atomic(&path, &[template(9), template(2)]).unwrap();
 
     let catalog = WeenieCatalog::open(path).unwrap();
     let records = catalog.records().collect::<Vec<_>>();
@@ -153,8 +152,8 @@ fn writer_canonicalizes_input_and_produces_deterministic_bytes() {
     let low = template(0);
     let high = template(u32::MAX);
 
-    write_catalog_atomic(&first_path, "ACE-World-test", &[high.clone(), low.clone()]).unwrap();
-    write_catalog_atomic(&second_path, "ACE-World-test", &[low.clone(), high.clone()]).unwrap();
+    write_catalog_atomic(&first_path, &[high.clone(), low.clone()]).unwrap();
+    write_catalog_atomic(&second_path, &[low.clone(), high.clone()]).unwrap();
 
     assert_eq!(
         fs::read(&first_path).unwrap(),
@@ -195,7 +194,7 @@ fn absent_zero_and_false_survive_round_trip_distinctly() {
     explicit.appearance.palette_template = Some(0);
     explicit.appearance.shade = Some(0.0);
 
-    write_catalog_atomic(&path, "ACE-World-test", &[absent, explicit]).unwrap();
+    write_catalog_atomic(&path, &[absent, explicit]).unwrap();
 
     let catalog = WeenieCatalog::open(path).unwrap();
     let absent = catalog.lookup(1).unwrap().unwrap();
@@ -253,7 +252,7 @@ fn wielded_entries_survive_round_trip_in_source_order() {
     ];
     let expected = template.wielded.clone();
 
-    write_catalog_atomic(&path, "ACE-World-test", &[template]).unwrap();
+    write_catalog_atomic(&path, &[template]).unwrap();
 
     let catalog = WeenieCatalog::open(path).unwrap();
     let decoded = catalog.lookup(3).unwrap().unwrap();
@@ -265,8 +264,7 @@ fn duplicate_wcid_is_rejected() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("duplicate.hwc");
 
-    let error =
-        write_catalog_atomic(&path, "ACE-World-test", &[template(7), template(7)]).unwrap_err();
+    let error = write_catalog_atomic(&path, &[template(7), template(7)]).unwrap_err();
 
     assert!(matches!(
         error,
@@ -279,11 +277,10 @@ fn duplicate_wcid_is_rejected() {
 fn failed_replacement_preserves_existing_catalog() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("preserved.hwc");
-    write_catalog_atomic(&path, "ACE-World-original", &[template(1)]).unwrap();
+    write_catalog_atomic(&path, &[template(1)]).unwrap();
     let original = fs::read(&path).unwrap();
 
-    let error =
-        write_catalog_atomic(&path, "ACE-World-rejected", &[template(2), template(2)]).unwrap_err();
+    let error = write_catalog_atomic(&path, &[template(2), template(2)]).unwrap_err();
 
     assert!(matches!(
         error,
@@ -303,7 +300,7 @@ fn duplicate_appearance_semantic_key_is_rejected() {
         new_texture_did: 0x0500_0099,
     });
 
-    let error = write_catalog_atomic(&path, "ACE-World-test", &[value]).unwrap_err();
+    let error = write_catalog_atomic(&path, &[value]).unwrap_err();
 
     assert!(matches!(error, CatalogWriteError::Record { wcid: 7, .. }));
     assert!(
@@ -320,7 +317,7 @@ fn nonfinite_source_float_is_rejected_with_wcid_and_field() {
     let mut value = template(9);
     value.friction = Some(f64::NAN);
 
-    let error = write_catalog_atomic(&path, "ACE-World-test", &[value]).unwrap_err();
+    let error = write_catalog_atomic(&path, &[value]).unwrap_err();
 
     assert!(matches!(error, CatalogWriteError::Record { wcid: 9, .. }));
     assert!(error.to_string().contains("friction"));
@@ -333,7 +330,7 @@ fn oversized_source_string_is_rejected_with_wcid_and_field() {
     let mut value = template(10);
     value.class_name = "x".repeat(MAX_STRING_BYTES + 1);
 
-    let error = write_catalog_atomic(&path, "ACE-World-test", &[value]).unwrap_err();
+    let error = write_catalog_atomic(&path, &[value]).unwrap_err();
 
     assert!(matches!(error, CatalogWriteError::Record { wcid: 10, .. }));
     assert!(error.to_string().contains("class_name"));
@@ -365,7 +362,7 @@ fn unsupported_version_is_distinct() {
     for unsupported in [CATALOG_FORMAT_VERSION - 1, CATALOG_FORMAT_VERSION + 1] {
         let directory = tempdir().unwrap();
         let path = directory.path().join("version.hwc");
-        write_catalog_atomic(&path, "ACE-World-test", &[]).unwrap();
+        write_catalog_atomic(&path, &[]).unwrap();
         mutate(&path, |bytes| {
             bytes[8..12].copy_from_slice(&unsupported.to_le_bytes())
         });
@@ -383,7 +380,7 @@ fn unsupported_version_is_distinct() {
 fn unsorted_index_is_corrupt() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("unsorted.hwc");
-    write_catalog_atomic(&path, "ACE-World-test", &[template(1), template(2)]).unwrap();
+    write_catalog_atomic(&path, &[template(1), template(2)]).unwrap();
     mutate(&path, |bytes| {
         let index_offset = read_u64(bytes, 40) as usize;
         let (prefix, suffix) = bytes.split_at_mut(index_offset + INDEX_ENTRY_LENGTH);
@@ -402,7 +399,7 @@ fn unsorted_index_is_corrupt() {
 fn overlapping_index_ranges_are_corrupt() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("overlap.hwc");
-    write_catalog_atomic(&path, "ACE-World-test", &[template(1), template(2)]).unwrap();
+    write_catalog_atomic(&path, &[template(1), template(2)]).unwrap();
     mutate(&path, |bytes| {
         let index_offset = read_u64(bytes, 40) as usize;
         let first_payload_offset = read_u64(bytes, index_offset + 4);
@@ -421,7 +418,7 @@ fn overlapping_index_ranges_are_corrupt() {
 fn out_of_range_index_payload_is_corrupt() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("out-of-range.hwc");
-    write_catalog_atomic(&path, "ACE-World-test", &[template(1)]).unwrap();
+    write_catalog_atomic(&path, &[template(1)]).unwrap();
     mutate(&path, |bytes| {
         let index_offset = read_u64(bytes, 40) as usize;
         bytes[index_offset + 4..index_offset + 12].copy_from_slice(&u64::MAX.to_le_bytes());
@@ -437,7 +434,7 @@ fn malformed_record_is_reported_at_lookup() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("malformed-record.hwc");
     let value = template(1);
-    write_catalog_atomic(&path, "ACE-World-test", std::slice::from_ref(&value)).unwrap();
+    write_catalog_atomic(&path, std::slice::from_ref(&value)).unwrap();
     mutate(&path, |bytes| {
         let payload_offset = read_u64(bytes, 24) as usize;
         let name_tag_offset = payload_offset + 4 + 4 + 4 + value.class_name.len();

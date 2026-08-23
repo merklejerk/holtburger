@@ -1071,7 +1071,6 @@ mod tests {
         fn capability(&self) -> ExplorerCatalogCapability {
             ExplorerCatalogCapability::Available {
                 path: "memory.hwc".into(),
-                provenance: "fixture".to_owned(),
                 record_count: self.templates.len(),
             }
         }

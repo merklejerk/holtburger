@@ -8,7 +8,6 @@ use crate::{
 pub(crate) const MAGIC: [u8; 8] = *b"HBWCAT\0\x1a";
 pub(crate) const HEADER_LENGTH: usize = 64;
 pub(crate) const INDEX_ENTRY_LENGTH: usize = 16;
-pub(crate) const MAX_PROVENANCE_BYTES: usize = 1024 * 1024;
 pub(crate) const MAX_STRING_BYTES: usize = 1024 * 1024;
 pub(crate) const MAX_COLLECTION_ENTRIES: usize = 1024 * 1024;
 pub(crate) const MAX_CATALOG_RECORDS: usize = 1024 * 1024;
@@ -38,7 +37,6 @@ impl std::error::Error for CodecError {}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Header {
     pub(crate) version: u32,
-    pub(crate) provenance_length: u32,
     pub(crate) record_count: u32,
     pub(crate) payload_offset: u64,
     pub(crate) payload_length: u64,
@@ -52,8 +50,7 @@ impl Header {
         bytes[0..8].copy_from_slice(&MAGIC);
         bytes[8..12].copy_from_slice(&self.version.to_le_bytes());
         bytes[12..16].copy_from_slice(&(HEADER_LENGTH as u32).to_le_bytes());
-        bytes[16..20].copy_from_slice(&self.provenance_length.to_le_bytes());
-        bytes[20..24].copy_from_slice(&self.record_count.to_le_bytes());
+        bytes[16..20].copy_from_slice(&self.record_count.to_le_bytes());
         bytes[24..32].copy_from_slice(&self.payload_offset.to_le_bytes());
         bytes[32..40].copy_from_slice(&self.payload_length.to_le_bytes());
         bytes[40..48].copy_from_slice(&self.index_offset.to_le_bytes());
@@ -71,13 +68,13 @@ impl Header {
                 "header length {header_length} does not equal {HEADER_LENGTH}"
             )));
         }
-        if bytes[56..64] != [0_u8; 8] {
+        // 20..24 pads record_count out to the u64 alignment the offset fields assume.
+        if bytes[20..24] != [0_u8; 4] || bytes[56..64] != [0_u8; 8] {
             return Err(CodecError::new("reserved header bytes are nonzero"));
         }
         Ok(Self {
             version: read_u32_array(bytes, 8)?,
-            provenance_length: read_u32_array(bytes, 16)?,
-            record_count: read_u32_array(bytes, 20)?,
+            record_count: read_u32_array(bytes, 16)?,
             payload_offset: read_u64_array(bytes, 24)?,
             payload_length: read_u64_array(bytes, 32)?,
             index_offset: read_u64_array(bytes, 40)?,

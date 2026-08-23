@@ -41,8 +41,6 @@ const REPRESENTATIVE_WCIDS: [u32; 10] = [1, 21, 147, 158, 239, 400, 1499, 34621,
 /// Stable, machine-readable Phase R0 measurements.
 #[derive(Debug, Serialize)]
 pub struct WeenieCatalogSurvey {
-    /// Catalog source label embedded by the exporter.
-    pub provenance: String,
     /// Catalog-only facts that require no client content.
     pub catalog: CatalogSurvey,
     /// Setup/GfxObj facts resolved through the normal content repository.
@@ -525,7 +523,6 @@ pub fn survey_weenie_catalog(
     let catalog_survey = survey_templates(&templates, encoded_lengths);
     let content_survey = survey_content(&templates, content)?;
     Ok(WeenieCatalogSurvey {
-        provenance: catalog.provenance().to_owned(),
         catalog: catalog_survey,
         content: content_survey,
     })

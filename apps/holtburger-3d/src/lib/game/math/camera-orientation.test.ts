@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	createCameraAxesRadians,
+	createEntityFacingCameraYaw,
 	createCameraLookAtAngles,
 	createCameraRotation,
 	createCameraRotationRadians,
@@ -62,5 +63,24 @@ describe("camera orientation", () => {
 		expect(() => createCameraLookAtAngles(position, position)).toThrow(
 			"finite and distinct",
 		);
+	});
+
+	it("maps an entity's AC forward axis to the camera yaw behind it", () => {
+		const halfQuarterTurn = Math.SQRT1_2;
+
+		expect(createEntityFacingCameraYaw({ w: 1, x: 0, y: 0, z: 0 })).toBeCloseTo(
+			0,
+		);
+		expect(
+			createEntityFacingCameraYaw({
+				w: halfQuarterTurn,
+				x: 0,
+				y: 0,
+				z: halfQuarterTurn,
+			}),
+		).toBeCloseTo(-Math.PI / 2);
+		expect(() =>
+			createEntityFacingCameraYaw({ w: 0, x: 0, y: 0, z: 0 }),
+		).toThrow("finite and non-zero");
 	});
 });

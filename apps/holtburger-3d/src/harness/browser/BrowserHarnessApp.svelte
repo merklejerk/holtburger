@@ -26,6 +26,7 @@
 		createCameraAxesRadians,
 		createCameraLookAtAngles,
 		createCameraRotationRadians,
+		createEntityFacingCameraYaw,
 	} from "../../lib/game/math/camera-orientation";
 	import { sceneVec3, sceneVector3 } from "../../lib/assets/ac-frame";
 	import type { Camera } from "../../lib/game/runtime/types";
@@ -96,6 +97,7 @@
 		HostKinematicBoomSession,
 		type HostKinematicBoomTransport,
 	} from "../../lib/game/camera/host-kinematic-boom-session";
+	import { PossessionCameraController } from "../../lib/game/camera/possession-camera-controller";
 	import type {
 		ExplorerPossession,
 		ExplorerPossessionEventRequest,
@@ -491,14 +493,19 @@
 			readonly metrics: FrameSelectionMetrics | null;
 		}>;
 		/** Exercise the compiled shared third-person router/look/boom ownership in-browser. */
-		readonly probeThirdPersonControls: () => {
+		readonly probeThirdPersonControls: () => Promise<{
 			readonly boomZoomDisplacement: number;
 			readonly cameraYawAfterKeyboardTurn: number;
 			readonly cameraYawBefore: number;
 			readonly characterInputCountAfterKeyboard: number;
 			readonly characterInputCountAfterPointerAndWheel: number;
 			readonly possessionOrbitDelta: readonly [number, number] | null;
-		};
+			readonly recenterAfterYaw: number;
+			readonly recenterBeforeYaw: number;
+			readonly recenterMidYaw: number;
+			readonly recenterPitch: number;
+			readonly recenterTrackingYaw: number;
+		}>;
 		/** Apply a host-resolved discontinuity and synchronously snap frontend placement. */
 		readonly relocateExplorerEntity: (
 			guid: number,
@@ -1685,8 +1692,8 @@
 		};
 	}
 
-	function probeThirdPersonControls(): ReturnType<
-		BrowserHarnessApi["probeThirdPersonControls"]
+	async function probeThirdPersonControls(): Promise<
+		Awaited<ReturnType<BrowserHarnessApi["probeThirdPersonControls"]>>
 	> {
 		const listeners = new Map<string, EventListener>();
 		const routedCharacterInput: unknown[] = [];
@@ -1741,6 +1748,82 @@
 		dispatch("wheel", { deltaX: 0, deltaY: 100, shiftKey: false });
 		const characterInputCountAfterPointerAndWheel = routedCharacterInput.length;
 		controller.dispose();
+		const projection = createProjectionClearanceRevision(
+			1,
+			{ fov: CAMERA_FOV_DEGREES, near: CAMERA_NEAR },
+			{ height: 720, width: 1_280 },
+		);
+		const transport: HostKinematicBoomTransport = {
+			async invoke(command) {
+				if (command === "start_kinematic_boom") {
+					return {
+						boomGeneration: 1,
+						entityGeneration: 1,
+						guid: 1,
+						possessionGeneration: 1,
+					};
+				}
+				if (
+					command === "set_kinematic_boom_intent" ||
+					command === "set_kinematic_boom_clearance"
+				)
+					return "accepted";
+				if (command === "stop_kinematic_boom") return true;
+				throw new Error(`Unexpected third-person probe command ${command}.`);
+			},
+		};
+		const recenter = new PossessionCameraController({
+			initialLook: { pitchRadians: -0.4, yawRadians: 0 },
+			orbit: {
+				maximumPitchRadians: 1,
+				pitchRadiansPerPixel: 0.01,
+				yawRadiansPerPixel: 0.01,
+			},
+			recenter: {
+				delayMs: FRONTEND_TUNING.explorer.camera.boom.recenterDelayMs,
+				durationMs: FRONTEND_TUNING.explorer.camera.boom.recenterDurationMs,
+			},
+			transport,
+		});
+		await recenter.start(
+			{ possessionGeneration: 1, guid: 1, entityGeneration: 1 },
+			{ initial: 4.5, minimum: 1.2, maximum: 32 },
+			projection,
+		);
+		const targetYaw = createEntityFacingCameraYaw({
+			w: Math.SQRT1_2,
+			x: 0,
+			y: 0,
+			z: Math.SQRT1_2,
+		});
+		const recenterDelayMs =
+			FRONTEND_TUNING.explorer.camera.boom.recenterDelayMs;
+		const recenterDurationMs =
+			FRONTEND_TUNING.explorer.camera.boom.recenterDurationMs;
+		recenter.setTranslationIntent(true, 0);
+		await recenter.synchronize(projection, recenterDelayMs - 1, targetYaw);
+		const recenterBefore = recenter.desiredLook();
+		await recenter.synchronize(
+			projection,
+			recenterDelayMs + recenterDurationMs / 2,
+			targetYaw,
+		);
+		const recenterMid = recenter.desiredLook();
+		await recenter.synchronize(
+			projection,
+			recenterDelayMs + recenterDurationMs,
+			targetYaw,
+		);
+		const recenterAfter = recenter.desiredLook();
+		const trackingTargetYaw = targetYaw + 0.4;
+		recenter.setTranslationIntent(false, recenterDelayMs + recenterDurationMs);
+		await recenter.synchronize(
+			projection,
+			recenterDelayMs + recenterDurationMs + 1,
+			trackingTargetYaw,
+		);
+		const recenterTracking = recenter.desiredLook();
+		await recenter.stop();
 		return {
 			boomZoomDisplacement:
 				-wheelDistance *
@@ -1750,6 +1833,11 @@
 			characterInputCountAfterKeyboard,
 			characterInputCountAfterPointerAndWheel,
 			possessionOrbitDelta,
+			recenterAfterYaw: recenterAfter.yawRadians,
+			recenterBeforeYaw: recenterBefore.yawRadians,
+			recenterMidYaw: recenterMid.yawRadians,
+			recenterPitch: recenterAfter.pitchRadians,
+			recenterTrackingYaw: recenterTracking.yawRadians,
 		};
 	}
 

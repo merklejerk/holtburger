@@ -390,6 +390,12 @@ export class DynamicEntityMirror {
 		);
 	}
 
+	/** Read one exact current generation without sorting or allocating the whole population. */
+	entity(guid: number, generation: number): DynamicEntityView | null {
+		const current = this.#entities.get(guid);
+		return current?.generation === generation ? current : null;
+	}
+
 	/** Whether deltas are intentionally being ignored pending replacement state. */
 	isAwaitingSnapshot(): boolean {
 		return this.#awaitingSnapshot;

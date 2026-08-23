@@ -74,6 +74,7 @@ class FakeTransport implements ExplorerDynamicEntityTransport {
 function entity(guid: number) {
 	return {
 		generation: 1,
+		playingClip: null,
 		identity: { guid, wcid: 42, name: "Drudge" },
 		presentation: {
 			content: {
@@ -279,7 +280,6 @@ describe("ExplorerDynamicEntitySession", () => {
 			durationMs: 32,
 			entityAdvances: [
 				{
-					clip: null,
 					entity: moved,
 					kind: "integrated",
 					path: {

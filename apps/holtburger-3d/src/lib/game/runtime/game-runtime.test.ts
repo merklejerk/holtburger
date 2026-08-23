@@ -29,6 +29,7 @@ import { GameRuntime, type GameRuntimeRenderDevice } from "./game-runtime";
 import type { SceneAvailabilityEvent } from "./scene-availability";
 import type { DynamicEntityView } from "./dynamic-entity-feed";
 import type { Camera } from "./types";
+import type { DatAssetId } from "../game-types";
 import type { DynamicEntityVisualSource } from "../../assets/dynamic-entity-visual-source";
 import type { DecodedStaticPresentation } from "../../assets/decode-static-source-record";
 import type {
@@ -666,6 +667,55 @@ describe("GameRuntime view and interest control", () => {
 });
 
 describe("GameRuntime spawned dynamic presentation", () => {
+	/// The clip is a level on the view, not an edge on a tick. An entity realized asynchronously
+	/// misses every transition that happened while its visual was decoding, so realization has to
+	/// be able to ask what it is playing rather than wait to be told that it changed.
+	it("plays the clip its view states when the entity is realized", async () => {
+		const runtime = await buildSpawnRuntime(
+			{ load: async () => spawnedVisual() },
+			MOTION_TABLE_ANIMATION_SOURCE,
+		);
+
+		await runtime.reconcileSpawnedDynamicEntities([
+			motionDrivenEntity(1, {
+				animationId: Number(IDLE_ANIMATION_ID),
+				completion: "loop",
+				framerate: 4,
+				highFrame: 0,
+				lowFrame: 0,
+			}),
+		]);
+		setTestCamera(runtime, SPAWN_TEST_CAMERA);
+		runtime.render(0);
+
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().animation
+				.activePlaybackCount,
+		).toBe(1);
+		await runtime.destroy();
+	});
+
+	/// The control for the test above: playback comes from the stated level and nothing else, so an
+	/// entity stating none is realized silent rather than incidentally animated.
+	it("realizes an entity stating no clip without any playback", async () => {
+		const runtime = await buildSpawnRuntime(
+			{ load: async () => spawnedVisual() },
+			MOTION_TABLE_ANIMATION_SOURCE,
+		);
+
+		await runtime.reconcileSpawnedDynamicEntities([
+			motionDrivenEntity(1, null),
+		]);
+		setTestCamera(runtime, SPAWN_TEST_CAMERA);
+		runtime.render(0);
+
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().animation
+				.activePlaybackCount,
+		).toBe(0);
+		await runtime.destroy();
+	});
+
 	it("shares one immutable visual load while retaining independent live owners", async () => {
 		const visual = spawnedVisual();
 		const load = vi.fn(async () => visual);
@@ -789,6 +839,7 @@ describe("GameRuntime spawned dynamic presentation", () => {
 
 async function buildSpawnRuntime(
 	dynamicEntityVisualSource: DynamicEntityVisualSource,
+	animationSource: AnimationAssetSource = ANIMATION_SOURCE,
 ): Promise<GameRuntime> {
 	const device: GameRuntimeRenderDevice = {
 		buildRenderer: async () => ({
@@ -801,7 +852,7 @@ async function buildSpawnRuntime(
 		device,
 		{ prepareLandblockLayers: async () => [] },
 		{} as TexturePixelSource,
-		ANIMATION_SOURCE,
+		animationSource,
 		PHYSICS_SCRIPT_SOURCE,
 		{ playOneShot: () => null, prepare: async () => {} },
 		PARTICLE_EMITTER_SOURCE,
@@ -809,6 +860,57 @@ async function buildSpawnRuntime(
 		PARTICLE_MESH_SOURCE,
 		dynamicEntityVisualSource,
 	);
+}
+
+/// Reaches one animation from one table, which is all a staged clip swap needs.
+const MOTION_TABLE_ANIMATION_SOURCE: AnimationAssetSource = {
+	async loadMotionTableClosure() {
+		return [IDLE_ANIMATION_ID];
+	},
+	async loadAnimation(animationId) {
+		return {
+			frameCount: 1,
+			hooks: [],
+			id: animationId,
+			partCount: 1,
+			partFrames: [Mat4.identity()],
+			positionFrames: [],
+		};
+	},
+	destroy() {},
+};
+
+const IDLE_ANIMATION_ID = "0x03000001" as DatAssetId;
+
+const SPAWN_TEST_CAMERA: Camera = {
+	far: 800,
+	fov: 90,
+	near: 0.5,
+	placement: {
+		envCellId: null,
+		landblockId: "0x00000000",
+		position: sceneVec3(Vec3.zero()),
+		rotation: Quat.identity(),
+	},
+};
+
+/// An entity that animates from a table, optionally already playing a clip when it is realized.
+function motionDrivenEntity(
+	guid: number,
+	playingClip: DynamicEntityView["playingClip"],
+): DynamicEntityView {
+	const entity = spawnedEntity(guid, 1);
+	return {
+		...entity,
+		playingClip,
+		presentation: {
+			...entity.presentation,
+			content: {
+				...entity.presentation.content,
+				motionTableDid: 0x09000001,
+			},
+		},
+	};
 }
 
 async function buildGameRuntimeForTest(
@@ -901,6 +1003,7 @@ function spawnedEntity(
 ): DynamicEntityView {
 	return {
 		generation,
+		playingClip: null,
 		identity: { guid, name: `Entity ${guid}`, wcid: 42 },
 		physics: {
 			cloaked: false,

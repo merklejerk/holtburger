@@ -15,6 +15,7 @@ function entity(
 ): DynamicEntityView & { placement: DynamicEntityWorldPlacement } {
 	return {
 		generation,
+		playingClip: null,
 		identity: { guid, wcid: 42, name: "Drudge" },
 		presentation: {
 			content: {
@@ -87,7 +88,6 @@ function advanced(
 			advances: [
 				{
 					// The host always sends this field; `null` means "keep playing whatever you have".
-					clip: null,
 					entity: value,
 					kind: "integrated",
 					path: {
@@ -188,6 +188,7 @@ describe("dynamic-entity view contract", () => {
 			"identity",
 			"physics",
 			"placement",
+			"playingClip",
 			"presentation",
 		]);
 		expect(decoded.presentation.content.motionTableDid).toBe(0x09000001);

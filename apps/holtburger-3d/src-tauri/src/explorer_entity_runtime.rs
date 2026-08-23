@@ -248,14 +248,16 @@ pub struct ExplorerEntityProjection {
     pub generation: u64,
     /// Source-neutral semantic facts joined with the current canonical body view.
     pub input: DynamicEntityProjectionInput,
+    /// Clip this entity is playing right now, read from the same locked registry transaction.
+    pub playing_clip: Option<holtburger_world::motion::PlayingMotionClip>,
 }
 
 /// One accepted fixed-tick body path paired with its still-current semantic generation.
 pub struct ExplorerEntityPhysicalTick {
     /// Whether frontend entity presentation consumes this tick; host-side followers ignore this.
     pub publish: bool,
-    /// Clip this entity started playing on this tick, present only when it changed.
-    pub clip: Option<holtburger_world::motion::PlayingMotionClip>,
+    /// Clip this entity is playing at the end of this tick, changed or not.
+    pub playing_clip: Option<holtburger_world::motion::PlayingMotionClip>,
     /// Possession lifecycle edges committed with this exact body solve.
     pub possession_event_outcomes: Vec<PossessionEventOutcome>,
     /// Current instance generation held stable across the collection transaction.
@@ -372,28 +374,36 @@ struct ExplorerMotionState {
     playback: MotionRuntimeRegistry,
     /// Exact entity/possession generation and all controller-owned input state.
     active: Option<ActivePossession>,
-    /// Clip each body was last published as playing, so only changes are republished.
-    playing: BTreeMap<Guid, PlayingMotionClip>,
+    /// Clip each body's most recent publication carried, so an unchanged level costs no traffic.
+    published: BTreeMap<Guid, PlayingMotionClip>,
 }
 
 impl ExplorerMotionState {
-    /// Clips that changed since the previous call, drained so each change publishes once.
+    /// Forgets publication history for bodies that no longer exist.
+    fn retain_published(&mut self, live: &BTreeSet<Guid>) {
+        self.published.retain(|guid, _| live.contains(guid));
+    }
+
+    /// Whether one body's current clip has yet to reach a consumer.
     ///
-    /// Tracking the previous clip here rather than making the receiver diff keeps "a projection
-    /// arrived" and "the clip changed" the same event.
-    fn take_changed_clips(&mut self, live: &BTreeSet<Guid>) -> BTreeMap<Guid, PlayingMotionClip> {
-        self.playing.retain(|guid, _| live.contains(guid));
-        let mut changed = BTreeMap::new();
-        for guid in live {
-            let Some(clip) = self.playback.playing_clip(*guid) else {
-                self.playing.remove(guid);
-                continue;
-            };
-            if self.playing.insert(*guid, clip) != Some(clip) {
-                changed.insert(*guid, clip);
-            }
-        }
-        changed
+    /// Read before the collection scan so a body whose only news is a clip change can be woken
+    /// into it. Playback alone does not schedule a body: an idle contributes no motion, so a
+    /// settled entity would otherwise have no tick to carry its level on.
+    fn clip_awaits_publication(&self, guid: Guid) -> bool {
+        self.playback.playing_clip(guid) != self.published.get(&guid).copied()
+    }
+
+    /// Commits the clip one body's publication carries, reporting whether it changed.
+    ///
+    /// Only a body that actually produced a tick commits. A body with no tick this epoch has
+    /// nothing to carry its level, so it stays pending and re-offers the change on its next one.
+    fn commit_published_clip(&mut self, guid: Guid) -> (Option<PlayingMotionClip>, bool) {
+        let clip = self.playback.playing_clip(guid);
+        let changed = match clip {
+            Some(clip) => self.published.insert(guid, clip) != Some(clip),
+            None => self.published.remove(&guid).is_some(),
+        };
+        (clip, changed)
     }
 
     fn release(&mut self) -> Option<Guid> {
@@ -510,7 +520,7 @@ pub struct ExplorerPossessionMotionProbe {
     pub style: u32,
     pub substate: ExplorerPossessionActiveMotionProbe,
     pub modifiers: Vec<ExplorerPossessionActiveMotionProbe>,
-    pub clip: Option<ExplorerPossessionPlayingClipProbe>,
+    pub clip: Option<holtburger_core::DynamicEntityPlayingClip>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
@@ -518,17 +528,6 @@ pub struct ExplorerPossessionMotionProbe {
 pub struct ExplorerPossessionActiveMotionProbe {
     pub command: u32,
     pub speed: f32,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ExplorerPossessionPlayingClipProbe {
-    pub animation_id: u32,
-    pub framerate: f32,
-    pub low_frame: i32,
-    pub high_frame: i32,
-    /// Terminal behavior projected from the host sequence's cyclic-tail boundary.
-    pub completion: holtburger_core::DynamicEntityClipCompletion,
 }
 
 /// Tentative possession/controller/playback state paired with one proposed body actuation.
@@ -1043,6 +1042,7 @@ impl ExplorerEntityRuntime {
         validate_prepared_intent(physical_intent, physical.is_some())?;
         let guid = definition.identity.guid;
         validate_attached_children(guid, &children)?;
+        let (definition, children) = self.resolve_group_motion_tables(definition, children);
         let mut registry = self
             .registry
             .lock()
@@ -1104,6 +1104,7 @@ impl ExplorerEntityRuntime {
         validate_prepared_intent(physical_intent, physical.is_some())?;
         let guid = definition.identity.guid;
         validate_attached_children(guid, &children)?;
+        let (definition, children) = self.resolve_group_motion_tables(definition, children);
         let mut registry = self
             .registry
             .lock()
@@ -1339,6 +1340,7 @@ impl ExplorerEntityRuntime {
         Ok(ExplorerEntityProjection {
             generation: instance.generation,
             input,
+            playing_clip: registry.motion.playback.playing_clip(guid),
         })
     }
 
@@ -1357,6 +1359,10 @@ impl ExplorerEntityRuntime {
                     input: self
                         .simulation
                         .project_dynamic_entity(&instance.definition)?,
+                    playing_clip: registry
+                        .motion
+                        .playback
+                        .playing_clip(instance.definition.identity.guid),
                 })
             })
             .collect()
@@ -1380,8 +1386,10 @@ impl ExplorerEntityRuntime {
             .get(&guid)
             .cloned()
             .ok_or(ExplorerEntityRuntimeError::NotRegistered { guid })?;
-        let motion_table_id = self
-            .motion_table_for(&instance.definition)
+        let motion_table_id = instance
+            .definition
+            .content
+            .motion_table_did
             .ok_or(ExplorerEntityRuntimeError::MissingPossessionMotionTable { guid })?;
         let table = self.motion_catalog.table(motion_table_id).ok_or(
             ExplorerEntityRuntimeError::UnprojectedPossessionMotionTable {
@@ -1552,15 +1560,7 @@ impl ExplorerEntityRuntime {
             .motion
             .playback
             .playing_clip(active.guid)
-            .map(|clip| ExplorerPossessionPlayingClipProbe {
-                animation_id: clip.animation_id,
-                framerate: clip.framerate,
-                low_frame: clip.low_frame,
-                high_frame: clip.high_frame,
-                completion: crate::explorer_entity_delivery::project_clip_completion(
-                    clip.completion,
-                ),
-            });
+            .map(holtburger_core::DynamicEntityPlayingClip::from);
         Some(ExplorerPossessionMotionProbe {
             guid: active.guid,
             entity_generation: active.entity_generation,
@@ -1599,12 +1599,27 @@ impl ExplorerEntityRuntime {
         })
     }
 
-    /// The motion table an entity animates from: its own property, or the default its setup installs.
-    fn motion_table_for(&self, definition: &DynamicEntityDefinition) -> Option<u32> {
-        definition.content.motion_table_did.or_else(|| {
-            self.motion_catalog
-                .default_motion_table_for_setup(definition.content.setup_did)
-        })
+    /// Resolves each definition's setup-default motion table before the group becomes contract.
+    ///
+    /// The entity's own property is the override; absent, the setup's default is the table it
+    /// really animates from. Resolving once here is what lets every consumer — including a frontend
+    /// that stages a closure for this exact id and has no setup catalog to consult — read the table
+    /// an entity animates from rather than repeat the lookup.
+    fn resolve_group_motion_tables(
+        &self,
+        definition: DynamicEntityDefinition,
+        children: Vec<DynamicEntityDefinition>,
+    ) -> (DynamicEntityDefinition, Vec<DynamicEntityDefinition>) {
+        let mut resolve = |mut definition: DynamicEntityDefinition| {
+            definition.content.motion_table_did =
+                definition.content.motion_table_did.or_else(|| {
+                    self.motion_catalog
+                        .default_motion_table_for_setup(definition.content.setup_did)
+                });
+            definition
+        };
+        let children = children.into_iter().map(&mut resolve).collect();
+        (resolve(definition), children)
     }
 
     /// Advances unpossessed authored playback independently from controller/body acceptance.
@@ -1639,16 +1654,15 @@ impl ExplorerEntityRuntime {
                 if possessed == Some(*guid) {
                     return None;
                 }
-                Some((*guid, self.motion_table_for(&instance.definition)?))
+                Some((*guid, instance.definition.content.motion_table_did?))
             })
             .collect();
 
         let live: BTreeSet<Guid> = registry
             .entities
             .iter()
-            .filter_map(|(guid, instance)| {
-                self.motion_table_for(&instance.definition).map(|_| *guid)
-            })
+            .filter(|(_, instance)| instance.definition.content.motion_table_did.is_some())
+            .map(|(guid, _)| *guid)
             .collect();
         registry
             .motion
@@ -1667,12 +1681,16 @@ impl ExplorerEntityRuntime {
             // A body that proved stable support has dropped out of the collection scan. Whether it
             // should be back in is a property of what its playback installed, not of how large this
             // tick's offset came out — the same distinction Phase 3 settled for the client basis.
+            //
+            // An unpublished clip is the other reason to be in it. An idle contributes no motion,
+            // so a settled entity would never be scanned again and its level would never reach a
+            // consumer — the tick is the only carrier a scheduled body has.
             let moving = registry
                 .motion
                 .playback
                 .get(guid)
                 .is_some_and(|runtime| runtime.sequence().contributes_motion());
-            if moving {
+            if moving || registry.motion.clip_awaits_publication(guid) {
                 self.simulation
                     .wake_dynamic_body(SpatialBodyId::Entity(guid));
             }
@@ -1765,16 +1783,13 @@ impl ExplorerEntityRuntime {
             registry.motion.active = Some(accepted.active);
         }
 
-        // A clip change is worth publishing even when the body did not move. Possessed playback is
-        // sampled only after its accepted proposal commits, so a held solve cannot leak a clip.
         let live: BTreeSet<Guid> = registry.entities.keys().copied().collect();
-        let changed_clips = registry.motion.take_changed_clips(&live);
+        registry.motion.retain_published(&live);
         let outcome_guids: BTreeSet<Guid> = possession_outcomes.keys().copied().collect();
         let ticks = collection
             .bodies
             .into_iter()
             .map(|solved| {
-                let changed_clips = &changed_clips;
                 let SpatialBodyId::Entity(guid) = solved.current.id else {
                     anyhow::bail!("dynamic-entity collection returned a non-entity body")
                 };
@@ -1789,20 +1804,24 @@ impl ExplorerEntityRuntime {
                         instance.definition.physics.semantic & !change.cleared,
                     );
                 }
+                let generation = instance.generation;
                 let input = dynamic_entity_projection_input_from_body(
                     &instance.definition,
                     &solved.current,
                 )?;
-                let publish = physical_tick_changed(&solved)
-                    || changed_clips.contains_key(&guid)
-                    || outcome_guids.contains(&guid);
+                // A clip change is worth publishing even when the body did not move. Possessed
+                // playback is sampled only after its accepted proposal commits, so a held solve
+                // cannot leak a clip.
+                let (playing_clip, clip_changed) = registry.motion.commit_published_clip(guid);
+                let publish =
+                    physical_tick_changed(&solved) || clip_changed || outcome_guids.contains(&guid);
                 Ok(ExplorerEntityPhysicalTick {
                     publish,
-                    clip: changed_clips.get(&guid).copied(),
+                    playing_clip,
                     possession_event_outcomes: possession_outcomes
                         .remove(&guid)
                         .unwrap_or_default(),
-                    generation: instance.generation,
+                    generation,
                     input,
                     solved,
                 })
@@ -1996,6 +2015,11 @@ mod tests {
         DynamicEntityContent, DynamicEntityDefinitionInput, DynamicEntityIdentity,
         DynamicEntityInitialState,
     };
+    use holtburger_dat::file_type::animation::AnimationFlags;
+    use holtburger_dat::file_type::motion_table::{AnimData, MotionData, MotionDataFlags};
+    use holtburger_dat::file_type::setup_model::AnimationFrame;
+    use holtburger_dat::file_type::{Animation, MotionTable};
+    use holtburger_dat::graphics::Frame;
     use holtburger_world::{
         DynamicBodyCollisionDefinition, EdgeProtection, EntityAppearance,
         EntityCollisionParticipation, EntityCollisionReportPolicy, EntityDynamicCollisionPolicy,
@@ -2021,6 +2045,9 @@ mod tests {
         (simulation, runtime)
     }
 
+    /// Setup every fixture entity presents, and the one the fixture catalog defaults for.
+    const FIXTURE_SETUP_DID: u32 = 0x0200_0001;
+
     fn definition(guid: Guid, wcid: u32, x: f32) -> DynamicEntityDefinition {
         DynamicEntityDefinition::prepare(DynamicEntityDefinitionInput {
             identity: DynamicEntityIdentity {
@@ -2031,7 +2058,7 @@ mod tests {
             },
             content: DynamicEntityContent {
                 motion_table_did: None,
-                setup_did: 0x0200_0001,
+                setup_did: FIXTURE_SETUP_DID,
                 sound_table_did: None,
                 physics_effect_table_did: None,
             },
@@ -2725,37 +2752,28 @@ mod tests {
     const WALK_STYLE: u32 = 0x8000_003D;
     const WALK_STAND: u32 = 0x4500_0003;
     const WALK_FORWARD: u32 = 0x4500_0005;
+    /// Default substate of the fixture's only style: what an unpossessed entity idles on.
+    const STAND_ANIM: u32 = 0x0300_0001;
     const WALK_ANIM: u32 = 0x0300_0002;
     const READY_ANIM: u32 = 0x0300_0003;
     const FALLING_ANIM: u32 = 0x0300_0004;
+    /// Successor the idle cycle advances to on its own, with no input and no possession.
+    const FIDGET_ANIM: u32 = 0x0300_0005;
 
-    /// A table whose walk cycle authors root motion along local Y, which is what a real walk does.
-    fn walking_catalog() -> Arc<MotionSequenceCatalog> {
-        walking_catalog_with_jump_presentation(false)
+    /// Four part frames with no hooks: the minimum an assembled animation needs.
+    fn part_frames() -> Vec<AnimationFrame> {
+        use holtburger_dat::file_type::setup_model::AnimationFrame;
+        (0..4)
+            .map(|_| AnimationFrame {
+                frames: Vec::new(),
+                hooks: Vec::new(),
+            })
+            .collect()
     }
 
-    fn walking_catalog_with_jump_presentation(
-        include_jump_presentation: bool,
-    ) -> Arc<MotionSequenceCatalog> {
-        use holtburger_dat::file_type::animation::AnimationFlags;
-        use holtburger_dat::file_type::motion_table::{AnimData, MotionData, MotionDataFlags};
-        use holtburger_dat::file_type::setup_model::AnimationFrame;
-        use holtburger_dat::file_type::{Animation, MotionTable};
-        use holtburger_dat::graphics::Frame;
-
-        let clip = |anim_id: u32| MotionData {
-            bitfield: 0,
-            flags: MotionDataFlags::empty(),
-            anims: vec![AnimData {
-                anim_id,
-                low_frame: 0,
-                high_frame: -1,
-                framerate: 4.0,
-            }],
-            velocity: None,
-            omega: None,
-        };
-        let animation = |id: u32, step: f32| Animation {
+    /// A clip that authors a per-frame root step, which is what a locomotion cycle does.
+    fn travelling_animation(id: u32, step: f32) -> Animation {
+        Animation {
             id,
             flags: AnimationFlags::POS_FRAMES,
             num_parts: 0,
@@ -2766,36 +2784,50 @@ mod tests {
                     orientation: Quaternion::identity(),
                 })
                 .collect(),
-            part_frames: (0..4)
-                .map(|_| AnimationFrame {
-                    frames: Vec::new(),
-                    hooks: Vec::new(),
+            part_frames: part_frames(),
+        }
+    }
+
+    /// A clip with no root track at all, which is what an idle or a presentation pose is.
+    ///
+    /// The distinction matters to scheduling, not just to travel: a stationary clip leaves its
+    /// body settled out of the collection scan.
+    fn stationary_animation(id: u32) -> Animation {
+        Animation {
+            id,
+            flags: AnimationFlags::empty(),
+            num_parts: 0,
+            num_frames: 4,
+            pos_frames: Vec::new(),
+            part_frames: part_frames(),
+        }
+    }
+
+    /// One cycle entry playing the named animations in order.
+    fn cycle(anim_ids: impl IntoIterator<Item = u32>) -> MotionData {
+        MotionData {
+            bitfield: 0,
+            flags: MotionDataFlags::empty(),
+            anims: anim_ids
+                .into_iter()
+                .map(|anim_id| AnimData {
+                    anim_id,
+                    low_frame: 0,
+                    high_frame: -1,
+                    framerate: 4.0,
                 })
                 .collect(),
-        };
-
-        let mut cycles = std::collections::HashMap::new();
-        cycles.insert(
-            MotionTable::cycle_key(WALK_STYLE, WALK_STAND),
-            clip(0x0300_0001),
-        );
-        cycles.insert(
-            MotionTable::cycle_key(WALK_STYLE, WALK_FORWARD),
-            clip(WALK_ANIM),
-        );
-        let mut animations = vec![animation(0x0300_0001, 0.0), animation(WALK_ANIM, 1.0)];
-        if include_jump_presentation {
-            cycles.insert(
-                MotionTable::cycle_key(WALK_STYLE, MotionCommand::READY.raw()),
-                clip(READY_ANIM),
-            );
-            cycles.insert(
-                MotionTable::cycle_key(WALK_STYLE, MotionCommand::FALLING.raw()),
-                clip(FALLING_ANIM),
-            );
-            animations.extend([animation(READY_ANIM, 0.0), animation(FALLING_ANIM, 0.0)]);
+            velocity: None,
+            omega: None,
         }
+    }
 
+    /// Assembles the single-table, single-style catalog every motion fixture here shares.
+    fn motion_catalog(
+        cycles: std::collections::HashMap<u32, MotionData>,
+        animations: Vec<Animation>,
+        setup_defaults: impl IntoIterator<Item = (u32, u32)>,
+    ) -> Arc<MotionSequenceCatalog> {
         Arc::new(
             MotionSequenceCatalog::assemble(
                 [MotionTable {
@@ -2807,10 +2839,65 @@ mod tests {
                     links: std::collections::HashMap::new(),
                 }],
                 animations,
-                [],
+                setup_defaults,
             )
-            .expect("walking fixture should assemble"),
+            .expect("motion fixture should assemble"),
         )
+    }
+
+    /// A table whose idle cycle advances between two stationary clips without any input, which is
+    /// what a real fidget does and the only way an unpossessed clip changes on its own.
+    fn fidgeting_catalog() -> Arc<MotionSequenceCatalog> {
+        motion_catalog(
+            std::collections::HashMap::from([(
+                MotionTable::cycle_key(WALK_STYLE, WALK_STAND),
+                cycle([STAND_ANIM, FIDGET_ANIM]),
+            )]),
+            vec![
+                stationary_animation(STAND_ANIM),
+                stationary_animation(FIDGET_ANIM),
+            ],
+            [],
+        )
+    }
+
+    /// A table whose walk cycle authors root motion along local Y, which is what a real walk does.
+    fn walking_catalog() -> Arc<MotionSequenceCatalog> {
+        walking_catalog_with_jump_presentation(false)
+    }
+
+    fn walking_catalog_with_jump_presentation(
+        include_jump_presentation: bool,
+    ) -> Arc<MotionSequenceCatalog> {
+        let mut cycles = std::collections::HashMap::from([
+            (
+                MotionTable::cycle_key(WALK_STYLE, WALK_STAND),
+                cycle([STAND_ANIM]),
+            ),
+            (
+                MotionTable::cycle_key(WALK_STYLE, WALK_FORWARD),
+                cycle([WALK_ANIM]),
+            ),
+        ]);
+        let mut animations = vec![
+            stationary_animation(STAND_ANIM),
+            travelling_animation(WALK_ANIM, 1.0),
+        ];
+        if include_jump_presentation {
+            cycles.insert(
+                MotionTable::cycle_key(WALK_STYLE, MotionCommand::READY.raw()),
+                cycle([READY_ANIM]),
+            );
+            cycles.insert(
+                MotionTable::cycle_key(WALK_STYLE, MotionCommand::FALLING.raw()),
+                cycle([FALLING_ANIM]),
+            );
+            animations.extend([
+                stationary_animation(READY_ANIM),
+                stationary_animation(FALLING_ANIM),
+            ]);
+        }
+        motion_catalog(cycles, animations, [(FIXTURE_SETUP_DID, WALK_TABLE)])
     }
 
     fn walking_runtime() -> (Arc<HostSimulationRuntime>, ExplorerEntityRuntime, Guid) {
@@ -2924,50 +3011,174 @@ mod tests {
         );
     }
 
-    /// The clip is published when it changes and not otherwise, because a receiver swaps on arrival
-    /// rather than diffing. Resending an unchanged clip would restart it every tick.
+    /// Every tick states the clip its entity is playing, changed or not, so a consumer never has
+    /// to have witnessed the transition that selected it.
     #[test]
-    fn a_playing_clip_publishes_on_change_and_not_again() {
+    fn every_tick_states_the_clip_its_entity_is_playing() {
         let (simulation, runtime, guid) = walking_runtime();
         let settled_at = settle(&simulation, Instant::now());
         let possession = runtime.possess(guid).unwrap();
 
-        // The first tick after spawn announces the idle the entity is already playing.
         let first = runtime
             .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(33))
             .unwrap();
         assert!(
-            first.ticks.iter().any(|tick| tick.clip.is_some()),
-            "the first tick announces the clip"
+            first.ticks.iter().any(|tick| {
+                tick.publish && tick.playing_clip.map(|clip| clip.animation_id) == Some(STAND_ANIM)
+            }),
+            "the first tick publishes the idle the entity is already playing"
         );
 
         set_walk_intent(&runtime, &possession, 1);
-        let mut announcements = 0usize;
-        let mut animations = Vec::new();
+        let mut levels = Vec::new();
         for step in 2..=20 {
             for tick in runtime
                 .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(step * 33))
                 .unwrap()
                 .ticks
             {
-                if let Some(clip) = tick.clip {
-                    announcements += 1;
-                    animations.push(clip.animation_id);
+                assert!(
+                    tick.playing_clip.is_some(),
+                    "a body driven by a motion table always has a clip to state"
+                );
+                if tick.publish {
+                    levels.push(tick.playing_clip.expect("a stated clip").animation_id);
                 }
             }
         }
 
         assert!(
-            announcements >= 1,
-            "commanding a walk changes the clip at least once"
+            levels.contains(&WALK_ANIM),
+            "commanding a walk moves the stated level onto the walk cycle: {levels:?}"
         );
-        assert!(
-            announcements <= 4,
-            "only transitions announce, not every tick: {announcements} announcements over 19 ticks"
+    }
+
+    /// The bug this contract exists to prevent: an entity that settles while a consumer is still
+    /// realizing it must still be able to state what it is playing. The clip was previously an
+    /// edge drained on publication, so a consumer that missed it never learned the entity idles.
+    #[test]
+    fn a_settled_unpossessed_entity_states_its_idle_to_a_late_consumer() {
+        let (simulation, runtime, guid) = walking_runtime();
+        let settled_at = settle(&simulation, Instant::now());
+        for step in 1..=30 {
+            runtime
+                .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(step * 33))
+                .unwrap();
+        }
+
+        assert_eq!(
+            runtime
+                .project(guid)
+                .expect("the spawned entity must project")
+                .playing_clip
+                .map(|clip| clip.animation_id),
+            Some(STAND_ANIM),
+            "a projection taken long after spawn still states the idle"
         );
+        assert_eq!(
+            runtime
+                .snapshot()
+                .expect("the population must snapshot")
+                .into_iter()
+                .find(|projection| projection.input.identity.guid == guid)
+                .expect("the spawned entity must appear in its snapshot")
+                .playing_clip
+                .map(|clip| clip.animation_id),
+            Some(STAND_ANIM),
+            "a complete snapshot reconstructs playback without replaying history"
+        );
+    }
+
+    /// A frontend stages a clip closure for the table id its view names, and has no setup catalog
+    /// to consult. Leaving the setup's default unresolved would publish an entity that states a
+    /// clip it also claims to have no table for.
+    #[test]
+    fn an_entity_without_its_own_table_publishes_the_one_its_setup_defaults_to() {
+        let simulation = Arc::new(HostSimulationRuntime::new(Arc::new(FlatGround)));
+        let runtime = ExplorerEntityRuntime::with_guid_range_and_motion(
+            Arc::clone(&simulation),
+            0xf000_0090,
+            0xf000_00a0,
+            walking_catalog(),
+        );
+        let guid = runtime.reserve_guid().unwrap();
+        let definition = definition(guid, 1, 0.0);
+        assert_eq!(
+            definition.content.motion_table_did, None,
+            "the fixture weenie carries no table of its own"
+        );
+
+        runtime
+            .spawn_prepared(definition, EntityPhysicalIntent::PoseOnly, None)
+            .unwrap();
+
+        assert_eq!(
+            runtime
+                .project(guid)
+                .unwrap()
+                .input
+                .content
+                .motion_table_did,
+            Some(WALK_TABLE),
+            "the published entity names the table it actually animates from"
+        );
+    }
+
+    /// An idle contributes no root motion, so nothing else returns a settled body to the collection
+    /// scan. Its own clip change has to, or the change has no tick to travel on and a consumer is
+    /// left rendering the clip the body stopped playing.
+    #[test]
+    fn a_clip_change_wakes_a_settled_body_so_it_can_publish() {
+        let (simulation, runtime, guid) = walking_runtime_with_catalog(fidgeting_catalog());
+        let mut now = settle(&simulation, Instant::now());
+
+        // Run until the idle's first clip leaves the body settled and out of the scan entirely.
+        let mut quiet = false;
+        for _ in 0..30 {
+            now += Duration::from_millis(33);
+            quiet = runtime
+                .tick_physical_collection(1.0 / 30.0, now)
+                .unwrap()
+                .ticks
+                .is_empty();
+            if quiet {
+                break;
+            }
+        }
         assert!(
-            animations.windows(2).all(|pair| pair[0] != pair[1]),
-            "the same clip is never announced twice in a row: {animations:?}"
+            quiet,
+            "a stationary idle must let the fixture body settle out of the scan"
+        );
+        assert_eq!(
+            runtime
+                .project(guid)
+                .unwrap()
+                .playing_clip
+                .unwrap()
+                .animation_id,
+            STAND_ANIM,
+            "the settled body is still on the first clip of its idle"
+        );
+
+        // Playback keeps advancing off the scan, so the successor clip eventually comes due.
+        let mut published = None;
+        for _ in 0..90 {
+            now += Duration::from_millis(33);
+            let tick = runtime.tick_physical_collection(1.0 / 30.0, now).unwrap();
+            if let Some(clip) = tick
+                .ticks
+                .iter()
+                .filter(|tick| tick.publish)
+                .find_map(|tick| tick.playing_clip)
+            {
+                published = Some(clip.animation_id);
+                break;
+            }
+        }
+        assert_eq!(
+            published,
+            Some(FIDGET_ANIM),
+            "the successor clip must wake its body back into the scan and publish there"
         );
     }
 
@@ -3207,10 +3418,10 @@ mod tests {
             {
                 saw_airborne_turn = true;
             }
-            restored_walk_clip |= ticks
-                .ticks
-                .iter()
-                .any(|tick| tick.clip.is_some_and(|clip| clip.animation_id == WALK_ANIM));
+            restored_walk_clip |= ticks.ticks.iter().any(|tick| {
+                tick.playing_clip
+                    .is_some_and(|clip| clip.animation_id == WALK_ANIM)
+            });
             if body.contact == ContactState::Grounded && step > 3 {
                 landed = true;
                 break;
@@ -3254,7 +3465,7 @@ mod tests {
             .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(33))
             .unwrap();
         assert!(charged.ticks.iter().any(|tick| {
-            tick.clip
+            tick.playing_clip
                 .is_some_and(|clip| clip.animation_id == READY_ANIM)
         }));
 
@@ -3274,7 +3485,7 @@ mod tests {
             .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(66))
             .unwrap();
         assert!(launched.ticks.iter().any(|tick| {
-            tick.clip
+            tick.playing_clip
                 .is_some_and(|clip| clip.animation_id == FALLING_ANIM)
         }));
     }

@@ -34,8 +34,7 @@
 	import type { HostKinematicBoomStatus } from "./host-kinematic-boom-session";
 	import type { ExplorerEntitySelection } from "./explorer-entity-panel-state";
 
-	type ExplorerTabId =
-		"world" | "grading" | "frame" | "textures" | "assets" | "entities" | "logs";
+	type ExplorerTabId = "world" | "grading" | "frame" | "textures" | "entities";
 
 	interface ExplorerTab {
 		/** Stable tab id used for selection and panel ids. */
@@ -44,8 +43,6 @@
 		readonly icon: string;
 		/** Accessible and tooltip label for the tab. */
 		readonly label: string;
-		/** Supporting text for tabs without a dedicated panel component. */
-		readonly stub: string;
 	}
 
 	interface Props {
@@ -215,43 +212,26 @@
 			id: "world",
 			icon: "🗺️",
 			label: "World",
-			stub: "World inspection controls will live here.",
 		},
 		{
 			id: "grading",
 			icon: "🎨",
 			label: "Grading",
-			stub: "Presentation color grade authoring.",
 		},
 		{
 			id: "frame",
 			icon: "🎞️",
 			label: "Frame info",
-			stub: "Renderer frame selection diagnostics.",
 		},
 		{
 			id: "textures",
 			icon: "🖼️",
 			label: "Textures",
-			stub: "Packed texture atlas page diagnostics.",
-		},
-		{
-			id: "assets",
-			icon: "🧱",
-			label: "Assets",
-			stub: "Asset lookup and preview controls will live here.",
 		},
 		{
 			id: "entities",
 			icon: "👤",
 			label: "Entities",
-			stub: "Catalog-backed Explorer entity controls.",
-		},
-		{
-			id: "logs",
-			icon: "📜",
-			label: "Logs",
-			stub: "Diagnostics and event history will live here.",
 		},
 	];
 
@@ -380,8 +360,6 @@
 								{readExplorerEntity}
 								{readBoomCameraStatus}
 							/>
-						{:else}
-							<p>{activeTab.stub}</p>
 						{/if}
 					</div>
 				</div>

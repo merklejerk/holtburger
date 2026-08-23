@@ -93,12 +93,6 @@
 		return error instanceof Error ? error.message : String(error);
 	}
 
-	function provenance(): string {
-		return catalog?.status === "available"
-			? catalog.provenance
-			: "catalog unavailable";
-	}
-
 	async function submitSpawn(event: SubmitEvent): Promise<void> {
 		event.preventDefault();
 		if (pending) return;
@@ -107,7 +101,7 @@
 		try {
 			await spawn(wcid, distance);
 		} catch (error) {
-			operationError = `WCID ${wcid.trim() || "<empty>"} (${provenance()}): ${errorMessage(error)}`;
+			operationError = `WCID ${wcid.trim() || "<empty>"}: ${errorMessage(error)}`;
 		} finally {
 			pending = false;
 		}
@@ -166,7 +160,7 @@
 		</p>
 	{:else if catalog.status === "available"}
 		<p class="explorer-entities-note">
-			Catalog: {catalog.recordCount.toLocaleString()} records · {catalog.provenance}
+			Catalog: {catalog.recordCount.toLocaleString()} records
 		</p>
 		<p class="explorer-entities-note truncate" title={catalog.path}>
 			{catalog.path}

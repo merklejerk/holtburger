@@ -37,8 +37,6 @@ pub enum ExplorerCatalogCapability {
     Available {
         /// Exact selected catalog path.
         path: PathBuf,
-        /// Exporter-provided ACE World revision or operator label.
-        provenance: String,
         /// Number of indexed WCID templates.
         record_count: usize,
     },
@@ -128,7 +126,6 @@ impl ExplorerWeenieCatalog {
             Ok(catalog) => Self {
                 capability: ExplorerCatalogCapability::Available {
                     path,
-                    provenance: catalog.provenance().to_owned(),
                     record_count: catalog.len(),
                 },
                 catalog: Some(catalog),
@@ -220,7 +217,7 @@ mod tests {
     fn directory_and_hba_selections_choose_only_the_canonical_sibling_name() {
         let directory = tempdir().unwrap();
         let path = directory.path().join(CATALOG_FILE_NAME);
-        write_catalog_atomic(&path, "ACE-test", &[template(42)]).unwrap();
+        write_catalog_atomic(&path, &[template(42)]).unwrap();
 
         for selected in [directory.path(), &directory.path().join("client.hba")] {
             let catalog = ExplorerWeenieCatalog::discover(Some(selected), None);
@@ -238,14 +235,13 @@ mod tests {
         let selected = directory.path().join("selected");
         let override_path = directory.path().join("operator-choice.hwc");
         std::fs::create_dir(&selected).unwrap();
-        write_catalog_atomic(selected.join(CATALOG_FILE_NAME), "selected", &[template(1)]).unwrap();
-        write_catalog_atomic(&override_path, "override", &[template(2)]).unwrap();
+        write_catalog_atomic(selected.join(CATALOG_FILE_NAME), &[template(1)]).unwrap();
+        write_catalog_atomic(&override_path, &[template(2)]).unwrap();
 
         let catalog = ExplorerWeenieCatalog::discover(Some(&selected), Some(override_path.clone()));
         assert!(matches!(
             catalog.capability(),
-            ExplorerCatalogCapability::Available { path, provenance, .. }
-                if path == override_path && provenance == "override"
+            ExplorerCatalogCapability::Available { path, .. } if path == override_path
         ));
         assert!(catalog.lookup(1).unwrap().is_none());
         assert_eq!(catalog.lookup(2).unwrap(), Some(template(2)));

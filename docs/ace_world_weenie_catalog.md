@@ -117,34 +117,34 @@ review condition rather than permission to trust incidental MySQL row order.
 The catalog includes every base `weenie` row, including records without setup or display-name
 properties, so Phase R0 can measure missing facts. A missing setup is not an export error.
 
-## `.hwc` File Format Version 4
+## `.hwc` File Format Version 6
 
 Every integer and binary64 float bit pattern is little-endian. Strings are length-prefixed UTF-8.
-There is no alignment padding, compression, checksum, implicit serializer metadata, or unknown-field
-skipping in version 4. Readers reject trailing bytes and every nonzero reserved byte. Versions are
-clean cutovers; the v4 reader does not reinterpret older payloads.
+There is no compression, checksum, implicit serializer metadata, or unknown-field skipping in
+version 6, and the only padding is the reserved word that aligns the header's 64-bit offset fields.
+Readers reject trailing bytes and every nonzero reserved byte. Versions are clean cutovers; the v6
+reader does not reinterpret older payloads.
 
 The file layout is:
 
 1. one 64-byte fixed header;
-2. the provenance UTF-8 bytes;
-3. the contiguous record payloads in strictly increasing WCID order; and
-4. the fixed-width index in the same WCID order.
+2. the contiguous record payloads in strictly increasing WCID order; and
+3. the fixed-width index in the same WCID order.
 
 ### Header
 
 | Offset | Width | Field | Contract |
 | ---: | ---: | --- | --- |
 | 0 | 8 | magic | Bytes `48 42 57 43 41 54 00 1A` (`HBWCAT`) |
-| 8 | 4 | version | `4` |
+| 8 | 4 | version | `6` |
 | 12 | 4 | header length | `64` |
-| 16 | 4 | provenance length | `1..=1,048,576` bytes |
-| 20 | 4 | record count | `0..=1,048,576` |
-| 24 | 8 | payload offset | Exactly `64 + provenance length` |
+| 16 | 4 | record count | `0..=1,048,576` |
+| 20 | 4 | reserved | All zero; aligns the 64-bit offset fields |
+| 24 | 8 | payload offset | Exactly `64` |
 | 32 | 8 | payload length | Sum of every indexed record length |
 | 40 | 8 | index offset | Exactly `payload offset + payload length` |
 | 48 | 8 | index length | Exactly `record count * 16` |
-| 56 | 8 | reserved | All zero in version 4 |
+| 56 | 8 | reserved | All zero in version 6 |
 
 The file ends exactly after the index. A valid index has no gaps or overlapping payload ranges.
 
@@ -186,7 +186,7 @@ already obey the canonical collection order and semantic uniqueness rules.
 
 The writer sorts templates and appearance collections, rejects semantic duplicates, writes a sibling
 temporary file, flushes and syncs it, closes the write handle, reopens the catalog through the runtime
-reader, and compares every decoded record with its canonical source record. Only then does it replace
+reader, and compares its record count and every decoded record with the canonical source records. Only then does it replace
 the requested path and sync the parent directory on Unix. A failed export leaves an existing catalog
 unchanged.
 
@@ -196,15 +196,21 @@ indexed payload fails strict decoding.
 
 ### Export Command
 
-`holtburger-tools` owns the only MySQL dependency. The exporter reads the connection URL from an
-explicitly named environment variable so credentials do not need to appear in process arguments:
+`holtburger-tools` owns the only MySQL dependency. It is declared with `default-features = false`
+and `minimal-rust`, which drops the `derive` proc-macro stack and the C zlib backend that the
+exporter never reaches.
+
+By default the exporter reads the connection URL from `ACE_WORLD_SQL_URL`, so credentials need not
+appear in process arguments:
 
 ```console
-cargo run -p holtburger-tools --features weenie-catalog-export \
-  --bin export-weenie-catalog -- \
-  --database-url-env ACE_WORLD_SQL_URL \
-  --provenance <ACE-World-revision-or-operator-label>
+export ACE_WORLD_SQL_URL='mysql://<user>:<password>@127.0.0.1:3306/ace_world'
+cargo run -p holtburger-tools --bin export-weenie-catalog
 ```
+
+`--database-url-env <NAME>` reads a differently named variable instead. `--database-url <URL>`
+passes the URL directly and overrides both; it is the convenient form, but it places credentials in
+the process arguments and the shell history.
 
 The default output is `dats/weenies.hwc`, beside the installed `assets.hba`. `--output <path>.hwc`
 overrides that location for packaging or diagnostics. The catalog remains a separate host-only file;

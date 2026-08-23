@@ -5,13 +5,9 @@ edition = "2024"
 authors = ["holtburger contributors"]
 default-run = "dat2hba"
 
-[features]
-weenie-catalog-export = ["dep:mysql"]
-
 [[bin]]
 name = "export-weenie-catalog"
 path = "src/bin/export-weenie-catalog.rs"
-required-features = ["weenie-catalog-export"]
 
 [dependencies]
 holtburger-common = { workspace = true }
@@ -31,7 +27,9 @@ thiserror.workspace = true
 reqwest.workspace = true
 zip.workspace = true
 regex.workspace = true
-mysql = { version = "28.0.0", optional = true }
+# `minimal-rust` drops the `derive` proc-macro stack and the C zlib backend; the exporter
+# only uses `Conn`/`Opts`/`Queryable`, so neither is reachable.
+mysql = { version = "28.0.0", default-features = false, features = ["minimal-rust"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }

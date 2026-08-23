@@ -651,11 +651,7 @@
 		void completion.catch((error: unknown) => {
 			if (revision !== dynamicEntityReconciliationRevision) return;
 			const wcids = entities.map(({ identity }) => identity.wcid).join(", ");
-			const provenance =
-				entityCatalog?.status === "available"
-					? entityCatalog.provenance
-					: "catalog unavailable";
-			spawnedEntityPresentationError = `Presentation reconciliation for WCID ${wcids || "<none>"} (${provenance}): ${errorMessage(error)}`;
+			spawnedEntityPresentationError = `Presentation reconciliation for WCID ${wcids || "<none>"}: ${errorMessage(error)}`;
 		});
 		return completion;
 	}

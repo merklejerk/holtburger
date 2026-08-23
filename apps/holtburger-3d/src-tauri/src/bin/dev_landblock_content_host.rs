@@ -363,7 +363,15 @@ async fn handle_connection(mut stream: TcpStream, state: &DevHostState) -> anyho
         ("POST", "/explorer-possession-intent") => {
             let request =
                 serde_json::from_slice::<ExplorerPossessionIntentWireRequest>(&request.body)?;
-            match state.runtime.replace_possession_intent(request.resolve()) {
+            match request
+                .resolve()
+                .map_err(anyhow::Error::msg)
+                .and_then(|request| {
+                    state
+                        .runtime
+                        .replace_possession_intent(request)
+                        .map_err(Into::into)
+                }) {
                 Ok(result) => {
                     write_response(
                         &mut stream,
@@ -373,7 +381,7 @@ async fn handle_connection(mut stream: TcpStream, state: &DevHostState) -> anyho
                     )
                     .await
                 }
-                Err(error) => write_error(&mut stream, error.into()).await,
+                Err(error) => write_error(&mut stream, error).await,
             }
         }
         ("POST", "/explorer-possession-event") => {

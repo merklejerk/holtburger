@@ -25,6 +25,7 @@ describe("decodeExplorerPossession", () => {
 			guid: 0xf0000001,
 			motionTableId: "0x09000001",
 			possessionGeneration: 9,
+			runRateCapability: { initial: 1, maximum: 10, minimum: 1 },
 			stances: [nonCombatCapability],
 		});
 
@@ -44,6 +45,7 @@ describe("decodeExplorerPossession", () => {
 				guid: null,
 				motionTableId: null,
 				possessionGeneration: 10,
+				runRateCapability: null,
 				stances: [],
 			}).possessionGeneration,
 		).toBe(10);
@@ -57,6 +59,7 @@ describe("decodeExplorerPossession", () => {
 				guid: null,
 				motionTableId: null,
 				possessionGeneration: 10,
+				runRateCapability: null,
 				stances: [],
 			}),
 		).toThrow();

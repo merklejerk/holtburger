@@ -67,8 +67,10 @@
 		MOTION_STYLE,
 		possessionStance,
 		type ExplorerPossession,
+		type ExplorerPossessionControls,
 		type MotionStyleName,
 		type PossessionEventOutcome,
+		type PossessionMotionProbe,
 	} from "./explorer-entity-possession";
 	import {
 		tauriHostKinematicBoomTransport,
@@ -142,7 +144,7 @@
 	let cameraCoordinator: ExplorerCameraCoordinator | undefined;
 	let physicalCameraSession: PhysicalFlySession | undefined;
 	let explorerPossession = $state<ExplorerPossession | null>(null);
-	let possessedStance = $state<MotionStyleName>("nonCombat");
+	let possessedControls = $state<ExplorerPossessionControls | null>(null);
 	let simulationInterestController: SimulationInterestController | undefined;
 	let dynamicEntitySession: ExplorerDynamicEntitySession | undefined;
 	let unsubscribeDynamicEntities: (() => void) | undefined;
@@ -873,6 +875,11 @@
 			: findSelectedExplorerEntity(session.mirror.entities(), selection);
 	}
 
+	/** Pull the host-applied possession sample only when the Inspector is sampling diagnostics. */
+	async function readPossessionMotionProbe(): Promise<PossessionMotionProbe | null> {
+		return (await dynamicEntitySession?.possessionMotionProbe()) ?? null;
+	}
+
 	/// Route one frame to whichever camera currently owns position.
 	///
 	/// Three owners in priority order, and the order matters: a boom outranks a physical session
@@ -986,13 +993,16 @@
 		) {
 			return;
 		}
+		const controls = possessedControls;
+		if (controls === null) return;
 		possessionIntentRevision += 1;
 		void session
 			.setPossessionIntent({
 				drive: input.drive(),
 				possessionGeneration: held.possessionGeneration,
 				revision: possessionIntentRevision,
-				stance: MOTION_STYLE[possessedStance],
+				runRateScalar: controls.runRateScalar,
+				stance: controls.stance,
 			})
 			.catch((error: unknown) => {
 				spawnedEntityPresentationError = errorMessage(error);
@@ -1045,6 +1055,8 @@
 		const held = explorerPossession;
 		if (!session || input === undefined || held === null || held.guid === null)
 			return;
+		const controls = possessedControls;
+		if (controls === null) return;
 		possessionIntentRevision += 1;
 		const drive = edge.kind === "reset" ? input.drive() : edge.drive;
 		void session
@@ -1053,7 +1065,8 @@
 				drive,
 				possessionGeneration: held.possessionGeneration,
 				revision: possessionIntentRevision,
-				stance: MOTION_STYLE[possessedStance],
+				runRateScalar: controls.runRateScalar,
+				stance: controls.stance,
 			})
 			.then((receipt) => {
 				for (const outcome of receipt.outcomes)
@@ -1086,6 +1099,7 @@
 		possessionInput?.releaseOwnership();
 		possessionInput = undefined;
 		explorerPossession = null;
+		possessedControls = null;
 		possessionIntentRevision = 0;
 		void endBoomCamera().catch((error: unknown) => {
 			physicalCameraError = errorMessage(error);
@@ -1111,6 +1125,7 @@
 			// Installing the next scheme first asks the outgoing character owner for its one reset.
 			cameraController?.setControlScheme(nonPossessionCameraControlScheme());
 			explorerPossession = null;
+			possessedControls = null;
 			possessionInput = undefined;
 			possessionIntentRevision = 0;
 			await endBoomCamera();
@@ -1124,7 +1139,12 @@
 			throw new Error(
 				`Host accepted unknown possession stance 0x${possession.acceptedStance.toString(16)}.`,
 			);
-		possessedStance = acceptedName;
+		if (possession.runRateCapability === null)
+			throw new Error("Host omitted the possession run-rate capability.");
+		possessedControls = {
+			stance: possession.acceptedStance,
+			runRateScalar: possession.runRateCapability.initial,
+		};
 		possessionIntentRevision = 0;
 		const capability = possessionStance(possession, possession.acceptedStance);
 		if (capability === null)
@@ -1156,27 +1176,78 @@
 	async function setExplorerEntityStance(style: number): Promise<void> {
 		const session = dynamicEntitySession;
 		const held = explorerPossession;
-		if (!session || held === null || held.guid === null) return;
+		const controls = possessedControls;
+		if (!session || held === null || held.guid === null || controls === null)
+			return;
 		const name = (Object.keys(MOTION_STYLE) as MotionStyleName[]).find(
 			(candidate) => MOTION_STYLE[candidate] === style,
 		);
 		if (name === undefined)
 			throw new Error(`Unknown possession stance 0x${style.toString(16)}.`);
 		possessionIntentRevision += 1;
-		const result = await session.setPossessionIntent({
-			drive: possessionInput?.drive() ?? IDLE_DRIVE,
-			possessionGeneration: held.possessionGeneration,
-			revision: possessionIntentRevision,
-			stance: style,
-		});
-		if (result === "accepted") {
-			const capability = possessionStance(held, style);
-			if (capability === null)
-				throw new Error(
-					"Host accepted a stance absent from its capability receipt.",
-				);
-			possessedStance = name;
-			possessionInput?.setFullChargeDurationMs(capability.chargeDurationMs);
+		const revision = possessionIntentRevision;
+		const nextControls = { ...controls, stance: style };
+		possessedControls = nextControls;
+		try {
+			const result = await session.setPossessionIntent({
+				drive: possessionInput?.drive() ?? IDLE_DRIVE,
+				possessionGeneration: held.possessionGeneration,
+				revision,
+				runRateScalar: nextControls.runRateScalar,
+				stance: nextControls.stance,
+			});
+			if (result === "accepted") {
+				const capability = possessionStance(held, style);
+				if (capability === null)
+					throw new Error(
+						"Host accepted a stance absent from its capability receipt.",
+					);
+				possessionInput?.setFullChargeDurationMs(capability.chargeDurationMs);
+			}
+		} catch (error) {
+			if (
+				possessionIntentRevision === revision &&
+				explorerPossession?.possessionGeneration === held.possessionGeneration
+			)
+				possessedControls = controls;
+			throw error;
+		}
+	}
+
+	async function setExplorerEntityRunRate(value: number): Promise<void> {
+		const session = dynamicEntitySession;
+		const held = explorerPossession;
+		const controls = possessedControls;
+		if (!session || held === null || held.guid === null || controls === null)
+			return;
+		const capability = held.runRateCapability;
+		if (capability === null)
+			throw new Error("Host omitted the possession run-rate capability.");
+		if (
+			!Number.isFinite(value) ||
+			value < capability.minimum ||
+			value > capability.maximum
+		)
+			throw new Error("Run rate is outside the host-reported range.");
+		possessionIntentRevision += 1;
+		const revision = possessionIntentRevision;
+		const nextControls = { ...controls, runRateScalar: value };
+		possessedControls = nextControls;
+		try {
+			await session.setPossessionIntent({
+				drive: possessionInput?.drive() ?? IDLE_DRIVE,
+				possessionGeneration: held.possessionGeneration,
+				revision,
+				runRateScalar: nextControls.runRateScalar,
+				stance: nextControls.stance,
+			});
+		} catch (error) {
+			if (
+				possessionIntentRevision === revision &&
+				explorerPossession?.possessionGeneration === held.possessionGeneration
+			)
+				possessedControls = controls;
+			throw error;
 		}
 	}
 
@@ -1573,9 +1644,12 @@
 			{despawnExplorerEntity}
 			{possessExplorerEntity}
 			{setExplorerEntityStance}
+			{setExplorerEntityRunRate}
 			{explorerPossession}
+			explorerPossessionControls={possessedControls}
 			{readExplorerEntity}
 			{readBoomCameraStatus}
+			{readPossessionMotionProbe}
 		/>
 	</div>
 </div>

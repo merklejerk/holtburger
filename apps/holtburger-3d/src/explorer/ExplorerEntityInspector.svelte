@@ -10,8 +10,10 @@
 	} from "./explorer-entity-panel-state";
 	import {
 		MOTION_STYLE,
+		type ExplorerPossessionControls,
 		type ExplorerPossession,
 		type MotionStyleName,
+		type PossessionMotionProbe,
 	} from "./explorer-entity-possession";
 
 	/** Debug telemetry is intentionally human-cadence and sampled only while visible. */
@@ -31,6 +33,7 @@
 			selection: ExplorerEntitySelection,
 		) => DynamicEntityView | null;
 		readonly readBoomCameraStatus: () => HostKinematicBoomStatus | null;
+		readonly readPossessionMotionProbe: () => Promise<PossessionMotionProbe | null>;
 		readonly select: (selection: ExplorerEntitySelection) => void;
 		readonly despawn: (entity: DynamicEntityView) => Promise<void>;
 		readonly possess: (
@@ -41,6 +44,8 @@
 			entity: DynamicEntityView,
 			style: number,
 		) => Promise<void>;
+		readonly setRunRate: (value: number) => Promise<void>;
+		readonly possessionControls: ExplorerPossessionControls | null;
 	}
 
 	let {
@@ -52,10 +57,13 @@
 		possession,
 		readExplorerEntity,
 		readBoomCameraStatus,
+		readPossessionMotionProbe,
 		select,
 		despawn,
 		possess,
 		setStance,
+		setRunRate,
+		possessionControls,
 	}: Props = $props();
 	const selectedIsPossessed = $derived(
 		selected.placement.kind === "world" &&
@@ -67,7 +75,7 @@
 	const possessedCapability = $derived(
 		selectedIsPossessed && possession !== null && possession.guid !== null
 			? (possession.stances.find(
-					(capability) => capability.style === possession.acceptedStance,
+					(capability) => capability.style === possessionControls?.stance,
 				) ?? null)
 			: null,
 	);
@@ -92,6 +100,8 @@
 		kind: "panel-snapshot",
 	});
 	let sampledBoomCameraStatus = $state<HostKinematicBoomStatus | null>(null);
+	let sampledPossessionMotionProbe = $state<PossessionMotionProbe | null>(null);
+	let sampledPossessionProbeError = $state<string | null>(null);
 	const diagnosticSelected = $derived.by(() =>
 		diagnosticEntityState.kind === "sampled"
 			? diagnosticEntityState.entity
@@ -102,6 +112,8 @@
 		if (!diagnosticsOpen) {
 			diagnosticEntityState = { kind: "panel-snapshot" };
 			sampledBoomCameraStatus = null;
+			sampledPossessionMotionProbe = null;
+			sampledPossessionProbeError = null;
 			return;
 		}
 		const selection = explorerEntitySelection(selected);
@@ -112,6 +124,31 @@
 			sampledBoomCameraStatus = selectedIsPossessed
 				? readBoomCameraStatus()
 				: null;
+			if (!selectedIsPossessed) {
+				sampledPossessionMotionProbe = null;
+				sampledPossessionProbeError = null;
+				return;
+			}
+			void readPossessionMotionProbe()
+				.then((probe) => {
+					if (!diagnosticsOpen) return;
+					if (
+						probe === null ||
+						probe.guid !== selected.identity.guid ||
+						probe.entityGeneration !== selected.generation
+					) {
+						sampledPossessionMotionProbe = null;
+					} else {
+						sampledPossessionMotionProbe = probe;
+					}
+					sampledPossessionProbeError = null;
+				})
+				.catch((error: unknown) => {
+					if (!diagnosticsOpen) return;
+					sampledPossessionMotionProbe = null;
+					sampledPossessionProbeError =
+						error instanceof Error ? error.message : String(error);
+				});
 		};
 		sample();
 		const timer = window.setInterval(sample, DIAGNOSTIC_SAMPLE_INTERVAL_MS);
@@ -145,6 +182,10 @@
 				(name) => MOTION_STYLE[name] === style,
 			) ?? null
 		);
+	}
+
+	function formatPossessionRate(rate: number): string {
+		return `${rate.toFixed(2)}x`;
 	}
 </script>
 
@@ -218,12 +259,12 @@
 		</div>
 	</div>
 
-	{#if selectedIsPossessed && possession !== null && possession.guid !== null}
+	{#if selectedIsPossessed && possession !== null && possession.guid !== null && possessionControls !== null}
 		<label class="explorer-form-field">
 			<span>Stance</span>
 			<select
 				class="explorer-control explorer-control--select"
-				value={possession.acceptedStance}
+				value={possessionControls.stance}
 				disabled={pending !== null}
 				onchange={(event) =>
 					setStance(selected, Number(event.currentTarget.value))}
@@ -234,6 +275,24 @@
 					</option>
 				{/each}
 			</select>
+		</label>
+		<label class="explorer-form-field">
+			<span>
+				Run rate
+				<output>{possessionControls.runRateScalar.toFixed(2)}x</output>
+			</span>
+			<input
+				class="explorer-control"
+				type="range"
+				min={possession.runRateCapability.minimum}
+				max={possession.runRateCapability.maximum}
+				step="0.25"
+				value={possessionControls.runRateScalar}
+				disabled={pending !== null}
+				aria-label="Run rate"
+				aria-valuetext={`${possessionControls.runRateScalar.toFixed(2)}x`}
+				oninput={(event) => setRunRate(Number(event.currentTarget.value))}
+			/>
 		</label>
 	{/if}
 
@@ -261,10 +320,40 @@
 					>
 				</div>
 			{/if}
-			{#if selectedIsPossessed && possession !== null && possession.guid !== null}
+			{#if selectedIsPossessed && possession !== null && possession.guid !== null && possessionControls !== null}
 				<div>
 					<span>Motion table</span><code>{possession.motionTableId}</code>
 				</div>
+				<div>
+					<span>Requested rate</span><code
+						>{formatPossessionRate(possessionControls.runRateScalar)}</code
+					>
+				</div>
+				{#if sampledPossessionMotionProbe !== null}
+					<div>
+						<span>Applied rate</span><code
+							>{formatPossessionRate(
+								sampledPossessionMotionProbe.requestedRunRate,
+							)}</code
+						>
+					</div>
+					<div>
+						<span>Physical tick</span><code
+							>{sampledPossessionMotionProbe.physicalStatus ?? "pending"}</code
+						>
+					</div>
+					{#if sampledPossessionMotionProbe.effectivePlanarSpeed !== null}
+						<div>
+							<span>Achieved speed</span><code
+								>{sampledPossessionMotionProbe.effectivePlanarSpeed.toFixed(2)} m/s</code
+							>
+						</div>
+					{/if}
+				{:else if sampledPossessionProbeError !== null}
+					<div>
+						<span>Motion probe</span><code>{sampledPossessionProbeError}</code>
+					</div>
+				{/if}
 				<div>
 					<span>Control sources</span>
 					<code>

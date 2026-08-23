@@ -16,7 +16,11 @@
 		type ExplorerEntityOperationFailure,
 		type ExplorerEntitySelection,
 	} from "./explorer-entity-panel-state";
-	import type { ExplorerPossession } from "./explorer-entity-possession";
+	import type {
+		ExplorerPossession,
+		ExplorerPossessionControls,
+		PossessionMotionProbe,
+	} from "./explorer-entity-possession";
 
 	interface Props {
 		readonly runtimeReady: boolean;
@@ -32,7 +36,10 @@
 		readonly possess: (guid: number | null) => Promise<ExplorerPossession>;
 		/** Change the stance the possessed entity holds. */
 		readonly setStance: (style: number) => Promise<void>;
+		readonly setRunRate: (value: number) => Promise<void>;
 		readonly possession: ExplorerPossession | null;
+		readonly possessionControls: ExplorerPossessionControls | null;
+		readonly readPossessionMotionProbe: () => Promise<PossessionMotionProbe | null>;
 		/** Pull one exact current entity only for disclosure-scoped volatile diagnostics. */
 		readonly readExplorerEntity: (
 			selection: ExplorerEntitySelection,
@@ -51,13 +58,17 @@
 		despawn,
 		possess,
 		setStance,
+		setRunRate,
 		possession,
+		possessionControls,
+		readPossessionMotionProbe,
 		readExplorerEntity,
 		readBoomCameraStatus,
 	}: Props = $props();
 	let selection = $state<ExplorerEntitySelection | null>(null);
 	let pending = $state<ExplorerEntityOperation | null>(null);
 	let failure = $state<ExplorerEntityOperationFailure | null>(null);
+	let runRateRequestSerial = 0;
 	const selected = $derived(findSelectedExplorerEntity(entities, selection));
 	const selectedWearer = $derived(findExplorerEntityWearer(entities, selected));
 	const catalogReady = $derived(catalog?.status === "available");
@@ -138,6 +149,31 @@
 		);
 	}
 
+	/** Run-rate edits are coalescible, so do not serialize every native range event. */
+	async function runRunRate(
+		entity: DynamicEntityView,
+		value: number,
+	): Promise<void> {
+		const serial = ++runRateRequestSerial;
+		failure = null;
+		try {
+			await setRunRate(value);
+		} catch (error) {
+			if (serial === runRateRequestSerial) {
+				failure = {
+					operation: {
+						kind: "run-rate",
+						target: {
+							guid: entity.identity.guid,
+							generation: entity.generation,
+						},
+					},
+					message: errorMessage(error),
+				};
+			}
+		}
+	}
+
 	function errorMessage(error: unknown): string {
 		return error instanceof Error ? error.message : String(error);
 	}
@@ -200,6 +236,9 @@
 			despawn={runDespawn}
 			possess={runPossession}
 			setStance={runStance}
+			setRunRate={(value) => runRunRate(selected, value)}
+			{possessionControls}
+			{readPossessionMotionProbe}
 		/>
 	{/if}
 </div>

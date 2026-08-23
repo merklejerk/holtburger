@@ -45,6 +45,10 @@ export type ExplorerEntityOperation =
 	| {
 			readonly kind: "stance";
 			readonly target: ExplorerEntitySelection;
+	  }
+	| {
+			readonly kind: "run-rate";
+			readonly target: ExplorerEntitySelection;
 	  };
 
 /** One action-local failure retained after its operation releases the panel. */

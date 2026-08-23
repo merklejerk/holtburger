@@ -35,8 +35,9 @@ use serde::Serialize;
 
 use crate::explorer_possession_control::{
     ActivePossession, ExplorerPossessionControlProfile, PossessionEventQueueResult,
-    PossessionIntentError, PossessionIntentReplaceResult, PossessionLifecycleEvent,
-    PossessionLocomotionSource, PossessionStanceCapability,
+    PossessionIntentError, PossessionIntentReplaceResult, PossessionIntentSnapshot,
+    PossessionLifecycleEvent, PossessionLocomotionSource, PossessionRunRateCapability,
+    PossessionStanceCapability,
 };
 use crate::host_simulation_runtime::{HostPhysicalBodyTick, HostSimulationRuntime};
 
@@ -376,6 +377,10 @@ struct ExplorerMotionState {
     active: Option<ActivePossession>,
     /// Clip each body's most recent publication carried, so an unchanged level costs no traffic.
     published: BTreeMap<Guid, PlayingMotionClip>,
+    /// Latest accepted physical result for the active possession, including bounded prefixes.
+    last_physical_status: Option<ExplorerPossessionPhysicalStatus>,
+    /// Planar speed achieved by the latest accepted body tick, for clamp diagnostics.
+    last_effective_planar_speed: Option<f32>,
 }
 
 impl ExplorerMotionState {
@@ -407,6 +412,8 @@ impl ExplorerMotionState {
     }
 
     fn release(&mut self) -> Option<Guid> {
+        self.last_physical_status = None;
+        self.last_effective_planar_speed = None;
         let active = self.active.take()?;
         self.playback.forget(active.guid);
         Some(active.guid)
@@ -435,6 +442,8 @@ pub struct ExplorerPossession {
     pub motion_table_id: u32,
     /// Host-selected valid initial stance.
     pub accepted_stance: u32,
+    /// Host-owned run-rate bounds and initial value for this possession generation.
+    pub run_rate_capability: PossessionRunRateCapability,
     /// Every offered stance this target table can model, including physical/presentation sources.
     pub stances: Vec<PossessionStanceCapability>,
 }
@@ -461,6 +470,8 @@ pub struct ExplorerPossessionIntentRequest {
     pub revision: u64,
     pub stance: u32,
     pub drive: CharacterDrive,
+    /// Host-validated run-rate snapshot applied to this complete intent.
+    pub run_rate_scalar: f32,
 }
 
 /// Ordered lifecycle edge carrying its complete contemporaneous intent snapshot.
@@ -471,6 +482,8 @@ pub struct ExplorerPossessionEventRequest {
     pub revision: u64,
     pub stance: u32,
     pub drive: CharacterDrive,
+    /// Host-validated run-rate snapshot captured with this ordered lifecycle edge.
+    pub run_rate_scalar: f32,
     pub event: PossessionLifecycleEvent,
 }
 
@@ -510,6 +523,27 @@ pub enum PossessionEventRejection {
     Airborne,
 }
 
+/// Physical result retained with the possession probe after one fixed-tick body commit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ExplorerPossessionPhysicalStatus {
+    Solved,
+    SubstepBudgetExceeded,
+}
+
+/// Classifies physical results whose solved state possession is allowed to commit.
+const fn committed_possession_physical_status(
+    status: PhysicalBodyTickStatus,
+) -> Option<ExplorerPossessionPhysicalStatus> {
+    match status {
+        PhysicalBodyTickStatus::Solved => Some(ExplorerPossessionPhysicalStatus::Solved),
+        PhysicalBodyTickStatus::SubstepBudgetExceeded => {
+            Some(ExplorerPossessionPhysicalStatus::SubstepBudgetExceeded)
+        }
+        PhysicalBodyTickStatus::ContactBudgetExceeded => None,
+    }
+}
+
 /// Machine-readable host playback state used by deterministic possession harnesses.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -517,6 +551,12 @@ pub struct ExplorerPossessionMotionProbe {
     pub guid: Guid,
     pub entity_generation: u64,
     pub possession_generation: u64,
+    /// Rate requested by the currently applied semantic intent.
+    pub requested_run_rate: f32,
+    /// Last committed generic physical-body result, including bounded prefixes.
+    pub physical_status: Option<ExplorerPossessionPhysicalStatus>,
+    /// Planar speed achieved by the last committed body tick.
+    pub effective_planar_speed: Option<f32>,
     pub style: u32,
     pub substate: ExplorerPossessionActiveMotionProbe,
     pub modifiers: Vec<ExplorerPossessionActiveMotionProbe>,
@@ -540,7 +580,6 @@ struct PossessionTickProposal {
 
 fn consume_nonphysical_possession_events(
     active: &mut ActivePossession,
-    profile: ExplorerPossessionControlProfile,
 ) -> Result<Vec<PossessionEventOutcome>, PossessionIntentError> {
     let mut outcomes = Vec::new();
     while let Some(pending) = active.pending_events.remove(&active.next_event_sequence) {
@@ -551,8 +590,7 @@ fn consume_nonphysical_possession_events(
         }
         let result = if matches!(pending.event, holtburger_core::CharacterMotionEvent::Reset) {
             active.controller.clear();
-            active.applied_intent =
-                active.resolve_effective_intent(CharacterDrive::default(), profile)?;
+            active.applied_intent = active.resolve_effective_intent(CharacterDrive::default())?;
             PossessionEventOutcomeKind::Reset
         } else {
             PossessionEventOutcomeKind::Rejected {
@@ -573,12 +611,11 @@ impl PossessionTickProposal {
         &mut self,
         table: &holtburger_content::MotionSequenceTable,
         contact: ContactState,
-        profile: ExplorerPossessionControlProfile,
     ) -> anyhow::Result<()> {
         if contact == self.pre_solve_contact {
             return Ok(());
         }
-        let order = effective_possession_order(&self.active, contact, false, profile)?;
+        let order = effective_possession_order(&self.active, contact, false)?;
         self.playback.drive(table, order, 0.0);
         self.pre_solve_contact = contact;
         Ok(())
@@ -633,11 +670,16 @@ fn propose_possession_tick(
                 .get(pending.intent.stance)
                 .expect("queued possession stance lost its capability")
                 .jump_presentation;
-            possession_event_result(event_result, body, profile, presentation, &mut launch)?
+            possession_event_result(
+                event_result,
+                body,
+                pending.intent.kinematics.jump(),
+                presentation,
+                &mut launch,
+            )?
         };
         if result == PossessionEventOutcomeKind::Reset {
-            active.applied_intent =
-                active.resolve_effective_intent(CharacterDrive::default(), profile)?;
+            active.applied_intent = active.resolve_effective_intent(CharacterDrive::default())?;
         }
         outcomes.push(PossessionEventOutcome {
             possession_generation: active.generation,
@@ -650,7 +692,7 @@ fn propose_possession_tick(
         active.applied_intent = active.latest_intent;
     }
     active.controller.replace_drive(active.applied_intent.drive);
-    let order = effective_possession_order(&active, body.contact, launch.is_some(), profile)?;
+    let order = effective_possession_order(&active, body.contact, launch.is_some())?;
     let mut playback = previous_playback
         .cloned()
         .unwrap_or_else(|| BodyMotionRuntime::new(table));
@@ -682,7 +724,7 @@ fn propose_possession_tick(
 fn possession_event_result(
     result: CharacterMotionEventResult,
     body: &SpatialBody,
-    profile: ExplorerPossessionControlProfile,
+    jump: holtburger_core::CharacterJumpKinematics,
     presentation: crate::explorer_possession_control::PossessionJumpPresentation,
     launch: &mut Option<GroundedLaunch>,
 ) -> anyhow::Result<PossessionEventOutcomeKind> {
@@ -719,12 +761,8 @@ fn possession_event_result(
                     }
                 }
             };
-            match resolve_character_jump(
-                profile.jump,
-                attempt,
-                body.pose.rotation.to_heading(),
-                readiness,
-            ) {
+            match resolve_character_jump(jump, attempt, body.pose.rotation.to_heading(), readiness)
+            {
                 Ok(resolved) => {
                     *launch = Some(GroundedLaunch::new(resolved.world_velocity())?);
                     PossessionEventOutcomeKind::JumpReleased { presentation }
@@ -748,10 +786,8 @@ fn effective_possession_order(
     active: &ActivePossession,
     contact: ContactState,
     launching: bool,
-    profile: ExplorerPossessionControlProfile,
 ) -> Result<MotionOrder, PossessionIntentError> {
-    let effective =
-        active.resolve_effective_intent(active.controller.effective_drive(), profile)?;
+    let effective = active.resolve_effective_intent(active.controller.effective_drive())?;
     let capability = active
         .capabilities
         .get(effective.stance)
@@ -786,8 +822,7 @@ fn possession_grounded_actuation(
     delta_seconds: f32,
     launch: Option<GroundedLaunch>,
 ) -> anyhow::Result<PhysicalBodyActuation> {
-    let effective =
-        active.resolve_effective_intent(active.controller.effective_drive(), profile)?;
+    let effective = active.resolve_effective_intent(active.controller.effective_drive())?;
     let capability = active
         .capabilities
         .get(effective.stance)
@@ -1420,6 +1455,7 @@ impl ExplorerEntityRuntime {
             possession_generation,
             motion_table_id,
             accepted_stance,
+            run_rate_capability: PossessionRunRateCapability::STANDARD,
             stances,
         })
     }
@@ -1489,9 +1525,12 @@ impl ExplorerEntityRuntime {
             return Ok(PossessionIntentReplaceResult::IgnoredStalePossession);
         }
         let result = active.replace_intent(
-            request.revision,
-            request.stance,
-            request.drive,
+            PossessionIntentSnapshot {
+                revision: request.revision,
+                stance: request.stance,
+                drive: request.drive,
+                run_rate_scalar: request.run_rate_scalar,
+            },
             self.possession_profile,
         )?;
         if result == PossessionIntentReplaceResult::Accepted {
@@ -1524,9 +1563,12 @@ impl ExplorerEntityRuntime {
         }
         let result = active.queue_event(
             request.sequence,
-            request.revision,
-            request.stance,
-            request.drive,
+            PossessionIntentSnapshot {
+                revision: request.revision,
+                stance: request.stance,
+                drive: request.drive,
+                run_rate_scalar: request.run_rate_scalar,
+            },
             request.event,
             self.possession_profile,
         )?;
@@ -1537,7 +1579,7 @@ impl ExplorerEntityRuntime {
                 matches!(definition, PhysicalBodyDefinition::Grounded { .. })
             });
         let outcomes = if result == PossessionEventQueueResult::Queued && !grounded_response {
-            consume_nonphysical_possession_events(active, self.possession_profile)?
+            consume_nonphysical_possession_events(active)?
         } else {
             Vec::new()
         };
@@ -1565,6 +1607,9 @@ impl ExplorerEntityRuntime {
             guid: active.guid,
             entity_generation: active.entity_generation,
             possession_generation: active.generation,
+            requested_run_rate: active.applied_intent.kinematics.run_rate().value(),
+            physical_status: registry.motion.last_physical_status,
+            effective_planar_speed: registry.motion.last_effective_planar_speed,
             style: state.style.0,
             substate: ExplorerPossessionActiveMotionProbe {
                 command: state.substate.0,
@@ -1761,20 +1806,26 @@ impl ExplorerEntityRuntime {
 
         let mut possession_outcomes = BTreeMap::new();
         if let (Some((expected, _, _)), Some(mut accepted)) = (possession.as_ref(), proposal)
-            && let Some(solved) = collection.bodies.iter().find(|tick| {
-                tick.current.id == SpatialBodyId::Entity(expected.guid)
-                    && tick.result.motion.status == PhysicalBodyTickStatus::Solved
+            && let Some((solved, physical_status)) = collection.bodies.iter().find_map(|tick| {
+                if tick.current.id != SpatialBodyId::Entity(expected.guid) {
+                    return None;
+                }
+                committed_possession_physical_status(tick.result.motion.status)
+                    .map(|status| (tick, status))
             })
             && registry.motion.active.as_ref().is_some_and(|active| {
                 active.generation == expected.generation
                     && active.entity_generation == expected.entity_generation
             })
         {
+            registry.motion.last_physical_status = Some(physical_status);
+            registry.motion.last_effective_planar_speed =
+                Some(solved.current.velocity.x.hypot(solved.current.velocity.y));
             let table = self
                 .motion_catalog
                 .table(expected.motion_table_id)
                 .expect("active possession motion table vanished while registry lock was held");
-            accepted.reconcile_playback(table, solved.current.contact, self.possession_profile)?;
+            accepted.reconcile_playback(table, solved.current.contact)?;
             possession_outcomes.insert(expected.guid, accepted.outcomes);
             registry
                 .motion
@@ -2151,6 +2202,21 @@ mod tests {
 
     fn physical() -> DynamicPhysicalBodyDefinition {
         physical_with_upper(None)
+    }
+
+    /// Uses the production grounded response while making its safe-prefix behavior observable in
+    /// one deterministic tick. The lowered budget is test-only; production remains at 32.
+    fn physical_with_maximum_substeps(maximum_substeps: usize) -> DynamicPhysicalBodyDefinition {
+        let mut physical = physical();
+        match &mut physical.movement {
+            PhysicalBodyDefinition::Grounded { config, .. } => {
+                config.maximum_substeps = maximum_substeps;
+            }
+            PhysicalBodyDefinition::FreeSphere { .. } => {
+                panic!("the Explorer fixture must use grounded movement")
+            }
+        }
+        physical
     }
 
     fn physical_with_ball_target() -> DynamicPhysicalBodyDefinition {
@@ -2752,9 +2818,11 @@ mod tests {
     const WALK_STYLE: u32 = 0x8000_003D;
     const WALK_STAND: u32 = 0x4500_0003;
     const WALK_FORWARD: u32 = 0x4500_0005;
+    const RUN_FORWARD: u32 = 0x4400_0007;
     /// Default substate of the fixture's only style: what an unpossessed entity idles on.
     const STAND_ANIM: u32 = 0x0300_0001;
     const WALK_ANIM: u32 = 0x0300_0002;
+    const RUN_ANIM: u32 = 0x0300_0006;
     const READY_ANIM: u32 = 0x0300_0003;
     const FALLING_ANIM: u32 = 0x0300_0004;
     /// Successor the idle cycle advances to on its own, with no input and no possession.
@@ -2866,6 +2934,28 @@ mod tests {
         walking_catalog_with_jump_presentation(false)
     }
 
+    /// A target-authored run cycle used to prove that a budgeted physical prefix still commits the
+    /// matching playback proposal instead of replaying the previous clip on the next tick.
+    fn running_catalog() -> Arc<MotionSequenceCatalog> {
+        motion_catalog(
+            std::collections::HashMap::from([
+                (
+                    MotionTable::cycle_key(WALK_STYLE, WALK_STAND),
+                    cycle([STAND_ANIM]),
+                ),
+                (
+                    MotionTable::cycle_key(WALK_STYLE, RUN_FORWARD),
+                    cycle([RUN_ANIM]),
+                ),
+            ]),
+            vec![
+                stationary_animation(STAND_ANIM),
+                travelling_animation(RUN_ANIM, 1.0),
+            ],
+            [(FIXTURE_SETUP_DID, WALK_TABLE)],
+        )
+    }
+
     fn walking_catalog_with_jump_presentation(
         include_jump_presentation: bool,
     ) -> Arc<MotionSequenceCatalog> {
@@ -2968,6 +3058,7 @@ mod tests {
                     revision,
                     stance: WALK_STYLE,
                     drive: CharacterDrive::builder().walk().forward().build(),
+                    run_rate_scalar: 1.0,
                 })
                 .expect("walk intent is valid"),
             PossessionIntentReplaceResult::Accepted
@@ -3008,6 +3099,270 @@ mod tests {
         assert!(
             (after - before).length() > 0.5,
             "a possessed entity ordered to walk must travel: {before:?} -> {after:?}"
+        );
+    }
+
+    #[test]
+    fn walk_rate_does_not_scale_authored_translation() {
+        let measure = |run_rate_scalar: f32| {
+            let (simulation, runtime, guid) = walking_runtime();
+            let settled_at = settle(&simulation, Instant::now());
+            let before = simulation
+                .physical_body_snapshot(SpatialBodyId::Entity(guid))
+                .expect("body")
+                .pose
+                .coords;
+            let possession = runtime.possess(guid).expect("fixture is possessable");
+            runtime
+                .replace_possession_intent(ExplorerPossessionIntentRequest {
+                    possession_generation: possession.possession_generation,
+                    revision: 1,
+                    stance: WALK_STYLE,
+                    drive: CharacterDrive::builder().walk().forward().build(),
+                    run_rate_scalar,
+                })
+                .expect("walk intent");
+            for step in 1..=15 {
+                runtime
+                    .tick_physical_collection(
+                        1.0 / 30.0,
+                        settled_at + Duration::from_millis(step * 33),
+                    )
+                    .expect("walk tick");
+            }
+            let after = simulation
+                .physical_body_snapshot(SpatialBodyId::Entity(guid))
+                .expect("body")
+                .pose
+                .coords;
+            (after - before).length()
+        };
+
+        let rate_one = measure(1.0);
+        let rate_ten = measure(10.0);
+        assert!(
+            (rate_ten - rate_one).abs() < 0.05,
+            "walk rates diverged: {rate_one} vs {rate_ten}"
+        );
+    }
+
+    #[test]
+    fn fallback_run_translation_uses_the_resolved_run_rate() {
+        let measure = |run_rate_scalar: f32| {
+            let (simulation, runtime, guid) = walking_runtime();
+            let settled_at = settle(&simulation, Instant::now());
+            let before = simulation
+                .physical_body_snapshot(SpatialBodyId::Entity(guid))
+                .expect("body")
+                .pose
+                .coords;
+            let possession = runtime.possess(guid).expect("fixture is possessable");
+            runtime
+                .replace_possession_intent(ExplorerPossessionIntentRequest {
+                    possession_generation: possession.possession_generation,
+                    revision: 1,
+                    stance: WALK_STYLE,
+                    drive: CharacterDrive::builder().run().forward().build(),
+                    run_rate_scalar,
+                })
+                .expect("run intent");
+            for step in 1..=15 {
+                runtime
+                    .tick_physical_collection(
+                        1.0 / 30.0,
+                        settled_at + Duration::from_millis(step * 33),
+                    )
+                    .expect("run tick");
+            }
+            let after = simulation
+                .physical_body_snapshot(SpatialBodyId::Entity(guid))
+                .expect("body")
+                .pose
+                .coords;
+            (after - before).y
+        };
+
+        let rate_one = measure(1.0);
+        let rate_ten = measure(10.0);
+        assert!(rate_one > 1.5, "rate-one fallback should move: {rate_one}");
+        assert!(
+            rate_ten > rate_one * 8.0,
+            "fallback run rate did not scale: {rate_one} vs {rate_ten}"
+        );
+    }
+
+    #[test]
+    fn authored_run_translation_and_playback_rate_use_the_same_scalar() {
+        let measure = |run_rate_scalar: f32| {
+            let (simulation, runtime, guid) = walking_runtime_with_catalog(running_catalog());
+            let settled_at = settle(&simulation, Instant::now());
+            let before = simulation
+                .physical_body_snapshot(SpatialBodyId::Entity(guid))
+                .expect("body")
+                .pose
+                .coords;
+            let possession = runtime.possess(guid).expect("fixture is possessable");
+            runtime
+                .replace_possession_intent(ExplorerPossessionIntentRequest {
+                    possession_generation: possession.possession_generation,
+                    revision: 1,
+                    stance: WALK_STYLE,
+                    drive: CharacterDrive::builder().run().forward().build(),
+                    run_rate_scalar,
+                })
+                .expect("run intent");
+            for step in 1..=15 {
+                runtime
+                    .tick_physical_collection(
+                        1.0 / 30.0,
+                        settled_at + Duration::from_millis(step * 33),
+                    )
+                    .expect("run tick");
+            }
+            let after = simulation
+                .physical_body_snapshot(SpatialBodyId::Entity(guid))
+                .expect("body")
+                .pose
+                .coords;
+            let probe = runtime.possession_motion_probe().expect("probe");
+            ((after - before).y, probe.substate.speed)
+        };
+
+        let (rate_one_distance, rate_one_playback) = measure(1.0);
+        let (rate_ten_distance, rate_ten_playback) = measure(10.0);
+        assert!(
+            rate_ten_distance > rate_one_distance * 8.0,
+            "authored run translation did not scale: {rate_one_distance} vs {rate_ten_distance}"
+        );
+        assert_eq!(rate_one_playback, 1.0);
+        assert_eq!(rate_ten_playback, 10.0);
+    }
+
+    #[test]
+    fn reset_preserves_the_applied_run_rate_snapshot() {
+        let (simulation, runtime, guid) = walking_runtime_with_catalog(running_catalog());
+        let settled_at = settle(&simulation, Instant::now());
+        let possession = runtime.possess(guid).expect("fixture is possessable");
+        assert_eq!(
+            runtime
+                .replace_possession_intent(ExplorerPossessionIntentRequest {
+                    possession_generation: possession.possession_generation,
+                    revision: 1,
+                    stance: WALK_STYLE,
+                    drive: CharacterDrive::builder().run().forward().build(),
+                    run_rate_scalar: 10.0,
+                })
+                .expect("run intent"),
+            PossessionIntentReplaceResult::Accepted
+        );
+        runtime
+            .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(33))
+            .expect("run tick");
+        assert_eq!(
+            runtime
+                .possession_motion_probe()
+                .expect("run probe")
+                .requested_run_rate,
+            10.0
+        );
+
+        runtime
+            .queue_possession_event(ExplorerPossessionEventRequest {
+                possession_generation: possession.possession_generation,
+                sequence: 0,
+                revision: 2,
+                stance: WALK_STYLE,
+                drive: CharacterDrive::default(),
+                run_rate_scalar: 10.0,
+                event: PossessionLifecycleEvent::Reset,
+            })
+            .expect("reset edge");
+        let reset = runtime
+            .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(66))
+            .expect("reset tick");
+        assert!(reset.ticks.iter().any(|tick| {
+            tick.possession_event_outcomes
+                .iter()
+                .any(|outcome| outcome.result == PossessionEventOutcomeKind::Reset)
+        }));
+        assert_eq!(
+            runtime
+                .possession_motion_probe()
+                .expect("reset probe")
+                .requested_run_rate,
+            10.0,
+            "reset clears drive state without resetting the selected rate"
+        );
+
+        runtime
+            .replace_possession_intent(ExplorerPossessionIntentRequest {
+                possession_generation: possession.possession_generation,
+                revision: 3,
+                stance: WALK_STYLE,
+                drive: CharacterDrive::builder().run().forward().build(),
+                run_rate_scalar: 10.0,
+            })
+            .expect("restored run intent");
+        runtime
+            .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(99))
+            .expect("restored run tick");
+        let restored = runtime.possession_motion_probe().expect("restored probe");
+        assert_eq!(restored.requested_run_rate, 10.0);
+        assert_eq!(restored.substate.speed, 10.0);
+    }
+
+    #[test]
+    fn a_budgeted_possession_tick_commits_its_safe_prefix_and_playback() {
+        let (simulation, runtime, guid) =
+            walking_runtime_with_body(running_catalog(), physical_with_maximum_substeps(1));
+        let settled_at = settle(&simulation, Instant::now());
+        let possession = runtime.possess(guid).expect("fixture is possessable");
+        let result = runtime
+            .replace_possession_intent(ExplorerPossessionIntentRequest {
+                possession_generation: possession.possession_generation,
+                revision: 1,
+                stance: WALK_STYLE,
+                drive: CharacterDrive::builder().run().forward().build(),
+                run_rate_scalar: 10.0,
+            })
+            .expect("run intent is valid");
+        assert_eq!(result, PossessionIntentReplaceResult::Accepted);
+
+        let tick = runtime
+            .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(33))
+            .expect("the safe prefix still commits");
+        let body_tick = tick
+            .ticks
+            .iter()
+            .find(|tick| tick.input.identity.guid == guid)
+            .expect("the possessed body must publish its committed tick");
+        assert_eq!(
+            body_tick.solved.result.motion.status,
+            PhysicalBodyTickStatus::SubstepBudgetExceeded
+        );
+
+        let probe = runtime
+            .possession_motion_probe()
+            .expect("the possession remains active after a bounded tick");
+        assert_eq!(probe.requested_run_rate, 10.0);
+        assert_eq!(
+            probe.physical_status,
+            Some(ExplorerPossessionPhysicalStatus::SubstepBudgetExceeded)
+        );
+        assert_eq!(
+            probe
+                .clip
+                .expect("run playback must be committed")
+                .animation_id,
+            RUN_ANIM
+        );
+        assert_eq!(probe.substate.speed, 10.0);
+        assert!(
+            probe
+                .effective_planar_speed
+                .expect("the committed body exposes achieved speed")
+                < 40.0,
+            "the one-substep fixture must expose its safe-prefix clamp"
         );
     }
 
@@ -3270,6 +3625,7 @@ mod tests {
                     .forward()
                     .strafe_right()
                     .build(),
+                run_rate_scalar: 1.0,
             })
             .unwrap();
 
@@ -3312,6 +3668,7 @@ mod tests {
                 revision: 1,
                 stance: WALK_STYLE,
                 drive: CharacterDrive::builder().turn_right().build(),
+                run_rate_scalar: 1.0,
             })
             .unwrap();
 
@@ -3348,6 +3705,7 @@ mod tests {
                 revision: 1,
                 stance: WALK_STYLE,
                 drive: CharacterDrive::default(),
+                run_rate_scalar: 1.0,
                 event: PossessionLifecycleEvent::BeginJump,
             })
             .unwrap();
@@ -3370,6 +3728,7 @@ mod tests {
                 revision: 2,
                 stance: WALK_STYLE,
                 drive: CharacterDrive::builder().forward().turn_right().build(),
+                run_rate_scalar: 1.0,
                 event: PossessionLifecycleEvent::ReleaseJump {
                     extent: holtburger_core::JumpExtent::MAXIMUM,
                 },
@@ -3391,11 +3750,41 @@ mod tests {
             .unwrap();
         assert!(body.velocity.z > 0.0, "accepted release must launch upward");
 
+        let launch_planar_speed = body.velocity.x.hypot(body.velocity.y);
+        assert_eq!(
+            runtime
+                .replace_possession_intent(ExplorerPossessionIntentRequest {
+                    possession_generation: possession.possession_generation,
+                    revision: 3,
+                    stance: WALK_STYLE,
+                    drive: CharacterDrive::builder()
+                        .walk()
+                        .forward()
+                        .turn_right()
+                        .build(),
+                    run_rate_scalar: 10.0,
+                })
+                .unwrap(),
+            PossessionIntentReplaceResult::Accepted
+        );
+        runtime
+            .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(99))
+            .unwrap();
+        let airborne_body = simulation
+            .physical_body_snapshot(SpatialBodyId::Entity(guid))
+            .unwrap();
+        assert!(
+            (airborne_body.velocity.x.hypot(airborne_body.velocity.y) - launch_planar_speed).abs()
+                < 0.1,
+            "changing rate in flight must not rescale retained planar velocity: {launch_planar_speed} -> {}",
+            airborne_body.velocity.x.hypot(airborne_body.velocity.y)
+        );
+
         let launch_heading = body.pose.rotation.to_heading();
         let mut saw_airborne_turn = false;
         let mut restored_walk_clip = false;
         let mut landed = false;
-        for step in 3..=140 {
+        for step in 4..=140 {
             let ticks = runtime
                 .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(step * 33))
                 .unwrap();
@@ -3442,6 +3831,69 @@ mod tests {
     }
 
     #[test]
+    fn queued_jump_release_keeps_its_rate_snapshot_when_a_newer_intent_arrives() {
+        let (simulation, runtime, guid) = walking_runtime();
+        let settled_at = settle(&simulation, Instant::now());
+        let possession = runtime.possess(guid).expect("fixture is possessable");
+        runtime
+            .queue_possession_event(ExplorerPossessionEventRequest {
+                possession_generation: possession.possession_generation,
+                sequence: 0,
+                revision: 1,
+                stance: WALK_STYLE,
+                drive: CharacterDrive::default(),
+                run_rate_scalar: 1.0,
+                event: PossessionLifecycleEvent::BeginJump,
+            })
+            .expect("begin edge queues");
+        runtime
+            .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(33))
+            .expect("charge tick");
+
+        runtime
+            .queue_possession_event(ExplorerPossessionEventRequest {
+                possession_generation: possession.possession_generation,
+                sequence: 1,
+                revision: 2,
+                stance: WALK_STYLE,
+                drive: CharacterDrive::builder().run().forward().build(),
+                run_rate_scalar: 1.0,
+                event: PossessionLifecycleEvent::ReleaseJump {
+                    extent: holtburger_core::JumpExtent::MAXIMUM,
+                },
+            })
+            .expect("release edge queues");
+        assert_eq!(
+            runtime
+                .replace_possession_intent(ExplorerPossessionIntentRequest {
+                    possession_generation: possession.possession_generation,
+                    revision: 3,
+                    stance: WALK_STYLE,
+                    drive: CharacterDrive::builder().run().forward().build(),
+                    run_rate_scalar: 10.0,
+                })
+                .expect("newer rate intent is accepted"),
+            PossessionIntentReplaceResult::Accepted
+        );
+
+        runtime
+            .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(66))
+            .expect("release tick");
+        let body = simulation
+            .physical_body_snapshot(SpatialBodyId::Entity(guid))
+            .expect("body remains registered");
+        let planar_speed = body.velocity.x.hypot(body.velocity.y);
+        assert!(
+            planar_speed < 8.0,
+            "release must use its captured 1x planar speed, not newer 10x intent: {planar_speed}"
+        );
+        assert!(
+            body.velocity.z > 0.0,
+            "the queued release must launch upward"
+        );
+    }
+
+    #[test]
     fn target_jump_presentation_selects_ready_then_falling_on_accepted_edges() {
         let (simulation, runtime, guid) =
             walking_runtime_with_catalog(walking_catalog_with_jump_presentation(true));
@@ -3458,6 +3910,7 @@ mod tests {
                 revision: 1,
                 stance: WALK_STYLE,
                 drive: CharacterDrive::default(),
+                run_rate_scalar: 1.0,
                 event: PossessionLifecycleEvent::BeginJump,
             })
             .unwrap();
@@ -3476,6 +3929,7 @@ mod tests {
                 revision: 2,
                 stance: WALK_STYLE,
                 drive: CharacterDrive::default(),
+                run_rate_scalar: 1.0,
                 event: PossessionLifecycleEvent::ReleaseJump {
                     extent: holtburger_core::JumpExtent::MINIMUM,
                 },
@@ -3502,6 +3956,7 @@ mod tests {
                 revision: 1,
                 stance: WALK_STYLE,
                 drive: CharacterDrive::default(),
+                run_rate_scalar: 1.0,
                 event: PossessionLifecycleEvent::BeginJump,
             })
             .unwrap();
@@ -3530,6 +3985,7 @@ mod tests {
                 revision: 2,
                 stance: WALK_STYLE,
                 drive: CharacterDrive::default(),
+                run_rate_scalar: 1.0,
                 event: PossessionLifecycleEvent::ReleaseJump {
                     extent: holtburger_core::JumpExtent::MAXIMUM,
                 },
@@ -3592,6 +4048,7 @@ mod tests {
                     revision: sequence + 1,
                     stance: WALK_STYLE,
                     drive: CharacterDrive::default(),
+                    run_rate_scalar: 1.0,
                     event,
                 })
                 .unwrap()
@@ -3625,6 +4082,7 @@ mod tests {
                 revision: 1,
                 stance: WALK_STYLE,
                 drive: CharacterDrive::default(),
+                run_rate_scalar: 1.0,
                 event: PossessionLifecycleEvent::BeginJump,
             })
             .unwrap();
@@ -3637,6 +4095,7 @@ mod tests {
                 revision: 2,
                 stance: WALK_STYLE,
                 drive: CharacterDrive::builder().forward().build(),
+                run_rate_scalar: 1.0,
             })
             .unwrap();
         let before = simulation
@@ -3666,6 +4125,7 @@ mod tests {
                 revision: 3,
                 stance: WALK_STYLE,
                 drive: CharacterDrive::default(),
+                run_rate_scalar: 1.0,
                 event: PossessionLifecycleEvent::Reset,
             })
             .unwrap();
@@ -3676,6 +4136,7 @@ mod tests {
                 revision: 4,
                 stance: WALK_STYLE,
                 drive: CharacterDrive::builder().forward().build(),
+                run_rate_scalar: 1.0,
                 event: PossessionLifecycleEvent::BeginJump,
             })
             .unwrap();
@@ -3707,6 +4168,7 @@ mod tests {
             revision: 1,
             stance: WALK_STYLE,
             drive: CharacterDrive::builder().walk().forward().build(),
+            run_rate_scalar: 1.0,
         };
         assert_eq!(
             runtime.replace_possession_intent(stale_intent).unwrap(),
@@ -3720,6 +4182,7 @@ mod tests {
                     revision: 1,
                     stance: WALK_STYLE,
                     drive: CharacterDrive::default(),
+                    run_rate_scalar: 1.0,
                     event: PossessionLifecycleEvent::Reset,
                 })
                 .unwrap()
@@ -3752,6 +4215,7 @@ mod tests {
                         revision: 1,
                         stance: WALK_STYLE,
                         drive: CharacterDrive::builder().forward().build(),
+                        run_rate_scalar: 1.0,
                     })
                     .unwrap(),
                 PossessionIntentReplaceResult::IgnoredStalePossession

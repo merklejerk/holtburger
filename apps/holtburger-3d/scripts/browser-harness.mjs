@@ -1505,14 +1505,26 @@ function summarizePossessionScenario(scenario) {
 		jump: {
 			begin: scenario.begin,
 			chargedMotion: scenario.charged.probe,
+			chargedAtMaximumMotion: scenario.chargedAtMaximum.probe,
 			landed: scenario.landed,
 			maximumZ: scenario.maximumZ,
 			outcomes: scenario.outcomes,
 			release: scenario.release,
+			releaseRunRate: scenario.releaseRunRate,
+			postReleaseMotion: scenario.postReleaseRateChange?.probe ?? null,
 			sawAirborne: scenario.sawAirborne,
 			sawFalling: scenario.sawFalling,
 		},
 		possession: scenario.possession,
+		replacement: {
+			initialRunRate: scenario.replacement.initialRunRate,
+			maximumRunRate: scenario.replacement.maximumRunRate,
+			possession: scenario.replacement.possession,
+			probeAtMaximum: scenario.replacement.probeAtMaximum,
+			probeBeforeIntent: scenario.replacement.probeBeforeIntent,
+			initialTick: scenario.replacement.initialTick,
+		},
+		runRate: scenario.runRate,
 		sidestep: {
 			from: entityCoordinates(scenario.sidestepStart),
 			motion: scenario.sidestep.probe,
@@ -1706,6 +1718,9 @@ async function runPossessionScenario(
 	const possession = await invoke("possessExplorerEntity", [
 		spawned.identity.guid,
 	]);
+	const initialRunRate = possession.runRateCapability.initial;
+	const maximumRunRate = possession.runRateCapability.maximum;
+	let runRateScalar = initialRunRate;
 	const boomDirection = await invoke("kinematicBoomDirection");
 	const orbitDirection =
 		Math.hypot(boomDirection[0], boomDirection[1]) > 1e-6
@@ -1754,8 +1769,13 @@ async function runPossessionScenario(
 	const boomTicks = [];
 	const boomTargetCellIds = [];
 	const boomFrameStates = [];
-	const drive = (longitudinal = null, turn = null, lateral = null) => ({
-		gait: "run",
+	const drive = (
+		longitudinal = null,
+		turn = null,
+		lateral = null,
+		gait = "run",
+	) => ({
+		gait,
 		lateral,
 		longitudinal,
 		turn,
@@ -1767,6 +1787,7 @@ async function runPossessionScenario(
 				drive: nextDrive,
 				possessionGeneration: possession.possessionGeneration,
 				revision,
+				runRateScalar,
 				stance,
 			},
 		]);
@@ -1799,6 +1820,38 @@ async function runPossessionScenario(
 	};
 	const boomProjectionRequests = [];
 	await advance(2, true);
+	// Change the scalar while stationary first. The idle clip and physical body must remain
+	// stationary even though the host has accepted the new complete snapshot.
+	const idleInitial = await advance(1);
+	runRateScalar = maximumRunRate;
+	await setDrive(drive());
+	const idleMaximum = await advance(1);
+	await setDrive(drive("forward"));
+	const maximumRate = await advance(1);
+	runRateScalar = initialRunRate;
+	await setDrive(drive());
+	await advance(2);
+	// Walking is a separate retail command family. Exercise the same slider transition at both
+	// ends of the range and retain the displacement pair as environment-sensitive evidence.
+	const walkingStart = current;
+	runRateScalar = maximumRunRate;
+	await setDrive(drive("forward", null, null, "walk"));
+	const walkingMaximum = await advance(15);
+	const walkingMaximumDistance = planarDistance(
+		walkingStart,
+		walkingMaximum.entity,
+	);
+	const walkingRateOneStart = walkingMaximum.entity;
+	runRateScalar = initialRunRate;
+	await setDrive(drive("forward", null, null, "walk"));
+	const walkingInitial = await advance(15);
+	const walkingInitialDistance = planarDistance(
+		walkingRateOneStart,
+		walkingInitial.entity,
+	);
+	runRateScalar = initialRunRate;
+	await setDrive(drive());
+	await advance(2);
 	// Preserve the authored interior portal-route seed. The outdoor case supplies overlapping
 	// walking evidence; the interior case isolates resize/orbit/zoom against nearby geometry before
 	// executing its established traversal.
@@ -1979,6 +2032,7 @@ async function runPossessionScenario(
 	const sidestep = await advance(4);
 
 	const jumpingDrive = drive("forward");
+	const jumpChargeInitialRate = runRateScalar;
 	revision += 1;
 	const begin = await invoke("queuePossessionEvent", [
 		{
@@ -1986,11 +2040,18 @@ async function runPossessionScenario(
 			kind: "begin-jump",
 			possessionGeneration: possession.possessionGeneration,
 			revision,
+			runRateScalar,
 			sequence: sequence++,
 			stance,
 		},
 	]);
 	const charged = await advance(1);
+	// Change the scalar while the charge is live, then release with that captured maximum-rate
+	// snapshot. The follow-up change after the release must not rewrite its queued launch physics.
+	runRateScalar = maximumRunRate;
+	await setDrive(jumpingDrive);
+	const chargedAtMaximum = await advance(1);
+	const releaseRunRate = runRateScalar;
 	revision += 1;
 	const release = await invoke("queuePossessionEvent", [
 		{
@@ -1999,6 +2060,7 @@ async function runPossessionScenario(
 			kind: "release-jump",
 			possessionGeneration: possession.possessionGeneration,
 			revision,
+			runRateScalar,
 			sequence,
 			stance,
 		},
@@ -2008,11 +2070,17 @@ async function runPossessionScenario(
 	let sawFalling = false;
 	let maximumZ = entityCoordinates(current).z;
 	let landed = null;
+	let postReleaseRateChange = null;
 	for (let index = 0; index < 100; index += 1) {
 		const step = await advance(1);
 		maximumZ = Math.max(maximumZ, entityCoordinates(step.entity).z);
 		if (step.entity.placement.contact === "airborne") sawAirborne = true;
 		if (step.probe?.substate.command === 0x40000015) sawFalling = true;
+		if (sawAirborne && postReleaseRateChange === null) {
+			runRateScalar = initialRunRate;
+			await setDrive(jumpingDrive);
+			postReleaseRateChange = await advance(1);
+		}
 		if (sawAirborne && step.entity.placement.contact === "grounded") {
 			landed = step;
 			break;
@@ -2031,6 +2099,30 @@ async function runPossessionScenario(
 	const stopAfterRelease = await invoke("stopKinematicBoom", [boomIdentity]);
 	await delay(tickMs * 2);
 	const cameraAfterRelease = (await invoke("state")).camera;
+	// Re-acquiring the same entity creates a fresh host possession generation. Its capability
+	// receipt must reset the selected scalar to the host's initial value rather than leaking the
+	// previous generation's last slider setting.
+	const replacementPossession = await invoke("possessExplorerEntity", [
+		spawned.identity.guid,
+	]);
+	const replacementInitialTick = await invoke("tickPossession", [tickMs]);
+	const replacementProbeBeforeIntent = await invoke("possessionMotionProbe");
+	const replacementIntentResult = await invoke("setPossessionIntent", [
+		{
+			drive: drive(),
+			possessionGeneration: replacementPossession.possessionGeneration,
+			revision: 1,
+			runRateScalar: maximumRunRate,
+			stance: replacementPossession.acceptedStance,
+		},
+	]);
+	if (replacementIntentResult !== "accepted")
+		throw new Error(
+			`Replacement possession intent returned ${replacementIntentResult}.`,
+		);
+	const replacementTick = await invoke("tickPossession", [tickMs]);
+	const replacementProbeAtMaximum = await invoke("possessionMotionProbe");
+	await invoke("possessExplorerEntity", [null]);
 
 	return {
 		backward,
@@ -2052,6 +2144,7 @@ async function runPossessionScenario(
 			ticks: boomTicks,
 		},
 		charged,
+		chargedAtMaximum,
 		combined,
 		combinedStart,
 		controlProbe,
@@ -2063,8 +2156,34 @@ async function runPossessionScenario(
 		possession,
 		outcomes,
 		release,
+		releaseRunRate,
+		postReleaseRateChange,
+		replacement: {
+			initialRunRate: replacementPossession.runRateCapability.initial,
+			maximumRunRate: replacementPossession.runRateCapability.maximum,
+			possession: replacementPossession,
+			probeAtMaximum: replacementProbeAtMaximum,
+			probeBeforeIntent: replacementProbeBeforeIntent,
+			tick: replacementTick,
+			initialTick: replacementInitialTick,
+		},
 		restored,
 		restoredStart,
+		runRate: {
+			initial: initialRunRate,
+			maximum: maximumRunRate,
+			maximumRateProbe: maximumRate.probe,
+			idleInitialProbe: idleInitial.probe,
+			idleMaximumProbe: idleMaximum.probe,
+			walkingInitialDistance,
+			walkingInitialProbe: walkingInitial.probe,
+			walkingMaximumDistance,
+			walkingMaximumProbe: walkingMaximum.probe,
+			jumpChargeInitialRate,
+			jumpChargeInitialProbe: charged.probe,
+			jumpChargeMaximumProbe: chargedAtMaximum.probe,
+			postReleaseProbe: postReleaseRateChange?.probe ?? null,
+		},
 		right,
 		sawAirborne,
 		sawFalling,
@@ -2079,6 +2198,41 @@ async function runPossessionScenario(
 function assertPossessionScenario(scenario) {
 	if (scenario === null)
 		throw new Error("Possession scenario produced no evidence.");
+	if (
+		scenario.runRate.initial !== 1 ||
+		scenario.runRate.maximum !== 10 ||
+		scenario.runRate.maximumRateProbe?.requestedRunRate !== 10 ||
+		scenario.runRate.idleInitialProbe?.requestedRunRate !== 1 ||
+		scenario.runRate.idleMaximumProbe?.requestedRunRate !== 10 ||
+		scenario.runRate.walkingInitialProbe?.requestedRunRate !== 1 ||
+		scenario.runRate.walkingMaximumProbe?.requestedRunRate !== 10 ||
+		scenario.runRate.jumpChargeInitialRate !== 1 ||
+		scenario.runRate.jumpChargeInitialProbe?.requestedRunRate !== 1 ||
+		scenario.runRate.jumpChargeMaximumProbe?.requestedRunRate !== 10 ||
+		scenario.runRate.postReleaseProbe?.requestedRunRate !== 1 ||
+		scenario.releaseRunRate !== 10
+	)
+		throw new Error(
+			`Possession run-rate transitions did not apply their complete snapshots: ${JSON.stringify(scenario.runRate)}.`,
+		);
+	if (
+		scenario.replacement.possession.runRateCapability.initial !== 1 ||
+		scenario.replacement.possession.runRateCapability.maximum !== 10 ||
+		scenario.replacement.probeBeforeIntent?.requestedRunRate !== 1 ||
+		scenario.replacement.probeAtMaximum?.requestedRunRate !== 10 ||
+		scenario.replacement.possession.possessionGeneration ===
+			scenario.possession.possessionGeneration
+	)
+		throw new Error(
+			`Possession replacement did not reset and reapply the host run-rate contract: ${JSON.stringify(scenario.replacement)}.`,
+		);
+	if (
+		scenario.runRate.walkingInitialProbe?.substate.speed !== 1 ||
+		scenario.runRate.walkingMaximumProbe?.substate.speed !== 1
+	)
+		throw new Error(
+			`Walking command rate changed with run rate: ${JSON.stringify(scenario.runRate)}.`,
+		);
 	const initial = entityCoordinates(scenario.initial);
 	const backward = entityCoordinates(scenario.backward.entity);
 	const heading = entityYawRadians(scenario.initial);

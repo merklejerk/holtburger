@@ -14,7 +14,7 @@ import {
 	type PortalScopeAtlasWebGLSink,
 } from "./portal-scope-atlas-command-model";
 import type { WebGL2PortalScopeAtlasTargetSet } from "./webgl2-portal-scope-atlas-targets";
-import type { WebGL2RenderExtent } from "./webgl2-render-target";
+import type { RenderExtent } from "./render-extent";
 import {
 	createWebGL2PortalScopeAtlasPrograms,
 	destroyWebGL2PortalScopeAtlasPrograms,
@@ -34,7 +34,7 @@ type SinkMethod<Name extends keyof PortalScopeAtlasWebGLSink> = Parameters<
 export interface WebGL2PortalScopeAtlasExecutionInput {
 	/** External color/depth destination; null selects the drawing buffer. */
 	readonly outputFramebuffer: WebGLFramebuffer | null;
-	readonly outputExtent: WebGL2RenderExtent;
+	readonly outputExtent: RenderExtent;
 	/** Arena-owned bytes remain valid for the duration of this call. */
 	readonly stream: PortalCrossingTriangleStreamView &
 		PortalPropagationMetadataStreamView;

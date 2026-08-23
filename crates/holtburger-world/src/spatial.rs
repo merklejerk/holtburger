@@ -45,8 +45,8 @@ pub use dynamic_body::{
 };
 pub use dynamic_contact::{MAXIMUM_DYNAMIC_SLICE_DISTANCE, MAXIMUM_DYNAMIC_SLICES};
 pub use free_sphere::{
-    FreeSphereBudget, FreeSphereConfig, FreeSphereOutcome, FreeSphereRequest, FreeSphereState,
-    solve_free_sphere,
+    FreeSphereBudget, FreeSphereConfig, FreeSphereOutcome, FreeSphereRequest,
+    FreeSphereSettleOutcome, FreeSphereState, settle_free_sphere, solve_free_sphere,
 };
 pub use grounded::{
     EdgeProtection, GroundState, GroundSupport, GroundedBody, GroundedBodySpheres, GroundedBudget,

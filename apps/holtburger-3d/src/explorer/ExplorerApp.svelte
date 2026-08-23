@@ -20,6 +20,10 @@
 	import { RuntimeTickProfiler } from "../lib/game/runtime/runtime-tick-profiler";
 	import { StandardCommitPipeline } from "../lib/game/commit/pipeline";
 	import { WebGL2Device } from "../lib/game/renderer/webgl2-device";
+	import {
+		createProjectionClearanceRevision,
+		type ProjectionClearanceRevision,
+	} from "../lib/game/camera/projection-clearance";
 	import { TauriActiveRegionSource } from "../lib/assets/tauri-active-region-source";
 	import { TauriSkySource } from "../lib/assets/tauri-sky-source";
 	import { TauriLandblockSourceBatch } from "../lib/assets/tauri-landblock-source-batch";
@@ -42,10 +46,10 @@
 		type ExplorerCameraResidencySync,
 	} from "./explorer-camera-coordinator";
 	import {
-		FrontendCameraController,
+		ExplorerCameraInputController,
 		type CharacterKeyInput,
 		type FrontendControlScheme,
-	} from "../lib/game/controls/frontend-camera-controller";
+	} from "./explorer-camera-input-controller";
 	import {
 		resolvePhysicalFlyViewDirection,
 		resolvePhysicalFlyVelocity,
@@ -67,16 +71,15 @@
 		type PossessionEventOutcome,
 	} from "./explorer-entity-possession";
 	import {
-		HostKinematicBoomSession,
 		tauriHostKinematicBoomTransport,
 		type HostKinematicBoomStatus,
-	} from "./host-kinematic-boom-session";
+	} from "../lib/game/camera/host-kinematic-boom-session";
+	import { PossessionCameraController } from "../lib/game/camera/possession-camera-controller";
 	import {
 		findSelectedExplorerEntity,
 		refreshesExplorerEntityPanel,
 		type ExplorerEntitySelection,
 	} from "./explorer-entity-panel-state";
-	import { resolveKinematicBoomDirection } from "../lib/game/motion/host-kinematic-boom-path";
 	import { createCameraLookAtAngles } from "../lib/game/math/camera-orientation";
 	import {
 		PhysicalFlySession,
@@ -132,7 +135,7 @@
 	let activeRegionSource: TauriActiveRegionSource | undefined;
 	let skySource: TauriSkySource | undefined;
 	let staticDetailOwner: ActiveRegionStaticDetailOwner | undefined;
-	let cameraController: FrontendCameraController | undefined;
+	let cameraController: ExplorerCameraInputController | undefined;
 	let cameraCoordinator: ExplorerCameraCoordinator | undefined;
 	let physicalCameraSession: PhysicalFlySession | undefined;
 	let explorerPossession = $state<ExplorerPossession | null>(null);
@@ -447,7 +450,7 @@
 		);
 	}
 
-	function physicalCameraInput(controller: FrontendCameraController): {
+	function physicalCameraInput(controller: ExplorerCameraInputController): {
 		readonly basis: {
 			readonly forward: [number, number, number];
 			readonly right: [number, number, number];
@@ -493,12 +496,12 @@
 		});
 	}
 
-	function sendPhysicalCameraWheel(localUpDistance: number): void {
+	function routeCameraWheel(localUpDistance: number): void {
 		if (boomCameraSession) {
-			// While possessed the wheel zooms the boom rather than lifting a free camera.
-			pendingBoomZoom -=
-				localUpDistance *
-				FRONTEND_TUNING.explorer.camera.boom.zoomDistanceMultiplier;
+			boomCameraSession.zoom(
+				-localUpDistance *
+					FRONTEND_TUNING.explorer.camera.boom.zoomDistanceMultiplier,
+			);
 			return;
 		}
 		const session = physicalCameraSession;
@@ -779,13 +782,10 @@
 
 	/// Third-person boom, alive exactly while an entity is possessed.
 	///
-	/// Owns only the boom's length. Orbit stays with the look controller, which already produces
-	/// yaw and pitch from pointer input and keeps them continuous across possession and release.
-	let boomCameraSession: HostKinematicBoomSession | undefined;
-	/// Session-total wheel displacement is accumulated host-side; this is only the unsent frame delta.
-	///
-	/// Command transport failures report through the existing camera-host error surface.
-	let pendingBoomZoom = 0;
+	/// Shared possession camera owning desired orbit, zoom, projection gating, and host playback.
+	let boomCameraSession: PossessionCameraController | undefined;
+	/** Latest viewport/FOV projection authored before camera synchronization. */
+	let cameraProjection: ProjectionClearanceRevision | undefined;
 
 	async function beginBoomCamera(
 		possession: ExplorerPossession,
@@ -799,17 +799,30 @@
 		const previous = boomCameraSession;
 		boomCameraSession = undefined;
 		await previous?.stop();
-		pendingBoomZoom = 0;
 		const controller = cameraController;
 		if (controller === undefined) {
 			throw new Error(
 				"Host boom registration requires an active camera controller.",
 			);
 		}
-		const boom = new HostKinematicBoomSession(
-			tauriHostKinematicBoomTransport(),
-		);
+		const state = controller.snapshotState();
+		const controls = FRONTEND_TUNING.explorer.camera.controls;
+		const boom = new PossessionCameraController({
+			initialLook: state,
+			orbit: {
+				maximumPitchRadians: controls.maximumPitchRadians,
+				pitchRadiansPerPixel: controls.pointerPitchRadiansPerPixel,
+				yawRadiansPerPixel: controls.pointerYawRadiansPerPixel,
+			},
+			transport: tauriHostKinematicBoomTransport(),
+		});
 		boomCameraSession = boom;
+		const runtime = gameRuntime;
+		const canvas = canvasElement;
+		if (runtime === undefined || canvas === null) {
+			throw new Error("Host boom registration requires an active viewport.");
+		}
+		const projection = resolveCameraProjection(runtime, canvas);
 		await boom.start(
 			{
 				possessionGeneration: possession.possessionGeneration,
@@ -817,9 +830,7 @@
 				entityGeneration: possession.entityGeneration,
 			},
 			FRONTEND_TUNING.explorer.camera.boom.distance,
-			resolveKinematicBoomDirection(
-				physicalCameraInput(controller).viewDirection,
-			),
+			projection,
 		);
 	}
 
@@ -828,7 +839,14 @@
 		// has been writing that position every frame; only translation authority returns here.
 		const boom = boomCameraSession;
 		boomCameraSession = undefined;
-		pendingBoomZoom = 0;
+		const controller = cameraController;
+		if (boom !== undefined && controller !== undefined) {
+			const state = controller.snapshotState();
+			controller.adoptPresentedPose({
+				...boom.desiredLook(),
+				position: state.position,
+			});
+		}
 		restoreCameraControlScheme();
 		await boom?.stop();
 	}
@@ -858,11 +876,15 @@
 	function syncActiveCamera(
 		physicalPlacement: HostCameraPlacement | null,
 		nowMs: number,
+		projection: ProjectionClearanceRevision,
 	): ExplorerCameraResidencySync | undefined {
-		if (boomCameraSession) return syncBoomCamera(nowMs);
+		if (boomCameraSession) return syncBoomCamera(nowMs, projection);
 		if (physicalCameraSession || cameraModePending)
-			return cameraCoordinator?.syncPhysicalCamera(physicalPlacement);
-		return cameraCoordinator?.syncFreeFlyCamera();
+			return cameraCoordinator?.syncPhysicalCamera(
+				physicalPlacement,
+				projection,
+			);
+		return cameraCoordinator?.syncFreeFlyCamera(projection);
 	}
 
 	/// Sample the host boom and hand its atomic position, pivot, and residency to the coordinator.
@@ -870,26 +892,23 @@
 	/// The look controller retains the operator's desired yaw/pitch for subsequent host intent. The
 	/// rendered orientation instead follows the same host path as position, preventing desired input
 	/// from visually outrunning collision-safe boom motion.
-	function syncBoomCamera(nowMs: number) {
+	function syncBoomCamera(
+		nowMs: number,
+		projection: ProjectionClearanceRevision,
+	) {
 		const boom = boomCameraSession;
 		const controller = cameraController;
 		const coordinator = cameraCoordinator;
 		if (!boom || !controller || !coordinator) return undefined;
-		const desiredOrientation = controller.snapshotState();
-		const zoomDisplacement = pendingBoomZoom;
-		pendingBoomZoom = 0;
-		void boom
-			.setIntent(
-				resolveKinematicBoomDirection(
-					physicalCameraInput(controller).viewDirection,
-				),
-				zoomDisplacement,
-			)
-			.catch((error: unknown) => {
-				if (boomCameraSession === boom)
-					physicalCameraError = errorMessage(error);
-			});
+		const desiredOrientation = boom.desiredLook();
+		void boom.synchronize(projection).catch((error: unknown) => {
+			if (boomCameraSession === boom) physicalCameraError = errorMessage(error);
+		});
 		const presentation = boom.presentation(nowMs);
+		const acknowledgedProjection = boom.acknowledgedProjection(nowMs);
+		if (acknowledgedProjection === null) {
+			return { location: null, renderable: false };
+		}
 		if (presentation === null) {
 			const placement = coordinator.presentedPlacement();
 			if (placement === null) return undefined;
@@ -897,6 +916,7 @@
 				placement,
 				desiredOrientation.yawRadians,
 				desiredOrientation.pitchRadians,
+				acknowledgedProjection,
 			);
 		}
 		const { placement, visualPivot } = presentation;
@@ -909,7 +929,39 @@
 			placement,
 			orientation.yawRadians,
 			orientation.pitchRadians,
+			acknowledgedProjection,
 		);
+	}
+
+	function resolveCameraProjection(
+		runtime: GameRuntime,
+		canvas: HTMLCanvasElement,
+	): ProjectionClearanceRevision {
+		const extent = runtime.resolveViewportExtent(
+			canvas.clientWidth,
+			canvas.clientHeight,
+		);
+		const framing = FRONTEND_TUNING.explorer.camera.framing;
+		const current = cameraProjection;
+		if (
+			current !== undefined &&
+			current.fov === framing.fov &&
+			current.near === framing.near &&
+			current.extent.width === extent.width &&
+			current.extent.height === extent.height
+		) {
+			return current;
+		}
+		const revision = (current === undefined ? 0 : current.revision) + 1;
+		if (!Number.isSafeInteger(revision)) {
+			throw new Error("Explorer camera projection revision exhausted.");
+		}
+		cameraProjection = createProjectionClearanceRevision(
+			revision,
+			framing,
+			extent,
+		);
+		return cameraProjection;
 	}
 
 	function sendPossessedIntent(): void {
@@ -1146,6 +1198,7 @@
 			activeRegion = undefined;
 			cameraCoordinator = undefined;
 			cameraController = undefined;
+			cameraProjection = undefined;
 			physicalCameraSession = undefined;
 			boomCameraSession = undefined;
 			dynamicEntitySession = undefined;
@@ -1280,7 +1333,7 @@
 				applyEnvironment();
 				applyFrameSettings();
 				if (destroyed) return;
-				cameraController = new FrontendCameraController({
+				cameraController = new ExplorerCameraInputController({
 					canvas,
 					keyboardYawRadiansPerSecond(shiftActive) {
 						const controls = FRONTEND_TUNING.explorer.camera.controls;
@@ -1296,7 +1349,11 @@
 						sendPhysicalCameraIntent();
 					},
 					onCharacterInput: handleCameraCharacterInput,
-					onPhysicalWheel: sendPhysicalCameraWheel,
+					onPhysicalWheel: routeCameraWheel,
+					onPossessionOrbit(deltaX, deltaY) {
+						boomCameraSession?.orbit(deltaX, deltaY);
+					},
+					onPossessionWheel: routeCameraWheel,
 				});
 				cameraCoordinator = new ExplorerCameraCoordinator(
 					gameRuntime,
@@ -1337,9 +1394,11 @@
 						);
 					}
 					gameRuntime.tick();
+					const projection = resolveCameraProjection(gameRuntime, canvas);
 					const residencySync = syncActiveCamera(
 						physicalPlacement,
 						tickStartedAt,
+						projection,
 					);
 					if (!residencySync) {
 						throw new Error(

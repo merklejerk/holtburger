@@ -1,4 +1,5 @@
 import type { LandblockId } from "../game-types";
+import type { RenderExtent } from "./render-extent";
 import type { SceneNodeId } from "../scene";
 import type { Camera } from "../runtime/types";
 import type { ResolvedSceneEnvironment } from "../environment/scene-environment";
@@ -145,6 +146,8 @@ export interface FrameInput {
 	readonly timeSeconds: number;
 	/** Effective regional presentation shared by all renderer passes. */
 	readonly environment: ResolvedSceneEnvironment;
+	/** Exact committed drawing-buffer extent paired with the active primary projection. */
+	readonly extent: RenderExtent;
 	/**
 	 * Resolves the authored outdoor lights reaching a landblock.
 	 *

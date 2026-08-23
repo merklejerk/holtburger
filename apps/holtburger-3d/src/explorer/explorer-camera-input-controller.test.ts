@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { Vec3 } from "../math/types";
-import { FrontendCameraController } from "./frontend-camera-controller";
+import { Vec3 } from "../lib/game/math/types";
+import { ExplorerCameraInputController } from "./explorer-camera-input-controller";
 
 function controllerHarness(
 	keyboardYawRadiansPerSecond?: (shiftActive: boolean) => number,
@@ -23,12 +23,16 @@ function controllerHarness(
 	const changes = vi.fn();
 	const physicalWheel = vi.fn();
 	const characterInput = vi.fn();
-	const controller = new FrontendCameraController({
+	const possessionOrbit = vi.fn();
+	const possessionWheel = vi.fn();
+	const controller = new ExplorerCameraInputController({
 		canvas,
 		keyboardYawRadiansPerSecond,
 		onChange: changes,
 		onCharacterInput: characterInput,
 		onPhysicalWheel: physicalWheel,
+		onPossessionOrbit: possessionOrbit,
+		onPossessionWheel: possessionWheel,
 		requestAnimationFrame: (callback) => {
 			animationFrame = callback;
 			return 1;
@@ -47,6 +51,8 @@ function controllerHarness(
 		controller,
 		dispatch,
 		physicalWheel,
+		possessionOrbit,
+		possessionWheel,
 		tick(frameAt: number) {
 			const callback = animationFrame;
 			animationFrame = null;
@@ -55,7 +61,7 @@ function controllerHarness(
 	};
 }
 
-describe("FrontendCameraController scheme routing", () => {
+describe("ExplorerCameraInputController scheme routing", () => {
 	it("delegates the complete keyboard-yaw rate to the active app regime", () => {
 		const walking = controllerHarness((shiftActive) =>
 			shiftActive ? 1.5 : 2.25,
@@ -131,6 +137,27 @@ describe("FrontendCameraController scheme routing", () => {
 		expect(test.changes).not.toHaveBeenCalled();
 	});
 
+	it("routes possessed orbit and wheel without mutating Explorer free-camera look", () => {
+		const test = controllerHarness();
+		test.controller.setControlScheme({ kind: "possessed-character" });
+		test.dispatch("pointerdown", {
+			button: 0,
+			clientX: 10,
+			clientY: 20,
+			pointerId: 1,
+		});
+		test.dispatch("pointermove", {
+			clientX: 14,
+			clientY: 17,
+			pointerId: 1,
+		});
+		test.dispatch("wheel", { deltaX: 0, deltaY: 100, shiftKey: false });
+
+		expect(test.possessionOrbit).toHaveBeenCalledWith(4, -3);
+		expect(test.possessionWheel).toHaveBeenCalledWith(2.5);
+		expect(test.controller.snapshotState().yawRadians).toBe(0);
+	});
+
 	it("routes possessed A/D only to character turn and keeps keyboard camera yaw fixed", () => {
 		const test = controllerHarness();
 		test.controller.setControlScheme({ kind: "possessed-character" });
@@ -199,7 +226,7 @@ describe("FrontendCameraController scheme routing", () => {
 		test.dispatch("wheel", { deltaX: 0, deltaY: 100, shiftKey: true });
 
 		expect(test.controller.snapshotState()).toEqual(initial);
-		expect(test.physicalWheel).toHaveBeenCalledWith(2.5);
+		expect(test.possessionWheel).toHaveBeenCalledWith(2.5);
 	});
 
 	it("does not apply Shift precision to possessed pointer orbit", () => {

@@ -3,11 +3,12 @@ import { describe, expect, it } from "vitest";
 import {
 	decodeHostKinematicBoomTick,
 	type HostKinematicBoomIdentity,
-} from "../lib/game/motion/host-kinematic-boom-path";
+} from "../motion/host-kinematic-boom-path";
 import {
 	HostKinematicBoomSession,
 	type HostKinematicBoomTransport,
 } from "./host-kinematic-boom-session";
+import { createProjectionClearanceRevision } from "./projection-clearance";
 
 const TARGET = {
 	possessionGeneration: 3,
@@ -16,6 +17,15 @@ const TARGET = {
 } as const;
 const IDENTITY = { ...TARGET, boomGeneration: 4 } as const;
 const DISTANCE = { initial: 4.5, minimum: 1.2, maximum: 8 } as const;
+const PROJECTION = createProjectionClearanceRevision(
+	1,
+	{ fov: 75, near: 0.5 },
+	{ height: 720, width: 1_280 },
+);
+const CLEARANCE = {
+	projectionRevision: PROJECTION.revision,
+	radius: PROJECTION.clearanceRadius,
+} as const;
 
 class RecordingTransport implements HostKinematicBoomTransport {
 	readonly calls: Array<{
@@ -32,7 +42,10 @@ class RecordingTransport implements HostKinematicBoomTransport {
 	): Promise<unknown> {
 		this.calls.push({ command, args });
 		if (command === "start_kinematic_boom") return this.startResponse;
-		if (command === "set_kinematic_boom_intent")
+		if (
+			command === "set_kinematic_boom_intent" ||
+			command === "set_kinematic_boom_clearance"
+		)
 			return this.intentResponses.shift() ?? "ignored-stale";
 		if (command === "stop_kinematic_boom") return true;
 		throw new Error(`Unexpected command ${command}.`);
@@ -64,6 +77,10 @@ function advance(
 	initialX = 10,
 	endX = 14,
 	identity: HostKinematicBoomIdentity = IDENTITY,
+	clearance: {
+		readonly projectionRevision: number;
+		readonly radius: number;
+	} = CLEARANCE,
 ) {
 	return decodeHostKinematicBoomTick(
 		{
@@ -71,7 +88,7 @@ function advance(
 			...identity,
 			sequence,
 			targetSphereRole: "primary",
-			effectiveCameraRadius: 0.25,
+			clearance,
 			desiredReach: 4.5,
 			renderedReach: 3.75,
 			path: {
@@ -96,7 +113,7 @@ function held(identity: HostKinematicBoomIdentity = IDENTITY) {
 			...identity,
 			sequence: 1,
 			targetSphereRole: "primary",
-			effectiveCameraRadius: 0.25,
+			clearance: CLEARANCE,
 			desiredReach: 4.5,
 			renderedReach: 3.75,
 			path: {
@@ -122,7 +139,7 @@ function reseed(sequence: number, x: number) {
 			...IDENTITY,
 			sequence,
 			targetSphereRole: "primary",
-			effectiveCameraRadius: 0.25,
+			clearance: CLEARANCE,
 			desiredReach: 4.5,
 			renderedReach: 0,
 			path: {
@@ -146,7 +163,7 @@ describe("HostKinematicBoomSession", () => {
 		const transport = new RecordingTransport();
 		const session = new HostKinematicBoomSession(transport);
 
-		await session.start(TARGET, DISTANCE, [0, 1, 0]);
+		await session.start(TARGET, DISTANCE, [0, 1, 0], PROJECTION);
 
 		expect(transport.calls[0]).toEqual({
 			command: "start_kinematic_boom",
@@ -159,6 +176,8 @@ describe("HostKinematicBoomSession", () => {
 					inputSequence: 0,
 					viewDirection: [0, 1, 0],
 					cumulativeZoomDisplacement: 0,
+					projectionRevision: PROJECTION.revision,
+					clearanceRadius: PROJECTION.clearanceRadius,
 				},
 			},
 		});
@@ -169,7 +188,7 @@ describe("HostKinematicBoomSession", () => {
 		const transport = new RecordingTransport();
 		transport.startResponse = registration.promise;
 		const session = new HostKinematicBoomSession(transport);
-		const started = session.start(TARGET, DISTANCE, [0, 1, 0]);
+		const started = session.start(TARGET, DISTANCE, [0, 1, 0], PROJECTION);
 
 		session.receive(advance(1), 32, 100);
 		registration.resolve(IDENTITY);
@@ -189,7 +208,7 @@ describe("HostKinematicBoomSession", () => {
 		const transport = new RecordingTransport();
 		transport.startResponse = registration.promise;
 		const session = new HostKinematicBoomSession(transport);
-		const started = session.start(TARGET, DISTANCE, [0, 1, 0]);
+		const started = session.start(TARGET, DISTANCE, [0, 1, 0], PROJECTION);
 
 		await session.setIntent([0, 1, 0], 0.75);
 		registration.resolve(IDENTITY);
@@ -219,7 +238,7 @@ describe("HostKinematicBoomSession", () => {
 
 	it("bounds fixed playback to current and successor and restarts from newest explicit input", async () => {
 		const session = new HostKinematicBoomSession(new RecordingTransport());
-		await session.start(TARGET, DISTANCE, [0, 1, 0]);
+		await session.start(TARGET, DISTANCE, [0, 1, 0], PROJECTION);
 		session.receive(advance(1, 10, 11), 32, 100);
 		const firstX = session.presentation(100)!.placement.position.x;
 		session.receive(advance(2, 11, 12), 32, 101);
@@ -235,9 +254,32 @@ describe("HostKinematicBoomSession", () => {
 		});
 	});
 
+	it("activates a larger projection only when its matching path reaches playback", async () => {
+		const session = new HostKinematicBoomSession(new RecordingTransport());
+		await session.start(TARGET, DISTANCE, [0, 1, 0], PROJECTION);
+		session.receive(advance(1, 10, 11), 32, 100);
+		const wider = createProjectionClearanceRevision(
+			2,
+			{ fov: 100, near: 0.5 },
+			PROJECTION.extent,
+		);
+		await session.setClearance(wider);
+		session.receive(
+			advance(2, 11, 12, IDENTITY, {
+				projectionRevision: wider.revision,
+				radius: wider.clearanceRadius,
+			}),
+			32,
+			110,
+		);
+
+		expect(session.acknowledgedProjection(110)?.revision).toBe(1);
+		expect(session.acknowledgedProjection(132)?.revision).toBe(2);
+	});
+
 	it("flushes interpolation history and snaps to an explicit host reseed", async () => {
 		const session = new HostKinematicBoomSession(new RecordingTransport());
-		await session.start(TARGET, DISTANCE, [0, 1, 0]);
+		await session.start(TARGET, DISTANCE, [0, 1, 0], PROJECTION);
 		session.receive(advance(1, 10, 11), 32, 100);
 		session.receive(advance(2, 11, 12), 32, 101);
 		session.receive(reseed(3, 50), 32, 102);
@@ -263,7 +305,7 @@ describe("HostKinematicBoomSession", () => {
 	it("ignores stale identities, recovers after a held path, and stops exactly", async () => {
 		const transport = new RecordingTransport();
 		const session = new HostKinematicBoomSession(transport);
-		await session.start(TARGET, DISTANCE, [0, 1, 0]);
+		await session.start(TARGET, DISTANCE, [0, 1, 0], PROJECTION);
 		const stale = { ...IDENTITY, boomGeneration: 3 };
 		session.receive(advance(1, 100, 101, stale), 32, 0);
 		expect(session.presentation(0)).toBeNull();

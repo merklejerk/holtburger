@@ -150,6 +150,7 @@ import {
 	type TextureSamplingClass,
 } from "./webgl2-texture-sampler-catalog";
 import { devicePixelArea, validateRenderScale } from "./render-scale";
+import { type RenderExtent, validateRenderExtent } from "./render-extent";
 import type { TextureFilteringPolicy } from "./texture-filtering-policy";
 import type { Camera } from "../runtime/types";
 import type {
@@ -932,7 +933,7 @@ export class WebGL2Renderer implements Renderer {
 			quality.minimumObjectFootprintCssPixelArea,
 			this.#renderScale,
 		);
-		this.#resizeCanvasForRenderScale();
+		this.#applyRenderExtent(input.extent);
 		this.#resetFrameSelectionMetrics(
 			input.views.length,
 			input.frameSettings.envCellRenderMode,
@@ -1165,9 +1166,10 @@ export class WebGL2Renderer implements Renderer {
 		anchorLandblockId: FrameInput["anchorLandblockId"],
 		viewInput: FrameViewInput,
 		rootScope: SceneScope,
+		extent: RenderExtent,
 	): PortalExecutionProbeResult {
 		this.#assertDeviceReady();
-		this.#resizeCanvasForRenderScale();
+		this.#applyRenderExtent(extent);
 		const prepared = this.#prepareViewGeometry(anchorLandblockId, viewInput);
 		const pipeline = (this.#portalScopeAtlasPipeline ??=
 			new WebGL2PortalScopeAtlasPipeline(this.#gl));
@@ -3559,11 +3561,16 @@ export class WebGL2Renderer implements Renderer {
 		}
 	}
 
-	#resizeCanvasForRenderScale(): void {
-		const scale = this.#renderScale;
-		const width = Math.max(1, Math.floor(this.#canvas.clientWidth * scale));
-		const height = Math.max(1, Math.floor(this.#canvas.clientHeight * scale));
-		if (width === this.#frameWidth && height === this.#frameHeight) return;
+	#applyRenderExtent(extent: RenderExtent): void {
+		validateRenderExtent(extent, "WebGL2 frame");
+		const { height, width } = extent;
+		if (
+			width === this.#frameWidth &&
+			height === this.#frameHeight &&
+			this.#canvas.width === width &&
+			this.#canvas.height === height
+		)
+			return;
 
 		this.#frameWidth = width;
 		this.#frameHeight = height;

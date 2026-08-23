@@ -1,6 +1,6 @@
 # Architectural Snapshot: holtburger-3d
 
-_Last updated: 2026-08-22_
+_Last updated: 2026-08-23_
 
 ## Tech Lead North Stars
 
@@ -15,8 +15,9 @@ _Last updated: 2026-08-22_
 - Keep one staged dynamic presentation runtime: immutable templates own geometry and atlas residency;
   animation owns semantic traversal and smooth rigid-part sampling; effects own persistent visual
   state; entity publication applies the complete sample.
-- Keep explorer camera policy in the explorer. The host owns physical placement and motion paths;
-  frontend runtime APIs expose only the facts needed for free-fly placement and rendering.
+- Keep Explorer free-camera policy in the explorer. Shared frontend camera code owns only semantic
+  possession orbit/zoom, host-boom lifecycle, path presentation, and projection acknowledgement;
+  the host owns physical placement and motion paths.
 - Make portal rendering correct by construction: fixed-capacity scope-window traversal, path-free
   arrival propagation, one packed tile per selected authored scope, and deferred scope envelopes.
 
@@ -249,10 +250,19 @@ still consumes the retained directed aperture topology from an already-known pla
 Possessed third-person camera placement follows the same authority boundary without registering a
 camera body. The app host advances the shared kinematic-boom controller immediately after the
 possessed entity on one fixed tick, then publishes camera positions, authoritative residency, and
-the controller's filtered visual pivot in one placed path. The frontend retains raw pointer
-orientation only as the next semantic intent; rendered position and pivot are interpolated together,
-and the Explorer derives a look-at orientation from that pair. It performs no collision query,
-position prediction, containment repair, or independent boom simulation.
+the controller's filtered visual pivot in one placed path. Target-seed placement and
+projection-derived camera clearance are separate host inputs. Radius growth remains recoverable and
+the host labels every publishable path with the exact projection revision its collision envelope
+proves.
+
+The backend-neutral possession controller under `src/lib/game/camera` owns semantic orbit/zoom,
+host lifecycle, fixed-tick presentation, and the requested/acknowledged projection handshake. It
+contains no DOM or Explorer mode policy. The Explorer-local input controller retains free fly,
+physical fly, mode switching, and raw event routing. Render extent is prepared before camera
+synchronization and committed atomically with the primary camera; possession rendering retains the
+currently playing acknowledged projection/extent until a host path solved under a newer envelope is
+active. The frontend performs no collision query, position prediction, containment repair, or
+independent boom simulation.
 
 ## 6. Authored and Effective Apertures
 

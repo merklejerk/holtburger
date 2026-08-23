@@ -102,9 +102,9 @@ time the frontend consumes it.
 - `PhysicalBodyDefinition::spheres()` exposes the exact accepted target motion spheres. Their
   transformed centers are valid static-collision origins after a solved body tick; using one avoids
   inventing camera-pivot depenetration.
-- `crates/holtburger-core/src/physical_body_definition.rs` proves the retail viewer radius is 0.25 m
-  (`acclient.c:139301-139305`). The current frontend tuning's claim that 0.3 m matches retail is
-  incorrect and disappears with the old implementation.
+- `acclient.c:139301-139305` initializes the retail viewer radius to 0.3 m. The inherited
+  `physical_fly_viewer_profile` uses an Explorer-only 0.25 m divergence; the initial boom reused
+  that smaller app value before projection clearance became an explicit contract.
 - `apps/holtburger-3d/src/lib/game/motion/host-placed-path.ts` validates and evaluates nonempty,
   half-open placed paths without reclassifying residency.
 - `apps/holtburger-3d/src/lib/game/motion/host-physical-fly-path.ts` and
@@ -229,7 +229,7 @@ values from browser evidence but may not reorder the safety rules.
 | -------------------------------------- | ----------------: | ------------------------------------------------------------------------------------------------- |
 | Visual pivot height                    |             1.5 m | Preserves the current framing baseline.                                                           |
 | Default/operator reach                 | 4.5 m / 1.2-8.0 m | Preserves the current useful zoom range.                                                          |
-| Nominal camera radius                  |            0.25 m | Shared retail-viewer evidence in `physical_body_definition.rs`.                                   |
+| Initial camera radius                  |            0.25 m | Inherited Explorer physical-fly tuning; later projection-clearance work supersedes this coupling. |
 | Horizontal pivot damping               |              none | Avoids target swim; host paths already interpolate exact horizontal motion.                       |
 | Vertical pivot half-life / maximum lag |   0.08 s / 0.30 m | A 0.6 m step is halved immediately and reaches 90% in about 0.266 s.                              |
 | Collision retraction                   |   same fixed tick | A comfort filter may never retain a penetrated reach.                                             |

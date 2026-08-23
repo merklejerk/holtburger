@@ -154,9 +154,14 @@ pub fn retail_player_grounded_profile(
     retail_grounded_body(spheres, edge_protection)
 }
 
-/// The retail render-viewer as a free-flying sphere: retail's viewer sphere radius
-/// (`acclient.c:139301-139305`) with a controlled-kinematic clip response (zero elasticity: clip
-/// the incoming normal without rebound).
+/// Explorer physical-fly viewer as a controlled-kinematic sphere with zero elasticity.
+///
+/// RETAIL DIVERGENCE: Retail initializes the render-viewer sphere to 0.3 m
+/// (`acclient.c:139301-139305`); this inherited Explorer-only profile uses 0.25 m, reducing free-fly
+/// wall clearance by 0.05 m. The call-site census is one production consumer,
+/// `HostPhysicalFlyRuntime`, plus its focused tests. Possession-camera clearance is projection-
+/// derived and does not consume this profile.
+///
 /// Anti-tunneling and separation budgets for one small free-flying sphere.
 ///
 /// The 0.25 m substep over 32 substeps bounds any one solve at 8 m.

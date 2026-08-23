@@ -1,8 +1,5 @@
-import {
-	type WebGL2RenderExtent,
-	validateWebGL2RenderExtent,
-	withPreservedWebGL2AllocationBindings,
-} from "./webgl2-render-target";
+import { withPreservedWebGL2AllocationBindings } from "./webgl2-render-target";
+import { type RenderExtent, validateRenderExtent } from "./render-extent";
 
 const RGBA8_BYTES_PER_PIXEL = 4;
 const DEPTH_COMPONENT24_BYTES_PER_PIXEL = 4;
@@ -12,9 +9,9 @@ const R8UI_BYTES_PER_PIXEL = 1;
 /** Independent extents for atlas-local scene data and screen-space propagation state. */
 export interface PortalScopeAtlasTargetExtents {
 	/** Packed scope tiles; this extent is never smaller than the drawing buffer. */
-	readonly atlas: WebGL2RenderExtent;
+	readonly atlas: RenderExtent;
 	/** One arrival state and nearest-crossing depth per destination pixel. */
-	readonly drawingBuffer: WebGL2RenderExtent;
+	readonly drawingBuffer: RenderExtent;
 }
 
 /** Scope-local opaque color and sampleable depth retained through final composition. */
@@ -263,7 +260,7 @@ function allocateTargetSet(
 function allocateFrontierTarget(
 	gl: WebGL2RenderingContext,
 	ordinal: 0 | 1,
-	extent: WebGL2RenderExtent,
+	extent: RenderExtent,
 	depth: WebGLTexture,
 	framebuffers: WebGLFramebuffer[],
 	textures: WebGLTexture[],
@@ -303,7 +300,7 @@ function initializeTexture(
 	gl: WebGL2RenderingContext,
 	texture: WebGLTexture,
 	internalFormat: GLenum,
-	extent: WebGL2RenderExtent,
+	extent: RenderExtent,
 ): void {
 	gl.activeTexture(gl.TEXTURE0);
 	gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -380,8 +377,8 @@ function disposeTargetSet(
 }
 
 function validateTargetExtents(extents: PortalScopeAtlasTargetExtents): void {
-	validateWebGL2RenderExtent(extents.atlas, "Portal scope atlas");
-	validateWebGL2RenderExtent(
+	validateRenderExtent(extents.atlas, "Portal scope atlas");
+	validateRenderExtent(
 		extents.drawingBuffer,
 		"Portal scope-atlas drawing buffer",
 	);

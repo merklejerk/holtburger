@@ -50,6 +50,13 @@ transport, pointer gesture, or presentation clock. Applications adapt their acto
 samples, advance the controller on their chosen fixed timeline, and publish the resulting
 collision-safe camera path with authoritative residency.
 
+Camera clearance is independent of the target seed. The controller retains a latest requested
+projection revision/radius and an optional committed revision/radius. Shrinks commit before the
+next ordinary solve; growth first finds a directionlessly separated candidate, reaches it under the
+old envelope, and acknowledges the new revision only on a later path solved with the new envelope.
+An impossible enlargement therefore leaves ordinary camera motion and the last acknowledged
+projection operational instead of becoming a terminal controller state.
+
 The current primitive movement surface lives in [src/client/movement_types.rs](src/client/movement_types.rs). It defines resolved movement commands built around a composite `MotionState`, plus one-shot `SnapFacing` and `Stop`. A motion state represents longitudinal, lateral, and turn axes independently, so diagonal translation does not require a named locomotion variant. [src/client/movement/mod.rs](src/client/movement/mod.rs) remains the sole executor boundary that owns local prediction, packet-edge synthesis, and direct server-facing movement behavior.
 
 [src/client/character_motion.rs](src/client/character_motion.rs) provides the reusable, clock-free character input interpreter. It accepts replaceable semantic drive snapshots and monotonically sequenced jump lifecycle edges, suppresses translation during a standing-long-jump charge, and emits an actor-neutral `JumpAttempt`. Frontends retain raw-key arbitration, charge timing, and presentation; actor-specific resolvers retain eligibility and launch-kinematics policy; world physics retains velocity and contact authority.

@@ -13,8 +13,8 @@ use holtburger_3d::{
     explorer_entity_runtime::{ExplorerEntityRuntime, PossessionEventOutcome},
     explorer_weenie_catalog::ExplorerWeenieCatalog,
     host_kinematic_boom_runtime::{
-        HostKinematicBoomIdentity, HostKinematicBoomIntentRequest, HostKinematicBoomRuntime,
-        HostKinematicBoomStartRequest,
+        HostKinematicBoomClearanceRequest, HostKinematicBoomIdentity,
+        HostKinematicBoomIntentRequest, HostKinematicBoomRuntime, HostKinematicBoomStartRequest,
     },
     host_simulation_runtime::{CollisionSource, HostSimulationRuntime, SimulationInterestRequest},
     load_active_region_data_bytes, load_animation_bytes, load_landblock_source_batch_bytes,
@@ -493,6 +493,22 @@ async fn handle_connection(mut stream: TcpStream, state: &DevHostState) -> anyho
         ("POST", "/kinematic-boom/intent") => {
             let request = serde_json::from_slice::<HostKinematicBoomIntentRequest>(&request.body)?;
             match state.boom.set_intent(request) {
+                Ok(receipt) => {
+                    write_response(
+                        &mut stream,
+                        200,
+                        "application/json",
+                        &serde_json::to_vec(&receipt)?,
+                    )
+                    .await
+                }
+                Err(error) => write_error(&mut stream, error).await,
+            }
+        }
+        ("POST", "/kinematic-boom/clearance") => {
+            let request =
+                serde_json::from_slice::<HostKinematicBoomClearanceRequest>(&request.body)?;
+            match state.boom.set_clearance(request) {
                 Ok(receipt) => {
                     write_response(
                         &mut stream,

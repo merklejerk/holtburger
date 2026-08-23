@@ -101,7 +101,7 @@ export const FRONTEND_TUNING = {
 				zoomDistanceMultiplier: 0.25,
 			},
 			/** Projection shared by Explorer-controlled primary views. */
-			framing: { fov: 75, near: 0.5, far: 2_000 },
+			framing: { fov: 75, near: 0.1, far: 2_000 },
 			/** Initial orientation before automatic scene focus or manual input. */
 			initialOrientation: { pitchRadians: -0.45, yawRadians: 0 },
 			outdoorFocus: {

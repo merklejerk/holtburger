@@ -28,6 +28,7 @@ import { LandblockLayerKind, type LandblockIdLayer } from "./scene-interest";
 import { GameRuntime, type GameRuntimeRenderDevice } from "./game-runtime";
 import type { SceneAvailabilityEvent } from "./scene-availability";
 import type { DynamicEntityView } from "./dynamic-entity-feed";
+import type { Camera } from "./types";
 import type { DynamicEntityVisualSource } from "../../assets/dynamic-entity-visual-source";
 import type { DecodedStaticPresentation } from "../../assets/decode-static-source-record";
 import type {
@@ -239,7 +240,7 @@ describe("GameRuntime view and interest control", () => {
 				terrainRadius: 0,
 			},
 		});
-		runtime.setPrimaryCamera({
+		setTestCamera(runtime, {
 			far: 800,
 			fov: 90,
 			near: 0.5,
@@ -257,6 +258,7 @@ describe("GameRuntime view and interest control", () => {
 
 		expect(requestedLayers).toEqual([{ id: "0x1010ffff", layer: "terrain" }]);
 		expect(frames[0]?.anchorLandblockId).toBe("0x2020ffff");
+		expect(frames[0]?.extent).toEqual({ height: 480, width: 640 });
 		expect(frames[0]?.frameSettings).toEqual({
 			layerVisibility: DEFAULT_FRAME_SETTINGS.layerVisibility,
 			ambientOcclusion: DEFAULT_FRAME_SETTINGS.ambientOcclusion,
@@ -346,7 +348,7 @@ describe("GameRuntime view and interest control", () => {
 			},
 		});
 		expect(() =>
-			runtime.setPrimaryCamera({
+			setTestCamera(runtime, {
 				far: 800,
 				fov: 90,
 				near: 0.5,
@@ -1182,6 +1184,10 @@ function promotedStaticArtifact(
 		landblockId,
 		layer,
 	};
+}
+
+function setTestCamera(runtime: GameRuntime, camera: Camera): void {
+	runtime.setPrimaryView({ camera, extent: { height: 480, width: 640 } });
 }
 
 class DeferredCommitPipeline implements CommitPipeline {

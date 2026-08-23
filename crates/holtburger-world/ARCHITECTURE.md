@@ -98,6 +98,12 @@ sampling behavior lives inside it via `BodySamplingStore`, and that world-owned 
 the canonical runtime body model for the client. Any app-facing cache in `holtburger-core` or a
 frontend is derived read state only; it must not independently advance runtime bodies.
 
+`settle_free_sphere` is the generic bounded placement counterpart to movement-oriented
+`solve_free_sphere`. It consumes directionless placement contacts and either returns a separated
+body/cell or reports that the finite contact budget could not prove one. It never publishes its
+unconverged candidate. Camera clearance growth is one consumer, but the primitive has no camera or
+projection policy.
+
 Shared world does not perform automatic local collision or local velocity integration during
 `tick()`. Constraint-aware advancement is an explicit solve operation on the world-owned runtime
 path rather than an implicit side effect or a parallel core/frontend cache.

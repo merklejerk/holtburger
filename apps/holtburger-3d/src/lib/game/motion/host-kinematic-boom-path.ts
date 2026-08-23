@@ -52,6 +52,13 @@ const diagnosticsSchema = z
 		contactPasses: z.number().int().nonnegative().safe(),
 	})
 	.strict();
+const clearanceSchema = z
+	.object({
+		projectionRevision: generation,
+		radius: finiteNumber.positive(),
+	})
+	.strict()
+	.nullable();
 const holdReasonSchema = z.enum([
 	"clearance-sweep",
 	"free-sphere-query",
@@ -59,7 +66,11 @@ const holdReasonSchema = z.enum([
 	"controller-input",
 	"path-projection",
 ]);
-const reseedReasonSchema = z.enum(["placed-path", "placement-recovery"]);
+const reseedReasonSchema = z.enum([
+	"placed-path",
+	"placement-recovery",
+	"clearance-recovery",
+]);
 const tickSchema = z.discriminatedUnion("kind", [
 	z
 		.object({
@@ -67,7 +78,7 @@ const tickSchema = z.discriminatedUnion("kind", [
 			...identityFields,
 			sequence,
 			targetSphereRole: z.enum(["primary", "upper-constraint"]),
-			effectiveCameraRadius: finiteNumber.positive().max(0.25),
+			clearance: clearanceSchema,
 			desiredReach: finiteNumber.nonnegative(),
 			renderedReach: finiteNumber.nonnegative(),
 			path: pathSchema,
@@ -80,9 +91,9 @@ const tickSchema = z.discriminatedUnion("kind", [
 			...identityFields,
 			sequence,
 			targetSphereRole: z.enum(["primary", "upper-constraint"]),
-			effectiveCameraRadius: finiteNumber.positive().max(0.25),
+			clearance: clearanceSchema,
 			desiredReach: finiteNumber.nonnegative(),
-			renderedReach: z.literal(0),
+			renderedReach: finiteNumber.nonnegative(),
 			path: pathSchema,
 			reason: reseedReasonSchema,
 			diagnostics: diagnosticsSchema,
@@ -94,7 +105,7 @@ const tickSchema = z.discriminatedUnion("kind", [
 			...identityFields,
 			sequence,
 			targetSphereRole: z.enum(["primary", "upper-constraint"]),
-			effectiveCameraRadius: finiteNumber.positive().max(0.25),
+			clearance: clearanceSchema,
 			desiredReach: finiteNumber.nonnegative(),
 			renderedReach: finiteNumber.nonnegative(),
 			path: pathSchema,
@@ -103,7 +114,7 @@ const tickSchema = z.discriminatedUnion("kind", [
 		})
 		.strict(),
 ]);
-const intentReceiptSchema = z.enum(["accepted", "ignored-stale"]);
+const updateReceiptSchema = z.enum(["accepted", "ignored-stale"]);
 
 /** Exact boom and possessed-body lifecycle tuple carried by every host result. */
 export type HostKinematicBoomIdentity = Pick<
@@ -115,8 +126,8 @@ export type HostKinematicBoomIdentity = Pick<
 export type HostKinematicBoomTick = z.infer<typeof tickSchema>;
 
 /** Result of one semantic latest-wins input command. */
-export type HostKinematicBoomIntentReceipt = z.infer<
-	typeof intentReceiptSchema
+export type HostKinematicBoomUpdateReceipt = z.infer<
+	typeof updateReceiptSchema
 >;
 
 /** Camera placement and host-owned filtered subject pivot sampled from one path instant. */
@@ -125,7 +136,7 @@ export interface HostKinematicBoomPresentation {
 	readonly visualPivot: SceneVec3;
 }
 
-/** Placement-authoring condition recovered through an explicit target-seed discontinuity. */
+/** Placement-authoring condition recovered through an explicit safe discontinuity. */
 export type HostKinematicBoomReseedReason = z.infer<typeof reseedReasonSchema>;
 
 /** Machine-readable reason one recoverable tick held its last collision-safe placement. */
@@ -165,10 +176,10 @@ export function decodeHostKinematicBoomTick(
 }
 
 /** Decode one semantic latest-wins input receipt. */
-export function decodeHostKinematicBoomIntentReceipt(
+export function decodeHostKinematicBoomUpdateReceipt(
 	value: unknown,
-): HostKinematicBoomIntentReceipt {
-	return intentReceiptSchema.parse(value);
+): HostKinematicBoomUpdateReceipt {
+	return updateReceiptSchema.parse(value);
 }
 
 /** Validate a registration receipt before it can target later commands or paths. */

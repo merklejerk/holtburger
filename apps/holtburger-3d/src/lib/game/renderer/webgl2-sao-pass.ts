@@ -9,12 +9,12 @@ import {
 	compileWebGL2Shader,
 	requireWebGL2Uniform,
 } from "./webgl2-shader-utils";
+import { withPreservedWebGL2AllocationBindings } from "./webgl2-render-target";
 import {
-	type WebGL2RenderExtent,
-	validateWebGL2RenderDimensions,
-	validateWebGL2RenderExtent,
-	withPreservedWebGL2AllocationBindings,
-} from "./webgl2-render-target";
+	type RenderExtent,
+	validateRenderDimensions,
+	validateRenderExtent,
+} from "./render-extent";
 
 const MAXIMUM_SAO_TILE_COUNT = 0xff;
 const SAO_TILE_METADATA_BINDING_POINT = 1;
@@ -370,7 +370,7 @@ interface SaoScratchTarget {
 }
 
 interface SaoScratchTargetSet {
-	readonly extent: WebGL2RenderExtent;
+	readonly extent: RenderExtent;
 	readonly first: SaoScratchTarget;
 	readonly second: SaoScratchTarget;
 }
@@ -378,7 +378,7 @@ interface SaoScratchTargetSet {
 /** Scene target consumed and modified by SAO without changing its attachment ownership. */
 export interface WebGL2SaoSceneTarget {
 	readonly depth: WebGLTexture;
-	readonly extent: WebGL2RenderExtent;
+	readonly extent: RenderExtent;
 	readonly framebuffer: WebGLFramebuffer;
 }
 
@@ -393,7 +393,7 @@ export interface WebGL2SaoPassDiagnostics {
 	readonly activeBytes: number;
 	readonly allocatedGenerationCount: number;
 	readonly disposedGenerationCount: number;
-	readonly extent: WebGL2RenderExtent | null;
+	readonly extent: RenderExtent | null;
 }
 
 /** One-shot harness census over committed opaque depth, excluding clear sky and atlas gaps. */
@@ -417,15 +417,15 @@ export class WebGL2SaoScratchTargets {
 		this.#gl = gl;
 	}
 
-	resize(extent: WebGL2RenderExtent): SaoScratchTargetSet {
-		validateWebGL2RenderExtent(extent, "SAO scratch target");
+	resize(extent: RenderExtent): SaoScratchTargetSet {
+		validateRenderExtent(extent, "SAO scratch target");
 		return this.resizeDimensions(extent.width, extent.height);
 	}
 
 	/** Reuse scratch storage from scalar dimensions without allocating an extent record. */
 	resizeDimensions(width: number, height: number): SaoScratchTargetSet {
 		this.#assertAlive();
-		validateWebGL2RenderDimensions(width, height, "SAO scratch target");
+		validateRenderDimensions(width, height, "SAO scratch target");
 		saoScratchByteLengthFromDimensions(width, height);
 		const current = this.#scratch;
 		if (
@@ -582,8 +582,8 @@ export class WebGL2SaoPass {
 	/** Apply SAO to every selected portal tile without changing portal planning ownership. */
 	applyPortal(
 		scene: Pick<WebGL2SaoSceneTarget, "depth" | "framebuffer">,
-		sceneExtent: WebGL2RenderExtent,
-		drawingBufferExtent: WebGL2RenderExtent,
+		sceneExtent: RenderExtent,
+		drawingBufferExtent: RenderExtent,
 		atlas: PortalScopeAtlasFrameView,
 		camera: WebGL2SaoCameraRange,
 		projection: Mat4,
@@ -647,8 +647,8 @@ export class WebGL2SaoPass {
 	#apply(
 		sceneDepth: WebGLTexture,
 		sceneFramebuffer: WebGLFramebuffer,
-		sceneExtent: WebGL2RenderExtent,
-		drawingBufferExtent: WebGL2RenderExtent,
+		sceneExtent: RenderExtent,
+		drawingBufferExtent: RenderExtent,
 		camera: WebGL2SaoCameraRange,
 		projection: Mat4,
 		policy: EffectiveAmbientOcclusionPolicy,
@@ -748,14 +748,14 @@ export class WebGL2SaoPass {
 
 	#bindEvaluation(
 		sceneDepth: WebGLTexture,
-		drawingBufferExtent: WebGL2RenderExtent,
+		drawingBufferExtent: RenderExtent,
 		camera: WebGL2SaoCameraRange,
 		projection: Mat4,
 		policy: Extract<
 			EffectiveAmbientOcclusionPolicy,
 			{ readonly kind: "enabled" }
 		>,
-		scratchExtent: WebGL2RenderExtent,
+		scratchExtent: RenderExtent,
 		resolutionScale: number,
 	): void {
 		const gl = this.#gl;
@@ -801,7 +801,7 @@ export class WebGL2SaoPass {
 			EffectiveAmbientOcclusionPolicy,
 			{ readonly kind: "enabled" }
 		>,
-		scratchExtent: WebGL2RenderExtent,
+		scratchExtent: RenderExtent,
 		directionX: number,
 		directionY: number,
 	): void {
@@ -837,7 +837,7 @@ export class WebGL2SaoPass {
 
 	#bindComposite(
 		sceneFramebuffer: WebGLFramebuffer,
-		sceneExtent: WebGL2RenderExtent,
+		sceneExtent: RenderExtent,
 		ambientOcclusion: WebGLTexture,
 	): void {
 		const gl = this.#gl;
@@ -870,8 +870,8 @@ export class WebGL2SaoPass {
 
 	#captureCoverageCensus(
 		sceneDepth: WebGLTexture,
-		sceneExtent: WebGL2RenderExtent,
-		drawingBufferExtent: WebGL2RenderExtent,
+		sceneExtent: RenderExtent,
+		drawingBufferExtent: RenderExtent,
 		camera: WebGL2SaoCameraRange,
 		projection: Mat4,
 		policy: Extract<
@@ -944,7 +944,7 @@ export class WebGL2SaoPass {
 
 	#prepareScratchDraw(
 		framebuffer: WebGLFramebuffer,
-		extent: WebGL2RenderExtent,
+		extent: RenderExtent,
 	): void {
 		const gl = this.#gl;
 		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, framebuffer);
@@ -959,7 +959,7 @@ export class WebGL2SaoPass {
 		gl.clearBufferfv(gl.COLOR, 0, NEUTRAL_SAO_CLEAR);
 	}
 
-	#writeFlatTile(extent: WebGL2RenderExtent): void {
+	#writeFlatTile(extent: RenderExtent): void {
 		this.#metadataStaging[0] = 0;
 		this.#metadataStaging[1] = 0;
 		this.#metadataStaging[2] = extent.width;
@@ -1001,7 +1001,7 @@ export class WebGL2SaoPass {
 }
 
 /** Exact bytes owned by the two resolution-scaled R8 textures. */
-export function saoScratchByteLength(extent: WebGL2RenderExtent): number {
+export function saoScratchByteLength(extent: RenderExtent): number {
 	return saoScratchByteLengthFromDimensions(extent.width, extent.height);
 }
 
@@ -1018,16 +1018,16 @@ function saoScratchByteLengthFromDimensions(
 
 /** Resolve a positive scratch extent from one source extent and linear scale. */
 export function scaledSaoExtent(
-	extent: WebGL2RenderExtent,
+	extent: RenderExtent,
 	resolutionScale: number,
-): WebGL2RenderExtent {
+): RenderExtent {
 	return scaledExtent(extent, resolutionScale);
 }
 
 function scaledExtent(
-	extent: WebGL2RenderExtent,
+	extent: RenderExtent,
 	resolutionScale: number,
-): WebGL2RenderExtent {
+): RenderExtent {
 	if (
 		!Number.isSafeInteger(extent.width) ||
 		!Number.isSafeInteger(extent.height) ||
@@ -1049,7 +1049,7 @@ function scaledExtent(
 
 function allocateScratch(
 	gl: WebGL2RenderingContext,
-	extent: WebGL2RenderExtent,
+	extent: RenderExtent,
 ): SaoScratchTargetSet {
 	const targets: SaoScratchTarget[] = [];
 	try {
@@ -1067,7 +1067,7 @@ function allocateScratch(
 
 function allocateScratchTarget(
 	gl: WebGL2RenderingContext,
-	extent: WebGL2RenderExtent,
+	extent: RenderExtent,
 	owner: string,
 ): SaoScratchTarget {
 	const framebuffer = gl.createFramebuffer();

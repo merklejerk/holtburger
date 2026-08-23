@@ -1797,6 +1797,41 @@ async function runPossessionScenario(
 		const probe = await invoke("possessionMotionProbe");
 		return { entity: current, probe };
 	};
+	const boomProjectionRequests = [];
+	await advance(2, true);
+	// Preserve the authored interior portal-route seed. The outdoor case supplies overlapping
+	// walking evidence; the interior case isolates resize/orbit/zoom against nearby geometry before
+	// executing its established traversal.
+	await setDrive(initialCamera.envCellId === null ? drive("forward") : drive());
+	for (const [width, height, fov] of [
+		[1600, 720, 110],
+		[800, 900, 65],
+	]) {
+		const requested = await invoke("reprojectKinematicBoom", [
+			width,
+			height,
+			fov,
+		]);
+		let projectionState = null;
+		let settleTickCount = 0;
+		while (settleTickCount < 120) {
+			await advance(1, true);
+			settleTickCount += 1;
+			projectionState = (await invoke("state")).boomProjection;
+			if (
+				projectionState.active?.revision === requested.revision &&
+				projectionState.requested?.revision === requested.revision
+			) {
+				break;
+			}
+		}
+		boomProjectionRequests.push({
+			requested,
+			settleTickCount,
+			state: projectionState,
+		});
+	}
+	await setDrive(drive());
 	const boomRoute = [];
 	let repeatedStepTickRange = null;
 	if (initialCamera.envCellId === "0xda550177") {
@@ -2007,6 +2042,7 @@ async function runPossessionScenario(
 			identity: boomIdentity,
 			intentReceipts: boomIntentReceipts,
 			postReleaseEnvelope,
+			projectionRequests: boomProjectionRequests,
 			releaseCamera: { after: cameraAfterRelease, before: cameraBeforeRelease },
 			repeatedStepTickRange,
 			route: boomRoute,
@@ -2138,6 +2174,35 @@ function assertPossessionScenario(scenario) {
 			`Portal-mode boom frame lost its camera or base-scene selection state: ${JSON.stringify(invalidPortalFrame)}.`,
 		);
 	}
+	for (const evidence of scenario.boom.projectionRequests) {
+		if (
+			evidence.state.active?.revision !== evidence.requested.revision ||
+			evidence.state.requested?.revision !== evidence.requested.revision
+		) {
+			throw new Error(
+				`Boom projection did not converge to its latest resize/FOV request: ${JSON.stringify(evidence)}.`,
+			);
+		}
+	}
+	const acknowledgedRevisions = new Set(
+		scenario.boom.ticks
+			.map((tick) => tick.clearance?.projectionRevision)
+			.filter((revision) => revision !== undefined),
+	);
+	const invalidProjectionFrame = scenario.boom.frameStates.find((state) => {
+		const active = state.boomProjection.active;
+		return (
+			active !== null &&
+			(!acknowledgedRevisions.has(active.revision) ||
+				state.camera?.fov !== active.fov ||
+				state.camera?.near !== active.near)
+		);
+	});
+	if (invalidProjectionFrame !== undefined) {
+		throw new Error(
+			`Rendered boom projection lacks matching host clearance evidence: ${JSON.stringify(invalidProjectionFrame)}.`,
+		);
+	}
 	if (
 		scenario.boom.route.length > 0 &&
 		![0xda550177, 0xda550178, 0xda55002d, 0xda550179].every((cellId) =>
@@ -2151,8 +2216,8 @@ function assertPossessionScenario(scenario) {
 	if (
 		scenario.controlProbe.cameraYawAfterKeyboardTurn !==
 			scenario.controlProbe.cameraYawBefore ||
-		scenario.controlProbe.cameraYawAfterPointerOrbit ===
-			scenario.controlProbe.cameraYawBefore ||
+		!Array.isArray(scenario.controlProbe.possessionOrbitDelta) ||
+		scenario.controlProbe.possessionOrbitDelta[0] === 0 ||
 		scenario.controlProbe.characterInputCountAfterKeyboard !== 1 ||
 		scenario.controlProbe.characterInputCountAfterPointerAndWheel !== 1 ||
 		!Number.isFinite(scenario.controlProbe.boomZoomDisplacement) ||

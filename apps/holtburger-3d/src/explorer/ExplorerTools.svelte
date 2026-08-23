@@ -31,7 +31,7 @@
 	} from "./explorer-entity-commands";
 	import type { ExplorerPossession } from "./explorer-entity-possession";
 	import type { DynamicEntityView } from "../lib/game/runtime/dynamic-entity-feed";
-	import type { HostKinematicBoomStatus } from "./host-kinematic-boom-session";
+	import type { HostKinematicBoomStatus } from "../lib/game/camera/host-kinematic-boom-session";
 	import type { ExplorerEntitySelection } from "./explorer-entity-panel-state";
 
 	type ExplorerTabId = "world" | "grading" | "frame" | "textures" | "entities";

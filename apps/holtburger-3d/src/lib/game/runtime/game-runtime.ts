@@ -33,6 +33,11 @@ import {
 	type RendererFrameDiagnosticsSnapshot,
 } from "../renderer/renderer";
 import { RenderWorld } from "../renderer/render-world";
+import {
+	type RenderExtent,
+	resolveRenderExtent,
+	validateRenderExtent,
+} from "../renderer/render-extent";
 import type { RendererResourceManager } from "../renderer/resource-manager";
 import type {
 	ClosedWorkerPoolDiagnostics,
@@ -199,7 +204,11 @@ import {
 	EnvCellGeometryPreparer,
 	type EnvCellRealizationArtifact,
 } from "./env-cell-realization";
-import type { AudioListenerPlacement, Camera } from "./types";
+import type {
+	AudioListenerPlacement,
+	Camera,
+	PrimaryCameraView,
+} from "./types";
 import type {
 	RuntimeTickProfile,
 	RuntimeTickProfiler,
@@ -724,6 +733,8 @@ export class GameRuntime {
 	readonly #sceneAvailabilityListeners = new Set<SceneAvailabilityListener>();
 	/** Current primary-view input used for visibility and rendering. */
 	#camera: Camera = DEFAULT_CAMERA;
+	/** Exact drawing extent committed atomically with `#camera`, absent before first view sync. */
+	#primaryViewExtent: RenderExtent | null = null;
 	/** Frontend-owned static regional presentation state for every render frame. */
 	#environment: ResolvedSceneEnvironment = DEFAULT_ENVIRONMENT;
 	/** Frontend-selected dynamic display choices forwarded unchanged to each frame. */
@@ -1695,8 +1706,18 @@ export class GameRuntime {
 		this.#audio.setSettings(settings);
 	}
 
-	/** Replace the authoritative primary camera without changing scene interest. */
-	setPrimaryCamera(camera: Camera): void {
+	/** Resolve a candidate viewport before camera policy decides whether it may become active. */
+	resolveViewportExtent(cssWidth: number, cssHeight: number): RenderExtent {
+		return resolveRenderExtent(
+			cssWidth,
+			cssHeight,
+			this.#frameSettings.quality.renderScale,
+		);
+	}
+
+	/** Replace the authoritative primary camera and its exact drawing extent atomically. */
+	setPrimaryView(view: PrimaryCameraView): void {
+		const { camera, extent } = view;
 		const { position, rotation } = camera.placement;
 		if (
 			![position.x, position.y, position.z].every(Number.isFinite) ||
@@ -1704,6 +1725,7 @@ export class GameRuntime {
 		) {
 			throw new Error("Primary camera placement must be finite.");
 		}
+		validateRenderExtent(extent, "Primary camera view");
 		this.#camera = {
 			far: camera.far,
 			fov: camera.fov,
@@ -1715,6 +1737,7 @@ export class GameRuntime {
 				rotation: new Quat(rotation.w, rotation.x, rotation.y, rotation.z),
 			},
 		};
+		this.#primaryViewExtent = { ...extent };
 	}
 
 	/** Replace the frontend-resolved environment without changing scene residency or interest. */
@@ -1929,6 +1952,10 @@ export class GameRuntime {
 		if (this.#destroyed) throw new Error("Game runtime has been destroyed.");
 		const renderer = this.#renderer;
 		if (!renderer) throw new Error("Game runtime has no renderer device.");
+		const extent = this.#primaryViewExtent;
+		if (extent === null) {
+			throw new Error("Game runtime has no committed primary camera view.");
+		}
 		this.#lastFrameTimeSeconds = timeSeconds;
 		// Retail runs script hooks before this frame's animation hooks for static objects
 		// (`animate_static_object`, acclient.c:309368-309409), and statics are this population.
@@ -1996,6 +2023,7 @@ export class GameRuntime {
 					this.#terrainFogCoverage,
 				),
 			},
+			extent,
 			frameSettings: this.#frameSettings,
 			outdoorLights: this.#outdoorLights,
 			timeSeconds,

@@ -258,9 +258,9 @@ export const FRONTEND_TUNING = {
 			 * redundant channel a reader who resolves no hue at all is left with. Collapsing two of
 			 * them to similar luminance costs that silently, and nothing will fail to warn you.
 			 */
-			sameLevelColor: { red: 0.9, green: 0.9, blue: 0.8 },
-			aboveColor: { red: 0.43, green: 0.58, blue: 0.9 },
-			belowColor: { red: 0.54, green: 0.77, blue: 0.41 },
+			sameLevelColor: { red: 0.9, green: 0.9, blue: 0.9 },
+			aboveColor: { red: 0.29, green: 0.45, blue: 0.51 },
+			belowColor: { red: 0.99, green: 0.55, blue: 0.27 },
 		},
 		interior: {
 			/**
@@ -271,23 +271,23 @@ export const FRONTEND_TUNING = {
 			 * reads as below, which is both wrong and the most common case. Sized under an AC storey
 			 * so a genuine floor above or below never falls inside it.
 			 */
-			sameLevelBandMeters: 2.5,
+			sameLevelBandMeters: 2,
 			/**
 			 * Height at which a floor reaches its full above or below colour, in metres.
 			 *
 			 * Measured from the same-level band. Far shorter than the fade span, so which side of
 			 * you a passage sits on is obvious well before it dims out.
 			 */
-			tintSpanMeters: 6,
+			tintSpanMeters: 5,
 			/** Height over which a floor fades toward the void, in metres. */
-			fadeSpanMeters: 14,
+			fadeSpanMeters: 10,
 			/**
 			 * How completely the most distant floor dissolves into the void, in [0, 1].
 			 *
 			 * Short of one: a passage far above or below still leaves a trace, because knowing
 			 * something is there is most of what a dungeon map is for.
 			 */
-			maximumFade: 0.86,
+			maximumFade: 0.5,
 			/**
 			 * Height span normalising the anchor-relative depth test, in metres.
 			 *
@@ -335,7 +335,7 @@ export const FRONTEND_TUNING = {
 			 */
 			defaultViewDiameterMeters: {
 				/** Initial extent restored when first entering an EnvCell. */
-				indoor: 64,
+				indoor: 96,
 				/** Initial extent used outdoors or while residency is unknown. */
 				outdoor: 192,
 			},

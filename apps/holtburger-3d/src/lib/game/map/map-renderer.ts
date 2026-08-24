@@ -134,9 +134,10 @@ export class MapRenderer {
 	constructor(canvas: HTMLCanvasElement, source: MapTerrainSource) {
 		const gl = canvas.getContext("webgl2", {
 			alpha: false,
+			// Thin blocker silhouettes visibly alias at one sample. Browser MSAA keeps those edges
+			// legible without supersampling every fragment of this small, cadence-limited canvas.
 			antialias: true,
-			// Requested now though Phase 1 never enables the test: depth is a context creation
-			// attribute, and the interior program that needs it cannot add one to a live context.
+			// Interior floors use depth to resolve vertically overlapping passages.
 			depth: true,
 			stencil: false,
 		});

@@ -27,6 +27,10 @@ fn template(wcid: u32) -> WeenieTemplate {
         elasticity: Some(0.05),
         maximum_velocity: Some(15.0),
         rotation_speed: Some(2.0),
+        radar_blip_color: Some(3),
+        radar_behavior: Some(4),
+        obvious_radar_range: Some(60.0),
+        attackable: Some(false),
         appearance: TemplateAppearance {
             clothing_base_did: None,
             head_object_did: Some(0x0200_1234),

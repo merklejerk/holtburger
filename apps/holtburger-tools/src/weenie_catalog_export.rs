@@ -35,6 +35,7 @@ const PROPERTY_FLOAT_ROTATION_SPEED: u16 = 27;
 const PROPERTY_FLOAT_DEFAULT_SCALE: u16 = 39;
 const PROPERTY_FLOAT_FRICTION: u16 = 78;
 const PROPERTY_FLOAT_ELASTICITY: u16 = 79;
+const PROPERTY_FLOAT_OBVIOUS_RADAR_RANGE: u16 = 104;
 
 const PROPERTY_INT_ITEM_TYPE: u16 = 1;
 const PROPERTY_INT_DEFAULT_COMBAT_STYLE: u16 = 46;
@@ -44,6 +45,8 @@ const PROPERTY_INT_VALID_LOCATIONS: u16 = 9;
 const PROPERTY_INT_GENDER: u16 = 113;
 const PROPERTY_INT_HERITAGE_GROUP: u16 = 188;
 const PROPERTY_INT_PALETTE_TEMPLATE: u16 = 3;
+const PROPERTY_INT_RADAR_BLIP_COLOR: u16 = 95;
+const PROPERTY_INT_SHOWABLE_ON_RADAR: u16 = 133;
 const PROPERTY_STRING_NAME: u16 = 1;
 const PROPERTY_STRING_SEX: u16 = 3;
 const PROPERTY_STRING_HERITAGE_GROUP_NAME: u16 = 4;
@@ -57,6 +60,7 @@ const PROPERTY_BOOL_GRAVITY_STATUS: u16 = 14;
 const PROPERTY_BOOL_LIGHTS_STATUS: u16 = 15;
 const PROPERTY_BOOL_SCRIPTED_COLLISION: u16 = 16;
 const PROPERTY_BOOL_INELASTIC: u16 = 17;
+const PROPERTY_BOOL_ATTACKABLE: u16 = 19;
 const PROPERTY_BOOL_IS_FROZEN: u16 = 38;
 const PROPERTY_BOOL_REPORT_COLLISIONS_AS_ENVIRONMENT: u16 = 41;
 const PROPERTY_BOOL_ALLOW_EDGE_SLIDE: u16 = 42;
@@ -192,13 +196,13 @@ fn load_rows(connection: &mut Conn) -> Result<AceWorldRows> {
             .context("could not query ACE table weenie_properties_d_i_d")?,
         floats: connection
             .query_map(
-                "SELECT object_Id, type, value FROM weenie_properties_float WHERE type IN (12, 26, 27, 39, 78, 79) ORDER BY object_Id, type",
+                "SELECT object_Id, type, value FROM weenie_properties_float WHERE type IN (12, 26, 27, 39, 78, 79, 104) ORDER BY object_Id, type",
                 |(wcid, property_type, value)| ScalarRow { wcid, property_type, value },
             )
             .context("could not query ACE table weenie_properties_float")?,
         ints: connection
             .query_map(
-                "SELECT object_Id, type, value FROM weenie_properties_int WHERE type IN (1, 3, 4, 9, 46, 93, 113, 188) ORDER BY object_Id, type",
+                "SELECT object_Id, type, value FROM weenie_properties_int WHERE type IN (1, 3, 4, 9, 46, 93, 95, 113, 133, 188) ORDER BY object_Id, type",
                 |(wcid, property_type, value)| ScalarRow { wcid, property_type, value },
             )
             .context("could not query ACE table weenie_properties_int")?,
@@ -210,7 +214,7 @@ fn load_rows(connection: &mut Conn) -> Result<AceWorldRows> {
             .context("could not query ACE table weenie_properties_string")?,
         bools: connection
             .query_map(
-                "SELECT object_Id, type, CAST(value AS UNSIGNED) FROM weenie_properties_bool WHERE type IN (11, 12, 13, 14, 15, 16, 17, 38, 41, 42, 71) ORDER BY object_Id, type",
+                "SELECT object_Id, type, CAST(value AS UNSIGNED) FROM weenie_properties_bool WHERE type IN (11, 12, 13, 14, 15, 16, 17, 19, 38, 41, 42, 71) ORDER BY object_Id, type",
                 |(wcid, property_type, value)| ScalarRow { wcid, property_type, value },
             )
             .context("could not query ACE table weenie_properties_bool")?,
@@ -266,6 +270,10 @@ fn project_rows(rows: AceWorldRows) -> std::result::Result<Vec<WeenieTemplate>, 
             elasticity: None,
             maximum_velocity: None,
             rotation_speed: None,
+            radar_blip_color: None,
+            radar_behavior: None,
+            obvious_radar_range: None,
+            attackable: None,
             physics: TemplatePhysics::default(),
             appearance: TemplateAppearance::default(),
             wielded: Vec::new(),
@@ -358,6 +366,9 @@ fn project_rows(rows: AceWorldRows) -> std::result::Result<Vec<WeenieTemplate>, 
             PROPERTY_FLOAT_FRICTION => ("friction", &mut template.friction),
             PROPERTY_FLOAT_ELASTICITY => ("elasticity", &mut template.elasticity),
             PROPERTY_FLOAT_SHADE => ("appearance.shade", &mut template.appearance.shade),
+            PROPERTY_FLOAT_OBVIOUS_RADAR_RANGE => {
+                ("obvious_radar_range", &mut template.obvious_radar_range)
+            }
             property_type => {
                 return Err(ProjectionError::UnexpectedProperty {
                     wcid: row.wcid,
@@ -442,6 +453,20 @@ fn project_rows(rows: AceWorldRows) -> std::result::Result<Vec<WeenieTemplate>, 
                 "weenie_properties_int",
                 "appearance.heritage_group",
             )?,
+            PROPERTY_INT_RADAR_BLIP_COLOR => set_once(
+                &mut template.radar_blip_color,
+                row.value,
+                row.wcid,
+                "weenie_properties_int",
+                "radar_blip_color",
+            )?,
+            PROPERTY_INT_SHOWABLE_ON_RADAR => set_once(
+                &mut template.radar_behavior,
+                row.value,
+                row.wcid,
+                "weenie_properties_int",
+                "radar_behavior",
+            )?,
             property_type => {
                 return Err(ProjectionError::UnexpectedProperty {
                     wcid: row.wcid,
@@ -507,6 +532,16 @@ fn project_rows(rows: AceWorldRows) -> std::result::Result<Vec<WeenieTemplate>, 
             }
         };
         let template = template_mut(&mut templates, row.wcid, "weenie_properties_bool")?;
+        if row.property_type == PROPERTY_BOOL_ATTACKABLE {
+            set_once(
+                &mut template.attackable,
+                value,
+                row.wcid,
+                "weenie_properties_bool",
+                "attackable",
+            )?;
+            continue;
+        }
         let (field, slot) = bool_slot(&mut template.physics.overrides, row.property_type).ok_or(
             ProjectionError::UnexpectedProperty {
                 wcid: row.wcid,
@@ -796,6 +831,11 @@ mod tests {
             property_type: PROPERTY_BOOL_IS_FROZEN,
             value: 0,
         });
+        rows.bools.push(ScalarRow {
+            wcid: 42,
+            property_type: PROPERTY_BOOL_ATTACKABLE,
+            value: 0,
+        });
         rows.ints.push(ScalarRow {
             wcid: 42,
             property_type: PROPERTY_INT_PALETTE_TEMPLATE,
@@ -827,6 +867,7 @@ mod tests {
         assert_eq!(template.setup_did, None);
         assert_eq!(template.physics.base_mask, Some(u32::MAX));
         assert_eq!(template.physics.overrides.frozen, Some(false));
+        assert_eq!(template.attackable, Some(false));
         assert_eq!(template.appearance.default_combat_style, Some(2));
         assert_eq!(template.appearance.palette_template, Some(61));
         assert_eq!(template.appearance.shade, Some(0.5));

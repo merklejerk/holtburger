@@ -22,6 +22,7 @@ use crate::interior_seam::{
     classify_indoor_seam,
 };
 use crate::landblock_source_batch::LoadedLandblockSourceBatch;
+use crate::map_geometry::build_walkable_floor_geometry;
 use crate::object_resource_closure::{
     ObjectResourceClosure, StaticGeometryBuffers, append_static_geometry,
 };
@@ -36,9 +37,15 @@ use crate::portal_visibility::{
 };
 use crate::source_projection::{dat_id, render_aabb_json};
 
-const ENV_CELL_RECORD_MAGIC: &[u8; 4] = b"HBEC";
-const ENV_CELL_RECORD_VERSION: u16 = 3;
+pub(crate) const ENV_CELL_RECORD_MAGIC: &[u8; 4] = b"HBEC";
+const ENV_CELL_RECORD_VERSION: u16 = 4;
 const ENV_CELL_RECORD_HEADER_LENGTH: usize = 16;
+
+/// Placement-rotation tolerance for the map-floor up-axis invariant.
+///
+/// Map floors are walkability-filtered per structure in the structure-local frame, which is only
+/// valid when every consuming cell placement maps local up to world up (yaw-only in practice).
+const MAP_FLOOR_UP_EPSILON: f32 = 1.0e-3;
 
 /// Build one independently decodable environment-cell record.
 pub(crate) async fn serialize_env_cell_source_record(
@@ -68,6 +75,8 @@ pub(crate) async fn serialize_env_cell_source_record(
     let mut structure_indices = BTreeMap::<(u32, u32), (usize, usize)>::new();
     let mut prepared_cells = Vec::with_capacity(interior.cells.len());
     let mut containment_planes = Vec::<f32>::new();
+    let mut map_floor_positions = Vec::<f32>::new();
+    let mut map_floor_indices = Vec::<u32>::new();
 
     for cell in &interior.cells {
         let environment = interior
@@ -135,6 +144,24 @@ pub(crate) async fn serialize_env_cell_source_record(
                     plane.d,
                 ]);
             }
+            let map_floor = build_walkable_floor_geometry(
+                &cell_struct.vertex_array,
+                &cell_struct.physics_polygons,
+            )
+            .with_context(|| {
+                format!(
+                    "Could not derive map floor for CellStruct 0x{:08X}/0x{:04X}",
+                    cell.structure.environment_id, cell.structure.local_selector
+                )
+            })?;
+            let map_floor_json = json!({
+                "positionOffset": map_floor_positions.len(),
+                "vertexCount": map_floor.vertex_count(),
+                "indexOffset": map_floor_indices.len(),
+                "indexCount": map_floor.indices.len(),
+            });
+            map_floor_positions.extend_from_slice(&map_floor.positions);
+            map_floor_indices.extend_from_slice(&map_floor.indices);
             structures.push(json!({
                 "id": format!("cell-struct:{:08x}/{:04x}", cell.structure.environment_id, cell.structure.local_selector),
                 "environmentId": dat_id(cell.structure.environment_id),
@@ -143,6 +170,7 @@ pub(crate) async fn serialize_env_cell_source_record(
                 "surfaceSlotCount": cell.surface_ids.len(),
                 "containmentPlaneOffset": containment_plane_offset,
                 "containmentPlaneCount": projection.containment_hull.planes.len(),
+                "mapFloor": map_floor_json,
                 "portalPolygons": projection.apertures.iter().map(|aperture| json!({
                     "cellStructPortalIndex": aperture.cell_struct_portal_index,
                     "polygonId": aperture.polygon_id,
@@ -151,6 +179,17 @@ pub(crate) async fn serialize_env_cell_source_record(
             structure_indices.insert(structure_key, (index, cell.surface_ids.len()));
             index
         };
+        let rotated_up = cell
+            .placement
+            .orientation
+            .rotate_vector(holtburger_common::Vector3::new(0.0, 0.0, 1.0));
+        ensure!(
+            rotated_up.z >= 1.0 - MAP_FLOOR_UP_EPSILON,
+            "EnvCell 0x{:08X} placement rotation does not preserve the up axis (rotated z {}), \
+             so its structure-local map floor would misclassify walkability",
+            cell.env_cell_id,
+            rotated_up.z
+        );
         object_closure
             .add_materials(runtime, &cell.surface_ids)
             .await
@@ -276,6 +315,8 @@ pub(crate) async fn serialize_env_cell_source_record(
     writer.append_u32("visibleCellIds", visible_cell_ids);
     writer.append_u32("cellResidentRanges", resident_ranges);
     writer.append_f32("containmentPlanes", containment_planes)?;
+    writer.append_f32("mapFloorPositions", map_floor_positions)?;
+    writer.append_u32("mapFloorIndices", map_floor_indices);
 
     let mut apertures = SerializedApertures::default();
     let mut aperture_indices_by_cell_polygon = HashMap::<(u32, u16), usize>::new();

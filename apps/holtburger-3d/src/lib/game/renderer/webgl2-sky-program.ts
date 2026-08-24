@@ -1,7 +1,7 @@
 import {
 	compileWebGL2Shader,
 	requireWebGL2Uniform,
-} from "./webgl2-shader-utils";
+} from "../webgl/shader-program";
 
 /** Sampler units bound once for the sky program's lifetime. */
 export const SKY_TEXTURE_UNITS = {

@@ -18,7 +18,10 @@ import type {
 } from "../resolution/landblock-layer";
 import { qualifyPortalApertureId } from "../resolution/portal-scene-identity";
 import type { ObjectMaterialOrdering } from "../resolution/object-material-planner";
-import type { ResolvedGeometry } from "../resolution/presentation";
+import type {
+	ResolvedGeometry,
+	ResolvedMapSurface,
+} from "../resolution/presentation";
 import {
 	bakeStaticLight,
 	placeObjectLights,
@@ -54,6 +57,8 @@ interface EnvCellShellMaterializationPlan {
 	readonly envCellId: EnvCellId;
 	readonly geometry: ObjectGeometryKey;
 	readonly placement: ScenePlacement;
+	/** Host-derived overhead-map floor for this cell's structure, in the same local frame. */
+	readonly mapFloor: ResolvedMapSurface;
 	readonly structureLocalBounds: AABB3;
 	readonly landblockBounds: AABB3;
 	readonly materialRanges: readonly EnvCellShellMaterialRange[];
@@ -195,6 +200,7 @@ export function planEnvCellMaterialization(
 			envCellId: cell.id,
 			geometry: geometryKey,
 			placement: cell.structureToLandblock,
+			mapFloor: cell.structure.mapFloor,
 			structureLocalBounds,
 			landblockBounds: cell.landblockBounds,
 			materialRanges,

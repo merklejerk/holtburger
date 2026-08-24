@@ -6,7 +6,7 @@ const STIPPLING_REPEAT_NEG: u8 = 0x02;
 const STIPPLING_NO_POS: u8 = 0x04;
 const STIPPLING_NO_NEG: u8 = 0x08;
 pub const CULL_MODE_LANDBLOCK: i32 = 0;
-const CULL_MODE_NONE: i32 = 1;
+pub const CULL_MODE_NONE: i32 = 1;
 const CULL_MODE_CLOCKWISE: i32 = 2;
 pub const CULL_MODE_COUNTER_CLOCKWISE: i32 = 3;
 

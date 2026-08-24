@@ -1,11 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { decodeEnvCellRecord } from "./decode-env-cell-record";
+import {
+	ENV_CELL_RECORD_VERSION,
+	decodeEnvCellRecord,
+} from "./decode-env-cell-record";
 
 const LAND_BLOCK_ID = "0x0001ffff";
 const CELL_ID = 0x00010100;
 const SURFACE_ID = 0x08000001;
 
 describe("decodeEnvCellRecord", () => {
+	it("rejects an out-of-range map-floor index", () => {
+		expect(() =>
+			decodeEnvCellRecord(
+				envCellRecord({ mapFloorIndices: [0, 1, 3] }),
+				LAND_BLOCK_ID,
+			),
+		).toThrow("out-of-range map-floor index");
+	});
+
 	it("decodes one closed synthetic cell record", () => {
 		const source = decodeEnvCellRecord(envCellRecord(), LAND_BLOCK_ID);
 
@@ -141,6 +153,8 @@ function envCellRecord(
 		["visibleCellIds", "u32", []],
 		["cellResidentRanges", "u32", [0, 0]],
 		["containmentPlanes", "f32", [1, 0, 0, 0]],
+		["mapFloorPositions", "f32", [0, 0, 0, 1, 0, 0, 0, 0, 1]],
+		["mapFloorIndices", "u32", [0, 1, 2]],
 		["aperturePositions", "f32", []],
 		["apertureIndices", "u32", []],
 		["shellPositions", "f32", [0, 0, 0, 1, 0, 0, 0, 1, 0]],
@@ -201,6 +215,12 @@ function envCellRecord(
 			surfaceSlotCount: 1,
 			containmentPlaneOffset: 0,
 			containmentPlaneCount: 1,
+			mapFloor: {
+				positionOffset: 0,
+				vertexCount: 3,
+				indexOffset: 0,
+				indexCount: 3,
+			},
 			portalPolygons: [],
 		},
 	];
@@ -222,7 +242,7 @@ function envCellRecord(
 function baseManifest(availability: "present" | "absent"): MutableManifest {
 	return {
 		transport: "holtburger-env-cell-record",
-		version: 3,
+		version: ENV_CELL_RECORD_VERSION,
 		byteOrder: "little-endian",
 		sectionByteOffsetBase: "section-data",
 		landblockId: LAND_BLOCK_ID,
@@ -355,7 +375,7 @@ function serializeRecord(
 	const result = new Uint8Array(16 + manifestLength + sectionBytes.length);
 	result.set(encoder.encode("HBEC"), 0);
 	const view = new DataView(result.buffer);
-	view.setUint16(4, 3, true);
+	view.setUint16(4, ENV_CELL_RECORD_VERSION, true);
 	view.setUint16(6, 0, true);
 	view.setUint32(8, manifestLength, true);
 	view.setUint32(12, result.length, true);

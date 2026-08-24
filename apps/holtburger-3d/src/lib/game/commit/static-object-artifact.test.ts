@@ -231,6 +231,7 @@ function litResident(x: number, y: number, z: number) {
 function source(): ResolvedOutdoorStaticLayerSource {
 	return {
 		dynamicSources: [],
+		mapBlockers: new Map(),
 		kind: LandblockLayerKind.Generated,
 		landblockId: "0xda55ffff",
 		staticResidents: [],

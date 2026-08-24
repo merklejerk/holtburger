@@ -8,7 +8,7 @@ import {
 import {
 	compileWebGL2Shader,
 	requireWebGL2Uniform,
-} from "./webgl2-shader-utils";
+} from "../webgl/shader-program";
 import { withPreservedWebGL2AllocationBindings } from "./webgl2-render-target";
 import {
 	type RenderExtent,

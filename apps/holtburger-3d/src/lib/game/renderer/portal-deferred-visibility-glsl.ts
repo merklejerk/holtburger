@@ -5,7 +5,7 @@ import {
 	PORTAL_SCOPE_ATLAS_METADATA_BINDING_POINT,
 	PORTAL_SCOPE_ATLAS_METADATA_GLSL,
 } from "./portal-scope-atlas-metadata-glsl";
-import { requireWebGL2Uniform } from "./webgl2-shader-utils";
+import { requireWebGL2Uniform } from "../webgl/shader-program";
 
 /** Draw-varying render-domain selector for one physical deferred submission. */
 export interface WebGL2PortalDeferredVisibilityUniforms {

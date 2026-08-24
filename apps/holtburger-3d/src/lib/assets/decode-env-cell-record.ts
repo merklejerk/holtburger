@@ -33,7 +33,10 @@ import {
 import { acFrameTransform, renderScale } from "./ac-frame";
 
 const MAGIC = "HBEC";
-const VERSION = 3;
+// v4 added the derived overhead-map floor sections (mapFloorPositions/mapFloorIndices and each
+// structure's mapFloor ranges).
+export const ENV_CELL_RECORD_VERSION = 4;
+const VERSION = ENV_CELL_RECORD_VERSION;
 const HEADER_LENGTH = 16;
 const datId = z.string().regex(/^0x[0-9a-f]{8}$/i);
 const finiteNumber = z.number().finite();
@@ -49,6 +52,13 @@ const structureSchema = z.object({
 	surfaceSlotCount: z.number().int().nonnegative(),
 	containmentPlaneOffset: z.number().int().nonnegative(),
 	containmentPlaneCount: z.number().int().nonnegative(),
+	/** Derived overhead-map walkable floor, in the same structure-local frame as the geometry. */
+	mapFloor: z.object({
+		positionOffset: z.number().int().nonnegative(),
+		vertexCount: z.number().int().nonnegative(),
+		indexOffset: z.number().int().nonnegative(),
+		indexCount: z.number().int().nonnegative(),
+	}),
 	portalPolygons: z.array(
 		z.object({
 			cellStructPortalIndex: z.number().int().nonnegative(),
@@ -211,6 +221,10 @@ const REQUIRED_SECTIONS = {
 	visibleCellIds: "u32",
 	cellResidentRanges: "u32",
 	containmentPlanes: "f32",
+	// Derived overhead-map floor geometry, present on every v4 interior record. Consumed when the
+	// map's interior layer lands; validated here so the record decodes today.
+	mapFloorPositions: "f32",
+	mapFloorIndices: "u32",
 	aperturePositions: "f32",
 	apertureIndices: "u32",
 	shellPositions: "f32",
@@ -285,6 +299,8 @@ export function decodeEnvCellRecord(
 	const structures = decodeStructures(
 		manifest,
 		arrays.containmentPlanes,
+		arrays.mapFloorPositions,
+		arrays.mapFloorIndices,
 		shellGeometries,
 	);
 	const objectGeometries = uniqueMap(
@@ -464,6 +480,9 @@ interface CellArrays {
 	readonly visibleCellIds: Uint32Array;
 	readonly residentRanges: Uint32Array;
 	readonly containmentPlanes: Float32Array;
+	/** Derived overhead-map floor vertices shared by every structure's range. */
+	readonly mapFloorPositions: Float32Array;
+	readonly mapFloorIndices: Uint32Array;
 }
 
 function decodeCellArrays(
@@ -574,18 +593,36 @@ function decodeCellArrays(
 			"containmentPlanes",
 			Float32Array,
 		),
+		mapFloorPositions: readWhole(
+			response,
+			sectionDataOffset,
+			sections,
+			"mapFloorPositions",
+			Float32Array,
+		),
+		mapFloorIndices: readWhole(
+			response,
+			sectionDataOffset,
+			sections,
+			"mapFloorIndices",
+			Uint32Array,
+		),
 	};
 }
 
 function decodeStructures(
 	manifest: EnvCellManifest,
 	containmentPlanes: Float32Array,
+	mapFloorPositions: Float32Array,
+	mapFloorIndices: Uint32Array,
 	geometries: ReadonlyMap<string, ResolvedGeometry>,
 ): readonly ResolvedCellStructure[] {
 	if (containmentPlanes.length % 4 !== 0) {
 		throw new Error("EnvCell containment section is not a plane tuple array.");
 	}
 	let expectedPlaneOffset = 0;
+	let expectedMapFloorPositionOffset = 0;
+	let expectedMapFloorIndexOffset = 0;
 	const structures = manifest.structures.map((entry) => {
 		const geometry = geometries.get(entry.geometry.id);
 		if (!geometry)
@@ -610,6 +647,33 @@ function decodeStructures(
 			);
 		}
 		const start = entry.containmentPlaneOffset * 4;
+		const floor = entry.mapFloor;
+		if (
+			floor.positionOffset !== expectedMapFloorPositionOffset ||
+			floor.indexOffset !== expectedMapFloorIndexOffset ||
+			floor.indexCount % 3 !== 0 ||
+			floor.positionOffset + floor.vertexCount * 3 > mapFloorPositions.length ||
+			floor.indexOffset + floor.indexCount > mapFloorIndices.length
+		) {
+			throw new Error(
+				`EnvCell structure ${entry.id} has an invalid map-floor range.`,
+			);
+		}
+		const floorPositions = mapFloorPositions.slice(
+			floor.positionOffset,
+			floor.positionOffset + floor.vertexCount * 3,
+		);
+		const floorIndices = mapFloorIndices.slice(
+			floor.indexOffset,
+			floor.indexOffset + floor.indexCount,
+		);
+		if (floorIndices.some((index) => index >= floor.vertexCount)) {
+			throw new Error(
+				`EnvCell structure ${entry.id} has an out-of-range map-floor index.`,
+			);
+		}
+		expectedMapFloorPositionOffset += floor.vertexCount * 3;
+		expectedMapFloorIndexOffset += floor.indexCount;
 		const resolved = {
 			id: entry.id,
 			geometry,
@@ -618,6 +682,10 @@ function decodeStructures(
 				start,
 				start + entry.containmentPlaneCount * 4,
 			),
+			mapFloor: {
+				positions: floorPositions,
+				indices: floorIndices,
+			},
 			portalPolygons: entry.portalPolygons,
 		};
 		if (
@@ -633,6 +701,14 @@ function decodeStructures(
 	if (expectedPlaneOffset !== containmentPlanes.length / 4) {
 		throw new Error(
 			"EnvCell structure ranges do not cover the containment section.",
+		);
+	}
+	if (
+		expectedMapFloorPositionOffset !== mapFloorPositions.length ||
+		expectedMapFloorIndexOffset !== mapFloorIndices.length
+	) {
+		throw new Error(
+			"EnvCell structure ranges do not cover the map-floor sections.",
 		);
 	}
 	return structures;

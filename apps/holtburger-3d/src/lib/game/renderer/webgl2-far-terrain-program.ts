@@ -4,7 +4,7 @@ import { TERRAIN_TYPE_COUNT } from "../terrain/pcode";
 import {
 	compileWebGL2Shader,
 	requireWebGL2Uniform,
-} from "./webgl2-shader-utils";
+} from "../webgl/shader-program";
 
 export const WEBGL2_FAR_TERRAIN_VERTEX_SHADER = `#version 300 es
 layout(location = 0) in vec3 aPosition;

@@ -1,7 +1,7 @@
 import {
 	compileWebGL2Shader,
 	requireWebGL2Uniform,
-} from "./webgl2-shader-utils";
+} from "../webgl/shader-program";
 import { WEBGL2_DISTANCE_FOG_GLSL } from "./webgl2-fog";
 import { WEBGL2_SCENE_LIGHTING_GLSL } from "./webgl2-lighting";
 import {

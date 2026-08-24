@@ -175,6 +175,33 @@ const dynamicEntityViewSchema = z.object({
 		}),
 		appearance: appearanceSchema,
 		objectScale: finiteNumber.positive(),
+		/** Producer-resolved retail radar presentation facts. */
+		radar: z.object({
+			blipColor: z.enum([
+				"Default",
+				"Blue",
+				"Gold",
+				"White",
+				"Purple",
+				"Red",
+				"Pink",
+				"Green",
+				"Yellow",
+				"Cyan",
+				"BrightGreen",
+			]),
+			behavior: z
+				.enum([
+					"Undefined",
+					"ShowNever",
+					"ShowMovement",
+					"ShowAttacking",
+					"ShowAlways",
+				])
+				.nullable(),
+			/** `PropertyFloat::ObviousRadarRange` in metres. */
+			obviousRange: finiteNumber.nonnegative().nullable(),
+		}),
 	}),
 	physics: z.object({
 		semanticMask: guid,

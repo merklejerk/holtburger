@@ -15,6 +15,7 @@ describe("StandardCommitPipeline", () => {
 	it("hands resolved building source to the runtime without preparing pixels or geometry", async () => {
 		const source = {
 			dynamicSources: [],
+			mapBlockers: new Map(),
 			kind: LandblockLayerKind.Buildings,
 			landblockId: "0xda55ffff",
 			staticResidents: [],
@@ -46,6 +47,7 @@ describe("StandardCommitPipeline", () => {
 		} as unknown as ResolvedTerrainLayerSource;
 		const buildings = {
 			dynamicSources: [],
+			mapBlockers: new Map(),
 			kind: LandblockLayerKind.Buildings,
 			landblockId,
 			staticResidents: [],
@@ -147,6 +149,7 @@ function outdoorSource(
 ): ResolvedObjectLayerSource {
 	return {
 		dynamicSources: [],
+		mapBlockers: new Map(),
 		kind,
 		landblockId,
 		staticResidents: [],

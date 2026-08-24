@@ -2,7 +2,7 @@
 
 use holtburger_common::Guid;
 use holtburger_common::properties::{
-    PropertyString, WorldObjectExt as _, WorldObjectPropertyAccessors as _,
+    PropertyFloat, PropertyString, WorldObjectExt as _, WorldObjectPropertyAccessors as _,
 };
 use holtburger_world::{EntityPlacement, PhysicalBodyParticipation, WorldState};
 use thiserror::Error;
@@ -94,6 +94,13 @@ pub fn project_client_dynamic_entity(
         appearance: entity.appearance.clone(),
         object_scale,
         physics: entity.physics,
+        radar: crate::DynamicEntityRadarFacts::from_authored(
+            format_args!("client entity 0x{:08X}", guid.0),
+            entity.radar_blip_color().map(|value| value as i32),
+            crate::semantic_radar_blip_color(entity.flags, entity.item_type()),
+            entity.radar_enum().map(|value| value as i32),
+            entity.get_float_prop(PropertyFloat::ObviousRadarRange),
+        ),
         placement,
         playing_clip: world.motion_runtimes.playing_clip(guid),
     }))
@@ -243,6 +250,7 @@ mod tests {
                 appearance,
                 object_scale: 1.25,
                 physics,
+                radar: crate::DynamicEntityRadarFacts::default(),
                 placement: EntityPlacement::World(DynamicEntityWorldProjection {
                     body,
                     spatial_membership: DynamicEntitySpatialMembership {

@@ -31,6 +31,11 @@ function entity(
 				partChanges: [],
 			},
 			objectScale: 1,
+			radar: {
+				blipColor: "Default",
+				behavior: null,
+				obviousRange: null,
+			},
 		},
 		physics: {
 			semanticMask: 0,

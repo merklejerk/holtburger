@@ -104,6 +104,17 @@ describe("decodeOutdoorStaticRecord", () => {
 		).toThrow("out-of-range index");
 	});
 
+	it("rejects an out-of-range map-blocker index before publishing a source", () => {
+		const response = buildResponse({ mapBlockerIndices: [0, 1, 3] });
+		expect(() =>
+			decodeOutdoorStaticRecord(
+				response,
+				LANDBLOCK_ID,
+				LandblockLayerKind.Buildings,
+			),
+		).toThrow("out-of-range index");
+	});
+
 	it("resolves authored setup lights into object-local render axes", () => {
 		const source = decodeOutdoorStaticRecord(
 			buildResponse({
@@ -301,6 +312,7 @@ function buildResponse(
 		readonly holdingLocations?: readonly Record<string, unknown>[];
 		readonly lights?: readonly Record<string, unknown>[];
 		readonly placementFrames?: readonly Record<string, unknown>[];
+		readonly mapBlockerIndices?: readonly number[];
 	} = {},
 ): Uint8Array {
 	const positions = Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0]);
@@ -312,36 +324,47 @@ function buildResponse(
 	const materialSideKinds = Uint8Array.from([0]);
 	const materialSideTypes = Uint8Array.from([1]);
 	const materialStippling = Uint8Array.from([1]);
-	const parts = [
-		positions,
-		normals,
-		textureCoordinates,
-		indices,
-		materialSlots,
-		materialWrapModes,
-		materialSideKinds,
-		materialSideTypes,
-		materialStippling,
+	const layer = options.layer ?? "buildings";
+	// Name, payload, and scalar type together: the buildings layer carries two extra map-blocker
+	// sections, so a positional scalar-type rule would silently mistype them.
+	const parts: ReadonlyArray<
+		readonly [
+			string,
+			Float32Array | Uint32Array | Uint16Array | Uint8Array,
+			string,
+		]
+	> = [
+		["positions", positions, "f32"],
+		["normals", normals, "f32"],
+		["textureCoordinates", textureCoordinates, "f32"],
+		["indices", indices, "u32"],
+		["materialSlots", materialSlots, "u16"],
+		["materialWrapModes", materialWrapModes, "u8"],
+		["materialSideKinds", materialSideKinds, "u8"],
+		["materialSideTypes", materialSideTypes, "u8"],
+		["materialStippling", materialStippling, "u8"],
+		...(layer === "buildings"
+			? ([
+					[
+						"mapBlockerPositions",
+						Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+						"f32",
+					],
+					[
+						"mapBlockerIndices",
+						Uint32Array.from(options.mapBlockerIndices ?? [0, 1, 2]),
+						"u32",
+					],
+				] as const)
+			: []),
 	];
-	const names = [
-		"positions",
-		"normals",
-		"textureCoordinates",
-		"indices",
-		"materialSlots",
-		"materialWrapModes",
-		"materialSideKinds",
-		"materialSideTypes",
-		"materialStippling",
-	] as const;
 	let byteOffset = 0;
-	const sections = parts.map((part, index) => {
+	const sections = parts.map(([name, part, scalarType]) => {
 		const alignment = part.BYTES_PER_ELEMENT;
 		byteOffset = Math.ceil(byteOffset / alignment) * alignment;
 		const result = {
-			name: names[index],
-			scalarType:
-				index < 3 ? "f32" : index === 3 ? "u32" : index === 4 ? "u16" : "u8",
+			name,
+			scalarType,
 			elementCount: part.length,
 			byteOffset,
 			byteLength: part.byteLength,
@@ -350,7 +373,7 @@ function buildResponse(
 		return result;
 	});
 	const payload = new Uint8Array(byteOffset);
-	for (const [index, part] of parts.entries()) {
+	for (const [index, [, part]] of parts.entries()) {
 		payload.set(new Uint8Array(part.buffer), sections[index]!.byteOffset);
 	}
 	const manifest = {
@@ -358,7 +381,7 @@ function buildResponse(
 		byteOrder: "little-endian",
 		sectionByteOffsetBase: "section-data",
 		landblockId: LANDBLOCK_ID,
-		layer: options.layer ?? "buildings",
+		layer,
 		residents: options.residents ?? [resident("direct"), resident("animated")],
 		definitions: [
 			{
@@ -439,6 +462,18 @@ function buildResponse(
 			},
 		],
 		textureDependencies: [],
+		mapBlockers:
+			layer === "buildings"
+				? [
+						{
+							sourceAssetId: "gfx-obj/01000001",
+							positionOffset: 0,
+							vertexCount: 3,
+							indexOffset: 0,
+							indexCount: 3,
+						},
+					]
+				: undefined,
 		sections,
 	};
 	const manifestBytes = new TextEncoder().encode(JSON.stringify(manifest));

@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
 use strum_macros::{Display, FromRepr};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, FromRepr, Display)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, FromRepr, Display, Default)]
 #[repr(u8)]
 pub enum RadarColor {
+    #[default]
     Default = 0x00,
     Blue = 0x01,
     Gold = 0x02,

@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
 use holtburger_common::position::WorldPosition;
-use holtburger_common::properties::{PhysicsState, WeenieType};
+use holtburger_common::properties::{ItemType, PhysicsState, WeenieType};
 use holtburger_common::{Guid, Quaternion, Vector3};
 use holtburger_content::ContentRepository;
 use holtburger_core::{
@@ -972,6 +972,12 @@ fn template_definition_input(
     appearance: EntityAppearance,
     placement: EntityPlacement<DynamicEntityInitialState>,
 ) -> Result<DynamicEntityDefinitionInput, ExplorerEntityDriverError> {
+    let weenie_type = WeenieType::from_repr(template.weenie_type).ok_or(
+        ExplorerEntityDriverError::InvalidWeenieType {
+            wcid: template.wcid,
+            value: template.weenie_type,
+        },
+    )?;
     Ok(DynamicEntityDefinitionInput {
         identity: DynamicEntityIdentity {
             guid,
@@ -982,12 +988,7 @@ fn template_definition_input(
                 .ok_or(ExplorerEntityDriverError::MissingName {
                     wcid: template.wcid,
                 })?,
-            weenie_type: WeenieType::from_repr(template.weenie_type).ok_or(
-                ExplorerEntityDriverError::InvalidWeenieType {
-                    wcid: template.wcid,
-                    value: template.weenie_type,
-                },
-            )?,
+            weenie_type,
         },
         content: DynamicEntityContent {
             setup_did: content.setup_did,
@@ -1006,6 +1007,20 @@ fn template_definition_input(
             template.maximum_velocity,
         )?,
         rotation_speed: optional_f32(template.wcid, "rotation speed", template.rotation_speed)?,
+        radar: holtburger_core::DynamicEntityRadarFacts::from_authored(
+            format_args!("WCID {}", template.wcid),
+            template.radar_blip_color,
+            holtburger_core::explorer_radar_blip_color(
+                weenie_type,
+                template
+                    .appearance
+                    .item_type
+                    .map(|value| ItemType::from_bits_retain(value as u32)),
+                template.attackable,
+            ),
+            template.radar_behavior,
+            template.obvious_radar_range,
+        ),
         physics: content.physics,
     })
 }
@@ -1268,6 +1283,10 @@ mod tests {
             elasticity: None,
             maximum_velocity: None,
             rotation_speed: None,
+            radar_blip_color: None,
+            radar_behavior: None,
+            obvious_radar_range: None,
+            attackable: None,
             appearance: Default::default(),
             wielded: Vec::new(),
             physics: TemplatePhysics {

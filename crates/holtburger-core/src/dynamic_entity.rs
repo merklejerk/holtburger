@@ -8,7 +8,9 @@ use std::time::Instant;
 
 use anyhow::Context;
 use holtburger_common::position::WorldPosition;
-use holtburger_common::properties::{PhysicsState, WeenieType};
+use holtburger_common::properties::{
+    ItemType, ObjectDescriptionFlag, PhysicsState, RadarBehavior, RadarColor, WeenieType,
+};
 use holtburger_common::{Guid, Placement, Quaternion, Vector3};
 use holtburger_content::{
     ColliderScale, CollisionShape, ContentRepository, MaterialAppearanceInput,
@@ -84,6 +86,155 @@ pub struct DynamicEntityInitialState {
     pub created_at: Instant,
 }
 
+/// Retail radar presentation facts resolved at the producer boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DynamicEntityRadarFacts {
+    /// Effective blip color after explicit property and semantic fallback resolution.
+    pub blip_color: holtburger_common::properties::RadarColor,
+    /// Authored `PropertyInt::ShowableOnRadar` (133).
+    pub behavior: Option<holtburger_common::properties::RadarBehavior>,
+    /// Authored `PropertyFloat::ObviousRadarRange` (104) in metres.
+    pub obvious_range: Option<f32>,
+}
+
+impl DynamicEntityRadarFacts {
+    /// Types raw authored radar properties and resolves the effective base blip color.
+    ///
+    /// Radar facts are cosmetic map presentation, so each field degrades independently rather than
+    /// failing the entity: an unmappable value selects the producer's category fallback. Drops are
+    /// logged rather than swallowed, because they mean the source authored
+    /// something neither ACE's enums nor retail's blip table describe. The census over the shipped
+    /// ACE World catalog found no such value, so a warning here indicates genuinely novel content.
+    pub fn from_authored(
+        context: impl std::fmt::Display,
+        blip_color: Option<i32>,
+        fallback_blip_color: RadarColor,
+        behavior: Option<i32>,
+        obvious_range: Option<f64>,
+    ) -> Self {
+        Self {
+            blip_color: blip_color.map_or(fallback_blip_color, |value| {
+                let typed = u8::try_from(value).ok().and_then(RadarColor::from_repr);
+                if typed.is_none() {
+                    log::warn!(
+                        "{context} radar blip color {value} is outside RadarColor; using category fallback"
+                    );
+                }
+                // Retail treats the authored Default value exactly like an absent property and
+                // continues into its object-category checks (`acclient.c:252944-253021`).
+                typed.filter(|color| *color != RadarColor::Default)
+                    .unwrap_or(fallback_blip_color)
+            }),
+            behavior: behavior.and_then(|value| {
+                let typed = u8::try_from(value).ok().and_then(RadarBehavior::from_repr);
+                if typed.is_none() {
+                    log::warn!(
+                        "{context} showable-on-radar {value} is outside RadarBehavior; ignoring"
+                    );
+                }
+                typed
+            }),
+            obvious_range: obvious_range.and_then(|value| {
+                let typed = value as f32;
+                if !typed.is_finite() || typed < 0.0 {
+                    log::warn!(
+                        "{context} obvious radar range {value} is not a usable distance; ignoring"
+                    );
+                    return None;
+                }
+                Some(typed)
+            }),
+        }
+    }
+}
+
+/// Selects our semantic fallback color from live entity classification facts.
+///
+/// RETAIL DIVERGENCE: retail's absent-color fallback makes portals purple, vendors yellow,
+/// attackable non-player creatures gold, and most remaining entities neutral
+/// (`acclient.c:253001-253079`). We instead follow the CLI's more informative presentation policy:
+/// players yellow, friendly creatures/vendors bright green, hostile creatures red, portals purple,
+/// lifestones blue, mana stones cyan, and recognized objects white. Restoring retail would erase the
+/// hostile/friendly distinction. This is client-only presentation that authored content cannot
+/// observe; the shipped-catalog census found 8,739 of 10,883 radar-visible templates rely on a
+/// fallback rather than an explicit `RadarBlipColor`.
+pub fn semantic_radar_blip_color(
+    flags: ObjectDescriptionFlag,
+    item_type: Option<ItemType>,
+) -> RadarColor {
+    if flags.contains(ObjectDescriptionFlag::PLAYER) {
+        return RadarColor::Yellow;
+    }
+
+    if item_type.is_some_and(|value| value.contains(ItemType::CREATURE)) {
+        return if flags.contains(ObjectDescriptionFlag::ATTACKABLE) {
+            RadarColor::Red
+        } else {
+            RadarColor::BrightGreen
+        };
+    }
+
+    if flags.contains(ObjectDescriptionFlag::PORTAL)
+        || item_type.is_some_and(|value| value.contains(ItemType::PORTAL))
+    {
+        RadarColor::Purple
+    } else if flags.contains(ObjectDescriptionFlag::VENDOR) {
+        RadarColor::BrightGreen
+    } else if flags
+        .intersects(ObjectDescriptionFlag::LIFE_STONE | ObjectDescriptionFlag::BIND_STONE)
+        || item_type.is_some_and(|value| value.contains(ItemType::LIFE_STONE))
+    {
+        RadarColor::Blue
+    } else if item_type.is_some_and(|value| value.contains(ItemType::MANA_STONE)) {
+        RadarColor::Cyan
+    } else if flags.contains(ObjectDescriptionFlag::HEALER) {
+        RadarColor::Pink
+    } else if flags.intersects(ObjectDescriptionFlag::DOOR | ObjectDescriptionFlag::STUCK)
+        || item_type.is_some_and(|value| !value.is_empty())
+    {
+        RadarColor::White
+    } else {
+        RadarColor::Default
+    }
+}
+
+/// Selects the same semantic fallback from the static facts available to Explorer.
+pub fn explorer_radar_blip_color(
+    weenie_type: WeenieType,
+    item_type: Option<ItemType>,
+    attackable: Option<bool>,
+) -> RadarColor {
+    match weenie_type {
+        WeenieType::Portal | WeenieType::HousePortal => RadarColor::Purple,
+        WeenieType::Vendor => RadarColor::BrightGreen,
+        WeenieType::Creature
+        | WeenieType::Cow
+        | WeenieType::AI
+        | WeenieType::Pet
+        | WeenieType::CombatPet => {
+            if attackable.unwrap_or(true) {
+                RadarColor::Red
+            } else {
+                RadarColor::BrightGreen
+            }
+        }
+        WeenieType::Admin | WeenieType::Sentinel => RadarColor::BrightGreen,
+        WeenieType::LifeStone | WeenieType::AllegianceBindstone => RadarColor::Blue,
+        WeenieType::ManaStone => RadarColor::Cyan,
+        WeenieType::Door => RadarColor::White,
+        WeenieType::Undef | WeenieType::Unknown31 => RadarColor::Default,
+        _ => {
+            let inferred = semantic_radar_blip_color(ObjectDescriptionFlag::empty(), item_type);
+            if inferred == RadarColor::Default {
+                RadarColor::White
+            } else {
+                inferred
+            }
+        }
+    }
+}
+
 /// Constructor input whose scalar domains have not yet been validated.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DynamicEntityDefinitionInput {
@@ -105,6 +256,8 @@ pub struct DynamicEntityDefinitionInput {
     pub maximum_velocity: Option<f32>,
     /// Optional authored rotation speed retained for behavior integration.
     pub rotation_speed: Option<f32>,
+    /// Producer-resolved radar presentation facts consumed by overhead-map blips.
+    pub radar: DynamicEntityRadarFacts,
     /// Fully resolved semantic state and state-derived decisions.
     pub physics: EffectiveEntityPhysicsState,
 }
@@ -130,6 +283,8 @@ pub struct DynamicEntityDefinition {
     pub maximum_velocity: Option<f32>,
     /// Validated optional rotation speed for later behavior integration.
     pub rotation_speed: Option<f32>,
+    /// Producer-resolved radar presentation facts consumed by overhead-map blips.
+    pub radar: DynamicEntityRadarFacts,
     /// Fully resolved semantic state and state-derived decisions.
     pub physics: EffectiveEntityPhysicsState,
 }
@@ -218,6 +373,7 @@ impl DynamicEntityDefinition {
             elasticity,
             maximum_velocity: input.maximum_velocity,
             rotation_speed: input.rotation_speed,
+            radar: input.radar,
             physics: input.physics,
         })
     }
@@ -391,6 +547,8 @@ pub struct DynamicEntityProjectionInput {
     pub object_scale: f32,
     /// Current complete semantic physics state.
     pub physics: EffectiveEntityPhysicsState,
+    /// Producer-resolved radar presentation facts consumed by overhead-map blips.
+    pub radar: DynamicEntityRadarFacts,
     /// Mutually exclusive current solver state or parent-owned attachment.
     pub placement: EntityPlacement<DynamicEntityWorldProjection>,
 }
@@ -630,6 +788,7 @@ fn projection_input(
         appearance: definition.appearance.clone(),
         object_scale: definition.object_scale,
         physics: definition.physics,
+        radar: definition.radar,
         placement,
     }
 }
@@ -1167,6 +1326,136 @@ mod tests {
         decide_entity_physics_state_transition, resolve_effective_entity_physics_state,
     };
 
+    #[test]
+    fn authored_radar_facts_type_in_domain_values() {
+        let facts = DynamicEntityRadarFacts::from_authored(
+            "test",
+            Some(5),
+            RadarColor::Purple,
+            Some(2),
+            Some(10.0),
+        );
+
+        assert_eq!(facts.blip_color, RadarColor::Red);
+        assert_eq!(facts.behavior, Some(RadarBehavior::ShowMovement));
+        assert_eq!(facts.obvious_range, Some(10.0));
+    }
+
+    /// Radar facts are cosmetic, so each unusable field drops independently instead of failing the
+    /// entity. `0x0A` sits in the authored gap between `RadarColor::Cyan` and `BrightGreen`.
+    #[test]
+    fn unusable_radar_values_drop_independently_without_failing_the_entity() {
+        let facts = DynamicEntityRadarFacts::from_authored(
+            "test",
+            Some(0x0A),
+            RadarColor::Default,
+            Some(99),
+            Some(f64::NAN),
+        );
+
+        assert_eq!(facts, DynamicEntityRadarFacts::default());
+
+        let partial = DynamicEntityRadarFacts::from_authored(
+            "test",
+            Some(-1),
+            RadarColor::Purple,
+            Some(4),
+            Some(-5.0),
+        );
+        assert_eq!(partial.blip_color, RadarColor::Purple);
+        assert_eq!(partial.behavior, Some(RadarBehavior::ShowAlways));
+        assert_eq!(partial.obvious_range, None);
+
+        let mut input = definition_input();
+        input.radar = DynamicEntityRadarFacts::from_authored(
+            "test",
+            Some(0x0A),
+            RadarColor::Default,
+            None,
+            None,
+        );
+        assert!(DynamicEntityDefinition::prepare(input).is_ok());
+    }
+
+    #[test]
+    fn absent_and_default_authored_colors_use_the_producer_category_fallback() {
+        for authored in [None, Some(RadarColor::Default as i32)] {
+            let facts = DynamicEntityRadarFacts::from_authored(
+                "portal",
+                authored,
+                RadarColor::Purple,
+                Some(RadarBehavior::ShowAlways as i32),
+                None,
+            );
+
+            assert_eq!(facts.blip_color, RadarColor::Purple);
+        }
+    }
+
+    #[test]
+    fn semantic_radar_colors_distinguish_cli_inspired_entity_classes() {
+        assert_eq!(
+            semantic_radar_blip_color(ObjectDescriptionFlag::PLAYER, Some(ItemType::CREATURE)),
+            RadarColor::Yellow
+        );
+        assert_eq!(
+            semantic_radar_blip_color(ObjectDescriptionFlag::ATTACKABLE, Some(ItemType::CREATURE)),
+            RadarColor::Red
+        );
+        assert_eq!(
+            semantic_radar_blip_color(ObjectDescriptionFlag::empty(), Some(ItemType::CREATURE)),
+            RadarColor::BrightGreen
+        );
+        assert_eq!(
+            semantic_radar_blip_color(ObjectDescriptionFlag::VENDOR, Some(ItemType::CREATURE)),
+            RadarColor::BrightGreen
+        );
+        assert_eq!(
+            semantic_radar_blip_color(ObjectDescriptionFlag::PORTAL, None),
+            RadarColor::Purple
+        );
+        assert_eq!(
+            semantic_radar_blip_color(ObjectDescriptionFlag::LIFE_STONE, None),
+            RadarColor::Blue
+        );
+        assert_eq!(
+            semantic_radar_blip_color(ObjectDescriptionFlag::empty(), Some(ItemType::MANA_STONE)),
+            RadarColor::Cyan
+        );
+        assert_eq!(
+            semantic_radar_blip_color(ObjectDescriptionFlag::DOOR, None),
+            RadarColor::White
+        );
+    }
+
+    #[test]
+    fn explorer_categories_use_the_semantic_color_policy() {
+        assert_eq!(
+            explorer_radar_blip_color(WeenieType::Portal, None, None),
+            RadarColor::Purple
+        );
+        assert_eq!(
+            explorer_radar_blip_color(WeenieType::Creature, Some(ItemType::CREATURE), Some(true)),
+            RadarColor::Red
+        );
+        assert_eq!(
+            explorer_radar_blip_color(WeenieType::Creature, Some(ItemType::CREATURE), Some(false)),
+            RadarColor::BrightGreen
+        );
+        assert_eq!(
+            explorer_radar_blip_color(WeenieType::Vendor, Some(ItemType::CREATURE), None),
+            RadarColor::BrightGreen
+        );
+        assert_eq!(
+            explorer_radar_blip_color(WeenieType::LifeStone, Some(ItemType::LIFE_STONE), None),
+            RadarColor::Blue
+        );
+        assert_eq!(
+            explorer_radar_blip_color(WeenieType::ManaStone, Some(ItemType::MANA_STONE), None),
+            RadarColor::Cyan
+        );
+    }
+
     fn definition_input() -> DynamicEntityDefinitionInput {
         DynamicEntityDefinitionInput {
             identity: DynamicEntityIdentity {
@@ -1194,6 +1483,7 @@ mod tests {
             elasticity: None,
             maximum_velocity: None,
             rotation_speed: None,
+            radar: DynamicEntityRadarFacts::default(),
             physics: resolve_effective_entity_physics_state(PhysicsState::GRAVITY),
         }
     }

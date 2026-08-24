@@ -19,6 +19,7 @@ function source(
 ): ResolvedStaticObjectLayerSource {
 	const common = {
 		dynamicSources: [],
+		mapBlockers: new Map(),
 		landblockId: "0xda55ffff" as const,
 		staticResidents: [],
 	};

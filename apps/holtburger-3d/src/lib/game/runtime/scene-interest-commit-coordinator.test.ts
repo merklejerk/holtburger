@@ -115,6 +115,7 @@ function artifact(layer: LandblockLayerKind): LandblockLayerCommit {
 		commit: {
 			source: {
 				dynamicSources: [],
+				mapBlockers: new Map(),
 				kind: layer,
 				landblockId,
 				staticResidents: [],

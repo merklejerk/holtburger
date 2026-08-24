@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import type { DynamicEntityEvent } from "../lib/game/runtime/dynamic-entity-feed";
+import type {
+	DynamicEntityEvent,
+	DynamicEntityView,
+} from "../lib/game/runtime/dynamic-entity-feed";
 import {
 	ExplorerDynamicEntitySession,
 	type ExplorerDynamicEntityTransport,
@@ -90,6 +93,7 @@ function entity(guid: number) {
 				partChanges: [],
 			},
 			objectScale: 1,
+			radar: { blipColor: "Default", behavior: null, obviousRange: null },
 		},
 		physics: {
 			semanticMask: 0,
@@ -118,7 +122,7 @@ function entity(guid: number) {
 			contact: "unknown" as const,
 			sampleMode: "authoritative-only" as const,
 		},
-	};
+	} satisfies DynamicEntityView;
 }
 
 function worldPoint(pose: ReturnType<typeof entity>["placement"]["pose"]) {

@@ -11,9 +11,10 @@ export const MAP_SURFACE_POSITION_ATTRIBUTE = 0;
  *
  * One program serves all three because they differ only in fill colour and whether depth and fade
  * apply. Interiors are the only geometry that can overlap itself — a dungeon ramp passes over its
- * own corridor — so depth is anchor-relative rather than height-ordered: the passage nearest the
- * anchor's own level wins the pixel, which is the only sensible answer for a 2D view of a 3D
- * pretzel. Setting `uFadeSpan` to zero disables both fade and tint for geometry that has no
+ * own corridor — so depth is anchor-relative and downward-first. The nearest floor at or below the
+ * anchor wins; a floor above participates only where no lower floor covers that pixel. This keeps
+ * an upper passage visible through genuine gaps without letting its floor hide a pit from a
+ * top-down reader. Setting `uFadeSpan` to zero disables both fade and tint for geometry that has no
  * meaningful height relationship to the anchor, which is every outdoor blocker.
  */
 const MAP_SURFACE_VERTEX_SHADER = `#version 300 es
@@ -24,7 +25,6 @@ uniform vec2 uLandblockOrigin;
 uniform vec2 uMapCenter;
 uniform mat4 uLocalToLandblock;
 uniform float uAnchorHeight;
-uniform float uDepthSpan;
 uniform vec2 uOutlineCenter;
 uniform float uOutlineExpansion;
 
@@ -48,9 +48,8 @@ void main() {
 	// Landblock origins carry no height, so landblock-local Y is already world Y.
 	float signedDelta = landblockPosition.y - uAnchorHeight;
 	vSignedHeightDelta = signedDelta;
-	// Nearest the anchor's level wins: zero delta maps to the near plane.
-	float depth = clamp(abs(signedDelta) / uDepthSpan, 0.0, 1.0) * 2.0 - 1.0;
-	gl_Position = vec4(uWorldToClip * worldOffset, depth, 1.0);
+	// The fragment shader owns depth because a ramp can cross the anchor plane within one triangle.
+	gl_Position = vec4(uWorldToClip * worldOffset, 0.0, 1.0);
 }
 `;
 
@@ -61,6 +60,7 @@ uniform vec3 uFillColor;
 uniform vec3 uVoidColor;
 uniform vec3 uAboveTint;
 uniform vec3 uBelowTint;
+uniform float uDepthSpan;
 uniform float uFadeSpan;
 uniform float uSameLevelBand;
 uniform float uTintSpan;
@@ -69,7 +69,19 @@ uniform float uMaximumFade;
 in float vSignedHeightDelta;
 out vec4 fragmentColor;
 
+// Keep the two priority ranges categorically separate after fixed-point depth quantization.
+const float DEPTH_PARTITION_GAP = 0.002;
+const float DEPTH_PARTITION_SPAN = (1.0 - DEPTH_PARTITION_GAP) / 2.0;
+const float ABOVE_DEPTH_START = (1.0 + DEPTH_PARTITION_GAP) / 2.0;
+
 void main() {
+	// Reserve the near half of the depth buffer for floors at or below the anchor. Within each half,
+	// distance still chooses the nearest floor. The small dead zone makes every below floor beat
+	// every above floor even when both distances saturate at uDepthSpan.
+	float relativeDepth = clamp(abs(vSignedHeightDelta) / uDepthSpan, 0.0, 1.0);
+	gl_FragDepth = vSignedHeightDelta <= 0.0
+		? relativeDepth * DEPTH_PARTITION_SPAN
+		: ABOVE_DEPTH_START + relativeDepth * DEPTH_PARTITION_SPAN;
 	if (uFadeSpan <= 0.0) {
 		fragmentColor = vec4(uFillColor, 1.0);
 		return;

@@ -4,10 +4,11 @@
 	import { ExplorerCameraInputController } from "../../explorer/explorer-camera-input-controller";
 	import { FRONTEND_TUNING } from "../../lib/frontend-tuning";
 	import { MapRenderer } from "../../lib/game/map/map-renderer";
-	import { MAP_DEFAULT_VIEW_DIAMETER } from "../../lib/game/map/map-appearance";
+	import { MAP_DEFAULT_VIEW_DIAMETERS } from "../../lib/game/map/map-appearance";
 	import {
 		type MapAnchor,
 		clampMapViewDiameter,
+		mapEnvironment,
 		mapHeadingFromSceneTransform,
 	} from "../../lib/game/map/map-view";
 	import {
@@ -2500,8 +2501,24 @@
 					const camera = cameraEvidence?.position ?? ([0, 0, 0] as const);
 					const centerX = request.centerX ?? camera[0];
 					const centerZ = request.centerZ ?? camera[2];
+					const anchor: MapAnchor = {
+						headingRadians: request.headingRadians ?? 0,
+						residency: cameraEvidence
+							? {
+									envCellId: cameraEvidence.envCellId,
+									landblockId: cameraEvidence.landblockId,
+								}
+							: null,
+						worldX: centerX,
+						worldY: request.centerY ?? camera[1],
+						worldZ: centerZ,
+					};
+					const defaultViewDiameter =
+						mapEnvironment(anchor) === "indoor"
+							? MAP_DEFAULT_VIEW_DIAMETERS.indoor
+							: MAP_DEFAULT_VIEW_DIAMETERS.outdoor;
 					const viewDiameter = clampMapViewDiameter(
-						request.viewDiameter ?? MAP_DEFAULT_VIEW_DIAMETER,
+						request.viewDiameter ?? defaultViewDiameter,
 					);
 					let minimumHeight = Number.POSITIVE_INFINITY;
 					let maximumHeight = Number.NEGATIVE_INFINITY;
@@ -2549,18 +2566,6 @@
 							(mapHeadingFromSceneTransform(placement.localTransform) * 180) /
 							Math.PI;
 					}
-					const anchor: MapAnchor = {
-						headingRadians: request.headingRadians ?? 0,
-						residency: cameraEvidence
-							? {
-									envCellId: cameraEvidence.envCellId,
-									landblockId: cameraEvidence.landblockId,
-								}
-							: null,
-						worldX: centerX,
-						worldY: request.centerY ?? camera[1],
-						worldZ: centerZ,
-					};
 					const drew = mapRenderer.render({ anchor, viewDiameter });
 					return {
 						available: mapRenderer.available,

@@ -38,13 +38,15 @@
 	import {
 		type MapViewParameters,
 		clampMapViewDiameter,
+		mapEnvironment,
 	} from "../lib/game/map/map-view";
 	import { formatExplorerOutdoorCoordinates } from "../explorer/explorer-camera-location";
 	import {
-		captureMapPanelDrawState,
-		sameMapPanelDrawState,
-		type MapPanelDrawState,
+		captureMapPanelGpuDrawState,
+		mapPanelViewDiameter,
+		sameMapPanelGpuDrawState,
 		type MapPanelFrame,
+		type MapPanelGpuDrawState,
 		type MapPanelState,
 	} from "./map-panel-frame";
 
@@ -52,8 +54,8 @@
 		/**
 		 * Pull every presentation-rate input in one snapshot.
 		 *
-		 * This is deliberately imperative. The scene runs faster than the map and must not schedule
-		 * Svelte work just because a camera or entity moved between map samples.
+		 * This is deliberately imperative. The scene must not schedule Svelte work just because a
+		 * camera or entity moved; overlays pull at display cadence and the WebGL map pulls at its cap.
 		 */
 		readonly readFrame: () => MapPanelFrame;
 		readonly panel: MapPanelState;
@@ -62,8 +64,8 @@
 
 	const { readFrame, panel, onStateChange }: Props = $props();
 
-	/** No faster than this; nobody reads a map at render rate and the map is not the scene. */
-	const MINIMUM_FRAME_INTERVAL_MS = 1000 / 30;
+	/** No faster than this; only the expensive WebGL map picture is cadence-limited. */
+	const MINIMUM_GPU_FRAME_INTERVAL_MS = 1000 / 30;
 	const MINIMUM_PANEL_SIZE = 140;
 
 	let mapCanvas = $state<HTMLCanvasElement | null>(null);
@@ -76,16 +78,19 @@
 
 	onMount(() => {
 		let frameHandle: number | undefined;
-		let lastSampledAt = Number.NEGATIVE_INFINITY;
-		let lastDrawn: MapPanelDrawState | null = null;
+		let lastGpuAttemptedAt = Number.NEGATIVE_INFINITY;
+		let lastGpuDrawn: MapPanelGpuDrawState | null = null;
 		const step = (now: number): void => {
 			frameHandle = window.requestAnimationFrame(step);
-			if (now - lastSampledAt < MINIMUM_FRAME_INTERVAL_MS) return;
-			lastSampledAt = now;
 			const frame = readFrame();
-			const next = captureMapPanelDrawState(frame, panel);
-			if (sameMapPanelDrawState(lastDrawn, next)) return;
-			if (draw(frame)) lastDrawn = next;
+			drawOverlay(frame);
+			const next = captureMapPanelGpuDrawState(frame, panel);
+			if (sameMapPanelGpuDrawState(lastGpuDrawn, next)) return;
+			if (now - lastGpuAttemptedAt < MINIMUM_GPU_FRAME_INTERVAL_MS) return;
+			lastGpuAttemptedAt = now;
+			if (drawMap(frame)) {
+				lastGpuDrawn = next;
+			}
 		};
 		frameHandle = window.requestAnimationFrame(step);
 		return () => {
@@ -100,7 +105,9 @@
 		if (!frame.anchor) return null;
 		return {
 			anchor: frame.anchor,
-			viewDiameter: clampMapViewDiameter(panel.viewDiameter),
+			viewDiameter: clampMapViewDiameter(
+				mapPanelViewDiameter(panel, frame.anchor),
+			),
 		};
 	}
 
@@ -114,13 +121,24 @@
 		return Math.max(1, Math.round(panel.size * (1 - 2 * RIM_FRACTION)));
 	}
 
-	function draw(frame: MapPanelFrame): boolean {
+	/** Draw DOM and 2D overlay work at the display's animation cadence. */
+	function drawOverlay(frame: MapPanelFrame): void {
 		drawChrome(frame);
+		const parameters = view(frame);
+		if (!parameters || !frame.source) {
+			clearBlipCanvas();
+			return;
+		}
+		drawBlips(frame, parameters, discPixelSize());
+	}
+
+	/** Draw only the map content that requires WebGL, subject to the 30 Hz cap. */
+	function drawMap(frame: MapPanelFrame): boolean {
 		reconcileRenderer(frame.source);
 		const parameters = view(frame);
 		const canvas = mapCanvas;
 		if (!parameters || !canvas || !frame.source) {
-			clearCanvases();
+			clearMapCanvas();
 			return true;
 		}
 		const size = discPixelSize();
@@ -129,7 +147,6 @@
 			canvas.height = size;
 		}
 		if (!renderer?.render(parameters)) return false;
-		drawBlips(frame, parameters, size);
 		return true;
 	}
 
@@ -141,9 +158,12 @@
 		if (source && mapCanvas) renderer = new MapRenderer(mapCanvas, source);
 	}
 
-	function clearCanvases(): void {
+	function clearMapCanvas(): void {
 		// Resetting the drawing buffer is the context-neutral way to clear the WebGL map canvas.
 		if (mapCanvas) mapCanvas.width = mapCanvas.width;
+	}
+
+	function clearBlipCanvas(): void {
 		const context = blipCanvas?.getContext("2d");
 		if (blipCanvas) {
 			context?.clearRect(0, 0, blipCanvas.width, blipCanvas.height);
@@ -273,9 +293,16 @@
 		event.preventDefault();
 		// Multiplicative so each notch covers the same proportion at every scale.
 		const factor = event.deltaY > 0 ? 1.2 : 1 / 1.2;
+		const frame = readFrame();
+		const environment = mapEnvironment(frame.anchor);
 		onStateChange({
 			...panel,
-			viewDiameter: clampMapViewDiameter(panel.viewDiameter * factor),
+			viewDiameters: {
+				...panel.viewDiameters,
+				[environment]: clampMapViewDiameter(
+					mapPanelViewDiameter(panel, frame.anchor) * factor,
+				),
+			},
 		});
 	}
 </script>

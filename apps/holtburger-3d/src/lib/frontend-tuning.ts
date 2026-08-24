@@ -333,7 +333,12 @@ export const FRONTEND_TUNING = {
 			 * Resolution-independent by construction: resizing the panel changes pixel density,
 			 * never how much world is shown. One landblock is 192 m across, for intuition.
 			 */
-			defaultViewDiameterMeters: 192,
+			defaultViewDiameterMeters: {
+				/** Initial extent restored when first entering an EnvCell. */
+				indoor: 64,
+				/** Initial extent used outdoors or while residency is unknown. */
+				outdoor: 192,
+			},
 			minimumViewDiameterMeters: 24,
 			maximumViewDiameterMeters: 1536,
 		},

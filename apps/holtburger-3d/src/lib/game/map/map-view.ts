@@ -37,6 +37,13 @@ export interface MapAnchor {
 	readonly residency: SceneResidency | null;
 }
 
+type MapEnvironment = "indoor" | "outdoor";
+
+/** Resolve the geometry mode selected by an anchor, treating absent knowledge as outdoors. */
+export function mapEnvironment(anchor: MapAnchor | null): MapEnvironment {
+	return anchor?.residency?.envCellId != null ? "indoor" : "outdoor";
+}
+
 /** Everything that decides what the map draws this frame, beyond the geometry itself. */
 export interface MapViewParameters {
 	readonly anchor: MapAnchor;

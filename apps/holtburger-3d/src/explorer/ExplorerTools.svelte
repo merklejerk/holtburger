@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { SceneResidency } from "../lib/game/scene";
+	import type { SceneInterestTarget } from "../lib/game/runtime/scene-target";
 	import type { SceneInterestRadii } from "../lib/game/runtime/types";
 	import type { ExplorerCameraFocusStatus } from "./explorer-camera-coordinator";
 	import ExplorerFramePanel from "./ExplorerFramePanel.svelte";
@@ -52,7 +52,7 @@
 	interface Props {
 		readonly runtimeReady: boolean;
 		readonly requestSceneInterest: (
-			residency: SceneResidency,
+			target: SceneInterestTarget,
 			radii: SceneInterestRadii,
 		) => void;
 		readonly cameraFocusStatus: ExplorerCameraFocusStatus;
@@ -75,7 +75,7 @@
 		readonly viewerLightEnabled: boolean;
 		readonly weatherEnabled: boolean;
 		readonly clockFollowing: boolean;
-		/** Follow mode: scene interest re-anchors to the camera's landblock on crossings. */
+		/** Follow mode: scene interest follows accepted outdoor residency crossings. */
 		readonly interestFollowsCamera: boolean;
 		readonly audioFollowsCamera: boolean;
 		readonly effectVolume: number;

@@ -11,6 +11,23 @@ export const OUTDOOR_TERRAIN_GRID_SIZE = OUTDOOR_TERRAIN_GRID_CELLS + 1;
 export const OUTDOOR_TERRAIN_TILE_SIZE =
 	OUTDOOR_LANDBLOCK_WORLD_SIZE / OUTDOOR_TERRAIN_GRID_CELLS;
 
+/** Normalize one eight-digit landblock owner identity to its `FFFF` CellLandblock root. */
+export function normalizeLandblockOwner(landblockId: LandblockId): LandblockId {
+	const match = /^(?:0x)?([0-9a-fA-F]{4})ffff$/i.exec(landblockId);
+	if (!match) {
+		throw new Error(
+			`Landblock owner must be an eight-digit FFFF id, received ${landblockId}.`,
+		);
+	}
+	const ownerHex = match[1];
+	if (ownerHex === undefined) {
+		throw new Error(
+			`Landblock owner must include its coordinate bytes, received ${landblockId}.`,
+		);
+	}
+	return `0x${ownerHex.toLowerCase()}ffff`;
+}
+
 /** Outdoor grid coordinates encoded in the high two bytes of a landblock id. */
 export interface LandblockCoordinates {
 	/** East-west outdoor grid coordinate. */

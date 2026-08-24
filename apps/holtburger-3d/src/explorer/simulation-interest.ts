@@ -1,5 +1,8 @@
 import type { LandblockId } from "../lib/game/game-types";
-import { getLandblockCoordinates } from "../lib/game/landblocks";
+import {
+	getLandblockCoordinates,
+	normalizeLandblockOwner,
+} from "../lib/game/landblocks";
 import { z } from "zod";
 
 /** Current Explorer policy radius for collision simulation, independent from render residency radii. */
@@ -113,16 +116,6 @@ export function computeSimulationInterest(
 		}
 	}
 	return owners;
-}
-
-function normalizeLandblockOwner(landblockId: LandblockId): LandblockId {
-	const match = /^(?:0x)?([0-9a-fA-F]{4})ffff$/i.exec(landblockId);
-	if (!match) {
-		throw new Error(
-			`Simulation interest requires a normalized landblock owner, received ${landblockId}.`,
-		);
-	}
-	return `0x${match[1]!.toLowerCase()}ffff`;
 }
 
 function validateReceipt(

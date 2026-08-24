@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
-	computeSceneInterest,
+	computeOutdoorSceneInterest,
+	computeDungeonSceneInterest,
 	diffSceneInterest,
 	groupLandblockLayers,
 	LandblockLayerKind,
+	unionSceneInterestComponents,
 	type LandblockIdLayer,
 	type SceneInterestMap,
 	validateSceneInterestRadiiOrThrow,
@@ -116,15 +118,19 @@ describe("groupLandblockLayers", () => {
 	});
 });
 
-describe("computeSceneInterest", () => {
+describe("computeOutdoorSceneInterest", () => {
 	it("supports terrain-only frontend interest", () => {
-		const interest = computeSceneInterest("0x1010ffff", {
-			buildingRadius: null,
-			envCellRadius: null,
-			explicitObjectRadius: null,
-			generatedObjectRadius: null,
-			terrainRadius: 1,
-		});
+		const interest = computeOutdoorSceneInterest(
+			"0x1010ffff",
+			{
+				buildingRadius: null,
+				envCellRadius: null,
+				explicitObjectRadius: null,
+				generatedObjectRadius: null,
+				terrainRadius: 1,
+			},
+			new Set(),
+		);
 
 		expect(interest).toHaveLength(9);
 		expect(
@@ -135,13 +141,17 @@ describe("computeSceneInterest", () => {
 	});
 
 	it("enables optional layers at their independent radii", () => {
-		const interest = computeSceneInterest("0x1010ffff", {
-			buildingRadius: 0,
-			envCellRadius: 1,
-			explicitObjectRadius: null,
-			generatedObjectRadius: null,
-			terrainRadius: 1,
-		});
+		const interest = computeOutdoorSceneInterest(
+			"0x1010ffff",
+			{
+				buildingRadius: 0,
+				envCellRadius: 1,
+				explicitObjectRadius: null,
+				generatedObjectRadius: null,
+				terrainRadius: 1,
+			},
+			new Set(["0x1010ffff", "0x0f0fffff"]),
+		);
 
 		expect(interest.get("0x1010ffff")).toEqual(
 			new Set([
@@ -174,5 +184,32 @@ describe("computeSceneInterest", () => {
 				terrainRadius: 1,
 			}),
 		).toThrow("Invalid scene config");
+	});
+});
+
+describe("dungeon scene-interest composition", () => {
+	it("plans one owner EnvCells layer without terrain or radius expansion", () => {
+		expect(computeDungeonSceneInterest("0x0005ffff")).toEqual(
+			new Map([["0x0005ffff", new Set([LandblockLayerKind.EnvCells])]]),
+		);
+	});
+
+	it("unions retained outdoor and active dungeon demand exactly", () => {
+		const retainedOutdoor = sceneInterest([
+			["0xda55ffff", [LandblockLayerKind.Terrain, LandblockLayerKind.EnvCells]],
+			["0x0005ffff", [LandblockLayerKind.EnvCells]],
+		]);
+		const activeDungeon = computeDungeonSceneInterest("0x0005ffff");
+		expect(
+			unionSceneInterestComponents({ activeDungeon, retainedOutdoor }),
+		).toEqual(
+			new Map([
+				[
+					"0xda55ffff",
+					new Set([LandblockLayerKind.Terrain, LandblockLayerKind.EnvCells]),
+				],
+				["0x0005ffff", new Set([LandblockLayerKind.EnvCells])],
+			]),
+		);
 	});
 });

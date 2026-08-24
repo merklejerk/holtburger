@@ -1,5 +1,6 @@
 import type { EnvCellId, LandblockId } from "../lib/game/game-types";
 import type { SceneResidency } from "../lib/game/scene";
+import type { SceneInterestTarget } from "../lib/game/runtime/scene-target";
 
 const HEX_PREFIX_PATTERN = /^(?:0x)?([0-9a-f]{4})$/i;
 const HEX_CELL_PATTERN = /^(?:0x)?([0-9a-f]{8})$/i;
@@ -15,6 +16,8 @@ export interface ParsedResidenceInput {
 	readonly label: string;
 	/** Authoritative residence encoded by the submitted identifier. */
 	readonly residency: SceneResidency;
+	/** Syntactic target intent retained for shared profile resolution. */
+	readonly target: SceneInterestTarget;
 }
 
 /**
@@ -28,20 +31,46 @@ export function parseResidenceInput(
 	const value = input.trim();
 	const prefixMatch = HEX_PREFIX_PATTERN.exec(value);
 	if (prefixMatch) {
-		return createResidence(`${prefixMatch[1]}ffff`);
+		const prefix = prefixMatch[1];
+		if (prefix === undefined) return null;
+		return createAutomaticResidence(prefix);
 	}
 	const cellMatch = HEX_CELL_PATTERN.exec(value);
-	if (cellMatch) return createResidence(cellMatch[1]!);
+	if (cellMatch) {
+		const cell = cellMatch[1];
+		if (cell === undefined) return null;
+		return createResidence(cell);
+	}
 
 	const coordinateMatch = MAP_COORDINATE_PATTERN.exec(value);
-	return coordinateMatch
-		? createOutdoorResidenceFromMapCoordinates({
-				eastWest: Number.parseFloat(coordinateMatch[3]!),
-				eastWestHemisphere: coordinateMatch[4]!.toUpperCase() as "E" | "W",
-				northSouth: Number.parseFloat(coordinateMatch[1]!),
-				northSouthHemisphere: coordinateMatch[2]!.toUpperCase() as "N" | "S",
-			})
-		: null;
+	if (coordinateMatch === null) return null;
+	const northSouth = coordinateMatch[1];
+	const northSouthHemisphere = coordinateMatch[2];
+	const eastWest = coordinateMatch[3];
+	const eastWestHemisphere = coordinateMatch[4];
+	if (
+		northSouth === undefined ||
+		northSouthHemisphere === undefined ||
+		eastWest === undefined ||
+		eastWestHemisphere === undefined
+	) {
+		return null;
+	}
+	return createOutdoorResidenceFromMapCoordinates({
+		eastWest: Number.parseFloat(eastWest),
+		eastWestHemisphere: eastWestHemisphere.toUpperCase() as "E" | "W",
+		northSouth: Number.parseFloat(northSouth),
+		northSouthHemisphere: northSouthHemisphere.toUpperCase() as "N" | "S",
+	});
+}
+
+function createAutomaticResidence(prefix: string): ParsedResidenceInput {
+	const landblockId = `0x${prefix.toLowerCase()}ffff` as LandblockId;
+	return {
+		label: `Landblock ${landblockId}`,
+		residency: { envCellId: null, landblockId },
+		target: { kind: "automatic-landblock", landblockId },
+	};
 }
 
 function createResidence(rawId: string): ParsedResidenceInput {
@@ -53,12 +82,14 @@ function createResidence(rawId: string): ParsedResidenceInput {
 		return {
 			label: `Outdoor landblock ${landblockId}`,
 			residency: { envCellId: null, landblockId },
+			target: { kind: "outdoor", landblockId },
 		};
 	}
 	const envCellId = canonicalId as EnvCellId;
 	return {
 		label: `Environment cell ${envCellId}`,
 		residency: { envCellId, landblockId },
+		target: { envCellId, kind: "env-cell", landblockId },
 	};
 }
 

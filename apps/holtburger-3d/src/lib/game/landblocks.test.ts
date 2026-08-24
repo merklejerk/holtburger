@@ -4,6 +4,7 @@ import {
 	createLandblockWorldOrigin,
 	getLandblockCoordinates,
 	landblockAtWorldPoint,
+	normalizeLandblockOwner,
 	OUTDOOR_LANDBLOCK_WORLD_SIZE,
 } from "./landblocks";
 import { Vec3 } from "./math/types";
@@ -50,6 +51,13 @@ describe("landblock coordinates", () => {
 	it("rejects malformed ids", () => {
 		expect(() => getLandblockCoordinates("not-a-landblock")).toThrow(
 			"Invalid landblock id",
+		);
+	});
+
+	it("normalizes one owner id to its CellLandblock root", () => {
+		expect(normalizeLandblockOwner("0102FFFF")).toBe("0x0102ffff");
+		expect(() => normalizeLandblockOwner("0x01020001")).toThrow(
+			"Landblock owner must be an eight-digit FFFF id",
 		);
 	});
 });

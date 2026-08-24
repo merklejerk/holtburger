@@ -570,6 +570,7 @@ mod tests {
     fn synthetic_landblock() -> LandblockAsset {
         LandblockAsset {
             landblock_id: 0xda55_ffff,
+            traversal_class: crate::LandblockTraversalClass::OutdoorOrMixed,
             terrain: LandblockTerrain {
                 grid_size: 9,
                 tile_size: 24.0,

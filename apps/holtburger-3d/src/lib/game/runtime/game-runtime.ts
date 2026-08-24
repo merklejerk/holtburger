@@ -193,15 +193,19 @@ import type {
 import { playingClip } from "../animation/animation-playback";
 import type { PlacedDynamicPresentationSource } from "../systems/dynamic-presentation-source";
 import {
-	computeSceneInterest,
+	computeOutdoorSceneInterest,
+	computeDungeonSceneInterest,
 	isOutdoorStaticLayer,
 	LandblockLayerKind,
+	unionSceneInterestComponents,
 	type OutdoorStaticLayerKind,
+	type SceneInterestComponents,
 	type StaticLayerKind,
 	type SceneInterestMap,
 	type SceneInterestRequest,
 	validateSceneInterestRadiiOrThrow,
 } from "./scene-interest";
+import type { ResolvedSceneInterestTarget } from "./scene-target";
 import {
 	EnvCellGeometryPreparer,
 	type EnvCellRealizationArtifact,
@@ -772,6 +776,12 @@ export class GameRuntime {
 	#frameSettings: FrameSettings = DEFAULT_FRAME_SETTINGS;
 	/** Terrain interest constraining the frontend's effective distance-fog range. */
 	#terrainFogCoverage: TerrainFogCoverage | null = null;
+	/** Retained outdoor demand; dungeon requests do not mutate this component. */
+	#retainedOutdoorInterest: SceneInterestMap = new Map();
+	/** One active dungeon owner demand, or empty while an outdoor target is active. */
+	#activeDungeonInterest: SceneInterestMap = new Map();
+	/** Last resolved target accepted by this runtime, for diagnostics and consumer policy. */
+	#resolvedSceneInterestTarget: ResolvedSceneInterestTarget | null = null;
 	/** Prevents new work and late async publication after runtime shutdown begins. */
 	#destroyed = false;
 
@@ -1565,21 +1575,61 @@ export class GameRuntime {
 			this.#removeSpawnedDynamicEntity(guid);
 	}
 
-	/** Replace frontend-owned static content interest without moving the camera. */
+	/** Replace profile-resolved static content demand without moving the camera. */
 	updateSceneInterest(request: SceneInterestRequest): SceneInterestReceipt {
 		validateSceneInterestRadiiOrThrow(request.radii);
-		this.#terrainFogCoverage = {
-			terrainRadius: request.radii.terrainRadius,
-		};
+		this.#resolvedSceneInterestTarget = request.target;
+		if (request.target.kind === "outdoor") {
+			const landblockId = request.target.requested.landblockId;
+			this.#retainedOutdoorInterest = computeOutdoorSceneInterest(
+				landblockId,
+				request.radii,
+				request.ambientOutdoorEnvCellOwners,
+			);
+			this.#activeDungeonInterest = new Map();
+			this.#terrainFogCoverage = {
+				terrainRadius: request.radii.terrainRadius,
+			};
+		} else {
+			this.#activeDungeonInterest = computeDungeonSceneInterest(
+				request.target.requested.landblockId,
+			);
+		}
 		return this.#applySceneInterest(
-			computeSceneInterest(request.anchorLandblockId, request.radii),
+			unionSceneInterestComponents(this.#sceneInterestComponents()),
 		);
 	}
 
-	/** Evict every frontend-requested static layer without moving the camera. */
+	/** Evict every requested static layer without moving the camera. */
 	clearSceneInterest(): SceneInterestReceipt {
 		this.#terrainFogCoverage = null;
+		this.#retainedOutdoorInterest = new Map();
+		this.#activeDungeonInterest = new Map();
+		this.#resolvedSceneInterestTarget = null;
 		return this.#applySceneInterest(new Map());
+	}
+
+	/** Snapshot logical demand components and their effective union for diagnostics and harnesses. */
+	sceneInterestComponents(): {
+		readonly activeDungeon: SceneInterestMap;
+		readonly effective: SceneInterestMap;
+		readonly retainedOutdoor: SceneInterestMap;
+		readonly resolvedTarget: ResolvedSceneInterestTarget | null;
+	} {
+		const components = this.#sceneInterestComponents();
+		return {
+			activeDungeon: cloneSceneInterest(components.activeDungeon),
+			effective: unionSceneInterestComponents(components),
+			retainedOutdoor: cloneSceneInterest(components.retainedOutdoor),
+			resolvedTarget: this.#resolvedSceneInterestTarget,
+		};
+	}
+
+	/** Snapshot the retained outdoor fog coverage without exposing mutable runtime state. */
+	terrainFogCoverage(): TerrainFogCoverage | null {
+		return this.#terrainFogCoverage === null
+			? null
+			: { ...this.#terrainFogCoverage };
 	}
 
 	/** Subscribe to source/topology availability without exposing runtime-owned resources. */
@@ -2226,6 +2276,13 @@ export class GameRuntime {
 		return this.#sceneInterestCoordinator.reconcile(interest);
 	}
 
+	#sceneInterestComponents(): SceneInterestComponents {
+		return {
+			activeDungeon: this.#activeDungeonInterest,
+			retainedOutdoor: this.#retainedOutdoorInterest,
+		};
+	}
+
 	#drainCommitArtifacts(): void {
 		while (this.#commitArtifacts.length > 0) {
 			const pending = this.#commitArtifacts.shift();
@@ -2757,6 +2814,15 @@ class InlineStaticObjectGeometryPreparer extends RuntimeStaticObjectGeometryPrep
 			destroy: () => undefined,
 		} as StaticObjectGeometryWorker);
 	}
+}
+
+function cloneSceneInterest(interest: SceneInterestMap): SceneInterestMap {
+	return new Map(
+		[...interest.entries()].map(([landblockId, layers]) => [
+			landblockId,
+			new Set(layers),
+		]),
+	);
 }
 
 /** Parse an outdoor static publisher owner, failing loudly if a non-outdoor layer reached it. */

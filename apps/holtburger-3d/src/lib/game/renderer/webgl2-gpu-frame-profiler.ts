@@ -5,6 +5,7 @@ import type {
 	RendererContributionFrameMetrics,
 	RendererFrameProfile,
 	RendererGpuFrameProfile,
+	RendererGpuFrameTimings,
 } from "./renderer";
 import { FRONTEND_TUNING } from "../../frontend-tuning";
 
@@ -173,12 +174,60 @@ export class WebGL2GpuFramePhaseCapture {
 	}
 }
 
+/** Per-phase GPU totals under accumulation, before a mean is derived from them. */
+type MutableGpuTimings = Record<keyof RendererGpuFrameTimings, number>;
+
+/**
+ * Every GPU phase at zero, written as a literal so the compiler proves the set is complete.
+ *
+ * It is also the only source of `GPU_TIMING_KEYS`: a hand-maintained parallel key array would let
+ * a newly added phase be declared and zeroed but never accumulated, which reads as a real zero.
+ */
+function emptyGpuTimings(): MutableGpuTimings {
+	return {
+		ambientOcclusionMs: 0,
+		blendedMs: 0,
+		farTerrainMs: 0,
+		nearTerrainMs: 0,
+		opaqueMs: 0,
+		particleMs: 0,
+		portalCompositionMs: 0,
+		presentationMs: 0,
+		skyMs: 0,
+		terrainMs: 0,
+		totalMs: 0,
+	};
+}
+
+const GPU_TIMING_KEYS = Object.keys(
+	emptyGpuTimings(),
+) as readonly (keyof RendererGpuFrameTimings)[];
+
+function addGpuTimings(
+	totals: MutableGpuTimings,
+	sample: RendererGpuFrameTimings,
+): void {
+	for (const key of GPU_TIMING_KEYS) totals[key] += sample[key];
+}
+
+function scaleGpuTimings(
+	totals: RendererGpuFrameTimings,
+	factor: number,
+): RendererGpuFrameTimings {
+	const scaled = emptyGpuTimings();
+	for (const key of GPU_TIMING_KEYS) scaled[key] = totals[key] * factor;
+	return scaled;
+}
+
 /** Context-owned, opt-in timestamp collector that never waits for unfinished GPU results. */
 export class WebGL2GpuFrameProfiler {
 	readonly #gl: WebGL2RenderingContext;
 	readonly #extension: WebGL2DisjointTimerQueryExtension | null;
 	readonly #pending: PendingFrame[] = [];
 	#latest: RendererGpuFrameProfile;
+	/** Running per-phase totals since the last reset; the mean is derived, never stored. */
+	#sums: MutableGpuTimings = emptyGpuTimings();
+	#sampleCount = 0;
 	#destroyed = false;
 	/** WebGL permits one active elapsed-time query per context, so this guards nesting. */
 	#activeQuery: WebGLQuery | null = null;
@@ -239,7 +288,17 @@ export class WebGL2GpuFrameProfiler {
 			) as boolean;
 			if (!available) return;
 			this.#pending.shift();
-			this.#latest = this.#resolveFrame(pending);
+			const timings = this.#resolveFrame(pending);
+			addGpuTimings(this.#sums, timings);
+			this.#sampleCount += 1;
+			this.#latest = {
+				...timings,
+				frameNumber: pending.frameNumber,
+				kind: "available",
+				mean: scaleGpuTimings(this.#sums, 1 / this.#sampleCount),
+				pendingFrameCount: this.#pending.length,
+				sampleCount: this.#sampleCount,
+			};
 			this.#deleteFrame(pending);
 		}
 	}
@@ -248,6 +307,18 @@ export class WebGL2GpuFrameProfiler {
 	getProfile(): RendererGpuFrameProfile {
 		if (this.#latest.kind === "unsupported") return this.#latest;
 		return { ...this.#latest, pendingFrameCount: this.#pending.length };
+	}
+
+	/** Discard accumulated samples so the next mean covers one explicit measurement window. */
+	reset(): void {
+		this.#sums = emptyGpuTimings();
+		this.#sampleCount = 0;
+		if (this.#latest.kind === "available") {
+			this.#latest = {
+				kind: "pending",
+				pendingFrameCount: this.#pending.length,
+			};
+		}
 	}
 
 	/** Delete every outstanding query without waiting for results. */
@@ -291,7 +362,7 @@ export class WebGL2GpuFrameProfiler {
 		this.#pending.push(frame);
 	}
 
-	#resolveFrame(frame: PendingFrame): RendererGpuFrameProfile {
+	#resolveFrame(frame: PendingFrame): RendererGpuFrameTimings {
 		const milliseconds = (query: WebGLQuery): number =>
 			(this.#gl.getQueryParameter(query, this.#gl.QUERY_RESULT) as number) /
 			NANOSECONDS_PER_MILLISECOND;
@@ -340,13 +411,10 @@ export class WebGL2GpuFrameProfiler {
 			ambientOcclusionMs,
 			blendedMs,
 			farTerrainMs,
-			frameNumber: frame.frameNumber,
-			kind: "available",
 			opaqueMs,
 			particleMs,
 			presentationMs,
 			portalCompositionMs,
-			pendingFrameCount: this.#pending.length,
 			skyMs,
 			nearTerrainMs,
 			terrainMs,
@@ -534,6 +602,7 @@ export class WebGL2FrameProfiler {
 	reset(): void {
 		this.#recentCpuFrames.length = 0;
 		this.#aggregate = createEmptyCpuAggregate();
+		this.#gpu.reset();
 	}
 
 	/** Tear down every pending GPU query immediately. */

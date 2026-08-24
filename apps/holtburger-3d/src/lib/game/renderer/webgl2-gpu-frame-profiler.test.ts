@@ -45,16 +45,13 @@ describe("WebGL2GpuFrameProfiler", () => {
 
 		harness.resultsAvailable = true;
 		profiler.poll();
-		expect(profiler.getProfile()).toEqual({
+		const timings = {
 			ambientOcclusionMs: 1,
 			blendedMs: 0,
 			farTerrainMs: 1,
-			frameNumber: 7,
-			kind: "available",
 			opaqueMs: 1,
 			particleMs: 1,
 			presentationMs: 1,
-			pendingFrameCount: 0,
 			portalCompositionMs: 2,
 			// This frame drives no sky pass, so its span stays zero rather than being absent.
 			skyMs: 0,
@@ -62,9 +59,47 @@ describe("WebGL2GpuFrameProfiler", () => {
 			// Near and far terrain remain available as one aggregate for existing consumers.
 			terrainMs: 2,
 			totalMs: 8,
+		};
+		expect(profiler.getProfile()).toEqual({
+			...timings,
+			frameNumber: 7,
+			kind: "available",
+			// One resolved frame, so the mean is that frame.
+			mean: timings,
+			pendingFrameCount: 0,
+			sampleCount: 1,
 		});
 		// One query per phase, where the timestamp profiler needed a pair plus a frame pair.
 		expect(harness.deleteQuery).toHaveBeenCalledTimes(8);
+	});
+
+	it("means every resolved frame, so one stalled batch cannot stand as the result", () => {
+		const harness = createGpuHarness(true);
+		const profiler = new WebGL2GpuFrameProfiler(harness.gl);
+		harness.resultsAvailable = true;
+		// Each query resolves to 1 ms, so opening `opaque` twice makes a frame twice as expensive.
+		for (const opaquePhaseCount of [2, 1, 1]) {
+			const frame = profiler.beginFrame(1);
+			if (!frame)
+				throw new Error("Supported timer queries did not begin a frame.");
+			for (let index = 0; index < opaquePhaseCount; index += 1) {
+				frame.beginPhase("opaque").finish();
+			}
+			frame.finish();
+			profiler.poll();
+		}
+
+		const profile = profiler.getProfile();
+		if (profile.kind !== "available") {
+			throw new Error(`Expected resolved GPU timings, got ${profile.kind}.`);
+		}
+		expect(profile.sampleCount).toBe(3);
+		expect(profile.opaqueMs).toBe(1);
+		expect(profile.mean.opaqueMs).toBeCloseTo(4 / 3);
+
+		// A reset delimits the next measurement window rather than carrying the old frames into it.
+		profiler.reset();
+		expect(profiler.getProfile().kind).toBe("pending");
 	});
 
 	it("refuses to nest elapsed queries, which WebGL permits only one of", () => {

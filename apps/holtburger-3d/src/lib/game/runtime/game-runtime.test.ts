@@ -199,6 +199,7 @@ describe("GameRuntime view and interest control", () => {
 				return EMPTY_RENDERER_FRAME_FEEDBACK;
 			},
 			frameDiagnostics: {
+				captureBakedDrawMergeCensus: vi.fn(),
 				setProfilingEnabled: setFrameProfilingEnabled,
 				resetProfile: vi.fn(),
 				snapshot: () => ({

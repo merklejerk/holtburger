@@ -29,8 +29,8 @@ function undeclaredNames(shader: string): readonly string[] {
 }
 
 const TRANSFORM_SOURCES: readonly ObjectVertexTransformSource[] = [
-	"baked",
-	"instanced",
+	"uniform",
+	"attribute",
 ];
 
 describe("object shader uniform and varying consistency", () => {
@@ -53,7 +53,7 @@ describe("object shader uniform and varying consistency", () => {
 	}
 
 	it("omits fog uniforms entirely from the unfogged variants", () => {
-		expect(createObjectVertexShader(false, "baked")).not.toContain("uFog");
+		expect(createObjectVertexShader(false, "uniform")).not.toContain("uFog");
 		expect(createObjectFragmentShader(false)).not.toContain("uFog");
 	});
 });

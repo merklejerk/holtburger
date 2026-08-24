@@ -10,8 +10,16 @@ import {
 	type WebGL2PortalDeferredVisibilityUniforms,
 } from "./portal-deferred-visibility-glsl";
 
-/** Object transform source selected at shader compilation rather than through nullable uniforms. */
-export type ObjectVertexTransformSource = "baked" | "instanced";
+/**
+ * Where a vertex shader reads its object transform, selected at shader compilation rather than
+ * through nullable uniforms.
+ *
+ * Named for the GLSL storage the transform arrives in, not for how its geometry was produced.
+ * The earlier "baked"/"instanced" spelling described geometry and was read that way, which is a
+ * different question: a `uniform` draw does read merged geometry, but that is a fact about
+ * `prepareBakedStaticObjectGeometry`, not about this field.
+ */
+export type ObjectVertexTransformSource = "uniform" | "attribute";
 
 /**
  * Vertex attribute carrying burned-in interior static light.
@@ -32,7 +40,7 @@ export const OBJECT_TEXTURE_UNITS = {
 /** Build one object vertex variant with explicit fog and transform contracts. */
 export function createObjectVertexShader(
 	distanceFog: boolean,
-	transformSource: ObjectVertexTransformSource = "baked",
+	transformSource: ObjectVertexTransformSource = "uniform",
 ): string {
 	const fogDeclarations = distanceFog
 		? `
@@ -43,17 +51,17 @@ out float vViewerDistance;`
 		? "vViewerDistance = length(anchoredPosition - uCameraPosition);"
 		: "";
 	const transformDeclarations =
-		transformSource === "instanced"
+		transformSource === "attribute"
 			? `
 layout(location = 3) in mat4 aSourceToLandblock;
 layout(location = 7) in vec4 aInstanceColor;`
 			: "uniform mat4 uLocalToLandblock;";
 	const transform =
-		transformSource === "instanced"
+		transformSource === "attribute"
 			? "aSourceToLandblock"
 			: "uLocalToLandblock";
 	const instanceColor =
-		transformSource === "instanced" ? "aInstanceColor" : "vec4(1.0)";
+		transformSource === "attribute" ? "aInstanceColor" : "vec4(1.0)";
 	return `#version 300 es
 layout(location = 0) in vec3 aPosition;
 layout(location = 1) in vec3 aNormal;
@@ -338,7 +346,7 @@ interface WebGL2ObjectProgramBase {
 
 /** Baked object program with one draw-scoped local transform uniform. */
 export interface WebGL2ObjectProgram extends WebGL2ObjectProgramBase {
-	readonly transformSource: "baked";
+	readonly transformSource: "uniform";
 	readonly uniforms: WebGL2ObjectProgramBase["uniforms"] & {
 		readonly localToLandblock: WebGLUniformLocation;
 	};
@@ -346,7 +354,7 @@ export interface WebGL2ObjectProgram extends WebGL2ObjectProgramBase {
 
 /** Instanced object program whose transforms and colors are vertex attributes. */
 export interface WebGL2InstancedObjectProgram extends WebGL2ObjectProgramBase {
-	readonly transformSource: "instanced";
+	readonly transformSource: "attribute";
 }
 
 /** Opaque-only program carrying the shared distance-fog uniform contract. */
@@ -381,7 +389,7 @@ export function createWebGL2ObjectProgram(
 	options: {
 		readonly distanceFog: false;
 		readonly portalVisibility?: false;
-		readonly transformSource?: "baked";
+		readonly transformSource?: "uniform";
 	},
 ): WebGL2ObjectProgram;
 /** Compile a fogged object program backed by matrix/color instance attributes. */
@@ -390,7 +398,7 @@ export function createWebGL2ObjectProgram(
 	options: {
 		readonly distanceFog: true;
 		readonly portalVisibility?: false;
-		readonly transformSource: "instanced";
+		readonly transformSource: "attribute";
 	},
 ): WebGL2FogInstancedObjectProgram;
 /** Compile an unfogged object program backed by matrix/color instance attributes. */
@@ -399,7 +407,7 @@ export function createWebGL2ObjectProgram(
 	options: {
 		readonly distanceFog: false;
 		readonly portalVisibility?: false;
-		readonly transformSource: "instanced";
+		readonly transformSource: "attribute";
 	},
 ): WebGL2InstancedObjectProgram;
 /** Compile an unfogged baked program with scope-envelope visibility. */
@@ -408,7 +416,7 @@ export function createWebGL2ObjectProgram(
 	options: {
 		readonly distanceFog: false;
 		readonly portalVisibility: true;
-		readonly transformSource?: "baked";
+		readonly transformSource?: "uniform";
 	},
 ): WebGL2ObjectProgram;
 /** Compile an unfogged instanced program with scope-envelope visibility. */
@@ -417,7 +425,7 @@ export function createWebGL2ObjectProgram(
 	options: {
 		readonly distanceFog: false;
 		readonly portalVisibility: true;
-		readonly transformSource: "instanced";
+		readonly transformSource: "attribute";
 	},
 ): WebGL2InstancedObjectProgram;
 export function createWebGL2ObjectProgram(
@@ -430,7 +438,7 @@ export function createWebGL2ObjectProgram(
 	| WebGL2FogInstancedObjectProgram {
 	const distanceFog = options.distanceFog ?? true;
 	const portalVisibility = options.portalVisibility ?? false;
-	const transformSource = options.transformSource ?? "baked";
+	const transformSource = options.transformSource ?? "uniform";
 	const vertexShader = compileWebGL2Shader(
 		gl,
 		gl.VERTEX_SHADER,
@@ -514,7 +522,7 @@ export function createWebGL2ObjectProgram(
 			? bindWebGL2PortalDeferredVisibilityProgram(gl, program)
 			: null;
 		const objectProgram: WebGL2ObjectProgram | WebGL2InstancedObjectProgram =
-			transformSource === "baked"
+			transformSource === "uniform"
 				? {
 						program,
 						portalVisibilityUniforms,

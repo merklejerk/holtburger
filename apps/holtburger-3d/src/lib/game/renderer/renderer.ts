@@ -332,13 +332,6 @@ export interface FrameSelectionMetrics {
 	 * filtering, so the ratio between them is what the filter is actually saving.
 	 */
 	readonly objectSuppressedUniformUploads: number;
-	/**
-	 * Uploads of `uLocalToLandblock` whose matrix was the identity.
-	 *
-	 * Baked geometry is pre-transformed into landblock space, so an identity here means the upload
-	 * carries nothing at all and can be removed rather than merely cached.
-	 */
-	readonly objectIdentityTransformUploads: number;
 }
 
 /** Non-overlapping renderer CPU wall-time phases aggregated from profiled frames. */

@@ -569,13 +569,42 @@ interface CpuFrameAggregate {
 }
 
 function createEmptyCpuAggregate(): CpuFrameAggregate {
-	const totals = {} as Record<keyof RendererCpuFrameTimings, number>;
-	for (const key of CPU_TIMING_KEYS) totals[key] = 0;
 	return {
 		contributionTotals: createEmptyContributionMetrics(),
 		latest: null,
 		sampleCount: 0,
-		totals,
+		totals: createEmptyCpuTimings(),
+	};
+}
+
+/**
+ * Every timing at zero, written as a literal so the compiler proves the set is complete.
+ *
+ * `CPU_TIMING_KEYS` cannot carry that proof: `satisfies` checks that each entry is a valid key, not
+ * that every key appears. Building the record from that list would let a newly added phase reach
+ * consumers as `undefined` behind a cast.
+ */
+function createEmptyCpuTimings(): Record<
+	keyof RendererCpuFrameTimings,
+	number
+> {
+	return {
+		blendedOrderingMs: 0,
+		blendedSubmissionMs: 0,
+		finalizationMs: 0,
+		instanceRunPreparationMs: 0,
+		instanceUploadMs: 0,
+		opaqueSubmissionMs: 0,
+		otherMs: 0,
+		particleSubmissionMs: 0,
+		portalCompositionMs: 0,
+		portalPlanningMs: 0,
+		sceneContributionResolutionMs: 0,
+		sceneQueryMs: 0,
+		setupMs: 0,
+		terrainSubmissionMs: 0,
+		totalMs: 0,
+		viewPreparationMs: 0,
 	};
 }
 
@@ -588,7 +617,7 @@ function summarizeCpuAggregate(
 	if (!latest || sampleCount === 0) {
 		throw new Error("Cannot summarize an empty CPU profile aggregate.");
 	}
-	const mean = {} as Record<keyof RendererCpuFrameTimings, number>;
+	const mean = createEmptyCpuTimings();
 	for (const key of CPU_TIMING_KEYS) mean[key] = totals[key] / sampleCount;
 	const orderedTotals = recentFrames
 		.map((frame) => frame.totalMs)

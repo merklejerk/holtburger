@@ -569,7 +569,6 @@ interface MutableFrameSelectionMetrics {
 	objectDrawCalls: number;
 	objectUniformUploads: number;
 	objectSuppressedUniformUploads: number;
-	objectIdentityTransformUploads: number;
 }
 
 export class WebGL2Renderer implements Renderer {
@@ -762,7 +761,6 @@ export class WebGL2Renderer implements Renderer {
 		objectDrawCalls: 0,
 		objectUniformUploads: 0,
 		objectSuppressedUniformUploads: 0,
-		objectIdentityTransformUploads: 0,
 	};
 	#frameWidth = 0;
 	#frameHeight = 0;
@@ -2090,7 +2088,6 @@ export class WebGL2Renderer implements Renderer {
 		metrics.objectDrawCalls = 0;
 		metrics.objectUniformUploads = 0;
 		metrics.objectSuppressedUniformUploads = 0;
-		metrics.objectIdentityTransformUploads = 0;
 	}
 
 	/** Finish counters shared by ordinary frames and explicit portal execution probes. */
@@ -3279,6 +3276,20 @@ export class WebGL2Renderer implements Renderer {
 		return { objects, runCounts };
 	}
 
+	/**
+	 * Account for one per-draw uniform write.
+	 *
+	 * Issued and suppressed are counted separately rather than derived from each other, because
+	 * their sum is the uniform set a draw would send without filtering, and the ratio between them
+	 * is what the filtering actually saves. A method rather than a closure so the submission path
+	 * allocates nothing per draw.
+	 */
+	#countUniformWrite(issued: boolean): void {
+		const metrics = this.#frameSelectionMetrics;
+		if (issued) metrics.objectUniformUploads += 1;
+		else metrics.objectSuppressedUniformUploads += 1;
+	}
+
 	#drawObjectRange(
 		program: AnyObjectProgram,
 		object: PreparedObjectFrameInput,
@@ -3295,26 +3306,13 @@ export class WebGL2Renderer implements Renderer {
 		const { compatibility } = object;
 		const gl = this.#gl;
 		const state = this.#objectState;
-		const metrics = this.#frameSelectionMetrics;
-		// Issued and suppressed are counted separately; their sum is the per-draw uniform set, so the
-		// ratio against `objectDrawCalls` stays readable whether or not filtering is winning.
-		let uploads = 0;
-		let suppressed = 0;
-		const record = (issued: boolean): void => {
-			if (issued) uploads += 1;
-			else suppressed += 1;
-		};
 		state.applyCullFace(compatibility.cullFace);
 		if (program.transformSource === "baked") {
-			const matrix = mat4ToFloat32Array(
-				object.localToLandblock,
-				this.#matrixScratch,
-			);
-			if (isIdentityMat4Buffer(matrix)) {
-				metrics.objectIdentityTransformUploads += 1;
-			}
-			record(
-				state.applyUniformMatrix4fv(program.uniforms.localToLandblock, matrix),
+			this.#countUniformWrite(
+				state.applyUniformMatrix4fv(
+					program.uniforms.localToLandblock,
+					mat4ToFloat32Array(object.localToLandblock, this.#matrixScratch),
+				),
 			);
 		}
 		const landblockOffset = landblockOffsets.get(object.landblockId);
@@ -3323,7 +3321,7 @@ export class WebGL2Renderer implements Renderer {
 				`Submitted object in landblock ${object.landblockId} has no frame offset.`,
 			);
 		}
-		record(
+		this.#countUniformWrite(
 			state.applyUniform3f(
 				program.uniforms.landblockOffset,
 				landblockOffset[0],
@@ -3331,25 +3329,27 @@ export class WebGL2Renderer implements Renderer {
 				landblockOffset[2],
 			),
 		);
-		record(
+		this.#countUniformWrite(
 			state.applyUniform1i(
 				program.uniforms.wrapRepeat,
 				compatibility.wrapRepeat ? 1 : 0,
 			),
 		);
-		record(
+		this.#countUniformWrite(
 			state.applyUniform1i(
 				program.uniforms.palettedClipMap,
 				compatibility.palettedClipMap ? 1 : 0,
 			),
 		);
-		record(
+		this.#countUniformWrite(
 			state.applyUniform1f(program.uniforms.alphaTest, compatibility.alphaTest),
 		);
 		const preparedMaterial = compatibility.material;
 		if (preparedMaterial.kind === "solid-color") {
-			record(state.applyUniform1i(program.uniforms.materialKind, 0));
-			record(
+			this.#countUniformWrite(
+				state.applyUniform1i(program.uniforms.materialKind, 0),
+			);
+			this.#countUniformWrite(
 				state.applyUniform4f(
 					program.uniforms.materialColor,
 					...preparedMaterial.color,
@@ -3360,13 +3360,13 @@ export class WebGL2Renderer implements Renderer {
 				OBJECT_TEXTURE_UNITS.base,
 				preparedMaterial.base,
 			);
-			record(
+			this.#countUniformWrite(
 				state.applyUniform4f(
 					program.uniforms.baseRect,
 					...preparedMaterial.base.rect,
 				),
 			);
-			record(
+			this.#countUniformWrite(
 				state.applyUniform1i(
 					program.uniforms.materialKind,
 					preparedMaterial.kind === "direct-color"
@@ -3376,7 +3376,7 @@ export class WebGL2Renderer implements Renderer {
 							: 3,
 				),
 			);
-			record(
+			this.#countUniformWrite(
 				state.applyUniform4f(
 					program.uniforms.materialColor,
 					...preparedMaterial.color,
@@ -3387,7 +3387,7 @@ export class WebGL2Renderer implements Renderer {
 					OBJECT_TEXTURE_UNITS.palette,
 					preparedMaterial.palette,
 				);
-				record(
+				this.#countUniformWrite(
 					state.applyUniform4f(
 						program.uniforms.paletteRect,
 						...preparedMaterial.palette.rect,
@@ -3398,23 +3398,27 @@ export class WebGL2Renderer implements Renderer {
 		const { detail } = compatibility;
 		if (detail) {
 			this.#bindPreparedObjectTexture(OBJECT_TEXTURE_UNITS.detail, detail);
-			record(state.applyUniform4f(program.uniforms.detailRect, ...detail.rect));
-			record(
+			this.#countUniformWrite(
+				state.applyUniform4f(program.uniforms.detailRect, ...detail.rect),
+			);
+			this.#countUniformWrite(
 				state.applyUniform1f(program.uniforms.detailTiling, detail.tiling),
 			);
-			record(state.applyUniform1i(program.uniforms.useDetail, 1));
+			this.#countUniformWrite(
+				state.applyUniform1i(program.uniforms.useDetail, 1),
+			);
 		} else {
-			record(state.applyUniform1i(program.uniforms.useDetail, 0));
+			this.#countUniformWrite(
+				state.applyUniform1i(program.uniforms.useDetail, 0),
+			);
 		}
-		record(
+		this.#countUniformWrite(
 			state.applyUniform1f(
 				program.uniforms.luminosity,
 				compatibility.luminosity,
 			),
 		);
-		metrics.objectDrawCalls += 1;
-		metrics.objectUniformUploads += uploads;
-		metrics.objectSuppressedUniformUploads += suppressed;
+		this.#frameSelectionMetrics.objectDrawCalls += 1;
 		const geometry = compatibility.geometry;
 		state.applyVertexArray(geometry.vertexArray);
 		let submittedInstanceCount = 1;
@@ -3682,20 +3686,6 @@ function frameTemplateBatchIdentityEquals(
 }
 
 /** Stable semantic partition used to narrow exact opaque instance compatibility checks. */
-/**
- * Whether a column-major 4x4 buffer is exactly the identity.
- *
- * Exact comparison rather than a tolerance: this answers whether the transform upload carries any
- * information at all, and a matrix that is merely close to identity still does.
- */
-function isIdentityMat4Buffer(matrix: Float32Array): boolean {
-	for (let index = 0; index < 16; index += 1) {
-		const expected = index % 5 === 0 ? 1 : 0;
-		if (matrix[index] !== expected) return false;
-	}
-	return true;
-}
-
 function opaqueObjectInstanceBatchKey(
 	object: PreparedObjectFrameInput,
 ): string {

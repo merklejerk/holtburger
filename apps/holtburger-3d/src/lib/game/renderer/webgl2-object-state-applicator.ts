@@ -8,8 +8,16 @@ import type {
 const UNKNOWN_STATE = Symbol("unknown-object-device-state");
 type UnknownState = typeof UNKNOWN_STATE;
 
-/** Widest uniform this applicator compares, a four-by-four matrix. */
-const MAXIMUM_UNIFORM_COMPONENTS = 16;
+/** Components in the mat4 uniforms this applicator compares. */
+const MAT4_COMPONENTS = 16;
+
+/**
+ * Storage width per cached uniform.
+ *
+ * Sized by the widest uniform rather than per location, so one slot fits any of them and the cache
+ * never reallocates when a location's kind is first seen.
+ */
+const MAXIMUM_UNIFORM_COMPONENTS = MAT4_COMPONENTS;
 
 /**
  * Applies only WebGL state owned by one object phase.
@@ -202,7 +210,7 @@ export class WebGL2ObjectStateApplicator {
 		location: WebGLUniformLocation,
 		value: Float32Array,
 	): boolean {
-		if (!this.#recordUniform(location, value, MAXIMUM_UNIFORM_COMPONENTS)) {
+		if (!this.#recordUniform(location, value, MAT4_COMPONENTS)) {
 			return false;
 		}
 		this.#gl.uniformMatrix4fv(location, false, value);

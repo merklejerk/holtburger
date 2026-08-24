@@ -207,6 +207,30 @@ Three secondary effects matter more than the framerate for future work:
 - `WEBGL_debug_renderer_info` is truthful, so driver identity no longer has to come from outside
   the page.
 
+### Distribution size
+
+Chromium is Chromium, and the runtime swap does not avoid its footprint. Recorded because the
+opposite was assumed earlier in this work, when Electron's bundle was treated as a cost CEF avoided.
+
+CEF's Linux `minimal` archive is a Release build whose `libcef.so` nonetheless ships with DWARF
+attached: 1.15 GB of debug sections inside 1.4 GB. `strip --strip-unneeded` leaves 248.9 MB with all
+240 `cef_*` dynamic symbols intact, verified by running the Explorer against the stripped library.
+The full shippable payload is then **361 MB**: `libcef.so` 249, `locales/` 47.7 across 220 files,
+`libGLESv2.so` 19.1, `resources.pak` 15.4, `libvk_swiftshader.so` 15.1, `icudtl.dat` 10.4, rest 4.7.
+
+**That is larger than Electron, not smaller.** Electron packages around 150-220 MB on Linux because
+it ships a distribution-tuned Chromium. Bundle size is not an argument for CEF over Electron; the
+arguments are that Rust stays in-process, there is no Node layer, no sidecar to supervise, and the
+35 commands are untouched.
+
+Trimming `locales/` to the shipped languages recovers ~47 MB, and dropping `libvk_swiftshader.so`
+another 15 MB at the cost of the software rasterizer fallback, for a realistic floor near 300 MB.
+
+The problem is Linux-specific. From CEF's build index for 150.0.10 minimal: linux64 300.4 MB,
+windows64 156.6 MB, macosx64 124.6 MB, macosarm64 118.7 MB. Windows keeps debug info in separate
+`.pdb` files and macOS in `.dSYM` bundles, so those distributions are already lean and need no
+stripping. The macOS helper-bundle and signing path is unverified.
+
 **This reframes what remains.** At 1.96 ms CPU against 0.79 ms GPU the outdoor scene is CPU-bound at
 roughly 500 fps, so the plan's 500 fps goal is met without Phase 3. `opaqueSubmissionMs` is still the
 largest single phase at 0.512 ms, so Phase 3 remains the correct next optimization — but it is now

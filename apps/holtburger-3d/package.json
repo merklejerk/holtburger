@@ -30,7 +30,8 @@
 		"tauri:dev": "tauri dev",
 		"tauri:build": "tauri build",
 		"dev:explorer:release": "node scripts/tauri-dev-entry.mjs explorer --release",
-		"dev:client:release": "node scripts/tauri-dev-entry.mjs client --release"
+		"dev:client:release": "node scripts/tauri-dev-entry.mjs client --release",
+		"prepare-cef": "node scripts/prepare-cef.mjs"
 	},
 	"devDependencies": {
 		"@eslint/js": "^10.0.1",

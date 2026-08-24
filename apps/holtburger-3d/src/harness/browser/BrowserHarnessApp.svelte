@@ -16,7 +16,11 @@
 		type ColorGradeParameters,
 	} from "../../lib/game/renderer/color-grade-policy";
 	import { HttpLandblockContentSource } from "../../lib/assets/http-landblock-content-source";
-	import type { HttpLandblockSourceBatchDiagnostic } from "../../lib/assets/http-landblock-content-source";
+	import type {
+		HttpLandblockProfileDiagnostic,
+		HttpLandblockSourceBatchDiagnostic,
+	} from "../../lib/assets/http-landblock-content-source";
+	import { CachedLandblockProfileSource } from "../../lib/assets/landblock-profile-source";
 	import { StandardCommitPipeline } from "../../lib/game/commit/pipeline";
 	import { SyntheticBlendedBuildingPipeline } from "./synthetic-blended-building-pipeline";
 	import { SyntheticInstancedObjectPipeline } from "./synthetic-instanced-object-pipeline";
@@ -58,6 +62,10 @@
 	import type { ClosedWorkerPoolDiagnostics } from "../../lib/game/workers/closed-worker";
 	import { RuntimeTickProfiler } from "../../lib/game/runtime/runtime-tick-profiler";
 	import { LandblockLayerKind } from "../../lib/game/runtime/scene-interest";
+	import {
+		SceneInterestRequestCoordinator,
+		type SceneInterestTarget,
+	} from "../../lib/game/runtime/scene-target";
 	import { ActiveRegionStaticDetailOwner } from "../../lib/game/resolution/active-region-static-detail";
 	import {
 		DEFAULT_FRAME_SETTINGS,
@@ -119,6 +127,7 @@
 		installTerrainGlTrace,
 		type TerrainGlTrace,
 	} from "./terrain-gl-trace";
+	import { parseResidenceInput } from "../../explorer/world-input";
 
 	const CAMERA_FOV_DEGREES = 90;
 	const CAMERA_NEAR = 0.5;
@@ -323,7 +332,7 @@
 	}
 
 	interface BrowserHarnessApi {
-		/** Request canonical outdoor layers for one neighborhood. */
+		/** Resolve one target and request its exact shared scene-interest policy. */
 		readonly requestSceneInterest: (
 			landblockId: string,
 			terrainRadius: number,
@@ -333,11 +342,11 @@
 			generatedObjectRadius: number | null,
 			cameraYawDegrees: number,
 			cameraPitchDegrees: number,
-		) => void;
+		) => Promise<void>;
 		/**
-		 * Fly the camera in a straight line to the target landblock's centre over the given
-		 * duration, re-anchoring scene interest on every landblock crossing — the harness
-		 * mirror of the Explorer's interest-follows-camera mode. Resolves with the crossing
+		 * Fly the outdoor camera in a straight line to the target landblock's centre over the given
+		 * duration, replacing outdoor scene interest on every landblock crossing — the harness
+		 * mirror of the Explorer's outdoor interest-follows-camera mode. Resolves with the crossing
 		 * log, audio trace (when enabled), and the flight window's frame timing.
 		 */
 		readonly runFollowFlight: (
@@ -360,6 +369,12 @@
 		/** Apply the Explorer's automatic outdoor focus policy after terrain becomes queryable. */
 		readonly focusExplorerOutdoor: (
 			landblockId: string,
+		) => BrowserHarnessCameraEvidence;
+		/** Apply the resolved target's Explorer focus policy, including dungeon default-cell focus. */
+		readonly focusExplorerTarget: (
+			target: string,
+			cameraYawDegrees: number,
+			cameraPitchDegrees: number,
 		) => BrowserHarnessCameraEvidence;
 		/** Place the camera at the contained bounds center of one authored EnvCell. */
 		readonly focusExplorerEnvCell: (
@@ -615,6 +630,10 @@
 		readonly portalScopeAtlasExecutor: WebGL2PortalScopeAtlasExecutorFixtureResult | null;
 		/** One read-only observation for every host source-batch response received by this harness. */
 		readonly sourceBatches: readonly HttpLandblockSourceBatchDiagnostic[];
+		/** One read-only observation for every profile transport request. */
+		readonly profiles: readonly HttpLandblockProfileDiagnostic[];
+		/** Logical demand components and their effective physical union. */
+		readonly sceneInterest: BrowserHarnessSceneInterestEvidence | null;
 		/** Current harness-only projection of the app-local host registry. */
 		readonly spawnedEntities: readonly DynamicEntityView[];
 		readonly ready: boolean;
@@ -622,11 +641,25 @@
 		readonly viewport: BrowserHarnessViewportEvidence;
 	}
 
+	interface BrowserHarnessSceneInterestEvidence {
+		readonly activeDungeon: readonly BrowserHarnessSceneInterestEntry[];
+		readonly effective: readonly BrowserHarnessSceneInterestEntry[];
+		readonly retainedOutdoor: readonly BrowserHarnessSceneInterestEntry[];
+		readonly resolvedTarget: ReturnType<
+			GameRuntime["sceneInterestComponents"]
+		>["resolvedTarget"];
+	}
+
+	interface BrowserHarnessSceneInterestEntry {
+		readonly landblockId: LandblockId;
+		readonly layers: readonly LandblockLayerKind[];
+	}
+
 	/** One scripted follow-mode flight's evidence: crossings, publications, and timing. */
 	interface BrowserHarnessFollowFlightReport {
 		/** Audio admissions and bounded placement updates observed during the flight. */
 		readonly audioTrace: AudioTraceSnapshot | null;
-		/** Interest re-anchors in flight order, stamped with elapsed flight time. */
+		/** Outdoor-interest crossings in flight order, stamped with elapsed flight time. */
 		readonly crossings: readonly {
 			readonly elapsedMs: number;
 			readonly landblockId: LandblockId;
@@ -644,6 +677,8 @@
 	interface FollowFlightState {
 		/** The destination pose is installed and the promise should resolve after this render. */
 		completionPending: boolean;
+		/** Latest profile-aware scene-interest transition started during this flight. */
+		sceneInterestReady: Promise<void> | null;
 		readonly crossings: { elapsedMs: number; landblockId: LandblockId }[];
 		readonly durationMs: number;
 		readonly from: Vec3;
@@ -783,6 +818,8 @@
 		longestLongTaskMs: 0,
 	});
 	let contentSource: HttpLandblockContentSource | undefined;
+	let landblockProfileSource: CachedLandblockProfileSource | undefined;
+	let sceneInterestCoordinator: SceneInterestRequestCoordinator | undefined;
 	let entityHost: HttpExplorerEntityHost | undefined;
 	let boomCameraSession: HostKinematicBoomSession | undefined;
 	let boomInputSequence = 0;
@@ -798,8 +835,8 @@
 	let renderer: WebGL2Renderer | undefined;
 	let textureFilteringCapabilities: TextureFilteringCapabilities | null = null;
 	let cameraEvidence: BrowserHarnessCameraEvidence | null = null;
-	/** Anchor and radii of the most recent interest request, reused by follow flights. */
-	let lastInterestAnchor: LandblockId | null = null;
+	/** Owner and radii of the most recent interest request, reused by outdoor follow flights. */
+	let lastInterestLandblockId: LandblockId | null = null;
 	let lastInterestRadii: SceneInterestRadii | null = null;
 	let followFlight: FollowFlightState | null = null;
 	let frameSettings: FrameSettings = {
@@ -824,7 +861,25 @@
 		return `0x${match[1]!.toLowerCase()}ffff`;
 	}
 
-	function requestSceneInterest(
+	function sceneInterestEvidence(): BrowserHarnessSceneInterestEvidence | null {
+		const state = runtime?.sceneInterestComponents();
+		if (state === undefined) return null;
+		const entries = (
+			interest: ReturnType<GameRuntime["sceneInterestComponents"]>["effective"],
+		): readonly BrowserHarnessSceneInterestEntry[] =>
+			[...interest.entries()].map(([landblockId, layers]) => ({
+				landblockId,
+				layers: [...layers],
+			}));
+		return {
+			activeDungeon: entries(state.activeDungeon),
+			effective: entries(state.effective),
+			retainedOutdoor: entries(state.retainedOutdoor),
+			resolvedTarget: state.resolvedTarget,
+		};
+	}
+
+	async function requestSceneInterest(
 		rawLandblockId: string,
 		terrainRadius: number,
 		buildingRadius: number,
@@ -833,7 +888,7 @@
 		generatedObjectRadius: number | null,
 		cameraYawDegrees: number,
 		cameraPitchDegrees: number,
-	): void {
+	): Promise<void> {
 		if (!runtime) throw new Error("Browser harness runtime is not ready.");
 		if (!Number.isInteger(terrainRadius) || terrainRadius < 0) {
 			throw new Error(
@@ -882,7 +937,16 @@
 		if (![cameraYawDegrees, cameraPitchDegrees].every(Number.isFinite)) {
 			throw new Error("Browser harness camera orientation must be finite.");
 		}
-		const landblockId = parseOutdoorLandblockId(rawLandblockId);
+		const parsed = parseResidenceInput(rawLandblockId);
+		if (parsed === null) {
+			throw new Error(`Browser harness target is invalid: ${rawLandblockId}.`);
+		}
+		const requestCoordinator = sceneInterestCoordinator;
+		if (!requestCoordinator) {
+			throw new Error(
+				"Browser harness scene-interest coordinator is not ready.",
+			);
+		}
 		const usesGeneratedFixture = fixture === "instanced";
 		const requestedRadii: SceneInterestRadii = {
 			buildingRadius: usesGeneratedFixture ? null : buildingRadius,
@@ -893,11 +957,12 @@
 				: generatedObjectRadius,
 			terrainRadius,
 		};
-		runtime.updateSceneInterest({
-			anchorLandblockId: landblockId,
-			radii: requestedRadii,
-		});
-		lastInterestAnchor = landblockId;
+		const request = requestCoordinator.request(parsed.target, requestedRadii);
+		const resolved = await request.promise;
+		if (!requestCoordinator.isCurrent(request.revision)) return;
+		const landblockId = parsed.residency.landblockId;
+		runtime.updateSceneInterest(resolved);
+		lastInterestLandblockId = landblockId;
 		lastInterestRadii = requestedRadii;
 		setCameraLandblock(landblockId, cameraYawDegrees, cameraPitchDegrees);
 	}
@@ -978,7 +1043,7 @@
 		};
 	}
 
-	/** Begin a scripted follow-mode flight; see the BrowserHarnessApi entry for semantics. */
+	/** Begin a scripted outdoor follow-mode flight; see the BrowserHarnessApi entry for semantics. */
 	async function runFollowFlight(
 		rawTargetLandblockId: string,
 		durationMs: number,
@@ -1034,6 +1099,7 @@
 				radii,
 				reject,
 				resolve,
+				sceneInterestReady: null,
 				startAudioSampleCounts: audioTraceVoices.map(
 					(voice) => voice.samples.length,
 				),
@@ -1046,13 +1112,13 @@
 	}
 
 	/**
-	 * Advance the scripted flight one frame: move the camera along the line and, on a landblock
-	 * crossing, re-issue the retained interest radii centred there — the same policy the
-	 * Explorer's interest-follows-camera toggle applies to free flight.
+	 * Advance the scripted outdoor flight one frame: move the camera along the line and, on a
+	 * landblock crossing, re-issue the retained outdoor interest radii there.
 	 */
 	function advanceFollowFlight(now: number): void {
 		const flight = followFlight;
-		if (flight === null || !runtime) return;
+		const activeRuntime = runtime;
+		if (flight === null || !activeRuntime) return;
 		const fraction = Math.min(1, (now - flight.startedAt) / flight.durationMs);
 		const position = new Vec3(
 			flight.from.x + (flight.to.x - flight.from.x) * fraction,
@@ -1067,12 +1133,40 @@
 			);
 			return;
 		}
-		if (landblockId !== lastInterestAnchor) {
-			lastInterestAnchor = landblockId;
-			runtime.updateSceneInterest({
-				anchorLandblockId: landblockId,
-				radii: flight.radii,
-			});
+		if (landblockId !== lastInterestLandblockId) {
+			lastInterestLandblockId = landblockId;
+			const requestCoordinator = sceneInterestCoordinator;
+			if (!requestCoordinator) {
+				followFlight = null;
+				flight.reject(
+					new Error("Browser harness scene-interest coordinator is not ready."),
+				);
+				return;
+			}
+			const request = requestCoordinator.request(
+				{ kind: "outdoor", landblockId },
+				flight.radii,
+			);
+			flight.sceneInterestReady = request.promise
+				.then((resolved) => {
+					if (
+						followFlight !== flight ||
+						!requestCoordinator.isCurrent(request.revision)
+					)
+						return;
+					activeRuntime.updateSceneInterest(resolved);
+				})
+				.catch((error: unknown) => {
+					if (
+						followFlight === flight &&
+						requestCoordinator.isCurrent(request.revision)
+					) {
+						followFlight = null;
+						flight.reject(
+							error instanceof Error ? error : new Error(String(error)),
+						);
+					}
+				});
 			flight.crossings.push({
 				elapsedMs: now - flight.startedAt,
 				landblockId,
@@ -1093,6 +1187,12 @@
 	function completeFollowFlight(): void {
 		const flight = followFlight;
 		if (flight === null || !flight.completionPending || !runtime) return;
+		if (flight.sceneInterestReady !== null) {
+			const sceneInterestReady = flight.sceneInterestReady;
+			flight.sceneInterestReady = null;
+			void sceneInterestReady.then(() => completeFollowFlight());
+			return;
+		}
 		followFlight = null;
 		flight.resolve({
 			audioTrace: AUDIO_TRACE
@@ -1218,6 +1318,41 @@
 			throw new Error("EnvCell focus did not retain camera evidence.");
 		}
 		return cameraEvidence;
+	}
+
+	function focusExplorerTarget(
+		rawTarget: string,
+		cameraYawDegrees: number,
+		cameraPitchDegrees: number,
+	): BrowserHarnessCameraEvidence {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		const parsed = parseResidenceInput(rawTarget);
+		if (parsed === null) throw new Error(`Target is invalid: ${rawTarget}.`);
+		const resolved = runtime.sceneInterestComponents().resolvedTarget;
+		if (resolved === null) {
+			throw new Error(
+				"Explorer target focus requires resolved scene interest.",
+			);
+		}
+		if (resolved.kind === "dungeon") {
+			const envCellId =
+				parsed.target.kind === "env-cell"
+					? parsed.target.envCellId
+					: (`${parsed.target.landblockId.slice(0, 6)}0100` as EnvCellId);
+			return focusExplorerEnvCell(
+				envCellId,
+				cameraYawDegrees,
+				cameraPitchDegrees,
+			);
+		}
+		if (parsed.target.kind === "env-cell") {
+			return focusExplorerEnvCell(
+				parsed.target.envCellId,
+				cameraYawDegrees,
+				cameraPitchDegrees,
+			);
+		}
+		return focusExplorerOutdoor(parsed.target.landblockId);
 	}
 
 	function setEnvCellRenderMode(envCellRenderMode: "flat" | "portal"): void {
@@ -2140,7 +2275,7 @@
 	function clearSceneInterest(): void {
 		if (!runtime) throw new Error("Browser harness runtime is not ready.");
 		runtime.clearSceneInterest();
-		lastInterestAnchor = null;
+		lastInterestLandblockId = null;
 		lastInterestRadii = null;
 	}
 
@@ -2277,6 +2412,12 @@
 		const start = async (): Promise<void> => {
 			try {
 				contentSource = await HttpLandblockContentSource.build(hostUrl);
+				landblockProfileSource = new CachedLandblockProfileSource(
+					contentSource,
+				);
+				sceneInterestCoordinator = new SceneInterestRequestCoordinator(
+					landblockProfileSource,
+				);
 				entityHost = new HttpExplorerEntityHost(hostUrl);
 				const landblockSource = ISOLATE_AUTHORED_DYNAMICS
 					? new DynamicOnlyLandblockSource(contentSource)
@@ -2604,6 +2745,7 @@
 					despawnExplorerEntity,
 					focusExplorerEnvCell,
 					focusExplorerOutdoor,
+					focusExplorerTarget,
 					launchExplorerEntity,
 					probeAudioFlyby,
 					probeNextFrameState,
@@ -2692,6 +2834,8 @@
 							terrainGlTrace: terrainGlTrace?.snapshot() ?? null,
 							sourceBatches:
 								contentSource?.getLandblockSourceBatchDiagnostics() ?? [],
+							profiles: contentSource?.getLandblockProfileDiagnostics() ?? [],
+							sceneInterest: sceneInterestEvidence(),
 							spawnedEntities,
 							timing: timingSnapshot(),
 							textureFilteringCapabilities,
@@ -2778,6 +2922,8 @@
 			longTaskObserver?.disconnect();
 			terrainGlTrace?.destroy();
 			mapRenderer?.destroy();
+			sceneInterestCoordinator?.destroy();
+			landblockProfileSource?.destroy();
 			delete hostGlobal.__HOLTBURGER_3D_BROWSER_HARNESS__;
 			staticDetailOwner?.teardown();
 			void runtime?.destroy().finally(async () => {

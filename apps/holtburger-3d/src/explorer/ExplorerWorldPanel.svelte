@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { SceneResidency } from "../lib/game/scene";
+	import type { SceneInterestTarget } from "../lib/game/runtime/scene-target";
 	import type { SceneInterestRadii } from "../lib/game/runtime/types";
 	import { FRONTEND_TUNING } from "../lib/frontend-tuning";
 	import type { ExplorerCameraFocusStatus } from "./explorer-camera-coordinator";
@@ -33,7 +34,7 @@
 		readonly runtimeReady: boolean;
 		/** Request frontend-owned scene content and automatic Explorer camera placement. */
 		readonly requestSceneInterest: (
-			residency: SceneResidency,
+			target: SceneInterestTarget,
 			radii: SceneInterestRadii,
 		) => void;
 		/** Current automatic camera-placement lifecycle state. */
@@ -56,7 +57,7 @@
 		/** Mirrors retail's `DisableMostWeatherEffects` player option, inverted. */
 		readonly weatherEnabled: boolean;
 		readonly clockFollowing: boolean;
-		/** Follow mode: scene interest re-anchors to the camera's landblock on crossings. */
+		/** Follow mode: scene interest follows accepted outdoor residency crossings. */
 		readonly interestFollowsCamera: boolean;
 		readonly updateInterestFollowsCamera: (enabled: boolean) => void;
 		/** Whether the audio listener rides the free camera; see the camera coordinator. */
@@ -151,8 +152,8 @@
 	function submitInterest(event: SubmitEvent): void {
 		event.preventDefault();
 		if (!runtimeReady || !parsedInterest) return;
-		requestSceneInterest(parsedInterest.residency, radii);
-		interestStatus = `Requested around ${parsedInterest.residency.landblockId}.`;
+		requestSceneInterest(parsedInterest.target, radii);
+		interestStatus = `Requested ${parsedInterest.label}.`;
 	}
 
 	function updateRadius(kind: ExplorerRadiusKind, event: Event): void {

@@ -1,5 +1,9 @@
 import type { LandblockId } from "../game-types";
-import { getLandblockCoordinates } from "../landblocks";
+import {
+	getLandblockCoordinates,
+	normalizeLandblockOwner,
+} from "../landblocks";
+import type { ResolvedSceneInterestTarget } from "./scene-target";
 import type { SceneInterestRadii } from "./types";
 
 export enum LandblockLayerKind {
@@ -56,12 +60,20 @@ export interface SceneInterestDiff {
 	evictedLayers: Set<LandblockIdLayer>;
 }
 
-/** Explicit frontend request for static content around one outdoor anchor. */
+/** Explicit frontend request for static content after target policy resolution. */
 export interface SceneInterestRequest {
-	/** Outdoor landblock around which requested layers are retained. */
-	readonly anchorLandblockId: LandblockId;
+	/** Profile-resolved target whose policy selects outdoor or dungeon demand. */
+	readonly target: ResolvedSceneInterestTarget;
 	/** Complete enabled-layer and radius policy for this request. */
 	readonly radii: SceneInterestRadii;
+	/** Owners allowed to receive EnvCells from ambient outdoor-radius demand. */
+	readonly ambientOutdoorEnvCellOwners: ReadonlySet<LandblockId>;
+}
+
+/** Explicitly retained components whose union is the only demand sent to materialization. */
+export interface SceneInterestComponents {
+	readonly retainedOutdoor: SceneInterestMap;
+	readonly activeDungeon: SceneInterestMap;
 }
 
 /** Reject a scene-interest radius configuration that cannot produce coherent layers. */
@@ -86,13 +98,14 @@ export function validateSceneInterestRadiiOrThrow(
 	}
 }
 
-/** Derive every static layer required around one anchor landblock. */
-export function computeSceneInterest(
-	anchorLandblockId: LandblockId,
+/** Derive every static layer required by an outdoor landblock window. */
+export function computeOutdoorSceneInterest(
+	landblockId: LandblockId,
 	config: SceneInterestRadii,
+	ambientOutdoorEnvCellOwners: ReadonlySet<LandblockId>,
 ): SceneInterestMap {
-	const anchor = getLandblockCoordinates(anchorLandblockId);
-	const suffix = landblockIdSuffix(anchorLandblockId);
+	const anchor = getLandblockCoordinates(landblockId);
+	const suffix = landblockIdSuffix(landblockId);
 	const interest: SceneInterestMap = new Map();
 	for (
 		let y = anchor.y - config.terrainRadius;
@@ -119,12 +132,46 @@ export function computeSceneInterest(
 				distance <= config.generatedObjectRadius
 			)
 				layers.add(LandblockLayerKind.Generated);
-			if (config.envCellRadius !== null && distance <= config.envCellRadius)
+			const owner = createLandblockId(x, y, suffix);
+			if (
+				config.envCellRadius !== null &&
+				distance <= config.envCellRadius &&
+				ambientOutdoorEnvCellOwners.has(owner)
+			)
 				layers.add(LandblockLayerKind.EnvCells);
-			interest.set(createLandblockId(x, y, suffix), layers);
+			interest.set(owner, layers);
 		}
 	}
 	return interest;
+}
+
+/** Derive the one EnvCells layer required by a dungeon owner. */
+export function computeDungeonSceneInterest(
+	landblockId: LandblockId,
+): SceneInterestMap {
+	const owner = normalizeLandblockOwner(landblockId);
+	return new Map([[owner, new Set([LandblockLayerKind.EnvCells])]]);
+}
+
+/** Copy and union retained demand components without exposing component ownership to the pipeline. */
+export function unionSceneInterestComponents(
+	components: SceneInterestComponents,
+): SceneInterestMap {
+	const effective: SceneInterestMap = new Map();
+	for (const component of [
+		components.retainedOutdoor,
+		components.activeDungeon,
+	]) {
+		for (const [landblockId, layers] of component) {
+			const effectiveLayers = effective.get(landblockId);
+			if (effectiveLayers) {
+				for (const layer of layers) effectiveLayers.add(layer);
+			} else {
+				effective.set(landblockId, new Set(layers));
+			}
+		}
+	}
+	return effective;
 }
 
 export function diffSceneInterest(
@@ -162,7 +209,10 @@ function isValidRadius(radius: number): boolean {
 function landblockIdSuffix(landblockId: LandblockId): string {
 	const match = /^(?:0x)?[0-9a-fA-F]{4}([0-9a-fA-F]{4})$/.exec(landblockId);
 	if (!match) throw new Error(`Invalid landblock id ${landblockId}.`);
-	return match[1]!;
+	const suffix = match[1];
+	if (suffix === undefined)
+		throw new Error(`Invalid landblock id ${landblockId}.`);
+	return suffix;
 }
 
 function createLandblockId(x: number, y: number, suffix: string): LandblockId {

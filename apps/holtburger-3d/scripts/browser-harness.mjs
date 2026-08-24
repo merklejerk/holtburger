@@ -836,7 +836,7 @@ function parseArgs(args) {
 		(parsed.relocateLandblockId || parsed.relocateSequence.length > 0)
 	) {
 		throw new Error(
-			"--follow-flight and relocation options cannot be combined; the flight re-anchors by itself.",
+			"--follow-flight and relocation options cannot be combined; the flight replaces outdoor interest by itself.",
 		);
 	}
 	if (parsed.relocateSequence.length > 0 && parsed.relocateLandblockId) {
@@ -1149,9 +1149,9 @@ Options:
                          churn can be measured without the interactive client. Reports per-hop
                          state under relocationSequence.
   --relocate-hop-ms <ms> Settle time between sequence hops. Default: ${DEFAULT_RELOCATE_HOP_MS}
-  --follow-flight <hex>  Fly the camera in a straight line to this landblock's centre,
-                         re-anchoring scene interest on every crossing — the harness mirror of
-                         Explorer follow mode. Reports crossings and flight-window timing.
+  --follow-flight <hex>  Fly the outdoor camera in a straight line to this landblock's centre,
+                         replacing outdoor scene interest on every crossing — the harness mirror
+                         of Explorer's outdoor follow mode. Reports crossings and timing.
   --follow-flight-ms <ms> Flight duration. Default: ${DEFAULT_FOLLOW_FLIGHT_MS}
   --cpu-profile <path>  Sample the page's V8 CPU profile across the measurement window and
                          persist it as .cpuprofile JSON for DevTools or speedscope.
@@ -1380,6 +1380,8 @@ function briefHarnessReport(result) {
 		relocationSequence: result.relocationSequence,
 		relocationState: result.relocationState,
 		sourceBatches: summarizeSourceBatches(result.state.sourceBatches),
+		profiles: result.state.profiles,
+		sceneInterest: result.state.sceneInterest,
 		// Compiled-draw occupancy is leak evidence across relocations, and its flush counts
 		// explain any recompilation, so brief mode keeps both.
 		compiledObjectDraws: result.state.compiledObjectDraws,
@@ -2950,6 +2952,7 @@ async function hopToLandblock(client, options, landblockId, settleMs) {
 		"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.requestSceneInterest",
 		sceneInterestArgs(options, landblockId, options.generatedObjectRadius),
 	);
+	await waitForRequiredEnvCellPublication(client, landblockId);
 	await delay(settleMs);
 	return evaluate(
 		client,
@@ -3132,9 +3135,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				[options.textureFiltering ?? "nearest"],
 			);
 		}
-		if (options.envCellRadius !== null) {
-			await waitForEnvCellPublication(client, options.landblockId);
-		}
+		await waitForRequiredEnvCellPublication(client, options.landblockId);
 		if (options.cameraPosition !== null) {
 			await evaluate(
 				client,
@@ -3151,8 +3152,12 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		if (options.explorerFocus) {
 			await evaluate(
 				client,
-				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.focusExplorerOutdoor",
-				[options.landblockId],
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.focusExplorerTarget",
+				[
+					options.landblockId,
+					options.cameraYawDegrees,
+					options.cameraPitchDegrees,
+				],
 			);
 			await delay(250);
 		}
@@ -3638,6 +3643,9 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			);
 			relocationSequence.push({
 				landblockId,
+				profiles: state.profiles,
+				sceneInterest: state.sceneInterest,
+				sourceBatches: summarizeSourceBatches(state.sourceBatches),
 				// Publication count travels with the timing: frame cost during a crossing scales
 				// with how many layer installs land in the window, so timings from runs that
 				// published different amounts are not comparable.
@@ -4057,6 +4065,23 @@ async function waitForHarnessApi(client) {
 		}
 		await delay(250);
 	}
+}
+
+/** Wait only when the resolved demand actually contains EnvCells (including cold dungeons). */
+async function waitForRequiredEnvCellPublication(client, requestedLandblockId) {
+	const state = await evaluate(
+		client,
+		"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
+		[],
+	);
+	if (
+		!state.sceneInterest?.effective?.some(({ layers }) =>
+			layers.includes("env-cells"),
+		)
+	) {
+		return;
+	}
+	await waitForEnvCellPublication(client, requestedLandblockId);
 }
 
 async function waitForEnvCellPublication(client, requestedLandblockId) {

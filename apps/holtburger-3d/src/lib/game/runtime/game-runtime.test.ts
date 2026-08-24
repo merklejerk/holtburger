@@ -29,7 +29,7 @@ import { GameRuntime, type GameRuntimeRenderDevice } from "./game-runtime";
 import type { SceneAvailabilityEvent } from "./scene-availability";
 import type { DynamicEntityView } from "./dynamic-entity-feed";
 import type { Camera } from "./types";
-import type { DatAssetId } from "../game-types";
+import type { DatAssetId, LandblockId } from "../game-types";
 import type { DynamicEntityVisualSource } from "../../assets/dynamic-entity-visual-source";
 import type { DecodedStaticPresentation } from "../../assets/decode-static-source-record";
 import type {
@@ -232,7 +232,11 @@ describe("GameRuntime view and interest control", () => {
 		);
 
 		runtime.updateSceneInterest({
-			anchorLandblockId: "0x1010ffff",
+			ambientOutdoorEnvCellOwners: new Set(),
+			target: {
+				kind: "outdoor",
+				requested: { kind: "outdoor", landblockId: "0x1010ffff" },
+			},
 			radii: {
 				buildingRadius: null,
 				envCellRadius: null,
@@ -835,6 +839,225 @@ describe("GameRuntime spawned dynamic presentation", () => {
 		).toBe(2);
 		await runtime.destroy();
 	});
+
+	it("keeps retained outdoor demand separate from active dungeon demand", async () => {
+		const requests: LandblockIdLayer[][] = [];
+		const runtime = await buildGameRuntimeForTest(
+			{
+				buildRenderer: async () => ({
+					async destroy() {},
+					drawFrame: () => EMPTY_RENDERER_FRAME_FEEDBACK,
+				}),
+				resources: TEST_RESOURCES,
+			},
+			{
+				async prepareLandblockLayers(layers) {
+					requests.push([...layers]);
+					return [];
+				},
+			},
+			{} as TexturePixelSource,
+			ANIMATION_SOURCE,
+			PHYSICS_SCRIPT_SOURCE,
+			{ playOneShot: () => null, prepare: async () => {} },
+			PARTICLE_EMITTER_SOURCE,
+			SOUND_TABLE_SOURCE,
+			PARTICLE_MESH_SOURCE,
+			null,
+		);
+		const outdoor = sceneInterest("0xda55ffff");
+		const outdoorWithEnv = {
+			...outdoor,
+			radii: { ...outdoor.radii, envCellRadius: 0 },
+		};
+		runtime.updateSceneInterest(outdoorWithEnv);
+		await Promise.resolve();
+		expect(runtime.sceneInterestComponents().activeDungeon).toEqual(new Map());
+		expect(runtime.sceneInterestComponents().retainedOutdoor).toEqual(
+			new Map([
+				[
+					"0xda55ffff",
+					new Set([LandblockLayerKind.Terrain, LandblockLayerKind.EnvCells]),
+				],
+			]),
+		);
+		expect(runtime.terrainFogCoverage()).toEqual({ terrainRadius: 0 });
+		requests.length = 0;
+
+		runtime.updateSceneInterest({
+			ambientOutdoorEnvCellOwners: new Set(),
+			target: {
+				kind: "dungeon",
+				requested: {
+					kind: "automatic-landblock",
+					landblockId: "0x0005ffff",
+				},
+			},
+			radii: outdoorWithEnv.radii,
+		});
+		await Promise.resolve();
+		expect(requests).toEqual([
+			[{ id: "0x0005ffff", layer: LandblockLayerKind.EnvCells }],
+		]);
+		expect(runtime.sceneInterestComponents().activeDungeon).toEqual(
+			new Map([["0x0005ffff", new Set([LandblockLayerKind.EnvCells])]]),
+		);
+		expect(runtime.terrainFogCoverage()).toEqual({ terrainRadius: 0 });
+		requests.length = 0;
+
+		runtime.updateSceneInterest({
+			ambientOutdoorEnvCellOwners: new Set(),
+			target: {
+				kind: "dungeon",
+				requested: {
+					kind: "automatic-landblock",
+					landblockId: "0x0006ffff",
+				},
+			},
+			radii: outdoorWithEnv.radii,
+		});
+		await Promise.resolve();
+		expect(requests).toEqual([
+			[{ id: "0x0006ffff", layer: LandblockLayerKind.EnvCells }],
+		]);
+		expect(runtime.sceneInterestComponents().effective.has("0x0005ffff")).toBe(
+			false,
+		);
+
+		requests.length = 0;
+		runtime.updateSceneInterest(outdoorWithEnv);
+		await Promise.resolve();
+		expect(requests).toHaveLength(0);
+		expect(runtime.sceneInterestComponents().activeDungeon).toEqual(new Map());
+		expect(runtime.sceneInterestComponents().effective).toEqual(
+			runtime.sceneInterestComponents().retainedOutdoor,
+		);
+
+		runtime.clearSceneInterest();
+		expect(runtime.sceneInterestComponents().activeDungeon).toEqual(new Map());
+		expect(runtime.sceneInterestComponents().retainedOutdoor).toEqual(
+			new Map(),
+		);
+		expect(runtime.sceneInterestComponents().effective).toEqual(new Map());
+		expect(runtime.sceneInterestComponents().resolvedTarget).toBeNull();
+		expect(runtime.terrainFogCoverage()).toBeNull();
+		requests.length = 0;
+		runtime.updateSceneInterest({
+			ambientOutdoorEnvCellOwners: new Set(),
+			target: {
+				kind: "dungeon",
+				requested: {
+					kind: "env-cell",
+					envCellId: "0x00050100",
+					landblockId: "0x0005ffff",
+				},
+			},
+			radii: outdoorWithEnv.radii,
+		});
+		await Promise.resolve();
+		expect(requests).toEqual([
+			[{ id: "0x0005ffff", layer: LandblockLayerKind.EnvCells }],
+		]);
+		expect(runtime.sceneInterestComponents().retainedOutdoor).toEqual(
+			new Map(),
+		);
+		await runtime.destroy();
+	});
+
+	it("filters ambient EnvCells for a dungeon-only outdoor owner but preserves explicit dungeon demand", async () => {
+		const runtime = await buildGameRuntimeForTest(
+			{
+				buildRenderer: async () => ({
+					async destroy() {},
+					drawFrame: () => EMPTY_RENDERER_FRAME_FEEDBACK,
+				}),
+				resources: TEST_RESOURCES,
+			},
+			{
+				async prepareLandblockLayers() {
+					return [];
+				},
+			},
+			{} as TexturePixelSource,
+			ANIMATION_SOURCE,
+			PHYSICS_SCRIPT_SOURCE,
+			{ playOneShot: () => null, prepare: async () => {} },
+			PARTICLE_EMITTER_SOURCE,
+			SOUND_TABLE_SOURCE,
+			PARTICLE_MESH_SOURCE,
+			null,
+		);
+		const radii = {
+			buildingRadius: 0,
+			envCellRadius: 0,
+			explicitObjectRadius: 0,
+			generatedObjectRadius: 0,
+			terrainRadius: 0,
+		} as const;
+		const outdoorTarget = {
+			kind: "outdoor" as const,
+			landblockId: "0x5f50ffff" as const,
+		};
+
+		runtime.updateSceneInterest({
+			ambientOutdoorEnvCellOwners: new Set(),
+			radii,
+			target: { kind: "outdoor", requested: outdoorTarget },
+		});
+		expect(runtime.sceneInterestComponents()).toMatchObject({
+			activeDungeon: new Map(),
+			retainedOutdoor: new Map([
+				[
+					"0x5f50ffff",
+					new Set([
+						LandblockLayerKind.Terrain,
+						LandblockLayerKind.Buildings,
+						LandblockLayerKind.Objects,
+						LandblockLayerKind.Generated,
+					]),
+				],
+			]),
+		});
+
+		runtime.updateSceneInterest({
+			ambientOutdoorEnvCellOwners: new Set(),
+			radii,
+			target: {
+				kind: "dungeon",
+				requested: {
+					kind: "automatic-landblock",
+					landblockId: "0x5f50ffff",
+				},
+			},
+		});
+		expect(runtime.sceneInterestComponents()).toMatchObject({
+			activeDungeon: new Map([
+				["0x5f50ffff", new Set([LandblockLayerKind.EnvCells])],
+			]),
+			retainedOutdoor: new Map([
+				[
+					"0x5f50ffff",
+					new Set([
+						LandblockLayerKind.Terrain,
+						LandblockLayerKind.Buildings,
+						LandblockLayerKind.Objects,
+						LandblockLayerKind.Generated,
+					]),
+				],
+			]),
+		});
+
+		runtime.updateSceneInterest({
+			ambientOutdoorEnvCellOwners: new Set(),
+			radii,
+			target: { kind: "outdoor", requested: outdoorTarget },
+		});
+		expect(runtime.sceneInterestComponents().activeDungeon).toEqual(new Map());
+		expect(runtime.sceneInterestComponents().effective).toEqual(
+			runtime.sceneInterestComponents().retainedOutdoor,
+		);
+		await runtime.destroy();
+	});
 });
 
 async function buildSpawnRuntime(
@@ -1128,7 +1351,14 @@ function spawnedVisual(): DecodedStaticPresentation {
 
 function sceneInterest(anchorLandblockId: string) {
 	return {
-		anchorLandblockId,
+		ambientOutdoorEnvCellOwners: new Set([anchorLandblockId as LandblockId]),
+		target: {
+			kind: "outdoor",
+			requested: {
+				kind: "outdoor",
+				landblockId: anchorLandblockId as LandblockId,
+			},
+		},
 		radii: {
 			buildingRadius: null,
 			envCellRadius: null,
@@ -1141,7 +1371,14 @@ function sceneInterest(anchorLandblockId: string) {
 
 function buildingSceneInterest(anchorLandblockId: string) {
 	return {
-		anchorLandblockId,
+		ambientOutdoorEnvCellOwners: new Set<LandblockId>(),
+		target: {
+			kind: "outdoor",
+			requested: {
+				kind: "outdoor",
+				landblockId: anchorLandblockId as LandblockId,
+			},
+		},
 		radii: {
 			buildingRadius: 0,
 			envCellRadius: null,
@@ -1154,7 +1391,14 @@ function buildingSceneInterest(anchorLandblockId: string) {
 
 function objectSceneInterest(anchorLandblockId: string) {
 	return {
-		anchorLandblockId,
+		ambientOutdoorEnvCellOwners: new Set<LandblockId>(),
+		target: {
+			kind: "outdoor",
+			requested: {
+				kind: "outdoor",
+				landblockId: anchorLandblockId as LandblockId,
+			},
+		},
 		radii: {
 			buildingRadius: null,
 			envCellRadius: null,
@@ -1167,7 +1411,14 @@ function objectSceneInterest(anchorLandblockId: string) {
 
 function generatedSceneInterest(anchorLandblockId: string) {
 	return {
-		anchorLandblockId,
+		ambientOutdoorEnvCellOwners: new Set<LandblockId>(),
+		target: {
+			kind: "outdoor",
+			requested: {
+				kind: "outdoor",
+				landblockId: anchorLandblockId as LandblockId,
+			},
+		},
 		radii: {
 			buildingRadius: null,
 			envCellRadius: null,

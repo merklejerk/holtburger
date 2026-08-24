@@ -7,10 +7,15 @@ import type { HostCameraPlacement } from "../lib/game/motion/host-placed-path";
 import type { SceneInterestRevision } from "../lib/game/runtime/scene-availability";
 import type { SceneAvailabilityEvent } from "../lib/game/runtime/scene-availability";
 import { LandblockLayerKind } from "../lib/game/runtime/scene-interest";
+import type { SceneInterestRequest } from "../lib/game/runtime/scene-interest";
 import type { Camera } from "../lib/game/runtime/types";
 import type { ProjectionClearanceRevision } from "../lib/game/camera/projection-clearance";
 import type { SceneInterestRadii } from "../lib/game/runtime/types";
 import type { SceneResidency } from "../lib/game/scene";
+import type {
+	ResolvedSceneInterestTarget,
+	SceneInterestTarget,
+} from "../lib/game/runtime/scene-target";
 import { FRONTEND_TUNING } from "../lib/frontend-tuning";
 import {
 	ExplorerCameraInputController,
@@ -29,6 +34,13 @@ type InteriorResidency = SceneResidency & {
 	readonly envCellId: NonNullable<SceneResidency["envCellId"]>;
 };
 
+/** Pending outdoor follow request awaiting shared profile-aware scene-interest resolution. */
+export interface PendingExplorerFollowSceneInterest {
+	readonly radii: SceneInterestRadii;
+	readonly residency: SceneResidency;
+	readonly target: SceneInterestTarget;
+}
+
 type PendingFocus =
 	| {
 			readonly kind: "interior";
@@ -46,15 +58,18 @@ export type ExplorerCameraFocusStatus =
 	| "No camera focus requested."
 	| "Loading outdoor terrain for initial camera placement."
 	| "Waiting for environment-cell topology for initial camera placement."
+	| "Loading dungeon environment-cell topology for initial camera placement."
 	| "Environment-cell topology is unavailable for the requested scene interest."
 	| "Initial camera placement applied."
 	| "Initial camera placement cancelled by manual control."
 	| "Camera position is outside canonical world bounds."
+	| "Camera position is outside active dungeon topology."
 	| "Waiting for first host camera placement."
 	| `Camera residency is ambiguous across EnvCells: ${string}.`
 	| `Camera residency follows host placement ${string}.`
 	| `Host-selected EnvCell ${string} is unavailable for camera rendering.`
 	| `Initial camera placement is outside selected EnvCell ${string}.`
+	| `Scene target unavailable: ${string}`
 	| `Initial camera placement failed: ${string}`;
 
 /** Post-tick camera reconciliation consumed before attempting the matching render. */
@@ -65,8 +80,9 @@ export interface ExplorerCameraResidencySync {
 	readonly renderable: boolean;
 }
 
-/** The scene interest currently anchored, and the radii every re-anchor reuses. */
+/** The current scene-interest target and the radii outdoor follow mode reuses. */
 export interface ExplorerSceneInterestSnapshot {
+	readonly target: ResolvedSceneInterestTarget;
 	readonly radii: SceneInterestRadii;
 	readonly residency: SceneResidency;
 }
@@ -86,13 +102,14 @@ export class ExplorerCameraCoordinator {
 	readonly #unsubscribeAvailability: () => void;
 	#pending: PendingFocus | null = null;
 	/**
-	 * The one anchor of record for scene interest, or null before anything has been requested.
+	 * The one scene-interest snapshot of record, or null before anything has been requested.
 	 *
 	 * Every writer of runtime scene interest goes through this coordinator, so this stays the
-	 * single answer to "where is interest centered". Follow mode reuses its radii rather than
-	 * carrying a second copy that can disagree with the focus flow mid-request.
+	 * single answer to "which target is active". Follow mode reuses its radii rather than carrying
+	 * a second copy that can disagree with the focus flow mid-request.
 	 */
-	#anchor: ExplorerSceneInterestSnapshot | null = null;
+	#sceneInterestSnapshot: ExplorerSceneInterestSnapshot | null = null;
+	#pendingFollowSceneInterest: PendingExplorerFollowSceneInterest | null = null;
 	#lastResidency: SceneResidency | null = null;
 	/** Exact position/residency most recently applied to the runtime camera. */
 	#presentedPlacement: HostCameraPlacement | null = null;
@@ -118,16 +135,17 @@ export class ExplorerCameraCoordinator {
 		);
 	}
 
-	/** Request content around a frontend-selected location and begin the matching focus flow. */
-	requestSceneInterest(
-		residency: SceneResidency,
-		radii: SceneInterestRadii,
-	): void {
-		this.#anchor = { radii: { ...radii }, residency: { ...residency } };
-		const receipt = this.#runtime.updateSceneInterest({
-			anchorLandblockId: residency.landblockId,
-			radii,
-		});
+	/** Request content for a frontend-selected target and begin the matching focus flow. */
+	requestSceneInterest(request: SceneInterestRequest): void {
+		const { radii, target } = request;
+		this.#pendingFollowSceneInterest = null;
+		const residency = focusResidency(target);
+		this.#sceneInterestSnapshot = {
+			radii: { ...radii },
+			residency: { ...residency },
+			target,
+		};
+		const receipt = this.#runtime.updateSceneInterest(request);
 		const pending: PendingFocus =
 			residency.envCellId === null
 				? {
@@ -146,7 +164,7 @@ export class ExplorerCameraCoordinator {
 			this.#tryFocusOutdoor(pending);
 			return;
 		}
-		if (radii.envCellRadius === null) {
+		if (radii.envCellRadius === null && target.kind !== "dungeon") {
 			this.#finishRejectedInteriorResolution(
 				pending,
 				resolveExplicitExplorerEnvCell(
@@ -157,46 +175,94 @@ export class ExplorerCameraCoordinator {
 			return;
 		}
 		this.#onStatus(
-			"Waiting for environment-cell topology for initial camera placement.",
+			target.kind === "dungeon"
+				? "Loading dungeon environment-cell topology for initial camera placement."
+				: "Waiting for environment-cell topology for initial camera placement.",
 		);
 		this.#tryFocusInterior(pending, false);
 	}
 
 	/**
-	 * Re-anchor the established radii on a residency the camera actually reached.
+	 * Reuse the established radii when the camera reaches a new outdoor residency.
 	 *
 	 * Follow mode's whole policy. No focus flow runs: the camera is already there, so placing it
 	 * would fight the viewer. Returns whether interest moved, which is what callers need to keep
 	 * their own interest-bearing systems in step.
 	 *
 	 * Declines while an automatic placement is pending, because until it applies the camera is
-	 * still at the location being left. Treating that as a crossing would re-anchor interest back
+	 * still at the location being left. Treating that as a crossing would move interest back
 	 * to it and supersede the revision the pending placement is waiting on, so the requested
 	 * landblock would load and then immediately unload again.
 	 */
-	followCameraResidency(residency: SceneResidency): boolean {
-		const anchor = this.#anchor;
+	prepareFollowCameraResidency(
+		resolution: ExplorerResidencyResolution,
+	): PendingExplorerFollowSceneInterest | null {
+		if (resolution.kind !== "resolved") return null;
+		const residency = resolution.residency;
+		const sceneInterest = this.#sceneInterestSnapshot;
 		if (
-			anchor === null ||
+			sceneInterest === null ||
 			this.#pending !== null ||
-			anchor.residency.landblockId === residency.landblockId
+			sceneInterest.target.kind === "dungeon" ||
+			sceneInterest.residency.landblockId === residency.landblockId ||
+			this.#pendingFollowSceneInterest?.residency.landblockId ===
+				residency.landblockId
+		) {
+			return null;
+		}
+		const pending: PendingExplorerFollowSceneInterest = {
+			radii: sceneInterest.radii,
+			residency,
+			target: {
+				kind: "outdoor",
+				landblockId: residency.landblockId,
+			},
+		};
+		this.#pendingFollowSceneInterest = pending;
+		return pending;
+	}
+
+	/** Apply a current, profile-resolved follow request after the camera crossed an outdoor owner. */
+	applyFollowCameraResidency(
+		pending: PendingExplorerFollowSceneInterest,
+		request: SceneInterestRequest,
+	): boolean {
+		if (this.#pendingFollowSceneInterest !== pending) return false;
+		this.#pendingFollowSceneInterest = null;
+		if (
+			request.target.kind !== "outdoor" ||
+			request.target.requested.kind !== "outdoor" ||
+			request.target.requested.landblockId !== pending.residency.landblockId
 		) {
 			return false;
 		}
-		this.#anchor = { radii: anchor.radii, residency: { ...residency } };
-		this.#runtime.updateSceneInterest({
-			anchorLandblockId: residency.landblockId,
-			radii: anchor.radii,
-		});
+		this.#sceneInterestSnapshot = {
+			radii: { ...pending.radii },
+			residency: { ...pending.residency },
+			target: request.target,
+		};
+		this.#runtime.updateSceneInterest(request);
 		return true;
 	}
 
-	/** Copy the anchor of record for diagnostics that record what the scene was asked to hold. */
+	/** Drop one failed follow resolution so a later crossing can retry explicitly. */
+	rejectFollowCameraResidency(
+		pending: PendingExplorerFollowSceneInterest,
+	): void {
+		if (this.#pendingFollowSceneInterest === pending)
+			this.#pendingFollowSceneInterest = null;
+	}
+
+	/** Copy the scene-interest snapshot for diagnostics. */
 	sceneInterest(): ExplorerSceneInterestSnapshot | null {
-		const anchor = this.#anchor;
-		return anchor === null
+		const sceneInterest = this.#sceneInterestSnapshot;
+		return sceneInterest === null
 			? null
-			: { radii: { ...anchor.radii }, residency: { ...anchor.residency } };
+			: {
+					radii: { ...sceneInterest.radii },
+					residency: { ...sceneInterest.residency },
+					target: sceneInterest.target,
+				};
 	}
 
 	/** Apply input-event policy without deriving residency from a potentially changing scene. */
@@ -227,6 +293,32 @@ export class ExplorerCameraCoordinator {
 		const resolution = resolveExplorerPointResidency(
 			this.#runtime.queryWorldPointResidencyCandidates(state.position),
 		);
+		if (this.#sceneInterestSnapshot?.target.kind === "dungeon") {
+			if (
+				resolution.kind === "resolved" &&
+				resolution.residency.envCellId !== null &&
+				resolution.residency.landblockId ===
+					this.#sceneInterestSnapshot.residency.landblockId
+			) {
+				this.#lastResolutionIssue = null;
+				this.#lastResidency = resolution.residency;
+				this.#applyCamera(
+					createCamera(resolution.residency, state, projection),
+					projection,
+				);
+				return {
+					location: { position: state.position, residency: resolution },
+					renderable: true,
+				};
+			}
+			this.#reportResolutionIssue(
+				"Camera position is outside active dungeon topology.",
+			);
+			return {
+				location: { position: state.position, residency: resolution },
+				renderable: false,
+			};
+		}
 		const location = { position: state.position, residency: resolution };
 		if (resolution.kind === "resolved") {
 			this.#lastResolutionIssue = null;
@@ -414,7 +506,8 @@ export class ExplorerCameraCoordinator {
 
 	dispose(): void {
 		this.#unsubscribeAvailability();
-		this.#anchor = null;
+		this.#sceneInterestSnapshot = null;
+		this.#pendingFollowSceneInterest = null;
 		this.#pending = null;
 		this.#lastReportedHostResidency = null;
 		this.#pendingFreeFlyResidency = null;
@@ -591,6 +684,27 @@ function pendingLayer(pending: PendingFocus): LandblockLayerKind {
 
 function formatResidency(residency: SceneResidency): string {
 	return residency.envCellId ?? `outdoor ${residency.landblockId}`;
+}
+
+function focusResidency(target: ResolvedSceneInterestTarget): SceneResidency {
+	const requested = target.requested;
+	if (target.kind === "dungeon") {
+		return {
+			envCellId:
+				requested.kind === "env-cell"
+					? requested.envCellId
+					: (`${requested.landblockId.slice(0, 6)}0100` as NonNullable<
+							SceneResidency["envCellId"]
+						>),
+			landblockId: requested.landblockId,
+		};
+	}
+	return requested.kind === "env-cell"
+		? {
+				envCellId: requested.envCellId,
+				landblockId: requested.landblockId,
+			}
+		: { envCellId: null, landblockId: requested.landblockId };
 }
 
 function sameResidency(

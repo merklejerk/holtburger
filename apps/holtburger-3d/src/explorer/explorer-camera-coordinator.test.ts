@@ -7,7 +7,9 @@ import type { SceneInterestRadii } from "../lib/game/runtime/types";
 import { createProjectionClearanceRevision } from "../lib/game/camera/projection-clearance";
 import { AABB3, Vec3 } from "../lib/game/math/types";
 import type { ScenePointResidencyCandidates } from "../lib/game/scene";
+import type { ResolvedSceneInterestTarget } from "../lib/game/runtime/scene-target";
 import type { ExplorerCameraInputController as FreeFlyCameraController } from "./explorer-camera-input-controller";
+import type { ExplorerResidencyResolution } from "./explorer-residency";
 import { ExplorerCameraCoordinator } from "./explorer-camera-coordinator";
 
 const TEST_RADII: SceneInterestRadii = {
@@ -23,7 +25,75 @@ const TEST_PROJECTION = createProjectionClearanceRevision(
 	{ height: 720, width: 1_280 },
 );
 
+function resolvedFromResidency(residency: {
+	readonly envCellId: string | null;
+	readonly landblockId: string;
+}): ResolvedSceneInterestTarget {
+	return {
+		kind: "outdoor",
+		requested:
+			residency.envCellId === null
+				? { kind: "outdoor", landblockId: residency.landblockId }
+				: {
+						envCellId: residency.envCellId,
+						kind: "env-cell",
+						landblockId: residency.landblockId,
+					},
+	};
+}
+
+function dungeonTarget(
+	requested:
+		| { readonly kind: "automatic-landblock"; readonly landblockId: string }
+		| {
+				readonly kind: "env-cell";
+				readonly envCellId: string;
+				readonly landblockId: string;
+		  },
+): ResolvedSceneInterestTarget {
+	return { kind: "dungeon", requested } as ResolvedSceneInterestTarget;
+}
+
 describe("ExplorerCameraCoordinator", () => {
+	it("focuses a bare dungeon owner at deterministic EnvCell 0x0100", () => {
+		const setAutomaticPose = vi.fn();
+		const statuses: string[] = [];
+		const { runtime } = createRuntime({
+			queryEnvCellBounds: () =>
+				new AABB3(new Vec3(10, 20, 30), new Vec3(30, 40, 50)),
+			queryEnvCellPointContainment: () => true,
+		});
+		const coordinator = new ExplorerCameraCoordinator(
+			runtime,
+			{ setAutomaticPose } as unknown as FreeFlyCameraController,
+			(status) => statuses.push(status),
+		);
+
+		coordinator.requestSceneInterest({
+			ambientOutdoorEnvCellOwners: new Set(),
+			radii: { ...TEST_RADII, envCellRadius: null },
+			target: dungeonTarget({
+				kind: "automatic-landblock",
+				landblockId: "0x0005ffff",
+			}),
+		});
+
+		expect(setAutomaticPose).toHaveBeenCalledWith({
+			pitchRadians: 0,
+			position: new Vec3(20, 30, 40),
+			yawRadians: 0,
+		});
+		expect(statuses).toEqual([
+			"Loading dungeon environment-cell topology for initial camera placement.",
+			"Initial camera placement applied.",
+		]);
+		expect(coordinator.sceneInterest()?.residency).toEqual({
+			envCellId: "0x00050100",
+			landblockId: "0x0005ffff",
+		});
+		coordinator.dispose();
+	});
+
 	it("focuses an explicitly selected valid EnvCell at its contained bounds center", () => {
 		const setAutomaticPose = vi.fn();
 		const statuses: string[] = [];
@@ -38,13 +108,14 @@ describe("ExplorerCameraCoordinator", () => {
 			(status) => statuses.push(status),
 		);
 
-		coordinator.requestSceneInterest(
-			{
+		coordinator.requestSceneInterest({
+			ambientOutdoorEnvCellOwners: new Set(),
+			radii: TEST_RADII,
+			target: resolvedFromResidency({
 				envCellId: "0x01020001",
 				landblockId: "0x0102ffff",
-			},
-			TEST_RADII,
-		);
+			}),
+		});
 
 		expect(setAutomaticPose).toHaveBeenCalledWith({
 			pitchRadians: 0,
@@ -55,6 +126,60 @@ describe("ExplorerCameraCoordinator", () => {
 			"Waiting for environment-cell topology for initial camera placement.",
 			"Initial camera placement applied.",
 		]);
+		coordinator.dispose();
+	});
+
+	it("keeps a dungeon owner sticky when camera containment is lost", () => {
+		let candidates: ScenePointResidencyCandidates | null = {
+			envCells: [
+				{
+					containsPoint: true,
+					envCellId: "0x00050100",
+					landblockId: "0x0005ffff",
+				},
+			],
+			outdoor: { envCellId: null, landblockId: "0x0005ffff" },
+		};
+		const { runtime } = createRuntime({
+			queryWorldPointResidencyCandidates: () => candidates,
+		});
+		const coordinator = new ExplorerCameraCoordinator(
+			runtime,
+			{
+				setAutomaticPose: vi.fn(),
+				snapshotState: () => ({
+					hasManualControl: false,
+					pitchRadians: 0,
+					position: new Vec3(1, 2, 3),
+					yawRadians: 0,
+				}),
+			} as unknown as FreeFlyCameraController,
+			() => {},
+		);
+		coordinator.requestSceneInterest({
+			ambientOutdoorEnvCellOwners: new Set(),
+			radii: TEST_RADII,
+			target: dungeonTarget({
+				kind: "env-cell",
+				envCellId: "0x00050100",
+				landblockId: "0x0005ffff",
+			}),
+		});
+		expect(
+			followCameraResidency(coordinator, {
+				kind: "resolved",
+				residency: {
+					envCellId: null,
+					landblockId: "0x0006ffff",
+				},
+				source: "outdoor",
+			}),
+		).toBe(false);
+		candidates = null;
+		expect(coordinator.syncFreeFlyCamera(TEST_PROJECTION).renderable).toBe(
+			false,
+		);
+		expect(coordinator.sceneInterest()?.target.kind).toBe("dungeon");
 		coordinator.dispose();
 	});
 
@@ -72,13 +197,14 @@ describe("ExplorerCameraCoordinator", () => {
 			{ setAutomaticPose } as unknown as FreeFlyCameraController,
 			(status) => statuses.push(status),
 		);
-		coordinator.requestSceneInterest(
-			{
+		coordinator.requestSceneInterest({
+			ambientOutdoorEnvCellOwners: new Set(),
+			radii: TEST_RADII,
+			target: resolvedFromResidency({
 				envCellId: "0x01020001",
 				landblockId: "0x0102ffff",
-			},
-			TEST_RADII,
-		);
+			}),
+		});
 		emit({
 			kind: "scene-content-failed",
 			layer: LandblockLayerKind.Terrain,
@@ -643,13 +769,14 @@ describe("ExplorerCameraCoordinator", () => {
 			} as unknown as FreeFlyCameraController,
 			(status) => statuses.push(status),
 		);
-		coordinator.requestSceneInterest(
-			{
+		coordinator.requestSceneInterest({
+			ambientOutdoorEnvCellOwners: new Set(),
+			radii: TEST_RADII,
+			target: resolvedFromResidency({
 				envCellId: "0x01020001",
 				landblockId: "0x0102ffff",
-			},
-			TEST_RADII,
-		);
+			}),
+		});
 
 		coordinator.syncFreeFlyCamera(TEST_PROJECTION);
 
@@ -668,13 +795,14 @@ describe("ExplorerCameraCoordinator", () => {
 			(status) => statuses.push(status),
 		);
 
-		coordinator.requestSceneInterest(
-			{
+		coordinator.requestSceneInterest({
+			ambientOutdoorEnvCellOwners: new Set(),
+			radii: { ...TEST_RADII, envCellRadius: null },
+			target: resolvedFromResidency({
 				envCellId: "0x01020001",
 				landblockId: "0x0102ffff",
-			},
-			{ ...TEST_RADII, envCellRadius: null },
-		);
+			}),
+		});
 
 		expect(statuses.at(-1)).toBe(
 			"Environment-cell topology is unavailable for the requested scene interest.",
@@ -693,13 +821,14 @@ describe("ExplorerCameraCoordinator", () => {
 			(status) => statuses.push(status),
 		);
 
-		coordinator.requestSceneInterest(
-			{
+		coordinator.requestSceneInterest({
+			ambientOutdoorEnvCellOwners: new Set(),
+			radii: TEST_RADII,
+			target: resolvedFromResidency({
 				envCellId: "0x0102dead",
 				landblockId: "0x0102ffff",
-			},
-			TEST_RADII,
-		);
+			}),
+		});
 
 		expect(statuses.at(-1)).toBe(
 			"Initial camera placement is outside selected EnvCell 0x0102dead.",
@@ -724,38 +853,62 @@ describe("ExplorerCameraCoordinator", () => {
 
 		// Inert until a manual request establishes the radii to follow with.
 		expect(
-			coordinator.followCameraResidency({
-				envCellId: null,
-				landblockId: "0x0103ffff",
+			followCameraResidency(coordinator, {
+				kind: "resolved",
+				residency: {
+					envCellId: null,
+					landblockId: "0x0103ffff",
+				},
+				source: "outdoor",
 			}),
 		).toBe(false);
 		expect(updateSceneInterest).not.toHaveBeenCalled();
 		expect(coordinator.sceneInterest()).toBeNull();
 
-		coordinator.requestSceneInterest(
-			{ envCellId: null, landblockId: "0x0102ffff" },
-			TEST_RADII,
-		);
-
-		expect(
-			coordinator.followCameraResidency({
+		coordinator.requestSceneInterest({
+			ambientOutdoorEnvCellOwners: new Set(),
+			radii: TEST_RADII,
+			target: resolvedFromResidency({
 				envCellId: null,
 				landblockId: "0x0102ffff",
 			}),
+		});
+
+		expect(
+			followCameraResidency(coordinator, {
+				kind: "resolved",
+				residency: {
+					envCellId: null,
+					landblockId: "0x0102ffff",
+				},
+				source: "outdoor",
+			}),
 		).toBe(false);
 		expect(
-			coordinator.followCameraResidency({
-				envCellId: null,
-				landblockId: "0x0103ffff",
+			followCameraResidency(coordinator, {
+				kind: "resolved",
+				residency: {
+					envCellId: null,
+					landblockId: "0x0103ffff",
+				},
+				source: "outdoor",
 			}),
 		).toBe(true);
 		expect(updateSceneInterest).toHaveBeenLastCalledWith({
-			anchorLandblockId: "0x0103ffff",
+			ambientOutdoorEnvCellOwners: new Set(),
+			target: {
+				kind: "outdoor",
+				requested: { kind: "outdoor", landblockId: "0x0103ffff" },
+			},
 			radii: TEST_RADII,
 		});
 		expect(coordinator.sceneInterest()).toEqual({
 			radii: TEST_RADII,
 			residency: { envCellId: null, landblockId: "0x0103ffff" },
+			target: {
+				kind: "outdoor",
+				requested: { kind: "outdoor", landblockId: "0x0103ffff" },
+			},
 		});
 		coordinator.dispose();
 	});
@@ -776,24 +929,36 @@ describe("ExplorerCameraCoordinator", () => {
 			() => {},
 		);
 		// Request a landblock whose terrain has not arrived, so its placement stays pending.
-		coordinator.requestSceneInterest(
-			{ envCellId: null, landblockId: "0x0103ffff" },
-			TEST_RADII,
-		);
+		coordinator.requestSceneInterest({
+			ambientOutdoorEnvCellOwners: new Set(),
+			radii: TEST_RADII,
+			target: resolvedFromResidency({
+				envCellId: null,
+				landblockId: "0x0103ffff",
+			}),
+		});
 		expect(setAutomaticPose).not.toHaveBeenCalled();
 		updateSceneInterest.mockClear();
 
 		// The camera still reports the landblock it is leaving; following it would undo the request.
 		expect(
-			coordinator.followCameraResidency({
-				envCellId: null,
-				landblockId: "0x0102ffff",
+			followCameraResidency(coordinator, {
+				kind: "resolved",
+				residency: {
+					envCellId: null,
+					landblockId: "0x0102ffff",
+				},
+				source: "outdoor",
 			}),
 		).toBe(false);
 		expect(updateSceneInterest).not.toHaveBeenCalled();
 		expect(coordinator.sceneInterest()).toEqual({
 			radii: TEST_RADII,
 			residency: { envCellId: null, landblockId: "0x0103ffff" },
+			target: {
+				kind: "outdoor",
+				requested: { kind: "outdoor", landblockId: "0x0103ffff" },
+			},
 		});
 
 		terrainQueryable = true;
@@ -805,14 +970,34 @@ describe("ExplorerCameraCoordinator", () => {
 
 		expect(setAutomaticPose).toHaveBeenCalledOnce();
 		expect(
-			coordinator.followCameraResidency({
-				envCellId: null,
-				landblockId: "0x0102ffff",
+			followCameraResidency(coordinator, {
+				kind: "resolved",
+				residency: {
+					envCellId: null,
+					landblockId: "0x0102ffff",
+				},
+				source: "outdoor",
 			}),
 		).toBe(true);
 		coordinator.dispose();
 	});
 });
+
+function followCameraResidency(
+	coordinator: ExplorerCameraCoordinator,
+	resolution: ExplorerResidencyResolution,
+): boolean {
+	const pending = coordinator.prepareFollowCameraResidency(resolution);
+	if (!pending) return false;
+	return coordinator.applyFollowCameraResidency(pending, {
+		ambientOutdoorEnvCellOwners: new Set(),
+		radii: pending.radii,
+		target: {
+			kind: "outdoor",
+			requested: pending.target,
+		},
+	});
+}
 
 function createRuntime(
 	overrides: Partial<{

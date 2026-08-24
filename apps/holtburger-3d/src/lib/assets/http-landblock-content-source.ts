@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import type { LandblockId } from "../game/game-types";
 import type { DatAssetId } from "../game/game-types";
+import { normalizeLandblockOwner } from "../game/landblocks";
 import type { AnimationAssetSource } from "./animation-asset-source";
 import { decodeAnimationRecord } from "./decode-animation-record";
 import { decodePhysicsScriptRecord } from "./decode-physics-script-record";
@@ -33,6 +34,11 @@ import type {
 	LandblockSourceBatchSource,
 	LandblockSourceLayer,
 } from "./landblock-source-batch";
+import {
+	decodeLandblockProfile,
+	type LandblockProfile,
+	type LandblockProfileSource,
+} from "./landblock-profile-source";
 import type { DynamicEntityVisualSource } from "./dynamic-entity-visual-source";
 import type { DynamicEntityView } from "../game/runtime/dynamic-entity-feed";
 import { decodeDynamicEntityVisual } from "./decode-dynamic-entity-visual";
@@ -49,10 +55,17 @@ export interface HttpLandblockSourceBatchDiagnostic {
 	readonly hostAssemblyDurationMs: number;
 }
 
+/** One observed shallow profile transport request, retained for harness policy assertions. */
+export interface HttpLandblockProfileDiagnostic {
+	/** Canonical owner requested from the host. */
+	readonly landblockId: LandblockId;
+}
+
 /** Browser-compatible adapter for the same closed landblock batch contract used by Tauri. */
 export class HttpLandblockContentSource
 	implements
 		LandblockSourceBatchSource,
+		LandblockProfileSource,
 		TexturePixelSource,
 		AnimationAssetSource,
 		PhysicsScriptSource,
@@ -66,6 +79,7 @@ export class HttpLandblockContentSource
 	readonly #activeRegion: ActiveRegionSource;
 	readonly #landblockSourceBatchDiagnostics: HttpLandblockSourceBatchDiagnostic[] =
 		[];
+	readonly #landblockProfileDiagnostics: HttpLandblockProfileDiagnostic[] = [];
 
 	private constructor(baseUrl: URL, activeRegion: ActiveRegionSource) {
 		this.#baseUrl = baseUrl;
@@ -98,6 +112,11 @@ export class HttpLandblockContentSource
 		return [...this.#landblockSourceBatchDiagnostics];
 	}
 
+	/** Snapshot profile requests without exposing response payloads. */
+	getLandblockProfileDiagnostics(): readonly HttpLandblockProfileDiagnostic[] {
+		return [...this.#landblockProfileDiagnostics];
+	}
+
 	async loadLandblockSourceBatch(
 		landblockId: LandblockId,
 		layers: ReadonlySet<LandblockSourceLayer>,
@@ -120,6 +139,17 @@ export class HttpLandblockContentSource
 			landblockId,
 			layers,
 			this.#activeRegion,
+		);
+	}
+
+	async loadLandblockProfile(
+		landblockId: LandblockId,
+	): Promise<LandblockProfile | null> {
+		const owner = normalizeLandblockOwner(landblockId);
+		this.#landblockProfileDiagnostics.push({ landblockId: owner });
+		return decodeLandblockProfile(
+			await this.#postJson("landblock-profile", { landblockId: owner }),
+			owner,
 		);
 	}
 
@@ -203,6 +233,20 @@ export class HttpLandblockContentSource
 
 	async #postBinary(path: string, body: unknown): Promise<Uint8Array> {
 		return postBinary(this.#baseUrl, path, body);
+	}
+
+	async #postJson(path: string, body: unknown): Promise<unknown> {
+		const response = await fetch(new URL(path, this.#baseUrl), {
+			body: JSON.stringify(body),
+			headers: { "content-type": "application/json" },
+			method: "POST",
+		});
+		if (!response.ok) {
+			throw new Error(
+				`Landblock content host ${path} failed (${response.status}): ${await response.text()}`,
+			);
+		}
+		return response.json();
 	}
 
 	async #postBinaryResponse(

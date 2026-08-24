@@ -18,6 +18,8 @@ pub fn normalize_landblock_id(raw_landblock_id: u32) -> u32 {
 pub struct LandblockAsset {
     /// Normalized CellLandblock DID (`0xXXYYFFFF`).
     pub landblock_id: u32,
+    /// Whether this landblock has only dungeon EnvCell traversal or any outdoor/mixed traversal.
+    pub traversal_class: LandblockTraversalClass,
     /// Canonical authored terrain and resolved height samples.
     pub terrain: LandblockTerrain,
     /// Every explicit object placement authored by LandblockInfo.
@@ -28,6 +30,15 @@ pub struct LandblockAsset {
     pub env_cell_refs: Vec<LandblockEnvCellRef>,
     /// Ordered landblock restriction-table entries.
     pub restrictions: Vec<LandblockRestriction>,
+}
+
+/// Static-data traversal classification for one normalized landblock owner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LandblockTraversalClass {
+    /// The owner has no traversable outdoor surface and is composed only of EnvCells.
+    DungeonOnly,
+    /// The owner is outdoor, mixed, empty, or otherwise not a dungeon-only owner.
+    OutdoorOrMixed,
 }
 
 /// Authored landblock terrain transposed into row-major order.
@@ -281,7 +292,7 @@ fn assemble_from_records(
             placement: placement_from_frame(&object.frame),
         })
         .collect();
-    let buildings = info
+    let buildings: Vec<LandblockBuilding> = info
         .into_iter()
         .flat_map(|info| info.buildings.iter())
         .enumerate()
@@ -316,6 +327,12 @@ fn assemble_from_records(
             env_cell_id: (landblock_id & 0xffff_0000) | (0x0100 + source_index),
         })
         .collect();
+    let traversal_class = classify_landblock_traversal(
+        landblock_id,
+        &terrain.height_indices,
+        info.map_or(0, |info| info.num_cells),
+        buildings.len(),
+    );
     let mut restrictions = info
         .and_then(|info| info.restriction_tables.as_ref())
         .into_iter()
@@ -329,11 +346,40 @@ fn assemble_from_records(
 
     LandblockAsset {
         landblock_id,
+        traversal_class,
         terrain,
         explicit_objects,
         buildings,
         env_cell_refs,
         restrictions,
+    }
+}
+
+/// Applies ACE's proven dungeon-only predicate to normalized shallow landblock facts.
+///
+/// The northwest exception is evaluated before the authored terrain signature because those
+/// water-cell edges are known to contain inconsistent height authoring. All other clauses are
+/// jointly necessary: flat terrain alone, EnvCell presence alone, and an interior building alone
+/// do not establish dungeon-only traversal.
+fn classify_landblock_traversal(
+    landblock_id: u32,
+    height_indices: &[u8],
+    env_cell_count: u32,
+    building_count: usize,
+) -> LandblockTraversalClass {
+    let landblock_x = ((landblock_id >> 24) & 0xff) as u8;
+    let landblock_y = ((landblock_id >> 16) & 0xff) as u8;
+    if landblock_x < 0x08 && landblock_y > 0xf8 {
+        return LandblockTraversalClass::OutdoorOrMixed;
+    }
+
+    if height_indices.iter().any(|height| *height != 0)
+        || env_cell_count == 0
+        || building_count != 0
+    {
+        LandblockTraversalClass::OutdoorOrMixed
+    } else {
+        LandblockTraversalClass::DungeonOnly
     }
 }
 
@@ -397,6 +443,10 @@ mod tests {
             assemble_terrain(&landblock, &region).expect("synthetic terrain should assemble");
         let asset = assemble_from_records(landblock.id, terrain, Some(&info));
 
+        assert_eq!(
+            asset.traversal_class,
+            LandblockTraversalClass::OutdoorOrMixed
+        );
         assert_eq!(asset.terrain.height_indices[1], 9);
         assert_eq!(asset.terrain.heights[1], 4.5);
         assert_eq!(asset.terrain.terrain_samples[1], 1_009);
@@ -443,6 +493,35 @@ mod tests {
             .expect_err("non-finite region height tables should fail loudly");
 
         assert!(error.to_string().contains("non-finite"));
+    }
+
+    #[test]
+    fn traversal_class_matches_ace_predicate_and_northwest_exception() {
+        let flat_heights = vec![0; LANDBLOCK_GRID_SIZE * LANDBLOCK_GRID_SIZE];
+
+        assert_eq!(
+            classify_landblock_traversal(0x0005_ffff, &flat_heights, 817, 0),
+            LandblockTraversalClass::DungeonOnly
+        );
+        assert_eq!(
+            classify_landblock_traversal(0x0005_ffff, &flat_heights, 0, 0),
+            LandblockTraversalClass::OutdoorOrMixed
+        );
+        assert_eq!(
+            classify_landblock_traversal(0x0005_ffff, &flat_heights, 817, 1),
+            LandblockTraversalClass::OutdoorOrMixed
+        );
+
+        let mut non_flat_heights = flat_heights.clone();
+        non_flat_heights[0] = 1;
+        assert_eq!(
+            classify_landblock_traversal(0x0005_ffff, &non_flat_heights, 817, 0),
+            LandblockTraversalClass::OutdoorOrMixed
+        );
+        assert_eq!(
+            classify_landblock_traversal(0x07f9_ffff, &flat_heights, 817, 0),
+            LandblockTraversalClass::OutdoorOrMixed
+        );
     }
 
     fn identity_frame(x: f32) -> Frame {

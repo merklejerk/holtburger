@@ -27,11 +27,17 @@
 	import { TauriActiveRegionSource } from "../lib/assets/tauri-active-region-source";
 	import { TauriSkySource } from "../lib/assets/tauri-sky-source";
 	import { TauriLandblockSourceBatch } from "../lib/assets/tauri-landblock-source-batch";
+	import { TauriLandblockProfileSource } from "../lib/assets/tauri-landblock-profile-source";
+	import { CachedLandblockProfileSource } from "../lib/assets/landblock-profile-source";
 	import { TauriTexturePixelSource } from "../lib/assets/tauri-texture-pixel-source";
 	import type { SceneInterestRadii } from "../lib/game/runtime/types";
 	import { LandblockLayerKind } from "../lib/game/runtime/scene-interest";
 	import type { LandblockId } from "../lib/game/game-types";
-	import type { SceneResidency } from "../lib/game/scene";
+	import type { ExplorerResidencyResolution } from "./explorer-residency";
+	import {
+		SceneInterestRequestCoordinator,
+		type SceneInterestTarget,
+	} from "../lib/game/runtime/scene-target";
 	import {
 		DEFAULT_FRAME_SETTINGS,
 		type FrameSettings,
@@ -148,6 +154,8 @@
 	let commitPipeline: StandardCommitPipeline | undefined;
 	let webglDevice: WebGL2Device | undefined;
 	let activeRegionSource: TauriActiveRegionSource | undefined;
+	let landblockProfileSource: CachedLandblockProfileSource | undefined;
+	let sceneInterestCoordinator: SceneInterestRequestCoordinator | undefined;
 	let skySource: TauriSkySource | undefined;
 	let staticDetailOwner: ActiveRegionStaticDetailOwner | undefined;
 	let cameraController: ExplorerCameraInputController | undefined;
@@ -313,7 +321,7 @@
 	 * two ways to reach the same resolution.
 	 */
 	let clockFollowing = $state(false);
-	/** Follow mode: re-anchor scene interest to the camera's landblock on boundary crossings. */
+	/** Follow mode: update scene interest when the camera reaches a new outdoor residency. */
 	let interestFollowsCamera = $state(false);
 	/** Mirrors the camera coordinator's default so the switch reflects reality on first paint. */
 	let audioFollowsCamera = $state(true);
@@ -344,16 +352,35 @@
 	/**
 	 * Carry follow-mode re-anchoring into simulation interest, which the coordinator does not own.
 	 *
-	 * The coordinator holds the anchor of record and decides whether the camera's residency is a
+	 * The coordinator holds the target snapshot and decides whether the camera's residency is a
 	 * crossing worth following, so this only mirrors a move it already made.
 	 */
-	function followCameraSceneInterest(residency: SceneResidency): void {
-		if (cameraCoordinator?.followCameraResidency(residency) !== true) return;
-		void requestSimulationInterest(residency.landblockId).catch(
-			(error: unknown) => {
-				physicalCameraError = errorMessage(error);
-			},
-		);
+	function followCameraSceneInterest(
+		resolution: ExplorerResidencyResolution,
+	): void {
+		const coordinator = cameraCoordinator;
+		const requestCoordinator = sceneInterestCoordinator;
+		const pending = coordinator?.prepareFollowCameraResidency(resolution);
+		if (!coordinator || !requestCoordinator || !pending) return;
+		const request = requestCoordinator.request(pending.target, pending.radii);
+		void request.promise
+			.then((resolved) => {
+				if (!requestCoordinator.isCurrent(request.revision)) {
+					coordinator.rejectFollowCameraResidency(pending);
+					return;
+				}
+				if (!coordinator.applyFollowCameraResidency(pending, resolved)) return;
+				void requestSimulationInterest(pending.residency.landblockId).catch(
+					(error: unknown) => {
+						physicalCameraError = errorMessage(error);
+					},
+				);
+			})
+			.catch((error: unknown) => {
+				coordinator.rejectFollowCameraResidency(pending);
+				if (requestCoordinator.isCurrent(request.revision))
+					physicalCameraError = errorMessage(error);
+			});
 	}
 	let clockStartedAtMs = 0;
 	let clockTimer: ReturnType<typeof setInterval> | undefined;
@@ -502,18 +529,34 @@
 	}
 
 	function requestSceneInterest(
-		residency: SceneResidency,
+		target: SceneInterestTarget,
 		radii: SceneInterestRadii,
 	): void {
 		// Automatic focus is an explicit teleport. Return position authority to free fly before the
 		// coordinator applies it instead of letting the host overwrite the new pose next frame.
 		if (physicalCameraSession) void leavePhysicalCamera(false);
-		void requestSimulationInterest(residency.landblockId).catch(
-			(error: unknown) => {
-				physicalCameraError = errorMessage(error);
-			},
-		);
-		cameraCoordinator?.requestSceneInterest(residency, radii);
+		const requestCoordinator = sceneInterestCoordinator;
+		if (!requestCoordinator) {
+			physicalCameraError = "Scene-interest resolution is not initialized.";
+			return;
+		}
+		const request = requestCoordinator.request(target, radii);
+		void request.promise
+			.then((resolved) => {
+				if (!requestCoordinator.isCurrent(request.revision)) return;
+				void requestSimulationInterest(
+					resolved.target.requested.landblockId,
+				).catch((error: unknown) => {
+					physicalCameraError = errorMessage(error);
+				});
+				cameraCoordinator?.requestSceneInterest(resolved);
+			})
+			.catch((error: unknown) => {
+				if (!requestCoordinator.isCurrent(request.revision)) return;
+				cameraFocusStatus = `Scene target unavailable: ${
+					error instanceof Error ? error.message : String(error)
+				}`;
+			});
 	}
 
 	async function requestSimulationInterest(
@@ -1383,6 +1426,8 @@
 			const pipeline = commitPipeline;
 			const device = webglDevice;
 			const regionSource = activeRegionSource;
+			const profileSource = landblockProfileSource;
+			const requestCoordinator = sceneInterestCoordinator;
 			const detailOwner = staticDetailOwner;
 			const coordinator = cameraCoordinator;
 			const controller = cameraController;
@@ -1401,6 +1446,8 @@
 			webglDevice = undefined;
 			textureFilteringCapabilities = null;
 			activeRegionSource = undefined;
+			landblockProfileSource = undefined;
+			sceneInterestCoordinator = undefined;
 			skySource?.destroy();
 			skySource = undefined;
 			staticDetailOwner = undefined;
@@ -1431,6 +1478,8 @@
 				possessionOutcomeUnsubscribe?.();
 				entitySession?.stop();
 				coordinator?.dispose();
+				requestCoordinator?.destroy();
+				profileSource?.destroy();
 				controller?.dispose();
 				try {
 					await boomSession?.stop();
@@ -1480,6 +1529,12 @@
 				activeRegion = await activeRegionSource.load();
 				if (destroyed) return;
 				const sourceBatch = TauriLandblockSourceBatch.build(activeRegion);
+				landblockProfileSource = new CachedLandblockProfileSource(
+					TauriLandblockProfileSource.build(),
+				);
+				sceneInterestCoordinator = new SceneInterestRequestCoordinator(
+					landblockProfileSource,
+				);
 				const texturePixelSource = TauriTexturePixelSource.build();
 				staticDetailOwner = new ActiveRegionStaticDetailOwner(
 					texturePixelSource,
@@ -1627,8 +1682,8 @@
 							? null
 							: (gameRuntime.spawnedEntityPlacement(possessedGuid) ?? null);
 					const followResidency = residencySync.location?.residency;
-					if (interestFollowsCamera && followResidency?.kind === "resolved") {
-						followCameraSceneInterest(followResidency.residency);
+					if (interestFollowsCamera && followResidency) {
+						followCameraSceneInterest(followResidency);
 					}
 					const updateAndDrawStartedAt = performance.now();
 					if (residencySync.renderable) {

@@ -33,7 +33,7 @@ pub use interior::{
 pub use landblock::{
     LandblockAsset, LandblockAssetAssembler, LandblockBuilding, LandblockBuildingPortal,
     LandblockEnvCellRef, LandblockObject, LandblockObjectSourceFamily, LandblockPlacement,
-    LandblockRestriction, LandblockTerrain, normalize_landblock_id,
+    LandblockRestriction, LandblockTerrain, LandblockTraversalClass, normalize_landblock_id,
 };
 pub use material_capabilities::{
     MaterialArchiveCapabilityReport, MaterialRecordAvailability, MaterialRecordCounts,

@@ -17,10 +17,10 @@ use holtburger_3d::{
         HostKinematicBoomIntentRequest, HostKinematicBoomRuntime, HostKinematicBoomStartRequest,
     },
     host_simulation_runtime::{CollisionSource, HostSimulationRuntime, SimulationInterestRequest},
-    load_active_region_data_bytes, load_animation_bytes, load_landblock_source_batch_bytes,
-    load_motion_table_closure_ids, load_particle_emitter_bytes, load_particle_meshes_bytes,
-    load_physics_script_bytes, load_sky_source_bytes, load_sound_table_bytes,
-    load_texture_pixels_bytes,
+    load_active_region_data_bytes, load_animation_bytes, load_landblock_profile_response,
+    load_landblock_source_batch_bytes, load_motion_table_closure_ids, load_particle_emitter_bytes,
+    load_particle_meshes_bytes, load_physics_script_bytes, load_sky_source_bytes,
+    load_sound_table_bytes, load_texture_pixels_bytes,
 };
 use holtburger_content::{ContentDecodeCache, ContentRepository};
 use holtburger_core::{ContentAssetRuntime, ContentAssetService};
@@ -50,6 +50,12 @@ struct ReadyMessage {
 struct LandblockSourceBatchRequest {
     landblock_id: String,
     layers: Vec<LandblockSourceLayer>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LandblockProfileRequest {
+    landblock_id: String,
 }
 
 #[derive(Deserialize)]
@@ -183,6 +189,21 @@ async fn handle_connection(mut stream: TcpStream, state: &DevHostState) -> anyho
                             "x-holtburger-landblock-source-batch-duration-ms",
                             (started_at.elapsed().as_secs_f64() * 1_000.0).to_string(),
                         )],
+                    )
+                    .await
+                }
+                Err(error) => write_error(&mut stream, error).await,
+            }
+        }
+        ("POST", "/landblock-profile") => {
+            let request = serde_json::from_slice::<LandblockProfileRequest>(&request.body)?;
+            match load_landblock_profile_response(runtime, &request.landblock_id).await {
+                Ok(profile) => {
+                    write_response(
+                        &mut stream,
+                        200,
+                        "application/json",
+                        &serde_json::to_vec(&profile)?,
                     )
                     .await
                 }

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result, bail, ensure};
 use holtburger_content::{
     ActiveRegionData, ContentDecodeCache, ContentRepository, LandblockTerrain, TexturePixelFormat,
 };
@@ -36,6 +36,7 @@ pub mod host_kinematic_boom_runtime;
 mod host_physical_fly_runtime;
 pub mod host_simulation_runtime;
 pub mod interior_seam;
+mod landblock_profile;
 mod landblock_source_batch;
 mod map_geometry;
 mod object_resource_closure;
@@ -58,6 +59,7 @@ use audio_source::serialize_audio_record_binary;
 use binary_source_record::BinarySectionWriter;
 use env_cell_source::serialize_env_cell_source_record;
 use gfx_obj_geometry::build_gfx_obj_portal_apertures;
+use landblock_profile::{LandblockProfile, project_landblock_profile};
 use landblock_source_batch::{
     LandblockSourceBatchRecord, LandblockSourceBatchRequest, LoadedLandblockSourceBatch,
     load_landblock_source_batch as load_landblock_source_batch_asset,
@@ -122,6 +124,12 @@ pub fn discover_content_runtime() -> Result<ContentAssetRuntime> {
 struct LoadLandblockSourceBatchRequest {
     landblock_id: String,
     layers: Vec<LandblockSourceLayer>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LoadLandblockProfileRequest {
+    landblock_id: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -237,6 +245,17 @@ async fn load_landblock_source_batch(
             .await
             .map_err(format_error)?;
     Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// Loads the normalized shallow landblock profile used to choose scene-interest coverage.
+#[tauri::command]
+async fn load_landblock_profile(
+    state: tauri::State<'_, HostContentState>,
+    request: LoadLandblockProfileRequest,
+) -> Result<Option<LandblockProfile>, String> {
+    load_landblock_profile_response(&state.runtime, &request.landblock_id)
+        .await
+        .map_err(format_error)
 }
 
 /// Loads the active region's closed celestial sky resource set as one binary record.
@@ -359,6 +378,32 @@ pub async fn load_landblock_source_batch_bytes(
     let landblock_id = parse_landblock_id(raw_landblock_id)?;
     let request = LandblockSourceBatchRequest::new(landblock_id, layers)?;
     build_landblock_source_batch_response(runtime, request).await
+}
+
+/// Builds the canonical profile response used by Tauri and the development HTTP host.
+pub async fn load_landblock_profile_response(
+    runtime: &ContentAssetRuntime,
+    raw_landblock_id: &str,
+) -> Result<Option<LandblockProfile>> {
+    let landblock_id = parse_landblock_id(raw_landblock_id)?;
+    let asset = runtime
+        .load(ContentAssetRequest::Landblock(landblock_id))
+        .await
+        .with_context(|| {
+            format!("Could not load shallow landblock profile for 0x{landblock_id:08X}")
+        })?;
+    let ContentAsset::Landblock(landblock) = asset else {
+        bail!("landblock profile request returned a different content asset");
+    };
+    let Some(landblock) = landblock else {
+        return Ok(None);
+    };
+    ensure!(
+        landblock.landblock_id == landblock_id,
+        "content runtime returned landblock 0x{:08X} for profile 0x{landblock_id:08X}",
+        landblock.landblock_id
+    );
+    Ok(Some(project_landblock_profile(&landblock)))
 }
 
 /// Builds the canonical EnvCell source record for the browser-free portal trace evaluator.
@@ -2100,6 +2145,7 @@ pub fn run() {
             load_particle_meshes,
             load_physics_script,
             load_landblock_source_batch,
+            load_landblock_profile,
             load_sky_source,
             load_texture_pixels
         ])
@@ -2115,7 +2161,7 @@ mod tests {
     use crate::outdoor_static_source::OUTDOOR_STATIC_RECORD_BINARY_MAGIC;
     use holtburger_dat::file_type::PixelFormatId;
     use holtburger_dat::file_type::region::{GameTime, LandDefs, RegionDesc};
-    use holtburger_dat::{DatFileType, EOR_PORTAL_NAMESPACE, HbaWriter};
+    use holtburger_dat::{DatFileType, EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, HbaWriter};
     use tempfile::tempdir;
 
     fn wire_drive() -> explorer_possession_control::CharacterDriveRequest {
@@ -2399,6 +2445,61 @@ mod tests {
         assert!(parse_landblock_id("not-a-landblock").is_err());
     }
 
+    #[tokio::test]
+    async fn landblock_profile_projects_classification_and_normalized_identity() {
+        let directory = tempdir().expect("temporary directory should be created");
+        let path = directory.path().join("landblock-profile.hba");
+        write_profile_hba(&path);
+        let repository = Arc::new(
+            ContentRepository::from_hba_path(&path).expect("profile HBA should be readable"),
+        );
+        let service = ContentAssetService::new(repository, Arc::new(ContentDecodeCache::new()));
+        let runtime = ContentAssetRuntime::new(service);
+
+        let dungeon = load_landblock_profile_response(&runtime, "0x00050123")
+            .await
+            .expect("dungeon profile should load")
+            .expect("dungeon CellLandblock should exist");
+        assert_eq!(dungeon.landblock_id, "0x0005ffff");
+        assert_eq!(
+            dungeon.traversal_class,
+            landblock_profile::LandblockTraversalClassWire::DungeonOnly
+        );
+
+        let outdoor = load_landblock_profile_response(&runtime, "0x0102ffff")
+            .await
+            .expect("outdoor profile should load")
+            .expect("outdoor CellLandblock should exist");
+        assert_eq!(outdoor.landblock_id, "0x0102ffff");
+        assert_eq!(
+            outdoor.traversal_class,
+            landblock_profile::LandblockTraversalClassWire::OutdoorOrMixed
+        );
+    }
+
+    #[tokio::test]
+    async fn landblock_profile_preserves_absence_and_content_failures() {
+        let directory = tempdir().expect("temporary directory should be created");
+        let path = directory.path().join("landblock-profile-errors.hba");
+        write_profile_hba(&path);
+        let repository = Arc::new(
+            ContentRepository::from_hba_path(&path).expect("profile HBA should be readable"),
+        );
+        let service = ContentAssetService::new(repository, Arc::new(ContentDecodeCache::new()));
+        let runtime = ContentAssetRuntime::new(service);
+
+        assert!(
+            load_landblock_profile_response(&runtime, "0x0103ffff")
+                .await
+                .expect("absent profile should be a successful lookup")
+                .is_none()
+        );
+        let error = load_landblock_profile_response(&runtime, "0x0104ffff")
+            .await
+            .expect_err("a promised LandblockInfo failure must propagate");
+        assert!(format!("{error:#}").contains("promises required LandblockInfo"));
+    }
+
     #[test]
     fn terrain_availability_represents_only_valid_absence() {
         assert!(matches!(
@@ -2626,6 +2727,87 @@ mod tests {
         assert_eq!(&pixels[..4], &[0x11, 0x11, 0x11, 0xFF]);
         assert_eq!(&pixels[4..8], &[0x55, 0x55, 0x55, 0xFF]);
         assert_eq!(&pixels[8..12], &[0x33, 0x33, 0x33, 0xFF]);
+    }
+
+    fn write_profile_hba(path: &std::path::Path) {
+        let mut writer = HbaWriter::new();
+        writer.set_compression(false);
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                holtburger_dat::file_type::REGION_DESC_FILE_ID,
+                DatFileType::Region as u32,
+                test_region_desc_bytes(),
+            )
+            .expect("profile region should be added");
+
+        writer
+            .add(
+                EOR_CELL_NAMESPACE,
+                0x0005_ffff,
+                DatFileType::Landblock as u32,
+                test_cell_landblock_bytes(0x0005_ffff, true, false),
+            )
+            .expect("dungeon CellLandblock should be added");
+        writer
+            .add(
+                EOR_CELL_NAMESPACE,
+                0x0005_fffe,
+                DatFileType::LandblockInfo as u32,
+                test_landblock_info_bytes(0x0005_fffe, 817),
+            )
+            .expect("dungeon LandblockInfo should be added");
+
+        writer
+            .add(
+                EOR_CELL_NAMESPACE,
+                0x0102_ffff,
+                DatFileType::Landblock as u32,
+                test_cell_landblock_bytes(0x0102_ffff, true, true),
+            )
+            .expect("outdoor CellLandblock should be added");
+        writer
+            .add(
+                EOR_CELL_NAMESPACE,
+                0x0102_fffe,
+                DatFileType::LandblockInfo as u32,
+                test_landblock_info_bytes(0x0102_fffe, 1),
+            )
+            .expect("outdoor LandblockInfo should be added");
+
+        writer
+            .add(
+                EOR_CELL_NAMESPACE,
+                0x0104_ffff,
+                DatFileType::Landblock as u32,
+                test_cell_landblock_bytes(0x0104_ffff, true, false),
+            )
+            .expect("failing CellLandblock should be added");
+        writer.write(path).expect("profile HBA should be written");
+    }
+
+    fn test_cell_landblock_bytes(id: u32, has_objects: bool, nonzero_height: bool) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(252);
+        bytes.extend(id.to_le_bytes());
+        bytes.extend(u32::from(has_objects).to_le_bytes());
+        bytes.extend(std::iter::repeat_n(0u16, 81).flat_map(u16::to_le_bytes));
+        for index in 0..81 {
+            bytes.push(u8::from(nonzero_height && index == 0));
+        }
+        while !bytes.len().is_multiple_of(4) {
+            bytes.push(0);
+        }
+        bytes
+    }
+
+    fn test_landblock_info_bytes(id: u32, num_cells: u32) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(16);
+        bytes.extend(id.to_le_bytes());
+        bytes.extend(num_cells.to_le_bytes());
+        bytes.extend(0u32.to_le_bytes());
+        bytes.extend(0u16.to_le_bytes());
+        bytes.extend(0u16.to_le_bytes());
+        bytes
     }
 
     fn test_palette_bytes(id: u32, colors_argb: &[u32]) -> Vec<u8> {

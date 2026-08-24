@@ -22,6 +22,7 @@ describe("DynamicEntityPlacementSystem", () => {
 			},
 			AABB3.zero(),
 		);
+		expect(placements.revision).toBe(1);
 		const moved = Mat4.identity();
 		moved.m41 = 7;
 		placements.updateRoot(root, {
@@ -38,6 +39,7 @@ describe("DynamicEntityPlacementSystem", () => {
 				],
 			},
 		});
+		expect(placements.revision).toBe(2);
 		expect(scene.getResolvedPlacement(root)).toMatchObject({
 			envCellId: "0x03040123",
 			landblockId: "0x0304ffff",
@@ -61,6 +63,7 @@ describe("DynamicEntityPlacementSystem", () => {
 		).toThrow("does not own root");
 
 		placements.destroyRoot(root);
+		expect(placements.revision).toBe(3);
 		expect(scene.getNode(root)).toBeUndefined();
 		expect(() => placements.destroyRoot(root)).toThrow("does not own root");
 	});
@@ -78,9 +81,12 @@ describe("DynamicEntityPlacementSystem", () => {
 			null,
 		);
 		placements.applyPath(root, advance(0, 10), 100, 1_000);
+		const appliedRevision = placements.revision;
 		placements.advance(1_050);
+		expect(placements.revision).toBe(appliedRevision + 1);
 		expect(scene.getResolvedPlacement(root)?.localToLandblock.m41).toBe(5);
 		placements.advance(1_100);
+		expect(placements.revision).toBe(appliedRevision + 2);
 		expect(scene.getResolvedPlacement(root)?.localToLandblock.m41).toBe(10);
 
 		placements.applyPath(root, advance(10, 20), 100, 2_000);
@@ -89,6 +95,9 @@ describe("DynamicEntityPlacementSystem", () => {
 		placements.applyPath(root, reset, 0, 2_025);
 		placements.advance(2_050);
 		expect(scene.getResolvedPlacement(root)?.localToLandblock.m41).toBe(99);
+		const settledRevision = placements.revision;
+		placements.advance(2_075);
+		expect(placements.revision).toBe(settledRevision);
 
 		placements.applyPath(root, advance(99, 100), 100, 3_000);
 		const corrected = Mat4.identity();
@@ -232,6 +241,7 @@ function dynamicEntity(
 				soundTableDid: null,
 			},
 			objectScale: 1,
+			radar: { blipColor: "Default", behavior: null, obviousRange: null },
 		},
 	};
 }

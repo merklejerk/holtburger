@@ -17,9 +17,15 @@ export class DynamicEntityPlacementSystem {
 	readonly #scene: SceneGraph;
 	readonly #roots = new Set<SceneNodeId>();
 	readonly #activePaths = new Map<SceneNodeId, ActiveDynamicEntityPath>();
+	#revision = 0;
 
 	constructor(scene: SceneGraph) {
 		this.#scene = scene;
+	}
+
+	/** Changes whenever an owned dynamic root's presented placement may have changed. */
+	get revision(): number {
+		return this.#revision;
 	}
 
 	/** Create one staged root at the producer's accepted placement. */
@@ -34,6 +40,7 @@ export class DynamicEntityPlacementSystem {
 			parentId: null,
 		});
 		this.#roots.add(nodeId);
+		this.#markChanged();
 		return nodeId;
 	}
 
@@ -42,6 +49,7 @@ export class DynamicEntityPlacementSystem {
 		this.#requireRoot(nodeId);
 		this.#activePaths.delete(nodeId);
 		this.#scene.updateRootSpatialPlacement(nodeId, placement);
+		this.#markChanged();
 	}
 
 	/** Replace transient playback with one newer host-accepted path or discontinuous correction. */
@@ -58,6 +66,7 @@ export class DynamicEntityPlacementSystem {
 				nodeId,
 				evaluateHostDynamicEntityPath(advance, durationMs, 0),
 			);
+			this.#markChanged();
 			return;
 		}
 		this.#activePaths.delete(nodeId);
@@ -65,10 +74,12 @@ export class DynamicEntityPlacementSystem {
 			nodeId,
 			evaluateHostDynamicEntityPath(advance, durationMs, durationMs),
 		);
+		this.#markChanged();
 	}
 
 	/** Evaluate every active path at frontend render cadence without consulting host topology. */
 	advance(nowMs: number): void {
+		let changed = false;
 		for (const [nodeId, active] of this.#activePaths) {
 			const elapsedMs = nowMs - active.startedAtMs;
 			this.#scene.updateRootSpatialPlacement(
@@ -79,8 +90,10 @@ export class DynamicEntityPlacementSystem {
 					elapsedMs,
 				),
 			);
+			changed = true;
 			if (elapsedMs >= active.durationMs) this.#activePaths.delete(nodeId);
 		}
+		if (changed) this.#markChanged();
 	}
 
 	/** Retire one leaf root after its presentation children have been removed. */
@@ -89,6 +102,14 @@ export class DynamicEntityPlacementSystem {
 		this.#activePaths.delete(nodeId);
 		this.#scene.destroyNode(nodeId);
 		this.#roots.delete(nodeId);
+		this.#markChanged();
+	}
+
+	#markChanged(): void {
+		this.#revision += 1;
+		if (!Number.isSafeInteger(this.#revision)) {
+			throw new Error("Dynamic placement revision exhausted.");
+		}
 	}
 
 	#requireRoot(nodeId: SceneNodeId): void {

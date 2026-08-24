@@ -44,6 +44,14 @@ pub struct WeenieTemplate {
     pub maximum_velocity: Option<f64>,
     /// Optional ACE World projectile rotation speed in revolutions per second.
     pub rotation_speed: Option<f64>,
+    /// Optional raw `PropertyInt::RadarBlipColor` (95).
+    pub radar_blip_color: Option<i32>,
+    /// Optional raw `PropertyInt::ShowableOnRadar` (133) `RadarBehavior` value.
+    pub radar_behavior: Option<i32>,
+    /// Optional `PropertyFloat::ObviousRadarRange` (104) in metres.
+    pub obvious_radar_range: Option<f64>,
+    /// Optional authored `PropertyBool::Attackable` (19); ACE defaults absence to `true`.
+    pub attackable: Option<bool>,
     /// Lossless template physics inputs; no effective mask has been derived.
     pub physics: TemplatePhysics,
     /// Lossless template appearance inputs; no ObjDesc has been derived.

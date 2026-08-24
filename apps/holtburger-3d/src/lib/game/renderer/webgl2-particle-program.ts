@@ -6,7 +6,7 @@ import {
 import {
 	compileWebGL2Shader,
 	requireWebGL2Uniform,
-} from "./webgl2-shader-utils";
+} from "../webgl/shader-program";
 import {
 	bindWebGL2PortalDeferredVisibilityProgram,
 	PORTAL_DEFERRED_VISIBILITY_GLSL,

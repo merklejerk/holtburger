@@ -1047,6 +1047,7 @@ function spawnedEntity(
 				soundTableDid: null,
 			},
 			objectScale: 1,
+			radar: { blipColor: "Default", behavior: null, obviousRange: null },
 		},
 	};
 }
@@ -1280,6 +1281,7 @@ function promotedStaticArtifact(
 		dynamicSources: [promotedResident],
 		kind: layer,
 		landblockId,
+		mapBlockers: new Map(),
 		staticResidents: [],
 	} satisfies ResolvedOutdoorStaticLayerSource;
 	return {

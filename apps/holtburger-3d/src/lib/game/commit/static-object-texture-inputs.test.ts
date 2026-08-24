@@ -54,6 +54,7 @@ describe("collectStaticObjectTextureDependencies", () => {
 function objectsSourceWithOneReferencedMaterial(): ResolvedOutdoorStaticLayerSource {
 	return {
 		dynamicSources: [],
+		mapBlockers: new Map(),
 		kind: LandblockLayerKind.Objects,
 		landblockId: "0xda55ffff",
 		staticResidents: [

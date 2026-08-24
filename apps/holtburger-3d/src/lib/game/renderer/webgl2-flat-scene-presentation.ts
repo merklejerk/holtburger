@@ -1,7 +1,7 @@
 import {
 	compileWebGL2Shader,
 	requireWebGL2Uniform,
-} from "./webgl2-shader-utils";
+} from "../webgl/shader-program";
 import type { WebGL2FlatSceneTargetSet } from "./webgl2-flat-scene-target";
 import { REC_601_LUMA_WEIGHTS } from "../environment/scene-lighting";
 import {

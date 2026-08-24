@@ -52,6 +52,8 @@ import {
 } from "../scene";
 import type { TerrainGenerator } from "../terrain/terrain-generator";
 import { WorkerTerrainGenerator } from "../terrain/terrain-worker-client";
+import { MapGeometryStore } from "../map/map-geometry-store";
+import type { InstalledTerrain } from "../terrain/terrain-system";
 import { TerrainSystem } from "../terrain/terrain-system";
 import { StaticObjectSystem } from "../systems/static-object-system";
 import { DynamicEntitySystem } from "../systems/dynamic-entity-system";
@@ -737,6 +739,13 @@ export class GameRuntime {
 	>();
 	/** Dynamic terrain sources, generation state, and realized terrain resources. */
 	readonly #terrain: TerrainSystem<ResourceOwnerId, TerrainResourceOwnerId>;
+	/**
+	 * Derived overhead-map geometry, installed and evicted with the layers it comes from.
+	 *
+	 * Held beside the scene rather than in it: the map is a second consumer of the same records,
+	 * and its geometry must never acquire scene-node lifetime.
+	 */
+	readonly #mapGeometry = new MapGeometryStore();
 	/** Read-only renderer gateway over this runtime's scene and resource systems. */
 	readonly #renderWorld: RenderWorld;
 	/** Renderer constructed with this runtime's private read-only world facade. */
@@ -1972,6 +1981,74 @@ export class GameRuntime {
 		return this.#terrain.querySurfaceAtWorldPoint(point);
 	}
 
+	/**
+	 * Terrain facts the overhead map draws from.
+	 *
+	 * These terrain members and `mapGeometry` are the whole of what the map reads from the runtime,
+	 * and they satisfy `MapTerrainSource` structurally so the map depends on no runtime type. The
+	 * terrain revision is its residency change fact, exactly as it is for the ambient bakes.
+	 */
+	get terrainInstallationRevision(): number {
+		return this.#terrain.installationRevision;
+	}
+
+	listInstalledTerrain(): Iterable<InstalledTerrain> {
+		return this.#terrain.listInstalledTerrain();
+	}
+
+	terrainColorPalette(): Float32Array | null {
+		return this.#terrain.terrainColorPalette();
+	}
+
+	/**
+	 * Where one spawned entity is being drawn right now.
+	 *
+	 * Read from the scene rather than from a feed snapshot, because the scene is what presentation
+	 * rate actually updates: ordinary integrated advances move entities every host tick without
+	 * republishing any view, so anything that follows a moving entity — a map anchor, a blip — must
+	 * ask here or it will hold a pose from the last discontinuous correction.
+	 *
+	 * Null once an entity is no longer realized.
+	 */
+	spawnedEntityPlacement(guid: number): ScenePlacement | null {
+		const nodeId = this.#spawnedPresentations.get(guid)?.nodeId;
+		if (nodeId === undefined) return null;
+		const node = this.#scene.getNode(nodeId);
+		// Only a root carries residency, and every spawned entity is realized as one.
+		if (!node || node.parentId !== null) return null;
+		return {
+			envCellId: node.envCellId,
+			landblockId: node.landblockId,
+			localTransform: node.localTransform,
+		};
+	}
+
+	/**
+	 * Every realized spawned entity paired with where it is being drawn right now.
+	 *
+	 * The identity half comes from the runtime's own desired-entity record rather than from any
+	 * inspector snapshot, so nothing that draws entities depends on a diagnostics path.
+	 */
+	*listPresentedSpawnedEntities(): Generator<{
+		readonly view: DynamicEntityView;
+		readonly placement: ScenePlacement;
+	}> {
+		for (const [guid, view] of this.#spawnedDesiredEntities) {
+			const placement = this.spawnedEntityPlacement(guid);
+			if (placement) yield { placement, view };
+		}
+	}
+
+	/** Change fact for consumers that sample live dynamic placement on their own cadence. */
+	get dynamicEntityPlacementRevision(): number {
+		return this.#dynamicPlacements.revision;
+	}
+
+	/** Derived map geometry currently resident, for the overhead map to draw. */
+	get mapGeometry(): MapGeometryStore {
+		return this.#mapGeometry;
+	}
+
 	/** Return installed environment-cell bounds for frontend-owned interior placement policy. */
 	queryEnvCellBounds(residency: SceneResidency): AABB3 | null {
 		return residency.envCellId === null
@@ -2260,6 +2337,7 @@ export class GameRuntime {
 				})
 				.then(async (result) => {
 					if (result.kind !== "published") return;
+					this.#mapGeometry.installOutdoorStatic(artifact.commit.source);
 					this.#staticObjectLayerDiagnostics.set(ownerId, {
 						...(result.geometry?.geometryDiagnostics ??
 							EMPTY_STATIC_OBJECT_GEOMETRY_DIAGNOSTICS),
@@ -2342,6 +2420,12 @@ export class GameRuntime {
 				})
 				.then(async (result) => {
 					if (result.kind !== "published") return;
+					this.#mapGeometry.installInterior({
+						apertures: plan.apertures,
+						crossings: plan.crossings,
+						landblockId: artifact.landblockId,
+						shells: plan.shells,
+					});
 					this.#envCellLayerDiagnostics.set(ownerId, {
 						...plan.diagnostics,
 						...result.geometry.residentGeometryDiagnostics,
@@ -2583,6 +2667,7 @@ export class GameRuntime {
 		} else {
 			this.#staticObjects.evict(ownerId, revision);
 		}
+		this.#mapGeometry.evict(landblockId, layer);
 		this.#authoredDynamicResidents.delete(ownerId);
 		this.#staticObjectLayerDiagnostics.delete(ownerId);
 		this.#envCellLayerDiagnostics.delete(ownerId);

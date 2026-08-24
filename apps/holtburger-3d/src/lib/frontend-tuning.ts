@@ -136,6 +136,209 @@ export const FRONTEND_TUNING = {
 			minimumRadius: 0,
 		},
 	},
+	map: {
+		/**
+		 * Overhead-map presentation. Shared by the Explorer and the future client shell, so this
+		 * sits beside `rendering` rather than inside `explorer`.
+		 *
+		 * Colours are authored channel-wise here and converted to GPU-ready buffers once in
+		 * `game/map/map-appearance.ts`, which holds the conversion and no values of its own.
+		 * Retail constants the map obeys are deliberately absent: the walkable-slope threshold
+		 * lives in `game/walkability.ts` because it is a fact about the ground, not a preference.
+		 */
+		hillshade: {
+			/**
+			 * Direction toward the relief light, in scene axes (+x east, +y up, -z north).
+			 *
+			 * Fixed in the world rather than on screen, lit from the north-west at roughly 45
+			 * degrees, which is the conventional cartographic relief angle.
+			 */
+			sunDirection: { x: -0.5774, y: 0.5774, z: -0.5774 },
+			/** Fraction of terrain colour surviving where the relief light does not reach. */
+			ambientLevel: 0.35,
+			/**
+			 * Vertical exaggeration applied to slope before shading, and to shading only.
+			 *
+			 * Relief maps have exaggerated their verticals since long before computers: Holtburg's
+			 * surroundings span about 52 m of height across more than a kilometre, and true-scale
+			 * shading of that reads as a flat wash. Explicitly not applied to the walkable-slope
+			 * test, which must stay a fact about the real ground.
+			 */
+			reliefExaggeration: 4,
+		},
+		colors: {
+			/** Background where no geometry is drawn, and the colour distant floors fade into. */
+			void: { red: 0.05, green: 0.05, blue: 0.07 },
+			/** Building footprints on the outdoor map. */
+			blocker: { red: 0.13, green: 0.12, blue: 0.15 },
+			/**
+			 * Outline drawn around building footprints, and its width in pixels.
+			 *
+			 * A near-black footprint reads as a solid mass on pale ground and disappears entirely on
+			 * dark ground, which is most of the map at dusk or under trees. The stroke is what makes
+			 * the shape survive either background. Width is in pixels rather than metres, like the
+			 * slope hatching, so a building stays outlined at every zoom instead of the outline
+			 * thinning away as the map pulls back.
+			 */
+			blockerStroke: { red: 0.83, green: 0.8, blue: 0.72 },
+			blockerStrokePixels: 1.5,
+			/** Roads, and how strongly authored road cells are tinted toward it. */
+			road: { red: 0.85, green: 0.76, blue: 0.55 },
+			roadTintStrength: 0.85,
+			/**
+			 * Ground too steep to stand on: hatched, not merely tinted.
+			 *
+			 * Hue is already carrying terrain type, roads, and the interior height ramp, so
+			 * impassability gets the free channel — pattern. Diagonal hatching is the cartographic
+			 * convention for a cliff, it survives colour blindness by construction, and it reads as
+			 * *impassable* where another dark tint would read as shadow. The stripes carry it
+			 * alone: ground between them is left exactly as it is, because a wash underneath only
+			 * darkened the slope without saying anything the stripes had not already said.
+			 */
+			steep: { red: 0.9, green: 0.3, blue: 0.3 },
+			/** Screen-space period of the hatch stripes, in pixels, and how opaque they are. */
+			steepHatchPeriodPixels: 7,
+			steepHatchStrength: 0.25,
+			/**
+			 * Contour lines, which carry the elevation that hillshade cannot.
+			 *
+			 * Hillshade shows the shape of the ground but says nothing about how high it is, and a
+			 * gentle rise and a cliff can shade alike once relief is exaggerated. Contours restore
+			 * the quantity: their spacing reads as steepness and their count reads as height
+			 * climbed. Also hue-independent, so they compose with the palette rather than competing
+			 * with it. Lines take their colour from the shared height ramp, so a contour says both
+			 * how high the ground is and whether it stands above or below you — the question the
+			 * interior floors answer, asked outdoors.
+			 */
+			/** Vertical distance between contour lines, in metres. */
+			contourIntervalMeters: 10,
+			contourStrength: 0.35,
+			/**
+			 * Height a pixel of ground must span before a contour is drawn on it, in metres.
+			 *
+			 * A contour marks where the ground *crosses* a height, so it needs the ground to be
+			 * going somewhere. A flat face sitting exactly on a multiple of the interval is a level
+			 * set with area rather than a curve, and without this the whole face floods with line
+			 * colour. That is the common case, not a corner case: AC's terrain heights are
+			 * quantised, so entire landblocks and shelves sit on exact multiples — Holtburg's
+			 * ground is flat at 20 m, which is two intervals exactly.
+			 *
+			 * Not a delicate number. Flooded faces span exactly zero and ordinary ground spans
+			 * roughly 5 mm per pixel, so anything small separates two populations that do not
+			 * overlap. Raising it far enough to matter would start dropping contours from genuinely
+			 * gentle ground.
+			 */
+			contourMinimumClimbPerPixelMeters: 0.001,
+			/**
+			 * Height over which a contour reaches its full above or below colour, in metres.
+			 *
+			 * Far larger than the interior spans, because a hillside is not a storey: at interior
+			 * scale every line in a landscape would saturate and the ramp would read as two flat
+			 * colours rather than as a gradient.
+			 */
+			contourHeightSpanMeters: 30,
+			/** Doorways between inside and outside, marked in both map modes. */
+			transitionAccent: { red: 0.95, green: 0.83, blue: 0.35 },
+		},
+		heightRamp: {
+			/**
+			 * The three-stop height ramp: below the anchor, at its level, above it.
+			 *
+			 * Shared by interior floors and outdoor contour lines, so the map means one thing by
+			 * "above" and "below" wherever the reader is. Only the spans differ, because the domains
+			 * do: a dungeon storey is a few metres, a hillside tens of them.
+			 *
+			 * Colour blindness is carried by lightness as much as hue, deliberately. Green and blue
+			 * separate for the common red-green deficiencies, but a deuteranope sees green
+			 * desaturated toward neutral — close to the neutral centre — and a tritanope confuses
+			 * blue with green outright.
+			 *
+			 * **The invariant when retuning: keep the ramp monotonic in lightness.** Which end is
+			 * the brighter one is a taste call, but the three must stay ordered, because that is the
+			 * redundant channel a reader who resolves no hue at all is left with. Collapsing two of
+			 * them to similar luminance costs that silently, and nothing will fail to warn you.
+			 */
+			sameLevelColor: { red: 0.9, green: 0.9, blue: 0.8 },
+			aboveColor: { red: 0.43, green: 0.58, blue: 0.9 },
+			belowColor: { red: 0.54, green: 0.77, blue: 0.41 },
+		},
+		interior: {
+			/**
+			 * Height within which a floor still counts as the anchor's own level, in metres.
+			 *
+			 * You stand *on* a floor rather than at its height: an eye sits a couple of metres above
+			 * its own ground, and a free camera higher still. Without this band the floor underfoot
+			 * reads as below, which is both wrong and the most common case. Sized under an AC storey
+			 * so a genuine floor above or below never falls inside it.
+			 */
+			sameLevelBandMeters: 2.5,
+			/**
+			 * Height at which a floor reaches its full above or below colour, in metres.
+			 *
+			 * Measured from the same-level band. Far shorter than the fade span, so which side of
+			 * you a passage sits on is obvious well before it dims out.
+			 */
+			tintSpanMeters: 6,
+			/** Height over which a floor fades toward the void, in metres. */
+			fadeSpanMeters: 14,
+			/**
+			 * How completely the most distant floor dissolves into the void, in [0, 1].
+			 *
+			 * Short of one: a passage far above or below still leaves a trace, because knowing
+			 * something is there is most of what a dungeon map is for.
+			 */
+			maximumFade: 0.86,
+			/**
+			 * Height span normalising the anchor-relative depth test, in metres.
+			 *
+			 * Anything further from the anchor's level than this shares the far plane, which is
+			 * harmless: by then it has faded out entirely.
+			 */
+			depthSpanMeters: 200,
+			/**
+			 * How wide a doorway is drawn across the wall it pierces, in metres.
+			 *
+			 * A doorway has no thickness worth drawing from above, so this is what makes it visible
+			 * at all; it wants to read at town zoom without swallowing its building.
+			 */
+			transitionAccentThicknessMeters: 2,
+		},
+		blips: {
+			/**
+			 * Marker fill per effective `RadarColor`.
+			 *
+			 * Presentation, not protocol: retail's palette is a client asset, and the map owns its
+			 * styling so a client shell can restyle markers without touching map semantics.
+			 */
+			colorsByRadarColor: {
+				Default: "#d8d8e0",
+				Blue: "#5b8dd6",
+				Gold: "#d6b23f",
+				White: "#f0f0f2",
+				Purple: "#9b6dd6",
+				Red: "#d24b45",
+				Pink: "#dd7fb0",
+				Green: "#4fb256",
+				Yellow: "#e2d24a",
+				Cyan: "#4fc4cc",
+				BrightGreen: "#6fe86f",
+			} as const,
+			/** Marker radius in canvas pixels, sized to stay legible without hiding the ground. */
+			radiusPixels: 3.5,
+		},
+		zoom: {
+			/**
+			 * Zoom as the world-metre diameter across the map's visible circle.
+			 *
+			 * Resolution-independent by construction: resizing the panel changes pixel density,
+			 * never how much world is shown. One landblock is 192 m across, for intuition.
+			 */
+			defaultViewDiameterMeters: 192,
+			minimumViewDiameterMeters: 24,
+			maximumViewDiameterMeters: 1536,
+		},
+	},
+
 	rendering: {
 		/** Fallback framebuffer color exposed when no scene presentation covers a pixel. */
 		clearColor: { red: 0.15, green: 0.05, blue: 0.05, alpha: 1 },

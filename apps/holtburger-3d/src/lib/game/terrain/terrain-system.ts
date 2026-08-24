@@ -250,6 +250,24 @@ export class TerrainSystem<
 		}
 	}
 
+	/**
+	 * The active region's mean colour per terrain code, or null before it publishes.
+	 *
+	 * Every installed landblock in a region names the same terrain-colour array, so the first
+	 * installation answers for all of them. Null is an ordinary early state, not a failure: colours
+	 * publish asynchronously and a consumer that cannot yet colour terrain should wait rather than
+	 * invent a palette.
+	 */
+	terrainColorPalette(): Float32Array | null {
+		for (const installation of this.#installations.values()) {
+			const key = installation.source.input.presentation.textures.colors.key;
+			if (!this.#textures.hasTexture(key)) return null;
+			return this.#textures.getTerrainColorTextureArrayBinding(key).palette
+				.colors;
+		}
+		return null;
+	}
+
 	querySurfaceAtWorldPoint(point: Vec3): TerrainSurfaceSample | null {
 		const landblockId = landblockAtWorldPoint(point);
 		if (!landblockId) return null;

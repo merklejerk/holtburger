@@ -31,6 +31,16 @@ or renderer paths scaffolding.
   Explorer panels, controls, camera gestures, diagnostics presentation, and
   layout remain app-local. Reusable runtime semantics should live in the
   appropriate shared runtime subsystem.
+- Svelte reactivity is appropriate for ordinary UI state, but not for frame-hot
+  presentation inputs such as camera poses, entity placements, renderer state,
+  or other values published at scene cadence. Frame-hot consumers should pull
+  coherent imperative snapshots on their own bounded cadence and use
+  owner-produced revisions for invalidation. Do not route render-loop facts
+  through `$state`, `$derived`, or `$effect` merely to notify a slower consumer;
+  doing so schedules reactive work at the producer's rate and can also produce
+  pictures assembled from differently aged facts. Cold controls, panel layout,
+  and genuinely event-driven UI state should remain reactive where that keeps
+  ownership and code clearer.
 
 ## Runtime Verification and Browser Harness
 

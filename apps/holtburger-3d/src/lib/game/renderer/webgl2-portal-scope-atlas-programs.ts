@@ -14,7 +14,7 @@ import {
 import {
 	compileWebGL2Shader,
 	requireWebGL2Uniform,
-} from "./webgl2-shader-utils";
+} from "../webgl/shader-program";
 
 const PROPAGATION_VERTEX_SHADER = `#version 300 es
 precision highp float;

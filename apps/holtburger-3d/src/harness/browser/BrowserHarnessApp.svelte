@@ -3,6 +3,13 @@
 	import { resolveExplorerOutdoorFocusPose } from "../../explorer/explorer-camera-framing";
 	import { ExplorerCameraInputController } from "../../explorer/explorer-camera-input-controller";
 	import { FRONTEND_TUNING } from "../../lib/frontend-tuning";
+	import { MapRenderer } from "../../lib/game/map/map-renderer";
+	import { MAP_DEFAULT_VIEW_DIAMETER } from "../../lib/game/map/map-appearance";
+	import {
+		type MapAnchor,
+		clampMapViewDiameter,
+		mapHeadingFromSceneTransform,
+	} from "../../lib/game/map/map-view";
 	import {
 		createColorGradeParameters,
 		type ColorGradeParameters,
@@ -407,6 +414,22 @@
 		readonly setWeather: (enabled: boolean) => void;
 		/** Withdraw every requested scene layer while retaining the harness runtime. */
 		readonly clearSceneInterest: () => void;
+		/**
+		 * Draw one overhead-map frame onto a harness-owned canvas and report what it drew.
+		 *
+		 * Pass `visible: false` to retire the canvas without tearing the map down. Centre defaults
+		 * to the current camera position; heading is explicit rather than derived from camera yaw,
+		 * because the map's bearing convention is not settled until the compass panel exists.
+		 */
+		readonly configureMap: (request: {
+			readonly size?: number;
+			readonly visible?: boolean;
+			readonly centerX?: number;
+			readonly centerY?: number;
+			readonly centerZ?: number;
+			readonly viewDiameter?: number;
+			readonly headingRadians?: number;
+		}) => BrowserHarnessMapEvidence;
 		/** Spawn one real catalog-backed entity through the app-local host and shared runtime. */
 		readonly spawnExplorerEntity: (
 			wcid: string,
@@ -653,6 +676,53 @@
 		readonly yawDegrees: number;
 	}
 
+	/** One overhead-map draw, reported so a screenshot can be judged against known state. */
+	interface BrowserHarnessMapEvidence {
+		/** False once the map's own WebGL2 context is lost. */
+		readonly available: boolean;
+		/** Whether the draw produced pixels; outdoors waits for the region palette. */
+		readonly drew: boolean;
+		/** Landblocks resident on the map's context after syncing. */
+		readonly residentLandblockCount: number;
+		/** Terrain installation revision the map last synced against. */
+		readonly terrainInstallationRevision: number;
+		readonly paletteReady: boolean;
+		readonly centerX: number;
+		readonly centerZ: number;
+		readonly viewDiameter: number;
+		/** Authored height span across resident terrain, proving relief reaches the map at all. */
+		readonly heightRange: readonly [number, number];
+		/** Distinct authored terrain codes resident, proving the palette has something to vary. */
+		readonly distinctTerrainCodes: readonly number[];
+		/** Vertices carrying a road classification. */
+		readonly roadVertexCount: number;
+		/** Which mode the anchor's residency selected. */
+		readonly mode: "outdoor" | "indoor";
+		/**
+		 * Entities the map would draw, read from the scene rather than any published snapshot.
+		 *
+		 * Sampled here so a probe can prove the position moves between ticks: the diagnostics
+		 * snapshot deliberately does not republish on ordinary advances, and the map must not
+		 * depend on it.
+		 */
+		readonly presentedEntities: {
+			readonly count: number;
+			readonly firstWorldX: number | null;
+			readonly firstWorldZ: number | null;
+			/** Extracted facing of the first entity, in degrees clockwise from north. */
+			readonly firstHeadingDegrees: number | null;
+		};
+		/** Derived map geometry resident in the runtime store. */
+		readonly geometry: {
+			readonly revision: number;
+			readonly blockerLandblockCount: number;
+			readonly blockerInstanceCount: number;
+			readonly interiorLandblockCount: number;
+			readonly floorInstanceCount: number;
+			readonly crossingCount: number;
+		};
+	}
+
 	interface BrowserHarnessViewportEvidence {
 		readonly cssHeight: number;
 		readonly cssWidth: number;
@@ -694,6 +764,9 @@
 	}
 
 	let canvasElement: HTMLCanvasElement | null = $state(null);
+	let mapCanvasElement: HTMLCanvasElement | null = $state(null);
+	let mapCanvasSize = $state(0);
+	let mapRenderer: MapRenderer | null = null;
 	let error: string | null = $state(null);
 	let frames = 0;
 	let lastFrameAt: number | undefined;
@@ -2368,8 +2441,161 @@
 						voices: trace.voices,
 					};
 				}
+				/**
+				 * Draw one overhead-map frame onto the harness map canvas.
+				 *
+				 * The draw is synchronous so a screenshot taken immediately after this returns shows
+				 * exactly the reported state.
+				 */
+				function configureMap(request: {
+					readonly size?: number;
+					readonly visible?: boolean;
+					readonly centerX?: number;
+					readonly centerY?: number;
+					readonly centerZ?: number;
+					readonly viewDiameter?: number;
+					readonly headingRadians?: number;
+				}): BrowserHarnessMapEvidence {
+					if (!runtime)
+						throw new Error("Browser harness runtime is not ready.");
+					if (request.visible === false) {
+						mapCanvasSize = 0;
+						return {
+							available: mapRenderer?.available ?? false,
+							centerX: 0,
+							centerZ: 0,
+							distinctTerrainCodes: [],
+							drew: false,
+							geometry: {
+								blockerInstanceCount: 0,
+								blockerLandblockCount: 0,
+								crossingCount: 0,
+								floorInstanceCount: 0,
+								interiorLandblockCount: 0,
+								revision: runtime.mapGeometry.revision,
+							},
+							heightRange: [0, 0],
+							mode: "outdoor",
+							presentedEntities: {
+								count: 0,
+								firstHeadingDegrees: null,
+								firstWorldX: null,
+								firstWorldZ: null,
+							},
+							roadVertexCount: 0,
+							paletteReady: runtime.terrainColorPalette() !== null,
+							residentLandblockCount: mapRenderer?.residentLandblockCount ?? 0,
+							terrainInstallationRevision: runtime.terrainInstallationRevision,
+							viewDiameter: 0,
+						};
+					}
+					mapCanvasSize = Math.max(1, Math.floor(request.size ?? 512));
+					const canvas = mapCanvasElement;
+					if (!canvas) {
+						throw new Error("Browser harness map canvas is not mounted.");
+					}
+					canvas.width = mapCanvasSize;
+					canvas.height = mapCanvasSize;
+					mapRenderer ??= new MapRenderer(canvas, runtime);
+					const camera = cameraEvidence?.position ?? ([0, 0, 0] as const);
+					const centerX = request.centerX ?? camera[0];
+					const centerZ = request.centerZ ?? camera[2];
+					const viewDiameter = clampMapViewDiameter(
+						request.viewDiameter ?? MAP_DEFAULT_VIEW_DIAMETER,
+					);
+					let minimumHeight = Number.POSITIVE_INFINITY;
+					let maximumHeight = Number.NEGATIVE_INFINITY;
+					const distinctTerrainCodes = new Set<number>();
+					let roadVertexCount = 0;
+					for (const { generation } of runtime.listInstalledTerrain()) {
+						for (const height of generation.heights) {
+							minimumHeight = Math.min(minimumHeight, height);
+							maximumHeight = Math.max(maximumHeight, height);
+						}
+						for (const authored of generation.terrainSamples) {
+							distinctTerrainCodes.add((authored >>> 2) & 0x1f);
+							if ((authored & 0x03) !== 0) roadVertexCount += 1;
+						}
+					}
+					let blockerInstanceCount = 0;
+					let blockerLandblockCount = 0;
+					for (const [, instances] of runtime.mapGeometry.listBlockers()) {
+						blockerLandblockCount += 1;
+						blockerInstanceCount += instances.length;
+					}
+					let interiorLandblockCount = 0;
+					let floorInstanceCount = 0;
+					let crossingCount = 0;
+					for (const [, resident] of runtime.mapGeometry.listInteriors()) {
+						interiorLandblockCount += 1;
+						floorInstanceCount += resident.floors.length;
+						crossingCount += resident.crossings.length;
+					}
+					// Residency comes from the harness camera: an EnvCell camera puts the map indoors,
+					// which is the same rule the app shell will apply to a possessed entity.
+					let presentedCount = 0;
+					let firstWorldX: number | null = null;
+					let firstWorldZ: number | null = null;
+					let firstHeadingDegrees: number | null = null;
+					for (const { placement } of runtime.listPresentedSpawnedEntities()) {
+						presentedCount += 1;
+						if (firstWorldX !== null) continue;
+						const entityOrigin = createLandblockWorldOrigin(
+							placement.landblockId,
+						);
+						firstWorldX = entityOrigin.x + placement.localTransform.m41;
+						firstWorldZ = entityOrigin.z + placement.localTransform.m43;
+						firstHeadingDegrees =
+							(mapHeadingFromSceneTransform(placement.localTransform) * 180) /
+							Math.PI;
+					}
+					const anchor: MapAnchor = {
+						headingRadians: request.headingRadians ?? 0,
+						residency: cameraEvidence
+							? {
+									envCellId: cameraEvidence.envCellId,
+									landblockId: cameraEvidence.landblockId,
+								}
+							: null,
+						worldX: centerX,
+						worldY: request.centerY ?? camera[1],
+						worldZ: centerZ,
+					};
+					const drew = mapRenderer.render({ anchor, viewDiameter });
+					return {
+						available: mapRenderer.available,
+						centerX,
+						centerZ,
+						distinctTerrainCodes: [...distinctTerrainCodes].sort(
+							(a, b) => a - b,
+						),
+						drew,
+						geometry: {
+							blockerInstanceCount,
+							blockerLandblockCount,
+							crossingCount,
+							floorInstanceCount,
+							interiorLandblockCount,
+							revision: runtime.mapGeometry.revision,
+						},
+						heightRange: [minimumHeight, maximumHeight],
+						presentedEntities: {
+							count: presentedCount,
+							firstHeadingDegrees,
+							firstWorldX,
+							firstWorldZ,
+						},
+						mode: anchor.residency?.envCellId == null ? "outdoor" : "indoor",
+						roadVertexCount,
+						paletteReady: runtime.terrainColorPalette() !== null,
+						residentLandblockCount: mapRenderer.residentLandblockCount,
+						terrainInstallationRevision: runtime.terrainInstallationRevision,
+						viewDiameter,
+					};
+				}
 				hostGlobal.__HOLTBURGER_3D_BROWSER_HARNESS__ = {
 					clearSceneInterest,
+					configureMap,
 					despawnExplorerEntity,
 					focusExplorerEnvCell,
 					focusExplorerOutdoor,
@@ -2546,6 +2772,7 @@
 			if (frameHandle !== undefined) window.cancelAnimationFrame(frameHandle);
 			longTaskObserver?.disconnect();
 			terrainGlTrace?.destroy();
+			mapRenderer?.destroy();
 			delete hostGlobal.__HOLTBURGER_3D_BROWSER_HARNESS__;
 			staticDetailOwner?.teardown();
 			void runtime?.destroy().finally(async () => {
@@ -2563,6 +2790,15 @@
 	style:width={`${viewportWidth}px`}
 ></canvas>
 
+<canvas
+	bind:this={mapCanvasElement}
+	class="map"
+	aria-label="Browser harness overhead map"
+	style:display={mapCanvasSize > 0 ? "block" : "none"}
+	style:height={`${mapCanvasSize}px`}
+	style:width={`${mapCanvasSize}px`}
+></canvas>
+
 <style>
 	:global(body) {
 		margin: 0;
@@ -2571,5 +2807,11 @@
 
 	canvas {
 		display: block;
+	}
+
+	canvas.map {
+		position: absolute;
+		top: 0;
+		left: 0;
 	}
 </style>

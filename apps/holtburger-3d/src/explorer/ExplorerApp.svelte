@@ -120,6 +120,16 @@
 	import type { Texture2DReadback } from "../lib/game/renderer/webgl2-device";
 	import type { TexturePageId } from "../lib/game/textures/texture-manager";
 	import type { ExplorerCameraLocation as ExplorerCameraLocationState } from "./explorer-camera-location";
+	import MapPanel from "../app/MapPanel.svelte";
+	import type { MapPanelFrame, MapPanelState } from "../app/map-panel-frame";
+	import {
+		type MapAnchor,
+		mapHeadingFromSceneTransform,
+	} from "../lib/game/map/map-view";
+	import { spawnedDynamicPlacementFromPoint } from "../lib/game/runtime/spawned-dynamic-presentation";
+	import { createLandblockWorldOrigin } from "../lib/game/landblocks";
+	import type { ScenePlacement } from "../lib/game/scene";
+	import { MAP_DEFAULT_VIEW_DIAMETER } from "../lib/game/map/map-appearance";
 	import {
 		resolveTextureFilteringPolicy,
 		supportedTextureFilteringPolicies,
@@ -173,6 +183,89 @@
 		"No camera focus requested.",
 	);
 	let cameraLocation = $state<ExplorerCameraLocationState | null>(null);
+	/**
+	 * Overhead-map panel geometry and view choices.
+	 *
+	 * The panel is a controlled component: it owns no persistence policy, so the shell that mounts
+	 * it owns where it sits and how far it sees. The Explorer keeps that here in memory.
+	 */
+	let mapPanel = $state<MapPanelState>({
+		left: 16,
+		size: 220,
+		top: 96,
+		viewDiameter: MAP_DEFAULT_VIEW_DIAMETER,
+	});
+	/** Heading the map orients by, kept in step with whatever controls the camera. */
+	let cameraYawRadians = 0;
+
+	/**
+	 * Where the possessed entity is being drawn, refreshed every frame.
+	 *
+	 * Deliberately not derived from `spawnedEntities`: that snapshot exists for the diagnostics
+	 * inspector and is republished only on identity changes and discontinuous corrections, so a
+	 * walking character never moves it. The scene is what presentation rate updates.
+	 */
+	let possessedPlacement: ScenePlacement | null = null;
+
+	/**
+	 * Anchor on the possessed entity itself, not on the camera watching it.
+	 *
+	 * Possession is the one mode where the two genuinely differ: the camera orbits while the
+	 * character faces where it is going, and it is the character's own position and facing that a
+	 * map should be drawn around. The pose is converted through the same helper the scene uses, so
+	 * the map cannot drift from where the entity is actually drawn.
+	 */
+	function anchorFromPossession(): MapAnchor | null {
+		const placement = possessedPlacement;
+		if (placement === null) return null;
+		const origin = createLandblockWorldOrigin(placement.landblockId);
+		return {
+			// The possessed character is the subject, so its own facing is up and the boom is not
+			// consulted; the boom's bearing still reaches the panel separately, to draw where the
+			// operator is looking relative to the character.
+			headingRadians: mapHeadingFromSceneTransform(placement.localTransform),
+			residency: {
+				envCellId: placement.envCellId,
+				landblockId: placement.landblockId,
+			},
+			worldX: origin.x + placement.localTransform.m41,
+			worldY: origin.y + placement.localTransform.m42,
+			worldZ: origin.z + placement.localTransform.m43,
+		};
+	}
+
+	/** Anchor on the free camera, which is what the Explorer has whenever nothing is possessed. */
+	function anchorFromCamera(): MapAnchor | null {
+		if (cameraLocation === null) return null;
+		return {
+			headingRadians: cameraYawRadians,
+			residency:
+				cameraLocation.residency.kind === "resolved"
+					? cameraLocation.residency.residency
+					: null,
+			worldX: cameraLocation.position.x,
+			worldY: cameraLocation.position.y,
+			worldZ: cameraLocation.position.z,
+		};
+	}
+
+	/** Pull the scene's current map picture without publishing presentation-rate Svelte state. */
+	function readMapPanelFrame(): MapPanelFrame {
+		const runtime = runtimeReady ? (gameRuntime ?? null) : null;
+		return {
+			anchor: anchorFromPossession() ?? anchorFromCamera(),
+			cameraFovRadians:
+				(FRONTEND_TUNING.explorer.camera.framing.fov * Math.PI) / 180,
+			cameraHeadingRadians: cameraYawRadians,
+			presentedEntities: readPresentedMapEntities,
+			presentedEntityRevision: runtime?.dynamicEntityPlacementRevision ?? 0,
+			source: runtime,
+		};
+	}
+
+	function readPresentedMapEntities() {
+		return gameRuntime?.listPresentedSpawnedEntities() ?? [];
+	}
 	let activeRegion = $state<ActiveRegionSource | undefined>(undefined);
 	/** Fast enough that a tick boundary is never visibly late; resolution is tick-quantized. */
 	const CLOCK_SAMPLE_INTERVAL_MS = 250;
@@ -929,6 +1022,7 @@
 		if (presentation === null) {
 			const placement = coordinator.presentedPlacement();
 			if (placement === null) return undefined;
+			cameraYawRadians = desiredOrientation.yawRadians;
 			return coordinator.syncBoomCamera(
 				placement,
 				desiredOrientation.yawRadians,
@@ -942,6 +1036,10 @@
 			visualPivot,
 		);
 		controller.applyPresentedPosition(placement.position);
+		// Published where it is decided: the boom owns orientation while it is running, and the
+		// free-fly controller only receives position, so reading yaw from that controller here
+		// would hand the map a bearing from before possession began.
+		cameraYawRadians = orientation.yawRadians;
 		return coordinator.syncBoomCamera(
 			placement,
 			orientation.yawRadians,
@@ -1515,6 +1613,17 @@
 						);
 					}
 					cameraLocation = residencySync.location;
+					// Only the free-fly controller's yaw is authoritative here; while a boom runs it
+					// publishes its own, because the controller is not the one turning.
+					if (boomCameraSession === undefined) {
+						cameraYawRadians =
+							cameraController?.snapshotState().yawRadians ?? cameraYawRadians;
+					}
+					const possessedGuid = explorerPossession?.guid ?? null;
+					possessedPlacement =
+						possessedGuid === null
+							? null
+							: (gameRuntime.spawnedEntityPlacement(possessedGuid) ?? null);
 					const followResidency = residencySync.location?.residency;
 					if (interestFollowsCamera && followResidency?.kind === "resolved") {
 						followCameraSceneInterest(followResidency.residency);
@@ -1581,6 +1690,15 @@
 		{/if}
 
 		<FrameMetricsOverlay metrics={frameMetrics} />
+		{#if startupError === null}
+			<MapPanel
+				readFrame={readMapPanelFrame}
+				panel={mapPanel}
+				onStateChange={(next) => {
+					mapPanel = next;
+				}}
+			/>
+		{/if}
 		{#if startupError === null}
 			<ExplorerCameraLocation location={cameraLocation} />
 		{/if}

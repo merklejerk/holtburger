@@ -357,6 +357,7 @@ function cell(
 		structure: {
 			id: "shared-structure",
 			geometry: SHARED_GEOMETRY,
+			mapFloor: { positions: new Float32Array(9), indices: new Uint32Array(3) },
 			surfaceSlotCount: 1,
 			containmentPlanes: new Float32Array([1, 0, 0, 0]),
 			portalPolygons: [],

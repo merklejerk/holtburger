@@ -150,10 +150,15 @@ renames it.
 - **Timing varies run to run at identical draw counts.** Outdoor `averageFrameWorkMs` moved 4.223 to
   4.132 (-2.2%) with every draw count byte-identical. Any Phase 1 win smaller than roughly 5% needs
   repeated runs to be believed.
-- **WebKitGTK quantizes `performance.now()` to 1 ms.** Explorer snapshots report `frameMs` as exact
+- **Resolved by the CEF cutover.** The three constraints below described the wry/WebKitGTK runtime
+  the Explorer used until `tauri::Cef` replaced it. They are retained because every measurement
+  recorded above them was taken under those conditions, and none of them apply to captures taken
+  after the cutover: the Explorer now reports full-precision `performance.now`, a truthful
+  `ANGLE (AMD, AMD Radeon RX 7900 XT (radeonsi navi31 ACO), OpenGL 4.6)`, and working GPU timing.
+- ~~**WebKitGTK quantizes `performance.now()` to 1 ms.**~~ Explorer snapshots report `frameMs` as exact
   integers plus float residue (`updateFrameMs: 5.000000000003638`), the fingerprint of subtracting
   two quantized reads. Single-frame phase numbers are noise under WebKitGTK.
-- **`WEBGL_debug_renderer_info` is fabricated under WebKitGTK**, reporting `Apple GPU` / `Apple Inc.`
+- ~~**`WEBGL_debug_renderer_info` is fabricated under WebKitGTK**~~, reporting `Apple GPU` / `Apple Inc.`
   on Linux/x86_64 as fingerprinting resistance, with `renderer`/`vendor` scrubbed to
   `WebKit WebGL` / `WebKit`. Driver identity must come from outside the page.
 - **Hardware acceleration is confirmed.** `LIBGL_ALWAYS_SOFTWARE=1` made the Explorer much worse and
@@ -174,6 +179,38 @@ renames it.
   same vantage in portal mode reports 10. Flat-mode numbers are not budgets.
 - **Explorer report schema is version 5** since `0f5bedb1`. Snapshots quoted during the original
   investigation were version 4.
+
+## Runtime: CEF replaced wry/WebKitGTK
+
+Measured after Phase 2, at the same outdoor vantage, with the renderer frame profiler:
+
+| runtime                       | `cpu.mean.totalMs` |         |
+| ----------------------------- | ------------------ | ------- |
+| wry / WebKitGTK               | 4.412 ms           | 227 fps |
+| CEF (`tauri::Cef`)            | **1.964 ms**       | 509 fps |
+| Chrome harness, for reference | 1.881 ms           | 532 fps |
+
+**2.25x raw**, and within 4.4% of real Chrome. The CEF capture ran a slightly lighter workload —
+7.5% fewer object draws and a 15.6% smaller drawing buffer, because the pose was matched by eye —
+so the engine-attributable share is closer to 2.0-2.1x. Either figure dwarfs what remained on the
+table in this plan.
+
+The per-phase split confirms the cause rather than coincidence: the phases that are pure JS compute
+moved most (`particleSubmission` 5.17x, `terrainSubmission` 3.67x, `instanceUpload` 3.03x), while
+`portalPlanning`, which is dominated by allocation and polygon state, moved least at 1.30x.
+
+Three secondary effects matter more than the framerate for future work:
+
+- `performance.now` is no longer quantized, so single-frame Explorer numbers are trustworthy.
+- `EXT_disjoint_timer_query_webgl2` is exposed, so the Explorer reports GPU timing for the first
+  time. Every GPU figure recorded earlier in this plan was Chrome-harness-only out of necessity.
+- `WEBGL_debug_renderer_info` is truthful, so driver identity no longer has to come from outside
+  the page.
+
+**This reframes what remains.** At 1.96 ms CPU against 0.79 ms GPU the outdoor scene is CPU-bound at
+roughly 500 fps, so the plan's 500 fps goal is met without Phase 3. `opaqueSubmissionMs` is still the
+largest single phase at 0.512 ms, so Phase 3 remains the correct next optimization — but it is now
+elective rather than required.
 
 ## Out of Scope
 

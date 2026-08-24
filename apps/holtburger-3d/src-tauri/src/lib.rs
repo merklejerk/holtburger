@@ -14,6 +14,19 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tauri::Emitter;
 
+/// The app's only Tauri runtime.
+///
+/// CEF rather than the default wry backend, because wry resolves to WebKitGTK on Linux and cost the
+/// Explorer roughly 2.2x in frame time on the same scene: 4.41 ms against 1.96 ms, measured at
+/// landblock 0xda55ffff with the renderer frame profiler. WebKitGTK additionally quantizes
+/// `performance.now` to 1 ms, fabricates `WEBGL_debug_renderer_info`, and never exposes
+/// `EXT_disjoint_timer_query_webgl2`, so it cannot report GPU timing at all. See
+/// docs/plans/holtburger-3d-object-draw-state-reduction-plan.md for the measurements.
+pub type Runtime = tauri::Cef;
+
+/// Handle to the running app, bound to the one runtime this binary builds.
+pub type AppHandle = tauri::AppHandle<Runtime>;
+
 pub use landblock_source_batch::LandblockSourceLayer;
 pub use sky_source::load_sky_source_bytes;
 
@@ -998,7 +1011,7 @@ fn format_error(error: anyhow::Error) -> String {
 /// Registers one host-owned physical camera body at the currently presented Explorer pose.
 #[tauri::command]
 async fn start_physical_fly(
-    app: tauri::AppHandle,
+    app: AppHandle,
     runtime: tauri::State<'_, Arc<host_physical_fly_runtime::HostPhysicalFlyRuntime>>,
     registration: host_physical_fly_runtime::PhysicalFlyRegistration,
 ) -> Result<host_physical_fly_runtime::PhysicalFlyStartReceipt, String> {
@@ -1110,7 +1123,7 @@ async fn search_explorer_weenies(
 /// Emits one complete current snapshot after the frontend has installed its listener.
 #[tauri::command]
 fn request_explorer_dynamic_entity_snapshot(
-    app: tauri::AppHandle,
+    app: AppHandle,
     delivery: tauri::State<'_, Arc<explorer_entity_delivery::ExplorerEntityDelivery>>,
 ) -> Result<(), String> {
     delivery.with_ordered_publication(|| {
@@ -1136,7 +1149,7 @@ fn explorer_possession_motion_probe(
 /// Prepares one catalog WCID and publishes the complete wearer/child registry generation.
 #[tauri::command]
 async fn spawn_explorer_entity(
-    app: tauri::AppHandle,
+    app: AppHandle,
     driver: tauri::State<'_, Arc<explorer_entity_driver::ExplorerEntityDriver>>,
     delivery: tauri::State<'_, Arc<explorer_entity_delivery::ExplorerEntityDelivery>>,
     request: explorer_entity_driver::ExplorerEntitySpawnRequest,
@@ -1172,7 +1185,7 @@ async fn spawn_explorer_entity(
 /// Removes one exact wearer generation and publishes the complete post-removal registry.
 #[tauri::command]
 async fn despawn_explorer_entity(
-    app: tauri::AppHandle,
+    app: AppHandle,
     driver: tauri::State<'_, Arc<explorer_entity_driver::ExplorerEntityDriver>>,
     delivery: tauri::State<'_, Arc<explorer_entity_delivery::ExplorerEntityDelivery>>,
     guid: holtburger_common::Guid,
@@ -1209,7 +1222,7 @@ async fn despawn_explorer_entity(
 /// Applies one complete semantic state and publishes the resulting current entity view.
 #[tauri::command]
 async fn replace_explorer_entity_physics_state(
-    app: tauri::AppHandle,
+    app: AppHandle,
     driver: tauri::State<'_, Arc<explorer_entity_driver::ExplorerEntityDriver>>,
     delivery: tauri::State<'_, Arc<explorer_entity_delivery::ExplorerEntityDelivery>>,
     request: ReplaceExplorerEntityPhysicsStateRequest,
@@ -1252,7 +1265,7 @@ async fn replace_explorer_entity_physics_state(
 /// Applies one catalog-speed launch and publishes the complete resulting current view.
 #[tauri::command]
 async fn launch_explorer_entity(
-    app: tauri::AppHandle,
+    app: AppHandle,
     driver: tauri::State<'_, Arc<explorer_entity_driver::ExplorerEntityDriver>>,
     delivery: tauri::State<'_, Arc<explorer_entity_delivery::ExplorerEntityDelivery>>,
     request: explorer_entity_driver::ExplorerEntityLaunchRequest,
@@ -1284,7 +1297,7 @@ async fn launch_explorer_entity(
 /// Applies one host-resolved teleport/reset and publishes a correction-only snap batch.
 #[tauri::command]
 async fn relocate_explorer_entity(
-    app: tauri::AppHandle,
+    app: AppHandle,
     driver: tauri::State<'_, Arc<explorer_entity_driver::ExplorerEntityDriver>>,
     delivery: tauri::State<'_, Arc<explorer_entity_delivery::ExplorerEntityDelivery>>,
     request: explorer_entity_driver::ExplorerEntityRelocationRequest,
@@ -1548,7 +1561,7 @@ async fn stop_kinematic_boom(
 /// Clears the Explorer registry/body population and publishes an empty reconstruction snapshot.
 #[tauri::command]
 async fn reset_explorer_entities(
-    app: tauri::AppHandle,
+    app: AppHandle,
     driver: tauri::State<'_, Arc<explorer_entity_driver::ExplorerEntityDriver>>,
     delivery: tauri::State<'_, Arc<explorer_entity_delivery::ExplorerEntityDelivery>>,
 ) -> Result<(), String> {
@@ -2084,7 +2097,7 @@ pub fn run() {
     let explorer_entities_for_setup = Arc::clone(&explorer_entities);
     let explorer_entity_delivery_for_setup = Arc::clone(&explorer_entity_delivery);
     let kinematic_boom_runtime_for_setup = Arc::clone(&kinematic_boom_runtime);
-    tauri::Builder::default()
+    tauri::Builder::<Runtime>::new()
         .setup(move |app| {
             fixed_tick_runtime_for_setup.install(
                 explorer_entity_tick_slot,

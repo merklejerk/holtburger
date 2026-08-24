@@ -190,7 +190,6 @@ describe("GameRuntime view and interest control", () => {
 			objectDrawCalls: 0,
 			objectUniformUploads: 0,
 			objectSuppressedUniformUploads: 0,
-			objectIdentityTransformUploads: 0,
 		};
 		const setFrameProfilingEnabled = vi.fn();
 		const renderer: Renderer = {

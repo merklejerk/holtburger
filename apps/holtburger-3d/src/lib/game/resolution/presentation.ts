@@ -17,6 +17,20 @@ export type ResolvedMaterialId = `material:${string}`;
 export type ResolvedObjectTextureEncoding =
 	"direct-color" | "index8" | "index16";
 
+/**
+ * Derived overhead-map geometry: positions and indices, and deliberately nothing else.
+ *
+ * The host reduces authored physics polygons to the walkable floors and blocker silhouettes a map
+ * draws, so this carries no normals, UVs, or materials — the map shades it flat and derives slope
+ * from position. Kept beside `ResolvedGeometry` because both are decoded record output; the map
+ * consumes this type rather than defining it, so asset decoding stays the owner of decoded shapes.
+ */
+export interface ResolvedMapSurface {
+	/** Source-local positions, in the same frame as the geometry they were derived beside. */
+	readonly positions: Float32Array;
+	readonly indices: Uint32Array;
+}
+
 /** Geometry buffers shared by object parts and embedded structures. */
 export interface ResolvedGeometry {
 	readonly id: ResolvedGeometryId;

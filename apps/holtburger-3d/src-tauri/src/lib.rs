@@ -37,6 +37,7 @@ mod host_physical_fly_runtime;
 pub mod host_simulation_runtime;
 pub mod interior_seam;
 mod landblock_source_batch;
+mod map_geometry;
 mod object_resource_closure;
 mod object_texture;
 mod outdoor_static_source;
@@ -56,11 +57,13 @@ use animation_source::serialize_animation_record_binary;
 use audio_source::serialize_audio_record_binary;
 use binary_source_record::BinarySectionWriter;
 use env_cell_source::serialize_env_cell_source_record;
+use gfx_obj_geometry::build_gfx_obj_portal_apertures;
 use landblock_source_batch::{
     LandblockSourceBatchRecord, LandblockSourceBatchRequest, LoadedLandblockSourceBatch,
     load_landblock_source_batch as load_landblock_source_batch_asset,
     serialize_landblock_source_batch,
 };
+use map_geometry::build_blocker_silhouette_geometry;
 use object_resource_closure::ObjectResourceClosure;
 use object_texture::{
     ObjectTexturePurpose, PreparedObjectTexture, prepare_object_palette, prepare_object_surface,
@@ -602,6 +605,11 @@ async fn serialize_outdoor_static_source_record(
     closure.validate()?;
     let mut section_writer = BinarySectionWriter::default();
     closure.buffers.append_sections(&mut section_writer, "")?;
+    let map_blockers = if layer == LandblockSourceLayer::Buildings {
+        Some(append_building_map_blockers(runtime, statics, &mut section_writer).await?)
+    } else {
+        None
+    };
     let (sections, section_bytes) = section_writer.finish();
     let manifest = OutdoorStaticSourceRecordManifest {
         transport: "holtburger-outdoor-static-record",
@@ -617,6 +625,7 @@ async fn serialize_outdoor_static_source_record(
             }
         },
         residents,
+        map_blockers,
         definitions: closure.definitions,
         geometries: closure.geometries,
         materials: closure.materials.into_values().collect(),
@@ -624,6 +633,68 @@ async fn serialize_outdoor_static_source_record(
         sections,
     };
     serialize_outdoor_static_record_binary(&manifest, section_bytes)
+}
+
+/// Derive and append per-building overhead-map blocker silhouettes for one buildings layer.
+///
+/// Doorways stay open on the map: physics polygons named by the building's authored portal
+/// apertures are excluded from the silhouette. Silhouettes are deduplicated by source DID; the
+/// frontend map composes them with each resident's placement.
+async fn append_building_map_blockers(
+    runtime: &ContentAssetRuntime,
+    statics: &[landblock_source_batch::OutdoorStaticResident],
+    writer: &mut BinarySectionWriter,
+) -> Result<Vec<serde_json::Value>> {
+    let mut positions = Vec::<f32>::new();
+    let mut indices = Vec::<u32>::new();
+    let mut entries = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for member in statics {
+        if !seen.insert(member.source_did) {
+            continue;
+        }
+        anyhow::ensure!(
+            member.source_did >> 24 == 0x01,
+            "building 0x{:08X} is not a GfxObj source; map blockers only understand GfxObj buildings",
+            member.source_did
+        );
+        let asset = runtime
+            .load(ContentAssetRequest::GfxObj(member.source_did))
+            .await?;
+        let ContentAsset::GfxObj(gfx_obj) = asset else {
+            unreachable!("GfxObj request must return a GfxObj")
+        };
+        let excluded = build_gfx_obj_portal_apertures(&gfx_obj)?
+            .iter()
+            .flat_map(|aperture| aperture.polygon_ids.iter().copied())
+            .collect::<std::collections::HashSet<u16>>();
+        let blocker = build_blocker_silhouette_geometry(
+            &gfx_obj.vertex_array,
+            &gfx_obj.physics_polygons,
+            &excluded,
+        )
+        .with_context(|| {
+            format!(
+                "Could not derive map blocker for building GfxObj 0x{:08X}",
+                member.source_did
+            )
+        })?;
+        entries.push(json!({
+            // Keyed by the presentation identity the resource closure gives this GfxObj, so the
+            // frontend joins a resident to its silhouette by exact string rather than by parsing a
+            // DAT id back out of one.
+            "sourceAssetId": format!("gfx-obj/{:08x}", member.source_did),
+            "positionOffset": positions.len(),
+            "vertexCount": blocker.vertex_count(),
+            "indexOffset": indices.len(),
+            "indexCount": blocker.indices.len(),
+        }));
+        positions.extend(blocker.positions);
+        indices.extend(blocker.indices);
+    }
+    writer.append_f32("mapBlockerPositions", positions)?;
+    writer.append_u32("mapBlockerIndices", indices);
+    Ok(entries)
 }
 
 async fn build_texture_pixels_response(
@@ -2172,6 +2243,7 @@ mod tests {
             landblock_id: "0x0102ffff".to_string(),
             layer: "buildings",
             residents: Vec::new(),
+            map_blockers: Some(Vec::new()),
             definitions: Vec::new(),
             geometries: Vec::new(),
             materials: Vec::new(),

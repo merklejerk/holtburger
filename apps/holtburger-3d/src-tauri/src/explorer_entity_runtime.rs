@@ -2130,6 +2130,7 @@ mod tests {
             elasticity: None,
             maximum_velocity: None,
             rotation_speed: None,
+            radar: holtburger_core::DynamicEntityRadarFacts::default(),
             physics: resolve_effective_entity_physics_state(PhysicsState::GRAVITY),
         })
         .unwrap()

@@ -12,6 +12,7 @@ import {
 } from "../runtime/scene-interest";
 import type {
 	ResolvedGeometry,
+	ResolvedMapSurface,
 	ResolvedMaterial,
 	ResolvedObjectPresentation,
 } from "./presentation";
@@ -121,6 +122,13 @@ export interface ResolvedCellStructure {
 	readonly surfaceSlotCount: number;
 	/** Positive-chain containment planes encoded as normalized [nx, ny, nz, d] tuples. */
 	readonly containmentPlanes: Float32Array;
+	/**
+	 * Host-derived walkable floor for the overhead map, in structure-local coordinates.
+	 *
+	 * Empty for structures with no walkable surface at all — shafts and solid fills — which the
+	 * shipped census found for roughly a fifth of authored structures.
+	 */
+	readonly mapFloor: ResolvedMapSurface;
 	readonly portalPolygons: readonly {
 		readonly cellStructPortalIndex: number;
 		readonly polygonId: number;
@@ -266,6 +274,15 @@ export interface ResolvedObjectLayerSource {
 	readonly landblockId: LandblockId;
 	readonly staticResidents: readonly ResolvedObjectResident[];
 	readonly dynamicSources: readonly AuthoredDynamicSource[];
+	/**
+	 * Host-derived overhead-map blocker silhouettes keyed by presentation source identity.
+	 *
+	 * Buildings alone derive these, so this is empty for the object and generated layers. Keyed by
+	 * source rather than resident because one building model is placed many times and the
+	 * silhouette is identical for every placement; the key is the resident's
+	 * `presentation.sourceAssetId`, so the join needs no parsing.
+	 */
+	readonly mapBlockers: ReadonlyMap<string, ResolvedMapSurface>;
 }
 
 /** Outdoor-static source kinds admitted by shared geometry preparation and realization contracts. */

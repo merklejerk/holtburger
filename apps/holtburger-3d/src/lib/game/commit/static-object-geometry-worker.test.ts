@@ -703,6 +703,7 @@ function source(
 ): ResolvedOutdoorStaticLayerSource {
 	return {
 		dynamicSources: [],
+		mapBlockers: new Map(),
 		kind: LandblockLayerKind.Buildings,
 		landblockId: "0xda55ffff",
 		staticResidents,

@@ -237,6 +237,11 @@ function parseArgs(args) {
 		lifecycle: false,
 		fixture: null,
 		screenshotPath: null,
+		map: false,
+		mapSize: 512,
+		mapViewDiameter: null,
+		mapCenter: null,
+		mapCenterHeight: null,
 		cpuProfilePath: null,
 		measureMs: 0,
 		settleMs: DEFAULT_SETTLE_MS,
@@ -710,6 +715,47 @@ function parseArgs(args) {
 			case "--screenshot":
 				parsed.screenshotPath = requireValue(args, ++index, arg);
 				break;
+			case "--map":
+				parsed.map = true;
+				break;
+			case "--map-size":
+				parsed.map = true;
+				parsed.mapSize = Number(requireValue(args, ++index, arg));
+				if (!Number.isFinite(parsed.mapSize) || parsed.mapSize <= 0) {
+					throw new Error("--map-size must be a positive number of pixels.");
+				}
+				break;
+			case "--map-view-diameter":
+				parsed.map = true;
+				parsed.mapViewDiameter = Number(requireValue(args, ++index, arg));
+				if (
+					!Number.isFinite(parsed.mapViewDiameter) ||
+					parsed.mapViewDiameter <= 0
+				) {
+					throw new Error("--map-view-diameter must be a positive metre span.");
+				}
+				break;
+			case "--map-center-height":
+				parsed.map = true;
+				parsed.mapCenterHeight = Number(requireValue(args, ++index, arg));
+				if (!Number.isFinite(parsed.mapCenterHeight)) {
+					throw new Error("--map-center-height must be a finite height.");
+				}
+				break;
+			case "--map-center": {
+				parsed.map = true;
+				const parts = requireValue(args, ++index, arg)
+					.split(",")
+					.map((entry) => Number(entry.trim()));
+				if (
+					parts.length !== 2 ||
+					parts.some((value) => !Number.isFinite(value))
+				) {
+					throw new Error("--map-center must be <worldX>,<worldZ>.");
+				}
+				parsed.mapCenter = { worldX: parts[0], worldZ: parts[1] };
+				break;
+			}
 			case "--relocate-sequence":
 				parsed.relocateSequence = requireValue(args, ++index, arg)
 					.split(",")
@@ -968,6 +1014,14 @@ function printHelp() {
 Options:
   --landblock <hex>     Outdoor landblock to render. Default: ${DEFAULT_LANDBLOCK_ID}
   --brief               Print frame and content-summary evidence instead of full diagnostics.
+  --map                 Draw the overhead map onto a harness canvas before the screenshot.
+  --map-size <px>       Square pixel size of the map canvas (default 512).
+  --map-view-diameter <m> World metres across the map's visible circle.
+  --map-center <x,z>    World centre for the map; defaults to the camera position.
+  --map-center-height <y>
+                        Anchor height the interior ramp measures floors against. Overriding it is
+                        how the above-the-anchor end of the ramp gets exercised without hunting for
+                        a dungeon that happens to rise.
 
   --terrain-radius <n>  Request terrain out to this radius independently of buildings, so a
                          terrain-cost capture does not also load a building neighborhood that
@@ -1287,6 +1341,7 @@ function briefHarnessReport(result) {
 						residentCount: authoredDynamics.residents.length,
 					},
 		glRenderer: result.glRenderer,
+		map: result.map,
 		consoleMessages: result.consoleMessages.filter(
 			({ level }) => level === "error" || level === "exception",
 		),
@@ -3369,7 +3424,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			await delay(250);
 		}
 		if (
-			(options.frameMode !== null || options.modeCycle) &&
+			(options.frameMode !== null || options.modeCycle || options.map) &&
 			options.envCellCameraId !== null
 		) {
 			await placeEnvCellCamera(client, options);
@@ -3733,6 +3788,23 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
 			[],
 		);
+		// Drawn after the scene settles and immediately before capture, so the screenshot and the
+		// reported map state describe the same moment.
+		const mapEvidence = options.map
+			? await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.configureMap",
+					[
+						{
+							centerX: options.mapCenter?.worldX,
+							centerY: options.mapCenterHeight ?? undefined,
+							centerZ: options.mapCenter?.worldZ,
+							size: options.mapSize,
+							viewDiameter: options.mapViewDiameter ?? undefined,
+						},
+					],
+				)
+			: null;
 		const screenshot = portalScreenshot
 			? { data: portalScreenshot }
 			: await client.send("Page.captureScreenshot", {
@@ -3758,6 +3830,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			ambientOcclusionCycleStates,
 			audioFlyby,
 			cameraSweepScreenshots,
+			map: mapEvidence,
 			glRenderer,
 			consoleMessages,
 			entityPair,

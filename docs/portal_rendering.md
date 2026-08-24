@@ -58,6 +58,86 @@ itself never receives a texture or material range.
 
 Portal polygons are planar but are not assumed to be rectangular or axis-aligned.
 
+## Derived Overhead-Map Geometry
+
+The app host derives the map's navigational geometry while producing source records. Raw physics
+polygons and physics BSPs do not cross the host boundary. The frontend receives only indexed
+triangle meshes in source-local render coordinates, where an authored AC `(x, y, z)` position is
+stored as render `(x, z, -y)`.
+
+This is an ownership boundary, not just a compact encoding:
+
+1. the host reads authoritative physics polygons and decides which geometry contributes;
+2. the source-record decoder validates and resolves the derived meshes;
+3. normal materialization carries them beside the render artifacts derived from the same source;
+4. `MapGeometryStore` installs and evicts them with their EnvCell or buildings layer; and
+5. the overhead renderer consumes those meshes without reading physics data or re-deriving
+   walkability.
+
+Map geometry is a sibling materialization output, not scene-graph content. Sharing source-layer
+lifetime keeps it synchronized with loaded content without making the scene renderer own a second
+view of the world.
+
+### HBEC v4 walkable floors
+
+Every present HBEC v4 record contains these additional typed sections:
+
+| Section             | Scalar              | Meaning                                             |
+| ------------------- | ------------------- | --------------------------------------------------- |
+| `mapFloorPositions` | little-endian `f32` | Packed structure-local render `(x, y, z)` vertices. |
+| `mapFloorIndices`   | little-endian `u32` | Packed triangle indices.                            |
+
+Each entry in the manifest's `structures` array contains a `mapFloor` object:
+
+| Field            | Unit           | Meaning                                                   |
+| ---------------- | -------------- | --------------------------------------------------------- |
+| `positionOffset` | `f32` elements | First position component in `mapFloorPositions`.          |
+| `vertexCount`    | vertices       | Number of three-component positions in the range.         |
+| `indexOffset`    | `u32` elements | First index in `mapFloorIndices`.                         |
+| `indexCount`     | indices        | Number of indices in the range; triangles occupy triples. |
+
+Indices are local to that structure's sliced position range. Empty ranges are valid for structures
+with no walkable physics polygons. One range exists per distinct CellStruct, and every EnvCell
+instance reuses it through the structure's ordinary landblock-local placement.
+
+The host computes the mesh from the CellStruct's physics polygons. It calculates each polygon's
+face normal in authored Z-up coordinates and retains an up-facing side when
+`normal.z >= 0.66417414`, retail's `PhysicsGlobals::floor_z` test
+(`CPhysicsObj::is_valid_walkable`, `acclient.c:304992-304995`). A double-sided polygon also retains
+its reversed underside when that side passes the same test. Kept polygons are fan-triangulated;
+zero-area polygons contribute nothing. Because the filter runs in structure-local space, HBEC
+production fails if any consuming cell placement does not preserve the up axis.
+
+### HBSO building blockers
+
+Only a buildings-layer HBSO record contains `mapBlockers` and requires these typed sections:
+
+| Section               | Scalar              | Meaning                                          |
+| --------------------- | ------------------- | ------------------------------------------------ |
+| `mapBlockerPositions` | little-endian `f32` | Packed GfxObj-local render `(x, y, z)` vertices. |
+| `mapBlockerIndices`   | little-endian `u32` | Packed triangle indices.                         |
+
+Each `mapBlockers` manifest entry contains `sourceAssetId`, `positionOffset`, `vertexCount`,
+`indexOffset`, and `indexCount`, with the same element-offset and local-index rules as HBEC floors.
+`sourceAssetId` is the presentation identity used to join the derived mesh to every resident that
+instances that GfxObj; one blocker is emitted per distinct building source rather than per
+placement.
+
+The blocker contains every non-degenerate physics polygon except polygon IDs claimed by the
+GfxObj's authored portal apertures. Excluding those polygons keeps doorways open instead of
+stamping them shut in the top-down silhouette. Objects and generated-scenery HBSO records carry no
+`mapBlockers` field or blocker sections: the overhead map represents navigational structure, not
+scenery.
+
+Primary implementation references:
+
+- `apps/holtburger-3d/src-tauri/src/map_geometry.rs`
+- `apps/holtburger-3d/src-tauri/src/env_cell_source.rs`
+- `apps/holtburger-3d/src-tauri/src/lib.rs` (`append_building_map_blockers`)
+- `apps/holtburger-3d/src/lib/assets/decode-env-cell-record.ts`
+- `apps/holtburger-3d/src/lib/assets/decode-static-source-record.ts`
+- `apps/holtburger-3d/src/lib/game/map/map-geometry-store.ts`
+
 ## Directed Topology
 
 Portal topology is directed. An EnvCell portal names a target cell and portal selector, but a

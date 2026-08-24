@@ -10,6 +10,7 @@ import type {
 	ParentLocation,
 	ResolvedAttachPoint,
 	ResolvedGeometry,
+	ResolvedMapSurface,
 	ResolvedMaterial,
 	ResolvedObjectLight,
 	ResolvedObjectPart,
@@ -29,6 +30,7 @@ import {
 	binarySectionSchema,
 	readBinarySectionSlice,
 	validateBinarySections,
+	readBinarySection,
 } from "./binary-source-record";
 import { acFrameTransform, renderScale, renderVector } from "./ac-frame";
 
@@ -50,6 +52,18 @@ const REQUIRED_SECTIONS = {
 	materialSideKinds: "u8",
 	materialSideTypes: "u8",
 	materialStippling: "u8",
+} as const;
+
+/**
+ * Extra sections the buildings layer carries, and only the buildings layer.
+ *
+ * The host derives overhead-map blocker silhouettes for buildings alone — scenery is deliberately
+ * absent from the map — so the required section set is discriminated by the manifest's own layer
+ * rather than padded with empty sections for layers that will never have them.
+ */
+const BUILDING_MAP_SECTIONS = {
+	mapBlockerPositions: "f32",
+	mapBlockerIndices: "u32",
 } as const;
 
 export const staticGeometrySchema = z.object({
@@ -228,6 +242,24 @@ const manifestSchema = z.object({
 			kind: z.enum(["surface-texture", "palette"]),
 		}),
 	),
+	/**
+	 * Derived overhead-map blocker silhouettes, one per distinct building source.
+	 *
+	 * Present only on the buildings layer: the map draws navigational structure, not scenery, so no
+	 * other outdoor static layer derives one.
+	 */
+	mapBlockers: z
+		.array(
+			z.object({
+				/** Presentation identity of the building's GfxObj, joining a resident to its shape. */
+				sourceAssetId: z.string().min(1),
+				positionOffset: z.number().int().nonnegative(),
+				vertexCount: z.number().int().nonnegative(),
+				indexOffset: z.number().int().nonnegative(),
+				indexCount: z.number().int().nonnegative(),
+			}),
+		)
+		.optional(),
 	sections: z.array(binarySectionSchema),
 });
 
@@ -356,7 +388,93 @@ export function decodeOutdoorStaticRecord(
 		landblockId: manifest.landblockId as LandblockId,
 		staticResidents,
 		dynamicSources,
+		mapBlockers: decodeMapBlockers(
+			manifest,
+			response,
+			sectionDataOffset,
+			sections,
+		),
 	};
+}
+
+/**
+ * Slice each building's derived blocker silhouette out of the shared map sections.
+ *
+ * Returns an empty map for layers that carry none, so consumers read one shape regardless of layer
+ * rather than branching on which layer they were handed.
+ */
+function decodeMapBlockers(
+	manifest: OutdoorStaticRecordManifest,
+	response: Uint8Array,
+	sectionDataOffset: number,
+	sections: ReadonlyMap<string, BinarySectionManifest>,
+): ReadonlyMap<string, ResolvedMapSurface> {
+	const blockers = new Map<string, ResolvedMapSurface>();
+	if (!manifest.mapBlockers) return blockers;
+	const positions = readBinarySection(
+		response,
+		sectionDataOffset,
+		sections,
+		"mapBlockerPositions",
+		Float32Array,
+		"Outdoor static record",
+	);
+	const indices = readBinarySection(
+		response,
+		sectionDataOffset,
+		sections,
+		"mapBlockerIndices",
+		Uint32Array,
+		"Outdoor static record",
+	);
+	let expectedPositionOffset = 0;
+	let expectedIndexOffset = 0;
+	for (const entry of manifest.mapBlockers) {
+		if (
+			entry.positionOffset !== expectedPositionOffset ||
+			entry.indexOffset !== expectedIndexOffset ||
+			entry.indexCount % 3 !== 0 ||
+			entry.positionOffset + entry.vertexCount * 3 > positions.length ||
+			entry.indexOffset + entry.indexCount > indices.length
+		) {
+			throw new Error(
+				`Outdoor static record map blocker ${entry.sourceAssetId} has an invalid range.`,
+			);
+		}
+		if (blockers.has(entry.sourceAssetId)) {
+			throw new Error(
+				`Outdoor static record repeats map blocker ${entry.sourceAssetId}.`,
+			);
+		}
+		const blockerPositions = positions.slice(
+			entry.positionOffset,
+			entry.positionOffset + entry.vertexCount * 3,
+		);
+		const blockerIndices = indices.slice(
+			entry.indexOffset,
+			entry.indexOffset + entry.indexCount,
+		);
+		if (blockerIndices.some((index) => index >= entry.vertexCount)) {
+			throw new Error(
+				`Outdoor static record map blocker ${entry.sourceAssetId} has an out-of-range index.`,
+			);
+		}
+		blockers.set(entry.sourceAssetId, {
+			positions: blockerPositions,
+			indices: blockerIndices,
+		});
+		expectedPositionOffset += entry.vertexCount * 3;
+		expectedIndexOffset += entry.indexCount;
+	}
+	if (
+		expectedPositionOffset !== positions.length ||
+		expectedIndexOffset !== indices.length
+	) {
+		throw new Error(
+			"Outdoor static record map blocker ranges do not cover their sections.",
+		);
+	}
+	return blockers;
 }
 
 function parseManifest(serialized: string): OutdoorStaticRecordManifest {
@@ -384,7 +502,9 @@ function validatedSections(
 		response,
 		sectionDataOffset,
 		manifest.sections,
-		REQUIRED_SECTIONS,
+		manifest.layer === "buildings"
+			? { ...REQUIRED_SECTIONS, ...BUILDING_MAP_SECTIONS }
+			: REQUIRED_SECTIONS,
 		"Outdoor static record",
 	);
 }

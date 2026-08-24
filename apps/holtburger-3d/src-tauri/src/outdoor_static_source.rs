@@ -22,6 +22,10 @@ pub(crate) struct OutdoorStaticSourceRecordManifest {
     /// Typed layer identity consumed by the record decoder and batch projection.
     pub(crate) layer: &'static str,
     pub(crate) residents: Vec<Value>,
+    /// Buildings layer only: per-source-DID overhead-map blocker silhouette ranges into the
+    /// `mapBlockerPositions`/`mapBlockerIndices` sections. Other layers carry no map geometry.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) map_blockers: Option<Vec<Value>>,
     pub(crate) definitions: Vec<Value>,
     pub(crate) geometries: Vec<Value>,
     pub(crate) materials: Vec<Value>,

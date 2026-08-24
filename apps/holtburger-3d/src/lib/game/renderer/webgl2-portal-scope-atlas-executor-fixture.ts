@@ -66,7 +66,7 @@ import { PORTAL_SCOPE_ATLAS_TEXTURE_UNITS } from "./portal-scope-atlas-command-m
 import {
 	compileWebGL2Shader,
 	requireWebGL2Uniform,
-} from "./webgl2-shader-utils";
+} from "../webgl/shader-program";
 import { createParticleFragmentShader } from "./webgl2-particle-program";
 
 // Tile interiors must exceed the resolve shader's 2-texel envelope gutter or confinement becomes

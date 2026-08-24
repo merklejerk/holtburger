@@ -15,29 +15,33 @@ supports offline surveys and Explorer realization without becoming a runtime ent
 Missing scalar properties remain absent; they are not replaced with ACE runtime defaults during
 export.
 
-| Field | ACE World source | Current consumer |
-| --- | --- | --- |
-| `wcid: u32` | `weenie.class_Id` | Record identity, coverage, and representative-WCID selection |
-| `class_name: String` | `weenie.class_Name` | Provenance and exact error reporting; never a fallback display name |
-| `weenie_type: i32` | `weenie.type` | Weenie/object-category and collision-policy census |
-| `name: Option<String>` | `weenie_properties_string`, `type = PropertyString.Name (1)` | Display-name coverage and runtime presentation input |
-| `setup_did: Option<u32>` | `weenie_properties_d_i_d`, `type = PropertyDataId.Setup (1)` | Setup coverage and all DAT-derived geometry/default surveys |
-| `motion_table_did: Option<u32>` | `weenie_properties_d_i_d`, `type = PropertyDataId.MotionTable (2)` | Motion-table coverage and locomotion evidence |
-| `sound_table_did: Option<u32>` | `weenie_properties_d_i_d`, `type = PropertyDataId.SoundTable (3)` | Authored sound behavior coverage |
-| `physics_effect_table_did: Option<u32>` | `weenie_properties_d_i_d`, `type = PropertyDataId.PhysicsEffectTable (22)` | Authored physics-effect behavior coverage |
-| `palette_base_did: Option<u32>` | `weenie_properties_d_i_d`, `type = PropertyDataId.PaletteBase (6)` | Base appearance coverage |
-| `default_scale: Option<f64>` | `weenie_properties_float`, `type = PropertyFloat.DefaultScale (39)` | Scale distribution and scaled collision geometry |
-| `friction: Option<f64>` | `weenie_properties_float`, `type = PropertyFloat.Friction (78)` | Response-policy distribution and validation |
-| `elasticity: Option<f64>` | `weenie_properties_float`, `type = PropertyFloat.Elasticity (79)` | Response-policy distribution and validation |
-| `maximum_velocity: Option<f64>` | `weenie_properties_float`, `type = PropertyFloat.MaximumVelocity (26)` | Explorer missile launch magnitude; actual velocity is live state |
-| `rotation_speed: Option<f64>` | `weenie_properties_float`, `type = PropertyFloat.RotationSpeed (27)` | Explorer missile spin magnitude; actual omega is live state |
-| `physics.base_mask: Option<u32>` | Bit-preserving reinterpretation of `weenie_properties_int.value`, `type = PropertyInt.PhysicsState (93)` | Base-mask absence/zero distinction, unknown-bit preservation, bit/combination census |
-| `physics.bool_overrides` | Selected rows from `weenie_properties_bool` listed below | Nullable override frequency and effective-state precedence survey |
-| `sub_palettes` | All `weenie_properties_palette` rows for the WCID | Palette cardinality, packed-range validation, and overlap census |
-| `texture_changes` | All `weenie_properties_texture_map` rows for the WCID | Appearance cardinality and ordered runtime substitution input |
-| `anim_part_changes` | All `weenie_properties_anim_part` rows for the WCID | Appearance cardinality and ordered runtime substitution input |
-| `appearance` | Selected appearance properties listed below | Humanoid face resolution, worn CLO painting, and wield classification |
-| `wielded` | Source-ordered `weenie_properties_create_list` rows whose destination includes `Wield` | Deterministic Explorer loadout selection |
+| Field                                   | ACE World source                                                                                         | Current consumer                                                                     |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `wcid: u32`                             | `weenie.class_Id`                                                                                        | Record identity, coverage, and representative-WCID selection                         |
+| `class_name: String`                    | `weenie.class_Name`                                                                                      | Provenance and exact error reporting; never a fallback display name                  |
+| `weenie_type: i32`                      | `weenie.type`                                                                                            | Weenie/object-category and collision-policy census                                   |
+| `name: Option<String>`                  | `weenie_properties_string`, `type = PropertyString.Name (1)`                                             | Display-name coverage and runtime presentation input                                 |
+| `setup_did: Option<u32>`                | `weenie_properties_d_i_d`, `type = PropertyDataId.Setup (1)`                                             | Setup coverage and all DAT-derived geometry/default surveys                          |
+| `motion_table_did: Option<u32>`         | `weenie_properties_d_i_d`, `type = PropertyDataId.MotionTable (2)`                                       | Motion-table coverage and locomotion evidence                                        |
+| `sound_table_did: Option<u32>`          | `weenie_properties_d_i_d`, `type = PropertyDataId.SoundTable (3)`                                        | Authored sound behavior coverage                                                     |
+| `physics_effect_table_did: Option<u32>` | `weenie_properties_d_i_d`, `type = PropertyDataId.PhysicsEffectTable (22)`                               | Authored physics-effect behavior coverage                                            |
+| `palette_base_did: Option<u32>`         | `weenie_properties_d_i_d`, `type = PropertyDataId.PaletteBase (6)`                                       | Base appearance coverage                                                             |
+| `default_scale: Option<f64>`            | `weenie_properties_float`, `type = PropertyFloat.DefaultScale (39)`                                      | Scale distribution and scaled collision geometry                                     |
+| `friction: Option<f64>`                 | `weenie_properties_float`, `type = PropertyFloat.Friction (78)`                                          | Response-policy distribution and validation                                          |
+| `elasticity: Option<f64>`               | `weenie_properties_float`, `type = PropertyFloat.Elasticity (79)`                                        | Response-policy distribution and validation                                          |
+| `maximum_velocity: Option<f64>`         | `weenie_properties_float`, `type = PropertyFloat.MaximumVelocity (26)`                                   | Explorer missile launch magnitude; actual velocity is live state                     |
+| `rotation_speed: Option<f64>`           | `weenie_properties_float`, `type = PropertyFloat.RotationSpeed (27)`                                     | Explorer missile spin magnitude; actual omega is live state                          |
+| `radar_blip_color: Option<i32>`         | `weenie_properties_int`, `type = PropertyInt.RadarBlipColor (95)`                                        | Explicit overhead-map color                                                          |
+| `radar_behavior: Option<i32>`           | `weenie_properties_int`, `type = PropertyInt.ShowableOnRadar (133)`                                      | Overhead-map visibility                                                              |
+| `obvious_radar_range: Option<f64>`      | `weenie_properties_float`, `type = PropertyFloat.ObviousRadarRange (104)`                                | Lossless authored radar fact retained for inspection                                 |
+| `attackable: Option<bool>`              | `weenie_properties_bool`, `type = PropertyBool.Attackable (19)`                                          | Hostile/friendly semantic map-color fallback; absence retains ACE's `true` default   |
+| `physics.base_mask: Option<u32>`        | Bit-preserving reinterpretation of `weenie_properties_int.value`, `type = PropertyInt.PhysicsState (93)` | Base-mask absence/zero distinction, unknown-bit preservation, bit/combination census |
+| `physics.bool_overrides`                | Selected rows from `weenie_properties_bool` listed below                                                 | Nullable override frequency and effective-state precedence survey                    |
+| `sub_palettes`                          | All `weenie_properties_palette` rows for the WCID                                                        | Palette cardinality, packed-range validation, and overlap census                     |
+| `texture_changes`                       | All `weenie_properties_texture_map` rows for the WCID                                                    | Appearance cardinality and ordered runtime substitution input                        |
+| `anim_part_changes`                     | All `weenie_properties_anim_part` rows for the WCID                                                      | Appearance cardinality and ordered runtime substitution input                        |
+| `appearance`                            | Selected appearance properties listed below                                                              | Humanoid face resolution, worn CLO painting, and wield classification                |
+| `wielded`                               | Source-ordered `weenie_properties_create_list` rows whose destination includes `Wield`                   | Deterministic Explorer loadout selection                                             |
 
 `appearance` preserves the optional DIDs `ClothingBase`, `HeadObject`, `SkinPalette`,
 `HairPalette`, `EyesPalette`, `EyesTexture`, `DefaultEyesTexture`, `NoseTexture`,
@@ -62,19 +66,19 @@ Only property-bools consumed by ACE's `CalculatedPhysicsState()` are exported as
 Each is `Option<bool>`: no row, an explicit false row, and an explicit true row are three distinct
 inputs.
 
-| Semantic field | PropertyBool | Runtime PhysicsState bit |
-| --- | ---: | ---: |
-| `ethereal` | `Ethereal (13)` | `Ethereal (0x00000004)` |
-| `report_collisions` | `ReportCollisions (12)` | `ReportCollisions (0x00000008)` |
-| `ignore_collisions` | `IgnoreCollisions (11)` | `IgnoreCollisions (0x00000010)` |
-| `no_draw` | `NoDraw (71)` | `NoDraw (0x00000020)` |
-| `gravity` | `GravityStatus (14)` | `Gravity (0x00000400)` |
-| `lighting` | `LightsStatus (15)` | `LightingOn (0x00000800)` |
-| `scripted_collision` | `ScriptedCollision (16)` | `ScriptedCollision (0x00008000)` |
-| `inelastic` | `Inelastic (17)` | `Inelastic (0x00020000)` |
+| Semantic field                     |                         PropertyBool |                     Runtime PhysicsState bit |
+| ---------------------------------- | -----------------------------------: | -------------------------------------------: |
+| `ethereal`                         |                      `Ethereal (13)` |                      `Ethereal (0x00000004)` |
+| `report_collisions`                |              `ReportCollisions (12)` |              `ReportCollisions (0x00000008)` |
+| `ignore_collisions`                |              `IgnoreCollisions (11)` |              `IgnoreCollisions (0x00000010)` |
+| `no_draw`                          |                        `NoDraw (71)` |                        `NoDraw (0x00000020)` |
+| `gravity`                          |                 `GravityStatus (14)` |                       `Gravity (0x00000400)` |
+| `lighting`                         |                  `LightsStatus (15)` |                    `LightingOn (0x00000800)` |
+| `scripted_collision`               |             `ScriptedCollision (16)` |             `ScriptedCollision (0x00008000)` |
+| `inelastic`                        |                     `Inelastic (17)` |                     `Inelastic (0x00020000)` |
 | `report_collisions_as_environment` | `ReportCollisionsAsEnvironment (41)` | `ReportCollisionsAsEnvironment (0x00200000)` |
-| `allow_edge_slide` | `AllowEdgeSlide (42)` | `EdgeSlide (0x00400000)` |
-| `frozen` | `IsFrozen (38)` | `Frozen (0x01000000)` |
+| `allow_edge_slide`                 |                `AllowEdgeSlide (42)` |                     `EdgeSlide (0x00400000)` |
+| `frozen`                           |                      `IsFrozen (38)` |                        `Frozen (0x01000000)` |
 
 `Static`, `Missile`, `Pushable`, `AlignPath`, `PathClipped`, `ParticleEmitter`, `Hidden`, `Cloaked`,
 and `Sledding` have no corresponding ACE World property-bool in `CalculatedPhysicsState()`; their
@@ -133,18 +137,18 @@ The file layout is:
 
 ### Header
 
-| Offset | Width | Field | Contract |
-| ---: | ---: | --- | --- |
-| 0 | 8 | magic | Bytes `48 42 57 43 41 54 00 1A` (`HBWCAT`) |
-| 8 | 4 | version | `6` |
-| 12 | 4 | header length | `64` |
-| 16 | 4 | record count | `0..=1,048,576` |
-| 20 | 4 | reserved | All zero; aligns the 64-bit offset fields |
-| 24 | 8 | payload offset | Exactly `64` |
-| 32 | 8 | payload length | Sum of every indexed record length |
-| 40 | 8 | index offset | Exactly `payload offset + payload length` |
-| 48 | 8 | index length | Exactly `record count * 16` |
-| 56 | 8 | reserved | All zero in version 6 |
+| Offset | Width | Field          | Contract                                   |
+| -----: | ----: | -------------- | ------------------------------------------ |
+|      0 |     8 | magic          | Bytes `48 42 57 43 41 54 00 1A` (`HBWCAT`) |
+|      8 |     4 | version        | `6`                                        |
+|     12 |     4 | header length  | `64`                                       |
+|     16 |     4 | record count   | `0..=1,048,576`                            |
+|     20 |     4 | reserved       | All zero; aligns the 64-bit offset fields  |
+|     24 |     8 | payload offset | Exactly `64`                               |
+|     32 |     8 | payload length | Sum of every indexed record length         |
+|     40 |     8 | index offset   | Exactly `payload offset + payload length`  |
+|     48 |     8 | index length   | Exactly `record count * 16`                |
+|     56 |     8 | reserved       | All zero in version 6                      |
 
 The file ends exactly after the index. A valid index has no gaps or overlapping payload ranges.
 
@@ -226,16 +230,16 @@ pool per WCID.
 Each rejection below has one reachable input and one diagnostic. Database-driver and I/O errors retain
 their source chain but are wrapped with the WCID/table or output path that owns the operation.
 
-| Rejection | Reachable input | Required diagnostic distinction |
-| --- | --- | --- |
-| Duplicate WCID | Two projected base records with the same `class_Id`, including synthetic exporter fixtures | Names the duplicate WCID |
-| Scalar property duplicate | More than one row for a selected `(object_Id, type)`, including a fixture that bypasses the production unique index | Names WCID, table, and property type |
-| Invalid floating value | NaN or infinity supplied by a synthetic row/source implementation | Names WCID and semantic field |
-| Invalid class name or name | String exceeds the format limit when encoded as UTF-8 | Names WCID, field, encoded length, and limit |
-| Appearance collection too large | Count cannot fit the format count field | Names WCID and collection |
-| Invalid appearance value | A value cannot fit the semantic/catalog field width in a synthetic row | Names WCID, collection, and field |
-| Noncanonical duplicate appearance key | Duplicate animation index, texture `(index, old_Id)`, or exact palette key in a synthetic fixture | Names WCID, collection, and key |
-| Record encode limit | Encoded payload exceeds the format record-length bound | Names WCID, encoded length, and limit |
+| Rejection                             | Reachable input                                                                                                     | Required diagnostic distinction              |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| Duplicate WCID                        | Two projected base records with the same `class_Id`, including synthetic exporter fixtures                          | Names the duplicate WCID                     |
+| Scalar property duplicate             | More than one row for a selected `(object_Id, type)`, including a fixture that bypasses the production unique index | Names WCID, table, and property type         |
+| Invalid floating value                | NaN or infinity supplied by a synthetic row/source implementation                                                   | Names WCID and semantic field                |
+| Invalid class name or name            | String exceeds the format limit when encoded as UTF-8                                                               | Names WCID, field, encoded length, and limit |
+| Appearance collection too large       | Count cannot fit the format count field                                                                             | Names WCID and collection                    |
+| Invalid appearance value              | A value cannot fit the semantic/catalog field width in a synthetic row                                              | Names WCID, collection, and field            |
+| Noncanonical duplicate appearance key | Duplicate animation index, texture `(index, old_Id)`, or exact palette key in a synthetic fixture                   | Names WCID, collection, and key              |
+| Record encode limit                   | Encoded payload exceeds the format record-length bound                                                              | Names WCID, encoded length, and limit        |
 
 The production database constraints make several failures unreachable from a valid ACE World schema;
 synthetic source/codec fixtures still exercise them so corruption is rejected deliberately rather

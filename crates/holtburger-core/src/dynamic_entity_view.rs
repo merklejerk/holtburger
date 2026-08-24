@@ -51,6 +51,8 @@ pub struct DynamicEntityPresentationView {
     pub appearance: EntityAppearance,
     /// Uniform root presentation scale.
     pub object_scale: f32,
+    /// Producer-resolved radar presentation facts consumed by overhead-map blips.
+    pub radar: crate::DynamicEntityRadarFacts,
 }
 
 /// Serializable projection of pose-only versus physical realization.
@@ -154,6 +156,8 @@ pub struct DynamicEntityViewSource {
     pub object_scale: f32,
     /// Complete semantic physics state and once-derived consequences.
     pub physics: EffectiveEntityPhysicsState,
+    /// Producer-resolved radar presentation facts consumed by overhead-map blips.
+    pub radar: crate::DynamicEntityRadarFacts,
     /// Current mutually exclusive solver state or parent-owned attachment.
     pub placement: EntityPlacement<DynamicEntityWorldProjection>,
     /// Clip the producer's playback currently has this entity playing.
@@ -181,6 +185,7 @@ impl DynamicEntityViewSource {
             appearance: input.appearance,
             object_scale: input.object_scale,
             physics: input.physics,
+            radar: input.radar,
             placement: input.placement,
             playing_clip,
         }
@@ -413,6 +418,7 @@ pub fn project_dynamic_entity_view(source: DynamicEntityViewSource) -> DynamicEn
             content: source.content,
             appearance: source.appearance,
             object_scale: source.object_scale,
+            radar: source.radar,
         },
         physics: DynamicEntityPhysicsView {
             semantic_mask: source.physics.semantic.bits(),

@@ -38,6 +38,7 @@ export class SyntheticBlendedBuildingPipeline implements CommitPipeline {
 function buildingBundle(landblockId: LandblockId): LandblockLayerCommit {
 	const source: ResolvedOutdoorStaticLayerSource = {
 		dynamicSources: [],
+		mapBlockers: new Map(),
 		kind: LandblockLayerKind.Buildings,
 		landblockId,
 		staticResidents: MATERIAL_FLAGS.map((flags, index) =>

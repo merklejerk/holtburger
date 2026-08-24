@@ -223,8 +223,17 @@ it ships a distribution-tuned Chromium. Bundle size is not an argument for CEF o
 arguments are that Rust stays in-process, there is no Node layer, no sidecar to supervise, and the
 35 commands are untouched.
 
-Trimming `locales/` to the shipped languages recovers ~47 MB, and dropping `libvk_swiftshader.so`
-another 15 MB at the cost of the software rasterizer fallback, for a realistic floor near 300 MB.
+**What this app ships**, applied by default in `npm run prepare-cef` so a development tree matches
+a bundle: stripped `libcef.so`, `en-US` only, and no SwiftShader. That is **299 MB on disk, 100 MB
+compressed** — and installers compress, so the download grows by roughly 100 MB rather than 299.
+
+Dropping SwiftShader is a deliberate failure-mode choice as much as a size one. A client that cannot
+reach the GPU should fail visibly instead of falling back to a software rasterizer that presents as
+an unexplained performance problem, which is the exact shape of the investigation that produced this
+plan. Verified: the Explorer runs unchanged without it on an RX 7900 XT.
+
+Removal is one way. `cef-dll-sys` re-downloads only when the version directory is missing, so
+restoring the full distribution means deleting `<CEF_PATH>/<version>/` and building again.
 
 The problem is Linux-specific. From CEF's build index for 150.0.10 minimal: linux64 300.4 MB,
 windows64 156.6 MB, macosx64 124.6 MB, macosarm64 118.7 MB. Windows keeps debug info in separate

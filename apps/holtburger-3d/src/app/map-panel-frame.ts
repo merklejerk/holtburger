@@ -1,13 +1,21 @@
 import type { MapEntity } from "../lib/game/map/map-blips";
 import type { MapTerrainSource } from "../lib/game/map/map-renderer";
-import type { MapAnchor } from "../lib/game/map/map-view";
+import { type MapAnchor, mapEnvironment } from "../lib/game/map/map-view";
+
+/** Independently remembered map extents for the two geometry modes. */
+interface MapPanelViewDiameters {
+	/** World-metre diameter restored whenever the anchor is inside an EnvCell. */
+	readonly indoor: number;
+	/** World-metre diameter restored outdoors or while residency is unknown. */
+	readonly outdoor: number;
+}
 
 /** Panel geometry and view choices, owned by whichever shell mounts the map. */
 export interface MapPanelState {
 	readonly left: number;
 	readonly top: number;
 	readonly size: number;
-	readonly viewDiameter: number;
+	readonly viewDiameters: MapPanelViewDiameters;
 }
 
 /** One imperative read of every hot input the map and compass render. */
@@ -24,50 +32,49 @@ export interface MapPanelFrame {
 	readonly cameraHeadingRadians: number;
 }
 
-/** Facts captured for the last completed map draw. */
-export interface MapPanelDrawState {
+/** Facts captured for the last completed WebGL map draw. */
+export interface MapPanelGpuDrawState {
 	readonly source: MapTerrainSource | null;
 	readonly terrainRevision: number;
 	readonly geometryRevision: number;
-	readonly presentedEntityRevision: number;
 	readonly anchor: MapAnchor | null;
-	readonly cameraFovRadians: number;
-	readonly cameraHeadingRadians: number;
 	readonly panelSize: number;
 	readonly viewDiameter: number;
 }
 
-/** Capture all facts whose change invalidates the map or compass picture. */
-export function captureMapPanelDrawState(
+/** Capture only facts whose change invalidates the WebGL map picture. */
+export function captureMapPanelGpuDrawState(
 	frame: MapPanelFrame,
 	panel: MapPanelState,
-): MapPanelDrawState {
+): MapPanelGpuDrawState {
 	return {
 		anchor: frame.anchor,
-		cameraFovRadians: frame.cameraFovRadians,
-		cameraHeadingRadians: frame.cameraHeadingRadians,
 		geometryRevision: frame.source?.mapGeometry.revision ?? -1,
 		panelSize: panel.size,
-		presentedEntityRevision: frame.presentedEntityRevision,
 		source: frame.source,
 		terrainRevision: frame.source?.terrainInstallationRevision ?? -1,
-		viewDiameter: panel.viewDiameter,
+		viewDiameter: mapPanelViewDiameter(panel, frame.anchor),
 	};
 }
 
-/** Whether a previously drawn picture still represents the latest imperative read. */
-export function sameMapPanelDrawState(
-	left: MapPanelDrawState | null,
-	right: MapPanelDrawState,
+/** Select the remembered extent for the anchor's current geometry mode. */
+export function mapPanelViewDiameter(
+	panel: MapPanelState,
+	anchor: MapAnchor | null,
+): number {
+	return panel.viewDiameters[mapEnvironment(anchor)];
+}
+
+/** Whether a previously drawn WebGL picture still represents the latest imperative read. */
+export function sameMapPanelGpuDrawState(
+	left: MapPanelGpuDrawState | null,
+	right: MapPanelGpuDrawState,
 ): boolean {
 	return (
 		left !== null &&
 		left.source === right.source &&
 		left.terrainRevision === right.terrainRevision &&
 		left.geometryRevision === right.geometryRevision &&
-		left.presentedEntityRevision === right.presentedEntityRevision &&
-		left.cameraFovRadians === right.cameraFovRadians &&
-		left.cameraHeadingRadians === right.cameraHeadingRadians &&
 		left.panelSize === right.panelSize &&
 		left.viewDiameter === right.viewDiameter &&
 		sameAnchor(left.anchor, right.anchor)

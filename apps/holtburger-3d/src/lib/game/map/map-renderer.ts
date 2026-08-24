@@ -50,6 +50,7 @@ import {
 import {
 	type MapViewParameters,
 	computeMapWorldToClip,
+	mapEnvironment,
 	writeMapWorldToClip,
 } from "./map-view";
 
@@ -210,7 +211,7 @@ export class MapRenderer {
 			computeMapWorldToClip(view, width, height),
 			this.#worldToClip,
 		);
-		const indoors = view.anchor.residency?.envCellId != null;
+		const indoors = mapEnvironment(view.anchor) === "indoor";
 		if (!indoors) {
 			const palette = this.#source.terrainColorPalette();
 			if (!palette || this.#terrain.size === 0) return false;

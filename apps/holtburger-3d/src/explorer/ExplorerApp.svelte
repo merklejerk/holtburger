@@ -129,7 +129,7 @@
 	import { spawnedDynamicPlacementFromPoint } from "../lib/game/runtime/spawned-dynamic-presentation";
 	import { createLandblockWorldOrigin } from "../lib/game/landblocks";
 	import type { ScenePlacement } from "../lib/game/scene";
-	import { MAP_DEFAULT_VIEW_DIAMETER } from "../lib/game/map/map-appearance";
+	import { MAP_DEFAULT_VIEW_DIAMETERS } from "../lib/game/map/map-appearance";
 	import {
 		resolveTextureFilteringPolicy,
 		supportedTextureFilteringPolicies,
@@ -193,7 +193,9 @@
 		left: 16,
 		size: 220,
 		top: 96,
-		viewDiameter: MAP_DEFAULT_VIEW_DIAMETER,
+		viewDiameters: {
+			...MAP_DEFAULT_VIEW_DIAMETERS,
+		},
 	});
 	/** Heading the map orients by, kept in step with whatever controls the camera. */
 	let cameraYawRadians = 0;

@@ -78,7 +78,7 @@ export const MAP_TRANSITION_ACCENT_THICKNESS =
 export const MAP_BLIP_COLORS = MAP_TUNING.blips.colorsByRadarColor;
 export const MAP_BLIP_RADIUS_PIXELS = MAP_TUNING.blips.radiusPixels;
 
-export const MAP_DEFAULT_VIEW_DIAMETER =
+export const MAP_DEFAULT_VIEW_DIAMETERS =
 	MAP_TUNING.zoom.defaultViewDiameterMeters;
 export const MAP_MINIMUM_VIEW_DIAMETER =
 	MAP_TUNING.zoom.minimumViewDiameterMeters;

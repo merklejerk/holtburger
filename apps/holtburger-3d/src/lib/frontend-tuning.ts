@@ -56,8 +56,13 @@ export const FRONTEND_TUNING = {
 		maximumDisplayedFramesPerSecond: 1_000,
 		/** GPU query frames allowed to await asynchronous device results. */
 		maximumPendingGpuFrames: 4,
-		/** Completed CPU frame profiles retained for delayed GPU-query reconciliation. */
-		maximumRetainedCpuFrames: 60,
+		/**
+		 * Recent CPU frame profiles retained only so the profile's percentile has samples to rank.
+		 *
+		 * The mean does not use this: it accumulates since the last profile reset, because a fixed
+		 * frame count spans a different amount of wall time at every frame rate.
+		 */
+		percentileCpuFrameTail: 60,
 		/** Recent effect observations retained for Explorer diagnostics. */
 		maximumRecentEffectObservations: 256,
 	},

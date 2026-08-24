@@ -405,6 +405,8 @@ export interface StaticObjectRuntimeDiagnostics {
 	readonly layers: readonly StaticObjectLayerRuntimeDiagnostics[];
 	readonly envCellLayers: readonly EnvCellLayerRuntimeDiagnostics[];
 	readonly geometryResourceCount: number;
+	/** Uploaded vertex and index payload bytes across every resident geometry. */
+	readonly geometryResourceBytes: number;
 	readonly staticObjectOwnerCount: number;
 	/**
 	 * Outdoor static layer publications since startup.
@@ -1892,6 +1894,11 @@ export class GameRuntime {
 		renderer.frameDiagnostics.setProfilingEnabled(enabled);
 	}
 
+	/** Delimit a measurement window so the next renderer profile mean covers only it. */
+	resetRendererFrameProfile(): void {
+		this.#renderer?.frameDiagnostics?.resetProfile();
+	}
+
 	/** Snapshot active authored dynamics and any hook-blocked static visual fallbacks. */
 	getAuthoredDynamicResidentDiagnostics(): readonly AuthoredDynamicResidentDiagnostic[] {
 		return [...this.#authoredDynamicResidents.values()].flat();
@@ -1923,6 +1930,7 @@ export class GameRuntime {
 				(left, right) => left.landblockId.localeCompare(right.landblockId),
 			),
 			geometryResourceCount: this.#geometry.getResourceCount(),
+			geometryResourceBytes: this.#geometry.getResourceBytes(),
 			layers: [...this.#staticObjectLayerDiagnostics.values()].sort(
 				(left, right) =>
 					left.landblockId.localeCompare(right.landblockId) ||

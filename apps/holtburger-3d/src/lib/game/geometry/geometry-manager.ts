@@ -10,6 +10,8 @@ export class GeometryManager<TOwnerId extends string = string> {
 	readonly #renderResources: RendererResourceManager;
 	readonly #leases = new LeaseRegistry<TOwnerId, GeometryKey>();
 	readonly #geometry = new Map<GeometryKey, GeometryResourceKey>();
+	/** Vertex and index payload bytes per device-backed key, for residency accounting. */
+	readonly #geometryBytes = new Map<GeometryKey, number>();
 
 	constructor(renderResources: RendererResourceManager) {
 		this.#renderResources = renderResources;
@@ -53,6 +55,7 @@ export class GeometryManager<TOwnerId extends string = string> {
 			source.key,
 			this.#renderResources.createGeometry(source.geometry),
 		);
+		this.#geometryBytes.set(source.key, geometrySourceBytes(source));
 	}
 
 	getResource(key: GeometryKey): GeometryResourceKey {
@@ -70,6 +73,19 @@ export class GeometryManager<TOwnerId extends string = string> {
 		return this.#geometry.size;
 	}
 
+	/**
+	 * Vertex and index payload bytes across every device-backed geometry.
+	 *
+	 * Counts the CPU-side source payload that was uploaded, which is what a change to geometry
+	 * partitioning moves. Driver-side padding and any resource the device allocates on top of the
+	 * payload are not visible here.
+	 */
+	getResourceBytes(): number {
+		let bytes = 0;
+		for (const value of this.#geometryBytes.values()) bytes += value;
+		return bytes;
+	}
+
 	/** Drop one owner's geometry retention and release resources with no remaining owner. */
 	dropOwner(owner: TOwnerId): void {
 		this.#leases.dropOwner(owner);
@@ -81,6 +97,7 @@ export class GeometryManager<TOwnerId extends string = string> {
 			const geometry = this.#geometry.get(key);
 			if (!geometry) continue;
 			this.#geometry.delete(key);
+			this.#geometryBytes.delete(key);
 			if (!this.#renderResources.releaseResource(geometry)) {
 				throw new Error(`Geometry ${key} lost its backend resource.`);
 			}
@@ -91,4 +108,17 @@ export class GeometryManager<TOwnerId extends string = string> {
 	destroy(): void {
 		for (const owner of [...this.#leases.iterOwners()]) this.dropOwner(owner);
 	}
+}
+
+/** Sum the uploaded payload of one geometry source across its present attribute buffers. */
+function geometrySourceBytes(source: GeometrySource): number {
+	const geometry = source.geometry;
+	if (geometry.kind !== "object") return geometry.positions.byteLength;
+	return (
+		geometry.positions.byteLength +
+		geometry.normals.byteLength +
+		geometry.textureCoordinates.byteLength +
+		geometry.indices.byteLength +
+		(geometry.bakedLight?.byteLength ?? 0)
+	);
 }

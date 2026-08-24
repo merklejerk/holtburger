@@ -134,7 +134,7 @@ describe("WebGL2GpuFrameProfiler", () => {
 });
 
 describe("WebGL2FrameProfiler", () => {
-	it("summarizes the latest sixty CPU frames with a nearest-rank p95", () => {
+	it("means every frame since reset while the percentile ranks only the recent tail", () => {
 		const harness = createGpuHarness(false);
 		const profiler = new WebGL2FrameProfiler(harness.gl);
 		for (let frameNumber = 1; frameNumber <= 61; frameNumber += 1) {
@@ -161,19 +161,59 @@ describe("WebGL2FrameProfiler", () => {
 		}
 
 		const profile = profiler.getProfile();
+		// Every one of the 61 frames reaches the mean. The percentile sees only the retained tail —
+		// frames 2..61 once frame 1 is shifted out — whose nearest-rank p95 is 58.
 		expect(profile?.cpu).toMatchObject({
 			latestFrameNumber: 61,
 			latestTotalMs: 61,
-			p95TotalMs: 58,
-			sampleCount: 60,
+			p95RecentTotalMs: 58,
+			sampleCount: 61,
 		});
-		expect(profile?.cpu.mean.totalMs).toBe(31.5);
+		expect(profile?.cpu.mean.totalMs).toBe(31);
 		expect(profile?.cpu.contribution.latest.staticObjectPreparationCount).toBe(
 			61,
 		);
 		expect(profile?.cpu.contribution.mean.staticObjectPreparationCount).toBe(
-			31.5,
+			31,
 		);
+	});
+
+	it("drops accumulated samples on reset so the next mean covers one window", () => {
+		const profiler = new WebGL2FrameProfiler(createGpuHarness(false).gl);
+		const record = (frameNumber: number, totalMs: number): void => {
+			profiler.finishFrame({
+				blendedOrderingMs: 0,
+				blendedSubmissionMs: 0,
+				contribution: contributionMetrics(frameNumber),
+				finalizationMs: 0,
+				frameNumber,
+				instanceRunPreparationMs: 0,
+				instanceUploadMs: 0,
+				opaqueSubmissionMs: 0,
+				otherMs: 0,
+				particleSubmissionMs: 0,
+				portalCompositionMs: 0,
+				portalPlanningMs: 0,
+				sceneContributionResolutionMs: 0,
+				sceneQueryMs: 0,
+				setupMs: 0,
+				terrainSubmissionMs: 0,
+				totalMs,
+				viewPreparationMs: 0,
+			});
+		};
+		record(1, 100);
+		record(2, 100);
+		profiler.reset();
+		expect(profiler.getProfile()).toBeNull();
+
+		record(3, 4);
+		record(4, 6);
+		const profile = profiler.getProfile();
+		expect(profile?.cpu.sampleCount).toBe(2);
+		expect(profile?.cpu.mean.totalMs).toBe(5);
+		// Frame numbering survives reset, so two samples from one session stay distinguishable.
+		expect(profile?.cpu.latestFrameNumber).toBe(4);
 	});
 
 	it("records static and dynamic contribution preparation work", () => {

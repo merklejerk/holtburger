@@ -38,6 +38,24 @@
 	const profile = $derived(diagnostics?.profile ?? null);
 	const profilingEnabled = $derived(diagnostics?.profilingEnabled ?? false);
 
+	/**
+	 * Toggle profiling, reporting the outcome either way.
+	 *
+	 * Every other control here reports its own failure; this one used to throw into the console and
+	 * leave the button visually inert, which silently invalidates every capture taken afterwards.
+	 */
+	function toggleProfiling(): void {
+		const next = !profilingEnabled;
+		try {
+			setProfilingEnabled(next);
+			exportStatus = next ? "Profiling started." : "Profiling stopped.";
+		} catch (error) {
+			exportStatus = `Could not ${next ? "start" : "stop"} profiling: ${
+				error instanceof Error ? error.message : String(error)
+			}`;
+		}
+	}
+
 	function requireReport(): ExplorerFrameDiagnosticReport {
 		const report = captureReport();
 		if (!report) throw new Error("Frame diagnostics are unavailable.");
@@ -84,7 +102,7 @@
 			type="button"
 			class="explorer-action explorer-frame-profile-toggle"
 			disabled={diagnostics === null}
-			onclick={() => setProfilingEnabled(!profilingEnabled)}
+			onclick={toggleProfiling}
 		>
 			{profilingEnabled ? "Stop profiling" : "Start profiling"}
 		</button>
@@ -122,7 +140,7 @@
 					</div>
 					<div>
 						<span>CPU p95</span>
-						<strong>{profile.cpu.p95TotalMs.toFixed(2)} ms</strong>
+						<strong>{profile.cpu.p95RecentTotalMs.toFixed(2)} ms</strong>
 					</div>
 					<div>
 						<span>Latest</span>

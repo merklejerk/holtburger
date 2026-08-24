@@ -481,11 +481,23 @@ export class WebGL2FrameProfileCapture {
 	}
 }
 
-/** Opt-in renderer profiler; construction is the only point that probes timer-query support. */
+/**
+ * Opt-in renderer profiler; construction is the only point that probes timer-query support.
+ *
+ * The mean accumulates over every frame since the last `reset`, not over a rolling tail, because a
+ * fixed frame count is a different amount of wall time at every frame rate. At the harness's
+ * uncapped indoor rate a sixty-frame tail spans about twenty-six milliseconds, which is short
+ * enough for one hitch to invert the sign of a measured change.
+ *
+ * The tail is retained anyway, but only for the percentile, which cannot be derived from running
+ * sums.
+ */
 export class WebGL2FrameProfiler {
 	readonly #gpu: WebGL2GpuFrameProfiler;
 	#frameNumber = 0;
-	readonly #cpuFrames: RendererCpuFrameProfile[] = [];
+	/** Recent frames retained solely so the percentile has samples to rank. */
+	readonly #recentCpuFrames: RendererCpuFrameProfile[] = [];
+	#aggregate = createEmptyCpuAggregate();
 
 	constructor(gl: WebGL2RenderingContext) {
 		this.#gpu = new WebGL2GpuFrameProfiler(gl);
@@ -505,97 +517,100 @@ export class WebGL2FrameProfiler {
 
 	/** Return the latest completed CPU profile paired with the latest delayed GPU outcome. */
 	getProfile(): RendererFrameProfile | null {
-		if (this.#cpuFrames.length === 0) return null;
+		const aggregate = this.#aggregate;
+		if (aggregate.latest === null) return null;
 		return {
-			cpu: summarizeCpuFrames(this.#cpuFrames),
+			cpu: summarizeCpuAggregate(aggregate, this.#recentCpuFrames),
 			gpu: this.#gpu.getProfile(),
 		};
+	}
+
+	/**
+	 * Discard every accumulated sample so the next mean covers one explicit measurement window.
+	 *
+	 * Frame numbering is deliberately not reset: it identifies a capture within the profiling
+	 * session, and restarting it would make two samples from one session indistinguishable.
+	 */
+	reset(): void {
+		this.#recentCpuFrames.length = 0;
+		this.#aggregate = createEmptyCpuAggregate();
 	}
 
 	/** Tear down every pending GPU query immediately. */
 	destroy(): void {
 		this.#gpu.destroy();
-		this.#cpuFrames.length = 0;
+		this.reset();
 	}
 
 	finishFrame(cpu: RendererCpuFrameProfile): void {
-		this.#cpuFrames.push(cpu);
+		const aggregate = this.#aggregate;
+		for (const key of CPU_TIMING_KEYS) aggregate.totals[key] += cpu[key];
+		for (const key of CONTRIBUTION_METRIC_KEYS) {
+			aggregate.contributionTotals[key] += cpu.contribution[key];
+		}
+		aggregate.sampleCount += 1;
+		aggregate.latest = cpu;
+		this.#recentCpuFrames.push(cpu);
 		if (
-			this.#cpuFrames.length >
-			FRONTEND_TUNING.diagnostics.maximumRetainedCpuFrames
+			this.#recentCpuFrames.length >
+			FRONTEND_TUNING.diagnostics.percentileCpuFrameTail
 		) {
-			this.#cpuFrames.shift();
+			this.#recentCpuFrames.shift();
 		}
 	}
 }
 
-/** Build a cold rolling summary without adding aggregation work to the frame path. */
-function summarizeCpuFrames(
-	frames: readonly RendererCpuFrameProfile[],
+/** Running CPU totals since the last reset, plus the sample the latest-frame fields describe. */
+interface CpuFrameAggregate {
+	readonly totals: Record<keyof RendererCpuFrameTimings, number>;
+	readonly contributionTotals: MutableContributionFrameMetrics;
+	sampleCount: number;
+	latest: RendererCpuFrameProfile | null;
+}
+
+function createEmptyCpuAggregate(): CpuFrameAggregate {
+	const totals = {} as Record<keyof RendererCpuFrameTimings, number>;
+	for (const key of CPU_TIMING_KEYS) totals[key] = 0;
+	return {
+		contributionTotals: createEmptyContributionMetrics(),
+		latest: null,
+		sampleCount: 0,
+		totals,
+	};
+}
+
+/** Build a cold summary without adding aggregation work to the frame path. */
+function summarizeCpuAggregate(
+	aggregate: CpuFrameAggregate,
+	recentFrames: readonly RendererCpuFrameProfile[],
 ): RendererCpuFrameProfileWindow {
-	const latest = frames.at(-1);
-	if (!latest) throw new Error("Cannot summarize an empty CPU profile window.");
-	const totals: Record<keyof RendererCpuFrameTimings, number> = {
-		blendedOrderingMs: 0,
-		blendedSubmissionMs: 0,
-		particleSubmissionMs: 0,
-		finalizationMs: 0,
-		instanceRunPreparationMs: 0,
-		instanceUploadMs: 0,
-		opaqueSubmissionMs: 0,
-		otherMs: 0,
-		portalPlanningMs: 0,
-		portalCompositionMs: 0,
-		sceneQueryMs: 0,
-		sceneContributionResolutionMs: 0,
-		setupMs: 0,
-		terrainSubmissionMs: 0,
-		totalMs: 0,
-		viewPreparationMs: 0,
-	};
-	const contributionTotals = createEmptyContributionMetrics();
-	for (const frame of frames) {
-		for (const key of CPU_TIMING_KEYS) totals[key] += frame[key];
-		for (const key of CONTRIBUTION_METRIC_KEYS) {
-			contributionTotals[key] += frame.contribution[key];
-		}
+	const { latest, sampleCount, totals } = aggregate;
+	if (!latest || sampleCount === 0) {
+		throw new Error("Cannot summarize an empty CPU profile aggregate.");
 	}
-	const sampleCount = frames.length;
-	const mean: RendererCpuFrameTimings = {
-		blendedOrderingMs: totals.blendedOrderingMs / sampleCount,
-		blendedSubmissionMs: totals.blendedSubmissionMs / sampleCount,
-		finalizationMs: totals.finalizationMs / sampleCount,
-		instanceRunPreparationMs: totals.instanceRunPreparationMs / sampleCount,
-		instanceUploadMs: totals.instanceUploadMs / sampleCount,
-		opaqueSubmissionMs: totals.opaqueSubmissionMs / sampleCount,
-		otherMs: totals.otherMs / sampleCount,
-		particleSubmissionMs: totals.particleSubmissionMs / sampleCount,
-		portalPlanningMs: totals.portalPlanningMs / sampleCount,
-		portalCompositionMs: totals.portalCompositionMs / sampleCount,
-		sceneQueryMs: totals.sceneQueryMs / sampleCount,
-		sceneContributionResolutionMs:
-			totals.sceneContributionResolutionMs / sampleCount,
-		setupMs: totals.setupMs / sampleCount,
-		terrainSubmissionMs: totals.terrainSubmissionMs / sampleCount,
-		totalMs: totals.totalMs / sampleCount,
-		viewPreparationMs: totals.viewPreparationMs / sampleCount,
-	};
-	const orderedTotals = frames
+	const mean = {} as Record<keyof RendererCpuFrameTimings, number>;
+	for (const key of CPU_TIMING_KEYS) mean[key] = totals[key] / sampleCount;
+	const orderedTotals = recentFrames
 		.map((frame) => frame.totalMs)
 		.toSorted((left, right) => left - right);
-	const p95TotalMs = orderedTotals.at(Math.ceil(sampleCount * 0.95) - 1);
-	if (p95TotalMs === undefined) {
+	const p95RecentTotalMs = orderedTotals.at(
+		Math.ceil(orderedTotals.length * 0.95) - 1,
+	);
+	if (p95RecentTotalMs === undefined) {
 		throw new Error("CPU profile percentile selection lost its sample.");
 	}
 	return {
 		contribution: {
 			latest: latest.contribution,
-			mean: averageContributionMetrics(contributionTotals, sampleCount),
+			mean: averageContributionMetrics(
+				aggregate.contributionTotals,
+				sampleCount,
+			),
 		},
 		latestFrameNumber: latest.frameNumber,
 		latestTotalMs: latest.totalMs,
 		mean,
-		p95TotalMs,
+		p95RecentTotalMs,
 		sampleCount,
 	};
 }

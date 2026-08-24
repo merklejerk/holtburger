@@ -2292,6 +2292,9 @@
 			longestLongTaskMs: 0,
 		};
 		lastFrameAt = undefined;
+		// One reset delimits both aggregates, so a --measure-ms window governs the renderer profile
+		// mean as well as the harness frame timing rather than leaving it a rolling tail.
+		runtime?.resetRendererFrameProfile();
 	}
 
 	function timingSnapshot(): BrowserHarnessTiming {

@@ -26,6 +26,7 @@ import { INVALID_ID, type EnvCellId, type LandblockId } from "../game-types";
 import { GeometryManager } from "../geometry/geometry-manager";
 import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
 import { AABB3, Mat4, Quat, Vec3 } from "../math/types";
+import type { BakedDrawMergeCensus } from "../renderer/baked-draw-merge-census";
 import {
 	DEFAULT_FRAME_SETTINGS,
 	type FrameSettings,
@@ -1897,6 +1898,15 @@ export class GameRuntime {
 	/** Delimit a measurement window so the next renderer profile mean covers only it. */
 	resetRendererFrameProfile(): void {
 		this.#renderer?.frameDiagnostics?.resetProfile();
+	}
+
+	/** Size how far the next frame's baked object draws could merge, for partitioning decisions. */
+	captureBakedDrawMergeCensus(): Promise<BakedDrawMergeCensus> {
+		const diagnostics = this.#renderer?.frameDiagnostics;
+		if (!diagnostics) {
+			throw new Error("Renderer does not support a baked draw merge census.");
+		}
+		return diagnostics.captureBakedDrawMergeCensus();
 	}
 
 	/** Snapshot active authored dynamics and any hook-blocked static visual fallbacks. */

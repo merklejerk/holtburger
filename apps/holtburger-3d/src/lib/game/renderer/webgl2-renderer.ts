@@ -132,6 +132,10 @@ import {
 	type PreparedStaticObjectDrawCompatibility,
 	type TransparentObjectRange,
 } from "./object-rendering-policy";
+import {
+	BakedDrawMergeCensusCollector,
+	type BakedDrawMergeCensus,
+} from "./baked-draw-merge-census";
 import { resolveStaticMaterialDetail } from "./static-detail-binding";
 import {
 	CompiledObjectDrawStore,
@@ -313,7 +317,8 @@ interface ObjectFrameInput {
 	readonly renderScopeKey: string;
 	readonly cullFaceOverride:
 		StaticObjectDrawUnit["material"]["polygon"]["cullFace"] | null;
-	readonly drawKind: "baked" | "instanced";
+	/** Which GL call form this submission takes; must match the program's transform source. */
+	readonly drawKind: "single" | "instanced";
 	readonly geometry: GeometryResourceKey;
 	readonly indexCount: number;
 	readonly indexStart: number;
@@ -643,6 +648,16 @@ export class WebGL2Renderer implements Renderer {
 	#saoPass: WebGL2SaoPass | null = null;
 	/** Harness-only category view; production never enables synchronous depth census work. */
 	#saoCoverageVisualizationEnabled = false;
+	/**
+	 * One-frame baked-draw merge census in flight, or null on an ordinary frame.
+	 *
+	 * Collector and waiter are held together because neither is meaningful alone: the census
+	 * spans exactly the frame between installation and the next frame finish.
+	 */
+	#mergeCensusRequest: {
+		readonly collector: BakedDrawMergeCensusCollector;
+		readonly resolve: (census: BakedDrawMergeCensus) => void;
+	} | null = null;
 	readonly #visibleStaticLayers = new Set<string>();
 	readonly #visibleEnvCellScopes = new Set<string>();
 	/** Dynamic roots selected in any view of the frame, retained as production feedback. */
@@ -809,14 +824,14 @@ export class WebGL2Renderer implements Renderer {
 		this.#objectProgram = createWebGL2ObjectProgram(gl);
 		this.#instancedObjectProgram = createWebGL2ObjectProgram(gl, {
 			distanceFog: true,
-			transformSource: "instanced",
+			transformSource: "attribute",
 		});
 		this.#blendedObjectProgram = createWebGL2ObjectProgram(gl, {
 			distanceFog: false,
 		});
 		this.#blendedInstancedObjectProgram = createWebGL2ObjectProgram(gl, {
 			distanceFog: false,
-			transformSource: "instanced",
+			transformSource: "attribute",
 		});
 		this.#objectFallbackBinding = {
 			sampler: this.#textureSamplers.getSampler({
@@ -848,6 +863,16 @@ export class WebGL2Renderer implements Renderer {
 			}),
 			setProfilingEnabled: (enabled) => this.#setFrameProfilingEnabled(enabled),
 			resetProfile: () => this.#frameProfiler?.reset(),
+			captureBakedDrawMergeCensus: () =>
+				new Promise<BakedDrawMergeCensus>((resolve) => {
+					if (this.#mergeCensusRequest !== null) {
+						throw new Error("A baked draw merge census is already in flight.");
+					}
+					this.#mergeCensusRequest = {
+						collector: new BakedDrawMergeCensusCollector(),
+						resolve,
+					};
+				}),
 		};
 		gl.clearColor(
 			FRONTEND_TUNING.rendering.clearColor.red,
@@ -1762,7 +1787,7 @@ export class WebGL2Renderer implements Renderer {
 			objects.push(
 				this.#compileStaticSubmission(resolved.drawUnit, {
 					cullFaceOverride: envCellRenderMode === "flat" ? "back" : null,
-					drawKind: "baked",
+					drawKind: "single",
 					geometry: resolved.geometry,
 					indexCount: resolved.drawUnit.indexCount,
 					indexStart: resolved.drawUnit.indexStart,
@@ -1818,7 +1843,7 @@ export class WebGL2Renderer implements Renderer {
 			objects.push(
 				this.#compileStaticSubmission(drawUnit, {
 					cullFaceOverride: null,
-					drawKind: "baked",
+					drawKind: "single",
 					geometry: resolved.geometry,
 					indexCount: drawUnit.indexCount,
 					indexStart: drawUnit.indexStart,
@@ -2092,6 +2117,11 @@ export class WebGL2Renderer implements Renderer {
 
 	/** Finish counters shared by ordinary frames and explicit portal execution probes. */
 	#finishFrameSelectionMetrics(): void {
+		const census = this.#mergeCensusRequest;
+		if (census !== null) {
+			this.#mergeCensusRequest = null;
+			census.resolve(census.collector.summarize());
+		}
 		const arena = this.#frameInstances.getDiagnostics();
 		this.#frameSelectionMetrics.visibleStaticLayerCount =
 			this.#visibleStaticLayers.size;
@@ -3146,7 +3176,7 @@ export class WebGL2Renderer implements Renderer {
 			{
 				distanceFog: false,
 				portalVisibility: true,
-				transformSource: "instanced",
+				transformSource: "attribute",
 			},
 		);
 		return {
@@ -3296,8 +3326,8 @@ export class WebGL2Renderer implements Renderer {
 		landblockOffsets: PreparedSceneContributions["landblockOffsets"],
 	): void {
 		if (
-			(object.drawKind === "baked") !==
-			(program.transformSource === "baked")
+			(object.drawKind === "single") !==
+			(program.transformSource === "uniform")
 		) {
 			throw new Error(
 				`${object.drawKind} draw cannot use ${program.transformSource} object program.`,
@@ -3307,7 +3337,7 @@ export class WebGL2Renderer implements Renderer {
 		const gl = this.#gl;
 		const state = this.#objectState;
 		state.applyCullFace(compatibility.cullFace);
-		if (program.transformSource === "baked") {
+		if (program.transformSource === "uniform") {
 			this.#countUniformWrite(
 				state.applyUniformMatrix4fv(
 					program.uniforms.localToLandblock,
@@ -3483,10 +3513,15 @@ export class WebGL2Renderer implements Renderer {
 			this.#frameSelectionMetrics.submittedEnvCellResidentTriangleCount +=
 				sourceTriangleCount * submittedInstanceCount;
 		}
-		if (object.drawKind === "baked" && object.source !== "dynamic") {
+		if (object.drawKind === "single" && object.source !== "dynamic") {
 			this.#frameSelectionMetrics.submittedBakedStaticObjectDrawCount += 1;
 			this.#frameSelectionMetrics.submittedBakedStaticObjectTriangleCount +=
 				sourceTriangleCount;
+			this.#mergeCensusRequest?.collector.record(
+				object.landblockId,
+				object.localToLandblock,
+				compatibility,
+			);
 		} else {
 			this.#frameSelectionMetrics.submittedInstancedSourceTriangleCount +=
 				sourceTriangleCount;

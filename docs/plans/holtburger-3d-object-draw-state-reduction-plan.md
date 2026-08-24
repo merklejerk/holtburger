@@ -536,7 +536,189 @@ decides that.
 **Dungeon: no.** It is at 1.281 ms / 781 fps, its object submission is a small share, and Phase 3
 was already scoped outdoor-only. Nothing here changes that.
 
-## Phase 3: Reduce Baked Range Count — outdoor only (conditional on Phase 2)
+## Phase 2.5: Census the Merge Ceiling — **result: Phase 3 as scoped is dead**
+
+Phase 2 said go on Phase 3 without ever measuring what a merge could buy. Two measurements were
+added to settle it, and both changed the answer.
+
+### Correction: `visibleStaticLayerCount` never meant what Phase 0 read into it
+
+Phase 0 reported `visibleStaticLayerCount` 309 and concluded "1,823 material-binding ranges across
+309 merged layers, averaging 5.9 ranges per layer." That reading is wrong. The census is keyed by
+`visibleLayerKey` (`webgl2-renderer.ts:1868-1872`), which for an outdoor publication is
+`outdoor/${contribution.cullingGroup}` — and `cullingGroup` is the layer *kind*, so outdoor
+contributes **at most three** distinct keys no matter how many landblocks are visible. The 309 was
+almost entirely EnvCell scope keys. Every per-layer average derived from it is void.
+
+The buffer partition that actually exists is one baked geometry per `(landblock, layer kind)` for
+outdoor sources and per `(landblock, cell)` for EnvCells, keyed for lifetime by
+`staticRevisionToInstallNamespace(owner, revision, partition)` (`owner-ids.ts:113`). It is now
+measured directly rather than inferred.
+
+### The census
+
+`BakedDrawMergeCensusCollector` (`baked-draw-merge-census.ts`) records one frame of baked static
+draws and reports the draw calls that would remain if every draw binding identical device state
+inside a named scope were merged into one range. State equality reuses
+`staticObjectDrawStateEquals`, extracted from `areStaticObjectDrawsCompatible`, so the census and
+the renderer cannot disagree about what "same state" means. Run it with
+`npm run harness:browser -- --merge-census`; `drawCount` equals
+`submittedBakedStaticObjectDrawCount` exactly in every run, which is the census's own check that it
+saw the whole frame.
+
+**Read every figure as a ceiling.** One draw per state bucket assumes one contiguous index range per
+bucket, and contiguity across residency units is precisely what a streaming client cannot hold
+cheaply. The comparisons between scopes are sound because all three carry the same assumption; the
+absolute reductions are not achievable as stated.
+
+| scene                              | draws | buffers | landblocks | within buffer | within landblock | scene-wide      |
+| ---------------------------------- | ----- | ------- | ---------- | ------------- | ---------------- | --------------- |
+| reference, portal                  | 805   | 54      | 26         | 794 (−1.4%)   | 735 (**−8.7%**)  | 252 (−68.7%)    |
+| all radii 8, portal                | 3,063 | 189     | 137        | 3,038 (−0.8%) | 2,974 (**−2.9%**)| 293 (−90.4%)    |
+| all radii 8, flat (debug mode)     | 5,713 | 865     | 141        | 5,675 (−0.7%) | 3,235 (−43.4%)   | 362 (−93.7%)    |
+
+Reference scene is `0xda55ffff`, `--building-radius 8 --env-cell-radius 2 --explicit-object-radius 2
+--generated-object-radius 2 --frame-mode portal` at 1600x948. The census is deterministic: three
+runs produced byte-identical figures.
+
+**Three findings, in order of how much they change the plan.**
+
+1. **Merging within a landblock — Phase 3's actual deliverable — buys 2.9% to 8.7% of draws in
+   production frame mode.** Not worth a cross-layer merge, a landblock-scoped resource owner, and a
+   partial-rebuild invalidation protocol. The 43.4% figure is flat mode, which is debug-only.
+2. **The entire win is cross-landblock: 69% to 90%.** Phase 3 listed that as an optional "decide and
+   document whether merging extends across landblocks" bullet. The prize was in the parenthetical.
+3. **Folding `localToLandblock` into the vertices is nearly unnecessary.** Requiring merged ranges to
+   share one transform still reaches 274 of 805 and 316 of 3,063 — within 22 draws of the folded
+   ceiling in both portal scenes. The expensive half of Phase 3's deliverable buys almost nothing.
+
+`mergedWithinBuffer` is the control: at 0.7-1.4% below `drawCount`, the geometry worker's grouping by
+material binding is already maximal. **The bake is not defective; only its partition is.** And that
+partition is not arbitrary — it is identical to the residency partition, which is what makes eviction
+a single namespace release today.
+
+### The GPU argument did not survive measurement either
+
+Phase 3's opening claim — "3.36 ms of `opaqueMs` for 510k triangles on an RX 7900 XT is command
+submission, not shading" — rested on a single-frame GPU sample, which Measurement Constraints
+already flagged as unreliable. `WebGL2GpuFrameProfiler` now accumulates per-phase means since the
+last reset, mirroring the CPU aggregate Phase 0 introduced, and `reset()` clears both.
+
+On the reference scene the single most recent frame reported `totalMs` 3.647 and `opaqueMs` 1.228.
+The mean over the 841 frames resolved in the same window reported **`totalMs` 1.442 and `opaqueMs`
+0.447** — the single sample overstated the frame by **2.5x**, opaque by **2.7x**, and near terrain by
+**6.4x**. Across three runs the mean held at 1.442/1.449/1.445 ms, a 0.45% spread.
+
+Against CPU `totalMs` 1.854/1.862/1.818 ms, the scene is **CPU-bound with roughly 0.4 ms of GPU
+headroom**, not submission-bound. Treat every single-frame GPU figure recorded earlier in this plan
+as an upper bound of unknown tightness.
+
+### Reordering submissions: measured, and it is not the lever either
+
+Reordering is the one change with no architectural cost at all — submission order is a per-frame
+decision that touches no buffer and no residency lifetime — so it was measured before being assumed
+away. `stateRunsInDrawOrder` counts maximal runs of state-equal draws in the order actually
+submitted, against `mergedSceneWide` as the run count a perfect sort would reach.
+
+| scene             | draws | runs in draw order | perfect-sort floor |
+| ----------------- | ----- | ------------------ | ------------------ |
+| reference, portal | 805   | **801**            | 252                |
+| all radii 8       | 3,063 | **3,046**          | 293                |
+
+The current order is essentially worst case: `createObjectSubmissionPhases`
+(`object-rendering-policy.ts:302`) pushes opaque submissions in traversal order and sorts only the
+transparent phase. Almost every consecutive pair differs in state.
+
+**The cost is per-draw and fixed.** `opaqueSubmissionMs` divided by object draws is 958 ns on the
+reference scene and 819 ns on a scene with 4x the draws — flat across the range. Sorting removes no
+`#drawObjectRange` invocation, and each invocation still runs its full comparison set whatever the
+order: the reference frame makes 9,272 `#recordUniform` calls, of which 7,719 suppress an upload and
+still pay for the comparison.
+
+**Sorting alone is worth about 1%; sorting plus interning is worth several times that.** An earlier
+revision of this section sized reordering against the GL call cost alone — 44 ns per binding, so
+0.068 ms of uploads on the reference scene — and concluded net zero. The profile below shows that
+framing was wrong: the machinery guarding those uploads costs more than the uploads. Sorting does not
+reduce it by itself, because a suppressed upload compares in any order, but sorting is the
+precondition for skipping it wholesale. See "Interning compiled draws by state" below.
+
+## Phase 2.6: CPU Profile After Phase 1
+
+`--cpu-profile` drives CDP's `Profiler` domain — V8's sampling profiler, the same engine behind the
+DevTools CPU profiler, at a 100 us interval. 32,575 samples on the reference scene.
+
+| self time | function                             | source        |
+| --------- | ------------------------------------ | ------------- |
+| **8.15%** | `#recordUniform`                     | applicator    |
+| 6.76%     | `drawElements`                       | GL            |
+| 5.10%     | `#drawObjectRange`                   | renderer      |
+| 4.11%     | `#frustumIntersectsLandblockBounds`  | scene-graph   |
+| 2.90%     | `resolveTerrainDrawUnit`             | render-world  |
+| 2.89%     | `uniform4f`                          | GL            |
+| 2.66%     | `uniform1i`                          | GL            |
+| 2.57%     | `createObjectSubmissionPhases`       | policy        |
+| 2.54%     | `bindVertexArray`                    | GL            |
+| 2.51%     | `#selectEntries`                     | scene-graph   |
+| 2.24%     | `#drawOpaqueObjects`                 | renderer      |
+| 2.19%     | `formGroupedObjectInstanceRuns`      | policy        |
+
+**Phase 1 worked, and then changed which end is expensive.** `uniformMatrix4fv` was 9.74% in Phase 0
+and no longer appears in the top 28. In its place, `#recordUniform` is now **the hottest function in
+the client** — and it is the comparison, not the upload. Every actual `uniform*` GL call combined is
+5.55%. The client now spends more deciding whether to upload than uploading.
+
+Costs outside the draw path are not negligible and are nobody's current target: scene query and
+selection is roughly 9.4% (`#frustumIntersectsLandblockBounds`, `#selectEntries`, `#resolvePlacement`,
+`classifyObjectFootprint`), submission preparation roughly 6.7%, `resolveTerrainDrawUnit` 2.90%, GC
+1.65%.
+
+### Why `#recordUniform` is expensive, and the three ways down
+
+Per draw it runs about 10.9 times (9,272 calls over 851 draws), and each call does a
+`Map<WebGLUniformLocation, Float64Array>` lookup before comparing 1 to 16 components. That is **9,272
+object-keyed hash lookups per frame in the hottest function in the client**, and they exist only
+because the cache is keyed dynamically by location.
+
+1. **Give each program a flat uniform-state array.** The uniform set is statically known per program
+   — `#drawObjectRange` already reaches `program.uniforms.<name>` by name — so slots can be fixed
+   offsets into one `Float64Array` per program, resolved once in `applyProgram` alongside the
+   existing `#program` tracking. Per-frame lookups fall from 10,465 to the program-change count, 17.
+   No state churn changes at all: identical uploads, identical suppression. This is the cheapest and
+   least risky of the three and needs neither of the others.
+2. **Skip the transform compare when it is identity.** Phase 0 measured `localToLandblock` identity
+   for 63.9% of baked draws, and the mat4 is 16 of the roughly 38 components compared per draw, so
+   skipping it on those draws removes about a quarter of the comparison loop. The flag belongs on the
+   compiled draw, computed once at compile time — not the per-frame `isIdentityMat4Buffer` scan
+   deleted in `120c0f98`, which recomputed it every draw to feed a census.
+
+   **This one is worth doing only after 1.** Each call pays a fixed lookup plus a loop proportional
+   to component count. While the lookup is still there it plausibly dominates, and shortening the
+   loop under it buys little. Order matters: 1 exposes whether 2 is worth anything.
+3. **Intern compiled draws by state, then sort.** `resolveDraw` is a `WeakMap` on draw-unit identity
+   (`compiled-object-draws.ts:92`), so two units with identical state hold distinct `compatibility`
+   objects and `compatibility === previous` holds for only 4 of 805 draws. Interning by state
+   collapses 805 entries to the 252 the census counted and makes an identity short-circuit
+   meaningful; sorting then raises its hit rate to roughly 69%, skipping all 13 comparisons on those
+   draws. This is the largest of the three and the only one that requires two changes to pay off.
+
+Estimates 1 and 2 are mechanical and their sizes follow from the call counts. Estimate 3's value is
+inferred from the run counts, not measured. None is scheduled: the plan's 500 fps goal is met.
+
+
+
+## Phase 3: Reduce Baked Range Count — **superseded by Phase 2.5, do not implement as written**
+
+Retained for the reasoning, not as work. The census above measured its ceiling at 2.9-8.7% in portal
+mode, and its GPU justification at roughly a third of the quoted figure. What survives is the
+observation that the draw partition is inherited from the residency partition rather than chosen —
+recorded as an open architectural item below, whose honest form is per-material buffers with
+sub-allocation, not a landblock-scoped merge.
+
+### Original scope (not implemented)
+
+> Both premises below are now known to be false: "309 layers" misread `visibleStaticLayerCount`, and
+> the 3.36 ms `opaqueMs` was a single-frame sample the accumulated mean puts near 0.45 ms. They are
+> left in place because the rest of this section reasons from them.
 
 1,823 baked ranges across 309 layers is the outdoor ceiling, and it pins the GPU as much as the CPU:
 3.36 ms of `opaqueMs` for 510k triangles on an RX 7900 XT is command submission, not shading. The
@@ -615,6 +797,183 @@ met on the outdoor reference scene, and if not, what the new dominant cost is.
 - Remove the Phase 0 uniform-redundancy census scaffolding.
 - Reconcile any metric this plan adds that has no surviving consumer.
 
+### Result
+
+**Already done before this phase ran.** The silent profiling toggle was fixed mid-investigation:
+`ExplorerFramePanel.toggleProfiling` now catches and reports into `exportStatus` like every other
+control on that panel. The Phase 0 census scaffolding — `isIdentityMat4Buffer` and
+`objectIdentityTransformUploads` — was removed in `120c0f98`.
+
+**Done here.** `WebGL2DeviceDiagnosticIdentity.unmaskedRenderer` now documents its third state:
+non-null and fabricated, as WebKitGTK demonstrated by reporting "Apple GPU" on an RX 7900 XT. The
+note survives the CEF migration because it is a property of WebKit hosts, not of the runtime this app
+currently ships.
+
+**`selectedRenderDomainCount` was deliberately not plumbed.** Nothing in this plan needed it. Portal
+scope selection is measured well enough by `portalSelectedScopeCount`, and a metric with no scenario
+that distinguishes it from an existing one does not earn a slot on the frame contract.
+
+**Metrics retained, with their consumers named.** `objectDrawCalls`, `objectUniformUploads` and
+`objectSuppressedUniformUploads` stay. They are the only visibility into whether the uniform
+redundancy filter — a shipped mechanism, not scaffolding — is still working, and they were the
+acceptance instrument for Phase 6's revert. Suppression rate is a number that would silently rot
+without them.
+
+**The merge census is retained.** `baked-draw-merge-census.ts`, `--merge-census`, and the
+`captureBakedDrawMergeCensus` path cost one nullable check per baked draw and answer the one question
+this plan leaves open — how far the static draw partition could collapse. Removing the instrument
+while leaving the question open is the wrong trade; Phase 2.5's figures are reproducible on demand
+rather than frozen in a document. `staticObjectDrawStateEquals`, extracted for it, is now shared with
+`areStaticObjectDrawsCompatible`.
+
+**The GPU frame mean is retained** and is not scaffolding at all: it corrected a measurement that had
+been overstating GPU cost by 2.5x throughout this plan.
+
+**The `baked` vocabulary sweep was done in part, and the rest was refuted.** The plan wrote this item
+believing "baked" was a lie about geometry. Phase 2.5 disproved that: `mergedWithinBuffer` came within
+0.7-1.4% of `drawCount`, so `prepareBakedStaticObjectGeometry` really does merge and every name that
+describes *geometry* is honest. What was actually wrong was narrower — two discriminants describing a
+draw's *call form* were spelled with a word about geometry.
+
+- `ObjectVertexTransformSource` is now `"uniform" | "attribute"`, naming the GLSL storage the
+  transform arrives in. 28 sites across four files.
+- `ObjectFrameInput.drawKind` is now `"single" | "instanced"`, naming the GL call form. 13 sites.
+  Renamed together because they encode the same bit and `#drawObjectRange` asserts they agree;
+  leaving one half spelled the old way would have made that guard unreadable.
+- **Deliberately left alone:** `submittedBakedStaticObjectDrawCount`,
+  `submittedBakedStaticObjectTriangleCount`, `bakedDrawUnitCount`, `bakedGeometryBytes`,
+  `BakedStaticObjectRange`, `prepareBakedStaticObjectGeometry`, and the `"baked" | "frame-streamed"`
+  geometry strategy. Every one of these describes merged geometry and is accurate. Renaming them
+  would also have changed harness JSON field names for no gain.
+- `aBakedLight` keeps its name; that one is genuinely baked.
+
+## Phase 6: Give Each Program a Flat Uniform-State Array
+
+Phase 2.6 found `#recordUniform` to be the hottest function in the client, and about 9,272 of its
+per-frame cost is an object-keyed `Map` lookup that exists only because the cache is keyed by
+`WebGLUniformLocation`. The uniform set is statically known per program, so the key can be a fixed
+slot instead.
+
+**Deliverables**
+
+- A composite `CachedUniform { location, slot }` owned by `webgl2-object-state-applicator.ts`, which
+  owns the caching contract. Location and slot are interdependent and never travel apart.
+- `webgl2-object-program.ts`: the 13 draw-scoped uniforms adopt it, through a
+  `requireCachedWebGL2Uniform` sibling to the existing helper, at the single construction site. A
+  slot table names the offsets and the total width; the mat4 is the only multi-slot entry.
+- `webgl2-object-state-applicator.ts`: the cache becomes `Map<WebGLProgram, Float64Array>` resolved
+  once in `applyProgram` into `#activeUniformState`, which `invalidate()` clears. `#recordUniform`
+  takes a slot and indexes directly. Applying a uniform with no active program throws rather than
+  silently writing a stale array.
+- `webgl2-renderer.ts` call sites keep their arity: the composite carries both fields.
+
+**Why this is safe.** Correctness rests on the property the current cache already relies on and
+documents: GL retains uniform state per program, so per-program arrays stay valid across program
+switches, which is why `#uniformComponents` deliberately survives `invalidate()` today.
+
+**Type-safety dividend.** The 13 cached uniforms become a distinct type from the 14 written by other
+paths, so "exactly one writer per cached location" becomes a compile error instead of a comment. A
+census of current writers found no violation to reconcile: the particle, sky and terrain passes write
+their own programs' uniform records, including the `localToLandblock` at `webgl2-renderer.ts:2658`,
+which belongs to `TerrainGroupUniforms`.
+
+**Acceptance**
+
+- `objectUniformUploads` and `objectSuppressedUniformUploads` are bit-identical to the pre-change
+  capture. This phase changes cost, not behaviour; any movement is a defect.
+- A fresh `--cpu-profile` either shows `#recordUniform` collapsing, or refutes the hypothesis that
+  the lookup dominates. Both outcomes are results.
+
+### Result: mechanism worked, frame did not — **Phase 7 refuted, Phase 8 weakened**
+
+The hypothesis was right about the lookup and wrong about what it was costing.
+
+| group (V8 self-time share) | before | after 1 | after 2 |
+| -------------------------- | ------ | ------- | ------- |
+| `#recordUniform`           | 8.15%  | 3.16%   | 3.43%   |
+| applicator comparison      | 10.18% | 5.03%   | 5.31%   |
+| uniform GL calls           | 7.02%  | 10.49%  | 14.52%  |
+| draw, VAO and texture      | 12.51% | 13.27%  | 9.64%   |
+| **object path total**      | 34.81% | 34.06%  | 34.51%  |
+
+**`#recordUniform` fell about 60%, reproducibly.** The `Map` lookup was indeed the bulk of it.
+
+**The object path total did not move, and neither did the frame.** `opaqueSubmissionMs` went 0.757 ->
+0.765, 0.773; `cpu.mean.totalMs` 1.828 -> 1.856, 1.875 against a pre-change spread of 1.818-1.862
+over five captures. The change is not an improvement and sits at the top of the prior range, which is
+weak evidence of a marginal regression rather than proof of one.
+
+The freed share reappears in the GL-call groups, but **those groups swing 4 points between two runs of
+the same build**, so they cannot be used to say where the time went. The only claims the data
+supports are the two above.
+
+**Acceptance, honestly scored.** The counters held: 9,272 total `#recordUniform` calls before and
+after, `objectDrawCalls` 851 both, with the 2-call issued/suppressed shift that also appears between
+two captures of one unchanged build. The profile criterion was met. The purpose was not.
+
+**What this refutes.** The comparison cost was real and is now largely gone, and the frame did not
+notice. Something else in the object path absorbs it. Therefore:
+
+- **Phase 7 is cancelled.** It targets the same comparison loop, on the same reasoning, for a
+  fraction of the components. Phase 6 already ran that experiment.
+- **Phase 8's CPU premise is weakened.** Skipping 13 comparisons per draw is the same lever again.
+  Any remaining case for it rests on reduced GL call count, which is a different mechanism and
+  unmeasured.
+- The object path is roughly 35% of CPU and stayed there while measurable JS work was removed from
+  it, which points at GL call throughput rather than JS as the constraint. That is a hypothesis, not
+  a finding: no experiment here varied call count while holding call content fixed.
+
+**The change was reverted.** It is behaviour-identical and strictly less work per frame, and
+`CachedUniform` turned "exactly one writer per cached location" from a comment into a compile error —
+but it bought no measured speed for roughly 40 lines across two modules and their tests, and landed
+at the top of the pre-change timing range. The knowledge was the deliverable; it is recorded here.
+`webgl2-object-state-applicator.ts` and `webgl2-object-program.ts` stand as they were after
+`120c0f98`.
+
+## Phase 7: Transform Handling — **cancelled by Phase 6's result**
+
+Retained for the reasoning. Phase 6 removed about 5 points of comparison cost from the same loop this
+phase would shorten further, and the frame did not move; there is no reason to expect a subset of the
+same work to behave differently. Reopen only if the object path is shown to be JS-bound after all.
+
+### Original scope (not implemented)
+
+`localToLandblock` is invariant per draw unit, so it can be flattened to a `Float32Array` once at
+compile time rather than through `mat4ToFloat32Array` every draw, and an `isIdentity` flag computed
+there skips 16 of the roughly 38 components compared on the 63.9% of baked draws that qualify.
+
+**Do not start before Phase 6 lands.** Each call is a fixed lookup plus a loop proportional to
+component count; while the lookup is present it plausibly dominates and shortening the loop beneath
+it buys little. Phase 6's profile is what makes this phase's value knowable. Note also that
+`mat4ToFloat32Array` is absent from Phase 2.6's top 28, bounding the flattening half below 0.77%.
+
+**Deliverables:** `compiled-object-draws.ts`, `webgl2-renderer.ts`, and a `#transformIsIdentity` flag
+on the applicator.
+
+**Acceptance:** upload and suppression counts unchanged, as in Phase 6.
+
+## Phase 8: Intern Compiled Draws by State, Then Sort — largest, and the only one with a GPU risk
+
+`resolveDraw` is a `WeakMap` on draw-unit identity (`compiled-object-draws.ts:92`), so two units with
+identical state hold distinct `compatibility` objects and an identity short-circuit holds for only 4
+of 805 draws. Interning by state collapses 805 entries to the 252 the census counted; sorting then
+raises the hit rate to roughly 69%, skipping all 13 comparisons on those draws.
+
+**The risk to measure first.** Traversal order is roughly spatial today, which gives incidental
+front-to-back coherence and early-Z rejection. Sorting by material destroys it. `gpu.mean.opaqueMs`
+is 0.447 ms against roughly 0.4 ms of frame headroom, so added overdraw could return the CPU win on
+the GPU side. That comparison is now trustworthy because Phase 2.5 made the GPU profile accumulate;
+it must be made before this phase is committed to.
+
+**Second unknown:** the state signature must be cheap to compute, or interning relocates the cost
+rather than removing it.
+
+**Deliverables:** `compiled-object-draws.ts`, `createObjectSubmissionPhases`
+(`object-rendering-policy.ts:302`), applicator short-circuit.
+
+**Acceptance:** `stateRunsInDrawOrder` approaches `mergedSceneWide`; `gpu.mean.opaqueMs` does not
+regress; CPU falls by more than the GPU rises.
+
 ## Risks and Mitigations
 
 | risk                                                                                                                                                 | mitigation                                                                                                                                                     |
@@ -652,6 +1011,36 @@ met on the outdoor reference scene, and if not, what the new dominant cost is.
 5. **Widening EnvCell scoping to the block.** No. Portal culling selects 58 of hundreds of cells at
    depth 16; block granularity would draw the whole dungeon to save draws that cost 0.1 ms.
 6. **Portal mode is production.** Flat mode is debug-only and its numbers are not budgets.
+
+## Open Architectural Item: the draw partition is inherited, not chosen
+
+The one durable finding from Phase 2.5. Baked geometry is partitioned by `(landblock, layer kind)`
+because that is the unit content streams in and out on, and the draw partition then follows from it.
+Nobody chose the draw partition; it is a side effect of the residency partition.
+
+**What does not fix it: per-material buffers with sub-allocation.** A free-list allocator decouples
+*lifetime* — each layer releases its own region and no other layer's bytes move — but it does not
+decouple *draw calls*. After eviction, geometry sharing one material occupies disjoint runs, and
+disjoint runs are separate `drawElements` calls. Collapsing them needs contiguity, holding
+contiguity under eviction needs compaction, and compaction relocates other layers' data: the exact
+coupling that disqualifies Phase 3, with more constituents rather than fewer. An earlier draft of
+this section recommended sub-allocation as the clean answer; it conflated the two decouplings.
+
+**Consequence for the census.** Its counts are defined as one draw per state bucket, which assumes a
+contiguous range per bucket. The 69-90% scene-wide figure is therefore a ceiling no
+lifetime-preserving mechanism reaches, by an unmeasured margin. This does not disturb the Phase 3
+verdict: within-landblock measured 2.9-8.7% under that same generous assumption, so its real value
+is lower still.
+
+**The direction that survives the constraint, untested.** If contiguity is what cannot be afforded,
+the lever is JS calls per range rather than range count. `WEBGL_multi_draw` submits disjoint ranges
+in one call and requires no contiguity, so it composes with a free list instead of fighting it. Before
+that is worth planning it needs three things this plan does not have: extension availability on the
+shipped targets, the ranges resident in a shared buffer, and a measured split of `opaqueSubmissionMs`
+(0.81 ms across 805 draws, roughly 1 us per draw) into per-call overhead versus state work that
+batching would not remove.
+
+Nothing here is scheduled. This plan's goal — 500 fps on the outdoor reference scene — is already met.
 
 ## Open Questions
 

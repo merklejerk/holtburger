@@ -566,6 +566,10 @@ interface MutableFrameSelectionMetrics {
 	objectLightingBinds: number;
 	objectProgramChanges: number;
 	objectTextureBinds: number;
+	objectDrawCalls: number;
+	objectUniformUploads: number;
+	objectSuppressedUniformUploads: number;
+	objectIdentityTransformUploads: number;
 }
 
 export class WebGL2Renderer implements Renderer {
@@ -607,9 +611,6 @@ export class WebGL2Renderer implements Renderer {
 		CompiledStaticNodeSubmissions,
 		PreparedObjectDrawCompatibility
 	>();
-	/** Last landblock offset uploaded, memoizing the per-draw lookup across a run. */
-	#lastDrawnLandblockId: string | null = null;
-	#lastDrawnLandblockOffset: LandblockRenderOffset = [0, 0, 0];
 	/** Terrain programs resolved once per realized landblock; see #resolveTerrainFrameInput. */
 	readonly #terrainFrameInputs = new WeakMap<
 		TerrainDrawUnit,
@@ -758,6 +759,10 @@ export class WebGL2Renderer implements Renderer {
 		objectLightingBinds: 0,
 		objectProgramChanges: 0,
 		objectTextureBinds: 0,
+		objectDrawCalls: 0,
+		objectUniformUploads: 0,
+		objectSuppressedUniformUploads: 0,
+		objectIdentityTransformUploads: 0,
 	};
 	#frameWidth = 0;
 	#frameHeight = 0;
@@ -844,6 +849,7 @@ export class WebGL2Renderer implements Renderer {
 				},
 			}),
 			setProfilingEnabled: (enabled) => this.#setFrameProfilingEnabled(enabled),
+			resetProfile: () => this.#frameProfiler?.reset(),
 		};
 		gl.clearColor(
 			FRONTEND_TUNING.rendering.clearColor.red,
@@ -895,9 +901,6 @@ export class WebGL2Renderer implements Renderer {
 		profile: WebGL2FrameProfileCapture | null,
 	): void {
 		const setupStartedAt = profile?.beginCpuPhase();
-		// Offsets are anchor-relative and rebuilt every frame, so last frame's memo would be a
-		// stale value for the same landblock after the anchor moves.
-		this.#lastDrawnLandblockId = null;
 		this.#frameTextureFiltering = input.frameSettings.quality.textureFiltering;
 		// Compiled facts embed the samplers filtering selects and the cull-face override the
 		// env-cell mode selects, so a change to either invalidates every compiled entry. Both
@@ -2084,6 +2087,10 @@ export class WebGL2Renderer implements Renderer {
 		metrics.objectLightingBinds = 0;
 		metrics.objectProgramChanges = 0;
 		metrics.objectTextureBinds = 0;
+		metrics.objectDrawCalls = 0;
+		metrics.objectUniformUploads = 0;
+		metrics.objectSuppressedUniformUploads = 0;
+		metrics.objectIdentityTransformUploads = 0;
 	}
 
 	/** Finish counters shared by ordinary frames and explicit portal execution probes. */
@@ -3287,79 +3294,129 @@ export class WebGL2Renderer implements Renderer {
 		}
 		const { compatibility } = object;
 		const gl = this.#gl;
-		this.#objectState.applyCullFace(compatibility.cullFace);
+		const state = this.#objectState;
+		const metrics = this.#frameSelectionMetrics;
+		// Issued and suppressed are counted separately; their sum is the per-draw uniform set, so the
+		// ratio against `objectDrawCalls` stays readable whether or not filtering is winning.
+		let uploads = 0;
+		let suppressed = 0;
+		const record = (issued: boolean): void => {
+			if (issued) uploads += 1;
+			else suppressed += 1;
+		};
+		state.applyCullFace(compatibility.cullFace);
 		if (program.transformSource === "baked") {
-			gl.uniformMatrix4fv(
-				program.uniforms.localToLandblock,
-				false,
-				mat4ToFloat32Array(object.localToLandblock, this.#matrixScratch),
+			const matrix = mat4ToFloat32Array(
+				object.localToLandblock,
+				this.#matrixScratch,
+			);
+			if (isIdentityMat4Buffer(matrix)) {
+				metrics.objectIdentityTransformUploads += 1;
+			}
+			record(
+				state.applyUniformMatrix4fv(program.uniforms.localToLandblock, matrix),
 			);
 		}
-		// Submissions are drawn in run order, so consecutive draws usually share a landblock.
-		if (object.landblockId !== this.#lastDrawnLandblockId) {
-			const offset = landblockOffsets.get(object.landblockId);
-			if (offset === undefined) {
-				throw new Error(
-					`Submitted object in landblock ${object.landblockId} has no frame offset.`,
-				);
-			}
-			this.#lastDrawnLandblockId = object.landblockId;
-			this.#lastDrawnLandblockOffset = offset;
+		const landblockOffset = landblockOffsets.get(object.landblockId);
+		if (landblockOffset === undefined) {
+			throw new Error(
+				`Submitted object in landblock ${object.landblockId} has no frame offset.`,
+			);
 		}
-		gl.uniform3f(
-			program.uniforms.landblockOffset,
-			this.#lastDrawnLandblockOffset[0],
-			this.#lastDrawnLandblockOffset[1],
-			this.#lastDrawnLandblockOffset[2],
+		record(
+			state.applyUniform3f(
+				program.uniforms.landblockOffset,
+				landblockOffset[0],
+				landblockOffset[1],
+				landblockOffset[2],
+			),
 		);
-		gl.uniform1i(program.uniforms.wrapRepeat, compatibility.wrapRepeat ? 1 : 0);
-		gl.uniform1i(
-			program.uniforms.palettedClipMap,
-			compatibility.palettedClipMap ? 1 : 0,
+		record(
+			state.applyUniform1i(
+				program.uniforms.wrapRepeat,
+				compatibility.wrapRepeat ? 1 : 0,
+			),
 		);
-		gl.uniform1f(program.uniforms.alphaTest, compatibility.alphaTest);
+		record(
+			state.applyUniform1i(
+				program.uniforms.palettedClipMap,
+				compatibility.palettedClipMap ? 1 : 0,
+			),
+		);
+		record(
+			state.applyUniform1f(program.uniforms.alphaTest, compatibility.alphaTest),
+		);
 		const preparedMaterial = compatibility.material;
 		if (preparedMaterial.kind === "solid-color") {
-			gl.uniform1i(program.uniforms.materialKind, 0);
-			gl.uniform4f(program.uniforms.materialColor, ...preparedMaterial.color);
+			record(state.applyUniform1i(program.uniforms.materialKind, 0));
+			record(
+				state.applyUniform4f(
+					program.uniforms.materialColor,
+					...preparedMaterial.color,
+				),
+			);
 		} else {
 			this.#bindPreparedObjectTexture(
 				OBJECT_TEXTURE_UNITS.base,
 				preparedMaterial.base,
 			);
-			gl.uniform4f(program.uniforms.baseRect, ...preparedMaterial.base.rect);
-			gl.uniform1i(
-				program.uniforms.materialKind,
-				preparedMaterial.kind === "direct-color"
-					? 1
-					: preparedMaterial.kind === "index8"
-						? 2
-						: 3,
+			record(
+				state.applyUniform4f(
+					program.uniforms.baseRect,
+					...preparedMaterial.base.rect,
+				),
 			);
-			gl.uniform4f(program.uniforms.materialColor, ...preparedMaterial.color);
+			record(
+				state.applyUniform1i(
+					program.uniforms.materialKind,
+					preparedMaterial.kind === "direct-color"
+						? 1
+						: preparedMaterial.kind === "index8"
+							? 2
+							: 3,
+				),
+			);
+			record(
+				state.applyUniform4f(
+					program.uniforms.materialColor,
+					...preparedMaterial.color,
+				),
+			);
 			if (preparedMaterial.kind !== "direct-color") {
 				this.#bindPreparedObjectTexture(
 					OBJECT_TEXTURE_UNITS.palette,
 					preparedMaterial.palette,
 				);
-				gl.uniform4f(
-					program.uniforms.paletteRect,
-					...preparedMaterial.palette.rect,
+				record(
+					state.applyUniform4f(
+						program.uniforms.paletteRect,
+						...preparedMaterial.palette.rect,
+					),
 				);
 			}
 		}
 		const { detail } = compatibility;
 		if (detail) {
 			this.#bindPreparedObjectTexture(OBJECT_TEXTURE_UNITS.detail, detail);
-			gl.uniform4f(program.uniforms.detailRect, ...detail.rect);
-			gl.uniform1f(program.uniforms.detailTiling, detail.tiling);
-			gl.uniform1i(program.uniforms.useDetail, 1);
+			record(state.applyUniform4f(program.uniforms.detailRect, ...detail.rect));
+			record(
+				state.applyUniform1f(program.uniforms.detailTiling, detail.tiling),
+			);
+			record(state.applyUniform1i(program.uniforms.useDetail, 1));
 		} else {
-			gl.uniform1i(program.uniforms.useDetail, 0);
+			record(state.applyUniform1i(program.uniforms.useDetail, 0));
 		}
-		gl.uniform1f(program.uniforms.luminosity, compatibility.luminosity);
+		record(
+			state.applyUniform1f(
+				program.uniforms.luminosity,
+				compatibility.luminosity,
+			),
+		);
+		metrics.objectDrawCalls += 1;
+		metrics.objectUniformUploads += uploads;
+		metrics.objectSuppressedUniformUploads += suppressed;
 		const geometry = compatibility.geometry;
-		this.#objectState.applyVertexArray(geometry.vertexArray);
+		state.applyVertexArray(geometry.vertexArray);
 		let submittedInstanceCount = 1;
 		if (object.drawKind === "instanced") {
 			if (!object.instances) {
@@ -3625,6 +3682,20 @@ function frameTemplateBatchIdentityEquals(
 }
 
 /** Stable semantic partition used to narrow exact opaque instance compatibility checks. */
+/**
+ * Whether a column-major 4x4 buffer is exactly the identity.
+ *
+ * Exact comparison rather than a tolerance: this answers whether the transform upload carries any
+ * information at all, and a matrix that is merely close to identity still does.
+ */
+function isIdentityMat4Buffer(matrix: Float32Array): boolean {
+	for (let index = 0; index < 16; index += 1) {
+		const expected = index % 5 === 0 ? 1 : 0;
+		if (matrix[index] !== expected) return false;
+	}
+	return true;
+}
+
 function opaqueObjectInstanceBatchKey(
 	object: PreparedObjectFrameInput,
 ): string {

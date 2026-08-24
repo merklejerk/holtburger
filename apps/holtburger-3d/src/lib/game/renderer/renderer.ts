@@ -315,6 +315,30 @@ export interface FrameSelectionMetrics {
 	readonly objectProgramChanges: number;
 	/** Physical two-dimensional object texture binds performed across every rendered view. */
 	readonly objectTextureBinds: number;
+	/** Object draw calls issued across every rendered view, instanced and single alike. */
+	readonly objectDrawCalls: number;
+	/**
+	 * Uniform uploads issued by object draw submission across every rendered view.
+	 *
+	 * Paired with `objectDrawCalls` this is the per-draw uniform cost, which is the quantity the
+	 * submission path is optimized against. Counted at the upload site rather than derived from a
+	 * per-draw constant, because how many uniforms a draw sends depends on its material and detail.
+	 */
+	readonly objectUniformUploads: number;
+	/**
+	 * Per-draw uniform writes skipped because the location already held that value.
+	 *
+	 * Summed with `objectUniformUploads` this is the uniform set the draw path would issue without
+	 * filtering, so the ratio between them is what the filter is actually saving.
+	 */
+	readonly objectSuppressedUniformUploads: number;
+	/**
+	 * Uploads of `uLocalToLandblock` whose matrix was the identity.
+	 *
+	 * Baked geometry is pre-transformed into landblock space, so an identity here means the upload
+	 * carries nothing at all and can be removed rather than merely cached.
+	 */
+	readonly objectIdentityTransformUploads: number;
 }
 
 /** Non-overlapping renderer CPU wall-time phases aggregated from profiled frames. */
@@ -370,9 +394,9 @@ export interface RendererCpuFrameProfile extends RendererCpuFrameTimings {
 	readonly frameNumber: number;
 }
 
-/** Short rolling CPU profile that exposes both attribution and frame-time variance. */
+/** CPU profile accumulated since the last reset, exposing attribution and frame-time variance. */
 export interface RendererCpuFrameProfileWindow {
-	/** Latest and arithmetic-mean contribution work across this profile window. */
+	/** Latest and arithmetic-mean contribution work since the last profile reset. */
 	readonly contribution: {
 		readonly latest: RendererContributionFrameMetrics;
 		readonly mean: RendererContributionFrameMetrics;
@@ -381,11 +405,23 @@ export interface RendererCpuFrameProfileWindow {
 	readonly latestFrameNumber: number;
 	/** Total CPU wall time of the most recently captured sample. */
 	readonly latestTotalMs: number;
-	/** Per-phase arithmetic mean across the retained sample window. */
+	/**
+	 * Per-phase arithmetic mean over every frame since the last profile reset.
+	 *
+	 * This is the only figure in this type suitable for comparing two builds. A fixed frame count
+	 * spans a different amount of wall time at every frame rate, so a rolling tail can invert the
+	 * sign of a real change when one hitch lands inside it.
+	 */
 	readonly mean: RendererCpuFrameTimings;
-	/** Nearest-rank 95th percentile of total CPU frame time. */
-	readonly p95TotalMs: number;
-	/** Number of frames represented by this profile window. */
+	/**
+	 * Nearest-rank 95th percentile of total CPU frame time over the most recent frames only.
+	 *
+	 * Bounded by `FRONTEND_TUNING.diagnostics.percentileCpuFrameTail` because a percentile needs
+	 * retained samples to rank and running sums cannot supply them. Read it as a hitch signal for
+	 * the recent past, never as a property of the measurement window.
+	 */
+	readonly p95RecentTotalMs: number;
+	/** Frames represented by `mean`, counted since the last profile reset. */
 	readonly sampleCount: number;
 }
 
@@ -488,6 +524,13 @@ export interface RendererFrameDiagnostics {
 	snapshot(): RendererFrameDiagnosticsSnapshot;
 	/** Create or tear down the explicit timing session and its GPU query resources. */
 	setProfilingEnabled(enabled: boolean): void;
+	/**
+	 * Discard accumulated profile samples so the next mean covers one explicit measurement window.
+	 *
+	 * A no-op while profiling is disabled, so a caller delimiting a measurement window does not
+	 * have to know whether profiling happens to be on.
+	 */
+	resetProfile(): void;
 }
 
 /** Production control feedback from one fully completed renderer frame. */

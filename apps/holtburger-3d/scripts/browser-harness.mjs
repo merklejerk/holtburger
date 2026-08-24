@@ -1390,6 +1390,7 @@ function briefHarnessReport(result) {
 				? null
 				: {
 						geometryResourceCount: staticObjects.geometryResourceCount,
+						geometryResourceBytes: staticObjects.geometryResourceBytes,
 						staticObjectNodeCount: staticObjects.staticObjectNodeCount,
 						staticObjectOwnerCount: staticObjects.staticObjectOwnerCount,
 						outdoorLightScopeCount: staticObjects.outdoorLightScopeCount,

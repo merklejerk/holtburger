@@ -359,7 +359,7 @@ export const FRONTEND_TUNING = {
 			parameters: {
 				temperature: 0.03,
 				tint: 0,
-				saturation: 1.02,
+				saturation: 1.06,
 				curves: {
 					master: [
 						{ x: 0, y: 0 },

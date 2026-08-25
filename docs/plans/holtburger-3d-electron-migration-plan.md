@@ -1,8 +1,8 @@
 # Holtburger 3D Electron Migration Plan
 
-Status: in progress. Phases 0-8 are complete on the available Linux desktop; Phase 9A is the next
-non-publishing portability phase. Real-machine certification and public distribution remain
-deferred to the 3D product-release roadmap.
+Status: in progress. Phases 0-9A are complete; Phase 10 is the remaining migration cleanup and
+handoff. Real-machine certification and public distribution remain deferred to the 3D
+product-release roadmap.
 
 ## Context and Boundaries
 
@@ -880,10 +880,9 @@ certification; those are deferred Phase 9B/9C product-release gates.
 
 ### Phase 9: Prove branch portability without publishing
 
-Status: in progress. The release boundary, workflow, and local Linux diagnostics are implemented.
-The first two hosted runs passed Linux x86-64 and both macOS architectures. Windows now packages and
-passes the production sidecar smoke; an ASAR-listing normalization bug is fixed locally and awaits
-the replacement matrix. Phases 9B and 9C are explicitly deferred.
+Status: Phase 9A complete on 2026-08-25. Hosted run `32885301938` passed the release-boundary job
+and all four native package probes at commit `41e82fb6cd9a22a7036f9f24ac312c0b68d13072`.
+Phases 9B and 9C are explicitly deferred.
 
 The 3D app is mid-roadmap and is not a release candidate. This phase proves that its Electron and
 Rust boundary can build on the target operating systems without modifying, invoking, or competing
@@ -914,18 +913,18 @@ short-lived diagnostic outputs, not releases.
       `probe/3d-electron-portability` branch. Do not add pull-request, schedule, or tag triggers.
       Name jobs and artifacts `holtburger-3d-portability-*` so they cannot be mistaken for canonical
       CLI outputs.
-- [ ] Build the Rust sidecar on the corresponding hosted OS runner, natively where the required
+- [x] Build the Rust sidecar on the corresponding hosted OS runner, natively where the required
       architecture is available and with an explicitly tested same-OS cross-build otherwise; do not
       place an architecture-mismatched binary into an Electron package.
-- [ ] Run Rust host tests, TypeScript checks, Electron-main tests, and a real subprocess protocol
+- [x] Run Rust host tests, TypeScript checks, Electron-main tests, and a real subprocess protocol
       integration test on every target. Use a checked-in fixture-backed or explicit no-content host
       path rather than a developer's untracked production DAT archive.
-- [ ] Run Electron Forge `package`, not a public-release command, and verify the expected host
+- [x] Run Electron Forge `package`, not a public-release command, and verify the expected host
       executable and static assets at the paths resolved by Electron main.
-- [ ] Complete a minimal handshake/`host_status`/shutdown smoke test wherever the hosted runner
+- [x] Complete a minimal handshake/`host_status`/shutdown smoke test wherever the hosted runner
       provides a usable desktop session. Record runner limitations rather than converting an unrun
       GUI test into a pass.
-- [ ] Upload packaged directories only as short-retention workflow artifacts for diagnostics and
+- [x] Upload packaged directories only as short-retention workflow artifacts for diagnostics and
       eventual manual testing. Label every artifact and workflow summary experimental, unsupported,
       and unverified on real hardware.
 
@@ -1007,9 +1006,6 @@ migration on `3d-next`.
 - No packaged GUI launch is claimed on hosted runners. The workflow runs the real sidecar protocol
   on every target and labels GUI, GPU, input, audio, scaling, and OS launch behavior unverified in
   its summary. Adding synthetic window automation would not replace Phase 9B real-machine evidence.
-- The native matrix and artifact upload configuration cannot be accepted from local Linux alone.
-  Its four target-specific checkboxes and Phase 9A acceptance remain open until the workflow runs
-  from `probe/3d-electron-portability` and supplies authoritative hosted-runner results.
 - Hosted run `32883334114` passed the canonical release assertion and the complete Linux x86-64,
   macOS arm64, and macOS x86-64 jobs, including native packaging, production sidecar protocol,
   package inspection, and artifact upload. Windows x86-64 passed Rust and frontend tests, then
@@ -1029,8 +1025,18 @@ migration on `3d-next`.
   `/package.json`. ASAR entries are now normalized once at that dependency boundary. The other three
   platform jobs again passed completely, so the third run is required only to establish one green
   replacement SHA across the whole matrix, not because their behavior regressed.
+- Final run `32885301938` passed the canonical release-boundary job and the Linux x86-64, Windows
+  x86-64, macOS x86-64, and macOS arm64 package probes at
+  `41e82fb6cd9a22a7036f9f24ac312c0b68d13072`. Every native job completed Rust and frontend checks,
+  Forge packaging, the production sidecar handshake/status/shutdown smoke, package inspection, and
+  artifact upload. GitHub recorded four unexpired, SHA-addressed
+  `holtburger-3d-portability-*` artifacts with seven-day retention. Their archive sizes range from
+  roughly 311 MB to 943 MB because these are uncompressed diagnostic package directories; they do
+  not establish release formats or size budgets.
 - Automated hosted-runner work can proceed without access to every target machine, but it proves
-  build and package structure only. Windows and macOS remain unverified until Phase 9B runs.
+  build, protocol behavior, and package structure only. No packaged GUI, GPU, input, audio, display
+  scaling, Gatekeeper, or SmartScreen behavior was exercised. Windows and macOS remain unverified
+  until Phase 9B runs.
 
 ### Phase 10: Finish migration cleanup and handoff
 
@@ -1089,7 +1095,7 @@ Status: follows Phase 9A and does not wait for deferred certification or public 
 - [ ] Host errors, incompatibility, crashes, and shutdown are explicit and tested.
 - [x] Tauri, CEF, `src-tauri`, and migration-only dual-shell code are removed from production.
 - [x] Browser harnesses remain independent and representative renderer checks pass.
-- [ ] Linux x86-64, Windows x86-64, macOS x86-64, and macOS arm64 build/package/protocol gates pass
+- [x] Linux x86-64, Windows x86-64, macOS x86-64, and macOS arm64 build/package/protocol gates pass
       in hosted CI.
 - [ ] Formatting, checks, lint, Clippy with warnings denied, unit/integration tests, runtime
       verification, and package inspection pass.

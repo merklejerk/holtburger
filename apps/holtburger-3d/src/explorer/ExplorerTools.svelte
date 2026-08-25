@@ -56,6 +56,8 @@
 			radii: SceneInterestRadii,
 		) => void;
 		readonly cameraFocusStatus: ExplorerCameraFocusStatus;
+		/** Formatted camera residency, or null before the first presented frame. */
+		readonly cameraResidencyLabel: string | null;
 		readonly cameraMode: ExplorerCameraMode;
 		readonly cameraModePending: boolean;
 		readonly physicalCameraStatus: PhysicalFlyStatus | null;
@@ -156,6 +158,7 @@
 		runtimeReady,
 		requestSceneInterest,
 		cameraFocusStatus,
+		cameraResidencyLabel,
 		cameraMode,
 		cameraModePending,
 		physicalCameraStatus,
@@ -303,6 +306,7 @@
 								runtimeReady={runtimeReady && !cameraModePending}
 								{requestSceneInterest}
 								{cameraFocusStatus}
+								{cameraResidencyLabel}
 								{cameraMode}
 								{cameraModePending}
 								{physicalCameraStatus}

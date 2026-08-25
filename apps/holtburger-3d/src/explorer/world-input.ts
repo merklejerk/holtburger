@@ -1,13 +1,12 @@
 import type { EnvCellId, LandblockId } from "../lib/game/game-types";
 import type { SceneResidency } from "../lib/game/scene";
 import type { SceneInterestTarget } from "../lib/game/runtime/scene-target";
+import { landblockAxisFromPrintedDegree } from "../lib/game/map/map-coordinates";
 
 const HEX_PREFIX_PATTERN = /^(?:0x)?([0-9a-f]{4})$/i;
 const HEX_CELL_PATTERN = /^(?:0x)?([0-9a-f]{8})$/i;
 const MAP_COORDINATE_PATTERN =
 	/^\s*(\d+(?:\.\d+)?)\s*([ns])\s*,?\s*(\d+(?:\.\d+)?)\s*([ew])(?:\s*,?\s*-?\d+(?:\.\d+)?\s*z?)?\s*$/i;
-const MAP_COORDINATE_ORIGIN = 102;
-const MAP_COORDINATE_LANDBLOCKS_PER_DEGREE = 240 / 192;
 const MAX_OUTDOOR_LANDBLOCK_AXIS = 0xfe;
 
 /** Parsed residence explicitly supplied by Explorer's world controls. */
@@ -114,9 +113,13 @@ function createOutdoorResidenceFromMapCoordinates(coordinates: {
 	);
 }
 
+/**
+ * Clamp a printed degree onto AC's finite outdoor landblock grid.
+ *
+ * The input pattern accepts more decimals than AC ever prints, and they are still read as printed
+ * notation, so a hand-typed extra digit lands up to the display bias away from where it reads.
+ */
 function mapCoordinateToLandblockAxis(coordinate: number): number {
-	const axis = Math.floor(
-		(coordinate + MAP_COORDINATE_ORIGIN) * MAP_COORDINATE_LANDBLOCKS_PER_DEGREE,
-	);
+	const axis = landblockAxisFromPrintedDegree(coordinate);
 	return Math.max(0, Math.min(MAX_OUTDOOR_LANDBLOCK_AXIS, axis));
 }

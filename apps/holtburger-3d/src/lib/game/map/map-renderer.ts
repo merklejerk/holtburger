@@ -34,7 +34,10 @@ import {
 	MAP_IMPASSABLE_HATCH_PERIOD_PIXELS,
 	MAP_IMPASSABLE_HATCH_STRENGTH,
 	MAP_RELIEF_EXAGGERATION,
+	MAP_ROAD_CASING_PIXELS,
+	MAP_ROAD_CASING_STRENGTH,
 	MAP_ROAD_COLOR,
+	MAP_ROAD_EDGE_COVERAGE,
 	MAP_ROAD_TINT_STRENGTH,
 	MAP_TRANSITION_ACCENT_COLOR,
 	MAP_SUN_DIRECTION,
@@ -225,6 +228,9 @@ export class MapRenderer {
 			gl.uniform1f(uniforms.ambientLevel, MAP_AMBIENT_LEVEL);
 			gl.uniform3fv(uniforms.roadColor, MAP_ROAD_COLOR);
 			gl.uniform1f(uniforms.roadTintStrength, MAP_ROAD_TINT_STRENGTH);
+			gl.uniform1f(uniforms.roadCasingPixels, MAP_ROAD_CASING_PIXELS);
+			gl.uniform1f(uniforms.roadCasingStrength, MAP_ROAD_CASING_STRENGTH);
+			gl.uniform1f(uniforms.roadEdgeCoverage, MAP_ROAD_EDGE_COVERAGE);
 			gl.uniform3fv(uniforms.impassableColor, MAP_IMPASSABLE_COLOR);
 			gl.uniform1f(uniforms.reliefExaggeration, MAP_RELIEF_EXAGGERATION);
 			gl.uniform3fv(
@@ -240,9 +246,10 @@ export class MapRenderer {
 				MAP_CONTOUR_MINIMUM_CLIMB_PER_PIXEL,
 			);
 			gl.uniform1f(uniforms.contourHeightSpan, MAP_CONTOUR_HEIGHT_SPAN);
-			// The map's own ink: a contour halo is the same dark the map clears to, so lines read as
-			// drawn on the terrain rather than as another colour competing with it.
-			gl.uniform3fv(uniforms.contourHaloColor, MAP_VOID_COLOR_VECTOR);
+			// The map's own ink, shared by the contour halo and the road casing: anything drawn on
+			// the terrain is the same dark the map clears to, so it reads as drawn on the ground
+			// rather than as another colour competing with it.
+			gl.uniform3fv(uniforms.inkColor, MAP_VOID_COLOR_VECTOR);
 			gl.uniform1f(uniforms.anchorHeight, view.anchor.worldY);
 			gl.uniform1f(
 				uniforms.impassableHatchPeriodPixels,
@@ -550,8 +557,9 @@ export class MapRenderer {
 		attribute(mesh.positions, MAP_TERRAIN_ATTRIBUTES.localPosition, 3, false);
 		attribute(mesh.normals, MAP_TERRAIN_ATTRIBUTES.normal, 3, false);
 		attribute(mesh.terrainCodes, MAP_TERRAIN_ATTRIBUTES.terrainCode, 1, true);
-		attribute(mesh.roadCoverage, MAP_TERRAIN_ATTRIBUTES.roadCoverage, 1, false);
+		attribute(mesh.roadMask, MAP_TERRAIN_ATTRIBUTES.roadMask, 1, true);
 		attribute(mesh.passable, MAP_TERRAIN_ATTRIBUTES.passable, 1, false);
+		attribute(mesh.cellUv, MAP_TERRAIN_ATTRIBUTES.cellUv, 2, false);
 		gl.bindVertexArray(null);
 		return {
 			buffers,

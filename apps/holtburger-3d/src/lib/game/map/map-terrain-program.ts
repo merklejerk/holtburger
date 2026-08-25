@@ -9,8 +9,9 @@ export const MAP_TERRAIN_ATTRIBUTES = {
 	localPosition: 0,
 	normal: 1,
 	terrainCode: 2,
-	roadCoverage: 3,
+	roadMask: 3,
 	passable: 4,
+	cellUv: 5,
 } as const;
 
 /**
@@ -26,8 +27,9 @@ const MAP_TERRAIN_VERTEX_SHADER = `#version 300 es
 layout(location = ${MAP_TERRAIN_ATTRIBUTES.localPosition}) in vec3 aLocalPosition;
 layout(location = ${MAP_TERRAIN_ATTRIBUTES.normal}) in vec3 aNormal;
 layout(location = ${MAP_TERRAIN_ATTRIBUTES.terrainCode}) in uint aTerrainCode;
-layout(location = ${MAP_TERRAIN_ATTRIBUTES.roadCoverage}) in float aRoadCoverage;
+layout(location = ${MAP_TERRAIN_ATTRIBUTES.roadMask}) in uint aRoadMask;
 layout(location = ${MAP_TERRAIN_ATTRIBUTES.passable}) in float aPassable;
+layout(location = ${MAP_TERRAIN_ATTRIBUTES.cellUv}) in vec2 aCellUv;
 
 uniform mat2 uWorldToClip;
 uniform vec2 uLandblockOrigin;
@@ -36,13 +38,15 @@ uniform vec3 uTerrainPalette[${TERRAIN_TYPE_COUNT}];
 
 // The palette is resolved here rather than in the fragment stage, because a colour interpolates
 // and the terrain code that selects it does not. That is what lets the boundary between two kinds
-// of ground cross a triangle instead of following its edges. Road coverage and normals interpolate
-// for the same reason, and the fragment stage decides where the road edge actually falls.
+// of ground cross a triangle instead of following its edges.
 out vec3 vBaseColor;
+// A road belongs to its cell, not to this triangle, so the mask travels flat and the position
+// inside the cell interpolates. The fragment stage puts the two back together.
+flat out uint vRoadMask;
+out vec2 vCellUv;
 // Passability is a fact about one triangle's own face — its geometric slope, and the water type of
 // the landblock it belongs to — decided on the CPU, so it must not be smeared by interpolation.
 flat out float vPassable;
-out float vRoadCoverage;
 out float vHeight;
 out vec3 vNormal;
 
@@ -50,7 +54,8 @@ void main() {
 	vec2 worldOffset =
 		uLandblockOrigin + vec2(aLocalPosition.x, aLocalPosition.z) - uMapCenter;
 	vBaseColor = uTerrainPalette[int(aTerrainCode)];
-	vRoadCoverage = aRoadCoverage;
+	vRoadMask = aRoadMask;
+	vCellUv = aCellUv;
 	vPassable = aPassable;
 	// Landblock origins carry no height, so local Y is already world height.
 	vHeight = aLocalPosition.y;
@@ -64,6 +69,9 @@ precision highp float;
 
 uniform vec3 uRoadColor;
 uniform float uRoadTintStrength;
+uniform float uRoadCasingPixels;
+uniform float uRoadCasingStrength;
+uniform float uRoadEdgeCoverage;
 uniform vec3 uSunDirection;
 uniform float uAmbientLevel;
 uniform vec3 uImpassableColor;
@@ -76,24 +84,62 @@ uniform float uContourInterval;
 uniform float uContourStrength;
 uniform float uContourMinimumClimbPerPixel;
 uniform float uContourHeightSpan;
-uniform vec3 uContourHaloColor;
+uniform vec3 uInkColor;
 uniform float uAnchorHeight;
 uniform float uReliefExaggeration;
 
 in vec3 vBaseColor;
 flat in float vPassable;
-in float vRoadCoverage;
+flat in uint vRoadMask;
+in vec2 vCellUv;
 in float vHeight;
 in vec3 vNormal;
 out vec4 fragmentColor;
 
+// Retail's road shape for one cell, read back off its four-corner mask.
+//
+// Bilinear across the cell rather than linear across this triangle, which is the whole fix: the
+// authored diagonal is a seeded value that knows nothing about roads, and interpolating within a
+// triangle let it decide whether a diagonally stepping road stayed joined.
+float roadCoverageInCell(uint mask, vec2 uv) {
+	float southwest = float(mask & 1u);
+	float southeast = float((mask >> 1u) & 1u);
+	float northeast = float((mask >> 2u) & 1u);
+	float northwest = float((mask >> 3u) & 1u);
+	return mix(
+		mix(southwest, southeast, uv.x),
+		mix(northwest, northeast, uv.x),
+		uv.y
+	);
+}
+
 void main() {
 	vec3 normal = normalize(vNormal);
-	// The road edge falls halfway between an authored road vertex and its neighbour, which keeps
-	// the boundary crisp while placing it from every corner rather than from one of them. This
-	// approximates retail's authored road alpha masks, which the map deliberately does not load.
-	float road = step(0.5, vRoadCoverage);
-	vec3 color = mix(vBaseColor, uRoadColor, road * uRoadTintStrength);
+	// The road edge falls at the coverage contour the tuning names, which keeps the boundary crisp
+	// while shaping it from all four corners of the cell rather than from one triangle's three.
+	// This approximates retail's authored road alpha masks, which the map deliberately does not
+	// load, at the scale retail decides them. Terrain colour blends across its boundaries and a
+	// road does not, because ground cover really does grade from one kind into another while a road
+	// is a line a reader follows.
+	//
+	// Cased in the map's ink, for the reason the building footprints are: a tan road crossing tan
+	// ground disappears exactly where it is most needed, which is inside a settlement. The rim is a
+	// band just outside the contour the fill ends at, so it needs no data of its own, and both
+	// edges are measured in how much coverage changes per fragment, which keeps the rim a constant
+	// pixel width at every zoom instead of thinning away as the map pulls back.
+	float coverage = roadCoverageInCell(vRoadMask, vCellUv);
+	float coveragePerPixel = max(fwidth(coverage), 1e-5);
+	float halfPixel = 0.5 * coveragePerPixel;
+	float roadFill =
+		smoothstep(uRoadEdgeCoverage - halfPixel, uRoadEdgeCoverage + halfPixel, coverage);
+	// Pulled far enough back, one cell falls below a pixel and the rim would grow to swallow the
+	// ground beside the road; a casing never reaches further than a quarter of the coverage ramp.
+	float casingWidth = min(uRoadCasingPixels * coveragePerPixel, 0.25);
+	float casingOuter = uRoadEdgeCoverage - casingWidth;
+	float roadCasing =
+		smoothstep(casingOuter - halfPixel, casingOuter + halfPixel, coverage) - roadFill;
+	vec3 color = mix(vBaseColor, uRoadColor, roadFill * uRoadTintStrength);
+	color = mix(color, uInkColor, roadCasing * uRoadCasingStrength);
 	// Exaggerate the surface for shading only. Passability was classified on the CPU from the real
 	// geometry, so nothing downstream of here can inherit the exaggeration.
 	vec3 reliefNormal = normalize(
@@ -133,7 +179,7 @@ void main() {
 	vec3 endpoint =
 		relativeHeight >= 0.0 ? uContourAboveColor : uContourBelowColor;
 	vec3 contourColor = mix(uContourSameLevelColor, endpoint, departure);
-	vec3 withHalo = mix(shaded, uContourHaloColor, halo * uContourStrength);
+	vec3 withHalo = mix(shaded, uInkColor, halo * uContourStrength);
 	vec3 withContours = mix(withHalo, contourColor, contour * uContourStrength);
 
 	// Screen-space diagonal hatching, so stripe spacing stays readable at every zoom rather than
@@ -165,10 +211,13 @@ export interface MapTerrainProgram {
 		readonly palette: WebGLUniformLocation;
 		readonly roadColor: WebGLUniformLocation;
 		readonly roadTintStrength: WebGLUniformLocation;
+		readonly roadCasingPixels: WebGLUniformLocation;
+		readonly roadCasingStrength: WebGLUniformLocation;
+		readonly roadEdgeCoverage: WebGLUniformLocation;
 		readonly anchorHeight: WebGLUniformLocation;
 		readonly contourAboveColor: WebGLUniformLocation;
 		readonly contourBelowColor: WebGLUniformLocation;
-		readonly contourHaloColor: WebGLUniformLocation;
+		readonly inkColor: WebGLUniformLocation;
 		readonly contourHeightSpan: WebGLUniformLocation;
 		readonly contourInterval: WebGLUniformLocation;
 		readonly contourSameLevelColor: WebGLUniformLocation;
@@ -202,6 +251,13 @@ export function createMapTerrainProgram(
 			palette: requireWebGL2Uniform(gl, program, "uTerrainPalette[0]"),
 			roadColor: requireWebGL2Uniform(gl, program, "uRoadColor"),
 			roadTintStrength: requireWebGL2Uniform(gl, program, "uRoadTintStrength"),
+			roadCasingPixels: requireWebGL2Uniform(gl, program, "uRoadCasingPixels"),
+			roadCasingStrength: requireWebGL2Uniform(
+				gl,
+				program,
+				"uRoadCasingStrength",
+			),
+			roadEdgeCoverage: requireWebGL2Uniform(gl, program, "uRoadEdgeCoverage"),
 			anchorHeight: requireWebGL2Uniform(gl, program, "uAnchorHeight"),
 			contourAboveColor: requireWebGL2Uniform(
 				gl,
@@ -213,7 +269,7 @@ export function createMapTerrainProgram(
 				program,
 				"uContourBelowColor",
 			),
-			contourHaloColor: requireWebGL2Uniform(gl, program, "uContourHaloColor"),
+			inkColor: requireWebGL2Uniform(gl, program, "uInkColor"),
 			contourHeightSpan: requireWebGL2Uniform(
 				gl,
 				program,

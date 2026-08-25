@@ -34,6 +34,11 @@ import {
 	decodeExplorerFixedTickEnvelope,
 	type ExplorerFixedTickEnvelope,
 } from "./explorer-fixed-tick";
+import type {
+	HostCommandArguments,
+	HostCommandName,
+	HostTransport,
+} from "../lib/host/host-transport";
 
 const DYNAMIC_ENTITY_EVENT = "explorer-dynamic-entity";
 const FIXED_TICK_EVENT = "explorer-fixed-tick";
@@ -45,13 +50,19 @@ export interface ExplorerFixedTickReceipt {
 	readonly receivedAtMs: number;
 }
 
-/** Injectable Tauri boundary for listener-before-request hydration and focused commands. */
+/** Injectable host boundary for listener-before-request hydration and focused commands. */
 export interface ExplorerDynamicEntityTransport {
 	listen(
-		event: string,
+		event:
+			| typeof DYNAMIC_ENTITY_EVENT
+			| typeof FIXED_TICK_EVENT
+			| typeof POSSESSION_EVENT_OUTCOMES,
 		handler: (payload: unknown) => void,
 	): Promise<() => void>;
-	invoke(command: string, args?: Record<string, unknown>): Promise<unknown>;
+	invoke(
+		command: HostCommandName,
+		args?: HostCommandArguments,
+	): Promise<unknown>;
 }
 
 /** Owns one frontend listener lifetime over a shared current-entity mirror. */
@@ -329,16 +340,12 @@ export class ExplorerDynamicEntitySession {
 	}
 }
 
-/** Production dynamic import keeps browser-only harnesses independent from Tauri. */
-export function tauriExplorerDynamicEntityTransport(): ExplorerDynamicEntityTransport {
+/** Host-backed transport keeps browser-only harnesses independent from any desktop shell. */
+export function hostExplorerDynamicEntityTransport(
+	host: HostTransport,
+): ExplorerDynamicEntityTransport {
 	return {
-		listen: async (event, handler) => {
-			const { listen } = await import("@tauri-apps/api/event");
-			return listen<unknown>(event, ({ payload }) => handler(payload));
-		},
-		invoke: async (command, args) => {
-			const { invoke } = await import("@tauri-apps/api/core");
-			return invoke(command, args);
-		},
+		listen: (event, handler) => host.listen(event, handler),
+		invoke: (command, args) => host.invoke(command, args),
 	};
 }

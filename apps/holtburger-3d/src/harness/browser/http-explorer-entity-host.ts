@@ -44,7 +44,7 @@ export interface PossessionTickResponse {
 	readonly outcomes: readonly PossessionEventOutcome[];
 }
 
-/** Browser-harness registration request mirroring the production Tauri command shape. */
+/** Browser-harness registration request mirroring the production host command shape. */
 export interface HttpKinematicBoomStartRequest {
 	readonly possessionGeneration: number;
 	readonly guid: number;
@@ -59,20 +59,20 @@ export interface HttpKinematicBoomStartRequest {
 	readonly clearanceRadius: number;
 }
 
-/** Browser-harness intent request mirroring the production Tauri command shape. */
+/** Browser-harness intent request mirroring the production host command shape. */
 export interface HttpKinematicBoomIntentRequest extends HostKinematicBoomIdentity {
 	readonly inputSequence: number;
 	readonly viewDirection: readonly [number, number, number];
 	readonly cumulativeZoomDisplacement: number;
 }
 
-/** Browser-harness projection-clearance request mirroring the production Tauri command shape. */
+/** Browser-harness projection-clearance request mirroring the production host command shape. */
 export interface HttpKinematicBoomClearanceRequest extends HostKinematicBoomIdentity {
 	readonly projectionRevision: number;
 	readonly clearanceRadius: number;
 }
 
-/** Harness-only HTTP adapter over the same app-local Explorer driver used by Tauri commands. */
+/** Harness-only HTTP adapter over the same app-local Explorer driver used by host commands. */
 export class HttpExplorerEntityHost {
 	readonly #baseUrl: URL;
 	readonly #interest: SimulationInterestController;

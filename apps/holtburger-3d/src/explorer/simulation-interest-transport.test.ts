@@ -1,15 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { tauriSimulationInterestTransport } from "./simulation-interest-transport";
+import type { HostTransport } from "../lib/host/host-transport";
+import { hostSimulationInterestTransport } from "./simulation-interest-transport";
 
 const mocks = vi.hoisted(() => ({
 	invoke: vi.fn(),
 }));
 
-vi.mock("@tauri-apps/api/core", () => ({
-	invoke: mocks.invoke,
-}));
-
-describe("tauriSimulationInterestTransport", () => {
+describe("hostSimulationInterestTransport", () => {
 	beforeEach(() => {
 		mocks.invoke.mockReset();
 	});
@@ -31,7 +28,11 @@ describe("tauriSimulationInterestTransport", () => {
 				};
 			},
 		);
-		const transport = tauriSimulationInterestTransport();
+		const host: HostTransport = {
+			invoke: mocks.invoke,
+			listen: vi.fn(),
+		};
+		const transport = hostSimulationInterestTransport(host);
 
 		await transport.replace({
 			landblockIds: ["0xda55ffff"],

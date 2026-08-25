@@ -198,7 +198,7 @@ The browser harness is agent-owned diagnostic infrastructure:
   the production system independently needs the same capability.
 
 Do not conclude that runtime verification is unavailable merely because the
-interactive Tauri application is unsuitable for automation. Adapt the browser
+interactive desktop application is unsuitable for automation. Adapt the browser
 harness or create a focused harness. If required local content, Chrome, or
 another external prerequisite is genuinely unavailable, report the exact
 missing prerequisite and use synthetic evidence where practical.

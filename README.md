@@ -88,7 +88,7 @@ This phase matters because the TUI is not the end state, but the underlying stac
 
 ### Phase 4: 3D Client
 
-With the stack proven out and scripting in place, work can begin on a full 3D client as a fast follow. The current expectation is a Tauri-based client with a classic visual style, backed by a modern, scriptable, and more extensible UI model.
+With the stack proven out and scripting in place, work can begin on a full 3D client as a fast follow. The current implementation uses an Electron shell with a classic visual style, backed by a modern, scriptable, and more extensible UI model.
 
 The TUI is therefore not a side project or disposable prototype. It is the shortest path to validating the complete client architecture, and it should continue to produce useful standalone value even after the 3D client exists.
 

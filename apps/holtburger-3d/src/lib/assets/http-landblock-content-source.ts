@@ -61,7 +61,7 @@ export interface HttpLandblockProfileDiagnostic {
 	readonly landblockId: LandblockId;
 }
 
-/** Browser-compatible adapter for the same closed landblock batch contract used by Tauri. */
+/** Browser-compatible adapter for the same closed landblock batch contract used by the app host. */
 export class HttpLandblockContentSource
 	implements
 		LandblockSourceBatchSource,
@@ -171,7 +171,7 @@ export class HttpLandblockContentSource
 		);
 	}
 
-	/** Resolved by the dev host from the same contract the Tauri command reads. */
+	/** Resolved by the dev host from the same contract the sidecar command reads. */
 	async loadMotionTableClosure(
 		motionTableId: DatAssetId,
 	): Promise<DatAssetId[]> {

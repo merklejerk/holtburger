@@ -55,29 +55,16 @@ describe("buildMapTerrainMesh", () => {
 		expect(mesh.positions[5]).toBe(-0);
 	});
 
-	it("gives a triangle the terrain type most of its corners agree on", () => {
-		// Cell (0, 0)'s southern corners are type 9 and its northern ones type 4, so the first
-		// triangle — south-west, south-east, north-east — is two to one for 9.
-		// The default diagonal makes the first triangle south-west, south-east, north-west, so its
-		// two southern corners outvote the northern one.
-		const terrainSamples = new Uint16Array(SIDE * SIDE).fill(sample(4));
-		terrainSamples[0] = sample(9);
-		terrainSamples[1] = sample(9);
-		const mesh = buildMapTerrainMesh(source({ terrainSamples }));
-
-		expect([...mesh.terrainCodes.slice(0, 3)]).toEqual([9, 9, 9]);
-	});
-
-	it("resolves a three-way corner disagreement without depending on corner order", () => {
-		// The default diagonal makes the first triangle south-west, south-east, north-west.
+	it("carries the authored terrain type of each corner, unresolved", () => {
+		// The default diagonal makes the first triangle south-west, south-east, north-west, and each
+		// of those corners keeps its own type so the shader can blend between them.
 		const terrainSamples = new Uint16Array(SIDE * SIDE).fill(sample(4));
 		terrainSamples[0] = sample(7);
 		terrainSamples[1] = sample(9);
 		terrainSamples[SIDE] = sample(5);
 		const mesh = buildMapTerrainMesh(source({ terrainSamples }));
 
-		// No majority exists, so the lowest authored code wins for every corner alike.
-		expect([...mesh.terrainCodes.slice(0, 3)]).toEqual([5, 5, 5]);
+		expect([...mesh.terrainCodes.slice(0, 3)]).toEqual([7, 9, 5]);
 	});
 
 	it("carries road presence per corner so the edge can be interpolated", () => {

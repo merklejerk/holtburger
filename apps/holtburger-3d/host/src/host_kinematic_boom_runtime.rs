@@ -244,21 +244,24 @@ impl From<KinematicBoomHoldReason> for HostKinematicBoomHoldReason {
     }
 }
 
-/// Placement-authoring discontinuity recovered at a full-envelope-safe target-adjacent placement.
+/// Why a tick reset the camera discontinuously onto the target seed.
+///
+/// The placement such a tick carries is the possessed body's own collision sphere, so its camera
+/// coincides with its visual pivot. `InitialPlacement` is ordinary; the rest are recoveries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum HostKinematicBoomReseedReason {
+    InitialPlacement,
     PlacedPath,
     PlacementRecovery,
-    ClearanceRecovery,
 }
 
 impl From<KinematicBoomReseedReason> for HostKinematicBoomReseedReason {
     fn from(value: KinematicBoomReseedReason) -> Self {
         match value {
+            KinematicBoomReseedReason::InitialPlacement => Self::InitialPlacement,
             KinematicBoomReseedReason::PlacedPath => Self::PlacedPath,
             KinematicBoomReseedReason::PlacementRecovery => Self::PlacementRecovery,
-            KinematicBoomReseedReason::ClearanceRecovery => Self::ClearanceRecovery,
         }
     }
 }

@@ -67,9 +67,9 @@ const holdReasonSchema = z.enum([
 	"path-projection",
 ]);
 const reseedReasonSchema = z.enum([
+	"initial-placement",
 	"placed-path",
 	"placement-recovery",
-	"clearance-recovery",
 ]);
 const tickSchema = z.discriminatedUnion("kind", [
 	z
@@ -130,7 +130,15 @@ export type HostKinematicBoomUpdateReceipt = z.infer<
 	typeof updateReceiptSchema
 >;
 
-/** Camera placement and host-owned filtered subject pivot sampled from one path instant. */
+/**
+ * Camera placement and host-owned filtered subject pivot sampled from one path instant.
+ *
+ * The two can coincide. Every reseed tick — the generation's first, and each recovery — settles the
+ * camera onto the possessed body's own collision sphere, which is also what the pivot resolves to,
+ * so for those instants the camera is inside the body it is looking at and the pair carries no look
+ * direction. Consumers that derive orientation from the pair must name a fallback; see
+ * `resolveCameraLookAtAngles`.
+ */
 export interface HostKinematicBoomPresentation {
 	readonly placement: HostCameraPlacement;
 	readonly visualPivot: SceneVec3;

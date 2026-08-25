@@ -67,9 +67,8 @@ describe("camera orientation", () => {
 	});
 
 	it("reports a coincident camera and target as carrying no direction", () => {
-		// The host boom seats its camera on the possessed body's own collision sphere while it
-		// seeds a generation and whenever it recovers one, so callers that can name a fallback
-		// orientation need this to be a value rather than a throw.
+		// The boom publishes a coincident pair on every reseed tick, so callers that can name a
+		// fallback orientation need this to be a value rather than a throw.
 		const position = new Vec3(4, 2, -3);
 
 		expect(resolveCameraLookAtAngles(position, position)).toBeNull();

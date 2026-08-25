@@ -57,11 +57,10 @@ export function createEntityFacingCameraYaw(
 /**
  * Look angles from a camera/target pair, or null when the pair carries no direction.
  *
- * A coincident pair is a legal state rather than a fault: the host boom seats its camera on the
- * possessed body's own collision sphere while it seeds a generation and whenever it recovers one,
- * so for those ticks the camera is inside the thing it is looking at and no direction exists.
- * Callers that can name a fallback orientation read this; callers for which a coincident pair
- * would be a bug read `createCameraLookAtAngles`, which rejects it.
+ * A coincident pair is a legal state rather than a fault — `HostKinematicBoomPresentation`
+ * documents when the boom produces one — so callers that can name a fallback orientation read this.
+ * Callers for which a coincident pair would be a bug read `createCameraLookAtAngles`, which rejects
+ * it.
  */
 export function resolveCameraLookAtAngles(
 	position: Vec3,

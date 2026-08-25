@@ -4510,7 +4510,7 @@ mod tests {
         assert!(matches!(
             initial_tick,
             HostKinematicBoomTick::Reseeded {
-                reason: crate::host_kinematic_boom_runtime::HostKinematicBoomReseedReason::ClearanceRecovery,
+                reason: crate::host_kinematic_boom_runtime::HostKinematicBoomReseedReason::InitialPlacement,
                 ..
             }
         ));

@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
 	createCameraAxesRadians,
-	createEntityFacingCameraYaw,
 	createCameraLookAtAngles,
 	createCameraRotation,
 	createCameraRotationRadians,
+	createEntityFacingCameraYaw,
+	resolveCameraLookAtAngles,
 } from "./camera-orientation";
 import { createViewMat4, transformPoint3 } from "./matrices";
 import { Vec3 } from "./types";
@@ -62,6 +63,21 @@ describe("camera orientation", () => {
 		expect(forward.z).toBeCloseTo(expected.z);
 		expect(() => createCameraLookAtAngles(position, position)).toThrow(
 			"finite and distinct",
+		);
+	});
+
+	it("reports a coincident camera and target as carrying no direction", () => {
+		// The host boom seats its camera on the possessed body's own collision sphere while it
+		// seeds a generation and whenever it recovers one, so callers that can name a fallback
+		// orientation need this to be a value rather than a throw.
+		const position = new Vec3(4, 2, -3);
+
+		expect(resolveCameraLookAtAngles(position, position)).toBeNull();
+		expect(
+			resolveCameraLookAtAngles(position, new Vec3(Number.NaN, 2, -3)),
+		).toBeNull();
+		expect(resolveCameraLookAtAngles(position, new Vec3(4, 5, -3))).toEqual(
+			createCameraLookAtAngles(position, new Vec3(4, 5, -3)),
 		);
 	});
 

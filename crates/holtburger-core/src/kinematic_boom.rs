@@ -12,6 +12,36 @@ use thiserror::Error;
 
 const DIRECTION_EPSILON: f32 = 1.0e-6;
 
+/// Point a third-person camera pivots on, in the body's own frame.
+///
+/// The rule is "look at the middle of the body". The best statement of where that is comes from the
+/// motion sphere the boom already targets for collision, so the camera and the collision query agree
+/// on what the body is. When a setup authors no motion sphere at all, retail substitutes a 0.1m
+/// stand-in (`CPhysicsObj::transition`, acclient.c:308364-308369) that says nothing about the body's
+/// size, and the authored setup height is the only remaining statement of it; half that height is
+/// the body's midpoint. Taking the larger of the two applies one rule to both cases rather than
+/// branching on which source happens to exist.
+///
+/// RETAIL DIVERGENCE: retail pivots at a fixed body-local `(0, 0, 1.5)` regardless of what the
+/// camera is pivoting on (`SmartBox::set_viewer_home`, acclient.c:138183-138187, re-asserted by the
+/// zoom path at acclient.c:142737-142739). It can afford that because `SetPivotObject` is only ever
+/// called with the player's own id, and 1.5 is the human body's upper motion-sphere center (1.49 by
+/// census). Possession makes the pivot object arbitrary, which retail never had to handle: a chair
+/// would frame 1.04m of empty air above itself. Content cannot observe the pivot — it is a camera
+/// placement, not a physics or gameplay quantity — and the human case is preserved to within a
+/// centimetre, so the departure costs no compatibility. Census over the 9,030 self-propelled weenie
+/// templates (`boom_pivot_height_census`): this rule lands within 0.25m of retail's constant for
+/// 64.3% of them, against 4.8% for the sphere top and 5.2% for the authored height. 92.4% of those
+/// templates author a motion sphere, and it is the sphere that decides the pivot for 86.2%; the
+/// height fallback decides the rest, and for 1.3% neither source says anything.
+pub fn resolve_camera_pivot_offset(target_sphere_center: Vector3, body_height: f32) -> Vector3 {
+    Vector3 {
+        x: target_sphere_center.x,
+        y: target_sphere_center.y,
+        z: target_sphere_center.z.max(body_height * 0.5),
+    }
+}
+
 /// Validated comfort and finite-work policy for one kinematic boom session.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct KinematicBoomProfile {
@@ -1236,6 +1266,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
+    use crate::RETAIL_DUMMY_MOTION_SPHERE;
     use holtburger_common::{Plane, Sphere};
     use holtburger_content::{
         BspSolid, CellVolume, ColliderScale, CollisionBox, CollisionPolygon, CollisionShape,
@@ -1245,6 +1276,46 @@ mod tests {
     use holtburger_dat::physics::{BspLeaf, BspNode, InternalNode};
 
     const LANDBLOCK: u32 = 0xda55_ffff;
+
+    /// Human upper motion-sphere center and authored setup height, from the retail archive.
+    const HUMAN_SPHERE_CENTER_Z: f32 = 1.49;
+    const HUMAN_BODY_HEIGHT: f32 = 2.05;
+
+    #[test]
+    fn camera_pivot_follows_the_targeted_motion_sphere() {
+        // The human is the one body retail's fixed 1.5 was authored against, so the generalized
+        // rule has to land on it without being told about it.
+        let pivot = resolve_camera_pivot_offset(
+            Vector3::new(0.0, 0.0, HUMAN_SPHERE_CENTER_Z),
+            HUMAN_BODY_HEIGHT,
+        );
+        assert_eq!(pivot.z, HUMAN_SPHERE_CENTER_Z);
+
+        // A chair, whose pivot retail would have hung 1.04m above the body entirely.
+        let chair = resolve_camera_pivot_offset(Vector3::new(0.0, 0.0, 0.23), 0.46);
+        assert_eq!(chair.z, 0.23);
+    }
+
+    #[test]
+    fn camera_pivot_falls_back_to_the_authored_height_without_a_motion_sphere() {
+        // A 64m tree authors no motion sphere, so its collision geometry is retail's 0.1m stand-in
+        // and says nothing about the body. Half the authored height frames the body instead.
+        let pivot = resolve_camera_pivot_offset(RETAIL_DUMMY_MOTION_SPHERE.center, 64.0);
+        assert_eq!(pivot.z, 32.0);
+    }
+
+    #[test]
+    fn camera_pivot_keeps_the_body_lateral_center_of_an_offset_sphere() {
+        let pivot = resolve_camera_pivot_offset(Vector3::new(0.4, -0.2, 1.1), 1.0);
+        assert_eq!((pivot.x, pivot.y), (0.4, -0.2));
+    }
+
+    #[test]
+    fn camera_pivot_survives_a_body_that_declares_no_size_at_all() {
+        // Both sources degenerate: the pivot rests on the stand-in sphere rather than failing.
+        let pivot = resolve_camera_pivot_offset(RETAIL_DUMMY_MOTION_SPHERE.center, 0.0);
+        assert_eq!(pivot.z, RETAIL_DUMMY_MOTION_SPHERE.center.z);
+    }
 
     fn profile_definition(maximum_control_legs: usize) -> KinematicBoomProfileDefinition {
         KinematicBoomProfileDefinition {

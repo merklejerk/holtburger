@@ -258,6 +258,8 @@ pub struct DynamicEntityDefinitionInput {
     pub rotation_speed: Option<f32>,
     /// Producer-resolved radar presentation facts consumed by overhead-map blips.
     pub radar: DynamicEntityRadarFacts,
+    /// Setup-resolved body height at this entity's scale before scalar validation.
+    pub body_height: f32,
     /// Fully resolved semantic state and state-derived decisions.
     pub physics: EffectiveEntityPhysicsState,
 }
@@ -285,6 +287,12 @@ pub struct DynamicEntityDefinition {
     pub rotation_speed: Option<f32>,
     /// Producer-resolved radar presentation facts consumed by overhead-map blips.
     pub radar: DynamicEntityRadarFacts,
+    /// Authored body height at this entity's scale; zero for the 3.4% of templates declaring none.
+    ///
+    /// The same fact retail keeps on the part array (`CPartArray::GetHeight`, acclient.c:313220).
+    /// Retained here rather than re-read from the setup because the possession camera pivot needs it
+    /// long after content resolution has finished.
+    pub body_height: f32,
     /// Fully resolved semantic state and state-derived decisions.
     pub physics: EffectiveEntityPhysicsState,
 }
@@ -304,6 +312,8 @@ pub enum DynamicEntityDefinitionError {
     InvalidMaximumVelocity,
     #[error("dynamic-entity rotation speed must be finite and non-negative")]
     InvalidRotationSpeed,
+    #[error("dynamic-entity body height must be finite and non-negative")]
+    InvalidBodyHeight,
 }
 
 /// Fully resolved one-shot launch consequences shared by producer compositions.
@@ -362,6 +372,11 @@ impl DynamicEntityDefinition {
             input.rotation_speed,
             DynamicEntityDefinitionError::InvalidRotationSpeed,
         )?;
+        // Zero is authored content meaning "declares no height"; negative or non-finite is a
+        // resolution bug on our side, so it fails rather than reaching a consumer.
+        if !input.body_height.is_finite() || input.body_height < 0.0 {
+            return Err(DynamicEntityDefinitionError::InvalidBodyHeight);
+        }
 
         Ok(Self {
             identity: input.identity,
@@ -374,6 +389,7 @@ impl DynamicEntityDefinition {
             maximum_velocity: input.maximum_velocity,
             rotation_speed: input.rotation_speed,
             radar: input.radar,
+            body_height: input.body_height,
             physics: input.physics,
         })
     }
@@ -486,6 +502,8 @@ pub struct DynamicEntitySetupPreparation {
     pub physics: EntityPhysicsSetupFacts,
     /// Validated movement spheres used for placement even when the entity remains pose-only.
     pub movement_spheres: PhysicalSphereSet,
+    /// Authored setup height scaled by the entity's own scale; zero where the setup declares none.
+    pub body_height: f32,
 }
 
 /// Failure to apply a shared body operation to the supplied canonical scene.
@@ -937,6 +955,7 @@ fn prepare_setup(
             has_default_script: setup.default_script.is_some(),
         },
         movement_spheres,
+        body_height: setup.height * object_scale,
     })
 }
 
@@ -1484,6 +1503,7 @@ mod tests {
             maximum_velocity: None,
             rotation_speed: None,
             radar: DynamicEntityRadarFacts::default(),
+            body_height: 2.05,
             physics: resolve_effective_entity_physics_state(PhysicsState::GRAVITY),
         }
     }

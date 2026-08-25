@@ -12,7 +12,9 @@ default-run = "holtburger-3d"
 profile-devtools = ["tauri/devtools"]
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+# Pinned to a revision rather than the branch: `feat/cef` is unmerged and rebases, and this is the
+# app's only runtime, so a moving target would break the build without a local change.
+tauri-build = { git = "https://github.com/tauri-apps/tauri", rev = "f5bf953fe2a259f2d176491f50ec2930fb73e03d", features = [] }
 
 [dependencies]
 anyhow.workspace = true
@@ -24,7 +26,15 @@ holtburger-protocol.workspace = true
 holtburger-world.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-tauri = { version = "2", features = [] }
+# `default-features = false` drops wry, which is otherwise pulled in by `default` and would compile
+# a second runtime we never construct. `x11`/`dbus` are dropped with it: both only gate
+# `tauri-runtime-wry`. `common-controls-v6` is kept because it also reaches `muda`, which we do use.
+tauri = { git = "https://github.com/tauri-apps/tauri", rev = "f5bf953fe2a259f2d176491f50ec2930fb73e03d", default-features = false, features = [
+    "cef",
+    "compression",
+    "common-controls-v6",
+    "dynamic-acl",
+] }
 tokio.workspace = true
 geo = "0.33.1"
 hex.workspace = true

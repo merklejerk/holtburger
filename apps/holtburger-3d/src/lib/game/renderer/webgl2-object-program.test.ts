@@ -11,12 +11,12 @@ describe("createWebGL2ObjectProgram", () => {
 		createWebGL2ObjectProgram(fixture.gl);
 		createWebGL2ObjectProgram(fixture.gl, {
 			distanceFog: true,
-			transformSource: "instanced",
+			transformSource: "attribute",
 		});
 		createWebGL2ObjectProgram(fixture.gl, { distanceFog: false });
 		createWebGL2ObjectProgram(fixture.gl, {
 			distanceFog: false,
-			transformSource: "instanced",
+			transformSource: "attribute",
 		});
 
 		expect(fixture.programs).toHaveLength(4);

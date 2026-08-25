@@ -5,6 +5,7 @@ import type {
 	RendererContributionFrameMetrics,
 	RendererFrameProfile,
 	RendererGpuFrameProfile,
+	RendererGpuFrameTimings,
 } from "./renderer";
 import { FRONTEND_TUNING } from "../../frontend-tuning";
 
@@ -173,12 +174,60 @@ export class WebGL2GpuFramePhaseCapture {
 	}
 }
 
+/** Per-phase GPU totals under accumulation, before a mean is derived from them. */
+type MutableGpuTimings = Record<keyof RendererGpuFrameTimings, number>;
+
+/**
+ * Every GPU phase at zero, written as a literal so the compiler proves the set is complete.
+ *
+ * It is also the only source of `GPU_TIMING_KEYS`: a hand-maintained parallel key array would let
+ * a newly added phase be declared and zeroed but never accumulated, which reads as a real zero.
+ */
+function emptyGpuTimings(): MutableGpuTimings {
+	return {
+		ambientOcclusionMs: 0,
+		blendedMs: 0,
+		farTerrainMs: 0,
+		nearTerrainMs: 0,
+		opaqueMs: 0,
+		particleMs: 0,
+		portalCompositionMs: 0,
+		presentationMs: 0,
+		skyMs: 0,
+		terrainMs: 0,
+		totalMs: 0,
+	};
+}
+
+const GPU_TIMING_KEYS = Object.keys(
+	emptyGpuTimings(),
+) as readonly (keyof RendererGpuFrameTimings)[];
+
+function addGpuTimings(
+	totals: MutableGpuTimings,
+	sample: RendererGpuFrameTimings,
+): void {
+	for (const key of GPU_TIMING_KEYS) totals[key] += sample[key];
+}
+
+function scaleGpuTimings(
+	totals: RendererGpuFrameTimings,
+	factor: number,
+): RendererGpuFrameTimings {
+	const scaled = emptyGpuTimings();
+	for (const key of GPU_TIMING_KEYS) scaled[key] = totals[key] * factor;
+	return scaled;
+}
+
 /** Context-owned, opt-in timestamp collector that never waits for unfinished GPU results. */
 export class WebGL2GpuFrameProfiler {
 	readonly #gl: WebGL2RenderingContext;
 	readonly #extension: WebGL2DisjointTimerQueryExtension | null;
 	readonly #pending: PendingFrame[] = [];
 	#latest: RendererGpuFrameProfile;
+	/** Running per-phase totals since the last reset; the mean is derived, never stored. */
+	#sums: MutableGpuTimings = emptyGpuTimings();
+	#sampleCount = 0;
 	#destroyed = false;
 	/** WebGL permits one active elapsed-time query per context, so this guards nesting. */
 	#activeQuery: WebGLQuery | null = null;
@@ -239,7 +288,17 @@ export class WebGL2GpuFrameProfiler {
 			) as boolean;
 			if (!available) return;
 			this.#pending.shift();
-			this.#latest = this.#resolveFrame(pending);
+			const timings = this.#resolveFrame(pending);
+			addGpuTimings(this.#sums, timings);
+			this.#sampleCount += 1;
+			this.#latest = {
+				...timings,
+				frameNumber: pending.frameNumber,
+				kind: "available",
+				mean: scaleGpuTimings(this.#sums, 1 / this.#sampleCount),
+				pendingFrameCount: this.#pending.length,
+				sampleCount: this.#sampleCount,
+			};
 			this.#deleteFrame(pending);
 		}
 	}
@@ -248,6 +307,18 @@ export class WebGL2GpuFrameProfiler {
 	getProfile(): RendererGpuFrameProfile {
 		if (this.#latest.kind === "unsupported") return this.#latest;
 		return { ...this.#latest, pendingFrameCount: this.#pending.length };
+	}
+
+	/** Discard accumulated samples so the next mean covers one explicit measurement window. */
+	reset(): void {
+		this.#sums = emptyGpuTimings();
+		this.#sampleCount = 0;
+		if (this.#latest.kind === "available") {
+			this.#latest = {
+				kind: "pending",
+				pendingFrameCount: this.#pending.length,
+			};
+		}
 	}
 
 	/** Delete every outstanding query without waiting for results. */
@@ -291,7 +362,7 @@ export class WebGL2GpuFrameProfiler {
 		this.#pending.push(frame);
 	}
 
-	#resolveFrame(frame: PendingFrame): RendererGpuFrameProfile {
+	#resolveFrame(frame: PendingFrame): RendererGpuFrameTimings {
 		const milliseconds = (query: WebGLQuery): number =>
 			(this.#gl.getQueryParameter(query, this.#gl.QUERY_RESULT) as number) /
 			NANOSECONDS_PER_MILLISECOND;
@@ -340,13 +411,10 @@ export class WebGL2GpuFrameProfiler {
 			ambientOcclusionMs,
 			blendedMs,
 			farTerrainMs,
-			frameNumber: frame.frameNumber,
-			kind: "available",
 			opaqueMs,
 			particleMs,
 			presentationMs,
 			portalCompositionMs,
-			pendingFrameCount: this.#pending.length,
 			skyMs,
 			nearTerrainMs,
 			terrainMs,
@@ -481,11 +549,23 @@ export class WebGL2FrameProfileCapture {
 	}
 }
 
-/** Opt-in renderer profiler; construction is the only point that probes timer-query support. */
+/**
+ * Opt-in renderer profiler; construction is the only point that probes timer-query support.
+ *
+ * The mean accumulates over every frame since the last `reset`, not over a rolling tail, because a
+ * fixed frame count is a different amount of wall time at every frame rate. At the harness's
+ * uncapped indoor rate a sixty-frame tail spans about twenty-six milliseconds, which is short
+ * enough for one hitch to invert the sign of a measured change.
+ *
+ * The tail is retained anyway, but only for the percentile, which cannot be derived from running
+ * sums.
+ */
 export class WebGL2FrameProfiler {
 	readonly #gpu: WebGL2GpuFrameProfiler;
 	#frameNumber = 0;
-	readonly #cpuFrames: RendererCpuFrameProfile[] = [];
+	/** Recent frames retained solely so the percentile has samples to rank. */
+	readonly #recentCpuFrames: RendererCpuFrameProfile[] = [];
+	#aggregate = createEmptyCpuAggregate();
 
 	constructor(gl: WebGL2RenderingContext) {
 		this.#gpu = new WebGL2GpuFrameProfiler(gl);
@@ -505,97 +585,130 @@ export class WebGL2FrameProfiler {
 
 	/** Return the latest completed CPU profile paired with the latest delayed GPU outcome. */
 	getProfile(): RendererFrameProfile | null {
-		if (this.#cpuFrames.length === 0) return null;
+		const aggregate = this.#aggregate;
+		if (aggregate.latest === null) return null;
 		return {
-			cpu: summarizeCpuFrames(this.#cpuFrames),
+			cpu: summarizeCpuAggregate(aggregate, this.#recentCpuFrames),
 			gpu: this.#gpu.getProfile(),
 		};
+	}
+
+	/**
+	 * Discard every accumulated sample so the next mean covers one explicit measurement window.
+	 *
+	 * Frame numbering is deliberately not reset: it identifies a capture within the profiling
+	 * session, and restarting it would make two samples from one session indistinguishable.
+	 */
+	reset(): void {
+		this.#recentCpuFrames.length = 0;
+		this.#aggregate = createEmptyCpuAggregate();
+		this.#gpu.reset();
 	}
 
 	/** Tear down every pending GPU query immediately. */
 	destroy(): void {
 		this.#gpu.destroy();
-		this.#cpuFrames.length = 0;
+		this.reset();
 	}
 
 	finishFrame(cpu: RendererCpuFrameProfile): void {
-		this.#cpuFrames.push(cpu);
+		const aggregate = this.#aggregate;
+		for (const key of CPU_TIMING_KEYS) aggregate.totals[key] += cpu[key];
+		for (const key of CONTRIBUTION_METRIC_KEYS) {
+			aggregate.contributionTotals[key] += cpu.contribution[key];
+		}
+		aggregate.sampleCount += 1;
+		aggregate.latest = cpu;
+		this.#recentCpuFrames.push(cpu);
 		if (
-			this.#cpuFrames.length >
-			FRONTEND_TUNING.diagnostics.maximumRetainedCpuFrames
+			this.#recentCpuFrames.length >
+			FRONTEND_TUNING.diagnostics.percentileCpuFrameTail
 		) {
-			this.#cpuFrames.shift();
+			this.#recentCpuFrames.shift();
 		}
 	}
 }
 
-/** Build a cold rolling summary without adding aggregation work to the frame path. */
-function summarizeCpuFrames(
-	frames: readonly RendererCpuFrameProfile[],
-): RendererCpuFrameProfileWindow {
-	const latest = frames.at(-1);
-	if (!latest) throw new Error("Cannot summarize an empty CPU profile window.");
-	const totals: Record<keyof RendererCpuFrameTimings, number> = {
+/** Running CPU totals since the last reset, plus the sample the latest-frame fields describe. */
+interface CpuFrameAggregate {
+	readonly totals: Record<keyof RendererCpuFrameTimings, number>;
+	readonly contributionTotals: MutableContributionFrameMetrics;
+	sampleCount: number;
+	latest: RendererCpuFrameProfile | null;
+}
+
+function createEmptyCpuAggregate(): CpuFrameAggregate {
+	return {
+		contributionTotals: createEmptyContributionMetrics(),
+		latest: null,
+		sampleCount: 0,
+		totals: createEmptyCpuTimings(),
+	};
+}
+
+/**
+ * Every timing at zero, written as a literal so the compiler proves the set is complete.
+ *
+ * `CPU_TIMING_KEYS` cannot carry that proof: `satisfies` checks that each entry is a valid key, not
+ * that every key appears. Building the record from that list would let a newly added phase reach
+ * consumers as `undefined` behind a cast.
+ */
+function createEmptyCpuTimings(): Record<
+	keyof RendererCpuFrameTimings,
+	number
+> {
+	return {
 		blendedOrderingMs: 0,
 		blendedSubmissionMs: 0,
-		particleSubmissionMs: 0,
 		finalizationMs: 0,
 		instanceRunPreparationMs: 0,
 		instanceUploadMs: 0,
 		opaqueSubmissionMs: 0,
 		otherMs: 0,
-		portalPlanningMs: 0,
+		particleSubmissionMs: 0,
 		portalCompositionMs: 0,
-		sceneQueryMs: 0,
+		portalPlanningMs: 0,
 		sceneContributionResolutionMs: 0,
+		sceneQueryMs: 0,
 		setupMs: 0,
 		terrainSubmissionMs: 0,
 		totalMs: 0,
 		viewPreparationMs: 0,
 	};
-	const contributionTotals = createEmptyContributionMetrics();
-	for (const frame of frames) {
-		for (const key of CPU_TIMING_KEYS) totals[key] += frame[key];
-		for (const key of CONTRIBUTION_METRIC_KEYS) {
-			contributionTotals[key] += frame.contribution[key];
-		}
+}
+
+/** Build a cold summary without adding aggregation work to the frame path. */
+function summarizeCpuAggregate(
+	aggregate: CpuFrameAggregate,
+	recentFrames: readonly RendererCpuFrameProfile[],
+): RendererCpuFrameProfileWindow {
+	const { latest, sampleCount, totals } = aggregate;
+	if (!latest || sampleCount === 0) {
+		throw new Error("Cannot summarize an empty CPU profile aggregate.");
 	}
-	const sampleCount = frames.length;
-	const mean: RendererCpuFrameTimings = {
-		blendedOrderingMs: totals.blendedOrderingMs / sampleCount,
-		blendedSubmissionMs: totals.blendedSubmissionMs / sampleCount,
-		finalizationMs: totals.finalizationMs / sampleCount,
-		instanceRunPreparationMs: totals.instanceRunPreparationMs / sampleCount,
-		instanceUploadMs: totals.instanceUploadMs / sampleCount,
-		opaqueSubmissionMs: totals.opaqueSubmissionMs / sampleCount,
-		otherMs: totals.otherMs / sampleCount,
-		particleSubmissionMs: totals.particleSubmissionMs / sampleCount,
-		portalPlanningMs: totals.portalPlanningMs / sampleCount,
-		portalCompositionMs: totals.portalCompositionMs / sampleCount,
-		sceneQueryMs: totals.sceneQueryMs / sampleCount,
-		sceneContributionResolutionMs:
-			totals.sceneContributionResolutionMs / sampleCount,
-		setupMs: totals.setupMs / sampleCount,
-		terrainSubmissionMs: totals.terrainSubmissionMs / sampleCount,
-		totalMs: totals.totalMs / sampleCount,
-		viewPreparationMs: totals.viewPreparationMs / sampleCount,
-	};
-	const orderedTotals = frames
+	const mean = createEmptyCpuTimings();
+	for (const key of CPU_TIMING_KEYS) mean[key] = totals[key] / sampleCount;
+	const orderedTotals = recentFrames
 		.map((frame) => frame.totalMs)
 		.toSorted((left, right) => left - right);
-	const p95TotalMs = orderedTotals.at(Math.ceil(sampleCount * 0.95) - 1);
-	if (p95TotalMs === undefined) {
+	const p95RecentTotalMs = orderedTotals.at(
+		Math.ceil(orderedTotals.length * 0.95) - 1,
+	);
+	if (p95RecentTotalMs === undefined) {
 		throw new Error("CPU profile percentile selection lost its sample.");
 	}
 	return {
 		contribution: {
 			latest: latest.contribution,
-			mean: averageContributionMetrics(contributionTotals, sampleCount),
+			mean: averageContributionMetrics(
+				aggregate.contributionTotals,
+				sampleCount,
+			),
 		},
 		latestFrameNumber: latest.frameNumber,
 		latestTotalMs: latest.totalMs,
 		mean,
-		p95TotalMs,
+		p95RecentTotalMs,
 		sampleCount,
 	};
 }

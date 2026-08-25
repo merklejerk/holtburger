@@ -1,3 +1,4 @@
+import type { BakedDrawMergeCensus } from "./baked-draw-merge-census";
 import type { LandblockId } from "../game-types";
 import type { RenderExtent } from "./render-extent";
 import type { SceneNodeId } from "../scene";
@@ -315,6 +316,23 @@ export interface FrameSelectionMetrics {
 	readonly objectProgramChanges: number;
 	/** Physical two-dimensional object texture binds performed across every rendered view. */
 	readonly objectTextureBinds: number;
+	/** Object draw calls issued across every rendered view, instanced and single alike. */
+	readonly objectDrawCalls: number;
+	/**
+	 * Uniform uploads issued by object draw submission across every rendered view.
+	 *
+	 * Paired with `objectDrawCalls` this is the per-draw uniform cost, which is the quantity the
+	 * submission path is optimized against. Counted at the upload site rather than derived from a
+	 * per-draw constant, because how many uniforms a draw sends depends on its material and detail.
+	 */
+	readonly objectUniformUploads: number;
+	/**
+	 * Per-draw uniform writes skipped because the location already held that value.
+	 *
+	 * Summed with `objectUniformUploads` this is the uniform set the draw path would issue without
+	 * filtering, so the ratio between them is what the filter is actually saving.
+	 */
+	readonly objectSuppressedUniformUploads: number;
 }
 
 /** Non-overlapping renderer CPU wall-time phases aggregated from profiled frames. */
@@ -370,9 +388,9 @@ export interface RendererCpuFrameProfile extends RendererCpuFrameTimings {
 	readonly frameNumber: number;
 }
 
-/** Short rolling CPU profile that exposes both attribution and frame-time variance. */
+/** CPU profile accumulated since the last reset, exposing attribution and frame-time variance. */
 export interface RendererCpuFrameProfileWindow {
-	/** Latest and arithmetic-mean contribution work across this profile window. */
+	/** Latest and arithmetic-mean contribution work since the last profile reset. */
 	readonly contribution: {
 		readonly latest: RendererContributionFrameMetrics;
 		readonly mean: RendererContributionFrameMetrics;
@@ -381,11 +399,87 @@ export interface RendererCpuFrameProfileWindow {
 	readonly latestFrameNumber: number;
 	/** Total CPU wall time of the most recently captured sample. */
 	readonly latestTotalMs: number;
-	/** Per-phase arithmetic mean across the retained sample window. */
+	/**
+	 * Per-phase arithmetic mean over every frame since the last profile reset.
+	 *
+	 * This is the only figure in this type suitable for comparing two builds. A fixed frame count
+	 * spans a different amount of wall time at every frame rate, so a rolling tail can invert the
+	 * sign of a real change when one hitch lands inside it.
+	 */
 	readonly mean: RendererCpuFrameTimings;
-	/** Nearest-rank 95th percentile of total CPU frame time. */
-	readonly p95TotalMs: number;
-	/** Number of frames represented by this profile window. */
+	/**
+	 * Nearest-rank 95th percentile of total CPU frame time over the most recent frames only.
+	 *
+	 * Bounded by `FRONTEND_TUNING.diagnostics.percentileCpuFrameTail` because a percentile needs
+	 * retained samples to rank and running sums cannot supply them. Read it as a hitch signal for
+	 * the recent past, never as a property of the measurement window.
+	 */
+	readonly p95RecentTotalMs: number;
+	/** Frames represented by `mean`, counted since the last profile reset. */
+	readonly sampleCount: number;
+}
+
+/** Per-phase GPU elapsed-time spans measured for one resolved frame. */
+export interface RendererGpuFrameTimings {
+	/** GPU elapsed-time span covering evaluation, filtering, and AO composition. */
+	readonly ambientOcclusionMs: number;
+	/** GPU elapsed-time span covering blended object commands. */
+	readonly blendedMs: number;
+	/** GPU elapsed-time span covering sampler-free far-terrain groups. */
+	readonly farTerrainMs: number;
+	/** GPU elapsed-time span covering opaque object commands. */
+	readonly opaqueMs: number;
+	/**
+	 * GPU elapsed-time span covering particle commands.
+	 *
+	 * Separate from `blendedMs` so a per-batch upload stall is attributable: every batch
+	 * writes into one buffer immediately before its own draw, and the driver must either
+	 * rename the buffer or wait.
+	 */
+	readonly particleMs: number;
+	/** GPU elapsed-time span covering flat color/depth presentation. */
+	readonly presentationMs: number;
+	/** GPU elapsed-time spans covering portal target setup and composition commands. */
+	readonly portalCompositionMs: number;
+	/**
+	 * GPU elapsed-time span covering both sky passes.
+	 *
+	 * One figure rather than two: the before-world and after-landscape passes are the same
+	 * cost to reason about, and elapsed queries cannot nest, so they are measured
+	 * sequentially and summed.
+	 */
+	readonly skyMs: number;
+	/** GPU elapsed-time span covering composed near-terrain groups. */
+	readonly nearTerrainMs: number;
+	/** GPU elapsed-time span covering terrain commands. */
+	readonly terrainMs: number;
+	/**
+	 * Sum of the measured phase spans, **not** wall-clock across the frame.
+	 *
+	 * Elapsed-time queries cannot nest, so no query can wrap the frame while phase queries
+	 * run inside it, and GPU work between phases is unmeasurable. There is deliberately no
+	 * `otherMs`: reporting an unmeasured gap as zero would read as "no unattributed work"
+	 * rather than "not measured".
+	 */
+	readonly totalMs: number;
+}
+
+/**
+ * One resolved GPU frame, plus the mean over every frame resolved since the last profile reset.
+ *
+ * The mean exists because a single GPU frame is not evidence: results arrive asynchronously, a
+ * driver may retire several frames' queries together, and one stalled batch moves a phase span by
+ * an order of magnitude. Compare builds on `mean`; read the per-frame spans as the latest sample.
+ */
+interface RendererGpuFrameSample extends RendererGpuFrameTimings {
+	/** Renderer frame identifier associated with this delayed result. */
+	readonly frameNumber: number;
+	readonly kind: "available";
+	/** Arithmetic mean of every phase over the frames resolved since the last reset. */
+	readonly mean: RendererGpuFrameTimings;
+	/** Submitted GPU frames whose timing results are not yet readable. */
+	readonly pendingFrameCount: number;
+	/** Frames represented by `mean`, counted since the last profile reset. */
 	readonly sampleCount: number;
 }
 
@@ -402,54 +496,7 @@ export type RendererGpuFrameProfile =
 			/** New GPU frames submitted since invalid timing queries were discarded. */
 			readonly pendingFrameCount: number;
 	  }
-	| {
-			/** GPU elapsed-time span covering evaluation, filtering, and AO composition. */
-			readonly ambientOcclusionMs: number;
-			/** GPU elapsed-time span covering blended object commands. */
-			readonly blendedMs: number;
-			/** GPU elapsed-time span covering sampler-free far-terrain groups. */
-			readonly farTerrainMs: number;
-			/** Renderer frame identifier associated with this delayed result. */
-			readonly frameNumber: number;
-			readonly kind: "available";
-			/** GPU elapsed-time span covering opaque object commands. */
-			readonly opaqueMs: number;
-			/**
-			 * GPU elapsed-time span covering particle commands.
-			 *
-			 * Separate from `blendedMs` so a per-batch upload stall is attributable: every batch
-			 * writes into one buffer immediately before its own draw, and the driver must either
-			 * rename the buffer or wait.
-			 */
-			readonly particleMs: number;
-			/** GPU elapsed-time span covering flat color/depth presentation. */
-			readonly presentationMs: number;
-			/** GPU elapsed-time spans covering portal target setup and composition commands. */
-			readonly portalCompositionMs: number;
-			/** Submitted GPU frames whose timing results are not yet readable. */
-			readonly pendingFrameCount: number;
-			/**
-			 * GPU elapsed-time span covering both sky passes.
-			 *
-			 * One figure rather than two: the before-world and after-landscape passes are the same
-			 * cost to reason about, and elapsed queries cannot nest, so they are measured
-			 * sequentially and summed.
-			 */
-			readonly skyMs: number;
-			/** GPU elapsed-time span covering composed near-terrain groups. */
-			readonly nearTerrainMs: number;
-			/** GPU elapsed-time span covering terrain commands. */
-			readonly terrainMs: number;
-			/**
-			 * Sum of the measured phase spans, **not** wall-clock across the frame.
-			 *
-			 * Elapsed-time queries cannot nest, so no query can wrap the frame while phase queries
-			 * run inside it, and GPU work between phases is unmeasurable. There is deliberately no
-			 * `otherMs`: reporting an unmeasured gap as zero would read as "no unattributed work"
-			 * rather than "not measured".
-			 */
-			readonly totalMs: number;
-	  };
+	| RendererGpuFrameSample;
 
 /** Latest CPU frame and delayed GPU result from an explicitly enabled profiling session. */
 export interface RendererFrameProfile {
@@ -488,6 +535,20 @@ export interface RendererFrameDiagnostics {
 	snapshot(): RendererFrameDiagnosticsSnapshot;
 	/** Create or tear down the explicit timing session and its GPU query resources. */
 	setProfilingEnabled(enabled: boolean): void;
+	/**
+	 * Discard accumulated profile samples so the next mean covers one explicit measurement window.
+	 *
+	 * A no-op while profiling is disabled, so a caller delimiting a measurement window does not
+	 * have to know whether profiling happens to be on.
+	 */
+	resetProfile(): void;
+	/**
+	 * Census how far the next complete frame's baked draws could merge.
+	 *
+	 * Resolves when that frame finishes, so the caller never observes a partial traversal. Rejects a
+	 * second concurrent request rather than interleaving two frames into one census.
+	 */
+	captureBakedDrawMergeCensus(): Promise<BakedDrawMergeCensus>;
 }
 
 /** Production control feedback from one fully completed renderer frame. */

@@ -132,6 +132,10 @@ import {
 	type PreparedStaticObjectDrawCompatibility,
 	type TransparentObjectRange,
 } from "./object-rendering-policy";
+import {
+	BakedDrawMergeCensusCollector,
+	type BakedDrawMergeCensus,
+} from "./baked-draw-merge-census";
 import { resolveStaticMaterialDetail } from "./static-detail-binding";
 import {
 	CompiledObjectDrawStore,
@@ -313,7 +317,8 @@ interface ObjectFrameInput {
 	readonly renderScopeKey: string;
 	readonly cullFaceOverride:
 		StaticObjectDrawUnit["material"]["polygon"]["cullFace"] | null;
-	readonly drawKind: "baked" | "instanced";
+	/** Which GL call form this submission takes; must match the program's transform source. */
+	readonly drawKind: "single" | "instanced";
 	readonly geometry: GeometryResourceKey;
 	readonly indexCount: number;
 	readonly indexStart: number;
@@ -566,6 +571,9 @@ interface MutableFrameSelectionMetrics {
 	objectLightingBinds: number;
 	objectProgramChanges: number;
 	objectTextureBinds: number;
+	objectDrawCalls: number;
+	objectUniformUploads: number;
+	objectSuppressedUniformUploads: number;
 }
 
 export class WebGL2Renderer implements Renderer {
@@ -607,9 +615,6 @@ export class WebGL2Renderer implements Renderer {
 		CompiledStaticNodeSubmissions,
 		PreparedObjectDrawCompatibility
 	>();
-	/** Last landblock offset uploaded, memoizing the per-draw lookup across a run. */
-	#lastDrawnLandblockId: string | null = null;
-	#lastDrawnLandblockOffset: LandblockRenderOffset = [0, 0, 0];
 	/** Terrain programs resolved once per realized landblock; see #resolveTerrainFrameInput. */
 	readonly #terrainFrameInputs = new WeakMap<
 		TerrainDrawUnit,
@@ -643,6 +648,16 @@ export class WebGL2Renderer implements Renderer {
 	#saoPass: WebGL2SaoPass | null = null;
 	/** Harness-only category view; production never enables synchronous depth census work. */
 	#saoCoverageVisualizationEnabled = false;
+	/**
+	 * One-frame baked-draw merge census in flight, or null on an ordinary frame.
+	 *
+	 * Collector and waiter are held together because neither is meaningful alone: the census
+	 * spans exactly the frame between installation and the next frame finish.
+	 */
+	#mergeCensusRequest: {
+		readonly collector: BakedDrawMergeCensusCollector;
+		readonly resolve: (census: BakedDrawMergeCensus) => void;
+	} | null = null;
 	readonly #visibleStaticLayers = new Set<string>();
 	readonly #visibleEnvCellScopes = new Set<string>();
 	/** Dynamic roots selected in any view of the frame, retained as production feedback. */
@@ -758,6 +773,9 @@ export class WebGL2Renderer implements Renderer {
 		objectLightingBinds: 0,
 		objectProgramChanges: 0,
 		objectTextureBinds: 0,
+		objectDrawCalls: 0,
+		objectUniformUploads: 0,
+		objectSuppressedUniformUploads: 0,
 	};
 	#frameWidth = 0;
 	#frameHeight = 0;
@@ -806,14 +824,14 @@ export class WebGL2Renderer implements Renderer {
 		this.#objectProgram = createWebGL2ObjectProgram(gl);
 		this.#instancedObjectProgram = createWebGL2ObjectProgram(gl, {
 			distanceFog: true,
-			transformSource: "instanced",
+			transformSource: "attribute",
 		});
 		this.#blendedObjectProgram = createWebGL2ObjectProgram(gl, {
 			distanceFog: false,
 		});
 		this.#blendedInstancedObjectProgram = createWebGL2ObjectProgram(gl, {
 			distanceFog: false,
-			transformSource: "instanced",
+			transformSource: "attribute",
 		});
 		this.#objectFallbackBinding = {
 			sampler: this.#textureSamplers.getSampler({
@@ -844,6 +862,17 @@ export class WebGL2Renderer implements Renderer {
 				},
 			}),
 			setProfilingEnabled: (enabled) => this.#setFrameProfilingEnabled(enabled),
+			resetProfile: () => this.#frameProfiler?.reset(),
+			captureBakedDrawMergeCensus: () =>
+				new Promise<BakedDrawMergeCensus>((resolve) => {
+					if (this.#mergeCensusRequest !== null) {
+						throw new Error("A baked draw merge census is already in flight.");
+					}
+					this.#mergeCensusRequest = {
+						collector: new BakedDrawMergeCensusCollector(),
+						resolve,
+					};
+				}),
 		};
 		gl.clearColor(
 			FRONTEND_TUNING.rendering.clearColor.red,
@@ -895,9 +924,6 @@ export class WebGL2Renderer implements Renderer {
 		profile: WebGL2FrameProfileCapture | null,
 	): void {
 		const setupStartedAt = profile?.beginCpuPhase();
-		// Offsets are anchor-relative and rebuilt every frame, so last frame's memo would be a
-		// stale value for the same landblock after the anchor moves.
-		this.#lastDrawnLandblockId = null;
 		this.#frameTextureFiltering = input.frameSettings.quality.textureFiltering;
 		// Compiled facts embed the samplers filtering selects and the cull-face override the
 		// env-cell mode selects, so a change to either invalidates every compiled entry. Both
@@ -1761,7 +1787,7 @@ export class WebGL2Renderer implements Renderer {
 			objects.push(
 				this.#compileStaticSubmission(resolved.drawUnit, {
 					cullFaceOverride: envCellRenderMode === "flat" ? "back" : null,
-					drawKind: "baked",
+					drawKind: "single",
 					geometry: resolved.geometry,
 					indexCount: resolved.drawUnit.indexCount,
 					indexStart: resolved.drawUnit.indexStart,
@@ -1817,7 +1843,7 @@ export class WebGL2Renderer implements Renderer {
 			objects.push(
 				this.#compileStaticSubmission(drawUnit, {
 					cullFaceOverride: null,
-					drawKind: "baked",
+					drawKind: "single",
 					geometry: resolved.geometry,
 					indexCount: drawUnit.indexCount,
 					indexStart: drawUnit.indexStart,
@@ -2084,10 +2110,18 @@ export class WebGL2Renderer implements Renderer {
 		metrics.objectLightingBinds = 0;
 		metrics.objectProgramChanges = 0;
 		metrics.objectTextureBinds = 0;
+		metrics.objectDrawCalls = 0;
+		metrics.objectUniformUploads = 0;
+		metrics.objectSuppressedUniformUploads = 0;
 	}
 
 	/** Finish counters shared by ordinary frames and explicit portal execution probes. */
 	#finishFrameSelectionMetrics(): void {
+		const census = this.#mergeCensusRequest;
+		if (census !== null) {
+			this.#mergeCensusRequest = null;
+			census.resolve(census.collector.summarize());
+		}
 		const arena = this.#frameInstances.getDiagnostics();
 		this.#frameSelectionMetrics.visibleStaticLayerCount =
 			this.#visibleStaticLayers.size;
@@ -3142,7 +3176,7 @@ export class WebGL2Renderer implements Renderer {
 			{
 				distanceFog: false,
 				portalVisibility: true,
-				transformSource: "instanced",
+				transformSource: "attribute",
 			},
 		);
 		return {
@@ -3272,14 +3306,28 @@ export class WebGL2Renderer implements Renderer {
 		return { objects, runCounts };
 	}
 
+	/**
+	 * Account for one per-draw uniform write.
+	 *
+	 * Issued and suppressed are counted separately rather than derived from each other, because
+	 * their sum is the uniform set a draw would send without filtering, and the ratio between them
+	 * is what the filtering actually saves. A method rather than a closure so the submission path
+	 * allocates nothing per draw.
+	 */
+	#countUniformWrite(issued: boolean): void {
+		const metrics = this.#frameSelectionMetrics;
+		if (issued) metrics.objectUniformUploads += 1;
+		else metrics.objectSuppressedUniformUploads += 1;
+	}
+
 	#drawObjectRange(
 		program: AnyObjectProgram,
 		object: PreparedObjectFrameInput,
 		landblockOffsets: PreparedSceneContributions["landblockOffsets"],
 	): void {
 		if (
-			(object.drawKind === "baked") !==
-			(program.transformSource === "baked")
+			(object.drawKind === "single") !==
+			(program.transformSource === "uniform")
 		) {
 			throw new Error(
 				`${object.drawKind} draw cannot use ${program.transformSource} object program.`,
@@ -3287,79 +3335,122 @@ export class WebGL2Renderer implements Renderer {
 		}
 		const { compatibility } = object;
 		const gl = this.#gl;
-		this.#objectState.applyCullFace(compatibility.cullFace);
-		if (program.transformSource === "baked") {
-			gl.uniformMatrix4fv(
-				program.uniforms.localToLandblock,
-				false,
-				mat4ToFloat32Array(object.localToLandblock, this.#matrixScratch),
+		const state = this.#objectState;
+		state.applyCullFace(compatibility.cullFace);
+		if (program.transformSource === "uniform") {
+			this.#countUniformWrite(
+				state.applyUniformMatrix4fv(
+					program.uniforms.localToLandblock,
+					mat4ToFloat32Array(object.localToLandblock, this.#matrixScratch),
+				),
 			);
 		}
-		// Submissions are drawn in run order, so consecutive draws usually share a landblock.
-		if (object.landblockId !== this.#lastDrawnLandblockId) {
-			const offset = landblockOffsets.get(object.landblockId);
-			if (offset === undefined) {
-				throw new Error(
-					`Submitted object in landblock ${object.landblockId} has no frame offset.`,
-				);
-			}
-			this.#lastDrawnLandblockId = object.landblockId;
-			this.#lastDrawnLandblockOffset = offset;
+		const landblockOffset = landblockOffsets.get(object.landblockId);
+		if (landblockOffset === undefined) {
+			throw new Error(
+				`Submitted object in landblock ${object.landblockId} has no frame offset.`,
+			);
 		}
-		gl.uniform3f(
-			program.uniforms.landblockOffset,
-			this.#lastDrawnLandblockOffset[0],
-			this.#lastDrawnLandblockOffset[1],
-			this.#lastDrawnLandblockOffset[2],
+		this.#countUniformWrite(
+			state.applyUniform3f(
+				program.uniforms.landblockOffset,
+				landblockOffset[0],
+				landblockOffset[1],
+				landblockOffset[2],
+			),
 		);
-		gl.uniform1i(program.uniforms.wrapRepeat, compatibility.wrapRepeat ? 1 : 0);
-		gl.uniform1i(
-			program.uniforms.palettedClipMap,
-			compatibility.palettedClipMap ? 1 : 0,
+		this.#countUniformWrite(
+			state.applyUniform1i(
+				program.uniforms.wrapRepeat,
+				compatibility.wrapRepeat ? 1 : 0,
+			),
 		);
-		gl.uniform1f(program.uniforms.alphaTest, compatibility.alphaTest);
+		this.#countUniformWrite(
+			state.applyUniform1i(
+				program.uniforms.palettedClipMap,
+				compatibility.palettedClipMap ? 1 : 0,
+			),
+		);
+		this.#countUniformWrite(
+			state.applyUniform1f(program.uniforms.alphaTest, compatibility.alphaTest),
+		);
 		const preparedMaterial = compatibility.material;
 		if (preparedMaterial.kind === "solid-color") {
-			gl.uniform1i(program.uniforms.materialKind, 0);
-			gl.uniform4f(program.uniforms.materialColor, ...preparedMaterial.color);
+			this.#countUniformWrite(
+				state.applyUniform1i(program.uniforms.materialKind, 0),
+			);
+			this.#countUniformWrite(
+				state.applyUniform4f(
+					program.uniforms.materialColor,
+					...preparedMaterial.color,
+				),
+			);
 		} else {
 			this.#bindPreparedObjectTexture(
 				OBJECT_TEXTURE_UNITS.base,
 				preparedMaterial.base,
 			);
-			gl.uniform4f(program.uniforms.baseRect, ...preparedMaterial.base.rect);
-			gl.uniform1i(
-				program.uniforms.materialKind,
-				preparedMaterial.kind === "direct-color"
-					? 1
-					: preparedMaterial.kind === "index8"
-						? 2
-						: 3,
+			this.#countUniformWrite(
+				state.applyUniform4f(
+					program.uniforms.baseRect,
+					...preparedMaterial.base.rect,
+				),
 			);
-			gl.uniform4f(program.uniforms.materialColor, ...preparedMaterial.color);
+			this.#countUniformWrite(
+				state.applyUniform1i(
+					program.uniforms.materialKind,
+					preparedMaterial.kind === "direct-color"
+						? 1
+						: preparedMaterial.kind === "index8"
+							? 2
+							: 3,
+				),
+			);
+			this.#countUniformWrite(
+				state.applyUniform4f(
+					program.uniforms.materialColor,
+					...preparedMaterial.color,
+				),
+			);
 			if (preparedMaterial.kind !== "direct-color") {
 				this.#bindPreparedObjectTexture(
 					OBJECT_TEXTURE_UNITS.palette,
 					preparedMaterial.palette,
 				);
-				gl.uniform4f(
-					program.uniforms.paletteRect,
-					...preparedMaterial.palette.rect,
+				this.#countUniformWrite(
+					state.applyUniform4f(
+						program.uniforms.paletteRect,
+						...preparedMaterial.palette.rect,
+					),
 				);
 			}
 		}
 		const { detail } = compatibility;
 		if (detail) {
 			this.#bindPreparedObjectTexture(OBJECT_TEXTURE_UNITS.detail, detail);
-			gl.uniform4f(program.uniforms.detailRect, ...detail.rect);
-			gl.uniform1f(program.uniforms.detailTiling, detail.tiling);
-			gl.uniform1i(program.uniforms.useDetail, 1);
+			this.#countUniformWrite(
+				state.applyUniform4f(program.uniforms.detailRect, ...detail.rect),
+			);
+			this.#countUniformWrite(
+				state.applyUniform1f(program.uniforms.detailTiling, detail.tiling),
+			);
+			this.#countUniformWrite(
+				state.applyUniform1i(program.uniforms.useDetail, 1),
+			);
 		} else {
-			gl.uniform1i(program.uniforms.useDetail, 0);
+			this.#countUniformWrite(
+				state.applyUniform1i(program.uniforms.useDetail, 0),
+			);
 		}
-		gl.uniform1f(program.uniforms.luminosity, compatibility.luminosity);
+		this.#countUniformWrite(
+			state.applyUniform1f(
+				program.uniforms.luminosity,
+				compatibility.luminosity,
+			),
+		);
+		this.#frameSelectionMetrics.objectDrawCalls += 1;
 		const geometry = compatibility.geometry;
-		this.#objectState.applyVertexArray(geometry.vertexArray);
+		state.applyVertexArray(geometry.vertexArray);
 		let submittedInstanceCount = 1;
 		if (object.drawKind === "instanced") {
 			if (!object.instances) {
@@ -3422,10 +3513,15 @@ export class WebGL2Renderer implements Renderer {
 			this.#frameSelectionMetrics.submittedEnvCellResidentTriangleCount +=
 				sourceTriangleCount * submittedInstanceCount;
 		}
-		if (object.drawKind === "baked" && object.source !== "dynamic") {
+		if (object.drawKind === "single" && object.source !== "dynamic") {
 			this.#frameSelectionMetrics.submittedBakedStaticObjectDrawCount += 1;
 			this.#frameSelectionMetrics.submittedBakedStaticObjectTriangleCount +=
 				sourceTriangleCount;
+			this.#mergeCensusRequest?.collector.record(
+				object.landblockId,
+				object.localToLandblock,
+				compatibility,
+			);
 		} else {
 			this.#frameSelectionMetrics.submittedInstancedSourceTriangleCount +=
 				sourceTriangleCount;

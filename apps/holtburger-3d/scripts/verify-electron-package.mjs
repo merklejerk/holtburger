@@ -21,19 +21,27 @@ export async function verifyElectronPackage(packageRoot) {
 				)
 			: join(normalizedPackageRoot, "resources");
 	const archivePath = join(resourcesDirectory, "app.asar");
+	const licensePath = join(resourcesDirectory, "LICENSE.md");
+	const electronNoticeRoot =
+		process.platform === "darwin" ? resourcesDirectory : normalizedPackageRoot;
 	const hostExecutable =
 		process.platform === "win32"
 			? "holtburger-3d-host.exe"
 			: "holtburger-3d-host";
 	const hostPath = join(resourcesDirectory, hostExecutable);
 
-	await access(hostPath, constants.X_OK);
-	const hostMetadata = await stat(hostPath);
-	if (!hostMetadata.isFile() || hostMetadata.size === 0) {
-		throw new Error(`packaged host is not a non-empty file: ${hostPath}`);
-	}
+	const hostMetadata = await requireNonEmptyFile(hostPath, constants.X_OK);
 
 	await access(archivePath, constants.R_OK);
+	await requireNonEmptyFile(licensePath, constants.R_OK);
+	await requireNonEmptyFile(
+		join(electronNoticeRoot, "LICENSE"),
+		constants.R_OK,
+	);
+	await requireNonEmptyFile(
+		join(electronNoticeRoot, "LICENSES.chromium.html"),
+		constants.R_OK,
+	);
 	const archiveEntries = new Set(
 		listPackage(archivePath, { isPack: false }).map((entry) =>
 			entry.replaceAll("\\", "/"),
@@ -79,6 +87,15 @@ export async function verifyElectronPackage(packageRoot) {
 		hostBytes: hostMetadata.size,
 		archiveEntryCount: archiveEntries.size,
 	};
+}
+
+async function requireNonEmptyFile(path, mode) {
+	await access(path, mode);
+	const metadata = await stat(path);
+	if (!metadata.isFile() || metadata.size === 0) {
+		throw new Error(`packaged resource is not a non-empty file: ${path}`);
+	}
+	return metadata;
 }
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === scriptPath) {

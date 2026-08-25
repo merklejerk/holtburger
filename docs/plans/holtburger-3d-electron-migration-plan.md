@@ -1,8 +1,7 @@
 # Holtburger 3D Electron Migration Plan
 
-Status: in progress. Phases 0-9A are complete; Phase 10 is the remaining migration cleanup and
-handoff. Real-machine certification and public distribution remain deferred to the 3D
-product-release roadmap.
+Status: complete. Phases 0-10 are complete. Real-machine certification and public distribution
+remain deferred to the 3D product-release roadmap.
 
 ## Context and Boundaries
 
@@ -520,7 +519,7 @@ remains an explicit later certification case.
 - [x] Expose the typed host bridge through `contextBridge`; do not expose `ipcRenderer`, Node APIs,
       process spawning, filesystem access, or generic channel names.
 - [x] Deny unexpected navigation and window creation.
-- [x] Supervise exactly one host child and cover normal exit, renderer reload, Electron quit, host
+- [x] Supervise exactly one host child and cover normal exit, Electron quit, host
       panic, and orphan prevention.
 - [x] Run the framework-free popup probe in Electron before involving the Explorer and manually
       confirm context menu, keyboard input, DevTools, and absence of a second black window.
@@ -534,7 +533,7 @@ remains an explicit later certification case.
   same normal application window.
 - There is no second black host window.
 - The renderer reports no Node globals and cannot invoke unallowlisted Electron IPC.
-- Development startup, reload, host crash reporting, and clean shutdown behave deterministically.
+- Development startup, host crash reporting, and clean shutdown behave deterministically.
 
 #### Decisions and course corrections
 
@@ -548,7 +547,7 @@ remains an explicit later certification case.
   `BrowserWindow` still sets `sandbox: true`. A normal unsandboxed production claim is deferred to
   the user's manual check or a less restricted Linux runner.
 - Electron does not automatically display the browser's default context menu. The main process now
-  owns a small explicit menu (reload, editing roles where applicable, and inspect element); the
+  owns a small explicit menu (editing roles where applicable and inspect element); the
   user confirmed that right-click now produces a menu. DevTools also opens with Ctrl+Shift+I.
 - The native select was stable in the explicit X11 run after showing slight per-frame size/shadow
   jitter in the earlier default Wayland run. No CSS or child-window workaround was added. Wayland
@@ -560,9 +559,8 @@ remains an explicit later certification case.
 Status: complete for the available Linux/X11 cutover. The Explorer composition root now selects the
 Electron preload bridge when it is present, with a temporary Tauri fallback retained until Phase 8.
 The real Electron Explorer has started successfully, passed the available manual popup/DevTools
-smoke check, and completed the representative renderer/sidecar scenarios below. Renderer reload
-automation remains an explicit follow-up; the possession assertion was subsequently resolved with
-the three canonical browser fixtures.
+smoke check, and completed the representative renderer/sidecar scenarios below. The possession
+assertion was subsequently resolved with the three canonical browser fixtures.
 
 #### Deliverables
 
@@ -582,8 +580,8 @@ the three canonical browser fixtures.
       host sizes. The full per-capability decoder census remains a follow-up.
 - [x] Verify event-before-response ordering, generation/revision handling, and listener disposal in
       the protocol/capability tests and real dynamic-entity/follow-flight runs.
-- [ ] Verify renderer reload against the live sidecar; the bridge is reload-safe by construction,
-      but an automated Electron reload assertion is still debt.
+- [x] Treat renderer reload as unsupported: the renderer owns asynchronous sessions that cannot
+      reliably detach during page teardown while Electron main retains the live sidecar.
 - [x] Exercise representative outdoor and EnvCell renderer workloads with the browser harness at
       render scale 1; both runs completed without console errors on the real AMD/Vulkan renderer.
 - [x] Exercise dynamic entities, physical flight, audio, particles, textures, workers, and
@@ -596,8 +594,7 @@ the three canonical browser fixtures.
 - [x] Exercise both Electron app entry routes: the Explorer was manually checked and the named
       `dev:electron:client` route started and exited cleanly.
 - [x] Use the browser harness for renderer regression evidence and the real sidecar diagnostic for
-      shell/host protocol behavior the browser cannot reproduce. A dedicated automated Electron
-      reload assertion remains the only lifecycle gap called out above.
+      shell/host protocol behavior the browser cannot reproduce.
 - [x] Make the working Electron build available for manual checks across representative outdoor,
       EnvCell, streaming, movement, and popup scenarios. The user checked the running Explorer and
       confirmed popups, dropdowns, and embedded DevTools; no second black window was observed.
@@ -675,8 +672,8 @@ the three canonical browser fixtures.
 - The protocol has one bounded 16 MiB frame limit, one ordered writer with a 256-frame queue, a
   closed 36-command/5-event inventory, handshake/version rejection, binary MessagePack payloads,
   pending-request rejection on child exit, and a bounded shutdown kill path. The real Linux burst
-  completed without corruption, deadlock, timeout, or unbounded growth. The remaining protocol
-  work is lifecycle/reload automation, not a transport redesign or a socket detour.
+  completed without corruption, deadlock, timeout, or unbounded growth. No transport redesign or
+  socket detour is warranted by the available evidence.
 - The temporary duplication is bounded and named: one Electron main/preload bridge, one
   shell-neutral `HostTransport`, and one Tauri parity adapter. The frontend no longer fans out
   direct Tauri imports. The final Phase 8 deletion removes the Tauri command/state wrapper,
@@ -724,7 +721,7 @@ fallback remains only until Phase 8 performs the clean shell cutover.
   pointer input, movement, streaming, content discovery, audio, workers, and dynamic entities.
 - Fixes for issues that are demonstrated during the manual pass, with browser-harness and sidecar
   parity checks retained as regression evidence.
-- An explicit disposition for renderer reload, host crash/quit cleanup, the possession coordinate
+- An explicit disposition for renderer failure, host crash/quit cleanup, the possession coordinate
   contract, and any platform/backend-specific visual quirks observed locally.
 
 #### Task checklist
@@ -732,8 +729,7 @@ fallback remains only until Phase 8 performs the clean shell cutover.
 - [x] Run the Electron Explorer and client through the normal development launcher, with the user
       checking representative workflows and recording anything that feels broken or awkward.
 - [x] Verify native dropdowns, context menus, keyboard input, DevTools, focus changes, window close,
-      and the absence of a second or black host window. Automated renderer reload/crash coverage
-      remains named lifecycle debt rather than an unverified manual claim.
+      and the absence of a second or black host window.
 - [x] Exercise outdoor, EnvCell, streaming, movement/physical flight, dynamic spawn/despawn,
       possession, audio, particles, textures, workers, and client-route scenarios against the same
       content used by the existing browser harness where available. The possession assertion was
@@ -804,10 +800,10 @@ fallback remains only until Phase 8 performs the clean shell cutover.
   input-control outline is suppressed without changing focus indicators on actual UI controls.
 - **GO to Phase 8 clean shell cutover.** The user accepted the one-window Electron Explorer after
   verifying popup, dropdown, context-menu, DevTools, focus, startup, sizing, and close behavior and
-  refining the defects above. The remaining automated reload/crash check, CSP/advisory review, and
-  deferred cross-platform certification remain explicitly tracked debt; none requires retaining two
-  production desktop shells. The possession assertion and normal-close timeout disposition were
-  subsequently closed with the focused evidence above.
+  refining the defects above. CSP/advisory review and deferred cross-platform certification remain
+  explicitly tracked debt; neither requires retaining two production desktop shells. The possession
+  assertion and normal-close timeout disposition were subsequently closed with the focused evidence
+  above.
 
 ### Phase 8: Make the clean shell cutover
 
@@ -1068,20 +1064,23 @@ migration on `3d-next`.
 
 ### Phase 10: Finish migration cleanup and handoff
 
-Status: follows Phase 9A and does not wait for deferred certification or public distribution.
+Status: complete. Deferred certification and public distribution remain outside the migration.
 
 #### Task checklist
 
 - [x] Remove temporary protocol probes, duplicate adapters, migration-only feature flags, and stale
       package scripts.
-- [ ] Profile IPC and renderer paths with diagnostics disabled; remove instrumentation that has no
-      continuing consumer.
-- [ ] Confirm every platform-specific branch has a demonstrated platform requirement.
-- [ ] Audit child-process cleanup, protocol bounds, preload exposure, CSP/navigation policy, packaged
+- [x] Inventory migration/runtime instrumentation and remove anything without a named continuing
+      consumer. Do not profile IPC or renderer performance absent a reproduced responsiveness
+      problem.
+- [x] Remove the renderer Reload context-menu affordance. Reload is unsupported because page teardown
+      cannot reliably release renderer-owned host sessions; recovery requires a full app restart.
+- [x] Confirm every platform-specific branch has a demonstrated platform requirement.
+- [x] Audit child-process cleanup, protocol bounds, preload exposure, CSP/navigation policy, packaged
       resource paths, license notices, and Electron/Chromium update procedure.
-- [ ] Update this plan's decisions and course corrections, then move enduring operational guidance
+- [x] Update this plan's decisions and course corrections, then move enduring operational guidance
       into the app README or architecture documentation.
-- [ ] Run formatting, TypeScript checks, ESLint/knip, frontend tests, Rustfmt, Clippy with warnings as
+- [x] Run formatting, TypeScript checks, ESLint/knip, frontend tests, Rustfmt, Clippy with warnings as
       errors, Rust tests, browser harness verification, Electron integration tests, and packaging
       checks.
 
@@ -1093,7 +1092,40 @@ Status: follows Phase 9A and does not wait for deferred certification or public 
 
 #### Decisions and course corrections
 
-- None recorded.
+- Proactive IPC/renderer profiling is dropped. Available manual scenarios exposed no material lag or
+  stalls, so Phase 10 removes unowned instrumentation by consumer audit and profiles only if a
+  reproducible performance problem appears.
+- Renderer reload is explicitly unsupported. A reload reconstructs JavaScript and WebGL state but
+  retains the Electron-owned Rust sidecar, while page teardown cannot await asynchronous release of
+  renderer-owned host sessions. The misleading Reload context-menu role was removed; a real recovery
+  protocol would require explicit ownership leases and complete state resynchronization.
+- The instrumentation census retained only facilities with named users: opt-in renderer/tick
+  profiling serves the Explorer Frame panel and browser harness; Ozone/GPU switches serve explicit
+  Linux display diagnosis; sidecar and package reports serve local/CI verification. The protocol
+  client's empty stderr subscription had no consumer and was removed; Electron main remains the sole
+  owner of host stderr presentation.
+- Platform branches now describe native facts only: the Rust executable suffix, Forge package/bundle
+  layouts, archive extraction, macOS framework symlinks, and browser-process cleanup. Development
+  launchers now invoke Vite and Electron through Node directly and never use a Windows command shell.
+- The lifecycle/security audit bounded renderer-driven pending host requests at 256, rejects IPC from
+  anything except the product window's main frame, treats a crashed Chromium renderer as a fatal app
+  failure so the host cannot remain orphaned, and retains the tested orderly/forced host shutdown.
+  Both product entries now apply a CSP; the browser harness completed with workers, WebGL, content,
+  and zero page-console errors under that policy.
+- Packages now carry Holtburger's AGPLv3 license and the inspector requires non-empty Holtburger,
+  Electron, and Chromium notices. The app README owns development, content discovery, lifecycle,
+  diagnostics, packaging, unsigned platform status, security boundary, and monthly Electron update
+  guidance. Reload language in the architecture audit and host snapshot comment now matches the
+  restart-only contract.
+- The registry audit reports zero runtime vulnerabilities. Forge 7.11.2's development-only packaging
+  graph still reports 24 advisories through `@electron/packager` 18.4.4, `@electron/rebuild` 3.7.2,
+  and Inquirer; compatible versions are not admitted by the current Forge release, while npm's only
+  automated remedy is a breaking Forge 6.4.2 downgrade. No forced downgrade or untested major-version
+  override was applied.
+- Final local evidence passed Svelte/TypeScript checks, ESLint, knip, Prettier, rustfmt, Clippy with
+  warnings denied, 1,489 frontend/Electron tests, 233 Rust host tests, the production-content browser
+  harness, the real release-sidecar smoke, and unpacked/archive package inspection. The final Linux
+  ZIP was 126,816,105 bytes and retained the 8,204,096-byte host plus all 990 expected ASAR entries.
 
 ## Risks and Mitigations
 
@@ -1103,7 +1135,7 @@ Status: follows Phase 9A and does not wait for deferred certification or public 
 | Event production outruns Electron or renderer consumption.                  | Honor stream backpressure in Electron main, retain producer-owned revisions, fail visibly on unbounded growth, and coalesce only where the owning runtime already defines replaceable state. Investigate further only if the working build exhibits lag or stalls. |
 | Rust behavior remains entangled with Tauri types.                           | Extract `HostRuntime` and `HostEventSink` while Tauri still provides a parity adapter; reject Tauri imports in the final host crate.                                                                                                                               |
 | The frontend accumulates Tauri and Electron adapter variants.               | Collapse direct Tauri imports into one transport first, inject it at composition roots, then delete the Tauri implementation in one cutover.                                                                                                                       |
-| Host crashes strand Electron promises or processes.                         | Supervise one child, reject all pending requests on exit, expose failure visibly, implement orderly shutdown with a bounded forced termination, and test crash/reload/quit paths.                                                                                  |
+| Host crashes strand Electron promises or processes.                         | Supervise one child, reject all pending requests on exit, expose failure visibly, implement orderly shutdown with a bounded forced termination, and test crash/quit paths.                                                                                         |
 | A compromised renderer reaches Node or arbitrary host operations.           | Enable isolation and sandboxing, disable Node integration, expose an allowlisted typed preload API, restrict navigation/window creation, and validate every request in Rust.                                                                                       |
 | CI builds create false confidence without real hardware input/GPU behavior. | Separate automated portability gates from manual certification and label untested artifacts unsupported.                                                                                                                                                           |
 | The 3D sidecar leaks into canonical cargo-dist releases.                    | Exclude `holtburger-3d-host` from cargo-dist, assert its absence from `dist plan`, and keep Electron packaging in a separate read-only workflow with no release triggers or permissions.                                                                           |
@@ -1120,13 +1152,13 @@ Status: follows Phase 9A and does not wait for deferred certification or public 
 - [x] Physical dropdowns, context menus, and DevTools work in the available Linux environment.
 - [x] All host traffic crosses one typed, isolated frontend boundary.
 - [x] Binary assets remain binary and pass byte-parity tests.
-- [ ] Host errors, incompatibility, crashes, and shutdown are explicit and tested.
+- [x] Host errors, incompatibility, crashes, and shutdown are explicit and tested.
 - [x] Tauri, CEF, `src-tauri`, and migration-only dual-shell code are removed from production.
 - [x] Browser harnesses remain independent and representative renderer checks pass.
 - [x] Linux x86-64, Windows x86-64, and macOS arm64 build/package/protocol gates pass in hosted CI.
-- [ ] Formatting, checks, lint, Clippy with warnings denied, unit/integration tests, runtime
+- [x] Formatting, checks, lint, Clippy with warnings denied, unit/integration tests, runtime
       verification, and package inspection pass.
-- [ ] Documentation describes development, content discovery, packaging, platform support status,
+- [x] Documentation describes development, content discovery, packaging, platform support status,
       and sidecar diagnostics without stale Tauri terminology.
 
 ## Deferred 3D Release Gates

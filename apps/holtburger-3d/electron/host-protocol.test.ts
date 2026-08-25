@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
 	MAX_FRAME_BYTES,
+	MAX_PENDING_REQUESTS,
 	PROTOCOL_VERSION,
 	SidecarFrameDecoder,
 	SidecarHostClient,
@@ -45,7 +46,6 @@ class FakeStream {
 class FakeProcess implements SidecarProcessLike {
 	readonly stdin = new FakeStream();
 	readonly stdout = new FakeStream();
-	readonly stderr = new FakeStream();
 	#exitListeners: Array<(code: number | null, signal: string | null) => void> =
 		[];
 	#errorListeners: Array<(error: Error) => void> = [];
@@ -81,6 +81,28 @@ class FakeProcess implements SidecarProcessLike {
 	failSpawn(error: Error): void {
 		for (const listener of this.#errorListeners) listener(error);
 	}
+
+	exit(code: number | null, signal: string | null): void {
+		for (const listener of this.#exitListeners) listener(code, signal);
+	}
+}
+
+async function connect(
+	process: FakeProcess,
+	protocolVersion = PROTOCOL_VERSION,
+): Promise<SidecarHostClient> {
+	const client = new SidecarHostClient(process);
+	const connected = client.connect();
+	process.stdout.push(
+		encodeSidecarFrame({
+			kind: "handshake",
+			protocol_version: protocolVersion,
+			host_name: "holtburger-3d-host",
+			host_version: "test",
+		}),
+	);
+	await connected;
+	return client;
 }
 
 function decodeWritten(stream: FakeStream): Record<string, unknown> {
@@ -154,17 +176,7 @@ describe("wireCommand", () => {
 describe("SidecarHostClient", () => {
 	it("negotiates, multiplexes responses, delivers events, and shuts down", async () => {
 		const process = new FakeProcess();
-		const client = new SidecarHostClient(process);
-		const connected = client.connect();
-		process.stdout.push(
-			encodeSidecarFrame({
-				kind: "handshake",
-				protocol_version: PROTOCOL_VERSION,
-				host_name: "holtburger-3d-host",
-				host_version: "test",
-			}),
-		);
-		await connected;
+		const client = await connect(process);
 		expect(process.stdin.writes).toHaveLength(1);
 
 		const events: unknown[] = [];
@@ -208,16 +220,7 @@ describe("SidecarHostClient", () => {
 
 	it("rejects pending and future requests after malformed host output", async () => {
 		const process = new FakeProcess();
-		const client = new SidecarHostClient(process);
-		process.stdout.push(
-			encodeSidecarFrame({
-				kind: "handshake",
-				protocol_version: PROTOCOL_VERSION,
-				host_name: "holtburger-3d-host",
-				host_version: "test",
-			}),
-		);
-		await client.connect();
+		const client = await connect(process);
 		const pending = client.invoke("host_status");
 		process.stdout.push(
 			encodeSidecarFrame({
@@ -250,5 +253,79 @@ describe("SidecarHostClient", () => {
 			code: "host_stdout",
 		});
 		expect(process.killCount).toBe(1);
+	});
+
+	it("rejects an incompatible handshake and terminates the host", async () => {
+		const process = new FakeProcess();
+		await expect(connect(process, PROTOCOL_VERSION + 1)).rejects.toMatchObject({
+			code: "incompatible_protocol",
+		});
+		expect(process.killCount).toBe(1);
+	});
+
+	it("rejects pending and future requests when the host crashes", async () => {
+		const process = new FakeProcess();
+		const client = await connect(process);
+		const pending = client.invoke("host_status");
+		await Promise.resolve();
+		process.exit(17, null);
+
+		await expect(pending).rejects.toMatchObject({ code: "host_exit" });
+		await expect(client.invoke("host_status")).rejects.toMatchObject({
+			code: "host_exit",
+		});
+		expect(process.killCount).toBe(0);
+	});
+
+	it("preserves structured application errors", async () => {
+		const process = new FakeProcess();
+		const client = await connect(process);
+		const request = client.invoke("host_status");
+		await Promise.resolve();
+		process.stdout.push(
+			encodeSidecarFrame({
+				kind: "response",
+				id: 1,
+				result: {
+					Err: { code: "content_missing", message: "content is absent" },
+				},
+			}),
+		);
+		await expect(request).rejects.toMatchObject({
+			code: "content_missing",
+			message: "content is absent",
+		});
+	});
+
+	it("bounds renderer requests awaiting host responses", async () => {
+		const process = new FakeProcess();
+		const client = await connect(process);
+		const pending: Promise<unknown>[] = [];
+		for (let index = 0; index < MAX_PENDING_REQUESTS; index += 1) {
+			pending.push(client.invoke("host_status").catch(() => undefined));
+		}
+		await Promise.resolve();
+		await expect(client.invoke("host_status")).rejects.toMatchObject({
+			code: "pending_limit",
+		});
+		process.exit(17, null);
+		await Promise.all(pending);
+	});
+
+	it("force-terminates a host that does not acknowledge shutdown", async () => {
+		const process = new FakeProcess();
+		const client = await connect(process);
+		vi.useFakeTimers();
+		try {
+			const shutdown = client.shutdown();
+			const rejected = expect(shutdown).rejects.toMatchObject({
+				code: "shutdown_timeout",
+			});
+			await vi.advanceTimersByTimeAsync(2_000);
+			await rejected;
+			expect(process.killCount).toBe(1);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });

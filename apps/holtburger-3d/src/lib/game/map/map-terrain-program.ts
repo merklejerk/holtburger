@@ -71,7 +71,9 @@ uniform vec3 uRoadColor;
 uniform float uRoadTintStrength;
 uniform float uRoadCasingPixels;
 uniform float uRoadCasingStrength;
-uniform float uRoadEdgeCoverage;
+uniform float uRoadWidth;
+uniform float uTileLength;
+uniform float uMetersPerPixel;
 uniform vec3 uSunDirection;
 uniform float uAmbientLevel;
 uniform vec3 uImpassableColor;
@@ -96,48 +98,71 @@ in float vHeight;
 in vec3 vNormal;
 out vec4 fragmentColor;
 
-// Retail's road shape for one cell, read back off its four-corner mask.
+// How far outside the road one point in a cell lies, in world units; negative means on it.
 //
-// Bilinear across the cell rather than linear across this triangle, which is the whole fix: the
-// authored diagonal is a seeded value that knows nothing about roads, and interpolating within a
-// triangle let it decide whether a diagonally stepping road stayed joined.
-float roadCoverageInCell(uint mask, vec2 uv) {
-	float southwest = float(mask & 1u);
-	float southeast = float((mask >> 1u) & 1u);
-	float northeast = float((mask >> 2u) & 1u);
-	float northwest = float((mask >> 3u) & 1u);
-	return mix(
-		mix(southwest, southeast, uv.x),
-		mix(northwest, northeast, uv.x),
-		uv.y
-	);
+// Retail's own shape, not one the terrain grid implies: CLandBlock::on_road reads the same four
+// corners and tests plain distances against a fixed five-unit road width
+// (acclient.c:337802-337960, the width from LandDefs::get_vars at acclient.c:446418). Every case
+// below is one of that function's branches, rewritten as a distance so the edge can be
+// antialiased and the casing can be a band outside it.
+//
+// The point of taking retail's shape rather than interpolating the grid: a road is a line with a
+// width, and a width is in metres. Interpolation can only place an edge as a fraction of a 24 unit
+// cell, which made a road as wide as the grid it was inferred from.
+float roadEdgeDistance(uint mask, vec2 cell) {
+	// Roaded at all four corners, and retail calls the whole cell road.
+	if (mask == 0xFu) return -uRoadWidth;
+	bool southwest = (mask & 1u) != 0u;
+	bool southeast = (mask & 2u) != 0u;
+	bool northeast = (mask & 4u) != 0u;
+	bool northwest = (mask & 8u) != 0u;
+	// Nothing claims this point yet, and a cell is never wider than itself.
+	float distance = uTileLength;
+	// An edge with road at both ends carries a band along it.
+	if (southwest && southeast) distance = min(distance, cell.y);
+	if (southeast && northeast) distance = min(distance, uTileLength - cell.x);
+	if (northeast && northwest) distance = min(distance, uTileLength - cell.y);
+	if (northwest && southwest) distance = min(distance, cell.x);
+	// An opposite pair is joined along its diagonal rather than left as two loose corners. This
+	// single branch is the connectivity a per-triangle interpolation could not express at all.
+	if (mask == 0x5u) distance = min(distance, abs(cell.x - cell.y));
+	if (mask == 0xAu) distance = min(distance, abs(cell.x + cell.y - uTileLength));
+	// A corner with neither neighbour roaded keeps a wedge of its own. Where a diagonal band also
+	// applies its wedges fall inside that band, so the two never disagree.
+	if (southwest && !southeast && !northwest) {
+		distance = min(distance, cell.x + cell.y);
+	}
+	if (southeast && !northeast && !southwest) {
+		distance = min(distance, uTileLength - cell.x + cell.y);
+	}
+	if (northeast && !northwest && !southeast) {
+		distance = min(distance, 2.0 * uTileLength - cell.x - cell.y);
+	}
+	if (northwest && !southwest && !northeast) {
+		distance = min(distance, uTileLength + cell.x - cell.y);
+	}
+	return distance - uRoadWidth;
 }
 
 void main() {
 	vec3 normal = normalize(vNormal);
-	// The road edge falls at the coverage contour the tuning names, which keeps the boundary crisp
-	// while shaping it from all four corners of the cell rather than from one triangle's three.
-	// This approximates retail's authored road alpha masks, which the map deliberately does not
-	// load, at the scale retail decides them. Terrain colour blends across its boundaries and a
-	// road does not, because ground cover really does grade from one kind into another while a road
-	// is a line a reader follows.
+	// Terrain colour blends across its boundaries and a road does not, because ground cover really
+	// does grade from one kind into another while a road is a line a reader follows.
 	//
 	// Cased in the map's ink, for the reason the building footprints are: a tan road crossing tan
 	// ground disappears exactly where it is most needed, which is inside a settlement. The rim is a
-	// band just outside the contour the fill ends at, so it needs no data of its own, and both
-	// edges are measured in how much coverage changes per fragment, which keeps the rim a constant
-	// pixel width at every zoom instead of thinning away as the map pulls back.
-	float coverage = roadCoverageInCell(vRoadMask, vCellUv);
-	float coveragePerPixel = max(fwidth(coverage), 1e-5);
-	float halfPixel = 0.5 * coveragePerPixel;
-	float roadFill =
-		smoothstep(uRoadEdgeCoverage - halfPixel, uRoadEdgeCoverage + halfPixel, coverage);
-	// Pulled far enough back, one cell falls below a pixel and the rim would grow to swallow the
-	// ground beside the road; a casing never reaches further than a quarter of the coverage ramp.
-	float casingWidth = min(uRoadCasingPixels * coveragePerPixel, 0.25);
-	float casingOuter = uRoadEdgeCoverage - casingWidth;
+	// band just outside the same edge the fill ends at, so it needs no data of its own.
+	//
+	// Both edges are measured against how much world one fragment covers, which the view already
+	// knows exactly. Reading it from a uniform rather than from fwidth matters here: the road
+	// distance jumps between cells with different corner masks, so a screen-space derivative of it
+	// spikes along those seams and would smear the rim wherever a road ends.
+	float roadDistance = roadEdgeDistance(vRoadMask, vCellUv * uTileLength);
+	float halfPixel = 0.5 * uMetersPerPixel;
+	float roadFill = 1.0 - smoothstep(-halfPixel, halfPixel, roadDistance);
+	float casingWidth = uRoadCasingPixels * uMetersPerPixel;
 	float roadCasing =
-		smoothstep(casingOuter - halfPixel, casingOuter + halfPixel, coverage) - roadFill;
+		1.0 - smoothstep(casingWidth - halfPixel, casingWidth + halfPixel, roadDistance) - roadFill;
 	vec3 color = mix(vBaseColor, uRoadColor, roadFill * uRoadTintStrength);
 	color = mix(color, uInkColor, roadCasing * uRoadCasingStrength);
 	// Exaggerate the surface for shading only. Passability was classified on the CPU from the real
@@ -213,7 +238,9 @@ export interface MapTerrainProgram {
 		readonly roadTintStrength: WebGLUniformLocation;
 		readonly roadCasingPixels: WebGLUniformLocation;
 		readonly roadCasingStrength: WebGLUniformLocation;
-		readonly roadEdgeCoverage: WebGLUniformLocation;
+		readonly roadWidth: WebGLUniformLocation;
+		readonly tileLength: WebGLUniformLocation;
+		readonly metersPerPixel: WebGLUniformLocation;
 		readonly anchorHeight: WebGLUniformLocation;
 		readonly contourAboveColor: WebGLUniformLocation;
 		readonly contourBelowColor: WebGLUniformLocation;
@@ -257,7 +284,9 @@ export function createMapTerrainProgram(
 				program,
 				"uRoadCasingStrength",
 			),
-			roadEdgeCoverage: requireWebGL2Uniform(gl, program, "uRoadEdgeCoverage"),
+			roadWidth: requireWebGL2Uniform(gl, program, "uRoadWidth"),
+			tileLength: requireWebGL2Uniform(gl, program, "uTileLength"),
+			metersPerPixel: requireWebGL2Uniform(gl, program, "uMetersPerPixel"),
 			anchorHeight: requireWebGL2Uniform(gl, program, "uAnchorHeight"),
 			contourAboveColor: requireWebGL2Uniform(
 				gl,

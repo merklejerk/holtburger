@@ -39,7 +39,7 @@ export function decodeSimulationInterestReceipt(
 	return simulationInterestReceiptSchema.parse(value);
 }
 
-/** Injectable boundary that keeps Tauri mechanics out of interest policy. */
+/** Injectable boundary that keeps host transport mechanics out of interest policy. */
 export interface SimulationInterestTransport {
 	replace(
 		request: SimulationInterestRequest,

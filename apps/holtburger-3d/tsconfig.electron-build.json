@@ -1,0 +1,14 @@
+{
+	"extends": "./tsconfig.electron.json",
+	"compilerOptions": {
+		"noEmit": false,
+		"allowImportingTsExtensions": false,
+		"outDir": "./dist-electron",
+		"rootDir": ".",
+		"sourceMap": true,
+		"declaration": false,
+		"tsBuildInfoFile": "./node_modules/.tmp/tsconfig.electron-build.tsbuildinfo"
+	},
+	"include": ["electron/**/*.ts"],
+	"exclude": ["electron/**/*.test.ts"]
+}

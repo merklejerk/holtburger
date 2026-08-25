@@ -11,7 +11,7 @@ members = [
     "crates/holtburger-world",
     "crates/holtburger-weenie-catalog",
     "apps/holtburger-cli",
-    "apps/holtburger-3d/src-tauri",
+    "apps/holtburger-3d/host",
     "apps/holtburger-tools",
     "crates/holtburger-debug-harness",
 ]

@@ -3,9 +3,14 @@
 	"entry": [
 		"src/client/main.ts",
 		"src/explorer/main.ts",
-		"src/harness/browser/main.ts"
+		"src/harness/browser/main.ts",
+		"electron/main.ts",
+		"electron/preload.cts",
+		"forge.config.cjs",
+		"scripts/entry-paths.mjs"
 	],
-	"ignoreDependencies": ["@types/rbush", "rbush"],
+	"ignore": ["scripts/entry-paths.d.mts"],
+	"ignoreDependencies": ["@electron-forge/maker-zip", "@types/rbush", "rbush"],
 	"ignoreIssues": {
 		"src/lib/game/commit/artifacts.ts": ["types"],
 		"src/lib/game/commit/types.ts": ["types"],

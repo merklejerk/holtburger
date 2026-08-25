@@ -1,28 +1,14 @@
-import type { HostPhysicalFlyPath } from "../lib/game/motion/host-physical-fly-path";
-import type {
-	HostPhysicalFlyFailure,
-	PhysicalFlyTransport,
-} from "./physical-fly-session";
+import type { PhysicalFlyTransport } from "./physical-fly-session";
+import type { HostTransport } from "../lib/host/host-transport";
 
-/** Production Tauri transport, isolated so session behavior remains browser-testable. */
-export function tauriPhysicalFlyTransport(): PhysicalFlyTransport {
+/** Host-backed transport, isolated so session behavior remains browser-testable. */
+export function hostPhysicalFlyTransport(
+	host: HostTransport,
+): PhysicalFlyTransport {
 	return {
-		invoke: async (command, args) => {
-			const { invoke } = await import("@tauri-apps/api/core");
-			return invoke(command, args);
-		},
-		listenMotion: async (event, handler) => {
-			const { listen } = await import("@tauri-apps/api/event");
-			return listen<HostPhysicalFlyPath>(event, ({ payload }) =>
-				handler(payload),
-			);
-		},
-		listenFailure: async (event, handler) => {
-			const { listen } = await import("@tauri-apps/api/event");
-			return listen<HostPhysicalFlyFailure>(event, ({ payload }) =>
-				handler(payload),
-			);
-		},
+		invoke: (command, args) => host.invoke(command, args),
+		listenMotion: (event, handler) => host.listen(event, handler),
+		listenFailure: (event, handler) => host.listen(event, handler),
 		now: () => performance.now(),
 	};
 }

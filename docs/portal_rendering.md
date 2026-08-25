@@ -31,8 +31,8 @@ Primary implementation references:
 - `crates/holtburger-dat/src/file_type/env_cell.rs`
 - `crates/holtburger-dat/src/file_type/environment.rs`
 - `crates/holtburger-content/src/interior.rs`
-- `apps/holtburger-3d/src-tauri/src/cell_struct_projection.rs`
-- `apps/holtburger-3d/src-tauri/src/env_cell_source.rs`
+- `apps/holtburger-3d/host/src/cell_struct_projection.rs`
+- `apps/holtburger-3d/host/src/env_cell_source.rs`
 - retail `CCellPortal::UnPack`, `CCellStruct::point_in_cell`, `PView::DrawCells`, and
   `D3DPolyRender::DrawPortalPolyInternal` in `acclient-eor-source/acclient.c`
 
@@ -131,9 +131,9 @@ scenery.
 
 Primary implementation references:
 
-- `apps/holtburger-3d/src-tauri/src/map_geometry.rs`
-- `apps/holtburger-3d/src-tauri/src/env_cell_source.rs`
-- `apps/holtburger-3d/src-tauri/src/lib.rs` (`append_building_map_blockers`)
+- `apps/holtburger-3d/host/src/map_geometry.rs`
+- `apps/holtburger-3d/host/src/env_cell_source.rs`
+- `apps/holtburger-3d/host/src/lib.rs` (`append_building_map_blockers`)
 - `apps/holtburger-3d/src/lib/assets/decode-env-cell-record.ts`
 - `apps/holtburger-3d/src/lib/assets/decode-static-source-record.ts`
 - `apps/holtburger-3d/src/lib/game/map/map-geometry-store.ts`

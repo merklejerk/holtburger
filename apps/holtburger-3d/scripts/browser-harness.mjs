@@ -2888,8 +2888,8 @@ function assertSpawnedEntityLifecycle(result) {
 async function startContentHost() {
 	const child = startChild("cargo", [
 		"run",
-		"--manifest-path",
-		"src-tauri/Cargo.toml",
+		"-p",
+		"holtburger-3d-host",
 		"--bin",
 		"dev_landblock_content_host",
 		"--",

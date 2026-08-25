@@ -4,7 +4,7 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
 	{
-		ignores: ["dist/**", "node_modules/**"],
+		ignores: ["dist/**", "dist-electron/**", "node_modules/**", "out/**"],
 	},
 	js.configs.recommended,
 	...tseslint.configs.recommended,
@@ -54,13 +54,26 @@ export default tseslint.config(
 		},
 	},
 	{
-		files: ["scripts/**/*.mjs", "vite.config.ts"],
+		files: ["electron/**/*.ts", "scripts/**/*.mjs", "vite.config.ts"],
 		languageOptions: {
 			ecmaVersion: "latest",
 			sourceType: "module",
 			globals: {
 				...globals.node,
 			},
+		},
+	},
+	{
+		files: ["electron/**/*.cts", "forge.config.cjs"],
+		languageOptions: {
+			ecmaVersion: "latest",
+			sourceType: "commonjs",
+			globals: {
+				...globals.node,
+			},
+		},
+		rules: {
+			"@typescript-eslint/no-require-imports": "off",
 		},
 	},
 );

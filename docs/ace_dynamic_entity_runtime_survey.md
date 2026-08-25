@@ -388,7 +388,7 @@ same committed solver outcome types; neither registry moves into a shared funnel
 
 The Explorer continues using `HostSimulationRuntime`'s `SpatialScene`; the client continues using
 `WorldState.scene`. A solve returns its committed result synchronously. The existing world event path
-and app-local Tauri emitter project only their named frontend-relevant consequences. Explorer
+and app-local host event sink project only their named frontend-relevant consequences. Explorer
 collision-report outcomes have no frontend consumer and are not relayed or retained for diagnostics.
 There is no named consumer requiring a new broadcast channel, acknowledgement protocol, or second
 state store.

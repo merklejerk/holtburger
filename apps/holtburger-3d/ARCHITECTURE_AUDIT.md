@@ -1,6 +1,6 @@
 # Architectural Snapshot: holtburger-3d
 
-_Last updated: 2026-08-23_
+_Last updated: 2026-08-25_
 
 ## Tech Lead North Stars
 
@@ -28,7 +28,7 @@ flowchart TD
     Interest[Explorer scene interest] --> Coordinator[SceneInterestCommitCoordinator]
     Coordinator --> Pipeline[StandardCommitPipeline]
     Pipeline --> Batch[LandblockSourceBatchSource]
-    Batch --> Host[Tauri landblock source adapter]
+    Batch --> Host[app host source adapter]
     Host --> Content[holtburger-content assets]
     Host --> HBLB[HBLB requested-layer records]
     HBLB --> Decode[typed browser decoders]
@@ -61,9 +61,9 @@ commit, revision, owner, publication, and eviction lifecycle.
 
 | Boundary                                              | Owned invariant                                                                                                                                         |
 | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src-tauri/src/landblock_source_batch.rs`             | One cumulative, requested-layer host acquisition with explicit requested/unrequested projections.                                                       |
-| `src-tauri/src/env_cell_source.rs`                    | HBEC v2 projection of CellStruct shells, materials, residents, containment, authored apertures, effective visibility apertures, and directed crossings. |
-| `src-tauri/src/cell_struct_projection.rs`             | One generalized polygon projection for visible sides, material-free apertures, and the normalized positive-child Cell BSP containment chain.            |
+| `host/src/landblock_source_batch.rs`                  | One cumulative, requested-layer host acquisition with explicit requested/unrequested projections.                                                       |
+| `host/src/env_cell_source.rs`                         | HBEC v2 projection of CellStruct shells, materials, residents, containment, authored apertures, effective visibility apertures, and directed crossings. |
+| `host/src/cell_struct_projection.rs`                  | One generalized polygon projection for visible sides, material-free apertures, and the normalized positive-child Cell BSP containment chain.            |
 | `src/lib/assets/decode-env-cell-record.ts`            | Strict, versioned, independently decodable browser boundary; malformed identity, ranges, topology, or geometry fail loudly.                             |
 | `game/commit/env-cell-materialization.ts`             | Renderer-neutral shell, scope, aperture, crossing, and per-cell resident work; no scene or GPU ownership.                                               |
 | `game/runtime/static-layer-realizer.ts`               | Revision currentness, geometry/atlas rendezvous, publication ordering, and stale-work withdrawal.                                                       |
@@ -202,9 +202,9 @@ authored effects runtime — scripts, particles, and audio — is complete, and 
 it through one source-neutral presentation input rather than a second dynamic system.
 
 A spawned entity enters through an app-local Explorer registry above the host simulation's own
-`SpatialScene`, crosses a narrow Tauri relay as one focused `DynamicEntityView`, and is realized by
+`SpatialScene`, crosses the narrow sidecar event boundary as one focused `DynamicEntityView`, and is realized by
 the same template repository, animation system, effect dispatcher, and renderer path the authored
-layer uses. The frontend mirror hydrates on mount or webview remount by registering its listener
+layer uses. The frontend mirror hydrates on mount or renderer reload by registering its listener
 and then requesting one current-state snapshot; there is no replay, acknowledgement, or
 delivery-recovery protocol. Solver output owns the entity root: the placement system evaluates
 accepted sparse paths at render cadence, while animation and effects write visual-root and part
@@ -335,7 +335,7 @@ retained across a switch back to flat mode, and disposed on resize or renderer d
 | Layer                 | May own                                                                    | Must not own                                             |
 | --------------------- | -------------------------------------------------------------------------- | -------------------------------------------------------- |
 | `holtburger-content`  | canonical landblock/interior joins and authored topology                   | app transport, browser geometry, portal render schedules |
-| Tauri adapter         | app-local projection, HBLB/HBEC encoding, effective aperture preprocessing | scene revisions, camera policy, WebGL state              |
+| app host              | app-local projection, HBLB/HBEC encoding, effective aperture preprocessing | scene revisions, camera policy, WebGL state              |
 | browser assets/commit | strict decoding and source-to-plan conversion                              | runtime currentness or GPU handles                       |
 | runtime/systems       | revision ownership, scene publication, topology, logical resources         | DAT discovery or portal draw scheduling                  |
 | scene graph           | transforms, scope facts, culling, containment, portal topology views       | explorer policy or stencil policy                        |
@@ -381,8 +381,8 @@ Current large-file concentration:
 | File                                     | Approx. lines | Assessment                                                                                                                                                                                |
 | ---------------------------------------- | ------------: | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `renderer/webgl2-renderer.ts`            |         2,945 | Largest active debt. Contribution assembly, frame metrics, scope routing, and device drawing are coherent but crowded. Extract a measured seam before adding another rendering subsystem. |
-| `src-tauri/src/env_cell_source.rs`       |         1,210 | Large but cohesive source projection. Binary-section encoding is now shared; visibility preprocessing is the clearest future split if the format evolves.                                 |
-| `src-tauri/src/lib.rs`                   |         1,550 | Broad Tauri composition hub; split by command family when next materially touched.                                                                                                        |
+| `host/src/env_cell_source.rs`            |         1,446 | Large but cohesive source projection. Binary-section encoding is now shared; visibility preprocessing is the clearest future split if the format evolves.                                 |
+| `host/src/lib.rs`                        |         2,177 | Broad app-host composition hub; split by command family when next materially touched.                                                                                                     |
 | `runtime/game-runtime.ts`                |         2,053 | Legitimate composition root. Typed owner parsing and texture merging are delegated; keep feature policy in planners, realizers, and systems.                                              |
 | `assets/decode-env-cell-record.ts`       |         1,141 | Strict semantic validation remains dense after shared binary-section and static-presentation decoding were extracted.                                                                     |
 | `renderer/portal-scope-window-culler.ts` |         1,058 | Packed zero-record camera-time traversal. Keep it differentially paired with the immutable reference and do not add object-shaped frame state.                                            |

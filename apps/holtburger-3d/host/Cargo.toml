@@ -1,0 +1,30 @@
+[package]
+name = "holtburger-3d-host"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+holtburger-content.workspace = true
+holtburger-common.workspace = true
+holtburger-core.workspace = true
+holtburger-dat.workspace = true
+holtburger-protocol.workspace = true
+holtburger-world.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+geo = "0.33.1"
+hex.workspace = true
+log.workspace = true
+holtburger-weenie-catalog.workspace = true
+thiserror.workspace = true
+nucleo-matcher = "0.3.1"
+rmp-serde = "1.3.1"
+serde_bytes = "0.11.19"
+
+[dev-dependencies]
+tempfile.workspace = true

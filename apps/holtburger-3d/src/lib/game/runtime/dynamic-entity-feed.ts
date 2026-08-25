@@ -297,7 +297,7 @@ export type DynamicEntityAdvanceBatch = z.infer<
 >;
 export type DynamicEntityEvent = z.infer<typeof dynamicEntityEventSchema>;
 
-/** Validates the narrow Tauri boundary before mutable frontend state observes it. */
+/** Validates the narrow host boundary before mutable frontend state observes it. */
 export function decodeDynamicEntityEvent(value: unknown): DynamicEntityEvent {
 	const event = dynamicEntityEventSchema.parse(value);
 	if (event.kind === "advanced") {

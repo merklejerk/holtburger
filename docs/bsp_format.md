@@ -121,5 +121,5 @@ propagation, collision response, or portal-crossing history.
 
 Implementation references:
 
-- `apps/holtburger-3d/src-tauri/src/cell_struct_projection.rs`
+- `apps/holtburger-3d/host/src/cell_struct_projection.rs`
 - `apps/holtburger-3d/src/lib/game/scene/cell-containment.ts`

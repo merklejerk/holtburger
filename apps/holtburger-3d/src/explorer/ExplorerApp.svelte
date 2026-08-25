@@ -1,13 +1,13 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import { TauriAnimationAssetSource } from "../lib/assets/tauri-animation-asset-source";
-	import { TauriPhysicsScriptSource } from "../lib/assets/tauri-physics-script-source";
-	import { TauriAudioSource } from "../lib/assets/tauri-audio-source";
+	import { AnimationHostSource } from "../lib/assets/animation-host-source";
+	import { PhysicsScriptHostSource } from "../lib/assets/physics-script-host-source";
+	import { AudioHostSource } from "../lib/assets/audio-host-source";
 	import { WebAudioDevice } from "../lib/assets/web-audio-device";
-	import { TauriParticleEmitterSource } from "../lib/assets/tauri-particle-emitter-source";
-	import { TauriSoundTableSource } from "../lib/assets/tauri-sound-table-source";
-	import { TauriParticleMeshSource } from "../lib/assets/tauri-particle-mesh-source";
-	import { TauriDynamicEntityVisualSource } from "../lib/assets/tauri-dynamic-entity-visual-source";
+	import { ParticleEmitterHostSource } from "../lib/assets/particle-emitter-host-source";
+	import { SoundTableHostSource } from "../lib/assets/sound-table-host-source";
+	import { ParticleMeshHostSource } from "../lib/assets/particle-mesh-host-source";
+	import { DynamicEntityVisualHostSource } from "../lib/assets/dynamic-entity-visual-host-source";
 	import FrameMetricsOverlay, {
 		type FrameMetrics,
 	} from "../app/FrameMetricsOverlay.svelte";
@@ -24,12 +24,13 @@
 		createProjectionClearanceRevision,
 		type ProjectionClearanceRevision,
 	} from "../lib/game/camera/projection-clearance";
-	import { TauriActiveRegionSource } from "../lib/assets/tauri-active-region-source";
-	import { TauriSkySource } from "../lib/assets/tauri-sky-source";
-	import { TauriLandblockSourceBatch } from "../lib/assets/tauri-landblock-source-batch";
-	import { TauriLandblockProfileSource } from "../lib/assets/tauri-landblock-profile-source";
+	import { ActiveRegionHostSource } from "../lib/assets/active-region-host-source";
+	import { SkyHostSource } from "../lib/assets/sky-host-source";
+	import { LandblockSourceHostBatch } from "../lib/assets/landblock-source-host-batch";
+	import { LandblockProfileHostSource } from "../lib/assets/landblock-profile-host-source";
 	import { CachedLandblockProfileSource } from "../lib/assets/landblock-profile-source";
-	import { TauriTexturePixelSource } from "../lib/assets/tauri-texture-pixel-source";
+	import { TexturePixelHostSource } from "../lib/assets/texture-pixel-host-source";
+	import { createElectronHostTransport } from "../lib/host/electron-host-transport";
 	import type { SceneInterestRadii } from "../lib/game/runtime/types";
 	import { LandblockLayerKind } from "../lib/game/runtime/scene-interest";
 	import type { LandblockId } from "../lib/game/game-types";
@@ -79,7 +80,7 @@
 		type PossessionMotionProbe,
 	} from "./explorer-entity-possession";
 	import {
-		tauriHostKinematicBoomTransport,
+		hostKinematicBoomTransport,
 		type HostKinematicBoomStatus,
 	} from "../lib/game/camera/host-kinematic-boom-session";
 	import { PossessionCameraController } from "../lib/game/camera/possession-camera-controller";
@@ -96,15 +97,15 @@
 		PhysicalFlySession,
 		type PhysicalFlyStatus,
 	} from "./physical-fly-session";
-	import { tauriPhysicalFlyTransport } from "./physical-fly-transport";
+	import { hostPhysicalFlyTransport } from "./physical-fly-transport";
 	import {
 		SimulationInterestController,
 		type SimulationInterestReceipt,
 	} from "./simulation-interest";
-	import { tauriSimulationInterestTransport } from "./simulation-interest-transport";
+	import { hostSimulationInterestTransport } from "./simulation-interest-transport";
 	import {
 		ExplorerDynamicEntitySession,
-		tauriExplorerDynamicEntityTransport,
+		hostExplorerDynamicEntityTransport,
 		type ExplorerFixedTickReceipt,
 	} from "./explorer-dynamic-entity-session";
 	import {
@@ -156,10 +157,11 @@
 	let gameRuntime: GameRuntime | undefined;
 	let commitPipeline: StandardCommitPipeline | undefined;
 	let webglDevice: WebGL2Device | undefined;
-	let activeRegionSource: TauriActiveRegionSource | undefined;
+	const hostTransport = createElectronHostTransport();
+	let activeRegionSource: ActiveRegionHostSource | undefined;
 	let landblockProfileSource: CachedLandblockProfileSource | undefined;
 	let sceneInterestCoordinator: SceneInterestRequestCoordinator | undefined;
-	let skySource: TauriSkySource | undefined;
+	let skySource: SkyHostSource | undefined;
 	let staticDetailOwner: ActiveRegionStaticDetailOwner | undefined;
 	let cameraController: ExplorerCameraInputController | undefined;
 	let cameraCoordinator: ExplorerCameraCoordinator | undefined;
@@ -813,7 +815,9 @@
 				? controlSchemeForCameraMode("physical-fly")
 				: { kind: "possessed-character" },
 		);
-		const session = new PhysicalFlySession(tauriPhysicalFlyTransport());
+		const session = new PhysicalFlySession(
+			hostPhysicalFlyTransport(hostTransport),
+		);
 		try {
 			const interest = await awaitCurrentSimulationInterest(
 				placement.residency.landblockId,
@@ -1086,7 +1090,7 @@
 				delayMs: FRONTEND_TUNING.explorer.camera.boom.recenterDelayMs,
 				durationMs: FRONTEND_TUNING.explorer.camera.boom.recenterDurationMs,
 			},
-			transport: tauriHostKinematicBoomTransport(),
+			transport: hostKinematicBoomTransport(hostTransport),
 		});
 		boomCameraSession = boom;
 		const runtime = gameRuntime;
@@ -1686,7 +1690,7 @@
 		const start = async (): Promise<void> => {
 			try {
 				const entitySession = new ExplorerDynamicEntitySession(
-					tauriExplorerDynamicEntityTransport(),
+					hostExplorerDynamicEntityTransport(hostTransport),
 				);
 				dynamicEntitySession = entitySession;
 				unsubscribeDynamicEntities = entitySession.subscribe(
@@ -1701,17 +1705,20 @@
 				await entitySession.start();
 				entityCatalog = await entitySession.catalogCapability();
 				if (destroyed) return;
-				activeRegionSource = TauriActiveRegionSource.build();
+				activeRegionSource = ActiveRegionHostSource.build(hostTransport);
 				activeRegion = await activeRegionSource.load();
 				if (destroyed) return;
-				const sourceBatch = TauriLandblockSourceBatch.build(activeRegion);
+				const sourceBatch = LandblockSourceHostBatch.build(
+					activeRegion,
+					hostTransport,
+				);
 				landblockProfileSource = new CachedLandblockProfileSource(
-					TauriLandblockProfileSource.build(),
+					LandblockProfileHostSource.build(hostTransport),
 				);
 				sceneInterestCoordinator = new SceneInterestRequestCoordinator(
 					landblockProfileSource,
 				);
-				const texturePixelSource = TauriTexturePixelSource.build();
+				const texturePixelSource = TexturePixelHostSource.build(hostTransport);
 				staticDetailOwner = new ActiveRegionStaticDetailOwner(
 					texturePixelSource,
 				);
@@ -1731,18 +1738,18 @@
 					webglDevice,
 					commitPipeline,
 					texturePixelSource,
-					TauriAnimationAssetSource.build(),
-					TauriPhysicsScriptSource.build(),
+					AnimationHostSource.build(hostTransport),
+					PhysicsScriptHostSource.build(hostTransport),
 					new WebAudioDevice(
 						new AudioContext(),
-						TauriAudioSource.build(),
+						AudioHostSource.build(hostTransport),
 						FRONTEND_TUNING.audio.placementSmoothingSeconds,
 						FRONTEND_TUNING.audio.loudnessCurveExponent,
 					),
-					TauriParticleEmitterSource.build(),
-					TauriSoundTableSource.build(),
-					TauriParticleMeshSource.build(),
-					new TauriDynamicEntityVisualSource(),
+					ParticleEmitterHostSource.build(hostTransport),
+					SoundTableHostSource.build(hostTransport),
+					ParticleMeshHostSource.build(hostTransport),
+					new DynamicEntityVisualHostSource(hostTransport),
 					undefined,
 					// The Explorer is a development surface and its Frame panel reports tick
 					// timing; the thin client route passes nothing and pays nothing.
@@ -1767,7 +1774,7 @@
 							})) ?? [],
 					});
 				}
-				skySource = new TauriSkySource();
+				skySource = new SkyHostSource(hostTransport);
 				await gameRuntime.installSky(await skySource.loadSkySource());
 				if (destroyed) return;
 				applyEnvironment();
@@ -1801,7 +1808,7 @@
 					(status) => (cameraFocusStatus = status),
 				);
 				simulationInterestController = new SimulationInterestController(
-					tauriSimulationInterestTransport(),
+					hostSimulationInterestTransport(hostTransport),
 				);
 				runtimeReady = true;
 

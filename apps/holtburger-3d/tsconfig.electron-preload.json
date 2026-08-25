@@ -1,0 +1,11 @@
+{
+	"extends": "./tsconfig.node.json",
+	"compilerOptions": {
+		"module": "NodeNext",
+		"moduleResolution": "NodeNext",
+		"verbatimModuleSyntax": false,
+		"erasableSyntaxOnly": false,
+		"noEmit": true
+	},
+	"include": ["electron/preload.cts"]
+}

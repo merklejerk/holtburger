@@ -829,7 +829,7 @@ function runRustArchiveAdapter<Output>(
 			"run",
 			"--quiet",
 			"--manifest-path",
-			"src-tauri/Cargo.toml",
+			"host/Cargo.toml",
 			"--bin",
 			"portal_trace_archive",
 			"--",

@@ -9,6 +9,10 @@ import {
 import type { HostCameraPlacement } from "../lib/game/motion/host-placed-path";
 import type { EnvCellId } from "../lib/game/game-types";
 import { FRONTEND_TUNING } from "../lib/frontend-tuning";
+import type {
+	HostCommandArguments,
+	HostCommandName,
+} from "../lib/host/host-transport";
 
 type PhysicalFlySpeedEnvelope =
 	| {
@@ -35,15 +39,21 @@ function physicalFlyCameraSpeedEnvelope(): PhysicalFlySpeedEnvelope {
 	};
 }
 
-/** Injectable Tauri boundary for one host-solved camera session. */
+/** Injectable transport boundary for one host-solved camera session. */
 export interface PhysicalFlyTransport {
-	invoke(command: string, args?: Record<string, unknown>): Promise<unknown>;
+	invoke(
+		command: Extract<
+			HostCommandName,
+			"start_physical_fly" | "set_physical_fly_intent" | "stop_physical_fly"
+		>,
+		args?: HostCommandArguments,
+	): Promise<unknown>;
 	listenMotion(
-		event: string,
+		event: "host://physical-fly-motion",
 		handler: (path: HostPhysicalFlyPath) => void,
 	): Promise<() => void>;
 	listenFailure(
-		event: string,
+		event: "host://physical-fly-failure",
 		handler: (failure: HostPhysicalFlyFailure) => void,
 	): Promise<() => void>;
 	now(): number;

@@ -10,6 +10,11 @@ import {
 	type HostKinematicBoomTick,
 } from "../motion/host-kinematic-boom-path";
 import type { ProjectionClearanceRevision } from "./projection-clearance";
+import type {
+	HostCommandArguments,
+	HostCommandName,
+	HostTransport,
+} from "../../host/host-transport";
 
 /** Possessed entity tuple required before the host will create a boom generation. */
 export interface HostKinematicBoomTarget {
@@ -27,7 +32,16 @@ export interface HostKinematicBoomDistancePolicy {
 
 /** Injectable command boundary; fixed-tick delivery remains owned by the entity session. */
 export interface HostKinematicBoomTransport {
-	invoke(command: string, args?: Record<string, unknown>): Promise<unknown>;
+	invoke(
+		command: Extract<
+			HostCommandName,
+			| "start_kinematic_boom"
+			| "set_kinematic_boom_intent"
+			| "set_kinematic_boom_clearance"
+			| "stop_kinematic_boom"
+		>,
+		args?: HostCommandArguments,
+	): Promise<unknown>;
 }
 
 /** Explorer-visible host session state without frontend collision or recovery policy. */
@@ -502,13 +516,12 @@ export class HostKinematicBoomSession {
 	}
 }
 
-/** Production command adapter; fixed-tick listener ownership stays in one entity session. */
-export function tauriHostKinematicBoomTransport(): HostKinematicBoomTransport {
+/** Host command adapter; fixed-tick listener ownership stays in one entity session. */
+export function hostKinematicBoomTransport(
+	host: HostTransport,
+): HostKinematicBoomTransport {
 	return {
-		invoke: async (command, args) => {
-			const { invoke } = await import("@tauri-apps/api/core");
-			return invoke(command, args);
-		},
+		invoke: (command, args) => host.invoke(command, args),
 	};
 }
 

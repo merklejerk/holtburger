@@ -90,8 +90,8 @@
 		type ExplorerEntitySelection,
 	} from "./explorer-entity-panel-state";
 	import {
-		createCameraLookAtAngles,
 		createEntityFacingCameraYaw,
+		resolveCameraLookAtAngles,
 	} from "../lib/game/math/camera-orientation";
 	import {
 		PhysicalFlySession,
@@ -1221,10 +1221,12 @@
 			);
 		}
 		const { placement, visualPivot } = presentation;
-		const orientation = createCameraLookAtAngles(
-			placement.position,
-			visualPivot,
-		);
+		// A boom that has just seeded or recovered sits on the body's own collision sphere, so this
+		// instant carries no look direction. The operator's desired orbit is what the boom is about
+		// to spring out along, which is the same orientation the unpresented branch above uses.
+		const orientation =
+			resolveCameraLookAtAngles(placement.position, visualPivot) ??
+			desiredOrientation;
 		controller.applyPresentedPosition(placement.position);
 		// Published where it is decided: the boom owns orientation while it is running, and the
 		// free-fly controller only receives position, so reading yaw from that controller here

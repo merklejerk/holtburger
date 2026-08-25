@@ -54,22 +54,40 @@ export function createEntityFacingCameraYaw(
 	return Math.atan2(forwardX / planarMagnitude, forwardY / planarMagnitude);
 }
 
+/**
+ * Look angles from a camera/target pair, or null when the pair carries no direction.
+ *
+ * A coincident pair is a legal state rather than a fault: the host boom seats its camera on the
+ * possessed body's own collision sphere while it seeds a generation and whenever it recovers one,
+ * so for those ticks the camera is inside the thing it is looking at and no direction exists.
+ * Callers that can name a fallback orientation read this; callers for which a coincident pair
+ * would be a bug read `createCameraLookAtAngles`, which rejects it.
+ */
+export function resolveCameraLookAtAngles(
+	position: Vec3,
+	target: Vec3,
+): CameraLookAngles | null {
+	const lookX = target.x - position.x;
+	const lookY = target.y - position.y;
+	const lookZ = target.z - position.z;
+	const length = Math.hypot(lookX, lookY, lookZ);
+	if (!Number.isFinite(length) || length <= Number.EPSILON) return null;
+	return {
+		pitchRadians: Math.asin(lookY / length),
+		yawRadians: Math.atan2(lookX, -lookZ),
+	};
+}
+
 /** Derive the renderer's canonical look angles from an exact camera/target pair. */
 export function createCameraLookAtAngles(
 	position: Vec3,
 	target: Vec3,
 ): CameraLookAngles {
-	const lookX = target.x - position.x;
-	const lookY = target.y - position.y;
-	const lookZ = target.z - position.z;
-	const length = Math.hypot(lookX, lookY, lookZ);
-	if (!Number.isFinite(length) || length <= Number.EPSILON) {
+	const angles = resolveCameraLookAtAngles(position, target);
+	if (angles === null) {
 		throw new Error("Camera look-at target must be finite and distinct.");
 	}
-	return {
-		pitchRadians: Math.asin(lookY / length),
-		yawRadians: Math.atan2(lookX, -lookZ),
-	};
+	return angles;
 }
 
 /** Derive the legacy-compatible world-space axes for yaw and pitch in radians. */

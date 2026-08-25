@@ -11,19 +11,24 @@ import { RETAIL_WALKABLE_NORMAL_UP } from "../walkability";
 /**
  * One landblock's terrain reduced to what an overhead map draws.
  *
- * Expanded per triangle rather than indexed, because classification and shape want different
- * things from the same mesh. A terrain type describes a whole patch of ground and must not bleed
- * across its boundary, so every corner of a triangle carries that triangle's one resolved type and
- * flat interpolation becomes independent of which corner the driver treats as provoking. Road
- * coverage and normals stay per-corner and interpolate, because a road edge and a hillside are
- * both genuinely continuous.
+ * Expanded per triangle rather than indexed, because passability is a fact about one face and must
+ * not be shared with the neighbouring face across a vertex. Everything else here is genuinely
+ * per-corner and interpolates: a hillside, a road edge, and the boundary between two kinds of
+ * ground are all continuous.
  */
 export interface MapTerrainMesh {
 	/** Landblock-local positions, x east and z north-negative, three per triangle. */
 	readonly positions: Float32Array;
 	/** Smooth per-corner normals, used for hillshading only. */
 	readonly normals: Float32Array;
-	/** The triangle's one resolved terrain type, repeated on each of its corners. */
+	/**
+	 * The authored terrain type at each corner, which the shader resolves to a colour and blends.
+	 *
+	 * The scene renderer cannot do this — a terrain type there selects a *texture*, and texture
+	 * indices do not interpolate, which is why it reproduces retail's authored alpha masks instead.
+	 * The map selects one mean colour per type out of a palette, and colours interpolate, so the
+	 * blend costs nothing but the absence of a vote.
+	 */
 	readonly terrainCodes: Uint8Array;
 	/** Per-corner road presence, interpolated and thresholded to place the road edge. */
 	readonly roadCoverage: Float32Array;
@@ -115,9 +120,6 @@ export function buildMapTerrainMesh(
 		// An entirely-water landblock is impassable whatever shape its bed is, so the geometric
 		// test only has to answer for the landblocks a body could otherwise stand in.
 		const facePassable = !entirelyWater && isFaceWalkable(face) ? 1 : 0;
-		const resolved = dominantTerrainCode(
-			face.map((vertex) => vertex.terrainCode),
-		);
 		for (const vertex of face) {
 			const offset = cursor * 3;
 			positions[offset] = vertex.x;
@@ -126,7 +128,7 @@ export function buildMapTerrainMesh(
 			normals[offset] = vertex.normalX;
 			normals[offset + 1] = vertex.normalY;
 			normals[offset + 2] = vertex.normalZ;
-			terrainCodes[cursor] = resolved;
+			terrainCodes[cursor] = vertex.terrainCode;
 			roadCoverage[cursor] = vertex.roadCoverage;
 			passable[cursor] = facePassable;
 			cursor += 1;
@@ -183,25 +185,6 @@ function isFaceWalkable(
 	const length = Math.hypot(normalX, normalY, normalZ);
 	if (length === 0) return true;
 	return Math.abs(normalY) / length >= RETAIL_WALKABLE_NORMAL_UP;
-}
-
-/**
- * The terrain type a triangle is drawn as: whichever type most of its corners agree on.
- *
- * Ties break toward the lowest code so the answer depends on the authored data alone, never on
- * corner order or on which vertex a driver happens to treat as provoking.
- */
-function dominantTerrainCode(codes: readonly number[]): number {
-	let best = Number.POSITIVE_INFINITY;
-	let bestCount = 0;
-	for (const code of codes) {
-		const count = codes.filter((other) => other === code).length;
-		if (count > bestCount || (count === bestCount && code < best)) {
-			best = code;
-			bestCount = count;
-		}
-	}
-	return best;
 }
 
 /** Resolve every authored grid vertex once, before triangles copy from them. */

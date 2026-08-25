@@ -32,12 +32,13 @@ layout(location = ${MAP_TERRAIN_ATTRIBUTES.passable}) in float aPassable;
 uniform mat2 uWorldToClip;
 uniform vec2 uLandblockOrigin;
 uniform vec2 uMapCenter;
+uniform vec3 uTerrainPalette[${TERRAIN_TYPE_COUNT}];
 
-// A terrain type describes a whole patch of ground, so it is flat; the mesh gives every corner of
-// a triangle the same resolved type, which makes that independent of the provoking-vertex
-// convention. Road coverage and normals interpolate, because a road edge and a hillside are both
-// continuous, and the fragment stage decides where the road edge actually falls.
-flat out uint vTerrainCode;
+// The palette is resolved here rather than in the fragment stage, because a colour interpolates
+// and the terrain code that selects it does not. That is what lets the boundary between two kinds
+// of ground cross a triangle instead of following its edges. Road coverage and normals interpolate
+// for the same reason, and the fragment stage decides where the road edge actually falls.
+out vec3 vBaseColor;
 // Passability is a fact about one triangle's own face — its geometric slope, and the water type of
 // the landblock it belongs to — decided on the CPU, so it must not be smeared by interpolation.
 flat out float vPassable;
@@ -48,7 +49,7 @@ out vec3 vNormal;
 void main() {
 	vec2 worldOffset =
 		uLandblockOrigin + vec2(aLocalPosition.x, aLocalPosition.z) - uMapCenter;
-	vTerrainCode = aTerrainCode;
+	vBaseColor = uTerrainPalette[int(aTerrainCode)];
 	vRoadCoverage = aRoadCoverage;
 	vPassable = aPassable;
 	// Landblock origins carry no height, so local Y is already world height.
@@ -61,7 +62,6 @@ void main() {
 const MAP_TERRAIN_FRAGMENT_SHADER = `#version 300 es
 precision highp float;
 
-uniform vec3 uTerrainPalette[${TERRAIN_TYPE_COUNT}];
 uniform vec3 uRoadColor;
 uniform float uRoadTintStrength;
 uniform vec3 uSunDirection;
@@ -80,7 +80,7 @@ uniform vec3 uContourHaloColor;
 uniform float uAnchorHeight;
 uniform float uReliefExaggeration;
 
-flat in uint vTerrainCode;
+in vec3 vBaseColor;
 flat in float vPassable;
 in float vRoadCoverage;
 in float vHeight;
@@ -89,12 +89,11 @@ out vec4 fragmentColor;
 
 void main() {
 	vec3 normal = normalize(vNormal);
-	vec3 base = uTerrainPalette[int(vTerrainCode)];
 	// The road edge falls halfway between an authored road vertex and its neighbour, which keeps
 	// the boundary crisp while placing it from every corner rather than from one of them. This
 	// approximates retail's authored road alpha masks, which the map deliberately does not load.
 	float road = step(0.5, vRoadCoverage);
-	vec3 color = mix(base, uRoadColor, road * uRoadTintStrength);
+	vec3 color = mix(vBaseColor, uRoadColor, road * uRoadTintStrength);
 	// Exaggerate the surface for shading only. Passability was classified on the CPU from the real
 	// geometry, so nothing downstream of here can inherit the exaggeration.
 	vec3 reliefNormal = normalize(

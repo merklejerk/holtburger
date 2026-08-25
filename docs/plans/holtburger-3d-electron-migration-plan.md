@@ -880,8 +880,10 @@ certification; those are deferred Phase 9B/9C product-release gates.
 
 ### Phase 9: Prove branch portability without publishing
 
-Status: in progress. The release boundary, workflow, and local Linux diagnostics are implemented;
-the four-target hosted matrix has not run yet. Phases 9B and 9C are explicitly deferred.
+Status: in progress. The release boundary, workflow, and local Linux diagnostics are implemented.
+The first hosted run passed Linux x86-64 and both macOS architectures; a separator bug found by the
+Windows package job is fixed locally and awaits the replacement matrix. Phases 9B and 9C are
+explicitly deferred.
 
 The 3D app is mid-roadmap and is not a release candidate. This phase proves that its Electron and
 Rust boundary can build on the target operating systems without modifying, invoking, or competing
@@ -1008,6 +1010,18 @@ migration on `3d-next`.
 - The native matrix and artifact upload configuration cannot be accepted from local Linux alone.
   Its four target-specific checkboxes and Phase 9A acceptance remain open until the workflow runs
   from `probe/3d-electron-portability` and supplies authoritative hosted-runner results.
+- Hosted run `32883334114` passed the canonical release assertion and the complete Linux x86-64,
+  macOS arm64, and macOS x86-64 jobs, including native packaging, production sidecar protocol,
+  package inspection, and artifact upload. Windows x86-64 passed Rust and frontend tests, then
+  proved that Forge supplies slash-separated app-relative paths even on Windows: the ignore callback
+  split only on `node:path.sep`, misclassified `dist-electron/electron/main.js`, and excluded the
+  main entry point. The callback now accepts either separator without adding a platform branch.
+- That Windows build also exposed a Unix-only `std::fs` import in `holtburger-weenie-catalog`; the
+  import is now guarded by the same `cfg(unix)` as its sole consumer. GitHub separately annotates
+  the current `actions/checkout`, `actions/setup-node`, and `actions/upload-artifact` major versions
+  because their Node 20 action runtimes are being forced onto Node 24. They completed successfully
+  and do not affect application portability, but their maintained major versions should be refreshed
+  when this probe workflow is next retained or promoted.
 - Automated hosted-runner work can proceed without access to every target machine, but it proves
   build and package structure only. Windows and macOS remain unverified until Phase 9B runs.
 

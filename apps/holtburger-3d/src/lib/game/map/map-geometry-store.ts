@@ -1,11 +1,10 @@
 import type { EnvCellId, LandblockId } from "../game-types";
 import type {
-	ResolvedOutdoorStaticLayerSource,
+	ResolvedBuildingLayerSource,
 	ResolvedPortalAperture,
 	ResolvedPortalCrossing,
 } from "../resolution/landblock-layer";
 import type { ResolvedMapSurface } from "../resolution/presentation";
-import { LandblockLayerKind } from "../runtime/scene-interest";
 import type { ScenePlacement } from "../scene";
 import { MAP_TRANSITION_ACCENT_THICKNESS } from "./map-appearance";
 import { buildTransitionAccentSurface } from "./map-transition-accent";
@@ -88,13 +87,12 @@ export class MapGeometryStore {
 	}
 
 	/**
-	 * Retain building blocker instances for one outdoor static layer.
+	 * Retain blocker instances for one buildings layer.
 	 *
-	 * Layers that derive no blockers install nothing, so scenery costs the map neither memory nor a
-	 * revision bump. A source with no physics polygons still has an empty derived surface; a missing
-	 * source is a broken host/frontend contract and fails loudly.
+	 * A source with no physics polygons still has an empty derived surface; a missing source is a
+	 * broken host/frontend contract and fails loudly.
 	 */
-	installOutdoorStatic(source: ResolvedOutdoorStaticLayerSource): void {
+	installBuildings(source: ResolvedBuildingLayerSource): void {
 		const instances: MapSurfaceInstance[] = [];
 		for (const resident of source.staticResidents) {
 			const surface = source.mapBlockers.get(
@@ -141,13 +139,14 @@ export class MapGeometryStore {
 		this.#revision += 1;
 	}
 
-	/** Release whatever the named layer contributed, if anything. */
-	evict(landblockId: LandblockId, layer: LandblockLayerKind): void {
-		const released =
-			layer === LandblockLayerKind.EnvCells
-				? this.#interiors.delete(landblockId)
-				: this.#blockers.delete(landblockId);
-		if (released) this.#revision += 1;
+	/** Release one buildings layer's blocker geometry, if installed. */
+	evictBuildings(landblockId: LandblockId): void {
+		if (this.#blockers.delete(landblockId)) this.#revision += 1;
+	}
+
+	/** Release one EnvCell layer's interior geometry, if installed. */
+	evictInterior(landblockId: LandblockId): void {
+		if (this.#interiors.delete(landblockId)) this.#revision += 1;
 	}
 
 	/** Building blockers by landblock, for the outdoor map. */

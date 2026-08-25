@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { EnvCellId, LandblockId } from "../game-types";
 import { Mat4 } from "../math/types";
 import type {
+	ResolvedBuildingLayerSource,
 	ResolvedObjectResident,
-	ResolvedOutdoorStaticLayerSource,
 	ResolvedPortalCrossing,
 } from "../resolution/landblock-layer";
 import type { ResolvedMapSurface } from "../resolution/presentation";
@@ -36,7 +36,7 @@ function surface(triangles = 1): ResolvedMapSurface {
 function buildings(
 	mapBlockers: ReadonlyMap<string, ResolvedMapSurface>,
 	sourceAssetId: string = BUILDING,
-): ResolvedOutdoorStaticLayerSource {
+): ResolvedBuildingLayerSource {
 	const resident = {
 		placement: placement(),
 		presentation: { sourceAssetId },
@@ -47,7 +47,7 @@ function buildings(
 		staticResidents: [resident],
 		dynamicSources: [],
 		mapBlockers,
-	} as ResolvedOutdoorStaticLayerSource;
+	};
 }
 
 function interior(
@@ -60,7 +60,7 @@ function interior(
 describe("MapGeometryStore", () => {
 	it("pairs each building resident with its source silhouette", () => {
 		const store = new MapGeometryStore();
-		store.installOutdoorStatic(buildings(new Map([[BUILDING, surface(2)]])));
+		store.installBuildings(buildings(new Map([[BUILDING, surface(2)]])));
 
 		const entries = [...store.listBlockers()];
 		expect(entries).toHaveLength(1);
@@ -71,14 +71,14 @@ describe("MapGeometryStore", () => {
 
 	it("rejects a layer missing a resident's derived blocker", () => {
 		const store = new MapGeometryStore();
-		expect(() => store.installOutdoorStatic(buildings(new Map()))).toThrow(
+		expect(() => store.installBuildings(buildings(new Map()))).toThrow(
 			"missing source",
 		);
 	});
 
 	it("skips a resident whose source silhouette is empty", () => {
 		const store = new MapGeometryStore();
-		store.installOutdoorStatic(buildings(new Map([[BUILDING, surface(0)]])));
+		store.installBuildings(buildings(new Map([[BUILDING, surface(0)]])));
 
 		expect([...store.listBlockers()]).toHaveLength(0);
 		expect(store.revision).toBe(0);
@@ -86,10 +86,10 @@ describe("MapGeometryStore", () => {
 
 	it("replaces prior blockers when a republished layer derives none", () => {
 		const store = new MapGeometryStore();
-		store.installOutdoorStatic(buildings(new Map([[BUILDING, surface()]])));
+		store.installBuildings(buildings(new Map([[BUILDING, surface()]])));
 		const installed = store.revision;
 
-		store.installOutdoorStatic(buildings(new Map([[BUILDING, surface(0)]])));
+		store.installBuildings(buildings(new Map([[BUILDING, surface(0)]])));
 
 		expect([...store.listBlockers()]).toHaveLength(0);
 		expect(store.revision).toBeGreaterThan(installed);
@@ -129,7 +129,7 @@ describe("MapGeometryStore", () => {
 
 	it("releases only the evicted layer and reports a new revision", () => {
 		const store = new MapGeometryStore();
-		store.installOutdoorStatic(buildings(new Map([[BUILDING, surface()]])));
+		store.installBuildings(buildings(new Map([[BUILDING, surface()]])));
 		store.installInterior(
 			interior([
 				{
@@ -141,14 +141,14 @@ describe("MapGeometryStore", () => {
 		);
 		const installed = store.revision;
 
-		store.evict(LANDBLOCK, LandblockLayerKind.EnvCells);
+		store.evictInterior(LANDBLOCK);
 
 		expect(store.interiorFor(LANDBLOCK)).toBeNull();
 		expect([...store.listBlockers()]).toHaveLength(1);
 		expect(store.revision).toBeGreaterThan(installed);
 
 		const beforeMiss = store.revision;
-		store.evict(OTHER_LANDBLOCK, LandblockLayerKind.EnvCells);
+		store.evictInterior(OTHER_LANDBLOCK);
 		expect(store.revision).toBe(beforeMiss);
 	});
 });

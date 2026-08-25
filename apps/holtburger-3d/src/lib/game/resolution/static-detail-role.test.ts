@@ -19,7 +19,6 @@ function source(
 ): ResolvedStaticObjectLayerSource {
 	const common = {
 		dynamicSources: [],
-		mapBlockers: new Map(),
 		landblockId: "0xda55ffff" as const,
 		staticResidents: [],
 	};
@@ -30,5 +29,7 @@ function source(
 				kind,
 				staticLights: [],
 			}
-		: { ...common, kind };
+		: kind === LandblockLayerKind.Buildings
+			? { ...common, kind, mapBlockers: new Map() }
+			: { ...common, kind };
 }

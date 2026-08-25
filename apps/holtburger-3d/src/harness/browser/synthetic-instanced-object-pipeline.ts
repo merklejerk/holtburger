@@ -48,7 +48,6 @@ function generatedBundle(landblockId: LandblockId): LandblockLayerCommit {
 	]);
 	const source: ResolvedOutdoorStaticLayerSource = {
 		dynamicSources: [],
-		mapBlockers: new Map(),
 		kind: LandblockLayerKind.Generated,
 		landblockId,
 		staticResidents: [

@@ -2,8 +2,8 @@ import { z } from "zod";
 import type { LandblockId } from "../game/game-types";
 import { AABB3, Mat4, Vec3 } from "../game/math/types";
 import type {
-	ResolvedObjectLayerSource,
 	ResolvedObjectResident,
+	ResolvedOutdoorStaticLayerSource,
 } from "../game/resolution/landblock-layer";
 import { LandblockLayerKind } from "../game/runtime/scene-interest";
 import type {
@@ -283,7 +283,7 @@ export function decodeOutdoorStaticRecord(
 	response: Uint8Array,
 	requestedLandblockId: LandblockId,
 	expectedLayer: OutdoorStaticLayerKind,
-): ResolvedObjectLayerSource {
+): ResolvedOutdoorStaticLayerSource {
 	if (response.byteLength < HEADER_LENGTH) {
 		throw new Error("Outdoor static record is shorter than its binary header.");
 	}
@@ -383,34 +383,52 @@ export function decodeOutdoorStaticRecord(
 	}
 	const { staticResidents, dynamicSources } =
 		classifyObjectResidents(residents);
-	return {
-		kind: expectedLayer,
+	const source = {
 		landblockId: manifest.landblockId as LandblockId,
 		staticResidents,
 		dynamicSources,
-		mapBlockers: decodeMapBlockers(
-			manifest,
+	};
+	if (expectedLayer === LandblockLayerKind.Buildings) {
+		if (manifest.mapBlockers === undefined) {
+			throw new Error("Buildings source record omitted map blocker metadata.");
+		}
+		const mapBlockers = decodeMapBlockers(
+			manifest.mapBlockers,
 			response,
 			sectionDataOffset,
 			sections,
-		),
-	};
+		);
+		for (const resident of staticResidents) {
+			if (!mapBlockers.has(resident.presentation.sourceAssetId)) {
+				throw new Error(
+					`Buildings source record omitted map blocker ${resident.presentation.sourceAssetId}.`,
+				);
+			}
+		}
+		return {
+			...source,
+			kind: LandblockLayerKind.Buildings,
+			mapBlockers,
+		};
+	}
+	if (manifest.mapBlockers !== undefined) {
+		throw new Error(
+			`${expectedLayer} source record unexpectedly carries map blockers.`,
+		);
+	}
+	return { ...source, kind: expectedLayer };
 }
 
 /**
  * Slice each building's derived blocker silhouette out of the shared map sections.
- *
- * Returns an empty map for layers that carry none, so consumers read one shape regardless of layer
- * rather than branching on which layer they were handed.
  */
 function decodeMapBlockers(
-	manifest: OutdoorStaticRecordManifest,
+	entries: NonNullable<OutdoorStaticRecordManifest["mapBlockers"]>,
 	response: Uint8Array,
 	sectionDataOffset: number,
 	sections: ReadonlyMap<string, BinarySectionManifest>,
 ): ReadonlyMap<string, ResolvedMapSurface> {
 	const blockers = new Map<string, ResolvedMapSurface>();
-	if (!manifest.mapBlockers) return blockers;
 	const positions = readBinarySection(
 		response,
 		sectionDataOffset,
@@ -429,7 +447,7 @@ function decodeMapBlockers(
 	);
 	let expectedPositionOffset = 0;
 	let expectedIndexOffset = 0;
-	for (const entry of manifest.mapBlockers) {
+	for (const entry of entries) {
 		if (
 			entry.positionOffset !== expectedPositionOffset ||
 			entry.indexOffset !== expectedIndexOffset ||

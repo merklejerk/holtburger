@@ -167,11 +167,26 @@ export class StandardCommitPipeline implements CommitPipeline {
 	#prepareOutdoorStaticLayer(
 		source: ResolvedOutdoorStaticLayerSource,
 	): LandblockLayerCommit {
-		return {
-			commit: { source },
-			landblockId: source.landblockId,
-			layer: source.kind,
-		};
+		switch (source.kind) {
+			case LandblockLayerKind.Buildings:
+				return {
+					commit: { source },
+					landblockId: source.landblockId,
+					layer: source.kind,
+				};
+			case LandblockLayerKind.Objects:
+				return {
+					commit: { source },
+					landblockId: source.landblockId,
+					layer: source.kind,
+				};
+			case LandblockLayerKind.Generated:
+				return {
+					commit: { source },
+					landblockId: source.landblockId,
+					layer: source.kind,
+				};
+		}
 	}
 
 	#prepareEnvCellLayer(
@@ -196,11 +211,12 @@ function describeLayer(layer: LandblockIdLayer): string {
 	return `landblock ${layer.id} layer ${layer.layer}`;
 }
 
-function isOutdoorStaticSource(
+function isOutdoorStaticSource<TLayer extends OutdoorStaticLayerKind>(
 	source: Exclude<LandblockSourceRecord, null>,
-	layer: OutdoorStaticLayerKind,
-): source is ResolvedOutdoorStaticLayerSource & {
-	readonly kind: OutdoorStaticLayerKind;
-} {
+	layer: TLayer,
+): source is Extract<
+	ResolvedOutdoorStaticLayerSource,
+	{ readonly kind: TLayer }
+> {
 	return source.kind === layer;
 }

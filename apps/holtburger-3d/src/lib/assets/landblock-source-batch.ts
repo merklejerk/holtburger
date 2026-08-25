@@ -1,7 +1,7 @@
 import type { LandblockId } from "../game/game-types";
 import type {
 	ResolvedEnvCellLayerSource,
-	ResolvedObjectLayerSource,
+	ResolvedOutdoorStaticLayerSource,
 	ResolvedTerrainLayerSource,
 } from "../game/resolution/landblock-layer";
 import { LandblockLayerKind } from "../game/runtime/scene-interest";
@@ -17,7 +17,7 @@ export type LandblockSourceLayer =
 /** One decoded, requested record from a landblock source batch. */
 export type LandblockSourceRecord =
 	| ResolvedTerrainLayerSource
-	| ResolvedObjectLayerSource
+	| ResolvedOutdoorStaticLayerSource
 	| ResolvedEnvCellLayerSource
 	| null;
 

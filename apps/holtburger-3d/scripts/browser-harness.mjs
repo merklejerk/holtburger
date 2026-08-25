@@ -1752,6 +1752,7 @@ async function runPossessionScenario(
 	captureFrameState,
 ) {
 	const tickMs = Math.min(50, requestedTickMs);
+	const transitionTimeoutTicks = Math.ceil(4_000 / tickMs);
 	const invoke = (method, args = []) =>
 		evaluate(
 			client,
@@ -2042,8 +2043,20 @@ async function runPossessionScenario(
 		await advance(8);
 	}
 
-	const initial = current;
 	await setDrive(drive("backward"));
+	let backwardEntry = await advance(1);
+	for (let tick = 1; tick < transitionTimeoutTicks; tick += 1) {
+		if (backwardEntry.probe?.clip?.completion === "loop") break;
+		backwardEntry = await advance(1);
+	}
+	if (backwardEntry.probe?.clip?.completion !== "loop") {
+		throw new Error(
+			`Possessed S did not reach its reversed cyclic motion: ${JSON.stringify(backwardEntry.probe)}.`,
+		);
+	}
+	// A table may author a one-shot transition whose root travels differently from the selected
+	// locomotion cycle. Measure signed movement only after that transition has completed.
+	const initial = backwardEntry.entity;
 	let backward = await advance(1);
 	for (let tick = 1; tick < 60; tick += 1) {
 		const heading = entityYawRadians(initial);

@@ -291,14 +291,14 @@ describe("HostKinematicBoomSession", () => {
 			kind: "active",
 			sequence: 3,
 			renderedReach: 0,
-			recovery: { kind: "reseeded", reason: "placement-recovery" },
+			placementOutcome: { kind: "reseeded", reason: "placement-recovery" },
 		});
 
 		session.receive(advance(4, 50, 51), 32, 103);
 		expect(session.status()).toMatchObject({
 			kind: "active",
 			sequence: 4,
-			recovery: null,
+			placementOutcome: null,
 		});
 	});
 
@@ -315,7 +315,7 @@ describe("HostKinematicBoomSession", () => {
 		expect(session.presentation(1_000)).toEqual(heldPresentation);
 		expect(session.status()).toMatchObject({
 			kind: "active",
-			recovery: { kind: "held", reason: "clearance-sweep" },
+			placementOutcome: { kind: "held", reason: "clearance-sweep" },
 		});
 
 		session.receive(advance(2, 12, 13), 32, 11);
@@ -325,7 +325,7 @@ describe("HostKinematicBoomSession", () => {
 		expect(session.status()).toMatchObject({
 			kind: "active",
 			sequence: 2,
-			recovery: null,
+			placementOutcome: null,
 		});
 
 		await session.stop();

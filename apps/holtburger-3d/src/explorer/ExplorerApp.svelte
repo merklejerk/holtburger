@@ -1221,9 +1221,8 @@
 			);
 		}
 		const { placement, visualPivot } = presentation;
-		// A boom that has just seeded or recovered sits on the body's own collision sphere, so this
-		// instant carries no look direction. The operator's desired orbit is what the boom is about
-		// to spring out along, which is the same orientation the unpresented branch above uses.
+		// A reseed instant carries no look direction. The operator's desired orbit is what the boom
+		// is about to spring back out along, which is what the unpresented branch above uses too.
 		const orientation =
 			resolveCameraLookAtAngles(placement.position, visualPivot) ??
 			desiredOrientation;

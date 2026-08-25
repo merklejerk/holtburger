@@ -1847,8 +1847,8 @@
 			return;
 		activeBoomProjection = projection;
 		const { placement, visualPivot } = presentation;
-		// Seeding and recovery ticks seat the camera on the body's collision sphere, which carries no
-		// look direction. The harness holds its last applied camera rather than inventing one.
+		// A reseed instant carries no look direction, and the harness has no desired orbit to fall
+		// back on, so it holds its last applied camera rather than inventing one.
 		const orientation = resolveCameraLookAtAngles(
 			placement.position,
 			visualPivot,

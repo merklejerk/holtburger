@@ -270,13 +270,21 @@ pub enum KinematicBoomHoldReason {
     FreeSphereQuery,
 }
 
-/// Failure recovered by a successful discontinuous reset to a full-envelope-safe placement.
+/// Why a tick reset the camera discontinuously to a full-envelope-safe placement.
+///
+/// Every reset settles the camera onto the target seed, so the placement these carry is the body's
+/// own collision sphere rather than a boom placement: reach collapses and the camera can coincide
+/// with the visual pivot, which resolves from that same sphere, until the next tick sweeps it back
+/// out. Only [`Self::InitialPlacement`] is ordinary; the other two are recoveries from a failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KinematicBoomReseedReason {
+    /// The generation's first tick, which proves projection clearance before any boom work.
+    ///
+    /// Not a recovery: it is reached exactly once per generation, because it is gated on a
+    /// committed clearance that is only ever absent before the first tick.
+    InitialPlacement,
     PlacedPath,
     PlacementRecovery,
-    /// Initial projection clearance was proven away from the unpresented target seed.
-    ClearanceRecovery,
 }
 
 /// Camera motion committed by one successful controller tick.
@@ -624,7 +632,7 @@ impl KinematicBoomController {
         KinematicBoomOutcome::Advanced {
             advance: KinematicBoomAdvance::Reseeded {
                 placement: self.camera,
-                reason: KinematicBoomReseedReason::ClearanceRecovery,
+                reason: KinematicBoomReseedReason::InitialPlacement,
             },
             clearance: self.committed_clearance,
             diagnostics: KinematicBoomDiagnostics {
@@ -1579,7 +1587,7 @@ mod tests {
             outcome,
             KinematicBoomOutcome::Advanced {
                 advance: KinematicBoomAdvance::Reseeded {
-                    reason: KinematicBoomReseedReason::ClearanceRecovery,
+                    reason: KinematicBoomReseedReason::InitialPlacement,
                     ..
                 },
                 ..

@@ -275,7 +275,7 @@ describe("GameRuntime view and interest control", () => {
 			colorGrade: DEFAULT_FRAME_SETTINGS.colorGrade,
 			distanceFogEnabled: true,
 			viewerLightEnabled:
-				FRONTEND_TUNING.rendering.frameDefaults.viewerLightEnabled,
+				FRONTEND_TUNING.rendering.viewerLight.enabledByDefault,
 			weatherEnabled: FRONTEND_TUNING.rendering.frameDefaults.weatherEnabled,
 			staticLightsEnabled:
 				FRONTEND_TUNING.rendering.frameDefaults.staticLightsEnabled,

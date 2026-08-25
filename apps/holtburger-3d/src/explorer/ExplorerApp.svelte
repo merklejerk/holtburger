@@ -1864,6 +1864,9 @@
 						possessedGuid === null
 							? null
 							: (gameRuntime.spawnedEntityPlacement(possessedGuid) ?? null);
+					// The possessed character is what the viewer is driving, so it carries the
+					// viewer light; with nothing possessed the camera carries it, as retail does.
+					gameRuntime.setViewerLightCarrier(possessedGuid);
 					const followResidency = residencySync.location?.residency;
 					if (interestFollowsCamera && followResidency) {
 						followCameraSceneInterest(followResidency);

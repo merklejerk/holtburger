@@ -29,10 +29,11 @@ export const MAP_RELIEF_EXAGGERATION = MAP_TUNING.hillshade.reliefExaggeration;
 
 export const MAP_ROAD_COLOR = colorVector(MAP_TUNING.colors.road);
 export const MAP_ROAD_TINT_STRENGTH = MAP_TUNING.colors.roadTintStrength;
-export const MAP_STEEP_COLOR = colorVector(MAP_TUNING.colors.steep);
-export const MAP_STEEP_HATCH_PERIOD_PIXELS =
-	MAP_TUNING.colors.steepHatchPeriodPixels;
-export const MAP_STEEP_HATCH_STRENGTH = MAP_TUNING.colors.steepHatchStrength;
+export const MAP_IMPASSABLE_COLOR = colorVector(MAP_TUNING.colors.impassable);
+export const MAP_IMPASSABLE_HATCH_PERIOD_PIXELS =
+	MAP_TUNING.colors.impassableHatchPeriodPixels;
+export const MAP_IMPASSABLE_HATCH_STRENGTH =
+	MAP_TUNING.colors.impassableHatchStrength;
 export const MAP_CONTOUR_INTERVAL = MAP_TUNING.colors.contourIntervalMeters;
 export const MAP_CONTOUR_STRENGTH = MAP_TUNING.colors.contourStrength;
 export const MAP_CONTOUR_MINIMUM_CLIMB_PER_PIXEL =

@@ -10,7 +10,7 @@ export const MAP_TERRAIN_ATTRIBUTES = {
 	normal: 1,
 	terrainCode: 2,
 	roadCoverage: 3,
-	walkable: 4,
+	passable: 4,
 } as const;
 
 /**
@@ -27,7 +27,7 @@ layout(location = ${MAP_TERRAIN_ATTRIBUTES.localPosition}) in vec3 aLocalPositio
 layout(location = ${MAP_TERRAIN_ATTRIBUTES.normal}) in vec3 aNormal;
 layout(location = ${MAP_TERRAIN_ATTRIBUTES.terrainCode}) in uint aTerrainCode;
 layout(location = ${MAP_TERRAIN_ATTRIBUTES.roadCoverage}) in float aRoadCoverage;
-layout(location = ${MAP_TERRAIN_ATTRIBUTES.walkable}) in float aWalkable;
+layout(location = ${MAP_TERRAIN_ATTRIBUTES.passable}) in float aPassable;
 
 uniform mat2 uWorldToClip;
 uniform vec2 uLandblockOrigin;
@@ -38,9 +38,9 @@ uniform vec2 uMapCenter;
 // convention. Road coverage and normals interpolate, because a road edge and a hillside are both
 // continuous, and the fragment stage decides where the road edge actually falls.
 flat out uint vTerrainCode;
-// Walkability is a fact about one triangle's own face, decided on the CPU from its geometric
-// normal, so it must not be smeared across the face by interpolation.
-flat out float vWalkable;
+// Passability is a fact about one triangle's own face — its geometric slope, and the water type of
+// the landblock it belongs to — decided on the CPU, so it must not be smeared by interpolation.
+flat out float vPassable;
 out float vRoadCoverage;
 out float vHeight;
 out vec3 vNormal;
@@ -50,7 +50,7 @@ void main() {
 		uLandblockOrigin + vec2(aLocalPosition.x, aLocalPosition.z) - uMapCenter;
 	vTerrainCode = aTerrainCode;
 	vRoadCoverage = aRoadCoverage;
-	vWalkable = aWalkable;
+	vPassable = aPassable;
 	// Landblock origins carry no height, so local Y is already world height.
 	vHeight = aLocalPosition.y;
 	vNormal = aNormal;
@@ -66,9 +66,9 @@ uniform vec3 uRoadColor;
 uniform float uRoadTintStrength;
 uniform vec3 uSunDirection;
 uniform float uAmbientLevel;
-uniform vec3 uSteepColor;
-uniform float uSteepHatchPeriodPixels;
-uniform float uSteepHatchStrength;
+uniform vec3 uImpassableColor;
+uniform float uImpassableHatchPeriodPixels;
+uniform float uImpassableHatchStrength;
 uniform vec3 uContourSameLevelColor;
 uniform vec3 uContourAboveColor;
 uniform vec3 uContourBelowColor;
@@ -81,7 +81,7 @@ uniform float uAnchorHeight;
 uniform float uReliefExaggeration;
 
 flat in uint vTerrainCode;
-flat in float vWalkable;
+flat in float vPassable;
 in float vRoadCoverage;
 in float vHeight;
 in vec3 vNormal;
@@ -95,8 +95,8 @@ void main() {
 	// approximates retail's authored road alpha masks, which the map deliberately does not load.
 	float road = step(0.5, vRoadCoverage);
 	vec3 color = mix(base, uRoadColor, road * uRoadTintStrength);
-	// Shade an exaggerated surface, but classify the real one: the steep test below reads the
-	// unexaggerated normal so it keeps meaning what retail means.
+	// Exaggerate the surface for shading only. Passability was classified on the CPU from the real
+	// geometry, so nothing downstream of here can inherit the exaggeration.
 	vec3 reliefNormal = normalize(
 		vec3(normal.x * uReliefExaggeration, normal.y, normal.z * uReliefExaggeration)
 	);
@@ -139,14 +139,18 @@ void main() {
 
 	// Screen-space diagonal hatching, so stripe spacing stays readable at every zoom rather than
 	// collapsing into solid fill when the map pulls back. The stripes are the whole marking:
-	// ground between them keeps its own colour, so a slope reads as hatched rather than as merely
-	// darker.
-	float steep = 1.0 - vWalkable;
+	// ground between them keeps its own colour, so a cliff or an ocean reads as hatched rather than
+	// as merely darker.
+	float impassable = 1.0 - vPassable;
 	float hatchPhase =
-		(gl_FragCoord.x + gl_FragCoord.y) / max(uSteepHatchPeriodPixels, 1.0);
+		(gl_FragCoord.x + gl_FragCoord.y) / max(uImpassableHatchPeriodPixels, 1.0);
 	float hatch = step(0.5, fract(hatchPhase));
 	fragmentColor = vec4(
-		mix(withContours, uSteepColor, steep * hatch * uSteepHatchStrength),
+		mix(
+			withContours,
+			uImpassableColor,
+			impassable * hatch * uImpassableHatchStrength
+		),
 		1.0
 	);
 }
@@ -171,9 +175,9 @@ export interface MapTerrainProgram {
 		readonly contourSameLevelColor: WebGLUniformLocation;
 		readonly contourStrength: WebGLUniformLocation;
 		readonly contourMinimumClimbPerPixel: WebGLUniformLocation;
-		readonly steepColor: WebGLUniformLocation;
-		readonly steepHatchPeriodPixels: WebGLUniformLocation;
-		readonly steepHatchStrength: WebGLUniformLocation;
+		readonly impassableColor: WebGLUniformLocation;
+		readonly impassableHatchPeriodPixels: WebGLUniformLocation;
+		readonly impassableHatchStrength: WebGLUniformLocation;
 		readonly sunDirection: WebGLUniformLocation;
 		readonly reliefExaggeration: WebGLUniformLocation;
 		readonly worldToClip: WebGLUniformLocation;
@@ -228,16 +232,16 @@ export function createMapTerrainProgram(
 				program,
 				"uContourMinimumClimbPerPixel",
 			),
-			steepColor: requireWebGL2Uniform(gl, program, "uSteepColor"),
-			steepHatchPeriodPixels: requireWebGL2Uniform(
+			impassableColor: requireWebGL2Uniform(gl, program, "uImpassableColor"),
+			impassableHatchPeriodPixels: requireWebGL2Uniform(
 				gl,
 				program,
-				"uSteepHatchPeriodPixels",
+				"uImpassableHatchPeriodPixels",
 			),
-			steepHatchStrength: requireWebGL2Uniform(
+			impassableHatchStrength: requireWebGL2Uniform(
 				gl,
 				program,
-				"uSteepHatchStrength",
+				"uImpassableHatchStrength",
 			),
 			sunDirection: requireWebGL2Uniform(gl, program, "uSunDirection"),
 			reliefExaggeration: requireWebGL2Uniform(

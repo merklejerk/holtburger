@@ -191,19 +191,23 @@ export const FRONTEND_TUNING = {
 			road: { red: 0.85, green: 0.76, blue: 0.55 },
 			roadTintStrength: 0.85,
 			/**
-			 * Ground too steep to stand on: hatched, not merely tinted.
+			 * Ground retail will not let a body onto: hatched, not merely tinted.
+			 *
+			 * Two unrelated rules land here, because the reader is asking one question. Ground too
+			 * steep to stand on is one; an entirely-water landblock is the other, and retail
+			 * refuses entry to those whole — which is why an ocean hatches while a pond does not.
 			 *
 			 * Hue is already carrying terrain type, roads, and the interior height ramp, so
 			 * impassability gets the free channel — pattern. Diagonal hatching is the cartographic
 			 * convention for a cliff, it survives colour blindness by construction, and it reads as
 			 * *impassable* where another dark tint would read as shadow. The stripes carry it
 			 * alone: ground between them is left exactly as it is, because a wash underneath only
-			 * darkened the slope without saying anything the stripes had not already said.
+			 * darkened the ground without saying anything the stripes had not already said.
 			 */
-			steep: { red: 0.9, green: 0.3, blue: 0.3 },
+			impassable: { red: 0.9, green: 0.3, blue: 0.3 },
 			/** Screen-space period of the hatch stripes, in pixels, and how opaque they are. */
-			steepHatchPeriodPixels: 7,
-			steepHatchStrength: 0.25,
+			impassableHatchPeriodPixels: 7,
+			impassableHatchStrength: 0.25,
 			/**
 			 * Contour lines, which carry the elevation that hillshade cannot.
 			 *

@@ -30,12 +30,12 @@ import {
 	MAP_FLOOR_MAXIMUM_FADE,
 	MAP_FLOOR_SAME_LEVEL_BAND,
 	MAP_FLOOR_TINT_SPAN,
+	MAP_IMPASSABLE_COLOR,
+	MAP_IMPASSABLE_HATCH_PERIOD_PIXELS,
+	MAP_IMPASSABLE_HATCH_STRENGTH,
 	MAP_RELIEF_EXAGGERATION,
 	MAP_ROAD_COLOR,
 	MAP_ROAD_TINT_STRENGTH,
-	MAP_STEEP_COLOR,
-	MAP_STEEP_HATCH_PERIOD_PIXELS,
-	MAP_STEEP_HATCH_STRENGTH,
 	MAP_TRANSITION_ACCENT_COLOR,
 	MAP_SUN_DIRECTION,
 	MAP_VOID_COLOR,
@@ -225,7 +225,7 @@ export class MapRenderer {
 			gl.uniform1f(uniforms.ambientLevel, MAP_AMBIENT_LEVEL);
 			gl.uniform3fv(uniforms.roadColor, MAP_ROAD_COLOR);
 			gl.uniform1f(uniforms.roadTintStrength, MAP_ROAD_TINT_STRENGTH);
-			gl.uniform3fv(uniforms.steepColor, MAP_STEEP_COLOR);
+			gl.uniform3fv(uniforms.impassableColor, MAP_IMPASSABLE_COLOR);
 			gl.uniform1f(uniforms.reliefExaggeration, MAP_RELIEF_EXAGGERATION);
 			gl.uniform3fv(
 				uniforms.contourSameLevelColor,
@@ -245,10 +245,13 @@ export class MapRenderer {
 			gl.uniform3fv(uniforms.contourHaloColor, MAP_VOID_COLOR_VECTOR);
 			gl.uniform1f(uniforms.anchorHeight, view.anchor.worldY);
 			gl.uniform1f(
-				uniforms.steepHatchPeriodPixels,
-				MAP_STEEP_HATCH_PERIOD_PIXELS,
+				uniforms.impassableHatchPeriodPixels,
+				MAP_IMPASSABLE_HATCH_PERIOD_PIXELS,
 			);
-			gl.uniform1f(uniforms.steepHatchStrength, MAP_STEEP_HATCH_STRENGTH);
+			gl.uniform1f(
+				uniforms.impassableHatchStrength,
+				MAP_IMPASSABLE_HATCH_STRENGTH,
+			);
 			for (const buffers of this.#terrain.values()) {
 				gl.uniform2f(
 					uniforms.landblockOrigin,
@@ -548,7 +551,7 @@ export class MapRenderer {
 		attribute(mesh.normals, MAP_TERRAIN_ATTRIBUTES.normal, 3, false);
 		attribute(mesh.terrainCodes, MAP_TERRAIN_ATTRIBUTES.terrainCode, 1, true);
 		attribute(mesh.roadCoverage, MAP_TERRAIN_ATTRIBUTES.roadCoverage, 1, false);
-		attribute(mesh.walkable, MAP_TERRAIN_ATTRIBUTES.walkable, 1, false);
+		attribute(mesh.passable, MAP_TERRAIN_ATTRIBUTES.passable, 1, false);
 		gl.bindVertexArray(null);
 		return {
 			buffers,

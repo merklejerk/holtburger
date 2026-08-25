@@ -1,5 +1,9 @@
 import { OUTDOOR_TERRAIN_GRID_CELLS } from "../landblocks";
-import { roadCodeOf, terrainCodeOf } from "../terrain/terrain-sample";
+import {
+	isWaterTerrainCode,
+	roadCodeOf,
+	terrainCodeOf,
+} from "../terrain/terrain-sample";
 import { usesSouthwestToNortheastCut } from "../terrain/terrain-surface";
 import type { TerrainGenerationSource } from "../terrain/types";
 import { RETAIL_WALKABLE_NORMAL_UP } from "../walkability";
@@ -24,17 +28,25 @@ export interface MapTerrainMesh {
 	/** Per-corner road presence, interpolated and thresholded to place the road edge. */
 	readonly roadCoverage: Float32Array;
 	/**
-	 * Whether the triangle can be stood on, repeated on each of its corners.
+	 * Whether a body may occupy the triangle, repeated on each of its corners.
 	 *
-	 * Decided here, once, from the triangle's own geometric normal rather than in the shader from
-	 * an interpolated one. Smooth normals are central differences across two tiles and then
-	 * interpolated again across the face, which systematically under-reports exactly the features
-	 * that matter: a 30 m step between adjacent vertices smooths to a gradient of 0.63 and reads as
-	 * walkable, while the face it actually forms rises 30 m over 24 m and is not. Because the map
-	 * triangulates on retail's authored diagonals, these faces are the surfaces physics tests, so
-	 * this is the game's own answer rather than an approximation of it.
+	 * Retail refuses ground for two unrelated reasons, and the map marks both the same way because
+	 * a reader asks one question of it: can I go there?
+	 *
+	 * Too steep is decided here, once, from the triangle's own geometric normal rather than in the
+	 * shader from an interpolated one. Smooth normals are central differences across two tiles and
+	 * then interpolated again across the face, which systematically under-reports exactly the
+	 * features that matter: a 30 m step between adjacent vertices smooths to a gradient of 0.63 and
+	 * reads as walkable, while the face it actually forms rises 30 m over 24 m and is not. Because
+	 * the map triangulates on retail's authored diagonals, these faces are the surfaces physics
+	 * tests, so this is the game's own answer rather than an approximation of it.
+	 *
+	 * Open water is decided per landblock, because that is the scale retail decides it at: entering
+	 * an entirely-water landblock collides outright, whatever the ground under it looks like
+	 * (`CLandCell::find_env_collisions`, acclient.c:340387-340390). Water inside a mixed landblock
+	 * is deliberately not marked — retail only lowers the contact plane there, and it is wadeable.
 	 */
-	readonly walkable: Float32Array;
+	readonly passable: Float32Array;
 	readonly vertexCount: number;
 }
 
@@ -75,35 +87,38 @@ export function buildMapTerrainMesh(
 	const roadCoverage = new Float32Array(vertexCount);
 	// A float rather than a byte because it feeds a float vertex attribute; storing it as a byte
 	// would need a normalising pointer type the map has no other use for.
-	const walkable = new Float32Array(vertexCount);
+	const passable = new Float32Array(vertexCount);
+	// Retail's landblock water type, which it derives per cell and then folds up: a cell is fully
+	// flooded when all four of its corners are water, and the landblock is entirely water when
+	// every cell is, so testing every authored vertex once answers the same question
+	// (`CLandBlockStruct::CalcWater`, acclient.c:339967-340014).
+	const entirelyWater = grid.every((vertex) =>
+		isWaterTerrainCode(vertex.terrainCode),
+	);
+
+	/** The grid is fixed-size and indexed by construction, so a gap is a programming error. */
+	const vertexAt = (index: number): TerrainGridVertex => {
+		const vertex = grid[index];
+		if (!vertex) throw new Error(`Terrain grid is missing vertex ${index}.`);
+		return vertex;
+	};
 
 	let cursor = 0;
 	const emit = (corners: readonly [number, number, number]): void => {
-		const faceWalkable = isFaceWalkable(
-			corners.map((index) => {
-				const vertex = grid[index];
-				if (!vertex) {
-					throw new Error(`Terrain grid is missing vertex ${index}.`);
-				}
-				return vertex;
-			}) as [TerrainGridVertex, TerrainGridVertex, TerrainGridVertex],
-		)
-			? 1
-			: 0;
+		// Resolved once as a tuple, so the face's own facts are decided from the same three
+		// vertices the corner loop then writes.
+		const face = [
+			vertexAt(corners[0]),
+			vertexAt(corners[1]),
+			vertexAt(corners[2]),
+		] as const;
+		// An entirely-water landblock is impassable whatever shape its bed is, so the geometric
+		// test only has to answer for the landblocks a body could otherwise stand in.
+		const facePassable = !entirelyWater && isFaceWalkable(face) ? 1 : 0;
 		const resolved = dominantTerrainCode(
-			corners.map((index) => {
-				const vertex = grid[index];
-				if (!vertex) {
-					throw new Error(`Terrain grid is missing vertex ${index}.`);
-				}
-				return vertex.terrainCode;
-			}),
+			face.map((vertex) => vertex.terrainCode),
 		);
-		for (const index of corners) {
-			const vertex = grid[index];
-			if (!vertex) {
-				throw new Error(`Terrain grid is missing vertex ${index}.`);
-			}
+		for (const vertex of face) {
 			const offset = cursor * 3;
 			positions[offset] = vertex.x;
 			positions[offset + 1] = vertex.y;
@@ -113,7 +128,7 @@ export function buildMapTerrainMesh(
 			normals[offset + 2] = vertex.normalZ;
 			terrainCodes[cursor] = resolved;
 			roadCoverage[cursor] = vertex.roadCoverage;
-			walkable[cursor] = faceWalkable;
+			passable[cursor] = facePassable;
 			cursor += 1;
 		}
 	};
@@ -136,11 +151,11 @@ export function buildMapTerrainMesh(
 
 	return {
 		normals,
+		passable,
 		positions,
 		roadCoverage,
 		terrainCodes,
 		vertexCount,
-		walkable,
 	};
 }
 

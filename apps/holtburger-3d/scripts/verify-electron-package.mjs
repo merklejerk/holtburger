@@ -5,74 +5,90 @@ import { access, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+const scriptPath = fileURLToPath(import.meta.url);
 const appRoot = resolve(fileURLToPath(new URL("../", import.meta.url)));
-const packageRoot = join(
-	appRoot,
-	"out",
-	`holtburger-3d-${process.platform}-${process.arch}`,
-);
-const resourcesDirectory =
-	process.platform === "darwin"
-		? join(packageRoot, "holtburger-3d.app", "Contents", "Resources")
-		: join(packageRoot, "resources");
-const archivePath = join(resourcesDirectory, "app.asar");
-const hostExecutable =
-	process.platform === "win32"
-		? "holtburger-3d-host.exe"
-		: "holtburger-3d-host";
-const hostPath = join(resourcesDirectory, hostExecutable);
 
-await access(hostPath, constants.X_OK);
-const hostMetadata = await stat(hostPath);
-if (!hostMetadata.isFile() || hostMetadata.size === 0) {
-	throw new Error(`packaged host is not a non-empty file: ${hostPath}`);
-}
+/** Verify the native host and compiled application payload in one Forge package directory. */
+export async function verifyElectronPackage(packageRoot) {
+	const normalizedPackageRoot = resolve(packageRoot);
+	const resourcesDirectory =
+		process.platform === "darwin"
+			? join(
+					normalizedPackageRoot,
+					"holtburger-3d.app",
+					"Contents",
+					"Resources",
+				)
+			: join(normalizedPackageRoot, "resources");
+	const archivePath = join(resourcesDirectory, "app.asar");
+	const hostExecutable =
+		process.platform === "win32"
+			? "holtburger-3d-host.exe"
+			: "holtburger-3d-host";
+	const hostPath = join(resourcesDirectory, hostExecutable);
 
-await access(archivePath, constants.R_OK);
-const archiveEntries = new Set(
-	listPackage(archivePath, { isPack: false }).map((entry) =>
-		entry.replaceAll("\\", "/"),
-	),
-);
-for (const requiredEntry of [
-	"/package.json",
-	"/dist/client/index.html",
-	"/dist/explorer/index.html",
-	"/dist-electron/electron/host-protocol.js",
-	"/dist-electron/electron/main.js",
-	"/dist-electron/electron/preload.cjs",
-	"/dist-electron/scripts/entry-paths.mjs",
-]) {
-	if (!archiveEntries.has(requiredEntry)) {
-		throw new Error(`packaged ASAR is missing ${requiredEntry}`);
+	await access(hostPath, constants.X_OK);
+	const hostMetadata = await stat(hostPath);
+	if (!hostMetadata.isFile() || hostMetadata.size === 0) {
+		throw new Error(`packaged host is not a non-empty file: ${hostPath}`);
 	}
-}
-if (
-	![...archiveEntries].some(
-		(entry) => entry.startsWith("/dist/assets/") && entry.endsWith(".js"),
-	)
-) {
-	throw new Error("packaged ASAR contains no compiled frontend JavaScript");
-}
-for (const forbiddenEntry of [
-	"/electron/main.ts",
-	"/scripts/electron-dev-entry.mjs",
-	"/src/explorer/main.ts",
-]) {
-	if (archiveEntries.has(forbiddenEntry)) {
-		throw new Error(
-			`packaged ASAR retained source-only entry ${forbiddenEntry}`,
-		);
-	}
-}
 
-console.log(
-	JSON.stringify({
+	await access(archivePath, constants.R_OK);
+	const archiveEntries = new Set(
+		listPackage(archivePath, { isPack: false }).map((entry) =>
+			entry.replaceAll("\\", "/"),
+		),
+	);
+	for (const requiredEntry of [
+		"/package.json",
+		"/dist/client/index.html",
+		"/dist/explorer/index.html",
+		"/dist-electron/electron/host-protocol.js",
+		"/dist-electron/electron/main.js",
+		"/dist-electron/electron/preload.cjs",
+		"/dist-electron/scripts/entry-paths.mjs",
+	]) {
+		if (!archiveEntries.has(requiredEntry)) {
+			throw new Error(`packaged ASAR is missing ${requiredEntry}`);
+		}
+	}
+	if (
+		![...archiveEntries].some(
+			(entry) => entry.startsWith("/dist/assets/") && entry.endsWith(".js"),
+		)
+	) {
+		throw new Error("packaged ASAR contains no compiled frontend JavaScript");
+	}
+	for (const forbiddenEntry of [
+		"/electron/main.ts",
+		"/scripts/electron-dev-entry.mjs",
+		"/src/explorer/main.ts",
+	]) {
+		if (archiveEntries.has(forbiddenEntry)) {
+			throw new Error(
+				`packaged ASAR retained source-only entry ${forbiddenEntry}`,
+			);
+		}
+	}
+
+	return {
 		platform: process.platform,
 		architecture: process.arch,
-		packageRoot,
+		packageRoot: normalizedPackageRoot,
 		hostExecutable,
 		hostBytes: hostMetadata.size,
 		archiveEntryCount: archiveEntries.size,
-	}),
-);
+	};
+}
+
+if (process.argv[1] !== undefined && resolve(process.argv[1]) === scriptPath) {
+	const packageRootArgument = process.argv[2];
+	if (process.argv.length > 3) {
+		throw new Error("usage: verify-electron-package.mjs [package-root]");
+	}
+	// The optional root lets callers inspect an extracted package through this same contract.
+	const packageRoot = packageRootArgument
+		? resolve(packageRootArgument)
+		: join(appRoot, "out", `holtburger-3d-${process.platform}-${process.arch}`);
+	console.log(JSON.stringify(await verifyElectronPackage(packageRoot)));
+}

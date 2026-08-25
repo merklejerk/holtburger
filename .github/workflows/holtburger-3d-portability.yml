@@ -51,16 +51,16 @@ jobs:
         include:
           - runner: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-            package-directory: holtburger-3d-linux-x64
+            platform: linux
+            architecture: x64
           - runner: windows-2022
             target: x86_64-pc-windows-msvc
-            package-directory: holtburger-3d-win32-x64
-          - runner: macos-15-intel
-            target: x86_64-apple-darwin
-            package-directory: holtburger-3d-darwin-x64
+            platform: win32
+            architecture: x64
           - runner: macos-14
             target: aarch64-apple-darwin
-            package-directory: holtburger-3d-darwin-arm64
+            platform: darwin
+            architecture: arm64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     steps:
@@ -97,6 +97,12 @@ jobs:
       - name: Inspect packaged host and static resources
         working-directory: apps/holtburger-3d
         run: npm run check:package
+      - name: Archive the inspected package without rebuilding
+        working-directory: apps/holtburger-3d
+        run: npm run archive:package -- --platform=${{ matrix.platform }} --arch=${{ matrix.architecture }}
+      - name: Verify the downloadable archive round trip
+        working-directory: apps/holtburger-3d
+        run: npm run check:archive
       - name: Record artifact limitations
         if: always()
         shell: bash
@@ -109,7 +115,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: holtburger-3d-portability-${{ matrix.target }}-${{ github.sha }}
-          path: apps/holtburger-3d/out/${{ matrix.package-directory }}
+          path: apps/holtburger-3d/out/make/zip/${{ matrix.platform }}/${{ matrix.architecture }}/*.zip
           if-no-files-found: error
           retention-days: 7
           compression-level: 0

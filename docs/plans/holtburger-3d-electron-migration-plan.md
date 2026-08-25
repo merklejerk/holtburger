@@ -1,8 +1,8 @@
 # Holtburger 3D Electron Migration Plan
 
-Status: in progress. Phases 0-9A are complete; Phase 10 is the remaining migration cleanup and
-handoff. Real-machine certification and public distribution remain deferred to the 3D
-product-release roadmap.
+Status: in progress. Phases 0-8 are complete; Phase 9A's artifact-preservation correction is in
+progress before Phase 10 migration cleanup and handoff. Real-machine certification and public
+distribution remain deferred to the 3D product-release roadmap.
 
 ## Context and Boundaries
 
@@ -33,7 +33,7 @@ and event adapters.
 - Run that Rust host as one private child process supervised by Electron.
 - Replace Tauri invoke/event calls with one narrow, typed frontend host boundary.
 - Preserve efficient binary asset responses and host-published simulation events.
-- Build and package native artifacts for Linux x86-64, Windows x86-64, and macOS x86-64/arm64.
+- Build and package native artifacts for Linux x86-64, Windows x86-64, and macOS arm64.
 - Add automated cross-platform compile, protocol, package, and launch checks using hosted CI runners.
 - Define manual certification gates for behavior that hosted CI cannot prove honestly.
 - Remove the Tauri/CEF implementation after Electron reaches local parity and the manual refinement
@@ -73,9 +73,9 @@ and event adapters.
   base64 expansion.
 - The shared `holtburger-common`, `content`, `core`, `dat`, `protocol`, `world`, and weenie-catalog
   crates do not depend on the desktop shell. The migration belongs inside `apps/holtburger-3d`.
-- `.github/workflows/nightly.yml` already builds Rust on Linux x86-64, Windows x86-64, and macOS
-  x86-64/arm64 runners. The Electron portability matrix should reuse those target expectations
-  rather than inventing a conflicting platform list.
+- `.github/workflows/nightly.yml` already builds Rust on Linux x86-64, Windows x86-64, and both
+  macOS architectures. The Electron portability probe initially reused that matrix; the 3D product
+  now deliberately targets Apple Silicon only and does not change the canonical CLI matrix.
 
 ### External references
 
@@ -880,9 +880,10 @@ certification; those are deferred Phase 9B/9C product-release gates.
 
 ### Phase 9: Prove branch portability without publishing
 
-Status: Phase 9A complete on 2026-08-25. Hosted run `32885301938` passed the release-boundary job
-and all four native package probes at commit `41e82fb6cd9a22a7036f9f24ac312c0b68d13072`.
-Phases 9B and 9C are explicitly deferred.
+Status: artifact-preservation correction in progress. Hosted run `32885301938` passed the
+release-boundary job and its native package probes, but uploading raw package directories flattened
+macOS framework symlinks and stripped the artifact layer of native filesystem semantics. Phases 9B
+and 9C are explicitly deferred.
 
 The 3D app is mid-roadmap and is not a release candidate. This phase proves that its Electron and
 Rust boundary can build on the target operating systems without modifying, invoking, or competing
@@ -897,7 +898,7 @@ short-lived diagnostic outputs, not releases.
   standalone application in canonical releases.
 - A dedicated `holtburger-3d-portability.yml` workflow with read-only repository permissions,
   relevant path filters, and a push trigger limited to `probe/3d-electron-portability`.
-- Native build/package jobs for Linux x86-64, Windows x86-64, macOS x86-64, and macOS arm64.
+- Native build/package jobs for Linux x86-64, Windows x86-64, and macOS arm64.
 - Short-lived artifacts named as experimental portability probes, paired with package-content and
   host-protocol evidence.
 
@@ -924,9 +925,10 @@ short-lived diagnostic outputs, not releases.
 - [x] Complete a minimal handshake/`host_status`/shutdown smoke test wherever the hosted runner
       provides a usable desktop session. Record runner limitations rather than converting an unrun
       GUI test into a pass.
-- [x] Upload packaged directories only as short-retention workflow artifacts for diagnostics and
-      eventual manual testing. Label every artifact and workflow summary experimental, unsupported,
-      and unverified on real hardware.
+- [ ] Archive inspected packages with Forge's ZIP maker before short-retention upload, verify the
+      extracted archive through the package inspector, and prove macOS framework symlinks survive.
+      Label every artifact and workflow summary experimental, unsupported, and unverified on real
+      hardware.
 
 ##### Acceptance criteria
 
@@ -947,9 +949,9 @@ result to remain meaningful.
 - [ ] On Windows x86-64, verify archive launch, popup and context-menu input, keyboard/mouse capture,
       WebGL/GPU identity, DPI changes, audio, workers, content discovery, host crash/quit cleanup,
       and representative Explorer/client flows.
-- [ ] On macOS arm64 and either macOS x86-64 hardware or the chosen universal-build strategy, verify
-      equivalent behavior plus application focus/menu conventions, Retina coordinates, app-bundle
-      sidecar execution, and the Gatekeeper launch procedure for an unsigned package.
+- [ ] On macOS arm64, verify equivalent behavior plus application focus/menu conventions, Retina
+      coordinates, app-bundle sidecar execution, and the Gatekeeper launch procedure for an
+      unsigned package.
 - [ ] Test Linux under native Wayland and X11/XWayland where available, including high-DPI and
       multi-monitor behavior.
 - [ ] Record OS version, architecture, GPU, display scaling, package type, and exact tested build for
@@ -961,7 +963,7 @@ result to remain meaningful.
 Status: deferred to the 3D product-release roadmap; it is not part of completing the Electron
 migration on `3d-next`.
 
-- [ ] Decide public distribution formats and whether macOS uses separate or universal packages.
+- [ ] Decide public distribution formats for the three supported platform targets.
 - [ ] Decide how a release-ready 3D application participates in the canonical publishing strategy.
       Do not create a parallel publisher or extend the CLI workflows before that product decision.
 - [ ] Generate public checksums and reproducible build instructions, and document Windows
@@ -977,7 +979,7 @@ migration on `3d-next`.
   certification and publication are separate deferred product work.
 - The probe runs only from `probe/3d-electron-portability`, based on the current local `3d-next`
   head. It has no pull-request trigger, so ordinary `3d-next` development does not consume the
-  four-platform matrix or acquire an accidental release-shaped gate. The probe branch can be
+  three-platform matrix or acquire an accidental release-shaped gate. The probe branch can be
   deleted after its evidence is recorded without moving or publishing `3d-next`.
 - A local cargo-dist 0.30.3 plan proved that the new workspace member currently appears as a
   standalone `holtburger-3d-host` release with archives, installers, and diagnostic binaries. The
@@ -1033,6 +1035,23 @@ migration on `3d-next`.
   `holtburger-3d-portability-*` artifacts with seven-day retention. Their archive sizes range from
   roughly 311 MB to 943 MB because these are uncompressed diagnostic package directories; they do
   not establish release formats or size budgets.
+- Downloading the x86-64 macOS artifact from that run proved the raw-directory upload was not
+  semantically neutral. GitHub's artifact transport materialized Electron framework symlinks as
+  duplicate files: the same 216,732,852-byte framework binary appeared at the framework root,
+  `Versions/A`, and `Versions/Current` with identical SHA-256 hashes, while the downloaded artifact
+  contained no symlinks. The 865 MB framework subtree therefore explains the roughly 900 MB macOS
+  artifacts and makes them unsuitable for manual package testing. Forge's existing ZIP maker must
+  archive the already-inspected package with `--skip-package`; CI must inspect the extracted ZIP and
+  upload only that file.
+- The replacement archive path reuses the configured Forge ZIP maker and adds no dependency. Its
+  verifier extracts the distributable into a temporary directory, reruns the same host/ASAR package
+  contract against those bytes, and on macOS checks the Electron framework's version, binary,
+  helper, library, and resource links explicitly. The local Linux round trip preserves the
+  executable host and all 990 ASAR entries while reducing the uploaded payload from 310,784,132
+  bytes for the raw directory to a 126,802,294-byte ZIP. Hosted macOS proof remains open.
+- macOS x86-64 is no longer a Holtburger 3D target. The Electron matrix, certification gate, and
+  release questions now cover Linux x86-64, Windows x86-64, and macOS arm64 only. This does not
+  remove or modify the canonical CLI's Intel-mac build.
 - Automated hosted-runner work can proceed without access to every target machine, but it proves
   build, protocol behavior, and package structure only. No packaged GUI, GPU, input, audio, display
   scaling, Gatekeeper, or SmartScreen behavior was exercised. Windows and macOS remain unverified
@@ -1095,8 +1114,7 @@ Status: follows Phase 9A and does not wait for deferred certification or public 
 - [ ] Host errors, incompatibility, crashes, and shutdown are explicit and tested.
 - [x] Tauri, CEF, `src-tauri`, and migration-only dual-shell code are removed from production.
 - [x] Browser harnesses remain independent and representative renderer checks pass.
-- [x] Linux x86-64, Windows x86-64, macOS x86-64, and macOS arm64 build/package/protocol gates pass
-      in hosted CI.
+- [x] Linux x86-64, Windows x86-64, and macOS arm64 build/package/protocol gates pass in hosted CI.
 - [ ] Formatting, checks, lint, Clippy with warnings denied, unit/integration tests, runtime
       verification, and package inspection pass.
 - [ ] Documentation describes development, content discovery, packaging, platform support status,
@@ -1120,7 +1138,5 @@ roadmap.
    installer, macOS disk image, and Linux deb/rpm/AppImage?
 2. Is Windows arm64 a supported target? It is not in the current Rust release matrix and is excluded
    from this plan until a named user/device requirement exists.
-3. Will macOS ship separate x86-64/arm64 applications or one universal application? Decide from CI
-   artifact size, packaging complexity, and actual target hardware before certification.
-4. Which real or hosted systems will provide the eventual Windows and macOS manual certification?
+3. Which real or hosted systems will provide the eventual Windows and macOS manual certification?
    Until identified, support remains explicitly pending even if CI is green.

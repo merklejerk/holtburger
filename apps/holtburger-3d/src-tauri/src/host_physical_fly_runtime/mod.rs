@@ -25,7 +25,9 @@ use holtburger_world::{
     PhysicalBodyActuation, PhysicalCollisionExclusions, PhysicalCollisionFilter, SpatialBodyId,
     resolve_physical_body_cell,
 };
-use tauri::{AppHandle, Emitter};
+use tauri::Emitter;
+
+use crate::AppHandle;
 
 use crate::host_fixed_tick_runtime::{
     HostFixedTickDisposition, HostFixedTickParticipant, HostFixedTickRegistration,

@@ -232,6 +232,7 @@ function parseArgs(args) {
 		staticLights: true,
 		weather: true,
 		profileRenderer: false,
+		mergeCensus: false,
 		terrainRadius: null,
 		textureFiltering: null,
 		lifecycle: false,
@@ -688,6 +689,9 @@ function parseArgs(args) {
 			case "--profile-renderer":
 				parsed.profileRenderer = true;
 				break;
+			case "--merge-census":
+				parsed.mergeCensus = true;
+				break;
 			case "--texture-filtering":
 				parsed.textureFiltering = requireValue(args, ++index, arg);
 				if (
@@ -1138,6 +1142,7 @@ Options:
   --no-weather           Disable authored weather, mirroring retail's player option. Use it to
                          A/B a Rainy day group against the same scene without rain.
   --profile-renderer     Enable opt-in renderer CPU/GPU profiling before capture.
+  --merge-census         Report how far the frame's baked object draws could merge.
   --texture-filtering <mode>
                          Select nearest, linear, or anisotropic-2x/4x/8x before content settles.
   --fixture <name>      Use the blended, instanced, or portal-scope-atlas fixture.
@@ -1340,6 +1345,7 @@ function briefHarnessReport(result) {
 						behavior: authoredDynamics.behavior,
 						residentCount: authoredDynamics.residents.length,
 					},
+		bakedDrawMergeCensus: result.bakedDrawMergeCensus,
 		glRenderer: result.glRenderer,
 		map: result.map,
 		consoleMessages: result.consoleMessages.filter(
@@ -1390,6 +1396,7 @@ function briefHarnessReport(result) {
 				? null
 				: {
 						geometryResourceCount: staticObjects.geometryResourceCount,
+						geometryResourceBytes: staticObjects.geometryResourceBytes,
 						staticObjectNodeCount: staticObjects.staticObjectNodeCount,
 						staticObjectOwnerCount: staticObjects.staticObjectOwnerCount,
 						outdoorLightScopeCount: staticObjects.outdoorLightScopeCount,
@@ -3790,6 +3797,13 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 					: gl.getParameter(info.UNMASKED_RENDERER_WEBGL);
 			})()`,
 		);
+		const bakedDrawMergeCensus = options.mergeCensus
+			? await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.captureBakedDrawMergeCensus",
+					[],
+				)
+			: null;
 		const state = await evaluate(
 			client,
 			"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
@@ -3833,6 +3847,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			);
 		}
 		return {
+			bakedDrawMergeCensus,
 			cpuProfile,
 			ambientOcclusionCycleStates,
 			audioFlyby,

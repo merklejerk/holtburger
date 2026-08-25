@@ -1,0 +1,17 @@
+[env]
+# Where cef-dll-sys keeps the downloaded CEF distribution.
+#
+# Without this the archive lands in `target/<profile>/build/cef-dll-sys-*/out`, which means a
+# separate 1.8 GB copy per profile and per feature permutation, re-downloaded for every fresh
+# target directory. Pointing it outside `target/` makes debug and release share one copy that
+# survives `cargo clean`.
+#
+# Deliberately not `force = true`: an exported `CEF_PATH`, or one set in `~/.cargo/config.toml`,
+# takes precedence. That is how several worktrees share a single distribution instead of caching
+# one apiece — point them all at the same absolute path.
+#
+# The layout underneath is owned by the build script: `<CEF_PATH>/<cef-version>/<os-arch>/`.
+# Run `npm run --prefix apps/holtburger-3d prepare-cef` after a first build or a CEF version bump
+# to strip the Linux distribution's debug sections, which are roughly 1.15 GB of the 1.4 GB
+# `libcef.so`.
+CEF_PATH = { value = ".cef-cache", relative = true }

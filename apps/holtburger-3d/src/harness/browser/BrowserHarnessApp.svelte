@@ -3,6 +3,7 @@
 	import { resolveExplorerOutdoorFocusPose } from "../../explorer/explorer-camera-framing";
 	import { ExplorerCameraInputController } from "../../explorer/explorer-camera-input-controller";
 	import { FRONTEND_TUNING } from "../../lib/frontend-tuning";
+	import type { BakedDrawMergeCensus } from "../../lib/game/renderer/baked-draw-merge-census";
 	import { MapRenderer } from "../../lib/game/map/map-renderer";
 	import { MAP_DEFAULT_VIEW_DIAMETERS } from "../../lib/game/map/map-appearance";
 	import {
@@ -416,6 +417,8 @@
 		readonly resetTerrainGlTrace: () => void;
 		/** Explicitly enable or tear down renderer CPU/GPU profiling. */
 		readonly setFrameProfiling: (enabled: boolean) => void;
+		/** Size how far the next frame's baked object draws could merge. */
+		readonly captureBakedDrawMergeCensus: () => Promise<BakedDrawMergeCensus>;
 		/** Toggle near-field ambient occlusion without rebuilding content. */
 		readonly setAmbientOcclusion: (enabled: boolean) => void;
 		/** Toggle the harness-only AO distance-category view and one-shot depth census. */
@@ -2241,6 +2244,11 @@
 		runtime.setRendererFrameProfilingEnabled(enabled);
 	}
 
+	function captureBakedDrawMergeCensus(): Promise<BakedDrawMergeCensus> {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		return runtime.captureBakedDrawMergeCensus();
+	}
+
 	function setAmbientOcclusion(enabled: boolean): void {
 		if (!runtime) throw new Error("Browser harness runtime is not ready.");
 		frameSettings = {
@@ -2299,6 +2307,9 @@
 			longestLongTaskMs: 0,
 		};
 		lastFrameAt = undefined;
+		// One reset delimits both aggregates, so a --measure-ms window governs the renderer profile
+		// mean as well as the harness frame timing rather than leaving it a rolling tail.
+		runtime?.resetRendererFrameProfile();
 	}
 
 	function timingSnapshot(): BrowserHarnessTiming {
@@ -2770,6 +2781,7 @@
 					setAmbientOcclusionCoverageVisualization,
 					setColorGrade,
 					setFrameProfiling,
+					captureBakedDrawMergeCensus,
 					setStaticLights,
 					setWeather,
 					setMinimumObjectFootprintCssPixelArea,

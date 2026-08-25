@@ -158,6 +158,24 @@ export function areStaticObjectDrawsCompatible<TGeometry, TTexture, TSampler>(
 		left.geometry === right.geometry &&
 		left.indexStart === right.indexStart &&
 		left.indexCount === right.indexCount &&
+		staticObjectDrawStateEquals(left, right)
+	);
+}
+
+/**
+ * Compare the device state two draws bind, ignoring which geometry range they read.
+ *
+ * Separate from `areStaticObjectDrawsCompatible` because the two questions differ: instance-run
+ * coalescing needs draws that share a range and can therefore be submitted as one instanced call,
+ * while a merge census asks which draws would bind identical state if their geometry were
+ * re-partitioned into a shared buffer.
+ */
+export function staticObjectDrawStateEquals<TGeometry, TTexture, TSampler>(
+	left: PreparedStaticObjectDrawCompatibility<TGeometry, TTexture, TSampler>,
+	right: PreparedStaticObjectDrawCompatibility<TGeometry, TTexture, TSampler>,
+): boolean {
+	if (left === right) return true;
+	return (
 		left.cullFace === right.cullFace &&
 		left.wrapRepeat === right.wrapRepeat &&
 		left.palettedClipMap === right.palettedClipMap &&

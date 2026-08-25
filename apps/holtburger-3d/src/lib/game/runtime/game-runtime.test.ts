@@ -187,6 +187,9 @@ describe("GameRuntime view and interest control", () => {
 			farTerrainCutoffLandblocks: null,
 			objectLightingBinds: 0,
 			objectTextureBinds: 0,
+			objectDrawCalls: 0,
+			objectUniformUploads: 0,
+			objectSuppressedUniformUploads: 0,
 		};
 		const setFrameProfilingEnabled = vi.fn();
 		const renderer: Renderer = {
@@ -196,7 +199,9 @@ describe("GameRuntime view and interest control", () => {
 				return EMPTY_RENDERER_FRAME_FEEDBACK;
 			},
 			frameDiagnostics: {
+				captureBakedDrawMergeCensus: vi.fn(),
 				setProfilingEnabled: setFrameProfilingEnabled,
+				resetProfile: vi.fn(),
 				snapshot: () => ({
 					compiledObjectDraws: null,
 					profile: null,

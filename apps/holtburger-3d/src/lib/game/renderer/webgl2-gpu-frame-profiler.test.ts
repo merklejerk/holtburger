@@ -45,16 +45,13 @@ describe("WebGL2GpuFrameProfiler", () => {
 
 		harness.resultsAvailable = true;
 		profiler.poll();
-		expect(profiler.getProfile()).toEqual({
+		const timings = {
 			ambientOcclusionMs: 1,
 			blendedMs: 0,
 			farTerrainMs: 1,
-			frameNumber: 7,
-			kind: "available",
 			opaqueMs: 1,
 			particleMs: 1,
 			presentationMs: 1,
-			pendingFrameCount: 0,
 			portalCompositionMs: 2,
 			// This frame drives no sky pass, so its span stays zero rather than being absent.
 			skyMs: 0,
@@ -62,9 +59,47 @@ describe("WebGL2GpuFrameProfiler", () => {
 			// Near and far terrain remain available as one aggregate for existing consumers.
 			terrainMs: 2,
 			totalMs: 8,
+		};
+		expect(profiler.getProfile()).toEqual({
+			...timings,
+			frameNumber: 7,
+			kind: "available",
+			// One resolved frame, so the mean is that frame.
+			mean: timings,
+			pendingFrameCount: 0,
+			sampleCount: 1,
 		});
 		// One query per phase, where the timestamp profiler needed a pair plus a frame pair.
 		expect(harness.deleteQuery).toHaveBeenCalledTimes(8);
+	});
+
+	it("means every resolved frame, so one stalled batch cannot stand as the result", () => {
+		const harness = createGpuHarness(true);
+		const profiler = new WebGL2GpuFrameProfiler(harness.gl);
+		harness.resultsAvailable = true;
+		// Each query resolves to 1 ms, so opening `opaque` twice makes a frame twice as expensive.
+		for (const opaquePhaseCount of [2, 1, 1]) {
+			const frame = profiler.beginFrame(1);
+			if (!frame)
+				throw new Error("Supported timer queries did not begin a frame.");
+			for (let index = 0; index < opaquePhaseCount; index += 1) {
+				frame.beginPhase("opaque").finish();
+			}
+			frame.finish();
+			profiler.poll();
+		}
+
+		const profile = profiler.getProfile();
+		if (profile.kind !== "available") {
+			throw new Error(`Expected resolved GPU timings, got ${profile.kind}.`);
+		}
+		expect(profile.sampleCount).toBe(3);
+		expect(profile.opaqueMs).toBe(1);
+		expect(profile.mean.opaqueMs).toBeCloseTo(4 / 3);
+
+		// A reset delimits the next measurement window rather than carrying the old frames into it.
+		profiler.reset();
+		expect(profiler.getProfile().kind).toBe("pending");
 	});
 
 	it("refuses to nest elapsed queries, which WebGL permits only one of", () => {
@@ -134,7 +169,7 @@ describe("WebGL2GpuFrameProfiler", () => {
 });
 
 describe("WebGL2FrameProfiler", () => {
-	it("summarizes the latest sixty CPU frames with a nearest-rank p95", () => {
+	it("means every frame since reset while the percentile ranks only the recent tail", () => {
 		const harness = createGpuHarness(false);
 		const profiler = new WebGL2FrameProfiler(harness.gl);
 		for (let frameNumber = 1; frameNumber <= 61; frameNumber += 1) {
@@ -161,19 +196,59 @@ describe("WebGL2FrameProfiler", () => {
 		}
 
 		const profile = profiler.getProfile();
+		// Every one of the 61 frames reaches the mean. The percentile sees only the retained tail —
+		// frames 2..61 once frame 1 is shifted out — whose nearest-rank p95 is 58.
 		expect(profile?.cpu).toMatchObject({
 			latestFrameNumber: 61,
 			latestTotalMs: 61,
-			p95TotalMs: 58,
-			sampleCount: 60,
+			p95RecentTotalMs: 58,
+			sampleCount: 61,
 		});
-		expect(profile?.cpu.mean.totalMs).toBe(31.5);
+		expect(profile?.cpu.mean.totalMs).toBe(31);
 		expect(profile?.cpu.contribution.latest.staticObjectPreparationCount).toBe(
 			61,
 		);
 		expect(profile?.cpu.contribution.mean.staticObjectPreparationCount).toBe(
-			31.5,
+			31,
 		);
+	});
+
+	it("drops accumulated samples on reset so the next mean covers one window", () => {
+		const profiler = new WebGL2FrameProfiler(createGpuHarness(false).gl);
+		const record = (frameNumber: number, totalMs: number): void => {
+			profiler.finishFrame({
+				blendedOrderingMs: 0,
+				blendedSubmissionMs: 0,
+				contribution: contributionMetrics(frameNumber),
+				finalizationMs: 0,
+				frameNumber,
+				instanceRunPreparationMs: 0,
+				instanceUploadMs: 0,
+				opaqueSubmissionMs: 0,
+				otherMs: 0,
+				particleSubmissionMs: 0,
+				portalCompositionMs: 0,
+				portalPlanningMs: 0,
+				sceneContributionResolutionMs: 0,
+				sceneQueryMs: 0,
+				setupMs: 0,
+				terrainSubmissionMs: 0,
+				totalMs,
+				viewPreparationMs: 0,
+			});
+		};
+		record(1, 100);
+		record(2, 100);
+		profiler.reset();
+		expect(profiler.getProfile()).toBeNull();
+
+		record(3, 4);
+		record(4, 6);
+		const profile = profiler.getProfile();
+		expect(profile?.cpu.sampleCount).toBe(2);
+		expect(profile?.cpu.mean.totalMs).toBe(5);
+		// Frame numbering survives reset, so two samples from one session stay distinguishable.
+		expect(profile?.cpu.latestFrameNumber).toBe(4);
 	});
 
 	it("records static and dynamic contribution preparation work", () => {

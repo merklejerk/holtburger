@@ -4,7 +4,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Error;
-use tauri::{AppHandle, Emitter};
+use tauri::Emitter;
+
+use crate::AppHandle;
 
 use crate::explorer_entity_delivery::{ExplorerEntityDelivery, ExplorerFixedTickEnvelope};
 use crate::explorer_entity_runtime::{ExplorerEntityRuntime, PossessionEventOutcome};

@@ -8,6 +8,17 @@ import type {
 const UNKNOWN_STATE = Symbol("unknown-object-device-state");
 type UnknownState = typeof UNKNOWN_STATE;
 
+/** Components in the mat4 uniforms this applicator compares. */
+const MAT4_COMPONENTS = 16;
+
+/**
+ * Storage width per cached uniform.
+ *
+ * Sized by the widest uniform rather than per location, so one slot fits any of them and the cache
+ * never reallocates when a location's kind is first seen.
+ */
+const MAXIMUM_UNIFORM_COMPONENTS = MAT4_COMPONENTS;
+
 /**
  * Applies only WebGL state owned by one object phase.
  *
@@ -28,6 +39,17 @@ export class WebGL2ObjectStateApplicator {
 		PreparedObjectTextureBinding<WebGLTexture, WebGLSampler>
 	>();
 	#vertexArray: WebGLVertexArrayObject | UnknownState = UNKNOWN_STATE;
+	/**
+	 * Last applied components per uniform location, for redundancy filtering.
+	 *
+	 * Keyed by location rather than by program because locations are already per-program objects,
+	 * and GL retains uniform state per program across program switches. Values are float64 so a
+	 * stored component compares equal to the float64 the caller passed; float32 storage would round
+	 * on write and report every upload as a change.
+	 */
+	readonly #uniformComponents = new Map<WebGLUniformLocation, Float64Array>();
+	/** Reused so per-draw comparison of scalar and vector uniforms allocates nothing. */
+	readonly #uniformScratch = new Float64Array(MAXIMUM_UNIFORM_COMPONENTS);
 
 	constructor(gl: WebGL2RenderingContext) {
 		this.#gl = gl;
@@ -127,6 +149,100 @@ export class WebGL2ObjectStateApplicator {
 		}
 		this.#textureUnits.set(unit, binding);
 		return textureBound;
+	}
+
+	/**
+	 * Upload one object uniform only when its value differs from the one already applied.
+	 *
+	 * Returns whether a GL call was issued. Sound because every location this caches has exactly one
+	 * writer: `#drawObjectRange` owns the per-draw material and transform set, while program
+	 * activation, lighting, fog and portal clip routing write a disjoint set of locations. Adding a
+	 * second writer for any cached location would desync this silently.
+	 */
+	applyUniform1i(location: WebGLUniformLocation, value: number): boolean {
+		this.#uniformScratch[0] = value;
+		if (!this.#recordUniform(location, this.#uniformScratch, 1)) return false;
+		this.#gl.uniform1i(location, value);
+		return true;
+	}
+
+	applyUniform1f(location: WebGLUniformLocation, value: number): boolean {
+		this.#uniformScratch[0] = value;
+		if (!this.#recordUniform(location, this.#uniformScratch, 1)) return false;
+		this.#gl.uniform1f(location, value);
+		return true;
+	}
+
+	applyUniform3f(
+		location: WebGLUniformLocation,
+		x: number,
+		y: number,
+		z: number,
+	): boolean {
+		const scratch = this.#uniformScratch;
+		scratch[0] = x;
+		scratch[1] = y;
+		scratch[2] = z;
+		if (!this.#recordUniform(location, scratch, 3)) return false;
+		this.#gl.uniform3f(location, x, y, z);
+		return true;
+	}
+
+	applyUniform4f(
+		location: WebGLUniformLocation,
+		x: number,
+		y: number,
+		z: number,
+		w: number,
+	): boolean {
+		const scratch = this.#uniformScratch;
+		scratch[0] = x;
+		scratch[1] = y;
+		scratch[2] = z;
+		scratch[3] = w;
+		if (!this.#recordUniform(location, scratch, 4)) return false;
+		this.#gl.uniform4f(location, x, y, z, w);
+		return true;
+	}
+
+	/** The caller owns the matrix buffer; it is read here and never retained. */
+	applyUniformMatrix4fv(
+		location: WebGLUniformLocation,
+		value: Float32Array,
+	): boolean {
+		if (!this.#recordUniform(location, value, MAT4_COMPONENTS)) {
+			return false;
+		}
+		this.#gl.uniformMatrix4fv(location, false, value);
+		return true;
+	}
+
+	/**
+	 * Record one uniform's components and report whether any differed from the last applied value.
+	 *
+	 * Compared with `!==` rather than `Object.is` deliberately: an unseen location starts as `NaN`,
+	 * which compares unequal to every real value and so reports the first upload as a change, while
+	 * `-0` and `0` are the same uniform value and must not read as one.
+	 */
+	#recordUniform(
+		location: WebGLUniformLocation,
+		components: ArrayLike<number>,
+		count: number,
+	): boolean {
+		let stored = this.#uniformComponents.get(location);
+		if (stored === undefined) {
+			stored = new Float64Array(MAXIMUM_UNIFORM_COMPONENTS).fill(Number.NaN);
+			this.#uniformComponents.set(location, stored);
+		}
+		let changed = false;
+		for (let index = 0; index < count; index += 1) {
+			const next = components[index]!;
+			if (stored[index] !== next) {
+				stored[index] = next;
+				changed = true;
+			}
+		}
+		return changed;
 	}
 
 	applyVertexArray(vertexArray: WebGLVertexArrayObject): void {

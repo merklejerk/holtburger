@@ -37,5 +37,8 @@ dist-manifest.json
 .antigravitycli/
 node_modules/
 
+# CEF distribution cache; see .cargo/config.toml
+.cef-cache/
+
 # Machine-local references and working notes
 /local/

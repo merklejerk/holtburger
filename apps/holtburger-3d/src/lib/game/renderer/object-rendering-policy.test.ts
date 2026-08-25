@@ -466,9 +466,9 @@ describe("object fragment variants", () => {
 		);
 	});
 
-	it("keeps baked and instanced transform inputs structurally distinct", () => {
-		const baked = createObjectVertexShader(true, "baked");
-		const instanced = createObjectVertexShader(true, "instanced");
+	it("keeps uniform and attribute transform inputs structurally distinct", () => {
+		const baked = createObjectVertexShader(true, "uniform");
+		const instanced = createObjectVertexShader(true, "attribute");
 
 		expect(baked).toContain("uniform mat4 uLocalToLandblock;");
 		expect(baked).not.toContain("aSourceToLandblock");

@@ -34,6 +34,14 @@ export interface Texture2DReadback {
 export interface WebGL2DeviceDiagnosticIdentity {
 	readonly renderer: string;
 	readonly shadingLanguageVersion: string;
+	/**
+	 * Adapter string behind `WEBGL_debug_renderer_info`, or null where the browser withholds it.
+	 *
+	 * Non-null is not the same as true. WebKitGTK returns a fabricated value — it reported
+	 * "Apple GPU" on an RX 7900 XT — so this field has three states, not two: absent, honest, and
+	 * confidently wrong. Never branch on it, and never read it as evidence that timing came from a
+	 * real adapter; that is what the harness records `glRenderer` against a known-good host for.
+	 */
 	readonly unmaskedRenderer: string | null;
 	readonly unmaskedVendor: string | null;
 	readonly vendor: string;

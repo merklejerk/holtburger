@@ -5,7 +5,7 @@ import {
 	WRAP_DISTANCE_SCALE,
 	WRAP_DIVISOR,
 } from "./point-light-falloff";
-import { VIEWER_LIGHT } from "./scene-environment";
+import { VIEWER_LIGHT } from "./viewer-light";
 
 /** Facing the light head-on from `distance` away, with a unit normal along the delta. */
 function headOn(distance: number, range: number, intensity: number): number {

@@ -52,7 +52,7 @@ export interface RuntimeLight {
 }
 
 /** Result of fitting a candidate light list into a fixed budget. */
-export interface SelectedLights {
+export interface FittedLights {
 	readonly lights: readonly RuntimeLight[];
 	/**
 	 * Lights that did not fit. Dropping is normal operation rather than an error, so this exists
@@ -62,42 +62,45 @@ export interface SelectedLights {
 }
 
 /**
- * Keep the lights nearest a viewpoint and report how many did not fit.
+ * Fit candidate lights into a fixed shader budget, keeping the ones nearest the camera.
  *
- * Mirrors retail's `Render::insert_light` (acclient.c:364013): rank by squared distance, keep the
- * nearest, discard the rest. Selection is what makes a cap graceful — without it an overflow drops
- * whatever happened to be gathered last, which could discard the light directly in front of the
- * camera while keeping one across the landblock.
+ * Named for the job rather than for the rule: under budget this is a pass-through, and distance
+ * only decides anything once there are more candidates than slots. "Selection" elsewhere in the
+ * renderer means visibility culling, which this is not — a light that fits is bound whether or not
+ * anything it reaches is on screen.
  *
- * Distance only. A light behind the camera still illuminates what is in front of it, so there is
- * deliberately no visibility test here.
+ * Ranking is distance only. A light behind the camera still illuminates what is in front of it, so
+ * there is deliberately no visibility test here. Without ranking, an overflow would drop whatever
+ * happened to be gathered last, which could discard the light directly in front of the camera
+ * while keeping one across the landblock.
+ *
+ * RETAIL DIVERGENCE: retail ranks the same way but measures from `Render::player_pos`
+ * (`Render::insert_light`, acclient.c:364043), which is the player's own body
+ * (acclient.c:138839) rather than the eye. We measure from the camera, because the frustum starts
+ * there: with a third-person boom the body is metres from where the picture is taken, and the
+ * lights that matter are the ones reaching visible pixels. "Correcting" it back to the carrier
+ * would, on overflow, prefer lights behind the camera over lights in front of it. The two rank
+ * identically except on overflow, which content cannot author: the static budget has documented
+ * headroom over the archive's largest authored set (51 lights against `MAX_STATIC_LIGHTS`), so
+ * only the `MAX_DYNAMIC_LIGHTS` slots can overflow, and only with more simultaneously lit entities
+ * near the camera than there are slots.
  */
-export function selectNearestLights(
+export function fitLightsToBudget(
 	candidates: readonly RuntimeLight[],
-	viewpoint: { readonly x: number; readonly y: number; readonly z: number },
-	cap: number,
-): SelectedLights {
-	if (cap < 0) throw new Error("Light selection cap must not be negative.");
-	if (candidates.length <= cap) {
+	cameraPosition: SceneVec3,
+	capacity: number,
+): FittedLights {
+	if (capacity < 0) throw new Error("Light budget must not be negative.");
+	if (candidates.length <= capacity) {
 		return { lights: candidates, dropped: 0 };
 	}
 	const ranked = [...candidates].sort(
 		(left, right) =>
-			squaredDistance(left.position, viewpoint) -
-			squaredDistance(right.position, viewpoint),
+			left.position.distanceSquaredTo(cameraPosition) -
+			right.position.distanceSquaredTo(cameraPosition),
 	);
 	return {
-		lights: ranked.slice(0, cap),
-		dropped: ranked.length - cap,
+		lights: ranked.slice(0, capacity),
+		dropped: ranked.length - capacity,
 	};
-}
-
-function squaredDistance(
-	light: { readonly x: number; readonly y: number; readonly z: number },
-	viewpoint: { readonly x: number; readonly y: number; readonly z: number },
-): number {
-	const dx = light.x - viewpoint.x;
-	const dy = light.y - viewpoint.y;
-	const dz = light.z - viewpoint.z;
-	return dx * dx + dy * dy + dz * dz;
 }

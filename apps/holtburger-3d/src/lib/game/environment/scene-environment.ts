@@ -2,7 +2,6 @@ import { renderVector } from "../../assets/ac-frame";
 import { bracketKeyframes } from "./keyframe-bracket";
 import { quantizeDayFraction } from "./game-clock";
 import { resolveSkyState } from "./sky-state";
-import { RUNTIME_LIGHT_RANGE_SCALE } from "./runtime-lights";
 import type { ActiveRegionSource } from "../../assets/active-region-source";
 import type { ResolvedSkyState } from "./sky-state";
 import type { Vec3 } from "../math/types";
@@ -59,28 +58,6 @@ export interface ResolvedDistanceFog {
  * outdoor object ambient formula, and which draws see the sun at all — belongs to the
  * renderer's lighting context, not here.
  */
-/**
- * Retail's authored viewer-light constants (acclient.c:43910, 728925), with `rangeAdjust`
- * (acclient.c:44671) already folded in: a hardware light reaches `falloff * 1.5`
- * (`config_hardware_light`, acclient.c:432899).
- */
-export const VIEWER_LIGHT = {
-	/** Retail's authored falloff of 10, scaled by `rangeAdjust` like any hardware light. */
-	range: 10 * RUNTIME_LIGHT_RANGE_SCALE,
-	/**
-	 * Recalibrated for the authored falloff, not retail's `0.5 * 4.5 = 2.25`.
-	 *
-	 * Retail's value was tuned against hardware `1/d`. The authored falloff we now use for every
-	 * light is effectively inverse-square, so 2.25 would leave the headlamp roughly thirty times
-	 * dimmer at ten units and useless past two. This value reproduces retail's contribution at the
-	 * midpoint of the light's range, giving a saturated core out to about five units that tapers
-	 * to nothing at fifteen.
-	 */
-	intensity: 34,
-	/** `RGBColor::SetColor32(&viewer_light.color, 0xFFFFFFFF)`, acclient.c:139346. */
-	color: { red: 1, green: 1, blue: 1 },
-} as const;
-
 export interface ResolvedSceneLighting {
 	/** Interpolated ambient level, floored at `MINIMUM_AMBIENT_LEVEL`. */
 	readonly ambientLevel: number;

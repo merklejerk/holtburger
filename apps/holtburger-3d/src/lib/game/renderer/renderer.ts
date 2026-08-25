@@ -6,6 +6,7 @@ import type { Camera } from "../runtime/types";
 import type { ResolvedSceneEnvironment } from "../environment/scene-environment";
 import type { LandblockLights } from "../environment/outdoor-light-index";
 import type { RuntimeLight } from "../environment/runtime-lights";
+import type { SceneVec3 } from "../../assets/ac-frame";
 import { LandblockLayerKind } from "../runtime/scene-interest";
 
 /** Minimal read side of the outdoor light index the renderer depends on. */
@@ -109,8 +110,7 @@ export const DEFAULT_FRAME_SETTINGS: FrameSettings = {
 	},
 	distanceFogEnabled:
 		FRONTEND_TUNING.rendering.frameDefaults.distanceFogEnabled,
-	viewerLightEnabled:
-		FRONTEND_TUNING.rendering.frameDefaults.viewerLightEnabled,
+	viewerLightEnabled: FRONTEND_TUNING.rendering.viewerLight.enabledByDefault,
 	weatherEnabled: FRONTEND_TUNING.rendering.frameDefaults.weatherEnabled,
 	staticLightsEnabled:
 		FRONTEND_TUNING.rendering.frameDefaults.staticLightsEnabled,
@@ -158,6 +158,15 @@ export interface FrameInput {
 	readonly outdoorLights: OutdoorLightLookup;
 	/** Current entity-owned point lights already composed into canonical scene space. */
 	readonly dynamicLights: readonly RuntimeLight[];
+	/**
+	 * Where the viewer light hangs this frame, in canonical scene space.
+	 *
+	 * Resolved by the frontend rather than derived from `views[0]` here: retail hangs the light on
+	 * the body the viewer is driving and only falls back to the camera when there is none
+	 * (`SmartBox::set_viewer`, acclient.c:137879-137897), and the renderer does not know what is
+	 * being driven. Always resolved, so the light is placed rather than defaulted.
+	 */
+	readonly viewerLightOrigin: SceneVec3;
 	/** Dynamic display choices applied to this frame. */
 	readonly frameSettings: FrameSettings;
 	readonly views: readonly FrameViewInput[];

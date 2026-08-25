@@ -452,7 +452,6 @@ export const FRONTEND_TUNING = {
 		frameDefaults: {
 			/** Whether region-authored distance fog is enabled initially. */
 			distanceFogEnabled: true,
-			viewerLightEnabled: true,
 			/**
 			 * Authored weather. Retail defaults `LScape::weather_enabled` to true
 			 * (acclient.c:44269) and only the player option turns it off, so we default it on too.
@@ -476,6 +475,49 @@ export const FRONTEND_TUNING = {
 			renderScale: 1,
 			/** Requested normalized-texture filtering before device capability resolution. */
 			textureFiltering: "anisotropic-2x",
+		},
+		/**
+		 * Retail's viewer headlamp, which is what makes an unlit interior navigable.
+		 *
+		 * Where it hangs is not a preference and is not here: retail attaches it to the body the
+		 * viewer is driving and to the camera when there is none (`SmartBox::set_viewer`,
+		 * acclient.c:137879-137897), and `game/environment/viewer-light.ts` does that hanging.
+		 * What it looks like once hung is ours to shape, so it lives here.
+		 */
+		viewerLight: {
+			/** Whether the headlamp is lit initially; the Explorer world panel toggles it live. */
+			enabledByDefault: true,
+			/**
+			 * Authored falloff, in the same unit every light in the archive authors.
+			 *
+			 * Retail authors 10 (acclient.c:43910, 728925). `RUNTIME_LIGHT_RANGE_SCALE` is applied
+			 * on top, beside the other light code, because reaching `falloff * 1.5` is a rule every
+			 * hardware light obeys rather than anything specific to this one.
+			 */
+			falloff: 10,
+			/**
+			 * Recalibrated for the authored falloff, not retail's `0.5 * 4.5 = 2.25`.
+			 *
+			 * Retail's value was tuned against hardware `1/d`. The authored falloff we now use for
+			 * every light is effectively inverse-square, so 2.25 would leave the headlamp roughly
+			 * thirty times dimmer at ten units and useless past two. This value reproduces retail's
+			 * contribution at the midpoint of the light's range, giving a saturated core out to
+			 * about five units that tapers to nothing at fifteen.
+			 *
+			 * Interdependent with `falloff`: changing the reach without retuning this changes how
+			 * bright the pool is, not just how far it goes.
+			 */
+			intensity: 34,
+			/** `RGBColor::SetColor32(&viewer_light.color, 0xFFFFFFFF)`, acclient.c:139346. */
+			color: { red: 1, green: 1, blue: 1 },
+			/**
+			 * How far up its own frame a carrying body lifts the light.
+			 *
+			 * Retail sets `viewer_light.offset` to (0, 0, 2) in AC axes while a body carries the
+			 * light and to the origin while the camera does (acclient.c:137881-137896), so a
+			 * carried light sits at roughly chest height rather than at the carrier's feet.
+			 */
+			carryHeight: 2,
 		},
 		/**
 		 * Authored outdoor lamps, which retail never rendered at all.

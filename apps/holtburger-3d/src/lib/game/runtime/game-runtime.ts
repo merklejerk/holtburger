@@ -231,6 +231,7 @@ import {
 	type ResolvedSceneEnvironment,
 	UNAUTHORED_SCENE_LIGHTING,
 } from "../environment/scene-environment";
+import { resolveViewerLightOrigin } from "../environment/viewer-light";
 import { OutdoorLightIndex } from "../environment/outdoor-light-index";
 import type { OutdoorLightLookup } from "../renderer/renderer";
 import {
@@ -775,6 +776,14 @@ export class GameRuntime {
 	#environment: ResolvedSceneEnvironment = DEFAULT_ENVIRONMENT;
 	/** Frontend-selected dynamic display choices forwarded unchanged to each frame. */
 	#frameSettings: FrameSettings = DEFAULT_FRAME_SETTINGS;
+	/**
+	 * Spawned entity carrying the viewer light, or null while the camera carries it itself.
+	 *
+	 * Held as an identity rather than a pose: the carrier is walking, and the scene is what
+	 * presentation rate updates, so the light is resolved from the live placement every frame
+	 * instead of from whatever the frontend last sampled.
+	 */
+	#viewerLightCarrier: number | null = null;
 	/** Terrain interest constraining the frontend's effective distance-fog range. */
 	#terrainFogCoverage: TerrainFogCoverage | null = null;
 	/** Complete static demand selected by the latest accepted scene target. */
@@ -1856,6 +1865,16 @@ export class GameRuntime {
 		this.#frameSettings = settings;
 	}
 
+	/**
+	 * Nominate the spawned entity carrying the viewer light; null returns it to the camera.
+	 *
+	 * Only the frontend knows whether the viewer is driving a body at all, which is the same split
+	 * retail has: `SmartBox` nominates, and the renderer places what it is given.
+	 */
+	setViewerLightCarrier(guid: number | null): void {
+		this.#viewerLightCarrier = guid;
+	}
+
 	/** Set offscreen visual sampling cadence; zero preserves full render cadence. */
 	setOffscreenAnimationSampleIntervalSeconds(intervalSeconds: number): void {
 		this.#animationPresentation.setOffscreenSampleIntervalSeconds(
@@ -2205,6 +2224,12 @@ export class GameRuntime {
 			frameSettings: this.#frameSettings,
 			outdoorLights: this.#outdoorLights,
 			timeSeconds,
+			viewerLightOrigin: resolveViewerLightOrigin(
+				this.#viewerLightCarrier === null
+					? null
+					: this.spawnedEntityPlacement(this.#viewerLightCarrier),
+				this.#camera.placement.position,
+			),
 			views: [
 				{
 					camera: this.#camera,

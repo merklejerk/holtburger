@@ -37,7 +37,11 @@ import {
 	type ResolvedResourceInvalidation,
 } from "./renderer";
 import { renderCullingGroupFilter } from "./render-layer-visibility";
-import type { LandblockVec3 } from "../../assets/ac-frame";
+import {
+	sceneVec3,
+	type LandblockVec3,
+	type SceneVec3,
+} from "../../assets/ac-frame";
 import {
 	RenderWorld,
 	type ObjectPresentationFootprint,
@@ -82,15 +86,13 @@ import {
 } from "./webgl2-object-program";
 import { bindWebGL2ObjectInstanceRange } from "./webgl2-instance-buffer";
 import type { LandblockId } from "../game-types";
-import {
-	UNAUTHORED_SCENE_LIGHTING,
-	VIEWER_LIGHT,
-} from "../environment/scene-environment";
+import { UNAUTHORED_SCENE_LIGHTING } from "../environment/scene-environment";
+import { VIEWER_LIGHT } from "../environment/viewer-light";
 import {
 	MAX_DYNAMIC_LIGHTS,
 	MAX_STATIC_LIGHTS,
 	type RuntimeLight,
-	selectNearestLights,
+	fitLightsToBudget,
 } from "../environment/runtime-lights";
 import type { LandblockLights } from "../environment/outdoor-light-index";
 import {
@@ -276,7 +278,8 @@ const PROBE_SHADING: SceneShading = {
 	lighting: resolveSceneLightingByRole(UNAUTHORED_SCENE_LIGHTING),
 };
 
-const ORIGIN = { x: 0, y: 0, z: 0 } as const;
+/** Ranking position used before any view has been committed. */
+const ORIGIN = sceneVec3(Vec3.zero());
 const EMPTY_LIGHTS: readonly RuntimeLight[] = [];
 /** Synthetic single render domain used by the deliberately unpartitioned flat debug mode. */
 const FLAT_PARTICLE_DOMAIN = "particle-render-domain:flat";
@@ -994,24 +997,26 @@ export class WebGL2Renderer implements Renderer {
 		}
 		// Dynamic lights are frame-global and reach every draw, so they are assembled once here
 		// rather than per role. Positions stay in canonical scene space; the bind rebases them.
-		const camera = input.views[0]?.camera.placement.position ?? null;
+		const sceneCameraPosition =
+			input.views[0]?.camera.placement.position ?? ORIGIN;
 		const dynamicCandidates: RuntimeLight[] = [...input.dynamicLights];
-		if (camera && input.frameSettings.viewerLightEnabled) {
-			// Retail attaches the viewer light at the camera itself when no character carries it
-			// (`SmartBox::set_viewer`, acclient.c:137890).
+		if (input.frameSettings.viewerLightEnabled) {
+			// Where the light hangs — on the body being driven, or on the camera when nothing is —
+			// is the frontend's call (`SmartBox::set_viewer`, acclient.c:137879-137897); this only
+			// admits it as one more candidate for the dynamic budget.
 			dynamicCandidates.push({
-				position: camera,
+				position: input.viewerLightOrigin,
 				color: VIEWER_LIGHT.color,
 				range: VIEWER_LIGHT.range,
 				intensity: VIEWER_LIGHT.intensity,
 			});
 		}
-		const selectedDynamic = selectNearestLights(
+		const fittedDynamic = fitLightsToBudget(
 			dynamicCandidates,
-			camera ?? ORIGIN,
+			sceneCameraPosition,
 			MAX_DYNAMIC_LIGHTS,
 		);
-		this.#frameSelectionMetrics.droppedLights += selectedDynamic.dropped;
+		this.#frameSelectionMetrics.droppedLights += fittedDynamic.dropped;
 		const shading: SceneShading = {
 			ambientOcclusion,
 			fog,
@@ -1021,9 +1026,9 @@ export class WebGL2Renderer implements Renderer {
 			authoredLightResponse: resolveAuthoredLightResponse(
 				input.environment.lighting,
 			),
-			dynamicLights: selectedDynamic.lights,
+			dynamicLights: fittedDynamic.lights,
 			staticLights: (landblockId) =>
-				this.#resolveStaticLights(input, landblockId, camera ?? ORIGIN),
+				this.#resolveStaticLights(input, landblockId, sceneCameraPosition),
 			lighting: resolveSceneLightingByRole(
 				input.environment.lighting,
 				input.views.some((view) => view.cameraInsideSealedCell),
@@ -3613,12 +3618,12 @@ export class WebGL2Renderer implements Renderer {
 	 * Resolve and budget one landblock's authored lights.
 	 *
 	 * The index memoizes the gather across frames, so the per-frame cost is a map read plus a
-	 * selection pass that is a pass-through whenever the set fits, which it almost always does.
+	 * budget fit that is a pass-through whenever the set fits, which it almost always does.
 	 */
 	#resolveStaticLights(
 		input: FrameInput,
 		landblockId: LandblockId,
-		viewpoint: { readonly x: number; readonly y: number; readonly z: number },
+		sceneCameraPosition: SceneVec3,
 	): LandblockLights {
 		if (!input.frameSettings.staticLightsEnabled) {
 			return EMPTY_LANDBLOCK_LIGHTS;
@@ -3626,18 +3631,18 @@ export class WebGL2Renderer implements Renderer {
 		if (input.outdoorLights.isEmpty) return EMPTY_LANDBLOCK_LIGHTS;
 		const reaching = input.outdoorLights.resolve(landblockId);
 		if (reaching.lights.length <= MAX_STATIC_LIGHTS) return reaching;
-		const selected = selectNearestLights(
+		const fitted = fitLightsToBudget(
 			reaching.lights,
-			viewpoint,
+			sceneCameraPosition,
 			MAX_STATIC_LIGHTS,
 		);
-		this.#frameSelectionMetrics.droppedLights += selected.dropped;
-		// Selection reorders by distance from the camera, so the memoized masks no longer name
-		// these slots. Fall back to admitting every light rather than binding a stale table; the
-		// shader still bounds iteration by the live count, so the result is identical and only
-		// the tiling saving is lost. Unreachable on retail content, whose worst landblock carries
-		// 51 lights against a cap of 64.
-		return { lights: selected.lights, cellMasks: TERRAIN_LIGHT_MASK_ALL };
+		this.#frameSelectionMetrics.droppedLights += fitted.dropped;
+		// The fit reorders by distance from the camera, so the memoized masks no longer name these
+		// slots. Fall back to admitting every light rather than binding a stale table; the shader
+		// still bounds iteration by the live count, so the result is identical and only the tiling
+		// saving is lost. Unreachable on retail content, whose worst landblock carries 51 lights
+		// against a cap of 64.
+		return { lights: fitted.lights, cellMasks: TERRAIN_LIGHT_MASK_ALL };
 	}
 
 	/** Start one object-owned phase with complete bindings for every active sampler. */

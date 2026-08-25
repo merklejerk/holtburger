@@ -69,6 +69,8 @@ export type ExplorerCameraFocusStatus =
 	| `Camera residency follows host placement ${string}.`
 	| `Host-selected EnvCell ${string} is unavailable for camera rendering.`
 	| `Initial camera placement is outside selected EnvCell ${string}.`
+	| "Releasing possession before scene-interest change."
+	| `Scene-interest change failed: ${string}`
 	| `Scene target unavailable: ${string}`
 	| `Initial camera placement failed: ${string}`;
 

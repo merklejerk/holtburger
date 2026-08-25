@@ -632,7 +632,7 @@
 		readonly sourceBatches: readonly HttpLandblockSourceBatchDiagnostic[];
 		/** One read-only observation for every profile transport request. */
 		readonly profiles: readonly HttpLandblockProfileDiagnostic[];
-		/** Logical demand components and their effective physical union. */
+		/** Complete static demand selected by the current scene target. */
 		readonly sceneInterest: BrowserHarnessSceneInterestEvidence | null;
 		/** Current harness-only projection of the app-local host registry. */
 		readonly spawnedEntities: readonly DynamicEntityView[];
@@ -642,11 +642,9 @@
 	}
 
 	interface BrowserHarnessSceneInterestEvidence {
-		readonly activeDungeon: readonly BrowserHarnessSceneInterestEntry[];
-		readonly effective: readonly BrowserHarnessSceneInterestEntry[];
-		readonly retainedOutdoor: readonly BrowserHarnessSceneInterestEntry[];
+		readonly interest: readonly BrowserHarnessSceneInterestEntry[];
 		readonly resolvedTarget: ReturnType<
-			GameRuntime["sceneInterestComponents"]
+			GameRuntime["sceneInterestState"]
 		>["resolvedTarget"];
 	}
 
@@ -862,19 +860,17 @@
 	}
 
 	function sceneInterestEvidence(): BrowserHarnessSceneInterestEvidence | null {
-		const state = runtime?.sceneInterestComponents();
+		const state = runtime?.sceneInterestState();
 		if (state === undefined) return null;
 		const entries = (
-			interest: ReturnType<GameRuntime["sceneInterestComponents"]>["effective"],
+			interest: ReturnType<GameRuntime["sceneInterestState"]>["interest"],
 		): readonly BrowserHarnessSceneInterestEntry[] =>
 			[...interest.entries()].map(([landblockId, layers]) => ({
 				landblockId,
 				layers: [...layers],
 			}));
 		return {
-			activeDungeon: entries(state.activeDungeon),
-			effective: entries(state.effective),
-			retainedOutdoor: entries(state.retainedOutdoor),
+			interest: entries(state.interest),
 			resolvedTarget: state.resolvedTarget,
 		};
 	}
@@ -961,6 +957,10 @@
 		const resolved = await request.promise;
 		if (!requestCoordinator.isCurrent(request.revision)) return;
 		const landblockId = parsed.residency.landblockId;
+		if (!entityHost) {
+			throw new Error("Browser harness simulation-interest host is not ready.");
+		}
+		await entityHost.ensureSimulationInterest(landblockId);
 		runtime.updateSceneInterest(resolved);
 		lastInterestLandblockId = landblockId;
 		lastInterestRadii = requestedRadii;
@@ -1113,7 +1113,7 @@
 
 	/**
 	 * Advance the scripted outdoor flight one frame: move the camera along the line and, on a
-	 * landblock crossing, re-issue the retained outdoor interest radii there.
+	 * landblock crossing, replace scene interest with the outdoor radii centered there.
 	 */
 	function advanceFollowFlight(now: number): void {
 		const flight = followFlight;
@@ -1328,7 +1328,7 @@
 		if (!runtime) throw new Error("Browser harness runtime is not ready.");
 		const parsed = parseResidenceInput(rawTarget);
 		if (parsed === null) throw new Error(`Target is invalid: ${rawTarget}.`);
-		const resolved = runtime.sceneInterestComponents().resolvedTarget;
+		const resolved = runtime.sceneInterestState().resolvedTarget;
 		if (resolved === null) {
 			throw new Error(
 				"Explorer target focus requires resolved scene interest.",
@@ -1385,10 +1385,7 @@
 				"Browser harness entity spawn requires a current camera and runtime.",
 			);
 		const { direction, placement } = entityScenarioAnchor();
-		if (physicalIntent === "simulated")
-			await entityHost.ensureSimulationInterest(
-				placement.residency.landblockId,
-			);
+		await entityHost.ensureSimulationInterest(placement.residency.landblockId);
 		const request = createExplorerSpawnRequest(
 			parseExplorerWcid(rawWcid),
 			placement,
@@ -1505,10 +1502,7 @@
 		if (offsets.length === 0)
 			throw new Error("Entity fleet requires at least one offset.");
 		const { placement } = entityScenarioAnchor();
-		if (physicalIntent === "simulated")
-			await entityHost.ensureSimulationInterest(
-				placement.residency.landblockId,
-			);
+		await entityHost.ensureSimulationInterest(placement.residency.landblockId);
 		const wcid = parseExplorerWcid(rawWcid);
 		const spawned: DynamicEntityView[] = [];
 		for (const offset of offsets) {
@@ -1657,6 +1651,18 @@
 		if (activeRuntime === undefined || canvas === null || evidence === null) {
 			throw new Error(
 				"Browser harness boom requires an active camera viewport.",
+			);
+		}
+		await entityHost.ensureSimulationInterest(evidence.landblockId);
+		if (
+			cameraEvidence?.landblockId !== evidence.landblockId ||
+			cameraEvidence?.envCellId !== evidence.envCellId ||
+			cameraEvidence?.position.some(
+				(value, index) => value !== evidence.position[index],
+			) === true
+		) {
+			throw new Error(
+				"Browser harness camera placement changed while collision interest loaded.",
 			);
 		}
 		const revision = ++boomProjectionRevision;
@@ -2061,6 +2067,7 @@
 				"Browser harness entity relocation requires an active runtime.",
 			);
 		const { direction, placement } = entityScenarioAnchor();
+		await entityHost.ensureSimulationInterest(placement.residency.landblockId);
 		const event = await entityHost.relocate(
 			createExplorerRelocationRequest(
 				guid,

@@ -992,15 +992,25 @@ impl KinematicBoomController {
             })
             .map_err(|_| KinematicBoomHoldReason::ClearanceSweep)?;
         let final_point = path.final_point();
-        let mut pose = seed_pose;
-        pose.coords = final_point.center();
-        pose = pose
-            .normalize_outdoor_landblock_frame()
-            .map_err(|_| KinematicBoomHoldReason::ClearanceSweep)?;
-        Ok(KinematicBoomPlacement {
-            pose,
-            cell: final_point.placement().committed_cell(),
-        })
+        let cell = final_point.placement().committed_cell();
+        // The path center is expressed in its outdoor comparison anchor. Reanchor it into the
+        // committed cell owner's frame before pairing the selector, or an owner-crossing portal
+        // would publish a valid EnvCell with coordinates from a different frame.
+        let mut pose = WorldPosition {
+            landblock_id: anchor,
+            coords: final_point.center(),
+            rotation: seed_pose.rotation,
+        };
+        if let Some(cell) = cell {
+            pose =
+                reanchor(pose, owner(cell)).map_err(|_| KinematicBoomHoldReason::ClearanceSweep)?;
+            pose.landblock_id = cell;
+        } else {
+            pose = pose
+                .normalize_outdoor_landblock_frame()
+                .map_err(|_| KinematicBoomHoldReason::ClearanceSweep)?;
+        }
+        Ok(KinematicBoomPlacement { pose, cell })
     }
 }
 
@@ -1163,6 +1173,9 @@ fn interpolate_pose(
     end: WorldPosition,
     fraction: f32,
 ) -> Result<WorldPosition, KinematicBoomInputError> {
+    // This is a coordinate-only control path: the boom's collision sample supplies residency
+    // separately, so interpolation deliberately uses one outdoor owner comparison frame and
+    // never claims that the resulting point is an EnvCell placement.
     let anchor = owner(start.landblock_id);
     let end = reanchor(end, anchor)?;
     let mut pose = start;
@@ -1225,7 +1238,7 @@ mod tests {
     use super::*;
     use holtburger_common::{Plane, Sphere};
     use holtburger_content::{
-        BspSolid, ColliderScale, CollisionBox, CollisionPolygon, CollisionShape,
+        BspSolid, CellVolume, ColliderScale, CollisionBox, CollisionPolygon, CollisionShape,
         LandblockColliders, LandblockCollisionAsset, LandblockPlacement, LandblockTerrain,
         PlacedCollider, StaticColliderPlacement, TerrainCellDiagonals, TerrainCollisionSurface,
     };
@@ -1776,6 +1789,62 @@ mod tests {
         controller.advance(&scene, 1.0 / 30.0, &[sample()]).unwrap();
         assert!(controller.rendered_reach() > first_reach);
         assert!(controller.rendered_reach() < controller.desired_reach());
+    }
+
+    #[test]
+    fn clearance_sweep_preserves_committed_indoor_cell_when_coordinates_cross_owner_square() {
+        let cell = Guid(0xda55_0100);
+        let mut scene = CollisionScene::new();
+        scene
+            .insert(LandblockCollisionAsset {
+                landblock_id: LANDBLOCK,
+                terrain: TerrainCollisionSurface::empty(),
+                static_geometry: LandblockColliders {
+                    colliders: Vec::new(),
+                    cell_volumes: vec![CellVolume {
+                        cell_selector: 0x0100,
+                        placement: LandblockPlacement {
+                            origin: Vector3::zero(),
+                            orientation: Quaternion::identity(),
+                        },
+                        planes: Vec::new(),
+                        portals: Vec::new(),
+                    }],
+                },
+            })
+            .unwrap();
+        let indoor_pose = WorldPosition {
+            landblock_id: cell,
+            coords: Vector3::new(200.0, -40.0, 2.0),
+            rotation: Quaternion::identity(),
+        };
+        let mut controller = KinematicBoomController::new(
+            profile(64),
+            indoor_pose,
+            KinematicBoomTargetSeed {
+                placement: KinematicBoomPlacement {
+                    pose: indoor_pose,
+                    cell: Some(cell),
+                },
+            },
+            clearance(1, 0.25),
+            4.5,
+            KinematicBoomIntent {
+                sequence: 0,
+                view_direction: Vector3::new(1.0, 0.0, 0.0),
+                cumulative_zoom_displacement: 0.0,
+            },
+        )
+        .unwrap();
+        controller.committed_clearance = Some(clearance(1, 0.25));
+
+        let placement = controller
+            .cast_to_reach(&scene, Vector3::new(1.0, 0.0, 0.0), 1.0)
+            .unwrap();
+
+        assert_eq!(placement.cell, Some(cell));
+        assert_eq!(placement.pose.landblock_id, cell);
+        assert_eq!(placement.pose.coords, Vector3::new(201.0, -40.0, 2.0));
     }
 
     #[test]

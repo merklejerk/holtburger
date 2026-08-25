@@ -840,7 +840,7 @@ describe("GameRuntime spawned dynamic presentation", () => {
 		await runtime.destroy();
 	});
 
-	it("keeps retained outdoor demand separate from active dungeon demand", async () => {
+	it("replaces outdoor demand with dungeon demand and reacquires it when returning", async () => {
 		const requests: LandblockIdLayer[][] = [];
 		const runtime = await buildGameRuntimeForTest(
 			{
@@ -872,8 +872,7 @@ describe("GameRuntime spawned dynamic presentation", () => {
 		};
 		runtime.updateSceneInterest(outdoorWithEnv);
 		await Promise.resolve();
-		expect(runtime.sceneInterestComponents().activeDungeon).toEqual(new Map());
-		expect(runtime.sceneInterestComponents().retainedOutdoor).toEqual(
+		expect(runtime.sceneInterestState().interest).toEqual(
 			new Map([
 				[
 					"0xda55ffff",
@@ -899,10 +898,10 @@ describe("GameRuntime spawned dynamic presentation", () => {
 		expect(requests).toEqual([
 			[{ id: "0x0005ffff", layer: LandblockLayerKind.EnvCells }],
 		]);
-		expect(runtime.sceneInterestComponents().activeDungeon).toEqual(
+		expect(runtime.sceneInterestState().interest).toEqual(
 			new Map([["0x0005ffff", new Set([LandblockLayerKind.EnvCells])]]),
 		);
-		expect(runtime.terrainFogCoverage()).toEqual({ terrainRadius: 0 });
+		expect(runtime.terrainFogCoverage()).toBeNull();
 		requests.length = 0;
 
 		runtime.updateSceneInterest({
@@ -920,26 +919,31 @@ describe("GameRuntime spawned dynamic presentation", () => {
 		expect(requests).toEqual([
 			[{ id: "0x0006ffff", layer: LandblockLayerKind.EnvCells }],
 		]);
-		expect(runtime.sceneInterestComponents().effective.has("0x0005ffff")).toBe(
-			false,
+		expect(runtime.sceneInterestState().interest).toEqual(
+			new Map([["0x0006ffff", new Set([LandblockLayerKind.EnvCells])]]),
 		);
 
 		requests.length = 0;
 		runtime.updateSceneInterest(outdoorWithEnv);
 		await Promise.resolve();
-		expect(requests).toHaveLength(0);
-		expect(runtime.sceneInterestComponents().activeDungeon).toEqual(new Map());
-		expect(runtime.sceneInterestComponents().effective).toEqual(
-			runtime.sceneInterestComponents().retainedOutdoor,
+		expect(requests).toEqual([
+			[
+				{ id: "0xda55ffff", layer: LandblockLayerKind.Terrain },
+				{ id: "0xda55ffff", layer: LandblockLayerKind.EnvCells },
+			],
+		]);
+		expect(runtime.sceneInterestState().interest).toEqual(
+			new Map([
+				[
+					"0xda55ffff",
+					new Set([LandblockLayerKind.Terrain, LandblockLayerKind.EnvCells]),
+				],
+			]),
 		);
 
 		runtime.clearSceneInterest();
-		expect(runtime.sceneInterestComponents().activeDungeon).toEqual(new Map());
-		expect(runtime.sceneInterestComponents().retainedOutdoor).toEqual(
-			new Map(),
-		);
-		expect(runtime.sceneInterestComponents().effective).toEqual(new Map());
-		expect(runtime.sceneInterestComponents().resolvedTarget).toBeNull();
+		expect(runtime.sceneInterestState().interest).toEqual(new Map());
+		expect(runtime.sceneInterestState().resolvedTarget).toBeNull();
 		expect(runtime.terrainFogCoverage()).toBeNull();
 		requests.length = 0;
 		runtime.updateSceneInterest({
@@ -958,13 +962,13 @@ describe("GameRuntime spawned dynamic presentation", () => {
 		expect(requests).toEqual([
 			[{ id: "0x0005ffff", layer: LandblockLayerKind.EnvCells }],
 		]);
-		expect(runtime.sceneInterestComponents().retainedOutdoor).toEqual(
-			new Map(),
+		expect(runtime.sceneInterestState().interest).toEqual(
+			new Map([["0x0005ffff", new Set([LandblockLayerKind.EnvCells])]]),
 		);
 		await runtime.destroy();
 	});
 
-	it("filters ambient EnvCells for a dungeon-only outdoor owner but preserves explicit dungeon demand", async () => {
+	it("filters ambient EnvCells for outdoor intent and replaces it with explicit dungeon demand", async () => {
 		const runtime = await buildGameRuntimeForTest(
 			{
 				buildRenderer: async () => ({
@@ -1004,9 +1008,8 @@ describe("GameRuntime spawned dynamic presentation", () => {
 			radii,
 			target: { kind: "outdoor", requested: outdoorTarget },
 		});
-		expect(runtime.sceneInterestComponents()).toMatchObject({
-			activeDungeon: new Map(),
-			retainedOutdoor: new Map([
+		expect(runtime.sceneInterestState().interest).toEqual(
+			new Map([
 				[
 					"0x5f50ffff",
 					new Set([
@@ -1017,7 +1020,7 @@ describe("GameRuntime spawned dynamic presentation", () => {
 					]),
 				],
 			]),
-		});
+		);
 
 		runtime.updateSceneInterest({
 			ambientOutdoorEnvCellOwners: new Set(),
@@ -1030,11 +1033,17 @@ describe("GameRuntime spawned dynamic presentation", () => {
 				},
 			},
 		});
-		expect(runtime.sceneInterestComponents()).toMatchObject({
-			activeDungeon: new Map([
-				["0x5f50ffff", new Set([LandblockLayerKind.EnvCells])],
-			]),
-			retainedOutdoor: new Map([
+		expect(runtime.sceneInterestState().interest).toEqual(
+			new Map([["0x5f50ffff", new Set([LandblockLayerKind.EnvCells])]]),
+		);
+
+		runtime.updateSceneInterest({
+			ambientOutdoorEnvCellOwners: new Set(),
+			radii,
+			target: { kind: "outdoor", requested: outdoorTarget },
+		});
+		expect(runtime.sceneInterestState().interest).toEqual(
+			new Map([
 				[
 					"0x5f50ffff",
 					new Set([
@@ -1045,16 +1054,6 @@ describe("GameRuntime spawned dynamic presentation", () => {
 					]),
 				],
 			]),
-		});
-
-		runtime.updateSceneInterest({
-			ambientOutdoorEnvCellOwners: new Set(),
-			radii,
-			target: { kind: "outdoor", requested: outdoorTarget },
-		});
-		expect(runtime.sceneInterestComponents().activeDungeon).toEqual(new Map());
-		expect(runtime.sceneInterestComponents().effective).toEqual(
-			runtime.sceneInterestComponents().retainedOutdoor,
 		);
 		await runtime.destroy();
 	});

@@ -97,7 +97,10 @@
 		type PhysicalFlyStatus,
 	} from "./physical-fly-session";
 	import { tauriPhysicalFlyTransport } from "./physical-fly-transport";
-	import { SimulationInterestController } from "./simulation-interest";
+	import {
+		SimulationInterestController,
+		type SimulationInterestReceipt,
+	} from "./simulation-interest";
 	import { tauriSimulationInterestTransport } from "./simulation-interest-transport";
 	import {
 		ExplorerDynamicEntitySession,
@@ -532,17 +535,32 @@
 		target: SceneInterestTarget,
 		radii: SceneInterestRadii,
 	): void {
-		// Automatic focus is an explicit teleport. Return position authority to free fly before the
-		// coordinator applies it instead of letting the host overwrite the new pose next frame.
-		if (physicalCameraSession) void leavePhysicalCamera(false);
 		const requestCoordinator = sceneInterestCoordinator;
 		if (!requestCoordinator) {
 			physicalCameraError = "Scene-interest resolution is not initialized.";
 			return;
 		}
+		// Reserve the revision before releasing camera authority so a newer target supersedes this
+		// request while the handoff is in flight; the resolved target is not applied until release.
 		const request = requestCoordinator.request(target, radii);
-		void request.promise
-			.then((resolved) => {
+		void (async () => {
+			try {
+				if (
+					explorerPossession !== null ||
+					possessionInput !== undefined ||
+					boomCameraSession !== undefined
+				)
+					cameraFocusStatus =
+						"Releasing possession before scene-interest change.";
+				await releaseCameraAuthorityForSceneChange();
+			} catch (error: unknown) {
+				if (!requestCoordinator.isCurrent(request.revision)) return;
+				cameraFocusStatus = `Scene-interest change failed: Could not release camera authority: ${errorMessage(error)}`;
+				return;
+			}
+
+			try {
+				const resolved = await request.promise;
 				if (!requestCoordinator.isCurrent(request.revision)) return;
 				void requestSimulationInterest(
 					resolved.target.requested.landblockId,
@@ -550,25 +568,23 @@
 					physicalCameraError = errorMessage(error);
 				});
 				cameraCoordinator?.requestSceneInterest(resolved);
-			})
-			.catch((error: unknown) => {
+			} catch (error: unknown) {
 				if (!requestCoordinator.isCurrent(request.revision)) return;
-				cameraFocusStatus = `Scene target unavailable: ${
-					error instanceof Error ? error.message : String(error)
-				}`;
-			});
+				cameraFocusStatus = `Scene target unavailable: ${errorMessage(error)}`;
+			}
+		})();
 	}
 
 	async function requestSimulationInterest(
 		anchorLandblockId: string,
-	): Promise<void> {
+	): Promise<SimulationInterestReceipt> {
 		const controller = simulationInterestController;
 		if (!controller) {
 			throw new Error("Simulation-interest policy is not initialized.");
 		}
 		const receipt = await controller.request(anchorLandblockId);
 		// A newer application anchor superseding this request is ordinary asynchronous currentness.
-		if (!receipt.committed) return;
+		if (!receipt.committed) return receipt;
 		if (
 			receipt.unavailableLandblockIds.some(
 				(owner) => owner.toLowerCase() === anchorLandblockId.toLowerCase(),
@@ -576,6 +592,87 @@
 		) {
 			throw new Error(
 				`Collision content is unavailable for ${anchorLandblockId}.`,
+			);
+		}
+		return receipt;
+	}
+
+	/** Await collision authority for a mutation that is about to enter the host. */
+	async function awaitCurrentSimulationInterest(
+		anchorLandblockId: string,
+	): Promise<SimulationInterestReceipt> {
+		const receipt = await requestSimulationInterest(anchorLandblockId);
+		if (!receipt.committed) {
+			throw new Error(
+				`Collision interest for ${anchorLandblockId} was superseded before the operation could start.`,
+			);
+		}
+		const controller = simulationInterestController;
+		if (
+			controller === undefined ||
+			!controller.isCurrent(anchorLandblockId, receipt.revision)
+		) {
+			throw new Error(
+				`Collision interest for ${anchorLandblockId} changed before the operation could start.`,
+			);
+		}
+		return receipt;
+	}
+
+	/** A handoff is valid only when the exact presented pose and residency survived the await. */
+	function requireStablePresentedPlacement(
+		before: HostCameraPlacement,
+		after: HostCameraPlacement | null,
+		interest: SimulationInterestReceipt,
+	): HostCameraPlacement {
+		const controller = simulationInterestController;
+		if (after === null) {
+			throw new Error(
+				"Camera placement disappeared while collision interest loaded.",
+			);
+		}
+		if (
+			controller === undefined ||
+			!controller.isCurrent(before.residency.landblockId, interest.revision)
+		) {
+			throw new Error(
+				"Camera placement changed while collision interest loaded.",
+			);
+		}
+		if (
+			after.residency.landblockId !== before.residency.landblockId ||
+			after.residency.envCellId !== before.residency.envCellId ||
+			after.position.x !== before.position.x ||
+			after.position.y !== before.position.y ||
+			after.position.z !== before.position.z
+		) {
+			throw new Error(
+				"Camera placement changed while collision interest loaded.",
+			);
+		}
+		return after;
+	}
+
+	type CameraOwnershipToken = {
+		readonly input: CharacterInputController | undefined;
+		readonly possessionGeneration: number | null;
+	};
+
+	function cameraOwnershipToken(): CameraOwnershipToken {
+		return {
+			input: possessionInput,
+			possessionGeneration: explorerPossession?.possessionGeneration ?? null,
+		};
+	}
+
+	function requireStableCameraOwnership(token: CameraOwnershipToken): void {
+		if (
+			possessionInput !== token.input ||
+			(explorerPossession?.possessionGeneration ?? null) !==
+				token.possessionGeneration
+		) {
+			throw new Error(
+				"Camera ownership changed while collision interest loaded.",
 			);
 		}
 	}
@@ -708,6 +805,7 @@
 				"Physical camera requires a currently rendered camera placement.";
 			return;
 		}
+		const ownership = cameraOwnershipToken();
 		cameraModePending = true;
 		physicalCameraError = null;
 		controller.setControlScheme(
@@ -717,8 +815,23 @@
 		);
 		const session = new PhysicalFlySession(tauriPhysicalFlyTransport());
 		try {
-			await session.start(placement);
-			if (cameraController !== controller || !runtimeReady) {
+			const interest = await awaitCurrentSimulationInterest(
+				placement.residency.landblockId,
+			);
+			const stablePlacement = requireStablePresentedPlacement(
+				placement,
+				cameraCoordinator?.presentedPlacement() ?? null,
+				interest,
+			);
+			requireStableCameraOwnership(ownership);
+			await session.start(stablePlacement);
+			if (
+				cameraController !== controller ||
+				!runtimeReady ||
+				possessionInput !== ownership.input ||
+				(explorerPossession?.possessionGeneration ?? null) !==
+					ownership.possessionGeneration
+			) {
 				await session.stop();
 				cameraMode = "free-fly";
 				restoreCameraControlScheme();
@@ -884,9 +997,19 @@
 		const controller = cameraController;
 		if (!session || !coordinator || !controller)
 			throw new Error("Explorer entity spawning requires an active runtime.");
-		const placement = coordinator.presentedPlacement();
-		if (placement === null)
+		const initialPlacement = coordinator.presentedPlacement();
+		if (initialPlacement === null)
 			throw new Error("Spawn requires a currently presented camera placement.");
+		const ownership = cameraOwnershipToken();
+		const interest = await awaitCurrentSimulationInterest(
+			initialPlacement.residency.landblockId,
+		);
+		const placement = requireStablePresentedPlacement(
+			initialPlacement,
+			coordinator.presentedPlacement(),
+			interest,
+		);
+		requireStableCameraOwnership(ownership);
 		const request = createExplorerSpawnRequest(
 			wcid,
 			placement,
@@ -927,6 +1050,8 @@
 	///
 	/// Shared possession camera owning desired orbit, zoom, projection gating, and host playback.
 	let boomCameraSession: PossessionCameraController | undefined;
+	/** Coalesces concurrent scene changes while one host camera authority release is in flight. */
+	let cameraAuthorityReleaseForSceneChange: Promise<void> | undefined;
 	/** Latest viewport/FOV projection authored before camera synchronization. */
 	let cameraProjection: ProjectionClearanceRevision | undefined;
 
@@ -969,6 +1094,22 @@
 		if (runtime === undefined || canvas === null) {
 			throw new Error("Host boom registration requires an active viewport.");
 		}
+		const initialPlacement = cameraCoordinator?.presentedPlacement() ?? null;
+		if (initialPlacement === null) {
+			throw new Error(
+				"Host boom registration requires a presented camera placement.",
+			);
+		}
+		const ownership = cameraOwnershipToken();
+		const interest = await awaitCurrentSimulationInterest(
+			initialPlacement.residency.landblockId,
+		);
+		requireStablePresentedPlacement(
+			initialPlacement,
+			cameraCoordinator?.presentedPlacement() ?? null,
+			interest,
+		);
+		requireStableCameraOwnership(ownership);
 		const projection = resolveCameraProjection(runtime, canvas);
 		await boom.start(
 			{
@@ -1247,6 +1388,41 @@
 		void endBoomCamera().catch((error: unknown) => {
 			physicalCameraError = errorMessage(error);
 		});
+	}
+
+	/** Return camera authority to the frontend before a target focus can replace the scene. */
+	async function releaseCameraAuthorityForSceneChange(): Promise<void> {
+		const pendingRelease = cameraAuthorityReleaseForSceneChange;
+		if (pendingRelease !== undefined) {
+			await pendingRelease;
+			return;
+		}
+		if (
+			physicalCameraSession === undefined &&
+			explorerPossession === null &&
+			possessionInput === undefined &&
+			boomCameraSession === undefined
+		)
+			return;
+
+		const release = (async () => {
+			// Physical fly and possession can briefly overlap while an authority handoff is pending;
+			// stop the host camera before releasing the character so neither can overwrite the focus pose.
+			if (physicalCameraSession !== undefined) await leavePhysicalCamera(false);
+			if (
+				explorerPossession !== null ||
+				possessionInput !== undefined ||
+				boomCameraSession !== undefined
+			)
+				await possessExplorerEntity(null);
+		})();
+		cameraAuthorityReleaseForSceneChange = release;
+		try {
+			await release;
+		} finally {
+			if (cameraAuthorityReleaseForSceneChange === release)
+				cameraAuthorityReleaseForSceneChange = undefined;
+		}
 	}
 
 	async function possessExplorerEntity(

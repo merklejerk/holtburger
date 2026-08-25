@@ -8,8 +8,8 @@ use super::PhysicalCollisionFilter;
 use super::collision::{
     CellTransitRequest, CollisionScene, MotionWaypoint, MovementObstructionRequest,
     MovementRestrictionRequest, PlacementRequest, PlacementRestrictionRequest, SpatialMembership,
-    SphereSweep, StaticContact, anchor_point_to_outdoor_position, landblock_key,
-    separating_displacement,
+    SphereSweep, StaticContact, anchor_point_to_cell_position, anchor_point_to_outdoor_position,
+    landblock_key, separating_displacement,
 };
 
 /// Explicit safety budgets for one free-sphere displacement solve.
@@ -359,11 +359,10 @@ fn pose_for_commit(
     original: WorldPosition,
     cell: Option<Guid>,
 ) -> WorldPosition {
-    let mut pose = anchor_point_to_outdoor_position(anchor, point, original.rotation);
-    if let Some(cell) = cell {
-        pose.landblock_id = cell;
-    }
-    pose
+    cell.map_or_else(
+        || anchor_point_to_outdoor_position(anchor, point, original.rotation),
+        |cell| anchor_point_to_cell_position(anchor, point, cell, original.rotation),
+    )
 }
 
 fn validate(config: FreeSphereConfig, radius: f32, displacement: Vector3) -> Result<()> {

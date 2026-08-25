@@ -943,13 +943,13 @@ fn candidate_pose(
             "Explorer entity candidate camera pose has no landblock".to_owned(),
         ));
     }
-    WorldPosition {
-        landblock_id: Guid(camera_pose.landblock_id.0 & 0xffff_0000),
+    Ok(WorldPosition {
+        // Keep the presented selector until collision transit commits a replacement. Indoor
+        // coordinates are authored in this owner frame even when they cross the outdoor square.
+        landblock_id: camera_pose.landblock_id,
         coords: candidate,
         rotation,
-    }
-    .normalize_outdoor_landblock_frame()
-    .map_err(|error| ExplorerEntityDriverError::Placement(error.to_string()))
+    })
 }
 
 /// Once-derived template content facts shared by a wearer and each of its held children.
@@ -1042,10 +1042,22 @@ fn resolve_spawn_placement(
             radius: sphere_radius,
         })
         .map_err(|error| ExplorerEntityDriverError::Placement(error.to_string()))?;
-    candidate_pose.landblock_id = placement
-        .committed_cell()
-        .unwrap_or(candidate_pose.landblock_id);
-    Ok(candidate_pose.normalize_outdoor_cell())
+    if let Some(cell) = placement.committed_cell() {
+        candidate_pose = candidate_pose
+            .reanchor_to_landblock_owner(Guid((cell.0 & 0xffff_0000) | 0xffff))
+            .map_err(|error| ExplorerEntityDriverError::Placement(error.to_string()))?;
+        candidate_pose.landblock_id = cell;
+        return Ok(candidate_pose);
+    }
+
+    // Only an accepted outdoor result may leave the authored EnvCell frame. Clear the indoor
+    // selector before coordinate-derived owner/cell normalization so an exit is canonicalized
+    // exactly once and missing indoor topology cannot masquerade as an outdoor spawn.
+    candidate_pose.landblock_id = Guid(candidate_pose.landblock_id.0 & 0xffff_0000);
+    candidate_pose
+        .normalize_outdoor_landblock_frame()
+        .map(|pose| pose.normalize_outdoor_cell())
+        .map_err(|error| ExplorerEntityDriverError::Placement(error.to_string()))
 }
 
 #[cfg(test)]
@@ -1055,7 +1067,10 @@ mod tests {
     use holtburger_common::Sphere;
     use holtburger_common::properties::{EquipMask, ItemType};
     use holtburger_common::{ParentLocation, Placement};
-    use holtburger_content::{ColliderScale, LandblockCollisionAsset};
+    use holtburger_content::{
+        CellVolume, ColliderScale, LandblockColliders, LandblockCollisionAsset, LandblockPlacement,
+        TerrainCollisionSurface,
+    };
     use holtburger_weenie_catalog::WieldEntry;
     use holtburger_weenie_catalog::{PhysicsBoolOverrides, TemplatePhysics};
     use holtburger_world::{
@@ -1467,6 +1482,48 @@ mod tests {
             wire["snapshot"]["entities"][0]["placement"]["pose"]["landblockId"],
             first.body.body.runtime_pose.landblock_id.0
         );
+    }
+
+    #[test]
+    fn indoor_spawn_preserves_authored_owner_when_candidate_crosses_square() {
+        let owner = Guid(0xda55_ffff);
+        let cell = Guid(0xda55_0100);
+        let mut collision = holtburger_world::CollisionScene::new();
+        collision
+            .insert(LandblockCollisionAsset {
+                landblock_id: owner.0,
+                terrain: TerrainCollisionSurface::empty(),
+                static_geometry: LandblockColliders {
+                    colliders: Vec::new(),
+                    cell_volumes: vec![CellVolume {
+                        cell_selector: 0x0100,
+                        placement: LandblockPlacement {
+                            origin: Vector3::zero(),
+                            orientation: Quaternion::identity(),
+                        },
+                        planes: Vec::new(),
+                        portals: Vec::new(),
+                    }],
+                },
+            })
+            .unwrap();
+        let camera = WorldPosition {
+            landblock_id: cell,
+            coords: Vector3::new(60.0, -4.5, -1184.0),
+            rotation: Quaternion::identity(),
+        };
+        let candidate = candidate_pose(
+            camera,
+            Vector3::new(200.0, -40.0, -1184.0),
+            Quaternion::identity(),
+        )
+        .unwrap();
+
+        let resolved =
+            resolve_spawn_placement(&collision, camera, candidate, Vector3::zero(), 0.5).unwrap();
+
+        assert_eq!(resolved.landblock_id, cell);
+        assert_eq!(resolved.coords, Vector3::new(200.0, -40.0, -1184.0));
     }
 
     #[test]

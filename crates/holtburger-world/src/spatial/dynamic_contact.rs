@@ -9,6 +9,7 @@ use holtburger_common::{Guid, Quaternion, Vector3};
 use holtburger_content::{CollisionShape, PlacedCollisionShape};
 
 use super::bsp_query::{ShapeContact, placed_polygon_contacts, placed_solid_contacts};
+use super::collision::anchor_point_to_cell_position;
 use super::collision_report::{
     CollisionReportClassification, CollisionReportContact, CollisionReportSource,
     CollisionReportTouch,
@@ -585,11 +586,16 @@ fn apply_blocking_contact(
     )?;
     let cell = corrected_path.final_point().placement().committed_cell();
     commit.pose = partial.pose;
-    commit.pose.landblock_id = partial.motion.path.anchor();
-    commit.pose.coords = corrected;
     if let Some(cell) = cell {
-        commit.pose.landblock_id = cell;
+        commit.pose = anchor_point_to_cell_position(
+            corrected_path.anchor(),
+            corrected,
+            cell,
+            partial.pose.rotation,
+        );
     } else {
+        commit.pose.landblock_id = partial.motion.path.anchor();
+        commit.pose.coords = corrected;
         commit.pose = commit
             .pose
             .normalize_outdoor_landblock_frame()

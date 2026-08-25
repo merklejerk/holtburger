@@ -251,7 +251,49 @@ mod tests {
         assert!(envelope.duration_ms > 0.0);
     }
 
+    #[test]
+    fn evicted_indoor_body_does_not_poison_ordered_publication() {
+        let simulation = Arc::new(HostSimulationRuntime::new(Arc::new(EmptyCollisionSource)));
+        let entities = Arc::new(ExplorerEntityRuntime::new(
+            Arc::clone(&simulation),
+            Default::default(),
+            crate::explorer_possession_control::ExplorerPossessionControlProfile::standard()
+                .expect("standard Explorer possession profile is valid"),
+        ));
+        let guid = entities.reserve_guid().unwrap();
+        entities
+            .spawn_prepared(
+                definition_at(guid, Guid(0xda55_0100)),
+                EntityPhysicalIntent::Simulated,
+                Some(physical()),
+            )
+            .unwrap();
+        let delivery = Arc::new(ExplorerEntityDelivery::new(Arc::clone(&entities)));
+        let boom = Arc::new(
+            HostKinematicBoomRuntime::new(Arc::clone(&entities), Arc::clone(&simulation)).unwrap(),
+        );
+        let sink = Arc::new(RecordingSink::default());
+        let participant = ExplorerEntitySimulation::new(entities, delivery, boom, sink.clone());
+        let tick = Duration::from_secs_f64(1.0 / HOST_FIXED_TICK_HZ);
+
+        // The body still names an indoor cell, but the current scene has already evicted it.
+        // The first tick must suspend that body rather than panic while holding publication.
+        assert_eq!(
+            participant.fixed_tick(tick).unwrap(),
+            HostFixedTickDisposition::Continue
+        );
+        assert_eq!(
+            participant.fixed_tick(tick).unwrap(),
+            HostFixedTickDisposition::Continue
+        );
+        assert!(sink.events.lock().unwrap().is_empty());
+    }
+
     fn definition(guid: Guid) -> DynamicEntityDefinition {
+        definition_at(guid, Guid(0xda55_0001))
+    }
+
+    fn definition_at(guid: Guid, landblock_id: Guid) -> DynamicEntityDefinition {
         DynamicEntityDefinition::prepare(DynamicEntityDefinitionInput {
             identity: DynamicEntityIdentity {
                 guid,
@@ -268,7 +310,7 @@ mod tests {
             appearance: EntityAppearance::default(),
             placement: EntityPlacement::World(DynamicEntityInitialState {
                 pose: WorldPosition {
-                    landblock_id: Guid(0xda55_0001),
+                    landblock_id,
                     coords: Vector3::new(96.0, 96.0, 10.0),
                     rotation: Quaternion::identity(),
                 },

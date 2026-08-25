@@ -87,6 +87,15 @@ export class SimulationInterestController {
 		this.#current = { anchorLandblockId: anchor, promise, revision };
 		return promise;
 	}
+
+	/** Whether one completed receipt still names the controller's current anchor revision. */
+	isCurrent(anchorLandblockId: LandblockId, revision: number): boolean {
+		const anchor = normalizeLandblockOwner(anchorLandblockId);
+		return (
+			this.#current?.anchorLandblockId === anchor &&
+			this.#current?.revision === revision
+		);
+	}
 }
 
 /** Derive the exact normalized owner square for one simulation anchor. */

@@ -18,8 +18,9 @@ use holtburger_world::{
     CollisionReportOutcome, CollisionScene, DynamicBodyKinematics, DynamicBodyRelocationOutcome,
     DynamicPhysicalBodyDefinition, EntityPhysicsTransitionDecision, GroundedBodyActuation,
     PhysicalBodyActuation, PhysicalBodyDefinition, PhysicalBodyResponsePolicy,
-    PhysicalBodyTickResult, PhysicalCollisionFilter, PlacedMotionPath, PlacementRecovery,
-    RuntimeSpatialBodyView, SpatialBody, SpatialBodyId, SpatialScene,
+    PhysicalBodySceneResidency, PhysicalBodyTickResult, PhysicalCollisionFilter, PlacedMotionPath,
+    PlacementRecovery, RuntimeSpatialBodyView, SpatialBody, SpatialBodyId, SpatialScene,
+    physical_body_scene_residency,
 };
 use serde::{Deserialize, Serialize};
 
@@ -115,6 +116,16 @@ pub struct HostPhysicalBodyTick {
     pub result: PhysicalBodyTickResult,
     /// Exact immutable topology snapshot used by the solve.
     pub collision: Arc<CollisionScene>,
+}
+
+/// One body and the exact installed collision snapshot used to classify its residency.
+pub struct HostPhysicalBodySceneSnapshot {
+    /// Complete registered body state from the snapshot epoch.
+    pub body: SpatialBody,
+    /// Immutable collision topology paired with `scene_residency`.
+    pub collision: Arc<CollisionScene>,
+    /// Body placement relative to `collision`.
+    pub scene_residency: PhysicalBodySceneResidency,
 }
 
 /// One committed collection epoch with body motion and report edges kept orthogonal.
@@ -471,6 +482,28 @@ impl HostSimulationRuntime {
             .bodies
             .body(body_id)
             .cloned()
+    }
+
+    /// Snapshots one physical body together with its residency in the same collision epoch.
+    pub fn physical_body_scene_snapshot(
+        &self,
+        body_id: SpatialBodyId,
+    ) -> Option<HostPhysicalBodySceneSnapshot> {
+        let state = self.state.lock().expect("host simulation lock poisoned");
+        let body = state.bodies.body(body_id)?.clone();
+        let physical = body.physical.as_ref()?;
+        let collision = Arc::clone(&state.scene);
+        let scene_residency = physical_body_scene_residency(
+            &collision,
+            body.pose,
+            physical.definition,
+            physical.response.cell(),
+        );
+        Some(HostPhysicalBodySceneSnapshot {
+            body,
+            collision,
+            scene_residency,
+        })
     }
 
     /// Counts registered runtime bodies for tests that prove query-only adapters stay body-free.

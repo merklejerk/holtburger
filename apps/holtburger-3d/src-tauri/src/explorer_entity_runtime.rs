@@ -65,6 +65,10 @@ pub enum ExplorerEntityRuntimeError {
     MissingPossessionMotionTable { guid: Guid },
     /// A target names a table absent from the projected runtime motion contract.
     UnprojectedPossessionMotionTable { guid: Guid, motion_table_id: u32 },
+    /// A possession target's authored collision owner is absent from current simulation interest.
+    PossessionTargetMissingCollisionOwner { guid: Guid, owner: Guid },
+    /// A possession target lies beyond AC's authored outdoor landscape.
+    PossessionTargetOutsideLandscape { guid: Guid },
     /// Host validation rejected a stance, drive scalar, or target capability.
     PossessionIntent(PossessionIntentError),
     /// The canonical host scene rejected the corresponding body operation.
@@ -135,6 +139,16 @@ impl Display for ExplorerEntityRuntimeError {
             } => write!(
                 formatter,
                 "Explorer entity 0x{:08X} names motion table 0x{motion_table_id:08X}, which is absent from the runtime contract",
+                guid.0
+            ),
+            Self::PossessionTargetMissingCollisionOwner { guid, owner } => write!(
+                formatter,
+                "Explorer entity 0x{:08X} cannot be possessed because collision owner 0x{:08X} is outside current simulation interest",
+                guid.0, owner.0
+            ),
+            Self::PossessionTargetOutsideLandscape { guid } => write!(
+                formatter,
+                "Explorer entity 0x{:08X} cannot be possessed outside AC's authored landscape",
                 guid.0
             ),
             Self::PossessionIntent(source) => Display::fmt(source, formatter),
@@ -1432,6 +1446,27 @@ impl ExplorerEntityRuntime {
                 motion_table_id,
             },
         )?;
+        if let Some(target) = self
+            .simulation
+            .physical_body_scene_snapshot(SpatialBodyId::Entity(guid))
+        {
+            match target.scene_residency {
+                holtburger_world::PhysicalBodySceneResidency::Resident => {}
+                holtburger_world::PhysicalBodySceneResidency::MissingOwner { owner } => {
+                    return Err(
+                        ExplorerEntityRuntimeError::PossessionTargetMissingCollisionOwner {
+                            guid,
+                            owner,
+                        },
+                    );
+                }
+                holtburger_world::PhysicalBodySceneResidency::OutsideLandscape => {
+                    return Err(
+                        ExplorerEntityRuntimeError::PossessionTargetOutsideLandscape { guid },
+                    );
+                }
+            }
+        }
         let possession_generation = registry.reserve_generation()?;
         let active = ActivePossession::new(
             guid,
@@ -4269,6 +4304,37 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn possession_rejects_a_target_outside_current_collision_interest() {
+        let (simulation, runtime, guid) = walking_runtime();
+        let session = simulation.reserve_interest_session();
+        simulation
+            .replace_interest(crate::host_simulation_runtime::SimulationInterestRequest {
+                session,
+                revision: 1,
+                landblock_ids: vec!["0xdb55ffff".to_owned()],
+            })
+            .unwrap();
+
+        assert_eq!(
+            runtime.possess(guid),
+            Err(
+                ExplorerEntityRuntimeError::PossessionTargetMissingCollisionOwner {
+                    guid,
+                    owner: Guid(0xda55_ffff),
+                }
+            )
+        );
+        assert_eq!(
+            runtime
+                .release_possession(Instant::now())
+                .unwrap()
+                .released_guid,
+            None,
+            "a rejected target must not mutate possession authority"
+        );
+    }
+
     /// A settled body stops integrating, so a change to the loaded static world would otherwise
     /// leave it resting on collision geometry that no longer exists. The host wakes the whole
     /// settled population conservatively; this proves that wiring, not just the scene primitive.
@@ -4549,6 +4615,47 @@ mod tests {
                 .is_none()
         );
         assert_eq!(simulation.registered_body_count(), body_count);
+    }
+
+    #[test]
+    fn host_boom_rejects_a_possessed_target_after_collision_interest_moves() {
+        use crate::host_kinematic_boom_runtime::{
+            HostKinematicBoomRuntime, HostKinematicBoomStartRequest,
+        };
+
+        let (simulation, entities, guid) = walking_runtime();
+        let entities = Arc::new(entities);
+        let possession = entities.possess(guid).unwrap();
+        let session = simulation.reserve_interest_session();
+        simulation
+            .replace_interest(crate::host_simulation_runtime::SimulationInterestRequest {
+                session,
+                revision: 1,
+                landblock_ids: vec!["0xdb55ffff".to_owned()],
+            })
+            .unwrap();
+        let boom =
+            HostKinematicBoomRuntime::new(Arc::clone(&entities), Arc::clone(&simulation)).unwrap();
+
+        let error = boom
+            .start(HostKinematicBoomStartRequest {
+                possession_generation: possession.possession_generation,
+                guid,
+                entity_generation: possession.entity_generation,
+                initial_reach: 4.0,
+                minimum_reach: 1.2,
+                maximum_reach: 4.25,
+                input_sequence: 1,
+                view_direction: [0.0, -1.0, 0.0],
+                cumulative_zoom_displacement: 0.0,
+                projection_revision: 1,
+                clearance_radius: 0.25,
+            })
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "kinematic boom target is outside current simulation interest"
+        );
     }
 
     #[test]

@@ -5,7 +5,6 @@ import {
 	diffSceneInterest,
 	groupLandblockLayers,
 	LandblockLayerKind,
-	unionSceneInterestComponents,
 	type LandblockIdLayer,
 	type SceneInterestMap,
 	validateSceneInterestRadiiOrThrow,
@@ -191,25 +190,6 @@ describe("dungeon scene-interest composition", () => {
 	it("plans one owner EnvCells layer without terrain or radius expansion", () => {
 		expect(computeDungeonSceneInterest("0x0005ffff")).toEqual(
 			new Map([["0x0005ffff", new Set([LandblockLayerKind.EnvCells])]]),
-		);
-	});
-
-	it("unions retained outdoor and active dungeon demand exactly", () => {
-		const retainedOutdoor = sceneInterest([
-			["0xda55ffff", [LandblockLayerKind.Terrain, LandblockLayerKind.EnvCells]],
-			["0x0005ffff", [LandblockLayerKind.EnvCells]],
-		]);
-		const activeDungeon = computeDungeonSceneInterest("0x0005ffff");
-		expect(
-			unionSceneInterestComponents({ activeDungeon, retainedOutdoor }),
-		).toEqual(
-			new Map([
-				[
-					"0xda55ffff",
-					new Set([LandblockLayerKind.Terrain, LandblockLayerKind.EnvCells]),
-				],
-				["0x0005ffff", new Set([LandblockLayerKind.EnvCells])],
-			]),
 		);
 	});
 });

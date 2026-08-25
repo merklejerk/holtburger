@@ -63,5 +63,6 @@ pub use physical_body::{
     PhysicalBodyResponsePolicyError, PhysicalBodyResponseState, PhysicalBodySceneResidency,
     PhysicalBodyState, PhysicalBodyTickResult, PhysicalBodyTickStatus, PhysicalCollisionExclusions,
     PhysicalCollisionFilter, PhysicalElasticity, PhysicalFriction, PhysicalRestitution,
-    PhysicalSphereSet, PhysicalSurfaceMotion, resolve_physical_body_cell,
+    PhysicalSphereSet, PhysicalSurfaceMotion, physical_body_scene_residency,
+    resolve_physical_body_cell,
 };

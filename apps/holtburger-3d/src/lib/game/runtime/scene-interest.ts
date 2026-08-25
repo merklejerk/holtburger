@@ -70,12 +70,6 @@ export interface SceneInterestRequest {
 	readonly ambientOutdoorEnvCellOwners: ReadonlySet<LandblockId>;
 }
 
-/** Explicitly retained components whose union is the only demand sent to materialization. */
-export interface SceneInterestComponents {
-	readonly retainedOutdoor: SceneInterestMap;
-	readonly activeDungeon: SceneInterestMap;
-}
-
 /** Reject a scene-interest radius configuration that cannot produce coherent layers. */
 export function validateSceneInterestRadiiOrThrow(
 	cfg: SceneInterestRadii,
@@ -151,27 +145,6 @@ export function computeDungeonSceneInterest(
 ): SceneInterestMap {
 	const owner = normalizeLandblockOwner(landblockId);
 	return new Map([[owner, new Set([LandblockLayerKind.EnvCells])]]);
-}
-
-/** Copy and union retained demand components without exposing component ownership to the pipeline. */
-export function unionSceneInterestComponents(
-	components: SceneInterestComponents,
-): SceneInterestMap {
-	const effective: SceneInterestMap = new Map();
-	for (const component of [
-		components.retainedOutdoor,
-		components.activeDungeon,
-	]) {
-		for (const [landblockId, layers] of component) {
-			const effectiveLayers = effective.get(landblockId);
-			if (effectiveLayers) {
-				for (const layer of layers) effectiveLayers.add(layer);
-			} else {
-				effective.set(landblockId, new Set(layers));
-			}
-		}
-	}
-	return effective;
 }
 
 export function diffSceneInterest(

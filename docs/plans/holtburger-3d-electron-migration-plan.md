@@ -881,9 +881,9 @@ certification; those are deferred Phase 9B/9C product-release gates.
 ### Phase 9: Prove branch portability without publishing
 
 Status: in progress. The release boundary, workflow, and local Linux diagnostics are implemented.
-The first hosted run passed Linux x86-64 and both macOS architectures; a separator bug found by the
-Windows package job is fixed locally and awaits the replacement matrix. Phases 9B and 9C are
-explicitly deferred.
+The first two hosted runs passed Linux x86-64 and both macOS architectures. Windows now packages and
+passes the production sidecar smoke; an ASAR-listing normalization bug is fixed locally and awaits
+the replacement matrix. Phases 9B and 9C are explicitly deferred.
 
 The 3D app is mid-roadmap and is not a release candidate. This phase proves that its Electron and
 Rust boundary can build on the target operating systems without modifying, invoking, or competing
@@ -1022,6 +1022,13 @@ migration on `3d-next`.
   because their Node 20 action runtimes are being forced onto Node 24. They completed successfully
   and do not affect application portability, but their maintained major versions should be refreshed
   when this probe workflow is next retained or promoted.
+- Replacement run `32884417695` proved the Forge fix: Windows built the native package and passed
+  the production sidecar handshake, status, shutdown, and clean-exit smoke. Its package inspector
+  then found that `@electron/asar` returns backslash-separated entry names on Windows; the verifier
+  had compared those raw names with its slash-canonical manifest and falsely reported a missing
+  `/package.json`. ASAR entries are now normalized once at that dependency boundary. The other three
+  platform jobs again passed completely, so the third run is required only to establish one green
+  replacement SHA across the whole matrix, not because their behavior regressed.
 - Automated hosted-runner work can proceed without access to every target machine, but it proves
   build and package structure only. Windows and macOS remain unverified until Phase 9B runs.
 

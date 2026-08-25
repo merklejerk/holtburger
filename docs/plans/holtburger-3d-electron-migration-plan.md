@@ -1,8 +1,8 @@
 # Holtburger 3D Electron Migration Plan
 
-Status: in progress. Phases 0-8 are complete; Phase 9A's artifact-preservation correction is in
-progress before Phase 10 migration cleanup and handoff. Real-machine certification and public
-distribution remain deferred to the 3D product-release roadmap.
+Status: in progress. Phases 0-9A are complete; Phase 10 is the remaining migration cleanup and
+handoff. Real-machine certification and public distribution remain deferred to the 3D
+product-release roadmap.
 
 ## Context and Boundaries
 
@@ -880,10 +880,9 @@ certification; those are deferred Phase 9B/9C product-release gates.
 
 ### Phase 9: Prove branch portability without publishing
 
-Status: artifact-preservation correction in progress. Hosted run `32885301938` passed the
-release-boundary job and its native package probes, but uploading raw package directories flattened
-macOS framework symlinks and stripped the artifact layer of native filesystem semantics. Phases 9B
-and 9C are explicitly deferred.
+Status: Phase 9A complete on 2026-08-25. Hosted run `32889677743` passed the release-boundary job and
+the Linux x86-64, Windows x86-64, and macOS arm64 package/archive probes at commit
+`7d84bf069e32f950248a739c17e5f063420472ae`. Phases 9B and 9C are explicitly deferred.
 
 The 3D app is mid-roadmap and is not a release candidate. This phase proves that its Electron and
 Rust boundary can build on the target operating systems without modifying, invoking, or competing
@@ -925,7 +924,7 @@ short-lived diagnostic outputs, not releases.
 - [x] Complete a minimal handshake/`host_status`/shutdown smoke test wherever the hosted runner
       provides a usable desktop session. Record runner limitations rather than converting an unrun
       GUI test into a pass.
-- [ ] Archive inspected packages with Forge's ZIP maker before short-retention upload, verify the
+- [x] Archive inspected packages with Forge's ZIP maker before short-retention upload, verify the
       extracted archive through the package inspector, and prove macOS framework symlinks survive.
       Label every artifact and workflow summary experimental, unsupported, and unverified on real
       hardware.
@@ -1027,7 +1026,7 @@ migration on `3d-next`.
   `/package.json`. ASAR entries are now normalized once at that dependency boundary. The other three
   platform jobs again passed completely, so the third run is required only to establish one green
   replacement SHA across the whole matrix, not because their behavior regressed.
-- Final run `32885301938` passed the canonical release-boundary job and the Linux x86-64, Windows
+- Baseline run `32885301938` passed the canonical release-boundary job and the Linux x86-64, Windows
   x86-64, macOS x86-64, and macOS arm64 package probes at
   `41e82fb6cd9a22a7036f9f24ac312c0b68d13072`. Every native job completed Rust and frontend checks,
   Forge packaging, the production sidecar handshake/status/shutdown smoke, package inspection, and
@@ -1048,7 +1047,17 @@ migration on `3d-next`.
   contract against those bytes, and on macOS checks the Electron framework's version, binary,
   helper, library, and resource links explicitly. The local Linux round trip preserves the
   executable host and all 990 ASAR entries while reducing the uploaded payload from 310,784,132
-  bytes for the raw directory to a 126,802,294-byte ZIP. Hosted macOS proof remains open.
+  bytes for the raw directory to a 126,802,294-byte ZIP.
+- Replacement run `32889677743` passed the release-boundary job and all three supported native
+  probes at `7d84bf069e32f950248a739c17e5f063420472ae`. Each target passed the existing build, test,
+  package, sidecar, and raw-package checks, then created a Forge ZIP without rebuilding, extracted
+  it, and reran the host/ASAR contract. The inner archives are 126,743,247 bytes on Linux x86-64,
+  161,208,037 bytes on Windows x86-64, and 131,553,527 bytes on macOS arm64; GitHub uploaded exactly
+  three SHA-addressed artifacts with only its small outer ZIP overhead and seven-day retention.
+  Downloading the macOS artifact back from GitHub and extracting both layers produced a 301 MB app,
+  retained the five asserted Electron framework symlinks with their correct targets, and retained
+  executable modes on the 7,748,832-byte Rust host and Electron framework binary. The downloadable
+  artifact boundary is therefore proven rather than inferred from its pre-upload source.
 - macOS x86-64 is no longer a Holtburger 3D target. The Electron matrix, certification gate, and
   release questions now cover Linux x86-64, Windows x86-64, and macOS arm64 only. This does not
   remove or modify the canonical CLI's Intel-mac build.

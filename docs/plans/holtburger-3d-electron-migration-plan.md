@@ -347,7 +347,8 @@ used by the Explorer composition root. Electron remains the next implementation 
 ### Phase 2: Extract a shell-neutral Rust host
 
 Status: complete for the shell-neutral host and temporary Tauri parity adapter. The broad command
-module split remains intentionally deferred until after frontend parity.
+module split was evaluated after parity and deliberately rejected as file shuffling without an
+ownership or complexity reduction.
 
 #### Deliverables
 
@@ -376,8 +377,11 @@ module split remains intentionally deferred until after frontend parity.
       same injected event-sink contract.
 - [x] Keep command validation and error construction in Rust host methods so every shell observes
       identical behavior.
-- [ ] After parity is established, split the current broad `lib.rs` by command family in focused
-      changes; do not reproduce a composition god file or mix the reorganization into relocation.
+- [x] After parity is established, evaluate splitting the current broad `lib.rs` by command family.
+      Retain it: lifecycle composition is already isolated in `runtime.rs`, command dispatch is in
+      `protocol.rs`, command-specific serializers live in their owning modules, and 717 of its 2,177
+      lines are colocated binary-contract tests. A family split would scatter the shared parsing,
+      envelope, and fixture code without reducing state ownership or control-flow complexity.
 - [x] Move existing Rust tests with their owning modules and add direct tests for host construction,
       command behavior, event publication, and shutdown.
 - [x] Keep the temporary Tauri adapter deliberately mechanical and mark it for deletion in Phase 8.
@@ -399,9 +403,14 @@ module split remains intentionally deferred until after frontend parity.
 - Added `apps/holtburger-3d/host` as a workspace crate and left `src-tauri` as a thin adapter. The
   host has no Tauri/AppHandle references, owns the fixed-tick stop hook needed for sidecar shutdown,
   and passes 228 host library tests plus all-target checks and Clippy with warnings denied.
-- The broad `lib.rs` command-family split remains unchecked deliberately; doing it before the
-  Electron parity slice would combine cleanup with a transport migration and make regressions less
-  localizable.
+- The broad `lib.rs` command-family split was left unchecked during extraction deliberately; doing
+  it before the Electron parity slice would have combined cleanup with a transport migration and
+  made regressions less localizable.
+- The post-parity review closed that item without a split. `lib.rs` is a static-content command
+  facade rather than the host composition root, and its loaders already delegate to focused source
+  modules. File length alone does not justify moving cohesive binary contracts and their shared test
+  fixtures behind a re-export layer; revisit only when a named command family gains independent
+  state or consumers.
 
 ### Phase 3: Implement and prove the sidecar protocol
 
@@ -551,8 +560,8 @@ Status: complete for the available Linux/X11 cutover. The Explorer composition r
 Electron preload bridge when it is present, with a temporary Tauri fallback retained until Phase 8.
 The real Electron Explorer has started successfully, passed the available manual popup/DevTools
 smoke check, and completed the representative renderer/sidecar scenarios below. Renderer reload
-automation and the pre-existing possession coordinate contract remain explicit follow-ups; they do
-not block this Linux vertical slice.
+automation remains an explicit follow-up; the possession assertion was subsequently resolved with
+the three canonical browser fixtures.
 
 #### Deliverables
 
@@ -579,11 +588,10 @@ not block this Linux vertical slice.
 - [x] Exercise dynamic entities, physical flight, audio, particles, textures, workers, and
       streaming through the browser harness; the follow-flight run crossed into `0xda56ffff` with
       no browser errors and observed live audio plus particle/physics activity.
-- [ ] Exercise possession through the browser harness. The existing possession assertion currently
-      fails for the documented WCID fixtures because its signed backward-displacement expectation
-      is opposite the observed host coordinates; the failure is identical in the browser-only path
-      and is not attributed to Electron. Keep this as pre-existing harness debt until its owner
-      resolves the coordinate contract.
+- [x] Exercise possession through the browser harness. The signed backward-displacement failure was
+      isolated to WCID 14: its one-shot transition initially travels forward while entering the
+      reversed `WalkForward` cycle. The assertion now waits for the authoritative cyclic clip before
+      measuring signed locomotion; canonical WCID 1, 3, and 14 scenarios all pass.
 - [x] Exercise both Electron app entry routes: the Explorer was manually checked and the named
       `dev:electron:client` route started and exited cleanly.
 - [x] Use the browser harness for renderer regression evidence and the real sidecar diagnostic for
@@ -628,9 +636,14 @@ not block this Linux vertical slice.
 - Added a named `dev:electron:client` script so both existing app entry routes are exercised through
   the same launcher. A tracked `entry-paths.d.mts` declaration keeps a clean checkout independent
   of generated TypeScript output.
-- The browser possession assertion is recorded as an existing coordinate-contract debt, not
-  weakened or papered over for the migration. The Electron cutover therefore claims the passing
-  renderer/streaming/dynamic paths and leaves that specific scenario open.
+- At the Phase 5 cutover, the browser possession assertion was recorded as existing
+  coordinate-contract debt rather than weakened or papered over for the migration. The focused
+  follow-up below subsequently closed it.
+- The possession follow-up proved the old wording wrong: this was not a coordinate-frame mismatch.
+  WCID 14 remained in one landblock frame while a negative-rate one-shot transition contributed
+  forward root motion. The durable assertion measures the selected reversed cycle after transition
+  completion, preserving separate failure messages for a cycle that never begins and one that does
+  not move backward. WCID 1, 3, and 14 pass the complete browser scenario.
 
 ### Phase 6: Resteer before the irreversible cutover
 
@@ -675,7 +688,7 @@ not block this Linux vertical slice.
 - Electron's security boundary is in place for this slice: `sandbox`, context isolation, disabled
   Node integration, a narrow preload API, an allowlisted command set, typed event forwarding, and
   denied navigation/window creation. The later cleanup audit still needs exact URL-boundary tests,
-  dependency advisories, CSP/resource policy, and platform signing review.
+  dependency advisories, CSP/resource policy, and unsigned-distribution guidance.
 - A registry-backed `npm audit` refresh was unavailable in this restricted environment; the earlier
   dependency install reported 30 findings. No automatic audit fix was applied. Treat dependency
   review as a Phase 9/10 release gate rather than silently claiming a clean advisory state.
@@ -692,8 +705,8 @@ not block this Linux vertical slice.
   manual diagnostics.
 - The Linux manual result does not certify native Wayland, Windows, or macOS. Phase 9 remains a
   real packaged-run certification gate, including display scaling, GPU, audio, content discovery,
-  lifecycle cleanup, signing, and notarization where applicable. This is an enumerated portability
-  gap, not evidence against the Electron architecture.
+  lifecycle cleanup, and the user experience of launching unsigned packages. This is an enumerated
+  portability gap, not evidence against the Electron architecture.
 
 ### Phase 7: Manually verify and refine the Electron client
 
@@ -720,8 +733,8 @@ fallback remains only until Phase 8 performs the clean shell cutover.
       remains named lifecycle debt rather than an unverified manual claim.
 - [x] Exercise outdoor, EnvCell, streaming, movement/physical flight, dynamic spawn/despawn,
       possession, audio, particles, textures, workers, and client-route scenarios against the same
-      content used by the existing browser harness where available. The pre-existing possession
-      coordinate assertion remains separately dispositioned below.
+      content used by the existing browser harness where available. The possession assertion was
+      subsequently closed across its three canonical fixtures.
 - [x] Compare default display-backend behavior with explicit X11/Wayland settings when available;
       record jitter, scaling, multi-monitor, GPU, or focus differences without forcing a global
       backend choice prematurely.
@@ -768,6 +781,11 @@ fallback remains only until Phase 8 performs the clean shell cutover.
   flight. The host did not acknowledge graceful shutdown within its existing two-second bound, was
   force-killed as designed, and left no orphan. Keep the timeout visible and revisit only if normal
   post-load closes are slow or noisy during user verification.
+- A post-cutover real-sidecar probe measured five normal closes after content initialization and
+  `load_active_region_data`: shutdown acknowledgement took 0.32-0.71 ms and clean process exit took
+  87-94 ms. The two-second forced-termination bound therefore remains unchanged; the earlier
+  first-paint timeout is an intentionally bounded exceptional path, not evidence that ordinary
+  closes need a longer grace period.
 - Manual DevTools verification exposed a startup dynamic-entity event with its semantic payload
   nested under a second `payload` field. The Rust wire enum combined Serde's adjacent
   `content = "payload"` representation with struct variants that also named their field `payload`.
@@ -783,9 +801,10 @@ fallback remains only until Phase 8 performs the clean shell cutover.
   input-control outline is suppressed without changing focus indicators on actual UI controls.
 - **GO to Phase 8 clean shell cutover.** The user accepted the one-window Electron Explorer after
   verifying popup, dropdown, context-menu, DevTools, focus, startup, sizing, and close behavior and
-  refining the defects above. The remaining automated reload/crash check, possession-coordinate
-  assertion, early-close host timeout, CSP/advisory review, and cross-platform certification remain
-  explicitly tracked debt; none requires retaining two production desktop shells.
+  refining the defects above. The remaining automated reload/crash check, CSP/advisory review, and
+  cross-platform certification remain explicitly tracked debt; none requires retaining two
+  production desktop shells. The possession assertion and normal-close timeout disposition were
+  subsequently closed with the focused evidence above.
 
 ### Phase 8: Make the clean shell cutover
 
@@ -869,8 +888,8 @@ unavailable systems are build artifacts, not supported releases.
 
 - A hosted CI matrix for Linux x86-64, Windows x86-64, macOS x86-64, and macOS arm64.
 - Per-target Rust host binaries paired with Electron packages of the same OS and architecture.
-- Unsigned internal artifacts and package-resource inspections, with signing/notarization inputs
-  isolated as release secrets.
+- Unsigned artifacts with package-resource inspections, checksums, reproducible build instructions,
+  and honest documentation of platform trust warnings.
 - Real packaged-run certification records for each available platform and display backend.
 
 #### Task checklist
@@ -889,7 +908,8 @@ unavailable systems are build artifacts, not supported releases.
       fixture-backed or no-content startup path. Record runner limitations rather than converting
       an unrun GUI test into a pass.
 - [ ] Upload packages as internal artifacts. Do not publish them as supported releases yet.
-- [ ] Configure, but do not fabricate, Windows code-signing and macOS signing/notarization inputs.
+- [ ] Generate checksums and document how users can verify and build the unsigned artifacts from
+      source. Do not require paid Windows signing or Apple Developer Program membership.
 - [ ] Keep installer-format choices isolated from application runtime code. Initial support may use
       portable archives while the final Windows installer, macOS disk image, and Linux package
       policy is decided.
@@ -898,7 +918,8 @@ unavailable systems are build artifacts, not supported releases.
       host crash/quit cleanup, and representative Explorer/client flows.
 - [ ] On macOS arm64 and either macOS x86-64 hardware or the chosen universal-build strategy,
       verify the equivalent behaviors plus application focus/menu conventions, Retina coordinates,
-      app-bundle sidecar execution, signing, and notarization.
+      app-bundle sidecar execution, and the documented Gatekeeper launch procedure for an unsigned
+      package.
 - [ ] Manually exercise representative renderer and streaming scenarios on each OS. Gather
       targeted measurements when behavior appears questionable rather than expecting Linux timings
       or hosted-runner numbers to transfer.
@@ -918,15 +939,24 @@ unavailable systems are build artifacts, not supported releases.
 - Windows, macOS, and Linux each have a real packaged-run certification record covering native
   input, WebGL, content, audio, IPC, lifecycle, and packaging before that platform is advertised as
   supported.
-- Signed Windows and signed/notarized macOS release candidates launch without security bypasses.
-- CI never reports an unsigned or unnotarized artifact as a public release candidate, and known
-  platform divergences are documented with a named affected workflow and disposition.
+- Published artifacts include checksums, source-build instructions, and accurate Windows
+  SmartScreen and macOS Gatekeeper guidance. The project does not imply a verified publisher
+  identity for unsigned builds.
+- CI and release documentation distinguish automated build success from real-machine verification,
+  and known platform divergences have a named affected workflow and disposition.
 
 #### Decisions and course corrections
 
 - Portability packaging and cross-platform certification were moved after the local Phase 8 shell
   cutover so they cannot block parallel frontend work. This phase still gates platform support and
   public release claims.
+- Paid Windows code signing and Apple Developer Program membership are not release requirements for
+  this open-source project. Initial releases remain unsigned and provide checksums, reproducible
+  build instructions, and platform-warning guidance. Free signing for qualifying open-source
+  projects may be adopted later, but is optional and must not block releases.
+- Automated hosted-runner work can proceed without access to every target machine. Windows and
+  macOS remain explicitly unverified until a real system is available for the manual certification
+  checklist; lack of current hardware does not block other development or unsigned package builds.
 
 ### Phase 10: Cleanup and release-readiness review
 
@@ -966,8 +996,8 @@ unavailable systems are build artifacts, not supported releases.
 | Host crashes strand Electron promises or processes.                         | Supervise one child, reject all pending requests on exit, expose failure visibly, implement orderly shutdown with a bounded forced termination, and test crash/reload/quit paths.                                                                                  |
 | A compromised renderer reaches Node or arbitrary host operations.           | Enable isolation and sandboxing, disable Node integration, expose an allowlisted typed preload API, restrict navigation/window creation, and validate every request in Rust.                                                                                       |
 | CI builds create false confidence without real hardware input/GPU behavior. | Separate automated portability gates from manual certification and label untested artifacts unsupported.                                                                                                                                                           |
-| macOS architecture or signing is wrong for the bundled sidecar.             | Build/package matching architectures on native runners, inspect bundle contents, and test signed/notarized packages before release.                                                                                                                                |
-| Windows antivirus flags or quarantines the sidecar.                         | Sign final artifacts, avoid shell spawning and self-modifying behavior, preserve stderr diagnostics, and test the packaged candidate on a real Windows installation.                                                                                               |
+| macOS rejects or warns about the unsigned app or bundled sidecar.           | Build/package matching architectures on native runners, inspect bundle contents, document the Gatekeeper launch procedure, and test the unsigned package on a real Mac before advertising support.                                                                  |
+| Windows warns about or quarantines the unsigned sidecar.                    | Publish checksums and source-build instructions, avoid shell spawning and self-modifying behavior, preserve stderr diagnostics, document SmartScreen behavior, and test the packaged candidate on a real Windows installation.                                      |
 | Wayland limits programmatic window operations.                              | Keep one ordinary user-controlled window, test native Wayland and XWayland, and add no window-position-dependent UX without a proven requirement.                                                                                                                  |
 | Electron increases bundle size or memory beyond an acceptable level.        | Compare like-for-like packages and representative working sets against the existing bundled CEF runtime during the Phase 9 release-support gate; do not turn one noisy Linux sample into a premature threshold.                                                    |
 | Electron/Chromium security maintenance becomes neglected.                   | Document an explicit dependency-update cadence and make dependency/version reporting part of release readiness.                                                                                                                                                    |
@@ -986,7 +1016,8 @@ unavailable systems are build artifacts, not supported releases.
       in hosted CI.
 - [ ] Real packaged applications are manually certified on Linux, Windows, and macOS before those
       platforms are advertised as supported.
-- [ ] Windows signing and macOS signing/notarization are complete for public release candidates.
+- [ ] Public unsigned artifacts include checksums, reproducible build instructions, and accurate
+      Windows SmartScreen and macOS Gatekeeper guidance.
 - [ ] Formatting, checks, lint, Clippy with warnings denied, unit/integration tests, runtime
       verification, and package inspection pass.
 - [ ] Documentation describes development, content discovery, packaging, platform support status,
@@ -1002,8 +1033,6 @@ release phase.
 2. Is Windows arm64 a supported target? It is not in the current Rust release matrix and is excluded
    from this plan until a named user/device requirement exists.
 3. Will macOS ship separate x86-64/arm64 applications or one universal application? Decide from CI
-   artifact size, signing complexity, and actual target hardware before certification.
-4. Who owns Windows and Apple signing identities and secrets? Unsigned internal artifacts can prove
-   packaging, but cannot satisfy the public-release gate.
-5. Which real or hosted systems will provide the eventual Windows and macOS manual certification?
+   artifact size, packaging complexity, and actual target hardware before certification.
+4. Which real or hosted systems will provide the eventual Windows and macOS manual certification?
    Until identified, support remains explicitly pending even if CI is green.

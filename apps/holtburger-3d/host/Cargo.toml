@@ -6,6 +6,10 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[package.metadata.dist]
+# Electron Forge bundles this private sidecar; it is not a standalone cargo-dist application.
+dist = false
+
 [dependencies]
 anyhow.workspace = true
 holtburger-content.workspace = true

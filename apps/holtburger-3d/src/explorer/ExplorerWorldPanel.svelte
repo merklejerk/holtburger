@@ -39,6 +39,8 @@
 		) => void;
 		/** Current automatic camera-placement lifecycle state. */
 		readonly cameraFocusStatus: ExplorerCameraFocusStatus;
+		/** Formatted camera residency, or null before the first presented frame. */
+		readonly cameraResidencyLabel: string | null;
 		readonly cameraMode: ExplorerCameraMode;
 		readonly cameraModePending: boolean;
 		readonly physicalCameraStatus: PhysicalFlyStatus | null;
@@ -102,6 +104,7 @@
 		runtimeReady,
 		requestSceneInterest,
 		cameraFocusStatus,
+		cameraResidencyLabel,
 		cameraMode,
 		cameraModePending,
 		physicalCameraStatus,
@@ -240,6 +243,10 @@
 </script>
 
 <div class="explorer-world-panel">
+	<p class="explorer-world-residency">
+		<span>Camera cell</span>
+		<strong>{cameraResidencyLabel ?? "—"}</strong>
+	</p>
 	<form class="explorer-world-form" onsubmit={submitInterest}>
 		<fieldset class="explorer-section" disabled={!runtimeReady}>
 			<legend>Scene interest</legend>

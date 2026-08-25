@@ -174,31 +174,6 @@ button:focus-visible {
 	text-shadow: 1px 1px 0 #000;
 }
 
-.explorer-camera-location.ac-panel {
-	position: absolute;
-	top: clamp(12px, 2vw, 22px);
-	left: clamp(12px, 2vw, 22px);
-	z-index: 2;
-	display: flex;
-	gap: 6px;
-	align-items: center;
-	width: fit-content;
-	max-width: calc(100vw - 24px);
-	padding: 4px 7px;
-	overflow: hidden;
-	color: var(--ac-ink);
-	font-family: var(--ac-font-ui);
-	font-size: 0.7rem;
-	font-variant-numeric: tabular-nums;
-	line-height: 1.15;
-	white-space: nowrap;
-	text-shadow: 1px 1px 0 #000;
-}
-
-.explorer-camera-location-separator {
-	color: var(--ac-gold);
-}
-
 .ac-panel {
 	width: min(100%, 720px);
 	border: var(--ac-border);
@@ -562,6 +537,32 @@ h1 {
 .explorer-world-panel {
 	display: grid;
 	gap: 14px;
+}
+
+.explorer-world-residency {
+	display: flex;
+	gap: 8px;
+	align-items: baseline;
+	justify-content: space-between;
+	min-width: 0;
+	padding: 7px 8px;
+	border: 1px solid rgb(200 148 42 / 0.36);
+	background: rgb(22 17 8 / 0.55);
+}
+
+.explorer-world-residency > span {
+	color: var(--ac-ink-muted);
+	font-size: 0.76rem;
+}
+
+.explorer-world-residency > strong {
+	min-width: 0;
+	overflow: hidden;
+	color: var(--ac-ink);
+	font-family: var(--ac-font-ui);
+	font-variant-numeric: tabular-nums;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .explorer-frame-panel {

@@ -12,7 +12,6 @@
 		type FrameMetrics,
 	} from "../app/FrameMetricsOverlay.svelte";
 	import ExplorerTools from "./ExplorerTools.svelte";
-	import ExplorerCameraLocation from "./ExplorerCameraLocation.svelte";
 	import {
 		GameRuntime,
 		type StaticObjectRuntimeDiagnostics,
@@ -90,8 +89,8 @@
 		type ExplorerEntitySelection,
 	} from "./explorer-entity-panel-state";
 	import {
-		createCameraLookAtAngles,
 		createEntityFacingCameraYaw,
+		resolveCameraLookAtAngles,
 	} from "../lib/game/math/camera-orientation";
 	import {
 		PhysicalFlySession,
@@ -129,7 +128,10 @@
 	import { ActiveRegionStaticDetailOwner } from "../lib/game/resolution/active-region-static-detail";
 	import type { Texture2DReadback } from "../lib/game/renderer/webgl2-device";
 	import type { TexturePageId } from "../lib/game/textures/texture-manager";
-	import type { ExplorerCameraLocation as ExplorerCameraLocationState } from "./explorer-camera-location";
+	import {
+		formatExplorerCameraResidency,
+		type ExplorerCameraLocation,
+	} from "./explorer-camera-location";
 	import MapPanel from "../app/MapPanel.svelte";
 	import type { MapPanelFrame, MapPanelState } from "../app/map-panel-frame";
 	import {
@@ -195,7 +197,34 @@
 	let cameraFocusStatus = $state<ExplorerCameraFocusStatus>(
 		"No camera focus requested.",
 	);
-	let cameraLocation = $state<ExplorerCameraLocationState | null>(null);
+	/**
+	 * Latest presented camera position and residency, republished every frame.
+	 *
+	 * Deliberately not reactive. Its readers — the map panel's anchor and the frame diagnostic
+	 * report — pull it imperatively on their own cadence, so publishing it through `$state` would
+	 * schedule a Svelte flush per frame to notify a much slower consumer.
+	 */
+	let cameraLocation: ExplorerCameraLocation | null = null;
+	/**
+	 * Camera residency as the World tab prints it.
+	 *
+	 * This is the one reactive projection of the camera location, and it is a string precisely so
+	 * that frames which do not change the resolved cell fail Svelte's equality check and schedule
+	 * nothing at all.
+	 */
+	let cameraResidencyLabel = $state<string | null>(null);
+
+	/** Publish one frame's camera location, deriving its label so the two never drift apart. */
+	function publishCameraLocation(
+		location: ExplorerCameraLocation | null,
+	): void {
+		cameraLocation = location;
+		cameraResidencyLabel =
+			location === null
+				? null
+				: formatExplorerCameraResidency(location.residency);
+	}
+
 	/**
 	 * Overhead-map panel geometry and view choices.
 	 *
@@ -1221,10 +1250,11 @@
 			);
 		}
 		const { placement, visualPivot } = presentation;
-		const orientation = createCameraLookAtAngles(
-			placement.position,
-			visualPivot,
-		);
+		// A reseed instant carries no look direction. The operator's desired orbit is what the boom
+		// is about to spring back out along, which is what the unpresented branch above uses too.
+		const orientation =
+			resolveCameraLookAtAngles(placement.position, visualPivot) ??
+			desiredOrientation;
 		controller.applyPresentedPosition(placement.position);
 		// Published where it is decided: the boom owns orientation while it is running, and the
 		// free-fly controller only receives position, so reading yaw from that controller here
@@ -1619,7 +1649,7 @@
 			const possessionOutcomeUnsubscribe = unsubscribePossessionOutcomes;
 			gameRuntime = undefined;
 			runtimeReady = false;
-			cameraLocation = null;
+			publishCameraLocation(null);
 			rendererFrameDiagnostics = null;
 			authoredDynamicRuntimeDiagnostics = null;
 			commitPipeline = undefined;
@@ -1852,7 +1882,7 @@
 							"Explorer camera coordinator is unavailable during rendering.",
 						);
 					}
-					cameraLocation = residencySync.location;
+					publishCameraLocation(residencySync.location);
 					// Only the free-fly controller's yaw is authoritative here; while a boom runs it
 					// publishes its own, because the controller is not the one turning.
 					if (boomCameraSession === undefined) {
@@ -1942,13 +1972,11 @@
 				}}
 			/>
 		{/if}
-		{#if startupError === null}
-			<ExplorerCameraLocation location={cameraLocation} />
-		{/if}
 		<ExplorerTools
 			{runtimeReady}
 			{requestSceneInterest}
 			{cameraFocusStatus}
+			{cameraResidencyLabel}
 			{cameraMode}
 			{cameraModePending}
 			{physicalCameraStatus}

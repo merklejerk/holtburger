@@ -4,6 +4,7 @@ import {
 	OUTDOOR_TERRAIN_GRID_SIZE,
 	OUTDOOR_TERRAIN_TILE_SIZE,
 } from "../landblocks";
+import { WATER_TERRAIN_CODES } from "../terrain/terrain-sample";
 import type { TerrainGenerationSource } from "../terrain/types";
 import { RETAIL_WALKABLE_NORMAL_UP } from "../walkability";
 import { buildMapTerrainMesh } from "./map-terrain-mesh";
@@ -37,7 +38,8 @@ describe("buildMapTerrainMesh", () => {
 		expect(mesh.vertexCount).toBe(OUTDOOR_TERRAIN_GRID_CELLS ** 2 * 2 * 3);
 		expect(mesh.positions).toHaveLength(mesh.vertexCount * 3);
 		expect(mesh.terrainCodes).toHaveLength(mesh.vertexCount);
-		expect(mesh.roadCoverage).toHaveLength(mesh.vertexCount);
+		expect(mesh.roadMask).toHaveLength(mesh.vertexCount);
+		expect(mesh.cellUv).toHaveLength(mesh.vertexCount * 2);
 	});
 
 	it("lays vertices out in the scene terrain frame", () => {
@@ -54,38 +56,48 @@ describe("buildMapTerrainMesh", () => {
 		expect(mesh.positions[5]).toBe(-0);
 	});
 
-	it("gives a triangle the terrain type most of its corners agree on", () => {
-		// Cell (0, 0)'s southern corners are type 9 and its northern ones type 4, so the first
-		// triangle — south-west, south-east, north-east — is two to one for 9.
-		// The default diagonal makes the first triangle south-west, south-east, north-west, so its
-		// two southern corners outvote the northern one.
-		const terrainSamples = new Uint16Array(SIDE * SIDE).fill(sample(4));
-		terrainSamples[0] = sample(9);
-		terrainSamples[1] = sample(9);
-		const mesh = buildMapTerrainMesh(source({ terrainSamples }));
-
-		expect([...mesh.terrainCodes.slice(0, 3)]).toEqual([9, 9, 9]);
-	});
-
-	it("resolves a three-way corner disagreement without depending on corner order", () => {
-		// The default diagonal makes the first triangle south-west, south-east, north-west.
+	it("carries the authored terrain type of each corner, unresolved", () => {
+		// The default diagonal makes the first triangle south-west, south-east, north-west, and each
+		// of those corners keeps its own type so the shader can blend between them.
 		const terrainSamples = new Uint16Array(SIDE * SIDE).fill(sample(4));
 		terrainSamples[0] = sample(7);
 		terrainSamples[1] = sample(9);
 		terrainSamples[SIDE] = sample(5);
 		const mesh = buildMapTerrainMesh(source({ terrainSamples }));
 
-		// No majority exists, so the lowest authored code wins for every corner alike.
-		expect([...mesh.terrainCodes.slice(0, 3)]).toEqual([5, 5, 5]);
+		expect([...mesh.terrainCodes.slice(0, 3)]).toEqual([7, 9, 5]);
 	});
 
-	it("carries road presence per corner so the edge can be interpolated", () => {
+	it("gives every corner of a cell that cell's whole road mask", () => {
 		const terrainSamples = new Uint16Array(SIDE * SIDE);
 		terrainSamples[0] = sample(3, 2);
 		const mesh = buildMapTerrainMesh(source({ terrainSamples }));
 
-		// Only the south-west corner of the first triangle carries a road.
-		expect([...mesh.roadCoverage.slice(0, 3)]).toEqual([1, 0, 0]);
+		// Cell (0, 0) carries road at its south-west corner alone, and every one of the six
+		// vertices it expands into reports that, so the shader can shape the road from the cell.
+		expect([...mesh.roadMask.slice(0, 6)]).toEqual([1, 1, 1, 1, 1, 1]);
+		// The default diagonal makes the first triangle south-west, south-east, north-west.
+		expect([...mesh.cellUv.slice(0, 6)]).toEqual([0, 0, 1, 0, 0, 1]);
+	});
+
+	it("keeps a diagonally stepping road joined whichever way the cell is cut", () => {
+		// Road at the south-west and north-east corners of cell (0, 0) and nowhere else: the case
+		// that used to break whenever the authored cut ran the other way.
+		const terrainSamples = new Uint16Array(SIDE * SIDE);
+		terrainSamples[0] = sample(3, 1);
+		terrainSamples[SIDE + 1] = sample(3, 1);
+
+		for (const cut of [0, 1]) {
+			const diagonals = new Uint8Array(OUTDOOR_TERRAIN_GRID_CELLS ** 2);
+			diagonals[0] = cut;
+			const mesh = buildMapTerrainMesh(
+				source({ cellDiagonals: diagonals, terrainSamples }),
+			);
+
+			// South-west is bit 0 and north-east is bit 2, and the mask no longer depends on which
+			// triangle a corner landed in, so both cuts describe the same road to the shader.
+			expect([...mesh.roadMask.slice(0, 6)]).toEqual([5, 5, 5, 5, 5, 5]);
+		}
 	});
 
 	it("gives flat ground a straight-up normal", () => {
@@ -122,7 +134,7 @@ describe("buildMapTerrainMesh", () => {
 		expect(y).toBeGreaterThan(RETAIL_WALKABLE_NORMAL_UP);
 	});
 
-	it("marks ground past retail's walkable limit as unwalkable", () => {
+	it("marks ground past retail's walkable limit as impassable", () => {
 		// Two tile sizes of rise per tile is roughly 63 degrees, well past the limit.
 		const heights = new Float32Array(SIDE * SIDE);
 		for (let row = 0; row < SIDE; row += 1) {
@@ -133,13 +145,35 @@ describe("buildMapTerrainMesh", () => {
 		const mesh = buildMapTerrainMesh(source({ heights }));
 
 		expect(mesh.normals[1]).toBeLessThan(RETAIL_WALKABLE_NORMAL_UP);
-		expect([...mesh.walkable.slice(0, 3)]).toEqual([0, 0, 0]);
+		expect([...mesh.passable.slice(0, 3)]).toEqual([0, 0, 0]);
 	});
 
-	it("calls flat and gently sloped ground walkable", () => {
-		expect([...buildMapTerrainMesh(source()).walkable.slice(0, 3)]).toEqual([
+	it("calls flat and gently sloped ground passable", () => {
+		expect([...buildMapTerrainMesh(source()).passable.slice(0, 3)]).toEqual([
 			1, 1, 1,
 		]);
+	});
+
+	it("marks every face of an entirely-water landblock impassable", () => {
+		// Retail collides on entry to a landblock whose every authored vertex is a water surface,
+		// however flat the ground beneath it is.
+		const terrainSamples = new Uint16Array(SIDE * SIDE).fill(
+			sample(WATER_TERRAIN_CODES.first),
+		);
+		const mesh = buildMapTerrainMesh(source({ terrainSamples }));
+
+		expect([...mesh.passable]).toEqual(Array(mesh.vertexCount).fill(0));
+	});
+
+	it("leaves a landblock that is only partly water passable", () => {
+		// A shoreline: retail lets a body wade in, so the map must not fence it off.
+		const terrainSamples = new Uint16Array(SIDE * SIDE).fill(
+			sample(WATER_TERRAIN_CODES.last),
+		);
+		terrainSamples[terrainSamples.length - 1] = sample(4);
+		const mesh = buildMapTerrainMesh(source({ terrainSamples }));
+
+		expect([...mesh.passable]).toEqual(Array(mesh.vertexCount).fill(1));
 	});
 
 	it("judges a step from the triangle's own face, not a smoothed gradient", () => {
@@ -161,7 +195,7 @@ describe("buildMapTerrainMesh", () => {
 		// The face itself rises 30 m over one tile and cannot be climbed; the map agrees with it.
 		const steppingCell = stepColumn - 1;
 		const firstCornerOfCell = steppingCell * 2 * 3;
-		expect(mesh.walkable[firstCornerOfCell]).toBe(0);
+		expect(mesh.passable[firstCornerOfCell]).toBe(0);
 	});
 
 	function withFirstDiagonal(value: number): Uint8Array {

@@ -37,9 +37,9 @@
 	} from "../../lib/game/landblocks";
 	import {
 		createCameraAxesRadians,
-		createCameraLookAtAngles,
 		createCameraRotationRadians,
 		createEntityFacingCameraYaw,
+		resolveCameraLookAtAngles,
 	} from "../../lib/game/math/camera-orientation";
 	import { sceneVec3, sceneVector3 } from "../../lib/assets/ac-frame";
 	import type { Camera } from "../../lib/game/runtime/types";
@@ -1847,10 +1847,13 @@
 			return;
 		activeBoomProjection = projection;
 		const { placement, visualPivot } = presentation;
-		const orientation = createCameraLookAtAngles(
+		// A reseed instant carries no look direction, and the harness has no desired orbit to fall
+		// back on, so it holds its last applied camera rather than inventing one.
+		const orientation = resolveCameraLookAtAngles(
 			placement.position,
 			visualPivot,
 		);
+		if (orientation === null) return;
 		const rotation = createCameraRotationRadians(
 			orientation.yawRadians,
 			orientation.pitchRadians,

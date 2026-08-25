@@ -165,15 +165,15 @@
 		if (status.kind === "awaiting-first-path") {
 			return `generation ${status.identity.boomGeneration}; awaiting first path`;
 		}
-		const recovery =
-			status.recovery === null
+		const placementOutcome =
+			status.placementOutcome === null
 				? ""
-				: `; ${status.recovery.kind} ${status.recovery.reason}`;
+				: `; ${status.placementOutcome.kind} ${status.placementOutcome.reason}`;
 		const clearance =
 			status.clearance === null
 				? "clearance awaiting initial proof"
 				: `projection ${status.clearance.projectionRevision}; radius ${status.clearance.radius.toFixed(2)}m`;
-		return `generation ${status.identity.boomGeneration}; path ${status.sequence}; ${status.targetSphereRole}; reach ${status.renderedReach.toFixed(2)}/${status.desiredReach.toFixed(2)}m; ${clearance}; dropped ${status.droppedPaths}${recovery}`;
+		return `generation ${status.identity.boomGeneration}; path ${status.sequence}; ${status.targetSphereRole}; reach ${status.renderedReach.toFixed(2)}/${status.desiredReach.toFixed(2)}m; ${clearance}; dropped ${status.droppedPaths}${placementOutcome}`;
 	}
 
 	function motionStyleName(style: number): MotionStyleName | null {

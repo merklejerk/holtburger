@@ -60,7 +60,14 @@ export type HostKinematicBoomStatus =
 			readonly clearance: HostKinematicBoomTick["clearance"];
 			readonly desiredReach: number;
 			readonly renderedReach: number;
-			readonly recovery:
+			/**
+			 * How the latest tick placed the camera, or null when it moved continuously.
+			 *
+			 * Not a fault indicator: a `reseeded` outcome covers the generation's ordinary first
+			 * tick as well as the two recoveries, so its reason is what says whether anything went
+			 * wrong. Only a `held` outcome always follows a failure.
+			 */
+			readonly placementOutcome:
 				| {
 						readonly kind: "held";
 						readonly reason: HostKinematicBoomHoldReason;
@@ -366,7 +373,7 @@ export class HostKinematicBoomSession {
 			clearance: latest.clearance,
 			desiredReach: latest.desiredReach,
 			renderedReach: latest.renderedReach,
-			recovery:
+			placementOutcome:
 				latest.kind === "held"
 					? { kind: "held", reason: latest.reason }
 					: latest.kind === "reseeded"

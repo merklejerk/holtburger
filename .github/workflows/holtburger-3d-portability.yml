@@ -1,0 +1,115 @@
+name: Holtburger 3D Portability Probes
+
+on:
+  push:
+    branches: [probe/3d-electron-portability]
+    paths:
+      - ".github/workflows/holtburger-3d-portability.yml"
+      - "apps/holtburger-3d/**"
+      - "crates/**"
+      - "Cargo.lock"
+      - "Cargo.toml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: holtburger-3d-portability-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release-boundary:
+    name: Canonical release boundary
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install the repository-pinned cargo-dist
+        shell: bash
+        run: |
+          DIST_VERSION="$(sed -n 's/^cargo-dist-version = "\([^"]*\)"/\1/p' Cargo.toml)"
+          test -n "$DIST_VERSION"
+          curl --proto '=https' --tlsv1.2 -LsSf "https://github.com/axodotdev/cargo-dist/releases/download/v${DIST_VERSION}/cargo-dist-installer.sh" | sh
+      - name: Reject standalone 3D host release artifacts
+        shell: bash
+        run: |
+          dist plan --output-format=json > "$RUNNER_TEMP/dist-plan.json"
+          jq -e '
+            ([.releases[].app_name] | index("holtburger-3d-host") == null) and
+            ([.artifacts | keys[] | select(startswith("holtburger-3d-host"))] | length == 0) and
+            (.announcement_github_body | contains("# holtburger-3d-host") | not)
+          ' "$RUNNER_TEMP/dist-plan.json"
+
+  package-probe:
+    name: Package probe (${{ matrix.target }})
+    needs: release-boundary
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            package-directory: holtburger-3d-linux-x64
+          - runner: windows-2022
+            target: x86_64-pc-windows-msvc
+            package-directory: holtburger-3d-win32-x64
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            package-directory: holtburger-3d-darwin-x64
+          - runner: macos-14
+            target: aarch64-apple-darwin
+            package-directory: holtburger-3d-darwin-arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/holtburger-3d/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install frontend dependencies
+        working-directory: apps/holtburger-3d
+        run: npm ci
+      - name: Test the Rust host
+        run: cargo test -p holtburger-3d-host --all-targets
+      - name: Check the frontend and Electron boundary
+        working-directory: apps/holtburger-3d
+        run: npm run check
+      - name: Lint TypeScript and Electron scripts
+        working-directory: apps/holtburger-3d
+        run: npm run lint:ts
+      - name: Test the frontend and Electron main process
+        working-directory: apps/holtburger-3d
+        run: npm run test:ts
+      - name: Build the native Electron package
+        working-directory: apps/holtburger-3d
+        run: npm run package
+      - name: Exercise the real sidecar protocol without production content
+        working-directory: apps/holtburger-3d
+        run: npm run smoke:sidecar
+      - name: Inspect packaged host and static resources
+        working-directory: apps/holtburger-3d
+        run: npm run check:package
+      - name: Record artifact limitations
+        if: always()
+        shell: bash
+        run: |
+          echo '### Experimental Holtburger 3D portability probe' >> "$GITHUB_STEP_SUMMARY"
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          echo 'This package is an unsupported, short-lived development artifact.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Hosted CI verifies build, protocol, and package structure only; real GPU, input, audio, display scaling, and OS launch behavior remain unverified.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload unsupported diagnostic package
+        uses: actions/upload-artifact@v4
+        with:
+          name: holtburger-3d-portability-${{ matrix.target }}-${{ github.sha }}
+          path: apps/holtburger-3d/out/${{ matrix.package-directory }}
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0

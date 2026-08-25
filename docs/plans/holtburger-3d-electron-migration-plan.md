@@ -1,7 +1,8 @@
 # Holtburger 3D Electron Migration Plan
 
-Status: in progress. Phases 0-8 are complete on the available Linux desktop; Phase 9 is the next
-portability, packaging, and cross-platform certification phase.
+Status: in progress. Phases 0-8 are complete on the available Linux desktop; Phase 9A is the next
+non-publishing portability phase. Real-machine certification and public distribution remain
+deferred to the 3D product-release roadmap.
 
 ## Context and Boundaries
 
@@ -299,9 +300,9 @@ interaction contract worth preserving during the migration.
 - Phase 2 is split into a mechanical module/test/binary relocation followed by Tauri dependency
   inversion and focused composition-root cleanup. Combining those with a broad `lib.rs`
   reorganization would make parity failures unnecessarily difficult to locate.
-- Automated cross-platform host/protocol/package gates are release-support gates rather than a
-  prerequisite for the local shell cutover. The phase order is deliberately manual refinement,
-  clean local cutover, then portability/package certification.
+- Automated cross-platform host/protocol/package probes are not a prerequisite for the local shell
+  cutover. The phase order is deliberately manual refinement, clean local cutover, then isolated
+  branch portability; real-machine certification and release integration remain deferred.
 
 ### Phase 1: Establish one frontend host boundary
 
@@ -489,7 +490,7 @@ exercise. Cross-platform and packaging validation remain later phases.
   and observed seven ordered motion events before stopping the session. Those production-DAT
   diagnostics are intentionally not retained as tests because the archive is not checked in. npm
   currently reports 30 audit findings after Forge/Electron installation; dependency review belongs
-  in Phase 9/10.
+  in Phase 10 and the eventual product-release roadmap.
 
 ### Phase 4: Build the Electron shell vertical slice
 
@@ -670,7 +671,7 @@ the three canonical browser fixtures.
   Linux/X11 Electron Explorer passed the product scenarios and the sidecar passed the measured
   concurrent binary burst and physical-flight event exercise. The next gate is an interactive pass
   with the user on the available desktop, while the thin Tauri adapter remains the recoverable
-  comparison path. Portability/package work moves after the local cutover into Phase 9.
+  comparison path. Isolated portability/package probes move after the local cutover into Phase 9A.
 - The protocol has one bounded 16 MiB frame limit, one ordered writer with a 256-frame queue, a
   closed 36-command/5-event inventory, handshake/version rejection, binary MessagePack payloads,
   pending-request rejection on child exit, and a bounded shutdown kill path. The real Linux burst
@@ -691,20 +692,22 @@ the three canonical browser fixtures.
   dependency advisories, CSP/resource policy, and unsigned-distribution guidance.
 - A registry-backed `npm audit` refresh was unavailable in this restricted environment; the earlier
   dependency install reported 30 findings. No automatic audit fix was applied. Treat dependency
-  review as a Phase 9/10 release gate rather than silently claiming a clean advisory state.
-- The portability dry-run found no Electron workflow in `.github/workflows`; `nightly.yml` only
-  builds the existing Rust/TUI artifacts even though its target matrix is reusable. Phase 9 must
-  add `npm ci`, Electron-main/renderer checks, native sidecar builds, package-resource inspection,
-  and target-specific launch smoke reporting for Linux x86-64, Windows x86-64, macOS x86-64, and
-  macOS arm64. Unsigned artifacts remain internal and do not block the local Phase 8 cutover.
+  review as a Phase 10 cleanup and eventual product-release concern rather than silently claiming a
+  clean advisory state.
+- The portability dry-run found no Electron workflow in `.github/workflows`; the existing nightly
+  and tag-release workflows own canonical publication. Phase 9A must add a separate read-only
+  workflow with `npm ci`, Electron-main/renderer checks, native sidecar builds, package-resource
+  inspection, and target-specific launch smoke reporting for Linux x86-64, Windows x86-64, macOS
+  x86-64, and macOS arm64. Its short-lived diagnostic artifacts do not block the local cutover and
+  are not releases.
 - The current production sidecar discovers `HOLTBURGER_DATS`/HBA content during startup, while
-  this repository intentionally does not check in the production DAT archive. Phase 9's real
+  this repository intentionally does not check in the production DAT archive. Phase 9A's real
   subprocess protocol test and packaged `host_status` smoke must therefore use a checked-in,
   fixture-backed or explicitly no-content test path; they must not reintroduce an ignored test that
   depends on a developer's external DAT files. Production-DAT burst and renderer scenarios remain
   manual diagnostics.
-- The Linux manual result does not certify native Wayland, Windows, or macOS. Phase 9 remains a
-  real packaged-run certification gate, including display scaling, GPU, audio, content discovery,
+- The Linux manual result does not certify native Wayland, Windows, or macOS. Those real packaged
+  scenarios remain deferred Phase 9B work, including display scaling, GPU, audio, content discovery,
   lifecycle cleanup, and the user experience of launching unsigned packages. This is an enumerated
   portability gap, not evidence against the Electron architecture.
 
@@ -802,7 +805,7 @@ fallback remains only until Phase 8 performs the clean shell cutover.
 - **GO to Phase 8 clean shell cutover.** The user accepted the one-window Electron Explorer after
   verifying popup, dropdown, context-menu, DevTools, focus, startup, sizing, and close behavior and
   refining the defects above. The remaining automated reload/crash check, CSP/advisory review, and
-  cross-platform certification remain explicitly tracked debt; none requires retaining two
+  deferred cross-platform certification remain explicitly tracked debt; none requires retaining two
   production desktop shells. The possession assertion and normal-close timeout disposition were
   subsequently closed with the focused evidence above.
 
@@ -812,7 +815,7 @@ Status: complete. Electron is the sole production desktop shell, and the public 
 commands now launch it by default.
 
 This follows Phase 7's local manual acceptance. It does not wait for Windows/macOS packaging or
-certification; those are Phase 9 release-support gates.
+certification; those are deferred Phase 9B/9C product-release gates.
 
 #### Deliverables
 
@@ -845,8 +848,8 @@ certification; those are Phase 9 release-support gates.
 #### Decisions and course corrections
 
 - The default script names become Electron-owned at this point so parallel frontend work no longer
-  needs to remember a shell-specific suffix. Portability/package certification remains explicitly
-  pending and does not get represented as supported-platform status.
+  needs to remember a shell-specific suffix. Phase 9A portability probes and deferred Phase 9B/9C
+  certification/release work do not get represented as supported-platform status.
 - The clean cutover deleted `src-tauri`, the temporary Tauri transport, Tauri/CEF dependencies and
   setup scripts, and the migration popup probe. The historical investigation and migration plans
   remain as evidence; production source and current developer documentation use only the
@@ -872,97 +875,149 @@ certification; those are Phase 9 release-support gates.
 - The final quality pass refreshed the registry audit and applied npm's non-breaking fixes. Runtime
   dependencies report no known vulnerabilities. Forge's development-only packaging graph retains
   24 advisories through its current `@electron/packager`, `@electron/rebuild`, and Inquirer
-  dependencies; npm offers only a forced Forge downgrade, so Phase 9/10 must resolve these through
-  compatible upstream releases rather than an untested override.
+  dependencies; npm offers only a forced Forge downgrade, so Phase 10 and the eventual product
+  release must resolve these through compatible upstream releases rather than an untested override.
 
-### Phase 9: Add portability, packaging, and platform certification gates
+### Phase 9: Prove branch portability without publishing
 
-Status: next. The local Linux shell is cut over; other operating systems and release packaging are
-not yet certified.
+Status: in progress. The release boundary, workflow, and local Linux diagnostics are implemented;
+the four-target hosted matrix has not run yet. Phases 9B and 9C are explicitly deferred.
 
-This is the last migration phase before release-readiness cleanup. It is intentionally not a
-prerequisite for the local Phase 8 shell cutover. Until it is complete, Electron packages for
-unavailable systems are build artifacts, not supported releases.
+The 3D app is mid-roadmap and is not a release candidate. This phase proves that its Electron and
+Rust boundary can build on the target operating systems without modifying, invoking, or competing
+with `.github/workflows/nightly.yml` or `.github/workflows/release.yml`. Workflow artifacts are
+short-lived diagnostic outputs, not releases.
 
-#### Deliverables
+#### Phase 9A: Isolated portability probes
 
-- A hosted CI matrix for Linux x86-64, Windows x86-64, macOS x86-64, and macOS arm64.
-- Per-target Rust host binaries paired with Electron packages of the same OS and architecture.
-- Unsigned artifacts with package-resource inspections, checksums, reproducible build instructions,
-  and honest documentation of platform trust warnings.
-- Real packaged-run certification records for each available platform and display backend.
+##### Deliverables
 
-#### Task checklist
+- An explicit cargo-dist exclusion for `holtburger-3d-host` so the sidecar cannot appear as a
+  standalone application in canonical releases.
+- A dedicated `holtburger-3d-portability.yml` workflow with read-only repository permissions,
+  relevant path filters, and a push trigger limited to `probe/3d-electron-portability`.
+- Native build/package jobs for Linux x86-64, Windows x86-64, macOS x86-64, and macOS arm64.
+- Short-lived artifacts named as experimental portability probes, paired with package-content and
+  host-protocol evidence.
 
+##### Task checklist
+
+- [x] Exclude `holtburger-3d-host` from cargo-dist. Run `dist plan` and assert that it proposes no
+      host archive, installer, announcement, or release asset; Electron Forge remains the sole owner
+      of bundling the sidecar with the 3D application.
+- [x] Add the dedicated workflow without editing the canonical nightly or tag-release workflows.
+      Grant only `contents: read`; do not grant write permissions, consume release secrets, create or
+      move tags, create GitHub Releases, publish packages, or use a release/deployment environment.
+- [x] Limit automatic triggers to relevant paths on the dedicated
+      `probe/3d-electron-portability` branch. Do not add pull-request, schedule, or tag triggers.
+      Name jobs and artifacts `holtburger-3d-portability-*` so they cannot be mistaken for canonical
+      CLI outputs.
 - [ ] Build the Rust sidecar on the corresponding hosted OS runner, natively where the required
-      architecture is available and with an explicitly tested same-OS cross-build otherwise; do
-      not place an architecture-mismatched binary into an Electron package.
+      architecture is available and with an explicitly tested same-OS cross-build otherwise; do not
+      place an architecture-mismatched binary into an Electron package.
 - [ ] Run Rust host tests, TypeScript checks, Electron-main tests, and a real subprocess protocol
-      integration test on every target. The subprocess test must use a checked-in fixture-backed or
-      explicitly no-content host path; it must not depend on a developer's untracked production DAT
-      archive.
-- [ ] Package the frontend and verify the expected host executable and static assets are present at
-      the path resolved by Electron main.
-- [ ] Launch the packaged app and complete a minimal handshake/`host_status`/shutdown smoke test on
-      each runner where the runner provides a usable desktop session, using the same checked-in
-      fixture-backed or no-content startup path. Record runner limitations rather than converting
-      an unrun GUI test into a pass.
-- [ ] Upload packages as internal artifacts. Do not publish them as supported releases yet.
-- [ ] Generate checksums and document how users can verify and build the unsigned artifacts from
-      source. Do not require paid Windows signing or Apple Developer Program membership.
-- [ ] Keep installer-format choices isolated from application runtime code. Initial support may use
-      portable archives while the final Windows installer, macOS disk image, and Linux package
-      policy is decided.
-- [ ] On Windows x86-64, verify install/uninstall or archive launch, popup and context-menu input,
-      keyboard/mouse capture, WebGL/GPU identity, DPI changes, audio, workers, content discovery,
-      host crash/quit cleanup, and representative Explorer/client flows.
-- [ ] On macOS arm64 and either macOS x86-64 hardware or the chosen universal-build strategy,
-      verify the equivalent behaviors plus application focus/menu conventions, Retina coordinates,
-      app-bundle sidecar execution, and the documented Gatekeeper launch procedure for an unsigned
-      package.
-- [ ] Manually exercise representative renderer and streaming scenarios on each OS. Gather
-      targeted measurements when behavior appears questionable rather than expecting Linux timings
-      or hosted-runner numbers to transfer.
+      integration test on every target. Use a checked-in fixture-backed or explicit no-content host
+      path rather than a developer's untracked production DAT archive.
+- [ ] Run Electron Forge `package`, not a public-release command, and verify the expected host
+      executable and static assets at the paths resolved by Electron main.
+- [ ] Complete a minimal handshake/`host_status`/shutdown smoke test wherever the hosted runner
+      provides a usable desktop session. Record runner limitations rather than converting an unrun
+      GUI test into a pass.
+- [ ] Upload packaged directories only as short-retention workflow artifacts for diagnostics and
+      eventual manual testing. Label every artifact and workflow summary experimental, unsupported,
+      and unverified on real hardware.
+
+##### Acceptance criteria
+
+- `dist plan` does not contain `holtburger-3d-host`; the canonical cargo-dist release surface is
+  unchanged by the Electron sidecar.
+- The dedicated workflow has no publication capability and does not alter or depend on the
+  canonical nightly or release workflows.
+- Every target builds, passes the applicable protocol checks, and produces a package containing the
+  matching native host executable. Missing GUI execution is reported as unverified, not passed.
+- Phase 10 can proceed after Phase 9A; unavailable hardware and product-release decisions do not
+  hold migration cleanup hostage.
+
+#### Phase 9B: Deferred real-machine certification
+
+Status: deferred until matching hardware is available and the 3D product is mature enough for the
+result to remain meaningful.
+
+- [ ] On Windows x86-64, verify archive launch, popup and context-menu input, keyboard/mouse capture,
+      WebGL/GPU identity, DPI changes, audio, workers, content discovery, host crash/quit cleanup,
+      and representative Explorer/client flows.
+- [ ] On macOS arm64 and either macOS x86-64 hardware or the chosen universal-build strategy, verify
+      equivalent behavior plus application focus/menu conventions, Retina coordinates, app-bundle
+      sidecar execution, and the Gatekeeper launch procedure for an unsigned package.
 - [ ] Test Linux under native Wayland and X11/XWayland where available, including high-DPI and
-      multi-monitor behavior. Accept documented Wayland window-management restrictions only if no
-      named Holtburger workflow depends on them.
+      multi-monitor behavior.
 - [ ] Record OS version, architecture, GPU, display scaling, package type, and exact tested build for
-      every certification result.
-- [ ] File platform-specific failures against the owning shell, host lifecycle, renderer, audio, or
-      packaging layer; do not add broad platform conditionals before locating the boundary.
+      every result. File failures against the owning shell, lifecycle, renderer, audio, or packaging
+      layer rather than adding broad platform conditionals first.
 
-#### Acceptance criteria
+#### Phase 9C: Deferred product-release integration
 
-- Every target builds, passes protocol tests, and produces a package containing the correct native
-  host executable. Any platform without an automated packaged-launch result is visibly marked
-  unverified.
-- Windows, macOS, and Linux each have a real packaged-run certification record covering native
-  input, WebGL, content, audio, IPC, lifecycle, and packaging before that platform is advertised as
-  supported.
-- Published artifacts include checksums, source-build instructions, and accurate Windows
-  SmartScreen and macOS Gatekeeper guidance. The project does not imply a verified publisher
-  identity for unsigned builds.
-- CI and release documentation distinguish automated build success from real-machine verification,
-  and known platform divergences have a named affected workflow and disposition.
+Status: deferred to the 3D product-release roadmap; it is not part of completing the Electron
+migration on `3d-next`.
+
+- [ ] Decide public distribution formats and whether macOS uses separate or universal packages.
+- [ ] Decide how a release-ready 3D application participates in the canonical publishing strategy.
+      Do not create a parallel publisher or extend the CLI workflows before that product decision.
+- [ ] Generate public checksums and reproducible build instructions, and document Windows
+      SmartScreen and macOS Gatekeeper behavior for unsigned artifacts.
+- [ ] Revisit free signing programs if useful. Paid Windows signing and Apple Developer Program
+      membership are not release requirements for this open-source project.
 
 #### Decisions and course corrections
 
-- Portability packaging and cross-platform certification were moved after the local Phase 8 shell
-  cutover so they cannot block parallel frontend work. This phase still gates platform support and
-  public release claims.
-- Paid Windows code signing and Apple Developer Program membership are not release requirements for
-  this open-source project. Initial releases remain unsigned and provide checksums, reproducible
-  build instructions, and platform-warning guidance. Free signing for qualifying open-source
-  projects may be adopted later, but is optional and must not block releases.
-- Automated hosted-runner work can proceed without access to every target machine. Windows and
-  macOS remain explicitly unverified until a real system is available for the manual certification
-  checklist; lack of current hardware does not block other development or unsigned package builds.
+- The original Phase 9 incorrectly coupled migration portability evidence to public release
+  readiness. The 3D app exists only on the mid-roadmap `3d-next` line, while the main tree already
+  owns canonical CLI publication. Phase 9A is therefore a read-only, branch-scoped CI probe;
+  certification and publication are separate deferred product work.
+- The probe runs only from `probe/3d-electron-portability`, based on the current local `3d-next`
+  head. It has no pull-request trigger, so ordinary `3d-next` development does not consume the
+  four-platform matrix or acquire an accidental release-shaped gate. The probe branch can be
+  deleted after its evidence is recorded without moving or publishing `3d-next`.
+- A local cargo-dist 0.30.3 plan proved that the new workspace member currently appears as a
+  standalone `holtburger-3d-host` release with archives, installers, and diagnostic binaries. The
+  explicit cargo-dist exclusion is a release-isolation fix, not optional packaging polish. After
+  adding `[package.metadata.dist] dist = false`, the planned applications are again only
+  `holtburger-cli`, `holtburger-tools`, and `holtburger-debug-harness`; no host-prefixed artifact or
+  announcement survives the workflow's `jq` assertion.
+- The subprocess smoke uses the production `SidecarHostClient` and release host binary with
+  `HOLTBURGER_DATS` pointed at a fresh empty directory. An empty repository is an existing explicit
+  no-content composition path: it exercises real discovery, handshake, `host_status`, shutdown
+  acknowledgement, and process exit without adding a test-only host mode or retaining an external
+  DAT fixture.
+- Package inspection uses the maintained `@electron/asar` API as an explicit dev dependency rather
+  than relying on Forge's transitive copy. The app now declares Node 22.12 or newer, matching that
+  tool's floor, while hosted probes use Node 24. The inspector verifies both app entry points,
+  compiled frontend JavaScript, Electron main/preload/protocol output, the entry-path helper, and
+  the native sidecar at the exact `process.resourcesPath` layout Electron main consumes.
+- Local Linux evidence passes the real sidecar smoke and inspection of an x64 package containing an
+  8,204,136-byte host and 990 ASAR entries after a clean `npm ci`. These values prove only that the
+  files were non-empty and enumerated; they are not portable size budgets.
+- The local Phase 9A gate also passes Prettier for the app, plan, and workflow; Svelte and all
+  TypeScript configurations with zero diagnostics; ESLint; knip; 1,481 Vitest tests; Rustfmt; 233
+  host tests across all targets; Clippy with warnings denied; a fresh Electron Forge package; and
+  the parsed workflow policy assertion. The canonical nightly and release workflow files have no
+  diff.
+- No packaged GUI launch is claimed on hosted runners. The workflow runs the real sidecar protocol
+  on every target and labels GUI, GPU, input, audio, scaling, and OS launch behavior unverified in
+  its summary. Adding synthetic window automation would not replace Phase 9B real-machine evidence.
+- The native matrix and artifact upload configuration cannot be accepted from local Linux alone.
+  Its four target-specific checkboxes and Phase 9A acceptance remain open until the workflow runs
+  from `probe/3d-electron-portability` and supplies authoritative hosted-runner results.
+- Automated hosted-runner work can proceed without access to every target machine, but it proves
+  build and package structure only. Windows and macOS remain unverified until Phase 9B runs.
 
-### Phase 10: Cleanup and release-readiness review
+### Phase 10: Finish migration cleanup and handoff
+
+Status: follows Phase 9A and does not wait for deferred certification or public distribution.
 
 #### Task checklist
 
-- [ ] Remove temporary protocol probes, duplicate adapters, migration-only feature flags, and stale
+- [x] Remove temporary protocol probes, duplicate adapters, migration-only feature flags, and stale
       package scripts.
 - [ ] Profile IPC and renderer paths with diagnostics disabled; remove instrumentation that has no
       continuing consumer.
@@ -979,7 +1034,7 @@ unavailable systems are build artifacts, not supported releases.
 
 - The final tree looks intentionally Electron-based rather than migrated from Tauri in layers.
 - No temporary dual-shell mechanism or unused transport abstraction survives.
-- All Definition of Done items below are satisfied.
+- All Migration Definition of Done items below are satisfied.
 
 #### Decisions and course corrections
 
@@ -996,40 +1051,46 @@ unavailable systems are build artifacts, not supported releases.
 | Host crashes strand Electron promises or processes.                         | Supervise one child, reject all pending requests on exit, expose failure visibly, implement orderly shutdown with a bounded forced termination, and test crash/reload/quit paths.                                                                                  |
 | A compromised renderer reaches Node or arbitrary host operations.           | Enable isolation and sandboxing, disable Node integration, expose an allowlisted typed preload API, restrict navigation/window creation, and validate every request in Rust.                                                                                       |
 | CI builds create false confidence without real hardware input/GPU behavior. | Separate automated portability gates from manual certification and label untested artifacts unsupported.                                                                                                                                                           |
-| macOS rejects or warns about the unsigned app or bundled sidecar.           | Build/package matching architectures on native runners, inspect bundle contents, document the Gatekeeper launch procedure, and test the unsigned package on a real Mac before advertising support.                                                                  |
-| Windows warns about or quarantines the unsigned sidecar.                    | Publish checksums and source-build instructions, avoid shell spawning and self-modifying behavior, preserve stderr diagnostics, document SmartScreen behavior, and test the packaged candidate on a real Windows installation.                                      |
+| The 3D sidecar leaks into canonical cargo-dist releases.                    | Exclude `holtburger-3d-host` from cargo-dist, assert its absence from `dist plan`, and keep Electron packaging in a separate read-only workflow with no release triggers or permissions.                                                                           |
+| macOS rejects or warns about the unsigned app or bundled sidecar.           | Build/package matching architectures on native runners, inspect bundle contents, document the Gatekeeper launch procedure, and test the unsigned package on a real Mac before advertising support.                                                                 |
+| Windows warns about or quarantines the unsigned sidecar.                    | Publish checksums and source-build instructions, avoid shell spawning and self-modifying behavior, preserve stderr diagnostics, document SmartScreen behavior, and test the packaged candidate on a real Windows installation.                                     |
 | Wayland limits programmatic window operations.                              | Keep one ordinary user-controlled window, test native Wayland and XWayland, and add no window-position-dependent UX without a proven requirement.                                                                                                                  |
-| Electron increases bundle size or memory beyond an acceptable level.        | Compare like-for-like packages and representative working sets against the existing bundled CEF runtime during the Phase 9 release-support gate; do not turn one noisy Linux sample into a premature threshold.                                                    |
+| Electron increases bundle size or memory beyond an acceptable level.        | Compare like-for-like packages and representative working sets against the existing bundled CEF runtime when the 3D product approaches release; do not turn one noisy Linux sample into a premature threshold.                                                     |
 | Electron/Chromium security maintenance becomes neglected.                   | Document an explicit dependency-update cadence and make dependency/version reporting part of release readiness.                                                                                                                                                    |
 
-## Definition of Done
+## Migration Definition of Done
 
-- [ ] Electron owns the only visible top-level application window.
-- [ ] The Svelte/WebGL frontend and Rust-owned behavior retain functional parity.
-- [ ] Physical dropdowns, context menus, and DevTools work in the available Linux environment.
-- [ ] All host traffic crosses one typed, isolated frontend boundary.
-- [ ] Binary assets remain binary and pass byte-parity tests.
+- [x] Electron owns the only visible top-level application window.
+- [x] The Svelte/WebGL frontend and Rust-owned behavior retain functional parity.
+- [x] Physical dropdowns, context menus, and DevTools work in the available Linux environment.
+- [x] All host traffic crosses one typed, isolated frontend boundary.
+- [x] Binary assets remain binary and pass byte-parity tests.
 - [ ] Host errors, incompatibility, crashes, and shutdown are explicit and tested.
-- [ ] Tauri, CEF, `src-tauri`, and migration-only dual-shell code are removed from production.
-- [ ] Browser harnesses remain independent and representative renderer checks pass.
+- [x] Tauri, CEF, `src-tauri`, and migration-only dual-shell code are removed from production.
+- [x] Browser harnesses remain independent and representative renderer checks pass.
 - [ ] Linux x86-64, Windows x86-64, macOS x86-64, and macOS arm64 build/package/protocol gates pass
       in hosted CI.
-- [ ] Real packaged applications are manually certified on Linux, Windows, and macOS before those
-      platforms are advertised as supported.
-- [ ] Public unsigned artifacts include checksums, reproducible build instructions, and accurate
-      Windows SmartScreen and macOS Gatekeeper guidance.
 - [ ] Formatting, checks, lint, Clippy with warnings denied, unit/integration tests, runtime
       verification, and package inspection pass.
 - [ ] Documentation describes development, content discovery, packaging, platform support status,
       and sidecar diagnostics without stale Tauri terminology.
 
+## Deferred 3D Release Gates
+
+- [ ] Real packaged applications are manually certified on Linux, Windows, and macOS before those
+      platforms are advertised as supported.
+- [ ] Public unsigned artifacts include checksums, reproducible build instructions, and accurate
+      Windows SmartScreen and macOS Gatekeeper guidance.
+- [ ] The release-ready 3D app is integrated into the repository's chosen canonical publishing
+      strategy without disrupting or silently superseding CLI releases.
+
 ## Open Questions
 
-These questions do not block the Linux vertical slice. They must be resolved before their named
-release phase.
+These questions do not block the Electron migration. They belong to the deferred 3D product-release
+roadmap.
 
 1. Which public distribution formats are required: portable archives only, or also a Windows
-   installer, macOS disk image, and Linux deb/rpm/AppImage? Resolve during Phase 9.
+   installer, macOS disk image, and Linux deb/rpm/AppImage?
 2. Is Windows arm64 a supported target? It is not in the current Rust release matrix and is excluded
    from this plan until a named user/device requirement exists.
 3. Will macOS ship separate x86-64/arm64 applications or one universal application? Decide from CI

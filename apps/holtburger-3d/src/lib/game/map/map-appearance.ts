@@ -31,7 +31,6 @@ export const MAP_ROAD_COLOR = colorVector(MAP_TUNING.colors.road);
 export const MAP_ROAD_TINT_STRENGTH = MAP_TUNING.colors.roadTintStrength;
 export const MAP_ROAD_CASING_PIXELS = MAP_TUNING.colors.roadCasingPixels;
 export const MAP_ROAD_CASING_STRENGTH = MAP_TUNING.colors.roadCasingStrength;
-export const MAP_ROAD_EDGE_COVERAGE = MAP_TUNING.colors.roadEdgeCoverage;
 export const MAP_IMPASSABLE_COLOR = colorVector(MAP_TUNING.colors.impassable);
 export const MAP_IMPASSABLE_HATCH_PERIOD_PIXELS =
 	MAP_TUNING.colors.impassableHatchPeriodPixels;

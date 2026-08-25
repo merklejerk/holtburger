@@ -29,7 +29,11 @@ if (!hostMetadata.isFile() || hostMetadata.size === 0) {
 }
 
 await access(archivePath, constants.R_OK);
-const archiveEntries = new Set(listPackage(archivePath, { isPack: false }));
+const archiveEntries = new Set(
+	listPackage(archivePath, { isPack: false }).map((entry) =>
+		entry.replaceAll("\\", "/"),
+	),
+);
 for (const requiredEntry of [
 	"/package.json",
 	"/dist/client/index.html",

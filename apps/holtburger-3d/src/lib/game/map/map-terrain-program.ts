@@ -117,31 +117,31 @@ float roadEdgeDistance(uint mask, vec2 cell) {
 	bool northeast = (mask & 4u) != 0u;
 	bool northwest = (mask & 8u) != 0u;
 	// Nothing claims this point yet, and a cell is never wider than itself.
-	float distance = uTileLength;
+	float nearest = uTileLength;
 	// An edge with road at both ends carries a band along it.
-	if (southwest && southeast) distance = min(distance, cell.y);
-	if (southeast && northeast) distance = min(distance, uTileLength - cell.x);
-	if (northeast && northwest) distance = min(distance, uTileLength - cell.y);
-	if (northwest && southwest) distance = min(distance, cell.x);
+	if (southwest && southeast) nearest = min(nearest, cell.y);
+	if (southeast && northeast) nearest = min(nearest, uTileLength - cell.x);
+	if (northeast && northwest) nearest = min(nearest, uTileLength - cell.y);
+	if (northwest && southwest) nearest = min(nearest, cell.x);
 	// An opposite pair is joined along its diagonal rather than left as two loose corners. This
 	// single branch is the connectivity a per-triangle interpolation could not express at all.
-	if (mask == 0x5u) distance = min(distance, abs(cell.x - cell.y));
-	if (mask == 0xAu) distance = min(distance, abs(cell.x + cell.y - uTileLength));
+	if (mask == 0x5u) nearest = min(nearest, abs(cell.x - cell.y));
+	if (mask == 0xAu) nearest = min(nearest, abs(cell.x + cell.y - uTileLength));
 	// A corner with neither neighbour roaded keeps a wedge of its own. Where a diagonal band also
 	// applies its wedges fall inside that band, so the two never disagree.
 	if (southwest && !southeast && !northwest) {
-		distance = min(distance, cell.x + cell.y);
+		nearest = min(nearest, cell.x + cell.y);
 	}
 	if (southeast && !northeast && !southwest) {
-		distance = min(distance, uTileLength - cell.x + cell.y);
+		nearest = min(nearest, uTileLength - cell.x + cell.y);
 	}
 	if (northeast && !northwest && !southeast) {
-		distance = min(distance, 2.0 * uTileLength - cell.x - cell.y);
+		nearest = min(nearest, 2.0 * uTileLength - cell.x - cell.y);
 	}
 	if (northwest && !southwest && !northeast) {
-		distance = min(distance, uTileLength + cell.x - cell.y);
+		nearest = min(nearest, uTileLength + cell.x - cell.y);
 	}
-	return distance - uRoadWidth;
+	return nearest - uRoadWidth;
 }
 
 void main() {
@@ -161,8 +161,9 @@ void main() {
 	float halfPixel = 0.5 * uMetersPerPixel;
 	float roadFill = 1.0 - smoothstep(-halfPixel, halfPixel, roadDistance);
 	float casingWidth = uRoadCasingPixels * uMetersPerPixel;
-	float roadCasing =
-		1.0 - smoothstep(casingWidth - halfPixel, casingWidth + halfPixel, roadDistance) - roadFill;
+	float withinCasing =
+		1.0 - smoothstep(casingWidth - halfPixel, casingWidth + halfPixel, roadDistance);
+	float roadCasing = withinCasing - roadFill;
 	vec3 color = mix(vBaseColor, uRoadColor, roadFill * uRoadTintStrength);
 	color = mix(color, uInkColor, roadCasing * uRoadCasingStrength);
 	// Exaggerate the surface for shading only. Passability was classified on the CPU from the real

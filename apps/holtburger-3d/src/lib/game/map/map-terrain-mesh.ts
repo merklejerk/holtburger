@@ -11,10 +11,10 @@ import { RETAIL_WALKABLE_NORMAL_UP } from "../walkability";
 /**
  * One landblock's terrain reduced to what an overhead map draws.
  *
- * Expanded per triangle rather than indexed, because passability is a fact about one face and must
- * not be shared with the neighbouring face across a vertex. Everything else here is genuinely
- * per-corner and interpolates: a hillside, a road edge, and the boundary between two kinds of
- * ground are all continuous.
+ * Expanded per triangle rather than indexed, because two of these facts belong to something other
+ * than a vertex and must not be shared across one: passability to the face, and the road mask to
+ * the cell. Positions, normals and terrain types stay per-corner and interpolate, because a
+ * hillside and the boundary between two kinds of ground are both genuinely continuous.
  */
 export interface MapTerrainMesh {
 	/** Landblock-local positions, x east and z north-negative, three per triangle. */
@@ -34,24 +34,25 @@ export interface MapTerrainMesh {
 	 * The four-corner road mask of the cell a triangle belongs to, repeated on each of its corners.
 	 *
 	 * Bits run south-west, south-east, north-east, north-west, matching how retail packs the road
-	 * bits of a landscape pcode. Roads are a *cell* fact there: `selectRoadOverlays` reduces the
-	 * four corners to one mask and picks an authored alpha shape for it, so no triangulation can
-	 * break a road apart.
+	 * bits of a landscape pcode. A road is a *cell* fact there and never a vertex one:
+	 * `CLandBlock::on_road` reads all four corners together to decide its shape, and
+	 * `selectRoadOverlays` reduces the same four to one authored alpha shape. So the mask travels
+	 * whole and the shader works the road out from it.
 	 *
-	 * The map used to carry per-corner coverage and interpolate it across the triangle, which made
-	 * road connectivity depend on which way retail cut that cell — a seeded value that knows nothing
-	 * about roads. Where a road stepped diagonally its two corners landed in different triangles
-	 * half the time, with zero coverage along the seam between them, so the road broke. A census
-	 * over the region found 2,661 diagonal-pair cells of which 1,319 were severed that way — 49.6%,
-	 * a coin flip — which is why a diagonal road drew as a dashed line.
+	 * Carrying per-corner coverage and interpolating it across the triangle instead is not merely
+	 * coarser, it is wrong: connectivity then depends on which way retail cut the cell, a seeded
+	 * value that knows nothing about roads. A census over the region found 2,661 cells whose road
+	 * runs corner to corner, of which 1,319 — 49.6%, a coin flip — had it severed by the cut, which
+	 * is what drew diagonal roads as dashed lines.
 	 */
 	readonly roadMask: Uint8Array;
 	/**
 	 * Where each corner sits in its own cell, x east and y north, each 0 or 1.
 	 *
-	 * Interpolating this rather than the coverage itself is what moves the road decision from the
-	 * triangle to the cell: the fragment stage recovers its position inside the cell and evaluates
-	 * the mask there.
+	 * The mask says what shape a cell's road is; this says where in that cell a fragment landed,
+	 * which is what the shader needs to evaluate the shape. The recovery is exact rather than
+	 * approximate: the map projects orthographically and each triangle's corners map affinely onto
+	 * its cell, so a fragment finds its true position whatever the ground beneath it is doing.
 	 */
 	readonly cellUv: Float32Array;
 	/**
@@ -146,7 +147,8 @@ export function buildMapTerrainMesh(
 		// An entirely-water landblock is impassable whatever shape its bed is, so the geometric
 		// test only has to answer for the landblocks a body could otherwise stand in.
 		const facePassable =
-			!entirelyWater && isFaceWalkable(face.map((corner) => corner.vertex))
+			!entirelyWater &&
+			isFaceWalkable([face[0].vertex, face[1].vertex, face[2].vertex])
 				? 1
 				: 0;
 		for (const corner of face) {
@@ -207,9 +209,10 @@ export function buildMapTerrainMesh(
  * The geometric face normal, against the same retail threshold the host filters interior floors by,
  * so indoors and out the map means one thing by "too steep".
  */
-function isFaceWalkable(corners: readonly TerrainGridVertex[]): boolean {
+function isFaceWalkable(
+	corners: readonly [TerrainGridVertex, TerrainGridVertex, TerrainGridVertex],
+): boolean {
 	const [a, b, c] = corners;
-	if (!a || !b || !c) throw new Error("A terrain face needs three corners.");
 	const abx = b.x - a.x;
 	const aby = b.y - a.y;
 	const abz = b.z - a.z;

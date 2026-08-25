@@ -111,16 +111,20 @@ function artifact(layer: LandblockLayerKind): LandblockLayerCommit {
 			layer,
 		};
 	}
+	const source = {
+		dynamicSources: [],
+		landblockId,
+		staticResidents: [],
+	};
+	if (layer === LandblockLayerKind.Buildings) {
+		return {
+			commit: { source: { ...source, kind: layer, mapBlockers: new Map() } },
+			landblockId,
+			layer,
+		};
+	}
 	return {
-		commit: {
-			source: {
-				dynamicSources: [],
-				mapBlockers: new Map(),
-				kind: layer,
-				landblockId,
-				staticResidents: [],
-			},
-		},
+		commit: { source: { ...source, kind: layer } },
 		landblockId,
 		layer,
 	};

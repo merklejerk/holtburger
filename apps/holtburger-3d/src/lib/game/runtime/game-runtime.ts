@@ -2302,15 +2302,8 @@ export class GameRuntime {
 			this.#realizeEnvCellLayer(ownerId, artifact, revision);
 			return;
 		}
-		if (isOutdoorStaticLayer(artifact.layer) && "source" in artifact.commit) {
-			this.#realizeOutdoorStaticLayer(
-				ownerId,
-				artifact as typeof artifact & {
-					readonly layer: OutdoorStaticLayerKind;
-					readonly commit: import("../commit/types").StaticObjectLayerSourceCommit;
-				},
-				revision,
-			);
+		if (isOutdoorStaticLayer(artifact.layer)) {
+			this.#realizeOutdoorStaticLayer(ownerId, artifact, revision);
 			return;
 		}
 		throw new Error(`Layer ${artifact.layer} has no publication contract.`);
@@ -2338,18 +2331,12 @@ export class GameRuntime {
 
 	#realizeOutdoorStaticLayer(
 		ownerId: OwnerId,
-		artifact: {
-			readonly landblockId: LandblockId;
-			readonly layer: OutdoorStaticLayerKind;
-			readonly commit: import("../commit/types").StaticObjectLayerSourceCommit;
-		},
+		artifact: Extract<
+			LandblockLayerCommit,
+			{ readonly layer: OutdoorStaticLayerKind }
+		>,
 		revision: SceneInterestRevision,
 	): void {
-		if (artifact.commit.source.kind !== artifact.layer) {
-			throw new Error(
-				`Static realization layer ${artifact.layer} does not match source ${artifact.commit.source.kind}.`,
-			);
-		}
 		const factCollectionStartedAt = performance.now();
 		const textureRequirements = collectStaticObjectTextureDependencies(
 			artifact.commit.source,
@@ -2375,7 +2362,9 @@ export class GameRuntime {
 				})
 				.then(async (result) => {
 					if (result.kind !== "published") return;
-					this.#mapGeometry.installOutdoorStatic(artifact.commit.source);
+					if (artifact.commit.source.kind === LandblockLayerKind.Buildings) {
+						this.#mapGeometry.installBuildings(artifact.commit.source);
+					}
 					this.#staticObjectLayerDiagnostics.set(ownerId, {
 						...(result.geometry?.geometryDiagnostics ??
 							EMPTY_STATIC_OBJECT_GEOMETRY_DIAGNOSTICS),
@@ -2705,7 +2694,11 @@ export class GameRuntime {
 		} else {
 			this.#staticObjects.evict(ownerId, revision);
 		}
-		this.#mapGeometry.evict(landblockId, layer);
+		if (layer === LandblockLayerKind.Buildings) {
+			this.#mapGeometry.evictBuildings(landblockId);
+		} else if (layer === LandblockLayerKind.EnvCells) {
+			this.#mapGeometry.evictInterior(landblockId);
+		}
 		this.#authoredDynamicResidents.delete(ownerId);
 		this.#staticObjectLayerDiagnostics.delete(ownerId);
 		this.#envCellLayerDiagnostics.delete(ownerId);

@@ -6,7 +6,7 @@ import type {
 } from "../../assets/landblock-source-batch";
 import { LandblockLayerKind } from "../runtime/scene-interest";
 import type {
-	ResolvedObjectLayerSource,
+	ResolvedOutdoorStaticLayerSource,
 	ResolvedTerrainLayerSource,
 } from "../resolution/landblock-layer";
 import { StandardCommitPipeline } from "./pipeline";
@@ -19,7 +19,7 @@ describe("StandardCommitPipeline", () => {
 			kind: LandblockLayerKind.Buildings,
 			landblockId: "0xda55ffff",
 			staticResidents: [],
-		} as unknown as ResolvedObjectLayerSource;
+		} as unknown as ResolvedOutdoorStaticLayerSource;
 		const pipeline = await StandardCommitPipeline.build({
 			sourceBatch: new SourceBatch(source),
 		});
@@ -51,11 +51,11 @@ describe("StandardCommitPipeline", () => {
 			kind: LandblockLayerKind.Buildings,
 			landblockId,
 			staticResidents: [],
-		} as unknown as ResolvedObjectLayerSource;
+		} as unknown as ResolvedOutdoorStaticLayerSource;
 		const sourceBatch = new RecordingSourceBatch(
 			new Map<
 				LandblockSourceLayer,
-				ResolvedTerrainLayerSource | ResolvedObjectLayerSource | null
+				ResolvedTerrainLayerSource | ResolvedOutdoorStaticLayerSource | null
 			>([
 				[LandblockLayerKind.Terrain, terrain],
 				[LandblockLayerKind.Buildings, buildings],
@@ -91,7 +91,7 @@ describe("StandardCommitPipeline", () => {
 		const sourceBatch = new RecordingSourceBatch(
 			new Map<
 				LandblockSourceLayer,
-				ResolvedTerrainLayerSource | ResolvedObjectLayerSource | null
+				ResolvedTerrainLayerSource | ResolvedOutdoorStaticLayerSource | null
 			>([
 				[LandblockLayerKind.Terrain, terrain],
 				[LandblockLayerKind.Buildings, buildings],
@@ -146,18 +146,19 @@ function outdoorSource(
 		| LandblockLayerKind.Buildings
 		| LandblockLayerKind.Objects
 		| LandblockLayerKind.Generated,
-): ResolvedObjectLayerSource {
-	return {
+): ResolvedOutdoorStaticLayerSource {
+	const source = {
 		dynamicSources: [],
-		mapBlockers: new Map(),
-		kind,
 		landblockId,
 		staticResidents: [],
 	};
+	return kind === LandblockLayerKind.Buildings
+		? { ...source, kind, mapBlockers: new Map() }
+		: { ...source, kind };
 }
 
 class SourceBatch implements LandblockSourceBatchSource {
-	constructor(private readonly source: ResolvedObjectLayerSource) {}
+	constructor(private readonly source: ResolvedOutdoorStaticLayerSource) {}
 	async loadLandblockSourceBatch(
 		landblockId: string,
 		layers: ReadonlySet<LandblockSourceLayer>,
@@ -183,7 +184,7 @@ class RecordingSourceBatch implements LandblockSourceBatchSource {
 	constructor(
 		private readonly records: ReadonlyMap<
 			LandblockSourceLayer,
-			ResolvedTerrainLayerSource | ResolvedObjectLayerSource | null
+			ResolvedTerrainLayerSource | ResolvedOutdoorStaticLayerSource | null
 		>,
 	) {}
 

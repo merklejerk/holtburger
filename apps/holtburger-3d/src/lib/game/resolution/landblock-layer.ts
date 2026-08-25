@@ -265,30 +265,43 @@ export interface ResolvedTerrainLayerSource {
 	readonly presentation: TerrainPresentationSource;
 }
 
-/** Outdoor static layer containing residents backed by shared object definitions. */
-export interface ResolvedObjectLayerSource {
-	readonly kind:
-		| LandblockLayerKind.Buildings
-		| LandblockLayerKind.Objects
-		| LandblockLayerKind.Generated;
+/** Fields shared by outdoor static layers backed by object presentations. */
+interface ResolvedOutdoorStaticLayerSourceFields<
+	TKind extends OutdoorStaticLayerKind,
+> {
+	readonly kind: TKind;
 	readonly landblockId: LandblockId;
 	readonly staticResidents: readonly ResolvedObjectResident[];
 	readonly dynamicSources: readonly AuthoredDynamicSource[];
+}
+
+/** Building source with the derived blocker geometry consumed by the overhead map. */
+export interface ResolvedBuildingLayerSource extends ResolvedOutdoorStaticLayerSourceFields<LandblockLayerKind.Buildings> {
 	/**
 	 * Host-derived overhead-map blocker silhouettes keyed by presentation source identity.
 	 *
-	 * Buildings alone derive these, so this is empty for the object and generated layers. Keyed by
-	 * source rather than resident because one building model is placed many times and the
-	 * silhouette is identical for every placement; the key is the resident's
-	 * `presentation.sourceAssetId`, so the join needs no parsing.
+	 * Keyed by source rather than resident because one building model is placed many times and the
+	 * silhouette is identical for every placement; the key is the resident's presentation identity,
+	 * so the join needs no parsing.
 	 */
 	readonly mapBlockers: ReadonlyMap<string, ResolvedMapSurface>;
 }
 
-/** Outdoor-static source kinds admitted by shared geometry preparation and realization contracts. */
-export type ResolvedOutdoorStaticLayerSource = ResolvedObjectLayerSource & {
-	readonly kind: OutdoorStaticLayerKind;
-};
+/** Compiler-only constraint preventing scenery from masquerading as a map-geometry producer. */
+interface BlockerFreeMapSource {
+	readonly mapBlockers?: never;
+}
+
+/** Scenery source deliberately excluded from overhead-map geometry. */
+export type ResolvedSceneryLayerSource =
+	| (ResolvedOutdoorStaticLayerSourceFields<LandblockLayerKind.Objects> &
+			BlockerFreeMapSource)
+	| (ResolvedOutdoorStaticLayerSourceFields<LandblockLayerKind.Generated> &
+			BlockerFreeMapSource);
+
+/** Closed outdoor-static source union consumed by preparation and realization. */
+export type ResolvedOutdoorStaticLayerSource =
+	ResolvedBuildingLayerSource | ResolvedSceneryLayerSource;
 
 /** One EnvCell-owned resident partition after every transform is expressed in landblock space. */
 export interface ResolvedEnvCellStaticObjectSource {
@@ -342,5 +355,5 @@ export interface ResolvedEnvCellLayerSource {
 /** Canonical source union returned by the frontend layer resolver. */
 export type ResolvedLandblockLayerSource =
 	| ResolvedTerrainLayerSource
-	| ResolvedObjectLayerSource
+	| ResolvedOutdoorStaticLayerSource
 	| ResolvedEnvCellLayerSource;

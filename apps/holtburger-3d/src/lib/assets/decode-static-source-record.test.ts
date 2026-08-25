@@ -47,6 +47,37 @@ describe("decodeOutdoorStaticRecord", () => {
 		expect(source.kind).toBe(LandblockLayerKind.Objects);
 		expect(source.staticResidents).toHaveLength(1);
 		expect(source.dynamicSources).toHaveLength(1);
+		expect("mapBlockers" in source).toBe(false);
+	});
+
+	it("rejects a buildings record without its owned map-blocker contract", () => {
+		expect(() =>
+			decodeOutdoorStaticRecord(
+				buildResponse({ omitMapBlockers: true }),
+				LANDBLOCK_ID,
+				LandblockLayerKind.Buildings,
+			),
+		).toThrow("omitted map blocker metadata");
+	});
+
+	it("rejects a buildings record missing one static resident's blocker", () => {
+		expect(() =>
+			decodeOutdoorStaticRecord(
+				buildResponse({ mapBlockerSourceAssetId: "gfx-obj/missing" }),
+				LANDBLOCK_ID,
+				LandblockLayerKind.Buildings,
+			),
+		).toThrow("omitted map blocker gfx-obj/01000001");
+	});
+
+	it("rejects map blockers on a scenery record", () => {
+		expect(() =>
+			decodeOutdoorStaticRecord(
+				buildResponse({ includeMapBlockers: true, layer: "objects" }),
+				LANDBLOCK_ID,
+				LandblockLayerKind.Objects,
+			),
+		).toThrow("unexpectedly carries map blockers");
 	});
 
 	it("decodes a present empty Level 3 generated record", () => {
@@ -313,6 +344,9 @@ function buildResponse(
 		readonly lights?: readonly Record<string, unknown>[];
 		readonly placementFrames?: readonly Record<string, unknown>[];
 		readonly mapBlockerIndices?: readonly number[];
+		readonly mapBlockerSourceAssetId?: string;
+		readonly includeMapBlockers?: boolean;
+		readonly omitMapBlockers?: boolean;
 	} = {},
 ): Uint8Array {
 	const positions = Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0]);
@@ -463,10 +497,12 @@ function buildResponse(
 		],
 		textureDependencies: [],
 		mapBlockers:
-			layer === "buildings"
+			!options.omitMapBlockers &&
+			(layer === "buildings" || options.includeMapBlockers)
 				? [
 						{
-							sourceAssetId: "gfx-obj/01000001",
+							sourceAssetId:
+								options.mapBlockerSourceAssetId ?? "gfx-obj/01000001",
 							positionOffset: 0,
 							vertexCount: 3,
 							indexOffset: 0,

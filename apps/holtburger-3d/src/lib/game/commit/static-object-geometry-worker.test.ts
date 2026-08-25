@@ -252,23 +252,24 @@ describe("prepareStaticObjectGeometry", () => {
 		const buildingsSource = source([
 			resident("opaque", Mat4.identity(), new Vec3(1, 1, 1)),
 		]);
-		const objectsSource = {
-			...buildingsSource,
-			kind: LandblockLayerKind.Objects,
-		} satisfies ResolvedOutdoorStaticLayerSource;
+		const objects = objectsSource([
+			resident("opaque", Mat4.identity(), new Vec3(1, 1, 1)),
+		]);
 		const buildings = prepareStaticObjectGeometry({
 			layer: LandblockLayerKind.Buildings,
 			resourceNamespace: "static-install:shared" as const,
 			source: buildingsSource,
 		});
-		const objects = prepareStaticObjectGeometry({
+		const preparedObjects = prepareStaticObjectGeometry({
 			layer: LandblockLayerKind.Objects,
 			resourceNamespace: "static-install:shared" as const,
-			source: objectsSource,
+			source: objects,
 		});
 
-		expect(buildings?.geometry[0]?.key).not.toBe(objects?.geometry[0]?.key);
-		expect(objects?.geometry[0]?.key).toContain("objects-layer");
+		expect(buildings?.geometry[0]?.key).not.toBe(
+			preparedObjects?.geometry[0]?.key,
+		);
+		expect(preparedObjects?.geometry[0]?.key).toContain("objects-layer");
 	});
 
 	it("rejects a source routed through the wrong static layer", () => {
@@ -276,7 +277,7 @@ describe("prepareStaticObjectGeometry", () => {
 			prepareStaticObjectGeometry({
 				layer: LandblockLayerKind.Buildings,
 				resourceNamespace: "static-install:mismatch" as const,
-				source: { ...source([]), kind: LandblockLayerKind.Objects },
+				source: objectsSource([]),
 			}),
 		).toThrow("does not match source layer");
 	});
@@ -714,8 +715,21 @@ function generatedSource(
 	staticResidents: readonly ReturnType<typeof resident>[],
 ): ResolvedOutdoorStaticLayerSource {
 	return {
-		...source(staticResidents),
+		dynamicSources: [],
 		kind: LandblockLayerKind.Generated,
+		landblockId: "0xda55ffff",
+		staticResidents,
+	};
+}
+
+function objectsSource(
+	staticResidents: readonly ReturnType<typeof resident>[],
+): ResolvedOutdoorStaticLayerSource {
+	return {
+		dynamicSources: [],
+		kind: LandblockLayerKind.Objects,
+		landblockId: "0xda55ffff",
+		staticResidents,
 	};
 }
 

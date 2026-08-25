@@ -11,7 +11,7 @@ import { createLandblockWorldOrigin } from "../landblocks";
 import { AABB3, Mat4, Quat, Vec3 } from "../math/types";
 import type {
 	AuthoredDynamicSource,
-	ResolvedOutdoorStaticLayerSource,
+	ResolvedObjectResident,
 } from "../resolution/landblock-layer";
 import {
 	DEFAULT_FRAME_SETTINGS,
@@ -598,6 +598,8 @@ describe("GameRuntime view and interest control", () => {
 			PARTICLE_MESH_SOURCE,
 			null,
 		);
+		const availability: SceneAvailabilityEvent[] = [];
+		runtime.subscribeSceneAvailability((event) => availability.push(event));
 
 		runtime.updateSceneInterest(objectSceneInterest("0xda55ffff"));
 		pipeline.resolveNext([promotedObjectArtifact("0xda55ffff")]);
@@ -615,9 +617,12 @@ describe("GameRuntime view and interest control", () => {
 		expect(runtime.getStaticObjectRuntimeDiagnostics().layers).toEqual([
 			expect.objectContaining({
 				cullingGroup: LandblockLayerKind.Objects,
-				sceneNodeCount: 0,
+				sceneNodeCount: 1,
 			}),
 		]);
+		expect(availability).not.toContainEqual(
+			expect.objectContaining({ kind: "scene-content-failed" }),
+		);
 
 		await runtime.destroy();
 	});
@@ -644,6 +649,8 @@ describe("GameRuntime view and interest control", () => {
 			PARTICLE_MESH_SOURCE,
 			null,
 		);
+		const availability: SceneAvailabilityEvent[] = [];
+		runtime.subscribeSceneAvailability((event) => availability.push(event));
 
 		runtime.updateSceneInterest(generatedSceneInterest("0xda55ffff"));
 		pipeline.resolveNext([promotedGeneratedArtifact("0xda55ffff")]);
@@ -662,9 +669,12 @@ describe("GameRuntime view and interest control", () => {
 			expect.objectContaining({
 				cullingGroup: LandblockLayerKind.Generated,
 				layer: LandblockLayerKind.Generated,
-				sceneNodeCount: 0,
+				sceneNodeCount: 1,
 			}),
 		]);
+		expect(availability).not.toContainEqual(
+			expect.objectContaining({ kind: "scene-content-failed" }),
+		);
 
 		await runtime.destroy();
 	});
@@ -1527,18 +1537,49 @@ function promotedStaticArtifact(
 		scale: new Vec3(1, 1, 1),
 		setupId: "0x02000001",
 	};
+	const staticResident: ResolvedObjectResident = {
+		...promotedResident,
+		behavior: {
+			animationId: null,
+			kind: "none",
+			motionTableId: null,
+			physicsScriptId: null,
+			physicsScriptTableId: null,
+			soundTableId: null,
+		},
+	};
 	const source = {
 		dynamicSources: [promotedResident],
-		kind: layer,
 		landblockId,
-		mapBlockers: new Map(),
-		staticResidents: [],
-	} satisfies ResolvedOutdoorStaticLayerSource;
-	return {
-		commit: { source },
-		landblockId,
-		layer,
+		staticResidents: [staticResident],
 	};
+	switch (layer) {
+		case LandblockLayerKind.Buildings:
+			return {
+				commit: {
+					source: {
+						...source,
+						kind: layer,
+						mapBlockers: new Map(),
+						staticResidents: [],
+					},
+				},
+				landblockId,
+				layer,
+			};
+		case LandblockLayerKind.Objects:
+			return {
+				commit: { source: { ...source, kind: layer } },
+				landblockId,
+				layer,
+			};
+		case LandblockLayerKind.Generated:
+			return {
+				commit: { source: { ...source, kind: layer } },
+				landblockId,
+				layer,
+			};
+	}
 }
 
 function setTestCamera(runtime: GameRuntime, camera: Camera): void {

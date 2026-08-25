@@ -3,6 +3,7 @@ import type { ResolvedOutdoorStaticLayerSource } from "../resolution/landblock-l
 import type {
 	LandblockIdLayer,
 	LandblockLayerKind,
+	OutdoorStaticLayerKind,
 } from "../runtime/scene-interest";
 import type {
 	TerrainGenerationSource,
@@ -24,8 +25,13 @@ export enum TextureWrapPolicy {
 }
 
 /** Classified outdoor-static source handed to runtime-owned realization without physical pages. */
-export interface StaticObjectLayerSourceCommit {
-	readonly source: ResolvedOutdoorStaticLayerSource;
+export interface StaticObjectLayerSourceCommit<
+	TLayer extends OutdoorStaticLayerKind,
+> {
+	readonly source: Extract<
+		ResolvedOutdoorStaticLayerSource,
+		{ readonly kind: TLayer }
+	>;
 }
 
 /** Closed EnvCell source plan awaiting revision-owned runtime realization. */
@@ -49,15 +55,15 @@ export type LandblockLayerCommit = {} & (
 	  >
 	| LandblockLayerCommitFields<
 			LandblockLayerKind.Buildings,
-			StaticObjectLayerSourceCommit
+			StaticObjectLayerSourceCommit<LandblockLayerKind.Buildings>
 	  >
 	| LandblockLayerCommitFields<
 			LandblockLayerKind.Objects,
-			StaticObjectLayerSourceCommit
+			StaticObjectLayerSourceCommit<LandblockLayerKind.Objects>
 	  >
 	| LandblockLayerCommitFields<
 			LandblockLayerKind.Generated,
-			StaticObjectLayerSourceCommit
+			StaticObjectLayerSourceCommit<LandblockLayerKind.Generated>
 	  >
 	| LandblockLayerCommitFields<
 			LandblockLayerKind.EnvCells,

@@ -191,6 +191,29 @@ export const FRONTEND_TUNING = {
 			road: { red: 0.85, green: 0.76, blue: 0.55 },
 			roadTintStrength: 0.85,
 			/**
+			 * Dark rim drawn just outside the road fill, in pixels, and how much ink it carries.
+			 *
+			 * The same device the building footprints use, in the opposite polarity: they are a dark
+			 * mass needing a light stroke, a road is a light ribbon needing a dark one. Without it a
+			 * tan road crossing tan ground vanishes exactly where a reader needs it — inside a
+			 * settlement, where the ground is packed dirt the same colour as the road. Width is in
+			 * pixels, like the hatch period and the footprint stroke, so a road stays cased at every
+			 * zoom. Strength short of one keeps it a rim rather than a hard black outline.
+			 */
+			roadCasingPixels: 1.5,
+			roadCasingStrength: 0.55,
+			/**
+			 * Cell coverage at which the road edge falls, and so how wide a road draws.
+			 *
+			 * Deliberately under a half. A cell whose road runs corner to corner across the diagonal
+			 * interpolates to exactly 0.5 at its centre — a saddle — so a half threshold would rejoin
+			 * the two halves of that road at a single point of no width, and it would still read as
+			 * broken. Backing off opens that pinch into a neck about 11 m across, which is the
+			 * difference between a road and a dashed line, and costs roughly a tenth of a cell of
+			 * extra width everywhere else.
+			 */
+			roadEdgeCoverage: 0.45,
+			/**
 			 * Ground retail will not let a body onto: hatched, not merely tinted.
 			 *
 			 * Two unrelated rules land here, because the reader is asking one question. Ground too

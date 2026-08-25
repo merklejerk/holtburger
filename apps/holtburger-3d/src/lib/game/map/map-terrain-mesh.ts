@@ -30,8 +30,30 @@ export interface MapTerrainMesh {
 	 * blend costs nothing but the absence of a vote.
 	 */
 	readonly terrainCodes: Uint8Array;
-	/** Per-corner road presence, interpolated and thresholded to place the road edge. */
-	readonly roadCoverage: Float32Array;
+	/**
+	 * The four-corner road mask of the cell a triangle belongs to, repeated on each of its corners.
+	 *
+	 * Bits run south-west, south-east, north-east, north-west, matching how retail packs the road
+	 * bits of a landscape pcode. Roads are a *cell* fact there: `selectRoadOverlays` reduces the
+	 * four corners to one mask and picks an authored alpha shape for it, so no triangulation can
+	 * break a road apart.
+	 *
+	 * The map used to carry per-corner coverage and interpolate it across the triangle, which made
+	 * road connectivity depend on which way retail cut that cell — a seeded value that knows nothing
+	 * about roads. Where a road stepped diagonally its two corners landed in different triangles
+	 * half the time, with zero coverage along the seam between them, so the road broke. A census
+	 * over the region found 2,661 diagonal-pair cells of which 1,319 were severed that way — 49.6%,
+	 * a coin flip — which is why a diagonal road drew as a dashed line.
+	 */
+	readonly roadMask: Uint8Array;
+	/**
+	 * Where each corner sits in its own cell, x east and y north, each 0 or 1.
+	 *
+	 * Interpolating this rather than the coverage itself is what moves the road decision from the
+	 * triangle to the cell: the fragment stage recovers its position inside the cell and evaluates
+	 * the mask there.
+	 */
+	readonly cellUv: Float32Array;
 	/**
 	 * Whether a body may occupy the triangle, repeated on each of its corners.
 	 *
@@ -64,7 +86,14 @@ interface TerrainGridVertex {
 	readonly normalY: number;
 	readonly normalZ: number;
 	readonly terrainCode: number;
-	readonly roadCoverage: number;
+	readonly hasRoad: boolean;
+}
+
+/** One cell corner: the grid vertex it reads, and where that corner sits inside the cell. */
+interface TerrainCellCorner {
+	readonly vertex: TerrainGridVertex;
+	readonly u: number;
+	readonly v: number;
 }
 
 /**
@@ -89,7 +118,8 @@ export function buildMapTerrainMesh(
 	const positions = new Float32Array(vertexCount * 3);
 	const normals = new Float32Array(vertexCount * 3);
 	const terrainCodes = new Uint8Array(vertexCount);
-	const roadCoverage = new Float32Array(vertexCount);
+	const roadMask = new Uint8Array(vertexCount);
+	const cellUv = new Float32Array(vertexCount * 2);
 	// A float rather than a byte because it feeds a float vertex attribute; storing it as a byte
 	// would need a normalising pointer type the map has no other use for.
 	const passable = new Float32Array(vertexCount);
@@ -109,18 +139,18 @@ export function buildMapTerrainMesh(
 	};
 
 	let cursor = 0;
-	const emit = (corners: readonly [number, number, number]): void => {
-		// Resolved once as a tuple, so the face's own facts are decided from the same three
-		// vertices the corner loop then writes.
-		const face = [
-			vertexAt(corners[0]),
-			vertexAt(corners[1]),
-			vertexAt(corners[2]),
-		] as const;
+	const emit = (
+		cellRoadMask: number,
+		face: readonly [TerrainCellCorner, TerrainCellCorner, TerrainCellCorner],
+	): void => {
 		// An entirely-water landblock is impassable whatever shape its bed is, so the geometric
 		// test only has to answer for the landblocks a body could otherwise stand in.
-		const facePassable = !entirelyWater && isFaceWalkable(face) ? 1 : 0;
-		for (const vertex of face) {
+		const facePassable =
+			!entirelyWater && isFaceWalkable(face.map((corner) => corner.vertex))
+				? 1
+				: 0;
+		for (const corner of face) {
+			const vertex = corner.vertex;
 			const offset = cursor * 3;
 			positions[offset] = vertex.x;
 			positions[offset + 1] = vertex.y;
@@ -129,7 +159,9 @@ export function buildMapTerrainMesh(
 			normals[offset + 1] = vertex.normalY;
 			normals[offset + 2] = vertex.normalZ;
 			terrainCodes[cursor] = vertex.terrainCode;
-			roadCoverage[cursor] = vertex.roadCoverage;
+			roadMask[cursor] = cellRoadMask;
+			cellUv[cursor * 2] = corner.u;
+			cellUv[cursor * 2 + 1] = corner.v;
 			passable[cursor] = facePassable;
 			cursor += 1;
 		}
@@ -137,25 +169,33 @@ export function buildMapTerrainMesh(
 
 	for (let row = 0; row < OUTDOOR_TERRAIN_GRID_CELLS; row += 1) {
 		for (let column = 0; column < OUTDOOR_TERRAIN_GRID_CELLS; column += 1) {
-			const southwest = row * side + column;
-			const southeast = southwest + 1;
-			const northwest = southwest + side;
-			const northeast = northwest + 1;
+			const origin = row * side + column;
+			const southwest = { u: 0, v: 0, vertex: vertexAt(origin) };
+			const southeast = { u: 1, v: 0, vertex: vertexAt(origin + 1) };
+			const northwest = { u: 0, v: 1, vertex: vertexAt(origin + side) };
+			const northeast = { u: 1, v: 1, vertex: vertexAt(origin + side + 1) };
+			const cellRoadMask = roadCornerMask([
+				southwest,
+				southeast,
+				northeast,
+				northwest,
+			]);
 			if (usesSouthwestToNortheastCut(source, column, row)) {
-				emit([southwest, southeast, northeast]);
-				emit([southwest, northeast, northwest]);
+				emit(cellRoadMask, [southwest, southeast, northeast]);
+				emit(cellRoadMask, [southwest, northeast, northwest]);
 			} else {
-				emit([southwest, southeast, northwest]);
-				emit([northeast, northwest, southeast]);
+				emit(cellRoadMask, [southwest, southeast, northwest]);
+				emit(cellRoadMask, [northeast, northwest, southeast]);
 			}
 		}
 	}
 
 	return {
+		cellUv,
 		normals,
 		passable,
 		positions,
-		roadCoverage,
+		roadMask,
 		terrainCodes,
 		vertexCount,
 	};
@@ -167,10 +207,9 @@ export function buildMapTerrainMesh(
  * The geometric face normal, against the same retail threshold the host filters interior floors by,
  * so indoors and out the map means one thing by "too steep".
  */
-function isFaceWalkable(
-	corners: readonly [TerrainGridVertex, TerrainGridVertex, TerrainGridVertex],
-): boolean {
+function isFaceWalkable(corners: readonly TerrainGridVertex[]): boolean {
 	const [a, b, c] = corners;
+	if (!a || !b || !c) throw new Error("A terrain face needs three corners.");
 	const abx = b.x - a.x;
 	const aby = b.y - a.y;
 	const abz = b.z - a.z;
@@ -185,6 +224,26 @@ function isFaceWalkable(
 	const length = Math.hypot(normalX, normalY, normalZ);
 	if (length === 0) return true;
 	return Math.abs(normalY) / length >= RETAIL_WALKABLE_NORMAL_UP;
+}
+
+/**
+ * Retail's four-corner road mask for one cell, south-west, south-east, north-east, north-west.
+ *
+ * The same reduction `selectRoadOverlays` performs before choosing a road alpha shape: a corner
+ * either carries road or it does not, and the cell's shape follows from all four together.
+ */
+function roadCornerMask(
+	corners: readonly [
+		TerrainCellCorner,
+		TerrainCellCorner,
+		TerrainCellCorner,
+		TerrainCellCorner,
+	],
+): number {
+	return corners.reduce(
+		(mask, corner, index) => mask | (corner.vertex.hasRoad ? 1 << index : 0),
+		0,
+	);
 }
 
 /** Resolve every authored grid vertex once, before triangles copy from them. */
@@ -228,7 +287,7 @@ function readTerrainGrid(
 				normalX: -dx / length,
 				normalY: 1 / length,
 				normalZ: -dz / length,
-				roadCoverage: roadCodeOf(sample) === 0 ? 0 : 1,
+				hasRoad: roadCodeOf(sample) !== 0,
 				terrainCode: terrainCodeOf(sample),
 				x: column * source.tileSize,
 				y: height(row, column),

@@ -38,7 +38,8 @@ describe("buildMapTerrainMesh", () => {
 		expect(mesh.vertexCount).toBe(OUTDOOR_TERRAIN_GRID_CELLS ** 2 * 2 * 3);
 		expect(mesh.positions).toHaveLength(mesh.vertexCount * 3);
 		expect(mesh.terrainCodes).toHaveLength(mesh.vertexCount);
-		expect(mesh.roadCoverage).toHaveLength(mesh.vertexCount);
+		expect(mesh.roadMask).toHaveLength(mesh.vertexCount);
+		expect(mesh.cellUv).toHaveLength(mesh.vertexCount * 2);
 	});
 
 	it("lays vertices out in the scene terrain frame", () => {
@@ -67,13 +68,36 @@ describe("buildMapTerrainMesh", () => {
 		expect([...mesh.terrainCodes.slice(0, 3)]).toEqual([7, 9, 5]);
 	});
 
-	it("carries road presence per corner so the edge can be interpolated", () => {
+	it("gives every corner of a cell that cell's whole road mask", () => {
 		const terrainSamples = new Uint16Array(SIDE * SIDE);
 		terrainSamples[0] = sample(3, 2);
 		const mesh = buildMapTerrainMesh(source({ terrainSamples }));
 
-		// Only the south-west corner of the first triangle carries a road.
-		expect([...mesh.roadCoverage.slice(0, 3)]).toEqual([1, 0, 0]);
+		// Cell (0, 0) carries road at its south-west corner alone, and every one of the six
+		// vertices it expands into reports that, so the shader can shape the road from the cell.
+		expect([...mesh.roadMask.slice(0, 6)]).toEqual([1, 1, 1, 1, 1, 1]);
+		// The default diagonal makes the first triangle south-west, south-east, north-west.
+		expect([...mesh.cellUv.slice(0, 6)]).toEqual([0, 0, 1, 0, 0, 1]);
+	});
+
+	it("keeps a diagonally stepping road joined whichever way the cell is cut", () => {
+		// Road at the south-west and north-east corners of cell (0, 0) and nowhere else: the case
+		// that used to break whenever the authored cut ran the other way.
+		const terrainSamples = new Uint16Array(SIDE * SIDE);
+		terrainSamples[0] = sample(3, 1);
+		terrainSamples[SIDE + 1] = sample(3, 1);
+
+		for (const cut of [0, 1]) {
+			const diagonals = new Uint8Array(OUTDOOR_TERRAIN_GRID_CELLS ** 2);
+			diagonals[0] = cut;
+			const mesh = buildMapTerrainMesh(
+				source({ cellDiagonals: diagonals, terrainSamples }),
+			);
+
+			// South-west is bit 0 and north-east is bit 2, and the mask no longer depends on which
+			// triangle a corner landed in, so both cuts describe the same road to the shader.
+			expect([...mesh.roadMask.slice(0, 6)]).toEqual([5, 5, 5, 5, 5, 5]);
+		}
 	});
 
 	it("gives flat ground a straight-up normal", () => {

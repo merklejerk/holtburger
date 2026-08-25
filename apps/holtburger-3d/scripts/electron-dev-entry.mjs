@@ -55,7 +55,7 @@ const hostBuild = spawnSync(
 	{
 		cwd: workspaceRoot,
 		stdio: "inherit",
-		shell: process.platform === "win32",
+		shell: false,
 	},
 );
 if (hostBuild.status !== 0) process.exit(hostBuild.status ?? 1);
@@ -121,11 +121,16 @@ if (vite.exitCode !== null || vite.signalCode !== null) {
 	throw new Error("Vite exited after its readiness check.");
 }
 
-const electronCommand =
-	process.platform === "win32" ? "electron.cmd" : "electron";
+const electronEntry = resolve(appRoot, "node_modules", "electron", "cli.js");
+if (!existsSync(electronEntry)) {
+	throw new Error(
+		`Electron entry point is missing at ${electronEntry}; run npm install first.`,
+	);
+}
 const electron = spawn(
-	electronCommand,
+	process.execPath,
 	[
+		electronEntry,
 		...electronSwitches,
 		".",
 		entryName ?? "explorer",

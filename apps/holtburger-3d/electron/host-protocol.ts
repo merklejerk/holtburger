@@ -9,6 +9,8 @@ import type {
 
 /** Must match the Rust sidecar's encoded payload ceiling. */
 export const MAX_FRAME_BYTES = 16 * 1024 * 1024;
+/** Maximum requests awaiting host responses; bounds renderer-driven stdin buffering. */
+export const MAX_PENDING_REQUESTS = 256;
 /** Version negotiated before any command is accepted. */
 export const PROTOCOL_VERSION = 1;
 /** Grace period before a sidecar that ignored shutdown is terminated. */
@@ -31,7 +33,6 @@ interface ReadableStreamLike {
 export interface SidecarProcessLike {
 	stdin: WritableStreamLike;
 	stdout: ReadableStreamLike;
-	stderr: ReadableStreamLike;
 	on(
 		event: "exit",
 		listener: (code: number | null, signal: string | null) => void,
@@ -270,9 +271,6 @@ export class SidecarHostClient {
 		process.stdout.on("error", (error) => {
 			this.#fail(new SidecarProtocolError("host_stdout", error.message), true);
 		});
-		process.stderr.on("data", () => {
-			// Rust diagnostics deliberately stay off stdout; Electron may route them to its logger.
-		});
 		process.on("error", (error) => {
 			this.#fail(
 				new SidecarProtocolError(
@@ -306,6 +304,12 @@ export class SidecarHostClient {
 	): Promise<unknown> {
 		await this.#connected;
 		if (this.#failure) throw this.#failure;
+		if (this.#pending.size >= MAX_PENDING_REQUESTS) {
+			throw new SidecarProtocolError(
+				"pending_limit",
+				`host already has ${MAX_PENDING_REQUESTS} pending requests`,
+			);
+		}
 		const id = this.#nextRequestId++;
 		return new Promise((resolve, reject) => {
 			this.#pending.set(id, { resolve, reject });
@@ -374,7 +378,7 @@ export class SidecarHostClient {
 
 	#write(frame: unknown): void {
 		if (!this.#process.stdin.write(encodeSidecarFrame(frame))) {
-			// Node's writable stream will emit drain; the frame itself remains queued by Node.
+			// Node retains the frame until drain; the pending-request limit bounds this queue.
 		}
 	}
 

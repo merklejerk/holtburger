@@ -204,9 +204,9 @@ it through one source-neutral presentation input rather than a second dynamic sy
 A spawned entity enters through an app-local Explorer registry above the host simulation's own
 `SpatialScene`, crosses the narrow sidecar event boundary as one focused `DynamicEntityView`, and is realized by
 the same template repository, animation system, effect dispatcher, and renderer path the authored
-layer uses. The frontend mirror hydrates on mount or renderer reload by registering its listener
-and then requesting one current-state snapshot; there is no replay, acknowledgement, or
-delivery-recovery protocol. Solver output owns the entity root: the placement system evaluates
+layer uses. The frontend mirror hydrates on mount or explicit reset by registering its listener and
+then requesting one current-state snapshot; there is no replay, acknowledgement, or
+renderer-recovery protocol. Solver output owns the entity root: the placement system evaluates
 accepted sparse paths at render cadence, while animation and effects write visual-root and part
 state only. No second dynamic system, stateful feed projector, or frontend placement authority
 exists.

@@ -108,7 +108,7 @@ impl ExplorerEntityDelivery {
         })
     }
 
-    /// Builds a complete replacement event for startup, reload, or explicit reset.
+    /// Builds a complete replacement event for startup or explicit reset.
     pub fn snapshot_event(&self) -> Result<DynamicEntityEvent, ExplorerEntityRuntimeError> {
         Ok(DynamicEntityEvent::Snapshot {
             snapshot: self.snapshot()?,

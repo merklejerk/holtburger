@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { buildEntryPath, requireEntry } from "./entry-paths.mjs";
 
@@ -17,7 +20,15 @@ try {
 
 console.info(`Launching ${entryName} Vite entry at ${openPath}`);
 
+const appRoot = resolve(fileURLToPath(new URL("../", import.meta.url)));
+const viteEntry = resolve(appRoot, "node_modules", "vite", "bin", "vite.js");
+if (!existsSync(viteEntry)) {
+	throw new Error(
+		`Vite entry point is missing at ${viteEntry}; run npm install first.`,
+	);
+}
 const viteArgs = [
+	viteEntry,
 	"--host",
 	"127.0.0.1",
 	"--port",
@@ -26,9 +37,9 @@ const viteArgs = [
 	"--open",
 	openPath,
 ];
-const child = spawn("vite", viteArgs, {
+const child = spawn(process.execPath, viteArgs, {
 	stdio: "inherit",
-	shell: process.platform === "win32",
+	shell: false,
 });
 
 child.on("exit", (code, signal) => {

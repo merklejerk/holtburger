@@ -40,7 +40,10 @@ function ignoreApplicationSource(path) {
 module.exports = {
 	packagerConfig: {
 		asar: true,
-		extraResource: [resolve(__dirname, "../../target/release", hostBinary)],
+		extraResource: [
+			resolve(__dirname, "../../target/release", hostBinary),
+			resolve(__dirname, "../../LICENSE.md"),
+		],
 		ignore: ignoreApplicationSource,
 	},
 	makers: [

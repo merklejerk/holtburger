@@ -51,7 +51,8 @@ function workspaceRoot(): string {
 }
 
 function hostBinaryPath(): string {
-	if (process.env.HOLTBURGER_HOST_BIN) return process.env.HOLTBURGER_HOST_BIN;
+	if (!app.isPackaged && process.env.HOLTBURGER_HOST_BIN)
+		return process.env.HOLTBURGER_HOST_BIN;
 	const executable =
 		process.platform === "win32"
 			? "holtburger-3d-host.exe"
@@ -111,8 +112,16 @@ function isHostCommandArguments(value: unknown): value is HostCommandArguments {
 	);
 }
 
-function installIpcBridge(): void {
-	ipcMain.handle("host:invoke", async (_event, request: unknown) => {
+function installIpcBridge(window: BrowserWindow): void {
+	ipcMain.handle("host:invoke", async (event, request: unknown) => {
+		if (
+			event.sender !== window.webContents ||
+			event.senderFrame !== window.webContents.mainFrame
+		) {
+			throw new Error(
+				"host requests are accepted only from the application frame",
+			);
+		}
 		if (
 			typeof request !== "object" ||
 			request === null ||
@@ -160,11 +169,19 @@ function createWindow(entry: { path: string; title: string }): BrowserWindow {
 	);
 	window.once("ready-to-show", () => window.show());
 	window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+	window.webContents.on("render-process-gone", (_event, details) => {
+		if (quitting) return;
+		reportFatalError(
+			"Holtburger 3D renderer stopped",
+			new Error(
+				`renderer process stopped (reason=${details.reason}, exitCode=${details.exitCode})`,
+			),
+		);
+	});
 	window.webContents.on("context-menu", (_event, params) => {
-		const template: MenuItemConstructorOptions[] = [{ role: "reload" }];
+		const template: MenuItemConstructorOptions[] = [];
 		if (params.isEditable) {
 			template.push(
-				{ type: "separator" },
 				{ role: "undo" },
 				{ role: "redo" },
 				{ type: "separator" },
@@ -174,15 +191,13 @@ function createWindow(entry: { path: string; title: string }): BrowserWindow {
 				{ role: "selectAll" },
 			);
 		} else if (params.selectionText.length > 0) {
-			template.push({ type: "separator" }, { role: "copy" });
+			template.push({ role: "copy" });
 		}
-		template.push(
-			{ type: "separator" },
-			{
-				label: "Inspect Element",
-				click: () => window.webContents.inspectElement(params.x, params.y),
-			},
-		);
+		if (template.length > 0) template.push({ type: "separator" });
+		template.push({
+			label: "Inspect Element",
+			click: () => window.webContents.inspectElement(params.x, params.y),
+		});
 		Menu.buildFromTemplate(template).popup({ window });
 	});
 	window.webContents.on("will-navigate", (event, targetUrl) => {
@@ -224,8 +239,8 @@ async function loadEntry(
 app.whenReady().then(async () => {
 	const entry = entryArguments();
 	Menu.setApplicationMenu(null);
-	installIpcBridge();
 	const window = createWindow(entry);
+	installIpcBridge(window);
 	try {
 		const [hostResult, entryResult] = await Promise.allSettled([
 			startHost(window),

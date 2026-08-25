@@ -1,6 +1,8 @@
-use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+
+#[cfg(unix)]
+use std::fs;
 
 use tempfile::NamedTempFile;
 use thiserror::Error;

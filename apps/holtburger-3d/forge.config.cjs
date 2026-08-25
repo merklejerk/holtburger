@@ -19,7 +19,7 @@ function ignoreApplicationSource(path) {
 		: relativePath;
 	if (applicationPath === "" || applicationPath === "package.json")
 		return false;
-	const [root, dependencyName] = applicationPath.split(sep);
+	const [root, dependencyName] = applicationPath.split(/[/\\]/);
 	if (
 		root === "node_modules" &&
 		[

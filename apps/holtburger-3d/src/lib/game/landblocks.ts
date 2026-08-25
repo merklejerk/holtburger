@@ -10,6 +10,17 @@ export const OUTDOOR_TERRAIN_GRID_SIZE = OUTDOOR_TERRAIN_GRID_CELLS + 1;
 /** Fixed world-space spacing between adjacent authored outdoor terrain vertices. */
 export const OUTDOOR_TERRAIN_TILE_SIZE =
 	OUTDOOR_LANDBLOCK_WORLD_SIZE / OUTDOOR_TERRAIN_GRID_CELLS;
+/**
+ * How far a road reaches from the authored line it is drawn along, in world units.
+ *
+ * A retail constant, not a preference: `LandDefs::get_vars` hands back a fixed 5.0
+ * (acclient.c:446418), and `CLandBlock::on_road` tests plain distances against it to decide what
+ * counts as road (acclient.c:337802-337960; ACE transcribes it as `Landblock.OnRoad`). A road line
+ * is therefore ten units across, whatever the terrain grid around it looks like — which is the
+ * fact a road drawn from grid interpolation cannot honour, because interpolation can only place an
+ * edge as a fraction of a 24 unit cell.
+ */
+export const RETAIL_ROAD_WIDTH = 5;
 
 /** Normalize one eight-digit landblock owner identity to its `FFFF` CellLandblock root. */
 export function normalizeLandblockOwner(landblockId: LandblockId): LandblockId {

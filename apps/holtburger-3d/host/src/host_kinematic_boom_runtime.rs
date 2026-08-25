@@ -10,7 +10,7 @@ use holtburger_core::{
     KinematicBoomDiagnostics, KinematicBoomHoldReason, KinematicBoomIntent, KinematicBoomOutcome,
     KinematicBoomPlacement, KinematicBoomProfile, KinematicBoomProfileDefinition,
     KinematicBoomReseedReason, KinematicBoomTargetSample, KinematicBoomTargetSeed,
-    KinematicBoomUpdateAcceptance,
+    KinematicBoomUpdateAcceptance, resolve_camera_pivot_offset,
 };
 use holtburger_world::{CellTransitRequest, FreeSphereConfig, PlacedMotionPath};
 use serde::{Deserialize, Serialize};
@@ -24,7 +24,6 @@ use crate::placed_motion_presentation::{
     interpolate_rotation, landblock_key, present_placed_motion_pose, reanchor_point,
 };
 
-const VISUAL_PIVOT_HEIGHT: f32 = 1.5;
 /// Exact boom, possession, and entity generations carried by every command and output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -245,21 +244,24 @@ impl From<KinematicBoomHoldReason> for HostKinematicBoomHoldReason {
     }
 }
 
-/// Placement-authoring discontinuity recovered at a full-envelope-safe target-adjacent placement.
+/// Why a tick reset the camera discontinuously onto the target seed.
+///
+/// The placement such a tick carries is the possessed body's own collision sphere, so its camera
+/// coincides with its visual pivot. `InitialPlacement` is ordinary; the rest are recoveries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum HostKinematicBoomReseedReason {
+    InitialPlacement,
     PlacedPath,
     PlacementRecovery,
-    ClearanceRecovery,
 }
 
 impl From<KinematicBoomReseedReason> for HostKinematicBoomReseedReason {
     fn from(value: KinematicBoomReseedReason) -> Self {
         match value {
+            KinematicBoomReseedReason::InitialPlacement => Self::InitialPlacement,
             KinematicBoomReseedReason::PlacedPath => Self::PlacedPath,
             KinematicBoomReseedReason::PlacementRecovery => Self::PlacementRecovery,
-            KinematicBoomReseedReason::ClearanceRecovery => Self::ClearanceRecovery,
         }
     }
 }
@@ -347,6 +349,11 @@ struct ActiveHostKinematicBoom {
     sequence: u64,
     /// Sphere role selected from the latest accepted body definition.
     target_sphere_role: HostKinematicBoomTargetSphereRole,
+    /// Body-local camera pivot offset, resolved once when the generation was seeded.
+    ///
+    /// Held for the generation rather than re-derived per tick: the body's geometry is what decides
+    /// it, and a body that reconfigured mid-possession would otherwise pop the look-at point.
+    pivot_offset: Vector3,
     /// Last committed collision-seed residency.
     target_seed_cell: Option<Guid>,
 }
@@ -433,7 +440,21 @@ impl HostKinematicBoomRuntime {
                 .and_then(|physical| physical.response.cell()),
             selected,
         )?;
-        let visual_pivot = visual_pivot(body.pose);
+        let body_height = self
+            .entities
+            .body_height(request.guid)
+            .context("kinematic boom target is not a live entity")?;
+        if body_height <= 0.0 {
+            // Content authors no height for a small minority of templates. The pivot still resolves
+            // from the body's motion sphere, so this is worth reporting and not worth refusing.
+            log::warn!(
+                "possessed entity {:?} declares no authored body height; \
+camera pivot rests on its collision geometry alone",
+                request.guid
+            );
+        }
+        let pivot_offset = resolve_camera_pivot_offset(selected.center, body_height);
+        let visual_pivot = visual_pivot(body.pose, pivot_offset);
         let mut state = self.state.lock().expect("kinematic boom lock poisoned");
         state.next_generation = state
             .next_generation
@@ -468,6 +489,7 @@ impl HostKinematicBoomRuntime {
             controller,
             sequence: 0,
             target_sphere_role: selected.role,
+            pivot_offset,
             target_seed_cell: seed.placement.cell,
         });
         Ok(HostKinematicBoomStartReceipt { identity })
@@ -567,7 +589,7 @@ impl HostKinematicBoomRuntime {
             return Ok(Some(tick));
         };
         let (samples, selected, final_seed_cell) =
-            match target_samples(target_tick, active.target_seed_cell) {
+            match target_samples(target_tick, active.target_seed_cell, active.pivot_offset) {
                 Ok(value) => value,
                 Err(error) => {
                     eprintln!("kinematic boom target adaptation failed: {error:#}");
@@ -749,8 +771,13 @@ fn selected_target_sphere(body: &holtburger_world::SpatialBody) -> Result<Select
     })
 }
 
-fn visual_pivot(mut pose: WorldPosition) -> WorldPosition {
-    pose.coords.z += VISUAL_PIVOT_HEIGHT;
+/// Places the body-local pivot offset in the body's own frame.
+///
+/// Composed through the pose's rotation, as retail composes its own pivot offset
+/// (`CameraManager::QueryPivotPosition`, acclient.c:141134-141148), so a body that pitches or rolls
+/// carries its pivot with it instead of leaving it hanging over world-up.
+fn visual_pivot(mut pose: WorldPosition, pivot_offset: Vector3) -> WorldPosition {
+    pose.coords = pose.coords + pose.rotation.rotate_vector(pivot_offset);
     pose
 }
 
@@ -785,6 +812,7 @@ fn target_seed(
 fn target_samples(
     tick: &ExplorerEntityPhysicalTick,
     mut seed_cell: Option<Guid>,
+    pivot_offset: Vector3,
 ) -> Result<(
     Vec<KinematicBoomTargetSample>,
     HostKinematicBoomTargetSphereRole,
@@ -804,7 +832,7 @@ fn target_samples(
         seed_cell = seed.placement.cell;
         samples.push(KinematicBoomTargetSample {
             end_fraction: leg.end_fraction(),
-            visual_pivot: visual_pivot(pose),
+            visual_pivot: visual_pivot(pose, pivot_offset),
             target_seed: seed,
         });
     }
@@ -944,6 +972,26 @@ mod tests {
                 rotation: Quaternion::identity(),
             },
         )
+    }
+
+    #[test]
+    fn visual_pivot_rides_the_body_frame_rather_than_world_up() {
+        // A quarter turn about AC +x carries the body's up onto AC -y. Retail composes its pivot
+        // offset the same way, so a tilted body must not leave its pivot standing straight up.
+        let pose = WorldPosition {
+            landblock_id: Guid(0xda55_0001),
+            coords: Vector3::new(10.0, 20.0, 30.0),
+            rotation: Quaternion::from_axis_angle(
+                Vector3::new(1.0, 0.0, 0.0),
+                -std::f32::consts::FRAC_PI_2,
+            )
+            .expect("unit axis"),
+        };
+        let pivot = visual_pivot(pose, Vector3::new(0.0, 0.0, 1.5));
+        assert!((pivot.coords.x - 10.0).abs() < 1.0e-5);
+        assert!((pivot.coords.y - 21.5).abs() < 1.0e-5);
+        assert!((pivot.coords.z - 30.0).abs() < 1.0e-5);
+        assert_eq!(pivot.landblock_id, pose.landblock_id);
     }
 
     #[test]

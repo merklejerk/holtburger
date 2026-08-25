@@ -1021,6 +1021,7 @@ fn template_definition_input(
             template.radar_behavior,
             template.obvious_radar_range,
         ),
+        body_height: content.setup.body_height,
         physics: content.physics,
     })
 }
@@ -1178,6 +1179,7 @@ mod tests {
                     None,
                 )
                 .unwrap(),
+                body_height: 2.05,
             })
         }
 

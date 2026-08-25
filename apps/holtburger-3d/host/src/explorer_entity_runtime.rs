@@ -1679,6 +1679,19 @@ impl ExplorerEntityRuntime {
         })
     }
 
+    /// Authored body height of one live entity, at its own scale.
+    ///
+    /// Read by the possession camera when it seeds a boom generation: the pivot needs a statement of
+    /// the body's size, and this is the only one that survives content resolution.
+    pub fn body_height(&self, guid: Guid) -> Option<f32> {
+        self.registry
+            .lock()
+            .expect("Explorer entity registry lock poisoned")
+            .entities
+            .get(&guid)
+            .map(|entity| entity.definition.body_height)
+    }
+
     /// Resolves each definition's setup-default motion table before the group becomes contract.
     ///
     /// The entity's own property is the override; absent, the setup's default is the table it
@@ -2166,6 +2179,7 @@ mod tests {
             maximum_velocity: None,
             rotation_speed: None,
             radar: holtburger_core::DynamicEntityRadarFacts::default(),
+            body_height: 2.05,
             physics: resolve_effective_entity_physics_state(PhysicsState::GRAVITY),
         })
         .unwrap()
@@ -4496,7 +4510,7 @@ mod tests {
         assert!(matches!(
             initial_tick,
             HostKinematicBoomTick::Reseeded {
-                reason: crate::host_kinematic_boom_runtime::HostKinematicBoomReseedReason::ClearanceRecovery,
+                reason: crate::host_kinematic_boom_runtime::HostKinematicBoomReseedReason::InitialPlacement,
                 ..
             }
         ));

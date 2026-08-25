@@ -1,5 +1,9 @@
 import { OUTDOOR_TERRAIN_GRID_CELLS } from "../landblocks";
-import { roadCodeOf, terrainCodeOf } from "../terrain/terrain-sample";
+import {
+	isWaterTerrainCode,
+	roadCodeOf,
+	terrainCodeOf,
+} from "../terrain/terrain-sample";
 import { usesSouthwestToNortheastCut } from "../terrain/terrain-surface";
 import type { TerrainGenerationSource } from "../terrain/types";
 import { RETAIL_WALKABLE_NORMAL_UP } from "../walkability";
@@ -7,34 +11,70 @@ import { RETAIL_WALKABLE_NORMAL_UP } from "../walkability";
 /**
  * One landblock's terrain reduced to what an overhead map draws.
  *
- * Expanded per triangle rather than indexed, because classification and shape want different
- * things from the same mesh. A terrain type describes a whole patch of ground and must not bleed
- * across its boundary, so every corner of a triangle carries that triangle's one resolved type and
- * flat interpolation becomes independent of which corner the driver treats as provoking. Road
- * coverage and normals stay per-corner and interpolate, because a road edge and a hillside are
- * both genuinely continuous.
+ * Expanded per triangle rather than indexed, because two of these facts belong to something other
+ * than a vertex and must not be shared across one: passability to the face, and the road mask to
+ * the cell. Positions, normals and terrain types stay per-corner and interpolate, because a
+ * hillside and the boundary between two kinds of ground are both genuinely continuous.
  */
 export interface MapTerrainMesh {
 	/** Landblock-local positions, x east and z north-negative, three per triangle. */
 	readonly positions: Float32Array;
 	/** Smooth per-corner normals, used for hillshading only. */
 	readonly normals: Float32Array;
-	/** The triangle's one resolved terrain type, repeated on each of its corners. */
-	readonly terrainCodes: Uint8Array;
-	/** Per-corner road presence, interpolated and thresholded to place the road edge. */
-	readonly roadCoverage: Float32Array;
 	/**
-	 * Whether the triangle can be stood on, repeated on each of its corners.
+	 * The authored terrain type at each corner, which the shader resolves to a colour and blends.
 	 *
-	 * Decided here, once, from the triangle's own geometric normal rather than in the shader from
-	 * an interpolated one. Smooth normals are central differences across two tiles and then
-	 * interpolated again across the face, which systematically under-reports exactly the features
-	 * that matter: a 30 m step between adjacent vertices smooths to a gradient of 0.63 and reads as
-	 * walkable, while the face it actually forms rises 30 m over 24 m and is not. Because the map
-	 * triangulates on retail's authored diagonals, these faces are the surfaces physics tests, so
-	 * this is the game's own answer rather than an approximation of it.
+	 * The scene renderer cannot do this — a terrain type there selects a *texture*, and texture
+	 * indices do not interpolate, which is why it reproduces retail's authored alpha masks instead.
+	 * The map selects one mean colour per type out of a palette, and colours interpolate, so the
+	 * blend costs nothing but the absence of a vote.
 	 */
-	readonly walkable: Float32Array;
+	readonly terrainCodes: Uint8Array;
+	/**
+	 * The four-corner road mask of the cell a triangle belongs to, repeated on each of its corners.
+	 *
+	 * Bits run south-west, south-east, north-east, north-west, matching how retail packs the road
+	 * bits of a landscape pcode. A road is a *cell* fact there and never a vertex one:
+	 * `CLandBlock::on_road` reads all four corners together to decide its shape, and
+	 * `selectRoadOverlays` reduces the same four to one authored alpha shape. So the mask travels
+	 * whole and the shader works the road out from it.
+	 *
+	 * Carrying per-corner coverage and interpolating it across the triangle instead is not merely
+	 * coarser, it is wrong: connectivity then depends on which way retail cut the cell, a seeded
+	 * value that knows nothing about roads. A census over the region found 2,661 cells whose road
+	 * runs corner to corner, of which 1,319 — 49.6%, a coin flip — had it severed by the cut, which
+	 * is what drew diagonal roads as dashed lines.
+	 */
+	readonly roadMask: Uint8Array;
+	/**
+	 * Where each corner sits in its own cell, x east and y north, each 0 or 1.
+	 *
+	 * The mask says what shape a cell's road is; this says where in that cell a fragment landed,
+	 * which is what the shader needs to evaluate the shape. The recovery is exact rather than
+	 * approximate: the map projects orthographically and each triangle's corners map affinely onto
+	 * its cell, so a fragment finds its true position whatever the ground beneath it is doing.
+	 */
+	readonly cellUv: Float32Array;
+	/**
+	 * Whether a body may occupy the triangle, repeated on each of its corners.
+	 *
+	 * Retail refuses ground for two unrelated reasons, and the map marks both the same way because
+	 * a reader asks one question of it: can I go there?
+	 *
+	 * Too steep is decided here, once, from the triangle's own geometric normal rather than in the
+	 * shader from an interpolated one. Smooth normals are central differences across two tiles and
+	 * then interpolated again across the face, which systematically under-reports exactly the
+	 * features that matter: a 30 m step between adjacent vertices smooths to a gradient of 0.63 and
+	 * reads as walkable, while the face it actually forms rises 30 m over 24 m and is not. Because
+	 * the map triangulates on retail's authored diagonals, these faces are the surfaces physics
+	 * tests, so this is the game's own answer rather than an approximation of it.
+	 *
+	 * Open water is decided per landblock, because that is the scale retail decides it at: entering
+	 * an entirely-water landblock collides outright, whatever the ground under it looks like
+	 * (`CLandCell::find_env_collisions`, acclient.c:340387-340390). Water inside a mixed landblock
+	 * is deliberately not marked — retail only lowers the contact plane there, and it is wadeable.
+	 */
+	readonly passable: Float32Array;
 	readonly vertexCount: number;
 }
 
@@ -47,7 +87,14 @@ interface TerrainGridVertex {
 	readonly normalY: number;
 	readonly normalZ: number;
 	readonly terrainCode: number;
-	readonly roadCoverage: number;
+	readonly hasRoad: boolean;
+}
+
+/** One cell corner: the grid vertex it reads, and where that corner sits inside the cell. */
+interface TerrainCellCorner {
+	readonly vertex: TerrainGridVertex;
+	readonly u: number;
+	readonly v: number;
 }
 
 /**
@@ -72,38 +119,40 @@ export function buildMapTerrainMesh(
 	const positions = new Float32Array(vertexCount * 3);
 	const normals = new Float32Array(vertexCount * 3);
 	const terrainCodes = new Uint8Array(vertexCount);
-	const roadCoverage = new Float32Array(vertexCount);
+	const roadMask = new Uint8Array(vertexCount);
+	const cellUv = new Float32Array(vertexCount * 2);
 	// A float rather than a byte because it feeds a float vertex attribute; storing it as a byte
 	// would need a normalising pointer type the map has no other use for.
-	const walkable = new Float32Array(vertexCount);
+	const passable = new Float32Array(vertexCount);
+	// Retail's landblock water type, which it derives per cell and then folds up: a cell is fully
+	// flooded when all four of its corners are water, and the landblock is entirely water when
+	// every cell is, so testing every authored vertex once answers the same question
+	// (`CLandBlockStruct::CalcWater`, acclient.c:339967-340014).
+	const entirelyWater = grid.every((vertex) =>
+		isWaterTerrainCode(vertex.terrainCode),
+	);
+
+	/** The grid is fixed-size and indexed by construction, so a gap is a programming error. */
+	const vertexAt = (index: number): TerrainGridVertex => {
+		const vertex = grid[index];
+		if (!vertex) throw new Error(`Terrain grid is missing vertex ${index}.`);
+		return vertex;
+	};
 
 	let cursor = 0;
-	const emit = (corners: readonly [number, number, number]): void => {
-		const faceWalkable = isFaceWalkable(
-			corners.map((index) => {
-				const vertex = grid[index];
-				if (!vertex) {
-					throw new Error(`Terrain grid is missing vertex ${index}.`);
-				}
-				return vertex;
-			}) as [TerrainGridVertex, TerrainGridVertex, TerrainGridVertex],
-		)
-			? 1
-			: 0;
-		const resolved = dominantTerrainCode(
-			corners.map((index) => {
-				const vertex = grid[index];
-				if (!vertex) {
-					throw new Error(`Terrain grid is missing vertex ${index}.`);
-				}
-				return vertex.terrainCode;
-			}),
-		);
-		for (const index of corners) {
-			const vertex = grid[index];
-			if (!vertex) {
-				throw new Error(`Terrain grid is missing vertex ${index}.`);
-			}
+	const emit = (
+		cellRoadMask: number,
+		face: readonly [TerrainCellCorner, TerrainCellCorner, TerrainCellCorner],
+	): void => {
+		// An entirely-water landblock is impassable whatever shape its bed is, so the geometric
+		// test only has to answer for the landblocks a body could otherwise stand in.
+		const facePassable =
+			!entirelyWater &&
+			isFaceWalkable([face[0].vertex, face[1].vertex, face[2].vertex])
+				? 1
+				: 0;
+		for (const corner of face) {
+			const vertex = corner.vertex;
 			const offset = cursor * 3;
 			positions[offset] = vertex.x;
 			positions[offset + 1] = vertex.y;
@@ -111,36 +160,46 @@ export function buildMapTerrainMesh(
 			normals[offset] = vertex.normalX;
 			normals[offset + 1] = vertex.normalY;
 			normals[offset + 2] = vertex.normalZ;
-			terrainCodes[cursor] = resolved;
-			roadCoverage[cursor] = vertex.roadCoverage;
-			walkable[cursor] = faceWalkable;
+			terrainCodes[cursor] = vertex.terrainCode;
+			roadMask[cursor] = cellRoadMask;
+			cellUv[cursor * 2] = corner.u;
+			cellUv[cursor * 2 + 1] = corner.v;
+			passable[cursor] = facePassable;
 			cursor += 1;
 		}
 	};
 
 	for (let row = 0; row < OUTDOOR_TERRAIN_GRID_CELLS; row += 1) {
 		for (let column = 0; column < OUTDOOR_TERRAIN_GRID_CELLS; column += 1) {
-			const southwest = row * side + column;
-			const southeast = southwest + 1;
-			const northwest = southwest + side;
-			const northeast = northwest + 1;
+			const origin = row * side + column;
+			const southwest = { u: 0, v: 0, vertex: vertexAt(origin) };
+			const southeast = { u: 1, v: 0, vertex: vertexAt(origin + 1) };
+			const northwest = { u: 0, v: 1, vertex: vertexAt(origin + side) };
+			const northeast = { u: 1, v: 1, vertex: vertexAt(origin + side + 1) };
+			const cellRoadMask = roadCornerMask([
+				southwest,
+				southeast,
+				northeast,
+				northwest,
+			]);
 			if (usesSouthwestToNortheastCut(source, column, row)) {
-				emit([southwest, southeast, northeast]);
-				emit([southwest, northeast, northwest]);
+				emit(cellRoadMask, [southwest, southeast, northeast]);
+				emit(cellRoadMask, [southwest, northeast, northwest]);
 			} else {
-				emit([southwest, southeast, northwest]);
-				emit([northeast, northwest, southeast]);
+				emit(cellRoadMask, [southwest, southeast, northwest]);
+				emit(cellRoadMask, [northeast, northwest, southeast]);
 			}
 		}
 	}
 
 	return {
+		cellUv,
 		normals,
+		passable,
 		positions,
-		roadCoverage,
+		roadMask,
 		terrainCodes,
 		vertexCount,
-		walkable,
 	};
 }
 
@@ -171,22 +230,23 @@ function isFaceWalkable(
 }
 
 /**
- * The terrain type a triangle is drawn as: whichever type most of its corners agree on.
+ * Retail's four-corner road mask for one cell, south-west, south-east, north-east, north-west.
  *
- * Ties break toward the lowest code so the answer depends on the authored data alone, never on
- * corner order or on which vertex a driver happens to treat as provoking.
+ * The same reduction `selectRoadOverlays` performs before choosing a road alpha shape: a corner
+ * either carries road or it does not, and the cell's shape follows from all four together.
  */
-function dominantTerrainCode(codes: readonly number[]): number {
-	let best = Number.POSITIVE_INFINITY;
-	let bestCount = 0;
-	for (const code of codes) {
-		const count = codes.filter((other) => other === code).length;
-		if (count > bestCount || (count === bestCount && code < best)) {
-			best = code;
-			bestCount = count;
-		}
-	}
-	return best;
+function roadCornerMask(
+	corners: readonly [
+		TerrainCellCorner,
+		TerrainCellCorner,
+		TerrainCellCorner,
+		TerrainCellCorner,
+	],
+): number {
+	return corners.reduce(
+		(mask, corner, index) => mask | (corner.vertex.hasRoad ? 1 << index : 0),
+		0,
+	);
 }
 
 /** Resolve every authored grid vertex once, before triangles copy from them. */
@@ -230,7 +290,7 @@ function readTerrainGrid(
 				normalX: -dx / length,
 				normalY: 1 / length,
 				normalZ: -dz / length,
-				roadCoverage: roadCodeOf(sample) === 0 ? 0 : 1,
+				hasRoad: roadCodeOf(sample) !== 0,
 				terrainCode: terrainCodeOf(sample),
 				x: column * source.tileSize,
 				y: height(row, column),

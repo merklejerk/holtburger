@@ -292,6 +292,7 @@ mod tests {
             maximum_velocity: None,
             rotation_speed: None,
             radar: holtburger_core::DynamicEntityRadarFacts::default(),
+            body_height: 2.05,
             physics: resolve_effective_entity_physics_state(PhysicsState::GRAVITY),
         })
         .unwrap()

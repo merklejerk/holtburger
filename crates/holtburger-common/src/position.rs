@@ -5,6 +5,17 @@ use std::fmt;
 
 pub const METERS_PER_LANDBLOCK: f32 = 192.0;
 pub const METERS_PER_MAP_DEGREE: f32 = 240.0;
+/// Map-degree offset of the world origin: Dereth spans 204 degrees, -102 to +102.
+///
+/// ACE `PositionExtensions.GetMapCoords` subtracts this after scaling the global position.
+pub const MAP_DEGREE_ORIGIN: f32 = 102.0;
+/// Magnitude AC shaves off a coordinate before printing it to one decimal.
+///
+/// ACE `GetMapCoordStr` prints `abs(degrees) - 0.05`, and its inverse `Position(Vector2)` adds
+/// 101.95 rather than 102. The bias is exactly half a terrain cell (24 m against 240 m per
+/// degree), but the retail decompile does not cover this display path, so only the arithmetic is
+/// reproduced here and the geometric reading stays a hypothesis.
+pub const MAP_DEGREE_DISPLAY_BIAS: f32 = 0.05;
 /// Highest authored outdoor landblock coordinate on either axis (2,040 terrain cells / 8).
 pub const MAX_OUTDOOR_LANDBLOCK_AXIS: u8 = 0xfe;
 
@@ -84,17 +95,15 @@ impl WorldCoordinates {
                 let ns = if *lat >= 0.0 { "N" } else { "S" };
                 let ew = if *lon >= 0.0 { "E" } else { "W" };
 
-                // ACE uses a 0.05 nudge when formatting to 1 decimal place to round down .X5 to .X
-                let display_lat = if precision == 1 {
-                    lat.abs() - 0.05
+                // The bias is authored against one-decimal output, so wider precision prints
+                // the raw magnitude rather than shifting a digit the bias was never sized for.
+                let bias = if precision == 1 {
+                    MAP_DEGREE_DISPLAY_BIAS
                 } else {
-                    lat.abs()
+                    0.0
                 };
-                let display_lon = if precision == 1 {
-                    lon.abs() - 0.05
-                } else {
-                    lon.abs()
-                };
+                let display_lat = (lat.abs() - bias).max(0.0);
+                let display_lon = (lon.abs() - bias).max(0.0);
 
                 format!(
                     "{:.*}{}, {:.*}{}, {:.1}Z",
@@ -256,12 +265,9 @@ impl WorldPosition {
         let total_x_meters = (lb_x as f32 * METERS_PER_LANDBLOCK) + self.coords.x;
         let total_y_meters = (lb_y as f32 * METERS_PER_LANDBLOCK) + self.coords.y;
 
-        // Formula from ACE (PositionExtensions.GetMapCoords):
-        // 1 map unit = 240 meters
-        // mapCoords = globalPos / 240.0
-        // mapCoords -= 102.0
-        let lon = (total_x_meters / METERS_PER_MAP_DEGREE) - 102.0;
-        let lat = (total_y_meters / METERS_PER_MAP_DEGREE) - 102.0;
+        // Formula from ACE (PositionExtensions.GetMapCoords).
+        let lon = (total_x_meters / METERS_PER_MAP_DEGREE) - MAP_DEGREE_ORIGIN;
+        let lat = (total_y_meters / METERS_PER_MAP_DEGREE) - MAP_DEGREE_ORIGIN;
 
         WorldCoordinates::Outdoor {
             lat,

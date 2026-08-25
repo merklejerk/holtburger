@@ -1,5 +1,9 @@
 import type { EnvCellId, LandblockId } from "../game-types";
-import { createLandblockWorldOrigin } from "../landblocks";
+import {
+	createLandblockWorldOrigin,
+	OUTDOOR_TERRAIN_TILE_SIZE,
+	RETAIL_ROAD_WIDTH,
+} from "../landblocks";
 import { writeMat4ToFloat32Array } from "../math/matrices";
 import type { InstalledTerrain } from "../terrain/terrain-system";
 import type { ResolvedMapSurface } from "../resolution/presentation";
@@ -30,12 +34,14 @@ import {
 	MAP_FLOOR_MAXIMUM_FADE,
 	MAP_FLOOR_SAME_LEVEL_BAND,
 	MAP_FLOOR_TINT_SPAN,
+	MAP_IMPASSABLE_COLOR,
+	MAP_IMPASSABLE_HATCH_PERIOD_PIXELS,
+	MAP_IMPASSABLE_HATCH_STRENGTH,
 	MAP_RELIEF_EXAGGERATION,
+	MAP_ROAD_CASING_PIXELS,
+	MAP_ROAD_CASING_STRENGTH,
 	MAP_ROAD_COLOR,
 	MAP_ROAD_TINT_STRENGTH,
-	MAP_STEEP_COLOR,
-	MAP_STEEP_HATCH_PERIOD_PIXELS,
-	MAP_STEEP_HATCH_STRENGTH,
 	MAP_TRANSITION_ACCENT_COLOR,
 	MAP_SUN_DIRECTION,
 	MAP_VOID_COLOR,
@@ -201,6 +207,9 @@ export class MapRenderer {
 		const height = this.#canvas.height;
 		if (width <= 0 || height <= 0) return false;
 		gl.viewport(0, 0, width, height);
+		// How much world one fragment covers. Both the road casing and the footprint stroke are
+		// authored in pixels and drawn in metres, so they resolve against this one number.
+		const metresPerPixel = view.viewDiameter / Math.min(width, height);
 		gl.clearColor(...MAP_VOID_COLOR, 1);
 		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 		// Outdoor terrain tiles without overlap, so Phase 1 needs neither depth nor culling. The
@@ -225,7 +234,12 @@ export class MapRenderer {
 			gl.uniform1f(uniforms.ambientLevel, MAP_AMBIENT_LEVEL);
 			gl.uniform3fv(uniforms.roadColor, MAP_ROAD_COLOR);
 			gl.uniform1f(uniforms.roadTintStrength, MAP_ROAD_TINT_STRENGTH);
-			gl.uniform3fv(uniforms.steepColor, MAP_STEEP_COLOR);
+			gl.uniform1f(uniforms.roadCasingPixels, MAP_ROAD_CASING_PIXELS);
+			gl.uniform1f(uniforms.roadCasingStrength, MAP_ROAD_CASING_STRENGTH);
+			gl.uniform1f(uniforms.roadWidth, RETAIL_ROAD_WIDTH);
+			gl.uniform1f(uniforms.tileLength, OUTDOOR_TERRAIN_TILE_SIZE);
+			gl.uniform1f(uniforms.metersPerPixel, metresPerPixel);
+			gl.uniform3fv(uniforms.impassableColor, MAP_IMPASSABLE_COLOR);
 			gl.uniform1f(uniforms.reliefExaggeration, MAP_RELIEF_EXAGGERATION);
 			gl.uniform3fv(
 				uniforms.contourSameLevelColor,
@@ -240,15 +254,19 @@ export class MapRenderer {
 				MAP_CONTOUR_MINIMUM_CLIMB_PER_PIXEL,
 			);
 			gl.uniform1f(uniforms.contourHeightSpan, MAP_CONTOUR_HEIGHT_SPAN);
-			// The map's own ink: a contour halo is the same dark the map clears to, so lines read as
-			// drawn on the terrain rather than as another colour competing with it.
-			gl.uniform3fv(uniforms.contourHaloColor, MAP_VOID_COLOR_VECTOR);
+			// The map's own ink, shared by the contour halo and the road casing: anything drawn on
+			// the terrain is the same dark the map clears to, so it reads as drawn on the ground
+			// rather than as another colour competing with it.
+			gl.uniform3fv(uniforms.inkColor, MAP_VOID_COLOR_VECTOR);
 			gl.uniform1f(uniforms.anchorHeight, view.anchor.worldY);
 			gl.uniform1f(
-				uniforms.steepHatchPeriodPixels,
-				MAP_STEEP_HATCH_PERIOD_PIXELS,
+				uniforms.impassableHatchPeriodPixels,
+				MAP_IMPASSABLE_HATCH_PERIOD_PIXELS,
 			);
-			gl.uniform1f(uniforms.steepHatchStrength, MAP_STEEP_HATCH_STRENGTH);
+			gl.uniform1f(
+				uniforms.impassableHatchStrength,
+				MAP_IMPASSABLE_HATCH_STRENGTH,
+			);
 			for (const buffers of this.#terrain.values()) {
 				gl.uniform2f(
 					uniforms.landblockOrigin,
@@ -259,7 +277,7 @@ export class MapRenderer {
 				gl.drawArrays(gl.TRIANGLES, 0, buffers.vertexCount);
 			}
 		}
-		this.#drawSurfaces(view, indoors);
+		this.#drawSurfaces(view, indoors, metresPerPixel);
 		gl.bindVertexArray(null);
 		return true;
 	}
@@ -271,7 +289,11 @@ export class MapRenderer {
 	 * outdoor geometry cannot overlap itself. Indoors it is the anchor's own interior component,
 	 * depth-tested against the anchor's level so a passage above a corridor resolves correctly.
 	 */
-	#drawSurfaces(view: MapViewParameters, indoors: boolean): void {
+	#drawSurfaces(
+		view: MapViewParameters,
+		indoors: boolean,
+		metresPerPixel: number,
+	): void {
 		const gl = this.#gl;
 		const uniforms = this.#surfaceProgram.uniforms;
 		gl.useProgram(this.#surfaceProgram.program);
@@ -292,8 +314,6 @@ export class MapRenderer {
 			// Stroke underneath, fill on top, so a rim of the first pass survives around the
 			// second. Expansion is a pixel width converted to metres, so a footprint stays outlined
 			// at every zoom instead of the outline thinning away as the map pulls back.
-			const metresPerPixel =
-				view.viewDiameter / Math.min(this.#canvas.width, this.#canvas.height);
 			gl.uniform3fv(uniforms.fillColor, MAP_BLOCKER_STROKE_COLOR);
 			for (const [
 				landblockId,
@@ -547,8 +567,9 @@ export class MapRenderer {
 		attribute(mesh.positions, MAP_TERRAIN_ATTRIBUTES.localPosition, 3, false);
 		attribute(mesh.normals, MAP_TERRAIN_ATTRIBUTES.normal, 3, false);
 		attribute(mesh.terrainCodes, MAP_TERRAIN_ATTRIBUTES.terrainCode, 1, true);
-		attribute(mesh.roadCoverage, MAP_TERRAIN_ATTRIBUTES.roadCoverage, 1, false);
-		attribute(mesh.walkable, MAP_TERRAIN_ATTRIBUTES.walkable, 1, false);
+		attribute(mesh.roadMask, MAP_TERRAIN_ATTRIBUTES.roadMask, 1, true);
+		attribute(mesh.passable, MAP_TERRAIN_ATTRIBUTES.passable, 1, false);
+		attribute(mesh.cellUv, MAP_TERRAIN_ATTRIBUTES.cellUv, 2, false);
 		gl.bindVertexArray(null);
 		return {
 			buffers,

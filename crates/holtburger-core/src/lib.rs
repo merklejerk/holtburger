@@ -67,6 +67,7 @@ pub use kinematic_boom::{
     KinematicBoomIntent, KinematicBoomOutcome, KinematicBoomPlacement, KinematicBoomProfile,
     KinematicBoomProfileDefinition, KinematicBoomProfileError, KinematicBoomReseedReason,
     KinematicBoomTargetSample, KinematicBoomTargetSeed, KinematicBoomUpdateAcceptance,
+    resolve_camera_pivot_offset,
 };
 pub use physical_body_definition::{
     FREE_SPHERE_FLY_CONFIG, RETAIL_DUMMY_MOTION_SPHERE, ResolvedBodyProfile,

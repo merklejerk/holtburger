@@ -191,19 +191,35 @@ export const FRONTEND_TUNING = {
 			road: { red: 0.85, green: 0.76, blue: 0.55 },
 			roadTintStrength: 0.85,
 			/**
-			 * Ground too steep to stand on: hatched, not merely tinted.
+			 * Dark rim drawn just outside the road fill, in pixels, and how much ink it carries.
+			 *
+			 * The same device the building footprints use, in the opposite polarity: they are a dark
+			 * mass needing a light stroke, a road is a light ribbon needing a dark one. Without it a
+			 * tan road crossing tan ground vanishes exactly where a reader needs it — inside a
+			 * settlement, where the ground is packed dirt the same colour as the road. Width is in
+			 * pixels, like the hatch period and the footprint stroke, so a road stays cased at every
+			 * zoom. Strength short of one keeps it a rim rather than a hard black outline.
+			 */
+			roadCasingPixels: 1.5,
+			roadCasingStrength: 0.55,
+			/**
+			 * Ground retail will not let a body onto: hatched, not merely tinted.
+			 *
+			 * Two unrelated rules land here, because the reader is asking one question. Ground too
+			 * steep to stand on is one; an entirely-water landblock is the other, and retail
+			 * refuses entry to those whole — which is why an ocean hatches while a pond does not.
 			 *
 			 * Hue is already carrying terrain type, roads, and the interior height ramp, so
 			 * impassability gets the free channel — pattern. Diagonal hatching is the cartographic
 			 * convention for a cliff, it survives colour blindness by construction, and it reads as
 			 * *impassable* where another dark tint would read as shadow. The stripes carry it
 			 * alone: ground between them is left exactly as it is, because a wash underneath only
-			 * darkened the slope without saying anything the stripes had not already said.
+			 * darkened the ground without saying anything the stripes had not already said.
 			 */
-			steep: { red: 0.9, green: 0.3, blue: 0.3 },
+			impassable: { red: 0.9, green: 0.3, blue: 0.3 },
 			/** Screen-space period of the hatch stripes, in pixels, and how opaque they are. */
-			steepHatchPeriodPixels: 7,
-			steepHatchStrength: 0.25,
+			impassableHatchPeriodPixels: 7,
+			impassableHatchStrength: 0.25,
 			/**
 			 * Contour lines, which carry the elevation that hillshade cannot.
 			 *

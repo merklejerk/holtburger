@@ -40,7 +40,7 @@
 		clampMapViewDiameter,
 		mapEnvironment,
 	} from "../lib/game/map/map-view";
-	import { formatExplorerOutdoorCoordinates } from "../explorer/explorer-camera-location";
+	import { formatWorldMapCoordinates } from "../lib/game/map/map-coordinates";
 	import {
 		captureMapPanelGpuDrawState,
 		mapPanelViewDiameter,
@@ -231,7 +231,7 @@
 		}
 		if (coordinatesElement) {
 			coordinatesElement.textContent = anchor
-				? formatExplorerOutdoorCoordinates({
+				? formatWorldMapCoordinates({
 						x: anchor.worldX,
 						z: anchor.worldZ,
 					})

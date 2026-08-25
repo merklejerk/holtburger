@@ -30,3 +30,24 @@ export function terrainCodeOf(sample: number): number {
 export function sceneTypeIndexOf(sample: number): number {
 	return sample >>> 11;
 }
+
+/**
+ * Inclusive bounds of the terrain types retail treats as water surfaces.
+ *
+ * Retail classifies water through a fixed 32-entry `SurfChar` table indexed by terrain type, which
+ * marks exactly types 0x10 through 0x14 — running water, standing fresh water, and the three sea
+ * classes (`LandDefs.TerrainType`). `CLandBlockStruct::CalcCellWater` reads only that table
+ * (acclient.c:339033-339072, where it appears as the unnamed `dword_7C9EC0`); the decoded values
+ * are ACE's `LandblockStruct.SurfChar`. Its Rust twin is `terrain_sample_is_water` in
+ * `crates/holtburger-content/src/terrain_collision.rs`; the range is duplicated only because it has
+ * to cross a language boundary, so change both or neither.
+ */
+export const WATER_TERRAIN_CODES = { first: 0x10, last: 0x14 } as const;
+
+/** Whether a terrain type is one of retail's water surfaces. */
+export function isWaterTerrainCode(terrainCode: number): boolean {
+	return (
+		terrainCode >= WATER_TERRAIN_CODES.first &&
+		terrainCode <= WATER_TERRAIN_CODES.last
+	);
+}

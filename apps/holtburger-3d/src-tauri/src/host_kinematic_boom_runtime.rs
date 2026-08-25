@@ -414,11 +414,16 @@ impl HostKinematicBoomRuntime {
             self.entities.has_possession(possession),
             "kinematic boom start targets a stale possession"
         );
-        let body = self
+        let target = self
             .simulation
-            .physical_body_snapshot(holtburger_world::SpatialBodyId::Entity(request.guid))
+            .physical_body_scene_snapshot(holtburger_world::SpatialBodyId::Entity(request.guid))
             .context("kinematic boom target has no physical body")?;
-        let collision = self.simulation.snapshot();
+        ensure!(
+            target.scene_residency == holtburger_world::PhysicalBodySceneResidency::Resident,
+            "kinematic boom target is outside current simulation interest"
+        );
+        let body = target.body;
+        let collision = target.collision;
         let selected = selected_target_sphere(&body)?;
         let seed = target_seed(
             &collision,
@@ -765,6 +770,9 @@ fn target_seed(
     })?;
     let cell = placement.committed_cell();
     if let Some(cell) = cell {
+        pose = pose
+            .reanchor_to_landblock_owner(landblock_key(cell))
+            .context("could not reanchor boom target into its committed EnvCell owner")?;
         pose.landblock_id = cell;
     } else {
         pose = pose.normalize_outdoor_landblock_frame()?;
@@ -865,7 +873,8 @@ fn path_point(position: WorldPosition, visual_pivot: WorldPosition) -> HostKinem
     }
 }
 
-/// Interpolate host-owned pivot positions without fabricating a presentation orientation.
+/// Interpolate coordinate-only pivot positions without fabricating residency or presentation
+/// orientation. The accepted EnvCell, when any, remains owned by the paired boom placement.
 fn interpolate_visual_pivot_position(
     start: WorldPosition,
     end: WorldPosition,

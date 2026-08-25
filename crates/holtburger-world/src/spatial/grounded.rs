@@ -8,7 +8,8 @@ use super::collision::{
     CellTransitRequest, CollisionScene, GroundedObstruction, GroundedObstructionRequest,
     MotionWaypoint, MovementRestrictionRequest, PlacementRequest, PlacementRestrictionRequest,
     SpatialMembership, SphereSweep, StaticContact, SupportContact, SupportFeature, SupportRequest,
-    anchor_point_to_outdoor_position, landblock_key, separating_displacement,
+    anchor_point_to_cell_position, anchor_point_to_outdoor_position, landblock_key,
+    separating_displacement,
 };
 
 /// Retail's minimum upward surface-normal component for walkable support.
@@ -1190,11 +1191,10 @@ fn pose_for_commit(
     original: WorldPosition,
     cell: Option<Guid>,
 ) -> WorldPosition {
-    let mut pose = anchor_point_to_outdoor_position(anchor, point, original.rotation);
-    if let Some(cell) = cell {
-        pose.landblock_id = cell;
-    }
-    pose
+    cell.map_or_else(
+        || anchor_point_to_outdoor_position(anchor, point, original.rotation),
+        |cell| anchor_point_to_cell_position(anchor, point, cell, original.rotation),
+    )
 }
 
 fn validate(config: GroundedConfig, request: &GroundedRequest) -> Result<()> {

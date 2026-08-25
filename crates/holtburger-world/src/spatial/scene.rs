@@ -1,5 +1,6 @@
 #[cfg(test)]
 use super::PhysicalCollisionFilter;
+use super::collision::CollisionQueryError;
 use super::collision_report::{
     CollisionReportContact, CollisionReportLifetimes, CollisionReportOutcome,
     CollisionReportSource, CollisionReportTouch,
@@ -338,7 +339,7 @@ impl SpatialScene {
     ) -> anyhow::Result<Vec<(SpatialBodyId, PhysicalBodyActuation)>> {
         // A failed replacement must not leave the prior epoch reusable.
         self.dynamic_pending_movers.clear();
-        self.refresh_all_dynamic_body_placements(collision);
+        self.refresh_all_dynamic_body_placements(collision)?;
         let next = DynamicShadowIndex::compile(self.body_store.bodies.values())?;
         let scheduled = self.scheduled_dynamic_entity_ids();
         let mut actuations = Vec::with_capacity(scheduled.len());
@@ -746,28 +747,44 @@ impl SpatialScene {
         &mut self,
         body_id: SpatialBodyId,
         collision: &CollisionScene,
-    ) -> bool {
+    ) -> anyhow::Result<()> {
         let Some(body) = self.body_store.body_mut(body_id) else {
-            return false;
+            return Ok(());
         };
         let Some(physical) = body.physical.as_mut() else {
-            return false;
+            return Ok(());
         };
         let Some(dynamic) = physical.dynamic.as_mut() else {
-            return false;
+            return Ok(());
         };
-        dynamic.placement = resolve_physical_body_placement(
+        let placement = match resolve_physical_body_placement(
             collision,
             body.pose,
             physical.definition,
             physical.response.cell(),
-        )
-        .expect("validated physical body produced invalid placement query geometry");
-        true
+        ) {
+            Ok(placement) => placement,
+            Err(CollisionQueryError::UnknownMotionCell { .. }) => {
+                // A scene-interest replacement may evict the dungeon containing this body while
+                // retaining the entity. Preserve its authored pose/cell, but keep it out of
+                // solving and dynamic-contact indexing until that topology is resident again.
+                dynamic.activity = DynamicBodyActivity::Suspended;
+                return Ok(());
+            }
+            Err(error) => return Err(error.into()),
+        };
+        dynamic.placement = placement;
+        if dynamic.activity == DynamicBodyActivity::Suspended {
+            dynamic.activity = DynamicBodyActivity::Active;
+        }
+        Ok(())
     }
 
     /// Re-derives exact domains for every dynamic body after loaded collision topology changes.
-    fn refresh_all_dynamic_body_placements(&mut self, collision: &CollisionScene) {
+    fn refresh_all_dynamic_body_placements(
+        &mut self,
+        collision: &CollisionScene,
+    ) -> anyhow::Result<()> {
         let body_ids = self
             .body_store
             .bodies
@@ -780,9 +797,9 @@ impl SpatialScene {
             })
             .collect::<Vec<_>>();
         for body_id in body_ids {
-            let refreshed = self.refresh_dynamic_body_placement(body_id, collision);
-            debug_assert!(refreshed, "captured dynamic body vanished during refresh");
+            self.refresh_dynamic_body_placement(body_id, collision)?;
         }
+        Ok(())
     }
 
     /// Advances one registered physical body without consulting content or interest policy.
@@ -964,7 +981,12 @@ impl SpatialScene {
             });
         let result = PhysicalBodyTickResult {
             motion: commit.motion.clone(),
-            scene_residency: physical_body_scene_residency(collision, commit.pose, definition),
+            scene_residency: physical_body_scene_residency(
+                collision,
+                commit.pose,
+                definition,
+                commit.response.cell(),
+            ),
             dynamic_state_change: projectile_state_change,
             collision_reports,
         };
@@ -1787,6 +1809,63 @@ mod physical_body_tests {
             .activity = DynamicBodyActivity::Settled;
         scene.wake_all_settled_dynamic_bodies();
         assert_eq!(dynamic_activity(&scene, id), DynamicBodyActivity::Active);
+    }
+
+    #[test]
+    fn missing_retained_env_cell_suspends_collection_until_topology_returns() {
+        let now = Instant::now();
+        let cell = Guid(0xda55_0100);
+        let id = SpatialBodyId::Entity(Guid(0x7000_0100));
+        let mut scene = SpatialScene::new();
+        scene.register_body(SpatialBody::new(
+            id,
+            WorldPosition {
+                landblock_id: cell,
+                ..pose(Vector3::new(96.0, 96.0, 20.0))
+            },
+            now,
+        ));
+        scene
+            .set_dynamic_physical_body(
+                id,
+                Some(dynamic_definition(
+                    free_definition(Vector3::zero(), 0.25),
+                    false,
+                )),
+                PhysicalCollisionFilter::ALL,
+                Some(cell),
+            )
+            .unwrap();
+
+        let absent = scene
+            .prepare_dynamic_entity_collection(&CollisionScene::new(), 0.1, collection_actuation)
+            .unwrap();
+        assert!(absent.is_empty());
+        assert_eq!(dynamic_activity(&scene, id), DynamicBodyActivity::Suspended);
+        scene
+            .finish_dynamic_entity_collection(now + Duration::from_millis(100))
+            .unwrap();
+
+        let collision = collision_scene(Some(0x0100));
+        let prepared = scene
+            .prepare_dynamic_entity_collection(&collision, 0.1, collection_actuation)
+            .unwrap();
+        assert_eq!(prepared.len(), 1);
+        assert_eq!(dynamic_activity(&scene, id), DynamicBodyActivity::Active);
+        let (body_id, actuation) = prepared.into_iter().next().unwrap();
+        scene
+            .tick_dynamic_physical_body_transaction(
+                body_id,
+                &collision,
+                actuation,
+                0.1,
+                now + Duration::from_millis(200),
+                |_, _| Ok(()),
+            )
+            .unwrap();
+        scene
+            .finish_dynamic_entity_collection(now + Duration::from_millis(200))
+            .unwrap();
     }
 
     #[test]
@@ -4122,6 +4201,66 @@ mod physical_body_tests {
     }
 
     #[test]
+    fn indoor_body_residency_uses_committed_cell_owner_not_crossed_coordinates() {
+        let cell = Guid(0xda55_0100);
+        let mut collision = CollisionScene::new();
+        collision
+            .insert(LandblockCollisionAsset {
+                landblock_id: 0xda55_ffff,
+                terrain: TerrainCollisionSurface::empty(),
+                static_geometry: LandblockColliders {
+                    colliders: Vec::new(),
+                    cell_volumes: vec![CellVolume {
+                        cell_selector: 0x0100,
+                        placement: LandblockPlacement {
+                            origin: Vector3::zero(),
+                            orientation: Quaternion::identity(),
+                        },
+                        planes: Vec::new(),
+                        portals: Vec::new(),
+                    }],
+                },
+            })
+            .unwrap();
+        let now = Instant::now();
+        let mut scene = SpatialScene::new();
+        let id = scene.register_ephemeral_body(
+            WorldPosition {
+                landblock_id: cell,
+                coords: Vector3::new(400.0, -400.0, 20.0),
+                rotation: Quaternion::identity(),
+            },
+            now,
+        );
+        scene
+            .install_physical_body(
+                id,
+                free_definition(Vector3::zero(), 0.25),
+                PhysicalCollisionFilter::ALL,
+                stable_policy(),
+                Some(cell),
+            )
+            .unwrap();
+
+        let result = scene
+            .tick_physical_body(
+                id,
+                &collision,
+                PhysicalBodyActuation::free_flight(Vector3::zero()).unwrap(),
+                0.1,
+                now + Duration::from_millis(100),
+            )
+            .unwrap();
+
+        assert_eq!(result.scene_residency, PhysicalBodySceneResidency::Resident);
+        assert_eq!(scene.body(id).unwrap().pose.landblock_id, cell);
+        assert_eq!(
+            scene.body(id).unwrap().pose.coords,
+            Vector3::new(400.0, -400.0, 20.0)
+        );
+    }
+
+    #[test]
     fn free_body_leaves_and_reenters_the_outdoor_landscape_without_a_snap() {
         let owner = Guid(0xfe55_ffff);
         let mut collision = CollisionScene::new();
@@ -4416,7 +4555,7 @@ mod physical_body_tests {
     }
 
     #[test]
-    fn missing_retained_env_cell_recovers_to_open_outdoor_space() {
+    fn missing_retained_env_cell_fails_loudly_without_outdoor_fallback() {
         let now = Instant::now();
         let cell = Guid(0xda55_0100);
         let mut scene = SpatialScene::new();
@@ -4436,7 +4575,7 @@ mod physical_body_tests {
                 Some(cell),
             )
             .unwrap();
-        let result = scene
+        let error = scene
             .tick_physical_body(
                 id,
                 &CollisionScene::new(),
@@ -4444,23 +4583,13 @@ mod physical_body_tests {
                 0.1,
                 now + Duration::from_millis(100),
             )
-            .unwrap();
-        assert_eq!(
-            result.scene_residency,
-            PhysicalBodySceneResidency::MissingOwner {
-                owner: Guid(0xda55_ffff)
-            }
+            .expect_err("an absent retained EnvCell must not become an outdoor placement");
+        assert!(
+            error
+                .to_string()
+                .contains("placed-motion EnvCell 0xDA550100 is absent from the collision scene")
         );
-        assert_eq!(
-            result
-                .motion
-                .path
-                .final_point()
-                .placement()
-                .committed_cell(),
-            None
-        );
-        assert!(!scene.body(id).unwrap().pose.is_indoors());
+        assert_eq!(scene.body(id).unwrap().pose.landblock_id, cell);
     }
 
     #[test]

@@ -89,7 +89,28 @@ export class HttpExplorerEntityHost {
 	ensureSimulationInterest(
 		anchorLandblockId: LandblockId,
 	): Promise<SimulationInterestReceipt> {
-		return this.#interest.request(anchorLandblockId);
+		return this.#interest.request(anchorLandblockId).then((receipt) => {
+			if (!receipt.committed) {
+				throw new Error(
+					`Collision interest for ${anchorLandblockId} was superseded before the operation could start.`,
+				);
+			}
+			if (!this.#interest.isCurrent(anchorLandblockId, receipt.revision)) {
+				throw new Error(
+					`Collision interest for ${anchorLandblockId} changed before the operation could start.`,
+				);
+			}
+			if (
+				receipt.unavailableLandblockIds.some(
+					(owner) => owner.toLowerCase() === anchorLandblockId.toLowerCase(),
+				)
+			) {
+				throw new Error(
+					`Collision content is unavailable for ${anchorLandblockId}.`,
+				);
+			}
+			return receipt;
+		});
 	}
 
 	async spawn(

@@ -29,7 +29,7 @@ export function farTerrainCutoffLandblocks(
 
 /** Terrain interest radius used to derive a stable presentation-only fog range. */
 export interface TerrainFogCoverage {
-	/** Chebyshev landblock radius selected for retained outdoor terrain. */
+	/** Chebyshev landblock radius selected for current outdoor terrain. */
 	readonly terrainRadius: number;
 }
 

@@ -8,7 +8,7 @@ use holtburger_common::{Guid, Vector3};
 use holtburger_content::{CollisionBox, LandblockPlacement, PlacedCollisionShape};
 
 use super::cell_index::GlobalCellRange;
-use super::{SpatialBody, SpatialBodyId, SpatialMembership};
+use super::{DynamicBodyActivity, SpatialBody, SpatialBodyId, SpatialMembership};
 use crate::EntityCollisionParticipation;
 
 /// Scene-owned dynamic equivalent of retail's outdoor and EnvCell shadow lists.
@@ -35,6 +35,9 @@ impl DynamicShadowIndex {
             else {
                 continue;
             };
+            if dynamic.activity == DynamicBodyActivity::Suspended {
+                continue;
+            }
             if dynamic.collision.dynamic_collision.target
                 == EntityCollisionParticipation::Suppressed
                 || dynamic.collision.dynamic_collision.missile

@@ -369,6 +369,11 @@ pub(crate) enum DynamicBodyActivity {
     Active,
     /// Stable support was accepted with no remaining root-motion work.
     Settled,
+    /// The body's retained collision topology is not in the current scene snapshot.
+    ///
+    /// The pose and authored EnvCell remain authoritative, but the body cannot be solved or
+    /// offered as a dynamic-contact target until its collision product is resident again.
+    Suspended,
 }
 
 /// Dynamic-only physical state kept as one invariant-bearing optional unit.
@@ -1479,11 +1484,21 @@ fn validate_finite_velocity(
 }
 
 /// Derives non-gating collision residency from the final primary-sphere owner exactly once.
-pub(super) fn physical_body_scene_residency(
+pub fn physical_body_scene_residency(
     scene: &CollisionScene,
     pose: WorldPosition,
     definition: PhysicalBodyDefinition,
+    committed_cell: Option<Guid>,
 ) -> PhysicalBodySceneResidency {
+    if let Some(cell) = committed_cell {
+        let owner = Guid((cell.0 & 0xffff_0000) | 0xffff);
+        return if scene.contains_env_cell(cell) {
+            PhysicalBodySceneResidency::Resident
+        } else {
+            PhysicalBodySceneResidency::MissingOwner { owner }
+        };
+    }
+
     let anchor = Guid((pose.landblock_id.0 & 0xffff_0000) | 0xffff);
     let primary = definition.spheres().primary();
     let center = pose.coords + pose.rotation.rotate_vector(primary.center);

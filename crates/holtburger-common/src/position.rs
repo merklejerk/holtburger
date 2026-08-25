@@ -38,6 +38,8 @@ pub struct WorldPosition {
 pub enum WorldPositionReanchorError {
     /// A null source has no meaningful outdoor landblock frame.
     NullSource,
+    /// Outdoor normalization was requested while the position still names an EnvCell.
+    IndoorSource(Guid),
     /// The target must identify a normalized `0xFFFF` landblock owner.
     InvalidTargetOwner(Guid),
 }
@@ -46,6 +48,11 @@ impl fmt::Display for WorldPositionReanchorError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NullSource => formatter.write_str("cannot reanchor a null world position"),
+            Self::IndoorSource(cell) => write!(
+                formatter,
+                "cannot normalize indoor world position 0x{:08X} as an outdoor landblock",
+                cell.0
+            ),
             Self::InvalidTargetOwner(owner) => write!(
                 formatter,
                 "world-position reanchor target 0x{:08X} is not a normalized landblock owner",
@@ -145,6 +152,11 @@ impl WorldPosition {
     pub fn normalize_outdoor_landblock_frame(self) -> Result<Self, WorldPositionReanchorError> {
         if self.landblock_id == Guid::NULL {
             return Err(WorldPositionReanchorError::NullSource);
+        }
+        // `0xXXYYFFFF` is the authored landblock-owner frame used for coordinate-only math; it
+        // is not an indoor EnvCell selector even though its low word is numerically above 0x100.
+        if self.is_indoors() && self.landblock_id.0 & 0xffff != 0xffff {
+            return Err(WorldPositionReanchorError::IndoorSource(self.landblock_id));
         }
         let Some(target) = outdoor_landblock_owner_at(self.landblock_id, self.coords) else {
             return Ok(self);
@@ -331,6 +343,35 @@ mod tests {
         assert_eq!(normalized.global_coords(), original.global_coords());
         assert_eq!(normalized.landblock_coords(), (0xdb, 0x54));
         assert_eq!(normalized.coords, Vector3::new(0.25, 191.75, 4.0));
+    }
+
+    #[test]
+    fn outdoor_frame_normalization_rejects_an_indoor_source() {
+        let indoor = WorldPosition {
+            landblock_id: Guid(0x0007_0100),
+            coords: Vector3::new(944.5, -1595.0, -12.0),
+            rotation: Quaternion::identity(),
+        };
+
+        assert_eq!(
+            indoor.normalize_outdoor_landblock_frame(),
+            Err(WorldPositionReanchorError::IndoorSource(Guid(0x0007_0100)))
+        );
+    }
+
+    #[test]
+    fn outdoor_frame_normalization_accepts_an_owner_sentinel_source() {
+        let owner_frame = WorldPosition {
+            landblock_id: Guid(0x0007_ffff),
+            coords: Vector3::new(200.0, -40.0, -12.0),
+            rotation: Quaternion::identity(),
+        };
+
+        let normalized = owner_frame
+            .normalize_outdoor_landblock_frame()
+            .expect("owner sentinel is a valid coordinate-only source");
+        assert!(!normalized.is_indoors());
+        assert_eq!(normalized.global_coords(), owner_frame.global_coords());
     }
 
     #[test]

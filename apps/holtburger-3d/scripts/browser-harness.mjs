@@ -3162,7 +3162,6 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			await delay(250);
 		}
 		if (
-			options.possessionScenario &&
 			options.envCellCameraId !== null &&
 			options.envCellCameraPosition !== null
 		) {
@@ -4075,7 +4074,7 @@ async function waitForRequiredEnvCellPublication(client, requestedLandblockId) {
 		[],
 	);
 	if (
-		!state.sceneInterest?.effective?.some(({ layers }) =>
+		!state.sceneInterest?.interest?.some(({ layers }) =>
 			layers.includes("env-cells"),
 		)
 	) {

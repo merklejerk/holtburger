@@ -94,6 +94,21 @@ describe("Explorer entity commands", () => {
 		});
 	});
 
+	it("uses an outdoor owner frame instead of treating the frontend owner sentinel as an EnvCell", () => {
+		const request = createExplorerSpawnRequest(
+			42,
+			{
+				position: sceneVec3(new Vec3(0, 30, 0)),
+				residency: { envCellId: null, landblockId: "0xda55ffff" },
+			},
+			[0, 2, 0],
+			5,
+			"pose-only",
+		);
+
+		expect(request.cameraPose.landblockId).toBe(0xda55_0000);
+	});
+
 	it("validates launch identity and direction without choosing speed", () => {
 		expect(createExplorerLaunchRequest(0xf0000001, 7, [3, 4, 0])).toEqual({
 			guid: 0xf0000001,

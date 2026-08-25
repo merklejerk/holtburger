@@ -1,7 +1,13 @@
 # Holtburger 3D Dungeon-Only Scene Interest Plan
 
 Date: 2026-08-24
-Status: original implementation complete; Phases 1-11 complete; Addendum A complete
+Status: original implementation complete; Phases 1-11 and Addendum A complete; retained-outdoor
+policy superseded by Addendum B
+
+> Historical note: the original plan intentionally retained the previous outdoor render window
+> during dungeon visits. Runtime evidence later proved that policy observable and unsafe when camera
+> authority targeted a still-registered entity outside current collision interest. Addendum B records
+> the clean replacement cutover; earlier retention sections remain as implementation history.
 
 ## Context And Boundaries
 
@@ -985,7 +991,7 @@ During execution, stop and request direction only if evidence shows one of the f
 
 ## Addendum A: Suppress Dungeon EnvCells From Ambient Outdoor Interest
 
-Status: implementation complete; verification in progress
+Status: implementation and verification complete
 
 ### Context And Goal
 
@@ -1299,3 +1305,70 @@ tests.
 No product or architecture question currently blocks implementation. During execution, stop and
 request direction only if measured profile fanout makes outdoor follow visibly regress or production
 evidence shows `5f50` does not retain outdoor terrain under an explicit outdoor request.
+
+---
+
+## Addendum B: Replace The Complete Render Scene On Every Explicit Target
+
+Status: implementation and verification complete
+
+### Evidence And Correction
+
+The retained-outdoor policy was intentionally bounded, but it was not semantically inert. After
+loading outdoor `da55`, spawning an entity, and selecting dungeon `0007`, the application had five
+different answers to “what world is current”:
+
+- the resolved scene target was `0007`;
+- collision simulation interest contained `0007` and evicted `da55`;
+- render demand contained both `0007` and the retained `da55` outdoor window;
+- the Explorer entity registry still contained the explicitly spawned `da55` entity; and
+- possession accepted that remote entity and let the boom camera publish a `da55` outdoor pose.
+
+The entity registry is correctly independent from static streaming: future server-authored entity
+lifetime must be driven by spawn/despawn authority. The render component union was not required for
+that separation. It made stale presentation observable and allowed an invalid camera handoff to look
+like a coherent scene transition.
+
+The corrected invariant is:
+
+```text
+resolved scene target -> one complete render-interest replacement
+resolved scene target -> one complete collision-interest replacement
+entity authority       -> independent semantic lifetime
+possession/boom         -> target must be resident in current collision snapshot
+```
+
+### Implementation
+
+- `GameRuntime` owns one current `SceneInterestMap`; outdoor and dungeon planners each produce a
+  complete replacement.
+- Dungeon selection clears outdoor terrain-fog coverage and evicts every outdoor layer absent from
+  the dungeon map.
+- The retired `SceneInterestComponents`, union helper, component diagnostics, and harness fields were
+  deleted.
+- The host exposes one atomic body/collision/residency snapshot using the world-owned canonical
+  `physical_body_scene_residency` decision.
+- Explorer possession rejects missing collision owners before changing possession authority.
+- Boom startup repeats the residency check against the exact collision snapshot used to seed its
+  controller, covering interest movement after possession was accepted.
+
+### Acceptance Criteria
+
+- [x] Outdoor-to-dungeon and dungeon-to-outdoor transitions reacquire and evict layers through normal
+      replacement diffs.
+- [x] No render-demand component can survive a newer scene target.
+- [x] Spawned entities survive until explicit despawn/reset but cannot be possessed outside current
+      collision interest.
+- [x] Boom startup cannot publish a path for a target outside its collision snapshot.
+- [x] Current diagnostics expose one interest map and one resolved target.
+- [x] Complete frontend, Rust, lint, formatting, and production-harness gates pass.
+
+### Verification Evidence
+
+- The complete selected Rust suites passed 932 tests, including direct rejection of remote physical
+  possession and boom startup after collision-interest movement.
+- The complete Explorer frontend suite passed 1,460 tests across 190 files; Svelte/TypeScript checks,
+  ESLint, Knip, Prettier, rustfmt, and clippy with warnings denied passed.
+- Settled and immediate production-content `da55 -> 0007` harness transitions both reported exactly
+  `0x0007ffff/env-cells`, zero terrain frame inputs, zero outdoor light scopes, and no browser page
+  errors or exceptions.

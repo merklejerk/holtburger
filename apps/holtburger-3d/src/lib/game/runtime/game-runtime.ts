@@ -197,9 +197,7 @@ import {
 	computeDungeonSceneInterest,
 	isOutdoorStaticLayer,
 	LandblockLayerKind,
-	unionSceneInterestComponents,
 	type OutdoorStaticLayerKind,
-	type SceneInterestComponents,
 	type StaticLayerKind,
 	type SceneInterestMap,
 	type SceneInterestRequest,
@@ -776,10 +774,8 @@ export class GameRuntime {
 	#frameSettings: FrameSettings = DEFAULT_FRAME_SETTINGS;
 	/** Terrain interest constraining the frontend's effective distance-fog range. */
 	#terrainFogCoverage: TerrainFogCoverage | null = null;
-	/** Retained outdoor demand; dungeon requests do not mutate this component. */
-	#retainedOutdoorInterest: SceneInterestMap = new Map();
-	/** One active dungeon owner demand, or empty while an outdoor target is active. */
-	#activeDungeonInterest: SceneInterestMap = new Map();
+	/** Complete static demand selected by the latest accepted scene target. */
+	#sceneInterest: SceneInterestMap = new Map();
 	/** Last resolved target accepted by this runtime, for diagnostics and consumer policy. */
 	#resolvedSceneInterestTarget: ResolvedSceneInterestTarget | null = null;
 	/** Prevents new work and late async publication after runtime shutdown begins. */
@@ -1581,51 +1577,43 @@ export class GameRuntime {
 		this.#resolvedSceneInterestTarget = request.target;
 		if (request.target.kind === "outdoor") {
 			const landblockId = request.target.requested.landblockId;
-			this.#retainedOutdoorInterest = computeOutdoorSceneInterest(
+			this.#sceneInterest = computeOutdoorSceneInterest(
 				landblockId,
 				request.radii,
 				request.ambientOutdoorEnvCellOwners,
 			);
-			this.#activeDungeonInterest = new Map();
 			this.#terrainFogCoverage = {
 				terrainRadius: request.radii.terrainRadius,
 			};
 		} else {
-			this.#activeDungeonInterest = computeDungeonSceneInterest(
+			this.#sceneInterest = computeDungeonSceneInterest(
 				request.target.requested.landblockId,
 			);
+			this.#terrainFogCoverage = null;
 		}
-		return this.#applySceneInterest(
-			unionSceneInterestComponents(this.#sceneInterestComponents()),
-		);
+		return this.#applySceneInterest(this.#sceneInterest);
 	}
 
 	/** Evict every requested static layer without moving the camera. */
 	clearSceneInterest(): SceneInterestReceipt {
 		this.#terrainFogCoverage = null;
-		this.#retainedOutdoorInterest = new Map();
-		this.#activeDungeonInterest = new Map();
+		this.#sceneInterest = new Map();
 		this.#resolvedSceneInterestTarget = null;
-		return this.#applySceneInterest(new Map());
+		return this.#applySceneInterest(this.#sceneInterest);
 	}
 
-	/** Snapshot logical demand components and their effective union for diagnostics and harnesses. */
-	sceneInterestComponents(): {
-		readonly activeDungeon: SceneInterestMap;
-		readonly effective: SceneInterestMap;
-		readonly retainedOutdoor: SceneInterestMap;
+	/** Snapshot the current replacement demand and resolved target for diagnostics and harnesses. */
+	sceneInterestState(): {
+		readonly interest: SceneInterestMap;
 		readonly resolvedTarget: ResolvedSceneInterestTarget | null;
 	} {
-		const components = this.#sceneInterestComponents();
 		return {
-			activeDungeon: cloneSceneInterest(components.activeDungeon),
-			effective: unionSceneInterestComponents(components),
-			retainedOutdoor: cloneSceneInterest(components.retainedOutdoor),
+			interest: cloneSceneInterest(this.#sceneInterest),
 			resolvedTarget: this.#resolvedSceneInterestTarget,
 		};
 	}
 
-	/** Snapshot the retained outdoor fog coverage without exposing mutable runtime state. */
+	/** Snapshot current outdoor fog coverage without exposing mutable runtime state. */
 	terrainFogCoverage(): TerrainFogCoverage | null {
 		return this.#terrainFogCoverage === null
 			? null
@@ -2274,13 +2262,6 @@ export class GameRuntime {
 
 	#applySceneInterest(interest: SceneInterestMap): SceneInterestReceipt {
 		return this.#sceneInterestCoordinator.reconcile(interest);
-	}
-
-	#sceneInterestComponents(): SceneInterestComponents {
-		return {
-			activeDungeon: this.#activeDungeonInterest,
-			retainedOutdoor: this.#retainedOutdoorInterest,
-		};
 	}
 
 	#drainCommitArtifacts(): void {

@@ -78,8 +78,9 @@ pub use spatial::{
     SpatialSampleMode, SpatialSamplingConfig, SpatialSamplingState, SpatialScene,
     SpatialSolveBatch, SpatialSolveRequest, SphereSweep, StaticContact, StaticSphereSweepHit,
     StaticSphereSweepRequest, SupportContact, SupportFeature, SupportRequest,
-    advance_body_kinematics, gate_authored_offset, project_pose_forward_distance,
-    resolve_physical_body_cell, settle_free_sphere, solve_free_sphere, solve_grounded,
+    advance_body_kinematics, gate_authored_offset, physical_body_scene_residency,
+    project_pose_forward_distance, resolve_physical_body_cell, settle_free_sphere,
+    solve_free_sphere, solve_grounded,
 };
 pub use state::{
     MotionCommandKinematics, MotionTableMovementProfile, PlayerMotionTableLookupError,

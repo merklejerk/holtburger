@@ -1172,6 +1172,13 @@ impl CollisionScene {
         &self,
         request: CellTransitRequest,
     ) -> Result<SpatialMembership, CollisionQueryError> {
+        if let Some(previous_cell) = request.previous_cell
+            && !self.contains_env_cell(previous_cell)
+        {
+            return Err(CollisionQueryError::UnknownMotionCell {
+                cell: previous_cell.0,
+            });
+        }
         let sweep = SphereSweep {
             anchor: request.anchor,
             start: request.center,
@@ -2509,6 +2516,20 @@ fn anchor_to_landblock(point: Vector3, anchor: Guid, landblock: Guid) -> Vector3
     )
 }
 
+/// Converts an anchor-local point into the authored frame of a committed EnvCell.
+pub(super) fn anchor_point_to_cell_position(
+    anchor: Guid,
+    point: Vector3,
+    cell: Guid,
+    rotation: holtburger_common::Quaternion,
+) -> WorldPosition {
+    WorldPosition {
+        landblock_id: cell,
+        coords: anchor_to_landblock(point, anchor, cell),
+        rotation,
+    }
+}
+
 /// Converts an anchor-local point into an outdoor pose without large absolute f32 coordinates.
 pub(super) fn anchor_point_to_outdoor_position(
     anchor: Guid,
@@ -3317,6 +3338,34 @@ mod tests {
             }])),
             Err(CollisionQueryError::IncompleteMotionPath)
         );
+    }
+
+    #[test]
+    fn stationary_transit_rejects_an_absent_prior_env_cell() {
+        let scene = CollisionScene::new();
+
+        assert_eq!(
+            scene.transit_cell(CellTransitRequest {
+                previous_cell: Some(Guid(0xda55_0100)),
+                anchor: Guid(0xda55_ffff),
+                center: Vector3::zero(),
+                radius: 0.3,
+            }),
+            Err(CollisionQueryError::UnknownMotionCell { cell: 0xda55_0100 })
+        );
+    }
+
+    #[test]
+    fn committed_cell_pose_reanchors_from_the_comparison_anchor() {
+        let pose = anchor_point_to_cell_position(
+            Guid(0xda55_ffff),
+            Vector3::new(20.0, -40.0, 2.0),
+            Guid(0xdb56_0100),
+            Quaternion::identity(),
+        );
+
+        assert_eq!(pose.landblock_id, Guid(0xdb56_0100));
+        assert_eq!(pose.coords, Vector3::new(-172.0, -232.0, 2.0));
     }
 
     #[test]

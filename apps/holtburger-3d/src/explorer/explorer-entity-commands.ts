@@ -264,9 +264,7 @@ function createCameraRelativeEntityCandidate(
 	const identityRotation = { w: 1, x: 0, y: 0, z: 0 } as const;
 	return {
 		cameraPose: {
-			landblockId: numericCellId(
-				placement.residency.envCellId ?? placement.residency.landblockId,
-			),
+			landblockId: numericCameraLandblockId(placement),
 			coords: cameraCoords,
 			// The host consumes this pose as coordinate anchor and portal history; candidate
 			// orientation is an independent Explorer policy below.
@@ -310,4 +308,17 @@ function numericCellId(value: string): number {
 	if (!/^[0-9a-fA-F]{8}$/.test(digits))
 		throw new Error(`Invalid cell id ${value}.`);
 	return Number.parseInt(digits, 16) >>> 0;
+}
+
+/** Convert frontend residency into the host's frame selector without mistaking an owner sentinel
+ * for an indoor EnvCell. Outdoor frontend residency uses `0xXXYYFFFF` as an owner key; a host
+ * WorldPosition uses the high-word-only frame until outdoor cell normalization commits a cell.
+ */
+function numericCameraLandblockId(placement: HostCameraPlacement): number {
+	const residencyId = numericCellId(
+		placement.residency.envCellId ?? placement.residency.landblockId,
+	);
+	return placement.residency.envCellId === null
+		? (residencyId & 0xffff_0000) >>> 0
+		: residencyId;
 }

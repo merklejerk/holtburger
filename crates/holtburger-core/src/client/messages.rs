@@ -1,8 +1,9 @@
+use super::movement::{CorrectionDisposition, ServerPositionUpdate};
 use super::{ClientRuntime, types::*};
 use anyhow::Result;
 use holtburger_common::ConfirmationType;
 use holtburger_common::properties::WorldObjectExt as _;
-use holtburger_protocol::errors::WeenieError;
+use holtburger_protocol::errors::{CharacterError, WeenieError};
 use holtburger_protocol::messages::*;
 use holtburger_protocol::traits::ProtocolUnpack;
 use holtburger_world::RuntimeBodyResetCause;
@@ -21,6 +22,65 @@ fn confirmation_done_requires_auto_response(confirmation_type: ConfirmationType)
 }
 
 impl ClientRuntime {
+    fn apply_local_position_correction(
+        &mut self,
+        position: holtburger_common::position::WorldPosition,
+        contact: bool,
+        known_teleport_sequence: u16,
+        teleport_sequence: u16,
+        discontinuity_already_handled: bool,
+    ) -> Vec<WorldEvent> {
+        let guid = self.world.player.guid;
+        if guid == holtburger_common::Guid::NULL {
+            return Vec::new();
+        }
+
+        let current = self.world.local_player_runtime_pose().unwrap_or(position);
+        let has_cell = self
+            .world
+            .runtime_body_view(holtburger_world::SpatialBodyId::LocalPlayer(guid))
+            .is_some_and(|body| body.runtime_pose.landblock_id != holtburger_common::Guid::NULL);
+        let update = ServerPositionUpdate {
+            pose: position,
+            teleport_sequence,
+            contact,
+            distance: current.distance_to(&position),
+            is_moving_to: self.movement.has_server_controlled_projection(),
+        };
+        let disposition = self.movement.accept_server_position_update(
+            update,
+            current,
+            known_teleport_sequence,
+            has_cell,
+        );
+
+        match disposition {
+            CorrectionDisposition::Ignored | CorrectionDisposition::Interpolate { .. } => {
+                Vec::new()
+            }
+            CorrectionDisposition::HardSet | CorrectionDisposition::Snap => {
+                // A direct placement is a local timeline discontinuity. The authoritative pose
+                // was already updated by WorldState; only the runtime body and downstream camera
+                // need the explicit reset here.
+                let events = self.world.set_local_player_runtime_pose(position);
+                if !discontinuity_already_handled {
+                    self.reset_camera();
+                    if let Some(coordinator) = self.collision_coordinator.as_mut() {
+                        coordinator.invalidate();
+                    }
+                    self.bump_world_generation();
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::WorldDiscontinuity {
+                            world_generation: self.world_generation,
+                            kind: ClientWorldDiscontinuityKind::ForcedReposition,
+                        });
+                }
+                events
+            }
+        }
+    }
+
     pub(super) async fn begin_world_entry_transition(&mut self) -> Result<()> {
         let reset_events = self
             .world
@@ -47,6 +107,10 @@ impl ClientRuntime {
         let mut pending_events = initial_events;
 
         while !pending_events.is_empty() {
+            let discontinuity_already_handled = pending_events.iter().any(|event| {
+                matches!(event, WorldEvent::RuntimeBodiesReset { .. } | WorldEvent::TeleportStarted { .. })
+                    || matches!(event, WorldEvent::ForcedReposition { guid, .. } if *guid == self.world.player.guid)
+            });
             for event in &pending_events {
                 self.handle_runtime_world_event(event);
             }
@@ -72,13 +136,27 @@ impl ClientRuntime {
                         follow_up_events.extend(world_events);
                     }
                     WorldEvent::SelfUpdatePosition {
+                        position,
+                        contact,
+                        known_teleport_sequence,
+                        teleport_sequence,
                         force_position_sequence,
                         ..
                     } => {
                         self.movement
                             .record_force_position_sequence(force_position_sequence);
+                        follow_up_events.extend(self.apply_local_position_correction(
+                            position,
+                            contact,
+                            known_teleport_sequence,
+                            teleport_sequence,
+                            discontinuity_already_handled,
+                        ));
                     }
                     WorldEvent::SelfAutonomousPosition {
+                        position,
+                        contact,
+                        known_teleport_sequence,
                         teleport_sequence,
                         force_position_sequence,
                         server_control_sequence,
@@ -88,6 +166,13 @@ impl ClientRuntime {
                             force_position_sequence,
                             server_control_sequence,
                         );
+                        follow_up_events.extend(self.apply_local_position_correction(
+                            position,
+                            contact,
+                            known_teleport_sequence,
+                            teleport_sequence,
+                            discontinuity_already_handled,
+                        ));
                     }
                     _ => {}
                 }
@@ -142,6 +227,7 @@ impl ClientRuntime {
             GameMessage::UpdateMotion(_) => Ok(()),
             GameMessage::AutonomousPosition(_) => Ok(()),
             GameMessage::CharacterList(data) => {
+                self.authenticating = false;
                 self.character_selection.characters = data.characters.clone();
                 self.turbine_chat.enabled = data.use_turbine_chat;
                 if !data.use_turbine_chat {
@@ -182,6 +268,15 @@ impl ClientRuntime {
                 Ok(())
             }
             GameMessage::CharacterEnterWorldServerReady => {
+                if let Some(guid) = self.character_selection.character_id
+                    && !self.character_selection.enter_world_sent
+                {
+                    let account = self.character_selection.account_name.clone();
+                    self.character_selection
+                        .send_character_enter_world(guid, account, &mut self.session)
+                        .await?;
+                    self.character_selection.enter_world_sent = true;
+                }
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::CharacterEnterWorldServerReady);
@@ -506,10 +601,20 @@ impl ClientRuntime {
                     ActionResultSource::Wire,
                     ActionResultReason::Character(error),
                 );
+                // ACE terminates an already-logged-in account with CharacterError.Logon. Treat
+                // this authentication edge as a typed server disconnect instead of leaving the
+                // client waiting for the generic receive timeout.
+                if error == CharacterError::Logon && self.authenticating {
+                    self.authenticating = false;
+                    self.set_exit_cause(ClientExitCause::ServerDisconnect);
+                    self.state = ClientState::Disconnected;
+                    self.send_status_event();
+                }
                 Ok(())
             }
             GameMessage::AccountBoot(data) => {
                 let reason = self.character_selection.handle_boot_account(*data);
+                self.set_exit_cause(ClientExitCause::ServerDisconnect);
                 self.state = ClientState::Disconnected;
                 self.send_status_event();
                 let _ = self
@@ -600,7 +705,7 @@ impl ClientRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::{ClientState, builder};
+    use crate::client::{ClientState, PHYSICS_TICK_MS, builder};
     use holtburger_common::position::WorldPosition;
     use holtburger_common::{CharacterOptions1, CharacterOptions2, ConfirmationType, Quaternion};
     use holtburger_protocol::errors::WeenieError;
@@ -836,7 +941,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn character_enter_world_server_ready_surfaces_view_event_without_auto_entering() {
+    async fn character_enter_world_server_ready_completes_entry_in_core() {
         let mut client = build_test_client();
         let mut events = client.subscribe_client_view_events();
         client.character_selection.character_id = Some(holtburger_common::Guid(0x5000_0001));
@@ -854,7 +959,8 @@ mod tests {
         }
 
         assert!(saw_ready);
-        assert_eq!(client.session.bytes_out, 0);
+        assert!(client.session.bytes_out > 0);
+        assert_eq!(client.session.packet_sequence, 2);
     }
 
     #[tokio::test]
@@ -877,7 +983,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn server_controlled_move_to_position_flows_through_world_apply() {
+    async fn server_controlled_move_to_position_registers_deferred_projection() {
         let mut client = build_test_client();
         let player_guid = holtburger_common::Guid(0x50000001);
         let start = WorldPosition {
@@ -913,11 +1019,18 @@ mod tests {
             .world
             .scene
             .body(holtburger_world::SpatialBodyId::LocalPlayer(player_guid))
-            .expect("server-controlled movement should update the local runtime body");
-        assert_eq!(body.pose.landblock_id, destination.landblock_id);
-        assert_eq!(body.pose.coords, destination.coords);
-        assert!((body.pose.rotation.to_heading() - 90.0_f32.to_radians()).abs() < 1e-5);
-        assert_eq!(client.session.packet_sequence, 2);
+            .expect("server-controlled movement should retain the local runtime body");
+        assert_eq!(body.pose, start);
+        let step = client
+            .movement
+            .advance_server_interpolation(
+                &client.world,
+                std::time::Duration::from_millis(PHYSICS_TICK_MS),
+            )
+            .expect("server-controlled movement should install an interpolation target");
+        assert_eq!(step.target, destination);
+        assert!(step.translation.length_squared() > 0.0);
+        assert_eq!(client.session.packet_sequence, 1);
     }
 
     #[tokio::test]
@@ -1283,5 +1396,38 @@ mod tests {
         }
 
         assert!(saw_completion);
+    }
+
+    #[tokio::test]
+    async fn logon_character_error_terminates_authentication_as_server_disconnect() {
+        let mut client = build_test_client();
+        let mut events = client.subscribe_client_view_events();
+        client.authenticating = true;
+
+        let encoded = encode_message(&GameMessage::CharacterError(Box::new(CharacterErrorData {
+            error_id: CharacterError::Logon as u32,
+        })));
+        client.handle_message(&encoded).await.unwrap();
+
+        assert_eq!(client.state, ClientState::Disconnected);
+        assert_eq!(
+            client.lifecycle(),
+            ClientLifecycleState::Exiting {
+                cause: ClientExitCause::ServerDisconnect,
+            }
+        );
+        let mut saw_exit = false;
+        while let Ok(event) = events.try_recv() {
+            if matches!(
+                event,
+                ClientViewEvent::LifecycleChanged(ClientLifecycleState::Exiting {
+                    cause: ClientExitCause::ServerDisconnect,
+                })
+            ) {
+                saw_exit = true;
+                break;
+            }
+        }
+        assert!(saw_exit);
     }
 }

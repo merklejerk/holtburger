@@ -1,3 +1,7 @@
+use crate::client::camera::{
+    ClientCameraClearanceRequest, ClientCameraIdentity, ClientCameraIntentRequest,
+    ClientCameraStartRequest,
+};
 use crate::client::movement_types::PlayerDriveIntent;
 use holtburger_common::properties::DamageType;
 use holtburger_common::{
@@ -31,7 +35,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::DynamicEntityEvent;
+use crate::{DynamicEntityEvent, DynamicEntitySnapshot};
 
 pub use holtburger_world::WorldEvent;
 
@@ -176,6 +180,79 @@ pub enum ClientState {
     Disconnected,
 }
 
+/// The small lifecycle vocabulary a client shell can render and reconstruct.
+///
+/// The broad [`ClientState`] remains the authority-facing API used by the TUI. This value is the
+/// deliberate, lossless-enough projection used by other shells; its variants keep character
+/// identity and pending-entry state together instead of exposing interdependent optionals.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClientLifecycleState {
+    Connecting,
+    Authenticating,
+    CharacterSelection {
+        characters: Vec<ClientCharacterSummary>,
+    },
+    EnteringWorld {
+        character_guid: Guid,
+    },
+    InWorld {
+        player_guid: Guid,
+    },
+    Exiting {
+        cause: ClientExitCause,
+    },
+}
+
+/// Existing-character identity needed by the first-cut selection screen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientCharacterSummary {
+    /// Server-assigned character identity used for world entry.
+    pub guid: Guid,
+    /// Server-provided character name.
+    pub name: String,
+    /// Stable ordinal in the server-provided character list.
+    pub slot: u32,
+    /// Server deletion timestamp; zero denotes an active character.
+    pub delete_time: u32,
+}
+
+/// Terminal cause retained for diagnostics and process-exit policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClientExitCause {
+    ExplicitDisconnect,
+    ServerDisconnect,
+    StartupFailure,
+    RuntimeFailure,
+    HostShutdown,
+}
+
+/// Discontinuity edge that invalidates interpolation and camera history.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClientWorldDiscontinuityKind {
+    Teleport,
+    ForcedReposition,
+    Reset,
+}
+
+/// One atomic, core-owned replacement level for client shells.
+///
+/// Runtime bodies stay in the core value for the existing TUI and authority tests. Desktop
+/// adapters deliberately project only the focused dynamic snapshot, lifecycle, time, and
+/// generation fields rather than putting the broad body representation on their wire.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClientApplicationSnapshot {
+    /// Complete shell-facing lifecycle level.
+    pub lifecycle: ClientLifecycleState,
+    /// Synchronized server time, absent before the first time-sync event.
+    pub server_time: Option<f64>,
+    /// Monotonic presentation generation invalidating pre-discontinuity history.
+    pub world_generation: u64,
+    /// Complete focused dynamic-entity replacement level.
+    pub dynamic: DynamicEntitySnapshot,
+    /// Broad runtime-body replacement retained for authority-facing clients such as the TUI.
+    pub runtime_bodies: Arc<[RuntimeSpatialBodyView]>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CharacterManagementOperation {
     Create,
@@ -259,6 +336,10 @@ pub enum BusyOperationResult {
 
 #[derive(Debug, Clone)]
 pub enum ClientViewEvent {
+    /// Complete application-level replacement state for a shell remount or receiver recovery.
+    ApplicationSnapshot(ClientApplicationSnapshot),
+    /// Source-neutral lifecycle projection emitted whenever the authoritative client state changes.
+    LifecycleChanged(ClientLifecycleState),
     StatusUpdate {
         state: ClientState,
     },
@@ -346,6 +427,14 @@ pub enum ClientViewEvent {
     },
     /// Focused reconstructible entity presentation feed carried inside the broader client surface.
     DynamicEntity(DynamicEntityEvent),
+    /// Client-owned collision-safe camera placement, published after the matching entity advance.
+    Camera(crate::client::ClientCameraTick),
+    /// Receipt for a newly registered client camera generation.
+    CameraStarted(crate::client::ClientCameraStartReceipt),
+    WorldDiscontinuity {
+        world_generation: u64,
+        kind: ClientWorldDiscontinuityKind,
+    },
     PlayerGroundedUpdated {
         grounded: bool,
     },
@@ -456,10 +545,6 @@ pub enum ClientViewEvent {
 pub enum ClientCommand {
     Login(String),
     SelectCharacter(Guid),
-    SendCharacterEnterWorld {
-        guid: Guid,
-        account: String,
-    },
     CreateCharacter(Box<CharacterCreateRequestData>),
     DeleteCharacter {
         slot: u32,
@@ -490,7 +575,8 @@ pub enum ClientCommand {
     Suicide,
     EnterPkLite,
     Ping,
-    RequestInitialViewState,
+    RequestCurrentApplicationState,
+    Disconnect,
     SetFellowshipUpdatesSubscribed {
         enabled: bool,
     },
@@ -528,6 +614,10 @@ pub enum ClientCommand {
         amount: u32,
     },
     DriveSelf(PlayerDriveIntent),
+    StartClientCamera(ClientCameraStartRequest),
+    SetClientCameraIntent(ClientCameraIntentRequest),
+    SetClientCameraClearance(ClientCameraClearanceRequest),
+    StopClientCamera(ClientCameraIdentity),
     RaiseAttribute {
         attribute: AttributeType,
         xp_spent: u32,

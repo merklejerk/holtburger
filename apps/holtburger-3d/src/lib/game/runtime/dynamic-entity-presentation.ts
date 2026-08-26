@@ -13,10 +13,10 @@ import type {
 import type { SceneScope, SceneSpatialPlacement } from "../scene";
 
 /** Join one host-projected live entity with its separately resolved immutable visual closure. */
-export function adaptSpawnedDynamicPresentation(
+export function adaptDynamicEntityPresentation(
 	entity: DynamicEntityView,
 	visual: DecodedStaticPresentation,
-	placement = spawnedDynamicPlacement(entity),
+	placement = dynamicEntityPlacement(entity),
 ): PlacedDynamicPresentationSource {
 	const expectedSetupId = datAssetId(entity.presentation.content.setupDid);
 	if (visual.setupId?.toLowerCase() !== expectedSetupId) {
@@ -54,7 +54,7 @@ export function adaptSpawnedDynamicPresentation(
 }
 
 /** Convert one host-accepted AC pose without re-resolving portal residency in the frontend. */
-export function spawnedDynamicPlacement(
+export function dynamicEntityPlacement(
 	entity: DynamicEntityView,
 ): SceneSpatialPlacement {
 	if (entity.placement.kind !== "world") {
@@ -62,11 +62,11 @@ export function spawnedDynamicPlacement(
 			`Attached dynamic entity ${formatGuid(entity.identity.guid)} has no world placement.`,
 		);
 	}
-	return spawnedDynamicPlacementFromPoint(entity.placement);
+	return dynamicEntityPlacementFromPoint(entity.placement);
 }
 
 /** Convert one host-authored root point without re-deriving its plural spatial membership. */
-export function spawnedDynamicPlacementFromPoint(
+export function dynamicEntityPlacementFromPoint(
 	point: DynamicEntityWorldPlacement | DynamicEntityAdvance["path"]["initial"],
 ): SceneSpatialPlacement {
 	const { pose, spatialMembership } = point;
@@ -97,12 +97,12 @@ export function spawnedDynamicPlacementFromPoint(
 }
 
 /** Interpolate one placement-stable half-open path leg in its starting residency. */
-export function interpolateSpawnedDynamicPlacement(
+export function interpolateDynamicEntityPlacement(
 	start: DynamicEntityAdvance["path"]["initial"],
 	end: DynamicEntityAdvance["path"]["initial"],
 	fraction: number,
 ): SceneSpatialPlacement {
-	const startPlacement = spawnedDynamicPlacementFromPoint(start);
+	const startPlacement = dynamicEntityPlacementFromPoint(start);
 	const startOwner = landblockCoordinates(start.pose.landblockId);
 	const endOwner = landblockCoordinates(end.pose.landblockId);
 	const startWorldX =
@@ -162,7 +162,7 @@ function spatialMembershipScopes(
 }
 
 /** Numeric DAT key for one typed feed placement. */
-export function spawnedDynamicPlacementKey(
+export function dynamicEntityPlacementKey(
 	placement: DynamicEntityAttachedPlacement["placement"],
 ): number {
 	return PLACEMENT_KEYS[placement];

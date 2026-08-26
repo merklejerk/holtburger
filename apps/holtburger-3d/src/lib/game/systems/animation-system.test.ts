@@ -451,7 +451,7 @@ describe("AnimationSystem", () => {
 });
 
 /**
- * Advance both clocks, then sample — the order `GameRuntime` uses.
+ * Advance both clocks, then sample — the order `GamePresentationRuntime` uses.
  *
  * Effect stepping no longer rides animation playback, so a test that only advanced the animation
  * would sample effect state frozen at install.

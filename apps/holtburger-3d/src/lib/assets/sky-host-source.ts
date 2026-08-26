@@ -21,7 +21,7 @@ export class SkyHostSource implements SkySourceLoader {
 		return this.#loaded;
 	}
 
-	/** Clear the frontend cache with the Explorer runtime that owned it. */
+	/** Clear the frontend cache with the presentation owner that owned it. */
 	destroy(): void {
 		this.#loaded = null;
 	}

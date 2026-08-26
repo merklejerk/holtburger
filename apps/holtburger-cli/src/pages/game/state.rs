@@ -41,7 +41,7 @@ pub struct GameState {
     pub dashboard: DashboardState,
     pub view: ViewState,
     pub(crate) script: GameScriptState,
-    runtime: GameRuntimeState,
+    runtime: GamePageRuntimeState,
     pub(super) render_state: GameRenderState,
     pub chat: ChatState,
     pub chat_input: ChatInputState,
@@ -122,7 +122,7 @@ impl GameState {
             dashboard: DashboardState::default(),
             view: ViewState::default(),
             script: GameScriptState::default(),
-            runtime: GameRuntimeState::default(),
+            runtime: GamePageRuntimeState::default(),
             render_state: GameRenderState::default(),
             chat: ChatState::new(None),
             chat_input: ChatInputState::default(),
@@ -321,7 +321,7 @@ pub struct ViewState {
 }
 
 #[derive(Clone, Default)]
-struct GameRuntimeState {
+struct GamePageRuntimeState {
     last_trade_initiation: Option<(Instant, Guid)>,
     open_party_tab_on_next_fellowship_update: bool,
     navigation: TuiNavigation,

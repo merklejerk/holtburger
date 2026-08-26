@@ -8,9 +8,11 @@ use holtburger_world::{EntityPlacement, PhysicalBodyParticipation, WorldState};
 use thiserror::Error;
 
 use crate::{
-    DynamicEntityContent, DynamicEntityEvent, DynamicEntityHostTime, DynamicEntityIdentityView,
-    DynamicEntitySnapshot, DynamicEntitySpatialMembership, DynamicEntityViewSource,
-    DynamicEntityWorldProjection, project_dynamic_entity_view,
+    DynamicEntityAdvance, DynamicEntityAdvanceBatch, DynamicEntityContent, DynamicEntityEvent,
+    DynamicEntityHostTime, DynamicEntityIdentityView, DynamicEntityPathLeg, DynamicEntityPathPoint,
+    DynamicEntityPlacedPath, DynamicEntityPlacementAdvanceKind, DynamicEntitySnapshot,
+    DynamicEntitySpatialMembership, DynamicEntityViewSource, DynamicEntityWorldProjection,
+    project_dynamic_entity_view,
 };
 
 use super::{ClientRuntime, ClientViewEvent};
@@ -123,12 +125,12 @@ pub fn project_client_dynamic_entities(
 }
 
 impl ClientRuntime {
-    fn dynamic_entity_host_time(&self) -> DynamicEntityHostTime {
+    pub(super) fn dynamic_entity_host_time(&self) -> DynamicEntityHostTime {
         DynamicEntityHostTime::new(self.dynamic_entity_time_origin.elapsed().as_secs_f64())
             .expect("monotonic elapsed time must be finite and nonnegative")
     }
 
-    fn current_dynamic_entity_views(&self) -> Vec<crate::DynamicEntityView> {
+    pub(super) fn current_dynamic_entity_views(&self) -> Vec<crate::DynamicEntityView> {
         project_client_dynamic_entities(&self.world)
             .into_iter()
             .filter_map(|result| match result {
@@ -176,6 +178,84 @@ impl ClientRuntime {
             .send(ClientViewEvent::DynamicEntity(
                 DynamicEntityEvent::Removed { guid, generation },
             ));
+    }
+
+    /// Builds one closed advance product from authority-owned tick boundaries.
+    ///
+    /// This intentionally accepts captured views rather than sampling `WorldState` from an app
+    /// host. The runtime owns both boundaries and publishes at most one batch for the turn.
+    pub(super) fn dynamic_entity_advance_event(
+        &self,
+        before: Vec<crate::DynamicEntityView>,
+        after: Vec<crate::DynamicEntityView>,
+        host_time: DynamicEntityHostTime,
+        duration_ms: f64,
+        kind: DynamicEntityPlacementAdvanceKind,
+    ) -> Option<DynamicEntityEvent> {
+        let before_by_guid = before
+            .into_iter()
+            .map(|entity| (entity.identity.guid, entity))
+            .collect::<std::collections::HashMap<_, _>>();
+        let mut advances = Vec::new();
+
+        for entity in after {
+            let Some(previous) = before_by_guid.get(&entity.identity.guid) else {
+                continue;
+            };
+            if previous.generation != entity.generation
+                || previous.placement == entity.placement
+                || !matches!(
+                    (&previous.placement, &entity.placement),
+                    (
+                        crate::DynamicEntityPlacementView::World { .. },
+                        crate::DynamicEntityPlacementView::World { .. }
+                    )
+                )
+            {
+                continue;
+            }
+
+            let (
+                crate::DynamicEntityPlacementView::World {
+                    pose: previous_pose,
+                    spatial_membership: previous_membership,
+                    ..
+                },
+                crate::DynamicEntityPlacementView::World {
+                    pose: current_pose,
+                    spatial_membership: current_membership,
+                    ..
+                },
+            ) = (&previous.placement, &entity.placement)
+            else {
+                unreachable!("world placement was checked above");
+            };
+
+            let initial = DynamicEntityPathPoint {
+                pose: *previous_pose,
+                spatial_membership: previous_membership.clone(),
+            };
+            let end = DynamicEntityPathPoint {
+                pose: *current_pose,
+                spatial_membership: current_membership.clone(),
+            };
+
+            advances.push(DynamicEntityAdvance {
+                entity: Box::new(entity),
+                kind,
+                path: DynamicEntityPlacedPath {
+                    initial,
+                    legs: vec![DynamicEntityPathLeg {
+                        end_fraction: 1.0,
+                        end,
+                    }],
+                },
+            });
+        }
+
+        (!advances.is_empty()).then(|| DynamicEntityEvent::Advanced {
+            batch: DynamicEntityAdvanceBatch::new(host_time, duration_ms, advances),
+        })
     }
 }
 
@@ -292,7 +372,7 @@ mod tests {
                 if entity.identity.guid == guid
         )));
 
-        client.emit_initial_view_state_snapshot();
+        client.emit_current_application_snapshot();
         let snapshot =
             std::iter::from_fn(|| events.try_recv().ok()).find_map(|event| match event {
                 ClientViewEvent::DynamicEntity(DynamicEntityEvent::Snapshot { snapshot }) => {
@@ -419,5 +499,48 @@ mod tests {
                 && parent_location == attachment.location
                 && placement == attachment.placement
         ));
+    }
+
+    #[test]
+    fn one_authority_tick_publishes_one_ordered_advance_batch() {
+        let guid = Guid(0x5000_0003);
+        let start = WorldPosition {
+            landblock_id: Guid(0xda55_0001),
+            coords: Vector3::new(1.0, 2.0, 3.0),
+            rotation: Quaternion::identity(),
+        };
+        let end = WorldPosition {
+            coords: Vector3::new(4.0, 5.0, 3.0),
+            ..start
+        };
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        client.world.player.guid = guid;
+        client.world.add_entity(projectable_entity(guid, start));
+
+        let before = client.current_dynamic_entity_views();
+        let _ = client.world.set_local_player_runtime_pose(end);
+        let after = client.current_dynamic_entity_views();
+        let event = client
+            .dynamic_entity_advance_event(
+                before,
+                after,
+                DynamicEntityHostTime::new(12.5).expect("test host time is valid"),
+                30.0,
+                DynamicEntityPlacementAdvanceKind::Integrated,
+            )
+            .expect("changed world placement should produce one advance");
+
+        let DynamicEntityEvent::Advanced { batch } = event else {
+            panic!("expected an advance event");
+        };
+        assert_eq!(batch.host_time.seconds, 12.5);
+        assert_eq!(batch.duration_ms, 30.0);
+        assert_eq!(batch.advances.len(), 1);
+        let advance = &batch.advances[0];
+        assert_eq!(advance.entity.identity.guid, guid);
+        assert_eq!(advance.kind, DynamicEntityPlacementAdvanceKind::Integrated);
+        assert_eq!(advance.path.initial.pose, start);
+        assert_eq!(advance.path.legs[0].end_fraction, 1.0);
+        assert_eq!(advance.path.legs[0].end.pose, end);
     }
 }

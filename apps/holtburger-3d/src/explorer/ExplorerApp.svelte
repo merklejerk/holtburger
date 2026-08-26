@@ -1,34 +1,19 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import { AnimationHostSource } from "../lib/assets/animation-host-source";
-	import { PhysicsScriptHostSource } from "../lib/assets/physics-script-host-source";
-	import { AudioHostSource } from "../lib/assets/audio-host-source";
-	import { WebAudioDevice } from "../lib/assets/web-audio-device";
-	import { ParticleEmitterHostSource } from "../lib/assets/particle-emitter-host-source";
-	import { SoundTableHostSource } from "../lib/assets/sound-table-host-source";
-	import { ParticleMeshHostSource } from "../lib/assets/particle-mesh-host-source";
-	import { DynamicEntityVisualHostSource } from "../lib/assets/dynamic-entity-visual-host-source";
 	import FrameMetricsOverlay, {
 		type FrameMetrics,
 	} from "../app/FrameMetricsOverlay.svelte";
 	import ExplorerTools from "./ExplorerTools.svelte";
 	import {
-		GameRuntime,
+		GamePresentationRuntime,
 		type StaticObjectRuntimeDiagnostics,
-	} from "../lib/game/runtime/game-runtime";
+	} from "../lib/game/runtime/game-presentation-runtime";
 	import { RuntimeTickProfiler } from "../lib/game/runtime/runtime-tick-profiler";
-	import { StandardCommitPipeline } from "../lib/game/commit/pipeline";
-	import { WebGL2Device } from "../lib/game/renderer/webgl2-device";
+	import { GamePresentationOwner } from "../lib/game/runtime/game-presentation-owner";
 	import {
 		createProjectionClearanceRevision,
 		type ProjectionClearanceRevision,
 	} from "../lib/game/camera/projection-clearance";
-	import { ActiveRegionHostSource } from "../lib/assets/active-region-host-source";
-	import { SkyHostSource } from "../lib/assets/sky-host-source";
-	import { LandblockSourceHostBatch } from "../lib/assets/landblock-source-host-batch";
-	import { LandblockProfileHostSource } from "../lib/assets/landblock-profile-host-source";
-	import { CachedLandblockProfileSource } from "../lib/assets/landblock-profile-source";
-	import { TexturePixelHostSource } from "../lib/assets/texture-pixel-host-source";
 	import { createElectronHostTransport } from "../lib/host/electron-host-transport";
 	import type { SceneInterestRadii } from "../lib/game/runtime/types";
 	import { LandblockLayerKind } from "../lib/game/runtime/scene-interest";
@@ -125,7 +110,6 @@
 	} from "../lib/game/environment/scene-environment";
 	import { resolveDayFraction } from "../lib/game/environment/game-clock";
 	import type { ActiveRegionSource } from "../lib/assets/active-region-source";
-	import { ActiveRegionStaticDetailOwner } from "../lib/game/resolution/active-region-static-detail";
 	import type { Texture2DReadback } from "../lib/game/renderer/webgl2-device";
 	import type { TexturePageId } from "../lib/game/textures/texture-manager";
 	import {
@@ -138,7 +122,7 @@
 		type MapAnchor,
 		mapHeadingFromSceneTransform,
 	} from "../lib/game/map/map-view";
-	import { spawnedDynamicPlacementFromPoint } from "../lib/game/runtime/spawned-dynamic-presentation";
+	import { dynamicEntityPlacementFromPoint } from "../lib/game/runtime/dynamic-entity-presentation";
 	import { createLandblockWorldOrigin } from "../lib/game/landblocks";
 	import type { ScenePlacement } from "../lib/game/scene";
 	import { MAP_DEFAULT_VIEW_DIAMETERS } from "../lib/game/map/map-appearance";
@@ -156,15 +140,11 @@
 
 	let canvasElement: HTMLCanvasElement | null = $state(null);
 	let frameHandle: number | null = null;
-	let gameRuntime: GameRuntime | undefined;
-	let commitPipeline: StandardCommitPipeline | undefined;
-	let webglDevice: WebGL2Device | undefined;
+	/** Borrowed imperative runtime; its lifecycle belongs to the shared presentation owner below. */
+	let presentationOwner: GamePresentationOwner | undefined;
+	let gameRuntime: GamePresentationRuntime | undefined;
 	const hostTransport = createElectronHostTransport();
-	let activeRegionSource: ActiveRegionHostSource | undefined;
-	let landblockProfileSource: CachedLandblockProfileSource | undefined;
 	let sceneInterestCoordinator: SceneInterestRequestCoordinator | undefined;
-	let skySource: SkyHostSource | undefined;
-	let staticDetailOwner: ActiveRegionStaticDetailOwner | undefined;
 	let cameraController: ExplorerCameraInputController | undefined;
 	let cameraCoordinator: ExplorerCameraCoordinator | undefined;
 	let physicalCameraSession: PhysicalFlySession | undefined;
@@ -189,7 +169,7 @@
 	let rendererFrameDiagnostics: RendererFrameDiagnosticsSnapshot | null =
 		$state(null);
 	let authoredDynamicRuntimeDiagnostics: ReturnType<
-		GameRuntime["getAuthoredDynamicRuntimeDiagnostics"]
+		GamePresentationRuntime["getAuthoredDynamicRuntimeDiagnostics"]
 	> | null = $state(null);
 	let lastFrameSelectionSampleAt = 0;
 	let startupError: string | null = $state(null);
@@ -517,7 +497,8 @@
 	}
 
 	function captureFrameDiagnosticReport(): ExplorerFrameDiagnosticReport | null {
-		if (!gameRuntime || !webglDevice || !canvasElement) return null;
+		const device = presentationOwner?.device;
+		if (!gameRuntime || !device || !canvasElement) return null;
 		const frame = gameRuntime.getRendererFrameDiagnostics();
 		if (!frame) return null;
 		const viewport = canvasElement.getBoundingClientRect();
@@ -525,7 +506,7 @@
 			applicationFrame: frameMetrics,
 			browser: {
 				userAgent: navigator.userAgent,
-				webgl: webglDevice.getDiagnosticIdentity(),
+				webgl: device.getDiagnosticIdentity(),
 			},
 			camera: cameraController?.snapshotState() ?? null,
 			cameraLocation,
@@ -924,12 +905,13 @@
 	}
 
 	function readTextureAtlasPage(pageId: TexturePageId): Texture2DReadback {
-		if (!gameRuntime || !webglDevice) {
+		const device = presentationOwner?.device;
+		if (!gameRuntime || !device) {
 			throw new Error(
 				"Texture page readback requires an active Explorer runtime.",
 			);
 		}
-		return webglDevice.readTexture2D(
+		return device.readTexture2D(
 			gameRuntime.getTextureAtlasPageResource(pageId),
 		);
 	}
@@ -964,7 +946,7 @@
 		if (runtime === undefined) return Promise.resolve();
 		const revision = ++dynamicEntityReconciliationRevision;
 		spawnedEntityPresentationError = null;
-		const completion = runtime.reconcileSpawnedDynamicEntities(entities);
+		const completion = runtime.reconcileDynamicEntities(entities);
 		dynamicEntityReconciliation = completion;
 		void completion.catch((error: unknown) => {
 			if (revision !== dynamicEntityReconciliationRevision) return;
@@ -986,7 +968,7 @@
 		const runtime = gameRuntime;
 		if (runtime === undefined) return;
 		try {
-			runtime.applySpawnedDynamicEntityAdvances(event.batch, performance.now());
+			runtime.applyDynamicEntityAdvances(event.batch, performance.now());
 			spawnedEntityPresentationError = null;
 		} catch (error) {
 			spawnedEntityPresentationError = `Dynamic-entity path presentation: ${errorMessage(error)}`;
@@ -1003,7 +985,7 @@
 			if (refreshesExplorerEntityPanel(entityEvent))
 				publishExplorerEntityPanelSnapshot();
 			try {
-				gameRuntime?.applySpawnedDynamicEntityAdvances(
+				gameRuntime?.applyDynamicEntityAdvances(
 					entityEvent.batch,
 					receivedAtMs,
 				);
@@ -1269,7 +1251,7 @@
 	}
 
 	function resolveCameraProjection(
-		runtime: GameRuntime,
+		runtime: GamePresentationRuntime,
 		canvas: HTMLCanvasElement,
 	): ProjectionClearanceRevision {
 		const extent = runtime.resolveViewportExtent(
@@ -1632,13 +1614,8 @@
 
 		const destroySystems = (): Promise<void> => {
 			if (teardown) return teardown;
-			const runtime = gameRuntime;
-			const pipeline = commitPipeline;
-			const device = webglDevice;
-			const regionSource = activeRegionSource;
-			const profileSource = landblockProfileSource;
+			const presentation = presentationOwner;
 			const requestCoordinator = sceneInterestCoordinator;
-			const detailOwner = staticDetailOwner;
 			const coordinator = cameraCoordinator;
 			const controller = cameraController;
 			const physicalSession = physicalCameraSession;
@@ -1652,15 +1629,9 @@
 			publishCameraLocation(null);
 			rendererFrameDiagnostics = null;
 			authoredDynamicRuntimeDiagnostics = null;
-			commitPipeline = undefined;
-			webglDevice = undefined;
+			presentationOwner = undefined;
 			textureFilteringCapabilities = null;
-			activeRegionSource = undefined;
-			landblockProfileSource = undefined;
 			sceneInterestCoordinator = undefined;
-			skySource?.destroy();
-			skySource = undefined;
-			staticDetailOwner = undefined;
 			activeRegion = undefined;
 			cameraCoordinator = undefined;
 			cameraController = undefined;
@@ -1689,7 +1660,6 @@
 				entitySession?.stop();
 				coordinator?.dispose();
 				requestCoordinator?.destroy();
-				profileSource?.destroy();
 				controller?.dispose();
 				try {
 					await boomSession?.stop();
@@ -1697,20 +1667,7 @@
 					try {
 						await physicalSession?.stop();
 					} finally {
-						try {
-							await runtime?.destroy();
-						} finally {
-							try {
-								await pipeline?.destroy();
-							} finally {
-								try {
-									await device?.destroy();
-								} finally {
-									detailOwner?.teardown();
-									regionSource?.destroy();
-								}
-							}
-						}
+						await presentation?.destroy();
 					}
 				}
 			})();
@@ -1735,78 +1692,28 @@
 				await entitySession.start();
 				entityCatalog = await entitySession.catalogCapability();
 				if (destroyed) return;
-				activeRegionSource = ActiveRegionHostSource.build(hostTransport);
-				activeRegion = await activeRegionSource.load();
-				if (destroyed) return;
-				const sourceBatch = LandblockSourceHostBatch.build(
-					activeRegion,
+				const presentation = await GamePresentationOwner.build({
+					canvas,
 					hostTransport,
-				);
-				landblockProfileSource = new CachedLandblockProfileSource(
-					LandblockProfileHostSource.build(hostTransport),
-				);
-				sceneInterestCoordinator = new SceneInterestRequestCoordinator(
-					landblockProfileSource,
-				);
-				const texturePixelSource = TexturePixelHostSource.build(hostTransport);
-				staticDetailOwner = new ActiveRegionStaticDetailOwner(
-					texturePixelSource,
-				);
-				const staticDetailBinding =
-					await staticDetailOwner.install(activeRegion);
-				if (destroyed) return;
-				webglDevice = await WebGL2Device.build(canvas);
-				textureFilteringCapabilities =
-					webglDevice.getTextureFilteringCapabilities();
-				if (destroyed) return;
-				commitPipeline = await StandardCommitPipeline.build({
-					sourceBatch,
-				});
-				if (destroyed) return;
-
-				gameRuntime = await GameRuntime.build(
-					webglDevice,
-					commitPipeline,
-					texturePixelSource,
-					AnimationHostSource.build(hostTransport),
-					PhysicsScriptHostSource.build(hostTransport),
-					new WebAudioDevice(
-						new AudioContext(),
-						AudioHostSource.build(hostTransport),
-						FRONTEND_TUNING.audio.placementSmoothingSeconds,
-						FRONTEND_TUNING.audio.loudnessCurveExponent,
-					),
-					ParticleEmitterHostSource.build(hostTransport),
-					SoundTableHostSource.build(hostTransport),
-					ParticleMeshHostSource.build(hostTransport),
-					new DynamicEntityVisualHostSource(hostTransport),
-					undefined,
+					audioTuning: {
+						placementSmoothingSeconds:
+							FRONTEND_TUNING.audio.placementSmoothingSeconds,
+						loudnessCurveExponent: FRONTEND_TUNING.audio.loudnessCurveExponent,
+					},
 					// The Explorer is a development surface and its Frame panel reports tick
 					// timing; the thin client route passes nothing and pays nothing.
-					new RuntimeTickProfiler(),
-				);
-				gameRuntime.installActiveRegionStaticDetails(staticDetailBinding);
-				void reconcileSpawnedEntities();
-				// Ambience is selected by the ground rather than by a hook, so nothing else pulls its
-				// sound tables in; installing the region's facts is what stages them.
-				if (activeRegion?.data.sound && activeRegion.data.scenes) {
-					void gameRuntime.installAmbientRegion({
-						sceneTypes: activeRegion.data.scenes.types.map((type) => ({
-							soundTableIndex: type.soundTableIndex,
-						})),
-						tables: activeRegion.data.sound.tables.map((table) => ({
-							soundTableId: table.soundTableId,
-							sounds: table.sounds,
-						})),
-						terrainTypes:
-							activeRegion.data.terrain?.types.map((type) => ({
-								sceneTypes: type.sceneTypes,
-							})) ?? [],
-					});
-				}
-				skySource = new SkyHostSource(hostTransport);
-				await gameRuntime.installSky(await skySource.loadSkySource());
+					tickProfiler: new RuntimeTickProfiler(),
+				});
+				presentationOwner = presentation;
+				activeRegion = presentation.activeRegion;
+				gameRuntime = presentation.runtime;
+				textureFilteringCapabilities =
+					presentation.textureFilteringCapabilities;
 				if (destroyed) return;
+				sceneInterestCoordinator = new SceneInterestRequestCoordinator(
+					presentation.profileSource,
+				);
+				void reconcileSpawnedEntities();
 				applyEnvironment();
 				applyFrameSettings();
 				if (destroyed) return;

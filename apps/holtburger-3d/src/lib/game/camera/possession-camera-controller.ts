@@ -19,6 +19,39 @@ import type {
 	HostKinematicBoomTick,
 } from "../motion/host-kinematic-boom-path";
 
+/**
+ * Source-neutral boom session seam shared by Explorer possession and the client local player.
+ *
+ * The session owns protocol identity, path playback, and projection acknowledgements; this
+ * controller owns only orbit, zoom, and rear-facing policy. Keeping the seam structural prevents
+ * the client from importing an Explorer identity or command adapter just to reuse camera UX.
+ */
+export interface PossessionCameraBoomSession<
+	Target,
+	Tick,
+	Presentation,
+	Status,
+> {
+	start(
+		target: Target,
+		distance: HostKinematicBoomDistancePolicy,
+		viewDirection: readonly [number, number, number],
+		projection: ProjectionClearanceRevision,
+	): Promise<void>;
+	setClearance(projection: ProjectionClearanceRevision): Promise<void>;
+	setIntent(
+		viewDirection: readonly [number, number, number],
+		zoomDisplacement: number,
+	): Promise<void>;
+	receive(tick: Tick, durationMs: number, receivedAtMs: number): void;
+	presentation(nowMs: number): Presentation | null;
+	acknowledgedProjection(nowMs: number): ProjectionClearanceRevision | null;
+	status(): Status;
+	stop(): Promise<void>;
+	destroy?(): void;
+	readonly running: boolean;
+}
+
 /** Gesture rates injected by the composing client rather than imported from Explorer tuning. */
 export interface PossessionCameraOrbitPolicy {
 	readonly maximumPitchRadians: number;
@@ -48,11 +81,21 @@ type PossessionCameraRecenterState =
 const REAR_ALIGNMENT_EPSILON_RADIANS = 1e-9;
 
 /** Reusable third-person camera behavior with no DOM or Explorer mode ownership. */
-export class PossessionCameraController {
+export class PossessionCameraController<
+	Target = HostKinematicBoomTarget,
+	Tick = HostKinematicBoomTick,
+	Presentation = HostKinematicBoomPresentation,
+	Status = HostKinematicBoomStatus,
+> {
 	readonly #look: CameraLookController;
 	readonly #orbit: PossessionCameraOrbitPolicy;
 	readonly #recenter: PossessionCameraRecenterPolicy;
-	readonly #session: HostKinematicBoomSession;
+	readonly #session: PossessionCameraBoomSession<
+		Target,
+		Tick,
+		Presentation,
+		Status
+	>;
 	/** True while longitudinal or lateral player intent remains held. */
 	#translationActive = false;
 	/** Explicit state prevents an armed dwell, transition, and pin from coexisting. */
@@ -63,19 +106,41 @@ export class PossessionCameraController {
 		readonly initialLook: CameraLook;
 		readonly orbit: PossessionCameraOrbitPolicy;
 		readonly recenter: PossessionCameraRecenterPolicy;
-		readonly transport: HostKinematicBoomTransport;
+		readonly transport?: HostKinematicBoomTransport;
+		readonly session?: PossessionCameraBoomSession<
+			Target,
+			Tick,
+			Presentation,
+			Status
+		>;
 	}) {
 		validateOrbitPolicy(options.orbit);
 		validateRecenterPolicy(options.recenter);
 		this.#look = new CameraLookController(options.initialLook);
 		this.#orbit = { ...options.orbit };
 		this.#recenter = { ...options.recenter };
-		this.#session = new HostKinematicBoomSession(options.transport);
+		if (options.session !== undefined) {
+			this.#session = options.session;
+		} else {
+			if (options.transport === undefined) {
+				throw new Error(
+					"Possession camera requires either a boom session or a host transport.",
+				);
+			}
+			this.#session = new HostKinematicBoomSession(
+				options.transport,
+			) as unknown as PossessionCameraBoomSession<
+				Target,
+				Tick,
+				Presentation,
+				Status
+			>;
+		}
 	}
 
 	/** Replace any prior host generation using the current desired orbit. */
 	start(
-		target: HostKinematicBoomTarget,
+		target: Target,
 		distance: HostKinematicBoomDistancePolicy,
 		projection: ProjectionClearanceRevision,
 	): Promise<void> {
@@ -99,6 +164,12 @@ export class PossessionCameraController {
 			this.#orbit.pitchRadiansPerPixel,
 			this.#orbit.maximumPitchRadians,
 		);
+	}
+
+	/** Seed a new target's facing without carrying orbit or recenter state across generations. */
+	replaceLook(look: CameraLook): CameraLook {
+		this.#resetRecenter();
+		return this.#look.replace(look);
 	}
 
 	/** Arms or disarms the rear-facing dwell from semantic translation intent. */
@@ -153,15 +224,11 @@ export class PossessionCameraController {
 	}
 
 	/** Accept one fixed-tick host result without owning its delivery subscription. */
-	receive(
-		tick: HostKinematicBoomTick,
-		durationMs: number,
-		receivedAtMs: number,
-	): void {
+	receive(tick: Tick, durationMs: number, receivedAtMs: number): void {
 		this.#session.receive(tick, durationMs, receivedAtMs);
 	}
 
-	presentation(nowMs: number): HostKinematicBoomPresentation | null {
+	presentation(nowMs: number): Presentation | null {
 		return this.#session.presentation(nowMs);
 	}
 
@@ -173,7 +240,7 @@ export class PossessionCameraController {
 		return this.#look.snapshot();
 	}
 
-	status(): HostKinematicBoomStatus {
+	status(): Status {
 		return this.#session.status();
 	}
 
@@ -181,6 +248,11 @@ export class PossessionCameraController {
 		this.#pendingZoomDisplacement = 0;
 		this.#resetRecenter();
 		return this.#session.stop();
+	}
+
+	/** Dispose a protocol-backed session when the owning presentation surface is torn down. */
+	destroy(): void {
+		this.#session.destroy?.();
 	}
 
 	get running(): boolean {

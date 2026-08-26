@@ -1,5 +1,6 @@
 //! Stateful host-side third-person boom behavior over world-owned static collision.
 
+use anyhow::{Result, ensure};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion, Vector3};
 use holtburger_world::{
@@ -80,6 +81,189 @@ pub struct KinematicBoomProfileDefinition {
     pub surface_clearance: f32,
     /// Sliding camera-transit work and separation policy.
     pub transit: FreeSphereConfig,
+}
+
+/// Standard third-person boom policy shared by every client presentation authority.
+//
+// The policy lives beside the controller rather than in either app adapter.  Explorer and client
+// may still choose different reach requests, but they cannot silently drift on collision work or
+// recovery budgets while consuming the same behavior.
+pub fn standard_kinematic_boom_profile() -> Result<KinematicBoomProfile> {
+    Ok(KinematicBoomProfile::new(KinematicBoomProfileDefinition {
+        minimum_reach: 1.2,
+        maximum_reach: 8.0,
+        vertical_pivot_half_life: 0.08,
+        maximum_vertical_pivot_lag: 0.30,
+        clearance_recovery_half_life: 0.10,
+        clearance_hysteresis: 0.05,
+        maximum_control_leg_displacement: 0.50,
+        maximum_control_legs: 64,
+        surface_clearance: 0.000_5,
+        transit: FreeSphereConfig {
+            maximum_substep_distance: 0.25,
+            maximum_substeps: 64,
+            maximum_contact_passes: 8,
+            separation_epsilon: 0.000_5,
+        },
+    })?)
+}
+
+/// A camera path point expressed in the AC world frame without an orientation the renderer needs.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KinematicBoomWorldPoint {
+    /// EnvCell or outdoor landblock selector anchoring `coords`.
+    pub landblock_id: Guid,
+    /// Point in the selected AC landblock frame.
+    pub coords: Vector3,
+}
+
+/// Camera placement and filtered visual pivot at one path boundary.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KinematicBoomPathPoint {
+    pub position: KinematicBoomWorldPoint,
+    pub visual_pivot: KinematicBoomWorldPoint,
+}
+
+/// One placement-stable camera path leg.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KinematicBoomPathLeg {
+    pub end_fraction: f32,
+    pub end: KinematicBoomPathPoint,
+}
+
+/// Serializable camera path shared by client and Explorer host adapters.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KinematicBoomPlacedPath {
+    pub initial: KinematicBoomPathPoint,
+    pub legs: Vec<KinematicBoomPathLeg>,
+}
+
+/// Projects one canonical placed motion path for a camera consumer.
+pub fn serialize_kinematic_boom_path(
+    path: &PlacedMotionPath,
+    initial_visual_pivot: WorldPosition,
+    final_visual_pivot: WorldPosition,
+) -> Result<KinematicBoomPlacedPath> {
+    Ok(KinematicBoomPlacedPath {
+        initial: KinematicBoomPathPoint {
+            position: present_placed_motion_pose(path, path.initial())?.into(),
+            visual_pivot: initial_visual_pivot.into(),
+        },
+        legs: path
+            .legs()
+            .iter()
+            .map(|leg| {
+                Ok(KinematicBoomPathLeg {
+                    end_fraction: leg.end_fraction(),
+                    end: KinematicBoomPathPoint {
+                        position: present_placed_motion_pose(path, leg.end())?.into(),
+                        visual_pivot: interpolate_visual_pivot(
+                            initial_visual_pivot,
+                            final_visual_pivot,
+                            leg.end_fraction(),
+                        )?,
+                    },
+                })
+            })
+            .collect::<Result<Vec<_>>>()?,
+    })
+}
+
+/// Builds the stationary path used by held and reseeded camera ticks.
+pub fn stationary_kinematic_boom_path(
+    placement: KinematicBoomPlacement,
+    visual_pivot: WorldPosition,
+) -> KinematicBoomPlacedPath {
+    let point = KinematicBoomPathPoint {
+        position: placement.pose.into(),
+        visual_pivot: visual_pivot.into(),
+    };
+    KinematicBoomPlacedPath {
+        initial: point,
+        legs: vec![KinematicBoomPathLeg {
+            end_fraction: 1.0,
+            end: point,
+        }],
+    }
+}
+
+pub(crate) fn present_placed_motion_pose(
+    path: &PlacedMotionPath,
+    point: &holtburger_world::PlacedMotionPoint,
+) -> Result<WorldPosition> {
+    let cell = point.placement().committed_cell();
+    let owner = cell
+        .map(landblock_key)
+        .or_else(|| {
+            holtburger_common::position::outdoor_landblock_owner_at(
+                landblock_key(path.anchor()),
+                point.center(),
+            )
+        })
+        .unwrap_or_else(|| landblock_key(path.anchor()));
+    let mut pose = WorldPosition {
+        landblock_id: Guid(owner.0 & 0xffff_0000),
+        coords: reanchor_point(point.center(), landblock_key(path.anchor()), owner),
+        rotation: holtburger_common::Quaternion::identity(),
+    }
+    .normalize_outdoor_cell();
+    if let Some(cell) = cell {
+        pose.landblock_id = cell;
+    }
+    Ok(pose)
+}
+
+fn interpolate_visual_pivot(
+    start: WorldPosition,
+    end: WorldPosition,
+    fraction: f32,
+) -> Result<KinematicBoomWorldPoint> {
+    ensure!(
+        fraction.is_finite() && (0.0..=1.0).contains(&fraction),
+        "kinematic boom pivot fraction must be finite and normalized"
+    );
+    let owner = landblock_key(start.landblock_id);
+    let start_coords = reanchor_point(start.coords, landblock_key(start.landblock_id), owner);
+    let end_coords = reanchor_point(end.coords, landblock_key(end.landblock_id), owner);
+    let pose = WorldPosition {
+        landblock_id: owner,
+        coords: start_coords + (end_coords - start_coords) * fraction,
+        rotation: holtburger_common::Quaternion::identity(),
+    }
+    .normalize_outdoor_landblock_frame()?;
+    Ok(KinematicBoomWorldPoint {
+        landblock_id: pose.landblock_id,
+        coords: pose.coords,
+    })
+}
+
+fn landblock_key(id: Guid) -> Guid {
+    Guid((id.0 & 0xffff_0000) | 0xffff)
+}
+
+fn reanchor_point(point: Vector3, source_owner: Guid, target_owner: Guid) -> Vector3 {
+    let source_x = ((source_owner.0 >> 24) & 0xff) as i32;
+    let source_y = ((source_owner.0 >> 16) & 0xff) as i32;
+    let target_x = ((target_owner.0 >> 24) & 0xff) as i32;
+    let target_y = ((target_owner.0 >> 16) & 0xff) as i32;
+    Vector3::new(
+        point.x + (source_x - target_x) as f32 * holtburger_common::position::METERS_PER_LANDBLOCK,
+        point.y + (source_y - target_y) as f32 * holtburger_common::position::METERS_PER_LANDBLOCK,
+        point.z,
+    )
+}
+
+impl From<WorldPosition> for KinematicBoomWorldPoint {
+    fn from(value: WorldPosition) -> Self {
+        Self {
+            landblock_id: value.landblock_id,
+            coords: value.coords,
+        }
+    }
 }
 
 impl KinematicBoomProfile {
@@ -1206,7 +1390,7 @@ fn spherical_interpolate(start: Vector3, end: Vector3, fraction: f32) -> Vector3
     (start * ((1.0 - fraction) * angle).sin() + end * (fraction * angle).sin()) / scale
 }
 
-fn interpolate_pose(
+pub(crate) fn interpolate_pose(
     start: WorldPosition,
     end: WorldPosition,
     fraction: f32,

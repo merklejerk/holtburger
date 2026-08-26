@@ -20,18 +20,23 @@ pub mod audio_source;
 pub mod behavior_hook_source;
 pub mod binary_source_record;
 pub mod cell_struct_projection;
+pub mod client_host;
+pub mod client_projection;
+pub mod client_runtime;
 pub mod dynamic_entity_visual_source;
 pub mod env_cell_source;
 pub mod explorer_entity_delivery;
 pub mod explorer_entity_driver;
 pub mod explorer_entity_runtime;
 pub mod explorer_entity_simulation;
+pub mod explorer_host;
 pub mod explorer_possession_control;
 pub mod explorer_weenie_catalog;
 pub mod gfx_obj_geometry;
 pub mod host_event_sink;
 pub mod host_fixed_tick_runtime;
 pub mod host_kinematic_boom_runtime;
+pub mod host_mode;
 pub mod host_physical_fly_runtime;
 pub mod host_simulation_runtime;
 pub mod interior_seam;
@@ -50,10 +55,13 @@ pub mod portal_geometry;
 pub mod portal_visibility;
 pub mod protocol;
 pub mod runtime;
+pub mod shared_host_content;
 pub mod sky_source;
 pub mod sound_table_source;
 pub mod source_projection;
 pub mod weenie_appearance;
+
+pub use shared_host_content::SharedHostContent;
 
 use animation_source::serialize_animation_record_binary;
 use audio_source::serialize_audio_record_binary;
@@ -84,36 +92,6 @@ const TERRAIN_SOURCE_BINARY_MAGIC: &[u8; 4] = b"HBTR";
 const BINARY_ENVELOPE_HEADER_LEN: usize = 12;
 const TEXTURE_PIXELS_BINARY_MAGIC: &[u8; 4] = b"HBTP";
 const ACTIVE_REGION_BINARY_MAGIC: &[u8; 4] = b"HBAR";
-
-/// Shared static-content runtime used by the shell adapter and headless hosts.
-#[derive(Clone)]
-pub struct HostContentState {
-    /// Async content service used by request handlers.
-    pub runtime: ContentAssetRuntime,
-    /// Immutable repository used by app-local dynamic-entity preparation.
-    pub repository: Arc<ContentRepository>,
-    /// Shared synchronous service used to realize explicitly requested simulation collision.
-    pub service: Arc<ContentAssetService>,
-}
-
-impl HostContentState {
-    /// Discovers the configured DAT repository and builds the shared services.
-    pub fn discover() -> Result<Self> {
-        let repository = Arc::new(ContentRepository::discover(None)?);
-        Self::from_repository(repository)
-    }
-
-    /// Builds the app-local host state from an already discovered or injected repository.
-    pub fn from_repository(repository: Arc<ContentRepository>) -> Result<Self> {
-        let service =
-            ContentAssetService::new(Arc::clone(&repository), Arc::new(ContentDecodeCache::new()));
-        Ok(Self {
-            runtime: ContentAssetRuntime::new(service.clone()),
-            repository,
-            service: Arc::new(service),
-        })
-    }
-}
 
 /// Discover the app's configured static-content runtime for a non-desktop diagnostic host.
 pub fn discover_content_runtime() -> Result<ContentAssetRuntime> {
@@ -1907,7 +1885,7 @@ mod tests {
         let repository = Arc::new(
             ContentRepository::from_hba_path(&path).expect("test repository should be opened"),
         );
-        let state = HostContentState::from_repository(repository)
+        let state = SharedHostContent::from_repository(repository)
             .expect("test content repository should initialize");
         let bytes = build_texture_pixels_response(
             &state.runtime,
@@ -1994,7 +1972,7 @@ mod tests {
         let repository = Arc::new(
             ContentRepository::from_hba_path(&path).expect("test repository should be opened"),
         );
-        let state = HostContentState::from_repository(repository)
+        let state = SharedHostContent::from_repository(repository)
             .expect("test content repository should initialize");
         let identity = "palette-composite:04000001:04000002+1+1".to_string();
         let bytes = build_texture_pixels_response(

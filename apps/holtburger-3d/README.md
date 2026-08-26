@@ -5,8 +5,10 @@ content and simulation behavior runs in the `holtburger-3d-host` Rust sidecar; t
 it through the context-isolated Electron preload boundary.
 
 The Explorer runs the shared content, scene, runtime, and WebGL2 rendering architecture against real
-client data. The primary client route is still a minimal shell while gameplay-facing application
-work catches up with the underlying runtime.
+client data. Client mode is a separate first-cut composition: `ClientRuntime` owns the network,
+world, collision, movement, and camera authorities, while the renderer consumes the focused dynamic
+feed and collision-safe third-person camera path. Its UI intentionally remains a small lifecycle and
+in-world shell rather than a TUI feature mirror.
 
 Explorer weenie discovery remains app-local: the Rust host lazily indexes the optional offline
 catalog and returns bounded ranked identity results to the Entities picker. The browser commits one
@@ -22,16 +24,35 @@ cd apps/holtburger-3d
 npm ci
 ```
 
-Use `npm run dev:explorer` for the Explorer and `npm run dev` or `npm run dev:client` for the client
-route. Development startup incrementally builds the Rust sidecar, starts Vite, launches Electron,
-and stops Vite after the application exits. Add `:release` to either named route to use an optimized
-host build.
+Use `npm run dev:explorer` for the Explorer and `npm run dev` or `npm run dev:client` for client mode.
+Development startup incrementally builds the Rust sidecar, starts Vite, launches Electron, and stops
+Vite after the application exits. Add `:release` to either named route to use an optimized host build.
+The app launchers choose a free loopback port at random by default. Pin one explicitly with
+`--vite-port <port>` when a deterministic URL is useful:
+
+```bash
+npm run dev:client -- --vite-port 1432
+```
+
+For client mode, `--port` remains the ACE server port; use `--vite-port` for the renderer server.
+The `--server`, `--host`, `--port`, `--account`, and `--password` launch options accept either
+`--name=value` or `--name value` spelling. Connection credentials stay in Electron main and are
+never copied into the renderer URL.
+
+The sidecar has one explicit composition root and mode-owned capabilities. Shared content lives in
+`host/src/shared_host_content.rs`; Explorer authority and client authority live in
+`host/src/explorer_host.rs` and `host/src/client_runtime.rs`; client wire projection lives in
+`host/src/client_projection.rs`. The protocol decodes into shared, Explorer, or client command
+inventories and dispatches only the selected authority. Event publication uses separate client and
+Explorer sink traits; the stdio writer is the only adapter that implements both.
 
 The launcher and host recognize these environment variables:
 
 - `HOLTBURGER_DATS` selects an explicit content installation. Development otherwise uses the
   repository `dats` directory when present, followed by the normal content-repository discovery
   rules.
+- `HOLTBURGER_VITE_PORT` pins the renderer server port when a shell-level override is preferable to
+  the `--vite-port` argument. Omit it to use a random free port.
 - `HOLTBURGER_ELECTRON_OZONE_PLATFORM` accepts `auto`, `wayland`, or `x11` for Linux display-backend
   diagnosis. It is not a product default.
 - `HOLTBURGER_ELECTRON_DISABLE_GPU=1` disables GPU acceleration for diagnosis. It is not a supported
@@ -64,7 +85,26 @@ bounded MessagePack protocol.
 
 Use `npm run harness:browser -- ...` for non-interactive browser, runtime, renderer,
 content-lifecycle, and WebGL verification. The harness is an agent-operated diagnostic playground
-and is not limited to terrain scenarios.
+and is not limited to terrain scenarios. Pass `--vite-port 1432` (or another isolated port) when
+running it alongside another worktree.
+
+The non-interactive live client probe is kept separate from the interactive app and TUI. It accepts
+credentials from the environment, drives the private sidecar protocol, and reports lifecycle,
+entity, camera, movement, and encoded-frame measurements without putting secrets in process
+arguments or URLs.
+
+With a live ACE endpoint available, run it without putting credentials in shell history or process
+arguments:
+
+```bash
+HOLTBURGER_PROBE_ACCOUNT=test \
+HOLTBURGER_PROBE_PASSWORD='your-password' \
+npm run probe:client
+```
+
+Override `HOLTBURGER_PROBE_HOST`, `HOLTBURGER_PROBE_PORT`, `HOLTBURGER_PROBE_DURATION_MS`, or
+`HOLTBURGER_PROBE_CHARACTER_GUID` through the environment. The probe emits one JSON result and
+never starts Electron, Vite, or the TUI.
 
 ## Packaging and platform status
 

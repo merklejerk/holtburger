@@ -9,6 +9,14 @@ const ENTRY_PATHS = {
 	},
 };
 
+const CLIENT_LAUNCH_ARGUMENT_NAMES = new Set([
+	"server",
+	"host",
+	"port",
+	"account",
+	"password",
+]);
+
 function isKnownEntry(value) {
 	return Object.hasOwn(ENTRY_PATHS, value);
 }
@@ -48,6 +56,68 @@ export function buildEntryPath(basePath, args) {
 	return query.length === 0 ? basePath : `${basePath}?${query}`;
 }
 
+/**
+ * Removes the client connection arguments before a renderer URL is assembled.
+ *
+ * These values belong to Electron main and must not become query parameters. Both `--name=value`
+ * and `--name value` forms are accepted here so the wrapper cannot reject a valid client launch
+ * before `parseClientLaunchArguments` gets to validate it.
+ */
+export function stripClientLaunchArguments(args) {
+	const rendererArgs = [];
+	for (let index = 0; index < args.length; index += 1) {
+		const parsed = parseLongArgument(args[index]);
+		if (!CLIENT_LAUNCH_ARGUMENT_NAMES.has(parsed.name)) {
+			rendererArgs.push(args[index]);
+			continue;
+		}
+		if (parsed.value === undefined) {
+			const value = args[index + 1];
+			if (value === undefined || value.startsWith("--")) {
+				throw new Error(`${args[index]} requires a value.`);
+			}
+			index += 1;
+		}
+	}
+	return rendererArgs;
+}
+
+/**
+ * Extracts the Vite-facing port from a development wrapper's arguments.
+ *
+ * `--vite-port` is intentionally distinct from the client's ACE server `--port`. Vite-only
+ * wrappers may opt into `--port` as an ergonomic alias because they have no server endpoint flag.
+ */
+export function extractVitePortArguments(
+	args,
+	{ allowPortAlias = false } = {},
+) {
+	const remainingArgs = [];
+	let vitePort;
+	for (let index = 0; index < args.length; index += 1) {
+		const argument = args[index];
+		const parsed = parseLongArgument(argument);
+		const isVitePort =
+			parsed.name === "vite-port" || (allowPortAlias && parsed.name === "port");
+		if (!isVitePort) {
+			remainingArgs.push(argument);
+			continue;
+		}
+		if (vitePort !== undefined) {
+			throw new Error("Vite port was specified more than once.");
+		}
+		vitePort = parsed.value;
+		if (vitePort === undefined) {
+			vitePort = args[index + 1];
+			if (vitePort === undefined || vitePort.startsWith("--")) {
+				throw new Error(`${argument} requires a value.`);
+			}
+			index += 1;
+		}
+	}
+	return { args: remainingArgs, vitePort };
+}
+
 export function requireEntry(value) {
 	if (isKnownEntry(value)) {
 		return ENTRY_PATHS[value];
@@ -67,4 +137,20 @@ function appendQuery(params, query) {
 	for (const [key, value] of queryParams.entries()) {
 		params.append(key, value);
 	}
+}
+
+function parseLongArgument(argument) {
+	if (!argument.startsWith("--")) return { name: "", value: undefined };
+	const withoutPrefix = argument.slice(2);
+	const separatorIndex = withoutPrefix.indexOf("=");
+	return {
+		name:
+			separatorIndex === -1
+				? withoutPrefix
+				: withoutPrefix.slice(0, separatorIndex),
+		value:
+			separatorIndex === -1
+				? undefined
+				: withoutPrefix.slice(separatorIndex + 1),
+	};
 }

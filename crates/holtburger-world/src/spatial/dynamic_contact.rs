@@ -799,30 +799,13 @@ fn sampled_planned_pose(
         .context("could not reanchor dynamic trajectory start")?;
     WorldPosition {
         landblock_id: path.anchor(),
-        coords: sample_path_center(path, fraction),
+        coords: path
+            .center_at_fraction(fraction)
+            .expect("dynamic trajectory fraction must be normalized"),
         rotation: spherical_lerp(initial.rotation, final_rotation, fraction),
     }
     .reanchor_to_landblock_owner(anchor)
     .context("could not reanchor dynamic trajectory sample")
-}
-
-fn sample_path_center(path: &super::PlacedMotionPath, fraction: f32) -> Vector3 {
-    let mut start_fraction = 0.0;
-    let mut start = path.initial().center();
-    for leg in path.legs() {
-        if fraction <= leg.end_fraction() {
-            let span = leg.end_fraction() - start_fraction;
-            let local = if span <= f32::EPSILON {
-                1.0
-            } else {
-                ((fraction - start_fraction) / span).clamp(0.0, 1.0)
-            };
-            return start + (leg.end().center() - start) * local;
-        }
-        start_fraction = leg.end_fraction();
-        start = leg.end().center();
-    }
-    path.final_point().center()
 }
 
 fn spherical_lerp(start: Quaternion, mut end: Quaternion, fraction: f32) -> Quaternion {

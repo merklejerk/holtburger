@@ -3,9 +3,9 @@ use crate::attachment::PhysicsAttachment;
 use crate::context::WorldContextExt;
 use crate::entity::EntityPositionSyncOutcome;
 use crate::spatial::{
-    AuthoritativeBodyKinematics, AuthoritativeBodySync, ContactState, RuntimeBodyResetCause,
-    RuntimeSpatialBodyView, SolvedBodyKinematics, SpatialBodyEvent, SpatialBodyId,
-    SpatialSampleMode, SpatialSamplingConfig,
+    AuthoritativeBodyKinematics, AuthoritativeBodySync, ContactState, PhysicalBodyTickResult,
+    RuntimeBodyResetCause, RuntimeSpatialBodyView, SolvedBodyKinematics, SpatialBodyEvent,
+    SpatialBodyId, SpatialSampleMode, SpatialSamplingConfig,
 };
 use crate::state::types::PendingChildLink;
 use holtburger_common::math::Quaternion;
@@ -249,6 +249,36 @@ impl WorldState {
             self.apply_player_contact_state(solved.contact, &mut events);
         }
 
+        events
+    }
+
+    /// Emits world semantics for a transaction already committed by `SpatialScene`.
+    ///
+    /// Unlike `apply_solved_body_kinematics`, this seam never writes pose or kinematics back into
+    /// the scene. The scene transaction is the sole physical commit; the world layer only projects
+    /// its canonical post-commit view into existing events.
+    pub fn apply_physical_body_tick_result(
+        &mut self,
+        body_id: SpatialBodyId,
+        _result: &PhysicalBodyTickResult,
+    ) -> Vec<WorldEvent> {
+        if self.scene.body(body_id).is_none() {
+            return Vec::new();
+        }
+
+        let mut events = Vec::new();
+        Self::emit_runtime_body_changed(&mut events, body_id);
+        if matches!(body_id, SpatialBodyId::LocalPlayer(_)) {
+            let contact = self
+                .scene
+                .body(body_id)
+                .map(|body| body.contact)
+                .expect("body existence was checked before projecting physical tick");
+            self.apply_player_contact_state(contact, &mut events);
+        }
+        // `_result` is intentionally accepted here even though its collision reports and scene
+        // residency have no pre-existing client world event contract. They remain available to
+        // the transaction caller for diagnostics without manufacturing a new wire event.
         events
     }
 
@@ -670,6 +700,7 @@ impl WorldState {
         &mut self,
         data: &ServerAutonomousPositionData,
     ) -> Vec<WorldEvent> {
+        let known_teleport_sequence = self.player.teleport_sequence;
         let accepted = self.player.should_accept_server_position_sequences(
             data.teleport_sequence,
             data.force_position_sequence,
@@ -703,6 +734,9 @@ impl WorldState {
         }
 
         let mut events = vec![WorldEvent::SelfAutonomousPosition {
+            position: data.position,
+            contact: data.contact_flags != 0,
+            known_teleport_sequence,
             teleport_sequence: data.teleport_sequence,
             force_position_sequence: data.force_position_sequence,
             server_control_sequence: data.server_control_sequence,

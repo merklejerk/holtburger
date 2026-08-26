@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { sceneVec3 } from "../lib/assets/ac-frame";
-import type { GameRuntime } from "../lib/game/runtime/game-runtime";
+import type { GamePresentationRuntime } from "../lib/game/runtime/game-presentation-runtime";
 import type { SceneAvailabilityEvent } from "../lib/game/runtime/scene-availability";
 import { LandblockLayerKind } from "../lib/game/runtime/scene-interest";
 import type { SceneInterestRadii } from "../lib/game/runtime/types";
@@ -843,7 +843,7 @@ describe("ExplorerCameraCoordinator", () => {
 				landblockId: "0x0102ffff",
 			}),
 			updateSceneInterest:
-				updateSceneInterest as unknown as GameRuntime["updateSceneInterest"],
+				updateSceneInterest as unknown as GamePresentationRuntime["updateSceneInterest"],
 		});
 		const coordinator = new ExplorerCameraCoordinator(
 			runtime,
@@ -921,7 +921,7 @@ describe("ExplorerCameraCoordinator", () => {
 			queryOutdoorTerrainSurface: () =>
 				terrainQueryable ? { height: 0, landblockId: "0x0103ffff" } : null,
 			updateSceneInterest:
-				updateSceneInterest as unknown as GameRuntime["updateSceneInterest"],
+				updateSceneInterest as unknown as GamePresentationRuntime["updateSceneInterest"],
 		});
 		const coordinator = new ExplorerCameraCoordinator(
 			runtime,
@@ -1001,19 +1001,19 @@ function followCameraResidency(
 
 function createRuntime(
 	overrides: Partial<{
-		hasEnvCellScope: GameRuntime["hasEnvCellScope"];
-		hasEnvCellTopology: GameRuntime["hasEnvCellTopology"];
-		queryEnvCellBounds: GameRuntime["queryEnvCellBounds"];
-		queryEnvCellPointContainment: GameRuntime["queryEnvCellPointContainment"];
-		queryOutdoorTerrainSurface: GameRuntime["queryOutdoorTerrainSurface"];
-		queryWorldPointResidencyCandidates: GameRuntime["queryWorldPointResidencyCandidates"];
-		setAudioListener: GameRuntime["setAudioListener"];
-		setPrimaryView: GameRuntime["setPrimaryView"];
-		updateSceneInterest: GameRuntime["updateSceneInterest"];
+		hasEnvCellScope: GamePresentationRuntime["hasEnvCellScope"];
+		hasEnvCellTopology: GamePresentationRuntime["hasEnvCellTopology"];
+		queryEnvCellBounds: GamePresentationRuntime["queryEnvCellBounds"];
+		queryEnvCellPointContainment: GamePresentationRuntime["queryEnvCellPointContainment"];
+		queryOutdoorTerrainSurface: GamePresentationRuntime["queryOutdoorTerrainSurface"];
+		queryWorldPointResidencyCandidates: GamePresentationRuntime["queryWorldPointResidencyCandidates"];
+		setAudioListener: GamePresentationRuntime["setAudioListener"];
+		setPrimaryView: GamePresentationRuntime["setPrimaryView"];
+		updateSceneInterest: GamePresentationRuntime["updateSceneInterest"];
 	}> = {},
 ): {
 	readonly emit: (event: SceneAvailabilityEvent) => void;
-	readonly runtime: GameRuntime;
+	readonly runtime: GamePresentationRuntime;
 } {
 	let listener: ((event: SceneAvailabilityEvent) => void) | null = null;
 	const runtime = {
@@ -1042,7 +1042,7 @@ function createRuntime(
 		},
 		updateSceneInterest:
 			overrides.updateSceneInterest ?? (() => ({ revision: 1 })),
-	} as unknown as GameRuntime;
+	} as unknown as GamePresentationRuntime;
 	return {
 		emit: (event) => listener?.(event),
 		runtime,

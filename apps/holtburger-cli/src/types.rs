@@ -561,7 +561,6 @@ pub enum AppAction {
         name: String,
         account: String,
     },
-    SendCharacterEnterWorld,
     EnterSelectedCharacter,
     RestoreSelectedCharacter,
     SubmitCharacterCreation,

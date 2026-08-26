@@ -11,8 +11,9 @@ mod viewer_projection;
 pub use contract::*;
 use input::{PhysicalFlyInputAccumulator, bounded_pending_displacement};
 use viewer_projection::{
-    PreparedPhysicalFlyPresentation, PresentedViewer, parse_registration_residency, pose_with_cell,
-    prepare_physical_fly_presentation, resolve_viewer_cell, scene_point_to_residency_pose,
+    PreparedPhysicalFlyPresentation, PresentedViewer, parse_registration_residency,
+    place_viewer_body, pose_with_cell, prepare_physical_fly_presentation,
+    scene_point_to_residency_pose,
 };
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -42,10 +43,10 @@ use crate::placed_motion_presentation::landblock_key;
 use crate::placed_motion_presentation::scene_point_to_pose;
 
 /// Event carrying one authoritative fixed-tick placed-motion path.
-pub const PHYSICAL_FLY_MOTION_EVENT: &str = "host://physical-fly-motion";
+pub const EXPLORER_PHYSICAL_FLY_MOTION_EVENT: &str = "explorer-physical-fly-motion";
 
 /// Event terminating one camera generation after a host-side fixed-tick failure.
-pub const PHYSICAL_FLY_FAILURE_EVENT: &str = "host://physical-fly-failure";
+pub const EXPLORER_PHYSICAL_FLY_FAILURE_EVENT: &str = "explorer-physical-fly-failure";
 
 /// Shell-neutral publication boundary for fixed-tick physical-fly responses.
 pub trait PhysicalFlyEventSink: Send + Sync {
@@ -102,7 +103,7 @@ impl HostPhysicalFlyRuntime {
     /// Registers one physical response after validating the renderer's placement-history seed.
     pub fn start(&self, registration: PhysicalFlyRegistration) -> Result<u64> {
         let (owner, initial_viewer_cell) = parse_registration_residency(&registration.residency)?;
-        let mut presented_pose =
+        let presented_pose =
             scene_point_to_residency_pose(registration.scene_position, owner, initial_viewer_cell)?;
         let speed_envelope = registration.speed_envelope.validate()?;
         let scene = self.simulation.snapshot();
@@ -135,18 +136,13 @@ impl HostPhysicalFlyRuntime {
             initial_viewer_cell,
         )?;
         body_pose = pose_with_cell(body_pose, body_cell)?;
-        let viewer_cell = resolve_viewer_cell(&scene, presented_pose, initial_viewer_cell)?;
-        presented_pose = pose_with_cell(presented_pose, viewer_cell)?;
+        let viewer = place_viewer_body(&scene, presented_pose)?;
         let body_id = self.simulation.register_resolved_physical_body(
             body_pose,
             body_cell,
             body_registration,
             Instant::now(),
         )?;
-        let viewer = PresentedViewer {
-            pose: presented_pose,
-            cell: viewer_cell,
-        };
         // Invalidate the prior task while holding the body lock, immediately before replacement.
         let session = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         let input = PhysicalFlyInputAccumulator {

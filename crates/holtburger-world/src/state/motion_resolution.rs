@@ -265,6 +265,15 @@ impl WorldState {
     /// contribution rather than producing it, which is what keeps the tick's authored offset a
     /// single computed fact.
     pub fn advance_authored_motion(&mut self, dt: Duration) {
+        self.advance_authored_motion_except(dt, None);
+    }
+
+    /// Advances authored playback while excluding a locally predicted body.
+    ///
+    /// A local client owns a separate motion cursor while a held drive is active.  The
+    /// authoritative snapshot for that same entity can still be present in the world, so it must
+    /// not advance a second cursor and double-apply the tick's offset.
+    pub fn advance_authored_motion_except(&mut self, dt: Duration, excluded: Option<Guid>) {
         let quantum = dt.as_secs_f32();
         if !quantum.is_finite() || quantum < 0.0 {
             return;
@@ -276,6 +285,9 @@ impl WorldState {
             .entities
             .iter()
             .filter_map(|entity| {
+                if excluded == Some(entity.guid) {
+                    return None;
+                }
                 let snapshot = entity.motion_snapshot?;
                 if snapshot
                     .motion_command()

@@ -151,7 +151,9 @@ impl SelectionState {
                 operation: Some(CharacterManagementOperation::Restore),
                 response,
             } => return self.handle_restore_response(response),
-            ClientViewEvent::CharacterEnterWorldServerReady => {
+            ClientViewEvent::StatusUpdate {
+                state: holtburger_core::ClientState::EnteringWorld,
+            } => {
                 if let Some(char_info) = self.characters.get(self.selected_character_index) {
                     return UpdateResult::new().with_action(AppAction::TransitionToGame {
                         guid: char_info.character.guid,
@@ -521,7 +523,9 @@ mod tests {
     fn character_enter_world_server_ready_transitions_to_game_with_selected_identity() {
         let mut state = test_state();
 
-        let result = state.handle_view_event(ClientViewEvent::CharacterEnterWorldServerReady);
+        let result = state.handle_view_event(ClientViewEvent::StatusUpdate {
+            state: holtburger_core::ClientState::EnteringWorld,
+        });
 
         assert!(matches!(
             result.actions.as_slice(),

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import type { StaticObjectRuntimeDiagnostics } from "../lib/game/runtime/game-runtime";
+	import type { StaticObjectRuntimeDiagnostics } from "../lib/game/runtime/game-presentation-runtime";
 	import type { Texture2DReadback } from "../lib/game/renderer/webgl2-device";
 	import type { TextureAtlasPageDiagnostics } from "../lib/game/textures/texture-manager";
 	import type { TexturePageId } from "../lib/game/textures/texture-manager";

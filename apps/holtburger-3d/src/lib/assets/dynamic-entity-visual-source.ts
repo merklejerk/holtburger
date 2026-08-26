@@ -6,4 +6,6 @@ export interface DynamicEntityVisualSource {
 	load(
 		presentation: DynamicEntityView["presentation"],
 	): Promise<DecodedStaticPresentation>;
+	/** Stop queued content work when the owning presentation is torn down. */
+	destroy?(): void;
 }

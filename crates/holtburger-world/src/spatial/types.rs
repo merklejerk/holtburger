@@ -417,19 +417,6 @@ pub struct LocalDriveControl {
     pub force_grounded: bool,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct SpatialSolveRequest {
-    pub dt: Duration,
-    pub bodies: Vec<SolveBodyInput>,
-    pub local_drive: Option<LocalDriveControl>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct SpatialSolveBatch {
-    pub solved: Vec<SolvedBodyKinematics>,
-    pub events: Vec<SpatialBodyEvent>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

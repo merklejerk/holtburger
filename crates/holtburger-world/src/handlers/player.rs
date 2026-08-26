@@ -33,9 +33,13 @@ pub(crate) fn handle_message(
         GameMessage::UpdatePosition(data) => {
             if data.guid == state.player.guid && state.player.guid != holtburger_common::Guid::NULL
             {
+                let known_teleport_sequence = state.player.teleport_sequence;
                 let accepted = state.player.apply_position_from_server(&data.pos, events);
                 if accepted {
                     events.push(WorldEvent::SelfUpdatePosition {
+                        position: data.pos.pos,
+                        contact: data.pos.flags.contains(UpdatePositionFlag::IS_GROUNDED),
+                        known_teleport_sequence,
                         teleport_sequence: data.pos.teleport_sequence,
                         force_position_sequence: data.pos.force_position_sequence,
                     });

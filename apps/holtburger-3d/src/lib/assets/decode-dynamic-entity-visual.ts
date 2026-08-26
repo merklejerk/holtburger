@@ -44,7 +44,7 @@ const manifestSchema = z.object({
 	sections: z.array(binarySectionSchema),
 });
 
-/** Decode one complete immutable SetupModel appearance returned by the Explorer host. */
+/** Decode one complete immutable SetupModel appearance returned by the content host. */
 export function decodeDynamicEntityVisual(
 	response: Uint8Array,
 ): DecodedStaticPresentation {

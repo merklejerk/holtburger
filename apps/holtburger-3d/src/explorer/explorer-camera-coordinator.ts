@@ -2,7 +2,7 @@ import type { LandblockId } from "../lib/game/game-types";
 import { sceneVec3, sceneVector3 } from "../lib/assets/ac-frame";
 import { Vec3 } from "../lib/game/math/types";
 import { createCameraRotationRadians } from "../lib/game/math/camera-orientation";
-import { GameRuntime } from "../lib/game/runtime/game-runtime";
+import { GamePresentationRuntime } from "../lib/game/runtime/game-presentation-runtime";
 import type { HostCameraPlacement } from "../lib/game/motion/host-placed-path";
 import type { SceneInterestRevision } from "../lib/game/runtime/scene-availability";
 import type { SceneAvailabilityEvent } from "../lib/game/runtime/scene-availability";
@@ -96,7 +96,7 @@ export interface ExplorerSceneInterestSnapshot {
  * alone chooses initial poses, cancels them for manual input, and supplies camera framing.
  */
 export class ExplorerCameraCoordinator {
-	readonly #runtime: GameRuntime;
+	readonly #runtime: GamePresentationRuntime;
 	/** Explorer default: the free camera carries the ears, which is what a viewer expects. */
 	#audioFollowsCamera = true;
 	readonly #controller: ExplorerCameraInputController;
@@ -123,7 +123,7 @@ export class ExplorerCameraCoordinator {
 	#lastResolutionIssue: ExplorerCameraFocusStatus | null = null;
 
 	constructor(
-		runtime: GameRuntime,
+		runtime: GamePresentationRuntime,
 		controller: ExplorerCameraInputController,
 		onStatus: (status: ExplorerCameraFocusStatus) => void,
 	) {

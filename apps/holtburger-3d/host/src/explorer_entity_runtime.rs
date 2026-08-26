@@ -22,9 +22,9 @@ use holtburger_world::motion::{
     BodyMotionRuntime, MotionCommand, MotionOrder, MotionRuntimeRegistry, PlayingMotionClip,
 };
 use holtburger_world::{
-    CollisionReportOutcome, ContactState, DynamicPhysicalBodyDefinition, GroundedBodyActuation,
-    GroundedLaunch, PhysicalBodyActuation, PhysicalBodyDefinition, PhysicalBodyTickStatus,
-    RuntimeSpatialBodyView, SpatialBody, SpatialBodyId, gate_authored_offset,
+    CollisionReportOutcome, ContactState, DynamicPhysicalBodyDefinition, GroundedLaunch,
+    PhysicalBodyActuation, PhysicalBodyDefinition, PhysicalBodyTickStatus, RuntimeSpatialBodyView,
+    SpatialBody, SpatialBodyId, gate_authored_offset, grounded_character_actuation,
 };
 use holtburger_world::{
     EffectiveEntityPhysicsState, EntityPhysicalIntent, EntityPhysicsTransitionContext,
@@ -789,7 +789,8 @@ fn possession_event_result(
                 },
                 Err(
                     error @ (CharacterJumpRejection::InvalidHeading
-                    | CharacterJumpRejection::InvalidTurnRate),
+                    | CharacterJumpRejection::InvalidTurnRate
+                    | CharacterJumpRejection::InvalidRunRate),
                 ) => anyhow::bail!("host-owned possession jump invariant failed: {error}"),
             }
         }
@@ -885,12 +886,11 @@ fn possession_grounded_actuation(
         }
         None => body.pose.rotation.to_heading(),
     };
-    let mut actuation =
-        GroundedBodyActuation::drive(world_planar)?.with_control_heading(heading)?;
-    if let Some(launch) = launch {
-        actuation = actuation.with_launch(launch);
-    }
-    Ok(PhysicalBodyActuation::Grounded(actuation))
+    Ok(grounded_character_actuation(
+        world_planar,
+        Some(heading),
+        launch,
+    )?)
 }
 
 fn fallback_forward_velocity(
@@ -3150,6 +3150,56 @@ mod tests {
             (after - before).length() > 0.5,
             "a possessed entity ordered to walk must travel: {before:?} -> {after:?}"
         );
+    }
+
+    #[test]
+    fn explorer_and_client_authored_grounded_adapters_resolve_equal_actuation() {
+        let (simulation, runtime, guid) = walking_runtime_with_catalog(running_catalog());
+        settle(&simulation, Instant::now());
+        let possession = runtime.possess(guid).expect("fixture is possessable");
+        let table = runtime
+            .motion_catalog
+            .table(possession.motion_table_id)
+            .expect("the possession table remains projected");
+        let mut active = ActivePossession::new(
+            guid,
+            possession.entity_generation,
+            possession.possession_generation,
+            possession.motion_table_id,
+            table,
+            runtime.possession_profile,
+        )
+        .expect("fixture possession should resolve");
+        let drive = CharacterDrive::builder().run().forward().build();
+        active.controller.replace_drive(drive);
+        let body = simulation
+            .physical_body_snapshot(SpatialBodyId::Entity(guid))
+            .expect("the possessed body must exist after settling");
+        assert_eq!(body.contact, ContactState::Grounded);
+        let offset = RigidTransform {
+            translation: Vector3::new(0.0, 0.25, 0.0),
+            rotation: Quaternion::identity(),
+        };
+
+        let explorer = possession_grounded_actuation(
+            &active,
+            offset,
+            &body,
+            1.0,
+            runtime.possession_profile,
+            1.0 / 30.0,
+            None,
+        )
+        .expect("Explorer adapter should produce grounded actuation");
+        let client = holtburger_world::authored_grounded_actuation(
+            offset,
+            body.pose,
+            body.contact,
+            1.0,
+            1.0 / 30.0,
+        )
+        .expect("client adapter should produce grounded actuation");
+        assert_eq!(explorer, client);
     }
 
     #[test]

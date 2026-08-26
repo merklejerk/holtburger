@@ -1,7 +1,9 @@
 mod bsp_query;
 mod cell_index;
+mod child_body;
 mod collision;
 mod collision_report;
+mod dead_reckoning;
 #[cfg(test)]
 mod differential_fixtures;
 mod dynamic_body;
@@ -10,20 +12,23 @@ mod dynamic_index;
 mod free_sphere;
 mod grounded;
 mod physical_body;
-mod physics;
 mod scene;
 mod types;
 mod volume_query;
 
-pub use physics::{
-    BasicSpatialPhysics, NoopSpatialPhysics, SpatialPhysics, advance_body_kinematics,
-    gate_authored_offset, project_pose_forward_distance,
+pub use child_body::{
+    ChildSpatialBody, ChildSpatialBodyDefinition, ChildSpatialBodyDefinitionError,
+    ChildSpatialBodyWaypoint,
+};
+pub use dead_reckoning::{
+    advance_authored_body_kinematics, advance_body_kinematics, gate_authored_offset,
+    project_pose_forward_distance,
 };
 pub use scene::{DynamicBodyRelocationOutcome, SpatialScene};
 pub use types::*;
 
 #[cfg(test)]
-pub(crate) use physics::project_pose_by_velocity;
+pub(crate) use dead_reckoning::project_pose_by_velocity;
 
 #[cfg(test)]
 mod tests;

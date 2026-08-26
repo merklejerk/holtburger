@@ -122,7 +122,6 @@ impl AppState {
         // Handle setup and chat events regardless of being locally in-game
         match &event {
             ClientViewEvent::CharacterList(_)
-            | ClientViewEvent::CharacterEnterWorldServerReady
             | ClientViewEvent::ServerTimeUpdated { .. }
             | ClientViewEvent::WorldNameUpdated(_) => {
                 self.handle_setup_event(&event, &mut result);
@@ -136,7 +135,6 @@ impl AppState {
         if !matches!(
             event,
             ClientViewEvent::CharacterList(_)
-                | ClientViewEvent::CharacterEnterWorldServerReady
                 | ClientViewEvent::WorldNameUpdated(_)
                 | ClientViewEvent::CharacterManagementResponse { .. }
                 | ClientViewEvent::CharacterDeleteResponse

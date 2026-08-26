@@ -314,165 +314,92 @@ fn advance_body_kinematics_rotates_velocity_with_turn_rate() {
 }
 
 #[test]
-fn basic_spatial_physics_realizes_local_grounded_direct_drive() {
+fn spatial_scene_transaction_commits_only_after_acceptance() {
     let mut scene = SpatialScene::new();
     let now = Instant::now();
-    let guid = Guid(0x5000_0001);
-    let body_id = SpatialBodyId::LocalPlayer(guid);
+    let body_id = SpatialBodyId::Entity(Guid(0x5000_0001));
     let pose = make_position(10.0, 20.0, 0.0);
-
-    scene.upsert_runtime_body_snapshot(body_id, pose, Vector3::zero(), Vector3::zero(), None, now);
-
-    let request = SpatialSolveRequest {
-        dt: Duration::from_millis(100),
-        bodies: vec![SolveBodyInput::velocity(
+    scene.register_body(SpatialBody::new(body_id, pose, now));
+    scene
+        .install_physical_body(
             body_id,
-            pose,
-            ContactState::Grounded,
-            Vector3::zero(),
-            Vector3::zero(),
-        )],
-        local_drive: Some(LocalDriveControl {
+            PhysicalBodyDefinition::free_sphere(
+                PhysicalSphereSet::new(
+                    holtburger_common::Sphere {
+                        center: Vector3::zero(),
+                        radius: 0.5,
+                    },
+                    None,
+                )
+                .expect("test sphere should be valid"),
+                FreeSphereConfig {
+                    maximum_substep_distance: 0.25,
+                    maximum_substeps: 32,
+                    maximum_contact_passes: 8,
+                    separation_epsilon: 0.0005,
+                },
+            )
+            .expect("test physical definition should be valid"),
+            PhysicalCollisionFilter::ALL,
+            PhysicalBodyResponsePolicy {
+                restitution: PhysicalRestitution::Inelastic,
+                friction: PhysicalFriction::DEFAULT,
+                surface_motion: PhysicalSurfaceMotion::Stable,
+                align_path: false,
+            },
+            None,
+        )
+        .expect("registered body should accept a physical definition");
+
+    let (result, callback_pose) = scene
+        .tick_physical_body_transaction(
             body_id,
-            desired_world_delta: Vector3::new(0.0, 4.5, 1.0),
-            desired_heading: Some(90.0_f32.to_radians()),
-            target_hint: None,
-            gait: LocalDriveGait::Run,
-            force_grounded: true,
-        }),
-    };
+            &CollisionScene::new(),
+            PhysicalBodyActuation::free_flight(Vector3::new(2.0, 0.0, 0.0))
+                .expect("test velocity should be finite"),
+            1.0,
+            now + Duration::from_secs(1),
+            |body, result| {
+                Ok((
+                    body.pose,
+                    result.motion.path.final_point().placement().clone(),
+                ))
+            },
+        )
+        .expect("transaction should solve against an empty scene");
 
-    let solved = BasicSpatialPhysics.solve(&request, &mut scene);
-    assert_eq!(solved.solved.len(), 1);
-    let body = solved.solved[0];
-    assert_eq!(body.body_id, body_id);
-    assert!((body.pose.coords.y - 24.5).abs() < 1e-4);
-    assert!((body.pose.coords.z - 1.0).abs() < 1e-4);
-    assert_eq!(body.contact, ContactState::Grounded);
-    assert_eq!(
-        body.projection_state,
-        Some(SelfPlayerDriveProjectionState::LocalGroundedDirectDrive)
-    );
-}
-
-#[test]
-fn basic_spatial_physics_freezes_local_drive_when_body_is_authority_frozen() {
-    let mut scene = SpatialScene::new();
-    let now = Instant::now();
-    let guid = Guid(0x5000_0002);
-    let body_id = SpatialBodyId::LocalPlayer(guid);
-    let pose = make_position(10.0, 20.0, 0.0);
-
-    scene.upsert_runtime_body_snapshot(body_id, pose, Vector3::zero(), Vector3::zero(), None, now);
-    scene.apply_forced_reposition_reset(body_id, pose, now);
-
-    let request = SpatialSolveRequest {
-        dt: Duration::from_millis(100),
-        bodies: vec![SolveBodyInput::velocity(
-            body_id,
-            pose,
-            ContactState::Grounded,
-            Vector3::zero(),
-            Vector3::zero(),
-        )],
-        local_drive: Some(LocalDriveControl {
-            body_id,
-            desired_world_delta: Vector3::new(0.0, 4.5, 0.0),
-            desired_heading: Some(90.0_f32.to_radians()),
-            target_hint: None,
-            gait: LocalDriveGait::Run,
-            force_grounded: true,
-        }),
-    };
-
-    let solved = BasicSpatialPhysics.solve(&request, &mut scene);
-    assert_eq!(solved.solved.len(), 1);
-    let body = solved.solved[0];
-    assert_eq!(body.pose, pose);
-    assert!(body.velocity.length_squared() <= 1e-6);
-    assert_eq!(
-        body.projection_state,
-        Some(SelfPlayerDriveProjectionState::AuthorityFrozen)
-    );
-}
-
-#[test]
-fn basic_spatial_physics_uses_target_hint_for_indoor_destination_landblock() {
-    let mut scene = SpatialScene::new();
-    let now = Instant::now();
-    let guid = Guid(0x5000_0003);
-    let body_id = SpatialBodyId::LocalPlayer(guid);
-    let pose = WorldPosition {
-        landblock_id: Guid(0x016C_0000),
-        coords: Vector3::new(180.0, 188.0, 0.0),
-        rotation: Quaternion::identity(),
-    };
-    let target_hint = WorldPosition {
-        landblock_id: Guid(0x016D_0100),
-        coords: Vector3::new(2.0, -3.0, 0.0),
-        rotation: Quaternion::identity(),
-    };
-
-    scene.upsert_runtime_body_snapshot(body_id, pose, Vector3::zero(), Vector3::zero(), None, now);
-
-    let request = SpatialSolveRequest {
-        dt: Duration::from_secs(1),
-        bodies: vec![SolveBodyInput::velocity(
-            body_id,
-            pose,
-            ContactState::Grounded,
-            Vector3::zero(),
-            Vector3::zero(),
-        )],
-        local_drive: Some(LocalDriveControl {
-            body_id,
-            desired_world_delta: Vector3::new(20.0, 10.0, 0.0),
-            desired_heading: None,
-            target_hint: Some(target_hint),
-            gait: LocalDriveGait::Run,
-            force_grounded: true,
-        }),
-    };
-
-    let solved = BasicSpatialPhysics.solve(&request, &mut scene);
-    let body = solved.solved[0];
-
-    assert_eq!(body.pose.landblock_id, target_hint.landblock_id);
-    assert_eq!(body.pose.coords, Vector3::new(200.0, 6.0, 0.0));
+    assert_eq!(callback_pose.0, scene.body(body_id).unwrap().pose);
+    assert_eq!(callback_pose.0.coords.x, 12.0);
+    assert_eq!(result.motion.path.initial().center(), pose.coords);
 }
 
 /// An authored offset is a local rigid transform: its translation is rotated into world space by
 /// the body's own pose and its rotation composes onto that pose.
 #[test]
-fn basic_spatial_physics_integrates_an_authored_offset_in_the_bodys_own_frame() {
-    let mut scene = SpatialScene::new();
+fn authored_projection_integrates_an_offset_in_the_bodys_own_frame() {
     let guid = Guid(0x5000_0004);
     // Heading 90 degrees is AC's North, where the pose rotation is identity.
     let pose = make_position(10.0, 20.0, 90.0_f32.to_radians());
     let quarter_turn = std::f32::consts::FRAC_PI_2;
 
-    let request = SpatialSolveRequest {
-        dt: Duration::from_secs(1),
-        bodies: vec![SolveBodyInput {
-            body_id: SpatialBodyId::Entity(guid),
-            pose,
-            contact: ContactState::Grounded,
-            basis: Some(SolveProjectionBasis::AuthoredDrive {
-                offset: RigidTransform {
-                    translation: Vector3::new(0.0, 2.0, 0.0),
-                    rotation: Quaternion::from_axis_angle(
-                        Vector3::new(0.0, 0.0, 1.0),
-                        quarter_turn,
-                    )
+    let input = SolveBodyInput {
+        body_id: SpatialBodyId::Entity(guid),
+        pose,
+        contact: ContactState::Grounded,
+        basis: Some(SolveProjectionBasis::AuthoredDrive {
+            offset: RigidTransform {
+                translation: Vector3::new(0.0, 2.0, 0.0),
+                rotation: Quaternion::from_axis_angle(Vector3::new(0.0, 0.0, 1.0), quarter_turn)
                     .expect("a unit axis and finite angle build a rotation"),
-                },
-            }),
-        }],
-        local_drive: None,
+            },
+        }),
     };
 
-    let solved = BasicSpatialPhysics.solve(&request, &mut scene);
-    let body = solved.solved[0];
+    let offset = match input.basis {
+        Some(SolveProjectionBasis::AuthoredDrive { offset }) => offset,
+        _ => unreachable!("test input should carry an authored offset"),
+    };
+    let body = advance_authored_body_kinematics(&input, offset, Duration::from_secs(1));
 
     assert!((body.pose.coords.x - 10.0).abs() < 1e-4);
     assert!((body.pose.coords.y - 22.0).abs() < 1e-4);
@@ -488,33 +415,28 @@ fn basic_spatial_physics_integrates_an_authored_offset_in_the_bodys_own_frame() 
 /// rotation, so a body walking off a ledge stops driving forward but keeps turning.
 #[test]
 fn an_unsupported_body_keeps_authored_rotation_and_loses_authored_translation() {
-    let mut scene = SpatialScene::new();
     let guid = Guid(0x5000_0005);
     let pose = make_position(10.0, 20.0, 90.0_f32.to_radians());
     let quarter_turn = std::f32::consts::FRAC_PI_2;
 
-    let request = SpatialSolveRequest {
-        dt: Duration::from_secs(1),
-        bodies: vec![SolveBodyInput {
-            body_id: SpatialBodyId::Entity(guid),
-            pose,
-            contact: ContactState::Airborne,
-            basis: Some(SolveProjectionBasis::AuthoredDrive {
-                offset: RigidTransform {
-                    translation: Vector3::new(0.0, 2.0, 0.0),
-                    rotation: Quaternion::from_axis_angle(
-                        Vector3::new(0.0, 0.0, 1.0),
-                        quarter_turn,
-                    )
+    let input = SolveBodyInput {
+        body_id: SpatialBodyId::Entity(guid),
+        pose,
+        contact: ContactState::Airborne,
+        basis: Some(SolveProjectionBasis::AuthoredDrive {
+            offset: RigidTransform {
+                translation: Vector3::new(0.0, 2.0, 0.0),
+                rotation: Quaternion::from_axis_angle(Vector3::new(0.0, 0.0, 1.0), quarter_turn)
                     .expect("a unit axis and finite angle build a rotation"),
-                },
-            }),
-        }],
-        local_drive: None,
+            },
+        }),
     };
 
-    let solved = BasicSpatialPhysics.solve(&request, &mut scene);
-    let body = solved.solved[0];
+    let offset = match input.basis {
+        Some(SolveProjectionBasis::AuthoredDrive { offset }) => offset,
+        _ => unreachable!("test input should carry an authored offset"),
+    };
+    let body = advance_authored_body_kinematics(&input, offset, Duration::from_secs(1));
 
     assert!((body.pose.coords.y - 20.0).abs() < 1e-4);
     assert_eq!(body.velocity, Vector3::zero());

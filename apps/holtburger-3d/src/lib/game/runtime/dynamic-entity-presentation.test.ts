@@ -5,9 +5,9 @@ import { AABB3, Mat4, Vec3 } from "../math/types";
 import { adaptAuthoredDynamicPresentation } from "../resolution/authored-dynamic-presentation";
 import type { AuthoredDynamicSource } from "../resolution/landblock-layer";
 import {
-	adaptSpawnedDynamicPresentation,
-	spawnedDynamicPlacement,
-} from "./spawned-dynamic-presentation";
+	adaptDynamicEntityPresentation,
+	dynamicEntityPlacement,
+} from "./dynamic-entity-presentation";
 import type { DynamicEntityView } from "./dynamic-entity-feed";
 
 describe("dynamic presentation producer adapters", () => {
@@ -53,7 +53,7 @@ describe("dynamic presentation producer adapters", () => {
 
 	it("uses host placement, AC axes, generation identity, scale, and explicit sound override", () => {
 		const entity = fixtureEntity();
-		const adapted = adaptSpawnedDynamicPresentation(entity, fixtureVisual());
+		const adapted = adaptDynamicEntityPresentation(entity, fixtureVisual());
 
 		expect(adapted.source).toMatchObject({
 			behavior: { soundTableId: "0x20000002" },
@@ -75,13 +75,13 @@ describe("dynamic presentation producer adapters", () => {
 				],
 			},
 		});
-		expect(spawnedDynamicPlacement(entity)).toEqual(adapted.placement);
+		expect(dynamicEntityPlacement(entity)).toEqual(adapted.placement);
 	});
 
 	it("rejects a visual closure for a different setup", () => {
 		const visual = { ...fixtureVisual(), setupId: "0x02000002" };
 		expect(() =>
-			adaptSpawnedDynamicPresentation(fixtureEntity(), visual),
+			adaptDynamicEntityPresentation(fixtureEntity(), visual),
 		).toThrow("expected 0x02000001");
 	});
 
@@ -95,7 +95,7 @@ describe("dynamic presentation producer adapters", () => {
 			reachedEnvCellIds: [0x01020123],
 		};
 
-		expect(spawnedDynamicPlacement(entity).spatialMembership.scopes).toEqual([
+		expect(dynamicEntityPlacement(entity).spatialMembership.scopes).toEqual([
 			{ kind: "outdoor" },
 			{
 				envCellId: "0x01020123",
@@ -115,7 +115,7 @@ describe("dynamic presentation producer adapters", () => {
 			reachedEnvCellIds: [0x01020001],
 		};
 
-		expect(() => spawnedDynamicPlacement(entity)).toThrow("non-EnvCell");
+		expect(() => dynamicEntityPlacement(entity)).toThrow("non-EnvCell");
 	});
 });
 

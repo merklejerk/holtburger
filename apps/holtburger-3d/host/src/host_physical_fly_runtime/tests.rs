@@ -546,7 +546,7 @@ fn tick_commits_exactly_the_viewer_placement_at_the_path_endpoint() {
     );
     let state = runtime.state.lock().unwrap();
     assert_eq!(
-        state.active.as_ref().unwrap().viewer.cell,
+        state.active.as_ref().unwrap().viewer.body.committed_cell(),
         Some(Guid(0xda55_010b))
     );
 }

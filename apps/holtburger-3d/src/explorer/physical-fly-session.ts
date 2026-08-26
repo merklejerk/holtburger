@@ -49,11 +49,11 @@ export interface PhysicalFlyTransport {
 		args?: HostCommandArguments,
 	): Promise<unknown>;
 	listenMotion(
-		event: "host://physical-fly-motion",
+		event: "explorer-physical-fly-motion",
 		handler: (path: HostPhysicalFlyPath) => void,
 	): Promise<() => void>;
 	listenFailure(
-		event: "host://physical-fly-failure",
+		event: "explorer-physical-fly-failure",
 		handler: (failure: HostPhysicalFlyFailure) => void,
 	): Promise<() => void>;
 	now(): number;
@@ -106,13 +106,13 @@ export class PhysicalFlySession {
 	async start(placement: HostCameraPlacement): Promise<void> {
 		if (this.#unlisten !== null) return;
 		const unlistenMotion = await this.#transport.listenMotion(
-			"host://physical-fly-motion",
+			"explorer-physical-fly-motion",
 			(path) => this.#receivePath(path),
 		);
 		let unlistenFailure: (() => void) | null = null;
 		try {
 			unlistenFailure = await this.#transport.listenFailure(
-				"host://physical-fly-failure",
+				"explorer-physical-fly-failure",
 				(failure) => this.#receiveFailure(failure),
 			);
 			this.#unlisten = () => {

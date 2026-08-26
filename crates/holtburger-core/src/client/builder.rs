@@ -2,7 +2,7 @@ use anyhow::{Context, Result, anyhow};
 use holtburger_content::ContentRepository;
 use holtburger_dat::file_type::{SkillTable, SpellTable, XpTable};
 use holtburger_session::Session;
-use holtburger_world::{BasicSpatialPhysics, SpatialPhysics, WorldBootstrap, WorldState};
+use holtburger_world::{WorldBootstrap, WorldState};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -24,7 +24,7 @@ pub struct ClientRuntimeBuilder {
     account_name: String,
     server_endpoint: Option<ServerEndpoint>,
     world_bootstrap: Option<Arc<WorldBootstrap>>,
-    spatial_physics: Option<Arc<dyn SpatialPhysics>>,
+    collision_source: Option<Arc<dyn super::collision::ClientCollisionSource>>,
     message_dump_dir: Option<PathBuf>,
 }
 
@@ -34,7 +34,7 @@ impl ClientRuntimeBuilder {
             account_name: account_name.into(),
             server_endpoint: None,
             world_bootstrap: None,
-            spatial_physics: None,
+            collision_source: None,
             message_dump_dir: None,
         }
     }
@@ -80,8 +80,12 @@ impl ClientRuntimeBuilder {
         Ok(())
     }
 
-    pub fn spatial_physics(mut self, physics: Arc<dyn SpatialPhysics>) -> Self {
-        self.spatial_physics = Some(physics);
+    /// Injects the content-backed source used to stage client collision and player-body products.
+    pub fn collision_source(
+        mut self,
+        source: Arc<dyn super::collision::ClientCollisionSource>,
+    ) -> Self {
+        self.collision_source = Some(source);
         self
     }
 
@@ -136,18 +140,17 @@ impl ClientRuntimeBuilder {
         let world_bootstrap = self.world_bootstrap.ok_or_else(|| {
             anyhow!("ClientRuntimeBuilder requires world bootstrap before connect()")
         })?;
-        let spatial_physics = self
-            .spatial_physics
-            .unwrap_or_else(|| Arc::new(BasicSpatialPhysics));
-
         let (client_view_event_tx, _) = broadcast::channel(4096);
 
         Ok(ClientRuntime {
             session,
-            world: WorldState::new_with_spatial_physics(world_bootstrap, spatial_physics),
+            world: WorldState::new(world_bootstrap),
             active_confirmation: None,
             active_busy_operation: None,
             state: ClientState::Connected,
+            authenticating: false,
+            world_generation: 0,
+            exit_cause: None,
             client_view_event_tx,
             dynamic_entity_time_origin: Instant::now(),
             command_rx: None,
@@ -155,6 +158,10 @@ impl ClientRuntimeBuilder {
             message_counter: 0,
             movement: MovementSystem::new(),
             simulation: ClientSimulationSystem::new(),
+            collision_coordinator: self
+                .collision_source
+                .map(super::collision::ClientCollisionCoordinator::new),
+            camera: super::camera::ClientCameraRuntime::new()?,
             character_selection: CharacterSelectionState::new(self.account_name),
             turbine_chat: TurbineChatState::default(),
         })
@@ -167,10 +174,13 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> ClientRuntime {
 
     let mut client = ClientRuntime {
         session: Session::new_test(),
-        world: WorldState::synthetic_with_spatial_physics(Arc::new(BasicSpatialPhysics)),
+        world: WorldState::synthetic(),
         active_confirmation: None,
         active_busy_operation: None,
         state: ClientState::Connected,
+        authenticating: false,
+        world_generation: 0,
+        exit_cause: None,
         client_view_event_tx,
         dynamic_entity_time_origin: Instant::now(),
         command_rx: None,
@@ -178,6 +188,8 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> ClientRuntime {
         message_counter: 0,
         movement: MovementSystem::new(),
         simulation: ClientSimulationSystem::new(),
+        collision_coordinator: None,
+        camera: super::camera::ClientCameraRuntime::new().expect("test camera profile"),
         character_selection: CharacterSelectionState::new("test".to_string()),
         turbine_chat: TurbineChatState::default(),
     };
@@ -188,57 +200,11 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> ClientRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use holtburger_common::{Guid, Vector3};
     use holtburger_content::ContentRepository;
     use holtburger_dat::file_type::{ChatPoseTable, MotionTable, SkillTable, SpellTable, XpTable};
     use holtburger_dat::{DatFileType, EOR_PORTAL_NAMESPACE, HbaReader, HbaWriter, ResourceSource};
-    use holtburger_world::{
-        ContactState, SolveBodyInput, SolvedBodyKinematics, SpatialScene, SpatialSolveBatch,
-        SpatialSolveRequest,
-    };
     use std::path::{Path, PathBuf};
-    use std::time::Duration;
     use tempfile::tempdir;
-
-    #[derive(Debug, Default)]
-    struct MarkerSpatialPhysics;
-
-    impl SpatialPhysics for MarkerSpatialPhysics {
-        fn solve(
-            &self,
-            request: &SpatialSolveRequest,
-            _scene: &mut SpatialScene,
-        ) -> SpatialSolveBatch {
-            SpatialSolveBatch {
-                solved: request
-                    .bodies
-                    .iter()
-                    .map(|body| {
-                        let (velocity, omega) = match body.basis {
-                            Some(holtburger_world::SolveProjectionBasis::Velocity {
-                                velocity,
-                                omega,
-                            }) => (velocity, omega),
-                            Some(holtburger_world::SolveProjectionBasis::AuthoredDrive {
-                                ..
-                            })
-                            | None => (Vector3::zero(), Vector3::zero()),
-                        };
-
-                        SolvedBodyKinematics {
-                            body_id: body.body_id,
-                            pose: body.pose,
-                            velocity,
-                            omega,
-                            contact: ContactState::Grounded,
-                            projection_state: None,
-                        }
-                    })
-                    .collect(),
-                events: Default::default(),
-            }
-        }
-    }
 
     fn repo_assets_hba_path() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../dats/assets.hba")
@@ -462,33 +428,5 @@ mod tests {
             .expect_err("runtime builder should fail when a required asset is missing");
 
         assert!(error.to_string().contains("skill table"));
-    }
-
-    #[test]
-    fn runtime_builder_injects_custom_spatial_physics() {
-        let client = ClientRuntimeBuilder::new("test")
-            .server("127.0.0.1", 9000)
-            .world_bootstrap(Arc::new(WorldBootstrap::synthetic()))
-            .spatial_physics(Arc::new(MarkerSpatialPhysics))
-            .build_with_session(Session::new_test())
-            .expect("runtime builder should accept custom spatial physics");
-
-        let request = SpatialSolveRequest {
-            dt: Duration::from_millis(30),
-            bodies: vec![SolveBodyInput::velocity(
-                holtburger_world::SpatialBodyId::Entity(Guid(0x5000_0001)),
-                Default::default(),
-                holtburger_world::ContactState::Unknown,
-                Vector3::zero(),
-                Vector3::zero(),
-            )],
-            local_drive: None,
-        };
-        let mut scene = SpatialScene::new_with_physics(Arc::clone(client.world.scene.physics()));
-
-        let batch = Arc::clone(client.world.scene.physics()).solve(&request, &mut scene);
-
-        assert_eq!(batch.solved.len(), 1);
-        assert_eq!(batch.solved[0].contact, ContactState::Grounded);
     }
 }

@@ -11,9 +11,31 @@ use holtburger_common::position::WorldPosition;
 use holtburger_common::{RigidTransform, Vector3};
 
 use crate::spatial::{
-    ContactState, GroundedBodyActuation, PhysicalBodyActuation, PhysicalBodyActuationError,
-    gate_authored_offset,
+    ContactState, GroundedBodyActuation, GroundedLaunch, PhysicalBodyActuation,
+    PhysicalBodyActuationError, gate_authored_offset,
 };
+
+/// Builds the one grounded actuation consumed by the physical solver.
+///
+/// Character controllers and authored-motion adapters may disagree about where their planar
+/// velocity came from, but they share this boundary: a world-space planar drive, one optional
+/// absolute heading, and one one-shot launch become one validated actuation. Keeping that
+/// conversion here prevents Explorer and client authorities from growing subtly different
+/// `GroundedBodyActuation` construction paths.
+pub fn grounded_character_actuation(
+    supported_planar_velocity: Vector3,
+    control_heading: Option<f32>,
+    launch: Option<GroundedLaunch>,
+) -> Result<PhysicalBodyActuation, PhysicalBodyActuationError> {
+    let mut grounded = GroundedBodyActuation::drive(supported_planar_velocity)?;
+    if let Some(heading) = control_heading {
+        grounded = grounded.with_control_heading(heading)?;
+    }
+    if let Some(launch) = launch {
+        grounded = grounded.with_launch(launch);
+    }
+    Ok(PhysicalBodyActuation::Grounded(grounded))
+}
 
 /// Builds the actuation one authored offset produces for a grounded body.
 ///
@@ -45,7 +67,5 @@ pub fn authored_grounded_actuation(
     };
 
     let heading = pose.rotation.multiply(&gated.rotation).to_heading();
-    Ok(PhysicalBodyActuation::Grounded(
-        GroundedBodyActuation::drive(planar)?.with_control_heading(heading)?,
-    ))
+    grounded_character_actuation(planar, Some(heading), None)
 }

@@ -1,16 +1,18 @@
 import { decode, encode } from "@msgpack/msgpack";
 import { z } from "zod";
+import type { ClientLaunchConfiguration } from "./client-launch.js";
+import { MAX_PENDING_REQUESTS } from "../src/lib/host/host-limits.js";
+export { MAX_PENDING_REQUESTS } from "../src/lib/host/host-limits.js";
 import type {
 	HostCommandArguments,
 	HostCommandName,
 	HostEventName,
 	HostEventPayloadMap,
+	HostMode,
 } from "../src/lib/host/host-transport.js";
 
 /** Must match the Rust sidecar's encoded payload ceiling. */
 export const MAX_FRAME_BYTES = 16 * 1024 * 1024;
-/** Maximum requests awaiting host responses; bounds renderer-driven stdin buffering. */
-export const MAX_PENDING_REQUESTS = 256;
 /** Version negotiated before any command is accepted. */
 export const PROTOCOL_VERSION = 1;
 /** Grace period before a sidecar that ignored shutdown is terminated. */
@@ -58,6 +60,7 @@ const wireFrameSchema = z.discriminatedUnion("kind", [
 		protocol_version: z.number().int().nonnegative(),
 		host_name: z.string(),
 		host_version: z.string(),
+		host_mode: z.enum(["explorer", "client"]),
 	}),
 	z.object({
 		kind: z.literal("response"),
@@ -71,11 +74,19 @@ const wireFrameSchema = z.discriminatedUnion("kind", [
 		kind: z.literal("event"),
 		event: z.object({
 			event: z.enum([
-				"dynamic-entity",
-				"fixed-tick",
-				"possession-event-outcomes",
-				"physical-fly-motion",
-				"physical-fly-failure",
+				"explorer-dynamic-entity",
+				"client-current-state",
+				"client-lifecycle-changed",
+				"client-server-time-updated",
+				"client-dynamic-entity",
+				"client-camera-started",
+				"client-camera",
+				"client-world-discontinuity",
+				"client-exit-requested",
+				"explorer-fixed-tick",
+				"explorer-possession-event-outcomes",
+				"explorer-physical-fly-motion",
+				"explorer-physical-fly-failure",
 			]),
 			payload: z.unknown(),
 		}),
@@ -85,7 +96,6 @@ const wireFrameSchema = z.discriminatedUnion("kind", [
 ]);
 
 type WireFrame = z.infer<typeof wireFrameSchema>;
-type WireEvent = Extract<WireFrame, { kind: "event" }>;
 
 /** Error reported when the sidecar violates the framing or negotiated protocol contract. */
 export class SidecarProtocolError extends Error {
@@ -195,14 +205,6 @@ export function encodeSidecarFrame(frame: unknown): Uint8Array {
 	return framed;
 }
 
-const WIRE_EVENT_NAMES: Record<WireEvent["event"]["event"], HostEventName> = {
-	"dynamic-entity": "explorer-dynamic-entity",
-	"fixed-tick": "explorer-fixed-tick",
-	"possession-event-outcomes": "explorer-possession-event-outcomes",
-	"physical-fly-motion": "host://physical-fly-motion",
-	"physical-fly-failure": "host://physical-fly-failure",
-};
-
 export function wireCommand(
 	command: HostCommandName,
 	args: HostCommandArguments,
@@ -214,6 +216,12 @@ export function wireCommand(
 		command === "stop_physical_fly"
 	) {
 		return { ...base, ...args };
+	}
+	if (command === "select_client_character") {
+		return { ...base, guid: args.guid };
+	}
+	if (command === "replace_client_drive") {
+		return { ...base, request: args.request };
 	}
 	if (command === "start_physical_fly") {
 		return { ...base, registration: args.registration };
@@ -228,6 +236,7 @@ export function wireCommand(
 /** Main-process client that owns one sidecar, request multiplexer, and event fanout. */
 export class SidecarHostClient {
 	readonly #process: SidecarProcessLike;
+	readonly #expectedMode: HostMode | undefined;
 	readonly #decoder = new SidecarFrameDecoder();
 	readonly #pending = new Map<
 		number,
@@ -249,8 +258,9 @@ export class SidecarHostClient {
 	#handshakeComplete = false;
 	readonly #handshakeTimeout: ReturnType<typeof setTimeout>;
 
-	constructor(process: SidecarProcessLike) {
+	constructor(process: SidecarProcessLike, expectedMode?: HostMode) {
 		this.#process = process;
+		this.#expectedMode = expectedMode;
 		this.#connected = new Promise<void>((resolve, reject) => {
 			this.#resolveConnected = resolve;
 			this.#rejectConnected = reject;
@@ -302,28 +312,17 @@ export class SidecarHostClient {
 		command: HostCommandName,
 		args?: HostCommandArguments,
 	): Promise<unknown> {
-		await this.#connected;
-		if (this.#failure) throw this.#failure;
-		if (this.#pending.size >= MAX_PENDING_REQUESTS) {
-			throw new SidecarProtocolError(
-				"pending_limit",
-				`host already has ${MAX_PENDING_REQUESTS} pending requests`,
-			);
+		return this.#invokeWire(wireCommand(command, args));
+	}
+
+	/** Sends the one launch-only client command; this method is not part of the preload bridge. */
+	async startClient(startup: ClientLaunchConfiguration): Promise<void> {
+		try {
+			await this.#invokeWire({ command: "start_client", startup });
+		} finally {
+			// Release the caller's retained credential as soon as the encoded startup request settles.
+			startup.password = "";
 		}
-		const id = this.#nextRequestId++;
-		return new Promise((resolve, reject) => {
-			this.#pending.set(id, { resolve, reject });
-			try {
-				this.#write({
-					kind: "request",
-					id,
-					command: wireCommand(command, args),
-				});
-			} catch (error) {
-				this.#pending.delete(id);
-				reject(error);
-			}
-		});
 	}
 
 	/** Registers one allowlisted event listener and returns its disposal function. */
@@ -337,6 +336,27 @@ export class SidecarHostClient {
 		listeners.add(handler as (payload: unknown) => void);
 		this.#listeners.set(event, listeners);
 		return () => listeners.delete(handler as (payload: unknown) => void);
+	}
+
+	async #invokeWire(command: Record<string, unknown>): Promise<unknown> {
+		await this.#connected;
+		if (this.#failure) throw this.#failure;
+		if (this.#pending.size >= MAX_PENDING_REQUESTS) {
+			throw new SidecarProtocolError(
+				"pending_limit",
+				`host already has ${MAX_PENDING_REQUESTS} pending requests`,
+			);
+		}
+		const id = this.#nextRequestId++;
+		return new Promise((resolve, reject) => {
+			this.#pending.set(id, { resolve, reject });
+			try {
+				this.#write({ kind: "request", id, command });
+			} catch (error) {
+				this.#pending.delete(id);
+				reject(error);
+			}
+		});
 	}
 
 	/** Requests an orderly host shutdown and force-kills only after the bounded grace period. */
@@ -418,6 +438,19 @@ export class SidecarHostClient {
 						);
 						return;
 					}
+					if (
+						this.#expectedMode !== undefined &&
+						frame.host_mode !== this.#expectedMode
+					) {
+						this.#fail(
+							new SidecarProtocolError(
+								"host_mode_mismatch",
+								`host selected ${frame.host_mode} mode, expected ${this.#expectedMode}`,
+							),
+							true,
+						);
+						return;
+					}
 					this.#write({
 						kind: "handshake_ack",
 						protocol_version: PROTOCOL_VERSION,
@@ -464,7 +497,7 @@ export class SidecarHostClient {
 					continue;
 				}
 				if (frame.kind === "event") {
-					const event = WIRE_EVENT_NAMES[frame.event.event];
+					const event: HostEventName = frame.event.event;
 					for (const listener of this.#listeners.get(event) ?? [])
 						listener(frame.event.payload);
 					continue;

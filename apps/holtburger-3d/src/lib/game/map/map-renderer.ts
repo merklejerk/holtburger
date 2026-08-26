@@ -64,7 +64,7 @@ import {
  * Everything the map reads from the running game.
  *
  * Narrow on purpose: the map takes terrain facts and a palette, never renderer, scene, or resource
- * internals. `GameRuntime` satisfies this structurally, so the map never imports it and cannot grow
+ * internals. `GamePresentationRuntime` satisfies this structurally, so the map never imports it and cannot grow
  * into a second scene renderer by reaching for what it can see.
  */
 export interface MapTerrainSource {

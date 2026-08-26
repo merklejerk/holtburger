@@ -9,16 +9,15 @@ use holtburger_cli::pages;
 use holtburger_cli::state::{AppState, NetStats, QueuedScriptStartup};
 use holtburger_cli::types::{AppEvent, ChatMessageTags, Page, RedrawPriority, UpdateResult};
 use holtburger_cli::utils::format_action_result_message;
-use holtburger_content::ContentRepository;
+use holtburger_content::{ContentDecodeCache, ContentRepository};
 use holtburger_core::errors::is_actually_weenie_error;
 use holtburger_core::{
     ActionResultReason, ClientCommand, ClientRuntime, ClientRuntimeBuilder, ClientState,
-    ClientViewEvent,
+    ClientViewEvent, ContentAssetService, ContentClientCollisionSource,
 };
 use holtburger_dat::file_type::SkillTable;
 use holtburger_protocol::errors::CharacterError;
 use holtburger_scripting::{ScriptFetchAllowedHost, ScriptFetchPolicy, ScriptHostConfig};
-use holtburger_world::BasicSpatialPhysics;
 use holtburger_world::RuntimeBodyResetCause;
 use holtburger_world::spell::SpellCatalog;
 use ratatui::{Terminal, backend::CrosstermBackend};
@@ -542,9 +541,16 @@ async fn bootstrap_once(args: &Args, host: &str, port: u16) -> Result<BootstrapO
     let content = Arc::new(ContentRepository::discover(
         args.dats.clone().map(std::path::PathBuf::from),
     )?);
+    let collision_service = Arc::new(ContentAssetService::new(
+        Arc::clone(&content),
+        Arc::new(ContentDecodeCache::new()),
+    ));
     let mut builder = ClientRuntimeBuilder::new(args.account.clone())
         .server(host.to_string(), port)
-        .spatial_physics(Arc::new(BasicSpatialPhysics));
+        .collision_source(Arc::new(ContentClientCollisionSource::new(
+            collision_service,
+            Arc::clone(&content),
+        )));
     builder.load_assets(content.as_ref())?;
 
     let mut client = builder.connect().await?;
@@ -558,7 +564,7 @@ async fn bootstrap_once(args: &Args, host: &str, port: u16) -> Result<BootstrapO
     let mut server_event_rx = client.subscribe_client_view_events();
     let mut client_task_handle = tokio::spawn(async move { client.run().await });
 
-    let _ = server_cmd_tx.send(ClientCommand::RequestInitialViewState);
+    let _ = server_cmd_tx.send(ClientCommand::RequestCurrentApplicationState);
     let _ = server_cmd_tx.send(ClientCommand::Login(args.password.clone()));
 
     let mut latest_status = Some(ClientState::Connected);
@@ -626,7 +632,7 @@ async fn bootstrap_once(args: &Args, host: &str, port: u16) -> Result<BootstrapO
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
                         if !requested_initial_view_state {
                             requested_initial_view_state = true;
-                            let _ = server_cmd_tx.send(ClientCommand::RequestInitialViewState);
+                            let _ = server_cmd_tx.send(ClientCommand::RequestCurrentApplicationState);
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
@@ -893,7 +899,7 @@ async fn run() -> Result<()> {
                     update_state(reset, &mut pending_redraw, &server_cmd_tx, &mut should_quit);
                     if !requested_initial_view_state {
                         requested_initial_view_state = true;
-                        let _ = server_cmd_tx.send(ClientCommand::RequestInitialViewState);
+                        let _ = server_cmd_tx.send(ClientCommand::RequestCurrentApplicationState);
                     }
                     break;
                 }

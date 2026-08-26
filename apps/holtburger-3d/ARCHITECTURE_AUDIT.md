@@ -1,6 +1,6 @@
 # Architectural Snapshot: holtburger-3d
 
-_Last updated: 2026-08-25_
+_Last updated: 2026-08-26_
 
 ## Tech Lead North Stars
 
@@ -17,7 +17,12 @@ _Last updated: 2026-08-25_
   state; entity publication applies the complete sample.
 - Keep Explorer free-camera policy in the explorer. Shared frontend camera code owns only semantic
   possession orbit/zoom, host-boom lifecycle, path presentation, and projection acknowledgement;
-  the host owns physical placement and motion paths.
+  the host owns physical placement and motion paths. Client mode uses the same source-neutral camera
+  behavior through a client-owned session, but its core authority supplies the collision-safe path.
+- Keep the two mode roots explicit: Explorer owns its registry/possession authority, while client
+  mode owns `ClientRuntime`/`WorldState` network authority. They share content products, the focused
+  dynamic presentation contract, the collision coordinator shape, and renderer realization—not an
+  authority superclass or body store.
 - Make portal rendering correct by construction: fixed-capacity scope-window traversal, path-free
   arrival propagation, one packed tile per selected authored scope, and deferred scope envelopes.
 
@@ -46,7 +51,20 @@ flowchart TD
     Flat --> Renderer[WebGL2 renderer]
     Portal --> Renderer
     Renderer --> Device[resource managers, programs, scope-atlas targets]
+    Client[ClientRuntime / WorldState authority] --> ClientFeed[focused dynamic + camera events]
+    ClientFeed --> Realize
+    Client --> ClientCollision[immutable client collision snapshot]
+    ClientCollision --> ClientCamera[client camera boom path]
+    ClientCamera --> ClientFeed
 ```
+
+The sidecar composition is deliberately physical rather than a shared authority hierarchy:
+`host/src/shared_host_content.rs` owns one discovered content value;
+`host/src/explorer_host.rs` owns Explorer registry, fixed-tick, possession, and diagnostic
+capabilities; `host/src/client_runtime.rs` owns the network client and client commands; and
+`host/src/client_projection.rs` owns the closed client event vocabulary. `protocol.rs` only performs
+framing, explicit inventory decoding, mode rejection, and stdio adaptation. Client and Explorer
+event sinks are separate traits, joined only by the stdio writer at the process boundary.
 
 `LandblockSourceBatchSource` is an app-local acquisition capability, not an outdoor scene type. It
 accepts the complete requested layer set for one landblock and returns independently decoded
@@ -382,7 +400,8 @@ Current large-file concentration:
 | ---------------------------------------- | ------------: | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `renderer/webgl2-renderer.ts`            |         2,945 | Largest active debt. Contribution assembly, frame metrics, scope routing, and device drawing are coherent but crowded. Extract a measured seam before adding another rendering subsystem. |
 | `host/src/env_cell_source.rs`            |         1,446 | Large but cohesive source projection. Binary-section encoding is now shared; visibility preprocessing is the clearest future split if the format evolves.                                 |
-| `host/src/lib.rs`                        |         2,177 | Broad app-host composition hub; split by command family when next materially touched.                                                                                                     |
+| `host/src/lib.rs`                        |         2,100 | Content serializers and source projections remain grouped by asset format; mode composition and command dispatch now live in focused modules.                                             |
+| `host/src/protocol.rs`                   |           700 | Framing and explicit outer command decoder; mode behavior is delegated to the shared, Explorer, and client dispatchers.                                                                   |
 | `runtime/game-runtime.ts`                |         2,053 | Legitimate composition root. Typed owner parsing and texture merging are delegated; keep feature policy in planners, realizers, and systems.                                              |
 | `assets/decode-env-cell-record.ts`       |         1,141 | Strict semantic validation remains dense after shared binary-section and static-presentation decoding were extracted.                                                                     |
 | `renderer/portal-scope-window-culler.ts` |         1,058 | Packed zero-record camera-time traversal. Keep it differentially paired with the immutable reference and do not add object-shaped frame state.                                            |

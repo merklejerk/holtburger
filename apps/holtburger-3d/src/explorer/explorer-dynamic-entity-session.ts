@@ -1,8 +1,8 @@
 import {
-	decodeDynamicEntityEvent,
 	DynamicEntityMirror,
 	type DynamicEntityEvent,
 } from "../lib/game/runtime/dynamic-entity-feed";
+import { DynamicEntitySession } from "../lib/game/runtime/dynamic-entity-session";
 import {
 	decodeExplorerCatalogCapability,
 	decodeExplorerEntityMutationReceipt,
@@ -67,6 +67,7 @@ export interface ExplorerDynamicEntityTransport {
 
 /** Owns one frontend listener lifetime over a shared current-entity mirror. */
 export class ExplorerDynamicEntitySession {
+	readonly #dynamicSession: DynamicEntitySession;
 	readonly mirror: DynamicEntityMirror;
 	readonly #transport: ExplorerDynamicEntityTransport;
 	readonly #listeners = new Set<(event: DynamicEntityEvent) => void>();
@@ -92,36 +93,58 @@ export class ExplorerDynamicEntitySession {
 		now = () => performance.now(),
 	) {
 		this.#transport = transport;
-		this.mirror = mirror;
+		this.#dynamicSession = new DynamicEntitySession(
+			{
+				subscribe: (handler) => transport.listen(DYNAMIC_ENTITY_EVENT, handler),
+				requestCurrentState: async () => {
+					await transport.invoke("request_explorer_dynamic_entity_snapshot");
+				},
+			},
+			mirror,
+		);
+		this.mirror = this.#dynamicSession.mirror;
 		this.#now = now;
+		this.#dynamicSession.subscribe((event) => {
+			this.#acceptedRevision += 1;
+			for (const listener of this.#listeners) listener(event);
+			for (const waiter of [...this.#waiters]) {
+				if (!waiter.reached()) continue;
+				this.#waiters.delete(waiter);
+				waiter.resolve();
+			}
+		});
 	}
 
 	/** Register the listener first, then request the complete current snapshot. */
 	async start(): Promise<void> {
 		if (this.#unlisten !== null) return;
-		this.mirror.awaitSnapshot();
-		const unlistenDynamic = await this.#transport.listen(
-			DYNAMIC_ENTITY_EVENT,
-			(payload) => this.#receive(payload),
-		);
 		let unlistenFixed: (() => void) | null = null;
 		let unlistenPossession: (() => void) | null = null;
 		try {
-			unlistenFixed = await this.#transport.listen(
-				FIXED_TICK_EVENT,
-				(payload) => this.#receiveFixedTick(payload),
-			);
-			unlistenPossession = await this.#transport.listen(
-				POSSESSION_EVENT_OUTCOMES,
-				(payload) => this.#receivePossessionOutcomes(payload),
-			);
-			this.#unlisten = [unlistenDynamic, unlistenFixed, unlistenPossession];
-			await this.#transport.invoke("request_explorer_dynamic_entity_snapshot");
+			await this.#dynamicSession.start({
+				beforeRequest: async () => {
+					unlistenFixed = await this.#transport.listen(
+						FIXED_TICK_EVENT,
+						(payload) => this.#receiveFixedTick(payload),
+					);
+					try {
+						unlistenPossession = await this.#transport.listen(
+							POSSESSION_EVENT_OUTCOMES,
+							(payload) => this.#receivePossessionOutcomes(payload),
+						);
+					} catch (error) {
+						unlistenFixed();
+						unlistenFixed = null;
+						throw error;
+					}
+					this.#unlisten = [unlistenFixed, unlistenPossession];
+				},
+			});
 		} catch (error) {
 			this.#unlisten = null;
-			unlistenPossession?.();
-			unlistenFixed?.();
-			unlistenDynamic();
+			disposeUnlisten(unlistenPossession);
+			disposeUnlisten(unlistenFixed);
+			this.#dynamicSession.stop();
 			throw error;
 		}
 	}
@@ -131,7 +154,7 @@ export class ExplorerDynamicEntitySession {
 		for (const unlisten of this.#unlisten ?? []) unlisten();
 		this.#unlisten = null;
 		this.#highestFixedTickEpoch = 0;
-		this.mirror.awaitSnapshot();
+		this.#dynamicSession.stop();
 		for (const waiter of this.#waiters) {
 			waiter.reject(
 				new Error("Dynamic-entity session stopped before command publication."),
@@ -276,18 +299,6 @@ export class ExplorerDynamicEntitySession {
 		return () => this.#possessionOutcomeListeners.delete(listener);
 	}
 
-	#receive(payload: unknown): void {
-		const event = decodeDynamicEntityEvent(payload);
-		if (!this.mirror.apply(event)) return;
-		this.#acceptedRevision += 1;
-		for (const listener of this.#listeners) listener(event);
-		for (const waiter of [...this.#waiters]) {
-			if (!waiter.reached()) continue;
-			this.#waiters.delete(waiter);
-			waiter.resolve();
-		}
-	}
-
 	#receivePossessionOutcomes(payload: unknown): void {
 		for (const outcome of decodePossessionEventOutcomes(payload)) {
 			for (const listener of this.#possessionOutcomeListeners)
@@ -299,14 +310,14 @@ export class ExplorerDynamicEntitySession {
 		const envelope = decodeExplorerFixedTickEnvelope(payload);
 		if (
 			envelope.epoch <= this.#highestFixedTickEpoch ||
-			this.mirror.isAwaitingSnapshot()
+			this.#dynamicSession.mirror.isAwaitingSnapshot()
 		) {
 			return;
 		}
 		this.#highestFixedTickEpoch = envelope.epoch;
 		if (
 			envelope.entityEvent !== null &&
-			this.mirror.apply(envelope.entityEvent)
+			this.#dynamicSession.mirror.apply(envelope.entityEvent)
 		) {
 			this.#acceptedRevision += 1;
 		}
@@ -338,6 +349,10 @@ export class ExplorerDynamicEntitySession {
 			});
 		});
 	}
+}
+
+function disposeUnlisten(unlisten: (() => void) | null): void {
+	if (unlisten !== null) unlisten();
 }
 
 /** Host-backed transport keeps browser-only harnesses independent from any desktop shell. */

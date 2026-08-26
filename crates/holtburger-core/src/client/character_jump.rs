@@ -44,6 +44,8 @@ pub enum CharacterJumpRejection {
     InvalidHeading,
     #[error("character drive has an invalid turn-rate scalar")]
     InvalidTurnRate,
+    #[error("character drive has an invalid run-rate scalar")]
+    InvalidRunRate,
 }
 
 /// One computed launch shared by local physics and the later player packet bridge.
@@ -86,8 +88,11 @@ pub fn resolve_character_jump(
 ) -> Result<ResolvedJump, CharacterJumpRejection> {
     require_supported(readiness)?;
     let planar = adjust_character_axes(attempt.drive, kinematics.movement())
-        .map_err(|CharacterAxisAdjustmentError::InvalidTurnRate| {
-            CharacterJumpRejection::InvalidTurnRate
+        .map_err(|error| match error {
+            CharacterAxisAdjustmentError::InvalidTurnRate => {
+                CharacterJumpRejection::InvalidTurnRate
+            }
+            CharacterAxisAdjustmentError::InvalidRunRate => CharacterJumpRejection::InvalidRunRate,
         })?
         .local_planar_velocity(kinematics.movement());
     let height = (kinematics.full_extent_jump_height() * attempt.extent.get())

@@ -3,7 +3,7 @@
 use super::character_kinematics::CharacterMovementKinematics;
 use super::movement_types::{CharacterDrive, Gait, LateralMotion, LongitudinalMotion, Turn};
 use holtburger_common::Vector3;
-use holtburger_world::motion::MotionCommand;
+use holtburger_world::motion::{MotionCommand, MotionOrder};
 use thiserror::Error;
 
 /// Retail walk animation speed from `CMotionInterp::get_state_velocity`
@@ -102,6 +102,8 @@ impl AdjustedCharacterAxes {
 pub enum CharacterAxisAdjustmentError {
     #[error("character turn-rate scalar must be finite and positive")]
     InvalidTurnRate,
+    #[error("character run-rate scalar must be finite and positive")]
+    InvalidRunRate,
 }
 
 /// Applies retail's `adjust_motion` and `apply_run_to_command` rules once.
@@ -109,8 +111,22 @@ pub fn adjust_character_axes(
     drive: CharacterDrive,
     kinematics: CharacterMovementKinematics,
 ) -> Result<AdjustedCharacterAxes, CharacterAxisAdjustmentError> {
+    adjust_character_axes_for_run_rate(drive, kinematics.run_rate_scalar())
+}
+
+/// Applies retail's command canonicalization when only the resolved run-rate is needed.
+///
+/// Authored playback needs signed command rates, but it must not turn those rates back into a
+/// fixed velocity. Keeping this resolver independent from numeric movement capabilities lets the
+/// client and Explorer adapters install the same motion-table order.
+pub fn adjust_character_axes_for_run_rate(
+    drive: CharacterDrive,
+    run_rate: f32,
+) -> Result<AdjustedCharacterAxes, CharacterAxisAdjustmentError> {
+    if !run_rate.is_finite() || run_rate <= 0.0 {
+        return Err(CharacterAxisAdjustmentError::InvalidRunRate);
+    }
     let running = drive.gait == Gait::Run;
-    let run_rate = kinematics.run_rate_scalar();
     let forward = match drive.longitudinal {
         Some(LongitudinalMotion::Forward) if running => Some(AdjustedForwardAxis::Run {
             speed_mod: run_rate,
@@ -161,6 +177,25 @@ pub fn adjust_character_axes(
         forward,
         sidestep_rate,
         turn_rate,
+    })
+}
+
+/// Resolves semantic character input into one concrete motion-table order.
+///
+/// `MotionOrder` remains a world/content concept while `CharacterDrive` remains controller intent;
+/// this is the single bridge between them. The caller supplies the stance selected by the
+/// authority and an actor run-rate already resolved from authoritative state.
+pub fn motion_order_for_drive(
+    drive: CharacterDrive,
+    run_rate: f32,
+    stance: MotionCommand,
+) -> Result<MotionOrder, CharacterAxisAdjustmentError> {
+    let axes = adjust_character_axes_for_run_rate(drive, run_rate)?;
+    Ok(MotionOrder {
+        style: Some(stance),
+        forward: axes.forward().map(AdjustedForwardAxis::ordered_motion),
+        sidestep: axes.sidestep(),
+        turn: axes.turn(),
     })
 }
 

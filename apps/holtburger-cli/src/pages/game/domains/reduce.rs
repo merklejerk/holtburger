@@ -22,18 +22,6 @@ pub(crate) fn reduce_action(state: &mut GameState, action: AppAction) -> Option<
         | AppAction::Log { .. }
         | AppAction::SendCommands { .. }
         | AppAction::TransitionToGame { .. } => None,
-        AppAction::SendCharacterEnterWorld => {
-            let guid = state
-                .data
-                .player_guid
-                .expect("game page should know the selected player guid before world entry");
-            Some(UpdateResult::commands(vec![
-                ClientCommand::SendCharacterEnterWorld {
-                    guid,
-                    account: state.data.account_name.clone(),
-                },
-            ]))
-        }
         AppAction::Sequence { actions } => {
             let mut result = UpdateResult::new();
             for inner_action in actions {

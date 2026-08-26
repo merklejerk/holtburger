@@ -1,7 +1,6 @@
 use super::{
-    ContactState, LocalDriveControl, SelfPlayerDriveProjectionState, SolveBodyInput,
-    SolveProjectionBasis, SolvedBodyKinematics, SpatialSampleMode, SpatialScene, SpatialSolveBatch,
-    SpatialSolveRequest,
+    ContactState, SelfPlayerDriveProjectionState, SolveBodyInput, SolveProjectionBasis,
+    SolvedBodyKinematics, SpatialSampleMode,
 };
 use holtburger_common::position::{METERS_PER_LANDBLOCK, WorldPosition};
 use holtburger_common::{Guid, Quaternion, RigidTransform, Vector3};
@@ -16,17 +15,6 @@ fn velocity_kinematics_for_input(input: &SolveBodyInput) -> (Vector3, Vector3) {
         Some(SolveProjectionBasis::AuthoredDrive { .. }) | None => {
             (Vector3::zero(), Vector3::zero())
         }
-    }
-}
-
-/// The authored offset this body is driving with, if it has one.
-///
-/// Both arms are named rather than wildcarded so a future basis variant fails to compile here
-/// instead of being absorbed as `None`, which would leave the body motionless with no diagnostic.
-fn authored_drive_for_input(input: &SolveBodyInput) -> Option<RigidTransform> {
-    match input.basis {
-        Some(SolveProjectionBasis::AuthoredDrive { offset }) => Some(offset),
-        Some(SolveProjectionBasis::Velocity { .. }) | None => None,
     }
 }
 
@@ -47,124 +35,6 @@ pub(super) fn sample_mode_for_projection_state(
                 SpatialSampleMode::SimulatingVelocity
             } else {
                 SpatialSampleMode::SimulatingMotionState
-            }
-        }
-    }
-}
-
-fn desired_heading_for_local_drive(control: &LocalDriveControl, current_heading: f32) -> f32 {
-    if let Some(desired_heading) = control.desired_heading {
-        return normalize_heading(desired_heading);
-    }
-
-    let planar_delta = Vector3::new(
-        control.desired_world_delta.x,
-        control.desired_world_delta.y,
-        0.0,
-    );
-    if planar_delta.length_squared() <= EPSILON {
-        current_heading
-    } else {
-        Vector3::zero().heading_to(&planar_delta)
-    }
-}
-
-fn derive_self_player_projection_state(
-    scene: &SpatialScene,
-    control: &LocalDriveControl,
-) -> SelfPlayerDriveProjectionState {
-    let Some(body) = scene.body(control.body_id) else {
-        return if control.force_grounded {
-            SelfPlayerDriveProjectionState::LocalGroundedDirectDrive
-        } else {
-            SelfPlayerDriveProjectionState::LocalAirborne
-        };
-    };
-
-    if body.sampling.mode == SpatialSampleMode::Suspended {
-        return SelfPlayerDriveProjectionState::AuthorityFrozen;
-    }
-
-    if !control.force_grounded && body.contact == ContactState::Airborne {
-        return SelfPlayerDriveProjectionState::LocalAirborne;
-    }
-
-    SelfPlayerDriveProjectionState::LocalGroundedDirectDrive
-}
-
-fn solve_self_player_local_drive(
-    input: &SolveBodyInput,
-    control: &LocalDriveControl,
-    dt: Duration,
-    scene: &SpatialScene,
-) -> SolvedBodyKinematics {
-    let projection_state = derive_self_player_projection_state(scene, control);
-    let dt_secs = dt.as_secs_f32().max(0.0);
-    let (velocity, omega) = velocity_kinematics_for_input(input);
-    let current_contact = scene
-        .body(control.body_id)
-        .map(|body| body.contact)
-        .unwrap_or(ContactState::Unknown);
-    let resolved_contact = if input.contact == ContactState::Unknown {
-        current_contact
-    } else {
-        input.contact
-    };
-
-    if dt_secs <= f32::EPSILON {
-        return SolvedBodyKinematics {
-            body_id: input.body_id,
-            pose: input.pose,
-            velocity,
-            omega,
-            contact: resolved_contact,
-            projection_state: Some(projection_state),
-        };
-    }
-
-    match projection_state {
-        SelfPlayerDriveProjectionState::AuthorityFrozen => SolvedBodyKinematics {
-            body_id: input.body_id,
-            pose: input.pose,
-            velocity: Vector3::zero(),
-            omega: Vector3::zero(),
-            contact: resolved_contact,
-            projection_state: Some(projection_state),
-        },
-        SelfPlayerDriveProjectionState::LocalAirborne => {
-            let mut solved = advance_body_kinematics(input, dt);
-            solved.contact = resolved_contact;
-            solved.projection_state = Some(projection_state);
-            solved
-        }
-        SelfPlayerDriveProjectionState::LocalGroundedDirectDrive
-        | SelfPlayerDriveProjectionState::ServerControlled => {
-            let desired_velocity = control.desired_world_delta / dt_secs;
-            let current_heading = input.pose.rotation.to_heading();
-            let desired_heading = desired_heading_for_local_drive(control, current_heading);
-            let mut next_pose = project_pose_by_velocity(
-                input.pose,
-                desired_velocity,
-                dt_secs,
-                control.target_hint,
-            );
-            next_pose.rotation = Quaternion::from_heading(desired_heading);
-
-            SolvedBodyKinematics {
-                body_id: input.body_id,
-                pose: next_pose,
-                velocity: desired_velocity,
-                omega: Vector3::new(
-                    0.0,
-                    0.0,
-                    signed_heading_delta(current_heading, desired_heading) / dt_secs,
-                ),
-                contact: if control.force_grounded {
-                    ContactState::Grounded
-                } else {
-                    resolved_contact
-                },
-                projection_state: Some(projection_state),
             }
         }
     }
@@ -218,7 +88,7 @@ fn signed_heading_delta(current_heading: f32, desired_heading: f32) -> f32 {
 /// path for the following tick: displacement over `dt` becomes the body's velocity
 /// (`acclient.c:310890-310905`). That is an in-character interpretation for a solver at this
 /// fidelity, and it is a reduction of an exact per-tick quantity rather than of the content.
-fn advance_authored_body_kinematics(
+pub fn advance_authored_body_kinematics(
     input: &SolveBodyInput,
     offset: RigidTransform,
     dt: Duration,
@@ -331,6 +201,7 @@ fn project_pose_by_offset(
     .normalize_outdoor_cell()
 }
 
+#[cfg(test)]
 pub(crate) fn project_pose_by_velocity(
     authoritative_pose: WorldPosition,
     velocity: Vector3,
@@ -387,56 +258,5 @@ pub fn advance_body_kinematics(input: &SolveBodyInput, dt: Duration) -> SolvedBo
         omega,
         contact: input.contact,
         projection_state: None,
-    }
-}
-
-pub trait SpatialPhysics: Send + Sync + 'static {
-    fn solve(&self, request: &SpatialSolveRequest, scene: &mut SpatialScene) -> SpatialSolveBatch;
-}
-
-#[derive(Debug, Default)]
-pub struct BasicSpatialPhysics;
-
-impl SpatialPhysics for BasicSpatialPhysics {
-    fn solve(&self, request: &SpatialSolveRequest, scene: &mut SpatialScene) -> SpatialSolveBatch {
-        let solved = request
-            .bodies
-            .iter()
-            .map(|body| {
-                if request
-                    .local_drive
-                    .as_ref()
-                    .is_some_and(|control| control.body_id == body.body_id)
-                    && let Some(control) = request.local_drive.as_ref()
-                {
-                    solve_self_player_local_drive(body, control, request.dt, scene)
-                } else if let Some(offset) = authored_drive_for_input(body) {
-                    advance_authored_body_kinematics(body, offset, request.dt)
-                } else {
-                    advance_body_kinematics(body, request.dt)
-                }
-            })
-            .collect();
-
-        SpatialSolveBatch {
-            solved,
-            events: Vec::new(),
-        }
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct NoopSpatialPhysics;
-
-impl SpatialPhysics for NoopSpatialPhysics {
-    fn solve(
-        &self,
-        _request: &SpatialSolveRequest,
-        _scene: &mut SpatialScene,
-    ) -> SpatialSolveBatch {
-        SpatialSolveBatch {
-            solved: Vec::new(),
-            events: Vec::new(),
-        }
     }
 }

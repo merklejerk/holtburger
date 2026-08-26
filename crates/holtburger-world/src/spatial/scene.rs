@@ -10,16 +10,16 @@ use super::dynamic_contact::{
 };
 use super::dynamic_index::DynamicShadowIndex;
 use super::{
-    AuthoritativeBodySync, BasicSpatialPhysics, CollisionScene, ContactState, DynamicBodyActivity,
+    AuthoritativeBodySync, CollisionScene, ContactState, DynamicBodyActivity,
     DynamicBodyKinematics, DynamicPhysicalBodyDefinition, GroundState, PhysicalBodyActuation,
     PhysicalBodyDefinition, PhysicalBodyParticipation, PhysicalBodyReconfiguration,
     PhysicalBodyReconfigurationOutcome, PhysicalBodyState, PhysicalBodyTickResult,
     PhysicalBodyTickStatus, RuntimeSpatialBodyView, SolvedBodyKinematics, SpatialBody,
-    SpatialBodyId, SpatialPhysics, SpatialSampleMode, SpatialSamplingConfig,
+    SpatialBodyId, SpatialSampleMode, SpatialSamplingConfig,
+    dead_reckoning::sample_mode_for_projection_state,
     physical_body::{
         physical_body_scene_residency, resolve_physical_body_placement, solve_physical_body_tick,
     },
-    physics::sample_mode_for_projection_state,
 };
 #[cfg(test)]
 use super::{RETAIL_AIRBORNE_STEP_DOWN_HEIGHT, RETAIL_LANDING_NORMAL_Z};
@@ -28,7 +28,6 @@ use anyhow::Context;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion, Vector3};
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::sync::Arc;
 use std::time::Instant;
 
 #[derive(Debug, Clone)]
@@ -252,7 +251,6 @@ pub struct SpatialScene {
     dynamic_pending_movers: HashSet<SpatialBodyId>,
     /// Minimal directional state required to distinguish report starts, refreshes, and ends.
     collision_reports: CollisionReportLifetimes,
-    physics: Arc<dyn SpatialPhysics>,
 }
 
 impl Default for SpatialScene {
@@ -263,10 +261,6 @@ impl Default for SpatialScene {
 
 impl SpatialScene {
     pub fn new() -> Self {
-        Self::new_with_physics(Arc::new(BasicSpatialPhysics))
-    }
-
-    pub fn new_with_physics(physics: Arc<dyn SpatialPhysics>) -> Self {
         Self {
             landblock_map: HashMap::new(),
             body_store: SpatialBodyStore::default(),
@@ -274,12 +268,7 @@ impl SpatialScene {
             dynamic_tick_start: BTreeMap::new(),
             dynamic_pending_movers: HashSet::new(),
             collision_reports: CollisionReportLifetimes::default(),
-            physics,
         }
-    }
-
-    pub fn physics(&self) -> &Arc<dyn SpatialPhysics> {
-        &self.physics
     }
 
     pub fn runtime_sampling_config(&self) -> SpatialSamplingConfig {

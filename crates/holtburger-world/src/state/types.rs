@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use crate::entity::{Entity, EntityManager};
 use crate::player::PlayerState;
-use crate::spatial::{BasicSpatialPhysics, SpatialPhysics, SpatialScene};
+use crate::spatial::SpatialScene;
 use crate::spell::{SpellCatalog, SpellInfo};
 use crate::state::fellowship::FellowshipState;
 use crate::state::liveness::EntityLifecycleStore;
@@ -393,13 +393,6 @@ impl WorldState {
     }
 
     pub fn new(bootstrap: Arc<WorldBootstrap>) -> Self {
-        Self::new_with_spatial_physics(bootstrap, Arc::new(BasicSpatialPhysics))
-    }
-
-    pub fn new_with_spatial_physics(
-        bootstrap: Arc<WorldBootstrap>,
-        spatial_physics: Arc<dyn SpatialPhysics>,
-    ) -> Self {
         Self {
             entities: EntityManager::new(),
             player: PlayerState::new(),
@@ -410,7 +403,7 @@ impl WorldState {
             soul_emote_catalog: Arc::clone(&bootstrap.soul_emote_catalog),
             motion_sequences: Arc::clone(&bootstrap.motion_sequences),
             motion_runtimes: MotionRuntimeRegistry::new(),
-            scene: SpatialScene::new_with_physics(spatial_physics),
+            scene: SpatialScene::new(),
             vendor: None,
             fellowship: None,
             trade: None,
@@ -423,12 +416,7 @@ impl WorldState {
 
     #[cfg(any(test, feature = "test-support"))]
     pub fn synthetic() -> Self {
-        Self::synthetic_with_spatial_physics(Arc::new(BasicSpatialPhysics))
-    }
-
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn synthetic_with_spatial_physics(spatial_physics: Arc<dyn SpatialPhysics>) -> Self {
-        Self::new_with_spatial_physics(Arc::new(WorldBootstrap::synthetic()), spatial_physics)
+        Self::new(Arc::new(WorldBootstrap::synthetic()))
     }
 
     #[cfg(any(test, feature = "test-support"))]

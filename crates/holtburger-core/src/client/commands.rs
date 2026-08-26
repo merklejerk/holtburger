@@ -1,5 +1,6 @@
 use crate::client::types::{
-    ActionResultReason, ActionResultSource, BusyOperationKind, ClientCommand, TargetSlot,
+    ActionResultReason, ActionResultSource, BusyOperationKind, ClientCommand, ClientExitCause,
+    TargetSlot,
 };
 use crate::client::{ClientRuntime, ClientState};
 use crate::motion_command_for_soul_emote_pose;
@@ -109,7 +110,6 @@ impl ClientRuntime {
         match cmd {
             ClientCommand::Login(_)
             | ClientCommand::SelectCharacter(_)
-            | ClientCommand::SendCharacterEnterWorld { .. }
             | ClientCommand::CreateCharacter(_)
             | ClientCommand::DeleteCharacter { .. }
             | ClientCommand::RestoreCharacter(_)
@@ -173,6 +173,11 @@ impl ClientRuntime {
 
             ClientCommand::DriveSelf(_) => self.handle_movement_command(cmd).await,
 
+            ClientCommand::StartClientCamera(_)
+            | ClientCommand::SetClientCameraIntent(_)
+            | ClientCommand::SetClientCameraClearance(_)
+            | ClientCommand::StopClientCamera(_) => self.handle_camera_command(cmd).await,
+
             ClientCommand::RaiseAttribute { .. }
             | ClientCommand::RaiseVital { .. }
             | ClientCommand::RaiseSkill { .. }
@@ -181,14 +186,23 @@ impl ClientRuntime {
             ClientCommand::SetCombatMode(_)
             | ClientCommand::CancelAttack
             | ClientCommand::Ping
-            | ClientCommand::RequestInitialViewState
+            | ClientCommand::RequestCurrentApplicationState
             | ClientCommand::SetFellowshipUpdatesSubscribed { .. }
             | ClientCommand::QueryEntityDebugInfo(_)
+            | ClientCommand::Disconnect
             | ClientCommand::Quit => self.handle_system_command(cmd).await,
         }
     }
 
     pub(super) async fn disconnect(&mut self) -> Result<()> {
+        self.disconnect_with_cause(ClientExitCause::ExplicitDisconnect)
+            .await
+    }
+
+    pub(super) async fn disconnect_with_cause(&mut self, cause: ClientExitCause) -> Result<()> {
+        self.movement.reset_manual_motion_playback();
+        self.reset_camera();
+        self.set_exit_cause(cause);
         let header = PacketHeader {
             flags: packet_flags::DISCONNECT,
             sequence: self.session.packet_sequence,
@@ -213,6 +227,8 @@ impl ClientRuntime {
     async fn handle_auth_command(&mut self, cmd: ClientCommand) -> Result<()> {
         match cmd {
             ClientCommand::Login(password) => {
+                self.authenticating = true;
+                self.send_status_event();
                 log::info!("Attempting login...");
                 self.session
                     .send_login_request(&self.character_selection.account_name, &password)
@@ -223,12 +239,6 @@ impl ClientRuntime {
                 self.begin_world_entry_transition().await?;
                 self.character_selection
                     .select_character(id, &mut self.session)
-                    .await
-            }
-            ClientCommand::SendCharacterEnterWorld { guid, account } => {
-                log::info!("Entering world with character: 0x{:08X}", guid);
-                self.character_selection
-                    .send_character_enter_world(guid, account, &mut self.session)
                     .await
             }
             ClientCommand::CreateCharacter(request) => {
@@ -890,6 +900,31 @@ impl ClientRuntime {
         }
     }
 
+    async fn handle_camera_command(&mut self, cmd: ClientCommand) -> Result<()> {
+        match cmd {
+            ClientCommand::StartClientCamera(request) => {
+                let receipt = self.start_camera(request)?;
+                log::info!(
+                    "accepted client camera generation {} for player {:?}",
+                    receipt.identity.camera_generation,
+                    receipt.identity.player_guid
+                );
+                Ok(())
+            }
+            ClientCommand::SetClientCameraIntent(request) => {
+                self.set_camera_intent(request).map(|_| ())
+            }
+            ClientCommand::SetClientCameraClearance(request) => {
+                self.set_camera_clearance(request).map(|_| ())
+            }
+            ClientCommand::StopClientCamera(identity) => {
+                self.stop_camera(identity);
+                Ok(())
+            }
+            _ => unreachable!(),
+        }
+    }
+
     async fn handle_system_command(&mut self, cmd: ClientCommand) -> Result<()> {
         match cmd {
             ClientCommand::Ping => {
@@ -897,9 +932,9 @@ impl ClientRuntime {
                 self.send_game_action(GameAction::PingRequest(Box::new(PingRequestActionData)))
                     .await
             }
-            ClientCommand::RequestInitialViewState => {
-                log::info!(">>> Client requested initial view state snapshot");
-                self.emit_initial_view_state_snapshot();
+            ClientCommand::RequestCurrentApplicationState => {
+                log::info!(">>> Client requested current application snapshot");
+                self.emit_current_application_snapshot();
                 Ok(())
             }
             ClientCommand::SetFellowshipUpdatesSubscribed { enabled } => {
@@ -940,7 +975,7 @@ impl ClientRuntime {
                 }
                 Ok(())
             }
-            ClientCommand::Quit => {
+            ClientCommand::Disconnect | ClientCommand::Quit => {
                 log::info!("Disconnecting...");
                 // First attempt a graceful logout from the world
                 if matches!(self.state, ClientState::InWorld) {
@@ -1479,7 +1514,7 @@ mod tests {
         let mut events = client.subscribe_client_view_events();
 
         client
-            .handle_command(ClientCommand::RequestInitialViewState)
+            .handle_command(ClientCommand::RequestCurrentApplicationState)
             .await
             .unwrap();
 
@@ -1535,7 +1570,7 @@ mod tests {
         let mut events = client.subscribe_client_view_events();
 
         client
-            .handle_command(ClientCommand::RequestInitialViewState)
+            .handle_command(ClientCommand::RequestCurrentApplicationState)
             .await
             .unwrap();
 
@@ -1563,7 +1598,7 @@ mod tests {
         let mut events = client.subscribe_client_view_events();
 
         client
-            .handle_command(ClientCommand::RequestInitialViewState)
+            .handle_command(ClientCommand::RequestCurrentApplicationState)
             .await
             .unwrap();
 
@@ -1617,7 +1652,7 @@ mod tests {
         let mut events = client.subscribe_client_view_events();
 
         client
-            .handle_command(ClientCommand::RequestInitialViewState)
+            .handle_command(ClientCommand::RequestCurrentApplicationState)
             .await
             .unwrap();
 

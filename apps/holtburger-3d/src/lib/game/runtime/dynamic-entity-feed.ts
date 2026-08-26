@@ -280,6 +280,7 @@ const dynamicEntityEventSchema = z.discriminatedUnion("kind", [
 ]);
 
 export type DynamicEntityView = z.infer<typeof dynamicEntityViewSchema>;
+export type DynamicEntitySnapshot = z.infer<typeof dynamicEntitySnapshotSchema>;
 export type DynamicEntityWorldPlacement = Extract<
 	DynamicEntityView["placement"],
 	{ kind: "world" }
@@ -315,6 +316,13 @@ export function decodeDynamicEntityEvent(value: unknown): DynamicEntityEvent {
 		}
 	}
 	return event;
+}
+
+/** Validates the snapshot embedded in the client lifecycle replacement contract. */
+export function decodeDynamicEntitySnapshot(
+	value: unknown,
+): DynamicEntitySnapshot {
+	return dynamicEntitySnapshotSchema.parse(value);
 }
 
 /** Validate one focused current entity returned by a diagnostic host boundary. */

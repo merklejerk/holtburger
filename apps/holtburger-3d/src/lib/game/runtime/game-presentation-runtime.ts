@@ -166,8 +166,8 @@ import {
 	type TerrainResourceOwnerId,
 	type OwnerId,
 	type DynamicOwnerId,
-	type SpawnedDynamicOwnerId,
-	spawnedDynamicOwnerId,
+	type DynamicEntityOwnerId,
+	dynamicEntityOwnerId,
 } from "./owner-ids";
 import type { ActiveRegionStaticDetailBinding } from "../resolution/active-region-static-detail";
 import {
@@ -181,11 +181,11 @@ import {
 } from "../resolution/landblock-layer";
 import { adaptAuthoredDynamicPresentation } from "../resolution/authored-dynamic-presentation";
 import {
-	adaptSpawnedDynamicPresentation,
+	adaptDynamicEntityPresentation,
 	datAssetId,
-	spawnedDynamicPlacement,
-	spawnedDynamicPlacementKey,
-} from "./spawned-dynamic-presentation";
+	dynamicEntityPlacement,
+	dynamicEntityPlacementKey,
+} from "./dynamic-entity-presentation";
 import type {
 	DynamicEntityAdvanceBatch,
 	DynamicEntityPlayingClip,
@@ -279,7 +279,7 @@ const EMPTY_STATIC_OBJECT_GEOMETRY_DIAGNOSTICS: StaticObjectGeometryDiagnostics 
 	};
 
 /** Runtime-owned collaborators that tests may replace with focused fakes. */
-export interface GameRuntimeDependencies {
+export interface GamePresentationRuntimeDependencies {
 	readonly animationSource: AnimationAssetSource;
 	readonly physicsScriptSource: PhysicsScriptSource;
 	readonly audioDevice: AudioDevice;
@@ -313,12 +313,12 @@ export interface GameRuntimeDependencies {
 }
 
 /** Browser worker constructors replaceable by Node integration tests without inline algorithms. */
-export interface GameRuntimeWorkerFactories {
+export interface GamePresentationRuntimeWorkerFactories {
 	readonly createTerrainWorker: () => ClosedWorkerPort;
 }
 
 /** Device boundary used by runtime to construct its private renderer facade. */
-export interface GameRuntimeRenderDevice {
+export interface GamePresentationRuntimeRenderDevice {
 	readonly resources: RendererResourceManager;
 	buildRenderer(world: RenderWorld): Promise<Renderer>;
 }
@@ -329,7 +329,7 @@ interface PendingCommitArtifact {
 	readonly revision: SceneInterestRevision;
 }
 
-interface SpawnedDynamicPresentationRecord {
+interface DynamicEntityPresentationRecord {
 	readonly generation: number;
 	/**
 	 * Dynamics owner generation this node's behavior targets carry.
@@ -339,7 +339,7 @@ interface SpawnedDynamicPresentationRecord {
 	 */
 	readonly behaviorGeneration: number;
 	readonly nodeId: SceneNodeId;
-	readonly ownerId: SpawnedDynamicOwnerId;
+	readonly ownerId: DynamicEntityOwnerId;
 	readonly visualKey: string;
 	/**
 	 * Clip level this presentation last applied, so a restated level is not re-entered.
@@ -458,8 +458,19 @@ function formatDynamicGuid(guid: number): string {
 	return `0x${(guid >>> 0).toString(16).padStart(8, "0")}`;
 }
 
+function dynamicEntityPresentationFailure(
+	entity: DynamicEntityView,
+	cause: unknown,
+): Error {
+	const reason = cause instanceof Error ? cause.message : String(cause);
+	return new Error(
+		`Dynamic entity ${formatDynamicGuid(entity.identity.guid)} generation ${entity.generation} presentation refused: ${reason}`,
+		{ cause },
+	);
+}
+
 /** Bridges source commits, scene topology, runtime residency, and frontend frame state. */
-export class GameRuntime {
+export class GamePresentationRuntime {
 	/** Canonical scene topology, residency, transforms, and spatial-query membership. */
 	readonly #scene = new SceneGraph();
 	/** Sole frontend writer of dynamic entity root placement and residency. */
@@ -497,7 +508,7 @@ export class GameRuntime {
 	/** Installed frontend resources keyed by producer identity. */
 	readonly #spawnedPresentations = new Map<
 		number,
-		SpawnedDynamicPresentationRecord
+		DynamicEntityPresentationRecord
 	>();
 	readonly #spawnedVisualKeys = new Map<number, string>();
 	readonly #spawnedVisuals = new Map<string, CachedDynamicVisual>();
@@ -622,7 +633,7 @@ export class GameRuntime {
 	/**
 	 * Current rotation of a target's frame, in AC's authored axes.
 	 *
-	 * Read from the same resolved placement as {@link GameRuntime.#sceneOriginOf}, so it reflects
+	 * Read from the same resolved placement as {@link GamePresentationRuntime.#sceneOriginOf}, so it reflects
 	 * whatever a script has rotated the owner to rather than its authored pose.
 	 */
 	#sceneRotationOf(nodeId: SceneNodeId): AcRotation | null {
@@ -650,7 +661,7 @@ export class GameRuntime {
 	/**
 	 * Whether a behavior target still exists, in either residency, without resolving its frame.
 	 *
-	 * The liveness half of {@link GameRuntime.#originOf}, split out because per-frame consumers ask
+	 * The liveness half of {@link GamePresentationRuntime.#originOf}, split out because per-frame consumers ask
 	 * only this: both residencies always publish an origin for a target they hold, so existence and
 	 * "has an origin" are the same fact, and only one of them costs a scene-hierarchy walk.
 	 */
@@ -796,7 +807,7 @@ export class GameRuntime {
 	protected constructor(
 		renderResources: RendererResourceManager,
 		commitPipeline: CommitPipeline,
-		dependencies: GameRuntimeDependencies,
+		dependencies: GamePresentationRuntimeDependencies,
 	) {
 		this.#tickProfiler = dependencies.tickProfiler;
 		this.#dynamicEntityVisualSource = dependencies.dynamicEntityVisualSource;
@@ -1198,7 +1209,7 @@ export class GameRuntime {
 
 	/** Construct production runtime workers and inject them into runtime-owned systems. */
 	static async build(
-		device: GameRuntimeRenderDevice,
+		device: GamePresentationRuntimeRenderDevice,
 		commitPipeline: CommitPipeline,
 		texturePixelSource: TexturePixelSource,
 		animationSource: AnimationAssetSource,
@@ -1210,8 +1221,8 @@ export class GameRuntime {
 		dynamicEntityVisualSource: DynamicEntityVisualSource | null,
 		roll?: UniformRoll,
 		tickProfiler?: RuntimeTickProfiler,
-		workerFactories?: GameRuntimeWorkerFactories,
-	): Promise<GameRuntime> {
+		workerFactories?: GamePresentationRuntimeWorkerFactories,
+	): Promise<GamePresentationRuntime> {
 		const [terrainGenerator, texturePreparer] = await Promise.all([
 			workerFactories === undefined
 				? WorkerTerrainGenerator.build()
@@ -1220,25 +1231,29 @@ export class GameRuntime {
 					}),
 			WorkerTexturePreparer.build(texturePixelSource),
 		]);
-		const runtime = new GameRuntime(device.resources, commitPipeline, {
-			animationSource,
-			audioDevice,
-			particleEmitterSource,
-			physicsScriptSource,
-			particleMeshSource,
-			dynamicEntityVisualSource,
-			roll,
-			soundTableSource,
-			tickProfiler,
-			staticGeometryPreparer:
-				typeof Worker === "undefined"
-					? new InlineStaticObjectGeometryPreparer()
-					: new RuntimeStaticObjectGeometryPreparer(
-							StaticObjectGeometryWorker.build(),
-						),
-			terrainGenerator,
-			texturePreparer,
-		});
+		const runtime = new GamePresentationRuntime(
+			device.resources,
+			commitPipeline,
+			{
+				animationSource,
+				audioDevice,
+				particleEmitterSource,
+				physicsScriptSource,
+				particleMeshSource,
+				dynamicEntityVisualSource,
+				roll,
+				soundTableSource,
+				tickProfiler,
+				staticGeometryPreparer:
+					typeof Worker === "undefined"
+						? new InlineStaticObjectGeometryPreparer()
+						: new RuntimeStaticObjectGeometryPreparer(
+								StaticObjectGeometryWorker.build(),
+							),
+				terrainGenerator,
+				texturePreparer,
+			},
+		);
 		runtime.#renderer = await device.buildRenderer(runtime.#renderWorld);
 		return runtime;
 	}
@@ -1247,13 +1262,17 @@ export class GameRuntime {
 	static buildForTesting(
 		renderResources: RendererResourceManager,
 		commitPipeline: CommitPipeline,
-		dependencies: GameRuntimeDependencies,
-	): GameRuntime {
-		return new GameRuntime(renderResources, commitPipeline, dependencies);
+		dependencies: GamePresentationRuntimeDependencies,
+	): GamePresentationRuntime {
+		return new GamePresentationRuntime(
+			renderResources,
+			commitPipeline,
+			dependencies,
+		);
 	}
 
 	/** Reconcile the focused producer mirror into shared dynamic presentation ownership. */
-	async reconcileSpawnedDynamicEntities(
+	async reconcileDynamicEntities(
 		entities: readonly DynamicEntityView[],
 	): Promise<void> {
 		if (this.#destroyed)
@@ -1279,7 +1298,7 @@ export class GameRuntime {
 				(guid) => !requested.has(guid),
 			),
 		);
-		for (const guid of stale) this.#removeSpawnedDynamicTree(guid, stale);
+		for (const guid of stale) this.#removeDynamicEntityTree(guid, stale);
 		const worldRequests: Array<{
 			entity: DynamicEntityView;
 			visualKey: string;
@@ -1290,13 +1309,17 @@ export class GameRuntime {
 			const guid = entity.identity.guid;
 			const visualKey = dynamicVisualKey(entity);
 			this.#spawnedDesiredEntities.set(guid, entity);
-			const visual = this.#retainSpawnedVisual(guid, visualKey, entity);
+			const visual = this.#retainSpawnedVisual(guid, visualKey, entity).catch(
+				(cause) => {
+					throw dynamicEntityPresentationFailure(entity, cause);
+				},
+			);
 			if (entity.placement.kind === "world")
 				worldRequests.push({ entity, visualKey, visual });
 			else attachedRequests.push({ entity, visualKey, visual });
 		}
 		const prepare = (request: (typeof worldRequests)[number]) => {
-			const continuation = this.#upsertSpawnedDynamicEntity(
+			const continuation = this.#upsertDynamicEntity(
 				request.entity,
 				request.visualKey,
 				request.visual,
@@ -1304,25 +1327,34 @@ export class GameRuntime {
 			this.#trackRealizationContinuation(continuation);
 			return continuation;
 		};
+		// World roots must commit before attached descendants can resolve their parent node.
 		const worldOutcomes = await Promise.allSettled(worldRequests.map(prepare));
-		const outcomes = [
-			...worldOutcomes,
-			...(await Promise.allSettled(attachedRequests.map(prepare))),
-		];
-		const failures = outcomes.flatMap((outcome) =>
-			outcome.status === "rejected" ? [outcome.reason] : [],
+		const attachedOutcomes = await Promise.allSettled(
+			attachedRequests.map(prepare),
 		);
+		const requests = [...worldRequests, ...attachedRequests];
+		const outcomes = [...worldOutcomes, ...attachedOutcomes];
+		const failures = outcomes.flatMap((outcome, index) => {
+			if (outcome.status !== "rejected") return [];
+			const request = requests[index];
+			if (request === undefined) {
+				throw new Error(
+					"Dynamic reconciliation outcome lost its request identity.",
+				);
+			}
+			return [dynamicEntityPresentationFailure(request.entity, outcome.reason)];
+		});
 		if (failures.length === 1) throw failures[0];
 		if (failures.length > 1) {
 			throw new AggregateError(
 				failures,
-				`${failures.length} spawned dynamic entities failed presentation reconciliation.`,
+				`${failures.length} dynamic entities failed presentation reconciliation.`,
 			);
 		}
 	}
 
 	/** Apply one accepted host tick without re-running asynchronous visual reconciliation. */
-	applySpawnedDynamicEntityAdvances(
+	applyDynamicEntityAdvances(
 		batch: DynamicEntityAdvanceBatch,
 		receivedAtMs: number,
 	): void {
@@ -1369,8 +1401,8 @@ export class GameRuntime {
 	 * The level is recorded before the clip resolves, so an unplayable one is refused once rather
 	 * than re-attempted on every view that restates it.
 	 */
-	#applySpawnedDynamicClip(
-		installed: SpawnedDynamicPresentationRecord,
+	#applyDynamicEntityClip(
+		installed: DynamicEntityPresentationRecord,
 		clip: DynamicEntityPlayingClip | null,
 	): void {
 		if (clip === null || samePlayingClip(installed.playingClip, clip)) return;
@@ -1396,7 +1428,7 @@ export class GameRuntime {
 		);
 	}
 
-	async #upsertSpawnedDynamicEntity(
+	async #upsertDynamicEntity(
 		entity: DynamicEntityView,
 		visualKey: string,
 		visual: Promise<DecodedStaticPresentation>,
@@ -1409,7 +1441,7 @@ export class GameRuntime {
 					`Dynamic entity ${formatDynamicGuid(guid)} changed immutable visual facts without changing generation.`,
 				);
 			}
-			this.#applySpawnedDynamicState(installedCurrent, entity);
+			this.#applyDynamicEntityState(installedCurrent, entity);
 			return;
 		}
 		const resolved = await visual;
@@ -1419,9 +1451,9 @@ export class GameRuntime {
 			return;
 		const stagingPlacement = this.#spawnedStagingPlacement(entity);
 		if (stagingPlacement === null) return;
-		const ownerId = spawnedDynamicOwnerId(guid);
+		const ownerId = dynamicEntityOwnerId(guid);
 		const activation = await this.#prepareDynamicOwner(ownerId, [
-			adaptSpawnedDynamicPresentation(entity, resolved, stagingPlacement),
+			adaptDynamicEntityPresentation(entity, resolved, stagingPlacement),
 		]);
 		if (
 			this.#spawnedDesiredEntities.get(guid)?.generation !== entity.generation
@@ -1437,7 +1469,7 @@ export class GameRuntime {
 			);
 		}
 		activation.commit();
-		const installed: SpawnedDynamicPresentationRecord = {
+		const installed: DynamicEntityPresentationRecord = {
 			behaviorGeneration: activation.generation,
 			generation: entity.generation,
 			nodeId,
@@ -1458,7 +1490,7 @@ export class GameRuntime {
 					nodeId,
 					parent.nodeId,
 					entity.placement.parentLocation,
-					spawnedDynamicPlacementKey(entity.placement.placement),
+					dynamicEntityPlacementKey(entity.placement.placement),
 				);
 			} catch (cause) {
 				this.#retireDynamicOwner(ownerId);
@@ -1472,18 +1504,18 @@ export class GameRuntime {
 				`Dynamic entity ${formatDynamicGuid(guid)} changed generation during synchronous activation commit.`,
 			);
 		}
-		this.#applySpawnedDynamicState(installed, latestDesired);
+		this.#applyDynamicEntityState(installed, latestDesired);
 	}
 
 	/** Apply everything one view says about an installed presentation, placement included. */
-	#applySpawnedDynamicState(
-		installed: SpawnedDynamicPresentationRecord,
+	#applyDynamicEntityState(
+		installed: DynamicEntityPresentationRecord,
 		entity: DynamicEntityView,
 	): void {
 		if (entity.placement.kind === "world") {
 			this.#dynamics.updatePlacement(
 				installed.nodeId,
-				spawnedDynamicPlacement(entity),
+				dynamicEntityPlacement(entity),
 			);
 		}
 		this.#applySpawnedPresentationState(installed, entity);
@@ -1494,7 +1526,7 @@ export class GameRuntime {
 		entity: DynamicEntityView,
 	): SceneSpatialPlacement | null {
 		if (entity.placement.kind === "world")
-			return spawnedDynamicPlacement(entity);
+			return dynamicEntityPlacement(entity);
 		const parent = this.#spawnedPresentations.get(entity.placement.parent);
 		if (!parent) return null;
 		return this.#dynamics.resolvedRootPlacement(parent.nodeId);
@@ -1508,7 +1540,7 @@ export class GameRuntime {
 	 * from carrying visibility forward while leaving playback on whatever it happened to catch.
 	 */
 	#applySpawnedPresentationState(
-		installed: SpawnedDynamicPresentationRecord,
+		installed: DynamicEntityPresentationRecord,
 		entity: DynamicEntityView,
 	): void {
 		this.#dynamics.updatePresentationState(installed.nodeId, {
@@ -1517,7 +1549,7 @@ export class GameRuntime {
 			lighting: entity.physics.lighting,
 			noDraw: entity.physics.noDraw,
 		});
-		this.#applySpawnedDynamicClip(installed, entity.playingClip);
+		this.#applyDynamicEntityClip(installed, entity.playingClip);
 	}
 
 	#retainSpawnedVisual(
@@ -1557,7 +1589,7 @@ export class GameRuntime {
 			this.#spawnedVisualKeys.delete(guid);
 	}
 
-	#removeSpawnedDynamicEntity(guid: number): void {
+	#removeDynamicEntity(guid: number): void {
 		this.#spawnedDesiredEntities.delete(guid);
 		const visualKey = this.#spawnedVisualKeys.get(guid);
 		if (visualKey !== undefined) this.#releaseSpawnedVisual(guid, visualKey);
@@ -1569,18 +1601,17 @@ export class GameRuntime {
 	}
 
 	/** Remove attached descendants before their parent scene tree. */
-	#removeSpawnedDynamicTree(guid: number, stale: ReadonlySet<number>): void {
+	#removeDynamicEntityTree(guid: number, stale: ReadonlySet<number>): void {
 		for (const [childGuid, child] of this.#spawnedDesiredEntities) {
 			if (
 				stale.has(childGuid) &&
 				child.placement.kind === "attached" &&
 				child.placement.parent === guid
 			) {
-				this.#removeSpawnedDynamicTree(childGuid, stale);
+				this.#removeDynamicEntityTree(childGuid, stale);
 			}
 		}
-		if (this.#spawnedDesiredEntities.has(guid))
-			this.#removeSpawnedDynamicEntity(guid);
+		if (this.#spawnedDesiredEntities.has(guid)) this.#removeDynamicEntity(guid);
 	}
 
 	/** Replace profile-resolved static content demand without moving the camera. */
@@ -2016,7 +2047,7 @@ export class GameRuntime {
 	 * the same interpolated position the entity is drawn at. `null` for an entity that is not
 	 * currently presented, which is an ordinary state during reconciliation rather than an error.
 	 */
-	spawnedDynamicEntityOrigin(
+	dynamicEntityOrigin(
 		guid: number,
 	): import("../scene").ResolvedSceneOrigin | null {
 		const installed = this.#spawnedPresentations.get(guid);
@@ -2263,8 +2294,9 @@ export class GameRuntime {
 
 	async destroy(): Promise<void> {
 		if (this.#destroyed) return;
+		this.#dynamicEntityVisualSource?.destroy?.();
 		const spawned = new Set(this.#spawnedDesiredEntities.keys());
-		for (const guid of spawned) this.#removeSpawnedDynamicTree(guid, spawned);
+		for (const guid of spawned) this.#removeDynamicEntityTree(guid, spawned);
 		this.#spawnedVisuals.clear();
 		this.#spawnedVisualKeys.clear();
 		this.#destroyed = true;

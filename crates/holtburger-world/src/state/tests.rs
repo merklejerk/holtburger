@@ -1255,6 +1255,7 @@ fn test_player_autonomous_sync_updates_authoritative_player_entity() {
             teleport_sequence: 30,
             force_position_sequence: 40,
             server_control_sequence: 20,
+            ..
         }
     )));
 

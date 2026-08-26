@@ -1,13 +1,13 @@
 use crate::client::movement_types::{
     CharacterDrive, Gait, LateralMotion, LongitudinalMotion, MotionStyle, MovementPacketMetadata,
-    Turn, planar_velocity_for_heading,
+    Turn,
 };
-use holtburger_common::{Guid, Vector3};
+use holtburger_common::Guid;
 use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::{RawMotionFlags, RawMotionState};
 use holtburger_protocol::messages::*;
+use holtburger_world::WorldState;
 use holtburger_world::context::WorldContextExt;
-use holtburger_world::{SelfMovementCapabilities, WorldState};
 use std::f32::consts::{PI, TAU};
 use std::time::Duration;
 
@@ -192,51 +192,6 @@ pub(super) fn build_motion_state_raw_motion_state(
     raw_motion_state_with_motion_style(world, raw_motion_state, motion_style)
 }
 
-fn local_longitudinal_speed_for_state(
-    state: CharacterDrive,
-    capabilities: &SelfMovementCapabilities,
-) -> f32 {
-    match (state.gait, state.longitudinal) {
-        (_, None) => 0.0,
-        (Gait::Run, Some(LongitudinalMotion::Forward)) => capabilities.resolved_manual_run_speed(),
-        (Gait::Walk, Some(LongitudinalMotion::Forward)) => capabilities.base_walk_forward_speed(),
-        (_, Some(LongitudinalMotion::Backward)) => 1.0,
-    }
-}
-
-pub(super) fn local_velocity_for_state(
-    current_heading: f32,
-    state: CharacterDrive,
-    capabilities: &SelfMovementCapabilities,
-) -> Vector3 {
-    let longitudinal = match state.longitudinal {
-        Some(LongitudinalMotion::Forward) => planar_velocity_for_heading(
-            current_heading,
-            local_longitudinal_speed_for_state(state, capabilities),
-        ),
-        Some(LongitudinalMotion::Backward) => {
-            planar_velocity_for_heading(normalize_heading(current_heading + PI), 1.0)
-        }
-        None => Vector3::zero(),
-    };
-    let lateral = match state.lateral {
-        Some(LateralMotion::Left) => {
-            planar_velocity_for_heading(normalize_heading(current_heading - (PI / 2.0)), 1.0)
-        }
-        Some(LateralMotion::Right) => {
-            planar_velocity_for_heading(normalize_heading(current_heading + (PI / 2.0)), 1.0)
-        }
-        None => Vector3::zero(),
-    };
-    let combined = longitudinal + lateral;
-    let maximum_speed = capabilities.resolved_manual_run_speed();
-    if combined.length() > maximum_speed {
-        combined.normalize() * maximum_speed
-    } else {
-        combined
-    }
-}
-
 pub(super) fn turn_rate_scalar_for_state(state: CharacterDrive) -> f32 {
     state.turn_rate_scalar.unwrap_or(match state.gait {
         Gait::Run => RUN_HELD_TURN_RATE_SCALAR,
@@ -244,89 +199,9 @@ pub(super) fn turn_rate_scalar_for_state(state: CharacterDrive) -> f32 {
     })
 }
 
-fn local_turn_omega(base_omega: Vector3, turn_rate_scalar: f32) -> Vector3 {
-    base_omega * turn_rate_scalar
-}
-
-pub(super) fn local_omega_for_state(
-    state: CharacterDrive,
-    capabilities: &SelfMovementCapabilities,
-) -> Vector3 {
-    match state.turning {
-        Some(Turn::Right) => local_turn_omega(
-            capabilities.kinematics().base_turn_right_omega,
-            turn_rate_scalar_for_state(state),
-        ),
-        Some(Turn::Left) => local_turn_omega(
-            capabilities.kinematics().base_turn_left_omega,
-            turn_rate_scalar_for_state(state),
-        ),
-        None => Vector3::zero(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use holtburger_protocol::messages::movement::MotionStance;
-    use holtburger_world::{
-        PlayerMotionTableSource, SelfMovementCapabilities, SelfMovementKinematics,
-    };
-
-    fn test_capabilities() -> SelfMovementCapabilities {
-        SelfMovementCapabilities {
-            kinematics: SelfMovementKinematics {
-                source: PlayerMotionTableSource::DirectProperty {
-                    motion_table_id: 0x0900_0020,
-                },
-                motion_table_id: 0x0900_0020,
-                stance: MotionStance::NonCombat as u32,
-                base_walk_forward_velocity: Vector3::new(1.0, 0.0, 0.0),
-                base_run_forward_velocity: Vector3::new(2.0, 0.0, 0.0),
-                base_turn_left_omega: Vector3::new(0.0, 0.0, -1.5),
-                base_turn_right_omega: Vector3::new(0.0, 0.0, 1.5),
-            },
-            run_rate_scalar: 1.0,
-        }
-    }
-
-    #[test]
-    fn local_omega_for_run_multiplies_authored_omega_by_retail_rate() {
-        let capabilities = test_capabilities();
-
-        assert_eq!(
-            local_omega_for_state(
-                CharacterDrive {
-                    gait: Gait::Run,
-                    longitudinal: None,
-                    lateral: None,
-                    turning: Some(Turn::Left),
-                    turn_rate_scalar: None,
-                },
-                &capabilities,
-            ),
-            Vector3::new(0.0, 0.0, -2.25)
-        );
-    }
-
-    #[test]
-    fn local_omega_for_state_applies_turn_rate_override_to_authored_omega() {
-        let capabilities = test_capabilities();
-
-        assert_eq!(
-            local_omega_for_state(
-                CharacterDrive {
-                    gait: Gait::Walk,
-                    longitudinal: None,
-                    lateral: None,
-                    turning: Some(Turn::Left),
-                    turn_rate_scalar: Some(0.75),
-                },
-                &capabilities,
-            ),
-            Vector3::new(0.0, 0.0, -1.125)
-        );
-    }
 
     #[test]
     fn raw_motion_state_encodes_longitudinal_and_lateral_axes_together() {
@@ -345,22 +220,5 @@ mod tests {
         assert!(raw.flags.contains(RawMotionFlags::SIDE_STEP_COMMAND));
         assert_eq!(raw.forward_command, Some(WALK_FORWARD_MOTION_COMMAND));
         assert_eq!(raw.sidestep_command, Some(SIDESTEP_LEFT_MOTION_COMMAND));
-    }
-
-    #[test]
-    fn local_velocity_composes_longitudinal_and_lateral_axes() {
-        let velocity = local_velocity_for_state(
-            0.0,
-            CharacterDrive::builder()
-                .walk()
-                .forward()
-                .strafe_left()
-                .build(),
-            &test_capabilities(),
-        );
-
-        assert!((velocity.x + 1.0).abs() < 1e-5);
-        assert!((velocity.y + 1.0).abs() < 1e-5);
-        assert_eq!(velocity.z, 0.0);
     }
 }

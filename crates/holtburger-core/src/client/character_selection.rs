@@ -11,6 +11,8 @@ pub(super) struct CharacterSelectionState {
     pub(super) account_name: String,
     pub(super) characters: Vec<CharacterEntry>,
     pub(super) character_id: Option<Guid>,
+    /// Guards the server-ready follow-up so a repeated edge cannot send entry twice.
+    pub(super) enter_world_sent: bool,
     pub(super) pending_character_operation: Option<CharacterManagementOperation>,
 }
 
@@ -20,6 +22,7 @@ impl CharacterSelectionState {
             account_name,
             characters: Vec::new(),
             character_id: None,
+            enter_world_sent: false,
             pending_character_operation: None,
         }
     }
@@ -90,6 +93,7 @@ impl CharacterSelectionState {
         session: &mut Session,
     ) -> Result<()> {
         self.character_id = Some(char_id);
+        self.enter_world_sent = false;
 
         // Wait up to 1s for the server seq to advance (helps ensure our ACK reflects the latest server packet)
         let prev_seq = session.last_server_seq;

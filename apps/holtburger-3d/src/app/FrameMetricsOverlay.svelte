@@ -5,7 +5,7 @@
 	export interface FrameMetrics {
 		/** Total milliseconds spent in the runtime tick phase. */
 		readonly tickMs: number;
-		/** Total milliseconds spent advancing GameRuntime state and drawing it. */
+		/** Total milliseconds spent advancing GamePresentationRuntime state and drawing it. */
 		readonly updateFrameMs: number;
 		/** Total measured frontend frame work in milliseconds. */
 		readonly frameMs: number;

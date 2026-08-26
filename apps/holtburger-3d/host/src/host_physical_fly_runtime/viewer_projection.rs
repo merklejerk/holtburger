@@ -2,9 +2,9 @@ use anyhow::{Context, Result, ensure};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion};
 use holtburger_world::{
-    CellTransitRequest, CollisionScene, MotionWaypoint, MotionWaypointPlacement,
+    ChildSpatialBody, ChildSpatialBodyDefinition, ChildSpatialBodyWaypoint, CollisionScene,
     PhysicalBodySceneResidency, PhysicalBodyTickStatus as GenericPhysicalBodyTickStatus,
-    PlacedMotionPath, PlacedMotionPathRequest, PlacedMotionPoint,
+    PlacedMotionPath, PlacedMotionPoint,
 };
 
 use crate::host_simulation_runtime::{HostPhysicalBodyTick, report_placed_motion_recoveries};
@@ -20,10 +20,8 @@ use super::{
 /// Host-retained render viewer state, independent from collision-body placement.
 #[derive(Debug, Clone)]
 pub(super) struct PresentedViewer {
-    /// Exact last placement-committed viewer pose, retained independently from the body.
-    pub(super) pose: WorldPosition,
-    /// Last portal-committed cell containing the viewer sphere, or outdoors.
-    pub(super) cell: Option<Guid>,
+    /// Parent-driven viewer sphere and its solver-owned portal history.
+    pub(super) body: ChildSpatialBody,
 }
 
 /// Fully validated presentation derived from a still-provisional body tick.
@@ -44,26 +42,26 @@ pub(super) fn prepare_physical_fly_presentation(
     solved: &HostPhysicalBodyTick,
 ) -> Result<PreparedPhysicalFlyPresentation> {
     let motion = &solved.result.motion;
-    let body_motion = motion
+    let parent_waypoints = motion
         .path
         .legs()
         .iter()
-        .map(|leg| MotionWaypoint {
-            center: leg.end().center(),
-            end_fraction: leg.end_fraction(),
-            placement: MotionWaypointPlacement::Traverse,
+        .map(|leg| {
+            Ok(ChildSpatialBodyWaypoint {
+                parent_pose: placed_point_pose(&motion.path, leg.end())?,
+                end_fraction: leg.end_fraction(),
+            })
         })
-        .collect::<Vec<_>>();
-    let viewer_path = transit_presented_viewer_path(
+        .collect::<Result<Vec<_>>>()?;
+    let mut viewer_body = previous.viewer.body.clone();
+    let viewer_path = viewer_body.reconcile_parent_path(
         &solved.collision,
-        previous,
         solved.previous.pose,
-        solved.current.pose,
-        &body_motion,
+        &parent_waypoints,
     )?;
     let initial = serialize_path_point(viewer_path.anchor(), viewer_path.initial())?;
     let legs = serialize_path_legs(&viewer_path)?;
-    let viewer = presented_viewer_from_path(&viewer_path)?;
+    let viewer = presented_viewer_from_path(&viewer_path, viewer_body)?;
     report_placed_motion_recoveries("physical fly viewer", &viewer_path);
     Ok(PreparedPhysicalFlyPresentation {
         initial,
@@ -136,19 +134,24 @@ pub(super) fn scene_point_to_residency_pose(
     Ok(pose)
 }
 
-/// Resolves the render viewer independently from the response body's primary sphere.
-pub(super) fn resolve_viewer_cell(
+/// Resolves one render viewer as a non-responsive child of its physical root body.
+pub(super) fn place_viewer_body(
     scene: &CollisionScene,
     pose: WorldPosition,
-    seed_cell: Option<Guid>,
-) -> Result<Option<Guid>> {
-    let placement = scene.transit_cell(CellTransitRequest {
-        previous_cell: seed_cell,
-        anchor: landblock_key(pose.landblock_id),
-        center: pose.coords,
-        radius: VIEWER_SPHERE_RADIUS,
-    })?;
-    Ok(placement.committed_cell())
+) -> Result<PresentedViewer> {
+    let mut body = ChildSpatialBody::new(
+        ChildSpatialBodyDefinition::new(holtburger_common::Vector3::zero(), VIEWER_SPHERE_RADIUS)?,
+        pose,
+    );
+    let path = body.reconcile_parent_path(
+        scene,
+        pose,
+        &[ChildSpatialBodyWaypoint {
+            parent_pose: pose,
+            end_fraction: 1.0,
+        }],
+    )?;
+    presented_viewer_from_path(&path, body)
 }
 
 /// Makes the pose frame agree with the independently resolved portal-history cell.
@@ -165,60 +168,6 @@ pub(super) fn pose_with_cell(mut pose: WorldPosition, cell: Option<Guid>) -> Res
     // Clear a stale EnvCell selector before normalization; low words >= 0x0100 identify interiors.
     pose.landblock_id = Guid(pose.landblock_id.0 & 0xffff_0000);
     Ok(pose.normalize_outdoor_landblock_frame()?)
-}
-
-/// Portal-transits the retail 0.3 m viewer independently at every accepted body-path fraction.
-///
-/// Retail transitions `viewer_sphere` on every normal draw (`acclient.c:138800-138918`); retaining
-/// the solver fractions prevents the visual viewer from cutting across a collision-bent body path.
-pub(super) fn transit_presented_viewer_path(
-    scene: &CollisionScene,
-    previous: &ActivePhysicalFly,
-    previous_body_pose: WorldPosition,
-    candidate_body_pose: WorldPosition,
-    body_motion: &[MotionWaypoint],
-) -> Result<PlacedMotionPath> {
-    let anchor = landblock_key(previous_body_pose.landblock_id);
-    let viewer_owner = landblock_key(previous.viewer.pose.landblock_id);
-    let start = reanchor_point(previous.viewer.pose.coords, viewer_owner, anchor);
-    let initial_body = reanchor_point(
-        previous_body_pose.coords,
-        landblock_key(previous_body_pose.landblock_id),
-        anchor,
-    );
-    let candidate_body = reanchor_point(
-        candidate_body_pose.coords,
-        landblock_key(candidate_body_pose.landblock_id),
-        anchor,
-    );
-    let waypoints = body_motion
-        .iter()
-        .map(|waypoint| MotionWaypoint {
-            center: waypoint.center,
-            end_fraction: waypoint.end_fraction,
-            placement: MotionWaypointPlacement::Traverse,
-        })
-        .collect::<Vec<_>>();
-    let waypoints = if waypoints.is_empty() {
-        vec![MotionWaypoint {
-            center: candidate_body,
-            end_fraction: 1.0,
-            placement: MotionWaypointPlacement::Traverse,
-        }]
-    } else {
-        waypoints
-    };
-    debug_assert!(
-        (start - initial_body).length() < 0.01 || previous.viewer.pose != previous_body_pose,
-        "camera viewer and body unexpectedly diverged without a prior presentation hold"
-    );
-    Ok(scene.transit_motion_path(PlacedMotionPathRequest {
-        previous_cell: previous.viewer.cell,
-        anchor,
-        start,
-        radius: VIEWER_SPHERE_RADIUS,
-        waypoints: &waypoints,
-    })?)
 }
 
 fn serialize_path_point(anchor: Guid, point: &PlacedMotionPoint) -> Result<PhysicalFlyPathPoint> {
@@ -244,8 +193,18 @@ fn serialize_path_legs(path: &PlacedMotionPath) -> Result<Vec<PhysicalFlyPathLeg
         .collect()
 }
 
-fn presented_viewer_from_path(path: &PlacedMotionPath) -> Result<PresentedViewer> {
-    let point = path.final_point();
+fn presented_viewer_from_path(
+    path: &PlacedMotionPath,
+    body: ChildSpatialBody,
+) -> Result<PresentedViewer> {
+    ensure!(
+        body.committed_cell() == path.final_point().placement().committed_cell(),
+        "presented viewer body disagrees with its accepted path"
+    );
+    Ok(PresentedViewer { body })
+}
+
+fn placed_point_pose(path: &PlacedMotionPath, point: &PlacedMotionPoint) -> Result<WorldPosition> {
     let presented = present_placed_motion_point(path.anchor(), point)?;
     let mut pose = WorldPosition {
         landblock_id: Guid(presented.owner.0 & 0xffff_0000),
@@ -256,10 +215,7 @@ fn presented_viewer_from_path(path: &PlacedMotionPath) -> Result<PresentedViewer
     if let Some(cell) = presented.cell {
         pose.landblock_id = cell;
     }
-    Ok(PresentedViewer {
-        pose,
-        cell: presented.cell,
-    })
+    Ok(pose)
 }
 
 fn physical_fly_tick_status(status: GenericPhysicalBodyTickStatus) -> PhysicalFlyTickStatus {

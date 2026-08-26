@@ -1,4 +1,5 @@
 mod common;
+mod correction;
 mod system;
 
 #[cfg(test)]
@@ -9,4 +10,5 @@ pub(crate) mod character_motion_retail_differential;
 #[path = "client_correction_retail_differential.rs"]
 mod client_correction_retail_differential;
 
+pub(super) use correction::{CorrectionDisposition, ServerPositionUpdate};
 pub(super) use system::{MovementSystem, ServerControlledProjection};

@@ -6,8 +6,9 @@ import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
+import { findAvailablePort, parseVitePort } from "./dev-port.mjs";
+
 const DEFAULT_CHROME_PATH = "/opt/google/chrome/chrome";
-const DEFAULT_VITE_PORT = 1420;
 const READY_KIND = "holtburger-3d-dev-landblock-content-host-ready";
 const DEFAULT_LANDBLOCK_ID = "0xda55ffff";
 /** Lateral metres between showcase subjects; wide enough that two humanoids do not overlap. */
@@ -227,7 +228,7 @@ function parseArgs(args) {
 		ambientOcclusionCycle: false,
 		ambientOcclusionCoverage: false,
 		traceTerrainGl: false,
-		vitePort: DEFAULT_VITE_PORT,
+		vitePort: null,
 		colorGrade: null,
 		staticLights: true,
 		weather: true,
@@ -664,7 +665,7 @@ function parseArgs(args) {
 				parsed.ambientOcclusionCycle = true;
 				break;
 			case "--vite-port":
-				parsed.vitePort = Number(requireValue(args, ++index, arg));
+				parsed.vitePort = parseVitePort(requireValue(args, ++index, arg), arg);
 				break;
 			case "--color-grade": {
 				const source = requireValue(args, ++index, arg);
@@ -1133,8 +1134,9 @@ Options:
                          any timing used as performance evidence.
   --trace-terrain-gl     Assert that the far-terrain program binds no texture state and uploads
                          exactly one terrain palette per activation.
-  --vite-port <port>     Vite port to start or reuse. Change it when another worktree is running
-                         a harness, or its server will silently serve that worktree's build.
+  --vite-port <port>     Vite port to start or reuse. Default: a random free port. Change it when
+                         another worktree is running a harness, or its server will silently serve
+                         that worktree's build.
   --color-grade <json>  Override the presentation color grade with these JSON parameters, e.g.
                          '{"temperature":0.6,"tint":0,"saturation":1.4,"curves":{...}}'. Omit it
                          to use whatever FRONTEND_TUNING currently ships.
@@ -2854,10 +2856,10 @@ function assertSpawnedEntityLifecycle(result) {
 		throw new Error("Spawned-entity scenario produced no lifecycle evidence.");
 	}
 	const initialDynamics = result.initialState.authoredDynamics?.dynamics;
-	const spawnedDynamics = lifecycle.spawnedState?.authoredDynamics?.dynamics;
-	const despawnedDynamics =
+	const postSpawnDynamics = lifecycle.spawnedState?.authoredDynamics?.dynamics;
+	const postDespawnDynamics =
 		lifecycle.despawnedState?.authoredDynamics?.dynamics;
-	if (!initialDynamics || !spawnedDynamics || !despawnedDynamics) {
+	if (!initialDynamics || !postSpawnDynamics || !postDespawnDynamics) {
 		throw new Error("Spawned-entity scenario omitted dynamic runtime state.");
 	}
 	const worldEntities = lifecycle.spawnedState.spawnedEntities.filter(
@@ -2869,7 +2871,7 @@ function assertSpawnedEntityLifecycle(result) {
 		);
 	}
 	if (
-		spawnedDynamics.entityCount !==
+		postSpawnDynamics.entityCount !==
 		initialDynamics.entityCount + lifecycle.spawnedState.spawnedEntities.length
 	) {
 		throw new Error(
@@ -2887,11 +2889,11 @@ function assertSpawnedEntityLifecycle(result) {
 			"Exact despawn left a current entity in the harness projection.",
 		);
 	}
-	if (despawnedDynamics.entityCount !== initialDynamics.entityCount) {
+	if (postDespawnDynamics.entityCount !== initialDynamics.entityCount) {
 		throw new Error("Exact despawn retained a shared-runtime dynamic entity.");
 	}
 	if (
-		despawnedDynamics.templates.templateCount !==
+		postDespawnDynamics.templates.templateCount !==
 		initialDynamics.templates.templateCount
 	) {
 		throw new Error("Exact despawn retained an immutable visual template.");
@@ -2924,8 +2926,10 @@ async function startContentHost() {
  * isolate a run when more than one checkout is active.
  */
 async function startViteServer(port) {
-	const viteUrl = `http://127.0.0.1:${port}`;
-	if (await isUrlReady(`${viteUrl}/harness/browser/`)) {
+	const reuseRequestedPort = port !== null && port !== 0;
+	const resolvedPort = reuseRequestedPort ? port : await findAvailablePort();
+	const viteUrl = `http://127.0.0.1:${resolvedPort}`;
+	if (reuseRequestedPort && (await isUrlReady(`${viteUrl}/harness/browser/`))) {
 		process.stderr.write(
 			`Reusing Vite server at ${viteUrl}. Pass --vite-port to isolate this run from ` +
 				`another worktree.\n`,
@@ -2937,7 +2941,7 @@ async function startViteServer(port) {
 		"--host",
 		"127.0.0.1",
 		"--port",
-		String(port),
+		String(resolvedPort),
 		"--strictPort",
 	]);
 	await waitForUrl(`${viteUrl}/harness/browser/`, 60_000);

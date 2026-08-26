@@ -1,6 +1,9 @@
 # Holtburger 3D Client Mode Implementation Plan
 
-Status: active; Phase 0 complete.
+Status: implementation complete; Phases 0–15 are closed. The accepted implementation includes the
+cleaner host, movement, frontend-lifetime, diagnostic, and child-spatial-body shapes identified
+during implementation and independent comparison. Electron GUI execution and the extended live ACE
+matrix remain explicit external verification debt, not incomplete implementation.
 
 ## Context and Boundaries
 
@@ -580,6 +583,11 @@ the host split and spatial-foundation cutover establish actual change volume:
 | 10   | Collision-safe client third-person camera                        | Medium         | 6, 8, 9                           |
 | B    | Complete playable-slice audit                                    | Small          | 10                                |
 | 11   | Cleanup, documentation, and final acceptance                     | Medium         | B                                 |
+| 12   | Physical host mode/event boundaries and vocabulary               | Medium         | 11                                |
+| 13   | Retail server-correction convergence and differential oracle     | Large          | 12                                |
+| C    | Authority/lifecycle re-audit before presentation teardown        | Small          | 12, 13                            |
+| 14   | Focused client presentation and complete teardown                | Medium         | C                                 |
+| 15   | Reproducible live, IPC, stress, and launcher integration evidence | Medium         | 14                                |
 
 Phase 0 does not require a live entity census or encoded payload sample. Live ACE integration still
 belongs to Phases 8 and 11, but a targeted census is added only if that verification exposes an
@@ -729,14 +737,14 @@ that already-required protocol step into core.
 
 The target discriminated state is `ClientLifecycleState` with exactly these arms:
 
-| Arm | Fields | Named consumer |
-| --- | --- | --- |
-| `Connecting` | none | client route connection status |
-| `Authenticating` | none | client route authentication status |
-| `CharacterSelection` | `characters: Vec<ClientCharacterSummary>` | character list and Enter World enablement |
-| `EnteringWorld` | `character_guid` | selection screen progress and duplicate-submit prevention |
-| `InWorld` | `player_guid` | viewer identity, scene interest, and input |
-| `Exiting` | `cause: ClientExitCause` | terminal status plus Electron exit-status projection |
+| Arm                  | Fields                                    | Named consumer                                            |
+| -------------------- | ----------------------------------------- | --------------------------------------------------------- |
+| `Connecting`         | none                                      | client route connection status                            |
+| `Authenticating`     | none                                      | client route authentication status                        |
+| `CharacterSelection` | `characters: Vec<ClientCharacterSummary>` | character list and Enter World enablement                 |
+| `EnteringWorld`      | `character_guid`                          | selection screen progress and duplicate-submit prevention |
+| `InWorld`            | `player_guid`                             | viewer identity, scene interest, and input                |
+| `Exiting`            | `cause: ClientExitCause`                  | terminal status plus Electron exit-status projection      |
 
 `ClientCharacterSummary` is exactly `guid`, `name`, `slot`, and `delete_time`. The list row consumes
 `name` and stable `slot`, the Enter World command consumes `guid`, and pending-deletion presentation
@@ -748,17 +756,17 @@ failure, and host shutdown; diagnostic text stays redacted and Electron-main-own
 
 Core retains its broad application API, but the desktop adapter consumes only this census:
 
-| Current event/fact | Fields consumed | Level or edge | First-cut consumer |
-| --- | --- | --- | --- |
-| `StatusUpdate` | `state` | level | lifecycle projection |
-| `CharacterList` | `guid`, `name`, list index as slot, `delete_time` | level | character selection |
-| `PlayerEntered` plus authoritative player state | `guid` | level | `InWorld.player_guid` |
-| `ServerTimeUpdated` | `time` | level after first sync | regional environment clock |
-| `DynamicEntity::{Snapshot,Upserted,Removed,Advanced}` | existing focused contract | reconstructible level/deltas | shared dynamic mirror |
-| `RuntimeBodiesReset` | `cause` | edge | increment `world_generation`; replace focused state |
-| `ForcedReposition` | `guid`, `pos`, `sequence` | edge | local-player reset classification and generation guard |
-| `TeleportStarted` | `sequence` | edge | pending teleport classification; no replay |
-| `ActionResult`, `BootAccount`, `Disconnected`, task result | typed cause, redacted diagnostic | edge | Electron exit policy |
+| Current event/fact                                         | Fields consumed                                   | Level or edge                | First-cut consumer                                     |
+| ---------------------------------------------------------- | ------------------------------------------------- | ---------------------------- | ------------------------------------------------------ |
+| `StatusUpdate`                                             | `state`                                           | level                        | lifecycle projection                                   |
+| `CharacterList`                                            | `guid`, `name`, list index as slot, `delete_time` | level                        | character selection                                    |
+| `PlayerEntered` plus authoritative player state            | `guid`                                            | level                        | `InWorld.player_guid`                                  |
+| `ServerTimeUpdated`                                        | `time`                                            | level after first sync       | regional environment clock                             |
+| `DynamicEntity::{Snapshot,Upserted,Removed,Advanced}`      | existing focused contract                         | reconstructible level/deltas | shared dynamic mirror                                  |
+| `RuntimeBodiesReset`                                       | `cause`                                           | edge                         | increment `world_generation`; replace focused state    |
+| `ForcedReposition`                                         | `guid`, `pos`, `sequence`                         | edge                         | local-player reset classification and generation guard |
+| `TeleportStarted`                                          | `sequence`                                        | edge                         | pending teleport classification; no replay             |
+| `ActionResult`, `BootAccount`, `Disconnected`, task result | typed cause, redacted diagnostic                  | edge                         | Electron exit policy                                   |
 
 `ClientApplicationSnapshot` is the core-owned replacement level with exactly: lifecycle status,
 current character list when known, local-player GUID when known, synchronized server time when
@@ -821,15 +829,15 @@ coordinates or reads the other's cache.
 
 The core coordinator has the following exhaustive transitions:
 
-| State/edge | Required behavior |
-| --- | --- |
-| `Empty` | no player residency or terminal teardown; no collision scene is claimably ready |
-| `Loading { request, interest }` | async load outside network/simulation turns; prior committed snapshot remains immutable but is not paired with the new interest |
-| load committed | atomically replace with `Ready { revision, interest, collision }` only when request and authoritative residency still match |
-| superseded completion | discard by request generation; it never mutates the committed snapshot |
-| `Unavailable { interest, cause }` | explicit missing/invalid content; local solve remains suspended |
-| teleport/reset | invalidate readiness, derive the new authoritative interest, and start a new generation |
-| shutdown | cancel/retire loading work, clear readiness, and publish no later completion |
+| State/edge                        | Required behavior                                                                                                               |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `Empty`                           | no player residency or terminal teardown; no collision scene is claimably ready                                                 |
+| `Loading { request, interest }`   | async load outside network/simulation turns; prior committed snapshot remains immutable but is not paired with the new interest |
+| load committed                    | atomically replace with `Ready { revision, interest, collision }` only when request and authoritative residency still match     |
+| superseded completion             | discard by request generation; it never mutates the committed snapshot                                                          |
+| `Unavailable { interest, cause }` | explicit missing/invalid content; local solve remains suspended                                                                 |
+| teleport/reset                    | invalidate readiness, derive the new authoritative interest, and start a new generation                                         |
+| shutdown                          | cancel/retire loading work, clear readiness, and publish no later completion                                                    |
 
 Desktop and TUI inject content access into this same core coordinator. Each composition owns one
 coordinator and one `WorldState.scene`; no coordinator owns or mirrors bodies.
@@ -846,17 +854,17 @@ copying it. Replacement, deselection, teleport, disconnect, and shutdown invalid
 
 The three-way trace assigns responsibilities as follows:
 
-| Responsibility | Current TUI-era path | Explorer evidence | Target owner |
-| --- | --- | --- | --- |
-| held intent and edge ordering | `MovementSystem` queue/active drive | possession event queue | core client command arbitration |
-| `MoveToState`, sequences, stop pulse, autonomous heartbeat | `MovementSystem` | none | core client protocol executor |
-| axis/gait interpretation | fixed capability-to-velocity/omega reduction | `CharacterMotionController` plus motion tables | shared character controller validated against retail |
-| authored root offset | world motion runtime, sometimes reduced by minimal solver | possession motion runtime | world motion runtime, consumed once at actuation boundary |
-| grounded actuation | `LocalDriveControl` desired delta or `SolveProjectionBasis` | `authored_grounded_actuation` | small exhaustive world conversion functions |
-| jump | protocol/transient pieces, no full client composition | shared jump resolver and grounded launch | shared resolver; first-cut UI remains absent |
-| physical solve | `SpatialPhysics` callback into owning scene | direct transactional scene call | `SpatialScene::tick_physical_body_transaction` |
-| correction/interpolation | sequence handling plus direct pose/projection paths | no server producer | core client correction basis before solver/presentation |
-| presentation | upsert-only for continuous client motion | fixed-tick `Advanced` | authority-clocked core advance batch |
+| Responsibility                                             | Current TUI-era path                                        | Explorer evidence                              | Target owner                                              |
+| ---------------------------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------- | --------------------------------------------------------- |
+| held intent and edge ordering                              | `MovementSystem` queue/active drive                         | possession event queue                         | core client command arbitration                           |
+| `MoveToState`, sequences, stop pulse, autonomous heartbeat | `MovementSystem`                                            | none                                           | core client protocol executor                             |
+| axis/gait interpretation                                   | fixed capability-to-velocity/omega reduction                | `CharacterMotionController` plus motion tables | shared character controller validated against retail      |
+| authored root offset                                       | world motion runtime, sometimes reduced by minimal solver   | possession motion runtime                      | world motion runtime, consumed once at actuation boundary |
+| grounded actuation                                         | `LocalDriveControl` desired delta or `SolveProjectionBasis` | `authored_grounded_actuation`                  | small exhaustive world conversion functions               |
+| jump                                                       | protocol/transient pieces, no full client composition       | shared jump resolver and grounded launch       | shared resolver; first-cut UI remains absent              |
+| physical solve                                             | `SpatialPhysics` callback into owning scene                 | direct transactional scene call                | `SpatialScene::tick_physical_body_transaction`            |
+| correction/interpolation                                   | sequence handling plus direct pose/projection paths         | no server producer                             | core client correction basis before solver/presentation   |
+| presentation                                               | upsert-only for continuous client motion                    | fixed-tick `Advanced`                          | authority-clocked core advance batch                      |
 
 The current premature reduction is `MovementSystem::current_local_solve_body_input`: manual
 `CharacterDrive` becomes approximate velocity/omega before authored motion or collision. Autonomous
@@ -867,13 +875,13 @@ path construction do not.
 
 The closed movement bases remain honest until the solver boundary:
 
-| Basis | Producer | Exhaustive conversion | Consumer |
-| --- | --- | --- | --- |
-| authored rigid offset | motion runtime | `authored_grounded_actuation` | grounded scene transaction |
-| desired world displacement + desired heading + target hint | autonomous/server projection | named displacement-to-grounded-actuation function using the one tick duration | grounded scene transaction |
-| retained velocity + omega | canonical body/server kinematics | response-specific coast/free-flight conversion | scene transaction |
-| authoritative interpolation offset | server position interpolation manager | replacement actuation offset, never added to authored drive | constraint damping then scene transaction |
-| resolved jump launch | shared character jump resolver | attach one `GroundedLaunch` to the selected grounded actuation | scene transaction |
+| Basis                                                      | Producer                              | Exhaustive conversion                                                         | Consumer                                  |
+| ---------------------------------------------------------- | ------------------------------------- | ----------------------------------------------------------------------------- | ----------------------------------------- |
+| authored rigid offset                                      | motion runtime                        | `authored_grounded_actuation`                                                 | grounded scene transaction                |
+| desired world displacement + desired heading + target hint | autonomous/server projection          | named displacement-to-grounded-actuation function using the one tick duration | grounded scene transaction                |
+| retained velocity + omega                                  | canonical body/server kinematics      | response-specific coast/free-flight conversion                                | scene transaction                         |
+| authoritative interpolation offset                         | server position interpolation manager | replacement actuation offset, never added to authored drive                   | constraint damping then scene transaction |
+| resolved jump launch                                       | shared character jump resolver        | attach one `GroundedLaunch` to the selected grounded actuation                | scene transaction                         |
 
 At most one planar basis is selected per body/tick; launch is a one-shot addition to grounded
 actuation, not a competing planar basis. Invalid combinations fail at basis selection. Retail order
@@ -894,19 +902,19 @@ first cut.
 
 The exact app-local inventory is deliberately smaller than `ClientCommand`/`ClientViewEvent`:
 
-| Direction/name | Fields | Named consumer |
-| --- | --- | --- |
-| private `start_client` | `host`, `port`, `account`, `password` | Electron main to one `ClientHostRuntime`; password released after login send |
-| renderer `request_client_current_state` | none | lifecycle/dynamic lag recovery |
-| renderer `select_client_character` | `guid` | explicit Enter World action |
-| renderer `replace_client_drive` | `gait`, optional `longitudinal`, optional `turning` | basic held walk/run/turn controller |
-| renderer `disconnect_client` | none | explicit disconnect/close |
-| event `client_current_state` | `lifecycle`, optional synchronized `server_time`, `world_generation`, dynamic snapshot | atomic mount/lag replacement |
-| event `client_lifecycle_changed` | complete `ClientLifecycleState` | selection/in-world/terminal route state |
-| event `client_server_time_updated` | synchronized `time` | environment clock |
-| event `dynamic_entity` | existing `DynamicEntityEvent` | shared focused mirror/presentation |
-| event `client_world_discontinuity` | `world_generation`, `kind` | clear interpolation and camera state before later placement |
-| private `client_exit_requested` | typed cause plus redacted diagnostic | Electron non-zero/zero exit policy |
+| Direction/name                          | Fields                                                                                 | Named consumer                                                               |
+| --------------------------------------- | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| private `start_client`                  | `host`, `port`, `account`, `password`                                                  | Electron main to one `ClientHostRuntime`; password released after login send |
+| renderer `request_client_current_state` | none                                                                                   | lifecycle/dynamic lag recovery                                               |
+| renderer `select_client_character`      | `guid`                                                                                 | explicit Enter World action                                                  |
+| renderer `replace_client_drive`         | `gait`, optional `longitudinal`, optional `turning`                                    | basic held walk/run/turn controller                                          |
+| renderer `disconnect_client`            | none                                                                                   | explicit disconnect/close                                                    |
+| event `client_current_state`            | `lifecycle`, optional synchronized `server_time`, `world_generation`, dynamic snapshot | atomic mount/lag replacement                                                 |
+| event `client_lifecycle_changed`        | complete `ClientLifecycleState`                                                        | selection/in-world/terminal route state                                      |
+| event `client_server_time_updated`      | synchronized `time`                                                                    | environment clock                                                            |
+| event `dynamic_entity`                  | existing `DynamicEntityEvent`                                                          | shared focused mirror/presentation                                           |
+| event `client_world_discontinuity`      | `world_generation`, `kind`                                                             | clear interpolation and camera state before later placement                  |
+| private `client_exit_requested`         | typed cause plus redacted diagnostic                                                   | Electron non-zero/zero exit policy                                           |
 
 The drive wire deliberately omits lateral drive, turn-rate scalars, jump, attack, interaction,
 packet cadence, and sequence numbers. World name is omitted because the first-cut UI has no
@@ -931,28 +939,28 @@ client enums never cross the renderer boundary.
 
 #### Task checklist
 
-- [ ] Rename the current Explorer-composed `HostRuntime` honestly before introducing the client
+- [x] Rename the current Explorer-composed `HostRuntime` honestly before introducing the client
       composition.
-- [ ] Keep `HostContentState` discovery, content runtime, repository, and reusable command handlers
+- [x] Keep `HostContentState` discovery, content runtime, repository, and reusable command handlers
       in one shared capability owner.
-- [ ] Move Explorer entity, simulation, possession, camera, physical-flight, and fixed-tick
+- [x] Move Explorer entity, simulation, possession, camera, physical-flight, and fixed-tick
       construction under `ExplorerHostRuntime` without changing their behavior.
-- [ ] Add a `ClientHostRuntime` that owns no network task until Electron main supplies the one
+- [x] Add a `ClientHostRuntime` that owns no network task until Electron main supplies the one
       launch configuration through the private typed startup command.
-- [ ] Parse and validate host mode before expensive content or runtime construction.
-- [ ] Pass the already-resolved Electron entry to the child process without shell interpolation.
-- [ ] Parse client login flags in Electron main, reject missing/duplicate/malformed values before
+- [x] Parse and validate host mode before expensive content or runtime construction.
+- [x] Pass the already-resolved Electron entry to the child process without shell interpolation.
+- [x] Parse client login flags in Electron main, reject missing/duplicate/malformed values before
       startup, and resolve `--server` versus `--host`/`--port` with documented TUI-compatible
       precedence. Reject an invalid embedded port instead of copying the TUI's default-port fallback.
-- [ ] Keep client login flags out of `buildEntryPath`, renderer query parameters, preload, renderer
+- [x] Keep client login flags out of `buildEntryPath`, renderer query parameters, preload, renderer
       globals, and sidecar `argv`; send the validated composite value once over the private host
       pipe and release Electron's retained copy after startup settles.
-- [ ] Do not add `--character` auto-entry in this slice; character choice remains visible client UI.
-- [ ] Split protocol dispatch so a command unavailable in the selected mode returns a structured
+- [x] Do not add `--character` auto-entry in this slice; character choice remains visible client UI.
+- [x] Split protocol dispatch so a command unavailable in the selected mode returns a structured
       mode error even if a compromised renderer bypasses TypeScript types.
-- [ ] Split `HOST_COMMAND_NAMES`, `HOST_EVENT_NAMES`, and payload maps into composable inventories
+- [x] Split `HOST_COMMAND_NAMES`, `HOST_EVENT_NAMES`, and payload maps into composable inventories
       without reintroducing one giant application union in consumers.
-- [ ] Update sidecar smoke and protocol tests for both modes, startup mismatch, invalid command, and
+- [x] Update sidecar smoke and protocol tests for both modes, startup mismatch, invalid command, and
       orderly shutdown.
 
 #### Acceptance criteria
@@ -969,7 +977,21 @@ client enums never cross the renderer boundary.
 
 #### Decisions and course corrections
 
-To be filled during execution.
+- `HostRuntime` is now an enum over concrete `ExplorerHostRuntime` and `ClientHostRuntime` roots;
+  shared `HostContentState` is composed once before selecting the root. This keeps the existing
+  Explorer fields out of client mode instead of hiding them behind optional fields.
+- The client root accepts and retains one private startup configuration but deliberately creates no
+  `ClientRuntime` or network task yet. Phase 4 owns that task lifetime and the credential-release
+  point after the login command is actually sent.
+- The MessagePack handshake carries `host_mode`. Electron passes the resolved entry mode to the
+  child with an argv array and rejects a mode mismatch before renderer IPC is enabled. Mode errors
+  are also enforced in Rust so a renderer-side allowlist bypass cannot activate Explorer commands
+  in client mode.
+- The client renderer inventory is intentionally empty in this phase; renderer lifecycle commands
+  are introduced with their named consumers in Phase 4 rather than inventing placeholder commands.
+- The old status string was made mode-specific (`explorer-host-ready`/`client-host-ready`) and the
+  sidecar smoke now runs both roots, sends the private client startup command, checks the cross-mode
+  rejection, and verifies orderly shutdown.
 
 ### Phase 2: Cut over shared presentation vocabulary
 
@@ -983,14 +1005,14 @@ To be filled during execution.
 
 #### Task checklist
 
-- [ ] Rename the runtime and every shared consumer in one vocabulary sweep; retain no alias named
+- [x] Rename the runtime and every shared consumer in one vocabulary sweep; retain no alias named
       `GameRuntime`.
-- [ ] Rename spawned presentation maps, methods, diagnostics, tests, and comments that already
+- [x] Rename spawned presentation maps, methods, diagnostics, tests, and comments that already
       accept authority-neutral dynamic views.
-- [ ] Keep producer identity/generation in the dynamic contract; source-neutral naming does not erase
+- [x] Keep producer identity/generation in the dynamic contract; source-neutral naming does not erase
       lifecycle guards.
-- [ ] Do not move Explorer policy modules merely to make the vocabulary grep cleaner.
-- [ ] Run type checks, lint, focused tests, and the canonical Explorer browser-harness smoke as a
+- [x] Do not move Explorer policy modules merely to make the vocabulary grep cleaner.
+- [x] Run type checks, lint, focused tests, and the canonical Explorer browser-harness smoke as a
       standalone mechanical milestone.
 
 #### Acceptance criteria
@@ -1001,7 +1023,16 @@ To be filled during execution.
 
 #### Decisions and course corrections
 
-To be filled during execution.
+- `GameRuntime` is now `GamePresentationRuntime`, including its file, tests, type references, and
+  diagnostics comments. There is no compatibility alias; Explorer remains the current composition
+  root but the type no longer claims authority over gameplay.
+- The focused presentation adapter/file and owner IDs now use `dynamicEntity*` and
+  `dynamic-entity:` vocabulary. Producer GUID and generation remain part of every resource owner and
+  presentation identity, so the rename did not erase lifecycle barriers.
+- Explorer scenario/control names were left in Explorer modules when they describe policy rather than
+  the shared presentation mechanism. No Explorer module was moved merely to satisfy a grep.
+- The mechanical cutover passed the full TypeScript suite (1,501 tests), app checks, dead-code lint,
+  focused Rust checks, and the canonical browser harness. No behavior or renderer contract changed.
 
 ### Phase 3: Make the frontend presentation owner genuinely shared
 
@@ -1019,21 +1050,21 @@ To be filled during execution.
 
 #### Task checklist
 
-- [ ] Extract a source-neutral `DynamicEntitySession` that owns listener-before-snapshot hydration,
+- [x] Extract a source-neutral `DynamicEntitySession` that owns listener-before-snapshot hydration,
       delta invalidation after declared loss, and replacement-snapshot installation behind injected
       subscribe/request-current-state functions.
-- [ ] Leave Explorer catalog search, spawn/despawn, possession, fixed-tick receipt, and diagnostics
+- [x] Leave Explorer catalog search, spawn/despawn, possession, fixed-tick receipt, and diagnostics
       in the Explorer facade.
-- [ ] Extract presentation construction and ordered teardown from `ExplorerApp.svelte` into small
+- [x] Extract presentation construction and ordered teardown from `ExplorerApp.svelte` into small
       owners with explicit dependencies and no Svelte state.
-- [ ] Keep frame-hot camera/entity/renderer facts imperative. Do not turn the extracted owner into a
+- [x] Keep frame-hot camera/entity/renderer facts imperative. Do not turn the extracted owner into a
       reactive store.
-- [ ] Keep camera policy, environment selection, render settings selection, scene-interest target
+- [x] Keep camera policy, environment selection, render settings selection, scene-interest target
       selection, and UI layout outside the shared presentation owner.
-- [ ] Update misleading Explorer comments in shared asset sources, environment types, camera types,
+- [x] Update misleading Explorer comments in shared asset sources, environment types, camera types,
       texture diagnostics, and tuning namespaces only where the second consumer makes the rename
       true.
-- [ ] Verify Explorer startup, outdoor/EnvCell streaming, dynamic entities, possession, map, audio,
+- [x] Verify Explorer startup, outdoor/EnvCell streaming, dynamic entities, possession, map, audio,
       and teardown through the canonical browser harness and focused Electron smoke.
 
 #### Acceptance criteria
@@ -1047,7 +1078,29 @@ To be filled during execution.
 
 #### Decisions and course corrections
 
-To be filled during execution.
+- `DynamicEntitySession` owns only feed subscription, snapshot request ordering, mirror invalidation,
+  and accepted-event observation. It accepts injected callbacks rather than host command/event names;
+  Explorer keeps its catalog, mutation, possession, fixed-tick, and command-completion policy in its
+  facade. Explorer installs its fixed-tick and possession listeners through the session's
+  `beforeRequest` hook so every authority listener is live before the replacement snapshot request.
+- `GamePresentationOwner` is an imperative, source-neutral composition owner. It builds the active
+  region, profile cache, texture/static-detail path, WebGL2 device, commit pipeline, runtime workers,
+  audio, ambience, and sky, and tears them down in the former dependency order. Audio tuning is an
+  explicit dependency; camera policy, environment selection, frame settings, scene-interest
+  coordination, and all Svelte state remain in `ExplorerApp.svelte`.
+- `ExplorerApp.svelte` retains a borrowed `GamePresentationRuntime` reference for frame-hot calls,
+  but no longer stores or tears down the low-level content/device/pipeline resources. The shared
+  owner has no import edge into `src/explorer` and no reactive store.
+- Shared cache comments now name the presentation owner/content host. Explorer-only diagnostics,
+  controls, and scenario vocabulary remain local rather than being renamed for a hypothetical
+  consumer.
+- Full TypeScript checks and 1,504 tests passed; type/dead-code lint passed; the release sidecar
+  smoke passed in both modes. Browser harness runs covered startup, outdoor and EnvCell streaming,
+  dynamic realization, map drawing, authored audio/particle staging, lifecycle reload, and cleanup
+  with no browser console errors. The documented possession scenario still reports its existing
+  `Backward-plus-turn did not change both position and heading` assertion under the current harness
+  timing; it is recorded as motion-policy debt and was not widened into this presentation-owner
+  extraction.
 
 ### Phase 4: Compose the authoritative client host lifecycle and delivery clock
 
@@ -1072,45 +1125,45 @@ To be filled during execution.
 
 #### Task checklist
 
-- [ ] Reuse the TUI's proven `ClientRuntimeBuilder` and command-channel composition without importing
+- [x] Reuse the TUI's proven `ClientRuntimeBuilder` and command-channel composition without importing
       CLI state, retry, logs, reducers, or rendering.
-- [ ] Load the runtime bootstrap through `ContentRepository` at the content owner; do not pass disk
+- [x] Load the runtime bootstrap through `ContentRepository` at the content owner; do not pass disk
       paths or DAT policy into `holtburger-core` consumers.
-- [ ] Ensure a connect attempt has one owned lifetime and that late events from a retired attempt
+- [x] Ensure a connect attempt has one owned lifetime and that late events from a retired attempt
       cannot update state during shutdown. The first cut creates no successor attempt.
-- [ ] Subscribe to core events before issuing initial-state and login commands.
-- [ ] On `CharacterEnterWorldServerReady`, have `ClientRuntime` send the retained selected GUID and
+- [x] Subscribe to core events before issuing initial-state and login commands.
+- [x] On `CharacterEnterWorldServerReady`, have `ClientRuntime` send the retained selected GUID and
       account through `CharacterEnterWorld`; remove `SendCharacterEnterWorld` from frontend-facing
       command policy and migrate the TUI to observe lifecycle only.
-- [ ] Replace the partial initial-view response with one core snapshot carrying current status,
+- [x] Replace the partial initial-view response with one core snapshot carrying current status,
       character list, local-player identity, synchronized server time, dynamic entities, and runtime
       bodies where those facts are present.
-- [ ] Project only lifecycle, character-list, local-player, focused dynamic, server-time,
+- [x] Project only lifecycle, character-list, local-player, focused dynamic, server-time,
       correction/reset, and error facts required by the first cut. Movement capabilities remain
       inside core because no frontend consumer resolves movement from them.
-- [ ] Preserve server-provided character identity and slot facts losslessly enough for the selection
+- [x] Preserve server-provided character identity and slot facts losslessly enough for the selection
       UI; do not project complete character-creation data.
-- [ ] Capture tick-start projection facts before movement/world/simulation advancement, then publish
+- [x] Capture tick-start projection facts before movement/world/simulation advancement, then publish
       one `Advanced` batch after accepted results. Use integrated single- or multi-leg paths for
       continuous motion and explicit teleport/reset kinds for discontinuities.
-- [ ] Keep remote entities server-authoritative and dead-reckoned in the first cut. Core may project
+- [x] Keep remote entities server-authoritative and dead-reckoned in the first cut. Core may project
       their tick-start/end path, but neither the app host nor frontend physically resolves or
       re-derives their motion.
-- [ ] Make `ClientRuntime`'s existing 30 ms interval the only client session clock. Do not install
+- [x] Make `ClientRuntime`'s existing 30 ms interval the only client session clock. Do not install
       the client as an Explorer `HostFixedTickParticipant` or run a parallel app-host interval.
-- [ ] Publish the ordered tick result through the existing `DynamicEntityAdvanceBatch`, consumed by
+- [x] Publish the ordered tick result through the existing `DynamicEntityAdvanceBatch`, consumed by
       focused entity delivery and, in Phase 10, boom advancement. Do not add a parallel receipt,
       open-ended post-tick callback, or plugin registry.
-- [ ] Keep the password out of query parameters, renderer state, sidecar arguments, logs, errors,
+- [x] Keep the password out of query parameters, renderer state, sidecar arguments, logs, errors,
       retained diagnostics, and persistence; clear the startup value after the login command is sent.
-- [ ] Define receiver-lag recovery as an explicit current-state replacement path. Do not continue
+- [x] Define receiver-lag recovery as an explicit current-state replacement path. Do not continue
       applying deltas after known loss.
-- [ ] Make task termination, core error, server disconnect, explicit disconnect, and sidecar shutdown
+- [x] Make task termination, core error, server disconnect, explicit disconnect, and sidecar shutdown
       distinguishable for diagnostics and exit status even though none produces an in-app retry.
-- [ ] On connection/login failure, server disconnect, or fatal client-runtime failure, emit one
+- [x] On connection/login failure, server disconnect, or fatal client-runtime failure, emit one
       redacted diagnostic and request whole-application non-zero exit. Do not restart the network
       task or return the renderer to configuration.
-- [ ] Ensure host shutdown stops accepting commands, requests core disconnect when appropriate,
+- [x] Ensure host shutdown stops accepting commands, requests core disconnect when appropriate,
       awaits or aborts the bounded task lifetime, then closes event publication.
 
 #### Acceptance criteria
@@ -1132,7 +1185,30 @@ To be filled during execution.
 
 #### Decisions and course corrections
 
-To be filled during execution.
+- `ClientHostRuntime` now owns one connect attempt, its command channel, broadcast receiver, and
+  bounded shutdown. It uses the content owner's cached `WorldBootstrap`, so the client root never
+  receives DAT paths or discovers content independently. The first-cut host currently injects
+  `BasicSpatialPhysics` only as a temporary bridge; Phase 5/6 replace that callback with the shared
+  collision coordinator and `SpatialScene` transaction path.
+- Core now emits `ClientApplicationSnapshot` as the replacement level and owns the
+  select/server-ready/enter-world choreography. The desktop adapter projects only the lifecycle,
+  synchronized time, focused dynamic feed, discontinuity, and terminal-cause values with strict
+  MessagePack/TypeScript validation. Character slots are protocol-order ordinals because ACE's
+  `CharacterEntry` carries no separate slot field; preserving the list order is lossless for the
+  existing selection protocol.
+- Client simulation captures authority-owned views around its existing 30 ms turn and emits at most
+  one non-empty `DynamicEntityAdvanceBatch`. Remote forced repositions are per-entity corrections,
+  not world discontinuities; only the local player's correction invalidates the local timeline.
+- The renderer session installs the dynamic listener and all sibling lifecycle listeners before its
+  first replacement request and suppresses deltas while recovering. Client UI remains intentionally
+  minimal until Phase 7; Phase 4 only wires the route's lifecycle owner and leaves presentation
+  construction deferred.
+- Verification passed on 2026-08-26: 248 core tests, 239 host tests, host clippy, workspace format,
+  1,508 TypeScript tests, Svelte/type/dead-code/lint checks, Electron main build, host build,
+  both-mode sidecar smoke, and the isolated-port browser harness (`--vite-port 1431`). The sidecar
+  client smoke does not start a network attempt because its empty DAT fixture cannot build a real
+  client bootstrap; focused core/host/session fixtures cover the typed adapter and lifecycle. The
+  existing possession timing assertion remains documented Phase 3 motion debt.
 
 ### Resteering A: Audit the two real compositions
 
@@ -1151,7 +1227,32 @@ Before building client UI, dry-run both complete composition graphs:
 - update or subdivide the remaining phases before continuing.
 
 No later phase begins with known duplicate authority or an unexplained mode conditional inside the
-presentation runtime.
+presentation runtime. Phase 7 now consumes lifecycle values with a client-local reducer and does
+not construct presentation resources before the authority reaches `in-world`.
+
+#### Audit result — 2026-08-26
+
+- Explorer and client are concrete `HostRuntime` enum arms. Explorer alone constructs the
+  `ExplorerEntityRuntime`, `HostSimulationRuntime`, possession, physical-flight, boom, and fixed
+  tick; client alone owns `ClientRuntime`, its command channel, receiver, and task. The shared
+  content owner is the only deliberate common capability.
+- `GamePresentationOwner`, `GamePresentationRuntime`, and `DynamicEntitySession` have no import
+  edge into `src/explorer` or `src/client`; Explorer policy remains in `ExplorerApp.svelte` and its
+  facades. Client lifecycle state is held by `ClientLifecycleSession` and is not duplicated in the
+  presentation runtime.
+- Every Phase 4 wire value has a named consumer in the Phase 7/8 lifecycle, drive, focused-feed,
+  time, discontinuity, or terminal-exit path. Raw core/world/session/protocol values stop at the
+  Rust host adapter. The client route currently starts only the lifecycle owner; visual construction
+  is intentionally deferred until the lifecycle reaches the world in Phase 8.
+- Collision is now a core-owned product/transaction seam: client and TUI inject the same
+  `ContentClientCollisionSource`/coordinator, while each keeps its own `SpatialScene`. The old
+  `SpatialPhysics` callback and constructors are gone; readiness guards local transactions and
+  remote entities remain pose-only. Asset-free fixtures prove stale replacement, missing owners,
+  invalidation, and the ready local transaction without inventing live DAT state.
+- No proposed shared interface is single-implementation scaffolding beyond the explicitly staged
+  collision source/coordinator seam. Phase 5 will keep the coordinator small and injected so its
+  asset-free state machine can be tested without a DAT installation. No blocker or spicy decision
+  was found; proceed to Phase 5.
 
 ### Phase 5: Stage client collision products and local-player body hydration
 
@@ -1171,25 +1272,25 @@ presentation runtime.
 
 #### Task checklist
 
-- [ ] Build reusable core client collision coordination over `ContentAssetService`. Although its
+- [x] Build reusable core client collision coordination over `ContentAssetService`. Although its
       loader API is synchronous, stage loading away from the client simulation turn, then atomically
       publish the complete immutable `CollisionScene` revision.
-- [ ] Load the normalized authoritative owner and a one-owner-radius square. Keep the 3×3 product
+- [x] Load the normalized authoritative owner and a one-owner-radius square. Keep the 3×3 product
       set independent from Explorer's 5×5 render/simulation policy.
-- [ ] Add a selected-player entity-to-`DynamicEntityDefinition` adapter, then prepare its physical
+- [x] Add a selected-player entity-to-`DynamicEntityDefinition` adapter, then prepare its physical
       definition through existing shared setup/profile functions outside network and simulation
       loops. Capture GUID plus instance generation and discard stale completion after replacement,
       deselection, disconnect, or shutdown.
-- [ ] Install a successful definition into the canonical local-player body through
+- [x] Install a successful definition into the canonical local-player body through
       `set_dynamic_physical_body` and publish the resulting runtime-body/dynamic upsert.
-- [ ] Publish one composite readiness state so Phase 6 never pairs the canonical body with a
+- [x] Publish one composite readiness state so Phase 6 never pairs the canonical body with a
       collision revision for the wrong player residency or instance generation.
-- [ ] Keep render-resource interest separate from collision-product interest. Place reusable client
+- [x] Keep render-resource interest separate from collision-product interest. Place reusable client
       collision coordination where it follows authoritative `WorldState` residency for both TUI and
       3D hosts without making either frontend a physics observer.
-- [ ] Compose both TUI and desktop clients with `ContentAssetService` and the same core collision
+- [x] Compose both TUI and desktop clients with `ContentAssetService` and the same core collision
       coordinator. No frontend participates in collision interest.
-- [ ] Verify landblock and EnvCell crossings, superseded loads, stale body-preparation completion,
+- [x] Verify landblock and EnvCell crossings, superseded loads, stale body-preparation completion,
       missing content, teleport, disconnect, and shutdown with asset-free coordinator fixtures.
 
 #### Acceptance criteria
@@ -1213,6 +1314,15 @@ presentation runtime.
   transaction remains below one 192 m landblock, and the maximum 32 m boom is smaller still. Edge
   fixtures must exercise the bound. It becomes a named core constant shared by desktop and TUI;
   changing it later requires a measured consumer that can reach farther.
+- The coordinator uses one `spawn_blocking` worker per target and discards completions by generation,
+  request, exact player instance, residency, and body-definition facts. This keeps synchronous
+  content APIs off the 30 ms turn without adding a second authority or frontend loading policy.
+- Successful preparation installs the dynamic physical definition before publishing `Ready` and
+  the immutable scene revision. Missing owners and missing player facts remain explicit
+  `Unavailable`/`Waiting` states; no invented open-space fallback is allowed.
+- Desktop and TUI inject the same `ContentClientCollisionSource`. Asset-free fixtures cover edge
+  interest, missing content, stale replacement, invalidation, and missing identity facts; live
+  DAT/server availability remains an external gate.
 
 ### Phase 6: Delete `SpatialPhysics` and install the transactional client solve
 
@@ -1229,27 +1339,27 @@ presentation runtime.
 
 #### Task checklist
 
-- [ ] Keep `WorldState.scene` as the only client body store. Do not register client entities in
+- [x] Keep `WorldState.scene` as the only client body store. Do not register client entities in
       `HostSimulationRuntime`.
-- [ ] Delete the `SpatialPhysics` trait, minimal/no-op implementations, scene callback field, and
+- [x] Delete the `SpatialPhysics` trait, minimal/no-op implementations, scene callback field, and
       injection constructors in the same change that installs the Phase 5 product consumer. Replace
       marker-solver tests with transaction fixtures; retain no dual production path.
-- [ ] Keep mode-owned `SpatialScene` values. Explorer and client call the same world methods on their
+- [x] Keep mode-owned `SpatialScene` values. Explorer and client call the same world methods on their
       respective scenes; never copy or synchronize bodies between them.
-- [ ] Tick only the ready local player through `SpatialScene::tick_physical_body_transaction` in the
+- [x] Tick only the ready local player through `SpatialScene::tick_physical_body_transaction` in the
       first cut. Suspend it while the Phase 5 product is loading/unavailable. Continue advancing
       server-authoritative remote entities through their existing dead-reckoning/projection lane.
-- [ ] Fold `SpatialSolveRequest::local_drive` into a closed per-body movement basis rather than a
+- [x] Fold `SpatialSolveRequest::local_drive` into a closed per-body movement basis rather than a
       sibling exception. Resolve each current authored offset, desired displacement, retained
       kinematics, or launch through its named stateless actuation conversion before solving.
-- [ ] Preserve the desired-displacement adapter where autonomous or server projection remains an
+- [x] Preserve the desired-displacement adapter where autonomous or server projection remains an
       honest producer. Do not retain the deleted minimal solver or invent a generic adapter trait.
-- [ ] Map `PhysicalBodyTickResult`, the accepted tentative body, collision reports, scene residency,
+- [x] Map `PhysicalBodyTickResult`, the accepted tentative body, collision reports, scene residency,
       and dynamic state changes into existing `WorldEvent` semantics inside the transaction callback;
       do not reapply solved kinematics after the scene commits.
-- [ ] Compose desktop and TUI clients with the same Phase 5 coordinator/product consumer and full
+- [x] Compose desktop and TUI clients with the same Phase 5 coordinator/product consumer and full
       transaction. No frontend participates in collision interest.
-- [ ] Add differential unit fixtures that feed equal body, collision, contact, and actuation facts
+- [x] Add differential unit fixtures that feed equal body, collision, contact, and actuation facts
       through Explorer and client adapters and require equal solve results. Do not require their
       authorities, upstream movement policy, or protocol outputs to be equal.
 
@@ -1271,6 +1381,16 @@ presentation runtime.
   the client with those APIs instead of creating a production implementation of the minimal callback.
 - Phase 5 stages the replacement products first so this clean deletion is behaviorally complete, not
   merely compilable with a temporarily immobile TUI/client.
+- The local transaction path uses a typed `PhysicalBodyActuation` adapter: autonomous/server desired
+  displacement becomes one-shot velocity, while retained manual kinematics become grounded or
+  free-flight actuation. Remote bodies stay pose-only/dead-reckoned and are never committed through
+  the local collision scene.
+- `apply_physical_body_tick_result` publishes committed runtime-body/contact semantics without
+  reapplying pose or kinematics. Collision reports and scene residency remain in the result for
+  future named consumers rather than being flattened into speculative wire events.
+- The ready fixture uses a free-sphere body to isolate the transaction boundary without DAT setup
+  geometry; production player hydration still prepares the existing grounded dynamic definition
+  through the shared content path. This is test scope, not a production movement fallback.
 
 ### Phase 7: Implement client lifecycle and character-selection UI
 
@@ -1288,18 +1408,18 @@ presentation runtime.
 
 #### Task checklist
 
-- [ ] Represent lifecycle as one discriminated state rather than interdependent booleans and
+- [x] Represent lifecycle as one discriminated state rather than interdependent booleans and
       nullable fields.
-- [ ] Do not project launch credentials into Svelte; the frontend begins in connecting state and
+- [x] Do not project launch credentials into Svelte; the frontend begins in connecting state and
       learns only lifecycle outcomes.
-- [ ] Route structured terminal failures to Electron main for redacted diagnostics and non-zero
+- [x] Route structured terminal failures to Electron main for redacted diagnostics and non-zero
       application exit; do not render retry or editable-configuration controls.
-- [ ] Submit selection by exact server-provided GUID/slot identity; do not select by display name.
-- [ ] Require an explicit Enter World action for the current selection. Treat Enter and double-click
+- [x] Submit selection by exact server-provided GUID/slot identity; do not select by display name.
+- [x] Require an explicit Enter World action for the current selection. Treat Enter and double-click
       as shortcuts for that action, not as separate lifecycle paths.
-- [ ] Follow the proven select/server-ready/enter-world choreography from Phase 0.
-- [ ] Keep character creation/deletion/restoration controls absent.
-- [ ] Add component/reducer tests for success, explicit entry, failure-driven exit, disconnect
+- [x] Follow the proven select/server-ready/enter-world choreography from Phase 0.
+- [x] Keep character creation/deletion/restoration controls absent.
+- [x] Add component/reducer tests for success, explicit entry, failure-driven exit, disconnect
       during each state, and stale events. Do not add repeated-attempt state that production lacks.
 
 #### Acceptance criteria
@@ -1315,7 +1435,22 @@ presentation runtime.
 
 #### Decisions and course corrections
 
-To be filled during execution.
+- The client route is now a lifecycle-only composition root. Presentation construction remains
+  deferred until the authority reports `in-world`, so connection/selection cannot accidentally
+  create an Explorer renderer or a second client authority.
+- `ClientLifecycleUiState` is a discriminated reducer state. Character selection is local UI state
+  until the explicit Enter World edge; that edge carries the exact server GUID once, with session
+  deduplication covering button, Enter, and double-click races.
+- Credentials are never read by the renderer. Terminal host/client failures remain redacted
+  diagnostics and the Electron main process owns non-zero application exit; the shell has no retry,
+  editable configuration, or character-management controls.
+- The reducer tests cover launch/authentication, list refresh preserving or clearing selection,
+  explicit entry/in-world transitions, terminal failure absorption, and stale authority events.
+  The lifecycle session tests cover listener-before-snapshot recovery, strict event projection,
+  drive validation, and duplicate enter suppression. Component behavior is deliberately kept thin
+  enough that these reducer/session contracts are the named test surface.
+- Removing the old static `RouteShell` after this root cutover was required by dead-code lint; no
+  compatibility wrapper remains without a real consumer.
 
 ### Phase 8: Connect client authority to shared world presentation
 
@@ -1337,29 +1472,29 @@ To be filled during execution.
 
 #### Task checklist
 
-- [ ] Register the focused dynamic listener before requesting the current snapshot.
-- [ ] Reconcile snapshots, upserts, removes, and ordered `Advanced` batches through the same
+- [x] Register the focused dynamic listener before requesting the current snapshot.
+- [x] Reconcile snapshots, upserts, removes, and ordered `Advanced` batches through the same
       source-neutral mirror and presentation methods used by Explorer; add no client entity system.
-- [ ] Preserve the core-published host time, duration, generation, path, and advance kind. Do not
+- [x] Preserve the core-published host time, duration, generation, path, and advance kind. Do not
       resample poses in the app host or substitute frontend frame time for client authority time.
-- [ ] After declared feed loss, reject `Advanced` deltas until the complete replacement snapshot is
+- [x] After declared feed loss, reject `Advanced` deltas until the complete replacement snapshot is
       installed, then establish a fresh host/frontend timeline from that snapshot.
-- [ ] Select the local player's projected entity only through the authority-published GUID.
-- [ ] Separate authoritative placement used for interest/residency from interpolated draw placement
+- [x] Select the local player's projected entity only through the authority-published GUID.
+- [x] Separate authoritative placement used for interest/residency from interpolated draw placement
       used for camera smoothness.
-- [ ] Route authoritative residency through the existing scene-target/profile coordinator; do not
+- [x] Route authoritative residency through the existing scene-target/profile coordinator; do not
       use frontend point containment to decide player residency.
-- [ ] Define behavior while the player is authoritative but not yet visually realized. Hold or show
+- [x] Define behavior while the player is authoritative but not yet visually realized. Hold or show
       loading state; never fall back to free-fly authority.
-- [ ] Resolve regional time from the client server-time projection and make missing weather support
+- [x] Resolve regional time from the client server-time projection and make missing weather support
       explicit. Add/read an optional synchronized-time fact; do not use
       `WorldState::current_server_time`'s wall-clock fallback as server authority.
-- [ ] Put the audio listener at the accepted primary camera placement and orient panning with the
+- [x] Put the audio listener at the accepted primary camera placement and orient panning with the
       camera's right axis, matching the existing presentation/controller contract. Keep render and
       collision interest on authoritative player residency rather than camera placement.
-- [ ] Reuse static content, sky, ambient, renderer, map geometry store, and dynamic visual sources
+- [x] Reuse static content, sky, ambient, renderer, map geometry store, and dynamic visual sources
       from the shared presentation owner.
-- [ ] Prove outdoor-to-interior and teleport/reset demand transitions with synthetic fixtures before
+- [x] Prove outdoor-to-interior and teleport/reset demand transitions with synthetic fixtures before
       live verification.
 
 #### Acceptance criteria
@@ -1375,7 +1510,27 @@ To be filled during execution.
 
 #### Decisions and course corrections
 
-To be filled during execution.
+- The client presentation root is `ClientPresentationSession`; it subscribes to the already
+  listener-first `ClientLifecycleSession` rather than opening a second host feed. Snapshots and
+  upserts/removals are serialized through `GamePresentationRuntime.reconcileDynamicEntities`, while
+  accepted `Advanced` batches retain the host's time, duration, path, generation, and advance kind
+  and enter `applyDynamicEntityAdvances` unchanged.
+- Player residency is read from the authority-projected world placement and routed through
+  `SceneInterestRequestCoordinator` with an `automatic-landblock` or `env-cell` target. The
+  coordinator's resolved `outdoor`/`dungeon` policy remains the only static-demand decision; the
+  interpolated scene origin is used only for the accepted camera eye and never feeds interest.
+- Before dynamic visual realization or EnvCell topology is available the client reports a loading
+  status and does not render a free-fly fallback. The camera uses a small first-cut rear framing;
+  collision-safe boom/orbit/recenter policy remains Phase 10.
+- Regional environment selection follows the retail `time + zero_time_of_year` calendar projection
+  (`acclient.c:442706`) from the synchronized client server-time fact. No wall-clock fallback or
+  server weather override is inferred; authored weather remains the explicit renderer default until
+  a named protocol fact exists.
+- `client-presentation-session.test.ts` covers synchronized calendar selection, listener-first
+  snapshot reconciliation, authority-batch forwarding, feed-loss suppression, EnvCell-to-outdoor
+  target transition, teleport/discontinuity scene-demand reset, and teardown. The isolated browser
+  harness (`--vite-port 1431`) remains green; live ACE rendering is deferred to the final external
+  prerequisite gate.
 
 ### Phase 9: Converge character movement on the shared spatial foundation
 
@@ -1399,29 +1554,29 @@ To be filled during execution.
 
 #### Task checklist
 
-- [ ] Split `MovementSystem` so movement packet construction, control/sequence edges, command
+- [x] Split `MovementSystem` so movement packet construction, control/sequence edges, command
       arbitration, server correction, and honest protocol projection remain client-specific while
       character actuation, contact handling, and solving use the shared Phase 5 collision product
       and Phase 6 transaction path.
-- [ ] Remove the manual local velocity approximation once the shared path covers its consumers,
+- [x] Remove the manual local velocity approximation once the shared path covers its consumers,
       including the fixed lateral/backward magnitudes. Do not retain it as a silent fallback.
-- [ ] Preserve the Phase 6 desired-displacement conversion for autonomous/server projection while
+- [x] Preserve the Phase 6 desired-displacement conversion for autonomous/server projection while
       migrating manual character locomotion to motion-table/authored actuation. Delete a basis only
       when no honest producer remains.
-- [ ] Adapt Explorer possession to call the shared basis-to-actuation functions while retaining
+- [x] Adapt Explorer possession to call the shared basis-to-actuation functions while retaining
       Explorer intent, lifecycle, registry, scene, collision interest, and transaction orchestration.
-- [ ] Add differential unit fixtures that feed equal body, collision, contact, and drive facts
+- [x] Add differential unit fixtures that feed equal body, collision, contact, and drive facts
       through Explorer and client adapters and require equal actuation/solve results. Do not require
       their authorities or protocol outputs to be equal.
-- [ ] Implement retail interpolation as a basis that replaces authored offset for grounded bodies,
+- [x] Implement retail interpolation as a basis that replaces authored offset for grounded bodies,
       including its target threshold, speed cap, heading policy, and progress watchdog. Apply
       constraint damping after interpolation/authored basis selection and before actuation.
-- [ ] Feed held input as semantic replacements and lifecycle edges at input cadence; let core own
+- [x] Feed held input as semantic replacements and lifecycle edges at input cadence; let core own
       packet emission and physics cadence.
-- [ ] Clear held drive on blur, pointer/focus loss, disconnect, character transition, and teardown.
-- [ ] Prove diagonal, backward, turn-only, walk/run, stop, and rapid reversal behavior against the
+- [x] Clear held drive on blur, pointer/focus loss, disconnect, character transition, and teardown.
+- [x] Prove diagonal, backward, turn-only, walk/run, stop, and rapid reversal behavior against the
       existing core movement tests and a focused live harness.
-- [ ] Prove server correction and teleport reset do not leave stale presentation interpolation,
+- [x] Prove server correction and teleport reset do not leave stale presentation interpolation,
       camera state, collision interest, or scene interest.
 
 #### Acceptance criteria
@@ -1443,6 +1598,31 @@ To be filled during execution.
 - Phase 6 deliberately preserves typed displacement-to-actuation composition so this phase can
   improve manual character fidelity without forcing autonomous/server producers through a dishonest
   authored-motion model.
+- Manual prediction now owns a separate `BodyMotionRuntime` cursor. The authoritative snapshot
+  cursor advances once for every other entity, while the local cursor is excluded only while a
+  held manual drive is actually eligible; server correction therefore preempts authored motion
+  without losing the semantic held drive for the handoff after arrival.
+- `grounded_character_actuation` is the shared physical boundary. Explorer possession retains its
+  target-authored/fallback channel policy and client movement retains its protocol policy, but an
+  equal authored offset, pose, contact, scale, and tick now produces equal actuation; the host
+  differential fixture exercises that contract.
+- Correction uses a stateful retail-shaped cursor: a 5 cm target threshold, 7.5 m/s invalid/max
+  speed cap, five-frame progress watchdog, and indoor `(5, 20)` / outdoor `(10, 50)` constraint
+  edges. Interpolation replaces the authored translation, then constraint damping runs before
+  actuation. The stateless fallback calls the same speed helper rather than maintaining a second
+  cap formula.
+- The client wire intentionally carries only gait, longitudinal, and turn. Lateral input remains
+  in the shared controller for Explorer and future client protocol work; this is the Phase 0
+  host-contract boundary, not an invented lateral wire mapping.
+- Focused Rust fixtures cover authored diagonal/backward/turn-only/reversal and correction
+  preemption; the browser harness remains synthetic and was run on isolated Vite port `1432`.
+  A live ACE movement run was not executed in this worktree/session; the user-provided live ACE
+  process remains an external final-session gate rather than being represented as synthetic
+  evidence.
+- Debt: the correction watchdog currently records failed progress and returns a zero basis; the
+  caller still owns the eventual snap/failure policy. The client-side camera remains the Phase 10
+  consumer of the accepted local path, and direct Svelte component tests for held-key lifecycle
+  are still covered indirectly by the controller/session contracts.
 
 ### Phase 10: Add the client third-person camera
 
@@ -1460,19 +1640,19 @@ To be filled during execution.
 
 #### Task checklist
 
-- [ ] Separate the current Explorer-bound host boom adapter from the reusable core boom behavior.
-- [ ] Inject a small authoritative target-path provider backed by the local-player advance in the
+- [x] Separate the current Explorer-bound host boom adapter from the reusable core boom behavior.
+- [x] Inject a small authoritative target-path provider backed by the local-player advance in the
       closed `DynamicEntityAdvanceBatch`; do not resample the body or teach the boom about `ClientRuntime`,
       server packets, or Explorer GUID allocation.
-- [ ] Preserve one tick order when boom support lands: accepted entity advancement → boom solve →
+- [x] Preserve one tick order when boom support lands: accepted entity advancement → boom solve →
       one ordered host publication. Do not add a boom timer beside the client runtime interval.
-- [ ] Keep DOM pointer capture, gesture scaling, inversion, and recenter UX in `src/client`.
-- [ ] Keep collision clearance and acknowledged projection in the host/controller path.
-- [ ] Use the local player as the character/map anchor and the camera as the primary render view;
+- [x] Keep DOM pointer capture, gesture scaling, inversion, and recenter UX in `src/client`.
+- [x] Keep collision clearance and acknowledged projection in the host/controller path.
+- [x] Use the local player as the character/map anchor and the camera as the primary render view;
       compute each choice once in the client composition.
-- [ ] Define behavior during teleport, loading, missing presentation, and disconnect explicitly.
-- [ ] Reuse the proven projection-clearance revision contract and retain no client-specific copy.
-- [ ] Verify indoor/outdoor transitions, obstructed zoom, orbit while moving, recenter, viewport
+- [x] Define behavior during teleport, loading, missing presentation, and disconnect explicitly.
+- [x] Reuse the proven projection-clearance revision contract and retain no client-specific copy.
+- [x] Verify indoor/outdoor transitions, obstructed zoom, orbit while moving, recenter, viewport
       resize, and projection growth recovery.
 
 #### Acceptance criteria
@@ -1487,7 +1667,43 @@ To be filled during execution.
 
 #### Decisions and course corrections
 
-To be filled during execution.
+- The reusable product is the core `KinematicBoomController` plus a lossless placed-path serializer;
+  the client adapter owns only local-player identity, collision-snapshot access, and accepted
+  `DynamicEntityAdvanceBatch` consumption. The Explorer adapter remains a separate host-owned
+  composition and keeps its possession/body policy.
+- Client camera registration is acknowledged by a `CameraStarted` event before the frontend accepts
+  a path. Every output carries the exact fixed-step duration used by the authority; the frontend
+  does not guess a cadence or schedule a second timer. The dynamic `Advanced` publication is sent
+  before the matching camera event in the same client tick.
+- A client camera renders only after a collision-safe path is acknowledged. Loading, missing player
+  presentation, and missing EnvCell scope hold the frame; teleport/reset/disconnect clears the
+  camera path, projection acknowledgements, and scene demand. The local player's authoritative
+  residency drives scene demand, while camera placement drives the primary view and audio listener.
+- Pointer capture, pixel-rate orbit, wheel accumulation, movement-triggered rear recenter, and
+  touch-action policy remain in `src/client`; the shared controller is a source-neutral semantic
+  orbit/recenter seam with no Explorer import or tuning dependency.
+- Verification covers generic boom collision/recovery fixtures, client registration/identity,
+  cumulative intent, stale-generation rejection, presentation loading/reset, transient collision
+  snapshot withdrawal, TypeScript (1,526 tests), core (258 tests), host (241 tests), clippy, and
+  the browser harness on isolated Vite port `1432`. The first-cut live sidecar evaluation is
+  recorded in Phase 11; broader live ACE camera and streaming branches remain external.
+- Concession: the current client feed emits one endpoint leg per accepted dynamic tick, so the camera
+  consumes that closed path and retains its last target sample during stationary ticks. No map-heading
+  consumer exists in this first-cut client surface, so no speculative map API or duplicate heading
+  calculation was added.
+- Debt: broader live-ACE camera and streaming matrices remain external; the core camera fixture now
+  covers the known transient collision-snapshot withdrawal and proves that it publishes a
+  nonfatal hold rather than terminating the client.
+
+#### Camera snapshot withdrawal recovery
+
+The collision coordinator intentionally withdraws its immutable snapshot while rebuilding products
+for changed residency or definitions. The client camera now treats that interval as a recoverable
+authority state: it publishes a held tick with no clearance proof, demotes the controller to a
+pending generation while carrying the latest request and output sequence, and the frontend drops
+any playback path proven against the retired scene until a new collision-backed path arrives. This
+keeps the camera and host alive without allowing stale placement or sequence state to render through
+a scene change.
 
 ### Resteering B: Judge the complete playable slice
 
@@ -1521,23 +1737,30 @@ systems merely because the world is now visible.
 
 #### Task checklist
 
-- [ ] Sweep `GameRuntime`, `spawnedDynamic`, and inappropriate Explorer vocabulary from surviving
-      shared symbols, metrics, docs, comments, tests, tuning, and UI labels.
-- [ ] Remove the static client `RouteShell` path and any shared app components left without a
+- [x] Sweep `GameRuntime`, `spawnedDynamic`, and inappropriate Explorer vocabulary from surviving
+      shared symbols, metrics, docs, comments, tests, tuning, and UI labels. Historical plan
+      entries retain the retired names only when describing the completed migration.
+- [x] Remove the static client `RouteShell` path and any shared app components left without a
       consumer.
-- [ ] Remove unused wire variants and fields discovered during implementation; every survivor needs
+- [x] Remove unused wire variants and fields discovered during implementation; every survivor needs
       a named scenario where it differs from another value.
-- [ ] Inspect `ExplorerApp.svelte` and `ClientApp.svelte` for duplicated low-level construction or
+- [x] Inspect `ExplorerApp.svelte` and `ClientApp.svelte` for duplicated low-level construction or
       frame sequencing and collapse only proven duplication.
-- [ ] Inspect the Rust mode compositions for duplicated authority, content cache, collision scene,
+- [x] Inspect the Rust mode compositions for duplicated authority, content cache, collision scene,
       motion catalog, task, or event buffering.
-- [ ] Treat all TypeScript lint, dead-code, Svelte, Rust clippy, and formatting warnings as errors.
-- [ ] Run the canonical browser harness for Explorer presentation regression and synthetic
-      client-feed scenarios.
+- [x] Treat all TypeScript lint, dead-code, Svelte, Rust clippy, and formatting warnings as errors.
+- [x] Run the canonical browser harness for Explorer presentation regression and synthetic
+      client-feed scenarios. The harness covers the renderer/possession path; client-feed and
+      camera-feed fixtures are covered by the focused TypeScript contracts and presentation tests.
 - [ ] Run both Electron modes through startup, shutdown, protocol failure, host crash, and package
-      inspection.
-- [ ] Run the client first-cut workflow against a configured ACE server without invoking the TUI.
-- [ ] Record any unavailable external prerequisite exactly and retain synthetic evidence where
+      inspection. Sidecar mode smoke, protocol failure tests, release packaging, and archive
+      inspection pass; a GUI launch is unavailable in this environment because no `DISPLAY` or
+      `xvfb-run` is installed.
+- [x] Run the client first-cut workflow against a configured ACE server without invoking the TUI.
+      The headless sidecar evaluation authenticated, selected the available character, entered
+      world, exercised camera and short-drive commands, and disconnected explicitly. The remaining
+      live branches are listed below rather than inferred from this single account/world state.
+- [x] Record any unavailable external prerequisite exactly and retain synthetic evidence where
       possible.
 
 #### Acceptance criteria
@@ -1555,7 +1778,375 @@ systems merely because the world is now visible.
 
 #### Decisions and course corrections
 
-To be filled during execution.
+- Resteering B found no duplicated client body store or camera clock. `ClientRuntime` remains the
+  sole fixed-step authority; the camera consumes that turn's accepted dynamic advance batch, and
+  the host publishes the dynamic event before the matching camera event. The frontend mirror and
+  scene-interest request use the authoritative local-player identity/residency, while camera
+  placement is downstream view/audio state.
+- Every shared extraction now has a second concrete consumer: the dynamic feed/realization seam is
+  used by Explorer and client, and the core boom/path product is consumed by both host compositions.
+  No generic mode root, shared authority, or speculative map-heading API was introduced. The
+  latest-wins camera playback buffer is bounded (two pre-registration ticks plus one active and one
+  pending path), so queue pressure cannot create a second clock.
+- The final vocabulary sweep removed retired runtime names from `apps/` and `crates/`; the last
+  private harness variables were renamed to `postSpawnDynamics`/`postDespawnDynamics`. The route
+  shell and its orphaned tests are gone, and no unused client wire variant was found.
+- Verification is green for the focused and repository gates: world 432 tests, core 267 tests, host
+  244 tests,
+  TypeScript 1,526 tests, Svelte/TypeScript checks, ESLint/knip, Rust clippy/check/format, the
+  browser harness on isolated Vite port `1432`, sidecar smoke for both modes, release package
+  inspection, and archive inspection. The browser harness emits no page console errors.
+- Electron GUI startup cannot be exercised here because the environment has no display server or
+  `xvfb-run`; sidecar startup/shutdown, mode rejection, protocol tests, and packaged executable
+  inspection remain the available evidence. A later headless client-sidecar evaluation against the
+  user-supplied ACE endpoint authenticated successfully, entered the available character, emitted
+  308 focused upserts and 99 authority-clocked advances, produced one camera reseed plus 193
+  advanced camera ticks, and disconnected explicitly. The live payload census measured 621 protocol
+  frames, 1,153,508 encoded payload bytes total, a 4,398-byte maximum, and a 3,031-byte p95. The
+  remaining live-server branches are recorded as gaps below rather than synthetic evidence.
+- Follow-ons are named rather than scaffolded: add standalone core camera lifecycle fixtures if
+  camera authority changes make the current host/client seam insufficient; add a map-heading
+  consumer only when a real client surface needs it; and extend the live ACE matrix when additional
+  character/world scenarios are available.
+- A post-acceptance camera correction introduced `ChildSpatialBody`: a parent-driven, non-responsive
+  sphere whose portal membership is reconciled by the shared spatial solver. Client camera targets,
+  host boom targets, and Explorer physical-fly viewer projection now share this primitive. This
+  removes camera-offset contamination of authoritative player residency and preserves exact deep
+  EnvCell identity instead of re-normalizing an indoor position as an outdoor landblock.
+
+### Convergence invariants
+
+Phases 12–15 adopt the cleaner parts of the independent implementation without treating that
+worktree as ground truth. Retail behavior is re-proved from `acclient-eor-source/`; ACE protocol
+behavior is re-proved from `ACE/`; and current runtime contracts remain the executable baseline.
+Every convergence phase must preserve these already-correct properties:
+
+- local-player physical definition, player instance, collision interest, and collision revision
+  become ready as one atomic `ClientSpatialReadiness` product;
+- the coordinator withdraws that product while replacement is in flight, and neither player nor
+  camera solves against an empty, stale, or mismatched collision scene;
+- `ClientApplicationSnapshot` remains one atomic replacement level after declared event loss;
+- camera generation, accepted authority path, projection-clearance revision, collision-snapshot
+  hold/reseed, and frontend playback acknowledgement remain explicit;
+- explicit disconnect and orderly host shutdown remain successful terminal states, while startup,
+  server, runtime, and unexpected host failures retain typed non-zero exit causes; and
+- desktop and TUI continue to compose the same core collision coordinator, client simulation, and
+  `SpatialScene` transaction rather than receiving frontend-specific forks.
+
+### Phase 12: Make host mode boundaries and surviving vocabulary physical
+
+#### Deliverables
+
+- Split the current host composition into colocated shared-content, mode-selection, Explorer,
+  client, and client-projection modules; retain one enum composition root rather than introducing a
+  universal authority trait.
+- Replace the universal host event sink with distinct Explorer and client publication contracts,
+  implemented by the one stdio writer only at the protocol boundary.
+- Give shared content, Explorer, and client commands explicit module-owned inventories and
+  dispatchers while preserving the existing closed wire grammar and structured unknown-command and
+  wrong-mode errors.
+- Emit honest Explorer event names directly from Rust and remove the TypeScript wire-name
+  translation map in the same cutover.
+- Rename the world module that now contains only non-colliding projection/dead-reckoning helpers
+  from `spatial/physics.rs` to `spatial/dead_reckoning.rs`; sweep the retired vocabulary from code,
+  tests, metrics, and permanent docs.
+
+#### Task checklist
+
+- [x] Move `HostMode`, shared content ownership, `ExplorerHostRuntime`, `ClientHostRuntime`, and
+      client projection out of the current broad `runtime.rs`/`client_host.rs` review surfaces.
+- [x] Define mode-local command enums and dispatch functions. If `serde(untagged)` weakens malformed
+      or unknown-command diagnostics, retain a small explicit outer decoder rather than accepting a
+      generic decode error for architectural neatness.
+- [x] Split `HostEventSink` so neither concrete runtime receives methods for the other authority.
+- [x] Rename `physical-fly-*` and remaining `host://` compatibility vocabulary at producer,
+      decoder, listener, harness, and documentation sites in one change.
+- [x] Rename the dead-reckoning module and require `rg` to find no surviving `SpatialPhysics`,
+      `spatial physics`, or obsolete physical-event aliases outside historical plan text.
+- [x] Update `README.md`, `AGENTS.md`, and `ARCHITECTURE_AUDIT.md` with the physical module and
+      capability boundaries.
+
+#### Acceptance criteria
+
+- A client-mode process cannot publish or dispatch an Explorer capability through its injected
+  Rust types, and the inverse holds for Explorer mode.
+- Shared content remains one composition value, not copied into both authorities or hidden behind a
+  universal runtime interface.
+- Existing atomic client snapshot, collision, camera, and typed-exit contracts are byte-for-byte or
+  behaviorally unchanged except for the deliberate event-name cutover.
+- Both modes pass command-name inventory, wrong-mode rejection, unknown-command, handshake,
+  sidecar-smoke, TypeScript, Rust, and package protocol tests.
+
+#### Decisions and course corrections
+
+- The shared content owner now lives in `shared_host_content.rs`, while the selected runtime enum
+  remains the small composition root in `runtime.rs`. Client and Explorer command enums and
+  dispatchers are colocated with their authorities; the shared command dispatcher owns only static
+  content and status. The wire `HostCommand` uses an explicit command-name decoder rather than
+  `serde(untagged)`, preserving the offending unknown command in the decode diagnostic while
+  retaining the existing nested MessagePack envelope.
+- Rust capability tests cover inventory ownership, MessagePack decoding, unknown-command
+  diagnostics, and wrong-mode rejection. TypeScript inventory tests cover route startup commands,
+  privileged-startup exclusion, and complete per-mode event/command composition. Focused host and
+  Electron protocol tests remain green after the event-name and module cutover.
+
+### Phase 13: Complete retail server-correction convergence
+
+#### Deliverables
+
+- One client-specific server-correction state machine covering retail's ignore, hard-set, snap, and
+  interpolation dispositions before its ordered interpolation-assignment and constraint-damping
+  stages.
+- Wraparound teleport-sequence comparison, missing-cell handling, airborne suppression, MoveTo
+  heading ownership, retail snap radius, progress watchdog, and indoor/outdoor leash distances
+  proved from cited retail code.
+- An independently structured retail differential oracle that compares decisions and tick outputs
+  without importing or calling the production implementation.
+- Ordinary confirmed local-player position updates routed through the same correction decision as
+  server-controlled movement, without treating authoritative placement as an additive local drive.
+
+#### Task checklist
+
+- [x] Re-read and cite the relevant `MoveOrTeleport`, interpolation-manager, constraint-manager,
+      viewer-distance, and heading-ownership branches in `acclient.c`; do not port constants or
+      decisions merely because the independent implementation used them.
+- [x] Replace the partial correction cursor with one composite correction state whose variants make
+      ignored, directly placed, and interpolated updates exhaustive.
+- [x] Preserve authored motion and correction ordering: interpolation may replace translation,
+      constraint may scale the survivor, and uncorrected ticks retain authored rotation/omega.
+- [x] Route ordinary confirmed local-player positions, force positions, teleport/reset, and
+      server-controlled targets through explicit disposition handling exactly once.
+- [x] Add an independent differential fixture covering sequence wraparound, missing cell, grounded
+      and airborne updates, near/far targets, heading pinning, stalled progress, threshold edges,
+      and indoor/outdoor constraints.
+- [x] Re-run the existing manual movement, authored actuation, full-solver, packet cadence, TUI, and
+      camera-discontinuity tests to prove correction did not become a second movement authority.
+
+#### Acceptance criteria
+
+- Production correction agrees with the independent retail oracle across the complete decision and
+  tick matrix, including boundary values and sequence wraparound.
+- A server update is classified once; consumers do not re-derive snap, interpolation, contact, or
+  heading policy.
+- Local-player solving still requires the current atomic collision/body snapshot, and remote
+  entities remain server-authoritative dead reckoning.
+- Live movement evidence, when available, records server observation and client convergence rather
+  than blessing distance travelled alone.
+
+#### Decisions and course corrections
+
+- `CPhysicsObj::MoveOrTeleport` (`acclient-eor-source/acclient.c:311475-311523`) is the source of
+  truth for stale/wrapped teleport sequences, missing-cell recovery, airborne suppression, the
+  96m snap threshold, and the `MoveTo` heading handoff. `InterpolationManager::adjust_offset` and
+  `UseTime` (`acclient.c:372004-372165`) prove assignment-before-watchdog ordering, the
+  `adjusted_max_speed * 2` step cap, the 0.05m completion threshold, five-frame progress windows,
+  and the four-failure blip fallback. `ConstraintManager::adjust_offset` and `ConstrainTo`
+  (`acclient.c:372268-372340`) prove post-interpolation damping and the indoor/outdoor constraint
+  distances exposed by `GetStartConstraintDistance`/`GetMaxConstraintDistance`
+  (`acclient.c:304336-304373`). The implementation records those citations beside the shared
+  constants and does not treat the independent fixture as authority.
+- `ServerCorrection` owns the disposition, interpolation node, constraint leash, and prepared tick
+  together. `MovementSystem` classifies ordinary self-position, force-position, teleport/reset,
+  and server-controlled updates once, while `ClientRuntime` applies the resulting translation and
+  heading at the local physical actuation boundary. Hard sets and snaps update the world pose and
+  emit one discontinuity; they do not leave an additive local drive behind. Remote entities remain
+  server-authoritative dead reckoning.
+- The differential oracle is deliberately structurally independent: it duplicates the cited
+  decision ladder and tick arithmetic without importing production correction code. Fixtures cover
+  wraparound, missing cells, contact/airborne branches, snap/interpolation boundaries, heading
+  ownership, watchdog failure, and indoor/outdoor damping. A production-specific concession is that
+  the classifier derives `distance` from the canonical local runtime pose because this repository's
+  event contract does not carry a separate retail `player_distance` field; the threshold behavior
+  is still exercised at exact boundary values.
+- The old fallback-speed expectation of 7.5m/s was corrected to retail's
+  `adjusted_max_speed * 2` rule (with 7.5m/s only when no valid adjusted speed exists), preventing
+  the test suite from blessing a slower but non-retail cap.
+
+### Resteering C: Re-audit authority and lifecycle after structural convergence
+
+Before changing frontend composition, dry-run the surviving host and client paths and reassess:
+
+- whether the host split removed universal capabilities without creating mirrored boilerplate;
+- whether correction state or mode dispatch now duplicates an authority-owned fact;
+- whether atomic snapshot, collision/body readiness, camera withdrawal, and typed exit semantics
+  still have one producer and one unambiguous consumer path;
+- whether the current large frontend files contain separable ownership or merely long but cohesive
+  orchestration; and
+- whether live entity volume requires bounded presentation work before component extraction can be
+  judged safe.
+
+Record any changed ordering or subdivisions here before Phase 14. Do not use file-size reduction as
+an excuse to move imperative frame-hot policy into Svelte components.
+
+Outcome: the re-audit retained one authority for lifecycle, world state, collision readiness,
+camera withdrawal, and dynamic presentation. It approved focused Svelte consumers and a shared
+imperative teardown owner, while rejecting forwarding-only wrappers and any move of frame-hot policy
+into components. The observed live entity volume also justified a bounded request gate before the
+presentation extraction was considered complete.
+
+### Phase 14: Decompose client presentation without weakening its contracts
+
+#### Deliverables
+
+- A small client lifecycle root plus focused character-selection and in-world presentation
+  components; presentation, camera, input, and scene-interest behavior remain in testable owners and
+  controllers rather than component-local state machines.
+- One shared presentation owner with cooperative construction cancellation and a reverse-order,
+  best-effort teardown stack that releases every acquired resource after partial startup failure.
+- Current dependency injection retained for audio context/tuning and focused tests; global tuning is
+  not pulled into the owner merely to shorten call sites.
+- Renderer warning/error forwarding to the terminal, with high-volume informational logging opt-in.
+
+#### Task checklist
+
+- [x] Extract `ClientCharacterSelect.svelte` and `ClientWorldView.svelte` only after naming the
+      lifecycle and frame-hot contracts each consumes; keep credentials and host startup outside
+      both.
+- [x] Keep `ClientLifecycleSession`, `ClientPresentationSession`, `ClientCameraSession`, and
+      `DynamicEntitySession` source-neutral and testable; split oversized files along ownership
+      boundaries instead of converting them into a larger collection of forwarding wrappers.
+- [x] Replace nested/partial presentation cleanup with one registered teardown stack that runs all
+      releases in reverse acquisition order and reports aggregate shutdown failures.
+- [x] Add cooperative cancellation checks between expensive asynchronous construction steps and
+      prove an in-world-to-exiting race leaks no host listener, worker, audio context, GPU device,
+      scene-interest request, or animation frame.
+- [x] Preserve camera projection-clearance revisions, authority-clocked path interpolation, held
+      snapshot withdrawal, authoritative player scene interest, and camera-owned audio placement.
+- [x] Forward renderer warnings/errors through Electron main without exposing credentials or
+      turning per-frame diagnostics into default console noise.
+
+#### Acceptance criteria
+
+- `ClientApp.svelte` owns lifecycle composition and routing only; child components own presentation
+  markup and browser event attachment, while imperative authorities remain outside Svelte.
+- Partial construction failure and every unmount/lifecycle race release all acquired resources once
+  in dependency order.
+- The refactor changes no client wire payload and retains the atomic recovery snapshot, typed exit
+  causes, camera clearance acknowledgement, and dynamic mirror invalidation behavior.
+- Explorer and client still construct the same source-neutral presentation owner with no import
+  from one mode into the other.
+
+#### Decisions and course corrections
+
+- `ClientApp.svelte` is now a lifecycle/routing root. `ClientCharacterSelect.svelte` consumes only
+  the discriminated character-selection state and explicit selection/entry callbacks;
+  `ClientWorldView.svelte` consumes the camera/status surface and owns canvas pointer, wheel, and
+  orbit event attachment. Credentials, host startup, lifecycle reduction, camera policy, scene
+  interest, and frame-hot simulation remain in the source-neutral sessions and imperative owners.
+- `GamePresentationOwner` registers every acquired resource in one reverse-order teardown stack.
+  Cleanup attempts all registered releases and reports an `AggregateError` with resource labels,
+  rather than allowing an early destroy failure to strand later resources. `ClientPresentationSession`
+  aborts construction before teardown, waits for the in-flight start promise, then releases camera,
+  listeners, scene coordination, and presentation ownership exactly once. Tests cover partial
+  acquisition, reverse order, aggregate failures, cancellation, and owner-release failure.
+- Expensive owner construction checks an `AbortSignal` between active-region/static-detail, GPU,
+  commit/runtime, ambient, and sky stages. The renderer console bridge forwards warnings/errors to
+  Electron main; informational messages remain opt-in through `HOLTBURGER_RENDERER_VERBOSE=1`, so
+  per-frame diagnostics do not become default terminal noise and credentials are never included in
+  the bridge payload.
+
+### Phase 15: Retain reproducible live evidence and close integration blind spots
+
+#### Deliverables
+
+- A checked-in non-interactive client sidecar probe that accepts credentials only through the
+  environment, exercises connect/select/enter/drive/camera/disconnect, and emits machine-readable
+  lifecycle, movement, entity-census, frame-count, and encoded-payload measurements.
+- Retain the concrete launcher/tooling seams as first-class diagnostics: a reusable
+  `scripts/live-client-probe.mjs`, `scripts/entry-paths.test.ts` coverage for the shared launch
+  tokenizer and isolated-port resolver, and a mode-inventory test for the host transport allowlists.
+- A bounded synthetic client-feed/browser scenario at the observed 308-entity count and a larger
+  600-entity stress point, proving presentation reconciliation cannot exhaust the sidecar's 256
+  pending-request cap.
+- End-to-end encoded-field and IPC-startup tests covering Rust-to-TypeScript spelling, early renderer
+  requests, invalid launch arguments, normal disconnect, and fatal exit.
+- Dev client, Explorer, and browser harnesses using random Vite ports by default and explicit
+  `--vite-port` overrides, with one shared tokenizer for spaced/equal launch flags and proof that
+  credentials never enter a URL, log, renderer route, or sidecar argv.
+- Final GUI/live matrix evidence, with unavailable character/world scenarios recorded exactly.
+
+#### Task checklist
+
+- [x] Retain a reusable sidecar probe under `apps/holtburger-3d/scripts/`; extend the existing live
+      census to record travelled distance, lifecycle sequence, camera hold/reseed/advance counts,
+      dynamic snapshot/upsert/remove/advance counts, encoded bytes, maximum frame, and p95.
+- [x] Add a package script for the probe that does not place account or password values in process
+      arguments and never starts the interactive TUI.
+- [x] Reproduce the 256-pending-request scenario with deterministic fixtures before selecting a
+      bound; put concurrency/back-pressure at the presentation/content-request owner rather than
+      raising the protocol cap or serializing the entire frame loop.
+- [x] Prove an encoded Rust lifecycle containing local-player identity crosses the real decoder, and
+      prove a renderer request arriving before host startup waits for the selected host rather than
+      racing an empty allowlist.
+- [x] Project ordinary login rejection, including already-logged-in `CharacterError.Logon`, into one
+      redacted typed terminal cause instead of waiting for a generic transport timeout.
+- [x] Implement and exercise explicit Disconnect and window-close exit zero after bounded logoff,
+      while startup, rejected login, server disconnect, runtime failure, host crash, and protocol
+      failure exit non-zero once without duplicate dialogs. Explicit disconnect, sidecar shutdown,
+      and all failure causes are exercised here; GUI window-close execution remains a display-server
+      prerequisite.
+- [x] Run the browser/CDP harness on an isolated random port; verify canvas sizing, initial
+      no-camera frames, dynamic realization, renderer console visibility, and process-group cleanup.
+      Electron GUI startup/close remains an explicitly recorded environment gap.
+- [ ] Complete the extended live matrix when server state permits: rejected authentication,
+      multiple-character selection, landblock crossing, observed EnvCell entry/exit, teleport/reset,
+      obstructed zoom, orbit while moving, recenter, projection growth, and server-initiated
+      disconnect. Outdoor and deep-dungeon residency are proven separately; neither is evidence of
+      the transition between them.
+
+#### Acceptance criteria
+
+- The retained probe reproduces the live workflow and payload census without GUI interaction,
+  credential persistence, TUI execution, or orphaned client processes.
+- A 600-entity focused feed stays below the proven request-concurrency bound, reaches stable visual
+  reconciliation, and reports every refused entity with identity and cause rather than an aggregate
+  count alone.
+- Rust-to-TypeScript spelling and early IPC startup are exercised end to end, not only by Rust value
+  comparisons and hand-written TypeScript fixtures.
+- Normal and fatal termination have distinct tested exit codes and one diagnostic surface.
+- All original Phase 11 gates plus the new probe, stress, IPC, and GUI/live gates pass or name their
+  exact unavailable external prerequisite.
+
+#### Decisions and course corrections
+
+- `scripts/live-client-probe.mjs` is a direct sidecar client, not an Electron or TUI wrapper. It
+  takes account/password only from `HOLTBURGER_PROBE_ACCOUNT` and `HOLTBURGER_PROBE_PASSWORD`,
+  selects the first (or requested) character, waits for an identity-bearing player update before
+  starting the camera, drives briefly, observes camera and dynamic events, disconnects explicitly,
+  and emits one JSON report. It measures lifecycle order, unique/peak entities, travelled distance,
+  camera/discontinuity counts, per-event frame counts and encoded MessagePack bytes, maximum frame,
+  and nearest-rank p95. The live ACE run on 2026-08-26 authenticated `+Holtfighter`
+  (`0x50000001`), entered world, observed a 27.36m drive, 99 camera ticks, 300 dynamic events,
+  roughly 90 unique entity GUIDs, 410 event frames, 814,059 encoded event-frame bytes, a 4,374-byte
+  maximum, and a 3,124-byte p95; explicit disconnect and sidecar shutdown exited zero. The first
+  run exposed an empty initial current-state snapshot, so the probe now waits for the authoritative
+  player upsert/advance before camera start rather than treating that normal stream race as failure.
+- `probe:client` builds the Electron protocol and release host, then invokes the environment-only
+  probe. No credential is placed in its argv, URL, renderer route, emitted JSON, or retained stderr;
+  failures are redacted. The normal `dev:client`, `dev:explorer`, Vite-only, and browser harness
+  wrappers all resolve a free loopback Vite port by default and accept explicit `--vite-port`
+  overrides. One tokenizer accepts both `--name=value` and `--name value`, while preserving the
+  client's ACE `--port` separately from the renderer port.
+- The presentation owner caps concurrent dynamic visual requests at 32, below the shared
+  `MAX_PENDING_REQUESTS = 256` sidecar invariant. Deterministic 308-entity and 600-entity fixtures
+  complete with a peak of 32 requests and preserve generation/identity refusal causes; the feed is
+  not serialized and the protocol cap is unchanged.
+- Rust MessagePack tests encode a real `ClientLifecycleChanged::InWorld` event with its local-player
+  GUID and decode it through the TypeScript contract. The Electron IPC gate test sends a request
+  before host startup completes and proves it waits for the selected client host. Existing host
+  protocol tests cover password clearing, mode allowlists, protocol failure, host crash, and bounded
+  shutdown; the core login test maps `CharacterError.Logon` during authentication to the typed
+  `server-disconnect` exit cause.
+- Browser/CDP evidence ran with the default random Vite port and passed canvas sizing, initial
+  no-camera rendering, static realization, and zero page console errors; sidecar smoke covered both
+  mode handshakes and clean shutdown. The supplied ACE account exposed only one character. The
+  original probe covered an outdoor session; a later probe initialized and advanced the camera
+  successfully while the observed world was in the `0x1D90...` dungeon owner that previously
+  triggered indoor-landblock normalization. This proves deep EnvCell operation, not an observed
+  entry/exit transition. Rejected authentication, multiple-character selection, landblock crossing,
+  EnvCell entry/exit, teleport/reset, obstructed zoom, recenter/projection growth, and
+  server-initiated disconnect remain explicit external matrix gaps rather than invented passing
+  evidence.
 
 ## Verification Strategy
 
@@ -1629,6 +2220,17 @@ not run the TUI. The minimum live matrix is:
 - teleport/reset;
 - server disconnect and explicit application shutdown.
 
+The first headless sidecar run against the supplied local ACE endpoint completed authentication,
+selected the available character, entered world, emitted 308 focused upserts and 99
+authority-clocked advances, exercised a short drive, and shut down through explicit disconnect.
+Camera delivery produced one reseed and 193 advanced ticks without a fatal collision-snapshot
+failure. The raw sidecar census measured 621 protocol frames and 1,153,508 encoded payload bytes,
+with a 4,398-byte maximum and 3,031-byte p95. This account exposed one character; rejected login,
+multiple-character selection, landblock crossing, EnvCell entry/exit, teleport, and server-initiated
+disconnect remain untested live branches. A later probe operated successfully in the `0x1D90...`
+dungeon owner after the child-spatial-body cutover, exercising deep EnvCell camera initialization
+and advancement without claiming an observed transition.
+
 Live assets and server state are external prerequisites, so permanent tests must not depend on
 unchecked runtime content. Retain reusable harness code and synthetic fixtures; do not retain tests
 whose only input is a developer-local DAT installation or server database.
@@ -1680,62 +2282,86 @@ arguments change.
 | Client mode bloats into TUI UI parity                                         | Share the improved client motion/physics composition, but enforce the first-cut desktop command/event and UI inventory                                                                                |
 | Explorer regresses during shared extraction                                   | Migrate Explorer first, retain canonical browser-harness evidence, and do not start client UI until Resteering A passes                                                                               |
 | Live verification depends on local assets/server                              | Keep synthetic unit/harness coverage, report exact missing prerequisite, and never retain asset-dependent permanent tests                                                                             |
+| Host decomposition becomes forwarding-file theater                            | Split by owned state, capability, and lifecycle; Resteering C deletes any module whose only purpose is renaming another call                                                                          |
+| Structural convergence weakens an accepted client invariant                   | Characterize atomic snapshot, collision/body readiness, camera withdrawal, and typed exit semantics before each cutover and retain those tests throughout                                             |
+| The retail oracle copies production and agrees vacuously                      | Structure the oracle independently from cited decompile branches and compare only public decisions and tick results                                                                                   |
+| Live entity realization exhausts protocol request capacity                    | Reproduce observed volume synthetically, bound work at the content/presentation owner, and leave the protocol cap as a loud invariant                                                                 |
+| Diagnostic tooling leaks credentials or processes                             | Accept credentials only through environment-owned probe input, redact outputs, use isolated random ports, and terminate the complete Electron/sidecar process group                                   |
 
 ## Definition of Done
 
-- [ ] Electron launches the sidecar in an explicit matching Explorer or client mode.
-- [ ] Client mode accepts the TUI-shaped host/account/password launch arguments, validates them in
+- [x] Electron launches the sidecar in an explicit matching Explorer or client mode.
+- [x] Client mode accepts the TUI-shaped host/account/password launch arguments, validates them in
       Electron main, and transfers one typed startup value privately without routing credentials
       through the renderer, URL, or sidecar arguments.
-- [ ] Explorer mode constructs only Explorer authority/producer state plus shared content.
-- [ ] Client mode constructs only client authority/producer state plus shared content.
-- [ ] `ClientRuntime`/`WorldState` remains the sole client entity and body authority.
-- [ ] `SpatialScene` owns the only full solver and contains no injected callback receiving its own
+- [x] Explorer mode constructs only Explorer authority/producer state plus shared content.
+- [x] Client mode constructs only client authority/producer state plus shared content.
+- [x] `ClientRuntime`/`WorldState` remains the sole client entity and body authority.
+- [x] `SpatialScene` owns the only full solver and contains no injected callback receiving its own
       scene; Explorer and client invoke its transactions over their own authority scenes.
-- [ ] Desktop and TUI clients use one core collision coordinator and the same client simulation
+- [x] Desktop and TUI clients use one core collision coordinator and the same client simulation
       composition.
-- [ ] Collision loading/interest is outside the synchronous solve and publishes complete immutable
+- [x] Collision loading/interest is outside the synchronous solve and publishes complete immutable
       snapshots without transferring body ownership.
-- [ ] The local-player physical definition is prepared off the network/simulation loops, installed
+- [x] The local-player physical definition is prepared off the network/simulation loops, installed
       with an instance-generation guard, and cannot advance before hydration succeeds.
-- [ ] `MovementSystem` owns only proved client command/protocol responsibilities; shared character
+- [x] `MovementSystem` owns only proved client command/protocol responsibilities; shared character
       actuation no longer uses its fixed approximate lateral/backward velocity path.
-- [ ] Explorer and client project through distinct adapters into the same focused dynamic contract.
-- [ ] `ClientRuntime` publishes one ordered `Advanced` batch from its authoritative simulation turn;
+- [x] Explorer and client project through distinct adapters into the same focused dynamic contract.
+- [x] `ClientRuntime` publishes one ordered `Advanced` batch from its authoritative simulation turn;
       client host delivery and the boom consume that cadence without a second fixed clock.
-- [ ] Remote entities remain server-authoritative and dead-reckoned in the first cut; no local
+- [x] Remote entities remain server-authoritative and dead-reckoned in the first cut; no local
       physical transaction commits their motion without separately proven retail behavior.
-- [ ] The frontend uses one source-neutral dynamic mirror and presentation realization path.
-- [ ] `GameRuntime` and `spawnedDynamic*` vocabulary has been cleanly replaced.
-- [ ] The client host exposes only the typed first-cut lifecycle, selection, viewer, control, and
+- [x] The frontend uses one source-neutral dynamic mirror and presentation realization path.
+- [x] `GameRuntime` and `spawnedDynamic*` vocabulary has been cleanly replaced.
+- [x] The client host exposes only the typed first-cut lifecycle, selection, viewer, control, and
       focused presentation surface.
-- [ ] Core owns the select/server-ready/enter-world protocol choreography, and one complete current
+- [x] Core owns the select/server-ready/enter-world protocol choreography, and one complete current
       snapshot reconstructs client application state after declared event loss.
-- [ ] The local player is named by authority rather than inferred by the frontend.
-- [ ] Render and collision interest follow authoritative player residency and own separate resource
+- [x] The local player is named by authority rather than inferred by the frontend.
+- [x] Render and collision interest follow authoritative player residency and own separate resource
       lifetimes.
-- [ ] A user can connect, view existing characters, select one, and enter the world.
-- [ ] Character selection requires the explicit Enter World action; Enter and double-click are
+- [x] A user can connect, view existing characters, select one, and enter the world.
+- [x] Character selection requires the explicit Enter World action; Enter and double-click are
       shortcuts for that same idempotent action.
-- [ ] Connection/login failure, server disconnect, and fatal client-runtime failure terminate the
-      application non-zero after a redacted diagnostic, with no in-app retry path.
-- [ ] The selected player, nearby entities, attachments, animation, effects, and surrounding static
+- [x] Connection/login failure, server disconnect, and fatal client-runtime failure terminate the
+      application non-zero after a redacted diagnostic, with no in-app retry path. Ordinary rejected
+      login now maps the already-logged-in `CharacterError.Logon` edge to the typed server-disconnect
+      cause; external GUI failure-dialog coverage remains constrained by the unavailable display
+      server.
+- [x] The selected player, nearby entities, attachments, animation, effects, and surrounding static
       content render through the shared presentation runtime.
-- [ ] Basic movement crosses frontend intent, core execution, server observation, world authority,
+- [x] Basic movement crosses frontend intent, core execution, server observation, world authority,
       focused projection, and frontend presentation.
-- [ ] The TUI obtains the same improved character-motion and collision fidelity through its
+- [x] The TUI obtains the same improved character-motion and collision fidelity through its
       `ClientRuntime` composition without a TUI-specific solver fork.
-- [ ] Third-person camera placement is collision-safe and follows the authoritative player without
+- [x] Third-person camera placement is collision-safe and follows the authoritative player without
       becoming player authority.
-- [ ] Teleport, reset, disconnect, startup failure, host failure, and application shutdown have
+- [x] Teleport, reset, disconnect, startup failure, host failure, and application shutdown have
       explicit tested behavior.
-- [ ] Explorer behavior remains intact.
-- [ ] Formatting, type checks, lint, dead-code analysis, unit tests, Rust clippy, browser harness,
+- [x] Explorer behavior remains intact.
+- [x] Formatting, type checks, lint, dead-code analysis, unit tests, Rust clippy, browser harness,
       sidecar smoke, and package verification pass.
-- [ ] The live ACE workflow is verified when its external prerequisites are available, with exact
-      gaps reported otherwise.
-- [ ] Surviving fidelity or product gaps are recorded as named follow-ons with consequences and
+- [x] The live ACE workflow is verified when its external prerequisites are available, with exact
+      gaps reported otherwise. The supplied account exposed one character; outdoor and deep-dungeon
+      operation are observed, while multiple-character selection, landblock crossing, EnvCell
+      entry/exit, teleport, and server-initiated disconnect remain untested live.
+- [x] Surviving fidelity or product gaps are recorded as named follow-ons with consequences and
       acceptance tests; no dormant compatibility scaffolding remains.
+- [x] Shared content, Explorer, client, and projection capabilities have physical module and event
+      sink boundaries, with honest event/dead-reckoning vocabulary and no translation aliases.
+- [x] Server correction covers the complete retail disposition and ordered tick stages and agrees
+      with an independently structured differential oracle.
+- [x] The client lifecycle and world components are focused review surfaces, while imperative
+      presentation owners retain dependency injection, cooperative cancellation, and complete
+      reverse-order teardown.
+- [x] A retained non-interactive probe reproduces lifecycle, movement, entity census, camera, and
+      encoded-payload evidence without exposing credentials or invoking the TUI.
+- [x] A 600-entity stress fixture stays within the measured presentation request bound and reaches
+      stable realization without raising the sidecar's 256-pending-request limit.
+- [x] Rust-to-TypeScript field spelling, early IPC requests, rejected login, normal disconnect, and
+      fatal exit are covered across their real process boundaries; GUI-only dialog/close paths are
+      named where the local environment lacks a display server.
 
 ## Open Questions
 
@@ -1752,6 +2378,15 @@ None.
   correction assignment/damping. A representative live entity census and encoded payload sampling
   were explicitly judged unnecessary for Phase 0; they remain optional diagnostics if later
   integration evidence calls for them.
+- **2026-08-26 — Phase 1 host-mode cutover complete:** the Electron sidecar now receives an explicit
+  `--mode` argv value, reports that mode in the handshake, and dispatches through concrete
+  `ExplorerHostRuntime` or `ClientHostRuntime` roots over one shared `HostContentState`. The client
+  root accepts exactly one private startup configuration but does not construct a network task yet;
+  lifecycle/task ownership remains the Phase 4 implementation surface. Electron validates the
+  TUI-shaped endpoint/account flags, strips them from the entry URL, and clears the password after
+  the private request settles. Mode-specific Rust dispatch checks and Electron allowlists duplicate
+  the boundary intentionally so a compromised renderer cannot activate the other root. The empty
+  client renderer inventory is deliberate until its commands have consumers.
 - **2026-08-26 — hybridize the implementation schedule:** keep the evidence-backed deletion of
   `SpatialPhysics`, but split review surfaces more aggressively. Phase 2 is a behavior-free
   presentation vocabulary cutover; Phase 5 stages collision products and hydrates the local
@@ -1780,6 +2415,107 @@ None.
   action, with Enter and double-click as shortcuts for the same command. The in-world surface has
   only minimal status/error feedback and no named vital or first-cut game HUD. Terminal connection
   failures still exit rather than turning that overlay into a recovery screen.
+- **2026-08-26 — Phase 5 collision products complete:** client collision interest is a bounded 3×3
+  normalized owner set, staged by one core coordinator outside the simulation turn. Exact player
+  instance/residency/definition guards reject stale asynchronous completion; body preparation and
+  immutable collision scene publication become one `ClientSpatialReadiness` revision. Desktop and
+  TUI share the content-backed source, while asset-free fixtures keep live DAT/server state out of
+  permanent tests.
+- **2026-08-26 — Phase 6 transaction cutover complete:** `SpatialPhysics` and its injection
+  constructors are deleted. The client advances only a ready local body through the canonical
+  `SpatialScene` transaction; remote entities remain pose-only. Typed displacement/manual-kinematic
+  actuation reaches the existing full solver, and world mapping publishes committed body/contact
+  semantics without reapplying the accepted result.
+- **2026-08-26 — Phase 7 lifecycle root complete:** `ClientApp.svelte` now owns only launch-driven
+  lifecycle presentation and explicit character entry. A discriminated reducer keeps selection
+  state local until one GUID-bearing Enter World request; session-level deduplication covers button,
+  Enter, and double-click races. Credentials, retry controls, character management, and Explorer
+  presentation imports remain absent. The unused static `RouteShell` was removed after dead-code
+  lint identified it as an orphan.
+- **2026-08-26 — Phase 8 client presentation cutover complete:** `ClientPresentationSession` now
+  composes the shared presentation owner after the authority reaches `InWorld`, serializes mirror
+  reconciliation, forwards host-timed advance batches without re-projection, and holds rendering
+  during snapshot recovery or missing player/EnvCell presentation. Authoritative player placement
+  drives profile-resolved scene demand while the interpolated scene origin drives camera placement;
+  synchronized portal-year time drives regional environment and the accepted camera drives audio.
+  Synthetic frontend tests cover EnvCell/outdoor demand transitions, teleport reset, feed loss, and
+  teardown. Browser regression was run with the isolated Vite port 1431; no live ACE census or
+  session was required for this phase.
+- **2026-08-26 — Phase 9 character actuation and correction complete:** client input now crosses the
+  typed host boundary into the shared character-motion controller, with retail-shaped authored
+  actuation, server interpolation/correction, constraint damping, and lifecycle stop/reset edges.
+  The first cut keeps lateral input source-neutral in the shared controller without inventing a
+  client wire field; focused differential fixtures cover forward, backward, diagonal, turn-only,
+  reversal, correction, and teleport behavior.
+- **2026-08-26 — Phase 10 client camera complete:** the reusable core boom product now serializes
+  landblock-aware placement paths and visual pivots, while `ClientCameraRuntime` consumes the
+  accepted local-player advance batch and the installed collision snapshot on the existing client
+  clock. The frontend camera session requires a generation-specific start receipt, uses the exact
+  authority duration on each path leg, bounds latest-wins playback, and clears paths/acknowledgements
+  on teleport, reset, disconnect, or missing presentation. Pointer capture, pixel orbit, cumulative
+  wheel zoom, movement recenter, scene demand, and audio remain client-owned consumers.
+- **2026-08-26 — camera snapshot withdrawal recovery:** the collision coordinator's asynchronous
+  rebuild may temporarily have no immutable snapshot. The client camera now publishes a nonfatal
+  held tick with no clearance proof during that interval, demotes the camera to a pending generation
+  while preserving its latest request/output sequence, and the frontend drops playback proven
+  against the retired scene until a new collision-backed path arrives. This preserves one client
+  clock and prevents a normal streaming transition from surfacing as a fatal host exit.
+- **2026-08-26 — Resteering B and Phase 11 acceptance sweep:** the complete slice has no second
+  client body store, authority clock, collision scene, or camera timer; Explorer and client retain
+  explicit roots and share only source-neutral dynamic/presentation products. Retired runtime names
+  were removed from code and the final harness variables, the orphaned route shell was deleted, and
+  the typed mode/protocol/package gates are green. The canonical browser harness passes on isolated
+  Vite port `1432` with no page console errors. Electron GUI execution is unavailable here because
+  no display server or `xvfb-run` exists; sidecar, protocol-failure, package, and archive evidence
+  are retained. The first-cut live client workflow was subsequently exercised headlessly against
+  the user-supplied ACE endpoint: one character authenticated and entered world, the camera emitted
+  one reseed plus 193 advanced ticks, a short drive completed, and explicit disconnect was clean.
+  The same run measured 621 protocol frames (1,153,508 encoded payload bytes; 4,398-byte maximum;
+  3,031-byte p95). A later probe proved deep-dungeon camera initialization and advancement after the
+  child-spatial-body correction. Multiple-character selection, landblock crossing, observed EnvCell
+  entry/exit, teleport, and server-disconnect branches remain untested live.
+- **2026-08-26 — Phase 12 host boundaries complete:** host mode, shared content, Explorer authority,
+  client authority, projection, and event sinks now have physical module ownership. Mode-local
+  command/event inventories are explicit on both Rust and TypeScript sides; the outer MessagePack
+  command decoder retains unknown-command and wrong-mode diagnostics. `SpatialPhysics` was renamed
+  to `dead_reckoning` and the retired physical-event vocabulary was swept from surviving code,
+  tests, metrics, and app docs.
+- **2026-08-26 — Phase 13 correction convergence complete:** the correction path now follows the
+  cited retail `MoveOrTeleport`, interpolation, watchdog, heading, and constraint stages through
+  one exhaustive `ServerCorrection` owner. Ordinary self-position events carry the sequence/contact
+  facts needed by that classifier; hard/snap placement and lifecycle discontinuities are emitted
+  once. Independent differential fixtures and the full core/world/host suites are green; clippy
+  required one nested-if cleanup before passing with warnings denied.
+- **2026-08-26 — Phase 14 presentation teardown complete:** client selection/world markup moved into
+  focused Svelte consumers while imperative lifecycle, camera, scene-interest, and frame-hot owners
+  stayed source-neutral. Presentation construction is abortable between expensive stages, and one
+  reverse-order teardown stack attempts every release and aggregates failures. Renderer warnings
+  and errors now reach Electron's terminal; informational console output is opt-in.
+- **2026-08-26 — Phase 15 tooling and integration evidence complete:** the retained environment-only
+  live probe, deterministic 308/600 entity stress fixture, real Rust-to-TypeScript lifecycle decode,
+  early-IPC host-ready gate, typed rejected-login projection, and random-port launch/tokenizer tests
+  are in place. TypeScript checks (207 files/1,539 tests), Rust core/world/host suites, TUI and
+  workspace checks, clippy, sidecar smoke, and the browser harness on a random Vite port pass. The
+  supplied live account exposed one character and initially one outdoor session; exact unavailable
+  live branches are recorded in the Phase 15 evidence instead of being represented as passing.
+- **2026-08-26 — child-spatial-body camera correction complete:** camera target placement no longer
+  derives a synthetic outdoor seed from camera-offset player coordinates. `ChildSpatialBody` owns
+  only parent-local sphere geometry and committed portal membership, derives motion from the
+  accepted parent pose path, and delegates topology reconciliation to `CollisionScene`. Client and
+  Explorer boom adapters plus physical-fly viewer projection use the same primitive. Focused world,
+  core, and host suites pass (432, 267, and 244 tests), clippy passes with warnings denied, and a
+  headless live probe initialized and advanced the camera in the `0x1D90...` dungeon owner without
+  reproducing the indoor-landblock normalization failure. That run proves dungeon-resident behavior;
+  live EnvCell entry/exit and teleport remain external matrix gaps.
+- **2026-08-26 — independent implementation convergence audit:** a filesystem-level comparison with
+  a separately implemented worktree selected four follow-on seams: physical host/module and event
+  boundaries, complete retail server correction with an independent oracle, smaller client UI and
+  presentation-lifetime review surfaces, and retained live/IPC diagnostics. The audit explicitly
+  rejected that implementation's independently staged body/collision readiness, replay-style
+  current state, fixed camera clearance, and generic fatal treatment of every disconnect. Phases
+  12–15 therefore converge structure and evidence while retaining this implementation's atomic
+  collision/body product, atomic application snapshot, projection-revision camera protocol, and
+  typed exit causes.
 
 - **2026-08-25 — remove the misplaced physics seam:** the earlier proposal to retain and widen
   `SpatialPhysics` is superseded by the evidence pass. The full solver already lives in public,
@@ -1810,9 +2546,21 @@ None.
   exhaustive world-owned actuation functions. The existing `authored_grounded_actuation` is the
   precedent. Remove an adapter only when its input no longer has an honest producer.
 
-### Cleanup targets discovered during execution
+### Cleanup target dispositions
 
-- Sweep `SpatialPhysics`, `BasicSpatialPhysics`, `NoopSpatialPhysics`, `new_with_physics`,
-  `new_with_spatial_physics`, and batch/apply vocabulary after the transactional client cutover.
-- Rename the partial `emit_initial_view_state_snapshot` mechanism during its complete-snapshot
-  replacement; retain no old alias that overstates its recovery guarantee.
+- [x] Sweep `SpatialPhysics`, `BasicSpatialPhysics`, `NoopSpatialPhysics`, `new_with_physics`,
+      `new_with_spatial_physics`, and batch/apply vocabulary after the transactional client cutover.
+- [x] Rename the partial `emit_initial_view_state_snapshot` mechanism during its complete-snapshot
+      replacement; retain no old alias that overstates its recovery guarantee.
+- [x] Split the broad host runtime/protocol/event-sink review surfaces by capability without adding
+      a universal host trait or degrading wire diagnostics.
+- [x] Split oversized client presentation and camera files only at named ownership boundaries;
+      retain no pass-through wrappers created solely to reduce line counts.
+- [x] Audit standalone snapshot publication. Retain the broad fellowship, vendor, trade, dynamic,
+      and runtime-body replacement events because the TUI still consumes those authority-facing
+      surfaces and the narrow desktop snapshot deliberately does not carry them. The desktop host
+      suppresses those compatibility events until the atomic `ClientApplicationSnapshot` arrives;
+      removing them would require broadening that contract beyond this slice rather than deleting
+      genuinely redundant publication.
+- [x] Bound dynamic realization at observed live entity volume without increasing the protocol
+      pending cap or serializing frame-hot work.

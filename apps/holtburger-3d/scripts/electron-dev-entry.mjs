@@ -4,21 +4,36 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 
-import { buildEntryPath, requireEntry } from "./entry-paths.mjs";
+import {
+	buildEntryPath,
+	extractVitePortArguments,
+	requireEntry,
+	stripClientLaunchArguments,
+} from "./entry-paths.mjs";
+import { resolveVitePort } from "./dev-port.mjs";
 
 const [entryName, ...allArgs] = process.argv.slice(2);
-const release = allArgs.includes("--release");
-const rawArgs = allArgs.filter((arg) => arg !== "--release");
+let rawArgs;
+let requestedVitePort;
 
 let entry;
 let entryPath;
 try {
 	entry = requireEntry(entryName);
-	entryPath = buildEntryPath(entry.path, rawArgs);
+	const extracted = extractVitePortArguments(allArgs, {
+		allowPortAlias: entryName !== "client",
+	});
+	requestedVitePort = extracted.vitePort;
+	rawArgs = extracted.args;
+	const entryArgs = rawArgs.filter((arg) => arg !== "--release");
+	const rendererArgs =
+		entryName === "client" ? stripClientLaunchArguments(entryArgs) : entryArgs;
+	entryPath = buildEntryPath(entry.path, rendererArgs);
 } catch (error) {
 	console.error(error instanceof Error ? error.message : String(error));
 	process.exit(1);
 }
+const release = rawArgs.includes("--release");
 
 const appRoot = resolve(fileURLToPath(new URL("../", import.meta.url)));
 const workspaceRoot = resolve(appRoot, "../..");
@@ -69,9 +84,18 @@ if (!existsSync(viteEntry)) {
 		`Vite entry point is missing at ${viteEntry}; run npm install first.`,
 	);
 }
+const vitePort = await resolveVitePort(requestedVitePort);
+console.info(`Using Vite port ${vitePort}`);
 const vite = spawn(
 	process.execPath,
-	[viteEntry, "--host", "127.0.0.1", "--port", "1420", "--strictPort"],
+	[
+		viteEntry,
+		"--host",
+		"127.0.0.1",
+		"--port",
+		String(vitePort),
+		"--strictPort",
+	],
 	{
 		cwd: appRoot,
 		env: { ...process.env },
@@ -81,7 +105,7 @@ const vite = spawn(
 );
 
 async function waitForVite() {
-	const url = `http://127.0.0.1:1420/${entryPath}`;
+	const url = `http://127.0.0.1:${vitePort}/${entryPath}`;
 	const deadline = Date.now() + 15_000;
 	await Promise.race([
 		(async () => {
@@ -141,6 +165,7 @@ const electron = spawn(
 		cwd: appRoot,
 		env: {
 			...process.env,
+			HOLTBURGER_ELECTRON_DEV_ORIGIN: `http://127.0.0.1:${vitePort}`,
 			HOLTBURGER_HOST_BIN: hostBinary,
 			HOLTBURGER_DATS:
 				process.env.HOLTBURGER_DATS ??

@@ -12,7 +12,10 @@ use holtburger_core::{
     KinematicBoomReseedReason, KinematicBoomTargetSample, KinematicBoomTargetSeed,
     KinematicBoomUpdateAcceptance, resolve_camera_pivot_offset,
 };
-use holtburger_world::{CellTransitRequest, FreeSphereConfig, PlacedMotionPath};
+use holtburger_world::{
+    ChildSpatialBody, ChildSpatialBodyDefinition, ChildSpatialBodyWaypoint, FreeSphereConfig,
+    PlacedMotionPath,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::explorer_entity_runtime::{
@@ -354,8 +357,8 @@ struct ActiveHostKinematicBoom {
     /// Held for the generation rather than re-derived per tick: the body's geometry is what decides
     /// it, and a body that reconfigured mid-possession would otherwise pop the look-at point.
     pivot_offset: Vector3,
-    /// Last committed collision-seed residency.
-    target_seed_cell: Option<Guid>,
+    /// Parent-driven target sphere whose topology is reconciled by the shared spatial solver.
+    target_body: ChildSpatialBody,
 }
 
 #[derive(Default)]
@@ -432,14 +435,11 @@ impl HostKinematicBoomRuntime {
         let body = target.body;
         let collision = target.collision;
         let selected = selected_target_sphere(&body)?;
-        let seed = target_seed(
-            &collision,
+        let mut target_body = ChildSpatialBody::new(
+            ChildSpatialBodyDefinition::new(selected.center, selected.radius)?,
             body.pose,
-            body.physical
-                .as_ref()
-                .and_then(|physical| physical.response.cell()),
-            selected,
-        )?;
+        );
+        let seed = stationary_target_seed(&collision, body.pose, &mut target_body)?;
         let body_height = self
             .entities
             .body_height(request.guid)
@@ -490,7 +490,7 @@ camera pivot rests on its collision geometry alone",
             sequence: 0,
             target_sphere_role: selected.role,
             pivot_offset,
-            target_seed_cell: seed.placement.cell,
+            target_body,
         });
         Ok(HostKinematicBoomStartReceipt { identity })
     }
@@ -588,8 +588,8 @@ camera pivot rests on its collision geometry alone",
             );
             return Ok(Some(tick));
         };
-        let (samples, selected, final_seed_cell) =
-            match target_samples(target_tick, active.target_seed_cell, active.pivot_offset) {
+        let (samples, selected, target_body) =
+            match target_samples(target_tick, &active.target_body, active.pivot_offset) {
                 Ok(value) => value,
                 Err(error) => {
                     eprintln!("kinematic boom target adaptation failed: {error:#}");
@@ -601,6 +601,10 @@ camera pivot rests on its collision geometry alone",
                     return Ok(Some(tick));
                 }
             };
+        // Child placement follows the accepted parent solve independently from whether the boom
+        // can advance its own collision response this tick.
+        active.target_sphere_role = selected;
+        active.target_body = target_body;
         let initial_visual_pivot = active.controller.visual_pivot();
         let outcome = match active.controller.advance(
             &target_tick.solved.collision,
@@ -618,13 +622,6 @@ camera pivot rests on its collision geometry alone",
                 return Ok(Some(tick));
             }
         };
-        if matches!(&outcome, KinematicBoomOutcome::Advanced { .. }) {
-            // These adapter facts describe the controller's committed seed. A held core tick keeps
-            // its previous controller transaction, so advancing only the adapter would manufacture
-            // an internally inconsistent recovery baseline.
-            active.target_sphere_role = selected;
-            active.target_seed_cell = final_seed_cell;
-        }
         let tick = project_outcome(active, initial_visual_pivot, outcome);
         Ok(Some(tick))
     }
@@ -781,59 +778,63 @@ fn visual_pivot(mut pose: WorldPosition, pivot_offset: Vector3) -> WorldPosition
     pose
 }
 
-fn target_seed(
-    scene: &holtburger_world::CollisionScene,
-    body_pose: WorldPosition,
-    previous_cell: Option<Guid>,
-    selected: SelectedTargetSphere,
-) -> Result<KinematicBoomTargetSeed> {
-    let mut pose = body_pose;
-    pose.coords = pose.coords + pose.rotation.rotate_vector(selected.center);
-    let placement = scene.transit_cell(CellTransitRequest {
-        previous_cell,
-        anchor: Guid((pose.landblock_id.0 & 0xffff_0000) | 0xffff),
-        center: pose.coords,
-        radius: selected.radius,
-    })?;
-    let cell = placement.committed_cell();
-    if let Some(cell) = cell {
-        pose = pose
-            .reanchor_to_landblock_owner(landblock_key(cell))
-            .context("could not reanchor boom target into its committed EnvCell owner")?;
-        pose.landblock_id = cell;
-    } else {
-        pose = pose.normalize_outdoor_landblock_frame()?;
-    }
-    Ok(KinematicBoomTargetSeed {
-        placement: KinematicBoomPlacement { pose, cell },
-    })
-}
-
 fn target_samples(
     tick: &ExplorerEntityPhysicalTick,
-    mut seed_cell: Option<Guid>,
+    previous_target_body: &ChildSpatialBody,
     pivot_offset: Vector3,
 ) -> Result<(
     Vec<KinematicBoomTargetSample>,
     HostKinematicBoomTargetSphereRole,
-    Option<Guid>,
+    ChildSpatialBody,
 )> {
     let selected = selected_target_sphere(&tick.solved.current)?;
-    let path = &tick.solved.result.motion.path;
-    let mut samples = Vec::with_capacity(path.legs().len());
-    for leg in path.legs() {
+    let definition = ChildSpatialBodyDefinition::new(selected.center, selected.radius)?;
+    let mut target_body = if previous_target_body.definition() == definition {
+        previous_target_body.clone()
+    } else {
+        ChildSpatialBody::new(definition, tick.solved.previous.pose)
+    };
+    let parent_path = &tick.solved.result.motion.path;
+    let parent_waypoints = parent_path
+        .legs()
+        .iter()
+        .map(|leg| {
+            let rotation = interpolate_rotation(
+                tick.solved.previous.pose.rotation,
+                tick.solved.current.pose.rotation,
+                leg.end_fraction(),
+            )?;
+            Ok(ChildSpatialBodyWaypoint {
+                parent_pose: present_placed_motion_pose(parent_path, leg.end(), rotation)?,
+                end_fraction: leg.end_fraction(),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let child_path = target_body.reconcile_parent_path(
+        &tick.solved.collision,
+        tick.solved.previous.pose,
+        &parent_waypoints,
+    )?;
+    let mut samples = Vec::with_capacity(child_path.legs().len());
+    for leg in child_path.legs() {
         let rotation = interpolate_rotation(
             tick.solved.previous.pose.rotation,
             tick.solved.current.pose.rotation,
             leg.end_fraction(),
         )?;
-        let pose = present_placed_motion_pose(path, leg.end(), rotation)?;
-        let seed = target_seed(&tick.solved.collision, pose, seed_cell, selected)?;
-        seed_cell = seed.placement.cell;
+        let pose = present_placed_motion_pose(&child_path, leg.end(), rotation)?;
         samples.push(KinematicBoomTargetSample {
             end_fraction: leg.end_fraction(),
-            visual_pivot: visual_pivot(pose, pivot_offset),
-            target_seed: seed,
+            visual_pivot: visual_pivot(
+                interpolate_parent_pose(tick, leg.end_fraction())?,
+                pivot_offset,
+            ),
+            target_seed: KinematicBoomTargetSeed {
+                placement: KinematicBoomPlacement {
+                    pose,
+                    cell: leg.end().placement().committed_cell(),
+                },
+            },
         });
     }
     ensure!(
@@ -842,7 +843,49 @@ fn target_samples(
             .is_some_and(|sample| sample.end_fraction == 1.0),
         "possessed target path must be nonempty and normalized"
     );
-    Ok((samples, selected.role, seed_cell))
+    Ok((samples, selected.role, target_body))
+}
+
+fn stationary_target_seed(
+    scene: &holtburger_world::CollisionScene,
+    parent_pose: WorldPosition,
+    target_body: &mut ChildSpatialBody,
+) -> Result<KinematicBoomTargetSeed> {
+    let path = target_body.reconcile_parent_path(
+        scene,
+        parent_pose,
+        &[ChildSpatialBodyWaypoint {
+            parent_pose,
+            end_fraction: 1.0,
+        }],
+    )?;
+    let point = path.final_point();
+    Ok(KinematicBoomTargetSeed {
+        placement: KinematicBoomPlacement {
+            pose: present_placed_motion_pose(&path, point, parent_pose.rotation)?,
+            cell: point.placement().committed_cell(),
+        },
+    })
+}
+
+fn interpolate_parent_pose(
+    tick: &ExplorerEntityPhysicalTick,
+    fraction: f32,
+) -> Result<WorldPosition> {
+    let path = &tick.solved.result.motion.path;
+    let rotation = interpolate_rotation(
+        tick.solved.previous.pose.rotation,
+        tick.solved.current.pose.rotation,
+        fraction,
+    )?;
+    let owner = landblock_key(path.anchor());
+    Ok(WorldPosition {
+        landblock_id: owner,
+        coords: path
+            .center_at_fraction(fraction)
+            .context("kinematic boom target fraction is outside its parent path")?,
+        rotation,
+    })
 }
 
 fn serialize_path(

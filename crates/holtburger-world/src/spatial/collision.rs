@@ -464,6 +464,29 @@ impl PlacedMotionPath {
             .end
     }
 
+    /// Samples accepted geometry without separating it from the path's retained boundaries.
+    pub fn center_at_fraction(&self, fraction: f32) -> Option<Vector3> {
+        if !fraction.is_finite() || !(0.0..=1.0).contains(&fraction) {
+            return None;
+        }
+        let mut start_fraction = 0.0;
+        let mut start = self.initial.center;
+        for leg in &self.legs {
+            if fraction <= leg.end_fraction {
+                let span = leg.end_fraction - start_fraction;
+                let local = if span <= f32::EPSILON {
+                    1.0
+                } else {
+                    ((fraction - start_fraction) / span).clamp(0.0, 1.0)
+                };
+                return Some(start + (leg.end.center - start) * local);
+            }
+            start_fraction = leg.end_fraction;
+            start = leg.end.center;
+        }
+        Some(self.final_point().center)
+    }
+
     /// Whether any point required exceptional placement repair.
     pub fn has_recovery(&self) -> bool {
         self.initial.recovery.is_some() || self.legs.iter().any(|leg| leg.end.recovery.is_some())
@@ -3366,6 +3389,40 @@ mod tests {
 
         assert_eq!(pose.landblock_id, Guid(0xdb56_0100));
         assert_eq!(pose.coords, Vector3::new(-172.0, -232.0, 2.0));
+    }
+
+    #[test]
+    fn child_spatial_body_starts_from_authoritative_deep_env_cell() {
+        use crate::spatial::{
+            ChildSpatialBody, ChildSpatialBodyDefinition, ChildSpatialBodyWaypoint,
+        };
+
+        let cell = Guid(0xda55_0100);
+        let scene = placement_scene(vec![volume(0x0100, Vec::new())]);
+        let parent = WorldPosition {
+            landblock_id: cell,
+            coords: Vector3::new(20.0, 30.0, 4.0),
+            rotation: Quaternion::identity(),
+        };
+        let mut child = ChildSpatialBody::new(
+            ChildSpatialBodyDefinition::new(Vector3::new(0.0, 0.0, 1.5), 0.3).unwrap(),
+            parent,
+        );
+
+        let path = child
+            .reconcile_parent_path(
+                &scene,
+                parent,
+                &[ChildSpatialBodyWaypoint {
+                    parent_pose: parent,
+                    end_fraction: 1.0,
+                }],
+            )
+            .unwrap();
+
+        assert_eq!(path.initial().placement().committed_cell(), Some(cell));
+        assert_eq!(path.final_point().placement().committed_cell(), Some(cell));
+        assert_eq!(child.committed_cell(), Some(cell));
     }
 
     #[test]

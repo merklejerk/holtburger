@@ -12,7 +12,8 @@ pub use character_gen::{
     CharacterGenBuild, CharacterGenBuilder, CharacterGenPolicy, CharacterGenValidationError,
 };
 pub use client::character_axes::{
-    AdjustedCharacterAxes, AdjustedForwardAxis, CharacterAxisAdjustmentError, adjust_character_axes,
+    AdjustedCharacterAxes, AdjustedForwardAxis, CharacterAxisAdjustmentError,
+    adjust_character_axes, adjust_character_axes_for_run_rate, motion_order_for_drive,
 };
 pub use client::character_jump::{
     CharacterJumpReadiness, CharacterJumpRejection, ResolvedJump, resolve_character_jump,
@@ -27,11 +28,24 @@ pub use client::character_motion::{
     CharacterMotionEventResult, CharacterMotionRejection, CharacterMotionSequence, JumpAttempt,
     JumpChargeProfile, JumpExtent, JumpExtentError, SequencedCharacterMotionEvent,
 };
+pub use client::collision::{
+    CLIENT_COLLISION_OWNER_RADIUS, ClientCollisionCoordinator, ClientCollisionInterest,
+    ClientCollisionSnapshot, ClientCollisionSource, ClientPlayerBodyFacts,
+    ClientPlayerBodyFactsError, ClientSpatialReadiness, ContentClientCollisionSource,
+    client_player_body_facts,
+};
 pub use client::runtime_body_view_cache::RuntimeBodyViewCache;
 pub use client::types::{
     ActionResultReason, ActionResultSource, ActiveCharacterConfirmation, BusyOperationKind,
-    BusyOperationResult, ClientCommand, ClientState, ClientViewEvent, PlayerCharacterOptions,
-    RetryState,
+    BusyOperationResult, ClientApplicationSnapshot, ClientCharacterSummary, ClientCommand,
+    ClientExitCause, ClientLifecycleState, ClientState, ClientViewEvent,
+    ClientWorldDiscontinuityKind, PlayerCharacterOptions, RetryState,
+};
+pub use client::{
+    ClientCameraClearance, ClientCameraClearanceRequest, ClientCameraDiagnostics,
+    ClientCameraHoldReason, ClientCameraIdentity, ClientCameraIntentRequest,
+    ClientCameraReseedReason, ClientCameraStartReceipt, ClientCameraStartRequest,
+    ClientCameraTargetSphereRole, ClientCameraTick, ClientCameraUpdateReceipt,
 };
 pub use client::{ClientRuntime, ClientRuntimeBuilder};
 pub use content_assets::{
@@ -64,10 +78,12 @@ pub use holtburger_content::LandblockCollisionAsset;
 pub use kinematic_boom::{
     KinematicBoomAdvance, KinematicBoomClearance, KinematicBoomController,
     KinematicBoomDiagnostics, KinematicBoomHoldReason, KinematicBoomInputError,
-    KinematicBoomIntent, KinematicBoomOutcome, KinematicBoomPlacement, KinematicBoomProfile,
+    KinematicBoomIntent, KinematicBoomOutcome, KinematicBoomPathLeg, KinematicBoomPathPoint,
+    KinematicBoomPlacedPath, KinematicBoomPlacement, KinematicBoomProfile,
     KinematicBoomProfileDefinition, KinematicBoomProfileError, KinematicBoomReseedReason,
     KinematicBoomTargetSample, KinematicBoomTargetSeed, KinematicBoomUpdateAcceptance,
-    resolve_camera_pivot_offset,
+    KinematicBoomWorldPoint, resolve_camera_pivot_offset, serialize_kinematic_boom_path,
+    standard_kinematic_boom_profile, stationary_kinematic_boom_path,
 };
 pub use physical_body_definition::{
     FREE_SPHERE_FLY_CONFIG, RETAIL_DUMMY_MOTION_SPHERE, ResolvedBodyProfile,

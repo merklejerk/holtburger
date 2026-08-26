@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { RendererFrameDiagnosticsSnapshot } from "../lib/game/renderer/renderer";
-	import type { GameRuntime } from "../lib/game/runtime/game-runtime";
+	import type { GamePresentationRuntime } from "../lib/game/runtime/game-presentation-runtime";
 	import {
 		explorerFrameDiagnosticReportFilename,
 		serializeExplorerFrameDiagnosticReport,
@@ -12,7 +12,7 @@
 		readonly diagnostics: RendererFrameDiagnosticsSnapshot | null;
 		/** Latest authored-dynamic residency diagnostics. */
 		readonly dynamics: ReturnType<
-			GameRuntime["getAuthoredDynamicRuntimeDiagnostics"]
+			GamePresentationRuntime["getAuthoredDynamicRuntimeDiagnostics"]
 		> | null;
 		/** Explicitly create or tear down the renderer profiling session. */
 		readonly setProfilingEnabled: (enabled: boolean) => void;

@@ -1,4 +1,6 @@
 use super::*;
+use crate::DynamicEntityEvent;
+use crate::DynamicEntityPlacementAdvanceKind;
 use anyhow::Result;
 use holtburger_world::SpatialBodyId;
 use std::sync::Arc;
@@ -84,6 +86,54 @@ impl ClientRuntime {
     }
 
     pub(super) fn handle_runtime_world_event(&mut self, event: &WorldEvent) {
+        match event {
+            WorldEvent::RuntimeBodiesReset { .. } => {
+                self.movement.reset_manual_motion_playback();
+                self.movement.clear_server_correction();
+                self.reset_camera();
+                if let Some(coordinator) = self.collision_coordinator.as_mut() {
+                    coordinator.invalidate();
+                }
+                self.bump_world_generation();
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::WorldDiscontinuity {
+                        world_generation: self.world_generation,
+                        kind: ClientWorldDiscontinuityKind::Reset,
+                    });
+            }
+            WorldEvent::ForcedReposition { guid, .. } if *guid == self.world.player.guid => {
+                self.movement.reset_manual_motion_playback();
+                self.movement.clear_server_correction();
+                self.reset_camera();
+                if let Some(coordinator) = self.collision_coordinator.as_mut() {
+                    coordinator.invalidate();
+                }
+                self.bump_world_generation();
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::WorldDiscontinuity {
+                        world_generation: self.world_generation,
+                        kind: ClientWorldDiscontinuityKind::ForcedReposition,
+                    });
+            }
+            WorldEvent::TeleportStarted { .. } => {
+                self.movement.reset_manual_motion_playback();
+                self.movement.clear_server_correction();
+                self.reset_camera();
+                if let Some(coordinator) = self.collision_coordinator.as_mut() {
+                    coordinator.invalidate();
+                }
+                self.bump_world_generation();
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::WorldDiscontinuity {
+                        world_generation: self.world_generation,
+                        kind: ClientWorldDiscontinuityKind::Teleport,
+                    });
+            }
+            _ => {}
+        }
         self.observe_runtime_world_event(event);
         self.emit_world_view_projection(event);
     }
@@ -111,6 +161,7 @@ impl ClientRuntime {
 
                     if now.duration_since(self.session.last_recv_time) > Duration::from_secs(15) {
                         log::warn!("Connection timed out (no data for 15s)");
+                        self.set_exit_cause(ClientExitCause::ServerDisconnect);
                         self.state = ClientState::Disconnected;
                         let _ = self.client_view_event_tx.send(ClientViewEvent::Disconnected);
                         self.send_status_event();
@@ -149,6 +200,7 @@ impl ClientRuntime {
                         }
                         Err(e) => {
                             log::error!("Session error: {}", e);
+                            self.set_exit_cause(ClientExitCause::RuntimeFailure);
                             self.state = ClientState::Disconnected;
                             self.send_status_event();
                             return Err(e);
@@ -162,7 +214,12 @@ impl ClientRuntime {
                         None
                     }
                 } => {
-                    self.handle_command(cmd).await?;
+                    if let Err(error) = self.handle_command(cmd).await {
+                        self.set_exit_cause(ClientExitCause::RuntimeFailure);
+                        self.state = ClientState::Disconnected;
+                        self.send_status_event();
+                        return Err(error);
+                    }
                 }
                 _ = physics_tick.tick() => {
                     let now = Instant::now();
@@ -170,33 +227,115 @@ impl ClientRuntime {
                     let dt_duration = Duration::from_secs_f32(dt.max(0.0));
                     last_physics_time = now;
 
+                    let before_dynamic = matches!(self.state, ClientState::InWorld)
+                        .then(|| self.current_dynamic_entity_views())
+                        .unwrap_or_default();
+                    let mut discontinuity = None;
+
                     let movement_events = self
                         .movement
                         .tick(now, &mut self.world, &mut self.session)
-                        .await?;
+                        .await
+                        .inspect_err(|_| {
+                            self.set_exit_cause(ClientExitCause::RuntimeFailure);
+                        })?;
                     for event in movement_events {
+                        discontinuity = discontinuity.or(self.world_discontinuity_kind(&event));
                         self.handle_runtime_world_event(&event);
                     }
 
                     let physics_events = self.world.tick();
                     for event in physics_events {
+                        discontinuity = discontinuity.or(self.world_discontinuity_kind(&event));
                         self.handle_runtime_world_event(&event);
                     }
 
+                    if let Some(coordinator) = self.collision_coordinator.as_mut() {
+                        coordinator.observe(&self.world);
+                        let collision_events = coordinator.poll(&mut self.world, now);
+                        for event in collision_events {
+                            discontinuity = discontinuity.or(self.world_discontinuity_kind(&event));
+                            self.handle_runtime_world_event(&event);
+                        }
+                    }
+
+                    let collision_snapshot = self
+                        .collision_coordinator
+                        .as_ref()
+                        .and_then(|coordinator| coordinator.snapshot());
                     let simulation_events = self.simulation.tick(
                         now,
                         dt_duration,
                         &mut self.world,
                         &mut self.movement,
-                    );
+                        collision_snapshot.as_ref(),
+                    ).inspect_err(|_| {
+                        self.set_exit_cause(ClientExitCause::RuntimeFailure);
+                    })?;
                     for event in simulation_events {
+                        discontinuity = discontinuity.or(self.world_discontinuity_kind(&event));
                         self.handle_runtime_world_event(&event);
+                    }
+
+                    let dynamic_event = if !before_dynamic.is_empty() {
+                        let kind = match discontinuity {
+                            Some(ClientWorldDiscontinuityKind::Teleport) => {
+                                DynamicEntityPlacementAdvanceKind::Teleport
+                            }
+                            Some(ClientWorldDiscontinuityKind::ForcedReposition)
+                            | Some(ClientWorldDiscontinuityKind::Reset) => {
+                                DynamicEntityPlacementAdvanceKind::Reset
+                            }
+                            None => DynamicEntityPlacementAdvanceKind::Integrated,
+                        };
+                        self.dynamic_entity_advance_event(
+                            before_dynamic,
+                            self.current_dynamic_entity_views(),
+                            self.dynamic_entity_host_time(),
+                            dt_duration.as_secs_f64() * 1_000.0,
+                            kind,
+                        )
+                    } else {
+                        None
+                    };
+                    let dynamic_batch = dynamic_event.as_ref().and_then(|event| match event {
+                        DynamicEntityEvent::Advanced { batch } => Some(batch.clone()),
+                        _ => None,
+                    });
+                    if let Some(event) = dynamic_event {
+                        let _ = self
+                            .client_view_event_tx
+                            .send(ClientViewEvent::DynamicEntity(event));
+                    }
+                    if let Some(tick) = self.advance_camera(
+                        collision_snapshot.as_ref(),
+                        dynamic_batch.as_ref(),
+                        dt_duration,
+                    )? {
+                        self.emit_camera_event(tick);
                     }
                 }
             }
         }
 
         Ok(())
+    }
+}
+
+impl ClientRuntime {
+    /// Returns only discontinuities that invalidate the local presentation timeline.
+    ///
+    /// Remote forced repositions are ordinary per-entity corrections. Treating one as a world
+    /// reset would unnecessarily invalidate every renderer-owned interpolation timeline.
+    fn world_discontinuity_kind(&self, event: &WorldEvent) -> Option<ClientWorldDiscontinuityKind> {
+        match event {
+            WorldEvent::RuntimeBodiesReset { .. } => Some(ClientWorldDiscontinuityKind::Reset),
+            WorldEvent::ForcedReposition { guid, .. } if *guid == self.world.player.guid => {
+                Some(ClientWorldDiscontinuityKind::ForcedReposition)
+            }
+            WorldEvent::TeleportStarted { .. } => Some(ClientWorldDiscontinuityKind::Teleport),
+            _ => None,
+        }
     }
 }
 
@@ -220,5 +359,18 @@ mod tests {
         let mut in_world = builder::build_test_client(ClientState::InWorld);
         in_world.session.last_send_time = now - Duration::from_secs(6);
         assert!(in_world.should_send_keepalive_ping(now));
+    }
+
+    #[test]
+    fn remote_forced_reposition_does_not_reset_local_timeline() {
+        let client = builder::build_test_client(ClientState::InWorld);
+        let remote_guid = holtburger_common::Guid(0x5000_0002);
+        let event = WorldEvent::ForcedReposition {
+            guid: remote_guid,
+            pos: Default::default(),
+            sequence: 1,
+        };
+
+        assert_eq!(client.world_discontinuity_kind(&event), None);
     }
 }

@@ -279,6 +279,16 @@ impl GroundedBodyActuation {
         self.control_heading
     }
 
+    /// One-shot launch carried by this actuation, if any.
+    pub fn launch(&self) -> Option<&GroundedLaunch> {
+        self.launch.as_ref()
+    }
+
+    /// Generic acceleration carried by this actuation.
+    pub fn external_acceleration(&self) -> Vector3 {
+        self.external_acceleration
+    }
+
     /// Applies the controller's absolute world heading without changing ballistic velocity.
     pub fn with_control_heading(
         mut self,

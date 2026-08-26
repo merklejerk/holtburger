@@ -7,8 +7,17 @@ use crate::explorer_entity_runtime::PossessionEventOutcome;
 use crate::host_physical_fly_runtime::{PhysicalFlyFailure, PhysicalFlyMotionPath};
 use holtburger_core::DynamicEntityEvent;
 
-/// Complete event surface produced by the app-local host runtime.
-pub trait HostEventSink: Send + Sync {
+/// Client-only event publication boundary.
+pub trait ClientEventSink: Send + Sync {
+    /// Publishes one renderer-safe client lifecycle or focused presentation event.
+    fn publish_client_event(
+        &self,
+        event: crate::client_projection::ClientHostEvent,
+    ) -> anyhow::Result<()>;
+}
+
+/// Explorer-only event publication boundary.
+pub trait ExplorerEventSink: Send + Sync {
     /// Publishes a command/snapshot-driven dynamic-entity change.
     fn publish_dynamic_entity(&self, event: DynamicEntityEvent) -> anyhow::Result<()>;
 
@@ -30,12 +39,12 @@ pub trait HostEventSink: Send + Sync {
 
 /// Adapter from the complete host sink to the dynamic-entity participant contract.
 pub struct DynamicEntityEventSinkAdapter {
-    sink: Arc<dyn HostEventSink>,
+    sink: Arc<dyn ExplorerEventSink>,
 }
 
 impl DynamicEntityEventSinkAdapter {
     /// Binds the adapter to one shell-owned publication sink.
-    pub fn new(sink: Arc<dyn HostEventSink>) -> Self {
+    pub fn new(sink: Arc<dyn ExplorerEventSink>) -> Self {
         Self { sink }
     }
 }
@@ -55,12 +64,12 @@ impl crate::explorer_entity_simulation::DynamicEntityEventSink for DynamicEntity
 
 /// Adapter from the complete host sink to the physical-flight participant contract.
 pub struct PhysicalFlyEventSinkAdapter {
-    sink: Arc<dyn HostEventSink>,
+    sink: Arc<dyn ExplorerEventSink>,
 }
 
 impl PhysicalFlyEventSinkAdapter {
     /// Binds the adapter to one shell-owned publication sink.
-    pub fn new(sink: Arc<dyn HostEventSink>) -> Self {
+    pub fn new(sink: Arc<dyn ExplorerEventSink>) -> Self {
         Self { sink }
     }
 }

@@ -7,10 +7,10 @@ import type { ObjectVisualTemplateResourceOwnerId } from "../systems/object-visu
 export type OwnerId = `landblock-layer:${LandblockId}/${LandblockLayerKind}`;
 
 /** Stable frontend lifetime identity for one producer-owned live dynamic entity. */
-export type SpawnedDynamicOwnerId = `spawned-dynamic:${number}`;
+export type DynamicEntityOwnerId = `dynamic-entity:${number}`;
 
 /** Every owner admitted by the shared dynamic presentation systems. */
-export type DynamicOwnerId = OwnerId | SpawnedDynamicOwnerId;
+export type DynamicOwnerId = OwnerId | DynamicEntityOwnerId;
 
 /** Runtime lifetime identity for resource leases owned exclusively by one terrain source. */
 export type TerrainResourceOwnerId = `terrain-resource:${LandblockId}`;
@@ -33,7 +33,7 @@ export type ResourceOwnerId =
 	| OwnerId
 	| TerrainResourceOwnerId
 	| ActiveRegionResourceOwnerId
-	| SpawnedDynamicOwnerId
+	| DynamicEntityOwnerId
 	| StaticRevisionResourceOwnerId
 	| EnvCellRevisionResourceOwnerId
 	| DynamicGenerationResourceOwnerId
@@ -107,8 +107,8 @@ export function dynamicGenerationToResourceOwnerId(
 }
 
 /** Derive the one stable dynamic-presentation owner for a producer GUID. */
-export function spawnedDynamicOwnerId(guid: number): SpawnedDynamicOwnerId {
-	return `spawned-dynamic:${guid}`;
+export function dynamicEntityOwnerId(guid: number): DynamicEntityOwnerId {
+	return `dynamic-entity:${guid}`;
 }
 
 /** Derive geometry keys from the same authoritative layer owner and revision as their lease. */

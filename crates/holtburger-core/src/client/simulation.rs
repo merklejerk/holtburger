@@ -1,15 +1,16 @@
+use super::collision::ClientCollisionSnapshot;
 use super::movement::{MovementSystem, ServerControlledProjection};
 use anyhow::Result;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::WorldObjectExt;
-use holtburger_common::{Guid, Quaternion, Vector3};
+use holtburger_common::{Guid, Quaternion, RigidTransform, Vector3};
 use holtburger_protocol::messages::*;
 use holtburger_session::Session;
 use holtburger_world::{
-    ContactState, SolveBodyInput, SolvedBodyKinematics, SpatialBodyId, SpatialSolveBatch,
-    SpatialSolveRequest, WorldEvent, WorldState,
+    ContactState, GroundedBodyActuation, PhysicalBodyActuation, PhysicalBodyDefinition,
+    SolveBodyInput, SolvedBodyKinematics, SpatialBodyId, WorldEvent, WorldState,
+    advance_authored_body_kinematics, advance_body_kinematics, authored_grounded_actuation,
 };
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 const AUTO_MOVE_DISTANCE_LIMIT: f32 = 500.0;
@@ -45,6 +46,12 @@ pub(super) struct ClientSimulationSystem {
     tracked_body_ids: Vec<SpatialBodyId>,
 }
 
+/// Pose-only projection inputs retained for diagnostic and remote dead-reckoning consumers.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct ClientProjectionRequest {
+    pub bodies: Vec<SolveBodyInput>,
+}
+
 impl ClientSimulationSystem {
     pub(super) fn new() -> Self {
         Self::default()
@@ -69,35 +76,65 @@ impl ClientSimulationSystem {
         dt: Duration,
         world: &mut WorldState,
         movement: &mut MovementSystem,
-    ) -> Vec<WorldEvent> {
+        collision: Option<&ClientCollisionSnapshot>,
+    ) -> Result<Vec<WorldEvent>> {
         if dt.is_zero() {
-            return Vec::new();
+            return Ok(Vec::new());
         }
 
-        // Authored playback advances once per tick, before any basis is read from it.
-        world.advance_authored_motion(dt);
+        // Authored playback advances once per tick, before any basis is read from it. A held
+        // local drive owns a separate predicted cursor; excluding that entity prevents the
+        // authoritative snapshot playback from producing a second offset for the same tick.
+        let local_guid = world.player.guid;
+        let excluded = movement
+            .has_active_manual_drive()
+            .then_some(local_guid)
+            .filter(|guid| !guid.is_null());
+        world.advance_authored_motion_except(dt, excluded);
+        // Server correction is another basis producer. Prepare it once so local actuation and
+        // projection diagnostics consume the same interpolation/constraint result.
+        let prepared_correction = movement.advance_server_interpolation(world, dt);
 
-        let Some(request) = self.build_solve_request(now, dt, world, movement) else {
-            return Vec::new();
-        };
-
-        let physics = Arc::clone(world.scene.physics());
-        let solved = physics.solve(&request, &mut world.scene);
-        self.apply_solve_batch(world, solved)
+        let mut events = Vec::new();
+        if let Some(snap_to) = prepared_correction.and_then(|step| step.snap_to) {
+            events.extend(world.set_local_player_runtime_pose(snap_to));
+            movement.clear_server_correction();
+        }
+        if let Some(collision) = collision {
+            let manual_offset = movement.advance_local_manual_motion(world, dt)?;
+            events.extend(self.tick_local_player(
+                now,
+                dt,
+                world,
+                movement,
+                collision,
+                manual_offset,
+            )?);
+        } else {
+            movement.reset_manual_motion_playback();
+        }
+        events.extend(self.tick_remote_entities(now, dt, world, movement));
+        Ok(events)
     }
 
-    pub(super) fn build_solve_request(
+    /// Builds the pose-only projection inputs retained for server-authoritative remote entities.
+    ///
+    /// The returned values are consumed by the client projection lane, never by a collision
+    /// callback. Local-player collision uses the transaction path in [`Self::tick`].
+    pub(super) fn build_projection_request(
         &self,
         _now: Instant,
         dt: Duration,
         world: &WorldState,
         movement: &MovementSystem,
-    ) -> Option<SpatialSolveRequest> {
-        let local_body = movement.current_local_solve_body_input(world).or_else(|| {
-            (world.player.guid != Guid::NULL)
-                .then_some(SpatialBodyId::LocalPlayer(world.player.guid))
-                .and_then(|body_id| world.resolve_body_projection_input(body_id))
-        });
+    ) -> Option<ClientProjectionRequest> {
+        let local_body = movement
+            .current_local_solve_body_input(world, dt)
+            .or_else(|| {
+                (world.player.guid != Guid::NULL)
+                    .then_some(SpatialBodyId::LocalPlayer(world.player.guid))
+                    .and_then(|body_id| world.resolve_body_projection_input(body_id))
+            });
         let local_pose = local_body.map(|body| body.pose);
         let nearby_tracked = local_pose.map(|pose| {
             world
@@ -138,28 +175,212 @@ impl ClientSimulationSystem {
             return None;
         }
 
-        Some(SpatialSolveRequest {
-            dt,
-            bodies,
-            local_drive: movement.current_local_drive_control(world, dt),
-        })
+        Some(ClientProjectionRequest { bodies })
     }
 
-    fn apply_solve_batch(
+    fn tick_local_player(
         &mut self,
+        now: Instant,
+        dt: Duration,
         world: &mut WorldState,
-        solved: SpatialSolveBatch,
+        movement: &mut MovementSystem,
+        collision: &ClientCollisionSnapshot,
+        manual_offset: Option<RigidTransform>,
+    ) -> Result<Vec<WorldEvent>> {
+        let guid = world.player.guid;
+        if guid.is_null() {
+            return Ok(Vec::new());
+        }
+        let body_id = SpatialBodyId::LocalPlayer(guid);
+        let Some(body) = world.scene.body(body_id) else {
+            return Ok(Vec::new());
+        };
+        let Some(player) = world.player_entity() else {
+            return Ok(Vec::new());
+        };
+        if collision.player.guid != guid
+            || collision.player.instance_sequence != player.instance_sequence()
+            || collision.player.residency != player.position.landblock_id
+        {
+            return Ok(Vec::new());
+        }
+        if body.physical.is_none() {
+            return Ok(Vec::new());
+        }
+
+        let actuation = self.local_player_actuation(body, dt, world, movement, manual_offset)?;
+        let (result, ()) = world.scene.tick_physical_body_transaction(
+            body_id,
+            collision.scene.as_ref(),
+            actuation,
+            dt.as_secs_f32(),
+            now,
+            |_, _| Ok(()),
+        )?;
+        Ok(world.apply_physical_body_tick_result(body_id, &result))
+    }
+
+    fn local_player_actuation(
+        &self,
+        body: &holtburger_world::SpatialBody,
+        dt: Duration,
+        world: &WorldState,
+        movement: &mut MovementSystem,
+        manual_offset: Option<RigidTransform>,
+    ) -> Result<PhysicalBodyActuation> {
+        let dt_secs = dt.as_secs_f32();
+        anyhow::ensure!(
+            dt_secs.is_finite() && dt_secs > 0.0,
+            "local client transaction interval must be finite and positive"
+        );
+
+        let definition = body
+            .physical
+            .as_ref()
+            .expect("physical body was checked before actuation resolution")
+            .definition;
+        let object_scale = world
+            .player_entity()
+            .and_then(|entity| entity.obj_scale())
+            .unwrap_or(1.0) as f32;
+        let actuation = match definition {
+            PhysicalBodyDefinition::FreeSphere { .. } => {
+                let velocity = movement
+                    .current_local_drive_control(world, dt)
+                    .map(|control| control.desired_world_delta / dt_secs)
+                    .or_else(|| {
+                        manual_offset.map(|offset| {
+                            body.pose.rotation.rotate_vector(offset.translation) / dt_secs
+                        })
+                    })
+                    .unwrap_or(body.velocity);
+                PhysicalBodyActuation::free_flight(velocity)?
+            }
+            PhysicalBodyDefinition::Grounded { .. } => {
+                if let Some(offset) = manual_offset {
+                    authored_grounded_actuation(
+                        offset,
+                        body.pose,
+                        body.contact,
+                        object_scale,
+                        dt_secs,
+                    )?
+                } else if let Some(control) = movement.current_local_drive_control(world, dt) {
+                    let planar_velocity = control.desired_world_delta / dt_secs;
+                    let mut grounded =
+                        if control.force_grounded || body.contact != ContactState::Airborne {
+                            GroundedBodyActuation::drive(Vector3::new(
+                                planar_velocity.x,
+                                planar_velocity.y,
+                                0.0,
+                            ))?
+                        } else {
+                            GroundedBodyActuation::coast()
+                        };
+                    if let Some(heading) = control.desired_heading {
+                        grounded = grounded.with_control_heading(heading)?;
+                    }
+                    PhysicalBodyActuation::Grounded(grounded)
+                } else {
+                    PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast())
+                }
+            }
+        };
+
+        let composed_translation = match &actuation {
+            PhysicalBodyActuation::FreeFlight { velocity } => *velocity * dt_secs,
+            PhysicalBodyActuation::Grounded(grounded) => {
+                grounded.supported_planar_velocity() * dt_secs
+            }
+        };
+        let correction = movement.apply_server_correction_to_translation(
+            composed_translation,
+            body.contact == ContactState::Grounded,
+        );
+        if correction.snap_to.is_some() {
+            // The simulation tick consumes the snap before this function is called. Retaining a
+            // defensive zero here prevents a stale prepared result from injecting movement.
+            return Ok(PhysicalBodyActuation::Grounded(
+                GroundedBodyActuation::coast(),
+            ));
+        }
+
+        match actuation {
+            PhysicalBodyActuation::FreeFlight { velocity } => {
+                let corrected_velocity = if correction.translation == composed_translation {
+                    velocity
+                } else {
+                    correction.translation / dt_secs
+                };
+                Ok(PhysicalBodyActuation::free_flight(corrected_velocity)?)
+            }
+            PhysicalBodyActuation::Grounded(grounded) => {
+                let original_heading = grounded.control_heading();
+                let launch = grounded.launch().cloned();
+                let external_acceleration = grounded.external_acceleration();
+                let has_drive = grounded.supported_planar_velocity() != Vector3::zero();
+                let correction_assigns = movement
+                    .prepared_server_correction()
+                    .is_some_and(|step| step.assigned);
+                let should_drive = has_drive || correction_assigns;
+                let mut corrected = if should_drive {
+                    GroundedBodyActuation::drive(Vector3::new(
+                        correction.translation.x / dt_secs,
+                        correction.translation.y / dt_secs,
+                        0.0,
+                    ))?
+                } else {
+                    GroundedBodyActuation::coast()
+                };
+                let heading = if correction.heading_pinned {
+                    None
+                } else if correction_assigns {
+                    correction.target.map(|target| target.rotation.to_heading())
+                } else {
+                    original_heading
+                };
+                if let Some(heading) = heading {
+                    corrected = corrected.with_control_heading(heading)?;
+                }
+                if let Some(launch) = launch {
+                    corrected = corrected.with_launch(launch);
+                }
+                if external_acceleration != Vector3::zero() {
+                    corrected = corrected.with_external_acceleration(external_acceleration)?;
+                }
+                Ok(PhysicalBodyActuation::Grounded(corrected))
+            }
+        }
+    }
+
+    fn tick_remote_entities(
+        &self,
+        now: Instant,
+        dt: Duration,
+        world: &mut WorldState,
+        movement: &MovementSystem,
     ) -> Vec<WorldEvent> {
+        let Some(request) = self.build_projection_request(now, dt, world, movement) else {
+            return Vec::new();
+        };
         let mut events = Vec::new();
-
-        for body in solved.solved {
-            events.extend(world.apply_solved_body_kinematics(&body));
+        for input in request.bodies {
+            if matches!(input.body_id, SpatialBodyId::LocalPlayer(_)) {
+                continue;
+            }
+            let Some(basis) = input.basis else {
+                continue;
+            };
+            let solved = match basis {
+                holtburger_world::SolveProjectionBasis::AuthoredDrive { offset } => {
+                    advance_authored_body_kinematics(&input, offset, dt)
+                }
+                holtburger_world::SolveProjectionBasis::Velocity { .. } => {
+                    advance_body_kinematics(&input, dt)
+                }
+            };
+            events.extend(world.apply_solved_body_kinematics(&solved));
         }
-
-        for event in solved.events {
-            events.extend(world.apply_spatial_body_event(&event));
-        }
-
         events
     }
 
@@ -168,7 +389,7 @@ impl ClientSimulationSystem {
         data: MovementEventData,
         movement: &mut MovementSystem,
         world: &mut WorldState,
-        session: &mut Session,
+        _session: &mut Session,
     ) -> Result<Vec<WorldEvent>> {
         log::info!(
             ">>> Processing server-initiated movement: {:?}. Control Sequence: {}",
@@ -201,10 +422,13 @@ impl ClientSimulationSystem {
                     Quaternion::from_heading(mto.params.desired_heading)
                 };
 
-                movement.set_server_controlled_projection(ServerControlledProjection {
-                    target_pose,
-                    speed_mps: (mto.run_rate * mto.params.speed.max(0.1)).max(0.1),
-                });
+                movement.set_server_controlled_projection_with_heading(
+                    ServerControlledProjection {
+                        target_pose,
+                        speed_mps: (mto.run_rate * mto.params.speed.max(0.1)).max(0.1),
+                    },
+                    true,
+                );
                 movement.arm_autonomous_position_heartbeat_schedule(Instant::now(), world);
                 return Ok(Vec::new());
             }
@@ -219,23 +443,13 @@ impl ClientSimulationSystem {
         let Some(solved) = self.build_server_controlled_result(&data, world) else {
             return Ok(Vec::new());
         };
-
-        let world_events = world.apply_solved_body_kinematics(&solved);
+        movement.set_server_controlled_projection(ServerControlledProjection {
+            target_pose: solved.pose,
+            speed_mps: server_controlled_speed(&data),
+        });
         let now = Instant::now();
-        if should_send_immediate_server_controlled_sync(&data) {
-            movement
-                .send_autonomous_position_sync(
-                    now,
-                    world,
-                    session,
-                    super::movement_types::MovementPacketMetadata::default(),
-                )
-                .await?;
-        } else {
-            movement.arm_autonomous_position_heartbeat_schedule(now, world);
-        }
-
-        Ok(world_events)
+        movement.arm_autonomous_position_heartbeat_schedule(now, world);
+        Ok(Vec::new())
     }
 
     fn build_server_controlled_result(
@@ -339,6 +553,20 @@ impl ClientSimulationSystem {
     }
 }
 
+fn server_controlled_speed(data: &MovementEventData) -> f32 {
+    let speed = match &data.data {
+        MovementTypeData::MoveToObject(move_to) => move_to.run_rate * move_to.params.speed.max(0.1),
+        MovementTypeData::MoveToPosition(move_to) => {
+            move_to.run_rate * move_to.params.speed.max(0.1)
+        }
+        MovementTypeData::TurnToObject(turn_to) => turn_to.params.speed,
+        MovementTypeData::TurnToHeading(turn_to) => turn_to.params.speed,
+        MovementTypeData::Invalid(_) => 0.0,
+    };
+    speed.max(0.1)
+}
+
+#[cfg(test)]
 fn should_send_immediate_server_controlled_sync(data: &MovementEventData) -> bool {
     !matches!(data.data, MovementTypeData::Invalid(_))
 }
@@ -371,8 +599,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_solve_batch_applies_spatial_events() {
-        let mut simulation = ClientSimulationSystem::new();
+    fn applying_spatial_events_keeps_world_semantics() {
         let mut world = WorldState::synthetic();
         let player_guid = Guid(0x5000_0001);
         let remote_guid = Guid(0x5000_0002);
@@ -389,21 +616,15 @@ mod tests {
         world.seed_local_player_entity(player_guid, "Player", player_pose);
         world.add_entity(Entity::new(remote_guid, "Remote".to_string(), player_pose));
 
-        let events = simulation.apply_solve_batch(
-            &mut world,
-            SpatialSolveBatch {
-                solved: Vec::new(),
-                events: vec![
-                    SpatialBodyEvent::ContactChanged {
-                        body_id: SpatialBodyId::LocalPlayer(player_guid),
-                        contact: ContactState::Grounded,
-                    },
-                    SpatialBodyEvent::ForcedReposition {
-                        body_id: SpatialBodyId::Entity(remote_guid),
-                        pose: remote_pose,
-                    },
-                ],
-            },
+        let mut events = world.apply_spatial_body_event(&SpatialBodyEvent::ContactChanged {
+            body_id: SpatialBodyId::LocalPlayer(player_guid),
+            contact: ContactState::Grounded,
+        });
+        events.extend(
+            world.apply_spatial_body_event(&SpatialBodyEvent::ForcedReposition {
+                body_id: SpatialBodyId::Entity(remote_guid),
+                pose: remote_pose,
+            }),
         );
 
         assert_eq!(world.player.last_server_grounded, Some(true));

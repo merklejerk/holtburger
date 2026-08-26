@@ -105,10 +105,23 @@ pub enum WorldEvent {
         grounded: bool,
     },
     SelfUpdatePosition {
+        /// The accepted server pose. The client correction owner consumes this once; the
+        /// authoritative world has already installed it as the server-side reference pose.
+        position: WorldPosition,
+        /// Whether the position packet reported walkable contact.
+        contact: bool,
+        /// Teleport epoch before this accepted packet was applied.
+        known_teleport_sequence: u16,
         teleport_sequence: u16,
         force_position_sequence: u16,
     },
     SelfAutonomousPosition {
+        /// The accepted autonomous position payload.
+        position: WorldPosition,
+        /// Whether the server reported contact for this autonomous update.
+        contact: bool,
+        /// Teleport epoch before this accepted packet was applied.
+        known_teleport_sequence: u16,
         teleport_sequence: u16,
         force_position_sequence: u16,
         server_control_sequence: u16,

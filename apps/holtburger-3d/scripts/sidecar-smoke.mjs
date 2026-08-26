@@ -47,61 +47,95 @@ await access(hostPath, constants.X_OK);
 const emptyContentDirectory = await mkdtemp(
 	join(tmpdir(), "holtburger-3d-sidecar-smoke-"),
 );
-const child = spawn(hostPath, [], {
-	env: { ...process.env, HOLTBURGER_DATS: emptyContentDirectory },
-	stdio: "pipe",
-	windowsHide: true,
-});
-const exited = waitForExit(child);
-let stderr = "";
-child.stderr.on("data", (chunk) => {
-	stderr += chunk.toString();
-});
-const client = new SidecarHostClient(child);
+async function smokeMode(mode) {
+	const child = spawn(hostPath, [`--mode=${mode}`], {
+		env: { ...process.env, HOLTBURGER_DATS: emptyContentDirectory },
+		stdio: "pipe",
+		windowsHide: true,
+	});
+	const exited = waitForExit(child);
+	let stderr = "";
+	child.stderr.on("data", (chunk) => {
+		stderr += chunk.toString();
+	});
+	const client = new SidecarHostClient(child, mode);
+
+	try {
+		await client.connect();
+		if (mode === "client") {
+			// Client startup needs a real DAT bootstrap and server; this smoke intentionally
+			// injects an empty repository, so verify mode admission without opening a socket.
+			await expectModeRejection(client, "explorer_catalog_capability");
+		} else {
+			await expectModeRejection(client, "start_client", {
+				startup: {
+					host: "127.0.0.1",
+					port: 9000,
+					account: "smoke",
+					password: "",
+				},
+			});
+		}
+		const status = await client.invoke("host_status");
+		if (
+			status?.appName !== "holtburger-3d" ||
+			status?.status !== `${mode}-host-ready`
+		) {
+			throw new Error(
+				`unexpected ${mode} host status: ${JSON.stringify(status)}`,
+			);
+		}
+		await client.shutdown();
+		const result = await withTimeout(
+			exited,
+			EXIT_TIMEOUT_MS,
+			"host did not exit after acknowledging shutdown",
+		);
+		if (result.code !== 0 || result.signal !== null) {
+			throw new Error(
+				`host exited uncleanly (code=${result.code ?? "none"}, signal=${result.signal ?? "none"})`,
+			);
+		}
+		return { mode, status, shutdown: "clean" };
+	} catch (error) {
+		const diagnostic = stderr.trim();
+		throw new Error(
+			`${mode} sidecar smoke failed${diagnostic.length === 0 ? "" : `: ${diagnostic}`}`,
+			{ cause: error },
+		);
+	} finally {
+		if (child.exitCode === null && child.signalCode === null) {
+			child.kill();
+			await withTimeout(
+				exited.catch(() => undefined),
+				EXIT_TIMEOUT_MS,
+				"host did not exit after forced smoke cleanup",
+			);
+		}
+	}
+}
+
+async function expectModeRejection(client, command, args) {
+	try {
+		await client.invoke(command, args);
+		throw new Error(`host accepted unavailable command ${command}`);
+	} catch (error) {
+		if (error?.code !== "mode_command_unavailable") throw error;
+	}
+}
 
 try {
-	await client.connect();
-	const status = await client.invoke("host_status");
-	if (
-		status?.appName !== "holtburger-3d" ||
-		status?.status !== "landblock-source-batch-host-ready"
-	) {
-		throw new Error(`unexpected host status: ${JSON.stringify(status)}`);
-	}
-	await client.shutdown();
-	const result = await withTimeout(
-		exited,
-		EXIT_TIMEOUT_MS,
-		"host did not exit after acknowledging shutdown",
-	);
-	if (result.code !== 0 || result.signal !== null) {
-		throw new Error(
-			`host exited uncleanly (code=${result.code ?? "none"}, signal=${result.signal ?? "none"})`,
-		);
-	}
+	const results = [];
+	for (const mode of ["explorer", "client"])
+		results.push(await smokeMode(mode));
 	console.log(
 		JSON.stringify({
 			binary: basename(hostPath),
 			platform: process.platform,
 			architecture: process.arch,
-			status,
-			shutdown: "clean",
+			modes: results,
 		}),
 	);
-} catch (error) {
-	const diagnostic = stderr.trim();
-	throw new Error(
-		`sidecar smoke failed${diagnostic.length === 0 ? "" : `: ${diagnostic}`}`,
-		{ cause: error },
-	);
 } finally {
-	if (child.exitCode === null && child.signalCode === null) {
-		child.kill();
-		await withTimeout(
-			exited.catch(() => undefined),
-			EXIT_TIMEOUT_MS,
-			"host did not exit after forced smoke cleanup",
-		);
-	}
 	await rm(emptyContentDirectory, { force: true, recursive: true });
 }

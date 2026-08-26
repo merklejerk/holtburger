@@ -3,10 +3,6 @@ use holtburger_common::position::WorldPosition;
 use holtburger_protocol::messages::movement::MotionStance;
 use std::time::Duration;
 
-pub(crate) fn planar_velocity_for_heading(heading: f32, speed: f32) -> Vector3 {
-    Vector3::new(-heading.cos() * speed, heading.sin() * speed, 0.0)
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MotionStyle {
     #[default]
@@ -207,16 +203,6 @@ mod tests {
     use super::*;
     use holtburger_common::position::WorldPosition;
     use holtburger_common::{Guid, Quaternion};
-
-    #[test]
-    fn planar_velocity_matches_ac_heading_convention() {
-        let west_velocity = planar_velocity_for_heading(0.0, 2.0);
-        let north_velocity = planar_velocity_for_heading(90.0f32.to_radians(), 2.0);
-
-        assert_eq!(west_velocity, Vector3::new(-2.0, 0.0, 0.0));
-        assert!(north_velocity.x.abs() < 1e-5);
-        assert!((north_velocity.y - 2.0).abs() < 1e-5);
-    }
 
     #[test]
     fn metadata_can_override_motion_style_without_contact() {

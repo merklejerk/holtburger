@@ -90,8 +90,9 @@ class FakeProcess implements SidecarProcessLike {
 async function connect(
 	process: FakeProcess,
 	protocolVersion = PROTOCOL_VERSION,
+	hostMode: "explorer" | "client" = "explorer",
 ): Promise<SidecarHostClient> {
-	const client = new SidecarHostClient(process);
+	const client = new SidecarHostClient(process, hostMode);
 	const connected = client.connect();
 	process.stdout.push(
 		encodeSidecarFrame({
@@ -99,6 +100,7 @@ async function connect(
 			protocol_version: protocolVersion,
 			host_name: "holtburger-3d-host",
 			host_version: "test",
+			host_mode: hostMode,
 		}),
 	);
 	await connected;
@@ -125,6 +127,7 @@ describe("SidecarFrameDecoder", () => {
 			protocol_version: 1,
 			host_name: "holtburger-3d-host",
 			host_version: "test",
+			host_mode: "explorer",
 		});
 		const second = encodeSidecarFrame({ kind: "shutdown_ack", id: 4 });
 		const merged = new Uint8Array(first.length + second.length);
@@ -170,6 +173,25 @@ describe("wireCommand", () => {
 		expect(
 			wireCommand("despawn_explorer_entity", { guid: 7, generation: 2 }),
 		).toEqual({ command: "despawn_explorer_entity", guid: 7, generation: 2 });
+		expect(
+			wireCommand("select_client_character", { guid: 0x50000007 }),
+		).toEqual({ command: "select_client_character", guid: 0x50000007 });
+		expect(
+			wireCommand("replace_client_drive", {
+				request: {
+					gait: "run",
+					longitudinal: "forward",
+					turning: null,
+				},
+			}),
+		).toEqual({
+			command: "replace_client_drive",
+			request: {
+				gait: "run",
+				longitudinal: "forward",
+				turning: null,
+			},
+		});
 	});
 });
 
@@ -190,7 +212,10 @@ describe("SidecarHostClient", () => {
 		process.stdout.push(
 			encodeSidecarFrame({
 				kind: "event",
-				event: { event: "fixed-tick", payload: { epoch: 1 } },
+				event: {
+					event: "explorer-fixed-tick",
+					payload: { epoch: 1 },
+				},
 			}),
 		);
 		process.stdout.push(
@@ -261,6 +286,48 @@ describe("SidecarHostClient", () => {
 			code: "incompatible_protocol",
 		});
 		expect(process.killCount).toBe(1);
+	});
+
+	it("rejects a sidecar that selected a different host mode", async () => {
+		const process = new FakeProcess();
+		const client = new SidecarHostClient(process, "explorer");
+		const connected = client.connect();
+		process.stdout.push(
+			encodeSidecarFrame({
+				kind: "handshake",
+				protocol_version: PROTOCOL_VERSION,
+				host_name: "holtburger-3d-host",
+				host_version: "test",
+				host_mode: "client",
+			}),
+		);
+		await expect(connected).rejects.toMatchObject({
+			code: "host_mode_mismatch",
+		});
+		expect(process.killCount).toBe(1);
+	});
+
+	it("sends client startup privately and clears the retained password", async () => {
+		const process = new FakeProcess();
+		const client = await connect(process, PROTOCOL_VERSION, "client");
+		const startup = {
+			host: "127.0.0.1",
+			port: 9000,
+			account: "account",
+			password: "secret",
+		};
+		const request = client.startClient(startup);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(process.stdin.writes).toHaveLength(2);
+		process.stdout.push(
+			encodeSidecarFrame({
+				kind: "response",
+				id: 1,
+				result: { Ok: { kind: "unit" } },
+			}),
+		);
+		await request;
+		expect(startup.password).toBe("");
 	});
 
 	it("rejects pending and future requests when the host crashes", async () => {

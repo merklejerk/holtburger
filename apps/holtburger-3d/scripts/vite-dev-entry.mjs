@@ -4,15 +4,28 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { buildEntryPath, requireEntry } from "./entry-paths.mjs";
+import {
+	buildEntryPath,
+	extractVitePortArguments,
+	requireEntry,
+	stripClientLaunchArguments,
+} from "./entry-paths.mjs";
+import { resolveVitePort } from "./dev-port.mjs";
 
-const [entryName, ...rawArgs] = process.argv.slice(2);
+const [entryName, ...allArgs] = process.argv.slice(2);
 
 let entry;
 let openPath;
+let requestedVitePort;
 try {
 	entry = requireEntry(entryName);
-	openPath = `/${buildEntryPath(entry.path, rawArgs)}`;
+	const extracted = extractVitePortArguments(allArgs, { allowPortAlias: true });
+	requestedVitePort = extracted.vitePort;
+	const rendererArgs =
+		entryName === "client"
+			? stripClientLaunchArguments(extracted.args)
+			: extracted.args;
+	openPath = `/${buildEntryPath(entry.path, rendererArgs)}`;
 } catch (error) {
 	console.error(error instanceof Error ? error.message : String(error));
 	process.exit(1);
@@ -27,12 +40,14 @@ if (!existsSync(viteEntry)) {
 		`Vite entry point is missing at ${viteEntry}; run npm install first.`,
 	);
 }
+const vitePort = await resolveVitePort(requestedVitePort);
+console.info(`Using Vite port ${vitePort}`);
 const viteArgs = [
 	viteEntry,
 	"--host",
 	"127.0.0.1",
 	"--port",
-	"1420",
+	String(vitePort),
 	"--strictPort",
 	"--open",
 	openPath,

@@ -25,7 +25,10 @@ import type { ParticleMeshSource } from "../../assets/particle-mesh-source";
 import type { PhysicsScriptSource } from "../../assets/physics-script-source";
 import type { RendererResourceManager } from "../renderer/resource-manager";
 import { LandblockLayerKind, type LandblockIdLayer } from "./scene-interest";
-import { GameRuntime, type GameRuntimeRenderDevice } from "./game-runtime";
+import {
+	GamePresentationRuntime,
+	type GamePresentationRuntimeRenderDevice,
+} from "./game-presentation-runtime";
 import type { SceneAvailabilityEvent } from "./scene-availability";
 import type { DynamicEntityView } from "./dynamic-entity-feed";
 import type { Camera } from "./types";
@@ -110,7 +113,7 @@ const TEST_RESOURCES = {
 
 const EMPTY_RENDERER_FRAME_FEEDBACK = { selectedDynamicNodeIds: [] } as const;
 
-describe("GameRuntime view and interest control", () => {
+describe("GamePresentationRuntime view and interest control", () => {
 	it("keeps frontend scene interest independent from the primary camera", async () => {
 		const requestedLayers: LandblockIdLayer[] = [];
 		const frames: Parameters<Renderer["drawFrame"]>[0][] = [];
@@ -218,11 +221,11 @@ describe("GameRuntime view and interest control", () => {
 				return [];
 			},
 		};
-		const device: GameRuntimeRenderDevice = {
+		const device: GamePresentationRuntimeRenderDevice = {
 			buildRenderer: async () => renderer,
 			resources: TEST_RESOURCES,
 		};
-		const runtime = await buildGameRuntimeForTest(
+		const runtime = await buildGamePresentationRuntimeForTest(
 			device,
 			pipeline,
 			{} as TexturePixelSource,
@@ -376,14 +379,14 @@ describe("GameRuntime view and interest control", () => {
 
 	it("discards a terrain commit whose scene interest was withdrawn while loading", async () => {
 		const pipeline = new DeferredCommitPipeline();
-		const device: GameRuntimeRenderDevice = {
+		const device: GamePresentationRuntimeRenderDevice = {
 			buildRenderer: async () => ({
 				async destroy() {},
 				drawFrame: () => EMPTY_RENDERER_FRAME_FEEDBACK,
 			}),
 			resources: TEST_RESOURCES,
 		};
-		const runtime = await buildGameRuntimeForTest(
+		const runtime = await buildGamePresentationRuntimeForTest(
 			device,
 			pipeline,
 			{} as TexturePixelSource,
@@ -408,14 +411,14 @@ describe("GameRuntime view and interest control", () => {
 
 	it("keeps an in-flight layer current across an unchanged interest refresh", async () => {
 		const pipeline = new DeferredCommitPipeline();
-		const device: GameRuntimeRenderDevice = {
+		const device: GamePresentationRuntimeRenderDevice = {
 			buildRenderer: async () => ({
 				async destroy() {},
 				drawFrame: () => EMPTY_RENDERER_FRAME_FEEDBACK,
 			}),
 			resources: TEST_RESOURCES,
 		};
-		const runtime = await buildGameRuntimeForTest(
+		const runtime = await buildGamePresentationRuntimeForTest(
 			device,
 			pipeline,
 			{} as TexturePixelSource,
@@ -453,14 +456,14 @@ describe("GameRuntime view and interest control", () => {
 
 	it("rejects an old completion after withdrawal and same-layer re-request", async () => {
 		const pipeline = new DeferredCommitPipeline();
-		const device: GameRuntimeRenderDevice = {
+		const device: GamePresentationRuntimeRenderDevice = {
 			buildRenderer: async () => ({
 				async destroy() {},
 				drawFrame: () => EMPTY_RENDERER_FRAME_FEEDBACK,
 			}),
 			resources: TEST_RESOURCES,
 		};
-		const runtime = await buildGameRuntimeForTest(
+		const runtime = await buildGamePresentationRuntimeForTest(
 			device,
 			pipeline,
 			{} as TexturePixelSource,
@@ -495,14 +498,14 @@ describe("GameRuntime view and interest control", () => {
 
 	it("rejects a queued completion after withdrawal and same-layer re-request", async () => {
 		const pipeline = new DeferredCommitPipeline();
-		const device: GameRuntimeRenderDevice = {
+		const device: GamePresentationRuntimeRenderDevice = {
 			buildRenderer: async () => ({
 				async destroy() {},
 				drawFrame: () => EMPTY_RENDERER_FRAME_FEEDBACK,
 			}),
 			resources: TEST_RESOURCES,
 		};
-		const runtime = await buildGameRuntimeForTest(
+		const runtime = await buildGamePresentationRuntimeForTest(
 			device,
 			pipeline,
 			{} as TexturePixelSource,
@@ -529,14 +532,14 @@ describe("GameRuntime view and interest control", () => {
 
 	it("activates a promoted building owner set with shared playback", async () => {
 		const pipeline = new DeferredCommitPipeline();
-		const device: GameRuntimeRenderDevice = {
+		const device: GamePresentationRuntimeRenderDevice = {
 			buildRenderer: async () => ({
 				async destroy() {},
 				drawFrame: () => EMPTY_RENDERER_FRAME_FEEDBACK,
 			}),
 			resources: TEST_RESOURCES,
 		};
-		const runtime = await buildGameRuntimeForTest(
+		const runtime = await buildGamePresentationRuntimeForTest(
 			device,
 			pipeline,
 			{} as TexturePixelSource,
@@ -583,14 +586,14 @@ describe("GameRuntime view and interest control", () => {
 
 	it("routes a synthetic explicit-object source through static realization", async () => {
 		const pipeline = new DeferredCommitPipeline();
-		const device: GameRuntimeRenderDevice = {
+		const device: GamePresentationRuntimeRenderDevice = {
 			buildRenderer: async () => ({
 				async destroy() {},
 				drawFrame: () => EMPTY_RENDERER_FRAME_FEEDBACK,
 			}),
 			resources: TEST_RESOURCES,
 		};
-		const runtime = await buildGameRuntimeForTest(
+		const runtime = await buildGamePresentationRuntimeForTest(
 			device,
 			pipeline,
 			{} as TexturePixelSource,
@@ -634,14 +637,14 @@ describe("GameRuntime view and interest control", () => {
 
 	it("routes generated source through independent static realization", async () => {
 		const pipeline = new DeferredCommitPipeline();
-		const device: GameRuntimeRenderDevice = {
+		const device: GamePresentationRuntimeRenderDevice = {
 			buildRenderer: async () => ({
 				async destroy() {},
 				drawFrame: () => EMPTY_RENDERER_FRAME_FEEDBACK,
 			}),
 			resources: TEST_RESOURCES,
 		};
-		const runtime = await buildGameRuntimeForTest(
+		const runtime = await buildGamePresentationRuntimeForTest(
 			device,
 			pipeline,
 			{} as TexturePixelSource,
@@ -685,7 +688,7 @@ describe("GameRuntime view and interest control", () => {
 	});
 });
 
-describe("GameRuntime spawned dynamic presentation", () => {
+describe("GamePresentationRuntime dynamic-entity presentation", () => {
 	/// The clip is a level on the view, not an edge on a tick. An entity realized asynchronously
 	/// misses every transition that happened while its visual was decoding, so realization has to
 	/// be able to ask what it is playing rather than wait to be told that it changed.
@@ -695,7 +698,7 @@ describe("GameRuntime spawned dynamic presentation", () => {
 			MOTION_TABLE_ANIMATION_SOURCE,
 		);
 
-		await runtime.reconcileSpawnedDynamicEntities([
+		await runtime.reconcileDynamicEntities([
 			motionDrivenEntity(1, {
 				animationId: Number(IDLE_ANIMATION_ID),
 				completion: "loop",
@@ -722,9 +725,7 @@ describe("GameRuntime spawned dynamic presentation", () => {
 			MOTION_TABLE_ANIMATION_SOURCE,
 		);
 
-		await runtime.reconcileSpawnedDynamicEntities([
-			motionDrivenEntity(1, null),
-		]);
+		await runtime.reconcileDynamicEntities([motionDrivenEntity(1, null)]);
 		setTestCamera(runtime, SPAWN_TEST_CAMERA);
 		runtime.render(0);
 
@@ -740,7 +741,7 @@ describe("GameRuntime spawned dynamic presentation", () => {
 		const load = vi.fn(async () => visual);
 		const runtime = await buildSpawnRuntime({ load });
 
-		await runtime.reconcileSpawnedDynamicEntities([
+		await runtime.reconcileDynamicEntities([
 			spawnedEntity(1, 1),
 			spawnedEntity(2, 1),
 		]);
@@ -753,7 +754,7 @@ describe("GameRuntime spawned dynamic presentation", () => {
 				.templateCount,
 		).toBe(1);
 
-		await runtime.reconcileSpawnedDynamicEntities([spawnedEntity(2, 1)]);
+		await runtime.reconcileDynamicEntities([spawnedEntity(2, 1)]);
 		expect(
 			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
 		).toBe(1);
@@ -761,7 +762,7 @@ describe("GameRuntime spawned dynamic presentation", () => {
 			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.templates
 				.templateCount,
 		).toBe(1);
-		await runtime.reconcileSpawnedDynamicEntities([]);
+		await runtime.reconcileDynamicEntities([]);
 		expect(
 			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
 		).toBe(0);
@@ -775,11 +776,11 @@ describe("GameRuntime spawned dynamic presentation", () => {
 	it("replaces one GUID generation and updates same-generation state without reloading", async () => {
 		const load = vi.fn(async () => spawnedVisual());
 		const runtime = await buildSpawnRuntime({ load });
-		await runtime.reconcileSpawnedDynamicEntities([spawnedEntity(7, 1)]);
-		await runtime.reconcileSpawnedDynamicEntities([
+		await runtime.reconcileDynamicEntities([spawnedEntity(7, 1)]);
+		await runtime.reconcileDynamicEntities([
 			spawnedEntity(7, 1, { noDraw: true }),
 		]);
-		await runtime.reconcileSpawnedDynamicEntities([spawnedEntity(7, 2)]);
+		await runtime.reconcileDynamicEntities([spawnedEntity(7, 2)]);
 
 		expect(load).toHaveBeenCalledTimes(1);
 		expect(
@@ -797,10 +798,8 @@ describe("GameRuntime spawned dynamic presentation", () => {
 				}),
 		};
 		const runtime = await buildSpawnRuntime(source);
-		const stale = runtime.reconcileSpawnedDynamicEntities([
-			spawnedEntity(9, 1),
-		]);
-		await runtime.reconcileSpawnedDynamicEntities([]);
+		const stale = runtime.reconcileDynamicEntities([spawnedEntity(9, 1)]);
+		await runtime.reconcileDynamicEntities([]);
 		resolveVisual(spawnedVisual());
 		await stale;
 
@@ -834,21 +833,21 @@ describe("GameRuntime spawned dynamic presentation", () => {
 		const parent = spawnedEntity(20, 1);
 		const child = attachedEntity(21, 1, 20);
 
-		await runtime.reconcileSpawnedDynamicEntities([child]);
+		await runtime.reconcileDynamicEntities([child]);
 		expect(
 			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
 		).toBe(0);
-		await runtime.reconcileSpawnedDynamicEntities([child, parent]);
+		await runtime.reconcileDynamicEntities([child, parent]);
 		expect(
 			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
 		).toBe(2);
-		await runtime.reconcileSpawnedDynamicEntities([]);
+		await runtime.reconcileDynamicEntities([]);
 		expect(
 			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
 		).toBe(0);
 
-		await runtime.reconcileSpawnedDynamicEntities([parent]);
-		await runtime.reconcileSpawnedDynamicEntities([parent, child]);
+		await runtime.reconcileDynamicEntities([parent]);
+		await runtime.reconcileDynamicEntities([parent, child]);
 		expect(
 			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
 		).toBe(2);
@@ -857,7 +856,7 @@ describe("GameRuntime spawned dynamic presentation", () => {
 
 	it("replaces outdoor demand with dungeon demand and reacquires it when returning", async () => {
 		const requests: LandblockIdLayer[][] = [];
-		const runtime = await buildGameRuntimeForTest(
+		const runtime = await buildGamePresentationRuntimeForTest(
 			{
 				buildRenderer: async () => ({
 					async destroy() {},
@@ -984,7 +983,7 @@ describe("GameRuntime spawned dynamic presentation", () => {
 	});
 
 	it("filters ambient EnvCells for outdoor intent and replaces it with explicit dungeon demand", async () => {
-		const runtime = await buildGameRuntimeForTest(
+		const runtime = await buildGamePresentationRuntimeForTest(
 			{
 				buildRenderer: async () => ({
 					async destroy() {},
@@ -1077,15 +1076,15 @@ describe("GameRuntime spawned dynamic presentation", () => {
 async function buildSpawnRuntime(
 	dynamicEntityVisualSource: DynamicEntityVisualSource,
 	animationSource: AnimationAssetSource = ANIMATION_SOURCE,
-): Promise<GameRuntime> {
-	const device: GameRuntimeRenderDevice = {
+): Promise<GamePresentationRuntime> {
+	const device: GamePresentationRuntimeRenderDevice = {
 		buildRenderer: async () => ({
 			async destroy() {},
 			drawFrame: () => EMPTY_RENDERER_FRAME_FEEDBACK,
 		}),
 		resources: TEST_RESOURCES,
 	};
-	return buildGameRuntimeForTest(
+	return buildGamePresentationRuntimeForTest(
 		device,
 		{ prepareLandblockLayers: async () => [] },
 		{} as TexturePixelSource,
@@ -1150,9 +1149,9 @@ function motionDrivenEntity(
 	};
 }
 
-async function buildGameRuntimeForTest(
-	...parameters: Parameters<typeof GameRuntime.build>
-): Promise<GameRuntime> {
+async function buildGamePresentationRuntimeForTest(
+	...parameters: Parameters<typeof GamePresentationRuntime.build>
+): Promise<GamePresentationRuntime> {
 	const [
 		device,
 		commitPipeline,
@@ -1167,7 +1166,7 @@ async function buildGameRuntimeForTest(
 		roll,
 		tickProfiler,
 	] = parameters;
-	return GameRuntime.build(
+	return GamePresentationRuntime.build(
 		device,
 		commitPipeline,
 		texturePixelSource,
@@ -1587,7 +1586,7 @@ function promotedStaticArtifact(
 	}
 }
 
-function setTestCamera(runtime: GameRuntime, camera: Camera): void {
+function setTestCamera(runtime: GamePresentationRuntime, camera: Camera): void {
 	runtime.setPrimaryView({ camera, extent: { height: 480, width: 640 } });
 }
 

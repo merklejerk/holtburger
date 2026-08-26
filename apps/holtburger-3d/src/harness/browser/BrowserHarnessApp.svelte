@@ -56,10 +56,10 @@
 	import type { WebGL2PortalScopeAtlasTargetsFixtureResult } from "../../lib/game/renderer/webgl2-portal-scope-atlas-targets-fixture";
 	import type { WebGL2PortalScopeAtlasExecutorFixtureResult } from "../../lib/game/renderer/webgl2-portal-scope-atlas-executor-fixture";
 	import {
-		GameRuntime,
+		GamePresentationRuntime,
 		type StaticObjectLayerRuntimeDiagnostics,
 		type StaticObjectRuntimeDiagnostics,
-	} from "../../lib/game/runtime/game-runtime";
+	} from "../../lib/game/runtime/game-presentation-runtime";
 	import type { ClosedWorkerPoolDiagnostics } from "../../lib/game/workers/closed-worker";
 	import { RuntimeTickProfiler } from "../../lib/game/runtime/runtime-tick-profiler";
 	import { LandblockLayerKind } from "../../lib/game/runtime/scene-interest";
@@ -93,7 +93,7 @@
 		resolveKinematicBoomDirection,
 		type HostKinematicBoomIdentity,
 	} from "../../lib/game/motion/host-kinematic-boom-path";
-	import { spawnedDynamicPlacement } from "../../lib/game/runtime/spawned-dynamic-presentation";
+	import { dynamicEntityPlacement } from "../../lib/game/runtime/dynamic-entity-presentation";
 	import {
 		createExplorerLaunchRequest,
 		createExplorerRelocationRequest,
@@ -158,7 +158,7 @@
 	 * the audio path cannot be exercised at all.
 	 */
 	function applyHarnessCamera(
-		target: GameRuntime,
+		target: GamePresentationRuntime,
 		camera: Camera,
 		extent?: RenderExtent,
 	): void {
@@ -209,7 +209,7 @@
 	 */
 	const AUDIO_TRACE = query.get("audioTrace") === "1";
 	type AuthoredDynamicDiagnostics = ReturnType<
-		GameRuntime["getAuthoredDynamicRuntimeDiagnostics"]
+		GamePresentationRuntime["getAuthoredDynamicRuntimeDiagnostics"]
 	>;
 
 	interface AudioTraceSample {
@@ -608,7 +608,9 @@
 		>;
 		/** Latest explicit renderer profile, or null while profiling is disabled. */
 		readonly frameProfile: RendererFrameProfile | null;
-		readonly tickProfile: ReturnType<GameRuntime["getTickProfile"]> | null;
+		readonly tickProfile: ReturnType<
+			GamePresentationRuntime["getTickProfile"]
+		> | null;
 		readonly authoredDynamics: AuthoredDynamicDiagnostics | null;
 		readonly frameSettings: FrameSettings;
 		readonly textureFilteringCapabilities: TextureFilteringCapabilities | null;
@@ -647,7 +649,7 @@
 	interface BrowserHarnessSceneInterestEvidence {
 		readonly interest: readonly BrowserHarnessSceneInterestEntry[];
 		readonly resolvedTarget: ReturnType<
-			GameRuntime["sceneInterestState"]
+			GamePresentationRuntime["sceneInterestState"]
 		>["resolvedTarget"];
 	}
 
@@ -832,7 +834,7 @@
 	let viewportWidth = $state(INITIAL_VIEWPORT_WIDTH);
 	let viewportHeight = $state(INITIAL_VIEWPORT_HEIGHT);
 	let spawnedEntities: readonly DynamicEntityView[] = [];
-	let runtime: GameRuntime | undefined;
+	let runtime: GamePresentationRuntime | undefined;
 	let renderer: WebGL2Renderer | undefined;
 	let textureFilteringCapabilities: TextureFilteringCapabilities | null = null;
 	let cameraEvidence: BrowserHarnessCameraEvidence | null = null;
@@ -866,7 +868,9 @@
 		const state = runtime?.sceneInterestState();
 		if (state === undefined) return null;
 		const entries = (
-			interest: ReturnType<GameRuntime["sceneInterestState"]>["interest"],
+			interest: ReturnType<
+				GamePresentationRuntime["sceneInterestState"]
+			>["interest"],
 		): readonly BrowserHarnessSceneInterestEntry[] =>
 			[...interest.entries()].map(([landblockId, layers]) => ({
 				landblockId,
@@ -1454,7 +1458,7 @@
 		);
 		if (entity === undefined)
 			throw new Error(`Boom framing probe could not find entity ${guid}.`);
-		const placement = spawnedDynamicPlacement(entity);
+		const placement = dynamicEntityPlacement(entity);
 		const owner = createLandblockWorldOrigin(placement.landblockId);
 		const target = new Vec3(
 			owner.x + placement.localTransform.m41,
@@ -1557,7 +1561,7 @@
 				? entity
 				: current,
 		);
-		await runtime.reconcileSpawnedDynamicEntities(spawnedEntities);
+		await runtime.reconcileDynamicEntities(spawnedEntities);
 		return entity;
 	}
 
@@ -2104,7 +2108,7 @@
 					`Dynamic-entity operation returned unknown generation ${advance.entity.generation} for 0x${advance.entity.identity.guid.toString(16)}.`,
 				);
 		}
-		runtime.applySpawnedDynamicEntityAdvances(event.batch, performance.now());
+		runtime.applyDynamicEntityAdvances(event.batch, performance.now());
 		const advanced = new Map(
 			event.batch.advances.map((advance) => [
 				advance.entity.identity.guid,
@@ -2130,7 +2134,7 @@
 					(entity) => entity.placement.kind === "world",
 				)
 			: event.snapshot.entities;
-		await runtime.reconcileSpawnedDynamicEntities(spawnedEntities);
+		await runtime.reconcileDynamicEntities(spawnedEntities);
 	}
 
 	async function despawnExplorerEntity(
@@ -2460,7 +2464,7 @@
 							: await StandardCommitPipeline.build({
 									sourceBatch: landblockSource,
 								});
-				runtime = await GameRuntime.build(
+				runtime = await GamePresentationRuntime.build(
 					{
 						buildRenderer: async (world) => {
 							renderer = await device!.buildRenderer(world);

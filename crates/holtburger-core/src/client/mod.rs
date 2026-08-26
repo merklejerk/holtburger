@@ -1,3 +1,5 @@
+use crate::DynamicEntitySnapshot;
+use holtburger_common::Guid;
 use holtburger_protocol::errors::WeenieError;
 use holtburger_session::Session;
 use holtburger_world::{WorldEvent, WorldState};
@@ -6,11 +8,13 @@ use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, mpsc};
 
 mod builder;
+mod camera;
 pub mod character_axes;
 pub mod character_jump;
 pub mod character_kinematics;
 pub mod character_motion;
 mod character_selection;
+pub mod collision;
 mod commands;
 mod dynamic_entity_view;
 mod messages;
@@ -21,6 +25,13 @@ pub mod runtime_body_view_cache;
 mod simulation;
 pub mod types;
 pub use builder::ClientRuntimeBuilder;
+use camera::ClientCameraRuntime;
+pub use camera::{
+    ClientCameraClearance, ClientCameraClearanceRequest, ClientCameraDiagnostics,
+    ClientCameraHoldReason, ClientCameraIdentity, ClientCameraIntentRequest,
+    ClientCameraReseedReason, ClientCameraStartReceipt, ClientCameraStartRequest,
+    ClientCameraTargetSphereRole, ClientCameraTick, ClientCameraUpdateReceipt,
+};
 use character_selection::CharacterSelectionState;
 use movement::MovementSystem;
 use simulation::ClientSimulationSystem;
@@ -43,6 +54,12 @@ pub struct ClientRuntime {
     active_confirmation: Option<ActiveCharacterConfirmation>,
     active_busy_operation: Option<PendingBusyOperation>,
     state: ClientState,
+    /// Distinguishes the initial connected socket from a login request in flight.
+    authenticating: bool,
+    /// Monotonic world-generation edge used to invalidate presentation interpolation.
+    world_generation: u64,
+    /// Terminal cause selected by the authority before it publishes `Exiting`.
+    exit_cause: Option<ClientExitCause>,
     client_view_event_tx: broadcast::Sender<ClientViewEvent>,
     /// Monotonic origin shared by focused dynamic-entity snapshots and deltas.
     dynamic_entity_time_origin: Instant,
@@ -51,11 +68,88 @@ pub struct ClientRuntime {
     message_counter: usize,
     movement: MovementSystem,
     simulation: ClientSimulationSystem,
+    /// Stages static collision and local-player body products outside the simulation turn.
+    collision_coordinator: Option<collision::ClientCollisionCoordinator>,
+    /// Client-local camera boom advanced inside the same authority clock as entity presentation.
+    camera: ClientCameraRuntime,
     character_selection: CharacterSelectionState,
     turbine_chat: TurbineChatState,
 }
 
 impl ClientRuntime {
+    /// Returns the complete lifecycle projection without exposing the internal world state.
+    pub fn lifecycle(&self) -> ClientLifecycleState {
+        match &self.state {
+            ClientState::Connected if self.authenticating => ClientLifecycleState::Authenticating,
+            ClientState::Connected => ClientLifecycleState::Connecting,
+            ClientState::CharacterSelection(characters) => {
+                ClientLifecycleState::CharacterSelection {
+                    characters: characters
+                        .iter()
+                        .enumerate()
+                        .map(|(slot, character)| ClientCharacterSummary {
+                            guid: character.guid,
+                            name: character.name.clone(),
+                            slot: slot as u32,
+                            delete_time: character.delete_time,
+                        })
+                        .collect(),
+                }
+            }
+            ClientState::EnteringWorld => ClientLifecycleState::EnteringWorld {
+                character_guid: self.character_selection.character_id.unwrap_or(Guid::NULL),
+            },
+            ClientState::InWorld if self.world.player.guid != Guid::NULL => {
+                ClientLifecycleState::InWorld {
+                    player_guid: self.world.player.guid,
+                }
+            }
+            ClientState::InWorld => ClientLifecycleState::EnteringWorld {
+                character_guid: self.character_selection.character_id.unwrap_or(Guid::NULL),
+            },
+            ClientState::Disconnected => ClientLifecycleState::Exiting {
+                cause: self.exit_cause.unwrap_or(ClientExitCause::ServerDisconnect),
+            },
+        }
+    }
+
+    /// Builds one atomic replacement level for shells that lost their event baseline.
+    pub fn application_snapshot(&self) -> ClientApplicationSnapshot {
+        ClientApplicationSnapshot {
+            lifecycle: self.lifecycle(),
+            server_time: self
+                .world
+                .server_time
+                .as_ref()
+                .map(|_| self.world.current_server_time()),
+            world_generation: self.world_generation,
+            dynamic: DynamicEntitySnapshot::new(
+                self.dynamic_entity_host_time(),
+                self.current_dynamic_entity_views(),
+            ),
+            runtime_bodies: self.world.runtime_body_views().into(),
+        }
+    }
+
+    /// Returns the staged spatial-product state, when this composition supplied a collision source.
+    ///
+    /// The value is intentionally core-facing. A frontend may show a loading/unavailable hint
+    /// only after a named wire consumer exists; it must not infer readiness from entity poses.
+    pub fn collision_readiness(&self) -> Option<collision::ClientSpatialReadiness> {
+        self.collision_coordinator
+            .as_ref()
+            .map(collision::ClientCollisionCoordinator::readiness)
+    }
+
+    pub(crate) fn set_exit_cause(&mut self, cause: ClientExitCause) {
+        self.exit_cause = Some(cause);
+    }
+
+    pub(crate) fn bump_world_generation(&mut self) -> u64 {
+        self.world_generation = self.world_generation.saturating_add(1);
+        self.world_generation
+    }
+
     fn player_character_options(&self) -> PlayerCharacterOptions {
         PlayerCharacterOptions {
             options1: self.world.player.options1,
@@ -217,12 +311,17 @@ impl ClientRuntime {
             });
     }
 
-    pub(super) fn emit_initial_view_state_snapshot(&mut self) {
+    pub(super) fn emit_current_application_snapshot(&mut self) {
         self.emit_fellowship_state_updated();
         self.emit_vendor_state_updated();
         self.emit_trade_state_updated();
         self.emit_dynamic_entity_snapshot();
         self.emit_runtime_body_snapshot();
+        let _ = self
+            .client_view_event_tx
+            .send(ClientViewEvent::ApplicationSnapshot(
+                self.application_snapshot(),
+            ));
     }
 
     pub fn subscribe_client_view_events(&self) -> broadcast::Receiver<ClientViewEvent> {
@@ -239,6 +338,9 @@ impl ClientRuntime {
             .send(ClientViewEvent::StatusUpdate {
                 state: self.state.clone(),
             });
+        let _ = self
+            .client_view_event_tx
+            .send(ClientViewEvent::LifecycleChanged(self.lifecycle()));
     }
 
     pub fn handle_world_event(&self, event: &WorldEvent) {
@@ -592,11 +694,17 @@ impl ClientRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+
+    use super::collision::{
+        ClientCollisionInterest, ClientCollisionSnapshot, ClientPlayerInstance,
+    };
     use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::{PropertyDataId, WorldObjectPropertyAccessorsMut};
     use holtburger_common::{Guid, Quaternion, Vector3};
     use holtburger_content::MotionSequenceCatalog;
     use holtburger_dat::file_type::MotionTable;
+    use holtburger_protocol::messages::CharacterEntry;
     use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
     use holtburger_world::FellowshipActivity;
     use holtburger_world::entity::{Entity, EntityMotionSnapshot, OrderedMotionSpeed};
@@ -604,7 +712,10 @@ mod tests {
         FixtureCycle, explicit_motion_catalog,
     };
     use holtburger_world::{
-        PlayerMotionTableSource, SelfMovementCapabilities, SelfMovementKinematics,
+        CollisionScene, FreeSphereConfig, PhysicalBodyDefinition, PhysicalBodyResponsePolicy,
+        PhysicalCollisionFilter, PhysicalFriction, PhysicalRestitution, PhysicalSphereSet,
+        PhysicalSurfaceMotion, PlayerMotionTableSource, SelfMovementCapabilities,
+        SelfMovementKinematics,
     };
 
     fn test_self_movement_capabilities(
@@ -637,6 +748,61 @@ mod tests {
             .world
             .set_self_movement_capabilities_override(capabilities.clone());
         capabilities
+    }
+
+    #[test]
+    fn lifecycle_and_snapshot_preserve_selection_slots_and_local_identity() {
+        let characters = vec![
+            CharacterEntry {
+                guid: Guid(0x5000_0001),
+                name: "Mira".to_string(),
+                delete_time: 0,
+            },
+            CharacterEntry {
+                guid: Guid(0x5000_0002),
+                name: "Nox".to_string(),
+                delete_time: 123,
+            },
+        ];
+        let mut client =
+            builder::build_test_client(ClientState::CharacterSelection(characters.clone()));
+
+        assert_eq!(
+            client.lifecycle(),
+            ClientLifecycleState::CharacterSelection {
+                characters: vec![
+                    ClientCharacterSummary {
+                        guid: Guid(0x5000_0001),
+                        name: "Mira".to_string(),
+                        slot: 0,
+                        delete_time: 0,
+                    },
+                    ClientCharacterSummary {
+                        guid: Guid(0x5000_0002),
+                        name: "Nox".to_string(),
+                        slot: 1,
+                        delete_time: 123,
+                    },
+                ],
+            }
+        );
+
+        client.state = ClientState::InWorld;
+        client.world.player.guid = Guid(0x5000_0002);
+        let snapshot = client.application_snapshot();
+        assert_eq!(
+            snapshot.lifecycle,
+            ClientLifecycleState::InWorld {
+                player_guid: Guid(0x5000_0002),
+            }
+        );
+        assert_eq!(snapshot.world_generation, 0);
+        assert!(snapshot.runtime_bodies.is_empty());
+        assert_eq!(
+            characters.len(),
+            2,
+            "selection source remains lossless in core"
+        );
     }
 
     fn test_remote_motion_catalog(motion_table_id: u32) -> MotionSequenceCatalog {
@@ -920,10 +1086,10 @@ mod tests {
     }
 
     #[test]
-    fn simulation_build_request_returns_none_without_local_intent() {
+    fn simulation_build_projection_returns_none_without_local_intent() {
         let client = builder::build_test_client(ClientState::InWorld);
 
-        let request = client.simulation.build_solve_request(
+        let request = client.simulation.build_projection_request(
             Instant::now(),
             Duration::from_millis(PHYSICS_TICK_MS),
             &client.world,
@@ -934,7 +1100,7 @@ mod tests {
     }
 
     #[test]
-    fn simulation_build_request_includes_idle_local_player_runtime_body() {
+    fn simulation_build_projection_includes_idle_local_player_runtime_body() {
         let mut client = builder::build_test_client(ClientState::InWorld);
         let guid = Guid(0x0102_0304);
         let player_pose = WorldPosition {
@@ -949,7 +1115,7 @@ mod tests {
 
         let request = client
             .simulation
-            .build_solve_request(
+            .build_projection_request(
                 Instant::now(),
                 Duration::from_millis(PHYSICS_TICK_MS),
                 &client.world,
@@ -964,16 +1130,14 @@ mod tests {
             holtburger_world::SpatialBodyId::LocalPlayer(guid)
         );
         assert_eq!(body.pose, player_pose);
-        assert!(matches!(
-            body.basis,
-            Some(holtburger_world::SolveProjectionBasis::Velocity { velocity, omega })
-                if velocity == Vector3::zero() && omega == Vector3::zero()
-        ));
-        assert_eq!(request.local_drive, None);
+        assert!(
+            body.basis.is_none(),
+            "an idle local player has no authored or velocity basis to advance"
+        );
     }
 
     #[tokio::test]
-    async fn simulation_build_request_carries_active_autonomous_drive() {
+    async fn simulation_build_projection_carries_active_autonomous_drive() {
         let mut client = builder::build_test_client(ClientState::InWorld);
         let guid = Guid(0x0102_0304);
         let now = Instant::now();
@@ -1008,21 +1172,10 @@ mod tests {
             .await
             .expect("movement tick should activate autonomous drive for the current frame");
 
-        let request = client
-            .simulation
-            .build_solve_request(
-                now,
-                Duration::from_millis(PHYSICS_TICK_MS),
-                &client.world,
-                &client.movement,
-            )
-            .expect(
-                "idle local player with active autonomous drive should produce a solve request",
-            );
-
-        let local_drive = request
-            .local_drive
-            .expect("active autonomous drive should be threaded into the solve request");
+        let local_drive = client
+            .movement
+            .current_local_drive_control(&client.world, Duration::from_millis(PHYSICS_TICK_MS))
+            .expect("active autonomous drive should remain a movement-owned actuation input");
         assert_eq!(
             local_drive.body_id,
             holtburger_world::SpatialBodyId::LocalPlayer(guid)
@@ -1037,7 +1190,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn simulation_build_request_reads_player_state_after_movement_tick() {
+    async fn simulation_build_projection_does_not_reconstruct_velocity_after_movement_tick() {
         let mut client = builder::build_test_client(ClientState::InWorld);
         let guid = Guid(0x0102_0304);
         let now = Instant::now();
@@ -1071,7 +1224,7 @@ mod tests {
 
         let request = client
             .simulation
-            .build_solve_request(
+            .build_projection_request(
                 now,
                 Duration::from_millis(PHYSICS_TICK_MS),
                 &client.world,
@@ -1092,17 +1245,14 @@ mod tests {
                 .local_player_runtime_pose()
                 .expect("local player runtime pose should be readable")
         );
-        assert!(matches!(
-            body.basis,
-            Some(holtburger_world::SolveProjectionBasis::Velocity { velocity, omega })
-                if velocity.x.abs() < 1e-5
-                    && (velocity.y - 4.5).abs() < 1e-5
-                    && omega == Vector3::zero()
-        ));
+        assert!(
+            body.basis.is_none(),
+            "manual motion is advanced by the simulation tick, not reconstructed as velocity"
+        );
     }
 
     #[tokio::test]
-    async fn simulation_build_request_includes_tracked_nearby_actor() {
+    async fn simulation_build_projection_includes_tracked_nearby_actor() {
         let mut client = builder::build_test_client(ClientState::InWorld);
         let player_guid = Guid(0x0102_0304);
         let remote_guid = Guid(0x0102_0305);
@@ -1155,7 +1305,7 @@ mod tests {
 
         let request = client
             .simulation
-            .build_solve_request(
+            .build_projection_request(
                 now,
                 Duration::from_millis(PHYSICS_TICK_MS),
                 &client.world,
@@ -1180,7 +1330,7 @@ mod tests {
     }
 
     #[test]
-    fn simulation_build_request_includes_tracked_grounded_actor_without_vector_update() {
+    fn simulation_build_projection_includes_tracked_grounded_actor_without_vector_update() {
         let mut client = builder::build_test_client(ClientState::InWorld);
         let player_guid = Guid(0x0102_1304);
         let remote_guid = Guid(0x0102_1305);
@@ -1231,7 +1381,7 @@ mod tests {
         client.world.advance_authored_motion(dt);
         let request = client
             .simulation
-            .build_solve_request(Instant::now(), dt, &client.world, &client.movement)
+            .build_projection_request(Instant::now(), dt, &client.world, &client.movement)
             .expect("tracked grounded remote should join the solve set");
 
         let remote_body = request
@@ -1250,8 +1400,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn simulation_tick_advances_local_player_runtime_body_without_mutating_authoritative_pose()
-     {
+    async fn simulation_tick_suspends_local_player_until_collision_products_are_ready() {
         let mut client = builder::build_test_client(ClientState::InWorld);
         let guid = Guid(0x0102_0304);
         let now = Instant::now();
@@ -1283,12 +1432,16 @@ mod tests {
             .await
             .expect("movement tick should succeed");
 
-        let events = client.simulation.tick(
-            now,
-            Duration::from_millis(PHYSICS_TICK_MS),
-            &mut client.world,
-            &mut client.movement,
-        );
+        let events = client
+            .simulation
+            .tick(
+                now,
+                Duration::from_millis(PHYSICS_TICK_MS),
+                &mut client.world,
+                &mut client.movement,
+                None,
+            )
+            .expect("pose-only simulation should not fail");
 
         let authoritative_pose = client
             .world
@@ -1301,17 +1454,129 @@ mod tests {
             .scene
             .body(holtburger_world::SpatialBodyId::LocalPlayer(guid))
             .expect("local player runtime body should exist after solve");
-        assert!(body.pose.coords.y > 0.0);
-        assert!(events.iter().any(|event| matches!(
+        assert_eq!(body.pose, player_pose);
+        assert!(!events.iter().any(|event| matches!(
             event,
             WorldEvent::RuntimeBodyChanged {
-                body_id: holtburger_world::SpatialBodyId::LocalPlayer(event_guid)
-            } if *event_guid == guid
+                body_id: holtburger_world::SpatialBodyId::LocalPlayer(_)
+            }
         )));
     }
 
     #[tokio::test]
-    async fn simulation_tick_advances_tracked_actor_alongside_local_player() {
+    async fn simulation_tick_uses_ready_collision_snapshot_for_local_transaction() {
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let guid = Guid(0x0102_0304);
+        let now = Instant::now();
+        let player_pose = WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            coords: Vector3::zero(),
+            rotation: Quaternion::identity(),
+        };
+
+        client
+            .world
+            .seed_local_player_entity(guid, "Player", player_pose);
+        let definition = PhysicalBodyDefinition::free_sphere(
+            PhysicalSphereSet::new(
+                holtburger_common::Sphere {
+                    center: Vector3::zero(),
+                    radius: 0.5,
+                },
+                None,
+            )
+            .expect("test sphere should be valid"),
+            FreeSphereConfig {
+                maximum_substep_distance: 0.25,
+                maximum_substeps: 32,
+                maximum_contact_passes: 8,
+                separation_epsilon: 0.0005,
+            },
+        )
+        .expect("test physical definition should be valid");
+        let body_id = holtburger_world::SpatialBodyId::LocalPlayer(guid);
+        client
+            .world
+            .scene
+            .install_physical_body(
+                body_id,
+                definition,
+                PhysicalCollisionFilter::ALL,
+                PhysicalBodyResponsePolicy {
+                    restitution: PhysicalRestitution::Inelastic,
+                    friction: PhysicalFriction::DEFAULT,
+                    surface_motion: PhysicalSurfaceMotion::Stable,
+                    align_path: false,
+                },
+                None,
+            )
+            .expect("seeded local player should have a canonical body");
+
+        let instance_sequence = client
+            .world
+            .player_entity()
+            .expect("seeded player should be hydrated")
+            .instance_sequence();
+        let collision = ClientCollisionSnapshot {
+            player: ClientPlayerInstance {
+                guid,
+                instance_sequence,
+                residency: player_pose.landblock_id,
+            },
+            revision: 1,
+            interest: ClientCollisionInterest::from_position(player_pose)
+                .expect("non-null player residency should demand collision"),
+            scene: Arc::new(CollisionScene::new()),
+        };
+
+        client.movement.enqueue_drive_intent(
+            movement_types::PlayerDriveIntent::Autonomous(movement_types::AutonomousDriveIntent {
+                desired_world_delta: Vector3::new(1.0, 0.0, 0.0),
+                desired_heading: Some(0.0),
+                target_hint: None,
+                gait: movement_types::Gait::Run,
+                force_grounded: true,
+            }),
+            now,
+        );
+        client
+            .movement
+            .tick(now, &mut client.world, &mut client.session)
+            .await
+            .expect("movement tick should activate the autonomous drive");
+
+        let events = client
+            .simulation
+            .tick(
+                now,
+                Duration::from_millis(PHYSICS_TICK_MS),
+                &mut client.world,
+                &mut client.movement,
+                Some(&collision),
+            )
+            .expect("ready collision products should permit the local transaction");
+
+        let body = client
+            .world
+            .scene
+            .body(body_id)
+            .expect("local player body should remain registered");
+        assert!(body.pose.coords.x > player_pose.coords.x);
+        assert_eq!(
+            client
+                .world
+                .player_position()
+                .expect("authoritative player pose should remain available"),
+            player_pose
+        );
+        assert!(events.iter().any(|event| matches!(
+            event,
+            WorldEvent::RuntimeBodyChanged { body_id: event_id } if *event_id == body_id
+        )));
+    }
+
+    #[tokio::test]
+    async fn simulation_tick_advances_remote_projection_while_local_player_is_suspended() {
         let mut client = builder::build_test_client(ClientState::InWorld);
         let player_guid = Guid(0x0102_0304);
         let remote_guid = Guid(0x0102_0305);
@@ -1375,12 +1640,16 @@ mod tests {
             .await
             .expect("movement tick should succeed");
 
-        let events = client.simulation.tick(
-            now,
-            Duration::from_millis(PHYSICS_TICK_MS),
-            &mut client.world,
-            &mut client.movement,
-        );
+        let events = client
+            .simulation
+            .tick(
+                now,
+                Duration::from_millis(PHYSICS_TICK_MS),
+                &mut client.world,
+                &mut client.movement,
+                None,
+            )
+            .expect("pose-only simulation should not fail");
 
         let remote_after = client
             .world
@@ -1392,13 +1661,13 @@ mod tests {
             .scene
             .body(holtburger_world::SpatialBodyId::LocalPlayer(player_guid))
             .expect("local player runtime body should exist after solve");
-        assert!(player_body.pose.coords.y > 0.0);
+        assert_eq!(player_body.pose, player_pose);
         assert!(remote_after.pose.coords.x > remote_start.x);
-        assert!(events.iter().any(|event| matches!(
+        assert!(!events.iter().any(|event| matches!(
             event,
             WorldEvent::RuntimeBodyChanged {
-                body_id: holtburger_world::SpatialBodyId::LocalPlayer(event_guid)
-            } if *event_guid == player_guid
+                body_id: holtburger_world::SpatialBodyId::LocalPlayer(_)
+            }
         )));
         assert!(events.iter().any(|event| matches!(
             event,
@@ -1452,7 +1721,7 @@ mod tests {
             client.observe_runtime_world_event(&event);
         }
 
-        let request = client.simulation.build_solve_request(
+        let request = client.simulation.build_projection_request(
             Instant::now(),
             Duration::from_millis(PHYSICS_TICK_MS),
             &client.world,
@@ -1517,7 +1786,7 @@ mod tests {
 
         let dt = Duration::from_millis(PHYSICS_TICK_MS);
         client.world.advance_authored_motion(dt);
-        let request = client.simulation.build_solve_request(
+        let request = client.simulation.build_projection_request(
             Instant::now(),
             dt,
             &client.world,

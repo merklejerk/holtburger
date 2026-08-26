@@ -5,8 +5,8 @@
 	import ExplorerFramePanel from "./ExplorerFramePanel.svelte";
 	import ExplorerTexturesPanel from "./ExplorerTexturesPanel.svelte";
 	import ExplorerWorldPanel from "./ExplorerWorldPanel.svelte";
-	import type { StaticObjectRuntimeDiagnostics } from "../lib/game/runtime/game-runtime";
-	import type { GameRuntime } from "../lib/game/runtime/game-runtime";
+	import type { StaticObjectRuntimeDiagnostics } from "../lib/game/runtime/game-presentation-runtime";
+	import type { GamePresentationRuntime } from "../lib/game/runtime/game-presentation-runtime";
 	import type { ExplorerEnvironmentSelection } from "../lib/game/environment/scene-environment";
 	import type {
 		EnvCellRenderMode,
@@ -118,7 +118,7 @@
 		/** Compose current renderer and Explorer context into one exportable report. */
 		readonly captureFrameDiagnosticReport: () => ExplorerFrameDiagnosticReport | null;
 		readonly authoredDynamicRuntimeDiagnostics: ReturnType<
-			GameRuntime["getAuthoredDynamicRuntimeDiagnostics"]
+			GamePresentationRuntime["getAuthoredDynamicRuntimeDiagnostics"]
 		> | null;
 		/** Read an outdoor-static and texture atlas snapshot for the Explorer inspector. */
 		readonly readStaticObjectRuntimeDiagnostics: () => StaticObjectRuntimeDiagnostics | null;

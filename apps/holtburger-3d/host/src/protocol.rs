@@ -9,31 +9,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
+use crate::client_runtime::{CLIENT_COMMAND_NAMES, ClientHostCommand, dispatch_client};
 use crate::explorer_entity_delivery::ExplorerFixedTickEnvelope;
-use crate::explorer_entity_driver::{
-    ExplorerEntityLaunchRequest, ExplorerEntityRelocationRequest, ExplorerEntitySpawnRequest,
-};
 use crate::explorer_entity_runtime::PossessionEventOutcome;
-use crate::explorer_weenie_catalog::ExplorerWeenieSearchRequest;
-use crate::host_event_sink::HostEventSink;
-use crate::host_kinematic_boom_runtime::{
-    HostKinematicBoomClearanceRequest, HostKinematicBoomIdentity, HostKinematicBoomIntentRequest,
-    HostKinematicBoomStartRequest,
-};
-use crate::host_physical_fly_runtime::{
-    PhysicalFlyFailure, PhysicalFlyIntent, PhysicalFlyMotionPath, PhysicalFlyRegistration,
-    PhysicalFlyStartReceipt,
-};
-use crate::host_simulation_runtime::SimulationInterestRequest;
-use crate::runtime::HostRuntime;
-use crate::{
-    ExplorerEntityMutationReceipt, ExplorerPossessionEventWireRequest,
-    ExplorerPossessionIntentWireRequest, ExplorerPossessionReceipt, LoadAnimationRequest,
-    LoadAudioRequest, LoadDynamicEntityVisualRequest, LoadLandblockProfileRequest,
-    LoadLandblockSourceBatchRequest, LoadParticleEmitterRequest, LoadParticleMeshesRequest,
-    LoadPhysicsScriptRequest, LoadSoundTableRequest, LoadTexturePixelsRequest,
-    MotionTableClosureRequest, PossessExplorerEntityRequest,
-    ReplaceExplorerEntityPhysicsStateRequest,
+use crate::explorer_host::{EXPLORER_COMMAND_NAMES, ExplorerHostCommand, dispatch_explorer};
+use crate::host_event_sink::{ClientEventSink, ExplorerEventSink};
+use crate::host_physical_fly_runtime::{PhysicalFlyFailure, PhysicalFlyMotionPath};
+use crate::runtime::{HostMode, HostRuntime};
+use crate::shared_host_content::{
+    SHARED_CONTENT_COMMAND_NAMES, SharedContentCommand, dispatch_shared_content,
 };
 
 /// Current sidecar protocol version.
@@ -43,114 +27,75 @@ pub const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
 /// Bounded writer queue. Producers block at capacity; no event is silently discarded.
 pub const WRITER_QUEUE_CAPACITY: usize = 256;
 
-/// A closed command set; the host never dispatches arbitrary method names.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "command", rename_all = "snake_case")]
+/// A closed command set composed from the shared, Explorer, and client inventories.
+#[derive(Debug, Clone)]
 pub enum HostCommand {
-    HostStatus,
-    ExplorerCatalogCapability,
-    SearchExplorerWeenies {
-        request: ExplorerWeenieSearchRequest,
-    },
-    RequestExplorerDynamicEntitySnapshot,
-    ExplorerPossessionMotionProbe,
-    SpawnExplorerEntity {
-        request: ExplorerEntitySpawnRequest,
-    },
-    DespawnExplorerEntity {
-        guid: holtburger_common::Guid,
-        generation: u64,
-    },
-    ReplaceExplorerEntityPhysicsState {
-        request: ReplaceExplorerEntityPhysicsStateRequest,
-    },
-    LaunchExplorerEntity {
-        request: ExplorerEntityLaunchRequest,
-    },
-    RelocateExplorerEntity {
-        request: ExplorerEntityRelocationRequest,
-    },
-    ResetExplorerEntities,
-    LoadMotionTableClosure {
-        request: MotionTableClosureRequest,
-    },
-    PossessExplorerEntity {
-        request: PossessExplorerEntityRequest,
-    },
-    SetExplorerPossessionIntent {
-        request: ExplorerPossessionIntentWireRequest,
-    },
-    QueueExplorerPossessionEvent {
-        request: ExplorerPossessionEventWireRequest,
-    },
-    StartKinematicBoom {
-        request: HostKinematicBoomStartRequest,
-    },
-    SetKinematicBoomIntent {
-        request: HostKinematicBoomIntentRequest,
-    },
-    SetKinematicBoomClearance {
-        request: HostKinematicBoomClearanceRequest,
-    },
-    StopKinematicBoom {
-        request: HostKinematicBoomIdentity,
-    },
-    StartSimulationInterestSession,
-    ReplaceSimulationInterest {
-        request: SimulationInterestRequest,
-    },
-    StartPhysicalFly {
-        registration: PhysicalFlyRegistration,
-    },
-    SetPhysicalFlyIntent {
-        intent: PhysicalFlyIntent,
-    },
-    StopPhysicalFly {
-        session: u64,
-    },
-    LoadActiveRegionData,
-    LoadAnimation {
-        request: LoadAnimationRequest,
-    },
-    LoadDynamicEntityVisual {
-        request: LoadDynamicEntityVisualRequest,
-    },
-    LoadAudio {
-        request: LoadAudioRequest,
-    },
-    LoadSoundTable {
-        request: LoadSoundTableRequest,
-    },
-    LoadParticleEmitter {
-        request: LoadParticleEmitterRequest,
-    },
-    LoadParticleMeshes {
-        request: LoadParticleMeshesRequest,
-    },
-    LoadPhysicsScript {
-        request: LoadPhysicsScriptRequest,
-    },
-    LoadLandblockSourceBatch {
-        request: LoadLandblockSourceBatchRequest,
-    },
-    LoadLandblockProfile {
-        request: LoadLandblockProfileRequest,
-    },
-    LoadSkySource,
-    LoadTexturePixels {
-        request: LoadTexturePixelsRequest,
-    },
+    Shared(SharedContentCommand),
+    Explorer(ExplorerHostCommand),
+    Client(ClientHostCommand),
+}
+
+impl HostCommand {
+    /// Returns the mode required by a command. `None` denotes shared content/status capability.
+    pub fn required_mode(&self) -> Option<HostMode> {
+        match self {
+            Self::Shared(_) => None,
+            Self::Explorer(_) => Some(HostMode::Explorer),
+            Self::Client(_) => Some(HostMode::Client),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for HostCommand {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+
+        let value = Value::deserialize(deserializer)?;
+        let command = value
+            .get("command")
+            .and_then(Value::as_str)
+            .ok_or_else(|| D::Error::custom("host command is missing its string command field"))?;
+        if SHARED_CONTENT_COMMAND_NAMES.contains(&command) {
+            return serde_json::from_value(value)
+                .map(HostCommand::Shared)
+                .map_err(D::Error::custom);
+        }
+        if EXPLORER_COMMAND_NAMES.contains(&command) {
+            return serde_json::from_value(value)
+                .map(HostCommand::Explorer)
+                .map_err(D::Error::custom);
+        }
+        if CLIENT_COMMAND_NAMES.contains(&command) {
+            return serde_json::from_value(value)
+                .map(HostCommand::Client)
+                .map_err(D::Error::custom);
+        }
+        Err(D::Error::custom(format!(
+            "unknown host command {command:?}"
+        )))
+    }
 }
 
 /// Events emitted by host-owned simulation and command publication.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "event", content = "payload", rename_all = "kebab-case")]
 pub enum HostEvent {
-    DynamicEntity(holtburger_core::DynamicEntityEvent),
-    FixedTick(ExplorerFixedTickEnvelope),
-    PossessionEventOutcomes(Vec<PossessionEventOutcome>),
-    PhysicalFlyMotion(PhysicalFlyMotionPath),
-    PhysicalFlyFailure(PhysicalFlyFailure),
+    ExplorerDynamicEntity(holtburger_core::DynamicEntityEvent),
+    ClientCurrentState(crate::client_projection::ClientCurrentState),
+    ClientLifecycleChanged(crate::client_projection::ClientLifecycleWire),
+    ClientServerTimeUpdated { time: f64 },
+    ClientDynamicEntity(holtburger_core::DynamicEntityEvent),
+    ClientCamera(holtburger_core::ClientCameraTick),
+    ClientCameraStarted(holtburger_core::ClientCameraStartReceipt),
+    ClientWorldDiscontinuity(crate::client_projection::ClientWorldDiscontinuity),
+    ClientExitRequested(crate::client_projection::ClientExitRequested),
+    ExplorerFixedTick(ExplorerFixedTickEnvelope),
+    ExplorerPossessionEventOutcomes(Vec<PossessionEventOutcome>),
+    ExplorerPhysicalFlyMotion(PhysicalFlyMotionPath),
+    ExplorerPhysicalFlyFailure(PhysicalFlyFailure),
 }
 
 /// Successful command payload. Binary responses use MessagePack's native bin type.
@@ -177,6 +122,7 @@ pub enum ProtocolFrame {
         protocol_version: u16,
         host_name: String,
         host_version: String,
+        host_mode: HostMode,
     },
     Response {
         id: u64,
@@ -290,354 +236,49 @@ fn validate_payload_length(length: usize) -> Result<(), FrameError> {
     Ok(())
 }
 
-fn application_error(error: impl std::fmt::Display) -> ProtocolError {
+pub(crate) fn application_error(error: impl std::fmt::Display) -> ProtocolError {
     ProtocolError {
         code: "application_error".to_string(),
         message: error.to_string(),
     }
 }
 
-fn encode_json<T: Serialize>(value: T) -> Result<HostResponse, ProtocolError> {
+pub(crate) fn encode_json<T: Serialize>(value: T) -> Result<HostResponse, ProtocolError> {
     serde_json::to_value(value)
         .map(HostResponse::Json)
         .map_err(application_error)
 }
 
-/// Dispatches one typed command against the shared shell-neutral host.
+/// Dispatches one typed command against the selected host composition.
 pub async fn dispatch(
     runtime: &HostRuntime,
     command: HostCommand,
 ) -> Result<HostResponse, ProtocolError> {
-    use HostCommand::*;
-
     match command {
-        HostStatus => encode_json(runtime.status()),
-        ExplorerCatalogCapability => {
-            encode_json(runtime.explorer_entity_driver.catalog_capability())
+        HostCommand::Shared(command) => dispatch_shared_content(runtime, command).await,
+        HostCommand::Explorer(command) => {
+            if runtime.mode() != HostMode::Explorer {
+                return Err(mode_command_error(runtime.mode(), HostMode::Explorer));
+            }
+            dispatch_explorer(runtime.explorer().map_err(application_error)?, command).await
         }
-        SearchExplorerWeenies { request } => {
-            let driver = Arc::clone(&runtime.explorer_entity_driver);
-            tokio::task::spawn_blocking(move || driver.search_weenies(&request))
-                .await
-                .map_err(application_error)?
-                .map_err(application_error)
-                .and_then(encode_json)
+        HostCommand::Client(command) => {
+            if runtime.mode() != HostMode::Client {
+                return Err(mode_command_error(runtime.mode(), HostMode::Client));
+            }
+            dispatch_client(runtime.client().map_err(application_error)?, command).await
         }
-        RequestExplorerDynamicEntitySnapshot => {
-            let event = runtime
-                .explorer_entity_delivery
-                .with_ordered_publication(|| runtime.explorer_entity_delivery.snapshot_event())
-                .map_err(application_error)?;
-            runtime
-                .publish_dynamic_entity(event)
-                .map_err(application_error)?;
-            Ok(HostResponse::Unit)
-        }
-        ExplorerPossessionMotionProbe => {
-            encode_json(runtime.explorer_entities.possession_motion_probe())
-        }
-        SpawnExplorerEntity { request } => {
-            let driver = Arc::clone(&runtime.explorer_entity_driver);
-            let delivery = Arc::clone(&runtime.explorer_entity_delivery);
-            let receipt = tokio::task::spawn_blocking(move || {
-                delivery.with_ordered_publication(|| {
-                    let outcome = driver.spawn_by_wcid(request)?;
-                    let receipt = ExplorerEntityMutationReceipt {
-                        guid: outcome.instance.definition.identity.guid,
-                        generation: outcome.instance.generation,
-                    };
-                    let event = delivery.snapshot_event()?;
-                    Ok::<_, anyhow::Error>((receipt, event))
-                })
-            })
-            .await
-            .map_err(application_error)?
-            .map_err(application_error)?;
-            runtime
-                .publish_dynamic_entity(receipt.1)
-                .map_err(application_error)?;
-            encode_json(receipt.0)
-        }
-        DespawnExplorerEntity { guid, generation } => {
-            let driver = Arc::clone(&runtime.explorer_entity_driver);
-            let delivery = Arc::clone(&runtime.explorer_entity_delivery);
-            let (receipt, event) = tokio::task::spawn_blocking(move || {
-                delivery.with_ordered_publication(|| {
-                    let outcome = driver.despawn(guid, generation)?;
-                    let receipt = ExplorerEntityMutationReceipt {
-                        guid,
-                        generation: outcome.instance.generation,
-                    };
-                    Ok::<_, anyhow::Error>((receipt, delivery.snapshot_event()?))
-                })
-            })
-            .await
-            .map_err(application_error)?
-            .map_err(application_error)?;
-            runtime
-                .publish_dynamic_entity(event)
-                .map_err(application_error)?;
-            encode_json(receipt)
-        }
-        ReplaceExplorerEntityPhysicsState { request } => {
-            let driver = Arc::clone(&runtime.explorer_entity_driver);
-            let delivery = Arc::clone(&runtime.explorer_entity_delivery);
-            let (receipt, event) = tokio::task::spawn_blocking(move || {
-                delivery.with_ordered_publication(|| {
-                    let outcome = driver.replace_physics_state(
-                        request.guid,
-                        request.generation,
-                        holtburger_common::properties::PhysicsState::from_bits_retain(
-                            request.semantic_mask,
-                        ),
-                        request.physical_intent,
-                    )?;
-                    let receipt = ExplorerEntityMutationReceipt {
-                        guid: request.guid,
-                        generation: outcome.instance.generation,
-                    };
-                    Ok::<_, anyhow::Error>((receipt, delivery.upserted(receipt.guid)?))
-                })
-            })
-            .await
-            .map_err(application_error)?
-            .map_err(application_error)?;
-            runtime
-                .publish_dynamic_entity(event)
-                .map_err(application_error)?;
-            encode_json(receipt)
-        }
-        LaunchExplorerEntity { request } => {
-            let guid = request.guid;
-            let driver = Arc::clone(&runtime.explorer_entity_driver);
-            let delivery = Arc::clone(&runtime.explorer_entity_delivery);
-            let (receipt, event) = tokio::task::spawn_blocking(move || {
-                delivery.with_ordered_publication(|| {
-                    let outcome = driver.launch(request)?;
-                    let receipt = ExplorerEntityMutationReceipt {
-                        guid,
-                        generation: outcome.instance.generation,
-                    };
-                    Ok::<_, anyhow::Error>((receipt, delivery.upserted(receipt.guid)?))
-                })
-            })
-            .await
-            .map_err(application_error)?
-            .map_err(application_error)?;
-            runtime
-                .publish_dynamic_entity(event)
-                .map_err(application_error)?;
-            encode_json(receipt)
-        }
-        RelocateExplorerEntity { request } => {
-            let guid = request.guid;
-            let driver = Arc::clone(&runtime.explorer_entity_driver);
-            let delivery = Arc::clone(&runtime.explorer_entity_delivery);
-            let (receipt, event) = tokio::task::spawn_blocking(move || {
-                delivery.with_ordered_publication(|| {
-                    let kind = request.kind.advance_kind();
-                    let outcome = driver.relocate(request)?;
-                    let receipt = ExplorerEntityMutationReceipt {
-                        guid,
-                        generation: outcome.instance.generation,
-                    };
-                    Ok::<_, anyhow::Error>((receipt, delivery.corrected(receipt.guid, kind)?))
-                })
-            })
-            .await
-            .map_err(application_error)?
-            .map_err(application_error)?;
-            runtime
-                .publish_dynamic_entity(event)
-                .map_err(application_error)?;
-            encode_json(receipt)
-        }
-        ResetExplorerEntities => {
-            let driver = Arc::clone(&runtime.explorer_entity_driver);
-            let delivery = Arc::clone(&runtime.explorer_entity_delivery);
-            let event = tokio::task::spawn_blocking(move || {
-                delivery.with_ordered_publication(|| {
-                    driver.reset().map_err(|error| anyhow::anyhow!("{error}"))?;
-                    Ok::<_, anyhow::Error>(delivery.snapshot_event()?)
-                })
-            })
-            .await
-            .map_err(application_error)?
-            .map_err(application_error)?;
-            runtime
-                .publish_dynamic_entity(event)
-                .map_err(application_error)?;
-            Ok(HostResponse::Unit)
-        }
-        LoadMotionTableClosure { request } => encode_json(
-            crate::load_motion_table_closure_ids(&runtime.motion_catalog, &request.motion_table_id)
-                .map_err(application_error)?,
-        ),
-        PossessExplorerEntity { request } => {
-            let Some(guid) = request.guid else {
-                let release = runtime
-                    .explorer_entities
-                    .release_possession(std::time::Instant::now())
-                    .map_err(application_error)?;
-                return encode_json(ExplorerPossessionReceipt::released(
-                    release.possession_generation,
-                ));
-            };
-            encode_json(ExplorerPossessionReceipt::active(
-                runtime
-                    .explorer_entities
-                    .possess(guid)
-                    .map_err(application_error)?,
-            ))
-        }
-        SetExplorerPossessionIntent { request } => encode_json(
-            runtime
-                .explorer_entities
-                .replace_possession_intent(request.resolve().map_err(application_error)?)
-                .map_err(application_error)?,
-        ),
-        QueueExplorerPossessionEvent { request } => encode_json(
-            runtime
-                .explorer_entities
-                .queue_possession_event(request.resolve().map_err(application_error)?)
-                .map_err(application_error)?,
-        ),
-        StartKinematicBoom { request } => encode_json(
-            runtime
-                .kinematic_boom_runtime
-                .start(request)
-                .map_err(application_error)?,
-        ),
-        SetKinematicBoomIntent { request } => encode_json(
-            runtime
-                .kinematic_boom_runtime
-                .set_intent(request)
-                .map_err(application_error)?,
-        ),
-        SetKinematicBoomClearance { request } => encode_json(
-            runtime
-                .kinematic_boom_runtime
-                .set_clearance(request)
-                .map_err(application_error)?,
-        ),
-        StopKinematicBoom { request } => Ok(HostResponse::Json(
-            serde_json::to_value(runtime.kinematic_boom_runtime.stop(request))
-                .map_err(application_error)?,
-        )),
-        StartSimulationInterestSession => {
-            encode_json(runtime.simulation.reserve_interest_session())
-        }
-        ReplaceSimulationInterest { request } => {
-            let simulation = Arc::clone(&runtime.simulation);
-            let receipt = tokio::task::spawn_blocking(move || simulation.replace_interest(request))
-                .await
-                .map_err(application_error)?
-                .map_err(application_error)?;
-            encode_json(receipt)
-        }
-        StartPhysicalFly { registration } => {
-            let physical = Arc::clone(&runtime.physical_fly_runtime);
-            let sink = Arc::clone(&runtime.physical_event_sink);
-            let session = tokio::task::spawn_blocking(move || {
-                let session = physical.start(registration)?;
-                if !physical.schedule(sink, session) {
-                    anyhow::bail!("physical camera registration was superseded before scheduling");
-                }
-                Ok::<_, anyhow::Error>(PhysicalFlyStartReceipt::new(session))
-            })
-            .await
-            .map_err(application_error)?
-            .map_err(application_error)?;
-            encode_json(session)
-        }
-        SetPhysicalFlyIntent { intent } => {
-            runtime
-                .physical_fly_runtime
-                .set_intent(intent)
-                .map_err(application_error)?;
-            Ok(HostResponse::Unit)
-        }
-        StopPhysicalFly { session } => {
-            runtime.physical_fly_runtime.stop(session);
-            Ok(HostResponse::Unit)
-        }
-        LoadActiveRegionData => Ok(HostResponse::Binary(
-            crate::load_active_region_data_bytes(&runtime.content.runtime)
-                .await
-                .map_err(application_error)?,
-        )),
-        LoadAnimation { request } => Ok(HostResponse::Binary(
-            crate::load_animation_bytes(&runtime.content.runtime, &request.animation_id)
-                .await
-                .map_err(application_error)?,
-        )),
-        LoadDynamicEntityVisual { request } => Ok(HostResponse::Binary(
-            crate::dynamic_entity_visual_source::load_dynamic_entity_visual_source_bytes(
-                &runtime.content.runtime,
-                request.setup_did,
-                request.appearance,
-            )
-            .await
-            .map_err(application_error)?,
-        )),
-        LoadAudio { request } => Ok(HostResponse::Binary(
-            crate::load_audio_bytes(&runtime.content.runtime, &request.sound_id)
-                .await
-                .map_err(application_error)?,
-        )),
-        LoadSoundTable { request } => Ok(HostResponse::Binary(
-            crate::load_sound_table_bytes(&runtime.content.runtime, &request.sound_table_id)
-                .await
-                .map_err(application_error)?,
-        )),
-        LoadParticleEmitter { request } => Ok(HostResponse::Binary(
-            crate::load_particle_emitter_bytes(&runtime.content.runtime, &request.emitter_info_id)
-                .await
-                .map_err(application_error)?,
-        )),
-        LoadParticleMeshes { request } => Ok(HostResponse::Binary(
-            crate::load_particle_meshes_bytes(&runtime.content.runtime, &request.hw_gfx_obj_ids)
-                .await
-                .map_err(application_error)?,
-        )),
-        LoadPhysicsScript { request } => Ok(HostResponse::Binary(
-            crate::load_physics_script_bytes(&runtime.content.runtime, &request.script_id)
-                .await
-                .map_err(application_error)?,
-        )),
-        LoadLandblockSourceBatch { request } => Ok(HostResponse::Binary(
-            crate::load_landblock_source_batch_bytes(
-                &runtime.content.runtime,
-                &request.landblock_id,
-                request.layers,
-            )
-            .await
-            .map_err(application_error)?,
-        )),
-        LoadLandblockProfile { request } => encode_json(
-            crate::load_landblock_profile_response(&runtime.content.runtime, &request.landblock_id)
-                .await
-                .map_err(application_error)?,
-        ),
-        LoadSkySource => Ok(HostResponse::Binary(
-            crate::load_sky_source_bytes(&runtime.content.runtime)
-                .await
-                .map_err(application_error)?,
-        )),
-        LoadTexturePixels { request } => Ok(HostResponse::Binary(
-            crate::load_texture_pixels_bytes(&runtime.content.runtime, request)
-                .await
-                .map_err(application_error)?,
-        )),
     }
 }
 
-impl HostRuntime {
-    fn publish_dynamic_entity(
-        &self,
-        event: holtburger_core::DynamicEntityEvent,
-    ) -> anyhow::Result<()> {
-        self.event_sink.publish_dynamic_entity(event)
+fn mode_command_error(actual: HostMode, required: HostMode) -> ProtocolError {
+    ProtocolError {
+        code: "mode_command_unavailable".to_string(),
+        message: format!(
+            "command is unavailable in {} mode; it requires {} mode",
+            actual.as_str(),
+            required.as_str(),
+        ),
     }
 }
 
@@ -659,36 +300,71 @@ impl StdioEventSink {
     }
 }
 
-impl HostEventSink for StdioEventSink {
+impl ClientEventSink for StdioEventSink {
+    fn publish_client_event(
+        &self,
+        event: crate::client_projection::ClientHostEvent,
+    ) -> anyhow::Result<()> {
+        let event = match event {
+            crate::client_projection::ClientHostEvent::CurrentState(state) => {
+                HostEvent::ClientCurrentState(state)
+            }
+            crate::client_projection::ClientHostEvent::LifecycleChanged(lifecycle) => {
+                HostEvent::ClientLifecycleChanged(lifecycle)
+            }
+            crate::client_projection::ClientHostEvent::ServerTimeUpdated { time } => {
+                HostEvent::ClientServerTimeUpdated { time }
+            }
+            crate::client_projection::ClientHostEvent::DynamicEntity(event) => {
+                HostEvent::ClientDynamicEntity(event)
+            }
+            crate::client_projection::ClientHostEvent::Camera(tick) => {
+                HostEvent::ClientCamera(tick)
+            }
+            crate::client_projection::ClientHostEvent::CameraStarted(receipt) => {
+                HostEvent::ClientCameraStarted(receipt)
+            }
+            crate::client_projection::ClientHostEvent::WorldDiscontinuity(discontinuity) => {
+                HostEvent::ClientWorldDiscontinuity(discontinuity)
+            }
+            crate::client_projection::ClientHostEvent::ExitRequested(exit) => {
+                HostEvent::ClientExitRequested(exit)
+            }
+        };
+        self.send(event)
+    }
+}
+
+impl ExplorerEventSink for StdioEventSink {
     fn publish_dynamic_entity(
         &self,
         event: holtburger_core::DynamicEntityEvent,
     ) -> anyhow::Result<()> {
-        self.send(HostEvent::DynamicEntity(event))
+        self.send(HostEvent::ExplorerDynamicEntity(event))
     }
 
     fn publish_fixed_tick(&self, envelope: ExplorerFixedTickEnvelope) -> anyhow::Result<()> {
-        self.send(HostEvent::FixedTick(envelope))
+        self.send(HostEvent::ExplorerFixedTick(envelope))
     }
 
     fn publish_possession_outcomes(
         &self,
         outcomes: Vec<PossessionEventOutcome>,
     ) -> anyhow::Result<()> {
-        self.send(HostEvent::PossessionEventOutcomes(outcomes))
+        self.send(HostEvent::ExplorerPossessionEventOutcomes(outcomes))
     }
 
     fn publish_physical_fly_motion(&self, path: PhysicalFlyMotionPath) -> anyhow::Result<()> {
-        self.send(HostEvent::PhysicalFlyMotion(path))
+        self.send(HostEvent::ExplorerPhysicalFlyMotion(path))
     }
 
     fn publish_physical_fly_failure(&self, failure: PhysicalFlyFailure) -> anyhow::Result<()> {
-        self.send(HostEvent::PhysicalFlyFailure(failure))
+        self.send(HostEvent::ExplorerPhysicalFlyFailure(failure))
     }
 }
 
 /// Runs the framed sidecar protocol over stdin/stdout.
-pub async fn run_stdio() -> anyhow::Result<()> {
+pub async fn run_stdio(mode: HostMode) -> anyhow::Result<()> {
     let (sender, receiver) = mpsc::sync_channel(WRITER_QUEUE_CAPACITY);
     let writer_thread = thread::spawn(move || -> anyhow::Result<()> {
         let stdout = io::stdout();
@@ -699,12 +375,17 @@ pub async fn run_stdio() -> anyhow::Result<()> {
         Ok(())
     });
     let event_sink = Arc::new(StdioEventSink::new(sender.clone()));
-    let runtime = Arc::new(HostRuntime::discover(event_sink)?);
+    let runtime = Arc::new(HostRuntime::discover(
+        mode,
+        Arc::clone(&event_sink) as Arc<dyn ClientEventSink>,
+        event_sink as Arc<dyn ExplorerEventSink>,
+    )?);
     sender
         .send(ProtocolFrame::Handshake {
             protocol_version: PROTOCOL_VERSION,
             host_name: "holtburger-3d-host".to_string(),
             host_version: env!("CARGO_PKG_VERSION").to_string(),
+            host_mode: mode,
         })
         .context("sidecar writer stopped before handshake")?;
 
@@ -799,7 +480,7 @@ pub async fn run_stdio() -> anyhow::Result<()> {
             .send(ProtocolFrame::ShutdownAck { id })
             .context("sidecar writer stopped while acknowledging shutdown")?;
     }
-    runtime.shutdown();
+    runtime.shutdown().await;
     drop(runtime);
     drop(sender);
     writer_thread
@@ -811,6 +492,7 @@ pub async fn run_stdio() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::host_mode::ClientLaunchConfiguration;
     use std::io::Cursor;
 
     #[test]
@@ -873,7 +555,7 @@ mod tests {
     #[test]
     fn event_content_has_exactly_one_payload_layer() {
         let encoded = encode_frame(&ProtocolFrame::Event {
-            event: HostEvent::PhysicalFlyFailure(PhysicalFlyFailure {
+            event: HostEvent::ExplorerPhysicalFlyFailure(PhysicalFlyFailure {
                 session: 7,
                 message: "stopped".to_string(),
             }),
@@ -885,10 +567,36 @@ mod tests {
             serde_json::json!({
                 "kind": "event",
                 "event": {
-                    "event": "physical-fly-failure",
+                    "event": "explorer-physical-fly-failure",
                     "payload": {
                         "session": 7,
                         "message": "stopped",
+                    },
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn encoded_client_lifecycle_retains_local_player_identity() {
+        let encoded = encode_frame(&ProtocolFrame::Event {
+            event: HostEvent::ClientLifecycleChanged(
+                crate::client_projection::ClientLifecycleWire::InWorld {
+                    player_guid: holtburger_common::Guid(0x5000_0008),
+                },
+            ),
+        })
+        .unwrap();
+        let decoded: Value = rmp_serde::from_slice(&encoded[4..]).unwrap();
+        assert_eq!(
+            decoded,
+            serde_json::json!({
+                "kind": "event",
+                "event": {
+                    "event": "client-lifecycle-changed",
+                    "payload": {
+                        "kind": "in-world",
+                        "playerGuid": 0x5000_0008u64,
                     },
                 },
             })
@@ -902,6 +610,86 @@ mod tests {
             validate_payload_length(MAX_FRAME_BYTES + 1),
             Err(FrameError::Oversize { announced }) if announced == MAX_FRAME_BYTES + 1
         ));
+    }
+
+    #[test]
+    fn command_inventory_declares_shared_and_mode_specific_capabilities() {
+        assert_eq!(
+            HostCommand::Shared(SharedContentCommand::HostStatus).required_mode(),
+            None,
+            "status is available through both mode roots"
+        );
+        assert_eq!(
+            HostCommand::Shared(SharedContentCommand::LoadSkySource).required_mode(),
+            None,
+            "static content is available through both mode roots"
+        );
+        assert_eq!(
+            HostCommand::Explorer(ExplorerHostCommand::ExplorerCatalogCapability).required_mode(),
+            Some(HostMode::Explorer)
+        );
+        assert_eq!(
+            HostCommand::Client(ClientHostCommand::StartClient {
+                startup: ClientLaunchConfiguration {
+                    host: "127.0.0.1".to_string(),
+                    port: 9000,
+                    account: "test".to_string(),
+                    password: "secret".to_string(),
+                },
+            })
+            .required_mode(),
+            Some(HostMode::Client)
+        );
+        assert_eq!(
+            HostCommand::Client(ClientHostCommand::RequestClientCurrentState).required_mode(),
+            Some(HostMode::Client)
+        );
+        assert_eq!(
+            HostCommand::Client(ClientHostCommand::SelectClientCharacter {
+                guid: holtburger_common::Guid(7),
+            })
+            .required_mode(),
+            Some(HostMode::Client)
+        );
+        assert_eq!(
+            HostCommand::Client(ClientHostCommand::DisconnectClient).required_mode(),
+            Some(HostMode::Client)
+        );
+    }
+
+    #[test]
+    fn messagepack_requests_decode_into_their_mode_owned_inventory() {
+        let request = rmp_serde::to_vec_named(&serde_json::json!({
+            "kind": "request",
+            "id": 1,
+            "command": { "command": "request_client_current_state" },
+        }))
+        .unwrap();
+        let mut reader = Cursor::new(framed_payload(request));
+        let Some(InboundFrame::Request {
+            command: HostCommand::Client(ClientHostCommand::RequestClientCurrentState),
+            ..
+        }) = read_frame(&mut reader).unwrap()
+        else {
+            panic!("client request did not decode into the client inventory");
+        };
+    }
+
+    #[test]
+    fn unknown_command_diagnostic_names_the_command() {
+        let request = rmp_serde::to_vec_named(&serde_json::json!({
+            "kind": "request",
+            "id": 1,
+            "command": { "command": "future_command" },
+        }))
+        .unwrap();
+        let mut reader = Cursor::new(framed_payload(request));
+        let error = read_frame(&mut reader).expect_err("unknown commands must be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("unknown host command \"future_command\"")
+        );
     }
 
     #[test]

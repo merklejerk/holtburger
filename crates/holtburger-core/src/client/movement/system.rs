@@ -1,8 +1,13 @@
 use super::common::{
     AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL, build_autonomous_position,
     build_motion_state_raw_motion_state, encode_contact_long_jump,
-    has_autonomous_position_sync_target, local_omega_for_state, local_velocity_for_state,
-    normalize_heading, raw_motion_state_with_motion_style, signed_heading_delta,
+    has_autonomous_position_sync_target, normalize_heading, raw_motion_state_with_motion_style,
+    signed_heading_delta,
+};
+use super::correction::{
+    CorrectionDisposition, CorrectionOverride, RETAIL_INTERPOLATION_TARGET_THRESHOLD_M,
+    ServerCorrection, ServerInterpolationStep, ServerPositionUpdate, classify_server_position,
+    retail_interpolated_speed,
 };
 use crate::client::movement_types::{
     AutonomousDriveIntent, CharacterDrive, LongitudinalMotion, MotionStyle, MovementPacketMetadata,
@@ -10,13 +15,14 @@ use crate::client::movement_types::{
 };
 use anyhow::Result;
 use holtburger_common::sequence::is_newer_u16;
-use holtburger_common::{Guid, Quaternion, Vector3};
+use holtburger_common::{Guid, Quaternion, RigidTransform, Vector3};
 use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::RawMotionState;
 use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionItem};
 use holtburger_session::Session;
-use holtburger_world::SolveBodyInput;
-use holtburger_world::spatial::{LocalDriveControl, LocalDriveGait};
+use holtburger_world::context::WorldContextExt as _;
+use holtburger_world::motion::{BodyMotionRuntime, MotionCommand};
+use holtburger_world::spatial::{ContactState, LocalDriveControl, LocalDriveGait};
 use holtburger_world::{SpatialBodyId, WorldEvent, WorldState};
 use std::time::{Duration, Instant};
 
@@ -129,6 +135,22 @@ pub(crate) struct MovementSystem {
     last_server_motion_intent: Option<ServerMotionIntent>,
     suppress_frontend_autonomous_once: bool,
     server_controlled_projection: Option<ServerControlledProjection>,
+    /// Whether the active server-controlled target is a MoveTo whose heading is owned by the
+    /// movement manager (`CPhysicsObj::IsMovingTo`, `acclient.c:311519-311520`).
+    server_controlled_keep_heading: bool,
+    /// One client-owned correction state machine for confirmed and server-controlled positions.
+    server_correction: ServerCorrection,
+    /// One prepared correction basis consumed by the next physical tick.
+    server_interpolation_step: Option<ServerInterpolationStep>,
+    /// Client-owned authored playback for the currently held local drive.
+    ///
+    /// Server motion snapshots retain the authority's playback, while this separate cursor lets
+    /// local prediction consume the same motion-table contract before that snapshot returns from
+    /// ACE. It is cleared on every ownership/correction edge and advanced at most once per
+    /// client simulation tick.
+    manual_motion_runtime: Option<BodyMotionRuntime>,
+    /// Last manual authored offset produced for the current simulation tick.
+    manual_motion_offset: Option<RigidTransform>,
     next_autonomous_position_heartbeat_at: Option<Instant>,
 }
 
@@ -216,23 +238,123 @@ impl MovementSystem {
             last_server_motion_intent: None,
             suppress_frontend_autonomous_once: false,
             server_controlled_projection: None,
+            server_controlled_keep_heading: false,
+            server_correction: ServerCorrection::default(),
+            server_interpolation_step: None,
+            manual_motion_runtime: None,
+            manual_motion_offset: None,
             next_autonomous_position_heartbeat_at: None,
         }
     }
 
     pub(crate) fn note_server_controlled_movement_started(&mut self) {
         self.suppress_frontend_autonomous_once = true;
+        self.reset_manual_motion_playback();
     }
 
     pub(crate) fn set_server_controlled_projection(
         &mut self,
         projection: ServerControlledProjection,
     ) {
+        self.set_server_controlled_projection_with_heading(projection, false);
+    }
+
+    pub(crate) fn set_server_controlled_projection_with_heading(
+        &mut self,
+        projection: ServerControlledProjection,
+        keep_heading: bool,
+    ) {
         self.server_controlled_projection = Some(projection);
+        self.server_controlled_keep_heading = keep_heading;
+        self.server_correction.reset();
+        self.server_interpolation_step = None;
+        self.reset_manual_motion_playback();
     }
 
     pub(crate) fn clear_server_controlled_projection(&mut self) {
         self.server_controlled_projection = None;
+        self.server_controlled_keep_heading = false;
+        self.server_correction.reset();
+        self.server_interpolation_step = None;
+        self.reset_manual_motion_playback();
+    }
+
+    pub(crate) fn clear_server_correction(&mut self) {
+        self.server_controlled_projection = None;
+        self.server_controlled_keep_heading = false;
+        self.server_correction.reset();
+        self.server_interpolation_step = None;
+    }
+
+    /// Clears local authored playback after authority, lifecycle, or focus ownership changes.
+    pub(crate) fn reset_manual_motion_playback(&mut self) {
+        self.manual_motion_runtime = None;
+        self.manual_motion_offset = None;
+    }
+
+    pub(crate) fn has_active_manual_drive(&self) -> bool {
+        matches!(
+            self.active_drive,
+            Some(ActiveDriveState {
+                intent: ActiveDriveIntent::Manual(_),
+                ..
+            })
+        ) && !self.has_active_server_correction()
+    }
+
+    pub(crate) fn has_active_server_correction(&self) -> bool {
+        self.server_controlled_projection.is_some() || self.server_correction.has_work()
+    }
+
+    pub(crate) fn has_server_controlled_projection(&self) -> bool {
+        self.server_controlled_projection.is_some()
+    }
+
+    /// Classifies and arms one accepted local-player position update. The caller applies a hard
+    /// set/snap to the world pose when the returned disposition requires it; interpolation remains
+    /// entirely in this movement owner and is consumed by the next simulation tick.
+    pub(crate) fn accept_server_position_update(
+        &mut self,
+        update: ServerPositionUpdate,
+        current: holtburger_common::position::WorldPosition,
+        known_teleport_sequence: u16,
+        has_cell: bool,
+    ) -> CorrectionDisposition {
+        let disposition = classify_server_position(update, known_teleport_sequence, has_cell);
+        match disposition {
+            CorrectionDisposition::Ignored => {}
+            CorrectionDisposition::HardSet | CorrectionDisposition::Snap => {
+                self.server_controlled_projection = None;
+                self.server_controlled_keep_heading = false;
+                self.server_correction.reset();
+                self.server_interpolation_step = None;
+                self.reset_manual_motion_playback();
+            }
+            CorrectionDisposition::Interpolate { keep_heading } => {
+                self.server_controlled_projection = None;
+                self.server_controlled_keep_heading = false;
+                self.server_correction.constrain_to(update.pose, current);
+                self.server_correction
+                    .interpolate_to(update.pose, current, keep_heading);
+                self.server_interpolation_step = None;
+                self.reset_manual_motion_playback();
+            }
+        }
+        disposition
+    }
+
+    pub(crate) fn apply_server_correction_to_translation(
+        &mut self,
+        composed: Vector3,
+        contact: bool,
+    ) -> CorrectionOverride {
+        self.server_correction
+            .apply_to_composed_translation(composed, contact)
+    }
+
+    pub(crate) fn prepared_server_correction(&self) -> Option<ServerInterpolationStep> {
+        self.server_interpolation_step
+            .or_else(|| self.server_correction.prepared_step())
     }
 
     fn clear_autonomous_position_heartbeat_schedule(&mut self) {
@@ -297,6 +419,7 @@ impl MovementSystem {
             QueuedDriveCommand::ArriveAtPose { pose } => {
                 self.pending_arrival_pose = Some(pose);
                 self.active_drive = None;
+                self.reset_manual_motion_playback();
             }
             QueuedDriveCommand::SnapFacing { heading } => {
                 self.pending_snap_facing = Some(heading);
@@ -305,6 +428,7 @@ impl MovementSystem {
                 self.pending_arrival_pose = None;
                 self.pending_snap_facing = None;
                 self.active_drive = None;
+                self.reset_manual_motion_playback();
             }
         }
     }
@@ -516,18 +640,26 @@ impl MovementSystem {
 
         if let Some(projection) = self.server_controlled_projection {
             let current_pose = world.local_player_runtime_pose().unwrap_or_default();
-            let to_target = projection.target_pose.global_coords() - current_pose.global_coords();
-            let max_step = (projection.speed_mps.max(0.1) * dt.as_secs_f32().max(0.001)).max(0.05);
-            let desired_world_delta = if to_target.length_squared() <= 1e-6 {
-                Vector3::zero()
-            } else {
-                let distance = to_target.length();
-                if distance <= max_step {
-                    to_target
-                } else {
-                    to_target.normalize() * max_step
-                }
-            };
+            let desired_world_delta = self
+                .server_interpolation_step
+                .filter(|step| step.target == projection.target_pose)
+                .map(|step| step.translation)
+                .unwrap_or_else(|| {
+                    let to_target =
+                        projection.target_pose.global_coords() - current_pose.global_coords();
+                    let max_speed = retail_interpolated_speed(Some(projection.speed_mps));
+                    let max_step = max_speed * dt.as_secs_f32().max(0.0);
+                    if to_target.length_squared() <= 1e-6 {
+                        Vector3::zero()
+                    } else {
+                        let distance = to_target.length();
+                        if distance <= max_step {
+                            to_target
+                        } else {
+                            to_target.normalize() * max_step
+                        }
+                    }
+                });
 
             let desired_heading = if desired_world_delta.length_squared() > 1e-6 {
                 Some(current_pose.heading_to(&projection.target_pose))
@@ -567,10 +699,47 @@ impl MovementSystem {
         })
     }
 
+    /// Advances the retail interpolation and constraint stages once for the current physics tick.
+    pub(crate) fn advance_server_interpolation(
+        &mut self,
+        world: &WorldState,
+        dt: Duration,
+    ) -> Option<ServerInterpolationStep> {
+        let current = world.local_player_runtime_pose()?;
+        let contact = world
+            .runtime_body_view(SpatialBodyId::LocalPlayer(world.player.guid))
+            .map(|body| body.contact)
+            .unwrap_or(ContactState::Unknown);
+        let projection = self.server_controlled_projection;
+        if let Some(projection) = projection {
+            if !self.server_correction.has_interpolation() {
+                self.server_correction
+                    .constrain_to(projection.target_pose, current);
+                self.server_correction.interpolate_to(
+                    projection.target_pose,
+                    current,
+                    self.server_controlled_keep_heading,
+                );
+            }
+        } else if !self.server_correction.has_work() {
+            self.server_interpolation_step = None;
+            return None;
+        }
+        let step = self.server_correction.prepare_tick(
+            current,
+            projection.is_some() || contact == ContactState::Grounded,
+            projection.map(|projection| projection.speed_mps),
+            dt.as_secs_f32(),
+        )?;
+        self.server_interpolation_step = Some(step);
+        Some(step)
+    }
+
     pub(crate) fn current_local_solve_body_input(
         &self,
         world: &WorldState,
-    ) -> Option<SolveBodyInput> {
+        dt: Duration,
+    ) -> Option<holtburger_world::SolveBodyInput> {
         let guid = world.player.guid;
         if guid == Guid::NULL {
             return None;
@@ -584,35 +753,111 @@ impl MovementSystem {
 
         let body_id = SpatialBodyId::LocalPlayer(guid);
         let pose = world.local_player_runtime_pose()?;
-        let (velocity, omega) = match self.active_drive.map(|active| active.intent) {
-            Some(ActiveDriveIntent::Manual(state)) => {
-                let heading = pose.rotation.to_heading();
-                match world.resolve_self_movement_capabilities() {
-                    Ok(capabilities) => (
-                        local_velocity_for_state(heading, state, &capabilities),
-                        local_omega_for_state(state, &capabilities),
-                    ),
-                    Err(error) => {
-                        log::warn!(
-                            "manual local solve missing self-movement capabilities: {error}"
-                        );
-                        (Vector3::zero(), Vector3::zero())
-                    }
-                }
-            }
-            _ => (Vector3::zero(), Vector3::zero()),
-        };
+        let contact = world
+            .runtime_body_view(body_id)
+            .map(|body| body.contact)
+            .unwrap_or(ContactState::Unknown);
+        let basis = self
+            .manual_motion_offset
+            .map(|offset| holtburger_world::SolveProjectionBasis::AuthoredDrive { offset })
+            .or_else(|| {
+                self.current_local_drive_control(world, dt)
+                    .and_then(|control| {
+                        let dt_secs = dt.as_secs_f32();
+                        (dt_secs.is_finite() && dt_secs > 0.0).then_some(
+                            holtburger_world::SolveProjectionBasis::velocity(
+                                control.desired_world_delta / dt_secs,
+                                Vector3::zero(),
+                            ),
+                        )
+                    })
+            });
 
-        Some(SolveBodyInput::velocity(
+        Some(holtburger_world::SolveBodyInput {
             body_id,
             pose,
-            world
-                .runtime_body_view(body_id)
-                .map(|body| body.contact)
-                .unwrap_or(holtburger_world::ContactState::Unknown),
-            velocity,
-            omega,
-        ))
+            contact,
+            basis,
+        })
+    }
+
+    /// Advances the held local drive's authored motion once and returns that exact tick offset.
+    ///
+    /// The runtime cursor is separate from the server-reported entity snapshot: local prediction
+    /// must begin immediately after input, while the authoritative snapshot may arrive later. No
+    /// velocity is reconstructed here; the returned offset is consumed by the shared physical
+    /// actuation boundary.
+    pub(crate) fn advance_local_manual_motion(
+        &mut self,
+        world: &WorldState,
+        dt: Duration,
+    ) -> Result<Option<RigidTransform>> {
+        self.manual_motion_offset = None;
+        // Server correction owns the physical basis until its target is reached. Keep the
+        // semantic held drive alive for the post-correction handoff, but never let its authored
+        // cursor compete with the correction cursor during that interval.
+        if self.has_active_server_correction() {
+            self.manual_motion_runtime = None;
+            return Ok(None);
+        }
+        let Some(ActiveDriveState {
+            intent: ActiveDriveIntent::Manual(state),
+            ..
+        }) = self.active_drive
+        else {
+            self.manual_motion_runtime = None;
+            return Ok(None);
+        };
+
+        let guid = world.player.guid;
+        if guid == Guid::NULL || dt.is_zero() {
+            self.manual_motion_runtime = None;
+            return Ok(None);
+        }
+
+        let resolution = world
+            .resolve_player_motion_table_profile()
+            .map_err(|error| anyhow::anyhow!("manual local motion table unavailable: {error}"))?;
+        let table = world
+            .motion_sequences
+            .table(resolution.movement_profile.motion_table_id)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "manual local motion table 0x{:08X} unavailable",
+                    resolution.movement_profile.motion_table_id
+                )
+            })?;
+        let run_rate = world
+            .player_run_rate()
+            .ok_or_else(|| anyhow::anyhow!("manual local run-rate is unavailable"))?;
+        let stance = world
+            .player_entity()
+            .and_then(|entity| entity.motion_snapshot)
+            .and_then(|snapshot| snapshot.current_style)
+            .or(world.player.last_server_motion_style)
+            .map(|style| MotionCommand(style as u32))
+            .unwrap_or(MotionCommand(table.default_style));
+        let mut order = crate::motion_order_for_drive(state, run_rate, stance)
+            .map_err(|error| anyhow::anyhow!("manual local motion order invalid: {error}"))?;
+        let body_id = SpatialBodyId::LocalPlayer(guid);
+        let contact = world
+            .runtime_body_view(body_id)
+            .map(|body| body.contact)
+            .unwrap_or(ContactState::Unknown);
+        if contact != ContactState::Grounded {
+            // Retail accepts turn-in-place while unsupported but gates planar locomotion until a
+            // walkable contact returns (`CMotionInterp::contact_allows_move`, `acclient.c:330443`).
+            order.forward = None;
+            order.sidestep = None;
+        }
+
+        let offset = self
+            .manual_motion_runtime
+            .get_or_insert_with(|| BodyMotionRuntime::new(table))
+            .drive(table, order, dt.as_secs_f32())
+            .offset;
+        self.manual_motion_offset = Some(offset);
+        Ok(Some(offset))
     }
 
     fn reconcile_server_controlled_projection(&mut self, world: &WorldState) {
@@ -627,7 +872,9 @@ impl MovementSystem {
             return;
         }
 
-        if current_pose.distance_to(&projection.target_pose) <= 0.05 {
+        if current_pose.distance_to(&projection.target_pose)
+            <= RETAIL_INTERPOLATION_TARGET_THRESHOLD_M
+        {
             log::info!(
                 "movement: completed server-controlled projection at {:?}",
                 projection.target_pose

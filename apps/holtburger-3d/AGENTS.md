@@ -2,20 +2,22 @@
 
 This app contains the working browser runtime and WebGL2 renderer used to prove
 the future replacement client architecture. The Explorer is the current
-working development surface: it loads real client content, manages
-scene interest and residency, realizes static and dynamic objects, renders
-outdoor and EnvCell scenes, executes portal views, and exposes focused
-inspection controls. The primary `ClientApp` route remains intentionally thin,
-but that bounded product gap does not make the shared runtime, content, scene,
-or renderer paths scaffolding.
+working development surface: it loads real client content, manages scene
+interest and residency, realizes static and dynamic objects, renders outdoor
+and EnvCell scenes, executes portal views, and exposes focused inspection
+controls. `ClientApp` is a deliberately thin shell over a separate client
+authority composition: lifecycle, movement, collision, and third-person camera
+facts arrive through typed host events, while shared presentation remains
+renderer-owned. Its small UI surface is intentional and is not a TUI parity
+target.
 
 ## Current Expectations
 
 - Treat implemented code paths as real code. Investigate failures to their root
   cause; do not attribute them to scaffolding without concrete evidence.
 - Distinguish an explicitly absent feature from a stubbed implementation. A
-  placeholder Explorer panel or thin client route does not weaken invariants in
-  neighboring runtime systems.
+  placeholder Explorer panel or intentionally small client UI does not weaken
+  invariants in neighboring runtime systems.
 - Do not expand a focused task into completing the product surface. Report
   unrelated missing features without opportunistically implementing them.
 - Prefer complete, honest vertical slices over speculative contracts. New
@@ -31,6 +33,14 @@ or renderer paths scaffolding.
   Explorer panels, controls, camera gestures, diagnostics presentation, and
   layout remain app-local. Reusable runtime semantics should live in the
   appropriate shared runtime subsystem.
+- Keep the host sidecar physically mode-specific: shared static content belongs
+  in `host/src/shared_host_content.rs`, Explorer authority in
+  `host/src/explorer_host.rs`, client authority in `host/src/client_runtime.rs`,
+  and the narrow client wire projection in `host/src/client_projection.rs`.
+  Do not reintroduce a universal host sink, authority trait, or command
+  dispatcher. Non-colliding spatial projection helpers belong to
+  `holtburger-world/src/spatial/dead_reckoning.rs`; collision and body solving
+  remain in the transactional scene path.
 - Svelte reactivity is appropriate for ordinary UI state, but not for frame-hot
   presentation inputs such as camera poses, entity placements, renderer state,
   or other values published at scene cadence. Frame-hot consumers should pull
@@ -51,10 +61,12 @@ Static checks alone are not sufficient evidence for those changes.
 Use `npm run harness:browser -- ...` as the canonical non-interactive browser
 playground. It can exercise production content and synthetic fixtures while
 collecting machine-readable state, browser errors, timings, portal evidence,
-and screenshots. It is not limited to terrain. Always run the harness using
-a deterministic port based on your current branch, because another agent may
-be working on the same machine under a different worktree and running their
-own harness instance.
+and screenshots. It is not limited to terrain. The harness chooses a free
+loopback port by default; pass `--vite-port 1432` when a deterministic isolated
+port is required for a recorded run or when another worktree is active. The
+Electron app launchers follow the same policy; use
+`npm run dev:client -- --vite-port 1432` for an explicit client port. In client
+mode, `--port` continues to mean the ACE server port.
 
 ### Renderer Profiling
 

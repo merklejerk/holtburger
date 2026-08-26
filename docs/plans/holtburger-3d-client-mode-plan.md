@@ -1,9 +1,10 @@
 # Holtburger 3D Client Mode Implementation Plan
 
-Status: implementation complete; Phases 0–15 are closed. The accepted implementation includes the
-cleaner host, movement, frontend-lifetime, diagnostic, and child-spatial-body shapes identified
-during implementation and independent comparison. Electron GUI execution and the extended live ACE
-matrix remain explicit external verification debt, not incomplete implementation.
+Status: original implementation complete; Phases 0–16 are closed. Live teleport evidence exposed a
+world-activation architecture gap, so Phases 17–21 are planned and not implemented. Those phases
+replace every 3D-app discontinuous hydration path with one retail-shaped portal-space activation
+barrier, while narrowing incremental hydration to continuous open-world streaming. Electron GUI
+execution and the remaining live ACE matrix stay explicit external verification debt.
 
 ## Context and Boundaries
 
@@ -89,6 +90,10 @@ path and the reverse input-to-core-to-server path before the client grows broad 
 - Adapt the shared kinematic-boom behavior to the client-owned player path without routing it
   through Explorer possession.
 - Add focused unit, protocol, lifecycle, presentation-harness, and live-client verification.
+- Prepare retail's authored portal tunnel as a required app-wide ambient presentation closure and
+  use one install/reveal transaction for client and Explorer discontinuities.
+- Narrow incremental scene hydration to continuous traversal of an already-active world, deleting
+  direct partial replacement-scene reveal paths.
 - Update the app architecture documentation after the clean cutover lands.
 
 ### Out of scope
@@ -117,6 +122,9 @@ path and the reverse input-to-core-to-server path before the client grows broad 
   presentation runtime.
 - Rewriting `holtburger-core` networking or world authority in TypeScript.
 - Running the interactive TUI for verification.
+- Shipping the enhanced tunnel-shaped outgoing/incoming screen-space warp. This cutover preserves
+  the semantic compositor inputs and final-frame seam required to add it without changing lifecycle
+  or activation contracts.
 
 ## Ground Truth
 
@@ -230,6 +238,19 @@ path and the reverse input-to-core-to-server path before the client grows broad 
   `docs/plans/holtburger-possession-camera-projection-clearance-plan.md` establish the reusable
   kinematic-boom behavior and frontend controller boundaries. Client mode supplies a different
   authoritative actor adapter; it does not inherit Explorer possession.
+- `apps/holtburger-3d/host/src/object_resource_closure.rs` is the generic setup/model/material
+  closure used successfully by portal setup `0x02000306`.
+  `dynamic_entity_visual_source.rs` is the currently misnamed setup-visual transport to generalize,
+  not duplicate.
+- `apps/holtburger-3d/src/lib/game/behavior/prepared-asset-repository.ts` owns shared preparation
+  and exact handle lifetime. `sky-script-system.ts` is the retained-small-ambient-closure precedent;
+  portal setup, animation, and audio have the same app-lifetime policy.
+- `apps/holtburger-3d/src/lib/game/renderer/webgl2-flat-scene-target.ts`,
+  `webgl2-flat-scene-presentation.ts`, and `webgl2-renderer.ts:2430-2471` establish the one finished
+  offscreen scene and single fullscreen presentation write that the transition compositor extends.
+- `apps/holtburger-3d/src/explorer/ExplorerApp.svelte:544-635` is the existing Explorer replacement
+  path: it owns a current request revision and collision receipt but has no installed-scene or
+  revealed-frame barrier. It is a migration/deletion target, not a second activation design.
 
 ### Authoritative external references
 
@@ -258,6 +279,8 @@ No new protocol behavior is guessed from what looks plausible in the Explorer.
 4. **Modes share capabilities, not a base runtime.** Common content and presentation components are
    composed by two explicit mode roots. Mode conditionals do not leak into shared runtime internals,
    and a newly shared mechanism gets a clean source-neutral cutover rather than a compatibility shim.
+   Every 3D replacement scene shares one portal install/reveal transaction; continuous streaming
+   never impersonates that transaction.
 5. **The first vertical slice stays narrow.** Every command, event, field, panel, and abstraction
    must have a consumer in connect, select, enter, render, move, camera, or shutdown behavior.
 6. **Derived identity is computed once.** The client authority names the local player and publishes
@@ -292,6 +315,7 @@ The target architecture has three different roles. They must not be collapsed in
 | Environment selection                 | Explorer manual/follow-clock selection                                     | Server-synchronized client time and future weather state                        | Mode-local environment input producer                                           | Shared environment resolver and renderer          |
 | Character movement                    | Explorer possession command/controller and Explorer body scene             | Client command/protocol executor plus `WorldState` body scene                   | Shared character controller resolves one drive into authored physical actuation | Authority-owned body result and presentation feed |
 | Camera placement                      | Explorer frontend owns desired controls; host boom owns accepted placement | Client frontend owns desired controls; client-host boom owns accepted placement | Mode-local camera controller publishes the accepted primary view                | Presentation runtime and camera-facing UI         |
+| Replacement activation                | Explicit Explorer initial target or world-jump request revision             | Core `world_generation` for initial entry or accepted `PlayerTeleport`           | Mode adapter supplies one exact activation set and post-reveal handoff           | Shared installation barrier and portal controller |
 | Diagnostics                           | Explorer panels and harnesses                                              | Focused client connection/runtime evidence                                      | Mode-local diagnostic readers                                                   | No shared product authority                       |
 
 The critical dynamic-entity flow is:
@@ -513,6 +537,40 @@ Render radii may reuse existing proven values, but they move out of the Explorer
 only when the client becomes a real consumer. Client collision interest is independently bounded to
 the 3×3 owner set justified in Phase 5. The first cut adds no adaptive streaming policy.
 
+### World activation and ordinary streaming
+
+Initial world entry, authoritative teleport, Explorer initial entry, and Explorer-directed world
+jumps are replacement transitions. They enter one source-neutral 3D-app transaction whose
+user-facing presentation is retail's portal space: the previous scene is withdrawn, destination
+authority continues hydrating off-screen, collision and required render products become ready, the
+transition compositor reveals one complete destination, and only then does the initiating mode
+resume controls. Client core retains its generation-scoped lifecycle and ACE handoff; Explorer
+retains its local authority. Neither grows parallel `teleporting`, `loadingScene`, or
+`hasCollision` booleans.
+
+Ordinary outdoor movement is not a replacement transition. Landblock demand continues to reconcile
+incrementally through `SceneInterestCommitCoordinator`, retaining overlapping products while new
+products prepare and old products evict. Portal activation and streaming share the same content and
+realization machinery, but have explicit policies and completion contracts:
+
+- ordinary scene-interest receipts acknowledge accepted demand only and never imply realization;
+- a scene activation receipt names one initiating mode's current generation and completes only when
+  its evidence-backed destination activation set is installed;
+- a portal reveal receipt completes only after that installed destination produces one
+  pure-destination frame; it is distinct from client `InWorld` or Explorer local handoff;
+- a second transition supersedes the first, and stale installation, reveal, or handoff completion
+  cannot activate either generation;
+- network ingestion and authoritative destination hydration continue during portal space, while
+  movement input, local physical advancement, ordinary camera advancement, and audio-listener
+  ownership remain withdrawn; destination pixels may appear during input-free portal exit; and
+- failures name the exact required owner/layer or authority prerequisite instead of presenting a
+  partial destination as playable.
+
+Phase 16 proved the required destination activation set from retail `CellManager` behavior and the
+current render-policy closure. The retained evidence ledger below fixes outdoor and EnvCell layers,
+player/camera staging, portal asset identities, renderer composition seam, resource lifetimes, and
+retail timing so implementation does not reopen those questions from UI appearance.
+
 ### Movement and physics convergence strategy
 
 The convergence is compositional rather than a rewrite of every protocol-shaped movement producer
@@ -588,12 +646,27 @@ the host split and spatial-foundation cutover establish actual change volume:
 | C    | Authority/lifecycle re-audit before presentation teardown        | Small          | 12, 13                            |
 | 14   | Focused client presentation and complete teardown                | Medium         | C                                 |
 | 15   | Reproducible live, IPC, stress, and launcher integration evidence | Medium         | 14                                |
+| 16   | Portal-space evidence, activation-set definition, and contracts   | Medium         | 15                                |
+| 17   | One core-owned world-transition authority and physical cutover    | Large          | 16                                |
+| D    | Transition authority and failure-semantics re-audit               | Small          | 17                                |
+| 18   | Source-neutral destination installation barrier                    | Large          | D                                 |
+| 19   | Required portal assets, compositor, and reveal handshake           | Large          | 18                                |
+| 20   | Explorer/client discontinuity convergence                          | Medium-large   | 19                                |
+| E    | Narrowed streaming and resource-lifetime re-audit                  | Small          | 20                                |
+| 21   | Clean cutover, integration evidence, and vocabulary sweep          | Medium-large   | E                                 |
 
 Phase 0 does not require a live entity census or encoded payload sample. Live ACE integration still
 belongs to Phases 8 and 11, but a targeted census is added only if that verification exposes an
 unexplained projection rejection or delivery-capacity problem. Phases 5 and 6 expose the spatial
 risk before client UI and world-presentation integration without combining contract deletion,
 collision loading, and body hydration into one review cliff.
+
+Phases 16–21 are a post-acceptance architecture correction prompted by live teleport evidence. They
+are intentionally not a narrow crash fix. Phase 16 must close the destination activation-set and
+failure-semantics questions from retail evidence before any implementation begins. Normal outdoor
+movement keeps using overlapping incremental streaming throughout this cutover. Initial world
+entry, authoritative teleport, Explorer initial entry, and Explorer-directed world jumps use the
+same portal activation transaction; only their post-reveal handoff differs.
 
 ### Phase 0: Prove the client vertical-slice contracts
 
@@ -2148,6 +2221,690 @@ presentation extraction was considered complete.
   server-initiated disconnect remain explicit external matrix gaps rather than invented passing
   evidence.
 
+### Phase 16: Prove portal-space semantics and freeze the activation contract
+
+This is an evidence and design phase. Do not alter runtime behavior until its acceptance criteria
+are met.
+
+#### Deliverables
+
+- A checked trace of initial entry, teleport, ordinary outdoor streaming, same-residency hard
+  correction, cross-residency forced reposition, reset, and feed-recovery behavior. Each trigger is
+  classified as a replacement activation, an in-place presentation discontinuity, or recovery;
+  similarly named events are not assumed equivalent.
+- A retail evidence note covering `SmartBox::HandlePlayerTeleport`
+  (`acclient.c:137285-137310`), `SmartBox::PlayerPositionUpdated`
+  (`acclient.c:138537-138578`), `SmartBox::UseTime` (`acclient.c:140020-140031`), and the portal-space
+  viewport in `gmSmartBoxUI::UseTime` (`acclient.c:252638-252789`). The note must trace the
+  `position_update_complete`, `blocking_for_cells`, and prefetch decisions far enough to identify
+  the minimum destination activation set rather than inferring it from the UI string.
+- One composite activation contract, provisionally `ClientWorldActivation`, with exactly one world
+  generation, cause, player identity, authoritative destination residency when known, and readiness
+  state. Every field must have a named core, host, or frontend consumer.
+- A prerequisite table naming which layer owns destination authority, local body relocation,
+  collision readiness, static render readiness, local-player visual readiness, initial camera
+  placement, installation, reveal acknowledgement, mode handoff, and input ownership.
+- Characterization tests that reproduce both live failures without local DAT dependencies: an
+  indoor destination paired with stale outdoor spatial membership, and a placed-motion EnvCell
+  absent from the currently installed collision scene.
+- A measured sLOC and deletion inventory for the post-Phase-16 cutover, including the existing discontinuity,
+  `loading-scene`, and false-ready receipt paths expected to disappear.
+
+#### Task checklist
+
+- [x] Trace `CellManager::PreFetchCells` and its callers through the retail decompile; record whether
+      destination neighbors and each static layer block portal exit. Corroborate content semantics
+      in ACViewer/ACE where the decompile is incomplete.
+- [x] Trace current code from position messages through `set_local_player_runtime_pose`,
+      `apply_forced_reposition_reset`, collision coordination, `WorldDiscontinuity`, frontend scene
+      demand, realization, camera seeding, and input acquisition. Name every stale level and early
+      acknowledgement.
+- [x] Decide the exact closed transition variants and replacement triggers. Initial entry and
+      teleport are mandatory replacement triggers; forced reposition and reset require evidence
+      rather than name-based promotion.
+- [x] Define the destination activation set separately for outdoor and EnvCell residency. Derive it
+      once in the frontend layer that owns render policy and carry the exact set in the activation
+      request; downstream readiness checks must not re-derive it.
+- [x] Specify supersession, cancellation, timeout, content-failure, disconnect, and renderer-crash
+      semantics. A failure clause is accepted only with a fixture that reaches it and one distinct
+      diagnostic.
+- [x] Dry-run the contract through the desktop client, TUI composition, snapshot recovery, a second
+      teleport before the first completes, and ordinary landblock crossing.
+
+#### Acceptance criteria
+
+- No unresolved question can change which products block activation, which layer owns the state, or
+  whether a trigger enters portal space.
+- The proposed contract has one transition generation and no interdependent optional fields or
+  renderer-derived authority facts.
+- Ordinary open-world streaming remains on the current diff-based coordinator and never waits for a
+  global scene-complete condition.
+- The phase identifies concrete code to delete or collapse; it does not merely wrap the existing
+  discontinuity edge in another state machine.
+
+#### Evidence and decisions
+
+Retail's blocking unit is the complete configured scene closure, not one destination cell:
+
+- `SmartBox::HandlePlayerTeleport` clears `position_update_complete` and enters the waiting state
+  only for an accepted teleport timestamp (`acclient.c:137285-137310`).
+- `SmartBox::PlayerPositionUpdated` clears completion, runs the teleport hook, drops command focus,
+  and calls `CellManager::ChangePosition(..., true)` for teleport placement
+  (`acclient.c:138537-138578`). Non-teleport blips call the same operation without blocking.
+- While `CellManager::blocking_for_cells` is true, `SmartBox::UseTime` performs only the prefetch
+  check instead of object maintenance, physics, landscape time, and ambient time. It marks position
+  complete only after blocking ends (`acclient.c:140013-140031`). Network dispatch continues so the
+  destination can hydrate.
+- Outdoor `CellManager::PreFetchCells` walks the configured square landscape radius. Each owner
+  prefetches its landblock, landblock info, and every building portal's stab EnvCells
+  (`acclient.c:140311-140389`, `296053-296145`, `336406-336432`, `337951-337981`,
+  `347593-347609`). An EnvCell destination prefetches the cell itself, its owner landblock and
+  landblock info, all building portal stab cells, and the outdoor landscape closure when the cell
+  sees outside (`acclient.c:333897-333978`, `334831-334858`).
+- Retail hides the normal SmartBox and shows the portal-space viewport until teleport animation
+  finishes (`acclient.c:252638-252789`). `SendLoginCompleteNotification` then waits recursively for
+  every object named by the player's item/container closure before emitting login complete
+  (`acclient.c:383229-383277`, `417770-417806`); the emitted UI action is opcode `0x00A1`
+  (`acclient.c:664098-664116`).
+- ACE confirms that `GameActionLoginComplete` means the client exited portal space for both initial
+  login and teleport (`ACE/Source/ACE.Server/Network/GameAction/Actions/GameActionLoginComplete.cs`).
+  ACE keeps the player hidden, collision-ignored, and `Teleporting` until that action, then waits for
+  critical destination world objects before materializing the player
+  (`ACE/Source/ACE.Server/WorldObjects/Player_Location.cs:654-765`). Its five-minute teleport limit
+  logs off a client that never completes rather than granting partial entry
+  (`ACE/Source/ACE.Server/WorldObjects/Player_Tick.cs:107-139`).
+
+Retail portal presentation and the checked-in DAT content fix the buildout shape more narrowly than
+the activation trace alone:
+
+- `TeleportAnimState` is the closed sequence `Off`, `WorldFadeOut`, `TunnelFadeIn`, `Tunnel`,
+  `TunnelContinue`, `TunnelFadeOut`, and `WorldFadeIn` (`acclient.h:3369-3378`). Ordinary accepted
+  teleport enters `Tunnel` directly; the outgoing-world fade path is used by logoff, not the normal
+  teleport edge (`acclient.c:252638-252671`). Therefore blending or warping the outgoing world into
+  the tunnel is a deliberate enhancement, not evidence of retail behavior.
+- `gmSmartBoxUI::PostInit` creates a dedicated portal viewport containing one physics object, one
+  distant light with intensity `2.0` and direction `(0.3, -1.9, 0.65)`, and a fixed camera at
+  `(0.24, -2.7, 0.88)` using the SmartBox FOV (`acclient.c:252537-252561`). This is presentation
+  furniture, not a second world or spatial scene.
+- On first tunnel display, retail loops the resolved animation at exactly 40 fps. It eases the
+  viewport yaw between random headings over 0.6–1.8 seconds and displays
+  `In Portal Space - Please Wait...` (`acclient.c:252671-252740`). Once destination readiness arrives,
+  it remains in `TunnelContinue` for at least two seconds and exits near an authored animation seam,
+  or after five seconds at the latest. Tunnel fade-out and incoming-world reveal each take one
+  second (`acclient.c:252741-252799`). The incoming reveal changes view-distance/FOV rather than
+  sampling a retained world texture (`SmartBox::SetOverrideFovDistance`,
+  `acclient.c:136977-137003`).
+- The retail asset mapper record `0x25000000` names mapper `0x25000010` as `UIASSET`.
+  `portalspace_background` resolves to setup `0x02000306`; `portalspace_animation` resolves to
+  animation `0x030005AC`. The setup has two parts sharing model `0x0100080B`; that model has 352
+  vertices, 360 draw polygons, zero physics polygons, and two surfaces. The animation has 120
+  frames, two part tracks, no root-position track, and one direct `SoundTweaked` hook at frame 2.
+  At retail's explicit 40 fps it is a three-second loop. These values were decoded from
+  `dats/assets.hba` through the checked-in `holtburger-dat` readers, not inferred from screenshots.
+- Portal audio has two evidenced consumers. `UIASSET` key `0x10000003` resolves UI sound table
+  `0x2000004B`; transition entry key `Sound_UI_EnterPortal = 0x6A` resolves its sole candidate
+  `0x0A000246`, while exit key `Sound_UI_ExitPortal = 0x6B` resolves `0x0A000245`. Both candidates
+  have priority `0.9`, probability `1.0`, and volume `1.0`
+  (`acclient.h:3760-3761`, `acclient.c:251982-252003`, `252782-252789`,
+  `ClientUISystem::GetUISoundTable` at `384060-384065`). The animation hook separately names sound
+  DID `0x0A000316` with probability `1.0` and volume `0.3`. All three waves are present and unpruned
+  in `dats/assets.hba`; preparation must retain both the UI-key resolution path and direct hook sound
+  rather than assuming the setup owns one default sound table.
+- One portal material names an absent first texture source level and a present 32×32 alternative;
+  the other resolves a present 128×128 source. `material_graph.rs:276-293` intentionally selects the
+  first available source level, and existing repository fixtures prove this missing-first-level
+  pattern is not portal-specific. The generic host projection succeeded, so this is not an
+  activation blocker; visual comparison may later test whether retail chooses the same level.
+- A temporary non-retained probe loaded setup `0x02000306` through
+  `object_resource_closure.rs`/`dynamic_entity_visual_source.rs` into a complete 76,524-byte visual
+  envelope and loaded animation `0x030005AC` into a 7,444-byte envelope. No new DAT decoder, baked
+  asset, synthetic entity, or offline conversion is required. The probe was removed after recording
+  these measurements so implementation should consume this ledger rather than repeat discovery.
+- `dynamic_entity_visual_source.rs` accepts only a setup DID and appearance and returns a generic
+  decoded static presentation. Its entity-specific name is now misleading. Phase 19 must cleanly
+  generalize it to a setup-visual source used by both dynamic entities and portal presentation,
+  rather than add a second transport/decoder path.
+- `animation-playback.ts` and `animation-asset-repository.ts` already support an explicit clip rate.
+  Portal playback must request 40 fps; changing the repository's general 30 fps default would alter
+  unrelated authored animation.
+
+The current WebGL2 renderer already provides the future-effects seam:
+
+- Both physical schedules render into one `WebGL2FlatSceneTarget`, and
+  `WebGL2Renderer.#presentFlatScene` performs the frame's only default-framebuffer write
+  (`webgl2-renderer.ts:2430-2471`). `WebGL2FlatScenePresentation` is already a fullscreen triangle
+  that samples the finished scene and applies color grade exactly once. The transition compositor
+  belongs at this final presentation boundary; nothing may draw afterward and escape it.
+- Portal presentation therefore needs one world runtime and one WebGL context. During a transition,
+  the compositor may sample an outgoing RGBA8 snapshot, a live authored tunnel target, and the
+  existing flat-scene target as the incoming destination. The first implementation may use a hard
+  switch or simple blend while preserving those semantic inputs. Later screen-space warping changes
+  only this compositor, not activation, residency, or core contracts.
+- An outgoing RGBA8 snapshot plus an RGBA8/D24 tunnel target costs 12 transient bytes per rendered
+  pixel: approximately 23.7 MiB at 1920×1080 and 94.9 MiB at 3840×2160, scaled by
+  `renderScale²`. Allocate them only while a transition owns them, diagnose exact bytes, and do not
+  retain outgoing depth unless a proved depth-aware effect consumes it.
+- Object draw preparation is currently private inside `WebGL2Renderer`. Phase 19 must extract or
+  reuse the smallest renderer-local object submission primitive needed by the portal pass. It must
+  not duplicate material/shader policy or insert the tunnel object into `SceneGraph` merely to reach
+  existing drawing code.
+
+Resource ownership is closed by the same evidence. Portal setup/model/material, animation, and
+required audio are a tiny frontend ambient closure required by every 3D presentation composition.
+`PreparedAssetRepository` already provides shared preparation and exact retained handles, while
+`SkyScriptSystem` demonstrates why a small closed ambient closure is retained for the presentation
+lifetime instead of evicted and re-fetched on each activation. `GamePresentationOwner` owns one
+prepared `PortalTransitionAssets` composite and a stable renderer resource owner independent of
+world generation. Tunnel targets, outgoing snapshots, and transition clocks remain transient and
+generation-scoped. Failure to prepare a required portal asset is presentation-construction failure:
+the loading presentation cannot first be fetched by the loading operation it exists to cover.
+
+The current client violates that protocol boundary in two places. `PlayerCreate` and
+`PlayerTeleport` each call `send_login_complete` immediately in
+`crates/holtburger-core/src/client/messages.rs`; renderer and collision readiness are not consulted.
+The same file also treats an inbound `GameAction::LoginComplete` as the state transition even though
+ACE defines `0x00A1` as a client action and sends no completion echo; active lifecycle must follow
+the successful outbound action instead of waiting for an unreachable mirror message.
+One teleport also emits both `RuntimeBodiesReset` and `TeleportStarted`, and
+`handle_runtime_world_event` independently increments `world_generation` for both. The frontend
+then clears demand on each edge but calls a scene target resolved as soon as
+`updateSceneInterest` accepts it. `SceneInterestReceipt` reports dispatch acceptance only; terrain
+generation, static/EnvCell atlas realization, player visual realization, and the first camera path
+may all still be pending. `ClientApp.svelte` also retains input ownership because teleport does not
+leave its broad `in-world` state.
+
+Explorer is the remaining discontinuous-hydration consumer. `ExplorerApp.svelte:544-590` reserves
+one monotonic scene-interest request revision, releases camera/possession authority, awaits target
+resolution, requests collision interest, and forwards the resolved target to the camera coordinator.
+That revision proves the frontend already has a supersession identity for explicit world jumps, but
+resolution still does not await installed render products or a reveal transaction. Phase 20 should
+adapt that existing request revision as the Explorer transition generation if its currentness domain
+remains exact; it must not mint a second counter that can drift. The same file's separate
+simulation-interest receipt (`ExplorerApp.svelte:596-635`) remains collision evidence, not render
+installation or reveal evidence.
+
+The physical stale level is equally concrete. `SpatialScene::suspend_runtime_bodies` retains
+`PhysicalBodyState.response` and dynamic `placement`; `set_local_player_runtime_pose` later changes
+only the pose; `set_dynamic_physical_body` deliberately preserves compatible response/placement
+memory when geometry is unchanged. A destination EnvCell can therefore coexist with old outdoor
+membership. `apply_forced_reposition_reset` claims reset semantics but delegates to the same
+pose/kinematics-only `reset_body_from_authority`. Conversely, `relocate_dynamic_body` already
+rebuilds response and membership from destination residency, zeros kinematics/contact, and ends
+collision reports, so Phase 17 is a call-path cutover and deletion rather than a new solver feature.
+The renderer failure has another contributor: world liveness conservatively retains potentially
+stale world entities for 25 seconds, while the client presentation currently reconciles the entire
+mirror against whichever static scopes happen to be installed. Portal entry must withdraw those
+visuals and active reconciliation must require installed scope without deleting authority state.
+
+Replacement-trigger classification is closed as follows:
+
+| Producer or situation | Classification | Reason |
+| --- | --- | --- |
+| Character selection through first player creation | Replacement activation: `initial-entry` | ACE begins with `Teleporting = true`; retail sends login complete only after cells and containment exist |
+| Accepted `PlayerTeleport` message | Replacement activation: `teleport` | This is the protocol edge that selects blocking `ChangePosition` and invalidates the previous scene |
+| `RuntimeBodiesReset(TeleportOrWorldReset)` emitted beside either trigger | Consequence of that activation, never a second trigger | It suspends bodies but carries no independent destination or protocol identity |
+| Local `ForcedReposition`, including cross-residency correction without `PlayerTeleport` | In-place physical and presentation discontinuity | Retail `BlipPlayer` uses non-blocking `ChangePosition`; it updates streaming interest but does not enter portal space |
+| Remote forced reposition | Per-entity correction | It cannot invalidate local scene or control authority |
+| TUI `Resync` or desktop replacement snapshot after receiver loss | Recovery | It replaces mirrors/caches without telling ACE that portal travel occurred |
+| Explicit disconnect, server disconnect, host failure | Terminal transition | It cancels activation and never emits login complete |
+
+Each 3D mode's frontend adapter computes one exact resolved `SceneInterestMap` from its render
+policy; the source-neutral activation coordinator consumes that set unchanged and no downstream
+consumer recomputes a smaller set. Client uses the current client radii below; Explorer preserves
+its explicit selected radii while gaining the same installation semantics:
+
+- For a dungeon-only target, the set is the destination owner's complete `EnvCells` layer. Its
+  completion means shells, portal scopes, static residents, companion authored dynamics, textures,
+  map geometry, and the exact destination EnvCell scope were atomically published.
+- For an outdoor or mixed target, the set contains every terrain owner inside `terrainRadius`, every
+  Buildings/Objects/Generated layer inside its enabled radius, and every profile-approved EnvCells
+  layer inside `envCellRadius`. With today's client policy this is terrain radius 3,
+  Buildings/Objects/Generated radius 2, and EnvCells radius 1. All requested layers block first
+  reveal; radius growth is not deferred because retail prefetch blocks its configured landscape
+  closure, and revealing a scene while its own configured visible layers are absent would recreate
+  the half-installed state this cutover removes.
+- `scene-content-unavailable` is success only for a layer not present in the resolved set. For a
+  requested layer it is an exact activation failure. Empty authored object categories must publish
+  an empty layer rather than masquerade as unavailable.
+- Terrain completes only when generation succeeded and its draw unit's geometry and every texture
+  binding are resident. The current `outdoor-terrain-source-available` event is too early. Static
+  and EnvCell layers complete from `StaticLayerRealizer`'s failure-atomic `published` result.
+
+The closed application contract uses the existing `world_generation`; it does not add an activation
+generation that could drift from it. The shell-facing lifecycle gains one composite portal state:
+
+```text
+PortalSpace {
+  world_generation,
+  cause: InitialEntry | Teleport,
+  player_guid,
+  destination: AwaitingPlacement
+             | Loading { residency, player_entity_generation }
+}
+```
+
+The destination variant prevents an old player pose from becoming the new target before an
+authoritative post-trigger placement arrives. Core internally retains the same identity plus two
+independent prerequisite products: spatial readiness (destination body plus matching collision
+revision) and composition reveal readiness. The desktop supplies reveal readiness only after an
+installed destination has passed through portal exit and produced its first pure-destination frame;
+TUI and non-rendering diagnostics use an immediate adapter because they own no asynchronous visual
+product. Immediate reveal readiness never bypasses spatial or containment readiness. Core emits the
+existing ACE `LoginComplete` action once all of these facts match:
+
+1. authoritative destination and current player entity generation;
+2. complete recursive player containment hydration, matching retail
+   `AllContainedObjectsExist`;
+3. relocated local body plus collision scene containing the destination residency;
+4. composition-provided reveal readiness; and
+5. for desktop, installed activation set, current player visual, one collision-backed input-free
+   initial camera placement, and the first pure-destination frame behind that reveal readiness.
+
+| Prerequisite or handoff | Owning producer | Named consumer and decision |
+| --- | --- | --- |
+| `world_generation`, cause, player GUID | `ClientRuntime` transition authority | Snapshots, host projection, and frontend currentness reject retired work |
+| Awaiting/known destination residency and player entity generation | `WorldState` projected once by `ClientRuntime` | Collision coordinator and desktop scene-target resolver start only from the known variant |
+| Recursive contained-object closure | `WorldState` player/inventory authority | Core activation conjunction withholds ACE login complete |
+| Relocated body response and spatial membership | `SpatialScene::relocate_dynamic_body` through `WorldState` mutation | Collision coordinator and dynamic projector consume one destination-consistent body |
+| Destination collision snapshot/revision | `ClientCollisionCoordinator` | Local solve remains stopped; camera may produce one seed; core activation conjunction records spatial readiness |
+| Exact static activation set | Frontend scene-interest policy and presentation runtime | Produces `SceneActivationReceipt` after every requested layer is installed; it does not claim reveal or handoff |
+| Current player visual | Dynamic presentation owner | Installation barrier rejects mirror-only or stale entity generations |
+| Dynamic installed-scope eligibility | Frontend presentation policy over producer-projected membership | Hidden staging selects the player attachment closure; active reconciliation suppresses old/unresident world roots without deleting mirror authority |
+| Initial camera placement | Core boom over matching collision, installed by frontend camera session | Installation barrier guarantees transition exit has a usable destination camera |
+| Composition reveal readiness | `PortalTransitionController` after the first pure-destination frame, or immediate TUI/non-rendering adapter | Core activation conjunction accepts only the current world generation |
+| ACE `LoginComplete` | `ClientRuntime` after the conjunction | ACE materializes the player; core publishes active `InWorld` only after send success |
+| Input and interactive camera/audio ownership | Frontend lifecycle/presentation root | Enabled only by active `InWorld` for the same generation; destination pixels may be visible during portal exit while controls remain withdrawn |
+
+`LoginComplete` changes the lifecycle to active `InWorld`; it is not sent once on receipt and again
+on reveal acknowledgement. The current `WorldDiscontinuity` edge remains only for Phase
+16-classified in-place correction/recovery until Phase 21 gives that narrower fact an honest name.
+
+Failure and concurrency policy is also closed:
+
+- A newer replacement trigger cancels the prior activation and owns a newly incremented
+  `world_generation`. Late collision, content, dynamic, camera, or renderer completions are stale
+  no-ops with no diagnostic.
+- Required collision/content/player/camera preparation returning an explicit failure is a typed
+  runtime failure naming the generation and exact prerequisite. It disconnects without sending
+  login complete. A requested unavailable layer is the same failure class.
+- There is no client-authored elapsed timeout. Retail remains blocked and ACE already owns the
+  five-minute session limit; inventing a shorter value would be ungrounded. Progress diagnostics may
+  name the pending prerequisite without mutating state.
+- Explicit disconnect bypasses the barrier, cancels owned work, and follows normal disconnect
+  policy. Server disconnect, renderer loss, or host failure follows the existing typed terminal
+  path. Activation acknowledgement transport failure is a host/runtime failure, not a retry.
+- Dynamic and containment deltas continue into the current authority/mirror while visibility is
+  gated. No frozen destination snapshot or replay queue is added; the current generation and player
+  entity generation make stale completion rejectable. Portal entry withdraws every realized dynamic
+  visual without deleting the authority mirror. Hidden staging realizes only the local-player root
+  and its transitive attached descendants; nearby destination entities do not block retail login
+  complete.
+- After activation, the client presentation reconciles only roots whose complete producer-projected
+  spatial membership is backed by the currently installed `SceneInterestMap`, plus their attached
+  descendants. This is presentation eligibility, not entity authority or a coordinate containment
+  guess. It prevents conservatively retained old-scene entities from requiring outdoor scope in a
+  dungeon (world liveness intentionally retains potentially stale visible entities for up to 25
+  seconds) and naturally admits destination entities as their required layers install.
+
+The dry-run leaves one-way dependency flow: authority publishes portal state and destination
+identity; the presentation runtime installs the exact render-policy set and returns
+`SceneActivationReceipt`; the app-local portal controller reveals the installed destination and
+returns one generation-only `PortalRevealReceipt`; client core joins that receipt with containment
+and spatial readiness and emits ACE login complete. Explorer instead completes its local handoff
+from the same reveal receipt. A second discontinuity supersedes every pending product. Ordinary
+landblock crossing never creates portal state and continues through the existing incremental
+coordinator. Snapshot recovery reconstructs the complete portal state and pending destination
+without manufacturing either receipt. Old-scene dynamic authority may survive conservative
+pruning, but no old visual survives portal entry or bypasses installed-scope eligibility.
+
+The measured pre-cutover cleanup inventory contains 45 `WorldDiscontinuity` vocabulary occurrences,
+37 of the client-specific spelling, eight `sceneResolvedKey` references, five `loading-scene`
+references, three immediate `send_login_complete` call/definition sites, three
+`apply_forced_reposition_reset` references, and two `reset_body_from_authority` references. The
+original Phase 16 estimate of 430 additions before 180 deletions covered only core relocation and a
+combined activation/UI barrier; authored rendering, retained ambient resources, and Explorer
+cutover were not yet evidenced. Preserve the inventory as deletion evidence, but do not distort the
+implementation to meet that obsolete net cap. Resteering E measures actual Phase 17–20 additions,
+sets the final cleanup budget, and rejects duplicated coordinators, caches, or render paths rather
+than normalizing their line cost.
+
+Asset-free characterization is complete. A temporary focused world test reproduced an indoor pose
+paired with retained outdoor `SpatialMembership` after `apply_forced_reposition_reset`; it was
+removed after the diagnostic run so broken behavior is not preserved as a contract. The retained
+`missing_retained_env_cell_fails_loudly_without_outdoor_fallback` test reproduces the second failure,
+and the retained `dynamic_relocation_clears_pose_dependent_state_and_moves_membership_atomically`
+test proves the existing positive primitive Phase 17 must route through. Both focused diagnostic
+runs passed; Phase 17 replaces the temporary negative characterization with a positive
+world-mutation regression.
+
+### Phase 17: Cut over core world-transition authority and physical relocation
+
+#### Deliverables
+
+- One core-owned activation state shared by desktop and TUI client compositions. Network ingestion
+  and world hydration continue during activation, while drive acceptance, local physical ticks, and
+  ordinary camera advancement are gated by that state.
+- Initial entry and every Phase 16-proven replacement trigger enter the same generation-scoped
+  activation path. The complete application snapshot carries this level, so receiver recovery
+  cannot reconstruct an impossible `InWorld` state from a pose alone.
+- The existing ACE `LoginComplete` action moves from message receipt to the activation conjunction;
+  its successful send is the one transition from portal space to active `InWorld`.
+- Recursive player containment readiness matching retail `AllContainedObjectsExist`; initial entry
+  cannot complete while an item or nested container named by authority is absent.
+- One discontinuous body-placement primitive that relocates the canonical local body from
+  authoritative destination residency and rebuilds physical response, portal membership,
+  kinematics, contacts, and reports together.
+- Collision coordination targeted to the activation generation and destination residency. Stale
+  collision/body completion is discarded; matching readiness may produce one non-advancing camera
+  seed but cannot activate controls by itself.
+- A typed external-readiness acknowledgement seam with two real adapters: desktop feeds the
+  matching post-reveal acknowledgement, while TUI/non-rendering compositions inject immediate
+  reveal readiness because they own no asynchronous visual product. Core owns the
+  conjunction and no adapter can bypass containment or collision readiness.
+
+#### Task checklist
+
+- [ ] Replace the current `EnteringWorld`/early `InWorld` handoff with the Phase 16
+      `PortalSpace` composite and its closed destination variant; do not add a parallel
+      `isTeleporting` level.
+- [ ] Route discontinuous authoritative placement through `SpatialScene::relocate_dynamic_body` or
+      one renamed equivalent. Collapse the misleading pose-only reset path so
+      `apply_forced_reposition_reset` cannot claim to clear state while retaining stale physical
+      response and membership.
+- [ ] Publish activation generation and destination facts atomically with dynamic and runtime-body
+      replacement state. Keep network deltas flowing into the hidden destination generation.
+- [ ] Remove immediate `send_login_complete` calls from player creation and `PlayerTeleport`.
+      Send that existing protocol action once after matching containment, collision/body, and view
+      readiness; do not invent a second core semantic acknowledgement.
+- [ ] Delete the unreachable inbound `GameAction::LoginComplete` lifecycle branch. Publish active
+      `InWorld` only after the current activation's outbound action is accepted by the session.
+- [ ] Collapse the `RuntimeBodiesReset` plus `TeleportStarted` pair into one generation increment
+      and one portal transition. The body reset remains an effect of the transition.
+- [ ] Hold movement protocol intent at idle, stop local solving and camera advancement, and reject
+      stale drive/camera commands while activation is pending. Prove exactly one stop edge is sent
+      when leaving active play.
+- [ ] Accept reveal readiness only for the current generation and required adapter. Acknowledgement
+      before collision/body readiness records its fact but does not make the world active.
+- [ ] Keep same-residency server correction on the correction path unless Phase 16 proves it is a
+      replacement transition; it must still use physical relocation when its pose is discontinuous.
+
+#### Acceptance criteria
+
+- Publishing `0x01D90100` as the local player's authoritative destination cannot coexist with an
+  outdoor physical response or outdoor dynamic spatial membership.
+- An EnvCell placed-motion update cannot reach the solver until the matching collision scene owns
+  that cell.
+- Matching collision and composition-provided reveal readiness activate exactly once; stale,
+  duplicated, or reordered acknowledgements do not. Missing recursive containment also keeps
+  activation pending.
+- ACE observes exactly one `LoginComplete` after readiness and none on cancellation or failure.
+- Desktop and TUI use the same core transition invariant without importing desktop render policy
+  into `holtburger-core` or `holtburger-world`.
+
+### Resteering D: Re-audit the transition authority before renderer cutover
+
+Dry-run the Phase 17 result before changing presentation:
+
+- prove that protocol lifecycle, world activation, and presentation readiness are distinct facts
+  but not competing state authorities;
+- check that the external-readiness adapter is justified by both desktop and TUI consumers rather
+  than being a renderer callback hidden in core;
+- verify that initial entry and teleport traverse the same state edges and that ordinary streaming
+  traverses none of them;
+- inspect every generation comparison and remove any duplicate generation that cannot differ; and
+- confirm that the one-shot camera seed has no control input, tick loop, or authority side effect.
+
+If these checks reveal mirrored state or a circular host/renderer dependency, revise Phase 17 before
+starting Phase 18. Do not compensate in TypeScript.
+
+### Phase 18: Add a source-neutral destination installation barrier
+
+#### Deliverables
+
+- A source-neutral `SceneActivationRequest` carrying the exact Phase 16 activation set, transition
+  generation, and one closed view-subject variant: a camera-only Explorer anchor or an entity anchor
+  with exact root identity. Its `SceneActivationReceipt` completes when those
+  products are installed and ready to reveal. It does not mean they were displayed or that controls
+  may resume. The existing `SceneInterestReceipt` continues to mean accepted demand only.
+- A one-shot activation coordinator over the same content preparation, installation, eviction, and
+  dynamic realization mechanisms used by normal streaming. It creates no second scene, duplicate
+  resource cache, or global blocking mode inside `SceneInterestCommitCoordinator`.
+- Installed-scope dynamic eligibility shared by activation and ordinary reconciliation. A world
+  root is presented only when every producer-projected outdoor/EnvCell scope it names is resident;
+  attached descendants follow their eligible root. Authority mirrors remain lossless.
+- Destination staging that withdraws old realized dynamics, stages an entity view subject and its
+  transitive attachments when that variant is present, and installs one input-free camera seed.
+  Camera-only Explorer activation invents no dynamic root. Presentation remains hidden behind the
+  transition owner until Phase 19 chooses to reveal it.
+- Exact required-product failure diagnostics. Optional neighboring streaming products retain their
+  ordinary non-blocking policy after activation.
+
+#### Task checklist
+
+- [ ] Add installation-complete signals for the exact required static layers. Reuse existing
+      EnvCell topology and terrain realization ownership; do not poll private renderer maps or infer
+      completion from elapsed frames.
+- [ ] Make terrain completion mean a resident draw unit, not merely an installed source. Treat an
+      unavailable requested layer as activation failure and require empty authored categories to
+      publish an empty layer.
+- [ ] Define and consume the closed camera-only/entity-anchor view-subject union. Extend dynamic
+      realization with a generation-specific root readiness fact only for the entity variant, and
+      consume the supplied initial camera seed for both. Do not treat entity presence in a mirror as
+      proof of visual or camera readiness.
+- [ ] Withdraw every realized dynamic on activation entry, then stage only an entity view subject
+      and its transitive attached descendants when that variant is present. After handoff, filter
+      presentation by complete producer-projected membership against installed scope; never infer
+      residency from coordinates.
+- [ ] Replace `sceneResolvedKey` readiness inference with the activation receipt; a returned
+      scene-interest revision must no longer be called resolved.
+- [ ] Keep normal `updateSceneInterest` reconciliation active after handoff for outdoor radius
+      growth, overlapping landblock installation, and incremental eviction.
+- [ ] Cover partial startup, teardown during activation, superseding activation, stale async
+      installation, and exact required-content failure without leaking workers, audio, GPU
+      resources, or host listeners.
+
+#### Acceptance criteria
+
+- `SceneInterestReceipt`, `SceneActivationReceipt`, and later `PortalRevealReceipt` are different
+  types with one reachable completion condition apiece.
+- No destination is offered to the transition compositor until its complete activation set,
+  required entity-view visual closure when present, and collision-backed camera seed are installed
+  for the same generation.
+- Walking across an outdoor landblock boundary retains overlapping content and input; it does not
+  enter activation or await `SceneActivationReceipt`.
+- The implementation reuses one presentation runtime and residency engine and adds no shadow scene
+  graph.
+
+### Phase 19: Install required portal assets and the reveal compositor
+
+#### Deliverables
+
+- One required `PortalTransitionAssets` ambient composition built and retained by
+  `GamePresentationOwner`: setup `0x02000306`, animation `0x030005AC` at explicit 40 fps, their
+  generic visual/material closure, UI sound table `0x2000004B`, and the three required waves. One
+  typed app-local catalog contains these evidenced identities; generic content sources resolve them
+  and frontend ownership chooses that the closure is mandatory. Do not add a runtime `DidMapper`
+  subsystem solely to rediscover this fixed, closed catalog.
+- A clean rename/generalization of the entity-named setup visual source. Dynamic entity and portal
+  consumers use the same generic host transport, decoder, template preparation, texture atlas, and
+  geometry machinery; no compatibility alias or bespoke portal decoder survives.
+- A renderer-local authored tunnel pass using the retail camera/light evidence and one stable
+  portal resource owner. The tunnel is not a scene node, spatial resident, collision body, dynamic
+  entity, or second `GamePresentationRuntime`.
+- A final-frame transition compositor extending the existing single default-framebuffer write. Its
+  closed input names outgoing snapshot availability, live tunnel presentation, incoming installed
+  scene availability, and transition progress. Color grading remains after composition and runs
+  exactly once.
+- An app-local `PortalTransitionController` with closed, generation-keyed states: `Entering`,
+  `Waiting`, `Exiting`, and `RevealedAwaitingHandoff`. Initial entry has no outgoing snapshot;
+  supersession while already in portal space never captures the tunnel as an old world.
+- A `PortalRevealReceipt` emitted once after the first pure-destination frame for the matching
+  generation. Destination pixels may appear during `Exiting`, but input, ordinary camera advance,
+  and listener ownership remain withdrawn until the mode-specific handoff completes.
+
+#### Task checklist
+
+- [ ] Prepare the portal asset composite during `GamePresentationOwner.build()` before either 3D
+      mode may begin world activation. Retain exact prepared handles and stable geometry/atlas
+      leases until owner teardown; aggregate construction and cleanup failures consistently with the
+      existing presentation owner.
+- [ ] Colocate and comment the one typed portal asset catalog. No setup, animation, sound-table key,
+      or wave DID may be repeated in renderer, controller, audio, tests, or mode roots; consumers
+      receive prepared values rather than re-derive mapper facts.
+- [ ] Add diagnostics for prepared source bytes, persistent geometry/texture GPU bytes, transient
+      target bytes, current transition state/generation, and outstanding handles. Each metric must
+      have a teardown, resize, context-loss, or memory-budget scenario where it differs.
+- [ ] Extract the smallest reusable object-submission primitive from `WebGL2Renderer` needed to draw
+      the portal setup. Keep material and shader decisions centralized; do not expose scene-private
+      mutation merely to avoid the extraction.
+- [ ] Add transition-only target ownership. Release the outgoing snapshot as soon as its compositor
+      weight reaches zero; release tunnel color/depth after pure-destination reveal; resize or
+      recreate exact extents without retaining old allocations. Do not add outgoing depth yet.
+- [ ] Preserve the current fast path and single framebuffer presentation write for ordinary frames.
+      Start with a retail-shaped hard switch or simple blend. Record one `RETAIL DIVERGENCE` at the
+      compositor policy if outgoing/incoming scene warping or blending is enabled; cite the ordinary
+      teleport branch at `acclient.c:252638-252799` and explain that retail switches viewports and
+      reveals by view-distance/FOV.
+- [ ] Play portal animation and audio through prepared app-local assets without registering a fake
+      behavior target. Random yaw and transition timing are presentation policy and never feed
+      world/camera authority.
+- [ ] Keep `Waiting` unbounded while activation is pending. After activation, baseline exit timing
+      may follow the proved retail minimum/seam policy; no timer may manufacture destination
+      readiness. Emit reveal only after one pure-destination frame, exactly once.
+- [ ] Cover required-asset startup failure, partial owner teardown, initial entry without outgoing
+      capture, indefinite waiting, exit reveal, supersession, resize, context loss, and exact
+      transient-resource release. Tests may inject zero durations but must traverse the same states.
+
+#### Acceptance criteria
+
+- Client and Explorer presentation cannot be constructed without the complete required portal
+  closure, and neither mode re-fetches that closure per transition.
+- Portal rendering uses the authored setup and explicit 40 fps animation through shared asset and
+  renderer primitives, with no synthetic world identity or duplicate material implementation.
+- The first transition version preserves outgoing/tunnel/incoming semantic inputs so later
+  screen-space warping requires no activation or lifecycle contract change.
+- `PortalRevealReceipt` cannot precede `SceneActivationReceipt` or a pure-destination frame, and no
+  gameplay/explorer controls resume merely because reveal completed.
+- Normal frames allocate no transition targets and retain exactly one default-framebuffer write.
+
+### Phase 20: Converge Explorer and client discontinuities
+
+#### Deliverables
+
+- One 3D-app discontinuity coordinator consumed by client and Explorer compositions. Client initial
+  entry and `PlayerTeleport`, Explorer initial entry, and Explorer-directed world jumps traverse the
+  same activation and portal-presentation states. Their authority adapters remain distinct.
+- A semantic discontinuity command supplied by the initiating authority; no distance threshold or
+  coordinate heuristic decides whether continuity exists.
+- A mode-specific post-reveal handoff: client forwards `PortalRevealReceipt` to core and waits for
+  successful ACE `LoginComplete`/matching `InWorld`; Explorer commits its local activation and
+  restores Explorer controls. Everything before that handoff is source-neutral.
+- Incremental scene hydration callable only around an already-active continuous world. It retains
+  overlap, cancellation, and eviction, but no longer supports arbitrary initial or replacement
+  scenes becoming visible piecemeal.
+
+#### Task checklist
+
+- [ ] Route Explorer startup and every explicit location/landblock/EnvCell jump through the shared
+      discontinuity coordinator. Initial entry supplies no outgoing scene; later jumps may capture
+      the current finished scene. The existing release-before-scene-change path produces a
+      camera-only view subject unless a future evidenced feature explicitly retains possession.
+- [ ] Adapt Explorer's existing scene-interest request revision as its transition generation after
+      proving the domains coincide. Client uses core `world_generation` unchanged. Each composition
+      has one currentness value; do not add a frontend activation counter beside either producer.
+- [ ] Route client lifecycle state into the same controller without importing ACE protocol policy
+      into the frontend. Forward one matching reveal receipt and keep controls withdrawn until core
+      publishes the same generation as active `InWorld`.
+- [ ] Gate pointer, character drive, explorer navigation, ordinary camera advancement, and audio
+      listener ownership on the initiating mode's completed handoff. Emit exactly one idle client
+      drive edge when leaving active play.
+- [ ] Delete Explorer direct clear/install/reveal paths, partial-startup visibility, and any
+      universal incremental-hydration branch whose only remaining consumer was a discontinuous
+      Explorer jump. Do not delete the shared preparation/installation primitives used by both
+      activation and streaming.
+- [ ] Keep forced reposition, feed recovery, and remote correction on their Phase 16-classified
+      non-portal paths. Do not promote similarly named discontinuities by convenience.
+- [ ] Cover initial Explorer entry, outdoor/EnvCell jumps in both directions, supersession, client
+      initial entry/teleport, mode teardown during every transition state, and uninterrupted
+      continuous landblock crossing.
+
+#### Acceptance criteria
+
+- Every visible 3D-app replacement scene crosses the same install/reveal transaction; there is no
+  Explorer consumer left that requires unrelated old and new scopes to hydrate incrementally while
+  visible.
+- Client and Explorer share portal assets, presentation states, activation coordinator, and
+  compositor while retaining separate authority and post-reveal handoff policy.
+- Continuous traversal never shows portal space, drops overlapping residents, or waits for a global
+  scene-complete condition.
+- A zero-duration harness adapter changes only presentation duration, never state edges, receipts,
+  readiness, or resource ownership.
+
+### Resteering E: Audit the narrowed streaming surface
+
+Dry-run both real 3D compositions after Phase 20:
+
+- enumerate every remaining call that can install a scene into an empty or unrelated scope and
+  prove it is activation, recovery, or dead code;
+- prove incremental streaming begins and ends with one active coherent scene and cannot publish a
+  replacement destination;
+- compare actual production additions and deletions against the Phase 16 inventory, then set the
+  cleanup budget from the surviving mechanisms rather than defending the obsolete pre-compositor
+  estimate;
+- inspect resource diagnostics before, during, after, and across two superseding transitions for
+  retained handles, atlas leases, framebuffers, audio, workers, and host requests; and
+- verify that `SceneInterestReceipt`, `SceneActivationReceipt`, `PortalRevealReceipt`, client
+  `InWorld`, and Explorer active state have no duplicate completion clauses.
+
+If a second empty-scene hydration path, transition generation, renderer instance, or resource cache
+survives, revise Phase 20 before cleanup. Do not preserve it as a fallback.
+
+### Phase 21: Complete the clean cutover and prove transition behavior
+
+#### Deliverables
+
+- Removal or honest narrowing of the old `ClientWorldDiscontinuity` path, `loading-scene` state,
+  scene-key readiness inference, pose-only physical reset, Explorer replacement hydration, and any
+  duplicate generation or portal vocabulary made obsolete by Phases 17–20.
+- Asset-free Rust and TypeScript integration fixtures with deliberately delayed and reordered
+  collision, static-content, dynamic-visual, camera-seed, installation, reveal, and handoff
+  completion.
+- Browser scenarios for both modes' initial entry, outdoor-to-EnvCell and EnvCell-to-outdoor
+  replacement, consecutive transitions, activation failure, resize/context loss, and ordinary
+  incremental landblock streaming.
+- A retained non-interactive live probe transition trace. Run it on an isolated random renderer
+  port and use environment-only credentials; do not invoke the TUI or retain asset-dependent tests.
+- Updated app/core/world architecture docs and diagnostics using one consistent activation,
+  streaming, reveal, handoff, and discontinuity vocabulary.
+
+#### Task checklist
+
+- [ ] Delete transition edges, UI states, source names, metrics, and comments whose only remaining
+      consumer is compatibility with the pre-cutover path. Preserve an in-place presentation
+      discontinuity only where Phase 16 proved a distinct non-portal producer.
+- [ ] Add unit coverage for physical relocation clearing stale response/membership and for every
+      closed activation, transition-presentation, reveal, handoff, supersession, and failure edge.
+- [ ] Add frontend coverage proving hidden staging, exact installation readiness, stale-generation
+      rejection, old-scene dynamic suppression, local-view attachment staging, first pure-destination
+      frame, input release/reacquisition, transient resource release, and continued streaming.
+- [ ] Run formatting, strict TypeScript, lint, Rust tests, clippy with warnings denied, sidecar
+      smoke, and browser harness on a random port.
+- [ ] Exercise live initial entry and teleport when server state permits. Record exact unavailable
+      transition branches rather than treating a dungeon spawn or synthetic fixture as live
+      teleport evidence.
+
+#### Acceptance criteria
+
+- Initial entry and replacement cannot publish a playable half-old/half-new world at any scheduling
+  order covered by the integration fixtures.
+- The two reported crashes are represented by regression fixtures and no longer reachable through
+  the accepted contract.
+- Ordinary streaming retains its incremental overlap, cancellation, and eviction behavior and does
+  not inherit portal-space latency or empty-scene responsibilities.
+- No retired transition mechanism, misleading readiness name, redundant generation, duplicate
+  asset loader, or leaked persistent/transient portal resource survives in code, tests, metrics,
+  docs, or UI labels.
+
 ## Verification Strategy
 
 ### Rust unit and integration evidence
@@ -2174,6 +2931,10 @@ presentation extraction was considered complete.
 - Differential movement fixtures for forward, backward, lateral, diagonal, turn-only, walk/run,
   grounded/airborne, correction, and teleport cases against documented retail/ACE evidence.
 - Client local-player boom adapter over the shared controller.
+- Activation-state fixtures for initial entry, teleport, supersession, reordered collision/reveal
+  readiness, stale acknowledgement, disconnect, and snapshot reconstruction.
+- Discontinuous local-body relocation rebuilding destination response, portal membership,
+  kinematics, contacts, and reports as one transaction.
 
 ### TypeScript and Svelte evidence
 
@@ -2188,6 +2949,17 @@ presentation extraction was considered complete.
 - Scene-interest, environment, input release, and camera coordination tests.
 - Client component tests for launch-driven connection, selection, explicit entry, minimal status
   feedback, and terminal-exit notification.
+- Separate scene-demand acceptance, destination installation, portal reveal, and mode-handoff tests,
+  including exact required-layer failure, hidden dynamic staging, conditional entity-view visual
+  readiness, camera-seed readiness, stale generation, input withdrawal, and the first
+  pure-destination frame.
+- Required portal-asset owner tests covering generic setup-source reuse, exact retained handle and
+  stable GPU lease lifetime, startup failure aggregation, teardown, and no per-transition re-fetch.
+- Closed transition-controller tests for initial entry without outgoing capture, indefinite waiting,
+  exit, supersession while already in portal space, zero-duration traversal, and handoff delay after
+  reveal.
+- An ordinary outdoor streaming fixture proving overlapping installation/eviction never enters the
+  portal-space activation path.
 
 ### Browser harness evidence
 
@@ -2199,6 +2971,12 @@ authority fixtures rather than requiring Electron or a live server for every vis
 - attachment trees and appearance changes;
 - outdoor, dungeon-only, and outdoor/EnvCell transition demand;
 - teleport/reset during streaming;
+- portal-space client and Explorer initial entry plus outdoor/EnvCell replacements with deliberately
+  reordered collision, static, dynamic, camera, installation, reveal, and handoff completion;
+- consecutive transition supersession and required destination/portal-asset failure;
+- authored tunnel playback at explicit 40 fps, retail camera/light placement, outgoing capture,
+  incoming reveal, resize/context loss, and transient-target release;
+- ordinary frames proving no transition-target allocation and one default-framebuffer write;
 - player temporarily authoritative but not visually realized;
 - movement/camera composition and focus-loss stop;
 - presentation construction failure and complete teardown.
@@ -2218,6 +2996,8 @@ not run the TUI. The minimum live matrix is:
 - landblock crossing;
 - EnvCell entry/exit or dungeon spawn;
 - teleport/reset;
+- portal-space entry/exit timing, authored animation playback, and the exact installation/reveal
+  generation acknowledged by the frontend;
 - server disconnect and explicit application shutdown.
 
 The first headless sidecar run against the supplied local ACE endpoint completed authentication,
@@ -2287,6 +3067,18 @@ arguments change.
 | The retail oracle copies production and agrees vacuously                      | Structure the oracle independently from cited decompile branches and compare only public decisions and tick results                                                                                   |
 | Live entity realization exhausts protocol request capacity                    | Reproduce observed volume synthetically, bound work at the content/presentation owner, and leave the protocol cap as a loud invariant                                                                 |
 | Diagnostic tooling leaks credentials or processes                             | Accept credentials only through environment-owned probe input, redact outputs, use isolated random ports, and terminate the complete Electron/sidecar process group                                   |
+| Portal space becomes a second world or scene authority                        | Keep one `WorldState`, one `SpatialScene`, and one presentation runtime; activation is a generation-scoped gate over their existing products, not another store                                       |
+| A global loading barrier stalls ordinary outdoor streaming                    | Route only semantically discontinuous client/Explorer operations through activation; keep active-world scene interest on the incremental diff, overlap, cancellation, and eviction path               |
+| Accepted demand is mistaken for installed destination content                 | Preserve `SceneInterestReceipt` as acceptance-only and add a distinct activation completion backed by exact installed products                                                                        |
+| Core becomes coupled to WebGL or desktop policy                               | Core owns activation prerequisites and a typed external-readiness seam; desktop and TUI adapters supply readiness without exporting their render policy into shared crates                            |
+| Installation, reveal, and collision readiness collapse into one vague receipt | Give demand acceptance, installed activation, first pure-destination frame, and mode handoff distinct contracts with one completion clause each                                                       |
+| Teleport fixes accidentally classify hard correction as portal travel         | Classify each trigger from retail/ACE and current producers in Phase 16; physical discontinuity and portal-space replacement remain separate decisions                                                 |
+| Portal exit reveals a scene without a usable camera                           | Permit one collision-backed, input-free camera seed during hidden staging and require its matching frontend installation before acknowledgement                                                       |
+| Destination activation set is guessed from current renderer structure         | Trace retail cell prefetch/blocking behavior first, define one exact outdoor/EnvCell contract, and give every required layer a distinct reachable failure fixture                                      |
+| Portal assets are loaded by the transition they must display                  | Build and retain the required ambient closure before either 3D mode may activate a world; fail presentation construction loudly if it is incomplete                                                    |
+| Tunnel drawing forks object/material policy                                   | Generalize the existing setup visual source and extract the smallest renderer-local object submission primitive; add no synthetic scene entity or portal-only decoder                                 |
+| Transition targets become permanent frame overhead                            | Allocate snapshot/tunnel targets only in active transition states, diagnose exact bytes, test release/resize/context loss, and preserve the ordinary-frame fast path                                  |
+| Explorer preserves universal replacement hydration complexity                 | Move Explorer startup and explicit jumps onto the same portal activation transaction, then delete direct partial-scene reveal paths while retaining continuous incremental streaming primitives        |
 
 ## Definition of Done
 
@@ -2337,8 +3129,12 @@ arguments change.
       `ClientRuntime` composition without a TUI-specific solver fork.
 - [x] Third-person camera placement is collision-safe and follows the authoritative player without
       becoming player authority.
-- [x] Teleport, reset, disconnect, startup failure, host failure, and application shutdown have
-      explicit tested behavior.
+- [ ] Initial entry and teleport use one generation-scoped portal-space activation path; reset and
+      forced reposition have their Phase 16-proven replacement or in-place behavior. No destination
+      becomes playable before physical, collision, render, player-visual, camera, and acknowledgement
+      prerequisites are ready.
+- [ ] The existing ACE `LoginComplete` action is sent exactly once after destination spatial, recursive
+      containment, and composition-provided reveal readiness; receipt of `PlayerTeleport` never sends it.
 - [x] Explorer behavior remains intact.
 - [x] Formatting, type checks, lint, dead-code analysis, unit tests, Rust clippy, browser harness,
       sidecar smoke, and package verification pass.
@@ -2362,14 +3158,78 @@ arguments change.
 - [x] Rust-to-TypeScript field spelling, early IPC requests, rejected login, normal disconnect, and
       fatal exit are covered across their real process boundaries; GUI-only dialog/close paths are
       named where the local environment lacks a display server.
+- [ ] Ordinary outdoor landblock streaming remains incremental and overlapping; it neither enters
+      portal space nor waits for a global scene-complete condition.
+- [ ] Discontinuous authoritative body placement rebuilds physical response and spatial membership
+      from destination residency instead of retaining topology from the previous scene.
+- [ ] Accepted scene demand and completed destination activation are distinct typed contracts; stale
+      generation completion cannot reveal or activate a retired destination.
+- [ ] Required authored portal assets are prepared once for the 3D presentation lifetime through
+      shared setup/animation/audio/resource machinery; portal space owns no synthetic scene entity,
+      collision body, second runtime, or per-transition asset fetch.
+- [ ] Destination installation, first pure-destination reveal, and mode-specific handoff are
+      distinct typed facts. Client controls wait for matching `InWorld`; Explorer controls wait for
+      matching local handoff.
+- [ ] Explorer startup and explicit world jumps use the same portal activation transaction as
+      client replacement entry, leaving incremental hydration responsible only for an already-active
+      continuous world.
+- [ ] Ordinary frames allocate no portal targets; transition targets have exact diagnostics and are
+      released across completion, supersession, resize, context loss, failure, and teardown.
+- [ ] Portal-space behavior passes asset-free reordered-completion fixtures, authored-asset browser
+      scenarios, and the live transition matrix where external server state permits.
 
 ## Open Questions
 
-None.
+None. Phase 16 plus the retained portal-asset/renderer investigation closed the activation set,
+trigger, timeout, resource ownership, compositor seam, Explorer migration, composition-adapter, and
+dynamic-hydration questions from retail/ACE evidence and the current code dry-run.
 
 ## Implementation Record
 
 ### Decisions and course corrections
+
+- **2026-08-26 — authored portal presentation and app-wide discontinuity cutover scoped:** the
+  checked-in `UIASSET` mapper resolves portal setup `0x02000306` and 120-frame animation
+  `0x030005AC`; the existing generic object closure and animation source loaded them without new DAT
+  work. Retail renders that non-colliding two-part object in a dedicated viewport at 40 fps with a
+  fixed camera/light and sends login complete only after tunnel exit plus incoming-world reveal.
+  The WebGL2 renderer already has one offscreen finished-scene target and one final fullscreen
+  presentation write, so the accepted design adds an app-local authored tunnel pass and transition
+  compositor there, not a second world, scene graph, or runtime. Portal assets are required ambient
+  `GamePresentationOwner` resources retained once for both Explorer and client; only snapshots,
+  tunnel targets, and transition clocks are transient. Installation, first pure-destination reveal,
+  and mode handoff are now distinct receipts/facts. Explorer startup and explicit world jumps join
+  the same discontinuity transaction so universal replacement hydration can be deleted and
+  incremental streaming can serve only an active continuous world. The evidence probe was removed;
+  its decoded identities, geometry, animation, transfer sizes, renderer seam, and memory budget are
+  retained above so implementation must not repeat discovery.
+
+- **2026-08-26 — Phase 16 portal-space contract complete:** retail blocks teleport completion on
+  the complete configured landscape/building/EnvCell prefetch closure, hides the normal viewport,
+  and sends login complete only after that work and the recursive contained-object closure exist.
+  ACE uses that same action to end `Teleporting` for initial entry and later teleports. Holtburger
+  instead sent it immediately and could increment one teleport through two world generations. The
+  accepted contract reuses `world_generation`, makes the resolved client `SceneInterestMap` the
+  exact desktop activation set, treats only initial entry and `PlayerTeleport` as replacement
+  triggers, retains forced reposition as non-blocking correction, and joins containment, relocated
+  body/collision, and composition-provided reveal readiness before sending one existing ACE
+  `LoginComplete`. TUI and non-rendering compositions inject immediate reveal readiness but cannot
+  bypass shared spatial or containment prerequisites. There is no invented client timeout; explicit
+  failures are terminal and ACE retains its five-minute server limit. Asset-free diagnostics
+  reproduced stale outdoor membership and the missing retained EnvCell failure, while the existing
+  relocation test proves the positive primitive. Its original production budget covered only the
+  then-known relocation and activation barrier; Resteering E replaces that obsolete estimate after
+  the now-evidenced compositor, ambient-resource, and Explorer cutovers land.
+
+- **2026-08-26 — portal-space cutover scoped, implementation deferred:** live teleporting to
+  EnvCell `0x01D90100` exposed two halves of one activation failure: the focused projection delivered
+  an indoor pose with retained outdoor spatial membership, and core allowed placed motion to reach a
+  collision scene that did not yet own the destination cell. Retail holds teleport completion while
+  `CellManager` blocks/prefetches and presents a dedicated portal-space viewport. Phases 16–21
+  therefore replace the ad hoc discontinuity/loading path with a generation-scoped activation
+  barrier spanning authoritative relocation, collision readiness, installed render products,
+  player visual, and initial camera placement. Ordinary outdoor movement explicitly retains the
+  existing incremental scene-interest path. No runtime code was changed while scoping this cutover.
 
 - **2026-08-26 — Phase 0 contract cutover complete:** the evidence ledger now fixes the lifecycle,
   current-state recovery, focused advance, residency/collision, hydration, movement, simulation, and

@@ -187,17 +187,17 @@ mod tests {
         PhysicsState, PropertyDataId, PropertyFloat, WeenieType,
         WorldObjectPropertyAccessorsMut as _,
     };
-    use holtburger_common::{Quaternion, Vector3};
+    use holtburger_common::{ParentLocation, Placement, Quaternion, Vector3};
     use holtburger_world::entity::Entity;
     use holtburger_world::{
-        EntityAppearance, PhysicalBodyParticipation, SpatialBodyId,
+        EntityAppearance, PhysicalBodyParticipation, PhysicsAttachment, SpatialBodyId,
         resolve_effective_entity_physics_state,
     };
 
     use crate::client::{ClientState, builder};
     use crate::{
-        DynamicEntityContent, DynamicEntityIdentity, DynamicEntityProjectionInput,
-        DynamicEntityViewSource,
+        DynamicEntityContent, DynamicEntityIdentity, DynamicEntityPlacementView,
+        DynamicEntityProjectionInput, DynamicEntityViewSource,
     };
 
     fn projectable_entity(guid: Guid, pose: WorldPosition) -> Entity {
@@ -305,5 +305,119 @@ mod tests {
             guid,
             "focused initial state must reconstruct current client entities"
         );
+    }
+
+    #[test]
+    fn client_projection_rejections_each_have_a_reachable_source_shape() {
+        let pose = WorldPosition::default();
+
+        let world = WorldState::synthetic();
+        assert_eq!(
+            project_client_dynamic_entity(&world, Guid(1)),
+            Err(ClientDynamicEntityViewError::NotRegistered { guid: 1 })
+        );
+
+        let mut world = WorldState::synthetic();
+        let missing_wcid = Entity::new(Guid(2), "No WCID".to_owned(), pose);
+        world.add_entity(missing_wcid);
+        assert_eq!(
+            project_client_dynamic_entity(&world, Guid(2)),
+            Err(ClientDynamicEntityViewError::MissingWcid { guid: 2 })
+        );
+
+        let mut world = WorldState::synthetic();
+        let mut missing_name = Entity::new(Guid(3), String::new(), pose);
+        missing_name.wcid = Some(42);
+        world.add_entity(missing_name);
+        assert_eq!(
+            project_client_dynamic_entity(&world, Guid(3)),
+            Err(ClientDynamicEntityViewError::MissingName { guid: 3 })
+        );
+
+        let mut world = WorldState::synthetic();
+        let mut missing_setup = Entity::new(Guid(4), "No Setup".to_owned(), pose);
+        missing_setup.wcid = Some(42);
+        world.add_entity(missing_setup);
+        assert_eq!(
+            project_client_dynamic_entity(&world, Guid(4)),
+            Err(ClientDynamicEntityViewError::MissingSetup { guid: 4 })
+        );
+
+        for (guid, scale) in [(5, f64::NAN), (6, 0.0)] {
+            let mut world = WorldState::synthetic();
+            let mut invalid_scale = projectable_entity(Guid(guid), pose);
+            invalid_scale.set_float_prop(PropertyFloat::DefaultScale, scale);
+            world.add_entity(invalid_scale);
+            assert_eq!(
+                project_client_dynamic_entity(&world, Guid(guid)),
+                Err(ClientDynamicEntityViewError::InvalidObjectScale { guid })
+            );
+        }
+
+        let mut world = WorldState::synthetic();
+        world.add_entity(projectable_entity(Guid(7), pose));
+        world.scene.remove_body(SpatialBodyId::Entity(Guid(7)));
+        assert_eq!(
+            project_client_dynamic_entity(&world, Guid(7)),
+            Err(ClientDynamicEntityViewError::MissingBody { guid: 7 })
+        );
+    }
+
+    #[test]
+    fn focused_snapshot_reconstructs_local_player_and_attached_entity_placement() {
+        let player_guid = Guid(0x5000_0001);
+        let attached_guid = Guid(0x7000_0001);
+        let pose = WorldPosition {
+            landblock_id: Guid(0xda55_0001),
+            coords: Vector3::new(4.0, 5.0, 6.0),
+            rotation: Quaternion::identity(),
+        };
+        let attachment = PhysicsAttachment {
+            parent: player_guid,
+            location: ParentLocation::RightHand,
+            placement: Placement::RightHandCombat,
+        };
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        client.world.player.guid = player_guid;
+        client
+            .world
+            .add_entity(projectable_entity(player_guid, pose));
+        let mut attached = projectable_entity(attached_guid, pose);
+        attached.attachment = Some(attachment);
+        client.world.add_entity(attached);
+        let mut events = client.subscribe_client_view_events();
+
+        client.emit_dynamic_entity_snapshot();
+
+        let snapshot =
+            std::iter::from_fn(|| events.try_recv().ok()).find_map(|event| match event {
+                ClientViewEvent::DynamicEntity(DynamicEntityEvent::Snapshot { snapshot }) => {
+                    Some(snapshot)
+                }
+                _ => None,
+            });
+        let snapshot = snapshot.expect("focused snapshot must be emitted");
+        assert_eq!(
+            snapshot
+                .entities
+                .iter()
+                .map(|entity| entity.identity.guid)
+                .collect::<Vec<_>>(),
+            vec![player_guid, attached_guid]
+        );
+        assert!(matches!(
+            snapshot.entities[0].placement,
+            DynamicEntityPlacementView::World { .. }
+        ));
+        assert!(matches!(
+            snapshot.entities[1].placement,
+            DynamicEntityPlacementView::Attached {
+                parent,
+                parent_location,
+                placement,
+            } if parent == attachment.parent
+                && parent_location == attachment.location
+                && placement == attachment.placement
+        ));
     }
 }

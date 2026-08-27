@@ -31,8 +31,8 @@ pub use client::character_motion::{
 };
 pub use client::collision::{
     CLIENT_COLLISION_OWNER_RADIUS, ClientBodyReadiness, ClientCollisionCoordinator,
-    ClientCollisionSource, ClientPlayerBodyFacts, ClientPlayerBodyFactsError, ClientPlayerIdentity,
-    ContentClientCollisionSource, client_player_body_facts,
+    ClientCollisionSource, ClientEntityBodyFacts, ClientEntityBodyFactsError, ClientPlayerIdentity,
+    ContentClientCollisionSource, client_entity_body_facts, client_player_body_facts,
 };
 pub use client::runtime_body_view_cache::RuntimeBodyViewCache;
 pub use client::types::{

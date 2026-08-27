@@ -8,9 +8,11 @@ use holtburger_protocol::messages::*;
 use holtburger_session::Session;
 use holtburger_world::{
     ContactState, GroundedBodyActuation, PhysicalBodyActuation, PhysicalBodyDefinition,
-    SolveBodyInput, SolvedBodyKinematics, SpatialBodyId, WorldEvent, WorldState,
-    advance_authored_body_kinematics, advance_body_kinematics, authored_grounded_actuation,
+    SolveBodyInput, SolveProjectionBasis, SolvedBodyKinematics, SpatialBodyId, WorldEvent,
+    WorldState, advance_authored_body_kinematics, advance_body_kinematics,
+    authored_grounded_actuation,
 };
+use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 const AUTO_MOVE_DISTANCE_LIMIT: f32 = 500.0;
@@ -101,7 +103,7 @@ impl ClientSimulationSystem {
         }
         if let Some(collision) = collision {
             let manual_offset = movement.advance_local_manual_motion(world, dt)?;
-            events.extend(self.tick_local_player(
+            events.extend(self.tick_physical_entities(
                 now,
                 dt,
                 world,
@@ -112,7 +114,7 @@ impl ClientSimulationSystem {
         } else {
             movement.reset_manual_motion_playback();
         }
-        events.extend(self.tick_remote_entities(now, dt, world, movement));
+        events.extend(self.tick_pose_only_remote_entities(now, dt, world, movement));
         Ok(events)
     }
 
@@ -177,7 +179,10 @@ impl ClientSimulationSystem {
         Some(ClientProjectionRequest { bodies })
     }
 
-    fn tick_local_player(
+    /// Advances every prepared authoritative body against one immutable tick-start population.
+    /// This is the architectural seam that makes peer response directional without giving the
+    /// local player or server-authored remotes a privileged collision path.
+    fn tick_physical_entities(
         &mut self,
         now: Instant,
         dt: Duration,
@@ -186,28 +191,89 @@ impl ClientSimulationSystem {
         collision: &SimulationSceneSnapshot,
         manual_offset: Option<RigidTransform>,
     ) -> Result<Vec<WorldEvent>> {
-        let guid = world.player.guid;
-        if guid.is_null() {
-            return Ok(Vec::new());
-        }
-        let body_id = SpatialBodyId::LocalPlayer(guid);
-        let Some(body) = world.scene.body(body_id) else {
-            return Ok(Vec::new());
-        };
-        if body.physical.is_none() {
-            return Ok(Vec::new());
+        let mut actuations = BTreeMap::new();
+        for body_id in world.scene.scheduled_dynamic_entity_ids() {
+            let Some(body) = world.scene.body(body_id) else {
+                continue;
+            };
+            let actuation = if matches!(body_id, SpatialBodyId::LocalPlayer(_)) {
+                self.local_player_actuation(body, dt, world, movement, manual_offset)?
+            } else {
+                Self::remote_entity_actuation(body_id, body, dt, world)?
+            };
+            actuations.insert(body_id, actuation);
         }
 
-        let actuation = self.local_player_actuation(body, dt, world, movement, manual_offset)?;
-        let (result, ()) = world.scene.tick_physical_body_transaction(
-            body_id,
+        let prepared = world.scene.prepare_dynamic_entity_collection(
             collision.scene.as_ref(),
-            actuation,
             dt.as_secs_f32(),
-            now,
-            |_, _| Ok(()),
+            |body| {
+                actuations.get(&body.id).cloned().ok_or_else(|| {
+                    anyhow::anyhow!("scheduled body {:?} has no client actuation", body.id)
+                })
+            },
         )?;
-        Ok(world.apply_physical_body_tick_result(body_id, &result))
+        let mut events = Vec::new();
+        for (body_id, actuation) in prepared.movers {
+            let (result, ()) = world.scene.tick_dynamic_physical_body_transaction(
+                body_id,
+                collision.scene.as_ref(),
+                actuation,
+                dt.as_secs_f32(),
+                now,
+                |_, _| Ok(()),
+            )?;
+            events.extend(world.apply_physical_body_tick_result(body_id, &result));
+        }
+        let _collision_reports = world.scene.finish_dynamic_entity_collection(now)?;
+        Ok(events)
+    }
+
+    fn remote_entity_actuation(
+        body_id: SpatialBodyId,
+        body: &holtburger_world::SpatialBody,
+        dt: Duration,
+        world: &WorldState,
+    ) -> Result<PhysicalBodyActuation> {
+        let definition = body
+            .physical
+            .as_ref()
+            .expect("scheduled body must retain its physical definition")
+            .definition;
+        let basis = world
+            .resolve_body_projection_input(body_id)
+            .and_then(|input| input.basis);
+        match definition {
+            PhysicalBodyDefinition::FreeSphere { .. } => {
+                let velocity = match basis {
+                    Some(SolveProjectionBasis::Velocity { velocity, .. }) => velocity,
+                    Some(SolveProjectionBasis::AuthoredDrive { offset }) => {
+                        body.pose.rotation.rotate_vector(offset.translation) / dt.as_secs_f32()
+                    }
+                    None => body.velocity,
+                };
+                Ok(PhysicalBodyActuation::free_flight(velocity)?)
+            }
+            PhysicalBodyDefinition::Grounded { .. } => {
+                let Some(SolveProjectionBasis::AuthoredDrive { offset }) = basis else {
+                    return Ok(PhysicalBodyActuation::Grounded(
+                        GroundedBodyActuation::coast(),
+                    ));
+                };
+                let object_scale = body_id
+                    .authoritative_guid()
+                    .and_then(|guid| world.entities.get(guid))
+                    .and_then(|entity| entity.obj_scale())
+                    .unwrap_or(1.0) as f32;
+                Ok(authored_grounded_actuation(
+                    offset,
+                    body.pose,
+                    body.contact,
+                    object_scale,
+                    dt.as_secs_f32(),
+                )?)
+            }
+        }
     }
 
     fn local_player_actuation(
@@ -343,7 +409,7 @@ impl ClientSimulationSystem {
         }
     }
 
-    fn tick_remote_entities(
+    fn tick_pose_only_remote_entities(
         &self,
         now: Instant,
         dt: Duration,
@@ -356,6 +422,16 @@ impl ClientSimulationSystem {
         let mut events = Vec::new();
         for input in request.bodies {
             if matches!(input.body_id, SpatialBodyId::LocalPlayer(_)) {
+                continue;
+            }
+            let physical = world
+                .scene
+                .body(input.body_id)
+                .is_some_and(|body| body.physical.is_some());
+            let physical_body_demanded = input.body_id.authoritative_guid().is_some_and(|guid| {
+                super::collision::client_remote_body_requires_preparation(world, guid)
+            });
+            if physical || physical_body_demanded {
                 continue;
             }
             let Some(basis) = input.basis else {

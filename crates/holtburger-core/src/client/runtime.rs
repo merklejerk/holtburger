@@ -273,8 +273,8 @@ impl ClientRuntime {
                     }
 
                     if let Some(coordinator) = self.collision_coordinator.as_mut() {
-                        coordinator.observe(&self.world);
-                        let collision_events = coordinator.poll(&mut self.world, now);
+                        let mut collision_events = coordinator.observe(&mut self.world);
+                        collision_events.extend(coordinator.poll(&mut self.world, now));
                         for event in collision_events {
                             discontinuity = discontinuity.or(self.world_discontinuity_kind(&event));
                             self.handle_runtime_world_event(&event);

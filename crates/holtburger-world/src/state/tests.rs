@@ -16,7 +16,7 @@ use crate::state::motion_resolution::test_support::{FixtureCycle, explicit_motio
 use crate::stats::{Skill, SkillType, TrainingLevel};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
-    PhysicsState, PropertyBool, PropertyInt, PropertyInt64, WeenieType, WorldObjectExt as _,
+    PhysicsState, PropertyBool, PropertyInt, PropertyInt64, WorldObjectExt as _,
     WorldObjectProperties, WorldObjectPropertyAccessors, WorldObjectPropertyAccessorsMut,
 };
 use holtburger_common::{
@@ -3046,7 +3046,6 @@ fn set_state_dynamic_definition() -> crate::DynamicPhysicalBodyDefinition {
                 as_environment: false,
             },
             uses_physics_bsp: false,
-            weenie_type: WeenieType::Creature,
             elasticity: crate::PhysicalElasticity::DEFAULT,
             default_animation_available: false,
             default_script_available: false,

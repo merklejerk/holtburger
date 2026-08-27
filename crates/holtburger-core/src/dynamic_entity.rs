@@ -281,8 +281,6 @@ pub struct DynamicEntityPhysicalPreparationInput {
     pub elasticity: Option<f32>,
     /// Effective semantic physics decisions controlling solver participation.
     pub physics: EffectiveEntityPhysicsState,
-    /// Semantic entity class retained by dynamic collision policy.
-    pub weenie_type: WeenieType,
 }
 
 /// Validated source-neutral entity definition shared by both producer compositions.
@@ -871,7 +869,6 @@ pub fn prepare_dynamic_entity_physics(
             friction: definition.friction,
             elasticity: definition.elasticity,
             physics: definition.physics,
-            weenie_type: definition.identity.weenie_type,
         },
         content,
     )
@@ -906,7 +903,6 @@ pub fn prepare_dynamic_entity_physical_definition(
             friction,
             elasticity,
             physics: input.physics,
-            weenie_type: input.weenie_type,
         },
         content,
     )
@@ -920,7 +916,6 @@ struct DynamicEntityPhysicalFacts<'a> {
     friction: PhysicalFriction,
     elasticity: PhysicalElasticity,
     physics: EffectiveEntityPhysicsState,
-    weenie_type: WeenieType,
 }
 
 fn prepare_dynamic_entity_physical_facts(
@@ -935,7 +930,6 @@ fn prepare_dynamic_entity_physical_facts(
         friction,
         elasticity,
         physics,
-        weenie_type,
     } = facts;
     if !physics.supports_local_simulation() {
         return Err(
@@ -1001,7 +995,6 @@ fn prepare_dynamic_entity_physical_facts(
             dynamic_collision: physics.dynamic_collision,
             reporting: physics.reporting,
             uses_physics_bsp: physics.uses_physics_bsp,
-            weenie_type,
             elasticity,
             default_animation_available: setup.default_animation.is_some(),
             default_script_available: setup.default_script.is_some(),
@@ -1770,7 +1763,6 @@ mod tests {
                     as_environment: false,
                 },
                 uses_physics_bsp: false,
-                weenie_type: WeenieType::Creature,
                 elasticity: PhysicalElasticity::DEFAULT,
                 default_animation_available: false,
                 default_script_available: false,

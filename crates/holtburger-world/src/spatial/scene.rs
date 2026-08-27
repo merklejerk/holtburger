@@ -330,16 +330,18 @@ impl SpatialScene {
     ///
     /// The canonical body store remains the only population. Callers receive a stable identity
     /// order without maintaining a second scheduler registry; pose-only, frozen, static, camera,
-    /// and local-player bodies are excluded by construction.
+    /// and ephemeral bodies are excluded by construction. Local and remote authoritative bodies
+    /// deliberately share this scheduler so directional peer-collision policy has one tick-start
+    /// population.
     pub fn scheduled_dynamic_entity_ids(&self) -> Vec<SpatialBodyId> {
         let mut body_ids = self
             .body_store
             .bodies
             .values()
             .filter_map(|body| {
-                let SpatialBodyId::Entity(_) = body.id else {
+                if matches!(body.id, SpatialBodyId::Ephemeral(_)) {
                     return None;
-                };
+                }
                 let dynamic = body.physical.as_ref()?.dynamic.as_ref()?;
                 (dynamic.collision.scheduling == crate::EntityPhysicsScheduling::Eligible
                     && dynamic.activity == DynamicBodyActivity::Active)
@@ -359,9 +361,9 @@ impl SpatialScene {
             .bodies
             .values()
             .filter_map(|body| {
-                let SpatialBodyId::Entity(_) = body.id else {
+                if matches!(body.id, SpatialBodyId::Ephemeral(_)) {
                     return None;
-                };
+                }
                 let physical = body.physical.as_ref()?;
                 let dynamic = physical.dynamic.as_ref()?;
                 let stale_support = match physical.response {
@@ -1375,7 +1377,7 @@ mod physical_body_tests {
         PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion, PreparedEntityBspPart,
         PreparedEntityTargetGeometry, RETAIL_WALKABLE_NORMAL_Z,
     };
-    use holtburger_common::properties::WeenieType;
+    use holtburger_common::properties::PhysicsState;
     use holtburger_common::{Plane, Quaternion, Sphere};
     use holtburger_content::{
         BspSolid, CellCollisionPortal, CellCollisionPortalTarget, CellVolume, ColliderScale,
@@ -1514,7 +1516,6 @@ mod physical_body_tests {
                     as_environment: false,
                 },
                 uses_physics_bsp,
-                weenie_type: WeenieType::Creature,
                 elasticity: PhysicalElasticity::DEFAULT,
                 default_animation_available: false,
                 default_script_available: false,
@@ -2605,6 +2606,99 @@ mod physical_body_tests {
                 "branch did not respond: {solved:?}"
             );
         }
+    }
+
+    #[test]
+    fn ignore_collisions_is_mover_side_only_and_preserves_target_solidity() {
+        let now = Instant::now();
+        let mover = SpatialBodyId::Entity(Guid(0x7000_0001));
+        let target = SpatialBodyId::Entity(Guid(0x7000_0002));
+        let geometry = || {
+            fallback_target(Arc::new(CollisionShape::Ball(CollisionBall {
+                center: Vector3::zero(),
+                radius: 0.5,
+            })))
+        };
+        let install_pair = |scene: &mut SpatialScene| {
+            install_free_dynamic(
+                scene,
+                mover,
+                Vector3::zero(),
+                Vector3::new(10.0, 0.0, 0.0),
+                geometry(),
+                now,
+            );
+            install_free_dynamic(
+                scene,
+                target,
+                Vector3::new(1.2, 0.0, 0.0),
+                Vector3::zero(),
+                geometry(),
+                now,
+            );
+        };
+        let ignored =
+            crate::resolve_effective_entity_physics_state(PhysicsState::IGNORE_COLLISIONS)
+                .dynamic_collision;
+        assert_eq!(ignored.target, EntityCollisionParticipation::Solid);
+        assert!(!ignored.mover_accepts_response);
+
+        let collision = collision_scene(None);
+        let mut ignored_mover_scene = SpatialScene::new();
+        install_pair(&mut ignored_mover_scene);
+        ignored_mover_scene
+            .body_mut(mover)
+            .unwrap()
+            .physical
+            .as_mut()
+            .unwrap()
+            .dynamic
+            .as_mut()
+            .unwrap()
+            .collision
+            .dynamic_collision = ignored;
+        let prepared = ignored_mover_scene
+            .prepare_dynamic_entity_collection(&collision, 0.1, collection_actuation)
+            .unwrap();
+        ignored_mover_scene
+            .tick_dynamic_physical_body_transaction(
+                mover,
+                &collision,
+                prepared_actuation(prepared, mover),
+                0.1,
+                now + Duration::from_millis(100),
+                |_, _| Ok(()),
+            )
+            .unwrap();
+        assert!(ignored_mover_scene.body(mover).unwrap().pose.coords.x > 0.9);
+
+        let mut ignored_target_scene = SpatialScene::new();
+        install_pair(&mut ignored_target_scene);
+        ignored_target_scene
+            .body_mut(target)
+            .unwrap()
+            .physical
+            .as_mut()
+            .unwrap()
+            .dynamic
+            .as_mut()
+            .unwrap()
+            .collision
+            .dynamic_collision = ignored;
+        let prepared = ignored_target_scene
+            .prepare_dynamic_entity_collection(&collision, 0.1, collection_actuation)
+            .unwrap();
+        ignored_target_scene
+            .tick_dynamic_physical_body_transaction(
+                mover,
+                &collision,
+                prepared_actuation(prepared, mover),
+                0.1,
+                now + Duration::from_millis(100),
+                |_, _| Ok(()),
+            )
+            .unwrap();
+        assert!(ignored_target_scene.body(mover).unwrap().pose.coords.x < 0.8);
     }
 
     #[test]

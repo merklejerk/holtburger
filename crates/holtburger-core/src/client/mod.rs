@@ -907,10 +907,13 @@ mod tests {
         SimulationSceneSnapshot,
     };
     use holtburger_common::position::WorldPosition;
-    use holtburger_common::properties::{PropertyDataId, WorldObjectPropertyAccessorsMut};
+    use holtburger_common::properties::{
+        PhysicsState, PropertyDataId, WorldObjectPropertyAccessorsMut,
+    };
     use holtburger_common::{Guid, Quaternion, Vector3};
     use holtburger_content::{
-        LandblockColliders, LandblockCollisionAsset, MotionSequenceCatalog, TerrainCollisionSurface,
+        ColliderScale, LandblockColliders, LandblockCollisionAsset, LandblockTerrain,
+        MotionSequenceCatalog, TerrainCellDiagonals, TerrainCollisionSurface,
     };
     use holtburger_dat::file_type::MotionTable;
     use holtburger_protocol::messages::CharacterEntry;
@@ -921,11 +924,49 @@ mod tests {
         FixtureCycle, explicit_motion_catalog,
     };
     use holtburger_world::{
-        CollisionScene, FreeSphereConfig, PhysicalBodyDefinition, PhysicalBodyResponsePolicy,
-        PhysicalCollisionFilter, PhysicalFriction, PhysicalRestitution, PhysicalSphereSet,
-        PhysicalSurfaceMotion, PlayerMotionTableSource, SelfMovementCapabilities,
-        SelfMovementKinematics,
+        CollisionScene, DynamicBodyCollisionDefinition, DynamicPhysicalBodyDefinition,
+        EdgeProtection, EntityCollisionParticipation, EntityCollisionReportPolicy,
+        EntityDynamicCollisionPolicy, EntityPhysicsScheduling, FreeSphereConfig, GroundedConfig,
+        PhysicalBodyDefinition, PhysicalBodyResponsePolicy, PhysicalCollisionFilter,
+        PhysicalElasticity, PhysicalFriction, PhysicalRestitution, PhysicalSphereSet,
+        PhysicalSurfaceMotion, PlayerMotionTableSource, PreparedEntityTargetGeometry,
+        RETAIL_AIRBORNE_STEP_DOWN_HEIGHT, RETAIL_LANDING_NORMAL_Z, RETAIL_WALKABLE_NORMAL_Z,
+        SelfMovementCapabilities, SelfMovementKinematics,
     };
+
+    fn dynamic_definition(
+        movement: PhysicalBodyDefinition,
+        response_policy: PhysicalBodyResponsePolicy,
+    ) -> DynamicPhysicalBodyDefinition {
+        DynamicPhysicalBodyDefinition {
+            movement,
+            response_policy,
+            entity_collision: DynamicBodyCollisionDefinition {
+                target_geometry: PreparedEntityTargetGeometry {
+                    physics_bsp_parts: Vec::new(),
+                    fallback_setup_did: 0,
+                    fallback_shapes: Vec::new(),
+                    fallback_scale: ColliderScale::uniform(1.0).unwrap(),
+                },
+                scheduling: EntityPhysicsScheduling::Eligible,
+                dynamic_collision: EntityDynamicCollisionPolicy {
+                    target: EntityCollisionParticipation::Solid,
+                    mover_accepts_response: true,
+                    accepts_peer_reports: true,
+                    missile: false,
+                    path_clipped: false,
+                },
+                reporting: EntityCollisionReportPolicy {
+                    enabled: false,
+                    as_environment: false,
+                },
+                uses_physics_bsp: false,
+                elasticity: PhysicalElasticity::DEFAULT,
+                default_animation_available: false,
+                default_script_available: false,
+            },
+        }
+    }
 
     fn test_self_movement_capabilities(
         run_rate_scalar: f32,
@@ -956,6 +997,28 @@ mod tests {
                 .insert(LandblockCollisionAsset {
                     landblock_id: owner.0,
                     terrain: TerrainCollisionSurface::empty(),
+                    static_geometry: LandblockColliders::default(),
+                })
+                .unwrap();
+        }
+        scene
+    }
+
+    fn flat_collision_scene_for_interest(interest: &SimulationSceneInterest) -> CollisionScene {
+        let mut scene = CollisionScene::new();
+        for owner in interest.owners() {
+            scene
+                .insert(LandblockCollisionAsset {
+                    landblock_id: owner.0,
+                    terrain: TerrainCollisionSurface::from_terrain(&LandblockTerrain {
+                        grid_size: 9,
+                        tile_size: 24.0,
+                        height_indices: vec![0; 81],
+                        heights: vec![0.0; 81],
+                        terrain_samples: vec![0; 81],
+                        cell_diagonals: TerrainCellDiagonals::for_landblock(owner.0),
+                    })
+                    .unwrap(),
                     static_geometry: LandblockColliders::default(),
                 })
                 .unwrap();
@@ -1740,16 +1803,18 @@ mod tests {
         client
             .world
             .scene
-            .install_physical_body(
+            .set_dynamic_physical_body(
                 body_id,
-                definition,
+                Some(dynamic_definition(
+                    definition,
+                    PhysicalBodyResponsePolicy {
+                        restitution: PhysicalRestitution::Inelastic,
+                        friction: PhysicalFriction::DEFAULT,
+                        surface_motion: PhysicalSurfaceMotion::Stable,
+                        align_path: false,
+                    },
+                )),
                 PhysicalCollisionFilter::ALL,
-                PhysicalBodyResponsePolicy {
-                    restitution: PhysicalRestitution::Inelastic,
-                    friction: PhysicalFriction::DEFAULT,
-                    surface_motion: PhysicalSurfaceMotion::Stable,
-                    align_path: false,
-                },
                 None,
             )
             .expect("seeded local player should have a canonical body");
@@ -1851,6 +1916,12 @@ mod tests {
             },
         );
         remote.velocity = holtburger_common::Vector3::new(2.0, 0.0, 0.0);
+        remote.wcid = Some(1);
+        remote
+            .properties
+            .set_did_prop(PropertyDataId::Setup, Guid(0x0200_0001));
+        remote.physics =
+            holtburger_world::resolve_effective_entity_physics_state(PhysicsState::STATIC);
         client.world.remove_entity(remote_guid);
         client.world.add_entity(remote);
 
@@ -1908,6 +1979,101 @@ mod tests {
                 body_id: holtburger_world::SpatialBodyId::Entity(event_guid)
             } if *event_guid == remote_guid
         )));
+    }
+
+    #[tokio::test]
+    async fn prepared_remote_body_lands_on_terrain_instead_of_dead_reckoning_through_it() {
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let player_guid = Guid(0x0102_0304);
+        let remote_guid = Guid(0x0102_0305);
+        let pose = |z| WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            coords: Vector3::new(48.0, 48.0, z),
+            rotation: Quaternion::identity(),
+        };
+        client
+            .world
+            .seed_local_player_entity(player_guid, "Player", pose(2.0));
+        let mut remote = Entity::new(remote_guid, "Remote".to_owned(), pose(2.0));
+        remote.velocity = Vector3::new(0.0, 0.0, -0.8);
+        remote.acceleration = Vector3::new(0.0, 0.0, -9.8);
+        client.world.add_entity(remote);
+
+        let movement = PhysicalBodyDefinition::grounded(
+            PhysicalSphereSet::new(
+                holtburger_common::Sphere {
+                    center: Vector3::new(0.0, 0.0, 0.5),
+                    radius: 0.5,
+                },
+                None,
+            )
+            .unwrap(),
+            GroundedConfig {
+                gravity: -9.8,
+                walkable_normal_z: RETAIL_WALKABLE_NORMAL_Z,
+                landing_normal_z: RETAIL_LANDING_NORMAL_Z,
+                airborne_step_down_height: RETAIL_AIRBORNE_STEP_DOWN_HEIGHT,
+                step_up_height: 0.6,
+                step_down_height: 1.5,
+                edge_protection: EdgeProtection::Creature,
+                maximum_substep_distance: 0.24,
+                maximum_substeps: 32,
+                maximum_contact_passes: 8,
+                separation_epsilon: 0.0005,
+            },
+        )
+        .unwrap();
+        let body_id = holtburger_world::SpatialBodyId::Entity(remote_guid);
+        client
+            .world
+            .scene
+            .set_dynamic_physical_body(
+                body_id,
+                Some(dynamic_definition(
+                    movement,
+                    PhysicalBodyResponsePolicy {
+                        restitution: PhysicalRestitution::Inelastic,
+                        friction: PhysicalFriction::DEFAULT,
+                        surface_motion: PhysicalSurfaceMotion::Stable,
+                        align_path: false,
+                    },
+                )),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+        client.simulation.track_body(body_id);
+
+        let interest = SimulationSceneInterest::prefetch_neighborhood(
+            pose(2.0),
+            CLIENT_COLLISION_OWNER_RADIUS,
+        )
+        .unwrap();
+        let collision = collision_snapshot(
+            interest.clone(),
+            flat_collision_scene_for_interest(&interest),
+        );
+        let dt = Duration::from_millis(PHYSICS_TICK_MS);
+        let started_at = Instant::now();
+        for tick in 1..=50 {
+            client
+                .simulation
+                .tick(
+                    started_at + dt * tick,
+                    dt,
+                    &mut client.world,
+                    &mut client.movement,
+                    Some(&collision),
+                )
+                .unwrap();
+        }
+
+        let landed = client.world.scene.body(body_id).unwrap();
+        assert_eq!(landed.contact, holtburger_world::ContactState::Grounded);
+        assert!(
+            landed.pose.coords.z >= -0.001,
+            "remote fell below terrain: {landed:?}"
+        );
     }
 
     #[test]

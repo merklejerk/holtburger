@@ -378,7 +378,6 @@ mod tests {
                     as_environment: false,
                 },
                 uses_physics_bsp: false,
-                weenie_type: WeenieType::Creature,
                 elasticity: PhysicalElasticity::DEFAULT,
                 default_animation_available: false,
                 default_script_available: false,

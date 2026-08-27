@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use holtburger_common::properties::WeenieType;
 use holtburger_common::{Quaternion, Vector3};
 use holtburger_content::{ColliderScale, CollisionShape};
 
@@ -76,8 +75,6 @@ pub struct DynamicBodyCollisionDefinition {
     pub reporting: EntityCollisionReportPolicy,
     /// Currently selected target branch within `target_geometry`.
     pub uses_physics_bsp: bool,
-    /// Gameplay category consumed by dynamic pair filtering.
-    pub weenie_type: WeenieType,
     /// Authored bounded elasticity retained across reversible `Inelastic` state changes.
     pub elasticity: PhysicalElasticity,
     /// Whether preparation found a setup default animation for reversible state changes.

@@ -104,6 +104,31 @@ describe("ClientCameraSession", () => {
 		]);
 	});
 
+	it("surfaces an uncovered camera path without withdrawing playback", async () => {
+		const transport = new FakeTransport();
+		const lifecycle = new ClientLifecycleSession(transport);
+		await lifecycle.start();
+		const camera = new ClientCameraSession(lifecycle);
+		await camera.start(TARGET, DISTANCE, [0, 0, -1], PROJECTION);
+		const uncovered = {
+			...tick(1, 10, 14),
+			diagnostics: {
+				...tick(1, 10, 14).diagnostics,
+				collisionProof: { status: "uncovered", owner: 0xda55_ffff },
+			},
+		} satisfies ClientCameraTick;
+
+		camera.receive(uncovered, 100);
+
+		expect(camera.presentation(116)).not.toBeNull();
+		expect(camera.status()).toMatchObject({
+			kind: "active",
+			diagnostics: {
+				collisionProof: { status: "uncovered", owner: 0xda55_ffff },
+			},
+		});
+	});
+
 	it("drops stale generations and clears projection/path state on stop", async () => {
 		const transport = new FakeTransport();
 		const lifecycle = new ClientLifecycleSession(transport);
@@ -117,24 +142,6 @@ describe("ClientCameraSession", () => {
 		await camera.stop();
 		expect(camera.status()).toEqual({ kind: "stopped" });
 		expect(camera.presentation(200)).toBeNull();
-	});
-
-	it("drops playback when the authority withdraws collision proof", async () => {
-		const transport = new FakeTransport();
-		const lifecycle = new ClientLifecycleSession(transport);
-		await lifecycle.start();
-		const camera = new ClientCameraSession(lifecycle);
-		await camera.start(TARGET, DISTANCE, [0, 0, -1], PROJECTION);
-		camera.receive(tick(1, 10, 14), 100);
-		expect(camera.presentation(100)).not.toBeNull();
-
-		camera.receive(collisionSnapshotHoldTick(2), 101);
-
-		expect(camera.presentation(120)).toBeNull();
-		expect(camera.status()).toMatchObject({
-			kind: "active",
-			placementOutcome: { kind: "held", reason: "collision-snapshot" },
-		});
 	});
 });
 
@@ -219,33 +226,10 @@ function tick(
 			legs: [{ endFraction: 1, end: pathPoint(endX) }],
 		},
 		diagnostics: {
+			collisionProof: { status: "covered" },
 			controlLegs: 1,
 			clearanceSweeps: 1,
 			transitSubsteps: 1,
-			contactPasses: 0,
-		},
-	};
-}
-
-function collisionSnapshotHoldTick(sequence: number): ClientCameraTick {
-	return {
-		kind: "held",
-		...IDENTITY,
-		sequence,
-		durationMs: 32,
-		targetSphereRole: "primary",
-		clearance: null,
-		desiredReach: 4.5,
-		renderedReach: 4.5,
-		path: {
-			initial: pathPoint(14),
-			legs: [{ endFraction: 1, end: pathPoint(14) }],
-		},
-		reason: "collision-snapshot",
-		diagnostics: {
-			controlLegs: 0,
-			clearanceSweeps: 0,
-			transitSubsteps: 0,
 			contactPasses: 0,
 		},
 	};

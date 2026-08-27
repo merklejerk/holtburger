@@ -1,5 +1,5 @@
-use super::collision::ClientCollisionSnapshot;
 use super::movement::{MovementSystem, ServerControlledProjection};
+use crate::SimulationSceneSnapshot;
 use anyhow::Result;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::WorldObjectExt;
@@ -57,7 +57,6 @@ impl ClientSimulationSystem {
         Self::default()
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(super) fn track_body(&mut self, body_id: SpatialBodyId) {
         if body_id.authoritative_guid() != Some(Guid::NULL)
             && !self.tracked_body_ids.contains(&body_id)
@@ -76,7 +75,7 @@ impl ClientSimulationSystem {
         dt: Duration,
         world: &mut WorldState,
         movement: &mut MovementSystem,
-        collision: Option<&ClientCollisionSnapshot>,
+        collision: Option<&SimulationSceneSnapshot>,
     ) -> Result<Vec<WorldEvent>> {
         if dt.is_zero() {
             return Ok(Vec::new());
@@ -184,7 +183,7 @@ impl ClientSimulationSystem {
         dt: Duration,
         world: &mut WorldState,
         movement: &mut MovementSystem,
-        collision: &ClientCollisionSnapshot,
+        collision: &SimulationSceneSnapshot,
         manual_offset: Option<RigidTransform>,
     ) -> Result<Vec<WorldEvent>> {
         let guid = world.player.guid;
@@ -195,15 +194,6 @@ impl ClientSimulationSystem {
         let Some(body) = world.scene.body(body_id) else {
             return Ok(Vec::new());
         };
-        let Some(player) = world.player_entity() else {
-            return Ok(Vec::new());
-        };
-        if collision.player.guid != guid
-            || collision.player.instance_sequence != player.instance_sequence()
-            || collision.player.residency != player.position.landblock_id
-        {
-            return Ok(Vec::new());
-        }
         if body.physical.is_none() {
             return Ok(Vec::new());
         }

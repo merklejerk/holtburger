@@ -6,11 +6,11 @@ use anyhow::{Context, Result, ensure};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion, Vector3};
 use holtburger_core::{
-    KinematicBoomAdvance, KinematicBoomClearance, KinematicBoomController,
-    KinematicBoomDiagnostics, KinematicBoomHoldReason, KinematicBoomIntent, KinematicBoomOutcome,
-    KinematicBoomPlacement, KinematicBoomProfile, KinematicBoomProfileDefinition,
-    KinematicBoomReseedReason, KinematicBoomTargetSample, KinematicBoomTargetSeed,
-    KinematicBoomUpdateAcceptance, resolve_camera_pivot_offset,
+    KinematicBoomAdvance, KinematicBoomClearance, KinematicBoomCollisionProof,
+    KinematicBoomController, KinematicBoomDiagnostics, KinematicBoomHoldReason,
+    KinematicBoomIntent, KinematicBoomOutcome, KinematicBoomPlacement, KinematicBoomProfile,
+    KinematicBoomProfileDefinition, KinematicBoomReseedReason, KinematicBoomTargetSample,
+    KinematicBoomTargetSeed, KinematicBoomUpdateAcceptance, resolve_camera_pivot_offset,
 };
 use holtburger_world::{
     ChildSpatialBody, ChildSpatialBodyDefinition, ChildSpatialBodyWaypoint, FreeSphereConfig,
@@ -204,8 +204,32 @@ pub struct HostKinematicBoomPlacedPath {
 
 /// Serializable finite-work diagnostics for one solved boom transaction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(tag = "status", rename_all = "kebab-case")]
+pub enum HostKinematicBoomCollisionProof {
+    /// Every selected owner was resident in the sampled scene.
+    Covered,
+    /// Installed topology was used despite one unavailable selected owner.
+    Uncovered {
+        /// First unavailable normalized collision owner.
+        owner: Guid,
+    },
+}
+
+impl From<KinematicBoomCollisionProof> for HostKinematicBoomCollisionProof {
+    fn from(value: KinematicBoomCollisionProof) -> Self {
+        match value {
+            KinematicBoomCollisionProof::Covered => Self::Covered,
+            KinematicBoomCollisionProof::Uncovered { owner } => Self::Uncovered { owner },
+        }
+    }
+}
+
+/// Serializable finite-work diagnostics for one solved boom transaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HostKinematicBoomDiagnostics {
+    /// Collision-authority proof for this camera result.
+    pub collision_proof: HostKinematicBoomCollisionProof,
     /// Number of semantic control legs solved during the transaction.
     pub control_legs: usize,
     /// Number of continuous pivot-ray clearance sweeps performed.
@@ -219,6 +243,7 @@ pub struct HostKinematicBoomDiagnostics {
 impl From<KinematicBoomDiagnostics> for HostKinematicBoomDiagnostics {
     fn from(value: KinematicBoomDiagnostics) -> Self {
         Self {
+            collision_proof: value.collision_proof.into(),
             control_legs: value.control_legs,
             clearance_sweeps: value.clearance_sweeps,
             transit_substeps: value.transit_substeps,
@@ -373,7 +398,7 @@ struct HostKinematicBoomState {
 pub struct HostKinematicBoomRuntime {
     /// Semantic entity and possession authority.
     entities: Arc<ExplorerEntityRuntime>,
-    /// Physical body and collision-snapshot authority.
+    /// Physical-body authority and access to the installed simulation-scene snapshot.
     simulation: Arc<HostSimulationRuntime>,
     /// Validated app-local control profile.
     profile: KinematicBoomProfile,
@@ -577,40 +602,79 @@ camera pivot rests on its collision geometry alone",
             .active
             .as_mut()
             .expect("current possession retained its active boom");
-        let Some(target_tick) = collection.ticks.iter().find(|tick| {
+        let target_tick = collection.ticks.iter().find(|tick| {
             tick.solved.current.id == holtburger_world::SpatialBodyId::Entity(active.identity.guid)
-        }) else {
-            eprintln!("kinematic boom target is absent from its current possession collection");
-            let tick = project_hold(
-                active,
-                HostKinematicBoomHoldReason::TargetContract,
-                KinematicBoomDiagnostics::default(),
-            );
-            return Ok(Some(tick));
-        };
-        let (samples, selected, target_body) =
-            match target_samples(target_tick, &active.target_body, active.pivot_offset) {
-                Ok(value) => value,
-                Err(error) => {
-                    eprintln!("kinematic boom target adaptation failed: {error:#}");
-                    let tick = project_hold(
-                        active,
-                        HostKinematicBoomHoldReason::TargetContract,
-                        KinematicBoomDiagnostics::default(),
-                    );
-                    return Ok(Some(tick));
+        });
+        let coverage_rejection = collection.coverage_rejections.iter().find(|rejection| {
+            rejection.body.id == holtburger_world::SpatialBodyId::Entity(active.identity.guid)
+        });
+        let (collision, samples, selected, target_body, unavailable_owner) =
+            if let Some(tick) = target_tick {
+                match target_samples(tick, &active.target_body, active.pivot_offset) {
+                    Ok((samples, selected, target_body)) => (
+                        Arc::clone(&tick.solved.collision),
+                        samples,
+                        selected,
+                        target_body,
+                        None,
+                    ),
+                    Err(error) => {
+                        eprintln!("kinematic boom target adaptation failed: {error:#}");
+                        let tick = project_hold(
+                            active,
+                            HostKinematicBoomHoldReason::TargetContract,
+                            KinematicBoomDiagnostics::default(),
+                        );
+                        return Ok(Some(tick));
+                    }
                 }
+            } else if let Some(rejection) = coverage_rejection {
+                match stationary_target_samples(
+                    &rejection.collision,
+                    &rejection.body,
+                    &active.target_body,
+                    active.pivot_offset,
+                ) {
+                    Ok((samples, selected, target_body)) => (
+                        Arc::clone(&rejection.collision),
+                        samples,
+                        selected,
+                        target_body,
+                        Some(rejection.owner),
+                    ),
+                    Err(error) => {
+                        eprintln!("kinematic boom stationary target adaptation failed: {error:#}");
+                        let tick = project_hold(
+                            active,
+                            HostKinematicBoomHoldReason::TargetContract,
+                            KinematicBoomDiagnostics {
+                                collision_proof: KinematicBoomCollisionProof::Uncovered {
+                                    owner: rejection.owner,
+                                },
+                                ..KinematicBoomDiagnostics::default()
+                            },
+                        );
+                        return Ok(Some(tick));
+                    }
+                }
+            } else {
+                eprintln!("kinematic boom target is absent from its current possession collection");
+                let tick = project_hold(
+                    active,
+                    HostKinematicBoomHoldReason::TargetContract,
+                    KinematicBoomDiagnostics::default(),
+                );
+                return Ok(Some(tick));
             };
         // Child placement follows the accepted parent solve independently from whether the boom
         // can advance its own collision response this tick.
         active.target_sphere_role = selected;
         active.target_body = target_body;
         let initial_visual_pivot = active.controller.visual_pivot();
-        let outcome = match active.controller.advance(
-            &target_tick.solved.collision,
-            duration_seconds,
-            &samples,
-        ) {
+        let mut outcome = match active
+            .controller
+            .advance(&collision, duration_seconds, &samples)
+        {
             Ok(outcome) => outcome,
             Err(error) => {
                 eprintln!("kinematic boom controller input failed: {error:#}");
@@ -622,8 +686,27 @@ camera pivot rests on its collision geometry alone",
                 return Ok(Some(tick));
             }
         };
+        if let Some(owner) = unavailable_owner {
+            mark_outcome_uncovered(&mut outcome, owner);
+        }
         let tick = project_outcome(active, initial_visual_pivot, outcome);
         Ok(Some(tick))
+    }
+}
+
+fn mark_outcome_uncovered(outcome: &mut KinematicBoomOutcome, candidate: Guid) {
+    let diagnostics = match outcome {
+        KinematicBoomOutcome::Advanced { diagnostics, .. }
+        | KinematicBoomOutcome::Held { diagnostics, .. } => diagnostics,
+    };
+    if matches!(
+        diagnostics.collision_proof,
+        KinematicBoomCollisionProof::Covered
+    ) || matches!(
+        diagnostics.collision_proof,
+        KinematicBoomCollisionProof::Uncovered { owner } if candidate < owner
+    ) {
+        diagnostics.collision_proof = KinematicBoomCollisionProof::Uncovered { owner: candidate };
     }
 }
 
@@ -844,6 +927,35 @@ fn target_samples(
         "possessed target path must be nonempty and normalized"
     );
     Ok((samples, selected.role, target_body))
+}
+
+fn stationary_target_samples(
+    scene: &holtburger_world::CollisionScene,
+    body: &holtburger_world::SpatialBody,
+    previous_target_body: &ChildSpatialBody,
+    pivot_offset: Vector3,
+) -> Result<(
+    Vec<KinematicBoomTargetSample>,
+    HostKinematicBoomTargetSphereRole,
+    ChildSpatialBody,
+)> {
+    let selected = selected_target_sphere(body)?;
+    let definition = ChildSpatialBodyDefinition::new(selected.center, selected.radius)?;
+    let mut target_body = if previous_target_body.definition() == definition {
+        previous_target_body.clone()
+    } else {
+        ChildSpatialBody::new(definition, body.pose)
+    };
+    let target_seed = stationary_target_seed(scene, body.pose, &mut target_body)?;
+    Ok((
+        vec![KinematicBoomTargetSample {
+            end_fraction: 1.0,
+            visual_pivot: visual_pivot(body.pose, pivot_offset),
+            target_seed,
+        }],
+        selected.role,
+        target_body,
+    ))
 }
 
 fn stationary_target_seed(

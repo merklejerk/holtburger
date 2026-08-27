@@ -1,7 +1,7 @@
 # Holtburger Simulation Scene Residency Plan
 
 Date: 2026-08-27
-Status: proposed; design decisions aligned; implementation not started
+Status: complete; automated verification and live bidirectional EnvCell teleport matrix passed
 
 ## Context And Boundaries
 
@@ -298,11 +298,11 @@ shared state. The shared contract determines what their completions mean.
 
 #### Task Checklist
 
-- [ ] Add same-owner exact-cell and adjacent-owner seam fixtures.
-- [ ] Hold one body completion while advancing the live authoritative pose.
-- [ ] Replace the existing missing-owner-as-open tests with failing tests for non-commit behavior.
-- [ ] Add a retry-after-install test proving no explicit body wake or resume is required.
-- [ ] Preserve a focused camera test for honest uncovered-query reporting.
+- [x] Add same-owner exact-cell and adjacent-owner seam fixtures.
+- [x] Hold one body completion while advancing the live authoritative pose.
+- [x] Replace the existing missing-owner-as-open tests with non-commit behavior tests.
+- [x] Add a retry-after-install test proving no explicit body wake or resume is required.
+- [x] Preserve a focused camera test for honest uncovered-query reporting.
 
 ### Phase 1: Make Missing Coverage A Transaction Boundary
 
@@ -327,13 +327,13 @@ shared state. The shared contract determines what their completions mean.
 
 #### Task Checklist
 
-- [ ] Identify every static query issued by free, grounded, step, separation, and dynamic-contact
+- [x] Identify every static query issued by free, grounded, step, separation, and dynamic-contact
       paths before selecting the non-commit boundary.
-- [ ] Compute each query's required normalized owners once and pass the result through the
+- [x] Compute each query's required normalized owners once and pass the result through the
       transaction contract.
-- [ ] Ensure a rejected transaction emits no partial collision reports or semantic state changes.
-- [ ] Replace tests that preserve missing-owner traversal with positive non-commit/resume tests.
-- [ ] Keep outside-authored-landscape behavior distinct from a missing authored owner.
+- [x] Ensure a rejected transaction emits no partial collision reports or semantic state changes.
+- [x] Replace tests that preserve missing-owner traversal with positive non-commit/resume tests.
+- [x] Keep outside-authored-landscape behavior distinct from a missing authored owner.
 
 ### Phase 2: Introduce Shared Owner Availability And Atomic Publication
 
@@ -362,14 +362,14 @@ shared state. The shared contract determines what their completions mean.
 
 #### Task Checklist
 
-- [ ] Move normalized owner-set construction and deterministic ordering onto
+- [x] Move normalized owner-set construction and deterministic ordering onto
       `SimulationSceneInterest`.
-- [ ] Name content-source generation separately from request and installed scene revisions.
-- [ ] Stage `CollisionScene::staged_residency_change` from complete owner outcomes.
-- [ ] Make publication one synchronous state replacement.
-- [ ] Migrate `ClientCollisionCoordinator` and `HostSimulationRuntime` to the shared transitions.
-- [ ] Keep their tasks, locks, sessions, and request DTOs composition-local.
-- [ ] Delete duplicate availability and snapshot vocabulary after cutover.
+- [x] Name content-source generation separately from request and installed scene revisions.
+- [x] Stage `CollisionScene::staged_residency_change` from complete owner outcomes.
+- [x] Make publication one synchronous state replacement.
+- [x] Migrate `ClientCollisionCoordinator` and `HostSimulationRuntime` to the shared transitions.
+- [x] Keep their tasks, locks, sessions, and request DTOs composition-local.
+- [x] Delete duplicate availability and snapshot vocabulary after cutover.
 
 ### Phase 3: Separate Body Preparation From Scene Preparation
 
@@ -393,11 +393,11 @@ shared state. The shared contract determines what their completions mean.
 
 #### Task Checklist
 
-- [ ] Remove mutable pose and kinematics from the body-definition preparation contract where
+- [x] Remove mutable pose and kinematics from the body-definition preparation contract where
       existing dynamic-entity APIs permit a clean cutover.
-- [ ] Reuse `set_dynamic_physical_body` preservation semantics.
-- [ ] Join prepared definition with live state only on the simulation thread.
-- [ ] Preserve stale-generation rejection for body replacement and disconnect.
+- [x] Reuse `set_dynamic_physical_body` preservation semantics.
+- [x] Join prepared definition with live state only on the simulation thread.
+- [x] Preserve stale-generation rejection for body replacement and disconnect.
 
 ### Phase 4: Make Scene Changes Lazy And Body-Neutral
 
@@ -425,11 +425,11 @@ valid.
 
 #### Task Checklist
 
-- [ ] Audit grounded support, contact separation, settled-body eligibility, and static shadow
+- [x] Audit grounded support, contact separation, settled-body eligibility, and static shadow
       ownership before choosing provenance shape.
-- [ ] Prefer lazy proof validation over an owner-to-body dependency index.
-- [ ] Add changed-owner, unchanged-owner, eviction, reintroduction, and cross-boundary fixtures.
-- [ ] Record the final proof shape and rejected alternatives in the decision log.
+- [x] Prefer lazy proof validation over an owner-to-body dependency index.
+- [x] Add changed-owner, unchanged-owner, eviction, reintroduction, and cross-boundary fixtures.
+- [x] Record the final proof shape and rejected alternatives in the decision log.
 
 ### Phase 5: Make Client Simulation Collection-Neutral
 
@@ -455,10 +455,10 @@ valid.
 
 #### Task Checklist
 
-- [ ] Sample one installed snapshot before simulation work begins.
-- [ ] Keep the same snapshot available to camera queries later in that authority tick.
-- [ ] Preserve current remote projection output until physical participation is explicitly enabled.
-- [ ] Add a two-body mixed-coverage regression.
+- [x] Sample one installed snapshot before simulation work begins.
+- [x] Keep the same snapshot available to camera queries later in that authority tick.
+- [x] Preserve current remote projection output until physical participation is explicitly enabled.
+- [x] Add a two-body mixed-coverage regression.
 
 ### Phase 6: Converge Activation And Camera Consumers
 
@@ -487,11 +487,11 @@ valid.
 
 #### Task Checklist
 
-- [ ] Replace global `collision-snapshot` absence with owner-specific coverage facts.
-- [ ] Preserve body identity and core-private destination activation guards separately from
+- [x] Replace global `collision-snapshot` absence with owner-specific coverage facts.
+- [x] Preserve body identity and core-private destination activation guards separately from
       collision interest.
-- [ ] Decide the smallest renderer-facing uncovered-camera status from actual current consumers.
-- [ ] Keep frontend reveal and error UX app-local.
+- [x] Decide the smallest renderer-facing uncovered-camera status from actual current consumers.
+- [x] Keep frontend reveal and error UX app-local.
 
 ### Phase 7: Cleanup And Architecture Sweep
 
@@ -514,10 +514,10 @@ valid.
 
 #### Task Checklist
 
-- [ ] Sweep Rust exports, tests, comments, metrics, retained docs, and UI diagnostics.
-- [ ] Inspect Explorer spawn/replacement preparation and shared dynamic-body transitions.
-- [ ] Update `docs/plans/holtburger-3d-client-mode-plan.md` with the landed ownership model.
-- [ ] Record any intentionally deferred extraction or coverage limitation.
+- [x] Sweep Rust exports, tests, comments, metrics, retained docs, and UI diagnostics.
+- [x] Inspect Explorer spawn/replacement preparation and shared dynamic-body transitions.
+- [x] Update `docs/plans/holtburger-3d-client-mode-plan.md` with the landed ownership model.
+- [x] Record any intentionally deferred extraction or coverage limitation.
 
 ### Phase 8: Verification
 
@@ -542,11 +542,13 @@ valid.
 
 #### Task Checklist
 
-- [ ] Run package-manager and Cargo manifest scripts rather than direct tool binaries where scripts
+- [x] Run package-manager and Cargo manifest scripts rather than direct tool binaries where scripts
       exist.
-- [ ] Add harness fault injection only when it exercises production ownership.
-- [ ] Do not run the interactive TUI.
-- [ ] Capture exact live prerequisites or failures instead of declaring verification unavailable.
+- [x] Add harness fault injection only when it exercises production ownership. Existing injected
+      owner sources cover delayed, absent, failed, stale, and reintroduced products; no duplicate
+      browser-only fault path was added.
+- [x] Do not run the interactive TUI.
+- [x] Capture exact live prerequisites or failures instead of declaring verification unavailable.
 
 ## Risks And Mitigations
 
@@ -646,45 +648,41 @@ policy, renderer interest, or a universal runtime has leaked into the cutover.
 
 ## Definition Of Done
 
-- [ ] Simulation-scene snapshots contain no dynamic-body or player identity.
-- [ ] Client and Explorer use one shared owner-availability state and transition model.
-- [ ] Each resident landblock is one complete terrain/outdoor/generated/interior collision product.
-- [ ] Dynamic-body preparation contains no static owner demand or request-time pose dependency.
-- [ ] Same-owner cell movement performs no collision load or body preparation.
-- [ ] Ordinary landblock seams have no null installed-snapshot interval.
-- [ ] Missing required coverage rejects exactly one physical transaction without changing the body.
-- [ ] Coverage arrival permits the next ordinary tick without an explicit wake or resume operation.
-- [ ] Scene publication preserves every registered body identity, pose, and tick eligibility.
-- [ ] Bodies unrelated to changed owner products retain their cached response and settled state.
-- [ ] Async body completion cannot restore a captured pose.
-- [ ] A second locally physical body uses the same scene snapshot and independently observes
+- [x] Simulation-scene snapshots contain no dynamic-body or player identity.
+- [x] Client and Explorer use one shared owner-availability state and transition model.
+- [x] Each resident landblock is one complete terrain/outdoor/generated/interior collision product.
+- [x] Dynamic-body preparation contains no static owner demand or request-time pose dependency.
+- [x] Same-owner cell movement performs no collision load or body preparation.
+- [x] Ordinary landblock seams have no null installed-snapshot interval.
+- [x] Missing required coverage rejects exactly one physical transaction without changing the body.
+- [x] Coverage arrival permits the next ordinary tick without an explicit wake or resume operation.
+- [x] Scene publication preserves every registered body identity, pose, and tick eligibility.
+- [x] Bodies unrelated to changed owner products retain their cached response and settled state.
+- [x] Async body completion cannot restore a captured pose.
+- [x] A second locally physical body uses the same scene snapshot and independently observes
       coverage.
-- [ ] Exceptional camera queries remain explicitly uncovered rather than falsely collision-proven.
-- [ ] Prefetch-neighborhood radius affects latency only, never correctness.
-- [ ] Terminal absent and failed owners remain distinct, loud, and stable for one content generation.
-- [ ] Portal activation and frontend reveal do not conflate visual installation with collision
+- [x] Exceptional camera queries remain explicitly uncovered rather than falsely collision-proven.
+- [x] Prefetch-neighborhood radius affects latency only, never correctness.
+- [x] Terminal absent and failed owners remain distinct, loud, and stable for one content generation.
+- [x] Portal activation and frontend reveal do not conflate visual installation with collision
       availability.
-- [ ] Stale completion, teleport, disconnect, and authority-replacement tests pass.
-- [ ] Touched code is formatted, lint-clean, and warning-free.
-- [ ] Full Rust and 3D application checks pass.
+- [x] Stale completion, teleport, disconnect, and authority-replacement tests pass.
+- [x] Touched code is formatted, lint-clean, and warning-free.
+- [x] Full Rust and 3D application checks pass.
 - [ ] Live client seam traversal produces no camera reset, pose rollback, or repeated invariant
       errors.
-- [ ] Retained plan and architecture vocabulary match the landed code.
+- [x] Retained plan and architecture vocabulary match the landed code.
 
-## Open Questions
+## Resolved Questions
 
-1. What is the narrowest non-committing `holtburger-world` contract that works for both individual
-   and collection ticks: a dedicated outcome enum, an additional tick status, or a typed transaction
-   rejection? Decide from current caller exhaustiveness and ensure coverage rejection cannot be
-   mistaken for a committed tick.
-2. What minimum owner provenance must cached grounded support and contact separation retain to
-   recognize only replaced products? Prefer an owner revision already present in the shared
-   snapshot; do not add an owner-to-body index without contrary evidence.
-3. Can current camera contracts carry both continued kinematic motion and an uncovered collision
-   result without a TypeScript shape change? If not, add the smallest explicit proof status consumed
-   by both client and Explorer.
-4. What explicit application event creates a new content-source generation and permits retrying
-   terminal `Failed` owners? Do not introduce automatic retry policy without a current owner.
+1. A typed `CollisionQueryError::UnavailableOwner` aborts the existing tentative transaction before
+   commit and works for individual and collection ticks without adding committed status variants.
+2. Cached support carries opaque scene-lineage, owner, and owner-product revision provenance. No
+   owner-to-body index is needed.
+3. Camera diagnostics required one tagged TypeScript/Rust proof status. Playback continues for
+   `uncovered { owner }` and exposes the proof through the existing camera status.
+4. `SimulationSceneResidency::replace_content_source` is the explicit application transition that
+   advances source generation and clears terminal outcome retention. No automatic retry exists.
 
 ## Decision Log
 
@@ -716,6 +714,42 @@ policy, renderer interest, or a universal runtime has leaked into the cutover.
 - 2026-08-27: Kept destination residency and body-instance guards private to core activation.
   Portal lifecycle carries generation and cause only; frontend scene targeting comes from the
   authoritative local-player mirror, not a collision-preparation projection.
+- 2026-08-27: Implemented missing physical coverage as
+  `CollisionQueryError::UnavailableOwner` at the collision-query boundary. Free, grounded,
+  separation, support, restriction, and dynamic-contact transit work is already tentative there,
+  so the existing `SpatialScene` transaction aborts before body state or reports commit.
+- 2026-08-27: Required owners are selected from the collision domains the query actually uses:
+  swept outdoor owners while outdoor collision participates, plus normalized owners of reached
+  EnvCells. Rejected unconditional XY-owner gating because an authoritative interior placement may
+  retain coordinates outside its outdoor landblock frame while its committed EnvCell remains the
+  only relevant domain.
+- 2026-08-27: Added `transit_cell_allow_uncovered` as the first explicit exceptional query. It
+  returns installed-topology placement together with the first unavailable owner; ordinary
+  physical transit continues to fail with the typed coverage error.
+- 2026-08-27: Added `CollisionQueryPolicy::{RequireCollisionCoverage, AllowUncoveredQuery}` and
+  threaded it through the free-sphere query family. Ordinary physical-body construction selects
+  required coverage; the kinematic boom is the first explicit exceptional consumer. Its underlying
+  free-sphere outcome retains the first unavailable owner instead of representing installed-only
+  motion as collision-proven.
+- 2026-08-27: Represented aggregate camera coverage as
+  `KinematicBoomCollisionProof::{Covered, Uncovered { owner }}` in per-tick diagnostics. The
+  composite enum keeps proof status and its deterministic first unavailable owner inseparable;
+  app-local presentation policy can consume it later without re-deriving collision authority.
+- 2026-08-27: Implemented static-response provenance as opaque
+  `CollisionOwnerProof { lineage, owner, revision }`. The lineage prevents equal per-owner revision
+  numbers from independently constructed scenes from validating each other; staged successors keep
+  the lineage and unchanged products keep their revisions. Rejected a global body wake and an
+  owner-to-body dependency index because both add publication-time body work and duplicate facts
+  already carried by cached support.
+- 2026-08-27: Split local-player preparation into scene interest and position-free physical facts.
+  Body completion validates identity plus immutable definition facts, then applies the prepared
+  definition to the current runtime body with its live pose and exact cell.
+- 2026-08-27: Made client activation independent from collision terminal availability. Exact
+  destination and body-instance guards remain core-private; visual convergence may reveal a
+  destination whose local physical transactions still reject unavailable owners.
+- 2026-08-27: Added required tagged `covered`/`uncovered { owner }` camera diagnostics to both Rust
+  host contracts and TypeScript decoders. Client playback retains uncovered paths and exposes the
+  proof through its existing camera status rather than creating a second frontend lifecycle.
 
 ## Course Corrections
 
@@ -728,3 +762,123 @@ policy, renderer interest, or a universal runtime has leaked into the cutover.
 - 2026-08-27: Expanded shared core scope from immutable snapshot vocabulary to owner-availability
   transitions because client and Explorer currently assign different meaning to the same content
   outcome.
+- 2026-08-27: Existing unit fixtures frequently used `CollisionScene::new()` to mean authored but
+  empty terrain. Converted physical fixtures to resident empty owner products instead of weakening
+  production coverage checks. Truly empty scenes now remain meaningful missing-coverage fixtures.
+- 2026-08-27: The implementation exceeded the estimated 300-500 production-line churn. At the
+  Phase 7 checkpoint the complete diff was 2,227 insertions and 1,156 deletions, including tests,
+  documentation, and typed-policy propagation through existing query families. Reassessment found
+  no remote-simulation policy, renderer-interest coupling, or universal runtime leakage. The main
+  source-neutral residency module is 612 production/comment lines plus 169 test lines; retaining
+  explicit complete-batch validation and shared terminal/source-generation semantics was judged
+  preferable to recreating divergent adapter state. This is an estimate miss, not a deferred
+  extraction: there is no second abstraction with a named consumer to extract.
+- 2026-08-27: Live ACE validation found that a locally projected runtime pose could change EnvCell
+  while a physical body's response cell and dynamic membership retained the previous EnvCell. The
+  renderer correctly rejected the contradictory pose/membership contract. Reusing full relocation
+  was rejected because it would promote a projected pose to server authority and zero valid
+  kinematics. Runtime pose application now rebases only cell-dependent physical response and
+  minimum membership, preserving same-cell wider membership, kinematics, and authoritative pose.
+
+## Execution Progress
+
+- 2026-08-27: Phase 0/1 world boundary in progress. Replaced the free, grounded, and registered
+  body missing-owner-as-open regressions with typed non-commit assertions. The registered-body test
+  proves the complete stored body is unchanged and the same ordinary tick succeeds immediately
+  after a resident successor is supplied, without a wake or resume operation.
+- 2026-08-27: Audited the static queries reached by free and grounded movement, placement
+  separation, support/step-down, restrictions, and dynamic-contact placement. Exact owner demand is
+  derived beside each query's swept geometry and placement domains; outside-landscape queries still
+  have an empty owner set.
+- 2026-08-27: Phase 1 complete. `cargo test -p holtburger-world --lib` previously passed 433 tests
+  and `cargo test -p holtburger-core --lib` passed 268 tests; focused static-sphere and kinematic
+  boom uncovered-policy regressions pass after the final proof cutover. Formatting and clippy were
+  clean before that final focused slice and will be rerun at the next verification checkpoint.
+  Every camera static/free-sphere query now selects `AllowUncoveredQuery`, and the aggregate boom
+  result reports the first unavailable owner instead of claiming collision proof.
+- 2026-08-27: Phases 2/3 complete. Client and Explorer use `SimulationSceneResidency`; staged work
+  publishes outside simulation locks and stale completions cannot replace newer demand. Local body
+  preparation is independent, position-free, and commits against live pose. Same-owner movement,
+  seam retention, delayed preparation, mixed absent/failed outcomes, and source-generation retry
+  fixtures pass.
+- 2026-08-27: Phases 4/5 complete. Cached ground support carries exact owner-product provenance;
+  unrelated publication leaves settled bodies untouched, changed/evicted products trigger lazy
+  validation, and reintroduction succeeds through an ordinary tick without a wake API. One scene
+  snapshot independently solves a resident body and rejects an uncovered body unchanged.
+- 2026-08-27: Phases 6/7 complete. Activation, body readiness, presentation convergence, and scene
+  availability are distinct. Camera diagnostics preserve uncovered proof in Rust and TypeScript;
+  obsolete player-scene composites, null-snapshot camera holds, global wakes, and halo vocabulary
+  were removed from live code. Retained architecture documentation describes the landed ownership
+  model.
+- 2026-08-27: Phase 8 automated verification complete. Exact results: world 437/437, core 276/276,
+  host 245/245, and TypeScript 1,562/1,562 tests passed. All-target clippy with warnings denied
+  passed for world, core, and host. Full app check, ESLint/Knip/Rust lint, Prettier check, production
+  Vite build, `git diff --check`, and the browser harness passed. The browser harness rendered 234
+  frames on SwiftShader with no application error or console invariant; Chrome emitted only its
+  external GCM deprecation and shutdown noise. The build retained the existing large-chunk warning.
+- 2026-08-27: Post-verification audit found that the production collection pre-pass still propagated
+  one body's `UnavailableOwner`, even though the earlier mixed-coverage fixture exercised bodies
+  through separate individual transactions. Corrected the collection contract to return accepted
+  movers and body-local coverage rejections from one sampled scene. Placement refresh and tentative
+  environment solves now reject only the dependent body; every other error remains collection-fatal.
+  Explorer retains possession for a rejected possessed body, and the host boom advances from its
+  unchanged pose while explicitly merging the unavailable owner into camera diagnostics. Focused
+  world, support-eviction, and possessed-camera regressions pass. Full re-verification passed world
+  437/437, core 276/276, host 245/245, and TypeScript 1,562/1,562 tests; all-target Clippy with
+  warnings denied, application checks and lint, Rust and Prettier format checks, production build,
+  `git diff --check`, and the browser harness also passed. The harness again rendered 234 frames on
+  SwiftShader with no application error or console invariant; external Chrome GCM, Fontconfig, and
+  shutdown diagnostics were unchanged environment noise. The existing Vite large-chunk warning
+  remains unrelated performance debt.
+- 2026-08-27: Live outdoor-to-outdoor teleport passed, while outdoor/EnvCell and same-dungeon
+  teleports exposed `Scene spatial membership omits resident scope` followed by missing local-player
+  presentation. Added world and client regressions for EnvCell-to-EnvCell, EnvCell-to-outdoor, and
+  outdoor-to-EnvCell runtime-pose changes. Re-verification passed world 438/438, core 277/277, host
+  245/245, all-target Clippy with warnings denied, application type checks, Rust formatting,
+  `git diff --check`, and the browser harness. Live transition retest remains required. WCID 4113
+  startup falling is tracked separately and was deliberately excluded from this correction.
+- 2026-08-27: Final live retest passed dungeon-to-outdoor, outdoor-to-dungeon, and same-dungeon
+  admin teleports without presentation freeze, missing runtime presentation, or spatial-membership
+  rejection. A post-test quality audit also made the pre-destination teleport gap an explicit core
+  activation phase, ensuring the first destination position clears pose-dependent response memory
+  without creating a second presentation generation.
+- 2026-08-27: Final commit gate passed the complete Rust workspace test suite and workspace-wide
+  all-target Clippy with warnings denied. Application type/Svelte checks, ESLint, Knip, Prettier,
+  1,564 TypeScript tests, production build, and the browser harness also passed with no application
+  console errors. The quality gate updated the collision probe to select strict coverage explicitly;
+  the existing Vite large-chunk warning and external Chrome diagnostics remain unrelated debt.
+
+## User-Run Live ACE Matrix
+
+External prerequisites are a reachable ACE endpoint, mounted client content, an account with a
+world-ready character, and credentials supplied only through `HOLTBURGER_PROBE_ACCOUNT` and
+`HOLTBURGER_PROBE_PASSWORD`. The non-interactive baseline is:
+
+```bash
+cd apps/holtburger-3d
+HOLTBURGER_PROBE_ACCOUNT=test \
+HOLTBURGER_PROBE_PASSWORD='your-password' \
+HOLTBURGER_PROBE_DURATION_MS=30000 \
+npm run probe:client
+```
+
+`HOLTBURGER_PROBE_HOST`, `HOLTBURGER_PROBE_PORT`, and
+`HOLTBURGER_PROBE_CHARACTER_GUID` select a non-default server or character. The probe builds the
+release host, never starts the TUI, disconnects explicitly, and emits one JSON census. Exact seam,
+EnvCell, and teleport cases may require the user-operated desktop client because they depend on
+character placement and server content.
+
+| Case | Action | Required evidence |
+| --- | --- | --- |
+| Ordinary cells | Move continuously across at least four 24-metre outdoor cells inside one owner. | Camera reach remains continuous; no player pose rollback, global scene absence, or repeated invariant diagnostic. |
+| Landblock seams | Cross two distinct 192-metre owner seams in both directions. | Installed camera path never collapses to the player; body preparation does not restart; motion commits or reports only an owner-specific coverage rejection. |
+| Coverage race | Approach a seam faster than prefetch completes, when reproducible with the live source. | Only the dependent motion pauses; canonical pose/velocity do not partially commit; the next ordinary input resumes after coverage arrives without a wake command. |
+| Terminal coverage | Exercise a genuinely absent owner and a deliberately corrupt/unreadable product in a disposable content source, if available. | Both block dependent motion; absence and failure remain distinct diagnostics, and failure retries only after explicit source replacement. |
+| Outdoor/EnvCell | Enter and leave an authored interior, including a deep EnvCell when available. | Exact cell identity and camera path remain coherent; no outdoor fallback is invented while indoor topology is pending. |
+| Teleport | Trigger an ordinary server teleport between different owners. | Old camera/destination proof retires once; prepared body installs at the live destination pose; presentation reveals independently from terminal collision availability. |
+| Lifecycle | Disconnect from world, reconnect, then shut down normally. | Pending scene/body completions cannot publish into the retired generation; disconnect and host shutdown converge without an orphaned process. |
+
+The synthetic delayed/absent/failed, seam, live-pose, mixed-body, and reintroduction cases are
+covered by automated production-path fixtures. The user-operated live ACE run completed the
+bidirectional outdoor/EnvCell and same-dungeon teleport cases; terminal missing/corrupt content
+remains an optional disposable-source diagnostic rather than a blocker for this plan.

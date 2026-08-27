@@ -18,16 +18,16 @@ use serde::{Deserialize, Serialize};
 
 use super::ClientRuntime;
 use crate::DynamicEntityPlacedPath;
-use crate::client::collision::ClientCollisionSnapshot;
+use crate::SimulationSceneSnapshot;
 use crate::client::types::ClientViewEvent;
 use crate::kinematic_boom::{
-    KinematicBoomAdvance, KinematicBoomClearance, KinematicBoomController,
-    KinematicBoomDiagnostics, KinematicBoomHoldReason, KinematicBoomIntent, KinematicBoomOutcome,
-    KinematicBoomPlacedPath, KinematicBoomPlacement, KinematicBoomProfile,
-    KinematicBoomReseedReason, KinematicBoomTargetSample, KinematicBoomTargetSeed,
-    KinematicBoomUpdateAcceptance, interpolate_pose, present_placed_motion_pose,
-    resolve_camera_pivot_offset, serialize_kinematic_boom_path, standard_kinematic_boom_profile,
-    stationary_kinematic_boom_path,
+    KinematicBoomAdvance, KinematicBoomClearance, KinematicBoomCollisionProof,
+    KinematicBoomController, KinematicBoomDiagnostics, KinematicBoomHoldReason,
+    KinematicBoomIntent, KinematicBoomOutcome, KinematicBoomPlacedPath, KinematicBoomPlacement,
+    KinematicBoomProfile, KinematicBoomReseedReason, KinematicBoomTargetSample,
+    KinematicBoomTargetSeed, KinematicBoomUpdateAcceptance, interpolate_pose,
+    present_placed_motion_pose, resolve_camera_pivot_offset, serialize_kinematic_boom_path,
+    standard_kinematic_boom_profile, stationary_kinematic_boom_path,
 };
 use crate::{DynamicEntityAdvanceBatch, DynamicEntityPlacementAdvanceKind};
 
@@ -138,10 +138,34 @@ pub enum ClientCameraTargetSphereRole {
     UpperConstraint,
 }
 
+/// Whether the published camera path was proven against complete static coverage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "kebab-case")]
+pub enum ClientCameraCollisionProof {
+    /// Every selected owner was resident in the sampled scene.
+    Covered,
+    /// Installed topology was used despite one unavailable selected owner.
+    Uncovered {
+        /// First unavailable normalized collision owner.
+        owner: Guid,
+    },
+}
+
+impl From<KinematicBoomCollisionProof> for ClientCameraCollisionProof {
+    fn from(value: KinematicBoomCollisionProof) -> Self {
+        match value {
+            KinematicBoomCollisionProof::Covered => Self::Covered,
+            KinematicBoomCollisionProof::Uncovered { owner } => Self::Uncovered { owner },
+        }
+    }
+}
+
 /// Finite-work diagnostics for one camera solve.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientCameraDiagnostics {
+    /// Collision-authority proof for this camera result.
+    pub collision_proof: ClientCameraCollisionProof,
     /// Semantic controller path legs evaluated.
     pub control_legs: usize,
     /// Radial clearance sweeps executed.
@@ -155,6 +179,7 @@ pub struct ClientCameraDiagnostics {
 impl From<KinematicBoomDiagnostics> for ClientCameraDiagnostics {
     fn from(value: KinematicBoomDiagnostics) -> Self {
         Self {
+            collision_proof: value.collision_proof.into(),
             control_legs: value.control_legs,
             clearance_sweeps: value.clearance_sweeps,
             transit_substeps: value.transit_substeps,
@@ -167,8 +192,6 @@ impl From<KinematicBoomDiagnostics> for ClientCameraDiagnostics {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ClientCameraHoldReason {
-    /// The collision coordinator is rebuilding the immutable scene snapshot.
-    CollisionSnapshot,
     ClearanceSweep,
     FreeSphereQuery,
     TargetContract,
@@ -457,7 +480,7 @@ impl ClientCameraRuntime {
     pub(super) fn advance(
         &mut self,
         world: &WorldState,
-        collision: Option<&ClientCollisionSnapshot>,
+        collision: Option<&SimulationSceneSnapshot>,
         batch: Option<&DynamicEntityAdvanceBatch>,
         duration: Duration,
     ) -> Result<Option<ClientCameraTick>> {
@@ -470,30 +493,11 @@ impl ClientCameraRuntime {
             return Ok(None);
         }
         let Some(collision) = collision else {
-            // Collision products are staged asynchronously and are intentionally withdrawn while
-            // the coordinator rebuilds a changed residency. Keep the client alive and publish an
-            // unacknowledged hold so the renderer drops stale playback until a new proof arrives.
-            // Demote the active controller to pending at the same time: its committed clearance
-            // belongs to the retired scene and must not be reused when the replacement arrives.
-            let Some(mut active) = self.active.take() else {
-                return Ok(None);
-            };
-            let tick = hold_without_collision(&mut active, duration.as_secs_f64() * 1_000.0)?;
-            self.pending = Some(PendingCamera {
-                identity: active.identity,
-                request: active.request,
-                sequence: active.sequence,
-            });
-            return Ok(Some(tick));
+            return Ok(None);
         };
         let Some(active) = self.active.as_mut() else {
             return Ok(None);
         };
-        if collision.player.guid != active.identity.player_guid {
-            self.reset();
-            return Ok(None);
-        }
-
         let path_samples = batch
             .and_then(|batch| {
                 batch.advances.iter().find(|advance| {
@@ -550,7 +554,7 @@ impl ClientCameraRuntime {
     pub(super) fn seed(
         &mut self,
         world: &WorldState,
-        collision: Option<&ClientCollisionSnapshot>,
+        collision: Option<&SimulationSceneSnapshot>,
     ) -> Result<Option<ClientCameraTick>> {
         if self
             .active
@@ -568,7 +572,7 @@ impl ClientCameraRuntime {
     fn initialize_if_ready(
         &mut self,
         world: &WorldState,
-        collision: Option<&ClientCollisionSnapshot>,
+        collision: Option<&SimulationSceneSnapshot>,
     ) -> Result<bool> {
         if self.active.is_some() {
             return Ok(true);
@@ -579,11 +583,6 @@ impl ClientCameraRuntime {
         let Some(collision) = collision else {
             return Ok(false);
         };
-        if collision.player.guid != pending.identity.player_guid
-            || u64::from(collision.player.instance_sequence) != pending.identity.entity_generation
-        {
-            return Ok(false);
-        }
         let body = world
             .scene
             .body(SpatialBodyId::LocalPlayer(pending.identity.player_guid))
@@ -643,25 +642,6 @@ impl ClientCameraRuntime {
     }
 }
 
-fn hold_without_collision(active: &mut ActiveCamera, duration_ms: f64) -> Result<ClientCameraTick> {
-    active.sequence = active
-        .sequence
-        .checked_add(1)
-        .context("client camera output sequence exhausted")?;
-    let mut tick = held_tick(
-        active,
-        ClientCameraHoldReason::CollisionSnapshot,
-        KinematicBoomDiagnostics::default(),
-        duration_ms,
-    );
-    if let ClientCameraTick::Held { clearance, .. } = &mut tick {
-        // The previous proof belongs to the withdrawn scene and must not be reused by the
-        // renderer while the coordinator is rebuilding a replacement snapshot.
-        *clearance = None;
-    }
-    Ok(tick)
-}
-
 impl ClientRuntime {
     pub(super) fn start_camera(
         &mut self,
@@ -698,7 +678,7 @@ impl ClientRuntime {
 
     pub(super) fn advance_camera(
         &mut self,
-        collision: Option<&ClientCollisionSnapshot>,
+        collision: Option<&SimulationSceneSnapshot>,
         batch: Option<&DynamicEntityAdvanceBatch>,
         duration: Duration,
     ) -> Result<Option<ClientCameraTick>> {
@@ -707,7 +687,7 @@ impl ClientRuntime {
 
     pub(super) fn seed_camera(
         &mut self,
-        collision: Option<&ClientCollisionSnapshot>,
+        collision: Option<&SimulationSceneSnapshot>,
     ) -> Result<Option<ClientCameraTick>> {
         self.camera.seed(&self.world, collision)
     }
@@ -985,12 +965,13 @@ fn validate_clearance(revision: u64, radius: f32) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::sync::Arc;
 
     use super::*;
     use crate::client::ClientState;
     use crate::client::builder::build_test_client;
-    use crate::client::collision::{ClientCollisionInterest, ClientPlayerInstance};
+    use crate::{SimulationSceneInterest, SimulationSceneOwnerAvailability};
     use holtburger_common::Sphere;
     use holtburger_content::{
         CellVolume, LandblockColliders, LandblockCollisionAsset, LandblockPlacement,
@@ -1013,6 +994,29 @@ mod tests {
             cumulative_zoom_displacement: 0.0,
             projection_revision: 1,
             clearance_radius: 0.5,
+        }
+    }
+
+    fn collision_snapshot(
+        interest: SimulationSceneInterest,
+        scene: CollisionScene,
+    ) -> SimulationSceneSnapshot {
+        let availability = interest
+            .owners()
+            .iter()
+            .map(|&owner| {
+                (
+                    owner,
+                    SimulationSceneOwnerAvailability::Resident { owner_revision: 1 },
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        SimulationSceneSnapshot {
+            revision: 1,
+            content_source_generation: 1,
+            interest,
+            availability,
+            scene: Arc::new(scene),
         }
     }
 
@@ -1043,12 +1047,12 @@ mod tests {
     }
 
     #[test]
-    fn missing_collision_snapshot_publishes_a_nonfatal_hold() {
+    fn unavailable_collision_snapshot_advances_with_an_uncovered_proof() {
         let mut client = build_test_client(ClientState::InWorld);
         let guid = Guid(0x0102_0304);
         let player_pose = WorldPosition {
             landblock_id: Guid(0x1000_0001),
-            coords: Vector3::zero(),
+            coords: Vector3::new(96.0, 96.0, 1.0),
             rotation: holtburger_common::Quaternion::identity(),
         };
         client
@@ -1095,15 +1099,22 @@ mod tests {
             .player_entity()
             .expect("seeded player should be hydrated")
             .instance_sequence();
-        let collision = ClientCollisionSnapshot {
-            player: ClientPlayerInstance {
-                guid,
-                instance_sequence,
-                residency: player_pose.landblock_id,
-            },
+        let interest = SimulationSceneInterest::prefetch_neighborhood(
+            player_pose,
+            crate::CLIENT_COLLISION_OWNER_RADIUS,
+        )
+        .expect("test position should demand collision");
+        let unavailable_owner = Guid(0x1000_ffff);
+        let availability = interest
+            .owners()
+            .iter()
+            .map(|&owner| (owner, SimulationSceneOwnerAvailability::Absent))
+            .collect();
+        let collision = SimulationSceneSnapshot {
             revision: 1,
-            interest: ClientCollisionInterest::from_position(player_pose)
-                .expect("test position should demand collision"),
+            content_source_generation: 1,
+            interest,
+            availability,
             scene: Arc::new(CollisionScene::new()),
         };
 
@@ -1122,49 +1133,21 @@ mod tests {
             })
             .expect("camera registration should be accepted");
         let tick_duration = Duration::from_millis(30);
-        client
+        let tick = client
             .advance_camera(Some(&collision), None, tick_duration)
             .expect("initial camera solve should not fail")
             .expect("initial camera solve should publish a tick");
-
-        let held = client
-            .advance_camera(None, None, tick_duration)
-            .expect("missing collision should be a recoverable camera hold")
-            .expect("camera should publish the hold state");
-        assert!(
-            matches!(
-                &held,
-                ClientCameraTick::Held {
-                    reason: ClientCameraHoldReason::CollisionSnapshot,
-                    clearance: None,
-                    ..
-                }
-            ),
-            "unexpected camera tick: {held:?}"
-        );
-
-        let recovered = client
-            .advance_camera(Some(&collision), None, tick_duration)
-            .expect("camera should rehydrate when collision returns")
-            .expect("rehydrated camera should publish a tick");
-        assert!(
-            matches!(
-                &recovered,
-                ClientCameraTick::Reseeded {
-                    identity: ClientCameraIdentity {
-                        camera_generation: 1,
-                        player_guid: recovered_guid,
-                        entity_generation: recovered_generation,
-                    },
-                    sequence: 3,
-                    clearance: Some(ClientCameraClearance {
-                        projection_revision: 1,
-                        ..
-                    }),
-                    ..
-                } if *recovered_guid == guid && *recovered_generation == u64::from(instance_sequence)
-            ),
-            "unexpected recovered camera tick: {recovered:?}"
+        let diagnostics = match &tick {
+            ClientCameraTick::Advanced { diagnostics, .. }
+            | ClientCameraTick::Reseeded { diagnostics, .. }
+            | ClientCameraTick::Held { diagnostics, .. } => diagnostics,
+        };
+        assert_eq!(
+            diagnostics.collision_proof,
+            ClientCameraCollisionProof::Uncovered {
+                owner: unavailable_owner,
+            },
+            "unexpected uncovered camera tick: {tick:?}"
         );
     }
 
@@ -1236,16 +1219,12 @@ mod tests {
             })
             .unwrap();
         let instance_sequence = client.world.player_entity().unwrap().instance_sequence();
-        let collision = ClientCollisionSnapshot {
-            player: ClientPlayerInstance {
-                guid,
-                instance_sequence,
-                residency: cell,
-            },
-            revision: 1,
-            interest: ClientCollisionInterest::from_position(player_pose).unwrap(),
-            scene: Arc::new(scene),
-        };
+        let interest = SimulationSceneInterest::prefetch_neighborhood(
+            player_pose,
+            crate::CLIENT_COLLISION_OWNER_RADIUS,
+        )
+        .unwrap();
+        let collision = collision_snapshot(interest, scene);
         client
             .start_camera(ClientCameraStartRequest {
                 player_guid: guid,

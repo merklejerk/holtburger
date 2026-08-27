@@ -298,9 +298,7 @@ fn drive_body(
         cell: None,
         velocity: Vector3::zero(),
         ground: if supported {
-            GroundState::Supported(GroundSupport {
-                normal: Vector3::new(0.0, 0.0, 1.0),
-            })
+            GroundState::Supported(GroundSupport::fixture(Vector3::new(0.0, 0.0, 1.0)))
         } else {
             GroundState::Airborne
         },

@@ -27,10 +27,11 @@ pub mod types;
 pub use builder::ClientRuntimeBuilder;
 use camera::ClientCameraRuntime;
 pub use camera::{
-    ClientCameraClearance, ClientCameraClearanceRequest, ClientCameraDiagnostics,
-    ClientCameraHoldReason, ClientCameraIdentity, ClientCameraIntentRequest,
-    ClientCameraReseedReason, ClientCameraStartReceipt, ClientCameraStartRequest,
-    ClientCameraTargetSphereRole, ClientCameraTick, ClientCameraUpdateReceipt,
+    ClientCameraClearance, ClientCameraClearanceRequest, ClientCameraCollisionProof,
+    ClientCameraDiagnostics, ClientCameraHoldReason, ClientCameraIdentity,
+    ClientCameraIntentRequest, ClientCameraReseedReason, ClientCameraStartReceipt,
+    ClientCameraStartRequest, ClientCameraTargetSphereRole, ClientCameraTick,
+    ClientCameraUpdateReceipt,
 };
 use character_selection::CharacterSelectionState;
 use movement::MovementSystem;
@@ -85,12 +86,27 @@ pub struct ClientRuntime {
 /// frontend cannot manufacture authority facts or observe an intermediate collision transaction.
 struct ClientWorldActivationRuntime {
     generation: u64,
-    state: ClientWorldActivationState,
+    phase: ClientWorldActivationPhase,
     player_guid: Guid,
-    destination: Option<collision::ClientPlayerInstance>,
-    collision_ready: Option<u64>,
+    destination: Option<ClientActivationDestination>,
     camera_seed_ready: bool,
     external_reveal_generation: Option<u64>,
+}
+
+/// Protocol progress needed to distinguish the pre-destination teleport gap from a destination
+/// that is ready for activation convergence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ClientWorldActivationPhase {
+    InitialEntry,
+    TeleportAwaitingDestination,
+    TeleportDestinationInstalled,
+}
+
+/// Core-private authority guard pairing stable player identity with the exact destination cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ClientActivationDestination {
+    player: collision::ClientPlayerIdentity,
+    residency: Guid,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -166,10 +182,10 @@ impl ClientRuntime {
     ///
     /// The value is intentionally core-facing. A frontend may show a loading/unavailable hint
     /// only after a named wire consumer exists; it must not infer readiness from entity poses.
-    pub fn collision_readiness(&self) -> Option<collision::ClientSpatialReadiness> {
+    pub fn body_readiness(&self) -> Option<collision::ClientBodyReadiness> {
         self.collision_coordinator
             .as_ref()
-            .map(collision::ClientCollisionCoordinator::readiness)
+            .map(collision::ClientCollisionCoordinator::body_readiness)
     }
 
     pub(crate) fn set_exit_cause(&mut self, cause: ClientExitCause) {
@@ -190,12 +206,17 @@ impl ClientRuntime {
         player_guid: Guid,
     ) {
         let generation = self.bump_world_generation();
+        let phase = match cause {
+            ClientWorldActivationState::InitialEntry => ClientWorldActivationPhase::InitialEntry,
+            ClientWorldActivationState::Teleport => {
+                ClientWorldActivationPhase::TeleportAwaitingDestination
+            }
+        };
         self.activation = Some(ClientWorldActivationRuntime {
             generation,
-            state: cause,
+            phase,
             player_guid,
             destination: None,
-            collision_ready: None,
             camera_seed_ready: !self.requires_external_world_reveal,
             external_reveal_generation: (!self.requires_external_world_reveal)
                 .then_some(generation),
@@ -247,6 +268,13 @@ impl ClientRuntime {
         let Some(mut activation) = self.activation.take() else {
             return Ok(());
         };
+        if matches!(
+            activation.phase,
+            ClientWorldActivationPhase::TeleportAwaitingDestination
+        ) {
+            self.activation = Some(activation);
+            return Ok(());
+        }
 
         let Some(player) = self.world.player_entity() else {
             self.activation = Some(activation);
@@ -257,34 +285,33 @@ impl ClientRuntime {
             return Ok(());
         }
 
-        let destination = collision::ClientPlayerInstance {
-            guid: player.guid,
-            instance_sequence: player.instance_sequence(),
+        let destination = ClientActivationDestination {
+            player: collision::ClientPlayerIdentity {
+                guid: player.guid,
+                instance_sequence: player.instance_sequence(),
+            },
             residency: player.position.landblock_id,
         };
         if activation.destination != Some(destination) {
             activation.destination = Some(destination);
-            activation.collision_ready = None;
             activation.camera_seed_ready = !self.requires_external_world_reveal;
         }
 
-        let collision_ready = self.collision_coordinator.as_ref().and_then(|coordinator| {
-            match coordinator.readiness() {
-                collision::ClientSpatialReadiness::Ready {
-                    player,
-                    collision_revision,
-                    ..
-                } if player == destination => Some(collision_revision),
-                _ => None,
-            }
-        });
-        activation.collision_ready = collision_ready;
-
         let body_ready = self
-            .world
-            .scene
-            .body(SpatialBodyId::LocalPlayer(player.guid))
-            .is_some_and(|body| body.physical.is_some());
+            .collision_coordinator
+            .as_ref()
+            .is_some_and(|coordinator| {
+                matches!(
+                    coordinator.body_readiness(),
+                    collision::ClientBodyReadiness::Ready { player }
+                        if player == destination.player
+                )
+            })
+            && self
+                .world
+                .scene
+                .body(SpatialBodyId::LocalPlayer(player.guid))
+                .is_some_and(|body| body.physical.is_some());
         let containment_ready = self.world.all_player_contained_objects_exist();
         let reveal_ready = activation.external_reveal_generation == Some(activation.generation);
 
@@ -292,19 +319,14 @@ impl ClientRuntime {
             let collision_snapshot = self
                 .collision_coordinator
                 .as_ref()
-                .and_then(|coordinator| coordinator.snapshot());
-            if let Some(tick) = self.seed_camera(collision_snapshot.as_ref())? {
+                .map(collision::ClientCollisionCoordinator::snapshot);
+            if let Some(tick) = self.seed_camera(collision_snapshot.as_deref())? {
                 self.emit_camera_event(tick);
                 activation.camera_seed_ready = true;
             }
         }
 
-        if activation.collision_ready.is_none()
-            || !body_ready
-            || !containment_ready
-            || !activation.camera_seed_ready
-            || !reveal_ready
-        {
+        if !body_ready || !containment_ready || !activation.camera_seed_ready || !reveal_ready {
             self.activation = Some(activation);
             return Ok(());
         }
@@ -859,9 +881,12 @@ impl ClientRuntime {
 
 impl ClientWorldActivationRuntime {
     fn lifecycle(&self) -> ClientLifecycleState {
-        let cause = match self.state {
-            ClientWorldActivationState::InitialEntry => ClientWorldActivationCause::InitialEntry,
-            ClientWorldActivationState::Teleport => ClientWorldActivationCause::Teleport,
+        let cause = match self.phase {
+            ClientWorldActivationPhase::InitialEntry => ClientWorldActivationCause::InitialEntry,
+            ClientWorldActivationPhase::TeleportAwaitingDestination
+            | ClientWorldActivationPhase::TeleportDestinationInstalled => {
+                ClientWorldActivationCause::Teleport
+            }
         };
 
         ClientLifecycleState::PortalSpace {
@@ -874,15 +899,19 @@ impl ClientWorldActivationRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
     use std::sync::Arc;
 
-    use super::collision::{
-        ClientCollisionInterest, ClientCollisionSnapshot, ClientPlayerInstance,
+    use crate::{
+        CLIENT_COLLISION_OWNER_RADIUS, SimulationSceneInterest, SimulationSceneOwnerAvailability,
+        SimulationSceneSnapshot,
     };
     use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::{PropertyDataId, WorldObjectPropertyAccessorsMut};
     use holtburger_common::{Guid, Quaternion, Vector3};
-    use holtburger_content::MotionSequenceCatalog;
+    use holtburger_content::{
+        LandblockColliders, LandblockCollisionAsset, MotionSequenceCatalog, TerrainCollisionSurface,
+    };
     use holtburger_dat::file_type::MotionTable;
     use holtburger_protocol::messages::CharacterEntry;
     use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
@@ -917,6 +946,43 @@ mod tests {
                 base_turn_right_omega: Vector3::new(0.0, 0.0, turn_speed_rad_per_sec),
             },
             run_rate_scalar,
+        }
+    }
+
+    fn collision_scene_for_interest(interest: &SimulationSceneInterest) -> CollisionScene {
+        let mut scene = CollisionScene::new();
+        for owner in interest.owners() {
+            scene
+                .insert(LandblockCollisionAsset {
+                    landblock_id: owner.0,
+                    terrain: TerrainCollisionSurface::empty(),
+                    static_geometry: LandblockColliders::default(),
+                })
+                .unwrap();
+        }
+        scene
+    }
+
+    fn collision_snapshot(
+        interest: SimulationSceneInterest,
+        scene: CollisionScene,
+    ) -> SimulationSceneSnapshot {
+        let availability = interest
+            .owners()
+            .iter()
+            .map(|&owner| {
+                (
+                    owner,
+                    SimulationSceneOwnerAvailability::Resident { owner_revision: 1 },
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        SimulationSceneSnapshot {
+            revision: 1,
+            content_source_generation: 1,
+            interest,
+            availability,
+            scene: Arc::new(scene),
         }
     }
 
@@ -1576,7 +1642,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn simulation_tick_suspends_local_player_until_collision_products_are_ready() {
+    async fn simulation_tick_leaves_a_pose_only_local_player_authoritative() {
         let mut client = builder::build_test_client(ClientState::InWorld);
         let guid = Guid(0x0102_0304);
         let now = Instant::now();
@@ -1640,7 +1706,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn simulation_tick_uses_ready_collision_snapshot_for_local_transaction() {
+    async fn simulation_tick_uses_the_installed_scene_snapshot_for_local_transaction() {
         let mut client = builder::build_test_client(ClientState::InWorld);
         let guid = Guid(0x0102_0304);
         let now = Instant::now();
@@ -1688,22 +1754,13 @@ mod tests {
             )
             .expect("seeded local player should have a canonical body");
 
-        let instance_sequence = client
-            .world
-            .player_entity()
-            .expect("seeded player should be hydrated")
-            .instance_sequence();
-        let collision = ClientCollisionSnapshot {
-            player: ClientPlayerInstance {
-                guid,
-                instance_sequence,
-                residency: player_pose.landblock_id,
-            },
-            revision: 1,
-            interest: ClientCollisionInterest::from_position(player_pose)
-                .expect("non-null player residency should demand collision"),
-            scene: Arc::new(CollisionScene::new()),
-        };
+        let interest = SimulationSceneInterest::prefetch_neighborhood(
+            player_pose,
+            CLIENT_COLLISION_OWNER_RADIUS,
+        )
+        .expect("non-null player residency should demand collision");
+        let scene = collision_scene_for_interest(&interest);
+        let collision = collision_snapshot(interest, scene);
 
         client.movement.enqueue_drive_intent(
             movement_types::PlayerDriveIntent::Autonomous(movement_types::AutonomousDriveIntent {

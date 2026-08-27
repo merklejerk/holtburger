@@ -6,10 +6,11 @@ use holtburger_common::{Guid, Vector3};
 
 use super::PhysicalCollisionFilter;
 use super::collision::{
-    CellTransitRequest, CollisionScene, MotionWaypoint, MovementObstructionRequest,
-    MovementRestrictionRequest, PlacementRequest, PlacementRestrictionRequest, SpatialMembership,
-    SphereSweep, StaticContact, anchor_point_to_cell_position, anchor_point_to_outdoor_position,
-    landblock_key, separating_displacement,
+    CellTransitRequest, CollisionQueryPolicy, CollisionScene, MotionWaypoint,
+    MovementObstructionRequest, MovementRestrictionRequest, PlacementRequest,
+    PlacementRestrictionRequest, SpatialMembership, SphereSweep, StaticContact,
+    anchor_point_to_cell_position, anchor_point_to_outdoor_position, landblock_key,
+    separating_displacement,
 };
 
 /// Explicit safety budgets for one free-sphere displacement solve.
@@ -45,6 +46,8 @@ pub struct FreeSphereRequest {
     pub displacement: Vector3,
     /// Body-owned optional collision-domain exclusions.
     pub filter: PhysicalCollisionFilter,
+    /// Coverage behavior selected explicitly by the physical or exceptional consumer.
+    pub query_policy: CollisionQueryPolicy,
 }
 
 /// Result of bounded directionless separation for one stationary free sphere.
@@ -58,11 +61,15 @@ pub enum FreeSphereSettleOutcome {
         separation: Vector3,
         /// Placement-contact passes evaluated.
         contact_passes: usize,
+        /// First unavailable owner crossed by an explicitly uncovered query.
+        unavailable_owner: Option<Guid>,
     },
     /// No safe placement was proven within the configured contact-pass budget.
     BudgetExceeded {
         /// Placement-contact passes evaluated before refusing the request.
         contact_passes: usize,
+        /// First unavailable owner crossed by an explicitly uncovered query.
+        unavailable_owner: Option<Guid>,
     },
 }
 
@@ -92,6 +99,8 @@ pub enum FreeSphereOutcome {
         substeps: usize,
         /// Contact passes evaluated across all substeps.
         contact_passes: usize,
+        /// First unavailable owner crossed by an explicitly uncovered query.
+        unavailable_owner: Option<Guid>,
     },
     /// A finite safety budget was reached after committing the safe prefix it could evaluate.
     BudgetExceeded {
@@ -109,6 +118,8 @@ pub enum FreeSphereOutcome {
         substeps: usize,
         /// Contact passes evaluated before the stop.
         contact_passes: usize,
+        /// First unavailable owner crossed by an explicitly uncovered query.
+        unavailable_owner: Option<Guid>,
     },
 }
 
@@ -134,9 +145,17 @@ pub fn solve_free_sphere(
     let mut motion = Vec::with_capacity(evaluated_substeps + 1);
     let mut contact_passes = 0usize;
     let mut collision_normal = None;
+    let mut unavailable_owner = None;
     for completed_substeps in 0..evaluated_substeps {
         let mut candidate = current + substep;
-        let mut candidate_placement = transit(scene, anchor, body, candidate)?;
+        let mut candidate_placement = transit(
+            scene,
+            anchor,
+            body,
+            candidate,
+            request.query_policy,
+            &mut unavailable_owner,
+        )?;
         let mut converged = false;
         let sweep = SphereSweep {
             anchor,
@@ -144,7 +163,14 @@ pub fn solve_free_sphere(
             end: candidate,
             radius: body.radius,
         };
-        let mut contacts = movement_contacts(scene, sweep, &candidate_placement, request.filter)?;
+        let mut contacts = movement_contacts(
+            scene,
+            sweep,
+            &candidate_placement,
+            request.filter,
+            request.query_policy,
+            &mut unavailable_owner,
+        )?;
 
         for _ in 0..config.maximum_contact_passes {
             contact_passes += 1;
@@ -156,14 +182,25 @@ pub fn solve_free_sphere(
             remember_collision_normal(&mut collision_normal, &contacts, request.displacement);
 
             candidate = candidate + separating_displacement(&contacts, config.separation_epsilon);
-            candidate_placement = transit(scene, anchor, body, candidate)?;
-            contacts = placement_contacts(
+            candidate_placement = transit(
                 scene,
                 anchor,
+                body,
                 candidate,
-                body.radius,
-                &candidate_placement,
+                request.query_policy,
+                &mut unavailable_owner,
+            )?;
+            contacts = placement_contacts(
+                scene,
+                PlacementRequest {
+                    anchor,
+                    center: candidate,
+                    radius: body.radius,
+                    placement: &candidate_placement,
+                },
                 request.filter,
+                request.query_policy,
+                &mut unavailable_owner,
             )?;
             if contacts.is_empty() {
                 converged = true;
@@ -181,6 +218,7 @@ pub fn solve_free_sphere(
                 budget: FreeSphereBudget::Contacts,
                 substeps: completed_substeps,
                 contact_passes,
+                unavailable_owner,
             });
         }
 
@@ -209,6 +247,7 @@ pub fn solve_free_sphere(
             budget: FreeSphereBudget::Substeps,
             substeps: evaluated_substeps,
             contact_passes,
+            unavailable_owner,
         });
     }
 
@@ -219,6 +258,7 @@ pub fn solve_free_sphere(
         motion,
         substeps: required_substeps,
         contact_passes,
+        unavailable_owner,
     })
 }
 
@@ -233,14 +273,50 @@ pub fn settle_free_sphere(
     body: FreeSphereState,
     filter: PhysicalCollisionFilter,
 ) -> Result<FreeSphereSettleOutcome> {
+    settle_free_sphere_with_policy(
+        scene,
+        config,
+        body,
+        filter,
+        CollisionQueryPolicy::RequireCollisionCoverage,
+    )
+}
+
+/// Separates a stationary sphere under one explicit collision-coverage policy.
+pub fn settle_free_sphere_with_policy(
+    scene: &CollisionScene,
+    config: FreeSphereConfig,
+    body: FreeSphereState,
+    filter: PhysicalCollisionFilter,
+    query_policy: CollisionQueryPolicy,
+) -> Result<FreeSphereSettleOutcome> {
     validate(config, body.radius, Vector3::zero())?;
     let anchor = landblock_key(body.pose.landblock_id);
     let start = body.pose.coords;
     let mut center = start;
-    let mut placement = transit(scene, anchor, body, center)?;
+    let mut unavailable_owner = None;
+    let mut placement = transit(
+        scene,
+        anchor,
+        body,
+        center,
+        query_policy,
+        &mut unavailable_owner,
+    )?;
 
     for contact_passes in 0..=config.maximum_contact_passes {
-        let contacts = placement_contacts(scene, anchor, center, body.radius, &placement, filter)?;
+        let contacts = placement_contacts(
+            scene,
+            PlacementRequest {
+                anchor,
+                center,
+                radius: body.radius,
+                placement: &placement,
+            },
+            filter,
+            query_policy,
+            &mut unavailable_owner,
+        )?;
         if contacts.is_empty() {
             let cell = placement.committed_cell();
             return Ok(FreeSphereSettleOutcome::Settled {
@@ -251,13 +327,24 @@ pub fn settle_free_sphere(
                 },
                 separation: center - start,
                 contact_passes,
+                unavailable_owner,
             });
         }
         if contact_passes == config.maximum_contact_passes {
-            return Ok(FreeSphereSettleOutcome::BudgetExceeded { contact_passes });
+            return Ok(FreeSphereSettleOutcome::BudgetExceeded {
+                contact_passes,
+                unavailable_owner,
+            });
         }
         center = center + separating_displacement(&contacts, config.separation_epsilon);
-        placement = transit(scene, anchor, body, center)?;
+        placement = transit(
+            scene,
+            anchor,
+            body,
+            center,
+            query_policy,
+            &mut unavailable_owner,
+        )?;
     }
 
     unreachable!("the inclusive contact-pass loop always settles or exhausts its budget")
@@ -283,38 +370,50 @@ fn movement_contacts(
     sweep: SphereSweep,
     placement: &SpatialMembership,
     filter: PhysicalCollisionFilter,
+    query_policy: CollisionQueryPolicy,
+    unavailable_owner: &mut Option<Guid>,
 ) -> Result<Vec<StaticContact>> {
-    let mut contacts =
-        scene.movement_obstructions(MovementObstructionRequest { sweep, placement })?;
-    contacts.extend(scene.movement_restrictions(MovementRestrictionRequest {
-        sweep,
-        placement,
-        filter,
-    })?);
+    let obstruction = scene.movement_obstructions_with_policy(
+        MovementObstructionRequest { sweep, placement },
+        query_policy,
+    )?;
+    remember_unavailable_owner(unavailable_owner, obstruction.unavailable_owner);
+    let mut contacts = obstruction.value;
+    let restriction = scene.movement_restrictions_with_policy(
+        MovementRestrictionRequest {
+            sweep,
+            placement,
+            filter,
+        },
+        query_policy,
+    )?;
+    remember_unavailable_owner(unavailable_owner, restriction.unavailable_owner);
+    contacts.extend(restriction.value);
     Ok(contacts)
 }
 
 fn placement_contacts(
     scene: &CollisionScene,
-    anchor: Guid,
-    center: Vector3,
-    radius: f32,
-    placement: &SpatialMembership,
+    request: PlacementRequest<'_>,
     filter: PhysicalCollisionFilter,
+    query_policy: CollisionQueryPolicy,
+    unavailable_owner: &mut Option<Guid>,
 ) -> Result<Vec<StaticContact>> {
-    let mut contacts = scene.placement_contacts(PlacementRequest {
-        anchor,
-        center,
-        radius,
-        placement,
-    })?;
-    contacts.extend(scene.placement_restrictions(PlacementRestrictionRequest {
-        anchor,
-        center,
-        radius,
-        placement,
-        filter,
-    })?);
+    let placement_contacts = scene.placement_contacts_with_policy(request, query_policy)?;
+    remember_unavailable_owner(unavailable_owner, placement_contacts.unavailable_owner);
+    let mut contacts = placement_contacts.value;
+    let restrictions = scene.placement_restrictions_with_policy(
+        PlacementRestrictionRequest {
+            anchor: request.anchor,
+            center: request.center,
+            radius: request.radius,
+            placement: request.placement,
+            filter,
+        },
+        query_policy,
+    )?;
+    remember_unavailable_owner(unavailable_owner, restrictions.unavailable_owner);
+    contacts.extend(restrictions.value);
     Ok(contacts)
 }
 
@@ -344,13 +443,32 @@ fn transit(
     anchor: Guid,
     body: FreeSphereState,
     center: Vector3,
+    query_policy: CollisionQueryPolicy,
+    unavailable_owner: &mut Option<Guid>,
 ) -> Result<SpatialMembership> {
-    Ok(scene.transit_cell(CellTransitRequest {
+    let query = scene.transit_cell_allow_uncovered(CellTransitRequest {
         previous_cell: body.cell,
         anchor,
         center,
         radius: body.radius,
-    })?)
+    })?;
+    if query_policy == CollisionQueryPolicy::RequireCollisionCoverage
+        && let Some(owner) = query.unavailable_owner
+    {
+        return Err(
+            super::collision::CollisionQueryError::UnavailableOwner { owner: owner.0 }.into(),
+        );
+    }
+    remember_unavailable_owner(unavailable_owner, query.unavailable_owner);
+    Ok(query.value)
+}
+
+fn remember_unavailable_owner(selected: &mut Option<Guid>, candidate: Option<Guid>) {
+    if let Some(candidate) = candidate
+        && selected.is_none_or(|current| candidate < current)
+    {
+        *selected = Some(candidate);
+    }
 }
 
 fn pose_for_commit(
@@ -617,14 +735,14 @@ mod tests {
 
     fn scene(colliders: Vec<PlacedCollider>) -> CollisionScene {
         let mut scene = CollisionScene::new();
-        insert_test_halo(&mut scene, &[LANDBLOCK]);
+        insert_test_coverage_neighborhood(&mut scene, &[LANDBLOCK]);
         scene
             .insert(artifact(LANDBLOCK, colliders, Vec::new()))
             .unwrap();
         scene
     }
 
-    fn test_halo_owners(touched: &[u32]) -> Vec<u32> {
+    fn test_coverage_neighborhood_owners(touched: &[u32]) -> Vec<u32> {
         let mut owners = Vec::new();
         for owner in touched {
             let x = ((owner >> 24) & 0xff) as i32;
@@ -642,8 +760,8 @@ mod tests {
         owners
     }
 
-    fn insert_test_halo(scene: &mut CollisionScene, touched: &[u32]) {
-        for owner in test_halo_owners(touched) {
+    fn insert_test_coverage_neighborhood(scene: &mut CollisionScene, touched: &[u32]) {
+        for owner in test_coverage_neighborhood_owners(touched) {
             scene
                 .insert(artifact(owner, Vec::new(), Vec::new()))
                 .unwrap();
@@ -662,6 +780,7 @@ mod tests {
                 body,
                 displacement,
                 filter: PhysicalCollisionFilter::ALL,
+                query_policy: CollisionQueryPolicy::RequireCollisionCoverage,
             },
         )
         .unwrap()
@@ -669,7 +788,7 @@ mod tests {
 
     fn water_boundary_scene() -> CollisionScene {
         let mut scene = CollisionScene::new();
-        insert_test_halo(&mut scene, &[LANDBLOCK, EAST]);
+        insert_test_coverage_neighborhood(&mut scene, &[LANDBLOCK, EAST]);
         scene
             .insert(artifact(LANDBLOCK, Vec::new(), Vec::new()))
             .unwrap();
@@ -762,6 +881,7 @@ mod tests {
             outcome,
             FreeSphereSettleOutcome::BudgetExceeded {
                 contact_passes: config().maximum_contact_passes,
+                unavailable_owner: None,
             }
         );
     }
@@ -785,6 +905,7 @@ mod tests {
                 filter: PhysicalCollisionFilter::excluding(
                     crate::PhysicalCollisionExclusions::ENTIRELY_WATER_BARRIER,
                 ),
+                query_policy: CollisionQueryPolicy::RequireCollisionCoverage,
             },
         )
         .unwrap();
@@ -954,6 +1075,7 @@ mod tests {
                     filter: PhysicalCollisionFilter::excluding(
                         crate::PhysicalCollisionExclusions::ENTIRELY_WATER_BARRIER,
                     ),
+                    query_policy: CollisionQueryPolicy::RequireCollisionCoverage,
                 },
             )
             .unwrap(),
@@ -963,19 +1085,53 @@ mod tests {
     }
 
     #[test]
-    fn free_sphere_crosses_a_missing_owner_as_open_space() {
+    fn free_sphere_rejects_motion_requiring_a_missing_owner() {
         let original = body(Vector3::new(50.0, 50.0, 5.0));
         let mut scene = CollisionScene::new();
-        for owner in test_halo_owners(&[LANDBLOCK]) {
+        for owner in test_coverage_neighborhood_owners(&[LANDBLOCK]) {
             if owner != LANDBLOCK {
                 scene
                     .insert(artifact(owner, Vec::new(), Vec::new()))
                     .unwrap();
             }
         }
-        let outcome = solve(&scene, original, Vector3::new(1.0, 0.0, 0.0));
-        let moved = solved(outcome);
-        assert_eq!(moved.pose.coords, Vector3::new(51.0, 50.0, 5.0));
+        let error = solve_free_sphere(
+            &scene,
+            config(),
+            FreeSphereRequest {
+                body: original,
+                displacement: Vector3::new(1.0, 0.0, 0.0),
+                filter: PhysicalCollisionFilter::ALL,
+                query_policy: CollisionQueryPolicy::RequireCollisionCoverage,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<crate::CollisionQueryError>(),
+            Some(&crate::CollisionQueryError::UnavailableOwner { owner: LANDBLOCK })
+        );
+
+        let uncovered = solve_free_sphere(
+            &scene,
+            config(),
+            FreeSphereRequest {
+                body: original,
+                displacement: Vector3::new(1.0, 0.0, 0.0),
+                filter: PhysicalCollisionFilter::ALL,
+                query_policy: CollisionQueryPolicy::AllowUncoveredQuery,
+            },
+        )
+        .unwrap();
+        let FreeSphereOutcome::Solved {
+            body,
+            unavailable_owner,
+            ..
+        } = uncovered
+        else {
+            panic!("uncovered free-sphere query should still solve installed topology")
+        };
+        assert_eq!(body.pose.coords, Vector3::new(51.0, 50.0, 5.0));
+        assert_eq!(unavailable_owner, Some(Guid(LANDBLOCK)));
     }
 
     #[test]
@@ -990,6 +1146,7 @@ mod tests {
                 body: original,
                 displacement: Vector3::new(20.0, 0.0, 0.0),
                 filter: PhysicalCollisionFilter::ALL,
+                query_policy: CollisionQueryPolicy::RequireCollisionCoverage,
             },
         )
         .unwrap();
@@ -1034,6 +1191,7 @@ mod tests {
                 body: original,
                 displacement: Vector3::new(0.1, 0.0, 0.0),
                 filter: PhysicalCollisionFilter::ALL,
+                query_policy: CollisionQueryPolicy::RequireCollisionCoverage,
             },
         )
         .unwrap();
@@ -1050,7 +1208,7 @@ mod tests {
     #[test]
     fn crossing_a_landblock_commits_the_neighbor_pose() {
         let mut scene = CollisionScene::new();
-        insert_test_halo(&mut scene, &[LANDBLOCK, EAST]);
+        insert_test_coverage_neighborhood(&mut scene, &[LANDBLOCK, EAST]);
         scene
             .insert(artifact(LANDBLOCK, Vec::new(), Vec::new()))
             .unwrap();
@@ -1115,7 +1273,7 @@ mod tests {
             }],
         };
         let mut scene = CollisionScene::new();
-        insert_test_halo(&mut scene, &[LANDBLOCK]);
+        insert_test_coverage_neighborhood(&mut scene, &[LANDBLOCK]);
         scene
             .insert(artifact(LANDBLOCK, vec![building], vec![volume]))
             .unwrap();
@@ -1192,7 +1350,7 @@ mod tests {
             ],
         };
         let mut scene = CollisionScene::new();
-        insert_test_halo(&mut scene, &[LANDBLOCK]);
+        insert_test_coverage_neighborhood(&mut scene, &[LANDBLOCK]);
         scene
             .insert(artifact(LANDBLOCK, Vec::new(), vec![first, second]))
             .unwrap();

@@ -655,7 +655,7 @@ fn stopping_an_old_session_cannot_invalidate_a_new_registration() {
 }
 
 #[test]
-fn registration_simulates_without_loading_missing_collision_owners() {
+fn registration_rejects_motion_that_requires_a_missing_collision_owner() {
     let runtime = runtime_with_da55_interest(Arc::new(MissingEastCollisionSource));
     let pose = scene_point_to_pose([
         0xda as f32 * 192.0 + 191.0,
@@ -668,17 +668,13 @@ fn registration_simulates_without_loading_missing_collision_owners() {
         .set_intent(intent(session, 0, [60.0, 0.0, 0.0]))
         .unwrap();
 
-    let path = runtime
+    let error = runtime
         .tick(session, Duration::from_millis(33))
-        .unwrap()
-        .unwrap();
+        .unwrap_err();
 
-    assert_eq!(path.status, PhysicalFlyTickStatus::Solved);
-    assert_eq!(
-        path.scene_residency,
-        PhysicalFlySceneResidency::MissingOwner {
-            landblock_id: "0xdb55ffff".to_owned(),
-        }
+    assert!(
+        error
+            .to_string()
+            .contains("collision query requires unavailable owner 0xDB55FFFF")
     );
-    assert_eq!(final_path_point(&path).residency.landblock_id, "0xdb55ffff");
 }

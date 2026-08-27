@@ -710,7 +710,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 });
 
 describe("GamePresentationRuntime dynamic-entity presentation", () => {
-	it("keeps an outdoor player installed across the static activation handoff", async () => {
+	it("installs an outdoor player that also reaches an unloaded EnvCell", async () => {
 		const landblockId = "0x0001ffff";
 		const runtime = await buildGamePresentationRuntimeForTest(
 			{
@@ -750,6 +750,12 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		});
 
 		const player = spawnedEntity(7, 1);
+		if (player.placement.kind !== "world")
+			throw new Error("Player fixture lost world placement.");
+		player.placement.spatialMembership = {
+			reachesOutdoors: true,
+			reachedEnvCellIds: [cellId(0x0001_0100)],
+		};
 		await runtime.reconcileDynamicEntities([player]);
 		expect(runtime.dynamicEntityOrigin(player.identity.guid)?.landblockId).toBe(
 			landblockId,
@@ -760,6 +766,36 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		expect(runtime.dynamicEntityOrigin(player.identity.guid)?.landblockId).toBe(
 			landblockId,
 		);
+		await runtime.destroy();
+	});
+
+	it("defers scope-blocked authority without treating it as deletion", async () => {
+		let visualLoads = 0;
+		const runtime = await buildSpawnRuntime({
+			async load() {
+				visualLoads += 1;
+				return spawnedVisual();
+			},
+		});
+		const player = spawnedEntity(7, 1);
+
+		const initiallyInstalled = await runtime.reconcileDynamicEntities([player]);
+		expect(initiallyInstalled.get(player.identity.guid)).toBe("installed");
+		expect(runtime.dynamicEntityOrigin(player.identity.guid)).not.toBeNull();
+
+		runtime.updateSceneInterest(sceneInterest("0x0001ffff"));
+		const deferred = await runtime.reconcileDynamicEntities([player]);
+		expect(deferred.get(player.identity.guid)).toBe("deferred");
+		expect(runtime.dynamicEntityOrigin(player.identity.guid)).toBeNull();
+
+		runtime.clearSceneInterest();
+		const reinstalled = await runtime.reconcileDynamicEntities([player]);
+		expect(reinstalled.get(player.identity.guid)).toBe("installed");
+		expect(runtime.dynamicEntityOrigin(player.identity.guid)).not.toBeNull();
+		expect(visualLoads).toBe(1);
+
+		await runtime.reconcileDynamicEntities([]);
+		expect(runtime.dynamicEntityOrigin(player.identity.guid)).toBeNull();
 		await runtime.destroy();
 	});
 

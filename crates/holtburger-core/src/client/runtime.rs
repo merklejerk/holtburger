@@ -288,14 +288,14 @@ impl ClientRuntime {
                     let collision_snapshot = self
                         .collision_coordinator
                         .as_ref()
-                        .and_then(|coordinator| coordinator.snapshot());
+                        .map(super::collision::ClientCollisionCoordinator::snapshot);
                     if active_world {
                         let simulation_events = self.simulation.tick(
                             now,
                             dt_duration,
                             &mut self.world,
                             &mut self.movement,
-                            collision_snapshot.as_ref(),
+                            collision_snapshot.as_deref(),
                         ).inspect_err(|_| {
                             self.set_exit_cause(ClientExitCause::RuntimeFailure);
                         })?;
@@ -337,7 +337,7 @@ impl ClientRuntime {
                     }
                     if active_world
                         && let Some(tick) = self.advance_camera(
-                            collision_snapshot.as_ref(),
+                            collision_snapshot.as_deref(),
                             dynamic_batch.as_ref(),
                             dt_duration,
                         )?

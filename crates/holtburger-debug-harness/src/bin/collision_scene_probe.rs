@@ -12,12 +12,12 @@ use holtburger_content::{
 use holtburger_core::ContentAssetService;
 use holtburger_dat::physics::BspNode;
 use holtburger_world::{
-    CellTransitRequest, CollisionScene, EdgeProtection, FreeSphereConfig, FreeSphereOutcome,
-    FreeSphereRequest, FreeSphereState, GroundState, GroundedBody, GroundedBodySpheres,
-    GroundedConfig, GroundedObstructionRequest, GroundedOutcome, GroundedRequest, GroundedSphere,
-    MotionWaypoint, MotionWaypointPlacement, PhysicalCollisionFilter, PlacedMotionPathRequest,
-    PlacementRequest, RETAIL_WALKABLE_NORMAL_Z, SpatialMembership, SphereSweep, SupportRequest,
-    solve_free_sphere, solve_grounded,
+    CellTransitRequest, CollisionQueryPolicy, CollisionScene, EdgeProtection, FreeSphereConfig,
+    FreeSphereOutcome, FreeSphereRequest, FreeSphereState, GroundState, GroundedBody,
+    GroundedBodySpheres, GroundedConfig, GroundedObstructionRequest, GroundedOutcome,
+    GroundedRequest, GroundedSphere, MotionWaypoint, MotionWaypointPlacement,
+    PhysicalCollisionFilter, PlacedMotionPathRequest, PlacementRequest, RETAIL_WALKABLE_NORMAL_Z,
+    SpatialMembership, SphereSweep, SupportRequest, solve_free_sphere, solve_grounded,
 };
 
 const HOST_TICK_SECONDS: f32 = 1.0 / 30.0;
@@ -991,6 +991,7 @@ fn traverse_physical_fly_portal(
                 body,
                 displacement: direction * WALK_SPEED * HOST_TICK_SECONDS,
                 filter: PhysicalCollisionFilter::ALL,
+                query_policy: CollisionQueryPolicy::RequireCollisionCoverage,
             },
         )?)
         .with_context(|| format!("drive tick {tick}"))?;
@@ -1088,6 +1089,7 @@ fn exit_physical_fly_portal(
                 body,
                 displacement: entry_direction * -WALK_SPEED * HOST_TICK_SECONDS,
                 filter: PhysicalCollisionFilter::ALL,
+                query_policy: CollisionQueryPolicy::RequireCollisionCoverage,
             },
         )?)
         .with_context(|| format!("reverse tick {tick}"))?;

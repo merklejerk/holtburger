@@ -6,6 +6,7 @@ pub use static_sphere_sweep::{StaticSphereSweepHit, StaticSphereSweepRequest};
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use holtburger_common::position::{
     MAX_OUTDOOR_LANDBLOCK_AXIS, METERS_PER_LANDBLOCK, WorldPosition, outdoor_landblock_owner_at,
@@ -28,6 +29,7 @@ use super::volume_query::{
 use super::{PhysicalCollisionExclusions, PhysicalCollisionFilter};
 
 const CELL_PLANE_TOLERANCE: f32 = 0.000_2;
+static NEXT_COLLISION_SCENE_LINEAGE: AtomicU64 = AtomicU64::new(1);
 
 /// Invalid collision-query geometry rejected before traversal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
@@ -68,6 +70,30 @@ pub enum CollisionQueryError {
         /// Full missing EnvCell DID.
         cell: u32,
     },
+    /// The exact geometric query reaches an authored owner absent from this immutable snapshot.
+    #[error("collision query requires unavailable owner 0x{owner:08X}")]
+    UnavailableOwner {
+        /// First unavailable normalized owner in deterministic coordinate order.
+        owner: u32,
+    },
+}
+
+/// Result of an exceptional query permitted to inspect only the topology currently available.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UncoveredCollisionQuery<T> {
+    /// Result derived from installed collision products only.
+    pub value: T,
+    /// First exact query owner absent from the sampled scene, when coverage was incomplete.
+    pub unavailable_owner: Option<Guid>,
+}
+
+/// Whether a static query requires complete coverage or may inspect installed topology only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CollisionQueryPolicy {
+    /// Reject the query when any selected collision owner is unavailable.
+    RequireCollisionCoverage,
+    /// Return an installed-topology result together with its first unavailable owner.
+    AllowUncoveredQuery,
 }
 
 /// Invalid collision facts or residency changes rejected before scene state commits.
@@ -128,12 +154,43 @@ pub struct GroundedObstruction {
 /// One source surface reachable by lowering a sphere vertically.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SupportContact {
+    /// Exact owner product that supplied this support.
+    pub proof: CollisionOwnerProof,
     /// Authored outward-facing unit normal.
     pub normal: Vector3,
     /// Signed vertical correction from the requested center to tangency; positive rises.
     pub height_delta: f32,
     /// Authored feature reached by the bounded vertical probe.
     pub feature: SupportFeature,
+}
+
+/// Opaque owner-scoped identity of one installed immutable collision product.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CollisionOwnerProof {
+    lineage: u64,
+    owner: Guid,
+    revision: u64,
+}
+
+impl CollisionOwnerProof {
+    /// Returns the normalized owner that supplied the static fact.
+    pub const fn owner(self) -> Guid {
+        self.owner
+    }
+
+    /// Returns the owner-product revision for diagnostics and shared snapshot contracts.
+    pub const fn revision(self) -> u64 {
+        self.revision
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn fixture(owner: Guid) -> Self {
+        Self {
+            lineage: 0,
+            owner,
+            revision: 1,
+        }
+    }
 }
 
 /// Authored surface feature reached by a support query.
@@ -757,10 +814,27 @@ impl StaticShadowIndex {
 }
 
 /// Static collision geometry resident by atomic landblock owner.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct CollisionScene {
+    lineage: u64,
     landblocks: HashMap<Guid, Arc<LandblockCollisionAsset>>,
+    owner_revisions: HashMap<Guid, u64>,
+    next_owner_revision: u64,
     shadows: StaticShadowIndex,
+}
+
+impl Default for CollisionScene {
+    fn default() -> Self {
+        let lineage = NEXT_COLLISION_SCENE_LINEAGE.fetch_add(1, Ordering::Relaxed);
+        assert_ne!(lineage, u64::MAX, "collision scene lineage exhausted");
+        Self {
+            lineage,
+            landblocks: HashMap::new(),
+            owner_revisions: HashMap::new(),
+            next_owner_revision: 0,
+            shadows: StaticShadowIndex::default(),
+        }
+    }
 }
 
 impl CollisionScene {
@@ -800,7 +874,10 @@ impl CollisionScene {
     ) -> Result<Self, CollisionSceneUpdateError> {
         if insertions.is_empty() && removals.is_empty() {
             return Ok(Self {
+                lineage: self.lineage,
                 landblocks: self.landblocks.clone(),
+                owner_revisions: self.owner_revisions.clone(),
+                next_owner_revision: self.next_owner_revision,
                 shadows: self.shadows.clone(),
             });
         }
@@ -828,15 +905,25 @@ impl CollisionScene {
         }
 
         let mut landblocks = self.landblocks.clone();
+        let mut owner_revisions = self.owner_revisions.clone();
+        let mut next_owner_revision = self.next_owner_revision;
         for owner in removal_owners {
             landblocks.remove(&owner);
+            owner_revisions.remove(&owner);
         }
         for (owner, asset) in insertions_by_owner {
+            next_owner_revision = next_owner_revision
+                .checked_add(1)
+                .expect("collision owner revision exhausted");
             landblocks.insert(owner, Arc::new(asset));
+            owner_revisions.insert(owner, next_owner_revision);
         }
         let shadows = StaticShadowIndex::compile(&landblocks)?;
         Ok(Self {
+            lineage: self.lineage,
             landblocks,
+            owner_revisions,
+            next_owner_revision,
             shadows,
         })
     }
@@ -873,6 +960,25 @@ impl CollisionScene {
         self.landblocks.contains_key(&landblock_key(owner))
     }
 
+    /// Returns the exact installed product proof for one normalized owner.
+    pub fn owner_proof(&self, owner: Guid) -> Option<CollisionOwnerProof> {
+        let owner = landblock_key(owner);
+        self.owner_revisions
+            .get(&owner)
+            .copied()
+            .map(|revision| CollisionOwnerProof {
+                lineage: self.lineage,
+                owner,
+                revision,
+            })
+    }
+
+    /// Whether an earlier static fact is still supplied by the exact installed owner product.
+    pub fn proves(&self, proof: CollisionOwnerProof) -> bool {
+        self.lineage == proof.lineage
+            && self.owner_revisions.get(&proof.owner) == Some(&proof.revision)
+    }
+
     /// Whether one authoritative body center occupies a region forbidden by its active domains.
     pub fn body_center_is_forbidden(
         &self,
@@ -894,17 +1000,32 @@ impl CollisionScene {
         &self,
         request: MovementObstructionRequest,
     ) -> Result<Vec<StaticContact>, CollisionQueryError> {
+        Ok(self
+            .movement_obstructions_with_policy(
+                request,
+                CollisionQueryPolicy::RequireCollisionCoverage,
+            )?
+            .value)
+    }
+
+    /// Evaluates movement obstructions under one explicit coverage policy.
+    pub fn movement_obstructions_with_policy(
+        &self,
+        request: MovementObstructionRequest,
+        policy: CollisionQueryPolicy,
+    ) -> Result<UncoveredCollisionQuery<Vec<StaticContact>>, CollisionQueryError> {
         validate_sweep(request.sweep)?;
         let touched = touched_landblocks(request.sweep);
         let movement = request.sweep.end - request.sweep.start;
-        Ok(self.contacts(StaticContactRequest {
+        let value = self.contacts(StaticContactRequest {
             touched: &touched,
             anchor: request.sweep.anchor,
             center: request.sweep.end,
             radius: request.sweep.radius,
             movement: Some(movement),
             placement: request.placement,
-        }))
+        });
+        self.complete_query(policy, &touched, request.placement, value)
     }
 
     /// Returns optional body-primary restrictions crossed by directional movement.
@@ -912,17 +1033,33 @@ impl CollisionScene {
         &self,
         request: MovementRestrictionRequest,
     ) -> Result<Vec<StaticContact>, CollisionQueryError> {
+        Ok(self
+            .movement_restrictions_with_policy(
+                request,
+                CollisionQueryPolicy::RequireCollisionCoverage,
+            )?
+            .value)
+    }
+
+    /// Evaluates optional movement restrictions under one explicit coverage policy.
+    pub fn movement_restrictions_with_policy(
+        &self,
+        request: MovementRestrictionRequest,
+        policy: CollisionQueryPolicy,
+    ) -> Result<UncoveredCollisionQuery<Vec<StaticContact>>, CollisionQueryError> {
         validate_sweep(request.sweep)?;
         let touched = touched_landblocks(request.sweep);
-        if !entirely_water_restriction_participates(request.placement, request.filter) {
-            return Ok(Vec::new());
-        }
-        Ok(self.entirely_water_contacts(
-            &touched,
-            request.sweep.anchor,
-            request.sweep.end,
-            Some(request.sweep.end - request.sweep.start),
-        ))
+        let value = if entirely_water_restriction_participates(request.placement, request.filter) {
+            self.entirely_water_contacts(
+                &touched,
+                request.sweep.anchor,
+                request.sweep.end,
+                Some(request.sweep.end - request.sweep.start),
+            )
+        } else {
+            Vec::new()
+        };
+        self.complete_query(policy, &touched, request.placement, value)
     }
 
     /// Returns directional grounded obstructions without collapsing polygon back faces.
@@ -932,6 +1069,7 @@ impl CollisionScene {
     ) -> Result<Vec<GroundedObstruction>, CollisionQueryError> {
         validate_sweep(request.sweep)?;
         let touched = touched_landblocks(request.sweep);
+        self.require_query_coverage(&touched, request.placement)?;
         let movement = request.sweep.end - request.sweep.start;
         let mut contacts = Vec::new();
         for owner in &touched {
@@ -1040,6 +1178,20 @@ impl CollisionScene {
         &self,
         request: PlacementRequest,
     ) -> Result<Vec<StaticContact>, CollisionQueryError> {
+        Ok(self
+            .placement_contacts_with_policy(
+                request,
+                CollisionQueryPolicy::RequireCollisionCoverage,
+            )?
+            .value)
+    }
+
+    /// Evaluates placement contacts under one explicit coverage policy.
+    pub fn placement_contacts_with_policy(
+        &self,
+        request: PlacementRequest,
+        policy: CollisionQueryPolicy,
+    ) -> Result<UncoveredCollisionQuery<Vec<StaticContact>>, CollisionQueryError> {
         let sweep = SphereSweep {
             anchor: request.anchor,
             start: request.center,
@@ -1048,14 +1200,15 @@ impl CollisionScene {
         };
         validate_sweep(sweep)?;
         let touched = touched_landblocks(sweep);
-        Ok(self.contacts(StaticContactRequest {
+        let value = self.contacts(StaticContactRequest {
             touched: &touched,
             anchor: request.anchor,
             center: request.center,
             radius: request.radius,
             movement: None,
             placement: request.placement,
-        }))
+        });
+        self.complete_query(policy, &touched, request.placement, value)
     }
 
     /// Returns optional body-primary restrictions at a stationary placement.
@@ -1063,6 +1216,20 @@ impl CollisionScene {
         &self,
         request: PlacementRestrictionRequest,
     ) -> Result<Vec<StaticContact>, CollisionQueryError> {
+        Ok(self
+            .placement_restrictions_with_policy(
+                request,
+                CollisionQueryPolicy::RequireCollisionCoverage,
+            )?
+            .value)
+    }
+
+    /// Evaluates optional placement restrictions under one explicit coverage policy.
+    pub fn placement_restrictions_with_policy(
+        &self,
+        request: PlacementRestrictionRequest,
+        policy: CollisionQueryPolicy,
+    ) -> Result<UncoveredCollisionQuery<Vec<StaticContact>>, CollisionQueryError> {
         let sweep = SphereSweep {
             anchor: request.anchor,
             start: request.center,
@@ -1071,10 +1238,12 @@ impl CollisionScene {
         };
         validate_sweep(sweep)?;
         let touched = touched_landblocks(sweep);
-        if !entirely_water_restriction_participates(request.placement, request.filter) {
-            return Ok(Vec::new());
-        }
-        Ok(self.entirely_water_contacts(&touched, request.anchor, request.center, None))
+        let value = if entirely_water_restriction_participates(request.placement, request.filter) {
+            self.entirely_water_contacts(&touched, request.anchor, request.center, None)
+        } else {
+            Vec::new()
+        };
+        self.complete_query(policy, &touched, request.placement, value)
     }
 
     /// Returns authored surfaces reachable by lowering the sphere within a finite distance.
@@ -1092,6 +1261,7 @@ impl CollisionScene {
             radius: request.radius,
         };
         let touched = touched_landblocks(sweep);
+        self.require_query_coverage(&touched, request.placement)?;
 
         let mut supports = Vec::new();
         for owner in &touched {
@@ -1115,6 +1285,9 @@ impl CollisionScene {
                             request.maximum_rise,
                         ) {
                             supports.push(SupportContact {
+                                proof: self
+                                    .owner_proof(*owner)
+                                    .expect("selected terrain owner must have a product revision"),
                                 normal: support.normal,
                                 height_delta: support.height_delta,
                                 feature: support.feature.into(),
@@ -1141,6 +1314,9 @@ impl CollisionScene {
             // One contract mapping for every shape's supports.
             let mut push = |support: super::bsp_query::ShapeSupport| {
                 supports.push(SupportContact {
+                    proof: self
+                        .owner_proof(reference.owner)
+                        .expect("selected collider owner must have a product revision"),
                     normal: support.normal,
                     height_delta: support.height_delta,
                     feature: support.feature.into(),
@@ -1195,6 +1371,22 @@ impl CollisionScene {
         &self,
         request: CellTransitRequest,
     ) -> Result<SpatialMembership, CollisionQueryError> {
+        let uncovered = self.transit_cell_allow_uncovered(request)?;
+        if let Some(owner) = uncovered.unavailable_owner {
+            return Err(CollisionQueryError::UnavailableOwner { owner: owner.0 });
+        }
+        Ok(uncovered.value)
+    }
+
+    /// Resolves placement from installed topology while honestly reporting missing query coverage.
+    ///
+    /// This is reserved for authoritative placement and presentation consumers. Physical-body
+    /// transactions use [`Self::transit_cell`] so unavailable coverage cannot be mistaken for
+    /// collision-proven open space.
+    pub fn transit_cell_allow_uncovered(
+        &self,
+        request: CellTransitRequest,
+    ) -> Result<UncoveredCollisionQuery<SpatialMembership>, CollisionQueryError> {
         if let Some(previous_cell) = request.previous_cell
             && !self.contains_env_cell(previous_cell)
         {
@@ -1210,7 +1402,12 @@ impl CollisionScene {
         };
         validate_sweep(sweep)?;
         let touched = touched_landblocks(sweep);
-        Ok(self.transit_cell_installed(request, &touched))
+        let value = self.transit_cell_installed(request, &touched);
+        let required = required_query_owners(&touched, &value);
+        Ok(UncoveredCollisionQuery {
+            unavailable_owner: self.first_unavailable_owner(&required),
+            value,
+        })
     }
 
     /// Resolves placement using only currently installed owners touched by `request.center`.
@@ -1272,6 +1469,45 @@ impl CollisionScene {
             }
         }
         placement
+    }
+
+    fn first_unavailable_owner(&self, owners: &[Guid]) -> Option<Guid> {
+        owners
+            .iter()
+            .copied()
+            .find(|owner| !self.landblocks.contains_key(owner))
+    }
+
+    fn require_query_coverage(
+        &self,
+        touched: &[Guid],
+        placement: &SpatialMembership,
+    ) -> Result<(), CollisionQueryError> {
+        let required = required_query_owners(touched, placement);
+        if let Some(owner) = self.first_unavailable_owner(&required) {
+            return Err(CollisionQueryError::UnavailableOwner { owner: owner.0 });
+        }
+        Ok(())
+    }
+
+    fn complete_query<T>(
+        &self,
+        policy: CollisionQueryPolicy,
+        touched: &[Guid],
+        placement: &SpatialMembership,
+        value: T,
+    ) -> Result<UncoveredCollisionQuery<T>, CollisionQueryError> {
+        let required = required_query_owners(touched, placement);
+        let unavailable_owner = self.first_unavailable_owner(&required);
+        if policy == CollisionQueryPolicy::RequireCollisionCoverage
+            && let Some(owner) = unavailable_owner
+        {
+            return Err(CollisionQueryError::UnavailableOwner { owner: owner.0 });
+        }
+        Ok(UncoveredCollisionQuery {
+            value,
+            unavailable_owner,
+        })
     }
 
     /// Attaches exact, prior-cell-seeded placement transitions to accepted geometric motion.
@@ -1415,12 +1651,14 @@ impl CollisionScene {
         radius: f32,
         committed_cell: Option<Guid>,
     ) -> Result<(SpatialMembership, Option<PlacementRecovery>), CollisionQueryError> {
-        let mut placement = self.transit_cell(CellTransitRequest {
-            previous_cell: committed_cell,
-            anchor,
-            center,
-            radius,
-        })?;
+        let mut placement = self
+            .transit_cell_allow_uncovered(CellTransitRequest {
+                previous_cell: committed_cell,
+                anchor,
+                center,
+                radius,
+            })?
+            .value;
         let recovery = if let Some(previous_cell) =
             committed_cell.filter(|cell| placement.committed_cell != Some(*cell))
         {
@@ -1435,12 +1673,14 @@ impl CollisionScene {
             None
         };
         if let Some(PlacementRecovery::Recovered { recovered_cell, .. }) = &recovery {
-            placement = self.transit_cell(CellTransitRequest {
-                previous_cell: *recovered_cell,
-                anchor,
-                center,
-                radius,
-            })?;
+            placement = self
+                .transit_cell_allow_uncovered(CellTransitRequest {
+                    previous_cell: *recovered_cell,
+                    anchor,
+                    center,
+                    radius,
+                })?
+                .value;
             return Ok((placement, recovery));
         }
         if recovery.is_some() {
@@ -2476,6 +2716,24 @@ fn touched_landblocks(request: SphereSweep) -> Vec<Guid> {
     touched
 }
 
+fn required_query_owners(touched: &[Guid], placement: &SpatialMembership) -> Vec<Guid> {
+    let mut required = if placement.reaches_outdoors {
+        touched.to_vec()
+    } else {
+        Vec::new()
+    };
+    required.extend(
+        placement
+            .reached_env_cells
+            .iter()
+            .copied()
+            .map(landblock_key),
+    );
+    required.sort_unstable();
+    required.dedup();
+    required
+}
+
 pub(super) fn landblock_key(landblock_id: Guid) -> Guid {
     Guid((landblock_id.0 & 0xffff_0000) | 0xffff)
 }
@@ -2668,6 +2926,37 @@ mod tests {
     }
 
     #[test]
+    fn static_sphere_sweep_reports_explicit_uncovered_policy() {
+        let owner = Guid(0xda55_ffff);
+        let request = StaticSphereSweepRequest {
+            anchor: owner,
+            start: Vector3::new(20.0, 20.0, 1.0),
+            end: Vector3::new(21.0, 20.0, 1.0),
+            previous_cell: None,
+            radius: 0.25,
+            filter: PhysicalCollisionFilter::ALL,
+        };
+        let scene = CollisionScene::new();
+
+        assert_eq!(
+            scene.sweep_static_sphere(request),
+            Err(CollisionQueryError::UnavailableOwner { owner: owner.0 })
+        );
+        assert_eq!(
+            scene
+                .sweep_static_sphere_with_policy(
+                    request,
+                    CollisionQueryPolicy::AllowUncoveredQuery,
+                )
+                .unwrap(),
+            UncoveredCollisionQuery {
+                value: None,
+                unavailable_owner: Some(owner),
+            }
+        );
+    }
+
+    #[test]
     fn static_sphere_sweep_finds_ball_and_cylinder_time_of_impact() {
         let owner = Guid(0xda55_ffff);
         for shape in [
@@ -2693,6 +2982,9 @@ mod tests {
             .unwrap();
             let mut scene = CollisionScene::new();
             scene.insert(outdoor_asset(owner, vec![collider])).unwrap();
+            scene
+                .insert(outdoor_asset(Guid(0xd955_ffff), Vec::new()))
+                .unwrap();
 
             let hit = sweep(
                 &scene,
@@ -2747,6 +3039,9 @@ mod tests {
         .unwrap();
         let mut scene = CollisionScene::new();
         scene.insert(outdoor_asset(owner, vec![collider])).unwrap();
+        scene
+            .insert(outdoor_asset(Guid(0xd955_ffff), Vec::new()))
+            .unwrap();
 
         let hit = sweep(
             &scene,
@@ -4195,16 +4490,26 @@ mod tests {
         let target_owner = Guid(0xda55_ffff);
         let source_owner = Guid(0xdb55_ffff);
         let target_cell = Guid(0xda55_0100);
+        let source_collider = PlacedCollider::new(
+            Arc::new(CollisionShape::Ball(CollisionBall {
+                center: Vector3::zero(),
+                radius: 1.0,
+            })),
+            LandblockPlacement {
+                origin: Vector3::new(-1.0, 0.0, 0.0),
+                orientation: Quaternion::identity(),
+            },
+            ColliderScale::uniform(1.0).unwrap(),
+            StaticColliderPlacement::OutdoorGenerated { source_index: 56 },
+        )
+        .unwrap();
         let mut scene = CollisionScene::new();
         scene
             .insert(LandblockCollisionAsset {
                 landblock_id: source_owner.0,
                 terrain: TerrainCollisionSurface::empty(),
                 static_geometry: LandblockColliders {
-                    colliders: vec![collider_at(
-                        -1.0,
-                        StaticColliderPlacement::OutdoorGenerated { source_index: 56 },
-                    )],
+                    colliders: vec![source_collider],
                     cell_volumes: Vec::new(),
                 },
             })
@@ -4244,6 +4549,18 @@ mod tests {
                 collider_index: 0,
             }]
         );
+        let supports = scene
+            .support_contacts(SupportRequest {
+                anchor: target_owner,
+                center: Vector3::new(191.0, 0.0, 2.0),
+                radius: 0.5,
+                maximum_drop: 1.0,
+                maximum_rise: 0.0,
+                placement: &SpatialMembership::interior(target_cell),
+            })
+            .unwrap();
+        assert_eq!(supports.len(), 1);
+        assert_eq!(supports[0].proof, scene.owner_proof(source_owner).unwrap());
 
         scene.remove(source_owner);
         assert!(
@@ -4330,5 +4647,20 @@ mod tests {
             &retained_product,
             &staged.landblocks[&retained_owner]
         ));
+    }
+
+    #[test]
+    fn owner_proof_is_not_valid_in_an_independent_scene_lineage() {
+        let owner = Guid(0xda55_ffff);
+        let original = scene(Vec::new(), Vec::new());
+        let independent = scene(Vec::new(), Vec::new());
+        let proof = original.owner_proof(owner).unwrap();
+
+        assert_eq!(
+            independent.owner_proof(owner).unwrap().revision(),
+            proof.revision(),
+            "fixture should exercise equal per-lineage revision numbers"
+        );
+        assert!(!independent.proves(proof));
     }
 }

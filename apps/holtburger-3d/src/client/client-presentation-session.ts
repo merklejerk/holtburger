@@ -22,7 +22,10 @@ import {
 	GamePresentationOwner,
 	type GamePresentationOwnerDependencies,
 } from "../lib/game/runtime/game-presentation-owner";
-import { datAssetId } from "../lib/game/runtime/dynamic-entity-presentation";
+import {
+	datAssetId,
+	type DynamicEntityReconciliation,
+} from "../lib/game/runtime/dynamic-entity-presentation";
 import type {
 	DynamicEntityAdvanceBatch,
 	DynamicEntityEvent,
@@ -132,6 +135,24 @@ export interface ClientPresentationFrame {
 	readonly status: ClientPresentationStatus;
 }
 
+/** One exact portal destination's static acceptance and dynamic installation progress. */
+type PortalSceneActivation =
+	| {
+			readonly kind: "requesting";
+			readonly generation: number;
+			readonly key: string;
+	  }
+	| {
+			readonly kind: "accepted";
+			readonly generation: number;
+			readonly key: string;
+			readonly receipt: SceneActivationReceipt;
+			readonly reconciliation: "idle" | "pending" | "deferred" | "ready";
+			/** Exact player residency/membership facts used by the latest reconciliation. */
+			readonly reconciledPlayerPlacementKey: string | null;
+			readonly revealAcknowledged: boolean;
+	  };
+
 /** Client-local camera controller exposed only to the client shell's semantic input handlers. */
 export type ClientPresentationCameraController = PossessionCameraController<
 	ClientCameraTarget,
@@ -144,7 +165,7 @@ export type ClientPresentationCameraController = PossessionCameraController<
 export interface ClientPresentationRuntime {
 	reconcileDynamicEntities(
 		entities: readonly DynamicEntityView[],
-	): Promise<void>;
+	): Promise<DynamicEntityReconciliation>;
 	applyDynamicEntityAdvances(
 		batch: DynamicEntityAdvanceBatch,
 		receivedAtMs: number,
@@ -213,16 +234,8 @@ export class ClientPresentationSession {
 	#playerGuid: number | null = null;
 	#startPromise: Promise<void> | null = null;
 	#mutationQueue: Promise<void> = Promise.resolve();
-	#reconciliationRevision = 0;
 	#sceneTargetKey: string | null = null;
-	#sceneActivationReceipt: SceneActivationReceipt | null = null;
-	#sceneActivationKey: string | null = null;
-	#sceneActivationPromise: Promise<void> | null = null;
-	/** Static-ready generation allowed to begin ordinary dynamic convergence. */
-	#sceneConvergenceRequestedGeneration: number | null = null;
-	/** Portal generation whose full dynamic reconciliation, including attachments, completed. */
-	#sceneConvergedGeneration: number | null = null;
-	#revealAcknowledgedGeneration: number | null = null;
+	#portalSceneActivation: PortalSceneActivation | null = null;
 	readonly #portalTransition = new PortalTransitionController();
 	#hasRenderedFrame = false;
 	#status: ClientPresentationStatus = {
@@ -339,25 +352,23 @@ export class ClientPresentationSession {
 		} else {
 			this.#portalTransition.reset();
 			owner.runtime.setPortalTransition(undefined);
-			if (this.#sceneActivationReceipt !== null) {
+			if (this.#portalSceneActivation?.kind === "accepted") {
 				owner.runtime.completeSceneActivation(
-					this.#sceneActivationReceipt.generation,
+					this.#portalSceneActivation.generation,
 				);
-				this.#sceneActivationReceipt = null;
-				this.#sceneActivationKey = null;
-				this.#sceneConvergenceRequestedGeneration = null;
-				this.#sceneConvergedGeneration = null;
 			}
+			this.#portalSceneActivation = null;
 			this.#syncSceneInterest(player);
 		}
 		owner.runtime.setViewerLightCarrier(playerGuid);
 		owner.runtime.tick();
 		if (portal) {
-			const receipt = this.#sceneActivationReceipt;
-			if (receipt === null) {
+			const sceneActivation = this.#portalSceneActivation;
+			if (sceneActivation?.kind !== "accepted") {
 				this.#setStatus("loading-activation");
 				return { rendered: false, status: this.#status };
 			}
+			const receipt = sceneActivation.receipt;
 			const activation = owner.runtime.sceneActivationStatus(receipt);
 			if (activation.kind === "failed") {
 				this.#setStatus("error", activation.diagnostic);
@@ -368,8 +379,12 @@ export class ClientPresentationSession {
 				this.#setStatus("loading-activation");
 				return { rendered: false, status: this.#status };
 			}
-			this.#ensureScenePresentationConvergence(receipt.generation);
-			if (this.#sceneConvergedGeneration !== receipt.generation) {
+			this.#ensureScenePresentationConvergence();
+			if (this.#portalSceneActivation?.kind !== "accepted") {
+				this.#setStatus("loading-activation");
+				return { rendered: false, status: this.#status };
+			}
+			if (this.#portalSceneActivation.reconciliation !== "ready") {
 				this.#setStatus("loading-player");
 				return { rendered: false, status: this.#status };
 			}
@@ -435,8 +450,9 @@ export class ClientPresentationSession {
 		owner.runtime.render(timeMs / 1_000);
 		this.#hasRenderedFrame = true;
 		this.#setStatus("ready");
-		if (portal && this.#sceneActivationReceipt !== null) {
-			const generation = this.#sceneActivationReceipt.generation;
+		if (portal && this.#portalSceneActivation?.kind === "accepted") {
+			const sceneActivation = this.#portalSceneActivation;
+			const generation = sceneActivation.generation;
 			const update = this.#portalTransition.tick({
 				nowMs: timeMs,
 				activationReady: true,
@@ -448,11 +464,11 @@ export class ClientPresentationSession {
 			owner.runtime.setPortalTransition(
 				this.#portalTransitionFrame(update.state),
 			);
-			if (
-				update.reveal !== null &&
-				this.#revealAcknowledgedGeneration !== generation
-			) {
-				this.#revealAcknowledgedGeneration = generation;
+			if (update.reveal !== null && !sceneActivation.revealAcknowledged) {
+				this.#portalSceneActivation = {
+					...sceneActivation,
+					revealAcknowledged: true,
+				};
 				void this.#session
 					.acknowledgeWorldReveal(generation)
 					.catch((error: unknown) => this.#reportError(error));
@@ -486,7 +502,6 @@ export class ClientPresentationSession {
 		await attempt("camera-destroy", () => this.camera.destroy());
 		await attempt("lifecycle-unsubscribe", () => this.#unsubscribe?.());
 		this.#unsubscribe = null;
-		this.#reconciliationRevision += 1;
 		await attempt("scene-interest-coordinator", () =>
 			this.#sceneInterestCoordinator?.invalidate(),
 		);
@@ -597,6 +612,18 @@ export class ClientPresentationSession {
 				this.#setStatus("awaiting-snapshot");
 				return;
 			}
+			const activation = this.#portalSceneActivation;
+			const retryDeferred =
+				activation?.kind === "accepted" &&
+				activation.reconciliation === "deferred" &&
+				activation.reconciledPlayerPlacementKey !==
+					this.#authoritativePlayerConvergenceKey();
+			if (retryDeferred) {
+				this.#portalSceneActivation = {
+					...activation,
+					reconciliation: "idle",
+				};
+			}
 			this.#enqueueMutation(async () => {
 				if (this.#owner === null || this.#session.mirror.isAwaitingSnapshot())
 					return;
@@ -605,7 +632,17 @@ export class ClientPresentationSession {
 					performance.now(),
 				);
 			});
+			if (retryDeferred) this.#ensureScenePresentationConvergence();
 			return;
+		}
+		const activation = this.#portalSceneActivation;
+		if (this.#session.state().lifecycle?.kind === "portal-space") {
+			if (activation?.kind !== "accepted") return;
+			this.#portalSceneActivation = {
+				...activation,
+				reconciliation: "pending",
+				reconciledPlayerPlacementKey: this.#authoritativePlayerConvergenceKey(),
+			};
 		}
 		void this.#requestReconciliation();
 	}
@@ -617,12 +654,7 @@ export class ClientPresentationSession {
 		this.#cameraTarget = null;
 		this.#cameraProjection = null;
 		this.#sceneTargetKey = null;
-		this.#sceneActivationReceipt = null;
-		this.#sceneActivationKey = null;
-		this.#sceneActivationPromise = null;
-		this.#sceneConvergenceRequestedGeneration = null;
-		this.#sceneConvergedGeneration = null;
-		this.#revealAcknowledgedGeneration = null;
+		this.#portalSceneActivation = null;
 		this.#portalTransition.reset();
 		this.#hasRenderedFrame = false;
 		this.#sceneInterestCoordinator?.invalidate();
@@ -642,16 +674,12 @@ export class ClientPresentationSession {
 	): void {
 		const state = this.#portalTransition.state();
 		if (state?.generation === lifecycle.worldGeneration) return;
-		if (this.#sceneActivationReceipt !== null) {
+		if (this.#portalSceneActivation?.kind === "accepted") {
 			owner.runtime.completeSceneActivation(
-				this.#sceneActivationReceipt.generation,
+				this.#portalSceneActivation.generation,
 			);
 		}
-		this.#sceneActivationReceipt = null;
-		this.#sceneActivationKey = null;
-		this.#sceneConvergenceRequestedGeneration = null;
-		this.#sceneConvergedGeneration = null;
-		this.#revealAcknowledgedGeneration = null;
+		this.#portalSceneActivation = null;
 		owner.runtime.setAudioListener(null);
 		// The core resets its camera at the same generation edge. Drop the frontend registration too
 		// so the next seed is accepted even when the player instance itself was reused by the server.
@@ -752,36 +780,78 @@ export class ClientPresentationSession {
 	}
 
 	#requestReconciliation(): Promise<void> {
-		const revision = ++this.#reconciliationRevision;
 		return this.#enqueueMutation(async () => {
+			if (this.#owner === null || this.#session.mirror.isAwaitingSnapshot())
+				return;
+			const lifecycle = this.#session.state().lifecycle;
+			const portalActivation = this.#portalSceneActivation;
 			if (
-				this.#owner === null ||
-				this.#session.mirror.isAwaitingSnapshot() ||
-				revision !== this.#reconciliationRevision ||
-				(this.#session.state().lifecycle?.kind === "portal-space" &&
-					this.#sceneConvergenceRequestedGeneration !==
-						this.#sceneActivationReceipt?.generation)
+				lifecycle?.kind === "portal-space" &&
+				(portalActivation?.kind !== "accepted" ||
+					portalActivation.reconciliation !== "pending")
 			)
 				return;
-			await this.#owner.runtime.reconcileDynamicEntities(
+			const reconciliation = await this.#owner.runtime.reconcileDynamicEntities(
 				this.#session.mirror.entities(),
 			);
-			const receipt = this.#sceneActivationReceipt;
 			if (
-				this.#session.state().lifecycle?.kind === "portal-space" &&
-				receipt !== null &&
-				this.#sceneConvergenceRequestedGeneration === receipt.generation
+				lifecycle?.kind !== "portal-space" ||
+				portalActivation?.kind !== "accepted"
 			)
-				this.#sceneConvergedGeneration = receipt.generation;
+				return;
+			const current = this.#portalSceneActivation;
+			if (
+				current?.kind !== "accepted" ||
+				current.receipt !== portalActivation.receipt
+			)
+				return;
+			const reconciliationState = this.#localPlayerInstalled(reconciliation)
+				? "ready"
+				: "deferred";
+			this.#portalSceneActivation = {
+				...current,
+				reconciliation: reconciliationState,
+			};
+			if (
+				reconciliationState === "deferred" &&
+				current.reconciledPlayerPlacementKey !==
+					this.#authoritativePlayerConvergenceKey()
+			) {
+				this.#portalSceneActivation = {
+					...this.#portalSceneActivation,
+					reconciliation: "idle",
+				};
+				this.#ensureScenePresentationConvergence();
+			}
 		});
 	}
 
 	/** Begin normal dynamic eligibility only after the destination's static products are installed. */
-	#ensureScenePresentationConvergence(worldGeneration: number): void {
-		if (this.#sceneConvergenceRequestedGeneration === worldGeneration) return;
-		this.#sceneConvergenceRequestedGeneration = worldGeneration;
-		this.#sceneConvergedGeneration = null;
+	#ensureScenePresentationConvergence(): void {
+		const activation = this.#portalSceneActivation;
+		if (activation?.kind !== "accepted" || activation.reconciliation !== "idle")
+			return;
+		this.#portalSceneActivation = {
+			...activation,
+			reconciliation: "pending",
+			reconciledPlayerPlacementKey: this.#authoritativePlayerConvergenceKey(),
+		};
 		void this.#requestReconciliation();
+	}
+
+	#localPlayerInstalled(reconciliation: DynamicEntityReconciliation): boolean {
+		return (
+			this.#playerGuid !== null &&
+			reconciliation.get(this.#playerGuid) === "installed"
+		);
+	}
+
+	#authoritativePlayerConvergenceKey(): string | null {
+		return this.#playerGuid === null
+			? null
+			: playerPresentationConvergenceKey(
+					this.#authoritativePlayer(this.#playerGuid),
+				);
 	}
 
 	#enqueueMutation(operation: () => void | Promise<void>): Promise<void> {
@@ -803,17 +873,27 @@ export class ClientPresentationSession {
 		if (player.placement.kind !== "world") return;
 		const target = clientSceneInterestTarget(player.placement);
 		const key = `${worldGeneration}:${sceneInterestTargetKey(target)}`;
-		if (
-			key === this.#sceneActivationKey ||
-			this.#sceneActivationPromise !== null
-		)
-			return;
+		if (this.#portalSceneActivation?.key === key) return;
 		const coordinator = this.#sceneInterestCoordinator;
 		const owner = this.#owner;
 		if (coordinator === null || owner === null) return;
-		this.#sceneActivationKey = key;
+		if (this.#portalSceneActivation !== null) {
+			// A later destination within the same authority generation supersedes any fade progress
+			// earned by the provisional scene. Only the replacement may produce the reveal frame.
+			this.#portalTransition.begin(worldGeneration, false);
+		}
+		if (this.#portalSceneActivation?.kind === "accepted") {
+			owner.runtime.completeSceneActivation(
+				this.#portalSceneActivation.generation,
+			);
+		}
+		this.#portalSceneActivation = {
+			kind: "requesting",
+			generation: worldGeneration,
+			key,
+		};
 		const request = coordinator.request(target, CLIENT_SCENE_INTEREST);
-		const activation = request.promise
+		void request.promise
 			.then((resolved) =>
 				owner.runtime.activateScene({
 					generation: worldGeneration,
@@ -821,28 +901,33 @@ export class ClientPresentationSession {
 				}),
 			)
 			.then((receipt) => {
+				const current = this.#portalSceneActivation;
 				if (
 					this.#destroyed ||
 					this.#owner !== owner ||
 					!coordinator.isCurrent(request.revision) ||
-					this.#sceneActivationKey !== key ||
+					current?.kind !== "requesting" ||
+					current.key !== key ||
 					!isCurrentPortalGeneration(
 						this.#session.state().lifecycle,
 						worldGeneration,
 					)
 				)
 					return;
-				this.#sceneActivationReceipt = receipt;
+				this.#portalSceneActivation = {
+					kind: "accepted",
+					generation: worldGeneration,
+					key,
+					receipt,
+					reconciliation: "idle",
+					reconciledPlayerPlacementKey: null,
+					revealAcknowledged: false,
+				};
 			})
 			.catch((error: unknown) => {
 				if (!this.#destroyed && coordinator.isCurrent(request.revision))
 					this.#reportError(error);
 			});
-		const trackedActivation = activation.finally(() => {
-			if (this.#sceneActivationPromise === trackedActivation)
-				this.#sceneActivationPromise = null;
-		});
-		this.#sceneActivationPromise = trackedActivation;
 	}
 
 	#syncSceneInterest(player: DynamicEntityView): void {
@@ -877,18 +962,15 @@ export class ClientPresentationSession {
 	}
 
 	#clearSceneDemand(owner: ClientPresentationOwner | null): void {
-		if (this.#sceneTargetKey === null && this.#sceneActivationReceipt === null)
+		if (this.#sceneTargetKey === null && this.#portalSceneActivation === null)
 			return;
 		this.#sceneTargetKey = null;
-		if (owner !== null && this.#sceneActivationReceipt !== null) {
+		if (owner !== null && this.#portalSceneActivation?.kind === "accepted") {
 			owner.runtime.completeSceneActivation(
-				this.#sceneActivationReceipt.generation,
+				this.#portalSceneActivation.generation,
 			);
 		}
-		this.#sceneActivationReceipt = null;
-		this.#sceneActivationKey = null;
-		this.#sceneConvergenceRequestedGeneration = null;
-		this.#sceneConvergedGeneration = null;
+		this.#portalSceneActivation = null;
 		this.#sceneInterestCoordinator?.invalidate();
 		if (owner !== null) owner.runtime.clearSceneInterest();
 	}
@@ -976,6 +1058,20 @@ function sceneInterestTargetKey(target: SceneInterestTarget): string {
 	return target.kind === "env-cell"
 		? `${target.kind}:${target.landblockId}:${target.envCellId}`
 		: `${target.kind}:${target.landblockId}`;
+}
+
+/** Stable retry identity for player facts that can change dynamic scope eligibility. */
+function playerPresentationConvergenceKey(
+	player: DynamicEntityView | null,
+): string | null {
+	if (player?.placement.kind !== "world") return null;
+	const membership = player.placement.spatialMembership;
+	return [
+		player.generation,
+		player.placement.pose.landblockId,
+		membership.reachesOutdoors ? "outdoor" : "interior",
+		...membership.reachedEnvCellIds,
+	].join(":");
 }
 
 function isCurrentPortalGeneration(

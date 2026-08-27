@@ -915,28 +915,24 @@ that published residency; core's client collision coordinator independently deri
 3x3 collision-owner set from the same authoritative residency. Neither path guesses an EnvCell from
 coordinates or reads the other's cache.
 
-The core coordinator has the following exhaustive transitions:
+The core client composition now owns two independent preparation lifetimes:
 
-| State/edge                        | Required behavior                                                                                                               |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `Empty`                           | no player residency or terminal teardown; no collision scene is claimably ready                                                 |
-| `Loading { request, interest }`   | async load outside network/simulation turns; prior committed snapshot remains immutable but is not paired with the new interest |
-| load committed                    | atomically replace with `Ready { revision, interest, collision }` only when request and authoritative residency still match     |
-| superseded completion             | discard by request generation; it never mutates the committed snapshot                                                          |
-| `Unavailable { interest, cause }` | explicit missing/invalid content; local solve remains suspended                                                                 |
-| teleport/reset                    | invalidate readiness, derive the new authoritative interest, and start a new generation                                         |
-| shutdown                          | cancel/retire loading work, clear readiness, and publish no later completion                                                    |
+- `SimulationSceneResidency` tracks normalized desired owners, request/source generations, and one
+  immutable installed scene. Every requested owner publishes as resident, pending, authoritatively
+  absent, or failed. A successor is staged outside the simulation turn and atomically replaces the
+  installed snapshot only after its complete batch resolves; pending, failed, and stale work never
+  withdraws the current snapshot.
+- Local-player body readiness is keyed only by `ClientPlayerIdentity` and immutable physical
+  definition facts. Preparation is position-free. Accepted completion installs the definition with
+  `set_dynamic_physical_body` against the live authoritative pose and current exact cell.
 
-Desktop and TUI inject content access into this same core coordinator. Each composition owns one
-coordinator and one `WorldState.scene`; no coordinator owns or mirrors bodies.
-
-Local-player physical preparation captures `(guid, entity_instance_generation, residency)` and
-loads the content-authored `DynamicPhysicalBodyDefinition` off the runtime turn. Completion may call
-`set_dynamic_physical_body` only if that exact tuple remains selected and the collision coordinator
-has a complete revision for the same residency. The resulting `ClientSpatialReadiness` is one closed
-value: `Waiting`, `Preparing`, `Ready { player_instance, collision_revision }`, or
-`Unavailable { player_instance, cause }`. It references the canonical body definition rather than
-copying it. Replacement, deselection, teleport, disconnect, and shutdown invalidate the generation.
+Desktop and TUI inject content access into the same core coordinator. Each composition owns one
+coordinator and one `WorldState.scene`; the coordinator neither owns nor mirrors bodies. Ordinary
+cell and landblock movement changes scene interest without rebuilding the local body. Teleport,
+replacement, disconnect, and shutdown retain separate identity/generation guards for body work.
+Presentation activation treats visual convergence, body readiness, and owner availability as
+distinct facts; terminally unavailable collision does not strand an otherwise complete visual
+destination, while dependent local motion remains non-committing.
 
 ##### Movement ownership and target simulation contract
 
@@ -1352,9 +1348,8 @@ not construct presentation resources before the authority reaches `in-world`.
   desktop and TUI compositions rather than duplicated as frontend policy.
 - Generation-guarded physical-body preparation for the selected local player through the existing
   shared dynamic-body definition/profile path, performed outside network and simulation turns.
-- A closed `ClientSpatialReadiness` value correlating one authoritative player identity/generation,
-  its installed canonical physical definition, and the complete collision revision required by the
-  Phase 6 cutover without duplicating body state.
+- Independent local-player body readiness and body-neutral `SimulationSceneSnapshot` contracts;
+  neither duplicates canonical body state or makes static-scene publication depend on player pose.
 - Explicit pose-only remote entities for the first cut; their server-authoritative placement and
   dead reckoning remain presentation inputs, not locally solved physical authority.
 
@@ -1756,42 +1751,43 @@ not construct presentation resources before the authority reaches `in-world`.
 #### Decisions and course corrections
 
 - The reusable product is the core `KinematicBoomController` plus a lossless placed-path serializer;
-  the client adapter owns only local-player identity, collision-snapshot access, and accepted
+  the client adapter owns only local-player identity, installed simulation-scene access, and accepted
   `DynamicEntityAdvanceBatch` consumption. The Explorer adapter remains a separate host-owned
   composition and keeps its possession/body policy.
 - Client camera registration is acknowledged by a `CameraStarted` event before the frontend accepts
   a path. Every output carries the exact fixed-step duration used by the authority; the frontend
   does not guess a cadence or schedule a second timer. The dynamic `Advanced` publication is sent
   before the matching camera event in the same client tick.
-- A client camera renders only after a collision-safe path is acknowledged. Loading, missing player
-  presentation, and missing EnvCell scope hold the frame; teleport/reset/disconnect clears the
-  camera path, projection acknowledgements, and scene demand. The local player's authoritative
-  residency drives scene demand, while camera placement drives the primary view and audio listener.
+- A client camera renders after receiving a path whose diagnostics distinguish covered from
+  uncovered topology. Loading, missing player presentation, and missing EnvCell presentation scope
+  hold the frame; unavailable collision coverage does not withdraw an otherwise usable path.
+  Teleport/reset/disconnect clears camera history, projection acknowledgements, and scene demand.
+  The local player's authoritative residency drives scene demand, while camera placement drives the
+  primary view and audio listener.
 - Pointer capture, pixel-rate orbit, wheel accumulation, movement-triggered rear recenter, and
   touch-action policy remain in `src/client`; the shared controller is a source-neutral semantic
   orbit/recenter seam with no Explorer import or tuning dependency.
 - Verification covers generic boom collision/recovery fixtures, client registration/identity,
-  cumulative intent, stale-generation rejection, presentation loading/reset, transient collision
-  snapshot withdrawal, TypeScript (1,526 tests), core (258 tests), host (241 tests), clippy, and
+  cumulative intent, stale-generation rejection, presentation loading/reset, transient unavailable
+  coverage, TypeScript (1,526 tests), core (258 tests), host (241 tests), clippy, and
   the browser harness on isolated Vite port `1432`. The first-cut live sidecar evaluation is
   recorded in Phase 11; broader live ACE camera and streaming branches remain external.
 - Concession: the current client feed emits one endpoint leg per accepted dynamic tick, so the camera
   consumes that closed path and retains its last target sample during stationary ticks. No map-heading
   consumer exists in this first-cut client surface, so no speculative map API or duplicate heading
   calculation was added.
-- Debt: broader live-ACE camera and streaming matrices remain external; the core camera fixture now
-  covers the known transient collision-snapshot withdrawal and proves that it publishes a
-  nonfatal hold rather than terminating the client.
+- Debt: broader live-ACE camera and streaming matrices remain external; core and frontend camera
+  fixtures now prove that unavailable coverage remains explicitly uncovered without terminating
+  the client or withdrawing playback.
 
-#### Camera snapshot withdrawal recovery
+#### Camera coverage recovery
 
-The collision coordinator intentionally withdraws its immutable snapshot while rebuilding products
-for changed residency or definitions. The client camera now treats that interval as a recoverable
-authority state: it publishes a held tick with no clearance proof, demotes the controller to a
-pending generation while carrying the latest request and output sequence, and the frontend drops
-any playback path proven against the retired scene until a new collision-backed path arrives. This
-keeps the camera and host alive without allowing stale placement or sequence state to render through
-a scene change.
+The collision coordinator retains its immutable installed scene while changed interest resolves.
+Camera queries explicitly allow uncovered topology and publish a tagged covered/uncovered proof;
+the frontend retains playback and exposes the latest proof through camera diagnostics. Ordinary
+physical-body transactions continue to require complete coverage and reject without commit. Portal
+discontinuity still retires the prior generation's camera path because that path belongs to a
+different authoritative destination, not because static residency changed.
 
 ### Resteering B: Judge the complete playable slice
 
@@ -1909,13 +1905,13 @@ worktree as ground truth. Retail behavior is re-proved from `acclient-eor-source
 behavior is re-proved from `ACE/`; and current runtime contracts remain the executable baseline.
 Every convergence phase must preserve these already-correct properties:
 
-- local-player physical definition, player instance, collision interest, and collision revision
-  become ready as one atomic `ClientSpatialReadiness` product;
-- the coordinator withdraws that product while replacement is in flight, and neither player nor
-  camera solves against an empty, stale, or mismatched collision scene;
+- local-player physical-definition readiness and body-neutral simulation-scene residency remain
+  independent, generation-guarded products;
+- the coordinator retains the installed scene while a successor is pending, and each authority tick
+  samples one immutable snapshot for physical transactions and camera queries;
 - `ClientApplicationSnapshot` remains one atomic replacement level after declared event loss;
-- camera generation, accepted authority path, projection-clearance revision, collision-snapshot
-  hold/reseed, and frontend playback acknowledgement remain explicit;
+- camera generation, accepted authority path, projection-clearance revision, covered/uncovered
+  collision proof, and frontend playback acknowledgement remain explicit;
 - explicit disconnect and orderly host shutdown remain successful terminal states, while startup,
   server, runtime, and unexpected host failures retain typed non-zero exit causes; and
 - desktop and TUI continue to compose the same core collision coordinator, client simulation, and
@@ -3044,7 +3040,7 @@ not run the TUI. The minimum live matrix is:
 The first headless sidecar run against the supplied local ACE endpoint completed authentication,
 selected the available character, entered world, emitted 308 focused upserts and 99
 authority-clocked advances, exercised a short drive, and shut down through explicit disconnect.
-Camera delivery produced one reseed and 193 advanced ticks without a fatal collision-snapshot
+Camera delivery produced one reseed and 193 advanced ticks without a fatal camera-coverage
 failure. The raw sidecar census measured 621 protocol frames and 1,153,508 encoded payload bytes,
 with a 4,398-byte maximum and 3,031-byte p95. This account exposed one character; rejected login,
 multiple-character selection, landblock crossing, EnvCell entry/exit, teleport, and server-initiated
@@ -3369,12 +3365,13 @@ or timing refinement must not change activation, residency, reveal, or handoff c
   action, with Enter and double-click as shortcuts for the same command. The in-world surface has
   only minimal status/error feedback and no named vital or first-cut game HUD. Terminal connection
   failures still exit rather than turning that overlay into a recovery screen.
-- **2026-08-26 — Phase 5 collision products complete:** client collision interest is a bounded 3×3
-  normalized owner set, staged by one core coordinator outside the simulation turn. Exact player
-  instance/residency/definition guards reject stale asynchronous completion; body preparation and
-  immutable collision scene publication become one `ClientSpatialReadiness` revision. Desktop and
-  TUI share the content-backed source, while asset-free fixtures keep live DAT/server state out of
-  permanent tests.
+- **2026-08-27 — simulation scene residency cutover:** client collision interest remains a bounded
+  3×3 normalized prefetch neighborhood, but static residency and local-player body preparation now
+  have independent lifetimes. `SimulationSceneResidency` retains one immutable installed snapshot
+  while complete successor batches resolve; position-free body preparation is keyed by player
+  identity and definition facts and installs against the live pose. Desktop and TUI share the
+  content-backed source, while asset-free fixtures keep live DAT/server state out of permanent
+  tests.
 - **2026-08-26 — Phase 6 transaction cutover complete:** `SpatialPhysics` and its injection
   constructors are deleted. The client advances only a ready local body through the canonical
   `SpatialScene` transaction; remote entities remain pose-only. Typed displacement/manual-kinematic

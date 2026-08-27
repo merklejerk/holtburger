@@ -1084,15 +1084,36 @@ mod tests {
     use std::collections::BTreeMap;
 
     #[derive(Default)]
-    struct EmptyCollisionSource;
+    struct EmptySpaceCollisionSource;
 
-    impl crate::host_simulation_runtime::CollisionSource for EmptyCollisionSource {
+    impl crate::host_simulation_runtime::CollisionSource for EmptySpaceCollisionSource {
         fn load_collision(
             &self,
-            _landblock_id: u32,
+            landblock_id: u32,
         ) -> anyhow::Result<Option<LandblockCollisionAsset>> {
-            Ok(None)
+            Ok(Some(LandblockCollisionAsset {
+                landblock_id,
+                terrain: TerrainCollisionSurface::empty(),
+                static_geometry: LandblockColliders::default(),
+            }))
         }
+    }
+
+    fn empty_space_simulation() -> Arc<HostSimulationRuntime> {
+        let simulation = Arc::new(HostSimulationRuntime::new(Arc::new(
+            EmptySpaceCollisionSource,
+        )));
+        let session = simulation.reserve_interest_session();
+        let receipt = simulation
+            .replace_interest(crate::host_simulation_runtime::SimulationInterestRequest {
+                session,
+                revision: 1,
+                landblock_ids: vec!["0xda55ffff".to_owned(), "0xdb55ffff".to_owned()],
+            })
+            .unwrap();
+        assert!(receipt.committed);
+        assert!(receipt.unavailable_landblock_ids.is_empty());
+        simulation
     }
 
     struct FixedClock(Instant);
@@ -1341,7 +1362,7 @@ mod tests {
             synthetic_clothing,
         };
 
-        let simulation = Arc::new(HostSimulationRuntime::new(Arc::new(EmptyCollisionSource)));
+        let simulation = empty_space_simulation();
         let entities = Arc::new(ExplorerEntityRuntime::new(
             Arc::clone(&simulation),
             Default::default(),
@@ -1384,7 +1405,7 @@ mod tests {
         catalog: Arc<dyn ExplorerWeenieCatalogSource>,
         physical: FixturePhysical,
     ) -> (Arc<ExplorerEntityRuntime>, ExplorerEntityDriver) {
-        let simulation = Arc::new(HostSimulationRuntime::new(Arc::new(EmptyCollisionSource)));
+        let simulation = empty_space_simulation();
         let entities = Arc::new(ExplorerEntityRuntime::new(
             Arc::clone(&simulation),
             Default::default(),

@@ -4,6 +4,8 @@ use anyhow::{Result, ensure};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Vector3};
 
+#[cfg(test)]
+use super::collision::CollisionOwnerProof;
 use super::collision::{
     CellTransitRequest, CollisionScene, GroundedObstruction, GroundedObstructionRequest,
     MotionWaypoint, MovementRestrictionRequest, PlacementRequest, PlacementRestrictionRequest,
@@ -89,6 +91,18 @@ pub struct GroundedBodySpheres {
 pub struct GroundSupport {
     /// Authored outward-facing unit normal.
     pub normal: Vector3,
+    /// Exact static owner product that proved this support.
+    pub proof: super::CollisionOwnerProof,
+}
+
+#[cfg(test)]
+impl GroundSupport {
+    pub(crate) const fn fixture(normal: Vector3) -> Self {
+        Self {
+            normal,
+            proof: CollisionOwnerProof::fixture(Guid(0xda55_ffff)),
+        }
+    }
 }
 
 /// The body's derived ground state, mirroring retail's observable transient combinations
@@ -815,6 +829,7 @@ fn settle_candidate(
                     placement: candidate_placement,
                     support: GroundSupport {
                         normal: edge.normal,
+                        proof: edge.proof,
                     },
                 },
             ));
@@ -828,6 +843,7 @@ fn settle_candidate(
             placement: settled_cells,
             support: GroundSupport {
                 normal: support.normal,
+                proof: support.proof,
             },
         },
     ))
@@ -1344,7 +1360,10 @@ mod tests {
             cell: None,
             velocity: Vector3::zero(),
             ground: match support {
-                Some(normal) => GroundState::Supported(GroundSupport { normal }),
+                Some(normal) => GroundState::Supported(GroundSupport {
+                    normal,
+                    proof: CollisionOwnerProof::fixture(Guid(LANDBLOCK)),
+                }),
                 None => GroundState::Airborne,
             },
         }
@@ -1579,14 +1598,14 @@ mod tests {
 
     fn scene(colliders: Vec<PlacedCollider>) -> CollisionScene {
         let mut scene = CollisionScene::new();
-        insert_test_halo(&mut scene, &[LANDBLOCK]);
+        insert_test_coverage_neighborhood(&mut scene, &[LANDBLOCK]);
         scene
             .insert(artifact(LANDBLOCK, colliders, Vec::new()))
             .unwrap();
         scene
     }
 
-    fn test_halo_owners(touched: &[u32]) -> Vec<u32> {
+    fn test_coverage_neighborhood_owners(touched: &[u32]) -> Vec<u32> {
         let mut owners = Vec::new();
         for owner in touched {
             let x = ((owner >> 24) & 0xff) as i32;
@@ -1604,8 +1623,8 @@ mod tests {
         owners
     }
 
-    fn insert_test_halo(scene: &mut CollisionScene, touched: &[u32]) {
-        for owner in test_halo_owners(touched) {
+    fn insert_test_coverage_neighborhood(scene: &mut CollisionScene, touched: &[u32]) {
+        for owner in test_coverage_neighborhood_owners(touched) {
             scene
                 .insert(artifact(owner, Vec::new(), Vec::new()))
                 .unwrap();
@@ -1713,7 +1732,7 @@ mod tests {
         moving.velocity = Vector3::new(3.0, 0.0, 0.0);
 
         let GroundedOutcome::Solved { body, .. } = solve_with_config(
-            &CollisionScene::new(),
+            &scene(Vec::new()),
             zero_gravity,
             moving,
             pair(),
@@ -1771,7 +1790,7 @@ mod tests {
     #[test]
     fn whole_water_restriction_is_selected_only_by_primary_sphere() {
         let mut collision = CollisionScene::new();
-        insert_test_halo(&mut collision, &[LANDBLOCK, EAST]);
+        insert_test_coverage_neighborhood(&mut collision, &[LANDBLOCK, EAST]);
         collision
             .insert(artifact(LANDBLOCK, Vec::new(), Vec::new()))
             .unwrap();
@@ -2582,7 +2601,7 @@ mod tests {
         })
         .unwrap();
         let mut collision = CollisionScene::new();
-        insert_test_halo(&mut collision, &[LANDBLOCK]);
+        insert_test_coverage_neighborhood(&mut collision, &[LANDBLOCK]);
         collision
             .insert(LandblockCollisionAsset {
                 landblock_id: LANDBLOCK,
@@ -2678,9 +2697,9 @@ mod tests {
     }
 
     #[test]
-    fn grounded_pair_crosses_owners_with_complete_source_halo() {
+    fn grounded_pair_crosses_owners_with_complete_coverage_neighborhood() {
         let mut resident = CollisionScene::new();
-        insert_test_halo(&mut resident, &[LANDBLOCK, EAST]);
+        insert_test_coverage_neighborhood(&mut resident, &[LANDBLOCK, EAST]);
         resident
             .insert(artifact(LANDBLOCK, vec![floor()], Vec::new()))
             .unwrap();
@@ -2722,7 +2741,7 @@ mod tests {
     }
 
     #[test]
-    fn grounded_body_crosses_a_missing_owner_as_open_space() {
+    fn grounded_body_rejects_motion_requiring_a_missing_owner() {
         let original = GroundedBody {
             pose: pose(Vector3::new(191.0, 20.0, 3.0)),
             cell: None,
@@ -2730,7 +2749,7 @@ mod tests {
             ground: GroundState::Airborne,
         };
         let mut incomplete = CollisionScene::new();
-        for owner in test_halo_owners(&[LANDBLOCK, EAST]) {
+        for owner in test_coverage_neighborhood_owners(&[LANDBLOCK, EAST]) {
             if owner != EAST {
                 incomplete
                     .insert(artifact(owner, Vec::new(), Vec::new()))
@@ -2740,21 +2759,23 @@ mod tests {
         incomplete
             .insert(artifact(LANDBLOCK, vec![floor()], Vec::new()))
             .unwrap();
-        let (crossed, _) = solved(solve(
+        let error = solve_grounded(
             &incomplete,
-            original,
-            pair(),
-            Vector3::new(20.0, 0.0, 0.0),
-            0.1,
-        ));
+            config(),
+            GroundedRequest {
+                body: original,
+                spheres: pair(),
+                supported_velocity: Vector3::new(20.0, 0.0, 0.0),
+                retain_supported_gravity: false,
+                settle: SettlePermission::Landing,
+                delta_seconds: 0.1,
+                filter: crate::PhysicalCollisionFilter::ALL,
+            },
+        )
+        .unwrap_err();
         assert_eq!(
-            crossed.pose.landblock_id.0 & 0xffff_0000,
-            EAST & 0xffff_0000
-        );
-        assert!((crossed.velocity.z + 1.98).abs() < EPSILON);
-        assert!(
-            crossed.pose.coords.z < 3.0,
-            "gravity stopped at the scene edge"
+            error.downcast_ref::<crate::CollisionQueryError>(),
+            Some(&crate::CollisionQueryError::UnavailableOwner { owner: EAST })
         );
     }
 
@@ -2833,7 +2854,7 @@ mod tests {
             cell_id: 0xda55_0100,
         };
         let mut collision = CollisionScene::new();
-        insert_test_halo(&mut collision, &[LANDBLOCK]);
+        insert_test_coverage_neighborhood(&mut collision, &[LANDBLOCK]);
         collision
             .insert(artifact(
                 LANDBLOCK,

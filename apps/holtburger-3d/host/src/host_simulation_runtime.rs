@@ -10,17 +10,20 @@ use holtburger_content::LandblockCollisionAsset;
 use holtburger_core::{
     ContentAssetService, DynamicEntityBodyCommitOutcome, DynamicEntityBodyOperationError,
     DynamicEntityBodyRemovalOutcome, DynamicEntityBodyReplacementOutcome, DynamicEntityDefinition,
-    DynamicEntityInitialState, DynamicEntityProjectionInput,
-    apply_dynamic_entity_physics_transition, dynamic_entity_projection_input,
-    install_dynamic_entity_body, remove_dynamic_entity_body, replace_dynamic_entity_body,
+    DynamicEntityInitialState, DynamicEntityProjectionInput, SimulationSceneBatchCompletion,
+    SimulationSceneInterest, SimulationSceneOwnerAvailability, SimulationSceneOwnerOutcome,
+    SimulationSceneOwnerRequest, SimulationScenePublication, SimulationSceneRequest,
+    SimulationSceneResidency, apply_dynamic_entity_physics_transition,
+    dynamic_entity_projection_input, install_dynamic_entity_body, remove_dynamic_entity_body,
+    replace_dynamic_entity_body,
 };
 use holtburger_world::{
-    CollisionReportOutcome, CollisionScene, DynamicBodyKinematics, DynamicBodyRelocationOutcome,
-    DynamicPhysicalBodyDefinition, EntityPhysicsTransitionDecision, GroundedBodyActuation,
-    PhysicalBodyActuation, PhysicalBodyDefinition, PhysicalBodyResponsePolicy,
-    PhysicalBodySceneResidency, PhysicalBodyTickResult, PhysicalCollisionFilter, PlacedMotionPath,
-    PlacementRecovery, RuntimeSpatialBodyView, SpatialBody, SpatialBodyId, SpatialScene,
-    physical_body_scene_residency,
+    CollisionQueryError, CollisionReportOutcome, CollisionScene, DynamicBodyKinematics,
+    DynamicBodyRelocationOutcome, DynamicPhysicalBodyDefinition, EntityPhysicsTransitionDecision,
+    GroundedBodyActuation, PhysicalBodyActuation, PhysicalBodyDefinition,
+    PhysicalBodyResponsePolicy, PhysicalBodySceneResidency, PhysicalBodyTickResult,
+    PhysicalCollisionFilter, PlacedMotionPath, PlacementRecovery, RuntimeSpatialBodyView,
+    SpatialBody, SpatialBodyId, SpatialScene, physical_body_scene_residency,
 };
 use serde::{Deserialize, Serialize};
 
@@ -77,10 +80,8 @@ pub struct ResolvedPhysicalBodyRegistration {
 
 /// State that must change atomically with respect to every generic body tick.
 struct HostSimulationState {
-    /// Complete immutable collision topology used by the next tick.
-    scene: Arc<CollisionScene>,
-    /// Normalized owners whose products are present in `scene`.
-    resident: HashSet<Guid>,
+    /// Shared body-neutral desired, pending, and installed collision state.
+    residency: SimulationSceneResidency,
     /// Canonical identity, pose, and physical state for every registered body.
     bodies: SpatialScene,
 }
@@ -88,8 +89,7 @@ struct HostSimulationState {
 impl Default for HostSimulationState {
     fn default() -> Self {
         Self {
-            scene: Arc::new(CollisionScene::new()),
-            resident: HashSet::new(),
+            residency: SimulationSceneResidency::default(),
             bodies: SpatialScene::new(),
         }
     }
@@ -103,7 +103,7 @@ struct SimulationInterestTarget {
     /// Newest revision accepted within `session`.
     revision: u64,
     /// Complete normalized owner set selected by that revision.
-    owners: HashSet<Guid>,
+    owners: SimulationSceneInterest,
 }
 
 /// One atomic host tick epoch consumed by app-local adapters.
@@ -128,10 +128,22 @@ pub struct HostPhysicalBodySceneSnapshot {
     pub scene_residency: PhysicalBodySceneResidency,
 }
 
+/// One non-committing collection member paired with its sampled immutable scene.
+pub struct HostPhysicalBodyCoverageRejection {
+    /// Complete unchanged body state from the collection epoch.
+    pub body: SpatialBody,
+    /// First normalized owner required by the body's actual transaction.
+    pub owner: Guid,
+    /// Exact immutable topology snapshot that could not prove `owner`.
+    pub collision: Arc<CollisionScene>,
+}
+
 /// One committed collection epoch with body motion and report edges kept orthogonal.
 pub struct HostDynamicEntityCollectionTick {
     /// Stable-ID directional body commits accepted during this epoch.
     pub bodies: Vec<HostPhysicalBodyTick>,
+    /// Body-local coverage rejections that did not prevent independent commits.
+    pub coverage_rejections: Vec<HostPhysicalBodyCoverageRejection>,
     /// First-touch and end edges; silent refreshes are intentionally absent.
     pub collision_reports: Vec<CollisionReportOutcome>,
 }
@@ -170,13 +182,13 @@ impl HostSimulationRuntime {
 
     /// Returns the complete immutable collision snapshot current at this instant.
     pub fn snapshot(&self) -> Arc<CollisionScene> {
-        Arc::clone(
-            &self
-                .state
-                .lock()
-                .expect("collision scene lock poisoned")
-                .scene,
-        )
+        self.state
+            .lock()
+            .expect("collision scene lock poisoned")
+            .residency
+            .snapshot()
+            .scene
+            .clone()
     }
 
     /// Allocates and registers one frontend-local generic body identity.
@@ -349,7 +361,7 @@ impl HostSimulationRuntime {
         accept: impl FnOnce(&HostPhysicalBodyTick) -> Result<T>,
     ) -> Result<(HostPhysicalBodyTick, T)> {
         let mut state = self.state.lock().expect("host simulation lock poisoned");
-        let scene = Arc::clone(&state.scene);
+        let scene = state.residency.snapshot().scene.clone();
         let previous = state
             .bodies
             .body(body_id)
@@ -386,14 +398,27 @@ impl HostSimulationRuntime {
         mut actuation_for: impl FnMut(&SpatialBody) -> Result<PhysicalBodyActuation>,
     ) -> Result<HostDynamicEntityCollectionTick> {
         let mut state = self.state.lock().expect("host simulation lock poisoned");
-        let scene = Arc::clone(&state.scene);
-        let tick_start = state.bodies.prepare_dynamic_entity_collection(
+        let scene = state.residency.snapshot().scene.clone();
+        let prepared = state.bodies.prepare_dynamic_entity_collection(
             &scene,
             delta_seconds,
             &mut actuation_for,
         )?;
-        let mut ticks = Vec::with_capacity(tick_start.len());
-        for (body_id, actuation) in tick_start {
+        let mut coverage_rejections = prepared
+            .coverage_rejections
+            .into_iter()
+            .map(|rejection| HostPhysicalBodyCoverageRejection {
+                body: state
+                    .bodies
+                    .body(rejection.body_id)
+                    .cloned()
+                    .expect("coverage-rejected body vanished while collection lock was held"),
+                owner: rejection.owner,
+                collision: Arc::clone(&scene),
+            })
+            .collect::<Vec<_>>();
+        let mut ticks = Vec::with_capacity(prepared.movers.len());
+        for (body_id, actuation) in prepared.movers {
             let previous = state
                 .bodies
                 .body(body_id)
@@ -411,9 +436,27 @@ impl HostSimulationRuntime {
                 },
                 |_| Ok(()),
             );
-            let (tick, ()) = solved?;
-            ticks.push(tick);
+            match solved {
+                Ok((tick, ())) => ticks.push(tick),
+                Err(error) => {
+                    let Some(CollisionQueryError::UnavailableOwner { owner }) =
+                        error.downcast_ref::<CollisionQueryError>()
+                    else {
+                        return Err(error);
+                    };
+                    coverage_rejections.push(HostPhysicalBodyCoverageRejection {
+                        body: state
+                            .bodies
+                            .body(body_id)
+                            .cloned()
+                            .expect("coverage-rejected body vanished after its tentative solve"),
+                        owner: Guid(*owner),
+                        collision: Arc::clone(&scene),
+                    });
+                }
+            }
         }
+        coverage_rejections.sort_by_key(|rejection| rejection.body.id);
         let mut collision_reports = ticks
             .iter()
             .flat_map(|tick| tick.result.collision_reports.iter().copied())
@@ -421,6 +464,7 @@ impl HostSimulationRuntime {
         collision_reports.extend(state.bodies.finish_dynamic_entity_collection(now)?);
         Ok(HostDynamicEntityCollectionTick {
             bodies: ticks,
+            coverage_rejections,
             collision_reports,
         })
     }
@@ -492,7 +536,7 @@ impl HostSimulationRuntime {
         let state = self.state.lock().expect("host simulation lock poisoned");
         let body = state.bodies.body(body_id)?.clone();
         let physical = body.physical.as_ref()?;
-        let collision = Arc::clone(&state.scene);
+        let collision = state.residency.snapshot().scene.clone();
         let scene_residency = physical_body_scene_residency(
             &collision,
             body.pose,
@@ -537,7 +581,7 @@ impl HostSimulationRuntime {
             .checked_add(1)
             .expect("simulation interest session exhausted");
         target.revision = 0;
-        target.owners.clear();
+        target.owners = SimulationSceneInterest::default();
         target.session
     }
 
@@ -570,44 +614,31 @@ impl HostSimulationRuntime {
             return Ok(receipt(request.revision, false, &[]));
         }
 
-        let (scene, resident) = {
-            let state = self.state.lock().expect("collision scene lock poisoned");
-            (Arc::clone(&state.scene), state.resident.clone())
+        let (scene_request, staging_residency) = {
+            let mut state = self.state.lock().expect("collision scene lock poisoned");
+            let Some(scene_request) = state.residency.request_interest(wanted.clone()) else {
+                let unavailable = unavailable_owners(state.residency.availability());
+                return Ok(receipt(request.revision, true, &unavailable));
+            };
+            (scene_request, state.residency.clone())
         };
-        let missing = wanted
+        let outcomes = resolve_scene_request(self.source.as_ref(), &scene_request);
+        let unavailable = outcomes
             .iter()
-            .copied()
-            .filter(|owner| !resident.contains(owner))
+            .filter_map(|outcome| match outcome {
+                SimulationSceneOwnerOutcome::Absent { owner }
+                | SimulationSceneOwnerOutcome::Failed { owner, .. } => Some(*owner),
+                SimulationSceneOwnerOutcome::Resident(_)
+                | SimulationSceneOwnerOutcome::Retained { .. } => None,
+            })
             .collect::<Vec<_>>();
-        let stale = resident
-            .iter()
-            .copied()
-            .filter(|owner| !wanted.contains(owner))
-            .collect::<Vec<_>>();
-
-        let mut insertions = Vec::new();
-        let mut next_resident = resident.clone();
-        let mut unavailable = Vec::new();
-        for owner in missing {
-            match self
-                .source
-                .load_collision(owner.0)
-                .with_context(|| format!("could not load collision owner 0x{:08X}", owner.0))?
-            {
-                Some(asset) => {
-                    next_resident.insert(owner);
-                    insertions.push(asset);
-                }
-                None => unavailable.push(owner),
-            }
-        }
-        for owner in &stale {
-            next_resident.remove(owner);
-        }
-        let next_scene = scene
-            .staged_residency_change(insertions, &stale)
-            .context("could not rebuild simulation-interest collision scene")?;
-        let collision_changed = next_resident != resident;
+        let staged = staging_residency
+            .stage(SimulationSceneBatchCompletion {
+                content_source_generation: scene_request.content_source_generation,
+                request_revision: scene_request.request_revision,
+                outcomes,
+            })?
+            .expect("a completion staged from its exact request cannot already be stale");
 
         let target = self
             .target
@@ -620,23 +651,61 @@ impl HostSimulationRuntime {
             return Ok(receipt(request.revision, false, &unavailable));
         }
         let mut state = self.state.lock().expect("host simulation lock poisoned");
-        state.scene = Arc::new(next_scene);
-        state.resident = next_resident;
-        if collision_changed {
-            // Support dependencies are intentionally not tracked. The 50-300 body target makes a
-            // conservative wake cheaper and safer until Phase R2 supplies evidence otherwise.
-            state.bodies.wake_all_settled_dynamic_bodies();
-        }
-        Ok(receipt(request.revision, true, &unavailable))
+        let committed = matches!(
+            state.residency.publish_staged(staged),
+            SimulationScenePublication::Published { .. }
+        );
+        Ok(receipt(request.revision, committed, &unavailable))
     }
 
-    fn request_is_current(&self, session: u64, revision: u64, owners: &HashSet<Guid>) -> bool {
+    fn request_is_current(
+        &self,
+        session: u64,
+        revision: u64,
+        owners: &SimulationSceneInterest,
+    ) -> bool {
         let target = self
             .target
             .lock()
             .expect("simulation interest target lock poisoned");
         target.session == session && target.revision == revision && target.owners == *owners
     }
+}
+
+fn resolve_scene_request(
+    source: &dyn CollisionSource,
+    request: &SimulationSceneRequest,
+) -> Vec<SimulationSceneOwnerOutcome> {
+    request
+        .owners
+        .iter()
+        .map(|operation| match operation {
+            SimulationSceneOwnerRequest::Retain {
+                owner,
+                owner_revision,
+            } => SimulationSceneOwnerOutcome::Retained {
+                owner: *owner,
+                owner_revision: *owner_revision,
+            },
+            SimulationSceneOwnerRequest::RetainAbsent { owner } => {
+                SimulationSceneOwnerOutcome::Absent { owner: *owner }
+            }
+            SimulationSceneOwnerRequest::RetainFailed { owner, cause } => {
+                SimulationSceneOwnerOutcome::Failed {
+                    owner: *owner,
+                    cause: cause.clone(),
+                }
+            }
+            SimulationSceneOwnerRequest::Load { owner } => match source.load_collision(owner.0) {
+                Ok(Some(asset)) => SimulationSceneOwnerOutcome::Resident(asset),
+                Ok(None) => SimulationSceneOwnerOutcome::Absent { owner: *owner },
+                Err(error) => SimulationSceneOwnerOutcome::Failed {
+                    owner: *owner,
+                    cause: format!("{error:#}"),
+                },
+            },
+        })
+        .collect()
 }
 
 fn tick_body_transaction<T>(
@@ -765,8 +834,8 @@ pub(crate) fn report_placed_motion_recoveries(subject: &str, path: &PlacedMotion
     }
 }
 
-fn parse_owner_set(values: &[String]) -> Result<HashSet<Guid>> {
-    values
+fn parse_owner_set(values: &[String]) -> Result<SimulationSceneInterest> {
+    let owners = values
         .iter()
         .map(|value| {
             let hexadecimal = value
@@ -782,6 +851,23 @@ fn parse_owner_set(values: &[String]) -> Result<HashSet<Guid>> {
                 "simulation-interest landblock must be a normalized 0xFFFF owner"
             );
             Ok(owner)
+        })
+        .collect::<Result<Vec<_>>>()?;
+    SimulationSceneInterest::new(owners).map_err(Into::into)
+}
+
+fn unavailable_owners(
+    availability: &std::collections::BTreeMap<Guid, SimulationSceneOwnerAvailability>,
+) -> Vec<Guid> {
+    availability
+        .iter()
+        .filter_map(|(&owner, status)| {
+            matches!(
+                status,
+                SimulationSceneOwnerAvailability::Absent
+                    | SimulationSceneOwnerAvailability::Failed { .. }
+            )
+            .then_some(owner)
         })
         .collect()
 }
@@ -835,6 +921,18 @@ mod tests {
         }
     }
 
+    fn resident_owners(state: &HostSimulationState) -> HashSet<Guid> {
+        state
+            .residency
+            .snapshot()
+            .availability
+            .iter()
+            .filter_map(|(&owner, status)| {
+                matches!(status, SimulationSceneOwnerAvailability::Resident { .. }).then_some(owner)
+            })
+            .collect()
+    }
+
     #[test]
     fn complete_interest_replacements_load_and_evict_exact_owners() {
         let source = Arc::new(CountingSource::default());
@@ -857,7 +955,7 @@ mod tests {
         assert_eq!(source.loads.load(Ordering::SeqCst), 3);
         let state = service.state.lock().unwrap();
         assert_eq!(
-            state.resident,
+            resident_owners(&state),
             HashSet::from([Guid(0xdb55_ffff), Guid(0xdc55_ffff)])
         );
     }
@@ -902,10 +1000,8 @@ mod tests {
 
         assert!(!retired.committed);
         assert_eq!(source.loads.load(Ordering::SeqCst), 2);
-        assert_eq!(
-            service.state.lock().unwrap().resident,
-            HashSet::from([Guid(0xdb55_ffff)])
-        );
+        let state = service.state.lock().unwrap();
+        assert_eq!(resident_owners(&state), HashSet::from([Guid(0xdb55_ffff)]));
     }
 
     #[test]
@@ -985,7 +1081,13 @@ mod tests {
             .unwrap();
 
         let state = service.state.lock().unwrap();
-        assert!(!state.scene.contains_env_cell(Guid(0xda55_0100)));
+        assert!(
+            !state
+                .residency
+                .snapshot()
+                .scene
+                .contains_env_cell(Guid(0xda55_0100))
+        );
         assert_eq!(state.bodies.body(body_id).unwrap(), &registered);
         drop(state);
 
@@ -998,6 +1100,12 @@ mod tests {
             .unwrap();
         let state = service.state.lock().unwrap();
         assert_eq!(state.bodies.body(body_id).unwrap(), &registered);
-        assert!(!state.scene.contains_landblock(Guid(0xda55_ffff)));
+        assert!(
+            !state
+                .residency
+                .snapshot()
+                .scene
+                .contains_landblock(Guid(0xda55_ffff))
+        );
     }
 }

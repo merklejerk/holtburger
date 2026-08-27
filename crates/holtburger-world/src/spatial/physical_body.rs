@@ -8,10 +8,10 @@ use holtburger_common::{Guid, Quaternion, Sphere, Vector3};
 use thiserror::Error;
 
 use super::{
-    CellTransitRequest, CollisionQueryError, CollisionReportOutcome, CollisionScene, ContactState,
-    DynamicBodyCollisionDefinition, DynamicPhysicalBodyDefinition, FreeSphereBudget,
-    FreeSphereConfig, FreeSphereOutcome, FreeSphereRequest, FreeSphereState, GroundState,
-    GroundSupport, GroundedBody, GroundedBodySpheres, GroundedBudget, GroundedConfig,
+    CellTransitRequest, CollisionQueryError, CollisionQueryPolicy, CollisionReportOutcome,
+    CollisionScene, ContactState, DynamicBodyCollisionDefinition, DynamicPhysicalBodyDefinition,
+    FreeSphereBudget, FreeSphereConfig, FreeSphereOutcome, FreeSphereRequest, FreeSphereState,
+    GroundState, GroundSupport, GroundedBody, GroundedBodySpheres, GroundedBudget, GroundedConfig,
     GroundedOutcome, GroundedRequest, GroundedSphere, MotionWaypoint, PlacedMotionPath,
     PlacedMotionPathRequest, SettlePermission, SpatialBody, SpatialMembership, solve_free_sphere,
     solve_grounded,
@@ -453,16 +453,7 @@ impl PhysicalBodyState {
         response_policy: PhysicalBodyResponsePolicy,
         cell: Option<Guid>,
     ) -> Self {
-        let response = match definition {
-            PhysicalBodyDefinition::FreeSphere { .. } => {
-                PhysicalBodyResponseState::FreeSphere { cell }
-            }
-            PhysicalBodyDefinition::Grounded { .. } => PhysicalBodyResponseState::Grounded {
-                cell,
-                ground: GroundState::Airborne,
-                stationary_fall_frames: 0,
-            },
-        };
+        let response = initial_response(definition, cell);
         Self {
             definition,
             collision_filter,
@@ -490,6 +481,25 @@ impl PhysicalBodyState {
             placement: cell.map_or_else(SpatialMembership::outdoor, SpatialMembership::interior),
         });
         state
+    }
+
+    /// Rebases dynamic placement after an authoritative runtime pose changes resident cell.
+    ///
+    /// The cell selector is trusted authority, but no collision query has yet proved wider sphere
+    /// reach in the destination. Retain immutable policy and kinematics while clearing response
+    /// memory and publishing only the exact minimum membership the next ordinary solve may expand.
+    pub(crate) fn rebase_dynamic_residency(&mut self, cell: Option<Guid>) -> bool {
+        let Some(dynamic) = self.dynamic.as_mut() else {
+            return false;
+        };
+        if self.response.cell() == cell {
+            return false;
+        }
+        self.response = initial_response(self.definition, cell);
+        dynamic.placement =
+            cell.map_or_else(SpatialMembership::outdoor, SpatialMembership::interior);
+        dynamic.activity = DynamicBodyActivity::Active;
+        true
     }
 
     /// Rebuilds immutable dynamic policy from a complete state while retaining authored geometry.
@@ -540,6 +550,20 @@ impl PhysicalBodyState {
             response_policy,
             entity_collision,
         })
+    }
+}
+
+fn initial_response(
+    definition: PhysicalBodyDefinition,
+    cell: Option<Guid>,
+) -> PhysicalBodyResponseState {
+    match definition {
+        PhysicalBodyDefinition::FreeSphere { .. } => PhysicalBodyResponseState::FreeSphere { cell },
+        PhysicalBodyDefinition::Grounded { .. } => PhysicalBodyResponseState::Grounded {
+            cell,
+            ground: GroundState::Airborne,
+            stationary_fall_frames: 0,
+        },
     }
 }
 
@@ -883,6 +907,7 @@ fn solve_free_sphere_tick(
             },
             displacement: desired_velocity * delta_seconds,
             filter: state.collision_filter,
+            query_policy: CollisionQueryPolicy::RequireCollisionCoverage,
         },
     )?;
     let (solved, achieved_displacement, collision_normal, motion, substeps, contact_passes, status) =
@@ -894,6 +919,7 @@ fn solve_free_sphere_tick(
                 motion,
                 substeps,
                 contact_passes,
+                ..
             } => (
                 solved,
                 achieved_displacement,
@@ -911,6 +937,7 @@ fn solve_free_sphere_tick(
                 budget,
                 substeps,
                 contact_passes,
+                ..
             } => (
                 solved,
                 achieved_displacement,
@@ -975,6 +1002,12 @@ fn solve_grounded_body_tick(
     actuation: GroundedBodyActuation,
     delta_seconds: f32,
 ) -> Result<PhysicalBodyTickCommit> {
+    let retained_ground_is_current = match state.ground {
+        GroundState::Supported(support) | GroundState::Sliding(support) => {
+            scene.proves(support.proof)
+        }
+        GroundState::Airborne => true,
+    };
     let mut grounded_body = GroundedBody {
         pose: body.pose,
         cell: state.cell,
@@ -986,7 +1019,11 @@ fn solve_grounded_body_tick(
             GroundedSupportedMotion::Coasting => canonical_retained_velocity(body.velocity),
             GroundedSupportedMotion::Driven(_) => body.velocity,
         },
-        ground: state.ground,
+        ground: if retained_ground_is_current {
+            state.ground
+        } else {
+            GroundState::Airborne
+        },
     };
     grounded_body.velocity =
         grounded_body.velocity + actuation.external_acceleration * delta_seconds;
@@ -1001,7 +1038,12 @@ fn solve_grounded_body_tick(
         grounded_body.velocity.x = velocity.x;
         grounded_body.velocity.y = velocity.y;
     }
-    let settle = grounded_settle_permission(body.contact, actuation.launch.is_some());
+    let retained_contact = if retained_ground_is_current {
+        body.contact
+    } else {
+        ContactState::Airborne
+    };
+    let settle = grounded_settle_permission(retained_contact, actuation.launch.is_some());
     if let Some(launch) = actuation.launch {
         ensure!(
             grounded_body.ground.walkable_support().is_some(),
@@ -1585,6 +1627,9 @@ mod restitution_retail_differential;
 mod tests {
     use super::*;
     use crate::{EdgeProtection, FreeSphereConfig, GroundedConfig, RETAIL_WALKABLE_NORMAL_Z};
+    use holtburger_content::{
+        LandblockColliders, LandblockCollisionAsset, TerrainCollisionSurface,
+    };
 
     const FLY_CONFIG: FreeSphereConfig = FreeSphereConfig {
         maximum_substep_distance: 0.25,
@@ -1611,6 +1656,18 @@ mod tests {
             center: Vector3::new(0.0, 0.0, z),
             radius,
         }
+    }
+
+    fn empty_collision(owner: Guid) -> CollisionScene {
+        let mut scene = CollisionScene::new();
+        scene
+            .insert(LandblockCollisionAsset {
+                landblock_id: owner.0,
+                terrain: TerrainCollisionSurface::empty(),
+                static_geometry: LandblockColliders::default(),
+            })
+            .unwrap();
+        scene
     }
 
     #[test]
@@ -1654,7 +1711,7 @@ mod tests {
     /// identical arithmetic; sampling the accepted rotation instead makes them the same fact.
     #[test]
     fn the_accepted_pose_carries_the_ticks_physical_rotation() {
-        let scene = CollisionScene::new();
+        let scene = empty_collision(Guid(0x0101_FFFF));
         let definition = PhysicalBodyDefinition::free_sphere(
             PhysicalSphereSet::new(sphere(0.0, 0.3), None).unwrap(),
             FLY_CONFIG,

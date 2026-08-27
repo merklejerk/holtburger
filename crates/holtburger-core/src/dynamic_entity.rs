@@ -264,6 +264,27 @@ pub struct DynamicEntityDefinitionInput {
     pub physics: EffectiveEntityPhysicsState,
 }
 
+/// Immutable definition facts sufficient to prepare physical geometry and response policy.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DynamicEntityPhysicalPreparationInput {
+    /// Weenie class identity retained in preparation errors.
+    pub wcid: u32,
+    /// Setup resource owning movement and target geometry.
+    pub setup_did: u32,
+    /// Lossless part substitutions that may replace target BSP geometry.
+    pub appearance: EntityAppearance,
+    /// Uniform root scale applied to movement and target geometry.
+    pub object_scale: f32,
+    /// Optional authored friction; absence selects the ACE default.
+    pub friction: Option<f32>,
+    /// Optional authored elasticity; absence selects the ACE default.
+    pub elasticity: Option<f32>,
+    /// Effective semantic physics decisions controlling solver participation.
+    pub physics: EffectiveEntityPhysicsState,
+    /// Semantic entity class retained by dynamic collision policy.
+    pub weenie_type: WeenieType,
+}
+
 /// Validated source-neutral entity definition shared by both producer compositions.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DynamicEntityDefinition {
@@ -444,6 +465,8 @@ pub fn resolve_dynamic_entity_launch(
 /// Physical preparation rejection with enough identity to explain the exact source failure.
 #[derive(Debug, Error)]
 pub enum DynamicEntityPhysicalPreparationError {
+    #[error("invalid position-free physical definition: {0}")]
+    Definition(#[from] DynamicEntityDefinitionError),
     #[error(
         "WCID {wcid} cannot be locally simulated with physics state 0x{state:08X}: unsupported bits 0x{unsupported_bits:08X}, unknown bits 0x{unknown_bits:08X}"
     )]
@@ -839,43 +862,111 @@ pub fn prepare_dynamic_entity_physics(
     definition: &DynamicEntityDefinition,
     content: &ContentRepository,
 ) -> Result<DynamicPhysicalBodyDefinition, DynamicEntityPhysicalPreparationError> {
-    let wcid = definition.identity.wcid;
-    let setup_did = definition.content.setup_did;
-    if !definition.physics.supports_local_simulation() {
+    prepare_dynamic_entity_physical_facts(
+        DynamicEntityPhysicalFacts {
+            wcid: definition.identity.wcid,
+            setup_did: definition.content.setup_did,
+            appearance: &definition.appearance,
+            object_scale: definition.object_scale,
+            friction: definition.friction,
+            elasticity: definition.elasticity,
+            physics: definition.physics,
+            weenie_type: definition.identity.weenie_type,
+        },
+        content,
+    )
+}
+
+/// Resolves complete solver facts from a position-free immutable definition contract.
+pub fn prepare_dynamic_entity_physical_definition(
+    input: DynamicEntityPhysicalPreparationInput,
+    content: &ContentRepository,
+) -> Result<DynamicPhysicalBodyDefinition, DynamicEntityPhysicalPreparationError> {
+    if !input.object_scale.is_finite() || input.object_scale <= 0.0 {
+        return Err(DynamicEntityDefinitionError::InvalidObjectScale.into());
+    }
+    let friction = input
+        .friction
+        .map(PhysicalFriction::new)
+        .transpose()
+        .map_err(|_| DynamicEntityDefinitionError::InvalidFriction)?
+        .unwrap_or(PhysicalFriction::DEFAULT);
+    let elasticity = input
+        .elasticity
+        .map(PhysicalElasticity::new)
+        .transpose()
+        .map_err(|_| DynamicEntityDefinitionError::InvalidElasticity)?
+        .unwrap_or(PhysicalElasticity::DEFAULT);
+    prepare_dynamic_entity_physical_facts(
+        DynamicEntityPhysicalFacts {
+            wcid: input.wcid,
+            setup_did: input.setup_did,
+            appearance: &input.appearance,
+            object_scale: input.object_scale,
+            friction,
+            elasticity,
+            physics: input.physics,
+            weenie_type: input.weenie_type,
+        },
+        content,
+    )
+}
+
+struct DynamicEntityPhysicalFacts<'a> {
+    wcid: u32,
+    setup_did: u32,
+    appearance: &'a EntityAppearance,
+    object_scale: f32,
+    friction: PhysicalFriction,
+    elasticity: PhysicalElasticity,
+    physics: EffectiveEntityPhysicsState,
+    weenie_type: WeenieType,
+}
+
+fn prepare_dynamic_entity_physical_facts(
+    facts: DynamicEntityPhysicalFacts<'_>,
+    content: &ContentRepository,
+) -> Result<DynamicPhysicalBodyDefinition, DynamicEntityPhysicalPreparationError> {
+    let DynamicEntityPhysicalFacts {
+        wcid,
+        setup_did,
+        appearance,
+        object_scale,
+        friction,
+        elasticity,
+        physics,
+        weenie_type,
+    } = facts;
+    if !physics.supports_local_simulation() {
         return Err(
             DynamicEntityPhysicalPreparationError::UnsupportedPhysicsState {
                 wcid,
-                state: definition.physics.semantic.bits(),
-                unsupported_bits: definition.physics.unsupported_local_simulation.bits(),
-                unknown_bits: definition.physics.unknown_bits,
+                state: physics.semantic.bits(),
+                unsupported_bits: physics.unsupported_local_simulation.bits(),
+                unknown_bits: physics.unknown_bits,
             },
         );
     }
 
     let setup = read_setup(content, wcid, setup_did)?;
-    let setup_preparation =
-        prepare_setup(wcid, setup_did, definition.object_scale, &setup, content)?;
+    let setup_preparation = prepare_setup(wcid, setup_did, object_scale, &setup, content)?;
     let movement_spheres = setup_preparation.movement_spheres;
     let response_policy = PhysicalBodyResponsePolicy {
-        restitution: if definition.physics.response.inelastic {
+        restitution: if physics.response.inelastic {
             PhysicalRestitution::Inelastic
         } else {
-            PhysicalRestitution::Elastic(definition.elasticity)
+            PhysicalRestitution::Elastic(elasticity)
         },
-        friction: definition.friction,
+        friction,
         surface_motion: PhysicalSurfaceMotion::Stable,
-        align_path: definition.physics.response.align_path,
+        align_path: physics.response.align_path,
     };
-    let edge_protection = if definition.physics.response.edge_slide {
+    let edge_protection = if physics.response.edge_slide {
         EdgeProtection::Creature
     } else {
         EdgeProtection::None
     };
-    let gravity = if definition.physics.response.gravity {
-        -9.8
-    } else {
-        0.0
-    };
+    let gravity = if physics.response.gravity { -9.8 } else { 0.0 };
     let movement = retail_grounded_body_with_policy(
         movement_spheres,
         edge_protection,
@@ -892,7 +983,10 @@ pub fn prepare_dynamic_entity_physics(
     )?
     .definition;
     let target_geometry = prepare_target_geometry(
-        definition,
+        wcid,
+        setup_did,
+        appearance,
+        object_scale,
         &setup,
         setup_preparation.physics.has_physics_bsp,
         content,
@@ -903,12 +997,12 @@ pub fn prepare_dynamic_entity_physics(
         response_policy,
         entity_collision: DynamicBodyCollisionDefinition {
             target_geometry,
-            scheduling: definition.physics.scheduling,
-            dynamic_collision: definition.physics.dynamic_collision,
-            reporting: definition.physics.reporting,
-            uses_physics_bsp: definition.physics.uses_physics_bsp,
-            weenie_type: definition.identity.weenie_type,
-            elasticity: definition.elasticity,
+            scheduling: physics.scheduling,
+            dynamic_collision: physics.dynamic_collision,
+            reporting: physics.reporting,
+            uses_physics_bsp: physics.uses_physics_bsp,
+            weenie_type,
+            elasticity,
             default_animation_available: setup.default_animation.is_some(),
             default_script_available: setup.default_script.is_some(),
         },
@@ -999,17 +1093,18 @@ pub fn material_appearance_input(appearance: &EntityAppearance) -> MaterialAppea
 }
 
 fn prepare_target_geometry(
-    definition: &DynamicEntityDefinition,
+    wcid: u32,
+    setup_did: u32,
+    appearance: &EntityAppearance,
+    object_scale: f32,
     setup: &SetupModel,
     cached_bsp_branch: bool,
     content: &ContentRepository,
 ) -> Result<PreparedEntityTargetGeometry, DynamicEntityPhysicalPreparationError> {
-    let wcid = definition.identity.wcid;
-    let setup_did = definition.content.setup_did;
     validate_default_script_stability(wcid, setup_did, setup.default_script, content)?;
 
     let mut effective_part_dids = setup.parts.clone();
-    for change in &definition.appearance.part_changes {
+    for change in &appearance.part_changes {
         let part_index = usize::from(change.part_index);
         let Some(part_did) = effective_part_dids.get_mut(part_index) else {
             return Err(
@@ -1075,7 +1170,7 @@ fn prepare_target_geometry(
             ),
         });
     }
-    let whole_scale = ColliderScale::uniform(definition.object_scale).map_err(|source| {
+    let whole_scale = ColliderScale::uniform(object_scale).map_err(|source| {
         DynamicEntityPhysicalPreparationError::Content {
             wcid,
             resource_did: setup_did,
@@ -1095,16 +1190,18 @@ fn prepare_target_geometry(
                 .get(part_index)
                 .copied()
                 .unwrap_or(Vector3::new(1.0, 1.0, 1.0));
-            let scale = ColliderScale::from_components(part_scale * definition.object_scale)
-                .map_err(|source| DynamicEntityPhysicalPreparationError::Content {
-                    wcid,
-                    resource_did: setup_did,
-                    source,
+            let scale =
+                ColliderScale::from_components(part_scale * object_scale).map_err(|source| {
+                    DynamicEntityPhysicalPreparationError::Content {
+                        wcid,
+                        resource_did: setup_did,
+                        source,
+                    }
                 })?;
             Ok(PreparedEntityBspPart {
                 part_index,
                 gfx_obj_did,
-                local_origin: local_origin * definition.object_scale,
+                local_origin: local_origin * object_scale,
                 local_orientation,
                 scale,
                 shape,
@@ -1337,7 +1434,9 @@ fn world_position_is_finite(position: WorldPosition) -> bool {
 mod tests {
     use super::*;
     use holtburger_common::properties::PhysicsState;
-    use holtburger_content::CollisionBall;
+    use holtburger_content::{
+        CollisionBall, LandblockColliders, LandblockCollisionAsset, TerrainCollisionSurface,
+    };
     use holtburger_world::{
         DynamicBodyCollisionDefinition, EntityCollisionParticipation, EntityPartChange,
         EntityPhysicalIntent, EntityPhysicsTransitionContext, EntitySubPalette,
@@ -1811,7 +1910,18 @@ mod tests {
         )
         .unwrap();
 
-        let collision = holtburger_world::CollisionScene::new();
+        let mut collision = holtburger_world::CollisionScene::new();
+        for x in 0xd9_u32..=0xdb {
+            for y in 0x54_u32..=0x56 {
+                collision
+                    .insert(LandblockCollisionAsset {
+                        landblock_id: (x << 24) | (y << 16) | 0xffff,
+                        terrain: TerrainCollisionSurface::empty(),
+                        static_geometry: LandblockColliders::default(),
+                    })
+                    .unwrap();
+            }
+        }
         let prepared = scene
             .prepare_dynamic_entity_collection(&collision, 0.1, |_| {
                 Ok(PhysicalBodyActuation::Grounded(
@@ -1819,9 +1929,10 @@ mod tests {
                 ))
             })
             .unwrap();
+        assert!(prepared.coverage_rejections.is_empty());
         let touched_at = created_at + std::time::Duration::from_millis(100);
         let mut started = Vec::new();
-        for (body_id, actuation) in prepared {
+        for (body_id, actuation) in prepared.movers {
             let result = scene
                 .tick_dynamic_physical_body_transaction(
                     body_id,

@@ -6,6 +6,7 @@ pub mod dynamic_entity_view;
 pub mod errors;
 pub mod kinematic_boom;
 pub mod physical_body_definition;
+pub mod simulation_scene;
 pub mod soul_emote_motion;
 
 pub use character_gen::{
@@ -29,10 +30,9 @@ pub use client::character_motion::{
     JumpChargeProfile, JumpExtent, JumpExtentError, SequencedCharacterMotionEvent,
 };
 pub use client::collision::{
-    CLIENT_COLLISION_OWNER_RADIUS, ClientCollisionCoordinator, ClientCollisionInterest,
-    ClientCollisionSnapshot, ClientCollisionSource, ClientPlayerBodyFacts,
-    ClientPlayerBodyFactsError, ClientSpatialReadiness, ContentClientCollisionSource,
-    client_player_body_facts,
+    CLIENT_COLLISION_OWNER_RADIUS, ClientBodyReadiness, ClientCollisionCoordinator,
+    ClientCollisionSource, ClientPlayerBodyFacts, ClientPlayerBodyFactsError, ClientPlayerIdentity,
+    ContentClientCollisionSource, client_player_body_facts,
 };
 pub use client::runtime_body_view_cache::RuntimeBodyViewCache;
 pub use client::types::{
@@ -42,10 +42,11 @@ pub use client::types::{
     ClientViewEvent, ClientWorldActivationCause, PlayerCharacterOptions, RetryState,
 };
 pub use client::{
-    ClientCameraClearance, ClientCameraClearanceRequest, ClientCameraDiagnostics,
-    ClientCameraHoldReason, ClientCameraIdentity, ClientCameraIntentRequest,
-    ClientCameraReseedReason, ClientCameraStartReceipt, ClientCameraStartRequest,
-    ClientCameraTargetSphereRole, ClientCameraTick, ClientCameraUpdateReceipt,
+    ClientCameraClearance, ClientCameraClearanceRequest, ClientCameraCollisionProof,
+    ClientCameraDiagnostics, ClientCameraHoldReason, ClientCameraIdentity,
+    ClientCameraIntentRequest, ClientCameraReseedReason, ClientCameraStartReceipt,
+    ClientCameraStartRequest, ClientCameraTargetSphereRole, ClientCameraTick,
+    ClientCameraUpdateReceipt,
 };
 pub use client::{ClientRuntime, ClientRuntimeBuilder};
 pub use content_assets::{
@@ -57,13 +58,15 @@ pub use dynamic_entity::{
     DynamicEntityBodyRemovalOutcome, DynamicEntityBodyReplacementOutcome, DynamicEntityContent,
     DynamicEntityDefinition, DynamicEntityDefinitionError, DynamicEntityDefinitionInput,
     DynamicEntityIdentity, DynamicEntityInitialState, DynamicEntityLaunchError,
-    DynamicEntityLaunchPlan, DynamicEntityPhysicalPreparationError, DynamicEntityProjectionInput,
-    DynamicEntityRadarFacts, DynamicEntitySetupPreparation, DynamicEntitySpatialMembership,
-    DynamicEntityWorldProjection, apply_dynamic_entity_physics_transition,
-    dynamic_entity_projection_input, dynamic_entity_projection_input_from_body,
-    explorer_radar_blip_color, install_dynamic_entity_body, material_appearance_input,
-    prepare_dynamic_entity_physics, prepare_dynamic_entity_setup, remove_dynamic_entity_body,
-    replace_dynamic_entity_body, resolve_dynamic_entity_launch, semantic_radar_blip_color,
+    DynamicEntityLaunchPlan, DynamicEntityPhysicalPreparationError,
+    DynamicEntityPhysicalPreparationInput, DynamicEntityProjectionInput, DynamicEntityRadarFacts,
+    DynamicEntitySetupPreparation, DynamicEntitySpatialMembership, DynamicEntityWorldProjection,
+    apply_dynamic_entity_physics_transition, dynamic_entity_projection_input,
+    dynamic_entity_projection_input_from_body, explorer_radar_blip_color,
+    install_dynamic_entity_body, material_appearance_input,
+    prepare_dynamic_entity_physical_definition, prepare_dynamic_entity_physics,
+    prepare_dynamic_entity_setup, remove_dynamic_entity_body, replace_dynamic_entity_body,
+    resolve_dynamic_entity_launch, semantic_radar_blip_color,
 };
 pub use dynamic_entity_view::{
     DynamicEntityAdvance, DynamicEntityAdvanceBatch, DynamicEntityClipCompletion,
@@ -76,10 +79,10 @@ pub use dynamic_entity_view::{
 };
 pub use holtburger_content::LandblockCollisionAsset;
 pub use kinematic_boom::{
-    KinematicBoomAdvance, KinematicBoomClearance, KinematicBoomController,
-    KinematicBoomDiagnostics, KinematicBoomHoldReason, KinematicBoomInputError,
-    KinematicBoomIntent, KinematicBoomOutcome, KinematicBoomPathLeg, KinematicBoomPathPoint,
-    KinematicBoomPlacedPath, KinematicBoomPlacement, KinematicBoomProfile,
+    KinematicBoomAdvance, KinematicBoomClearance, KinematicBoomCollisionProof,
+    KinematicBoomController, KinematicBoomDiagnostics, KinematicBoomHoldReason,
+    KinematicBoomInputError, KinematicBoomIntent, KinematicBoomOutcome, KinematicBoomPathLeg,
+    KinematicBoomPathPoint, KinematicBoomPlacedPath, KinematicBoomPlacement, KinematicBoomProfile,
     KinematicBoomProfileDefinition, KinematicBoomProfileError, KinematicBoomReseedReason,
     KinematicBoomTargetSample, KinematicBoomTargetSeed, KinematicBoomUpdateAcceptance,
     KinematicBoomWorldPoint, resolve_camera_pivot_offset, serialize_kinematic_boom_path,
@@ -89,5 +92,11 @@ pub use physical_body_definition::{
     FREE_SPHERE_FLY_CONFIG, RETAIL_DUMMY_MOTION_SPHERE, ResolvedBodyProfile,
     SetupPhysicalShapeError, physical_fly_viewer_profile, resolve_setup_physical_spheres,
     retail_grounded_body, retail_grounded_body_with_policy, retail_player_grounded_profile,
+};
+pub use simulation_scene::{
+    SimulationSceneBatchCompletion, SimulationSceneInterest, SimulationSceneOwnerAvailability,
+    SimulationSceneOwnerOutcome, SimulationSceneOwnerRequest, SimulationScenePublication,
+    SimulationSceneRequest, SimulationSceneResidency, SimulationSceneResidencyError,
+    SimulationSceneSnapshot, StagedSimulationScenePublication,
 };
 pub use soul_emote_motion::motion_command_for_soul_emote_pose;

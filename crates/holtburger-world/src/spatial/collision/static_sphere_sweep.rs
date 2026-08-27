@@ -7,10 +7,10 @@ use parry3d::query::{ShapeCastOptions, cast_shapes};
 use parry3d::shape::{Ball, Cylinder, Triangle};
 
 use super::{
-    CollisionQueryError, CollisionScene, GlobalCellRange, MotionWaypoint, MotionWaypointPlacement,
-    PhysicalCollisionExclusions, PhysicalCollisionFilter, PlacedMotionPathRequest, SphereSweep,
-    anchor_to_landblock, landblock_key, point_between_landblocks, touched_landblocks,
-    validate_sweep,
+    CollisionQueryError, CollisionQueryPolicy, CollisionScene, GlobalCellRange, MotionWaypoint,
+    MotionWaypointPlacement, PhysicalCollisionExclusions, PhysicalCollisionFilter,
+    PlacedMotionPathRequest, SphereSweep, UncoveredCollisionQuery, anchor_to_landblock,
+    landblock_key, point_between_landblocks, touched_landblocks, validate_sweep,
 };
 
 /// One continuous sphere displacement against resident static collision geometry.
@@ -45,6 +45,20 @@ impl CollisionScene {
         &self,
         request: StaticSphereSweepRequest,
     ) -> Result<Option<StaticSphereSweepHit>, CollisionQueryError> {
+        Ok(self
+            .sweep_static_sphere_with_policy(
+                request,
+                CollisionQueryPolicy::RequireCollisionCoverage,
+            )?
+            .value)
+    }
+
+    /// Returns the earliest installed obstruction under one explicit coverage policy.
+    pub fn sweep_static_sphere_with_policy(
+        &self,
+        request: StaticSphereSweepRequest,
+        policy: CollisionQueryPolicy,
+    ) -> Result<UncoveredCollisionQuery<Option<StaticSphereSweepHit>>, CollisionQueryError> {
         let sweep = SphereSweep {
             anchor: request.anchor,
             start: request.start,
@@ -53,9 +67,6 @@ impl CollisionScene {
         };
         validate_sweep(sweep)?;
         let displacement = request.end - request.start;
-        if displacement.length_squared() <= f32::EPSILON {
-            return Ok(None);
-        }
 
         let placement_path = self.transit_motion_path(PlacedMotionPathRequest {
             previous_cell: request.previous_cell,
@@ -73,6 +84,11 @@ impl CollisionScene {
             swept_placement = swept_placement.merge_reached(leg.end().placement().clone());
         }
 
+        let touched = touched_landblocks(sweep);
+        if displacement.length_squared() <= f32::EPSILON {
+            return self.complete_query(policy, &touched, &swept_placement, None);
+        }
+
         let moving_ball = Ball::new(request.radius);
         let narrow_phase = MovingSphereCast {
             ball: &moving_ball,
@@ -82,7 +98,6 @@ impl CollisionScene {
         };
         let mut earliest = None;
 
-        let touched = touched_landblocks(sweep);
         if swept_placement.reaches_outdoors() {
             for owner in &touched {
                 let Some(asset) = self.landblocks.get(owner) else {
@@ -171,7 +186,7 @@ impl CollisionScene {
             update_water_restriction_hit(self, sweep, &touched, &mut earliest);
         }
 
-        Ok(earliest)
+        self.complete_query(policy, &touched, &swept_placement, earliest)
     }
 }
 

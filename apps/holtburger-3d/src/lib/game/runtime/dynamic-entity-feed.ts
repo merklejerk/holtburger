@@ -8,6 +8,16 @@ const finiteNumber = z.number().finite();
 const nonNegativeInteger = z.number().int().nonnegative();
 const guid = nonNegativeInteger.max(0xffff_ffff);
 
+declare const cellIdBrand: unique symbol;
+/** Exact AC world-position cell identity, distinct from a normalized landblock owner. */
+export type CellId = number & { readonly [cellIdBrand]: "CellId" };
+const cellIdSchema = guid.transform((value): CellId => value as CellId);
+
+/** Validate and brand one exact AC cell identity at a typed construction boundary. */
+export function cellId(value: number): CellId {
+	return cellIdSchema.parse(value);
+}
+
 const vector3Schema = z.object({
 	x: finiteNumber,
 	y: finiteNumber,
@@ -22,14 +32,15 @@ const quaternionSchema = z.object({
 });
 
 const worldPositionSchema = z.object({
-	landblockId: guid,
+	// Wire spelling follows WorldPosition; the value is an exact cell, never a terrain owner.
+	landblockId: cellIdSchema,
 	coords: vector3Schema,
 	rotation: quaternionSchema,
 });
 
 const spatialMembershipSchema = z.object({
 	reachesOutdoors: z.boolean(),
-	reachedEnvCellIds: z.array(guid),
+	reachedEnvCellIds: z.array(cellIdSchema),
 });
 
 const appearanceSchema = z.object({

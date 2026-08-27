@@ -96,6 +96,7 @@ export class ExplorerCameraInputController {
 	#linearMovementStartedAt: number | null = null;
 	#movementFrame: number | null = null;
 	#shiftActive = false;
+	#inputEnabled = true;
 	#scheme: FrontendControlScheme = { kind: "free-fly" };
 	readonly #look = new CameraLookController(DEFAULT_STATE);
 	#state: FreeFlyCameraState = DEFAULT_STATE;
@@ -157,6 +158,16 @@ export class ExplorerCameraInputController {
 		this.#scheme = scheme;
 	}
 
+	/** Withdraw every Explorer input edge while a replacement scene is installing or revealing. */
+	setInputEnabled(enabled: boolean): void {
+		if (this.#inputEnabled === enabled) return;
+		this.#inputEnabled = enabled;
+		if (enabled) return;
+		if (this.#isCharacterScheme()) this.#onCharacterInput({ kind: "reset" });
+		this.#stopMovement();
+		this.#shiftActive = false;
+	}
+
 	/** Current local input, camera basis, and precision modifier for physical-camera policy. */
 	physicalFlyInput(): {
 		readonly basis: {
@@ -201,6 +212,7 @@ export class ExplorerCameraInputController {
 	}
 
 	readonly #handlePointerDown = (event: PointerEvent): void => {
+		if (!this.#inputEnabled) return;
 		if (event.button !== 0 && event.button !== 1 && event.button !== 2) return;
 		if (
 			this.#isCharacterScheme() &&
@@ -219,6 +231,7 @@ export class ExplorerCameraInputController {
 	};
 
 	readonly #handlePointerMove = (event: PointerEvent): void => {
+		if (!this.#inputEnabled) return;
 		const drag = this.#activeDrag;
 		if (!drag || drag.pointerId !== event.pointerId) return;
 		const deltaX = event.clientX - drag.lastX;
@@ -266,15 +279,21 @@ export class ExplorerCameraInputController {
 	};
 
 	readonly #handlePointerUp = (event: PointerEvent): void => {
+		if (!this.#inputEnabled) return;
 		if (!this.#finishDrag(event.pointerId)) return;
 		event.preventDefault();
 	};
 
 	readonly #handlePointerCancel = (event: PointerEvent): void => {
+		if (!this.#inputEnabled) return;
 		this.#finishDrag(event.pointerId);
 	};
 
 	readonly #handleWheel = (event: WheelEvent): void => {
+		if (!this.#inputEnabled) {
+			event.preventDefault();
+			return;
+		}
 		const delta = event.deltaY !== 0 ? event.deltaY : event.deltaX;
 		const distance =
 			-clamp(
@@ -301,6 +320,10 @@ export class ExplorerCameraInputController {
 	};
 
 	readonly #handleKeyDown = (event: KeyboardEvent): void => {
+		if (!this.#inputEnabled) {
+			event.preventDefault();
+			return;
+		}
 		this.#shiftActive = event.shiftKey;
 		const semanticKey = this.#isCharacterScheme()
 			? THIRD_PERSON_CHARACTER_CONTROL_PROFILE.characterKey(event.key)
@@ -327,6 +350,10 @@ export class ExplorerCameraInputController {
 	};
 
 	readonly #handleKeyUp = (event: KeyboardEvent): void => {
+		if (!this.#inputEnabled) {
+			event.preventDefault();
+			return;
+		}
 		this.#shiftActive = event.key === "Shift" ? false : event.shiftKey;
 		const semanticKey = this.#isCharacterScheme()
 			? THIRD_PERSON_CHARACTER_CONTROL_PROFILE.characterKey(event.key)
@@ -381,6 +408,10 @@ export class ExplorerCameraInputController {
 	#stopMovement(): void {
 		if (this.#movementFrame !== null)
 			this.#cancelAnimationFrame(this.#movementFrame);
+		const drag = this.#activeDrag;
+		if (drag !== null && this.#canvas.hasPointerCapture(drag.pointerId)) {
+			this.#canvas.releasePointerCapture(drag.pointerId);
+		}
 		this.#movementFrame = null;
 		this.#lastMovementAt = null;
 		this.#linearMovementStartedAt = null;
@@ -389,6 +420,7 @@ export class ExplorerCameraInputController {
 	}
 
 	readonly #applyMovement = (frameAt: number): void => {
+		if (!this.#inputEnabled) return;
 		this.#movementFrame =
 			this.#pressedKeys.size === 0
 				? null

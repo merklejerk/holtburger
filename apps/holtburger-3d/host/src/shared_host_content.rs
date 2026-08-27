@@ -11,9 +11,9 @@ use serde::Deserialize;
 
 use crate::protocol::{HostResponse, ProtocolError, application_error, encode_json};
 use crate::{
-    LoadAnimationRequest, LoadAudioRequest, LoadDynamicEntityVisualRequest,
-    LoadLandblockProfileRequest, LoadLandblockSourceBatchRequest, LoadParticleEmitterRequest,
-    LoadParticleMeshesRequest, LoadPhysicsScriptRequest, LoadSoundTableRequest,
+    LoadAnimationRequest, LoadAudioRequest, LoadLandblockProfileRequest,
+    LoadLandblockSourceBatchRequest, LoadParticleEmitterRequest, LoadParticleMeshesRequest,
+    LoadPhysicsScriptRequest, LoadSetupVisualRequest, LoadSoundTableRequest,
     LoadTexturePixelsRequest, MotionTableClosureRequest,
 };
 
@@ -103,8 +103,8 @@ pub enum SharedContentCommand {
     LoadAnimation {
         request: LoadAnimationRequest,
     },
-    LoadDynamicEntityVisual {
-        request: LoadDynamicEntityVisualRequest,
+    LoadSetupVisual {
+        request: LoadSetupVisualRequest,
     },
     LoadAudio {
         request: LoadAudioRequest,
@@ -141,7 +141,7 @@ pub const SHARED_CONTENT_COMMAND_NAMES: &[&str] = &[
     "host_status",
     "load_active_region_data",
     "load_animation",
-    "load_dynamic_entity_visual",
+    "load_setup_visual",
     "load_audio",
     "load_sound_table",
     "load_particle_emitter",
@@ -173,8 +173,8 @@ pub async fn dispatch_shared_content(
                 .await
                 .map_err(application_error)?,
         )),
-        LoadDynamicEntityVisual { request } => Ok(HostResponse::Binary(
-            crate::dynamic_entity_visual_source::load_dynamic_entity_visual_source_bytes(
+        LoadSetupVisual { request } => Ok(HostResponse::Binary(
+            crate::setup_visual_source::load_setup_visual_source_bytes(
                 &runtime.content().runtime,
                 request.setup_did,
                 request.appearance,

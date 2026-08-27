@@ -76,6 +76,86 @@ describe("SceneInterestCommitCoordinator", () => {
 			revision: 1,
 		});
 	});
+
+	it("bounds landblock batches before they enter the host pipeline", async () => {
+		let active = 0;
+		let maximumActive = 0;
+		let release!: () => void;
+		const held = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const requests: string[] = [];
+		const callbacks = createCallbacks();
+		const pipeline: CommitPipeline = {
+			prepareLandblockLayers: async (layers) => {
+				const owner = [...layers][0]?.id;
+				if (owner === undefined) throw new Error("Batch lost its owner.");
+				requests.push(owner);
+				active += 1;
+				maximumActive = Math.max(maximumActive, active);
+				await held;
+				active -= 1;
+				return [];
+			},
+		};
+		const coordinator = new SceneInterestCommitCoordinator(
+			pipeline,
+			callbacks,
+			3,
+		);
+
+		coordinator.reconcile(terrainInterest(8));
+
+		await vi.waitFor(() => expect(requests).toHaveLength(3));
+		expect(maximumActive).toBe(3);
+		release();
+		await vi.waitFor(() => expect(requests).toHaveLength(8));
+		await vi.waitFor(() =>
+			expect(callbacks.unavailable).toHaveBeenCalledTimes(8),
+		);
+		expect(maximumActive).toBe(3);
+	});
+
+	it("drops a superseded queued landblock before invoking the pipeline", async () => {
+		let releaseFirst!: () => void;
+		const held = new Promise<void>((resolve) => {
+			releaseFirst = resolve;
+		});
+		const owners = ["0x0000ffff", "0x0001ffff"];
+		const requests: string[] = [];
+		const callbacks = createCallbacks();
+		const pipeline: CommitPipeline = {
+			prepareLandblockLayers: async (layers) => {
+				const owner = [...layers][0]?.id;
+				if (owner === undefined) throw new Error("Batch lost its owner.");
+				requests.push(owner);
+				if (requests.length === 1) await held;
+				return [];
+			},
+		};
+		const coordinator = new SceneInterestCommitCoordinator(
+			pipeline,
+			callbacks,
+			1,
+		);
+
+		coordinator.reconcile(terrainInterest(owners.length));
+		await vi.waitFor(() => expect(requests).toEqual([owners[0]]));
+		coordinator.reconcile(
+			new Map([[owners[0], new Set([LandblockLayerKind.Terrain])]]),
+		);
+		releaseFirst();
+
+		await vi.waitFor(() =>
+			expect(callbacks.unavailable).toHaveBeenCalledTimes(1),
+		);
+		await Promise.resolve();
+		expect(requests).toEqual([owners[0]]);
+		expect(callbacks.evict).toHaveBeenCalledWith({
+			layer: { id: owners[1], layer: LandblockLayerKind.Terrain },
+			revision: 1,
+		});
+	});
 });
 
 function artifact(layer: LandblockLayerKind): LandblockLayerCommit {
@@ -169,4 +249,13 @@ function sceneInterest(
 	layers: readonly LandblockLayerKind[],
 ): SceneInterestMap {
 	return new Map([[landblockId, new Set(layers)]]);
+}
+
+function terrainInterest(count: number): SceneInterestMap {
+	return new Map(
+		Array.from({ length: count }, (_, index) => [
+			`0x${index.toString(16).padStart(4, "0")}ffff`,
+			new Set([LandblockLayerKind.Terrain]),
+		]),
+	);
 }

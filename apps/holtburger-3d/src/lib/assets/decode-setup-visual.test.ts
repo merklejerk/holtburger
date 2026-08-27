@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { decodeDynamicEntityVisual } from "./decode-dynamic-entity-visual";
+import { decodeSetupVisual } from "./decode-setup-visual";
 
 const EMPTY_SECTIONS = [
 	["positions", "f32"],
@@ -14,11 +14,11 @@ const EMPTY_SECTIONS = [
 	["materialStippling", "u8"],
 ] as const;
 
-describe("decodeDynamicEntityVisual", () => {
+describe("decodeSetupVisual", () => {
 	it("selects the exact setup appearance and retains its behavior and light facts", () => {
-		const visual = decodeDynamicEntityVisual(
+		const visual = decodeSetupVisual(
 			envelope({
-				transport: "holtburger-dynamic-entity-visual",
+				transport: "holtburger-setup-visual",
 				byteOrder: "little-endian",
 				sectionByteOffsetBase: "section-data",
 				definitionId: "setup:exact",
@@ -87,18 +87,16 @@ describe("decodeDynamicEntityVisual", () => {
 
 	it("rejects a response whose declared envelope length is dishonest", () => {
 		const response = new Uint8Array(12);
-		response.set(new TextEncoder().encode("HBDV"));
+		response.set(new TextEncoder().encode("HBSV"));
 		new DataView(response.buffer).setUint32(8, 99, true);
-		expect(() => decodeDynamicEntityVisual(response)).toThrow(
-			"header declares 99",
-		);
+		expect(() => decodeSetupVisual(response)).toThrow("header declares 99");
 	});
 });
 
 function envelope(manifest: unknown): Uint8Array {
 	const json = new TextEncoder().encode(JSON.stringify(manifest));
 	const response = new Uint8Array(12 + json.length);
-	response.set(new TextEncoder().encode("HBDV"));
+	response.set(new TextEncoder().encode("HBSV"));
 	const view = new DataView(response.buffer);
 	view.setUint32(4, json.length, true);
 	view.setUint32(8, response.length, true);

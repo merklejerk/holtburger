@@ -210,6 +210,20 @@ describe("interpolateRigidTransform", () => {
 });
 
 describe("sampleAnimationPose", () => {
+	it("keeps an explicit authored rate while interpolating at render cadence", () => {
+		const clip = playingClip(testAnimation(3), 0, 2, 40, "loop");
+		const halfFrame = advancePlayingFrame(
+			clip,
+			clipEntryFrame(clip),
+			1 / 80,
+		).framePosition;
+
+		// 40 fps is the source animation's traversal rate; a half display interval still lands
+		// between authored frames and uses the same sampler ordinary entities use.
+		expect(halfFrame).toBeCloseTo(0.5);
+		expect(sampleAnimationPose(clip, halfFrame)[0]?.m41).toBeCloseTo(5);
+	});
+
 	it("interpolates within the clip and holds the terminal pose across the cyclic seam", () => {
 		const clip = wholeAnimationClip(testAnimation(3));
 

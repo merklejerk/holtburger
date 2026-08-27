@@ -1,4 +1,4 @@
-import type { EnvCellId, LandblockId } from "../game-types";
+import type { EnvCellId, LandblockOwnerId } from "../game-types";
 import {
 	createObjectGeometryKey,
 	createPortalGeometryKey,
@@ -102,7 +102,7 @@ export interface EnvCellMaterializationDiagnostics {
 
 /** Complete source plan; runtime supplies revision namespaces and executes it in Phase 5. */
 export interface EnvCellMaterializationPlan {
-	readonly landblockId: LandblockId;
+	readonly landblockId: LandblockOwnerId;
 	readonly scopes: readonly EnvCellScopeMaterializationPlan[];
 	readonly shellGeometries: readonly (GeometrySource & {
 		readonly key: ObjectGeometryKey;
@@ -399,7 +399,7 @@ function resolveResident(
 }
 
 function assertCellIdentity(
-	landblockId: LandblockId,
+	landblockId: LandblockOwnerId,
 	cell: ResolvedEnvCellPresentation,
 ): void {
 	if (
@@ -439,7 +439,7 @@ function objectGeometry(
 }
 
 function apertureGeometry(
-	landblockId: LandblockId,
+	landblockId: LandblockOwnerId,
 	aperture: ResolvedPortalAperture,
 ): GeometrySource & {
 	readonly key: PortalGeometryKey;

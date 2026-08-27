@@ -192,6 +192,14 @@ describe("wireCommand", () => {
 				turning: null,
 			},
 		});
+		expect(
+			wireCommand("acknowledge_client_world_reveal", {
+				worldGeneration: 7,
+			}),
+		).toEqual({
+			command: "acknowledge_client_world_reveal",
+			worldGeneration: 7,
+		});
 	});
 });
 

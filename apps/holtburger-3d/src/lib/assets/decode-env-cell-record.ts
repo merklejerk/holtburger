@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { EnvCellId, LandblockId } from "../game/game-types";
+import type { EnvCellId, LandblockOwnerId } from "../game/game-types";
 import { AABB3, Vec3 } from "../game/math/types";
 import type {
 	PortalApertureId,
@@ -252,7 +252,7 @@ const REQUIRED_SECTIONS = {
 /** Decode one independently versioned environment-cell source record. */
 export function decodeEnvCellRecord(
 	response: Uint8Array,
-	requestedLandblockId: LandblockId,
+	requestedLandblockId: LandblockOwnerId,
 ): ResolvedEnvCellLayerSource | null {
 	const { manifest, sectionDataOffset } = decodeEnvelope(response);
 	if (
@@ -358,7 +358,7 @@ export function decodeEnvCellRecord(
 	);
 	return {
 		kind: LandblockLayerKind.EnvCells,
-		landblockId: manifest.landblockId as LandblockId,
+		landblockId: manifest.landblockId as LandblockOwnerId,
 		cells,
 		portalApertures,
 		portalCrossings,
@@ -716,7 +716,7 @@ function decodeStructures(
 
 function decodeCells(
 	manifest: EnvCellManifest,
-	landblockId: LandblockId,
+	landblockId: LandblockOwnerId,
 	arrays: CellArrays,
 	structures: readonly ResolvedCellStructure[],
 	materials: ReadonlyMap<string, ResolvedMaterial>,
@@ -904,7 +904,7 @@ function decodeApertures(
 
 function decodeCrossings(
 	manifest: EnvCellManifest,
-	landblockId: LandblockId,
+	landblockId: LandblockOwnerId,
 	cells: readonly ResolvedEnvCellPresentation[],
 	apertures: readonly ResolvedPortalAperture[],
 ): readonly ResolvedPortalCrossing[] {
@@ -1002,7 +1002,7 @@ function decodeCrossings(
 					? {
 							...entry.spatialRelationship,
 							exteriorLandblockId: entry.spatialRelationship
-								.exteriorLandblockId as LandblockId,
+								.exteriorLandblockId as LandblockOwnerId,
 						}
 					: entry.spatialRelationship,
 		};
@@ -1107,7 +1107,7 @@ function validateVisibilityDiagnostics(
 function scopeForCellIndex(
 	cellIndex: number | null,
 	cells: readonly ResolvedEnvCellPresentation[],
-	landblockId: LandblockId,
+	landblockId: LandblockOwnerId,
 ): SceneScope {
 	if (cellIndex === null) return { kind: "outdoor" };
 	const cell = cells[cellIndex];

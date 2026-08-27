@@ -15,7 +15,7 @@ import {
 	type SimulationInterestRequest,
 	type SimulationInterestReceipt,
 } from "../../explorer/simulation-interest";
-import type { LandblockId } from "../../lib/game/game-types";
+import type { LandblockOwnerId } from "../../lib/game/game-types";
 import {
 	decodeExplorerPossession,
 	decodePossessionEventOutcome,
@@ -87,7 +87,7 @@ export class HttpExplorerEntityHost {
 
 	/** Load the same camera-centered collision-owner policy used by the production Explorer. */
 	ensureSimulationInterest(
-		anchorLandblockId: LandblockId,
+		anchorLandblockId: LandblockOwnerId,
 	): Promise<SimulationInterestReceipt> {
 		return this.#interest.request(anchorLandblockId).then((receipt) => {
 			if (!receipt.committed) {

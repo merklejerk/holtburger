@@ -981,6 +981,36 @@ fn player_teleport_suspends_runtime_bodies_and_emits_reset_signal() {
 }
 
 #[test]
+fn player_contained_object_readiness_requires_the_recursive_authority_closure() {
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x5000_0301);
+    let container_guid = Guid(0x6000_0301);
+    let item_guid = Guid(0x6000_0302);
+    state.player.guid = player_guid;
+    state.seed_local_player_entity(player_guid, "Player", WorldPosition::default());
+
+    let mut container = Entity::new(container_guid, "Pack".to_string(), WorldPosition::default());
+    container.set_container_id(Some(player_guid));
+    state.add_entity(container);
+    state.player.add_to_inventory(container_guid);
+    state.player.add_to_inventory(item_guid);
+
+    assert!(!state.all_player_contained_objects_exist());
+
+    let mut item = Entity::new(item_guid, "Item".to_string(), WorldPosition::default());
+    item.set_container_id(Some(container_guid));
+    state.add_entity(item);
+    assert!(state.all_player_contained_objects_exist());
+
+    state
+        .entities
+        .get_mut(container_guid)
+        .expect("container should exist")
+        .set_container_id(Some(item_guid));
+    assert!(!state.all_player_contained_objects_exist());
+}
+
+#[test]
 fn test_spell_name_resolution() {
     use crate::spell::{SpellCatalog, SpellInfo};
 

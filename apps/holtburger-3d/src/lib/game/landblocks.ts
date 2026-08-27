@@ -1,4 +1,4 @@
-import type { LandblockId } from "./game-types";
+import type { LandblockOwnerId } from "./game-types";
 import { Vec3 } from "./math/types";
 
 /** Width and depth of one outdoor landblock in AC world units. */
@@ -23,7 +23,7 @@ export const OUTDOOR_TERRAIN_TILE_SIZE =
 export const RETAIL_ROAD_WIDTH = 5;
 
 /** Normalize one eight-digit landblock owner identity to its `FFFF` CellLandblock root. */
-export function normalizeLandblockOwner(landblockId: LandblockId): LandblockId {
+export function normalizeLandblockOwner(landblockId: string): LandblockOwnerId {
 	const match = /^(?:0x)?([0-9a-fA-F]{4})ffff$/i.exec(landblockId);
 	if (!match) {
 		throw new Error(
@@ -64,7 +64,7 @@ export function landblockChebyshevDistance(
 }
 
 export function getLandblockCoordinates(
-	landblockId: LandblockId,
+	landblockId: LandblockOwnerId,
 ): LandblockCoordinates {
 	const hex = landblockId.startsWith("0x") ? landblockId.slice(2) : landblockId;
 	if (hex.length !== 8) throw new Error(`Invalid landblock id ${landblockId}.`);
@@ -96,7 +96,7 @@ export function createLandblockOffset(
 
 /** Scene-space origin of one outdoor landblock's local coordinate frame. */
 export function createLandblockWorldOrigin(
-	landblock: LandblockId | LandblockCoordinates,
+	landblock: LandblockOwnerId | LandblockCoordinates,
 	targetVec?: Vec3,
 ): Vec3 {
 	const coords =
@@ -115,7 +115,7 @@ export function createLandblockWorldOrigin(
 }
 
 /** Resolve the outdoor landblock containing one canonical scene-space point. */
-export function landblockAtWorldPoint(point: Vec3): LandblockId | null {
+export function landblockAtWorldPoint(point: Vec3): LandblockOwnerId | null {
 	const x = Math.floor(point.x / OUTDOOR_LANDBLOCK_WORLD_SIZE);
 	const y = Math.floor(-point.z / OUTDOOR_LANDBLOCK_WORLD_SIZE);
 	if (x < 0 || x > 0xff || y < 0 || y > 0xff) return null;

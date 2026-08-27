@@ -86,11 +86,17 @@ pub enum HostEvent {
     ExplorerDynamicEntity(holtburger_core::DynamicEntityEvent),
     ClientCurrentState(crate::client_projection::ClientCurrentState),
     ClientLifecycleChanged(crate::client_projection::ClientLifecycleWire),
-    ClientServerTimeUpdated { time: f64 },
+    ClientLocalPlayerEstablished {
+        #[serde(rename = "playerGuid")]
+        player_guid: holtburger_common::Guid,
+    },
+    ClientServerTimeUpdated {
+        time: f64,
+    },
     ClientDynamicEntity(holtburger_core::DynamicEntityEvent),
     ClientCamera(holtburger_core::ClientCameraTick),
     ClientCameraStarted(holtburger_core::ClientCameraStartReceipt),
-    ClientWorldDiscontinuity(crate::client_projection::ClientWorldDiscontinuity),
+    ClientPresentationDiscontinuity(crate::client_projection::ClientPresentationDiscontinuity),
     ClientExitRequested(crate::client_projection::ClientExitRequested),
     ExplorerFixedTick(ExplorerFixedTickEnvelope),
     ExplorerPossessionEventOutcomes(Vec<PossessionEventOutcome>),
@@ -312,6 +318,9 @@ impl ClientEventSink for StdioEventSink {
             crate::client_projection::ClientHostEvent::LifecycleChanged(lifecycle) => {
                 HostEvent::ClientLifecycleChanged(lifecycle)
             }
+            crate::client_projection::ClientHostEvent::LocalPlayerEstablished { player_guid } => {
+                HostEvent::ClientLocalPlayerEstablished { player_guid }
+            }
             crate::client_projection::ClientHostEvent::ServerTimeUpdated { time } => {
                 HostEvent::ClientServerTimeUpdated { time }
             }
@@ -324,8 +333,8 @@ impl ClientEventSink for StdioEventSink {
             crate::client_projection::ClientHostEvent::CameraStarted(receipt) => {
                 HostEvent::ClientCameraStarted(receipt)
             }
-            crate::client_projection::ClientHostEvent::WorldDiscontinuity(discontinuity) => {
-                HostEvent::ClientWorldDiscontinuity(discontinuity)
+            crate::client_projection::ClientHostEvent::PresentationDiscontinuity(discontinuity) => {
+                HostEvent::ClientPresentationDiscontinuity(discontinuity)
             }
             crate::client_projection::ClientHostEvent::ExitRequested(exit) => {
                 HostEvent::ClientExitRequested(exit)
@@ -578,13 +587,11 @@ mod tests {
     }
 
     #[test]
-    fn encoded_client_lifecycle_retains_local_player_identity() {
+    fn encoded_local_player_event_retains_authority_identity() {
         let encoded = encode_frame(&ProtocolFrame::Event {
-            event: HostEvent::ClientLifecycleChanged(
-                crate::client_projection::ClientLifecycleWire::InWorld {
-                    player_guid: holtburger_common::Guid(0x5000_0008),
-                },
-            ),
+            event: HostEvent::ClientLocalPlayerEstablished {
+                player_guid: holtburger_common::Guid(0x5000_0008),
+            },
         })
         .unwrap();
         let decoded: Value = rmp_serde::from_slice(&encoded[4..]).unwrap();
@@ -593,9 +600,8 @@ mod tests {
             serde_json::json!({
                 "kind": "event",
                 "event": {
-                    "event": "client-lifecycle-changed",
+                    "event": "client-local-player-established",
                     "payload": {
-                        "kind": "in-world",
                         "playerGuid": 0x5000_0008u64,
                     },
                 },
@@ -672,6 +678,27 @@ mod tests {
         }) = read_frame(&mut reader).unwrap()
         else {
             panic!("client request did not decode into the client inventory");
+        };
+
+        let reveal = rmp_serde::to_vec_named(&serde_json::json!({
+            "kind": "request",
+            "id": 2,
+            "command": {
+                "command": "acknowledge_client_world_reveal",
+                "worldGeneration": 7,
+            },
+        }))
+        .unwrap();
+        let mut reader = Cursor::new(framed_payload(reveal));
+        let Some(InboundFrame::Request {
+            command:
+                HostCommand::Client(ClientHostCommand::AcknowledgeClientWorldReveal {
+                    world_generation: 7,
+                }),
+            ..
+        }) = read_frame(&mut reader).unwrap()
+        else {
+            panic!("client reveal acknowledgement did not preserve its world generation");
         };
     }
 

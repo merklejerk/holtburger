@@ -1,4 +1,4 @@
-import type { EnvCellId, LandblockId } from "../game-types";
+import type { EnvCellId, LandblockOwnerId } from "../game-types";
 import type {
 	ResolvedBuildingLayerSource,
 	ResolvedPortalAperture,
@@ -32,7 +32,7 @@ interface MapFloorInstance extends MapSurfaceInstance {
  * map depends on no pipeline type and the pipeline knows nothing about the map.
  */
 export interface MapInteriorInstallation {
-	readonly landblockId: LandblockId;
+	readonly landblockId: LandblockOwnerId;
 	readonly shells: readonly {
 		readonly envCellId: EnvCellId;
 		readonly placement: ScenePlacement;
@@ -77,8 +77,11 @@ export interface MapLandblockInterior {
  * that `installationRevision` gives it for terrain.
  */
 export class MapGeometryStore {
-	readonly #blockers = new Map<LandblockId, readonly MapSurfaceInstance[]>();
-	readonly #interiors = new Map<LandblockId, MapLandblockInterior>();
+	readonly #blockers = new Map<
+		LandblockOwnerId,
+		readonly MapSurfaceInstance[]
+	>();
+	readonly #interiors = new Map<LandblockOwnerId, MapLandblockInterior>();
 	#revision = 0;
 
 	/** Changes whenever installed map geometry changes. */
@@ -140,28 +143,28 @@ export class MapGeometryStore {
 	}
 
 	/** Release one buildings layer's blocker geometry, if installed. */
-	evictBuildings(landblockId: LandblockId): void {
+	evictBuildings(landblockId: LandblockOwnerId): void {
 		if (this.#blockers.delete(landblockId)) this.#revision += 1;
 	}
 
 	/** Release one EnvCell layer's interior geometry, if installed. */
-	evictInterior(landblockId: LandblockId): void {
+	evictInterior(landblockId: LandblockOwnerId): void {
 		if (this.#interiors.delete(landblockId)) this.#revision += 1;
 	}
 
 	/** Building blockers by landblock, for the outdoor map. */
 	listBlockers(): Iterable<
-		readonly [LandblockId, readonly MapSurfaceInstance[]]
+		readonly [LandblockOwnerId, readonly MapSurfaceInstance[]]
 	> {
 		return this.#blockers.entries();
 	}
 
 	/** Interiors by landblock, for component selection and the indoor map. */
-	listInteriors(): Iterable<readonly [LandblockId, MapLandblockInterior]> {
+	listInteriors(): Iterable<readonly [LandblockOwnerId, MapLandblockInterior]> {
 		return this.#interiors.entries();
 	}
 
-	interiorFor(landblockId: LandblockId): MapLandblockInterior | null {
+	interiorFor(landblockId: LandblockOwnerId): MapLandblockInterior | null {
 		return this.#interiors.get(landblockId) ?? null;
 	}
 

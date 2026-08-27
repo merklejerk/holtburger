@@ -94,6 +94,7 @@ describe("WebAudioDevice", () => {
 		expect(started).toHaveLength(0);
 
 		await device.prepare(SOUND);
+		expect(device.getPreparedSourceBytes?.(SOUND)).toBe(8);
 		expect(device.playOneShot(SOUND, 1, 0)).not.toBeNull();
 		expect(started).toHaveLength(1);
 	});
@@ -225,5 +226,6 @@ describe("WebAudioDevice", () => {
 		device.destroy();
 
 		expect(device.playOneShot(SOUND, 1, 0)).toBeNull();
+		expect(device.getPreparedSourceBytes?.(SOUND)).toBeNull();
 	});
 });

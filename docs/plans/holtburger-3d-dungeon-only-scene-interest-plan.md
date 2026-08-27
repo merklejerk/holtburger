@@ -194,7 +194,8 @@ Teleporting portals may change owners, but they do not make one cross-landblock 
 
 ## North Stars
 
-- **Classify once at the data owner.** Consumers receive `DungeonOnly` or `OutdoorOrMixed`; they do
+- **Classify once at the data owner.** Consumers receive `DungeonOnly`, `OutdoorOnly`, or
+  `OutdoorWithEnvCells`; they do
   not reconstruct the decision from raw heights, cell counts, or buildings.
 - **Routing precedes rendering.** A profile lookup decides which layers to request. Renderer source
   batches and materializers remain exact, dungeon-agnostic consumers.
@@ -222,14 +223,15 @@ Teleporting portals may change owners, but they do not make one cross-landblock 
 Add a canonical, fully commented classification to the shallow landblock contract:
 
 ```rust
-pub enum LandblockTraversalClass {
+pub enum LandblockSceneClass {
     DungeonOnly,
-    OutdoorOrMixed,
+    OutdoorOnly,
+    OutdoorWithEnvCells,
 }
 
 pub struct LandblockAsset {
     // Existing canonical fields.
-    pub traversal_class: LandblockTraversalClass,
+    pub scene_class: LandblockSceneClass,
 }
 ```
 
@@ -240,7 +242,8 @@ classification should be implemented in one small pure helper so every clause ha
 2. Require every authored height index to be zero.
 3. Require a present `LandblockInfo` with `num_cells > 0`.
 4. Require zero buildings.
-5. Classify every other available landblock as `OutdoorOrMixed`.
+5. Classify every other available landblock as `OutdoorOnly` or `OutdoorWithEnvCells` from its
+   exact authored EnvCell count.
 
 The enum is a canonical static-data fact and belongs in `holtburger-content`, beside
 `LandblockAsset`. It is not a frontend preference and should not live in Tauri, TypeScript, the
@@ -255,11 +258,14 @@ evidence establishes an observable compatibility claim.
 Project only the facts needed to route an app request:
 
 ```ts
-type LandblockTraversalClass = "dungeon-only" | "outdoor-or-mixed";
+type LandblockSceneClass =
+  | "dungeon-only"
+  | "outdoor-only"
+  | "outdoor-with-env-cells";
 
 interface LandblockProfile {
   readonly landblockId: LandblockId;
-  readonly traversalClass: LandblockTraversalClass;
+  readonly sceneClass: LandblockSceneClass;
 }
 
 interface LandblockProfileSource {
@@ -270,7 +276,7 @@ interface LandblockProfileSource {
 ```
 
 `null` means the normalized `CellLandblock` is absent. Decode, invariant, and transport failures
-remain thrown errors. Callers must not translate absence or error into `OutdoorOrMixed`.
+remain thrown errors. Callers must not translate absence or error into an available scene class.
 
 Add one Rust builder used by both host transports. It should request
 `ContentAssetRequest::Landblock(owner)` from the existing `ContentAssetRuntime` and project the
@@ -328,7 +334,7 @@ Resolution rules:
 - `automatic-landblock` loads the profile and maps `DungeonOnly` to `dungeon`, otherwise
   `outdoor`;
 - `env-cell` loads the owner profile and maps `DungeonOnly` to `dungeon`; an EnvCell in
-  `OutdoorOrMixed` resolves to `outdoor` for residency purposes;
+  `OutdoorWithEnvCells` resolves to `outdoor` for residency purposes;
 - every result preserves the original target, including an exact requested EnvCell, but does not
   prescribe camera placement;
 - only Explorer translates an automatic dungeon target into deterministic camera focus at
@@ -428,9 +434,9 @@ outdoor terrain block and is not dungeon-only behavior.
 
 ### Deliverables
 
-- Add `LandblockTraversalClass` beside `LandblockAsset` in
+- Add `LandblockSceneClass` beside `LandblockAsset` in
   `crates/holtburger-content/src/landblock.rs`.
-- Add the commented `traversal_class` field to `LandblockAsset`.
+- Add the commented `scene_class` field to `LandblockAsset`.
 - Add one pure classification helper implementing the ACE predicate and northwest exception.
 - Update every synthetic `LandblockAsset` constructor and fixture through honest field values.
 - Re-export the canonical enum from `holtburger-content` as needed.
@@ -439,8 +445,8 @@ outdoor terrain block and is not dungeon-only behavior.
 
 - [x] Express the northwest exception against normalized owner bytes without coordinate ambiguity.
 - [x] Make all-zero height, positive EnvCell count, and zero buildings jointly necessary.
-- [x] Classify mixed, building-interior, flat-empty, and ordinary outdoor fixtures as
-      `OutdoorOrMixed`.
+- [x] Distinguish mixed/building-interior fixtures as `OutdoorWithEnvCells` and flat-empty or
+      ordinary outdoor fixtures as `OutdoorOnly`.
 - [x] Classify representative `0005` facts as `DungeonOnly` in an asset-independent unit test.
 - [x] Cover each classifier failure clause with an input that reaches that clause.
 - [x] Avoid a permanent test that depends on repo-local runtime assets.
@@ -512,7 +518,7 @@ outdoor terrain block and is not dungeon-only behavior.
 
 ### Deliverables
 
-- Add `LandblockProfile`, `LandblockTraversalClass`, and `LandblockProfileSource` under
+- Add `LandblockProfile`, `LandblockSceneClass`, and `LandblockProfileSource` under
   `apps/holtburger-3d/src/lib/assets`.
 - Add strict Zod decoding and requested/returned owner validation.
 - Add `TauriLandblockProfileSource`.
@@ -566,7 +572,7 @@ outdoor terrain block and is not dungeon-only behavior.
 - [x] Resolve four-digit `0005` to dungeon through its profile.
 - [x] Keep eight-digit `0005FFFF` explicitly outdoor.
 - [x] Resolve `00050100` to dungeon and preserve its exact requested target.
-- [x] Resolve an EnvCell owned by `OutdoorOrMixed` without claiming the owner is dungeon-only.
+- [x] Resolve an EnvCell owned by `OutdoorWithEnvCells` without claiming the owner is dungeon-only.
 - [x] Resolve absent profile as actionable unavailable status.
 - [x] Reject stale profile completions after a newer request.
 - [x] Preserve automatic-focus cancellation under manual camera control.
@@ -933,11 +939,11 @@ fails, investigate authored topology or known portal destinations before adding 
 
 **Mitigation:** Keep the canonical enum in content, the serialized projection in assets, and the
 resolved target in shared runtime. Renderer layers remain terrain/buildings/objects/generated/
-EnvCells; mixed and building interiors stay `OutdoorOrMixed`.
+EnvCells; mixed and building interiors stay `OutdoorWithEnvCells`.
 
 ## Definition Of Done
 
-- [x] `LandblockAsset` carries one content-owned `LandblockTraversalClass` computed by the complete
+- [x] `LandblockAsset` carries one content-owned `LandblockSceneClass` computed by the complete
       ACE predicate and northwest exception.
 - [x] No downstream consumer re-derives classification.
 - [x] Tauri and HTTP expose one lightweight, validated profile capability backed by the existing
@@ -1012,10 +1018,10 @@ explicit dungeon navigation, outdoor terrain coverage, or renderer materializati
 
 #### In Scope
 
-- Reuse the existing `LandblockProfile.traversalClass`; add no content or wire facts.
+- Reuse the existing `LandblockProfile.sceneClass`; add no additional content or wire facts.
 - Resolve profiles for owners inside an outdoor request's enabled `envCellRadius`.
 - Include an owner in ambient outdoor EnvCell demand only when its profile is
-  `OutdoorOrMixed`.
+  `OutdoorWithEnvCells`.
 - Continue requesting terrain, buildings, explicit objects, and generated scenery entirely from
   their existing outdoor radii, regardless of traversal classification.
 - Preserve direct target semantics:
@@ -1036,7 +1042,7 @@ explicit dungeon navigation, outdoor terrain coverage, or renderer materializati
 
 - Reading or interpreting building-portal stab lists for scene-interest policy.
 - Detecting closed portal-graph components or filtering unattached EnvCells in
-  `OutdoorOrMixed` owners.
+  `OutdoorWithEnvCells` owners.
 - Adding another traversal classification or landblock-profile field.
 - Cell-selective EnvCell fetch, publication, retention, or eviction.
 - Changing outdoor terrain/static radii, simulation interest, dungeon camera stickiness, or retained
@@ -1048,7 +1054,7 @@ explicit dungeon navigation, outdoor terrain coverage, or renderer materializati
 ### Ground Truth
 
 - `crates/holtburger-content/src/landblock.rs`
-  - `LandblockTraversalClass::DungeonOnly` is already computed from ACE's complete shallow
+  - `LandblockSceneClass::DungeonOnly` is already computed from ACE's complete shallow
     predicate. It means there is no traversable outdoor surface, not that the outdoor terrain record
     is absent or should never render.
 - `apps/holtburger-3d/src/lib/game/runtime/scene-target.ts`
@@ -1089,7 +1095,7 @@ shared SceneInterestRequestCoordinator
   - resolves automatic target classification
   - for outdoor targets, enumerates envCellRadius owners
   - loads cached profiles concurrently
-  - retains only OutdoorOrMixed owners for ambient EnvCells
+  - retains only OutdoorWithEnvCells owners for ambient EnvCells
   - rejects stale completions
         |
         v
@@ -1135,7 +1141,7 @@ failure.
 
 - Dungeon targets perform no outdoor candidate expansion.
 - `envCellRadius: null` performs no ambient candidate profile requests.
-- Outdoor candidates classified `OutdoorOrMixed` enter the resolved ambient EnvCell owner set.
+- Outdoor candidates classified `OutdoorWithEnvCells` enter the resolved ambient EnvCell owner set.
 - Outdoor candidates classified `DungeonOnly`, including `5f50`, do not.
 - Missing candidate profiles are omitted as absent content; actual source and validation failures
   reject the request.
@@ -1184,7 +1190,7 @@ failure.
   map and adds the dungeon EnvCells layer.
 - Returning to outdoor intent clears active dungeon demand and evicts its EnvCells when no other
   direct demand owns them.
-- Existing `OutdoorOrMixed` EnvCell-radius behavior remains unchanged.
+- Existing `OutdoorWithEnvCells` EnvCell-radius behavior remains unchanged.
 - Commit, source acquisition, and renderer code do not import traversal classification or learn why
   the EnvCells layer was requested.
 
@@ -1221,7 +1227,7 @@ failure.
 - Explicitly targeting `5f50` after that transition adds the dungeon while retaining the outdoor
   window.
 - Repeated or rapidly superseded follow transitions cannot restore an older interest window.
-- A representative `OutdoorOrMixed` owner still loads EnvCells under outdoor radius.
+- A representative `OutdoorWithEnvCells` owner still loads EnvCells under outdoor radius.
 - Browser console output contains no errors.
 - `cargo fmt --all -- --check`, focused and workspace Rust tests, clippy with warnings denied,
   frontend tests, Svelte check, lint, format check, and `git diff --check` pass.
@@ -1230,7 +1236,7 @@ failure.
 #### Checklist
 
 - [x] Exercise and inspect the three `5f50` scenarios.
-- [x] Run an `OutdoorOrMixed` regression scenario.
+- [x] Run an `OutdoorWithEnvCells` regression scenario.
 - [x] Run all repository verification gates.
 - [x] Record implementation decisions, course corrections, and final evidence here.
 
@@ -1295,7 +1301,7 @@ tests.
 - [x] Organic outdoor traversal into `5f50` retains outdoor terrain and omits dungeon EnvCells.
 - [x] Explicit automatic `5f50` still requests the dungeon only.
 - [x] Explicit dungeon demand after organic arrival retains outdoor demand and adds the dungeon.
-- [x] `OutdoorOrMixed` ambient EnvCell behavior remains unchanged.
+- [x] `OutdoorWithEnvCells` ambient EnvCell behavior remains unchanged.
 - [x] Latest-request-wins behavior holds during rapid camera-follow transitions.
 - [x] Production browser evidence and all repository verification gates pass.
 - [x] No speculative batch endpoint, cell-selective ownership, or mixed-interior policy is added.

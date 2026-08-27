@@ -1,4 +1,4 @@
-import type { EnvCellId, LandblockId } from "../game-types";
+import type { EnvCellId, LandblockOwnerId } from "../game-types";
 import {
 	createLandblockWorldOrigin,
 	OUTDOOR_TERRAIN_TILE_SIZE,
@@ -123,7 +123,7 @@ export class MapRenderer {
 	 */
 	readonly #surfaces = new Map<Float32Array, MapSurfaceBuffers>();
 	readonly #localToLandblock = new Float32Array(16);
-	readonly #terrain = new Map<LandblockId, MapTerrainBuffers>();
+	readonly #terrain = new Map<LandblockOwnerId, MapTerrainBuffers>();
 	/** Reused so the per-frame clip upload allocates nothing. */
 	readonly #worldToClip = new Float32Array(4);
 	#syncedTerrainRevision: number | null = null;
@@ -176,7 +176,7 @@ export class MapRenderer {
 		if (!this.available) return;
 		const revision = this.#source.terrainInstallationRevision;
 		if (this.#syncedTerrainRevision !== revision) {
-			const installed = new Set<LandblockId>();
+			const installed = new Set<LandblockOwnerId>();
 			for (const terrain of this.#source.listInstalledTerrain()) {
 				installed.add(terrain.landblockId);
 				if (!this.#terrain.has(terrain.landblockId)) {
@@ -401,7 +401,7 @@ export class MapRenderer {
 
 	/** Draw only the floor instances in the anchor's connected interior, without a filtered copy. */
 	#drawInteriorFloors(
-		landblockId: LandblockId,
+		landblockId: LandblockOwnerId,
 		floors: readonly (MapSurfaceInstance & { readonly envCellId: EnvCellId })[],
 		component: ReadonlySet<EnvCellId>,
 	): void {
@@ -418,7 +418,7 @@ export class MapRenderer {
 
 	/** Draw one landblock's instances, uploading each distinct source surface at most once. */
 	#drawInstances(
-		landblockId: LandblockId,
+		landblockId: LandblockOwnerId,
 		instances: readonly MapSurfaceInstance[],
 		outlineExpansion = 0,
 	): void {

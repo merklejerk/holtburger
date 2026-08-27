@@ -8,12 +8,14 @@ import { farTerrainCutoffLandblocks } from "../environment/terrain-fog";
 import {
 	createPerspectiveMat4,
 	createViewMat4,
+	createRotationMat4,
+	createTranslationMat4,
 	mat4ToFloat32Array,
 	multiplyMat4,
 	transformPoint3,
 } from "../math/matrices";
 import { createFrustumFromClipMatrix, type Frustum } from "../math/frustum";
-import { Mat4, Vec3 } from "../math/types";
+import { Mat4, Quat, Vec3 } from "../math/types";
 import { type SceneNodeId, type SceneScope } from "../scene";
 import { scopeFor, scopeKey } from "../scene/scope";
 import { createCameraNearClipVolume } from "./portal-near-plane";
@@ -33,11 +35,14 @@ import {
 	type RendererFrameDiagnostics,
 	type RendererFrameFeedback,
 	type FrameViewInput,
+	type PortalTransitionFrame,
+	type PortalTransitionVisual,
 	type Renderer,
 	type ResolvedResourceInvalidation,
 } from "./renderer";
 import { renderCullingGroupFilter } from "./render-layer-visibility";
 import {
+	landblockVec3,
 	sceneVec3,
 	type LandblockVec3,
 	type SceneVec3,
@@ -85,7 +90,7 @@ import {
 	type WebGL2ObjectProgram,
 } from "./webgl2-object-program";
 import { bindWebGL2ObjectInstanceRange } from "./webgl2-instance-buffer";
-import type { LandblockId } from "../game-types";
+import type { LandblockOwnerId } from "../game-types";
 import { UNAUTHORED_SCENE_LIGHTING } from "../environment/scene-environment";
 import { VIEWER_LIGHT } from "../environment/viewer-light";
 import {
@@ -198,13 +203,23 @@ import {
 	WebGL2FlatSceneTarget,
 	type WebGL2FlatSceneTargetSet,
 } from "./webgl2-flat-scene-target";
-import { WebGL2FlatScenePresentation } from "./webgl2-flat-scene-presentation";
+import {
+	WebGL2FlatScenePresentation,
+	type FlatSceneTransitionInput,
+} from "./webgl2-flat-scene-presentation";
+import { WebGL2TransitionSnapshot } from "./webgl2-transition-snapshot";
 import {
 	AMBIENT_OCCLUSION_DISTANCE_FADE,
 	resolveEffectiveAmbientOcclusionPolicy,
 	type EffectiveAmbientOcclusionPolicy,
 } from "./ambient-occlusion-policy";
 import { WebGL2SaoPass, type WebGL2SaoCoverageCensus } from "./webgl2-sao-pass";
+import { composeObjectPartTransform } from "../resolution/object-part-transform";
+import {
+	sampleAnimationPose,
+	playingClip,
+	type PlayingClip,
+} from "../animation/animation-playback";
 
 /**
  * Texture unit for the terrain light mask, after the six the terrain shader samples: unit 0 is the
@@ -231,7 +246,7 @@ const TERRAIN_DEPTH_OFFSET = { factor: 1, units: 1 } as const;
  */
 function anchorRelativePosition(
 	position: Vec3,
-	anchorLandblockId: LandblockId,
+	anchorLandblockId: LandblockOwnerId,
 ): Vec3 {
 	const origin = createLandblockWorldOrigin(anchorLandblockId);
 	return new Vec3(position.x - origin.x, position.y, position.z - origin.z);
@@ -255,7 +270,7 @@ interface SceneShading {
 	 * Authored outdoor lights reaching one landblock with their terrain cell masks, memoized
 	 * across frames by the index. Objects consume only the lights; terrain also uploads the masks.
 	 */
-	readonly staticLights: (landblockId: LandblockId) => LandblockLights;
+	readonly staticLights: (landblockId: LandblockOwnerId) => LandblockLights;
 	/** Lighting per draw role, derived once per frame so draw loops stay allocation-free. */
 	readonly lighting: SceneLightingByRole;
 }
@@ -290,6 +305,15 @@ const EMPTY_LANDBLOCK_LIGHTS: LandblockLights = {
 	cellMasks: new Uint32Array(TERRAIN_LIGHT_MASK_LENGTH),
 };
 
+/** Retail portal room lighting: one distant light and a modest ambient floor. */
+const PORTAL_TRANSITION_LIGHTING = {
+	ambientLevel: 0.3,
+	ambientColor: { red: 1, green: 1, blue: 1, alpha: 1 },
+	sunVector: new Vec3(-0.3, 1.9, -0.65),
+	sunColor: { red: 1, green: 1, blue: 1, alpha: 1 },
+} as const;
+const PORTAL_TRANSITION_SCOPE = "portal-transition";
+
 interface TerrainFrameInput {
 	/** Logical geometry and texture identities for one landblock's terrain. */
 	readonly drawUnit: TerrainDrawUnit;
@@ -315,7 +339,8 @@ interface ObjectFrameInput {
 		| "generated"
 		| "env-cell-shell"
 		| "env-cell-resident"
-		| "dynamic";
+		| "dynamic"
+		| "portal-transition";
 	/** Canonical authored scope; an instance run must never cross this atlas-routing boundary. */
 	readonly renderScopeKey: string;
 	readonly cullFaceOverride:
@@ -337,7 +362,7 @@ interface ObjectFrameInput {
 				readonly instanceCount: number;
 				readonly kind: "frame-range";
 		  };
-	readonly landblockId: string;
+	readonly landblockId: LandblockOwnerId;
 	readonly localToLandblock: Mat4;
 	readonly material: ObjectMaterialBinding;
 	readonly ordering: ObjectMaterialOrdering;
@@ -426,7 +451,7 @@ type LandblockRenderOffset = readonly [number, number, number];
  */
 interface CompiledStaticNodeSubmissions {
 	readonly objects: readonly PreparedObjectFrameInput[];
-	readonly landblockId: string;
+	readonly landblockId: LandblockOwnerId;
 	readonly source: ObjectFrameInput["source"];
 	/** Key this publication contributes to the visible-layer census. */
 	readonly visibleLayerKey: string;
@@ -534,6 +559,15 @@ interface MutableFrameSelectionMetrics {
 	portalTruncatedViewCount: number;
 	portalFramebufferCount: number;
 	portalTargetBytes: number;
+	portalTransitionSnapshotBytes: number;
+	portalTransitionSnapshotAllocatedGenerationCount: number;
+	portalTransitionSnapshotDisposedGenerationCount: number;
+	portalTransitionFramebufferCount: number;
+	portalTransitionTargetBytes: number;
+	submittedPortalTransitionDrawCount: number;
+	portalTransitionVisualInstalled: boolean;
+	portalTransitionGeneration: number | null;
+	portalTransitionPhase: PortalTransitionFrame["phase"] | null;
 	flatSceneFramebufferCount: number;
 	flatSceneTargetBytes: number;
 	flatSceneAllocatedGenerationCount: number;
@@ -647,6 +681,15 @@ export class WebGL2Renderer implements Renderer {
 	#flatSceneTarget: WebGL2FlatSceneTarget | null = null;
 	/** Flat color/depth presenter, compiled lazily with the first flat frame. */
 	#flatScenePresentation: WebGL2FlatScenePresentation | null = null;
+	/** Outgoing world color retained only while a transition compositor needs it. */
+	#transitionSnapshot: WebGL2TransitionSnapshot | null = null;
+	#transitionSnapshotGeneration: number | null = null;
+	#activeTransition: PortalTransitionFrame | null = null;
+	/** Prepared setup visual retained for the transition-only tunnel target. */
+	#portalTransitionVisual: PortalTransitionVisual | null = null;
+	#portalTransitionClip: PlayingClip | null = null;
+	/** Transition-only authored tunnel color/depth target; ordinary frames never allocate it. */
+	#portalTransitionTarget: WebGL2FlatSceneTarget | null = null;
 	/** Optional SAO programs and scratch ownership, created only by the first enabled frame. */
 	#saoPass: WebGL2SaoPass | null = null;
 	/** Harness-only category view; production never enables synchronous depth census work. */
@@ -735,6 +778,15 @@ export class WebGL2Renderer implements Renderer {
 		portalTruncatedViewCount: 0,
 		portalFramebufferCount: 0,
 		portalTargetBytes: 0,
+		portalTransitionSnapshotBytes: 0,
+		portalTransitionSnapshotAllocatedGenerationCount: 0,
+		portalTransitionSnapshotDisposedGenerationCount: 0,
+		portalTransitionFramebufferCount: 0,
+		portalTransitionTargetBytes: 0,
+		submittedPortalTransitionDrawCount: 0,
+		portalTransitionVisualInstalled: false,
+		portalTransitionGeneration: null,
+		portalTransitionPhase: null,
 		flatSceneFramebufferCount: 0,
 		flatSceneTargetBytes: 0,
 		flatSceneAllocatedGenerationCount: 0,
@@ -901,6 +953,25 @@ export class WebGL2Renderer implements Renderer {
 		}
 	}
 
+	/** Install one validated setup/animation pair for the transition-only authored tunnel pass. */
+	installPortalTransitionVisual(visual: PortalTransitionVisual): void {
+		this.#assertDeviceReady();
+		if (this.#portalTransitionVisual !== null) {
+			throw new Error("Portal transition visual is already installed.");
+		}
+		if (visual.template.parts.length === 0) {
+			throw new Error("Portal transition visual has no drawable parts.");
+		}
+		this.#portalTransitionVisual = visual;
+		this.#portalTransitionClip = playingClip(
+			visual.animation,
+			0,
+			visual.animation.frameCount - 1,
+			visual.animation.framesPerSecond,
+			"loop",
+		);
+	}
+
 	/**
 	 * Drop compiled draw facts because a runtime event invalidated them.
 	 *
@@ -962,7 +1033,11 @@ export class WebGL2Renderer implements Renderer {
 			quality.minimumObjectFootprintCssPixelArea,
 			this.#renderScale,
 		);
+		// Capture before resizing the scene target: if a transition begins on the same frame as a
+		// drawing-buffer resize, the outgoing image is still the last completed native-sized frame.
+		this.#prepareTransitionSnapshot(input.portalTransition);
 		this.#applyRenderExtent(input.extent);
+		this.#activeTransition = input.portalTransition ?? null;
 		this.#resetFrameSelectionMetrics(
 			input.views.length,
 			input.frameSettings.envCellRenderMode,
@@ -1169,6 +1244,24 @@ export class WebGL2Renderer implements Renderer {
 			diagnostics?.activeFramebufferCount ?? 0;
 		this.#frameSelectionMetrics.portalTargetBytes =
 			diagnostics?.activeBytes ?? 0;
+		const transitionSnapshot = this.#transitionSnapshot?.getDiagnostics();
+		this.#frameSelectionMetrics.portalTransitionSnapshotBytes =
+			transitionSnapshot?.activeBytes ?? 0;
+		this.#frameSelectionMetrics.portalTransitionSnapshotAllocatedGenerationCount =
+			transitionSnapshot?.allocatedGenerationCount ?? 0;
+		this.#frameSelectionMetrics.portalTransitionSnapshotDisposedGenerationCount =
+			transitionSnapshot?.disposedGenerationCount ?? 0;
+		const transitionTarget = this.#portalTransitionTarget;
+		this.#frameSelectionMetrics.portalTransitionFramebufferCount =
+			transitionTarget?.activeFramebufferCount ?? 0;
+		this.#frameSelectionMetrics.portalTransitionTargetBytes =
+			transitionTarget?.activeBytes ?? 0;
+		this.#frameSelectionMetrics.portalTransitionVisualInstalled =
+			this.#portalTransitionVisual !== null;
+		this.#frameSelectionMetrics.portalTransitionGeneration =
+			this.#activeTransition?.generation ?? null;
+		this.#frameSelectionMetrics.portalTransitionPhase =
+			this.#activeTransition?.phase ?? null;
 		const flatTarget = this.#flatSceneTarget;
 		this.#frameSelectionMetrics.flatSceneFramebufferCount =
 			flatTarget?.activeFramebufferCount ?? 0;
@@ -1372,6 +1465,7 @@ export class WebGL2Renderer implements Renderer {
 		}
 		this.#submitBlendedPhase(view, objectPhases, shading, profile, pipeline);
 		this.#drawScopedParticles(view, particlesByScope, pipeline, profile);
+		this.#drawPortalTransitionTunnel(view, shading, target, profile);
 		this.#presentFlatScene(target, profile);
 	}
 
@@ -1384,6 +1478,14 @@ export class WebGL2Renderer implements Renderer {
 		this.#portalScopeAtlasPipeline = null;
 		this.#flatSceneTarget?.destroy();
 		this.#flatSceneTarget = null;
+		this.#transitionSnapshot?.destroy();
+		this.#transitionSnapshot = null;
+		this.#transitionSnapshotGeneration = null;
+		this.#activeTransition = null;
+		this.#portalTransitionTarget?.destroy();
+		this.#portalTransitionTarget = null;
+		this.#portalTransitionVisual = null;
+		this.#portalTransitionClip = null;
 		this.#flatScenePresentation?.destroy();
 		this.#flatScenePresentation = null;
 		this.#saoPass?.destroy();
@@ -1547,8 +1649,8 @@ export class WebGL2Renderer implements Renderer {
 		// One offset per visible landblock, not one per object: it is the same value for every
 		// object in a landblock. Submissions carry only their landblock id, so a cached static
 		// submission stays valid across re-anchoring and the frame never rewrites it.
-		const landblockOffsets = new Map<string, LandblockRenderOffset>();
-		const retainOffset = (landblockId: string): void => {
+		const landblockOffsets = new Map<LandblockOwnerId, LandblockRenderOffset>();
+		const retainOffset = (landblockId: LandblockOwnerId): void => {
 			if (landblockOffsets.has(landblockId)) return;
 			const offset = createLandblockOffset(
 				getLandblockCoordinates(landblockId),
@@ -2071,6 +2173,15 @@ export class WebGL2Renderer implements Renderer {
 		metrics.portalTruncatedViewCount = 0;
 		metrics.portalFramebufferCount = 0;
 		metrics.portalTargetBytes = 0;
+		metrics.portalTransitionSnapshotBytes = 0;
+		metrics.portalTransitionSnapshotAllocatedGenerationCount = 0;
+		metrics.portalTransitionSnapshotDisposedGenerationCount = 0;
+		metrics.portalTransitionFramebufferCount = 0;
+		metrics.portalTransitionTargetBytes = 0;
+		metrics.submittedPortalTransitionDrawCount = 0;
+		metrics.portalTransitionVisualInstalled = false;
+		metrics.portalTransitionGeneration = null;
+		metrics.portalTransitionPhase = null;
 		metrics.flatSceneFramebufferCount = 0;
 		metrics.flatSceneTargetBytes = 0;
 		metrics.flatSceneAllocatedGenerationCount = 0;
@@ -2423,7 +2534,179 @@ export class WebGL2Renderer implements Renderer {
 			1.0,
 		);
 		this.#gl.bindVertexArray(null);
+		this.#drawPortalTransitionTunnel(view, shading, target, profile);
 		this.#presentFlatScene(target, profile);
+	}
+
+	/**
+	 * Render the authored portal setup into a transition-only target before final presentation.
+	 *
+	 * The setup is placed in a virtual camera room using the retail camera facts rather than added
+	 * to the world scene. That keeps world authority and culling untouched while still exercising
+	 * the same compiled geometry, atlas bindings, material partitions, and animation sampler used
+	 * by ordinary setup visuals.
+	 */
+	#drawPortalTransitionTunnel(
+		view: PreparedView,
+		shading: SceneShading,
+		sceneTarget: WebGL2FlatSceneTargetSet,
+		profile: WebGL2FrameProfileCapture | null,
+	): void {
+		const transition = this.#activeTransition;
+		const visual = this.#portalTransitionVisual;
+		const clip = this.#portalTransitionClip;
+		if (
+			transition === null ||
+			transition.phase === "revealed-awaiting-handoff" ||
+			visual === null ||
+			clip === null
+		) {
+			this.#portalTransitionTarget?.destroy();
+			this.#portalTransitionTarget = null;
+			return;
+		}
+		const target = (this.#portalTransitionTarget ??= new WebGL2FlatSceneTarget(
+			this.#gl,
+		)).resizeDimensions(this.#frameWidth, this.#frameHeight);
+		const startedAt = profile?.beginCpuPhase();
+		try {
+			this.#beginPortalTransitionTarget(target);
+			// `animationFramePosition` is already a fractional cursor advanced at render cadence.
+			// The authored 40 fps rate belongs to traversal, not to the display refresh cap.
+			const framePosition = Math.max(0, transition.animationFramePosition ?? 0);
+			const partPoses = sampleAnimationPose(clip, framePosition);
+			const currentCameraWorld = multiplyMat4(
+				createTranslationMat4(view.cameraPosition),
+				createRotationMat4(view.camera.placement.rotation),
+			);
+			const portalView = createViewMat4(
+				new Vec3(0.24, -2.7, 0.88),
+				Quat.identity(),
+			);
+			const portalCameraWorld = multiplyMat4(currentCameraWorld, portalView);
+			const objects: PreparedObjectFrameInput[] = [];
+			for (const part of visual.template.parts) {
+				const pose = partPoses[part.partIndex];
+				if (!pose) {
+					throw new Error(
+						`Portal animation has no pose for setup part ${part.partIndex}.`,
+					);
+				}
+				const localToLandblock = multiplyMat4(
+					portalCameraWorld,
+					composeObjectPartTransform(
+						pose,
+						new Vec3(1, 1, 1),
+						part.defaultScale,
+					),
+				);
+				const bounds = part.localBounds;
+				const center = new Vec3(
+					bounds ? (bounds.min.x + bounds.max.x) / 2 : 0,
+					bounds ? (bounds.min.y + bounds.max.y) / 2 : 0,
+					bounds ? (bounds.min.z + bounds.max.z) / 2 : 0,
+				);
+				const transparentCenter = landblockVec3(
+					transformPoint3(localToLandblock, center),
+				);
+				for (const drawUnit of part.drawUnits) {
+					const geometry = this.#world.resolveGeometry(drawUnit.geometry);
+					const object: ObjectFrameInput = {
+						cullFaceOverride: null,
+						drawKind: "single",
+						geometry,
+						indexCount: drawUnit.indexCount,
+						indexStart: drawUnit.indexStart,
+						instances: null,
+						landblockId: view.anchorLandblockId,
+						localToLandblock,
+						material: drawUnit.material,
+						ordering: drawUnit.ordering,
+						renderScopeKey: PORTAL_TRANSITION_SCOPE,
+						source: "portal-transition",
+						transparentSort: {
+							center: transparentCenter,
+							stableId: `portal-transition/${part.partIndex}/${drawUnit.batchKey}`,
+						},
+					};
+					const compiled = this.#compiledDraws.resolveDraw(
+						drawUnit,
+						drawUnit.ordering,
+						() => this.#compileObjectDraw(object),
+					);
+					objects.push(createObjectSubmission(object, compiled));
+				}
+			}
+			const portalViewInput: PreparedView = {
+				...view,
+				landblockOffsets: new Map([[view.anchorLandblockId, [0, 0, 0]]]),
+				objects,
+				particles: [],
+				skyParticles: [],
+				terrain: [],
+			};
+			const portalShading: SceneShading = {
+				...shading,
+				authoredLightResponse: 0,
+				ambientOcclusion: { kind: "disabled" },
+				dynamicLights: [],
+				fog: null,
+				sky: null,
+				staticLights: () => EMPTY_LANDBLOCK_LIGHTS,
+				weatherEnabled: false,
+				lighting: resolveSceneLightingByRole(PORTAL_TRANSITION_LIGHTING),
+			};
+			const phases = this.#createObjectSubmissionPhases(
+				portalViewInput,
+				profile,
+			);
+			this.#drawOpaqueObjects(
+				portalViewInput,
+				phases.opaque,
+				portalShading,
+				profile,
+				null,
+			);
+			this.#drawBlendedObjects(
+				portalViewInput,
+				phases,
+				portalShading,
+				profile,
+				null,
+			);
+		} finally {
+			// The presenter samples the scene target next; restore its framebuffer and viewport even
+			// when an authored material fails loudly during this transition-only pass.
+			this.#gl.bindFramebuffer(
+				this.#gl.DRAW_FRAMEBUFFER,
+				sceneTarget.framebuffer,
+			);
+			this.#gl.viewport(
+				0,
+				0,
+				sceneTarget.extent.width,
+				sceneTarget.extent.height,
+			);
+			if (profile && startedAt !== undefined) {
+				profile.finishCpuPhase("portalComposition", startedAt);
+			}
+		}
+	}
+
+	/** Clear a tunnel target with transparent color so only authored pixels cover the world. */
+	#beginPortalTransitionTarget(target: WebGL2FlatSceneTargetSet): void {
+		const gl = this.#gl;
+		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, target.framebuffer);
+		gl.viewport(0, 0, target.extent.width, target.extent.height);
+		gl.colorMask(true, true, true, true);
+		gl.depthMask(true);
+		gl.disable(gl.BLEND);
+		gl.disable(gl.CULL_FACE);
+		gl.disable(gl.SCISSOR_TEST);
+		gl.disable(gl.STENCIL_TEST);
+		gl.clearColor(0, 0, 0, 0);
+		gl.clearDepth(1);
+		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 	}
 
 	/**
@@ -2455,14 +2738,97 @@ export class WebGL2Renderer implements Renderer {
 	): void {
 		const presentationGpu = profile?.beginGpuPhase("presentation") ?? null;
 		try {
+			const transition = this.#transitionPresentationInput();
 			(this.#flatScenePresentation ??= new WebGL2FlatScenePresentation(
 				this.#gl,
-			)).present(target, this.#frameColorGrade);
+			)).present(target, this.#frameColorGrade, transition);
 		} finally {
 			presentationGpu?.finish();
 		}
+		const activeTransition = this.#activeTransition;
+		if (
+			activeTransition === null ||
+			activeTransition.phase === "revealed-awaiting-handoff" ||
+			activeTransition.progress >= 1
+		) {
+			this.#transitionSnapshot?.clear();
+			this.#transitionSnapshotGeneration = null;
+			this.#portalTransitionTarget?.destroy();
+			this.#portalTransitionTarget = null;
+		}
 		// Presentation changes program and texture bindings outside the object-state mirror.
 		this.#beginObjectPhase();
+	}
+
+	/** Capture or retire transition-only resources at frame entry, before the scene target is drawn. */
+	#prepareTransitionSnapshot(transition: FrameInput["portalTransition"]): void {
+		if (
+			transition === undefined ||
+			transition.phase === "revealed-awaiting-handoff"
+		) {
+			this.#transitionSnapshot?.clear();
+			this.#transitionSnapshotGeneration = null;
+			return;
+		}
+		if (
+			!Number.isSafeInteger(transition.generation) ||
+			transition.generation < 0
+		) {
+			throw new Error(
+				"Portal transition generation must be a non-negative safe integer.",
+			);
+		}
+		if (
+			!Number.isFinite(transition.progress) ||
+			transition.progress < 0 ||
+			transition.progress > 1
+		) {
+			throw new Error("Portal transition progress must be within [0, 1].");
+		}
+		if (this.#transitionSnapshotGeneration !== transition.generation) {
+			this.#transitionSnapshot?.clear();
+			this.#transitionSnapshotGeneration = transition.generation;
+		}
+		if (!transition.outgoingAvailable) {
+			this.#transitionSnapshot?.clear();
+			return;
+		}
+		const source = this.#flatSceneTarget?.getCurrentTarget();
+		if (source === null || source === undefined) return;
+		const existing = this.#transitionSnapshot?.getCurrentTarget();
+		if (existing !== null && existing !== undefined) {
+			// The outgoing image is the last completed frame, not the incoming frame currently
+			// being drawn. Keep the first capture stable for the whole transition generation. Its
+			// native extent is intentional: the fullscreen compositor samples normalized UVs, so a
+			// resize can preserve this useful warp source without an intermediate reallocation.
+			return;
+		}
+		(this.#transitionSnapshot ??= new WebGL2TransitionSnapshot(
+			this.#gl,
+		)).capture(source.framebuffer, source.extent);
+	}
+
+	/** Convert renderer-owned snapshot state into the final presenter input. */
+	#transitionPresentationInput(): FlatSceneTransitionInput | undefined {
+		const transition = this.#activeTransition;
+		if (transition === null) return undefined;
+		const snapshot = this.#transitionSnapshot?.getCurrentTarget();
+		const tunnel = this.#portalTransitionTarget?.getCurrentTarget();
+		if (snapshot === null && tunnel === null) return undefined;
+		const tunnelOpacity =
+			tunnel === null
+				? 0
+				: transition.phase === "exiting"
+					? 1 - transition.progress
+					: transition.phase === "revealed-awaiting-handoff"
+						? 0
+						: 1;
+		return {
+			outgoingScene: snapshot?.texture ?? null,
+			progress: transition.progress,
+			tunnelOpacity,
+			tunnelScene: tunnel?.color ?? null,
+		};
 	}
 
 	/** Bind and clear one complete flat-scene target before any world submission. */
@@ -3501,6 +3867,8 @@ export class WebGL2Renderer implements Renderer {
 			this.#frameSelectionMetrics.submittedDynamicDrawCount += 1;
 			this.#frameSelectionMetrics.submittedDynamicInstanceCount +=
 				submittedInstanceCount;
+		} else if (object.source === "portal-transition") {
+			this.#frameSelectionMetrics.submittedPortalTransitionDrawCount += 1;
 		} else {
 			this.#frameSelectionMetrics.submittedStaticObjectDrawCount += 1;
 			this.#frameSelectionMetrics.submittedStaticObjectTriangleCount +=
@@ -3518,7 +3886,11 @@ export class WebGL2Renderer implements Renderer {
 			this.#frameSelectionMetrics.submittedEnvCellResidentTriangleCount +=
 				sourceTriangleCount * submittedInstanceCount;
 		}
-		if (object.drawKind === "single" && object.source !== "dynamic") {
+		if (
+			object.drawKind === "single" &&
+			object.source !== "dynamic" &&
+			object.source !== "portal-transition"
+		) {
 			this.#frameSelectionMetrics.submittedBakedStaticObjectDrawCount += 1;
 			this.#frameSelectionMetrics.submittedBakedStaticObjectTriangleCount +=
 				sourceTriangleCount;
@@ -3527,7 +3899,7 @@ export class WebGL2Renderer implements Renderer {
 				object.localToLandblock,
 				compatibility,
 			);
-		} else {
+		} else if (object.source !== "portal-transition") {
 			this.#frameSelectionMetrics.submittedInstancedSourceTriangleCount +=
 				sourceTriangleCount;
 		}
@@ -3601,7 +3973,10 @@ export class WebGL2Renderer implements Renderer {
 		}
 		// Interior geometry already carries its static lighting in baked vertex colours, so it
 		// binds an empty set rather than the landblock's outdoor lamps.
-		const scope = role === "interior-object" ? null : object.landblockId;
+		const scope =
+			role === "interior-object" || object.source === "portal-transition"
+				? null
+				: object.landblockId;
 		if (!this.#objectState.applyStaticLightScope(scope)) return;
 		bindWebGL2StaticLights(
 			this.#gl,
@@ -3622,7 +3997,7 @@ export class WebGL2Renderer implements Renderer {
 	 */
 	#resolveStaticLights(
 		input: FrameInput,
-		landblockId: LandblockId,
+		landblockId: LandblockOwnerId,
 		sceneCameraPosition: SceneVec3,
 	): LandblockLights {
 		if (!input.frameSettings.staticLightsEnabled) {

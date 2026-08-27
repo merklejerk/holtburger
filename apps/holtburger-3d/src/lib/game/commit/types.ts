@@ -1,4 +1,4 @@
-import type { LandblockId } from "../game-types";
+import type { LandblockOwnerId } from "../game-types";
 import type { ResolvedOutdoorStaticLayerSource } from "../resolution/landblock-layer";
 import type {
 	LandblockIdLayer,
@@ -43,7 +43,7 @@ export interface LandblockLayerCommitFields<
 	TLayerKind extends LandblockLayerKind,
 	TLayerCommit,
 > {
-	landblockId: LandblockId;
+	landblockId: LandblockOwnerId;
 	layer: TLayerKind;
 	commit: TLayerCommit;
 }

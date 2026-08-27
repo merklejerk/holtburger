@@ -102,6 +102,11 @@ export class WebGL2FlatSceneTarget {
 		};
 	}
 
+	/** Current target for renderer-local transition capture; null before the first scene frame. */
+	getCurrentTarget(): WebGL2FlatSceneTargetSet | null {
+		return this.#target;
+	}
+
 	/** Release the active generation exactly once. */
 	destroy(): void {
 		if (this.#destroyed) return;

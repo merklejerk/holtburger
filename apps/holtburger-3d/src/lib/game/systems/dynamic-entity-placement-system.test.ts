@@ -8,6 +8,7 @@ import type {
 	DynamicEntityView,
 	DynamicEntityWorldPlacement,
 } from "../runtime/dynamic-entity-feed";
+import { cellId } from "../runtime/dynamic-entity-feed";
 
 describe("DynamicEntityPlacementSystem", () => {
 	it("atomically updates only roots it created and retires their ownership", () => {
@@ -140,12 +141,12 @@ describe("DynamicEntityPlacementSystem", () => {
 		const crossing = advance(0, 10);
 		crossing.path.initial.spatialMembership = {
 			reachesOutdoors: true,
-			reachedEnvCellIds: [0x01020100],
+			reachedEnvCellIds: [cellId(0x01020100)],
 		};
-		crossing.path.legs[0]!.end.pose.landblockId = 0x01020100;
+		crossing.path.legs[0]!.end.pose.landblockId = cellId(0x01020100);
 		crossing.path.legs[0]!.end.spatialMembership = {
 			reachesOutdoors: false,
-			reachedEnvCellIds: [0x01020100],
+			reachedEnvCellIds: [cellId(0x01020100)],
 		};
 
 		placements.applyPath(root, crossing, 100, 1_000);
@@ -221,7 +222,7 @@ function dynamicEntity(
 			omega: { x: 0, y: 0, z: 0 },
 			pose: {
 				coords: { x, y: 0, z: 0 },
-				landblockId: 0x0102_0001,
+				landblockId: cellId(0x0102_0001),
 				rotation: { w: 1, x: 0, y: 0, z: 0 },
 			},
 			sampleMode: "simulating-velocity",

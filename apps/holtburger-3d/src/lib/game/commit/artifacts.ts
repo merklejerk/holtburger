@@ -4,7 +4,7 @@ import type {
 	ObjectGeometryKey,
 	PortalGeometryKey,
 } from "../geometry/types";
-import type { LandblockId } from "../game-types";
+import type { LandblockOwnerId } from "../game-types";
 import type { AABB3 } from "../math/types";
 import type { LandblockVec3 } from "../../assets/ac-frame";
 import type { ObjectMaterialOrdering } from "../resolution/object-material-planner";
@@ -210,7 +210,7 @@ export interface PortalDrawUnit {
 	readonly indexStart: number;
 	readonly indexCount: number;
 	/** Landblock frame containing the already-transformed aperture positions. */
-	readonly landblockId: LandblockId;
+	readonly landblockId: LandblockOwnerId;
 }
 
 /** Bounded cell-shell presentation published as a scene resident. */

@@ -1,4 +1,4 @@
-import type { LandblockId } from "../game-types";
+import type { LandblockOwnerId } from "../game-types";
 import type {
 	PortalApertureId,
 	ResolvedPortalCrossing,
@@ -6,7 +6,7 @@ import type {
 
 /** Qualify one HBEC-local aperture identity for global SceneGraph/resource ownership. */
 export function qualifyPortalApertureId(
-	landblockId: LandblockId,
+	landblockId: LandblockOwnerId,
 	id: PortalApertureId,
 ): PortalApertureId {
 	return `portal-aperture:${landblockId}/${id.slice("portal-aperture:".length)}`;
@@ -14,7 +14,7 @@ export function qualifyPortalApertureId(
 
 /** Qualify one HBEC-local directed crossing identity for global SceneGraph ownership. */
 export function qualifyPortalCrossingId(
-	landblockId: LandblockId,
+	landblockId: LandblockOwnerId,
 	id: ResolvedPortalCrossing["id"],
 ): ResolvedPortalCrossing["id"] {
 	return `portal-crossing:${landblockId}/${id.slice("portal-crossing:".length)}`;
@@ -29,7 +29,7 @@ export function qualifyPortalCrossingId(
  * the identity deterministic and stateless; zero remains "no junction" on the GPU.
  */
 export function qualifyJunctionGroupId(
-	landblockId: LandblockId,
+	landblockId: LandblockOwnerId,
 	junctionGroupId: number | null,
 ): number | null {
 	if (junctionGroupId === null) return null;

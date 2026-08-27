@@ -1,4 +1,4 @@
-import type { LandblockId } from "../game/game-types";
+import type { LandblockOwnerId } from "../game/game-types";
 import { normalizeLandblockOwner } from "../game/landblocks";
 import {
 	decodeLandblockProfile,
@@ -21,7 +21,7 @@ export class LandblockProfileHostSource implements LandblockProfileSource {
 	}
 
 	async loadLandblockProfile(
-		landblockId: LandblockId,
+		landblockId: LandblockOwnerId,
 	): Promise<LandblockProfile | null> {
 		if (this.#destroyed) {
 			throw new Error(

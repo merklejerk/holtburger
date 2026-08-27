@@ -8,7 +8,7 @@ import {
 	type SceneVector3,
 } from "../../assets/ac-frame";
 import type { TexturePixelSource } from "../../assets/texture-pixel-source";
-import type { DynamicEntityVisualSource } from "../../assets/dynamic-entity-visual-source";
+import type { SetupVisualSource } from "../../assets/setup-visual-source";
 import type { DecodedStaticPresentation } from "../../assets/decode-static-source-record";
 import type { AnimationAssetSource } from "../../assets/animation-asset-source";
 import type { SkySourcePresentations } from "../../assets/decode-sky-record";
@@ -22,7 +22,7 @@ import type {
 	StaticObjectGeometryDiagnostics,
 	StaticObjectLayerDiagnostics,
 } from "../commit/artifacts";
-import { INVALID_ID, type EnvCellId, type LandblockId } from "../game-types";
+import type { EnvCellId, LandblockOwnerId } from "../game-types";
 import { GeometryManager } from "../geometry/geometry-manager";
 import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
 import { AABB3, Mat4, Quat, Vec3 } from "../math/types";
@@ -30,6 +30,7 @@ import type { BakedDrawMergeCensus } from "../renderer/baked-draw-merge-census";
 import {
 	DEFAULT_FRAME_SETTINGS,
 	type FrameSettings,
+	type PortalTransitionFrame,
 	type Renderer,
 	type RendererFrameDiagnosticsSnapshot,
 } from "../renderer/renderer";
@@ -62,6 +63,7 @@ import { DynamicEntityPlacementSystem } from "../systems/dynamic-entity-placemen
 import {
 	InlineObjectVisualTemplatePreparer,
 	ObjectVisualTemplateRepository,
+	type ObjectVisualTemplateRepositoryDiagnostics,
 } from "../systems/object-visual-template-repository";
 import { EnvCellSystem } from "../systems/env-cell-system";
 import { AnimationSystem } from "../systems/animation-system";
@@ -78,6 +80,7 @@ import { ParticleMeshCache } from "../behavior/particle-mesh-cache";
 import type { ParticleMeshSource } from "../../assets/particle-mesh-source";
 import type { SoundTableSource } from "../../assets/sound-table-source";
 import type { DecodedSoundTable } from "../../assets/decode-sound-table-record";
+import type { PortalTransitionAssets } from "../../client/portal-transition-assets";
 import { selectSoundCandidate } from "../../assets/decode-sound-table-record";
 import {
 	SKY_PARTICLE_RENDER_OWNER,
@@ -155,7 +158,8 @@ import {
 	activeRegionResourceToOwnerId,
 	type ActiveRegionResourceOwnerId,
 	dynamicGenerationToResourceOwnerId,
-	type DynamicGenerationResourceOwnerId,
+	type DynamicPresentationResourceOwnerId,
+	PORTAL_TRANSITION_RESOURCE_OWNER_ID,
 	landblockLayerToOwnerId,
 	parseLandblockLayerOwnerId,
 	type ResourceOwnerId,
@@ -191,8 +195,21 @@ import type {
 	DynamicEntityPlayingClip,
 	DynamicEntityView,
 } from "./dynamic-entity-feed";
-import { playingClip } from "../animation/animation-playback";
-import type { PlacedDynamicPresentationSource } from "../systems/dynamic-presentation-source";
+import {
+	advancePlayingFrame,
+	clipEntryFrame,
+	playingClip,
+	type PlayingClip,
+} from "../animation/animation-playback";
+import { prepareAnimation } from "../animation/animation-asset-repository";
+import type {
+	DynamicPresentationSource,
+	PlacedDynamicPresentationSource,
+} from "../systems/dynamic-presentation-source";
+import {
+	objectVisualTemplateKey,
+	type ObjectVisualTemplate,
+} from "../systems/object-visual-template-repository";
 import {
 	computeOutdoorSceneInterest,
 	computeDungeonSceneInterest,
@@ -219,6 +236,9 @@ import type {
 	RuntimeTickProfiler,
 } from "./runtime-tick-profiler";
 import type {
+	SceneActivationRequest,
+	SceneActivationReceipt,
+	SceneActivationStatus,
 	SceneAvailabilityEvent,
 	SceneAvailabilityListener,
 	SceneInterestReceipt,
@@ -245,7 +265,7 @@ const DEFAULT_CAMERA: Camera = {
 	fov: 90,
 	placement: {
 		envCellId: null,
-		landblockId: INVALID_ID,
+		landblockId: "0xffffffff",
 		position: sceneVec3(Vec3.zero()),
 		rotation: Quat.identity(),
 	},
@@ -287,7 +307,7 @@ export interface GamePresentationRuntimeDependencies {
 	readonly soundTableSource: SoundTableSource;
 	readonly particleMeshSource: ParticleMeshSource;
 	/** Optional live-entity visual capability; null for runtimes that never consume a focused feed. */
-	readonly dynamicEntityVisualSource: DynamicEntityVisualSource | null;
+	readonly setupVisualSource: SetupVisualSource | null;
 	readonly terrainGenerator: TerrainGenerator;
 	readonly texturePreparer: TexturePreparer;
 	readonly staticGeometryPreparer: StaticLayerGeometryPreparer<
@@ -373,7 +393,7 @@ interface CachedDynamicVisual {
 /** One activated authored-dynamic resident or valid static visual fallback. */
 export interface AuthoredDynamicResidentDiagnostic {
 	readonly layer: LandblockLayerKind;
-	readonly landblockId: LandblockId;
+	readonly landblockId: LandblockOwnerId;
 	readonly residentId: string;
 	readonly setupSourceId: string;
 	readonly defaultAnimationId: string | null;
@@ -391,7 +411,7 @@ export interface StaticObjectLayerRuntimeDiagnostics extends StaticObjectLayerDi
 	/** Concrete SceneGraph culling group selected for this independently installed layer. */
 	readonly cullingGroup: OutdoorStaticLayerKind;
 	readonly layer: OutdoorStaticLayerKind;
-	readonly landblockId: LandblockId;
+	readonly landblockId: LandblockOwnerId;
 	/** Scene nodes published by this exact layer revision. */
 	readonly sceneNodeCount: number;
 	/** Promoted residents owned by the authored dynamic runtime. */
@@ -428,6 +448,43 @@ export interface StaticObjectRuntimeDiagnostics {
 	readonly textureAtlasPages: readonly TextureAtlasPageDiagnostics[];
 }
 
+/** Runtime-owned authored portal closure and transition-resource diagnostics. */
+export interface PortalTransitionRuntimeDiagnostics {
+	/** Whether the required setup/animation/sound closure is installed. */
+	readonly installed: boolean;
+	/** Exact source envelopes, with null reserved for injected sources that cannot report bytes. */
+	readonly sourceBytes: PortalTransitionAssets["sourceBytes"] | null;
+	/** Direct playback cursor facts, or null before the closure is installed. */
+	readonly animation: {
+		readonly frameCount: number;
+		readonly framePosition: number;
+		readonly framesPerSecond: number;
+		readonly id: DatAssetId;
+		readonly partCount: number;
+	} | null;
+	/** Current transition edge and generation, or null while no transition is active. */
+	readonly transition: {
+		readonly generation: number;
+		readonly phase: PortalTransitionFrame["phase"];
+		readonly progress: number;
+	} | null;
+	/** Shared persistent resource totals; transition resources remain in renderer metrics. */
+	readonly persistent: {
+		readonly geometryResourceBytes: number;
+		readonly geometryResourceCount: number;
+		readonly textureAtlasPageBytes: number;
+		readonly textureAtlasPageCount: number;
+		readonly textureSourceBytes: number;
+	};
+	/** Template preparation state and owner count for the shared visual repository. */
+	readonly templates: ObjectVisualTemplateRepositoryDiagnostics;
+	/** Number of retained portal closure resources (one template owner and three wave buffers). */
+	readonly outstandingHandles: {
+		readonly portalTemplateOwner: number;
+		readonly portalWaveBuffers: number;
+	};
+}
+
 /** One realized EnvCell source plan plus worker consumption facts. */
 export interface EnvCellLayerRuntimeDiagnostics
 	extends EnvCellMaterializationDiagnostics, StaticObjectGeometryDiagnostics {
@@ -437,7 +494,7 @@ export interface EnvCellLayerRuntimeDiagnostics
 	readonly indoorTopologyBoundaryCrossingCount: number;
 	/** Directed indoor/outdoor transitions that always retain a scene-domain boundary. */
 	readonly exteriorTransitionCrossingCount: number;
-	readonly landblockId: LandblockId;
+	readonly landblockId: LandblockOwnerId;
 	/** Total authored potentially-visible EnvCell references across resident scopes. */
 	readonly potentiallyVisibleReferenceCount: number;
 	readonly sceneShellNodeCount: number;
@@ -497,12 +554,14 @@ export class GamePresentationRuntime {
 		EnvCellRealizationArtifact,
 		OwnerId
 	>;
-	/** Dynamic roots, articulated part nodes, and presentation preparation. */
-	readonly #dynamics: DynamicEntitySystem<
-		DynamicOwnerId,
-		DynamicGenerationResourceOwnerId
+	/** Shared visual-template residency for authored dynamics and the portal transition object. */
+	readonly #objectVisualTemplates: ObjectVisualTemplateRepository<
+		DynamicPresentationResourceOwnerId,
+		AtlasRequirementHandle<ResourceOwnerId>
 	>;
-	readonly #dynamicEntityVisualSource: DynamicEntityVisualSource | null;
+	/** Dynamic roots, articulated part nodes, and presentation preparation. */
+	readonly #dynamics: DynamicEntitySystem<DynamicOwnerId, ResourceOwnerId>;
+	readonly #setupVisualSource: SetupVisualSource | null;
 	/** Latest desired current views are liveness tokens and late-readiness endpoints, not authority. */
 	readonly #spawnedDesiredEntities = new Map<number, DynamicEntityView>();
 	/** Installed frontend resources keyed by producer identity. */
@@ -555,6 +614,8 @@ export class GamePresentationRuntime {
 	#audioListenerPosition: SceneVector3 = sceneVector3([0, 0, 0]);
 	/** Environment cell the listener occupies, or null for outdoor terrain. */
 	#audioListenerEnvCellId: EnvCellId | null = null;
+	/** Whether the current mode owns listener/audio presentation for this frame. */
+	#audioListenerEnabled = false;
 	/** Region ambient facts, installed once per active region; `null` before one is installed. */
 	#ambientRegion: AmbientRegionResolution | null = null;
 	/** Baked sound-authoring ground per installed landblock, reconciled by terrain revision. */
@@ -787,6 +848,15 @@ export class GamePresentationRuntime {
 	#environment: ResolvedSceneEnvironment = DEFAULT_ENVIRONMENT;
 	/** Frontend-selected dynamic display choices forwarded unchanged to each frame. */
 	#frameSettings: FrameSettings = DEFAULT_FRAME_SETTINGS;
+	/** Presentation-only transition input consumed by the renderer's final-frame compositor. */
+	#portalTransition: PortalTransitionFrame | undefined;
+	/** Prepared authored portal closure retained until runtime teardown. */
+	#portalTransitionAssets: PortalTransitionAssets | null = null;
+	/** Authored 40fps traversal sampled at render cadence for the portal's setup and sound hooks. */
+	#portalTransitionClip: PlayingClip | null = null;
+	#portalTransitionFramePosition = 0;
+	#portalTransitionAnimationGeneration: number | null = null;
+	#portalTransitionLastTimeSeconds: number | null = null;
 	/**
 	 * Spawned entity carrying the viewer light, or null while the camera carries it itself.
 	 *
@@ -801,6 +871,13 @@ export class GamePresentationRuntime {
 	#sceneInterest: SceneInterestMap = new Map();
 	/** Last resolved target accepted by this runtime, for diagnostics and consumer policy. */
 	#resolvedSceneInterestTarget: ResolvedSceneInterestTarget | null = null;
+	/** One source-neutral replacement barrier layered over the ordinary interest coordinator. */
+	#sceneActivation: SceneActivationReceipt | null = null;
+	/** Exact layer failures retained until the owning interest revision is withdrawn. */
+	readonly #sceneLayerFailures = new Map<
+		string,
+		{ readonly revision: SceneInterestRevision; readonly diagnostic: string }
+	>();
 	/** Prevents new work and late async publication after runtime shutdown begins. */
 	#destroyed = false;
 
@@ -810,7 +887,7 @@ export class GamePresentationRuntime {
 		dependencies: GamePresentationRuntimeDependencies,
 	) {
 		this.#tickProfiler = dependencies.tickProfiler;
-		this.#dynamicEntityVisualSource = dependencies.dynamicEntityVisualSource;
+		this.#setupVisualSource = dependencies.setupVisualSource;
 		this.#terrainGenerator = dependencies.terrainGenerator;
 		this.#texturePreparer = dependencies.texturePreparer;
 		this.#geometry = new GeometryManager<ResourceOwnerId>(renderResources);
@@ -1009,17 +1086,18 @@ export class GamePresentationRuntime {
 			partFrameOf: (target, partIndex) => this.#partFrameOf(target, partIndex),
 			roll: dependencies.roll ?? Math.random,
 		});
+		this.#objectVisualTemplates = new ObjectVisualTemplateRepository<
+			DynamicPresentationResourceOwnerId,
+			AtlasRequirementHandle<ResourceOwnerId>
+		>(
+			this.#geometry,
+			this.#residentAtlas,
+			new InlineObjectVisualTemplatePreparer(),
+		);
 		this.#dynamics = new DynamicEntitySystem(
 			this.#scene,
 			this.#dynamicPlacements,
-			new ObjectVisualTemplateRepository<
-				DynamicGenerationResourceOwnerId,
-				AtlasRequirementHandle<ResourceOwnerId>
-			>(
-				this.#geometry,
-				this.#residentAtlas,
-				new InlineObjectVisualTemplatePreparer(),
-			),
+			this.#objectVisualTemplates,
 			new AnimationAssetRepository(dependencies.animationSource),
 			this.#physicsScripts,
 			this.#particleEmitters,
@@ -1048,7 +1126,8 @@ export class GamePresentationRuntime {
 				),
 			listenerHearsOutdoors: () => this.#ambientListenerSeenOutside(),
 			listenerPosition: () => this.#audioListenerPosition,
-			play: (trigger) => this.#audio.trigger(trigger),
+			play: (trigger) =>
+				this.#audioListenerEnabled ? this.#audio.trigger(trigger) : "inaudible",
 			resolveSound: (soundTableId, soundType) =>
 				this.#resolveAmbientSound(soundTableId, soundType),
 			roll: dependencies.roll ?? Math.random,
@@ -1062,6 +1141,7 @@ export class GamePresentationRuntime {
 			{
 				audio: {
 					playSound: (target, sound) => {
+						if (!this.#audioListenerEnabled) return "suppressed";
 						// The emitting node's world position is sampled once at trigger time, as
 						// retail samples it; the voice then tracks the listener from that fixed
 						// point rather than following the emitter.
@@ -1078,6 +1158,7 @@ export class GamePresentationRuntime {
 						return outcome === "played" ? "played" : "suppressed";
 					},
 					playSoundTableKey: (target, soundType) => {
+						if (!this.#audioListenerEnabled) return "suppressed";
 						const table = this.#targetSoundTables.get(target.targetId);
 						const candidates = table?.entries.get(soundType);
 						// Retail's miss is a silent no-op; reporting it keeps a missing table and a
@@ -1218,7 +1299,7 @@ export class GamePresentationRuntime {
 		particleEmitterSource: ParticleEmitterSource,
 		soundTableSource: SoundTableSource,
 		particleMeshSource: ParticleMeshSource,
-		dynamicEntityVisualSource: DynamicEntityVisualSource | null,
+		setupVisualSource: SetupVisualSource | null,
 		roll?: UniformRoll,
 		tickProfiler?: RuntimeTickProfiler,
 		workerFactories?: GamePresentationRuntimeWorkerFactories,
@@ -1240,7 +1321,7 @@ export class GamePresentationRuntime {
 				particleEmitterSource,
 				physicsScriptSource,
 				particleMeshSource,
-				dynamicEntityVisualSource,
+				setupVisualSource,
 				roll,
 				soundTableSource,
 				tickProfiler,
@@ -1279,13 +1360,12 @@ export class GamePresentationRuntime {
 			throw new Error(
 				"Cannot reconcile spawned entities after runtime shutdown.",
 			);
-		if (this.#dynamicEntityVisualSource === null && entities.length > 0) {
-			throw new Error(
-				"This runtime has no dynamic-entity visual source capability.",
-			);
+		if (this.#setupVisualSource === null && entities.length > 0) {
+			throw new Error("This runtime has no setup visual source capability.");
 		}
+		const candidates = this.#selectDynamicReconciliationCandidates(entities);
 		const requested = new Map<number, DynamicEntityView>();
-		for (const entity of entities) {
+		for (const entity of candidates) {
 			const guid = entity.identity.guid;
 			if (requested.has(guid))
 				throw new Error(
@@ -1342,7 +1422,11 @@ export class GamePresentationRuntime {
 					"Dynamic reconciliation outcome lost its request identity.",
 				);
 			}
-			return [dynamicEntityPresentationFailure(request.entity, outcome.reason)];
+			const failure = dynamicEntityPresentationFailure(
+				request.entity,
+				outcome.reason,
+			);
+			return [failure];
 		});
 		if (failures.length === 1) throw failures[0];
 		if (failures.length > 1) {
@@ -1351,6 +1435,143 @@ export class GamePresentationRuntime {
 				`${failures.length} dynamic entities failed presentation reconciliation.`,
 			);
 		}
+	}
+
+	/**
+	 * Replace the current scene with one generation-scoped destination installation.
+	 *
+	 * This deliberately layers over the existing interest coordinator: static preparation, worker
+	 * ownership, eviction, and dynamic realization remain the same machinery used by continuous
+	 * streaming. The receipt returned here is a different contract from `SceneInterestReceipt` —
+	 * it names the exact products that must become resident before a transition may reveal them.
+	 */
+	async activateScene(
+		request: SceneActivationRequest,
+	): Promise<SceneActivationReceipt> {
+		if (!Number.isInteger(request.generation) || request.generation < 0) {
+			throw new Error(
+				"Scene activation generation must be a non-negative integer.",
+			);
+		}
+		if (this.#destroyed)
+			throw new Error("Cannot activate a scene after runtime shutdown.");
+		const interest = this.updateSceneInterest(request.target);
+		const receipt: SceneActivationReceipt = {
+			generation: request.generation,
+			revision: interest.revision,
+			requiredLayers: cloneSceneInterest(this.#sceneInterest),
+		};
+		this.#sceneActivation = receipt;
+		return receipt;
+	}
+
+	/** Poll exact installation products without exposing scene-private maps or resource leases. */
+	sceneActivationStatus(
+		receipt: SceneActivationReceipt,
+	): SceneActivationStatus {
+		if (this.#sceneActivation !== receipt) {
+			return {
+				kind: "failed",
+				receipt,
+				diagnostic: "Scene activation was superseded by a newer destination.",
+			};
+		}
+		for (const [landblockId, layers] of receipt.requiredLayers) {
+			for (const layer of layers) {
+				const failure = this.#sceneLayerFailures.get(
+					sceneLayerKey(landblockId, layer),
+				);
+				if (failure?.revision === receipt.revision) {
+					return {
+						kind: "failed",
+						receipt,
+						diagnostic: failure.diagnostic,
+					};
+				}
+				if (!this.#isSceneLayerInstalled(landblockId, layer)) {
+					return { kind: "pending", receipt };
+				}
+			}
+		}
+		return { kind: "ready", receipt };
+	}
+
+	/** Release the replacement barrier after the mode-specific handoff has completed. */
+	completeSceneActivation(generation: number): void {
+		if (this.#sceneActivation?.generation !== generation) return;
+		this.#sceneActivation = null;
+	}
+
+	/** Select every dynamic entity whose producer-projected scopes are currently resident. */
+	#selectDynamicReconciliationCandidates(
+		entities: readonly DynamicEntityView[],
+	): readonly DynamicEntityView[] {
+		// Focused dynamic-runtime consumers may exercise presentation before static interest exists;
+		// there is no installed scope to classify against in that composition. Production client and
+		// Explorer handoff paths always install their activation/interest set first.
+		if (this.#sceneInterest.size === 0) return entities;
+
+		const byGuid = new Map(
+			entities.map((entity) => [entity.identity.guid, entity]),
+		);
+		const eligible = new Set<number>();
+		for (const entity of entities) {
+			if (
+				entity.placement.kind === "world" &&
+				this.#isDynamicScopeReady(entity)
+			)
+				eligible.add(entity.identity.guid);
+		}
+		let changed = true;
+		while (changed) {
+			changed = false;
+			for (const entity of entities) {
+				if (
+					entity.placement.kind === "attached" &&
+					eligible.has(entity.placement.parent) &&
+					!eligible.has(entity.identity.guid) &&
+					byGuid.has(entity.placement.parent)
+				) {
+					eligible.add(entity.identity.guid);
+					changed = true;
+				}
+			}
+		}
+		return entities.filter((entity) => eligible.has(entity.identity.guid));
+	}
+
+	/** A world-root dynamic is drawable only when every producer-projected scope is resident. */
+	#isDynamicScopeReady(entity: DynamicEntityView): boolean {
+		if (entity.placement.kind !== "world") return false;
+		// Use the same canonical placement projection used to install the entity. Host poses name
+		// exact cells, while terrain residency names their FFFF landblock owner; comparing those raw
+		// identities evicts an outdoor entity immediately after its activation barrier is released.
+		const placement = dynamicEntityPlacement(entity);
+		for (const scope of placement.spatialMembership.scopes) {
+			if (scope.kind === "outdoor") {
+				if (!this.#terrain.hasResidentDrawUnit(placement.landblockId))
+					return false;
+				continue;
+			}
+			if (!this.#scene.hasEnvCellScope(scope)) return false;
+		}
+		return true;
+	}
+
+	/** Check one exact static layer's published product, never a source or request revision. */
+	#isSceneLayerInstalled(
+		landblockId: LandblockOwnerId,
+		layer: LandblockLayerKind,
+	): boolean {
+		if (layer === LandblockLayerKind.Terrain)
+			return this.#terrain.hasResidentDrawUnit(landblockId);
+		if (layer === LandblockLayerKind.EnvCells)
+			return this.#envCellLayerDiagnostics.has(
+				landblockLayerToOwnerId(landblockId, layer),
+			);
+		return this.#staticObjectLayerDiagnostics.has(
+			landblockLayerToOwnerId(landblockId, layer),
+		);
 	}
 
 	/** Apply one accepted host tick without re-running asynchronous visual reconciliation. */
@@ -1564,12 +1785,15 @@ export class GamePresentationRuntime {
 		this.#spawnedVisualKeys.set(guid, visualKey);
 		let cached = this.#spawnedVisuals.get(visualKey);
 		if (cached === undefined) {
-			const source = this.#dynamicEntityVisualSource;
+			const source = this.#setupVisualSource;
 			if (source === null)
 				throw new Error(
-					"This runtime has no dynamic-entity visual source capability.",
+					"This runtime has no SetupModel visual source capability.",
 				);
-			const completion = source.load(entity.presentation);
+			const completion = source.load(
+				entity.presentation.content.setupDid,
+				entity.presentation.appearance,
+			);
 			cached = { completion, users: new Set() };
 			this.#spawnedVisuals.set(visualKey, cached);
 			void completion.catch(() => {
@@ -1642,6 +1866,7 @@ export class GamePresentationRuntime {
 		this.#terrainFogCoverage = null;
 		this.#sceneInterest = new Map();
 		this.#resolvedSceneInterestTarget = null;
+		this.#sceneActivation = null;
 		return this.#applySceneInterest(this.#sceneInterest);
 	}
 
@@ -1672,12 +1897,21 @@ export class GamePresentationRuntime {
 	/**
 	 * Place the audio listener, in canonical scene space.
 	 *
-	 * Deliberately a frontend input rather than something derived from the primary camera. Where
+	 * Passing `null` withdraws listener ownership and fades existing voices while a mode is in
+	 * portal-space staging. Otherwise this is deliberately a frontend input rather than something
+	 * derived from the primary camera. Where
 	 * the ears are is a client decision: a game client puts them on the player, while the explorer
 	 * flies a free camera and may want them somewhere else entirely. The runtime owns the frame
 	 * conversion and the retail spatial maths, not the choice.
 	 */
-	setAudioListener(placement: AudioListenerPlacement): void {
+	setAudioListener(placement: AudioListenerPlacement | null): void {
+		if (placement === null) {
+			this.#audioListenerEnabled = false;
+			this.#audioListenerPosition = sceneVector3([0, 0, 0]);
+			this.#audioListenerEnvCellId = null;
+			this.#audio.silence();
+			return;
+		}
 		const { envCellId, position, rotation } = placement;
 		if (
 			!position.every(Number.isFinite) ||
@@ -1697,6 +1931,7 @@ export class GamePresentationRuntime {
 				2 * (x * z - w * y),
 			]),
 		});
+		this.#audioListenerEnabled = true;
 	}
 
 	/**
@@ -1896,6 +2131,175 @@ export class GamePresentationRuntime {
 		this.#frameSettings = settings;
 	}
 
+	/** Update the app-local portal compositor state without touching authority or scene demand. */
+	setPortalTransition(transition: PortalTransitionFrame | undefined): void {
+		if (transition === undefined) {
+			this.#portalTransition = undefined;
+			this.#portalTransitionAnimationGeneration = null;
+			this.#portalTransitionFramePosition = 0;
+			this.#portalTransitionLastTimeSeconds = null;
+			return;
+		}
+		if (
+			!Number.isSafeInteger(transition.generation) ||
+			transition.generation < 0
+		) {
+			throw new Error(
+				"Portal transition generation must be a non-negative safe integer.",
+			);
+		}
+		if (
+			!Number.isFinite(transition.progress) ||
+			transition.progress < 0 ||
+			transition.progress > 1
+		) {
+			throw new Error("Portal transition progress must be within [0, 1].");
+		}
+		this.#portalTransition = transition;
+	}
+
+	/** Play one of the validated head-locked sounds authored for the portal transition. */
+	playPortalTransitionSound(kind: "enter" | "exit"): void {
+		const assets = this.#portalTransitionAssets;
+		if (assets === null)
+			throw new Error("Portal transition audio is not installed.");
+		const soundId =
+			kind === "enter"
+				? assets.catalog.enterSoundId
+				: assets.catalog.exitSoundId;
+		this.#audio.triggerListenerLocked(soundId);
+	}
+
+	/** Advance the direct portal animation cursor and dispatch only its authored sound hooks. */
+	#advancePortalTransition(
+		timeSeconds: number,
+	): PortalTransitionFrame | undefined {
+		const transition = this.#portalTransition;
+		const clip = this.#portalTransitionClip;
+		if (
+			transition === undefined ||
+			transition.phase === "revealed-awaiting-handoff" ||
+			clip === null
+		) {
+			this.#portalTransitionAnimationGeneration = null;
+			this.#portalTransitionFramePosition = 0;
+			this.#portalTransitionLastTimeSeconds = null;
+			return transition;
+		}
+		if (this.#portalTransitionAnimationGeneration !== transition.generation) {
+			this.#portalTransitionAnimationGeneration = transition.generation;
+			this.#portalTransitionFramePosition = clipEntryFrame(clip);
+			this.#portalTransitionLastTimeSeconds = timeSeconds;
+		} else {
+			const previous = this.#portalTransitionLastTimeSeconds ?? timeSeconds;
+			const elapsedSeconds = Math.max(0, timeSeconds - previous);
+			const advanced = advancePlayingFrame(
+				clip,
+				this.#portalTransitionFramePosition,
+				elapsedSeconds,
+			);
+			this.#portalTransitionFramePosition = advanced.framePosition;
+			this.#portalTransitionLastTimeSeconds = timeSeconds;
+			this.#dispatchPortalAnimationHooks(advanced.departedFrames);
+		}
+		return {
+			...transition,
+			// This is deliberately fractional: the renderer samples it at the display cadence rather
+			// than rounding to the 40 authored frames-per-second ticks.
+			animationFramePosition: this.#portalTransitionFramePosition,
+		};
+	}
+
+	#dispatchPortalAnimationHooks(departedFrames: readonly number[]): void {
+		const animation = this.#portalTransitionClip?.animation;
+		if (!animation) return;
+		for (const frameIndex of departedFrames) {
+			for (const hook of animation.hooks) {
+				if (
+					hook.frameIndex !== frameIndex ||
+					(hook.direction !== "both" && hook.direction !== "forward") ||
+					hook.kind !== "sound-tweaked"
+				) {
+					continue;
+				}
+				this.#audio.triggerListenerLocked(
+					hook.soundId,
+					hook.volume,
+					hook.probability,
+				);
+			}
+		}
+	}
+
+	/**
+	 * Install the validated setup, animation, and audio closure into shared runtime residency.
+	 *
+	 * The portal is not a dynamic scene entity: it owns one stable template lease and one direct
+	 * animation cursor. Sharing the template repository still gives it the exact geometry/atlas
+	 * lifetime and rollback guarantees used by ordinary dynamics without inventing a fake behavior
+	 * target or scene placement.
+	 */
+	async installPortalTransitionAssets(
+		assets: PortalTransitionAssets,
+	): Promise<void> {
+		if (this.#destroyed)
+			throw new Error(
+				"Cannot install portal transition assets after runtime shutdown.",
+			);
+		if (this.#portalTransitionAssets !== null)
+			throw new Error("Portal transition assets are already installed.");
+		const setupId = assets.visual.setupId;
+		if (setupId === null)
+			throw new Error("Portal transition visual has no setup identity.");
+		const animation = prepareAnimation(
+			assets.animation,
+			assets.catalog.animationId,
+			assets.catalog.animationFramesPerSecond,
+		);
+		const source: DynamicPresentationSource = {
+			behavior: assets.visual.behavior,
+			identity: "portal-transition",
+			localBounds: assets.visual.localBounds,
+			presentation: assets.visual.presentation,
+			scale: new Vec3(1, 1, 1),
+			setupId: setupId as DatAssetId,
+		};
+		const staged = this.#objectVisualTemplates.stageOwner([source]);
+		let template: ObjectVisualTemplate;
+		try {
+			const templates = await staged.completion;
+			const prepared = templates.get(objectVisualTemplateKey(source));
+			if (!prepared)
+				throw new Error(
+					`Portal transition template ${objectVisualTemplateKey(source)} was not prepared.`,
+				);
+			template = prepared;
+			staged.commit(PORTAL_TRANSITION_RESOURCE_OWNER_ID);
+		} catch (cause) {
+			staged.release();
+			throw cause;
+		}
+		try {
+			this.#renderer?.installPortalTransitionVisual?.({
+				animation,
+				template,
+			});
+		} catch (cause) {
+			this.#objectVisualTemplates.dropOwner(
+				PORTAL_TRANSITION_RESOURCE_OWNER_ID,
+			);
+			throw cause;
+		}
+		this.#portalTransitionAssets = assets;
+		this.#portalTransitionClip = playingClip(
+			animation,
+			0,
+			animation.frameCount - 1,
+			assets.catalog.animationFramesPerSecond,
+			"loop",
+		);
+	}
+
 	/**
 	 * Nominate the spawned entity carrying the viewer light; null returns it to the camera.
 	 *
@@ -1967,6 +2371,48 @@ export class GamePresentationRuntime {
 			effects: this.#effects.getDiagnostics(),
 			presentationCadence: this.#animationPresentation.getDiagnostics(),
 			residents: this.getAuthoredDynamicResidentDiagnostics(),
+		};
+	}
+
+	/** Snapshot the required portal closure without exposing mutable renderer or repository state. */
+	getPortalTransitionDiagnostics(): PortalTransitionRuntimeDiagnostics {
+		const assets = this.#portalTransitionAssets;
+		const clip = this.#portalTransitionClip;
+		const transition = this.#portalTransition;
+		const texture = this.#textures.getDiagnostics();
+		return {
+			animation:
+				assets === null || clip === null
+					? null
+					: {
+							frameCount: clip.animation.frameCount,
+							framePosition: this.#portalTransitionFramePosition,
+							framesPerSecond: clip.framesPerSecond,
+							id: clip.animation.id,
+							partCount: clip.animation.partCount,
+						},
+			installed: assets !== null,
+			outstandingHandles: {
+				portalTemplateOwner: assets === null ? 0 : 1,
+				portalWaveBuffers: assets?.waveIds.length ?? 0,
+			},
+			persistent: {
+				geometryResourceBytes: this.#geometry.getResourceBytes(),
+				geometryResourceCount: this.#geometry.getResourceCount(),
+				textureAtlasPageBytes: texture.activeAtlasPageBytes,
+				textureAtlasPageCount: texture.activeAtlasPages,
+				textureSourceBytes: texture.residentSourceBytes,
+			},
+			sourceBytes: assets?.sourceBytes ?? null,
+			templates: this.#objectVisualTemplates.getDiagnostics(),
+			transition:
+				transition === undefined
+					? null
+					: {
+							generation: transition.generation,
+							phase: transition.phase,
+							progress: transition.progress,
+						},
 		};
 	}
 
@@ -2185,6 +2631,7 @@ export class GamePresentationRuntime {
 			throw new Error("Game runtime has no committed primary camera view.");
 		}
 		this.#lastFrameTimeSeconds = timeSeconds;
+		const portalTransition = this.#advancePortalTransition(timeSeconds);
 		// Retail runs script hooks before this frame's animation hooks for static objects
 		// (`animate_static_object`, acclient.c:309368-309409), and statics are this population.
 		const tick = this.#tickProfiler;
@@ -2201,15 +2648,19 @@ export class GamePresentationRuntime {
 		this.#physicsScriptSystem.advance(timeSeconds);
 		tick?.mark("scriptAdvance");
 		this.#particles.advance(timeSeconds);
-		const ambientRefreshed = this.#refreshAmbient(timeSeconds);
-		const updateAudioControl = this.#audioControlCadence.shouldUpdate(
-			timeSeconds,
-			ambientRefreshed,
-		);
-		if (updateAudioControl) this.#ambient.updateLiveWeights();
-		this.#ambient.advance(timeSeconds);
-		// After ambience so a voice admitted on this control tick is placed against the same pose.
-		if (updateAudioControl) this.#audio.updatePlacements();
+		const ambientRefreshed = this.#audioListenerEnabled
+			? this.#refreshAmbient(timeSeconds)
+			: false;
+		if (this.#audioListenerEnabled) {
+			const updateAudioControl = this.#audioControlCadence.shouldUpdate(
+				timeSeconds,
+				ambientRefreshed,
+			);
+			if (updateAudioControl) this.#ambient.updateLiveWeights();
+			this.#ambient.advance(timeSeconds);
+			// After ambience so a voice admitted on this control tick is placed against the same pose.
+			if (updateAudioControl) this.#audio.updatePlacements();
+		}
 		tick?.mark("particleAdvance");
 		const animationFrame = this.#animation.advance(timeSeconds);
 		const presentationSelection = this.#animationPresentation.select(
@@ -2253,6 +2704,7 @@ export class GamePresentationRuntime {
 			},
 			extent,
 			frameSettings: this.#frameSettings,
+			portalTransition,
 			outdoorLights: this.#outdoorLights,
 			timeSeconds,
 			viewerLightOrigin: resolveViewerLightOrigin(
@@ -2294,7 +2746,7 @@ export class GamePresentationRuntime {
 
 	async destroy(): Promise<void> {
 		if (this.#destroyed) return;
-		this.#dynamicEntityVisualSource?.destroy?.();
+		this.#setupVisualSource?.destroy?.();
 		const spawned = new Set(this.#spawnedDesiredEntities.keys());
 		for (const guid of spawned) this.#removeDynamicEntityTree(guid, spawned);
 		this.#spawnedVisuals.clear();
@@ -2309,6 +2761,11 @@ export class GamePresentationRuntime {
 		await Promise.allSettled([...this.#realizationContinuations]);
 		await this.#renderer?.destroy();
 		this.#renderer = null;
+		this.#portalTransitionAssets = null;
+		this.#portalTransitionClip = null;
+		this.#portalTransitionAnimationGeneration = null;
+		this.#portalTransitionFramePosition = 0;
+		this.#portalTransitionLastTimeSeconds = null;
 		this.#animationPresentation.clear();
 		this.#animation.destroy();
 		this.#physicsScriptSystem.destroy();
@@ -2360,6 +2817,9 @@ export class GamePresentationRuntime {
 		artifact: LandblockLayerCommit,
 		revision: SceneInterestRevision,
 	): void {
+		this.#sceneLayerFailures.delete(
+			sceneLayerKey(artifact.landblockId, artifact.layer),
+		);
 		const ownerId = landblockLayerToOwnerId(
 			artifact.landblockId,
 			artifact.layer,
@@ -2705,7 +3165,7 @@ export class GamePresentationRuntime {
 	async #prepareStaticAuthoredDynamics(
 		ownerId: OwnerId,
 		layer: LandblockLayerKind,
-		landblockId: LandblockId,
+		landblockId: LandblockOwnerId,
 		sources: readonly AuthoredDynamicSource[],
 	): Promise<StaticLayerCompanionPublication> {
 		if (this.#destroyed)
@@ -2757,7 +3217,7 @@ export class GamePresentationRuntime {
 	}
 
 	#evictStaticLayer(
-		landblockId: LandblockId,
+		landblockId: LandblockOwnerId,
 		layer: LandblockLayerKind,
 		revision: SceneInterestRevision,
 	): void {
@@ -2777,6 +3237,7 @@ export class GamePresentationRuntime {
 		this.#authoredDynamicResidents.delete(ownerId);
 		this.#staticObjectLayerDiagnostics.delete(ownerId);
 		this.#envCellLayerDiagnostics.delete(ownerId);
+		this.#sceneLayerFailures.delete(sceneLayerKey(landblockId, layer));
 		this.#retireDynamicOwner(ownerId);
 		this.#envCells.removeOwner(ownerId);
 		if (layer === LandblockLayerKind.Terrain) {
@@ -2798,6 +3259,23 @@ export class GamePresentationRuntime {
 	}
 
 	#publishSceneAvailability(event: SceneAvailabilityEvent): void {
+		if (event.kind === "scene-content-failed") {
+			this.#sceneLayerFailures.set(
+				sceneLayerKey(event.residency.landblockId, event.layer),
+				{
+					diagnostic: event.message,
+					revision: event.revision,
+				},
+			);
+		} else if (event.kind === "scene-content-unavailable") {
+			this.#sceneLayerFailures.set(
+				sceneLayerKey(event.residency.landblockId, event.layer),
+				{
+					diagnostic: `No source content is available for ${event.layer} at ${event.residency.landblockId}.`,
+					revision: event.revision,
+				},
+			);
+		}
 		for (const listener of this.#sceneAvailabilityListeners) listener(event);
 	}
 
@@ -2874,9 +3352,16 @@ function cloneSceneInterest(interest: SceneInterestMap): SceneInterestMap {
 	);
 }
 
+function sceneLayerKey(
+	landblockId: LandblockOwnerId,
+	layer: LandblockLayerKind,
+): string {
+	return `${landblockId}:${layer}`;
+}
+
 /** Parse an outdoor static publisher owner, failing loudly if a non-outdoor layer reached it. */
 function parseOutdoorLayerOwner(owner: OwnerId): {
-	readonly landblockId: LandblockId;
+	readonly landblockId: LandblockOwnerId;
 	readonly layer: OutdoorStaticLayerKind;
 } {
 	const parsed = parseLandblockLayerOwnerId(owner);
@@ -2886,7 +3371,9 @@ function parseOutdoorLayerOwner(owner: OwnerId): {
 	return { landblockId: parsed.landblockId, layer: parsed.layer };
 }
 
-function createLandblockPlacement(landblockId: LandblockId): ScenePlacement {
+function createLandblockPlacement(
+	landblockId: LandblockOwnerId,
+): ScenePlacement {
 	return {
 		envCellId: null,
 		landblockId,

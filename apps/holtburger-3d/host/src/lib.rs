@@ -23,7 +23,6 @@ pub mod cell_struct_projection;
 pub mod client_host;
 pub mod client_projection;
 pub mod client_runtime;
-pub mod dynamic_entity_visual_source;
 pub mod env_cell_source;
 pub mod explorer_entity_delivery;
 pub mod explorer_entity_driver;
@@ -55,6 +54,7 @@ pub mod portal_geometry;
 pub mod portal_visibility;
 pub mod protocol;
 pub mod runtime;
+pub mod setup_visual_source;
 pub mod shared_host_content;
 pub mod sky_source;
 pub mod sound_table_source;
@@ -182,7 +182,7 @@ pub struct LoadParticleMeshesRequest {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct LoadDynamicEntityVisualRequest {
+pub struct LoadSetupVisualRequest {
     pub setup_did: u32,
     pub appearance: holtburger_world::EntityAppearance,
 }
@@ -1743,8 +1743,8 @@ mod tests {
             .expect("dungeon CellLandblock should exist");
         assert_eq!(dungeon.landblock_id, "0x0005ffff");
         assert_eq!(
-            dungeon.traversal_class,
-            landblock_profile::LandblockTraversalClassWire::DungeonOnly
+            dungeon.scene_class,
+            landblock_profile::LandblockSceneClassWire::DungeonOnly
         );
 
         let outdoor = load_landblock_profile_response(&runtime, "0x0102ffff")
@@ -1753,8 +1753,8 @@ mod tests {
             .expect("outdoor CellLandblock should exist");
         assert_eq!(outdoor.landblock_id, "0x0102ffff");
         assert_eq!(
-            outdoor.traversal_class,
-            landblock_profile::LandblockTraversalClassWire::OutdoorOrMixed
+            outdoor.scene_class,
+            landblock_profile::LandblockSceneClassWire::OutdoorWithEnvCells
         );
     }
 

@@ -183,8 +183,8 @@ pub enum ClientState {
 /// The small lifecycle vocabulary a client shell can render and reconstruct.
 ///
 /// The broad [`ClientState`] remains the authority-facing API used by the TUI. This value is the
-/// deliberate, lossless-enough projection used by other shells; its variants keep character
-/// identity and pending-entry state together instead of exposing interdependent optionals.
+/// deliberate, lossless-enough phase projection used by other shells. Exact local-player identity
+/// is an independent session fact because it is established later by the server's `PlayerCreate`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClientLifecycleState {
     Connecting,
@@ -195,12 +195,26 @@ pub enum ClientLifecycleState {
     EnteringWorld {
         character_guid: Guid,
     },
-    InWorld {
-        player_guid: Guid,
+    /// The authority has accepted an initial entry or teleport and is hydrating the destination
+    /// behind the 3D application's portal-space presentation. Controls remain withdrawn until
+    /// the core activation conjunction sends ACE's `LoginComplete` action.
+    PortalSpace {
+        /// One generation shared by world, collision, presentation, and handoff currentness.
+        world_generation: u64,
+        /// Why this replacement destination superseded the previous active scene.
+        cause: ClientWorldActivationCause,
     },
+    InWorld,
     Exiting {
         cause: ClientExitCause,
     },
+}
+
+/// Replacement activation causes proven by the protocol/retail trace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClientWorldActivationCause {
+    InitialEntry,
+    Teleport,
 }
 
 /// Existing-character identity needed by the first-cut selection screen.
@@ -226,10 +240,13 @@ pub enum ClientExitCause {
     HostShutdown,
 }
 
-/// Discontinuity edge that invalidates interpolation and camera history.
+/// Non-portal presentation edge that invalidates interpolation and camera history.
+///
+/// Portal replacement is represented by [`ClientLifecycleState::PortalSpace`] and never crosses
+/// this event surface. Keeping only the two in-place producers here makes the host contract honest:
+/// a consumer may discard presentation history without mistaking it for a destination activation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ClientWorldDiscontinuityKind {
-    Teleport,
+pub enum ClientPresentationDiscontinuityKind {
     ForcedReposition,
     Reset,
 }
@@ -237,12 +254,14 @@ pub enum ClientWorldDiscontinuityKind {
 /// One atomic, core-owned replacement level for client shells.
 ///
 /// Runtime bodies stay in the core value for the existing TUI and authority tests. Desktop
-/// adapters deliberately project only the focused dynamic snapshot, lifecycle, time, and
-/// generation fields rather than putting the broad body representation on their wire.
+/// adapters deliberately project only local-player identity, the focused dynamic snapshot,
+/// lifecycle, time, and generation rather than putting the broad body representation on their wire.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClientApplicationSnapshot {
     /// Complete shell-facing lifecycle level.
     pub lifecycle: ClientLifecycleState,
+    /// Exact local-player identity established by the server's `PlayerCreate` message.
+    pub local_player_guid: Option<Guid>,
     /// Synchronized server time, absent before the first time-sync event.
     pub server_time: Option<f64>,
     /// Monotonic presentation generation invalidating pre-discontinuity history.
@@ -340,6 +359,10 @@ pub enum ClientViewEvent {
     ApplicationSnapshot(ClientApplicationSnapshot),
     /// Source-neutral lifecycle projection emitted whenever the authoritative client state changes.
     LifecycleChanged(ClientLifecycleState),
+    /// First exact local-player identity established by the server for this world session.
+    LocalPlayerEstablished {
+        player_guid: Guid,
+    },
     StatusUpdate {
         state: ClientState,
     },
@@ -431,9 +454,9 @@ pub enum ClientViewEvent {
     Camera(crate::client::ClientCameraTick),
     /// Receipt for a newly registered client camera generation.
     CameraStarted(crate::client::ClientCameraStartReceipt),
-    WorldDiscontinuity {
+    PresentationDiscontinuity {
         world_generation: u64,
-        kind: ClientWorldDiscontinuityKind,
+        kind: ClientPresentationDiscontinuityKind,
     },
     PlayerGroundedUpdated {
         grounded: bool,
@@ -576,6 +599,11 @@ pub enum ClientCommand {
     EnterPkLite,
     Ping,
     RequestCurrentApplicationState,
+    /// Supplies the presentation-owned first-pure-destination acknowledgement for one
+    /// generation. Non-rendering compositions use the immediate adapter and need not send it.
+    AcknowledgeClientWorldReveal {
+        world_generation: u64,
+    },
     Disconnect,
     SetFellowshipUpdatesSubscribed {
         enabled: bool,

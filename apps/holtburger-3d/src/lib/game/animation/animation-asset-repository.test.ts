@@ -3,9 +3,18 @@ import type { AnimationAssetSource } from "../../assets/animation-asset-source";
 import type { DecodedAnimationAsset } from "../../assets/decode-animation-record";
 import type { DatAssetId } from "../game-types";
 import { Mat4 } from "../math/types";
-import { AnimationAssetRepository } from "./animation-asset-repository";
+import {
+	AnimationAssetRepository,
+	prepareAnimation,
+} from "./animation-asset-repository";
 
 describe("AnimationAssetRepository", () => {
+	it("allows a caller to retain the authored traversal rate", () => {
+		const prepared = prepareAnimation(animation(), "0x03000001", 40);
+
+		expect(prepared.framesPerSecond).toBe(40);
+	});
+
 	it("shares one in-flight load and releases the prepared value exactly", async () => {
 		const source = new DeferredAnimationSource();
 		const repository = new AnimationAssetRepository(source);

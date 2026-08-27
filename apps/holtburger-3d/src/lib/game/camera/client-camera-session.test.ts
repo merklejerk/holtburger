@@ -11,6 +11,7 @@ import {
 } from "../../../client/client-lifecycle-session";
 import { createProjectionClearanceRevision } from "./projection-clearance";
 import { ClientCameraSession } from "./client-camera-session";
+import { cellId } from "../runtime/dynamic-entity-feed";
 
 const PLAYER_GUID = 0x5000_0001;
 const IDENTITY: ClientCameraIdentity = {
@@ -139,7 +140,8 @@ describe("ClientCameraSession", () => {
 
 function currentState(): ClientCurrentState {
 	return {
-		lifecycle: { kind: "in-world", playerGuid: PLAYER_GUID },
+		lifecycle: { kind: "in-world" },
+		localPlayerGuid: PLAYER_GUID,
 		serverTime: 10,
 		worldGeneration: 1,
 		dynamic: {
@@ -177,7 +179,7 @@ function currentState(): ClientCurrentState {
 					placement: {
 						kind: "world",
 						pose: {
-							landblockId: 0xda55_ffff,
+							landblockId: cellId(0xda55_ffff),
 							coords: { x: 0, y: 0, z: 0 },
 							rotation: { w: 1, x: 0, y: 0, z: 0 },
 						},

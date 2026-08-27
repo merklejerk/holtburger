@@ -7,7 +7,8 @@ import type {
 	ClientCurrentState,
 	ClientExitRequested,
 	ClientLifecycle,
-	ClientWorldDiscontinuity,
+	ClientLocalPlayerEstablished,
+	ClientPresentationDiscontinuity,
 	ClientCameraStartReceipt,
 	ClientCameraTick,
 } from "../../client/client-host-contract";
@@ -21,7 +22,7 @@ const SHARED_HOST_COMMAND_NAMES = [
 	"load_sky_source",
 	"load_texture_pixels",
 	"load_animation",
-	"load_dynamic_entity_visual",
+	"load_setup_visual",
 	"load_physics_script",
 	"load_particle_emitter",
 	"load_audio",
@@ -64,6 +65,7 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"start_client_camera",
 	"set_client_camera_intent",
 	"set_client_camera_clearance",
+	"acknowledge_client_world_reveal",
 	"stop_client_camera",
 	"disconnect_client",
 ] as const;
@@ -106,11 +108,12 @@ const EXPLORER_HOST_EVENT_NAMES = [
 const CLIENT_HOST_EVENT_NAMES = [
 	"client-current-state",
 	"client-lifecycle-changed",
+	"client-local-player-established",
 	"client-server-time-updated",
 	"client-dynamic-entity",
 	"client-camera-started",
 	"client-camera",
-	"client-world-discontinuity",
+	"client-presentation-discontinuity",
 	"client-exit-requested",
 ] as const;
 
@@ -159,11 +162,12 @@ export interface HostEventPayloadMap {
 	"explorer-physical-fly-failure": HostPhysicalFlyFailure;
 	"client-current-state": ClientCurrentState;
 	"client-lifecycle-changed": ClientLifecycle;
+	"client-local-player-established": ClientLocalPlayerEstablished;
 	"client-server-time-updated": { time: number };
 	"client-dynamic-entity": DynamicEntityEvent;
 	"client-camera-started": ClientCameraStartReceipt;
 	"client-camera": ClientCameraTick;
-	"client-world-discontinuity": ClientWorldDiscontinuity;
+	"client-presentation-discontinuity": ClientPresentationDiscontinuity;
 	"client-exit-requested": ClientExitRequested;
 }
 

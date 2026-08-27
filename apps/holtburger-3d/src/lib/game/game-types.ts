@@ -1,8 +1,7 @@
-// Represents a landblock ID.
-export type LandblockId = string;
+/** Canonical CellLandblock owner identity, normalized at construction boundaries. */
+export type LandblockOwnerId = string;
 export type EnvCellId = string;
 export type DatAssetId = string;
-export const INVALID_ID = "ffffffff";
 
 /**
  * Identity of one palette the host composited from a base palette and ObjDesc ranges.

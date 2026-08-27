@@ -24,6 +24,17 @@ const NEUTRAL_WHITE_BALANCE: ColorGradeChannelGains = {
 
 const SCENE_COLOR_TEXTURE_UNIT = 0;
 const COLOR_GRADE_STRIP_TEXTURE_UNIT = 1;
+const OUTGOING_SCENE_TEXTURE_UNIT = 2;
+const TUNNEL_SCENE_TEXTURE_UNIT = 3;
+
+/** Renderer-owned outgoing snapshot fed into the final transition composite. */
+export interface FlatSceneTransitionInput {
+	readonly outgoingScene: WebGLTexture | null;
+	readonly progress: number;
+	/** Optional authored tunnel target composited after the outgoing-world blend. */
+	readonly tunnelScene?: WebGLTexture | null;
+	readonly tunnelOpacity?: number;
+}
 
 const PRESENTATION_VERTEX_SHADER = `#version 300 es
 precision highp float;
@@ -45,9 +56,15 @@ precision highp sampler2D;
 
 uniform sampler2D uSceneColor;
 uniform sampler2D uColorGradeStrip;
+uniform sampler2D uOutgoingScene;
+uniform sampler2D uTunnelScene;
 uniform vec3 uWhiteBalance;
 uniform float uSaturation;
+uniform float uTransitionProgress;
+uniform float uTunnelOpacity;
 uniform int uColorGradeEnabled;
+uniform int uTransitionEnabled;
+uniform int uTunnelEnabled;
 layout(location = 0) out vec4 outColor;
 
 const vec3 LUMA_WEIGHTS = vec3(
@@ -93,6 +110,23 @@ vec3 applyColorGrade(vec3 color, vec2 pixel) {
 
 void main() {
 	vec4 scene = texelFetch(uSceneColor, ivec2(gl_FragCoord.xy), 0);
+	if (uTransitionEnabled != 0) {
+		// RETAIL DIVERGENCE: the first pass keeps the compositor as a normalized screen-space
+		// blend; retail swaps viewport/FOV state while the portal is open
+		// (acclient.c:252638-252799). Correcting this would affect only the portal presentation
+		// pass, not activation or world state. The current census is one snapshot texture and this
+		// shader, so an authored tunnel can replace this seam without widening the state contract.
+		// The outgoing capture may retain the previous drawing-buffer extent during a resize. Sample
+		// by normalized screen coordinates so that old-sized frames remain valid warp sources.
+		vec2 outgoingUv = gl_FragCoord.xy / vec2(textureSize(uSceneColor, 0));
+		vec4 outgoing = texture(uOutgoingScene, outgoingUv);
+		scene = mix(outgoing, scene, clamp(uTransitionProgress, 0.0, 1.0));
+	}
+	if (uTunnelEnabled != 0) {
+		vec2 tunnelUv = gl_FragCoord.xy / vec2(textureSize(uSceneColor, 0));
+		vec4 tunnel = texture(uTunnelScene, tunnelUv);
+		scene = mix(scene, tunnel, clamp(uTunnelOpacity * tunnel.a, 0.0, 1.0));
+	}
 	outColor =
 		uColorGradeEnabled != 0
 			? vec4(applyColorGrade(scene.rgb, gl_FragCoord.xy), scene.a)
@@ -110,6 +144,10 @@ export class WebGL2FlatScenePresentation {
 	readonly #uniforms: {
 		readonly whiteBalance: WebGLUniformLocation;
 		readonly saturation: WebGLUniformLocation;
+		readonly transitionProgress: WebGLUniformLocation;
+		readonly tunnelOpacity: WebGLUniformLocation;
+		readonly transitionEnabled: WebGLUniformLocation;
+		readonly tunnelEnabled: WebGLUniformLocation;
 		readonly enabled: WebGLUniformLocation;
 	};
 	/** Parameters the resident strip and gains were derived from; identity-compared for staleness. */
@@ -158,9 +196,29 @@ export class WebGL2FlatScenePresentation {
 				requireWebGL2Uniform(gl, program, "uColorGradeStrip"),
 				COLOR_GRADE_STRIP_TEXTURE_UNIT,
 			);
+			gl.uniform1i(
+				requireWebGL2Uniform(gl, program, "uOutgoingScene"),
+				OUTGOING_SCENE_TEXTURE_UNIT,
+			);
+			gl.uniform1i(
+				requireWebGL2Uniform(gl, program, "uTunnelScene"),
+				TUNNEL_SCENE_TEXTURE_UNIT,
+			);
 			this.#uniforms = {
 				whiteBalance: requireWebGL2Uniform(gl, program, "uWhiteBalance"),
 				saturation: requireWebGL2Uniform(gl, program, "uSaturation"),
+				transitionProgress: requireWebGL2Uniform(
+					gl,
+					program,
+					"uTransitionProgress",
+				),
+				tunnelOpacity: requireWebGL2Uniform(gl, program, "uTunnelOpacity"),
+				transitionEnabled: requireWebGL2Uniform(
+					gl,
+					program,
+					"uTransitionEnabled",
+				),
+				tunnelEnabled: requireWebGL2Uniform(gl, program, "uTunnelEnabled"),
 				enabled: requireWebGL2Uniform(gl, program, "uColorGradeEnabled"),
 			};
 			this.#program = program;
@@ -200,6 +258,7 @@ export class WebGL2FlatScenePresentation {
 	present(
 		target: WebGL2FlatSceneTargetSet,
 		colorGrade: ColorGradeSettings,
+		transition: FlatSceneTransitionInput | undefined = undefined,
 	): void {
 		if (this.#destroyed) {
 			throw new Error("Flat scene presentation has been destroyed.");
@@ -220,6 +279,50 @@ export class WebGL2FlatScenePresentation {
 		gl.depthFunc(gl.ALWAYS);
 		gl.useProgram(this.#program);
 		this.#applyColorGrade(colorGrade);
+		if (transition !== undefined) {
+			if (
+				!Number.isFinite(transition.progress) ||
+				transition.progress < 0 ||
+				transition.progress > 1
+			) {
+				throw new Error(
+					"Flat scene transition progress must be within [0, 1].",
+				);
+			}
+			const tunnelOpacity = transition.tunnelOpacity ?? 0;
+			if (
+				!Number.isFinite(tunnelOpacity) ||
+				tunnelOpacity < 0 ||
+				tunnelOpacity > 1
+			) {
+				throw new Error("Flat scene tunnel opacity must be within [0, 1].");
+			}
+			gl.uniform1i(
+				this.#uniforms.transitionEnabled,
+				transition.outgoingScene === null ? 0 : 1,
+			);
+			gl.uniform1f(this.#uniforms.transitionProgress, transition.progress);
+			gl.uniform1i(
+				this.#uniforms.tunnelEnabled,
+				transition.tunnelScene === null || transition.tunnelScene === undefined
+					? 0
+					: 1,
+			);
+			gl.uniform1f(this.#uniforms.tunnelOpacity, tunnelOpacity);
+			gl.activeTexture(gl.TEXTURE0 + OUTGOING_SCENE_TEXTURE_UNIT);
+			gl.bindTexture(gl.TEXTURE_2D, transition.outgoingScene);
+			gl.activeTexture(gl.TEXTURE0 + TUNNEL_SCENE_TEXTURE_UNIT);
+			gl.bindTexture(gl.TEXTURE_2D, transition.tunnelScene ?? null);
+		} else {
+			gl.uniform1i(this.#uniforms.transitionEnabled, 0);
+			gl.uniform1f(this.#uniforms.transitionProgress, 1);
+			gl.uniform1i(this.#uniforms.tunnelEnabled, 0);
+			gl.uniform1f(this.#uniforms.tunnelOpacity, 0);
+			gl.activeTexture(gl.TEXTURE0 + OUTGOING_SCENE_TEXTURE_UNIT);
+			gl.bindTexture(gl.TEXTURE_2D, null);
+			gl.activeTexture(gl.TEXTURE0 + TUNNEL_SCENE_TEXTURE_UNIT);
+			gl.bindTexture(gl.TEXTURE_2D, null);
+		}
 		gl.bindVertexArray(this.#vertexArray);
 		gl.activeTexture(gl.TEXTURE0 + SCENE_COLOR_TEXTURE_UNIT);
 		gl.bindTexture(gl.TEXTURE_2D, target.color);

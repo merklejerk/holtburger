@@ -1,5 +1,5 @@
 import type { BakedDrawMergeCensus } from "./baked-draw-merge-census";
-import type { LandblockId } from "../game-types";
+import type { LandblockOwnerId } from "../game-types";
 import type { RenderExtent } from "./render-extent";
 import type { SceneNodeId } from "../scene";
 import type { Camera } from "../runtime/types";
@@ -8,11 +8,13 @@ import type { LandblockLights } from "../environment/outdoor-light-index";
 import type { RuntimeLight } from "../environment/runtime-lights";
 import type { SceneVec3 } from "../../assets/ac-frame";
 import { LandblockLayerKind } from "../runtime/scene-interest";
+import type { PreparedAnimation } from "../animation/animation-asset-repository";
+import type { ObjectVisualTemplate } from "../systems/object-visual-template-repository";
 
 /** Minimal read side of the outdoor light index the renderer depends on. */
 export interface OutdoorLightLookup {
 	readonly isEmpty: boolean;
-	resolve(landblockId: LandblockId): LandblockLights;
+	resolve(landblockId: LandblockOwnerId): LandblockLights;
 }
 import { FRONTEND_TUNING } from "../../frontend-tuning";
 import type { TextureFilteringPolicy } from "./texture-filtering-policy";
@@ -140,10 +142,43 @@ export interface FrameViewInput {
 	readonly cameraInsideSealedCell: boolean;
 }
 
+/**
+ * Presentation-only portal composition state.
+ *
+ * The renderer owns the outgoing snapshot and any tunnel target; callers provide only the
+ * generation-independent state edge and progress. This keeps transition resources out of world
+ * authority and lets a later authored warp replace the simple blend without changing lifecycle
+ * contracts.
+ */
+export interface PortalTransitionFrame {
+	/** Authority generation used to reject a snapshot from a superseded transition. */
+	readonly generation: number;
+	readonly phase:
+		"entering" | "waiting" | "exiting" | "revealed-awaiting-handoff";
+	/** Monotonic presentation progress in [0, 1], meaningful during `exiting`. */
+	readonly progress: number;
+	/** Whether the controller captured a finished outgoing world for this generation. */
+	readonly outgoingAvailable: boolean;
+	/**
+	 * Fractional authored frame position sampled at render cadence.
+	 *
+	 * The portal's 40 fps value is the authored traversal rate, not a render cap. Keeping the
+	 * already-fractional cursor here lets the renderer use the same rigid-pose sampler as ordinary
+	 * authored animations without quantising a 60/120 Hz frame to an integer animation frame.
+	 */
+	readonly animationFramePosition?: number;
+}
+
+/** Prepared setup visual and animation retained for the transition-only authored tunnel pass. */
+export interface PortalTransitionVisual {
+	readonly template: ObjectVisualTemplate;
+	readonly animation: PreparedAnimation;
+}
+
 /** Immutable renderer input carrying frame state rather than preassembled draw submissions. */
 export interface FrameInput {
 	/** Landblock whose origin is the floating render-world origin. */
-	readonly anchorLandblockId: LandblockId;
+	readonly anchorLandblockId: LandblockOwnerId;
 	readonly timeSeconds: number;
 	/** Effective regional presentation shared by all renderer passes. */
 	readonly environment: ResolvedSceneEnvironment;
@@ -169,6 +204,8 @@ export interface FrameInput {
 	readonly viewerLightOrigin: SceneVec3;
 	/** Dynamic display choices applied to this frame. */
 	readonly frameSettings: FrameSettings;
+	/** Optional transition composition; ordinary frames allocate no transition resources. */
+	readonly portalTransition?: PortalTransitionFrame;
 	readonly views: readonly FrameViewInput[];
 }
 
@@ -238,6 +275,25 @@ export interface FrameSelectionMetrics {
 	readonly portalFramebufferCount: number;
 	/** Exact live bytes owned by the current portal target generation. */
 	readonly portalTargetBytes: number;
+	/** Exact live RGBA8 bytes retained for the outgoing transition snapshot. */
+	readonly portalTransitionSnapshotBytes: number;
+	/** Transition snapshot generations allocated over this renderer lifetime. */
+	readonly portalTransitionSnapshotAllocatedGenerationCount: number;
+	/** Transition snapshot generations released over this renderer lifetime. */
+	readonly portalTransitionSnapshotDisposedGenerationCount: number;
+	/** Live framebuffer owned by the authored transition tunnel target. */
+	readonly portalTransitionFramebufferCount: number;
+	/** Exact live color/depth bytes owned by the authored transition tunnel target. */
+	readonly portalTransitionTargetBytes: number;
+	/** Authored portal setup ranges submitted into the transition target this frame. */
+	readonly submittedPortalTransitionDrawCount: number;
+	/** Whether the renderer has a prepared authored portal setup installed. */
+	readonly portalTransitionVisualInstalled: boolean;
+	/** Current transition generation, or null when the compositor is idle. */
+	readonly portalTransitionGeneration: number | null;
+	/** Current transition state, or null when the compositor is idle. */
+	readonly portalTransitionPhase:
+		"entering" | "waiting" | "exiting" | "revealed-awaiting-handoff" | null;
 	/** Live framebuffer owned by the unconditional flat-scene target generation. */
 	readonly flatSceneFramebufferCount: number;
 	/** Exact live color/depth texture bytes owned by the flat-scene target generation. */
@@ -631,6 +687,8 @@ export interface Renderer {
 	readonly sky?: RendererSkyCapability;
 	/** Authored particle residency and submission, absent on backends that cannot draw them. */
 	readonly particles?: RendererParticleCapability;
+	/** Install the already prepared authored portal visual, when this backend can draw it. */
+	installPortalTransitionVisual?(visual: PortalTransitionVisual): void;
 	drawFrame(input: FrameInput): RendererFrameFeedback;
 	/** Drop cached derivations of world resources; absent on backends that cache none. */
 	invalidateResolvedResources?(reason: ResolvedResourceInvalidation): void;

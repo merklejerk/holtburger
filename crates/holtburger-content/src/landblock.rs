@@ -18,8 +18,8 @@ pub fn normalize_landblock_id(raw_landblock_id: u32) -> u32 {
 pub struct LandblockAsset {
     /// Normalized CellLandblock DID (`0xXXYYFFFF`).
     pub landblock_id: u32,
-    /// Whether this landblock has only dungeon EnvCell traversal or any outdoor/mixed traversal.
-    pub traversal_class: LandblockTraversalClass,
+    /// Closed scene-content class used to choose outdoor and EnvCell demand.
+    pub scene_class: LandblockSceneClass,
     /// Canonical authored terrain and resolved height samples.
     pub terrain: LandblockTerrain,
     /// Every explicit object placement authored by LandblockInfo.
@@ -32,13 +32,15 @@ pub struct LandblockAsset {
     pub restrictions: Vec<LandblockRestriction>,
 }
 
-/// Static-data traversal classification for one normalized landblock owner.
+/// Static scene-content classification for one normalized landblock owner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LandblockTraversalClass {
+pub enum LandblockSceneClass {
     /// The owner has no traversable outdoor surface and is composed only of EnvCells.
     DungeonOnly,
-    /// The owner is outdoor, mixed, empty, or otherwise not a dungeon-only owner.
-    OutdoorOrMixed,
+    /// The owner is outdoor-capable and has no authored EnvCells.
+    OutdoorOnly,
+    /// The owner is outdoor-capable and also has authored EnvCells.
+    OutdoorWithEnvCells,
 }
 
 /// Authored landblock terrain transposed into row-major order.
@@ -327,7 +329,7 @@ fn assemble_from_records(
             env_cell_id: (landblock_id & 0xffff_0000) | (0x0100 + source_index),
         })
         .collect();
-    let traversal_class = classify_landblock_traversal(
+    let scene_class = classify_landblock_scene(
         landblock_id,
         &terrain.height_indices,
         info.map_or(0, |info| info.num_cells),
@@ -346,7 +348,7 @@ fn assemble_from_records(
 
     LandblockAsset {
         landblock_id,
-        traversal_class,
+        scene_class,
         terrain,
         explicit_objects,
         buildings,
@@ -355,31 +357,39 @@ fn assemble_from_records(
     }
 }
 
-/// Applies ACE's proven dungeon-only predicate to normalized shallow landblock facts.
+/// Applies ACE's proven dungeon-only predicate, then retains exact EnvCell availability.
 ///
 /// The northwest exception is evaluated before the authored terrain signature because those
 /// water-cell edges are known to contain inconsistent height authoring. All other clauses are
 /// jointly necessary: flat terrain alone, EnvCell presence alone, and an interior building alone
 /// do not establish dungeon-only traversal.
-fn classify_landblock_traversal(
+fn classify_landblock_scene(
     landblock_id: u32,
     height_indices: &[u8],
     env_cell_count: u32,
     building_count: usize,
-) -> LandblockTraversalClass {
+) -> LandblockSceneClass {
     let landblock_x = ((landblock_id >> 24) & 0xff) as u8;
     let landblock_y = ((landblock_id >> 16) & 0xff) as u8;
     if landblock_x < 0x08 && landblock_y > 0xf8 {
-        return LandblockTraversalClass::OutdoorOrMixed;
+        return outdoor_scene_class(env_cell_count);
     }
 
     if height_indices.iter().any(|height| *height != 0)
         || env_cell_count == 0
         || building_count != 0
     {
-        LandblockTraversalClass::OutdoorOrMixed
+        outdoor_scene_class(env_cell_count)
     } else {
-        LandblockTraversalClass::DungeonOnly
+        LandblockSceneClass::DungeonOnly
+    }
+}
+
+fn outdoor_scene_class(env_cell_count: u32) -> LandblockSceneClass {
+    if env_cell_count == 0 {
+        LandblockSceneClass::OutdoorOnly
+    } else {
+        LandblockSceneClass::OutdoorWithEnvCells
     }
 }
 
@@ -443,10 +453,7 @@ mod tests {
             assemble_terrain(&landblock, &region).expect("synthetic terrain should assemble");
         let asset = assemble_from_records(landblock.id, terrain, Some(&info));
 
-        assert_eq!(
-            asset.traversal_class,
-            LandblockTraversalClass::OutdoorOrMixed
-        );
+        assert_eq!(asset.scene_class, LandblockSceneClass::OutdoorWithEnvCells);
         assert_eq!(asset.terrain.height_indices[1], 9);
         assert_eq!(asset.terrain.heights[1], 4.5);
         assert_eq!(asset.terrain.terrain_samples[1], 1_009);
@@ -496,31 +503,31 @@ mod tests {
     }
 
     #[test]
-    fn traversal_class_matches_ace_predicate_and_northwest_exception() {
+    fn scene_class_matches_ace_predicate_env_cell_availability_and_northwest_exception() {
         let flat_heights = vec![0; LANDBLOCK_GRID_SIZE * LANDBLOCK_GRID_SIZE];
 
         assert_eq!(
-            classify_landblock_traversal(0x0005_ffff, &flat_heights, 817, 0),
-            LandblockTraversalClass::DungeonOnly
+            classify_landblock_scene(0x0005_ffff, &flat_heights, 817, 0),
+            LandblockSceneClass::DungeonOnly
         );
         assert_eq!(
-            classify_landblock_traversal(0x0005_ffff, &flat_heights, 0, 0),
-            LandblockTraversalClass::OutdoorOrMixed
+            classify_landblock_scene(0x0005_ffff, &flat_heights, 0, 0),
+            LandblockSceneClass::OutdoorOnly
         );
         assert_eq!(
-            classify_landblock_traversal(0x0005_ffff, &flat_heights, 817, 1),
-            LandblockTraversalClass::OutdoorOrMixed
+            classify_landblock_scene(0x0005_ffff, &flat_heights, 817, 1),
+            LandblockSceneClass::OutdoorWithEnvCells
         );
 
         let mut non_flat_heights = flat_heights.clone();
         non_flat_heights[0] = 1;
         assert_eq!(
-            classify_landblock_traversal(0x0005_ffff, &non_flat_heights, 817, 0),
-            LandblockTraversalClass::OutdoorOrMixed
+            classify_landblock_scene(0x0005_ffff, &non_flat_heights, 817, 0),
+            LandblockSceneClass::OutdoorWithEnvCells
         );
         assert_eq!(
-            classify_landblock_traversal(0x07f9_ffff, &flat_heights, 817, 0),
-            LandblockTraversalClass::OutdoorOrMixed
+            classify_landblock_scene(0x07f9_ffff, &flat_heights, 817, 0),
+            LandblockSceneClass::OutdoorWithEnvCells
         );
     }
 

@@ -14,7 +14,8 @@ export type ClientLifecycleUiState =
 			readonly selectedGuid: number | null;
 	  }
 	| { readonly kind: "entering-world"; readonly characterGuid: number }
-	| { readonly kind: "in-world"; readonly playerGuid: number }
+	| ClientLifecyclePortalSpace
+	| { readonly kind: "in-world" }
 	| {
 			readonly kind: "exiting";
 			readonly cause: ClientExitRequested["cause"];
@@ -29,6 +30,24 @@ export type ClientLifecycleUiAction =
 /** Initial launch state before the host's atomic current-state response arrives. */
 export function initialClientLifecycleUiState(): ClientLifecycleUiState {
 	return { kind: "connecting" };
+}
+
+/** Whether this lifecycle phase requires the frontend's world-presentation installation. */
+export function clientLifecycleUsesWorldPresentation(
+	state: ClientLifecycleUiState,
+): boolean {
+	return (
+		state.kind === "entering-world" ||
+		state.kind === "portal-space" ||
+		state.kind === "in-world"
+	);
+}
+
+/** Whether the frontend owns live character input for this authority phase. */
+export function clientLifecycleEnablesWorldInput(
+	state: ClientLifecycleUiState,
+): boolean {
+	return state.kind === "in-world";
 }
 
 /**
@@ -60,6 +79,12 @@ export function reduceClientLifecycleUiState(
 			};
 	}
 }
+
+/** Hidden destination staging while the authority waits for collision and presentation readiness. */
+type ClientLifecyclePortalSpace = Extract<
+	ClientLifecycle,
+	{ readonly kind: "portal-space" }
+>;
 
 function fromAuthorityLifecycle(
 	previous: ClientLifecycleUiState,

@@ -1,8 +1,9 @@
 import type { ActiveRegionSource } from "./active-region-source";
 import { resolveOutdoorTerrainLayer } from "../game/terrain/active-region-terrain-resolver";
 import type { ResolvedTerrainLayerSource } from "../game/resolution/landblock-layer";
-import type { LandblockId } from "../game/game-types";
+import type { LandblockOwnerId } from "../game/game-types";
 import {
+	normalizeLandblockOwner,
 	OUTDOOR_TERRAIN_GRID_CELLS,
 	OUTDOOR_TERRAIN_GRID_SIZE,
 } from "../game/landblocks";
@@ -34,7 +35,7 @@ interface TerrainSourceManifest {
 /** Decode and validate one terrain record nested in a landblock source batch. */
 export function decodeLandblockTerrainRecord(
 	response: Uint8Array,
-	requestedLandblockId: LandblockId,
+	requestedLandblockId: LandblockOwnerId,
 	activeRegion: ActiveRegionSource,
 ): ResolvedTerrainLayerSource | null {
 	if (response.byteLength < HEADER_LENGTH) {
@@ -124,7 +125,7 @@ export function decodeLandblockTerrainRecord(
 			cellDiagonals,
 			heightIndices,
 			heights,
-			landblockId: manifest.landblockId,
+			landblockId: normalizeLandblockOwner(manifest.landblockId),
 			terrainSamples,
 		},
 		activeRegion,

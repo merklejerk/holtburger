@@ -1,4 +1,4 @@
-import type { LandblockId } from "../lib/game/game-types";
+import type { LandblockOwnerId } from "../lib/game/game-types";
 import {
 	getLandblockCoordinates,
 	normalizeLandblockOwner,
@@ -13,7 +13,7 @@ export interface SimulationInterestRequest {
 	/** Monotonic replacement revision within the current frontend lifetime. */
 	readonly revision: number;
 	/** Complete normalized collision-owner set selected by application policy. */
-	readonly landblockIds: readonly LandblockId[];
+	readonly landblockIds: readonly LandblockOwnerId[];
 }
 
 /** Host acknowledgement for one revisioned simulation-interest replacement. */
@@ -23,13 +23,15 @@ export interface SimulationInterestReceipt {
 	/** Whether this request remained current through the atomic scene commit. */
 	readonly committed: boolean;
 	/** Requested owners for which static collision content does not exist. */
-	readonly unavailableLandblockIds: readonly LandblockId[];
+	readonly unavailableLandblockIds: readonly LandblockOwnerId[];
 }
 
 const simulationInterestReceiptSchema = z.object({
 	revision: z.number().int().nonnegative(),
 	committed: z.boolean(),
-	unavailableLandblockIds: z.array(z.string()),
+	unavailableLandblockIds: z.array(
+		z.string().transform(normalizeLandblockOwner),
+	),
 });
 
 /** Validate one untrusted transport acknowledgement before policy observes it. */
@@ -48,7 +50,7 @@ export interface SimulationInterestTransport {
 
 interface CurrentRequest {
 	/** Normalized application anchor associated with the replacement. */
-	readonly anchorLandblockId: LandblockId;
+	readonly anchorLandblockId: LandblockOwnerId;
 	/** Revision used to prevent an older failure from clearing newer state. */
 	readonly revision: number;
 	/** Shared result returned when the same anchor is requested again. */
@@ -66,7 +68,9 @@ export class SimulationInterestController {
 	}
 
 	/** Replace collision interest when, and only when, the application anchor changes. */
-	request(anchorLandblockId: LandblockId): Promise<SimulationInterestReceipt> {
+	request(
+		anchorLandblockId: LandblockOwnerId,
+	): Promise<SimulationInterestReceipt> {
 		const anchor = normalizeLandblockOwner(anchorLandblockId);
 		if (this.#current?.anchorLandblockId === anchor) {
 			return this.#current.promise;
@@ -89,7 +93,7 @@ export class SimulationInterestController {
 	}
 
 	/** Whether one completed receipt still names the controller's current anchor revision. */
-	isCurrent(anchorLandblockId: LandblockId, revision: number): boolean {
+	isCurrent(anchorLandblockId: LandblockOwnerId, revision: number): boolean {
 		const anchor = normalizeLandblockOwner(anchorLandblockId);
 		return (
 			this.#current?.anchorLandblockId === anchor &&
@@ -100,12 +104,12 @@ export class SimulationInterestController {
 
 /** Derive the exact normalized owner square for one simulation anchor. */
 export function computeSimulationInterest(
-	anchorLandblockId: LandblockId,
-): readonly LandblockId[] {
+	anchorLandblockId: LandblockOwnerId,
+): readonly LandblockOwnerId[] {
 	const anchor = getLandblockCoordinates(
 		normalizeLandblockOwner(anchorLandblockId),
 	);
-	const owners: LandblockId[] = [];
+	const owners: LandblockOwnerId[] = [];
 	for (
 		let y = anchor.y - SIMULATION_INTEREST_RADIUS;
 		y <= anchor.y + SIMULATION_INTEREST_RADIUS;

@@ -146,7 +146,8 @@ export function objectLightingRole(
 		| "generated"
 		| "env-cell-shell"
 		| "env-cell-resident"
-		| "dynamic",
+		| "dynamic"
+		| "portal-transition",
 ): SceneLightingRole {
 	return source === "env-cell-shell" || source === "env-cell-resident"
 		? "interior-object"

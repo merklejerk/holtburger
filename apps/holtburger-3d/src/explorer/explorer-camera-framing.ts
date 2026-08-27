@@ -1,4 +1,4 @@
-import type { LandblockId } from "../lib/game/game-types";
+import type { LandblockOwnerId } from "../lib/game/game-types";
 import {
 	createLandblockWorldOrigin,
 	OUTDOOR_LANDBLOCK_WORLD_SIZE,
@@ -12,14 +12,14 @@ import type { FreeFlyCameraPose } from "./explorer-camera-input-controller";
 export interface ExplorerOutdoorSurfaceQuery {
 	queryOutdoorTerrainSurface(point: Vec3): {
 		readonly height: number;
-		readonly landblockId: LandblockId;
+		readonly landblockId: LandblockOwnerId;
 	} | null;
 }
 
 /** Resolve the Explorer's terrain-relative outdoor focus pose once its terrain is queryable. */
 export function resolveExplorerOutdoorFocusPose(
 	query: ExplorerOutdoorSurfaceQuery,
-	landblockId: LandblockId,
+	landblockId: LandblockOwnerId,
 ): FreeFlyCameraPose | null {
 	const origin = createLandblockWorldOrigin(landblockId);
 	const center = new Vec3(

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { LandblockId } from "../game/game-types";
+import type { LandblockOwnerId } from "../game/game-types";
 import { AABB3, Mat4, Vec3 } from "../game/math/types";
 import type {
 	ResolvedObjectResident,
@@ -272,6 +272,8 @@ export interface DecodedStaticPresentation {
 	readonly localBounds: AABB3 | null;
 	readonly setupId: string | null;
 	readonly behavior: import("../game/resolution/landblock-layer").ResolvedObjectBehavior;
+	/** Complete host envelope bytes retained for construction diagnostics when this is a standalone source. */
+	readonly sourceByteLength?: number;
 }
 export type OutdoorStaticLayerKind =
 	| LandblockLayerKind.Buildings
@@ -281,7 +283,7 @@ export type OutdoorStaticLayerKind =
 /** Decode and validate one closed outdoor-static source record. */
 export function decodeOutdoorStaticRecord(
 	response: Uint8Array,
-	requestedLandblockId: LandblockId,
+	requestedLandblockId: LandblockOwnerId,
 	expectedLayer: OutdoorStaticLayerKind,
 ): ResolvedOutdoorStaticLayerSource {
 	if (response.byteLength < HEADER_LENGTH) {
@@ -371,7 +373,7 @@ export function decodeOutdoorStaticRecord(
 			behavior: source.behavior,
 			placement: {
 				envCellId: null,
-				landblockId: manifest.landblockId as LandblockId,
+				landblockId: manifest.landblockId as LandblockOwnerId,
 				// Source scale remains explicit on the resident so static baking can compose it
 				// once with setup-part scale instead of silently applying it twice.
 				localTransform: acFrameTransform(resident.placement, [1, 1, 1]),
@@ -384,7 +386,7 @@ export function decodeOutdoorStaticRecord(
 	const { staticResidents, dynamicSources } =
 		classifyObjectResidents(residents);
 	const source = {
-		landblockId: manifest.landblockId as LandblockId,
+		landblockId: manifest.landblockId as LandblockOwnerId,
 		staticResidents,
 		dynamicSources,
 	};

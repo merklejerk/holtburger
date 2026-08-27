@@ -93,6 +93,7 @@ try {
 						filteringCycleStates: result.filteringCycleStates,
 						modeCycleStates: result.modeCycleStates,
 						portalExecution: result.portalExecution,
+						portalTransitionDemo: options.portalTransitionDemo,
 						portalContextLossPolicy: result.state.portalContextLossPolicy,
 						portalScopeAtlasTargets: result.state.portalScopeAtlasTargets,
 						consoleMessages: result.consoleMessages,
@@ -218,6 +219,7 @@ function parseArgs(args) {
 		minimumObjectFootprintCssPixelArea: null,
 		offscreenAnimationSampleIntervalMs: null,
 		executePortal: false,
+		portalTransitionDemo: false,
 		frameMode: null,
 		timeOfDay: null,
 		dayGroup: null,
@@ -592,6 +594,9 @@ function parseArgs(args) {
 				break;
 			case "--execute-portal":
 				parsed.executePortal = true;
+				break;
+			case "--portal-transition-demo":
+				parsed.portalTransitionDemo = true;
 				break;
 			case "--capture-frame": {
 				const value = Number(requireValue(args, ++index, arg));
@@ -1106,6 +1111,9 @@ Options:
                          Override offscreen visual animation sampling; zero is full cadence.
   --execute-portal
                          Execute the public portal compositor once through production GPU passes.
+  --portal-transition-demo
+                         Load the authored transition closure and hold the renderer in the loading
+                         transition for a screenshot. This is a harness-only diagnostic.
   --particle-seed <n>   Seed particle emission randomness so runs repeat exactly. Required for any
                          screenshot comparison of a scene containing particles.
   --capture-frame <n>   Freeze runtime time at frame n, so the captured instant is identical no
@@ -1359,6 +1367,8 @@ function briefHarnessReport(result) {
 		entityPopulation: result.entityPopulation,
 		envCellLayers: summarizeEnvCellLayers(staticObjects?.envCellLayers ?? []),
 		finalMetrics: result.state.metrics,
+		portalTransition: result.state.portalTransition,
+		portalTransitionDemo: options.portalTransitionDemo,
 		terrainGlTrace: result.state.terrainGlTrace,
 		ambientOcclusionCoverageCensus: result.state.ambientOcclusionCoverageCensus,
 		frameProfile: result.state.frameProfile,
@@ -2976,7 +2986,7 @@ async function hopToLandblock(client, options, landblockId, settleMs) {
 		"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.requestSceneInterest",
 		sceneInterestArgs(options, landblockId, options.generatedObjectRadius),
 	);
-	await waitForRequiredEnvCellPublication(client, landblockId);
+	await waitForRequiredEnvCellPublication(client);
 	await delay(settleMs);
 	return evaluate(
 		client,
@@ -3025,6 +3035,9 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 	const fixture = options.fixture
 		? `&fixture=${encodeURIComponent(options.fixture)}`
 		: "";
+	const portalTransitionDemo = options.portalTransitionDemo
+		? "&portalTransitionDemo=true"
+		: "";
 	const dynamicIsolation = options.isolateAuthoredDynamics
 		? "&isolateAuthoredDynamics=true"
 		: "";
@@ -3060,7 +3073,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			? ""
 			: "&audioTrace=1";
 	const terrainGlTrace = options.traceTerrainGl ? "&traceTerrainGl=true" : "";
-	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&cameraHeight=${encodeURIComponent(options.cameraHeight)}&viewportWidth=${encodeURIComponent(options.viewportWidth)}&viewportHeight=${encodeURIComponent(options.viewportHeight)}${dynamicIsolation}${dynamicExclusion}${attachmentExclusion}${fixture}${timeOfDay}${dayGroup}${particleSeed}${frameIntervalMs}${captureFrame}${audioTrace}${terrainGlTrace}`;
+	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&cameraHeight=${encodeURIComponent(options.cameraHeight)}&viewportWidth=${encodeURIComponent(options.viewportWidth)}&viewportHeight=${encodeURIComponent(options.viewportHeight)}${dynamicIsolation}${dynamicExclusion}${attachmentExclusion}${fixture}${portalTransitionDemo}${timeOfDay}${dayGroup}${particleSeed}${frameIntervalMs}${captureFrame}${audioTrace}${terrainGlTrace}`;
 	const chrome = startChild(options.chromePath, [
 		"--remote-debugging-port=0",
 		`--user-data-dir=${userDataDirectory}`,
@@ -3159,7 +3172,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				[options.textureFiltering ?? "nearest"],
 			);
 		}
-		await waitForRequiredEnvCellPublication(client, options.landblockId);
+		await waitForRequiredEnvCellPublication(client);
 		if (options.cameraPosition !== null) {
 			await evaluate(
 				client,
@@ -4099,27 +4112,21 @@ async function waitForHarnessApi(client) {
 }
 
 /** Wait only when the resolved demand actually contains EnvCells (including cold dungeons). */
-async function waitForRequiredEnvCellPublication(client, requestedLandblockId) {
+async function waitForRequiredEnvCellPublication(client) {
 	const state = await evaluate(
 		client,
 		"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
 		[],
 	);
-	if (
-		!state.sceneInterest?.interest?.some(({ layers }) =>
-			layers.includes("env-cells"),
-		)
-	) {
-		return;
-	}
-	await waitForEnvCellPublication(client, requestedLandblockId);
+	const requiredLandblockIds =
+		state.sceneInterest?.interest
+			?.filter(({ layers }) => layers.includes("env-cells"))
+			.map(({ landblockId }) => landblockId.toLowerCase()) ?? [];
+	if (requiredLandblockIds.length === 0) return;
+	await waitForEnvCellPublications(client, requiredLandblockIds);
 }
 
-async function waitForEnvCellPublication(client, requestedLandblockId) {
-	const expectedId = requestedLandblockId
-		.toLowerCase()
-		.replace(/^0x/, "")
-		.slice(0, 4);
+async function waitForEnvCellPublications(client, requiredLandblockIds) {
 	const timeoutAt = Date.now() + 30_000;
 	while (Date.now() < timeoutAt) {
 		const state = await evaluate(
@@ -4132,18 +4139,21 @@ async function waitForEnvCellPublication(client, requestedLandblockId) {
 				`Browser harness failed while awaiting EnvCell publication: ${state.error}`,
 			);
 		}
+		const residentLandblockIds = new Set(
+			state.staticObjects?.envCellLayers.map(({ landblockId }) =>
+				landblockId.toLowerCase(),
+			) ?? [],
+		);
 		if (
-			state.staticObjects?.envCellLayers.some(
-				({ landblockId }) =>
-					landblockId.toLowerCase().slice(2, 6) === expectedId,
+			requiredLandblockIds.every((landblockId) =>
+				residentLandblockIds.has(landblockId),
 			)
-		) {
+		)
 			return;
-		}
 		await delay(100);
 	}
 	throw new Error(
-		`Timed out awaiting EnvCell publication for landblock 0x${expectedId}ffff.`,
+		`Timed out awaiting EnvCell publication for required owners ${requiredLandblockIds.join(", ")}.`,
 	);
 }
 

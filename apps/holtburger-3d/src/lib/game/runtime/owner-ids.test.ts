@@ -5,11 +5,11 @@ import {
 	landblockLayerToOwnerId,
 	parseLandblockLayerOwnerId,
 } from "./owner-ids";
-import type { LandblockId } from "../game-types";
+import type { LandblockOwnerId } from "../game-types";
 
 describe("landblock-layer owner IDs", () => {
 	it("round-trips the structured owner facts", () => {
-		const landblockId = "0xda55ffff" as LandblockId;
+		const landblockId = "0xda55ffff" as LandblockOwnerId;
 		expect(
 			parseLandblockLayerOwnerId(
 				landblockLayerToOwnerId(landblockId, LandblockLayerKind.EnvCells),

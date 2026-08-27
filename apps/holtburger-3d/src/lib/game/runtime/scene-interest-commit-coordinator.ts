@@ -9,6 +9,10 @@ import type {
 	SceneInterestReceipt,
 	SceneInterestRevision,
 } from "./scene-availability";
+import { HostRequestGate } from "../../host/host-request-gate";
+
+/** Leave ample protocol headroom while keeping the four-worker host content pool supplied. */
+const MAX_SCENE_LANDBLOCK_REQUESTS = 32;
 
 /** Runtime mutation callbacks kept outside the asynchronous scene-interest loading coordinator. */
 export interface SceneInterestCommitCoordinatorCallbacks {
@@ -41,6 +45,7 @@ export interface SceneInterestCommitCoordinatorCallbacks {
 export class SceneInterestCommitCoordinator {
 	readonly #callbacks: SceneInterestCommitCoordinatorCallbacks;
 	readonly #pipeline: CommitPipeline;
+	readonly #requests: HostRequestGate;
 	readonly #layerRevisions = new Map<string, SceneInterestRevision>();
 	#interest: SceneInterestMap = new Map();
 	#nextRevision = 0;
@@ -49,9 +54,11 @@ export class SceneInterestCommitCoordinator {
 	constructor(
 		pipeline: CommitPipeline,
 		callbacks: SceneInterestCommitCoordinatorCallbacks,
+		maxConcurrentRequests = MAX_SCENE_LANDBLOCK_REQUESTS,
 	) {
 		this.#pipeline = pipeline;
 		this.#callbacks = callbacks;
+		this.#requests = new HostRequestGate(maxConcurrentRequests);
 	}
 
 	/** Reconcile one complete interest set and dispatch only newly demanded layers. */
@@ -74,7 +81,11 @@ export class SceneInterestCommitCoordinator {
 			this.#layerRevisions.set(layerKey(layer), revision);
 		}
 		for (const layers of groupLandblockLayers(newLayers).values()) {
-			void this.#prepareLandblock(layers, revision);
+			void this.#requests
+				.schedule(() => this.#prepareLandblock(layers, revision))
+				.catch((error: unknown) => {
+					if (!this.#destroyed) console.error(error);
+				});
 		}
 		return { revision };
 	}
@@ -90,6 +101,7 @@ export class SceneInterestCommitCoordinator {
 	/** Stop new publication; already running workers may finish and are then discarded. */
 	destroy(): void {
 		this.#destroyed = true;
+		this.#requests.destroy();
 		this.#layerRevisions.clear();
 		this.#interest = new Map();
 	}
@@ -98,10 +110,16 @@ export class SceneInterestCommitCoordinator {
 		layers: readonly LandblockIdLayer[],
 		dispatchRevision: SceneInterestRevision,
 	): Promise<void> {
+		// Re-evaluate after leaving the bounded queue. Superseded owners never create a stale host
+		// request, while retained layers from a partially changed owner still complete normally.
+		const currentLayers = layers.filter((layer) =>
+			this.#isCurrent(layer, dispatchRevision),
+		);
+		if (currentLayers.length === 0) return;
 		try {
-			const requestedLayers = new Set(layers.map(layerKey));
+			const requestedLayers = new Set(currentLayers.map(layerKey));
 			const artifacts = await this.#pipeline.prepareLandblockLayers(
-				new Set(layers),
+				new Set(currentLayers),
 			);
 			const preparedLayers = new Set<string>();
 			for (const artifact of artifacts) {
@@ -111,7 +129,7 @@ export class SceneInterestCommitCoordinator {
 				preparedLayers.add(layerKey(layer));
 				this.#callbacks.prepared({ artifact, revision: dispatchRevision });
 			}
-			for (const layer of layers) {
+			for (const layer of currentLayers) {
 				if (
 					this.#isCurrent(layer, dispatchRevision) &&
 					!preparedLayers.has(layerKey(layer))
@@ -121,7 +139,7 @@ export class SceneInterestCommitCoordinator {
 			}
 		} catch (error) {
 			console.error(error);
-			for (const layer of layers) {
+			for (const layer of currentLayers) {
 				if (this.#isCurrent(layer, dispatchRevision)) {
 					this.#callbacks.failed({ error, layer, revision: dispatchRevision });
 				}

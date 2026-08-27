@@ -17,7 +17,7 @@
 	import { createElectronHostTransport } from "../lib/host/electron-host-transport";
 	import type { SceneInterestRadii } from "../lib/game/runtime/types";
 	import { LandblockLayerKind } from "../lib/game/runtime/scene-interest";
-	import type { LandblockId } from "../lib/game/game-types";
+	import type { LandblockOwnerId } from "../lib/game/game-types";
 	import type { ExplorerResidencyResolution } from "./explorer-residency";
 	import {
 		SceneInterestRequestCoordinator,
@@ -157,6 +157,11 @@
 	let unsubscribePossessionOutcomes: (() => void) | undefined;
 	let dynamicEntityReconciliation: Promise<void> = Promise.resolve();
 	let dynamicEntityReconciliationRevision = 0;
+	/** Exact ordinary dynamic reconciliation withholding an activated destination's first frame. */
+	let sceneActivationPresentationConvergence: {
+		readonly completion: Promise<void>;
+		ready: boolean;
+	} | null = null;
 	let entityCatalog = $state<ExplorerCatalogCapability | null>(null);
 	let spawnedEntities = $state<readonly DynamicEntityView[]>([]);
 	let spawnedEntityPresentationError = $state<string | null>(null);
@@ -579,7 +584,13 @@
 				).catch((error: unknown) => {
 					physicalCameraError = errorMessage(error);
 				});
-				cameraCoordinator?.requestSceneInterest(resolved);
+				cameraController?.setInputEnabled(false);
+				if (cameraCoordinator !== undefined) {
+					await cameraCoordinator.requestSceneInterest(
+						resolved,
+						request.revision,
+					);
+				}
 			} catch (error: unknown) {
 				if (!requestCoordinator.isCurrent(request.revision)) return;
 				cameraFocusStatus = `Scene target unavailable: ${errorMessage(error)}`;
@@ -588,7 +599,7 @@
 	}
 
 	async function requestSimulationInterest(
-		anchorLandblockId: string,
+		anchorLandblockId: LandblockOwnerId,
 	): Promise<SimulationInterestReceipt> {
 		const controller = simulationInterestController;
 		if (!controller) {
@@ -611,7 +622,7 @@
 
 	/** Await collision authority for a mutation that is about to enter the host. */
 	async function awaitCurrentSimulationInterest(
-		anchorLandblockId: string,
+		anchorLandblockId: LandblockOwnerId,
 	): Promise<SimulationInterestReceipt> {
 		const receipt = await requestSimulationInterest(anchorLandblockId);
 		if (!receipt.committed) {
@@ -689,7 +700,9 @@
 		}
 	}
 
-	function followPhysicalSimulationInterest(anchorLandblockId: string): void {
+	function followPhysicalSimulationInterest(
+		anchorLandblockId: LandblockOwnerId,
+	): void {
 		if (physicalSimulationAnchor === anchorLandblockId) return;
 		physicalSimulationAnchor = anchorLandblockId;
 		void requestSimulationInterest(anchorLandblockId).catch(
@@ -948,10 +961,19 @@
 		spawnedEntityPresentationError = null;
 		const completion = runtime.reconcileDynamicEntities(entities);
 		dynamicEntityReconciliation = completion;
+		if (cameraCoordinator?.activationReady()) {
+			const convergence = { completion, ready: false };
+			sceneActivationPresentationConvergence = convergence;
+			void completion.then(() => {
+				if (sceneActivationPresentationConvergence === convergence)
+					convergence.ready = true;
+			});
+		}
 		void completion.catch((error: unknown) => {
 			if (revision !== dynamicEntityReconciliationRevision) return;
 			const wcids = entities.map(({ identity }) => identity.wcid).join(", ");
 			spawnedEntityPresentationError = `Presentation reconciliation for WCID ${wcids || "<none>"}: ${errorMessage(error)}`;
+			console.error(spawnedEntityPresentationError, error);
 		});
 		return completion;
 	}
@@ -1659,7 +1681,7 @@
 				possessionOutcomeUnsubscribe?.();
 				entitySession?.stop();
 				coordinator?.dispose();
-				requestCoordinator?.destroy();
+				requestCoordinator?.invalidate();
 				controller?.dispose();
 				try {
 					await boomSession?.stop();
@@ -1778,6 +1800,20 @@
 						);
 					}
 					gameRuntime.tick();
+					cameraCoordinator?.pollSceneActivation();
+					const staticActivationReady =
+						cameraCoordinator?.activationReady() ?? false;
+					const activationPending =
+						cameraCoordinator?.activationPending() ?? false;
+					if (!activationPending || !staticActivationReady) {
+						sceneActivationPresentationConvergence = null;
+					} else if (sceneActivationPresentationConvergence === null) {
+						void reconcileSpawnedEntities();
+					}
+					cameraController?.setInputEnabled(!activationPending);
+					gameRuntime.setPortalTransition(
+						cameraCoordinator?.portalTransitionFrame(),
+					);
 					const projection = resolveCameraProjection(gameRuntime, canvas);
 					const residencySync = syncActiveCamera(
 						physicalPlacement,
@@ -1809,8 +1845,38 @@
 						followCameraSceneInterest(followResidency);
 					}
 					const updateAndDrawStartedAt = performance.now();
-					if (residencySync.renderable) {
+					const activationReady =
+						staticActivationReady &&
+						(sceneActivationPresentationConvergence?.ready ?? false);
+					if (
+						residencySync.renderable &&
+						(!activationPending || activationReady)
+					) {
+						if (activationReady) {
+							cameraCoordinator?.advancePortalTransition(tickStartedAt, false);
+							gameRuntime.setPortalTransition(
+								cameraCoordinator?.portalTransitionFrame(),
+							);
+						}
 						gameRuntime.render(performance.now() / 1_000);
+						let reveal = null;
+						if (activationReady) {
+							reveal =
+								cameraCoordinator?.advancePortalTransition(
+									tickStartedAt,
+									true,
+								) ?? null;
+							gameRuntime.setPortalTransition(
+								cameraCoordinator?.portalTransitionFrame(),
+							);
+						} else {
+							cameraCoordinator?.markRenderedFrame();
+						}
+						if (reveal !== null) {
+							cameraCoordinator?.completeSceneActivation();
+							sceneActivationPresentationConvergence = null;
+							cameraController?.setInputEnabled(true);
+						}
 					}
 					const frameFinishedAt = performance.now();
 

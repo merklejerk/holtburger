@@ -1,4 +1,4 @@
-import type { EnvCellId, LandblockId } from "../game-types";
+import type { EnvCellId, LandblockOwnerId } from "../game-types";
 import type { AABB3, Mat4, Vec3 } from "../math/types";
 
 /** Opaque identity assigned by SceneGraph to one canonical scene node. */
@@ -7,7 +7,7 @@ export type SceneNodeId = `scene-node:${number}`;
 /** Landblock and optional environment-cell residency of a transform tree. */
 export interface SceneResidency {
 	/** Landblock whose local coordinate frame contains the complete tree. */
-	readonly landblockId: LandblockId;
+	readonly landblockId: LandblockOwnerId;
 	/** Optional environment cell occupied by this root within its landblock. */
 	readonly envCellId: EnvCellId | null;
 }
@@ -20,7 +20,7 @@ export type SceneScope =
 	  }
 	| {
 			readonly kind: "env-cell";
-			readonly landblockId: LandblockId;
+			readonly landblockId: LandblockOwnerId;
 			readonly envCellId: EnvCellId;
 	  };
 
@@ -74,7 +74,7 @@ type SceneVisibilityIslandId = `env-cell-island:${string}`;
 /** One material-free planar aperture expressed in an owning landblock frame. */
 interface ScenePortalAperture {
 	readonly id: `portal-aperture:${string}`;
-	readonly landblockId: LandblockId;
+	readonly landblockId: LandblockOwnerId;
 	readonly landblockBounds: AABB3;
 	readonly vertices: Float32Array;
 	readonly indices: Uint32Array;
@@ -114,7 +114,7 @@ export interface ScenePortalCrossingInput {
 		  }
 		| {
 				readonly kind: "exterior-transition";
-				readonly exteriorLandblockId: LandblockId;
+				readonly exteriorLandblockId: LandblockOwnerId;
 		  };
 	/** Authored directed geometry used for entry-side, junction, and topology decisions. */
 	readonly sourceAperture: ScenePortalAperture;

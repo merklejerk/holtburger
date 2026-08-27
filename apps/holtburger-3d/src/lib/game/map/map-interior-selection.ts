@@ -1,4 +1,4 @@
-import type { EnvCellId, LandblockId } from "../game-types";
+import type { EnvCellId, LandblockOwnerId } from "../game-types";
 import type { SceneResidency } from "../scene";
 import type { MapGeometryStore } from "./map-geometry-store";
 import {
@@ -17,7 +17,7 @@ const EMPTY_INTERIOR_COMPONENT: ReadonlySet<EnvCellId> = new Set();
  * changes underneath it, rather than every time the anchor moves.
  */
 export class MapInteriorSelection {
-	#landblockId: LandblockId | null = null;
+	#landblockId: LandblockOwnerId | null = null;
 	#component: ReadonlySet<EnvCellId> = EMPTY_INTERIOR_COMPONENT;
 	#storeRevision = -1;
 

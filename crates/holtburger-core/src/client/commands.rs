@@ -187,6 +187,7 @@ impl ClientRuntime {
             | ClientCommand::CancelAttack
             | ClientCommand::Ping
             | ClientCommand::RequestCurrentApplicationState
+            | ClientCommand::AcknowledgeClientWorldReveal { .. }
             | ClientCommand::SetFellowshipUpdatesSubscribed { .. }
             | ClientCommand::QueryEntityDebugInfo(_)
             | ClientCommand::Disconnect
@@ -236,6 +237,11 @@ impl ClientRuntime {
             }
             ClientCommand::SelectCharacter(id) => {
                 log::info!("Selecting character: 0x{:08X}", id);
+                // Selection is the command's input, so publish it before starting the
+                // activation barrier. `select_character` also stores it, but only after the
+                // asynchronous request setup; beginning the transition first would leave the
+                // barrier without the identity it is required to hydrate.
+                self.character_selection.character_id = Some(id);
                 self.begin_world_entry_transition().await?;
                 self.character_selection
                     .select_character(id, &mut self.session)
@@ -892,6 +898,11 @@ impl ClientRuntime {
     async fn handle_movement_command(&mut self, cmd: ClientCommand) -> Result<()> {
         match cmd {
             ClientCommand::DriveSelf(intent) => {
+                if self.activation.is_some() || !matches!(self.state, ClientState::InWorld) {
+                    // Activation owns the input boundary. A stale held-drive edge must not be
+                    // replayed after the destination handoff, and it is not a runtime failure.
+                    return Ok(());
+                }
                 log::info!(">>> Queueing self drive intent: {:?}", intent);
                 self.movement.enqueue_drive_intent(intent, Instant::now());
                 Ok(())
@@ -903,6 +914,9 @@ impl ClientRuntime {
     async fn handle_camera_command(&mut self, cmd: ClientCommand) -> Result<()> {
         match cmd {
             ClientCommand::StartClientCamera(request) => {
+                if self.activation.is_none() && !matches!(self.state, ClientState::InWorld) {
+                    return Ok(());
+                }
                 let receipt = self.start_camera(request)?;
                 log::info!(
                     "accepted client camera generation {} for player {:?}",
@@ -912,9 +926,15 @@ impl ClientRuntime {
                 Ok(())
             }
             ClientCommand::SetClientCameraIntent(request) => {
+                if self.activation.is_some() || !matches!(self.state, ClientState::InWorld) {
+                    return Ok(());
+                }
                 self.set_camera_intent(request).map(|_| ())
             }
             ClientCommand::SetClientCameraClearance(request) => {
+                if self.activation.is_some() || !matches!(self.state, ClientState::InWorld) {
+                    return Ok(());
+                }
                 self.set_camera_clearance(request).map(|_| ())
             }
             ClientCommand::StopClientCamera(identity) => {
@@ -936,6 +956,13 @@ impl ClientRuntime {
                 log::info!(">>> Client requested current application snapshot");
                 self.emit_current_application_snapshot();
                 Ok(())
+            }
+            ClientCommand::AcknowledgeClientWorldReveal { world_generation } => {
+                log::info!(
+                    ">>> Client acknowledged world reveal for generation {}",
+                    world_generation
+                );
+                self.acknowledge_world_reveal(world_generation).await
             }
             ClientCommand::SetFellowshipUpdatesSubscribed { enabled } => {
                 if !matches!(self.state, ClientState::InWorld) {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+	cellId,
 	decodeDynamicEntityEvent,
 	decodeDynamicEntityView,
 	DynamicEntityMirror,
@@ -54,7 +55,7 @@ function entity(
 				reachedEnvCellIds: [],
 			},
 			pose: {
-				landblockId: 0xda550001,
+				landblockId: cellId(0xda550001),
 				coords: { x: 1, y: 2, z: 3 },
 				rotation: { w: 1, x: 0, y: 0, z: 0 },
 			},

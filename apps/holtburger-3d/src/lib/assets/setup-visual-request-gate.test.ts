@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { MAX_PENDING_REQUESTS } from "../host/host-limits";
-import {
-	DynamicEntityVisualRequestGate,
-	MAX_DYNAMIC_ENTITY_VISUAL_REQUESTS,
-} from "./dynamic-entity-visual-host-source";
+import { HostRequestGate } from "../host/host-request-gate";
+import { MAX_SETUP_VISUAL_REQUESTS } from "./setup-visual-host-source";
 import {
 	DynamicEntityMirror,
 	type DynamicEntitySnapshot,
@@ -14,9 +12,9 @@ import {
 const OBSERVED_ENTITY_COUNT = 308;
 const STRESS_ENTITY_COUNT = 600;
 
-describe("dynamic entity visual request gate", () => {
+describe("setup visual request gate", () => {
 	it("keeps the observed and stress snapshots below the sidecar pending cap", async () => {
-		const gate = new DynamicEntityVisualRequestGate();
+		const gate = new HostRequestGate(MAX_SETUP_VISUAL_REQUESTS);
 		let completed = 0;
 		const requests = Array.from({ length: STRESS_ENTITY_COUNT }, () =>
 			gate.schedule(async () => {
@@ -28,7 +26,7 @@ describe("dynamic entity visual request gate", () => {
 		await Promise.all(requests);
 
 		expect(completed).toBe(STRESS_ENTITY_COUNT);
-		expect(gate.peakActiveCount).toBe(MAX_DYNAMIC_ENTITY_VISUAL_REQUESTS);
+		expect(gate.peakActiveCount).toBe(MAX_SETUP_VISUAL_REQUESTS);
 		expect(gate.peakActiveCount).toBeLessThan(MAX_PENDING_REQUESTS);
 	});
 

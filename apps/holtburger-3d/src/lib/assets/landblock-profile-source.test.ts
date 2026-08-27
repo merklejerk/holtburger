@@ -11,13 +11,13 @@ describe("landblock profile source", () => {
 			decodeLandblockProfile(
 				{
 					landblockId: "0x0005ffff",
-					traversalClass: "dungeon-only",
+					sceneClass: "dungeon-only",
 				},
 				"0x0005ffff",
 			),
 		).toEqual({
 			landblockId: "0x0005ffff",
-			traversalClass: "dungeon-only",
+			sceneClass: "dungeon-only",
 		});
 		expect(decodeLandblockProfile(null, "0x0005ffff")).toBeNull();
 	});
@@ -27,7 +27,7 @@ describe("landblock profile source", () => {
 			decodeLandblockProfile(
 				{
 					landblockId: "0x0005ffff",
-					traversalClass: "dungeon",
+					sceneClass: "dungeon",
 				},
 				"0x0005ffff",
 			),
@@ -36,7 +36,7 @@ describe("landblock profile source", () => {
 			decodeLandblockProfile(
 				{
 					landblockId: "0x0006ffff",
-					traversalClass: "dungeon-only",
+					sceneClass: "dungeon-only",
 				},
 				"0x0005ffff",
 			),
@@ -50,7 +50,7 @@ describe("landblock profile source", () => {
 				.mockResolvedValueOnce(null)
 				.mockResolvedValue({
 					landblockId: "0x0005ffff",
-					traversalClass: "dungeon-only" as const,
+					sceneClass: "dungeon-only" as const,
 				}),
 		};
 		const cached = new CachedLandblockProfileSource(source);
@@ -73,7 +73,7 @@ describe("landblock profile source", () => {
 				.mockRejectedValueOnce(new Error("temporary profile failure"))
 				.mockResolvedValue({
 					landblockId: "0x0005ffff",
-					traversalClass: "dungeon-only" as const,
+					sceneClass: "dungeon-only" as const,
 				}),
 		};
 		const cached = new CachedLandblockProfileSource(source);
@@ -83,7 +83,7 @@ describe("landblock profile source", () => {
 		);
 		await expect(cached.loadLandblockProfile("0x0005ffff")).resolves.toEqual({
 			landblockId: "0x0005ffff",
-			traversalClass: "dungeon-only",
+			sceneClass: "dungeon-only",
 		});
 		expect(source.loadLandblockProfile).toHaveBeenCalledTimes(2);
 	});

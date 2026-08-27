@@ -6,6 +6,16 @@ use holtburger_world::SpatialBodyId;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+/// Internal tick classification used to choose the dynamic-feed edge. Portal replacement is
+/// consumed here and never emitted as a presentation discontinuity; only in-place reset and
+/// correction producers cross that external boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ClientAdvanceDiscontinuityKind {
+    Teleport,
+    ForcedReposition,
+    Reset,
+}
+
 impl ClientRuntime {
     fn should_send_keepalive_ping(&self, now: Instant) -> bool {
         matches!(self.state, ClientState::InWorld)
@@ -86,6 +96,14 @@ impl ClientRuntime {
     }
 
     pub(super) fn handle_runtime_world_event(&mut self, event: &WorldEvent) {
+        self.handle_runtime_world_event_with_context(event, false);
+    }
+
+    pub(super) fn handle_runtime_world_event_with_context(
+        &mut self,
+        event: &WorldEvent,
+        teleport_batch: bool,
+    ) {
         match event {
             WorldEvent::RuntimeBodiesReset { .. } => {
                 self.movement.reset_manual_motion_playback();
@@ -94,13 +112,18 @@ impl ClientRuntime {
                 if let Some(coordinator) = self.collision_coordinator.as_mut() {
                     coordinator.invalidate();
                 }
-                self.bump_world_generation();
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::WorldDiscontinuity {
-                        world_generation: self.world_generation,
-                        kind: ClientWorldDiscontinuityKind::Reset,
-                    });
+                // PlayerTeleport emits this reset as an effect before its identifying edge. The
+                // batch handler lets the TeleportStarted event own the one generation increment;
+                // a standalone reset remains an in-place presentation discontinuity.
+                if !teleport_batch && self.activation.is_none() {
+                    self.bump_world_generation();
+                    let _ = self.client_view_event_tx.send(
+                        ClientViewEvent::PresentationDiscontinuity {
+                            world_generation: self.world_generation,
+                            kind: ClientPresentationDiscontinuityKind::Reset,
+                        },
+                    );
+                }
             }
             WorldEvent::ForcedReposition { guid, .. } if *guid == self.world.player.guid => {
                 self.movement.reset_manual_motion_playback();
@@ -109,28 +132,21 @@ impl ClientRuntime {
                 if let Some(coordinator) = self.collision_coordinator.as_mut() {
                     coordinator.invalidate();
                 }
-                self.bump_world_generation();
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::WorldDiscontinuity {
-                        world_generation: self.world_generation,
-                        kind: ClientWorldDiscontinuityKind::ForcedReposition,
-                    });
+                if self.activation.is_none() {
+                    self.bump_world_generation();
+                    let _ = self.client_view_event_tx.send(
+                        ClientViewEvent::PresentationDiscontinuity {
+                            world_generation: self.world_generation,
+                            kind: ClientPresentationDiscontinuityKind::ForcedReposition,
+                        },
+                    );
+                }
             }
             WorldEvent::TeleportStarted { .. } => {
-                self.movement.reset_manual_motion_playback();
-                self.movement.clear_server_correction();
-                self.reset_camera();
-                if let Some(coordinator) = self.collision_coordinator.as_mut() {
-                    coordinator.invalidate();
-                }
-                self.bump_world_generation();
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::WorldDiscontinuity {
-                        world_generation: self.world_generation,
-                        kind: ClientWorldDiscontinuityKind::Teleport,
-                    });
+                self.start_world_activation(
+                    ClientWorldActivationState::Teleport,
+                    self.world.player.guid,
+                );
             }
             _ => {}
         }
@@ -227,21 +243,27 @@ impl ClientRuntime {
                     let dt_duration = Duration::from_secs_f32(dt.max(0.0));
                     last_physics_time = now;
 
-                    let before_dynamic = matches!(self.state, ClientState::InWorld)
-                        .then(|| self.current_dynamic_entity_views())
-                        .unwrap_or_default();
+                    let active_world = self.activation.is_none()
+                        && matches!(self.state, ClientState::InWorld);
+                    let before_dynamic = if active_world {
+                        self.current_dynamic_entity_views()
+                    } else {
+                        Default::default()
+                    };
                     let mut discontinuity = None;
 
-                    let movement_events = self
-                        .movement
-                        .tick(now, &mut self.world, &mut self.session)
-                        .await
-                        .inspect_err(|_| {
-                            self.set_exit_cause(ClientExitCause::RuntimeFailure);
-                        })?;
-                    for event in movement_events {
-                        discontinuity = discontinuity.or(self.world_discontinuity_kind(&event));
-                        self.handle_runtime_world_event(&event);
+                    if active_world {
+                        let movement_events = self
+                            .movement
+                            .tick(now, &mut self.world, &mut self.session)
+                            .await
+                            .inspect_err(|_| {
+                                self.set_exit_cause(ClientExitCause::RuntimeFailure);
+                            })?;
+                        for event in movement_events {
+                            discontinuity = discontinuity.or(self.world_discontinuity_kind(&event));
+                            self.handle_runtime_world_event(&event);
+                        }
                     }
 
                     let physics_events = self.world.tick();
@@ -259,31 +281,37 @@ impl ClientRuntime {
                         }
                     }
 
+                    self.try_complete_world_activation().await?;
+
+                    let active_world = self.activation.is_none()
+                        && matches!(self.state, ClientState::InWorld);
                     let collision_snapshot = self
                         .collision_coordinator
                         .as_ref()
                         .and_then(|coordinator| coordinator.snapshot());
-                    let simulation_events = self.simulation.tick(
-                        now,
-                        dt_duration,
-                        &mut self.world,
-                        &mut self.movement,
-                        collision_snapshot.as_ref(),
-                    ).inspect_err(|_| {
-                        self.set_exit_cause(ClientExitCause::RuntimeFailure);
-                    })?;
-                    for event in simulation_events {
-                        discontinuity = discontinuity.or(self.world_discontinuity_kind(&event));
-                        self.handle_runtime_world_event(&event);
+                    if active_world {
+                        let simulation_events = self.simulation.tick(
+                            now,
+                            dt_duration,
+                            &mut self.world,
+                            &mut self.movement,
+                            collision_snapshot.as_ref(),
+                        ).inspect_err(|_| {
+                            self.set_exit_cause(ClientExitCause::RuntimeFailure);
+                        })?;
+                        for event in simulation_events {
+                            discontinuity = discontinuity.or(self.world_discontinuity_kind(&event));
+                            self.handle_runtime_world_event(&event);
+                        }
                     }
 
                     let dynamic_event = if !before_dynamic.is_empty() {
                         let kind = match discontinuity {
-                            Some(ClientWorldDiscontinuityKind::Teleport) => {
+                            Some(ClientAdvanceDiscontinuityKind::Teleport) => {
                                 DynamicEntityPlacementAdvanceKind::Teleport
                             }
-                            Some(ClientWorldDiscontinuityKind::ForcedReposition)
-                            | Some(ClientWorldDiscontinuityKind::Reset) => {
+                            Some(ClientAdvanceDiscontinuityKind::ForcedReposition)
+                            | Some(ClientAdvanceDiscontinuityKind::Reset) => {
                                 DynamicEntityPlacementAdvanceKind::Reset
                             }
                             None => DynamicEntityPlacementAdvanceKind::Integrated,
@@ -307,12 +335,14 @@ impl ClientRuntime {
                             .client_view_event_tx
                             .send(ClientViewEvent::DynamicEntity(event));
                     }
-                    if let Some(tick) = self.advance_camera(
-                        collision_snapshot.as_ref(),
-                        dynamic_batch.as_ref(),
-                        dt_duration,
-                    )? {
-                        self.emit_camera_event(tick);
+                    if active_world
+                        && let Some(tick) = self.advance_camera(
+                            collision_snapshot.as_ref(),
+                            dynamic_batch.as_ref(),
+                            dt_duration,
+                        )?
+                    {
+                            self.emit_camera_event(tick);
                     }
                 }
             }
@@ -327,13 +357,16 @@ impl ClientRuntime {
     ///
     /// Remote forced repositions are ordinary per-entity corrections. Treating one as a world
     /// reset would unnecessarily invalidate every renderer-owned interpolation timeline.
-    fn world_discontinuity_kind(&self, event: &WorldEvent) -> Option<ClientWorldDiscontinuityKind> {
+    fn world_discontinuity_kind(
+        &self,
+        event: &WorldEvent,
+    ) -> Option<ClientAdvanceDiscontinuityKind> {
         match event {
-            WorldEvent::RuntimeBodiesReset { .. } => Some(ClientWorldDiscontinuityKind::Reset),
+            WorldEvent::RuntimeBodiesReset { .. } => Some(ClientAdvanceDiscontinuityKind::Reset),
             WorldEvent::ForcedReposition { guid, .. } if *guid == self.world.player.guid => {
-                Some(ClientWorldDiscontinuityKind::ForcedReposition)
+                Some(ClientAdvanceDiscontinuityKind::ForcedReposition)
             }
-            WorldEvent::TeleportStarted { .. } => Some(ClientWorldDiscontinuityKind::Teleport),
+            WorldEvent::TeleportStarted { .. } => Some(ClientAdvanceDiscontinuityKind::Teleport),
             _ => None,
         }
     }

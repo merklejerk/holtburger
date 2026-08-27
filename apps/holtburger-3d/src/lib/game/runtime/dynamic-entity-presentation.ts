@@ -1,6 +1,6 @@
 import { acFrameTransform } from "../../assets/ac-frame";
 import type { DecodedStaticPresentation } from "../../assets/decode-static-source-record";
-import type { DatAssetId, EnvCellId, LandblockId } from "../game-types";
+import type { DatAssetId, EnvCellId, LandblockOwnerId } from "../game-types";
 import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
 import { Vec3 } from "../math/types";
 import type { PlacedDynamicPresentationSource } from "../systems/dynamic-presentation-source";
@@ -74,7 +74,7 @@ export function dynamicEntityPlacementFromPoint(
 	const selector = cellId & 0xffff;
 	const landblockId = datAssetId(
 		(cellId & 0xffff_0000) | 0xffff,
-	) as LandblockId;
+	) as LandblockOwnerId;
 	return {
 		envCellId: selector >= 0x0100 ? (datAssetId(cellId) as EnvCellId) : null,
 		landblockId,
@@ -155,7 +155,7 @@ function spatialMembershipScopes(
 			kind: "env-cell",
 			landblockId: datAssetId(
 				(envCellId & 0xffff_0000) | 0xffff,
-			) as LandblockId,
+			) as LandblockOwnerId,
 		});
 	}
 	return scopes;

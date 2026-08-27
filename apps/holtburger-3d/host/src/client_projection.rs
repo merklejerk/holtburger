@@ -3,7 +3,7 @@
 use holtburger_common::Guid;
 use holtburger_core::{
     ClientApplicationSnapshot, ClientCameraStartReceipt, ClientCameraTick, ClientExitCause,
-    ClientLifecycleState, ClientViewEvent, DynamicEntityEvent,
+    ClientLifecycleState, ClientViewEvent, ClientWorldActivationCause, DynamicEntityEvent,
 };
 use serde::Serialize;
 
@@ -23,9 +23,13 @@ pub enum ClientLifecycleWire {
     EnteringWorld {
         character_guid: Guid,
     },
-    InWorld {
-        player_guid: Guid,
+    PortalSpace {
+        /// Generation shared by the pending world replacement and its renderer products.
+        world_generation: u64,
+        /// Authority-proven reason for replacing the active scene.
+        cause: ClientWorldActivationCauseWire,
     },
+    InWorld,
     Exiting {
         cause: ClientExitCauseWire,
     },
@@ -56,10 +60,16 @@ pub enum ClientExitCauseWire {
 
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum ClientWorldDiscontinuityWire {
-    Teleport,
+pub enum ClientPresentationDiscontinuityWire {
     ForcedReposition,
     Reset,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClientWorldActivationCauseWire {
+    InitialEntry,
+    Teleport,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -67,6 +77,8 @@ pub enum ClientWorldDiscontinuityWire {
 pub struct ClientCurrentState {
     /// Complete renderer-facing lifecycle level.
     pub lifecycle: ClientLifecycleWire,
+    /// Exact local-player identity, absent until the server creates the player object.
+    pub local_player_guid: Option<Guid>,
     /// Synchronized server time, absent until a server time-sync arrives.
     pub server_time: Option<f64>,
     /// Monotonic generation invalidating presentation history across discontinuities.
@@ -77,11 +89,11 @@ pub struct ClientCurrentState {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ClientWorldDiscontinuity {
+pub struct ClientPresentationDiscontinuity {
     /// Generation that becomes current after this edge.
     pub world_generation: u64,
     /// Authority-classified discontinuity kind.
-    pub kind: ClientWorldDiscontinuityWire,
+    pub kind: ClientPresentationDiscontinuityWire,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -99,11 +111,12 @@ pub struct ClientExitRequested {
 pub enum ClientHostEvent {
     CurrentState(ClientCurrentState),
     LifecycleChanged(ClientLifecycleWire),
+    LocalPlayerEstablished { player_guid: Guid },
     ServerTimeUpdated { time: f64 },
     DynamicEntity(DynamicEntityEvent),
     Camera(ClientCameraTick),
     CameraStarted(ClientCameraStartReceipt),
-    WorldDiscontinuity(ClientWorldDiscontinuity),
+    PresentationDiscontinuity(ClientPresentationDiscontinuity),
     ExitRequested(ClientExitRequested),
 }
 
@@ -126,12 +139,26 @@ impl From<&ClientLifecycleState> for ClientLifecycleWire {
             ClientLifecycleState::EnteringWorld { character_guid } => Self::EnteringWorld {
                 character_guid: *character_guid,
             },
-            ClientLifecycleState::InWorld { player_guid } => Self::InWorld {
-                player_guid: *player_guid,
+            ClientLifecycleState::PortalSpace {
+                world_generation,
+                cause,
+            } => Self::PortalSpace {
+                world_generation: *world_generation,
+                cause: (*cause).into(),
             },
+            ClientLifecycleState::InWorld => Self::InWorld,
             ClientLifecycleState::Exiting { cause } => Self::Exiting {
                 cause: (*cause).into(),
             },
+        }
+    }
+}
+
+impl From<ClientWorldActivationCause> for ClientWorldActivationCauseWire {
+    fn from(cause: ClientWorldActivationCause) -> Self {
+        match cause {
+            ClientWorldActivationCause::InitialEntry => Self::InitialEntry,
+            ClientWorldActivationCause::Teleport => Self::Teleport,
         }
     }
 }
@@ -148,14 +175,15 @@ impl From<ClientExitCause> for ClientExitCauseWire {
     }
 }
 
-impl From<holtburger_core::ClientWorldDiscontinuityKind> for ClientWorldDiscontinuityWire {
-    fn from(kind: holtburger_core::ClientWorldDiscontinuityKind) -> Self {
+impl From<holtburger_core::ClientPresentationDiscontinuityKind>
+    for ClientPresentationDiscontinuityWire
+{
+    fn from(kind: holtburger_core::ClientPresentationDiscontinuityKind) -> Self {
         match kind {
-            holtburger_core::ClientWorldDiscontinuityKind::Teleport => Self::Teleport,
-            holtburger_core::ClientWorldDiscontinuityKind::ForcedReposition => {
+            holtburger_core::ClientPresentationDiscontinuityKind::ForcedReposition => {
                 Self::ForcedReposition
             }
-            holtburger_core::ClientWorldDiscontinuityKind::Reset => Self::Reset,
+            holtburger_core::ClientPresentationDiscontinuityKind::Reset => Self::Reset,
         }
     }
 }
@@ -164,6 +192,7 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
     fn from(snapshot: &ClientApplicationSnapshot) -> Self {
         Self {
             lifecycle: (&snapshot.lifecycle).into(),
+            local_player_guid: snapshot.local_player_guid,
             server_time: snapshot.server_time,
             world_generation: snapshot.world_generation,
             dynamic: snapshot.dynamic.clone(),
@@ -180,17 +209,20 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
         ClientViewEvent::LifecycleChanged(lifecycle) => {
             Some(ClientHostEvent::LifecycleChanged((&lifecycle).into()))
         }
+        ClientViewEvent::LocalPlayerEstablished { player_guid } => {
+            Some(ClientHostEvent::LocalPlayerEstablished { player_guid })
+        }
         ClientViewEvent::ServerTimeUpdated { time } => {
             Some(ClientHostEvent::ServerTimeUpdated { time })
         }
         ClientViewEvent::DynamicEntity(event) => Some(ClientHostEvent::DynamicEntity(event)),
         ClientViewEvent::Camera(tick) => Some(ClientHostEvent::Camera(tick)),
         ClientViewEvent::CameraStarted(receipt) => Some(ClientHostEvent::CameraStarted(receipt)),
-        ClientViewEvent::WorldDiscontinuity {
+        ClientViewEvent::PresentationDiscontinuity {
             world_generation,
             kind,
-        } => Some(ClientHostEvent::WorldDiscontinuity(
-            ClientWorldDiscontinuity {
+        } => Some(ClientHostEvent::PresentationDiscontinuity(
+            ClientPresentationDiscontinuity {
                 world_generation,
                 kind: kind.into(),
             },

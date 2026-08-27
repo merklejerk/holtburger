@@ -542,6 +542,29 @@ impl ClientCameraRuntime {
         Ok(Some(tick))
     }
 
+    /// Produce the one collision-backed, input-free seed needed before a desktop portal reveal.
+    ///
+    /// The seed uses the normal controller clearance transaction with a tiny presentation-only
+    /// duration and no dynamic target batch. It never consumes a drive, advances the authority
+    /// clock, or runs while an active camera already has a sequence.
+    pub(super) fn seed(
+        &mut self,
+        world: &WorldState,
+        collision: Option<&ClientCollisionSnapshot>,
+    ) -> Result<Option<ClientCameraTick>> {
+        if self
+            .active
+            .as_ref()
+            .is_some_and(|camera| camera.sequence > 0)
+        {
+            return Ok(None);
+        }
+        let Some(collision) = collision else {
+            return Ok(None);
+        };
+        self.advance(world, Some(collision), None, Duration::from_millis(1))
+    }
+
     fn initialize_if_ready(
         &mut self,
         world: &WorldState,
@@ -680,6 +703,13 @@ impl ClientRuntime {
         duration: Duration,
     ) -> Result<Option<ClientCameraTick>> {
         self.camera.advance(&self.world, collision, batch, duration)
+    }
+
+    pub(super) fn seed_camera(
+        &mut self,
+        collision: Option<&ClientCollisionSnapshot>,
+    ) -> Result<Option<ClientCameraTick>> {
+        self.camera.seed(&self.world, collision)
     }
 
     pub(super) fn emit_camera_event(&self, tick: ClientCameraTick) {

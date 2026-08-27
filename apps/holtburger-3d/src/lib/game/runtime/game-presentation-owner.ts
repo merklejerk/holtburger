@@ -1,7 +1,7 @@
 import { AnimationHostSource } from "../../assets/animation-host-source";
 import { ActiveRegionHostSource } from "../../assets/active-region-host-source";
 import { AudioHostSource } from "../../assets/audio-host-source";
-import { DynamicEntityVisualHostSource } from "../../assets/dynamic-entity-visual-host-source";
+import { SetupVisualHostSource } from "../../assets/setup-visual-host-source";
 import { LandblockProfileHostSource } from "../../assets/landblock-profile-host-source";
 import { CachedLandblockProfileSource } from "../../assets/landblock-profile-source";
 import { LandblockSourceHostBatch } from "../../assets/landblock-source-host-batch";
@@ -22,6 +22,10 @@ import { GamePresentationRuntime } from "./game-presentation-runtime";
 import type { TextureFilteringCapabilities } from "../renderer/texture-filtering-policy";
 import type { LandblockSourceBatchSource } from "../../assets/landblock-source-batch";
 import type { AmbientRegionFacts } from "../systems/ambient-region";
+import {
+	loadPortalTransitionAssets,
+	type PortalTransitionAssets,
+} from "../../client/portal-transition-assets";
 
 /** Explicit browser dependencies for one imperative presentation composition. */
 export interface GamePresentationOwnerDependencies {
@@ -54,6 +58,8 @@ export class GamePresentationOwner {
 	readonly profileSource: CachedLandblockProfileSource;
 	readonly device: WebGL2Device;
 	readonly runtime: GamePresentationRuntime;
+	/** Required authored portal closure retained for every client/Explorer transition. */
+	readonly portalTransitionAssets: PortalTransitionAssets;
 	readonly textureFilteringCapabilities: TextureFilteringCapabilities;
 	readonly #teardown: PresentationTeardownStack;
 	#destroyed = false;
@@ -63,8 +69,13 @@ export class GamePresentationOwner {
 		readonly activeRegionSource: ActiveRegionHostSource;
 		readonly commitPipeline: StandardCommitPipeline;
 		readonly device: WebGL2Device;
+		readonly setupVisualSource: SetupVisualHostSource;
+		readonly animationSource: AnimationHostSource;
+		readonly soundTableSource: SoundTableHostSource;
+		readonly audioDevice: WebAudioDevice;
 		readonly profileHostSource: LandblockProfileHostSource;
 		readonly profileSource: CachedLandblockProfileSource;
+		readonly portalTransitionAssets: PortalTransitionAssets;
 		readonly runtime: GamePresentationRuntime;
 		readonly skySource: SkyHostSource;
 		readonly staticDetailOwner: ActiveRegionStaticDetailOwner;
@@ -74,6 +85,7 @@ export class GamePresentationOwner {
 		this.device = resources.device;
 		this.profileSource = resources.profileSource;
 		this.runtime = resources.runtime;
+		this.portalTransitionAssets = resources.portalTransitionAssets;
 		this.textureFilteringCapabilities = resources.textureFilteringCapabilities;
 		this.#teardown = createPresentationTeardown(resources);
 	}
@@ -98,6 +110,11 @@ export class GamePresentationOwner {
 		let device: WebGL2Device | undefined;
 		let commitPipeline: StandardCommitPipeline | undefined;
 		let runtime: GamePresentationRuntime | undefined;
+		let setupVisualSource: SetupVisualHostSource | undefined;
+		let animationSource: AnimationHostSource | undefined;
+		let soundTableSource: SoundTableHostSource | undefined;
+		let audioDevice: WebAudioDevice | undefined;
+		let portalTransitionAssets: PortalTransitionAssets | undefined;
 		try {
 			throwIfPresentationConstructionAborted(signal);
 			activeRegionSource = ActiveRegionHostSource.build(hostTransport);
@@ -117,25 +134,41 @@ export class GamePresentationOwner {
 				device.getTextureFilteringCapabilities();
 			commitPipeline = await StandardCommitPipeline.build({ sourceBatch });
 			throwIfPresentationConstructionAborted(signal);
+			setupVisualSource = new SetupVisualHostSource(hostTransport);
+			animationSource = AnimationHostSource.build(hostTransport);
+			soundTableSource = SoundTableHostSource.build(hostTransport);
+			audioDevice = new WebAudioDevice(
+				audioContextFactory(),
+				AudioHostSource.build(hostTransport),
+				audioTuning.placementSmoothingSeconds,
+				audioTuning.loudnessCurveExponent,
+			);
+			portalTransitionAssets = await loadPortalTransitionAssets({
+				audio: audioDevice,
+				animation: animationSource,
+				setupVisual: setupVisualSource,
+				soundTable: soundTableSource,
+			});
+			throwIfPresentationConstructionAborted(signal);
 			runtime = await GamePresentationRuntime.build(
 				device,
 				commitPipeline,
 				texturePixelSource,
-				AnimationHostSource.build(hostTransport),
+				animationSource,
 				PhysicsScriptHostSource.build(hostTransport),
-				new WebAudioDevice(
-					audioContextFactory(),
-					AudioHostSource.build(hostTransport),
-					audioTuning.placementSmoothingSeconds,
-					audioTuning.loudnessCurveExponent,
-				),
+				audioDevice,
 				ParticleEmitterHostSource.build(hostTransport),
-				SoundTableHostSource.build(hostTransport),
+				soundTableSource,
 				ParticleMeshHostSource.build(hostTransport),
-				new DynamicEntityVisualHostSource(hostTransport),
+				setupVisualSource,
 				undefined,
 				tickProfiler,
 			);
+			throwIfPresentationConstructionAborted(signal);
+			if (portalTransitionAssets === undefined) {
+				throw new Error("Portal transition assets were not prepared.");
+			}
+			await runtime.installPortalTransitionAssets(portalTransitionAssets);
 			throwIfPresentationConstructionAborted(signal);
 			runtime.installActiveRegionStaticDetails(staticDetailBinding);
 			const ambient = ambientRegionFacts(activeRegion);
@@ -156,6 +189,11 @@ export class GamePresentationOwner {
 				device,
 				profileHostSource,
 				profileSource,
+				portalTransitionAssets,
+				setupVisualSource,
+				animationSource,
+				soundTableSource,
+				audioDevice,
 				runtime,
 				skySource,
 				staticDetailOwner,
@@ -167,6 +205,10 @@ export class GamePresentationOwner {
 					activeRegionSource,
 					commitPipeline,
 					device,
+					setupVisualSource,
+					animationSource,
+					soundTableSource,
+					audioDevice,
 					profileHostSource,
 					profileSource,
 					runtime,
@@ -205,6 +247,10 @@ interface PresentationParts {
 	readonly activeRegionSource?: ActiveRegionHostSource;
 	readonly commitPipeline?: StandardCommitPipeline;
 	readonly device?: WebGL2Device;
+	readonly setupVisualSource?: SetupVisualHostSource;
+	readonly animationSource?: AnimationHostSource;
+	readonly soundTableSource?: SoundTableHostSource;
+	readonly audioDevice?: WebAudioDevice;
 	readonly profileHostSource?: LandblockProfileHostSource;
 	readonly profileSource?: CachedLandblockProfileSource;
 	readonly runtime?: GamePresentationRuntime;
@@ -283,6 +329,19 @@ function createPresentationTeardown(
 		parts.staticDetailOwner?.teardown.bind(parts.staticDetailOwner),
 	);
 	stack.add("webgl-device", parts.device?.destroy.bind(parts.device));
+	stack.add(
+		"setup-visual-source",
+		parts.setupVisualSource?.destroy.bind(parts.setupVisualSource),
+	);
+	stack.add(
+		"animation-source",
+		parts.animationSource?.destroy.bind(parts.animationSource),
+	);
+	stack.add(
+		"sound-table-source",
+		parts.soundTableSource?.destroy.bind(parts.soundTableSource),
+	);
+	stack.add("audio-device", parts.audioDevice?.destroy.bind(parts.audioDevice));
 	stack.add(
 		"commit-pipeline",
 		parts.commitPipeline?.destroy.bind(parts.commitPipeline),

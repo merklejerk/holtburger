@@ -37,6 +37,12 @@ pub enum ClientHostCommand {
     SetClientCameraClearance {
         request: holtburger_core::ClientCameraClearanceRequest,
     },
+    /// Renderer acknowledgement after the matching destination has been installed and revealed.
+    AcknowledgeClientWorldReveal {
+        /// Renderer wire contracts use camelCase; keep the inline enum field explicit.
+        #[serde(rename = "worldGeneration")]
+        world_generation: u64,
+    },
     StopClientCamera {
         request: holtburger_core::ClientCameraIdentity,
     },
@@ -52,6 +58,7 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "start_client_camera",
     "set_client_camera_intent",
     "set_client_camera_clearance",
+    "acknowledge_client_world_reveal",
     "stop_client_camera",
     "disconnect_client",
 ];
@@ -115,6 +122,7 @@ impl ClientHostRuntime {
         let builder = holtburger_core::ClientRuntimeBuilder::new(startup.account.clone())
             .server(startup.host.clone(), startup.port)
             .world_bootstrap(bootstrap)
+            .require_external_world_reveal()
             .collision_source(Arc::new(
                 holtburger_core::ContentClientCollisionSource::new(
                     Arc::clone(&self.content.service),
@@ -221,6 +229,11 @@ impl ClientHostRuntime {
             .map(|_| ())
     }
 
+    pub async fn acknowledge_world_reveal(&self, world_generation: u64) -> Result<()> {
+        self.send_command(ClientCommand::AcknowledgeClientWorldReveal { world_generation })
+            .await
+    }
+
     pub async fn stop_camera(&self, identity: holtburger_core::ClientCameraIdentity) -> Result<()> {
         self.send_command(ClientCommand::StopClientCamera(identity))
             .await
@@ -296,6 +309,11 @@ pub async fn dispatch_client(
             .map_err(application_error),
         SetClientCameraClearance { request } => runtime
             .set_camera_clearance(request)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        AcknowledgeClientWorldReveal { world_generation } => runtime
+            .acknowledge_world_reveal(world_generation)
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),

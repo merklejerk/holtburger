@@ -1,4 +1,4 @@
-import type { LandblockId } from "../game-types";
+import type { LandblockOwnerId } from "../game-types";
 import {
 	getLandblockCoordinates,
 	normalizeLandblockOwner,
@@ -35,18 +35,18 @@ export function isOutdoorStaticLayer(
 	);
 }
 
-export type SceneInterestMap = Map<LandblockId, Set<LandblockLayerKind>>;
+export type SceneInterestMap = Map<LandblockOwnerId, Set<LandblockLayerKind>>;
 
 export interface LandblockIdLayer {
-	readonly id: LandblockId;
+	readonly id: LandblockOwnerId;
 	readonly layer: LandblockLayerKind;
 }
 
 /** Group layer requests by their one shared cumulative-content acquisition identity. */
 export function groupLandblockLayers(
 	layers: ReadonlySet<LandblockIdLayer>,
-): ReadonlyMap<LandblockId, LandblockIdLayer[]> {
-	const grouped = new Map<LandblockId, LandblockIdLayer[]>();
+): ReadonlyMap<LandblockOwnerId, LandblockIdLayer[]> {
+	const grouped = new Map<LandblockOwnerId, LandblockIdLayer[]>();
 	for (const layer of layers) {
 		const group = grouped.get(layer.id);
 		if (group) group.push(layer);
@@ -67,7 +67,7 @@ export interface SceneInterestRequest {
 	/** Complete enabled-layer and radius policy for this request. */
 	readonly radii: SceneInterestRadii;
 	/** Owners allowed to receive EnvCells from ambient outdoor-radius demand. */
-	readonly ambientOutdoorEnvCellOwners: ReadonlySet<LandblockId>;
+	readonly ambientOutdoorEnvCellOwners: ReadonlySet<LandblockOwnerId>;
 }
 
 /** Reject a scene-interest radius configuration that cannot produce coherent layers. */
@@ -94,9 +94,9 @@ export function validateSceneInterestRadiiOrThrow(
 
 /** Derive every static layer required by an outdoor landblock window. */
 export function computeOutdoorSceneInterest(
-	landblockId: LandblockId,
+	landblockId: LandblockOwnerId,
 	config: SceneInterestRadii,
-	ambientOutdoorEnvCellOwners: ReadonlySet<LandblockId>,
+	ambientOutdoorEnvCellOwners: ReadonlySet<LandblockOwnerId>,
 ): SceneInterestMap {
 	const anchor = getLandblockCoordinates(landblockId);
 	const suffix = landblockIdSuffix(landblockId);
@@ -141,7 +141,7 @@ export function computeOutdoorSceneInterest(
 
 /** Derive the one EnvCells layer required by a dungeon owner. */
 export function computeDungeonSceneInterest(
-	landblockId: LandblockId,
+	landblockId: LandblockOwnerId,
 ): SceneInterestMap {
 	const owner = normalizeLandblockOwner(landblockId);
 	return new Map([[owner, new Set([LandblockLayerKind.EnvCells])]]);
@@ -179,7 +179,7 @@ function isValidRadius(radius: number): boolean {
 	return Number.isInteger(radius) && radius >= 0;
 }
 
-function landblockIdSuffix(landblockId: LandblockId): string {
+function landblockIdSuffix(landblockId: LandblockOwnerId): string {
 	const match = /^(?:0x)?[0-9a-fA-F]{4}([0-9a-fA-F]{4})$/.exec(landblockId);
 	if (!match) throw new Error(`Invalid landblock id ${landblockId}.`);
 	const suffix = match[1];
@@ -188,6 +188,12 @@ function landblockIdSuffix(landblockId: LandblockId): string {
 	return suffix;
 }
 
-function createLandblockId(x: number, y: number, suffix: string): LandblockId {
-	return `0x${x.toString(16).padStart(2, "0")}${y.toString(16).padStart(2, "0")}${suffix}`;
+function createLandblockId(
+	x: number,
+	y: number,
+	suffix: string,
+): LandblockOwnerId {
+	return normalizeLandblockOwner(
+		`0x${x.toString(16).padStart(2, "0")}${y.toString(16).padStart(2, "0")}${suffix}`,
+	);
 }

@@ -21,6 +21,8 @@
 	import ClientWorldView from "./ClientWorldView.svelte";
 	import type { ClientDriveRequest } from "./client-host-contract";
 	import {
+		clientLifecycleEnablesWorldInput,
+		clientLifecycleUsesWorldPresentation,
 		initialClientLifecycleUiState,
 		reduceClientLifecycleUiState,
 		type ClientLifecycleUiState,
@@ -45,6 +47,12 @@
 	);
 	let inputController: CharacterInputController | null = null;
 	let inputDispatch: Promise<void> = Promise.resolve();
+	const usesWorldPresentation = $derived(
+		clientLifecycleUsesWorldPresentation(lifecycle),
+	);
+	const worldInputEnabled = $derived(
+		clientLifecycleEnablesWorldInput(lifecycle),
+	);
 
 	const IDLE_CLIENT_DRIVE: ClientDriveRequest = {
 		gait: "run",
@@ -184,6 +192,9 @@
 	}
 
 	function presentationStatusText(status: ClientPresentationStatus): string {
+		if (status.diagnostic !== null && status.kind !== "error") {
+			return status.diagnostic;
+		}
 		switch (status.kind) {
 			case "starting":
 				return "Preparing world presentation…";
@@ -191,7 +202,7 @@
 				return "Waiting for an authoritative world snapshot…";
 			case "loading-player":
 				return "Waiting for the player presentation…";
-			case "loading-scene":
+			case "loading-activation":
 				return "Loading the authoritative scene…";
 			case "ready":
 				return "World ready";
@@ -202,30 +213,33 @@
 		}
 	}
 
-	/** Build and drive the renderer only after Svelte has mounted the in-world canvas. */
+	/** Build and drive the renderer after Svelte mounts the world-presentation canvas. */
 	$effect(() => {
 		const currentSession = session;
 		const currentTransport = hostTransport;
-		const currentLifecycle = lifecycle;
+		const shouldInstall = usesWorldPresentation;
 		const canvas = canvasElement;
 		if (
 			currentSession === null ||
 			currentTransport === null ||
 			canvas === null ||
-			currentLifecycle.kind !== "in-world"
+			!shouldInstall
 		) {
 			return;
 		}
 
 		let cancelled = false;
 		let frameHandle = 0;
+		const reportPresentationError = (error: unknown): void => {
+			if (cancelled) return;
+			console.error(error);
+			presentationError = diagnostic(error);
+		};
 		const presentation = new ClientPresentationSession({
 			canvas,
 			hostTransport: currentTransport,
 			session: currentSession,
-			onError(error) {
-				if (!cancelled) presentationError = diagnostic(error);
-			},
+			onError: reportPresentationError,
 		});
 		cameraController = presentation.camera;
 		presentationError = null;
@@ -236,13 +250,11 @@
 			frameHandle = window.requestAnimationFrame(frame);
 		};
 		void presentation
-			.start(currentLifecycle.playerGuid)
+			.start()
 			.then(() => {
 				if (!cancelled) frameHandle = window.requestAnimationFrame(frame);
 			})
-			.catch((error: unknown) => {
-				if (!cancelled) presentationError = diagnostic(error);
-			});
+			.catch(reportPresentationError);
 
 		return () => {
 			cancelled = true;
@@ -260,8 +272,8 @@
 	/** Raw browser ownership ends at the client shell; every edge publishes an idle replacement. */
 	$effect(() => {
 		const currentSession = session;
-		const currentLifecycle = lifecycle;
-		if (currentSession === null || currentLifecycle.kind !== "in-world") {
+		const shouldOwnInput = worldInputEnabled;
+		if (currentSession === null || !shouldOwnInput) {
 			inputController?.releaseOwnership();
 			inputController = null;
 			return;
@@ -317,9 +329,9 @@
 
 <svelte:window onkeydown={handleWindowKeydown} onkeyup={handleWindowKeyup} />
 
-{#if lifecycle.kind === "in-world" && startupError === null && commandFailure === null}
+{#if usesWorldPresentation && startupError === null && commandFailure === null}
 	<ClientWorldView
-		{cameraController}
+		cameraController={lifecycle.kind === "in-world" ? cameraController : null}
 		{presentationStatus}
 		{presentationStatusText}
 		{presentationError}

@@ -1,4 +1,4 @@
-import type { DatAssetId, LandblockId } from "../game-types";
+import type { DatAssetId, LandblockOwnerId } from "../game-types";
 import type { TerrainGeometryKey } from "../geometry/types";
 import {
 	type LandblockCoordinates,
@@ -87,7 +87,7 @@ export interface TerrainCompositionFacts {
 /** Canonical landblock facts sufficient for one complete terrain-generation job. */
 export interface TerrainGenerationSource {
 	/** Outdoor landblock identity. */
-	readonly landblockId: LandblockId;
+	readonly landblockId: LandblockOwnerId;
 	/** Number of authored vertices on each terrain-grid axis. */
 	readonly gridSize: number;
 	/** World-space distance between adjacent authored terrain vertices. */
@@ -152,7 +152,7 @@ export interface TerrainGenerationResult {
 
 /** Generation and presentation facts installed under one interested landblock. */
 export interface TerrainSourceInstallation {
-	readonly landblockId: LandblockId;
+	readonly landblockId: LandblockOwnerId;
 	readonly generation: TerrainGenerationSource;
 	readonly presentation: TerrainPresentationSource;
 }
@@ -166,7 +166,7 @@ export interface RealizedTerrainResources {
 /** One selected terrain submission ready for renderer resource resolution and drawing. */
 export interface TerrainDrawUnit {
 	/** Landblock containing this intrinsically landblock-local terrain geometry. */
-	readonly landblockId: LandblockId;
+	readonly landblockId: LandblockOwnerId;
 	readonly coordinates: LandblockCoordinates;
 	readonly geometry: TerrainGeometryKey;
 	readonly surfaceField: TerrainSurfaceTextureKey;
@@ -244,7 +244,7 @@ export function terrainTextureKeysFromFacts(
 
 /** Derive every generated texture identity deterministically from one terrain source. */
 export function terrainGeneratedTextureKeys(
-	landblockId: LandblockId,
+	landblockId: LandblockOwnerId,
 	presentation: TerrainPresentationSource,
 ): TerrainGeneratedTextureKeys {
 	return {

@@ -14,7 +14,7 @@ import {
 } from "./binary-source-record";
 
 const HEADER_LENGTH = 12;
-const MAGIC = "HBDV";
+const MAGIC = "HBSV";
 const REQUIRED_SECTIONS = {
 	positions: "f32",
 	normals: "f32",
@@ -28,7 +28,7 @@ const REQUIRED_SECTIONS = {
 } as const;
 
 const manifestSchema = z.object({
-	transport: z.literal("holtburger-dynamic-entity-visual"),
+	transport: z.literal("holtburger-setup-visual"),
 	byteOrder: z.literal("little-endian"),
 	sectionByteOffsetBase: z.literal("section-data"),
 	definitionId: z.string().min(1),
@@ -45,11 +45,11 @@ const manifestSchema = z.object({
 });
 
 /** Decode one complete immutable SetupModel appearance returned by the content host. */
-export function decodeDynamicEntityVisual(
+export function decodeSetupVisual(
 	response: Uint8Array,
 ): DecodedStaticPresentation {
 	if (response.byteLength < HEADER_LENGTH) {
-		throw new Error("Dynamic entity visual is shorter than its binary header.");
+		throw new Error("Setup visual is shorter than its binary header.");
 	}
 	const view = new DataView(
 		response.buffer,
@@ -58,19 +58,17 @@ export function decodeDynamicEntityVisual(
 	);
 	const magic = new TextDecoder().decode(response.subarray(0, 4));
 	if (magic !== MAGIC)
-		throw new Error(`Unexpected dynamic entity visual magic ${magic}.`);
+		throw new Error(`Unexpected setup visual magic ${magic}.`);
 	const manifestLength = view.getUint32(4, true);
 	const totalLength = view.getUint32(8, true);
 	if (totalLength !== response.byteLength) {
 		throw new Error(
-			`Dynamic entity visual length is ${response.byteLength}; header declares ${totalLength}.`,
+			`Setup visual length is ${response.byteLength}; header declares ${totalLength}.`,
 		);
 	}
 	const sectionDataOffset = HEADER_LENGTH + manifestLength;
 	if (sectionDataOffset > response.byteLength) {
-		throw new Error(
-			"Dynamic entity visual manifest exceeds the binary response.",
-		);
+		throw new Error("Setup visual manifest exceeds the binary response.");
 	}
 	const parsed = manifestSchema.safeParse(
 		JSON.parse(
@@ -81,7 +79,7 @@ export function decodeDynamicEntityVisual(
 	);
 	if (!parsed.success) {
 		throw new Error(
-			`Dynamic entity visual manifest is invalid: ${parsed.error.message}`,
+			`Setup visual manifest is invalid: ${parsed.error.message}`,
 		);
 	}
 	const manifest = parsed.data;
@@ -90,7 +88,7 @@ export function decodeDynamicEntityVisual(
 		sectionDataOffset,
 		manifest.sections,
 		REQUIRED_SECTIONS,
-		"Dynamic entity visual",
+		"Setup visual",
 	);
 	const geometries = new Map(
 		manifest.geometries.map((entry) => [
@@ -101,22 +99,18 @@ export function decodeDynamicEntityVisual(
 				sectionDataOffset,
 				sections,
 				"",
-				"Dynamic entity visual",
+				"Setup visual",
 			),
 		]),
 	);
 	if (geometries.size !== manifest.geometries.length) {
-		throw new Error(
-			"Dynamic entity visual contains duplicate geometry identities.",
-		);
+		throw new Error("Setup visual contains duplicate geometry identities.");
 	}
 	const materials = new Map(
 		manifest.materials.map((entry) => [entry.id, decodeStaticMaterial(entry)]),
 	);
 	if (materials.size !== manifest.materials.length) {
-		throw new Error(
-			"Dynamic entity visual contains duplicate material identities.",
-		);
+		throw new Error("Setup visual contains duplicate material identities.");
 	}
 	const definitions = new Map(
 		manifest.definitions.map((definition) => [
@@ -125,15 +119,18 @@ export function decodeDynamicEntityVisual(
 		]),
 	);
 	if (definitions.size !== manifest.definitions.length) {
-		throw new Error(
-			"Dynamic entity visual contains duplicate presentation identities.",
-		);
+		throw new Error("Setup visual contains duplicate presentation identities.");
 	}
 	const selected = definitions.get(manifest.definitionId);
 	if (!selected) {
 		throw new Error(
-			`Dynamic entity visual references missing definition ${manifest.definitionId}.`,
+			`Setup visual references missing definition ${manifest.definitionId}.`,
 		);
 	}
-	return selected;
+	return {
+		...selected,
+		// The setup visual is a standalone host envelope, so its exact retained source size is
+		// meaningful even though the decoded sections are immediately projected into typed facts.
+		sourceByteLength: response.byteLength,
+	};
 }

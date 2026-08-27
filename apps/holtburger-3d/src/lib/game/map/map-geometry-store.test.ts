@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { EnvCellId, LandblockId } from "../game-types";
+import type { EnvCellId, LandblockOwnerId } from "../game-types";
 import { Mat4 } from "../math/types";
 import type {
 	ResolvedBuildingLayerSource,
@@ -14,8 +14,8 @@ import {
 	MapGeometryStore,
 } from "./map-geometry-store";
 
-const LANDBLOCK = "0xda55ffff" as LandblockId;
-const OTHER_LANDBLOCK = "0xda56ffff" as LandblockId;
+const LANDBLOCK = "0xda55ffff" as LandblockOwnerId;
+const OTHER_LANDBLOCK = "0xda56ffff" as LandblockOwnerId;
 const BUILDING = "gfx-obj/01000801";
 
 function placement(): ScenePlacement {

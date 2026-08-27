@@ -5,6 +5,8 @@ import type {
 	ClientLifecycle,
 } from "./client-host-contract";
 import {
+	clientLifecycleEnablesWorldInput,
+	clientLifecycleUsesWorldPresentation,
 	initialClientLifecycleUiState,
 	reduceClientLifecycleUiState,
 } from "./client-lifecycle-state";
@@ -15,6 +17,45 @@ const characters = [
 ];
 
 describe("client lifecycle reducer", () => {
+	it("enables input only for the interactive world phase", () => {
+		expect(clientLifecycleEnablesWorldInput({ kind: "in-world" })).toBe(true);
+		expect(
+			clientLifecycleEnablesWorldInput({
+				kind: "portal-space",
+				worldGeneration: 4,
+				cause: "teleport",
+			}),
+		).toBe(false);
+		expect(
+			clientLifecycleEnablesWorldInput({
+				kind: "entering-world",
+				characterGuid: 7,
+			}),
+		).toBe(false);
+	});
+
+	it("retains one presentation installation throughout world entry", () => {
+		expect(
+			clientLifecycleUsesWorldPresentation({
+				kind: "entering-world",
+				characterGuid: 7,
+			}),
+		).toBe(true);
+		expect(
+			clientLifecycleUsesWorldPresentation({
+				kind: "portal-space",
+				worldGeneration: 4,
+				cause: "initial-entry",
+			}),
+		).toBe(true);
+		expect(clientLifecycleUsesWorldPresentation({ kind: "in-world" })).toBe(
+			true,
+		);
+		expect(clientLifecycleUsesWorldPresentation({ kind: "connecting" })).toBe(
+			false,
+		);
+	});
+
 	it("starts connecting and preserves one selected exact character identity", () => {
 		let state = initialClientLifecycleUiState();
 		state = reduceClientLifecycleUiState(
@@ -56,7 +97,7 @@ describe("client lifecycle reducer", () => {
 		for (const lifecycle of [
 			{ kind: "authenticating" },
 			{ kind: "entering-world", characterGuid: 7 },
-			{ kind: "in-world", playerGuid: 7 },
+			{ kind: "in-world" },
 		] satisfies ClientLifecycle[]) {
 			state = reduceClientLifecycleUiState(state, {
 				type: "authority",
@@ -73,7 +114,7 @@ describe("client lifecycle reducer", () => {
 		expect(state).toEqual({ kind: "exiting", ...exit });
 		state = reduceClientLifecycleUiState(state, {
 			type: "authority",
-			lifecycle: { kind: "in-world", playerGuid: 7 },
+			lifecycle: { kind: "in-world" },
 		});
 		expect(state.kind).toBe("exiting");
 	});

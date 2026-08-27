@@ -1,14 +1,14 @@
 use super::movement::{CorrectionDisposition, ServerPositionUpdate};
-use super::{ClientRuntime, types::*};
+use super::{ClientRuntime, ClientWorldActivationState, types::*};
 use anyhow::Result;
 use holtburger_common::ConfirmationType;
 use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_protocol::errors::{CharacterError, WeenieError};
 use holtburger_protocol::messages::*;
 use holtburger_protocol::traits::ProtocolUnpack;
-use holtburger_world::RuntimeBodyResetCause;
 use holtburger_world::WorldEvent;
 use holtburger_world::entity::Entity;
+use std::time::Instant;
 
 fn confirmation_done_requires_auto_response(confirmation_type: ConfirmationType) -> bool {
     matches!(
@@ -62,19 +62,21 @@ impl ClientRuntime {
                 // A direct placement is a local timeline discontinuity. The authoritative pose
                 // was already updated by WorldState; only the runtime body and downstream camera
                 // need the explicit reset here.
-                let events = self.world.set_local_player_runtime_pose(position);
+                let events = self
+                    .world
+                    .relocate_local_player_runtime_body(position, Instant::now());
                 if !discontinuity_already_handled {
                     self.reset_camera();
                     if let Some(coordinator) = self.collision_coordinator.as_mut() {
                         coordinator.invalidate();
                     }
                     self.bump_world_generation();
-                    let _ = self
-                        .client_view_event_tx
-                        .send(ClientViewEvent::WorldDiscontinuity {
+                    let _ = self.client_view_event_tx.send(
+                        ClientViewEvent::PresentationDiscontinuity {
                             world_generation: self.world_generation,
-                            kind: ClientWorldDiscontinuityKind::ForcedReposition,
-                        });
+                            kind: ClientPresentationDiscontinuityKind::ForcedReposition,
+                        },
+                    );
                 }
                 events
             }
@@ -82,22 +84,27 @@ impl ClientRuntime {
     }
 
     pub(super) async fn begin_world_entry_transition(&mut self) -> Result<()> {
-        let reset_events = self
-            .world
-            .suspend_runtime_bodies(RuntimeBodyResetCause::TeleportOrWorldReset);
-        for event in &reset_events {
-            self.handle_runtime_world_event(event);
-        }
-        self.state = ClientState::EnteringWorld;
-        self.send_status_event();
+        let player_guid = self.character_selection.character_id.ok_or_else(|| {
+            anyhow::anyhow!("cannot enter the world without a selected character")
+        })?;
+        self.start_world_activation_with_reset(
+            ClientWorldActivationState::InitialEntry,
+            player_guid,
+        );
         Ok(())
     }
 
     async fn enter_world(&mut self) -> Result<()> {
-        if self.state == ClientState::InWorld {
+        if self.state == ClientState::InWorld && self.activation.is_none() {
             return Ok(());
         }
 
+        // Synthetic/non-network callers may still feed StartGame directly. Real network entry
+        // remains gated by `try_complete_world_activation`; this fallback preserves the broad
+        // TUI authority API when no activation has been started.
+        if self.activation.is_some() {
+            return self.try_complete_world_activation().await;
+        }
         self.state = ClientState::InWorld;
         self.send_status_event();
         Ok(())
@@ -107,12 +114,15 @@ impl ClientRuntime {
         let mut pending_events = initial_events;
 
         while !pending_events.is_empty() {
+            let teleport_batch = pending_events
+                .iter()
+                .any(|event| matches!(event, WorldEvent::TeleportStarted { .. }));
             let discontinuity_already_handled = pending_events.iter().any(|event| {
                 matches!(event, WorldEvent::RuntimeBodiesReset { .. } | WorldEvent::TeleportStarted { .. })
                     || matches!(event, WorldEvent::ForcedReposition { guid, .. } if *guid == self.world.player.guid)
             });
             for event in &pending_events {
-                self.handle_runtime_world_event(event);
+                self.handle_runtime_world_event_with_context(event, teleport_batch);
             }
 
             let mut follow_up_events = Vec::new();
@@ -181,6 +191,7 @@ impl ClientRuntime {
             pending_events = follow_up_events;
         }
 
+        self.try_complete_world_activation().await?;
         Ok(())
     }
 
@@ -528,6 +539,29 @@ impl ClientRuntime {
             GameMessage::PlayerCreate(data) => {
                 let player_id = data.guid;
                 self.world.player.guid = player_id;
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::LocalPlayerEstablished {
+                        player_guid: player_id,
+                    });
+
+                if self.activation.is_none() {
+                    self.start_world_activation_with_reset(
+                        ClientWorldActivationState::InitialEntry,
+                        player_id,
+                    );
+                } else if let Some(activation) = self.activation.as_ref()
+                    && activation.player_guid != player_id
+                {
+                    // The server's PlayerCreate is the first exact local-player identity. Keep
+                    // the selected identity in the activation so a mismatched response cannot
+                    // silently retarget the barrier to a different character.
+                    log::error!(
+                        "PlayerCreate identity 0x{:08X} disagrees with activation character 0x{:08X}",
+                        player_id.0,
+                        activation.player_guid.0
+                    );
+                }
 
                 let name = self
                     .character_selection
@@ -556,8 +590,7 @@ impl ClientRuntime {
                         name: name.clone(),
                     });
 
-                self.send_login_complete().await?;
-                self.enter_world().await?;
+                self.try_complete_world_activation().await?;
                 Ok(())
             }
             GameMessage::PlayerKilled(data) => {
@@ -577,7 +610,10 @@ impl ClientRuntime {
                     "Portal transition started (seq: {})",
                     data.teleport_sequence
                 );
-                self.send_login_complete().await?;
+                // `WorldState::handle_message` already emitted the paired reset and
+                // `TeleportStarted` edge above. Its batch handler owns the one activation
+                // generation; starting another transition here would make a single server
+                // teleport observable as two generations.
                 Ok(())
             }
             GameMessage::PrivateUpdatePropertyInt(_) | GameMessage::PublicUpdatePropertyInt(_) => {
@@ -693,11 +729,10 @@ impl ClientRuntime {
         Ok(world_events)
     }
 
-    async fn handle_game_action(&mut self, data: &GameAction) -> Result<()> {
-        if let GameAction::LoginComplete(_) = data {
-            self.state = ClientState::InWorld;
-            self.send_status_event();
-        }
+    async fn handle_game_action(&mut self, _data: &GameAction) -> Result<()> {
+        // `LoginComplete` is a client action (opcode 0x00A1), not a server completion echo. The
+        // active lifecycle is published by `try_complete_world_activation` after the outbound
+        // action succeeds; waiting for an inbound mirror would leave the client in portal space.
         Ok(())
     }
 }
@@ -776,6 +811,7 @@ mod tests {
     async fn test_player_teleport_emits_teleport_started_view_event() {
         let mut client = build_test_client();
         let mut events = client.subscribe_client_view_events();
+        let generation_before = client.world_generation;
 
         let encoded = encode_message(&GameMessage::PlayerTeleport(Box::new(PlayerTeleportData {
             teleport_sequence: 42,
@@ -792,6 +828,14 @@ mod tests {
         }
 
         assert!(saw_teleport_started);
+        assert_eq!(client.world_generation, generation_before + 1);
+        assert!(matches!(
+            client.lifecycle(),
+            ClientLifecycleState::PortalSpace {
+                cause: ClientWorldActivationCause::Teleport,
+                ..
+            }
+        ));
     }
 
     #[tokio::test]

@@ -82,6 +82,8 @@ export function animationHookCommand(hook: DecodedAnimationHook): string {
 /** Fully decoded immutable animation source before shared repository acquisition. */
 export interface DecodedAnimationAsset {
 	readonly id: DatAssetId;
+	/** Complete host envelope bytes retained for construction diagnostics. */
+	readonly sourceByteLength?: number;
 	readonly frameCount: number;
 	readonly partCount: number;
 	/** Frame-major rigid-part transforms in the app's render coordinate system. */
@@ -177,6 +179,7 @@ export function decodeAnimationRecord(
 		partCount: manifest.partCount,
 		partFrames: decodeFrames(partValues),
 		positionFrames: decodeFrames(positionValues),
+		sourceByteLength: response.byteLength,
 	};
 }
 

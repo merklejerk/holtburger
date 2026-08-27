@@ -1148,32 +1148,6 @@ impl SpatialScene {
         self.set_body_motion_state(body_id, motion_state);
     }
 
-    fn reset_body_from_authority(
-        &mut self,
-        body_id: SpatialBodyId,
-        pose: WorldPosition,
-        now: Instant,
-        clear_kinematics: bool,
-    ) {
-        let mut body = self
-            .remove_body(body_id)
-            .unwrap_or_else(|| SpatialBody::new(body_id, pose, now));
-
-        body.authoritative_pose = Some(pose);
-        body.pose = pose;
-        if clear_kinematics {
-            body.velocity = Vector3::zero();
-            body.acceleration = Vector3::zero();
-            body.omega = Vector3::zero();
-            body.motion_state = None;
-        }
-        body.sampling.last_authoritative_update = now;
-        body.sampling.last_derived_at = now;
-        body.sampling.mode = SpatialSampleMode::AuthoritativeOnly;
-        wake_dynamic_runtime(&mut body);
-        self.register_body(body);
-    }
-
     pub fn apply_runtime_body_pose(
         &mut self,
         body_id: SpatialBodyId,
@@ -1243,18 +1217,6 @@ impl SpatialScene {
         self.update_body(body)
             .expect("runtime body vanished during single-threaded solve commit");
         true
-    }
-
-    pub fn apply_forced_reposition_reset(
-        &mut self,
-        body_id: SpatialBodyId,
-        pose: WorldPosition,
-        now: Instant,
-    ) {
-        self.reset_body_from_authority(body_id, pose, now, true);
-        if let Some(body) = self.body_store.body_mut(body_id) {
-            body.sampling.mode = SpatialSampleMode::Suspended;
-        }
     }
 
     pub fn suspend_runtime_bodies(&mut self, now: Instant) {

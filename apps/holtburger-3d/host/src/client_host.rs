@@ -195,7 +195,7 @@ mod tests {
     }
 
     #[test]
-    fn lifecycle_projection_preserves_character_identity_and_exact_local_guid() {
+    fn lifecycle_projects_character_selection_while_snapshot_owns_local_identity() {
         let lifecycle = ClientLifecycleWire::from(&ClientLifecycleState::CharacterSelection {
             characters: vec![holtburger_core::ClientCharacterSummary {
                 guid: Guid(0x5000_0007),
@@ -218,9 +218,8 @@ mod tests {
         );
 
         let snapshot = ClientApplicationSnapshot {
-            lifecycle: ClientLifecycleState::InWorld {
-                player_guid: Guid(0x5000_0008),
-            },
+            lifecycle: ClientLifecycleState::InWorld,
+            local_player_guid: Some(Guid(0x5000_0008)),
             server_time: Some(22.0),
             world_generation: 4,
             dynamic: DynamicEntitySnapshot::new(
@@ -230,16 +229,31 @@ mod tests {
             runtime_bodies: Vec::new().into(),
         };
         let current = ClientCurrentState::from(&snapshot);
-        assert!(matches!(
-            current.lifecycle,
-            ClientLifecycleWire::InWorld { player_guid } if player_guid == Guid(0x5000_0008)
-        ));
+        assert_eq!(
+            serde_json::to_value(&current)
+                .expect("current state should serialize")
+                .get("localPlayerGuid"),
+            Some(&serde_json::json!(0x5000_0008u64))
+        );
+        assert!(matches!(current.lifecycle, ClientLifecycleWire::InWorld));
+        assert_eq!(current.local_player_guid, Some(Guid(0x5000_0008)));
         assert_eq!(current.world_generation, 4);
     }
 
     #[test]
     fn broad_core_events_stop_at_the_client_host_boundary() {
         assert!(project_client_event(ClientViewEvent::Disconnected).is_none());
+    }
+
+    #[test]
+    fn local_player_identity_crosses_independently_of_lifecycle() {
+        let player_guid = Guid(0x5000_0009);
+        assert!(matches!(
+            project_client_event(ClientViewEvent::LocalPlayerEstablished { player_guid }),
+            Some(ClientHostEvent::LocalPlayerEstablished {
+                player_guid: projected
+            }) if projected == player_guid
+        ));
     }
 
     #[test]

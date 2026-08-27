@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { ActiveRegionSource } from "./active-region-source";
 import { decodeLandblockTerrainRecord } from "./decode-landblock-terrain-record";
-import type { LandblockId } from "../game/game-types";
+import type { LandblockOwnerId } from "../game/game-types";
 import { resolveActiveRegionTerrainPresentation } from "../game/terrain/active-region-terrain-resolver";
 
-const LANDBLOCK_ID = "0x0102ffff" as LandblockId;
+const LANDBLOCK_ID = "0x0102ffff" as LandblockOwnerId;
 const ACTIVE_REGION: ActiveRegionSource = {
 	provenance: {
 		sourceRecordId: "0x13000000",

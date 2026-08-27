@@ -239,6 +239,12 @@ shared state. The shared contract determines what their completions mean.
 - `crates/holtburger-core/src/client/runtime.rs`
   - samples one collision snapshot before simulation and camera work, providing the correct
     same-epoch consumption point.
+- `crates/holtburger-core/src/client/types.rs` and
+  `apps/holtburger-3d/src/client/client-presentation-session.ts`
+  - portal lifecycle publishes only generation and cause; destination residency and body-instance
+    guards remain core-private activation facts;
+  - frontend presentation derives its exact scene target from the authoritative local-player
+    mirror rather than a collision-preparation projection.
 
 ### Evidence from the observed failure
 
@@ -460,6 +466,8 @@ valid.
 
 - Client world activation treats presentation readiness, local-player body readiness, and
   collision availability as distinct facts.
+- Core-private destination and body-instance guards protect authority activation without becoming
+  renderer-facing placement or collision-readiness state.
 - Unavailable destination collision does not strand presentation in portal space; local physical
   motion rejects and a loud diagnostic names the unavailable owner.
 - Client and Explorer camera queries use the explicit exceptional uncovered-query policy.
@@ -473,12 +481,15 @@ valid.
 - A complete visual destination can present when collision is terminally unavailable, while the
   local body cannot commit unproven motion.
 - Client and Explorer never label an uncovered camera query collision-safe.
+- Portal lifecycle remains a phase contract: no residency, body-instance, or collision-preparation
+  field is added to its Rust or host wire representation.
 - No universal authority trait or mode flag is introduced.
 
 #### Task Checklist
 
 - [ ] Replace global `collision-snapshot` absence with owner-specific coverage facts.
-- [ ] Preserve body identity and destination activation guards separately from collision interest.
+- [ ] Preserve body identity and core-private destination activation guards separately from
+      collision interest.
 - [ ] Decide the smallest renderer-facing uncovered-camera status from actual current consumers.
 - [ ] Keep frontend reveal and error UX app-local.
 
@@ -702,6 +713,9 @@ policy, renderer interest, or a universal runtime has leaked into the cutover.
   generation. Both block ordinary motion, but only failure represents an operational defect.
 - 2026-08-27: Kept remote local simulation participation policy out of scope. A two-body invariant
   test proves the extension seam without inventing control behavior.
+- 2026-08-27: Kept destination residency and body-instance guards private to core activation.
+  Portal lifecycle carries generation and cause only; frontend scene targeting comes from the
+  authoritative local-player mirror, not a collision-preparation projection.
 
 ## Course Corrections
 

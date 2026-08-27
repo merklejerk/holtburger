@@ -38,8 +38,8 @@ pub use client::runtime_body_view_cache::RuntimeBodyViewCache;
 pub use client::types::{
     ActionResultReason, ActionResultSource, ActiveCharacterConfirmation, BusyOperationKind,
     BusyOperationResult, ClientApplicationSnapshot, ClientCharacterSummary, ClientCommand,
-    ClientExitCause, ClientLifecycleState, ClientState, ClientViewEvent,
-    ClientWorldDiscontinuityKind, PlayerCharacterOptions, RetryState,
+    ClientExitCause, ClientLifecycleState, ClientPresentationDiscontinuityKind, ClientState,
+    ClientViewEvent, ClientWorldActivationCause, PlayerCharacterOptions, RetryState,
 };
 pub use client::{
     ClientCameraClearance, ClientCameraClearanceRequest, ClientCameraDiagnostics,

@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import type {
-	DynamicEntityEvent,
-	DynamicEntityView,
+import {
+	cellId,
+	type DynamicEntityEvent,
+	type DynamicEntityView,
 } from "../lib/game/runtime/dynamic-entity-feed";
 import {
 	ExplorerDynamicEntitySession,
@@ -112,7 +113,7 @@ function entity(guid: number) {
 				reachedEnvCellIds: [],
 			},
 			pose: {
-				landblockId: 0xda550001,
+				landblockId: cellId(0xda550001),
 				coords: { x: 1, y: 2, z: 3 },
 				rotation: { w: 1, x: 0, y: 0, z: 0 },
 			},

@@ -25,6 +25,9 @@ pub struct ClientRuntimeBuilder {
     server_endpoint: Option<ServerEndpoint>,
     world_bootstrap: Option<Arc<WorldBootstrap>>,
     collision_source: Option<Arc<dyn super::collision::ClientCollisionSource>>,
+    /// Whether an external 3D presentation must acknowledge the first pure-destination frame.
+    /// Non-rendering clients retain the immediate adapter default.
+    requires_external_world_reveal: bool,
     message_dump_dir: Option<PathBuf>,
 }
 
@@ -35,6 +38,7 @@ impl ClientRuntimeBuilder {
             server_endpoint: None,
             world_bootstrap: None,
             collision_source: None,
+            requires_external_world_reveal: false,
             message_dump_dir: None,
         }
     }
@@ -86,6 +90,14 @@ impl ClientRuntimeBuilder {
         source: Arc<dyn super::collision::ClientCollisionSource>,
     ) -> Self {
         self.collision_source = Some(source);
+        self
+    }
+
+    /// Requires a presentation adapter to acknowledge the first pure-destination frame before
+    /// core sends ACE's `LoginComplete` action. Desktop 3D mode enables this; the TUI keeps the
+    /// immediate non-rendering adapter.
+    pub fn require_external_world_reveal(mut self) -> Self {
+        self.requires_external_world_reveal = true;
         self
     }
 
@@ -161,6 +173,8 @@ impl ClientRuntimeBuilder {
             collision_coordinator: self
                 .collision_source
                 .map(super::collision::ClientCollisionCoordinator::new),
+            requires_external_world_reveal: self.requires_external_world_reveal,
+            activation: None,
             camera: super::camera::ClientCameraRuntime::new()?,
             character_selection: CharacterSelectionState::new(self.account_name),
             turbine_chat: TurbineChatState::default(),
@@ -189,6 +203,8 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> ClientRuntime {
         movement: MovementSystem::new(),
         simulation: ClientSimulationSystem::new(),
         collision_coordinator: None,
+        requires_external_world_reveal: false,
+        activation: None,
         camera: super::camera::ClientCameraRuntime::new().expect("test camera profile"),
         character_selection: CharacterSelectionState::new("test".to_string()),
         turbine_chat: TurbineChatState::default(),

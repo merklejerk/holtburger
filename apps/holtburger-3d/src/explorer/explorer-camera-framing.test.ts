@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import type { LandblockId } from "../lib/game/game-types";
+import type { LandblockOwnerId } from "../lib/game/game-types";
 import { Vec3 } from "../lib/game/math/types";
 import { FRONTEND_TUNING } from "../lib/frontend-tuning";
 import { resolveExplorerOutdoorFocusPose } from "./explorer-camera-framing";
 
-const LAND_BLOCK_ID = "0xda55ffff" as LandblockId;
+const LAND_BLOCK_ID = "0xda55ffff" as LandblockOwnerId;
 
 describe("Explorer camera framing", () => {
 	it("resolves the automatic outdoor pose from the offset and center terrain surfaces", () => {

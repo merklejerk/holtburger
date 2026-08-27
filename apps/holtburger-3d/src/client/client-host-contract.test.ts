@@ -1,15 +1,18 @@
 import { decode, encode } from "@msgpack/msgpack";
 import { describe, expect, it } from "vitest";
 
-import { decodeClientLifecycle } from "./client-host-contract";
+import {
+	decodeClientLifecycle,
+	decodeClientLocalPlayerEstablished,
+} from "./client-host-contract";
 
 describe("client host wire contract", () => {
-	it("decodes the Rust-shaped local-player lifecycle identity", () => {
+	it("decodes Rust-shaped lifecycle and local-player identity independently", () => {
 		const payload = encode({
 			kind: "event",
 			event: {
 				event: "client-lifecycle-changed",
-				payload: { kind: "in-world", playerGuid: 0x5000_0008 },
+				payload: { kind: "in-world" },
 			},
 		});
 		const frame = decode(payload);
@@ -26,7 +29,9 @@ describe("client host wire contract", () => {
 
 		expect(decodeClientLifecycle(frame.event.payload)).toEqual({
 			kind: "in-world",
-			playerGuid: 0x5000_0008,
 		});
+		expect(
+			decodeClientLocalPlayerEstablished({ playerGuid: 0x5000_0008 }),
+		).toEqual({ playerGuid: 0x5000_0008 });
 	});
 });

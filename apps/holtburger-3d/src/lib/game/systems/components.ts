@@ -1,4 +1,4 @@
-import type { EnvCellId, LandblockId } from "../game-types";
+import type { EnvCellId, LandblockOwnerId } from "../game-types";
 import type { ObjectGeometryKey } from "../geometry/types";
 import type { AABB3, Mat4, Vec3 } from "../math/types";
 import type { LandblockVec3 } from "../../assets/ac-frame";
@@ -34,7 +34,7 @@ export interface RigidPartDrawUnit {
 /** Renderer-neutral visible rigid-part instance emitted from one selected dynamic root. */
 export interface VisibleRigidPartContribution {
 	/** Landblock coordinate frame containing `instance.sourceToLandblock`. */
-	readonly landblockId: LandblockId;
+	readonly landblockId: LandblockOwnerId;
 	/** Source-domain scopes reached by the owning entity's accepted spatial geometry. */
 	readonly renderScopes: readonly SceneScope[];
 	/** Stable authored draw unit; its identity is a cache key, so it is never cloned per frame. */

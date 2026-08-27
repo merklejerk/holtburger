@@ -1,7 +1,7 @@
 import { sceneVec3 } from "../../assets/ac-frame";
 import { Vec3 } from "../../game/math/types";
 import { describe, expect, it } from "vitest";
-import type { LandblockId } from "../game-types";
+import type { LandblockOwnerId } from "../game-types";
 import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
 import { LandblockLayerKind } from "../runtime/scene-interest";
 import type { SceneInterestRevision } from "../runtime/scene-availability";
@@ -13,8 +13,8 @@ function revision(value: number): SceneInterestRevision {
 	return value as SceneInterestRevision;
 }
 
-function landblock(x: number, y: number): LandblockId {
-	return `0x${x.toString(16).padStart(2, "0")}${y.toString(16).padStart(2, "0")}ffff` as LandblockId;
+function landblock(x: number, y: number): LandblockOwnerId {
+	return `0x${x.toString(16).padStart(2, "0")}${y.toString(16).padStart(2, "0")}ffff` as LandblockOwnerId;
 }
 
 /** A light placed at a world offset from a landblock's own origin. */

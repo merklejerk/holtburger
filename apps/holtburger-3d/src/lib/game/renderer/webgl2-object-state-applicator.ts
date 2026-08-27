@@ -1,4 +1,4 @@
-import type { LandblockId } from "../game-types";
+import type { LandblockOwnerId } from "../game-types";
 import type { SceneLightingRole } from "../environment/scene-lighting";
 import type {
 	ObjectBlendPolicy,
@@ -32,7 +32,7 @@ export class WebGL2ObjectStateApplicator {
 	#blendPolicy: ObjectBlendPolicy | UnknownState = UNKNOWN_STATE;
 	#cullFace: "back" | "front" | UnknownState = UNKNOWN_STATE;
 	#lightingRole: SceneLightingRole | UnknownState = UNKNOWN_STATE;
-	#staticLightScope: LandblockId | null | UnknownState = UNKNOWN_STATE;
+	#staticLightScope: LandblockOwnerId | null | UnknownState = UNKNOWN_STATE;
 	#program: WebGLProgram | UnknownState = UNKNOWN_STATE;
 	readonly #textureUnits = new Map<
 		number,
@@ -92,7 +92,7 @@ export class WebGL2ObjectStateApplicator {
 	 * Keyed by landblock rather than by role, because two draws sharing a role can sit in
 	 * different landblocks and therefore need different sets.
 	 */
-	applyStaticLightScope(landblockId: LandblockId | null): boolean {
+	applyStaticLightScope(landblockId: LandblockOwnerId | null): boolean {
 		if (this.#staticLightScope === landblockId) return false;
 		this.#staticLightScope = landblockId;
 		return true;

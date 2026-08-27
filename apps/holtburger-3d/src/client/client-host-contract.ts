@@ -24,6 +24,8 @@ const exitCauseSchema = z.enum([
 	"host-shutdown",
 ]);
 
+const worldActivationCauseSchema = z.enum(["initial-entry", "teleport"]);
+
 const lifecycleSchema = z.discriminatedUnion("kind", [
 	z.object({ kind: z.literal("connecting") }).strict(),
 	z.object({ kind: z.literal("authenticating") }).strict(),
@@ -39,7 +41,14 @@ const lifecycleSchema = z.discriminatedUnion("kind", [
 			characterGuid: guid,
 		})
 		.strict(),
-	z.object({ kind: z.literal("in-world"), playerGuid: guid }).strict(),
+	z
+		.object({
+			kind: z.literal("portal-space"),
+			worldGeneration: z.number().int().nonnegative(),
+			cause: worldActivationCauseSchema,
+		})
+		.strict(),
+	z.object({ kind: z.literal("in-world") }).strict(),
 	z
 		.object({
 			kind: z.literal("exiting"),
@@ -51,18 +60,21 @@ const lifecycleSchema = z.discriminatedUnion("kind", [
 const currentStateSchema = z
 	.object({
 		lifecycle: lifecycleSchema,
+		localPlayerGuid: guid.nullable(),
 		serverTime: finiteNumber.nullable(),
 		worldGeneration: z.number().int().nonnegative(),
 		dynamic: z.unknown(),
 	})
 	.strict();
 
-const discontinuitySchema = z
+const presentationDiscontinuitySchema = z
 	.object({
 		worldGeneration: z.number().int().nonnegative(),
-		kind: z.enum(["teleport", "forced-reposition", "reset"]),
+		kind: z.enum(["forced-reposition", "reset"]),
 	})
 	.strict();
+
+const localPlayerEstablishedSchema = z.object({ playerGuid: guid }).strict();
 
 const exitRequestedSchema = z
 	.object({
@@ -192,7 +204,12 @@ export type ClientCurrentState = Omit<
 	z.infer<typeof currentStateSchema>,
 	"dynamic"
 > & { dynamic: DynamicEntitySnapshot };
-export type ClientWorldDiscontinuity = z.infer<typeof discontinuitySchema>;
+export type ClientPresentationDiscontinuity = z.infer<
+	typeof presentationDiscontinuitySchema
+>;
+export type ClientLocalPlayerEstablished = z.infer<
+	typeof localPlayerEstablishedSchema
+>;
 export type ClientExitRequested = z.infer<typeof exitRequestedSchema>;
 export type ClientDriveRequest = z.infer<typeof clientDriveRequestSchema>;
 export type ClientCameraIdentity = z.infer<typeof cameraIdentitySchema>;
@@ -240,16 +257,23 @@ export function decodeClientLifecycle(value: unknown): ClientLifecycle {
 	return lifecycleSchema.parse(value);
 }
 
+/** Strictly validates the server-established local-player identity edge. */
+export function decodeClientLocalPlayerEstablished(
+	value: unknown,
+): ClientLocalPlayerEstablished {
+	return localPlayerEstablishedSchema.parse(value);
+}
+
 /** Strictly validates one synchronized server-time event. */
 export function decodeClientServerTime(value: unknown): { time: number } {
 	return z.object({ time: finiteNumber }).strict().parse(value);
 }
 
-/** Strictly validates one interpolation/camera discontinuity edge. */
-export function decodeClientWorldDiscontinuity(
+/** Strictly validates one non-portal interpolation/camera discontinuity edge. */
+export function decodeClientPresentationDiscontinuity(
 	value: unknown,
-): ClientWorldDiscontinuity {
-	return discontinuitySchema.parse(value);
+): ClientPresentationDiscontinuity {
+	return presentationDiscontinuitySchema.parse(value);
 }
 
 /** Strictly validates the redacted terminal diagnostic. */

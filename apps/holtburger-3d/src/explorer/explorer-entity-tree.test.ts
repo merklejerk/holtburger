@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { buildExplorerEntityTree } from "./explorer-entity-tree";
-import type { DynamicEntityView } from "../lib/game/runtime/dynamic-entity-feed";
+import {
+	cellId,
+	type DynamicEntityView,
+} from "../lib/game/runtime/dynamic-entity-feed";
 
 describe("buildExplorerEntityTree", () => {
 	it("nests each held child under its wearer in published order", () => {
@@ -44,7 +47,7 @@ function world(guid: number): DynamicEntityView {
 				reachedEnvCellIds: [],
 			},
 			pose: {
-				landblockId: 0xda550001,
+				landblockId: cellId(0xda550001),
 				coords: { x: 0, y: 0, z: 0 },
 				rotation: { w: 1, x: 0, y: 0, z: 0 },
 			},

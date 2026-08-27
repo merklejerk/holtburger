@@ -3,7 +3,6 @@ use holtburger_3d_host::{
     ExplorerPossessionEventWireRequest, ExplorerPossessionIntentWireRequest,
     ExplorerPossessionReceipt, LandblockSourceLayer, LoadTexturePixelsRequest,
     PossessExplorerEntityRequest,
-    dynamic_entity_visual_source::load_dynamic_entity_visual_source_bytes,
     explorer_entity_delivery::ExplorerEntityDelivery,
     explorer_entity_delivery::ExplorerFixedTickEnvelope,
     explorer_entity_driver::{
@@ -21,6 +20,7 @@ use holtburger_3d_host::{
     load_landblock_source_batch_bytes, load_motion_table_closure_ids, load_particle_emitter_bytes,
     load_particle_meshes_bytes, load_physics_script_bytes, load_sky_source_bytes,
     load_sound_table_bytes, load_texture_pixels_bytes,
+    setup_visual_source::load_setup_visual_source_bytes,
 };
 use holtburger_content::{ContentDecodeCache, ContentRepository};
 use holtburger_core::{ContentAssetRuntime, ContentAssetService};
@@ -96,7 +96,7 @@ struct SoundTableRequest {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct DynamicEntityVisualRequest {
+struct SetupVisualRequest {
     setup_did: u32,
     appearance: EntityAppearance,
 }
@@ -279,14 +279,10 @@ async fn handle_connection(mut stream: TcpStream, state: &DevHostState) -> anyho
                 Err(error) => write_error(&mut stream, error).await,
             }
         }
-        ("POST", "/dynamic-entity-visual") => {
-            let request = serde_json::from_slice::<DynamicEntityVisualRequest>(&request.body)?;
-            match load_dynamic_entity_visual_source_bytes(
-                runtime,
-                request.setup_did,
-                request.appearance,
-            )
-            .await
+        ("POST", "/setup-visual") => {
+            let request = serde_json::from_slice::<SetupVisualRequest>(&request.body)?;
+            match load_setup_visual_source_bytes(runtime, request.setup_did, request.appearance)
+                .await
             {
                 Ok(bytes) => {
                     write_response(&mut stream, 200, "application/octet-stream", &bytes).await

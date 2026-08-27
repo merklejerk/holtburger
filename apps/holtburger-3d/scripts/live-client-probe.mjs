@@ -308,11 +308,12 @@ async function main() {
 	const events = [
 		"client-current-state",
 		"client-lifecycle-changed",
+		"client-local-player-established",
 		"client-server-time-updated",
 		"client-dynamic-entity",
 		"client-camera-started",
 		"client-camera",
-		"client-world-discontinuity",
+		"client-presentation-discontinuity",
 		"client-exit-requested",
 	];
 	try {
@@ -345,7 +346,7 @@ async function main() {
 				}
 				if (event === "client-camera" || event === "client-camera-started")
 					cameras.push({ event, payload });
-				if (event === "client-world-discontinuity")
+				if (event === "client-presentation-discontinuity")
 					discontinuities.push(payload);
 				if (event === "client-exit-requested") {
 					terminalEvents.push({
@@ -397,9 +398,16 @@ async function main() {
 			timeoutMs,
 		);
 		void inWorldPromise.catch(() => undefined);
+		const localPlayerPromise = waiter.wait(
+			"client-local-player-established",
+			(payload) => Number.isInteger(payload?.playerGuid),
+			timeoutMs,
+		);
+		void localPlayerPromise.catch(() => undefined);
 		await client.invoke("select_client_character", { guid: selected.guid });
-		const inWorld = await inWorldPromise;
-		census.setFocusGuid(inWorld.playerGuid);
+		await inWorldPromise;
+		const { playerGuid } = await localPlayerPromise;
+		census.setFocusGuid(playerGuid);
 
 		const currentStatePromise = waiter.wait(
 			"client-current-state",
@@ -409,19 +417,23 @@ async function main() {
 		void currentStatePromise.catch(() => undefined);
 		await client.invoke("request_client_current_state");
 		const currentState = await currentStatePromise;
+		if (currentState.localPlayerGuid !== playerGuid) {
+			throw new Error(
+				"current state disagreed with established local-player identity",
+			);
+		}
 		let player = currentState.dynamic?.entities?.find(
-			(entity) => entity.identity?.guid === inWorld.playerGuid,
+			(entity) => entity.identity?.guid === playerGuid,
 		);
 		if (player === undefined) {
 			const playerEventPromise = waiter.wait(
 				"client-dynamic-entity",
 				(payload) =>
 					(payload?.kind === "upserted" &&
-						payload.entity?.identity?.guid === inWorld.playerGuid) ||
+						payload.entity?.identity?.guid === playerGuid) ||
 					(payload?.kind === "advanced" &&
 						payload.batch?.advances?.some(
-							(advance) =>
-								advance.entity?.identity?.guid === inWorld.playerGuid,
+							(advance) => advance.entity?.identity?.guid === playerGuid,
 						)),
 				timeoutMs,
 			);
@@ -431,17 +443,17 @@ async function main() {
 				event.kind === "upserted"
 					? event.entity
 					: event.batch.advances.find(
-							(advance) => advance.entity.identity.guid === inWorld.playerGuid,
+							(advance) => advance.entity.identity.guid === playerGuid,
 						)?.entity;
 		}
-		player ??= latestEntities.get(inWorld.playerGuid);
+		player ??= latestEntities.get(playerGuid);
 		if (player !== undefined) census.seedFocusEntity(player);
 		let cameraStartError = null;
 		if (player?.placement?.kind === "world") {
 			try {
 				await client.invoke("start_client_camera", {
 					request: {
-						playerGuid: inWorld.playerGuid,
+						playerGuid,
 						entityGeneration: player.generation,
 						initialReach: 4.5,
 						minimumReach: 1.2,

@@ -30,10 +30,10 @@ import {
 	type GamePresentationRuntimeRenderDevice,
 } from "./game-presentation-runtime";
 import type { SceneAvailabilityEvent } from "./scene-availability";
-import type { DynamicEntityView } from "./dynamic-entity-feed";
+import { cellId, type DynamicEntityView } from "./dynamic-entity-feed";
 import type { Camera } from "./types";
-import type { DatAssetId, LandblockId } from "../game-types";
-import type { DynamicEntityVisualSource } from "../../assets/dynamic-entity-visual-source";
+import type { DatAssetId, LandblockOwnerId } from "../game-types";
+import type { SetupVisualSource } from "../../assets/setup-visual-source";
 import type { DecodedStaticPresentation } from "../../assets/decode-static-source-record";
 import type {
 	ClosedWorkerPort,
@@ -42,6 +42,18 @@ import type {
 } from "../workers/closed-worker";
 import { generateTerrain } from "../terrain/terrain-generator";
 import { validateTerrainGenerationValues } from "../terrain/terrain-generation-validation";
+import { compileTerrainCompositionTable } from "../terrain/composition-table";
+import { resolveTerrainMaterialTable } from "../terrain/terrain-materials";
+import { resolveTerrainTextureFacts } from "../terrain/types";
+import {
+	texturePixelFormatByteLength,
+	texturePurposePolicy,
+	TexturePurpose,
+} from "../textures/types";
+import type {
+	TexturePreparationServiceRequest,
+	TexturePreparationServiceResponse,
+} from "../textures/texture-preparer";
 import {
 	terrainWorkerResultTransferables,
 	type TerrainWorkerJob,
@@ -136,6 +148,15 @@ describe("GamePresentationRuntime view and interest control", () => {
 			portalTruncatedViewCount: 0,
 			portalFramebufferCount: 0,
 			portalTargetBytes: 0,
+			portalTransitionSnapshotBytes: 0,
+			portalTransitionSnapshotAllocatedGenerationCount: 0,
+			portalTransitionSnapshotDisposedGenerationCount: 0,
+			portalTransitionFramebufferCount: 0,
+			portalTransitionTargetBytes: 0,
+			submittedPortalTransitionDrawCount: 0,
+			portalTransitionVisualInstalled: false,
+			portalTransitionGeneration: null,
+			portalTransitionPhase: null,
 			flatSceneFramebufferCount: 0,
 			flatSceneTargetBytes: 0,
 			flatSceneAllocatedGenerationCount: 0,
@@ -689,6 +710,59 @@ describe("GamePresentationRuntime view and interest control", () => {
 });
 
 describe("GamePresentationRuntime dynamic-entity presentation", () => {
+	it("keeps an outdoor player installed across the static activation handoff", async () => {
+		const landblockId = "0x0001ffff";
+		const runtime = await buildGamePresentationRuntimeForTest(
+			{
+				buildRenderer: async () => ({
+					async destroy() {},
+					drawFrame: () => EMPTY_RENDERER_FRAME_FEEDBACK,
+				}),
+				resources: TEST_RESOURCES,
+			},
+			{
+				async prepareLandblockLayers(layers) {
+					return [...layers].map(({ id: requested, layer }) => {
+						if (layer !== LandblockLayerKind.Terrain)
+							throw new Error(`Unexpected activation layer ${layer}.`);
+						return terrainArtifact(requested);
+					});
+				},
+			},
+			new EchoTexturePixelSource(),
+			ANIMATION_SOURCE,
+			PHYSICS_SCRIPT_SOURCE,
+			{ playOneShot: () => null, prepare: async () => {} },
+			PARTICLE_EMITTER_SOURCE,
+			SOUND_TABLE_SOURCE,
+			PARTICLE_MESH_SOURCE,
+			{ load: async () => spawnedVisual() },
+		);
+		const receipt = await runtime.activateScene({
+			generation: 7,
+			target: sceneInterest(landblockId),
+		});
+		await vi.waitFor(() => {
+			runtime.tick();
+			const status = runtime.sceneActivationStatus(receipt);
+			if (status.kind === "failed") throw new Error(status.diagnostic);
+			expect(status.kind).toBe("ready");
+		});
+
+		const player = spawnedEntity(7, 1);
+		await runtime.reconcileDynamicEntities([player]);
+		expect(runtime.dynamicEntityOrigin(player.identity.guid)?.landblockId).toBe(
+			landblockId,
+		);
+
+		runtime.completeSceneActivation(receipt.generation);
+		await runtime.reconcileDynamicEntities([player]);
+		expect(runtime.dynamicEntityOrigin(player.identity.guid)?.landblockId).toBe(
+			landblockId,
+		);
+		await runtime.destroy();
+	});
+
 	/// The clip is a level on the view, not an edge on a tick. An entity realized asynchronously
 	/// misses every transition that happened while its visual was decoding, so realization has to
 	/// be able to ask what it is playing rather than wait to be told that it changed.
@@ -791,7 +865,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 
 	it("cannot publish a visual load that completes after exact removal", async () => {
 		let resolveVisual!: (value: DecodedStaticPresentation) => void;
-		const source: DynamicEntityVisualSource = {
+		const source: SetupVisualSource = {
 			load: () =>
 				new Promise((resolve) => {
 					resolveVisual = resolve;
@@ -1074,7 +1148,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 });
 
 async function buildSpawnRuntime(
-	dynamicEntityVisualSource: DynamicEntityVisualSource,
+	setupVisualSource: SetupVisualSource,
 	animationSource: AnimationAssetSource = ANIMATION_SOURCE,
 ): Promise<GamePresentationRuntime> {
 	const device: GamePresentationRuntimeRenderDevice = {
@@ -1094,7 +1168,7 @@ async function buildSpawnRuntime(
 		PARTICLE_EMITTER_SOURCE,
 		SOUND_TABLE_SOURCE,
 		PARTICLE_MESH_SOURCE,
-		dynamicEntityVisualSource,
+		setupVisualSource,
 	);
 }
 
@@ -1162,7 +1236,7 @@ async function buildGamePresentationRuntimeForTest(
 		particleEmitterSource,
 		soundTableSource,
 		particleMeshSource,
-		dynamicEntityVisualSource,
+		setupVisualSource,
 		roll,
 		tickProfiler,
 	] = parameters;
@@ -1176,7 +1250,7 @@ async function buildGamePresentationRuntimeForTest(
 		particleEmitterSource,
 		soundTableSource,
 		particleMeshSource,
-		dynamicEntityVisualSource,
+		setupVisualSource,
 		roll,
 		tickProfiler,
 		{ createTerrainWorker: () => new TestTerrainWorkerPort() },
@@ -1232,6 +1306,32 @@ class TestTerrainWorkerPort implements ClosedWorkerPort {
 	}
 }
 
+/** Returns one compatible pixel for every terrain texture role used by the activation fixture. */
+class EchoTexturePixelSource implements TexturePixelSource {
+	async loadTexturePixels(
+		request: TexturePreparationServiceRequest,
+	): Promise<TexturePreparationServiceResponse> {
+		if (request.kind !== "prepared-texture-surface")
+			throw new Error(`Unexpected texture request ${request.kind}.`);
+		const format = texturePurposePolicy(request.purpose).format;
+		const surface = {
+			format,
+			height: 1,
+			pixels: new Uint8Array(texturePixelFormatByteLength(format)).fill(1),
+			sourceAssetId: request.sourceAssetId,
+			width: 1,
+		};
+		if (request.purpose === TexturePurpose.TerrainColor) {
+			return {
+				kind: request.kind,
+				purpose: request.purpose,
+				surface: { ...surface, meanRgb: [1 / 255, 2 / 255, 3 / 255] },
+			};
+		}
+		return { kind: request.kind, purpose: request.purpose, surface };
+	}
+}
+
 function spawnedEntity(
 	guid: number,
 	generation: number,
@@ -1263,7 +1363,7 @@ function spawnedEntity(
 			omega: { x: 0, y: 0, z: 0 },
 			pose: {
 				coords: { x: guid, y: 2, z: 3 },
-				landblockId: 0x00010001,
+				landblockId: cellId(0x00010001),
 				rotation: { w: 1, x: 0, y: 0, z: 0 },
 			},
 			sampleMode: "authoritative-only",
@@ -1364,12 +1464,14 @@ function spawnedVisual(): DecodedStaticPresentation {
 
 function sceneInterest(anchorLandblockId: string) {
 	return {
-		ambientOutdoorEnvCellOwners: new Set([anchorLandblockId as LandblockId]),
+		ambientOutdoorEnvCellOwners: new Set([
+			anchorLandblockId as LandblockOwnerId,
+		]),
 		target: {
 			kind: "outdoor",
 			requested: {
 				kind: "outdoor",
-				landblockId: anchorLandblockId as LandblockId,
+				landblockId: anchorLandblockId as LandblockOwnerId,
 			},
 		},
 		radii: {
@@ -1384,12 +1486,12 @@ function sceneInterest(anchorLandblockId: string) {
 
 function buildingSceneInterest(anchorLandblockId: string) {
 	return {
-		ambientOutdoorEnvCellOwners: new Set<LandblockId>(),
+		ambientOutdoorEnvCellOwners: new Set<LandblockOwnerId>(),
 		target: {
 			kind: "outdoor",
 			requested: {
 				kind: "outdoor",
-				landblockId: anchorLandblockId as LandblockId,
+				landblockId: anchorLandblockId as LandblockOwnerId,
 			},
 		},
 		radii: {
@@ -1404,12 +1506,12 @@ function buildingSceneInterest(anchorLandblockId: string) {
 
 function objectSceneInterest(anchorLandblockId: string) {
 	return {
-		ambientOutdoorEnvCellOwners: new Set<LandblockId>(),
+		ambientOutdoorEnvCellOwners: new Set<LandblockOwnerId>(),
 		target: {
 			kind: "outdoor",
 			requested: {
 				kind: "outdoor",
-				landblockId: anchorLandblockId as LandblockId,
+				landblockId: anchorLandblockId as LandblockOwnerId,
 			},
 		},
 		radii: {
@@ -1424,12 +1526,12 @@ function objectSceneInterest(anchorLandblockId: string) {
 
 function generatedSceneInterest(anchorLandblockId: string) {
 	return {
-		ambientOutdoorEnvCellOwners: new Set<LandblockId>(),
+		ambientOutdoorEnvCellOwners: new Set<LandblockOwnerId>(),
 		target: {
 			kind: "outdoor",
 			requested: {
 				kind: "outdoor",
-				landblockId: anchorLandblockId as LandblockId,
+				landblockId: anchorLandblockId as LandblockOwnerId,
 			},
 		},
 		radii: {
@@ -1440,6 +1542,57 @@ function generatedSceneInterest(anchorLandblockId: string) {
 			terrainRadius: 0,
 		},
 	} as const;
+}
+
+/** Complete one-landblock terrain source used to exercise production activation residency. */
+function terrainArtifact(landblockId: LandblockOwnerId): LandblockLayerCommit {
+	const composition = {
+		activeRegionKey: "activation-handoff-test",
+		cornerTerrainAlphaMaps: [
+			{ blendMaskTextureId: "0x05000002", terrainCode: 1 },
+		],
+		landscapeDetail: { textureId: "0x05000004", tiling: 1 },
+		roadAlphaMaps: [{ roadCode: 1, roadMaskTextureId: "0x05000003" }],
+		sideTerrainAlphaMaps: [
+			{ blendMaskTextureId: "0x05000002", terrainCode: 3 },
+		],
+		terrainMaterials: resolveTerrainMaterialTable([
+			{
+				colorTextureId: "0x05000001",
+				colorVariation: {
+					maxVertexBrightness: 0,
+					maxVertexHue: 0,
+					maxVertexSaturation: 0,
+					minVertexBrightness: 0,
+					minVertexHue: 0,
+					minVertexSaturation: 0,
+				},
+				terrainType: 0,
+				tiling: 1,
+			},
+		]),
+	} as const;
+	const textures = resolveTerrainTextureFacts(composition);
+	return {
+		commit: {
+			generation: {
+				cellDiagonals: new Uint8Array(64),
+				gridSize: 9,
+				heightIndices: new Uint8Array(81),
+				heights: new Float32Array(81),
+				landblockId,
+				terrainSamples: new Uint16Array(81),
+				tileSize: 24,
+			},
+			presentation: {
+				composition,
+				compositionTable: compileTerrainCompositionTable(composition, textures),
+				textures,
+			},
+		},
+		landblockId,
+		layer: LandblockLayerKind.Terrain,
+	};
 }
 
 /** Minimal stale artifact: applying it would fail, so a passing test proves it was discarded. */

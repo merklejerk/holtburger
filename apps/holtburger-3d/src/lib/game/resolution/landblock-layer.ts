@@ -1,5 +1,5 @@
 import type { PlacedStaticLight } from "./presentation";
-import type { DatAssetId, EnvCellId, LandblockId } from "../game-types";
+import type { DatAssetId, EnvCellId, LandblockOwnerId } from "../game-types";
 import type { AABB3, Vec3 } from "../math/types";
 import type { ScenePlacement, SceneScope } from "../scene";
 import type {
@@ -203,7 +203,7 @@ export type PortalSpatialRelationship =
 	  }
 	| {
 			readonly kind: "exterior-transition";
-			readonly exteriorLandblockId: LandblockId;
+			readonly exteriorLandblockId: LandblockOwnerId;
 	  };
 
 /** One host-validated directed crossing between scene scopes. */
@@ -258,7 +258,7 @@ export interface ResolvedPortalCrossing {
 /** Source-only terrain layer consumed by runtime texture and terrain residency. */
 export interface ResolvedTerrainLayerSource {
 	readonly kind: LandblockLayerKind.Terrain;
-	readonly landblockId: LandblockId;
+	readonly landblockId: LandblockOwnerId;
 	/** Canonical landblock facts consumed by the terrain generator. */
 	readonly generation: TerrainGenerationSource;
 	/** Stable regional composition and deterministic texture facts for presentation. */
@@ -270,7 +270,7 @@ interface ResolvedOutdoorStaticLayerSourceFields<
 	TKind extends OutdoorStaticLayerKind,
 > {
 	readonly kind: TKind;
-	readonly landblockId: LandblockId;
+	readonly landblockId: LandblockOwnerId;
 	readonly staticResidents: readonly ResolvedObjectResident[];
 	readonly dynamicSources: readonly AuthoredDynamicSource[];
 }
@@ -306,7 +306,7 @@ export type ResolvedOutdoorStaticLayerSource =
 /** One EnvCell-owned resident partition after every transform is expressed in landblock space. */
 export interface ResolvedEnvCellStaticObjectSource {
 	readonly kind: LandblockLayerKind.EnvCells;
-	readonly landblockId: LandblockId;
+	readonly landblockId: LandblockOwnerId;
 	readonly envCellId: EnvCellId;
 	readonly staticResidents: readonly ResolvedObjectResident[];
 	/** Animation sources retained so worker transfer cannot detach their shared visual buffers. */
@@ -330,7 +330,7 @@ export type ResolvedStaticObjectLayerSource =
 /** Environment-cell layer containing structured interiors and embedded residents. */
 export interface ResolvedEnvCellLayerSource {
 	readonly kind: LandblockLayerKind.EnvCells;
-	readonly landblockId: LandblockId;
+	readonly landblockId: LandblockOwnerId;
 	readonly cells: readonly ResolvedEnvCellPresentation[];
 	readonly portalApertures: readonly ResolvedPortalAperture[];
 	readonly portalCrossings: readonly ResolvedPortalCrossing[];

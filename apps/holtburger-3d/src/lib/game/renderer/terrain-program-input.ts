@@ -1,4 +1,4 @@
-import type { LandblockId } from "../game-types";
+import type { LandblockOwnerId } from "../game-types";
 import type {
 	TerrainColorTextureArrayBinding,
 	TextureArrayBinding,
@@ -41,7 +41,7 @@ export interface TerrainProgramInput {
 export function assertSharedTerrainRegion(
 	expected: TerrainProgramInput,
 	actual: TerrainProgramInput,
-	landblockId: LandblockId,
+	landblockId: LandblockOwnerId,
 ): void {
 	if (
 		expected.composition !== actual.composition ||

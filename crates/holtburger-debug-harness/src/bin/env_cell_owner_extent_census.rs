@@ -7,7 +7,7 @@ use clap::Parser;
 use holtburger_common::Vector3;
 use holtburger_content::{
     ContentDecodeCache, ContentRepository, LandblockAssetAssembler,
-    LandblockInteriorSystemAssembler, LandblockTraversalClass,
+    LandblockInteriorSystemAssembler, LandblockSceneClass,
 };
 use holtburger_dat::EOR_CELL_NAMESPACE;
 
@@ -174,7 +174,7 @@ fn main() -> Result<()> {
 
     let mut all = Census::new();
     let mut dungeon = Census::new();
-    let mut mixed = Census::new();
+    let mut outdoor_with_env_cells = Census::new();
     for landblock_id in landblock_ids {
         let Some(landblock) = LandblockAssetAssembler
             .assemble(&content, &cache, &active_region, landblock_id)
@@ -188,9 +188,10 @@ fn main() -> Result<()> {
         let interior = LandblockInteriorSystemAssembler
             .assemble(&content, &cache, &landblock)
             .with_context(|| format!("interior 0x{landblock_id:08X} assembly failed"))?;
-        let class = match landblock.traversal_class {
-            LandblockTraversalClass::DungeonOnly => &mut dungeon,
-            LandblockTraversalClass::OutdoorOrMixed => &mut mixed,
+        let class = match landblock.scene_class {
+            LandblockSceneClass::DungeonOnly => &mut dungeon,
+            LandblockSceneClass::OutdoorWithEnvCells => &mut outdoor_with_env_cells,
+            LandblockSceneClass::OutdoorOnly => continue,
         };
         all.owners += 1;
         class.owners += 1;
@@ -243,7 +244,7 @@ fn main() -> Result<()> {
 
     report("all", &all);
     report("dungeon-only", &dungeon);
-    report("outdoor-or-mixed", &mixed);
+    report("outdoor-with-env-cells", &outdoor_with_env_cells);
     Ok(())
 }
 

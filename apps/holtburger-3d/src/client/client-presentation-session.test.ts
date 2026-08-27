@@ -2,9 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { ActiveRegionSource } from "../lib/assets/active-region-source";
 import type { LandblockProfileSource } from "../lib/assets/landblock-profile-source";
-import type {
-	DynamicEntityAdvanceBatch,
-	DynamicEntityView,
+import {
+	cellId,
+	type DynamicEntityAdvanceBatch,
+	type DynamicEntityView,
 } from "../lib/game/runtime/dynamic-entity-feed";
 import { Vec3 } from "../lib/game/math/types";
 import type {
@@ -13,6 +14,11 @@ import type {
 } from "./client-host-contract";
 import type { ClientPresentationRuntime } from "./client-presentation-session";
 import type { SceneInterestRequest } from "../lib/game/runtime/scene-interest";
+import type {
+	SceneActivationReceipt,
+	SceneActivationRequest,
+	SceneActivationStatus,
+} from "../lib/game/runtime/scene-availability";
 import {
 	ClientPresentationSession,
 	resolveClientEnvironmentSelection,
@@ -45,6 +51,69 @@ describe("resolveClientEnvironmentSelection", () => {
 });
 
 describe("ClientPresentationSession", () => {
+	it("installs before identity and binds possession from the authority edge", async () => {
+		const playerGuid = 0x0101_0001;
+		const transport = new FakeClientTransport({
+			...currentState(playerGuid),
+			localPlayerGuid: null,
+		});
+		const lifecycle = new ClientLifecycleSession(transport);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		const presentation = new ClientPresentationSession({
+			canvas: fakeCanvas(),
+			hostTransport: {} as never,
+			session: lifecycle,
+			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+		});
+
+		await presentation.start();
+		expect(presentation.frame(1_000).status.kind).toBe("loading-player");
+
+		transport.emit("client-local-player-established", { playerGuid });
+		expect(presentation.frame(1_016).rendered).toBe(true);
+		expect(runtime.viewerLightGuid).toBe(playerGuid);
+		await presentation.destroy();
+	});
+
+	it("retains activation for duplicate portal state and replaces only on generation change", async () => {
+		const playerGuid = 0x0101_0001;
+		const transport = new FakeClientTransport({
+			...currentState(playerGuid),
+			lifecycle: portalLifecycle(4),
+			worldGeneration: 4,
+		});
+		const lifecycle = new ClientLifecycleSession(transport);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		const presentation = new ClientPresentationSession({
+			canvas: fakeCanvas(),
+			hostTransport: {} as never,
+			session: lifecycle,
+			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+		});
+
+		await presentation.start();
+		presentation.frame(1_000);
+		await vi.waitFor(() => expect(runtime.sceneRequests).toHaveLength(1));
+		presentation.frame(1_016);
+
+		transport.emit("client-lifecycle-changed", portalLifecycle(4));
+		presentation.frame(1_032);
+		expect(runtime.sceneRequests).toHaveLength(1);
+		expect(runtime.completedActivations).toEqual([]);
+
+		transport.emit("client-lifecycle-changed", { kind: "in-world" });
+		expect(presentation.frame(1_040).status.kind).toBe("ready");
+		expect(runtime.completedActivations).toEqual([4]);
+
+		transport.emit("client-lifecycle-changed", portalLifecycle(5));
+		presentation.frame(1_048);
+		await vi.waitFor(() => expect(runtime.sceneRequests).toHaveLength(2));
+		expect(runtime.completedActivations).toEqual([4]);
+		await presentation.destroy();
+	});
+
 	it("reconciles snapshots, forwards authority batches, and follows residency targets", async () => {
 		const transport = new FakeClientTransport(currentState(0x0101_0001));
 		const lifecycle = new ClientLifecycleSession(transport);
@@ -58,7 +127,7 @@ describe("ClientPresentationSession", () => {
 			ownerFactory: async () => owner,
 		});
 
-		await presentation.start(0x0101_0001);
+		await presentation.start();
 		expect(runtime.reconciled).toHaveLength(1);
 		expect(
 			runtime.reconciled[0]?.map((entity) => entity.identity.guid),
@@ -84,9 +153,9 @@ describe("ClientPresentationSession", () => {
 		expect(runtime.advances[0]?.batch).toEqual(batch);
 		expect(runtime.advances[0]?.receivedAtMs).toBeTypeOf("number");
 
-		transport.emit("client-world-discontinuity", {
+		transport.emit("client-presentation-discontinuity", {
 			worldGeneration: 2,
-			kind: "teleport",
+			kind: "forced-reposition",
 		});
 		await vi.waitFor(() => expect(runtime.clearCount).toBe(1));
 		const teleport = advanceBatch(0x0101_0001, 0x0100_0001, "teleport", 77);
@@ -118,7 +187,7 @@ describe("ClientPresentationSession", () => {
 			session: lifecycle,
 			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
 		});
-		await presentation.start(0x0100_0001);
+		await presentation.start();
 		presentation.frame(1_000);
 
 		transport.setCurrentState(currentState(0x0100_0002));
@@ -154,7 +223,7 @@ describe("ClientPresentationSession", () => {
 			},
 		});
 
-		const started = presentation.start(0x0100_0001);
+		const started = presentation.start();
 		await presentation.destroy();
 
 		await expect(started).resolves.toBeUndefined();
@@ -177,7 +246,7 @@ describe("ClientPresentationSession", () => {
 			ownerFactory: async () => owner,
 		});
 
-		await presentation.start(0x0100_0001);
+		await presentation.start();
 		await expect(presentation.destroy()).rejects.toMatchObject({
 			message: "Client presentation shutdown failed for: presentation-owner.",
 		});
@@ -223,11 +292,7 @@ class FakeClientTransport implements ClientLifecycleTransport {
 		if (this.#emitLaggedAdvance) {
 			this.emit("client-dynamic-entity", {
 				kind: "advanced",
-				batch: advanceBatch(
-					this.#currentState.lifecycle.kind === "in-world"
-						? this.#currentState.lifecycle.playerGuid
-						: 0,
-				),
+				batch: advanceBatch(this.#currentState.localPlayerGuid ?? 0),
 			});
 		}
 		this.emit("client-current-state", this.#currentState);
@@ -287,6 +352,8 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 	audioListeners: unknown[] = [];
 	viewerLightGuid: number | null = null;
 	clearCount = 0;
+	portalTransitions: unknown[] = [];
+	completedActivations: number[] = [];
 
 	async reconcileDynamicEntities(
 		entities: readonly DynamicEntityView[],
@@ -303,6 +370,27 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 
 	updateSceneInterest(request: SceneInterestRequest): void {
 		this.sceneRequests.push(request);
+	}
+
+	async activateScene(
+		request: SceneActivationRequest,
+	): Promise<SceneActivationReceipt> {
+		this.sceneRequests.push(request.target);
+		return {
+			generation: request.generation,
+			revision: 1 as never,
+			requiredLayers: new Map(),
+		};
+	}
+
+	sceneActivationStatus(
+		receipt: SceneActivationReceipt,
+	): SceneActivationStatus {
+		return { kind: "ready", receipt };
+	}
+
+	completeSceneActivation(generation: number): void {
+		this.completedActivations.push(generation);
 	}
 
 	clearSceneInterest(): void {
@@ -325,6 +413,10 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 
 	setViewerLightCarrier(guid: number | null): void {
 		this.viewerLightGuid = guid;
+	}
+
+	setPortalTransition(transition: unknown): void {
+		this.portalTransitions.push(transition);
 	}
 
 	dynamicEntityOrigin(): ReturnType<
@@ -362,7 +454,7 @@ function fakeOwner(
 		profileSource: {
 			loadLandblockProfile: async (landblockId: `0x${string}`) => ({
 				landblockId,
-				traversalClass: "outdoor-or-mixed" as const,
+				sceneClass: "outdoor-only" as const,
 			}),
 		},
 		runtime,
@@ -425,13 +517,24 @@ function activeRegion(
 function currentState(playerGuid: number): ClientCurrentState {
 	const landblockId = playerGuid === 0x0101_0001 ? 0x0101_0100 : 0x0100_0001;
 	return {
-		lifecycle: { kind: "in-world", playerGuid },
+		lifecycle: { kind: "in-world" },
+		localPlayerGuid: playerGuid,
 		serverTime: 75,
 		worldGeneration: 1,
 		dynamic: {
 			hostTime: { seconds: 75 },
 			entities: [view(playerGuid, landblockId)],
 		},
+	};
+}
+
+function portalLifecycle(
+	worldGeneration: number,
+): ClientCurrentState["lifecycle"] {
+	return {
+		kind: "portal-space",
+		worldGeneration,
+		cause: "teleport",
 	};
 }
 
@@ -468,13 +571,13 @@ function view(guid: number, landblockId = 0x0101_0100): DynamicEntityView {
 		placement: {
 			kind: "world",
 			pose: {
-				landblockId,
+				landblockId: cellId(landblockId),
 				coords: { x: 4, y: 5, z: 6 },
 				rotation: { w: 1, x: 0, y: 0, z: 0 },
 			},
 			spatialMembership: {
 				reachesOutdoors: false,
-				reachedEnvCellIds: [0x0101_0001],
+				reachedEnvCellIds: [cellId(0x0101_0001)],
 			},
 			velocity: { x: 0, y: 0, z: 0 },
 			acceleration: { x: 0, y: 0, z: 0 },

@@ -45,11 +45,11 @@ describe("resolveSceneInterestTarget", () => {
 			landblockId === "0x0005ffff"
 				? {
 						landblockId: "0x0005ffff" as const,
-						traversalClass: "dungeon-only" as const,
+						sceneClass: "dungeon-only" as const,
 					}
 				: {
 						landblockId: "0x0102ffff" as const,
-						traversalClass: "outdoor-or-mixed" as const,
+						sceneClass: "outdoor-with-env-cells" as const,
 					},
 		);
 		const source = profileSource(load);
@@ -104,7 +104,7 @@ describe("resolveSceneInterestTarget", () => {
 });
 
 describe("resolveSceneInterestRequest", () => {
-	it("clips ambient owners to world bounds and keeps only outdoor-or-mixed profiles", async () => {
+	it("clips ambient owners to world bounds and keeps only profiles with EnvCells", async () => {
 		const loads: string[] = [];
 		let activeLoads = 0;
 		let maximumActiveLoads = 0;
@@ -117,13 +117,19 @@ describe("resolveSceneInterestRequest", () => {
 			if (landblockId === "0x0000ffff") {
 				return {
 					landblockId,
-					traversalClass: "outdoor-or-mixed" as const,
+					sceneClass: "outdoor-with-env-cells" as const,
+				};
+			}
+			if (landblockId === "0x0100ffff") {
+				return {
+					landblockId,
+					sceneClass: "outdoor-only" as const,
 				};
 			}
 			if (landblockId === "0x0001ffff") {
 				return {
 					landblockId,
-					traversalClass: "dungeon-only" as const,
+					sceneClass: "dungeon-only" as const,
 				};
 			}
 			return null;
@@ -160,7 +166,7 @@ describe("resolveSceneInterestRequest", () => {
 	it("does not expand dungeon targets into ambient owners", async () => {
 		const load = vi.fn(async () => ({
 			landblockId: "0x0005ffff" as const,
-			traversalClass: "dungeon-only" as const,
+			sceneClass: "dungeon-only" as const,
 		}));
 		const target = {
 			kind: "automatic-landblock" as const,
@@ -238,7 +244,7 @@ describe("SceneInterestRequestCoordinator", () => {
 			)
 			.mockResolvedValue({
 				landblockId: "0x0102ffff",
-				traversalClass: "outdoor-or-mixed" as const,
+				sceneClass: "outdoor-only" as const,
 			});
 		const coordinator = new SceneInterestRequestCoordinator(
 			profileSource(load),
@@ -272,7 +278,7 @@ describe("SceneInterestRequestCoordinator", () => {
 				},
 			},
 		});
-		coordinator.destroy();
+		coordinator.invalidate();
 		expect(coordinator.isCurrent(second.revision)).toBe(false);
 	});
 
@@ -315,6 +321,6 @@ describe("SceneInterestRequestCoordinator", () => {
 			ambientOutdoorEnvCellOwners: new Set(),
 		});
 		expect(coordinator.isCurrent(first.revision)).toBe(false);
-		coordinator.destroy();
+		coordinator.invalidate();
 	});
 });

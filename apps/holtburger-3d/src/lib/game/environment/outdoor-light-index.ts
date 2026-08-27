@@ -1,4 +1,4 @@
-import type { LandblockId } from "../game-types";
+import type { LandblockOwnerId } from "../game-types";
 import type { SceneInterestRevision } from "../runtime/scene-availability";
 import type { OutdoorStaticLayerKind } from "../runtime/scene-interest";
 import {
@@ -40,7 +40,7 @@ export interface LandblockLights {
  */
 export class OutdoorLightIndex {
 	readonly #owned = new Map<OwnedLightScope, OwnedLights>();
-	readonly #effective = new Map<LandblockId, LandblockLights>();
+	readonly #effective = new Map<LandblockOwnerId, LandblockLights>();
 
 	/**
 	 * Replace one landblock layer's emitted lights. Passing an empty list removes its entry.
@@ -51,7 +51,7 @@ export class OutdoorLightIndex {
 	 * erase the lamps.
 	 */
 	install(
-		landblockId: LandblockId,
+		landblockId: LandblockOwnerId,
 		layer: OutdoorStaticLayerKind,
 		revision: SceneInterestRevision,
 		lights: readonly RuntimeLight[],
@@ -73,7 +73,7 @@ export class OutdoorLightIndex {
 	 * just installed.
 	 */
 	evict(
-		landblockId: LandblockId,
+		landblockId: LandblockOwnerId,
 		layer: OutdoorStaticLayerKind,
 		revision: SceneInterestRevision,
 	): void {
@@ -82,7 +82,7 @@ export class OutdoorLightIndex {
 
 	/** Remove exactly one revision's lights, repairing a publish that lost the eviction race. */
 	removeExact(
-		landblockId: LandblockId,
+		landblockId: LandblockOwnerId,
 		layer: OutdoorStaticLayerKind,
 		revision: SceneInterestRevision,
 	): void {
@@ -90,7 +90,7 @@ export class OutdoorLightIndex {
 	}
 
 	#remove(
-		landblockId: LandblockId,
+		landblockId: LandblockOwnerId,
 		layer: OutdoorStaticLayerKind,
 		matches: (owned: SceneInterestRevision) => boolean,
 	): void {
@@ -123,7 +123,7 @@ export class OutdoorLightIndex {
 	 * Masks are built here, under this same memoization, so tiling costs nothing per frame: they
 	 * are recomputed only when residency invalidates the gather that produced them.
 	 */
-	resolve(landblockId: LandblockId): LandblockLights {
+	resolve(landblockId: LandblockOwnerId): LandblockLights {
 		const memoized = this.#effective.get(landblockId);
 		if (memoized !== undefined) return memoized;
 		if (this.#owned.size === 0) return EMPTY;
@@ -132,7 +132,7 @@ export class OutdoorLightIndex {
 		return resolved;
 	}
 
-	#gather(landblockId: LandblockId): LandblockLights {
+	#gather(landblockId: LandblockOwnerId): LandblockLights {
 		const coordinates = getLandblockCoordinates(landblockId);
 		const minimumX = coordinates.x * OUTDOOR_LANDBLOCK_WORLD_SIZE;
 		const maximumZ = -coordinates.y * OUTDOOR_LANDBLOCK_WORLD_SIZE;
@@ -187,11 +187,11 @@ function reachesBounds(
 }
 
 /** One publishing layer's key: outdoor static layers publish per landblock, independently. */
-type OwnedLightScope = `${LandblockId}/${OutdoorStaticLayerKind}`;
+type OwnedLightScope = `${LandblockOwnerId}/${OutdoorStaticLayerKind}`;
 
 /** Owned lights alongside their landblock, so gathering never re-parses the scope key. */
 interface OwnedLights {
-	readonly landblockId: LandblockId;
+	readonly landblockId: LandblockOwnerId;
 	readonly lights: readonly RuntimeLight[];
 	/** Interest revision that published these lights; evictions match against it. */
 	readonly revision: SceneInterestRevision;

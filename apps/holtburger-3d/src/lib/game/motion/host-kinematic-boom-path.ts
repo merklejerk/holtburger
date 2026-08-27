@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { sceneVec3, type SceneVec3 } from "../../assets/ac-frame";
-import type { EnvCellId, LandblockId } from "../game-types";
+import type { EnvCellId, LandblockOwnerId } from "../game-types";
 import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
 import { Vec3 } from "../math/types";
 import type { SceneResidency } from "../scene";
@@ -247,7 +247,7 @@ function presentationFromPoint(
 	const cellId = point.position.landblockId >>> 0;
 	const ownerId = (cellId & 0xffff_0000) | 0xffff;
 	const residency: SceneResidency = {
-		landblockId: formatId(ownerId) as LandblockId,
+		landblockId: formatId(ownerId) as LandblockOwnerId,
 		envCellId:
 			(cellId & 0xffff) >= 0x0100 && (cellId & 0xffff) !== 0xffff
 				? (formatId(cellId) as EnvCellId)

@@ -1,39 +1,40 @@
 import { z } from "zod";
 
-import type { LandblockId } from "../game/game-types";
+import type { LandblockOwnerId } from "../game/game-types";
 import { normalizeLandblockOwner } from "../game/landblocks";
 
-/** Canonical content classification projected by the host profile capability. */
-const landblockTraversalClassSchema = z.enum([
+/** Canonical scene-content classification projected by the host profile capability. */
+const landblockSceneClassSchema = z.enum([
 	"dungeon-only",
-	"outdoor-or-mixed",
+	"outdoor-only",
+	"outdoor-with-env-cells",
 ]);
-type LandblockTraversalClass = z.infer<typeof landblockTraversalClassSchema>;
+type LandblockSceneClass = z.infer<typeof landblockSceneClassSchema>;
 
 /** Minimal static fact required to choose scene-interest coverage. */
 export interface LandblockProfile {
-	readonly landblockId: LandblockId;
-	readonly traversalClass: LandblockTraversalClass;
+	readonly landblockId: LandblockOwnerId;
+	readonly sceneClass: LandblockSceneClass;
 }
 
 /** Host capability for one normalized landblock owner's shallow profile. */
 export interface LandblockProfileSource {
 	loadLandblockProfile(
-		landblockId: LandblockId,
+		landblockId: LandblockOwnerId,
 	): Promise<LandblockProfile | null>;
 }
 
 const profileSchema = z
 	.object({
 		landblockId: z.string().regex(/^(?:0x)?[0-9a-f]{8}$/i),
-		traversalClass: landblockTraversalClassSchema,
+		sceneClass: landblockSceneClassSchema,
 	})
 	.strict();
 
 /** Decode and validate one host response against the owner requested by the caller. */
 export function decodeLandblockProfile(
 	value: unknown,
-	requestedLandblockId: LandblockId,
+	requestedLandblockId: LandblockOwnerId,
 ): LandblockProfile | null {
 	const requested = normalizeLandblockOwner(requestedLandblockId);
 	const parsed = profileSchema.nullable().parse(value);
@@ -44,21 +45,24 @@ export function decodeLandblockProfile(
 			`Landblock profile returned ${returned} for requested owner ${requested}.`,
 		);
 	}
-	return { landblockId: returned, traversalClass: parsed.traversalClass };
+	return { landblockId: returned, sceneClass: parsed.sceneClass };
 }
 
 /** Cache completed profiles and share concurrent owner requests without caching failures. */
 export class CachedLandblockProfileSource implements LandblockProfileSource {
 	readonly #source: LandblockProfileSource;
-	readonly #profiles = new Map<LandblockId, LandblockProfile | null>();
-	readonly #pending = new Map<LandblockId, Promise<LandblockProfile | null>>();
+	readonly #profiles = new Map<LandblockOwnerId, LandblockProfile | null>();
+	readonly #pending = new Map<
+		LandblockOwnerId,
+		Promise<LandblockProfile | null>
+	>();
 
 	constructor(source: LandblockProfileSource) {
 		this.#source = source;
 	}
 
 	loadLandblockProfile(
-		landblockId: LandblockId,
+		landblockId: LandblockOwnerId,
 	): Promise<LandblockProfile | null> {
 		const owner = normalizeLandblockOwner(landblockId);
 		const cached = this.#profiles.get(owner);
@@ -90,7 +94,7 @@ export class CachedLandblockProfileSource implements LandblockProfileSource {
 
 function normalizeProfileOwner(
 	profile: LandblockProfile,
-	requested: LandblockId,
+	requested: LandblockOwnerId,
 ): LandblockProfile {
 	const returned = normalizeLandblockOwner(profile.landblockId);
 	if (returned !== requested) {

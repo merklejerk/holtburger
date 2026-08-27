@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { LandblockId } from "../game/game-types";
+import type { LandblockOwnerId } from "../game/game-types";
 import { LandblockLayerKind } from "../game/runtime/scene-interest";
 import type { ActiveRegionSource } from "./active-region-source";
 import { decodeLandblockSourceBatch } from "./decode-landblock-source-batch";
@@ -8,7 +8,7 @@ import {
 	unpackArgbColor,
 } from "./decode-static-source-record";
 
-const LANDBLOCK_ID = "0xda55ffff" as LandblockId;
+const LANDBLOCK_ID = "0xda55ffff" as LandblockOwnerId;
 
 describe("decodeOutdoorStaticRecord", () => {
 	it("decodes a closed direct and setup-backed source bundle", () => {

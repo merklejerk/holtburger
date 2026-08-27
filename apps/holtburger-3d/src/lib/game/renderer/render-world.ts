@@ -1,4 +1,4 @@
-import type { LandblockId } from "../game-types";
+import type { LandblockOwnerId } from "../game-types";
 import type { GeometryKey } from "../geometry/types";
 import type { Frustum } from "../math/frustum";
 import type {
@@ -55,19 +55,19 @@ interface RenderWorldSystems {
 		getPortalTopologyView(): SceneTopologyView;
 		queryScopesFrustum(
 			frustum: Frustum,
-			anchorLandblockId: LandblockId,
+			anchorLandblockId: LandblockOwnerId,
 			scopes: readonly SceneScope[],
 			cullingGroupFilter: SceneCullingGroupFilter,
 		): VisibleScene;
 		queryScopeSelectionFrustum(
 			frustum: Frustum,
-			anchorLandblockId: LandblockId,
+			anchorLandblockId: LandblockOwnerId,
 			scopes: SceneScopeSelection,
 			cullingGroupFilter: SceneCullingGroupFilter,
 		): VisibleScene;
 		queryFlatFrustum(
 			frustum: Frustum,
-			anchorLandblockId: LandblockId,
+			anchorLandblockId: LandblockOwnerId,
 			cullingGroupFilter: SceneCullingGroupFilter,
 		): VisibleScene;
 	};
@@ -177,7 +177,7 @@ export class RenderWorld {
 
 	queryFlatScene(
 		frustum: Frustum,
-		anchorLandblockId: LandblockId,
+		anchorLandblockId: LandblockOwnerId,
 		cullingGroupFilter: SceneCullingGroupFilter,
 	): VisibleScene {
 		return this.#systems.scene.queryFlatFrustum(
@@ -189,7 +189,7 @@ export class RenderWorld {
 
 	queryScopesScene(
 		frustum: Frustum,
-		anchorLandblockId: LandblockId,
+		anchorLandblockId: LandblockOwnerId,
 		scopes: readonly SceneScope[],
 		cullingGroupFilter: SceneCullingGroupFilter,
 	): VisibleScene {
@@ -203,7 +203,7 @@ export class RenderWorld {
 
 	queryScopeSelectionScene(
 		frustum: Frustum,
-		anchorLandblockId: LandblockId,
+		anchorLandblockId: LandblockOwnerId,
 		scopes: SceneScopeSelection,
 		cullingGroupFilter: SceneCullingGroupFilter,
 	): VisibleScene {

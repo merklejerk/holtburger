@@ -1,5 +1,5 @@
 import type { ActiveRegionSource } from "../../assets/active-region-source";
-import type { DatAssetId, LandblockId } from "../game-types";
+import type { DatAssetId, LandblockOwnerId } from "../game-types";
 import {
 	OUTDOOR_TERRAIN_GRID_CELLS,
 	OUTDOOR_TERRAIN_GRID_SIZE,
@@ -54,7 +54,7 @@ interface ResolvedRegionTerrainDetailRole {
 
 /** Raw landblock facts transported independently of regional static presentation. */
 export interface RawOutdoorTerrainSource {
-	readonly landblockId: LandblockId;
+	readonly landblockId: LandblockOwnerId;
 	readonly heightIndices: Uint8Array;
 	readonly heights: Float32Array;
 	readonly terrainSamples: Uint16Array;

@@ -7,6 +7,13 @@ function controllerHarness(
 ) {
 	const listeners = new Map<string, EventListener>();
 	let animationFrame: FrameRequestCallback | null = null;
+	let capturedPointerId: number | null = null;
+	const setPointerCapture = vi.fn((pointerId: number) => {
+		capturedPointerId = pointerId;
+	});
+	const releasePointerCapture = vi.fn((pointerId: number) => {
+		if (capturedPointerId === pointerId) capturedPointerId = null;
+	});
 	const canvas = {
 		addEventListener: (
 			type: string,
@@ -16,9 +23,9 @@ function controllerHarness(
 		},
 		removeEventListener: vi.fn(),
 		focus: vi.fn(),
-		setPointerCapture: vi.fn(),
-		hasPointerCapture: () => false,
-		releasePointerCapture: vi.fn(),
+		setPointerCapture,
+		hasPointerCapture: (pointerId: number) => capturedPointerId === pointerId,
+		releasePointerCapture,
 	} as unknown as HTMLCanvasElement;
 	const changes = vi.fn();
 	const physicalWheel = vi.fn();
@@ -53,6 +60,7 @@ function controllerHarness(
 		physicalWheel,
 		possessionOrbit,
 		possessionWheel,
+		releasePointerCapture,
 		tick(frameAt: number) {
 			const callback = animationFrame;
 			animationFrame = null;
@@ -62,6 +70,20 @@ function controllerHarness(
 }
 
 describe("ExplorerCameraInputController scheme routing", () => {
+	it("releases an active drag when input is withdrawn", () => {
+		const test = controllerHarness();
+		test.dispatch("pointerdown", {
+			button: 0,
+			clientX: 10,
+			clientY: 20,
+			pointerId: 7,
+		});
+
+		test.controller.setInputEnabled(false);
+
+		expect(test.releasePointerCapture).toHaveBeenCalledWith(7);
+	});
+
 	it("delegates the complete keyboard-yaw rate to the active app regime", () => {
 		const walking = controllerHarness((shiftActive) =>
 			shiftActive ? 1.5 : 2.25,

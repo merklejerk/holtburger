@@ -1,4 +1,4 @@
-import type { LandblockId } from "../game-types";
+import type { LandblockOwnerId } from "../game-types";
 import type { AABB3 } from "../math/types";
 import type { Vec3 } from "../math/types";
 import {
@@ -49,7 +49,7 @@ interface ResolvedTerrainSource<TOwnerId extends string> {
 
 /** One installed landblock's authored terrain, paired with the block it belongs to. */
 export interface InstalledTerrain {
-	readonly landblockId: LandblockId;
+	readonly landblockId: LandblockOwnerId;
 	readonly generation: TerrainGenerationSource;
 }
 
@@ -101,12 +101,12 @@ export class TerrainSystem<
 	readonly #geometry: GeometryManager<TManagerOwnerId>;
 	readonly #textures: TextureManager<TManagerOwnerId>;
 	/** Creates a private geometry/texture lease owner for each installed source. */
-	readonly #ownerForLandblock: (landblockId: LandblockId) => TOwnerId;
+	readonly #ownerForLandblock: (landblockId: LandblockOwnerId) => TOwnerId;
 	readonly #scene: SceneGraph;
 	readonly #nodes = new Map<TOwnerId, SceneNodeId>();
-	readonly #nodeLandblocks = new Map<SceneNodeId, LandblockId>();
+	readonly #nodeLandblocks = new Map<SceneNodeId, LandblockOwnerId>();
 	readonly #installations = new Map<
-		LandblockId,
+		LandblockOwnerId,
 		TerrainInstallation<TOwnerId>
 	>();
 	/**
@@ -115,7 +115,7 @@ export class TerrainSystem<
 	 * Residency only ever goes from pending to satisfied within one installation, so this latches
 	 * the check rather than repeating six resource lookups for every visible landblock every frame.
 	 */
-	readonly #residentDrawUnits = new Set<LandblockId>();
+	readonly #residentDrawUnits = new Set<LandblockOwnerId>();
 	/**
 	 * Bumped whenever the installed set changes, so consumers that derive from *which* landblocks are
 	 * resident can tell that their derivation is stale without diffing the set themselves.
@@ -128,7 +128,7 @@ export class TerrainSystem<
 		generator: TerrainGenerator,
 		geometry: GeometryManager<TManagerOwnerId>,
 		textures: TextureManager<TManagerOwnerId>,
-		ownerForLandblock: (landblockId: LandblockId) => TOwnerId,
+		ownerForLandblock: (landblockId: LandblockOwnerId) => TOwnerId,
 	) {
 		this.#scene = scene;
 		this.#generator = generator;
@@ -195,7 +195,7 @@ export class TerrainSystem<
 	}
 
 	/** Drop one terrain source and release resources retained by its layer owner. */
-	#removeSource(landblockId: LandblockId): void {
+	#removeSource(landblockId: LandblockOwnerId): void {
 		const installation = this.#installations.get(landblockId);
 		if (!installation) return;
 		this.#installations.delete(landblockId);
@@ -212,14 +212,22 @@ export class TerrainSystem<
 		if (!installation || installation.kind !== "realized") return null;
 		// Residency is rechecked per frame because the shared region arrays this draw unit names
 		// can finish preparing after the landblock realizes.
-		return this.#hasDrawUnit(installation.drawUnit)
-			? installation.drawUnit
-			: null;
+		return this.hasResidentDrawUnit(landblockId) ? installation.drawUnit : null;
+	}
+
+	/** Whether one landblock owns a complete GPU-backed terrain draw unit. */
+	hasResidentDrawUnit(landblockId: LandblockOwnerId): boolean {
+		if (this.#residentDrawUnits.has(landblockId)) return true;
+		const installation = this.#installations.get(landblockId);
+		if (installation?.kind !== "realized") return false;
+		if (!this.#hasDrawUnit(installation.drawUnit)) return false;
+		this.#residentDrawUnits.add(landblockId);
+		return true;
 	}
 
 	/** Assemble one realized landblock's draw unit from facts that cannot change afterwards. */
 	#buildDrawUnit(
-		landblockId: LandblockId,
+		landblockId: LandblockOwnerId,
 		source: ResolvedTerrainSource<TOwnerId>,
 	): TerrainDrawUnit {
 		return {
@@ -295,7 +303,7 @@ export class TerrainSystem<
 	}
 
 	async #generateAndRealize(
-		landblockId: LandblockId,
+		landblockId: LandblockOwnerId,
 		installation: LoadingTerrainInstallation<TOwnerId>,
 	): Promise<void> {
 		try {
@@ -403,7 +411,7 @@ export class TerrainSystem<
 	 * knows its own extent exactly, so replacing them tightens culling. Bounds no longer depend on
 	 * the render anchor, because every landblock has exactly one mesh.
 	 */
-	#syncSceneBoundsForLandblock(landblockId: LandblockId): void {
+	#syncSceneBoundsForLandblock(landblockId: LandblockOwnerId): void {
 		const installation = this.#installations.get(landblockId);
 		if (installation?.kind !== "realized") return;
 		for (const [nodeId, nodeLandblockId] of this.#nodeLandblocks) {

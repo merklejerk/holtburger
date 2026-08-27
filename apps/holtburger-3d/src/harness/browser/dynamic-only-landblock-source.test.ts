@@ -3,7 +3,7 @@ import type {
 	LandblockSourceBatch,
 	LandblockSourceBatchSource,
 } from "../../lib/assets/landblock-source-batch";
-import type { LandblockId } from "../../lib/game/game-types";
+import type { LandblockOwnerId } from "../../lib/game/game-types";
 import { LandblockLayerKind } from "../../lib/game/runtime/scene-interest";
 import {
 	DynamicOnlyLandblockSource,
@@ -12,7 +12,7 @@ import {
 
 describe("DynamicOnlyLandblockSource", () => {
 	it("strips outdoor static residents while retaining promoted dynamics", async () => {
-		const landblockId = "0xda56ffff" as LandblockId;
+		const landblockId = "0xda56ffff" as LandblockOwnerId;
 		const dynamic = { identity: { kind: "authored", sourceId: "butterfly" } };
 		const batch = {
 			landblockId,
@@ -46,7 +46,7 @@ describe("DynamicOnlyLandblockSource", () => {
 	});
 
 	it("removes promoted dynamics while retaining outdoor static residents", async () => {
-		const landblockId = "0xda56ffff" as LandblockId;
+		const landblockId = "0xda56ffff" as LandblockOwnerId;
 		const staticResident = { identity: { sourceId: "foliage" } };
 		const batch = {
 			landblockId,

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { LandblockId } from "../game/game-types";
+import type { LandblockOwnerId } from "../game/game-types";
 import type { DatAssetId } from "../game/game-types";
 import { normalizeLandblockOwner } from "../game/landblocks";
 import type { AnimationAssetSource } from "./animation-asset-source";
@@ -39,14 +39,16 @@ import {
 	type LandblockProfile,
 	type LandblockProfileSource,
 } from "./landblock-profile-source";
-import type { DynamicEntityVisualSource } from "./dynamic-entity-visual-source";
-import type { DynamicEntityView } from "../game/runtime/dynamic-entity-feed";
-import { decodeDynamicEntityVisual } from "./decode-dynamic-entity-visual";
+import type {
+	SetupVisualAppearance,
+	SetupVisualSource,
+} from "./setup-visual-source";
+import { decodeSetupVisual } from "./decode-setup-visual";
 
 /** One observed host batch retained only by the browser harness source adapter. */
 export interface HttpLandblockSourceBatchDiagnostic {
 	/** Canonical landblock requested by the frontend dispatch. */
-	readonly landblockId: LandblockId;
+	readonly landblockId: LandblockOwnerId;
 	/** Exact layer subset projected from the host's cumulative asset. */
 	readonly layers: readonly LandblockSourceLayer[];
 	/** Exact response payload length before browser decoding. */
@@ -58,7 +60,7 @@ export interface HttpLandblockSourceBatchDiagnostic {
 /** One observed shallow profile transport request, retained for harness policy assertions. */
 export interface HttpLandblockProfileDiagnostic {
 	/** Canonical owner requested from the host. */
-	readonly landblockId: LandblockId;
+	readonly landblockId: LandblockOwnerId;
 }
 
 /** Browser-compatible adapter for the same closed landblock batch contract used by the app host. */
@@ -72,7 +74,7 @@ export class HttpLandblockContentSource
 		ParticleEmitterSource,
 		SoundTableSource,
 		ParticleMeshSource,
-		DynamicEntityVisualSource,
+		SetupVisualSource,
 		SkySourceLoader
 {
 	readonly #baseUrl: URL;
@@ -118,7 +120,7 @@ export class HttpLandblockContentSource
 	}
 
 	async loadLandblockSourceBatch(
-		landblockId: LandblockId,
+		landblockId: LandblockOwnerId,
 		layers: ReadonlySet<LandblockSourceLayer>,
 	): Promise<LandblockSourceBatch> {
 		const response = await this.#postBinaryResponse("landblock-source-batch", {
@@ -143,7 +145,7 @@ export class HttpLandblockContentSource
 	}
 
 	async loadLandblockProfile(
-		landblockId: LandblockId,
+		landblockId: LandblockOwnerId,
 	): Promise<LandblockProfile | null> {
 		const owner = normalizeLandblockOwner(landblockId);
 		this.#landblockProfileDiagnostics.push({ landblockId: owner });
@@ -220,11 +222,11 @@ export class HttpLandblockContentSource
 		);
 	}
 
-	async load(presentation: DynamicEntityView["presentation"]) {
-		return decodeDynamicEntityVisual(
-			await this.#postBinary("dynamic-entity-visual", {
-				setupDid: presentation.content.setupDid,
-				appearance: presentation.appearance,
+	async load(setupDid: number, appearance: SetupVisualAppearance) {
+		return decodeSetupVisual(
+			await this.#postBinary("setup-visual", {
+				setupDid,
+				appearance,
 			}),
 		);
 	}

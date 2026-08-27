@@ -88,6 +88,8 @@ export interface AudioDevice {
 	): AudioVoice | null;
 	/** Decode one sound, resolving exactly when `playOneShot` will accept it. */
 	prepare(soundId: DatAssetId): Promise<void>;
+	/** Exact decoder-ready payload bytes retained for one prepared sound, when observable. */
+	getPreparedSourceBytes?(soundId: DatAssetId): number | null;
 }
 
 /**
@@ -296,6 +298,25 @@ export class AudioSystem {
 		return "played";
 	}
 
+	/** Play a head-locked UI/effect sound while a frontend temporarily owns no listener pose. */
+	triggerListenerLocked(
+		soundId: DatAssetId,
+		volume = 1,
+		probability = 1,
+	): AudioTriggerOutcome {
+		if (!(Number.isFinite(volume) && volume >= 0)) {
+			throw new Error(
+				"Listener-locked sound volume must be finite and non-negative.",
+			);
+		}
+		return this.trigger({
+			category: "effect",
+			probability,
+			soundId,
+			source: { mode: "listener", volume: () => volume },
+		});
+	}
+
 	/** Record a started voice with the facts `updatePlacements` re-places it from. */
 	#retain(voice: AudioVoice, trigger: AudioTrigger): void {
 		this.#voices.push({
@@ -340,6 +361,12 @@ export class AudioSystem {
 			const placement = this.#place(live.source, live.category);
 			live.voice.setPlacement(placement?.gain ?? 0, placement?.pan ?? 0);
 		}
+	}
+
+	/** Fade live voices to silence while a presentation mode owns no listener. */
+	silence(): void {
+		this.#sweepFinishedVoices();
+		for (const live of this.#voices) live.voice.setPlacement(0, 0);
 	}
 
 	/** Retire voices that ended on their own; shared by the control path and the budget path. */

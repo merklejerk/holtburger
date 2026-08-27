@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { ActiveRegionSource } from "./active-region-source";
 import { decodeLandblockSourceBatch } from "./decode-landblock-source-batch";
 import { LandblockLayerKind } from "../game/runtime/scene-interest";
-import type { LandblockId } from "../game/game-types";
+import type { LandblockOwnerId } from "../game/game-types";
 
-const LANDBLOCK_ID = "0xda55ffff" as LandblockId;
+const LANDBLOCK_ID = "0xda55ffff" as LandblockOwnerId;
 const ACTIVE_REGION = {} as ActiveRegionSource;
 
 describe("decodeLandblockSourceBatch", () => {

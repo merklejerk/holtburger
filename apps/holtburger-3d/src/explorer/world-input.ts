@@ -1,4 +1,4 @@
-import type { EnvCellId, LandblockId } from "../lib/game/game-types";
+import type { EnvCellId, LandblockOwnerId } from "../lib/game/game-types";
 import type { SceneResidency } from "../lib/game/scene";
 import type { SceneInterestTarget } from "../lib/game/runtime/scene-target";
 import { landblockAxisFromPrintedDegree } from "../lib/game/map/map-coordinates";
@@ -64,7 +64,7 @@ export function parseResidenceInput(
 }
 
 function createAutomaticResidence(prefix: string): ParsedResidenceInput {
-	const landblockId = `0x${prefix.toLowerCase()}ffff` as LandblockId;
+	const landblockId = `0x${prefix.toLowerCase()}ffff` as LandblockOwnerId;
 	return {
 		label: `Landblock ${landblockId}`,
 		residency: { envCellId: null, landblockId },
@@ -76,7 +76,7 @@ function createResidence(rawId: string): ParsedResidenceInput {
 	const canonicalId = `0x${rawId.toLowerCase()}`;
 	const prefix = canonicalId.slice(0, 6);
 	const suffix = canonicalId.slice(6);
-	const landblockId = `${prefix}ffff` as LandblockId;
+	const landblockId = `${prefix}ffff` as LandblockOwnerId;
 	if (suffix === "ffff") {
 		return {
 			label: `Outdoor landblock ${landblockId}`,

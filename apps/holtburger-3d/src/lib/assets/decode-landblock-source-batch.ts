@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { LandblockId } from "../game/game-types";
+import type { LandblockOwnerId } from "../game/game-types";
 import { LandblockLayerKind } from "../game/runtime/scene-interest";
 import type { ActiveRegionSource } from "./active-region-source";
 import { decodeEnvCellRecord } from "./decode-env-cell-record";
@@ -44,7 +44,7 @@ const manifestSchema = z.object({
 /** Decodes, validates, and projects one closed landblock source batch response. */
 export function decodeLandblockSourceBatch(
 	response: Uint8Array,
-	requestedLandblockId: LandblockId,
+	requestedLandblockId: LandblockOwnerId,
 	requestedLayers: ReadonlySet<LandblockSourceLayer>,
 	activeRegion: ActiveRegionSource,
 ): LandblockSourceBatch {
@@ -158,13 +158,13 @@ export function decodeLandblockSourceBatch(
 	if (records.size !== requestedLayers.size) {
 		throw new Error("Landblock source batch lost a requested known record.");
 	}
-	return { landblockId: manifest.landblockId as LandblockId, records };
+	return { landblockId: manifest.landblockId as LandblockOwnerId, records };
 }
 
 function decodeRecord(
 	layer: LandblockSourceLayer,
 	bytes: Uint8Array,
-	landblockId: LandblockId,
+	landblockId: LandblockOwnerId,
 	activeRegion: ActiveRegionSource,
 ) {
 	if (layer === LandblockLayerKind.Terrain) {

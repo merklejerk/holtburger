@@ -1,5 +1,5 @@
 import { sceneVec3, type SceneVec3 } from "../../assets/ac-frame";
-import type { LandblockId } from "../game-types";
+import type { LandblockOwnerId } from "../game-types";
 import {
 	getLandblockCoordinates,
 	OUTDOOR_LANDBLOCK_WORLD_SIZE,
@@ -20,7 +20,7 @@ export type PhysicalFlyTickStatus =
 /** Non-gating residency of the final primary-sphere collision owner. */
 export type PhysicalFlySceneResidency =
 	| { readonly state: "resident" }
-	| { readonly state: "missing-owner"; readonly landblockId: LandblockId }
+	| { readonly state: "missing-owner"; readonly landblockId: LandblockOwnerId }
 	| { readonly state: "outside-landscape" };
 
 /**

@@ -1,8 +1,8 @@
-import type { EnvCellId, LandblockId } from "../game-types";
+import type { EnvCellId, LandblockOwnerId } from "../game-types";
 import type { SceneScope } from "./index";
 
 export function scopeFor(
-	landblockId: LandblockId,
+	landblockId: LandblockOwnerId,
 	envCellId: EnvCellId | null,
 ): SceneScope {
 	return envCellId === null

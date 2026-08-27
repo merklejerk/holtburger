@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { residentKey } from "../resolution/landblock-layer";
-import type { EnvCellId, LandblockId } from "../game-types";
+import type { EnvCellId, LandblockOwnerId } from "../game-types";
 import { transformPoint3 } from "../math/matrices";
 import { AABB3, Mat4, Vec3 } from "../math/types";
 import type {
@@ -23,7 +23,7 @@ import { prepareStaticObjectGeometry } from "./static-object-geometry-worker";
 import { assembleStaticObjectArtifact } from "./static-object-artifact";
 import { planEnvCellMaterialization } from "./env-cell-materialization";
 
-const LANDBLOCK_ID = "0x0001ffff" as LandblockId;
+const LANDBLOCK_ID = "0x0001ffff" as LandblockOwnerId;
 const SHARED_GEOMETRY = geometry();
 const SHARED_MATERIAL = material();
 const STATIC_PRESENTATION = presentation();

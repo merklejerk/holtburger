@@ -1,10 +1,11 @@
-import type { LandblockId } from "../game-types";
+import type { LandblockOwnerId } from "../game-types";
 import { LandblockLayerKind } from "./scene-interest";
 import type { StaticInstallResourceNamespace } from "../systems/static-resources";
 import type { ObjectVisualTemplateResourceOwnerId } from "../systems/object-visual-template-repository";
 
 /** Stable runtime lifetime identity for one authored static layer. */
-export type OwnerId = `landblock-layer:${LandblockId}/${LandblockLayerKind}`;
+export type OwnerId =
+	`landblock-layer:${LandblockOwnerId}/${LandblockLayerKind}`;
 
 /** Stable frontend lifetime identity for one producer-owned live dynamic entity. */
 export type DynamicEntityOwnerId = `dynamic-entity:${number}`;
@@ -13,7 +14,7 @@ export type DynamicEntityOwnerId = `dynamic-entity:${number}`;
 export type DynamicOwnerId = OwnerId | DynamicEntityOwnerId;
 
 /** Runtime lifetime identity for resource leases owned exclusively by one terrain source. */
-export type TerrainResourceOwnerId = `terrain-resource:${LandblockId}`;
+export type TerrainResourceOwnerId = `terrain-resource:${LandblockOwnerId}`;
 
 /** Runtime lifetime identity for an active-region resource shared by multiple landblock layers. */
 export type ActiveRegionResourceOwnerId = `active-region-resource:${string}`;
@@ -28,6 +29,15 @@ export type EnvCellRevisionResourceOwnerId =
 export type DynamicGenerationResourceOwnerId =
 	`dynamic-generation:${DynamicOwnerId}/${number}`;
 
+/** Stable resource owner for the authored portal transition visual. */
+export type PortalTransitionResourceOwnerId = "portal-transition";
+export const PORTAL_TRANSITION_RESOURCE_OWNER_ID: PortalTransitionResourceOwnerId =
+	"portal-transition";
+
+/** Resource owners admitted by the shared authored-dynamic visual-template repository. */
+export type DynamicPresentationResourceOwnerId =
+	DynamicGenerationResourceOwnerId | PortalTransitionResourceOwnerId;
+
 /** Any runtime owner admitted by geometry and texture resource managers. */
 export type ResourceOwnerId =
 	| OwnerId
@@ -37,11 +47,12 @@ export type ResourceOwnerId =
 	| StaticRevisionResourceOwnerId
 	| EnvCellRevisionResourceOwnerId
 	| DynamicGenerationResourceOwnerId
+	| PortalTransitionResourceOwnerId
 	| ObjectVisualTemplateResourceOwnerId;
 
 /** Return the runtime owner responsible for one static landblock layer. */
 export function landblockLayerToOwnerId(
-	landblockId: LandblockId,
+	landblockId: LandblockOwnerId,
 	layer: LandblockLayerKind,
 ): OwnerId {
 	return `landblock-layer:${landblockId}/${layer}`;
@@ -49,7 +60,7 @@ export function landblockLayerToOwnerId(
 
 /** Parse one typed static-layer owner without leaking its string grammar to consumers. */
 export function parseLandblockLayerOwnerId(owner: OwnerId): {
-	readonly landblockId: LandblockId;
+	readonly landblockId: LandblockOwnerId;
 	readonly layer: LandblockLayerKind;
 } {
 	const match = /^landblock-layer:(0x[0-9a-f]{8})\/([a-z-]+)$/i.exec(owner);
@@ -63,14 +74,14 @@ export function parseLandblockLayerOwnerId(owner: OwnerId): {
 		throw new Error(`Owner ${owner} has an invalid landblock layer.`);
 	}
 	return {
-		landblockId: match[1]!.toLowerCase() as LandblockId,
+		landblockId: match[1]!.toLowerCase() as LandblockOwnerId,
 		layer,
 	};
 }
 
 /** Return the private resource owner for one terrain source installation. */
 export function terrainSourceToOwnerId(
-	landblockId: LandblockId,
+	landblockId: LandblockOwnerId,
 ): TerrainResourceOwnerId {
 	return `terrain-resource:${landblockId}`;
 }

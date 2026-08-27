@@ -1,4 +1,4 @@
-use holtburger_content::{LandblockAsset, LandblockTraversalClass};
+use holtburger_content::{LandblockAsset, LandblockSceneClass};
 use serde::Serialize;
 
 /// Minimal host projection used to choose scene-interest coverage before deep materialization.
@@ -7,23 +7,25 @@ use serde::Serialize;
 pub struct LandblockProfile {
     /// Normalized owner identity echoed to the caller.
     pub landblock_id: String,
-    /// Canonical content-owned traversal classification.
-    pub traversal_class: LandblockTraversalClassWire,
+    /// Canonical content-owned scene classification.
+    pub scene_class: LandblockSceneClassWire,
 }
 
-/// Wire spelling for the content-owned traversal classification.
+/// Wire spelling for the content-owned scene classification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum LandblockTraversalClassWire {
+pub enum LandblockSceneClassWire {
     DungeonOnly,
-    OutdoorOrMixed,
+    OutdoorOnly,
+    OutdoorWithEnvCells,
 }
 
-impl From<LandblockTraversalClass> for LandblockTraversalClassWire {
-    fn from(value: LandblockTraversalClass) -> Self {
+impl From<LandblockSceneClass> for LandblockSceneClassWire {
+    fn from(value: LandblockSceneClass) -> Self {
         match value {
-            LandblockTraversalClass::DungeonOnly => Self::DungeonOnly,
-            LandblockTraversalClass::OutdoorOrMixed => Self::OutdoorOrMixed,
+            LandblockSceneClass::DungeonOnly => Self::DungeonOnly,
+            LandblockSceneClass::OutdoorOnly => Self::OutdoorOnly,
+            LandblockSceneClass::OutdoorWithEnvCells => Self::OutdoorWithEnvCells,
         }
     }
 }
@@ -32,7 +34,7 @@ impl From<LandblockTraversalClass> for LandblockTraversalClassWire {
 pub fn project_landblock_profile(asset: &LandblockAsset) -> LandblockProfile {
     LandblockProfile {
         landblock_id: format!("0x{:08x}", asset.landblock_id),
-        traversal_class: asset.traversal_class.into(),
+        scene_class: asset.scene_class.into(),
     }
 }
 
@@ -44,7 +46,7 @@ mod tests {
     fn profile_projection_uses_stable_wire_spelling() {
         let asset = LandblockAsset {
             landblock_id: 0x0005_ffff,
-            traversal_class: LandblockTraversalClass::DungeonOnly,
+            scene_class: LandblockSceneClass::DungeonOnly,
             terrain: synthetic_terrain(),
             explicit_objects: Vec::new(),
             buildings: Vec::new(),
@@ -54,15 +56,12 @@ mod tests {
 
         let profile = project_landblock_profile(&asset);
         assert_eq!(profile.landblock_id, "0x0005ffff");
-        assert_eq!(
-            profile.traversal_class,
-            LandblockTraversalClassWire::DungeonOnly
-        );
+        assert_eq!(profile.scene_class, LandblockSceneClassWire::DungeonOnly);
         assert_eq!(
             serde_json::to_value(&profile).expect("profile should serialize"),
             serde_json::json!({
                 "landblockId": "0x0005ffff",
-                "traversalClass": "dungeon-only",
+                "sceneClass": "dungeon-only",
             })
         );
     }

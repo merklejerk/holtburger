@@ -1,12 +1,13 @@
 import {
 	decodeClientCurrentState,
+	decodeClientLocalPlayerEstablished,
 	decodeClientCameraStartReceipt,
 	decodeClientCameraTick,
 	decodeClientDriveRequest,
 	decodeClientExitRequested,
 	decodeClientLifecycle,
+	decodeClientPresentationDiscontinuity,
 	decodeClientServerTime,
-	decodeClientWorldDiscontinuity,
 	type ClientCurrentState,
 	type ClientCameraIdentity,
 	type ClientCameraClearanceRequest,
@@ -17,7 +18,8 @@ import {
 	type ClientDriveRequest,
 	type ClientExitRequested,
 	type ClientLifecycle,
-	type ClientWorldDiscontinuity,
+	type ClientLocalPlayerEstablished,
+	type ClientPresentationDiscontinuity,
 } from "./client-host-contract";
 import {
 	DynamicEntityMirror,
@@ -39,6 +41,7 @@ type ClientCommandName = Extract<
 	| "start_client_camera"
 	| "set_client_camera_intent"
 	| "set_client_camera_clearance"
+	| "acknowledge_client_world_reveal"
 	| "stop_client_camera"
 	| "disconnect_client"
 >;
@@ -46,11 +49,12 @@ type ClientEventName = Extract<
 	HostEventName,
 	| "client-current-state"
 	| "client-lifecycle-changed"
+	| "client-local-player-established"
 	| "client-server-time-updated"
 	| "client-dynamic-entity"
 	| "client-camera-started"
 	| "client-camera"
-	| "client-world-discontinuity"
+	| "client-presentation-discontinuity"
 	| "client-exit-requested"
 >;
 
@@ -69,6 +73,7 @@ export interface ClientLifecycleTransport {
 /** Renderer-visible lifecycle values held independently of Svelte and presentation resources. */
 export interface ClientLifecycleSessionState {
 	readonly lifecycle: ClientLifecycle | null;
+	readonly playerGuid: number | null;
 	readonly serverTime: number | null;
 	readonly worldGeneration: number;
 	readonly exit: ClientExitRequested | null;
@@ -78,6 +83,10 @@ export interface ClientLifecycleSessionState {
 export type ClientLifecycleSessionEvent =
 	| { readonly type: "current-state"; readonly state: ClientCurrentState }
 	| { readonly type: "lifecycle"; readonly lifecycle: ClientLifecycle }
+	| {
+			readonly type: "local-player-established";
+			readonly identity: ClientLocalPlayerEstablished;
+	  }
 	| { readonly type: "server-time"; readonly time: number }
 	| { readonly type: "dynamic"; readonly event: DynamicEntityEvent }
 	| {
@@ -86,8 +95,8 @@ export type ClientLifecycleSessionEvent =
 	  }
 	| { readonly type: "camera"; readonly tick: ClientCameraTick }
 	| {
-			readonly type: "world-discontinuity";
-			readonly discontinuity: ClientWorldDiscontinuity;
+			readonly type: "presentation-discontinuity";
+			readonly discontinuity: ClientPresentationDiscontinuity;
 	  }
 	| { readonly type: "exit-requested"; readonly exit: ClientExitRequested };
 
@@ -210,6 +219,13 @@ export class ClientLifecycleSession {
 		await this.#transport.invoke("set_client_camera_clearance", { request });
 	}
 
+	/** Acknowledge one installed, first-pure-destination frame for the current activation. */
+	async acknowledgeWorldReveal(worldGeneration: number): Promise<void> {
+		await this.#transport.invoke("acknowledge_client_world_reveal", {
+			worldGeneration,
+		});
+	}
+
 	async stopCamera(request: ClientCameraIdentity): Promise<void> {
 		await this.#transport.invoke("stop_client_camera", { request });
 	}
@@ -233,13 +249,20 @@ export class ClientLifecycleSession {
 				),
 			);
 			unlisteners.push(
+				await this.#transport.listen(
+					"client-local-player-established",
+					(payload) => this.#receiveLocalPlayerEstablished(payload),
+				),
+			);
+			unlisteners.push(
 				await this.#transport.listen("client-server-time-updated", (payload) =>
 					this.#receiveServerTime(payload),
 				),
 			);
 			unlisteners.push(
-				await this.#transport.listen("client-world-discontinuity", (payload) =>
-					this.#receiveDiscontinuity(payload),
+				await this.#transport.listen(
+					"client-presentation-discontinuity",
+					(payload) => this.#receivePresentationDiscontinuity(payload),
 				),
 			);
 			unlisteners.push(
@@ -272,6 +295,7 @@ export class ClientLifecycleSession {
 		this.#state = {
 			...this.#state,
 			lifecycle: state.lifecycle,
+			playerGuid: state.localPlayerGuid,
 			serverTime: state.serverTime,
 			worldGeneration: state.worldGeneration,
 			exit: null,
@@ -298,20 +322,26 @@ export class ClientLifecycleSession {
 		this.#emit({ type: "lifecycle", lifecycle });
 	}
 
+	#receiveLocalPlayerEstablished(payload: unknown): void {
+		const identity = decodeClientLocalPlayerEstablished(payload);
+		this.#state = { ...this.#state, playerGuid: identity.playerGuid };
+		this.#emit({ type: "local-player-established", identity });
+	}
+
 	#receiveServerTime(payload: unknown): void {
 		const { time } = decodeClientServerTime(payload);
 		this.#state = { ...this.#state, serverTime: time };
 		this.#emit({ type: "server-time", time });
 	}
 
-	#receiveDiscontinuity(payload: unknown): void {
-		const discontinuity = decodeClientWorldDiscontinuity(payload);
+	#receivePresentationDiscontinuity(payload: unknown): void {
+		const discontinuity = decodeClientPresentationDiscontinuity(payload);
 		if (discontinuity.worldGeneration < this.#state.worldGeneration) return;
 		this.#state = {
 			...this.#state,
 			worldGeneration: discontinuity.worldGeneration,
 		};
-		this.#emit({ type: "world-discontinuity", discontinuity });
+		this.#emit({ type: "presentation-discontinuity", discontinuity });
 	}
 
 	#receiveCameraStarted(payload: unknown): void {
@@ -341,6 +371,7 @@ export class ClientLifecycleSession {
 function emptyState(): ClientLifecycleSessionState {
 	return {
 		lifecycle: null,
+		playerGuid: null,
 		serverTime: null,
 		worldGeneration: 0,
 		exit: null,

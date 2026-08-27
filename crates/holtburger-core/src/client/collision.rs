@@ -531,6 +531,19 @@ impl ClientCollisionCoordinator {
                         continue;
                     };
 
+                    // Body preparation and destination placement are one authority product. A
+                    // prepared definition must not inherit response/membership from the scene
+                    // the player just left, especially when the destination is an EnvCell.
+                    if world
+                        .relocate_local_player_runtime_body(completion.target.facts.position, _now)
+                        .is_empty()
+                    {
+                        self.readiness = ClientSpatialReadiness::Waiting;
+                        self.target = None;
+                        self.snapshot = None;
+                        continue;
+                    }
+
                     self.next_revision = self.next_revision.saturating_add(1);
                     let collision = Arc::new(products.scene);
                     self.snapshot = Some(ClientCollisionSnapshot {

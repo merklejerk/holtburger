@@ -1,4 +1,4 @@
-//! One exact live-entity SetupModel appearance projected for frontend visual realization.
+//! One exact SetupModel appearance projected for frontend visual realization.
 
 use anyhow::Result;
 use holtburger_core::{ContentAssetRuntime, SetupAppearanceRequest, material_appearance_input};
@@ -11,11 +11,11 @@ use crate::binary_source_record::{
 };
 use crate::object_resource_closure::ObjectResourceClosure;
 
-pub(crate) const DYNAMIC_ENTITY_VISUAL_BINARY_MAGIC: &[u8; 4] = b"HBDV";
+pub(crate) const SETUP_VISUAL_BINARY_MAGIC: &[u8; 4] = b"HBSV";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct DynamicEntityVisualManifest {
+struct SetupVisualManifest {
     transport: &'static str,
     byte_order: &'static str,
     section_byte_offset_base: &'static str,
@@ -27,8 +27,8 @@ struct DynamicEntityVisualManifest {
     sections: Vec<BinarySectionManifest>,
 }
 
-/// Resolve and serialize every immutable visual dependency for one exact entity appearance.
-pub async fn load_dynamic_entity_visual_source_bytes(
+/// Resolve and serialize every immutable visual dependency for one exact SetupModel appearance.
+pub async fn load_setup_visual_source_bytes(
     runtime: &ContentAssetRuntime,
     setup_did: u32,
     appearance: EntityAppearance,
@@ -48,9 +48,9 @@ pub async fn load_dynamic_entity_visual_source_bytes(
     closure.buffers.append_sections(&mut writer, "")?;
     let (sections, section_bytes) = writer.finish();
     serialize_binary_envelope(
-        DYNAMIC_ENTITY_VISUAL_BINARY_MAGIC,
-        &DynamicEntityVisualManifest {
-            transport: "holtburger-dynamic-entity-visual",
+        SETUP_VISUAL_BINARY_MAGIC,
+        &SetupVisualManifest {
+            transport: "holtburger-setup-visual",
             byte_order: "little-endian",
             section_byte_offset_base: "section-data",
             definition_id,

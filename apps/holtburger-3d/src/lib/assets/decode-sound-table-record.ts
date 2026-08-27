@@ -34,6 +34,8 @@ export interface SoundCandidate {
 /** A decoded sound table, keyed by retail `SoundType`. */
 export interface DecodedSoundTable {
 	readonly id: DatAssetId;
+	/** Complete host envelope bytes retained for construction diagnostics. */
+	readonly sourceByteLength?: number;
 	readonly entries: ReadonlyMap<number, readonly SoundCandidate[]>;
 }
 
@@ -87,6 +89,7 @@ export function decodeSoundTableRecord(
 			]),
 		),
 		id: manifest.soundTableId as DatAssetId,
+		sourceByteLength: response.byteLength,
 	};
 }
 

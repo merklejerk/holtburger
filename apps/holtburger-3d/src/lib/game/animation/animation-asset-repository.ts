@@ -127,9 +127,11 @@ export class AnimationAssetRepository extends PreparedAssetRepository<
 	}
 }
 
-function prepareAnimation(
+/** Prepare a decoded animation for a caller-owned playback rate. */
+export function prepareAnimation(
 	decoded: DecodedAnimationAsset,
 	expectedId: DatAssetId,
+	framesPerSecond = STATIC_DEFAULT_ANIMATION_FRAMES_PER_SECOND,
 ): PreparedAnimation {
 	if (decoded.id.toLowerCase() !== expectedId.toLowerCase())
 		throw new Error(
@@ -148,12 +150,17 @@ function prepareAnimation(
 			`Animation ${decoded.id} has an incomplete position-frame table.`,
 		);
 	}
+	if (!Number.isFinite(framesPerSecond) || framesPerSecond === 0) {
+		throw new Error(
+			`Animation ${decoded.id} playback rate must be finite and non-zero.`,
+		);
+	}
 	return {
 		authoredRootTranslates: decoded.positionFrames.some(
 			(frame) => frame.m41 !== 0 || frame.m42 !== 0 || frame.m43 !== 0,
 		),
 		frameCount: decoded.frameCount,
-		framesPerSecond: STATIC_DEFAULT_ANIMATION_FRAMES_PER_SECOND,
+		framesPerSecond,
 		hooks: decoded.hooks,
 		id: decoded.id,
 		partCount: decoded.partCount,

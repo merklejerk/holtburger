@@ -1,7 +1,7 @@
 import { sceneVec3 } from "../../assets/ac-frame";
 import { FRONTEND_TUNING } from "../../frontend-tuning";
 import { placeObjectLights } from "../commit/interior-static-lighting";
-import type { LandblockId } from "../game-types";
+import type { LandblockOwnerId } from "../game-types";
 import { createLandblockWorldOrigin } from "../landblocks";
 import type { Mat4 } from "../math/types";
 import { Vec3 } from "../math/types";
@@ -12,7 +12,7 @@ import { RUNTIME_LIGHT_RANGE_SCALE, type RuntimeLight } from "./runtime-lights";
 export function resolveObjectRuntimeLights(
 	lights: readonly ResolvedObjectLight[],
 	objectToLandblock: Mat4,
-	landblockId: LandblockId,
+	landblockId: LandblockOwnerId,
 ): readonly RuntimeLight[] {
 	const origin = createLandblockWorldOrigin(landblockId);
 	const placed: Parameters<typeof placeObjectLights>[2] = [];

@@ -19,7 +19,7 @@ import {
 } from "../src/lib/game/behavior/behavior-event-router";
 import { ParticleEmitterRepository } from "../src/lib/game/behavior/particle-emitter-repository";
 import { PhysicsScriptRepository } from "../src/lib/game/behavior/physics-script-repository";
-import type { DatAssetId, LandblockId } from "../src/lib/game/game-types";
+import type { DatAssetId, LandblockOwnerId } from "../src/lib/game/game-types";
 import {
 	createLandblockOffset,
 	createLandblockWorldOrigin,
@@ -116,7 +116,7 @@ interface ArchiveTraceRecord {
 	/** Canonical HBEC source record encoded as lowercase hex. */
 	readonly envCellRecordHex: string;
 	/** Landblock from which the record was loaded. */
-	readonly landblockId: LandblockId;
+	readonly landblockId: LandblockOwnerId;
 	/** Closed all-layer source batch used by the dry scheduler. */
 	readonly sourceBatchHex: string;
 }
@@ -145,7 +145,7 @@ interface ArchiveBehaviorExport {
 interface ArchivePortalCensusExport {
 	readonly failures: readonly {
 		readonly detail: string;
-		readonly landblockId: LandblockId;
+		readonly landblockId: LandblockOwnerId;
 	}[];
 	readonly landblocks: readonly ArchivePortalCensusLandblock[];
 }
@@ -183,7 +183,7 @@ interface ArchivePortalCensusLandblock {
 	readonly internalComponentCellCount: ArchivePortalCensusDistribution;
 	readonly internalComponentPortalCount: ArchivePortalCensusDistribution;
 	readonly internalPortalCount: number;
-	readonly landblockId: LandblockId;
+	readonly landblockId: LandblockOwnerId;
 	readonly maximumIndoorDistanceFromOutside: number;
 	readonly maximumOutgoingPortalCount: number;
 	readonly maximumSourceApertureVertexCount: number;
@@ -219,7 +219,7 @@ interface NumericTraceDistribution {
 
 /** One deterministic archive workload selected because it exercises a named risk dimension. */
 interface ArchivePortalRiskSelection {
-	readonly landblockId: LandblockId;
+	readonly landblockId: LandblockOwnerId;
 	readonly reason: string;
 	readonly value: number;
 }
@@ -280,7 +280,7 @@ interface ArchivePortalPvsCensusReport {
 /** One deterministic camera/root-scope input shared by both compared planners. */
 interface TracePose {
 	/** Landblock defining the render anchor for this camera. */
-	readonly anchorLandblockId: LandblockId;
+	readonly anchorLandblockId: LandblockOwnerId;
 	/** Stable diagnostic identity including the topology stratum. */
 	readonly id: string;
 	/** Camera position in anchor-relative coordinates. */
@@ -307,7 +307,7 @@ interface PortalWorkTraceReport {
 	/** Canonical schema identity for disposable reports. */
 	readonly kind: "holtburger-portal-work-trace";
 	/** Real archive landblocks contributing resident topology. */
-	readonly landblockIds: readonly LandblockId[];
+	readonly landblockIds: readonly LandblockOwnerId[];
 	/** Deterministic live authored-particle population supplied to every dry schedule. */
 	readonly particles: ArchiveParticleTrace;
 	/** Route-independent projection reuse ceiling from the unchanged production plan. */
@@ -337,7 +337,7 @@ interface AtlasCapacityPolicy {
 interface PortalAtlasCapacityTraceReport {
 	readonly drawingBuffer: TraceDrawingBuffer;
 	readonly kind: "holtburger-portal-atlas-capacity-trace";
-	readonly landblockIds: readonly LandblockId[];
+	readonly landblockIds: readonly LandblockOwnerId[];
 	readonly policies: readonly ReturnType<typeof summarizeAtlasPolicy>[];
 	readonly poses: readonly ReturnType<typeof traceAtlasCapacityPose>[];
 	/** Production extent and arrival-id policy evaluated beside the extent-only grid. */
@@ -356,7 +356,7 @@ interface ArchivePreparedContentArtifacts {
 	/** Prepared outdoor and interior-resident static draw artifacts. */
 	readonly statics: readonly StaticObjectLayerArtifact[];
 	/** Terrain sources represented as one resolved draw domain per resident landblock. */
-	readonly terrainLandblockIds: readonly LandblockId[];
+	readonly terrainLandblockIds: readonly LandblockOwnerId[];
 }
 
 /** Complete archive workload after deterministic particle lifetime execution. */
@@ -546,7 +546,7 @@ function parseArguments(arguments_: readonly string[]):
 			readonly archiveRecordsPath: string | null;
 			readonly drawingBuffer: TraceDrawingBuffer;
 			readonly kind: "workload";
-			readonly landblockIds: readonly LandblockId[];
+			readonly landblockIds: readonly LandblockOwnerId[];
 			readonly maximumPoseCount: number;
 			readonly mode: "atlas-capacity" | "particle-lifetime" | "workload";
 			/** Optional exact deterministic camera identity retained for a focused trace. */
@@ -556,7 +556,7 @@ function parseArguments(arguments_: readonly string[]):
 	if (arguments_.length === 1 && arguments_[0] === "--census") {
 		return { kind: "census" };
 	}
-	const landblockIds: LandblockId[] = [];
+	const landblockIds: LandblockOwnerId[] = [];
 	let archiveRecordsPath: string | null = null;
 	let drawingBuffer: TraceDrawingBuffer = DEFAULT_DRAWING_BUFFER;
 	let mode: "atlas-capacity" | "particle-lifetime" | "workload" = "workload";
@@ -606,7 +606,7 @@ function parseArguments(arguments_: readonly string[]):
 		if (!/^0x[0-9a-f]{4}ffff$/i.test(argument)) {
 			throw new Error(`Invalid outdoor landblock id ${argument}.`);
 		}
-		landblockIds.push(argument.toLowerCase() as LandblockId);
+		landblockIds.push(argument.toLowerCase() as LandblockOwnerId);
 	}
 	if (landblockIds.length === 0) {
 		throw new Error(
@@ -644,7 +644,7 @@ function parseDrawingBuffer(raw: string): TraceDrawingBuffer {
 }
 
 async function loadArchiveArtifacts(
-	landblockIds: readonly LandblockId[],
+	landblockIds: readonly LandblockOwnerId[],
 	archiveRecordsPath: string | null,
 ) {
 	const appDirectory = fileURLToPath(new URL("..", import.meta.url));
@@ -723,7 +723,7 @@ function prepareArchiveContentArtifacts(
 ): ArchivePreparedContentArtifacts {
 	const dynamics: AuthoredDynamicSource[] = [];
 	const statics: StaticObjectLayerArtifact[] = [];
-	const terrainLandblockIds: LandblockId[] = [];
+	const terrainLandblockIds: LandblockOwnerId[] = [];
 	for (const batch of sources) {
 		if (batch.records.get(LandblockLayerKind.Terrain) !== null) {
 			terrainLandblockIds.push(batch.landblockId);
@@ -796,7 +796,7 @@ function prepareStaticArtifact(
 
 function runArchiveAdapter(
 	appDirectory: string,
-	landblockIds: readonly LandblockId[],
+	landblockIds: readonly LandblockOwnerId[],
 ): ArchiveTraceExport {
 	return runRustArchiveAdapter<ArchiveTraceExport>(appDirectory, landblockIds);
 }
@@ -1091,7 +1091,7 @@ function selectMaximum(
 function uniqueRiskSelections(
 	selections: readonly ArchivePortalRiskSelection[],
 ): readonly ArchivePortalRiskSelection[] {
-	const byLandblock = new Map<LandblockId, ArchivePortalRiskSelection>();
+	const byLandblock = new Map<LandblockOwnerId, ArchivePortalRiskSelection>();
 	for (const selection of selections) {
 		const existing = byLandblock.get(selection.landblockId);
 		byLandblock.set(
@@ -1563,7 +1563,7 @@ function crossingFacingTarget(
 
 function poseFacing(
 	id: string,
-	anchorLandblockId: LandblockId,
+	anchorLandblockId: LandblockOwnerId,
 	rootScope: SceneScope,
 	position: Vec3,
 	target: Vec3,
@@ -2671,7 +2671,7 @@ function appendDryDraw(
 		readonly center: Vec3 | null;
 		readonly ordering: "additive" | "alpha-test" | "opaque" | "transparent";
 		readonly physicalKey: string;
-		readonly placementLandblockId: LandblockId;
+		readonly placementLandblockId: LandblockOwnerId;
 		readonly pose: TracePose;
 		readonly view: Mat4;
 	},

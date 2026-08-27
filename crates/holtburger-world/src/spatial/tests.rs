@@ -631,7 +631,7 @@ fn spatial_scene_runtime_body_views_include_entity_local_player_and_ephemeral_bo
 }
 
 #[test]
-fn spatial_scene_forced_reposition_reset_clears_runtime_motion_and_suspends_body() {
+fn spatial_scene_relocation_clears_runtime_motion_and_rebuilds_body() {
     let mut scene = SpatialScene::new();
     let now = Instant::now();
     let body_id = SpatialBodyId::Entity(Guid(0x7100_0012));
@@ -648,7 +648,9 @@ fn spatial_scene_forced_reposition_reset_clears_runtime_motion_and_suspends_body
         now,
     );
 
-    scene.apply_forced_reposition_reset(body_id, make_position(8.0, 9.0, 0.25), now);
+    scene
+        .relocate_dynamic_body(body_id, make_position(8.0, 9.0, 0.25), now)
+        .expect("body should relocate");
 
     let body = scene.body(body_id).expect("body should remain tracked");
     assert_eq!(body.pose, make_position(8.0, 9.0, 0.25));
@@ -656,5 +658,5 @@ fn spatial_scene_forced_reposition_reset_clears_runtime_motion_and_suspends_body
     assert_eq!(body.velocity, Vector3::zero());
     assert_eq!(body.omega, Vector3::zero());
     assert_eq!(body.motion_state, None);
-    assert_eq!(body.sampling.mode, SpatialSampleMode::Suspended);
+    assert_eq!(body.sampling.mode, SpatialSampleMode::AuthoritativeOnly);
 }

@@ -1,4 +1,4 @@
-import type { LandblockId } from "../lib/game/game-types";
+import type { LandblockOwnerId } from "../lib/game/game-types";
 import { sceneVec3, sceneVector3 } from "../lib/assets/ac-frame";
 import { Vec3 } from "../lib/game/math/types";
 import { createCameraRotationRadians } from "../lib/game/math/camera-orientation";
@@ -6,12 +6,22 @@ import { GamePresentationRuntime } from "../lib/game/runtime/game-presentation-r
 import type { HostCameraPlacement } from "../lib/game/motion/host-placed-path";
 import type { SceneInterestRevision } from "../lib/game/runtime/scene-availability";
 import type { SceneAvailabilityEvent } from "../lib/game/runtime/scene-availability";
+import type {
+	SceneActivationReceipt,
+	SceneActivationStatus,
+} from "../lib/game/runtime/scene-availability";
 import { LandblockLayerKind } from "../lib/game/runtime/scene-interest";
 import type { SceneInterestRequest } from "../lib/game/runtime/scene-interest";
 import type { Camera } from "../lib/game/runtime/types";
 import type { ProjectionClearanceRevision } from "../lib/game/camera/projection-clearance";
 import type { SceneInterestRadii } from "../lib/game/runtime/types";
 import type { SceneResidency } from "../lib/game/scene";
+import type { PortalTransitionFrame } from "../lib/game/renderer/renderer";
+import {
+	PortalTransitionController,
+	type PortalRevealReceipt,
+	type PortalTransitionState,
+} from "../lib/client/portal-transition-controller";
 import type {
 	ResolvedSceneInterestTarget,
 	SceneInterestTarget,
@@ -49,7 +59,7 @@ type PendingFocus =
 	  }
 	| {
 			readonly kind: "outdoor";
-			readonly landblockId: LandblockId;
+			readonly landblockId: LandblockOwnerId;
 			readonly revision: SceneInterestRevision;
 	  };
 
@@ -89,6 +99,15 @@ export interface ExplorerSceneInterestSnapshot {
 	readonly residency: SceneResidency;
 }
 
+/** One valid phase of the Explorer-owned scene installation transaction. */
+type ExplorerSceneActivation =
+	| { readonly kind: "requesting"; readonly generation: number }
+	| {
+			readonly kind: "installing";
+			readonly receipt: SceneActivationReceipt;
+			readonly ready: boolean;
+	  };
+
 /**
  * Explorer policy connecting user-requested scene interest to its free-fly camera.
  *
@@ -112,6 +131,10 @@ export class ExplorerCameraCoordinator {
 	 */
 	#sceneInterestSnapshot: ExplorerSceneInterestSnapshot | null = null;
 	#pendingFollowSceneInterest: PendingExplorerFollowSceneInterest | null = null;
+	/** The source-neutral replacement currently being requested or installed, if any. */
+	#sceneActivation: ExplorerSceneActivation | null = null;
+	readonly #portalTransition = new PortalTransitionController();
+	#hasRenderedFrame = false;
 	#lastResidency: SceneResidency | null = null;
 	/** Exact position/residency most recently applied to the runtime camera. */
 	#presentedPlacement: HostCameraPlacement | null = null;
@@ -138,50 +161,165 @@ export class ExplorerCameraCoordinator {
 	}
 
 	/** Request content for a frontend-selected target and begin the matching focus flow. */
-	requestSceneInterest(request: SceneInterestRequest): void {
+	requestSceneInterest(
+		request: SceneInterestRequest,
+		generation: number,
+	): Promise<void> {
 		const { radii, target } = request;
 		this.#pendingFollowSceneInterest = null;
+		this.#cancelSceneActivation();
 		const residency = focusResidency(target);
 		this.#sceneInterestSnapshot = {
 			radii: { ...radii },
 			residency: { ...residency },
 			target,
 		};
-		const receipt = this.#runtime.updateSceneInterest(request);
-		const pending: PendingFocus =
-			residency.envCellId === null
-				? {
-						kind: "outdoor",
-						landblockId: residency.landblockId,
-						revision: receipt.revision,
-					}
-				: {
-						kind: "interior",
-						residency: { ...residency, envCellId: residency.envCellId },
-						revision: receipt.revision,
-					};
-		this.#pending = pending;
-		if (pending.kind === "outdoor") {
-			this.#onStatus("Loading outdoor terrain for initial camera placement.");
-			this.#tryFocusOutdoor(pending);
-			return;
-		}
-		if (radii.envCellRadius === null && target.kind !== "dungeon") {
-			this.#finishRejectedInteriorResolution(
-				pending,
-				resolveExplicitExplorerEnvCell(
-					pending.residency,
-					"topology-unavailable",
-				),
-			);
-			return;
-		}
+		this.#pending = null;
+		this.#sceneActivation = { kind: "requesting", generation };
+		this.#portalTransition.begin(generation, this.#hasRenderedFrame);
+		this.#runtime.playPortalTransitionSound?.("enter");
 		this.#onStatus(
-			target.kind === "dungeon"
-				? "Loading dungeon environment-cell topology for initial camera placement."
-				: "Waiting for environment-cell topology for initial camera placement.",
+			residency.envCellId === null
+				? "Loading outdoor terrain for initial camera placement."
+				: target.kind === "dungeon"
+					? "Loading dungeon environment-cell topology for initial camera placement."
+					: "Waiting for environment-cell topology for initial camera placement.",
 		);
-		this.#tryFocusInterior(pending, false);
+		return this.#runtime
+			.activateScene({
+				generation,
+				target: request,
+			})
+			.then((receipt) => {
+				const activation = this.#sceneActivation;
+				if (
+					activation?.kind !== "requesting" ||
+					activation.generation !== generation
+				)
+					return;
+				this.#sceneActivation = {
+					kind: "installing",
+					receipt,
+					ready: false,
+				};
+				this.#pending = pendingFocusFor(residency, receipt.revision);
+				this.pollSceneActivation();
+			})
+			.catch((error: unknown) => {
+				const activation = this.#sceneActivation;
+				if (
+					activation?.kind !== "requesting" ||
+					activation.generation !== generation
+				)
+					return;
+				this.#sceneActivation = null;
+				this.#pending = null;
+				this.#portalTransition.reset();
+				this.#onStatus(
+					`Initial camera placement failed: ${errorMessage(error)}`,
+				);
+			});
+	}
+
+	/** Current renderer input for the shared portal presentation, if a replacement is active. */
+	portalTransitionFrame(): PortalTransitionFrame | undefined {
+		const state = this.#portalTransition.state();
+		return state === null ? undefined : portalTransitionFrame(state);
+	}
+
+	/** Advance the shared presentation state and return a one-shot reveal edge when emitted. */
+	advancePortalTransition(
+		nowMs: number,
+		destinationFrameRendered: boolean,
+	): PortalRevealReceipt | null {
+		if (this.#portalTransition.state() === null) return null;
+		const update = this.#portalTransition.tick({
+			nowMs,
+			activationReady: this.activationReady(),
+			destinationFrameRendered,
+		});
+		if (update.audio !== undefined) {
+			this.#runtime.playPortalTransitionSound?.(update.audio);
+		}
+		if (destinationFrameRendered) this.#hasRenderedFrame = true;
+		return update.reveal;
+	}
+
+	/** Record a normal finished frame so a later replacement may retain it as outgoing content. */
+	markRenderedFrame(): void {
+		this.#hasRenderedFrame = true;
+	}
+
+	/** Poll the exact installation receipt from the Explorer frame loop. */
+	pollSceneActivation(): SceneActivationStatus | null {
+		const activation = this.#sceneActivation;
+		if (activation?.kind !== "installing") return null;
+		const receipt = activation.receipt;
+		const status = this.#runtime.sceneActivationStatus(receipt);
+		if (status.kind === "failed") {
+			console.error({
+				diagnostic: status.diagnostic,
+				generation: receipt.generation,
+				kind: "explorer-scene-activation-failed",
+				revision: receipt.revision,
+			});
+			this.#sceneActivation = null;
+			this.#pending = null;
+			this.#portalTransition.reset();
+			this.#onStatus(`Initial camera placement failed: ${status.diagnostic}`);
+			return status;
+		}
+		if (status.kind !== "ready") return status;
+		if (!activation.ready) {
+			this.#sceneActivation = { ...activation, ready: true };
+			const pending = this.#pending;
+			if (pending?.kind === "outdoor") this.#tryFocusOutdoor(pending);
+			if (pending?.kind === "interior") {
+				if (
+					this.#sceneInterestSnapshot?.radii.envCellRadius === null &&
+					this.#sceneInterestSnapshot.target.kind !== "dungeon"
+				) {
+					this.#finishRejectedInteriorResolution(
+						pending,
+						resolveExplicitExplorerEnvCell(
+							pending.residency,
+							"topology-unavailable",
+						),
+					);
+				} else this.#tryFocusInterior(pending, true);
+			}
+		}
+		return status;
+	}
+
+	/** Whether an activation is still withholding the Explorer camera/input handoff. */
+	activationPending(): boolean {
+		return this.#sceneActivation !== null;
+	}
+
+	/** Whether the destination products are installed and may produce the first destination frame. */
+	activationReady(): boolean {
+		return (
+			this.#sceneActivation?.kind === "installing" &&
+			this.#sceneActivation.ready
+		);
+	}
+
+	/** Complete the mode-specific handoff after the first destination frame. */
+	completeSceneActivation(): void {
+		const activation = this.#sceneActivation;
+		if (activation?.kind === "installing")
+			this.#runtime.completeSceneActivation(activation.receipt.generation);
+		this.#sceneActivation = null;
+		this.#portalTransition.reset();
+	}
+
+	/** Cancel one superseded activation without touching the continuous follow policy. */
+	#cancelSceneActivation(): void {
+		const activation = this.#sceneActivation;
+		if (activation?.kind === "installing")
+			this.#runtime.completeSceneActivation(activation.receipt.generation);
+		this.#sceneActivation = null;
 	}
 
 	/**
@@ -204,6 +342,7 @@ export class ExplorerCameraCoordinator {
 		const sceneInterest = this.#sceneInterestSnapshot;
 		if (
 			sceneInterest === null ||
+			this.activationPending() ||
 			this.#pending !== null ||
 			sceneInterest.target.kind === "dungeon" ||
 			sceneInterest.residency.landblockId === residency.landblockId ||
@@ -508,6 +647,7 @@ export class ExplorerCameraCoordinator {
 
 	dispose(): void {
 		this.#unsubscribeAvailability();
+		this.#cancelSceneActivation();
 		this.#sceneInterestSnapshot = null;
 		this.#pendingFollowSceneInterest = null;
 		this.#pending = null;
@@ -558,7 +698,7 @@ export class ExplorerCameraCoordinator {
 	#tryFocusOutdoor(
 		pending: Extract<PendingFocus, { readonly kind: "outdoor" }>,
 	): void {
-		if (this.#pending !== pending) return;
+		if (this.#pending !== pending || !this.activationReady()) return;
 		const pose = resolveExplorerOutdoorFocusPose(
 			this.#runtime,
 			pending.landblockId,
@@ -571,7 +711,7 @@ export class ExplorerCameraCoordinator {
 		pending: Extract<PendingFocus, { readonly kind: "interior" }>,
 		topologyComplete: boolean,
 	): void {
-		if (this.#pending !== pending) return;
+		if (this.#pending !== pending || !this.activationReady()) return;
 		const bounds = this.#runtime.queryEnvCellBounds(pending.residency);
 		if (!bounds) {
 			if (
@@ -672,10 +812,27 @@ function createCamera(
 	};
 }
 
-function pendingLandblockId(pending: PendingFocus): LandblockId {
+function pendingLandblockId(pending: PendingFocus): LandblockOwnerId {
 	return pending.kind === "outdoor"
 		? pending.landblockId
 		: pending.residency.landblockId;
+}
+
+function pendingFocusFor(
+	residency: SceneResidency,
+	revision: SceneInterestRevision,
+): PendingFocus {
+	return residency.envCellId === null
+		? {
+				kind: "outdoor",
+				landblockId: residency.landblockId,
+				revision,
+			}
+		: {
+				kind: "interior",
+				residency: { ...residency, envCellId: residency.envCellId },
+				revision,
+			};
 }
 
 function pendingLayer(pending: PendingFocus): LandblockLayerKind {
@@ -718,4 +875,25 @@ function sameResidency(
 		left.landblockId === right.landblockId &&
 		left.envCellId === right.envCellId
 	);
+}
+
+function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+function portalTransitionFrame(
+	state: PortalTransitionState,
+): PortalTransitionFrame {
+	return {
+		generation: state.generation,
+		outgoingAvailable:
+			state.kind !== "revealed-awaiting-handoff" && state.outgoingCaptured,
+		phase: state.kind,
+		progress:
+			state.kind === "exiting"
+				? state.progress
+				: state.kind === "revealed-awaiting-handoff"
+					? 1
+					: 0,
+	};
 }

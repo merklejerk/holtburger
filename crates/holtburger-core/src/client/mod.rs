@@ -2,7 +2,7 @@ use crate::DynamicEntitySnapshot;
 use holtburger_common::Guid;
 use holtburger_protocol::errors::WeenieError;
 use holtburger_session::Session;
-use holtburger_world::{WorldEvent, WorldState};
+use holtburger_world::{SpatialBodyId, WorldEvent, WorldState};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, mpsc};
@@ -70,10 +70,33 @@ pub struct ClientRuntime {
     simulation: ClientSimulationSystem,
     /// Stages static collision and local-player body products outside the simulation turn.
     collision_coordinator: Option<collision::ClientCollisionCoordinator>,
+    /// Whether the selected composition owns an asynchronous destination reveal product.
+    requires_external_world_reveal: bool,
+    /// One generation-scoped replacement transition. `None` means the active scene is continuous
+    /// (or the client has not selected a character yet).
+    activation: Option<ClientWorldActivationRuntime>,
     /// Client-local camera boom advanced inside the same authority clock as entity presentation.
     camera: ClientCameraRuntime,
     character_selection: CharacterSelectionState,
     turbine_chat: TurbineChatState,
+}
+
+/// Internal activation bookkeeping. Destination and prerequisite products stay private so a
+/// frontend cannot manufacture authority facts or observe an intermediate collision transaction.
+struct ClientWorldActivationRuntime {
+    generation: u64,
+    state: ClientWorldActivationState,
+    player_guid: Guid,
+    destination: Option<collision::ClientPlayerInstance>,
+    collision_ready: Option<u64>,
+    camera_seed_ready: bool,
+    external_reveal_generation: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ClientWorldActivationState {
+    InitialEntry,
+    Teleport,
 }
 
 impl ClientRuntime {
@@ -96,17 +119,23 @@ impl ClientRuntime {
                         .collect(),
                 }
             }
-            ClientState::EnteringWorld => ClientLifecycleState::EnteringWorld {
-                character_guid: self.character_selection.character_id.unwrap_or(Guid::NULL),
-            },
+            ClientState::EnteringWorld => self
+                .activation
+                .as_ref()
+                .map(|activation| activation.lifecycle())
+                .unwrap_or(ClientLifecycleState::EnteringWorld {
+                    character_guid: self.character_selection.character_id.unwrap_or(Guid::NULL),
+                }),
             ClientState::InWorld if self.world.player.guid != Guid::NULL => {
-                ClientLifecycleState::InWorld {
-                    player_guid: self.world.player.guid,
-                }
+                ClientLifecycleState::InWorld
             }
-            ClientState::InWorld => ClientLifecycleState::EnteringWorld {
-                character_guid: self.character_selection.character_id.unwrap_or(Guid::NULL),
-            },
+            ClientState::InWorld => self
+                .activation
+                .as_ref()
+                .map(|activation| activation.lifecycle())
+                .unwrap_or(ClientLifecycleState::EnteringWorld {
+                    character_guid: self.character_selection.character_id.unwrap_or(Guid::NULL),
+                }),
             ClientState::Disconnected => ClientLifecycleState::Exiting {
                 cause: self.exit_cause.unwrap_or(ClientExitCause::ServerDisconnect),
             },
@@ -117,6 +146,8 @@ impl ClientRuntime {
     pub fn application_snapshot(&self) -> ClientApplicationSnapshot {
         ClientApplicationSnapshot {
             lifecycle: self.lifecycle(),
+            local_player_guid: (self.world.player.guid != Guid::NULL)
+                .then_some(self.world.player.guid),
             server_time: self
                 .world
                 .server_time
@@ -148,6 +179,141 @@ impl ClientRuntime {
     pub(crate) fn bump_world_generation(&mut self) -> u64 {
         self.world_generation = self.world_generation.saturating_add(1);
         self.world_generation
+    }
+
+    /// Starts one generation-scoped replacement activation. The network/world authority keeps
+    /// ingesting destination state while movement, local solving, and camera advancement remain
+    /// withdrawn until the activation conjunction completes.
+    pub(super) fn start_world_activation(
+        &mut self,
+        cause: ClientWorldActivationState,
+        player_guid: Guid,
+    ) {
+        let generation = self.bump_world_generation();
+        self.activation = Some(ClientWorldActivationRuntime {
+            generation,
+            state: cause,
+            player_guid,
+            destination: None,
+            collision_ready: None,
+            camera_seed_ready: !self.requires_external_world_reveal,
+            external_reveal_generation: (!self.requires_external_world_reveal)
+                .then_some(generation),
+        });
+        self.movement.reset_manual_motion_playback();
+        self.movement.clear_server_correction();
+        self.reset_camera();
+        if let Some(coordinator) = self.collision_coordinator.as_mut() {
+            coordinator.invalidate();
+        }
+        self.state = ClientState::EnteringWorld;
+        self.send_status_event();
+    }
+
+    /// Starts an initial-entry activation after retiring the previous runtime scene. The reset is
+    /// projected under the new generation so reset and the later destination edge cannot create
+    /// two replacement generations.
+    pub(super) fn start_world_activation_with_reset(
+        &mut self,
+        cause: ClientWorldActivationState,
+        player_guid: Guid,
+    ) {
+        self.start_world_activation(cause, player_guid);
+        let reset_events = self
+            .world
+            .suspend_runtime_bodies(holtburger_world::RuntimeBodyResetCause::TeleportOrWorldReset);
+        for event in &reset_events {
+            self.handle_runtime_world_event_with_context(event, true);
+        }
+    }
+
+    /// Records the presentation-owned first-pure-destination acknowledgement for the current
+    /// generation. Stale or duplicate acknowledgements are harmless and never activate a newer
+    /// destination.
+    pub(super) async fn acknowledge_world_reveal(&mut self, generation: u64) -> anyhow::Result<()> {
+        let Some(activation) = self.activation.as_mut() else {
+            return Ok(());
+        };
+        if activation.generation != generation {
+            return Ok(());
+        }
+        activation.external_reveal_generation = Some(generation);
+        self.try_complete_world_activation().await
+    }
+
+    /// Re-evaluates the activation conjunction after a world/collision/content fact changes.
+    /// This is deliberately the only path that can send ACE's `LoginComplete` action.
+    pub(super) async fn try_complete_world_activation(&mut self) -> anyhow::Result<()> {
+        let Some(mut activation) = self.activation.take() else {
+            return Ok(());
+        };
+
+        let Some(player) = self.world.player_entity() else {
+            self.activation = Some(activation);
+            return Ok(());
+        };
+        if player.guid != activation.player_guid || player.position.landblock_id == Guid::NULL {
+            self.activation = Some(activation);
+            return Ok(());
+        }
+
+        let destination = collision::ClientPlayerInstance {
+            guid: player.guid,
+            instance_sequence: player.instance_sequence(),
+            residency: player.position.landblock_id,
+        };
+        if activation.destination != Some(destination) {
+            activation.destination = Some(destination);
+            activation.collision_ready = None;
+            activation.camera_seed_ready = !self.requires_external_world_reveal;
+        }
+
+        let collision_ready = self.collision_coordinator.as_ref().and_then(|coordinator| {
+            match coordinator.readiness() {
+                collision::ClientSpatialReadiness::Ready {
+                    player,
+                    collision_revision,
+                    ..
+                } if player == destination => Some(collision_revision),
+                _ => None,
+            }
+        });
+        activation.collision_ready = collision_ready;
+
+        let body_ready = self
+            .world
+            .scene
+            .body(SpatialBodyId::LocalPlayer(player.guid))
+            .is_some_and(|body| body.physical.is_some());
+        let containment_ready = self.world.all_player_contained_objects_exist();
+        let reveal_ready = activation.external_reveal_generation == Some(activation.generation);
+
+        if !activation.camera_seed_ready {
+            let collision_snapshot = self
+                .collision_coordinator
+                .as_ref()
+                .and_then(|coordinator| coordinator.snapshot());
+            if let Some(tick) = self.seed_camera(collision_snapshot.as_ref())? {
+                self.emit_camera_event(tick);
+                activation.camera_seed_ready = true;
+            }
+        }
+
+        if activation.collision_ready.is_none()
+            || !body_ready
+            || !containment_ready
+            || !activation.camera_seed_ready
+            || !reveal_ready
+        {
+            self.activation = Some(activation);
+            return Ok(());
+        }
+
+        self.send_login_complete().await?;
+        self.activation = None;
+        self.state = ClientState::InWorld;
+        self.send_status_event();
+        Ok(())
     }
 
     fn player_character_options(&self) -> PlayerCharacterOptions {
@@ -691,6 +857,20 @@ impl ClientRuntime {
     }
 }
 
+impl ClientWorldActivationRuntime {
+    fn lifecycle(&self) -> ClientLifecycleState {
+        let cause = match self.state {
+            ClientWorldActivationState::InitialEntry => ClientWorldActivationCause::InitialEntry,
+            ClientWorldActivationState::Teleport => ClientWorldActivationCause::Teleport,
+        };
+
+        ClientLifecycleState::PortalSpace {
+            world_generation: self.generation,
+            cause,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -751,7 +931,7 @@ mod tests {
     }
 
     #[test]
-    fn lifecycle_and_snapshot_preserve_selection_slots_and_local_identity() {
+    fn lifecycle_preserves_selection_slots_and_snapshot_owns_local_identity() {
         let characters = vec![
             CharacterEntry {
                 guid: Guid(0x5000_0001),
@@ -790,12 +970,8 @@ mod tests {
         client.state = ClientState::InWorld;
         client.world.player.guid = Guid(0x5000_0002);
         let snapshot = client.application_snapshot();
-        assert_eq!(
-            snapshot.lifecycle,
-            ClientLifecycleState::InWorld {
-                player_guid: Guid(0x5000_0002),
-            }
-        );
+        assert_eq!(snapshot.lifecycle, ClientLifecycleState::InWorld);
+        assert_eq!(snapshot.local_player_guid, Some(Guid(0x5000_0002)));
         assert_eq!(snapshot.world_generation, 0);
         assert!(snapshot.runtime_bodies.is_empty());
         assert_eq!(

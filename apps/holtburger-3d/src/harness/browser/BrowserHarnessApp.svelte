@@ -29,7 +29,7 @@
 		DynamicOnlyLandblockSource,
 		WithoutAuthoredDynamicsLandblockSource,
 	} from "./dynamic-only-landblock-source";
-	import type { EnvCellId, LandblockId } from "../../lib/game/game-types";
+	import type { EnvCellId, LandblockOwnerId } from "../../lib/game/game-types";
 	import {
 		createLandblockWorldOrigin,
 		landblockAtWorldPoint,
@@ -57,6 +57,7 @@
 	import type { WebGL2PortalScopeAtlasExecutorFixtureResult } from "../../lib/game/renderer/webgl2-portal-scope-atlas-executor-fixture";
 	import {
 		GamePresentationRuntime,
+		type PortalTransitionRuntimeDiagnostics,
 		type StaticObjectLayerRuntimeDiagnostics,
 		type StaticObjectRuntimeDiagnostics,
 	} from "../../lib/game/runtime/game-presentation-runtime";
@@ -129,6 +130,7 @@
 		type TerrainGlTrace,
 	} from "./terrain-gl-trace";
 	import { parseResidenceInput } from "../../explorer/world-input";
+	import { loadPortalTransitionAssets } from "../../lib/client/portal-transition-assets";
 
 	const CAMERA_FOV_DEGREES = 90;
 	const CAMERA_NEAR = 0.5;
@@ -182,6 +184,9 @@
 
 	const query = new URLSearchParams(window.location.search);
 	const TRACE_TERRAIN_GL = query.get("traceTerrainGl") === "true";
+	/** Harness-only loading screen demo; production frontends own this transition policy. */
+	const PORTAL_TRANSITION_DEMO = query.get("portalTransitionDemo") === "true";
+	let portalTransitionDemoFrames = 0;
 	/** Sits above the runtime's conservative ±510 outdoor terrain bound. */
 	const cameraHeightSource = query.get("cameraHeight");
 	const CAMERA_HEIGHT =
@@ -612,6 +617,8 @@
 			GamePresentationRuntime["getTickProfile"]
 		> | null;
 		readonly authoredDynamics: AuthoredDynamicDiagnostics | null;
+		/** Required authored portal closure and transition cursor/resource evidence. */
+		readonly portalTransition: PortalTransitionRuntimeDiagnostics | null;
 		readonly frameSettings: FrameSettings;
 		readonly textureFilteringCapabilities: TextureFilteringCapabilities | null;
 		/** Browser main-thread timing facts accumulated during this harness session. */
@@ -654,7 +661,7 @@
 	}
 
 	interface BrowserHarnessSceneInterestEntry {
-		readonly landblockId: LandblockId;
+		readonly landblockId: LandblockOwnerId;
 		readonly layers: readonly LandblockLayerKind[];
 	}
 
@@ -665,7 +672,7 @@
 		/** Outdoor-interest crossings in flight order, stamped with elapsed flight time. */
 		readonly crossings: readonly {
 			readonly elapsedMs: number;
-			readonly landblockId: LandblockId;
+			readonly landblockId: LandblockOwnerId;
 		}[];
 		readonly durationMs: number;
 		/** Outdoor static layer publications that landed during the flight window. */
@@ -682,7 +689,7 @@
 		completionPending: boolean;
 		/** Latest profile-aware scene-interest transition started during this flight. */
 		sceneInterestReady: Promise<void> | null;
-		readonly crossings: { elapsedMs: number; landblockId: LandblockId }[];
+		readonly crossings: { elapsedMs: number; landblockId: LandblockOwnerId }[];
 		readonly durationMs: number;
 		readonly from: Vec3;
 		readonly pitchDegrees: number;
@@ -703,7 +710,7 @@
 		readonly envCellId: EnvCellId | null;
 		readonly far: number;
 		readonly fov: number;
-		readonly landblockId: LandblockId;
+		readonly landblockId: LandblockOwnerId;
 		readonly near: number;
 		readonly pitchDegrees: number;
 		readonly policy:
@@ -839,7 +846,7 @@
 	let textureFilteringCapabilities: TextureFilteringCapabilities | null = null;
 	let cameraEvidence: BrowserHarnessCameraEvidence | null = null;
 	/** Owner and radii of the most recent interest request, reused by outdoor follow flights. */
-	let lastInterestLandblockId: LandblockId | null = null;
+	let lastInterestLandblockId: LandblockOwnerId | null = null;
 	let lastInterestRadii: SceneInterestRadii | null = null;
 	let followFlight: FollowFlightState | null = null;
 	let frameSettings: FrameSettings = {
@@ -854,7 +861,7 @@
 	let ready = false;
 	const fixture = query.get("fixture");
 
-	function parseOutdoorLandblockId(value: string): LandblockId {
+	function parseOutdoorLandblockId(value: string): LandblockOwnerId {
 		const match = /^(?:0x)?([0-9a-f]{4})(?:[0-9a-f]{4})?$/i.exec(value.trim());
 		if (!match) {
 			throw new Error(
@@ -1267,7 +1274,7 @@
 			);
 		}
 		const envCellId = parseEnvCellId(rawEnvCellId, "portal frame");
-		const landblockId = `${envCellId.slice(0, 6)}ffff` as LandblockId;
+		const landblockId = `${envCellId.slice(0, 6)}ffff` as LandblockOwnerId;
 		applyHarnessCamera(runtime, {
 			far: CAMERA_FAR,
 			fov: CAMERA_FOV_DEGREES,
@@ -1299,7 +1306,7 @@
 	): BrowserHarnessCameraEvidence {
 		if (!runtime) throw new Error("Browser harness runtime is not ready.");
 		const envCellId = parseEnvCellId(rawEnvCellId, "EnvCell focus");
-		const landblockId = `${envCellId.slice(0, 6)}ffff` as LandblockId;
+		const landblockId = `${envCellId.slice(0, 6)}ffff` as LandblockOwnerId;
 		const residency = { envCellId, landblockId };
 		const bounds = runtime.queryEnvCellBounds(residency);
 		if (bounds === null) {
@@ -2356,7 +2363,7 @@
 			);
 		}
 		const envCellId = parseEnvCellId(rawEnvCellId, "portal execution");
-		const landblockId = `${envCellId.slice(0, 6)}ffff` as LandblockId;
+		const landblockId = `${envCellId.slice(0, 6)}ffff` as LandblockOwnerId;
 		return renderer.probePortalExecution(
 			landblockId,
 			{
@@ -2493,6 +2500,19 @@
 					// The harness is a measurement surface, so it always wants tick timing.
 					new RuntimeTickProfiler(),
 				);
+				if (PORTAL_TRANSITION_DEMO) {
+					await runtime.installPortalTransitionAssets(
+						await loadPortalTransitionAssets({
+							audio: {
+								playOneShot: () => null,
+								prepare: async () => {},
+							},
+							animation: contentSource,
+							setupVisual: contentSource,
+							soundTable: contentSource,
+						}),
+					);
+				}
 				// Harness comparisons select their render policy explicitly and start from flat.
 				runtime.setFrameSettings(frameSettings);
 				staticDetailOwner = new ActiveRegionStaticDetailOwner(contentSource);
@@ -2828,6 +2848,8 @@
 								renderer?.getAmbientOcclusionCoverageCensus() ?? null,
 							authoredDynamics:
 								runtime?.getAuthoredDynamicRuntimeDiagnostics() ?? null,
+							portalTransition:
+								runtime?.getPortalTransitionDiagnostics() ?? null,
 							tickProfile: runtime?.getTickProfile() ?? null,
 							camera: cameraEvidence,
 							error,
@@ -2896,6 +2918,15 @@
 					lastFrameAt = now;
 					advanceFollowFlight(now);
 					syncHarnessBoomCamera(now);
+					if (PORTAL_TRANSITION_DEMO && portalTransitionDemoFrames >= 2) {
+						runtime.setPortalTransition({
+							generation: 1,
+							phase: "waiting",
+							progress: 0,
+							outgoingAvailable: true,
+						});
+					}
+					if (PORTAL_TRANSITION_DEMO) portalTransitionDemoFrames += 1;
 					const tickStartedAt = performance.now();
 					runtime.tick();
 					const renderStartedAt = performance.now();
@@ -2948,7 +2979,7 @@
 			longTaskObserver?.disconnect();
 			terrainGlTrace?.destroy();
 			mapRenderer?.destroy();
-			sceneInterestCoordinator?.destroy();
+			sceneInterestCoordinator?.invalidate();
 			landblockProfileSource?.destroy();
 			delete hostGlobal.__HOLTBURGER_3D_BROWSER_HARNESS__;
 			staticDetailOwner?.teardown();

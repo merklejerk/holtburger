@@ -2,7 +2,7 @@ import type {
 	CommitPipeline,
 	LandblockLayerCommit,
 } from "../../lib/game/commit/types";
-import type { LandblockId } from "../../lib/game/game-types";
+import type { LandblockOwnerId } from "../../lib/game/game-types";
 import { createTranslationMat4 } from "../../lib/game/math/matrices";
 import { AABB3, Mat4, Vec3 } from "../../lib/game/math/types";
 import type {
@@ -35,7 +35,7 @@ export class SyntheticBlendedBuildingPipeline implements CommitPipeline {
 	async destroy(): Promise<void> {}
 }
 
-function buildingBundle(landblockId: LandblockId): LandblockLayerCommit {
+function buildingBundle(landblockId: LandblockOwnerId): LandblockLayerCommit {
 	const source: ResolvedOutdoorStaticLayerSource = {
 		dynamicSources: [],
 		mapBlockers: new Map(),
@@ -53,7 +53,7 @@ function buildingBundle(landblockId: LandblockId): LandblockLayerCommit {
 }
 
 function resident(
-	landblockId: LandblockId,
+	landblockId: LandblockOwnerId,
 	flags: number,
 	index: number,
 ): ResolvedObjectResident {

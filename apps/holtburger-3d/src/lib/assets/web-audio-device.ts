@@ -53,6 +53,8 @@ export class WebAudioDevice implements AudioDevice {
 	readonly #placementSmoothingSeconds: number;
 	readonly #loudnessCurveExponent: number;
 	readonly #buffers = new Map<DatAssetId, AudioBuffer>();
+	/** Decoder-ready payload sizes retained alongside the corresponding Web Audio buffers. */
+	readonly #bufferSourceBytes = new Map<DatAssetId, number>();
 	readonly #pending = new Set<DatAssetId>();
 	#destroyed = false;
 
@@ -183,10 +185,15 @@ export class WebAudioDevice implements AudioDevice {
 		await this.#prepare(soundId);
 	}
 
+	getPreparedSourceBytes(soundId: DatAssetId): number | null {
+		return this.#bufferSourceBytes.get(soundId) ?? null;
+	}
+
 	destroy(): void {
 		if (this.#destroyed) return;
 		this.#destroyed = true;
 		this.#buffers.clear();
+		this.#bufferSourceBytes.clear();
 		this.#pending.clear();
 		this.#source.destroy();
 	}
@@ -198,7 +205,10 @@ export class WebAudioDevice implements AudioDevice {
 		try {
 			const bytes = await this.#source.loadAudio(soundId);
 			const buffer = await this.#context.decodeAudioData(bytes);
-			if (!this.#destroyed) this.#buffers.set(soundId, buffer);
+			if (!this.#destroyed) {
+				this.#buffers.set(soundId, buffer);
+				this.#bufferSourceBytes.set(soundId, bytes.byteLength);
+			}
 		} finally {
 			this.#pending.delete(soundId);
 		}

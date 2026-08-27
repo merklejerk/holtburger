@@ -1,4 +1,4 @@
-import type { LandblockId } from "../game/game-types";
+import type { LandblockOwnerId } from "../game/game-types";
 import type {
 	ResolvedEnvCellLayerSource,
 	ResolvedOutdoorStaticLayerSource,
@@ -24,13 +24,13 @@ export type LandblockSourceRecord =
 /** Closed host capability for one landblock's complete requested source-layer set. */
 export interface LandblockSourceBatchSource {
 	loadLandblockSourceBatch(
-		landblockId: LandblockId,
+		landblockId: LandblockOwnerId,
 		layers: ReadonlySet<LandblockSourceLayer>,
 	): Promise<LandblockSourceBatch>;
 }
 
 /** The independently decoded records projected from one cumulative host acquisition. */
 export interface LandblockSourceBatch {
-	readonly landblockId: LandblockId;
+	readonly landblockId: LandblockOwnerId;
 	readonly records: ReadonlyMap<LandblockSourceLayer, LandblockSourceRecord>;
 }

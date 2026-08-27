@@ -1,4 +1,4 @@
-import type { LandblockId } from "../game-types";
+import type { LandblockOwnerId } from "../game-types";
 import type { RenderGeometryData } from "../renderer/geometry";
 import type { StaticGeometryKey } from "../systems/static-resources";
 
@@ -7,7 +7,7 @@ declare const objectGeometryKeyBrand: unique symbol;
 declare const portalGeometryKeyBrand: unique symbol;
 
 /** Stable geometry resource containing every generated terrain variant for one landblock. */
-export type TerrainGeometryKey = `terrain-geometry:${LandblockId}` & {
+export type TerrainGeometryKey = `terrain-geometry:${LandblockOwnerId}` & {
 	readonly [terrainGeometryKeyBrand]: true;
 };
 
@@ -38,7 +38,7 @@ export interface GeometrySource {
 
 /** Build the canonical generated terrain-geometry identity for one landblock. */
 export function createTerrainGeometryKey(
-	landblockId: LandblockId,
+	landblockId: LandblockOwnerId,
 ): TerrainGeometryKey {
 	return `terrain-geometry:${landblockId}` as TerrainGeometryKey;
 }

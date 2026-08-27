@@ -2,7 +2,7 @@ import type {
 	CommitPipeline,
 	LandblockLayerCommit,
 } from "../../lib/game/commit/types";
-import type { LandblockId } from "../../lib/game/game-types";
+import type { LandblockOwnerId } from "../../lib/game/game-types";
 import { createTranslationMat4 } from "../../lib/game/math/matrices";
 import { AABB3, Mat4, Vec3 } from "../../lib/game/math/types";
 import type {
@@ -34,7 +34,7 @@ export class SyntheticInstancedObjectPipeline implements CommitPipeline {
 	async destroy(): Promise<void> {}
 }
 
-function generatedBundle(landblockId: LandblockId): LandblockLayerCommit {
+function generatedBundle(landblockId: LandblockOwnerId): LandblockLayerCommit {
 	const opaque = presentation("opaque", [
 		material("opaque", 0x10, 1),
 		material("alpha-test", 0x04, 0.7),
@@ -73,7 +73,7 @@ function generatedBundle(landblockId: LandblockId): LandblockLayerCommit {
 }
 
 function resident(
-	landblockId: LandblockId,
+	landblockId: LandblockOwnerId,
 	id: string,
 	presentation: ResolvedObjectPresentation,
 	x: number,

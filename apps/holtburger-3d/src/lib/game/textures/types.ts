@@ -1,6 +1,6 @@
 import type {
 	DatAssetId,
-	LandblockId,
+	LandblockOwnerId,
 	PaletteComposite,
 	TextureSourceId,
 } from "../game-types";
@@ -61,7 +61,7 @@ export type TextureArrayKey = `texture-array:${TexturePurpose}:${string}` & {
 };
 
 /** Stable generated pcode field for one landblock and mesh stride. */
-export type TerrainSurfaceTextureKey = `terrain-surface:${LandblockId}` & {
+export type TerrainSurfaceTextureKey = `terrain-surface:${LandblockOwnerId}` & {
 	readonly [terrainSurfaceTextureKeyBrand]: true;
 };
 
@@ -300,7 +300,7 @@ export function createTextureArrayKey(
 
 /** Build the canonical generated pcode-field identity for one landblock. */
 export function createTerrainSurfaceTextureKey(
-	landblockId: LandblockId,
+	landblockId: LandblockOwnerId,
 ): TerrainSurfaceTextureKey {
 	return `terrain-surface:${landblockId}` as TerrainSurfaceTextureKey;
 }

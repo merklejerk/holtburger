@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { EnvCellId, LandblockId } from "../game-types";
+import type { EnvCellId, LandblockOwnerId } from "../game-types";
 import type { ResolvedPortalCrossing } from "../resolution/landblock-layer";
 import {
 	floodInteriorComponent,
 	interiorComponentContains,
 } from "./map-interior-component";
 
-const LANDBLOCK = "0xda55ffff" as LandblockId;
+const LANDBLOCK = "0xda55ffff" as LandblockOwnerId;
 
 function cell(ordinal: number): EnvCellId {
 	return (0xda550100 + ordinal) as unknown as EnvCellId;

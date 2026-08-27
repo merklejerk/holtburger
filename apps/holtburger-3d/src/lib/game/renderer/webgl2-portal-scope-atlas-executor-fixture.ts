@@ -512,7 +512,7 @@ function createFixtureCrossing(
 		halfExtent,
 		z,
 	);
-	const sceneAperture = {
+	const sceneAperture: ScenePortalCrossingInput["sourceAperture"] = {
 		id: `portal-aperture:${id}` as const,
 		indices: aperture.indices,
 		landblockBounds: boundsForAperture(aperture),

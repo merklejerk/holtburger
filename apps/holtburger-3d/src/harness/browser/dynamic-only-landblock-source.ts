@@ -4,7 +4,7 @@ import type {
 	LandblockSourceLayer,
 	LandblockSourceRecord,
 } from "../../lib/assets/landblock-source-batch";
-import type { LandblockId } from "../../lib/game/game-types";
+import type { LandblockOwnerId } from "../../lib/game/game-types";
 import { LandblockLayerKind } from "../../lib/game/runtime/scene-interest";
 
 /** Harness-only source decorator that retains terrain and authored dynamics but strips outdoor statics. */
@@ -16,7 +16,7 @@ export class DynamicOnlyLandblockSource implements LandblockSourceBatchSource {
 	}
 
 	async loadLandblockSourceBatch(
-		landblockId: LandblockId,
+		landblockId: LandblockOwnerId,
 		layers: ReadonlySet<LandblockSourceLayer>,
 	): Promise<LandblockSourceBatch> {
 		const batch = await this.#source.loadLandblockSourceBatch(
@@ -44,7 +44,7 @@ export class WithoutAuthoredDynamicsLandblockSource implements LandblockSourceBa
 	}
 
 	async loadLandblockSourceBatch(
-		landblockId: LandblockId,
+		landblockId: LandblockOwnerId,
 		layers: ReadonlySet<LandblockSourceLayer>,
 	): Promise<LandblockSourceBatch> {
 		const batch = await this.#source.loadLandblockSourceBatch(

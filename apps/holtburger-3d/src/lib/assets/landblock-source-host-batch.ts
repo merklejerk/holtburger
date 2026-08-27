@@ -1,4 +1,4 @@
-import type { LandblockId } from "../game/game-types";
+import type { LandblockOwnerId } from "../game/game-types";
 import type { ActiveRegionSource } from "./active-region-source";
 import { decodeLandblockSourceBatch } from "./decode-landblock-source-batch";
 import type {
@@ -30,7 +30,7 @@ export class LandblockSourceHostBatch implements LandblockSourceBatchSource {
 	}
 
 	async loadLandblockSourceBatch(
-		landblockId: LandblockId,
+		landblockId: LandblockOwnerId,
 		layers: ReadonlySet<LandblockSourceLayer>,
 	): Promise<LandblockSourceBatch> {
 		const response = await this.#transport.invoke(

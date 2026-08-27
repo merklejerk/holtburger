@@ -1,5 +1,5 @@
 import type { LandblockProfileSource } from "../../assets/landblock-profile-source";
-import type { EnvCellId, LandblockId } from "../game-types";
+import type { EnvCellId, LandblockOwnerId } from "../game-types";
 import {
 	getLandblockCoordinates,
 	normalizeLandblockOwner,
@@ -11,15 +11,15 @@ import type { SceneInterestRequest } from "./scene-interest";
 export type SceneInterestTarget =
 	| {
 			readonly kind: "automatic-landblock";
-			readonly landblockId: LandblockId;
+			readonly landblockId: LandblockOwnerId;
 	  }
 	| {
 			readonly kind: "outdoor";
-			readonly landblockId: LandblockId;
+			readonly landblockId: LandblockOwnerId;
 	  }
 	| {
 			readonly kind: "env-cell";
-			readonly landblockId: LandblockId;
+			readonly landblockId: LandblockOwnerId;
 			readonly envCellId: EnvCellId;
 	  };
 
@@ -42,9 +42,9 @@ export type ResolvedSceneInterestTarget =
 
 /** A typed missing-profile failure that callers can surface as unavailable target content. */
 export class SceneInterestTargetUnavailableError extends Error {
-	readonly landblockId: LandblockId;
+	readonly landblockId: LandblockOwnerId;
 
-	constructor(landblockId: LandblockId) {
+	constructor(landblockId: LandblockOwnerId) {
 		super(`No landblock profile is available for ${landblockId}.`);
 		this.name = "SceneInterestTargetUnavailableError";
 		this.landblockId = landblockId;
@@ -55,12 +55,12 @@ export class SceneInterestTargetUnavailableError extends Error {
 export function enumerateAmbientEnvCellOwners(
 	target: SceneInterestTarget,
 	radii: SceneInterestRadii,
-): readonly LandblockId[] {
+): readonly LandblockOwnerId[] {
 	if (radii.envCellRadius === null) return [];
 	const anchor = getLandblockCoordinates(
 		normalizeLandblockOwner(target.landblockId),
 	);
-	const owners: LandblockId[] = [];
+	const owners: LandblockOwnerId[] = [];
 	for (
 		let y = anchor.y - radii.envCellRadius;
 		y <= anchor.y + radii.envCellRadius;
@@ -94,7 +94,7 @@ export async function resolveSceneInterestTarget(
 	if (profile === null) {
 		throw new SceneInterestTargetUnavailableError(target.landblockId);
 	}
-	return profile.traversalClass === "dungeon-only"
+	return profile.sceneClass === "dungeon-only"
 		? { kind: "dungeon", requested: target }
 		: { kind: "outdoor", requested: target };
 }
@@ -126,7 +126,7 @@ export async function resolveSceneInterestRequest(
 	);
 	const ambientOutdoorEnvCellOwners = new Set(
 		profiles
-			.filter(({ profile }) => profile?.traversalClass === "outdoor-or-mixed")
+			.filter(({ profile }) => profile?.sceneClass === "outdoor-with-env-cells")
 			.map(({ landblockId }) => landblockId),
 	);
 	return {
@@ -165,8 +165,8 @@ export class SceneInterestRequestCoordinator {
 		return revision === this.#revision;
 	}
 
-	/** Invalidate outstanding profile work during frontend teardown. */
-	destroy(): void {
+	/** Invalidate outstanding profile work without making the coordinator unusable. */
+	invalidate(): void {
 		this.#revision += 1;
 	}
 }

@@ -230,6 +230,78 @@ impl WorldState {
         vec![WorldEvent::RuntimeBodyChanged { body_id }]
     }
 
+    /// Relocates the canonical local-player body through the scene-owned discontinuity path.
+    ///
+    /// A server placement can cross from an outdoor owner into an EnvCell (or back again). The
+    /// scene relocation transaction rebuilds response/membership and clears pose-dependent
+    /// kinematics, contacts, and collision reports together; a pose-only write would retain the
+    /// previous residency and make the next solver tick query the wrong collision topology.
+    pub fn relocate_local_player_runtime_body(
+        &mut self,
+        pose: WorldPosition,
+        now: Instant,
+    ) -> Vec<WorldEvent> {
+        let Some(body_id) = self.runtime_body_id_for_guid(self.player.guid) else {
+            return Vec::new();
+        };
+
+        if !self.ensure_runtime_body(body_id) {
+            return Vec::new();
+        }
+
+        if self
+            .scene
+            .relocate_dynamic_body(body_id, pose, now)
+            .is_none()
+        {
+            return Vec::new();
+        }
+
+        vec![WorldEvent::RuntimeBodyChanged { body_id }]
+    }
+
+    /// Returns whether every object named by the player's recursive inventory closure is
+    /// hydrated. This mirrors retail `AllContainedObjectsExist`: an absent nested item keeps
+    /// world activation pending rather than exposing a partially materialized player.
+    pub fn all_player_contained_objects_exist(&self) -> bool {
+        let player_guid = self.player.guid;
+        if player_guid == Guid::NULL || self.entities.get(player_guid).is_none() {
+            return false;
+        }
+
+        self.player.inventory.iter().all(|guid| {
+            if self.entities.get(*guid).is_none() {
+                return false;
+            }
+
+            // Inventory is a flat authority-owned closure. Validate every explicit container or
+            // wielder reference as well, so a child cannot appear before its parent object.
+            let mut current = *guid;
+            let mut visited = std::collections::HashSet::new();
+            while current != player_guid {
+                if !visited.insert(current) {
+                    return false;
+                }
+                let Some(current_entity) = self.entities.get(current) else {
+                    return false;
+                };
+                let parent = current_entity
+                    .container_id()
+                    .or_else(|| current_entity.wielder_id());
+                let Some(parent) = parent.filter(|parent| *parent != Guid::NULL) else {
+                    // An inventory item without an owner is still a valid top-level item when
+                    // the server has already named it in the player's closure.
+                    break;
+                };
+                if self.entities.get(parent).is_none() {
+                    return false;
+                }
+                current = parent;
+            }
+            true
+        })
+    }
+
     pub fn apply_solved_body_kinematics(
         &mut self,
         solved: &SolvedBodyKinematics,
@@ -309,7 +381,7 @@ impl WorldState {
                 }
 
                 self.scene
-                    .apply_forced_reposition_reset(*body_id, *pose, Instant::now());
+                    .relocate_dynamic_body(*body_id, *pose, Instant::now());
 
                 body_id.authoritative_guid().map_or_else(Vec::new, |guid| {
                     vec![

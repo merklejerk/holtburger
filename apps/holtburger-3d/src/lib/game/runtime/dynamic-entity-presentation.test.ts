@@ -8,7 +8,7 @@ import {
 	adaptDynamicEntityPresentation,
 	dynamicEntityPlacement,
 } from "./dynamic-entity-presentation";
-import type { DynamicEntityView } from "./dynamic-entity-feed";
+import { cellId, type DynamicEntityView } from "./dynamic-entity-feed";
 
 describe("dynamic presentation producer adapters", () => {
 	it("adds resident-only membership to authored placement without reinterpreting its facts", () => {
@@ -92,7 +92,7 @@ describe("dynamic presentation producer adapters", () => {
 		}
 		entity.placement.spatialMembership = {
 			reachesOutdoors: true,
-			reachedEnvCellIds: [0x01020123],
+			reachedEnvCellIds: [cellId(0x01020123)],
 		};
 
 		expect(dynamicEntityPlacement(entity).spatialMembership.scopes).toEqual([
@@ -105,6 +105,24 @@ describe("dynamic presentation producer adapters", () => {
 		]);
 	});
 
+	it("projects an outdoor cell pose onto its canonical terrain owner", () => {
+		const entity = fixtureEntity();
+		if (entity.placement.kind !== "world") {
+			throw new Error("Expected a world-placement fixture.");
+		}
+		entity.placement.pose.landblockId = cellId(0x0102_0003);
+		entity.placement.spatialMembership = {
+			reachesOutdoors: true,
+			reachedEnvCellIds: [],
+		};
+
+		expect(dynamicEntityPlacement(entity)).toMatchObject({
+			envCellId: null,
+			landblockId: "0x0102ffff",
+			spatialMembership: { scopes: [{ kind: "outdoor" }] },
+		});
+	});
+
 	it("rejects non-EnvCell ids in host spatial membership", () => {
 		const entity = fixtureEntity();
 		if (entity.placement.kind !== "world") {
@@ -112,7 +130,7 @@ describe("dynamic presentation producer adapters", () => {
 		}
 		entity.placement.spatialMembership = {
 			reachesOutdoors: false,
-			reachedEnvCellIds: [0x01020001],
+			reachedEnvCellIds: [cellId(0x01020001)],
 		};
 
 		expect(() => dynamicEntityPlacement(entity)).toThrow("non-EnvCell");
@@ -164,14 +182,14 @@ function fixtureEntity(): DynamicEntityView {
 			kind: "world",
 			spatialMembership: {
 				reachesOutdoors: false,
-				reachedEnvCellIds: [0x01020123],
+				reachedEnvCellIds: [cellId(0x01020123)],
 			},
 			acceleration: { x: 0, y: 0, z: 0 },
 			contact: "unknown",
 			omega: { x: 0, y: 0, z: 0 },
 			pose: {
 				coords: { x: 10, y: 20, z: 30 },
-				landblockId: 0x01020123,
+				landblockId: cellId(0x01020123),
 				rotation: { w: 1, x: 0, y: 0, z: 0 },
 			},
 			sampleMode: "authoritative-only",

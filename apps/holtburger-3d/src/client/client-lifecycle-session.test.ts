@@ -62,12 +62,13 @@ describe("ClientLifecycleSession", () => {
 
 		await session.start();
 
-		expect(transport.calls.slice(0, 9)).toEqual([
+		expect(transport.calls.slice(0, 10)).toEqual([
 			"listen:client-dynamic-entity",
 			"listen:client-current-state",
 			"listen:client-lifecycle-changed",
+			"listen:client-local-player-established",
 			"listen:client-server-time-updated",
-			"listen:client-world-discontinuity",
+			"listen:client-presentation-discontinuity",
 			"listen:client-camera-started",
 			"listen:client-camera",
 			"listen:client-exit-requested",
@@ -75,8 +76,8 @@ describe("ClientLifecycleSession", () => {
 		]);
 		expect(session.state().lifecycle).toEqual({
 			kind: "in-world",
-			playerGuid: 0x5000_0001,
 		});
+		expect(session.state().playerGuid).toBe(0x5000_0001);
 		expect(
 			session.mirror.entities().map((entity) => entity.identity.guid),
 		).toEqual([0x5000_0001]);
@@ -102,6 +103,7 @@ describe("ClientLifecycleSession", () => {
 		const events: string[] = [];
 		session.subscribe((event) => events.push(event.type));
 		await session.start();
+		transport.emit("client-local-player-established", { playerGuid: 9 });
 
 		const lifecycle: ClientLifecycle = {
 			kind: "character-selection",
@@ -109,9 +111,9 @@ describe("ClientLifecycleSession", () => {
 		};
 		transport.emit("client-lifecycle-changed", lifecycle);
 		transport.emit("client-server-time-updated", { time: 12.5 });
-		transport.emit("client-world-discontinuity", {
+		transport.emit("client-presentation-discontinuity", {
 			worldGeneration: 4,
-			kind: "teleport",
+			kind: "reset",
 		});
 		transport.emit("client-exit-requested", {
 			cause: "server-disconnect",
@@ -122,6 +124,7 @@ describe("ClientLifecycleSession", () => {
 			lifecycle: { kind: "exiting", cause: "server-disconnect" },
 			serverTime: 12.5,
 			worldGeneration: 4,
+			playerGuid: 9,
 			exit: {
 				cause: "server-disconnect",
 				diagnostic: "server closed the session",
@@ -130,9 +133,10 @@ describe("ClientLifecycleSession", () => {
 		expect(events).toEqual([
 			"current-state",
 			"dynamic",
+			"local-player-established",
 			"lifecycle",
 			"server-time",
-			"world-discontinuity",
+			"presentation-discontinuity",
 			"lifecycle",
 			"exit-requested",
 		]);
@@ -171,7 +175,8 @@ describe("ClientLifecycleSession", () => {
 
 function currentState(playerGuid: number): ClientCurrentState {
 	return {
-		lifecycle: { kind: "in-world", playerGuid },
+		lifecycle: { kind: "in-world" },
+		localPlayerGuid: playerGuid,
 		serverTime: 10,
 		worldGeneration: 2,
 		dynamic: {

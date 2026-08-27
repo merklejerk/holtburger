@@ -44,8 +44,13 @@ const identityFields = {
 	guid,
 	entityGeneration: generation,
 };
+const collisionProofSchema = z.discriminatedUnion("status", [
+	z.object({ status: z.literal("covered") }).strict(),
+	z.object({ status: z.literal("uncovered"), owner: guid }).strict(),
+]);
 const diagnosticsSchema = z
 	.object({
+		collisionProof: collisionProofSchema,
 		controlLegs: z.number().int().nonnegative().safe(),
 		clearanceSweeps: z.number().int().nonnegative().safe(),
 		transitSubsteps: z.number().int().nonnegative().safe(),

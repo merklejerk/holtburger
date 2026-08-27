@@ -128,11 +128,11 @@ existing implicit `tick()` policy:
   retained sphere set, and outdoor reach. All query families select terrain, outdoor objects,
   building shells, EnvCell shells, and indoor statics from that one contract; they never infer a
   collision domain independently.
-- Static-shadow bounds can cross at most one source owner in the shipped-content census. Coverage
-  therefore requires a one-landblock source halo around every owner touched by a swept sphere. The
-  Explorer currently requests a radius-two simulation-interest neighborhood so a sweep touching its
-  first neighbor still has that complete source halo. Application policy owns that request; render
-  interest and registered bodies cannot alter it.
+- Cross-owner static shadows retain the exact owner-product proof of the geometry that supplied
+  them. Each query derives its required normalized owners from its actual swept extent; unavailable
+  coverage rejects ordinary body motion without mutating the body. Applications may prefetch a
+  wider simulation neighborhood to hide loading latency, but correctness does not depend on that
+  policy radius. Render interest and registered bodies cannot alter simulation coverage semantics.
 - BSP planes and polygons transform into landblock-local query space. The body sphere remains
   spherical even for non-uniformly scaled SetupModel parts.
 - `solve_free_sphere` is an explicit bounded operation over one requested displacement. It owns no

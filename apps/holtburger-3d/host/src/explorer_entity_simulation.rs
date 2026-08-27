@@ -124,6 +124,41 @@ mod tests {
         }
     }
 
+    struct EmptySpaceCollisionSource;
+
+    impl CollisionSource for EmptySpaceCollisionSource {
+        fn load_collision(
+            &self,
+            landblock_id: u32,
+        ) -> anyhow::Result<Option<LandblockCollisionAsset>> {
+            Ok(Some(LandblockCollisionAsset {
+                landblock_id,
+                terrain: holtburger_content::TerrainCollisionSurface::empty(),
+                static_geometry: holtburger_content::LandblockColliders::default(),
+            }))
+        }
+    }
+
+    fn empty_space_simulation() -> Arc<HostSimulationRuntime> {
+        let simulation = Arc::new(HostSimulationRuntime::new(Arc::new(
+            EmptySpaceCollisionSource,
+        )));
+        let session = simulation.reserve_interest_session();
+        let landblock_ids = (0xd9..=0xdb)
+            .flat_map(|x| (0x54..=0x56).map(move |y| format!("0x{x:02x}{y:02x}ffff")))
+            .collect();
+        let receipt = simulation
+            .replace_interest(crate::host_simulation_runtime::SimulationInterestRequest {
+                session,
+                revision: 1,
+                landblock_ids,
+            })
+            .unwrap();
+        assert!(receipt.committed);
+        assert!(receipt.unavailable_landblock_ids.is_empty());
+        simulation
+    }
+
     #[derive(Default)]
     struct RecordingSink {
         events: Mutex<Vec<ExplorerFixedTickEnvelope>>,
@@ -171,7 +206,7 @@ mod tests {
 
     #[test]
     fn one_collection_tick_publishes_one_changed_entity_batch() {
-        let simulation = Arc::new(HostSimulationRuntime::new(Arc::new(EmptyCollisionSource)));
+        let simulation = empty_space_simulation();
         let entities = Arc::new(ExplorerEntityRuntime::new(
             Arc::clone(&simulation),
             Default::default(),

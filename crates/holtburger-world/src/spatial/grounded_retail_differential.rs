@@ -588,9 +588,7 @@ fn portal_visible_terrain_lip_is_a_walkable_lift_not_a_placement_veto() {
         },
         cell: Some(Guid(CELL)),
         velocity: Vector3::zero(),
-        ground: GroundState::Supported(GroundSupport {
-            normal: Vector3::new(0.0, 0.0, 1.0),
-        }),
+        ground: GroundState::Supported(GroundSupport::fixture(Vector3::new(0.0, 0.0, 1.0))),
     };
     let spheres = grounded_pair();
     let expected_lift = retail_walkable_height_delta(
@@ -687,9 +685,7 @@ fn lowered_step_down_rebuild_reaches_horizontal_portal_support() {
         .normalize_outdoor_cell(),
         cell: None,
         velocity: Vector3::zero(),
-        ground: GroundState::Supported(GroundSupport {
-            normal: Vector3::new(0.0, 0.0, 1.0),
-        }),
+        ground: GroundState::Supported(GroundSupport::fixture(Vector3::new(0.0, 0.0, 1.0))),
     };
     let spheres = grounded_pair();
     let mut config = grounded_config();
@@ -851,9 +847,7 @@ fn zero_adjustment_edge_routes_to_retail_precipice_slide_instead_of_ratcheting_d
                 .normalize_outdoor_cell(),
                 cell: None,
                 velocity: Vector3::zero(),
-                ground: GroundState::Supported(GroundSupport {
-                    normal: Vector3::new(0.0, 0.0, 1.0),
-                }),
+                ground: GroundState::Supported(GroundSupport::fixture(Vector3::new(0.0, 0.0, 1.0))),
             },
             spheres: grounded_pair(),
             supported_velocity: requested_velocity,
@@ -944,9 +938,7 @@ fn retail_precipice_rollback_restores_saved_cell_at_every_approach_speed() {
             },
             cell: Some(Guid(FIRST_CELL)),
             velocity: Vector3::zero(),
-            ground: GroundState::Supported(GroundSupport {
-                normal: Vector3::new(0.0, 0.0, 1.0),
-            }),
+            ground: GroundState::Supported(GroundSupport::fixture(Vector3::new(0.0, 0.0, 1.0))),
         };
         let mut held = false;
         let mut config = grounded_config();
@@ -1105,9 +1097,7 @@ fn failed_lower_step_slides_before_precipice_response_at_a_wall_edge_corner() {
                 },
                 cell: Some(Guid(SAFE_CELL)),
                 velocity: Vector3::zero(),
-                ground: GroundState::Supported(GroundSupport {
-                    normal: Vector3::new(0.0, 0.0, 1.0),
-                }),
+                ground: GroundState::Supported(GroundSupport::fixture(Vector3::new(0.0, 0.0, 1.0))),
             },
             spheres: grounded_pair(),
             supported_velocity: drive_velocity,
@@ -1191,9 +1181,7 @@ fn overlapping_walkable_planes_select_retails_highest_reached_surface_in_any_aut
             .normalize_outdoor_cell(),
             cell: None,
             velocity: Vector3::zero(),
-            ground: GroundState::Supported(GroundSupport {
-                normal: Vector3::new(0.0, 0.0, 1.0),
-            }),
+            ground: GroundState::Supported(GroundSupport::fixture(Vector3::new(0.0, 0.0, 1.0))),
         };
         let spheres = grounded_pair();
         let mut config = grounded_config();
@@ -1254,6 +1242,7 @@ fn failed_step_restores_the_exact_pose_and_support_before_retreat() {
     let start = Vector3::new(9.4, 20.0, 0.0);
     let support = GroundSupport {
         normal: Vector3::new(0.0, 0.0, 1.0),
+        proof: scene.owner_proof(Guid(LANDBLOCK)).unwrap(),
     };
     let body = GroundedBody {
         pose: WorldPosition {
@@ -1351,9 +1340,7 @@ fn zero_step_retains_mound_slope_beside_edge_reached_face() {
         .normalize_outdoor_cell(),
         cell: None,
         velocity: Vector3::zero(),
-        ground: GroundState::Supported(GroundSupport {
-            normal: upper_normal,
-        }),
+        ground: GroundState::Supported(GroundSupport::fixture(upper_normal)),
     };
     let mut config = grounded_config();
     config.step_down_height = 1.5;
@@ -1439,9 +1426,7 @@ fn upper_sphere_independently_vetoes_an_otherwise_valid_lower_step() {
         .normalize_outdoor_cell(),
         cell: None,
         velocity: Vector3::zero(),
-        ground: GroundState::Supported(GroundSupport {
-            normal: Vector3::new(0.0, 0.0, 1.0),
-        }),
+        ground: GroundState::Supported(GroundSupport::fixture(Vector3::new(0.0, 0.0, 1.0))),
     };
     let lower_scene = scene(step_geometry.clone());
     let lower_step = step_up_candidate(
@@ -1527,9 +1512,9 @@ fn separate_stair_and_landing_polygons_cross_crest_matrix_without_zero_progress(
                         .normalize_outdoor_cell(),
                         cell: None,
                         velocity: Vector3::zero(),
-                        ground: GroundState::Supported(GroundSupport {
-                            normal: Vector3::new(0.0, 0.0, 1.0),
-                        }),
+                        ground: GroundState::Supported(GroundSupport::fixture(Vector3::new(
+                            0.0, 0.0, 1.0,
+                        ))),
                     };
                     let outcome = solve_grounded(
                         &scene,

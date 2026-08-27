@@ -38,6 +38,7 @@ function advanced() {
 			],
 		},
 		diagnostics: {
+			collisionProof: { status: "covered" },
 			controlLegs: 1,
 			clearanceSweeps: 1,
 			transitSubsteps: 2,

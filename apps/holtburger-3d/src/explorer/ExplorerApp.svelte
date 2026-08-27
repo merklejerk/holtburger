@@ -959,7 +959,9 @@
 		if (runtime === undefined) return Promise.resolve();
 		const revision = ++dynamicEntityReconciliationRevision;
 		spawnedEntityPresentationError = null;
-		const completion = runtime.reconcileDynamicEntities(entities);
+		const completion = runtime
+			.reconcileDynamicEntities(entities)
+			.then(() => undefined);
 		dynamicEntityReconciliation = completion;
 		if (cameraCoordinator?.activationReady()) {
 			const convergence = { completion, ready: false };

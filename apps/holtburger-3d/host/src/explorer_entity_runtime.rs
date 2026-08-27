@@ -39,7 +39,9 @@ use crate::explorer_possession_control::{
     PossessionLifecycleEvent, PossessionLocomotionSource, PossessionRunRateCapability,
     PossessionStanceCapability,
 };
-use crate::host_simulation_runtime::{HostPhysicalBodyTick, HostSimulationRuntime};
+use crate::host_simulation_runtime::{
+    HostPhysicalBodyCoverageRejection, HostPhysicalBodyTick, HostSimulationRuntime,
+};
 
 const EXPLORER_GUID_START: u32 = 0xf000_0001;
 const EXPLORER_GUID_END: u32 = 0xffff_fffe;
@@ -298,6 +300,8 @@ pub struct ExplorerPossessedBodyEpoch {
 pub struct ExplorerEntityCollectionTick {
     /// Every scheduled accepted body tick, including stable possessed-body evidence.
     pub ticks: Vec<ExplorerEntityPhysicalTick>,
+    /// Unchanged bodies whose current transactions required unavailable static coverage.
+    pub coverage_rejections: Vec<HostPhysicalBodyCoverageRejection>,
     /// Possessed identity for this epoch, absent after release or retirement.
     pub possession: Option<ExplorerPossessedBodyEpoch>,
 }
@@ -1927,16 +1931,24 @@ impl ExplorerEntityRuntime {
             })
             .collect::<anyhow::Result<Vec<_>>>()?;
         let possession = possession.and_then(|(active, _, _)| {
-            ticks
+            (ticks
                 .iter()
                 .any(|tick| tick.solved.current.id == SpatialBodyId::Entity(active.guid))
-                .then_some(ExplorerPossessedBodyEpoch {
-                    guid: active.guid,
-                    entity_generation: active.entity_generation,
-                    possession_generation: active.generation,
-                })
+                || collection
+                    .coverage_rejections
+                    .iter()
+                    .any(|rejection| rejection.body.id == SpatialBodyId::Entity(active.guid)))
+            .then_some(ExplorerPossessedBodyEpoch {
+                guid: active.guid,
+                entity_generation: active.entity_generation,
+                possession_generation: active.generation,
+            })
         });
-        Ok(ExplorerEntityCollectionTick { ticks, possession })
+        Ok(ExplorerEntityCollectionTick {
+            ticks,
+            coverage_rejections: collection.coverage_rejections,
+            possession,
+        })
     }
 
     /// Tests whether an asynchronous outcome still targets the current live generation.
@@ -2130,16 +2142,43 @@ mod tests {
     use std::time::Instant;
 
     #[derive(Default)]
-    struct EmptyCollisionSource;
+    struct EmptySpaceCollisionSource;
 
-    impl crate::host_simulation_runtime::CollisionSource for EmptyCollisionSource {
-        fn load_collision(&self, _landblock_id: u32) -> Result<Option<LandblockCollisionAsset>> {
-            Ok(None)
+    impl crate::host_simulation_runtime::CollisionSource for EmptySpaceCollisionSource {
+        fn load_collision(&self, landblock_id: u32) -> Result<Option<LandblockCollisionAsset>> {
+            Ok(Some(LandblockCollisionAsset {
+                landblock_id,
+                terrain: holtburger_content::TerrainCollisionSurface::empty(),
+                static_geometry: holtburger_content::LandblockColliders::default(),
+            }))
         }
     }
 
+    fn fixture_landblock_ids() -> Vec<String> {
+        (0xd9..=0xdb)
+            .flat_map(|x| (0x54..=0x56).map(move |y| format!("0x{x:02x}{y:02x}ffff")))
+            .collect()
+    }
+
+    fn install_fixture_interest(simulation: &HostSimulationRuntime) -> u64 {
+        let session = simulation.reserve_interest_session();
+        let receipt = simulation
+            .replace_interest(crate::host_simulation_runtime::SimulationInterestRequest {
+                session,
+                revision: 1,
+                landblock_ids: fixture_landblock_ids(),
+            })
+            .unwrap();
+        assert!(receipt.committed);
+        assert!(receipt.unavailable_landblock_ids.is_empty());
+        session
+    }
+
     fn runtime(start: u32, end: u32) -> (Arc<HostSimulationRuntime>, ExplorerEntityRuntime) {
-        let simulation = Arc::new(HostSimulationRuntime::new(Arc::new(EmptyCollisionSource)));
+        let simulation = Arc::new(HostSimulationRuntime::new(Arc::new(
+            EmptySpaceCollisionSource,
+        )));
+        install_fixture_interest(&simulation);
         let runtime = ExplorerEntityRuntime::with_guid_range(Arc::clone(&simulation), start, end);
         (simulation, runtime)
     }
@@ -3061,14 +3100,7 @@ mod tests {
             0xf000_00a0,
             catalog,
         );
-        let session = simulation.reserve_interest_session();
-        simulation
-            .replace_interest(crate::host_simulation_runtime::SimulationInterestRequest {
-                session,
-                revision: 1,
-                landblock_ids: vec!["0xda55ffff".to_owned()],
-            })
-            .unwrap();
+        install_fixture_interest(&simulation);
 
         let guid = runtime.reserve_guid().unwrap();
         let mut definition = definition(guid, 1, 0.0);
@@ -4399,11 +4431,9 @@ mod tests {
         );
     }
 
-    /// A settled body stops integrating, so a change to the loaded static world would otherwise
-    /// leave it resting on collision geometry that no longer exists. The host wakes the whole
-    /// settled population conservatively; this proves that wiring, not just the scene primitive.
+    /// A settled body lazily revalidates changed static support without publication-time mutation.
     #[test]
-    fn loaded_collision_change_wakes_settled_dynamic_entities() {
+    fn loaded_collision_eviction_rejects_the_dependent_body_without_global_waking() {
         /// Serves flat ground so the fixture body can prove stable support and settle.
         struct FlatGroundSource;
 
@@ -4434,14 +4464,7 @@ mod tests {
             0xf000_0050,
             0xf000_0060,
         );
-        let session = simulation.reserve_interest_session();
-        simulation
-            .replace_interest(crate::host_simulation_runtime::SimulationInterestRequest {
-                session,
-                revision: 1,
-                landblock_ids: vec!["0xda55ffff".to_owned()],
-            })
-            .unwrap();
+        let session = install_fixture_interest(&simulation);
 
         let guid = runtime.reserve_guid().unwrap();
         runtime
@@ -4475,29 +4498,40 @@ mod tests {
             "a settled body must stay out of the integration scan"
         );
 
-        // Replacing interest with a different owner changes loaded collision.
+        let before = runtime.project(guid).unwrap();
+
+        // Replacing interest with a different owner evicts the product that proved support.
         simulation
             .replace_interest(crate::host_simulation_runtime::SimulationInterestRequest {
                 session,
                 revision: 2,
-                landblock_ids: vec!["0xdb55ffff".to_owned()],
+                landblock_ids: fixture_landblock_ids()
+                    .into_iter()
+                    .filter(|owner| owner != "0xda55ffff")
+                    .collect(),
             })
             .unwrap();
 
-        assert!(
-            !simulation
-                .tick_dynamic_entity_collection(1.0 / 30.0, settled_at, coasting(1.0 / 30.0))
-                .unwrap()
-                .bodies
-                .is_empty(),
-            "a loaded static-world collision change must wake settled bodies before the next solve"
+        let collection = simulation
+            .tick_dynamic_entity_collection(1.0 / 30.0, settled_at, coasting(1.0 / 30.0))
+            .unwrap();
+        assert!(collection.bodies.is_empty());
+        assert_eq!(
+            collection
+                .coverage_rejections
+                .iter()
+                .map(|rejection| (rejection.body.id, rejection.owner))
+                .collect::<Vec<_>>(),
+            [(SpatialBodyId::Entity(guid), Guid(0xda55_ffff))]
         );
+        assert_eq!(runtime.project(guid).unwrap(), before);
     }
 
     #[test]
     fn host_boom_follows_exact_possession_without_registering_a_camera_body() {
         use crate::host_kinematic_boom_runtime::{
-            HostKinematicBoomHoldReason, HostKinematicBoomIntentRequest, HostKinematicBoomRuntime,
+            HostKinematicBoomCollisionProof, HostKinematicBoomHoldReason,
+            HostKinematicBoomIntentRequest, HostKinematicBoomRuntime,
             HostKinematicBoomStartRequest, HostKinematicBoomTargetSphereRole,
             HostKinematicBoomTick, HostKinematicBoomUpdateReceipt,
         };
@@ -4589,8 +4623,44 @@ mod tests {
         assert!(path.initial.visual_pivot.coords.z.is_finite());
         assert_eq!(simulation.registered_body_count(), body_count);
 
+        let target_tick = collection
+            .ticks
+            .iter()
+            .find(|tick| tick.solved.current.id == SpatialBodyId::Entity(guid))
+            .unwrap();
+        let unavailable_owner = Guid(0xda55_ffff);
+        let rejected_target = ExplorerEntityCollectionTick {
+            ticks: Vec::new(),
+            coverage_rejections: vec![
+                crate::host_simulation_runtime::HostPhysicalBodyCoverageRejection {
+                    body: target_tick.solved.current.clone(),
+                    owner: unavailable_owner,
+                    collision: Arc::clone(&target_tick.solved.collision),
+                },
+            ],
+            possession: Some(ExplorerPossessedBodyEpoch {
+                guid,
+                entity_generation: possession.entity_generation,
+                possession_generation: possession.possession_generation,
+            }),
+        };
+        assert!(matches!(
+            boom.advance(&rejected_target, 1.0 / 30.0).unwrap(),
+            Some(HostKinematicBoomTick::Advanced {
+                identity,
+                sequence: 3,
+                diagnostics,
+                ..
+            }) if identity == receipt.identity
+                && diagnostics.collision_proof
+                    == HostKinematicBoomCollisionProof::Uncovered {
+                        owner: unavailable_owner,
+                    }
+        ));
+
         let missing_target = ExplorerEntityCollectionTick {
             ticks: Vec::new(),
+            coverage_rejections: Vec::new(),
             possession: Some(ExplorerPossessedBodyEpoch {
                 guid,
                 entity_generation: possession.entity_generation,
@@ -4601,7 +4671,7 @@ mod tests {
             boom.advance(&missing_target, 1.0 / 30.0).unwrap(),
             Some(HostKinematicBoomTick::Held {
                 identity,
-                sequence: 3,
+                sequence: 4,
                 reason: HostKinematicBoomHoldReason::TargetContract,
                 ..
             }) if identity == receipt.identity
@@ -4621,7 +4691,7 @@ mod tests {
             boom.advance(&collection, 1.0 / 30.0).unwrap(),
             Some(HostKinematicBoomTick::Advanced {
                 identity,
-                sequence: 4,
+                sequence: 5,
                 ..
             }) if identity == receipt.identity
         ));

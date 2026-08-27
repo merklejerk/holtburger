@@ -4,10 +4,10 @@ use anyhow::{Result, ensure};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion, Vector3};
 use holtburger_world::{
-    CollisionScene, FreeSphereConfig, FreeSphereOutcome, FreeSphereRequest,
+    CollisionQueryPolicy, CollisionScene, FreeSphereConfig, FreeSphereOutcome, FreeSphereRequest,
     FreeSphereSettleOutcome, FreeSphereState, MotionWaypoint, MotionWaypointPlacement,
     PhysicalCollisionFilter, PlacedMotionPath, PlacedMotionPathRequest, StaticSphereSweepRequest,
-    settle_free_sphere, solve_free_sphere,
+    UncoveredCollisionQuery, settle_free_sphere_with_policy, solve_free_sphere,
 };
 use thiserror::Error;
 
@@ -483,9 +483,43 @@ pub enum KinematicBoomAdvance {
     },
 }
 
+/// Whether every static query contributing to a camera tick had complete collision coverage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum KinematicBoomCollisionProof {
+    /// Every selected owner was resident in the sampled immutable scene.
+    #[default]
+    Covered,
+    /// Installed topology was used despite at least one unavailable selected owner.
+    Uncovered {
+        /// First unavailable normalized owner in deterministic order.
+        owner: Guid,
+    },
+}
+
+impl KinematicBoomCollisionProof {
+    fn include(&mut self, unavailable_owner: Option<Guid>) {
+        let Some(candidate) = unavailable_owner else {
+            return;
+        };
+        if matches!(self, Self::Covered)
+            || matches!(self, Self::Uncovered { owner } if candidate < *owner)
+        {
+            *self = Self::Uncovered { owner: candidate };
+        }
+    }
+
+    fn merge(&mut self, other: Self) {
+        if let Self::Uncovered { owner } = other {
+            self.include(Some(owner));
+        }
+    }
+}
+
 /// Finite work consumed by a successfully staged tick.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct KinematicBoomDiagnostics {
+    /// Coverage proof for the static queries contributing to this result.
+    pub collision_proof: KinematicBoomCollisionProof,
     /// Internal target/orbit control legs evaluated.
     pub control_legs: usize,
     /// Continuous clearance sweeps evaluated; successful control legs currently use two.
@@ -644,9 +678,10 @@ impl KinematicBoomController {
         if self.committed_clearance.is_none() {
             return Ok(self.initialize_clearance(scene));
         }
+        let mut collision_proof = KinematicBoomCollisionProof::Covered;
         if self.requested_clearance.radius <= self.clearance_radius() {
             self.committed_clearance = Some(self.requested_clearance);
-        } else if let Some(outcome) = self.advance_clearance_growth(scene) {
+        } else if let Some(outcome) = self.advance_clearance_growth(scene, &mut collision_proof) {
             return Ok(outcome);
         }
         let mut staged = self.clone();
@@ -654,7 +689,10 @@ impl KinematicBoomController {
         let tick_start = reanchor(self.camera.pose, tick_anchor)?;
         let start_direction = self.sampled_view_direction;
         let mut waypoints = Vec::new();
-        let mut diagnostics = KinematicBoomDiagnostics::default();
+        let mut diagnostics = KinematicBoomDiagnostics {
+            collision_proof,
+            ..KinematicBoomDiagnostics::default()
+        };
         let mut segment_start_fraction = 0.0;
 
         'samples: for sample in target_samples {
@@ -714,6 +752,9 @@ impl KinematicBoomController {
                         diagnostics.clearance_sweeps += leg_diagnostics.clearance_sweeps;
                         diagnostics.transit_substeps += leg_diagnostics.transit_substeps;
                         diagnostics.contact_passes += leg_diagnostics.contact_passes;
+                        diagnostics
+                            .collision_proof
+                            .merge(leg_diagnostics.collision_proof);
                         motion
                     }
                     Err(reason) => {
@@ -759,7 +800,7 @@ impl KinematicBoomController {
     /// Proves the first projection envelope before any camera placement is published.
     fn initialize_clearance(&mut self, scene: &CollisionScene) -> KinematicBoomOutcome {
         let requested = self.requested_clearance;
-        let outcome = settle_free_sphere(
+        let outcome = settle_free_sphere_with_policy(
             scene,
             self.profile.transit,
             FreeSphereState {
@@ -768,10 +809,12 @@ impl KinematicBoomController {
                 radius: requested.radius,
             },
             PhysicalCollisionFilter::ALL,
+            CollisionQueryPolicy::AllowUncoveredQuery,
         );
         let FreeSphereSettleOutcome::Settled {
             body,
             contact_passes,
+            unavailable_owner,
             ..
         } = (match outcome {
             Ok(outcome) => outcome,
@@ -813,6 +856,8 @@ impl KinematicBoomController {
         self.camera = camera;
         self.rendered_reach = rendered_reach.min(self.profile.maximum_reach);
         self.committed_clearance = Some(requested);
+        let mut collision_proof = KinematicBoomCollisionProof::Covered;
+        collision_proof.include(unavailable_owner);
         KinematicBoomOutcome::Advanced {
             advance: KinematicBoomAdvance::Reseeded {
                 placement: self.camera,
@@ -820,6 +865,7 @@ impl KinematicBoomController {
             },
             clearance: self.committed_clearance,
             diagnostics: KinematicBoomDiagnostics {
+                collision_proof,
                 contact_passes,
                 ..KinematicBoomDiagnostics::default()
             },
@@ -827,10 +873,14 @@ impl KinematicBoomController {
     }
 
     /// Advances one old-envelope-safe leg toward a placement that can admit a larger projection.
-    fn advance_clearance_growth(&mut self, scene: &CollisionScene) -> Option<KinematicBoomOutcome> {
+    fn advance_clearance_growth(
+        &mut self,
+        scene: &CollisionScene,
+        collision_proof: &mut KinematicBoomCollisionProof,
+    ) -> Option<KinematicBoomOutcome> {
         let requested = self.requested_clearance;
         let committed = self.committed_clearance?;
-        let candidate = match settle_free_sphere(
+        let candidate = match settle_free_sphere_with_policy(
             scene,
             self.profile.transit,
             FreeSphereState {
@@ -839,10 +889,15 @@ impl KinematicBoomController {
                 radius: requested.radius,
             },
             PhysicalCollisionFilter::ALL,
+            CollisionQueryPolicy::AllowUncoveredQuery,
         ) {
             Ok(FreeSphereSettleOutcome::Settled {
-                body, separation, ..
+                body,
+                separation,
+                unavailable_owner,
+                ..
             }) => {
+                collision_proof.include(unavailable_owner);
                 if separation.length() <= f32::EPSILON {
                     self.committed_clearance = Some(requested);
                     return None;
@@ -882,6 +937,7 @@ impl KinematicBoomController {
                 },
                 displacement,
                 filter: PhysicalCollisionFilter::ALL,
+                query_policy: CollisionQueryPolicy::AllowUncoveredQuery,
             },
         ) {
             Ok(outcome) => outcome,
@@ -894,12 +950,13 @@ impl KinematicBoomController {
                 ));
             }
         };
-        let (body, motion, substeps, contact_passes) = match solve {
+        let (body, motion, substeps, contact_passes, unavailable_owner) = match solve {
             FreeSphereOutcome::Solved {
                 body,
                 motion,
                 substeps,
                 contact_passes,
+                unavailable_owner,
                 ..
             }
             | FreeSphereOutcome::BudgetExceeded {
@@ -907,9 +964,11 @@ impl KinematicBoomController {
                 motion,
                 substeps,
                 contact_passes,
+                unavailable_owner,
                 ..
-            } => (body, motion, substeps, contact_passes),
+            } => (body, motion, substeps, contact_passes, unavailable_owner),
         };
+        collision_proof.include(unavailable_owner);
         let anchor = owner(start.pose.landblock_id);
         let start_pose = match reanchor(start.pose, anchor) {
             Ok(pose) => pose,
@@ -963,6 +1022,7 @@ impl KinematicBoomController {
             advance: KinematicBoomAdvance::Continuous { path },
             clearance: self.committed_clearance,
             diagnostics: KinematicBoomDiagnostics {
+                collision_proof: *collision_proof,
                 transit_substeps: substeps,
                 contact_passes,
                 ..KinematicBoomDiagnostics::default()
@@ -1025,7 +1085,7 @@ impl KinematicBoomController {
         scene: &CollisionScene,
         mut staged: Self,
         reason: KinematicBoomReseedReason,
-        diagnostics: KinematicBoomDiagnostics,
+        mut diagnostics: KinematicBoomDiagnostics,
     ) -> KinematicBoomOutcome {
         let clearance = staged.committed_clearance;
         let Some(clearance) = clearance else {
@@ -1036,7 +1096,7 @@ impl KinematicBoomController {
                 diagnostics,
             );
         };
-        let settled = settle_free_sphere(
+        let settled = settle_free_sphere_with_policy(
             scene,
             staged.profile.transit,
             FreeSphereState {
@@ -1045,8 +1105,14 @@ impl KinematicBoomController {
                 radius: clearance.radius,
             },
             PhysicalCollisionFilter::ALL,
+            CollisionQueryPolicy::AllowUncoveredQuery,
         );
-        let Ok(FreeSphereSettleOutcome::Settled { body, .. }) = settled else {
+        let Ok(FreeSphereSettleOutcome::Settled {
+            body,
+            unavailable_owner,
+            ..
+        }) = settled
+        else {
             return held(
                 self.camera,
                 self.committed_clearance,
@@ -1054,6 +1120,7 @@ impl KinematicBoomController {
                 diagnostics,
             );
         };
+        diagnostics.collision_proof.include(unavailable_owner);
         staged.camera = KinematicBoomPlacement {
             pose: body.pose,
             cell: body.cell,
@@ -1097,7 +1164,9 @@ impl KinematicBoomController {
         delta_seconds: f32,
     ) -> Result<ControlLegMotion, KinematicBoomHoldReason> {
         let clearance = self.cast_to_reach(scene, direction, self.desired_reach)?;
-        let clearance_reach = placement_distance(clearance.pose, self.filtered_visual_pivot)
+        let mut collision_proof = KinematicBoomCollisionProof::Covered;
+        collision_proof.include(clearance.unavailable_owner);
+        let clearance_reach = placement_distance(clearance.value.pose, self.filtered_visual_pivot)
             .map_err(|_| KinematicBoomHoldReason::ClearanceSweep)?;
         if clearance_reach < self.rendered_reach {
             self.rendered_reach = clearance_reach;
@@ -1111,11 +1180,12 @@ impl KinematicBoomController {
         self.rendered_reach = self.rendered_reach.min(self.profile.maximum_reach);
 
         let radial = self.cast_to_reach(scene, direction, self.rendered_reach)?;
-        self.rendered_reach = placement_distance(radial.pose, self.filtered_visual_pivot)
+        collision_proof.include(radial.unavailable_owner);
+        self.rendered_reach = placement_distance(radial.value.pose, self.filtered_visual_pivot)
             .map_err(|_| KinematicBoomHoldReason::ClearanceSweep)?
             .min(self.profile.maximum_reach);
         let camera_start = self.camera;
-        let displacement = placement_displacement(camera_start.pose, radial.pose)
+        let displacement = placement_displacement(camera_start.pose, radial.value.pose)
             .map_err(|_| KinematicBoomHoldReason::FreeSphereQuery)?;
         let outcome = solve_free_sphere(
             scene,
@@ -1128,15 +1198,17 @@ impl KinematicBoomController {
                 },
                 displacement,
                 filter: PhysicalCollisionFilter::ALL,
+                query_policy: CollisionQueryPolicy::AllowUncoveredQuery,
             },
         )
         .map_err(|_| KinematicBoomHoldReason::FreeSphereQuery)?;
-        let (body, motion, substeps, contact_passes) = match outcome {
+        let (body, motion, substeps, contact_passes, unavailable_owner) = match outcome {
             FreeSphereOutcome::Solved {
                 body,
                 motion,
                 substeps,
                 contact_passes,
+                unavailable_owner,
                 ..
             }
             | FreeSphereOutcome::BudgetExceeded {
@@ -1144,9 +1216,11 @@ impl KinematicBoomController {
                 motion,
                 substeps,
                 contact_passes,
+                unavailable_owner,
                 ..
-            } => (body, motion, substeps, contact_passes),
+            } => (body, motion, substeps, contact_passes, unavailable_owner),
         };
+        collision_proof.include(unavailable_owner);
         {
             let solve_anchor = owner(camera_start.pose.landblock_id);
             self.camera = KinematicBoomPlacement {
@@ -1159,6 +1233,7 @@ impl KinematicBoomController {
                 anchor: solve_anchor,
                 waypoints: motion,
                 diagnostics: KinematicBoomDiagnostics {
+                    collision_proof,
                     control_legs: 0,
                     clearance_sweeps: 2,
                     transit_substeps: substeps,
@@ -1173,7 +1248,7 @@ impl KinematicBoomController {
         scene: &CollisionScene,
         direction: Vector3,
         reach: f32,
-    ) -> Result<KinematicBoomPlacement, KinematicBoomHoldReason> {
+    ) -> Result<UncoveredCollisionQuery<KinematicBoomPlacement>, KinematicBoomHoldReason> {
         let seed = self.target_seed.placement;
         let anchor = owner(seed.pose.landblock_id);
         let seed_pose =
@@ -1183,20 +1258,26 @@ impl KinematicBoomController {
         let ray = pivot.coords + direction * reach - seed_pose.coords;
         let ray_length = ray.length();
         if ray_length <= DIRECTION_EPSILON {
-            return Ok(seed);
+            return Ok(UncoveredCollisionQuery {
+                value: seed,
+                unavailable_owner: None,
+            });
         }
         let requested_end = seed_pose.coords + ray;
         let hit = scene
-            .sweep_static_sphere(StaticSphereSweepRequest {
-                anchor,
-                start: seed_pose.coords,
-                end: requested_end,
-                previous_cell: seed.cell,
-                radius: self.clearance_radius(),
-                filter: PhysicalCollisionFilter::ALL,
-            })
+            .sweep_static_sphere_with_policy(
+                StaticSphereSweepRequest {
+                    anchor,
+                    start: seed_pose.coords,
+                    end: requested_end,
+                    previous_cell: seed.cell,
+                    radius: self.clearance_radius(),
+                    filter: PhysicalCollisionFilter::ALL,
+                },
+                CollisionQueryPolicy::AllowUncoveredQuery,
+            )
             .map_err(|_| KinematicBoomHoldReason::ClearanceSweep)?;
-        let safe_distance = hit.map_or(ray_length, |hit| {
+        let safe_distance = hit.value.map_or(ray_length, |hit| {
             (ray_length * hit.time_of_impact - self.profile.surface_clearance).max(0.0)
         });
         let safe = seed_pose.coords + ray * (safe_distance / ray_length);
@@ -1232,7 +1313,10 @@ impl KinematicBoomController {
                 .normalize_outdoor_landblock_frame()
                 .map_err(|_| KinematicBoomHoldReason::ClearanceSweep)?;
         }
-        Ok(KinematicBoomPlacement { pose, cell })
+        Ok(UncoveredCollisionQuery {
+            value: KinematicBoomPlacement { pose, cell },
+            unavailable_owner: hit.unavailable_owner,
+        })
     }
 }
 
@@ -1694,6 +1778,10 @@ mod tests {
         collision_scene(vec![wall_x(10.0)])
     }
 
+    fn empty_scene() -> CollisionScene {
+        collision_scene(Vec::new())
+    }
+
     fn collision_scene(colliders: Vec<PlacedCollider>) -> CollisionScene {
         let mut scene = CollisionScene::new();
         let owner_x = (LANDBLOCK >> 24) as i32;
@@ -2022,13 +2110,13 @@ mod tests {
         );
         assert_eq!(
             controller
-                .advance(&CollisionScene::new(), 0.0, &[sample()])
+                .advance(&empty_scene(), 0.0, &[sample()])
                 .unwrap_err(),
             KinematicBoomInputError::InvalidTickDuration
         );
         assert_eq!(
             controller
-                .advance(&CollisionScene::new(), 1.0 / 30.0, &[])
+                .advance(&empty_scene(), 1.0 / 30.0, &[])
                 .unwrap_err(),
             KinematicBoomInputError::InvalidTargetPath
         );
@@ -2037,7 +2125,7 @@ mod tests {
     #[test]
     fn empty_scene_emits_a_nonempty_normalized_path_and_advances_recovery_monotonically() {
         let mut controller = controller(64);
-        let scene = CollisionScene::new();
+        let scene = empty_scene();
         initialize(&mut controller, &scene, sample());
         let first = controller.advance(&scene, 1.0 / 30.0, &[sample()]).unwrap();
         let KinematicBoomOutcome::Advanced {
@@ -2052,6 +2140,28 @@ mod tests {
         controller.advance(&scene, 1.0 / 30.0, &[sample()]).unwrap();
         assert!(controller.rendered_reach() > first_reach);
         assert!(controller.rendered_reach() < controller.desired_reach());
+    }
+
+    #[test]
+    fn unavailable_scene_advances_with_an_uncovered_collision_proof() {
+        let mut controller = controller(64);
+
+        let outcome = controller
+            .advance(&CollisionScene::new(), 1.0 / 30.0, &[sample()])
+            .unwrap();
+
+        assert!(matches!(
+            outcome,
+            KinematicBoomOutcome::Advanced {
+                diagnostics: KinematicBoomDiagnostics {
+                    collision_proof: KinematicBoomCollisionProof::Uncovered {
+                        owner: Guid(LANDBLOCK),
+                    },
+                    ..
+                },
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -2105,9 +2215,9 @@ mod tests {
             .cast_to_reach(&scene, Vector3::new(1.0, 0.0, 0.0), 1.0)
             .unwrap();
 
-        assert_eq!(placement.cell, Some(cell));
-        assert_eq!(placement.pose.landblock_id, cell);
-        assert_eq!(placement.pose.coords, Vector3::new(201.0, -40.0, 2.0));
+        assert_eq!(placement.value.cell, Some(cell));
+        assert_eq!(placement.value.pose.landblock_id, cell);
+        assert_eq!(placement.value.pose.coords, Vector3::new(201.0, -40.0, 2.0));
     }
 
     #[test]
@@ -2130,7 +2240,7 @@ mod tests {
 
         assert!(matches!(
             controller
-                .advance(&CollisionScene::new(), 1.0 / 30.0, &[sample()])
+                .advance(&empty_scene(), 1.0 / 30.0, &[sample()])
                 .unwrap(),
             KinematicBoomOutcome::Advanced { .. }
         ));
@@ -2154,7 +2264,7 @@ mod tests {
             },
         )
         .unwrap();
-        let scene = CollisionScene::new();
+        let scene = empty_scene();
         settle_reach(&mut controller, &scene, sample());
 
         let mut moved = sample();
@@ -2183,7 +2293,7 @@ mod tests {
             },
         )
         .unwrap();
-        let scene = CollisionScene::new();
+        let scene = empty_scene();
         settle_reach(&mut controller, &scene, sample());
         controller.camera.pose.coords.x += 0.25;
         controller.rendered_reach = 32.25;
@@ -2213,12 +2323,12 @@ mod tests {
             },
         )
         .unwrap();
-        initialize(&mut controller, &CollisionScene::new(), sample());
+        initialize(&mut controller, &empty_scene(), sample());
         let initial = controller.camera().pose;
 
         assert!(matches!(
             controller
-                .advance(&CollisionScene::new(), 1.0 / 30.0, &[sample()])
+                .advance(&empty_scene(), 1.0 / 30.0, &[sample()])
                 .unwrap(),
             KinematicBoomOutcome::Advanced { .. }
         ));
@@ -2229,7 +2339,7 @@ mod tests {
 
         assert!(matches!(
             controller
-                .advance(&CollisionScene::new(), 1.0 / 30.0, &[sample()])
+                .advance(&empty_scene(), 1.0 / 30.0, &[sample()])
                 .unwrap(),
             KinematicBoomOutcome::Advanced { .. }
         ));
@@ -2241,13 +2351,13 @@ mod tests {
     #[test]
     fn control_budget_commits_one_prefix_and_continues_next_tick() {
         let mut controller = controller(1);
-        initialize(&mut controller, &CollisionScene::new(), sample());
+        initialize(&mut controller, &empty_scene(), sample());
         let mut moved = sample();
         moved.visual_pivot.coords.x += 2.0;
         moved.target_seed.placement.pose.coords.x += 2.0;
 
         let first = controller
-            .advance(&CollisionScene::new(), 1.0 / 30.0, &[moved])
+            .advance(&empty_scene(), 1.0 / 30.0, &[moved])
             .unwrap();
         assert!(matches!(
             first,
@@ -2262,7 +2372,7 @@ mod tests {
         assert_eq!(controller.raw_visual_pivot.coords.x, 20.5);
 
         let second = controller
-            .advance(&CollisionScene::new(), 1.0 / 30.0, &[moved])
+            .advance(&empty_scene(), 1.0 / 30.0, &[moved])
             .unwrap();
         assert!(matches!(second, KinematicBoomOutcome::Advanced { .. }));
         assert_eq!(controller.raw_visual_pivot.coords.x, 21.0);
@@ -2280,7 +2390,7 @@ mod tests {
 
     #[test]
     fn equivalent_recovery_duration_is_independent_of_tick_splits() {
-        let scene = CollisionScene::new();
+        let scene = empty_scene();
         let mut one = controller(64);
         initialize(&mut one, &scene, sample());
         let mut two = one.clone();
@@ -2297,7 +2407,7 @@ mod tests {
 
     #[test]
     fn equivalent_target_motion_is_independent_of_internal_sample_splits() {
-        let scene = CollisionScene::new();
+        let scene = empty_scene();
         let mut one = controller(64);
         initialize(&mut one, &scene, sample());
         let mut two = one.clone();
@@ -2409,7 +2519,7 @@ mod tests {
 
     #[test]
     fn vertical_step_is_lag_clamped_then_converges_monotonically() {
-        let scene = CollisionScene::new();
+        let scene = empty_scene();
         let mut controller = controller(64);
         settle_reach(&mut controller, &scene, sample());
         let before = controller.camera().pose.coords.z;

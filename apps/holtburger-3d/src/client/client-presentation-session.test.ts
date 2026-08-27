@@ -19,6 +19,7 @@ import type {
 	SceneActivationRequest,
 	SceneActivationStatus,
 } from "../lib/game/runtime/scene-availability";
+import type { DynamicEntityReconciliationDisposition } from "../lib/game/runtime/dynamic-entity-presentation";
 import {
 	ClientPresentationSession,
 	resolveClientEnvironmentSelection,
@@ -76,7 +77,7 @@ describe("ClientPresentationSession", () => {
 		await presentation.destroy();
 	});
 
-	it("retains activation for duplicate portal state and replaces only on generation change", async () => {
+	it("retains activation for duplicate portal state and replaces it on generation change", async () => {
 		const playerGuid = 0x0101_0001;
 		const transport = new FakeClientTransport({
 			...currentState(playerGuid),
@@ -111,6 +112,59 @@ describe("ClientPresentationSession", () => {
 		presentation.frame(1_048);
 		await vi.waitFor(() => expect(runtime.sceneRequests).toHaveLength(2));
 		expect(runtime.completedActivations).toEqual([4]);
+		await presentation.destroy();
+	});
+
+	it("replaces same-generation destination convergence and reveals only an installed player", async () => {
+		const playerGuid = 0x0101_0001;
+		const transport = new FakeClientTransport({
+			...currentState(playerGuid),
+			lifecycle: portalLifecycle(4),
+			worldGeneration: 4,
+		});
+		const lifecycle = new ClientLifecycleSession(transport);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		runtime.reconciliationDisposition = "deferred";
+		const presentation = new ClientPresentationSession({
+			canvas: fakeCanvas(),
+			hostTransport: {} as never,
+			session: lifecycle,
+			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+		});
+
+		await presentation.start();
+		presentation.frame(1_000);
+		await vi.waitFor(() => expect(runtime.sceneRequests).toHaveLength(1));
+		presentation.frame(1_016);
+		await vi.waitFor(() => expect(runtime.reconciled).toHaveLength(1));
+		expect(presentation.frame(1_032).status.kind).toBe("loading-player");
+		expect(transport.acknowledgedWorldReveals).toEqual([]);
+		transport.emit("client-dynamic-entity", {
+			kind: "advanced",
+			batch: advanceBatch(playerGuid),
+		});
+		await vi.waitFor(() => expect(runtime.advances).toHaveLength(1));
+		expect(runtime.reconciled).toHaveLength(1);
+
+		runtime.reconciliationDisposition = "installed";
+		transport.emit("client-dynamic-entity", {
+			kind: "upserted",
+			entity: view(playerGuid, 0x0100_0001),
+		});
+		presentation.frame(1_048);
+		await vi.waitFor(() => expect(runtime.sceneRequests).toHaveLength(2));
+		expect(runtime.completedActivations).toEqual([4]);
+		presentation.frame(1_064);
+		await vi.waitFor(() =>
+			expect(runtime.reconciled.length).toBeGreaterThan(1),
+		);
+
+		expect(presentation.frame(2_000).rendered).toBe(true);
+		expect(presentation.frame(4_100).rendered).toBe(true);
+		await vi.waitFor(() =>
+			expect(transport.acknowledgedWorldReveals).toEqual([4]),
+		);
 		await presentation.destroy();
 	});
 
@@ -256,6 +310,7 @@ describe("ClientPresentationSession", () => {
 
 class FakeClientTransport implements ClientLifecycleTransport {
 	readonly handlers = new Map<string, (payload: unknown) => void>();
+	readonly acknowledgedWorldReveals: number[] = [];
 	#currentState: ClientCurrentState;
 	#emitLaggedAdvance = false;
 	#cameraGeneration = 0;
@@ -273,6 +328,14 @@ class FakeClientTransport implements ClientLifecycleTransport {
 	}
 
 	async invoke(command: string, args?: Record<string, unknown>): Promise<void> {
+		if (command === "acknowledge_client_world_reveal") {
+			const worldGeneration = args?.worldGeneration;
+			if (typeof worldGeneration !== "number") {
+				throw new Error("World reveal acknowledgement omitted its generation.");
+			}
+			this.acknowledgedWorldReveals.push(worldGeneration);
+			return;
+		}
 		if (command === "start_client_camera") {
 			const request = args?.request as {
 				playerGuid: number;
@@ -335,6 +398,7 @@ function cameraTick(identity: {
 		},
 		reason: "initial-placement",
 		diagnostics: {
+			collisionProof: { status: "covered" },
 			controlLegs: 0,
 			clearanceSweeps: 0,
 			transitSubsteps: 0,
@@ -354,11 +418,20 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 	clearCount = 0;
 	portalTransitions: unknown[] = [];
 	completedActivations: number[] = [];
+	reconciliationDisposition: DynamicEntityReconciliationDisposition =
+		"installed";
+	#activationRevision = 0;
 
 	async reconcileDynamicEntities(
 		entities: readonly DynamicEntityView[],
-	): Promise<void> {
+	): ReturnType<ClientPresentationRuntime["reconcileDynamicEntities"]> {
 		this.reconciled.push([...entities]);
+		return new Map(
+			entities.map((entity) => [
+				entity.identity.guid,
+				this.reconciliationDisposition,
+			]),
+		);
 	}
 
 	applyDynamicEntityAdvances(
@@ -376,9 +449,10 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 		request: SceneActivationRequest,
 	): Promise<SceneActivationReceipt> {
 		this.sceneRequests.push(request.target);
+		this.#activationRevision += 1;
 		return {
 			generation: request.generation,
-			revision: 1 as never,
+			revision: this.#activationRevision as never,
 			requiredLayers: new Map(),
 		};
 	}
@@ -422,6 +496,7 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 	dynamicEntityOrigin(): ReturnType<
 		ClientPresentationRuntime["dynamicEntityOrigin"]
 	> {
+		if (this.reconciliationDisposition === "deferred") return null;
 		return {
 			envCellId: null,
 			landblockId: "0x0100ffff",

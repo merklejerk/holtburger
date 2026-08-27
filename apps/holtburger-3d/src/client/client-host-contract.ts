@@ -131,8 +131,13 @@ const cameraClearanceSchema = z
 	})
 	.strict()
 	.nullable();
+const cameraCollisionProofSchema = z.discriminatedUnion("status", [
+	z.object({ status: z.literal("covered") }).strict(),
+	z.object({ status: z.literal("uncovered"), owner: guid }).strict(),
+]);
 const cameraDiagnosticsSchema = z
 	.object({
+		collisionProof: cameraCollisionProofSchema,
 		controlLegs: z.number().int().nonnegative().safe(),
 		clearanceSweeps: z.number().int().nonnegative().safe(),
 		transitSubsteps: z.number().int().nonnegative().safe(),
@@ -185,7 +190,6 @@ const cameraTickSchema = z.discriminatedUnion("kind", [
 			renderedReach: finiteNumber.nonnegative(),
 			path: cameraPathSchema,
 			reason: z.enum([
-				"collision-snapshot",
 				"clearance-sweep",
 				"free-sphere-query",
 				"target-contract",

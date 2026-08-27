@@ -96,6 +96,7 @@ function advance(
 				legs: [{ endFraction: 1, end: pathPoint(endX) }],
 			},
 			diagnostics: {
+				collisionProof: { status: "covered" },
 				controlLegs: 1,
 				clearanceSweeps: 1,
 				transitSubsteps: 1,
@@ -122,6 +123,7 @@ function held(identity: HostKinematicBoomIdentity = IDENTITY) {
 			},
 			reason: "clearance-sweep",
 			diagnostics: {
+				collisionProof: { status: "covered" },
 				controlLegs: 1,
 				clearanceSweeps: 0,
 				transitSubsteps: 0,
@@ -148,6 +150,7 @@ function reseed(sequence: number, x: number) {
 			},
 			reason: "placement-recovery",
 			diagnostics: {
+				collisionProof: { status: "covered" },
 				controlLegs: 2,
 				clearanceSweeps: 4,
 				transitSubsteps: 2,

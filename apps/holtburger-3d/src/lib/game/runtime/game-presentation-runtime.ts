@@ -189,6 +189,7 @@ import {
 	datAssetId,
 	dynamicEntityPlacement,
 	dynamicEntityPlacementKey,
+	type DynamicEntityReconciliation,
 } from "./dynamic-entity-presentation";
 import type {
 	DynamicEntityAdvanceBatch,
@@ -1355,7 +1356,7 @@ export class GamePresentationRuntime {
 	/** Reconcile the focused producer mirror into shared dynamic presentation ownership. */
 	async reconcileDynamicEntities(
 		entities: readonly DynamicEntityView[],
-	): Promise<void> {
+	): Promise<DynamicEntityReconciliation> {
 		if (this.#destroyed)
 			throw new Error(
 				"Cannot reconcile spawned entities after runtime shutdown.",
@@ -1363,9 +1364,8 @@ export class GamePresentationRuntime {
 		if (this.#setupVisualSource === null && entities.length > 0) {
 			throw new Error("This runtime has no setup visual source capability.");
 		}
-		const candidates = this.#selectDynamicReconciliationCandidates(entities);
 		const requested = new Map<number, DynamicEntityView>();
-		for (const entity of candidates) {
+		for (const entity of entities) {
 			const guid = entity.identity.guid;
 			if (requested.has(guid))
 				throw new Error(
@@ -1379,16 +1379,30 @@ export class GamePresentationRuntime {
 			),
 		);
 		for (const guid of stale) this.#removeDynamicEntityTree(guid, stale);
+		for (const [guid, entity] of requested) {
+			this.#spawnedDesiredEntities.set(guid, entity);
+		}
+		const candidates = this.#selectDynamicReconciliationCandidates(entities);
+		const candidateGuids = new Set(
+			candidates.map((entity) => entity.identity.guid),
+		);
+		const deferred = new Set(
+			entities
+				.map((entity) => entity.identity.guid)
+				.filter((guid) => !candidateGuids.has(guid)),
+		);
+		for (const guid of deferred) {
+			this.#retireDeferredDynamicEntityTree(guid, deferred);
+		}
 		const worldRequests: Array<{
 			entity: DynamicEntityView;
 			visualKey: string;
 			visual: Promise<DecodedStaticPresentation>;
 		}> = [];
 		const attachedRequests: typeof worldRequests = [];
-		for (const entity of requested.values()) {
+		for (const entity of candidates) {
 			const guid = entity.identity.guid;
 			const visualKey = dynamicVisualKey(entity);
-			this.#spawnedDesiredEntities.set(guid, entity);
 			const visual = this.#retainSpawnedVisual(guid, visualKey, entity).catch(
 				(cause) => {
 					throw dynamicEntityPresentationFailure(entity, cause);
@@ -1435,6 +1449,17 @@ export class GamePresentationRuntime {
 				`${failures.length} dynamic entities failed presentation reconciliation.`,
 			);
 		}
+		return new Map(
+			entities.map((entity) => {
+				const installed = this.#spawnedPresentations.get(entity.identity.guid);
+				return [
+					entity.identity.guid,
+					installed?.generation === entity.generation
+						? "installed"
+						: "deferred",
+				] as const;
+			}),
+		);
 	}
 
 	/**
@@ -1540,22 +1565,19 @@ export class GamePresentationRuntime {
 		return entities.filter((entity) => eligible.has(entity.identity.guid));
 	}
 
-	/** A world-root dynamic is drawable only when every producer-projected scope is resident. */
+	/** A world root can install once its authoritative resident scope is available. */
 	#isDynamicScopeReady(entity: DynamicEntityView): boolean {
 		if (entity.placement.kind !== "world") return false;
-		// Use the same canonical placement projection used to install the entity. Host poses name
-		// exact cells, while terrain residency names their FFFF landblock owner; comparing those raw
-		// identities evicts an outdoor entity immediately after its activation barrier is released.
+		// Plural membership may include physically reached scopes that are not part of current scene
+		// interest. The scene graph indexes those facts without requiring their topology; only the
+		// pose's resident scope must exist so placement and camera resolution have an authority.
 		const placement = dynamicEntityPlacement(entity);
-		for (const scope of placement.spatialMembership.scopes) {
-			if (scope.kind === "outdoor") {
-				if (!this.#terrain.hasResidentDrawUnit(placement.landblockId))
-					return false;
-				continue;
-			}
-			if (!this.#scene.hasEnvCellScope(scope)) return false;
-		}
-		return true;
+		if (placement.envCellId === null)
+			return this.#terrain.hasResidentDrawUnit(placement.landblockId);
+		return this.#scene.hasEnvCellScope({
+			envCellId: placement.envCellId,
+			landblockId: placement.landblockId,
+		});
 	}
 
 	/** Check one exact static layer's published product, never a source or request revision. */
@@ -1822,6 +1844,31 @@ export class GamePresentationRuntime {
 			this.#retireDynamicOwner(installed.ownerId);
 			this.#spawnedPresentations.delete(guid);
 		}
+	}
+
+	/** Retire an unrealizable scene node without confusing deferred authority with deletion. */
+	#retireDeferredDynamicEntity(guid: number): void {
+		const installed = this.#spawnedPresentations.get(guid);
+		if (installed === undefined) return;
+		this.#retireDynamicOwner(installed.ownerId);
+		this.#spawnedPresentations.delete(guid);
+	}
+
+	/** Retire attached descendants before a deferred parent scene tree. */
+	#retireDeferredDynamicEntityTree(
+		guid: number,
+		deferred: ReadonlySet<number>,
+	): void {
+		for (const [childGuid, child] of this.#spawnedDesiredEntities) {
+			if (
+				deferred.has(childGuid) &&
+				child.placement.kind === "attached" &&
+				child.placement.parent === guid
+			) {
+				this.#retireDeferredDynamicEntityTree(childGuid, deferred);
+			}
+		}
+		this.#retireDeferredDynamicEntity(guid);
 	}
 
 	/** Remove attached descendants before their parent scene tree. */

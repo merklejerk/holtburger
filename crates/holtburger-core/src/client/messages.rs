@@ -47,12 +47,27 @@ impl ClientRuntime {
             distance: current.distance_to(&position),
             is_moving_to: self.movement.has_server_controlled_projection(),
         };
-        let disposition = self.movement.accept_server_position_update(
-            update,
-            current,
-            known_teleport_sequence,
-            has_cell,
-        );
+        // PlayerTeleport establishes the destination epoch before ACE sends its position. That
+        // makes the ordinary retail sequence classifier see the destination as same-epoch, even
+        // though portal activation requires one unconditional runtime-pose replacement. Without
+        // this edge the old predicted pose can survive beside destination collision residency.
+        let installs_teleport_destination = self.activation.as_ref().is_some_and(|activation| {
+            matches!(
+                activation.phase,
+                super::ClientWorldActivationPhase::TeleportAwaitingDestination
+            )
+        });
+        let disposition = if installs_teleport_destination {
+            self.movement.clear_server_correction();
+            CorrectionDisposition::HardSet
+        } else {
+            self.movement.accept_server_position_update(
+                update,
+                current,
+                known_teleport_sequence,
+                has_cell,
+            )
+        };
 
         match disposition {
             CorrectionDisposition::Ignored | CorrectionDisposition::Interpolate { .. } => {
@@ -65,7 +80,13 @@ impl ClientRuntime {
                 let events = self
                     .world
                     .relocate_local_player_runtime_body(position, Instant::now());
-                if !discontinuity_already_handled {
+                if installs_teleport_destination {
+                    self.activation
+                        .as_mut()
+                        .expect("teleport destination requires an active activation")
+                        .phase = super::ClientWorldActivationPhase::TeleportDestinationInstalled;
+                }
+                if !discontinuity_already_handled && !installs_teleport_destination {
                     self.reset_camera();
                     if let Some(coordinator) = self.collision_coordinator.as_mut() {
                         coordinator.invalidate();
@@ -836,6 +857,59 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[tokio::test]
+    async fn teleport_destination_position_replaces_the_pre_portal_runtime_pose() {
+        let mut client = build_test_client();
+        let guid = holtburger_common::Guid(0x5000_0001);
+        let outdoors = WorldPosition {
+            landblock_id: holtburger_common::Guid(0x7c65_0032),
+            coords: holtburger_common::Vector3::new(10.0, 10.0, 0.0),
+            rotation: Quaternion::identity(),
+        };
+        let dungeon = WorldPosition {
+            landblock_id: holtburger_common::Guid(0x01d9_0100),
+            // Keep the local-coordinate delta below the ordinary snap threshold. The portal edge,
+            // rather than incidental coordinate distance or grounded state, owns this reset.
+            coords: holtburger_common::Vector3::new(11.0, 10.0, 0.0),
+            rotation: Quaternion::identity(),
+        };
+        client
+            .world
+            .seed_local_player_entity(guid, "Player", outdoors);
+        let _ = client.world.set_local_player_runtime_pose(outdoors);
+        let _ = client.world.set_player_vector(
+            holtburger_common::Vector3::new(1.0, 2.0, 3.0),
+            holtburger_common::Vector3::new(0.0, 0.0, 1.0),
+        );
+
+        let teleport = encode_message(&GameMessage::PlayerTeleport(Box::new(PlayerTeleportData {
+            teleport_sequence: 42,
+        })));
+        client.handle_message(&teleport).await.unwrap();
+        let teleport_generation = client.world_generation;
+
+        let destination =
+            encode_message(&GameMessage::UpdatePosition(Box::new(UpdatePositionData {
+                guid,
+                pos: PositionPack {
+                    flags: UpdatePositionFlag::NONE,
+                    pos: dungeon,
+                    teleport_sequence: 42,
+                    ..PositionPack::default()
+                },
+            })));
+        client.handle_message(&destination).await.unwrap();
+
+        assert_eq!(client.world.local_player_runtime_pose(), Some(dungeon));
+        assert_eq!(client.world_generation, teleport_generation);
+        let runtime = client
+            .world
+            .runtime_body_view(holtburger_world::SpatialBodyId::LocalPlayer(guid))
+            .unwrap();
+        assert_eq!(runtime.velocity, holtburger_common::Vector3::zero());
+        assert_eq!(runtime.omega, holtburger_common::Vector3::zero());
     }
 
     #[tokio::test]

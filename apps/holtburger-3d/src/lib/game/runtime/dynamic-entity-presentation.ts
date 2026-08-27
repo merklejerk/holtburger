@@ -12,6 +12,15 @@ import type {
 } from "./dynamic-entity-feed";
 import type { SceneScope, SceneSpatialPlacement } from "../scene";
 
+/** Runtime disposition of one entity retained by the latest authoritative snapshot. */
+export type DynamicEntityReconciliationDisposition = "installed" | "deferred";
+
+/** Per-entity result of reconciling one complete authoritative dynamic snapshot. */
+export type DynamicEntityReconciliation = ReadonlyMap<
+	number,
+	DynamicEntityReconciliationDisposition
+>;
+
 /** Join one host-projected live entity with its separately resolved immutable visual closure. */
 export function adaptDynamicEntityPresentation(
 	entity: DynamicEntityView,

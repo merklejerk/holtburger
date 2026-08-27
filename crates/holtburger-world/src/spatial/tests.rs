@@ -2,6 +2,7 @@ use super::*;
 use crate::entity::EntityMotionSnapshot;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion, RigidTransform, Vector3};
+use holtburger_content::{LandblockColliders, LandblockCollisionAsset, TerrainCollisionSurface};
 use holtburger_protocol::messages::movement::InterpretedMotionCommand;
 use std::time::{Duration, Instant};
 
@@ -24,6 +25,18 @@ fn register_entity_pose(scene: &mut SpatialScene, guid: Guid, pose: WorldPositio
             .is_none(),
         "test entity body should not replace an existing body"
     );
+}
+
+fn empty_collision(owner: Guid) -> CollisionScene {
+    let mut scene = CollisionScene::new();
+    scene
+        .insert(LandblockCollisionAsset {
+            landblock_id: owner.0,
+            terrain: TerrainCollisionSurface::empty(),
+            static_geometry: LandblockColliders::default(),
+        })
+        .unwrap();
+    scene
 }
 
 #[test]
@@ -354,7 +367,7 @@ fn spatial_scene_transaction_commits_only_after_acceptance() {
     let (result, callback_pose) = scene
         .tick_physical_body_transaction(
             body_id,
-            &CollisionScene::new(),
+            &empty_collision(Guid(0x0102_FFFF)),
             PhysicalBodyActuation::free_flight(Vector3::new(2.0, 0.0, 0.0))
                 .expect("test velocity should be finite"),
             1.0,
@@ -366,7 +379,7 @@ fn spatial_scene_transaction_commits_only_after_acceptance() {
                 ))
             },
         )
-        .expect("transaction should solve against an empty scene");
+        .expect("transaction should solve against resident empty collision");
 
     assert_eq!(callback_pose.0, scene.body(body_id).unwrap().pose);
     assert_eq!(callback_pose.0.coords.x, 12.0);

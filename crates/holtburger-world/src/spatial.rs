@@ -24,7 +24,10 @@ pub use dead_reckoning::{
     advance_authored_body_kinematics, advance_body_kinematics, gate_authored_offset,
     project_pose_forward_distance,
 };
-pub use scene::{DynamicBodyRelocationOutcome, SpatialScene};
+pub use scene::{
+    DynamicBodyRelocationOutcome, DynamicEntityCollectionCoverageRejection,
+    PreparedDynamicEntityCollection, SpatialScene,
+};
 pub use types::*;
 
 #[cfg(test)]
@@ -33,12 +36,13 @@ pub(crate) use dead_reckoning::project_pose_by_velocity;
 #[cfg(test)]
 mod tests;
 pub use collision::{
-    CellTransitRequest, CollisionQueryError, CollisionScene, CollisionSceneUpdateError,
-    GroundedObstruction, GroundedObstructionRequest, MotionWaypoint, MotionWaypointPlacement,
-    MovementObstructionRequest, MovementRestrictionRequest, PlacedMotionLeg, PlacedMotionPath,
-    PlacedMotionPathRequest, PlacedMotionPoint, PlacementRecovery, PlacementRequest,
-    PlacementRestrictionRequest, SpatialMembership, SphereSweep, StaticContact,
-    StaticSphereSweepHit, StaticSphereSweepRequest, SupportContact, SupportFeature, SupportRequest,
+    CellTransitRequest, CollisionOwnerProof, CollisionQueryError, CollisionQueryPolicy,
+    CollisionScene, CollisionSceneUpdateError, GroundedObstruction, GroundedObstructionRequest,
+    MotionWaypoint, MotionWaypointPlacement, MovementObstructionRequest,
+    MovementRestrictionRequest, PlacedMotionLeg, PlacedMotionPath, PlacedMotionPathRequest,
+    PlacedMotionPoint, PlacementRecovery, PlacementRequest, PlacementRestrictionRequest,
+    SpatialMembership, SphereSweep, StaticContact, StaticSphereSweepHit, StaticSphereSweepRequest,
+    SupportContact, SupportFeature, SupportRequest, UncoveredCollisionQuery,
 };
 pub use collision_report::{
     CollisionReportClassification, CollisionReportContact, CollisionReportOutcome,
@@ -51,7 +55,8 @@ pub use dynamic_body::{
 pub use dynamic_contact::{MAXIMUM_DYNAMIC_SLICE_DISTANCE, MAXIMUM_DYNAMIC_SLICES};
 pub use free_sphere::{
     FreeSphereBudget, FreeSphereConfig, FreeSphereOutcome, FreeSphereRequest,
-    FreeSphereSettleOutcome, FreeSphereState, settle_free_sphere, solve_free_sphere,
+    FreeSphereSettleOutcome, FreeSphereState, settle_free_sphere, settle_free_sphere_with_policy,
+    solve_free_sphere,
 };
 pub use grounded::{
     EdgeProtection, GroundState, GroundSupport, GroundedBody, GroundedBodySpheres, GroundedBudget,

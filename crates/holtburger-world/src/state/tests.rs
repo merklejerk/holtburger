@@ -12,7 +12,9 @@ use crate::{
     SpatialBodyEvent, SpatialBodyId, SpatialSampleMode, WorldBootstrap,
 };
 
-use crate::state::motion_resolution::test_support::{FixtureCycle, explicit_motion_catalog};
+use crate::state::motion_resolution::test_support::{
+    FIXTURE_STAND_COMMAND, FixtureCycle, explicit_motion_catalog,
+};
 use crate::stats::{Skill, SkillType, TrainingLevel};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
@@ -943,6 +945,13 @@ fn apply_spatial_body_event_emits_runtime_body_changed_for_remote_contact() {
 
 #[test]
 fn player_teleport_suspends_runtime_bodies_and_emits_reset_signal() {
+    let motion_table_id = 0x0900_0040;
+    let motion_snapshot = crate::entity::EntityMotionSnapshot {
+        current_style: Some(MotionStance::NonCombat),
+        forward_command: Some(InterpretedMotionCommand::RUN_FORWARD),
+        forward_speed: crate::entity::OrderedMotionSpeed::from_f32(1.0),
+        ..Default::default()
+    };
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0201);
     let position = WorldPosition {
@@ -953,6 +962,26 @@ fn player_teleport_suspends_runtime_bodies_and_emits_reset_signal() {
 
     state.player.guid = player_guid;
     state.seed_local_player_entity(player_guid, "Player", position);
+    state.set_motion_sequences(test_motion_catalog(motion_table_id));
+    let player = state
+        .entities
+        .get_mut(player_guid)
+        .expect("seeded player should exist");
+    player.properties.set_did_prop(
+        holtburger_common::properties::PropertyDataId::MotionTable,
+        Guid(motion_table_id),
+    );
+    player.motion_snapshot = Some(motion_snapshot);
+    state.advance_authored_motion(std::time::Duration::from_millis(30));
+    assert_eq!(state.motion_runtimes.len(), 1);
+    assert_eq!(
+        state
+            .motion_runtimes
+            .state(player_guid)
+            .expect("running player should own authored playback")
+            .substate,
+        crate::motion::MotionCommand::RUN_FORWARD
+    );
 
     let events = state.handle_message(&GameMessage::PlayerTeleport(Box::new(PlayerTeleportData {
         teleport_sequence: 7,
@@ -978,6 +1007,28 @@ fn player_teleport_suspends_runtime_bodies_and_emits_reset_signal() {
             .mode,
         SpatialSampleMode::Suspended
     );
+    let reset_snapshot = state
+        .entities
+        .get(player_guid)
+        .and_then(|entity| entity.motion_snapshot)
+        .expect("teleport should retain an idle stance snapshot");
+    assert_eq!(reset_snapshot.current_style, Some(MotionStance::NonCombat));
+    assert_eq!(reset_snapshot.motion_command(), None);
+    assert_eq!(state.motion_runtimes.len(), 1);
+    assert_eq!(
+        state
+            .motion_runtimes
+            .state(player_guid)
+            .expect("teleport should rebuild idle authored playback")
+            .substate,
+        crate::motion::MotionCommand(FIXTURE_STAND_COMMAND)
+    );
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::EntityMotionUpdated { guid, snapshot }
+            if *guid == player_guid
+                && snapshot.as_ref().is_some_and(|snapshot| snapshot.motion_command().is_none())
+    )));
 }
 
 #[test]

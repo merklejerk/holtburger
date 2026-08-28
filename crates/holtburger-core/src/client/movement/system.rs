@@ -286,6 +286,26 @@ impl MovementSystem {
         self.server_interpolation_step = None;
     }
 
+    /// Retires every movement product owned by the current world-placement epoch.
+    ///
+    /// World activation rejects frontend drive commands while the destination is hidden. Clearing
+    /// authority state here prevents a pre-activation held drive or queued command from resuming
+    /// after that rejection boundary. Protocol sequence diagnostics intentionally survive because
+    /// the connected session and its server-authored ordering epochs remain continuous.
+    pub(crate) fn retire_movement_epoch(&mut self) {
+        self.queued_drive_commands.clear();
+        self.pending_transient_motion = None;
+        self.pending_arrival_pose = None;
+        self.pending_snap_facing = None;
+        self.active_drive = None;
+        self.server_motion_active = false;
+        self.last_server_motion_intent = None;
+        self.suppress_frontend_autonomous_once = false;
+        self.clear_server_correction();
+        self.reset_manual_motion_playback();
+        self.clear_autonomous_position_heartbeat_schedule();
+    }
+
     /// Clears local authored playback after authority, lifecycle, or focus ownership changes.
     pub(crate) fn reset_manual_motion_playback(&mut self) {
         self.manual_motion_runtime = None;

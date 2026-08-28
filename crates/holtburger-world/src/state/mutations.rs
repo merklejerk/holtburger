@@ -1,7 +1,7 @@
 use super::*;
 use crate::attachment::PhysicsAttachment;
 use crate::context::WorldContextExt;
-use crate::entity::EntityPositionSyncOutcome;
+use crate::entity::{EntityMotionSnapshot, EntityPositionSyncOutcome};
 use crate::spatial::{
     AuthoritativeBodyKinematics, AuthoritativeBodySync, ContactState, PhysicalBodyTickResult,
     RuntimeBodyResetCause, RuntimeSpatialBodyView, SolvedBodyKinematics, SpatialBodyEvent,
@@ -177,10 +177,48 @@ impl WorldState {
     }
 
     pub fn suspend_runtime_bodies(&mut self, cause: RuntimeBodyResetCause) -> Vec<WorldEvent> {
-        self.scene.suspend_runtime_bodies(Instant::now());
         let mut events = Vec::new();
+        if matches!(cause, RuntimeBodyResetCause::TeleportOrWorldReset) {
+            self.retire_local_player_motion_epoch(&mut events);
+        }
+        self.scene.suspend_runtime_bodies(Instant::now());
         Self::emit_runtime_bodies_reset(&mut events, cause);
         events
+    }
+
+    /// Clears local-player motion authored against the world placement being replaced.
+    fn retire_local_player_motion_epoch(&mut self, events: &mut Vec<WorldEvent>) {
+        let guid = self.player.guid;
+        if guid == Guid::NULL {
+            return;
+        }
+
+        let current_style = self
+            .entities
+            .get(guid)
+            .and_then(|entity| entity.motion_snapshot)
+            .and_then(|snapshot| snapshot.current_style)
+            .or(self.player.last_server_motion_style);
+        let replacement = current_style.map(|current_style| EntityMotionSnapshot {
+            current_style: Some(current_style),
+            ..EntityMotionSnapshot::default()
+        });
+        let snapshot_changed = self.entities.get_mut(guid).is_some_and(|entity| {
+            let changed = entity.motion_snapshot != replacement;
+            entity.motion_snapshot = replacement;
+            changed
+        });
+        self.reset_authored_motion(guid, replacement);
+        if let Some(body_id) = self.runtime_body_id_for_guid(guid) {
+            self.scene
+                .update_runtime_body_motion_state(body_id, replacement);
+        }
+        if snapshot_changed {
+            events.push(WorldEvent::EntityMotionUpdated {
+                guid,
+                snapshot: replacement,
+            });
+        }
     }
 
     pub(crate) fn update_runtime_body_motion_snapshot_for_guid(

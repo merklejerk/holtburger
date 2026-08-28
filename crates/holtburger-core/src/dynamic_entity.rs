@@ -1924,13 +1924,11 @@ mod tests {
         assert!(prepared.coverage_rejections.is_empty());
         let touched_at = created_at + std::time::Duration::from_millis(100);
         let mut started = Vec::new();
-        for (body_id, actuation) in prepared.movers {
+        for body_id in prepared.movers {
             let result = scene
                 .tick_dynamic_physical_body_transaction(
                     body_id,
                     &collision,
-                    actuation,
-                    0.1,
                     touched_at,
                     |_, _| Ok(()),
                 )

@@ -32,11 +32,17 @@ pub const MAXIMUM_DYNAMIC_SLICE_DISTANCE: f32 = 0.05;
 /// Finite per-pair narrow-phase budget selected by the R0 catalog and speed census.
 pub const MAXIMUM_DYNAMIC_SLICES: usize = 128;
 
-/// One immutable body and its environment-only plan from the collection's tick start.
+/// One immutable dynamic body captured at the collection's tick start.
 #[derive(Debug, Clone)]
-pub(crate) struct DynamicTickStartBody {
+pub(crate) struct DynamicEpochParticipant {
     pub(crate) body: SpatialBody,
-    pub(crate) planned: Option<PhysicalBodyTickCommit>,
+}
+
+/// One scheduled mover's derived inputs, computed exactly once during epoch preparation.
+#[derive(Debug, Clone)]
+pub(crate) struct PreparedDynamicMover {
+    pub(crate) actuation: PhysicalBodyActuation,
+    pub(crate) environment_plan: PhysicalBodyTickCommit,
 }
 
 /// Blocking peer accepted by one directional solve.
@@ -57,7 +63,8 @@ pub(crate) struct DynamicContactResolution {
 pub(crate) fn resolve_dynamic_contacts(
     collision: &CollisionScene,
     index: &DynamicShadowIndex,
-    tick_start: &BTreeMap<SpatialBodyId, DynamicTickStartBody>,
+    participants: &BTreeMap<SpatialBodyId, DynamicEpochParticipant>,
+    movers: &BTreeMap<SpatialBodyId, PreparedDynamicMover>,
     mover: &SpatialBody,
     commit: &mut PhysicalBodyTickCommit,
     actuation: &PhysicalBodyActuation,
@@ -93,7 +100,7 @@ pub(crate) fn resolve_dynamic_contacts(
     let mut sampled_report_touches = Vec::new();
     let mut accepted_fraction = 1.0_f32;
     for peer_id in candidates {
-        let Some(peer) = tick_start.get(&peer_id) else {
+        let Some(peer) = participants.get(&peer_id) else {
             continue;
         };
         let peer_dynamic = peer
@@ -122,7 +129,14 @@ pub(crate) fn resolve_dynamic_contacts(
             continue;
         }
 
-        let pair = PairTrajectories::new(mover, commit, peer, delta_seconds, anchor)?;
+        let pair = PairTrajectories::new(
+            mover,
+            commit,
+            peer,
+            movers.get(&peer_id).map(|mover| &mover.environment_plan),
+            delta_seconds,
+            anchor,
+        )?;
         if !pair.swept_bounds_overlap()? {
             continue;
         }
@@ -268,7 +282,8 @@ struct SelectedBlockingContact {
 struct PairTrajectories<'a> {
     mover: &'a SpatialBody,
     mover_commit: &'a PhysicalBodyTickCommit,
-    peer: &'a DynamicTickStartBody,
+    peer: &'a DynamicEpochParticipant,
+    peer_plan: Option<&'a PhysicalBodyTickCommit>,
     anchor: Guid,
 }
 
@@ -276,7 +291,8 @@ impl<'a> PairTrajectories<'a> {
     fn new(
         mover: &'a SpatialBody,
         mover_commit: &'a PhysicalBodyTickCommit,
-        peer: &'a DynamicTickStartBody,
+        peer: &'a DynamicEpochParticipant,
+        peer_plan: Option<&'a PhysicalBodyTickCommit>,
         delta_seconds: f32,
         anchor: Guid,
     ) -> Result<Self> {
@@ -288,6 +304,7 @@ impl<'a> PairTrajectories<'a> {
             mover,
             mover_commit,
             peer,
+            peer_plan,
             anchor,
         })
     }
@@ -313,7 +330,7 @@ impl<'a> PairTrajectories<'a> {
             self.anchor,
         )?;
         let peer_extent = target_furthest_extent(&self.peer.body)?;
-        let peer_bounds = if let Some(planned) = &self.peer.planned {
+        let peer_bounds = if let Some(planned) = self.peer_plan {
             swept_root_bounds_in_anchor(&planned.motion.path, peer_extent, self.anchor)?
         } else {
             let pose = self
@@ -400,7 +417,7 @@ impl<'a> PairTrajectories<'a> {
     }
 
     fn peer_pose(&self, fraction: f32) -> Result<WorldPosition> {
-        let Some(planned) = &self.peer.planned else {
+        let Some(planned) = self.peer_plan else {
             return self
                 .peer
                 .body
@@ -418,9 +435,7 @@ impl<'a> PairTrajectories<'a> {
     }
 
     fn peer_velocity(&self) -> Vector3 {
-        self.peer
-            .planned
-            .as_ref()
+        self.peer_plan
             .map_or(self.peer.body.velocity, |planned| planned.velocity)
     }
 }

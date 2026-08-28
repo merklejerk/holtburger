@@ -1,6 +1,6 @@
 # Holtburger Client Dynamic Delta and Solver Epoch Plan
 
-Status: **Execution in progress; Phase 0 complete, Phase 1 active (2026-08-28).**
+Status: **Execution in progress; Phases 0–2 and Resteer A complete, Phase 3 active (2026-08-28).**
 
 Origin: investigation of client-mode stalls after entering dungeon EnvCell `0x00070156`.
 
@@ -355,11 +355,11 @@ host invocation completion, and timing before it can claim fidelity.
 
 #### Checklist
 
-- [ ] Define the focused presentation mutation contract.
-- [ ] Cut over client lifecycle dispatch.
-- [ ] Preserve mirror hydration and accepted-event ordering.
-- [ ] Update Explorer/harness snapshot call sites.
-- [ ] Delete obsolete reconciliation queue vocabulary and tests.
+- [x] Define the focused presentation mutation contract.
+- [x] Cut over client lifecycle dispatch.
+- [x] Preserve mirror hydration and accepted-event ordering.
+- [x] Update Explorer/harness snapshot call sites.
+- [x] Delete obsolete reconciliation queue vocabulary and tests.
 
 ### Phase 2: Make incremental presentation proportional
 
@@ -383,10 +383,10 @@ host invocation completion, and timing before it can claim fidelity.
 
 #### Checklist
 
-- [ ] Introduce focused comparison/value helpers at the runtime ownership boundary.
-- [ ] Separate desired-state update from realization and placement mutation.
-- [ ] Add attachment and residency dependency tests.
-- [ ] Remove fallback full replacements used only to repair incremental gaps.
+- [x] Introduce focused comparison/value helpers at the runtime ownership boundary.
+- [x] Separate desired-state update from realization and placement mutation.
+- [x] Add attachment and residency dependency tests.
+- [x] Remove fallback full replacements used only to repair incremental gaps.
 
 ### Resteer A: Frontend ownership review
 
@@ -638,6 +638,55 @@ lookalikes, so Phase 0 records and runs it instead of adding ceremonial tests.
 **Debt carried forward:** The live probe still uses one timeout value for distinct lifecycle waits.
 Its new phase/predicate diagnostics make failures actionable; separate timeout policy is deferred
 unless a longer world-entry run proves the single bound materially wrong.
+
+### Phases 1–2 — complete (2026-08-28)
+
+- Replaced the universal full-array presentation operation with explicit snapshot replacement,
+  accepted upsert, exact-generation removal, advance, and eligibility-boundary operations. Client
+  and Explorer ordinary lifecycle dispatch now preserve the accepted event variant; browser setup
+  retains explicit snapshot vocabulary.
+- Removed the production empty-interest eligibility fallback. Hydration now installs desired
+  authority only, and realization begins when the matching terrain or EnvCell capability exists.
+- Collapsed each desired presentation into one record containing its entity level, immutable visual
+  key, placement identity, current deferral, and exact in-flight realization. Reverse indexes name
+  the parent GUID or residency fact that can wake the record.
+- Split placement and mutable presentation-state application. A state-only upsert does not bump the
+  existing placement revision; one changed world placement bumps it exactly once without a
+  task-specific counter.
+- Made parent installation wake only indexed children and static publication wake only matching
+  deferred residency records. Interest replacement scans only at that explicit boundary, retires
+  newly ineligible roots, and leaves desired authority available for exact publication wake-up.
+- Preserved shared visual leases across compatible generation replacement and retained exact-record
+  checks across asynchronous decoding. Focused tests prove removal/replacement cannot publish stale
+  geometry and parent-first/child-first delivery converges.
+- Type checks, ESLint, dead-code analysis, and 49 focused feed/session/runtime/terrain tests pass.
+
+**Decision:** Outdoor dynamic placement depends on installed terrain source and its synchronous
+scene attachment, not on eventual GPU draw-unit residency. The runtime's existing
+`outdoor-terrain-source-available` event publishes the former; requiring the latter left deferred
+entities with no event capable of waking them. Scene activation and drawing retain their stricter
+resident-draw-unit checks.
+
+**Debt carried forward:** Explicit snapshot/portal convergence still uses reconciliation-shaped
+result vocabulary. The ordinary reconciliation queue and full-population path are gone; Phase 6
+will sweep the remaining synchronization-boundary names without conflating them with delta ingress.
+
+### Resteer A — complete (2026-08-28)
+
+- Audited the runtime after cutover: `DynamicEntityMirror` remains the single accepted lifecycle
+  authority, while the runtime map is a generation-current realization ledger with no event
+  subscription or frontend mirror repair loop.
+- Confirmed ordinary client and Explorer upserts/removals do not call snapshot replacement.
+- The Chrome/WebGL browser harness passed its real catalog-host spawn/current/exact-despawn scenario
+  with WCID 7, no browser console errors, one live dynamic entity during presentation, and zero
+  dynamic resources after removal.
+- Interactive client-mode dungeon acceptance remains the Phase 7 user gate. The earlier live probe
+  reached portal-space but not in-world within its current single timeout; repeating that partial
+  probe before the solver cutover would not add discriminating evidence.
+
+**Resteer conclusion:** Frontend mutation work now follows accepted deltas and exact dependency
+edges. No compensating coalescer or population replay remains, so solver work can proceed without
+carrying a known frontend backlog mechanism forward.
 
 ## Decisions and Course Corrections
 

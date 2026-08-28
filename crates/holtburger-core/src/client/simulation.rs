@@ -214,12 +214,10 @@ impl ClientSimulationSystem {
             },
         )?;
         let mut events = Vec::new();
-        for (body_id, actuation) in prepared.movers {
+        for body_id in prepared.movers {
             let (result, ()) = world.scene.tick_dynamic_physical_body_transaction(
                 body_id,
                 collision.scene.as_ref(),
-                actuation,
-                dt.as_secs_f32(),
                 now,
                 |_, _| Ok(()),
             )?;

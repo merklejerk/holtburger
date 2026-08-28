@@ -150,6 +150,29 @@ pub enum PlayerMotionTableLookupError {
 }
 
 impl WorldState {
+    /// Rebuilds one body's authored playback from a discontinuity-safe motion snapshot.
+    pub(crate) fn reset_authored_motion(
+        &mut self,
+        guid: Guid,
+        snapshot: Option<EntityMotionSnapshot>,
+    ) {
+        self.motion_runtimes.forget(guid);
+        let Some(snapshot) = snapshot else {
+            return;
+        };
+        let Some(source) = self.motion_table_source_for_guid(guid) else {
+            return;
+        };
+        let Some(table) = self
+            .motion_sequences
+            .table(motion_table_id_for_source(source))
+        else {
+            return;
+        };
+        self.motion_runtimes
+            .drive(table, guid, MotionOrder::from_snapshot(snapshot), 0.0);
+    }
+
     pub fn resolve_player_motion_table_profile(
         &self,
     ) -> Result<PlayerMotionTableResolution, PlayerMotionTableLookupError> {

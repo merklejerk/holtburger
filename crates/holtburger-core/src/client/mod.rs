@@ -236,8 +236,7 @@ impl ClientRuntime {
             external_reveal_generation: (!self.requires_external_world_reveal)
                 .then_some(generation),
         });
-        self.movement.reset_manual_motion_playback();
-        self.movement.clear_server_correction();
+        self.movement.retire_movement_epoch();
         self.reset_camera();
         if let Some(coordinator) = self.collision_coordinator.as_mut() {
             coordinator.invalidate();
@@ -1204,6 +1203,56 @@ mod tests {
         assert!(client.activation.is_none());
         assert_eq!(client.state, ClientState::InWorld);
         assert!(client.session.bytes_out > 0);
+    }
+
+    #[tokio::test]
+    async fn world_activation_retires_pre_portal_movement_epoch() {
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let player_guid = Guid(0x5000_0001);
+        let position = WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            coords: Vector3::zero(),
+            rotation: Quaternion::identity(),
+        };
+        client
+            .world
+            .seed_local_player_entity(player_guid, "Player", position);
+        let started_at = Instant::now();
+        let forward = movement_types::PlayerDriveIntent::ManualHeld(
+            movement_types::CharacterDrive::builder()
+                .run()
+                .forward()
+                .build(),
+        );
+
+        client.movement.enqueue_drive_intent(forward, started_at);
+        client
+            .movement
+            .tick(started_at, &mut client.world, &mut client.session)
+            .await
+            .expect("pre-portal drive should become active");
+        client
+            .movement
+            .enqueue_drive_intent(forward, started_at + Duration::from_millis(10));
+
+        client.start_world_activation(ClientWorldActivationState::Teleport, player_guid);
+        client
+            .movement
+            .tick(
+                started_at + Duration::from_millis(30),
+                &mut client.world,
+                &mut client.session,
+            )
+            .await
+            .expect("destination activation should leave movement idle");
+
+        assert!(!client.movement.has_active_manual_drive());
+        assert_eq!(
+            client
+                .movement
+                .current_local_drive_control(&client.world, Duration::from_millis(30)),
+            None
+        );
     }
 
     #[tokio::test]

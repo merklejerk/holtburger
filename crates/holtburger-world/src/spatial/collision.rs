@@ -288,6 +288,14 @@ impl SpatialMembership {
             .iter()
             .any(|cell| landblock_key(*cell) == owner)
     }
+
+    /// Whether prior-cell traversal found no authoritative domain containing sphere zero's center.
+    ///
+    /// Reaching a different EnvCell or authored outdoor space is a resolved topology transition,
+    /// not evidence that the retained cell escaped its portal graph.
+    fn center_domain_is_unresolved(&self) -> bool {
+        self.committed_cell.is_none() && !self.reaches_outdoors
+    }
 }
 
 /// Directional movement-obstruction query.
@@ -1520,7 +1528,7 @@ impl CollisionScene {
         request: PlacedMotionPathRequest<'_>,
     ) -> Result<PlacedMotionPath, CollisionQueryError> {
         validate_motion_waypoints(request.waypoints)?;
-        let (initial_placement, initial_recovery) = self.placement_for_committed_cell(
+        let (initial_placement, initial_recovery) = self.infer_placement_from_cell(
             request.anchor,
             request.start,
             request.radius,
@@ -1601,7 +1609,7 @@ impl CollisionScene {
                 cursor = transition.fraction;
             }
 
-            let inferred = self.placement_for_committed_cell(
+            let inferred = self.infer_placement_from_cell(
                 request.anchor,
                 waypoint.center,
                 request.radius,
@@ -1651,16 +1659,41 @@ impl CollisionScene {
         radius: f32,
         committed_cell: Option<Guid>,
     ) -> Result<(SpatialMembership, Option<PlacementRecovery>), CollisionQueryError> {
+        let (mut placement, recovery) =
+            self.infer_placement_from_cell(anchor, center, radius, committed_cell)?;
+        if recovery.is_some() {
+            return Ok((placement, recovery));
+        }
+        placement.committed_cell = committed_cell;
+        match committed_cell {
+            Some(cell) => {
+                if !placement.reached_env_cells.contains(&cell) {
+                    placement.reached_env_cells.push(cell);
+                }
+            }
+            None => placement.reaches_outdoors = true,
+        }
+        Ok((placement, recovery))
+    }
+
+    /// Infers the center domain from prior-cell-seeded topology, recovering only if unresolved.
+    fn infer_placement_from_cell(
+        &self,
+        anchor: Guid,
+        center: Vector3,
+        radius: f32,
+        previous_cell: Option<Guid>,
+    ) -> Result<(SpatialMembership, Option<PlacementRecovery>), CollisionQueryError> {
         let mut placement = self
             .transit_cell_allow_uncovered(CellTransitRequest {
-                previous_cell: committed_cell,
+                previous_cell,
                 anchor,
                 center,
                 radius,
             })?
             .value;
         let recovery = if let Some(previous_cell) =
-            committed_cell.filter(|cell| placement.committed_cell != Some(*cell))
+            previous_cell.filter(|_| placement.center_domain_is_unresolved())
         {
             Some(self.recover_placement(
                 anchor,
@@ -1686,14 +1719,12 @@ impl CollisionScene {
         if recovery.is_some() {
             return Ok((placement, recovery));
         }
-        placement.committed_cell = committed_cell;
-        match committed_cell {
-            Some(cell) => {
-                if !placement.reached_env_cells.contains(&cell) {
-                    placement.reached_env_cells.push(cell);
-                }
-            }
-            None => placement.reaches_outdoors = true,
+        if previous_cell.is_none() {
+            // Outdoor placement has no cell selector to seed traversal. Motion transitions own
+            // entry into an EnvCell; an endpoint containment scan alone must not choose among
+            // coincident building entries or synthesize an untraversed indoor transition.
+            placement.committed_cell = None;
+            placement.reaches_outdoors = true;
         }
         Ok((placement, recovery))
     }
@@ -3718,6 +3749,85 @@ mod tests {
         assert_eq!(path.initial().placement().committed_cell(), Some(cell));
         assert_eq!(path.final_point().placement().committed_cell(), Some(cell));
         assert_eq!(child.committed_cell(), Some(cell));
+    }
+
+    #[test]
+    fn stationary_child_stays_in_a_portal_connected_env_cell_in_a_mixed_landblock() {
+        use crate::spatial::{
+            ChildSpatialBody, ChildSpatialBodyDefinition, ChildSpatialBodyWaypoint,
+        };
+
+        let source_cell = Guid(0xda55_010a);
+        let target_cell = Guid(0xda55_010b);
+        let source_to_target = CellCollisionPortal {
+            plane: Plane {
+                normal: Vector3::new(0.0, 0.0, 1.0),
+                d: 11.0,
+            },
+            positive_side: true,
+            target: CellCollisionPortalTarget::EnvCell(0x010b),
+            outdoor_building: None,
+        };
+        let scene = placement_scene(vec![
+            CellVolume {
+                cell_selector: 0x010a,
+                placement: LandblockPlacement {
+                    origin: Vector3::zero(),
+                    orientation: Quaternion::identity(),
+                },
+                planes: vec![Plane {
+                    normal: Vector3::new(0.0, 0.0, -1.0),
+                    d: -11.0,
+                }],
+                portals: vec![source_to_target],
+            },
+            CellVolume {
+                cell_selector: 0x010b,
+                placement: LandblockPlacement {
+                    origin: Vector3::zero(),
+                    orientation: Quaternion::identity(),
+                },
+                planes: vec![Plane {
+                    normal: Vector3::new(0.0, 0.0, 1.0),
+                    d: 11.0,
+                }],
+                portals: Vec::new(),
+            },
+        ]);
+        assert!(scene.contains_landblock(Guid(0xda55_ffff)));
+        let parent = WorldPosition {
+            landblock_id: source_cell,
+            // Negative dungeon-local coordinates are authored interior space. Coordinate-wide
+            // recovery would instead search the adjacent outdoor landblock to the south.
+            coords: Vector3::new(90.0, -20.0, -11.995),
+            rotation: Quaternion::identity(),
+        };
+        let mut child = ChildSpatialBody::new(
+            ChildSpatialBodyDefinition::new(Vector3::new(0.0, 0.0, 1.35), 0.48).unwrap(),
+            parent,
+        );
+
+        let path = child
+            .reconcile_parent_path(
+                &scene,
+                parent,
+                &[ChildSpatialBodyWaypoint {
+                    parent_pose: parent,
+                    end_fraction: 1.0,
+                }],
+            )
+            .unwrap();
+
+        assert_eq!(
+            path.initial().placement().committed_cell(),
+            Some(target_cell)
+        );
+        assert_eq!(path.initial().recovery(), None);
+        assert_eq!(
+            path.final_point().placement().committed_cell(),
+            Some(target_cell)
+        );
+        assert_eq!(child.committed_cell(), Some(target_cell));
     }
 
     #[test]

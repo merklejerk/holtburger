@@ -161,6 +161,31 @@ function reseed(sequence: number, x: number) {
 	);
 }
 
+function fallback(sequence: number, x: number) {
+	return decodeHostKinematicBoomTick(
+		{
+			kind: "fallback",
+			...IDENTITY,
+			sequence,
+			targetSphereRole: "primary",
+			desiredReach: 4.5,
+			path: {
+				initial: pathPoint(x),
+				legs: [{ endFraction: 1, end: pathPoint(x) }],
+			},
+			reason: "free-sphere-query",
+			diagnostics: {
+				collisionProof: { status: "covered" },
+				controlLegs: 0,
+				clearanceSweeps: 0,
+				transitSubsteps: 0,
+				contactPasses: 8,
+			},
+		},
+		32,
+	);
+}
+
 describe("HostKinematicBoomSession", () => {
 	it("registers the complete distance policy with the host", async () => {
 		const transport = new RecordingTransport();
@@ -303,6 +328,32 @@ describe("HostKinematicBoomSession", () => {
 			sequence: 4,
 			placementOutcome: null,
 		});
+	});
+
+	it("presents fallback without projection proof and replaces it immediately when proven", async () => {
+		const session = new HostKinematicBoomSession(new RecordingTransport());
+		await session.start(TARGET, DISTANCE, [0, 1, 0], PROJECTION);
+		session.receive(fallback(1, 50), 32, 100);
+
+		expect(session.presentation(100)?.placement.position.x).toBeCloseTo(
+			50 + 0xda * 192,
+		);
+		expect(session.acknowledgedProjection(100)).toBeNull();
+		expect(session.status()).toMatchObject({
+			kind: "active",
+			clearance: null,
+			renderedReach: 0,
+			placementOutcome: {
+				kind: "fallback",
+				reason: "free-sphere-query",
+			},
+		});
+
+		session.receive(advance(2, 10, 14), 32, 101);
+		expect(session.presentation(101)?.placement.position.x).toBeCloseTo(
+			10 + 0xda * 192,
+		);
+		expect(session.acknowledgedProjection(101)?.revision).toBe(1);
 	});
 
 	it("ignores stale identities, recovers after a held path, and stops exactly", async () => {

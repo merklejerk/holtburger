@@ -3,7 +3,7 @@ import {
 	decodeHostKinematicBoomUpdateReceipt,
 	evaluateHostKinematicBoomPath,
 	sameHostKinematicBoomIdentity,
-	type HostKinematicBoomHoldReason,
+	type HostKinematicBoomFailureReason,
 	type HostKinematicBoomIdentity,
 	type HostKinematicBoomReseedReason,
 	type HostKinematicBoomPresentation,
@@ -29,6 +29,11 @@ export interface HostKinematicBoomDistancePolicy {
 	readonly minimum: number;
 	readonly maximum: number;
 }
+
+type HostKinematicBoomProvenTick = Exclude<
+	HostKinematicBoomTick,
+	{ readonly kind: "fallback" }
+>;
 
 /** Injectable command boundary; fixed-tick delivery remains owned by the entity session. */
 export interface HostKinematicBoomTransport {
@@ -57,7 +62,7 @@ export type HostKinematicBoomStatus =
 			readonly identity: HostKinematicBoomIdentity;
 			readonly sequence: number;
 			readonly targetSphereRole: HostKinematicBoomTick["targetSphereRole"];
-			readonly clearance: HostKinematicBoomTick["clearance"];
+			readonly clearance: HostKinematicBoomProvenTick["clearance"] | null;
 			readonly desiredReach: number;
 			readonly renderedReach: number;
 			/**
@@ -65,16 +70,21 @@ export type HostKinematicBoomStatus =
 			 *
 			 * Not a fault indicator: a `reseeded` outcome covers the generation's ordinary first
 			 * tick as well as the two recoveries, so its reason is what says whether anything went
-			 * wrong. Only a `held` outcome always follows a failure.
+			 * wrong. Held and fallback outcomes follow failures, but only held retains a proven
+			 * placement and projection envelope.
 			 */
 			readonly placementOutcome:
 				| {
 						readonly kind: "held";
-						readonly reason: HostKinematicBoomHoldReason;
+						readonly reason: HostKinematicBoomFailureReason;
 				  }
 				| {
 						readonly kind: "reseeded";
 						readonly reason: HostKinematicBoomReseedReason;
+				  }
+				| {
+						readonly kind: "fallback";
+						readonly reason: HostKinematicBoomFailureReason;
 				  }
 				| null;
 			readonly droppedPaths: number;
@@ -370,15 +380,17 @@ export class HostKinematicBoomSession {
 			identity,
 			sequence: latest.sequence,
 			targetSphereRole: latest.targetSphereRole,
-			clearance: latest.clearance,
+			clearance: latest.kind === "fallback" ? null : latest.clearance,
 			desiredReach: latest.desiredReach,
-			renderedReach: latest.renderedReach,
+			renderedReach: latest.kind === "fallback" ? 0 : latest.renderedReach,
 			placementOutcome:
 				latest.kind === "held"
 					? { kind: "held", reason: latest.reason }
 					: latest.kind === "reseeded"
 						? { kind: "reseeded", reason: latest.reason }
-						: null,
+						: latest.kind === "fallback"
+							? { kind: "fallback", reason: latest.reason }
+							: null,
 			droppedPaths: this.#droppedPaths,
 			diagnostics: latest.diagnostics,
 		};
@@ -401,7 +413,11 @@ export class HostKinematicBoomSession {
 	#acceptOutput(received: ReceivedBoomTick): void {
 		const tick = received.tick;
 		this.#latestPath = tick;
-		if (tick.clearance === null) return;
+		if (tick.kind === "fallback") {
+			this.#acceptPath(tick, received.durationMs, received.receivedAtMs);
+			this.#pruneProjectionRevisions();
+			return;
+		}
 		const projection = this.#projectionRevisions.get(
 			tick.clearance.projectionRevision,
 		);
@@ -420,7 +436,7 @@ export class HostKinematicBoomSession {
 		receivedAtMs: number,
 	): void {
 		const path = { tick, durationMs };
-		if (tick.kind !== "advanced") {
+		if (tick.kind !== "advanced" || this.#active?.tick.kind === "fallback") {
 			this.#active = path;
 			this.#pending = null;
 			this.#activeStartedAtMs = receivedAtMs;
@@ -477,10 +493,10 @@ export class HostKinematicBoomSession {
 	}
 
 	#activeProjection(): ProjectionClearanceRevision | null {
-		const clearance = this.#active?.tick.clearance;
-		if (clearance == null) return null;
+		const tick = this.#active?.tick;
+		if (tick === undefined || tick.kind === "fallback") return null;
 		const projection = this.#projectionRevisions.get(
-			clearance.projectionRevision,
+			tick.clearance.projectionRevision,
 		);
 		return projection === undefined ? null : projection;
 	}
@@ -488,8 +504,10 @@ export class HostKinematicBoomSession {
 	#pruneProjectionRevisions(): void {
 		const retained = new Set([this.#lastRequestedProjectionRevision]);
 		for (const playback of [this.#active, this.#pending]) {
-			const revision = playback?.tick.clearance?.projectionRevision;
-			if (revision !== undefined) retained.add(revision);
+			const tick = playback?.tick;
+			if (tick !== undefined && tick.kind !== "fallback") {
+				retained.add(tick.clearance.projectionRevision);
+			}
 		}
 		for (const revision of this.#projectionRevisions.keys()) {
 			if (!retained.has(revision)) this.#projectionRevisions.delete(revision);

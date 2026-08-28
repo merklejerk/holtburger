@@ -202,6 +202,88 @@ describe("ClientPresentationSession", () => {
 		await presentation.destroy();
 	});
 
+	it("reveals a portal destination from a current fallback camera placement", async () => {
+		const playerGuid = 0x0101_0001;
+		const transport = new FakeClientTransport({
+			...currentState(playerGuid),
+			lifecycle: portalLifecycle(4),
+			worldGeneration: 4,
+		});
+		transport.setCameraOutput("fallback");
+		const lifecycle = new ClientLifecycleSession(transport);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		const presentation = new ClientPresentationSession({
+			canvas: fakeCanvas(),
+			hostTransport: {} as never,
+			session: lifecycle,
+			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+		});
+
+		await presentation.start();
+		presentation.frame(1_000);
+		await vi.waitFor(() => expect(runtime.sceneRequests).toHaveLength(1));
+		presentation.frame(1_016);
+		await vi.waitFor(() =>
+			expect(runtime.snapshotReplacements).toHaveLength(1),
+		);
+		await vi.waitFor(() =>
+			expect(presentation.frame(1_032).rendered).toBe(true),
+		);
+		expect(presentation.readDiagnostics().cameraStatus).toMatchObject({
+			kind: "active",
+			clearance: null,
+			renderedReach: 0,
+			placementOutcome: {
+				kind: "fallback",
+				reason: "free-sphere-query",
+			},
+		});
+		expect(presentation.frame(4_100).rendered).toBe(true);
+		await vi.waitFor(() =>
+			expect(transport.acknowledgedWorldReveals).toEqual([4]),
+		);
+		await presentation.destroy();
+	});
+
+	it.each(["none", "wrong-generation"] as const)(
+		"keeps a portal destination hidden for %s camera output",
+		async (cameraOutput) => {
+			const playerGuid = 0x0101_0001;
+			const transport = new FakeClientTransport({
+				...currentState(playerGuid),
+				lifecycle: portalLifecycle(4),
+				worldGeneration: 4,
+			});
+			transport.setCameraOutput(cameraOutput);
+			const lifecycle = new ClientLifecycleSession(transport);
+			await lifecycle.start();
+			const runtime = new FakePresentationRuntime();
+			const presentation = new ClientPresentationSession({
+				canvas: fakeCanvas(),
+				hostTransport: {} as never,
+				session: lifecycle,
+				ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+			});
+
+			await presentation.start();
+			presentation.frame(1_000);
+			await vi.waitFor(() => expect(runtime.sceneRequests).toHaveLength(1));
+			presentation.frame(1_016);
+			await vi.waitFor(() =>
+				expect(runtime.snapshotReplacements).toHaveLength(1),
+			);
+			await vi.waitFor(() =>
+				expect(presentation.frame(1_032).status.kind).toBe(
+					"loading-activation",
+				),
+			);
+			expect(presentation.frame(4_100).rendered).toBe(false);
+			expect(transport.acknowledgedWorldReveals).toEqual([]);
+			await presentation.destroy();
+		},
+	);
+
 	it("replaces snapshots, forwards authority batches, and follows residency targets", async () => {
 		const transport = new FakeClientTransport(currentState(0x0101_0001));
 		const lifecycle = new ClientLifecycleSession(transport);
@@ -378,6 +460,7 @@ class FakeClientTransport implements ClientLifecycleTransport {
 	#currentState: ClientCurrentState;
 	#emitLaggedAdvance = false;
 	#cameraGeneration = 0;
+	#cameraOutput: "proven" | "fallback" | "none" | "wrong-generation" = "proven";
 
 	constructor(currentState: ClientCurrentState) {
 		this.#currentState = currentState;
@@ -412,7 +495,17 @@ class FakeClientTransport implements ClientLifecycleTransport {
 				entityGeneration: request.entityGeneration,
 			};
 			this.emit("client-camera-started", identity);
-			this.emit("client-camera", cameraTick(identity));
+			if (this.#cameraOutput === "none") return;
+			const tickIdentity =
+				this.#cameraOutput === "wrong-generation"
+					? { ...identity, cameraGeneration: identity.cameraGeneration + 1 }
+					: identity;
+			this.emit(
+				"client-camera",
+				this.#cameraOutput === "fallback"
+					? fallbackCameraTick(tickIdentity)
+					: cameraTick(tickIdentity),
+			);
 			return;
 		}
 		if (command !== "request_client_current_state") return;
@@ -431,6 +524,12 @@ class FakeClientTransport implements ClientLifecycleTransport {
 
 	setEmitLaggedAdvance(enabled: boolean): void {
 		this.#emitLaggedAdvance = enabled;
+	}
+
+	setCameraOutput(
+		output: "proven" | "fallback" | "none" | "wrong-generation",
+	): void {
+		this.#cameraOutput = output;
 	}
 
 	emit(event: string, payload: unknown): void {
@@ -467,6 +566,37 @@ function cameraTick(identity: {
 			clearanceSweeps: 0,
 			transitSubsteps: 0,
 			contactPasses: 0,
+		},
+	};
+}
+
+function fallbackCameraTick(identity: {
+	readonly cameraGeneration: number;
+	readonly playerGuid: number;
+	readonly entityGeneration: number;
+}): ClientCameraTick {
+	const point = {
+		landblockId: 0x0100_ffff,
+		coords: { x: 12, y: 3, z: 2 },
+	};
+	return {
+		kind: "fallback",
+		...identity,
+		sequence: 1,
+		durationMs: 30,
+		targetSphereRole: "primary",
+		desiredReach: 4.5,
+		path: {
+			initial: { position: point, visualPivot: point },
+			legs: [{ endFraction: 1, end: { position: point, visualPivot: point } }],
+		},
+		reason: "free-sphere-query",
+		diagnostics: {
+			collisionProof: { status: "covered" },
+			controlLegs: 0,
+			clearanceSweeps: 0,
+			transitSubsteps: 0,
+			contactPasses: 8,
 		},
 	};
 }

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
 	decodeClientChatMessage,
+	decodeClientCameraTick,
 	decodeClientLifecycle,
 	decodeClientLocalPlayerEstablished,
 	decodeClientVitals,
@@ -65,6 +66,56 @@ describe("client host wire contract", () => {
 				channel: "General",
 				message: "Hello",
 				extra: true,
+			}),
+		).toThrow();
+	});
+
+	it("separates proven camera ticks from unproven fallback by shape", () => {
+		const point = {
+			position: {
+				landblockId: 0xda55_ffff,
+				coords: { x: 10, y: 20, z: 3 },
+			},
+			visualPivot: {
+				landblockId: 0xda55_ffff,
+				coords: { x: 10, y: 20, z: 3 },
+			},
+		};
+		const common = {
+			cameraGeneration: 1,
+			playerGuid: 0x5000_0001,
+			entityGeneration: 1,
+			sequence: 1,
+			durationMs: 30,
+			targetSphereRole: "upper-constraint",
+			desiredReach: 4.5,
+			path: {
+				initial: point,
+				legs: [{ endFraction: 1, end: point }],
+			},
+			diagnostics: {
+				collisionProof: { status: "covered" },
+				controlLegs: 0,
+				clearanceSweeps: 0,
+				transitSubsteps: 0,
+				contactPasses: 8,
+			},
+		} as const;
+
+		expect(
+			decodeClientCameraTick({
+				...common,
+				kind: "fallback",
+				reason: "free-sphere-query",
+			}),
+		).not.toHaveProperty("clearance");
+		expect(() =>
+			decodeClientCameraTick({
+				...common,
+				kind: "held",
+				clearance: null,
+				renderedReach: 0,
+				reason: "free-sphere-query",
 			}),
 		).toThrow();
 	});

@@ -62,9 +62,8 @@ const clearanceSchema = z
 		projectionRevision: generation,
 		radius: finiteNumber.positive(),
 	})
-	.strict()
-	.nullable();
-const holdReasonSchema = z.enum([
+	.strict();
+const failureReasonSchema = z.enum([
 	"clearance-sweep",
 	"free-sphere-query",
 	"target-contract",
@@ -114,7 +113,19 @@ const tickSchema = z.discriminatedUnion("kind", [
 			desiredReach: finiteNumber.nonnegative(),
 			renderedReach: finiteNumber.nonnegative(),
 			path: pathSchema,
-			reason: holdReasonSchema,
+			reason: failureReasonSchema,
+			diagnostics: diagnosticsSchema,
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("fallback"),
+			...identityFields,
+			sequence,
+			targetSphereRole: z.enum(["primary", "upper-constraint"]),
+			desiredReach: finiteNumber.nonnegative(),
+			path: pathSchema,
+			reason: failureReasonSchema,
 			diagnostics: diagnosticsSchema,
 		})
 		.strict(),
@@ -127,7 +138,7 @@ export type HostKinematicBoomIdentity = Pick<
 	"boomGeneration" | "possessionGeneration" | "guid" | "entityGeneration"
 >;
 
-/** One validated host camera tick carrying continuous, reseeded, or recoverably held placement. */
+/** One validated host camera tick with explicit projection-proof state. */
 export type HostKinematicBoomTick = z.infer<typeof tickSchema>;
 
 /** Result of one semantic latest-wins input command. */
@@ -152,8 +163,10 @@ export interface HostKinematicBoomPresentation {
 /** Placement-authoring condition recovered through an explicit safe discontinuity. */
 export type HostKinematicBoomReseedReason = z.infer<typeof reseedReasonSchema>;
 
-/** Machine-readable reason one recoverable tick held its last collision-safe placement. */
-export type HostKinematicBoomHoldReason = z.infer<typeof holdReasonSchema>;
+/** Machine-readable reason one recoverable tick could not produce a new safe placement. */
+export type HostKinematicBoomFailureReason = z.infer<
+	typeof failureReasonSchema
+>;
 
 /**
  * Convert the camera's AC-world look direction into the boom's pivot-to-camera direction.
@@ -178,7 +191,9 @@ export function decodeHostKinematicBoomTick(
 	const tick = tickSchema.parse(value);
 	validateHostPlacedPath(tick.path, durationMs);
 	if (
-		(tick.kind === "reseeded" || tick.kind === "held") &&
+		(tick.kind === "reseeded" ||
+			tick.kind === "held" ||
+			tick.kind === "fallback") &&
 		!tick.path.legs.every(({ end }) => samePathPoint(end, tick.path.initial))
 	) {
 		throw new Error(
@@ -215,7 +230,7 @@ export function sameHostKinematicBoomIdentity(
 	);
 }
 
-/** Evaluate one collision-safe host path without predicting or reclassifying its residency. */
+/** Evaluate one host-authored path without predicting or reclassifying its residency. */
 export function evaluateHostKinematicBoomPath(
 	path: HostPlacedPath<z.infer<typeof pathPointSchema>>,
 	durationMs: number,

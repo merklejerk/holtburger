@@ -1437,7 +1437,9 @@ function summarizePossessionScenario(scenario) {
 		cameraVerticalVelocities,
 		scenario.boom.tickMs / 1_000,
 	);
-	const renderedReach = playableBoomTicks.map((tick) => tick.renderedReach);
+	const renderedReach = playableBoomTicks
+		.filter((tick) => tick.kind !== "fallback")
+		.map((tick) => tick.renderedReach);
 	const repeatedStepTicks = scenario.boom.repeatedStepTickRange
 		? playableBoomTicks.slice(
 				scenario.boom.repeatedStepTickRange.start,
@@ -1502,6 +1504,9 @@ function summarizePossessionScenario(scenario) {
 			pathCount: playableBoomTicks.length,
 			holds: playableBoomTicks
 				.filter((tick) => tick.kind === "held")
+				.map((tick) => ({ reason: tick.reason, sequence: tick.sequence })),
+			fallbacks: playableBoomTicks
+				.filter((tick) => tick.kind === "fallback")
 				.map((tick) => ({ reason: tick.reason, sequence: tick.sequence })),
 			reseeds: playableBoomTicks
 				.filter((tick) => tick.kind === "reseeded")
@@ -1572,7 +1577,9 @@ function summarizePossessionScenario(scenario) {
 							),
 							pathCount: repeatedStepTicks.length,
 							reachDirectionReversals: directionReversals(
-								repeatedStepTicks.map((tick) => tick.renderedReach),
+								repeatedStepTicks
+									.filter((tick) => tick.kind !== "fallback")
+									.map((tick) => tick.renderedReach),
 							),
 						},
 			route: compactResidencyRoute(scenario.boom.route),
@@ -2429,7 +2436,11 @@ function assertPossessionScenario(scenario) {
 	}
 	const acknowledgedRevisions = new Set(
 		scenario.boom.ticks
-			.map((tick) => tick.clearance?.projectionRevision)
+			.map((tick) =>
+				tick.kind === "fallback"
+					? undefined
+					: tick.clearance.projectionRevision,
+			)
 			.filter((revision) => revision !== undefined),
 	);
 	const invalidProjectionFrame = scenario.boom.frameStates.find((state) => {

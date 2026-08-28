@@ -7,7 +7,7 @@ use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion, Vector3};
 use holtburger_core::{
     KinematicBoomAdvance, KinematicBoomClearance, KinematicBoomCollisionProof,
-    KinematicBoomController, KinematicBoomDiagnostics, KinematicBoomHoldReason,
+    KinematicBoomController, KinematicBoomDiagnostics, KinematicBoomFailureReason,
     KinematicBoomIntent, KinematicBoomOutcome, KinematicBoomPlacement, KinematicBoomProfile,
     KinematicBoomProfileDefinition, KinematicBoomReseedReason, KinematicBoomTargetSample,
     KinematicBoomTargetSeed, KinematicBoomUpdateAcceptance, resolve_camera_pivot_offset,
@@ -252,10 +252,10 @@ impl From<KinematicBoomDiagnostics> for HostKinematicBoomDiagnostics {
     }
 }
 
-/// Machine-readable reason a recoverable tick held its last safe placement.
+/// Machine-readable reason a recoverable tick could not produce a new safe placement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum HostKinematicBoomHoldReason {
+pub enum HostKinematicBoomFailureReason {
     ClearanceSweep,
     FreeSphereQuery,
     TargetContract,
@@ -263,11 +263,11 @@ pub enum HostKinematicBoomHoldReason {
     PathProjection,
 }
 
-impl From<KinematicBoomHoldReason> for HostKinematicBoomHoldReason {
-    fn from(value: KinematicBoomHoldReason) -> Self {
+impl From<KinematicBoomFailureReason> for HostKinematicBoomFailureReason {
+    fn from(value: KinematicBoomFailureReason) -> Self {
         match value {
-            KinematicBoomHoldReason::ClearanceSweep => Self::ClearanceSweep,
-            KinematicBoomHoldReason::FreeSphereQuery => Self::FreeSphereQuery,
+            KinematicBoomFailureReason::ClearanceSweep => Self::ClearanceSweep,
+            KinematicBoomFailureReason::FreeSphereQuery => Self::FreeSphereQuery,
         }
     }
 }
@@ -311,8 +311,8 @@ pub enum HostKinematicBoomTick {
         sequence: u64,
         /// Target sphere selected from the accepted physical body definition.
         target_sphere_role: HostKinematicBoomTargetSphereRole,
-        /// Projection clearance proven by this path, absent only before initial acknowledgement.
-        clearance: Option<HostKinematicBoomClearance>,
+        /// Projection clearance proven by this path.
+        clearance: HostKinematicBoomClearance,
         /// Latest operator-requested reach after cumulative zoom and host clamping.
         desired_reach: f32,
         /// Collision-constrained reach committed by the controller for this transaction.
@@ -332,7 +332,7 @@ pub enum HostKinematicBoomTick {
         /// Target sphere selected from the accepted physical body definition.
         target_sphere_role: HostKinematicBoomTargetSphereRole,
         /// Projection clearance proven by this placement.
-        clearance: Option<HostKinematicBoomClearance>,
+        clearance: HostKinematicBoomClearance,
         /// Latest operator-requested reach after cumulative zoom and host clamping.
         desired_reach: f32,
         /// Reach committed at the recovered full-envelope-safe placement.
@@ -353,8 +353,8 @@ pub enum HostKinematicBoomTick {
         sequence: u64,
         /// Target sphere selected from the latest accepted physical body definition.
         target_sphere_role: HostKinematicBoomTargetSphereRole,
-        /// Projection clearance retained by the active generation, if initialized.
-        clearance: Option<HostKinematicBoomClearance>,
+        /// Projection clearance retained by the active generation.
+        clearance: HostKinematicBoomClearance,
         /// Latest operator-requested reach after cumulative zoom and host clamping.
         desired_reach: f32,
         /// Actual reach of the retained collision-safe camera placement.
@@ -362,8 +362,26 @@ pub enum HostKinematicBoomTick {
         /// Stationary path at the authoritative retained placement.
         path: HostKinematicBoomPlacedPath,
         /// Machine-readable reason the tick could not advance continuously.
-        reason: HostKinematicBoomHoldReason,
+        reason: HostKinematicBoomFailureReason,
         /// Work completed before holding.
+        diagnostics: HostKinematicBoomDiagnostics,
+    },
+    /// Stationary current target placement published before projection clearance is proven.
+    Fallback {
+        /// Exact runtime identity that remains active.
+        #[serde(flatten)]
+        identity: HostKinematicBoomIdentity,
+        /// Monotonic host-authored camera path sequence.
+        sequence: u64,
+        /// Target sphere selected from the latest accepted physical body definition.
+        target_sphere_role: HostKinematicBoomTargetSphereRole,
+        /// Latest operator-requested reach after cumulative zoom and host clamping.
+        desired_reach: f32,
+        /// Stationary path at the generation-current target placement.
+        path: HostKinematicBoomPlacedPath,
+        /// Machine-readable reason projection clearance could not yet be proven.
+        reason: HostKinematicBoomFailureReason,
+        /// Work completed before falling back.
         diagnostics: HostKinematicBoomDiagnostics,
     },
 }
@@ -622,7 +640,7 @@ camera pivot rests on its collision geometry alone",
                         eprintln!("kinematic boom target adaptation failed: {error:#}");
                         let tick = project_hold(
                             active,
-                            HostKinematicBoomHoldReason::TargetContract,
+                            HostKinematicBoomFailureReason::TargetContract,
                             KinematicBoomDiagnostics::default(),
                         );
                         return Ok(Some(tick));
@@ -646,7 +664,7 @@ camera pivot rests on its collision geometry alone",
                         eprintln!("kinematic boom stationary target adaptation failed: {error:#}");
                         let tick = project_hold(
                             active,
-                            HostKinematicBoomHoldReason::TargetContract,
+                            HostKinematicBoomFailureReason::TargetContract,
                             KinematicBoomDiagnostics {
                                 collision_proof: KinematicBoomCollisionProof::Uncovered {
                                     owner: rejection.owner,
@@ -661,7 +679,7 @@ camera pivot rests on its collision geometry alone",
                 eprintln!("kinematic boom target is absent from its current possession collection");
                 let tick = project_hold(
                     active,
-                    HostKinematicBoomHoldReason::TargetContract,
+                    HostKinematicBoomFailureReason::TargetContract,
                     KinematicBoomDiagnostics::default(),
                 );
                 return Ok(Some(tick));
@@ -680,7 +698,7 @@ camera pivot rests on its collision geometry alone",
                 eprintln!("kinematic boom controller input failed: {error:#}");
                 let tick = project_hold(
                     active,
-                    HostKinematicBoomHoldReason::ControllerInput,
+                    HostKinematicBoomFailureReason::ControllerInput,
                     KinematicBoomDiagnostics::default(),
                 );
                 return Ok(Some(tick));
@@ -697,7 +715,8 @@ camera pivot rests on its collision geometry alone",
 fn mark_outcome_uncovered(outcome: &mut KinematicBoomOutcome, candidate: Guid) {
     let diagnostics = match outcome {
         KinematicBoomOutcome::Advanced { diagnostics, .. }
-        | KinematicBoomOutcome::Held { diagnostics, .. } => diagnostics,
+        | KinematicBoomOutcome::Held { diagnostics, .. }
+        | KinematicBoomOutcome::Fallback { diagnostics, .. } => diagnostics,
     };
     if matches!(
         diagnostics.collision_proof,
@@ -712,7 +731,7 @@ fn mark_outcome_uncovered(outcome: &mut KinematicBoomOutcome, candidate: Guid) {
 
 fn project_hold(
     active: &mut ActiveHostKinematicBoom,
-    reason: HostKinematicBoomHoldReason,
+    reason: HostKinematicBoomFailureReason,
     diagnostics: KinematicBoomDiagnostics,
 ) -> HostKinematicBoomTick {
     let sequence = active
@@ -720,32 +739,47 @@ fn project_hold(
         .checked_add(1)
         .expect("active boom output sequence exhausted");
     active.sequence = sequence;
-    hold_tick(
-        active,
-        sequence,
-        active.controller.camera(),
-        active.controller.committed_clearance(),
-        reason,
-        diagnostics,
-    )
+    let placement = active.controller.camera();
+    match active.controller.committed_clearance() {
+        Some(clearance) => hold_tick(active, sequence, placement, clearance, reason, diagnostics),
+        None => fallback_tick(active, sequence, placement, reason, diagnostics),
+    }
 }
 
 fn hold_tick(
     active: &ActiveHostKinematicBoom,
     sequence: u64,
     held: KinematicBoomPlacement,
-    clearance: Option<KinematicBoomClearance>,
-    reason: HostKinematicBoomHoldReason,
+    clearance: KinematicBoomClearance,
+    reason: HostKinematicBoomFailureReason,
     diagnostics: KinematicBoomDiagnostics,
 ) -> HostKinematicBoomTick {
     HostKinematicBoomTick::Held {
         identity: active.identity,
         sequence,
         target_sphere_role: active.target_sphere_role,
-        clearance: clearance.map(Into::into),
+        clearance: clearance.into(),
         desired_reach: active.controller.desired_reach(),
         rendered_reach: active.controller.rendered_reach(),
         path: stationary_path(held, active.controller.visual_pivot()),
+        reason,
+        diagnostics: diagnostics.into(),
+    }
+}
+
+fn fallback_tick(
+    active: &ActiveHostKinematicBoom,
+    sequence: u64,
+    placement: KinematicBoomPlacement,
+    reason: HostKinematicBoomFailureReason,
+    diagnostics: KinematicBoomDiagnostics,
+) -> HostKinematicBoomTick {
+    HostKinematicBoomTick::Fallback {
+        identity: active.identity,
+        sequence,
+        target_sphere_role: active.target_sphere_role,
+        desired_reach: active.controller.desired_reach(),
+        path: stationary_path(placement, active.controller.visual_pivot()),
         reason,
         diagnostics: diagnostics.into(),
     }
@@ -776,7 +810,7 @@ fn project_outcome(
                     identity: active.identity,
                     sequence,
                     target_sphere_role: active.target_sphere_role,
-                    clearance: clearance.map(Into::into),
+                    clearance: clearance.into(),
                     desired_reach: active.controller.desired_reach(),
                     rendered_reach: active.controller.rendered_reach(),
                     path,
@@ -789,7 +823,7 @@ fn project_outcome(
                         sequence,
                         active.controller.camera(),
                         clearance,
-                        HostKinematicBoomHoldReason::PathProjection,
+                        HostKinematicBoomFailureReason::PathProjection,
                         diagnostics,
                     )
                 }
@@ -799,7 +833,7 @@ fn project_outcome(
                     identity: active.identity,
                     sequence,
                     target_sphere_role: active.target_sphere_role,
-                    clearance: clearance.map(Into::into),
+                    clearance: clearance.into(),
                     desired_reach: active.controller.desired_reach(),
                     rendered_reach: active.controller.rendered_reach(),
                     path: stationary_path(placement, active.controller.visual_pivot()),
@@ -821,6 +855,11 @@ fn project_outcome(
             reason.into(),
             diagnostics,
         ),
+        KinematicBoomOutcome::Fallback {
+            reason,
+            placement,
+            diagnostics,
+        } => fallback_tick(active, sequence, placement, reason.into(), diagnostics),
     }
 }
 
@@ -1160,10 +1199,10 @@ mod tests {
             },
             sequence: 5,
             target_sphere_role: HostKinematicBoomTargetSphereRole::UpperConstraint,
-            clearance: Some(HostKinematicBoomClearance {
+            clearance: HostKinematicBoomClearance {
                 projection_revision: 7,
                 radius: 0.9,
-            }),
+            },
             desired_reach: 4.5,
             rendered_reach: 3.75,
             path: HostKinematicBoomPlacedPath {

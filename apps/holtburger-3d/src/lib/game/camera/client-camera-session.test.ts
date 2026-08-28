@@ -129,6 +129,35 @@ describe("ClientCameraSession", () => {
 		});
 	});
 
+	it("presents fallback without projection proof and replaces it immediately when proven", async () => {
+		const transport = new FakeTransport();
+		const lifecycle = new ClientLifecycleSession(transport);
+		await lifecycle.start();
+		const camera = new ClientCameraSession(lifecycle);
+		await camera.start(TARGET, DISTANCE, [0, 0, -1], PROJECTION);
+		camera.receive(fallback(1, 50), 100);
+
+		expect(camera.presentation(100)?.placement.position.x).toBeCloseTo(
+			50 + 0xda * 192,
+		);
+		expect(camera.acknowledgedProjection(100)).toBeNull();
+		expect(camera.status()).toMatchObject({
+			kind: "active",
+			clearance: null,
+			renderedReach: 0,
+			placementOutcome: {
+				kind: "fallback",
+				reason: "free-sphere-query",
+			},
+		});
+
+		camera.receive(tick(2, 10, 14), 101);
+		expect(camera.presentation(101)?.placement.position.x).toBeCloseTo(
+			10 + 0xda * 192,
+		);
+		expect(camera.acknowledgedProjection(101)?.revision).toBe(1);
+	});
+
 	it("drops stale generations and clears projection/path state on stop", async () => {
 		const transport = new FakeTransport();
 		const lifecycle = new ClientLifecycleSession(transport);
@@ -234,6 +263,29 @@ function tick(
 			clearanceSweeps: 1,
 			transitSubsteps: 1,
 			contactPasses: 0,
+		},
+	};
+}
+
+function fallback(sequence: number, x: number): ClientCameraTick {
+	return {
+		kind: "fallback",
+		...IDENTITY,
+		sequence,
+		durationMs: 32,
+		targetSphereRole: "primary",
+		desiredReach: 4.5,
+		path: {
+			initial: pathPoint(x),
+			legs: [{ endFraction: 1, end: pathPoint(x) }],
+		},
+		reason: "free-sphere-query",
+		diagnostics: {
+			collisionProof: { status: "covered" },
+			controlLegs: 0,
+			clearanceSweeps: 0,
+			transitSubsteps: 0,
+			contactPasses: 8,
 		},
 	};
 }

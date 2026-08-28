@@ -29,7 +29,7 @@ pub use builder::ClientRuntimeBuilder;
 use camera::ClientCameraRuntime;
 pub use camera::{
     ClientCameraClearance, ClientCameraClearanceRequest, ClientCameraCollisionProof,
-    ClientCameraDiagnostics, ClientCameraHoldReason, ClientCameraIdentity,
+    ClientCameraDiagnostics, ClientCameraFailureReason, ClientCameraIdentity,
     ClientCameraIntentRequest, ClientCameraReseedReason, ClientCameraStartReceipt,
     ClientCameraStartRequest, ClientCameraTargetSphereRole, ClientCameraTick,
     ClientCameraUpdateReceipt,
@@ -92,9 +92,14 @@ struct ClientWorldActivationRuntime {
     phase: ClientWorldActivationPhase,
     player_guid: Guid,
     destination: Option<ClientActivationDestination>,
+    /// When the server's destination position became authoritative for this generation.
+    destination_accepted_at: Option<Instant>,
     camera_seed_ready: bool,
     external_reveal_generation: Option<u64>,
 }
+
+/// Maximum retail tunnel completion after an authoritative destination position is accepted.
+const RETAIL_PORTAL_COMPLETION_GRACE: Duration = Duration::from_secs(7);
 
 /// Protocol progress needed to distinguish the pre-destination teleport gap from a destination
 /// that is ready for activation convergence.
@@ -226,6 +231,7 @@ impl ClientRuntime {
             phase,
             player_guid,
             destination: None,
+            destination_accepted_at: None,
             camera_seed_ready: !self.requires_external_world_reveal,
             external_reveal_generation: (!self.requires_external_world_reveal)
                 .then_some(generation),
@@ -274,6 +280,11 @@ impl ClientRuntime {
     /// Re-evaluates the activation conjunction after a world/collision/content fact changes.
     /// This is deliberately the only path that can send ACE's `LoginComplete` action.
     pub(super) async fn try_complete_world_activation(&mut self) -> anyhow::Result<()> {
+        self.try_complete_world_activation_at(Instant::now()).await
+    }
+
+    /// Re-evaluates activation against one sampled clock for deterministic deadline policy.
+    async fn try_complete_world_activation_at(&mut self, now: Instant) -> anyhow::Result<()> {
         let Some(mut activation) = self.activation.take() else {
             return Ok(());
         };
@@ -303,6 +314,7 @@ impl ClientRuntime {
         };
         if activation.destination != Some(destination) {
             activation.destination = Some(destination);
+            activation.destination_accepted_at = Some(now);
             activation.camera_seed_ready = !self.requires_external_world_reveal;
         }
 
@@ -342,14 +354,29 @@ impl ClientRuntime {
             }
         }
 
-        if !body_ready
-            || !destination_scene_ready
-            || !containment_ready
-            || !activation.camera_seed_ready
-            || !reveal_ready
-        {
+        let presentation_ready = body_ready
+            && destination_scene_ready
+            && containment_ready
+            && activation.camera_seed_ready
+            && reveal_ready;
+        // RETAIL QUIRK: `SmartBox::UseTime` completes a received position independently of scene
+        // rendering (acclient.c:140024-140027), then `gmSmartBoxUI::UseTime` bounds tunnel exit and
+        // sends LoginComplete (acclient.c:252754-252799). Requiring visual convergence forever
+        // strands the shipped Town Network destination at 0x00070219. Live census: 0x0007 lacks a
+        // usable destination scene; 0x0288 and outdoor 22S, 2W converge before this deadline.
+        let completion_grace_elapsed = activation.destination_accepted_at.is_some_and(|accepted| {
+            now.saturating_duration_since(accepted) >= RETAIL_PORTAL_COMPLETION_GRACE
+        });
+        if !presentation_ready && !completion_grace_elapsed {
             self.activation = Some(activation);
             return Ok(());
+        }
+        if completion_grace_elapsed && !presentation_ready {
+            log::warn!(
+                "Completing world generation {} at destination {:#010X} after presentation failed to converge",
+                activation.generation,
+                destination.residency.0
+            );
         }
 
         self.send_login_complete().await?;
@@ -1130,6 +1157,80 @@ mod tests {
             2,
             "selection source remains lossless in core"
         );
+    }
+
+    #[tokio::test]
+    async fn authoritative_destination_completes_after_retail_presentation_grace() {
+        let mut client = builder::build_test_client(ClientState::EnteringWorld);
+        let player_guid = Guid(0x5000_0001);
+        let destination = WorldPosition {
+            landblock_id: Guid(0x0007_0219),
+            coords: Vector3::new(160.0, -10.0, 12.01),
+            rotation: Quaternion::identity(),
+        };
+        let accepted_at = Instant::now();
+        client.requires_external_world_reveal = true;
+        client
+            .world
+            .seed_local_player_entity(player_guid, "Player", destination);
+        client.start_world_activation(ClientWorldActivationState::Teleport, player_guid);
+        let activation = client
+            .activation
+            .as_mut()
+            .expect("teleport should create an activation");
+        activation.phase = ClientWorldActivationPhase::TeleportDestinationInstalled;
+
+        client
+            .try_complete_world_activation_at(accepted_at)
+            .await
+            .unwrap();
+        assert!(client.activation.is_some());
+        assert_eq!(client.session.bytes_out, 0);
+
+        client
+            .try_complete_world_activation_at(
+                accepted_at + RETAIL_PORTAL_COMPLETION_GRACE - Duration::from_millis(1),
+            )
+            .await
+            .unwrap();
+        assert!(client.activation.is_some());
+        assert_eq!(client.session.bytes_out, 0);
+
+        client
+            .try_complete_world_activation_at(accepted_at + RETAIL_PORTAL_COMPLETION_GRACE)
+            .await
+            .unwrap();
+
+        assert!(client.activation.is_none());
+        assert_eq!(client.state, ClientState::InWorld);
+        assert!(client.session.bytes_out > 0);
+    }
+
+    #[tokio::test]
+    async fn presentation_grace_never_completes_a_teleport_without_a_destination() {
+        let mut client = builder::build_test_client(ClientState::EnteringWorld);
+        let player_guid = Guid(0x5000_0001);
+        let started_at = Instant::now();
+        client
+            .world
+            .seed_local_player_entity(player_guid, "Player", WorldPosition::default());
+        client.start_world_activation(ClientWorldActivationState::Teleport, player_guid);
+
+        client
+            .try_complete_world_activation_at(
+                started_at + RETAIL_PORTAL_COMPLETION_GRACE + Duration::from_secs(60),
+            )
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            client
+                .activation
+                .as_ref()
+                .map(|activation| activation.phase),
+            Some(ClientWorldActivationPhase::TeleportAwaitingDestination)
+        ));
+        assert_eq!(client.session.bytes_out, 0);
     }
 
     fn test_remote_motion_catalog(motion_table_id: u32) -> MotionSequenceCatalog {

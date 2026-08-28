@@ -23,6 +23,7 @@
 		"archive:package": "electron-forge make --skip-package",
 		"smoke:sidecar": "node scripts/sidecar-smoke.mjs",
 		"probe:client": "npm run build:electron:main && npm run build:host && node scripts/live-client-probe.mjs",
+		"probe:client:ui": "node scripts/live-client-ui-probe.mjs",
 		"check:package": "node scripts/verify-electron-package.mjs",
 		"check:archive": "node scripts/verify-electron-archive.mjs",
 		"preview": "vite preview --host 127.0.0.1 --port 0 --strictPort",

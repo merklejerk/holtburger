@@ -81,6 +81,15 @@ describe("host kinematic boom path", () => {
 			decodeHostKinematicBoomTick(
 				{
 					...advanced(),
+					clearance: null,
+				},
+				32,
+			),
+		).toThrow();
+		expect(() =>
+			decodeHostKinematicBoomTick(
+				{
+					...advanced(),
 					clearance: { projectionRevision: 3, radius: -0.3 },
 					desiredReach: 4.5,
 					renderedReach: 3.75,
@@ -124,10 +133,13 @@ describe("host kinematic boom path", () => {
 			},
 		};
 		expect(decodeHostKinematicBoomTick(value, 32).kind).toBe("reseeded");
-		expect(
-			decodeHostKinematicBoomTick({ ...value, renderedReach: 0.1 }, 32)
-				.renderedReach,
-		).toBe(0.1);
+		const extended = decodeHostKinematicBoomTick(
+			{ ...value, renderedReach: 0.1 },
+			32,
+		);
+		if (extended.kind !== "reseeded")
+			throw new Error("fixture must remain reseeded");
+		expect(extended.renderedReach).toBe(0.1);
 		expect(() =>
 			decodeHostKinematicBoomTick(
 				{
@@ -163,7 +175,32 @@ describe("host kinematic boom path", () => {
 			32,
 		);
 
-		expect(tick.kind).toBe("held");
+		if (tick.kind !== "held") throw new Error("fixture must hold");
 		expect(tick.renderedReach).toBe(4.75);
+	});
+
+	it("accepts stationary fallback without projection proof or rendered reach", () => {
+		const base = Object.fromEntries(
+			Object.entries(advanced()).filter(
+				([field]) => field !== "clearance" && field !== "renderedReach",
+			),
+		);
+		const stationary = point(0xda550178, 12, 12);
+		const tick = decodeHostKinematicBoomTick(
+			{
+				...base,
+				kind: "fallback",
+				reason: "free-sphere-query",
+				path: {
+					initial: stationary,
+					legs: [{ endFraction: 1, end: stationary }],
+				},
+			},
+			32,
+		);
+
+		expect(tick.kind).toBe("fallback");
+		expect("clearance" in tick).toBe(false);
+		expect("renderedReach" in tick).toBe(false);
 	});
 });

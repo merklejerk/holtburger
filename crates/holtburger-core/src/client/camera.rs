@@ -22,7 +22,7 @@ use crate::SimulationSceneSnapshot;
 use crate::client::types::ClientViewEvent;
 use crate::kinematic_boom::{
     KinematicBoomAdvance, KinematicBoomClearance, KinematicBoomCollisionProof,
-    KinematicBoomController, KinematicBoomDiagnostics, KinematicBoomHoldReason,
+    KinematicBoomController, KinematicBoomDiagnostics, KinematicBoomFailureReason,
     KinematicBoomIntent, KinematicBoomOutcome, KinematicBoomPlacedPath, KinematicBoomPlacement,
     KinematicBoomProfile, KinematicBoomReseedReason, KinematicBoomTargetSample,
     KinematicBoomTargetSeed, KinematicBoomUpdateAcceptance, interpolate_pose,
@@ -188,10 +188,10 @@ impl From<KinematicBoomDiagnostics> for ClientCameraDiagnostics {
     }
 }
 
-/// Machine-readable reason for a recoverable held camera tick.
+/// Machine-readable reason a recoverable camera tick could not prove a new placement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum ClientCameraHoldReason {
+pub enum ClientCameraFailureReason {
     ClearanceSweep,
     FreeSphereQuery,
     TargetContract,
@@ -199,11 +199,11 @@ pub enum ClientCameraHoldReason {
     PathProjection,
 }
 
-impl From<KinematicBoomHoldReason> for ClientCameraHoldReason {
-    fn from(value: KinematicBoomHoldReason) -> Self {
+impl From<KinematicBoomFailureReason> for ClientCameraFailureReason {
+    fn from(value: KinematicBoomFailureReason) -> Self {
         match value {
-            KinematicBoomHoldReason::ClearanceSweep => Self::ClearanceSweep,
-            KinematicBoomHoldReason::FreeSphereQuery => Self::FreeSphereQuery,
+            KinematicBoomFailureReason::ClearanceSweep => Self::ClearanceSweep,
+            KinematicBoomFailureReason::FreeSphereQuery => Self::FreeSphereQuery,
         }
     }
 }
@@ -227,7 +227,7 @@ impl From<KinematicBoomReseedReason> for ClientCameraReseedReason {
     }
 }
 
-/// One host-authored collision-safe client camera tick.
+/// One host-authored client camera tick with explicit projection-proof state.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(
     tag = "kind",
@@ -242,7 +242,7 @@ pub enum ClientCameraTick {
         /// Exact authority-clocked duration used by the boom solve and path playback.
         duration_ms: f64,
         target_sphere_role: ClientCameraTargetSphereRole,
-        clearance: Option<ClientCameraClearance>,
+        clearance: ClientCameraClearance,
         desired_reach: f32,
         rendered_reach: f32,
         path: KinematicBoomPlacedPath,
@@ -255,7 +255,7 @@ pub enum ClientCameraTick {
         /// Exact authority-clocked duration used by the boom solve and path playback.
         duration_ms: f64,
         target_sphere_role: ClientCameraTargetSphereRole,
-        clearance: Option<ClientCameraClearance>,
+        clearance: ClientCameraClearance,
         desired_reach: f32,
         rendered_reach: f32,
         path: KinematicBoomPlacedPath,
@@ -269,11 +269,24 @@ pub enum ClientCameraTick {
         /// Exact authority-clocked duration used by the boom solve and path playback.
         duration_ms: f64,
         target_sphere_role: ClientCameraTargetSphereRole,
-        clearance: Option<ClientCameraClearance>,
+        clearance: ClientCameraClearance,
         desired_reach: f32,
         rendered_reach: f32,
         path: KinematicBoomPlacedPath,
-        reason: ClientCameraHoldReason,
+        reason: ClientCameraFailureReason,
+        diagnostics: ClientCameraDiagnostics,
+    },
+    /// Current target placement used before projection clearance can be proven.
+    Fallback {
+        #[serde(flatten)]
+        identity: ClientCameraIdentity,
+        sequence: u64,
+        /// Exact authority-clocked duration used for stationary playback.
+        duration_ms: f64,
+        target_sphere_role: ClientCameraTargetSphereRole,
+        desired_reach: f32,
+        path: KinematicBoomPlacedPath,
+        reason: ClientCameraFailureReason,
         diagnostics: ClientCameraDiagnostics,
     },
 }
@@ -498,6 +511,7 @@ impl ClientCameraRuntime {
         let Some(active) = self.active.as_mut() else {
             return Ok(None);
         };
+        let duration_ms = duration.as_secs_f64() * 1_000.0;
         let path_samples = batch
             .and_then(|batch| {
                 batch.advances.iter().find(|advance| {
@@ -514,35 +528,72 @@ impl ClientCameraRuntime {
                     active.pivot_offset,
                 )
             })
-            .transpose()?;
+            .transpose();
+        let path_samples = match path_samples {
+            Ok(samples) => samples,
+            Err(_) => {
+                return project_camera_failure(
+                    active,
+                    duration_ms,
+                    ClientCameraFailureReason::TargetContract,
+                    KinematicBoomDiagnostics::default(),
+                )
+                .map(Some);
+            }
+        };
         if let Some(samples) = path_samples {
             active.latest_target_samples = samples;
         }
         if active.latest_target_samples.is_empty() {
-            let pose = world
+            let Some(body) = world
                 .scene
                 .body(SpatialBodyId::LocalPlayer(active.identity.player_guid))
-                .context("client camera target body disappeared")?
-                .pose;
-            active.latest_target_samples = vec![target_sample_from_pose(
+            else {
+                return project_camera_failure(
+                    active,
+                    duration_ms,
+                    ClientCameraFailureReason::TargetContract,
+                    KinematicBoomDiagnostics::default(),
+                )
+                .map(Some);
+            };
+            let target_sample = match target_sample_from_pose(
                 collision.scene.as_ref(),
-                pose,
+                body.pose,
                 &mut active.target_body,
                 active.pivot_offset,
-            )?];
+            ) {
+                Ok(sample) => sample,
+                Err(_) => {
+                    return project_camera_failure(
+                        active,
+                        duration_ms,
+                        ClientCameraFailureReason::TargetContract,
+                        KinematicBoomDiagnostics::default(),
+                    )
+                    .map(Some);
+                }
+            };
+            active.latest_target_samples = vec![target_sample];
         }
         let initial_visual_pivot = active.controller.visual_pivot();
-        let outcome = active.controller.advance(
+        let outcome = match active.controller.advance(
             collision.scene.as_ref(),
             duration_seconds,
             &active.latest_target_samples,
-        )?;
-        let tick = project_camera_outcome(
-            active,
-            initial_visual_pivot,
-            duration.as_secs_f64() * 1_000.0,
-            outcome,
-        )?;
+        ) {
+            Ok(outcome) => outcome,
+            Err(_) => {
+                return project_camera_failure(
+                    active,
+                    duration_ms,
+                    ClientCameraFailureReason::ControllerInput,
+                    KinematicBoomDiagnostics::default(),
+                )
+                .map(Some);
+            }
+        };
+        let tick = project_camera_outcome(active, initial_visual_pivot, duration_ms, outcome)?;
         Ok(Some(tick))
     }
 
@@ -826,10 +877,7 @@ fn project_camera_outcome(
     outcome: KinematicBoomOutcome,
 ) -> Result<ClientCameraTick> {
     ensure!(duration_ms.is_finite() && duration_ms > 0.0);
-    active.sequence = active
-        .sequence
-        .checked_add(1)
-        .context("client camera output sequence exhausted")?;
+    active.sequence = next_camera_sequence(active)?;
     let identity = active.identity;
     Ok(match outcome {
         KinematicBoomOutcome::Advanced {
@@ -848,10 +896,10 @@ fn project_camera_outcome(
                         sequence: active.sequence,
                         duration_ms,
                         target_sphere_role: active.target_sphere_role,
-                        clearance: clearance.map(|value| ClientCameraClearance {
-                            projection_revision: value.revision,
-                            radius: value.radius,
-                        }),
+                        clearance: ClientCameraClearance {
+                            projection_revision: clearance.revision,
+                            radius: clearance.radius,
+                        },
                         desired_reach: active.controller.desired_reach(),
                         rendered_reach: active.controller.rendered_reach(),
                         path,
@@ -859,7 +907,8 @@ fn project_camera_outcome(
                     },
                     Err(_) => held_tick(
                         active,
-                        ClientCameraHoldReason::PathProjection,
+                        clearance,
+                        ClientCameraFailureReason::PathProjection,
                         diagnostics,
                         duration_ms,
                     ),
@@ -870,10 +919,10 @@ fn project_camera_outcome(
                 sequence: active.sequence,
                 duration_ms,
                 target_sphere_role: active.target_sphere_role,
-                clearance: clearance.map(|value| ClientCameraClearance {
-                    projection_revision: value.revision,
-                    radius: value.radius,
-                }),
+                clearance: ClientCameraClearance {
+                    projection_revision: clearance.revision,
+                    radius: clearance.radius,
+                },
                 desired_reach: active.controller.desired_reach(),
                 rendered_reach: active.controller.rendered_reach(),
                 path: stationary_kinematic_boom_path(placement, active.controller.visual_pivot()),
@@ -883,15 +932,49 @@ fn project_camera_outcome(
         },
         KinematicBoomOutcome::Held {
             reason,
+            clearance,
             diagnostics,
             ..
-        } => held_tick(active, reason.into(), diagnostics, duration_ms),
+        } => held_tick(active, clearance, reason.into(), diagnostics, duration_ms),
+        KinematicBoomOutcome::Fallback {
+            reason,
+            placement,
+            diagnostics,
+        } => fallback_tick(active, placement, reason.into(), diagnostics, duration_ms),
     })
+}
+
+fn project_camera_failure(
+    active: &mut ActiveCamera,
+    duration_ms: f64,
+    reason: ClientCameraFailureReason,
+    diagnostics: KinematicBoomDiagnostics,
+) -> Result<ClientCameraTick> {
+    ensure!(duration_ms.is_finite() && duration_ms > 0.0);
+    active.sequence = next_camera_sequence(active)?;
+    Ok(match active.controller.committed_clearance() {
+        Some(clearance) => held_tick(active, clearance, reason, diagnostics, duration_ms),
+        None => fallback_tick(
+            active,
+            active.controller.camera(),
+            reason,
+            diagnostics,
+            duration_ms,
+        ),
+    })
+}
+
+fn next_camera_sequence(active: &ActiveCamera) -> Result<u64> {
+    active
+        .sequence
+        .checked_add(1)
+        .context("client camera output sequence exhausted")
 }
 
 fn held_tick(
     active: &ActiveCamera,
-    reason: ClientCameraHoldReason,
+    clearance: KinematicBoomClearance,
+    reason: ClientCameraFailureReason,
     diagnostics: KinematicBoomDiagnostics,
     duration_ms: f64,
 ) -> ClientCameraTick {
@@ -902,19 +985,35 @@ fn held_tick(
         // frontend can keep one receipt-clocked playback contract for every output kind.
         duration_ms,
         target_sphere_role: active.target_sphere_role,
-        clearance: active
-            .controller
-            .committed_clearance()
-            .map(|value| ClientCameraClearance {
-                projection_revision: value.revision,
-                radius: value.radius,
-            }),
+        clearance: ClientCameraClearance {
+            projection_revision: clearance.revision,
+            radius: clearance.radius,
+        },
         desired_reach: active.controller.desired_reach(),
         rendered_reach: active.controller.rendered_reach(),
         path: stationary_kinematic_boom_path(
             active.controller.camera(),
             active.controller.visual_pivot(),
         ),
+        reason,
+        diagnostics: diagnostics.into(),
+    }
+}
+
+fn fallback_tick(
+    active: &ActiveCamera,
+    placement: KinematicBoomPlacement,
+    reason: ClientCameraFailureReason,
+    diagnostics: KinematicBoomDiagnostics,
+    duration_ms: f64,
+) -> ClientCameraTick {
+    ClientCameraTick::Fallback {
+        identity: active.identity,
+        sequence: active.sequence,
+        duration_ms,
+        target_sphere_role: active.target_sphere_role,
+        desired_reach: active.controller.desired_reach(),
+        path: stationary_kinematic_boom_path(placement, active.controller.visual_pivot()),
         reason,
         diagnostics: diagnostics.into(),
     }
@@ -1140,7 +1239,8 @@ mod tests {
         let diagnostics = match &tick {
             ClientCameraTick::Advanced { diagnostics, .. }
             | ClientCameraTick::Reseeded { diagnostics, .. }
-            | ClientCameraTick::Held { diagnostics, .. } => diagnostics,
+            | ClientCameraTick::Held { diagnostics, .. }
+            | ClientCameraTick::Fallback { diagnostics, .. } => diagnostics,
         };
         assert_eq!(
             diagnostics.collision_proof,
@@ -1244,10 +1344,13 @@ mod tests {
             .advance_camera(Some(&collision), None, Duration::from_millis(30))
             .expect("deep indoor camera initialization must not fail")
             .expect("initialized camera should publish a tick");
-        let path = match &tick {
-            ClientCameraTick::Advanced { path, .. }
-            | ClientCameraTick::Reseeded { path, .. }
-            | ClientCameraTick::Held { path, .. } => path,
+        let ClientCameraTick::Reseeded {
+            path,
+            reason: ClientCameraReseedReason::InitialPlacement,
+            ..
+        } = &tick
+        else {
+            panic!("ordinary indoor initialization must prove its initial placement: {tick:?}")
         };
         assert_eq!(path.initial.position.landblock_id, cell);
     }

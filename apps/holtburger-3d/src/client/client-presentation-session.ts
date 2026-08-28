@@ -528,9 +528,9 @@ export class ClientPresentationSession {
 		const projection = this.#resolveCameraProjection(extent);
 		let cameraPresentation: HostKinematicBoomPresentation | null;
 		if (portal) {
-			// Portal activation stages the same collision-backed boom as active play, but never
-			// submits input or advances it. A fallback eye would make reveal independent of the
-			// collision product, so hold the destination until the seed tick arrives.
+			// Portal activation requires one generation-current host-authored camera placement.
+			// It may be either projection-proven or the controller's explicit target fallback;
+			// absence and stale-generation output remain non-presentable.
 			this.#ensureCamera(player, projection);
 			cameraPresentation = this.camera.presentation(timeMs);
 			if (cameraPresentation === null) {
@@ -1164,8 +1164,8 @@ export class ClientPresentationSession {
 			kind === "loading-player" &&
 			(previous.kind !== kind || previous.diagnostic !== diagnostic)
 		) {
-			console.error(
-				`Client presentation lost its local-player invariant after world handoff: ${diagnostic ?? "no diagnostic supplied"}`,
+			console.warn(
+				`Client presentation is unavailable after world handoff: ${diagnostic ?? "no diagnostic supplied"}`,
 			);
 		}
 		this.#status = { kind, diagnostic };
@@ -1258,7 +1258,7 @@ function clientCameraWaitDiagnostic(
 		case "awaiting-registration":
 			return "Waiting for local-player camera registration.";
 		case "awaiting-first-path":
-			return "Waiting for the first collision-backed camera path.";
+			return "Waiting for the first host-authored camera path.";
 		case "active":
 			return status.placementOutcome?.kind === "held"
 				? `The camera withdrew its rendered path while held for ${status.placementOutcome.reason}.`

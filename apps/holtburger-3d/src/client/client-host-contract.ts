@@ -152,8 +152,7 @@ const cameraClearanceSchema = z
 		projectionRevision: z.number().int().positive().safe(),
 		radius: finiteNumber.positive(),
 	})
-	.strict()
-	.nullable();
+	.strict();
 const cameraCollisionProofSchema = z.discriminatedUnion("status", [
 	z.object({ status: z.literal("covered") }).strict(),
 	z.object({ status: z.literal("uncovered"), owner: guid }).strict(),
@@ -167,6 +166,13 @@ const cameraDiagnosticsSchema = z
 		contactPasses: z.number().int().nonnegative().safe(),
 	})
 	.strict();
+const cameraFailureReasonSchema = z.enum([
+	"clearance-sweep",
+	"free-sphere-query",
+	"target-contract",
+	"controller-input",
+	"path-projection",
+]);
 const cameraTickSchema = z.discriminatedUnion("kind", [
 	z
 		.object({
@@ -212,13 +218,20 @@ const cameraTickSchema = z.discriminatedUnion("kind", [
 			desiredReach: finiteNumber.nonnegative(),
 			renderedReach: finiteNumber.nonnegative(),
 			path: cameraPathSchema,
-			reason: z.enum([
-				"clearance-sweep",
-				"free-sphere-query",
-				"target-contract",
-				"controller-input",
-				"path-projection",
-			]),
+			reason: cameraFailureReasonSchema,
+			diagnostics: cameraDiagnosticsSchema,
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("fallback"),
+			...cameraIdentitySchema.shape,
+			sequence: z.number().int().positive().safe(),
+			durationMs: finiteNumber.positive(),
+			targetSphereRole: z.enum(["primary", "upper-constraint"]),
+			desiredReach: finiteNumber.nonnegative(),
+			path: cameraPathSchema,
+			reason: cameraFailureReasonSchema,
 			diagnostics: cameraDiagnosticsSchema,
 		})
 		.strict(),
@@ -342,7 +355,7 @@ export function decodeClientCameraStartReceipt(
 	return cameraStartedSchema.parse(value);
 }
 
-/** Strictly validates one client collision-safe camera tick. */
+/** Strictly validates one client camera tick with explicit projection-proof state. */
 export function decodeClientCameraTick(value: unknown): ClientCameraTick {
 	return cameraTickSchema.parse(value);
 }

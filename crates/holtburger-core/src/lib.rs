@@ -43,7 +43,7 @@ pub use client::types::{
 };
 pub use client::{
     ClientCameraClearance, ClientCameraClearanceRequest, ClientCameraCollisionProof,
-    ClientCameraDiagnostics, ClientCameraHoldReason, ClientCameraIdentity,
+    ClientCameraDiagnostics, ClientCameraFailureReason, ClientCameraIdentity,
     ClientCameraIntentRequest, ClientCameraReseedReason, ClientCameraStartReceipt,
     ClientCameraStartRequest, ClientCameraTargetSphereRole, ClientCameraTick,
     ClientCameraUpdateReceipt,
@@ -80,7 +80,7 @@ pub use dynamic_entity_view::{
 pub use holtburger_content::LandblockCollisionAsset;
 pub use kinematic_boom::{
     KinematicBoomAdvance, KinematicBoomClearance, KinematicBoomCollisionProof,
-    KinematicBoomController, KinematicBoomDiagnostics, KinematicBoomHoldReason,
+    KinematicBoomController, KinematicBoomDiagnostics, KinematicBoomFailureReason,
     KinematicBoomInputError, KinematicBoomIntent, KinematicBoomOutcome, KinematicBoomPathLeg,
     KinematicBoomPathPoint, KinematicBoomPlacedPath, KinematicBoomPlacement, KinematicBoomProfile,
     KinematicBoomProfileDefinition, KinematicBoomProfileError, KinematicBoomReseedReason,

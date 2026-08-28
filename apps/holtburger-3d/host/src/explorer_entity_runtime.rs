@@ -4530,7 +4530,7 @@ mod tests {
     #[test]
     fn host_boom_follows_exact_possession_without_registering_a_camera_body() {
         use crate::host_kinematic_boom_runtime::{
-            HostKinematicBoomCollisionProof, HostKinematicBoomHoldReason,
+            HostKinematicBoomCollisionProof, HostKinematicBoomFailureReason,
             HostKinematicBoomIntentRequest, HostKinematicBoomRuntime,
             HostKinematicBoomStartRequest, HostKinematicBoomTargetSphereRole,
             HostKinematicBoomTick, HostKinematicBoomUpdateReceipt,
@@ -4617,7 +4617,7 @@ mod tests {
             target_sphere_role,
             HostKinematicBoomTargetSphereRole::UpperConstraint
         );
-        assert_eq!(clearance.unwrap().radius, 0.25);
+        assert_eq!(clearance.radius, 0.25);
         assert_eq!(desired_reach, 4.25);
         assert_eq!(path.legs.last().unwrap().end_fraction, 1.0);
         assert!(path.initial.visual_pivot.coords.z.is_finite());
@@ -4672,7 +4672,7 @@ mod tests {
             Some(HostKinematicBoomTick::Held {
                 identity,
                 sequence: 4,
-                reason: HostKinematicBoomHoldReason::TargetContract,
+                reason: HostKinematicBoomFailureReason::TargetContract,
                 ..
             }) if identity == receipt.identity
         ));
@@ -4717,6 +4717,25 @@ mod tests {
             !boom.stop(receipt.identity),
             "a stale stop must preserve the replacement"
         );
+        let replacement_missing_target = ExplorerEntityCollectionTick {
+            ticks: Vec::new(),
+            coverage_rejections: Vec::new(),
+            possession: Some(ExplorerPossessedBodyEpoch {
+                guid,
+                entity_generation: replacement_possession.entity_generation,
+                possession_generation: replacement_possession.possession_generation,
+            }),
+        };
+        assert!(matches!(
+            boom.advance(&replacement_missing_target, 1.0 / 30.0)
+                .unwrap(),
+            Some(HostKinematicBoomTick::Fallback {
+                identity,
+                sequence: 1,
+                reason: HostKinematicBoomFailureReason::TargetContract,
+                ..
+            }) if identity == replacement.identity
+        ));
         let replacement_collection = entities
             .tick_physical_collection(
                 1.0 / 30.0,
@@ -4725,7 +4744,11 @@ mod tests {
             .unwrap();
         assert!(matches!(
             boom.advance(&replacement_collection, 1.0 / 30.0).unwrap(),
-            Some(HostKinematicBoomTick::Reseeded { identity, .. })
+            Some(HostKinematicBoomTick::Reseeded {
+                identity,
+                sequence: 2,
+                ..
+            })
                 if identity == replacement.identity
         ));
 

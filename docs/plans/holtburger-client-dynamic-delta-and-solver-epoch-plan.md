@@ -1,6 +1,6 @@
 # Holtburger Client Dynamic Delta and Solver Epoch Plan
 
-Status: **Final; statically dry-run against production callers (2026-08-28).**
+Status: **Execution in progress; Phase 0 complete, Phase 1 active (2026-08-28).**
 
 Origin: investigation of client-mode stalls after entering dungeon EnvCell `0x00070156`.
 
@@ -322,13 +322,13 @@ host invocation completion, and timing before it can claim fidelity.
 
 #### Checklist
 
-- [ ] Inventory `reconcileDynamicEntities` callers and classify snapshot owners versus delta owners.
-- [ ] Inventory collection callers and callback/rollback requirements.
-- [ ] Identify every consumer of `DynamicTickStartBody::planned`.
-- [ ] Harden and test the existing live probe's redacted failure result and 10-second cooldown
+- [x] Inventory `reconcileDynamicEntities` callers and classify snapshot owners versus delta owners.
+- [x] Inventory collection callers and callback/rollback requirements.
+- [x] Identify every consumer of `DynamicTickStartBody::planned`.
+- [x] Harden and test the existing live probe's redacted failure result and 10-second cooldown
   precondition.
-- [ ] Add focused frontend regression and solver behavior fixtures.
-- [ ] Dry-run Phases 1-4 against attachment, portal activation, and coverage rejection.
+- [x] Add focused frontend regression and identify the existing solver behavior fixtures.
+- [x] Dry-run Phases 1-4 against attachment, portal activation, and coverage rejection.
 
 ### Phase 1: Cut client presentation over to semantic deltas
 
@@ -606,6 +606,38 @@ successful-login cooldown, reached the probe's character-selection wait and time
 actionable failure record. The probe currently discards progress and raw host stderr, so these runs
 do not prove whether authentication, account occupancy, or lifecycle delivery failed. Phase 0 closes
 that observability gap before using the probe as acceptance evidence.
+
+## Execution Progress
+
+### Phase 0 — complete (2026-08-28)
+
+- Classified `ClientPresentationSession` and Explorer lifecycle dispatch as delta owners. Browser
+  scenario setup and explicit hydration/reset call sites are complete-snapshot owners.
+- Confirmed the two production dynamic-collection consumers are client simulation and the Explorer
+  host runtime. Their collection acceptance callbacks return `Ok(())`; the meaningful rollback
+  callback remains confined to the separate single-body transaction API.
+- Confirmed `DynamicTickStartBody::planned` is consumed only by dynamic-contact peer bounds, pose,
+  and velocity sampling plus the collection transaction path that currently recomputes the plan.
+- Added a focused frontend characterization proving that three accepted upserts enqueue three full
+  reconciliations and that every callback rereads the same final mirror.
+- Reused the existing solver fixtures rather than adding duplicates. The 440-test
+  `holtburger-world` library suite already exercises no-block/report-only contact, directional
+  blocking, independent coverage rejection, consumer rollback, report starts/ends, stable peer
+  selection, and immutable tick-start trajectories; it passes before the cutover.
+- Split live-probe failure reporting into a testable harness-only helper. Failures now retain the
+  last completed phase, lifecycle history, terminal events, and a bounded credential-redacted host
+  diagnostic. Focused Vitest and TypeScript checks pass.
+- A live run after the ACE cooldown established `authenticating → character-selection →
+  portal-space`, then timed out awaiting `in-world` after character selection. This corrects the
+  earlier ambiguous diagnosis; a longer bounded run remains Phase 7 evidence, not a blocker for the
+  deterministic frontend cutover.
+
+**Decision:** Existing solver characterization is stronger and broader than new plan-shaped
+lookalikes, so Phase 0 records and runs it instead of adding ceremonial tests.
+
+**Debt carried forward:** The live probe still uses one timeout value for distinct lifecycle waits.
+Its new phase/predicate diagnostics make failures actionable; separate timeout policy is deferred
+unless a longer world-entry run proves the single bound materially wrong.
 
 ## Decisions and Course Corrections
 

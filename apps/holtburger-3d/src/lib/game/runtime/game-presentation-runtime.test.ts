@@ -756,13 +756,13 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			reachesOutdoors: true,
 			reachedEnvCellIds: [cellId(0x0001_0100)],
 		};
-		await runtime.reconcileDynamicEntities([player]);
+		await runtime.replaceDynamicEntitySnapshot([player]);
 		expect(runtime.dynamicEntityOrigin(player.identity.guid)?.landblockId).toBe(
 			landblockId,
 		);
 
 		runtime.completeSceneActivation(receipt.generation);
-		await runtime.reconcileDynamicEntities([player]);
+		await runtime.replaceDynamicEntitySnapshot([player]);
 		expect(runtime.dynamicEntityOrigin(player.identity.guid)?.landblockId).toBe(
 			landblockId,
 		);
@@ -779,22 +779,24 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		});
 		const player = spawnedEntity(7, 1);
 
-		const initiallyInstalled = await runtime.reconcileDynamicEntities([player]);
+		const initiallyInstalled = await runtime.replaceDynamicEntitySnapshot([
+			player,
+		]);
 		expect(initiallyInstalled.get(player.identity.guid)).toBe("installed");
 		expect(runtime.dynamicEntityOrigin(player.identity.guid)).not.toBeNull();
 
-		runtime.updateSceneInterest(sceneInterest("0x0001ffff"));
-		const deferred = await runtime.reconcileDynamicEntities([player]);
+		await activateSpawnScene(runtime, "0x0002ffff", 2);
+		const deferred = await runtime.replaceDynamicEntitySnapshot([player]);
 		expect(deferred.get(player.identity.guid)).toBe("deferred");
 		expect(runtime.dynamicEntityOrigin(player.identity.guid)).toBeNull();
 
-		runtime.clearSceneInterest();
-		const reinstalled = await runtime.reconcileDynamicEntities([player]);
+		await activateSpawnScene(runtime, "0x0001ffff", 3);
+		const reinstalled = await runtime.replaceDynamicEntitySnapshot([player]);
 		expect(reinstalled.get(player.identity.guid)).toBe("installed");
 		expect(runtime.dynamicEntityOrigin(player.identity.guid)).not.toBeNull();
 		expect(visualLoads).toBe(1);
 
-		await runtime.reconcileDynamicEntities([]);
+		await runtime.replaceDynamicEntitySnapshot([]);
 		expect(runtime.dynamicEntityOrigin(player.identity.guid)).toBeNull();
 		await runtime.destroy();
 	});
@@ -808,7 +810,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			MOTION_TABLE_ANIMATION_SOURCE,
 		);
 
-		await runtime.reconcileDynamicEntities([
+		await runtime.replaceDynamicEntitySnapshot([
 			motionDrivenEntity(1, {
 				animationId: Number(IDLE_ANIMATION_ID),
 				completion: "loop",
@@ -835,7 +837,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			MOTION_TABLE_ANIMATION_SOURCE,
 		);
 
-		await runtime.reconcileDynamicEntities([motionDrivenEntity(1, null)]);
+		await runtime.replaceDynamicEntitySnapshot([motionDrivenEntity(1, null)]);
 		setTestCamera(runtime, SPAWN_TEST_CAMERA);
 		runtime.render(0);
 
@@ -851,7 +853,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		const load = vi.fn(async () => visual);
 		const runtime = await buildSpawnRuntime({ load });
 
-		await runtime.reconcileDynamicEntities([
+		await runtime.replaceDynamicEntitySnapshot([
 			spawnedEntity(1, 1),
 			spawnedEntity(2, 1),
 		]);
@@ -864,7 +866,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 				.templateCount,
 		).toBe(1);
 
-		await runtime.reconcileDynamicEntities([spawnedEntity(2, 1)]);
+		await runtime.replaceDynamicEntitySnapshot([spawnedEntity(2, 1)]);
 		expect(
 			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
 		).toBe(1);
@@ -872,7 +874,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.templates
 				.templateCount,
 		).toBe(1);
-		await runtime.reconcileDynamicEntities([]);
+		await runtime.replaceDynamicEntitySnapshot([]);
 		expect(
 			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
 		).toBe(0);
@@ -886,11 +888,11 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 	it("replaces one GUID generation and updates same-generation state without reloading", async () => {
 		const load = vi.fn(async () => spawnedVisual());
 		const runtime = await buildSpawnRuntime({ load });
-		await runtime.reconcileDynamicEntities([spawnedEntity(7, 1)]);
-		await runtime.reconcileDynamicEntities([
+		await runtime.replaceDynamicEntitySnapshot([spawnedEntity(7, 1)]);
+		await runtime.replaceDynamicEntitySnapshot([
 			spawnedEntity(7, 1, { noDraw: true }),
 		]);
-		await runtime.reconcileDynamicEntities([spawnedEntity(7, 2)]);
+		await runtime.replaceDynamicEntitySnapshot([spawnedEntity(7, 2)]);
 
 		expect(load).toHaveBeenCalledTimes(1);
 		expect(
@@ -908,8 +910,8 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 				}),
 		};
 		const runtime = await buildSpawnRuntime(source);
-		const stale = runtime.reconcileDynamicEntities([spawnedEntity(9, 1)]);
-		await runtime.reconcileDynamicEntities([]);
+		const stale = runtime.replaceDynamicEntitySnapshot([spawnedEntity(9, 1)]);
+		await runtime.replaceDynamicEntitySnapshot([]);
 		resolveVisual(spawnedVisual());
 		await stale;
 
@@ -943,21 +945,21 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		const parent = spawnedEntity(20, 1);
 		const child = attachedEntity(21, 1, 20);
 
-		await runtime.reconcileDynamicEntities([child]);
+		await runtime.replaceDynamicEntitySnapshot([child]);
 		expect(
 			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
 		).toBe(0);
-		await runtime.reconcileDynamicEntities([child, parent]);
+		await runtime.replaceDynamicEntitySnapshot([child, parent]);
 		expect(
 			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
 		).toBe(2);
-		await runtime.reconcileDynamicEntities([]);
+		await runtime.replaceDynamicEntitySnapshot([]);
 		expect(
 			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
 		).toBe(0);
 
-		await runtime.reconcileDynamicEntities([parent]);
-		await runtime.reconcileDynamicEntities([parent, child]);
+		await runtime.replaceDynamicEntitySnapshot([parent]);
+		await runtime.replaceDynamicEntitySnapshot([parent, child]);
 		expect(
 			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
 		).toBe(2);
@@ -1194,10 +1196,18 @@ async function buildSpawnRuntime(
 		}),
 		resources: TEST_RESOURCES,
 	};
-	return buildGamePresentationRuntimeForTest(
+	const runtime = await buildGamePresentationRuntimeForTest(
 		device,
-		{ prepareLandblockLayers: async () => [] },
-		{} as TexturePixelSource,
+		{
+			async prepareLandblockLayers(layers) {
+				return [...layers].map(({ id, layer }) => {
+					if (layer !== LandblockLayerKind.Terrain)
+						throw new Error(`Unexpected spawn-test layer ${layer}.`);
+					return terrainArtifact(id);
+				});
+			},
+		},
+		new EchoTexturePixelSource(),
 		animationSource,
 		PHYSICS_SCRIPT_SOURCE,
 		{ playOneShot: () => null, prepare: async () => {} },
@@ -1206,6 +1216,27 @@ async function buildSpawnRuntime(
 		PARTICLE_MESH_SOURCE,
 		setupVisualSource,
 	);
+	await activateSpawnScene(runtime, "0x0001ffff", 1);
+	return runtime;
+}
+
+/** Install one explicit outdoor scope before a focused dynamic presentation test uses it. */
+async function activateSpawnScene(
+	runtime: GamePresentationRuntime,
+	landblockId: LandblockOwnerId,
+	generation: number,
+): Promise<void> {
+	const receipt = await runtime.activateScene({
+		generation,
+		target: sceneInterest(landblockId),
+	});
+	await vi.waitFor(() => {
+		runtime.tick();
+		const status = runtime.sceneActivationStatus(receipt);
+		if (status.kind === "failed") throw new Error(status.diagnostic);
+		expect(status.kind).toBe("ready");
+	});
+	runtime.completeSceneActivation(generation);
 }
 
 /// Reaches one animation from one table, which is all a staged clip swap needs.

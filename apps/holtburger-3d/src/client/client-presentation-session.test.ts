@@ -174,6 +174,7 @@ describe("ClientPresentationSession", () => {
 		});
 		await vi.waitFor(() => expect(runtime.advances).toHaveLength(1));
 		expect(runtime.reconciled).toHaveLength(1);
+		const eligibilityReevaluationsBefore = runtime.eligibilityReevaluationCount;
 
 		runtime.reconciliationDisposition = "installed";
 		transport.emit("client-dynamic-entity", {
@@ -185,8 +186,11 @@ describe("ClientPresentationSession", () => {
 		expect(runtime.completedActivations).toEqual([4]);
 		presentation.frame(1_064);
 		await vi.waitFor(() =>
-			expect(runtime.reconciled.length).toBeGreaterThan(1),
+			expect(runtime.eligibilityReevaluationCount).toBeGreaterThan(
+				eligibilityReevaluationsBefore,
+			),
 		);
+		expect(runtime.upserted).toHaveLength(1);
 
 		expect(presentation.frame(2_000).rendered).toBe(true);
 		expect(presentation.frame(4_100).rendered).toBe(true);
@@ -256,6 +260,36 @@ describe("ClientPresentationSession", () => {
 
 		await presentation.destroy();
 		expect(owner.destroyed).toBe(true);
+	});
+
+	it("preserves accepted upserts without replacing the complete mirror", async () => {
+		const playerGuid = 0x0101_0001;
+		const transport = new FakeClientTransport(currentState(playerGuid));
+		const lifecycle = new ClientLifecycleSession(transport);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		const presentation = new ClientPresentationSession({
+			canvas: fakeCanvas(),
+			hostTransport: {} as never,
+			session: lifecycle,
+			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+		});
+
+		await presentation.start();
+		expect(runtime.reconciled).toHaveLength(1);
+		for (const guid of [0x0101_0002, 0x0101_0003, 0x0101_0004]) {
+			transport.emit("client-dynamic-entity", {
+				kind: "upserted",
+				entity: view(guid),
+			});
+		}
+		await vi.waitFor(() => expect(runtime.upserted).toHaveLength(3));
+
+		expect(runtime.reconciled).toHaveLength(1);
+		expect(runtime.upserted.map((entity) => entity.identity.guid)).toEqual([
+			0x0101_0002, 0x0101_0003, 0x0101_0004,
+		]);
+		await presentation.destroy();
 	});
 
 	it("holds rendering and rejects lagged advances during mirror recovery", async () => {
@@ -440,6 +474,9 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 	readonly terrainInstallationRevision = 0;
 	readonly dynamicEntityPlacementRevision = 0;
 	reconciled: DynamicEntityView[][] = [];
+	upserted: DynamicEntityView[] = [];
+	removed: Array<{ guid: number; generation: number }> = [];
+	eligibilityReevaluationCount = 0;
 	advances: Array<{ batch: DynamicEntityAdvanceBatch; receivedAtMs: number }> =
 		[];
 	sceneRequests: SceneInterestRequest[] = [];
@@ -452,13 +489,43 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 	reconciliationDisposition: DynamicEntityReconciliationDisposition =
 		"installed";
 	#activationRevision = 0;
+	readonly #desired = new Map<number, DynamicEntityView>();
 
-	async reconcileDynamicEntities(
+	async replaceDynamicEntitySnapshot(
 		entities: readonly DynamicEntityView[],
-	): ReturnType<ClientPresentationRuntime["reconcileDynamicEntities"]> {
+	): ReturnType<ClientPresentationRuntime["replaceDynamicEntitySnapshot"]> {
 		this.reconciled.push([...entities]);
+		this.#desired.clear();
+		for (const entity of entities)
+			this.#desired.set(entity.identity.guid, entity);
 		return new Map(
 			entities.map((entity) => [
+				entity.identity.guid,
+				this.reconciliationDisposition,
+			]),
+		);
+	}
+
+	async upsertDynamicEntity(
+		entity: DynamicEntityView,
+	): ReturnType<ClientPresentationRuntime["upsertDynamicEntity"]> {
+		this.upserted.push(entity);
+		this.#desired.set(entity.identity.guid, entity);
+		return this.reconciliationDisposition;
+	}
+
+	removeDynamicEntity(guid: number, generation: number): void {
+		this.removed.push({ generation, guid });
+		if (this.#desired.get(guid)?.generation === generation)
+			this.#desired.delete(guid);
+	}
+
+	async reevaluateDynamicEntityEligibility(): ReturnType<
+		ClientPresentationRuntime["reevaluateDynamicEntityEligibility"]
+	> {
+		this.eligibilityReevaluationCount += 1;
+		return new Map(
+			[...this.#desired.values()].map((entity) => [
 				entity.identity.guid,
 				this.reconciliationDisposition,
 			]),

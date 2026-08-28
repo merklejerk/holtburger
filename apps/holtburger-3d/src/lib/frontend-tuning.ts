@@ -52,6 +52,8 @@ export const FRONTEND_TUNING = {
 	diagnostics: {
 		/** Smoothing window used by the on-screen frame-time readout. */
 		frameMetricsEmaWindowMs: 1_000,
+		/** UI publication cadence for a frame rate sampled imperatively by the render loop. */
+		frameRateDisplayIntervalMs: 250,
 		/** Largest numeric frame rate rendered by the compact frame-time readout. */
 		maximumDisplayedFramesPerSecond: 1_000,
 		/** GPU query frames allowed to await asynchronous device results. */

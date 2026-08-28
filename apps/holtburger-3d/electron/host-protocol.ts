@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { ClientLaunchConfiguration } from "./client-launch.js";
 import { MAX_PENDING_REQUESTS } from "../src/lib/host/host-limits.js";
 export { MAX_PENDING_REQUESTS } from "../src/lib/host/host-limits.js";
+import { HOST_EVENT_NAMES } from "../src/lib/host/host-transport.js";
 import type {
 	HostCommandArguments,
 	HostCommandName,
@@ -73,22 +74,7 @@ const wireFrameSchema = z.discriminatedUnion("kind", [
 	z.object({
 		kind: z.literal("event"),
 		event: z.object({
-			event: z.enum([
-				"explorer-dynamic-entity",
-				"client-current-state",
-				"client-lifecycle-changed",
-				"client-local-player-established",
-				"client-server-time-updated",
-				"client-dynamic-entity",
-				"client-camera-started",
-				"client-camera",
-				"client-presentation-discontinuity",
-				"client-exit-requested",
-				"explorer-fixed-tick",
-				"explorer-possession-event-outcomes",
-				"explorer-physical-fly-motion",
-				"explorer-physical-fly-failure",
-			]),
+			event: z.enum(HOST_EVENT_NAMES),
 			payload: z.unknown(),
 		}),
 	}),

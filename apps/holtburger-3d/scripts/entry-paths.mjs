@@ -57,13 +57,26 @@ export function buildEntryPath(basePath, args) {
 }
 
 /**
+ * Collapses renderer flags into one application-owned query argument.
+ *
+ * Electron interprets some flags (notably `--debug`) even when they follow the application path.
+ * Encoding renderer state under `--query` prevents those flags from leaking into Electron's CLI
+ * while preserving the entry URL assembled by `buildEntryPath`.
+ */
+export function collapseRendererArguments(args) {
+	const queryPath = buildEntryPath("", args);
+	return queryPath.length === 0 ? [] : [`--query=${queryPath.slice(1)}`];
+}
+
+/**
  * Removes the client connection arguments before a renderer URL is assembled.
  *
  * These values belong to Electron main and must not become query parameters. Both `--name=value`
  * and `--name value` forms are accepted here so the wrapper cannot reject a valid client launch
  * before `parseClientLaunchArguments` gets to validate it.
  */
-export function stripClientLaunchArguments(args) {
+export function partitionClientLaunchArguments(args) {
+	const launchArguments = [];
 	const rendererArgs = [];
 	for (let index = 0; index < args.length; index += 1) {
 		const parsed = parseLongArgument(args[index]);
@@ -71,15 +84,21 @@ export function stripClientLaunchArguments(args) {
 			rendererArgs.push(args[index]);
 			continue;
 		}
+		launchArguments.push(args[index]);
 		if (parsed.value === undefined) {
 			const value = args[index + 1];
 			if (value === undefined || value.startsWith("--")) {
 				throw new Error(`${args[index]} requires a value.`);
 			}
+			launchArguments.push(value);
 			index += 1;
 		}
 	}
-	return rendererArgs;
+	return { launchArguments, rendererArguments: rendererArgs };
+}
+
+export function stripClientLaunchArguments(args) {
+	return partitionClientLaunchArguments(args).rendererArguments;
 }
 
 /**

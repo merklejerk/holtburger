@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { HOST_EVENT_NAMES } from "../src/lib/host/host-transport.js";
 import {
 	MAX_FRAME_BYTES,
 	MAX_PENDING_REQUESTS,
@@ -151,6 +152,20 @@ describe("SidecarFrameDecoder", () => {
 		const prefix = new Uint8Array(4);
 		new DataView(prefix.buffer).setUint32(0, MAX_FRAME_BYTES + 1, true);
 		expect(() => decoder.push(prefix)).toThrow(/exceeding/);
+	});
+
+	it("accepts every event in the canonical host inventory", () => {
+		for (const event of HOST_EVENT_NAMES) {
+			const decoder = new SidecarFrameDecoder();
+			expect(
+				decoder.push(
+					encodeSidecarFrame({
+						kind: "event",
+						event: { event, payload: null },
+					}),
+				),
+			).toHaveLength(1);
+		}
 	});
 });
 

@@ -43,6 +43,7 @@
 	import { formatWorldMapCoordinates } from "../lib/game/map/map-coordinates";
 	import {
 		captureMapPanelGpuDrawState,
+		MAP_PANEL_MINIMUM_SIZE,
 		mapPanelViewDiameter,
 		sameMapPanelGpuDrawState,
 		type MapPanelFrame,
@@ -59,14 +60,15 @@
 		 */
 		readonly readFrame: () => MapPanelFrame;
 		readonly panel: MapPanelState;
+		/** Whether shell-owned placement and sizing controls are currently available. */
+		readonly editable: boolean;
 		readonly onStateChange: (state: MapPanelState) => void;
 	}
 
-	const { readFrame, panel, onStateChange }: Props = $props();
+	const { readFrame, panel, editable, onStateChange }: Props = $props();
 
 	/** No faster than this; only the expensive WebGL map picture is cadence-limited. */
 	const MINIMUM_GPU_FRAME_INTERVAL_MS = 1000 / 30;
-	const MINIMUM_PANEL_SIZE = 140;
 
 	let mapCanvas = $state<HTMLCanvasElement | null>(null);
 	let blipCanvas = $state<HTMLCanvasElement | null>(null);
@@ -265,7 +267,7 @@
 			const delta = Math.max(moved.clientX - startX, moved.clientY - startY);
 			onStateChange({
 				...panel,
-				size: Math.max(MINIMUM_PANEL_SIZE, Math.round(startSize + delta)),
+				size: Math.max(MAP_PANEL_MINIMUM_SIZE, Math.round(startSize + delta)),
 			});
 		});
 	}
@@ -351,28 +353,38 @@
 			</g>
 			<circle class="map-panel-anchor" cx="0" cy="0" r="3.5" />
 		</svg>
-		<button
-			type="button"
-			class="map-panel-move"
-			onpointerdown={beginDrag}
-			aria-label="Move map"
-		>
-			<svg class="map-panel-handle-icon" viewBox="0 0 12 12" aria-hidden="true">
-				<path
-					d="M 6 1 V 11 M 1 6 H 11 M 6 1 L 4.5 2.5 M 6 1 L 7.5 2.5 M 6 11 L 4.5 9.5 M 6 11 L 7.5 9.5 M 1 6 L 2.5 4.5 M 1 6 L 2.5 7.5 M 11 6 L 9.5 4.5 M 11 6 L 9.5 7.5"
-				/>
-			</svg>
-		</button>
-		<button
-			type="button"
-			class="map-panel-resize"
-			onpointerdown={beginResize}
-			aria-label="Resize map"
-		>
-			<svg class="map-panel-handle-icon" viewBox="0 0 12 12" aria-hidden="true">
-				<path d="M 2 10 L 10 2 M 2 10 V 7 M 2 10 H 5 M 10 2 H 7 M 10 2 V 5" />
-			</svg>
-		</button>
+		{#if editable}
+			<button
+				type="button"
+				class="map-panel-move"
+				onpointerdown={beginDrag}
+				aria-label="Move map"
+			>
+				<svg
+					class="map-panel-handle-icon"
+					viewBox="0 0 12 12"
+					aria-hidden="true"
+				>
+					<path
+						d="M 6 1 V 11 M 1 6 H 11 M 6 1 L 4.5 2.5 M 6 1 L 7.5 2.5 M 6 11 L 4.5 9.5 M 6 11 L 7.5 9.5 M 1 6 L 2.5 4.5 M 1 6 L 2.5 7.5 M 11 6 L 9.5 4.5 M 11 6 L 9.5 7.5"
+					/>
+				</svg>
+			</button>
+			<button
+				type="button"
+				class="map-panel-resize"
+				onpointerdown={beginResize}
+				aria-label="Resize map"
+			>
+				<svg
+					class="map-panel-handle-icon"
+					viewBox="0 0 12 12"
+					aria-hidden="true"
+				>
+					<path d="M 2 10 L 10 2 M 2 10 V 7 M 2 10 H 5 M 10 2 H 7 M 10 2 V 5" />
+				</svg>
+			</button>
+		{/if}
 	</div>
 	<span bind:this={coordinatesElement} class="map-panel-coordinates"></span>
 </section>

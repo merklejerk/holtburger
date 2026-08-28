@@ -295,7 +295,7 @@
 
 				<div class="explorer-tools-body">
 					<div
-						class="explorer-tab-panel"
+						class="explorer-tab-panel ac-panel-body"
 						role="tabpanel"
 						id={`explorer-tab-panel-${activeTab.id}`}
 						aria-labelledby={`explorer-tab-${activeTab.id}`}

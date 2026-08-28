@@ -189,10 +189,12 @@ function isHostCommandArguments(value: unknown): value is HostCommandArguments {
 }
 
 function installIpcBridge(window: BrowserWindow, mode: HostMode): void {
+	const applicationContents = window.webContents;
 	ipcMain.handle("host:invoke", async (event, request: unknown) => {
 		if (
-			event.sender !== window.webContents ||
-			event.senderFrame !== window.webContents.mainFrame
+			applicationContents.isDestroyed() ||
+			event.sender !== applicationContents ||
+			event.senderFrame !== applicationContents.mainFrame
 		) {
 			throw new Error(
 				"host requests are accepted only from the application frame",

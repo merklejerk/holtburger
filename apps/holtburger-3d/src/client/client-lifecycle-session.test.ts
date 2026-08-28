@@ -62,12 +62,16 @@ describe("ClientLifecycleSession", () => {
 
 		await session.start();
 
-		expect(transport.calls.slice(0, 10)).toEqual([
+		expect(transport.calls.slice(0, 14)).toEqual([
 			"listen:client-dynamic-entity",
 			"listen:client-current-state",
 			"listen:client-lifecycle-changed",
 			"listen:client-local-player-established",
 			"listen:client-server-time-updated",
+			"listen:client-world-name-updated",
+			"listen:client-player-entered",
+			"listen:client-player-vitals-updated",
+			"listen:client-chat-message",
 			"listen:client-presentation-discontinuity",
 			"listen:client-camera-started",
 			"listen:client-camera",
@@ -111,6 +115,17 @@ describe("ClientLifecycleSession", () => {
 		};
 		transport.emit("client-lifecycle-changed", lifecycle);
 		transport.emit("client-server-time-updated", { time: 12.5 });
+		transport.emit("client-world-name-updated", { name: "Morningthaw" });
+		transport.emit("client-player-entered", { playerGuid: 9, name: "Mira" });
+		transport.emit("client-player-vitals-updated", {
+			vitals: [{ kind: "health", current: 80, maximum: 100 }],
+		});
+		transport.emit("client-chat-message", {
+			kind: "speech",
+			sender: "Mira",
+			channel: null,
+			message: "Hello",
+		});
 		transport.emit("client-presentation-discontinuity", {
 			worldGeneration: 4,
 			kind: "reset",
@@ -125,6 +140,9 @@ describe("ClientLifecycleSession", () => {
 			serverTime: 12.5,
 			worldGeneration: 4,
 			playerGuid: 9,
+			playerName: "Mira",
+			worldName: "Morningthaw",
+			vitals: [{ kind: "health", current: 80, maximum: 100 }],
 			exit: {
 				cause: "server-disconnect",
 				diagnostic: "server closed the session",
@@ -136,6 +154,10 @@ describe("ClientLifecycleSession", () => {
 			"local-player-established",
 			"lifecycle",
 			"server-time",
+			"world-name",
+			"player-entered",
+			"vitals",
+			"chat",
 			"presentation-discontinuity",
 			"lifecycle",
 			"exit-requested",
@@ -171,6 +193,16 @@ describe("ClientLifecycleSession", () => {
 
 		expect(transport.calls).toEqual(["invoke:select_client_character"]);
 	});
+
+	it("sends visible local speech and rejects empty input before transport", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+
+		await session.sendChat("Hello world");
+		expect(transport.calls).toEqual(["invoke:send_client_chat"]);
+		await expect(session.sendChat("   ")).rejects.toThrow("visible text");
+		expect(transport.calls).toHaveLength(1);
+	});
 });
 
 function currentState(playerGuid: number): ClientCurrentState {
@@ -179,6 +211,9 @@ function currentState(playerGuid: number): ClientCurrentState {
 		localPlayerGuid: playerGuid,
 		serverTime: 10,
 		worldGeneration: 2,
+		worldName: "Leafcull",
+		playerName: "Drudge",
+		vitals: [],
 		dynamic: {
 			hostTime: { seconds: 10 },
 			entities: [view(playerGuid)],

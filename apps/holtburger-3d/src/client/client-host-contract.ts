@@ -7,6 +7,23 @@ import {
 const guid = z.number().int().nonnegative().max(0xffff_ffff);
 const finiteNumber = z.number().finite();
 
+const vitalSchema = z
+	.object({
+		kind: z.enum(["health", "stamina", "mana"]),
+		current: z.number().int().nonnegative(),
+		maximum: z.number().int().nonnegative(),
+	})
+	.strict();
+
+const chatMessageSchema = z
+	.object({
+		kind: z.enum(["speech", "tell", "channel", "system", "emote"]),
+		sender: z.string().nullable(),
+		channel: z.string().nullable(),
+		message: z.string(),
+	})
+	.strict();
+
 const characterSchema = z
 	.object({
 		guid,
@@ -63,6 +80,9 @@ const currentStateSchema = z
 		localPlayerGuid: guid.nullable(),
 		serverTime: finiteNumber.nullable(),
 		worldGeneration: z.number().int().nonnegative(),
+		worldName: z.string().nullable(),
+		playerName: z.string().nullable(),
+		vitals: z.array(vitalSchema),
 		dynamic: z.unknown(),
 	})
 	.strict();
@@ -75,6 +95,9 @@ const presentationDiscontinuitySchema = z
 	.strict();
 
 const localPlayerEstablishedSchema = z.object({ playerGuid: guid }).strict();
+const playerEnteredSchema = z
+	.object({ playerGuid: guid, name: z.string() })
+	.strict();
 
 const exitRequestedSchema = z
 	.object({
@@ -215,6 +238,9 @@ export type ClientLocalPlayerEstablished = z.infer<
 	typeof localPlayerEstablishedSchema
 >;
 export type ClientExitRequested = z.infer<typeof exitRequestedSchema>;
+export type ClientVital = z.infer<typeof vitalSchema>;
+export type ClientChatMessage = z.infer<typeof chatMessageSchema>;
+export type ClientPlayerEntered = z.infer<typeof playerEnteredSchema>;
 export type ClientDriveRequest = z.infer<typeof clientDriveRequestSchema>;
 export type ClientCameraIdentity = z.infer<typeof cameraIdentitySchema>;
 export type ClientCameraTick = z.infer<typeof cameraTickSchema>;
@@ -271,6 +297,25 @@ export function decodeClientLocalPlayerEstablished(
 /** Strictly validates one synchronized server-time event. */
 export function decodeClientServerTime(value: unknown): { time: number } {
 	return z.object({ time: finiteNumber }).strict().parse(value);
+}
+
+export function decodeClientWorldName(value: unknown): { name: string } {
+	return z.object({ name: z.string() }).strict().parse(value);
+}
+
+export function decodeClientPlayerEntered(value: unknown): ClientPlayerEntered {
+	return playerEnteredSchema.parse(value);
+}
+
+export function decodeClientVitals(value: unknown): { vitals: ClientVital[] } {
+	return z
+		.object({ vitals: z.array(vitalSchema) })
+		.strict()
+		.parse(value);
+}
+
+export function decodeClientChatMessage(value: unknown): ClientChatMessage {
+	return chatMessageSchema.parse(value);
 }
 
 /** Strictly validates one non-portal interpolation/camera discontinuity edge. */

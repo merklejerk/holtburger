@@ -8,6 +8,10 @@ import {
 	decodeClientLifecycle,
 	decodeClientPresentationDiscontinuity,
 	decodeClientServerTime,
+	decodeClientWorldName,
+	decodeClientPlayerEntered,
+	decodeClientVitals,
+	decodeClientChatMessage,
 	type ClientCurrentState,
 	type ClientCameraIdentity,
 	type ClientCameraClearanceRequest,
@@ -20,6 +24,9 @@ import {
 	type ClientLifecycle,
 	type ClientLocalPlayerEstablished,
 	type ClientPresentationDiscontinuity,
+	type ClientVital,
+	type ClientChatMessage,
+	type ClientPlayerEntered,
 } from "./client-host-contract";
 import {
 	DynamicEntityMirror,
@@ -38,6 +45,7 @@ type ClientCommandName = Extract<
 	| "request_client_current_state"
 	| "select_client_character"
 	| "replace_client_drive"
+	| "send_client_chat"
 	| "start_client_camera"
 	| "set_client_camera_intent"
 	| "set_client_camera_clearance"
@@ -51,6 +59,10 @@ type ClientEventName = Extract<
 	| "client-lifecycle-changed"
 	| "client-local-player-established"
 	| "client-server-time-updated"
+	| "client-world-name-updated"
+	| "client-player-entered"
+	| "client-player-vitals-updated"
+	| "client-chat-message"
 	| "client-dynamic-entity"
 	| "client-camera-started"
 	| "client-camera"
@@ -76,6 +88,9 @@ export interface ClientLifecycleSessionState {
 	readonly playerGuid: number | null;
 	readonly serverTime: number | null;
 	readonly worldGeneration: number;
+	readonly worldName: string | null;
+	readonly playerName: string | null;
+	readonly vitals: readonly ClientVital[];
 	readonly exit: ClientExitRequested | null;
 }
 
@@ -88,6 +103,10 @@ export type ClientLifecycleSessionEvent =
 			readonly identity: ClientLocalPlayerEstablished;
 	  }
 	| { readonly type: "server-time"; readonly time: number }
+	| { readonly type: "world-name"; readonly name: string }
+	| { readonly type: "player-entered"; readonly player: ClientPlayerEntered }
+	| { readonly type: "vitals"; readonly vitals: readonly ClientVital[] }
+	| { readonly type: "chat"; readonly message: ClientChatMessage }
 	| { readonly type: "dynamic"; readonly event: DynamicEntityEvent }
 	| {
 			readonly type: "camera-started";
@@ -204,6 +223,14 @@ export class ClientLifecycleSession {
 		});
 	}
 
+	/** Send one ordinary local-speech message. */
+	async sendChat(message: string): Promise<void> {
+		if (message.trim().length === 0) {
+			throw new Error("Chat message must contain visible text.");
+		}
+		await this.#transport.invoke("send_client_chat", { message });
+	}
+
 	/** Register a client camera generation; its authority receipt arrives on the sibling event. */
 	async startCamera(request: ClientCameraStartRequest): Promise<void> {
 		await this.#transport.invoke("start_client_camera", { request });
@@ -260,6 +287,27 @@ export class ClientLifecycleSession {
 				),
 			);
 			unlisteners.push(
+				await this.#transport.listen("client-world-name-updated", (payload) =>
+					this.#receiveWorldName(payload),
+				),
+			);
+			unlisteners.push(
+				await this.#transport.listen("client-player-entered", (payload) =>
+					this.#receivePlayerEntered(payload),
+				),
+			);
+			unlisteners.push(
+				await this.#transport.listen(
+					"client-player-vitals-updated",
+					(payload) => this.#receiveVitals(payload),
+				),
+			);
+			unlisteners.push(
+				await this.#transport.listen("client-chat-message", (payload) =>
+					this.#receiveChat(payload),
+				),
+			);
+			unlisteners.push(
 				await this.#transport.listen(
 					"client-presentation-discontinuity",
 					(payload) => this.#receivePresentationDiscontinuity(payload),
@@ -298,6 +346,9 @@ export class ClientLifecycleSession {
 			playerGuid: state.localPlayerGuid,
 			serverTime: state.serverTime,
 			worldGeneration: state.worldGeneration,
+			worldName: state.worldName,
+			playerName: state.playerName,
+			vitals: state.vitals,
 			exit: null,
 		};
 		const dynamic: DynamicEntityEvent = {
@@ -332,6 +383,37 @@ export class ClientLifecycleSession {
 		const { time } = decodeClientServerTime(payload);
 		this.#state = { ...this.#state, serverTime: time };
 		this.#emit({ type: "server-time", time });
+	}
+
+	#receiveWorldName(payload: unknown): void {
+		const { name } = decodeClientWorldName(payload);
+		this.#state = { ...this.#state, worldName: name };
+		this.#emit({ type: "world-name", name });
+	}
+
+	#receivePlayerEntered(payload: unknown): void {
+		const player = decodeClientPlayerEntered(payload);
+		if (player.playerGuid === this.#state.playerGuid) {
+			this.#state = { ...this.#state, playerName: player.name };
+		}
+		this.#emit({ type: "player-entered", player });
+	}
+
+	#receiveVitals(payload: unknown): void {
+		const updates = decodeClientVitals(payload).vitals;
+		const byKind = new Map(
+			this.#state.vitals.map((vital) => [vital.kind, vital]),
+		);
+		for (const vital of updates) byKind.set(vital.kind, vital);
+		const vitals = ["health", "stamina", "mana"]
+			.map((kind) => byKind.get(kind as ClientVital["kind"]))
+			.filter((vital): vital is ClientVital => vital !== undefined);
+		this.#state = { ...this.#state, vitals };
+		this.#emit({ type: "vitals", vitals });
+	}
+
+	#receiveChat(payload: unknown): void {
+		this.#emit({ type: "chat", message: decodeClientChatMessage(payload) });
 	}
 
 	#receivePresentationDiscontinuity(payload: unknown): void {
@@ -374,6 +456,9 @@ function emptyState(): ClientLifecycleSessionState {
 		playerGuid: null,
 		serverTime: null,
 		worldGeneration: 0,
+		worldName: null,
+		playerName: null,
+		vitals: [],
 		exit: null,
 	};
 }

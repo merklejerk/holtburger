@@ -422,8 +422,13 @@ impl SpatialScene {
                     }
                     | super::PhysicalBodyResponseState::FreeSphere { .. } => false,
                 };
+                let requires_solve = match dynamic.activity {
+                    DynamicBodyActivity::Active => true,
+                    DynamicBodyActivity::Settled => stale_support,
+                    DynamicBodyActivity::Suspended => false,
+                };
                 (dynamic.collision.scheduling == crate::EntityPhysicsScheduling::Eligible
-                    && (dynamic.activity == DynamicBodyActivity::Active || stale_support))
+                    && requires_solve)
                     .then_some(body.id)
             })
             .collect::<Vec<_>>();
@@ -2167,6 +2172,52 @@ mod physical_body_tests {
             .unwrap();
         scene
             .finish_dynamic_entity_collection(now + Duration::from_millis(200))
+            .unwrap();
+    }
+
+    #[test]
+    fn missing_retained_env_cell_suspends_body_with_stale_ground_support() {
+        let now = Instant::now();
+        let cell = Guid(0xda55_0100);
+        let id = SpatialBodyId::Entity(Guid(0x7000_0100));
+        let collision = collision_scene(Some(0x0100));
+        let mut scene = SpatialScene::new();
+        scene.register_body(SpatialBody::new(
+            id,
+            WorldPosition {
+                landblock_id: cell,
+                ..pose(Vector3::new(96.0, 96.0, 20.0))
+            },
+            now,
+        ));
+        scene
+            .set_dynamic_physical_body(
+                id,
+                Some(dynamic_definition(grounded_definition(), false)),
+                PhysicalCollisionFilter::ALL,
+                Some(cell),
+            )
+            .unwrap();
+        let stored = scene.body_mut(id).unwrap();
+        stored.contact = ContactState::Grounded;
+        let PhysicalBodyResponseState::Grounded { ground, .. } =
+            &mut stored.physical.as_mut().unwrap().response
+        else {
+            panic!("grounded definition produced non-grounded response state")
+        };
+        *ground = GroundState::Supported(GroundSupport {
+            normal: Vector3::new(0.0, 0.0, 1.0),
+            proof: collision.owner_proof(Guid(0xda55_ffff)).unwrap(),
+        });
+
+        let prepared = scene
+            .prepare_dynamic_entity_collection(&CollisionScene::new(), 0.1, collection_actuation)
+            .unwrap();
+
+        assert!(prepared.movers.is_empty());
+        assert_eq!(dynamic_activity(&scene, id), DynamicBodyActivity::Suspended);
+        scene
+            .finish_dynamic_entity_collection(now + Duration::from_millis(100))
             .unwrap();
     }
 

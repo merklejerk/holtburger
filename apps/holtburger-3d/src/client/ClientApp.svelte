@@ -2,6 +2,7 @@
 	import { onMount } from "svelte";
 	import {
 		createFrameRateSampler,
+		type FrameRates,
 		type FrameRateSampler,
 	} from "../app/frame-rate-sampler";
 
@@ -286,8 +287,8 @@
 		return presentationSession?.readDiagnostics() ?? null;
 	}
 
-	function readFramesPerSecond(): number | null {
-		return frameRateSampler?.readFramesPerSecond() ?? null;
+	function readFrameRates(): FrameRates | null {
+		return frameRateSampler?.readFrameRates() ?? null;
 	}
 
 	/** Build and drive the renderer after Svelte mounts the world-presentation canvas. */
@@ -331,10 +332,11 @@
 			const frameStartedAt = performance.now();
 			const nextStatus = presentation.frame(timeMs).status;
 			const frameFinishedAt = performance.now();
-			currentFrameRateSampler.recordFrameWork(
-				frameFinishedAt - frameStartedAt,
-				frameFinishedAt,
-			);
+			currentFrameRateSampler.recordFrame({
+				animationFrameTimeMs: timeMs,
+				startedAtMs: frameStartedAt,
+				workMs: frameFinishedAt - frameStartedAt,
+			});
 			if (
 				nextStatus.kind !== presentationStatus.kind ||
 				nextStatus.diagnostic !== presentationStatus.diagnostic
@@ -434,7 +436,7 @@
 		{presentationError}
 		{readMapPanelFrame}
 		{readDiagnostics}
-		{readFramesPerSecond}
+		{readFrameRates}
 		{playerName}
 		{worldName}
 		{vitals}

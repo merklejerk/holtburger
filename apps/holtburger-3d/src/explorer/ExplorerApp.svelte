@@ -3,6 +3,11 @@
 	import FrameMetricsOverlay, {
 		type FrameMetrics,
 	} from "../app/FrameMetricsOverlay.svelte";
+	import {
+		createFrameRateSampler,
+		type FrameRates,
+		type FrameRateSampler,
+	} from "../app/frame-rate-sampler";
 	import ExplorerTools from "./ExplorerTools.svelte";
 	import {
 		GamePresentationRuntime,
@@ -171,6 +176,9 @@
 	let physicalCameraStatus = $state<PhysicalFlyStatus | null>(null);
 	let physicalCameraError = $state<string | null>(null);
 	let frameMetrics: FrameMetrics | null = $state(null);
+	const frameRateSampler: FrameRateSampler = createFrameRateSampler(
+		FRONTEND_TUNING.diagnostics.frameMetricsEmaWindowMs,
+	);
 	let rendererFrameDiagnostics: RendererFrameDiagnosticsSnapshot | null =
 		$state(null);
 	let authoredDynamicRuntimeDiagnostics: ReturnType<
@@ -294,6 +302,10 @@
 
 	function readPresentedMapEntities() {
 		return gameRuntime?.listPresentedSpawnedEntities() ?? [];
+	}
+
+	function readFrameRates(): FrameRates | null {
+		return frameRateSampler.readFrameRates();
 	}
 	let activeRegion = $state<ActiveRegionSource | undefined>(undefined);
 	/** Fast enough that a tick boundary is never visibly late; resolution is tick-quantized. */
@@ -1795,7 +1807,7 @@
 				);
 				runtimeReady = true;
 
-				const step = (): void => {
+				const step = (animationFrameTimeMs: number): void => {
 					if (gameRuntime === undefined) {
 						frameMetrics = null;
 						rendererFrameDiagnostics = null;
@@ -1903,6 +1915,11 @@
 						}
 					}
 					const frameFinishedAt = performance.now();
+					frameRateSampler.recordFrame({
+						animationFrameTimeMs,
+						startedAtMs: tickStartedAt,
+						workMs: frameFinishedAt - tickStartedAt,
+					});
 
 					frameMetrics = {
 						tickMs: updateAndDrawStartedAt - tickStartedAt,
@@ -1959,7 +1976,7 @@
 			</section>
 		{/if}
 
-		<FrameMetricsOverlay metrics={frameMetrics} />
+		<FrameMetricsOverlay metrics={frameMetrics} {readFrameRates} />
 		{#if startupError === null}
 			<MapPanel
 				readFrame={readMapPanelFrame}

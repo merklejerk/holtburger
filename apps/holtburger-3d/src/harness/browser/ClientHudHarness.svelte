@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { FrameRates } from "../../app/frame-rate-sampler";
 	import ClientWorldView from "../../client/ClientWorldView.svelte";
 	import type { ClientChatLine } from "../../client/ClientChat.svelte";
 	import type { MapPanelFrame } from "../../app/map-panel-frame";
@@ -55,8 +56,8 @@
 		return null;
 	}
 
-	function readFramesPerSecond(): number {
-		return 60;
+	function readFrameRates(): FrameRates {
+		return { capped: 60, uncapped: 144 };
 	}
 </script>
 
@@ -68,7 +69,7 @@
 	presentationError={null}
 	{readMapPanelFrame}
 	{readDiagnostics}
-	{readFramesPerSecond}
+	{readFrameRates}
 	playerName="Alice"
 	worldName="ACE Emulator"
 	vitals={[

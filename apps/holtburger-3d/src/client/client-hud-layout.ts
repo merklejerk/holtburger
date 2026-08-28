@@ -51,6 +51,9 @@ export interface ClientHudLayout {
 	readonly shortcuts: ClientHudPlacement;
 }
 
+/** Width reserved for the capped/uncapped frame-rate pair and its unit label. */
+export const CLIENT_FPS_PANEL_WIDTH = 120;
+
 interface PreferredClientHudExtent {
 	readonly width: number;
 	readonly height: number;
@@ -233,7 +236,6 @@ export function createDefaultClientHudLayout(
 	const margin = 16;
 	const shortcutWidth = shortcutCount * 42;
 	const chatHeight = Math.min(450, Math.max(260, viewportHeight - 188));
-	const fpsWidth = 96;
 	return {
 		character: {
 			horizontal: { edge: "left", offset: margin },
@@ -250,10 +252,10 @@ export function createDefaultClientHudLayout(
 		fps: {
 			horizontal: {
 				edge: "left",
-				offset: Math.max(0, (viewportWidth - fpsWidth) / 2),
+				offset: Math.max(0, (viewportWidth - CLIENT_FPS_PANEL_WIDTH) / 2),
 			},
 			vertical: { edge: "top", offset: 8 },
-			preferredWidth: fpsWidth,
+			preferredWidth: CLIENT_FPS_PANEL_WIDTH,
 			preferredHeight: 26,
 		},
 		shortcuts: {

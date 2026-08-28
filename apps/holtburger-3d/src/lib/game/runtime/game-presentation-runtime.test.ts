@@ -901,6 +901,77 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		await runtime.destroy();
 	});
 
+	it("does not mutate placement for a state-only upsert and moves one changed root once", async () => {
+		const runtime = await buildSpawnRuntime({ load: async () => spawnedVisual() });
+		const entity = spawnedEntity(7, 1);
+		await runtime.upsertDynamicEntity(entity);
+		const installedRevision = runtime.dynamicEntityPlacementRevision;
+
+		await runtime.upsertDynamicEntity(spawnedEntity(7, 1, { noDraw: true }));
+		expect(runtime.dynamicEntityPlacementRevision).toBe(installedRevision);
+
+		const moved = spawnedEntity(7, 1, { noDraw: true });
+		if (moved.placement.kind !== "world")
+			throw new Error("Moved fixture lost world placement.");
+		moved.placement.pose.coords.x += 1;
+		await runtime.upsertDynamicEntity(moved);
+		expect(runtime.dynamicEntityPlacementRevision).toBe(installedRevision + 1);
+		await runtime.destroy();
+	});
+
+	it("retains a newer generation when an exact stale removal arrives", async () => {
+		const runtime = await buildSpawnRuntime({ load: async () => spawnedVisual() });
+		await runtime.upsertDynamicEntity(spawnedEntity(7, 2));
+
+		runtime.removeDynamicEntity(7, 1);
+
+		expect(runtime.dynamicEntityOrigin(7)).not.toBeNull();
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
+		).toBe(1);
+		await runtime.destroy();
+	});
+
+	it("keeps hydration desired-only until its exact terrain residency publishes", async () => {
+		let visualLoads = 0;
+		const runtime = await buildUnscopedSpawnRuntime({
+			async load() {
+				visualLoads += 1;
+				return spawnedVisual();
+			},
+		});
+		const entity = spawnedEntity(7, 1);
+
+		const hydration = await runtime.replaceDynamicEntitySnapshot([entity]);
+		expect(hydration.get(7)).toBe("deferred");
+		expect(visualLoads).toBe(0);
+		expect(runtime.dynamicEntityOrigin(7)).toBeNull();
+
+		runtime.updateSceneInterest(sceneInterest("0x0001ffff"));
+		await vi.waitFor(() => {
+			runtime.tick();
+			expect(runtime.dynamicEntityOrigin(7)).not.toBeNull();
+		});
+		expect(visualLoads).toBe(1);
+		await runtime.destroy();
+	});
+
+	it("withdraws only out-of-scope roots and wakes them on exact residency return", async () => {
+		const runtime = await buildSpawnRuntime({ load: async () => spawnedVisual() });
+		await runtime.upsertDynamicEntity(spawnedEntity(7, 1));
+		expect(runtime.dynamicEntityOrigin(7)).not.toBeNull();
+
+		await activateSpawnScene(runtime, "0x0002ffff", 2);
+		expect(runtime.dynamicEntityOrigin(7)).toBeNull();
+
+		await activateSpawnScene(runtime, "0x0001ffff", 3);
+		await vi.waitFor(() => {
+			runtime.tick();
+			expect(runtime.dynamicEntityOrigin(7)).not.toBeNull();
+		});
+		await runtime.destroy();
+	});
+
 	it("cannot publish a visual load that completes after exact removal", async () => {
 		let resolveVisual!: (value: DecodedStaticPresentation) => void;
 		const source: SetupVisualSource = {
@@ -918,6 +989,27 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		expect(
 			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
 		).toBe(0);
+		await runtime.destroy();
+	});
+
+	it("cannot publish a superseded generation when one shared visual load completes", async () => {
+		let resolveVisual!: (value: DecodedStaticPresentation) => void;
+		const runtime = await buildSpawnRuntime({
+			load: () =>
+				new Promise((resolve) => {
+					resolveVisual = resolve;
+				}),
+		});
+
+		const stale = runtime.upsertDynamicEntity(spawnedEntity(9, 1));
+		const current = runtime.upsertDynamicEntity(spawnedEntity(9, 2));
+		resolveVisual(spawnedVisual());
+		await Promise.all([stale, current]);
+
+		runtime.removeDynamicEntity(9, 1);
+		expect(runtime.dynamicEntityOrigin(9)).not.toBeNull();
+		runtime.removeDynamicEntity(9, 2);
+		expect(runtime.dynamicEntityOrigin(9)).toBeNull();
 		await runtime.destroy();
 	});
 
@@ -945,11 +1037,11 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		const parent = spawnedEntity(20, 1);
 		const child = attachedEntity(21, 1, 20);
 
-		await runtime.replaceDynamicEntitySnapshot([child]);
+		expect(await runtime.upsertDynamicEntity(child)).toBe("deferred");
 		expect(
 			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
 		).toBe(0);
-		await runtime.replaceDynamicEntitySnapshot([child, parent]);
+		expect(await runtime.upsertDynamicEntity(parent)).toBe("installed");
 		expect(
 			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
 		).toBe(2);
@@ -958,8 +1050,8 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
 		).toBe(0);
 
-		await runtime.replaceDynamicEntitySnapshot([parent]);
-		await runtime.replaceDynamicEntitySnapshot([parent, child]);
+		expect(await runtime.upsertDynamicEntity(parent)).toBe("installed");
+		expect(await runtime.upsertDynamicEntity(child)).toBe("installed");
 		expect(
 			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
 		).toBe(2);
@@ -1189,6 +1281,19 @@ async function buildSpawnRuntime(
 	setupVisualSource: SetupVisualSource,
 	animationSource: AnimationAssetSource = ANIMATION_SOURCE,
 ): Promise<GamePresentationRuntime> {
+	const runtime = await buildUnscopedSpawnRuntime(
+		setupVisualSource,
+		animationSource,
+	);
+	await activateSpawnScene(runtime, "0x0001ffff", 1);
+	return runtime;
+}
+
+/** Build the dynamic-capable runtime without granting any implicit residency capability. */
+async function buildUnscopedSpawnRuntime(
+	setupVisualSource: SetupVisualSource,
+	animationSource: AnimationAssetSource = ANIMATION_SOURCE,
+): Promise<GamePresentationRuntime> {
 	const device: GamePresentationRuntimeRenderDevice = {
 		buildRenderer: async () => ({
 			async destroy() {},
@@ -1196,7 +1301,7 @@ async function buildSpawnRuntime(
 		}),
 		resources: TEST_RESOURCES,
 	};
-	const runtime = await buildGamePresentationRuntimeForTest(
+	return buildGamePresentationRuntimeForTest(
 		device,
 		{
 			async prepareLandblockLayers(layers) {
@@ -1216,8 +1321,6 @@ async function buildSpawnRuntime(
 		PARTICLE_MESH_SOURCE,
 		setupVisualSource,
 	);
-	await activateSpawnScene(runtime, "0x0001ffff", 1);
-	return runtime;
 }
 
 /** Install one explicit outdoor scope before a focused dynamic presentation test uses it. */

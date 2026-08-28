@@ -225,6 +225,11 @@ export class TerrainSystem<
 		return true;
 	}
 
+	/** Whether one landblock owns installed terrain source and spatial-placement authority. */
+	hasInstalledSource(landblockId: LandblockOwnerId): boolean {
+		return this.#installations.has(landblockId);
+	}
+
 	/** Assemble one realized landblock's draw unit from facts that cannot change afterwards. */
 	#buildDrawUnit(
 		landblockId: LandblockOwnerId,

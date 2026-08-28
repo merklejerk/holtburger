@@ -154,7 +154,6 @@ struct HostPhysicalBodyTickRequest {
     actuation: PhysicalBodyActuation,
     delta_seconds: f32,
     now: std::time::Instant,
-    dynamic_contacts: bool,
 }
 
 /// Host service that realizes explicit application simulation interest into immutable scenes.
@@ -376,7 +375,6 @@ impl HostSimulationRuntime {
                 actuation,
                 delta_seconds,
                 now,
-                dynamic_contacts: false,
             },
             accept,
         )
@@ -418,26 +416,36 @@ impl HostSimulationRuntime {
             })
             .collect::<Vec<_>>();
         let mut ticks = Vec::with_capacity(prepared.movers.len());
-        for (body_id, actuation) in prepared.movers {
+        for body_id in prepared.movers {
             let previous = state
                 .bodies
                 .body(body_id)
                 .cloned()
                 .expect("scheduled dynamic body vanished while collection lock was held");
-            let solved = tick_body_transaction(
-                &mut state,
-                HostPhysicalBodyTickRequest {
-                    scene: Arc::clone(&scene),
-                    previous,
-                    actuation,
-                    delta_seconds,
+            let solved = state
+                .bodies
+                .tick_dynamic_physical_body_transaction(
+                    body_id,
+                    &scene,
                     now,
-                    dynamic_contacts: true,
-                },
-                |_| Ok(()),
-            );
+                    |_, _| Ok(()),
+                )
+                .map(|(result, ())| {
+                    report_body_placement_recoveries(body_id, &result);
+                    let current = state
+                        .bodies
+                        .body(body_id)
+                        .cloned()
+                        .expect("physical body vanished during a locked host collection tick");
+                    HostPhysicalBodyTick {
+                        previous,
+                        current,
+                        result,
+                        collision: Arc::clone(&scene),
+                    }
+                });
             match solved {
-                Ok((tick, ())) => ticks.push(tick),
+                Ok(tick) => ticks.push(tick),
                 Err(error) => {
                     let Some(CollisionQueryError::UnavailableOwner { owner }) =
                         error.downcast_ref::<CollisionQueryError>()
@@ -719,7 +727,6 @@ fn tick_body_transaction<T>(
         actuation,
         delta_seconds,
         now,
-        dynamic_contacts,
     } = request;
     let body_id = previous.id;
     let accept_tick = |current: &SpatialBody, result: &PhysicalBodyTickResult| {
@@ -730,25 +737,14 @@ fn tick_body_transaction<T>(
             collision: Arc::clone(&scene),
         })
     };
-    let (result, accepted) = if dynamic_contacts {
-        state.bodies.tick_dynamic_physical_body_transaction(
-            body_id,
-            &scene,
-            actuation,
-            delta_seconds,
-            now,
-            accept_tick,
-        )?
-    } else {
-        state.bodies.tick_physical_body_transaction(
-            body_id,
-            &scene,
-            actuation,
-            delta_seconds,
-            now,
-            accept_tick,
-        )?
-    };
+    let (result, accepted) = state.bodies.tick_physical_body_transaction(
+        body_id,
+        &scene,
+        actuation,
+        delta_seconds,
+        now,
+        accept_tick,
+    )?;
     report_body_placement_recoveries(body_id, &result);
     let current = state
         .bodies

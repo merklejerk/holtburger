@@ -901,6 +901,8 @@ export class GamePresentationRuntime {
 	readonly #commitArtifacts: PendingCommitArtifact[] = [];
 	/** Resource continuations awaited before runtime-owned sources and renderer state are destroyed. */
 	readonly #realizationContinuations = new Set<Promise<void>>();
+	/** Asynchronous dependency-wake failures surfaced synchronously by the next runtime tick. */
+	readonly #dynamicRealizationFailures: unknown[] = [];
 	/** Frontend listeners informed when placement facts become available or fail. */
 	readonly #sceneAvailabilityListeners = new Set<SceneAvailabilityListener>();
 	/** Current primary-view input used for visibility and rendering. */
@@ -1595,12 +1597,6 @@ export class GamePresentationRuntime {
 			const child = this.#spawnedDesiredEntities.get(childGuid);
 			if (child === undefined) continue;
 			await this.#realizeAcceptedDynamicEntity(child);
-			if (
-				this.#spawnedPresentations.get(childGuid)?.generation ===
-				child.entity.generation
-			) {
-				await this.#realizeDesiredDynamicChildren(childGuid);
-			}
 		}
 	}
 
@@ -1806,7 +1802,7 @@ export class GamePresentationRuntime {
 		const demandedLayers = this.#sceneInterest.get(placement.landblockId);
 		if (placement.envCellId === null) {
 			if (!demandedLayers?.has(LandblockLayerKind.Terrain)) return false;
-			return this.#terrain.hasResidentDrawUnit(placement.landblockId);
+			return this.#terrain.hasInstalledSource(placement.landblockId);
 		}
 		if (!demandedLayers?.has(LandblockLayerKind.EnvCells)) return false;
 		return this.#scene.hasEnvCellScope({
@@ -2114,6 +2110,7 @@ export class GamePresentationRuntime {
 			);
 			this.#terrainFogCoverage = null;
 		}
+		this.#withdrawOutOfScopeDynamicEntities();
 		return this.#applySceneInterest(this.#sceneInterest);
 	}
 
@@ -2123,7 +2120,25 @@ export class GamePresentationRuntime {
 		this.#sceneInterest = new Map();
 		this.#resolvedSceneInterestTarget = null;
 		this.#sceneActivation = null;
+		this.#withdrawOutOfScopeDynamicEntities();
 		return this.#applySceneInterest(this.#sceneInterest);
+	}
+
+	/** Retire only desired world roots made ineligible by an explicit interest replacement. */
+	#withdrawOutOfScopeDynamicEntities(): void {
+		for (const record of this.#spawnedDesiredEntities.values()) {
+			const entity = record.entity;
+			if (
+				entity.placement.kind !== "world" ||
+				this.#isDynamicScopeReady(entity)
+			)
+				continue;
+			this.#deferDynamicEntity(record, {
+				kind: "residency",
+				residencyKey: dynamicResidencyKey(entity),
+			});
+			this.#retireDynamicPresentationTree(entity.identity.guid);
+		}
 	}
 
 	/** Snapshot the current replacement demand and resolved target for diagnostics and harnesses. */
@@ -2867,6 +2882,14 @@ export class GamePresentationRuntime {
 	tick(): void {
 		if (this.#destroyed) return;
 		this.#drainCommitArtifacts();
+		const failures = this.#dynamicRealizationFailures.splice(0);
+		if (failures.length === 1) throw failures[0];
+		if (failures.length > 1) {
+			throw new AggregateError(
+				failures,
+				`${failures.length} deferred dynamic entities failed presentation realization.`,
+			);
+		}
 		this.#dynamicPlacements.advance(performance.now());
 	}
 
@@ -3534,14 +3557,53 @@ export class GamePresentationRuntime {
 				},
 			);
 		}
+		if (event.kind === "outdoor-terrain-source-available") {
+			this.#wakeDeferredDynamicResidencies(
+				`${event.landblockId}:outdoor`,
+				"exact",
+			);
+		} else if (event.kind === "env-cell-topology-available") {
+			this.#wakeDeferredDynamicResidencies(
+				`${event.landblockId}:env-cell:`,
+				"prefix",
+			);
+		}
 		for (const listener of this.#sceneAvailabilityListeners) listener(event);
+	}
+
+	/** Wake only desired roots indexed under one newly published static residency fact. */
+	#wakeDeferredDynamicResidencies(
+		residencyKey: string,
+		match: "exact" | "prefix",
+	): void {
+		const records: DesiredDynamicEntityRecord[] = [];
+		for (const [key, guids] of this.#spawnedDeferredResidencies) {
+			if (
+				(match === "exact" && key !== residencyKey) ||
+				(match === "prefix" && !key.startsWith(residencyKey))
+			)
+				continue;
+			for (const guid of guids) {
+				const record = this.#spawnedDesiredEntities.get(guid);
+				if (record !== undefined) records.push(record);
+			}
+		}
+		if (records.length === 0) return;
+		const continuation = Promise.all(
+			records.map((record) => this.#realizeAcceptedDynamicEntity(record)),
+		).then(() => undefined);
+		const guarded = continuation.catch((error: unknown) => {
+			this.#dynamicRealizationFailures.push(error);
+		});
+		this.#trackRealizationContinuation(guarded);
 	}
 
 	#trackRealizationContinuation(continuation: Promise<void>): void {
 		this.#realizationContinuations.add(continuation);
-		void continuation.finally(() => {
-			this.#realizationContinuations.delete(continuation);
-		});
+		void continuation.then(
+			() => this.#realizationContinuations.delete(continuation),
+			() => this.#realizationContinuations.delete(continuation),
+		);
 	}
 }
 

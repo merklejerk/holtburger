@@ -55,6 +55,21 @@ const hostBinary = resolve(
 		: "holtburger-3d-host",
 );
 const electronSwitches = [];
+const remoteDebuggingPort =
+	process.env.HOLTBURGER_ELECTRON_REMOTE_DEBUGGING_PORT;
+if (remoteDebuggingPort !== undefined) {
+	const port = Number(remoteDebuggingPort);
+	if (
+		!/^(0|[1-9][0-9]*)$/.test(remoteDebuggingPort) ||
+		!Number.isSafeInteger(port) ||
+		port > 65_535
+	) {
+		throw new Error(
+			"HOLTBURGER_ELECTRON_REMOTE_DEBUGGING_PORT must be an integer from 0 to 65535.",
+		);
+	}
+	electronSwitches.push(`--remote-debugging-port=${port}`);
+}
 const ozonePlatform = process.env.HOLTBURGER_ELECTRON_OZONE_PLATFORM;
 if (ozonePlatform !== undefined) {
 	if (!new Set(["auto", "wayland", "x11"]).has(ozonePlatform)) {

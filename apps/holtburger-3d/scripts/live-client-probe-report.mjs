@@ -19,13 +19,25 @@ const MAX_HOST_DIAGNOSTIC_CHARACTERS = 4_096;
  */
 export function redactProbeText(value, credentials) {
 	const text = String(value);
-	const withoutAccount =
-		credentials.account.length > 0
-			? text.replaceAll(credentials.account, "<account>")
+	const withoutPassword =
+		credentials.password.length > 0
+			? text.replaceAll(credentials.password, "<password>")
 			: text;
-	return credentials.password.length > 0
-		? withoutAccount.replaceAll(credentials.password, "<password>")
-		: withoutAccount;
+	return credentials.account.length > 0
+		? withoutPassword.replaceAll(credentials.account, "<account>")
+		: withoutPassword;
+}
+
+/**
+ * Serializes probe evidence while redacting string values without mutating report field names.
+ *
+ * @param {unknown} value
+ * @param {ProbeCredentials} credentials
+ */
+export function stringifyRedactedProbeReport(value, credentials) {
+	return JSON.stringify(value, (_key, member) =>
+		typeof member === "string" ? redactProbeText(member, credentials) : member,
+	);
 }
 
 /**

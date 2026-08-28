@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
 	createProbeFailureResult,
 	probeHostDiagnostic,
+	stringifyRedactedProbeReport,
 } from "./live-client-probe-report.mjs";
 
 const credentials = { account: "test-account", password: "test-password" };
@@ -46,5 +47,20 @@ describe("live client probe failure reporting", () => {
 		expect(diagnostic).toMatch(/^…x+/);
 		expect(diagnostic).toMatch(/<password>$/);
 		expect(diagnostic).not.toContain("test-password");
+	});
+
+	it("redacts report values without corrupting field names containing the account", () => {
+		const report = stringifyRedactedProbeReport(
+			{
+				latest: "test account",
+				passwordDiagnostic: "test-password failed",
+			},
+			{ account: "test", password: "test-password" },
+		);
+
+		expect(JSON.parse(report)).toEqual({
+			latest: "<account> account",
+			passwordDiagnostic: "<password> failed",
+		});
 	});
 });

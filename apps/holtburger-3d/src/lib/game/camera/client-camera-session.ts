@@ -20,6 +20,11 @@ export interface ClientCameraTarget {
 /** Reach policy sent with a client camera registration request. */
 export type ClientCameraDistancePolicy = HostKinematicBoomDistancePolicy;
 
+type ClientCameraProvenTick = Exclude<
+	ClientCameraTick,
+	{ readonly kind: "fallback" }
+>;
+
 /** Renderer-visible camera session lifecycle and latest host evidence. */
 export type ClientCameraStatus =
 	| { readonly kind: "stopped" }
@@ -33,7 +38,7 @@ export type ClientCameraStatus =
 			readonly identity: ClientCameraIdentity;
 			readonly sequence: number;
 			readonly targetSphereRole: ClientCameraTick["targetSphereRole"];
-			readonly clearance: ClientCameraTick["clearance"];
+			readonly clearance: ClientCameraProvenTick["clearance"] | null;
 			readonly desiredReach: number;
 			readonly renderedReach: number;
 			readonly placementOutcome:
@@ -49,6 +54,13 @@ export type ClientCameraStatus =
 						readonly reason: Extract<
 							ClientCameraTick,
 							{ readonly kind: "reseeded" }
+						>["reason"];
+				  }
+				| {
+						readonly kind: "fallback";
+						readonly reason: Extract<
+							ClientCameraTick,
+							{ readonly kind: "fallback" }
 						>["reason"];
 				  }
 				| null;
@@ -282,15 +294,17 @@ export class ClientCameraSession {
 			identity,
 			sequence: latest.sequence,
 			targetSphereRole: latest.targetSphereRole,
-			clearance: latest.clearance,
+			clearance: latest.kind === "fallback" ? null : latest.clearance,
 			desiredReach: latest.desiredReach,
-			renderedReach: latest.renderedReach,
+			renderedReach: latest.kind === "fallback" ? 0 : latest.renderedReach,
 			placementOutcome:
 				latest.kind === "held"
 					? { kind: "held", reason: latest.reason }
 					: latest.kind === "reseeded"
 						? { kind: "reseeded", reason: latest.reason }
-						: null,
+						: latest.kind === "fallback"
+							? { kind: "fallback", reason: latest.reason }
+							: null,
 			droppedPaths: this.#droppedPaths,
 			diagnostics: latest.diagnostics,
 		};
@@ -357,14 +371,9 @@ export class ClientCameraSession {
 			this.#droppedPaths += tick.sequence - this.#highestSequence - 1;
 		this.#highestSequence = tick.sequence;
 		this.#latestPath = tick;
-		if (tick.clearance === null) {
-			if (tick.kind === "held") {
-				// A held tick without clearance means the authority withdrew its collision
-				// snapshot. Do not keep rendering a path proven against the retired scene.
-				this.#active = null;
-				this.#pending = null;
-				this.#activeStartedAtMs = 0;
-			}
+		if (tick.kind === "fallback") {
+			this.#acceptPath({ tick }, receivedAtMs);
+			this.#pruneProjectionRevisions();
 			return;
 		}
 		const projection = this.#projectionRevisions.get(
@@ -381,7 +390,7 @@ export class ClientCameraSession {
 
 	#acceptPath(path: PlaybackPath, receivedAtMs: number): void {
 		const { tick } = path;
-		if (tick.kind !== "advanced") {
+		if (tick.kind !== "advanced" || this.#active?.tick.kind === "fallback") {
 			this.#active = path;
 			this.#pending = null;
 			this.#activeStartedAtMs = receivedAtMs;
@@ -437,17 +446,20 @@ export class ClientCameraSession {
 	}
 
 	#activeProjection(): ProjectionClearanceRevision | null {
-		const revision = this.#active?.tick.clearance?.projectionRevision;
-		return revision === undefined
-			? null
-			: (this.#projectionRevisions.get(revision) ?? null);
+		const tick = this.#active?.tick;
+		if (tick === undefined || tick.kind === "fallback") return null;
+		return (
+			this.#projectionRevisions.get(tick.clearance.projectionRevision) ?? null
+		);
 	}
 
 	#pruneProjectionRevisions(): void {
 		const retained = new Set([this.#lastRequestedProjectionRevision]);
 		for (const playback of [this.#active, this.#pending]) {
-			const revision = playback?.tick.clearance?.projectionRevision;
-			if (revision !== undefined) retained.add(revision);
+			const tick = playback?.tick;
+			if (tick !== undefined && tick.kind !== "fallback") {
+				retained.add(tick.clearance.projectionRevision);
+			}
 		}
 		for (const revision of this.#projectionRevisions.keys()) {
 			if (!retained.has(revision)) this.#projectionRevisions.delete(revision);

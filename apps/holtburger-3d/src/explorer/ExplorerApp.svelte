@@ -951,17 +951,26 @@
 	}
 
 	/** Project lifecycle state from the one authoritative mirror into Svelte and presentation. */
-	function reconcileSpawnedEntities(): Promise<void> {
+	function replaceSpawnedEntitySnapshot(): Promise<void> {
 		const session = dynamicEntitySession;
 		if (session === undefined) return Promise.resolve();
 		const entities = publishExplorerEntityPanelSnapshot();
 		const runtime = gameRuntime;
 		if (runtime === undefined) return Promise.resolve();
+		return trackDynamicEntityPresentation(
+			runtime.replaceDynamicEntitySnapshot(entities),
+			entities,
+		);
+	}
+
+	/** Retain one presentation completion as the current Explorer convergence boundary. */
+	function trackDynamicEntityPresentation(
+		operation: Promise<unknown>,
+		entities: readonly DynamicEntityView[],
+	): Promise<void> {
 		const revision = ++dynamicEntityReconciliationRevision;
 		spawnedEntityPresentationError = null;
-		const completion = runtime
-			.reconcileDynamicEntities(entities)
-			.then(() => undefined);
+		const completion = operation.then(() => undefined);
 		dynamicEntityReconciliation = completion;
 		if (cameraCoordinator?.activationReady()) {
 			const convergence = { completion, ready: false };
@@ -983,19 +992,35 @@
 	/** Route high-frequency accepted paths without restarting visual resource reconciliation. */
 	function acceptDynamicEntityEvent(event: DynamicEntityEvent): void {
 		if (dynamicEntitySession === undefined) return;
-		if (event.kind !== "advanced") {
-			void reconcileSpawnedEntities();
-			return;
-		}
 		if (refreshesExplorerEntityPanel(event))
 			publishExplorerEntityPanelSnapshot();
 		const runtime = gameRuntime;
 		if (runtime === undefined) return;
 		try {
-			runtime.applyDynamicEntityAdvances(event.batch, performance.now());
-			spawnedEntityPresentationError = null;
+			switch (event.kind) {
+				case "advanced":
+					runtime.applyDynamicEntityAdvances(event.batch, performance.now());
+					spawnedEntityPresentationError = null;
+					return;
+				case "snapshot":
+					void trackDynamicEntityPresentation(
+						runtime.replaceDynamicEntitySnapshot(spawnedEntities),
+						spawnedEntities,
+					);
+					return;
+				case "upserted":
+					void trackDynamicEntityPresentation(
+						runtime.upsertDynamicEntity(event.entity),
+						[event.entity],
+					);
+					return;
+				case "removed":
+					runtime.removeDynamicEntity(event.guid, event.generation);
+					spawnedEntityPresentationError = null;
+					return;
+			}
 		} catch (error) {
-			spawnedEntityPresentationError = `Dynamic-entity path presentation: ${errorMessage(error)}`;
+			spawnedEntityPresentationError = `Dynamic-entity presentation: ${errorMessage(error)}`;
 		}
 	}
 
@@ -1737,7 +1762,7 @@
 				sceneInterestCoordinator = new SceneInterestRequestCoordinator(
 					presentation.profileSource,
 				);
-				void reconcileSpawnedEntities();
+				void replaceSpawnedEntitySnapshot();
 				applyEnvironment();
 				applyFrameSettings();
 				if (destroyed) return;
@@ -1810,7 +1835,7 @@
 					if (!activationPending || !staticActivationReady) {
 						sceneActivationPresentationConvergence = null;
 					} else if (sceneActivationPresentationConvergence === null) {
-						void reconcileSpawnedEntities();
+						void replaceSpawnedEntitySnapshot();
 					}
 					cameraController?.setInputEnabled(!activationPending);
 					gameRuntime.setPortalTransition(

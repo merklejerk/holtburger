@@ -25,6 +25,7 @@ import {
 import {
 	datAssetId,
 	type DynamicEntityReconciliation,
+	type DynamicEntityReconciliationDisposition,
 } from "../lib/game/runtime/dynamic-entity-presentation";
 import type {
 	DynamicEntityAdvanceBatch,
@@ -204,9 +205,14 @@ export type ClientPresentationCameraController = PossessionCameraController<
 
 /** Runtime surface consumed by the client orchestration seam and injected by focused tests. */
 export interface ClientPresentationRuntime extends MapTerrainSource {
-	reconcileDynamicEntities(
+	replaceDynamicEntitySnapshot(
 		entities: readonly DynamicEntityView[],
 	): Promise<DynamicEntityReconciliation>;
+	upsertDynamicEntity(
+		entity: DynamicEntityView,
+	): Promise<DynamicEntityReconciliationDisposition>;
+	removeDynamicEntity(guid: number, generation: number): void;
+	reevaluateDynamicEntityEligibility(): Promise<DynamicEntityReconciliation>;
 	applyDynamicEntityAdvances(
 		batch: DynamicEntityAdvanceBatch,
 		receivedAtMs: number,
@@ -683,7 +689,9 @@ export class ClientPresentationSession {
 				return;
 			}
 			this.#applyServerEnvironment(this.#session.state().serverTime);
-			await this.#requestReconciliation();
+			await this.#requestDynamicSnapshotReplacement(
+				this.#session.mirror.entities(),
+			);
 		} catch (error) {
 			if (this.#destroyed && isPresentationCancellation(error)) return;
 			this.#reportError(error);
@@ -731,44 +739,57 @@ export class ClientPresentationSession {
 	}
 
 	#receiveDynamic(event: DynamicEntityEvent): void {
-		if (event.kind === "advanced") {
-			if (this.#session.mirror.isAwaitingSnapshot()) {
-				this.#setStatus("awaiting-snapshot");
+		switch (event.kind) {
+			case "advanced": {
+				if (this.#session.mirror.isAwaitingSnapshot()) {
+					this.#setStatus("awaiting-snapshot");
+					return;
+				}
+				const activation = this.#portalSceneActivation;
+				const retryDeferred =
+					activation?.kind === "accepted" &&
+					activation.reconciliation === "deferred" &&
+					activation.reconciledPlayerPlacementKey !==
+						this.#authoritativePlayerConvergenceKey();
+				if (retryDeferred) {
+					this.#portalSceneActivation = {
+						...activation,
+						reconciliation: "idle",
+					};
+				}
+				this.#enqueueMutation(async () => {
+					if (this.#owner === null || this.#session.mirror.isAwaitingSnapshot())
+						return;
+					this.#owner.runtime.applyDynamicEntityAdvances(
+						event.batch,
+						performance.now(),
+					);
+				});
+				if (retryDeferred) this.#ensureScenePresentationConvergence();
 				return;
 			}
-			const activation = this.#portalSceneActivation;
-			const retryDeferred =
-				activation?.kind === "accepted" &&
-				activation.reconciliation === "deferred" &&
-				activation.reconciledPlayerPlacementKey !==
-					this.#authoritativePlayerConvergenceKey();
-			if (retryDeferred) {
-				this.#portalSceneActivation = {
-					...activation,
-					reconciliation: "idle",
-				};
-			}
-			this.#enqueueMutation(async () => {
-				if (this.#owner === null || this.#session.mirror.isAwaitingSnapshot())
-					return;
-				this.#owner.runtime.applyDynamicEntityAdvances(
-					event.batch,
-					performance.now(),
-				);
-			});
-			if (retryDeferred) this.#ensureScenePresentationConvergence();
-			return;
+			case "snapshot":
+				this.#invalidatePlayerPresentationConvergence();
+				void this.#requestDynamicSnapshotReplacement(event.snapshot.entities);
+				return;
+			case "upserted":
+				if (event.entity.identity.guid === this.#playerGuid)
+					this.#invalidatePlayerPresentationConvergence();
+				this.#enqueueMutation(async () => {
+					await this.#owner?.runtime.upsertDynamicEntity(event.entity);
+				});
+				return;
+			case "removed":
+				if (event.guid === this.#playerGuid)
+					this.#invalidatePlayerPresentationConvergence();
+				this.#enqueueMutation(() => {
+					this.#owner?.runtime.removeDynamicEntity(
+						event.guid,
+						event.generation,
+					);
+				});
+				return;
 		}
-		const activation = this.#portalSceneActivation;
-		if (this.#session.state().lifecycle?.kind === "portal-space") {
-			if (activation?.kind !== "accepted") return;
-			this.#portalSceneActivation = {
-				...activation,
-				reconciliation: "pending",
-				reconciledPlayerPlacementKey: this.#authoritativePlayerConvergenceKey(),
-			};
-		}
-		void this.#requestReconciliation();
 	}
 
 	#receivePresentationDiscontinuity(
@@ -903,7 +924,16 @@ export class ClientPresentationSession {
 		);
 	}
 
-	#requestReconciliation(): Promise<void> {
+	#requestDynamicSnapshotReplacement(
+		entities: readonly DynamicEntityView[],
+	): Promise<void> {
+		return this.#enqueueMutation(async () => {
+			if (this.#owner === null) return;
+			await this.#owner.runtime.replaceDynamicEntitySnapshot(entities);
+		});
+	}
+
+	#requestDynamicEligibilityReevaluation(): Promise<void> {
 		return this.#enqueueMutation(async () => {
 			if (this.#owner === null || this.#session.mirror.isAwaitingSnapshot())
 				return;
@@ -915,9 +945,8 @@ export class ClientPresentationSession {
 					portalActivation.reconciliation !== "pending")
 			)
 				return;
-			const reconciliation = await this.#owner.runtime.reconcileDynamicEntities(
-				this.#session.mirror.entities(),
-			);
+			const reconciliation =
+				await this.#owner.runtime.reevaluateDynamicEntityEligibility();
 			if (
 				lifecycle?.kind !== "portal-space" ||
 				portalActivation?.kind !== "accepted"
@@ -950,6 +979,17 @@ export class ClientPresentationSession {
 		});
 	}
 
+	/** Force the exact local-player installation barrier to observe its latest desired level. */
+	#invalidatePlayerPresentationConvergence(): void {
+		const activation = this.#portalSceneActivation;
+		if (activation?.kind !== "accepted") return;
+		this.#portalSceneActivation = {
+			...activation,
+			reconciliation: "idle",
+			reconciledPlayerPlacementKey: null,
+		};
+	}
+
 	/** Begin normal dynamic eligibility only after the destination's static products are installed. */
 	#ensureScenePresentationConvergence(): void {
 		const activation = this.#portalSceneActivation;
@@ -960,7 +1000,7 @@ export class ClientPresentationSession {
 			reconciliation: "pending",
 			reconciledPlayerPlacementKey: this.#authoritativePlayerConvergenceKey(),
 		};
-		void this.#requestReconciliation();
+		void this.#requestDynamicEligibilityReevaluation();
 	}
 
 	#localPlayerInstalled(reconciliation: DynamicEntityReconciliation): boolean {

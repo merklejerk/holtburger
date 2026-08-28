@@ -1568,7 +1568,7 @@
 				? entity
 				: current,
 		);
-		await runtime.reconcileDynamicEntities(spawnedEntities);
+		await runtime.upsertDynamicEntity(entity);
 		return entity;
 	}
 
@@ -2141,7 +2141,7 @@
 					(entity) => entity.placement.kind === "world",
 				)
 			: event.snapshot.entities;
-		await runtime.reconcileDynamicEntities(spawnedEntities);
+		await runtime.replaceDynamicEntitySnapshot(spawnedEntities);
 	}
 
 	async function despawnExplorerEntity(

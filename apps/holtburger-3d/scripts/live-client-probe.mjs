@@ -10,6 +10,11 @@ import {
 	encodeSidecarFrame,
 	SidecarHostClient,
 } from "../dist-electron/electron/host-protocol.js";
+import {
+	createProbeFailureResult,
+	probeError,
+	redactProbeText,
+} from "./live-client-probe-report.mjs";
 
 const DEFAULT_OBSERVATION_MS = 5_000;
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -234,7 +239,7 @@ function createWaiter() {
 				wait.resolve(payload);
 			}
 		},
-		wait(event, predicate, milliseconds) {
+		wait(event, predicate, milliseconds, description = event) {
 			return new Promise((resolvePromise, rejectPromise) => {
 				const entry = {
 					event,
@@ -249,7 +254,9 @@ function createWaiter() {
 					const index = pending.indexOf(entry);
 					if (index >= 0) pending.splice(index, 1);
 					rejectPromise(
-						new Error(`timed out waiting for ${event} after ${milliseconds}ms`),
+						new Error(
+							`timed out waiting for ${description} after ${milliseconds}ms`,
+						),
 					);
 				}, milliseconds);
 				pending.push(entry);
@@ -298,6 +305,7 @@ async function main() {
 		stderr += chunk.toString();
 	});
 	const client = new SidecarHostClient(child, "client");
+	let lastCompletedPhase = "host-started";
 	const census = createCensus();
 	const waiter = createWaiter();
 	const lifecycle = [];
@@ -318,6 +326,7 @@ async function main() {
 	];
 	try {
 		await client.connect();
+		lastCompletedPhase = "sidecar-connected";
 		for (const event of events) {
 			await client.listen(event, (payload) => {
 				census.observe(event, payload);
@@ -356,11 +365,13 @@ async function main() {
 				}
 			});
 		}
+		lastCompletedPhase = "event-subscriptions-installed";
 
 		const selectionPromise = waiter.wait(
 			"client-lifecycle-changed",
 			(payload) => payload?.kind === "character-selection",
 			timeoutMs,
+			"character-selection lifecycle",
 		);
 		void selectionPromise.catch(() => undefined);
 		try {
@@ -370,11 +381,13 @@ async function main() {
 				account,
 				password,
 			});
+			lastCompletedPhase = "client-start-requested";
 		} catch (error) {
 			waiter.cancel(error);
 			throw error;
 		}
 		const selection = await selectionPromise;
+		lastCompletedPhase = "character-selection-received";
 		const characters = Array.isArray(selection.characters)
 			? selection.characters
 			: [];
@@ -396,27 +409,33 @@ async function main() {
 			"client-lifecycle-changed",
 			(payload) => payload?.kind === "in-world",
 			timeoutMs,
+			"in-world lifecycle",
 		);
 		void inWorldPromise.catch(() => undefined);
 		const localPlayerPromise = waiter.wait(
 			"client-local-player-established",
 			(payload) => Number.isInteger(payload?.playerGuid),
 			timeoutMs,
+			"local-player establishment",
 		);
 		void localPlayerPromise.catch(() => undefined);
 		await client.invoke("select_client_character", { guid: selected.guid });
+		lastCompletedPhase = "character-selection-requested";
 		await inWorldPromise;
 		const { playerGuid } = await localPlayerPromise;
+		lastCompletedPhase = "in-world-established";
 		census.setFocusGuid(playerGuid);
 
 		const currentStatePromise = waiter.wait(
 			"client-current-state",
 			(payload) => payload?.lifecycle?.kind === "in-world",
 			timeoutMs,
+			"in-world current state",
 		);
 		void currentStatePromise.catch(() => undefined);
 		await client.invoke("request_client_current_state");
 		const currentState = await currentStatePromise;
+		lastCompletedPhase = "current-state-received";
 		if (currentState.localPlayerGuid !== playerGuid) {
 			throw new Error(
 				"current state disagreed with established local-player identity",
@@ -436,6 +455,7 @@ async function main() {
 							(advance) => advance.entity?.identity?.guid === playerGuid,
 						)),
 				timeoutMs,
+				"local-player dynamic entity",
 			);
 			void playerEventPromise.catch(() => undefined);
 			const event = await playerEventPromise;
@@ -469,6 +489,7 @@ async function main() {
 				cameraStartError = safeError(error);
 			}
 		}
+		lastCompletedPhase = "camera-start-attempted";
 
 		let driveError = null;
 		try {
@@ -478,7 +499,9 @@ async function main() {
 		} catch (error) {
 			driveError = safeError(error);
 		}
+		lastCompletedPhase = "drive-start-attempted";
 		await delay(observationMs);
+		lastCompletedPhase = "observation-completed";
 		if (driveError === null) {
 			await client
 				.invoke("replace_client_drive", {
@@ -488,11 +511,13 @@ async function main() {
 		}
 		await client.invoke("disconnect_client").catch(() => undefined);
 		await client.shutdown();
+		lastCompletedPhase = "shutdown-requested";
 		const result = await withTimeout(
 			exited,
 			EXIT_TIMEOUT_MS,
 			"client sidecar did not exit after shutdown",
 		);
+		lastCompletedPhase = "complete";
 		return {
 			ok: true,
 			server: { host: serverHost, port: serverPort },
@@ -511,6 +536,14 @@ async function main() {
 			census: census.toJSON(),
 			process: result,
 		};
+	} catch (error) {
+		return createProbeFailureResult(error, {
+			credentials: redactionValues,
+			lastCompletedPhase,
+			lifecycle,
+			terminalEvents,
+			stderr,
+		});
 	} finally {
 		if (child.exitCode === null && child.signalCode === null) {
 			await client.shutdown().catch(() => undefined);
@@ -521,34 +554,21 @@ async function main() {
 				"sidecar cleanup timed out",
 			).catch(() => undefined);
 		}
-		// Stderr is intentionally not printed: a server diagnostic must not accidentally echo a
-		// credential supplied through the environment. Keep it available to the debugger without
-		// making it part of the machine-readable output.
-		void stderr;
 	}
 }
 
 function safeError(error) {
-	const message = error instanceof Error ? error.message : String(error);
-	return {
-		...(error instanceof Error ? { name: error.name } : {}),
-		message: redactText(message),
-	};
+	return probeError(error, redactionValues);
 }
 
 function redactText(value) {
-	const text = String(value);
-	const withoutAccount =
-		redactionValues.account.length > 0
-			? text.replaceAll(redactionValues.account, "<account>")
-			: text;
-	return redactionValues.password.length > 0
-		? withoutAccount.replaceAll(redactionValues.password, "<password>")
-		: withoutAccount;
+	return redactProbeText(value, redactionValues);
 }
 
 try {
-	console.log(JSON.stringify(await main()));
+	const result = await main();
+	console.log(JSON.stringify(result));
+	if (!result.ok) process.exitCode = 1;
 } catch (error) {
 	console.error(JSON.stringify({ ok: false, error: safeError(error) }));
 	process.exitCode = 1;

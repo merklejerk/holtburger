@@ -64,6 +64,21 @@ function optionalGuid(value) {
 	return guid;
 }
 
+function cameraStartRequest(playerGuid, entityGeneration, sequence) {
+	return {
+		playerGuid,
+		entityGeneration,
+		initialReach: 4.5,
+		minimumReach: 1.2,
+		maximumReach: 8,
+		inputSequence: sequence,
+		viewDirection: [0, -0.2, -1],
+		cumulativeZoomDisplacement: 0,
+		projectionRevision: sequence,
+		clearanceRadius: 0.2,
+	};
+}
+
 function waitForExit(child) {
 	return new Promise((resolvePromise, rejectPromise) => {
 		child.once("error", rejectPromise);
@@ -210,6 +225,32 @@ function distance(left, right) {
 	return Math.hypot(right.x - left.x, right.y - left.y, right.z - left.z);
 }
 
+const TELEPORT_DESTINATIONS = [
+	{ coordinates: "22n 2w", point: { x: 23_988, y: 29_748, z: 0 } },
+	{ coordinates: "11n 2w", point: { x: 23_988, y: 27_108, z: 0 } },
+];
+
+function selectTeleportDestination(requested, pose) {
+	if (requested === undefined) return null;
+	if (requested !== "auto") {
+		const destination = TELEPORT_DESTINATIONS.find(
+			(candidate) => candidate.coordinates === requested,
+		);
+		if (destination === undefined) {
+			throw new Error(
+				"HOLTBURGER_PROBE_TELEPORT must be auto, 22n 2w, or 11n 2w.",
+			);
+		}
+		return destination;
+	}
+	const source = worldPoint(pose);
+	return TELEPORT_DESTINATIONS.reduce((farthest, candidate) =>
+		distance(source, candidate.point) > distance(source, farthest.point)
+			? candidate
+			: farthest,
+	);
+}
+
 function entitiesInPayload(event, payload) {
 	if (event === "client-current-state") return payload?.dynamic?.entities ?? [];
 	if (event !== "client-dynamic-entity") return [];
@@ -292,6 +333,7 @@ async function main() {
 	const requestedCharacterGuid = optionalGuid(
 		process.env.HOLTBURGER_PROBE_CHARACTER_GUID,
 	);
+	const requestedTeleport = process.env.HOLTBURGER_PROBE_TELEPORT;
 	await access(hostPath, constants.X_OK);
 	const environment = { ...process.env };
 	if (environment.HOLTBURGER_DATS === undefined) {
@@ -317,6 +359,7 @@ async function main() {
 	const discontinuities = [];
 	const terminalEvents = [];
 	const latestEntities = new Map();
+	let teleport = null;
 	const events = [
 		"client-current-state",
 		"client-lifecycle-changed",
@@ -515,18 +558,7 @@ async function main() {
 		);
 		void cameraPathPromise.catch(() => undefined);
 		await client.invoke("start_client_camera", {
-			request: {
-				playerGuid,
-				entityGeneration: player.generation,
-				initialReach: 4.5,
-				minimumReach: 1.2,
-				maximumReach: 8,
-				inputSequence: 1,
-				viewDirection: [0, -0.2, -1],
-				cumulativeZoomDisplacement: 0,
-				projectionRevision: 1,
-				clearanceRadius: 0.2,
-			},
+			request: cameraStartRequest(playerGuid, player.generation, 1),
 		});
 		await cameraStartedPromise;
 		lastCompletedPhase = "portal-camera-registered";
@@ -557,23 +589,98 @@ async function main() {
 		);
 		player ??= latestEntities.get(playerGuid);
 		if (player !== undefined) census.seedFocusEntity(player);
-		let driveError = null;
-		try {
-			await client.invoke("replace_client_drive", {
-				request: { gait: "run", longitudinal: "forward", turning: null },
-			});
-		} catch (error) {
-			driveError = safeError(error);
+		const teleportDestination =
+			player?.placement?.kind === "world"
+				? selectTeleportDestination(requestedTeleport, player.placement.pose)
+				: null;
+		if (requestedTeleport !== undefined && teleportDestination === null) {
+			throw new Error("teleport probe requires a world-placed local player");
 		}
-		lastCompletedPhase = "drive-start-attempted";
-		await delay(observationMs);
-		lastCompletedPhase = "observation-completed";
-		if (driveError === null) {
-			await client
-				.invoke("replace_client_drive", {
-					request: { gait: "walk", longitudinal: null, turning: null },
-				})
-				.catch(() => undefined);
+		let driveError = null;
+		if (teleportDestination !== null) {
+			const sourcePose = player.placement.pose;
+			const teleportLifecyclePromise = waiter.wait(
+				"client-lifecycle-changed",
+				(payload) =>
+					payload?.kind === "portal-space" &&
+					payload.cause === "teleport" &&
+					payload.worldGeneration > portalSpace.worldGeneration,
+				timeoutMs,
+				"teleport portal-space lifecycle",
+			);
+			void teleportLifecyclePromise.catch(() => undefined);
+			const destinationEntityPromise = waiter.wait(
+				"client-dynamic-entity",
+				(payload) =>
+					entitiesInPayload("client-dynamic-entity", payload).some(
+						(entity) =>
+							entity.identity?.guid === playerGuid &&
+							entity.placement?.kind === "world" &&
+							entity.placement.pose.landblockId !== sourcePose.landblockId,
+					),
+				timeoutMs,
+				"teleport destination player placement",
+			);
+			void destinationEntityPromise.catch(() => undefined);
+			await client.invoke("send_client_chat", {
+				message: `@tele ${teleportDestination.coordinates}`,
+			});
+			lastCompletedPhase = "teleport-command-sent";
+			const [teleportLifecycle] = await Promise.all([
+				teleportLifecyclePromise,
+				destinationEntityPromise,
+			]);
+			lastCompletedPhase = "teleport-destination-received";
+			const destinationPlayer = latestEntities.get(playerGuid);
+			if (destinationPlayer?.placement?.kind !== "world") {
+				throw new Error("teleport destination player is not world-placed");
+			}
+			teleport = {
+				command: `@tele ${teleportDestination.coordinates}`,
+				sourcePose,
+				destinationPose: destinationPlayer.placement.pose,
+				lifecycle: teleportLifecycle,
+			};
+			const cameraStartedPromise = waiter.wait(
+				"client-camera-started",
+				(payload) =>
+					payload?.playerGuid === playerGuid &&
+					payload.entityGeneration === destinationPlayer.generation,
+				timeoutMs,
+				"teleport camera registration",
+			);
+			void cameraStartedPromise.catch(() => undefined);
+			await client.invoke("start_client_camera", {
+				request: cameraStartRequest(
+					playerGuid,
+					destinationPlayer.generation,
+					2,
+				),
+			});
+			await cameraStartedPromise;
+			lastCompletedPhase = "teleport-camera-registered";
+			await acknowledgeProbeWorldReveal(client, teleportLifecycle);
+			lastCompletedPhase = "teleport-world-reveal-acknowledged";
+			await delay(observationMs);
+			lastCompletedPhase = "teleport-observation-completed";
+		} else {
+			try {
+				await client.invoke("replace_client_drive", {
+					request: { gait: "run", longitudinal: "forward", turning: null },
+				});
+			} catch (error) {
+				driveError = safeError(error);
+			}
+			lastCompletedPhase = "drive-start-attempted";
+			await delay(observationMs);
+			lastCompletedPhase = "observation-completed";
+			if (driveError === null) {
+				await client
+					.invoke("replace_client_drive", {
+						request: { gait: "walk", longitudinal: null, turning: null },
+					})
+					.catch(() => undefined);
+			}
 		}
 		await client.invoke("disconnect_client").catch(() => undefined);
 		await client.shutdown();
@@ -592,6 +699,7 @@ async function main() {
 				name: selected.name,
 			},
 			lifecycle,
+			teleport,
 			camera: {
 				eventCount: cameras.length,
 			},
@@ -602,13 +710,17 @@ async function main() {
 			process: result,
 		};
 	} catch (error) {
-		return createProbeFailureResult(error, {
-			credentials: redactionValues,
-			lastCompletedPhase,
-			lifecycle,
-			terminalEvents,
-			stderr,
-		});
+		return {
+			...createProbeFailureResult(error, {
+				credentials: redactionValues,
+				lastCompletedPhase,
+				lifecycle,
+				terminalEvents,
+				stderr,
+			}),
+			teleport,
+			census: census.toJSON(),
+		};
 	} finally {
 		if (child.exitCode === null && child.signalCode === null) {
 			await client.shutdown().catch(() => undefined);

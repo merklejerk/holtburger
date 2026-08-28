@@ -1305,6 +1305,7 @@ mod tests {
             matches!(readiness, ClientBodyReadiness::Ready { .. })
         })
         .await;
+        wait_for_scene_revision(&mut coordinator, &mut world, 1).await;
         let snapshot = coordinator.snapshot();
         assert!(matches!(
             snapshot.availability.get(&Guid(0x1233_ffff)),

@@ -1942,6 +1942,7 @@
 			<MapPanel
 				readFrame={readMapPanelFrame}
 				panel={mapPanel}
+				editable={true}
 				onStateChange={(next) => {
 					mapPanel = next;
 				}}

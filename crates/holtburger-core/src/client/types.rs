@@ -266,6 +266,12 @@ pub struct ClientApplicationSnapshot {
     pub server_time: Option<f64>,
     /// Monotonic presentation generation invalidating pre-discontinuity history.
     pub world_generation: u64,
+    /// Latest server-provided world name, absent before the server-name message arrives.
+    pub world_name: Option<String>,
+    /// Current local-player display name, absent before its authoritative entity exists.
+    pub player_name: Option<String>,
+    /// Complete current/max local-player vitals used by client HUDs.
+    pub vitals: HashMap<VitalType, Vital>,
     /// Complete focused dynamic-entity replacement level.
     pub dynamic: DynamicEntitySnapshot,
     /// Broad runtime-body replacement retained for authority-facing clients such as the TUI.

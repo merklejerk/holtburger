@@ -96,7 +96,7 @@
 	.client-character span {
 		color: var(--ac-ink-muted);
 		font-family: var(--ac-font-ui);
-		font-size: 0.78rem;
+		font-size: var(--ac-panel-font-size);
 	}
 
 	.client-actions {

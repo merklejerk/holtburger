@@ -93,6 +93,18 @@ pub enum HostEvent {
     ClientServerTimeUpdated {
         time: f64,
     },
+    ClientWorldNameUpdated {
+        name: String,
+    },
+    ClientPlayerEntered {
+        #[serde(rename = "playerGuid")]
+        player_guid: holtburger_common::Guid,
+        name: String,
+    },
+    ClientPlayerVitalsUpdated {
+        vitals: Vec<crate::client_projection::ClientVitalWire>,
+    },
+    ClientChatMessage(crate::client_projection::ClientChatMessageWire),
     ClientDynamicEntity(holtburger_core::DynamicEntityEvent),
     ClientCamera(holtburger_core::ClientCameraTick),
     ClientCameraStarted(holtburger_core::ClientCameraStartReceipt),
@@ -323,6 +335,18 @@ impl ClientEventSink for StdioEventSink {
             }
             crate::client_projection::ClientHostEvent::ServerTimeUpdated { time } => {
                 HostEvent::ClientServerTimeUpdated { time }
+            }
+            crate::client_projection::ClientHostEvent::WorldNameUpdated { name } => {
+                HostEvent::ClientWorldNameUpdated { name }
+            }
+            crate::client_projection::ClientHostEvent::PlayerEntered { player_guid, name } => {
+                HostEvent::ClientPlayerEntered { player_guid, name }
+            }
+            crate::client_projection::ClientHostEvent::PlayerVitalsUpdated { vitals } => {
+                HostEvent::ClientPlayerVitalsUpdated { vitals }
+            }
+            crate::client_projection::ClientHostEvent::ChatMessage(message) => {
+                HostEvent::ClientChatMessage(message)
             }
             crate::client_projection::ClientHostEvent::DynamicEntity(event) => {
                 HostEvent::ClientDynamicEntity(event)
@@ -700,6 +724,25 @@ mod tests {
         else {
             panic!("client reveal acknowledgement did not preserve its world generation");
         };
+
+        let chat = rmp_serde::to_vec_named(&serde_json::json!({
+            "kind": "request",
+            "id": 3,
+            "command": {
+                "command": "send_client_chat",
+                "message": "Hello world",
+            },
+        }))
+        .unwrap();
+        let mut reader = Cursor::new(framed_payload(chat));
+        let Some(InboundFrame::Request {
+            command: HostCommand::Client(ClientHostCommand::SendClientChat { message }),
+            ..
+        }) = read_frame(&mut reader).unwrap()
+        else {
+            panic!("client chat did not decode into the client inventory");
+        };
+        assert_eq!(message, "Hello world");
     }
 
     #[test]

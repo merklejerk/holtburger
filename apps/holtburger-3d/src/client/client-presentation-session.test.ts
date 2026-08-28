@@ -7,7 +7,10 @@ import {
 	type DynamicEntityAdvanceBatch,
 	type DynamicEntityView,
 } from "../lib/game/runtime/dynamic-entity-feed";
-import { Vec3 } from "../lib/game/math/types";
+import { Mat4, Vec3 } from "../lib/game/math/types";
+import type { MapTerrainSource } from "../lib/game/map/map-renderer";
+import type { ScenePlacement } from "../lib/game/scene";
+import { createLandblockWorldOrigin } from "../lib/game/landblocks";
 import type {
 	ClientCameraTick,
 	ClientCurrentState,
@@ -74,6 +77,31 @@ describe("ClientPresentationSession", () => {
 		transport.emit("client-local-player-established", { playerGuid });
 		expect(presentation.frame(1_016).rendered).toBe(true);
 		expect(runtime.viewerLightGuid).toBe(playerGuid);
+		const landblockOrigin = createLandblockWorldOrigin("0x0100ffff");
+		expect(presentation.readMapPanelFrame()).toMatchObject({
+			anchor: {
+				residency: { envCellId: null, landblockId: "0x0100ffff" },
+				worldX: landblockOrigin.x + 12,
+				worldY: landblockOrigin.y + 3,
+				worldZ: landblockOrigin.z - 4,
+			},
+			presentedEntityRevision: 0,
+			source: runtime,
+		});
+		expect(presentation.readDiagnostics()).toMatchObject({
+			playerGuid,
+			playerResidency: {
+				envCellId: null,
+				landblockId: "0x0100ffff",
+			},
+			cameraResidency: {
+				envCellId: null,
+				landblockId: "0x0100ffff",
+			},
+			cameraStatus: { kind: "active" },
+			renderedFrameCount: 1,
+			draw: null,
+		});
 		await presentation.destroy();
 	});
 
@@ -408,6 +436,9 @@ function cameraTick(identity: {
 }
 
 class FakePresentationRuntime implements ClientPresentationRuntime {
+	readonly mapGeometry = { revision: 0 } as MapTerrainSource["mapGeometry"];
+	readonly terrainInstallationRevision = 0;
+	readonly dynamicEntityPlacementRevision = 0;
 	reconciled: DynamicEntityView[][] = [];
 	advances: Array<{ batch: DynamicEntityAdvanceBatch; receivedAtMs: number }> =
 		[];
@@ -505,6 +536,30 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 		};
 	}
 
+	spawnedEntityPlacement(): ScenePlacement | null {
+		const localTransform = Mat4.identity();
+		localTransform.m41 = 12;
+		localTransform.m42 = 3;
+		localTransform.m43 = -4;
+		return {
+			envCellId: null,
+			landblockId: "0x0100ffff",
+			localTransform,
+		};
+	}
+
+	listPresentedSpawnedEntities(): [] {
+		return [];
+	}
+
+	listInstalledTerrain(): [] {
+		return [];
+	}
+
+	terrainColorPalette(): null {
+		return null;
+	}
+
 	hasEnvCellScope(): boolean {
 		return true;
 	}
@@ -596,6 +651,9 @@ function currentState(playerGuid: number): ClientCurrentState {
 		localPlayerGuid: playerGuid,
 		serverTime: 75,
 		worldGeneration: 1,
+		worldName: "Leafcull",
+		playerName: "Player",
+		vitals: [],
 		dynamic: {
 			hostTime: { seconds: 75 },
 			entities: [view(playerGuid, landblockId)],

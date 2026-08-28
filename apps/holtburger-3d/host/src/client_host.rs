@@ -222,6 +222,9 @@ mod tests {
             local_player_guid: Some(Guid(0x5000_0008)),
             server_time: Some(22.0),
             world_generation: 4,
+            world_name: Some("Leafcull".to_string()),
+            player_name: Some("Mira".to_string()),
+            vitals: std::collections::HashMap::new(),
             dynamic: DynamicEntitySnapshot::new(
                 DynamicEntityHostTime::new(22.0).unwrap(),
                 Vec::new(),

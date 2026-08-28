@@ -245,6 +245,7 @@ impl ClientRuntime {
         log::debug!("GameMessage: {:?}", message);
 
         if let GameMessage::ServerName(data) = &message {
+            self.world_name = Some(data.name.clone());
             let _ = self
                 .client_view_event_tx
                 .send(ClientViewEvent::WorldNameUpdated(data.name.clone()));

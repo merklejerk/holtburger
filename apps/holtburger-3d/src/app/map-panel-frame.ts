@@ -2,6 +2,9 @@ import type { MapEntity } from "../lib/game/map/map-blips";
 import type { MapTerrainSource } from "../lib/game/map/map-renderer";
 import { type MapAnchor, mapEnvironment } from "../lib/game/map/map-view";
 
+/** Smallest usable compass diameter when the containing viewport has enough room. */
+export const MAP_PANEL_MINIMUM_SIZE = 140;
+
 /** Independently remembered map extents for the two geometry modes. */
 interface MapPanelViewDiameters {
 	/** World-metre diameter restored whenever the anchor is inside an EnvCell. */

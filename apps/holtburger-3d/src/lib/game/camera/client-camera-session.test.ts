@@ -151,6 +151,9 @@ function currentState(): ClientCurrentState {
 		localPlayerGuid: PLAYER_GUID,
 		serverTime: 10,
 		worldGeneration: 1,
+		worldName: "Leafcull",
+		playerName: "Drudge",
+		vitals: [],
 		dynamic: {
 			hostTime: { seconds: 10 },
 			entities: [

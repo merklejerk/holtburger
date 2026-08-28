@@ -1,12 +1,38 @@
 import { describe, expect, it } from "vitest";
 
 import {
+	buildEntryPath,
+	collapseRendererArguments,
 	extractVitePortArguments,
+	partitionClientLaunchArguments,
 	stripClientLaunchArguments,
 } from "./entry-paths.mjs";
 import { parseVitePort, resolveVitePort } from "./dev-port.mjs";
 
 describe("development launcher arguments", () => {
+	it("turns the bare client debug flag into an explicit renderer value", () => {
+		expect(buildEntryPath("client/index.html", ["--debug"])).toBe(
+			"client/index.html?debug=true",
+		);
+		expect(collapseRendererArguments(["--debug"])).toEqual([
+			"--query=debug=true",
+		]);
+	});
+
+	it("keeps renderer flags out of Electron's application arguments", () => {
+		expect(
+			partitionClientLaunchArguments([
+				"--account",
+				"ash",
+				"--password=secret",
+				"--debug",
+			]),
+		).toEqual({
+			launchArguments: ["--account", "ash", "--password=secret"],
+			rendererArguments: ["--debug"],
+		});
+	});
+
 	it("accepts separated client values without putting credentials in the renderer URL", () => {
 		expect(
 			stripClientLaunchArguments([

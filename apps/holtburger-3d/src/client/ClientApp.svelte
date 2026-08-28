@@ -1,10 +1,15 @@
 <script lang="ts">
 	import { onMount } from "svelte";
+	import {
+		createFrameRateSampler,
+		type FrameRateSampler,
+	} from "../app/frame-rate-sampler";
 
 	import {
 		CharacterInputController,
 		type CharacterInputKey,
 	} from "../lib/game/controls/character-input-controller";
+	import { FRONTEND_TUNING } from "../lib/frontend-tuning";
 	import { createElectronHostTransport } from "../lib/host/electron-host-transport";
 	import type { HostTransport } from "../lib/host/host-transport";
 	import {
@@ -15,11 +20,15 @@
 	import {
 		ClientPresentationSession,
 		type ClientPresentationCameraController,
+		type ClientPresentationDiagnostics,
 		type ClientPresentationStatus,
 	} from "./client-presentation-session";
+	import { clientDebugEnabled } from "./client-debug";
 	import ClientCharacterSelect from "./ClientCharacterSelect.svelte";
 	import ClientWorldView from "./ClientWorldView.svelte";
-	import type { ClientDriveRequest } from "./client-host-contract";
+	import type { MapPanelFrame } from "../app/map-panel-frame";
+	import type { ClientDriveRequest, ClientVital } from "./client-host-contract";
+	import type { ClientChatLine } from "./ClientChat.svelte";
 	import {
 		clientLifecycleEnablesWorldInput,
 		clientLifecycleUsesWorldPresentation,
@@ -31,10 +40,17 @@
 	let lifecycle = $state<ClientLifecycleUiState>(
 		initialClientLifecycleUiState(),
 	);
+	const debugEnabled = clientDebugEnabled(window.location.search);
 	let session = $state<ClientLifecycleSession | null>(null);
 	let hostTransport = $state<HostTransport | null>(null);
 	let startupError = $state<string | null>(null);
 	let commandFailure = $state<string | null>(null);
+	let playerName = $state<string | null>(null);
+	let worldName = $state<string | null>(null);
+	let vitals = $state<readonly ClientVital[]>([]);
+	let chatMessages = $state<readonly ClientChatLine[]>([]);
+	let nextChatMessageId = 1;
+	const MAXIMUM_CHAT_LINES = 250;
 	let presentationError = $state<string | null>(null);
 	let presentationStatus = $state<ClientPresentationStatus>({
 		kind: "starting",
@@ -45,6 +61,9 @@
 	let cameraController = $state<ClientPresentationCameraController | null>(
 		null,
 	);
+	/** Imperative presentation source sampled by the radar on its own bounded cadence. */
+	let presentationSession: ClientPresentationSession | null = null;
+	let frameRateSampler: FrameRateSampler | null = null;
 	let inputController: CharacterInputController | null = null;
 	let inputDispatch: Promise<void> = Promise.resolve();
 	const usesWorldPresentation = $derived(
@@ -102,15 +121,40 @@
 	function receive(event: ClientLifecycleSessionEvent): void {
 		switch (event.type) {
 			case "current-state":
+				playerName = event.state.playerName;
+				worldName = event.state.worldName;
+				vitals = event.state.vitals;
+				lifecycle = reduceClientLifecycleUiState(lifecycle, {
+					type: "authority",
+					lifecycle: event.state.lifecycle,
+				});
+				return;
 			case "lifecycle":
 				lifecycle = reduceClientLifecycleUiState(lifecycle, {
 					type: "authority",
-					lifecycle:
-						event.type === "current-state"
-							? event.state.lifecycle
-							: event.lifecycle,
+					lifecycle: event.lifecycle,
 				});
 				return;
+			case "world-name":
+				worldName = event.name;
+				return;
+			case "player-entered":
+				if (event.player.playerGuid === session?.state().playerGuid) {
+					playerName = event.player.name;
+				}
+				return;
+			case "vitals":
+				vitals = event.vitals;
+				return;
+			case "chat": {
+				const line: ClientChatLine = {
+					...event.message,
+					id: nextChatMessageId++,
+					receivedAt: new Date(),
+				};
+				chatMessages = [...chatMessages, line].slice(-MAXIMUM_CHAT_LINES);
+				return;
+			}
 			case "exit-requested":
 				lifecycle = reduceClientLifecycleUiState(lifecycle, {
 					type: "exit",
@@ -164,7 +208,20 @@
 		}
 	}
 
+	async function sendChat(message: string): Promise<void> {
+		if (session === null || lifecycle.kind !== "in-world") {
+			throw new Error("Chat is unavailable outside the world.");
+		}
+		await session.sendChat(message);
+	}
+
+	function handleChatFocusChange(focused: boolean): void {
+		if (focused) inputController?.reset();
+	}
+
 	function handleWindowKeydown(event: KeyboardEvent): void {
+		if (event.defaultPrevented) return;
+		if (event.target instanceof HTMLInputElement) return;
 		if (lifecycle.kind === "character-selection" && event.key === "Enter") {
 			event.preventDefault();
 			void enterWorld();
@@ -178,6 +235,7 @@
 	}
 
 	function handleWindowKeyup(event: KeyboardEvent): void {
+		if (event.target instanceof HTMLInputElement) return;
 		if (lifecycle.kind !== "in-world") return;
 		const key = clientInputKey(event.key);
 		if (key === null || inputController === null) return;
@@ -213,6 +271,27 @@
 		}
 	}
 
+	function readMapPanelFrame(): MapPanelFrame {
+		return (
+			presentationSession?.readMapPanelFrame() ?? {
+				anchor: null,
+				cameraFovRadians: 0,
+				cameraHeadingRadians: 0,
+				presentedEntities: () => [],
+				presentedEntityRevision: 0,
+				source: null,
+			}
+		);
+	}
+
+	function readDiagnostics(): ClientPresentationDiagnostics | null {
+		return presentationSession?.readDiagnostics() ?? null;
+	}
+
+	function readFramesPerSecond(): number | null {
+		return frameRateSampler?.readFramesPerSecond() ?? null;
+	}
+
 	/** Build and drive the renderer after Svelte mounts the world-presentation canvas. */
 	$effect(() => {
 		const currentSession = session;
@@ -241,12 +320,29 @@
 			session: currentSession,
 			onError: reportPresentationError,
 		});
+		const currentFrameRateSampler = createFrameRateSampler(
+			FRONTEND_TUNING.diagnostics.frameMetricsEmaWindowMs,
+		);
+		presentationSession = presentation;
+		frameRateSampler = currentFrameRateSampler;
 		cameraController = presentation.camera;
 		presentationError = null;
 
 		const frame = (timeMs: number): void => {
 			if (cancelled) return;
-			presentationStatus = presentation.frame(timeMs).status;
+			const frameStartedAt = performance.now();
+			const nextStatus = presentation.frame(timeMs).status;
+			const frameFinishedAt = performance.now();
+			currentFrameRateSampler.recordFrameWork(
+				frameFinishedAt - frameStartedAt,
+				frameFinishedAt,
+			);
+			if (
+				nextStatus.kind !== presentationStatus.kind ||
+				nextStatus.diagnostic !== presentationStatus.diagnostic
+			) {
+				presentationStatus = nextStatus;
+			}
 			frameHandle = window.requestAnimationFrame(frame);
 		};
 		void presentation
@@ -265,6 +361,8 @@
 				presentationError = diagnostic(error);
 			});
 			if (cameraController === presentation.camera) cameraController = null;
+			if (presentationSession === presentation) presentationSession = null;
+			if (frameRateSampler === currentFrameRateSampler) frameRateSampler = null;
 			presentationStatus = { kind: "stopped", diagnostic: null };
 		};
 	});
@@ -332,9 +430,19 @@
 {#if usesWorldPresentation && startupError === null && commandFailure === null}
 	<ClientWorldView
 		cameraController={lifecycle.kind === "in-world" ? cameraController : null}
+		{debugEnabled}
 		{presentationStatus}
 		{presentationStatusText}
 		{presentationError}
+		{readMapPanelFrame}
+		{readDiagnostics}
+		{readFramesPerSecond}
+		{playerName}
+		{worldName}
+		{vitals}
+		{chatMessages}
+		onSendChat={sendChat}
+		onChatFocusChange={handleChatFocusChange}
 		onCanvas={(canvas) => (canvasElement = canvas)}
 		onDisconnect={disconnect}
 	/>
@@ -345,7 +453,7 @@
 				<span>Client</span>
 			</header>
 
-			<div class="client-panel-body">
+			<div class="client-panel-body ac-panel-body">
 				<p class="ac-section-label">Holtburger 3D Client</p>
 				{#if startupError !== null}
 					<h1>Client unavailable</h1>

@@ -79,3 +79,24 @@
 		)} ms | frame {formatMs(smoothedMetrics.frameMs)} ms
 	</aside>
 {/if}
+
+<style>
+	.frame-metrics-overlay {
+		position: absolute;
+		left: 12px;
+		bottom: 12px;
+		z-index: 2;
+		max-width: calc(100vw - 24px);
+		padding: 3px 6px;
+		overflow: hidden;
+		color: #fff;
+		font-family: var(--ac-font-ui);
+		font-size: var(--ac-panel-font-size);
+		font-variant-numeric: tabular-nums;
+		line-height: 1.2;
+		white-space: nowrap;
+		text-overflow: ellipsis;
+		background: rgb(0 0 0 / 0.58);
+		text-shadow: 1px 1px 0 #000;
+	}
+</style>

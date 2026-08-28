@@ -4,10 +4,12 @@ const { contextBridge, ipcRenderer } = electron;
 
 type HostListener = (payload: unknown) => void;
 
-const listeners = new Map<
-	number,
-	(_event: Electron.IpcRendererEvent, payload: unknown) => void
->();
+interface RegisteredHostListener {
+	readonly event: string;
+	readonly handler: HostListener;
+}
+
+const listeners = new Map<number, RegisteredHostListener>();
 let nextListenerToken = 1;
 
 function isEventEnvelope(
@@ -21,6 +23,14 @@ function isEventEnvelope(
 	);
 }
 
+ipcRenderer.on("host:event", (_ipcEvent, payload: unknown) => {
+	if (!isEventEnvelope(payload))
+		throw new Error("malformed host event envelope");
+	for (const listener of listeners.values()) {
+		if (listener.event === payload.event) listener.handler(payload.payload);
+	}
+});
+
 contextBridge.exposeInMainWorld("holtburgerHost", {
 	invoke(
 		command: string,
@@ -30,24 +40,11 @@ contextBridge.exposeInMainWorld("holtburgerHost", {
 	},
 	listen(event: string, handler: HostListener): Promise<number> {
 		const token = nextListenerToken++;
-		const listener = (
-			_ipcEvent: Electron.IpcRendererEvent,
-			payload: unknown,
-		) => {
-			if (!isEventEnvelope(payload))
-				throw new Error("malformed host event envelope");
-			if (payload.event === event) handler(payload.payload);
-		};
-		listeners.set(token, listener);
-		ipcRenderer.on("host:event", listener);
+		listeners.set(token, { event, handler });
 		return Promise.resolve(token);
 	},
 	unlisten(token: number): Promise<void> {
-		const listener = listeners.get(token);
-		if (listener) {
-			ipcRenderer.removeListener("host:event", listener);
-			listeners.delete(token);
-		}
+		listeners.delete(token);
 		return Promise.resolve();
 	},
 });

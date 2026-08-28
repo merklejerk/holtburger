@@ -11,6 +11,9 @@ import type {
 	ClientPresentationDiscontinuity,
 	ClientCameraStartReceipt,
 	ClientCameraTick,
+	ClientChatMessage,
+	ClientPlayerEntered,
+	ClientVital,
 } from "../../client/client-host-contract";
 
 /** Content/status commands implemented by the shared host-content capability. */
@@ -62,6 +65,7 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"request_client_current_state",
 	"select_client_character",
 	"replace_client_drive",
+	"send_client_chat",
 	"start_client_camera",
 	"set_client_camera_intent",
 	"set_client_camera_clearance",
@@ -110,6 +114,10 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-lifecycle-changed",
 	"client-local-player-established",
 	"client-server-time-updated",
+	"client-world-name-updated",
+	"client-player-entered",
+	"client-player-vitals-updated",
+	"client-chat-message",
 	"client-dynamic-entity",
 	"client-camera-started",
 	"client-camera",
@@ -164,6 +172,12 @@ export interface HostEventPayloadMap {
 	"client-lifecycle-changed": ClientLifecycle;
 	"client-local-player-established": ClientLocalPlayerEstablished;
 	"client-server-time-updated": { time: number };
+	"client-world-name-updated": { name: string };
+	"client-player-entered": ClientPlayerEntered;
+	"client-player-vitals-updated": {
+		vitals: ClientVital[];
+	};
+	"client-chat-message": ClientChatMessage;
 	"client-dynamic-entity": DynamicEntityEvent;
 	"client-camera-started": ClientCameraStartReceipt;
 	"client-camera": ClientCameraTick;

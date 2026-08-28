@@ -1,5 +1,6 @@
 use crate::DynamicEntitySnapshot;
 use holtburger_common::Guid;
+use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_protocol::errors::WeenieError;
 use holtburger_session::Session;
 use holtburger_world::{SpatialBodyId, WorldEvent, WorldState};
@@ -59,6 +60,8 @@ pub struct ClientRuntime {
     authenticating: bool,
     /// Monotonic world-generation edge used to invalidate presentation interpolation.
     world_generation: u64,
+    /// Latest server-provided world name retained for replacement application snapshots.
+    world_name: Option<String>,
     /// Terminal cause selected by the authority before it publishes `Exiting`.
     exit_cause: Option<ClientExitCause>,
     client_view_event_tx: broadcast::Sender<ClientViewEvent>,
@@ -170,6 +173,12 @@ impl ClientRuntime {
                 .as_ref()
                 .map(|_| self.world.current_server_time()),
             world_generation: self.world_generation,
+            world_name: self.world_name.clone(),
+            player_name: self
+                .world
+                .player_entity()
+                .map(|entity| entity.name().to_string()),
+            vitals: self.world.player.vitals.clone(),
             dynamic: DynamicEntitySnapshot::new(
                 self.dynamic_entity_host_time(),
                 self.current_dynamic_entity_views(),

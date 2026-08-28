@@ -1,11 +1,51 @@
 //! Client-specific projection from core view events to the renderer contract.
 
-use holtburger_common::Guid;
+use std::collections::HashMap;
+
+use holtburger_common::{Guid, stats::VitalType};
 use holtburger_core::{
     ClientApplicationSnapshot, ClientCameraStartReceipt, ClientCameraTick, ClientExitCause,
     ClientLifecycleState, ClientViewEvent, ClientWorldActivationCause, DynamicEntityEvent,
 };
+use holtburger_world::stats::Vital;
 use serde::Serialize;
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClientVitalKind {
+    Health,
+    Stamina,
+    Mana,
+}
+
+/// One local-player vital level, projected without exposing world stat internals.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientVitalWire {
+    pub kind: ClientVitalKind,
+    pub current: u32,
+    pub maximum: u32,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClientChatKind {
+    Speech,
+    Tell,
+    Channel,
+    System,
+    Emote,
+}
+
+/// One already-interpreted chat line for the combined client buffer.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientChatMessageWire {
+    pub kind: ClientChatKind,
+    pub sender: Option<String>,
+    pub channel: Option<String>,
+    pub message: String,
+}
 
 /// Renderer-safe lifecycle state. Core's broad state and protocol packet values stop here.
 #[derive(Debug, Clone, Serialize)]
@@ -83,6 +123,12 @@ pub struct ClientCurrentState {
     pub server_time: Option<f64>,
     /// Monotonic generation invalidating presentation history across discontinuities.
     pub world_generation: u64,
+    /// Latest server-provided world name.
+    pub world_name: Option<String>,
+    /// Current local-player display name.
+    pub player_name: Option<String>,
+    /// Complete local-player vital replacement level.
+    pub vitals: Vec<ClientVitalWire>,
     /// Complete focused dynamic-entity replacement level.
     pub dynamic: holtburger_core::DynamicEntitySnapshot,
 }
@@ -113,6 +159,10 @@ pub enum ClientHostEvent {
     LifecycleChanged(ClientLifecycleWire),
     LocalPlayerEstablished { player_guid: Guid },
     ServerTimeUpdated { time: f64 },
+    WorldNameUpdated { name: String },
+    PlayerEntered { player_guid: Guid, name: String },
+    PlayerVitalsUpdated { vitals: Vec<ClientVitalWire> },
+    ChatMessage(ClientChatMessageWire),
     DynamicEntity(DynamicEntityEvent),
     Camera(ClientCameraTick),
     CameraStarted(ClientCameraStartReceipt),
@@ -195,6 +245,9 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
             local_player_guid: snapshot.local_player_guid,
             server_time: snapshot.server_time,
             world_generation: snapshot.world_generation,
+            world_name: snapshot.world_name.clone(),
+            player_name: snapshot.player_name.clone(),
+            vitals: project_vitals(&snapshot.vitals),
             dynamic: snapshot.dynamic.clone(),
         }
     }
@@ -215,6 +268,58 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
         ClientViewEvent::ServerTimeUpdated { time } => {
             Some(ClientHostEvent::ServerTimeUpdated { time })
         }
+        ClientViewEvent::WorldNameUpdated(name) => Some(ClientHostEvent::WorldNameUpdated { name }),
+        ClientViewEvent::PlayerEntered { guid, name } => Some(ClientHostEvent::PlayerEntered {
+            player_guid: guid,
+            name,
+        }),
+        ClientViewEvent::PlayerVitalsUpdated { vitals } => {
+            Some(ClientHostEvent::PlayerVitalsUpdated {
+                vitals: project_vitals(&vitals),
+            })
+        }
+        ClientViewEvent::ServerMessage { message, .. } => {
+            Some(ClientHostEvent::ChatMessage(ClientChatMessageWire {
+                kind: ClientChatKind::System,
+                sender: None,
+                channel: None,
+                message,
+            }))
+        }
+        ClientViewEvent::Chat {
+            sender, message, ..
+        } => Some(ClientHostEvent::ChatMessage(ClientChatMessageWire {
+            kind: ClientChatKind::Speech,
+            sender: Some(sender),
+            channel: None,
+            message,
+        })),
+        ClientViewEvent::Tell { sender, message } => {
+            Some(ClientHostEvent::ChatMessage(ClientChatMessageWire {
+                kind: ClientChatKind::Tell,
+                sender: Some(sender),
+                channel: None,
+                message,
+            }))
+        }
+        ClientViewEvent::ChannelMessage {
+            channel,
+            sender,
+            message,
+        } => Some(ClientHostEvent::ChatMessage(ClientChatMessageWire {
+            kind: ClientChatKind::Channel,
+            sender: Some(sender),
+            channel: Some(format!("{:?}", channel.kind)),
+            message,
+        })),
+        ClientViewEvent::Emote { sender, text } | ClientViewEvent::SoulEmote { sender, text } => {
+            Some(ClientHostEvent::ChatMessage(ClientChatMessageWire {
+                kind: ClientChatKind::Emote,
+                sender: Some(sender),
+                channel: None,
+                message: text,
+            }))
+        }
         ClientViewEvent::DynamicEntity(event) => Some(ClientHostEvent::DynamicEntity(event)),
         ClientViewEvent::Camera(tick) => Some(ClientHostEvent::Camera(tick)),
         ClientViewEvent::CameraStarted(receipt) => Some(ClientHostEvent::CameraStarted(receipt)),
@@ -229,6 +334,24 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
         )),
         _ => None,
     }
+}
+
+fn project_vitals(vitals: &HashMap<VitalType, Vital>) -> Vec<ClientVitalWire> {
+    [VitalType::Health, VitalType::Stamina, VitalType::Mana]
+        .into_iter()
+        .filter_map(|kind| {
+            let vital = vitals.get(&kind)?;
+            Some(ClientVitalWire {
+                kind: match kind {
+                    VitalType::Health => ClientVitalKind::Health,
+                    VitalType::Stamina => ClientVitalKind::Stamina,
+                    VitalType::Mana => ClientVitalKind::Mana,
+                },
+                current: vital.current,
+                maximum: vital.buffed_max,
+            })
+        })
+        .collect()
 }
 
 /// Converts an explicit task result into a redacted diagnostic without preserving credentials.

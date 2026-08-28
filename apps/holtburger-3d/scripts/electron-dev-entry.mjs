@@ -6,15 +6,17 @@ import { resolve } from "node:path";
 
 import {
 	buildEntryPath,
+	collapseRendererArguments,
 	extractVitePortArguments,
+	partitionClientLaunchArguments,
 	requireEntry,
-	stripClientLaunchArguments,
 } from "./entry-paths.mjs";
 import { resolveVitePort } from "./dev-port.mjs";
 
 const [entryName, ...allArgs] = process.argv.slice(2);
 let rawArgs;
 let requestedVitePort;
+let electronAppArgs;
 
 let entry;
 let entryPath;
@@ -26,9 +28,16 @@ try {
 	requestedVitePort = extracted.vitePort;
 	rawArgs = extracted.args;
 	const entryArgs = rawArgs.filter((arg) => arg !== "--release");
-	const rendererArgs =
-		entryName === "client" ? stripClientLaunchArguments(entryArgs) : entryArgs;
+	const partitioned =
+		entryName === "client"
+			? partitionClientLaunchArguments(entryArgs)
+			: { launchArguments: [], rendererArguments: entryArgs };
+	const rendererArgs = partitioned.rendererArguments;
 	entryPath = buildEntryPath(entry.path, rendererArgs);
+	electronAppArgs = [
+		...partitioned.launchArguments,
+		...collapseRendererArguments(rendererArgs),
+	];
 } catch (error) {
 	console.error(error instanceof Error ? error.message : String(error));
 	process.exit(1);
@@ -158,7 +167,7 @@ const electron = spawn(
 		...electronSwitches,
 		".",
 		entryName ?? "explorer",
-		...rawArgs,
+		...electronAppArgs,
 		...(release ? ["--release"] : []),
 	],
 	{

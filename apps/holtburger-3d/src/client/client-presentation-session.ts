@@ -80,7 +80,15 @@ import {
 	PortalTransitionController,
 	type PortalTransitionState,
 } from "../lib/client/portal-transition-controller";
-import type { PortalTransitionFrame } from "../lib/game/renderer/renderer";
+import type {
+	PortalTransitionFrame,
+	RendererFrameDiagnosticsSnapshot,
+} from "../lib/game/renderer/renderer";
+import type { MapPanelFrame } from "../app/map-panel-frame";
+import type { MapEntity } from "../lib/game/map/map-blips";
+import type { MapTerrainSource } from "../lib/game/map/map-renderer";
+import { mapHeadingFromSceneTransform } from "../lib/game/map/map-view";
+import type { ScenePlacement } from "../lib/game/scene";
 
 /** Client presentation projection and the frontend's small reach/orbit policy. */
 const CLIENT_CAMERA = {
@@ -135,6 +143,39 @@ export interface ClientPresentationFrame {
 	readonly status: ClientPresentationStatus;
 }
 
+/** Residency identity shown by the client diagnostics panel. */
+export interface ClientDiagnosticResidency {
+	readonly landblockId: string;
+	readonly envCellId: string | null;
+}
+
+/** Cold, curated client diagnostics sampled only while the debug panel is open. */
+export interface ClientPresentationDiagnostics {
+	readonly playerGuid: number | null;
+	readonly playerResidency: ClientDiagnosticResidency | null;
+	readonly cameraResidency: ClientDiagnosticResidency | null;
+	readonly cameraStatus: ReturnType<
+		ClientPresentationCameraController["status"]
+	>;
+	readonly renderedFrameCount: number;
+	readonly viewport: {
+		readonly cssWidth: number;
+		readonly cssHeight: number;
+		readonly drawingBufferWidth: number;
+		readonly drawingBufferHeight: number;
+	};
+	readonly draw: null | {
+		readonly viewCount: number;
+		readonly visibleSceneEntries: number;
+		readonly visibleStaticNodes: number;
+		readonly visibleDynamicEntities: number;
+		readonly visibleDynamicParts: number;
+		readonly objectDrawCalls: number;
+		readonly dynamicDrawCalls: number;
+		readonly particleBatches: number;
+	};
+}
+
 /** One exact portal destination's static acceptance and dynamic installation progress. */
 type PortalSceneActivation =
 	| {
@@ -162,7 +203,7 @@ export type ClientPresentationCameraController = PossessionCameraController<
 >;
 
 /** Runtime surface consumed by the client orchestration seam and injected by focused tests. */
-export interface ClientPresentationRuntime {
+export interface ClientPresentationRuntime extends MapTerrainSource {
 	reconcileDynamicEntities(
 		entities: readonly DynamicEntityView[],
 	): Promise<DynamicEntityReconciliation>;
@@ -186,9 +227,17 @@ export interface ClientPresentationRuntime {
 	/** Play a validated head-locked portal transition cue when the runtime owns audio. */
 	playPortalTransitionSound?(kind: "enter" | "exit"): void;
 	dynamicEntityOrigin(guid: number): ResolvedSceneOrigin | null;
+	/** Current scene placement of one realized dynamic entity. */
+	spawnedEntityPlacement(guid: number): ScenePlacement | null;
+	/** Every realized entity paired with the placement used by the current scene. */
+	listPresentedSpawnedEntities(): Iterable<MapEntity>;
+	/** Monotonic change fact for live dynamic placements. */
+	readonly dynamicEntityPlacementRevision: number;
 	hasEnvCellScope(residency: ResolvedSceneOrigin): boolean;
 	tick(): void;
 	render(timeSeconds: number): void;
+	/** Optional cold renderer counters used only by explicitly enabled client diagnostics. */
+	getRendererFrameDiagnostics?(): RendererFrameDiagnosticsSnapshot | null;
 }
 
 /** Minimal owner surface; keeping it structural makes the feed behavior testable without WebGL. */
@@ -238,6 +287,8 @@ export class ClientPresentationSession {
 	#portalSceneActivation: PortalSceneActivation | null = null;
 	readonly #portalTransition = new PortalTransitionController();
 	#hasRenderedFrame = false;
+	#renderedFrameCount = 0;
+	#lastCameraResidency: ClientPresentationDiagnostics["cameraResidency"] = null;
 	#status: ClientPresentationStatus = {
 		kind: "starting",
 		diagnostic: null,
@@ -284,6 +335,69 @@ export class ClientPresentationSession {
 	/** Current presentation status for the minimal client overlay. */
 	status(): ClientPresentationStatus {
 		return this.#status;
+	}
+
+	/** Pull one coherent radar frame from the same presentation facts the world scene draws. */
+	readMapPanelFrame(): MapPanelFrame {
+		const owner = this.#owner;
+		const playerGuid = this.#playerGuid;
+		const placement =
+			owner === null || playerGuid === null
+				? null
+				: owner.runtime.spawnedEntityPlacement(playerGuid);
+		return {
+			anchor: placement === null ? null : mapAnchorFromPlacement(placement),
+			cameraFovRadians: (CLIENT_CAMERA.fov * Math.PI) / 180,
+			cameraHeadingRadians: this.camera.desiredLook().yawRadians,
+			presentedEntities: () =>
+				owner?.runtime.listPresentedSpawnedEntities() ?? [],
+			presentedEntityRevision:
+				owner?.runtime.dynamicEntityPlacementRevision ?? 0,
+			source: owner?.runtime ?? null,
+		};
+	}
+
+	/** Pull one bounded diagnostics snapshot without making frame-hot facts reactive. */
+	readDiagnostics(): ClientPresentationDiagnostics {
+		const owner = this.#owner;
+		const playerPlacement =
+			owner === null || this.#playerGuid === null
+				? null
+				: owner.runtime.spawnedEntityPlacement(this.#playerGuid);
+		const frame = owner?.runtime.getRendererFrameDiagnostics?.() ?? null;
+		const selection = frame?.selectionMetrics;
+		return {
+			playerGuid: this.#playerGuid,
+			playerResidency:
+				playerPlacement === null
+					? null
+					: {
+							landblockId: playerPlacement.landblockId,
+							envCellId: playerPlacement.envCellId,
+						},
+			cameraResidency: this.#lastCameraResidency,
+			cameraStatus: this.camera.status(),
+			renderedFrameCount: this.#renderedFrameCount,
+			viewport: {
+				cssWidth: this.#canvas.clientWidth,
+				cssHeight: this.#canvas.clientHeight,
+				drawingBufferWidth: this.#canvas.width,
+				drawingBufferHeight: this.#canvas.height,
+			},
+			draw:
+				selection === undefined
+					? null
+					: {
+							viewCount: selection.viewCount,
+							visibleSceneEntries: selection.visibleSceneEntries,
+							visibleStaticNodes: selection.visibleStaticNodeCount,
+							visibleDynamicEntities: selection.visibleDynamicEntityCount,
+							visibleDynamicParts: selection.visibleDynamicPartCount,
+							objectDrawCalls: selection.objectDrawCalls,
+							dynamicDrawCalls: selection.submittedDynamicDrawCount,
+							particleBatches: selection.submittedParticleBatchCount,
+						},
+		};
 	}
 
 	/**
@@ -445,10 +559,20 @@ export class ClientPresentationSession {
 			cameraPresentation,
 			this.camera.acknowledgedProjection(timeMs),
 		);
+		if (
+			this.#lastCameraResidency?.landblockId !== camera.placement.landblockId ||
+			this.#lastCameraResidency.envCellId !== camera.placement.envCellId
+		) {
+			this.#lastCameraResidency = {
+				landblockId: camera.placement.landblockId,
+				envCellId: camera.placement.envCellId,
+			};
+		}
 		owner.runtime.setPrimaryView({ camera, extent });
 		if (!portal) owner.runtime.setAudioListener(audioListenerFor(camera));
 		owner.runtime.render(timeMs / 1_000);
 		this.#hasRenderedFrame = true;
+		this.#renderedFrameCount += 1;
 		this.#setStatus("ready");
 		if (portal && this.#portalSceneActivation?.kind === "accepted") {
 			const sceneActivation = this.#portalSceneActivation;
@@ -994,6 +1118,7 @@ export class ClientPresentationSession {
 		diagnostic: string | null = null,
 	): void {
 		const previous = this.#status;
+		if (previous.kind === kind && previous.diagnostic === diagnostic) return;
 		if (
 			this.#hasRenderedFrame &&
 			this.#session.state().lifecycle?.kind === "in-world" &&
@@ -1164,6 +1289,23 @@ function createClientCamera(
 			position,
 			rotation: fallbackRotation,
 		},
+	};
+}
+
+/** Convert the player's live scene placement into the world-space subject used by the radar. */
+function mapAnchorFromPlacement(
+	placement: ScenePlacement,
+): NonNullable<MapPanelFrame["anchor"]> {
+	const origin = createLandblockWorldOrigin(placement.landblockId);
+	return {
+		headingRadians: mapHeadingFromSceneTransform(placement.localTransform),
+		residency: {
+			envCellId: placement.envCellId,
+			landblockId: placement.landblockId,
+		},
+		worldX: origin.x + placement.localTransform.m41,
+		worldY: origin.y + placement.localTransform.m42,
+		worldZ: origin.z + placement.localTransform.m43,
 	};
 }
 

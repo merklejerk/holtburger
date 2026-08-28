@@ -28,6 +28,9 @@ pub enum ClientHostCommand {
     ReplaceClientDrive {
         request: crate::client_host::ClientDriveRequest,
     },
+    SendClientChat {
+        message: String,
+    },
     StartClientCamera {
         request: holtburger_core::ClientCameraStartRequest,
     },
@@ -55,6 +58,7 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "request_client_current_state",
     "select_client_character",
     "replace_client_drive",
+    "send_client_chat",
     "start_client_camera",
     "set_client_camera_intent",
     "set_client_camera_clearance",
@@ -244,6 +248,14 @@ impl ClientHostRuntime {
         self.send_command(ClientCommand::Disconnect).await
     }
 
+    /// Send one ordinary local-speech message through core's existing chat command path.
+    pub async fn send_chat(&self, message: String) -> Result<()> {
+        if message.trim().is_empty() {
+            bail!("client chat message must contain visible text");
+        }
+        self.send_command(ClientCommand::Talk(message)).await
+    }
+
     /// Stops command intake, asks core to disconnect, and bounds the owned task lifetime.
     pub async fn shutdown(&self) {
         let (sender, task) = {
@@ -294,6 +306,11 @@ pub async fn dispatch_client(
             .map_err(application_error),
         ReplaceClientDrive { request } => runtime
             .replace_drive(request)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SendClientChat { message } => runtime
+            .send_chat(message)
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),

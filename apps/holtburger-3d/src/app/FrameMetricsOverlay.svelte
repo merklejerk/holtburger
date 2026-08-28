@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { untrack } from "svelte";
+	import { onMount, untrack } from "svelte";
+	import type { FrameRates } from "./frame-rate-sampler";
 	import { FRONTEND_TUNING } from "../lib/frontend-tuning";
 
 	export interface FrameMetrics {
@@ -14,15 +15,19 @@
 	interface Props {
 		/** Latest measured runtime frame timings. */
 		metrics: FrameMetrics | null;
+		/** Cold read of frame cadence and estimated capacity from the Explorer render loop. */
+		readonly readFrameRates: () => FrameRates | null;
 		/** EMA smoothing window in milliseconds. */
 		emaWindowMs?: number;
 	}
 
 	let {
 		metrics,
+		readFrameRates,
 		emaWindowMs = FRONTEND_TUNING.diagnostics.frameMetricsEmaWindowMs,
 	}: Props = $props();
 	let smoothedMetrics: FrameMetrics | null = $state(null);
+	let frameRates = $state<FrameRates | null>(null);
 	let lastSampleAt: number | null = null;
 
 	const smooth = (current: number, next: number, alpha: number): number =>
@@ -61,14 +66,27 @@
 		});
 	});
 
+	onMount(() => {
+		const sample = (): void => {
+			frameRates = readFrameRates();
+		};
+		sample();
+		const interval = window.setInterval(
+			sample,
+			FRONTEND_TUNING.diagnostics.frameRateDisplayIntervalMs,
+		);
+		return () => window.clearInterval(interval);
+	});
+
 	const formatMs = (value: number): string => value.toFixed(2);
-	const calculateFramesPerSecond = (value: FrameMetrics | null): number =>
-		value === null ? 0 : 1000 / Math.max(value.frameMs, 0.001);
-	const fps = $derived(calculateFramesPerSecond(smoothedMetrics));
-	const displayFps = $derived(
-		fps > FRONTEND_TUNING.diagnostics.maximumDisplayedFramesPerSecond
+	const formatFramesPerSecond = (value: number): string =>
+		value > FRONTEND_TUNING.diagnostics.maximumDisplayedFramesPerSecond
 			? `${FRONTEND_TUNING.diagnostics.maximumDisplayedFramesPerSecond}+`
-			: fps.toFixed(0),
+			: value.toFixed(0);
+	const displayFps = $derived(
+		frameRates === null
+			? "—/—"
+			: `${formatFramesPerSecond(frameRates.capped)}/${formatFramesPerSecond(frameRates.uncapped)}`,
 	);
 </script>
 

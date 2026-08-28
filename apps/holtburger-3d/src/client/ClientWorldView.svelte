@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { untrack } from "svelte";
 	import MapPanel from "../app/MapPanel.svelte";
+	import type { FrameRates } from "../app/frame-rate-sampler";
 	import {
 		MAP_PANEL_MINIMUM_SIZE,
 		type MapPanelFrame,
@@ -18,6 +19,7 @@
 	import type { ClientVital } from "./client-host-contract";
 	import {
 		anchorClientHudPlacement,
+		CLIENT_FPS_PANEL_WIDTH,
 		createDefaultClientHudLayout,
 		resolveClientHudSquarePlacement,
 		type ClientHudPlacement,
@@ -39,7 +41,7 @@
 		readonly presentationError: string | null;
 		readonly readMapPanelFrame: () => MapPanelFrame;
 		readonly readDiagnostics: () => ClientPresentationDiagnostics | null;
-		readonly readFramesPerSecond: () => number | null;
+		readonly readFrameRates: () => FrameRates | null;
 		readonly playerName: string | null;
 		readonly worldName: string | null;
 		readonly vitals: readonly ClientVital[];
@@ -58,7 +60,7 @@
 		presentationError,
 		readMapPanelFrame,
 		readDiagnostics,
-		readFramesPerSecond,
+		readFrameRates,
 		playerName,
 		worldName,
 		vitals,
@@ -264,14 +266,14 @@
 		label="Frame rate"
 		placement={hudLayout.fps}
 		editable={!uiLocked}
-		minWidth={80}
+		minWidth={CLIENT_FPS_PANEL_WIDTH}
 		minHeight={24}
 		resizable={false}
 		contentHitTesting="descendants"
 		{viewport}
 		onPlacementChange={(fps) => (hudLayout = { ...hudLayout, fps })}
 	>
-		<ClientFpsCounter {readFramesPerSecond} />
+		<ClientFpsCounter {readFrameRates} />
 	</ClientHudPanel>
 	<ClientHudPanel
 		label="Game shortcuts"

@@ -1,21 +1,28 @@
 <script lang="ts">
 	import { onMount } from "svelte";
+	import type { FrameRates } from "../app/frame-rate-sampler";
 	import { FRONTEND_TUNING } from "../lib/frontend-tuning";
 
 	interface Props {
-		/** Cold read of the uncapped presentation throughput maintained outside Svelte. */
-		readonly readFramesPerSecond: () => number | null;
+		/** Cold read of presentation cadence and capacity maintained outside Svelte. */
+		readonly readFrameRates: () => FrameRates | null;
 	}
 
-	const { readFramesPerSecond }: Props = $props();
-	let framesPerSecond = $state<number | null>(null);
+	const { readFrameRates }: Props = $props();
+	let frameRates = $state<FrameRates | null>(null);
+	const formatFramesPerSecond = (value: number): string =>
+		value > FRONTEND_TUNING.diagnostics.maximumDisplayedFramesPerSecond
+			? `${FRONTEND_TUNING.diagnostics.maximumDisplayedFramesPerSecond}+`
+			: value.toFixed(0);
 	const display = $derived(
-		framesPerSecond === null ? "—" : framesPerSecond.toFixed(0),
+		frameRates === null
+			? "— / —"
+			: `${formatFramesPerSecond(frameRates.capped)} / ${formatFramesPerSecond(frameRates.uncapped)}`,
 	);
 
 	onMount(() => {
 		const sample = (): void => {
-			framesPerSecond = readFramesPerSecond();
+			frameRates = readFrameRates();
 		};
 		sample();
 		const interval = window.setInterval(
@@ -27,7 +34,7 @@
 </script>
 
 <output class="client-fps-counter" aria-label="Frames per second">
-	{display} fps
+	{display} FPS
 </output>
 
 <style>
@@ -42,6 +49,7 @@
 		font-size: var(--ac-panel-font-size);
 		font-variant-numeric: tabular-nums;
 		line-height: 1.2;
+		white-space: nowrap;
 		pointer-events: none;
 		background: radial-gradient(
 			ellipse at center,

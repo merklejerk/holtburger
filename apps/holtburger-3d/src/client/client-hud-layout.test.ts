@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
 	anchorClientHudPlacement,
+	CLIENT_FPS_PANEL_WIDTH,
 	createDefaultClientHudLayout,
 	resizeClientPanelRectangle,
 	resolveClientHudPlacement,
@@ -23,9 +24,12 @@ describe("client HUD layout", () => {
 			vertical: { edge: "bottom", offset: 16 },
 		});
 		expect(layout.fps).toEqual({
-			horizontal: { edge: "left", offset: 624 },
+			horizontal: {
+				edge: "left",
+				offset: (1_344 - CLIENT_FPS_PANEL_WIDTH) / 2,
+			},
 			vertical: { edge: "top", offset: 8 },
-			preferredWidth: 96,
+			preferredWidth: CLIENT_FPS_PANEL_WIDTH,
 			preferredHeight: 26,
 		});
 		expect(layout.shortcuts).toMatchObject({

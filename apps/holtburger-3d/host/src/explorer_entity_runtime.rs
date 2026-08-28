@@ -2262,12 +2262,12 @@ mod tests {
             movement,
             response_policy,
             entity_collision: DynamicBodyCollisionDefinition {
-                target_geometry: PreparedEntityTargetGeometry {
+                target_geometry: Arc::new(PreparedEntityTargetGeometry {
                     physics_bsp_parts: Vec::new(),
                     fallback_setup_did: 0x0200_0001,
                     fallback_shapes: Vec::new(),
                     fallback_scale: ColliderScale::uniform(1.0).unwrap(),
-                },
+                }),
                 scheduling: EntityPhysicsScheduling::Eligible,
                 dynamic_collision: EntityDynamicCollisionPolicy {
                     target: EntityCollisionParticipation::Solid,
@@ -2309,11 +2309,12 @@ mod tests {
 
     fn physical_with_ball_target() -> DynamicPhysicalBodyDefinition {
         let mut physical = physical();
-        physical.entity_collision.target_geometry.fallback_shapes =
-            vec![Arc::new(CollisionShape::Ball(CollisionBall {
-                center: Vector3::zero(),
-                radius: 0.5,
-            }))];
+        Arc::get_mut(&mut physical.entity_collision.target_geometry)
+            .expect("new fixture geometry has no other owner")
+            .fallback_shapes = vec![Arc::new(CollisionShape::Ball(CollisionBall {
+            center: Vector3::zero(),
+            radius: 0.5,
+        }))];
         physical
     }
 

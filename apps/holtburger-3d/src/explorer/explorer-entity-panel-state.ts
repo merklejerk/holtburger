@@ -6,7 +6,7 @@ import type {
 type ExplorerEntityPanelRelevantEvent =
 	| { readonly kind: "snapshot" | "upserted" | "removed" }
 	| {
-			readonly kind: "advanced";
+			readonly kind: "ticked";
 			readonly batch: {
 				readonly advances: readonly Pick<DynamicEntityAdvance, "kind">[];
 			};
@@ -23,7 +23,7 @@ export function refreshesExplorerEntityPanel(
 	event: ExplorerEntityPanelRelevantEvent,
 ): boolean {
 	return (
-		event.kind !== "advanced" ||
+		event.kind !== "ticked" ||
 		event.batch.advances.some((advance) => advance.kind !== "integrated")
 	);
 }

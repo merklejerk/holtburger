@@ -7,12 +7,11 @@ use holtburger_common::{Guid, Quaternion, RigidTransform, Vector3};
 use holtburger_protocol::messages::*;
 use holtburger_session::Session;
 use holtburger_world::{
-    ContactState, GroundedBodyActuation, PhysicalBodyActuation, PhysicalBodyDefinition,
-    SolveBodyInput, SolveProjectionBasis, SolvedBodyKinematics, SpatialBodyId, WorldEvent,
-    WorldState, advance_authored_body_kinematics, advance_body_kinematics,
-    authored_grounded_actuation,
+    BodyProjectionResolver, ContactState, GroundedBodyActuation, LocalDriveControl,
+    PhysicalBodyActuation, PhysicalBodyDefinition, SolveBodyInput, SolveProjectionBasis,
+    SolvedBodyKinematics, SpatialBodyId, WorldEvent, WorldState, advance_authored_body_kinematics,
+    advance_body_kinematics, authored_grounded_actuation,
 };
-use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 const AUTO_MOVE_DISTANCE_LIMIT: f32 = 500.0;
@@ -191,35 +190,44 @@ impl ClientSimulationSystem {
         collision: &SimulationSceneSnapshot,
         manual_offset: Option<RigidTransform>,
     ) -> Result<Vec<WorldEvent>> {
-        let mut actuations = BTreeMap::new();
-        for body_id in world.scene.scheduled_dynamic_entity_ids() {
-            let Some(body) = world.scene.body(body_id) else {
-                continue;
-            };
-            let actuation = if matches!(body_id, SpatialBodyId::LocalPlayer(_)) {
-                self.local_player_actuation(body, dt, world, movement, manual_offset)?
-            } else {
-                Self::remote_entity_actuation(body_id, body, dt, world)?
-            };
-            actuations.insert(body_id, actuation);
-        }
-
+        let local_drive = movement.current_local_drive_control(world, dt);
+        let local_object_scale = world
+            .player_entity()
+            .and_then(|entity| entity.obj_scale())
+            .unwrap_or(1.0) as f32;
+        let projection = BodyProjectionResolver::new(&world.entities, &world.motion_runtimes);
+        let entities = &world.entities;
         let prepared = world.scene.prepare_dynamic_entity_collection(
             collision.scene.as_ref(),
             dt.as_secs_f32(),
             |body| {
-                actuations.get(&body.id).cloned().ok_or_else(|| {
-                    anyhow::anyhow!("scheduled body {:?} has no client actuation", body.id)
-                })
+                if matches!(body.id, SpatialBodyId::LocalPlayer(_)) {
+                    self.local_player_actuation(
+                        body,
+                        dt,
+                        movement,
+                        manual_offset,
+                        local_drive,
+                        local_object_scale,
+                    )
+                } else {
+                    let basis = projection.resolve(body).and_then(|input| input.basis);
+                    let object_scale = body
+                        .id
+                        .authoritative_guid()
+                        .and_then(|guid| entities.get(guid))
+                        .and_then(|entity| entity.obj_scale())
+                        .unwrap_or(1.0) as f32;
+                    Self::remote_entity_actuation(body, dt, basis, object_scale)
+                }
             },
         )?;
         let mut events = Vec::new();
         for body_id in prepared.movers {
-            let (result, ()) = world.scene.tick_dynamic_physical_body_transaction(
+            let result = world.scene.tick_prepared_dynamic_physical_body(
                 body_id,
                 collision.scene.as_ref(),
                 now,
-                |_, _| Ok(()),
             )?;
             events.extend(world.apply_physical_body_tick_result(body_id, &result));
         }
@@ -228,19 +236,16 @@ impl ClientSimulationSystem {
     }
 
     fn remote_entity_actuation(
-        body_id: SpatialBodyId,
         body: &holtburger_world::SpatialBody,
         dt: Duration,
-        world: &WorldState,
+        basis: Option<SolveProjectionBasis>,
+        object_scale: f32,
     ) -> Result<PhysicalBodyActuation> {
         let definition = body
             .physical
             .as_ref()
             .expect("scheduled body must retain its physical definition")
             .definition;
-        let basis = world
-            .resolve_body_projection_input(body_id)
-            .and_then(|input| input.basis);
         match definition {
             PhysicalBodyDefinition::FreeSphere { .. } => {
                 let velocity = match basis {
@@ -258,11 +263,6 @@ impl ClientSimulationSystem {
                         GroundedBodyActuation::coast(),
                     ));
                 };
-                let object_scale = body_id
-                    .authoritative_guid()
-                    .and_then(|guid| world.entities.get(guid))
-                    .and_then(|entity| entity.obj_scale())
-                    .unwrap_or(1.0) as f32;
                 Ok(authored_grounded_actuation(
                     offset,
                     body.pose,
@@ -278,9 +278,10 @@ impl ClientSimulationSystem {
         &self,
         body: &holtburger_world::SpatialBody,
         dt: Duration,
-        world: &WorldState,
         movement: &mut MovementSystem,
         manual_offset: Option<RigidTransform>,
+        local_drive: Option<LocalDriveControl>,
+        object_scale: f32,
     ) -> Result<PhysicalBodyActuation> {
         let dt_secs = dt.as_secs_f32();
         anyhow::ensure!(
@@ -293,14 +294,9 @@ impl ClientSimulationSystem {
             .as_ref()
             .expect("physical body was checked before actuation resolution")
             .definition;
-        let object_scale = world
-            .player_entity()
-            .and_then(|entity| entity.obj_scale())
-            .unwrap_or(1.0) as f32;
         let actuation = match definition {
             PhysicalBodyDefinition::FreeSphere { .. } => {
-                let velocity = movement
-                    .current_local_drive_control(world, dt)
+                let velocity = local_drive
                     .map(|control| control.desired_world_delta / dt_secs)
                     .or_else(|| {
                         manual_offset.map(|offset| {
@@ -319,7 +315,7 @@ impl ClientSimulationSystem {
                         object_scale,
                         dt_secs,
                     )?
-                } else if let Some(control) = movement.current_local_drive_control(world, dt) {
+                } else if let Some(control) = local_drive {
                     let planar_velocity = control.desired_world_delta / dt_secs;
                     let mut grounded =
                         if control.force_grounded || body.contact != ContactState::Airborne {
@@ -370,7 +366,7 @@ impl ClientSimulationSystem {
             }
             PhysicalBodyActuation::Grounded(grounded) => {
                 let original_heading = grounded.control_heading();
-                let launch = grounded.launch().cloned();
+                let launch = grounded.launch().copied();
                 let external_acceleration = grounded.external_acceleration();
                 let has_drive = grounded.supported_planar_velocity() != Vector3::zero();
                 let correction_assigns = movement

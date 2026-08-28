@@ -1278,12 +1278,12 @@ mod tests {
             movement,
             response_policy,
             entity_collision: DynamicBodyCollisionDefinition {
-                target_geometry: PreparedEntityTargetGeometry {
+                target_geometry: Arc::new(PreparedEntityTargetGeometry {
                     physics_bsp_parts: Vec::new(),
                     fallback_setup_did: 0x0200_0001,
                     fallback_shapes: Vec::new(),
                     fallback_scale: ColliderScale::uniform(1.0).unwrap(),
-                },
+                }),
                 scheduling: EntityPhysicsScheduling::Eligible,
                 dynamic_collision: EntityDynamicCollisionPolicy {
                     target: EntityCollisionParticipation::Solid,
@@ -1663,9 +1663,10 @@ mod tests {
             .corrected(guid, relocation.kind.advance_kind())
             .unwrap();
         let wire = serde_json::to_value(correction).unwrap();
-        assert_eq!(wire["kind"], "advanced");
+        assert_eq!(wire["kind"], "ticked");
         assert_eq!(wire["batch"]["durationMs"], 0.0);
         assert_eq!(wire["batch"]["advances"][0]["kind"], "teleport");
+        assert_eq!(wire["batch"]["updates"], serde_json::json!([]));
         assert_eq!(
             wire["batch"]["advances"][0]["path"]["legs"][0]["end"]["pose"]["coords"]["x"],
             10.0

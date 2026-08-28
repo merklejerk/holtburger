@@ -2648,9 +2648,7 @@ function assertLaunchedEntityLifecycle(result) {
 		(envelope) => envelope?.entityEvent !== null,
 	)?.entityEvent;
 	if (advance === undefined || advance === null) {
-		throw new Error(
-			"Launch scenario produced no changed-entity advance batch.",
-		);
+		throw new Error("Launch scenario produced no changed-entity tick batch.");
 	}
 	if (
 		!advance.batch.advances.some(
@@ -2665,7 +2663,7 @@ function assertLaunchedEntityLifecycle(result) {
 
 function assertRelocatedEntityLifecycle(result, expectedKind) {
 	const event = result.entityLifecycle?.relocated;
-	if (event?.kind !== "advanced" || event.batch.durationMs !== 0) {
+	if (event?.kind !== "ticked" || event.batch.durationMs !== 0) {
 		throw new Error(
 			"Relocation scenario did not produce a zero-duration correction batch.",
 		);

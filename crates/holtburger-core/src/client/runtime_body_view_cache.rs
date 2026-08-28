@@ -37,6 +37,11 @@ impl RuntimeBodyViewCache {
             ClientViewEvent::RuntimeBodyUpserted { body } => {
                 self.upsert_runtime_body(**body);
             }
+            ClientViewEvent::RuntimeBodiesAdvanced { bodies } => {
+                for body in bodies.iter().copied() {
+                    self.upsert_runtime_body(body);
+                }
+            }
             ClientViewEvent::RuntimeBodyRemoved { body_id } => {
                 self.bodies.remove(body_id);
             }
@@ -205,6 +210,20 @@ mod tests {
             .spatial_sample(guid)
             .expect("entity should still exist");
         assert_eq!(updated.projected_pose, make_position(31.0, 42.0, 0.25));
+
+        system.handle_view_event(
+            &ClientViewEvent::RuntimeBodiesAdvanced {
+                bodies: vec![make_runtime_body(SpatialBodyId::Entity(guid), 50.0, 60.0)].into(),
+            },
+            start + Duration::from_millis(60),
+        );
+        assert_eq!(
+            system
+                .spatial_sample(guid)
+                .expect("batched entity should remain cached")
+                .projected_pose,
+            make_position(51.0, 62.0, 0.25)
+        );
 
         system.handle_view_event(
             &ClientViewEvent::RuntimeBodyRemoved {

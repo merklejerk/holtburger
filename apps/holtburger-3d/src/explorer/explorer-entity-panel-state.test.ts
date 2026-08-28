@@ -33,7 +33,7 @@ describe("Explorer entity panel state", () => {
 
 	it("keeps integrated host ticks out of panel state while publishing corrections", () => {
 		const event = {
-			kind: "advanced",
+			kind: "ticked",
 			batch: {
 				hostTime: { seconds: 1 },
 				durationMs: 1000 / 30,

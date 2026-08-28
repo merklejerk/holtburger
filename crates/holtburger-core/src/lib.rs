@@ -69,12 +69,12 @@ pub use dynamic_entity::{
     resolve_dynamic_entity_launch, semantic_radar_blip_color,
 };
 pub use dynamic_entity_view::{
-    DynamicEntityAdvance, DynamicEntityAdvanceBatch, DynamicEntityClipCompletion,
-    DynamicEntityContactView, DynamicEntityEvent, DynamicEntityHostTime, DynamicEntityIdentityView,
-    DynamicEntityPathLeg, DynamicEntityPathPoint, DynamicEntityPhysicsView,
-    DynamicEntityPlacedPath, DynamicEntityPlacementAdvanceKind, DynamicEntityPlacementView,
-    DynamicEntityPlayingClip, DynamicEntityPresentationView, DynamicEntitySampleModeView,
-    DynamicEntitySnapshot, DynamicEntityView, DynamicEntityViewSource,
+    DynamicEntityAdvance, DynamicEntityClipCompletion, DynamicEntityContactView,
+    DynamicEntityEvent, DynamicEntityHostTime, DynamicEntityIdentityView, DynamicEntityPathLeg,
+    DynamicEntityPathPoint, DynamicEntityPhysicsView, DynamicEntityPlacedPath,
+    DynamicEntityPlacementAdvanceKind, DynamicEntityPlacementView, DynamicEntityPlayingClip,
+    DynamicEntityPresentationView, DynamicEntitySampleModeView, DynamicEntitySnapshot,
+    DynamicEntityTickBatch, DynamicEntityView, DynamicEntityViewSource,
     PhysicalBodyParticipationView, project_dynamic_entity_view,
 };
 pub use holtburger_content::LandblockCollisionAsset;

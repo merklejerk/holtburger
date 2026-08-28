@@ -209,9 +209,7 @@
 	}
 
 	async function sendChat(message: string): Promise<void> {
-		if (session === null || lifecycle.kind !== "in-world") {
-			throw new Error("Chat is unavailable outside the world.");
-		}
+		if (session === null) throw new Error("Chat session is unavailable.");
 		await session.sendChat(message);
 	}
 

@@ -324,6 +324,16 @@ impl ClientCollisionCoordinator {
         self.residency.snapshot()
     }
 
+    /// Whether the installed immutable scene contains the exact authoritative destination.
+    pub fn destination_scene_ready(&self, residency: Guid) -> bool {
+        let snapshot = self.residency.snapshot();
+        if residency_is_indoors(residency) {
+            snapshot.scene.contains_env_cell(residency)
+        } else {
+            snapshot.scene.contains_landblock(residency)
+        }
+    }
+
     /// Independently refreshes scene interest and immutable authoritative-body definition demand.
     pub fn observe(&mut self, world: &mut WorldState) -> Vec<WorldEvent> {
         let events = self.observe_remote_bodies(world);
@@ -926,12 +936,12 @@ mod tests {
                     align_path: false,
                 },
                 entity_collision: DynamicBodyCollisionDefinition {
-                    target_geometry: holtburger_world::PreparedEntityTargetGeometry {
+                    target_geometry: Arc::new(holtburger_world::PreparedEntityTargetGeometry {
                         physics_bsp_parts: Vec::new(),
                         fallback_setup_did: 0,
                         fallback_shapes: Vec::new(),
                         fallback_scale: holtburger_content::ColliderScale::uniform(1.0).unwrap(),
-                    },
+                    }),
                     scheduling: EntityPhysicsScheduling::Eligible,
                     dynamic_collision: EntityDynamicCollisionPolicy {
                         target: holtburger_world::EntityCollisionParticipation::Solid,
@@ -1069,11 +1079,13 @@ mod tests {
         let source = Arc::new(FakeSource::default());
         let mut coordinator = ClientCollisionCoordinator::new(source.clone());
         coordinator.observe(&mut world);
+        assert!(!coordinator.destination_scene_ready(Guid(0x1234_0001)));
         wait_for_readiness(&mut coordinator, &mut world, |readiness| {
             matches!(readiness, ClientBodyReadiness::Ready { .. })
         })
         .await;
         wait_for_scene_revision(&mut coordinator, &mut world, 1).await;
+        assert!(coordinator.destination_scene_ready(Guid(0x1234_0001)));
         assert_eq!(source.loaded.lock().unwrap().len(), 9);
         assert_eq!(source.prepared.load(Ordering::SeqCst), 1);
 

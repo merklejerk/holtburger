@@ -2,13 +2,13 @@ import type { AABB3 } from "../math/types";
 import { evaluateHostDynamicEntityPath } from "../motion/host-dynamic-entity-path";
 import type {
 	DynamicEntityAdvance,
-	DynamicEntityAdvanceBatch,
+	DynamicEntityTickBatch,
 } from "../runtime/dynamic-entity-feed";
 import type { SceneGraph, SceneNodeId, SceneSpatialPlacement } from "../scene";
 
 interface ActiveDynamicEntityPath {
 	readonly advance: DynamicEntityAdvance;
-	readonly durationMs: DynamicEntityAdvanceBatch["durationMs"];
+	readonly durationMs: DynamicEntityTickBatch["durationMs"];
 	readonly startedAtMs: number;
 }
 
@@ -56,7 +56,7 @@ export class DynamicEntityPlacementSystem {
 	applyPath(
 		nodeId: SceneNodeId,
 		advance: DynamicEntityAdvance,
-		durationMs: DynamicEntityAdvanceBatch["durationMs"],
+		durationMs: DynamicEntityTickBatch["durationMs"],
 		startedAtMs: number,
 	): void {
 		this.#requireRoot(nodeId);

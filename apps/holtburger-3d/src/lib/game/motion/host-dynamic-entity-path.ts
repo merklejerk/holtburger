@@ -1,7 +1,7 @@
 import type { SceneSpatialPlacement } from "../scene";
 import type {
 	DynamicEntityAdvance,
-	DynamicEntityAdvanceBatch,
+	DynamicEntityTickBatch,
 } from "../runtime/dynamic-entity-feed";
 import {
 	interpolateDynamicEntityPlacement,
@@ -12,7 +12,7 @@ import { evaluateHostPlacedPath } from "./host-placed-path";
 /** Evaluate one accepted entity path without performing portal traversal in the frontend. */
 export function evaluateHostDynamicEntityPath(
 	advance: DynamicEntityAdvance,
-	durationMs: DynamicEntityAdvanceBatch["durationMs"],
+	durationMs: DynamicEntityTickBatch["durationMs"],
 	elapsedMs: number,
 ): SceneSpatialPlacement {
 	const finalPoint = advance.path.legs[advance.path.legs.length - 1].end;

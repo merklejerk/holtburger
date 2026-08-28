@@ -155,9 +155,9 @@
 	let unsubscribeDynamicEntities: (() => void) | undefined;
 	let unsubscribeFixedTicks: (() => void) | undefined;
 	let unsubscribePossessionOutcomes: (() => void) | undefined;
-	let dynamicEntityReconciliation: Promise<void> = Promise.resolve();
-	let dynamicEntityReconciliationRevision = 0;
-	/** Exact ordinary dynamic reconciliation withholding an activated destination's first frame. */
+	let dynamicEntityPresentationCompletion: Promise<void> = Promise.resolve();
+	let dynamicEntityPresentationRevision = 0;
+	/** Exact ordinary dynamic realization withholding an activated destination's first frame. */
 	let sceneActivationPresentationConvergence: {
 		readonly completion: Promise<void>;
 		ready: boolean;
@@ -968,10 +968,10 @@
 		operation: Promise<unknown>,
 		entities: readonly DynamicEntityView[],
 	): Promise<void> {
-		const revision = ++dynamicEntityReconciliationRevision;
+		const revision = ++dynamicEntityPresentationRevision;
 		spawnedEntityPresentationError = null;
 		const completion = operation.then(() => undefined);
-		dynamicEntityReconciliation = completion;
+		dynamicEntityPresentationCompletion = completion;
 		if (cameraCoordinator?.activationReady()) {
 			const convergence = { completion, ready: false };
 			sceneActivationPresentationConvergence = convergence;
@@ -981,15 +981,15 @@
 			});
 		}
 		void completion.catch((error: unknown) => {
-			if (revision !== dynamicEntityReconciliationRevision) return;
+			if (revision !== dynamicEntityPresentationRevision) return;
 			const wcids = entities.map(({ identity }) => identity.wcid).join(", ");
-			spawnedEntityPresentationError = `Presentation reconciliation for WCID ${wcids || "<none>"}: ${errorMessage(error)}`;
+			spawnedEntityPresentationError = `Presentation realization for WCID ${wcids || "<none>"}: ${errorMessage(error)}`;
 			console.error(spawnedEntityPresentationError, error);
 		});
 		return completion;
 	}
 
-	/** Route high-frequency accepted paths without restarting visual resource reconciliation. */
+	/** Route high-frequency accepted paths without restarting visual resource realization. */
 	function acceptDynamicEntityEvent(event: DynamicEntityEvent): void {
 		if (dynamicEntitySession === undefined) return;
 		if (refreshesExplorerEntityPanel(event))
@@ -998,8 +998,8 @@
 		if (runtime === undefined) return;
 		try {
 			switch (event.kind) {
-				case "advanced":
-					runtime.applyDynamicEntityAdvances(event.batch, performance.now());
+				case "ticked":
+					runtime.applyDynamicEntityTick(event.batch, performance.now());
 					spawnedEntityPresentationError = null;
 					return;
 				case "snapshot":
@@ -1034,10 +1034,7 @@
 			if (refreshesExplorerEntityPanel(entityEvent))
 				publishExplorerEntityPanelSnapshot();
 			try {
-				gameRuntime?.applyDynamicEntityAdvances(
-					entityEvent.batch,
-					receivedAtMs,
-				);
+				gameRuntime?.applyDynamicEntityTick(entityEvent.batch, receivedAtMs);
 				spawnedEntityPresentationError = null;
 			} catch (error) {
 				spawnedEntityPresentationError = `Dynamic-entity path presentation: ${errorMessage(error)}`;
@@ -1082,7 +1079,7 @@
 			"simulated",
 		);
 		await session.spawn(request);
-		await dynamicEntityReconciliation;
+		await dynamicEntityPresentationCompletion;
 	}
 
 	async function searchExplorerWeenies(
@@ -1227,7 +1224,7 @@
 	///
 	/// Three owners in priority order, and the order matters: a boom outranks a physical session
 	/// because possession is the more specific state. A possessed entity that is momentarily
-	/// unpresented — an ordinary condition while presentation reconciles — falls through to free
+	/// unpresented — an ordinary condition while presentation realizes — falls through to free
 	/// fly, which holds still rather than drifting, since the boom has been writing its position
 	/// into the controller every frame and possession has taken the drive keys away.
 	function syncActiveCamera(
@@ -1642,7 +1639,7 @@
 		if (!session)
 			throw new Error("Explorer entity despawn requires an active runtime.");
 		await session.despawn(entity.identity.guid, entity.generation);
-		await dynamicEntityReconciliation;
+		await dynamicEntityPresentationCompletion;
 	}
 
 	onMount(() => {
@@ -1691,8 +1688,8 @@
 			unsubscribeDynamicEntities = undefined;
 			unsubscribeFixedTicks = undefined;
 			unsubscribePossessionOutcomes = undefined;
-			dynamicEntityReconciliationRevision += 1;
-			dynamicEntityReconciliation = Promise.resolve();
+			dynamicEntityPresentationRevision += 1;
+			dynamicEntityPresentationCompletion = Promise.resolve();
 			entityCatalog = null;
 			spawnedEntities = [];
 			spawnedEntityPresentationError = null;

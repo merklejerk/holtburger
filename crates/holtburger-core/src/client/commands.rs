@@ -286,129 +286,111 @@ impl ClientRuntime {
     async fn handle_chat_command(&mut self, cmd: ClientCommand) -> Result<()> {
         match cmd {
             ClientCommand::Talk(text) => {
-                if matches!(self.state, ClientState::InWorld) {
-                    log::info!(">>> You say: \"{}\"", text);
-                    return self.send_talk(&text).await;
-                }
-                Ok(())
+                log::info!(">>> You say: \"{}\"", text);
+                self.send_talk(&text).await
             }
             ClientCommand::Tell { target, message } => {
-                if matches!(self.state, ClientState::InWorld) {
-                    log::info!(">>> You tell {}, \"{}\"", target, message);
-                    return self
-                        .send_game_action(GameAction::Tell(Box::new(TellActionData {
-                            target,
-                            message,
-                        })))
-                        .await;
-                }
-                Ok(())
+                log::info!(">>> You tell {}, \"{}\"", target, message);
+                self.send_game_action(GameAction::Tell(Box::new(TellActionData {
+                    target,
+                    message,
+                })))
+                .await
             }
             ClientCommand::ChannelMessage { channel, message } => {
-                if matches!(self.state, ClientState::InWorld) {
-                    log::info!(">>> You send {:?}: \"{}\"", channel, message);
-                    if let Some((room_id, chat_type)) = self.resolve_turbine_channel(channel) {
-                        let context_id = self.turbine_chat.next_context_id;
-                        self.turbine_chat.next_context_id =
-                            self.turbine_chat.next_context_id.wrapping_add(1).max(1);
+                log::info!(">>> You send {:?}: \"{}\"", channel, message);
+                if let Some((room_id, chat_type)) = self.resolve_turbine_channel(channel) {
+                    let context_id = self.turbine_chat.next_context_id;
+                    self.turbine_chat.next_context_id =
+                        self.turbine_chat.next_context_id.wrapping_add(1).max(1);
 
-                        return self
-                            .session
-                            .send_message(&GameMessage::TurbineChat(Box::new(
-                                TurbineChatMessageData {
-                                    blob_type: TurbineChatBlobType::RequestBinary,
-                                    dispatch_type: TurbineChatDispatchType::SendToRoomById,
-                                    target_type: 1,
-                                    target_id: 0,
-                                    transport_type: 0,
-                                    transport_id: 0,
-                                    cookie: 0,
-                                    payload: TurbineChatPayload::RequestSendToRoomById {
-                                        context_id,
-                                        room_id,
-                                        message,
-                                        extra_data_size: 0x0C,
-                                        sender_id: self.world.player.guid.0,
-                                        hresult: 0,
-                                        chat_type: chat_type.into(),
-                                    },
-                                },
-                            )))
-                            .await;
-                    }
-
-                    if let Some(channel) = Self::resolve_legacy_channel(channel) {
-                        return self
-                            .send_game_action(GameAction::ChatChannel(Box::new(
-                                ChatChannelActionData {
-                                    channel: channel.into(),
+                    return self
+                        .session
+                        .send_message(&GameMessage::TurbineChat(Box::new(
+                            TurbineChatMessageData {
+                                blob_type: TurbineChatBlobType::RequestBinary,
+                                dispatch_type: TurbineChatDispatchType::SendToRoomById,
+                                target_type: 1,
+                                target_id: 0,
+                                transport_type: 0,
+                                transport_id: 0,
+                                cookie: 0,
+                                payload: TurbineChatPayload::RequestSendToRoomById {
+                                    context_id,
+                                    room_id,
                                     message,
+                                    extra_data_size: 0x0C,
+                                    sender_id: self.world.player.guid.0,
+                                    hresult: 0,
+                                    chat_type: chat_type.into(),
                                 },
-                            )))
-                            .await;
-                    }
-
-                    self.emit_action_result(
-                        ActionResultSource::Client,
-                        ActionResultReason::General(format!(
-                            "No supported chat transport is available for {:?}.",
-                            channel
-                        )),
-                    );
+                            },
+                        )))
+                        .await;
                 }
+
+                if let Some(channel) = Self::resolve_legacy_channel(channel) {
+                    return self
+                        .send_game_action(GameAction::ChatChannel(Box::new(
+                            ChatChannelActionData {
+                                channel: channel.into(),
+                                message,
+                            },
+                        )))
+                        .await;
+                }
+
+                self.emit_action_result(
+                    ActionResultSource::Client,
+                    ActionResultReason::General(format!(
+                        "No supported chat transport is available for {:?}.",
+                        channel
+                    )),
+                );
                 Ok(())
             }
             ClientCommand::Emote(text) => {
-                if matches!(self.state, ClientState::InWorld) {
-                    log::info!(">>> You emote: \"{}\"", text);
-                    return self
-                        .send_game_action(GameAction::Emote(Box::new(EmoteActionData {
-                            message: text,
-                        })))
-                        .await;
-                }
-                Ok(())
+                log::info!(">>> You emote: \"{}\"", text);
+                self.send_game_action(GameAction::Emote(Box::new(EmoteActionData {
+                    message: text,
+                })))
+                .await
             }
             ClientCommand::SoulEmote(token) => {
-                if matches!(self.state, ClientState::InWorld) {
-                    let Some(resolved) = self.world.soul_emote_catalog.resolve(&token) else {
-                        self.emit_action_result(
-                            ActionResultSource::Client,
-                            ActionResultReason::General(format!(
-                                "Unknown soul emote token: {}",
-                                token
-                            )),
-                        );
-                        return Ok(());
-                    };
+                let Some(resolved) = self.world.soul_emote_catalog.resolve(&token) else {
+                    self.emit_action_result(
+                        ActionResultSource::Client,
+                        ActionResultReason::General(format!("Unknown soul emote token: {}", token)),
+                    );
+                    return Ok(());
+                };
 
-                    let pose = resolved.pose.to_string();
-                    let message = resolved
-                        .other_emote
-                        .map(render_soul_emote_text)
-                        .or_else(|| resolved.my_emote.map(str::to_owned))
-                        .unwrap_or_else(|| resolved.token.to_string());
+                let pose = resolved.pose.to_string();
+                let message = resolved
+                    .other_emote
+                    .map(render_soul_emote_text)
+                    .or_else(|| resolved.my_emote.map(str::to_owned))
+                    .unwrap_or_else(|| resolved.token.to_string());
 
-                    if let Some(command) = motion_command_for_soul_emote_pose(&pose) {
-                        let motion_style = self
-                            .world
-                            .player
-                            .last_server_motion_style
-                            .unwrap_or(MotionStance::NonCombat);
-                        self.movement.enqueue_transient_motion(
-                            command,
-                            crate::client::movement_types::MotionStyle::Explicit(motion_style),
-                        );
-                    }
-
-                    log::info!(">>> You soul emote: \"{}\"", message);
-                    return self
-                        .send_game_action(GameAction::SoulEmote(Box::new(SoulEmoteActionData {
-                            message,
-                        })))
-                        .await;
+                if self.world.player.guid != Guid::NULL
+                    && let Some(command) = motion_command_for_soul_emote_pose(&pose)
+                {
+                    let motion_style = self
+                        .world
+                        .player
+                        .last_server_motion_style
+                        .unwrap_or(MotionStance::NonCombat);
+                    self.movement.enqueue_transient_motion(
+                        command,
+                        crate::client::movement_types::MotionStyle::Explicit(motion_style),
+                    );
                 }
-                Ok(())
+
+                log::info!(">>> You soul emote: \"{}\"", message);
+                self.send_game_action(GameAction::SoulEmote(Box::new(SoulEmoteActionData {
+                    message,
+                })))
+                .await
             }
             _ => unreachable!(),
         }
@@ -1393,6 +1375,19 @@ mod tests {
         client
     }
 
+    #[tokio::test]
+    async fn talk_is_forwarded_without_local_world_state() {
+        let mut client = builder::build_test_client(ClientState::EnteringWorld);
+
+        client
+            .handle_command(ClientCommand::Talk("portal chat".to_string()))
+            .await
+            .unwrap();
+
+        assert_eq!(client.session.game_action_sequence, 1);
+        assert!(client.session.bytes_out > 0);
+    }
+
     fn spell_info(school: MagicSchool, bitfield: u32, non_component_target_type: u32) -> SpellInfo {
         SpellInfo {
             name: "Test Spell".to_string(),
@@ -2025,6 +2020,7 @@ mod tests {
     #[tokio::test]
     async fn soul_emote_command_sends_dedicated_game_action() {
         let mut client = build_test_client();
+        client.world.player.guid = Guid(0x5000_0001);
 
         client
             .handle_command(ClientCommand::SoulEmote("wave".to_string()))
@@ -2040,6 +2036,24 @@ mod tests {
             .unwrap();
 
         assert_eq!(client.session.game_action_sequence, 2);
+        assert!(client.session.bytes_out > 0);
+    }
+
+    #[tokio::test]
+    async fn soul_emote_without_player_identity_skips_only_local_motion() {
+        let mut client = build_test_client();
+
+        client
+            .handle_command(ClientCommand::SoulEmote("wave".to_string()))
+            .await
+            .unwrap();
+        client
+            .movement
+            .tick(Instant::now(), &mut client.world, &mut client.session)
+            .await
+            .unwrap();
+
+        assert_eq!(client.session.game_action_sequence, 1);
         assert!(client.session.bytes_out > 0);
     }
 

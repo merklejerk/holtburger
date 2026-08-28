@@ -233,7 +233,7 @@ mod tests {
 
         let events = sink.events.lock().unwrap();
         let [envelope] = events.as_slice() else {
-            panic!("one changed collection tick must publish one advance batch")
+            panic!("one changed collection tick must publish one entity tick batch")
         };
         assert_eq!(envelope.entity_advances.len(), 1);
         assert_eq!(envelope.entity_advances[0].entity.identity.guid, guid);
@@ -359,12 +359,12 @@ mod tests {
             movement,
             response_policy,
             entity_collision: DynamicBodyCollisionDefinition {
-                target_geometry: PreparedEntityTargetGeometry {
+                target_geometry: Arc::new(PreparedEntityTargetGeometry {
                     physics_bsp_parts: Vec::new(),
                     fallback_setup_did: 0x0200_0001,
                     fallback_shapes: Vec::new(),
                     fallback_scale: ColliderScale::uniform(1.0).unwrap(),
-                },
+                }),
                 scheduling: EntityPhysicsScheduling::Eligible,
                 dynamic_collision: EntityDynamicCollisionPolicy {
                     target: EntityCollisionParticipation::Solid,

@@ -82,12 +82,12 @@ function upserted(value: DynamicEntityView): DynamicEntityEvent {
 	};
 }
 
-function advanced(
+function ticked(
 	value: DynamicEntityView & { placement: DynamicEntityWorldPlacement },
 	hostSeconds: number,
-): Extract<DynamicEntityEvent, { kind: "advanced" }> {
+): Extract<DynamicEntityEvent, { kind: "ticked" }> {
 	return {
-		kind: "advanced",
+		kind: "ticked",
 		batch: {
 			hostTime: { seconds: hostSeconds },
 			durationMs: 1000 / 30,
@@ -113,6 +113,22 @@ function advanced(
 					},
 				},
 			],
+			updates: [],
+		},
+	};
+}
+
+function updated(
+	value: DynamicEntityView,
+	hostSeconds: number,
+): Extract<DynamicEntityEvent, { kind: "ticked" }> {
+	return {
+		kind: "ticked",
+		batch: {
+			hostTime: { seconds: hostSeconds },
+			durationMs: 1000 / 30,
+			advances: [],
+			updates: [value],
 		},
 	};
 }
@@ -149,7 +165,7 @@ describe("dynamic-entity view contract", () => {
 	});
 
 	it("rejects path advances for an attached entity", () => {
-		const worldAdvance = advanced(entity(2, 1), 2);
+		const worldAdvance = ticked(entity(2, 1), 2);
 		const attached = {
 			...entity(2, 1),
 			placement: {
@@ -208,14 +224,27 @@ describe("dynamic-entity view contract", () => {
 });
 
 describe("DynamicEntityMirror", () => {
+	it("applies path-stable updates and rejects duplicate tick identities", () => {
+		const mirror = new DynamicEntityMirror();
+		mirror.apply(snapshot(entity(7, 2)));
+		const next = entity(7, 2);
+		next.placement.contact = "grounded";
+		expect(mirror.apply(updated(next, 2))).toBe(true);
+		expect(worldPlacement(mirror.entities()[0]!).contact).toBe("grounded");
+
+		const duplicate = ticked(entity(7, 2), 3);
+		duplicate.batch.updates.push(entity(7, 2));
+		expect(() => decodeDynamicEntityEvent(duplicate)).toThrow("duplicate GUID");
+	});
+
 	it("accepts zero-duration correction snaps but not zero-duration integration", () => {
 		const value = entity(7, 2);
-		const correction = advanced(value, 2);
+		const correction = ticked(value, 2);
 		correction.batch.durationMs = 0;
 		correction.batch.advances[0]!.kind = "reset";
 		expect(decodeDynamicEntityEvent(correction)).toEqual(correction);
 
-		const integrated = advanced(value, 3);
+		const integrated = ticked(value, 3);
 		integrated.batch.durationMs = 0;
 		expect(() => decodeDynamicEntityEvent(integrated)).toThrow(
 			"duration must be positive",
@@ -274,21 +303,21 @@ describe("DynamicEntityMirror", () => {
 		expect(mirror.entities()).toEqual([entity(1, 1)]);
 	});
 
-	it("accepts only newer exact-generation advance batches", () => {
+	it("accepts only newer exact-generation tick batches", () => {
 		const mirror = new DynamicEntityMirror();
 		mirror.apply(snapshot(entity(7, 2)));
 		const stale = entity(7, 1);
 		stale.placement.pose.coords.x = 9;
-		expect(mirror.apply(advanced(stale, 2))).toBe(false);
+		expect(mirror.apply(ticked(stale, 2))).toBe(false);
 
 		const current = entity(7, 2);
 		current.placement.pose.coords.x = 10;
-		expect(mirror.apply(advanced(current, 3))).toBe(true);
+		expect(mirror.apply(ticked(current, 3))).toBe(true);
 		expect(worldPlacement(mirror.entities()[0]!).pose.coords.x).toBe(10);
 
 		const late = entity(7, 2);
 		late.placement.pose.coords.x = 11;
-		expect(mirror.apply(advanced(late, 2.5))).toBe(false);
+		expect(mirror.apply(ticked(late, 2.5))).toBe(false);
 		expect(worldPlacement(mirror.entities()[0]!).pose.coords.x).toBe(10);
 	});
 });

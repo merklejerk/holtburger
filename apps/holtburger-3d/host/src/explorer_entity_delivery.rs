@@ -9,9 +9,9 @@ use anyhow::{Result, anyhow, ensure};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion};
 use holtburger_core::{
-    DynamicEntityAdvance, DynamicEntityAdvanceBatch, DynamicEntityEvent, DynamicEntityHostTime,
-    DynamicEntityPathLeg, DynamicEntityPathPoint, DynamicEntityPlacedPath,
-    DynamicEntityPlacementAdvanceKind, DynamicEntitySnapshot, DynamicEntitySpatialMembership,
+    DynamicEntityAdvance, DynamicEntityEvent, DynamicEntityHostTime, DynamicEntityPathLeg,
+    DynamicEntityPathPoint, DynamicEntityPlacedPath, DynamicEntityPlacementAdvanceKind,
+    DynamicEntitySnapshot, DynamicEntitySpatialMembership, DynamicEntityTickBatch,
     DynamicEntityView, DynamicEntityViewSource, project_dynamic_entity_view,
 };
 use holtburger_world::{PlacedMotionPath, PlacedMotionPoint};
@@ -173,8 +173,8 @@ impl ExplorerEntityDelivery {
                 });
             }
         };
-        Ok(DynamicEntityEvent::Advanced {
-            batch: DynamicEntityAdvanceBatch::new(
+        Ok(DynamicEntityEvent::Ticked {
+            batch: DynamicEntityTickBatch::new(
                 self.host_time(),
                 0.0,
                 vec![DynamicEntityAdvance {
@@ -188,7 +188,9 @@ impl ExplorerEntityDelivery {
                         }],
                     },
                 }],
-            ),
+                Vec::new(),
+            )
+            .expect("one correction advance must produce a dynamic tick"),
         })
     }
 

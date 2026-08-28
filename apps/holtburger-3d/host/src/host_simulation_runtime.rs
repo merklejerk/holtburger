@@ -406,6 +406,8 @@ impl HostSimulationRuntime {
             .coverage_rejections
             .into_iter()
             .map(|rejection| HostPhysicalBodyCoverageRejection {
+                // The rejection envelope outlives this lock while the unchanged canonical body
+                // remains registered for a later retry.
                 body: state
                     .bodies
                     .body(rejection.body_id)
@@ -417,6 +419,8 @@ impl HostSimulationRuntime {
             .collect::<Vec<_>>();
         let mut ticks = Vec::with_capacity(prepared.movers.len());
         for body_id in prepared.movers {
+            // The host result owns both temporal levels; the scene must simultaneously retain the
+            // canonical current level for subsequent body commits and queries.
             let previous = state
                 .bodies
                 .body(body_id)
@@ -424,13 +428,8 @@ impl HostSimulationRuntime {
                 .expect("scheduled dynamic body vanished while collection lock was held");
             let solved = state
                 .bodies
-                .tick_dynamic_physical_body_transaction(
-                    body_id,
-                    &scene,
-                    now,
-                    |_, _| Ok(()),
-                )
-                .map(|(result, ())| {
+                .tick_prepared_dynamic_physical_body(body_id, &scene, now)
+                .map(|result| {
                     report_body_placement_recoveries(body_id, &result);
                     let current = state
                         .bodies

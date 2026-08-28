@@ -65,7 +65,7 @@ import type { RuntimeLight } from "../environment/runtime-lights";
 import { resolveObjectRuntimeLights } from "../environment/object-runtime-lights";
 import type {
 	DynamicEntityAdvance,
-	DynamicEntityAdvanceBatch,
+	DynamicEntityTickBatch,
 } from "../runtime/dynamic-entity-feed";
 
 /** Presentation-owned consequences of one complete producer physics-state projection. */
@@ -628,7 +628,7 @@ export class DynamicEntitySystem<
 	updatePlacementPath(
 		nodeId: SceneNodeId,
 		advance: DynamicEntityAdvance,
-		durationMs: DynamicEntityAdvanceBatch["durationMs"],
+		durationMs: DynamicEntityTickBatch["durationMs"],
 		startedAtMs: number,
 	): void {
 		if (!this.#entities.has(nodeId))

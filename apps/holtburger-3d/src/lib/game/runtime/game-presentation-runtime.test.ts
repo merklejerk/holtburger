@@ -710,6 +710,47 @@ describe("GamePresentationRuntime view and interest control", () => {
 });
 
 describe("GamePresentationRuntime dynamic-entity presentation", () => {
+	it("applies path-stable tick updates without mutating scene placement", async () => {
+		const runtime = await buildSpawnRuntime({
+			load: async () => spawnedVisual(),
+		});
+		const initial = spawnedEntity(7, 1);
+		await runtime.replaceDynamicEntitySnapshot([initial]);
+		const placementRevision = runtime.dynamicEntityPlacementRevision;
+		const updated = spawnedEntity(7, 1);
+		if (updated.placement.kind !== "world")
+			throw new Error("Update fixture lost world placement.");
+		updated.placement.contact = "grounded";
+
+		runtime.applyDynamicEntityTick(
+			{
+				hostTime: { seconds: 2 },
+				durationMs: 30,
+				advances: [],
+				updates: [updated],
+			},
+			1_000,
+		);
+		expect(runtime.dynamicEntityPlacementRevision).toBe(placementRevision);
+
+		const invalid = spawnedEntity(7, 1);
+		if (invalid.placement.kind !== "world")
+			throw new Error("Invalid update fixture lost world placement.");
+		invalid.placement.pose.coords.x += 1;
+		expect(() =>
+			runtime.applyDynamicEntityTick(
+				{
+					hostTime: { seconds: 3 },
+					durationMs: 30,
+					advances: [],
+					updates: [invalid],
+				},
+				1_030,
+			),
+		).toThrow("path-changing tick update");
+		await runtime.destroy();
+	});
+
 	it("installs an outdoor player that also reaches an unloaded EnvCell", async () => {
 		const landblockId = "0x0001ffff";
 		const runtime = await buildGamePresentationRuntimeForTest(
@@ -902,7 +943,9 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 	});
 
 	it("does not mutate placement for a state-only upsert and moves one changed root once", async () => {
-		const runtime = await buildSpawnRuntime({ load: async () => spawnedVisual() });
+		const runtime = await buildSpawnRuntime({
+			load: async () => spawnedVisual(),
+		});
 		const entity = spawnedEntity(7, 1);
 		await runtime.upsertDynamicEntity(entity);
 		const installedRevision = runtime.dynamicEntityPlacementRevision;
@@ -920,7 +963,9 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 	});
 
 	it("retains a newer generation when an exact stale removal arrives", async () => {
-		const runtime = await buildSpawnRuntime({ load: async () => spawnedVisual() });
+		const runtime = await buildSpawnRuntime({
+			load: async () => spawnedVisual(),
+		});
 		await runtime.upsertDynamicEntity(spawnedEntity(7, 2));
 
 		runtime.removeDynamicEntity(7, 1);
@@ -957,7 +1002,9 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 	});
 
 	it("withdraws only out-of-scope roots and wakes them on exact residency return", async () => {
-		const runtime = await buildSpawnRuntime({ load: async () => spawnedVisual() });
+		const runtime = await buildSpawnRuntime({
+			load: async () => spawnedVisual(),
+		});
 		await runtime.upsertDynamicEntity(spawnedEntity(7, 1));
 		expect(runtime.dynamicEntityOrigin(7)).not.toBeNull();
 

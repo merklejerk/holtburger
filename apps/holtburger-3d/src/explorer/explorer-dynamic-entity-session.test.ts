@@ -349,7 +349,7 @@ describe("ExplorerDynamicEntitySession", () => {
 			envelope: {
 				epoch: 7,
 				durationMs: 32,
-				entityEvent: { kind: "advanced" },
+				entityEvent: { kind: "ticked" },
 				boom: { kind: "advanced", sequence: 1 },
 			},
 		});

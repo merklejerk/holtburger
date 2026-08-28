@@ -1,7 +1,8 @@
-use crate::entity::EntityMotionSnapshot;
-use crate::motion::MotionOrder;
+use crate::entity::{EntityManager, EntityMotionSnapshot};
+use crate::motion::{MotionOrder, MotionRuntimeRegistry};
 use crate::spatial::{
-    ContactState, SolveBodyInput, SolveProjectionBasis, SpatialBodyId, SpatialSampleMode,
+    ContactState, SolveBodyInput, SolveProjectionBasis, SpatialBody, SpatialBodyId,
+    SpatialSampleMode,
 };
 use crate::state::WorldState;
 use holtburger_common::properties::WorldObjectExt as _;
@@ -14,6 +15,108 @@ use thiserror::Error;
 
 const MOTION_EPSILON: f32 = 1e-4;
 const MOTION_EPSILON_SQUARED: f32 = MOTION_EPSILON * MOTION_EPSILON;
+
+/// Immutable non-scene authority required to derive projection for a captured spatial body.
+pub struct BodyProjectionResolver<'a> {
+    entities: &'a EntityManager,
+    motion_runtimes: &'a MotionRuntimeRegistry,
+}
+
+impl<'a> BodyProjectionResolver<'a> {
+    pub fn new(entities: &'a EntityManager, motion_runtimes: &'a MotionRuntimeRegistry) -> Self {
+        Self {
+            entities,
+            motion_runtimes,
+        }
+    }
+
+    /// Resolves one captured body's current authority and authored-playback contribution.
+    pub fn resolve(&self, body: &SpatialBody) -> Option<SolveBodyInput> {
+        let guid = body.id.authoritative_guid()?;
+        let entity_state = self
+            .entities
+            .get(guid)
+            .map(|entity| (entity.velocity, entity.omega, entity.motion_snapshot));
+        let (velocity, omega, motion_snapshot) = match entity_state {
+            Some((entity_velocity, entity_omega, entity_motion_state)) => {
+                let (velocity, omega) =
+                    if body.sampling.mode == SpatialSampleMode::AuthoritativeOnly {
+                        (entity_velocity, entity_omega)
+                    } else {
+                        (body.velocity, body.omega)
+                    };
+                (velocity, omega, entity_motion_state.or(body.motion_state))
+            }
+            None => (body.velocity, body.omega, body.motion_state),
+        };
+        let basis = match body.id {
+            SpatialBodyId::LocalPlayer(_) => Some(SolveProjectionBasis::velocity(velocity, omega)),
+            SpatialBodyId::Entity(guid) => {
+                self.resolve_guid_basis(guid, body.contact, velocity, omega, motion_snapshot)
+            }
+            SpatialBodyId::Ephemeral(_) => None,
+        };
+        Some(SolveBodyInput {
+            body_id: body.id,
+            pose: body.pose,
+            contact: body.contact,
+            basis,
+        })
+    }
+
+    fn resolve_guid_basis(
+        &self,
+        guid: Guid,
+        contact: ContactState,
+        velocity: Vector3,
+        omega: Vector3,
+        motion_snapshot: Option<EntityMotionSnapshot>,
+    ) -> Option<SolveProjectionBasis> {
+        // Sliding motion is physics-driven like airborne motion; only walkable support selects
+        // the grounded animation basis.
+        if matches!(contact, ContactState::Airborne | ContactState::Sliding)
+            || velocity.z.abs() > MOTION_EPSILON
+        {
+            return vector_projection_basis(velocity, omega);
+        }
+
+        if let Some(snapshot) = motion_snapshot
+            && let Some(grounded) = self.resolve_grounded_basis(guid, snapshot)
+        {
+            return Some(grounded);
+        }
+
+        vector_projection_basis(velocity, omega)
+    }
+
+    fn resolve_grounded_basis(
+        &self,
+        guid: Guid,
+        snapshot: EntityMotionSnapshot,
+    ) -> Option<SolveProjectionBasis> {
+        if snapshot
+            .motion_command()
+            .is_some_and(InterpretedMotionCommand::is_dead)
+        {
+            return None;
+        }
+        // TODO: Extend grounded basis resolution for TurnToHeading and TurnToObject once
+        // continuous command-driven observer projection is validated.
+        if snapshot.directive.is_some() {
+            return None;
+        }
+
+        // Participation follows the installed sequence, not this tick's offset magnitude: a slow
+        // turn can produce a rotation smaller than a useful identity threshold at 30 Hz.
+        let runtime = self.motion_runtimes.get(guid)?;
+        runtime
+            .sequence()
+            .contributes_motion()
+            .then_some(SolveProjectionBasis::AuthoredDrive {
+                offset: runtime.tick().offset,
+            })
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlayerMotionTableSource {
@@ -85,30 +188,8 @@ impl WorldState {
     }
 
     pub fn resolve_body_projection_input(&self, body_id: SpatialBodyId) -> Option<SolveBodyInput> {
-        let guid = body_id.authoritative_guid()?;
-        let pose = self.runtime_pose_for_guid(guid)?;
-        let contact = self
-            .scene
-            .body(body_id)
-            .map(|body| body.contact)
-            .unwrap_or(ContactState::Unknown);
-        let (velocity, omega, motion_snapshot) =
-            self.authoritative_projection_state_for_body(body_id)?;
-
-        let basis = match body_id {
-            SpatialBodyId::LocalPlayer(_) => Some(SolveProjectionBasis::velocity(velocity, omega)),
-            SpatialBodyId::Entity(guid) => {
-                self.resolve_guid_projection_basis(guid, contact, velocity, omega, motion_snapshot)
-            }
-            SpatialBodyId::Ephemeral(_) => None,
-        };
-
-        Some(SolveBodyInput {
-            body_id,
-            pose,
-            contact,
-            basis,
-        })
+        let body = self.scene.body(body_id)?;
+        BodyProjectionResolver::new(&self.entities, &self.motion_runtimes).resolve(body)
     }
 
     pub fn body_has_simulatable_projection_basis(&self, body_id: SpatialBodyId) -> bool {
@@ -162,100 +243,6 @@ impl WorldState {
         (!self.player.guid.is_null())
             .then_some(u32::from(self.player.guid))
             .ok_or(PlayerMotionTableLookupError::PlayerUnavailable)
-    }
-
-    fn authoritative_projection_state_for_body(
-        &self,
-        body_id: SpatialBodyId,
-    ) -> Option<(Vector3, Vector3, Option<EntityMotionSnapshot>)> {
-        let guid = body_id.authoritative_guid()?;
-        let body_state = self.scene.body(body_id).map(|body| {
-            (
-                body.sampling.mode,
-                body.velocity,
-                body.omega,
-                body.motion_state,
-            )
-        });
-        let entity_state = self
-            .entities
-            .get(guid)
-            .map(|entity| (entity.velocity, entity.omega, entity.motion_snapshot));
-
-        match (body_state, entity_state) {
-            (
-                Some((mode, body_velocity, body_omega, body_motion_state)),
-                Some((entity_velocity, entity_omega, entity_motion_state)),
-            ) => {
-                let (velocity, omega) = if mode == SpatialSampleMode::AuthoritativeOnly {
-                    (entity_velocity, entity_omega)
-                } else {
-                    (body_velocity, body_omega)
-                };
-
-                Some((velocity, omega, entity_motion_state.or(body_motion_state)))
-            }
-            (Some((_, velocity, omega, motion_state)), None) => {
-                Some((velocity, omega, motion_state))
-            }
-            (None, Some(state)) => Some(state),
-            (None, None) => None,
-        }
-    }
-
-    fn resolve_guid_projection_basis(
-        &self,
-        guid: Guid,
-        contact: ContactState,
-        velocity: Vector3,
-        omega: Vector3,
-        motion_snapshot: Option<EntityMotionSnapshot>,
-    ) -> Option<SolveProjectionBasis> {
-        // Sliding motion is physics-driven like airborne motion; only walkable support selects
-        // the grounded animation basis.
-        if matches!(contact, ContactState::Airborne | ContactState::Sliding)
-            || velocity.z.abs() > MOTION_EPSILON
-        {
-            return vector_projection_basis(velocity, omega);
-        }
-
-        if let Some(snapshot) = motion_snapshot
-            && let Some(grounded) = self.resolve_grounded_motion_basis(guid, snapshot)
-        {
-            return Some(grounded);
-        }
-
-        vector_projection_basis(velocity, omega)
-    }
-
-    fn resolve_grounded_motion_basis(
-        &self,
-        guid: Guid,
-        snapshot: EntityMotionSnapshot,
-    ) -> Option<SolveProjectionBasis> {
-        if snapshot
-            .motion_command()
-            .is_some_and(InterpretedMotionCommand::is_dead)
-        {
-            return None;
-        }
-
-        // TODO: Extend grounded basis resolution here for TurnToHeading and TurnToObject
-        // directives once continuous command-driven observer projection is validated.
-        if snapshot.directive.is_some() {
-            return None;
-        }
-
-        // Whether the body participates is decided by what its playback installed, not by how
-        // large this particular tick's offset came out: a slow turn produces a rotation smaller
-        // than any sane identity threshold at 30 Hz.
-        let runtime = self.motion_runtimes.get(guid)?;
-        runtime
-            .sequence()
-            .contributes_motion()
-            .then_some(SolveProjectionBasis::AuthoredDrive {
-                offset: runtime.tick().offset,
-            })
     }
 
     /// Advances every body's authored motion by one tick, before any solver reads a basis.

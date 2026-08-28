@@ -990,7 +990,7 @@ fn prepare_dynamic_entity_physical_facts(
         movement,
         response_policy,
         entity_collision: DynamicBodyCollisionDefinition {
-            target_geometry,
+            target_geometry: Arc::new(target_geometry),
             scheduling: physics.scheduling,
             dynamic_collision: physics.dynamic_collision,
             reporting: physics.reporting,
@@ -1741,7 +1741,7 @@ mod tests {
             movement: profile.definition,
             response_policy: profile.response_policy,
             entity_collision: DynamicBodyCollisionDefinition {
-                target_geometry: PreparedEntityTargetGeometry {
+                target_geometry: Arc::new(PreparedEntityTargetGeometry {
                     physics_bsp_parts: Vec::new(),
                     fallback_setup_did: 0x0200_0001,
                     fallback_shapes: vec![Arc::new(CollisionShape::Ball(CollisionBall {
@@ -1749,7 +1749,7 @@ mod tests {
                         radius: 0.5,
                     }))],
                     fallback_scale: ColliderScale::uniform(1.0).unwrap(),
-                },
+                }),
                 scheduling: holtburger_world::EntityPhysicsScheduling::Eligible,
                 dynamic_collision: holtburger_world::EntityDynamicCollisionPolicy {
                     target: EntityCollisionParticipation::Solid,
@@ -1926,14 +1926,8 @@ mod tests {
         let mut started = Vec::new();
         for body_id in prepared.movers {
             let result = scene
-                .tick_dynamic_physical_body_transaction(
-                    body_id,
-                    &collision,
-                    touched_at,
-                    |_, _| Ok(()),
-                )
-                .unwrap()
-                .0;
+                .tick_prepared_dynamic_physical_body(body_id, &collision, touched_at)
+                .unwrap();
             started.extend(result.collision_reports);
         }
         started.extend(scene.finish_dynamic_entity_collection(touched_at).unwrap());

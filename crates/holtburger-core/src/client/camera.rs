@@ -29,7 +29,7 @@ use crate::kinematic_boom::{
     present_placed_motion_pose, resolve_camera_pivot_offset, serialize_kinematic_boom_path,
     standard_kinematic_boom_profile, stationary_kinematic_boom_path,
 };
-use crate::{DynamicEntityAdvanceBatch, DynamicEntityPlacementAdvanceKind};
+use crate::{DynamicEntityPlacementAdvanceKind, DynamicEntityTickBatch};
 
 /// Renderer-authored camera registration request.
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -481,7 +481,7 @@ impl ClientCameraRuntime {
         &mut self,
         world: &WorldState,
         collision: Option<&SimulationSceneSnapshot>,
-        batch: Option<&DynamicEntityAdvanceBatch>,
+        batch: Option<&DynamicEntityTickBatch>,
         duration: Duration,
     ) -> Result<Option<ClientCameraTick>> {
         let _ = self.initialize_if_ready(world, collision)?;
@@ -679,7 +679,7 @@ impl ClientRuntime {
     pub(super) fn advance_camera(
         &mut self,
         collision: Option<&SimulationSceneSnapshot>,
-        batch: Option<&DynamicEntityAdvanceBatch>,
+        batch: Option<&DynamicEntityTickBatch>,
         duration: Duration,
     ) -> Result<Option<ClientCameraTick>> {
         self.camera.advance(&self.world, collision, batch, duration)

@@ -65,8 +65,8 @@ impl PartialEq for PreparedEntityTargetGeometry {
 /// Entity-specific collision and scheduling facts retained beside generic response memory.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DynamicBodyCollisionDefinition {
-    /// Both stable target branches prepared from immutable content.
-    pub target_geometry: PreparedEntityTargetGeometry,
+    /// Shared stable target branches prepared once from immutable content.
+    pub target_geometry: Arc<PreparedEntityTargetGeometry>,
     /// State-derived fixed-tick eligibility.
     pub scheduling: EntityPhysicsScheduling,
     /// State-derived directional peer collision policy.

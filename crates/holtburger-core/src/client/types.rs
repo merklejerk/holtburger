@@ -448,6 +448,10 @@ pub enum ClientViewEvent {
     RuntimeBodyUpserted {
         body: Box<RuntimeSpatialBodyView>,
     },
+    /// Complete runtime-body levels committed by one fixed tick, in stable body order.
+    RuntimeBodiesAdvanced {
+        bodies: Arc<[RuntimeSpatialBodyView]>,
+    },
     RuntimeBodyRemoved {
         body_id: SpatialBodyId,
     },

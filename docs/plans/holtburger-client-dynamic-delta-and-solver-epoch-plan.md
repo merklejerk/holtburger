@@ -1,6 +1,6 @@
 # Holtburger Client Dynamic Delta and Solver Epoch Plan
 
-Status: **Execution in progress; Phases 0–2 and Resteer A complete, Phase 3 active (2026-08-28).**
+Status: **Complete (2026-08-28).**
 
 Origin: investigation of client-mode stalls after entering dungeon EnvCell `0x00070156`.
 
@@ -204,13 +204,12 @@ spatial index.
 ### D4. Dynamic collection state becomes one epoch
 
 Replace `dynamic_pending_movers`, `dynamic_shadows`, and `dynamic_tick_start` with one optional
-`PreparedDynamicEntityEpoch`. The epoch owns:
+`PreparedDynamicEntityEpoch`. Epoch preparation owns:
 
-- the immutable target index;
+- the immutable target index until all directional peer consequences are sealed;
 - stable participant records;
-- scheduled mover identity/order;
-- each scheduled mover's actuation and environment-only plan;
-- pending/attempted state; and
+- each scheduled mover's actuation and environment-only plan until its peer consequence is sealed;
+- stable mover identity/order plus each selected final plan and consequence; and
 - coverage rejections.
 
 Opening a second epoch before finishing the first and finishing with unattempted movers remain loud
@@ -417,10 +416,10 @@ forward.
 
 #### Checklist
 
-- [ ] Define the minimal tick-start participant and prepared mover records.
-- [ ] Collapse the three scene fields into one epoch.
-- [ ] Migrate world, core client, and Explorer host callers.
-- [ ] Rewrite ossified tests around the new epoch contract rather than preserving call choreography.
+- [x] Define the minimal tick-start participant and prepared mover records.
+- [x] Collapse the three scene fields into one epoch.
+- [x] Migrate world, core client, and Explorer host callers.
+- [x] Rewrite ossified tests around the new epoch contract rather than preserving call choreography.
 
 ### Phase 4: Consume one prepared plan and remove redundant ownership copies
 
@@ -446,11 +445,11 @@ forward.
 
 #### Checklist
 
-- [ ] Make dynamic-contact resolution return a patch/consequence over the prepared plan.
-- [ ] Remove the second `solve_physical_body_tick` call.
-- [ ] Move immutable geometry behind shared composite ownership.
-- [ ] Give collection finalization a focused non-callback API and sweep host-envelope clones.
-- [ ] Review every surviving clone in the epoch hot path.
+- [x] Make dynamic-contact resolution return a patch/consequence over the prepared plan.
+- [x] Remove the second `solve_physical_body_tick` call.
+- [x] Move immutable geometry behind shared composite ownership.
+- [x] Give collection finalization a focused non-callback API and sweep host-envelope clones.
+- [x] Review every surviving clone in the epoch hot path.
 
 ### Phase 5: Prove and correct dynamic-body liveness
 
@@ -479,12 +478,12 @@ forward.
 
 #### Checklist
 
-- [ ] Census scheduled admission predicates.
-- [ ] Census failed stability predicates.
-- [ ] Replace `motion_state.is_none()` with the existing derived-work invariant.
-- [ ] Correct the owning liveness transition, not its callers.
-- [ ] Add focused wake/sleep/report regression tests.
-- [ ] Remove temporary evidence code.
+- [x] Census scheduled admission predicates.
+- [x] Census failed stability predicates.
+- [x] Replace `motion_state.is_none()` with the existing derived-work invariant.
+- [x] Correct the owning liveness transition, not its callers.
+- [x] Add focused wake/sleep/report regression tests.
+- [x] Remove temporary evidence code.
 
 ### Resteer B: Work and behavior review
 
@@ -529,15 +528,15 @@ were introduced. Do not add permanent metrics to make the comparison convenient.
 
 #### Checklist
 
-- [ ] `cargo fmt --all -- --check`
-- [ ] `cargo clippy -p holtburger-world -p holtburger-core -p holtburger-3d-host --all-targets -- -D warnings`
-- [ ] Focused Rust tests for spatial collection, client simulation, and host simulation.
-- [ ] `npm run check`
-- [ ] Focused Vitest suites for dynamic feed, presentation session, runtime, and scene graph.
-- [ ] `npm run harness:browser -- ...` with synthetic delta/attachment scenarios.
-- [ ] `npm run probe:client` against the local ACE endpoint with credentials supplied through the
+- [x] `cargo fmt --all -- --check`
+- [x] `cargo clippy -p holtburger-world -p holtburger-core -p holtburger-3d-host --all-targets -- -D warnings`
+- [x] Focused Rust tests for spatial collection, client simulation, and host simulation.
+- [x] `npm run check`
+- [x] Focused Vitest suites for dynamic feed, presentation session, runtime, and scene graph.
+- [x] `npm run harness:browser -- ...` with synthetic delta/attachment scenarios.
+- [x] `npm run probe:client` against the local ACE endpoint with credentials supplied through the
   environment and the server cooldown satisfied.
-- [ ] Interactive client-mode dungeon acceptance by the user.
+- [x] Interactive client-mode dungeon acceptance by the user.
 
 ## Risks and Mitigations
 
@@ -551,9 +550,9 @@ parent GUID/generation and test both delivery orders. Do not fall back to whole-
 Continue checking the exact desired generation and visual identity at publication. Cancellation and
 resource release must be generation-owned, not inferred from current population scans.
 
-### Portal activation currently uses reconciliation as a readiness barrier
+### Portal activation can conflate static readiness with dynamic realization
 
-Replace it with an explicit local-player/deferred-eligibility convergence operation. Readiness names
+Use the explicit local-player/deferred-eligibility convergence operation. Readiness names
 the exact activation generation and installed player; it does not imply a general snapshot replay.
 
 ### Dynamic peers require immutable tick-start trajectories
@@ -581,31 +580,22 @@ lifetime/stale-support paths retain explicit wake behavior.
 
 ## Definition of Done
 
-- [ ] Accepted client dynamic deltas remain deltas through presentation.
-- [ ] Full snapshot replacement occurs only at named hydration/reset/residency boundaries.
-- [ ] Ordinary entity updates perform no unchanged-population spatial work.
-- [ ] The solver owns one composite prepared epoch.
-- [ ] Every ordinary scheduled mover performs one full-duration environment solve.
-- [ ] Immutable target geometry is shared rather than vector-cloned into tick snapshots.
-- [ ] Surviving hot-path clones each have a simultaneous owner that requires them.
-- [ ] Every scheduled mover has a proven semantic wake reason.
-- [ ] Client camera, remote motion, chat, diagnostics, and Explorer behavior pass acceptance.
-- [ ] Formatting, clippy, TypeScript/Svelte checks, focused tests, and browser harness pass.
-- [ ] Temporary profiling and diagnostic code is absent.
-- [ ] Removed architecture vocabulary is swept from code, tests, comments, and UI.
+- [x] Accepted client dynamic deltas remain deltas through presentation.
+- [x] Full snapshot replacement occurs only at named hydration/reset/residency boundaries.
+- [x] Ordinary entity updates perform no unchanged-population spatial work.
+- [x] The solver owns one composite prepared epoch.
+- [x] Every ordinary scheduled mover performs one full-duration environment solve.
+- [x] Immutable target geometry is shared rather than vector-cloned into tick snapshots.
+- [x] Surviving hot-path clones each have a simultaneous owner that requires them.
+- [x] Every scheduled mover has a proven semantic wake reason.
+- [x] Client camera, remote motion, chat, diagnostics, and Explorer behavior pass acceptance.
+- [x] Formatting, clippy, TypeScript/Svelte checks, focused tests, and browser harness pass.
+- [x] Temporary profiling and diagnostic code is absent.
+- [x] Removed architecture vocabulary is swept from code, tests, comments, and UI.
 
 ## Open Questions
 
-None block execution. Phase 5 still measures whether admission reasons beyond the proven
-`motion_state` stability defect materially contribute to the dungeon population, but that is an
-implementation finding with an explicit decision rule rather than missing plan direction.
-
-The existing live probe was built and invoked against `127.0.0.1:9000` during the plan dry run. Two
-sandbox-permitted attempts, including one after more than the server's approximately 10-second
-successful-login cooldown, reached the probe's character-selection wait and timed out without an
-actionable failure record. The probe currently discards progress and raw host stderr, so these runs
-do not prove whether authentication, account occupancy, or lifecycle delivery failed. Phase 0 closes
-that observability gap before using the probe as acceptance evidence.
+None. The plan is complete.
 
 ## Execution Progress
 
@@ -688,6 +678,293 @@ will sweep the remaining synchronization-boundary names without conflating them 
 edges. No compensating coalescer or population replay remains, so solver work can proceed without
 carrying a known frontend backlog mechanism forward.
 
+### Phase 3 — complete (2026-08-28)
+
+- Replaced the scene's independent target-index, tick-start, and pending-mover fields with one
+  optional `PreparedDynamicEntityEpoch`. Its participant records, stable-ID mover map, prepared
+  environment plans, pending attempts, fixed interval, and coverage rejections now share one
+  representable lifetime.
+- Preparation computes participant and mover facts locally and publishes the epoch only after
+  successful construction. World, core-client, and Explorer-host consumers receive only the small
+  ordered mover/rejection projection and retrieve all solver inputs through the active epoch.
+- Opening an overlapping epoch, ticking outside one, finishing without one, and finishing before
+  every mover was attempted fail loudly. An incomplete finish retains the epoch so its remaining
+  movers can still be attempted.
+- Runtime suspension and authoritative reset invalidate the complete epoch because their new
+  temporal origin makes every captured participant and plan stale. The next collection operation
+  must prepare again.
+- Removed the production broad-phase inspection method; its focused test-only replacement requires
+  an active epoch instead of turning missing preparation into an empty candidate set.
+- The expanded world suite passes 442 tests; complete core and 3D-host library suites pass 282 and
+  245 tests respectively.
+
+**Decision:** The remaining mover map is the pending state; removing an entry starts its focused
+finalization attempt. Preparation/coverage failures never enter that map, and the callback-bearing
+single-body transaction remains the separate rollback surface.
+
+**Debt carried into Phase 4:** The epoch owns the prepared environment plan, but the current dynamic
+transaction still clones actuation and invokes the ordinary full-duration solver again. The client
+also retains a temporary actuation map to work around its broad world borrow. These are explicit
+cutover seams, not accepted final ownership.
+
+### Phase 4 — complete (2026-08-28)
+
+- Dynamic-contact resolution now reads immutable full-duration environment plans and returns an
+  optional replacement plan plus peer/report consequences. No-contact movers retain their original
+  plan; blocking and work-budget cases alone create the existing distinct bounded-duration plan.
+- Sealed every directional peer consequence before the first canonical body commit. Finalization
+  consequently moves each selected plan and captured participant body out of the epoch without
+  cloning the motion path or making later movers observe committed peers.
+- Replaced the collection's callback transaction with
+  `tick_prepared_dynamic_physical_body`. The ordinary callback-bearing single-body transaction
+  remains intact for physical-fly acceptance; the dead collection consumer-rejection test was
+  removed instead of preserving an API with no production consumer.
+- Moved target geometry behind `Arc<PreparedEntityTargetGeometry>`. Body snapshots now share the
+  immutable BSP-part and fallback-shape vectors while equality continues to use content/placement
+  facts rather than pointer identity.
+- Changed the internal physical solver to borrow actuation. Full and bounded solves no longer clone
+  it, and the client now derives actuation directly into epoch preparation through a stateless
+  `BodyProjectionResolver` over disjoint non-scene authority. The temporary population actuation
+  map is gone.
+- Reviewed remaining collection-path copies: participant bodies coexist with the canonical store
+  but share geometry; host previous/current bodies coexist in the returned temporal envelope and
+  canonical store; collision scenes and geometry use shared ownership; broad-phase placement folds
+  copy path-owned membership because both results survive.
+- World, core, and 3D-host library suites pass with 441, 282, and 245 tests respectively.
+
+**Course correction:** The immutable target index is consumed while all directional consequences
+are sealed, then dropped before the active finalization epoch is published. Retaining an index that
+finalization cannot consume would violate the codebase's named-consumer rule. The active epoch keeps
+only captured participants needed for currentness, remaining mover plans/consequences, and coverage
+rejections.
+
+**Debt resolved:** The second full-duration solve, collection no-op callback, actuation map, and
+vector-owning target-geometry snapshots are gone. No Phase 4 compatibility seam remains.
+
+### Phase 5 — complete (2026-08-28)
+
+- Ran a temporary 163-body debug-harness census with 120 standing authoritative motion snapshots,
+  35 snapshot-free coasters, and 8 explicit grounded-drive bodies. Before the correction, the
+  coasters settled after support stabilized while all 120 standing snapshots and all 8 driven
+  bodies remained scheduled indefinitely.
+- Removed `motion_state.is_none()` from the scene-owned stability predicate. Repeating the same
+  census left only the 8 driven bodies scheduled after the second epoch; standing snapshots and
+  snapshot-free coasters both settled.
+- Added a focused regression proving a standing authoritative snapshot survives canonically while
+  its body settles. Existing tests already prove the complementary chain: grounded motion content
+  resolves to `AuthoredDrive`, explicit grounded drive prevents settling, settled report-only peers
+  remain queryable without integration, and the selected directional response wakes exactly its
+  settled target.
+- Audited admission and wake ownership. Collection admission is limited to eligible active bodies
+  plus bodies whose retained support proof is stale in the current collision snapshot. Activity is
+  woken by authoritative kinematic/motion changes, explicit scene wake, residency/reconfiguration,
+  or an accepted directional response. The census exposed no second unjustified admission or wake
+  transition.
+- Deleted the temporary census after recording its result and encoding the standing-snapshot case
+  in the world suite. No reason enum, counter, logger, or harness source remains.
+- Rebuilt the release host and reran the credential-redacted live probe with a 60-second lifecycle
+  bound. It again reached `authenticating → character-selection → portal-space`, then timed out
+  before `in-world`; therefore it corroborates startup and lifecycle delivery but cannot yet
+  discriminate the dungeon's post-entry responsiveness. Interactive acceptance remains Phase 7.
+
+**Decision:** Snapshot presence is authoritative semantic state, not liveness. The already-derived
+actuation work and accepted physical result jointly own settling; adding a parallel diagnostic
+reason model would duplicate those facts and risk drifting from the scheduler.
+
+**Superseded concession:** The initial probe could not cross portal space because it omitted the
+desktop host's external reveal handshake. Phase 7 corrected the headless ordering and exposed a
+separate activation race; neither was ordinary server portal latency.
+
+### Resteer B — complete (2026-08-28)
+
+- Frontend ordinary work remains one accepted upsert/removal/advance plus dependency-local wake-up;
+  complete population replacement is confined to named synchronization boundaries.
+- Environment solves are one full-duration solve per admitted mover. Only selected blocking or
+  work-budget contacts compute a semantically distinct bounded-duration replacement.
+- After stable support, the synthetic dungeon population fell from 163 scheduled bodies to the 8
+  bodies with explicit authored drive. No population-wide standing-snapshot loop remained.
+- The active epoch contains only finalization consumers. Its transient target index and trajectory
+  map are consumed while sealing peer consequences; participant snapshots, selected plans, and
+  coverage rejections survive only as long as finalization requires them.
+
+**Resteer conclusion:** The remaining work is cleanup and integrated verification. No new duplicate
+representation or compensating throughput mechanism warrants replanning.
+
+### Phase 6 — complete (2026-08-28)
+
+- Swept production, tests, and UI for the removed universal reconciliation, independent pending
+  mover/tick-start maps, second-solve transaction, and task-specific profiling vocabulary. No old
+  entry point or compatibility adapter remains.
+- Renamed the surviving explicit boundary result from `DynamicEntityReconciliation` to
+  `DynamicEntityRealizationResults`, its item result to `DynamicEntityRealizationDisposition`, and
+  the client/Explorer readiness state and test ledger accordingly. Snapshot replacement, delta
+  ingress, and readiness realization now remain distinct in both API and UI vocabulary.
+- Confirmed no `HB_CLIENT_PROFILE`/profiling environment variable, Electron capture shortcut,
+  profile log/CPU-profile artifact, task-specific stderr summary, or runtime counter survives.
+- Clippy exposed two new correlated argument trains. Collapsed directional contact inputs into one
+  immutable `DynamicContactEpoch` contract and tentative publication inputs into one
+  `PhysicalBodyCommitInput`; no lint suppression or defaulted field was introduced.
+- Formatting, full frontend type/Svelte checks, and strict Rust clippy for world, core, and the 3D
+  host pass.
+
+**Decision:** “Reconciliation” remains only where an independently valid subsystem truly compares
+two retained levels (for example terrain bakes or scene interest). Dynamic presentation now uses
+replacement, upsert/removal/advance, eligibility reevaluation, and realization vocabulary matching
+the operation that actually occurs.
+
+**Debt carried into Phase 7:** None from cleanup. The live probe's portal-space integration and the
+original interactive dungeon behavior remained explicit acceptance gaps at this boundary.
+
+### Phase 7 — complete (2026-08-28)
+
+- `cargo fmt --all -- --check` and strict clippy across world, core, and the 3D host pass.
+- Complete library suites pass: `holtburger-world` 442 tests, `holtburger-core` 284 tests, and
+  `holtburger-3d-host` 245 tests.
+- Full frontend verification passes: Svelte/TypeScript checks, ESLint, dead-code analysis, and 1,594
+  Vitest tests across 215 files.
+- The Chrome/WebGL browser harness passes under SwiftShader with a ready scene, advancing frames,
+  no application console error, and successful cleanup. The earlier targeted dynamic
+  spawn/current/exact-despawn and attachment/delta scenarios remain green.
+- The original live probe never acknowledged the external world-reveal generation required by the
+  desktop host composition. After adding that handshake, it acknowledged before the first
+  collision-backed camera path and exposed a second ordering defect: activation attempted to seed
+  a registered camera while destination collision was still pending, terminating on missing
+  EnvCell `0x00070156`.
+- Added a testable headless reveal adapter and made the probe mirror the renderer's causal boundary:
+  portal snapshot, local-player placement, camera registration, first covered camera path, then
+  generation-exact reveal acknowledgement.
+- Made destination collision residency an explicit core activation prerequisite. Camera seeding now
+  waits for both the prepared local body and the installed authoritative destination instead of
+  treating ordinary asynchronous scene loading as a missing-cell runtime failure. The focused
+  coordinator regression, formatting, and strict core clippy pass.
+- Rebuilt the release host and reran the probe after the ACE cooldown. It reached `in-world` and
+  completed its 10-second motion window in 11.9 seconds total with 334 camera ticks, accepted drive,
+  zero presentation discontinuities, and only the expected explicit-disconnect terminal event.
+- The same census reported 18,717 `client-dynamic-entity` frames and 16.4 MiB of dynamic-event
+  traffic for 163 entities during that run. That first aggregate did not partition event variants,
+  so attributing its complete count to upserts was initially an inference from cadence and source
+  flow rather than a direct measurement. A second 10-second live run added a temporary variant
+  counter and measured 13,725 dynamic frames for the then-current 117-entity population: 13,651
+  upserts, 71 advance batches, and 3 snapshots. The temporary counter was then removed. Source
+  tracing confirms every `RuntimeBodyChanged` projects an individual complete dynamic upsert while
+  the fixed-tick boundary separately computes an advance batch from before/after views. This is
+  proven population-multiplied IPC and presentation ingress.
+- After the Phase 7A cutover, the rebuilt release host completed the same 10-second probe with 335
+  camera events, accepted drive over 47.3 world units, zero presentation discontinuities, and only
+  the expected explicit disconnect. Dynamic publication fell to 695 frames and 1.90 MiB for a
+  163-entity peak: 19.7 times fewer frames and approximately 8.6 times fewer bytes than the direct
+  13,725-frame/16.4-MiB pre-cutover evidence. The remaining count includes entity-bounded lifecycle
+  snapshots/upserts in addition to the steady tick-bounded publications.
+- Interactive acceptance in the original dungeon confirms responsive camera motion aligned with
+  the minimap, timely remote-player motion, normal chat submission, regularly updating diagnostics,
+  and materially lower idle CPU. Explorer behavior also remains correct.
+
+The user selected a tick-owned mixed delta product rather than filtering or receiver coalescing.
+Phase 7A preserves placement-stable frontend facts while removing per-commit focused upserts.
+
+#### Phase 7A — complete: Tick-owned dynamic publication
+
+**Implemented contract:** Replace `DynamicEntityEvent::Advanced` with one
+`DynamicEntityEvent::Ticked { batch }`. `DynamicEntityTickBatch` owns the shared host time and
+duration plus two disjoint stable-GUID collections:
+
+- `advances`: complete final views paired with accepted placement paths;
+- `updates`: complete final views whose placement is unchanged but whose other frontend-owned level
+  changed.
+
+The constructor rejects an empty batch, duplicate GUIDs, and a GUID present in both collections; it
+establishes stable GUID order itself. The external schema owns numeric wire validation. Snapshot,
+focused upsert, and exact-generation removal remain unchanged.
+This is a clean replacement of the old advance-only tick product, not a second parallel delivery
+grammar.
+
+**World/core cutover:**
+
+- Add a precise `WorldEvent::RuntimeBodyAdvanced` emitted only by
+  `apply_physical_body_tick_result`. `RuntimeBodyChanged` remains the structural/authoritative body
+  replacement edge used by collision preparation, motion/property changes, and other non-tick
+  producers.
+- Project structural `RuntimeBodyChanged` into the existing focused `RuntimeBodyUpserted`. Collect
+  tick-owned `RuntimeBodyAdvanced` views into one new `RuntimeBodiesAdvanced` client event so the
+  in-process TUI cache remains current without reproducing per-body broadcast fan-out. The desktop
+  host does not forward this cache channel.
+- Only structural `RuntimeBodyChanged` may request a focused dynamic upsert. A routine
+  `RuntimeBodyAdvanced` is represented by the fixed-tick dynamic product and the one TUI cache
+  batch, never by a focused presentation upsert.
+- Replace `dynamic_entity_advance_event` with a pure before/after tick builder. For the same current
+  generation, world-placement changes become `advances`, placement-stable view changes become
+  `updates`, and identical views disappear. Existing lifecycle upserts continue to own generation,
+  visual identity, attachment-domain, and spawn/replacement changes.
+- Move the client tick baseline to immediately after movement commands, world maintenance,
+  collision completion, and activation convergence have published their focused semantic edges,
+  but before simulation commits. The tick product then describes simulation alone and cannot
+  duplicate a structural upsert from the same turn. Snap/arrival/forced-reposition edges establish
+  the new baseline rather than being replayed as an interpolation path.
+- Delete the client-only `ClientAdvanceDiscontinuityKind` accumulator and classifier. Teleport/reset
+  producers already own lifecycle replacement or presentation-discontinuity edges before the new
+  simulation baseline; ordinary client solver paths are integrated. Explorer-authored correction
+  kinds remain part of the shared advance item because Explorer has explicit teleport/reset tools.
+- Compute the camera tick while borrowing the tick batch, then publish the dynamic batch followed
+  by the camera event. This removes the surviving complete advance-batch clone while preserving
+  entity-before-camera delivery.
+
+**Frontend/Explorer cutover:**
+
+- Replace the `advanced` schema and mirror branch with `ticked`. Apply all updates and advances
+  under one monotonic host-time check and one duplicate-GUID validation transaction.
+- Replace `applyDynamicEntityAdvances` with one synchronous tick operation. Updates refresh the
+  desired level and installed presentation state without visual realization or scene placement;
+  advances additionally install the accepted placement path.
+- `ClientPresentationSession` enqueues one mutation for the complete accepted tick rather than one
+  mutation per body. Explorer fixed-tick delivery adopts the same shared tick vocabulary; its
+  current producer may legitimately populate only `advances`.
+- Update the browser harness, Explorer panel bookkeeping, live-probe entity extraction, and focused
+  host adapters to consume `ticked` without compatibility shims.
+
+**Production touch points:**
+
+- World/core: `crates/holtburger-world/src/events.rs`,
+  `crates/holtburger-world/src/state/mutations.rs`,
+  `crates/holtburger-core/src/dynamic_entity_view.rs`,
+  `crates/holtburger-core/src/client/dynamic_entity_view.rs`,
+  `crates/holtburger-core/src/client/runtime.rs`,
+  `crates/holtburger-core/src/client/mod.rs`, and
+  `crates/holtburger-core/src/client/camera.rs`, plus the small
+  `runtime_body_view_cache.rs` batch-consumer cutover.
+- Host/Explorer: `apps/holtburger-3d/host/src/explorer_entity_delivery.rs`, the Explorer fixed-tick
+  envelope/runtime producers, and their protocol tests.
+- Frontend: `dynamic-entity-feed.ts`, `client-presentation-session.ts`,
+  `game-presentation-runtime.ts`, `explorer-fixed-tick.ts`, `ExplorerApp.svelte`, and the browser
+  harness adapters that currently switch on `advanced`.
+- Tests: colocated world event, core tick-builder/camera, feed/mirror, client presentation, runtime,
+  Explorer fixed-tick, and browser-harness fixtures. No new package or permanent diagnostic is
+  required.
+
+**Acceptance fixtures:**
+
+- Fifty-two committed but frontend-identical bodies produce no dynamic tick event.
+- Three moved bodies plus one placement-stable contact/state change produce one tick containing
+  three advances and one update, each GUID exactly once.
+- A structural body reconfiguration still produces its focused upsert and is not lost behind the
+  tick grammar.
+- The TUI runtime-body cache receives every accepted solver body level through one tick batch, while
+  structural changes remain focused upserts.
+- The client camera consumes the exact matching advance paths and remains published after the
+  dynamic tick without cloning the batch.
+- The live probe reports dynamic-event traffic proportional to changed tick products rather than
+  committed bodies; no temporary variant counter remains.
+
+No dependency, persistent schema, credential flow, or retail behavior change was involved.
+
+**Explicitly out of this cut:** Field-level wire patches, receiver coalescing, worker threads, and
+optimizing the existing before/after projection scan without profiling evidence. The current scan
+averaged well below the original solver and renderer costs; the proven defect is
+population-multiplied publication and presentation ingress.
+
+**User acceptance completed:** Electron client mode in the original dungeon showed prompt 3D camera
+response matching the minimap, timely remote-player motion, working chat submission, regular
+FPS/rendered-frame diagnostic updates, and materially reduced idle CPU.
+
 ## Decisions and Course Corrections
 
 - **2026-08-28:** Rejected reconciliation coalescing as the primary fix because it retains snapshot
@@ -716,3 +993,20 @@ carrying a known frontend backlog mechanism forward.
   wait, including a retry after the server's successful-login cooldown, then timed out with no
   retained phase/lifecycle diagnostic. Added bounded, credential-redacted failure reporting and an
   explicit cooldown precondition to Phase 0 rather than reviving production profiling.
+- **2026-08-28:** Corrected the headless external-reveal sequence and made destination collision
+  residency an explicit camera-seed prerequisite after the live probe proved early camera
+  registration could race an empty retained scene. The corrected probe reaches `in-world` normally.
+- **2026-08-28:** Paused execution when live verification exposed population-multiplied dynamic
+  traffic. A temporary follow-up counter measured 13,651 upserts versus 71 advance batches and 3
+  snapshots in 10 seconds, then was removed. The per-commit upsert path overlaps the tick-owned
+  advance product but may carry non-placement facts; choosing its replacement is an architectural
+  scope expansion requiring explicit review rather than an opportunistic Phase 7 optimization.
+- **2026-08-28:** Implemented the reviewed mixed tick product. Routine solver commits now use a
+  distinct world event, one fixed-tick publication carries disjoint path advances and path-stable
+  updates, and structural changes retain focused upserts. A dedicated path identity was required in
+  the browser runtime because the existing placement identity deliberately includes contact and
+  kinematics; reusing it would have misclassified valid path-stable updates as placement changes.
+- **2026-08-28:** Removed local lifecycle authorization from chat dispatch. ACE establishes its
+  world-connected session and player before `LoginComplete`, so portal-space chat is a valid server
+  decision; frontend and core state guards were narrower than the protocol and could silently drop
+  valid commands.

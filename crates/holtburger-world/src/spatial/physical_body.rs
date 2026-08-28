@@ -183,7 +183,7 @@ pub enum PhysicalBodyActuationError {
 }
 
 /// Validated one-shot launch velocity produced by an actor-specific resolver.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GroundedLaunch {
     /// Full world-space velocity committed atomically when support is left.
     velocity: Vector3,
@@ -345,7 +345,7 @@ impl PhysicalBodyActuation {
 }
 
 /// Response-owned state retained with a generic body's single authoritative pose.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PhysicalBodyResponseState {
     /// Placement state for collision-aware free three-dimensional motion.
     FreeSphere {
@@ -800,7 +800,7 @@ struct FreeSphereTickState {
 pub(super) fn solve_physical_body_tick(
     scene: &CollisionScene,
     body: &SpatialBody,
-    actuation: PhysicalBodyActuation,
+    actuation: &PhysicalBodyActuation,
     delta_seconds: f32,
 ) -> Result<PhysicalBodyTickCommit> {
     ensure!(
@@ -830,7 +830,7 @@ fn solve_physical_body_response(
     scene: &CollisionScene,
     body: &SpatialBody,
     physical: &PhysicalBodyState,
-    actuation: PhysicalBodyActuation,
+    actuation: &PhysicalBodyActuation,
     delta_seconds: f32,
 ) -> Result<PhysicalBodyTickCommit> {
     match (physical.definition, &physical.response) {
@@ -851,7 +851,7 @@ fn solve_physical_body_response(
                     collision_filter: physical.collision_filter,
                     cell: *cell,
                 },
-                velocity,
+                *velocity,
                 delta_seconds,
             )
         }
@@ -999,7 +999,7 @@ fn solve_grounded_body_tick(
     scene: &CollisionScene,
     body: &SpatialBody,
     state: GroundedTickState,
-    actuation: GroundedBodyActuation,
+    actuation: &GroundedBodyActuation,
     delta_seconds: f32,
 ) -> Result<PhysicalBodyTickCommit> {
     let retained_ground_is_current = match state.ground {
@@ -1044,7 +1044,7 @@ fn solve_grounded_body_tick(
         ContactState::Airborne
     };
     let settle = grounded_settle_permission(retained_contact, actuation.launch.is_some());
-    if let Some(launch) = actuation.launch {
+    if let Some(launch) = actuation.launch.as_ref() {
         ensure!(
             grounded_body.ground.walkable_support().is_some(),
             "grounded launch requires current walkable support"
@@ -1742,7 +1742,7 @@ mod tests {
         let commit = solve_physical_body_tick(
             &scene,
             &body,
-            PhysicalBodyActuation::free_flight(Vector3::zero()).unwrap(),
+            &PhysicalBodyActuation::free_flight(Vector3::zero()).unwrap(),
             0.5,
         )
         .expect("a free sphere in an empty scene solves");

@@ -38,11 +38,21 @@ pub(crate) struct DynamicEpochParticipant {
     pub(crate) body: SpatialBody,
 }
 
-/// One scheduled mover's derived inputs, computed exactly once during epoch preparation.
+/// One scheduled mover's trajectory inputs while every directional peer query is resolved.
 #[derive(Debug, Clone)]
-pub(crate) struct PreparedDynamicMover {
+pub(crate) struct PreparedDynamicTrajectory {
     pub(crate) actuation: PhysicalBodyActuation,
     pub(crate) environment_plan: PhysicalBodyTickCommit,
+}
+
+/// Immutable inputs shared by every directional query in one prepared collection.
+#[derive(Clone, Copy)]
+pub(crate) struct DynamicContactEpoch<'a> {
+    pub(crate) collision: &'a CollisionScene,
+    pub(crate) index: &'a DynamicShadowIndex,
+    pub(crate) participants: &'a BTreeMap<SpatialBodyId, DynamicEpochParticipant>,
+    pub(crate) trajectories: &'a BTreeMap<SpatialBodyId, PreparedDynamicTrajectory>,
+    pub(crate) delta_seconds: f32,
 }
 
 /// Blocking peer accepted by one directional solve.
@@ -55,21 +65,28 @@ pub(crate) struct DynamicResponseContact {
 /// Confirmed report touches plus the optional blocking peer selected for mover response.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct DynamicContactResolution {
+    /// Distinct bounded-duration plan selected instead of the full environment plan.
+    pub(crate) replacement_plan: Option<PhysicalBodyTickCommit>,
     pub(crate) response: Option<DynamicResponseContact>,
     pub(crate) report_touches: Vec<CollisionReportTouch>,
 }
 
 /// Applies the earliest stable blocking contact to an environment-only body plan.
 pub(crate) fn resolve_dynamic_contacts(
-    collision: &CollisionScene,
-    index: &DynamicShadowIndex,
-    participants: &BTreeMap<SpatialBodyId, DynamicEpochParticipant>,
-    movers: &BTreeMap<SpatialBodyId, PreparedDynamicMover>,
-    mover: &SpatialBody,
-    commit: &mut PhysicalBodyTickCommit,
-    actuation: &PhysicalBodyActuation,
-    delta_seconds: f32,
+    epoch: DynamicContactEpoch<'_>,
+    mover_id: SpatialBodyId,
 ) -> Result<DynamicContactResolution> {
+    let mover = &epoch
+        .participants
+        .get(&mover_id)
+        .context("dynamic mover has no tick-start participant")?
+        .body;
+    let trajectory = epoch
+        .trajectories
+        .get(&mover_id)
+        .context("dynamic mover has no prepared trajectory")?;
+    let environment_plan = &trajectory.environment_plan;
+    let actuation = &trajectory.actuation;
     let Some(mover_dynamic) = mover
         .physical
         .as_ref()
@@ -90,17 +107,19 @@ pub(crate) fn resolve_dynamic_contacts(
         return Ok(DynamicContactResolution::default());
     }
 
-    let anchor = commit.motion.path.anchor();
+    let anchor = environment_plan.motion.path.anchor();
     let extent = moving_sphere_extent(mover);
-    let (minimum, maximum) = swept_root_bounds(&commit.motion.path, extent);
-    let placement = swept_mover_placement(collision, mover, commit)?;
-    let candidates = index.candidates(mover.id, anchor, minimum, maximum, &placement);
+    let (minimum, maximum) = swept_root_bounds(&environment_plan.motion.path, extent);
+    let placement = swept_mover_placement(epoch.collision, mover, environment_plan)?;
+    let candidates = epoch
+        .index
+        .candidates(mover.id, anchor, minimum, maximum, &placement);
 
     let mut selected = None::<SelectedBlockingContact>;
     let mut sampled_report_touches = Vec::new();
     let mut accepted_fraction = 1.0_f32;
     for peer_id in candidates {
-        let Some(peer) = participants.get(&peer_id) else {
+        let Some(peer) = epoch.participants.get(&peer_id) else {
             continue;
         };
         let peer_dynamic = peer
@@ -131,10 +150,13 @@ pub(crate) fn resolve_dynamic_contacts(
 
         let pair = PairTrajectories::new(
             mover,
-            commit,
+            environment_plan,
             peer,
-            movers.get(&peer_id).map(|mover| &mover.environment_plan),
-            delta_seconds,
+            epoch
+                .trajectories
+                .get(&peer_id)
+                .map(|mover| &mover.environment_plan),
+            epoch.delta_seconds,
             anchor,
         )?;
         if !pair.swept_bounds_overlap()? {
@@ -188,24 +210,33 @@ pub(crate) fn resolve_dynamic_contacts(
 
     let selected = selected.filter(|contact| contact.fraction <= accepted_fraction);
     let Some(selected) = selected else {
-        if accepted_fraction < 1.0 {
-            apply_budgeted_prefix(
-                collision,
-                mover,
-                commit,
-                actuation,
-                delta_seconds,
-                accepted_fraction,
-            )?;
-        }
+        let replacement_plan = (accepted_fraction < 1.0)
+            .then(|| {
+                budgeted_prefix_plan(
+                    epoch.collision,
+                    mover,
+                    actuation,
+                    epoch.delta_seconds,
+                    accepted_fraction,
+                )
+            })
+            .transpose()?;
         return Ok(DynamicContactResolution {
+            replacement_plan,
             response: None,
             report_touches: accepted_report_touches(sampled_report_touches, accepted_fraction),
         });
     };
     let report_touches = accepted_report_touches(sampled_report_touches, selected.fraction);
-    apply_blocking_contact(collision, mover, commit, actuation, delta_seconds, selected)?;
+    let replacement_plan = blocking_contact_plan(
+        epoch.collision,
+        mover,
+        actuation,
+        epoch.delta_seconds,
+        selected,
+    )?;
     Ok(DynamicContactResolution {
+        replacement_plan: Some(replacement_plan),
         response: Some(DynamicResponseContact {
             peer: selected.peer,
             state_change: selected.clears_projectile_state.then_some(
@@ -440,18 +471,17 @@ impl<'a> PairTrajectories<'a> {
     }
 }
 
-fn apply_budgeted_prefix(
+fn budgeted_prefix_plan(
     collision: &CollisionScene,
     mover: &SpatialBody,
-    commit: &mut PhysicalBodyTickCommit,
     actuation: &PhysicalBodyActuation,
     delta_seconds: f32,
     accepted_fraction: f32,
-) -> Result<()> {
-    let partial = solve_physical_body_tick(
+) -> Result<PhysicalBodyTickCommit> {
+    let mut partial = solve_physical_body_tick(
         collision,
         mover,
-        actuation.clone(),
+        actuation,
         delta_seconds * accepted_fraction,
     )?;
     let endpoint = partial.motion.path.final_point().center();
@@ -496,10 +526,9 @@ fn apply_budgeted_prefix(
         &waypoints,
         false,
     )?;
-    *commit = partial;
-    commit.motion.path = path;
-    commit.motion.status = super::PhysicalBodyTickStatus::SubstepBudgetExceeded;
-    Ok(())
+    partial.motion.path = path;
+    partial.motion.status = super::PhysicalBodyTickStatus::SubstepBudgetExceeded;
+    Ok(partial)
 }
 
 fn swept_mover_placement(
@@ -507,6 +536,8 @@ fn swept_mover_placement(
     mover: &SpatialBody,
     commit: &PhysicalBodyTickCommit,
 ) -> Result<SpatialMembership> {
+    // The selected plan retains every waypoint placement for later result publication while this
+    // fold independently owns the union used for broad-phase membership.
     let mut placement = commit.motion.path.initial().placement().clone();
     for leg in commit.motion.path.legs() {
         placement = placement.merge_reached(leg.end().placement().clone());
@@ -547,19 +578,18 @@ fn swept_mover_placement(
     Ok(placement)
 }
 
-fn apply_blocking_contact(
+fn blocking_contact_plan(
     collision: &CollisionScene,
     mover: &SpatialBody,
-    commit: &mut PhysicalBodyTickCommit,
     actuation: &PhysicalBodyActuation,
     delta_seconds: f32,
     selected: SelectedBlockingContact,
-) -> Result<()> {
+) -> Result<PhysicalBodyTickCommit> {
     let contact_fraction = selected
         .fraction
         .max((1.0 / MAXIMUM_DYNAMIC_SLICES as f32).min(1.0));
     let partial_seconds = delta_seconds * contact_fraction;
-    let partial = solve_physical_body_tick(collision, mover, actuation.clone(), partial_seconds)?;
+    let mut partial = solve_physical_body_tick(collision, mover, actuation, partial_seconds)?;
     let corrected = partial.motion.path.final_point().center()
         + selected.contact.normal * selected.contact.depth;
     let mut waypoints = partial
@@ -600,38 +630,31 @@ fn apply_blocking_contact(
         false,
     )?;
     let cell = corrected_path.final_point().placement().committed_cell();
-    commit.pose = partial.pose;
+    let mut pose = partial.pose;
     if let Some(cell) = cell {
-        commit.pose = anchor_point_to_cell_position(
+        pose = anchor_point_to_cell_position(
             corrected_path.anchor(),
             corrected,
             cell,
             partial.pose.rotation,
         );
     } else {
-        commit.pose.landblock_id = partial.motion.path.anchor();
-        commit.pose.coords = corrected;
-        commit.pose = commit
-            .pose
+        pose.landblock_id = partial.motion.path.anchor();
+        pose.coords = corrected;
+        pose = pose
             .normalize_outdoor_landblock_frame()
             .context("could not normalize dynamic contact endpoint")?;
     }
-    commit.velocity = dynamic_collision_velocity(
+    partial.pose = pose;
+    partial.velocity = dynamic_collision_velocity(
         partial.velocity,
         selected.peer_velocity,
         physical.response_policy.restitution,
         selected.contact.normal,
     );
-    commit.response = response_with_cell(partial.response, cell);
-    commit.contact = partial.contact;
-    commit.motion.path = corrected_path;
-    commit.motion.status = partial.motion.status;
-    commit.motion.constraint_count = partial.motion.constraint_count;
-    commit.motion.substeps = partial.motion.substeps;
-    commit.motion.contact_passes = partial.motion.contact_passes;
-    commit.environment_contact = partial.environment_contact;
-    commit.residual_contacts = partial.residual_contacts;
-    Ok(())
+    partial.response = response_with_cell(partial.response, cell);
+    partial.motion.path = corrected_path;
+    Ok(partial)
 }
 
 fn response_with_cell(

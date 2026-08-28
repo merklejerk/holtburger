@@ -339,7 +339,7 @@ impl WorldState {
         }
 
         let mut events = Vec::new();
-        Self::emit_runtime_body_changed(&mut events, body_id);
+        events.push(WorldEvent::RuntimeBodyAdvanced { body_id });
         if matches!(body_id, SpatialBodyId::LocalPlayer(_)) {
             let contact = self
                 .scene

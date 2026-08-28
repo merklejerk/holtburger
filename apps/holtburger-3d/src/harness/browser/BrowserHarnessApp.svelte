@@ -1583,7 +1583,7 @@
 			throw new Error("Entity tick duration must be positive and finite.");
 		const envelope = await entityHost.tick(durationMilliseconds);
 		if (envelope?.entityEvent) {
-			applyDynamicEntityAdvanceEvent(envelope.entityEvent);
+			applyDynamicEntityTickEvent(envelope.entityEvent);
 		}
 		return envelope;
 	}
@@ -1622,7 +1622,7 @@
 		const response = await entityHost.tickPossession(durationMilliseconds);
 		const receivedAtMs = performance.now();
 		if (response.envelope?.entityEvent) {
-			applyDynamicEntityAdvanceEvent(response.envelope.entityEvent);
+			applyDynamicEntityTickEvent(response.envelope.entityEvent);
 		}
 		if (response.envelope?.boom) {
 			boomCameraSession?.receive(
@@ -2095,14 +2095,14 @@
 				kind,
 			),
 		);
-		applyDynamicEntityAdvanceEvent(event);
+		applyDynamicEntityTickEvent(event);
 		return event;
 	}
 
-	function applyDynamicEntityAdvanceEvent(event: DynamicEntityEvent): void {
+	function applyDynamicEntityTickEvent(event: DynamicEntityEvent): void {
 		if (!runtime)
-			throw new Error("Dynamic-entity advance requires an active runtime.");
-		if (event.kind !== "advanced")
+			throw new Error("Dynamic-entity tick requires an active runtime.");
+		if (event.kind !== "ticked")
 			throw new Error(
 				`Dynamic-entity operation returned unexpected ${event.kind} event.`,
 			);
@@ -2115,7 +2115,7 @@
 					`Dynamic-entity operation returned unknown generation ${advance.entity.generation} for 0x${advance.entity.identity.guid.toString(16)}.`,
 				);
 		}
-		runtime.applyDynamicEntityAdvances(event.batch, performance.now());
+		runtime.applyDynamicEntityTick(event.batch, performance.now());
 		const advanced = new Map(
 			event.batch.advances.map((advance) => [
 				advance.entity.identity.guid,

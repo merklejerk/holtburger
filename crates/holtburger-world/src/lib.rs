@@ -86,8 +86,8 @@ pub use spatial::{
     solve_free_sphere, solve_grounded,
 };
 pub use state::{
-    MotionCommandKinematics, MotionTableMovementProfile, PlayerMotionTableLookupError,
-    PlayerMotionTableResolution, PlayerMotionTableSource, RequiredSelfMovementKinematics,
-    SelfMovementCapabilities, SelfMovementCapabilitiesError, SelfMovementKinematics,
-    SelfMovementKinematicsError,
+    BodyProjectionResolver, MotionCommandKinematics, MotionTableMovementProfile,
+    PlayerMotionTableLookupError, PlayerMotionTableResolution, PlayerMotionTableSource,
+    RequiredSelfMovementKinematics, SelfMovementCapabilities, SelfMovementCapabilitiesError,
+    SelfMovementKinematics, SelfMovementKinematicsError,
 };

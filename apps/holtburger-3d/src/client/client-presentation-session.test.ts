@@ -4,7 +4,7 @@ import type { ActiveRegionSource } from "../lib/assets/active-region-source";
 import type { LandblockProfileSource } from "../lib/assets/landblock-profile-source";
 import {
 	cellId,
-	type DynamicEntityAdvanceBatch,
+	type DynamicEntityTickBatch,
 	type DynamicEntityView,
 } from "../lib/game/runtime/dynamic-entity-feed";
 import { Mat4, Vec3 } from "../lib/game/math/types";
@@ -22,7 +22,7 @@ import type {
 	SceneActivationRequest,
 	SceneActivationStatus,
 } from "../lib/game/runtime/scene-availability";
-import type { DynamicEntityReconciliationDisposition } from "../lib/game/runtime/dynamic-entity-presentation";
+import type { DynamicEntityRealizationDisposition } from "../lib/game/runtime/dynamic-entity-presentation";
 import {
 	ClientPresentationSession,
 	resolveClientEnvironmentSelection,
@@ -153,7 +153,7 @@ describe("ClientPresentationSession", () => {
 		const lifecycle = new ClientLifecycleSession(transport);
 		await lifecycle.start();
 		const runtime = new FakePresentationRuntime();
-		runtime.reconciliationDisposition = "deferred";
+		runtime.realizationDisposition = "deferred";
 		const presentation = new ClientPresentationSession({
 			canvas: fakeCanvas(),
 			hostTransport: {} as never,
@@ -165,18 +165,20 @@ describe("ClientPresentationSession", () => {
 		presentation.frame(1_000);
 		await vi.waitFor(() => expect(runtime.sceneRequests).toHaveLength(1));
 		presentation.frame(1_016);
-		await vi.waitFor(() => expect(runtime.reconciled).toHaveLength(1));
+		await vi.waitFor(() =>
+			expect(runtime.snapshotReplacements).toHaveLength(1),
+		);
 		expect(presentation.frame(1_032).status.kind).toBe("loading-player");
 		expect(transport.acknowledgedWorldReveals).toEqual([]);
 		transport.emit("client-dynamic-entity", {
-			kind: "advanced",
+			kind: "ticked",
 			batch: advanceBatch(playerGuid),
 		});
 		await vi.waitFor(() => expect(runtime.advances).toHaveLength(1));
-		expect(runtime.reconciled).toHaveLength(1);
+		expect(runtime.snapshotReplacements).toHaveLength(1);
 		const eligibilityReevaluationsBefore = runtime.eligibilityReevaluationCount;
 
-		runtime.reconciliationDisposition = "installed";
+		runtime.realizationDisposition = "installed";
 		transport.emit("client-dynamic-entity", {
 			kind: "upserted",
 			entity: view(playerGuid, 0x0100_0001),
@@ -200,7 +202,7 @@ describe("ClientPresentationSession", () => {
 		await presentation.destroy();
 	});
 
-	it("reconciles snapshots, forwards authority batches, and follows residency targets", async () => {
+	it("replaces snapshots, forwards authority batches, and follows residency targets", async () => {
 		const transport = new FakeClientTransport(currentState(0x0101_0001));
 		const lifecycle = new ClientLifecycleSession(transport);
 		await lifecycle.start();
@@ -214,9 +216,9 @@ describe("ClientPresentationSession", () => {
 		});
 
 		await presentation.start();
-		expect(runtime.reconciled).toHaveLength(1);
+		expect(runtime.snapshotReplacements).toHaveLength(1);
 		expect(
-			runtime.reconciled[0]?.map((entity) => entity.identity.guid),
+			runtime.snapshotReplacements[0]?.map((entity) => entity.identity.guid),
 		).toEqual([0x0101_0001]);
 
 		const firstFrame = presentation.frame(1_000);
@@ -234,7 +236,7 @@ describe("ClientPresentationSession", () => {
 		expect(runtime.audioListeners).toHaveLength(2);
 
 		const batch = advanceBatch(0x0101_0001);
-		transport.emit("client-dynamic-entity", { kind: "advanced", batch });
+		transport.emit("client-dynamic-entity", { kind: "ticked", batch });
 		await vi.waitFor(() => expect(runtime.advances).toHaveLength(1));
 		expect(runtime.advances[0]?.batch).toEqual(batch);
 		expect(runtime.advances[0]?.receivedAtMs).toBeTypeOf("number");
@@ -246,7 +248,7 @@ describe("ClientPresentationSession", () => {
 		await vi.waitFor(() => expect(runtime.clearCount).toBe(1));
 		const teleport = advanceBatch(0x0101_0001, 0x0100_0001, "teleport", 77);
 		transport.emit("client-dynamic-entity", {
-			kind: "advanced",
+			kind: "ticked",
 			batch: teleport,
 		});
 		await vi.waitFor(() => expect(runtime.advances).toHaveLength(2));
@@ -276,7 +278,7 @@ describe("ClientPresentationSession", () => {
 		});
 
 		await presentation.start();
-		expect(runtime.reconciled).toHaveLength(1);
+		expect(runtime.snapshotReplacements).toHaveLength(1);
 		for (const guid of [0x0101_0002, 0x0101_0003, 0x0101_0004]) {
 			transport.emit("client-dynamic-entity", {
 				kind: "upserted",
@@ -285,7 +287,7 @@ describe("ClientPresentationSession", () => {
 		}
 		await vi.waitFor(() => expect(runtime.upserted).toHaveLength(3));
 
-		expect(runtime.reconciled).toHaveLength(1);
+		expect(runtime.snapshotReplacements).toHaveLength(1);
 		expect(runtime.upserted.map((entity) => entity.identity.guid)).toEqual([
 			0x0101_0002, 0x0101_0003, 0x0101_0004,
 		]);
@@ -311,7 +313,7 @@ describe("ClientPresentationSession", () => {
 		const requestsBefore = runtime.advances.length;
 		await lifecycle.requestCurrentState();
 		await vi.waitFor(() =>
-			expect(runtime.reconciled.length).toBeGreaterThan(1),
+			expect(runtime.snapshotReplacements.length).toBeGreaterThan(1),
 		);
 		expect(runtime.advances).toHaveLength(requestsBefore);
 		expect(presentation.frame(1_016).status.kind).toBe("loading-player");
@@ -416,7 +418,7 @@ class FakeClientTransport implements ClientLifecycleTransport {
 		if (command !== "request_client_current_state") return;
 		if (this.#emitLaggedAdvance) {
 			this.emit("client-dynamic-entity", {
-				kind: "advanced",
+				kind: "ticked",
 				batch: advanceBatch(this.#currentState.localPlayerGuid ?? 0),
 			});
 		}
@@ -473,12 +475,11 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 	readonly mapGeometry = { revision: 0 } as MapTerrainSource["mapGeometry"];
 	readonly terrainInstallationRevision = 0;
 	readonly dynamicEntityPlacementRevision = 0;
-	reconciled: DynamicEntityView[][] = [];
+	snapshotReplacements: DynamicEntityView[][] = [];
 	upserted: DynamicEntityView[] = [];
 	removed: Array<{ guid: number; generation: number }> = [];
 	eligibilityReevaluationCount = 0;
-	advances: Array<{ batch: DynamicEntityAdvanceBatch; receivedAtMs: number }> =
-		[];
+	advances: Array<{ batch: DynamicEntityTickBatch; receivedAtMs: number }> = [];
 	sceneRequests: SceneInterestRequest[] = [];
 	primaryViews: unknown[] = [];
 	audioListeners: unknown[] = [];
@@ -486,22 +487,21 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 	clearCount = 0;
 	portalTransitions: unknown[] = [];
 	completedActivations: number[] = [];
-	reconciliationDisposition: DynamicEntityReconciliationDisposition =
-		"installed";
+	realizationDisposition: DynamicEntityRealizationDisposition = "installed";
 	#activationRevision = 0;
 	readonly #desired = new Map<number, DynamicEntityView>();
 
 	async replaceDynamicEntitySnapshot(
 		entities: readonly DynamicEntityView[],
 	): ReturnType<ClientPresentationRuntime["replaceDynamicEntitySnapshot"]> {
-		this.reconciled.push([...entities]);
+		this.snapshotReplacements.push([...entities]);
 		this.#desired.clear();
 		for (const entity of entities)
 			this.#desired.set(entity.identity.guid, entity);
 		return new Map(
 			entities.map((entity) => [
 				entity.identity.guid,
-				this.reconciliationDisposition,
+				this.realizationDisposition,
 			]),
 		);
 	}
@@ -511,7 +511,7 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 	): ReturnType<ClientPresentationRuntime["upsertDynamicEntity"]> {
 		this.upserted.push(entity);
 		this.#desired.set(entity.identity.guid, entity);
-		return this.reconciliationDisposition;
+		return this.realizationDisposition;
 	}
 
 	removeDynamicEntity(guid: number, generation: number): void {
@@ -527,13 +527,13 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 		return new Map(
 			[...this.#desired.values()].map((entity) => [
 				entity.identity.guid,
-				this.reconciliationDisposition,
+				this.realizationDisposition,
 			]),
 		);
 	}
 
-	applyDynamicEntityAdvances(
-		batch: DynamicEntityAdvanceBatch,
+	applyDynamicEntityTick(
+		batch: DynamicEntityTickBatch,
 		receivedAtMs: number,
 	): void {
 		this.advances.push({ batch, receivedAtMs });
@@ -594,7 +594,7 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 	dynamicEntityOrigin(): ReturnType<
 		ClientPresentationRuntime["dynamicEntityOrigin"]
 	> {
-		if (this.reconciliationDisposition === "deferred") return null;
+		if (this.realizationDisposition === "deferred") return null;
 		return {
 			envCellId: null,
 			landblockId: "0x0100ffff",
@@ -794,7 +794,7 @@ function advanceBatch(
 	landblockId = 0x0101_0100,
 	kind: "integrated" | "teleport" | "reset" = "integrated",
 	hostTime = 76,
-): DynamicEntityAdvanceBatch {
+): DynamicEntityTickBatch {
 	const entity = view(guid, landblockId);
 	if (entity.placement.kind !== "world")
 		throw new Error("test view must be world placed");
@@ -812,5 +812,6 @@ function advanceBatch(
 				path: { initial: endpoint, legs: [{ endFraction: 1, end: endpoint }] },
 			},
 		],
+		updates: [],
 	};
 }

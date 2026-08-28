@@ -12,13 +12,13 @@ import type {
 } from "./dynamic-entity-feed";
 import type { SceneScope, SceneSpatialPlacement } from "../scene";
 
-/** Runtime disposition of one entity retained by the latest authoritative snapshot. */
-export type DynamicEntityReconciliationDisposition = "installed" | "deferred";
+/** Runtime realization state of one accepted entity level. */
+export type DynamicEntityRealizationDisposition = "installed" | "deferred";
 
-/** Per-entity result of reconciling one complete authoritative dynamic snapshot. */
-export type DynamicEntityReconciliation = ReadonlyMap<
+/** Per-entity realization result produced at an explicit population/readiness boundary. */
+export type DynamicEntityRealizationResults = ReadonlyMap<
 	number,
-	DynamicEntityReconciliationDisposition
+	DynamicEntityRealizationDisposition
 >;
 
 /** Join one host-projected live entity with its separately resolved immutable visual closure. */

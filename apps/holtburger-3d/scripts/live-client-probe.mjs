@@ -15,6 +15,7 @@ import {
 	probeError,
 	redactProbeText,
 } from "./live-client-probe-report.mjs";
+import { acknowledgeProbeWorldReveal } from "./live-client-probe-lifecycle.mjs";
 
 const DEFAULT_OBSERVATION_MS = 5_000;
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -215,8 +216,11 @@ function entitiesInPayload(event, payload) {
 	if (payload?.kind === "snapshot") return payload.snapshot?.entities ?? [];
 	if (payload?.kind === "upserted")
 		return payload.entity ? [payload.entity] : [];
-	if (payload?.kind === "advanced") {
-		return payload.batch?.advances?.map((advance) => advance.entity) ?? [];
+	if (payload?.kind === "ticked") {
+		return [
+			...(payload.batch?.advances?.map((advance) => advance.entity) ?? []),
+			...(payload.batch?.updates ?? []),
+		];
 	}
 	return [];
 }
@@ -345,9 +349,12 @@ async function main() {
 						}
 					} else if (payload?.kind === "upserted") {
 						latestEntities.set(payload.entity.identity.guid, payload.entity);
-					} else if (payload?.kind === "advanced") {
+					} else if (payload?.kind === "ticked") {
 						for (const advance of payload.batch?.advances ?? []) {
 							latestEntities.set(advance.entity.identity.guid, advance.entity);
+						}
+						for (const entity of payload.batch?.updates ?? []) {
+							latestEntities.set(entity.identity.guid, entity);
 						}
 					} else if (payload?.kind === "removed") {
 						latestEntities.delete(payload.guid);
@@ -419,12 +426,116 @@ async function main() {
 			"local-player establishment",
 		);
 		void localPlayerPromise.catch(() => undefined);
+		const portalSpacePromise = waiter.wait(
+			"client-lifecycle-changed",
+			(payload) => payload?.kind === "portal-space",
+			timeoutMs,
+			"portal-space lifecycle",
+		);
+		void portalSpacePromise.catch(() => undefined);
 		await client.invoke("select_client_character", { guid: selected.guid });
 		lastCompletedPhase = "character-selection-requested";
-		await inWorldPromise;
+		const portalSpace = await portalSpacePromise;
+		lastCompletedPhase = "portal-space-received";
 		const { playerGuid } = await localPlayerPromise;
-		lastCompletedPhase = "in-world-established";
+		lastCompletedPhase = "local-player-established";
 		census.setFocusGuid(playerGuid);
+		const portalStatePromise = waiter.wait(
+			"client-current-state",
+			(payload) =>
+				payload?.lifecycle?.kind === "portal-space" &&
+				payload.lifecycle.worldGeneration === portalSpace.worldGeneration,
+			timeoutMs,
+			"portal-space current state",
+		);
+		void portalStatePromise.catch(() => undefined);
+		await client.invoke("request_client_current_state");
+		const portalState = await portalStatePromise;
+		lastCompletedPhase = "portal-state-received";
+		if (portalState.localPlayerGuid !== playerGuid) {
+			throw new Error(
+				"portal state disagreed with established local-player identity",
+			);
+		}
+		let player = portalState.dynamic?.entities?.find(
+			(entity) => entity.identity?.guid === playerGuid,
+		);
+		player ??= latestEntities.get(playerGuid);
+		if (player === undefined) {
+			const playerEventPromise = waiter.wait(
+				"client-dynamic-entity",
+				(payload) =>
+					(payload?.kind === "upserted" &&
+						payload.entity?.identity?.guid === playerGuid) ||
+					(payload?.kind === "ticked" &&
+						(payload.batch?.advances?.some(
+							(advance) => advance.entity?.identity?.guid === playerGuid,
+						) ||
+							payload.batch?.updates?.some(
+								(entity) => entity?.identity?.guid === playerGuid,
+							))),
+				timeoutMs,
+				"local-player dynamic entity",
+			);
+			void playerEventPromise.catch(() => undefined);
+			const event = await playerEventPromise;
+			player =
+				event.kind === "upserted"
+					? event.entity
+					: (event.batch.advances.find(
+							(advance) => advance.entity.identity.guid === playerGuid,
+						)?.entity ??
+						event.batch.updates.find(
+							(entity) => entity.identity.guid === playerGuid,
+						));
+		}
+		if (player?.placement?.kind !== "world") {
+			throw new Error(
+				"local player has no world placement for the portal-space camera",
+			);
+		}
+		census.seedFocusEntity(player);
+		const cameraStartedPromise = waiter.wait(
+			"client-camera-started",
+			(payload) =>
+				payload?.playerGuid === playerGuid &&
+				payload.entityGeneration === player.generation,
+			timeoutMs,
+			"portal-space camera registration",
+		);
+		void cameraStartedPromise.catch(() => undefined);
+		const cameraPathPromise = waiter.wait(
+			"client-camera",
+			(payload) =>
+				payload?.playerGuid === playerGuid &&
+				payload.entityGeneration === player.generation &&
+				payload.diagnostics?.collisionProof?.status === "covered",
+			timeoutMs,
+			"first collision-backed portal-space camera path",
+		);
+		void cameraPathPromise.catch(() => undefined);
+		await client.invoke("start_client_camera", {
+			request: {
+				playerGuid,
+				entityGeneration: player.generation,
+				initialReach: 4.5,
+				minimumReach: 1.2,
+				maximumReach: 8,
+				inputSequence: 1,
+				viewDirection: [0, -0.2, -1],
+				cumulativeZoomDisplacement: 0,
+				projectionRevision: 1,
+				clearanceRadius: 0.2,
+			},
+		});
+		await cameraStartedPromise;
+		lastCompletedPhase = "portal-camera-registered";
+		await cameraPathPromise;
+		lastCompletedPhase = "portal-camera-path-received";
+		await acknowledgeProbeWorldReveal(client, portalSpace);
+		lastCompletedPhase = "world-reveal-acknowledged";
+		await inWorldPromise;
+		lastCompletedPhase = "in-world-established";
 
 		const currentStatePromise = waiter.wait(
 			"client-current-state",
@@ -441,56 +552,11 @@ async function main() {
 				"current state disagreed with established local-player identity",
 			);
 		}
-		let player = currentState.dynamic?.entities?.find(
+		player = currentState.dynamic?.entities?.find(
 			(entity) => entity.identity?.guid === playerGuid,
 		);
-		if (player === undefined) {
-			const playerEventPromise = waiter.wait(
-				"client-dynamic-entity",
-				(payload) =>
-					(payload?.kind === "upserted" &&
-						payload.entity?.identity?.guid === playerGuid) ||
-					(payload?.kind === "advanced" &&
-						payload.batch?.advances?.some(
-							(advance) => advance.entity?.identity?.guid === playerGuid,
-						)),
-				timeoutMs,
-				"local-player dynamic entity",
-			);
-			void playerEventPromise.catch(() => undefined);
-			const event = await playerEventPromise;
-			player =
-				event.kind === "upserted"
-					? event.entity
-					: event.batch.advances.find(
-							(advance) => advance.entity.identity.guid === playerGuid,
-						)?.entity;
-		}
 		player ??= latestEntities.get(playerGuid);
 		if (player !== undefined) census.seedFocusEntity(player);
-		let cameraStartError = null;
-		if (player?.placement?.kind === "world") {
-			try {
-				await client.invoke("start_client_camera", {
-					request: {
-						playerGuid,
-						entityGeneration: player.generation,
-						initialReach: 4.5,
-						minimumReach: 1.2,
-						maximumReach: 8,
-						inputSequence: 1,
-						viewDirection: [0, -0.2, -1],
-						cumulativeZoomDisplacement: 0,
-						projectionRevision: 1,
-						clearanceRadius: 0.2,
-					},
-				});
-			} catch (error) {
-				cameraStartError = safeError(error);
-			}
-		}
-		lastCompletedPhase = "camera-start-attempted";
-
 		let driveError = null;
 		try {
 			await client.invoke("replace_client_drive", {
@@ -527,7 +593,6 @@ async function main() {
 			},
 			lifecycle,
 			camera: {
-				startError: cameraStartError,
 				eventCount: cameras.length,
 			},
 			driveError,

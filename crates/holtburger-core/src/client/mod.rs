@@ -323,8 +323,15 @@ impl ClientRuntime {
                 .is_some_and(|body| body.physical.is_some());
         let containment_ready = self.world.all_player_contained_objects_exist();
         let reveal_ready = activation.external_reveal_generation == Some(activation.generation);
+        let destination_scene_ready = self
+            .collision_coordinator
+            .as_ref()
+            .is_some_and(|coordinator| coordinator.destination_scene_ready(destination.residency));
 
-        if !activation.camera_seed_ready {
+        // Body preparation and static residency complete independently. A registered camera may
+        // arrive before either worker; seeding it against the retained prior/empty scene would
+        // turn ordinary asynchronous loading into a terminal missing-cell failure.
+        if body_ready && destination_scene_ready && !activation.camera_seed_ready {
             let collision_snapshot = self
                 .collision_coordinator
                 .as_ref()
@@ -335,7 +342,12 @@ impl ClientRuntime {
             }
         }
 
-        if !body_ready || !containment_ready || !activation.camera_seed_ready || !reveal_ready {
+        if !body_ready
+            || !destination_scene_ready
+            || !containment_ready
+            || !activation.camera_seed_ready
+            || !reveal_ready
+        {
             self.activation = Some(activation);
             return Ok(());
         }
@@ -816,6 +828,7 @@ impl ClientRuntime {
                     self.emit_dynamic_entity_upsert(guid);
                 }
             }
+            WorldEvent::RuntimeBodyAdvanced { .. } => {}
             WorldEvent::RuntimeBodyRemoved { body_id } => {
                 let _ = self
                     .client_view_event_tx
@@ -951,12 +964,12 @@ mod tests {
             movement,
             response_policy,
             entity_collision: DynamicBodyCollisionDefinition {
-                target_geometry: PreparedEntityTargetGeometry {
+                target_geometry: Arc::new(PreparedEntityTargetGeometry {
                     physics_bsp_parts: Vec::new(),
                     fallback_setup_did: 0,
                     fallback_shapes: Vec::new(),
                     fallback_scale: ColliderScale::uniform(1.0).unwrap(),
-                },
+                }),
                 scheduling: EntityPhysicsScheduling::Eligible,
                 dynamic_collision: EntityDynamicCollisionPolicy {
                     target: EntityCollisionParticipation::Solid,
@@ -1878,7 +1891,7 @@ mod tests {
         );
         assert!(events.iter().any(|event| matches!(
             event,
-            WorldEvent::RuntimeBodyChanged { body_id: event_id } if *event_id == body_id
+            WorldEvent::RuntimeBodyAdvanced { body_id: event_id } if *event_id == body_id
         )));
     }
 

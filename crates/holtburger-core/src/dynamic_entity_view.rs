@@ -347,28 +347,53 @@ impl From<MotionClipCompletion> for DynamicEntityClipCompletion {
 /// At most one ordered changed-entity publication for one host fixed tick.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DynamicEntityAdvanceBatch {
+pub struct DynamicEntityTickBatch {
     /// Host instant at which this fixed tick completed.
     pub host_time: DynamicEntityHostTime,
     /// Positive integrated playback duration, or zero for correction-only snap batches.
     pub duration_ms: f64,
-    /// Changed current generations in stable GUID order.
+    /// Entities whose accepted root path changed, in stable GUID order.
     pub advances: Vec<DynamicEntityAdvance>,
+    /// Path-stable entities whose remaining frontend-reconstructible level changed.
+    pub updates: Vec<Box<DynamicEntityView>>,
 }
 
-impl DynamicEntityAdvanceBatch {
-    /// Establishes stable publication order without creating retained delivery history.
+impl DynamicEntityTickBatch {
+    /// Establishes one nonempty, disjoint, stable publication without retained delivery history.
     pub fn new(
         host_time: DynamicEntityHostTime,
         duration_ms: f64,
         mut advances: Vec<DynamicEntityAdvance>,
-    ) -> Self {
+        mut updates: Vec<Box<DynamicEntityView>>,
+    ) -> Option<Self> {
         advances.sort_by_key(|advance| advance.entity.identity.guid);
-        Self {
+        updates.sort_by_key(|entity| entity.identity.guid);
+        assert!(
+            advances
+                .windows(2)
+                .all(|pair| pair[0].entity.identity.guid != pair[1].entity.identity.guid),
+            "dynamic tick contains duplicate advance GUIDs"
+        );
+        assert!(
+            updates
+                .windows(2)
+                .all(|pair| pair[0].identity.guid != pair[1].identity.guid),
+            "dynamic tick contains duplicate update GUIDs"
+        );
+        assert!(
+            !advances.iter().any(|advance| updates
+                .binary_search_by_key(&advance.entity.identity.guid, |entity| {
+                    entity.identity.guid
+                })
+                .is_ok()),
+            "dynamic tick GUID cannot be both advanced and updated"
+        );
+        (!advances.is_empty() || !updates.is_empty()).then_some(Self {
             host_time,
             duration_ms,
             advances,
-        }
+            updates,
+        })
     }
 }
 
@@ -383,7 +408,7 @@ pub enum DynamicEntityEvent {
     Snapshot { snapshot: DynamicEntitySnapshot },
     Upserted { entity: Box<DynamicEntityView> },
     Removed { guid: Guid, generation: u64 },
-    Advanced { batch: DynamicEntityAdvanceBatch },
+    Ticked { batch: DynamicEntityTickBatch },
 }
 
 /// Projects one semantic/body join without consulting either producer registry.

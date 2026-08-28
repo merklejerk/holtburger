@@ -6,8 +6,8 @@ use super::collision_report::{
     CollisionReportSource, CollisionReportTouch,
 };
 use super::dynamic_contact::{
-    DynamicContactResolution, DynamicEpochParticipant, PreparedDynamicMover,
-    resolve_dynamic_contacts,
+    DynamicContactEpoch, DynamicContactResolution, DynamicEpochParticipant, DynamicResponseContact,
+    PreparedDynamicTrajectory, resolve_dynamic_contacts,
 };
 use super::dynamic_index::DynamicShadowIndex;
 use super::{
@@ -67,18 +67,25 @@ pub struct PreparedDynamicEntityCollection {
 /// One invariant-bearing dynamic collection epoch retained until every mover is attempted.
 #[derive(Debug, Clone)]
 struct PreparedDynamicEntityEpoch {
-    /// Immutable broad-phase membership compiled from the captured participant population.
-    targets: DynamicShadowIndex,
-    /// Stable tick-start body levels used by every directional peer solve.
+    /// Stable tick-start body levels retained for exact pre-commit currentness checks.
     participants: BTreeMap<SpatialBodyId, DynamicEpochParticipant>,
-    /// Stable ordered mover inputs and environment plans computed during preparation.
+    /// Stable ordered mover plans and peer consequences not yet attempted.
     movers: BTreeMap<SpatialBodyId, PreparedDynamicMover>,
-    /// Scheduled movers not yet attempted by the collection consumer.
-    pending: HashSet<SpatialBodyId>,
     /// Body-local preparation failures retained with the epoch that produced them.
     coverage_rejections: Vec<DynamicEntityCollectionCoverageRejection>,
-    /// Fixed interval used to prepare every mover and sample every peer trajectory.
-    delta_seconds: f32,
+}
+
+/// One mover's fully resolved plan ready to move into canonical finalization.
+#[derive(Debug, Clone)]
+struct PreparedDynamicMover {
+    /// Full-duration environment plan or the distinct bounded plan selected by peer response.
+    plan: super::physical_body::PhysicalBodyTickCommit,
+    /// Existing derived work fact consumed by the dynamic settling decision.
+    actuation_permits_settling: bool,
+    /// Optional peer whose accepted response wakes it after this commit.
+    response: Option<DynamicResponseContact>,
+    /// Directional report touches confirmed within the selected plan duration.
+    report_touches: Vec<CollisionReportTouch>,
 }
 
 impl PreparedDynamicEntityEpoch {
@@ -185,7 +192,6 @@ fn accepted_dynamic_tick_is_stable(
         && body.velocity == Vector3::zero()
         && body.acceleration == Vector3::zero()
         && body.omega == Vector3::zero()
-        && body.motion_state.is_none()
         && physical.response == *previous_response
         && matches!(
             physical.response,
@@ -296,7 +302,23 @@ struct PhysicalBodyTickRequest<'a> {
     actuation: PhysicalBodyActuation,
     delta_seconds: f32,
     now: Instant,
-    dynamic_contacts: bool,
+}
+
+/// Complete tentative consequence shared by callback and prepared-plan finalization paths.
+struct TentativePhysicalBodyTick {
+    body: SpatialBody,
+    result: PhysicalBodyTickResult,
+    report_touches: Vec<CollisionReportTouch>,
+    wake_peer: Option<SpatialBodyId>,
+}
+
+/// One solved body plus the derived consequences required for tentative publication.
+struct PhysicalBodyCommitInput {
+    body: SpatialBody,
+    commit: super::physical_body::PhysicalBodyTickCommit,
+    actuation_permits_settling: bool,
+    dynamic_response: Option<DynamicResponseContact>,
+    report_touches: Vec<CollisionReportTouch>,
 }
 
 #[derive(Clone)]
@@ -465,19 +487,17 @@ impl SpatialScene {
                     .and_then(|physical| physical.dynamic.as_ref())
                     .is_some()
             })
-            .map(|body| {
-                (
-                    body.id,
-                    DynamicEpochParticipant { body: body.clone() },
-                )
-            })
+            // Canonical bodies must remain installed while every directional query reads this
+            // immutable tick start. Shared target geometry avoids duplicating its immutable
+            // vectors into every captured body.
+            .map(|body| (body.id, DynamicEpochParticipant { body: body.clone() }))
             .collect::<BTreeMap<_, _>>();
-        let mut movers = BTreeMap::new();
+        let mut trajectories = BTreeMap::new();
         for body_id in scheduled {
             let body = &participants[&body_id].body;
             let actuation = actuation_for(body)?;
             let environment_plan =
-                match solve_physical_body_tick(collision, body, actuation.clone(), delta_seconds) {
+                match solve_physical_body_tick(collision, body, &actuation, delta_seconds) {
                     Ok(environment_plan) => environment_plan,
                     Err(error) => match error.downcast_ref::<CollisionQueryError>() {
                         Some(CollisionQueryError::UnavailableOwner { owner }) => {
@@ -490,42 +510,90 @@ impl SpatialScene {
                         Some(_) | None => return Err(error),
                     },
                 };
-            movers.insert(
+            trajectories.insert(
                 body_id,
-                PreparedDynamicMover {
+                PreparedDynamicTrajectory {
                     actuation,
                     environment_plan,
                 },
             );
         }
+        let mut resolutions = BTreeMap::new();
+        let contact_epoch = DynamicContactEpoch {
+            collision,
+            index: &next,
+            participants: &participants,
+            trajectories: &trajectories,
+            delta_seconds,
+        };
+        for body_id in trajectories.keys() {
+            match resolve_dynamic_contacts(contact_epoch, *body_id) {
+                Ok(resolution) => {
+                    resolutions.insert(*body_id, resolution);
+                }
+                Err(error) => match error.downcast_ref::<CollisionQueryError>() {
+                    Some(CollisionQueryError::UnavailableOwner { owner }) => {
+                        coverage_rejections.push(DynamicEntityCollectionCoverageRejection {
+                            body_id: *body_id,
+                            owner: Guid(*owner),
+                        });
+                    }
+                    Some(_) | None => return Err(error),
+                },
+            }
+        }
+        let movers = trajectories
+            .into_iter()
+            .filter_map(|(body_id, trajectory)| {
+                let DynamicContactResolution {
+                    replacement_plan,
+                    response,
+                    report_touches,
+                } = resolutions.remove(&body_id)?;
+                let plan = replacement_plan.unwrap_or(trajectory.environment_plan);
+                Some((
+                    body_id,
+                    PreparedDynamicMover {
+                        plan,
+                        actuation_permits_settling: trajectory.actuation.permits_dynamic_settling(),
+                        response,
+                        report_touches,
+                    },
+                ))
+            })
+            .collect();
         coverage_rejections.sort_by_key(|rejection| rejection.body_id);
         let epoch = PreparedDynamicEntityEpoch {
-            pending: movers.keys().copied().collect(),
-            targets: next,
             participants,
             movers,
             coverage_rejections,
-            delta_seconds,
         };
         let collection = epoch.collection();
         self.dynamic_epoch = Some(epoch);
         Ok(collection)
     }
 
-    /// Queries the prepared tick-start target index with swept bounds and provisional domains.
-    pub fn dynamic_candidates_for_extent(
+    /// Queries the active epoch's target index for focused broad-phase tests.
+    #[cfg(test)]
+    fn dynamic_candidates_for_extent(
         &self,
         mover: SpatialBodyId,
         anchor: Guid,
         minimum: Vector3,
         maximum: Vector3,
         placement: &super::SpatialMembership,
-    ) -> Vec<SpatialBodyId> {
-        self.dynamic_epoch.as_ref().map_or_else(Vec::new, |epoch| {
+    ) -> anyhow::Result<Vec<SpatialBodyId>> {
+        let epoch = self
+            .dynamic_epoch
+            .as_ref()
+            .context("dynamic candidate query requested without an active prepared epoch")?;
+        let targets = DynamicShadowIndex::compile(
             epoch
-                .targets
-                .candidates(mover, anchor, minimum, maximum, placement)
-        })
+                .participants
+                .values()
+                .map(|participant| &participant.body),
+        )?;
+        Ok(targets.candidates(mover, anchor, minimum, maximum, placement))
     }
 
     /// Ends naturally expired report lifetimes after all movers in one collection were attempted.
@@ -541,7 +609,7 @@ impl SpatialScene {
             .as_ref()
             .context("dynamic collection finished without an active prepared epoch")?;
         anyhow::ensure!(
-            epoch.pending.is_empty(),
+            epoch.movers.is_empty(),
             "dynamic collection finished before every prepared mover was attempted"
         );
         self.dynamic_epoch = None;
@@ -944,41 +1012,36 @@ impl SpatialScene {
                 actuation,
                 delta_seconds,
                 now,
-                dynamic_contacts: false,
             },
             accept,
         )
     }
 
-    /// Solves one prepared dynamic mover against static and immutable tick-start peer geometry.
-    pub fn tick_dynamic_physical_body_transaction<T>(
+    /// Commits one mover whose environment and peer plans were sealed during epoch preparation.
+    pub fn tick_prepared_dynamic_physical_body(
         &mut self,
         body_id: SpatialBodyId,
         collision: &CollisionScene,
         now: Instant,
-        accept: impl FnOnce(&SpatialBody, &PhysicalBodyTickResult) -> anyhow::Result<T>,
-    ) -> anyhow::Result<(PhysicalBodyTickResult, T)> {
-        let epoch = self
-            .dynamic_epoch
-            .as_mut()
-            .context("dynamic body tick requested without an active prepared epoch")?;
-        anyhow::ensure!(epoch.pending.remove(&body_id),
-            "dynamic body {body_id:?} was not pending in the prepared collection epoch");
-        let mover = epoch
-            .movers
-            .get(&body_id)
-            .context("pending dynamic mover has no prepared inputs")?;
-        let actuation = mover.actuation.clone();
-        let delta_seconds = epoch.delta_seconds;
+    ) -> anyhow::Result<PhysicalBodyTickResult> {
+        let (prepared, captured) = {
+            let epoch = self
+                .dynamic_epoch
+                .as_mut()
+                .context("prepared dynamic body tick requested without an active epoch")?;
+            let prepared = epoch.movers.remove(&body_id).with_context(|| {
+                format!("dynamic body {body_id:?} was not pending in the prepared epoch")
+            })?;
+            let captured = epoch
+                .participants
+                .remove(&body_id)
+                .context("prepared dynamic mover has no tick-start participant")?;
+            (prepared, captured.body)
+        };
         let current = self
             .body_store
             .body(body_id)
-            .context("prepared dynamic mover vanished before its solve")?;
-        let captured = &epoch
-            .participants
-            .get(&body_id)
-            .context("prepared dynamic mover has no tick-start snapshot")?
-            .body;
+            .context("prepared dynamic mover vanished before finalization")?;
         anyhow::ensure!(
             current.pose == captured.pose
                 && current.velocity == captured.velocity
@@ -987,17 +1050,18 @@ impl SpatialScene {
                 && current.physical == captured.physical,
             "dynamic body {body_id:?} changed after collection preparation"
         );
-        self.tick_physical_body_transaction_inner(
-            PhysicalBodyTickRequest {
-                body_id,
-                collision,
-                actuation,
-                delta_seconds,
-                now,
-                dynamic_contacts: true,
+        let tentative = self.prepare_physical_body_commit(
+            collision,
+            PhysicalBodyCommitInput {
+                body: captured,
+                commit: prepared.plan,
+                actuation_permits_settling: prepared.actuation_permits_settling,
+                dynamic_response: prepared.response,
+                report_touches: prepared.report_touches,
             },
-            accept,
-        )
+            now,
+        )?;
+        Ok(self.publish_physical_body_commit(tentative, now))
     }
 
     fn tick_physical_body_transaction_inner<T>(
@@ -1011,13 +1075,44 @@ impl SpatialScene {
             actuation,
             delta_seconds,
             now,
-            dynamic_contacts,
         } = request;
         let body = self
             .body_store
             .body(body_id)
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("physical body {body_id:?} is not registered"))?;
+        let actuation_permits_settling = actuation.permits_dynamic_settling();
+        let commit = solve_physical_body_tick(collision, &body, &actuation, delta_seconds)?;
+        let tentative = self.prepare_physical_body_commit(
+            collision,
+            PhysicalBodyCommitInput {
+                body,
+                commit,
+                actuation_permits_settling,
+                dynamic_response: None,
+                report_touches: Vec::new(),
+            },
+            now,
+        )?;
+        let accepted = accept(&tentative.body, &tentative.result)?;
+        let result = self.publish_physical_body_commit(tentative, now);
+        Ok((result, accepted))
+    }
+
+    fn prepare_physical_body_commit(
+        &self,
+        collision: &CollisionScene,
+        input: PhysicalBodyCommitInput,
+        now: Instant,
+    ) -> anyhow::Result<TentativePhysicalBodyTick> {
+        let PhysicalBodyCommitInput {
+            body,
+            commit,
+            actuation_permits_settling,
+            dynamic_response,
+            mut report_touches,
+        } = input;
+        let body_id = body.id;
         let definition = body
             .physical
             .as_ref()
@@ -1027,37 +1122,7 @@ impl SpatialScene {
             .physical
             .as_ref()
             .expect("physical definition was just validated")
-            .response
-            .clone();
-        let actuation_permits_settling = actuation.permits_dynamic_settling();
-        let dynamic_actuation = dynamic_contacts.then(|| actuation.clone());
-        let mut commit = solve_physical_body_tick(collision, &body, actuation, delta_seconds)?;
-        let dynamic_resolution = if dynamic_contacts {
-            let epoch = self
-                .dynamic_epoch
-                .as_ref()
-                .context("dynamic body solve lost its prepared collection epoch")?;
-            anyhow::ensure!(epoch.participants.contains_key(&body_id),
-                "dynamic body {body_id:?} was not captured by the prepared collection epoch");
-            resolve_dynamic_contacts(
-                collision,
-                &epoch.targets,
-                &epoch.participants,
-                &epoch.movers,
-                &body,
-                &mut commit,
-                dynamic_actuation
-                    .as_ref()
-                    .expect("dynamic actuation was captured before solve"),
-                delta_seconds,
-            )?
-        } else {
-            DynamicContactResolution::default()
-        };
-        let DynamicContactResolution {
-            response: dynamic_response,
-            mut report_touches,
-        } = dynamic_resolution;
+            .response;
         if commit.environment_contact
             && body
                 .physical
@@ -1090,13 +1155,22 @@ impl SpatialScene {
                             | holtburger_common::properties::PhysicsState::PATH_CLIPPED,
                     })
             });
+        let super::physical_body::PhysicalBodyTickCommit {
+            pose,
+            velocity,
+            contact,
+            response,
+            motion,
+            environment_contact: _,
+            residual_contacts,
+        } = commit;
         let result = PhysicalBodyTickResult {
-            motion: commit.motion.clone(),
+            motion,
             scene_residency: physical_body_scene_residency(
                 collision,
-                commit.pose,
+                pose,
                 definition,
-                commit.response.cell(),
+                response.cell(),
             ),
             dynamic_state_change: projectile_state_change,
             collision_reports,
@@ -1104,14 +1178,14 @@ impl SpatialScene {
         let mut tentative = body;
         // The accepted pose is already final, physical omega included; re-integrating it here would
         // rotate the body twice.
-        tentative.pose = commit.pose;
-        tentative.velocity = commit.velocity;
-        tentative.contact = commit.contact;
+        tentative.pose = pose;
+        tentative.velocity = velocity;
+        tentative.contact = contact;
         let physical = tentative
             .physical
             .as_mut()
             .expect("physical definition vanished during single-threaded solve");
-        physical.response = commit.response;
+        physical.response = response;
         if result.dynamic_state_change.is_some() {
             physical.response_policy.align_path = false;
             let dynamic = physical
@@ -1126,7 +1200,7 @@ impl SpatialScene {
             &previous_response,
             &result,
             actuation_permits_settling,
-            commit.residual_contacts,
+            residual_contacts,
         );
         if let Some(dynamic) = tentative
             .physical
@@ -1152,14 +1226,32 @@ impl SpatialScene {
         }
         tentative.sampling.mode = SpatialSampleMode::SimulatingVelocity;
         tentative.sampling.last_derived_at = now;
-        let accepted = accept(&tentative, &result)?;
-        self.update_body(tentative)
+        Ok(TentativePhysicalBodyTick {
+            body: tentative,
+            result,
+            report_touches,
+            wake_peer: dynamic_response.map(|response| response.peer),
+        })
+    }
+
+    fn publish_physical_body_commit(
+        &mut self,
+        tentative: TentativePhysicalBodyTick,
+        now: Instant,
+    ) -> PhysicalBodyTickResult {
+        let TentativePhysicalBodyTick {
+            body,
+            result,
+            report_touches,
+            wake_peer,
+        } = tentative;
+        self.update_body(body)
             .expect("physical body vanished during single-threaded solve");
         self.collision_reports.commit_touches(&report_touches, now);
-        if let Some(response) = dynamic_response {
-            self.wake_dynamic_body(response.peer);
+        if let Some(peer) = wake_peer {
+            self.wake_dynamic_body(peer);
         }
-        Ok((result, accepted))
+        result
     }
 
     #[cfg(test)]
@@ -1174,6 +1266,11 @@ impl SpatialScene {
         sync: AuthoritativeBodySync,
         now: Instant,
     ) {
+        if matches!(sync, AuthoritativeBodySync::Reset) {
+            // A reset establishes a new temporal origin, so no plan captured before it remains
+            // eligible for commit. A later collection operation fails loudly until preparation.
+            self.dynamic_epoch = None;
+        }
         let mode = match sync {
             AuthoritativeBodySync::Snapshot => SpatialSampleMode::AuthoritativeOnly,
             AuthoritativeBodySync::Reset => SpatialSampleMode::Suspended,
@@ -1342,6 +1439,8 @@ impl SpatialScene {
     }
 
     pub fn suspend_runtime_bodies(&mut self, now: Instant) {
+        // Suspension invalidates every captured participant and prepared plan as one unit.
+        self.dynamic_epoch = None;
         let body_ids = self.body_store.bodies.keys().copied().collect::<Vec<_>>();
         for body_id in body_ids {
             let mut body = self
@@ -1547,7 +1646,7 @@ mod physical_body_tests {
                 ..stable_policy()
             },
             entity_collision: DynamicBodyCollisionDefinition {
-                target_geometry,
+                target_geometry: Arc::new(target_geometry),
                 scheduling: EntityPhysicsScheduling::Eligible,
                 dynamic_collision: EntityDynamicCollisionPolicy {
                     target: EntityCollisionParticipation::Solid,
@@ -1700,14 +1799,8 @@ mod physical_body_tests {
         let mut reports = Vec::new();
         for body_id in prepared.movers {
             let result = scene
-                .tick_dynamic_physical_body_transaction(
-                    body_id,
-                    collision,
-                    now,
-                    |_, _| Ok(()),
-                )
-                .unwrap()
-                .0;
+                .tick_prepared_dynamic_physical_body(body_id, collision, now)
+                .unwrap();
             reports.extend(result.collision_reports);
         }
         reports.extend(scene.finish_dynamic_entity_collection(now).unwrap());
@@ -1859,6 +1952,52 @@ mod physical_body_tests {
     }
 
     #[test]
+    fn standing_authoritative_motion_snapshot_does_not_prevent_settling() {
+        let collision = flat_collision_scene();
+        let now = Instant::now();
+        let id = SpatialBodyId::Entity(Guid(0x7000_0001));
+        let start = pose(Vector3::new(90.0, 96.0, 0.005));
+        let mut scene = SpatialScene::new();
+        scene.register_body(SpatialBody::new(id, start, now));
+        scene
+            .set_dynamic_physical_body(
+                id,
+                Some(dynamic_definition(grounded_definition(), false)),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+
+        scene
+            .tick_physical_body(
+                id,
+                &collision,
+                PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                0.1,
+                now + Duration::from_millis(100),
+            )
+            .unwrap();
+        scene.update_runtime_body_motion_state(id, Some(EntityMotionSnapshot::default()));
+
+        scene
+            .tick_physical_body(
+                id,
+                &collision,
+                PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                0.1,
+                now + Duration::from_millis(200),
+            )
+            .unwrap();
+
+        assert_eq!(dynamic_activity(&scene, id), DynamicBodyActivity::Settled);
+        assert!(scene.scheduled_dynamic_entity_ids().is_empty());
+        assert_eq!(
+            scene.body(id).unwrap().motion_state,
+            Some(EntityMotionSnapshot::default())
+        );
+    }
+
+    #[test]
     fn scene_publication_lazily_schedules_only_stale_static_support() {
         let collision = flat_collision_scene();
         let now = Instant::now();
@@ -1965,11 +2104,10 @@ mod physical_body_tests {
             .unwrap();
         let body_id = prepared.movers.into_iter().next().unwrap();
         scene
-            .tick_dynamic_physical_body_transaction(
+            .tick_prepared_dynamic_physical_body(
                 body_id,
                 &reintroduced,
                 now + Duration::from_millis(300),
-                |_, _| Ok(()),
             )
             .unwrap();
         scene
@@ -2021,11 +2159,10 @@ mod physical_body_tests {
         assert_eq!(dynamic_activity(&scene, id), DynamicBodyActivity::Active);
         let body_id = prepared.movers.into_iter().next().unwrap();
         scene
-            .tick_dynamic_physical_body_transaction(
+            .tick_prepared_dynamic_physical_body(
                 body_id,
                 &collision,
                 now + Duration::from_millis(200),
-                |_, _| Ok(()),
             )
             .unwrap();
         scene
@@ -2360,8 +2497,94 @@ mod physical_body_tests {
                     Vector3::new(1.0, 1.0, 1.0),
                     &crate::SpatialMembership::outdoor(),
                 )
+                .unwrap()
                 .len(),
             300
+        );
+    }
+
+    #[test]
+    fn dynamic_epoch_requires_one_complete_prepare_attempt_finish_lifecycle() {
+        let collision = flat_collision_scene();
+        let now = Instant::now();
+        let id = SpatialBodyId::Entity(Guid(0x7000_0001));
+        let mut scene = SpatialScene::new();
+        scene.register_body(SpatialBody::new(
+            id,
+            pose(Vector3::new(96.0, 96.0, 0.005)),
+            now,
+        ));
+        scene
+            .set_dynamic_physical_body(
+                id,
+                Some(dynamic_definition(grounded_definition(), false)),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+
+        let prepared = scene
+            .prepare_dynamic_entity_collection(&collision, 0.1, collection_actuation)
+            .unwrap();
+        assert_eq!(prepared.movers, [id]);
+        assert!(
+            scene
+                .prepare_dynamic_entity_collection(&collision, 0.1, collection_actuation)
+                .is_err()
+        );
+        assert!(scene.finish_dynamic_entity_collection(now).is_err());
+
+        scene
+            .tick_prepared_dynamic_physical_body(id, &collision, now + Duration::from_millis(100))
+            .unwrap();
+        scene
+            .finish_dynamic_entity_collection(now + Duration::from_millis(100))
+            .unwrap();
+        assert!(
+            scene
+                .finish_dynamic_entity_collection(now + Duration::from_millis(100))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn runtime_suspension_invalidates_the_complete_dynamic_epoch() {
+        let collision = flat_collision_scene();
+        let now = Instant::now();
+        let id = SpatialBodyId::Entity(Guid(0x7000_0001));
+        let mut scene = SpatialScene::new();
+        scene.register_body(SpatialBody::new(
+            id,
+            pose(Vector3::new(96.0, 96.0, 0.005)),
+            now,
+        ));
+        scene
+            .set_dynamic_physical_body(
+                id,
+                Some(dynamic_definition(grounded_definition(), false)),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+        scene
+            .prepare_dynamic_entity_collection(&collision, 0.1, collection_actuation)
+            .unwrap();
+
+        scene.suspend_runtime_bodies(now + Duration::from_millis(50));
+
+        assert!(
+            scene
+                .tick_prepared_dynamic_physical_body(
+                    id,
+                    &collision,
+                    now + Duration::from_millis(100)
+                )
+                .is_err()
+        );
+        assert!(
+            scene
+                .finish_dynamic_entity_collection(now + Duration::from_millis(100))
+                .is_err()
         );
     }
 
@@ -2405,13 +2628,15 @@ mod physical_body_tests {
             )
             .unwrap();
         assert_eq!(
-            scene.dynamic_candidates_for_extent(
-                SpatialBodyId::Entity(Guid(0x7000_0099)),
-                Guid(0xdb55_ffff),
-                Vector3::new(0.0, 11.0, 0.0),
-                Vector3::new(1.0, 13.0, 2.0),
-                &crate::SpatialMembership::outdoor(),
-            ),
+            scene
+                .dynamic_candidates_for_extent(
+                    SpatialBodyId::Entity(Guid(0x7000_0099)),
+                    Guid(0xdb55_ffff),
+                    Vector3::new(0.0, 11.0, 0.0),
+                    Vector3::new(1.0, 13.0, 2.0),
+                    &crate::SpatialMembership::outdoor(),
+                )
+                .unwrap(),
             [target]
         );
     }
@@ -2444,20 +2669,24 @@ mod physical_body_tests {
             )
             .unwrap();
 
-        let initial_cell_only = scene.dynamic_candidates_for_extent(
-            SpatialBodyId::Ephemeral(999),
-            Guid(0xda55_ffff),
-            Vector3::new(0.0, 11.0, 0.0),
-            Vector3::new(1.0, 13.0, 2.0),
-            &crate::SpatialMembership::outdoor(),
-        );
-        let full_sweep = scene.dynamic_candidates_for_extent(
-            SpatialBodyId::Ephemeral(999),
-            Guid(0xda55_ffff),
-            Vector3::new(0.0, 11.0, 0.0),
-            Vector3::new(99.0, 13.0, 2.0),
-            &crate::SpatialMembership::outdoor(),
-        );
+        let initial_cell_only = scene
+            .dynamic_candidates_for_extent(
+                SpatialBodyId::Ephemeral(999),
+                Guid(0xda55_ffff),
+                Vector3::new(0.0, 11.0, 0.0),
+                Vector3::new(1.0, 13.0, 2.0),
+                &crate::SpatialMembership::outdoor(),
+            )
+            .unwrap();
+        let full_sweep = scene
+            .dynamic_candidates_for_extent(
+                SpatialBodyId::Ephemeral(999),
+                Guid(0xda55_ffff),
+                Vector3::new(0.0, 11.0, 0.0),
+                Vector3::new(99.0, 13.0, 2.0),
+                &crate::SpatialMembership::outdoor(),
+            )
+            .unwrap();
 
         assert!(initial_cell_only.len() < 50);
         assert_eq!(full_sweep.len(), 50);
@@ -2623,11 +2852,10 @@ mod physical_body_tests {
                 .unwrap();
             assert!(prepared.movers.contains(&mover));
             scene
-                .tick_dynamic_physical_body_transaction(
+                .tick_prepared_dynamic_physical_body(
                     mover,
                     &collision,
                     now + Duration::from_millis(100),
-                    |_, _| Ok(()),
                 )
                 .unwrap();
             let solved = scene.body(mover).unwrap();
@@ -2692,11 +2920,10 @@ mod physical_body_tests {
             .prepare_dynamic_entity_collection(&collision, 0.1, collection_actuation)
             .unwrap();
         ignored_mover_scene
-            .tick_dynamic_physical_body_transaction(
+            .tick_prepared_dynamic_physical_body(
                 mover,
                 &collision,
                 now + Duration::from_millis(100),
-                |_, _| Ok(()),
             )
             .unwrap();
         assert!(ignored_mover_scene.body(mover).unwrap().pose.coords.x > 0.9);
@@ -2718,11 +2945,10 @@ mod physical_body_tests {
             .prepare_dynamic_entity_collection(&collision, 0.1, collection_actuation)
             .unwrap();
         ignored_target_scene
-            .tick_dynamic_physical_body_transaction(
+            .tick_prepared_dynamic_physical_body(
                 mover,
                 &collision,
                 now + Duration::from_millis(100),
-                |_, _| Ok(()),
             )
             .unwrap();
         assert!(ignored_target_scene.body(mover).unwrap().pose.coords.x < 0.8);
@@ -2771,11 +2997,10 @@ mod physical_body_tests {
             .prepare_dynamic_entity_collection(&collision, 0.1, collection_actuation)
             .unwrap();
         scene
-            .tick_dynamic_physical_body_transaction(
+            .tick_prepared_dynamic_physical_body(
                 mover,
                 &collision,
                 now + Duration::from_millis(100),
-                |_, _| Ok(()),
             )
             .unwrap();
         assert!((scene.body(mover).unwrap().pose.coords.x - 1.0).abs() < 0.000_1);
@@ -2839,14 +3064,12 @@ mod physical_body_tests {
             .prepare_dynamic_entity_collection(&collision, 0.1, collection_actuation)
             .unwrap();
         let result = scene
-            .tick_dynamic_physical_body_transaction(
+            .tick_prepared_dynamic_physical_body(
                 mover,
                 &collision,
                 now + Duration::from_millis(100),
-                |_, _| Ok(()),
             )
-            .unwrap()
-            .0;
+            .unwrap();
         assert!(scene.body(mover).unwrap().velocity.x < 0.0);
         assert!(result.dynamic_state_change.is_none());
         assert!(result.collision_reports.is_empty());
@@ -3025,9 +3248,7 @@ mod physical_body_tests {
         );
         let ended = scene
             .collision_reports
-            .expire(
-                touched_at + Duration::from_secs(1) + Duration::from_nanos(1),
-            )
+            .expire(touched_at + Duration::from_secs(1) + Duration::from_nanos(1))
             .unwrap();
         assert_eq!(ended.len(), 2);
         assert!(
@@ -3373,69 +3594,6 @@ mod physical_body_tests {
     }
 
     #[test]
-    fn rejected_consumer_transaction_does_not_publish_or_retain_report_touch() {
-        let created_at = Instant::now();
-        let mover = SpatialBodyId::Entity(Guid(0x7000_0001));
-        let peer = SpatialBodyId::Entity(Guid(0x7000_0002));
-        let geometry = || {
-            fallback_target(Arc::new(CollisionShape::Ball(CollisionBall {
-                center: Vector3::zero(),
-                radius: 0.5,
-            })))
-        };
-        let mut scene = SpatialScene::new();
-        for body_id in [mover, peer] {
-            install_free_dynamic(
-                &mut scene,
-                body_id,
-                Vector3::zero(),
-                Vector3::zero(),
-                geometry(),
-                created_at,
-            );
-            scene
-                .body_mut(body_id)
-                .unwrap()
-                .physical
-                .as_mut()
-                .unwrap()
-                .dynamic
-                .as_mut()
-                .unwrap()
-                .collision
-                .dynamic_collision
-                .mover_accepts_response = false;
-        }
-        scene
-            .body_mut(peer)
-            .unwrap()
-            .physical
-            .as_mut()
-            .unwrap()
-            .dynamic
-            .as_mut()
-            .unwrap()
-            .activity = DynamicBodyActivity::Settled;
-        let collision = collision_scene(None);
-        scene
-            .prepare_dynamic_entity_collection(&collision, 0.1, collection_actuation)
-            .unwrap();
-        let error = scene
-            .tick_dynamic_physical_body_transaction(
-                mover,
-                &collision,
-                created_at + Duration::from_millis(100),
-                |_, result| -> anyhow::Result<()> {
-                    assert_eq!(result.collision_reports.len(), 2);
-                    anyhow::bail!("consumer refused report-bearing tick")
-                },
-            )
-            .unwrap_err();
-        assert!(error.to_string().contains("consumer refused"));
-        assert_eq!(scene.active_collision_report_count(), 0);
-    }
-
-    #[test]
     fn targetless_fast_missile_hits_small_target_and_clears_projectile_state() {
         let now = Instant::now();
         let mover = SpatialBodyId::Entity(Guid(0x7000_0001));
@@ -3484,14 +3642,12 @@ mod physical_body_tests {
             .prepare_dynamic_entity_collection(&collision, delta_seconds, collection_actuation)
             .unwrap();
         let result = scene
-            .tick_dynamic_physical_body_transaction(
+            .tick_prepared_dynamic_physical_body(
                 mover,
                 &collision,
                 now + Duration::from_secs_f32(delta_seconds),
-                |_, _| Ok(()),
             )
-            .unwrap()
-            .0;
+            .unwrap();
         assert_eq!(scene.body(mover).unwrap().velocity, Vector3::zero());
         assert!(scene.body(mover).unwrap().pose.coords.x < 1.0);
         assert_eq!(
@@ -3563,11 +3719,10 @@ mod physical_body_tests {
             .prepare_dynamic_entity_collection(&collision, 0.1, collection_actuation)
             .unwrap();
         scene
-            .tick_dynamic_physical_body_transaction(
+            .tick_prepared_dynamic_physical_body(
                 mover,
                 &collision,
                 now + Duration::from_millis(100),
-                |_, _| Ok(()),
             )
             .unwrap();
         let solved = scene.body(mover).unwrap();
@@ -3629,11 +3784,10 @@ mod physical_body_tests {
             .prepare_dynamic_entity_collection(&collision, 0.1, collection_actuation)
             .unwrap();
         scene
-            .tick_dynamic_physical_body_transaction(
+            .tick_prepared_dynamic_physical_body(
                 mover,
                 &collision,
                 now + Duration::from_millis(100),
-                |_, _| Ok(()),
             )
             .unwrap();
         assert_eq!(dynamic_activity(&scene, low), DynamicBodyActivity::Active);
@@ -3687,14 +3841,12 @@ mod physical_body_tests {
             .prepare_dynamic_entity_collection(&collision, 0.1, collection_actuation)
             .unwrap();
         let result = scene
-            .tick_dynamic_physical_body_transaction(
+            .tick_prepared_dynamic_physical_body(
                 mover,
                 &collision,
                 now + Duration::from_millis(100),
-                |_, _| Ok(()),
             )
-            .unwrap()
-            .0;
+            .unwrap();
         assert_eq!(result.collision_reports.len(), 1);
         assert_eq!(
             result.collision_reports[0].contact.source,
@@ -3742,11 +3894,10 @@ mod physical_body_tests {
         for body_id in [left, right] {
             assert!(prepared.movers.contains(&body_id));
             scene
-                .tick_dynamic_physical_body_transaction(
+                .tick_prepared_dynamic_physical_body(
                     body_id,
                     &collision,
                     now + Duration::from_millis(100),
-                    |_, _| Ok(()),
                 )
                 .unwrap();
         }
@@ -3789,12 +3940,7 @@ mod physical_body_tests {
             .prepare_dynamic_entity_collection(&collision, 1.0, collection_actuation)
             .unwrap();
         scene
-            .tick_dynamic_physical_body_transaction(
-                mover,
-                &collision,
-                now + Duration::from_secs(1),
-                |_, _| Ok(()),
-            )
+            .tick_prepared_dynamic_physical_body(mover, &collision, now + Duration::from_secs(1))
             .unwrap();
         assert_ne!(
             scene.body(mover).unwrap().pose.coords,
@@ -3846,15 +3992,10 @@ mod physical_body_tests {
         assert!(prepared.movers.contains(&mover));
         assert!(prepared.movers.contains(&unrelated));
         let result = scene
-            .tick_dynamic_physical_body_transaction(
-                mover,
-                &collision,
-                now + Duration::from_secs(1),
-                |_, _| Ok(()),
-            )
+            .tick_prepared_dynamic_physical_body(mover, &collision, now + Duration::from_secs(1))
             .unwrap();
         assert_eq!(
-            result.0.motion.status,
+            result.motion.status,
             PhysicalBodyTickStatus::SubstepBudgetExceeded
         );
         assert_eq!(
@@ -3867,11 +4008,10 @@ mod physical_body_tests {
         );
         assert_eq!(scene.active_collision_report_count(), 0);
         scene
-            .tick_dynamic_physical_body_transaction(
+            .tick_prepared_dynamic_physical_body(
                 unrelated,
                 &collision,
                 now + Duration::from_secs(1),
-                |_, _| Ok(()),
             )
             .unwrap();
         assert_eq!(
@@ -4048,14 +4188,7 @@ mod physical_body_tests {
         );
         assert_eq!(enabled.before, PhysicalBodyParticipation::PoseOnly);
         assert_eq!(enabled.after, PhysicalBodyParticipation::Physical);
-        let retained_response = scene
-            .body(id)
-            .unwrap()
-            .physical
-            .as_ref()
-            .unwrap()
-            .response
-            .clone();
+        let retained_response = scene.body(id).unwrap().physical.as_ref().unwrap().response;
 
         let policy_only = scene
             .set_dynamic_physical_body(
@@ -4636,13 +4769,8 @@ mod physical_body_tests {
         );
 
         let body_id = prepared.movers.into_iter().next().unwrap();
-        let (solved, ()) = scene
-            .tick_dynamic_physical_body_transaction(
-                body_id,
-                &collision,
-                now + Duration::from_secs(1),
-                |_, _| Ok(()),
-            )
+        let solved = scene
+            .tick_prepared_dynamic_physical_body(body_id, &collision, now + Duration::from_secs(1))
             .unwrap();
         scene
             .finish_dynamic_entity_collection(now + Duration::from_secs(1))

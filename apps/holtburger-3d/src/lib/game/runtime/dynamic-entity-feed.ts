@@ -264,11 +264,16 @@ const dynamicEntityAdvanceSchema = z.object({
 	path: dynamicEntityPathSchema,
 });
 
-const dynamicEntityAdvanceBatchSchema = z.object({
-	hostTime: hostTimeSchema,
-	durationMs: finiteNumber.nonnegative(),
-	advances: z.array(dynamicEntityAdvanceSchema).nonempty(),
-});
+const dynamicEntityTickBatchSchema = z
+	.object({
+		hostTime: hostTimeSchema,
+		durationMs: finiteNumber.nonnegative(),
+		advances: z.array(dynamicEntityAdvanceSchema),
+		updates: z.array(dynamicEntityViewSchema),
+	})
+	.refine((batch) => batch.advances.length > 0 || batch.updates.length > 0, {
+		message: "Dynamic-entity tick must contain an advance or update.",
+	});
 
 const dynamicEntityEventSchema = z.discriminatedUnion("kind", [
 	z.object({
@@ -285,8 +290,8 @@ const dynamicEntityEventSchema = z.discriminatedUnion("kind", [
 		generation: nonNegativeInteger,
 	}),
 	z.object({
-		kind: z.literal("advanced"),
-		batch: dynamicEntityAdvanceBatchSchema,
+		kind: z.literal("ticked"),
+		batch: dynamicEntityTickBatchSchema,
 	}),
 ]);
 
@@ -304,16 +309,22 @@ export type DynamicEntityAdvance = z.infer<typeof dynamicEntityAdvanceSchema>;
 export type DynamicEntityPlayingClip = z.infer<
 	typeof dynamicEntityPlayingClipSchema
 >;
-export type DynamicEntityAdvanceBatch = z.infer<
-	typeof dynamicEntityAdvanceBatchSchema
+export type DynamicEntityTickBatch = z.infer<
+	typeof dynamicEntityTickBatchSchema
 >;
 export type DynamicEntityEvent = z.infer<typeof dynamicEntityEventSchema>;
 
 /** Validates the narrow host boundary before mutable frontend state observes it. */
 export function decodeDynamicEntityEvent(value: unknown): DynamicEntityEvent {
 	const event = dynamicEntityEventSchema.parse(value);
-	if (event.kind === "advanced") {
+	if (event.kind === "ticked") {
+		const seen = new Set<number>();
 		for (const advance of event.batch.advances) {
+			if (seen.has(advance.entity.identity.guid))
+				throw new Error(
+					`Dynamic-entity tick contains duplicate GUID 0x${advance.entity.identity.guid.toString(16).padStart(8, "0")}.`,
+				);
+			seen.add(advance.entity.identity.guid);
 			if (advance.entity.placement.kind !== "world") {
 				throw new Error(
 					`Dynamic-entity advance targets attached GUID 0x${advance.entity.identity.guid.toString(16).padStart(8, "0")}.`,
@@ -324,6 +335,13 @@ export function decodeDynamicEntityEvent(value: unknown): DynamicEntityEvent {
 			} else {
 				validateHostPlacedPathShape(advance.path);
 			}
+		}
+		for (const update of event.batch.updates) {
+			if (seen.has(update.identity.guid))
+				throw new Error(
+					`Dynamic-entity tick contains duplicate GUID 0x${update.identity.guid.toString(16).padStart(8, "0")}.`,
+				);
+			seen.add(update.identity.guid);
 		}
 	}
 	return event;
@@ -346,7 +364,7 @@ export class DynamicEntityMirror {
 	#awaitingSnapshot = true;
 	#entities = new Map<number, DynamicEntityView>();
 	#timeline: { hostSeconds: number; frontendSeconds: number } | null = null;
-	#lastAdvanceHostSeconds: number | null = null;
+	#lastTickHostSeconds: number | null = null;
 	readonly #nowSeconds: () => number;
 
 	constructor(nowSeconds = () => performance.now() / 1_000) {
@@ -357,7 +375,7 @@ export class DynamicEntityMirror {
 	awaitSnapshot(): void {
 		this.#awaitingSnapshot = true;
 		this.#timeline = null;
-		this.#lastAdvanceHostSeconds = null;
+		this.#lastTickHostSeconds = null;
 	}
 
 	/** Apply one validated snapshot or ordered live mutation and report whether current state changed. */
@@ -378,7 +396,7 @@ export class DynamicEntityMirror {
 				hostSeconds: event.snapshot.hostTime.seconds,
 				frontendSeconds: this.#nowSeconds(),
 			};
-			this.#lastAdvanceHostSeconds = event.snapshot.hostTime.seconds;
+			this.#lastTickHostSeconds = event.snapshot.hostTime.seconds;
 			this.#awaitingSnapshot = false;
 			return true;
 		}
@@ -395,14 +413,14 @@ export class DynamicEntityMirror {
 			this.#entities.set(event.entity.identity.guid, event.entity);
 			return current !== event.entity;
 		}
-		if (event.kind === "advanced") {
+		if (event.kind === "ticked") {
 			if (
-				this.#lastAdvanceHostSeconds !== null &&
-				event.batch.hostTime.seconds <= this.#lastAdvanceHostSeconds
+				this.#lastTickHostSeconds !== null &&
+				event.batch.hostTime.seconds <= this.#lastTickHostSeconds
 			) {
 				return false;
 			}
-			this.#lastAdvanceHostSeconds = event.batch.hostTime.seconds;
+			this.#lastTickHostSeconds = event.batch.hostTime.seconds;
 			const seen = new Set<number>();
 			let changed = false;
 			for (const advance of event.batch.advances) {
@@ -416,6 +434,19 @@ export class DynamicEntityMirror {
 				const current = this.#entities.get(entityGuid);
 				if (current?.generation !== advance.entity.generation) continue;
 				this.#entities.set(entityGuid, advance.entity);
+				changed = true;
+			}
+			for (const update of event.batch.updates) {
+				const entityGuid = update.identity.guid;
+				if (seen.has(entityGuid)) {
+					throw new Error(
+						`Dynamic-entity tick contains duplicate GUID 0x${entityGuid.toString(16).padStart(8, "0")}.`,
+					);
+				}
+				seen.add(entityGuid);
+				const current = this.#entities.get(entityGuid);
+				if (current?.generation !== update.generation) continue;
+				this.#entities.set(entityGuid, update);
 				changed = true;
 			}
 			return changed;

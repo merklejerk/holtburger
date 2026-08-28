@@ -75,7 +75,12 @@ pub enum WorldEvent {
         guid: Guid,
         snapshot: Option<EntityMotionSnapshot>,
     },
+    /// A runtime body's structure or externally-authored state changed.
     RuntimeBodyChanged {
+        body_id: SpatialBodyId,
+    },
+    /// One routine solver commit; consumers batch these at the owning fixed-tick boundary.
+    RuntimeBodyAdvanced {
         body_id: SpatialBodyId,
     },
     RuntimeBodyRemoved {

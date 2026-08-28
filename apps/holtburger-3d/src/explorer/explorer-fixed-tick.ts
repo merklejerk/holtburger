@@ -26,11 +26,8 @@ export interface ExplorerFixedTickEnvelope {
 	readonly hostTime: { readonly seconds: number };
 	/** Positive playback duration shared by every path in this envelope. */
 	readonly durationMs: number;
-	/** Existing entity advance event, or null when only the camera needs publication. */
-	readonly entityEvent: Extract<
-		DynamicEntityEvent,
-		{ kind: "advanced" }
-	> | null;
+	/** Entity tick event, or null when only the camera needs publication. */
+	readonly entityEvent: Extract<DynamicEntityEvent, { kind: "ticked" }> | null;
 	/** Current host boom result, or null while no boom session is active. */
 	readonly boom: HostKinematicBoomTick | null;
 }
@@ -44,13 +41,14 @@ export function decodeExplorerFixedTickEnvelope(
 		parsed.entityAdvances.length === 0
 			? null
 			: (decodeDynamicEntityEvent({
-					kind: "advanced",
+					kind: "ticked",
 					batch: {
 						hostTime: parsed.hostTime,
 						durationMs: parsed.durationMs,
 						advances: parsed.entityAdvances,
+						updates: [],
 					},
-				}) as Extract<DynamicEntityEvent, { kind: "advanced" }>);
+				}) as Extract<DynamicEntityEvent, { kind: "ticked" }>);
 	const boom =
 		parsed.boom === null
 			? null

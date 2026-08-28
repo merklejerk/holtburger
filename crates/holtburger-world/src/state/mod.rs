@@ -13,8 +13,8 @@ pub use fellowship::{
     FellowshipMemberState, FellowshipState,
 };
 pub use motion_resolution::{
-    MotionCommandKinematics, MotionTableMovementProfile, PlayerMotionTableLookupError,
-    PlayerMotionTableResolution, PlayerMotionTableSource,
+    BodyProjectionResolver, MotionCommandKinematics, MotionTableMovementProfile,
+    PlayerMotionTableLookupError, PlayerMotionTableResolution, PlayerMotionTableSource,
 };
 pub use self_movement::{
     RequiredSelfMovementKinematics, SelfMovementCapabilities, SelfMovementCapabilitiesError,

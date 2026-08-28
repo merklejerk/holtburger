@@ -189,11 +189,11 @@ import {
 	datAssetId,
 	dynamicEntityPlacement,
 	dynamicEntityPlacementKey,
-	type DynamicEntityReconciliation,
-	type DynamicEntityReconciliationDisposition,
+	type DynamicEntityRealizationDisposition,
+	type DynamicEntityRealizationResults,
 } from "./dynamic-entity-presentation";
 import type {
-	DynamicEntityAdvanceBatch,
+	DynamicEntityTickBatch,
 	DynamicEntityPlayingClip,
 	DynamicEntityView,
 } from "./dynamic-entity-feed";
@@ -539,6 +539,16 @@ function dynamicVisualKey(entity: DynamicEntityView): string {
 /** Exact placement level used to avoid unchanged scene-graph and culling-index mutation. */
 function dynamicPlacementIdentity(entity: DynamicEntityView): string {
 	return JSON.stringify(entity.placement);
+}
+
+/** Placement facts whose change requires a scene path rather than a level-only tick update. */
+function dynamicPathIdentity(entity: DynamicEntityView): string {
+	return entity.placement.kind === "world"
+		? JSON.stringify({
+				pose: entity.placement.pose,
+				spatialMembership: entity.placement.spatialMembership,
+			})
+		: JSON.stringify(entity.placement);
 }
 
 /** Mutable presentation level applied independently from placement and visual identity. */
@@ -1420,7 +1430,7 @@ export class GamePresentationRuntime {
 	/** Replace the complete accepted producer snapshot and converge its eligible presentations. */
 	async replaceDynamicEntitySnapshot(
 		entities: readonly DynamicEntityView[],
-	): Promise<DynamicEntityReconciliation> {
+	): Promise<DynamicEntityRealizationResults> {
 		if (this.#destroyed)
 			throw new Error(
 				"Cannot replace the dynamic entity snapshot after runtime shutdown.",
@@ -1433,7 +1443,7 @@ export class GamePresentationRuntime {
 			const guid = entity.identity.guid;
 			if (requested.has(guid))
 				throw new Error(
-					`Spawned dynamic reconciliation repeats GUID ${formatDynamicGuid(guid)}.`,
+					`Dynamic entity snapshot repeats GUID ${formatDynamicGuid(guid)}.`,
 				);
 			requested.set(guid, entity);
 		}
@@ -1455,7 +1465,7 @@ export class GamePresentationRuntime {
 	/** Apply one mirror-accepted entity level without revisiting unrelated desired entities. */
 	async upsertDynamicEntity(
 		entity: DynamicEntityView,
-	): Promise<DynamicEntityReconciliationDisposition> {
+	): Promise<DynamicEntityRealizationDisposition> {
 		if (this.#destroyed)
 			throw new Error("Cannot upsert a dynamic entity after runtime shutdown.");
 		if (this.#setupVisualSource === null)
@@ -1488,7 +1498,7 @@ export class GamePresentationRuntime {
 	}
 
 	/** Revisit desired authority only at an explicit scene-readiness boundary. */
-	async reevaluateDynamicEntityEligibility(): Promise<DynamicEntityReconciliation> {
+	async reevaluateDynamicEntityEligibility(): Promise<DynamicEntityRealizationResults> {
 		if (this.#destroyed)
 			throw new Error(
 				"Cannot reevaluate dynamic entity eligibility after runtime shutdown.",
@@ -1542,7 +1552,10 @@ export class GamePresentationRuntime {
 		)
 			return;
 		const entity = record.entity;
-		if (entity.placement.kind === "world" && !this.#isDynamicScopeReady(entity)) {
+		if (
+			entity.placement.kind === "world" &&
+			!this.#isDynamicScopeReady(entity)
+		) {
 			this.#deferDynamicEntity(record, {
 				kind: "residency",
 				residencyKey: dynamicResidencyKey(entity),
@@ -1577,14 +1590,14 @@ export class GamePresentationRuntime {
 			guid,
 			record.visualKey,
 			entity,
-		).catch(
-			(cause) => {
-				throw dynamicEntityPresentationFailure(entity, cause);
+		).catch((cause) => {
+			throw dynamicEntityPresentationFailure(entity, cause);
+		});
+		const continuation = this.#realizeDynamicEntity(record, visual).finally(
+			() => {
+				if (record.realization === continuation) record.realization = null;
 			},
 		);
-		const continuation = this.#realizeDynamicEntity(record, visual).finally(() => {
-			if (record.realization === continuation) record.realization = null;
-		});
 		record.realization = continuation;
 		this.#trackRealizationContinuation(continuation);
 		await continuation;
@@ -1593,7 +1606,8 @@ export class GamePresentationRuntime {
 
 	/** Realize only descendants whose desired attachment names this installed parent. */
 	async #realizeDesiredDynamicChildren(parentGuid: number): Promise<void> {
-		for (const childGuid of this.#spawnedDesiredChildren.get(parentGuid) ?? []) {
+		for (const childGuid of this.#spawnedDesiredChildren.get(parentGuid) ??
+			[]) {
 			const child = this.#spawnedDesiredEntities.get(childGuid);
 			if (child === undefined) continue;
 			await this.#realizeAcceptedDynamicEntity(child);
@@ -1630,7 +1644,11 @@ export class GamePresentationRuntime {
 			previous.placementIdentity !== placementIdentity &&
 			(previous.entity.placement.kind === "attached" ||
 				entity.placement.kind === "attached");
-		if (previous !== undefined && sameGeneration && !attachmentTopologyChanged) {
+		if (
+			previous !== undefined &&
+			sameGeneration &&
+			!attachmentTopologyChanged
+		) {
 			this.#clearDynamicEntityDeferral(previous);
 			previous.entity = entity;
 			previous.placementIdentity = placementIdentity;
@@ -1717,9 +1735,7 @@ export class GamePresentationRuntime {
 			if (guids?.size === 0)
 				this.#spawnedDeferredParents.delete(deferral.parentGuid);
 		} else {
-			const guids = this.#spawnedDeferredResidencies.get(
-				deferral.residencyKey,
-			);
+			const guids = this.#spawnedDeferredResidencies.get(deferral.residencyKey);
 			guids?.delete(record.entity.identity.guid);
 			if (guids?.size === 0)
 				this.#spawnedDeferredResidencies.delete(deferral.residencyKey);
@@ -1827,14 +1843,14 @@ export class GamePresentationRuntime {
 		);
 	}
 
-	/** Apply one accepted host tick without re-running asynchronous visual reconciliation. */
-	applyDynamicEntityAdvances(
-		batch: DynamicEntityAdvanceBatch,
+	/** Apply one accepted host tick without re-running asynchronous visual realization. */
+	applyDynamicEntityTick(
+		batch: DynamicEntityTickBatch,
 		receivedAtMs: number,
 	): void {
 		if (this.#destroyed)
 			throw new Error(
-				"Cannot advance spawned entities after runtime shutdown.",
+				"Cannot apply a dynamic entity tick after runtime shutdown.",
 			);
 		for (const advance of batch.advances) {
 			const entity = advance.entity;
@@ -1857,6 +1873,27 @@ export class GamePresentationRuntime {
 				batch.durationMs,
 				receivedAtMs,
 			);
+			installed.placementIdentity = desired.placementIdentity;
+		}
+		for (const entity of batch.updates) {
+			const guid = entity.identity.guid;
+			const desired = this.#spawnedDesiredEntities.get(guid);
+			if (desired?.entity.generation !== entity.generation) continue;
+			if (desired.visualKey !== dynamicVisualKey(entity)) {
+				throw new Error(
+					`Dynamic entity ${formatDynamicGuid(guid)} changed immutable visual facts within generation ${entity.generation}.`,
+				);
+			}
+			if (dynamicPathIdentity(desired.entity) !== dynamicPathIdentity(entity)) {
+				throw new Error(
+					`Dynamic entity ${formatDynamicGuid(guid)} received a path-changing tick update without an advance.`,
+				);
+			}
+			desired.entity = entity;
+			desired.placementIdentity = dynamicPlacementIdentity(entity);
+			const installed = this.#spawnedPresentations.get(guid);
+			if (installed?.generation !== entity.generation) continue;
+			this.#applySpawnedPresentationState(installed, entity);
 			installed.placementIdentity = desired.placementIdentity;
 		}
 	}
@@ -2762,7 +2799,7 @@ export class GamePresentationRuntime {
 	 *
 	 * Returns the scene graph's own resolution rather than the last host pose, so a follower sees
 	 * the same interpolated position the entity is drawn at. `null` for an entity that is not
-	 * currently presented, which is an ordinary state during reconciliation rather than an error.
+	 * currently presented, which is an ordinary state during realization rather than an error.
 	 */
 	dynamicEntityOrigin(
 		guid: number,

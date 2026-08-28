@@ -24,11 +24,11 @@ import {
 } from "../lib/game/runtime/game-presentation-owner";
 import {
 	datAssetId,
-	type DynamicEntityReconciliation,
-	type DynamicEntityReconciliationDisposition,
+	type DynamicEntityRealizationDisposition,
+	type DynamicEntityRealizationResults,
 } from "../lib/game/runtime/dynamic-entity-presentation";
 import type {
-	DynamicEntityAdvanceBatch,
+	DynamicEntityTickBatch,
 	DynamicEntityEvent,
 	DynamicEntityView,
 	DynamicEntityWorldPlacement,
@@ -189,9 +189,9 @@ type PortalSceneActivation =
 			readonly generation: number;
 			readonly key: string;
 			readonly receipt: SceneActivationReceipt;
-			readonly reconciliation: "idle" | "pending" | "deferred" | "ready";
-			/** Exact player residency/membership facts used by the latest reconciliation. */
-			readonly reconciledPlayerPlacementKey: string | null;
+			readonly realization: "idle" | "pending" | "deferred" | "ready";
+			/** Exact player residency/membership facts used by the latest realization attempt. */
+			readonly realizedPlayerPlacementKey: string | null;
 			readonly revealAcknowledged: boolean;
 	  };
 
@@ -207,14 +207,14 @@ export type ClientPresentationCameraController = PossessionCameraController<
 export interface ClientPresentationRuntime extends MapTerrainSource {
 	replaceDynamicEntitySnapshot(
 		entities: readonly DynamicEntityView[],
-	): Promise<DynamicEntityReconciliation>;
+	): Promise<DynamicEntityRealizationResults>;
 	upsertDynamicEntity(
 		entity: DynamicEntityView,
-	): Promise<DynamicEntityReconciliationDisposition>;
+	): Promise<DynamicEntityRealizationDisposition>;
 	removeDynamicEntity(guid: number, generation: number): void;
-	reevaluateDynamicEntityEligibility(): Promise<DynamicEntityReconciliation>;
-	applyDynamicEntityAdvances(
-		batch: DynamicEntityAdvanceBatch,
+	reevaluateDynamicEntityEligibility(): Promise<DynamicEntityRealizationResults>;
+	applyDynamicEntityTick(
+		batch: DynamicEntityTickBatch,
 		receivedAtMs: number,
 	): void;
 	updateSceneInterest(request: SceneInterestRequest): unknown;
@@ -272,7 +272,7 @@ export interface ClientPresentationSessionDependencies {
  * Bridges one client authority session into the shared renderer runtime.
  *
  * This class owns no game state. The lifecycle session remains the authority mirror; this owner
- * only schedules reconciliation, interpolation application, camera projection, environment, and
+ * only schedules realization, interpolation application, camera projection, environment, and
  * static-content demand. It is intentionally disposable so a terminal client event cannot leave a
  * renderer or scene-interest request alive while Electron is shutting down.
  */
@@ -504,7 +504,7 @@ export class ClientPresentationSession {
 				this.#setStatus("loading-activation");
 				return { rendered: false, status: this.#status };
 			}
-			if (this.#portalSceneActivation.reconciliation !== "ready") {
+			if (this.#portalSceneActivation.realization !== "ready") {
 				this.#setStatus("loading-player");
 				return { rendered: false, status: this.#status };
 			}
@@ -740,7 +740,7 @@ export class ClientPresentationSession {
 
 	#receiveDynamic(event: DynamicEntityEvent): void {
 		switch (event.kind) {
-			case "advanced": {
+			case "ticked": {
 				if (this.#session.mirror.isAwaitingSnapshot()) {
 					this.#setStatus("awaiting-snapshot");
 					return;
@@ -748,19 +748,19 @@ export class ClientPresentationSession {
 				const activation = this.#portalSceneActivation;
 				const retryDeferred =
 					activation?.kind === "accepted" &&
-					activation.reconciliation === "deferred" &&
-					activation.reconciledPlayerPlacementKey !==
+					activation.realization === "deferred" &&
+					activation.realizedPlayerPlacementKey !==
 						this.#authoritativePlayerConvergenceKey();
 				if (retryDeferred) {
 					this.#portalSceneActivation = {
 						...activation,
-						reconciliation: "idle",
+						realization: "idle",
 					};
 				}
 				this.#enqueueMutation(async () => {
 					if (this.#owner === null || this.#session.mirror.isAwaitingSnapshot())
 						return;
-					this.#owner.runtime.applyDynamicEntityAdvances(
+					this.#owner.runtime.applyDynamicEntityTick(
 						event.batch,
 						performance.now(),
 					);
@@ -942,10 +942,10 @@ export class ClientPresentationSession {
 			if (
 				lifecycle?.kind === "portal-space" &&
 				(portalActivation?.kind !== "accepted" ||
-					portalActivation.reconciliation !== "pending")
+					portalActivation.realization !== "pending")
 			)
 				return;
-			const reconciliation =
+			const results =
 				await this.#owner.runtime.reevaluateDynamicEntityEligibility();
 			if (
 				lifecycle?.kind !== "portal-space" ||
@@ -958,21 +958,21 @@ export class ClientPresentationSession {
 				current.receipt !== portalActivation.receipt
 			)
 				return;
-			const reconciliationState = this.#localPlayerInstalled(reconciliation)
+			const realization = this.#localPlayerInstalled(results)
 				? "ready"
 				: "deferred";
 			this.#portalSceneActivation = {
 				...current,
-				reconciliation: reconciliationState,
+				realization,
 			};
 			if (
-				reconciliationState === "deferred" &&
-				current.reconciledPlayerPlacementKey !==
+				realization === "deferred" &&
+				current.realizedPlayerPlacementKey !==
 					this.#authoritativePlayerConvergenceKey()
 			) {
 				this.#portalSceneActivation = {
 					...this.#portalSceneActivation,
-					reconciliation: "idle",
+					realization: "idle",
 				};
 				this.#ensureScenePresentationConvergence();
 			}
@@ -985,28 +985,27 @@ export class ClientPresentationSession {
 		if (activation?.kind !== "accepted") return;
 		this.#portalSceneActivation = {
 			...activation,
-			reconciliation: "idle",
-			reconciledPlayerPlacementKey: null,
+			realization: "idle",
+			realizedPlayerPlacementKey: null,
 		};
 	}
 
 	/** Begin normal dynamic eligibility only after the destination's static products are installed. */
 	#ensureScenePresentationConvergence(): void {
 		const activation = this.#portalSceneActivation;
-		if (activation?.kind !== "accepted" || activation.reconciliation !== "idle")
+		if (activation?.kind !== "accepted" || activation.realization !== "idle")
 			return;
 		this.#portalSceneActivation = {
 			...activation,
-			reconciliation: "pending",
-			reconciledPlayerPlacementKey: this.#authoritativePlayerConvergenceKey(),
+			realization: "pending",
+			realizedPlayerPlacementKey: this.#authoritativePlayerConvergenceKey(),
 		};
 		void this.#requestDynamicEligibilityReevaluation();
 	}
 
-	#localPlayerInstalled(reconciliation: DynamicEntityReconciliation): boolean {
+	#localPlayerInstalled(results: DynamicEntityRealizationResults): boolean {
 		return (
-			this.#playerGuid !== null &&
-			reconciliation.get(this.#playerGuid) === "installed"
+			this.#playerGuid !== null && results.get(this.#playerGuid) === "installed"
 		);
 	}
 
@@ -1083,8 +1082,8 @@ export class ClientPresentationSession {
 					generation: worldGeneration,
 					key,
 					receipt,
-					reconciliation: "idle",
-					reconciledPlayerPlacementKey: null,
+					realization: "idle",
+					realizedPlayerPlacementKey: null,
 					revealAcknowledged: false,
 				};
 			})

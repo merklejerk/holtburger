@@ -2,7 +2,7 @@
 	import { onMount, tick as svelteTick } from "svelte";
 	import { resolveExplorerOutdoorFocusPose } from "../../explorer/explorer-camera-framing";
 	import { ExplorerCameraInputController } from "../../explorer/explorer-camera-input-controller";
-	import { FRONTEND_TUNING } from "../../lib/frontend-tuning";
+	import { EXPLORER_TUNING } from "../../explorer/explorer-tuning";
 	import type { BakedDrawMergeCensus } from "../../lib/game/renderer/baked-draw-merge-census";
 	import { MapRenderer } from "../../lib/game/map/map-renderer";
 	import { MAP_DEFAULT_VIEW_DIAMETERS } from "../../lib/game/map/map-appearance";
@@ -71,7 +71,6 @@
 	} from "../../lib/game/runtime/scene-target";
 	import { ActiveRegionStaticDetailOwner } from "../../lib/game/resolution/active-region-static-detail";
 	import {
-		DEFAULT_FRAME_SETTINGS,
 		type EntityShadowResourceDiagnostics,
 		type FrameSelectionMetrics,
 		type FrameSettings,
@@ -865,7 +864,7 @@
 	let lastInterestRadii: SceneInterestRadii | null = null;
 	let followFlight: FollowFlightState | null = null;
 	let frameSettings: FrameSettings = {
-		...DEFAULT_FRAME_SETTINGS,
+		...EXPLORER_TUNING.frameSettings,
 		envCellRenderMode: "flat",
 	};
 	let portalContextLossPolicy: WebGL2ContextLossPolicyProbe | null = null;
@@ -1250,7 +1249,7 @@
 			);
 		}
 		applyHarnessCamera(runtime, {
-			...FRONTEND_TUNING.explorer.camera.framing,
+			...EXPLORER_TUNING.camera.framing,
 			placement: {
 				envCellId: null,
 				landblockId,
@@ -1262,7 +1261,7 @@
 			},
 		});
 		cameraEvidence = {
-			...FRONTEND_TUNING.explorer.camera.framing,
+			...EXPLORER_TUNING.camera.framing,
 			envCellId: null,
 			landblockId,
 			pitchDegrees: (pose.pitchRadians * 180) / Math.PI,
@@ -2028,8 +2027,8 @@
 				yawRadiansPerPixel: 0.01,
 			},
 			recenter: {
-				delayMs: FRONTEND_TUNING.explorer.camera.boom.recenterDelayMs,
-				durationMs: FRONTEND_TUNING.explorer.camera.boom.recenterDurationMs,
+				delayMs: EXPLORER_TUNING.camera.boom.recenterDelayMs,
+				durationMs: EXPLORER_TUNING.camera.boom.recenterDurationMs,
 			},
 			transport,
 		});
@@ -2044,10 +2043,8 @@
 			y: 0,
 			z: Math.SQRT1_2,
 		});
-		const recenterDelayMs =
-			FRONTEND_TUNING.explorer.camera.boom.recenterDelayMs;
-		const recenterDurationMs =
-			FRONTEND_TUNING.explorer.camera.boom.recenterDurationMs;
+		const recenterDelayMs = EXPLORER_TUNING.camera.boom.recenterDelayMs;
+		const recenterDurationMs = EXPLORER_TUNING.camera.boom.recenterDurationMs;
 		recenter.setTranslationIntent(true, 0);
 		await recenter.synchronize(projection, recenterDelayMs - 1, targetYaw);
 		const recenterBefore = recenter.desiredLook();
@@ -2074,8 +2071,7 @@
 		await recenter.stop();
 		return {
 			boomZoomDisplacement:
-				-wheelDistance *
-				FRONTEND_TUNING.explorer.camera.boom.zoomDistanceMultiplier,
+				-wheelDistance * EXPLORER_TUNING.camera.boom.zoomDistanceMultiplier,
 			cameraYawAfterKeyboardTurn,
 			cameraYawBefore,
 			characterInputCountAfterKeyboard,
@@ -2414,6 +2410,7 @@
 				canvas.clientWidth,
 				canvas.clientHeight,
 			),
+			frameSettings,
 		);
 	}
 
@@ -2526,6 +2523,7 @@
 					contentSource,
 					contentSource,
 					contentSource,
+					EXPLORER_TUNING.frameSettings,
 					PARTICLE_SEED === null
 						? undefined
 						: seededRoll(Number(PARTICLE_SEED)),

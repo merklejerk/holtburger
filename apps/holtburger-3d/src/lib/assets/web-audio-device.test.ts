@@ -202,7 +202,7 @@ describe("WebAudioDevice", () => {
 	});
 
 	it("shapes gain through the loudness contour, at start and when steered", async () => {
-		// RETAIL DIVERGENCE (see frontend-tuning): exponent < 1 lifts quiet gains toward the mids
+		// RETAIL DIVERGENCE (see shared frontend tuning): exponent < 1 lifts quiet gains toward the mids
 		// with fixed points at 0 and 1; the channel shadow stays dB-exact retail pan law.
 		const { context, gains } = fakeContext();
 		const device = new WebAudioDevice(context, fakeSource(), SMOOTHING, 0.5);

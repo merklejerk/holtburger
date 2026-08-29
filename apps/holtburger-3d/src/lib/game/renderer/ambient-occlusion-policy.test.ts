@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FRONTEND_TUNING } from "../../frontend-tuning";
+import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import {
 	AMBIENT_OCCLUSION_SAMPLE_KERNEL,
 	AMBIENT_OCCLUSION_DISTANCE_FADE,
@@ -102,7 +102,8 @@ describe("ambient occlusion policy", () => {
 	});
 
 	it("builds one deterministic bounded spatial kernel", () => {
-		const sampleCount = FRONTEND_TUNING.rendering.ambientOcclusion.sampleCount;
+		const sampleCount =
+			SHARED_FRONTEND_TUNING.rendering.ambientOcclusion.sampleCount;
 		const rebuilt = createAmbientOcclusionSampleKernel(sampleCount);
 		expect(rebuilt).toEqual(AMBIENT_OCCLUSION_SAMPLE_KERNEL);
 		expect(rebuilt).toHaveLength(sampleCount * 2);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Vec3 } from "../math/types";
-import { FRONTEND_TUNING } from "../../frontend-tuning";
+import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import type { ResolvedSceneLighting } from "./scene-environment";
 import {
 	OBJECT_AMBIENT_SUN_SCALE,
@@ -112,7 +112,7 @@ describe("resolveAuthoredLightResponse", () => {
 		expect(night).toBe(1);
 		// Not zero: lamps that fade to nothing read as switching off.
 		expect(noon).toBe(
-			FRONTEND_TUNING.rendering.outdoorAuthoredLights.minimumResponse,
+			SHARED_FRONTEND_TUNING.rendering.outdoorAuthoredLights.minimumResponse,
 		);
 	});
 

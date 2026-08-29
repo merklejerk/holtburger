@@ -10,7 +10,7 @@
 		CharacterInputController,
 		type CharacterInputKey,
 	} from "../lib/game/controls/character-input-controller";
-	import { FRONTEND_TUNING } from "../lib/frontend-tuning";
+	import { CLIENT_TUNING } from "./client-tuning";
 	import { createElectronHostTransport } from "../lib/host/electron-host-transport";
 	import type { HostTransport } from "../lib/host/host-transport";
 	import {
@@ -320,7 +320,7 @@
 			onError: reportPresentationError,
 		});
 		const currentFrameRateSampler = createFrameRateSampler(
-			FRONTEND_TUNING.diagnostics.frameMetricsEmaWindowMs,
+			CLIENT_TUNING.diagnostics.frameMetricsEmaWindowMs,
 		);
 		presentationSession = presentation;
 		frameRateSampler = currentFrameRateSampler;

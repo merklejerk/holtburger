@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount, untrack } from "svelte";
 	import type { FrameRates } from "./frame-rate-sampler";
-	import { FRONTEND_TUNING } from "../lib/frontend-tuning";
+	import type { FrontendUiDiagnosticsTuning } from "../lib/frontend-tuning";
 
 	export interface FrameMetrics {
 		/** Total milliseconds spent in the runtime tick phase. */
@@ -17,6 +17,8 @@
 		metrics: FrameMetrics | null;
 		/** Cold read of frame cadence and estimated capacity from the Explorer render loop. */
 		readonly readFrameRates: () => FrameRates | null;
+		/** Mode-owned display cadence and formatting policy. */
+		readonly diagnosticsTuning: FrontendUiDiagnosticsTuning;
 		/** EMA smoothing window in milliseconds. */
 		emaWindowMs?: number;
 	}
@@ -24,7 +26,8 @@
 	let {
 		metrics,
 		readFrameRates,
-		emaWindowMs = FRONTEND_TUNING.diagnostics.frameMetricsEmaWindowMs,
+		diagnosticsTuning,
+		emaWindowMs = diagnosticsTuning.frameMetricsEmaWindowMs,
 	}: Props = $props();
 	let smoothedMetrics: FrameMetrics | null = $state(null);
 	let frameRates = $state<FrameRates | null>(null);
@@ -73,15 +76,15 @@
 		sample();
 		const interval = window.setInterval(
 			sample,
-			FRONTEND_TUNING.diagnostics.frameRateDisplayIntervalMs,
+			diagnosticsTuning.frameRateDisplayIntervalMs,
 		);
 		return () => window.clearInterval(interval);
 	});
 
 	const formatMs = (value: number): string => value.toFixed(2);
 	const formatFramesPerSecond = (value: number): string =>
-		value > FRONTEND_TUNING.diagnostics.maximumDisplayedFramesPerSecond
-			? `${FRONTEND_TUNING.diagnostics.maximumDisplayedFramesPerSecond}+`
+		value > diagnosticsTuning.maximumDisplayedFramesPerSecond
+			? `${diagnosticsTuning.maximumDisplayedFramesPerSecond}+`
 			: value.toFixed(0);
 	const displayFps = $derived(
 		frameRates === null

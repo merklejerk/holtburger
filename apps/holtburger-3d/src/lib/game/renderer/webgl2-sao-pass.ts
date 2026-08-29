@@ -1,4 +1,4 @@
-import { FRONTEND_TUNING } from "../../frontend-tuning";
+import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import type { Mat4 } from "../math/types";
 import type { PortalScopeAtlasFrameView } from "./portal-scope-atlas-planner";
 import {
@@ -663,7 +663,7 @@ export class WebGL2SaoPass {
 				`SAO tile count must be from 1 through ${MAXIMUM_SAO_TILE_COUNT}.`,
 			);
 		}
-		const tuning = FRONTEND_TUNING.rendering.ambientOcclusion;
+		const tuning = SHARED_FRONTEND_TUNING.rendering.ambientOcclusion;
 		const scratch = this.#scratchTargets.resizeDimensions(
 			Math.max(1, Math.floor(sceneExtent.width * tuning.resolutionScale)),
 			Math.max(1, Math.floor(sceneExtent.height * tuning.resolutionScale)),
@@ -691,7 +691,7 @@ export class WebGL2SaoPass {
 			projection,
 			policy,
 			scratch.extent,
-			FRONTEND_TUNING.rendering.ambientOcclusion.resolutionScale,
+			SHARED_FRONTEND_TUNING.rendering.ambientOcclusion.resolutionScale,
 		);
 		gl.drawArraysInstanced(gl.TRIANGLES, 0, SAO_TILE_VERTEX_COUNT, tileCount);
 		if (this.#coverageCensusRequested) {
@@ -816,13 +816,13 @@ export class WebGL2SaoPass {
 		);
 		gl.uniform1f(
 			program.outputScale,
-			FRONTEND_TUNING.rendering.ambientOcclusion.resolutionScale,
+			SHARED_FRONTEND_TUNING.rendering.ambientOcclusion.resolutionScale,
 		);
 		gl.uniform1f(program.cameraNear, camera.near);
 		gl.uniform1f(program.cameraFar, camera.far);
 		gl.uniform1f(
 			program.resolutionScale,
-			FRONTEND_TUNING.rendering.ambientOcclusion.resolutionScale,
+			SHARED_FRONTEND_TUNING.rendering.ambientOcclusion.resolutionScale,
 		);
 		gl.uniform1f(
 			program.bilateralDepthThreshold,
@@ -849,7 +849,7 @@ export class WebGL2SaoPass {
 		gl.uniform1f(program.outputScale, 1);
 		gl.uniform1f(
 			program.resolutionScale,
-			FRONTEND_TUNING.rendering.ambientOcclusion.resolutionScale,
+			SHARED_FRONTEND_TUNING.rendering.ambientOcclusion.resolutionScale,
 		);
 		gl.uniform1i(
 			program.coverageVisualization,

@@ -26,7 +26,7 @@ import type {
 	ResolvedSceneInterestTarget,
 	SceneInterestTarget,
 } from "../lib/game/runtime/scene-target";
-import { FRONTEND_TUNING } from "../lib/frontend-tuning";
+import { EXPLORER_TUNING } from "./explorer-tuning";
 import {
 	ExplorerCameraInputController,
 	type FreeFlyCameraPose,
@@ -796,7 +796,7 @@ function createCamera(
 	projection: ProjectionClearanceRevision,
 ): Camera {
 	return {
-		far: FRONTEND_TUNING.explorer.camera.framing.far,
+		far: EXPLORER_TUNING.camera.framing.far,
 		fov: projection.fov,
 		near: projection.near,
 		placement: {

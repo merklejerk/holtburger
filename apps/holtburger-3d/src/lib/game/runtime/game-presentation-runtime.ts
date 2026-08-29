@@ -28,7 +28,6 @@ import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
 import { AABB3, Mat4, Quat, Vec3 } from "../math/types";
 import type { BakedDrawMergeCensus } from "../renderer/baked-draw-merge-census";
 import {
-	DEFAULT_FRAME_SETTINGS,
 	type FrameSettings,
 	type PortalTransitionFrame,
 	type Renderer,
@@ -123,7 +122,7 @@ import { SKY_OWNER_ID, type SkyOwnerId } from "./owner-ids";
 import { AudioControlCadence } from "./audio-control-cadence";
 import { SKY_OBJECT_ONLY_PART_INDEX } from "../environment/sky-behavior-targets";
 import type { SkyBehaviorTarget } from "../environment/sky-behavior-targets";
-import { FRONTEND_TUNING } from "../../frontend-tuning";
+import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import { EffectSystem } from "../systems/effect-system";
 import { AnimationAssetRepository } from "../animation/animation-asset-repository";
 import {
@@ -317,6 +316,8 @@ export interface GamePresentationRuntimeDependencies {
 		StaticObjectLayerArtifact | null,
 		OwnerId
 	>;
+	/** Mode-owned initial display policy; shared runtime behavior never chooses a frontend look. */
+	readonly frameSettings: FrameSettings;
 	/**
 	 * Optional per-phase tick timing.
 	 *
@@ -681,7 +682,7 @@ export class GamePresentationRuntime {
 	readonly #ambient: AmbientSystem;
 	/** Bounded owner for live ambient-weight and voice-placement control work. */
 	readonly #audioControlCadence = new AudioControlCadence(
-		FRONTEND_TUNING.audio.controlUpdateIntervalSeconds,
+		SHARED_FRONTEND_TUNING.audio.controlUpdateIntervalSeconds,
 	);
 	/** Where ambience is centred; the listener's own position, kept for the scan and for playback. */
 	#audioListenerPosition: SceneVector3 = sceneVector3([0, 0, 0]);
@@ -922,7 +923,7 @@ export class GamePresentationRuntime {
 	/** Frontend-owned static regional presentation state for every render frame. */
 	#environment: ResolvedSceneEnvironment = DEFAULT_ENVIRONMENT;
 	/** Frontend-selected dynamic display choices forwarded unchanged to each frame. */
-	#frameSettings: FrameSettings = DEFAULT_FRAME_SETTINGS;
+	#frameSettings: FrameSettings;
 	/** Presentation-only transition input consumed by the renderer's final-frame compositor. */
 	#portalTransition: PortalTransitionFrame | undefined;
 	/** Prepared authored portal closure retained until runtime teardown. */
@@ -962,6 +963,7 @@ export class GamePresentationRuntime {
 		dependencies: GamePresentationRuntimeDependencies,
 	) {
 		this.#tickProfiler = dependencies.tickProfiler;
+		this.#frameSettings = dependencies.frameSettings;
 		this.#setupVisualSource = dependencies.setupVisualSource;
 		this.#terrainGenerator = dependencies.terrainGenerator;
 		this.#texturePreparer = dependencies.texturePreparer;
@@ -1186,9 +1188,9 @@ export class GamePresentationRuntime {
 		this.#audio = new AudioSystem(
 			dependencies.audioDevice,
 			Math.random,
-			FRONTEND_TUNING.audio.maximumSimultaneousVoices,
+			SHARED_FRONTEND_TUNING.audio.maximumSimultaneousVoices,
 			() => this.#lastFrameTimeSeconds,
-			FRONTEND_TUNING.audio.maximumWarmupReplaySeconds,
+			SHARED_FRONTEND_TUNING.audio.maximumWarmupReplaySeconds,
 		);
 		this.#ambient = new AmbientSystem({
 			// Pure wiring: the ambient system owns the buffer, what share means, and the indoor
@@ -1284,7 +1286,7 @@ export class GamePresentationRuntime {
 						(scriptWiring.system?.holds(target) ?? false),
 				},
 			},
-			FRONTEND_TUNING.diagnostics.maximumRecentEffectObservations,
+			SHARED_FRONTEND_TUNING.diagnostics.maximumRecentEffectObservations,
 		);
 		this.#animation = new AnimationSystem(this.#effects, this.#behaviorRouter);
 		this.#physicsScriptSystem = new PhysicsScriptSystem<OwnerId | SkyOwnerId>(
@@ -1375,6 +1377,7 @@ export class GamePresentationRuntime {
 		soundTableSource: SoundTableSource,
 		particleMeshSource: ParticleMeshSource,
 		setupVisualSource: SetupVisualSource | null,
+		frameSettings: FrameSettings,
 		roll?: UniformRoll,
 		tickProfiler?: RuntimeTickProfiler,
 		workerFactories?: GamePresentationRuntimeWorkerFactories,
@@ -1397,6 +1400,7 @@ export class GamePresentationRuntime {
 				physicsScriptSource,
 				particleMeshSource,
 				setupVisualSource,
+				frameSettings,
 				roll,
 				soundTableSource,
 				tickProfiler,

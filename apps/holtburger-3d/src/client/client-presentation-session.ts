@@ -1,7 +1,7 @@
 import { sceneVec3, sceneVector3 } from "../lib/assets/ac-frame";
 import type { ActiveRegionSource } from "../lib/assets/active-region-source";
 import type { LandblockProfileSource } from "../lib/assets/landblock-profile-source";
-import { FRONTEND_TUNING } from "../lib/frontend-tuning";
+import { CLIENT_TUNING } from "./client-tuning";
 import { resolveDayFraction } from "../lib/game/environment/game-clock";
 import {
 	resolveSceneEnvironment,
@@ -63,15 +63,10 @@ import {
 } from "./client-lifecycle-session";
 import {
 	ClientCameraSession,
-	type ClientCameraDistancePolicy,
 	type ClientCameraStatus,
 	type ClientCameraTarget,
 } from "../lib/game/camera/client-camera-session";
-import {
-	PossessionCameraController,
-	type PossessionCameraOrbitPolicy,
-	type PossessionCameraRecenterPolicy,
-} from "../lib/game/camera/possession-camera-controller";
+import { PossessionCameraController } from "../lib/game/camera/possession-camera-controller";
 import {
 	createProjectionClearanceRevision,
 	type ProjectionClearanceRevision,
@@ -90,39 +85,6 @@ import type { MapEntity } from "../lib/game/map/map-blips";
 import type { MapTerrainSource } from "../lib/game/map/map-renderer";
 import { mapHeadingFromSceneTransform } from "../lib/game/map/map-view";
 import type { ScenePlacement } from "../lib/game/scene";
-
-/** Client presentation projection and the frontend's small reach/orbit policy. */
-const CLIENT_CAMERA = {
-	far: 2_000,
-	fov: 75,
-	height: 2,
-	near: 0.1,
-	pitchRadians: -0.2,
-	rearDistance: 4.5,
-	distance: {
-		initial: 4.5,
-		minimum: 1.2,
-		maximum: 8,
-	} satisfies ClientCameraDistancePolicy,
-	orbit: {
-		maximumPitchRadians: 1.35,
-		pitchRadiansPerPixel: 0.004,
-		yawRadiansPerPixel: 0.004,
-	} satisfies PossessionCameraOrbitPolicy,
-	recenter: {
-		delayMs: 350,
-		durationMs: 180,
-	} satisfies PossessionCameraRecenterPolicy,
-} as const;
-
-/** Static demand follows the authoritative player, not the interpolated camera. */
-const CLIENT_SCENE_INTEREST = {
-	buildingRadius: 2,
-	envCellRadius: 1,
-	explicitObjectRadius: 2,
-	generatedObjectRadius: 2,
-	terrainRadius: 3,
-} as const;
 
 /** Presentation state exposed to the thin client shell. */
 export type ClientPresentationStatusKind =
@@ -315,11 +277,11 @@ export class ClientPresentationSession {
 		const cameraSession = new ClientCameraSession(this.#session);
 		this.camera = new PossessionCameraController({
 			initialLook: {
-				pitchRadians: CLIENT_CAMERA.pitchRadians,
+				pitchRadians: CLIENT_TUNING.camera.pitchRadians,
 				yawRadians: 0,
 			},
-			orbit: CLIENT_CAMERA.orbit,
-			recenter: CLIENT_CAMERA.recenter,
+			orbit: CLIENT_TUNING.camera.orbit,
+			recenter: CLIENT_TUNING.camera.recenter,
 			session: cameraSession,
 		});
 	}
@@ -353,7 +315,7 @@ export class ClientPresentationSession {
 				: owner.runtime.spawnedEntityPlacement(playerGuid);
 		return {
 			anchor: placement === null ? null : mapAnchorFromPlacement(placement),
-			cameraFovRadians: (CLIENT_CAMERA.fov * Math.PI) / 180,
+			cameraFovRadians: (CLIENT_TUNING.camera.fov * Math.PI) / 180,
 			cameraHeadingRadians: this.camera.desiredLook().yawRadians,
 			presentedEntities: () =>
 				owner?.runtime.listPresentedSpawnedEntities() ?? [],
@@ -664,10 +626,11 @@ export class ClientPresentationSession {
 				canvas: this.#canvas,
 				hostTransport: this.#hostTransport,
 				signal: this.#constructionAbortController.signal,
+				frameSettings: CLIENT_TUNING.frameSettings,
 				audioTuning: {
 					placementSmoothingSeconds:
-						FRONTEND_TUNING.audio.placementSmoothingSeconds,
-					loudnessCurveExponent: FRONTEND_TUNING.audio.loudnessCurveExponent,
+						CLIENT_TUNING.audio.placementSmoothingSeconds,
+					loudnessCurveExponent: CLIENT_TUNING.audio.loudnessCurveExponent,
 				},
 			});
 			if (this.#destroyed) {
@@ -883,7 +846,7 @@ export class ClientPresentationSession {
 			return current;
 		const projection = createProjectionClearanceRevision(
 			(current?.revision ?? 0) + 1,
-			{ fov: CLIENT_CAMERA.fov, near: CLIENT_CAMERA.near },
+			{ fov: CLIENT_TUNING.camera.fov, near: CLIENT_TUNING.camera.near },
 			extent,
 		);
 		this.#cameraProjection = projection;
@@ -906,11 +869,11 @@ export class ClientPresentationSession {
 			return;
 		this.#cameraTarget = target;
 		this.camera.replaceLook({
-			pitchRadians: CLIENT_CAMERA.pitchRadians,
+			pitchRadians: CLIENT_TUNING.camera.pitchRadians,
 			yawRadians: createEntityFacingCameraYaw(player.placement.pose.rotation),
 		});
 		void this.camera
-			.start(target, CLIENT_CAMERA.distance, projection)
+			.start(target, CLIENT_TUNING.camera.distance, projection)
 			.catch((error: unknown) => {
 				if (this.#cameraTarget === target) this.#reportError(error);
 			});
@@ -1055,7 +1018,7 @@ export class ClientPresentationSession {
 			generation: worldGeneration,
 			key,
 		};
-		const request = coordinator.request(target, CLIENT_SCENE_INTEREST);
+		const request = coordinator.request(target, CLIENT_TUNING.sceneInterest);
 		void request.promise
 			.then((resolved) =>
 				owner.runtime.activateScene({
@@ -1105,7 +1068,7 @@ export class ClientPresentationSession {
 		const owner = this.#owner;
 		if (coordinator === null || owner === null) return;
 		this.#sceneTargetKey = key;
-		const request = coordinator.request(target, CLIENT_SCENE_INTEREST);
+		const request = coordinator.request(target, CLIENT_TUNING.sceneInterest);
 		void request.promise
 			.then((resolved) => {
 				if (
@@ -1280,7 +1243,7 @@ function createClientCamera(
 	);
 	const fallbackRotation = createCameraRotationRadians(
 		fallbackYaw,
-		CLIENT_CAMERA.pitchRadians,
+		CLIENT_TUNING.camera.pitchRadians,
 	);
 	if (boom !== null) {
 		const look = resolveCameraLookAtAngles(
@@ -1292,9 +1255,9 @@ function createClientCamera(
 			new Vec3(boom.visualPivot.x, boom.visualPivot.y, boom.visualPivot.z),
 		);
 		return {
-			far: CLIENT_CAMERA.far,
-			fov: projection?.fov ?? CLIENT_CAMERA.fov,
-			near: projection?.near ?? CLIENT_CAMERA.near,
+			far: CLIENT_TUNING.camera.far,
+			fov: projection?.fov ?? CLIENT_TUNING.camera.fov,
+			near: projection?.near ?? CLIENT_TUNING.camera.near,
 			placement: {
 				...boom.placement.residency,
 				position: boom.placement.position,
@@ -1305,23 +1268,26 @@ function createClientCamera(
 			},
 		};
 	}
-	const axes = createCameraAxesRadians(fallbackYaw, CLIENT_CAMERA.pitchRadians);
+	const axes = createCameraAxesRadians(
+		fallbackYaw,
+		CLIENT_TUNING.camera.pitchRadians,
+	);
 	const originWorld = createLandblockWorldOrigin(origin.landblockId).add(
 		origin.landblockOrigin,
 	);
 	const position = sceneVec3(
 		new Vec3(
-			originWorld.x - axes.forward.x * CLIENT_CAMERA.rearDistance,
+			originWorld.x - axes.forward.x * CLIENT_TUNING.camera.rearDistance,
 			originWorld.y +
-				CLIENT_CAMERA.height -
-				axes.forward.y * CLIENT_CAMERA.rearDistance,
-			originWorld.z - axes.forward.z * CLIENT_CAMERA.rearDistance,
+				CLIENT_TUNING.camera.height -
+				axes.forward.y * CLIENT_TUNING.camera.rearDistance,
+			originWorld.z - axes.forward.z * CLIENT_TUNING.camera.rearDistance,
 		),
 	);
 	return {
-		far: CLIENT_CAMERA.far,
-		fov: CLIENT_CAMERA.fov,
-		near: CLIENT_CAMERA.near,
+		far: CLIENT_TUNING.camera.far,
+		fov: CLIENT_TUNING.camera.fov,
+		near: CLIENT_TUNING.camera.near,
 		placement: {
 			envCellId: origin.envCellId,
 			landblockId: origin.landblockId,

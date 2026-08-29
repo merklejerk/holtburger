@@ -2,7 +2,7 @@
 	import type { SceneResidency } from "../lib/game/scene";
 	import type { SceneInterestTarget } from "../lib/game/runtime/scene-target";
 	import type { SceneInterestRadii } from "../lib/game/runtime/types";
-	import { FRONTEND_TUNING } from "../lib/frontend-tuning";
+	import { EXPLORER_TUNING } from "./explorer-tuning";
 	import type { ExplorerCameraFocusStatus } from "./explorer-camera-coordinator";
 	import {
 		formatResidencyRadius,
@@ -156,7 +156,7 @@
 	let interestInput = $state("0000");
 	let interestStatus = $state("No scene interest requested.");
 	let radii = $state<SceneInterestRadii>({
-		...FRONTEND_TUNING.explorer.residency.defaultRadii,
+		...EXPLORER_TUNING.residency.defaultRadii,
 	});
 
 	const parsedInterest = $derived(parseResidenceInput(interestInput));
@@ -298,8 +298,8 @@
 					<strong>{formatResidencyRadius(radii.terrainRadius)}</strong>
 					<input
 						id="explorer-residency-terrain"
-						max={FRONTEND_TUNING.explorer.residency.maximumRadius}
-						min={FRONTEND_TUNING.explorer.residency.minimumRadius}
+						max={EXPLORER_TUNING.residency.maximumRadius}
+						min={EXPLORER_TUNING.residency.minimumRadius}
 						step="1"
 						type="range"
 						value={radii.terrainRadius}

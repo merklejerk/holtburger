@@ -5,7 +5,7 @@ import {
 } from "../lib/game/landblocks";
 import { Vec3 } from "../lib/game/math/types";
 import { createCameraLookAtAngles } from "../lib/game/math/camera-orientation";
-import { FRONTEND_TUNING } from "../lib/frontend-tuning";
+import { EXPLORER_TUNING } from "./explorer-tuning";
 import type { FreeFlyCameraPose } from "./explorer-camera-input-controller";
 
 /** Minimal terrain query needed to reproduce the Explorer's automatic outdoor camera policy. */
@@ -28,15 +28,14 @@ export function resolveExplorerOutdoorFocusPose(
 		origin.z - OUTDOOR_LANDBLOCK_WORLD_SIZE / 2,
 	);
 	const position = new Vec3(
-		center.x + FRONTEND_TUNING.explorer.camera.outdoorFocus.offset,
+		center.x + EXPLORER_TUNING.camera.outdoorFocus.offset,
 		0,
-		center.z + FRONTEND_TUNING.explorer.camera.outdoorFocus.offset,
+		center.z + EXPLORER_TUNING.camera.outdoorFocus.offset,
 	);
 	const surface = query.queryOutdoorTerrainSurface(position);
 	if (!surface || surface.landblockId !== landblockId) return null;
 	const centerSurface = query.queryOutdoorTerrainSurface(center);
-	position.y =
-		surface.height + FRONTEND_TUNING.explorer.camera.outdoorFocus.clearance;
+	position.y = surface.height + EXPLORER_TUNING.camera.outdoorFocus.clearance;
 	center.y = centerSurface?.height ?? surface.height;
 	return createLookAtPose(position, center);
 }

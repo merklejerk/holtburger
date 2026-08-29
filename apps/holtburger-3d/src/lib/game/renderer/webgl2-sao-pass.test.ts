@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FRONTEND_TUNING } from "../../frontend-tuning";
+import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import {
 	WebGL2SaoScratchTargets,
 	saoScratchByteLength,
@@ -11,7 +11,8 @@ const RESIZED_EXTENT = { height: 6, width: 8 } as const;
 
 describe("WebGL2 SAO scratch policy", () => {
 	it("scales each axis independently and retains a positive minimum extent", () => {
-		const scale = FRONTEND_TUNING.rendering.ambientOcclusion.resolutionScale;
+		const scale =
+			SHARED_FRONTEND_TUNING.rendering.ambientOcclusion.resolutionScale;
 		expect(scaledSaoExtent({ height: 721, width: 1_281 }, scale)).toEqual({
 			height: Math.floor(721 * scale),
 			width: Math.floor(1_281 * scale),
@@ -25,7 +26,7 @@ describe("WebGL2 SAO scratch policy", () => {
 	it("reports the exact two-R8 allocation", () => {
 		const extent = scaledSaoExtent(
 			{ height: 1_080, width: 1_920 },
-			FRONTEND_TUNING.rendering.ambientOcclusion.resolutionScale,
+			SHARED_FRONTEND_TUNING.rendering.ambientOcclusion.resolutionScale,
 		);
 		expect(saoScratchByteLength(extent)).toBe(extent.width * extent.height * 2);
 	});

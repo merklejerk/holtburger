@@ -92,7 +92,7 @@ describe("DynamicEntityPlacementSystem", () => {
 
 		placements.applyPath(root, advance(10, 20), 100, 2_000);
 		const reset = advance(20, 99);
-		reset.kind = "reset";
+		reset.kind = "correction-snap";
 		placements.applyPath(root, reset, 0, 2_025);
 		placements.advance(2_050);
 		expect(scene.getResolvedPlacement(root)?.localToLandblock.m41).toBe(99);
@@ -217,16 +217,13 @@ function dynamicEntity(
 				reachesOutdoors: true,
 				reachedEnvCellIds: [],
 			},
-			acceleration: { x: 0, y: 0, z: 0 },
 			contact: "airborne",
-			omega: { x: 0, y: 0, z: 0 },
 			pose: {
 				coords: { x, y: 0, z: 0 },
 				landblockId: cellId(0x0102_0001),
 				rotation: { w: 1, x: 0, y: 0, z: 0 },
 			},
 			sampleMode: "simulating-velocity",
-			velocity: { x: 1, y: 0, z: 0 },
 		},
 		presentation: {
 			appearance: {

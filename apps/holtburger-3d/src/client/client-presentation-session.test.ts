@@ -909,9 +909,6 @@ function view(guid: number, landblockId = 0x0101_0100): DynamicEntityView {
 				reachesOutdoors: false,
 				reachedEnvCellIds: [cellId(0x0101_0001)],
 			},
-			velocity: { x: 0, y: 0, z: 0 },
-			acceleration: { x: 0, y: 0, z: 0 },
-			omega: { x: 0, y: 0, z: 0 },
 			contact: "grounded",
 			sampleMode: "authoritative-only",
 		},
@@ -922,7 +919,7 @@ function view(guid: number, landblockId = 0x0101_0100): DynamicEntityView {
 function advanceBatch(
 	guid: number,
 	landblockId = 0x0101_0100,
-	kind: "integrated" | "teleport" | "reset" = "integrated",
+	kind: "integrated" | "correction-snap" | "teleport" | "reset" = "integrated",
 	hostTime = 76,
 ): DynamicEntityTickBatch {
 	const entity = view(guid, landblockId);

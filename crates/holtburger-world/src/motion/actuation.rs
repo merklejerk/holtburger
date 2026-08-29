@@ -2,10 +2,11 @@
 //!
 //! The collision solver takes a planar drive velocity and an absolute world heading, so the
 //! authored offset is converted at this boundary — once, by the layer that owns the solver
-//! contract. That conversion is arithmetic on an exact per-tick quantity, not a reduction of the
-//! content: the offset was composed from ordered authored frames and is discarded after this tick.
-//! Retail does the same thing in the other direction, reducing its own accepted path to
-//! `cached_velocity` for the following tick.
+//! contract. That conversion is arithmetic on an exact per-tick quantity, not a reduction of
+//! the content: the offset was composed from ordered authored frames and is discarded after
+//! this tick. Retail likewise reduces its accepted path to observational `cached_velocity`,
+//! while retaining physical `m_velocityVector` as the next update's independent integration
+//! input.
 
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{RigidTransform, Vector3};

@@ -59,9 +59,6 @@ function entity(
 				coords: { x: 1, y: 2, z: 3 },
 				rotation: { w: 1, x: 0, y: 0, z: 0 },
 			},
-			velocity: { x: 0, y: 0, z: 0 },
-			acceleration: { x: 0, y: 0, z: 0 },
-			omega: { x: 0, y: 0, z: 0 },
 			contact: "unknown",
 			sampleMode: "authoritative-only",
 		},
@@ -241,7 +238,7 @@ describe("DynamicEntityMirror", () => {
 		const value = entity(7, 2);
 		const correction = ticked(value, 2);
 		correction.batch.durationMs = 0;
-		correction.batch.advances[0]!.kind = "reset";
+		correction.batch.advances[0]!.kind = "correction-snap";
 		expect(decodeDynamicEntityEvent(correction)).toEqual(correction);
 
 		const integrated = ticked(value, 3);

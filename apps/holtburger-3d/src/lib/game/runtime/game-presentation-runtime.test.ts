@@ -952,6 +952,12 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 
 		await runtime.upsertDynamicEntity(spawnedEntity(7, 1, { noDraw: true }));
 		expect(runtime.dynamicEntityPlacementRevision).toBe(installedRevision);
+		const contacted = spawnedEntity(7, 1, { noDraw: true });
+		if (contacted.placement.kind !== "world")
+			throw new Error("Contact fixture lost world placement.");
+		contacted.placement.contact = "sliding";
+		await runtime.upsertDynamicEntity(contacted);
+		expect(runtime.dynamicEntityPlacementRevision).toBe(installedRevision);
 
 		const moved = spawnedEntity(7, 1, { noDraw: true });
 		if (moved.placement.kind !== "world")
@@ -1575,16 +1581,13 @@ function spawnedEntity(
 				reachesOutdoors: true,
 				reachedEnvCellIds: [],
 			},
-			acceleration: { x: 0, y: 0, z: 0 },
 			contact: "unknown",
-			omega: { x: 0, y: 0, z: 0 },
 			pose: {
 				coords: { x: guid, y: 2, z: 3 },
 				landblockId: cellId(0x00010001),
 				rotation: { w: 1, x: 0, y: 0, z: 0 },
 			},
 			sampleMode: "authoritative-only",
-			velocity: { x: 0, y: 0, z: 0 },
 		},
 		presentation: {
 			appearance: {

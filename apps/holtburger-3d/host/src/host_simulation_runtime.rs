@@ -761,10 +761,9 @@ fn tick_body_transaction<T>(
     ))
 }
 
-/// Advances a dynamic body on retained velocity alone, which is what an uncommanded entity does.
+/// Advances a dynamic body from its retained physical vectors, with no kinematic drive.
 pub(crate) fn dynamic_entity_coasting_actuation(
     previous: &SpatialBody,
-    delta_seconds: f32,
 ) -> Result<PhysicalBodyActuation> {
     let definition = previous
         .physical
@@ -772,12 +771,11 @@ pub(crate) fn dynamic_entity_coasting_actuation(
         .context("scheduled dynamic body lost its physical definition")?
         .definition;
     match definition {
-        PhysicalBodyDefinition::FreeSphere { .. } => PhysicalBodyActuation::free_flight(
-            previous.velocity + previous.acceleration * delta_seconds,
-        )
-        .map_err(Into::into),
+        PhysicalBodyDefinition::FreeSphere { .. } => {
+            PhysicalBodyActuation::free_flight(previous.retained.velocity).map_err(Into::into)
+        }
         PhysicalBodyDefinition::Grounded { .. } => Ok(PhysicalBodyActuation::Grounded(
-            GroundedBodyActuation::coast().with_external_acceleration(previous.acceleration)?,
+            GroundedBodyActuation::coast(),
         )),
     }
 }

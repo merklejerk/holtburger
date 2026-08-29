@@ -107,7 +107,8 @@ bitflags::bitflags! {
         const NONE = 0x00;
         const HAS_VELOCITY = 0x01;
         const HAS_PLACEMENT_ID = 0x02;
-        const IS_GROUNDED = 0x04;
+        /// The received position reports physical contact (`PositionPack::has_contact` in retail).
+        const HAS_CONTACT = 0x04;
         const ORIENTATION_HAS_NO_W = 0x08;
         const ORIENTATION_HAS_NO_X = 0x10;
         const ORIENTATION_HAS_NO_Y = 0x20;

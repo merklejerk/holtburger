@@ -1783,14 +1783,21 @@ async function runPossessionScenario(
 		await invoke("probeNextFrameState");
 	}
 	let settledState = null;
+	let previousSettlingEntity = null;
+	let stationaryGroundedTicks = 0;
 	// The default outdoor camera can seed the fixture several hundred metres above support.
 	for (let tick = 0; tick < 480; tick += 1) {
 		await invoke("tickExplorerEntities", [tickMs]);
 		settledState = await invoke("state");
-		if (
-			exactHarnessEntity(settledState, spawned).placement.contact === "grounded"
-		)
-			break;
+		const settlingEntity = exactHarnessEntity(settledState, spawned);
+		stationaryGroundedTicks =
+			settlingEntity.placement.contact === "grounded" &&
+			previousSettlingEntity !== null &&
+			planarDistance(previousSettlingEntity, settlingEntity) <= 1e-6
+				? stationaryGroundedTicks + 1
+				: 0;
+		previousSettlingEntity = settlingEntity;
+		if (stationaryGroundedTicks >= 3) break;
 	}
 	if (settledState === null)
 		throw new Error("Possession scenario did not execute a settling tick.");
@@ -2499,8 +2506,16 @@ function assertPossessionScenario(scenario) {
 		throw new Error(
 			"Possessed A and D did not produce opposite heading signs.",
 		);
-	assertPlanarStill(scenario.turnStart, scenario.left.entity, "A turn");
-	assertPlanarStill(scenario.left.entity, scenario.right.entity, "D turn");
+	const leftTravel = planarDistance(scenario.turnStart, scenario.left.entity);
+	const rightTravel = planarDistance(
+		scenario.left.entity,
+		scenario.right.entity,
+	);
+	if (leftTravel > 0.01 || rightTravel > 0.01) {
+		throw new Error(
+			`Pure turns translated the possessed body: ${JSON.stringify({ leftTravel, leftProbe: scenario.left.probe, rightTravel, rightProbe: scenario.right.probe })}.`,
+		);
+	}
 
 	if (
 		planarDistance(scenario.combinedStart, scenario.combined.entity) <= 0.01 ||
@@ -2640,8 +2655,12 @@ function cameraDistance(first, second) {
 }
 
 function assertPlanarStill(first, second, label) {
-	if (planarDistance(first, second) > 0.01)
-		throw new Error(`${label} unexpectedly translated the possessed body.`);
+	const distance = planarDistance(first, second);
+	if (distance > 0.01) {
+		throw new Error(
+			`${label} unexpectedly translated the possessed body by ${distance} m from ${JSON.stringify(entityCoordinates(first))} to ${JSON.stringify(entityCoordinates(second))}.`,
+		);
+	}
 }
 
 function assertLaunchedEntityLifecycle(result) {
@@ -2651,24 +2670,28 @@ function assertLaunchedEntityLifecycle(result) {
 			"Launch scenario did not return a current launched entity.",
 		);
 	}
-	const { velocity } = lifecycle.launched.placement;
-	if (Math.hypot(velocity.x, velocity.y, velocity.z) <= 0) {
-		throw new Error("Launch scenario returned zero current velocity.");
-	}
 	const advance = lifecycle.advances.find(
 		(envelope) => envelope?.entityEvent !== null,
 	)?.entityEvent;
 	if (advance === undefined || advance === null) {
 		throw new Error("Launch scenario produced no changed-entity tick batch.");
 	}
-	if (
-		!advance.batch.advances.some(
-			({ entity }) =>
-				entity.identity.guid === lifecycle.spawned.identity.guid &&
-				entity.generation === lifecycle.spawned.generation,
-		)
-	) {
+	const launchedAdvance = advance.batch.advances.find(
+		({ entity }) =>
+			entity.identity.guid === lifecycle.spawned.identity.guid &&
+			entity.generation === lifecycle.spawned.generation,
+	);
+	if (launchedAdvance === undefined) {
 		throw new Error("Launch advance omitted the exact spawned generation.");
+	}
+	const initial = launchedAdvance.path.initial.pose.coords;
+	const final = launchedAdvance.path.legs.at(-1)?.end.pose.coords;
+	if (
+		final === undefined ||
+		Math.hypot(final.x - initial.x, final.y - initial.y, final.z - initial.z) <=
+			0
+	) {
+		throw new Error("Launch advance accepted no displacement.");
 	}
 }
 
@@ -2684,22 +2707,6 @@ function assertRelocatedEntityLifecycle(result, expectedKind) {
 		throw new Error(
 			`Relocation scenario returned ${advance?.kind ?? "no"} correction instead of ${expectedKind}.`,
 		);
-	}
-	const placement = advance.entity.placement;
-	if (
-		Math.hypot(
-			placement.velocity.x,
-			placement.velocity.y,
-			placement.velocity.z,
-			placement.acceleration.x,
-			placement.acceleration.y,
-			placement.acceleration.z,
-			placement.omega.x,
-			placement.omega.y,
-			placement.omega.z,
-		) !== 0
-	) {
-		throw new Error("Relocation correction did not clear live kinematics.");
 	}
 }
 
@@ -3362,14 +3369,16 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				tickCount: pairTicks.filter((event) => event !== null).length,
 				// Final placement of both bodies. The mover starts at x=0 relative to the target's
 				// x=+3; a blocking response leaves it short of the target rather than past it.
-				finalPlacements: contactState.spawnedEntities.map((entity) => ({
-					guid: entity.identity.guid,
-					wcid: entity.identity.wcid,
-					coords: entity.placement.pose.coords,
-					velocity: entity.placement.velocity,
-					contact: entity.placement.contact,
-					semanticMask: entity.physics.semanticMask,
-				})),
+				finalPlacements: contactState.spawnedEntities
+					.filter((entity) => entity.placement.kind === "world")
+					.map((entity) => ({
+						guid: entity.identity.guid,
+						wcid: entity.identity.wcid,
+						coords: entity.placement.pose.coords,
+						contact: entity.placement.contact,
+						playingClip: entity.playingClip,
+						semanticMask: entity.physics.semanticMask,
+					})),
 				contactState: summarizeEntityRuntimeState(contactState),
 				retiredCount: retired,
 				teardownState: summarizeEntityRuntimeState(
@@ -3873,17 +3882,26 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				});
 		let despawnedEntityState = null;
 		if (spawnedEntity !== null) {
-			await evaluate(
-				client,
-				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.despawnExplorerEntity",
-				[spawnedEntity.identity.guid, spawnedEntity.generation],
+			const stillLive = state.spawnedEntities.some(
+				(entity) =>
+					entity.identity.guid === spawnedEntity.identity.guid &&
+					entity.generation === spawnedEntity.generation,
 			);
-			await delay(100);
-			despawnedEntityState = await evaluate(
-				client,
-				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
-				[],
-			);
+			if (stillLive) {
+				await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.despawnExplorerEntity",
+					[spawnedEntity.identity.guid, spawnedEntity.generation],
+				);
+				await delay(100);
+				despawnedEntityState = await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
+					[],
+				);
+			} else {
+				despawnedEntityState = state;
+			}
 		}
 		return {
 			bakedDrawMergeCensus,

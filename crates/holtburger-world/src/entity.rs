@@ -54,6 +54,10 @@ impl OrderedMotionSpeed {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntityMotionDirective {
+    /// Server-authored travel toward a world position.
+    MoveToPosition,
+    /// Server-authored travel toward another object.
+    MoveToObject,
     TurnToHeading {
         desired_heading: OrderedMotionSpeed,
         speed: OrderedMotionSpeed,
@@ -70,6 +74,14 @@ impl EntityMotionSnapshot {
         self.forward_command
             .or(self.sidestep_command)
             .or(self.turn_command)
+    }
+
+    /// Whether retail preserves authored heading while pose interpolation owns translation.
+    pub const fn is_moving_to(self) -> bool {
+        matches!(
+            self.directive,
+            Some(EntityMotionDirective::MoveToPosition | EntityMotionDirective::MoveToObject)
+        )
     }
 
     pub fn from_movement_event(data: &MovementEventData) -> Option<Self> {
@@ -101,6 +113,10 @@ impl EntityMotionSnapshot {
                 .state
                 .turn_speed
                 .and_then(OrderedMotionSpeed::from_f32);
+        } else if matches!(data.data, MovementTypeData::MoveToPosition(_)) {
+            snapshot.directive = Some(EntityMotionDirective::MoveToPosition);
+        } else if matches!(data.data, MovementTypeData::MoveToObject(_)) {
+            snapshot.directive = Some(EntityMotionDirective::MoveToObject);
         } else if let MovementTypeData::TurnToHeading(turn) = &data.data {
             let desired_heading = OrderedMotionSpeed::from_f32(turn.params.desired_heading);
             let speed = OrderedMotionSpeed::from_f32(turn.params.speed);
@@ -295,13 +311,6 @@ const OBJECT_SERVER_CONTROL_SEQUENCE_INDEX: usize = 5;
 const OBJECT_FORCE_POSITION_SEQUENCE_INDEX: usize = 6;
 const OBJECT_INSTANCE_SEQUENCE_INDEX: usize = 8;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EntityPositionSyncOutcome {
-    Rejected,
-    Moved,
-    Reset { sequence: u16 },
-}
-
 impl HasProperties for Entity {
     fn properties(&self) -> &WorldObjectProperties {
         &self.properties
@@ -325,7 +334,36 @@ impl Entity {
             .and_then(EntityMotionSnapshot::motion_command)
     }
 
-    pub fn should_accept_server_position_sequences(
+    /// Current remote-object position timestamp.
+    pub const fn position_sequence(&self) -> u16 {
+        self.sequences[OBJECT_POSITION_SEQUENCE_INDEX]
+    }
+
+    /// Current remote-object teleport timestamp.
+    pub const fn teleport_sequence(&self) -> u16 {
+        self.sequences[OBJECT_TELEPORT_SEQUENCE_INDEX]
+    }
+
+    /// Advances only the remote position timestamp after retail admits a non-contact sample.
+    pub fn apply_remote_position_sequence_only(&mut self, position_sequence: u16) {
+        self.sequences[OBJECT_POSITION_SEQUENCE_INDEX] = position_sequence;
+    }
+
+    /// Commits one admitted remote position sample after world policy classifies its runtime effect.
+    pub fn apply_remote_position_sample(
+        &mut self,
+        position: WorldPosition,
+        instance_sequence: u16,
+        position_sequence: u16,
+        teleport_sequence: u16,
+    ) {
+        self.position = position;
+        self.sequences[OBJECT_INSTANCE_SEQUENCE_INDEX] = instance_sequence;
+        self.sequences[OBJECT_POSITION_SEQUENCE_INDEX] = position_sequence;
+        self.sequences[OBJECT_TELEPORT_SEQUENCE_INDEX] = teleport_sequence;
+    }
+
+    fn should_accept_autonomous_position_sequences(
         &self,
         teleport_sequence: u16,
         force_position_sequence: u16,
@@ -346,45 +384,27 @@ impl Entity {
         true
     }
 
-    pub fn apply_server_position_update(
+    /// Applies the quarantined server-to-client autonomous-position path as a discontinuity.
+    pub fn apply_server_autonomous_position_update(
         &mut self,
         position: WorldPosition,
         instance_sequence: u16,
-        position_sequence: Option<u16>,
         teleport_sequence: u16,
         force_position_sequence: u16,
-        server_control_sequence: Option<u16>,
-    ) -> EntityPositionSyncOutcome {
-        if !self.should_accept_server_position_sequences(teleport_sequence, force_position_sequence)
+        server_control_sequence: u16,
+    ) -> bool {
+        if !self
+            .should_accept_autonomous_position_sequences(teleport_sequence, force_position_sequence)
         {
-            return EntityPositionSyncOutcome::Rejected;
+            return false;
         }
-
-        let old_teleport_sequence = self.sequences[OBJECT_TELEPORT_SEQUENCE_INDEX];
-        let old_force_position_sequence = self.sequences[OBJECT_FORCE_POSITION_SEQUENCE_INDEX];
 
         self.position = position;
         self.sequences[OBJECT_INSTANCE_SEQUENCE_INDEX] = instance_sequence;
-        if let Some(position_sequence) = position_sequence {
-            self.sequences[OBJECT_POSITION_SEQUENCE_INDEX] = position_sequence;
-        }
         self.sequences[OBJECT_TELEPORT_SEQUENCE_INDEX] = teleport_sequence;
         self.sequences[OBJECT_FORCE_POSITION_SEQUENCE_INDEX] = force_position_sequence;
-        if let Some(server_control_sequence) = server_control_sequence {
-            self.sequences[OBJECT_SERVER_CONTROL_SEQUENCE_INDEX] = server_control_sequence;
-        }
-
-        let reset_required = position_sequence.is_none()
-            || is_newer_u16(teleport_sequence, old_teleport_sequence)
-            || is_newer_u16(force_position_sequence, old_force_position_sequence);
-
-        if reset_required {
-            EntityPositionSyncOutcome::Reset {
-                sequence: force_position_sequence,
-            }
-        } else {
-            EntityPositionSyncOutcome::Moved
-        }
+        self.sequences[OBJECT_SERVER_CONTROL_SEQUENCE_INDEX] = server_control_sequence;
+        true
     }
 
     pub fn set_property(&mut self, update: PropertyUpdate) {

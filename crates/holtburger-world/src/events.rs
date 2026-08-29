@@ -1,6 +1,6 @@
 use crate::book::BookData;
 use crate::entity::{Entity, EntityMotionSnapshot};
-use crate::spatial::{RuntimeBodyResetCause, SpatialBodyId};
+use crate::spatial::{RuntimeBodyAdvanceKind, RuntimeBodyResetCause, SpatialBodyId};
 use crate::state;
 use crate::stats;
 use crate::vendor;
@@ -82,6 +82,8 @@ pub enum WorldEvent {
     /// One routine solver commit; consumers batch these at the owning fixed-tick boundary.
     RuntimeBodyAdvanced {
         body_id: SpatialBodyId,
+        /// Whether this tick integrated a path or installed an ordinary correction snap.
+        kind: RuntimeBodyAdvanceKind,
     },
     RuntimeBodyRemoved {
         body_id: SpatialBodyId,
@@ -110,23 +112,22 @@ pub enum WorldEvent {
         grounded: bool,
     },
     SelfUpdatePosition {
-        /// The accepted server pose. The client correction owner consumes this once; the
-        /// authoritative world has already installed it as the server-side reference pose.
+        /// Accepted server pose consumed once by the core-owned local authority adapter.
         position: WorldPosition,
-        /// Whether the position packet reported walkable contact.
-        contact: bool,
         /// Teleport epoch before this accepted packet was applied.
         known_teleport_sequence: u16,
+        /// Force-position epoch before this accepted packet was applied.
+        known_force_position_sequence: u16,
         teleport_sequence: u16,
         force_position_sequence: u16,
     },
     SelfAutonomousPosition {
-        /// The accepted autonomous position payload.
+        /// Accepted autonomous pose consumed once by the core-owned local authority adapter.
         position: WorldPosition,
-        /// Whether the server reported contact for this autonomous update.
-        contact: bool,
         /// Teleport epoch before this accepted packet was applied.
         known_teleport_sequence: u16,
+        /// Force-position epoch before this accepted packet was applied.
+        known_force_position_sequence: u16,
         teleport_sequence: u16,
         force_position_sequence: u16,
         server_control_sequence: u16,

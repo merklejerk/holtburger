@@ -161,8 +161,11 @@ fn every_canonical_pose_commit_moves_or_clears_coarse_membership() {
         scene.apply_solved_runtime_body_kinematics(&SolvedBodyKinematics {
             body_id,
             pose: third,
-            velocity: Vector3::new(1.0, 0.0, 0.0),
-            omega: Vector3::zero(),
+            accepted_motion: AcceptedBodyMotion {
+                velocity: Vector3::new(1.0, 0.0, 0.0),
+                omega: Vector3::zero(),
+            },
+            retained: RetainedBodyKinematics::default(),
             contact: ContactState::Airborne,
             projection_state: None,
         })
@@ -303,7 +306,7 @@ fn project_pose_forward_distance_ignores_non_finite_distance() {
 }
 
 #[test]
-fn advance_body_kinematics_rotates_velocity_with_turn_rate() {
+fn advance_body_kinematics_integrates_world_velocity_and_world_axis_omega_independently() {
     let input = SolveBodyInput::velocity(
         SpatialBodyId::Entity(Guid(0x5000_0001)),
         WorldPosition {
@@ -318,11 +321,11 @@ fn advance_body_kinematics_rotates_velocity_with_turn_rate() {
 
     let solved = advance_body_kinematics(&input, Duration::from_secs(1));
 
-    assert!((solved.pose.rotation.to_heading().to_degrees() - 180.0).abs() < 1e-4);
-    assert!((solved.velocity.x - 18.0).abs() < 1e-4);
-    assert!(solved.velocity.y.abs() < 1e-4);
-    assert!((solved.pose.coords.x - 18.0).abs() < 1e-4);
-    assert!(solved.pose.coords.y.abs() < 1e-4);
+    assert!(solved.pose.rotation.to_heading().to_degrees().abs() < 1e-4);
+    assert!(solved.accepted_motion.velocity.x.abs() < 1e-4);
+    assert!((solved.accepted_motion.velocity.y - 18.0).abs() < 1e-4);
+    assert!(solved.pose.coords.x.abs() < 1e-4);
+    assert!((solved.pose.coords.y - 18.0).abs() < 1e-4);
     assert_eq!(solved.contact, ContactState::Unknown);
 }
 
@@ -399,29 +402,48 @@ fn authored_projection_integrates_an_offset_in_the_bodys_own_frame() {
         body_id: SpatialBodyId::Entity(guid),
         pose,
         contact: ContactState::Grounded,
-        basis: Some(SolveProjectionBasis::AuthoredDrive {
-            offset: RigidTransform {
-                translation: Vector3::new(0.0, 2.0, 0.0),
-                rotation: Quaternion::from_axis_angle(Vector3::new(0.0, 0.0, 1.0), quarter_turn)
-                    .expect("a unit axis and finite angle build a rotation"),
-            },
+        authored_offset: Some(RigidTransform {
+            translation: Vector3::new(0.0, 2.0, 0.0),
+            rotation: Quaternion::from_axis_angle(Vector3::new(0.0, 0.0, 1.0), quarter_turn)
+                .expect("a unit axis and finite angle build a rotation"),
         }),
+        retained: RetainedBodyKinematics::default(),
     };
 
-    let offset = match input.basis {
-        Some(SolveProjectionBasis::AuthoredDrive { offset }) => offset,
-        _ => unreachable!("test input should carry an authored offset"),
-    };
-    let body = advance_authored_body_kinematics(&input, offset, Duration::from_secs(1));
+    let body = advance_body_kinematics(&input, Duration::from_secs(1));
 
     assert!((body.pose.coords.x - 10.0).abs() < 1e-4);
     assert!((body.pose.coords.y - 22.0).abs() < 1e-4);
-    assert!((body.velocity.y - 2.0).abs() < 1e-4);
+    assert!((body.accepted_motion.velocity.y - 2.0).abs() < 1e-4);
     assert!(
-        (body.omega.z.abs() - quarter_turn).abs() < 1e-4,
+        (body.accepted_motion.omega.z.abs() - quarter_turn).abs() < 1e-4,
         "the authored rotation reduces to the heading rate it achieved"
     );
     assert_eq!(body.contact, ContactState::Grounded);
+}
+
+#[test]
+fn authored_turn_in_place_has_no_linear_or_retained_motion() {
+    let body_id = SpatialBodyId::Entity(Guid(0x5000_0007));
+    let quarter_turn = std::f32::consts::FRAC_PI_2;
+    let input = SolveBodyInput {
+        body_id,
+        pose: make_position(10.0, 20.0, 90.0_f32.to_radians()),
+        contact: ContactState::Grounded,
+        authored_offset: Some(RigidTransform {
+            translation: Vector3::zero(),
+            rotation: Quaternion::from_axis_angle(Vector3::new(0.0, 0.0, 1.0), quarter_turn)
+                .expect("a unit axis and finite angle build a rotation"),
+        }),
+        retained: RetainedBodyKinematics::default(),
+    };
+
+    let body = advance_body_kinematics(&input, Duration::from_millis(30));
+
+    assert_eq!(body.pose.global_coords(), input.pose.global_coords());
+    assert_eq!(body.accepted_motion.velocity, Vector3::zero());
+    assert!((body.accepted_motion.omega.z.abs() - quarter_turn / 0.03).abs() < 1e-3);
+    assert_eq!(body.retained, RetainedBodyKinematics::default());
 }
 
 /// Retail's support gate zeroes authored translation off walkable support and never touches the
@@ -436,24 +458,52 @@ fn an_unsupported_body_keeps_authored_rotation_and_loses_authored_translation() 
         body_id: SpatialBodyId::Entity(guid),
         pose,
         contact: ContactState::Airborne,
-        basis: Some(SolveProjectionBasis::AuthoredDrive {
-            offset: RigidTransform {
-                translation: Vector3::new(0.0, 2.0, 0.0),
-                rotation: Quaternion::from_axis_angle(Vector3::new(0.0, 0.0, 1.0), quarter_turn)
-                    .expect("a unit axis and finite angle build a rotation"),
-            },
+        authored_offset: Some(RigidTransform {
+            translation: Vector3::new(0.0, 2.0, 0.0),
+            rotation: Quaternion::from_axis_angle(Vector3::new(0.0, 0.0, 1.0), quarter_turn)
+                .expect("a unit axis and finite angle build a rotation"),
         }),
+        retained: RetainedBodyKinematics::default(),
     };
 
-    let offset = match input.basis {
-        Some(SolveProjectionBasis::AuthoredDrive { offset }) => offset,
-        _ => unreachable!("test input should carry an authored offset"),
-    };
-    let body = advance_authored_body_kinematics(&input, offset, Duration::from_secs(1));
+    let body = advance_body_kinematics(&input, Duration::from_secs(1));
 
     assert!((body.pose.coords.y - 20.0).abs() < 1e-4);
-    assert_eq!(body.velocity, Vector3::zero());
-    assert!((body.omega.z.abs() - quarter_turn).abs() < 1e-4);
+    assert_eq!(body.accepted_motion.velocity, Vector3::zero());
+    assert!((body.accepted_motion.omega.z.abs() - quarter_turn).abs() < 1e-4);
+}
+
+#[test]
+fn an_authored_stop_clears_accepted_motion_without_manufacturing_coasting_momentum() {
+    let body_id = SpatialBodyId::Entity(Guid(0x5000_0006));
+    let start = make_position(10.0, 20.0, 90.0_f32.to_radians());
+    let moving = SolveBodyInput {
+        body_id,
+        pose: start,
+        contact: ContactState::Grounded,
+        authored_offset: Some(RigidTransform {
+            translation: Vector3::new(0.0, 0.3, 0.0),
+            rotation: Quaternion::identity(),
+        }),
+        retained: RetainedBodyKinematics::default(),
+    };
+    let moved = advance_body_kinematics(&moving, Duration::from_millis(30));
+    assert!((moved.accepted_motion.velocity.y - 10.0).abs() < 1e-4);
+    assert_eq!(moved.retained, RetainedBodyKinematics::default());
+
+    let stopped = advance_body_kinematics(
+        &SolveBodyInput {
+            body_id,
+            pose: moved.pose,
+            contact: ContactState::Grounded,
+            authored_offset: None,
+            retained: moved.retained,
+        },
+        Duration::from_millis(30),
+    );
+    assert_eq!(stopped.pose, moved.pose);
+    assert_eq!(stopped.accepted_motion, AcceptedBodyMotion::default());
+    assert_eq!(stopped.retained, RetainedBodyKinematics::default());
 }
 
 #[test]
@@ -477,7 +527,7 @@ fn spatial_scene_tracks_body_registration_update_and_removal() {
 
     let mut updated = body;
     updated.pose.coords = Vector3::new(4.0, 5.0, 6.0);
-    updated.velocity = Vector3::new(7.0, 8.0, 0.0);
+    updated.retained.velocity = Vector3::new(7.0, 8.0, 0.0);
     updated.sampling.mode = SpatialSampleMode::SimulatingVelocity;
 
     let previous = scene
@@ -489,7 +539,7 @@ fn spatial_scene_tracks_body_registration_update_and_removal() {
         .body(body_id)
         .expect("updated body should remain present");
     assert_eq!(stored.pose.coords, Vector3::new(4.0, 5.0, 6.0));
-    assert_eq!(stored.velocity, Vector3::new(7.0, 8.0, 0.0));
+    assert_eq!(stored.retained.velocity, Vector3::new(7.0, 8.0, 0.0));
     assert_eq!(stored.sampling.mode, SpatialSampleMode::SimulatingVelocity);
 
     let removed = scene
@@ -533,10 +583,12 @@ fn body_solver_types_preserve_body_identity_and_support_ephemeral_events() {
         body_id: SpatialBodyId::Entity(Guid(0x7000_0001)),
         pose,
         contact: ContactState::Unknown,
-        basis: Some(SolveProjectionBasis::velocity(
-            Vector3::new(2.0, 0.0, 0.0),
-            Vector3::new(0.0, 0.0, 3.0),
-        )),
+        authored_offset: None,
+        retained: RetainedBodyKinematics {
+            velocity: Vector3::new(2.0, 0.0, 0.0),
+            acceleration: Vector3::zero(),
+            omega: Vector3::new(0.0, 0.0, 3.0),
+        },
     };
 
     assert_eq!(
@@ -548,10 +600,12 @@ fn body_solver_types_preserve_body_identity_and_support_ephemeral_events() {
         body_id: SpatialBodyId::LocalPlayer(Guid(0x7000_0002)),
         pose,
         contact: ContactState::Unknown,
-        basis: Some(SolveProjectionBasis::velocity(
-            Vector3::new(2.0, 0.0, 0.0),
-            Vector3::new(0.0, 0.0, 3.0),
-        )),
+        authored_offset: None,
+        retained: RetainedBodyKinematics {
+            velocity: Vector3::new(2.0, 0.0, 0.0),
+            acceleration: Vector3::zero(),
+            omega: Vector3::new(0.0, 0.0, 3.0),
+        },
     };
 
     assert_eq!(
@@ -573,7 +627,7 @@ fn body_solver_types_preserve_body_identity_and_support_ephemeral_events() {
 }
 
 #[test]
-fn reconcile_authoritative_body_resets_sampling_on_forced_reposition() {
+fn authoritative_body_reset_resets_sampling_on_forced_reposition() {
     let mut scene = SpatialScene::new();
     let body_id = SpatialBodyId::Entity(Guid(0x7000_0010));
     let start = Instant::now();
@@ -589,15 +643,17 @@ fn reconcile_authoritative_body_resets_sampling_on_forced_reposition() {
     };
 
     scene.register_body(SpatialBody::new(body_id, start_pose, start));
-    scene.reconcile_authoritative_body(
+    scene.apply_authoritative_body_effect(
         body_id,
-        AuthoritativeBodyKinematics {
+        AuthoritativePoseEffect::Reset {
             pose: reset_pose,
+            cause: AuthoritativePoseResetCause::ForcedReposition,
+        },
+        AuthoritativeBodyVectors {
             velocity: Vector3::new(4.0, 5.0, 6.0),
             acceleration: Vector3::zero(),
             omega: Vector3::new(0.0, 0.0, 1.0),
         },
-        AuthoritativeBodySync::Reset,
         start + Duration::from_secs(1),
     );
 
@@ -606,14 +662,142 @@ fn reconcile_authoritative_body_resets_sampling_on_forced_reposition() {
         .expect("body should exist after reconcile");
     assert_eq!(body.authoritative_pose, Some(reset_pose));
     assert_eq!(body.pose, reset_pose);
-    assert_eq!(body.velocity, Vector3::new(4.0, 5.0, 6.0));
-    assert_eq!(body.omega, Vector3::new(0.0, 0.0, 1.0));
+    assert_eq!(body.retained.velocity, Vector3::zero());
+    assert_eq!(body.retained.omega, Vector3::zero());
     assert_eq!(body.motion_state, None);
     assert_eq!(body.sampling.mode, SpatialSampleMode::Suspended);
     assert_eq!(
         body.sampling.last_derived_at,
         start + Duration::from_secs(1)
     );
+}
+
+#[test]
+fn authoritative_pose_effects_do_not_infer_initialization_or_replace_ordinary_runtime_pose() {
+    let mut scene = SpatialScene::new();
+    let body_id = SpatialBodyId::Entity(Guid(0x7000_0011));
+    let now = Instant::now();
+    let initial_pose = WorldPosition {
+        landblock_id: Guid(0x1111_0000),
+        coords: Vector3::new(1.0, 2.0, 3.0),
+        ..Default::default()
+    };
+    let runtime_pose = WorldPosition {
+        coords: Vector3::new(4.0, 5.0, 3.0),
+        ..initial_pose
+    };
+    let target_pose = WorldPosition {
+        coords: Vector3::new(8.0, 9.0, 3.0),
+        ..initial_pose
+    };
+    let vectors = AuthoritativeBodyVectors {
+        velocity: Vector3::zero(),
+        acceleration: Vector3::zero(),
+        omega: Vector3::zero(),
+    };
+
+    assert!(!scene.apply_authoritative_body_effect(
+        body_id,
+        AuthoritativePoseEffect::Confirm { pose: target_pose },
+        vectors,
+        now,
+    ));
+    assert!(scene.body(body_id).is_none());
+
+    assert!(scene.apply_authoritative_body_effect(
+        body_id,
+        AuthoritativePoseEffect::Initialize { pose: initial_pose },
+        vectors,
+        now,
+    ));
+    assert!(scene.apply_runtime_body_pose(
+        body_id,
+        runtime_pose,
+        SpatialSampleMode::SimulatingMotionState,
+    ));
+
+    for effect in [
+        AuthoritativePoseEffect::Confirm { pose: target_pose },
+        AuthoritativePoseEffect::Interpolate {
+            pose: target_pose,
+            keep_heading: false,
+            adjusted_max_speed_mps: None,
+        },
+        AuthoritativePoseEffect::Snap { pose: target_pose },
+    ] {
+        assert!(scene.apply_authoritative_body_effect(body_id, effect, vectors, now));
+        let body = scene.body(body_id).expect("initialized body must survive");
+        assert_eq!(body.authoritative_pose, Some(target_pose));
+        assert_eq!(body.pose, runtime_pose);
+    }
+
+    let updated_vectors = AuthoritativeBodyVectors {
+        velocity: Vector3::new(1.0, 2.0, 3.0),
+        acceleration: Vector3::new(0.0, 0.0, -9.8),
+        omega: Vector3::new(0.0, 0.0, 0.5),
+    };
+    assert!(scene.apply_authoritative_body_vectors(body_id, updated_vectors, now));
+    let body = scene.body(body_id).expect("vector update retains body");
+    assert_eq!(body.pose, runtime_pose);
+    assert_eq!(body.authoritative_pose, Some(target_pose));
+    assert_eq!(body.retained.velocity, updated_vectors.velocity);
+}
+
+#[test]
+fn reset_and_world_suspension_clear_pose_reconciliation_state() {
+    let mut scene = SpatialScene::new();
+    let now = Instant::now();
+    let body_id = SpatialBodyId::Entity(Guid(0x7000_0012));
+    let initial_pose = WorldPosition {
+        landblock_id: Guid(0x1111_0000),
+        ..Default::default()
+    };
+    let target_pose = WorldPosition {
+        coords: Vector3::new(5.0, 0.0, 0.0),
+        ..initial_pose
+    };
+    let vectors = AuthoritativeBodyVectors {
+        velocity: Vector3::zero(),
+        acceleration: Vector3::zero(),
+        omega: Vector3::zero(),
+    };
+    scene.apply_authoritative_body_effect(
+        body_id,
+        AuthoritativePoseEffect::Initialize { pose: initial_pose },
+        vectors,
+        now,
+    );
+    scene.apply_authoritative_body_effect(
+        body_id,
+        AuthoritativePoseEffect::Interpolate {
+            pose: target_pose,
+            keep_heading: false,
+            adjusted_max_speed_mps: None,
+        },
+        vectors,
+        now,
+    );
+    assert!(scene.body(body_id).unwrap().has_pose_reconciliation_state());
+
+    scene.suspend_runtime_bodies(now + Duration::from_millis(30));
+    assert!(!scene.body(body_id).unwrap().has_pose_reconciliation_state());
+
+    scene.apply_authoritative_body_effect(
+        body_id,
+        AuthoritativePoseEffect::Confirm { pose: target_pose },
+        vectors,
+        now,
+    );
+    scene.apply_authoritative_body_effect(
+        body_id,
+        AuthoritativePoseEffect::Reset {
+            pose: target_pose,
+            cause: AuthoritativePoseResetCause::ForcedReposition,
+        },
+        vectors,
+        now,
+    );
+    assert!(!scene.body(body_id).unwrap().has_pose_reconciliation_state());
 }
 
 #[test]
@@ -668,8 +852,8 @@ fn spatial_scene_relocation_clears_runtime_motion_and_rebuilds_body() {
     let body = scene.body(body_id).expect("body should remain tracked");
     assert_eq!(body.pose, make_position(8.0, 9.0, 0.25));
     assert_eq!(body.authoritative_pose, Some(make_position(8.0, 9.0, 0.25)));
-    assert_eq!(body.velocity, Vector3::zero());
-    assert_eq!(body.omega, Vector3::zero());
+    assert_eq!(body.retained.velocity, Vector3::zero());
+    assert_eq!(body.retained.omega, Vector3::zero());
     assert_eq!(body.motion_state, None);
     assert_eq!(body.sampling.mode, SpatialSampleMode::AuthoritativeOnly);
 }

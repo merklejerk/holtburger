@@ -1,7 +1,7 @@
 //! Source-neutral frontend projection and dynamic-entity delivery values.
 
 use holtburger_common::position::WorldPosition;
-use holtburger_common::{Guid, ParentLocation, Placement, Vector3};
+use holtburger_common::{Guid, ParentLocation, Placement};
 use holtburger_world::motion::{MotionClipCompletion, PlayingMotionClip};
 use holtburger_world::{
     ContactState, EffectiveEntityPhysicsState, EntityAppearance, EntityPlacement,
@@ -113,18 +113,12 @@ pub enum DynamicEntitySampleModeView {
     rename_all_fields = "camelCase"
 )]
 pub enum DynamicEntityPlacementView {
-    /// Canonical pose, kinematics, support, and sampling state owned by the solver scene.
+    /// Canonical pose, support, and sampling state owned by the solver scene.
     World {
         /// Current accepted root pose; its cell ID is also the current residency.
         pose: WorldPosition,
         /// Complete source-domain membership accepted atomically with `pose`.
         spatial_membership: DynamicEntitySpatialMembership,
-        /// Current world-space linear velocity.
-        velocity: Vector3,
-        /// Current world-space linear acceleration.
-        acceleration: Vector3,
-        /// Current world-space angular velocity.
-        omega: Vector3,
         /// Current solver/server support classification.
         contact: DynamicEntityContactView,
         /// Current sparse sampling behavior.
@@ -243,6 +237,8 @@ impl DynamicEntitySnapshot {
 pub enum DynamicEntityPlacementAdvanceKind {
     /// Ordinary fixed-tick integration; render frames interpolate the complete accepted path.
     Integrated,
+    /// Ordinary far correction; consumers snap without treating it as a lifecycle reset.
+    CorrectionSnap,
     /// Explicit discontinuous relocation; consumers snap and clear the previous path.
     Teleport,
     /// Forced authority reset; consumers snap and clear all prior correction state.
@@ -419,9 +415,6 @@ pub fn project_dynamic_entity_view(source: DynamicEntityViewSource) -> DynamicEn
             DynamicEntityPlacementView::World {
                 pose: world.body.runtime_pose,
                 spatial_membership: world.spatial_membership,
-                velocity: world.body.velocity,
-                acceleration: world.body.acceleration,
-                omega: world.body.omega,
                 contact: world.body.contact.into(),
                 sample_mode: world.body.sample_mode.into(),
             },

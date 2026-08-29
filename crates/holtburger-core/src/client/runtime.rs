@@ -73,7 +73,7 @@ impl ClientRuntime {
                 self.simulation.untrack_body(SpatialBodyId::Entity(*guid));
             }
             WorldEvent::RuntimeBodyChanged { body_id }
-            | WorldEvent::RuntimeBodyAdvanced { body_id } => {
+            | WorldEvent::RuntimeBodyAdvanced { body_id, .. } => {
                 self.sync_remote_body_tracking(*body_id);
             }
             WorldEvent::RuntimeBodyRemoved { body_id }
@@ -97,8 +97,7 @@ impl ClientRuntime {
     ) {
         match event {
             WorldEvent::RuntimeBodiesReset { .. } => {
-                self.movement.reset_manual_motion_playback();
-                self.movement.clear_server_correction();
+                self.movement.clear_server_controlled_projection();
                 self.reset_camera();
                 if let Some(coordinator) = self.collision_coordinator.as_mut() {
                     coordinator.invalidate();
@@ -117,8 +116,7 @@ impl ClientRuntime {
                 }
             }
             WorldEvent::ForcedReposition { guid, .. } if *guid == self.world.player.guid => {
-                self.movement.reset_manual_motion_playback();
-                self.movement.clear_server_correction();
+                self.movement.clear_server_controlled_projection();
                 self.reset_camera();
                 if let Some(coordinator) = self.collision_coordinator.as_mut() {
                     coordinator.invalidate();
@@ -275,6 +273,7 @@ impl ClientRuntime {
                         .collision_coordinator
                         .as_ref()
                         .map(super::collision::ClientCollisionCoordinator::snapshot);
+                    let mut placement_kind_overrides = std::collections::HashMap::new();
                     if active_world {
                         let simulation_events = self.simulation.tick(
                             now,
@@ -287,10 +286,23 @@ impl ClientRuntime {
                         })?;
                         let mut advanced_runtime_bodies = Vec::new();
                         for event in simulation_events {
-                            if let WorldEvent::RuntimeBodyAdvanced { body_id } = event
-                                && let Some(body) = self.world.runtime_body_view(body_id)
-                            {
-                                advanced_runtime_bodies.push(body);
+                            if let WorldEvent::RuntimeBodyAdvanced { body_id, kind } = event {
+                                if let Some(guid) = body_id.authoritative_guid() {
+                                    placement_kind_overrides.insert(
+                                        guid,
+                                        match kind {
+                                            holtburger_world::RuntimeBodyAdvanceKind::Integrated => {
+                                                DynamicEntityPlacementAdvanceKind::Integrated
+                                            }
+                                            holtburger_world::RuntimeBodyAdvanceKind::CorrectionSnap => {
+                                                DynamicEntityPlacementAdvanceKind::CorrectionSnap
+                                            }
+                                        },
+                                    );
+                                }
+                                if let Some(body) = self.world.runtime_body_view(body_id) {
+                                    advanced_runtime_bodies.push(body);
+                                }
                             }
                             self.handle_runtime_world_event(&event);
                         }
@@ -310,7 +322,7 @@ impl ClientRuntime {
                             self.current_dynamic_entity_views(),
                             self.dynamic_entity_host_time(),
                             dt_duration.as_secs_f64() * 1_000.0,
-                            DynamicEntityPlacementAdvanceKind::Integrated,
+                            &placement_kind_overrides,
                         )
                     } else {
                         None

@@ -184,16 +184,13 @@ function fixtureEntity(): DynamicEntityView {
 				reachesOutdoors: false,
 				reachedEnvCellIds: [cellId(0x01020123)],
 			},
-			acceleration: { x: 0, y: 0, z: 0 },
 			contact: "unknown",
-			omega: { x: 0, y: 0, z: 0 },
 			pose: {
 				coords: { x: 10, y: 20, z: 30 },
 				landblockId: cellId(0x01020123),
 				rotation: { w: 1, x: 0, y: 0, z: 0 },
 			},
 			sampleMode: "authoritative-only",
-			velocity: { x: 0, y: 0, z: 0 },
 		},
 		presentation: {
 			appearance: {

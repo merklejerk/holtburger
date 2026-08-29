@@ -201,7 +201,6 @@ impl ClientRuntime {
     }
 
     pub(super) async fn disconnect_with_cause(&mut self, cause: ClientExitCause) -> Result<()> {
-        self.movement.reset_manual_motion_playback();
         self.reset_camera();
         self.set_exit_cause(cause);
         let header = PacketHeader {

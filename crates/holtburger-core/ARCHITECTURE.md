@@ -120,9 +120,9 @@ Manages the multi-stage handshake with GLS (Global Login Service) and the World 
 
 #### Movement ([src/client/movement/mod.rs](src/client/movement/mod.rs))
 
-The `MovementSystem` runs on the shared fixed 30ms client physics cadence. It ingests resolved movement commands, calculates client-side prediction, and pushes reliable synchronization with the server's authoritative position.
+The `MovementSystem` runs on the shared fixed 30ms client physics cadence. It ingests resolved movement commands, supplies local ordinary actuation, and pushes reliable synchronization with the server's authoritative position.
 
-Today, this module owns resolved motion expiry, edge-based movement packet emission, stop-pulse obligations, snap-facing execution, and server-controlled movement reconciliation. Reusable approach behavior lives in [src/client/controllers/approach_target.rs](src/client/controllers/approach_target.rs), and navigation translates those controller outputs into resolved `MovementCommand` values before crossing into the movement executor.
+Today, this module owns resolved motion expiry, edge-based movement packet emission, stop-pulse obligations, snap-facing execution, and server-directed `MoveTo` drive lifecycle. It does not retain server pose-correction targets or an animation cursor: packet-scoped self authority policy selects a world-owned confirmation or reset, while local authored input advances the same world-owned `MotionRuntimeRegistry` cursor consumed by presentation and root actuation. `SpatialBody` reconciliation composes with that ordinary drive inside the shared spatial tick. Reusable approach behavior lives in [src/client/controllers/approach_target.rs](src/client/controllers/approach_target.rs), and navigation translates those controller outputs into resolved `MovementCommand` values before crossing into the movement executor.
 
 Combat automation now follows the same pattern from [src/client/controllers/combat.rs](src/client/controllers/combat.rs): frontends own a controller, feed it world-derived snapshots, and translate emitted facing or targeted-attack intents into their preferred execution path. Sticky melee range maintenance now does the same through [src/client/controllers/maintain_range.rs](src/client/controllers/maintain_range.rs), which owns the repeat latch and pursuit reissue cadence while leaving activation policy in the frontend.
 
@@ -245,6 +245,12 @@ assembled its facts, and it never claims producer authority.
   (`client/dynamic_entity_view.rs`) and the Explorer host emit identical shapes. The view carries
   no semantic motion object and no motion-table identity; world roots are solver-owned while
   attached roots inherit transform authority from their parent.
+- Client fixed ticks publish one per-body placement consequence. Integrated bodies retain the
+  ordinary host duration; an ordinary far correction uses `CorrectionSnap`, clears frontend path
+  interpolation immediately, and does not increment generation or masquerade as teleport/reset.
+  Packet-time upserts carry the current runtime pose, and the 3D runtime keys scene-spatial
+  placement only by pose plus membership so contact/vector level changes cannot rewrite a root or
+  cancel its active host path.
 
 `material_appearance_input` is the single projection from the shared `EntityAppearance` into the
 content resolver's ObjDesc shape. The Explorer's visual source consumes it directly; there is no

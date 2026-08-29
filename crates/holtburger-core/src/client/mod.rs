@@ -1563,54 +1563,12 @@ mod tests {
     }
 
     #[test]
-    fn simulation_build_projection_returns_none_without_local_intent() {
+    fn simulation_build_projection_returns_none_without_tracked_remote() {
         let client = builder::build_test_client(ClientState::InWorld);
 
-        let request = client.simulation.build_projection_request(
-            Instant::now(),
-            Duration::from_millis(PHYSICS_TICK_MS),
-            &client.world,
-            &client.movement,
-        );
+        let request = client.simulation.build_projection_request(&client.world);
 
         assert!(request.is_none());
-    }
-
-    #[test]
-    fn simulation_build_projection_includes_idle_local_player_runtime_body() {
-        let mut client = builder::build_test_client(ClientState::InWorld);
-        let guid = Guid(0x0102_0304);
-        let player_pose = WorldPosition {
-            landblock_id: Guid(0x1000_0001),
-            coords: Vector3::zero(),
-            rotation: Quaternion::identity(),
-        };
-
-        client
-            .world
-            .seed_local_player_entity(guid, "Player", player_pose);
-
-        let request = client
-            .simulation
-            .build_projection_request(
-                Instant::now(),
-                Duration::from_millis(PHYSICS_TICK_MS),
-                &client.world,
-                &client.movement,
-            )
-            .expect("idle local player should still be submitted to physics");
-
-        assert_eq!(request.bodies.len(), 1);
-        let body = request.bodies[0];
-        assert_eq!(
-            body.body_id,
-            holtburger_world::SpatialBodyId::LocalPlayer(guid)
-        );
-        assert_eq!(body.pose, player_pose);
-        assert!(
-            body.basis.is_none(),
-            "an idle local player has no authored or velocity basis to advance"
-        );
     }
 
     #[tokio::test]
@@ -1667,68 +1625,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn simulation_build_projection_does_not_reconstruct_velocity_after_movement_tick() {
-        let mut client = builder::build_test_client(ClientState::InWorld);
-        let guid = Guid(0x0102_0304);
-        let now = Instant::now();
-        let player_pose = WorldPosition {
-            landblock_id: Guid(0x1000_0001),
-            coords: Vector3::zero(),
-            rotation: Quaternion::identity(),
-        };
-
-        seed_test_self_movement_capabilities(&mut client);
-
-        client
-            .world
-            .seed_local_player_entity(guid, "Player", player_pose);
-
-        client.movement.enqueue_drive_intent(
-            movement_types::PlayerDriveIntent::ManualHeld(
-                movement_types::CharacterDrive::builder()
-                    .run()
-                    .forward()
-                    .build(),
-            ),
-            now,
-        );
-
-        let _ = client
-            .movement
-            .tick(now, &mut client.world, &mut client.session)
-            .await
-            .expect("movement tick should succeed");
-
-        let request = client
-            .simulation
-            .build_projection_request(
-                now,
-                Duration::from_millis(PHYSICS_TICK_MS),
-                &client.world,
-                &client.movement,
-            )
-            .expect("movement-backed local intent should produce a solve request");
-
-        assert_eq!(request.bodies.len(), 1);
-        let body = request.bodies[0];
-        assert_eq!(
-            body.body_id,
-            holtburger_world::SpatialBodyId::LocalPlayer(guid)
-        );
-        assert_eq!(
-            body.pose,
-            client
-                .world
-                .local_player_runtime_pose()
-                .expect("local player runtime pose should be readable")
-        );
-        assert!(
-            body.basis.is_none(),
-            "manual motion is advanced by the simulation tick, not reconstructed as velocity"
-        );
-    }
-
-    #[tokio::test]
     async fn simulation_build_projection_includes_tracked_nearby_actor() {
         let mut client = builder::build_test_client(ClientState::InWorld);
         let player_guid = Guid(0x0102_0304);
@@ -1782,22 +1678,10 @@ mod tests {
 
         let request = client
             .simulation
-            .build_projection_request(
-                now,
-                Duration::from_millis(PHYSICS_TICK_MS),
-                &client.world,
-                &client.movement,
-            )
+            .build_projection_request(&client.world)
             .expect("tracked nearby actor should join the solve set");
 
-        assert_eq!(request.bodies.len(), 2);
-        assert!(
-            request
-                .bodies
-                .iter()
-                .any(|body| body.body_id
-                    == holtburger_world::SpatialBodyId::LocalPlayer(player_guid))
-        );
+        assert_eq!(request.bodies.len(), 1);
         assert!(
             request
                 .bodies
@@ -1858,7 +1742,7 @@ mod tests {
         client.world.advance_authored_motion(dt);
         let request = client
             .simulation
-            .build_projection_request(Instant::now(), dt, &client.world, &client.movement)
+            .build_projection_request(&client.world)
             .expect("tracked grounded remote should join the solve set");
 
         let remote_body = request
@@ -1868,10 +1752,7 @@ mod tests {
             .expect("tracked grounded remote should be present");
 
         assert!(
-            matches!(
-                remote_body.basis,
-                Some(holtburger_world::SolveProjectionBasis::AuthoredDrive { .. })
-            ),
+            remote_body.authored_offset.is_some(),
             "a grounded remote performing a motion drives from its authored offset"
         );
     }
@@ -2041,7 +1922,10 @@ mod tests {
         );
         assert!(events.iter().any(|event| matches!(
             event,
-            WorldEvent::RuntimeBodyAdvanced { body_id: event_id } if *event_id == body_id
+            WorldEvent::RuntimeBodyAdvanced {
+                body_id: event_id,
+                ..
+            } if *event_id == body_id
         )));
     }
 
@@ -2147,8 +2031,9 @@ mod tests {
         )));
         assert!(events.iter().any(|event| matches!(
             event,
-            WorldEvent::RuntimeBodyChanged {
-                body_id: holtburger_world::SpatialBodyId::Entity(event_guid)
+            WorldEvent::RuntimeBodyAdvanced {
+                body_id: holtburger_world::SpatialBodyId::Entity(event_guid),
+                ..
             } if *event_guid == remote_guid
         )));
     }
@@ -2263,7 +2148,7 @@ mod tests {
                 rotation: Quaternion::identity(),
             },
         );
-        client.world.add_entity(Entity::new(
+        let mut remote = Entity::new(
             remote_guid,
             "Remote".to_string(),
             holtburger_common::position::WorldPosition {
@@ -2271,7 +2156,9 @@ mod tests {
                 coords: holtburger_common::Vector3::new(12.0, 0.0, 0.0),
                 rotation: Quaternion::identity(),
             },
-        ));
+        );
+        remote.velocity = holtburger_common::Vector3::new(1.0, 0.0, 0.0);
+        client.world.add_entity(remote);
 
         let runtime_events =
             client
@@ -2283,8 +2170,11 @@ mod tests {
                         coords: holtburger_common::Vector3::new(12.5, 0.0, 0.0),
                         rotation: Quaternion::identity(),
                     },
-                    velocity: holtburger_common::Vector3::new(1.0, 0.0, 0.0),
-                    omega: holtburger_common::Vector3::zero(),
+                    accepted_motion: holtburger_world::AcceptedBodyMotion::default(),
+                    retained: holtburger_world::RetainedBodyKinematics {
+                        velocity: holtburger_common::Vector3::new(1.0, 0.0, 0.0),
+                        ..Default::default()
+                    },
                     contact: holtburger_world::ContactState::Grounded,
                     projection_state: None,
                 });
@@ -2292,12 +2182,7 @@ mod tests {
             client.observe_runtime_world_event(&event);
         }
 
-        let request = client.simulation.build_projection_request(
-            Instant::now(),
-            Duration::from_millis(PHYSICS_TICK_MS),
-            &client.world,
-            &client.movement,
-        );
+        let request = client.simulation.build_projection_request(&client.world);
 
         assert!(request.is_some());
         assert!(
@@ -2357,12 +2242,7 @@ mod tests {
 
         let dt = Duration::from_millis(PHYSICS_TICK_MS);
         client.world.advance_authored_motion(dt);
-        let request = client.simulation.build_projection_request(
-            Instant::now(),
-            dt,
-            &client.world,
-            &client.movement,
-        );
+        let request = client.simulation.build_projection_request(&client.world);
 
         assert!(request.is_some());
         assert!(

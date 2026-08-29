@@ -127,9 +127,6 @@ const dynamicEntityPlacementSchema = z.discriminatedUnion("kind", [
 			kind: z.literal("world"),
 			pose: worldPositionSchema,
 			spatialMembership: spatialMembershipSchema,
-			velocity: vector3Schema,
-			acceleration: vector3Schema,
-			omega: vector3Schema,
 			contact: z.enum(["unknown", "airborne", "sliding", "grounded"]),
 			sampleMode: z.enum([
 				"authoritative-only",
@@ -260,7 +257,7 @@ const dynamicEntityPathSchema = z.object({
 
 const dynamicEntityAdvanceSchema = z.object({
 	entity: dynamicEntityViewSchema,
-	kind: z.enum(["integrated", "teleport", "reset"]),
+	kind: z.enum(["integrated", "correction-snap", "teleport", "reset"]),
 	path: dynamicEntityPathSchema,
 });
 

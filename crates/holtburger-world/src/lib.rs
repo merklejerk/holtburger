@@ -41,12 +41,11 @@ pub use entity_appearance::{
 };
 pub use entity_physics::{
     DEFAULT_ENTITY_PHYSICS_STATE, EffectiveEntityPhysicsState, EntityCollisionParticipation,
-    EntityCollisionReportPolicy, EntityDynamicCollisionPolicy, EntityPhysicalDisposition,
-    EntityPhysicalIntent, EntityPhysicalTransitionAction, EntityPhysicsPresentation,
-    EntityPhysicsResponse, EntityPhysicsScheduling, EntityPhysicsSetupFacts,
-    EntityPhysicsStateInput, EntityPhysicsStateOverrides, EntityPhysicsTransitionContext,
-    EntityPhysicsTransitionDecision, calculate_effective_entity_physics_state,
-    decide_entity_physics_state_transition, resolve_effective_entity_physics_state,
+    EntityCollisionReportPolicy, EntityDynamicCollisionPolicy, EntityIntegrationEligibility,
+    EntityPhysicsPresentation, EntityPhysicsResponse, EntityPhysicsSetupFacts,
+    EntityPhysicsStateInput, EntityPhysicsStateOverrides, LocalIntegrationDemand,
+    LocalPhysicalDemand, LocalTargetDemand, calculate_effective_entity_physics_state,
+    resolve_effective_entity_physics_state,
 };
 pub use events::{DerivedStatsData, FellowshipActivity, PlayerInfoData, WorldEvent};
 pub use motion::{authored_grounded_actuation, grounded_character_actuation};
@@ -58,7 +57,8 @@ pub use spatial::{
     CollisionReportContact, CollisionReportOutcome, CollisionReportPhase, CollisionReportSource,
     CollisionScene, CollisionSceneUpdateError, ContactState, DynamicBodyCollisionDefinition,
     DynamicBodyKinematics, DynamicBodyPhysicsStateChange, DynamicBodyRelocationOutcome,
-    DynamicEntityCollectionCoverageRejection, DynamicPhysicalBodyDefinition, EdgeProtection,
+    DynamicEntityCollectionCoverageRejection, DynamicPhysicalBodyConfiguration,
+    DynamicPhysicalBodyConfigurationError, DynamicPhysicalBodyDefinition, EdgeProtection,
     FreeSphereBudget, FreeSphereConfig, FreeSphereOutcome, FreeSphereRequest,
     FreeSphereSettleOutcome, FreeSphereState, GroundState, GroundSupport, GroundedBody,
     GroundedBodyActuation, GroundedBodySpheres, GroundedBudget, GroundedConfig, GroundedLaunch,

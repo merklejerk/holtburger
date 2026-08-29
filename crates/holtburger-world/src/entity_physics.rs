@@ -1,7 +1,6 @@
 //! Source-neutral interpretation of complete entity physics-state replacements.
 
 use holtburger_common::properties::PhysicsState;
-use serde::{Deserialize, Serialize};
 
 /// ACE's physics state when a template has no explicit `PropertyInt::PhysicsState`.
 ///
@@ -63,9 +62,9 @@ pub struct EntityPhysicsStateInput {
     pub overrides: EntityPhysicsStateOverrides,
 }
 
-/// Whether fixed-tick integration may schedule this entity.
+/// State-derived eligibility for fixed-tick integration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EntityPhysicsScheduling {
+pub enum EntityIntegrationEligibility {
     /// The state itself permits integration. Solver-owned settled state remains a separate gate.
     Eligible,
     /// `Frozen` reversibly pauses integration and default behavior.
@@ -153,8 +152,8 @@ pub struct EffectiveEntityPhysicsState {
     pub unsupported_local_simulation: PhysicsState,
     /// Known gameplay marker preserved without changing the proven physical contact path.
     pub unsupported_gameplay: PhysicsState,
-    /// Fixed-tick scheduling decision derived from the semantic mask.
-    pub scheduling: EntityPhysicsScheduling,
+    /// Integration eligibility derived from the semantic mask.
+    pub integration_eligibility: EntityIntegrationEligibility,
     /// Directional peer collision decisions derived from the semantic mask.
     pub dynamic_collision: EntityDynamicCollisionPolicy,
     /// Environment and peer response decisions derived from the semantic mask.
@@ -172,131 +171,48 @@ impl EffectiveEntityPhysicsState {
     pub const fn supports_local_simulation(self) -> bool {
         self.unknown_bits == 0 && self.unsupported_local_simulation.is_empty()
     }
-
-    fn physical_decisions_equal(self, other: Self) -> bool {
-        self.scheduling == other.scheduling
-            && self.dynamic_collision == other.dynamic_collision
-            && self.response == other.response
-            && self.reporting == other.reporting
-            && self.uses_physics_bsp == other.uses_physics_bsp
-    }
 }
 
-/// Whether a producer requests local physical realization for this semantic entity.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum EntityPhysicalIntent {
-    /// Keep only the canonical pose body; presentation remains valid.
-    PoseOnly,
-    /// Install local collision and solver state when preparation succeeds.
-    Simulated,
-}
-
-/// Facts outside the state mask required to choose a scene operation.
+/// Whether prepared target geometry is retained for directional peer queries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct EntityPhysicsTransitionContext {
-    /// Producer policy for whether this entity should be locally simulated.
-    pub intent: EntityPhysicalIntent,
-    /// Whether immutable content preparation produced a usable physical definition.
-    pub prepared_physics_available: bool,
-    /// Whether the canonical pose body currently carries physical state.
-    pub solver_participation_enabled: bool,
-    /// Scale, geometry, category, or another prepared non-state fact changed.
-    pub prepared_definition_changed: bool,
+pub enum LocalTargetDemand {
+    /// Do not retain or index peer-target geometry.
+    Absent,
+    /// Retain prepared geometry and index it while topology is resident.
+    Retained,
 }
 
-/// Desired local realization after a complete semantic replacement.
+/// Whether a producer permits fixed-tick environment and peer solving.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EntityPhysicalDisposition {
-    PoseOnly,
-    Physical,
-    /// The complete semantic state is retained, but local simulation must stop.
-    UnsupportedState {
-        unsupported_bits: PhysicsState,
-        unknown_bits: u32,
-    },
-    /// A simulated producer requested a body before content preparation supplied one.
-    MissingPreparedPhysics,
+pub enum LocalIntegrationDemand {
+    /// Keep the body out of the mover schedule.
+    Excluded,
+    /// Permit scheduling while solver-owned activity is active.
+    Eligible,
 }
 
-/// Exact scene mutation required by one complete state replacement.
+/// Producer-owned demand for the two independent uses of prepared local physics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EntityPhysicalTransitionAction {
-    None,
-    /// Install collision/physics state on the retained pose body.
-    EnableSolverParticipation,
-    /// Remove collision/physics state while the pose body survives.
-    DisableSolverParticipation,
-    Reconfigure,
+pub struct LocalPhysicalDemand {
+    /// Whether other movers may discover this body as a peer target.
+    pub target: LocalTargetDemand,
+    /// Whether this body may enter fixed-tick integration.
+    pub integration: LocalIntegrationDemand,
 }
 
-/// Pure state-replacement decision consumed by both producer compositions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct EntityPhysicsTransitionDecision {
-    /// Exact mutation to apply to the canonical scene body.
-    pub action: EntityPhysicalTransitionAction,
-    /// Resulting local physical disposition, including typed unsupported cases.
-    pub disposition: EntityPhysicalDisposition,
-    /// Existing directional report lifetimes must end before the replacement is committed.
-    pub force_end_reports: bool,
-    /// Solver-owned settled state must be cleared before the next eligible tick.
-    pub wake_solver: bool,
-}
-
-/// Selects the body operation for a complete effective-state replacement.
-///
-/// This function deliberately does not choose Explorer rejection versus authoritative-client
-/// retention. Both receive the same unsupported disposition: Explorer rejects before publication;
-/// the client preserves semantic truth and applies the returned participation disable when necessary.
-pub fn decide_entity_physics_state_transition(
-    previous: Option<EffectiveEntityPhysicsState>,
-    next: EffectiveEntityPhysicsState,
-    context: EntityPhysicsTransitionContext,
-) -> EntityPhysicsTransitionDecision {
-    let disposition = match context.intent {
-        EntityPhysicalIntent::PoseOnly => EntityPhysicalDisposition::PoseOnly,
-        EntityPhysicalIntent::Simulated if !next.supports_local_simulation() => {
-            EntityPhysicalDisposition::UnsupportedState {
-                unsupported_bits: next.unsupported_local_simulation,
-                unknown_bits: next.unknown_bits,
-            }
-        }
-        EntityPhysicalIntent::Simulated if !context.prepared_physics_available => {
-            EntityPhysicalDisposition::MissingPreparedPhysics
-        }
-        EntityPhysicalIntent::Simulated => EntityPhysicalDisposition::Physical,
+impl LocalPhysicalDemand {
+    /// Demand that requires no prepared local physical state.
+    pub const NONE: Self = Self {
+        target: LocalTargetDemand::Absent,
+        integration: LocalIntegrationDemand::Excluded,
     };
-    let action = match (context.solver_participation_enabled, disposition) {
-        (true, EntityPhysicalDisposition::Physical)
-            if context.prepared_definition_changed
-                || previous.is_none_or(|previous| !previous.physical_decisions_equal(next)) =>
-        {
-            EntityPhysicalTransitionAction::Reconfigure
-        }
-        (true, EntityPhysicalDisposition::Physical) => EntityPhysicalTransitionAction::None,
-        (false, EntityPhysicalDisposition::Physical) => {
-            EntityPhysicalTransitionAction::EnableSolverParticipation
-        }
-        (true, _) => EntityPhysicalTransitionAction::DisableSolverParticipation,
-        (false, _) => EntityPhysicalTransitionAction::None,
-    };
-    let force_end_reports = previous.is_some_and(|previous| previous.reporting.enabled)
-        && (!next.reporting.enabled || !matches!(disposition, EntityPhysicalDisposition::Physical));
-    let scheduling_woke = previous.is_some_and(|previous| {
-        previous.scheduling != EntityPhysicsScheduling::Eligible
-            && next.scheduling == EntityPhysicsScheduling::Eligible
-    });
 
-    EntityPhysicsTransitionDecision {
-        action,
-        disposition,
-        force_end_reports,
-        wake_solver: scheduling_woke
-            || matches!(
-                action,
-                EntityPhysicalTransitionAction::EnableSolverParticipation
-                    | EntityPhysicalTransitionAction::Reconfigure
-            ),
+    /// Whether at least one local physical role requires a prepared body.
+    pub const fn requires_physical_body(self) -> bool {
+        !matches!(
+            (self.target, self.integration),
+            (LocalTargetDemand::Absent, LocalIntegrationDemand::Excluded)
+        )
     }
 }
 
@@ -372,12 +288,12 @@ pub fn resolve_effective_entity_physics_state(
     } else {
         EntityCollisionParticipation::Solid
     };
-    let scheduling = if semantic.contains(PhysicsState::STATIC) {
-        EntityPhysicsScheduling::Static
+    let integration_eligibility = if semantic.contains(PhysicsState::STATIC) {
+        EntityIntegrationEligibility::Static
     } else if semantic.contains(PhysicsState::FROZEN) {
-        EntityPhysicsScheduling::Frozen
+        EntityIntegrationEligibility::Frozen
     } else {
-        EntityPhysicsScheduling::Eligible
+        EntityIntegrationEligibility::Eligible
     };
 
     EffectiveEntityPhysicsState {
@@ -385,7 +301,7 @@ pub fn resolve_effective_entity_physics_state(
         unknown_bits,
         unsupported_local_simulation,
         unsupported_gameplay: semantic & PhysicsState::SCRIPTED_COLLISION,
-        scheduling,
+        integration_eligibility,
         dynamic_collision: EntityDynamicCollisionPolicy {
             target,
             mover_accepts_response: !hidden && !ignore_collisions,
@@ -466,7 +382,10 @@ mod tests {
 
         assert!(resolved.semantic.contains(PhysicsState::HAS_DEFAULT_ANIM));
         assert!(!resolved.semantic.contains(PhysicsState::HAS_DEFAULT_SCRIPT));
-        assert_eq!(resolved.scheduling, EntityPhysicsScheduling::Static);
+        assert_eq!(
+            resolved.integration_eligibility,
+            EntityIntegrationEligibility::Static
+        );
         assert!(!resolved.supports_local_simulation());
     }
 
@@ -551,7 +470,10 @@ mod tests {
         let resolved = resolve_effective_entity_physics_state(semantic);
 
         assert_eq!(resolved.semantic, semantic);
-        assert_eq!(resolved.scheduling, EntityPhysicsScheduling::Frozen);
+        assert_eq!(
+            resolved.integration_eligibility,
+            EntityIntegrationEligibility::Frozen
+        );
         assert!(resolved.dynamic_collision.missile);
         assert!(resolved.dynamic_collision.path_clipped);
         assert!(resolved.response.align_path);
@@ -567,101 +489,37 @@ mod tests {
     }
 
     #[test]
-    fn transition_ignores_presentation_only_changes_but_reconfigures_physical_changes() {
-        let previous = resolve_effective_entity_physics_state(PhysicsState::GRAVITY);
-        let presentation =
-            resolve_effective_entity_physics_state(PhysicsState::GRAVITY | PhysicsState::NO_DRAW);
-        let physical =
-            resolve_effective_entity_physics_state(PhysicsState::GRAVITY | PhysicsState::FROZEN);
-        let context = EntityPhysicsTransitionContext {
-            intent: EntityPhysicalIntent::Simulated,
-            prepared_physics_available: true,
-            solver_participation_enabled: true,
-            prepared_definition_changed: false,
-        };
-
-        assert_eq!(
-            decide_entity_physics_state_transition(Some(previous), presentation, context).action,
-            EntityPhysicalTransitionAction::None
-        );
-        assert_eq!(
-            decide_entity_physics_state_transition(Some(previous), physical, context).action,
-            EntityPhysicalTransitionAction::Reconfigure
-        );
-    }
-
-    #[test]
-    fn transition_disables_participation_for_unsupported_state_without_losing_its_mask() {
-        let previous = resolve_effective_entity_physics_state(PhysicsState::REPORT_COLLISIONS);
-        let next = resolve_effective_entity_physics_state(
-            PhysicsState::REPORT_COLLISIONS | PhysicsState::PUSHABLE,
-        );
-        let decision = decide_entity_physics_state_transition(
-            Some(previous),
-            next,
-            EntityPhysicsTransitionContext {
-                intent: EntityPhysicalIntent::Simulated,
-                prepared_physics_available: true,
-                solver_participation_enabled: true,
-                prepared_definition_changed: false,
-            },
-        );
-
-        assert_eq!(
-            decision.action,
-            EntityPhysicalTransitionAction::DisableSolverParticipation
-        );
-        assert_eq!(
-            decision.disposition,
-            EntityPhysicalDisposition::UnsupportedState {
-                unsupported_bits: PhysicsState::PUSHABLE,
-                unknown_bits: 0,
-            }
-        );
-        assert!(decision.force_end_reports);
-        assert_eq!(
-            next.semantic,
-            PhysicsState::REPORT_COLLISIONS | PhysicsState::PUSHABLE
-        );
-    }
-
-    #[test]
-    fn bodyless_intent_never_invents_physical_participation() {
-        let next = resolve_effective_entity_physics_state(PhysicsState::GRAVITY);
-        let decision = decide_entity_physics_state_transition(
-            None,
-            next,
-            EntityPhysicsTransitionContext {
-                intent: EntityPhysicalIntent::PoseOnly,
-                prepared_physics_available: true,
-                solver_participation_enabled: false,
-                prepared_definition_changed: false,
-            },
-        );
-
-        assert_eq!(decision.action, EntityPhysicalTransitionAction::None);
-        assert_eq!(decision.disposition, EntityPhysicalDisposition::PoseOnly);
-    }
-
-    #[test]
-    fn simulated_intent_reports_missing_preparation_without_mutating_a_body() {
-        let next = resolve_effective_entity_physics_state(PhysicsState::GRAVITY);
-        let decision = decide_entity_physics_state_transition(
-            None,
-            next,
-            EntityPhysicsTransitionContext {
-                intent: EntityPhysicalIntent::Simulated,
-                prepared_physics_available: false,
-                solver_participation_enabled: false,
-                prepared_definition_changed: false,
-            },
-        );
-
-        assert_eq!(decision.action, EntityPhysicalTransitionAction::None);
-        assert_eq!(
-            decision.disposition,
-            EntityPhysicalDisposition::MissingPreparedPhysics
-        );
-        assert!(!decision.wake_solver);
+    fn local_physical_demand_distinguishes_all_four_role_combinations() {
+        for (target, integration, requires_body) in [
+            (
+                LocalTargetDemand::Absent,
+                LocalIntegrationDemand::Excluded,
+                false,
+            ),
+            (
+                LocalTargetDemand::Retained,
+                LocalIntegrationDemand::Excluded,
+                true,
+            ),
+            (
+                LocalTargetDemand::Absent,
+                LocalIntegrationDemand::Eligible,
+                true,
+            ),
+            (
+                LocalTargetDemand::Retained,
+                LocalIntegrationDemand::Eligible,
+                true,
+            ),
+        ] {
+            assert_eq!(
+                LocalPhysicalDemand {
+                    target,
+                    integration
+                }
+                .requires_physical_body(),
+                requires_body
+            );
+        }
     }
 }

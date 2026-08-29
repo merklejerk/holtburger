@@ -22,13 +22,16 @@ use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
 use holtburger_weenie_catalog::WeenieTemplate;
 use holtburger_world::{
     CellTransitRequest, DynamicPhysicalBodyDefinition, EffectiveEntityPhysicsState,
-    EntityAppearance, EntityPartChange, EntityPhysicalIntent, EntityPhysicalTransitionAction,
+    EntityAppearance, EntityCollisionParticipation, EntityIntegrationEligibility, EntityPartChange,
     EntityPhysicsStateInput, EntityPhysicsStateOverrides, EntityPlacement, EntitySubPalette,
-    EntityTextureChange, WieldedItemClassification, WieldedItemClassificationError,
-    WieldedItemSlotFacts, calculate_effective_entity_physics_state, classify_wielded_item,
+    EntityTextureChange, LocalIntegrationDemand, LocalPhysicalDemand, LocalTargetDemand,
+    WieldedItemClassification, WieldedItemClassificationError, WieldedItemSlotFacts,
+    calculate_effective_entity_physics_state, classify_wielded_item,
     resolve_effective_entity_physics_state,
 };
 use serde::Deserialize;
+
+use crate::ExplorerPhysicalMode;
 
 use crate::explorer_entity_runtime::{
     ExplorerEntityDespawnOutcome, ExplorerEntityLaunchOutcome, ExplorerEntityPhysicsStateOutcome,
@@ -56,6 +59,30 @@ struct ResolvedSpawnAppearance {
     wielded: Vec<SelectedWieldedItem>,
 }
 
+/// Resolves the Explorer's app-local mode into the two shared local physical roles.
+pub(crate) fn explorer_physical_demand(
+    mode: ExplorerPhysicalMode,
+    physics: EffectiveEntityPhysicsState,
+) -> LocalPhysicalDemand {
+    if mode == ExplorerPhysicalMode::PoseOnly {
+        return LocalPhysicalDemand::NONE;
+    }
+    LocalPhysicalDemand {
+        target: if physics.dynamic_collision.target != EntityCollisionParticipation::Suppressed
+            && !physics.dynamic_collision.missile
+        {
+            LocalTargetDemand::Retained
+        } else {
+            LocalTargetDemand::Absent
+        },
+        integration: if physics.integration_eligibility == EntityIntegrationEligibility::Eligible {
+            LocalIntegrationDemand::Eligible
+        } else {
+            LocalIntegrationDemand::Excluded
+        },
+    }
+}
+
 /// Explicit host-owned spawn placement; `candidate` uses the camera pose's landblock frame.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -68,8 +95,8 @@ pub struct ExplorerEntitySpawnRequest {
     pub candidate: Vector3,
     /// Explicit candidate root orientation.
     pub rotation: Quaternion,
-    /// Whether to enable local solver participation or retain a canonical pose-only body.
-    pub physical_intent: EntityPhysicalIntent,
+    /// Whether to allocate local physics or retain a canonical pose-only body.
+    pub physical_mode: ExplorerPhysicalMode,
 }
 
 /// One exact-generation launch using catalog-authored speed and explicit world direction.
@@ -279,7 +306,7 @@ pub trait ExplorerEntityContentPreparer: Send + Sync {
         object_scale: f32,
     ) -> Result<DynamicEntitySetupPreparation, DynamicEntityPhysicalPreparationError>;
 
-    /// Resolves complete stable solver facts for simulated intent.
+    /// Resolves complete stable physical facts for an integrated spawn.
     fn prepare_physical(
         &self,
         definition: &DynamicEntityDefinition,
@@ -455,7 +482,7 @@ impl ExplorerEntityDriver {
         let guid = self.entities.reserve_guid()?;
         let (definition, physical, children) = self.prepare_by_wcid(guid, request)?;
         self.entities
-            .spawn_prepared_group(definition, request.physical_intent, physical, children)
+            .spawn_prepared_group(definition, request.physical_mode, physical, children)
             .map_err(ExplorerEntityDriverError::from)
     }
 
@@ -475,7 +502,7 @@ impl ExplorerEntityDriver {
             .replace_prepared_group(
                 definition,
                 request.generation,
-                request.replacement.physical_intent,
+                request.replacement.physical_mode,
                 physical,
                 children,
             )
@@ -560,9 +587,11 @@ impl ExplorerEntityDriver {
             resolved_appearance.wearer,
             placement,
         )?)?;
-        let physical = match request.physical_intent {
-            EntityPhysicalIntent::PoseOnly => None,
-            EntityPhysicalIntent::Simulated => Some(self.content.prepare_physical(&definition)?),
+        let demand = explorer_physical_demand(request.physical_mode, definition.physics);
+        let physical = if demand.requires_physical_body() {
+            Some(self.content.prepare_physical(&definition)?)
+        } else {
+            None
         };
         let initial = definition
             .placement
@@ -654,7 +683,7 @@ impl ExplorerEntityDriver {
         guid: Guid,
         generation: u64,
         semantic: PhysicsState,
-        physical_intent: EntityPhysicalIntent,
+        physical_mode: ExplorerPhysicalMode,
     ) -> Result<ExplorerEntityPhysicsStateOutcome, ExplorerEntityDriverError> {
         let _operation = self
             .operation
@@ -672,14 +701,11 @@ impl ExplorerEntityDriver {
                 },
             ));
         }
-        let decision = self
+        let demand = explorer_physical_demand(physical_mode, next);
+        let preparation_required = self
             .entities
-            .plan_physics_state(guid, generation, next, physical_intent)?;
-        let replacement = if matches!(
-            decision.action,
-            EntityPhysicalTransitionAction::EnableSolverParticipation
-                | EntityPhysicalTransitionAction::Reconfigure
-        ) {
+            .physical_preparation_required(guid, generation, demand)?;
+        let replacement = if preparation_required {
             let mut definition = self.entities.instance(guid, generation)?.definition;
             definition.physics = next;
             Some(self.content.prepare_physical(&definition)?)
@@ -687,7 +713,7 @@ impl ExplorerEntityDriver {
             None
         };
         self.entities
-            .replace_physics_state(guid, generation, next, physical_intent, replacement)
+            .replace_physics_state(guid, generation, next, demand, replacement)
             .map_err(ExplorerEntityDriverError::from)
     }
 
@@ -1104,10 +1130,9 @@ mod tests {
     use holtburger_weenie_catalog::{PhysicsBoolOverrides, TemplatePhysics};
     use holtburger_world::{
         DynamicBodyCollisionDefinition, EdgeProtection, EntityCollisionParticipation,
-        EntityCollisionReportPolicy, EntityDynamicCollisionPolicy, EntityPhysicsScheduling,
-        EntityPhysicsSetupFacts, PhysicalBodyResponsePolicy, PhysicalElasticity, PhysicalFriction,
-        PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion, PhysicsAttachment,
-        PreparedEntityTargetGeometry,
+        EntityCollisionReportPolicy, EntityDynamicCollisionPolicy, EntityPhysicsSetupFacts,
+        PhysicalBodyResponsePolicy, PhysicalElasticity, PhysicalFriction, PhysicalRestitution,
+        PhysicalSphereSet, PhysicalSurfaceMotion, PhysicsAttachment, PreparedEntityTargetGeometry,
     };
     use std::collections::BTreeMap;
 
@@ -1295,7 +1320,6 @@ mod tests {
                 }
             }
             let mut physical = physical();
-            physical.entity_collision.scheduling = definition.physics.scheduling;
             physical.entity_collision.dynamic_collision = definition.physics.dynamic_collision;
             physical.entity_collision.reporting = definition.physics.reporting;
             physical.entity_collision.uses_physics_bsp = definition.physics.uses_physics_bsp;
@@ -1352,7 +1376,6 @@ mod tests {
                     fallback_shapes: Vec::new(),
                     fallback_scale: ColliderScale::uniform(1.0).unwrap(),
                 }),
-                scheduling: EntityPhysicsScheduling::Eligible,
                 dynamic_collision: EntityDynamicCollisionPolicy {
                     target: EntityCollisionParticipation::Solid,
                     mover_accepts_response: true,
@@ -1493,7 +1516,7 @@ mod tests {
         (entities, driver)
     }
 
-    fn request(wcid: u32, intent: EntityPhysicalIntent) -> ExplorerEntitySpawnRequest {
+    fn request(wcid: u32, intent: ExplorerPhysicalMode) -> ExplorerEntitySpawnRequest {
         ExplorerEntitySpawnRequest {
             wcid,
             camera_pose: WorldPosition {
@@ -1503,7 +1526,7 @@ mod tests {
             },
             candidate: Vector3::new(200.0, 96.0, 10.0),
             rotation: Quaternion::identity(),
-            physical_intent: intent,
+            physical_mode: intent,
         }
     }
 
@@ -1511,11 +1534,11 @@ mod tests {
     fn missing_wcid_and_preparation_failure_leave_no_entity_or_body() {
         let (entities, driver) = driver(vec![template(7)], FixturePhysical::FailsContent);
         assert!(matches!(
-            driver.spawn_by_wcid(request(8, EntityPhysicalIntent::Simulated)),
+            driver.spawn_by_wcid(request(8, ExplorerPhysicalMode::Integrated)),
             Err(ExplorerEntityDriverError::MissingWcid { wcid: 8 })
         ));
         assert!(matches!(
-            driver.spawn_by_wcid(request(7, EntityPhysicalIntent::Simulated)),
+            driver.spawn_by_wcid(request(7, ExplorerPhysicalMode::Integrated)),
             Err(ExplorerEntityDriverError::Preparation(_))
         ));
         assert!(entities.snapshot().unwrap().is_empty());
@@ -1525,10 +1548,10 @@ mod tests {
     fn repeated_wcid_spawns_are_equal_except_for_identity_and_keep_host_placement() {
         let (entities, driver) = driver(vec![template(42)], FixturePhysical::Prepares);
         let first = driver
-            .spawn_by_wcid(request(42, EntityPhysicalIntent::Simulated))
+            .spawn_by_wcid(request(42, ExplorerPhysicalMode::Integrated))
             .unwrap();
         let second = driver
-            .spawn_by_wcid(request(42, EntityPhysicalIntent::Simulated))
+            .spawn_by_wcid(request(42, ExplorerPhysicalMode::Integrated))
             .unwrap();
 
         assert_ne!(
@@ -1642,7 +1665,7 @@ mod tests {
         );
 
         let flame = driver
-            .spawn_by_wcid(request(239, EntityPhysicalIntent::Simulated))
+            .spawn_by_wcid(request(239, ExplorerPhysicalMode::Integrated))
             .unwrap();
         let flame_launch = driver
             .launch(ExplorerEntityLaunchRequest {
@@ -1669,7 +1692,7 @@ mod tests {
         );
 
         let blade = driver
-            .spawn_by_wcid(request(300, EntityPhysicalIntent::Simulated))
+            .spawn_by_wcid(request(300, ExplorerPhysicalMode::Integrated))
             .unwrap();
         let blade_launch = driver
             .launch(ExplorerEntityLaunchRequest {
@@ -1696,7 +1719,7 @@ mod tests {
             (302, DynamicEntityLaunchError::MissingMaximumVelocity),
         ] {
             let spawned = driver
-                .spawn_by_wcid(request(wcid, EntityPhysicalIntent::PoseOnly))
+                .spawn_by_wcid(request(wcid, ExplorerPhysicalMode::PoseOnly))
                 .unwrap();
             assert!(matches!(
                 driver.launch(ExplorerEntityLaunchRequest {
@@ -1724,7 +1747,7 @@ mod tests {
         launchable.maximum_velocity = Some(15.0);
         let (entities, driver) = driver(vec![launchable], FixturePhysical::Prepares);
         let spawned = driver
-            .spawn_by_wcid(request(239, EntityPhysicalIntent::Simulated))
+            .spawn_by_wcid(request(239, ExplorerPhysicalMode::Integrated))
             .unwrap();
         let guid = spawned.instance.definition.identity.guid;
         driver
@@ -1737,7 +1760,7 @@ mod tests {
         let relocation = ExplorerEntityRelocationRequest {
             guid,
             generation: spawned.instance.generation,
-            camera_pose: request(239, EntityPhysicalIntent::Simulated).camera_pose,
+            camera_pose: request(239, ExplorerPhysicalMode::Integrated).camera_pose,
             candidate: Vector3::new(10.0, 20.0, 30.0),
             rotation: Quaternion::identity(),
             kind: ExplorerEntityRelocationKind::Teleport,
@@ -1769,14 +1792,14 @@ mod tests {
         let (entities, driver) =
             driver(vec![template(42), template(43)], FixturePhysical::Prepares);
         let first = driver
-            .spawn_by_wcid(request(42, EntityPhysicalIntent::Simulated))
+            .spawn_by_wcid(request(42, ExplorerPhysicalMode::Integrated))
             .unwrap();
         let guid = first.instance.definition.identity.guid;
         let replaced = driver
             .replace_by_wcid(ExplorerEntityReplaceRequest {
                 guid,
                 generation: first.instance.generation,
-                replacement: request(43, EntityPhysicalIntent::PoseOnly),
+                replacement: request(43, ExplorerPhysicalMode::PoseOnly),
             })
             .unwrap();
 
@@ -1801,7 +1824,7 @@ mod tests {
     fn pose_only_spawn_and_exact_generation_despawn_use_the_same_driver() {
         let (entities, driver) = driver(vec![template(9)], FixturePhysical::Prepares);
         let spawned = driver
-            .spawn_by_wcid(request(9, EntityPhysicalIntent::PoseOnly))
+            .spawn_by_wcid(request(9, ExplorerPhysicalMode::PoseOnly))
             .unwrap();
         assert_eq!(
             spawned.body.participation,
@@ -1822,7 +1845,7 @@ mod tests {
         invalid.weenie_type = 999;
         let (entities, driver) = driver(vec![invalid], FixturePhysical::Prepares);
         assert!(matches!(
-            driver.spawn_by_wcid(request(10, EntityPhysicalIntent::PoseOnly)),
+            driver.spawn_by_wcid(request(10, ExplorerPhysicalMode::PoseOnly)),
             Err(ExplorerEntityDriverError::InvalidWeenieType {
                 wcid: 10,
                 value: 999
@@ -1835,7 +1858,7 @@ mod tests {
     fn complete_physics_state_replacement_enables_reconfigures_and_disables_participation() {
         let (_entities, driver) = driver(vec![template(12)], FixturePhysical::Prepares);
         let spawned = driver
-            .spawn_by_wcid(request(12, EntityPhysicalIntent::PoseOnly))
+            .spawn_by_wcid(request(12, ExplorerPhysicalMode::PoseOnly))
             .unwrap();
         let guid = spawned.instance.definition.identity.guid;
         let generation = spawned.instance.generation;
@@ -1845,19 +1868,19 @@ mod tests {
                 guid,
                 generation,
                 PhysicsState::GRAVITY,
-                EntityPhysicalIntent::Simulated,
+                ExplorerPhysicalMode::Integrated,
             )
             .unwrap();
         assert_eq!(
             enabled.body.physical_change.change,
-            holtburger_world::PhysicalBodyReconfiguration::SolverParticipationEnabled
+            holtburger_world::PhysicalBodyReconfiguration::Installed
         );
         let reconfigured = driver
             .replace_physics_state(
                 guid,
                 generation,
                 PhysicsState::GRAVITY | PhysicsState::FROZEN,
-                EntityPhysicalIntent::Simulated,
+                ExplorerPhysicalMode::Integrated,
             )
             .unwrap();
         assert_eq!(
@@ -1869,17 +1892,14 @@ mod tests {
                 guid,
                 generation,
                 PhysicsState::GRAVITY | PhysicsState::FROZEN,
-                EntityPhysicalIntent::PoseOnly,
+                ExplorerPhysicalMode::PoseOnly,
             )
             .unwrap();
         assert_eq!(
             disabled.body.physical_change.change,
-            holtburger_world::PhysicalBodyReconfiguration::SolverParticipationDisabled
+            holtburger_world::PhysicalBodyReconfiguration::Removed
         );
-        assert_eq!(
-            disabled.instance.physical_intent,
-            EntityPhysicalIntent::PoseOnly
-        );
+        assert_eq!(disabled.instance.physical_demand, LocalPhysicalDemand::NONE);
     }
 
     #[test]
@@ -1893,17 +1913,17 @@ mod tests {
     }
 
     /// The measured WCID 52077 boundary. Moving physics-BSP geometry has no supported target
-    /// representation, so solver participation must be refused at both entry points while the
+    /// representation, so physical allocation must be refused at both entry points while the
     /// template stays a valid pose-only visual.
     #[test]
-    fn animated_physics_bsp_rejects_solver_participation_but_remains_a_valid_visual() {
+    fn animated_physics_bsp_rejects_physical_allocation_but_remains_a_valid_visual() {
         let (entities, driver) = driver(
             vec![template(52077)],
             FixturePhysical::FailsAnimatedPhysicsBsp,
         );
 
         let simulated = driver
-            .spawn_by_wcid(request(52077, EntityPhysicalIntent::Simulated))
+            .spawn_by_wcid(request(52077, ExplorerPhysicalMode::Integrated))
             .unwrap_err();
         assert!(
             matches!(
@@ -1922,7 +1942,7 @@ mod tests {
         // The same template still realizes as a pose-only entity: the rejection is about local
         // physical simulation, not about the object existing or animating.
         let visual = driver
-            .spawn_by_wcid(request(52077, EntityPhysicalIntent::PoseOnly))
+            .spawn_by_wcid(request(52077, ExplorerPhysicalMode::PoseOnly))
             .unwrap();
         assert_eq!(
             visual.body.participation,
@@ -1937,7 +1957,7 @@ mod tests {
                 visual.instance.definition.identity.guid,
                 visual.instance.generation,
                 PhysicsState::GRAVITY,
-                EntityPhysicalIntent::Simulated,
+                ExplorerPhysicalMode::Integrated,
             )
             .unwrap_err();
         assert!(
@@ -1970,7 +1990,7 @@ mod tests {
 
         let (_entities, driver) = driver_with_appearance(vec![rabbit]);
         let spawned = driver
-            .spawn_by_wcid(request(2568, EntityPhysicalIntent::PoseOnly))
+            .spawn_by_wcid(request(2568, ExplorerPhysicalMode::PoseOnly))
             .unwrap();
 
         assert!(
@@ -1994,7 +2014,7 @@ mod tests {
 
         let (_entities, driver) = driver_with_appearance(vec![rabbit]);
         let spawned = driver
-            .spawn_by_wcid(request(2566, EntityPhysicalIntent::PoseOnly))
+            .spawn_by_wcid(request(2566, ExplorerPhysicalMode::PoseOnly))
             .unwrap();
 
         assert!(
@@ -2029,7 +2049,7 @@ mod tests {
 
         let (_entities, driver) = driver_with_appearance(vec![wearer, shirt]);
         let spawned = driver
-            .spawn_by_wcid(request(3921, EntityPhysicalIntent::PoseOnly))
+            .spawn_by_wcid(request(3921, ExplorerPhysicalMode::PoseOnly))
             .unwrap();
         let appearance = &spawned.instance.definition.appearance;
 
@@ -2065,7 +2085,7 @@ mod tests {
 
         let (_entities, driver) = driver_with_appearance(vec![wearer, shirt]);
         let spawned = driver
-            .spawn_by_wcid(request(3921, EntityPhysicalIntent::PoseOnly))
+            .spawn_by_wcid(request(3921, ExplorerPhysicalMode::PoseOnly))
             .unwrap();
         let appearance = &spawned.instance.definition.appearance;
 
@@ -2098,7 +2118,7 @@ mod tests {
 
         let (entities, driver) = driver_with_appearance(vec![collector, shirt]);
         let spawned = driver
-            .spawn_by_wcid(request(3921, EntityPhysicalIntent::PoseOnly))
+            .spawn_by_wcid(request(3921, ExplorerPhysicalMode::PoseOnly))
             .unwrap();
         let appearance = &spawned.instance.definition.appearance;
 
@@ -2148,7 +2168,7 @@ mod tests {
         ]);
         let second = repeat
             .1
-            .spawn_by_wcid(request(3921, EntityPhysicalIntent::PoseOnly))
+            .spawn_by_wcid(request(3921, ExplorerPhysicalMode::PoseOnly))
             .unwrap();
         assert_eq!(
             &second.instance.definition.appearance, appearance,
@@ -2177,7 +2197,7 @@ mod tests {
 
         let (entities, driver) = driver_with_appearance(vec![wearer, sword]);
         let spawned = driver
-            .spawn_by_wcid(request(3921, EntityPhysicalIntent::PoseOnly))
+            .spawn_by_wcid(request(3921, ExplorerPhysicalMode::PoseOnly))
             .unwrap();
 
         assert_eq!(spawned.children.len(), 1);
@@ -2219,7 +2239,7 @@ mod tests {
         let (_entities, driver) = driver(vec![template(147)], FixturePhysical::Prepares);
 
         let spawned = driver
-            .spawn_by_wcid(request(147, EntityPhysicalIntent::PoseOnly))
+            .spawn_by_wcid(request(147, ExplorerPhysicalMode::PoseOnly))
             .unwrap();
 
         assert!(
@@ -2241,7 +2261,7 @@ mod tests {
         let (entities, driver) = driver(vec![humanoid], FixturePhysical::Prepares);
 
         let error = driver
-            .spawn_by_wcid(request(3922, EntityPhysicalIntent::PoseOnly))
+            .spawn_by_wcid(request(3922, ExplorerPhysicalMode::PoseOnly))
             .unwrap_err();
 
         assert!(matches!(
@@ -2266,7 +2286,7 @@ mod tests {
         let (_entities, driver) = driver_with_appearance(vec![wearer]);
 
         let error = driver
-            .spawn_by_wcid(request(3921, EntityPhysicalIntent::PoseOnly))
+            .spawn_by_wcid(request(3921, ExplorerPhysicalMode::PoseOnly))
             .unwrap_err();
 
         assert!(matches!(
@@ -2322,7 +2342,7 @@ mod tests {
             ExplorerCatalogCapability::Unavailable { .. }
         ));
         let error = driver
-            .spawn_by_wcid(request(1, EntityPhysicalIntent::Simulated))
+            .spawn_by_wcid(request(1, ExplorerPhysicalMode::Integrated))
             .unwrap_err();
         assert!(
             matches!(

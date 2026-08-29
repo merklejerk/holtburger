@@ -6,12 +6,26 @@ import { resolve } from "node:path";
 
 import { stringifyRedactedProbeReport } from "./live-client-probe-report.mjs";
 
+const PASSIVE_CAMERA_SETTLE_MS = 3_000;
+const PASSIVE_CAMERA_INPUT_COUNT = 40;
+const PASSIVE_CAMERA_INPUT_INTERVAL_MS = 25;
+
 const appRoot = resolve(fileURLToPath(new URL("../", import.meta.url)));
 const account = requiredEnvironment("HOLTBURGER_PROBE_ACCOUNT");
 const password = requiredEnvironment("HOLTBURGER_PROBE_PASSWORD");
-let commands = process.env.HOLTBURGER_PROBE_TELEPORT_SEQUENCE
-	? parseCommands(process.env.HOLTBURGER_PROBE_TELEPORT_SEQUENCE)
-	: null;
+const mode = probeMode(process.env.HOLTBURGER_PROBE_MODE);
+if (
+	mode === "passive-camera" &&
+	process.env.HOLTBURGER_PROBE_TELEPORT_SEQUENCE !== undefined
+) {
+	throw new Error(
+		"Passive camera mode rejects HOLTBURGER_PROBE_TELEPORT_SEQUENCE.",
+	);
+}
+let commands =
+	mode === "teleport" && process.env.HOLTBURGER_PROBE_TELEPORT_SEQUENCE
+		? parseCommands(process.env.HOLTBURGER_PROBE_TELEPORT_SEQUENCE)
+		: null;
 const timeoutMs = Number(process.env.HOLTBURGER_PROBE_TIMEOUT_MS ?? "45000");
 
 if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
@@ -21,7 +35,7 @@ const child = spawn(
 	process.platform === "win32" ? "npm.cmd" : "npm",
 	[
 		"run",
-		"dev:client",
+		mode === "passive-camera" ? "dev:client:release" : "dev:client",
 		"--",
 		"--vite-port",
 		"1432",
@@ -96,52 +110,74 @@ try {
 	if (!initial.ready) {
 		throw new Error("Initial world entry did not produce a destination frame.");
 	}
-	commands ??= defaultTeleportSequence(initial.lastState.bodyText);
 
-	for (const command of commands) {
-		const before = await pageState(client);
-		await submitChat(client, command);
-		const outcome = await waitForReady(
-			client,
-			timeoutMs,
-			command,
-			true,
-			before.camera?.cameraGeneration ?? null,
-		);
-		const generation = outcome.lastState.camera?.cameraGeneration;
-		const cameraGeneration = outcome.lastState.cameraGenerations.find(
-			(evidence) => evidence.cameraGeneration === generation,
-		);
-		const provenInitialReseed =
-			cameraGeneration?.first.kind === "reseeded" &&
-			cameraGeneration.first.reason === "initial-placement" &&
-			cameraGeneration.first.clearance !== null;
-		const lastState = {
-			status: outcome.lastState.status,
-			error: outcome.lastState.error,
-			camera: outcome.lastState.camera,
-			bodyText: outcome.lastState.bodyText,
-		};
-		hops.push({
-			command,
-			ready: outcome.ready,
-			elapsedMs: outcome.elapsedMs,
-			lastState,
-			cameraGeneration,
-			provenInitialReseed,
+	if (mode === "passive-camera") {
+		await delay(PASSIVE_CAMERA_SETTLE_MS);
+		const cameraEvidence = await capturePassiveCameraGesture(client);
+		const cameraSummary = summarizeCameraEvidence(cameraEvidence);
+		const captureComplete =
+			cameraSummary.inputEventCount === PASSIVE_CAMERA_INPUT_COUNT &&
+			cameraSummary.cameraEventCount > 0 &&
+			cameraSummary.animationFrameCount > 0;
+		printReport({
+			ok: captureComplete,
+			mode,
+			commands: [],
+			teleports: [],
+			cameraEvidence: cameraSummary,
+			consoleMessages: [...consoleMessages.values()],
+			page: await pageState(client),
+			hostOutput: redact(output).slice(-30_000),
 		});
-		if (!outcome.ready) break;
-	}
+		process.exitCode = captureComplete ? 0 : 1;
+	} else {
+		commands ??= defaultTeleportSequence(initial.lastState.bodyText);
 
-	printReport({
-		ok:
-			hops.length === commands.length &&
-			hops.every((hop) => hop.ready && hop.provenInitialReseed),
-		hops,
-		consoleMessages: [...consoleMessages.values()],
-		page: await pageState(client),
-		hostOutput: redact(output).slice(-30_000),
-	});
+		for (const command of commands) {
+			const before = await pageState(client);
+			await submitChat(client, command);
+			const outcome = await waitForReady(
+				client,
+				timeoutMs,
+				command,
+				true,
+				before.camera?.cameraGeneration ?? null,
+			);
+			const generation = outcome.lastState.camera?.cameraGeneration;
+			const cameraGeneration = outcome.lastState.cameraGenerations.find(
+				(evidence) => evidence.cameraGeneration === generation,
+			);
+			const provenInitialReseed =
+				cameraGeneration?.first.kind === "reseeded" &&
+				cameraGeneration.first.reason === "initial-placement" &&
+				cameraGeneration.first.clearance !== null;
+			const lastState = {
+				status: outcome.lastState.status,
+				error: outcome.lastState.error,
+				camera: outcome.lastState.camera,
+				bodyText: outcome.lastState.bodyText,
+			};
+			hops.push({
+				command,
+				ready: outcome.ready,
+				elapsedMs: outcome.elapsedMs,
+				lastState,
+				cameraGeneration,
+				provenInitialReseed,
+			});
+			if (!outcome.ready) break;
+		}
+
+		printReport({
+			ok:
+				hops.length === commands.length &&
+				hops.every((hop) => hop.ready && hop.provenInitialReseed),
+			hops,
+			consoleMessages: [...consoleMessages.values()],
+			page: await pageState(client),
+			hostOutput: redact(output).slice(-30_000),
+		});
+	}
 } catch (error) {
 	printReport({
 		ok: false,
@@ -164,6 +200,21 @@ function requiredEnvironment(name) {
 	if (value === undefined || value.length === 0)
 		throw new Error(`${name} must be set.`);
 	return value;
+}
+
+function probeMode(value) {
+	if (value === undefined) {
+		throw new Error(
+			"HOLTBURGER_PROBE_MODE must be explicitly set to teleport or passive-camera.",
+		);
+	}
+	const mode = value;
+	if (mode !== "teleport" && mode !== "passive-camera") {
+		throw new Error(
+			"HOLTBURGER_PROBE_MODE must be teleport or passive-camera.",
+		);
+	}
+	return mode;
 }
 
 function parseCommands(value) {
@@ -326,12 +377,22 @@ async function installEvidenceCollector(client_) {
 		`async () => {
 			const bridge = window.holtburgerHost;
 			if (bridge === undefined) throw new Error("Electron host bridge is unavailable.");
-			const evidence = { camera: null, cameraGenerations: [], lifecycle: null, lifecycles: [] };
+			const evidence = {
+				camera: null,
+				cameraGenerations: [],
+				lifecycle: null,
+				lifecycles: [],
+				collecting: false,
+				cameraEvents: [],
+				animationFrames: [],
+				inputEvents: [],
+			};
 			Object.defineProperty(window, "__holtburgerProbeEvidence", {
 				configurable: true,
 				value: evidence,
 			});
 			await bridge.listen("client-camera", (tick) => {
+				if (evidence.collecting) evidence.cameraEvents.push(performance.now());
 				const pathEnd = tick.path.legs.at(-1)?.end.position ?? tick.path.initial.position;
 				const summary = {
 					cameraGeneration: tick.cameraGeneration,
@@ -360,8 +421,117 @@ async function installEvidenceCollector(client_) {
 				evidence.lifecycle = lifecycle;
 				evidence.lifecycles.push(lifecycle);
 			});
+			const collectAnimationFrame = (timestamp) => {
+				if (evidence.collecting) evidence.animationFrames.push(timestamp);
+				requestAnimationFrame(collectAnimationFrame);
+			};
+			requestAnimationFrame(collectAnimationFrame);
 		}`,
 	);
+}
+
+async function capturePassiveCameraGesture(client_) {
+	const bounds = await evaluate(
+		client_,
+		`() => {
+			const canvas = document.querySelector(".client-canvas");
+			if (!(canvas instanceof HTMLCanvasElement)) {
+				throw new Error("Client canvas is unavailable.");
+			}
+			const rect = canvas.getBoundingClientRect();
+			const evidence = window.__holtburgerProbeEvidence;
+			evidence.cameraEvents = [];
+			evidence.animationFrames = [];
+			evidence.inputEvents = [];
+			evidence.collecting = true;
+			return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+		}`,
+	);
+	const startX = bounds.x + bounds.width * 0.45;
+	const startY = bounds.y + bounds.height * 0.5;
+	await client_.send("Input.dispatchMouseEvent", {
+		type: "mousePressed",
+		x: startX,
+		y: startY,
+		button: "left",
+		buttons: 1,
+		clickCount: 1,
+	});
+	for (let step = 1; step <= PASSIVE_CAMERA_INPUT_COUNT; step += 1) {
+		await evaluate(
+			client_,
+			"() => window.__holtburgerProbeEvidence.inputEvents.push(performance.now())",
+		);
+		await client_.send("Input.dispatchMouseEvent", {
+			type: "mouseMoved",
+			x: startX + step * 2,
+			y: startY + Math.sin(step / 6) * 12,
+			button: "left",
+			buttons: 1,
+		});
+		await delay(PASSIVE_CAMERA_INPUT_INTERVAL_MS);
+	}
+	await client_.send("Input.dispatchMouseEvent", {
+		type: "mouseReleased",
+		x: startX + 80,
+		y: startY,
+		button: "left",
+		buttons: 0,
+		clickCount: 1,
+	});
+	await delay(2_000);
+	return evaluate(
+		client_,
+		`() => {
+			const evidence = window.__holtburgerProbeEvidence;
+			evidence.collecting = false;
+			return {
+				cameraEvents: evidence.cameraEvents,
+				animationFrames: evidence.animationFrames,
+				inputEvents: evidence.inputEvents,
+			};
+		}`,
+	);
+}
+
+function summarizeCameraEvidence(evidence) {
+	const cameraIntervals = intervals(evidence.cameraEvents);
+	const animationFrameIntervals = intervals(evidence.animationFrames);
+	const inputLatencies = evidence.inputEvents.flatMap((input) => {
+		const camera = evidence.cameraEvents.find((event) => event >= input);
+		return camera === undefined ? [] : [camera - input];
+	});
+	return {
+		cameraEventCount: evidence.cameraEvents.length,
+		animationFrameCount: evidence.animationFrames.length,
+		inputEventCount: evidence.inputEvents.length,
+		cameraIntervalMs: distribution(cameraIntervals),
+		animationFrameIntervalMs: distribution(animationFrameIntervals),
+		inputToCameraMs: distribution(inputLatencies),
+	};
+}
+
+function intervals(values) {
+	return values.slice(1).map((value, index) => value - values[index]);
+}
+
+function distribution(values) {
+	if (values.length === 0) return null;
+	const sorted = [...values].sort((left, right) => left - right);
+	const percentile = (fraction) =>
+		sorted[
+			Math.min(
+				sorted.length - 1,
+				Math.max(0, Math.ceil(sorted.length * fraction) - 1),
+			)
+		];
+	return {
+		count: sorted.length,
+		mean: sorted.reduce((total, value) => total + value, 0) / sorted.length,
+		p50: percentile(0.5),
+		p95: percentile(0.95),
+		max: sorted.at(-1),
+	};
 }
 
 async function submitChat(client_, message) {

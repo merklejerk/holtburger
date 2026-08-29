@@ -36,7 +36,6 @@ pub use camera::{
 };
 use character_selection::CharacterSelectionState;
 use movement::MovementSystem;
-use simulation::ClientSimulationSystem;
 use types::*;
 
 /// Physics tick interval in milliseconds.
@@ -71,7 +70,6 @@ pub struct ClientRuntime {
     message_dump_dir: Option<std::path::PathBuf>,
     message_counter: usize,
     movement: MovementSystem,
-    simulation: ClientSimulationSystem,
     /// Stages static collision and local-player body products outside the simulation turn.
     collision_coordinator: Option<collision::ClientCollisionCoordinator>,
     /// Whether the selected composition owns an asynchronous destination reveal product.
@@ -972,9 +970,10 @@ mod tests {
         FixtureCycle, explicit_motion_catalog,
     };
     use holtburger_world::{
-        CollisionScene, DynamicBodyCollisionDefinition, DynamicPhysicalBodyDefinition,
-        EdgeProtection, EntityCollisionParticipation, EntityCollisionReportPolicy,
-        EntityDynamicCollisionPolicy, EntityPhysicsScheduling, FreeSphereConfig, GroundedConfig,
+        CollisionScene, DynamicBodyCollisionDefinition, DynamicPhysicalBodyConfiguration,
+        DynamicPhysicalBodyDefinition, EdgeProtection, EntityCollisionParticipation,
+        EntityCollisionReportPolicy, EntityDynamicCollisionPolicy, FreeSphereConfig,
+        GroundedConfig, LocalIntegrationDemand, LocalPhysicalDemand, LocalTargetDemand,
         PhysicalBodyDefinition, PhysicalBodyResponsePolicy, PhysicalCollisionFilter,
         PhysicalElasticity, PhysicalFriction, PhysicalRestitution, PhysicalSphereSet,
         PhysicalSurfaceMotion, PlayerMotionTableSource, PreparedEntityTargetGeometry,
@@ -985,8 +984,8 @@ mod tests {
     fn dynamic_definition(
         movement: PhysicalBodyDefinition,
         response_policy: PhysicalBodyResponsePolicy,
-    ) -> DynamicPhysicalBodyDefinition {
-        DynamicPhysicalBodyDefinition {
+    ) -> DynamicPhysicalBodyConfiguration {
+        let definition = DynamicPhysicalBodyDefinition {
             movement,
             response_policy,
             entity_collision: DynamicBodyCollisionDefinition {
@@ -996,7 +995,6 @@ mod tests {
                     fallback_shapes: Vec::new(),
                     fallback_scale: ColliderScale::uniform(1.0).unwrap(),
                 }),
-                scheduling: EntityPhysicsScheduling::Eligible,
                 dynamic_collision: EntityDynamicCollisionPolicy {
                     target: EntityCollisionParticipation::Solid,
                     mover_accepts_response: true,
@@ -1013,7 +1011,15 @@ mod tests {
                 default_animation_available: false,
                 default_script_available: false,
             },
-        }
+        };
+        DynamicPhysicalBodyConfiguration::new(
+            definition,
+            LocalPhysicalDemand {
+                target: LocalTargetDemand::Retained,
+                integration: LocalIntegrationDemand::Eligible,
+            },
+        )
+        .unwrap()
     }
 
     fn test_self_movement_capabilities(
@@ -1563,10 +1569,10 @@ mod tests {
     }
 
     #[test]
-    fn simulation_build_projection_returns_none_without_tracked_remote() {
+    fn simulation_build_projection_returns_none_without_projectable_remote() {
         let client = builder::build_test_client(ClientState::InWorld);
 
-        let request = client.simulation.build_projection_request(&client.world);
+        let request = simulation::build_projection_request(&client.world);
 
         assert!(request.is_none());
     }
@@ -1625,7 +1631,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn simulation_build_projection_includes_tracked_nearby_actor() {
+    async fn simulation_build_projection_discovers_nearby_actor() {
         let mut client = builder::build_test_client(ClientState::InWorld);
         let player_guid = Guid(0x0102_0304);
         let remote_guid = Guid(0x0102_0305);
@@ -1654,12 +1660,9 @@ mod tests {
             .world
             .entities
             .get_mut(remote_guid)
-            .expect("tracked remote entity should exist");
+            .expect("remote entity should exist");
         remote.velocity = holtburger_common::Vector3::new(1.0, 0.0, 0.0);
 
-        client
-            .simulation
-            .track_body(holtburger_world::SpatialBodyId::Entity(remote_guid));
         client.movement.enqueue_drive_intent(
             movement_types::PlayerDriveIntent::ManualHeld(
                 movement_types::CharacterDrive::builder()
@@ -1676,10 +1679,8 @@ mod tests {
             .await
             .expect("movement tick should succeed");
 
-        let request = client
-            .simulation
-            .build_projection_request(&client.world)
-            .expect("tracked nearby actor should join the solve set");
+        let request = simulation::build_projection_request(&client.world)
+            .expect("nearby actor should join the solve set");
 
         assert_eq!(request.bodies.len(), 1);
         assert!(
@@ -1691,7 +1692,7 @@ mod tests {
     }
 
     #[test]
-    fn simulation_build_projection_includes_tracked_grounded_actor_without_vector_update() {
+    fn simulation_build_projection_discovers_grounded_actor_without_vector_update() {
         let mut client = builder::build_test_client(ClientState::InWorld);
         let player_guid = Guid(0x0102_1304);
         let remote_guid = Guid(0x0102_1305);
@@ -1734,22 +1735,16 @@ mod tests {
         });
         client.world.add_entity(remote);
 
-        client
-            .simulation
-            .track_body(holtburger_world::SpatialBodyId::Entity(remote_guid));
-
         let dt = Duration::from_millis(PHYSICS_TICK_MS);
         client.world.advance_authored_motion(dt);
-        let request = client
-            .simulation
-            .build_projection_request(&client.world)
-            .expect("tracked grounded remote should join the solve set");
+        let request = simulation::build_projection_request(&client.world)
+            .expect("grounded remote should join the solve set");
 
         let remote_body = request
             .bodies
             .iter()
             .find(|body| body.body_id == holtburger_world::SpatialBodyId::Entity(remote_guid))
-            .expect("tracked grounded remote should be present");
+            .expect("grounded remote should be present");
 
         assert!(
             remote_body.authored_offset.is_some(),
@@ -1790,16 +1785,14 @@ mod tests {
             .await
             .expect("movement tick should succeed");
 
-        let events = client
-            .simulation
-            .tick(
-                now,
-                Duration::from_millis(PHYSICS_TICK_MS),
-                &mut client.world,
-                &mut client.movement,
-                None,
-            )
-            .expect("pose-only simulation should not fail");
+        let events = simulation::tick(
+            now,
+            Duration::from_millis(PHYSICS_TICK_MS),
+            &mut client.world,
+            &mut client.movement,
+            None,
+        )
+        .expect("pose-only simulation should not fail");
 
         let authoritative_pose = client
             .world
@@ -1896,16 +1889,14 @@ mod tests {
             .await
             .expect("movement tick should activate the autonomous drive");
 
-        let events = client
-            .simulation
-            .tick(
-                now,
-                Duration::from_millis(PHYSICS_TICK_MS),
-                &mut client.world,
-                &mut client.movement,
-                Some(&collision),
-            )
-            .expect("ready collision products should permit the local transaction");
+        let events = simulation::tick(
+            now,
+            Duration::from_millis(PHYSICS_TICK_MS),
+            &mut client.world,
+            &mut client.movement,
+            Some(&collision),
+        )
+        .expect("ready collision products should permit the local transaction");
 
         let body = client
             .world
@@ -1959,7 +1950,7 @@ mod tests {
             .world
             .entities
             .get(remote_guid)
-            .expect("tracked remote entity should exist before solve")
+            .expect("remote entity should exist before solve")
             .position
             .coords;
         let mut remote = Entity::new(
@@ -1981,9 +1972,6 @@ mod tests {
         client.world.remove_entity(remote_guid);
         client.world.add_entity(remote);
 
-        client
-            .simulation
-            .track_body(holtburger_world::SpatialBodyId::Entity(remote_guid));
         client.movement.enqueue_drive_intent(
             movement_types::PlayerDriveIntent::ManualHeld(
                 movement_types::CharacterDrive::builder()
@@ -2000,22 +1988,20 @@ mod tests {
             .await
             .expect("movement tick should succeed");
 
-        let events = client
-            .simulation
-            .tick(
-                now,
-                Duration::from_millis(PHYSICS_TICK_MS),
-                &mut client.world,
-                &mut client.movement,
-                None,
-            )
-            .expect("pose-only simulation should not fail");
+        let events = simulation::tick(
+            now,
+            Duration::from_millis(PHYSICS_TICK_MS),
+            &mut client.world,
+            &mut client.movement,
+            None,
+        )
+        .expect("pose-only simulation should not fail");
 
         let remote_after = client
             .world
             .scene
             .body(holtburger_world::SpatialBodyId::Entity(remote_guid))
-            .expect("tracked remote body should still exist after solve");
+            .expect("remote body should still exist after solve");
         let player_body = client
             .world
             .scene
@@ -2099,8 +2085,6 @@ mod tests {
                 None,
             )
             .unwrap();
-        client.simulation.track_body(body_id);
-
         let interest = SimulationSceneInterest::prefetch_neighborhood(
             pose(2.0),
             CLIENT_COLLISION_OWNER_RADIUS,
@@ -2113,16 +2097,14 @@ mod tests {
         let dt = Duration::from_millis(PHYSICS_TICK_MS);
         let started_at = Instant::now();
         for tick in 1..=50 {
-            client
-                .simulation
-                .tick(
-                    started_at + dt * tick,
-                    dt,
-                    &mut client.world,
-                    &mut client.movement,
-                    Some(&collision),
-                )
-                .unwrap();
+            simulation::tick(
+                started_at + dt * tick,
+                dt,
+                &mut client.world,
+                &mut client.movement,
+                Some(&collision),
+            )
+            .unwrap();
         }
 
         let landed = client.world.scene.body(body_id).unwrap();
@@ -2134,7 +2116,7 @@ mod tests {
     }
 
     #[test]
-    fn runtime_world_event_tracking_registers_remote_movers() {
+    fn direct_projection_discovery_sees_remote_vector_changes() {
         let mut client = builder::build_test_client(ClientState::InWorld);
         let player_guid = Guid(0x0102_0304);
         let remote_guid = Guid(0x0102_0305);
@@ -2178,16 +2160,14 @@ mod tests {
                     contact: holtburger_world::ContactState::Grounded,
                     projection_state: None,
                 });
-        for event in runtime_events {
-            client.observe_runtime_world_event(&event);
-        }
+        assert!(!runtime_events.is_empty());
 
-        let request = client.simulation.build_projection_request(&client.world);
+        let request = simulation::build_projection_request(&client.world);
 
         assert!(request.is_some());
         assert!(
             request
-                .expect("tracked remote mover should produce a solve request")
+                .expect("remote mover should produce a solve request")
                 .bodies
                 .iter()
                 .any(|body| body.body_id == holtburger_world::SpatialBodyId::Entity(remote_guid))
@@ -2195,7 +2175,7 @@ mod tests {
     }
 
     #[test]
-    fn runtime_world_event_tracking_registers_grounded_projectable_remote() {
+    fn direct_projection_discovery_sees_grounded_authored_motion() {
         let mut client = builder::build_test_client(ClientState::InWorld);
         let player_guid = Guid(0x0102_2304);
         let remote_guid = Guid(0x0102_2305);
@@ -2238,16 +2218,14 @@ mod tests {
         });
         client.world.add_entity(remote.clone());
 
-        client.observe_runtime_world_event(&WorldEvent::EntityReplaced(Box::new(remote)));
-
         let dt = Duration::from_millis(PHYSICS_TICK_MS);
         client.world.advance_authored_motion(dt);
-        let request = client.simulation.build_projection_request(&client.world);
+        let request = simulation::build_projection_request(&client.world);
 
         assert!(request.is_some());
         assert!(
             request
-                .expect("tracked grounded remote should produce a solve request")
+                .expect("grounded remote should produce a solve request")
                 .bodies
                 .iter()
                 .any(|body| body.body_id == holtburger_world::SpatialBodyId::Entity(remote_guid))

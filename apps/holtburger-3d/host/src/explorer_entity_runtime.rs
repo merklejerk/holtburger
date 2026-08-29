@@ -22,14 +22,11 @@ use holtburger_world::motion::{
     BodyMotionRuntime, MotionCommand, MotionOrder, MotionRuntimeRegistry, PlayingMotionClip,
 };
 use holtburger_world::{
-    CollisionReportOutcome, ContactState, DynamicPhysicalBodyDefinition, GroundedLaunch,
-    PhysicalBodyActuation, PhysicalBodyDefinition, PhysicalBodyTickStatus, RuntimeSpatialBodyView,
-    SpatialBody, SpatialBodyId, gate_authored_offset, grounded_character_actuation,
-};
-use holtburger_world::{
-    EffectiveEntityPhysicsState, EntityPhysicalIntent, EntityPhysicsTransitionContext,
-    EntityPhysicsTransitionDecision, EntityPlacement, decide_entity_physics_state_transition,
-    resolve_effective_entity_physics_state,
+    CollisionReportOutcome, ContactState, DynamicPhysicalBodyConfiguration,
+    DynamicPhysicalBodyDefinition, EffectiveEntityPhysicsState, EntityPlacement, GroundedLaunch,
+    LocalPhysicalDemand, PhysicalBodyActuation, PhysicalBodyDefinition, PhysicalBodyTickStatus,
+    RuntimeSpatialBodyView, SpatialBody, SpatialBodyId, gate_authored_offset,
+    grounded_character_actuation, resolve_effective_entity_physics_state,
 };
 use serde::Serialize;
 
@@ -42,6 +39,7 @@ use crate::explorer_possession_control::{
 use crate::host_simulation_runtime::{
     HostPhysicalBodyCoverageRejection, HostPhysicalBodyTick, HostSimulationRuntime,
 };
+use crate::{ExplorerPhysicalMode, explorer_entity_driver::explorer_physical_demand};
 
 const EXPLORER_GUID_START: u32 = 0xf000_0001;
 const EXPLORER_GUID_END: u32 = 0xffff_fffe;
@@ -75,9 +73,9 @@ pub enum ExplorerEntityRuntimeError {
     PossessionIntent(PossessionIntentError),
     /// The canonical host scene rejected the corresponding body operation.
     Body(DynamicEntityBodyOperationError),
-    /// Simulated intent reached publication without a prepared physical definition.
+    /// Non-empty local physical demand reached publication without a prepared definition.
     MissingPreparedPhysics,
-    /// Pose-only intent incorrectly carried a physical definition.
+    /// Empty local physical demand incorrectly carried a prepared definition.
     UnexpectedPreparedPhysics,
     /// A world-motion operation targeted an attached child at the untyped GUID boundary.
     AttachedOperation {
@@ -155,12 +153,11 @@ impl Display for ExplorerEntityRuntimeError {
             ),
             Self::PossessionIntent(source) => Display::fmt(source, formatter),
             Self::Body(source) => Display::fmt(source, formatter),
-            Self::MissingPreparedPhysics => {
-                formatter.write_str("simulated Explorer entity requires prepared physics")
-            }
-            Self::UnexpectedPreparedPhysics => {
-                formatter.write_str("pose-only Explorer entity cannot install prepared physics")
-            }
+            Self::MissingPreparedPhysics => formatter
+                .write_str("Explorer entity with physical demand requires prepared physics"),
+            Self::UnexpectedPreparedPhysics => formatter.write_str(
+                "Explorer entity without physical demand cannot install prepared physics",
+            ),
             Self::AttachedOperation {
                 guid,
                 parent,
@@ -215,8 +212,8 @@ impl From<PossessionIntentError> for ExplorerEntityRuntimeError {
 pub struct ExplorerEntityInstance {
     /// Monotonic composition-local generation guarding late outcomes.
     pub generation: u64,
-    /// Producer policy retained independently from current solver participation.
-    pub physical_intent: EntityPhysicalIntent,
+    /// Final producer-owned target and integration demand.
+    pub physical_demand: LocalPhysicalDemand,
     /// Explorer-resolved frontend category retained outside the source-neutral definition.
     pub presentation_category: DynamicEntityCategory,
     /// Current complete source-neutral semantic definition.
@@ -326,8 +323,6 @@ pub struct ExplorerEntityCollectionTick {
 pub struct ExplorerEntityPhysicsStateOutcome {
     /// Updated current semantic instance; identity generation is unchanged.
     pub instance: ExplorerEntityInstance,
-    /// Pure shared transition decision applied to the canonical body.
-    pub decision: EntityPhysicsTransitionDecision,
     /// Canonical body facts read after the transition committed.
     pub body: DynamicEntityBodyCommitOutcome,
 }
@@ -979,7 +974,7 @@ impl ExplorerEntityRegistry {
     fn publish(
         &mut self,
         prepared: ExplorerPreparedEntity,
-        physical_intent: EntityPhysicalIntent,
+        physical_demand: LocalPhysicalDemand,
         generation: u64,
     ) -> ExplorerEntityInstance {
         let ExplorerPreparedEntity {
@@ -988,7 +983,7 @@ impl ExplorerEntityRegistry {
         } = prepared;
         let instance = ExplorerEntityInstance {
             generation,
-            physical_intent,
+            physical_demand,
             presentation_category,
             definition,
         };
@@ -1005,7 +1000,7 @@ impl ExplorerEntityRegistry {
     fn replace(
         &mut self,
         prepared: ExplorerPreparedEntity,
-        physical_intent: EntityPhysicalIntent,
+        physical_demand: LocalPhysicalDemand,
         generation: u64,
     ) -> (ExplorerEntityInstance, ExplorerEntityInstance) {
         let ExplorerPreparedEntity {
@@ -1015,7 +1010,7 @@ impl ExplorerEntityRegistry {
         let guid = definition.identity.guid;
         let installed = ExplorerEntityInstance {
             generation,
-            physical_intent,
+            physical_demand,
             presentation_category,
             definition,
         };
@@ -1103,21 +1098,26 @@ impl ExplorerEntityRuntime {
     pub fn spawn_prepared(
         &self,
         prepared: ExplorerPreparedEntity,
-        physical_intent: EntityPhysicalIntent,
+        physical_mode: ExplorerPhysicalMode,
         physical: Option<DynamicPhysicalBodyDefinition>,
     ) -> Result<ExplorerEntitySpawnOutcome, ExplorerEntityRuntimeError> {
-        self.spawn_prepared_group(prepared, physical_intent, physical, Vec::new())
+        self.spawn_prepared_group(prepared, physical_mode, physical, Vec::new())
     }
 
     /// Installs one world-placed wearer and publishes its bodyless attached children atomically.
     pub fn spawn_prepared_group(
         &self,
         prepared: ExplorerPreparedEntity,
-        physical_intent: EntityPhysicalIntent,
+        physical_mode: ExplorerPhysicalMode,
         physical: Option<DynamicPhysicalBodyDefinition>,
         children: Vec<ExplorerPreparedEntity>,
     ) -> Result<ExplorerEntitySpawnOutcome, ExplorerEntityRuntimeError> {
-        validate_prepared_intent(physical_intent, physical.is_some())?;
+        let physical_demand = explorer_physical_demand(physical_mode, prepared.definition.physics);
+        validate_prepared_demand(physical_demand, physical.is_some())?;
+        let physical = physical.map(|physical| {
+            DynamicPhysicalBodyConfiguration::new(physical, physical_demand)
+                .expect("prepared Explorer body must have non-empty demand")
+        });
         let guid = prepared.definition.identity.guid;
         validate_attached_children(guid, &children)?;
         let (prepared, children) = self.resolve_group_motion_tables(prepared, children);
@@ -1138,12 +1138,12 @@ impl ExplorerEntityRuntime {
         let body =
             self.simulation
                 .install_dynamic_entity(&prepared.definition, initial, physical)?;
-        let instance = registry.publish(prepared, physical_intent, generation);
+        let instance = registry.publish(prepared, physical_demand, generation);
         let children = children
             .into_iter()
             .zip(child_generations)
             .map(|(child, generation)| {
-                registry.publish(child, EntityPhysicalIntent::PoseOnly, generation)
+                registry.publish(child, LocalPhysicalDemand::NONE, generation)
             })
             .collect();
         Ok(ExplorerEntitySpawnOutcome {
@@ -1158,13 +1158,13 @@ impl ExplorerEntityRuntime {
         &self,
         prepared: ExplorerPreparedEntity,
         expected_generation: u64,
-        physical_intent: EntityPhysicalIntent,
+        physical_mode: ExplorerPhysicalMode,
         physical: Option<DynamicPhysicalBodyDefinition>,
     ) -> Result<ExplorerEntityReplacementOutcome, ExplorerEntityRuntimeError> {
         self.replace_prepared_group(
             prepared,
             expected_generation,
-            physical_intent,
+            physical_mode,
             physical,
             Vec::new(),
         )
@@ -1175,11 +1175,16 @@ impl ExplorerEntityRuntime {
         &self,
         prepared: ExplorerPreparedEntity,
         expected_generation: u64,
-        physical_intent: EntityPhysicalIntent,
+        physical_mode: ExplorerPhysicalMode,
         physical: Option<DynamicPhysicalBodyDefinition>,
         children: Vec<ExplorerPreparedEntity>,
     ) -> Result<ExplorerEntityReplacementOutcome, ExplorerEntityRuntimeError> {
-        validate_prepared_intent(physical_intent, physical.is_some())?;
+        let physical_demand = explorer_physical_demand(physical_mode, prepared.definition.physics);
+        validate_prepared_demand(physical_demand, physical.is_some())?;
+        let physical = physical.map(|physical| {
+            DynamicPhysicalBodyConfiguration::new(physical, physical_demand)
+                .expect("prepared Explorer body must have non-empty demand")
+        });
         let guid = prepared.definition.identity.guid;
         validate_attached_children(guid, &children)?;
         let (prepared, children) = self.resolve_group_motion_tables(prepared, children);
@@ -1202,7 +1207,7 @@ impl ExplorerEntityRuntime {
             self.simulation
                 .replace_dynamic_entity(&prepared.definition, initial, physical)?;
         registry.motion.retire_target(guid, expected_generation);
-        let (removed, installed) = registry.replace(prepared, physical_intent, generation);
+        let (removed, installed) = registry.replace(prepared, physical_demand, generation);
         let removed_children = removed_child_guids
             .into_iter()
             .map(|child| registry.remove(child))
@@ -1211,7 +1216,7 @@ impl ExplorerEntityRuntime {
             .into_iter()
             .zip(child_generations)
             .map(|(child, generation)| {
-                registry.publish(child, EntityPhysicalIntent::PoseOnly, generation)
+                registry.publish(child, LocalPhysicalDemand::NONE, generation)
             })
             .collect();
         Ok(ExplorerEntityReplacementOutcome {
@@ -1258,7 +1263,7 @@ impl ExplorerEntityRuntime {
         guid: Guid,
         expected_generation: u64,
         next: EffectiveEntityPhysicsState,
-        next_intent: EntityPhysicalIntent,
+        next_demand: LocalPhysicalDemand,
         replacement: Option<DynamicPhysicalBodyDefinition>,
     ) -> Result<ExplorerEntityPhysicsStateOutcome, ExplorerEntityRuntimeError> {
         let mut registry = self
@@ -1266,18 +1271,11 @@ impl ExplorerEntityRuntime {
             .lock()
             .expect("Explorer entity registry lock poisoned");
         let instance = registry.require_generation(guid, expected_generation)?;
-        let decision = transition_decision(
-            &self.simulation,
-            instance,
-            next,
-            next_intent,
-            replacement.is_some(),
-            "physics-state replacement",
-        )?;
-        validate_transition_replacement(decision.action, replacement.is_some())?;
-        let outcome = self.simulation.apply_dynamic_entity_physics(
+        require_world_initial(&instance.definition, "physics-state replacement")?;
+        let outcome = self.simulation.reconfigure_dynamic_entity_physics(
             SpatialBodyId::Entity(guid),
-            decision,
+            next,
+            next_demand,
             replacement,
         )?;
         let current = registry
@@ -1285,10 +1283,9 @@ impl ExplorerEntityRuntime {
             .get_mut(&guid)
             .expect("prevalidated entity vanished while registry lock was held");
         current.definition.physics = next;
-        current.physical_intent = next_intent;
+        current.physical_demand = next_demand;
         Ok(ExplorerEntityPhysicsStateOutcome {
             instance: current.clone(),
-            decision,
             body: outcome,
         })
     }
@@ -1347,27 +1344,26 @@ impl ExplorerEntityRuntime {
         })
     }
 
-    /// Preflights the exact shared state-transition action before content preparation.
-    pub fn plan_physics_state(
+    /// Reports whether the next demand needs content preparation for the current pose body.
+    pub fn physical_preparation_required(
         &self,
         guid: Guid,
         expected_generation: u64,
-        next: EffectiveEntityPhysicsState,
-        next_intent: EntityPhysicalIntent,
-    ) -> Result<EntityPhysicsTransitionDecision, ExplorerEntityRuntimeError> {
+        next_demand: LocalPhysicalDemand,
+    ) -> Result<bool, ExplorerEntityRuntimeError> {
         let registry = self
             .registry
             .lock()
             .expect("Explorer entity registry lock poisoned");
         let instance = registry.require_generation(guid, expected_generation)?;
-        transition_decision(
-            &self.simulation,
-            instance,
-            next,
-            next_intent,
-            true,
-            "physics-state planning",
-        )
+        require_world_initial(&instance.definition, "physics-state planning")?;
+        let projection = self
+            .simulation
+            .project_dynamic_entity(&instance.definition)?;
+        Ok(next_demand.requires_physical_body()
+            && projection.placement.world().is_some_and(|world| {
+                world.participation == holtburger_world::PhysicalBodyParticipation::PoseOnly
+            }))
     }
 
     /// Returns one exact semantic generation without joining or copying solver state.
@@ -2071,67 +2067,11 @@ fn require_world_initial(
     }
 }
 
-fn validate_prepared_intent(
-    intent: EntityPhysicalIntent,
+fn validate_prepared_demand(
+    demand: LocalPhysicalDemand,
     has_physical: bool,
 ) -> Result<(), ExplorerEntityRuntimeError> {
-    match (intent, has_physical) {
-        (EntityPhysicalIntent::Simulated, false) => {
-            Err(ExplorerEntityRuntimeError::MissingPreparedPhysics)
-        }
-        (EntityPhysicalIntent::PoseOnly, true) => {
-            Err(ExplorerEntityRuntimeError::UnexpectedPreparedPhysics)
-        }
-        _ => Ok(()),
-    }
-}
-
-fn transition_decision(
-    simulation: &HostSimulationRuntime,
-    instance: &ExplorerEntityInstance,
-    next: EffectiveEntityPhysicsState,
-    next_intent: EntityPhysicalIntent,
-    prepared_physics_available: bool,
-    operation: &'static str,
-) -> Result<EntityPhysicsTransitionDecision, ExplorerEntityRuntimeError> {
-    let projection = simulation.project_dynamic_entity(&instance.definition)?;
-    let world = match projection.placement {
-        EntityPlacement::World(world) => world,
-        EntityPlacement::Attached(attachment) => {
-            return Err(ExplorerEntityRuntimeError::AttachedOperation {
-                guid: instance.definition.identity.guid,
-                parent: attachment.parent,
-                operation,
-            });
-        }
-    };
-    let solver_participation_enabled = matches!(
-        world.participation,
-        holtburger_world::PhysicalBodyParticipation::Physical
-    );
-    Ok(decide_entity_physics_state_transition(
-        Some(instance.definition.physics),
-        next,
-        EntityPhysicsTransitionContext {
-            intent: next_intent,
-            prepared_physics_available: prepared_physics_available || solver_participation_enabled,
-            solver_participation_enabled,
-            prepared_definition_changed: false,
-        },
-    ))
-}
-
-fn validate_transition_replacement(
-    action: holtburger_world::EntityPhysicalTransitionAction,
-    has_replacement: bool,
-) -> Result<(), ExplorerEntityRuntimeError> {
-    use holtburger_world::EntityPhysicalTransitionAction::{
-        EnableSolverParticipation, Reconfigure,
-    };
-    match (
-        matches!(action, EnableSolverParticipation | Reconfigure),
-        has_replacement,
-    ) {
+    match (demand.requires_physical_body(), has_physical) {
         (true, false) => Err(ExplorerEntityRuntimeError::MissingPreparedPhysics),
         (false, true) => Err(ExplorerEntityRuntimeError::UnexpectedPreparedPhysics),
         _ => Ok(()),
@@ -2166,10 +2106,10 @@ mod tests {
     use holtburger_world::{
         DynamicBodyCollisionDefinition, EdgeProtection, EntityAppearance,
         EntityCollisionParticipation, EntityCollisionReportPolicy, EntityDynamicCollisionPolicy,
-        EntityPhysicsScheduling, FreeSphereConfig, PhysicalBodyDefinition,
-        PhysicalBodyParticipation, PhysicalBodyResponsePolicy, PhysicalElasticity,
-        PhysicalFriction, PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion,
-        PhysicsAttachment, PreparedEntityTargetGeometry, resolve_effective_entity_physics_state,
+        FreeSphereConfig, PhysicalBodyDefinition, PhysicalBodyParticipation,
+        PhysicalBodyResponsePolicy, PhysicalElasticity, PhysicalFriction, PhysicalRestitution,
+        PhysicalSphereSet, PhysicalSurfaceMotion, PhysicsAttachment, PreparedEntityTargetGeometry,
+        resolve_effective_entity_physics_state,
     };
     use std::time::Instant;
 
@@ -2307,7 +2247,6 @@ mod tests {
                     fallback_shapes: Vec::new(),
                     fallback_scale: ColliderScale::uniform(1.0).unwrap(),
                 }),
-                scheduling: EntityPhysicsScheduling::Eligible,
                 dynamic_collision: EntityDynamicCollisionPolicy {
                     target: EntityCollisionParticipation::Solid,
                     mover_accepts_response: true,
@@ -2405,14 +2344,14 @@ mod tests {
         let first = runtime
             .spawn_prepared(
                 prepared(definition(first_guid, 42, 0.0)),
-                EntityPhysicalIntent::PoseOnly,
+                ExplorerPhysicalMode::PoseOnly,
                 None,
             )
             .unwrap();
         let second = runtime
             .spawn_prepared(
                 prepared(definition(second_guid, 42, 2.0)),
-                EntityPhysicalIntent::Simulated,
+                ExplorerPhysicalMode::Integrated,
                 Some(physical()),
             )
             .unwrap();
@@ -2437,6 +2376,31 @@ mod tests {
     }
 
     #[test]
+    fn spawn_rejects_prepared_body_and_derived_demand_mismatches_before_publication() {
+        let (_simulation, runtime) = runtime(0xf000_0010, 0xf000_0011);
+        let missing_guid = runtime.reserve_guid().unwrap();
+        assert_eq!(
+            runtime.spawn_prepared(
+                prepared(definition(missing_guid, 42, 0.0)),
+                ExplorerPhysicalMode::Integrated,
+                None,
+            ),
+            Err(ExplorerEntityRuntimeError::MissingPreparedPhysics)
+        );
+
+        let unexpected_guid = runtime.reserve_guid().unwrap();
+        assert_eq!(
+            runtime.spawn_prepared(
+                prepared(definition(unexpected_guid, 42, 2.0)),
+                ExplorerPhysicalMode::PoseOnly,
+                Some(physical()),
+            ),
+            Err(ExplorerEntityRuntimeError::UnexpectedPreparedPhysics)
+        );
+        assert!(runtime.snapshot().unwrap().is_empty());
+    }
+
+    #[test]
     fn collection_tick_visits_only_eligible_physical_instances_in_guid_order() {
         let (_simulation, runtime) = runtime(0xf000_0100, 0xf000_0103);
         let pose_only_guid = runtime.reserve_guid().unwrap();
@@ -2446,7 +2410,7 @@ mod tests {
         runtime
             .spawn_prepared(
                 prepared(definition(pose_only_guid, 1, 0.0)),
-                EntityPhysicalIntent::PoseOnly,
+                ExplorerPhysicalMode::PoseOnly,
                 None,
             )
             .unwrap();
@@ -2454,26 +2418,24 @@ mod tests {
         let mut frozen_definition = definition(frozen_guid, 2, 1.0);
         frozen_definition.physics =
             resolve_effective_entity_physics_state(PhysicsState::GRAVITY | PhysicsState::FROZEN);
-        let mut frozen_physical = physical();
-        frozen_physical.entity_collision.scheduling = EntityPhysicsScheduling::Frozen;
         runtime
             .spawn_prepared(
                 prepared(frozen_definition),
-                EntityPhysicalIntent::Simulated,
-                Some(frozen_physical),
+                ExplorerPhysicalMode::Integrated,
+                Some(physical()),
             )
             .unwrap();
         let first = runtime
             .spawn_prepared(
                 prepared(definition(first_active_guid, 3, 2.0)),
-                EntityPhysicalIntent::Simulated,
+                ExplorerPhysicalMode::Integrated,
                 Some(physical()),
             )
             .unwrap();
         let second = runtime
             .spawn_prepared(
                 prepared(definition(second_active_guid, 4, 3.0)),
-                EntityPhysicalIntent::Simulated,
+                ExplorerPhysicalMode::Integrated,
                 Some(physical()),
             )
             .unwrap();
@@ -2524,14 +2486,14 @@ mod tests {
         let mover = runtime
             .spawn_prepared(
                 prepared(mover_definition),
-                EntityPhysicalIntent::Simulated,
+                ExplorerPhysicalMode::Integrated,
                 Some(mover_physical),
             )
             .unwrap();
         runtime
             .spawn_prepared(
                 prepared(definition(target_guid, 1, 1.2)),
-                EntityPhysicalIntent::Simulated,
+                ExplorerPhysicalMode::Integrated,
                 Some(physical_with_ball_target()),
             )
             .unwrap();
@@ -2567,7 +2529,7 @@ mod tests {
             runtime
                 .spawn_prepared(
                     prepared(definition),
-                    EntityPhysicalIntent::Simulated,
+                    ExplorerPhysicalMode::Integrated,
                     Some(report_only_physical()),
                 )
                 .unwrap();
@@ -2597,7 +2559,11 @@ mod tests {
             )
             .unwrap();
         assert_eq!(collection.collision_reports.len(), 2);
-        assert_eq!(collection.bodies.len(), 2);
+        assert_eq!(collection.bodies.len(), 1);
+        assert_eq!(
+            collection.bodies[0].current.id.authoritative_guid(),
+            Some(guids[1])
+        );
         assert!(
             collection
                 .bodies
@@ -2621,7 +2587,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            runtime.spawn_prepared(prepared(definition), EntityPhysicalIntent::PoseOnly, None),
+            runtime.spawn_prepared(prepared(definition), ExplorerPhysicalMode::PoseOnly, None),
             Err(ExplorerEntityRuntimeError::Body(
                 DynamicEntityBodyOperationError::AlreadyRegistered {
                     body_id: SpatialBodyId::Entity(guid)
@@ -2641,7 +2607,7 @@ mod tests {
         let first = runtime
             .spawn_prepared(
                 prepared(definition(guid, 8, 0.0)),
-                EntityPhysicalIntent::Simulated,
+                ExplorerPhysicalMode::Integrated,
                 Some(physical()),
             )
             .unwrap();
@@ -2649,7 +2615,7 @@ mod tests {
             .replace_prepared(
                 prepared(definition(guid, 9, 5.0)),
                 first.instance.generation,
-                EntityPhysicalIntent::PoseOnly,
+                ExplorerPhysicalMode::PoseOnly,
                 None,
             )
             .unwrap();
@@ -2680,7 +2646,7 @@ mod tests {
             .replace_prepared(
                 prepared(definition(guid, 10, 9.0)),
                 first.instance.generation,
-                EntityPhysicalIntent::PoseOnly,
+                ExplorerPhysicalMode::PoseOnly,
                 None,
             )
             .unwrap_err();
@@ -2702,7 +2668,7 @@ mod tests {
         let first = runtime
             .spawn_prepared(
                 prepared(definition(first_guid, 11, 0.0)),
-                EntityPhysicalIntent::PoseOnly,
+                ExplorerPhysicalMode::PoseOnly,
                 None,
             )
             .unwrap();
@@ -2719,7 +2685,7 @@ mod tests {
         let second = runtime
             .spawn_prepared(
                 prepared(definition(second_guid, 12, 0.0)),
-                EntityPhysicalIntent::PoseOnly,
+                ExplorerPhysicalMode::PoseOnly,
                 None,
             )
             .unwrap();
@@ -2729,7 +2695,7 @@ mod tests {
         let after_reset = runtime
             .spawn_prepared(
                 prepared(definition(Guid(0xf000_0040), 13, 0.0)),
-                EntityPhysicalIntent::PoseOnly,
+                ExplorerPhysicalMode::PoseOnly,
                 None,
             )
             .unwrap();
@@ -2749,7 +2715,7 @@ mod tests {
             runtime
                 .spawn_prepared_group(
                     prepared(definition(wearer_guid, 10, 0.0)),
-                    EntityPhysicalIntent::PoseOnly,
+                    ExplorerPhysicalMode::PoseOnly,
                     None,
                     vec![prepared(attached_definition(
                         child_guid,
@@ -2768,7 +2734,7 @@ mod tests {
             runtime
                 .spawn_prepared_group(
                     prepared(definition(wearer_guid, 10, 0.0)),
-                    EntityPhysicalIntent::PoseOnly,
+                    ExplorerPhysicalMode::PoseOnly,
                     None,
                     vec![prepared(definition(child_guid, 20, 0.0))],
                 )
@@ -2790,7 +2756,7 @@ mod tests {
         let first = runtime
             .spawn_prepared_group(
                 prepared(definition(wearer_guid, 10, 0.0)),
-                EntityPhysicalIntent::PoseOnly,
+                ExplorerPhysicalMode::PoseOnly,
                 None,
                 vec![prepared(attached_definition(
                     first_child_guid,
@@ -2814,11 +2780,10 @@ mod tests {
         );
         assert_eq!(
             runtime
-                .plan_physics_state(
+                .physical_preparation_required(
                     first_child_guid,
                     first.children[0].generation,
-                    resolve_effective_entity_physics_state(PhysicsState::GRAVITY),
-                    EntityPhysicalIntent::PoseOnly,
+                    LocalPhysicalDemand::NONE,
                 )
                 .unwrap_err(),
             ExplorerEntityRuntimeError::AttachedOperation {
@@ -2833,7 +2798,7 @@ mod tests {
             .replace_prepared_group(
                 prepared(definition(wearer_guid, 11, 1.0)),
                 first.instance.generation,
-                EntityPhysicalIntent::PoseOnly,
+                ExplorerPhysicalMode::PoseOnly,
                 None,
                 vec![prepared(attached_definition(
                     second_child_guid,
@@ -2865,7 +2830,7 @@ mod tests {
         runtime
             .spawn_prepared_group(
                 prepared(definition(reset_wearer_guid, 12, 0.0)),
-                EntityPhysicalIntent::PoseOnly,
+                ExplorerPhysicalMode::PoseOnly,
                 None,
                 vec![prepared(attached_definition(
                     reset_child_guid,
@@ -2877,61 +2842,6 @@ mod tests {
         let reset = runtime.reset().unwrap();
         assert_eq!(reset.len(), 2);
         assert!(runtime.snapshot().unwrap().is_empty());
-    }
-
-    /// Both producer compositions must derive the same operation from one pair of masks. This
-    /// walks the exact sequence the client `SetState` path asserts in
-    /// `holtburger_world::state::tests::set_state_reconfigures_then_disables_dynamic_client_physics_without_losing_semantic_truth`
-    /// (GRAVITY, then FROZEN, then PUSHABLE). If either producer's context construction drifts,
-    /// one of the two tests fails rather than both silently agreeing on a new answer.
-    #[test]
-    fn explorer_derives_the_same_transition_actions_as_the_client_set_state_path() {
-        let (_simulation, runtime) = runtime(0xf000_0070, 0xf000_0080);
-        let guid = runtime.reserve_guid().unwrap();
-        let spawned = runtime
-            .spawn_prepared(
-                prepared(definition(guid, 1, 0.0)),
-                EntityPhysicalIntent::Simulated,
-                Some(physical()),
-            )
-            .unwrap();
-        let generation = spawned.instance.generation;
-
-        // FROZEN keeps a simulated body but changes scheduling: reconfigure, never retire.
-        let frozen = runtime
-            .plan_physics_state(
-                guid,
-                generation,
-                resolve_effective_entity_physics_state(PhysicsState::FROZEN),
-                EntityPhysicalIntent::Simulated,
-            )
-            .unwrap();
-        assert_eq!(
-            frozen.action,
-            holtburger_world::EntityPhysicalTransitionAction::Reconfigure
-        );
-
-        // PUSHABLE has no reachable local simulation, so both producers disable participation
-        // while the semantic mask survives.
-        let pushable = runtime
-            .plan_physics_state(
-                guid,
-                generation,
-                resolve_effective_entity_physics_state(PhysicsState::PUSHABLE),
-                EntityPhysicalIntent::Simulated,
-            )
-            .unwrap();
-        assert_eq!(
-            pushable.action,
-            holtburger_world::EntityPhysicalTransitionAction::DisableSolverParticipation
-        );
-        assert!(
-            matches!(
-                pushable.disposition,
-                holtburger_world::EntityPhysicalDisposition::UnsupportedState { .. }
-            ),
-            "the unsupported reason must stay typed rather than collapsing to pose-only"
-        );
     }
 
     /// Serves flat ground so a fixture body can prove stable support.
@@ -3163,7 +3073,7 @@ mod tests {
         runtime
             .spawn_prepared(
                 prepared(definition),
-                EntityPhysicalIntent::Simulated,
+                ExplorerPhysicalMode::Integrated,
                 Some(body),
             )
             .unwrap();
@@ -3655,7 +3565,7 @@ mod tests {
         );
 
         runtime
-            .spawn_prepared(prepared(definition), EntityPhysicalIntent::PoseOnly, None)
+            .spawn_prepared(prepared(definition), ExplorerPhysicalMode::PoseOnly, None)
             .unwrap();
 
         assert_eq!(
@@ -4178,7 +4088,7 @@ mod tests {
         let peer = runtime
             .spawn_prepared(
                 prepared(peer),
-                EntityPhysicalIntent::Simulated,
+                ExplorerPhysicalMode::Integrated,
                 Some(physical_with_ball_target()),
             )
             .unwrap();
@@ -4240,7 +4150,7 @@ mod tests {
         let mut target = definition(guid, 1, 0.0);
         target.content.motion_table_did = Some(WALK_TABLE);
         runtime
-            .spawn_prepared(prepared(target), EntityPhysicalIntent::PoseOnly, None)
+            .spawn_prepared(prepared(target), ExplorerPhysicalMode::PoseOnly, None)
             .unwrap();
         let possession = runtime.possess(guid).unwrap();
 
@@ -4441,7 +4351,7 @@ mod tests {
             .replace_prepared(
                 prepared(replacement),
                 generation,
-                EntityPhysicalIntent::Simulated,
+                ExplorerPhysicalMode::Integrated,
                 Some(physical()),
             )
             .unwrap();
@@ -4460,7 +4370,7 @@ mod tests {
         runtime
             .spawn_prepared(
                 prepared(definition(guid, 1, 0.0)),
-                EntityPhysicalIntent::Simulated,
+                ExplorerPhysicalMode::Integrated,
                 Some(physical()),
             )
             .unwrap();
@@ -4542,7 +4452,7 @@ mod tests {
         runtime
             .spawn_prepared(
                 prepared(definition(guid, 1, 0.0)),
-                EntityPhysicalIntent::Simulated,
+                ExplorerPhysicalMode::Integrated,
                 Some(physical()),
             )
             .unwrap();

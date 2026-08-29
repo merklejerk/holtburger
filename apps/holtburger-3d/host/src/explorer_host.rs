@@ -353,7 +353,7 @@ pub async fn dispatch_explorer(
                         holtburger_common::properties::PhysicsState::from_bits_retain(
                             request.semantic_mask,
                         ),
-                        request.physical_intent,
+                        request.physical_mode,
                     )?;
                     let receipt = ExplorerEntityMutationReceipt {
                         guid: request.guid,

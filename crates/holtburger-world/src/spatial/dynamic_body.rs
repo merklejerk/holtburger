@@ -5,7 +5,7 @@ use std::sync::Arc;
 use holtburger_common::{Quaternion, Vector3};
 use holtburger_content::{ColliderScale, CollisionShape};
 
-use crate::{EntityCollisionReportPolicy, EntityDynamicCollisionPolicy, EntityPhysicsScheduling};
+use crate::{EntityCollisionReportPolicy, EntityDynamicCollisionPolicy, LocalPhysicalDemand};
 
 use super::{PhysicalBodyDefinition, PhysicalBodyResponsePolicy, PhysicalElasticity};
 
@@ -62,13 +62,11 @@ impl PartialEq for PreparedEntityTargetGeometry {
     }
 }
 
-/// Entity-specific collision and scheduling facts retained beside generic response memory.
+/// Entity-specific prepared collision facts retained beside generic response memory.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DynamicBodyCollisionDefinition {
     /// Shared stable target branches prepared once from immutable content.
     pub target_geometry: Arc<PreparedEntityTargetGeometry>,
-    /// State-derived fixed-tick eligibility.
-    pub scheduling: EntityPhysicsScheduling,
     /// State-derived directional peer collision policy.
     pub dynamic_collision: EntityDynamicCollisionPolicy,
     /// State-derived directional contact reporting policy.
@@ -90,13 +88,60 @@ pub struct DynamicPhysicalBodyDefinition {
     pub movement: PhysicalBodyDefinition,
     /// Authored response coefficients after effective-state overrides.
     pub response_policy: PhysicalBodyResponsePolicy,
-    /// Entity-specific peer-target, scheduling, and reporting facts.
+    /// Entity-specific peer-target, response, and reporting facts.
     pub entity_collision: DynamicBodyCollisionDefinition,
+}
+
+/// A prepared physical definition joined to the producer demand that gives it a local role.
+///
+/// Construction rejects a body with neither target nor integration demand so physical allocation
+/// cannot become a third, contradictory source of admission policy.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DynamicPhysicalBodyConfiguration {
+    definition: DynamicPhysicalBodyDefinition,
+    demand: LocalPhysicalDemand,
+}
+
+/// Failure to join prepared body facts to producer-owned local demand.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum DynamicPhysicalBodyConfigurationError {
+    /// A pose-only entity must not retain an otherwise unused physical allocation.
+    #[error("dynamic physical body configuration requires target or integration demand")]
+    NoLocalPhysicalDemand,
+}
+
+impl DynamicPhysicalBodyConfiguration {
+    /// Joins prepared facts to a non-empty local demand.
+    pub fn new(
+        definition: DynamicPhysicalBodyDefinition,
+        demand: LocalPhysicalDemand,
+    ) -> Result<Self, DynamicPhysicalBodyConfigurationError> {
+        if !demand.requires_physical_body() {
+            return Err(DynamicPhysicalBodyConfigurationError::NoLocalPhysicalDemand);
+        }
+        Ok(Self { definition, demand })
+    }
+
+    /// Prepared geometry and response facts, independent from producer policy.
+    pub const fn definition(&self) -> &DynamicPhysicalBodyDefinition {
+        &self.definition
+    }
+
+    /// Final producer-owned target and integration demand.
+    pub const fn demand(&self) -> LocalPhysicalDemand {
+        self.demand
+    }
+
+    /// Separates the joined configuration at the canonical scene ownership boundary.
+    pub(crate) fn into_parts(self) -> (DynamicPhysicalBodyDefinition, LocalPhysicalDemand) {
+        (self.definition, self.demand)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{LocalIntegrationDemand, LocalTargetDemand};
     use holtburger_content::{CollisionBall, CollisionShape};
 
     fn ball_shape() -> Arc<CollisionShape> {
@@ -139,5 +184,68 @@ mod tests {
             &right.fallback_shapes[0]
         ));
         assert_eq!(left, right);
+    }
+
+    #[test]
+    fn configuration_rejects_a_body_with_no_local_physical_role() {
+        let definition = DynamicPhysicalBodyDefinition {
+            movement: PhysicalBodyDefinition::free_sphere(
+                super::super::PhysicalSphereSet::new(
+                    holtburger_common::Sphere {
+                        center: Vector3::zero(),
+                        radius: 0.5,
+                    },
+                    None,
+                )
+                .unwrap(),
+                super::super::FreeSphereConfig {
+                    maximum_substep_distance: 0.25,
+                    maximum_substeps: 8,
+                    maximum_contact_passes: 4,
+                    separation_epsilon: 0.001,
+                },
+            )
+            .unwrap(),
+            response_policy: PhysicalBodyResponsePolicy {
+                restitution: super::super::PhysicalRestitution::Inelastic,
+                friction: super::super::PhysicalFriction::DEFAULT,
+                surface_motion: super::super::PhysicalSurfaceMotion::Stable,
+                align_path: false,
+            },
+            entity_collision: DynamicBodyCollisionDefinition {
+                target_geometry: Arc::new(PreparedEntityTargetGeometry {
+                    physics_bsp_parts: Vec::new(),
+                    fallback_setup_did: 0,
+                    fallback_shapes: Vec::new(),
+                    fallback_scale: ColliderScale::uniform(1.0).unwrap(),
+                }),
+                dynamic_collision: crate::EntityDynamicCollisionPolicy {
+                    target: crate::EntityCollisionParticipation::Suppressed,
+                    mover_accepts_response: false,
+                    accepts_peer_reports: false,
+                    missile: false,
+                    path_clipped: false,
+                },
+                reporting: crate::EntityCollisionReportPolicy {
+                    enabled: false,
+                    as_environment: false,
+                },
+                uses_physics_bsp: false,
+                elasticity: PhysicalElasticity::DEFAULT,
+                default_animation_available: false,
+                default_script_available: false,
+            },
+        };
+
+        assert_eq!(
+            DynamicPhysicalBodyConfiguration::new(
+                definition,
+                LocalPhysicalDemand {
+                    target: LocalTargetDemand::Absent,
+                    integration: LocalIntegrationDemand::Excluded,
+                },
+            ),
+            Err(DynamicPhysicalBodyConfigurationError::NoLocalPhysicalDemand)
+        );
     }
 }

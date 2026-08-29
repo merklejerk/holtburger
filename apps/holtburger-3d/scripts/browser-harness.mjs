@@ -3542,7 +3542,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			const movers = await evaluate(
 				client,
 				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.spawnExplorerEntityFleet",
-				[options.entityPairWcid, [[0, 12, 0]], "simulated"],
+				[options.entityPairWcid, [[0, 12, 0]], "integrated"],
 			);
 			const targets = await evaluate(
 				client,
@@ -3550,7 +3550,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				[
 					options.entityPairTargetWcid ?? options.entityPairWcid,
 					[[options.entityPairSeparation, 12, 0]],
-					"simulated",
+					"integrated",
 				],
 			);
 			const pair = [...movers, ...targets];
@@ -3629,7 +3629,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 					...(await evaluate(
 						client,
 						"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.spawnExplorerEntityFleet",
-						[wcid, share, "simulated"],
+						[wcid, share, "integrated"],
 					)),
 				);
 			}

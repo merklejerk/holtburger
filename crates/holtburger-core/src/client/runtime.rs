@@ -2,7 +2,6 @@ use super::*;
 use crate::DynamicEntityEvent;
 use crate::DynamicEntityPlacementAdvanceKind;
 use anyhow::Result;
-use holtburger_world::SpatialBodyId;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -10,18 +9,6 @@ impl ClientRuntime {
     fn should_send_keepalive_ping(&self, now: Instant) -> bool {
         matches!(self.state, ClientState::InWorld)
             && now.duration_since(self.session.last_send_time) > Duration::from_secs(5)
-    }
-
-    fn sync_remote_body_tracking(&mut self, body_id: SpatialBodyId) {
-        if matches!(body_id, SpatialBodyId::LocalPlayer(_)) {
-            return;
-        }
-
-        if self.world.body_has_simulatable_projection_basis(body_id) {
-            self.simulation.track_body(body_id);
-        } else {
-            self.simulation.untrack_body(body_id);
-        }
     }
 
     pub(super) fn poll_busy_timeout(&mut self, now: Instant) {
@@ -52,37 +39,6 @@ impl ClientRuntime {
         let world_events = self.world.set_server_time_sync(server_time, local_time);
         for event in world_events {
             self.handle_world_event(&event);
-        }
-    }
-
-    pub(super) fn observe_runtime_world_event(&mut self, event: &WorldEvent) {
-        match event {
-            WorldEvent::EntitySpawned(entity)
-            | WorldEvent::EntityReplaced(entity)
-            | WorldEvent::EntityIdentified(entity) => {
-                if let Some(body_id) = self.world.runtime_body_id_for_guid(entity.guid) {
-                    self.sync_remote_body_tracking(body_id);
-                }
-            }
-            WorldEvent::EntityVectorUpdated { guid, .. } => {
-                if let Some(body_id) = self.world.runtime_body_id_for_guid(*guid) {
-                    self.sync_remote_body_tracking(body_id);
-                }
-            }
-            WorldEvent::EntityDespawned { guid, .. } => {
-                self.simulation.untrack_body(SpatialBodyId::Entity(*guid));
-            }
-            WorldEvent::RuntimeBodyChanged { body_id }
-            | WorldEvent::RuntimeBodyAdvanced { body_id, .. } => {
-                self.sync_remote_body_tracking(*body_id);
-            }
-            WorldEvent::RuntimeBodyRemoved { body_id }
-                if !matches!(body_id, SpatialBodyId::LocalPlayer(_)) =>
-            {
-                self.simulation.untrack_body(*body_id);
-            }
-            WorldEvent::RuntimeBodiesReset { .. } => {}
-            _ => {}
         }
     }
 
@@ -139,7 +95,6 @@ impl ClientRuntime {
             }
             _ => {}
         }
-        self.observe_runtime_world_event(event);
         self.emit_world_view_projection(event);
     }
 
@@ -275,7 +230,7 @@ impl ClientRuntime {
                         .map(super::collision::ClientCollisionCoordinator::snapshot);
                     let mut placement_kind_overrides = std::collections::HashMap::new();
                     if active_world {
-                        let simulation_events = self.simulation.tick(
+                        let simulation_events = super::simulation::tick(
                             now,
                             dt_duration,
                             &mut self.world,

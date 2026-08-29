@@ -13,17 +13,18 @@ use holtburger_core::{
     DynamicEntityInitialState, DynamicEntityProjectionInput, SimulationSceneBatchCompletion,
     SimulationSceneInterest, SimulationSceneOwnerAvailability, SimulationSceneOwnerOutcome,
     SimulationSceneOwnerRequest, SimulationScenePublication, SimulationSceneRequest,
-    SimulationSceneResidency, apply_dynamic_entity_physics_transition,
-    dynamic_entity_projection_input, install_dynamic_entity_body, remove_dynamic_entity_body,
-    replace_dynamic_entity_body,
+    SimulationSceneResidency, dynamic_entity_projection_input, install_dynamic_entity_body,
+    remove_dynamic_entity_body, replace_dynamic_entity_body,
+    set_dynamic_entity_physical_configuration,
 };
 use holtburger_world::{
     CollisionQueryError, CollisionReportOutcome, CollisionScene, DynamicBodyKinematics,
-    DynamicBodyRelocationOutcome, DynamicPhysicalBodyDefinition, EntityPhysicsTransitionDecision,
-    GroundedBodyActuation, PhysicalBodyActuation, PhysicalBodyDefinition,
-    PhysicalBodyResponsePolicy, PhysicalBodySceneResidency, PhysicalBodyTickResult,
-    PhysicalCollisionFilter, PlacedMotionPath, PlacementRecovery, RuntimeSpatialBodyView,
-    SpatialBody, SpatialBodyId, SpatialScene, physical_body_scene_residency,
+    DynamicBodyRelocationOutcome, DynamicPhysicalBodyConfiguration, DynamicPhysicalBodyDefinition,
+    EffectiveEntityPhysicsState, GroundedBodyActuation, LocalPhysicalDemand, PhysicalBodyActuation,
+    PhysicalBodyDefinition, PhysicalBodyResponsePolicy, PhysicalBodySceneResidency,
+    PhysicalBodyTickResult, PhysicalCollisionFilter, PlacedMotionPath, PlacementRecovery,
+    RuntimeSpatialBodyView, SpatialBody, SpatialBodyId, SpatialScene,
+    physical_body_scene_residency,
 };
 use serde::{Deserialize, Serialize};
 
@@ -224,7 +225,7 @@ impl HostSimulationRuntime {
         &self,
         definition: &DynamicEntityDefinition,
         initial: DynamicEntityInitialState,
-        physical: Option<DynamicPhysicalBodyDefinition>,
+        physical: Option<DynamicPhysicalBodyConfiguration>,
     ) -> Result<DynamicEntityBodyCommitOutcome, DynamicEntityBodyOperationError> {
         let mut state = self.state.lock().expect("host simulation lock poisoned");
         install_dynamic_entity_body(&mut state.bodies, definition, initial, physical)
@@ -235,7 +236,7 @@ impl HostSimulationRuntime {
         &self,
         definition: &DynamicEntityDefinition,
         initial: DynamicEntityInitialState,
-        physical: Option<DynamicPhysicalBodyDefinition>,
+        physical: Option<DynamicPhysicalBodyConfiguration>,
     ) -> Result<DynamicEntityBodyReplacementOutcome, DynamicEntityBodyOperationError> {
         let mut state = self.state.lock().expect("host simulation lock poisoned");
         replace_dynamic_entity_body(&mut state.bodies, definition, initial, physical)
@@ -280,15 +281,40 @@ impl HostSimulationRuntime {
         dynamic_entity_projection_input(definition, &state.bodies)
     }
 
-    /// Applies one shared complete-state transition to an existing dynamic entity body.
-    pub fn apply_dynamic_entity_physics(
+    /// Resolves and commits one complete state/demand replacement under the scene lock.
+    pub fn reconfigure_dynamic_entity_physics(
         &self,
         body_id: SpatialBodyId,
-        decision: EntityPhysicsTransitionDecision,
-        replacement: Option<DynamicPhysicalBodyDefinition>,
+        next: EffectiveEntityPhysicsState,
+        demand: LocalPhysicalDemand,
+        prepared: Option<DynamicPhysicalBodyDefinition>,
     ) -> Result<DynamicEntityBodyCommitOutcome, DynamicEntityBodyOperationError> {
         let mut state = self.state.lock().expect("host simulation lock poisoned");
-        apply_dynamic_entity_physics_transition(&mut state.bodies, body_id, decision, replacement)
+        let replacement = if demand.requires_physical_body() {
+            if let Some(prepared) = prepared {
+                Some(
+                    DynamicPhysicalBodyConfiguration::new(prepared, demand)
+                        .expect("non-empty Explorer demand must produce a configuration"),
+                )
+            } else {
+                let body = state
+                    .bodies
+                    .body(body_id)
+                    .ok_or(DynamicEntityBodyOperationError::NotRegistered { body_id })?;
+                let physical = body
+                    .physical
+                    .as_ref()
+                    .ok_or(DynamicEntityBodyOperationError::NotPhysical { body_id })?;
+                Some(
+                    physical
+                        .dynamic_configuration_for_state(next, demand)
+                        .ok_or(DynamicEntityBodyOperationError::NotPhysical { body_id })?,
+                )
+            }
+        } else {
+            None
+        };
+        set_dynamic_entity_physical_configuration(&mut state.bodies, body_id, replacement)
     }
 
     /// Replaces one physical dynamic entity's live vectors and incompatible response memory.
@@ -329,7 +355,7 @@ impl HostSimulationRuntime {
             .expect("prevalidated dynamic entity body lost its dynamic physical invariant"))
     }
 
-    /// Installs a source-neutral physical definition, enabling solver participation.
+    /// Installs or removes a source-neutral physical configuration.
     pub fn install_physical_body(
         &self,
         body_id: SpatialBodyId,

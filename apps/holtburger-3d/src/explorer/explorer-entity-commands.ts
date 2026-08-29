@@ -104,7 +104,7 @@ export interface ExplorerEntitySpawnRequest {
 		readonly y: number;
 		readonly z: number;
 	};
-	readonly physicalIntent: "pose-only" | "simulated";
+	readonly physicalMode: "pose-only" | "integrated";
 }
 
 /** Explicit one-shot launch; catalog facts own speed and spin. */
@@ -208,14 +208,14 @@ export function createExplorerSpawnRequest(
 	placement: HostCameraPlacement,
 	viewDirection: readonly [number, number, number],
 	distance: number,
-	physicalIntent: ExplorerEntitySpawnRequest["physicalIntent"],
+	physicalMode: ExplorerEntitySpawnRequest["physicalMode"],
 ): ExplorerEntitySpawnRequest {
 	if (!Number.isInteger(wcid) || wcid < 0 || wcid > 0xffff_ffff)
 		throw new Error("WCID must fit an unsigned 32-bit integer.");
 	return {
 		wcid,
 		...createCameraRelativeEntityCandidate(placement, viewDirection, distance),
-		physicalIntent,
+		physicalMode,
 	};
 }
 

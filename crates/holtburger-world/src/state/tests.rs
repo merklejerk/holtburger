@@ -3282,15 +3282,13 @@ fn apply_set_state_updates_local_player_instance_sequence_and_entity_physics_sta
         [WorldEvent::EntityStateUpdated {
             guid,
             physics_state,
-            transition,
         }] if *guid == state.player.guid
             && *physics_state
                 == (PhysicsState::REPORT_COLLISIONS | PhysicsState::IGNORE_COLLISIONS)
-            && transition.action == crate::EntityPhysicalTransitionAction::None
     ));
 }
 
-fn set_state_dynamic_definition() -> crate::DynamicPhysicalBodyDefinition {
+fn set_state_dynamic_definition() -> crate::DynamicPhysicalBodyConfiguration {
     let movement = crate::PhysicalBodyDefinition::free_sphere(
         crate::PhysicalSphereSet::new(
             holtburger_common::Sphere {
@@ -3314,7 +3312,7 @@ fn set_state_dynamic_definition() -> crate::DynamicPhysicalBodyDefinition {
         surface_motion: crate::PhysicalSurfaceMotion::Stable,
         align_path: false,
     };
-    crate::DynamicPhysicalBodyDefinition {
+    let definition = crate::DynamicPhysicalBodyDefinition {
         movement,
         response_policy,
         entity_collision: crate::DynamicBodyCollisionDefinition {
@@ -3324,7 +3322,6 @@ fn set_state_dynamic_definition() -> crate::DynamicPhysicalBodyDefinition {
                 fallback_shapes: Vec::new(),
                 fallback_scale: holtburger_content::ColliderScale::uniform(1.0).unwrap(),
             }),
-            scheduling: crate::EntityPhysicsScheduling::Eligible,
             dynamic_collision: crate::EntityDynamicCollisionPolicy {
                 target: crate::EntityCollisionParticipation::Solid,
                 mover_accepts_response: true,
@@ -3341,11 +3338,19 @@ fn set_state_dynamic_definition() -> crate::DynamicPhysicalBodyDefinition {
             default_animation_available: false,
             default_script_available: false,
         },
-    }
+    };
+    crate::DynamicPhysicalBodyConfiguration::new(
+        definition,
+        crate::LocalPhysicalDemand {
+            target: crate::LocalTargetDemand::Retained,
+            integration: crate::LocalIntegrationDemand::Eligible,
+        },
+    )
+    .unwrap()
 }
 
 #[test]
-fn set_state_reconfigures_then_disables_dynamic_client_physics_without_losing_semantic_truth() {
+fn set_state_updates_semantic_truth_without_inferring_client_physical_policy() {
     let mut state = WorldState::synthetic();
     let guid = Guid(0x7000_0001);
     let pose = WorldPosition {
@@ -3376,24 +3381,13 @@ fn set_state_reconfigures_then_disables_dynamic_client_physics_without_losing_se
         &mut frozen_events,
     ));
     assert_eq!(
-        state
-            .scene
-            .body(body_id)
-            .unwrap()
-            .physical
-            .as_ref()
-            .unwrap()
-            .dynamic
-            .as_ref()
-            .unwrap()
-            .collision
-            .scheduling,
-        crate::EntityPhysicsScheduling::Frozen
+        state.entities.get(guid).unwrap().physics.semantic,
+        PhysicsState::FROZEN
     );
+    assert!(state.scene.body(body_id).unwrap().physical.is_some());
     assert!(matches!(
         frozen_events.last(),
-        Some(WorldEvent::EntityStateUpdated { transition, .. })
-            if transition.action == crate::EntityPhysicalTransitionAction::Reconfigure
+        Some(WorldEvent::EntityStateUpdated { .. })
     ));
 
     let mut unsupported_events = Vec::new();
@@ -3406,19 +3400,14 @@ fn set_state_reconfigures_then_disables_dynamic_client_physics_without_losing_se
         },
         &mut unsupported_events,
     ));
-    assert!(state.scene.body(body_id).unwrap().physical.is_none());
+    assert!(state.scene.body(body_id).unwrap().physical.is_some());
     assert_eq!(
         state.entities.get(guid).unwrap().physics.semantic,
         PhysicsState::PUSHABLE
     );
     assert!(matches!(
         unsupported_events.last(),
-        Some(WorldEvent::EntityStateUpdated { transition, .. })
-            if transition.action == crate::EntityPhysicalTransitionAction::DisableSolverParticipation
-                && matches!(
-                    transition.disposition,
-                    crate::EntityPhysicalDisposition::UnsupportedState { .. }
-                )
+        Some(WorldEvent::EntityStateUpdated { .. })
     ));
 }
 

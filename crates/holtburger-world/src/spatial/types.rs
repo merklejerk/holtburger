@@ -341,7 +341,7 @@ impl SpatialBody {
 
     /// Complete source-domain membership accepted atomically with the current root pose.
     ///
-    /// Solver-participating entities retain the exact sphere-reached membership used by the
+    /// Physical entities retain the exact sphere-reached membership used by the
     /// accepted collision transaction. Pose-only bodies have no wider geometry to evaluate, so
     /// their authoritative cell selector is their complete known membership.
     pub fn spatial_membership(&self) -> super::SpatialMembership {

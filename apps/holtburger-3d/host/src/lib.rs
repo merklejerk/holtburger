@@ -197,6 +197,16 @@ pub struct ExplorerEntityMutationReceipt {
     pub generation: u64,
 }
 
+/// Explorer-local choice for whether an entity is presentation-only or physically integrated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ExplorerPhysicalMode {
+    /// Retain authoritative pose and presentation without local physical roles.
+    PoseOnly,
+    /// Resolve target and integration demand from the entity's complete semantic state.
+    Integrated,
+}
+
 /// Complete effective-state replacement requested by one Explorer scenario.
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -207,8 +217,8 @@ pub struct ReplaceExplorerEntityPhysicsStateRequest {
     pub generation: u64,
     /// Complete semantic mask; individual bits are never patched at this boundary.
     pub semantic_mask: u32,
-    /// Explicit local physical realization policy.
-    pub physical_intent: holtburger_world::EntityPhysicalIntent,
+    /// Explicit Explorer-local physical realization policy.
+    pub physical_mode: ExplorerPhysicalMode,
 }
 
 /// Every animation one motion table can reach, so a spawning entity can stage them as a closure.

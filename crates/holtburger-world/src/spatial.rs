@@ -60,7 +60,8 @@ pub use collision_report::{
     CollisionReportPhase, CollisionReportSource,
 };
 pub use dynamic_body::{
-    DynamicBodyCollisionDefinition, DynamicPhysicalBodyDefinition, PreparedEntityBspPart,
+    DynamicBodyCollisionDefinition, DynamicPhysicalBodyConfiguration,
+    DynamicPhysicalBodyConfigurationError, DynamicPhysicalBodyDefinition, PreparedEntityBspPart,
     PreparedEntityTargetGeometry,
 };
 pub use dynamic_contact::{MAXIMUM_DYNAMIC_SLICE_DISTANCE, MAXIMUM_DYNAMIC_SLICES};

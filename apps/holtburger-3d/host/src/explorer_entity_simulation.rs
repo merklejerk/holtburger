@@ -103,15 +103,15 @@ mod tests {
     use holtburger_world::{
         DynamicBodyCollisionDefinition, DynamicPhysicalBodyDefinition, EdgeProtection,
         EntityAppearance, EntityCollisionParticipation, EntityCollisionReportPolicy,
-        EntityDynamicCollisionPolicy, EntityPhysicalIntent, EntityPhysicsScheduling,
-        EntityPlacement, PhysicalBodyResponsePolicy, PhysicalElasticity, PhysicalFriction,
-        PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion,
-        PreparedEntityTargetGeometry, resolve_effective_entity_physics_state,
+        EntityDynamicCollisionPolicy, EntityPlacement, PhysicalBodyResponsePolicy,
+        PhysicalElasticity, PhysicalFriction, PhysicalRestitution, PhysicalSphereSet,
+        PhysicalSurfaceMotion, PreparedEntityTargetGeometry,
+        resolve_effective_entity_physics_state,
     };
 
-    use crate::explorer_entity_runtime::ExplorerPreparedEntity;
     use crate::host_fixed_tick_runtime::HOST_FIXED_TICK_HZ;
     use crate::host_simulation_runtime::{CollisionSource, HostSimulationRuntime};
+    use crate::{ExplorerPhysicalMode, explorer_entity_runtime::ExplorerPreparedEntity};
 
     #[derive(Default)]
     struct EmptyCollisionSource;
@@ -218,7 +218,7 @@ mod tests {
         let spawned = entities
             .spawn_prepared(
                 prepared(definition(guid)),
-                EntityPhysicalIntent::Simulated,
+                ExplorerPhysicalMode::Integrated,
                 Some(physical()),
             )
             .unwrap();
@@ -267,7 +267,7 @@ mod tests {
         entities
             .spawn_prepared(
                 prepared(definition_at(guid, Guid(0xda55_0100))),
-                EntityPhysicalIntent::Simulated,
+                ExplorerPhysicalMode::Integrated,
                 Some(physical()),
             )
             .unwrap();
@@ -373,7 +373,6 @@ mod tests {
                     fallback_shapes: Vec::new(),
                     fallback_scale: ColliderScale::uniform(1.0).unwrap(),
                 }),
-                scheduling: EntityPhysicsScheduling::Eligible,
                 dynamic_collision: EntityDynamicCollisionPolicy {
                     target: EntityCollisionParticipation::Solid,
                     mover_accepts_response: true,

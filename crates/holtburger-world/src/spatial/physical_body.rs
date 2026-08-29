@@ -7,21 +7,22 @@ use holtburger_common::properties::PhysicsState;
 use holtburger_common::{Guid, Quaternion, Sphere, Vector3};
 use thiserror::Error;
 
+use crate::{EffectiveEntityPhysicsState, LocalIntegrationDemand, LocalPhysicalDemand};
+
 use super::{
     CellTransitRequest, CollisionQueryError, CollisionQueryPolicy, CollisionReportOutcome,
-    CollisionScene, ContactState, DynamicBodyCollisionDefinition, DynamicPhysicalBodyDefinition,
-    FreeSphereBudget, FreeSphereConfig, FreeSphereOutcome, FreeSphereRequest, FreeSphereState,
-    GroundState, GroundSupport, GroundedBody, GroundedBodySpheres, GroundedBudget, GroundedConfig,
-    GroundedOutcome, GroundedRequest, GroundedSphere, MotionWaypoint, PlacedMotionPath,
-    PlacedMotionPathRequest, SettlePermission, SpatialBody, SpatialMembership, solve_free_sphere,
-    solve_grounded,
+    CollisionScene, ContactState, DynamicBodyCollisionDefinition, DynamicPhysicalBodyConfiguration,
+    DynamicPhysicalBodyDefinition, FreeSphereBudget, FreeSphereConfig, FreeSphereOutcome,
+    FreeSphereRequest, FreeSphereState, GroundState, GroundSupport, GroundedBody,
+    GroundedBodySpheres, GroundedBudget, GroundedConfig, GroundedOutcome, GroundedRequest,
+    GroundedSphere, MotionWaypoint, PlacedMotionPath, PlacedMotionPathRequest, SettlePermission,
+    SpatialBody, SpatialMembership, solve_free_sphere, solve_grounded,
 };
 
 /// Retail's canonical velocity floor (`PhysicsGlobals.SmallVelocity`) squared.
 const RETAIL_SMALL_VELOCITY_SQUARED: f32 = 0.25 * 0.25;
 /// Retail compares the squared speed to the floor with its ordinary physics epsilon.
 const RETAIL_PHYSICS_EPSILON: f32 = 0.000_2;
-use crate::EffectiveEntityPhysicsState;
 
 /// Invalid geometry rejected before a body enters authoritative world state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
@@ -378,7 +379,8 @@ impl PhysicalBodyResponseState {
 pub(crate) enum DynamicBodyActivity {
     /// The collection participant must attempt this body's next eligible solve.
     Active,
-    /// Stable support was accepted with no remaining root-motion work.
+    /// A completed tick proved no retained, authored, reconciliation, contact, or response work.
+    /// Gravity-bearing grounded bodies additionally retain a valid stable-support proof.
     Settled,
     /// The body's retained collision topology is not in the current scene snapshot.
     ///
@@ -390,12 +392,40 @@ pub(crate) enum DynamicBodyActivity {
 /// Dynamic-only physical state kept as one invariant-bearing optional unit.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct DynamicBodyRuntimeState {
-    /// Prepared target geometry and effective collision/scheduling policy.
+    /// Prepared target geometry and effective directional collision policy.
     pub(crate) collision: DynamicBodyCollisionDefinition,
+    /// Producer-owned target and integration demand consumed without reinterpretation.
+    pub(crate) demand: LocalPhysicalDemand,
     /// Solver-owned activity, independent from semantic and presentation state.
     pub(crate) activity: DynamicBodyActivity,
     /// Complete collision-domain membership accepted for the current root pose.
     pub(crate) placement: SpatialMembership,
+}
+
+impl DynamicBodyRuntimeState {
+    /// Wakes integration work without overriding a topology suspension.
+    pub(crate) fn wake(&mut self) {
+        if self.activity == DynamicBodyActivity::Suspended {
+            return;
+        }
+        self.activity = if self.demand.integration == LocalIntegrationDemand::Eligible {
+            DynamicBodyActivity::Active
+        } else {
+            DynamicBodyActivity::Settled
+        };
+    }
+
+    /// Restores the activity implied by demand after collision topology returns.
+    pub(crate) fn restore_from_suspension(&mut self) {
+        if self.activity != DynamicBodyActivity::Suspended {
+            return;
+        }
+        self.activity = if self.demand.integration == LocalIntegrationDemand::Eligible {
+            DynamicBodyActivity::Active
+        } else {
+            DynamicBodyActivity::Settled
+        };
+    }
 }
 
 /// Physical definition and response memory owned by one spatial body.
@@ -425,9 +455,9 @@ pub enum PhysicalBodyParticipation {
 pub enum PhysicalBodyReconfiguration {
     Unchanged,
     /// The pose body gained collision/physics state.
-    SolverParticipationEnabled,
+    Installed,
     /// The pose body lost collision/physics state without retiring.
-    SolverParticipationDisabled,
+    Removed,
     Reconfigured,
 }
 
@@ -466,10 +496,11 @@ impl PhysicalBodyState {
 
     /// Builds a dynamic entity body while retaining one canonical generic response state.
     pub fn new_dynamic(
-        definition: DynamicPhysicalBodyDefinition,
+        configuration: DynamicPhysicalBodyConfiguration,
         collision_filter: PhysicalCollisionFilter,
         cell: Option<Guid>,
     ) -> Self {
+        let (definition, demand) = configuration.into_parts();
         let DynamicPhysicalBodyDefinition {
             movement,
             response_policy,
@@ -478,7 +509,12 @@ impl PhysicalBodyState {
         let mut state = Self::new(movement, collision_filter, response_policy, cell);
         state.dynamic = Some(DynamicBodyRuntimeState {
             collision: entity_collision,
-            activity: DynamicBodyActivity::Active,
+            demand,
+            activity: if demand.integration == LocalIntegrationDemand::Eligible {
+                DynamicBodyActivity::Active
+            } else {
+                DynamicBodyActivity::Settled
+            },
             placement: cell.map_or_else(SpatialMembership::outdoor, SpatialMembership::interior),
         });
         state
@@ -499,16 +535,17 @@ impl PhysicalBodyState {
         self.response = initial_response(self.definition, cell);
         dynamic.placement =
             cell.map_or_else(SpatialMembership::outdoor, SpatialMembership::interior);
-        dynamic.activity = DynamicBodyActivity::Active;
+        dynamic.wake();
         true
     }
 
     /// Rebuilds immutable dynamic policy from a complete state while retaining authored geometry.
-    pub fn dynamic_definition_for_state(
+    pub fn dynamic_configuration_for_state(
         &self,
         state: EffectiveEntityPhysicsState,
-    ) -> Option<DynamicPhysicalBodyDefinition> {
-        if !state.supports_local_simulation() {
+        demand: LocalPhysicalDemand,
+    ) -> Option<DynamicPhysicalBodyConfiguration> {
+        if !state.supports_local_simulation() || !demand.requires_physical_body() {
             return None;
         }
         let mut entity_collision = self.dynamic.as_ref()?.collision.clone();
@@ -542,15 +579,20 @@ impl PhysicalBodyState {
             surface_motion: PhysicalSurfaceMotion::Stable,
             align_path: state.response.align_path,
         };
-        entity_collision.scheduling = state.scheduling;
         entity_collision.dynamic_collision = state.dynamic_collision;
         entity_collision.reporting = state.reporting;
         entity_collision.uses_physics_bsp = state.uses_physics_bsp;
-        Some(DynamicPhysicalBodyDefinition {
-            movement,
-            response_policy,
-            entity_collision,
-        })
+        Some(
+            DynamicPhysicalBodyConfiguration::new(
+                DynamicPhysicalBodyDefinition {
+                    movement,
+                    response_policy,
+                    entity_collision,
+                },
+                demand,
+            )
+            .expect("non-empty retained demand must produce a physical configuration"),
+        )
     }
 }
 

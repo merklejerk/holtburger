@@ -478,7 +478,7 @@
 		readonly spawnExplorerEntityFleet: (
 			wcid: string,
 			offsets: readonly (readonly [number, number, number])[],
-			physicalIntent: "pose-only" | "simulated",
+			physicalMode: "pose-only" | "integrated",
 		) => Promise<readonly DynamicEntityView[]>;
 		/** Retire every live harness-spawned generation through the same host lifecycle. */
 		readonly despawnExplorerEntityFleet: () => Promise<number>;
@@ -1394,20 +1394,20 @@
 		rawWcid: string,
 		distance: number,
 	): Promise<DynamicEntityView> {
-		return spawnExplorerEntityWithIntent(rawWcid, distance, "pose-only");
+		return spawnExplorerEntityWithMode(rawWcid, distance, "pose-only");
 	}
 
 	async function spawnSimulatedExplorerEntity(
 		rawWcid: string,
 		distance: number,
 	): Promise<DynamicEntityView> {
-		return spawnExplorerEntityWithIntent(rawWcid, distance, "simulated");
+		return spawnExplorerEntityWithMode(rawWcid, distance, "integrated");
 	}
 
-	async function spawnExplorerEntityWithIntent(
+	async function spawnExplorerEntityWithMode(
 		rawWcid: string,
 		distance: number,
-		physicalIntent: "pose-only" | "simulated",
+		physicalMode: "pose-only" | "integrated",
 	): Promise<DynamicEntityView> {
 		if (!runtime || !entityHost)
 			throw new Error(
@@ -1420,7 +1420,7 @@
 			placement,
 			direction,
 			distance,
-			physicalIntent,
+			physicalMode,
 		);
 		const previousGuids = new Set(
 			spawnedEntities.map((entity) => entity.identity.guid),
@@ -1522,7 +1522,7 @@
 	async function spawnExplorerEntityFleet(
 		rawWcid: string,
 		offsets: readonly (readonly [number, number, number])[],
-		physicalIntent: "pose-only" | "simulated",
+		physicalMode: "pose-only" | "integrated",
 	): Promise<readonly DynamicEntityView[]> {
 		if (!runtime || !entityHost)
 			throw new Error(
@@ -1547,7 +1547,7 @@
 					placement,
 					offset,
 					distance,
-					physicalIntent,
+					physicalMode,
 				),
 			);
 			await applyDynamicEntitySnapshotEvent(event);

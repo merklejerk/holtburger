@@ -3,10 +3,13 @@ import type { AABB3, Vec3 } from "../math/types";
 import type { ResolvedObjectBehavior } from "../resolution/landblock-layer";
 import type { ResolvedObjectPresentation } from "../resolution/presentation";
 import type { SceneSpatialPlacement } from "../scene";
+import type { DynamicEntityCategory } from "../dynamic-entity-category";
 
 /** Immutable visual and setup-default behavior facts shared by every dynamic producer. */
 export interface DynamicPresentationSource {
-	/** Producer-stable identity used only for behavior playback and diagnostics. */
+	/** Producer-resolved frontend category controlling presentation participation. */
+	readonly category: DynamicEntityCategory;
+	/** Producer-stable identity used for behavior, diagnostics, and deterministic presentation ties. */
 	readonly identity: string;
 	/** Exact SetupModel DAT identity that owns setup-default behavior. */
 	readonly setupId: DatAssetId;

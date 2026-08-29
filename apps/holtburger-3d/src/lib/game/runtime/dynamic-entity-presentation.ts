@@ -36,6 +36,7 @@ export function adaptDynamicEntityPresentation(
 	return {
 		placement,
 		source: {
+			category: entity.presentation.category,
 			behavior: {
 				...visual.behavior,
 				// The entity names the table it animates from; the setup's own default already

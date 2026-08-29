@@ -10,25 +10,28 @@ interface WebGL2AllocationBindings {
 export function withPreservedWebGL2AllocationBindings<T>(
 	gl: WebGL2RenderingContext,
 	allocate: () => T,
+	textureTarget: GLenum = gl.TEXTURE_2D,
 ): T {
-	const bindings = captureAllocationBindings(gl);
+	const bindings = captureAllocationBindings(gl, textureTarget);
 	try {
 		return allocate();
 	} finally {
-		restoreAllocationBindings(gl, bindings);
+		restoreAllocationBindings(gl, bindings, textureTarget);
 	}
 }
 
 function captureAllocationBindings(
 	gl: WebGL2RenderingContext,
+	textureTarget: GLenum,
 ): WebGL2AllocationBindings {
+	const textureBindingParameter = bindingParameter(gl, textureTarget);
 	const activeTexture = gl.getParameter(gl.ACTIVE_TEXTURE) as GLenum;
 	const activeTextureBinding = gl.getParameter(
-		gl.TEXTURE_BINDING_2D,
+		textureBindingParameter,
 	) as WebGLTexture | null;
 	gl.activeTexture(gl.TEXTURE0);
 	const texture0Binding = gl.getParameter(
-		gl.TEXTURE_BINDING_2D,
+		textureBindingParameter,
 	) as WebGLTexture | null;
 	gl.activeTexture(activeTexture);
 	return {
@@ -47,11 +50,21 @@ function captureAllocationBindings(
 function restoreAllocationBindings(
 	gl: WebGL2RenderingContext,
 	bindings: WebGL2AllocationBindings,
+	textureTarget: GLenum,
 ): void {
 	gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, bindings.drawFramebuffer);
 	gl.bindFramebuffer(gl.READ_FRAMEBUFFER, bindings.readFramebuffer);
 	gl.activeTexture(gl.TEXTURE0);
-	gl.bindTexture(gl.TEXTURE_2D, bindings.texture0Binding);
+	gl.bindTexture(textureTarget, bindings.texture0Binding);
 	gl.activeTexture(bindings.activeTexture);
-	gl.bindTexture(gl.TEXTURE_2D, bindings.activeTextureBinding);
+	gl.bindTexture(textureTarget, bindings.activeTextureBinding);
+}
+
+function bindingParameter(
+	gl: WebGL2RenderingContext,
+	textureTarget: GLenum,
+): GLenum {
+	if (textureTarget === gl.TEXTURE_2D) return gl.TEXTURE_BINDING_2D;
+	if (textureTarget === gl.TEXTURE_2D_ARRAY) return gl.TEXTURE_BINDING_2D_ARRAY;
+	throw new Error(`Unsupported allocation texture target ${textureTarget}.`);
 }

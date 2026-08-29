@@ -31,6 +31,10 @@ import {
 	DEFAULT_COLOR_GRADE_PARAMETERS,
 	type ColorGradeSettings,
 } from "./color-grade-policy";
+import {
+	DEFAULT_ENTITY_SHADOW_SETTINGS,
+	type EntityShadowSettings,
+} from "./entity-shadow-policy";
 
 /** Environment-cell visibility scheduler selected without rebuilding resident content. */
 export type EnvCellRenderMode = "flat" | "portal";
@@ -66,6 +70,8 @@ export interface FrameSettings {
 	 * shipped look itself is frontend tuning rather than a renderer decision.
 	 */
 	readonly colorGrade: ColorGradeSettings;
+	/** Outdoor directional shadows and indoor analytic actor grounding. */
+	readonly entityShadows: EntityShadowSettings;
 	/** Whether render passes apply the effective region-authored distance fog. */
 	readonly distanceFogEnabled: boolean;
 	/** Retail's viewer headlamp, which makes interiors without authored lights navigable. */
@@ -110,6 +116,7 @@ export const DEFAULT_FRAME_SETTINGS: FrameSettings = {
 		enabled: FRONTEND_TUNING.rendering.colorGrade.enabledByDefault,
 		parameters: DEFAULT_COLOR_GRADE_PARAMETERS,
 	},
+	entityShadows: DEFAULT_ENTITY_SHADOW_SETTINGS,
 	distanceFogEnabled:
 		FRONTEND_TUNING.rendering.frameDefaults.distanceFogEnabled,
 	viewerLightEnabled: FRONTEND_TUNING.rendering.viewerLight.enabledByDefault,
@@ -573,6 +580,8 @@ export interface RendererFrameProfile {
 
 /** One cold read of the renderer diagnostics that must describe the same session state. */
 export interface RendererFrameDiagnosticsSnapshot {
+	/** Cold entity-shadow resource ownership, independent from optional timing profiling. */
+	readonly entityShadows: EntityShadowResourceDiagnostics;
 	/** Latest completed profile, or null before the first sample and while profiling is disabled. */
 	readonly profile: RendererFrameProfile | null;
 	readonly profilingEnabled: boolean;
@@ -585,6 +594,19 @@ export interface RendererFrameDiagnosticsSnapshot {
 	 * attributable instead of appearing as unexplained frame cost.
 	 */
 	readonly compiledObjectDraws: CompiledObjectDrawDiagnostics | null;
+}
+
+/** Renderer-lifetime outdoor target ownership exposed for toggle/reconfigure verification. */
+export interface EntityShadowResourceDiagnostics {
+	readonly outdoorTargets: {
+		readonly activeBytes: number;
+		readonly activeFramebufferCount: number;
+		readonly activeTextureCount: number;
+		readonly allocatedGenerationCount: number;
+		readonly cascadeCount: number | null;
+		readonly disposedGenerationCount: number;
+		readonly resolution: number | null;
+	};
 }
 
 /** Draw-compilation occupancy and churn reported by a renderer that caches compiled draws. */

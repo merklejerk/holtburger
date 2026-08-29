@@ -61,6 +61,29 @@ describe("WebGL2ObjectStateApplicator", () => {
 		]);
 	});
 
+	it("tracks array textures on the shared active-unit selector", () => {
+		const fixture = createFixture();
+		const state = new WebGL2ObjectStateApplicator(fixture.gl);
+
+		expect(state.applyTextureArrayUnit(7, fixture.textureA)).toBe(true);
+		expect(state.applyTextureArrayUnit(7, fixture.textureA)).toBe(false);
+		expect(
+			state.applyTextureUnit(0, {
+				sampler: fixture.samplerA,
+				texture: fixture.textureB,
+			}),
+		).toBe(true);
+
+		expect(fixture.calls).toEqual([
+			"activeTexture:17",
+			"bindTexture:12:a",
+			"bindSampler:7:null",
+			"activeTexture:10",
+			"bindTexture:9:b",
+			"bindSampler:0:a",
+		]);
+	});
+
 	it("reapplies every required value after invalidation", () => {
 		const fixture = createFixture();
 		const state = new WebGL2ObjectStateApplicator(fixture.gl);
@@ -136,6 +159,18 @@ describe("WebGL2ObjectStateApplicator", () => {
 		scratch[15] = 2;
 		expect(state.applyUniformMatrix4fv(fixture.locationA, scratch)).toBe(true);
 	});
+
+	it("compares the full configurable-width vec4 array", () => {
+		const fixture = createFixture();
+		const state = new WebGL2ObjectStateApplicator(fixture.gl);
+		const records = new Float32Array(128);
+
+		expect(state.applyUniform4fv(fixture.locationA, records)).toBe(true);
+		expect(state.applyUniform4fv(fixture.locationA, records)).toBe(false);
+		records[127] = 2;
+		expect(state.applyUniform4fv(fixture.locationA, records)).toBe(true);
+		expect(fixture.calls).toEqual(["uniform4fv:ua:0:0", "uniform4fv:ua:0:2"]);
+	});
 });
 
 function createFixture() {
@@ -153,12 +188,16 @@ function createFixture() {
 	};
 	const named = (
 		value:
+			| null
 			| WebGLProgram
 			| WebGLSampler
 			| WebGLTexture
 			| WebGLUniformLocation
 			| WebGLVertexArrayObject,
-	) => (value as unknown as { readonly name: string }).name;
+	) =>
+		value === null
+			? "null"
+			: (value as unknown as { readonly name: string }).name;
 	const gl = {
 		BACK: 2,
 		BLEND: 5,
@@ -169,8 +208,9 @@ function createFixture() {
 		SRC_ALPHA: 7,
 		TEXTURE0: 10,
 		TEXTURE_2D: 9,
+		TEXTURE_2D_ARRAY: 12,
 		activeTexture: (unit: number) => calls.push(`activeTexture:${unit}`),
-		bindSampler: (unit: number, sampler: WebGLSampler) =>
+		bindSampler: (unit: number, sampler: WebGLSampler | null) =>
 			calls.push(`bindSampler:${unit}:${named(sampler)}`),
 		bindTexture: (target: number, texture: WebGLTexture) =>
 			calls.push(`bindTexture:${target}:${named(texture)}`),
@@ -191,6 +231,10 @@ function createFixture() {
 			calls.push(`uniform3f:${named(location)}:${values.join(",")}`),
 		uniform4f: (location: WebGLUniformLocation, ...values: number[]) =>
 			calls.push(`uniform4f:${named(location)}:${values.join(",")}`),
+		uniform4fv: (location: WebGLUniformLocation, values: Float32Array) =>
+			calls.push(
+				`uniform4fv:${named(location)}:${values[0]}:${values[values.length - 1]}`,
+			),
 		uniformMatrix4fv: (
 			location: WebGLUniformLocation,
 			_transpose: boolean,

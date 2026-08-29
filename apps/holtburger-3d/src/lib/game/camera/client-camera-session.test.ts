@@ -190,6 +190,7 @@ function currentState(): ClientCurrentState {
 					generation: 1,
 					identity: { guid: PLAYER_GUID, wcid: 42, name: "Drudge" },
 					presentation: {
+						category: "player",
 						content: {
 							motionTableDid: null,
 							setupDid: 0x0200_0001,

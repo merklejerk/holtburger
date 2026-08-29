@@ -873,6 +873,7 @@ function view(guid: number, landblockId = 0x0101_0100): DynamicEntityView {
 		generation: 1,
 		identity: { guid, wcid: 42, name: "Player" },
 		presentation: {
+			category: "other",
 			content: {
 				motionTableDid: null,
 				setupDid: 0x0200_0001,

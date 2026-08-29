@@ -12,7 +12,7 @@ use crate::{
     DynamicEntityIdentityView, DynamicEntityPathLeg, DynamicEntityPathPoint,
     DynamicEntityPlacedPath, DynamicEntityPlacementAdvanceKind, DynamicEntitySnapshot,
     DynamicEntitySpatialMembership, DynamicEntityTickBatch, DynamicEntityViewSource,
-    DynamicEntityWorldProjection, project_dynamic_entity_view,
+    DynamicEntityWorldProjection, project_dynamic_entity_view, semantic_dynamic_entity_category,
 };
 
 use super::{ClientRuntime, ClientViewEvent};
@@ -86,6 +86,7 @@ pub fn project_client_dynamic_entity(
 
     Ok(project_dynamic_entity_view(DynamicEntityViewSource {
         generation: u64::from(entity.instance_sequence()),
+        category: semantic_dynamic_entity_category(entity.flags, entity.item_type()),
         identity: DynamicEntityIdentityView { guid, wcid, name },
         content: DynamicEntityContent {
             setup_did,
@@ -263,8 +264,8 @@ mod tests {
     use super::*;
     use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::{
-        PhysicsState, PropertyDataId, PropertyFloat, WeenieType,
-        WorldObjectPropertyAccessorsMut as _,
+        ItemType, ObjectDescriptionFlag, PhysicsState, PropertyDataId, PropertyFloat, PropertyInt,
+        WeenieType, WorldObjectPropertyAccessorsMut as _,
     };
     use holtburger_common::{ParentLocation, Placement, Quaternion, Vector3};
     use holtburger_world::entity::Entity;
@@ -275,8 +276,8 @@ mod tests {
 
     use crate::client::{ClientState, builder};
     use crate::{
-        DynamicEntityContent, DynamicEntityIdentity, DynamicEntityPlacementView,
-        DynamicEntityProjectionInput, DynamicEntityViewSource,
+        DynamicEntityCategory, DynamicEntityContent, DynamicEntityIdentity,
+        DynamicEntityPlacementView, DynamicEntityProjectionInput, DynamicEntityViewSource,
     };
 
     fn projectable_entity(guid: Guid, pose: WorldPosition) -> Entity {
@@ -296,6 +297,45 @@ mod tests {
         entity.physics = resolve_effective_entity_physics_state(PhysicsState::GRAVITY);
         world.add_entity(entity);
         Box::new(project_client_dynamic_entity(&world, guid).unwrap())
+    }
+
+    #[test]
+    fn client_category_uses_live_description_facts_and_includes_vendors_as_npcs() {
+        assert_eq!(
+            semantic_dynamic_entity_category(
+                ObjectDescriptionFlag::PLAYER,
+                Some(ItemType::CREATURE),
+            ),
+            DynamicEntityCategory::Player
+        );
+        assert_eq!(
+            semantic_dynamic_entity_category(
+                ObjectDescriptionFlag::empty(),
+                Some(ItemType::CREATURE)
+            ),
+            DynamicEntityCategory::Npc
+        );
+        assert_eq!(
+            semantic_dynamic_entity_category(
+                ObjectDescriptionFlag::ATTACKABLE,
+                Some(ItemType::CREATURE),
+            ),
+            DynamicEntityCategory::Mob
+        );
+        assert_eq!(
+            semantic_dynamic_entity_category(
+                ObjectDescriptionFlag::VENDOR | ObjectDescriptionFlag::ATTACKABLE,
+                Some(ItemType::CREATURE),
+            ),
+            DynamicEntityCategory::Npc
+        );
+        assert_eq!(
+            semantic_dynamic_entity_category(
+                ObjectDescriptionFlag::ATTACKABLE,
+                Some(ItemType::ARMOR)
+            ),
+            DynamicEntityCategory::Other
+        );
     }
 
     fn advance(guid: Guid) -> DynamicEntityAdvance {
@@ -399,6 +439,10 @@ mod tests {
         let mut entity = projectable_entity(guid, pose);
         entity.physics = physics;
         entity.appearance = appearance.clone();
+        entity
+            .properties
+            .ints
+            .insert(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
         entity.set_did_prop(PropertyDataId::Setup, Guid(0x0200_0001));
         entity.set_did_prop(PropertyDataId::MotionTable, Guid(0x0900_0001));
         entity.set_float_prop(PropertyFloat::DefaultScale, 1.25);
@@ -411,6 +455,7 @@ mod tests {
             .unwrap();
         let explorer = project_dynamic_entity_view(DynamicEntityViewSource::from_projection(
             0,
+            DynamicEntityCategory::Npc,
             DynamicEntityProjectionInput {
                 identity: DynamicEntityIdentity {
                     guid,
@@ -427,7 +472,17 @@ mod tests {
                 appearance,
                 object_scale: 1.25,
                 physics,
-                radar: crate::DynamicEntityRadarFacts::default(),
+                radar: crate::DynamicEntityRadarFacts::from_authored(
+                    "test explorer entity",
+                    None,
+                    crate::explorer_radar_blip_color(
+                        WeenieType::Creature,
+                        Some(ItemType::CREATURE),
+                        Some(false),
+                    ),
+                    None,
+                    None,
+                ),
                 placement: EntityPlacement::World(DynamicEntityWorldProjection {
                     body,
                     spatial_membership: DynamicEntitySpatialMembership {

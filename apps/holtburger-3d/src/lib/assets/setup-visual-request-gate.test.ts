@@ -64,6 +64,7 @@ function view(guid: number, generation: number): DynamicEntityView {
 		generation,
 		identity: { guid, wcid: 42, name: `Entity ${guid}` },
 		presentation: {
+			category: "other",
 			content: {
 				motionTableDid: null,
 				setupDid: 0x0200_0001,

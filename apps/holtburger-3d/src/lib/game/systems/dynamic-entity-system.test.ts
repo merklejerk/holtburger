@@ -662,9 +662,16 @@ describe("DynamicEntitySystem authored ownership", () => {
 			system.getPublishedPresentationBounds(nodeId),
 			new AABB3(new Vec3(-3, -10, -4), new Vec3(0, 14, 8)),
 		);
+		expectBounds(
+			system.getPublishedRigidPresentationBounds(nodeId),
+			new AABB3(new Vec3(-3, -10, -4), new Vec3(0, 14, 8)),
+		);
 		const sweptBounds = scene.getNode(nodeId)?.localBounds;
 		system.publishPresentation([sample]);
 		expect(system.getPublishedPresentationBounds(nodeId)).toEqual(
+			new AABB3(new Vec3(0, 0, -4), new Vec3(12, 3, 8)),
+		);
+		expect(system.getPublishedRigidPresentationBounds(nodeId)).toEqual(
 			new AABB3(new Vec3(0, 0, -4), new Vec3(12, 3, 8)),
 		);
 		expect(scene.getNode(nodeId)?.localBounds).toEqual(sweptBounds);
@@ -688,8 +695,12 @@ describe("DynamicEntitySystem authored ownership", () => {
 		const nodeId = requiredAt(installation.nodeIds, 0);
 		const meshBounds = scene.getNode(nodeId)?.localBounds?.clone();
 		const poseBounds = system.getPublishedPresentationBounds(nodeId)?.clone();
-		if (!meshBounds || !poseBounds)
+		const rigidBounds = system
+			.getPublishedRigidPresentationBounds(nodeId)
+			?.clone();
+		if (!meshBounds || !poseBounds || !rigidBounds)
 			throw new Error("Entity published no bounds.");
+		expect(rigidBounds).toEqual(poseBounds);
 		const particleOnlyFrustum = {
 			cameraPosition: Vec3.zero(),
 			// The owner proxy at x=0 is outside; a radius-five particle envelope crosses this plane.
@@ -711,6 +722,9 @@ describe("DynamicEntitySystem authored ownership", () => {
 		);
 		expect(system.getPublishedPresentationBounds(nodeId)).toEqual(
 			expandBounds(poseBounds, 5),
+		);
+		expect(system.getPublishedRigidPresentationBounds(nodeId)).toEqual(
+			rigidBounds,
 		);
 		expect(
 			scene.queryFlatFrustum(
@@ -890,6 +904,7 @@ function source(
 			spatialMembership: { scopes: [{ kind: "outdoor" }] },
 		},
 		source: {
+			category: "other",
 			behavior: {
 				animationId: "0x03000001",
 				kind: "animation-only",

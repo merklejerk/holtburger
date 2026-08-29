@@ -138,6 +138,50 @@ export function createPerspectiveMat4(
 	);
 }
 
+/** Create a right-handed WebGL orthographic projection. */
+export function createOrthographicMat4(
+	left: number,
+	right: number,
+	bottom: number,
+	top: number,
+	near: number,
+	far: number,
+	targetMatrix?: Mat4,
+): Mat4 {
+	if (![left, right, bottom, top, near, far].every(Number.isFinite)) {
+		throw new Error("Orthographic projection bounds must be finite.");
+	}
+	if (right <= left || top <= bottom) {
+		throw new Error("Orthographic projection extents must be non-empty.");
+	}
+	if (near < 0 || far <= near) {
+		throw new Error(
+			"Orthographic projection depth requires zero or positive near and far greater than near.",
+		);
+	}
+	const inverseWidth = 1 / (right - left);
+	const inverseHeight = 1 / (top - bottom);
+	const inverseDepth = 1 / (far - near);
+	const target = targetMatrix ?? Mat4.zero();
+	target.m11 = 2 * inverseWidth;
+	target.m12 = 0;
+	target.m13 = 0;
+	target.m14 = 0;
+	target.m21 = 0;
+	target.m22 = 2 * inverseHeight;
+	target.m23 = 0;
+	target.m24 = 0;
+	target.m31 = 0;
+	target.m32 = 0;
+	target.m33 = -2 * inverseDepth;
+	target.m34 = 0;
+	target.m41 = -(right + left) * inverseWidth;
+	target.m42 = -(top + bottom) * inverseHeight;
+	target.m43 = -(far + near) * inverseDepth;
+	target.m44 = 1;
+	return target;
+}
+
 /** Invert a camera-local rotation and translation into a view matrix. */
 export function createViewMat4(position: Vec3, rotation: Quat): Mat4 {
 	const inverseRotation = createRotationMat4(

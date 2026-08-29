@@ -438,6 +438,58 @@ differ from them.
 
 These are deliberate, and each produces output equivalent to retail:
 
+### Entity grounding and shadows
+
+Entity grounding is deliberate presentation policy, not retail parity and not one global-lighting
+model. Spawned dynamics carry one producer-resolved `player`, `npc`, `mob`, or `other` category.
+Only the first three participate; the renderer does not reconstruct category from names, WCIDs,
+radar colors, geometry, or animation anatomy.
+
+The setting has three exhaustive modes:
+
+| Mode          | Outdoor terrain                           | Outdoor Buildings | EnvCell shells     |
+| ------------- | ----------------------------------------- | ----------------- | ------------------ |
+| `none`        | no entity shadow                          | no entity shadow  | no grounding       |
+| `simple`      | analytic grounding                        | no entity shadow  | analytic grounding |
+| `shadow-maps` | parallel-split directional shadow mapping | PSSM              | analytic grounding |
+
+`shadow-maps` is the default. In that mode, eligible outdoor entity geometry enters a
+material-free parallel-split shadow-map pass. The pass uses the regional directional sun, stable
+camera-frustum fits, texel-snapped cascades, bounded PCF, and a depth-texture array. Terrain inside
+the configured shadow distance and Buildings-layer meshes are the only PSSM receivers. The sampled
+shadow attenuates only regional-sun diffuse: ambient, point lights, baked color, emissive
+luminosity, material detail, fog, and color grading retain their ordinary terms. Hidden, `noDraw`,
+and fully transparent caster parts are omitted; alpha cutouts are intentionally outside the
+material-free depth contract.
+
+In both enabled modes, EnvCell shells evaluate a short, soft analytic grounding cue from each
+eligible entity; there is no indoor directional sunlight or shadow map. `simple` reuses the same
+cue on outdoor near terrain, but never on Buildings, other outdoor objects, or far terrain. Its
+horizontal center and radius come from the exact current rigid-pose bounds, before
+particle-envelope expansion, while its vertical anchor comes from authoritative entity-root
+placement. Animation can therefore change the cue's useful horizontal footprint without letting a
+limb or robe push its anchor below a receiver and remove the cue; actual root movement still
+raises, lowers, spreads, and fades it. The cue suppresses non-upward surfaces and combines overlaps
+by strongest contribution so crowds do not progressively blacken a floor. It is a stylized contact
+cue rather than light transport: indoor resident objects neither cast nor receive it.
+
+The build-time per-receiver limit in `frontend-tuning.ts` defaults to eight records for one shell or
+outdoor terrain landblock. Candidates up to that limit preserve source order; overflow
+deterministically keeps the nearest candidates to the camera with stable identity as the tie break.
+The same value sizes CPU storage and generated GLSL, so changing it requires an app reload rather
+than a live Explorer update. Indoor candidate influence may cross authored cell boundaries only
+within the same proven depth-continuous visibility island, which lets grid-split rooms share a cue
+without admitting an unrelated stacked interior. Outdoor selection intersects influence with each
+landblock independently, so a border caster can reach both adjacent terrain receivers.
+
+One Explorer selector owns the mode, both techniques, and every appearance/resource parameter.
+`none` skips both candidate families, uses ordinary receiver programs, and releases active PSSM
+targets. `simple` retains no PSSM resources. The implementation and defaults live in
+`apps/holtburger-3d/src/lib/game/renderer/entity-shadow-policy.ts` and
+`apps/holtburger-3d/src/lib/frontend-tuning.ts`.
+
+### Retail-equivalent implementation differences
+
 - **Sun and ambient evaluate in the vertex shader** for both landscape and meshes, rather than
   being baked per landblock. The formula is identical; evaluating it live makes a time-of-day
   change a uniform update instead of a re-bake of every loaded landblock.

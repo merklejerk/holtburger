@@ -48,10 +48,10 @@
 	}
 </script>
 
-<label class="shadow-mode">
+<label class="ac-form-field">
 	<span>Entity shadows</span>
 	<select
-		class="explorer-control explorer-control--select"
+		class="ac-control ac-control--select"
 		value={settings.mode}
 		onchange={updateMode}
 	>
@@ -64,10 +64,10 @@
 {#if settings.mode === "shadow-maps"}
 	<p class="ac-section-label">Outdoor PSSM</p>
 	<div class="shadow-grid">
-		<label>
+		<label class="ac-form-field">
 			<span>Cascades</span>
 			<select
-				class="explorer-control explorer-control--select"
+				class="ac-control ac-control--select"
 				value={settings.pssm.cascadeCount}
 				onchange={(event) => updatePssm("cascadeCount", event)}
 			>
@@ -76,10 +76,10 @@
 				{/each}
 			</select>
 		</label>
-		<label>
+		<label class="ac-form-field">
 			<span>Map resolution</span>
 			<select
-				class="explorer-control explorer-control--select"
+				class="ac-control ac-control--select"
 				value={settings.pssm.mapResolution}
 				onchange={(event) => updatePssm("mapResolution", event)}
 			>
@@ -88,8 +88,9 @@
 				{/each}
 			</select>
 		</label>
-		<label
+		<label class="ac-form-field"
 			><span>Maximum distance</span><input
+				class="ac-control"
 				min="1"
 				max="2048"
 				step="1"
@@ -98,8 +99,9 @@
 				onchange={(event) => updatePssm("maximumDistance", event)}
 			/></label
 		>
-		<label
+		<label class="ac-form-field"
 			><span>Minimum light elevation</span><input
+				class="ac-control"
 				min="0"
 				max="90"
 				step="1"
@@ -108,8 +110,9 @@
 				onchange={(event) => updatePssm("minimumLightElevationDegrees", event)}
 			/></label
 		>
-		<label
+		<label class="ac-form-field"
 			><span>Split lambda</span><input
+				class="ac-control"
 				min="0"
 				max="1"
 				step="0.01"
@@ -118,8 +121,9 @@
 				onchange={(event) => updatePssm("splitLambda", event)}
 			/></label
 		>
-		<label
+		<label class="ac-form-field"
 			><span>Blend fraction</span><input
+				class="ac-control"
 				min="0"
 				max="0.5"
 				step="0.01"
@@ -128,10 +132,10 @@
 				onchange={(event) => updatePssm("transitionFraction", event)}
 			/></label
 		>
-		<label>
+		<label class="ac-form-field">
 			<span>PCF radius</span>
 			<select
-				class="explorer-control explorer-control--select"
+				class="ac-control ac-control--select"
 				value={settings.pssm.pcfRadius}
 				onchange={(event) => updatePssm("pcfRadius", event)}
 			>
@@ -140,8 +144,9 @@
 				>
 			</select>
 		</label>
-		<label
+		<label class="ac-form-field"
 			><span>Strength</span><input
+				class="ac-control"
 				min="0"
 				max="1"
 				step="0.01"
@@ -150,8 +155,9 @@
 				onchange={(event) => updatePssm("strength", event)}
 			/></label
 		>
-		<label
+		<label class="ac-form-field"
 			><span>Receiver depth bias</span><input
+				class="ac-control"
 				min="0"
 				max="0.05"
 				step="0.0001"
@@ -160,8 +166,9 @@
 				onchange={(event) => updatePssm("receiverDepthBias", event)}
 			/></label
 		>
-		<label
+		<label class="ac-form-field"
 			><span>Normal offset bias</span><input
+				class="ac-control"
 				min="0"
 				max="4"
 				step="0.01"
@@ -170,8 +177,9 @@
 				onchange={(event) => updatePssm("normalOffsetBias", event)}
 			/></label
 		>
-		<label
+		<label class="ac-form-field"
 			><span>Caster slope bias</span><input
+				class="ac-control"
 				min="0"
 				max="8"
 				step="0.1"
@@ -180,8 +188,9 @@
 				onchange={(event) => updatePssm("casterPolygonOffsetFactor", event)}
 			/></label
 		>
-		<label
+		<label class="ac-form-field"
 			><span>Caster unit bias</span><input
+				class="ac-control"
 				min="0"
 				max="16"
 				step="0.1"
@@ -190,8 +199,9 @@
 				onchange={(event) => updatePssm("casterPolygonOffsetUnits", event)}
 			/></label
 		>
-		<label
+		<label class="ac-form-field"
 			><span>Caster-depth padding</span><input
+				class="ac-control"
 				min="0"
 				max="512"
 				step="1"
@@ -206,8 +216,9 @@
 {#if settings.mode !== "none"}
 	<p class="ac-section-label">Analytic grounding</p>
 	<div class="shadow-grid">
-		<label
+		<label class="ac-form-field"
 			><span>Strength</span><input
+				class="ac-control"
 				min="0"
 				max="1"
 				step="0.01"
@@ -216,8 +227,9 @@
 				onchange={(event) => updateGrounding("strength", event)}
 			/></label
 		>
-		<label
+		<label class="ac-form-field"
 			><span>Radius scale</span><input
+				class="ac-control"
 				min="0.1"
 				max="4"
 				step="0.05"
@@ -226,8 +238,9 @@
 				onchange={(event) => updateGrounding("radiusScale", event)}
 			/></label
 		>
-		<label
+		<label class="ac-form-field"
 			><span>Softness</span><input
+				class="ac-control"
 				min="0.01"
 				max="1"
 				step="0.01"
@@ -236,8 +249,9 @@
 				onchange={(event) => updateGrounding("softness", event)}
 			/></label
 		>
-		<label
+		<label class="ac-form-field"
 			><span>Drop spread</span><input
+				class="ac-control"
 				min="0"
 				max="2"
 				step="0.05"
@@ -246,8 +260,9 @@
 				onchange={(event) => updateGrounding("dropSpread", event)}
 			/></label
 		>
-		<label
+		<label class="ac-form-field"
 			><span>Maximum drop</span><input
+				class="ac-control"
 				min="0.01"
 				max="16"
 				step="0.05"
@@ -256,8 +271,9 @@
 				onchange={(event) => updateGrounding("maximumDrop", event)}
 			/></label
 		>
-		<label
+		<label class="ac-form-field"
 			><span>Minimum up-facing</span><input
+				class="ac-control"
 				min="0"
 				max={settings.grounding.fullStrengthUpFacing - 0.01}
 				step="0.01"
@@ -266,8 +282,9 @@
 				onchange={(event) => updateGrounding("minimumUpFacing", event)}
 			/></label
 		>
-		<label
+		<label class="ac-form-field"
 			><span>Full-strength up-facing</span><input
+				class="ac-control"
 				min={settings.grounding.minimumUpFacing + 0.01}
 				max="1"
 				step="0.01"
@@ -276,8 +293,9 @@
 				onchange={(event) => updateGrounding("fullStrengthUpFacing", event)}
 			/></label
 		>
-		<label
+		<label class="ac-form-field"
 			><span>Contact bias</span><input
+				class="ac-control"
 				min="0"
 				max="1"
 				step="0.01"
@@ -290,25 +308,10 @@
 {/if}
 
 <style>
-	.shadow-mode {
-		display: grid;
-		gap: 0.25rem;
-	}
-
 	.shadow-grid {
 		display: grid;
 		gap: 0.45rem;
 		grid-template-columns: repeat(2, minmax(0, 1fr));
-	}
-
-	.shadow-grid label {
-		display: grid;
-		gap: 0.2rem;
-		min-width: 0;
-	}
-
-	.shadow-grid span {
-		font-size: 0.75rem;
 	}
 
 	.shadow-grid input,

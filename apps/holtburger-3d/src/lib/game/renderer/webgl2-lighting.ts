@@ -14,7 +14,7 @@ import {
  * cap and therefore how large its bright region looks. Lower to dim the hottest point without
  * shrinking the pool; 1 is the plain `x / (1 + x)` curve.
  *
- * Lives here rather than in `FRONTEND_TUNING` because it crosses into GLSL: the shader validator
+ * Lives here rather than in `SHARED_FRONTEND_TUNING` because it crosses into GLSL: the shader validator
  * pins shader-facing numbers by reading them out of a module as literals, which it cannot do
  * through a nested object. Same reason the wrap constants sit in `point-light-falloff.ts`.
  *

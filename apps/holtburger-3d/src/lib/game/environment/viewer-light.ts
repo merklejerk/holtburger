@@ -1,19 +1,19 @@
 import { sceneVec3, type SceneVec3 } from "../../assets/ac-frame";
-import { FRONTEND_TUNING } from "../../frontend-tuning";
+import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import { createLandblockWorldOrigin } from "../landblocks";
 import { transformPoint3 } from "../math/matrices";
 import { Vec3 } from "../math/types";
 import type { ScenePlacement } from "../scene";
 import { RUNTIME_LIGHT_RANGE_SCALE } from "./runtime-lights";
 
-const TUNING = FRONTEND_TUNING.rendering.viewerLight;
+const TUNING = SHARED_FRONTEND_TUNING.rendering.viewerLight;
 
 /**
  * Draw-time headlamp values, with `rangeAdjust` folded into the authored falloff: a hardware light
  * reaches `falloff * 1.5` (`config_hardware_light`, acclient.c:432899).
  *
  * Shaped so the renderer can place it as one more runtime light without knowing whose it is;
- * every value it holds is authored in `FRONTEND_TUNING.rendering.viewerLight`.
+ * every value it holds is authored in `SHARED_FRONTEND_TUNING.rendering.viewerLight`.
  */
 export const VIEWER_LIGHT = {
 	range: TUNING.falloff * RUNTIME_LIGHT_RANGE_SCALE,

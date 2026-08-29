@@ -5,7 +5,7 @@ import {
 	type AssetTextureKey,
 	type PackedObjectTexturePurpose,
 } from "../types";
-import { FRONTEND_TUNING } from "../../../frontend-tuning";
+import { SHARED_FRONTEND_TUNING } from "../../../frontend-tuning";
 import {
 	allocationBoundsForPlacement,
 	type AtlasPageId,
@@ -323,9 +323,12 @@ function validatePageSize(pageSize: number): void {
 	if (!Number.isInteger(pageSize) || pageSize <= 0) {
 		throw new Error("Atlas page size must be a positive integer.");
 	}
-	if (pageSize > FRONTEND_TUNING.workloads.staticObjectTextureAtlas.pageSize) {
+	if (
+		pageSize >
+		SHARED_FRONTEND_TUNING.workloads.staticObjectTextureAtlas.pageSize
+	) {
 		throw new Error(
-			`Atlas page size ${pageSize} exceeds the fixed ${FRONTEND_TUNING.workloads.staticObjectTextureAtlas.pageSize}px policy.`,
+			`Atlas page size ${pageSize} exceeds the fixed ${SHARED_FRONTEND_TUNING.workloads.staticObjectTextureAtlas.pageSize}px policy.`,
 		);
 	}
 }

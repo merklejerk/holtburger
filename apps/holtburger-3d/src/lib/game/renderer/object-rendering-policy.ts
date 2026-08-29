@@ -1,8 +1,8 @@
-import { FRONTEND_TUNING } from "../../frontend-tuning";
+import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 
 /** Squared radius inside which transparent geometry receives exact camera-depth ordering. */
 const TRANSPARENT_NEAR_DISTANCE_SQUARED =
-	FRONTEND_TUNING.rendering.transparentObjects.nearDistance ** 2;
+	SHARED_FRONTEND_TUNING.rendering.transparentObjects.nearDistance ** 2;
 
 /**
  * Current-frame facts needed to classify one transparent range, paired with the range itself.

@@ -9,7 +9,7 @@ import { AnimationSystem } from "../systems/animation-system";
 import { wholeAnimationClip } from "../animation/animation-playback";
 import type { PreparedAnimation } from "../animation/animation-asset-repository";
 import { Mat4 } from "../math/types";
-import { FRONTEND_TUNING } from "../../frontend-tuning";
+import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import { AnimationPresentationScheduler } from "./animation-presentation-scheduler";
 
 /**
@@ -39,14 +39,15 @@ describe("AnimationPresentationScheduler", () => {
 		expect(
 			scheduler.select(
 				frame,
-				FRONTEND_TUNING.animationPresentation.offscreenSampleIntervalSeconds /
-					2,
+				SHARED_FRONTEND_TUNING.animationPresentation
+					.offscreenSampleIntervalSeconds / 2,
 			).selectedNodeIds,
 		).toEqual([]);
 		expect(
 			scheduler.select(
 				frame,
-				FRONTEND_TUNING.animationPresentation.offscreenSampleIntervalSeconds,
+				SHARED_FRONTEND_TUNING.animationPresentation
+					.offscreenSampleIntervalSeconds,
 			).selectedNodeIds,
 		).toEqual(["scene-node:1"]);
 	});

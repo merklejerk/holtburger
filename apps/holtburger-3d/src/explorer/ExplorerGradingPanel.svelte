@@ -168,7 +168,7 @@
 		try {
 			await navigator.clipboard.writeText(fragment);
 			copyStatus =
-				"Copied. Paste over the colorGrade block in frontend-tuning.ts.";
+				"Copied. Paste over the colorGrade block in explorer-tuning.ts.";
 		} catch (cause) {
 			// Surfaced rather than swallowed: a silent no-op reads as a successful copy, and the
 			// author only finds out when they paste the previous clipboard into their source.

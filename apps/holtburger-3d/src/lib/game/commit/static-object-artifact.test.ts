@@ -9,7 +9,7 @@ import {
 } from "../textures/types";
 import { createLandblockWorldOrigin } from "../landblocks";
 import { RUNTIME_LIGHT_RANGE_SCALE } from "../environment/runtime-lights";
-import { FRONTEND_TUNING } from "../../frontend-tuning";
+import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import { assembleStaticObjectArtifact } from "./static-object-artifact";
 import type {
 	FrameStreamedObjectInstanceTemplate,
@@ -261,7 +261,8 @@ describe("outdoor static light gathering", () => {
 				color: { red: 1, green: 1, blue: 1 },
 				range: 4 * RUNTIME_LIGHT_RANGE_SCALE,
 				intensity:
-					100 * FRONTEND_TUNING.rendering.outdoorAuthoredLights.intensityScale,
+					100 *
+					SHARED_FRONTEND_TUNING.rendering.outdoorAuthoredLights.intensityScale,
 			},
 		]);
 	});

@@ -4,7 +4,7 @@ import {
 	isPackedObjectTexturePurpose,
 	packedObjectTexturePreparation,
 } from "../types";
-import { FRONTEND_TUNING } from "../../../frontend-tuning";
+import { SHARED_FRONTEND_TUNING } from "../../../frontend-tuning";
 import type { TexturePageId } from "../texture-manager";
 
 declare const atlasPageIdBrand: unique symbol;
@@ -108,7 +108,7 @@ export function allocationBoundsForPlacement(
 /** Reconstruct canonical free rectangles from a fixed page's locked content placements. */
 export function reconstructFreeRectangles(
 	page: AtlasPageLayout,
-	pageSize: number = FRONTEND_TUNING.workloads.staticObjectTextureAtlas
+	pageSize: number = SHARED_FRONTEND_TUNING.workloads.staticObjectTextureAtlas
 		.pageSize,
 ): readonly AtlasBounds[] {
 	validatePageSize(pageSize);
@@ -137,7 +137,7 @@ export function planStableAtlasLayout(
 ): StableAtlasLayoutPlan {
 	const pageSize =
 		options.pageSize ??
-		FRONTEND_TUNING.workloads.staticObjectTextureAtlas.pageSize;
+		SHARED_FRONTEND_TUNING.workloads.staticObjectTextureAtlas.pageSize;
 	validatePageSize(pageSize);
 	validateRequest(request);
 	const entriesByKey = indexEntries(request.entries, request.purpose, pageSize);

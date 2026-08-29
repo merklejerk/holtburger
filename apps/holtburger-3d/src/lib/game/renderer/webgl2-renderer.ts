@@ -30,14 +30,16 @@ import type {
 } from "../commit/artifacts";
 import type { ObjectMaterialOrdering } from "../resolution/object-material-planner";
 import { TextureWrapMode } from "../textures/types";
-import type { ColorGradeSettings } from "./color-grade-policy";
+import {
+	DEFAULT_COLOR_GRADE_PARAMETERS,
+	type ColorGradeSettings,
+} from "./color-grade-policy";
 import {
 	createEntityShadowSettings,
 	isOutdoorPssmReceiverFootprint,
 	type EntityShadowSettings,
 } from "./entity-shadow-policy";
 import {
-	DEFAULT_FRAME_SETTINGS,
 	type FrameInput,
 	type FrameSelectionMetrics,
 	type FrameSettings,
@@ -195,7 +197,7 @@ import {
 	selectedDynamicRenderScopeKeys,
 } from "./dynamic-render-scopes";
 import type { WebGL2TextureFilteringSupport } from "./webgl2-texture-filtering-support";
-import { FRONTEND_TUNING } from "../../frontend-tuning";
+import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import {
 	WebGL2TextureSamplerCatalog,
 	type TextureSamplingClass,
@@ -819,15 +821,19 @@ export class WebGL2Renderer implements Renderer {
 	>;
 	/** Requested quality captured at frame entry and consumed by every nested draw path. */
 	#frameTextureFiltering: TextureFilteringPolicy =
-		FRONTEND_TUNING.rendering.frameDefaults.textureFiltering;
+		SHARED_FRONTEND_TUNING.rendering.frameDefaults.textureFiltering;
 	/** Portal footprint cutoff resolved to drawing-buffer pixels once at frame entry. */
 	#minimumPortalFootprintDevicePixelArea = 0;
 	/** Object-presentation footprint cutoff resolved to drawing-buffer pixels at frame entry. */
 	#minimumObjectFootprintDevicePixelArea = 0;
 	/** Sampling density the drawing buffer is currently sized for, retained for resize alone. */
-	#renderScale: number = FRONTEND_TUNING.rendering.frameDefaults.renderScale;
+	#renderScale: number =
+		SHARED_FRONTEND_TUNING.rendering.frameDefaults.renderScale;
 	/** This frame's presentation grade, snapshotted once and consumed at present time. */
-	#frameColorGrade: ColorGradeSettings = DEFAULT_FRAME_SETTINGS.colorGrade;
+	#frameColorGrade: ColorGradeSettings = {
+		enabled: false,
+		parameters: DEFAULT_COLOR_GRADE_PARAMETERS,
+	};
 	/** Explicit session; null avoids clocks, extension probes, and GPU query resources. */
 	#frameProfiler: WebGL2FrameProfiler | null = null;
 	/** Reused metrics record for the frame's effective AO distance interval. */
@@ -994,7 +1000,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#objectFallbackBinding = {
 			sampler: this.#textureSamplers.getSampler({
 				mipLevels: 1,
-				policy: FRONTEND_TUNING.rendering.frameDefaults.textureFiltering,
+				policy: SHARED_FRONTEND_TUNING.rendering.frameDefaults.textureFiltering,
 				samplingClass: "exact",
 				wrap: TextureWrapMode.Clamp,
 			}),
@@ -1036,10 +1042,10 @@ export class WebGL2Renderer implements Renderer {
 				}),
 		};
 		gl.clearColor(
-			FRONTEND_TUNING.rendering.clearColor.red,
-			FRONTEND_TUNING.rendering.clearColor.green,
-			FRONTEND_TUNING.rendering.clearColor.blue,
-			FRONTEND_TUNING.rendering.clearColor.alpha,
+			SHARED_FRONTEND_TUNING.rendering.clearColor.red,
+			SHARED_FRONTEND_TUNING.rendering.clearColor.green,
+			SHARED_FRONTEND_TUNING.rendering.clearColor.blue,
+			SHARED_FRONTEND_TUNING.rendering.clearColor.alpha,
 		);
 		gl.enable(gl.DEPTH_TEST);
 	}
@@ -1409,6 +1415,7 @@ export class WebGL2Renderer implements Renderer {
 		viewInput: FrameViewInput,
 		rootScope: SceneScope,
 		extent: RenderExtent,
+		frameSettings: FrameSettings,
 	): PortalExecutionProbeResult {
 		this.#assertDeviceReady();
 		this.#applyRenderExtent(extent);
@@ -1431,13 +1438,13 @@ export class WebGL2Renderer implements Renderer {
 			prepared,
 			frame,
 			[
-				FRONTEND_TUNING.rendering.clearColor.red,
-				FRONTEND_TUNING.rendering.clearColor.green,
-				FRONTEND_TUNING.rendering.clearColor.blue,
-				FRONTEND_TUNING.rendering.clearColor.alpha,
+				SHARED_FRONTEND_TUNING.rendering.clearColor.red,
+				SHARED_FRONTEND_TUNING.rendering.clearColor.green,
+				SHARED_FRONTEND_TUNING.rendering.clearColor.blue,
+				SHARED_FRONTEND_TUNING.rendering.clearColor.alpha,
 			],
 			PROBE_SHADING,
-			DEFAULT_FRAME_SETTINGS,
+			frameSettings,
 			null,
 			pipeline,
 		);
@@ -1529,15 +1536,15 @@ export class WebGL2Renderer implements Renderer {
 			if (
 				skyBatches &&
 				skyBatches.length > 0 &&
-				FRONTEND_TUNING.rendering.skyParticles.opacityScale > 0
+				SHARED_FRONTEND_TUNING.rendering.skyParticles.opacityScale > 0
 			) {
 				this.#drawParticleBatches(
 					view,
 					skyBatches,
 					profile,
 					this.#skyClockSeconds *
-						FRONTEND_TUNING.rendering.skyParticles.speedMultiplier,
-					FRONTEND_TUNING.rendering.skyParticles.opacityScale,
+						SHARED_FRONTEND_TUNING.rendering.skyParticles.speedMultiplier,
+					SHARED_FRONTEND_TUNING.rendering.skyParticles.opacityScale,
 				);
 			}
 		}
@@ -2772,15 +2779,15 @@ export class WebGL2Renderer implements Renderer {
 			this.#submitSkyPhase(view, shading, "before-world", profile, null);
 			if (
 				view.skyParticles.length > 0 &&
-				FRONTEND_TUNING.rendering.skyParticles.opacityScale > 0
+				SHARED_FRONTEND_TUNING.rendering.skyParticles.opacityScale > 0
 			) {
 				this.#drawParticleBatches(
 					view,
 					view.skyParticles,
 					profile,
 					this.#skyClockSeconds *
-						FRONTEND_TUNING.rendering.skyParticles.speedMultiplier,
-					FRONTEND_TUNING.rendering.skyParticles.opacityScale,
+						SHARED_FRONTEND_TUNING.rendering.skyParticles.speedMultiplier,
+					SHARED_FRONTEND_TUNING.rendering.skyParticles.opacityScale,
 				);
 			}
 		}
@@ -3343,11 +3350,11 @@ export class WebGL2Renderer implements Renderer {
 		const gl = this.#gl;
 		gl.uniform1f(
 			uniforms.detailFadeNear,
-			FRONTEND_TUNING.rendering.terrainDetailFade.near,
+			SHARED_FRONTEND_TUNING.rendering.terrainDetailFade.near,
 		);
 		gl.uniform1f(
 			uniforms.detailFadeFar,
-			FRONTEND_TUNING.rendering.terrainDetailFade.far,
+			SHARED_FRONTEND_TUNING.rendering.terrainDetailFade.far,
 		);
 		bindWebGL2DynamicLights(
 			gl,

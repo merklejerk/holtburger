@@ -1,7 +1,7 @@
 import type { AdvancedAnimationFrame } from "../systems/animation-system";
 import type { RendererFrameFeedback } from "../renderer/renderer";
 import type { SceneNodeId } from "../scene";
-import { FRONTEND_TUNING } from "../../frontend-tuning";
+import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 
 const TIME_EPSILON_SECONDS = 1e-9;
 
@@ -40,7 +40,7 @@ export class AnimationPresentationScheduler {
 	readonly #lastSampleTimeSeconds = new Map<SceneNodeId, number>();
 	#activeNodeIds = new Set<SceneNodeId>();
 	#offscreenSampleIntervalSeconds: number =
-		FRONTEND_TUNING.animationPresentation.offscreenSampleIntervalSeconds;
+		SHARED_FRONTEND_TUNING.animationPresentation.offscreenSampleIntervalSeconds;
 	#previousVisibleNodeIds = new Set<SceneNodeId>();
 	#diagnostics: AnimationPresentationSchedulerDiagnostics = {
 		lastMaximumVisiblePresentationAgeSeconds: 0,
@@ -49,7 +49,8 @@ export class AnimationPresentationScheduler {
 		lastSkippedSampleCount: 0,
 		lastVisibleSampleCount: 0,
 		offscreenSampleIntervalSeconds:
-			FRONTEND_TUNING.animationPresentation.offscreenSampleIntervalSeconds,
+			SHARED_FRONTEND_TUNING.animationPresentation
+				.offscreenSampleIntervalSeconds,
 		previousFrameVisibleCount: 0,
 		trackedPlaybackCount: 0,
 	};

@@ -1,4 +1,4 @@
-import { FRONTEND_TUNING } from "../../frontend-tuning";
+import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 
 declare const ambientOcclusionDistanceFadeBrand: unique symbol;
 
@@ -45,7 +45,7 @@ const MAX_AMBIENT_OCCLUSION_SAMPLE_COUNT = 32;
 
 /** Validate shader and allocation tuning together before any WebGL resource is created. */
 function validateAmbientOcclusionResourceTuning(
-	tuning: typeof FRONTEND_TUNING.rendering.ambientOcclusion,
+	tuning: typeof SHARED_FRONTEND_TUNING.rendering.ambientOcclusion,
 ): void {
 	if (
 		!Number.isFinite(tuning.resolutionScale) ||
@@ -215,7 +215,7 @@ export function createAmbientOcclusionSampleKernel(
 	return kernel;
 }
 
-const tuning = FRONTEND_TUNING.rendering.ambientOcclusion;
+const tuning = SHARED_FRONTEND_TUNING.rendering.ambientOcclusion;
 validateAmbientOcclusionResourceTuning(tuning);
 
 /** Validated configured fade shared by every frame until frontend tuning changes. */

@@ -21,8 +21,8 @@ authored value upstream of presentation.
 - `FrameSettings.colorGrade` wiring from Explorer through the runtime, following the
   ambient-occlusion precedent.
 - Explorer grading panel: enable toggle, parametric sliders, Krita-style curve editor,
-  copy-to-clipboard export shaped as a `FRONTEND_TUNING` fragment.
-- Defaults in `FRONTEND_TUNING.rendering.colorGrade` (identity until a look is tuned and pasted).
+  copy-to-clipboard export shaped as an `EXPLORER_TUNING_OVERRIDES` fragment.
+- Defaults in `EXPLORER_TUNING_OVERRIDES.colorGrade` (identity until a look is tuned and pasted).
 
 ### Out of Scope
 
@@ -69,15 +69,15 @@ authored value upstream of presentation.
 ### Existing Patterns
 
 - `ambient-occlusion-policy.ts` — the settings-module precedent: validated parameter type,
-  `Settings = { enabled, parameters }`, defaults sourced from `FRONTEND_TUNING`, loud
+  `Settings = { enabled, parameters }`, defaults sourced from `SHARED_FRONTEND_TUNING`, loud
   validation errors. `colorGrade` mirrors this shape.
-- `renderer.ts` `FrameSettings` / `DEFAULT_FRAME_SETTINGS` — where the new `colorGrade` field
+- `renderer.ts` `FrameSettings` / `SHARED_FRAME_SETTINGS` — where the new `colorGrade` field
   and its tuning-sourced default live.
 - `ExplorerApp.svelte` (`frameSettings` `$state` + `applyFrameSettings()`) and
   `ExplorerWorldPanel.svelte` (AO slider wiring) — the panel-to-runtime plumbing precedent.
 - `webgl2-sao-pass.ts` — precedent for a pass owning small GPU resources with explicit
   destroy and generation metrics.
-- `FRONTEND_TUNING.rendering.skyParticles` / `weather` — precedent for commented,
+- `SHARED_FRONTEND_TUNING.rendering.skyParticles` / `weather` — precedent for commented,
   deliberately-ours presentation knobs.
 
 ## North Stars
@@ -87,7 +87,7 @@ authored value upstream of presentation.
    shaders.
 2. **Off means bit-exact off.** With the grade disabled, presentation output is byte-identical
    to today's. The A/B toggle is only honest if the off state is the true baseline.
-3. **The tuned look is source code.** Export lands as a readable `FRONTEND_TUNING` fragment —
+3. **The tuned look is source code.** Export lands as a readable `EXPLORER_TUNING_OVERRIDES` fragment —
    diffable, greppable, reviewable. No binary artifacts.
 4. **Curves cannot be deranged.** Monotone interpolation, clamped domain, validated control
    points. A curve the editor can produce is a curve the renderer can safely bake.
@@ -119,7 +119,7 @@ Everything the shader and panel will consume, as pure tested functions.
     a 256-entry strip, writing into a caller-owned buffer.
   - `temperatureTintToGains(temperature, tint)` — CPU-side white-balance RGB gains,
     normalized to preserve luma so white balance does not double as exposure.
-- `FRONTEND_TUNING.rendering.colorGrade` — identity defaults, `enabledByDefault: false`,
+- `EXPLORER_TUNING_OVERRIDES.colorGrade` — identity defaults, `enabledByDefault: false`,
   with a comment recording that this is a deliberate presentation departure from retail's
   ungraded output.
 - Colocated tests: evaluator monotonicity/endpoint/identity properties, bake composition,
@@ -136,7 +136,7 @@ Everything the shader and panel will consume, as pure tested functions.
 - [x] Types + validation + defaults
 - [x] Monotone evaluator + bake + white-balance gains
 - [x] Tests (18, all passing; full suite 1327 passing)
-- [x] `FRONTEND_TUNING.rendering.colorGrade` block
+- [x] `EXPLORER_TUNING_OVERRIDES.colorGrade` block
 
 **Decisions and Course Corrections**
 
@@ -331,8 +331,9 @@ Profiling (`--gpu --profile-renderer`, portal mode) reports the new presentation
     into a retained scratch `Float32Array`, and uploads with `texSubImage2D` only when
     settings actually change (mechanism decided at implementation — reference equality is the
     likely candidate given `frameSettings` snapshots are fresh objects per update).
-- `renderer.ts`: `FrameSettings.colorGrade: ColorGradeSettings`, default sourced from
-  `FRONTEND_TUNING.rendering.colorGrade` in `DEFAULT_FRAME_SETTINGS`.
+- `renderer.ts`: `FrameSettings.colorGrade: ColorGradeSettings`, shared defaults sourced from
+  `SHARED_FRONTEND_TUNING.rendering.colorGrade` in `SHARED_FRAME_SETTINGS` and overridden by
+  `EXPLORER_TUNING_OVERRIDES` for Explorer.
 - `webgl2-renderer.ts`: snapshot `frameSettings.colorGrade` at frame entry alongside the other
   quality state and hand it to the presentation pass before `present()` in both paths.
 - `game-runtime.ts` likely needs no change beyond the settings type flowing through
@@ -409,7 +410,7 @@ have shown a small but systematic delta instead, which is easy to mistake for "l
 - `src/explorer/ExplorerGradingPanel.svelte` — enable toggle; temperature/tint/saturation
   sliders; SVG curve editor (identity diagonal, channel tabs for master/R/G/B, draggable
   points, click-to-add, double-click-to-remove); "Copy tuning" button via
-  `navigator.clipboard.writeText`; "Reset" back to `FRONTEND_TUNING` defaults.
+  `navigator.clipboard.writeText`; "Reset" back to Explorer tuning defaults.
 - `ExplorerApp.svelte` — `updateColorGradeSettings` following the AO update pattern.
 - `ExplorerTools.svelte` — panels are tabs in its `tabs` registry (stable id, emoji icon,
   label); the grading panel mounts as a new tab entry following that pattern.
@@ -418,7 +419,7 @@ have shown a small but systematic delta instead, which is easy to mistake for "l
 
 - Editing any control updates the rendered frame on the next `applyFrameSettings` (manual
   verification in Explorer; wiring-level behavior covered by the pure-function tests).
-- Copied fragment pastes into `FRONTEND_TUNING.rendering` and type-checks unmodified.
+- Copied fragment pastes into `EXPLORER_TUNING_OVERRIDES` and type-checks unmodified.
 - Curve editor cannot produce a state `createColorGradeParameters` rejects.
 - `npm run check`, `npm run lint` (including svelte-check), `npm run test:ts` pass.
 
@@ -563,9 +564,9 @@ across 174 files, and prettier over every touched file all pass.
 - [x] Grade disabled is byte-identical to pre-plan output.
 - [x] Explorer panel tunes white balance, saturation, and master/RGB monotone curves live,
       with A/B toggle.
-- [x] Copy-to-clipboard emits a fragment that pastes into `FRONTEND_TUNING.rendering` and
+- [x] Copy-to-clipboard emits a fragment that pastes into `EXPLORER_TUNING_OVERRIDES` and
       type-checks (verified by splicing a real fragment in and re-running the whole gate).
-- [x] `FRONTEND_TUNING.rendering.colorGrade` documents the departure-from-retail rationale.
+- [x] `EXPLORER_TUNING_OVERRIDES.colorGrade` documents the departure-from-retail rationale.
 - [x] All gates pass: `npm run check`, `npm run lint`, `npm run test:ts`, and prettier over
       the files this plan touches (repo-wide `format:check` fails at HEAD for unrelated
       prettier-version reasons — see Phase 1's discovered debt).
@@ -575,7 +576,7 @@ across 174 files, and prettier over every touched file all pass.
 
 The plan shipped an identity, disabled grade so the feature could land without changing how the
 client looks. An authored look has since been tuned in the Explorer panel and pasted into
-`FRONTEND_TUNING.rendering.colorGrade`, which is exactly the workflow the export exists for, so
+`EXPLORER_TUNING_OVERRIDES.colorGrade`, which is exactly the workflow the export exists for, so
 the grade now ships **enabled**: a gentle warm shift (temperature 0.03), a touch of saturation
 (1.02), and a five-point master curve that lifts shadows slightly and softens the top end.
 

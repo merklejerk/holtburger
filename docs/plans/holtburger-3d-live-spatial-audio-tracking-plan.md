@@ -155,7 +155,7 @@ needs to re-place it, and the frame loop does so.
   builds. **Writes go through `setTargetAtTime`, not `.value`.** A direct per-frame assignment to an
   `AudioParam` steps the signal once per frame and produces zipper noise; the smoothing constant is a
   tuning knob, not an implementation detail.
-- `FRONTEND_TUNING.audio.placementSmoothingSeconds` — the `setTargetAtTime` time constant. Start at
+- `SHARED_FRONTEND_TUNING.audio.placementSmoothingSeconds` — the `setTargetAtTime` time constant. Start at
   `0.02`. Documented as the tradeoff it is: too small clicks, too large smears a fast pan.
 - `AudioSystem` retains a `LiveVoice` record per playing voice — the voice handle plus the facts
   needed to re-place it (`position`, `volume`, `category`). The bare `AudioVoice[]` becomes
@@ -231,7 +231,7 @@ needs to re-place it, and the frame loop does so.
   deletes a stale-value path rather than papering over it.
 - `SpatialAudioPlacement` should now be retained by nothing anywhere. Confirm it is a pure return
   value and nothing stores one.
-- Rewrite `FRONTEND_TUNING.audio.maximumWarmupReplaySeconds`'s doc comment. Its stated rationale is
+- Rewrite `SHARED_FRONTEND_TUNING.audio.maximumWarmupReplaySeconds`'s doc comment. Its stated rationale is
   "playing it would place a sound where the listener no longer is, since retail fixes gain and pan at
   trigger time and never updates them" — that reason is gone. The bound survives, but now on purely
   temporal grounds: a footstep that arrives 300 ms late belongs to a moment that has passed. Say
@@ -760,7 +760,7 @@ eslint all clean.
   corresponded to forced 24 m scan-cell refreshes, which is the intended override rather than
   cadence drift. Both harness runs reported no browser console errors.
 
-- **2026-08-17 — Loudness contour added** (`FRONTEND_TUNING.audio.loudnessCurveExponent`, default
+- **2026-08-17 — Loudness contour added** (`SHARED_FRONTEND_TUNING.audio.loudnessCurveExponent`, default
   0.75, marked `RETAIL DIVERGENCE`): each voice's linear gain passes through `gain ** exponent` at
   the device boundary, lifting quiet-to-mid distant ambience with fixed points at 0 and 1. Applied
   at the last moment before the param write, so the audibility floor, diagnostics, and quietest-

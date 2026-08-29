@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FRONTEND_TUNING } from "../../frontend-tuning";
+import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import { AABB3, Mat4, Vec3 } from "../math/types";
 import {
 	DEFAULT_ENTITY_SHADOW_SETTINGS,
@@ -23,7 +23,7 @@ describe("entity shadow policy", () => {
 			DEFAULT_ENTITY_SHADOW_SETTINGS.pssm.mapResolution,
 		).toBeLessThanOrEqual(MAX_OUTDOOR_PSSM_MAP_RESOLUTION);
 		expect(MAX_ENTITY_GROUNDING_CASTERS_PER_RECEIVER).toBe(
-			FRONTEND_TUNING.rendering.entityShadows
+			SHARED_FRONTEND_TUNING.rendering.entityShadows
 				.maximumGroundingCastersPerReceiver,
 		);
 	});

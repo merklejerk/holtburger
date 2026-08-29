@@ -397,7 +397,7 @@ An unsupported material drops its own draw and reports it, rather than failing t
 prepared with: one bad asset costs one range or one mesh, never a region's sky.
 
 `holtburger-3d` scales authored weather opacity by
-`FRONTEND_TUNING.rendering.weather.opacityScale`, a marked `RETAIL DIVERGENCE`. The columns are
+`SHARED_FRONTEND_TUNING.rendering.weather.opacityScale`, a marked `RETAIL DIVERGENCE`. The columns are
 viewer-pinned with an absolute height clamp, so they sweep vertically past a camera that changes
 height quickly — faithful motion under an input envelope retail never had. Both rain surfaces are
 `ALPHA | ADDITIVE`, which blends `SRC_ALPHA, ONE`, so alpha scales the added light directly. Set

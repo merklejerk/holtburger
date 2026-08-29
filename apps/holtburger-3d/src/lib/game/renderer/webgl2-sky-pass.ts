@@ -10,7 +10,7 @@ import { createTexture2DUpload } from "../textures/texture-manager";
 import { resolveObjectMaterialRanges } from "../commit/object-material-ranges";
 import { SKY_MATERIAL_KIND, SKY_TEXTURE_UNITS } from "./webgl2-sky-program";
 import { objectBlendPolicy, sourceOpacity } from "./object-rendering-policy";
-import { FRONTEND_TUNING } from "../../frontend-tuning";
+import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import { Mat4, Vec3 } from "../math/types";
 import type {
 	AssetTextureFact,
@@ -270,7 +270,7 @@ export class WebGL2SkyPass {
 				object.placement.pass === pass &&
 				(context.weatherEnabled || object.placement.kind === "celestial") &&
 				(object.placement.kind !== "weather" ||
-					FRONTEND_TUNING.rendering.weather.opacityScale > 0),
+					SHARED_FRONTEND_TUNING.rendering.weather.opacityScale > 0),
 		);
 		if (drawn.length === 0) return;
 
@@ -307,7 +307,7 @@ export class WebGL2SkyPass {
 			// divergence is about weather specifically, not about the sky pass as a whole.
 			const opacityScale =
 				object.placement.kind === "weather"
-					? FRONTEND_TUNING.rendering.weather.opacityScale
+					? SHARED_FRONTEND_TUNING.rendering.weather.opacityScale
 					: 1;
 			for (const range of resources.ranges) {
 				this.#drawRange(
@@ -387,7 +387,7 @@ export class WebGL2SkyPass {
 		// replacement. Applying only the latter left additive cloud sheets contributing at full
 		// strength and washing the sky out.
 		// RETAIL DIVERGENCE: `opacityScale` is ours, not retail's — see
-		// `FRONTEND_TUNING.rendering.weather.opacityScale` for the citation, the census that sized
+		// `SHARED_FRONTEND_TUNING.rendering.weather.opacityScale` for the citation, the census that sized
 		// it, and how to restore retail's contribution exactly. It is 1 for every celestial layer,
 		// so this expression is retail's own everywhere except authored weather.
 		gl.uniform1f(

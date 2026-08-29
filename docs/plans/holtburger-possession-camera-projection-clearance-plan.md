@@ -555,7 +555,7 @@ Before frontend cutover:
   possession-camera controller.
 - Keep transport injected so Tauri and browser harness use the same behavior.
 - Rename or relocate the existing DOM regime router as Explorer-specific input composition.
-- Remove direct `FRONTEND_TUNING.explorer` dependencies from reusable control primitives; inject
+- Remove direct `EXPLORER_TUNING` dependencies from reusable control primitives; inject
   initial orientation and gesture tuning at composition.
 
 ### Task checklist

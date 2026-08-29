@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FRONTEND_TUNING } from "../../../frontend-tuning";
+import { SHARED_FRONTEND_TUNING } from "../../../frontend-tuning";
 import {
 	createAssetTextureKey,
 	packedObjectTexturePreparation,
@@ -26,20 +26,22 @@ describe("buildAtlasPage", () => {
 				1,
 				1,
 			),
-			pageSize: FRONTEND_TUNING.workloads.staticObjectTextureAtlas.pageSize,
+			pageSize:
+				SHARED_FRONTEND_TUNING.workloads.staticObjectTextureAtlas.pageSize,
 			sources: [
 				{ height: 1, key, pixels: Uint8Array.of(1, 2, 3, 4), width: 1 },
 			],
 		});
 
 		expect(result.width).toBe(
-			FRONTEND_TUNING.workloads.staticObjectTextureAtlas.pageSize,
+			SHARED_FRONTEND_TUNING.workloads.staticObjectTextureAtlas.pageSize,
 		);
 		expect(result.height).toBe(
-			FRONTEND_TUNING.workloads.staticObjectTextureAtlas.pageSize,
+			SHARED_FRONTEND_TUNING.workloads.staticObjectTextureAtlas.pageSize,
 		);
 		expect(result.pageBits.byteLength).toBe(
-			FRONTEND_TUNING.workloads.staticObjectTextureAtlas.pageSize ** 2 * 4,
+			SHARED_FRONTEND_TUNING.workloads.staticObjectTextureAtlas.pageSize ** 2 *
+				4,
 		);
 	});
 

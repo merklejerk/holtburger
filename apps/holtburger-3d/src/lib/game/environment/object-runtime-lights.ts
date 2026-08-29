@@ -1,5 +1,5 @@
 import { sceneVec3 } from "../../assets/ac-frame";
-import { FRONTEND_TUNING } from "../../frontend-tuning";
+import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import { placeObjectLights } from "../commit/interior-static-lighting";
 import type { LandblockOwnerId } from "../game-types";
 import { createLandblockWorldOrigin } from "../landblocks";
@@ -30,6 +30,6 @@ export function resolveObjectRuntimeLights(
 		// Authored intensity uses the same draw-time response whether the owner is static or dynamic.
 		intensity:
 			light.intensity *
-			FRONTEND_TUNING.rendering.outdoorAuthoredLights.intensityScale,
+			SHARED_FRONTEND_TUNING.rendering.outdoorAuthoredLights.intensityScale,
 	}));
 }

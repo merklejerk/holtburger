@@ -1,4 +1,4 @@
-import { FRONTEND_TUNING } from "../lib/frontend-tuning";
+import { EXPLORER_TUNING } from "./explorer-tuning";
 import { createCameraAxesRadians } from "../lib/game/math/camera-orientation";
 import { Vec3 } from "../lib/game/math/types";
 import { clamp, normalizeVec3, scaleVec3 } from "../lib/game/math/vector-utils";
@@ -70,11 +70,11 @@ export type CharacterKeyInput =
 
 const DEFAULT_STATE: FreeFlyCameraState = {
 	hasManualControl: false,
-	pitchRadians: FRONTEND_TUNING.explorer.camera.initialOrientation.pitchRadians,
+	pitchRadians: EXPLORER_TUNING.camera.initialOrientation.pitchRadians,
 	position: Vec3.zero(),
-	yawRadians: FRONTEND_TUNING.explorer.camera.initialOrientation.yawRadians,
+	yawRadians: EXPLORER_TUNING.camera.initialOrientation.yawRadians,
 };
-const CAMERA_CONTROL_TUNING = FRONTEND_TUNING.explorer.camera.controls;
+const CAMERA_CONTROL_TUNING = EXPLORER_TUNING.camera.controls;
 
 /**
  * Explorer-local port of the legacy fly controls: left drag rotates, middle/right drag pans,

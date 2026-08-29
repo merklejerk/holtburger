@@ -430,6 +430,37 @@ export const FRONTEND_TUNING = {
 			/** Renderer-owned camera-distance interval over which AO becomes neutral. */
 			distanceFade: { fullStrengthUntil: 64, disabledAt: 128 },
 		},
+		/** Accepted entity-shadow quality and appearance defaults, kept together for later tuning. */
+		entityShadows: {
+			/** Hybrid PSSM outdoors plus analytic grounding indoors. */
+			defaultMode: "shadow-maps" as const,
+			/** Build-time analytic-caster capacity shared by every terrain and EnvCell receiver. */
+			maximumGroundingCastersPerReceiver: 8,
+			pssm: {
+				cascadeCount: 3,
+				mapResolution: 1_024,
+				maximumDistance: 384,
+				splitLambda: 0.65,
+				transitionFraction: 0.1,
+				receiverDepthBias: 0.001,
+				normalOffsetBias: 0.15,
+				casterPolygonOffsetFactor: 1.1,
+				casterPolygonOffsetUnits: 2,
+				pcfRadius: 1,
+				strength: 0.55,
+				casterSearchPadding: 64,
+			},
+			grounding: {
+				strength: 0.38,
+				radiusScale: 0.75,
+				softness: 0.4,
+				dropSpread: 0.3,
+				maximumDrop: 3,
+				minimumUpFacing: 0.2,
+				fullStrengthUpFacing: 0.75,
+				contactBias: 0.03,
+			},
+		},
 		/** Authored weather presentation, which is ours to shape rather than inherit. */
 		weather: {
 			/**

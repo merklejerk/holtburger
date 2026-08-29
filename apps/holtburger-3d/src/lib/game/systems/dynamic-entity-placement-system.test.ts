@@ -229,6 +229,7 @@ function dynamicEntity(
 			velocity: { x: 1, y: 0, z: 0 },
 		},
 		presentation: {
+			category: "other",
 			appearance: {
 				paletteDid: null,
 				partChanges: [],

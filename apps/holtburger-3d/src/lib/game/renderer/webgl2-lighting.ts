@@ -39,11 +39,19 @@ vec3 safeNormal(vec3 normal) {
 	return lengthSquared > 0.0 ? normal * inversesqrt(lengthSquared) : vec3(0.0);
 }
 
+vec3 evaluateAmbient() {
+	return uAmbientLevel * uAmbientColor;
+}
+
+vec3 evaluateSun(vec3 normal) {
+	float sun = max(dot(safeNormal(normal), uSunVector), 0.0);
+	return sun * uSunColor;
+}
+
 // Ambient and the sun are directional, so they interpolate correctly across even a very large
 // triangle. Deliberately unclamped: callers clamp the complete lighting contribution once.
 vec3 evaluateAmbientAndSun(vec3 normal) {
-	float sun = max(dot(safeNormal(normal), uSunVector), 0.0);
-	return uAmbientLevel * uAmbientColor + sun * uSunColor;
+	return evaluateAmbient() + evaluateSun(normal);
 }
 `;
 

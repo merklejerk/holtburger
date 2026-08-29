@@ -45,6 +45,7 @@ describe("dynamic presentation producer adapters", () => {
 		expect(adapted.source.presentation).toBe(visual.presentation);
 		expect(adapted.source).toMatchObject({
 			behavior,
+			category: "other",
 			identity: "resident:1",
 			scale: new Vec3(2, 3, 4),
 			setupId: "0x02000001",
@@ -57,6 +58,7 @@ describe("dynamic presentation producer adapters", () => {
 
 		expect(adapted.source).toMatchObject({
 			behavior: { soundTableId: "0x20000002" },
+			category: "mob",
 			identity: "dynamic-entity:0x00000007/3",
 			scale: new Vec3(2, 2, 2),
 			setupId: "0x02000001",
@@ -196,6 +198,7 @@ function fixtureEntity(): DynamicEntityView {
 			velocity: { x: 0, y: 0, z: 0 },
 		},
 		presentation: {
+			category: "mob",
 			appearance: {
 				paletteDid: null,
 				partChanges: [],

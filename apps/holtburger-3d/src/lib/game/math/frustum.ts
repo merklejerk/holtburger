@@ -3,10 +3,10 @@ import { multiplyMat4 } from "./matrices";
 
 /** One inward-facing normalized plane in an anchor-relative render frame. */
 interface FrustumPlane {
-	readonly x: number;
-	readonly y: number;
-	readonly z: number;
-	readonly constant: number;
+	x: number;
+	y: number;
+	z: number;
+	constant: number;
 }
 
 /** Camera frustum expressed in one anchor-relative render frame. */
@@ -31,48 +31,58 @@ export function createFrustum(
 export function createFrustumFromClipMatrix(
 	clip: Mat4,
 	cameraPosition: Vec3,
+	target?: Frustum,
 ): Frustum {
-	return {
-		cameraPosition,
-		planes: [
-			normalizePlane(
-				clip.m14 + clip.m11,
-				clip.m24 + clip.m21,
-				clip.m34 + clip.m31,
-				clip.m44 + clip.m41,
-			),
-			normalizePlane(
-				clip.m14 - clip.m11,
-				clip.m24 - clip.m21,
-				clip.m34 - clip.m31,
-				clip.m44 - clip.m41,
-			),
-			normalizePlane(
-				clip.m14 + clip.m12,
-				clip.m24 + clip.m22,
-				clip.m34 + clip.m32,
-				clip.m44 + clip.m42,
-			),
-			normalizePlane(
-				clip.m14 - clip.m12,
-				clip.m24 - clip.m22,
-				clip.m34 - clip.m32,
-				clip.m44 - clip.m42,
-			),
-			normalizePlane(
-				clip.m14 + clip.m13,
-				clip.m24 + clip.m23,
-				clip.m34 + clip.m33,
-				clip.m44 + clip.m43,
-			),
-			normalizePlane(
-				clip.m14 - clip.m13,
-				clip.m24 - clip.m23,
-				clip.m34 - clip.m33,
-				clip.m44 - clip.m43,
-			),
-		],
+	const resolved = target ?? {
+		cameraPosition: cameraPosition.clone(),
+		planes: [],
 	};
+	resolved.cameraPosition.copy(cameraPosition);
+	const planes = resolved.planes as FrustumPlane[];
+	planes[0] = normalizePlane(
+		clip.m14 + clip.m11,
+		clip.m24 + clip.m21,
+		clip.m34 + clip.m31,
+		clip.m44 + clip.m41,
+		planes[0],
+	);
+	planes[1] = normalizePlane(
+		clip.m14 - clip.m11,
+		clip.m24 - clip.m21,
+		clip.m34 - clip.m31,
+		clip.m44 - clip.m41,
+		planes[1],
+	);
+	planes[2] = normalizePlane(
+		clip.m14 + clip.m12,
+		clip.m24 + clip.m22,
+		clip.m34 + clip.m32,
+		clip.m44 + clip.m42,
+		planes[2],
+	);
+	planes[3] = normalizePlane(
+		clip.m14 - clip.m12,
+		clip.m24 - clip.m22,
+		clip.m34 - clip.m32,
+		clip.m44 - clip.m42,
+		planes[3],
+	);
+	planes[4] = normalizePlane(
+		clip.m14 + clip.m13,
+		clip.m24 + clip.m23,
+		clip.m34 + clip.m33,
+		clip.m44 + clip.m43,
+		planes[4],
+	);
+	planes[5] = normalizePlane(
+		clip.m14 - clip.m13,
+		clip.m24 - clip.m23,
+		clip.m34 - clip.m33,
+		clip.m44 - clip.m43,
+		planes[5],
+	);
+	planes.length = 6;
+	return resolved;
 }
 
 /** Conservatively test one offset AABB against every frustum plane. */
@@ -98,13 +108,14 @@ function normalizePlane(
 	y: number,
 	z: number,
 	constant: number,
+	target?: FrustumPlane,
 ): FrustumPlane {
 	const length = Math.hypot(x, y, z);
 	if (length === 0) throw new Error("Frustum contains a degenerate plane.");
-	return {
-		constant: constant / length,
-		x: x / length,
-		y: y / length,
-		z: z / length,
-	};
+	const resolved = target ?? { constant: 0, x: 0, y: 0, z: 0 };
+	resolved.constant = constant / length;
+	resolved.x = x / length;
+	resolved.y = y / length;
+	resolved.z = z / length;
+	return resolved;
 }

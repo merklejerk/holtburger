@@ -26,6 +26,9 @@
 
 	const metrics = $derived(diagnostics?.selectionMetrics ?? null);
 	const compiledDraws = $derived(diagnostics?.compiledObjectDraws ?? null);
+	const shadowTargets = $derived(
+		diagnostics?.entityShadows.outdoorTargets ?? null,
+	);
 	/** Flushes are rare by design, so showing the total keeps an unexpected source visible. */
 	const compiledFlushTotal = $derived(
 		compiledDraws === null
@@ -339,6 +342,30 @@
 				</div>
 			</div>
 		</fieldset>
+
+		<details class="explorer-frame-details">
+			<summary>Entity shadows</summary>
+			<div class="ac-param-panel">
+				<div class="ac-param-row">
+					<span class="ac-param-key">Outdoor target resolution / cascades</span>
+					<code
+						>{shadowTargets?.resolution ?? "—"} / {shadowTargets?.cascadeCount ??
+							"—"}</code
+					>
+				</div>
+				<div class="ac-param-row">
+					<span class="ac-param-key">Outdoor target bytes</span>
+					<code>{shadowTargets?.activeBytes ?? 0}</code>
+				</div>
+				<div class="ac-param-row">
+					<span class="ac-param-key">Allocated / disposed generations</span>
+					<code
+						>{shadowTargets?.allocatedGenerationCount ?? 0} / {shadowTargets?.disposedGenerationCount ??
+							0}</code
+					>
+				</div>
+			</div>
+		</details>
 
 		<details class="explorer-frame-details">
 			<summary>Object pipeline</summary>

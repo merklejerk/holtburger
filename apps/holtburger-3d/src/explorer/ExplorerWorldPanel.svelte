@@ -28,6 +28,8 @@
 	} from "../lib/game/renderer/ambient-occlusion-policy";
 	import type { PhysicalFlyStatus } from "./physical-fly-session";
 	import type { ExplorerCameraMode } from "../lib/game/motion/host-physical-fly-path";
+	import type { EntityShadowSettings } from "../lib/game/renderer/entity-shadow-policy";
+	import ExplorerShadowControls from "./ExplorerShadowControls.svelte";
 
 	interface Props {
 		/** Whether Explorer has a runtime available to accept world operations. */
@@ -55,6 +57,8 @@
 		readonly distanceFogEnabled: boolean;
 		/** User-switchable near-field ambient-occlusion presentation. */
 		readonly ambientOcclusion: AmbientOcclusionSettings;
+		/** Complete outdoor and indoor entity-shadow presentation policy. */
+		readonly entityShadows: EntityShadowSettings;
 		readonly viewerLightEnabled: boolean;
 		/** Mirrors retail's `DisableMostWeatherEffects` player option, inverted. */
 		readonly weatherEnabled: boolean;
@@ -71,6 +75,9 @@
 		readonly updateDistanceFog: (enabled: boolean) => void;
 		readonly updateAmbientOcclusionSettings: (
 			settings: AmbientOcclusionSettings,
+		) => void;
+		readonly updateEntityShadowSettings: (
+			settings: EntityShadowSettings,
 		) => void;
 		readonly updateViewerLight: (enabled: boolean) => void;
 		readonly updateWeather: (enabled: boolean) => void;
@@ -115,6 +122,7 @@
 		updateEnvironment,
 		distanceFogEnabled,
 		ambientOcclusion,
+		entityShadows,
 		viewerLightEnabled,
 		weatherEnabled,
 		clockFollowing,
@@ -128,6 +136,7 @@
 		updateAmbientVolume,
 		updateDistanceFog,
 		updateAmbientOcclusionSettings,
+		updateEntityShadowSettings,
 		updateViewerLight,
 		updateWeather,
 		updateClockFollowing,
@@ -623,6 +632,10 @@
 					updateAmbientOcclusionParameter("bilateralDepthThreshold", event)}
 			/>
 		</label>
+		<ExplorerShadowControls
+			settings={entityShadows}
+			updateSettings={updateEntityShadowSettings}
+		/>
 		<label class="explorer-environment-field">
 			<span>Render scale</span>
 			<select

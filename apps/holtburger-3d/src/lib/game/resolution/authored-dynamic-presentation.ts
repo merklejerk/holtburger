@@ -19,6 +19,7 @@ export function adaptAuthoredDynamicPresentation(
 			},
 		},
 		source: {
+			category: "other",
 			behavior: authored.behavior,
 			identity: authored.identity.sourceId,
 			localBounds: authored.localBounds,

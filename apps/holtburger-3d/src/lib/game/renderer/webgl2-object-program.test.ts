@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+	createObjectFragmentShader,
+	createObjectVertexShader,
 	createWebGL2ObjectProgram,
 	OBJECT_TEXTURE_UNITS,
 } from "./webgl2-object-program";
+import { MAX_ENTITY_GROUNDING_CASTERS_PER_RECEIVER } from "./entity-shadow-policy";
 
 describe("createWebGL2ObjectProgram", () => {
 	it("initializes invariant sampler units exactly once for every program variant", () => {
@@ -31,6 +34,65 @@ describe("createWebGL2ObjectProgram", () => {
 				{ name: "uDetail", program, unit: OBJECT_TEXTURE_UNITS.detail },
 			]);
 		}
+	});
+});
+
+describe("outdoor PSSM object variant", () => {
+	it("keeps the ordinary program free of receiver work", () => {
+		const source = `${createObjectVertexShader(true)}\n${createObjectFragmentShader(true)}`;
+		expect(source).not.toContain("uOutdoorPssmDepth");
+		expect(source).not.toContain("vLightingWithoutSun");
+		expect(source).toContain("color.rgb *= min(vLighting +");
+	});
+
+	it("samples per fragment and blends only between full and sun-removed lighting", () => {
+		const vertex = createObjectVertexShader(true, "uniform", true);
+		const fragment = createObjectFragmentShader(true, true);
+		expect(vertex).toContain("vLightingWithoutSun = min(lightingWithoutSun");
+		expect(vertex).toContain(
+			"vLighting = min(lightingWithoutSun + evaluateSun",
+		);
+		expect(vertex).toContain("vOutdoorPssmViewDepth = -viewPosition.z");
+		expect(fragment).toContain("evaluateOutdoorPssmVisibility(");
+		expect(fragment).toContain(
+			"mix(\n\t\tvLightingWithoutSun,\n\t\tvLighting,",
+		);
+		expect(fragment).not.toContain("vLighting * evaluateOutdoorPssmVisibility");
+	});
+});
+
+describe("EnvCell grounding object variant", () => {
+	it("keeps ordinary and instanced programs free of grounding work", () => {
+		const source = `${createObjectVertexShader(true)}\n${createObjectFragmentShader(true)}`;
+		expect(source).not.toContain("uGroundingCasterCount");
+		expect(source).not.toContain("vGroundingPosition");
+	});
+
+	it("carries shell receiver facts and applies grounding after detail but before fog", () => {
+		const vertex = createObjectVertexShader(
+			true,
+			"uniform",
+			false,
+			"env-cell-shell",
+		);
+		const fragment = createObjectFragmentShader(true, false, "env-cell-shell");
+		expect(vertex).toContain("vGroundingPosition = anchoredPosition");
+		expect(vertex).toContain("vGroundingUpFacing = dot(");
+		expect(fragment).toContain(
+			`MAX_ENTITY_GROUNDING_CASTERS = ${MAX_ENTITY_GROUNDING_CASTERS_PER_RECEIVER}`,
+		);
+		expect(fragment).toContain(
+			"uGroundingCasters[MAX_ENTITY_GROUNDING_CASTERS]",
+		);
+		expect(fragment).toContain(
+			"strongest = max(strongest, radial * (1.0 - dropRatio));",
+		);
+		expect(
+			fragment.indexOf("color.rgb *= 1.0 - evaluateEntityGrounding"),
+		).toBeGreaterThan(fragment.indexOf("if (uUseDetail != 0)"));
+		expect(
+			fragment.indexOf("color.rgb *= 1.0 - evaluateEntityGrounding"),
+		).toBeLessThan(fragment.indexOf("color.rgb = applyDistanceFog"));
 	});
 });
 

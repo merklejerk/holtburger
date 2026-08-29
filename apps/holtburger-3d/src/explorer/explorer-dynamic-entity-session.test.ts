@@ -81,6 +81,7 @@ function entity(guid: number) {
 		playingClip: null,
 		identity: { guid, wcid: 42, name: "Drudge" },
 		presentation: {
+			category: "other",
 			content: {
 				motionTableDid: null,
 				setupDid: 0x02000001,

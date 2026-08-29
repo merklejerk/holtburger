@@ -3,7 +3,7 @@ use crate::attachment::PhysicsAttachment;
 use crate::book::BookData;
 use crate::entity::Entity;
 use crate::state::WorldState;
-use crate::state::liveness::EntityUpsertKind;
+use crate::state::liveness::{EntityCreateDisposition, EntityInstanceDeleteDisposition};
 use holtburger_common::Guid;
 use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_common::properties::{
@@ -33,7 +33,11 @@ pub(crate) fn handle_message(
             entity.apply_description(data);
 
             let guid = entity.guid;
-            let upsert_kind = state.upsert_entity_from_create(entity, events);
+            let create_disposition = state.upsert_entity_from_create(entity, events);
+            if create_disposition == EntityCreateDisposition::DeleteRequested {
+                state.update_player_inventory_recursive(guid, false);
+                return true;
+            }
             state.retain_announced_children(guid, data.children.as_deref(), events);
             state.resolve_pending_child_link(guid, data.animation_frame.unwrap_or(0), events);
             if guid != state.player.guid
@@ -55,15 +59,14 @@ pub(crate) fn handle_message(
             state.sync_player_ownership_for_entity(guid);
             let _ = state.reconcile_entity_retention(guid);
 
-            if matches!(upsert_kind, EntityUpsertKind::Inserted) {
-                return true;
-            }
-
             true
         }
         GameMessage::ObjectDelete(data) => {
-            state.update_player_inventory_recursive(data.guid, false);
-            state.mark_entity_explicit_delete(data.guid);
+            if state.request_entity_instance_delete(data.guid, data.instance_sequence)
+                == EntityInstanceDeleteDisposition::Applied
+            {
+                state.update_player_inventory_recursive(data.guid, false);
+            }
             true
         }
         GameMessage::InventoryRemoveObject(data) => {

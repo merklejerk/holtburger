@@ -192,8 +192,9 @@ fn test_update_property_float_unpack() {
 fn test_object_delete_fixture() {
     let expected = ObjectDeleteData {
         guid: Guid(0x50000001),
+        instance_sequence: 0x1234,
     };
-    let data = hex::decode("01000050").unwrap();
+    let data = hex::decode("0100005034120000").unwrap();
     assert_pack_unpack_parity(&data, &expected);
 }
 

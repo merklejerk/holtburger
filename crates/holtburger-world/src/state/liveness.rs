@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use holtburger_common::Guid;
 use holtburger_common::properties::WorldObjectExt as _;
+use holtburger_common::sequence::is_newer_u16;
 
 use crate::WorldEvent;
 use crate::context::WorldContextExt;
@@ -11,9 +12,28 @@ use crate::state::WorldState;
 const ACE_DESTRUCTION_TIMEOUT_SECS: f64 = 25.0;
 const CONSERVATIVE_VISIBILITY_DISTANCE_M: f32 = 384.0;
 
+/// Server request that can retire every current incarnation or one exact instance sequence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EntityDeleteRequest {
+    /// Non-generation-scoped removal produced by inventory and ownership transitions.
+    Unconditional,
+    /// Network deletion that applies only to the named server object incarnation.
+    Instance(u16),
+}
+
+impl EntityDeleteRequest {
+    fn applies_to(self, instance_sequence: u16) -> bool {
+        match self {
+            Self::Unconditional => true,
+            Self::Instance(sequence) => sequence == instance_sequence,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct EntityLifecycleState {
-    pub explicit_delete_requested: bool,
+    /// Pending deletion authority, including future instance deletes queued like retail SmartBox.
+    pub delete_request: Option<EntityDeleteRequest>,
     pub prune_deadline: Option<f64>,
     pub trade_preview: bool,
     pub container_preview: bool,
@@ -21,7 +41,7 @@ pub(crate) struct EntityLifecycleState {
 
 impl EntityLifecycleState {
     fn is_empty(&self) -> bool {
-        !self.explicit_delete_requested
+        self.delete_request.is_none()
             && self.prune_deadline.is_none()
             && !self.trade_preview
             && !self.container_preview
@@ -61,10 +81,24 @@ impl EntityLifecycleStore {
     }
 }
 
+/// Delete disposition after applying one authoritative object description.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum EntityUpsertKind {
-    Inserted,
-    Replaced,
+pub(crate) enum EntityCreateDisposition {
+    /// The description is newer than any queued delete or has no queued delete.
+    Active,
+    /// A previously queued delete names the description's exact instance sequence.
+    DeleteRequested,
+}
+
+/// Retail SmartBox disposition for an instance-sequenced object deletion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EntityInstanceDeleteDisposition {
+    /// The request names the currently materialized incarnation.
+    Applied,
+    /// The request names a future incarnation or arrived before its object description.
+    Queued,
+    /// The request names an incarnation older than the currently materialized one.
+    Stale,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -78,7 +112,8 @@ pub(crate) struct EntityRetentionSnapshot {
     pub has_parent_owner: bool,
     pub trade_preview: bool,
     pub container_preview: bool,
-    pub explicit_delete_requested: bool,
+    /// Whether current deletion authority applies to this entity's exact incarnation.
+    pub current_instance_delete_requested: bool,
     pub prune_deadline_expired: bool,
 }
 
@@ -173,7 +208,7 @@ impl WorldState {
                 continue;
             };
 
-            if snapshot.explicit_delete_requested || snapshot.has_nonworld_retention() {
+            if snapshot.current_instance_delete_requested || snapshot.has_nonworld_retention() {
                 self.clear_entity_prune_deadline(guid);
                 continue;
             }
@@ -201,14 +236,72 @@ impl WorldState {
     pub(crate) fn mark_entity_explicit_delete(&mut self, guid: Guid) {
         self.entity_lifecycle
             .get_or_default_mut(guid)
-            .explicit_delete_requested = true;
+            .delete_request = Some(EntityDeleteRequest::Unconditional);
     }
 
-    pub(crate) fn clear_entity_explicit_delete(&mut self, guid: Guid) {
+    /// Applies SmartBox's three-way instance-timestamp disposition from acclient.c:137144-137176:
+    /// exact deletes apply, future deletes queue, and stale deletes cannot retire a later instance.
+    pub(crate) fn request_entity_instance_delete(
+        &mut self,
+        guid: Guid,
+        instance_sequence: u16,
+    ) -> EntityInstanceDeleteDisposition {
+        let current_sequence = self.entities.get(guid).map(Entity::instance_sequence);
+        let disposition = match current_sequence {
+            Some(current) if current == instance_sequence => {
+                EntityInstanceDeleteDisposition::Applied
+            }
+            Some(current) if is_newer_u16(instance_sequence, current) => {
+                EntityInstanceDeleteDisposition::Queued
+            }
+            Some(_) => EntityInstanceDeleteDisposition::Stale,
+            None => EntityInstanceDeleteDisposition::Queued,
+        };
+        if disposition == EntityInstanceDeleteDisposition::Stale {
+            return disposition;
+        }
+
+        let state = self.entity_lifecycle.get_or_default_mut(guid);
+        match state.delete_request {
+            Some(EntityDeleteRequest::Unconditional) => {}
+            Some(EntityDeleteRequest::Instance(pending))
+                if disposition == EntityInstanceDeleteDisposition::Applied
+                    || is_newer_u16(instance_sequence, pending) =>
+            {
+                state.delete_request = Some(EntityDeleteRequest::Instance(instance_sequence));
+            }
+            None => {
+                state.delete_request = Some(EntityDeleteRequest::Instance(instance_sequence));
+            }
+            Some(EntityDeleteRequest::Instance(_)) => {}
+        }
+        disposition
+    }
+
+    /// Reconciles a create against a queued delete without letting stale delete traffic win.
+    fn reconcile_entity_delete_after_create(&mut self, guid: Guid) -> bool {
+        let Some(instance_sequence) = self.entities.get(guid).map(Entity::instance_sequence) else {
+            return false;
+        };
+        let mut applies_to_instance = false;
         if let Some(state) = self.entity_lifecycle.by_guid.get_mut(&guid) {
-            state.explicit_delete_requested = false;
+            applies_to_instance = matches!(
+                state.delete_request,
+                Some(EntityDeleteRequest::Instance(pending)) if pending == instance_sequence
+            );
+            let clear = match state.delete_request {
+                None => false,
+                Some(EntityDeleteRequest::Unconditional) => true,
+                Some(EntityDeleteRequest::Instance(pending)) => {
+                    is_newer_u16(instance_sequence, pending)
+                }
+            };
+            if clear {
+                state.delete_request = None;
+            }
         }
         self.entity_lifecycle.compact(guid);
+        applies_to_instance
     }
 
     pub(crate) fn set_entity_prune_deadline(&mut self, guid: Guid, deadline: f64) {
@@ -274,8 +367,7 @@ impl WorldState {
                 .is_some_and(|attachment| self.entities.get(attachment.parent).is_some()),
             trade_preview: lifecycle.is_some_and(|state| state.trade_preview),
             container_preview,
-            explicit_delete_requested: lifecycle
-                .is_some_and(|state| state.explicit_delete_requested),
+            current_instance_delete_requested: self.current_instance_delete_requested(guid),
             prune_deadline_expired: lifecycle
                 .and_then(|state| state.prune_deadline)
                 .is_some_and(|deadline| deadline <= now),
@@ -298,7 +390,7 @@ impl WorldState {
             return false;
         };
 
-        if snapshot.explicit_delete_requested {
+        if snapshot.current_instance_delete_requested {
             return true;
         }
 
@@ -342,11 +434,18 @@ impl WorldState {
     }
 
     pub fn is_entity_client_visible(&self, guid: Guid) -> bool {
-        self.entities.get(guid).is_some()
-            && !self
-                .entity_lifecycle
-                .get(guid)
-                .is_some_and(|state| state.explicit_delete_requested)
+        self.entities.get(guid).is_some() && !self.current_instance_delete_requested(guid)
+    }
+
+    fn current_instance_delete_requested(&self, guid: Guid) -> bool {
+        let Some(instance_sequence) = self.entities.get(guid).map(Entity::instance_sequence) else {
+            return false;
+        };
+        self.entity_lifecycle.get(guid).is_some_and(|state| {
+            state
+                .delete_request
+                .is_some_and(|request| request.applies_to(instance_sequence))
+        })
     }
 
     pub fn is_entity_world_participant(&self, guid: Guid) -> bool {
@@ -394,7 +493,7 @@ impl WorldState {
         &mut self,
         entity: Entity,
         events: &mut Vec<WorldEvent>,
-    ) -> EntityUpsertKind {
+    ) -> EntityCreateDisposition {
         let guid = entity.guid;
         let preserve_container_preview = entity
             .container_id()
@@ -405,7 +504,6 @@ impl WorldState {
                 .and_then(|existing| existing.container_id())
                 .is_some_and(|container| self.open_containers.contains(&container));
 
-        self.clear_entity_explicit_delete(guid);
         self.clear_entity_prune_deadline(guid);
         if !self.trade_contains_item(guid) {
             self.clear_trade_preview(guid);
@@ -423,11 +521,14 @@ impl WorldState {
                 entity.omega,
             );
             events.push(WorldEvent::EntityReplaced(Box::new(entity)));
-            EntityUpsertKind::Replaced
         } else {
             self.add_entity(entity.clone());
             events.push(WorldEvent::EntitySpawned(Box::new(entity)));
-            EntityUpsertKind::Inserted
+        }
+        if self.reconcile_entity_delete_after_create(guid) {
+            EntityCreateDisposition::DeleteRequested
+        } else {
+            EntityCreateDisposition::Active
         }
     }
 }

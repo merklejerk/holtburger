@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use crate::attachment::PhysicsAttachment;
 use crate::entity::Entity;
-use crate::state::liveness::EntityUpsertKind;
+use crate::state::liveness::EntityCreateDisposition;
 use crate::{
     ContactState, RuntimeBodyResetCause, SolvedBodyKinematics, SpatialBodyEvent, SpatialBodyId,
     SpatialSampleMode, WorldBootstrap,
@@ -2204,7 +2204,7 @@ fn test_inventory_remove_object() {
     assert!(
         state
             .entity_lifecycle_state(obj_guid)
-            .is_some_and(|state| state.explicit_delete_requested)
+            .is_some_and(|state| state.delete_request.is_some())
     );
     assert!(
         !events
@@ -2542,27 +2542,109 @@ fn spawn_invalid_motion_data(
 #[test]
 fn test_object_delete_marks_explicit_delete_without_inline_despawn() {
     let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x50000002);
     let guid = Guid(0x90000002);
+    let mut entity = Entity::new(guid, "DeleteMe".to_string(), WorldPosition::default());
+    entity.set_container_id(Some(player_guid));
+    state.player.guid = player_guid;
+    state.entities.insert(entity);
+    state.sync_player_ownership_for_entity(guid);
+    assert!(state.player.inventory.contains(&guid));
 
-    state.entities.insert(Entity::new(
+    let msg = GameMessage::ObjectDelete(Box::new(ObjectDeleteData {
         guid,
-        "DeleteMe".to_string(),
-        WorldPosition::default(),
-    ));
-
-    let msg = GameMessage::ObjectDelete(Box::new(ObjectDeleteData { guid }));
+        instance_sequence: 0,
+    }));
 
     let events = state.handle_message(&msg);
 
     assert!(state.entities.get(guid).is_some());
+    assert!(!state.player.inventory.contains(&guid));
     assert!(
         state
             .entity_lifecycle_state(guid)
-            .is_some_and(|state| state.explicit_delete_requested)
+            .is_some_and(|state| state.delete_request.is_some())
     );
     assert!(!events.iter().any(
         |event| matches!(event, WorldEvent::EntityDespawned { guid: target, .. } if *target == guid)
     ));
+}
+
+#[test]
+fn test_stale_object_delete_does_not_retire_newer_instance() {
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x50000012);
+    let guid = Guid(0x90000012);
+    let position = WorldPosition::default();
+    let mut entity = Entity::new(guid, "Newer".to_string(), position);
+    entity.apply_remote_position_sample(position, 10, 0, 0);
+    entity.set_container_id(Some(player_guid));
+    state.player.guid = player_guid;
+    state.add_entity(entity);
+    state.sync_player_ownership_for_entity(guid);
+    assert!(state.player.inventory.contains(&guid));
+
+    let events = state.handle_message(&GameMessage::ObjectDelete(Box::new(ObjectDeleteData {
+        guid,
+        instance_sequence: 9,
+    })));
+
+    assert!(events.is_empty());
+    assert!(state.is_entity_client_visible(guid));
+    assert!(state.player.inventory.contains(&guid));
+    assert!(state.entity_lifecycle_state(guid).is_none());
+}
+
+#[test]
+fn test_future_object_delete_waits_for_matching_instance() {
+    let mut state = WorldState::synthetic();
+    let guid = Guid(0x90000013);
+    let position = WorldPosition::default();
+    let mut current = Entity::new(guid, "Current".to_string(), position);
+    current.apply_remote_position_sample(position, 10, 0, 0);
+    state.add_entity(current);
+
+    let _ = state.handle_message(&GameMessage::ObjectDelete(Box::new(ObjectDeleteData {
+        guid,
+        instance_sequence: 11,
+    })));
+    assert!(state.is_entity_client_visible(guid));
+
+    let mut matching = Entity::new(guid, "Matching".to_string(), position);
+    matching.apply_remote_position_sample(position, 11, 0, 0);
+    let create_disposition = state.upsert_entity_from_create(matching, &mut Vec::new());
+
+    assert_eq!(create_disposition, EntityCreateDisposition::DeleteRequested);
+    assert!(!state.is_entity_client_visible(guid));
+    let events = state.tick();
+    assert!(state.entities.get(guid).is_none());
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::EntityDespawned {
+            guid: event_guid,
+            generation: 11,
+        } if *event_guid == guid
+    )));
+}
+
+#[test]
+fn test_newer_create_supersedes_queued_object_delete() {
+    let mut state = WorldState::synthetic();
+    let guid = Guid(0x90000014);
+    let position = WorldPosition::default();
+
+    let _ = state.handle_message(&GameMessage::ObjectDelete(Box::new(ObjectDeleteData {
+        guid,
+        instance_sequence: u16::MAX,
+    })));
+    let mut replacement = Entity::new(guid, "Wrapped".to_string(), position);
+    replacement.apply_remote_position_sample(position, 0, 0, 0);
+    let create_disposition = state.upsert_entity_from_create(replacement, &mut Vec::new());
+
+    assert_eq!(create_disposition, EntityCreateDisposition::Active);
+    assert!(state.is_entity_client_visible(guid));
+    assert!(state.entity_lifecycle_state(guid).is_none());
+    assert!(state.tick().is_empty());
 }
 
 #[test]
@@ -2629,7 +2711,7 @@ fn test_pickup_event_marks_unretained_entity_for_sweep() {
     assert!(
         state
             .entity_lifecycle_state(guid)
-            .is_some_and(|state| state.explicit_delete_requested)
+            .is_some_and(|state| state.delete_request.is_some())
     );
     assert!(events.iter().any(|event| matches!(
         event,
@@ -2675,7 +2757,7 @@ fn test_retention_snapshot_reflects_lifecycle_metadata() {
     assert!(!snapshot.in_world);
     assert!(snapshot.trade_preview);
     assert!(snapshot.container_preview);
-    assert!(snapshot.explicit_delete_requested);
+    assert!(snapshot.current_instance_delete_requested);
     assert!(snapshot.prune_deadline_expired);
 }
 
@@ -2710,9 +2792,9 @@ fn test_upsert_entity_from_create_replaces_in_place() {
     events.clear();
 
     let replacement = Entity::new(guid, "Replacement".to_string(), WorldPosition::default());
-    let outcome = state.upsert_entity_from_create(replacement, &mut events);
+    let create_disposition = state.upsert_entity_from_create(replacement, &mut events);
 
-    assert!(matches!(outcome, EntityUpsertKind::Replaced));
+    assert_eq!(create_disposition, EntityCreateDisposition::Active);
     assert!(matches!(
         events.first(),
         Some(WorldEvent::EntityReplaced(_))

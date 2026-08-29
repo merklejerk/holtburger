@@ -78,7 +78,7 @@ describe("Explorer entity commands", () => {
 			},
 			[0, 2, 0],
 			5,
-			"simulated",
+			"integrated",
 		);
 
 		expect(request).toEqual({
@@ -90,7 +90,7 @@ describe("Explorer entity commands", () => {
 			},
 			candidate: { x: 10, y: 25, z: 30 },
 			rotation: { w: 1, x: 0, y: 0, z: 0 },
-			physicalIntent: "simulated",
+			physicalMode: "integrated",
 		});
 	});
 

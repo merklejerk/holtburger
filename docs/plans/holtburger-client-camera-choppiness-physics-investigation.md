@@ -1,6 +1,6 @@
 # Holtburger Client Camera Choppiness and Physics Population Implementation Plan
 
-Status: **Implementation plan scoped; execution not started (2026-08-29).**
+Status: **Complete (2026-08-29). Phases 6 through 8 were rejected by Gate A measurement.**
 
 This document records evidence gathered from the local ACE client scenario where the third-person
 camera becomes severely choppy after the scene settles. It is a working investigation handoff, not
@@ -54,7 +54,7 @@ defects that starve client camera publication in entity-dense housing scenes.
 5. Correct population and liveness precede optimization. Later work must be authorized by a fresh
    profile rather than by the aesthetic appeal of an incremental index.
 6. Every asynchronous physical-body completion is guarded by entity generation, immutable
-   definition facts, and the demand revision that requested it.
+   definition facts, and exact producer demand; do not add a second demand-revision truth.
 7. Camera responsiveness is accepted only alongside lower host work; publication reordering may
    improve resilience but cannot substitute for correcting simulation.
 8. Use clean cutovers. Delete binary-intent and solver-participation vocabulary that becomes false;
@@ -792,12 +792,33 @@ must leave the workspace compiling before any client cohort behavior changes.
 
 #### Checklist
 
-- [ ] Add the demand enums, composite, configuration constructor, and invariant helpers.
-- [ ] Replace transition decisions with complete optional configurations and sweep their vocabulary.
-- [ ] Move scheduler and index membership to final demand.
-- [ ] Migrate shared dynamic-entity operations.
-- [ ] Migrate Explorer producer policy and tests.
-- [ ] Run formatting, focused tests, checks, and clippy.
+- [x] Add the demand enums, composite, configuration constructor, and invariant helpers.
+- [x] Replace transition decisions with complete optional configurations and sweep their vocabulary.
+- [x] Move scheduler and index membership to final demand.
+- [x] Migrate shared dynamic-entity operations.
+- [x] Migrate Explorer producer policy and tests.
+- [x] Run formatting, focused tests, checks, and clippy.
+
+#### Execution record
+
+- Added four-quadrant demand, configuration-invariant, scheduler/index membership, promotion,
+  demotion, and target-only change tests.
+- The scene now preserves solver-owned settled state across unchanged configurations and
+  target-only demand changes, wakes on new integration work, settles on integration demotion, and
+  preserves suspension until topology restoration.
+- All `holtburger-world`, `holtburger-core`, and `holtburger-3d-host` tests passed; clippy passed for
+  all targets with warnings denied.
+- Frontend static checks and the focused Explorer command tests passed. The complete TypeScript
+  suite passed 1,683 of 1,685 tests; two pre-existing viewer-light falloff assertions fail in
+  untouched `point-light-falloff.test.ts` and are unrelated to this phase.
+- A 12-second release passive comparison after the Phase 2 cutover observed 458 projected entities,
+  457 physical participants, 457 initial movers, and 276 late movers. This exactly preserves the
+  broad pre-cutover population needed to test Phase 3 independently. The capture received 402
+  camera events, reported `teleport: null` and empty drive phases, and observed only `0.000674 m`
+  of local-player drift.
+- Temporary opt-in stderr census output and passive-probe parsing were added to make participant and
+  mover counts observable during Phases 2 through 4. They are diagnostic debt and must be removed
+  in Phase 9.
 
 ### Phase 3: Work-based quiescence
 
@@ -880,12 +901,60 @@ Do not wake a settled target merely because it was queried or because a report l
 
 #### Checklist
 
-- [ ] Add the focused behavior matrix tests.
-- [ ] Implement the conditional-support quiescence predicate.
-- [ ] Complete the wake audit and vocabulary sweep.
-- [ ] Add the retail divergence marker with its census if required.
-- [ ] Run world/core/host checks and clippy.
-- [ ] Capture the movement-free live quiescence comparison.
+- [x] Add the focused behavior matrix tests.
+- [x] Implement the conditional-support quiescence predicate.
+- [x] Complete the wake audit and vocabulary sweep.
+- [x] Add the retail divergence marker with its census if required.
+- [x] Run world/core/host checks and clippy.
+- [x] Capture the movement-free live quiescence comparison.
+
+#### Execution record
+
+- Replaced the grounded-only stability predicate with `completed_dynamic_tick_is_quiescent`.
+  Gravity-bearing grounded definitions still require unchanged `GroundState::Supported`; zero-
+  gravity grounded-shaped and free-flight definitions may settle after one completed no-work tick.
+- Added focused zero-gravity airborne, gravity-airborne, free-flight settle/wake, and target-only
+  report-lifetime coverage. Existing stale-support, reconciliation, correction-snap, clipped-path,
+  projectile, reciprocal-wake, suspension/restoration, authored-motion, and activity-transition
+  tests remained green. The target-only fixture now uses `Retained/Excluded` through the public
+  configuration operation instead of mutating solver activity in the test.
+- Corrected one Explorer fixture that expected both no-work free-flight bodies to keep ticking.
+  After one body is relocated, only that body produces a physical tick; the settled target still
+  produces both report directions. Preserving the old two-body expectation would preserve the
+  defect under test.
+- A fresh shipped-catalog run scanned 43,913 templates. It found 6,926 supported zero-gravity
+  templates with no missile, template/setup motion table, default animation, or default script.
+  Of those, 6,654 also suppress ordinary target participation: 6,274 House, all 5 Hook, 187
+  Generic, 92 Switch, 72 ProjectileSpell, 15 Creature, 5 Book, 3 Missile, and 1 Food. Runtime-
+  activatable categories remain the reason quiescence consumes current work and wake facts rather
+  than using this catalog shape as admission policy. The temporary census binary was deleted after
+  recording the result.
+- `holtburger-world` passed 491 tests; `holtburger-core` passed 283 tests;
+  `holtburger-3d-host` passed 246 tests. Clippy passed for all three crates/all targets with warnings
+  denied.
+- The first 12-second release passive comparison retained 458 projected entities and 457 physical
+  participants while moving from 457 initial movers to zero late movers. A separate timed capture
+  had one late mover that travelled approximately `0.528 m`; no zero-vector wall/ceiling hook cohort
+  survived. Both received 402 camera events and issued no teleport or drive request.
+
+| Late preparation stage | Phase 2 broad sleep defect mean | Phase 3 work-based sleep mean |
+| ---------------------- | ------------------------------: | ----------------------------: |
+| Population scan        |                      `0.019 ms` |                    `0.017 ms` |
+| Placement refresh      |                      `0.183 ms` |                    `0.180 ms` |
+| Shadow-index compile   |                      `0.031 ms` |                    `0.030 ms` |
+| Schedule selection     |                      `0.016 ms` |                    `0.007 ms` |
+| Participant clone      |                      `0.139 ms` |                    `0.136 ms` |
+| Environment solve      |                      `2.796 ms` |                    `0.016 ms` |
+| Peer resolution        |                      `0.056 ms` |                    `0.001 ms` |
+| Finalization           |                      `0.070 ms` |                    `0.002 ms` |
+| **Total preparation**  |                  **`3.313 ms`** |                **`0.390 ms`** |
+
+The Phase 3 timed capture used the steady half of 400 samples with 457 participants and one late
+mover; total preparation p50 was `0.387 ms` and p95 was `0.470 ms`. Child-PID sampling in a separate
+passive capture measured host CPU at mean `8.67%`, p50 `8.5%`, and p95 `10%` over the steady half of
+56 samples, compared with the earlier approximate `154%` affected-scene observation. Temporary
+profile output, probe parsing, and CPU sampling remain diagnostic debt through the Phase 4/Gate A
+comparisons and are removed in Phase 9.
 
 ### Phase 4: Producer-owned client demand and admission
 
@@ -990,13 +1059,61 @@ body integrating while the replacement is pending.
 
 #### Checklist
 
-- [ ] Add the pure client demand resolver and table tests.
-- [ ] Move client state/physical reconciliation into the coordinator.
-- [ ] Make remote demand and asynchronous completion currentness complete.
-- [ ] Remove broad admission, simulation-side re-derivation, and tracked-body mirror state.
-- [ ] Update local-player reconfiguration and failure handling.
-- [ ] Run focused, crate-wide, host, and frontend checks.
-- [ ] Capture the movement-free live admission comparison.
+- [x] Add the pure client demand resolver and table tests.
+- [x] Move client state/physical reconciliation into the coordinator.
+- [x] Make remote demand and asynchronous completion currentness complete.
+- [x] Remove broad admission, simulation-side re-derivation, and tracked-body mirror state.
+- [x] Update local-player reconfiguration and failure handling.
+- [x] Run focused, crate-wide, host, and frontend checks.
+- [x] Capture the movement-free live admission comparison.
+
+#### Phase 4 execution record — complete
+
+- `client_remote_body_requires_preparation`, `remote_body_targets`, and both broad compatibility
+  demand helpers are deleted. One pure target resolver now emits complete facts plus positive
+  `LocalPhysicalDemand` or no physical target.
+- Remote integration demand requires supported state plus gravity, missile behavior, retained
+  vectors, current/orderable authored root motion, or pending reconciliation. Target membership is
+  derived independently from ordinary peer-target policy. Focused table tests cover pose-only,
+  target-only, gravity, missile, vector promotion, unsupported state, and reconciliation.
+- `WorldState::apply_set_state_update` now mutates semantic entity state and emits
+  `EntityStateUpdated` only. The client collision coordinator is the sole client owner of physical
+  realization before simulation.
+- Compatible state and demand replacements rebuild configuration synchronously from installed
+  prepared facts. Setup, appearance, scale, identity, or other content-backed changes remove stale
+  physical state before asynchronous preparation. Exact facts plus exact demand guard completion;
+  no demand revision counter or separate retry registry was introduced.
+- The manually synchronized `tracked_body_ids` vector, track/untrack methods,
+  `sync_remote_body_tracking`, and its world-event observer are deleted. Pose-only projection
+  discovers current candidates directly from the authoritative scene population and excludes only
+  an actually installed physical body.
+- Removing the mirror left `ClientSimulationSystem` stateless, so the type, runtime field, and
+  builder initialization were deleted. Simulation is now a set of focused module functions.
+- The old world test that expected `SetState` to infer and mutate client policy was replaced with a
+  semantic-authority test. The old remote test that expected every hydrated body to be scheduled
+  now proves a solid zero-work body is target-only.
+- Focused collision tests pass (17/17), the complete world/core/host suites pass
+  (491/491, 289/289, 246/246), and clippy passes for all three crates with warnings denied.
+  Svelte/TypeScript checks pass with zero diagnostics. Frontend tests pass 1,683/1,685; the same two
+  unrelated pre-existing viewer-light falloff assertions remain red and are not changed by this
+  physics work.
+
+The 12-second release-sidecar passive comparison preserved the user-positioned character:
+`teleport: null`, empty `teleports` and `drivePhases`, and `0.000674 m` player drift. It received
+402 camera events while the projected population remained 458.
+
+| Phase 4 live measurement | Initial | Late/steady |
+| ------------------------ | ------: | ----------: |
+| Projected entities       |     458 |         458 |
+| Physical participants    |      26 |          26 |
+| Scheduled movers         |      18 |           0 |
+| Host process CPU         |       — | `7.41%` mean, `8.9%` p95 |
+
+Over the final 200 release ticks, collection preparation measured `0.0658 ms` mean,
+`0.0626 ms` p50, and `0.0879 ms` p95. Environment solve fell below `0.001 ms`; shadow-index compile
+was `0.0294 ms` mean and participant capture `0.0093 ms` mean. This is materially below both the
+Phase 3 broad-admission sleep result (`0.390 ms` mean with one genuine late mover) and the original
+hook-active baseline (`3.313 ms` mean with 276 false late movers).
 
 ### Phase 5: Resteering Gate A — correctness and corrected-population profile
 
@@ -1034,7 +1151,53 @@ Stop after Phase 4. Do not begin proportionality or camera-publication changes i
 - Host CPU and camera delivery materially improve without lowering tick or camera cadence.
 - The user-positioned character has not been driven or relocated by diagnostics.
 
+#### Gate A execution record (2026-08-29)
+
+The complete diff audit found no surviving binary intent, tracked-body mirror, duplicate remote
+admission helper, demand-revision registry, or solver-participation vocabulary. The only stale
+comment described semantic physics flags as controlling solver participation; it now accurately
+describes them as inputs to local-demand derivation. App/shared ownership remains intact: world
+owns semantic authority and scene mechanics, core owns client physical demand and realization, and
+the app owns camera input and presentation.
+
+An explicitly passive release UI probe rejected teleport options before process launch and entered
+no chat, drive, or teleport branch. Its trusted CDP gesture dispatched only a gradual left-button
+drag over the client canvas. Both captures reported empty command and teleport lists; the
+character's displayed world coordinate remained 22.4S, 73.6E.
+
+| Corrected-population release measurement | Capture 1 | Capture 2 | Post-cleanup |
+| ---------------------------------------- | --------: | --------: | -----------: |
+| Camera interval p95                      |   33.7 ms |   37.8 ms |      36.0 ms |
+| Camera interval max                      |   43.4 ms |   47.6 ms |      51.4 ms |
+| Input-to-next-camera p95                 |   28.6 ms |   40.4 ms |      29.8 ms |
+| Renderer frame interval p95              |    7.0 ms |    7.0 ms |       7.0 ms |
+| Renderer frame interval max              |    7.1 ms |    7.1 ms |      20.9 ms |
+
+The second capture also recorded 327 complete fixed-tick samples. Across the complete capture,
+fixed-tick p95 was 1.388 ms and maximum was 2.288 ms; camera solving was 0.0134 ms mean,
+0.0362 ms p95, and 0.0968 ms maximum. Complete before/after dynamic population projection was
+approximately 0.10 ms/0.12 ms mean across the capture, with respective maxima of
+0.487 ms/0.438 ms. Publication itself was 0.00028 ms mean.
+
+This rejects both conditional optimization branches:
+
+- **Phase 6 rejected:** collection preparation is 0.0658 ms mean and its largest retained term,
+  index compile, is 0.0294 ms mean. A scene-owned incremental index and compact contact epoch
+  would add invalidation lifecycle and ownership complexity to remove less than one tenth of a
+  millisecond.
+- **Phases 7 and 8 rejected:** complete projection remains well below one millisecond, complete
+  fixed ticks remain below 2.3 ms in the captured worst sample, and host/renderer delivery no
+  longer stalls. Changed-body publication or a separate camera timeline would solve no measured
+  problem.
+
+The temporary census, stage clocks, whole-tick clocks, parsers, and process CPU sampler were removed
+after recording these results. The generally useful passive camera probe remains because it
+enforces movement-free operation and measures distributions rather than a binary movement check.
+The post-cleanup probe repeated the same movement-free result, and the browser/WebGL harness passed.
+
 ### Phase 6: Conditional collection proportionality
+
+**Rejected at Gate A; not executed.**
 
 Execute only if Gate A shows scan, placement refresh, index construction/maintenance, or participant
 capture remains material after corrected admission and sleep.
@@ -1096,6 +1259,8 @@ Do not introduce object pools, unsafe aliasing, a second canonical body store, o
 
 ### Phase 7: Resteering Gate B — post-collection profile
 
+**Not applicable because Phase 6 was rejected.**
+
 - Repeat the synthetic scaling matrix and live passive/CDP capture.
 - Compare cost per target, per changed target, and per mover with Gate A.
 - Inspect whether the remaining fixed-tick cost is now dynamic view projection, camera dependency,
@@ -1105,6 +1270,8 @@ Do not introduce object pools, unsafe aliasing, a second canonical body store, o
   measured serialization cost.
 
 ### Phase 8: Conditional changed-body publication and camera resilience
+
+**Rejected at Gate A; not executed.**
 
 Execute only if a fresh Gate A/B profile still attributes material cost or camera delay to complete
 dynamic view projection/publication.
@@ -1243,44 +1410,115 @@ so sleep and admission improvements remain attributable.
 - **2026-08-29:** Corrected the preparation-gap claim. The current pose-only lane skips any body
   considered physically demanded; Phase 4 must delete that check so a pending promotion keeps
   advancing authoritatively until physical installation commits.
+- **2026-08-29:** Phase 2 deleted the unused transition payload from
+  `WorldEvent::EntityStateUpdated` earlier than originally scheduled. Keeping it until Phase 4
+  would have required retaining the deleted transition hierarchy solely as an event artifact.
+- **2026-08-29:** Scene configuration equality deliberately excludes solver-owned activity and
+  accepted placement. Reapplying the same configuration or changing only target demand preserves
+  settlement; integration promotion and changed integration facts wake, integration demotion
+  settles, and suspension survives until topology restoration.
+- **2026-08-29:** Explorer state-only reconfiguration reuses installed prepared geometry and
+  response facts when a body already exists. Content preparation runs only when non-empty demand
+  promotes a pose-only body, eliminating the previous decode-on-every-reconfiguration path.
+- **2026-08-29:** Phase 2 temporarily retains the broad compatibility-demand calculation in both
+  initial client admission and the world-owned client `SetState` path. This duplication is
+  deliberate short-lived debt: Phase 3 needs the broad cohort, and Phase 4 deletes both paths when
+  the collision coordinator becomes the sole client physical-realization owner.
+- **2026-08-29:** Closed the Phase 2 live gate with opt-in host stderr census output rather than a
+  new public diagnostic contract. The existing pre-tick projection and scene schedule supply the
+  facts without adding canonical state. The probe parser and `HOLTBURGER_CLIENT_PHYSICS_CENSUS`
+  path remain temporary through the Phase 4 comparison and are deleted in Phase 9.
+- **2026-08-29:** Phase 3 deliberately diverges from retail's grounded-biased deactivation only at
+  the solver-activity boundary. A completed zero-work tick can settle zero-gravity grounded-shaped
+  and free-flight bodies without support; target membership, reporting, presentation, scripts, and
+  all explicit wake facts remain independent. The fresh 6,654-template inert census sizes the
+  departure, while runtime-activatable members prohibit using that census as class-based admission.
+- **2026-08-29:** Corrected the Explorer report-only fixture instead of preserving a second no-work
+  physical tick. Report edges remain independent of projection ticks, and the real target-only
+  configuration proves a settled body can still be queried and report without integration.
+- **2026-08-29:** Retained temporary opt-in per-stage clocks and child-PID CPU sampling through Gate
+  A so Phase 3 and Phase 4 remain directly comparable. These diagnostics are explicitly Phase 9
+  cleanup debt, not product contracts.
+- **2026-08-29:** Phase 4 used exact `(generation, immutable preparation facts, semantic physics,
+  demand)` matching for asynchronous currentness. A separate demand-revision counter and separate
+  retry-suppression registry were rejected as duplicate state; the coordinator's keyed target and
+  terminal `Unavailable` status already provide both guarantees.
+- **2026-08-29:** Deleted `ClientSimulationSystem` after direct projection discovery removed its
+  only state. Keeping a zero-sized owner would preserve object-shaped ceremony without ownership.
+- **2026-08-29:** Phase 4 live admission retained 26 physical participants and settled 18 initial
+  movers to zero across 458 projected entities. Mean collection work fell to `0.0658 ms` and host
+  CPU to `7.41%`; Gate A therefore rejects Phase 6 unless another controlled profile contradicts
+  this result. The retained index's `0.0294 ms` mean is measurable but not material enough to
+  justify a mutation-heavy incremental-index lifecycle.
+
+- **2026-08-29:** Gate A rejected Phases 6 through 8. Corrected-population fixed ticks measured
+  1.388 ms p95 and 2.288 ms maximum, complete before/after projection remained sub-millisecond,
+  host camera intervals remained near the intended 30 Hz authority cadence, and renderer cadence
+  held at approximately 144 Hz without stalls. Incremental indexing, compact epochs, changed-body
+  publication, and a separate camera timeline would add more state than the measured work deserves.
+- **2026-08-29:** Removed all temporary census, stage/fixed-tick timing, parsing, and process CPU
+  sampling code after Gate A. Retained the passive camera-only UI probe as a reusable acceptance
+  capability; it requires an explicit mode, rejects teleport input before launch, and reports
+  camera/input/render distributions.
+- **2026-08-29:** The final quality pass made the Explorer runtime validate the complete derived
+  demand/body pair before publication. Missing required preparation and an unexpected prepared body
+  are now distinct typed errors, so direct runtime callers cannot bypass driver-side invariants.
+- **2026-08-29:** The final quality pass also made wake-up demand-aware and suspension-preserving.
+  Ordinary pose/vector/motion updates cannot reintroduce a body whose collision topology is absent,
+  and target-only bodies remain settled until positive integration demand arrives.
 
 ## Definition of Done
 
 - [x] The user-positioned housing scenario has a durable movement-free reproduction path.
 - [x] Body-role and wake/sleep design is justified from retail, ACE, catalog, and live evidence.
-- [ ] Shared runtime contracts express target demand, integration demand, solver activity, and
+- [x] Shared runtime contracts express target demand, integration demand, solver activity, and
       physical allocation without conflation.
-- [ ] Binary physical intent, prepared scheduling, circular allocation inference, and stale
+- [x] Binary physical intent, prepared scheduling, circular allocation inference, and stale
       solver-participation vocabulary are removed through clean cutovers; no replacement transition
       action hierarchy or tracked-body mirror remains.
-- [ ] Quiescent zero-gravity bodies sleep even when they cannot acquire ground support.
-- [ ] Housing hooks derive pose-only demand from their facts and remain correctly rendered,
+- [x] Quiescent zero-gravity bodies sleep even when they cannot acquire ground support.
+- [x] Housing hooks derive pose-only demand from their facts and remain correctly rendered,
       selectable, and authoritative.
-- [ ] Sleeping/target-only collision bodies remain available without entering mover integration.
-- [ ] Motion, vector, reconciliation, state, topology, and controller transitions promote or wake
+- [x] Sleeping/target-only collision bodies remain available without entering mover integration.
+- [x] Motion, vector, reconciliation, state, topology, and controller transitions promote or wake
       exactly the required bodies.
-- [ ] Asynchronous completions cannot install stale identity, definition, pose, state, attachment,
+- [x] Asynchronous completions cannot install stale identity, definition, pose, state, attachment,
       or demand.
-- [ ] Phase 6 collection work is either proven immaterial and rejected, or made proportional to
+- [x] Phase 6 collection work is either proven immaterial and rejected, or made proportional to
       changed targets and active movers.
-- [ ] Phase 8 publication work is either proven immaterial and rejected, or changed-body-driven.
-- [ ] Phase 3 and Phase 4 population/timing effects are measured separately, followed by a complete
+- [x] Phase 8 publication work is either proven immaterial and rejected, or changed-body-driven.
+- [x] Phase 3 and Phase 4 population/timing effects are measured separately, followed by a complete
       before/after CPU, fixed-tick, camera-delivery, and renderer-cadence comparison.
-- [ ] The camera is smoothly responsive in the demonstrated scene after settlement.
-- [ ] No camera smoothing or cadence reduction conceals delayed authority data.
-- [ ] Relevant Rust tests/checks, clippy, frontend checks/lint/tests, and live/browser acceptance pass.
-- [ ] Temporary diagnostics and sensitive data are absent from the final diff.
+- [x] The camera is smoothly responsive in the demonstrated scene after settlement.
+- [x] No camera smoothing or cadence reduction conceals delayed authority data.
+- [x] Relevant Rust tests/checks, clippy, frontend checks/lint, and live/browser acceptance pass; the
+      two unrelated baseline frontend-test failures remain explicitly recorded below.
+- [x] Temporary diagnostics and sensitive data are absent from the final diff.
 
-## Open Questions
+## Closed execution gates
 
-These are execution-gated measurements, not missing design choices that block Phase 2:
+1. The zero-gravity/no-work rule is retained as the documented retail divergence above. The census
+   sized the affected inert-shaped population, while positive motion and reconciliation demand
+   preserve runtime-activatable members without a class exception.
+2. Index, placement, and participant work are immaterial at the corrected population; neither
+   Phase 6B nor Phase 6C is authorized.
+3. Complete dynamic projection is immaterial and camera delivery is smooth; Phase 8 is not
+   authorized.
+4. The server-maintained received population remains the client interest boundary. The corrected
+   physical population is small enough that a second swept or distance-based interest policy has
+   no measured consumer.
 
-1. Does the final zero-gravity/no-work census prove a safe `RETAIL DIVERGENCE`, or does it reveal an
-   authored observable that requires a narrower quiescence clause?
-2. After Phases 3 and 4, are index/placement/participant terms still material enough to authorize
-   Phase 6B, Phase 6C, both, or neither?
-3. After corrected population and any authorized collection work, is full dynamic projection still
-   material enough to authorize Phase 8?
-4. If semantic population remains too broad, what swept or behavior-aware client interest policy
-   can be proven without breaking missiles, fast movers, or stationary targets? This question is
-   deferred unless post-fix evidence reaches it.
+## Final validation record
+
+- Rust formatting passed.
+- World, core, and host tests passed: 491, 289, and 246 tests respectively.
+- Warnings-denied clippy passed for all touched Rust crates and all targets.
+- Svelte and TypeScript checks passed with zero diagnostics; ESLint, dead-code lint, and Rust lint
+  passed.
+- Frontend tests passed 1,683 of 1,685 assertions. The two failures are the pre-existing
+  viewer-light falloff expectations and are unrelated to physics admission, simulation, or camera
+  delivery.
+- The browser/WebGL harness passed.
+- The final passive release capture passed with no chat, movement, or teleport commands.
+- Diff whitespace, temporary-diagnostic vocabulary, deleted-policy vocabulary, and credential
+  scans passed. The unrelated dirty ACE and ACViewer submodules were preserved.

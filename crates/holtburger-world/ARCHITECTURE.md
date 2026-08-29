@@ -211,7 +211,7 @@ Dynamic entities extend the same scene without a second store or solver:
 
 - Every world-placed dynamic entity keeps exactly one `SpatialBody` that owns its world pose.
   `SpatialBody::physical` is optional collision/physics state, and `set_dynamic_physical_body`
-  adds, removes, or reconfigures it reversibly. Disabling solver participation never retires the
+  adds, removes, or reconfigures it reversibly. Removing physical allocation never retires the
   pose body, and compatible movement geometry preserves contact/placement response memory.
 - An attached entity instead carries `EntityPlacement::Attached(PhysicsAttachment)` and has no
   `SpatialBody`: its parent GUID, named holding location, and own placement pose delegate transform
@@ -222,10 +222,12 @@ Dynamic entities extend the same scene without a second store or solver:
   shadow index are updated inside registration, pose commit, physical-state replacement,
   relocation, and removal, so no caller choreographs a second index and no `entity_poses` mirror
   exists.
-- Scheduling eligibility comes from the effective `PhysicsState`; solver activity is separate. A
-  body settles after one accepted tick with walkable support, canonical zero velocity/omega, no
-  acceleration or drive, and no pending response or path. Settling skips integration and
-  mover-side queries only: pose, index membership, target geometry, report lifetimes, and
+- Producer-owned integration demand and solver-owned activity are separate. A body settles after
+  one completed accepted tick with canonical zero retained vectors, no controller, launch,
+  authored-root, reconciliation, residual-contact, response, or path work. Only a gravity-bearing
+  grounded body additionally requires stable supported ground; a zero-gravity grounded-shaped or
+  free-flight body can quiesce while airborne when it has no work. Settling skips integration and
+  mover-side queries only: pose, target-index membership, target geometry, report lifetimes, and
   presentation all remain live, and every state-changing input wakes the body explicitly.
 - Dynamic peers are discovered through the same spatial domains as static collision — global 24 m
   outdoor cells and exact reached EnvCells — queried once over full swept conservative bounds so a

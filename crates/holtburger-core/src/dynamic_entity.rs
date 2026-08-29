@@ -24,14 +24,13 @@ use holtburger_dat::file_type::{
 use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
 use holtburger_world::{
     CollisionReportOutcome, DynamicBodyCollisionDefinition, DynamicBodyKinematics,
-    DynamicPhysicalBodyDefinition, EdgeProtection, EffectiveEntityPhysicsState, EntityAppearance,
-    EntityPhysicalTransitionAction, EntityPhysicsSetupFacts, EntityPhysicsTransitionDecision,
-    EntityPlacement, PhysicalBodyParticipation, PhysicalBodyReconfiguration,
-    PhysicalBodyReconfigurationOutcome, PhysicalBodyResponsePolicy, PhysicalBodyState,
-    PhysicalCollisionFilter, PhysicalElasticity, PhysicalFriction, PhysicalRestitution,
-    PhysicalSphereSet, PhysicalSurfaceMotion, PreparedEntityBspPart, PreparedEntityTargetGeometry,
-    RuntimeSpatialBodyView, SpatialBody, SpatialBodyId, SpatialMembership, SpatialScene,
-    resolve_effective_entity_physics_state,
+    DynamicPhysicalBodyConfiguration, DynamicPhysicalBodyDefinition, EdgeProtection,
+    EffectiveEntityPhysicsState, EntityAppearance, EntityPhysicsSetupFacts, EntityPlacement,
+    PhysicalBodyParticipation, PhysicalBodyReconfiguration, PhysicalBodyReconfigurationOutcome,
+    PhysicalBodyResponsePolicy, PhysicalBodyState, PhysicalCollisionFilter, PhysicalElasticity,
+    PhysicalFriction, PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion,
+    PreparedEntityBspPart, PreparedEntityTargetGeometry, RuntimeSpatialBodyView, SpatialBody,
+    SpatialBodyId, SpatialMembership, SpatialScene, resolve_effective_entity_physics_state,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -333,7 +332,7 @@ pub struct DynamicEntityPhysicalPreparationInput {
     pub friction: Option<f32>,
     /// Optional authored elasticity; absence selects the ACE default.
     pub elasticity: Option<f32>,
-    /// Effective semantic physics decisions controlling solver participation.
+    /// Effective semantic physics decisions consumed while deriving local physical demand.
     pub physics: EffectiveEntityPhysicsState,
 }
 
@@ -590,10 +589,6 @@ pub enum DynamicEntityBodyOperationError {
     NotRegistered { body_id: SpatialBodyId },
     #[error("dynamic entity body {body_id:?} has no physical participation")]
     NotPhysical { body_id: SpatialBodyId },
-    #[error("physics transition {action:?} requires a prepared physical definition")]
-    MissingReplacement {
-        action: EntityPhysicalTransitionAction,
-    },
 }
 
 /// Complete body facts returned after an install or physical-state replacement commits.
@@ -684,7 +679,7 @@ pub fn install_dynamic_entity_body(
     scene: &mut SpatialScene,
     definition: &DynamicEntityDefinition,
     initial: DynamicEntityInitialState,
-    physical: Option<DynamicPhysicalBodyDefinition>,
+    physical: Option<DynamicPhysicalBodyConfiguration>,
 ) -> Result<DynamicEntityBodyCommitOutcome, DynamicEntityBodyOperationError> {
     let body_id = SpatialBodyId::Entity(definition.identity.guid);
     if scene.body(body_id).is_some() {
@@ -695,57 +690,25 @@ pub fn install_dynamic_entity_body(
     committed_body_outcome(scene, body_id, physical_change)
 }
 
-/// Applies one pure complete-state decision and returns only committed scene facts.
-pub fn apply_dynamic_entity_physics_transition(
+/// Applies one complete optional physical configuration and returns only committed scene facts.
+pub fn set_dynamic_entity_physical_configuration(
     scene: &mut SpatialScene,
     body_id: SpatialBodyId,
-    decision: EntityPhysicsTransitionDecision,
-    replacement: Option<DynamicPhysicalBodyDefinition>,
+    replacement: Option<DynamicPhysicalBodyConfiguration>,
 ) -> Result<DynamicEntityBodyCommitOutcome, DynamicEntityBodyOperationError> {
     let pose = scene
         .body(body_id)
         .ok_or(DynamicEntityBodyOperationError::NotRegistered { body_id })?
         .pose;
     let initial_cell = pose.is_indoors().then_some(pose.landblock_id);
-    let requested = match decision.action {
-        EntityPhysicalTransitionAction::None => None,
-        EntityPhysicalTransitionAction::EnableSolverParticipation
-        | EntityPhysicalTransitionAction::Reconfigure => Some(replacement.ok_or(
-            DynamicEntityBodyOperationError::MissingReplacement {
-                action: decision.action,
-            },
-        )?),
-        EntityPhysicalTransitionAction::DisableSolverParticipation => None,
-    };
-    let mut forced_report_ends = if decision.force_end_reports {
-        scene.force_end_collision_reports_for_recipient(body_id)
-    } else {
-        Vec::new()
-    };
-    let mut physical_change = if decision.action == EntityPhysicalTransitionAction::None {
-        let body = scene
-            .body(body_id)
-            .ok_or(DynamicEntityBodyOperationError::NotRegistered { body_id })?;
-        let participation = participation(body.physical.is_some());
-        PhysicalBodyReconfigurationOutcome {
-            before: participation,
-            after: participation,
-            change: PhysicalBodyReconfiguration::Unchanged,
-            response_memory_preserved: body.physical.is_some(),
-            collision_reports: Vec::new(),
-        }
-    } else {
-        scene
-            .set_dynamic_physical_body(
-                body_id,
-                requested,
-                PhysicalCollisionFilter::ALL,
-                initial_cell,
-            )
-            .ok_or(DynamicEntityBodyOperationError::NotRegistered { body_id })?
-    };
-    forced_report_ends.append(&mut physical_change.collision_reports);
-    physical_change.collision_reports = forced_report_ends;
+    let physical_change = scene
+        .set_dynamic_physical_body(
+            body_id,
+            replacement,
+            PhysicalCollisionFilter::ALL,
+            initial_cell,
+        )
+        .ok_or(DynamicEntityBodyOperationError::NotRegistered { body_id })?;
     committed_body_outcome(scene, body_id, physical_change)
 }
 
@@ -772,7 +735,7 @@ pub fn replace_dynamic_entity_body(
     scene: &mut SpatialScene,
     definition: &DynamicEntityDefinition,
     initial: DynamicEntityInitialState,
-    physical: Option<DynamicPhysicalBodyDefinition>,
+    physical: Option<DynamicPhysicalBodyConfiguration>,
 ) -> Result<DynamicEntityBodyReplacementOutcome, DynamicEntityBodyOperationError> {
     let body_id = SpatialBodyId::Entity(definition.identity.guid);
     if scene.body(body_id).is_none() {
@@ -795,7 +758,7 @@ pub fn replace_dynamic_entity_body(
 fn build_dynamic_entity_body(
     definition: &DynamicEntityDefinition,
     initial: DynamicEntityInitialState,
-    physical: Option<DynamicPhysicalBodyDefinition>,
+    physical: Option<DynamicPhysicalBodyConfiguration>,
 ) -> (SpatialBody, PhysicalBodyReconfigurationOutcome) {
     let body_id = SpatialBodyId::Entity(definition.identity.guid);
     let mut body = SpatialBody::new(body_id, initial.pose, initial.created_at);
@@ -817,7 +780,7 @@ fn build_dynamic_entity_body(
         PhysicalBodyReconfigurationOutcome {
             before: PhysicalBodyParticipation::PoseOnly,
             after: PhysicalBodyParticipation::Physical,
-            change: PhysicalBodyReconfiguration::SolverParticipationEnabled,
+            change: PhysicalBodyReconfiguration::Installed,
             response_memory_preserved: false,
             collision_reports: Vec::new(),
         }
@@ -1047,7 +1010,6 @@ fn prepare_dynamic_entity_physical_facts(
         response_policy,
         entity_collision: DynamicBodyCollisionDefinition {
             target_geometry: Arc::new(target_geometry),
-            scheduling: physics.scheduling,
             dynamic_collision: physics.dynamic_collision,
             reporting: physics.reporting,
             uses_physics_bsp: physics.uses_physics_bsp,
@@ -1058,7 +1020,7 @@ fn prepare_dynamic_entity_physical_facts(
     })
 }
 
-/// Resolves setup-owned state bits and movement geometry without requiring simulated intent.
+/// Resolves setup-owned state bits and movement geometry before local demand is applied.
 ///
 /// Pose-only realization still needs the movement sphere to resolve its authoritative EnvCell, but
 /// it does not prepare target collision geometry or validate default physics-script stability.
@@ -1488,9 +1450,9 @@ mod tests {
     };
     use holtburger_world::{
         DynamicBodyCollisionDefinition, EntityCollisionParticipation, EntityPartChange,
-        EntityPhysicalIntent, EntityPhysicsTransitionContext, EntitySubPalette,
-        EntityTextureChange, GroundedBodyActuation, PhysicalBodyActuation, PhysicalSphereSet,
-        decide_entity_physics_state_transition, resolve_effective_entity_physics_state,
+        EntitySubPalette, EntityTextureChange, GroundedBodyActuation, LocalIntegrationDemand,
+        LocalPhysicalDemand, LocalTargetDemand, PhysicalBodyActuation, PhysicalSphereSet,
+        resolve_effective_entity_physics_state,
     };
 
     #[test]
@@ -1806,7 +1768,6 @@ mod tests {
                     }))],
                     fallback_scale: ColliderScale::uniform(1.0).unwrap(),
                 }),
-                scheduling: holtburger_world::EntityPhysicsScheduling::Eligible,
                 dynamic_collision: holtburger_world::EntityDynamicCollisionPolicy {
                     target: EntityCollisionParticipation::Solid,
                     mover_accepts_response: true,
@@ -1824,6 +1785,17 @@ mod tests {
                 default_script_available: false,
             },
         }
+    }
+
+    fn configured_physics() -> DynamicPhysicalBodyConfiguration {
+        DynamicPhysicalBodyConfiguration::new(
+            prepared_physics(),
+            LocalPhysicalDemand {
+                target: LocalTargetDemand::Retained,
+                integration: LocalIntegrationDemand::Eligible,
+            },
+        )
+        .unwrap()
     }
 
     #[test]
@@ -1856,28 +1828,16 @@ mod tests {
             PhysicalBodyParticipation::PoseOnly
         );
 
-        let previous = definition.physics;
-        let enable = decide_entity_physics_state_transition(
-            Some(previous),
-            previous,
-            EntityPhysicsTransitionContext {
-                intent: EntityPhysicalIntent::Simulated,
-                prepared_physics_available: true,
-                solver_participation_enabled: false,
-                prepared_definition_changed: false,
-            },
-        );
-        let enabled = apply_dynamic_entity_physics_transition(
+        let enabled = set_dynamic_entity_physical_configuration(
             &mut scene,
             body_id,
-            enable,
-            Some(prepared_physics()),
+            Some(configured_physics()),
         )
         .unwrap();
         assert_eq!(enabled.participation, PhysicalBodyParticipation::Physical);
         assert_eq!(
             enabled.physical_change.change,
-            PhysicalBodyReconfiguration::SolverParticipationEnabled
+            PhysicalBodyReconfiguration::Installed
         );
 
         let removed = remove_dynamic_entity_body(&mut scene, body_id).unwrap();
@@ -1898,7 +1858,7 @@ mod tests {
             &mut scene,
             &first,
             world_initial(&first),
-            Some(prepared_physics()),
+            Some(configured_physics()),
         )
         .unwrap();
 
@@ -1947,14 +1907,14 @@ mod tests {
             &mut scene,
             &first,
             world_initial(&first),
-            Some(prepared_physics()),
+            Some(configured_physics()),
         )
         .unwrap();
         install_dynamic_entity_body(
             &mut scene,
             &peer,
             world_initial(&peer),
-            Some(prepared_physics()),
+            Some(configured_physics()),
         )
         .unwrap();
 

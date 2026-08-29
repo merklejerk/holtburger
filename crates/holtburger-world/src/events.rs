@@ -150,7 +150,6 @@ pub enum WorldEvent {
     EntityStateUpdated {
         guid: Guid,
         physics_state: holtburger_common::properties::PhysicsState,
-        transition: crate::EntityPhysicsTransitionDecision,
     },
     // Keep the full protocol payload for now: a future 3D client will likely need
     // richer server-authored movement detail than the current core/TUI consumer.

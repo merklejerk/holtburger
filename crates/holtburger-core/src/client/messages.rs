@@ -131,15 +131,15 @@ impl ClientRuntime {
                             .record_server_control_sequence(data.server_control_sequence);
                         let world_events = {
                             let ClientRuntime {
-                                simulation,
                                 movement,
                                 world,
                                 session,
                                 ..
                             } = self;
-                            simulation
-                                .handle_server_controlled_movement(data, movement, world, session)
-                                .await?
+                            super::simulation::handle_server_controlled_movement(
+                                data, movement, world, session,
+                            )
+                            .await?
                         };
                         follow_up_events.extend(world_events);
                     }

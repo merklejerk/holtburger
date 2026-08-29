@@ -1477,84 +1477,15 @@ impl WorldState {
 
         if self.entities.get(data.guid).is_some() {
             let next = crate::resolve_effective_entity_physics_state(data.physics_state);
-            let previous = self
-                .entities
-                .get(data.guid)
-                .expect("entity presence was checked above")
-                .physics;
-            let body_id = self.authoritative_body_id_for_guid(data.guid);
-            let (intent, solver_participation_enabled, replacement) =
-                body_id.and_then(|body_id| self.scene.body(body_id)).map_or(
-                    (crate::EntityPhysicalIntent::PoseOnly, false, None),
-                    |body| {
-                        let dynamic = body
-                            .physical
-                            .as_ref()
-                            .is_some_and(|physical| physical.dynamic.is_some());
-                        let replacement = body
-                            .physical
-                            .as_ref()
-                            .and_then(|physical| physical.dynamic_definition_for_state(next));
-                        (
-                            if dynamic {
-                                crate::EntityPhysicalIntent::Simulated
-                            } else {
-                                crate::EntityPhysicalIntent::PoseOnly
-                            },
-                            dynamic,
-                            replacement,
-                        )
-                    },
-                );
-            let transition = crate::decide_entity_physics_state_transition(
-                Some(previous),
-                next,
-                crate::EntityPhysicsTransitionContext {
-                    intent,
-                    prepared_physics_available: replacement.is_some(),
-                    solver_participation_enabled,
-                    prepared_definition_changed: false,
-                },
-            );
-
             let entity = self
                 .entities
                 .get_mut(data.guid)
                 .expect("entity presence was checked above");
             entity.physics = next;
             entity.properties.hydrate_from_set_state(data);
-            if let Some(body_id) = body_id {
-                let replacement = match transition.action {
-                    crate::EntityPhysicalTransitionAction::EnableSolverParticipation
-                    | crate::EntityPhysicalTransitionAction::Reconfigure => replacement,
-                    crate::EntityPhysicalTransitionAction::DisableSolverParticipation => None,
-                    crate::EntityPhysicalTransitionAction::None => {
-                        events.push(WorldEvent::EntityStateUpdated {
-                            guid: data.guid,
-                            physics_state: data.physics_state,
-                            transition,
-                        });
-                        return true;
-                    }
-                };
-                let initial_cell = self
-                    .scene
-                    .body(body_id)
-                    .and_then(|body| body.pose.is_indoors().then_some(body.pose.landblock_id));
-                if let Some(outcome) = self.scene.set_dynamic_physical_body(
-                    body_id,
-                    replacement,
-                    crate::PhysicalCollisionFilter::ALL,
-                    initial_cell,
-                ) && outcome.change != crate::PhysicalBodyReconfiguration::Unchanged
-                {
-                    Self::emit_runtime_body_changed(events, body_id);
-                }
-            }
             events.push(WorldEvent::EntityStateUpdated {
                 guid: data.guid,
                 physics_state: data.physics_state,
-                transition,
             });
             true
         } else {

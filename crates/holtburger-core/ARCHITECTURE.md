@@ -236,9 +236,10 @@ assembled its facts, and it never claims producer authority.
   DAT/setup facts and rejects unsupported combinations with typed reasons — including the measured
   moving-physics-BSP boundary — before any scene mutation.
 - The body operations (`install_dynamic_entity_body`, `replace_dynamic_entity_body`,
-  `remove_dynamic_entity_body`, `apply_dynamic_entity_physics_transition`) apply the shared
-  transition decision to a caller-supplied `SpatialScene`. The client uses `WorldState`'s scene and
-  the Explorer uses the host simulation's; the operations are identical and hold no state.
+  `remove_dynamic_entity_body`, `set_dynamic_entity_physical_configuration`) apply a complete
+  optional physical configuration to a caller-supplied `SpatialScene`. The client uses
+  `WorldState`'s scene and the Explorer uses the host simulation's; the operations are identical
+  and hold no state.
 - `project_dynamic_entity_view` is a pure projection of registry semantics, joining a body view
   only for the world arm and forwarding bodyless attachment facts directly. It is the only
   producer of `DynamicEntityView`, so the client adapter
@@ -258,6 +259,15 @@ second copy.
 
 Two producer registries remain intentionally distinct — `WorldState` for the network client and an
 app-local registry for the Explorer — and neither is generalized into a universal store.
+
+The network client's collision coordinator is the sole producer of client-local physical demand.
+It joins authoritative entity state, retained vectors, authored root motion, pose reconciliation,
+and prepared content before each simulation transaction. Target retention and integration demand
+are derived independently; presentation, reporting, or decodable setup content alone do not create
+solver work. Compatible state/demand changes reuse installed prepared geometry, while incompatible
+content facts remove stale physical state before asynchronous preparation. Pose-only projection
+discovers candidates directly from `WorldState` and `SpatialScene`; no synchronized body-ID mirror
+or stateful simulation owner exists.
 
 ## Dependencies
 

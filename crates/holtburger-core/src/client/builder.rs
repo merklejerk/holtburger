@@ -10,7 +10,7 @@ use tokio::sync::broadcast;
 
 use super::{
     ClientRuntime, ClientState, TurbineChatState, character_selection::CharacterSelectionState,
-    movement::MovementSystem, simulation::ClientSimulationSystem,
+    movement::MovementSystem,
 };
 
 #[derive(Clone)]
@@ -170,7 +170,6 @@ impl ClientRuntimeBuilder {
             message_dump_dir: self.message_dump_dir,
             message_counter: 0,
             movement: MovementSystem::new(),
-            simulation: ClientSimulationSystem::new(),
             collision_coordinator: self
                 .collision_source
                 .map(super::collision::ClientCollisionCoordinator::new),
@@ -203,7 +202,6 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> ClientRuntime {
         message_dump_dir: None,
         message_counter: 0,
         movement: MovementSystem::new(),
-        simulation: ClientSimulationSystem::new(),
         collision_coordinator: None,
         requires_external_world_reveal: false,
         activation: None,

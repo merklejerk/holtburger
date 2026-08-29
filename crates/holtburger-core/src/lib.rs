@@ -61,12 +61,12 @@ pub use dynamic_entity::{
     DynamicEntityLaunchError, DynamicEntityLaunchPlan, DynamicEntityPhysicalPreparationError,
     DynamicEntityPhysicalPreparationInput, DynamicEntityProjectionInput, DynamicEntityRadarFacts,
     DynamicEntitySetupPreparation, DynamicEntitySpatialMembership, DynamicEntityWorldProjection,
-    apply_dynamic_entity_physics_transition, dynamic_entity_projection_input,
-    dynamic_entity_projection_input_from_body, explorer_dynamic_entity_category,
-    explorer_radar_blip_color, install_dynamic_entity_body, material_appearance_input,
-    prepare_dynamic_entity_physical_definition, prepare_dynamic_entity_physics,
-    prepare_dynamic_entity_setup, remove_dynamic_entity_body, replace_dynamic_entity_body,
-    resolve_dynamic_entity_launch, semantic_dynamic_entity_category, semantic_radar_blip_color,
+    dynamic_entity_projection_input, dynamic_entity_projection_input_from_body,
+    explorer_dynamic_entity_category, explorer_radar_blip_color, install_dynamic_entity_body,
+    material_appearance_input, prepare_dynamic_entity_physical_definition,
+    prepare_dynamic_entity_physics, prepare_dynamic_entity_setup, remove_dynamic_entity_body,
+    replace_dynamic_entity_body, resolve_dynamic_entity_launch, semantic_dynamic_entity_category,
+    semantic_radar_blip_color, set_dynamic_entity_physical_configuration,
 };
 pub use dynamic_entity_view::{
     DynamicEntityAdvance, DynamicEntityClipCompletion, DynamicEntityContactView,

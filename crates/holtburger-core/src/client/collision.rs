@@ -8,7 +8,7 @@
 //! body-neutral; body completion is joined with live authoritative placement only on the
 //! simulation thread.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -26,8 +26,10 @@ use holtburger_common::properties::{
 };
 use holtburger_content::{ContentRepository, LandblockCollisionAsset};
 use holtburger_world::{
-    DynamicPhysicalBodyDefinition, EffectiveEntityPhysicsState, EntityAppearance,
-    PhysicalCollisionFilter, SpatialBodyId, WorldEvent, WorldState,
+    DynamicPhysicalBodyConfiguration, DynamicPhysicalBodyDefinition, EffectiveEntityPhysicsState,
+    EntityAppearance, EntityCollisionParticipation, EntityIntegrationEligibility,
+    LocalIntegrationDemand, LocalPhysicalDemand, LocalTargetDemand, PhysicalCollisionFilter,
+    SpatialBodyId, WorldEvent, WorldState,
 };
 use thiserror::Error;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
@@ -55,7 +57,7 @@ pub struct ClientEntityBodyFacts {
     pub wcid: u32,
     /// Lossless appearance facts needed by dynamic definition preparation.
     pub appearance: EntityAppearance,
-    /// Effective semantic physics flags controlling solver participation.
+    /// Effective semantic physics flags consumed when deriving local physical demand.
     pub physics: EffectiveEntityPhysicsState,
     /// Setup resource defining physical geometry.
     pub setup_did: u32,
@@ -68,14 +70,20 @@ pub struct ClientEntityBodyFacts {
 }
 
 impl ClientEntityBodyFacts {
-    /// Body-definition equality intentionally ignores live pose and kinematics.  A server motion
-    /// update must not restart a DAT preparation job; a setup/appearance/physics replacement must.
+    /// Exact completion equality intentionally ignores live pose and kinematics.
+    ///
+    /// Physics remains part of completion currentness even though a compatible state-only change
+    /// can rebuild configuration from already prepared content without restarting a DAT job.
     fn definition_eq(&self, other: &Self) -> bool {
+        self.preparation_eq(other) && self.physics == other.physics
+    }
+
+    /// Equality of content-backed facts, excluding live semantic physics state.
+    fn preparation_eq(&self, other: &Self) -> bool {
         self.guid == other.guid
             && self.instance_sequence == other.instance_sequence
             && self.wcid == other.wcid
             && self.appearance == other.appearance
-            && self.physics == other.physics
             && self.setup_did == other.setup_did
             && self.object_scale.to_bits() == other.object_scale.to_bits()
             && option_f32_eq(self.friction, other.friction)
@@ -219,6 +227,7 @@ struct ClientSpatialTarget {
 struct ClientBodyTarget {
     player: ClientPlayerIdentity,
     facts: ClientEntityBodyFacts,
+    demand: LocalPhysicalDemand,
 }
 
 /// Immutable remote-body demand guarded by server identity and complete definition facts.
@@ -226,6 +235,7 @@ struct ClientBodyTarget {
 struct ClientRemoteBodyTarget {
     body_id: SpatialBodyId,
     facts: ClientEntityBodyFacts,
+    demand: LocalPhysicalDemand,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -239,6 +249,7 @@ enum ClientRemoteBodyStatus {
 /// One remote body's definition demand and mutually exclusive preparation state.
 struct ClientRemoteBodyDemand {
     facts: ClientEntityBodyFacts,
+    demand: LocalPhysicalDemand,
     status: ClientRemoteBodyStatus,
 }
 
@@ -336,7 +347,7 @@ impl ClientCollisionCoordinator {
 
     /// Independently refreshes scene interest and immutable authoritative-body definition demand.
     pub fn observe(&mut self, world: &mut WorldState) -> Vec<WorldEvent> {
-        let events = self.observe_remote_bodies(world);
+        let mut events = self.observe_remote_bodies(world);
         let Some(target) = Self::target_from_world(world) else {
             self.clear();
             return events;
@@ -346,13 +357,30 @@ impl ClientCollisionCoordinator {
         }
         let body_target = ClientBodyTarget {
             player: target.player,
+            demand: local_player_physical_demand(target.facts.physics),
             facts: target.facts,
         };
         let same_body = self.body_target.as_ref().is_some_and(|current| {
-            current.player == body_target.player && current.facts.definition_eq(&body_target.facts)
+            current.player == body_target.player
+                && current.facts.definition_eq(&body_target.facts)
+                && current.demand == body_target.demand
         });
         if !same_body {
-            self.start_body_loading(body_target);
+            let can_reuse = self.body_target.as_ref().is_some_and(|current| {
+                current.player == body_target.player
+                    && current.facts.preparation_eq(&body_target.facts)
+            });
+            if can_reuse && reconfigure_local_player_body(world, &body_target, &mut events) {
+                self.body_worker.take().inspect(|worker| worker.abort());
+                self.body_generation = self.body_generation.saturating_add(1);
+                self.body_readiness = ClientBodyReadiness::Ready {
+                    player: body_target.player,
+                };
+                self.body_target = Some(body_target);
+            } else {
+                remove_local_player_physical_body(world, body_target.player, &mut events);
+                self.start_body_loading(body_target);
+            }
         }
         events
     }
@@ -381,6 +409,7 @@ impl ClientCollisionCoordinator {
                         || self.body_target.as_ref().is_none_or(|target| {
                             target.player != completion.target.player
                                 || !target.facts.definition_eq(&completion.target.facts)
+                                || target.demand != completion.target.demand
                         })
                     {
                         continue;
@@ -393,6 +422,8 @@ impl ClientCollisionCoordinator {
                     };
                     if current.player != completion.target.player
                         || !current.facts.definition_eq(&completion.target.facts)
+                        || local_player_physical_demand(current.facts.physics)
+                            != completion.target.demand
                     {
                         self.body_target = None;
                         self.body_readiness = ClientBodyReadiness::Waiting;
@@ -426,7 +457,13 @@ impl ClientCollisionCoordinator {
                         residency_is_indoors(live_residency).then_some(live_residency);
                     let Some(_outcome) = world.scene.set_dynamic_physical_body(
                         body_id,
-                        Some(physical),
+                        Some(
+                            DynamicPhysicalBodyConfiguration::new(
+                                physical,
+                                completion.target.demand,
+                            )
+                            .expect("local-player completion carries integration demand"),
+                        ),
                         PhysicalCollisionFilter::ALL,
                         initial_cell,
                     ) else {
@@ -448,7 +485,10 @@ impl ClientCollisionCoordinator {
                         if self
                             .remote_bodies
                             .get(&target.body_id)
-                            .is_none_or(|demand| !demand.facts.definition_eq(&target.facts))
+                            .is_none_or(|demand| {
+                                !demand.facts.definition_eq(&target.facts)
+                                    || demand.demand != target.demand
+                            })
                         {
                             continue;
                         }
@@ -481,7 +521,10 @@ impl ClientCollisionCoordinator {
                         let initial_cell = body.pose.is_indoors().then_some(body.pose.landblock_id);
                         let Some(outcome) = world.scene.set_dynamic_physical_body(
                             target.body_id,
-                            Some(physical),
+                            Some(
+                                DynamicPhysicalBodyConfiguration::new(physical, target.demand)
+                                    .expect("remote completion carries non-empty demand"),
+                            ),
                             PhysicalCollisionFilter::ALL,
                             initial_cell,
                         ) else {
@@ -625,61 +668,75 @@ impl ClientCollisionCoordinator {
     }
 
     fn observe_remote_bodies(&mut self, world: &mut WorldState) -> Vec<WorldEvent> {
-        let desired = remote_body_targets(world);
+        let desired = world
+            .entities
+            .iter()
+            .filter_map(|entity| {
+                client_remote_body_target(world, entity.guid).map(|target| (target.body_id, target))
+            })
+            .collect::<BTreeMap<_, _>>();
         if remote_body_demands_match(&self.remote_bodies, &desired) {
             self.start_pending_remote_body_loading();
             return Vec::new();
         }
 
         let mut events = Vec::new();
+        let mut reconfigured = BTreeSet::new();
         for (&body_id, demand) in &self.remote_bodies {
-            if demand.status != ClientRemoteBodyStatus::Prepared {
+            if desired.get(&body_id).is_some_and(|target| {
+                target.facts.definition_eq(&demand.facts) && target.demand == demand.demand
+            }) {
                 continue;
             }
-            if desired
-                .get(&body_id)
-                .is_some_and(|facts| facts.definition_eq(&demand.facts))
-            {
+            if desired.get(&body_id).is_some_and(|target| {
+                demand.facts.preparation_eq(&target.facts)
+                    && reconfigure_physical_body(world, target, &mut events)
+            }) {
+                reconfigured.insert(body_id);
                 continue;
             }
-            let initial_cell = world
-                .scene
-                .body(body_id)
-                .and_then(|body| body.pose.is_indoors().then_some(body.pose.landblock_id));
-            if let Some(outcome) = world.scene.set_dynamic_physical_body(
-                body_id,
-                None,
-                PhysicalCollisionFilter::ALL,
-                initial_cell,
-            ) && outcome.change != holtburger_world::PhysicalBodyReconfiguration::Unchanged
-            {
-                events.push(WorldEvent::RuntimeBodyChanged { body_id });
-            }
+            remove_physical_body(world, body_id, &mut events);
         }
         self.remote_bodies = desired
             .into_iter()
-            .map(|(body_id, facts)| {
-                let status = self
-                    .remote_bodies
-                    .get(&body_id)
-                    .filter(|demand| demand.facts.definition_eq(&facts))
-                    .map_or(ClientRemoteBodyStatus::Pending, |demand| {
-                        match demand.status {
-                            ClientRemoteBodyStatus::Prepared => ClientRemoteBodyStatus::Prepared,
-                            ClientRemoteBodyStatus::Unavailable => {
-                                ClientRemoteBodyStatus::Unavailable
-                            }
-                            ClientRemoteBodyStatus::Preparing
-                                if self.remote_body_worker.is_some() =>
-                            {
+            .map(|(body_id, target)| {
+                let status = if reconfigured.contains(&body_id) {
+                    ClientRemoteBodyStatus::Prepared
+                } else {
+                    self.remote_bodies
+                        .get(&body_id)
+                        .filter(|demand| {
+                            demand.facts.definition_eq(&target.facts)
+                                && demand.demand == target.demand
+                        })
+                        .map_or(ClientRemoteBodyStatus::Pending, |demand| {
+                            match demand.status {
+                                ClientRemoteBodyStatus::Prepared => {
+                                    ClientRemoteBodyStatus::Prepared
+                                }
+                                ClientRemoteBodyStatus::Unavailable => {
+                                    ClientRemoteBodyStatus::Unavailable
+                                }
                                 ClientRemoteBodyStatus::Preparing
-                            }
-                            ClientRemoteBodyStatus::Pending | ClientRemoteBodyStatus::Preparing => {
+                                    if self.remote_body_worker.is_some() =>
+                                {
+                                    ClientRemoteBodyStatus::Preparing
+                                }
                                 ClientRemoteBodyStatus::Pending
+                                | ClientRemoteBodyStatus::Preparing => {
+                                    ClientRemoteBodyStatus::Pending
+                                }
                             }
-                        }
-                    });
-                (body_id, ClientRemoteBodyDemand { facts, status })
+                        })
+                };
+                (
+                    body_id,
+                    ClientRemoteBodyDemand {
+                        facts: target.facts,
+                        demand: target.demand,
+                        status,
+                    },
+                )
             })
             .collect();
 
@@ -700,6 +757,7 @@ impl ClientCollisionCoordinator {
                 ClientRemoteBodyTarget {
                     body_id,
                     facts: demand.facts.clone(),
+                    demand: demand.demand,
                 }
             })
             .collect::<Vec<_>>();
@@ -748,47 +806,145 @@ impl ClientCollisionCoordinator {
 
 fn remote_body_demands_match(
     current: &BTreeMap<SpatialBodyId, ClientRemoteBodyDemand>,
-    desired: &BTreeMap<SpatialBodyId, ClientEntityBodyFacts>,
+    desired: &BTreeMap<SpatialBodyId, ClientRemoteBodyTarget>,
 ) -> bool {
     current.len() == desired.len()
         && current.iter().all(|(body_id, demand)| {
-            desired
-                .get(body_id)
-                .is_some_and(|facts| facts.definition_eq(&demand.facts))
+            desired.get(body_id).is_some_and(|target| {
+                target.facts.definition_eq(&demand.facts) && target.demand == demand.demand
+            })
         })
 }
 
-fn remote_body_targets(world: &WorldState) -> BTreeMap<SpatialBodyId, ClientEntityBodyFacts> {
-    world
-        .entities
-        .iter()
-        .filter(|entity| client_remote_body_requires_preparation(world, entity.guid))
-        .map(|entity| {
-            let facts = client_entity_body_facts(world, entity.guid)
-                .expect("remote preparation eligibility requires complete body facts");
-            (SpatialBodyId::Entity(entity.guid), facts)
-        })
-        .collect()
+fn local_player_physical_demand(physics: EffectiveEntityPhysicsState) -> LocalPhysicalDemand {
+    LocalPhysicalDemand {
+        target: if physics.dynamic_collision.target != EntityCollisionParticipation::Suppressed
+            && !physics.dynamic_collision.missile
+        {
+            LocalTargetDemand::Retained
+        } else {
+            LocalTargetDemand::Absent
+        },
+        integration: LocalIntegrationDemand::Eligible,
+    }
 }
 
-/// Resolves the exact remote-body eligibility contract shared by preparation and simulation.
-pub(super) fn client_remote_body_requires_preparation(world: &WorldState, guid: Guid) -> bool {
-    let Some(entity) = world.entities.get(guid) else {
+/// Resolves complete positive physical demand from current authoritative client facts.
+fn client_remote_body_target(world: &WorldState, guid: Guid) -> Option<ClientRemoteBodyTarget> {
+    let entity = world.entities.get(guid)?;
+    let body_id = SpatialBodyId::Entity(guid);
+    if guid == world.player.guid
+        || entity.attachment.is_some()
+        || !entity.physics.supports_local_simulation()
+    {
+        return None;
+    }
+    let body = world.scene.body(body_id)?;
+    body.authoritative_pose?;
+    let facts = client_entity_body_facts(world, guid).ok()?;
+    let target = if facts.physics.dynamic_collision.target
+        != EntityCollisionParticipation::Suppressed
+        && !facts.physics.dynamic_collision.missile
+    {
+        LocalTargetDemand::Retained
+    } else {
+        LocalTargetDemand::Absent
+    };
+    let has_integration_work = facts.physics.response.gravity
+        || facts.physics.dynamic_collision.missile
+        || world.body_has_simulatable_projection_basis(body_id)
+        || body.has_pose_reconciliation_work();
+    let integration = if facts.physics.integration_eligibility
+        == EntityIntegrationEligibility::Eligible
+        && has_integration_work
+    {
+        LocalIntegrationDemand::Eligible
+    } else {
+        LocalIntegrationDemand::Excluded
+    };
+    let demand = LocalPhysicalDemand {
+        target,
+        integration,
+    };
+    demand
+        .requires_physical_body()
+        .then_some(ClientRemoteBodyTarget {
+            body_id,
+            facts,
+            demand,
+        })
+}
+
+fn remove_physical_body(
+    world: &mut WorldState,
+    body_id: SpatialBodyId,
+    events: &mut Vec<WorldEvent>,
+) {
+    let initial_cell = world
+        .scene
+        .body(body_id)
+        .and_then(|body| body.pose.is_indoors().then_some(body.pose.landblock_id));
+    if let Some(outcome) = world.scene.set_dynamic_physical_body(
+        body_id,
+        None,
+        PhysicalCollisionFilter::ALL,
+        initial_cell,
+    ) && outcome.change != holtburger_world::PhysicalBodyReconfiguration::Unchanged
+    {
+        events.push(WorldEvent::RuntimeBodyChanged { body_id });
+    }
+}
+
+fn remove_local_player_physical_body(
+    world: &mut WorldState,
+    player: ClientPlayerIdentity,
+    events: &mut Vec<WorldEvent>,
+) {
+    remove_physical_body(world, SpatialBodyId::LocalPlayer(player.guid), events);
+}
+
+fn reconfigure_local_player_body(
+    world: &mut WorldState,
+    target: &ClientBodyTarget,
+    events: &mut Vec<WorldEvent>,
+) -> bool {
+    let physical_target = ClientRemoteBodyTarget {
+        body_id: SpatialBodyId::LocalPlayer(target.player.guid),
+        facts: target.facts.clone(),
+        demand: target.demand,
+    };
+    reconfigure_physical_body(world, &physical_target, events)
+}
+
+fn reconfigure_physical_body(
+    world: &mut WorldState,
+    target: &ClientRemoteBodyTarget,
+    events: &mut Vec<WorldEvent>,
+) -> bool {
+    let Some((configuration, initial_cell)) = world.scene.body(target.body_id).and_then(|body| {
+        let configuration = body
+            .physical
+            .as_ref()?
+            .dynamic_configuration_for_state(target.facts.physics, target.demand)?;
+        let initial_cell = body.pose.is_indoors().then_some(body.pose.landblock_id);
+        Some((configuration, initial_cell))
+    }) else {
         return false;
     };
-    let body_id = SpatialBodyId::Entity(guid);
-    guid != world.player.guid
-        && entity.attachment.is_none()
-        && entity.physics.supports_local_simulation()
-        && entity.wcid.is_some()
-        && entity
-            .properties
-            .get_data_prop(PropertyDataId::Setup)
-            .is_some()
-        && world
-            .scene
-            .body(body_id)
-            .is_some_and(|body| body.authoritative_pose.is_some())
+    let Some(outcome) = world.scene.set_dynamic_physical_body(
+        target.body_id,
+        Some(configuration),
+        PhysicalCollisionFilter::ALL,
+        initial_cell,
+    ) else {
+        return false;
+    };
+    if outcome.change != holtburger_world::PhysicalBodyReconfiguration::Unchanged {
+        events.push(WorldEvent::RuntimeBodyChanged {
+            body_id: target.body_id,
+        });
+    }
+    true
 }
 
 fn resolve_scene_request(
@@ -848,14 +1004,14 @@ impl Drop for ClientCollisionCoordinator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use holtburger_common::properties::WorldObjectPropertyAccessorsMut;
+    use holtburger_common::properties::{PhysicsState, WorldObjectPropertyAccessorsMut};
     use holtburger_common::{Quaternion, Vector3};
     use holtburger_content::{LandblockCollisionAsset, TerrainCollisionSurface};
     use holtburger_world::{
-        DynamicBodyCollisionDefinition, DynamicPhysicalBodyDefinition, EntityCollisionReportPolicy,
-        EntityDynamicCollisionPolicy, EntityPhysicsScheduling, PhysicalBodyDefinition,
-        PhysicalBodyResponsePolicy, PhysicalElasticity, PhysicalFriction, PhysicalRestitution,
-        PhysicalSphereSet, PhysicalSurfaceMotion, SpatialBodyId,
+        AuthoritativeBodyVectors, AuthoritativePoseEffect, DynamicBodyCollisionDefinition,
+        DynamicPhysicalBodyDefinition, EntityCollisionReportPolicy, EntityDynamicCollisionPolicy,
+        PhysicalBodyDefinition, PhysicalBodyResponsePolicy, PhysicalElasticity, PhysicalFriction,
+        PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion, SpatialBodyId,
     };
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -942,7 +1098,6 @@ mod tests {
                         fallback_shapes: Vec::new(),
                         fallback_scale: holtburger_content::ColliderScale::uniform(1.0).unwrap(),
                     }),
-                    scheduling: EntityPhysicsScheduling::Eligible,
                     dynamic_collision: EntityDynamicCollisionPolicy {
                         target: holtburger_world::EntityCollisionParticipation::Solid,
                         mover_accepts_response: true,
@@ -1010,6 +1165,117 @@ mod tests {
         entity
             .properties
             .set_float_prop(PropertyFloat::DefaultScale, 1.0);
+    }
+
+    fn remote_demand_for_state(
+        state: PhysicsState,
+        velocity: Vector3,
+    ) -> Option<LocalPhysicalDemand> {
+        let mut world = WorldState::synthetic();
+        let guid = Guid(0x7000_0042);
+        world.add_entity(holtburger_world::entity::Entity::new(
+            guid,
+            "Remote".to_owned(),
+            position(0x1234_0002),
+        ));
+        facts(&mut world, guid);
+        let entity = world.entities.get_mut(guid).unwrap();
+        entity.physics = holtburger_world::resolve_effective_entity_physics_state(state);
+        entity.velocity = velocity;
+        client_remote_body_target(&world, guid).map(|target| target.demand)
+    }
+
+    #[test]
+    fn remote_demand_requires_positive_target_or_integration_work() {
+        assert_eq!(
+            remote_demand_for_state(
+                PhysicsState::ETHEREAL | PhysicsState::IGNORE_COLLISIONS,
+                Vector3::zero(),
+            ),
+            None,
+            "suppressed zero-gravity zero-work entities remain pose-only"
+        );
+        assert_eq!(
+            remote_demand_for_state(PhysicsState::empty(), Vector3::zero()),
+            Some(LocalPhysicalDemand {
+                target: LocalTargetDemand::Retained,
+                integration: LocalIntegrationDemand::Excluded,
+            }),
+            "solid zero-work entities retain target geometry without becoming movers"
+        );
+        assert_eq!(
+            remote_demand_for_state(PhysicsState::GRAVITY, Vector3::zero()),
+            Some(LocalPhysicalDemand {
+                target: LocalTargetDemand::Retained,
+                integration: LocalIntegrationDemand::Eligible,
+            }),
+        );
+        assert_eq!(
+            remote_demand_for_state(PhysicsState::MISSILE, Vector3::zero()),
+            Some(LocalPhysicalDemand {
+                target: LocalTargetDemand::Absent,
+                integration: LocalIntegrationDemand::Eligible,
+            }),
+        );
+        assert_eq!(
+            remote_demand_for_state(
+                PhysicsState::ETHEREAL | PhysicsState::IGNORE_COLLISIONS,
+                Vector3::new(1.0, 0.0, 0.0),
+            ),
+            Some(LocalPhysicalDemand {
+                target: LocalTargetDemand::Absent,
+                integration: LocalIntegrationDemand::Eligible,
+            }),
+            "retained vectors promote an otherwise pose-only body"
+        );
+        assert_eq!(
+            remote_demand_for_state(PhysicsState::STATIC, Vector3::new(1.0, 0.0, 0.0),),
+            None,
+            "unsupported state remains a validation gate after positive work"
+        );
+    }
+
+    #[test]
+    fn pending_reconciliation_is_positive_integration_work() {
+        let mut world = WorldState::synthetic();
+        let guid = Guid(0x7000_0042);
+        let initial = position(0x1234_0002);
+        world.add_entity(holtburger_world::entity::Entity::new(
+            guid,
+            "Remote".to_owned(),
+            initial,
+        ));
+        facts(&mut world, guid);
+        world.entities.get_mut(guid).unwrap().physics =
+            holtburger_world::resolve_effective_entity_physics_state(
+                PhysicsState::ETHEREAL | PhysicsState::IGNORE_COLLISIONS,
+            );
+        let target = WorldPosition {
+            coords: initial.coords + Vector3::new(1.0, 0.0, 0.0),
+            ..initial
+        };
+        assert!(world.scene.apply_authoritative_body_effect(
+            SpatialBodyId::Entity(guid),
+            AuthoritativePoseEffect::Interpolate {
+                pose: target,
+                keep_heading: false,
+                adjusted_max_speed_mps: None,
+            },
+            AuthoritativeBodyVectors {
+                velocity: Vector3::zero(),
+                acceleration: Vector3::zero(),
+                omega: Vector3::zero(),
+            },
+            Instant::now(),
+        ));
+
+        assert_eq!(
+            client_remote_body_target(&world, guid).map(|target| target.demand),
+            Some(LocalPhysicalDemand {
+                target: LocalTargetDemand::Absent,
+                integration: LocalIntegrationDemand::Eligible,
+            })
+        );
     }
 
     async fn wait_for_readiness(
@@ -1145,7 +1411,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn hydrated_remote_entity_joins_the_same_prepared_body_population() {
+    async fn hydrated_zero_work_remote_becomes_target_only() {
         let mut world = WorldState::synthetic();
         let player_guid = Guid(0x5000_0001);
         let remote_guid = Guid(0x7000_0001);
@@ -1172,11 +1438,197 @@ mod tests {
 
         assert_eq!(source.prepared.load(Ordering::SeqCst), 2);
         assert!(
+            !world
+                .scene
+                .scheduled_dynamic_entity_ids()
+                .contains(&body_id)
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn suppressed_zero_work_remote_never_requests_physical_preparation() {
+        let mut world = WorldState::synthetic();
+        let player_guid = Guid(0x5000_0001);
+        let remote_guid = Guid(0x7000_0001);
+        world.seed_local_player_entity(player_guid, "Player", position(0x1234_0001));
+        facts(&mut world, player_guid);
+        world.add_entity(holtburger_world::entity::Entity::new(
+            remote_guid,
+            "Remote".to_owned(),
+            position(0x1234_0002),
+        ));
+        facts(&mut world, remote_guid);
+        world.entities.get_mut(remote_guid).unwrap().physics =
+            holtburger_world::resolve_effective_entity_physics_state(
+                PhysicsState::ETHEREAL | PhysicsState::IGNORE_COLLISIONS,
+            );
+
+        let source = Arc::new(FakeSource::default());
+        let mut coordinator = ClientCollisionCoordinator::new(source.clone());
+        let _ = coordinator.observe(&mut world);
+        wait_for_physical_body(
+            &mut coordinator,
+            &mut world,
+            SpatialBodyId::LocalPlayer(player_guid),
+        )
+        .await;
+
+        assert_eq!(source.prepared.load(Ordering::SeqCst), 1);
+        assert!(
+            world
+                .scene
+                .body(SpatialBodyId::Entity(remote_guid))
+                .is_some_and(|body| body.physical.is_none())
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn vector_demand_promotes_and_demotes_with_no_content_reload() {
+        let mut world = WorldState::synthetic();
+        let player_guid = Guid(0x5000_0001);
+        let remote_guid = Guid(0x7000_0001);
+        world.seed_local_player_entity(player_guid, "Player", position(0x1234_0001));
+        facts(&mut world, player_guid);
+        world.add_entity(holtburger_world::entity::Entity::new(
+            remote_guid,
+            "Remote".to_owned(),
+            position(0x1234_0002),
+        ));
+        facts(&mut world, remote_guid);
+
+        let source = Arc::new(FakeSource::default());
+        let mut coordinator = ClientCollisionCoordinator::new(source.clone());
+        let _ = coordinator.observe(&mut world);
+        let body_id = SpatialBodyId::Entity(remote_guid);
+        wait_for_physical_body(&mut coordinator, &mut world, body_id).await;
+        assert!(
+            !world
+                .scene
+                .scheduled_dynamic_entity_ids()
+                .contains(&body_id)
+        );
+        let preparations = source.prepared.load(Ordering::SeqCst);
+
+        world.entities.get_mut(remote_guid).unwrap().velocity = Vector3::new(1.0, 0.0, 0.0);
+        let promoted = coordinator.observe(&mut world);
+        assert!(
             world
                 .scene
                 .scheduled_dynamic_entity_ids()
                 .contains(&body_id)
         );
+        assert!(promoted.iter().any(
+            |event| matches!(event, WorldEvent::RuntimeBodyChanged { body_id: changed } if *changed == body_id)
+        ));
+        assert_eq!(source.prepared.load(Ordering::SeqCst), preparations);
+
+        world.entities.get_mut(remote_guid).unwrap().velocity = Vector3::zero();
+        let _ = coordinator.observe(&mut world);
+        assert!(
+            !world
+                .scene
+                .scheduled_dynamic_entity_ids()
+                .contains(&body_id)
+        );
+        assert!(world.scene.body(body_id).unwrap().physical.is_some());
+        assert_eq!(source.prepared.load(Ordering::SeqCst), preparations);
+    }
+
+    #[tokio::test]
+    async fn remote_completion_is_rejected_when_positive_demand_changed() {
+        let mut world = WorldState::synthetic();
+        let guid = Guid(0x7000_0001);
+        world.add_entity(holtburger_world::entity::Entity::new(
+            guid,
+            "Remote".to_owned(),
+            position(0x1234_0002),
+        ));
+        facts(&mut world, guid);
+        let current = client_remote_body_target(&world, guid).unwrap();
+        let stale = ClientRemoteBodyTarget {
+            demand: LocalPhysicalDemand {
+                target: LocalTargetDemand::Retained,
+                integration: LocalIntegrationDemand::Eligible,
+            },
+            ..current.clone()
+        };
+        let source = Arc::new(FakeSource::default());
+        let physical = source.prepare_body(stale.facts.clone()).unwrap();
+        let mut coordinator = ClientCollisionCoordinator::new(source);
+        coordinator.remote_bodies.insert(
+            current.body_id,
+            ClientRemoteBodyDemand {
+                facts: current.facts,
+                demand: current.demand,
+                status: ClientRemoteBodyStatus::Unavailable,
+            },
+        );
+        coordinator
+            .completion_tx
+            .send(ClientSpatialCompletion::RemoteBodies(
+                ClientRemoteBodyCompletion {
+                    generation: coordinator.remote_body_generation,
+                    targets: vec![(stale, Ok(physical))],
+                },
+            ))
+            .unwrap();
+
+        let events = coordinator.poll(&mut world, Instant::now());
+
+        assert!(events.is_empty());
+        assert!(
+            world
+                .scene
+                .body(SpatialBodyId::Entity(guid))
+                .is_some_and(|body| body.physical.is_none())
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn incompatible_content_change_removes_stale_body_before_preparation() {
+        let mut world = WorldState::synthetic();
+        let player_guid = Guid(0x5000_0001);
+        let remote_guid = Guid(0x7000_0001);
+        world.seed_local_player_entity(player_guid, "Player", position(0x1234_0001));
+        facts(&mut world, player_guid);
+        world.add_entity(holtburger_world::entity::Entity::new(
+            remote_guid,
+            "Remote".to_owned(),
+            position(0x1234_0002),
+        ));
+        facts(&mut world, remote_guid);
+
+        let source = Arc::new(FakeSource::default());
+        let mut coordinator = ClientCollisionCoordinator::new(source.clone());
+        let _ = coordinator.observe(&mut world);
+        let body_id = SpatialBodyId::Entity(remote_guid);
+        wait_for_physical_body(&mut coordinator, &mut world, body_id).await;
+
+        let (started_tx, started_rx) = std::sync::mpsc::sync_channel(0);
+        let (release_tx, release_rx) = std::sync::mpsc::sync_channel(0);
+        *source.body_gate.lock().unwrap() = Some(BodyGate {
+            guid: remote_guid,
+            started: started_tx,
+            release: release_rx,
+        });
+        world
+            .entities
+            .get_mut(remote_guid)
+            .unwrap()
+            .properties
+            .set_did_prop(PropertyDataId::Setup, Guid(0x0200_0002));
+
+        let events = coordinator.observe(&mut world);
+        started_rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("replacement preparation did not reach the test gate");
+        assert!(world.scene.body(body_id).unwrap().physical.is_none());
+        assert!(events.iter().any(
+            |event| matches!(event, WorldEvent::RuntimeBodyChanged { body_id: changed } if *changed == body_id)
+        ));
+
+        release_tx.send(()).unwrap();
+        wait_for_physical_body(&mut coordinator, &mut world, body_id).await;
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 3)]

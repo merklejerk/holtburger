@@ -1099,7 +1099,7 @@
 			placement,
 			physicalCameraInput(controller).viewDirection,
 			distance,
-			"simulated",
+			"integrated",
 		);
 		await session.spawn(request);
 		await dynamicEntityPresentationCompletion;

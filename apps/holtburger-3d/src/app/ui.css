@@ -65,6 +65,72 @@
 	text-shadow: 1px 1px 0 #000;
 }
 
+/* Shared form primitives for both frontend shells and their app-local panels. */
+.ac-form-field {
+	display: grid;
+	gap: 4px;
+	min-width: 0;
+}
+
+.ac-form-field > span {
+	color: var(--ac-ink);
+	font-size: 0.76rem;
+}
+
+.ac-control {
+	min-width: 0;
+	min-height: 28px;
+	padding: 5px 7px;
+	border: 1px solid rgb(200 148 42 / 0.74);
+	border-radius: 0;
+	color: var(--ac-ink);
+	background:
+		linear-gradient(
+			90deg,
+			rgb(245 203 95 / 0.12),
+			transparent 10%,
+			transparent 90%,
+			rgb(245 203 95 / 0.08)
+		),
+		linear-gradient(180deg, rgb(47 54 29 / 0.98), rgb(10 14 7 / 0.98));
+	box-shadow:
+		inset 0 1px 1px rgb(0 0 0 / 0.8),
+		inset 0 0 0 1px rgb(245 203 95 / 0.12),
+		0 1px 0 rgb(0 0 0 / 0.72);
+	font: inherit;
+	font-variant-numeric: tabular-nums;
+	color-scheme: dark;
+}
+
+.ac-control--select {
+	appearance: none;
+	padding-right: 27px;
+	background:
+		linear-gradient(45deg, transparent 50%, var(--ac-gold-bright) 50%) right 9px
+			center / 6px 6px no-repeat,
+		linear-gradient(135deg, var(--ac-gold-bright) 50%, transparent 50%) right
+			4px center / 6px 6px no-repeat,
+		linear-gradient(
+			90deg,
+			rgb(245 203 95 / 0.12),
+			transparent 10%,
+			transparent 90%,
+			rgb(245 203 95 / 0.08)
+		),
+		linear-gradient(180deg, rgb(47 54 29 / 0.98), rgb(10 14 7 / 0.98));
+}
+
+.ac-control--select option {
+	background: var(--ac-panel-deep);
+	color: var(--ac-ink);
+}
+
+.ac-control:focus {
+	border-color: var(--ac-gold-bright);
+	outline: 1px solid rgb(245 203 95 / 0.36);
+	outline-offset: 1px;
+}
+
 h1 {
 	margin: 0;
 	color: var(--ac-ink);

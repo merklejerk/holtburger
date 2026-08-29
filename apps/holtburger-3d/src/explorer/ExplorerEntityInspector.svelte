@@ -260,10 +260,10 @@
 	</div>
 
 	{#if selectedIsPossessed && possession !== null && possession.guid !== null && possessionControls !== null}
-		<label class="explorer-form-field">
+		<label class="ac-form-field">
 			<span>Stance</span>
 			<select
-				class="explorer-control explorer-control--select"
+				class="ac-control ac-control--select"
 				value={possessionControls.stance}
 				disabled={pending !== null}
 				onchange={(event) =>
@@ -276,13 +276,13 @@
 				{/each}
 			</select>
 		</label>
-		<label class="explorer-form-field">
+		<label class="ac-form-field">
 			<span>
 				Run rate
 				<output>{possessionControls.runRateScalar.toFixed(2)}x</output>
 			</span>
 			<input
-				class="explorer-control"
+				class="ac-control"
 				type="range"
 				min={possession.runRateCapability.minimum}
 				max={possession.runRateCapability.maximum}

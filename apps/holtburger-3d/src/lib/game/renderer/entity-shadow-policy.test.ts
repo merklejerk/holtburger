@@ -86,6 +86,11 @@ describe("entity shadow policy", () => {
 		["cascade count", { cascadeCount: 0 }, "cascade count"],
 		["map resolution", { mapResolution: 300 }, "map resolution"],
 		["maximum distance", { maximumDistance: Number.NaN }, "maximum distance"],
+		[
+			"minimum light elevation",
+			{ minimumLightElevationDegrees: 91 },
+			"minimum light elevation",
+		],
 		["split lambda", { splitLambda: 1.1 }, "split lambda"],
 		[
 			"transition fraction",

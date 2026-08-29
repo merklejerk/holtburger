@@ -1,5 +1,5 @@
 import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
-import { FRONTEND_TUNING } from "../../frontend-tuning";
+import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import type { ResolvedDistanceFog } from "./scene-environment";
 
 /**
@@ -22,7 +22,7 @@ export function farTerrainCutoffLandblocks(
 	fog: ResolvedDistanceFog | null,
 ): number | null {
 	if (fog === null) return null;
-	const coverage = FRONTEND_TUNING.rendering.farTerrainFogCoverage;
+	const coverage = SHARED_FRONTEND_TUNING.rendering.farTerrainFogCoverage;
 	const distance = fog.near + (fog.far - fog.near) * coverage;
 	return Math.ceil(distance / OUTDOOR_LANDBLOCK_WORLD_SIZE);
 }

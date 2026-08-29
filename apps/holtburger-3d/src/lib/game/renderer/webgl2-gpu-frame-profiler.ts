@@ -8,7 +8,7 @@ import type {
 	RendererGpuFrameTimings,
 	RendererOutdoorShadowMapFrameMetrics,
 } from "./renderer";
-import { FRONTEND_TUNING } from "../../frontend-tuning";
+import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 
 /** GPU phases whose timestamp intervals are aggregated across every view in one frame. */
 export type WebGL2GpuFramePhase =
@@ -283,7 +283,7 @@ export class WebGL2GpuFrameProfiler {
 		if (
 			!this.#extension ||
 			this.#pending.length >=
-				FRONTEND_TUNING.diagnostics.maximumPendingGpuFrames
+				SHARED_FRONTEND_TUNING.diagnostics.maximumPendingGpuFrames
 		) {
 			return null;
 		}
@@ -669,7 +669,7 @@ export class WebGL2FrameProfiler {
 		this.#recentCpuFrames.push(cpu);
 		if (
 			this.#recentCpuFrames.length >
-			FRONTEND_TUNING.diagnostics.percentileCpuFrameTail
+			SHARED_FRONTEND_TUNING.diagnostics.percentileCpuFrameTail
 		) {
 			this.#recentCpuFrames.shift();
 		}

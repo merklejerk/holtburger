@@ -15,7 +15,7 @@ import {
 	type AssetTextureKey,
 	type PackedObjectTexturePurpose,
 } from "../types";
-import { FRONTEND_TUNING } from "../../../frontend-tuning";
+import { SHARED_FRONTEND_TUNING } from "../../../frontend-tuning";
 import {
 	allocationBoundsForPlacement,
 	reconstructFreeRectangles,
@@ -87,7 +87,7 @@ export class AtlasPagePublication {
 
 	constructor(
 		renderResources: RendererResourceManager,
-		pageSize: number = FRONTEND_TUNING.workloads.staticObjectTextureAtlas
+		pageSize: number = SHARED_FRONTEND_TUNING.workloads.staticObjectTextureAtlas
 			.pageSize,
 	) {
 		this.#renderResources = renderResources;

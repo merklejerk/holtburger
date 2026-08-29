@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from "svelte";
 	import type { FrameRates } from "../app/frame-rate-sampler";
-	import { FRONTEND_TUNING } from "../lib/frontend-tuning";
+	import { CLIENT_TUNING } from "./client-tuning";
 
 	interface Props {
 		/** Cold read of presentation cadence and capacity maintained outside Svelte. */
@@ -11,8 +11,8 @@
 	const { readFrameRates }: Props = $props();
 	let frameRates = $state<FrameRates | null>(null);
 	const formatFramesPerSecond = (value: number): string =>
-		value > FRONTEND_TUNING.diagnostics.maximumDisplayedFramesPerSecond
-			? `${FRONTEND_TUNING.diagnostics.maximumDisplayedFramesPerSecond}+`
+		value > CLIENT_TUNING.diagnostics.maximumDisplayedFramesPerSecond
+			? `${CLIENT_TUNING.diagnostics.maximumDisplayedFramesPerSecond}+`
 			: value.toFixed(0);
 	const display = $derived(
 		frameRates === null
@@ -27,7 +27,7 @@
 		sample();
 		const interval = window.setInterval(
 			sample,
-			FRONTEND_TUNING.diagnostics.frameRateDisplayIntervalMs,
+			CLIENT_TUNING.diagnostics.frameRateDisplayIntervalMs,
 		);
 		return () => window.clearInterval(interval);
 	});

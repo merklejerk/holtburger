@@ -1,5 +1,5 @@
 import { Vec3 } from "../math/types";
-import { FRONTEND_TUNING } from "../../frontend-tuning";
+import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import { type ResolvedSceneLighting } from "./scene-environment";
 
 /**
@@ -100,7 +100,7 @@ export function resolveAuthoredLightResponse(
 			sun * lighting.sunColor.blue,
 	);
 	const { fullResponseBrightness, minimumResponseBrightness, minimumResponse } =
-		FRONTEND_TUNING.rendering.outdoorAuthoredLights;
+		SHARED_FRONTEND_TUNING.rendering.outdoorAuthoredLights;
 	const ramp = Math.min(
 		1,
 		Math.max(

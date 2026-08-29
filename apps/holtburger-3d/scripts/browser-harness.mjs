@@ -1213,7 +1213,7 @@ Options:
                          that worktree's build.
   --color-grade <json>  Override the presentation color grade with these JSON parameters, e.g.
                          '{"temperature":0.6,"tint":0,"saturation":1.4,"curves":{...}}'. Omit it
-                         to use whatever FRONTEND_TUNING currently ships.
+                         to use whatever Explorer tuning currently ships.
   --no-static-lights     Disable authored outdoor lamps, for same-scene A/B of their cost.
   --no-weather           Disable authored weather, mirroring retail's player option. Use it to
                          A/B a Rainy day group against the same scene without rain.

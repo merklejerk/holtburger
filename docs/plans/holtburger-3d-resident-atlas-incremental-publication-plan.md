@@ -230,7 +230,7 @@ with zero build work). The phase therefore reduces to the rebuild predicate.
     `#metadataOnlyPageUpdateCount` incremented before the publication was attempted at all — so a
     failed attempt inflated exactly the counters meant to explain it. All three now commit after
     the publication they describe.
-  - **`pageSize` optionality was the wrong shape.** Four `?? FRONTEND_TUNING…pageSize` resolutions
+  - **`pageSize` optionality was the wrong shape.** Four `?? SHARED_FRONTEND_TUNING…pageSize` resolutions
     had accumulated, and the Phase 1 helper `resolveAtlasPageSize` institutionalized the implicit
     default instead of removing it. The fixture override now resolves once into a `readonly
 #pageSize`, and the helper plus every `??` and optional-chain site is gone.

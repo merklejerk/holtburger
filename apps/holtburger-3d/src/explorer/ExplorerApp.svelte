@@ -29,7 +29,6 @@
 		type SceneInterestTarget,
 	} from "../lib/game/runtime/scene-target";
 	import {
-		DEFAULT_FRAME_SETTINGS,
 		type FrameSettings,
 		type EnvCellRenderMode,
 		type RendererFrameDiagnosticsSnapshot,
@@ -108,7 +107,7 @@
 		DynamicEntityView,
 	} from "../lib/game/runtime/dynamic-entity-feed";
 	import { Vec3 } from "../lib/game/math/types";
-	import { FRONTEND_TUNING } from "../lib/frontend-tuning";
+	import { EXPLORER_TUNING } from "./explorer-tuning";
 	import {
 		resolveSceneEnvironment,
 		type ExplorerEnvironmentSelection,
@@ -182,7 +181,7 @@
 	let physicalCameraError = $state<string | null>(null);
 	let frameMetrics: FrameMetrics | null = $state(null);
 	const frameRateSampler: FrameRateSampler = createFrameRateSampler(
-		FRONTEND_TUNING.diagnostics.frameMetricsEmaWindowMs,
+		EXPLORER_TUNING.diagnostics.frameMetricsEmaWindowMs,
 	);
 	let rendererFrameDiagnostics: RendererFrameDiagnosticsSnapshot | null =
 		$state(null);
@@ -296,8 +295,7 @@
 		const runtime = runtimeReady ? (gameRuntime ?? null) : null;
 		return {
 			anchor: anchorFromPossession() ?? anchorFromCamera(),
-			cameraFovRadians:
-				(FRONTEND_TUNING.explorer.camera.framing.fov * Math.PI) / 180,
+			cameraFovRadians: (EXPLORER_TUNING.camera.framing.fov * Math.PI) / 180,
 			cameraHeadingRadians: cameraYawRadians,
 			presentedEntities: readPresentedMapEntities,
 			presentedEntityRevision: runtime?.dynamicEntityPlacementRevision ?? 0,
@@ -319,13 +317,14 @@
 	let textureFilteringCapabilities =
 		$state<TextureFilteringCapabilities | null>(null);
 	let environmentSelection = $state<ExplorerEnvironmentSelection>({
-		dayIndex: FRONTEND_TUNING.explorer.environment.defaultDayIndex,
-		timeOfDay: FRONTEND_TUNING.explorer.environment.defaultTimeOfDay,
-		dayGroupOverride:
-			FRONTEND_TUNING.explorer.environment.defaultDayGroupOverride,
+		dayIndex: EXPLORER_TUNING.environment.defaultDayIndex,
+		timeOfDay: EXPLORER_TUNING.environment.defaultTimeOfDay,
+		dayGroupOverride: EXPLORER_TUNING.environment.defaultDayGroupOverride,
 	});
 	/** Explorer-local dynamic display choices; they do not alter resolved regional data. */
-	let frameSettings = $state<FrameSettings>({ ...DEFAULT_FRAME_SETTINGS });
+	let frameSettings = $state<FrameSettings>({
+		...EXPLORER_TUNING.frameSettings,
+	});
 	const supportedTextureFiltering = $derived(
 		textureFilteringCapabilities === null
 			? []
@@ -765,10 +764,8 @@
 		const worldVelocity = resolvePhysicalFlyVelocity(
 			movement as PhysicalFlyLocalMovement,
 			cameraBasis,
-			FRONTEND_TUNING.explorer.camera.controls.moveSpeed *
-				(precision
-					? FRONTEND_TUNING.explorer.camera.controls.shiftSlowMultiplier
-					: 1),
+			EXPLORER_TUNING.camera.controls.moveSpeed *
+				(precision ? EXPLORER_TUNING.camera.controls.shiftSlowMultiplier : 1),
 		);
 		return {
 			basis: cameraBasis,
@@ -791,8 +788,7 @@
 	function routeCameraWheel(localUpDistance: number): void {
 		if (boomCameraSession) {
 			boomCameraSession.zoom(
-				-localUpDistance *
-					FRONTEND_TUNING.explorer.camera.boom.zoomDistanceMultiplier,
+				-localUpDistance * EXPLORER_TUNING.camera.boom.zoomDistanceMultiplier,
 			);
 			return;
 		}
@@ -1162,7 +1158,7 @@
 			);
 		}
 		const state = controller.snapshotState();
-		const controls = FRONTEND_TUNING.explorer.camera.controls;
+		const controls = EXPLORER_TUNING.camera.controls;
 		const boom = new PossessionCameraController({
 			initialLook: state,
 			orbit: {
@@ -1171,8 +1167,8 @@
 				yawRadiansPerPixel: controls.pointerYawRadiansPerPixel,
 			},
 			recenter: {
-				delayMs: FRONTEND_TUNING.explorer.camera.boom.recenterDelayMs,
-				durationMs: FRONTEND_TUNING.explorer.camera.boom.recenterDurationMs,
+				delayMs: EXPLORER_TUNING.camera.boom.recenterDelayMs,
+				durationMs: EXPLORER_TUNING.camera.boom.recenterDurationMs,
 			},
 			transport: hostKinematicBoomTransport(hostTransport),
 		});
@@ -1205,7 +1201,7 @@
 				guid: possession.guid,
 				entityGeneration: possession.entityGeneration,
 			},
-			FRONTEND_TUNING.explorer.camera.boom.distance,
+			EXPLORER_TUNING.camera.boom.distance,
 			projection,
 		);
 	}
@@ -1331,7 +1327,7 @@
 			canvas.clientWidth,
 			canvas.clientHeight,
 		);
-		const framing = FRONTEND_TUNING.explorer.camera.framing;
+		const framing = EXPLORER_TUNING.camera.framing;
 		const current = cameraProjection;
 		if (
 			current !== undefined &&
@@ -1768,10 +1764,11 @@
 				const presentation = await GamePresentationOwner.build({
 					canvas,
 					hostTransport,
+					frameSettings: EXPLORER_TUNING.frameSettings,
 					audioTuning: {
 						placementSmoothingSeconds:
-							FRONTEND_TUNING.audio.placementSmoothingSeconds,
-						loudnessCurveExponent: FRONTEND_TUNING.audio.loudnessCurveExponent,
+							EXPLORER_TUNING.audio.placementSmoothingSeconds,
+						loudnessCurveExponent: EXPLORER_TUNING.audio.loudnessCurveExponent,
 					},
 					// The Explorer is a development surface and its Frame panel reports tick
 					// timing; the thin client route passes nothing and pays nothing.
@@ -1793,7 +1790,7 @@
 				cameraController = new ExplorerCameraInputController({
 					canvas,
 					keyboardYawRadiansPerSecond(shiftActive) {
-						const controls = FRONTEND_TUNING.explorer.camera.controls;
+						const controls = EXPLORER_TUNING.camera.controls;
 						return (
 							controls.keyboardYawRadiansPerSecond *
 							(shiftActive ? controls.shiftSlowMultiplier : 1)
@@ -1991,7 +1988,11 @@
 			</section>
 		{/if}
 
-		<FrameMetricsOverlay metrics={frameMetrics} {readFrameRates} />
+		<FrameMetricsOverlay
+			metrics={frameMetrics}
+			{readFrameRates}
+			diagnosticsTuning={EXPLORER_TUNING.diagnostics}
+		/>
 		{#if startupError === null}
 			<MapPanel
 				readFrame={readMapPanelFrame}

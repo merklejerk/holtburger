@@ -122,7 +122,7 @@ enabled by default while retaining an explicit user disable switch.
 
 - Add one explicit ambient-occlusion enablement choice plus appearance parameters to `FrameSettings`
   and the Explorer control path.
-- Keep shader tuning in one composite `FRONTEND_TUNING.rendering.ambientOcclusion` value. Its fields
+- Keep shader tuning in one composite `SHARED_FRONTEND_TUNING.rendering.ambientOcclusion` value. Its fields
   must have named shader, allocation, distance-resolution, or diagnostic consumers.
 - Keep distance eligibility in one renderer-owned validated policy:
   - `fullStrengthUntil`: AO is not distance-attenuated before this linear view distance;

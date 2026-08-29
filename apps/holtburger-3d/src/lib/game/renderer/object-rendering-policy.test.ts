@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FRONTEND_TUNING } from "../../frontend-tuning";
+import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import {
 	areStaticObjectDrawsCompatible,
 	createObjectSubmissionPhases,
@@ -15,7 +15,7 @@ import {
 	createObjectVertexShader,
 } from "./webgl2-object-program";
 
-const TRANSPARENT_TUNING = FRONTEND_TUNING.rendering.transparentObjects;
+const TRANSPARENT_TUNING = SHARED_FRONTEND_TUNING.rendering.transparentObjects;
 
 describe("orderTransparentObjectRanges", () => {
 	it("orders nearby ranges exactly back-to-front by camera depth", () => {

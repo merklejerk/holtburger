@@ -353,7 +353,7 @@ exposed through `RendererFrameDiagnostics.resetProfile` and called from the harn
 so one reset delimits both aggregates and a `--measure-ms` window governs the renderer profile too.
 The retained tail survives only for the percentile, which cannot be derived from running sums and is
 now honestly named `p95RecentTotalMs` against
-`FRONTEND_TUNING.diagnostics.percentileCpuFrameTail`.
+`SHARED_FRONTEND_TUNING.diagnostics.percentileCpuFrameTail`.
 
 `cpu.mean` now spans the whole measurement window (1,150-3,271 frames instead of 60) and tracks
 `timing.averageFrameWorkMs` closely, the residual gap being the non-render part of frame work.

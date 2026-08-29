@@ -249,7 +249,7 @@ Guarantees removed, and their replacements:
   derivable from the vertex count without scanning.
 - Delete the variant-matrix tests rather than migrating them; add single-mesh invariant tests.
 - Sweep the vocabulary. This includes renaming `LoDConfig.terrainRadius`, `explorer/explorer-lod.ts`
-  and its exports, `FRONTEND_TUNING.explorer.lod`, and the Explorer panel label so residency stops
+  and its exports, `EXPLORER_TUNING.residency`, and the Explorer panel label so residency stops
   reading as detail — clean cutover, no aliases. It also includes the light-grid comment at
   `webgl2-terrain-program.ts:111-113`, which justifies the light grid's independence from the surface
   field by that field's resolution dropping with the stride. The grids stay separate; the reason must
@@ -302,7 +302,7 @@ merely simpler, and they were removed rather than left vestigial:
   `terrain-surface:${landblockId}`.
 
 **Rename.** `LoDConfig` -> `SceneInterestRadii`; `explorer-lod.ts` -> `explorer-residency-radius.ts`
-with its exports renamed to match; `FRONTEND_TUNING.explorer.lod` -> `.residency`; the `lod:` field
+with its exports renamed to match; `EXPLORER_TUNING.residency`; the `lod:` field
 on scene-interest requests -> `radii:`; the Explorer panel label "Outdoor LoD" -> "Outdoor
 residency", and its DOM/CSS ids with it. Clean cutover, no aliases. `grep -rni "\blod\b"` over
 `src` now returns only the deliberate `RETAIL DIVERGENCE` marker.
@@ -369,7 +369,7 @@ switching at a line is available but is not built unless raising it fails.
 
 ### Result: complete
 
-`FRONTEND_TUNING.rendering.solidTerrainFogCoverage` is the one constant; `solidTerrainCutoffLandblocks`
+`SHARED_FRONTEND_TUNING.rendering.solidTerrainFogCoverage` is the one constant; `solidTerrainCutoffLandblocks`
 in `environment/terrain-fog.ts` converts it and the frame's fog into an integer ring, and
 `landblockChebyshevDistance` (promoted to `landblocks.ts`) tests each landblock against it.
 

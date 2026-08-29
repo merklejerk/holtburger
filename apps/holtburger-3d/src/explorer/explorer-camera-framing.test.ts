@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { LandblockOwnerId } from "../lib/game/game-types";
 import { Vec3 } from "../lib/game/math/types";
-import { FRONTEND_TUNING } from "../lib/frontend-tuning";
+import { EXPLORER_TUNING } from "./explorer-tuning";
 import { resolveExplorerOutdoorFocusPose } from "./explorer-camera-framing";
 
 const LAND_BLOCK_ID = "0xda55ffff" as LandblockOwnerId;
@@ -11,7 +11,7 @@ describe("Explorer camera framing", () => {
 		const queriedPoints: Vec3[] = [];
 		const heights = [12, 8];
 		const center = new Vec3(41_952, 0, -16_416);
-		const focus = FRONTEND_TUNING.explorer.camera.outdoorFocus;
+		const focus = EXPLORER_TUNING.camera.outdoorFocus;
 		const queryOutdoorTerrainSurface = vi.fn((point: Vec3) => {
 			queriedPoints.push(point.clone());
 			const height = heights.shift();

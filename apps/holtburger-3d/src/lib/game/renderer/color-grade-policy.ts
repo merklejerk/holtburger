@@ -1,4 +1,4 @@
-import { FRONTEND_TUNING } from "../../frontend-tuning";
+import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import { relativeLuminance } from "../environment/scene-lighting";
 
 /**
@@ -293,7 +293,7 @@ export function temperatureTintToGains(
 	return { red: red / luma, green: green / luma, blue: blue / luma };
 }
 
-/** Validated identity-by-default look shared by every frame until frontend tuning changes. */
+/** Validated shared look used by the frame-settings baseline until a mode overrides it. */
 export const DEFAULT_COLOR_GRADE_PARAMETERS = createColorGradeParameters(
-	FRONTEND_TUNING.rendering.colorGrade.parameters,
+	SHARED_FRONTEND_TUNING.rendering.colorGrade.parameters,
 );

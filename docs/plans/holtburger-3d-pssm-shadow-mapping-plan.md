@@ -142,7 +142,7 @@ the same indoor analytic grounding.
 
 - `apps/holtburger-3d/src/lib/game/renderer/renderer.ts`
   - `FrameSettings` is the cold frontend-owned renderer-policy contract;
-  - `DEFAULT_FRAME_SETTINGS` reads defaults from `FRONTEND_TUNING`.
+  - `SHARED_FRAME_SETTINGS` reads defaults from `SHARED_FRONTEND_TUNING`.
 - `apps/holtburger-3d/src/lib/frontend-tuning.ts`
   - owns discoverable presentation defaults and immutable quality ceilings.
 - `apps/holtburger-3d/src/lib/game/renderer/render-world.ts`
@@ -338,7 +338,7 @@ a baseline-WebGL2 ceiling of 32. It sizes the shared shader constant, CPU record
 overflow selection for one EnvCell shell or outdoor terrain landblock; it is deliberately not a
 runtime Explorer control.
 
-Defaults live in `FRONTEND_TUNING`, remain within baseline WebGL2 guarantees, and start in
+Defaults live in `SHARED_FRONTEND_TUNING`, remain within baseline WebGL2 guarantees, and start in
 `shadow-maps` mode.
 
 ### Outdoor PSSM
@@ -564,7 +564,7 @@ large floor triangle and would disappear if only its vertices sampled the blob.
   `OutdoorPssmSettings`, and `EntityGroundingSettings`.
 - Colocate the documented eight-decal indoor ceiling with its fixed storage and GLSL source
   generation.
-- Add default-on conservative values to `FRONTEND_TUNING`.
+- Add default-on conservative values to `SHARED_FRONTEND_TUNING`.
 - Add `FrameSettings.entityShadows` as one complete composite and migrate complete fixtures.
 - Add only the missing orthographic/frustum primitives to the existing math vocabulary.
 - Add a pure outdoor PSSM module producing split distances, frustum-slice corners, stable light

@@ -4085,7 +4085,7 @@ back to flat and are released by resize/destroy policy.
   indoor/outdoor cycles, two near-plane straddles, and opaque, alpha-test, transparent, and
   additive ordering.
 - With the browser, archive, blend, lifecycle, and target-ownership matrix passing, production
-  `DEFAULT_FRAME_SETTINGS` now selects `portal`. The harness keeps an explicit flat baseline and
+  `SHARED_FRAME_SETTINGS` now selects `portal`. The harness keeps an explicit flat baseline and
   Explorer keeps both user-selectable modes.
 - Phase-close verification passed: 66 frontend test files / 354 tests, Svelte and TypeScript
   checks, ESLint, Knip, and Clippy with warnings denied.

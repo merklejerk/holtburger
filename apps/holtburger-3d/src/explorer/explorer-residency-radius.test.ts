@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FRONTEND_TUNING } from "../lib/frontend-tuning";
+import { EXPLORER_TUNING } from "./explorer-tuning";
 import {
 	countResidentLandblocks,
 	updateExplorerResidencyRadius,
@@ -26,7 +26,7 @@ describe("Explorer residency-radius controls", () => {
 
 	it("keeps detail layers beneath buildings and disables them with buildings", () => {
 		let config = updateExplorerResidencyRadius(
-			FRONTEND_TUNING.explorer.residency.defaultRadii,
+			EXPLORER_TUNING.residency.defaultRadii,
 			"buildings",
 			2,
 		);

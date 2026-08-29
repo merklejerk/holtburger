@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import { acFrameTransform, sceneVec3 } from "../../assets/ac-frame";
-import { FRONTEND_TUNING } from "../../frontend-tuning";
+import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import { createLandblockWorldOrigin } from "../landblocks";
 import { Vec3 } from "../math/types";
 import type { ScenePlacement } from "../scene";
 import { resolveViewerLightOrigin } from "./viewer-light";
 
 const LANDBLOCK = "0x2020ffff";
-const CARRY_HEIGHT = FRONTEND_TUNING.rendering.viewerLight.carryHeight;
+const CARRY_HEIGHT = SHARED_FRONTEND_TUNING.rendering.viewerLight.carryHeight;
 
 /** One spawned-entity placement built exactly as the dynamic feed builds them. */
 function carrierAt(

@@ -598,7 +598,7 @@ Progress: **Complete 2026-08-08.**
 - **Weather opacity is now a marked divergence, by user decision** (2026-08-08). Reviewing against
   retail, the viewer-pinned columns read as distracting during camera movement — and the reviewer
   noted they are erratic *in retail too*, so this is a deliberate improvement rather than a bug
-  fix. `FRONTEND_TUNING.rendering.weatherOpacityScale` scales authored weather opacity only;
+  fix. `SHARED_FRONTEND_TUNING.rendering.weather.opacityScale` scales authored weather opacity only;
   celestial layers pass 1 and are untouched. Verified the knob actually bites: both rain surfaces
   are `ALPHA | ADDITIVE`, which `objectBlendPolicy` maps to `SRC_ALPHA, ONE`, so alpha scales the
   added light. A pure-additive surface without the `ALPHA` bit would map to `ONE, ONE` and ignore

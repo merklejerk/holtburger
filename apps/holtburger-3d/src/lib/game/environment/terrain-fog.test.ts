@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FRONTEND_TUNING } from "../../frontend-tuning";
+import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
 import {
 	resolveTerrainCoverageFog,
@@ -42,7 +42,7 @@ describe("farTerrainCutoffLandblocks", () => {
 	it("converts the configured fog coverage into a whole landblock ring", () => {
 		const fog = resolveTerrainCoverageFog(AUTHORED_FOG, { terrainRadius: 8 });
 		if (fog === null) throw new Error("Coverage fog must resolve.");
-		const coverage = FRONTEND_TUNING.rendering.farTerrainFogCoverage;
+		const coverage = SHARED_FRONTEND_TUNING.rendering.farTerrainFogCoverage;
 
 		expect(farTerrainCutoffLandblocks(fog)).toBe(
 			Math.ceil(

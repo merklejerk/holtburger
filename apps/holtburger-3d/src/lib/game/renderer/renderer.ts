@@ -16,25 +16,15 @@ export interface OutdoorLightLookup {
 	readonly isEmpty: boolean;
 	resolve(landblockId: LandblockOwnerId): LandblockLights;
 }
-import { FRONTEND_TUNING } from "../../frontend-tuning";
 import type { TextureFilteringPolicy } from "./texture-filtering-policy";
 import type { SkySourcePresentations } from "../../assets/decode-sky-record";
 import type { ParticleMeshPresentations } from "../../assets/decode-particle-mesh-record";
 import type { ParticleSourceRange } from "../systems/particle-system";
 import type { ParticleRecordFrame } from "./webgl2-particle-pass";
 import type { TexturePreparer } from "../textures/texture-preparer";
-import {
-	DEFAULT_AMBIENT_OCCLUSION_PARAMETERS,
-	type AmbientOcclusionSettings,
-} from "./ambient-occlusion-policy";
-import {
-	DEFAULT_COLOR_GRADE_PARAMETERS,
-	type ColorGradeSettings,
-} from "./color-grade-policy";
-import {
-	DEFAULT_ENTITY_SHADOW_SETTINGS,
-	type EntityShadowSettings,
-} from "./entity-shadow-policy";
+import type { AmbientOcclusionSettings } from "./ambient-occlusion-policy";
+import type { ColorGradeSettings } from "./color-grade-policy";
+import type { EntityShadowSettings } from "./entity-shadow-policy";
 
 /** Environment-cell visibility scheduler selected without rebuilding resident content. */
 export type EnvCellRenderMode = "flat" | "portal";
@@ -98,43 +88,6 @@ export interface FrameSettings {
 	/** Quality policy snapshotted once for every rendered frame. */
 	readonly quality: RenderQualitySettings;
 }
-
-/** Default dynamic display choices matching the region-authored presentation. */
-export const DEFAULT_FRAME_SETTINGS: FrameSettings = {
-	layerVisibility: {
-		[LandblockLayerKind.Terrain]: true,
-		[LandblockLayerKind.Buildings]: true,
-		[LandblockLayerKind.Objects]: true,
-		[LandblockLayerKind.Generated]: true,
-		[LandblockLayerKind.EnvCells]: true,
-	},
-	ambientOcclusion: {
-		enabled: FRONTEND_TUNING.rendering.ambientOcclusion.enabledByDefault,
-		parameters: DEFAULT_AMBIENT_OCCLUSION_PARAMETERS,
-	},
-	colorGrade: {
-		enabled: FRONTEND_TUNING.rendering.colorGrade.enabledByDefault,
-		parameters: DEFAULT_COLOR_GRADE_PARAMETERS,
-	},
-	entityShadows: DEFAULT_ENTITY_SHADOW_SETTINGS,
-	distanceFogEnabled:
-		FRONTEND_TUNING.rendering.frameDefaults.distanceFogEnabled,
-	viewerLightEnabled: FRONTEND_TUNING.rendering.viewerLight.enabledByDefault,
-	weatherEnabled: FRONTEND_TUNING.rendering.frameDefaults.weatherEnabled,
-	staticLightsEnabled:
-		FRONTEND_TUNING.rendering.frameDefaults.staticLightsEnabled,
-	envCellRenderMode: FRONTEND_TUNING.rendering.frameDefaults.envCellRenderMode,
-	quality: {
-		minimumObjectFootprintCssPixelArea:
-			FRONTEND_TUNING.rendering.frameDefaults
-				.minimumObjectFootprintCssPixelArea,
-		minimumPortalFootprintCssPixelArea:
-			FRONTEND_TUNING.rendering.frameDefaults
-				.minimumPortalFootprintCssPixelArea,
-		renderScale: FRONTEND_TUNING.rendering.frameDefaults.renderScale,
-		textureFiltering: FRONTEND_TUNING.rendering.frameDefaults.textureFiltering,
-	},
-};
 
 /** Camera state for one camera or portal view. The renderer collects scene content itself. */
 export interface FrameViewInput {
@@ -505,7 +458,7 @@ export interface RendererCpuFrameProfileWindow {
 	/**
 	 * Nearest-rank 95th percentile of total CPU frame time over the most recent frames only.
 	 *
-	 * Bounded by `FRONTEND_TUNING.diagnostics.percentileCpuFrameTail` because a percentile needs
+	 * Bounded by the shared diagnostics tuning's percentile CPU-frame tail because a percentile needs
 	 * retained samples to rank and running sums cannot supply them. Read it as a hitch signal for
 	 * the recent past, never as a property of the measurement window.
 	 */

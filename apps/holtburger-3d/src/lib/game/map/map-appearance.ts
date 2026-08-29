@@ -1,14 +1,14 @@
-import { FRONTEND_TUNING } from "../../frontend-tuning";
+import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 
 /**
  * GPU-ready form of the overhead map's tuning policy.
  *
- * Deliberately holds no values: every colour and threshold is authored in `frontend-tuning.ts`
- * alongside the rest of the frontend's knobs, and this module only converts them into the shapes
- * WebGL and the canvas want, once at module scope rather than per frame. Change appearance there,
- * not here.
+ * Deliberately holds no values: every colour and threshold is authored in the shared frontend
+ * tuning module alongside the rest of the frontend's knobs, and this module only converts them
+ * into the shapes WebGL and the canvas want, once at module scope rather than per frame. Change
+ * appearance there, not here.
  */
-const MAP_TUNING = FRONTEND_TUNING.map;
+const MAP_TUNING = SHARED_FRONTEND_TUNING.map;
 
 /** One authored colour as a GL uniform payload. */
 function colorVector(color: {

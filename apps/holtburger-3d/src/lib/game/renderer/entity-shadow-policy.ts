@@ -1,4 +1,4 @@
-import { FRONTEND_TUNING } from "../../frontend-tuning";
+import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import type { DynamicEntityCategory } from "../dynamic-entity-category";
 import type { ObjectPresentationFootprint } from "./render-world";
 
@@ -24,7 +24,8 @@ export const MAX_OUTDOOR_PSSM_PCF_RADIUS = 2;
 const MAX_BASELINE_WEBGL2_GROUNDING_CASTERS_PER_RECEIVER = 32;
 
 const configuredGroundingCasterCapacity =
-	FRONTEND_TUNING.rendering.entityShadows.maximumGroundingCastersPerReceiver;
+	SHARED_FRONTEND_TUNING.rendering.entityShadows
+		.maximumGroundingCastersPerReceiver;
 if (
 	!Number.isInteger(configuredGroundingCasterCapacity) ||
 	configuredGroundingCasterCapacity < 1 ||
@@ -317,7 +318,7 @@ function finiteRange(
 	}
 }
 
-const tuning = FRONTEND_TUNING.rendering.entityShadows;
+const tuning = SHARED_FRONTEND_TUNING.rendering.entityShadows;
 
 /** Validated default-hybrid entity-shadow settings used by every frontend composition. */
 export const DEFAULT_ENTITY_SHADOW_SETTINGS = createEntityShadowSettings({

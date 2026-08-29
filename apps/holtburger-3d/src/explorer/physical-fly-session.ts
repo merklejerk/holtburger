@@ -8,7 +8,7 @@ import {
 } from "../lib/game/motion/host-physical-fly-path";
 import type { HostCameraPlacement } from "../lib/game/motion/host-placed-path";
 import type { EnvCellId } from "../lib/game/game-types";
-import { FRONTEND_TUNING } from "../lib/frontend-tuning";
+import { EXPLORER_TUNING } from "./explorer-tuning";
 import type {
 	HostCommandArguments,
 	HostCommandName,
@@ -33,9 +33,9 @@ function physicalFlyCameraSpeedEnvelope(): PhysicalFlySpeedEnvelope {
 	return {
 		kind: "linear-ramp",
 		accelerationSeconds:
-			FRONTEND_TUNING.explorer.camera.controls.keyboardAccelerationSeconds,
+			EXPLORER_TUNING.camera.controls.keyboardAccelerationSeconds,
 		initialSpeedMultiplier:
-			FRONTEND_TUNING.explorer.camera.controls.keyboardInitialSpeedMultiplier,
+			EXPLORER_TUNING.camera.controls.keyboardInitialSpeedMultiplier,
 	};
 }
 

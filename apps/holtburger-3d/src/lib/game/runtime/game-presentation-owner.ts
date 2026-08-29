@@ -16,6 +16,7 @@ import type { ActiveRegionSource } from "../../assets/active-region-source";
 import type { HostTransport } from "../../host/host-transport";
 import { StandardCommitPipeline } from "../commit/pipeline";
 import { WebGL2Device } from "../renderer/webgl2-device";
+import type { FrameSettings } from "../renderer/renderer";
 import { ActiveRegionStaticDetailOwner } from "../resolution/active-region-static-detail";
 import { RuntimeTickProfiler } from "./runtime-tick-profiler";
 import { GamePresentationRuntime } from "./game-presentation-runtime";
@@ -32,6 +33,8 @@ export interface GamePresentationOwnerDependencies {
 	readonly canvas: HTMLCanvasElement;
 	readonly hostTransport: HostTransport;
 	readonly audioTuning: GamePresentationAudioTuning;
+	/** Mode-owned initial display policy forwarded to the shared runtime. */
+	readonly frameSettings: FrameSettings;
 	/** Optional lifecycle signal; construction stops between expensive host/GPU steps when aborted. */
 	readonly signal?: AbortSignal;
 	/** Optional frame profiler; a diagnostics-oriented frontend may inject one. */
@@ -98,6 +101,7 @@ export class GamePresentationOwner {
 			canvas,
 			hostTransport,
 			audioTuning,
+			frameSettings,
 			signal,
 			tickProfiler,
 			audioContextFactory = () => new AudioContext(),
@@ -161,6 +165,7 @@ export class GamePresentationOwner {
 				soundTableSource,
 				ParticleMeshHostSource.build(hostTransport),
 				setupVisualSource,
+				frameSettings,
 				undefined,
 				tickProfiler,
 			);

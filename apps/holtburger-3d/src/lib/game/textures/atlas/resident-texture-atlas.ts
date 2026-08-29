@@ -36,7 +36,7 @@ import {
 	AtlasPagePublication,
 	type AtlasPagePublicationDiagnostics,
 } from "./page-publication";
-import { FRONTEND_TUNING } from "../../../frontend-tuning";
+import { SHARED_FRONTEND_TUNING } from "../../../frontend-tuning";
 
 /** Exact owner/revision requirement handle; callers retain it for activation or stale cleanup. */
 export interface AtlasRequirementHandle<TOwner extends string> {
@@ -206,7 +206,7 @@ export class ResidentTextureAtlas<TOwner extends string> {
 		this.#physical = physical;
 		this.#pageSize =
 			physical?.pageSize ??
-			FRONTEND_TUNING.workloads.staticObjectTextureAtlas.pageSize;
+			SHARED_FRONTEND_TUNING.workloads.staticObjectTextureAtlas.pageSize;
 		this.#publication =
 			physical === null
 				? null
@@ -599,7 +599,7 @@ export class ResidentTextureAtlas<TOwner extends string> {
 				shouldAcceptCompaction(
 					plans.stable,
 					plans.compact,
-					FRONTEND_TUNING.workloads.staticObjectTextureAtlas
+					SHARED_FRONTEND_TUNING.workloads.staticObjectTextureAtlas
 						.maximumCompactionRebuildPages,
 				) &&
 				(await this.#tryPublishCompaction(purpose, plans.compact, plans))
@@ -653,7 +653,7 @@ export class ResidentTextureAtlas<TOwner extends string> {
 		const compact = couldCompactionReducePages(
 			stable,
 			this.#pageSize,
-			FRONTEND_TUNING.workloads.staticObjectTextureAtlas
+			SHARED_FRONTEND_TUNING.workloads.staticObjectTextureAtlas
 				.maximumCompactionRebuildPages,
 		)
 			? await physical.layoutPlanner.plan({

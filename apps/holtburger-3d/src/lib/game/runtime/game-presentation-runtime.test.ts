@@ -14,11 +14,11 @@ import type {
 	ResolvedObjectResident,
 } from "../resolution/landblock-layer";
 import {
-	DEFAULT_FRAME_SETTINGS,
 	type FrameSelectionMetrics,
 	type Renderer,
 } from "../renderer/renderer";
-import { FRONTEND_TUNING } from "../../frontend-tuning";
+import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
+import { SHARED_FRAME_SETTINGS } from "../../frontend-frame-settings";
 import type { ParticleEmitterSource } from "../../assets/particle-emitter-source";
 import type { SoundTableSource } from "../../assets/sound-table-source";
 import type { ParticleMeshSource } from "../../assets/particle-mesh-source";
@@ -27,6 +27,7 @@ import type { RendererResourceManager } from "../renderer/resource-manager";
 import { LandblockLayerKind, type LandblockIdLayer } from "./scene-interest";
 import {
 	GamePresentationRuntime,
+	type GamePresentationRuntimeDependencies,
 	type GamePresentationRuntimeRenderDevice,
 } from "./game-presentation-runtime";
 import type { SceneAvailabilityEvent } from "./scene-availability";
@@ -305,41 +306,42 @@ describe("GamePresentationRuntime view and interest control", () => {
 		expect(frames[0]?.anchorLandblockId).toBe("0x2020ffff");
 		expect(frames[0]?.extent).toEqual({ height: 480, width: 640 });
 		expect(frames[0]?.frameSettings).toEqual({
-			layerVisibility: DEFAULT_FRAME_SETTINGS.layerVisibility,
-			ambientOcclusion: DEFAULT_FRAME_SETTINGS.ambientOcclusion,
-			colorGrade: DEFAULT_FRAME_SETTINGS.colorGrade,
-			entityShadows: DEFAULT_FRAME_SETTINGS.entityShadows,
+			layerVisibility: SHARED_FRAME_SETTINGS.layerVisibility,
+			ambientOcclusion: SHARED_FRAME_SETTINGS.ambientOcclusion,
+			colorGrade: SHARED_FRAME_SETTINGS.colorGrade,
+			entityShadows: SHARED_FRAME_SETTINGS.entityShadows,
 			distanceFogEnabled: true,
 			viewerLightEnabled:
-				FRONTEND_TUNING.rendering.viewerLight.enabledByDefault,
-			weatherEnabled: FRONTEND_TUNING.rendering.frameDefaults.weatherEnabled,
+				SHARED_FRONTEND_TUNING.rendering.viewerLight.enabledByDefault,
+			weatherEnabled:
+				SHARED_FRONTEND_TUNING.rendering.frameDefaults.weatherEnabled,
 			staticLightsEnabled:
-				FRONTEND_TUNING.rendering.frameDefaults.staticLightsEnabled,
+				SHARED_FRONTEND_TUNING.rendering.frameDefaults.staticLightsEnabled,
 			envCellRenderMode: "portal",
 			quality: {
 				minimumObjectFootprintCssPixelArea:
-					FRONTEND_TUNING.rendering.frameDefaults
+					SHARED_FRONTEND_TUNING.rendering.frameDefaults
 						.minimumObjectFootprintCssPixelArea,
 				minimumPortalFootprintCssPixelArea:
-					FRONTEND_TUNING.rendering.frameDefaults
+					SHARED_FRONTEND_TUNING.rendering.frameDefaults
 						.minimumPortalFootprintCssPixelArea,
-				renderScale: FRONTEND_TUNING.rendering.frameDefaults.renderScale,
+				renderScale: SHARED_FRONTEND_TUNING.rendering.frameDefaults.renderScale,
 				textureFiltering:
-					FRONTEND_TUNING.rendering.frameDefaults.textureFiltering,
+					SHARED_FRONTEND_TUNING.rendering.frameDefaults.textureFiltering,
 			},
 		});
 		runtime.setFrameSettings({
-			layerVisibility: DEFAULT_FRAME_SETTINGS.layerVisibility,
+			layerVisibility: SHARED_FRAME_SETTINGS.layerVisibility,
 			ambientOcclusion: {
-				...DEFAULT_FRAME_SETTINGS.ambientOcclusion,
+				...SHARED_FRAME_SETTINGS.ambientOcclusion,
 				enabled: true,
 				parameters: {
-					...DEFAULT_FRAME_SETTINGS.ambientOcclusion.parameters,
+					...SHARED_FRAME_SETTINGS.ambientOcclusion.parameters,
 					intensity: 2,
 				},
 			},
-			colorGrade: DEFAULT_FRAME_SETTINGS.colorGrade,
-			entityShadows: DEFAULT_FRAME_SETTINGS.entityShadows,
+			colorGrade: SHARED_FRAME_SETTINGS.colorGrade,
+			entityShadows: SHARED_FRAME_SETTINGS.entityShadows,
 			distanceFogEnabled: false,
 			viewerLightEnabled: false,
 			weatherEnabled: true,
@@ -348,23 +350,23 @@ describe("GamePresentationRuntime view and interest control", () => {
 			quality: {
 				minimumObjectFootprintCssPixelArea: 8,
 				minimumPortalFootprintCssPixelArea: 4,
-				renderScale: FRONTEND_TUNING.rendering.frameDefaults.renderScale,
+				renderScale: SHARED_FRONTEND_TUNING.rendering.frameDefaults.renderScale,
 				textureFiltering: "nearest",
 			},
 		});
 		runtime.render(2);
 		expect(frames[1]?.frameSettings).toEqual({
-			layerVisibility: DEFAULT_FRAME_SETTINGS.layerVisibility,
+			layerVisibility: SHARED_FRAME_SETTINGS.layerVisibility,
 			ambientOcclusion: {
-				...DEFAULT_FRAME_SETTINGS.ambientOcclusion,
+				...SHARED_FRAME_SETTINGS.ambientOcclusion,
 				enabled: true,
 				parameters: {
-					...DEFAULT_FRAME_SETTINGS.ambientOcclusion.parameters,
+					...SHARED_FRAME_SETTINGS.ambientOcclusion.parameters,
 					intensity: 2,
 				},
 			},
-			colorGrade: DEFAULT_FRAME_SETTINGS.colorGrade,
-			entityShadows: DEFAULT_FRAME_SETTINGS.entityShadows,
+			colorGrade: SHARED_FRAME_SETTINGS.colorGrade,
+			entityShadows: SHARED_FRAME_SETTINGS.entityShadows,
 			distanceFogEnabled: false,
 			viewerLightEnabled: false,
 			weatherEnabled: true,
@@ -373,7 +375,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 			quality: {
 				minimumObjectFootprintCssPixelArea: 8,
 				minimumPortalFootprintCssPixelArea: 4,
-				renderScale: FRONTEND_TUNING.rendering.frameDefaults.renderScale,
+				renderScale: SHARED_FRONTEND_TUNING.rendering.frameDefaults.renderScale,
 				textureFiltering: "nearest",
 			},
 		});
@@ -1472,22 +1474,17 @@ function motionDrivenEntity(
 }
 
 async function buildGamePresentationRuntimeForTest(
-	...parameters: Parameters<typeof GamePresentationRuntime.build>
+	device: GamePresentationRuntimeRenderDevice,
+	commitPipeline: CommitPipeline,
+	texturePixelSource: TexturePixelSource,
+	animationSource: AnimationAssetSource,
+	physicsScriptSource: PhysicsScriptSource,
+	audioDevice: GamePresentationRuntimeDependencies["audioDevice"],
+	particleEmitterSource: ParticleEmitterSource,
+	soundTableSource: SoundTableSource,
+	particleMeshSource: ParticleMeshSource,
+	setupVisualSource: SetupVisualSource | null,
 ): Promise<GamePresentationRuntime> {
-	const [
-		device,
-		commitPipeline,
-		texturePixelSource,
-		animationSource,
-		physicsScriptSource,
-		audioDevice,
-		particleEmitterSource,
-		soundTableSource,
-		particleMeshSource,
-		setupVisualSource,
-		roll,
-		tickProfiler,
-	] = parameters;
 	return GamePresentationRuntime.build(
 		device,
 		commitPipeline,
@@ -1499,8 +1496,9 @@ async function buildGamePresentationRuntimeForTest(
 		soundTableSource,
 		particleMeshSource,
 		setupVisualSource,
-		roll,
-		tickProfiler,
+		SHARED_FRAME_SETTINGS,
+		undefined,
+		undefined,
 		{ createTerrainWorker: () => new TestTerrainWorkerPort() },
 	);
 }

@@ -140,7 +140,7 @@ export function withCurve(
 }
 
 /**
- * Emit a tuned look as the `colorGrade` property of `FRONTEND_TUNING.rendering`.
+ * Emit a tuned look as the `colorGrade` property of `EXPLORER_TUNING_OVERRIDES`.
  *
  * Formatted to match the surrounding file so a paste needs no reformatting, and shaped as the
  * whole property so replacing it leaves the explanatory comment above it intact.
@@ -150,24 +150,24 @@ export function serializeColorGradeTuningFragment(
 	enabledByDefault: boolean,
 ): string {
 	const lines = [
-		"\t\tcolorGrade: {",
-		`\t\t\tenabledByDefault: ${enabledByDefault},`,
-		"\t\t\tparameters: {",
-		`\t\t\t\ttemperature: ${formatNumber(parameters.temperature)},`,
-		`\t\t\t\ttint: ${formatNumber(parameters.tint)},`,
-		`\t\t\t\tsaturation: ${formatNumber(parameters.saturation)},`,
-		"\t\t\t\tcurves: {",
+		"\tcolorGrade: {",
+		`\t\tenabledByDefault: ${enabledByDefault},`,
+		"\t\tparameters: {",
+		`\t\t\ttemperature: ${formatNumber(parameters.temperature)},`,
+		`\t\t\ttint: ${formatNumber(parameters.tint)},`,
+		`\t\t\tsaturation: ${formatNumber(parameters.saturation)},`,
+		"\t\t\tcurves: {",
 	];
 	for (const channel of COLOR_GRADE_CURVE_CHANNELS) {
-		lines.push(`\t\t\t\t\t${channel}: [`);
+		lines.push(`\t\t\t\t${channel}: [`);
 		for (const point of parameters.curves[channel]) {
 			lines.push(
-				`\t\t\t\t\t\t{ x: ${formatNumber(point.x)}, y: ${formatNumber(point.y)} },`,
+				`\t\t\t\t\t{ x: ${formatNumber(point.x)}, y: ${formatNumber(point.y)} },`,
 			);
 		}
-		lines.push("\t\t\t\t\t],");
+		lines.push("\t\t\t\t],");
 	}
-	lines.push("\t\t\t\t},", "\t\t\t},", "\t\t},");
+	lines.push("\t\t\t},", "\t\t},", "\t},");
 	return lines.join("\n");
 }
 

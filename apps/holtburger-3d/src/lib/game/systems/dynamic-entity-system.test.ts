@@ -35,7 +35,7 @@ import {
 	type ObjectVisualTemplatePreparer,
 } from "./object-visual-template-repository";
 import { RUNTIME_LIGHT_RANGE_SCALE } from "../environment/runtime-lights";
-import { FRONTEND_TUNING } from "../../frontend-tuning";
+import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 
 describe("DynamicEntitySystem authored ownership", () => {
 	it("installs and removes a promoted owner population as one set", async () => {
@@ -477,7 +477,8 @@ describe("DynamicEntitySystem authored ownership", () => {
 			{
 				color: { red: 0.1, green: 0.2, blue: 0.3 },
 				intensity:
-					100 * FRONTEND_TUNING.rendering.outdoorAuthoredLights.intensityScale,
+					100 *
+					SHARED_FRONTEND_TUNING.rendering.outdoorAuthoredLights.intensityScale,
 				position: { x: 13, y: 2, z: -189 },
 				range: 4 * RUNTIME_LIGHT_RANGE_SCALE,
 			},

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { SHARED_FRAME_SETTINGS } from "../../frontend-frame-settings";
 import { LandblockLayerKind } from "../runtime/scene-interest";
-import { DEFAULT_FRAME_SETTINGS, type RenderLayerVisibility } from "./renderer";
+import type { RenderLayerVisibility } from "./renderer";
 import { renderCullingGroupFilter } from "./render-layer-visibility";
 
 describe("render contribution layer visibility", () => {
@@ -44,5 +45,5 @@ describe("render contribution layer visibility", () => {
 function visibilityWithHiddenLayer(
 	hiddenLayer: LandblockLayerKind,
 ): RenderLayerVisibility {
-	return { ...DEFAULT_FRAME_SETTINGS.layerVisibility, [hiddenLayer]: false };
+	return { ...SHARED_FRAME_SETTINGS.layerVisibility, [hiddenLayer]: false };
 }

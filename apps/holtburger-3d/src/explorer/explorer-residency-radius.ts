@@ -1,5 +1,5 @@
 import type { SceneInterestRadii } from "../lib/game/runtime/types";
-import { FRONTEND_TUNING } from "../lib/frontend-tuning";
+import { EXPLORER_TUNING } from "./explorer-tuning";
 
 export type ExplorerRadiusKind =
 	"buildings" | "envCells" | "explicitObjects" | "generatedObjects" | "terrain";
@@ -75,13 +75,10 @@ export function formatResidencyRadius(radius: number | null): string {
 
 function clampRadius(radius: number | null): number {
 	if (radius === null || !Number.isFinite(radius))
-		return FRONTEND_TUNING.explorer.residency.minimumRadius;
+		return EXPLORER_TUNING.residency.minimumRadius;
 	return Math.min(
-		FRONTEND_TUNING.explorer.residency.maximumRadius,
-		Math.max(
-			FRONTEND_TUNING.explorer.residency.minimumRadius,
-			Math.trunc(radius),
-		),
+		EXPLORER_TUNING.residency.maximumRadius,
+		Math.max(EXPLORER_TUNING.residency.minimumRadius, Math.trunc(radius)),
 	);
 }
 

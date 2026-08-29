@@ -488,7 +488,7 @@ export const SHARED_FRONTEND_TUNING = {
 			 * Interdependent with `falloff`: changing the reach without retuning this changes how
 			 * bright the pool is, not just how far it goes.
 			 */
-			intensity: 34,
+			intensity: 10,
 			/** `RGBColor::SetColor32(&viewer_light.color, 0xFFFFFFFF)`, acclient.c:139346. */
 			color: { red: 1, green: 1, blue: 1 },
 			/**

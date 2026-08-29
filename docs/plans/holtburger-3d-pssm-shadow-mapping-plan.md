@@ -311,6 +311,7 @@ Mode semantics are exhaustive and renderer-owned:
 - cascade count within one small renderer ceiling;
 - square map resolution bounded by baseline WebGL2 guarantees;
 - maximum distance, clamped by the camera far plane;
+- minimum light-view elevation above the horizon, without changing scene sunlight;
 - practical/logarithmic split blend;
 - cascade transition fraction;
 - constant receiver depth bias;
@@ -341,8 +342,9 @@ Defaults live in `FRONTEND_TUNING`, remain within baseline WebGL2 guarantees, an
 
 Outdoor PSSM is the only shadow-map family:
 
-- Normalize the existing regional sun direction for light-view construction while preserving its
-  original magnitude in regional lighting.
+- Normalize the existing regional sun direction for light-view construction, preserve its
+  horizontal azimuth, and clamp only the PSSM elevation to the configured minimum. Preserve the
+  original vector and magnitude in regional lighting.
 - Use `camera.near` through `min(camera.far, maximumDistance)` as the covered interval.
 - Compute practical PSSM splits from the configured uniform/logarithmic blend.
 - Reconstruct each camera-frustum slice in the anchor-relative frame.
@@ -1238,7 +1240,11 @@ large floor triangle and would disappear if only its vertices sampled the blob.
   stable width per location, while scalar/vector scratch remains four components. Capacity-sensitive
   tests import the runtime constant, and shared dynamic-fact/uniform-attempt vocabulary no longer
   claims the analytic path is indoor-only.
-- Final acceptance verification passed all 225 TypeScript test files (1,683 tests), complete Svelte
+- Follow-up tuning adds a minimum PSSM light elevation, defaulting to 15 degrees. Cascade and caster
+  frustum construction preserve the authored azimuth and clamp low elevation only; regional-sun
+  lighting continues to consume the original authored vector. The value is validated with the
+  complete PSSM settings and remains live in Explorer alongside the other shadow-map controls.
+- Final acceptance verification passed all 225 TypeScript test files (1,685 tests), complete Svelte
   and TypeScript checks, TypeScript/Rust/dead-export lint, formatting, 246 host tests, 295 core tests,
   and combined core/host clippy with warnings denied. The real-GPU mode cycle reported no page or
   GL error: `none` and `simple` retained zero PSSM textures, while `shadow-maps` allocated one
@@ -1246,35 +1252,35 @@ large floor triangle and would disappear if only its vertices sampled the blob.
 
 ## Risks and Mitigations
 
-| Risk                                                          | Consequence                                                  | Mitigation                                                                                                                        |
-| ------------------------------------------------------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
-| Client and Explorer category fact adapters drift              | Equivalent actors participate differently                    | Share one semantic category policy with narrow live/template adapters, carry one resolved enum, and cover representative fixtures |
-| Outdoor caster alpha is ignored                               | Hair or clothing can cast solid silhouettes                  | Accept the first-version tradeoff and keep the depth pass material-free                                                           |
-| Off-camera outdoor casters are omitted                        | Shadows pop at screen edges                                  | Query cascade light frusta rather than reuse camera-visible dynamic submissions                                                   |
-| Outdoor-shadow-only dynamic animation is not retained         | An off-camera cast silhouette freezes                        | Union outdoor caster roots into the existing renderer animation-liveness feedback; indoor candidates already use visible roots    |
-| Reused scene-query entries are overwritten                    | A later cascade query corrupts an earlier caster set         | Fully consume each query before issuing another; retain only owned compact caster records                                         |
-| Depth submission bypasses frame-instance batching             | Crowds multiply caster draw calls and transform uploads      | Use an attribute-instanced depth program and the existing compatible-run/arena vocabulary                                         |
-| Indoor selection queries once per cell                        | Cell-grid rooms repeat broadphase work                       | Collect eligible dynamic roots once from the ordinary view query and intersect the compact pool against visible shells            |
-| PSSM state corrupts later portal/object draws                 | Subsequent passes render incorrectly                         | Restore explicit framebuffer/viewport state and invalidate cached object routing after shadow submission                          |
-| Cascade matrices swim                                         | Distracting outdoor shimmer                                  | Use stable fits, texel snapping, deterministic camera sweeps, and final screenshot review                                         |
-| Bias tuning detaches outdoor shadows                          | Peter-panning                                                | Keep constant, normal, and polygon-offset controls separate and bounded                                                           |
-| Far-terrain optimization overlaps shadow coverage             | Visible terrain shadow gap                                   | Keep terrain inside maximum distance on the shadow-capable near path                                                              |
-| Grounding code bloats every object shader                     | Nonreceiver cost and variant sprawl                          | Compile one shell-only grounding option; ordinary programs contain no grounding declarations                                      |
-| A decal lies inside one large floor triangle                  | Vertex-only evaluation misses it                             | Evaluate the radial function per fragment and interpolate only position/up-facing weight                                          |
-| A receiver exceeds its configured caster capacity             | A farther visible decal is omitted                           | Invoke deterministic nearest-camera partial selection only on overflow; treat omission as the declared quality budget             |
-| Common receivers pay unnecessary sorting cost                 | Frame-hot CPU overhead grows for no visual benefit           | Preserve candidate order and skip all ordering work through the configured per-receiver capacity                                  |
-| Cell-grid room seams split a blob                             | Grounding pops at invisible EnvCell boundaries               | Select by influence-volume/cell intersection across same-island cells rather than resident scope alone                            |
-| Overlapping cells contaminate grounding                       | A caster grounds an unrelated stacked shell                  | Require stable visibility-island equality and bound vertical drop/radius                                                          |
-| Same-island structures do not occlude blobs                   | A short decal can reach a nearby unintended floor            | Keep the effect short, suppress non-upward surfaces, and accept that it is grounding rather than light transport                  |
-| Crowds blacken the floor                                      | Overlapping decals look like soot                            | Combine by strongest contribution rather than addition or multiplication                                                          |
-| Animated mesh minima cross receiving floors                   | A selected caster disappears before radius evaluation        | Anchor caster Y to authoritative root placement while retaining pose-reactive rigid X/Z bounds                                    |
-| Particle envelopes contaminate grounding                      | Temporary effects resize or move an actor's decal            | Publish exact rigid-pose bounds separately and keep particle expansion only in presentation/culling bounds                        |
-| Animated horizontal bounds produce an objectionable excursion | A blob changes size or center too abruptly                   | Prove the case in representative motion first; add the narrowest clamp or smoothing only if visual review requires it             |
-| Repeated shell material draws rewrite identical uniforms      | CPU submission work grows                                    | Compute one cell record set and let the object-state cache suppress identical consecutive writes                                  |
-| Mode changes leave stale work or resources active             | A lower mode retains hidden cost or stale shading            | Gate each path from the exhaustive mode, clear analytic sets, and release PSSM targets outside `shadow-maps`                      |
-| Adjacent outdoor landblocks choose different overflow sets    | A dense border crowd can expose a simple-shadow seam         | Intersect each influence with both bounds and use identical camera/identity ranking; verify overflow borders visually             |
-| Simple grounding promotes distant terrain to the near shader  | A remote visible caster defeats the far-terrain optimization | Retain near terrain only for landblocks with nonempty records; keep the configured record cap and omit analytic code from far terrain  |
-| Portal transition invents a second shadow lifecycle           | Snapshot/tunnel resources become tangled with world shading  | Keep effects inside ordinary scene rendering; outgoing color is already shaded and the tunnel is excluded                         |
+| Risk                                                          | Consequence                                                  | Mitigation                                                                                                                            |
+| ------------------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Client and Explorer category fact adapters drift              | Equivalent actors participate differently                    | Share one semantic category policy with narrow live/template adapters, carry one resolved enum, and cover representative fixtures     |
+| Outdoor caster alpha is ignored                               | Hair or clothing can cast solid silhouettes                  | Accept the first-version tradeoff and keep the depth pass material-free                                                               |
+| Off-camera outdoor casters are omitted                        | Shadows pop at screen edges                                  | Query cascade light frusta rather than reuse camera-visible dynamic submissions                                                       |
+| Outdoor-shadow-only dynamic animation is not retained         | An off-camera cast silhouette freezes                        | Union outdoor caster roots into the existing renderer animation-liveness feedback; indoor candidates already use visible roots        |
+| Reused scene-query entries are overwritten                    | A later cascade query corrupts an earlier caster set         | Fully consume each query before issuing another; retain only owned compact caster records                                             |
+| Depth submission bypasses frame-instance batching             | Crowds multiply caster draw calls and transform uploads      | Use an attribute-instanced depth program and the existing compatible-run/arena vocabulary                                             |
+| Indoor selection queries once per cell                        | Cell-grid rooms repeat broadphase work                       | Collect eligible dynamic roots once from the ordinary view query and intersect the compact pool against visible shells                |
+| PSSM state corrupts later portal/object draws                 | Subsequent passes render incorrectly                         | Restore explicit framebuffer/viewport state and invalidate cached object routing after shadow submission                              |
+| Cascade matrices swim                                         | Distracting outdoor shimmer                                  | Use stable fits, texel snapping, deterministic camera sweeps, and final screenshot review                                             |
+| Bias tuning detaches outdoor shadows                          | Peter-panning                                                | Keep constant, normal, and polygon-offset controls separate and bounded                                                               |
+| Far-terrain optimization overlaps shadow coverage             | Visible terrain shadow gap                                   | Keep terrain inside maximum distance on the shadow-capable near path                                                                  |
+| Grounding code bloats every object shader                     | Nonreceiver cost and variant sprawl                          | Compile one shell-only grounding option; ordinary programs contain no grounding declarations                                          |
+| A decal lies inside one large floor triangle                  | Vertex-only evaluation misses it                             | Evaluate the radial function per fragment and interpolate only position/up-facing weight                                              |
+| A receiver exceeds its configured caster capacity             | A farther visible decal is omitted                           | Invoke deterministic nearest-camera partial selection only on overflow; treat omission as the declared quality budget                 |
+| Common receivers pay unnecessary sorting cost                 | Frame-hot CPU overhead grows for no visual benefit           | Preserve candidate order and skip all ordering work through the configured per-receiver capacity                                      |
+| Cell-grid room seams split a blob                             | Grounding pops at invisible EnvCell boundaries               | Select by influence-volume/cell intersection across same-island cells rather than resident scope alone                                |
+| Overlapping cells contaminate grounding                       | A caster grounds an unrelated stacked shell                  | Require stable visibility-island equality and bound vertical drop/radius                                                              |
+| Same-island structures do not occlude blobs                   | A short decal can reach a nearby unintended floor            | Keep the effect short, suppress non-upward surfaces, and accept that it is grounding rather than light transport                      |
+| Crowds blacken the floor                                      | Overlapping decals look like soot                            | Combine by strongest contribution rather than addition or multiplication                                                              |
+| Animated mesh minima cross receiving floors                   | A selected caster disappears before radius evaluation        | Anchor caster Y to authoritative root placement while retaining pose-reactive rigid X/Z bounds                                        |
+| Particle envelopes contaminate grounding                      | Temporary effects resize or move an actor's decal            | Publish exact rigid-pose bounds separately and keep particle expansion only in presentation/culling bounds                            |
+| Animated horizontal bounds produce an objectionable excursion | A blob changes size or center too abruptly                   | Prove the case in representative motion first; add the narrowest clamp or smoothing only if visual review requires it                 |
+| Repeated shell material draws rewrite identical uniforms      | CPU submission work grows                                    | Compute one cell record set and let the object-state cache suppress identical consecutive writes                                      |
+| Mode changes leave stale work or resources active             | A lower mode retains hidden cost or stale shading            | Gate each path from the exhaustive mode, clear analytic sets, and release PSSM targets outside `shadow-maps`                          |
+| Adjacent outdoor landblocks choose different overflow sets    | A dense border crowd can expose a simple-shadow seam         | Intersect each influence with both bounds and use identical camera/identity ranking; verify overflow borders visually                 |
+| Simple grounding promotes distant terrain to the near shader  | A remote visible caster defeats the far-terrain optimization | Retain near terrain only for landblocks with nonempty records; keep the configured record cap and omit analytic code from far terrain |
+| Portal transition invents a second shadow lifecycle           | Snapshot/tunnel resources become tangled with world shading  | Keep effects inside ordinary scene rendering; outgoing color is already shaded and the tunnel is excluded                             |
 
 ## Definition of Done
 

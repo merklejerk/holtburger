@@ -460,7 +460,9 @@ the configured shadow distance and Buildings-layer meshes are the only PSSM rece
 shadow attenuates only regional-sun diffuse: ambient, point lights, baked color, emissive
 luminosity, material detail, fog, and color grading retain their ordinary terms. Hidden, `noDraw`,
 and fully transparent caster parts are omitted; alpha cutouts are intentionally outside the
-material-free depth contract.
+material-free depth contract. Cascade construction clamps the light to the frontend-tuned minimum
+elevation above the horizon while preserving its azimuth. This bounds horizon-grazing shadow-map
+fits without changing the authored regional-sun vector used by ordinary lighting.
 
 In both enabled modes, EnvCell shells evaluate a short, soft analytic grounding cue from each
 eligible entity; there is no indoor directional sunlight or shadow map. `simple` reuses the same

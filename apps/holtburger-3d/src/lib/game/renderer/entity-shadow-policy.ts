@@ -52,6 +52,8 @@ export interface OutdoorPssmSettings {
 	readonly mapResolution: number;
 	/** Maximum camera distance covered in world units. */
 	readonly maximumDistance: number;
+	/** Minimum light-view elevation above the horizon; does not alter scene sunlight. */
+	readonly minimumLightElevationDegrees: number;
 	/** Uniform/logarithmic split interpolation, from uniform 0 to logarithmic 1. */
 	readonly splitLambda: number;
 	/** Fraction of each cascade interval blended into its successor. */
@@ -143,6 +145,13 @@ export function createOutdoorPssmSettings(
 		MAX_OUTDOOR_PSSM_DISTANCE,
 		false,
 		"Outdoor shadow maximum distance must be finite and in (0, 2048].",
+	);
+	finiteRange(
+		settings.minimumLightElevationDegrees,
+		0,
+		90,
+		true,
+		"Outdoor shadow minimum light elevation must be finite and within [0, 90] degrees.",
 	);
 	finiteRange(
 		settings.splitLambda,

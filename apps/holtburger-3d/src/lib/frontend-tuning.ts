@@ -440,6 +440,8 @@ export const FRONTEND_TUNING = {
 				cascadeCount: 3,
 				mapResolution: 1_024,
 				maximumDistance: 384,
+				/** Lowest elevation used to construct shadow maps; scene sunlight remains authored. */
+				minimumLightElevationDegrees: 15,
 				splitLambda: 0.65,
 				transitionFraction: 0.1,
 				receiverDepthBias: 0.001,

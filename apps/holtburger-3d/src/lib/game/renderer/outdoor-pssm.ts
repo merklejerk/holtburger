@@ -189,7 +189,10 @@ export function buildOutdoorPssmCascades(
 		settings.cascadeCount,
 		settings.splitLambda,
 	);
-	const directionTowardSun = normalizeVec3(input.sunVector);
+	const directionTowardSun = clampLightElevation(
+		normalizeVec3(input.sunVector),
+		settings.minimumLightElevationDegrees,
+	);
 	const lightForward = new Vec3(
 		-directionTowardSun.x,
 		-directionTowardSun.y,
@@ -313,6 +316,33 @@ export function buildOutdoorPssmCascades(
 	}
 	out.length = settings.cascadeCount;
 	return out;
+}
+
+/** Clamp only the normalized PSSM direction while preserving the authored horizontal azimuth. */
+function clampLightElevation(
+	directionTowardSun: Vec3,
+	minimumElevationDegrees: number,
+): Vec3 {
+	const minimumElevationRadians = (minimumElevationDegrees * Math.PI) / 180;
+	const minimumY = Math.sin(minimumElevationRadians);
+	if (directionTowardSun.y >= minimumY) return directionTowardSun;
+
+	const horizontalLength = Math.hypot(
+		directionTowardSun.x,
+		directionTowardSun.z,
+	);
+	const horizontalMagnitude = Math.cos(minimumElevationRadians);
+	if (horizontalLength <= Number.EPSILON) {
+		// A directly downward vector has no authored azimuth. Positive X makes the otherwise
+		// undefined clamped direction deterministic without leaking into scene-lighting policy.
+		return new Vec3(horizontalMagnitude, minimumY, 0);
+	}
+	const horizontalScale = horizontalMagnitude / horizontalLength;
+	return new Vec3(
+		directionTowardSun.x * horizontalScale,
+		minimumY,
+		directionTowardSun.z * horizontalScale,
+	);
 }
 
 interface OrthonormalAxes {

@@ -99,6 +99,16 @@
 			/></label
 		>
 		<label
+			><span>Minimum light elevation</span><input
+				min="0"
+				max="90"
+				step="1"
+				type="number"
+				value={settings.pssm.minimumLightElevationDegrees}
+				onchange={(event) => updatePssm("minimumLightElevationDegrees", event)}
+			/></label
+		>
+		<label
 			><span>Split lambda</span><input
 				min="0"
 				max="1"

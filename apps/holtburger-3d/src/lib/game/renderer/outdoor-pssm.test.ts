@@ -146,6 +146,36 @@ describe("outdoor PSSM", () => {
 		expect(Math.abs(paddedClip.z)).toBeLessThanOrEqual(1);
 	});
 
+	it("clamps only low light elevation while preserving horizontal azimuth", () => {
+		const minimumLightElevationDegrees = 30;
+		const low = buildOutdoorPssmCascades({
+			camera: CAMERA,
+			sunVector: new Vec3(2, 0, -2),
+			settings: {
+				...SETTINGS,
+				cascadeCount: 1,
+				minimumLightElevationDegrees,
+			},
+		})[0]!;
+		const expectedHorizontal =
+			Math.cos((minimumLightElevationDegrees * Math.PI) / 180) / Math.sqrt(2);
+		expect(low.lightView.m13).toBeCloseTo(expectedHorizontal);
+		expect(low.lightView.m23).toBeCloseTo(0.5);
+		expect(low.lightView.m33).toBeCloseTo(-expectedHorizontal);
+
+		const authored = buildOutdoorPssmCascades({
+			camera: CAMERA,
+			sunVector: new Vec3(0, 1, 1),
+			settings: {
+				...SETTINGS,
+				cascadeCount: 1,
+				minimumLightElevationDegrees,
+			},
+		})[0]!;
+		expect(authored.lightView.m23).toBeCloseTo(1 / Math.sqrt(2));
+		expect(authored.lightView.m33).toBeCloseTo(1 / Math.sqrt(2));
+	});
+
 	it("holds a light matrix through sub-texel translation and steps by one texel", () => {
 		const buildAtX = (x: number) =>
 			buildOutdoorPssmCascades({

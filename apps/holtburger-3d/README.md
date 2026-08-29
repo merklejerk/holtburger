@@ -106,6 +106,11 @@ Override `HOLTBURGER_PROBE_HOST`, `HOLTBURGER_PROBE_PORT`, `HOLTBURGER_PROBE_DUR
 `HOLTBURGER_PROBE_CHARACTER_GUID` through the environment. The probe emits one JSON result and
 never starts Electron, Vite, or the TUI.
 
+Set `HOLTBURGER_PROBE_MODE=passive` to observe the current character without sending teleport,
+chat, or drive commands. Passive mode rejects teleport options instead of silently becoming an
+active probe. The default `drive` mode retains the movement phases used by the ordinary motion
+probe.
+
 ## Packaging and platform status
 
 `npm run package` builds an unpacked application and `npm run make` creates the configured ZIP.

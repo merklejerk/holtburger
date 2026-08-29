@@ -64,6 +64,14 @@ function optionalGuid(value) {
 	return guid;
 }
 
+function probeMode(value) {
+	const mode = value ?? "drive";
+	if (mode !== "drive" && mode !== "passive") {
+		throw new Error("HOLTBURGER_PROBE_MODE must be drive or passive.");
+	}
+	return mode;
+}
+
 function cameraStartRequest(playerGuid, entityGeneration, sequence) {
 	return {
 		playerGuid,
@@ -407,9 +415,18 @@ async function main() {
 	const requestedCharacterGuid = optionalGuid(
 		process.env.HOLTBURGER_PROBE_CHARACTER_GUID,
 	);
+	const mode = probeMode(process.env.HOLTBURGER_PROBE_MODE);
 	const requestedTeleport = process.env.HOLTBURGER_PROBE_TELEPORT;
 	const requestedTeleportSequence =
 		process.env.HOLTBURGER_PROBE_TELEPORT_SEQUENCE;
+	if (
+		mode === "passive" &&
+		(requestedTeleport !== undefined || requestedTeleportSequence !== undefined)
+	) {
+		throw new Error(
+			"passive client probe cannot be combined with teleport commands.",
+		);
+	}
 	await access(hostPath, constants.X_OK);
 	const environment = { ...process.env };
 	if (environment.HOLTBURGER_DATS === undefined) {
@@ -427,6 +444,12 @@ async function main() {
 		stderr += chunk.toString();
 	});
 	const client = new SidecarHostClient(child, "client");
+	const invokeMovement = (command, args) => {
+		if (mode === "passive") {
+			throw new Error(`passive client probe rejected ${command}`);
+		}
+		return client.invoke(command, args);
+	};
 	let lastCompletedPhase = "host-started";
 	const census = createCensus();
 	const waiter = createWaiter();
@@ -718,7 +741,7 @@ async function main() {
 					`teleport ${index + 1} destination player placement`,
 				);
 				void destinationEntityPromise.catch(() => undefined);
-				await client.invoke("send_client_chat", { message: command });
+				await invokeMovement("send_client_chat", { message: command });
 				lastCompletedPhase = `teleport-${index + 1}-command-sent`;
 				const [teleportLifecycle] = await Promise.all([
 					teleportLifecyclePromise,
@@ -782,10 +805,13 @@ async function main() {
 				sourcePlayer = destinationPlayer;
 				previousLifecycle = teleportLifecycle;
 			}
+		} else if (mode === "passive") {
+			await delay(observationMs);
+			lastCompletedPhase = "passive-observation-completed";
 		} else {
 			const runDrivePhase = async (label, request, durationMilliseconds) => {
 				const before = actorPhaseSample(latestEntities.get(playerGuid));
-				await client.invoke("replace_client_drive", { request });
+				await invokeMovement("replace_client_drive", { request });
 				await delay(durationMilliseconds);
 				const after = actorPhaseSample(latestEntities.get(playerGuid));
 				drivePhases.push({
@@ -830,11 +856,9 @@ async function main() {
 			lastCompletedPhase = "drive-start-attempted";
 			lastCompletedPhase = "observation-completed";
 			if (driveError === null) {
-				await client
-					.invoke("replace_client_drive", {
-						request: { gait: "walk", longitudinal: null, turning: null },
-					})
-					.catch(() => undefined);
+				await invokeMovement("replace_client_drive", {
+					request: { gait: "walk", longitudinal: null, turning: null },
+				}).catch(() => undefined);
 			}
 		}
 		await client.invoke("disconnect_client").catch(() => undefined);
@@ -848,6 +872,7 @@ async function main() {
 		lastCompletedPhase = "complete";
 		return {
 			ok: true,
+			mode,
 			server: { host: serverHost, port: serverPort },
 			selectedCharacter: {
 				guid: guidString(selected.guid),
@@ -875,6 +900,7 @@ async function main() {
 				terminalEvents,
 				stderr,
 			}),
+			mode,
 			teleport,
 			teleports,
 			census: census.toJSON(),

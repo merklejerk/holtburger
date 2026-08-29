@@ -22,8 +22,8 @@ use super::physical_body::{
 use super::volume_query::{placed_ball_contact, placed_cylinder_contact};
 use super::{
     CollisionScene, DynamicBodyPhysicsStateChange, MotionWaypoint, MotionWaypointPlacement,
-    PhysicalBodyActuation, PhysicalBodyResponseState, PhysicalRestitution, SpatialBody,
-    SpatialBodyId, SpatialMembership,
+    PhysicalBodyActuation, PhysicalBodyResponseState, PhysicalRestitution, PoseReconciliationState,
+    SpatialBody, SpatialBodyId, SpatialMembership,
 };
 use crate::EntityCollisionParticipation;
 
@@ -36,6 +36,10 @@ pub const MAXIMUM_DYNAMIC_SLICES: usize = 128;
 #[derive(Debug, Clone)]
 pub(crate) struct DynamicEpochParticipant {
     pub(crate) body: SpatialBody,
+    /// Tentative reconciliation cursor, kept inline so cloning the captured body does not allocate.
+    pub(crate) reconciliation: Option<PoseReconciliationState>,
+    /// Tick-start cursor used to reject a stale prepared commit.
+    pub(crate) initial_reconciliation: Option<PoseReconciliationState>,
 }
 
 /// One scheduled mover's trajectory inputs while every directional peer query is resolved.
@@ -193,7 +197,6 @@ pub(crate) fn resolve_dynamic_contacts(
             peer: peer_id,
             fraction: contact.fraction,
             contact: contact.contact,
-            peer_velocity: pair.peer_velocity(),
             clears_projectile_state: mover_dynamic.collision.dynamic_collision.missile
                 && peer_dynamic
                     .collision
@@ -306,7 +309,6 @@ struct SelectedBlockingContact {
     peer: SpatialBodyId,
     fraction: f32,
     contact: ShapeContact,
-    peer_velocity: Vector3,
     clears_projectile_state: bool,
 }
 
@@ -464,11 +466,6 @@ impl<'a> PairTrajectories<'a> {
             self.anchor,
         )
     }
-
-    fn peer_velocity(&self) -> Vector3 {
-        self.peer_plan
-            .map_or(self.peer.body.velocity, |planned| planned.velocity)
-    }
 }
 
 fn budgeted_prefix_plan(
@@ -528,6 +525,12 @@ fn budgeted_prefix_plan(
     )?;
     partial.motion.path = path;
     partial.motion.status = super::PhysicalBodyTickStatus::SubstepBudgetExceeded;
+    partial.accepted_motion = super::physical_body::accepted_motion(
+        mover.pose,
+        partial.pose,
+        (partial.pose.global_coords() - mover.pose.global_coords()) / delta_seconds,
+        delta_seconds,
+    );
     Ok(partial)
 }
 
@@ -646,11 +649,16 @@ fn blocking_contact_plan(
             .context("could not normalize dynamic contact endpoint")?;
     }
     partial.pose = pose;
-    partial.velocity = dynamic_collision_velocity(
-        partial.velocity,
-        selected.peer_velocity,
+    partial.retained_velocity = dynamic_collision_velocity(
+        partial.retained_velocity,
         physical.response_policy.restitution,
         selected.contact.normal,
+    );
+    partial.accepted_motion = super::physical_body::accepted_motion(
+        mover.pose,
+        pose,
+        (pose.global_coords() - mover.pose.global_coords()) / delta_seconds,
+        delta_seconds,
     );
     partial.response = response_with_cell(partial.response, cell);
     partial.motion.path = corrected_path;
@@ -679,19 +687,17 @@ fn response_with_cell(
 
 fn dynamic_collision_velocity(
     mover: Vector3,
-    peer: Vector3,
     restitution: PhysicalRestitution,
     normal: Vector3,
 ) -> Vector3 {
     match restitution {
         PhysicalRestitution::Inelastic => Vector3::zero(),
         PhysicalRestitution::Elastic(elasticity) => {
-            let relative = mover - peer;
-            let impact_speed = relative.dot(&normal);
+            let impact_speed = mover.dot(&normal);
             if impact_speed >= 0.0 {
                 mover
             } else {
-                peer + relative + normal * -(impact_speed * (elasticity.get() + 1.0))
+                mover + normal * -(impact_speed * (elasticity.get() + 1.0))
             }
         }
     }

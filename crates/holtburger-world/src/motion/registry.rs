@@ -9,10 +9,14 @@ use holtburger_common::{Guid, RigidTransform};
 use holtburger_content::MotionSequenceTable;
 use std::collections::HashMap;
 
-use super::selection::{select_motion, set_default_state, stop_motion};
+use super::selection::{select_modifier, select_motion, set_default_state, stop_motion};
 use super::sequence::{CurrentSequenceClip, MotionClipCompletion};
 use super::sequence::{MotionSequenceRuntime, SequenceTick};
 use super::state::{MotionCommand, MotionOrder, MotionState};
+
+/// Retail `RunForward` state velocity used by `CMotionInterp::get_adjusted_max_speed`
+/// (`acclient.c:329811-329837,329866-329872`).
+pub(super) const RETAIL_RUN_FORWARD_BASE_SPEED_MPS: f32 = 4.0;
 
 /// One body's playback: what it is doing, where the cursor is, and what the last tick contributed.
 #[derive(Debug, Clone)]
@@ -25,6 +29,8 @@ pub struct BodyMotionRuntime {
     /// Contribution the most recent tick produced, held for the solver to read the way a body holds
     /// the velocity its last tick achieved.
     tick: SequenceTick,
+    /// Last valid `RunForward` multiplier, matching retail's persistent `my_run_rate` fact.
+    retained_run_rate_multiplier: Option<f32>,
 }
 
 /// Which clip the host has a body playing, and how to play it.
@@ -70,6 +76,7 @@ impl BodyMotionRuntime {
             state: MotionState::default(),
             sequence: MotionSequenceRuntime::new(),
             tick: SequenceTick::identity(),
+            retained_run_rate_multiplier: None,
         };
         set_default_state(table, &mut runtime.state, &mut runtime.sequence);
         runtime
@@ -95,6 +102,18 @@ impl BodyMotionRuntime {
         &self.tick
     }
 
+    /// Returns retail's adjusted maximum interpolation speed for this playback, when usable.
+    pub fn adjusted_max_speed_mps(&self) -> Option<f32> {
+        let multiplier = if self.state.substate == MotionCommand::RUN_FORWARD
+            && valid_speed_multiplier(self.state.substate_mod)
+        {
+            Some(self.state.substate_mod)
+        } else {
+            self.retained_run_rate_multiplier
+        }?;
+        Some(multiplier * RETAIL_RUN_FORWARD_BASE_SPEED_MPS)
+    }
+
     /// Applies one order and advances this isolated body's provisional playback.
     pub fn drive(
         &mut self,
@@ -105,10 +124,19 @@ impl BodyMotionRuntime {
         if self.motion_table_id != table.id {
             *self = Self::new(table);
         }
+        if let Some((MotionCommand::RUN_FORWARD, speed)) = order.forward
+            && valid_speed_multiplier(speed)
+        {
+            self.retained_run_rate_multiplier = Some(speed);
+        }
         apply_order(table, &mut self.state, &mut self.sequence, order);
         self.tick = self.sequence.advance(quantum);
         &self.tick
     }
+}
+
+fn valid_speed_multiplier(speed: f32) -> bool {
+    speed.is_finite() && speed > f32::EPSILON
 }
 
 /// Authored-motion playback for every body one authority simulates.
@@ -238,7 +266,21 @@ fn apply_modifier(
 ) {
     match ordered {
         Some((command, speed)) => {
-            select_motion(table, state, sequence, command, speed);
+            if state
+                .modifiers()
+                .iter()
+                .any(|modifier| modifier.command == command)
+            {
+                // Retail key releases stop only the released axis; they do not reissue the other
+                // held commands (`CommandInterpreter::MovePlayer`, `acclient.c:682360-682540`). A
+                // full-order refresh must therefore keep an existing modifier in that role. Going
+                // back through generic selection after locomotion stops can promote the same
+                // turn/sidestep command into its default-state cycle while its modifier remains,
+                // stacking the authored physics twice.
+                select_modifier(table, state, sequence, command, speed);
+            } else {
+                select_motion(table, state, sequence, command, speed);
+            }
         }
         None => {
             stop_motion(table, state, sequence, family);

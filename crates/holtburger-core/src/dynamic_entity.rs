@@ -745,9 +745,11 @@ fn build_dynamic_entity_body(
 ) -> (SpatialBody, PhysicalBodyReconfigurationOutcome) {
     let body_id = SpatialBodyId::Entity(definition.identity.guid);
     let mut body = SpatialBody::new(body_id, initial.pose, initial.created_at);
-    body.velocity = initial.velocity;
-    body.acceleration = initial.acceleration;
-    body.omega = initial.omega;
+    body.retained = holtburger_world::RetainedBodyKinematics {
+        velocity: initial.velocity,
+        acceleration: initial.acceleration,
+        omega: initial.omega,
+    };
     let physical_change = if let Some(physical) = physical {
         let initial_cell = initial
             .pose
@@ -1788,7 +1790,7 @@ mod tests {
             Err(DynamicEntityBodyOperationError::AlreadyRegistered { body_id })
         );
         assert_eq!(
-            scene.body(body_id).unwrap().acceleration,
+            scene.body(body_id).unwrap().retained.acceleration,
             initial.acceleration
         );
         let projection = dynamic_entity_projection_input(&definition, &scene).unwrap();
@@ -1864,7 +1866,7 @@ mod tests {
             replacement_initial.pose
         );
         assert_eq!(
-            scene.body(body_id).unwrap().velocity,
+            scene.body(body_id).unwrap().retained.velocity,
             replacement_initial.velocity
         );
     }

@@ -1490,7 +1490,10 @@ The offset is the tick's exact displacement, composed from ordered frames; divid
 meet a velocity-shaped actuation is arithmetic on an exact quantity, performed once, at the layer
 that owns the solver contract. The rejected reduction was a *content-pipeline* one that discarded
 ordering, ranges, and rotation before any solver saw them. Retail itself reduces its own accepted
-path to `cached_velocity` for the following tick.
+path to observational `cached_velocity`. **Superseding correction (2026-08-28):** the shared-pose
+reconciliation investigation proved that retail does not feed `cached_velocity` into the following
+physics tick; `m_velocityVector` remains the independent physical integration input
+(`acclient.c:306094-306172, 310862-310927`).
 
 **Scenario dry-run.** Supported-to-airborne and airborne-to-supported are the support gate, which
 applies once per update to translation only and leaves rotation intact, so a rotating clip keeps

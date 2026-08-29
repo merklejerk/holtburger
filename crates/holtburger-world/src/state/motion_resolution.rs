@@ -1,8 +1,7 @@
 use crate::entity::{EntityManager, EntityMotionSnapshot};
 use crate::motion::{MotionOrder, MotionRuntimeRegistry};
 use crate::spatial::{
-    ContactState, SolveBodyInput, SolveProjectionBasis, SpatialBody, SpatialBodyId,
-    SpatialSampleMode,
+    RetainedBodyKinematics, SolveBodyInput, SpatialBody, SpatialBodyId, SpatialSampleMode,
 };
 use crate::state::WorldState;
 use holtburger_common::properties::WorldObjectExt as _;
@@ -12,9 +11,6 @@ use holtburger_dat::file_type::MotionTable;
 use holtburger_protocol::messages::movement::InterpretedMotionCommand;
 use std::time::Duration;
 use thiserror::Error;
-
-const MOTION_EPSILON: f32 = 1e-4;
-const MOTION_EPSILON_SQUARED: f32 = MOTION_EPSILON * MOTION_EPSILON;
 
 /// Immutable non-scene authority required to derive projection for a captured spatial body.
 pub struct BodyProjectionResolver<'a> {
@@ -33,67 +29,47 @@ impl<'a> BodyProjectionResolver<'a> {
     /// Resolves one captured body's current authority and authored-playback contribution.
     pub fn resolve(&self, body: &SpatialBody) -> Option<SolveBodyInput> {
         let guid = body.id.authoritative_guid()?;
-        let entity_state = self
-            .entities
-            .get(guid)
-            .map(|entity| (entity.velocity, entity.omega, entity.motion_snapshot));
-        let (velocity, omega, motion_snapshot) = match entity_state {
-            Some((entity_velocity, entity_omega, entity_motion_state)) => {
-                let (velocity, omega) =
-                    if body.sampling.mode == SpatialSampleMode::AuthoritativeOnly {
-                        (entity_velocity, entity_omega)
-                    } else {
-                        (body.velocity, body.omega)
-                    };
-                (velocity, omega, entity_motion_state.or(body.motion_state))
+        let entity_state = self.entities.get(guid).map(|entity| {
+            (
+                RetainedBodyKinematics {
+                    velocity: entity.velocity,
+                    acceleration: entity.acceleration,
+                    omega: entity.omega,
+                },
+                entity.motion_snapshot,
+            )
+        });
+        let (retained, motion_snapshot) = match entity_state {
+            Some((entity_retained, entity_motion_state)) => {
+                let retained = if body.sampling.mode == SpatialSampleMode::AuthoritativeOnly {
+                    entity_retained
+                } else {
+                    body.retained
+                };
+                (retained, entity_motion_state.or(body.motion_state))
             }
-            None => (body.velocity, body.omega, body.motion_state),
+            None => (body.retained, body.motion_state),
         };
-        let basis = match body.id {
-            SpatialBodyId::LocalPlayer(_) => Some(SolveProjectionBasis::velocity(velocity, omega)),
-            SpatialBodyId::Entity(guid) => {
-                self.resolve_guid_basis(guid, body.contact, velocity, omega, motion_snapshot)
-            }
+        let authored_offset = match body.id {
+            SpatialBodyId::LocalPlayer(_) => None,
+            SpatialBodyId::Entity(guid) => self.resolve_authored_offset(guid, motion_snapshot),
             SpatialBodyId::Ephemeral(_) => None,
         };
         Some(SolveBodyInput {
             body_id: body.id,
             pose: body.pose,
             contact: body.contact,
-            basis,
+            authored_offset,
+            retained,
         })
     }
 
-    fn resolve_guid_basis(
+    fn resolve_authored_offset(
         &self,
         guid: Guid,
-        contact: ContactState,
-        velocity: Vector3,
-        omega: Vector3,
-        motion_snapshot: Option<EntityMotionSnapshot>,
-    ) -> Option<SolveProjectionBasis> {
-        // Sliding motion is physics-driven like airborne motion; only walkable support selects
-        // the grounded animation basis.
-        if matches!(contact, ContactState::Airborne | ContactState::Sliding)
-            || velocity.z.abs() > MOTION_EPSILON
-        {
-            return vector_projection_basis(velocity, omega);
-        }
-
-        if let Some(snapshot) = motion_snapshot
-            && let Some(grounded) = self.resolve_grounded_basis(guid, snapshot)
-        {
-            return Some(grounded);
-        }
-
-        vector_projection_basis(velocity, omega)
-    }
-
-    fn resolve_grounded_basis(
-        &self,
-        guid: Guid,
-        snapshot: EntityMotionSnapshot,
-    ) -> Option<SolveProjectionBasis> {
+        snapshot: Option<EntityMotionSnapshot>,
+    ) -> Option<RigidTransform> {
+        let snapshot = snapshot?;
         if snapshot
             .motion_command()
             .is_some_and(InterpretedMotionCommand::is_dead)
@@ -112,9 +88,7 @@ impl<'a> BodyProjectionResolver<'a> {
         runtime
             .sequence()
             .contributes_motion()
-            .then_some(SolveProjectionBasis::AuthoredDrive {
-                offset: runtime.tick().offset,
-            })
+            .then_some(runtime.tick().offset)
     }
 }
 
@@ -147,6 +121,15 @@ pub enum PlayerMotionTableLookupError {
     SetupModelMissingDefaultMotionTable { setup_model_id: u32 },
     #[error("motion table 0x{motion_table_id:08X} is missing from the motion contract")]
     MotionTableAbsentFromContract { motion_table_id: u32 },
+}
+
+/// Failure to advance one named body's world-owned authored playback cursor.
+#[derive(Debug, Error)]
+pub enum AuthoredMotionDriveError {
+    #[error("body 0x{guid:08X} has no motion-table or setup-model source")]
+    MotionTableSourceUnavailable { guid: u32 },
+    #[error("body 0x{guid:08X} resolved missing motion table 0x{motion_table_id:08X}")]
+    MotionTableUnavailable { guid: u32, motion_table_id: u32 },
 }
 
 impl WorldState {
@@ -210,6 +193,36 @@ impl WorldState {
             .ok_or(PlayerMotionTableLookupError::MotionTableAbsentFromContract { motion_table_id })
     }
 
+    /// Drives one named body's sole authored playback cursor and returns this tick's exact offset.
+    ///
+    /// The world owns table selection and cursor state. Callers own only the semantic order, so
+    /// presentation and root motion cannot accidentally advance different playback instances.
+    pub fn drive_authored_motion_for_body(
+        &mut self,
+        guid: Guid,
+        order: MotionOrder,
+        dt: Duration,
+    ) -> Result<RigidTransform, AuthoredMotionDriveError> {
+        let quantum = dt.as_secs_f32();
+        let source = self.motion_table_source_for_guid(guid).ok_or(
+            AuthoredMotionDriveError::MotionTableSourceUnavailable {
+                guid: u32::from(guid),
+            },
+        )?;
+        let motion_table_id = motion_table_id_for_source(source);
+        let table = self.motion_sequences.table(motion_table_id).ok_or(
+            AuthoredMotionDriveError::MotionTableUnavailable {
+                guid: u32::from(guid),
+                motion_table_id,
+            },
+        )?;
+
+        Ok(self
+            .motion_runtimes
+            .drive(table, guid, order, quantum)
+            .offset)
+    }
+
     pub fn resolve_body_projection_input(&self, body_id: SpatialBodyId) -> Option<SolveBodyInput> {
         let body = self.scene.body(body_id)?;
         BodyProjectionResolver::new(&self.entities, &self.motion_runtimes).resolve(body)
@@ -218,8 +231,7 @@ impl WorldState {
     pub fn body_has_simulatable_projection_basis(&self, body_id: SpatialBodyId) -> bool {
         if self
             .resolve_body_projection_input(body_id)
-            .and_then(|input| input.basis)
-            .is_some()
+            .is_some_and(SolveBodyInput::has_motion)
         {
             return true;
         }
@@ -278,11 +290,10 @@ impl WorldState {
         self.advance_authored_motion_except(dt, None);
     }
 
-    /// Advances authored playback while excluding a locally predicted body.
+    /// Advances authored playback while excluding a body explicitly driven by its local adapter.
     ///
-    /// A local client owns a separate motion cursor while a held drive is active.  The
-    /// authoritative snapshot for that same entity can still be present in the world, so it must
-    /// not advance a second cursor and double-apply the tick's offset.
+    /// The authoritative snapshot for that entity can still be present, so bulk advancement must
+    /// not advance its world-owned cursor before the adapter drives that same cursor for the tick.
     pub fn advance_authored_motion_except(&mut self, dt: Duration, excluded: Option<Guid>) {
         let quantum = dt.as_secs_f32();
         if !quantum.is_finite() || quantum < 0.0 {
@@ -315,8 +326,11 @@ impl WorldState {
             })
             .collect();
 
+        // Cursor lifetime follows entity lifetime, not the presence of a snapshot in this tick.
+        // Local prediction can legitimately install a cursor before an echoed motion snapshot
+        // exists, and excluding that body from bulk advancement must not delete its cursor.
         let live: std::collections::HashSet<Guid> =
-            driving.iter().map(|(guid, _, _)| *guid).collect();
+            self.entities.iter().map(|entity| entity.guid).collect();
         self.motion_runtimes
             .retain_bodies(|guid| live.contains(&guid));
 
@@ -456,12 +470,6 @@ fn motion_table_id_for_source(source: PlayerMotionTableSource) -> u32 {
             motion_table_id, ..
         } => motion_table_id,
     }
-}
-
-fn vector_projection_basis(velocity: Vector3, omega: Vector3) -> Option<SolveProjectionBasis> {
-    ((velocity.length_squared() > MOTION_EPSILON_SQUARED)
-        || (omega.length_squared() > MOTION_EPSILON_SQUARED))
-        .then_some(SolveProjectionBasis::Velocity { velocity, omega })
 }
 
 /// Motion fixtures for tests that care about resolved rates rather than authored tracks.

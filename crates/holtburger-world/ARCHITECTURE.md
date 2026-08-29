@@ -108,6 +108,22 @@ Shared world does not perform automatic local collision or local velocity integr
 `tick()`. Constraint-aware advancement is an explicit solve operation on the world-owned runtime
 path rather than an implicit side effect or a parallel core/frontend cache.
 
+Authoritative pose samples and runtime placement are deliberately separate levels. A local-player
+adapter in `holtburger-core` classifies ordinary self echoes as confirmations; the remote-object
+adapter in `WorldState` applies retail's position/teleport/contact/viewer-distance ladder. Both
+produce one `AuthoritativePoseEffect`, while `SpatialBody` owns the optional interpolation,
+confirmed-travel constraint, and pending ordinary-snap state that executes the effect. Remote
+force-position timestamps have no independent meaning in the retail receive path; only the
+quarantined, unobserved server-to-client autonomous-position opcode still retains its explicit
+reset behavior pending evidence.
+
+Reconciliation composes at the existing body tick boundary. Physical bodies compose it into their
+prepared actuation before collision; pose-only remotes compose the same translation and heading
+policy before dead reckoning. A far correction is installed on the next fixed tick and reports
+`RuntimeBodyAdvanceKind::CorrectionSnap`; it is not a teleport or authority reset. Packet-time
+entity authority may advance without replacing `SpatialBody.pose`, and no correction clock or
+target is projected outside `holtburger-world`.
+
 The host-physics recovery adds an explicit static-collision subsystem without changing that
 existing implicit `tick()` policy:
 
@@ -173,10 +189,17 @@ existing implicit `tick()` policy:
   continuous-support restitution, and selects the retail speed/slope friction branches. Nonzero
   velocity supplies Sledding facing after ordinary control; `AlignPath` displacement-facing runs
   later and supersedes it. These are generic body semantics, not character-controller modes.
-- `SpatialBody.velocity` is the only retained linear-velocity authority. Grounded actuation may
-  carry one resolved launch and one control heading, but it cannot retain a competing fall velocity
-  or replay a launch on later ticks. Airborne drive preserves existing planar velocity while gravity
-  and collision response update the canonical vector.
+- `SpatialBody::retained` is the only future physical-integration authority. Authored playback,
+  reconciliation, and controller drive contribute one-tick kinematic displacement; the accepted
+  path is reduced separately into `SpatialBody::accepted_motion` for observation and never feeds a
+  later solve. This mirrors retail's independent `m_velocityVector` and `cached_velocity` roles
+  (`acclient.c:306094-306172, 306864-306923, 310862-310927`). Grounded actuation may carry one
+  resolved launch and one control heading, but it cannot retain a competing fall velocity or replay
+  a launch on later ticks. Collision response mutates retained physical velocity only.
+- Dynamic peer planned motion participates in relative swept-contact detection, but retail's
+  response reflects or zeros only the mover's own physical velocity; peer velocity is never added
+  to the committed mover (`acclient.c:309982-310051`). Contact can block or clip a mover without
+  transferring locomotion momentum to a stationary actor.
 
 Collision integration uses an anchor landblock's local coordinates across one solve. It does not
 accumulate large absolute-world `f32` coordinates; doing so produced measurable centimeter-scale
@@ -241,8 +264,10 @@ than as a service. Nothing here caches, records history, or reaches back into co
 - `selection.rs` ports retail's motion selection, including link resolution and `re_modify`, while
   deliberately replaying every active modifier once instead of reproducing retail's head-only
   replay defect. The divergence marker there carries the citation and content census.
-- `MotionRuntimeRegistry` holds per-body playback for one authority, and `actuation.rs` converts a
-  tick's authored offset into the solver's drive basis.
+- `MotionRuntimeRegistry` holds the sole per-body playback cursor for one authority, and
+  `actuation.rs` converts that cursor's exact tick offset into the solver's drive basis. Cursor
+  lifetime follows entity lifetime rather than snapshot presence: an explicit snapshot reset or
+  entity removal retires it, while a locally predicted order can precede its server echo.
 
 Playback is _not_ frontend animation. Only simulation-relevant facts live here; articulated part
 frames never enter this crate.

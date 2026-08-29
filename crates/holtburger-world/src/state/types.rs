@@ -447,18 +447,13 @@ impl WorldState {
         let omega = entity.omega;
 
         self.entities.insert(entity);
-        self.reconcile_authoritative_body(
-            guid,
-            pos,
-            velocity,
-            omega,
-            crate::spatial::AuthoritativeBodySync::Snapshot,
-        );
+        self.initialize_authoritative_body(guid, pos, velocity, omega);
     }
 
     pub fn remove_entity<G: Into<Guid> + Copy>(&mut self, guid: G) -> Option<Entity> {
         let guid = guid.into();
         if let Some(entity) = self.entities.remove(guid) {
+            self.motion_runtimes.forget(guid);
             self.retire_authoritative_body_for_guid(guid);
             self.entity_lifecycle.clear(guid);
             // Pending links live only as long as the entities at either end of them.

@@ -1161,6 +1161,12 @@ mod tests {
         let source = Arc::new(FakeSource::default());
         let mut coordinator = ClientCollisionCoordinator::new(source.clone());
         let _ = coordinator.observe(&mut world);
+        wait_for_physical_body(
+            &mut coordinator,
+            &mut world,
+            SpatialBodyId::LocalPlayer(player_guid),
+        )
+        .await;
         let body_id = SpatialBodyId::Entity(remote_guid);
         wait_for_physical_body(&mut coordinator, &mut world, body_id).await;
 

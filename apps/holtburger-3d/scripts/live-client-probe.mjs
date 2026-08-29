@@ -119,6 +119,7 @@ function payloadFrameBytes(event, payload) {
 function createCensus() {
 	const byEvent = new Map();
 	const entityGuids = new Set();
+	const actorMotion = new Map();
 	const frameSizes = [];
 	let focusGuid;
 	let focusPoint;
@@ -147,6 +148,7 @@ function createCensus() {
 		for (const entity of entities) {
 			if (entity && typeof entity.identity?.guid === "number") {
 				entityGuids.add(entity.identity.guid);
+				rememberActorMotion(entity);
 			}
 		}
 		if (event === "client-current-state") {
@@ -166,6 +168,24 @@ function createCensus() {
 			peakEntityBatchEntities = Math.max(peakEntityBatchEntities, entityCount);
 		}
 		byEvent.set(event, record);
+	}
+
+	function rememberActorMotion(entity) {
+		if (entity.placement?.kind !== "world") return;
+		const point = worldPoint(entity.placement.pose);
+		const clip = JSON.stringify(entity.playingClip ?? null);
+		const previous = actorMotion.get(entity.identity.guid);
+		const step = previous === undefined ? 0 : distance(previous.point, point);
+		actorMotion.set(entity.identity.guid, {
+			point,
+			sampleCount: (previous?.sampleCount ?? 0) + 1,
+			totalDistance: (previous?.totalDistance ?? 0) + step,
+			maximumStep: Math.max(previous?.maximumStep ?? 0, step),
+			clip,
+			clipTransitions:
+				(previous?.clipTransitions ?? 0) +
+				(previous !== undefined && previous.clip !== clip ? 1 : 0),
+		});
 	}
 
 	function rememberFocusEntity(entity) {
@@ -204,6 +224,19 @@ function createCensus() {
 						? 0
 						: sortedFrameSizes[Math.ceil(sortedFrameSizes.length * 0.95) - 1],
 				travelledDistance,
+				actorMotion: Object.fromEntries(
+					[...actorMotion.entries()]
+						.sort(([left], [right]) => left - right)
+						.map(([guid, motion]) => [
+							guidString(guid),
+							{
+								sampleCount: motion.sampleCount,
+								totalDistance: motion.totalDistance,
+								maximumStep: motion.maximumStep,
+								clipTransitions: motion.clipTransitions,
+							},
+						]),
+				),
 				byEvent: Object.fromEntries(
 					[...byEvent.entries()].map(([event, record]) => [event, record]),
 				),
@@ -223,6 +256,27 @@ function worldPoint(pose) {
 
 function distance(left, right) {
 	return Math.hypot(right.x - left.x, right.y - left.y, right.z - left.z);
+}
+
+function entityHeading(entity) {
+	const rotation = entity.placement.pose.rotation;
+	return Math.atan2(
+		2 * (rotation.w * rotation.z + rotation.x * rotation.y),
+		1 - 2 * (rotation.y * rotation.y + rotation.z * rotation.z),
+	);
+}
+
+function wrappedAngleDelta(from, to) {
+	return Math.atan2(Math.sin(to - from), Math.cos(to - from));
+}
+
+function actorPhaseSample(entity) {
+	if (entity?.placement?.kind !== "world") return null;
+	return {
+		heading: entityHeading(entity),
+		point: worldPoint(entity.placement.pose),
+		playingClip: entity.playingClip ?? null,
+	};
 }
 
 const TELEPORT_DESTINATIONS = [
@@ -628,6 +682,7 @@ async function main() {
 			throw new Error("teleport probe requires a world-placed local player");
 		}
 		let driveError = null;
+		const drivePhases = [];
 		if (teleportCommands.length > 0) {
 			let sourcePlayer = player;
 			let previousLifecycle = portalSpace;
@@ -728,15 +783,51 @@ async function main() {
 				previousLifecycle = teleportLifecycle;
 			}
 		} else {
-			try {
-				await client.invoke("replace_client_drive", {
-					request: { gait: "run", longitudinal: "forward", turning: null },
+			const runDrivePhase = async (label, request, durationMilliseconds) => {
+				const before = actorPhaseSample(latestEntities.get(playerGuid));
+				await client.invoke("replace_client_drive", { request });
+				await delay(durationMilliseconds);
+				const after = actorPhaseSample(latestEntities.get(playerGuid));
+				drivePhases.push({
+					label,
+					durationMilliseconds,
+					displacement:
+						before === null || after === null
+							? null
+							: distance(before.point, after.point),
+					headingDelta:
+						before === null || after === null
+							? null
+							: wrappedAngleDelta(before.heading, after.heading),
+					playingClipBefore: before?.playingClip ?? null,
+					playingClipAfter: after?.playingClip ?? null,
 				});
+			};
+			try {
+				await runDrivePhase(
+					"forward",
+					{ gait: "run", longitudinal: "forward", turning: null },
+					observationMs,
+				);
+				await runDrivePhase(
+					"forward-and-turn",
+					{ gait: "run", longitudinal: "forward", turning: "right" },
+					Math.max(500, Math.floor(observationMs / 4)),
+				);
+				await runDrivePhase(
+					"turn-after-forward-release",
+					{ gait: "run", longitudinal: null, turning: "right" },
+					Math.max(1_000, Math.floor(observationMs / 2)),
+				);
+				await runDrivePhase(
+					"stop",
+					{ gait: "walk", longitudinal: null, turning: null },
+					1_000,
+				);
 			} catch (error) {
 				driveError = safeError(error);
 			}
 			lastCompletedPhase = "drive-start-attempted";
-			await delay(observationMs);
 			lastCompletedPhase = "observation-completed";
 			if (driveError === null) {
 				await client
@@ -769,6 +860,7 @@ async function main() {
 				eventCount: cameras.length,
 			},
 			driveError,
+			drivePhases,
 			discontinuityCount: discontinuities.length,
 			terminalEvents,
 			census: census.toJSON(),

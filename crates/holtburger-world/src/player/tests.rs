@@ -982,7 +982,7 @@ fn test_magic_purge_enchantments_preserves_vitae_only() {
 }
 
 #[test]
-fn test_update_position_from_server_caches_grounded_state() {
+fn test_update_position_from_server_caches_packet_contact() {
     let mut player = PlayerState::new();
     player.guid = Guid(0x50000001);
 
@@ -1005,7 +1005,7 @@ fn test_update_position_from_server_caches_grounded_state() {
         },
         &mut events,
     );
-    assert_eq!(player.last_server_grounded, Some(false));
+    assert_eq!(player.last_server_contact, Some(false));
 
     player.update_position_from_server(
         &PositionPack {
@@ -1014,12 +1014,12 @@ fn test_update_position_from_server_caches_grounded_state() {
             position_sequence: 6,
             teleport_sequence: 7,
             force_position_sequence: 4,
-            flags: UpdatePositionFlag::IS_GROUNDED,
+            flags: UpdatePositionFlag::HAS_CONTACT,
             ..Default::default()
         },
         &mut events,
     );
-    assert_eq!(player.last_server_grounded, Some(true));
+    assert_eq!(player.last_server_contact, Some(true));
 }
 
 #[test]

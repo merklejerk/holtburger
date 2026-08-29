@@ -1,22 +1,12 @@
 use super::{
-    ContactState, SelfPlayerDriveProjectionState, SolveBodyInput, SolveProjectionBasis,
+    AcceptedBodyMotion, ContactState, SelfPlayerDriveProjectionState, SolveBodyInput,
     SolvedBodyKinematics, SpatialSampleMode,
 };
 use holtburger_common::position::{METERS_PER_LANDBLOCK, WorldPosition};
-use holtburger_common::{Guid, Quaternion, RigidTransform, Vector3};
-use std::f32::consts::{PI, TAU};
+use holtburger_common::{Guid, RigidTransform, Vector3};
 use std::time::Duration;
 
 const EPSILON: f32 = 1e-4;
-
-fn velocity_kinematics_for_input(input: &SolveBodyInput) -> (Vector3, Vector3) {
-    match input.basis {
-        Some(SolveProjectionBasis::Velocity { velocity, omega }) => (velocity, omega),
-        Some(SolveProjectionBasis::AuthoredDrive { .. }) | None => {
-            (Vector3::zero(), Vector3::zero())
-        }
-    }
-}
 
 pub(super) fn sample_mode_for_projection_state(
     projection_state: Option<SelfPlayerDriveProjectionState>,
@@ -55,76 +45,6 @@ fn indoor_projection_landblock_id(
     })
 }
 
-fn normalize_heading(heading: f32) -> f32 {
-    heading.rem_euclid(TAU)
-}
-
-fn rotate_planar_velocity(velocity: Vector3, turn_step: f32) -> Vector3 {
-    if turn_step.abs() <= f32::EPSILON {
-        return velocity;
-    }
-    let sin = turn_step.sin();
-    let cos = turn_step.cos();
-    Vector3::new(
-        (velocity.x * cos) + (velocity.y * sin),
-        (-velocity.x * sin) + (velocity.y * cos),
-        velocity.z,
-    )
-}
-
-fn signed_heading_delta(current_heading: f32, desired_heading: f32) -> f32 {
-    let mut delta = (desired_heading - current_heading) % TAU;
-    if delta <= -PI {
-        delta += TAU;
-    } else if delta > PI {
-        delta -= TAU;
-    }
-    delta
-}
-
-/// Advances a body driven by an authored rigid offset.
-///
-/// This solver has no collision, so it reduces the offset the way retail reduces its own accepted
-/// path for the following tick: displacement over `dt` becomes the body's velocity
-/// (`acclient.c:310890-310905`). That is an in-character interpretation for a solver at this
-/// fidelity, and it is a reduction of an exact per-tick quantity rather than of the content.
-pub fn advance_authored_body_kinematics(
-    input: &SolveBodyInput,
-    offset: RigidTransform,
-    dt: Duration,
-) -> SolvedBodyKinematics {
-    let dt_secs = dt.as_secs_f32().max(0.0);
-    let gated = gate_authored_offset(offset, input.contact, 1.0);
-    let world_delta = input.pose.rotation.rotate_vector(gated.translation);
-    let next_rotation = input.pose.rotation.multiply(&gated.rotation);
-    let heading_delta =
-        signed_heading_delta(input.pose.rotation.to_heading(), next_rotation.to_heading());
-
-    if dt_secs <= f32::EPSILON {
-        return SolvedBodyKinematics {
-            body_id: input.body_id,
-            pose: input.pose,
-            velocity: Vector3::zero(),
-            omega: Vector3::zero(),
-            contact: input.contact,
-            projection_state: None,
-        };
-    }
-
-    let velocity = world_delta / dt_secs;
-    let mut next_pose = project_pose_by_offset(input.pose, world_delta, None);
-    next_pose.rotation = Quaternion::from_heading(next_rotation.to_heading());
-
-    SolvedBodyKinematics {
-        body_id: input.body_id,
-        pose: next_pose,
-        velocity,
-        omega: Vector3::new(0.0, 0.0, heading_delta / dt_secs),
-        contact: input.contact,
-        projection_state: None,
-    }
-}
-
 /// Applies retail's support gate to an authored offset.
 ///
 /// `CPhysicsObj::UpdatePositionInternal` (`acclient.c:308282-308292`) multiplies the accumulated
@@ -151,7 +71,7 @@ pub fn gate_authored_offset(
     }
 }
 
-fn project_pose_by_offset(
+pub(super) fn project_pose_by_offset(
     authoritative_pose: WorldPosition,
     offset: Vector3,
     target_hint: Option<WorldPosition>,
@@ -230,32 +150,43 @@ pub fn project_pose_forward_distance(
 }
 
 pub fn advance_body_kinematics(input: &SolveBodyInput, dt: Duration) -> SolvedBodyKinematics {
-    let (velocity, omega) = velocity_kinematics_for_input(input);
     let dt_secs = dt.as_secs_f32().max(0.0);
     if dt_secs <= f32::EPSILON {
         return SolvedBodyKinematics {
             body_id: input.body_id,
             pose: input.pose,
-            velocity,
-            omega,
+            accepted_motion: AcceptedBodyMotion::default(),
+            retained: input.retained,
             contact: input.contact,
             projection_state: None,
         };
     }
 
-    let turn_step = omega.z * dt_secs;
-    let next_heading = normalize_heading(input.pose.rotation.to_heading() + turn_step);
-    let next_velocity = rotate_planar_velocity(velocity, turn_step);
-
-    let mut next_pose = input.pose;
-    next_pose.rotation = Quaternion::from_heading(next_heading);
-    next_pose.coords = next_pose.coords + (next_velocity * dt_secs);
+    let authored = input
+        .authored_offset
+        .map(|offset| gate_authored_offset(offset, input.contact, 1.0))
+        .unwrap_or_else(RigidTransform::identity);
+    let authored_translation = input.pose.rotation.rotate_vector(authored.translation);
+    let physical_translation =
+        input.retained.velocity * dt_secs + input.retained.acceleration * (0.5 * dt_secs * dt_secs);
+    let accepted_translation = authored_translation + physical_translation;
+    let mut next_pose = project_pose_by_offset(input.pose, accepted_translation, None);
+    next_pose.rotation = input.pose.rotation.multiply(&authored.rotation);
+    next_pose.rotation =
+        super::scene::integrate_angular_velocity(next_pose.rotation, input.retained.omega, dt_secs);
+    let mut retained = input.retained;
+    retained.velocity = retained.velocity + retained.acceleration * dt_secs;
 
     SolvedBodyKinematics {
         body_id: input.body_id,
         pose: next_pose,
-        velocity: next_velocity,
-        omega,
+        accepted_motion: super::physical_body::accepted_motion(
+            input.pose,
+            next_pose,
+            accepted_translation / dt_secs,
+            dt_secs,
+        ),
+        retained,
         contact: input.contact,
         projection_state: None,
     }

@@ -1,14 +1,13 @@
-use super::movement::{CorrectionDisposition, ServerPositionUpdate};
 use super::{ClientRuntime, ClientWorldActivationState, types::*};
 use anyhow::Result;
 use holtburger_common::ConfirmationType;
 use holtburger_common::properties::WorldObjectExt as _;
+use holtburger_common::sequence::is_newer_u16;
 use holtburger_protocol::errors::{CharacterError, WeenieError};
 use holtburger_protocol::messages::*;
 use holtburger_protocol::traits::ProtocolUnpack;
-use holtburger_world::WorldEvent;
 use holtburger_world::entity::Entity;
-use std::time::Instant;
+use holtburger_world::{AuthoritativePoseEffect, AuthoritativePoseResetCause, WorldEvent};
 
 fn confirmation_done_requires_auto_response(confirmation_type: ConfirmationType) -> bool {
     matches!(
@@ -22,86 +21,64 @@ fn confirmation_done_requires_auto_response(confirmation_type: ConfirmationType)
 }
 
 impl ClientRuntime {
-    fn apply_local_position_correction(
+    fn apply_local_position_authority(
         &mut self,
         position: holtburger_common::position::WorldPosition,
-        contact: bool,
         known_teleport_sequence: u16,
+        known_force_position_sequence: u16,
         teleport_sequence: u16,
+        force_position_sequence: u16,
         discontinuity_already_handled: bool,
     ) -> Vec<WorldEvent> {
-        let guid = self.world.player.guid;
-        if guid == holtburger_common::Guid::NULL {
-            return Vec::new();
-        }
-
-        let current = self.world.local_player_runtime_pose().unwrap_or(position);
-        let has_cell = self
-            .world
-            .runtime_body_view(holtburger_world::SpatialBodyId::LocalPlayer(guid))
-            .is_some_and(|body| body.runtime_pose.landblock_id != holtburger_common::Guid::NULL);
-        let update = ServerPositionUpdate {
-            pose: position,
-            teleport_sequence,
-            contact,
-            distance: current.distance_to(&position),
-            is_moving_to: self.movement.has_server_controlled_projection(),
-        };
         // PlayerTeleport establishes the destination epoch before ACE sends its position. That
-        // makes the ordinary retail sequence classifier see the destination as same-epoch, even
-        // though portal activation requires one unconditional runtime-pose replacement. Without
-        // this edge the old predicted pose can survive beside destination collision residency.
+        // makes the destination packet look same-epoch, even though portal activation requires
+        // one unconditional runtime reset to the destination pose.
         let installs_teleport_destination = self.activation.as_ref().is_some_and(|activation| {
             matches!(
                 activation.phase,
                 super::ClientWorldActivationPhase::TeleportAwaitingDestination
             )
         });
-        let disposition = if installs_teleport_destination {
-            self.movement.clear_server_correction();
-            CorrectionDisposition::HardSet
+        let reset_cause = if installs_teleport_destination
+            || is_newer_u16(teleport_sequence, known_teleport_sequence)
+        {
+            Some(AuthoritativePoseResetCause::Teleport)
+        } else if is_newer_u16(force_position_sequence, known_force_position_sequence) {
+            Some(AuthoritativePoseResetCause::ForcedReposition)
         } else {
-            self.movement.accept_server_position_update(
-                update,
-                current,
-                known_teleport_sequence,
-                has_cell,
-            )
+            None
         };
+        let effect = reset_cause.map_or(
+            AuthoritativePoseEffect::Confirm { pose: position },
+            |cause| AuthoritativePoseEffect::Reset {
+                pose: position,
+                cause,
+            },
+        );
+        let events = self.world.apply_player_pose_effect(effect);
 
-        match disposition {
-            CorrectionDisposition::Ignored | CorrectionDisposition::Interpolate { .. } => {
-                Vec::new()
-            }
-            CorrectionDisposition::HardSet | CorrectionDisposition::Snap => {
-                // A direct placement is a local timeline discontinuity. The authoritative pose
-                // was already updated by WorldState; only the runtime body and downstream camera
-                // need the explicit reset here.
-                let events = self
-                    .world
-                    .relocate_local_player_runtime_body(position, Instant::now());
-                if installs_teleport_destination {
-                    self.activation
-                        .as_mut()
-                        .expect("teleport destination requires an active activation")
-                        .phase = super::ClientWorldActivationPhase::TeleportDestinationInstalled;
-                }
-                if !discontinuity_already_handled && !installs_teleport_destination {
-                    self.reset_camera();
-                    if let Some(coordinator) = self.collision_coordinator.as_mut() {
-                        coordinator.invalidate();
-                    }
-                    self.bump_world_generation();
-                    let _ = self.client_view_event_tx.send(
-                        ClientViewEvent::PresentationDiscontinuity {
-                            world_generation: self.world_generation,
-                            kind: ClientPresentationDiscontinuityKind::ForcedReposition,
-                        },
-                    );
-                }
-                events
-            }
+        if installs_teleport_destination {
+            self.activation
+                .as_mut()
+                .expect("teleport destination requires an active activation")
+                .phase = super::ClientWorldActivationPhase::TeleportDestinationInstalled;
         }
+        if reset_cause.is_some() && !discontinuity_already_handled && !installs_teleport_destination
+        {
+            self.reset_camera();
+            if let Some(coordinator) = self.collision_coordinator.as_mut() {
+                coordinator.invalidate();
+            }
+            self.bump_world_generation();
+            let _ = self
+                .client_view_event_tx
+                .send(ClientViewEvent::PresentationDiscontinuity {
+                    world_generation: self.world_generation,
+                    kind: ClientPresentationDiscontinuityKind::ForcedReposition,
+                });
+        }
+
+        events
     }
 
     pub(super) async fn begin_world_entry_transition(&mut self) -> Result<()> {
@@ -142,12 +119,12 @@ impl ClientRuntime {
                 matches!(event, WorldEvent::RuntimeBodiesReset { .. } | WorldEvent::TeleportStarted { .. })
                     || matches!(event, WorldEvent::ForcedReposition { guid, .. } if *guid == self.world.player.guid)
             });
-            for event in &pending_events {
-                self.handle_runtime_world_event_with_context(event, teleport_batch);
-            }
-
             let mut follow_up_events = Vec::new();
-            for event in pending_events {
+            // Packet-scoped authority/control effects must finish mutating the canonical runtime
+            // before any event in this batch projects a dynamic entity view. Otherwise an
+            // `EntityMoved` upsert can publish the newly authoritative pose before the local
+            // correction/reset effect has established its runtime consequence.
+            for event in &pending_events {
                 match event {
                     WorldEvent::SelfServerControlledMotion(data) => {
                         self.movement
@@ -161,52 +138,58 @@ impl ClientRuntime {
                                 ..
                             } = self;
                             simulation
-                                .handle_server_controlled_movement(*data, movement, world, session)
+                                .handle_server_controlled_movement(data, movement, world, session)
                                 .await?
                         };
                         follow_up_events.extend(world_events);
                     }
                     WorldEvent::SelfUpdatePosition {
                         position,
-                        contact,
                         known_teleport_sequence,
+                        known_force_position_sequence,
                         teleport_sequence,
                         force_position_sequence,
                         ..
                     } => {
                         self.movement
-                            .record_force_position_sequence(force_position_sequence);
-                        follow_up_events.extend(self.apply_local_position_correction(
-                            position,
-                            contact,
-                            known_teleport_sequence,
-                            teleport_sequence,
+                            .record_force_position_sequence(*force_position_sequence);
+                        follow_up_events.extend(self.apply_local_position_authority(
+                            *position,
+                            *known_teleport_sequence,
+                            *known_force_position_sequence,
+                            *teleport_sequence,
+                            *force_position_sequence,
                             discontinuity_already_handled,
                         ));
                     }
                     WorldEvent::SelfAutonomousPosition {
                         position,
-                        contact,
                         known_teleport_sequence,
+                        known_force_position_sequence,
                         teleport_sequence,
                         force_position_sequence,
                         server_control_sequence,
                     } => {
                         self.movement.record_autonomous_position_sequences(
-                            teleport_sequence,
-                            force_position_sequence,
-                            server_control_sequence,
+                            *teleport_sequence,
+                            *force_position_sequence,
+                            *server_control_sequence,
                         );
-                        follow_up_events.extend(self.apply_local_position_correction(
-                            position,
-                            contact,
-                            known_teleport_sequence,
-                            teleport_sequence,
+                        follow_up_events.extend(self.apply_local_position_authority(
+                            *position,
+                            *known_teleport_sequence,
+                            *known_force_position_sequence,
+                            *teleport_sequence,
+                            *force_position_sequence,
                             discontinuity_already_handled,
                         ));
                     }
                     _ => {}
                 }
+            }
+
+            for event in &pending_events {
+                self.handle_runtime_world_event_with_context(event, teleport_batch);
             }
 
             pending_events = follow_up_events;
@@ -762,8 +745,10 @@ impl ClientRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::DynamicEntityEvent;
     use crate::client::{ClientState, PHYSICS_TICK_MS, builder};
     use holtburger_common::position::WorldPosition;
+    use holtburger_common::properties::WorldObjectPropertyAccessorsMut;
     use holtburger_common::{CharacterOptions1, CharacterOptions2, ConfirmationType, Quaternion};
     use holtburger_protocol::errors::WeenieError;
     use holtburger_protocol::messages::movement::MotionStance;
@@ -911,6 +896,74 @@ mod tests {
             .unwrap();
         assert_eq!(runtime.velocity, holtburger_common::Vector3::zero());
         assert_eq!(runtime.omega, holtburger_common::Vector3::zero());
+    }
+
+    #[tokio::test]
+    async fn five_self_position_echoes_confirm_without_replacing_runtime_pose() {
+        let mut client = build_test_client();
+        let guid = holtburger_common::Guid(0x5000_0002);
+        let authoritative = WorldPosition {
+            landblock_id: holtburger_common::Guid(0x7c65_0032),
+            coords: holtburger_common::Vector3::new(10.0, 10.0, 0.0),
+            rotation: Quaternion::identity(),
+        };
+        let runtime = WorldPosition {
+            coords: holtburger_common::Vector3::new(12.0, 10.0, 0.0),
+            ..authoritative
+        };
+        client
+            .world
+            .seed_local_player_entity(guid, "Player", authoritative);
+        let player = client
+            .world
+            .entities
+            .get_mut(guid)
+            .expect("seeded player entity must exist");
+        player.wcid = Some(42);
+        player.set_did_prop(
+            holtburger_common::properties::PropertyDataId::Setup,
+            holtburger_common::Guid(0x0200_0001),
+        );
+        client.world.set_local_player_runtime_pose(runtime);
+        let mut events = client.subscribe_client_view_events();
+
+        let mut echoed = authoritative;
+        for position_sequence in 1..=5 {
+            echoed.coords.x = 10.0 + position_sequence as f32 * 0.1;
+            let update =
+                encode_message(&GameMessage::UpdatePosition(Box::new(UpdatePositionData {
+                    guid,
+                    pos: PositionPack {
+                        flags: UpdatePositionFlag::HAS_CONTACT,
+                        pos: echoed,
+                        position_sequence,
+                        ..PositionPack::default()
+                    },
+                })));
+            client.handle_message(&update).await.unwrap();
+            assert_eq!(client.world.local_player_runtime_pose(), Some(runtime));
+        }
+
+        let projected_poses = std::iter::from_fn(|| events.try_recv().ok())
+            .filter_map(|event| {
+                let ClientViewEvent::DynamicEntity(DynamicEntityEvent::Upserted { entity }) = event
+                else {
+                    return None;
+                };
+                if entity.identity.guid != guid {
+                    return None;
+                }
+                let crate::DynamicEntityPlacementView::World { pose, .. } = entity.placement else {
+                    return None;
+                };
+                Some(pose)
+            })
+            .collect::<Vec<_>>();
+
+        assert!(projected_poses.len() >= 5);
+        assert!(projected_poses.into_iter().all(|pose| pose == runtime));
+        assert_eq!(client.world.player_position(), Some(echoed));
+        assert_eq!(client.world.local_player_runtime_pose(), Some(runtime));
     }
 
     #[tokio::test]
@@ -1140,15 +1193,15 @@ mod tests {
             .body(holtburger_world::SpatialBodyId::LocalPlayer(player_guid))
             .expect("server-controlled movement should retain the local runtime body");
         assert_eq!(body.pose, start);
-        let step = client
+        let drive = client
             .movement
-            .advance_server_interpolation(
+            .current_local_drive_control(
                 &client.world,
                 std::time::Duration::from_millis(PHYSICS_TICK_MS),
             )
-            .expect("server-controlled movement should install an interpolation target");
-        assert_eq!(step.target, destination);
-        assert!(step.translation.length_squared() > 0.0);
+            .expect("server-controlled movement should expose an ordinary drive target");
+        assert_eq!(drive.target_hint, Some(destination));
+        assert!(drive.desired_world_delta.length_squared() > 0.0);
         assert_eq!(client.session.packet_sequence, 1);
     }
 

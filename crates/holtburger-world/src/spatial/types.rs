@@ -25,6 +25,15 @@ pub enum ContactState {
 }
 
 impl ContactState {
+    /// Whether the body has physical contact, once classified.
+    pub const fn contact(self) -> Option<bool> {
+        match self {
+            Self::Unknown => None,
+            Self::Airborne => Some(false),
+            Self::Sliding | Self::Grounded => Some(true),
+        }
+    }
+
     /// Whether the body has walkable support, once classified. `Sliding` answers `false`: the
     /// body is on a surface, but not one it can stand on.
     pub const fn walkable(self) -> Option<bool> {
@@ -92,22 +101,47 @@ pub enum SelfPlayerDriveProjectionState {
     AuthorityFrozen,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AuthoritativeBodySync {
-    Snapshot,
-    Reset,
-}
-
-/// One complete producer-authoritative pose and vector replacement.
+/// One complete producer-authoritative vector replacement.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct AuthoritativeBodyKinematics {
-    /// Producer-authoritative world pose.
-    pub pose: WorldPosition,
+pub struct AuthoritativeBodyVectors {
     /// Producer-authoritative world-space linear velocity.
     pub velocity: Vector3,
     /// Producer-authoritative world-space linear acceleration.
     pub acceleration: Vector3,
     /// Producer-authoritative world-space angular velocity.
+    pub omega: Vector3,
+}
+
+/// Physical vectors retained across ticks and integrated independently from authored motion.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct RetainedBodyKinematics {
+    /// World-space linear momentum used by physical integration and collision response.
+    pub velocity: Vector3,
+    /// World-space linear acceleration applied to retained momentum.
+    pub acceleration: Vector3,
+    /// World-space angular velocity integrated into physical orientation.
+    pub omega: Vector3,
+}
+
+impl From<AuthoritativeBodyVectors> for RetainedBodyKinematics {
+    fn from(vectors: AuthoritativeBodyVectors) -> Self {
+        Self {
+            velocity: vectors.velocity,
+            acceleration: vectors.acceleration,
+            omega: vectors.omega,
+        }
+    }
+}
+
+/// Observed derivative of the path accepted during the latest fixed tick.
+///
+/// This is retail's cached-motion role: callers may observe it, but it is never a future physical
+/// integration basis.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct AcceptedBodyMotion {
+    /// Accepted world-space displacement divided by the tick quantum.
+    pub velocity: Vector3,
+    /// Accepted angular displacement divided by the tick quantum.
     pub omega: Vector3,
 }
 
@@ -218,9 +252,11 @@ pub struct SpatialEntitySample {
     pub guid: Guid,
     pub authoritative_pose: WorldPosition,
     pub projected_pose: WorldPosition,
+    /// Accepted displacement from the latest tick divided by its quantum; observational only.
     pub velocity: Vector3,
-    /// Current producer-authored world-space linear acceleration.
+    /// Retained producer-authored world-space linear acceleration.
     pub acceleration: Vector3,
+    /// Retained producer-authored world-space angular velocity.
     pub omega: Vector3,
     pub motion_state: Option<EntityMotionSnapshot>,
     pub projection_mode: SpatialSampleMode,
@@ -231,9 +267,11 @@ pub struct RuntimeSpatialBodyView {
     pub body_id: SpatialBodyId,
     pub authoritative_pose: Option<WorldPosition>,
     pub runtime_pose: WorldPosition,
+    /// Accepted displacement from the latest tick divided by its quantum; observational only.
     pub velocity: Vector3,
-    /// Current canonical world-space linear acceleration.
+    /// Retained world-space linear acceleration used by physical integration.
     pub acceleration: Vector3,
+    /// Retained world-space angular velocity used by physical integration.
     pub omega: Vector3,
     pub motion_state: Option<EntityMotionSnapshot>,
     pub contact: ContactState,
@@ -245,13 +283,15 @@ pub struct SpatialBody {
     pub id: SpatialBodyId,
     pub authoritative_pose: Option<WorldPosition>,
     pub pose: WorldPosition,
-    pub velocity: Vector3,
-    /// Canonical world-space linear acceleration retained for dynamic integration.
-    pub acceleration: Vector3,
-    pub omega: Vector3,
+    /// Physical vectors retained for future integration and collision response.
+    pub retained: RetainedBodyKinematics,
+    /// Observed derivative of the latest accepted path; never a future integration basis.
+    pub accepted_motion: AcceptedBodyMotion,
     pub motion_state: Option<EntityMotionSnapshot>,
     pub contact: ContactState,
     pub sampling: SpatialSamplingState,
+    /// Active authoritative-pose reconciliation, allocated only for bodies that receive it.
+    pub(crate) reconciliation: Option<Box<super::PoseReconciliationState>>,
     /// Optional static-collision response attached without duplicating body identity or pose.
     pub physical: Option<PhysicalBodyState>,
 }
@@ -262,12 +302,12 @@ impl SpatialBody {
             id,
             authoritative_pose: Some(pose),
             pose,
-            velocity: Vector3::zero(),
-            acceleration: Vector3::zero(),
-            omega: Vector3::zero(),
+            retained: RetainedBodyKinematics::default(),
+            accepted_motion: AcceptedBodyMotion::default(),
             motion_state: None,
             contact: ContactState::Unknown,
             sampling: SpatialSamplingState::authoritative(now),
+            reconciliation: None,
             physical: None,
         }
     }
@@ -277,14 +317,26 @@ impl SpatialBody {
             id,
             authoritative_pose: None,
             pose,
-            velocity: Vector3::zero(),
-            acceleration: Vector3::zero(),
-            omega: Vector3::zero(),
+            retained: RetainedBodyKinematics::default(),
+            accepted_motion: AcceptedBodyMotion::default(),
             motion_state: None,
             contact: ContactState::Unknown,
             sampling: SpatialSamplingState::authoritative(now),
+            reconciliation: None,
             physical: None,
         }
+    }
+
+    /// Whether this body has allocated authoritative-pose reconciliation state.
+    pub fn has_pose_reconciliation_state(&self) -> bool {
+        self.reconciliation.is_some()
+    }
+
+    /// Whether reconciliation can move this body without an ordinary actor-produced basis.
+    pub fn has_pose_reconciliation_work(&self) -> bool {
+        self.reconciliation
+            .as_deref()
+            .is_some_and(super::PoseReconciliationState::has_projection_work)
     }
 
     /// Complete source-domain membership accepted atomically with the current root pose.
@@ -313,9 +365,9 @@ impl SpatialBody {
             guid,
             authoritative_pose,
             projected_pose: self.pose,
-            velocity: self.velocity,
-            acceleration: self.acceleration,
-            omega: self.omega,
+            velocity: self.accepted_motion.velocity,
+            acceleration: self.retained.acceleration,
+            omega: self.retained.omega,
             motion_state: self.motion_state,
             projection_mode: self.sampling.mode,
         })
@@ -326,9 +378,9 @@ impl SpatialBody {
             body_id: self.id,
             authoritative_pose: self.authoritative_pose,
             runtime_pose: self.pose,
-            velocity: self.velocity,
-            acceleration: self.acceleration,
-            omega: self.omega,
+            velocity: self.accepted_motion.velocity,
+            acceleration: self.retained.acceleration,
+            omega: self.retained.omega,
             motion_state: self.motion_state,
             contact: self.contact,
             sample_mode: self.sampling.mode,
@@ -337,33 +389,18 @@ impl SpatialBody {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum SolveProjectionBasis {
-    /// Retained physical momentum in world space.
-    Velocity { velocity: Vector3, omega: Vector3 },
-    /// The tick's authored contribution as one rigid offset in the body's own frame.
-    ///
-    /// This is the whole authored program for the tick, composed exactly from the frames the cursor
-    /// departed plus the motion-data slice — not a rate sampled from it. It is consumed and
-    /// discarded: blocked displacement is never retried, and nothing accumulates it as momentum.
-    AuthoredDrive { offset: RigidTransform },
-}
-
-impl SolveProjectionBasis {
-    pub const fn velocity(velocity: Vector3, omega: Vector3) -> Self {
-        Self::Velocity { velocity, omega }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SolveBodyInput {
     pub body_id: SpatialBodyId,
     pub pose: WorldPosition,
     pub contact: ContactState,
-    pub basis: Option<SolveProjectionBasis>,
+    /// One-tick authored contribution in body-local space, consumed without retention.
+    pub authored_offset: Option<RigidTransform>,
+    /// Physical vectors integrated independently from the authored contribution.
+    pub retained: RetainedBodyKinematics,
 }
 
 impl SolveBodyInput {
-    pub const fn velocity(
+    pub fn velocity(
         body_id: SpatialBodyId,
         pose: WorldPosition,
         contact: ContactState,
@@ -374,8 +411,18 @@ impl SolveBodyInput {
             body_id,
             pose,
             contact,
-            basis: Some(SolveProjectionBasis::Velocity { velocity, omega }),
+            authored_offset: None,
+            retained: RetainedBodyKinematics {
+                velocity,
+                acceleration: Vector3::zero(),
+                omega,
+            },
         }
+    }
+
+    /// Whether this tick has an authored or physical contribution worth scheduling.
+    pub fn has_motion(self) -> bool {
+        self.authored_offset.is_some() || self.retained != RetainedBodyKinematics::default()
     }
 }
 
@@ -383,10 +430,21 @@ impl SolveBodyInput {
 pub struct SolvedBodyKinematics {
     pub body_id: SpatialBodyId,
     pub pose: WorldPosition,
-    pub velocity: Vector3,
-    pub omega: Vector3,
+    /// Observed derivative of this solve's accepted path.
+    pub accepted_motion: AcceptedBodyMotion,
+    /// Physical vectors retained after this pose-only integration tick.
+    pub retained: RetainedBodyKinematics,
     pub contact: ContactState,
     pub projection_state: Option<SelfPlayerDriveProjectionState>,
+}
+
+/// Placement consequence produced by one fixed body tick.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeBodyAdvanceKind {
+    /// Ordinary authored, velocity, interpolation, or collision-resolved movement.
+    Integrated,
+    /// Ordinary far correction installed at the tick boundary without a lifecycle reset.
+    CorrectionSnap,
 }
 
 #[derive(Debug, Clone, PartialEq)]

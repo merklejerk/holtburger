@@ -303,7 +303,12 @@ impl HostPhysicalFlyRuntime {
                 previous.body_id,
                 dt.as_secs_f32(),
                 Instant::now(),
-                |_| Ok(PhysicalBodyActuation::free_flight(velocity)?),
+                |body| {
+                    Ok(PhysicalBodyActuation::free_flight_with_kinematic_velocity(
+                        body.retained.velocity,
+                        velocity,
+                    )?)
+                },
                 |solved| prepare_physical_fly_presentation(&previous, solved),
             )?;
             let _ = solved;

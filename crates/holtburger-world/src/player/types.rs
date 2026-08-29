@@ -236,7 +236,10 @@ pub struct PlayerState {
     /// Sequence for client-initiated position updates.
     pub position_sequence: u16,
     /// Last grounded bit reported by authoritative self movement updates.
-    pub last_server_grounded: Option<bool>,
+    /// Last packet-authored `HAS_CONTACT` fact, retained only as an outbound packet fallback.
+    pub last_server_contact: Option<bool>,
+    /// Last locally solved walkability projected to consumers, retained to suppress duplicates.
+    pub last_runtime_walkable: Option<bool>,
     /// Monotonically increasing sequence for autonomous movement steps.
     pub movement_sequence: u16,
     /// Session-local private position overlays keyed by packet `PositionType`.
@@ -288,7 +291,8 @@ impl PlayerState {
             teleport_sequence: 0,
             force_position_sequence: 0,
             position_sequence: 0,
-            last_server_grounded: None,
+            last_server_contact: None,
+            last_runtime_walkable: None,
             movement_sequence: 0,
             local_position_overlays: HashMap::new(),
             enchantments: Vec::new(),

@@ -212,8 +212,6 @@ pub struct GroundedBodyActuation {
     launch: Option<GroundedLaunch>,
     /// Optional controller-selected world heading applied before body-policy facing overrides.
     control_heading: Option<f32>,
-    /// World-space acceleration contributed by generic dynamic-body kinematics this tick.
-    external_acceleration: Vector3,
 }
 
 /// Source of planar velocity while a grounded body retains support.
@@ -237,7 +235,6 @@ impl GroundedBodyActuation {
             supported_motion: GroundedSupportedMotion::Driven(supported_planar_velocity),
             launch: None,
             control_heading: None,
-            external_acceleration: Vector3::zero(),
         })
     }
 
@@ -247,23 +244,12 @@ impl GroundedBodyActuation {
             supported_motion: GroundedSupportedMotion::Coasting,
             launch: None,
             control_heading: None,
-            external_acceleration: Vector3::zero(),
         }
     }
 
     pub fn with_launch(mut self, launch: GroundedLaunch) -> Self {
         self.launch = Some(launch);
         self
-    }
-
-    /// Adds one finite world-space acceleration without reinterpreting it as controller drive.
-    pub fn with_external_acceleration(
-        mut self,
-        acceleration: Vector3,
-    ) -> std::result::Result<Self, PhysicalBodyActuationError> {
-        validate_finite_velocity(acceleration)?;
-        self.external_acceleration = acceleration;
-        Ok(self)
     }
 
     /// Planar drive this actuation supplies, or the zero vector while coasting.
@@ -284,11 +270,6 @@ impl GroundedBodyActuation {
         self.launch.as_ref()
     }
 
-    /// Generic acceleration carried by this actuation.
-    pub fn external_acceleration(&self) -> Vector3 {
-        self.external_acceleration
-    }
-
     /// Applies the controller's absolute world heading without changing ballistic velocity.
     pub fn with_control_heading(
         mut self,
@@ -305,10 +286,12 @@ impl GroundedBodyActuation {
 /// Response-specific one-tick actuation for a registered physical body.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PhysicalBodyActuation {
-    /// Unrestricted collision-aware three-dimensional target velocity.
+    /// Unrestricted collision-aware three-dimensional physical and kinematic motion.
     FreeFlight {
-        /// Desired world-space velocity for this tick.
-        velocity: Vector3,
+        /// World-space physical velocity eligible for retention and collision response.
+        retained_velocity: Vector3,
+        /// One-tick world-space drive added to the candidate path but never retained.
+        kinematic_velocity: Vector3,
     },
     /// Grounded drive plus an optional supported launch edge.
     Grounded(GroundedBodyActuation),
@@ -317,7 +300,23 @@ pub enum PhysicalBodyActuation {
 impl PhysicalBodyActuation {
     pub fn free_flight(velocity: Vector3) -> std::result::Result<Self, PhysicalBodyActuationError> {
         validate_finite_velocity(velocity)?;
-        Ok(Self::FreeFlight { velocity })
+        Ok(Self::FreeFlight {
+            retained_velocity: velocity,
+            kinematic_velocity: Vector3::zero(),
+        })
+    }
+
+    /// Adds one non-retained world-space contribution to a free body's candidate path.
+    pub fn free_flight_with_kinematic_velocity(
+        retained_velocity: Vector3,
+        kinematic_velocity: Vector3,
+    ) -> std::result::Result<Self, PhysicalBodyActuationError> {
+        validate_finite_velocity(retained_velocity)?;
+        validate_finite_velocity(kinematic_velocity)?;
+        Ok(Self::FreeFlight {
+            retained_velocity,
+            kinematic_velocity,
+        })
     }
 
     pub fn grounded_drive(
@@ -328,17 +327,19 @@ impl PhysicalBodyActuation {
         )?))
     }
 
-    /// Whether this tick input contains no controller, launch, acceleration, or flight work.
+    /// Whether this tick input contains no controller, launch, or flight work.
     pub(crate) fn permits_dynamic_settling(&self) -> bool {
         match self {
-            Self::FreeFlight { velocity } => *velocity == Vector3::zero(),
+            Self::FreeFlight {
+                retained_velocity,
+                kinematic_velocity,
+            } => *retained_velocity == Vector3::zero() && *kinematic_velocity == Vector3::zero(),
             Self::Grounded(actuation) => {
                 matches!(
                     actuation.supported_motion,
                     GroundedSupportedMotion::Coasting
                 ) && actuation.launch.is_none()
                     && actuation.control_heading.is_none()
-                    && actuation.external_acceleration == Vector3::zero()
             }
         }
     }
@@ -748,8 +749,10 @@ pub struct DynamicBodyPhysicsStateChange {
 pub(super) struct PhysicalBodyTickCommit {
     /// Accepted body-reference pose.
     pub pose: WorldPosition,
-    /// Velocity achieved by the accepted displacement.
-    pub velocity: Vector3,
+    /// Physical linear momentum retained for the next integration tick.
+    pub retained_velocity: Vector3,
+    /// Observed derivative of the complete path accepted during this tick.
+    pub accepted_motion: super::AcceptedBodyMotion,
     /// Coarse support state derived by the selected response.
     pub contact: ContactState,
     /// Response-only state matching the physical definition variant.
@@ -821,8 +824,11 @@ pub(super) fn solve_physical_body_tick(
     // Derived here so the accepted pose is final. Both the scene commit and dynamic contact used to
     // re-integrate it from retained omega themselves, which made the tick's end orientation a fact
     // computed in three places.
-    commit.pose.rotation =
-        super::scene::integrate_angular_velocity(commit.pose.rotation, body.omega, delta_seconds);
+    commit.pose.rotation = super::scene::integrate_angular_velocity(
+        commit.pose.rotation,
+        body.retained.omega,
+        delta_seconds,
+    );
     Ok(commit)
 }
 
@@ -838,7 +844,11 @@ fn solve_physical_body_response(
             PhysicalBodyDefinition::FreeSphere { sphere, config },
             PhysicalBodyResponseState::FreeSphere { cell },
         ) => {
-            let PhysicalBodyActuation::FreeFlight { velocity } = actuation else {
+            let PhysicalBodyActuation::FreeFlight {
+                retained_velocity,
+                kinematic_velocity,
+            } = actuation
+            else {
                 anyhow::bail!("grounded actuation cannot drive a free-sphere physical body")
             };
             solve_free_sphere_tick(
@@ -851,7 +861,8 @@ fn solve_physical_body_response(
                     collision_filter: physical.collision_filter,
                     cell: *cell,
                 },
-                *velocity,
+                *retained_velocity,
+                *kinematic_velocity,
                 delta_seconds,
             )
         }
@@ -890,10 +901,14 @@ fn solve_free_sphere_tick(
     scene: &CollisionScene,
     body: &SpatialBody,
     state: FreeSphereTickState,
-    desired_velocity: Vector3,
+    retained_velocity: Vector3,
+    kinematic_velocity: Vector3,
     delta_seconds: f32,
 ) -> Result<PhysicalBodyTickCommit> {
     let offset = body.pose.rotation.rotate_vector(state.sphere.center);
+    let integrated_velocity = retained_velocity + body.retained.acceleration * delta_seconds;
+    let candidate_velocity =
+        retained_velocity + body.retained.acceleration * (0.5 * delta_seconds) + kinematic_velocity;
     let mut sphere_pose = body.pose;
     sphere_pose.coords = sphere_pose.coords + offset;
     let outcome = solve_free_sphere(
@@ -905,7 +920,7 @@ fn solve_free_sphere_tick(
                 cell: state.cell,
                 radius: state.sphere.radius,
             },
-            displacement: desired_velocity * delta_seconds,
+            displacement: candidate_velocity * delta_seconds,
             filter: state.collision_filter,
             query_policy: CollisionQueryPolicy::RequireCollisionCoverage,
         },
@@ -958,15 +973,10 @@ fn solve_free_sphere_tick(
     );
     let mut pose = body_reference_pose(solved.pose, committed_cell, offset)?;
     let velocity = collision_response(CollisionResponseInput {
-        incoming: desired_velocity,
-        // A budget-limited prefix occupies only part of the tick geometrically; dividing by the
-        // complete interval turns the work bound into an explicit effective speed clamp.
-        achieved_velocity: achieved_displacement / delta_seconds,
+        incoming: integrated_velocity,
         restitution: state.response_policy.restitution,
         collision_normal,
-        previously_walkable: false,
         current_support_normal: None,
-        surface_motion: state.response_policy.surface_motion,
         stationary_fall_frames: 0,
     })
     .velocity;
@@ -978,7 +988,13 @@ fn solve_free_sphere_tick(
     );
     Ok(PhysicalBodyTickCommit {
         pose,
-        velocity,
+        retained_velocity: velocity,
+        accepted_motion: accepted_motion(
+            body.pose,
+            pose,
+            achieved_displacement / delta_seconds,
+            delta_seconds,
+        ),
         contact: ContactState::Airborne,
         response: PhysicalBodyResponseState::FreeSphere {
             cell: committed_cell,
@@ -1008,25 +1024,22 @@ fn solve_grounded_body_tick(
         }
         GroundState::Airborne => true,
     };
+    let initial_retained_velocity = canonical_retained_velocity(body.retained.velocity);
+    let acceleration_step = body.retained.acceleration * delta_seconds;
+    let mut candidate_retained_velocity = initial_retained_velocity + acceleration_step * 0.5;
+    let mut retained_velocity = initial_retained_velocity + acceleration_step;
     let mut grounded_body = GroundedBody {
         pose: body.pose,
         cell: state.cell,
-        velocity: match actuation.supported_motion {
-            // Retail zeros retained velocity below `SmallVelocity` before applying acceleration
-            // and integrating the next offset (`CPhysicsObj::UpdatePhysicsInternal`,
-            // `acclient.c:306106-306153`). Explicit controller drive and launch are separate
-            // commands and must not be erased by this retained-response canonicalization.
-            GroundedSupportedMotion::Coasting => canonical_retained_velocity(body.velocity),
-            GroundedSupportedMotion::Driven(_) => body.velocity,
-        },
+        // This field remains physical momentum. A kinematic drive may temporarily be supplied to
+        // the solver below for first-contact path finding, but is never committed through it.
+        velocity: candidate_retained_velocity,
         ground: if retained_ground_is_current {
             state.ground
         } else {
             GroundState::Airborne
         },
     };
-    grounded_body.velocity =
-        grounded_body.velocity + actuation.external_acceleration * delta_seconds;
     // A newly installed grounded body has not yet had a collision transaction classify its
     // contact. Let explicit planar drive participate in that first transaction so a body placed
     // on a floor does not discard one tick of input. Once a solve commits `Airborne`, canonical
@@ -1035,8 +1048,8 @@ fn solve_grounded_body_tick(
         && grounded_body.ground.walkable_support().is_none()
         && let GroundedSupportedMotion::Driven(velocity) = actuation.supported_motion
     {
-        grounded_body.velocity.x = velocity.x;
-        grounded_body.velocity.y = velocity.y;
+        grounded_body.velocity.x += velocity.x;
+        grounded_body.velocity.y += velocity.y;
     }
     let retained_contact = if retained_ground_is_current {
         body.contact
@@ -1050,36 +1063,64 @@ fn solve_grounded_body_tick(
             "grounded launch requires current walkable support"
         );
         grounded_body.velocity = launch.velocity();
+        candidate_retained_velocity = launch.velocity();
+        retained_velocity = launch.velocity();
         grounded_body.ground = GroundState::Airborne;
     }
     let mut supported_velocity = match actuation.supported_motion {
-        GroundedSupportedMotion::Driven(velocity) => velocity,
-        GroundedSupportedMotion::Coasting => grounded_body.velocity,
+        GroundedSupportedMotion::Driven(velocity) => velocity + candidate_retained_velocity,
+        GroundedSupportedMotion::Coasting => candidate_retained_velocity,
     };
     if let Some(support) = grounded_body.ground.walkable_support() {
-        match (
-            state.response_policy.surface_motion,
-            actuation.supported_motion,
-        ) {
-            (PhysicalSurfaceMotion::Stable, GroundedSupportedMotion::Driven(_)) => {}
-            (PhysicalSurfaceMotion::Stable, GroundedSupportedMotion::Coasting) => {
-                supported_velocity = surface_friction(
-                    supported_velocity,
+        match state.response_policy.surface_motion {
+            PhysicalSurfaceMotion::Stable => {
+                // Retail damps `m_velocityVector` before composing that physical contribution
+                // with movement-manager output (`acclient.c:306114-306153`). Controller drive is
+                // therefore not a reason to suspend friction on independently retained momentum.
+                candidate_retained_velocity = surface_friction(
+                    candidate_retained_velocity,
                     support.normal,
                     state.response_policy.friction,
                     delta_seconds,
                     PhysicalSurfaceMotion::Stable,
                 );
+                retained_velocity = surface_friction(
+                    retained_velocity,
+                    support.normal,
+                    state.response_policy.friction,
+                    delta_seconds,
+                    PhysicalSurfaceMotion::Stable,
+                );
+                grounded_body.velocity = candidate_retained_velocity;
+                supported_velocity = match actuation.supported_motion {
+                    GroundedSupportedMotion::Driven(velocity) => {
+                        velocity + candidate_retained_velocity
+                    }
+                    GroundedSupportedMotion::Coasting => candidate_retained_velocity,
+                };
             }
-            (PhysicalSurfaceMotion::Sledding, _) => {
-                grounded_body.velocity = surface_friction(
-                    supported_velocity,
+            PhysicalSurfaceMotion::Sledding => {
+                candidate_retained_velocity = surface_friction(
+                    candidate_retained_velocity,
                     support.normal,
                     state.response_policy.friction,
                     delta_seconds,
                     PhysicalSurfaceMotion::Sledding,
                 );
-                supported_velocity = grounded_body.velocity;
+                retained_velocity = surface_friction(
+                    retained_velocity,
+                    support.normal,
+                    state.response_policy.friction,
+                    delta_seconds,
+                    PhysicalSurfaceMotion::Sledding,
+                );
+                grounded_body.velocity = candidate_retained_velocity;
+                supported_velocity = match actuation.supported_motion {
+                    GroundedSupportedMotion::Driven(velocity) => {
+                        velocity + candidate_retained_velocity
+                    }
+                    GroundedSupportedMotion::Coasting => candidate_retained_velocity,
+                };
             }
         }
     }
@@ -1181,14 +1222,40 @@ fn solve_grounded_body_tick(
         collision_normal,
         achieved_velocity,
     );
+    let continuous_stable_support = state.ground.walkable_support().is_some()
+        && solved.ground.walkable_support().is_some()
+        && state.response_policy.surface_motion == PhysicalSurfaceMotion::Stable;
+    let physical_incoming = if continuous_stable_support {
+        retained_velocity
+    } else {
+        // Ballistic integration applies gravity to the retained vector inside `solve_grounded`.
+        // Remove any temporary first-contact drive that was supplied only to discover support.
+        let mut physical = solved.velocity;
+        if body.contact == ContactState::Unknown
+            && state.ground.walkable_support().is_none()
+            && let GroundedSupportedMotion::Driven(drive) = actuation.supported_motion
+        {
+            physical.x -= drive.x;
+            physical.y -= drive.y;
+        }
+        if actuation.launch.is_none() {
+            physical + acceleration_step * 0.5
+        } else {
+            physical
+        }
+    };
     let collision_response = collision_response(CollisionResponseInput {
-        incoming: solved.velocity,
-        achieved_velocity,
+        incoming: physical_incoming,
         restitution: state.response_policy.restitution,
-        collision_normal,
-        previously_walkable: state.ground.walkable_support().is_some(),
-        current_support_normal: ground.walkable_support().map(|current| current.normal),
-        surface_motion: state.response_policy.surface_motion,
+        // Retail suppresses restitution entirely while ordinary walkable support continues. The
+        // accepted path may still be clipped, but that must not rewrite or separate retained
+        // physical momentum (`CPhysicsObj::handle_all_collisions`, acclient.c:309982-310051).
+        collision_normal: (!continuous_stable_support)
+            .then_some(collision_normal)
+            .flatten(),
+        current_support_normal: (!continuous_stable_support)
+            .then(|| ground.walkable_support().map(|current| current.normal))
+            .flatten(),
         stationary_fall_frames,
     });
     if collision_response.separates_from_support {
@@ -1204,7 +1271,8 @@ fn solve_grounded_body_tick(
     );
     Ok(PhysicalBodyTickCommit {
         pose,
-        velocity,
+        retained_velocity: velocity,
+        accepted_motion: accepted_motion(body.pose, pose, achieved_velocity, delta_seconds),
         contact: match ground {
             GroundState::Supported(_) => ContactState::Grounded,
             GroundState::Sliding(_) => ContactState::Sliding,
@@ -1225,6 +1293,34 @@ fn solve_grounded_body_tick(
         environment_contact: collision_normal.is_some() || ground.contact_plane().is_some(),
         residual_contacts,
     })
+}
+
+/// Derives the observational path rate without making it a retained physical input.
+pub(super) fn accepted_motion(
+    start: WorldPosition,
+    end: WorldPosition,
+    velocity: Vector3,
+    delta_seconds: f32,
+) -> super::AcceptedBodyMotion {
+    let delta = end.rotation.multiply(&start.rotation.conjugate());
+    let canonical = if delta.w < 0.0 {
+        Quaternion {
+            w: -delta.w,
+            x: -delta.x,
+            y: -delta.y,
+            z: -delta.z,
+        }
+    } else {
+        delta
+    };
+    let half_sine = Vector3::new(canonical.x, canonical.y, canonical.z).length();
+    let omega = if half_sine <= f32::EPSILON || delta_seconds <= f32::EPSILON {
+        Vector3::zero()
+    } else {
+        let angle = 2.0 * half_sine.atan2(canonical.w);
+        Vector3::new(canonical.x, canonical.y, canonical.z) / half_sine * (angle / delta_seconds)
+    };
+    super::AcceptedBodyMotion { velocity, omega }
 }
 
 fn canonical_retained_velocity(velocity: Vector3) -> Vector3 {
@@ -1337,18 +1433,12 @@ struct CollisionResponse {
 struct CollisionResponseInput {
     /// Velocity entering restitution handling.
     incoming: Vector3,
-    /// Velocity measured from the displacement accepted by the geometry solver.
-    achieved_velocity: Vector3,
     /// Authored body restitution behavior.
     restitution: PhysicalRestitution,
     /// Most relevant impact normal produced by the collision transaction.
     collision_normal: Option<Vector3>,
-    /// Whether the preceding committed tick retained walkable support.
-    previously_walkable: bool,
     /// Current support normal, independently from whether an impact normal was produced.
     current_support_normal: Option<Vector3>,
-    /// Stable or Sledding supported-surface behavior.
-    surface_motion: PhysicalSurfaceMotion,
     /// Retail's repeated stationary-fall escalation stage.
     stationary_fall_frames: u8,
 }
@@ -1360,30 +1450,14 @@ fn physical_surface_retains_gravity(surface_motion: PhysicalSurfaceMotion) -> bo
 fn collision_response(input: CollisionResponseInput) -> CollisionResponse {
     let CollisionResponseInput {
         incoming,
-        achieved_velocity,
         restitution,
         collision_normal,
-        previously_walkable,
         current_support_normal,
-        surface_motion,
         stationary_fall_frames,
     } = input;
     if stationary_fall_frames > MAXIMUM_BOUNCE_STATIONARY_FALL_FRAMES {
         return CollisionResponse {
             velocity: Vector3::zero(),
-            separates_from_support: false,
-        };
-    }
-    let currently_walkable = current_support_normal.is_some();
-    let continuous_support = previously_walkable && currently_walkable;
-    if continuous_support && surface_motion == PhysicalSurfaceMotion::Stable {
-        // A grounded solve has already redirected ordinary drive along its support plane. The
-        // original horizontal drive may point outward from a downhill plane, but retail retains
-        // continuous stable contact and commits the achieved tangent instead of treating that
-        // component as takeoff (`CTransition::adjust_offset`, acclient.c:300589-300730;
-        // `CPhysicsObj::handle_all_collisions`, acclient.c:309982-310068).
-        return CollisionResponse {
-            velocity: achieved_velocity,
             separates_from_support: false,
         };
     }
@@ -1726,7 +1800,7 @@ mod tests {
             },
             std::time::Instant::now(),
         );
-        body.omega = Vector3::new(0.0, 0.0, 1.0);
+        body.retained.omega = Vector3::new(0.0, 0.0, 1.0);
         body.physical = Some(PhysicalBodyState::new(
             definition,
             PhysicalCollisionFilter::ALL,
@@ -1749,7 +1823,7 @@ mod tests {
 
         let expected = super::super::scene::integrate_angular_velocity(
             Quaternion::identity(),
-            body.omega,
+            body.retained.omega,
             0.5,
         );
         assert!((commit.pose.rotation.w - expected.w).abs() < 1e-6);

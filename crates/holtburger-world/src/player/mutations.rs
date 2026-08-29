@@ -165,28 +165,18 @@ impl PlayerState {
         }
     }
 
-    /// Updates the player entity's authoritative position sequencing and cached grounded
-    /// state, then emits grounded or forced-reposition events when those outcomes change.
+    /// Updates the player entity's authoritative sequencing and packet-contact fallback.
     pub fn update_position_from_server(
         &mut self,
         pos_pack: &PositionPack,
         events: &mut Vec<WorldEvent>,
     ) {
         let old_forced_seq = self.force_position_sequence;
-        let old_grounded = self.last_server_grounded;
-
         self.instance_sequence = pos_pack.instance_sequence;
         self.position_sequence = pos_pack.position_sequence;
         self.teleport_sequence = pos_pack.teleport_sequence;
         self.force_position_sequence = pos_pack.force_position_sequence;
-        let is_grounded = pos_pack.flags.contains(UpdatePositionFlag::IS_GROUNDED);
-        self.last_server_grounded = Some(is_grounded);
-
-        if old_grounded != Some(is_grounded) {
-            events.push(WorldEvent::PlayerGroundedUpdated {
-                grounded: is_grounded,
-            });
-        }
+        self.last_server_contact = Some(pos_pack.flags.contains(UpdatePositionFlag::HAS_CONTACT));
 
         if is_newer_u16(self.force_position_sequence, old_forced_seq) {
             events.push(WorldEvent::ForcedReposition {

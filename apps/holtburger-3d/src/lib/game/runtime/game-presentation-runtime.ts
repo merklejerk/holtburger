@@ -536,9 +536,9 @@ function dynamicVisualKey(entity: DynamicEntityView): string {
 	});
 }
 
-/** Exact placement level used to avoid unchanged scene-graph and culling-index mutation. */
+/** Exact scene-spatial placement used to avoid kinematic-level upserts clearing an active path. */
 function dynamicPlacementIdentity(entity: DynamicEntityView): string {
-	return JSON.stringify(entity.placement);
+	return dynamicPathIdentity(entity);
 }
 
 /** Placement facts whose change requires a scene path rather than a level-only tick update. */

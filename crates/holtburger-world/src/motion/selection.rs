@@ -384,7 +384,7 @@ fn select_substate(
 }
 
 /// Layering an additive motion on top of whatever the body is already doing.
-fn select_modifier(
+pub(super) fn select_modifier(
     table: &MotionSequenceTable,
     state: &mut MotionState,
     sequence: &mut MotionSequenceRuntime,

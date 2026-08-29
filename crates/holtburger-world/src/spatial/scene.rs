@@ -10,20 +10,24 @@ use super::dynamic_contact::{
     PreparedDynamicTrajectory, resolve_dynamic_contacts,
 };
 use super::dynamic_index::DynamicShadowIndex;
+#[cfg(test)]
 use super::{
-    AuthoritativeBodySync, CollisionScene, ContactState, DynamicBodyActivity,
-    DynamicBodyKinematics, DynamicPhysicalBodyDefinition, GroundState, PhysicalBodyActuation,
-    PhysicalBodyDefinition, PhysicalBodyParticipation, PhysicalBodyReconfiguration,
-    PhysicalBodyReconfigurationOutcome, PhysicalBodyState, PhysicalBodyTickResult,
-    PhysicalBodyTickStatus, RuntimeSpatialBodyView, SolvedBodyKinematics, SpatialBody,
-    SpatialBodyId, SpatialSampleMode, SpatialSamplingConfig,
-    dead_reckoning::sample_mode_for_projection_state,
+    AcceptedBodyMotion, RETAIL_AIRBORNE_STEP_DOWN_HEIGHT, RETAIL_LANDING_NORMAL_Z,
+    RetainedBodyKinematics, SolveBodyInput,
+};
+use super::{
+    AuthoritativeBodyVectors, AuthoritativePoseEffect, AuthoritativePoseResetCause, CollisionScene,
+    ContactState, DynamicBodyActivity, DynamicBodyKinematics, DynamicPhysicalBodyDefinition,
+    GroundState, GroundedBodyActuation, PhysicalBodyActuation, PhysicalBodyDefinition,
+    PhysicalBodyParticipation, PhysicalBodyReconfiguration, PhysicalBodyReconfigurationOutcome,
+    PhysicalBodyState, PhysicalBodyTickResult, PhysicalBodyTickStatus, PoseReconciliationState,
+    PoseTranslationSource, RuntimeBodyAdvanceKind, RuntimeSpatialBodyView, SolvedBodyKinematics,
+    SpatialBody, SpatialBodyId, SpatialSampleMode, SpatialSamplingConfig,
+    dead_reckoning::{project_pose_by_offset, sample_mode_for_projection_state},
     physical_body::{
         physical_body_scene_residency, resolve_physical_body_placement, solve_physical_body_tick,
     },
 };
-#[cfg(test)]
-use super::{RETAIL_AIRBORNE_STEP_DOWN_HEIGHT, RETAIL_LANDING_NORMAL_Z};
 use crate::entity::EntityMotionSnapshot;
 use anyhow::Context;
 use holtburger_common::position::WorldPosition;
@@ -60,6 +64,8 @@ pub struct DynamicEntityCollectionCoverageRejection {
 pub struct PreparedDynamicEntityCollection {
     /// Stable IDs whose environment-only plans are ready in the scene-owned epoch.
     pub movers: Vec<SpatialBodyId>,
+    /// Stable IDs whose pending ordinary correction snap is ready for fixed-tick installation.
+    pub correction_snaps: Vec<SpatialBodyId>,
     /// Scheduled bodies rejected without preventing independent movers from committing.
     pub coverage_rejections: Vec<DynamicEntityCollectionCoverageRejection>,
 }
@@ -71,6 +77,8 @@ struct PreparedDynamicEntityEpoch {
     participants: BTreeMap<SpatialBodyId, DynamicEpochParticipant>,
     /// Stable ordered mover plans and peer consequences not yet attempted.
     movers: BTreeMap<SpatialBodyId, PreparedDynamicMover>,
+    /// Pending snap targets captured from the same tick-start body population as movers.
+    correction_snaps: BTreeMap<SpatialBodyId, WorldPosition>,
     /// Body-local preparation failures retained with the epoch that produced them.
     coverage_rejections: Vec<DynamicEntityCollectionCoverageRejection>,
 }
@@ -93,6 +101,7 @@ impl PreparedDynamicEntityEpoch {
     fn collection(&self) -> PreparedDynamicEntityCollection {
         PreparedDynamicEntityCollection {
             movers: self.movers.keys().copied().collect(),
+            correction_snaps: self.correction_snaps.keys().copied().collect(),
             coverage_rejections: self.coverage_rejections.clone(),
         }
     }
@@ -189,9 +198,9 @@ fn accepted_dynamic_tick_is_stable(
         && !residual_contacts
         && result.motion.status == PhysicalBodyTickStatus::Solved
         && body.contact == ContactState::Grounded
-        && body.velocity == Vector3::zero()
-        && body.acceleration == Vector3::zero()
-        && body.omega == Vector3::zero()
+        && body.retained.velocity == Vector3::zero()
+        && body.retained.acceleration == Vector3::zero()
+        && body.retained.omega == Vector3::zero()
         && physical.response == *previous_response
         && matches!(
             physical.response,
@@ -307,6 +316,7 @@ struct PhysicalBodyTickRequest<'a> {
 /// Complete tentative consequence shared by callback and prepared-plan finalization paths.
 struct TentativePhysicalBodyTick {
     body: SpatialBody,
+    reconciliation: Option<PoseReconciliationState>,
     result: PhysicalBodyTickResult,
     report_touches: Vec<CollisionReportTouch>,
     wake_peer: Option<SpatialBodyId>,
@@ -315,10 +325,90 @@ struct TentativePhysicalBodyTick {
 /// One solved body plus the derived consequences required for tentative publication.
 struct PhysicalBodyCommitInput {
     body: SpatialBody,
+    reconciliation: Option<PoseReconciliationState>,
     commit: super::physical_body::PhysicalBodyTickCommit,
     actuation_permits_settling: bool,
     dynamic_response: Option<DynamicResponseContact>,
     report_touches: Vec<CollisionReportTouch>,
+}
+
+/// Composes one actor adapter's ordinary physical input through body-owned pose reconciliation.
+///
+/// The prepared participant is the body that will be committed after solving, so advancing the
+/// reconciliation cursor here neither mutates packet-time placement nor requires a second body
+/// scan. Launch remains an ordinary actor input, retained acceleration remains body-owned, and
+/// reconciliation owns only the tick translation and interpolation heading policy.
+fn reconcile_physical_body_actuation(
+    body: &mut SpatialBody,
+    reconciliation: &mut Option<PoseReconciliationState>,
+    actuation: PhysicalBodyActuation,
+    delta_seconds: f32,
+) -> anyhow::Result<PhysicalBodyActuation> {
+    let Some(state) = reconciliation.as_mut() else {
+        return Ok(actuation);
+    };
+
+    let ordinary_translation = match &actuation {
+        PhysicalBodyActuation::FreeFlight {
+            kinematic_velocity, ..
+        } => *kinematic_velocity * delta_seconds,
+        PhysicalBodyActuation::Grounded(grounded) => {
+            grounded.supported_planar_velocity() * delta_seconds
+        }
+    };
+    let composition =
+        state.compose_translation(body.pose, body.contact, ordinary_translation, delta_seconds);
+    if state.is_empty() {
+        *reconciliation = None;
+    }
+
+    match actuation {
+        PhysicalBodyActuation::FreeFlight {
+            retained_velocity, ..
+        } => {
+            if matches!(composition.source, PoseTranslationSource::Interpolation)
+                && !composition.keep_heading
+                && let Some(authoritative) = body.authoritative_pose
+            {
+                body.pose.rotation = authoritative.rotation;
+            }
+            Ok(PhysicalBodyActuation::free_flight_with_kinematic_velocity(
+                retained_velocity,
+                composition.translation / delta_seconds,
+            )?)
+        }
+        PhysicalBodyActuation::Grounded(grounded) => {
+            let original_heading = grounded.control_heading();
+            let launch = grounded.launch().copied();
+            let ordinary_drive = grounded.supported_planar_velocity() != Vector3::zero();
+            let should_drive = ordinary_drive
+                || composition.source == PoseTranslationSource::Interpolation
+                || composition.translation != ordinary_translation;
+            let mut corrected = if should_drive {
+                GroundedBodyActuation::drive(Vector3::new(
+                    composition.translation.x / delta_seconds,
+                    composition.translation.y / delta_seconds,
+                    0.0,
+                ))?
+            } else {
+                GroundedBodyActuation::coast()
+            };
+            let heading = match composition.source {
+                PoseTranslationSource::Interpolation if composition.keep_heading => None,
+                PoseTranslationSource::Interpolation => body
+                    .authoritative_pose
+                    .map(|target| target.rotation.to_heading()),
+                PoseTranslationSource::Ordinary => original_heading,
+            };
+            if let Some(heading) = heading {
+                corrected = corrected.with_control_heading(heading)?;
+            }
+            if let Some(launch) = launch {
+                corrected = corrected.with_launch(launch);
+            }
+            Ok(PhysicalBodyActuation::Grounded(corrected))
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -447,6 +537,10 @@ impl SpatialScene {
             self.dynamic_epoch.is_none(),
             "dynamic collection preparation started before the active epoch finished"
         );
+        anyhow::ensure!(
+            delta_seconds.is_finite() && delta_seconds > 0.0,
+            "dynamic collection interval must be finite and positive"
+        );
         let mut dynamic_body_ids = self
             .body_store
             .bodies
@@ -482,39 +576,74 @@ impl SpatialScene {
             .into_iter()
             .filter(|body_id| !rejected_body_ids.contains(body_id))
             .collect::<Vec<_>>();
-        let participants = self
-            .body_store
-            .bodies
-            .values()
-            .filter(|body| {
-                body.physical
-                    .as_ref()
-                    .and_then(|physical| physical.dynamic.as_ref())
-                    .is_some()
-            })
-            // Canonical bodies must remain installed while every directional query reads this
-            // immutable tick start. Shared target geometry avoids duplicating its immutable
-            // vectors into every captured body.
-            .map(|body| (body.id, DynamicEpochParticipant { body: body.clone() }))
-            .collect::<BTreeMap<_, _>>();
+        let mut participants = BTreeMap::new();
+        for body in self.body_store.bodies.values_mut().filter(|body| {
+            body.physical
+                .as_ref()
+                .and_then(|physical| physical.dynamic.as_ref())
+                .is_some()
+        }) {
+            // Canonical bodies remain installed while every directional query reads this immutable
+            // tick start. Temporarily taking the optional box lets the body clone omit a per-tick
+            // heap allocation; the canonical allocation is restored before the next body is read.
+            let retained_reconciliation = body.reconciliation.take();
+            let reconciliation = retained_reconciliation.as_deref().copied();
+            let captured = body.clone();
+            body.reconciliation = retained_reconciliation;
+            participants.insert(
+                body.id,
+                DynamicEpochParticipant {
+                    body: captured,
+                    reconciliation,
+                    initial_reconciliation: reconciliation,
+                },
+            );
+        }
         let mut trajectories = BTreeMap::new();
+        let mut correction_snaps = BTreeMap::new();
         for body_id in scheduled {
-            let body = &participants[&body_id].body;
-            let actuation = actuation_for(body)?;
-            let environment_plan =
-                match solve_physical_body_tick(collision, body, &actuation, delta_seconds) {
-                    Ok(environment_plan) => environment_plan,
-                    Err(error) => match error.downcast_ref::<CollisionQueryError>() {
-                        Some(CollisionQueryError::UnavailableOwner { owner }) => {
-                            coverage_rejections.push(DynamicEntityCollectionCoverageRejection {
-                                body_id,
-                                owner: Guid(*owner),
-                            });
-                            continue;
-                        }
-                        Some(_) | None => return Err(error),
-                    },
-                };
+            let participant = participants
+                .get_mut(&body_id)
+                .expect("scheduled body must belong to the prepared population");
+            if let Some(target) = participant
+                .reconciliation
+                .as_mut()
+                .and_then(PoseReconciliationState::take_pending_snap)
+            {
+                if participant
+                    .reconciliation
+                    .is_some_and(|state| state.is_empty())
+                {
+                    participant.reconciliation = None;
+                }
+                correction_snaps.insert(body_id, target);
+                continue;
+            }
+            let actuation = actuation_for(&participant.body)?;
+            let actuation = reconcile_physical_body_actuation(
+                &mut participant.body,
+                &mut participant.reconciliation,
+                actuation,
+                delta_seconds,
+            )?;
+            let environment_plan = match solve_physical_body_tick(
+                collision,
+                &participant.body,
+                &actuation,
+                delta_seconds,
+            ) {
+                Ok(environment_plan) => environment_plan,
+                Err(error) => match error.downcast_ref::<CollisionQueryError>() {
+                    Some(CollisionQueryError::UnavailableOwner { owner }) => {
+                        coverage_rejections.push(DynamicEntityCollectionCoverageRejection {
+                            body_id,
+                            owner: Guid(*owner),
+                        });
+                        continue;
+                    }
+                    Some(_) | None => return Err(error),
+                },
+            };
             trajectories.insert(
                 body_id,
                 PreparedDynamicTrajectory {
@@ -571,6 +700,7 @@ impl SpatialScene {
         let epoch = PreparedDynamicEntityEpoch {
             participants,
             movers,
+            correction_snaps,
             coverage_rejections,
         };
         let collection = epoch.collection();
@@ -614,8 +744,8 @@ impl SpatialScene {
             .as_ref()
             .context("dynamic collection finished without an active prepared epoch")?;
         anyhow::ensure!(
-            epoch.movers.is_empty(),
-            "dynamic collection finished before every prepared mover was attempted"
+            epoch.movers.is_empty() && epoch.correction_snaps.is_empty(),
+            "dynamic collection finished before every prepared body was attempted"
         );
         self.dynamic_epoch = None;
         self.collision_reports.expire(now)
@@ -881,9 +1011,12 @@ impl SpatialScene {
             .expect("dynamic definition produced generic physical state")
             .placement = retained_placement;
         body.physical = Some(replacement);
-        body.velocity = kinematics.velocity();
-        body.acceleration = kinematics.acceleration();
-        body.omega = kinematics.omega();
+        body.retained = super::RetainedBodyKinematics {
+            velocity: kinematics.velocity(),
+            acceleration: kinematics.acceleration(),
+            omega: kinematics.omega(),
+        };
+        body.accepted_motion = super::AcceptedBodyMotion::default();
         body.contact = ContactState::Airborne;
         body.sampling.mode = SpatialSampleMode::SimulatingVelocity;
         body.sampling.last_derived_at = now;
@@ -913,9 +1046,8 @@ impl SpatialScene {
         }
         body.authoritative_pose = Some(pose);
         body.pose = pose;
-        body.velocity = Vector3::zero();
-        body.acceleration = Vector3::zero();
-        body.omega = Vector3::zero();
+        body.retained = super::RetainedBodyKinematics::default();
+        body.accepted_motion = super::AcceptedBodyMotion::default();
         body.motion_state = None;
         body.contact = if body.physical.is_some() {
             ContactState::Airborne
@@ -1029,7 +1161,7 @@ impl SpatialScene {
         collision: &CollisionScene,
         now: Instant,
     ) -> anyhow::Result<PhysicalBodyTickResult> {
-        let (prepared, captured) = {
+        let (prepared, captured, reconciliation, initial_reconciliation) = {
             let epoch = self
                 .dynamic_epoch
                 .as_mut()
@@ -1041,7 +1173,12 @@ impl SpatialScene {
                 .participants
                 .remove(&body_id)
                 .context("prepared dynamic mover has no tick-start participant")?;
-            (prepared, captured.body)
+            (
+                prepared,
+                captured.body,
+                captured.reconciliation,
+                captured.initial_reconciliation,
+            )
         };
         let current = self
             .body_store
@@ -1049,9 +1186,9 @@ impl SpatialScene {
             .context("prepared dynamic mover vanished before finalization")?;
         anyhow::ensure!(
             current.pose == captured.pose
-                && current.velocity == captured.velocity
-                && current.acceleration == captured.acceleration
-                && current.omega == captured.omega
+                && current.retained == captured.retained
+                && current.accepted_motion == captured.accepted_motion
+                && current.reconciliation.as_deref() == initial_reconciliation.as_ref()
                 && current.physical == captured.physical,
             "dynamic body {body_id:?} changed after collection preparation"
         );
@@ -1059,6 +1196,7 @@ impl SpatialScene {
             collision,
             PhysicalBodyCommitInput {
                 body: captured,
+                reconciliation,
                 commit: prepared.plan,
                 actuation_permits_settling: prepared.actuation_permits_settling,
                 dynamic_response: prepared.response,
@@ -1067,6 +1205,59 @@ impl SpatialScene {
             now,
         )?;
         Ok(self.publish_physical_body_commit(tentative, now))
+    }
+
+    /// Installs one prepared ordinary correction snap without treating it as an authority reset.
+    pub fn tick_prepared_dynamic_correction_snap(
+        &mut self,
+        body_id: SpatialBodyId,
+        now: Instant,
+    ) -> anyhow::Result<RuntimeSpatialBodyView> {
+        let (target, captured, reconciliation, initial_reconciliation) = {
+            let epoch = self
+                .dynamic_epoch
+                .as_mut()
+                .context("prepared correction snap requested without an active epoch")?;
+            let target = epoch.correction_snaps.remove(&body_id).with_context(|| {
+                format!("dynamic body {body_id:?} had no prepared correction snap")
+            })?;
+            let captured = epoch
+                .participants
+                .remove(&body_id)
+                .context("prepared correction snap has no tick-start participant")?;
+            (
+                target,
+                captured.body,
+                captured.reconciliation,
+                captured.initial_reconciliation,
+            )
+        };
+        let current = self
+            .body_store
+            .body(body_id)
+            .context("prepared correction snap body vanished before finalization")?;
+        anyhow::ensure!(
+            current.pose == captured.pose
+                && current.retained == captured.retained
+                && current.accepted_motion == captured.accepted_motion
+                && current.reconciliation.as_deref() == initial_reconciliation.as_ref()
+                && current.physical == captured.physical,
+            "dynamic body {body_id:?} changed after correction-snap preparation"
+        );
+
+        self.relocate_dynamic_body(body_id, target, now)
+            .context("prepared correction snap body could not be relocated")?;
+        let body = self
+            .body_store
+            .body_mut(body_id)
+            .expect("relocated correction-snap body must remain registered");
+        body.retained = captured.retained;
+        body.accepted_motion = super::AcceptedBodyMotion::default();
+        body.motion_state = captured.motion_state;
+        body.reconciliation = reconciliation.map(Box::new);
+        body.sampling.mode = captured.sampling.mode;
+        wake_dynamic_runtime(body);
+        Ok(body.runtime_view())
     }
 
     fn tick_physical_body_transaction_inner<T>(
@@ -1081,17 +1272,24 @@ impl SpatialScene {
             delta_seconds,
             now,
         } = request;
-        let body = self
-            .body_store
-            .body(body_id)
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("physical body {body_id:?} is not registered"))?;
+        let (body, reconciliation) = {
+            let body = self
+                .body_store
+                .body_mut(body_id)
+                .ok_or_else(|| anyhow::anyhow!("physical body {body_id:?} is not registered"))?;
+            let retained_reconciliation = body.reconciliation.take();
+            let reconciliation = retained_reconciliation.as_deref().copied();
+            let captured = body.clone();
+            body.reconciliation = retained_reconciliation;
+            (captured, reconciliation)
+        };
         let actuation_permits_settling = actuation.permits_dynamic_settling();
         let commit = solve_physical_body_tick(collision, &body, &actuation, delta_seconds)?;
         let tentative = self.prepare_physical_body_commit(
             collision,
             PhysicalBodyCommitInput {
                 body,
+                reconciliation,
                 commit,
                 actuation_permits_settling,
                 dynamic_response: None,
@@ -1112,6 +1310,7 @@ impl SpatialScene {
     ) -> anyhow::Result<TentativePhysicalBodyTick> {
         let PhysicalBodyCommitInput {
             body,
+            reconciliation,
             commit,
             actuation_permits_settling,
             dynamic_response,
@@ -1162,7 +1361,8 @@ impl SpatialScene {
             });
         let super::physical_body::PhysicalBodyTickCommit {
             pose,
-            velocity,
+            retained_velocity,
+            accepted_motion,
             contact,
             response,
             motion,
@@ -1184,7 +1384,8 @@ impl SpatialScene {
         // The accepted pose is already final, physical omega included; re-integrating it here would
         // rotate the body twice.
         tentative.pose = pose;
-        tentative.velocity = velocity;
+        tentative.retained.velocity = retained_velocity;
+        tentative.accepted_motion = accepted_motion;
         tentative.contact = contact;
         let physical = tentative
             .physical
@@ -1233,6 +1434,7 @@ impl SpatialScene {
         tentative.sampling.last_derived_at = now;
         Ok(TentativePhysicalBodyTick {
             body: tentative,
+            reconciliation,
             result,
             report_touches,
             wake_peer: dynamic_response.map(|response| response.peer),
@@ -1245,11 +1447,25 @@ impl SpatialScene {
         now: Instant,
     ) -> PhysicalBodyTickResult {
         let TentativePhysicalBodyTick {
-            body,
+            mut body,
+            reconciliation,
             result,
             report_touches,
             wake_peer,
         } = tentative;
+        let reusable = self
+            .body_store
+            .body_mut(body.id)
+            .and_then(|current| current.reconciliation.take());
+        body.reconciliation = match reconciliation {
+            Some(state) => {
+                let mut allocation =
+                    reusable.unwrap_or_else(|| Box::new(PoseReconciliationState::default()));
+                *allocation = state;
+                Some(allocation)
+            }
+            None => None,
+        };
         self.update_body(body)
             .expect("physical body vanished during single-threaded solve");
         self.collision_reports.commit_touches(&report_touches, now);
@@ -1264,48 +1480,105 @@ impl SpatialScene {
         self.collision_reports.active_len()
     }
 
-    pub fn reconcile_authoritative_body(
+    /// Applies one already-classified authoritative pose effect and vector replacement.
+    ///
+    /// Initialization is the only variant that may create a body. Every other effect requires an
+    /// existing runtime timeline so missing-body recovery remains an explicit adapter decision.
+    pub fn apply_authoritative_body_effect(
         &mut self,
         body_id: SpatialBodyId,
-        kinematics: super::AuthoritativeBodyKinematics,
-        sync: AuthoritativeBodySync,
+        effect: AuthoritativePoseEffect,
+        vectors: AuthoritativeBodyVectors,
         now: Instant,
-    ) {
-        if matches!(sync, AuthoritativeBodySync::Reset) {
+    ) -> bool {
+        let pose = effect.pose();
+        let mut body = match effect {
+            AuthoritativePoseEffect::Initialize { .. } => self
+                .remove_body(body_id)
+                .unwrap_or_else(|| SpatialBody::new(body_id, pose, now)),
+            _ => {
+                let Some(body) = self.remove_body(body_id) else {
+                    return false;
+                };
+                body
+            }
+        };
+
+        if matches!(
+            effect,
+            AuthoritativePoseEffect::Initialize { .. } | AuthoritativePoseEffect::Reset { .. }
+        ) {
             // A reset establishes a new temporal origin, so no plan captured before it remains
             // eligible for commit. A later collection operation fails loudly until preparation.
             self.dynamic_epoch = None;
         }
-        let mode = match sync {
-            AuthoritativeBodySync::Snapshot => SpatialSampleMode::AuthoritativeOnly,
-            AuthoritativeBodySync::Reset => SpatialSampleMode::Suspended,
-        };
 
-        let mut body = self
-            .remove_body(body_id)
-            .unwrap_or_else(|| SpatialBody::new(body_id, kinematics.pose, now));
-
-        let preserve_local_runtime_pose = matches!(body_id, SpatialBodyId::LocalPlayer(_))
-            && matches!(sync, AuthoritativeBodySync::Snapshot)
-            && matches!(
-                body.sampling.mode,
-                SpatialSampleMode::SimulatingMotionState | SpatialSampleMode::SimulatingVelocity
-            );
-
-        body.authoritative_pose = Some(kinematics.pose);
-        body.velocity = kinematics.velocity;
-        body.acceleration = kinematics.acceleration;
-        body.omega = kinematics.omega;
-        body.motion_state = None;
+        body.authoritative_pose = Some(pose);
+        body.retained = vectors.into();
         body.sampling.last_authoritative_update = now;
         body.sampling.last_derived_at = now;
-        if !preserve_local_runtime_pose {
-            replace_unsolved_runtime_pose(&mut body, kinematics.pose);
-            body.sampling.mode = mode;
+        match effect {
+            AuthoritativePoseEffect::Initialize { .. } => {
+                replace_unsolved_runtime_pose(&mut body, pose);
+                body.accepted_motion = super::AcceptedBodyMotion::default();
+                body.motion_state = None;
+                body.reconciliation = None;
+                body.sampling.mode = SpatialSampleMode::AuthoritativeOnly;
+            }
+            AuthoritativePoseEffect::Confirm { .. } => {
+                body.reconciliation
+                    .get_or_insert_with(|| Box::new(PoseReconciliationState::default()))
+                    .confirm(pose, body.pose);
+            }
+            AuthoritativePoseEffect::Interpolate {
+                keep_heading,
+                adjusted_max_speed_mps,
+                ..
+            } => {
+                body.reconciliation
+                    .get_or_insert_with(|| Box::new(PoseReconciliationState::default()))
+                    .interpolate(pose, body.pose, keep_heading, adjusted_max_speed_mps);
+            }
+            AuthoritativePoseEffect::Snap { .. } => {
+                body.reconciliation
+                    .get_or_insert_with(|| Box::new(PoseReconciliationState::default()))
+                    .schedule_snap(pose);
+            }
+            AuthoritativePoseEffect::Reset { cause, .. } => {
+                replace_unsolved_runtime_pose(&mut body, pose);
+                body.retained = super::RetainedBodyKinematics::default();
+                body.accepted_motion = super::AcceptedBodyMotion::default();
+                body.motion_state = None;
+                body.reconciliation = None;
+                body.sampling.mode =
+                    if matches!(cause, AuthoritativePoseResetCause::MissingCellRecovery) {
+                        SpatialSampleMode::AuthoritativeOnly
+                    } else {
+                        SpatialSampleMode::Suspended
+                    };
+            }
         }
         wake_dynamic_runtime(&mut body);
 
         self.register_body(body);
+        true
+    }
+
+    /// Replaces producer-authored vectors without changing pose or reconciliation state.
+    pub fn apply_authoritative_body_vectors(
+        &mut self,
+        body_id: SpatialBodyId,
+        vectors: AuthoritativeBodyVectors,
+        now: Instant,
+    ) -> bool {
+        let Some(body) = self.body_store.body_mut(body_id) else {
+            return false;
+        };
+        body.retained = vectors.into();
+        body.motion_state = None;
+        body.sampling.last_authoritative_update = now;
+        wake_dynamic_runtime(body);
+        true
     }
 
     pub fn retire_authoritative_body(&mut self, body_id: SpatialBodyId) -> Option<SpatialBody> {
@@ -1328,8 +1601,8 @@ impl SpatialScene {
 
         body.authoritative_pose = Some(pose);
         body.pose = pose;
-        body.velocity = velocity;
-        body.omega = omega;
+        body.retained.velocity = velocity;
+        body.retained.omega = omega;
         body.motion_state = motion_state;
         body.sampling.mode = SpatialSampleMode::AuthoritativeOnly;
         body.sampling.last_authoritative_update = now;
@@ -1429,18 +1702,67 @@ impl SpatialScene {
         };
 
         body.pose = solved.pose;
-        body.velocity = solved.velocity;
-        body.omega = solved.omega;
+        body.accepted_motion = solved.accepted_motion;
+        body.retained = solved.retained;
         body.contact = solved.contact;
         body.sampling.mode = sample_mode_for_projection_state(
             solved.projection_state,
-            solved.velocity,
-            solved.omega,
+            solved.accepted_motion.velocity,
+            solved.accepted_motion.omega,
         );
         wake_dynamic_runtime(&mut body);
         self.update_body(body)
             .expect("runtime body vanished during single-threaded solve commit");
         true
+    }
+
+    /// Composes one pose-only body's ordinary projection through its body-owned reconciliation.
+    pub fn reconcile_pose_only_body_kinematics(
+        &mut self,
+        mut solved: SolvedBodyKinematics,
+        delta_seconds: f32,
+    ) -> Option<(SolvedBodyKinematics, RuntimeBodyAdvanceKind)> {
+        let body = self.body_store.body_mut(solved.body_id)?;
+        let Some(mut reconciliation) = body.reconciliation.take() else {
+            return Some((solved, RuntimeBodyAdvanceKind::Integrated));
+        };
+        if let Some(target) = reconciliation.take_pending_snap() {
+            solved.pose = target;
+            solved.accepted_motion = super::AcceptedBodyMotion::default();
+            solved.contact = body.contact;
+            body.reconciliation = (!reconciliation.is_empty()).then_some(reconciliation);
+            return Some((solved, RuntimeBodyAdvanceKind::CorrectionSnap));
+        }
+
+        let accepted_translation = solved.pose.global_coords() - body.pose.global_coords();
+        let physical_translation = body.retained.velocity * delta_seconds
+            + body.retained.acceleration * (0.5 * delta_seconds * delta_seconds);
+        let ordinary_translation = accepted_translation - physical_translation;
+        let composition = reconciliation.compose_pose_only_translation(
+            body.pose,
+            ordinary_translation,
+            delta_seconds,
+        );
+        body.reconciliation = (!reconciliation.is_empty()).then_some(reconciliation);
+        let composed_translation = composition.translation + physical_translation;
+        if composed_translation != accepted_translation {
+            solved.pose =
+                project_pose_by_offset(body.pose, composed_translation, body.authoritative_pose);
+            if delta_seconds > f32::EPSILON {
+                solved.accepted_motion.velocity = composed_translation / delta_seconds;
+            }
+        }
+        if matches!(composition.source, PoseTranslationSource::Interpolation)
+            && !composition.keep_heading
+            && let Some(authoritative) = body.authoritative_pose
+        {
+            solved.pose.rotation = integrate_angular_velocity(
+                authoritative.rotation,
+                body.retained.omega,
+                delta_seconds,
+            );
+        }
+        Some((solved, RuntimeBodyAdvanceKind::Integrated))
     }
 
     pub fn suspend_runtime_bodies(&mut self, now: Instant) {
@@ -1456,6 +1778,7 @@ impl SpatialScene {
             if let Some(authoritative_pose) = body.authoritative_pose {
                 replace_unsolved_runtime_pose(&mut body, authoritative_pose);
             }
+            body.reconciliation = None;
             body.sampling.mode = SpatialSampleMode::Suspended;
             body.sampling.last_derived_at = now;
             wake_dynamic_runtime(&mut body);
@@ -1593,6 +1916,304 @@ mod physical_body_tests {
         .unwrap()
     }
 
+    fn confirmed_reconciliation_body(contact: ContactState) -> SpatialBody {
+        let confirmed = pose(Vector3::zero());
+        let current = pose(Vector3::new(20.0, 0.0, 0.0));
+        let mut body = SpatialBody::new(
+            SpatialBodyId::Entity(Guid(0x5000_0042)),
+            current,
+            Instant::now(),
+        );
+        body.contact = contact;
+        let mut reconciliation = PoseReconciliationState::default();
+        reconciliation.confirm(confirmed, current);
+        body.reconciliation = Some(Box::new(reconciliation));
+        body
+    }
+
+    fn reconcile_test_body_actuation(
+        body: &mut SpatialBody,
+        actuation: PhysicalBodyActuation,
+        delta_seconds: f32,
+    ) -> anyhow::Result<PhysicalBodyActuation> {
+        let mut reconciliation = body.reconciliation.take().map(|state| *state);
+        let result =
+            reconcile_physical_body_actuation(body, &mut reconciliation, actuation, delta_seconds);
+        body.reconciliation = reconciliation.map(Box::new);
+        result
+    }
+
+    #[test]
+    fn physical_preparation_dampens_confirmed_travel_without_owning_ordinary_drive() {
+        for contact in [ContactState::Grounded, ContactState::Sliding] {
+            let mut body = confirmed_reconciliation_body(contact);
+            let ordinary =
+                PhysicalBodyActuation::grounded_drive(Vector3::new(4.0, 0.0, 0.0)).unwrap();
+
+            let composed = reconcile_test_body_actuation(&mut body, ordinary, 1.0).unwrap();
+            let PhysicalBodyActuation::Grounded(composed) = composed else {
+                panic!("grounded reconciliation must preserve the physical response variant");
+            };
+
+            assert_eq!(
+                composed.supported_planar_velocity(),
+                Vector3::new(3.0, 0.0, 0.0)
+            );
+            assert!(body.reconciliation.is_some());
+        }
+    }
+
+    #[test]
+    fn physical_and_pose_only_interpolation_compose_the_same_pre_collision_delta() {
+        let now = Instant::now();
+        let current = pose(Vector3::zero());
+        let target = pose(Vector3::new(2.0, 0.0, 0.0));
+        let mut physical = SpatialBody::new(SpatialBodyId::Entity(Guid(0x5000_0043)), current, now);
+        physical.authoritative_pose = Some(target);
+        physical.contact = ContactState::Grounded;
+        let mut reconciliation = PoseReconciliationState::default();
+        reconciliation.interpolate(target, current, false, None);
+        physical.reconciliation = Some(Box::new(reconciliation));
+        let actuation = reconcile_test_body_actuation(
+            &mut physical,
+            PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+            0.03,
+        )
+        .unwrap();
+        let PhysicalBodyActuation::Grounded(actuation) = actuation else {
+            panic!("grounded interpolation must preserve the physical response variant");
+        };
+        let physical_delta = actuation.supported_planar_velocity() * 0.03;
+
+        let pose_only_id = SpatialBodyId::Entity(Guid(0x5000_0044));
+        let mut pose_only = SpatialBody::new(pose_only_id, current, now);
+        pose_only.authoritative_pose = Some(target);
+        pose_only.contact = ContactState::Grounded;
+        let mut reconciliation = PoseReconciliationState::default();
+        reconciliation.interpolate(target, current, false, None);
+        pose_only.reconciliation = Some(Box::new(reconciliation));
+        let mut scene = SpatialScene::new();
+        scene.register_body(pose_only);
+        let ordinary = SolvedBodyKinematics {
+            body_id: pose_only_id,
+            pose: current,
+            accepted_motion: AcceptedBodyMotion::default(),
+            retained: RetainedBodyKinematics::default(),
+            contact: ContactState::Grounded,
+            projection_state: None,
+        };
+        let (solved, kind) = scene
+            .reconcile_pose_only_body_kinematics(ordinary, 0.03)
+            .unwrap();
+        assert_eq!(kind, RuntimeBodyAdvanceKind::Integrated);
+        let pose_only_delta = solved.pose.global_coords() - current.global_coords();
+        assert!(
+            (physical_delta - pose_only_delta).length() < 0.002,
+            "coordinate re-anchoring may quantize the equivalent delta by less than 2 mm"
+        );
+    }
+
+    fn tick_pose_only_body(scene: &mut SpatialScene, body_id: SpatialBodyId, delta_seconds: f32) {
+        let body = scene.body(body_id).expect("pose-only body").clone();
+        let ordinary = crate::spatial::advance_body_kinematics(
+            &SolveBodyInput {
+                body_id,
+                pose: body.pose,
+                contact: body.contact,
+                authored_offset: None,
+                retained: body.retained,
+            },
+            Duration::from_secs_f32(delta_seconds),
+        );
+        let (solved, _) = scene
+            .reconcile_pose_only_body_kinematics(ordinary, delta_seconds)
+            .expect("pose-only body remains registered");
+        assert!(scene.apply_solved_runtime_body_kinematics(&solved));
+    }
+
+    #[test]
+    fn pose_only_interpolation_reaches_target_then_remains_idle_without_retained_momentum() {
+        let now = Instant::now();
+        let body_id = SpatialBodyId::Entity(Guid(0x5000_0045));
+        let start = pose(Vector3::zero());
+        let target = pose(Vector3::new(0.1, 0.0, 0.0));
+        let mut scene = SpatialScene::new();
+        scene.register_body(SpatialBody::new(body_id, start, now));
+        assert!(scene.apply_authoritative_body_effect(
+            body_id,
+            AuthoritativePoseEffect::Interpolate {
+                pose: target,
+                keep_heading: false,
+                adjusted_max_speed_mps: None,
+            },
+            AuthoritativeBodyVectors {
+                velocity: Vector3::zero(),
+                acceleration: Vector3::zero(),
+                omega: Vector3::zero(),
+            },
+            now,
+        ));
+
+        tick_pose_only_body(&mut scene, body_id, 0.03);
+        let reached = scene.body(body_id).unwrap().pose;
+        assert!(reached.distance_to(&target) < 0.002);
+        assert_eq!(
+            scene.body(body_id).unwrap().retained.velocity,
+            Vector3::zero()
+        );
+
+        tick_pose_only_body(&mut scene, body_id, 0.03);
+        tick_pose_only_body(&mut scene, body_id, 0.03);
+        let idle = scene.body(body_id).unwrap();
+        assert_eq!(idle.pose, reached);
+        assert_eq!(idle.accepted_motion, AcceptedBodyMotion::default());
+        assert_eq!(idle.retained, RetainedBodyKinematics::default());
+    }
+
+    #[test]
+    fn pose_only_interpolation_adds_received_physical_velocity_without_retaining_correction() {
+        let now = Instant::now();
+        let body_id = SpatialBodyId::Entity(Guid(0x5000_0046));
+        let start = pose(Vector3::zero());
+        let target = pose(Vector3::new(1.0, 0.0, 0.0));
+        let retained_velocity = Vector3::new(1.0, 0.0, 0.0);
+        let mut scene = SpatialScene::new();
+        scene.register_body(SpatialBody::new(body_id, start, now));
+        assert!(scene.apply_authoritative_body_effect(
+            body_id,
+            AuthoritativePoseEffect::Interpolate {
+                pose: target,
+                keep_heading: false,
+                adjusted_max_speed_mps: None,
+            },
+            AuthoritativeBodyVectors {
+                velocity: retained_velocity,
+                acceleration: Vector3::zero(),
+                omega: Vector3::zero(),
+            },
+            now,
+        ));
+
+        tick_pose_only_body(&mut scene, body_id, 0.03);
+        let body = scene.body(body_id).unwrap();
+        let displacement = body.pose.global_coords() - start.global_coords();
+        assert!((displacement.x - 0.255).abs() < 0.002);
+        assert_eq!(body.retained.velocity, retained_velocity);
+        assert!((body.accepted_motion.velocity.x - 8.5).abs() < 0.06);
+    }
+
+    #[test]
+    fn grounded_interpolation_reaches_target_without_retaining_correction_momentum() {
+        let now = Instant::now();
+        let body_id = SpatialBodyId::Entity(Guid(0x5000_0047));
+        let start = pose(Vector3::new(90.0, 96.0, 0.005));
+        let target = pose(Vector3::new(90.1, 96.0, 0.005));
+        let collision = flat_collision_scene();
+        let mut scene = SpatialScene::new();
+        scene.register_body(SpatialBody::new(body_id, start, now));
+        scene
+            .set_dynamic_physical_body(
+                body_id,
+                Some(dynamic_definition(grounded_definition(), false)),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+        let _ = tick_prepared_collection(&mut scene, &collision, 0.03, now);
+        assert_eq!(scene.body(body_id).unwrap().contact, ContactState::Grounded);
+        assert!(scene.apply_authoritative_body_effect(
+            body_id,
+            AuthoritativePoseEffect::Interpolate {
+                pose: target,
+                keep_heading: false,
+                adjusted_max_speed_mps: None,
+            },
+            AuthoritativeBodyVectors {
+                velocity: Vector3::zero(),
+                acceleration: Vector3::zero(),
+                omega: Vector3::zero(),
+            },
+            now,
+        ));
+
+        let _ = tick_prepared_collection(
+            &mut scene,
+            &collision,
+            0.03,
+            now + Duration::from_millis(30),
+        );
+        let corrected = scene.body(body_id).unwrap();
+        assert!(corrected.pose.distance_to(&target) < 0.002);
+        assert_eq!(corrected.retained.velocity, Vector3::zero());
+        let corrected_pose = corrected.pose;
+
+        let _ = tick_prepared_collection(
+            &mut scene,
+            &collision,
+            0.03,
+            now + Duration::from_millis(60),
+        );
+        let idle = scene.body(body_id).unwrap();
+        assert_eq!(idle.pose, corrected_pose);
+        assert_eq!(idle.retained.velocity, Vector3::zero());
+        assert_eq!(idle.accepted_motion, AcceptedBodyMotion::default());
+    }
+
+    #[test]
+    fn airborne_grounded_body_integrates_retained_acceleration_without_actor_actuation() {
+        let now = Instant::now();
+        let body_id = SpatialBodyId::Entity(Guid(0x5000_0048));
+        let start = pose(Vector3::new(90.0, 96.0, 10.0));
+        let collision = flat_collision_scene();
+        let mut scene = SpatialScene::new();
+        scene.register_body(SpatialBody::new(body_id, start, now));
+        scene
+            .set_dynamic_physical_body(
+                body_id,
+                Some(dynamic_definition(grounded_definition(), false)),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+        let body = scene.body_mut(body_id).expect("grounded body");
+        body.contact = ContactState::Airborne;
+        body.retained.acceleration = Vector3::new(2.0, 0.0, 0.0);
+
+        let _ = tick_prepared_collection(&mut scene, &collision, 0.03, now);
+
+        let body = scene.body(body_id).expect("advanced grounded body");
+        assert!((body.pose.coords.x - start.coords.x - 0.0009).abs() < 0.000_01);
+        assert!((body.retained.velocity.x - 0.06).abs() < 0.000_01);
+    }
+
+    #[test]
+    fn unsupported_confirmed_travel_accumulates_without_damping() {
+        for contact in [ContactState::Airborne, ContactState::Unknown] {
+            let mut body = confirmed_reconciliation_body(contact);
+            let ordinary =
+                PhysicalBodyActuation::grounded_drive(Vector3::new(4.0, 0.0, 0.0)).unwrap();
+
+            let first = reconcile_test_body_actuation(&mut body, ordinary.clone(), 1.0).unwrap();
+            let PhysicalBodyActuation::Grounded(first) = first else {
+                panic!("grounded reconciliation must preserve the physical response variant");
+            };
+            assert_eq!(
+                first.supported_planar_velocity(),
+                Vector3::new(4.0, 0.0, 0.0)
+            );
+
+            body.contact = ContactState::Grounded;
+            let second = reconcile_test_body_actuation(&mut body, ordinary, 1.0).unwrap();
+            let PhysicalBodyActuation::Grounded(second) = second else {
+                panic!("grounded reconciliation must preserve the physical response variant");
+            };
+            assert_eq!(
+                second.supported_planar_velocity(),
+                Vector3::new(2.6, 0.0, 0.0)
+            );
+        }
+    }
+
     fn grounded_definition_with_spheres(spheres: PhysicalSphereSet) -> PhysicalBodyDefinition {
         PhysicalBodyDefinition::grounded(spheres, GROUNDED_CONFIG).unwrap()
     }
@@ -1610,7 +2231,7 @@ mod physical_body_tests {
         let definition = body.physical.as_ref().unwrap().definition;
         Ok(match definition {
             PhysicalBodyDefinition::FreeSphere { .. } => {
-                PhysicalBodyActuation::free_flight(body.velocity)?
+                PhysicalBodyActuation::free_flight(body.retained.velocity)?
             }
             PhysicalBodyDefinition::Grounded { .. } => {
                 PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast())
@@ -1789,7 +2410,7 @@ mod physical_body_tests {
                 None,
             )
             .unwrap();
-        scene.body_mut(body_id).unwrap().velocity = velocity;
+        scene.body_mut(body_id).unwrap().retained.velocity = velocity;
     }
 
     fn tick_prepared_collection(
@@ -1954,6 +2575,55 @@ mod physical_body_tests {
             )
             .unwrap();
         assert_eq!(dynamic_activity(&scene, id), DynamicBodyActivity::Active);
+    }
+
+    #[test]
+    fn physical_correction_snap_waits_for_and_commits_at_collection_boundary() {
+        let collision = flat_collision_scene();
+        let now = Instant::now();
+        let id = SpatialBodyId::Entity(Guid(0x7000_0011));
+        let start = pose(Vector3::new(90.0, 96.0, 0.005));
+        let target = pose(Vector3::new(100.0, 96.0, 0.005));
+        let retained_velocity = Vector3::new(1.0, 0.0, 0.0);
+        let mut scene = SpatialScene::new();
+        scene.register_body(SpatialBody::new(id, start, now));
+        scene
+            .set_dynamic_physical_body(
+                id,
+                Some(dynamic_definition(grounded_definition(), false)),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+        assert!(scene.apply_authoritative_body_effect(
+            id,
+            AuthoritativePoseEffect::Snap { pose: target },
+            AuthoritativeBodyVectors {
+                velocity: retained_velocity,
+                acceleration: Vector3::zero(),
+                omega: Vector3::zero(),
+            },
+            now,
+        ));
+        assert_eq!(scene.body(id).unwrap().pose, start);
+
+        let prepared = scene
+            .prepare_dynamic_entity_collection(&collision, 0.03, collection_actuation)
+            .unwrap();
+        assert!(prepared.movers.is_empty());
+        assert_eq!(prepared.correction_snaps, vec![id]);
+        assert_eq!(scene.body(id).unwrap().pose, start);
+
+        let view = scene
+            .tick_prepared_dynamic_correction_snap(id, now + Duration::from_millis(30))
+            .unwrap();
+        assert_eq!(view.runtime_pose, target);
+        assert_eq!(view.velocity, Vector3::zero());
+        assert_eq!(scene.body(id).unwrap().retained.velocity, retained_velocity);
+        assert!(!scene.body(id).unwrap().has_pose_reconciliation_state());
+        scene
+            .finish_dynamic_entity_collection(now + Duration::from_millis(30))
+            .unwrap();
     }
 
     #[test]
@@ -2252,7 +2922,7 @@ mod physical_body_tests {
             .unwrap();
         let supported_pose = scene.body(id).unwrap().pose;
         let body = scene.body_mut(id).unwrap();
-        body.velocity = Vector3::new(0.2, 0.0, 0.0);
+        body.retained.velocity = Vector3::new(0.2, 0.0, 0.0);
 
         scene
             .tick_physical_body(
@@ -2265,7 +2935,7 @@ mod physical_body_tests {
             .unwrap();
 
         let body = scene.body(id).unwrap();
-        assert_eq!(body.velocity, Vector3::zero());
+        assert_eq!(body.retained.velocity, Vector3::zero());
         assert_eq!(body.pose, supported_pose);
         assert_eq!(dynamic_activity(&scene, id), DynamicBodyActivity::Settled);
     }
@@ -2354,9 +3024,11 @@ mod physical_body_tests {
         let acceleration = Vector3::new(0.0, 0.0, -9.8);
         let omega = Vector3::new(0.0, 0.0, 0.5);
         let mut body = SpatialBody::new(id, initial, now);
-        body.velocity = velocity;
-        body.acceleration = acceleration;
-        body.omega = omega;
+        body.retained = RetainedBodyKinematics {
+            velocity,
+            acceleration,
+            omega,
+        };
         scene.register_body(body);
         scene
             .set_dynamic_physical_body(
@@ -2396,9 +3068,9 @@ mod physical_body_tests {
         let body = scene.body(id).unwrap();
         assert_eq!(body.pose, next);
         assert_eq!(body.authoritative_pose, Some(initial));
-        assert_eq!(body.velocity, velocity);
-        assert_eq!(body.acceleration, acceleration);
-        assert_eq!(body.omega, omega);
+        assert_eq!(body.retained.velocity, velocity);
+        assert_eq!(body.retained.acceleration, acceleration);
+        assert_eq!(body.retained.omega, omega);
         assert_eq!(body.contact, ContactState::Airborne);
         assert_eq!(
             body.spatial_membership(),
@@ -2467,15 +3139,17 @@ mod physical_body_tests {
             )
             .unwrap();
 
-        scene.reconcile_authoritative_body(
+        scene.apply_authoritative_body_effect(
             id,
-            crate::AuthoritativeBodyKinematics {
+            AuthoritativePoseEffect::Reset {
                 pose: dungeon,
+                cause: AuthoritativePoseResetCause::ForcedReposition,
+            },
+            AuthoritativeBodyVectors {
                 velocity: Vector3::zero(),
                 acceleration: Vector3::zero(),
                 omega: Vector3::zero(),
             },
-            AuthoritativeBodySync::Reset,
             now + Duration::from_secs(1),
         );
 
@@ -2912,7 +3586,7 @@ mod physical_body_tests {
             let solved = scene.body(mover).unwrap();
             assert!(solved.pose.coords.x < 0.8, "branch tunneled: {solved:?}");
             assert!(
-                solved.velocity.x < 0.0,
+                solved.retained.velocity.x < 0.0,
                 "branch did not respond: {solved:?}"
             );
         }
@@ -3055,7 +3729,7 @@ mod physical_body_tests {
             )
             .unwrap();
         assert!((scene.body(mover).unwrap().pose.coords.x - 1.0).abs() < 0.000_1);
-        assert_eq!(scene.body(mover).unwrap().velocity.x, 10.0);
+        assert_eq!(scene.body(mover).unwrap().retained.velocity.x, 10.0);
     }
 
     #[test]
@@ -3121,7 +3795,7 @@ mod physical_body_tests {
                 now + Duration::from_millis(100),
             )
             .unwrap();
-        assert!(scene.body(mover).unwrap().velocity.x < 0.0);
+        assert!(scene.body(mover).unwrap().retained.velocity.x < 0.0);
         assert!(result.dynamic_state_change.is_none());
         assert!(result.collision_reports.is_empty());
     }
@@ -3162,7 +3836,7 @@ mod physical_body_tests {
         // The solid peer blocks and reverses the mover.
         let blocked = tick_prepared_collection(&mut scene, &collision, 0.1, now);
         assert!(
-            scene.body(mover).unwrap().velocity.x < 0.0,
+            scene.body(mover).unwrap().retained.velocity.x < 0.0,
             "a solid peer must reverse the mover before replacement"
         );
         assert!(!blocked.is_empty(), "the blocking touch must report");
@@ -3212,7 +3886,7 @@ mod physical_body_tests {
             now + Duration::from_millis(200),
         );
         assert!(
-            scene.body(mover).unwrap().velocity.x > 0.0,
+            scene.body(mover).unwrap().retained.velocity.x > 0.0,
             "an ethereal peer must not reverse the mover after contact-time replacement"
         );
     }
@@ -3699,7 +4373,10 @@ mod physical_body_tests {
                 now + Duration::from_secs_f32(delta_seconds),
             )
             .unwrap();
-        assert_eq!(scene.body(mover).unwrap().velocity, Vector3::zero());
+        assert_eq!(
+            scene.body(mover).unwrap().retained.velocity,
+            Vector3::zero()
+        );
         assert!(scene.body(mover).unwrap().pose.coords.x < 1.0);
         assert_eq!(
             result.dynamic_state_change.unwrap().cleared,
@@ -3763,7 +4440,7 @@ mod physical_body_tests {
                     None,
                 )
                 .unwrap();
-            scene.body_mut(body_id).unwrap().velocity = velocity;
+            scene.body_mut(body_id).unwrap().retained.velocity = velocity;
         }
         let collision = flat_collision_scene();
         scene
@@ -3786,7 +4463,7 @@ mod physical_body_tests {
             }
         ));
         assert!(solved.pose.coords.x < 10.8);
-        assert!(solved.velocity.x < 0.0);
+        assert!(solved.retained.velocity.x < 0.0);
     }
 
     #[test]
@@ -3952,9 +4629,63 @@ mod physical_body_tests {
                 )
                 .unwrap();
         }
-        assert!(scene.body(left).unwrap().velocity.x < -10.0);
-        assert!(scene.body(right).unwrap().velocity.x > 10.0);
+        assert!(scene.body(left).unwrap().retained.velocity.x < 0.0);
+        assert!(scene.body(right).unwrap().retained.velocity.x > 0.0);
         assert!(scene.body(left).unwrap().pose.coords.x < scene.body(right).unwrap().pose.coords.x);
+    }
+
+    #[test]
+    fn moving_peer_blocks_without_transferring_its_velocity_to_a_stationary_mover() {
+        let now = Instant::now();
+        let stationary = SpatialBodyId::Entity(Guid(0x7000_0011));
+        let moving = SpatialBodyId::Entity(Guid(0x7000_0012));
+        let geometry = || {
+            fallback_target(Arc::new(CollisionShape::Ball(CollisionBall {
+                center: Vector3::zero(),
+                radius: 0.5,
+            })))
+        };
+        let mut scene = SpatialScene::new();
+        install_free_dynamic(
+            &mut scene,
+            stationary,
+            Vector3::zero(),
+            Vector3::zero(),
+            geometry(),
+            now,
+        );
+        install_free_dynamic(
+            &mut scene,
+            moving,
+            Vector3::new(2.0, 0.0, 0.0),
+            Vector3::new(-10.0, 0.0, 0.0),
+            geometry(),
+            now,
+        );
+        let collision = collision_scene(None);
+        let prepared = scene
+            .prepare_dynamic_entity_collection(&collision, 0.2, collection_actuation)
+            .unwrap();
+        for body_id in [stationary, moving] {
+            assert!(prepared.movers.contains(&body_id));
+            scene
+                .tick_prepared_dynamic_physical_body(
+                    body_id,
+                    &collision,
+                    now + Duration::from_millis(200),
+                )
+                .unwrap();
+        }
+
+        assert_eq!(
+            scene.body(stationary).unwrap().retained.velocity,
+            Vector3::zero()
+        );
+        assert!(scene.body(moving).unwrap().retained.velocity.x > 0.0);
+        assert!(
+            scene.body(stationary).unwrap().pose.global_coords().x
+                < scene.body(moving).unwrap().pose.global_coords().x
+        );
     }
 
     #[test]
@@ -3985,7 +4716,8 @@ mod physical_body_tests {
             }))),
             now,
         );
-        scene.body_mut(target).unwrap().omega = Vector3::new(0.0, 0.0, std::f32::consts::FRAC_PI_2);
+        scene.body_mut(target).unwrap().retained.omega =
+            Vector3::new(0.0, 0.0, std::f32::consts::FRAC_PI_2);
         let collision = collision_scene(None);
         scene
             .prepare_dynamic_entity_collection(&collision, 1.0, collection_actuation)
@@ -4054,7 +4786,7 @@ mod physical_body_tests {
             Vector3::new(6.4, 0.0, 0.0)
         );
         assert_eq!(
-            scene.body(mover).unwrap().velocity,
+            scene.body(mover).unwrap().retained.velocity,
             Vector3::new(7.0, 0.0, 0.0)
         );
         assert_eq!(scene.active_collision_report_count(), 0);
@@ -4108,7 +4840,11 @@ mod physical_body_tests {
                 now,
             )
             .unwrap();
-        assert_eq!(view.velocity, Vector3::new(1.0, 0.0, 0.0));
+        assert_eq!(view.velocity, Vector3::zero());
+        assert_eq!(
+            scene.body(id).unwrap().retained.velocity,
+            Vector3::new(1.0, 0.0, 0.0)
+        );
         assert_eq!(view.acceleration, Vector3::new(0.0, 0.0, -9.8));
         assert_eq!(view.omega, omega);
         assert_eq!(view.contact, ContactState::Airborne);
@@ -4222,7 +4958,7 @@ mod physical_body_tests {
         let id = SpatialBodyId::Entity(Guid(0x7000_0001));
         let mut scene = SpatialScene::new();
         let mut body = SpatialBody::new(id, pose(Vector3::new(10.0, 20.0, 30.0)), now);
-        body.velocity = Vector3::new(1.0, 2.0, 3.0);
+        body.retained.velocity = Vector3::new(1.0, 2.0, 3.0);
         scene.register_body(body);
 
         let enabled = scene
@@ -4280,7 +5016,7 @@ mod physical_body_tests {
             PhysicalBodyResponseState::FreeSphere { .. }
         ));
         assert_eq!(
-            scene.body(id).unwrap().velocity,
+            scene.body(id).unwrap().retained.velocity,
             Vector3::new(1.0, 2.0, 3.0)
         );
 
@@ -4620,7 +5356,7 @@ mod physical_body_tests {
                 .unwrap();
             assert_eq!(scene.body(id).unwrap().contact, ContactState::Grounded);
 
-            scene.body_mut(id).unwrap().velocity = Vector3::new(3.0, 0.0, 0.0);
+            scene.body_mut(id).unwrap().retained.velocity = Vector3::new(3.0, 0.0, 0.0);
             scene
                 .tick_physical_body(
                     id,
@@ -4632,11 +5368,54 @@ mod physical_body_tests {
                 .unwrap();
             let solved = scene.body(id).unwrap();
             let expected_horizontal_velocity = 3.0 * (1.0_f32 - 0.95).powf(0.1);
-            assert!((solved.velocity.x - expected_horizontal_velocity).abs() < 0.000_1);
-            assert!((solved.velocity.z + 0.98).abs() < 0.000_1);
+            assert!((solved.retained.velocity.x - expected_horizontal_velocity).abs() < 0.000_1);
+            assert!((solved.retained.velocity.z + 0.98).abs() < 0.000_1);
             assert_eq!(solved.contact, ContactState::Grounded);
             assert!(solved.pose.coords.x > start.x);
         }
+    }
+
+    #[test]
+    fn stable_support_damps_retained_momentum_while_controller_drive_is_active() {
+        let collision = flat_collision_scene();
+        let now = Instant::now();
+        let mut scene = SpatialScene::new();
+        let start = Vector3::new(90.0, 96.0, 0.005);
+        let id = scene.register_ephemeral_body(pose(start), now);
+        scene
+            .install_physical_body(
+                id,
+                grounded_definition(),
+                PhysicalCollisionFilter::ALL,
+                stable_policy(),
+                None,
+            )
+            .unwrap();
+        scene
+            .tick_physical_body(
+                id,
+                &collision,
+                PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                0.1,
+                now + Duration::from_millis(100),
+            )
+            .unwrap();
+        scene.body_mut(id).unwrap().retained.velocity = Vector3::new(3.0, 0.0, 0.0);
+
+        scene
+            .tick_physical_body(
+                id,
+                &collision,
+                PhysicalBodyActuation::grounded_drive(Vector3::new(2.0, 0.0, 0.0)).unwrap(),
+                0.1,
+                now + Duration::from_millis(200),
+            )
+            .unwrap();
+
+        let solved = scene.body(id).unwrap();
+        let expected_retained = 3.0 * (1.0_f32 - 0.95).powf(0.1);
+        assert!((solved.retained.velocity.x - expected_retained).abs() < 0.000_1);
+        assert!((solved.accepted_motion.velocity.x - (2.0 + expected_retained)).abs() < 0.000_1);
     }
 
     #[test]
@@ -4669,7 +5448,8 @@ mod physical_body_tests {
         let solved = scene.body(id).unwrap();
         assert_eq!(solved.contact, ContactState::Grounded);
         assert!((solved.pose.coords.x - (start.x + 0.3)).abs() < 0.000_1);
-        assert!((solved.velocity.x - 3.0).abs() < 0.000_1);
+        assert!((solved.accepted_motion.velocity.x - 3.0).abs() < 0.000_1);
+        assert_eq!(solved.retained.velocity, Vector3::new(0.0, 0.0, -0.98));
     }
 
     #[test]
@@ -4718,7 +5498,7 @@ mod physical_body_tests {
                     now + Duration::from_millis(100),
                 )
                 .unwrap();
-            let actual = scene.body(id).unwrap().velocity;
+            let actual = scene.body(id).unwrap().retained.velocity;
             assert!(
                 (actual - expected_velocity).length() < 0.000_1,
                 "unexpected response for {restitution:?}: {actual:?}"
@@ -5008,7 +5788,7 @@ mod physical_body_tests {
             .unwrap();
         let launched = scene.body(id).unwrap();
         assert_eq!(launched.contact, ContactState::Airborne);
-        assert!((launched.velocity - Vector3::new(2.0, 3.0, 4.02)).length() < 0.000_1);
+        assert!((launched.retained.velocity - Vector3::new(2.0, 3.0, 4.02)).length() < 0.000_1);
 
         let airborne_heading = 1.25;
         scene
@@ -5026,7 +5806,7 @@ mod physical_body_tests {
             )
             .unwrap();
         let airborne = scene.body(id).unwrap();
-        assert!((airborne.velocity - Vector3::new(2.0, 3.0, 3.04)).length() < 0.000_1);
+        assert!((airborne.retained.velocity - Vector3::new(2.0, 3.0, 3.04)).length() < 0.000_1);
         assert!((airborne.pose.rotation.to_heading() - airborne_heading).abs() < 0.000_1);
     }
 
@@ -5075,7 +5855,7 @@ mod physical_body_tests {
             let body = scene.body(id).unwrap();
             assert_eq!(body.contact, ContactState::Grounded);
             assert_eq!(body.pose.coords, start);
-            assert_eq!(body.velocity, Vector3::zero());
+            assert_eq!(body.retained.velocity, Vector3::zero());
         }
     }
 
@@ -5158,7 +5938,7 @@ mod physical_body_tests {
             )
             .unwrap();
         let stored = scene.body_mut(id).unwrap();
-        stored.velocity = Vector3::new(1.0, 2.0, -3.0);
+        stored.retained.velocity = Vector3::new(1.0, 2.0, -3.0);
         stored.contact = ContactState::Grounded;
         let PhysicalBodyResponseState::Grounded { ground, .. } =
             &mut stored.physical.as_mut().unwrap().response

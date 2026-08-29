@@ -726,7 +726,7 @@ fn propose_possession_tick(
             launch,
         )?
     } else {
-        crate::host_simulation_runtime::dynamic_entity_coasting_actuation(body, delta_seconds)?
+        crate::host_simulation_runtime::dynamic_entity_coasting_actuation(body)?
     };
     Ok((
         PossessionTickProposal {
@@ -1849,10 +1849,9 @@ impl ExplorerEntityRuntime {
                             );
                             Ok(actuation)
                         }
-                        _ => crate::host_simulation_runtime::dynamic_entity_coasting_actuation(
-                            body,
-                            delta_seconds,
-                        ),
+                        _ => {
+                            crate::host_simulation_runtime::dynamic_entity_coasting_actuation(body)
+                        }
                     }
                 })?;
 
@@ -1871,8 +1870,14 @@ impl ExplorerEntityRuntime {
             })
         {
             registry.motion.last_physical_status = Some(physical_status);
-            registry.motion.last_effective_planar_speed =
-                Some(solved.current.velocity.x.hypot(solved.current.velocity.y));
+            registry.motion.last_effective_planar_speed = Some(
+                solved
+                    .current
+                    .accepted_motion
+                    .velocity
+                    .x
+                    .hypot(solved.current.accepted_motion.velocity.y),
+            );
             let table = self
                 .motion_catalog
                 .table(expected.motion_table_id)
@@ -2106,12 +2111,9 @@ fn validate_transition_replacement(
 #[cfg(test)]
 mod tests {
     /// Every scheduled body coasts, for tests that do not care about drive.
-    fn coasting(
-        delta_seconds: f32,
-    ) -> impl Fn(&SpatialBody) -> anyhow::Result<holtburger_world::PhysicalBodyActuation> {
-        move |body| {
-            crate::host_simulation_runtime::dynamic_entity_coasting_actuation(body, delta_seconds)
-        }
+    fn coasting() -> impl Fn(&SpatialBody) -> anyhow::Result<holtburger_world::PhysicalBodyActuation>
+    {
+        crate::host_simulation_runtime::dynamic_entity_coasting_actuation
     }
 
     use super::*;
@@ -2536,7 +2538,7 @@ mod tests {
 
         let baseline_at = Instant::now();
         let baseline = simulation
-            .tick_dynamic_entity_collection(0.1, baseline_at, coasting(0.1))
+            .tick_dynamic_entity_collection(0.1, baseline_at, coasting())
             .unwrap();
         assert!(baseline.collision_reports.is_empty());
         simulation
@@ -2554,7 +2556,7 @@ mod tests {
             .tick_dynamic_entity_collection(
                 0.1,
                 baseline_at + std::time::Duration::from_millis(200),
-                coasting(0.1),
+                coasting(),
             )
             .unwrap();
         assert_eq!(collection.collision_reports.len(), 2);
@@ -3117,7 +3119,7 @@ mod tests {
         for step in 0..240 {
             let now = start + std::time::Duration::from_millis(step * 33);
             if simulation
-                .tick_dynamic_entity_collection(1.0 / 30.0, now, coasting(1.0 / 30.0))
+                .tick_dynamic_entity_collection(1.0 / 30.0, now, coasting())
                 .unwrap()
                 .bodies
                 .is_empty()
@@ -3880,9 +3882,12 @@ mod tests {
         let body = simulation
             .physical_body_snapshot(SpatialBodyId::Entity(guid))
             .unwrap();
-        assert!(body.velocity.z > 0.0, "accepted release must launch upward");
+        assert!(
+            body.retained.velocity.z > 0.0,
+            "accepted release must launch upward"
+        );
 
-        let launch_planar_speed = body.velocity.x.hypot(body.velocity.y);
+        let launch_planar_speed = body.retained.velocity.x.hypot(body.retained.velocity.y);
         assert_eq!(
             runtime
                 .replace_possession_intent(ExplorerPossessionIntentRequest {
@@ -3906,10 +3911,20 @@ mod tests {
             .physical_body_snapshot(SpatialBodyId::Entity(guid))
             .unwrap();
         assert!(
-            (airborne_body.velocity.x.hypot(airborne_body.velocity.y) - launch_planar_speed).abs()
+            (airborne_body
+                .retained
+                .velocity
+                .x
+                .hypot(airborne_body.retained.velocity.y)
+                - launch_planar_speed)
+                .abs()
                 < 0.1,
             "changing rate in flight must not rescale retained planar velocity: {launch_planar_speed} -> {}",
-            airborne_body.velocity.x.hypot(airborne_body.velocity.y)
+            airborne_body
+                .retained
+                .velocity
+                .x
+                .hypot(airborne_body.retained.velocity.y)
         );
 
         let launch_heading = body.pose.rotation.to_heading();
@@ -4014,13 +4029,13 @@ mod tests {
         let body = simulation
             .physical_body_snapshot(SpatialBodyId::Entity(guid))
             .expect("body remains registered");
-        let planar_speed = body.velocity.x.hypot(body.velocity.y);
+        let planar_speed = body.retained.velocity.x.hypot(body.retained.velocity.y);
         assert!(
             planar_speed < 8.0,
             "release must use its captured 1x planar speed, not newer 10x intent: {planar_speed}"
         );
         assert!(
-            body.velocity.z > 0.0,
+            body.retained.velocity.z > 0.0,
             "the queued release must launch upward"
         );
     }
@@ -4481,7 +4496,7 @@ mod tests {
         for step in 0..240 {
             let now = start + std::time::Duration::from_millis(step * 33);
             let tick = simulation
-                .tick_dynamic_entity_collection(1.0 / 30.0, now, coasting(1.0 / 30.0))
+                .tick_dynamic_entity_collection(1.0 / 30.0, now, coasting())
                 .unwrap();
             if tick.bodies.is_empty() {
                 settled_at = Some(now);
@@ -4491,7 +4506,7 @@ mod tests {
         let settled_at = settled_at.expect("the grounded fixture body must settle");
         assert!(
             simulation
-                .tick_dynamic_entity_collection(1.0 / 30.0, settled_at, coasting(1.0 / 30.0))
+                .tick_dynamic_entity_collection(1.0 / 30.0, settled_at, coasting())
                 .unwrap()
                 .bodies
                 .is_empty(),
@@ -4513,7 +4528,7 @@ mod tests {
             .unwrap();
 
         let collection = simulation
-            .tick_dynamic_entity_collection(1.0 / 30.0, settled_at, coasting(1.0 / 30.0))
+            .tick_dynamic_entity_collection(1.0 / 30.0, settled_at, coasting())
             .unwrap();
         assert!(collection.bodies.is_empty());
         assert_eq!(

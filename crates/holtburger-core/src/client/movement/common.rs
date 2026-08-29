@@ -71,7 +71,14 @@ pub(super) fn raw_motion_state_with_motion_style(
 fn resolve_contact(world: &WorldState, metadata: MovementPacketMetadata) -> bool {
     metadata
         .contact
-        .or(world.player.last_server_grounded)
+        .or_else(|| {
+            world
+                .runtime_body_view(holtburger_world::SpatialBodyId::LocalPlayer(
+                    world.player.guid,
+                ))
+                .and_then(|body| body.contact.contact())
+        })
+        .or(world.player.last_server_contact)
         .unwrap_or(true)
 }
 
@@ -181,12 +188,17 @@ pub(super) fn build_motion_state_raw_motion_state(
     }
 
     if let Some(turn) = state.turning {
-        raw_motion_state.flags |= RawMotionFlags::TURN_COMMAND
-            | RawMotionFlags::TURN_HOLD_KEY
-            | RawMotionFlags::TURN_SPEED;
+        raw_motion_state.flags |= RawMotionFlags::TURN_COMMAND | RawMotionFlags::TURN_HOLD_KEY;
         raw_motion_state.turn_command = Some(turn_motion_command_for_state(turn));
         raw_motion_state.turn_hold_key = Some(axis_hold_key);
-        raw_motion_state.turn_speed = Some(turn_rate_scalar_for_state(state));
+        let raw_turn_rate = raw_turn_rate_scalar_for_state(state);
+        // Retail packs speed only when it differs bitwise from the raw default 1.0
+        // (`RawMotionState::Pack`, `acclient.c:319879-320015`). Omitting the default also lets ACE's
+        // raw-to-interpreted broadcast path derive the Run-held 1.5 rate instead of overriding it.
+        if raw_turn_rate != 1.0 {
+            raw_motion_state.flags |= RawMotionFlags::TURN_SPEED;
+            raw_motion_state.turn_speed = Some(raw_turn_rate);
+        }
     }
 
     raw_motion_state_with_motion_style(world, raw_motion_state, motion_style)
@@ -197,6 +209,19 @@ pub(super) fn turn_rate_scalar_for_state(state: CharacterDrive) -> f32 {
         Gait::Run => RUN_HELD_TURN_RATE_SCALAR,
         Gait::Walk => NON_RUN_HELD_TURN_RATE_SCALAR,
     })
+}
+
+/// Encodes the pre-hold-key turn rate carried by retail's `RawMotionState`.
+///
+/// `CMotionInterp::apply_raw_movement` applies the axis hold key after unpacking, and
+/// `apply_run_to_command` multiplies a Run-held turn by 1.5 (`acclient.c:329739-330067`). Sending
+/// the already-adjusted playback rate would therefore apply the Run multiplier twice.
+fn raw_turn_rate_scalar_for_state(state: CharacterDrive) -> f32 {
+    let hold_key_multiplier = match state.gait {
+        Gait::Run => RUN_HELD_TURN_RATE_SCALAR,
+        Gait::Walk => NON_RUN_HELD_TURN_RATE_SCALAR,
+    };
+    turn_rate_scalar_for_state(state) / hold_key_multiplier
 }
 
 #[cfg(test)]

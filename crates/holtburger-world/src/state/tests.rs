@@ -8,8 +8,8 @@ use crate::attachment::PhysicsAttachment;
 use crate::entity::Entity;
 use crate::state::liveness::EntityUpsertKind;
 use crate::{
-    ContactState, RuntimeBodyResetCause, SolveProjectionBasis, SolvedBodyKinematics,
-    SpatialBodyEvent, SpatialBodyId, SpatialSampleMode, WorldBootstrap,
+    ContactState, RuntimeBodyResetCause, SolvedBodyKinematics, SpatialBodyEvent, SpatialBodyId,
+    SpatialSampleMode, WorldBootstrap,
 };
 
 use crate::state::motion_resolution::test_support::{
@@ -499,15 +499,14 @@ fn resolve_body_projection_input_uses_grounded_motion_snapshot_without_vector_up
     });
     state.entities.insert(entity);
 
-    state.scene.reconcile_authoritative_body(
+    state.scene.apply_authoritative_body_effect(
         SpatialBodyId::Entity(guid),
-        crate::AuthoritativeBodyKinematics {
-            pose,
+        crate::AuthoritativePoseEffect::Initialize { pose },
+        crate::AuthoritativeBodyVectors {
             velocity: Vector3::zero(),
             acceleration: Vector3::zero(),
             omega: Vector3::zero(),
         },
-        crate::AuthoritativeBodySync::Snapshot,
         Instant::now(),
     );
     assert!(
@@ -524,9 +523,9 @@ fn resolve_body_projection_input_uses_grounded_motion_snapshot_without_vector_up
         .expect("guid-backed remote body should resolve projection input");
 
     assert_eq!(input.contact, ContactState::Grounded);
-    let Some(SolveProjectionBasis::AuthoredDrive { offset }) = input.basis else {
-        panic!("a grounded body performing a motion should drive from its authored offset");
-    };
+    let offset = input
+        .authored_offset
+        .expect("a grounded body performing a motion should expose its authored offset");
     // The fixture puts turn commands in cycles, so retail's substate branch claims the turn and it
     // displaces the run: the surviving contribution is the turn's omega at its ordered speed.
     assert_eq!(offset.translation, Vector3::zero());
@@ -537,7 +536,7 @@ fn resolve_body_projection_input_uses_grounded_motion_snapshot_without_vector_up
 }
 
 #[test]
-fn resolve_body_projection_input_falls_back_to_velocity_for_airborne_body() {
+fn resolve_body_projection_input_retains_physical_vectors_for_airborne_body() {
     let guid = Guid(0x7000_0101);
     let pose = WorldPosition {
         landblock_id: Guid(0x1234_0000),
@@ -561,15 +560,14 @@ fn resolve_body_projection_input_falls_back_to_velocity_for_airborne_body() {
     });
     state.entities.insert(entity);
 
-    state.scene.reconcile_authoritative_body(
+    state.scene.apply_authoritative_body_effect(
         SpatialBodyId::Entity(guid),
-        crate::AuthoritativeBodyKinematics {
-            pose,
+        crate::AuthoritativePoseEffect::Initialize { pose },
+        crate::AuthoritativeBodyVectors {
             velocity: Vector3::new(0.0, 0.0, 4.0),
             acceleration: Vector3::zero(),
             omega: Vector3::new(0.0, 0.0, 0.5),
         },
-        crate::AuthoritativeBodySync::Snapshot,
         Instant::now(),
     );
     assert!(
@@ -582,12 +580,9 @@ fn resolve_body_projection_input_falls_back_to_velocity_for_airborne_body() {
         .resolve_body_projection_input(SpatialBodyId::Entity(guid))
         .expect("airborne guid-backed body should resolve projection input");
 
-    assert!(matches!(
-        input.basis,
-        Some(SolveProjectionBasis::Velocity { velocity, omega })
-            if velocity == Vector3::new(0.0, 0.0, 4.0)
-                && omega == Vector3::new(0.0, 0.0, 0.5)
-    ));
+    assert_eq!(input.authored_offset, None);
+    assert_eq!(input.retained.velocity, Vector3::new(0.0, 0.0, 4.0));
+    assert_eq!(input.retained.omega, Vector3::new(0.0, 0.0, 0.5));
 }
 
 #[test]
@@ -659,8 +654,11 @@ fn solved_remote_runtime_body_only_emits_runtime_body_change() {
             coords: Vector3::new(5.0, 6.0, 4.0),
             ..pose
         },
-        velocity: Vector3::new(1.0, 0.0, 0.0),
-        omega: Vector3::zero(),
+        accepted_motion: crate::AcceptedBodyMotion {
+            velocity: Vector3::new(1.0, 0.0, 0.0),
+            omega: Vector3::zero(),
+        },
+        retained: crate::RetainedBodyKinematics::default(),
         contact: ContactState::Grounded,
         projection_state: None,
     });
@@ -700,8 +698,11 @@ fn authoritative_player_snapshots_do_not_clobber_active_local_runtime_motion() {
     let runtime_events = state.apply_solved_body_kinematics(&SolvedBodyKinematics {
         body_id: SpatialBodyId::LocalPlayer(player_guid),
         pose: runtime_pose,
-        velocity: Vector3::new(1.0, 0.0, 0.0),
-        omega: Vector3::new(0.0, 0.0, 0.5),
+        accepted_motion: crate::AcceptedBodyMotion {
+            velocity: Vector3::new(1.0, 0.0, 0.0),
+            omega: Vector3::new(0.0, 0.0, 0.5),
+        },
+        retained: crate::RetainedBodyKinematics::default(),
         contact: ContactState::Grounded,
         projection_state: Some(crate::SelfPlayerDriveProjectionState::LocalGroundedDirectDrive),
     });
@@ -837,8 +838,11 @@ fn apply_solved_body_kinematics_updates_local_runtime_body_and_grounded_state() 
             coords: Vector3::new(10.0, 20.0, 30.0),
             rotation: holtburger_common::math::Quaternion::identity(),
         },
-        velocity: Vector3::new(1.0, 2.0, 3.0),
-        omega: Vector3::new(0.0, 0.0, 4.0),
+        accepted_motion: crate::AcceptedBodyMotion {
+            velocity: Vector3::new(1.0, 2.0, 3.0),
+            omega: Vector3::new(0.0, 0.0, 4.0),
+        },
+        retained: crate::RetainedBodyKinematics::default(),
         contact: ContactState::Grounded,
         projection_state: None,
     };
@@ -858,9 +862,8 @@ fn apply_solved_body_kinematics_updates_local_runtime_body_and_grounded_state() 
         .body(SpatialBodyId::LocalPlayer(player_guid))
         .expect("local player runtime body should exist");
     assert_eq!(runtime_body.pose, solved.pose);
-    assert_eq!(runtime_body.velocity, solved.velocity);
-    assert_eq!(runtime_body.omega, solved.omega);
-    assert_eq!(state.player.last_server_grounded, Some(true));
+    assert_eq!(runtime_body.accepted_motion, solved.accepted_motion);
+    assert_eq!(state.player.last_runtime_walkable, Some(true));
     assert!(events.iter().any(|event| matches!(
         event,
         WorldEvent::RuntimeBodyChanged {
@@ -875,14 +878,14 @@ fn apply_solved_body_kinematics_updates_local_runtime_body_and_grounded_state() 
 }
 
 #[test]
-fn apply_solved_body_kinematics_preserves_player_grounded_cache_when_contact_unknown() {
+fn unknown_runtime_contact_preserves_packet_contact_fallback() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000123);
     let start_pos = WorldPosition::default();
 
     state.player.guid = player_guid;
     state.seed_local_player_entity(player_guid, "Player", start_pos);
-    state.player.last_server_grounded = Some(true);
+    state.player.last_server_contact = Some(true);
 
     let solved = SolvedBodyKinematics {
         body_id: SpatialBodyId::LocalPlayer(player_guid),
@@ -890,15 +893,16 @@ fn apply_solved_body_kinematics_preserves_player_grounded_cache_when_contact_unk
             coords: Vector3::new(1.0, 2.0, 3.0),
             ..start_pos
         },
-        velocity: Vector3::zero(),
-        omega: Vector3::zero(),
+        accepted_motion: crate::AcceptedBodyMotion::default(),
+        retained: crate::RetainedBodyKinematics::default(),
         contact: ContactState::Unknown,
         projection_state: None,
     };
 
     let events = state.apply_solved_body_kinematics(&solved);
 
-    assert_eq!(state.player.last_server_grounded, Some(true));
+    assert_eq!(state.player.last_server_contact, Some(true));
+    assert_eq!(state.player.last_runtime_walkable, None);
     assert!(
         !events
             .iter()
@@ -1305,7 +1309,7 @@ fn test_tick_does_not_require_runtime_resource_access() {
 }
 
 #[test]
-fn test_player_autonomous_sync_updates_authoritative_player_entity() {
+fn player_autonomous_sync_defers_pose_to_core_authority_adapter() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000123);
     state.player.guid = player_guid;
@@ -1340,10 +1344,10 @@ fn test_player_autonomous_sync_updates_authoritative_player_entity() {
         }
     )));
 
-    assert_eq!(state.player_position(), Some(sync_data.position));
+    assert_eq!(state.player_position(), Some(initial_pos));
     assert_eq!(
         state.entities.get(player_guid).unwrap().position,
-        sync_data.position
+        initial_pos
     );
     assert_eq!(state.player.instance_sequence, 10);
     assert_eq!(state.player.server_control_sequence, 20);
@@ -1391,18 +1395,21 @@ fn test_stale_player_autonomous_sync_is_ignored() {
 }
 
 #[test]
-fn test_remote_update_position_emits_forced_reposition_when_force_sequence_advances() {
+fn remote_force_position_sequence_has_no_independent_reconciliation_meaning() {
     let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x5000_0001);
     let guid = Guid(0x6000_0001);
     let initial_pos = WorldPosition {
         landblock_id: Guid(0x01000000),
         coords: Vector3::new(1.0, 2.0, 3.0),
         rotation: holtburger_common::math::Quaternion::identity(),
     };
+    state.player.guid = player_guid;
+    state.seed_local_player_entity(player_guid, "Player", initial_pos);
     let mut entity = Entity::new(guid, "Target".to_string(), initial_pos);
     entity.sequences[4] = 30;
     entity.sequences[6] = 40;
-    state.entities.insert(entity);
+    state.add_entity(entity);
 
     let msg = GameMessage::UpdatePosition(Box::new(UpdatePositionData {
         guid,
@@ -1416,6 +1423,7 @@ fn test_remote_update_position_emits_forced_reposition_when_force_sequence_advan
             position_sequence: 9,
             teleport_sequence: 30,
             force_position_sequence: 41,
+            flags: UpdatePositionFlag::HAS_CONTACT,
             ..PositionPack::default()
         },
     }));
@@ -1423,18 +1431,20 @@ fn test_remote_update_position_emits_forced_reposition_when_force_sequence_advan
     let events = state.handle_message(&msg);
 
     assert_eq!(state.entities.get(guid).unwrap().position.coords.x, 10.0);
-    assert!(events.iter().any(|event| matches!(
-        event,
-        WorldEvent::ForcedReposition {
-            guid: event_guid,
-            pos,
-            sequence: 41,
-        } if *event_guid == guid && (pos.coords.x - 10.0).abs() < 1e-5
-    )));
+    assert_eq!(state.entities.get(guid).unwrap().sequences[6], 40);
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, WorldEvent::ForcedReposition { .. }))
+    );
+    assert_eq!(
+        state.scene.body(SpatialBodyId::Entity(guid)).unwrap().pose,
+        initial_pos
+    );
 }
 
 #[test]
-fn test_stale_remote_update_position_is_ignored_when_force_sequence_regresses() {
+fn remote_force_position_regression_does_not_reject_a_newer_contacted_position() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0002);
     let guid = Guid(0x6000_0002);
@@ -1463,14 +1473,19 @@ fn test_stale_remote_update_position_is_ignored_when_force_sequence_regresses() 
             position_sequence: 9,
             teleport_sequence: 30,
             force_position_sequence: 39,
+            flags: UpdatePositionFlag::HAS_CONTACT,
             ..PositionPack::default()
         },
     }));
 
     let events = state.handle_message(&msg);
 
-    assert!(events.is_empty());
-    assert_eq!(state.entities.get(guid).unwrap().position, initial_pos);
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::EntityMoved { guid: event_guid, .. } if *event_guid == guid
+    )));
+    assert_ne!(state.entities.get(guid).unwrap().position, initial_pos);
+    assert_eq!(state.entities.get(guid).unwrap().sequences[6], 40);
 
     let nearby: std::collections::HashSet<_> = state
         .get_nearby_world_entities()
@@ -2732,13 +2747,13 @@ fn test_add_entity_seeds_remote_body_sidecar() {
         .expect("remote entity body should be seeded");
     assert_eq!(body.authoritative_pose, Some(position));
     assert_eq!(body.pose, position);
-    assert_eq!(body.velocity, Vector3::new(1.0, 2.0, 0.0));
-    assert_eq!(body.omega, Vector3::new(0.0, 0.0, 0.5));
+    assert_eq!(body.retained.velocity, Vector3::new(1.0, 2.0, 0.0));
+    assert_eq!(body.retained.omega, Vector3::new(0.0, 0.0, 0.5));
     assert_eq!(body.sampling.mode, SpatialSampleMode::AuthoritativeOnly);
 }
 
 #[test]
-fn test_player_authoritative_updates_seed_local_player_body() {
+fn player_confirmation_and_vector_update_preserve_existing_runtime_placement() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0100);
     let initial_pos = WorldPosition {
@@ -2763,14 +2778,169 @@ fn test_player_authoritative_updates_seed_local_player_body() {
         .body(SpatialBodyId::LocalPlayer(player_guid))
         .expect("local player body should be reconciled from authoritative entity state");
     assert_eq!(body.authoritative_pose, Some(moved));
-    assert_eq!(body.pose, moved);
-    assert_eq!(body.velocity, Vector3::new(4.0, 5.0, 0.0));
-    assert_eq!(body.omega, Vector3::new(0.0, 0.0, 2.0));
+    assert_eq!(body.pose, initial_pos);
+    assert_eq!(body.retained.velocity, Vector3::new(4.0, 5.0, 0.0));
+    assert_eq!(body.retained.omega, Vector3::new(0.0, 0.0, 2.0));
     assert_eq!(body.sampling.mode, SpatialSampleMode::AuthoritativeOnly);
 }
 
 #[test]
-fn test_remote_position_reset_suspends_body_sampling() {
+fn contacted_near_remote_position_preserves_runtime_pose_then_interpolates_on_tick() {
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x6200_0010);
+    let remote_guid = Guid(0x6200_0011);
+    let pose = |x| WorldPosition {
+        landblock_id: Guid(0x0100_0001),
+        coords: Vector3::new(x, 0.0, 0.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+    state.player.guid = player_guid;
+    state.seed_local_player_entity(player_guid, "Player", pose(0.0));
+    state.add_entity(Entity::new(remote_guid, "Remote".to_owned(), pose(8.0)));
+
+    let accepted = state.apply_entity_position_pack(
+        remote_guid,
+        &PositionPack {
+            pos: pose(10.0),
+            position_sequence: 1,
+            flags: UpdatePositionFlag::HAS_CONTACT,
+            ..PositionPack::default()
+        },
+        &mut Vec::new(),
+    );
+    assert!(accepted);
+    let body_id = SpatialBodyId::Entity(remote_guid);
+    let body = state.scene.body(body_id).expect("remote body");
+    assert_eq!(body.pose, pose(8.0));
+    assert_eq!(body.authoritative_pose, Some(pose(10.0)));
+    assert_eq!(body.contact, ContactState::Unknown);
+
+    let ordinary = SolvedBodyKinematics {
+        body_id,
+        pose: pose(8.0),
+        accepted_motion: crate::AcceptedBodyMotion::default(),
+        retained: crate::RetainedBodyKinematics::default(),
+        contact: ContactState::Unknown,
+        projection_state: None,
+    };
+    let (solved, kind) = state
+        .scene
+        .reconcile_pose_only_body_kinematics(ordinary, 0.03)
+        .expect("remote body remains registered");
+    assert_eq!(kind, crate::RuntimeBodyAdvanceKind::Integrated);
+    assert!(solved.pose.coords.x > 8.0);
+    assert!(solved.pose.coords.x < 10.0);
+}
+
+#[test]
+fn remote_position_requires_a_strictly_newer_position_sequence() {
+    let mut state = WorldState::synthetic();
+    let guid = Guid(0x6200_0012);
+    let initial = WorldPosition {
+        landblock_id: Guid(0x0100_0001),
+        ..WorldPosition::default()
+    };
+    state.add_entity(Entity::new(guid, "Remote".to_owned(), initial));
+
+    assert!(!state.apply_entity_position_pack(
+        guid,
+        &PositionPack {
+            pos: WorldPosition {
+                coords: Vector3::new(5.0, 0.0, 0.0),
+                ..initial
+            },
+            position_sequence: 0,
+            flags: UpdatePositionFlag::HAS_CONTACT,
+            ..PositionPack::default()
+        },
+        &mut Vec::new(),
+    ));
+    assert_eq!(state.entities.get(guid).unwrap().position, initial);
+    assert_eq!(
+        state.scene.body(SpatialBodyId::Entity(guid)).unwrap().pose,
+        initial
+    );
+}
+
+#[test]
+fn remote_position_at_retail_distance_boundary_schedules_tick_snap() {
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x6200_0013);
+    let remote_guid = Guid(0x6200_0014);
+    let pose = |x| WorldPosition {
+        landblock_id: Guid(0x0100_0001),
+        coords: Vector3::new(x, 0.0, 0.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+    state.player.guid = player_guid;
+    state.seed_local_player_entity(player_guid, "Player", pose(0.0));
+    state.add_entity(Entity::new(remote_guid, "Remote".to_owned(), pose(96.0)));
+    assert!(state.apply_entity_position_pack(
+        remote_guid,
+        &PositionPack {
+            pos: pose(100.0),
+            position_sequence: 1,
+            flags: UpdatePositionFlag::HAS_CONTACT,
+            ..PositionPack::default()
+        },
+        &mut Vec::new(),
+    ));
+
+    let body_id = SpatialBodyId::Entity(remote_guid);
+    assert_eq!(state.scene.body(body_id).unwrap().pose, pose(96.0));
+    let ordinary = SolvedBodyKinematics {
+        body_id,
+        pose: pose(96.0),
+        accepted_motion: crate::AcceptedBodyMotion::default(),
+        retained: crate::RetainedBodyKinematics::default(),
+        contact: ContactState::Sliding,
+        projection_state: None,
+    };
+    let (solved, kind) = state
+        .scene
+        .reconcile_pose_only_body_kinematics(ordinary, 0.03)
+        .expect("remote body remains registered");
+    assert_eq!(kind, crate::RuntimeBodyAdvanceKind::CorrectionSnap);
+    assert_eq!(solved.pose, pose(100.0));
+}
+
+#[test]
+fn valid_remote_position_recovers_a_missing_runtime_cell() {
+    let mut state = WorldState::synthetic();
+    let guid = Guid(0x6200_0015);
+    state.add_entity(Entity::new(
+        guid,
+        "Remote".to_owned(),
+        WorldPosition::default(),
+    ));
+    let recovered = WorldPosition {
+        landblock_id: Guid(0x0100_0001),
+        coords: Vector3::new(5.0, 0.0, 0.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+    let mut events = Vec::new();
+    assert!(state.apply_entity_position_pack(
+        guid,
+        &PositionPack {
+            pos: recovered,
+            position_sequence: 1,
+            flags: UpdatePositionFlag::HAS_CONTACT,
+            ..PositionPack::default()
+        },
+        &mut events,
+    ));
+    assert_eq!(
+        state.scene.body(SpatialBodyId::Entity(guid)).unwrap().pose,
+        recovered
+    );
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::ForcedReposition { guid: event_guid, .. } if *event_guid == guid
+    )));
+}
+
+#[test]
+fn newer_remote_teleport_resets_and_suspends_body_sampling() {
     let mut state = WorldState::synthetic();
     let guid = Guid(0x6200_0002);
     let initial_pos = WorldPosition {
@@ -2793,7 +2963,7 @@ fn test_remote_position_reset_suspends_body_sampling() {
             },
             instance_sequence: 2,
             position_sequence: 3,
-            teleport_sequence: 30,
+            teleport_sequence: 31,
             force_position_sequence: 41,
             ..PositionPack::default()
         },
@@ -2814,7 +2984,7 @@ fn test_remote_position_reset_suspends_body_sampling() {
 }
 
 #[test]
-fn test_remote_position_pack_updates_and_clears_linear_velocity() {
+fn non_contact_remote_position_advances_only_sequence_then_contact_updates_vectors() {
     let mut state = WorldState::synthetic();
     let guid = Guid(0x6200_0005);
     let initial_pos = WorldPosition {
@@ -2847,23 +3017,11 @@ fn test_remote_position_pack_updates_and_clears_linear_velocity() {
     );
 
     assert!(applied);
-    assert_eq!(
-        state
-            .entities
-            .get(guid)
-            .expect("entity should exist")
-            .velocity,
-        Vector3::new(-1.327_315_8, 5.460_433_5, -18.468_733)
-    );
-    assert!(falling_events.iter().any(|event| matches!(
-        event,
-        WorldEvent::EntityVectorUpdated {
-            guid: event_guid,
-            velocity,
-            ..
-        } if *event_guid == guid
-            && *velocity == Vector3::new(-1.327_315_8, 5.460_433_5, -18.468_733)
-    )));
+    let entity = state.entities.get(guid).expect("entity should exist");
+    assert_eq!(entity.position, initial_pos);
+    assert_eq!(entity.velocity, Vector3::new(0.0, 0.0, 20.046_688));
+    assert_eq!(entity.sequences[0], 285);
+    assert!(falling_events.is_empty());
 
     let mut grounded_events = Vec::new();
     let applied = state.apply_entity_position_pack(
@@ -2878,7 +3036,7 @@ fn test_remote_position_pack_updates_and_clears_linear_velocity() {
             position_sequence: 286,
             teleport_sequence: 0,
             force_position_sequence: 0,
-            flags: UpdatePositionFlag::IS_GROUNDED,
+            flags: UpdatePositionFlag::HAS_CONTACT,
             ..PositionPack::default()
         },
         &mut grounded_events,
@@ -2897,7 +3055,7 @@ fn test_remote_position_pack_updates_and_clears_linear_velocity() {
         .scene
         .body(SpatialBodyId::Entity(guid))
         .expect("remote body should remain present after grounded snap");
-    assert_eq!(body.velocity, Vector3::zero());
+    assert_eq!(body.retained.velocity, Vector3::zero());
     assert!(grounded_events.iter().any(|event| matches!(
         event,
         WorldEvent::EntityVectorUpdated {

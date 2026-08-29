@@ -1,3 +1,4 @@
+use super::registry::RETAIL_RUN_FORWARD_BASE_SPEED_MPS;
 use super::*;
 use holtburger_common::{Quaternion, RigidTransform, Vector3};
 use holtburger_content::{MotionHookDirection, MotionSequenceCatalog, MotionSequenceTable};
@@ -17,6 +18,7 @@ const WALK: u32 = MotionTable::WALK_FORWARD_COMMAND;
 const RUN: u32 = MotionTable::RUN_FORWARD_COMMAND;
 const MODIFIER: u32 = 0x2000_0021;
 const SECOND_MODIFIER: u32 = 0x2000_0022;
+const DUAL_TURN: u32 = MotionTable::TURN_RIGHT_COMMAND;
 const HOOKED: u32 = 0x4500_0009;
 
 const STAND_ANIM: u32 = 0x0300_0001;
@@ -118,6 +120,13 @@ fn catalog() -> MotionSequenceCatalog {
         MotionTable::cycle_key(STYLE, HOOKED),
         motion(vec![clip(HOOK_ANIM, 4.0)], None, None),
     );
+    let mut standing_turn = motion(
+        vec![clip(STAND_ANIM, 4.0)],
+        None,
+        Some(Vector3::new(0.0, 0.0, 0.5)),
+    );
+    standing_turn.bitfield = 2;
+    cycles.insert(MotionTable::cycle_key(STYLE, DUAL_TURN), standing_turn);
     cycles.insert(
         MotionTable::cycle_key(COMBAT_STYLE, STAND),
         motion(vec![clip(STAND_ANIM, 10.0)], None, None),
@@ -131,6 +140,10 @@ fn catalog() -> MotionSequenceCatalog {
     modifiers.insert(
         MotionTable::cycle_key(STYLE, SECOND_MODIFIER),
         motion(Vec::new(), None, Some(Vector3::new(0.25, 0.0, 0.0))),
+    );
+    modifiers.insert(
+        MotionTable::cycle_key(STYLE, DUAL_TURN),
+        motion(Vec::new(), None, Some(Vector3::new(0.0, 0.0, 0.5))),
     );
 
     // Links: stand->walk, walk->stand, stand->run, run->stand, and stand->combat style.
@@ -351,6 +364,44 @@ fn repeated_forward_taps_then_hold_do_not_accumulate_a_transition_backlog() {
     assert_eq!(animation_ids(body.sequence()), vec![LINK_ANIM, WALK_ANIM]);
 }
 
+#[test]
+fn adjusted_interpolation_speed_retains_the_last_valid_run_rate() {
+    let catalog = catalog();
+    let table = catalog.table(0x0900_0001).expect("table");
+    let mut body = BodyMotionRuntime::new(table);
+    let order = |forward| MotionOrder {
+        style: Some(MotionCommand(STYLE)),
+        forward,
+        sidestep: None,
+        turn: None,
+    };
+
+    assert_eq!(body.adjusted_max_speed_mps(), None);
+    body.drive(
+        table,
+        order(Some((MotionCommand::RUN_FORWARD, 1.75))),
+        1.0 / 30.0,
+    );
+    assert_eq!(
+        body.adjusted_max_speed_mps(),
+        Some(1.75 * RETAIL_RUN_FORWARD_BASE_SPEED_MPS)
+    );
+    body.drive(table, order(None), 1.0 / 30.0);
+    assert_eq!(
+        body.adjusted_max_speed_mps(),
+        Some(1.75 * RETAIL_RUN_FORWARD_BASE_SPEED_MPS)
+    );
+    body.drive(
+        table,
+        order(Some((MotionCommand::RUN_FORWARD, f32::NAN))),
+        1.0 / 30.0,
+    );
+    assert_eq!(
+        body.adjusted_max_speed_mps(),
+        Some(1.75 * RETAIL_RUN_FORWARD_BASE_SPEED_MPS)
+    );
+}
+
 /// Transition clips the cursor has passed are dropped, so an interrupted body does not accumulate
 /// a growing backlog of played-out links.
 #[test]
@@ -542,6 +593,47 @@ fn selecting_a_substate_reinstalls_the_active_modifiers() {
 
     assert_eq!(body.state.modifiers().len(), 1);
     assert_eq!(body.sequence.omega(), Vector3::new(0.0, 0.0, 0.5));
+}
+
+#[test]
+fn releasing_locomotion_keeps_an_active_turn_as_one_modifier() {
+    let catalog = catalog();
+    let table = catalog.table(0x0900_0001).expect("table");
+    let mut body = BodyMotionRuntime::new(table);
+
+    body.drive(
+        table,
+        MotionOrder {
+            style: Some(MotionCommand(STYLE)),
+            forward: Some((MotionCommand(RUN), 1.0)),
+            sidestep: None,
+            turn: Some((MotionCommand(DUAL_TURN), 1.0)),
+        },
+        0.0,
+    );
+    assert_eq!(body.state().substate, MotionCommand(RUN));
+    assert_eq!(body.state().modifiers().len(), 1);
+
+    body.drive(
+        table,
+        MotionOrder {
+            style: Some(MotionCommand(STYLE)),
+            forward: None,
+            sidestep: None,
+            turn: Some((MotionCommand(DUAL_TURN), 1.5)),
+        },
+        0.0,
+    );
+
+    assert_eq!(body.state().substate, MotionCommand(STAND));
+    assert_eq!(
+        body.state().modifiers(),
+        &[ActiveMotion {
+            command: MotionCommand(DUAL_TURN),
+            speed_mod: 1.5,
+        }]
+    );
+    assert_eq!(body.sequence().omega(), Vector3::new(0.0, 0.0, 0.75));
 }
 
 #[test]

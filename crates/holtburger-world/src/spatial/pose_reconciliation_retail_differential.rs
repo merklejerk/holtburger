@@ -1,4 +1,4 @@
-//! Independent, asset-free reconstruction of the retail correction pipeline.
+//! Independent, asset-free reconstruction of the retail pose-reconciliation pipeline.
 //!
 //! This module deliberately does not import the production correction state. It transliterates
 //! the cited decompile branches into a small oracle so the client implementation can be compared
@@ -16,14 +16,51 @@ const EPSILON: f32 = 0.000_2;
 const WATCHDOG_FRAMES: u32 = 5;
 const WATCHDOG_RATIO: f32 = 0.3;
 const WATCHDOG_NEAR_COMPLETE_DISTANCE: f32 = 0.2;
-const FAILURE_LIMIT: u8 = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OracleDisposition {
     Ignored,
-    HardSet,
+    /// Accept only the outer position timestamp; retail does not install the packet pose.
+    SequenceOnly,
+    Reset(OracleResetCause),
     Snap,
-    Interpolate { keep_heading: bool },
+    Interpolate {
+        keep_heading: bool,
+    },
+}
+
+/// Discontinuous placement reasons that must not collapse into an ordinary correction snap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OracleResetCause {
+    MissingCell,
+    Teleport,
+}
+
+/// Retail's local-player branch, which is distinct from generic `MoveOrTeleport` dispatch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OracleSelfDisposition {
+    Ignored,
+    ForcePositionReset,
+    TeleportReset,
+    Confirm,
+    ConfirmAndInterpolate { keep_heading: bool },
+}
+
+/// Packet and client-authority facts consumed by retail's self-player receive branch.
+#[derive(Debug, Clone, Copy)]
+struct OracleSelfUpdate {
+    /// Whether `newer_event(FORCE_POSITION_TS)` accepted this packet's force timestamp.
+    force_position_newer: bool,
+    /// Whether `newer_event(POSITION_TS)` accepted this packet's position timestamp.
+    position_newer: bool,
+    /// Teleport epoch carried by this packet.
+    teleport_sequence: u16,
+    /// Packet `has_contact`, independently of locally solved contact state.
+    contact: bool,
+    /// Result of retail `CommandInterpreter::UsePositionFromServer`.
+    use_position_from_server: bool,
+    /// Whether an active MoveTo owns heading while interpolation applies.
+    keep_heading: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -52,16 +89,62 @@ fn oracle_move_or_teleport(
         return OracleDisposition::Ignored;
     }
     if retail_newer_u16(update.teleport_sequence, known_teleport_sequence) || !update.has_cell {
-        return OracleDisposition::HardSet;
+        return OracleDisposition::Reset(if update.has_cell {
+            OracleResetCause::Teleport
+        } else {
+            OracleResetCause::MissingCell
+        });
     }
     if !update.contact {
-        return OracleDisposition::Ignored;
+        return OracleDisposition::SequenceOnly;
     }
     if update.distance >= SNAP_DISTANCE {
         return OracleDisposition::Snap;
     }
     OracleDisposition::Interpolate {
         keep_heading: update.moving_to,
+    }
+}
+
+/// Transliteration of the self-player half of `SmartBox::HandleReceivedPosition`
+/// (`acclient.c:138968-139041`). Server-control state is deliberately absent: retail consults
+/// `UsePositionFromServer`, whose input is autonomy level, not `controlled_by_server`.
+fn oracle_self_received_position(
+    update: OracleSelfUpdate,
+    known_teleport_sequence: u16,
+) -> OracleSelfDisposition {
+    let packet_teleport_is_stale =
+        retail_newer_u16(known_teleport_sequence, update.teleport_sequence);
+    if update.force_position_newer && !packet_teleport_is_stale {
+        return OracleSelfDisposition::ForcePositionReset;
+    }
+    if !update.position_newer || packet_teleport_is_stale {
+        return OracleSelfDisposition::Ignored;
+    }
+    if retail_newer_u16(update.teleport_sequence, known_teleport_sequence) {
+        return OracleSelfDisposition::TeleportReset;
+    }
+    if update.use_position_from_server && update.contact {
+        return OracleSelfDisposition::ConfirmAndInterpolate {
+            keep_heading: update.keep_heading,
+        };
+    }
+    OracleSelfDisposition::Confirm
+}
+
+/// Runtime contact projected from retail's `transient_state & Contact` bit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OracleRuntimeContact {
+    Unknown,
+    Airborne,
+    Sliding,
+    Grounded,
+}
+
+impl OracleRuntimeContact {
+    /// `Sliding` is contact without `OnWalkable`; it still admits correction mechanics.
+    const fn has_contact(self) -> bool {
+        matches!(self, Self::Sliding | Self::Grounded)
     }
 }
 
@@ -98,13 +181,14 @@ enum OracleInterpolationOutcome {
 
 fn oracle_interpolation_adjust(
     node: &mut OracleNode,
-    contact: bool,
+    contact: OracleRuntimeContact,
     to_target: Vector3,
     max_speed: Option<f32>,
     keep_heading: bool,
     quantum: f32,
+    queued_successor: bool,
 ) -> OracleInterpolationOutcome {
-    if !contact {
+    if !contact.has_contact() {
         return OracleInterpolationOutcome::NotApplied;
     }
     let distance = to_target.length();
@@ -126,8 +210,8 @@ fn oracle_interpolation_adjust(
             if distance < WATCHDOG_NEAR_COMPLETE_DISTANCE {
                 return OracleInterpolationOutcome::Completed;
             }
-            node.failed_nodes = node.failed_nodes.saturating_add(1).min(FAILURE_LIMIT);
-            if node.failed_nodes >= FAILURE_LIMIT {
+            node.failed_nodes = node.failed_nodes.saturating_add(1);
+            if !queued_successor || node.failed_nodes > 3 {
                 return OracleInterpolationOutcome::Snap;
             }
             return OracleInterpolationOutcome::Abandoned;
@@ -166,11 +250,11 @@ fn oracle_constraint(indoors: bool, current_drift: f32) -> OracleConstraint {
 
 fn oracle_constraint_adjust(
     constraint: &mut OracleConstraint,
-    contact: bool,
+    contact: OracleRuntimeContact,
     translation: Vector3,
 ) -> Vector3 {
     let mut damped = translation;
-    if contact {
+    if contact.has_contact() {
         if constraint.accumulated >= constraint.maximum {
             damped = Vector3::zero();
         } else if constraint.accumulated > constraint.start {
@@ -187,7 +271,7 @@ fn oracle_constraint_adjust(
 /// translation survives; the caller still runs the constraint stage over that authored basis.
 struct OracleTickInput {
     /// Whether retail's current placement reports contact.
-    contact: bool,
+    contact: OracleRuntimeContact,
     /// Authored translation retained when interpolation does not apply.
     authored_translation: Vector3,
     /// Current displacement from the body to its correction target.
@@ -221,6 +305,7 @@ fn oracle_tick(
             max_speed,
             keep_heading,
             quantum,
+            false,
         ) {
             OracleInterpolationOutcome::Assigned {
                 translation,
@@ -268,7 +353,7 @@ mod tests {
         );
         assert_eq!(
             oracle_move_or_teleport(update(1, true, true, 1.0), u16::MAX),
-            OracleDisposition::HardSet
+            OracleDisposition::Reset(OracleResetCause::Teleport)
         );
         assert_eq!(
             oracle_move_or_teleport(update(u16::MAX, true, true, 1.0), 1),
@@ -280,19 +365,75 @@ mod tests {
     fn missing_cell_new_epoch_airborne_and_far_branches_are_distinct() {
         assert_eq!(
             oracle_move_or_teleport(update(4, false, false, 1.0), 4),
-            OracleDisposition::HardSet
+            OracleDisposition::Reset(OracleResetCause::MissingCell)
         );
         assert_eq!(
             oracle_move_or_teleport(update(5, true, false, 1.0), 4),
-            OracleDisposition::HardSet
+            OracleDisposition::Reset(OracleResetCause::Teleport)
         );
         assert_eq!(
             oracle_move_or_teleport(update(4, true, false, 1.0), 4),
-            OracleDisposition::Ignored
+            OracleDisposition::SequenceOnly
         );
         assert_eq!(
             oracle_move_or_teleport(update(4, true, true, SNAP_DISTANCE), 4),
             OracleDisposition::Snap
+        );
+    }
+
+    #[test]
+    fn self_default_autonomy_confirms_without_interpolating() {
+        let disposition = oracle_self_received_position(
+            OracleSelfUpdate {
+                force_position_newer: false,
+                position_newer: true,
+                teleport_sequence: 4,
+                contact: true,
+                use_position_from_server: false,
+                keep_heading: true,
+            },
+            4,
+        );
+        assert_eq!(disposition, OracleSelfDisposition::Confirm);
+    }
+
+    #[test]
+    fn self_non_default_autonomy_interpolates_only_with_packet_contact() {
+        let update = |contact| OracleSelfUpdate {
+            force_position_newer: false,
+            position_newer: true,
+            teleport_sequence: 4,
+            contact,
+            use_position_from_server: true,
+            keep_heading: true,
+        };
+        assert_eq!(
+            oracle_self_received_position(update(true), 4),
+            OracleSelfDisposition::ConfirmAndInterpolate { keep_heading: true }
+        );
+        assert_eq!(
+            oracle_self_received_position(update(false), 4),
+            OracleSelfDisposition::Confirm
+        );
+    }
+
+    #[test]
+    fn self_force_and_teleport_resets_are_not_ordinary_corrections() {
+        let update = |force_position_newer, teleport_sequence| OracleSelfUpdate {
+            force_position_newer,
+            position_newer: true,
+            teleport_sequence,
+            contact: true,
+            use_position_from_server: false,
+            keep_heading: false,
+        };
+        assert_eq!(
+            oracle_self_received_position(update(true, 4), 4),
+            OracleSelfDisposition::ForcePositionReset
+        );
+        assert_eq!(
+            oracle_self_received_position(update(false, 5), 4),
+            OracleSelfDisposition::TeleportReset
         );
     }
 
@@ -314,7 +455,7 @@ mod tests {
             Some(&mut node),
             &mut leash,
             OracleTickInput {
-                contact: true,
+                contact: OracleRuntimeContact::Grounded,
                 authored_translation: Vector3::new(1.0, 2.0, 0.0),
                 to_target: Vector3::new(10.0, 0.0, 0.0),
                 max_speed: Some(4.0),
@@ -328,17 +469,18 @@ mod tests {
     }
 
     #[test]
-    fn watchdog_has_near_complete_and_four_failure_outcomes() {
+    fn watchdog_completes_near_and_distinguishes_last_from_queued_failure() {
         let mut node = OracleNode::new(10.0);
         for _ in 0..4 {
             assert!(matches!(
                 oracle_interpolation_adjust(
                     &mut node,
-                    true,
+                    OracleRuntimeContact::Grounded,
                     Vector3::new(10.0, 0.0, 0.0),
                     Some(1.0),
                     false,
                     0.03,
+                    false,
                 ),
                 OracleInterpolationOutcome::Assigned { .. }
             ));
@@ -346,11 +488,26 @@ mod tests {
         assert_eq!(
             oracle_interpolation_adjust(
                 &mut node,
-                true,
+                OracleRuntimeContact::Grounded,
                 Vector3::new(10.0, 0.0, 0.0),
                 Some(1.0),
                 false,
                 0.03,
+                false,
+            ),
+            OracleInterpolationOutcome::Snap
+        );
+        let mut queued = OracleNode::new(10.0);
+        queued.frame_counter = 4;
+        assert_eq!(
+            oracle_interpolation_adjust(
+                &mut queued,
+                OracleRuntimeContact::Grounded,
+                Vector3::new(10.0, 0.0, 0.0),
+                Some(1.0),
+                false,
+                0.03,
+                true,
             ),
             OracleInterpolationOutcome::Abandoned
         );
@@ -358,21 +515,23 @@ mod tests {
         for _ in 0..4 {
             let _ = oracle_interpolation_adjust(
                 &mut near,
-                true,
+                OracleRuntimeContact::Grounded,
                 Vector3::new(0.1, 0.0, 0.0),
                 Some(1.0),
                 false,
                 0.03,
+                false,
             );
         }
         assert_eq!(
             oracle_interpolation_adjust(
                 &mut near,
-                true,
+                OracleRuntimeContact::Grounded,
                 Vector3::new(0.1, 0.0, 0.0),
                 Some(1.0),
                 false,
                 0.03,
+                false,
             ),
             OracleInterpolationOutcome::Completed
         );
@@ -382,14 +541,34 @@ mod tests {
     fn constraint_uses_indoor_outdoor_edges_and_post_damping_accumulation() {
         let mut indoor = oracle_constraint(true, 5.0);
         assert_eq!(
-            oracle_constraint_adjust(&mut indoor, true, Vector3::new(2.0, 0.0, 0.0)),
+            oracle_constraint_adjust(
+                &mut indoor,
+                OracleRuntimeContact::Grounded,
+                Vector3::new(2.0, 0.0, 0.0),
+            ),
             Vector3::new(2.0, 0.0, 0.0)
         );
         let mut outdoor = oracle_constraint(false, 30.0);
-        let damped = oracle_constraint_adjust(&mut outdoor, true, Vector3::new(2.0, 0.0, 0.0));
+        let damped = oracle_constraint_adjust(
+            &mut outdoor,
+            OracleRuntimeContact::Sliding,
+            Vector3::new(2.0, 0.0, 0.0),
+        );
         assert_close(damped.x, 1.0);
         assert_close(outdoor.accumulated, 31.0);
-        let airborne = oracle_constraint_adjust(&mut outdoor, false, Vector3::new(2.0, 0.0, 0.0));
+        let airborne = oracle_constraint_adjust(
+            &mut outdoor,
+            OracleRuntimeContact::Airborne,
+            Vector3::new(2.0, 0.0, 0.0),
+        );
         assert_eq!(airborne, Vector3::new(2.0, 0.0, 0.0));
+        assert_close(outdoor.accumulated, 33.0);
+        let unknown = oracle_constraint_adjust(
+            &mut outdoor,
+            OracleRuntimeContact::Unknown,
+            Vector3::new(1.0, 0.0, 0.0),
+        );
+        assert_eq!(unknown, Vector3::new(1.0, 0.0, 0.0));
+        assert_close(outdoor.accumulated, 34.0);
     }
 }

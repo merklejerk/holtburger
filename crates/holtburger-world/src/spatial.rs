@@ -11,7 +11,12 @@ mod dynamic_contact;
 mod dynamic_index;
 mod free_sphere;
 mod grounded;
+#[cfg(test)]
+mod motion_update_retail_differential;
 mod physical_body;
+mod pose_reconciliation;
+#[cfg(test)]
+mod pose_reconciliation_retail_differential;
 mod scene;
 mod types;
 mod volume_query;
@@ -21,8 +26,14 @@ pub use child_body::{
     ChildSpatialBodyWaypoint,
 };
 pub use dead_reckoning::{
-    advance_authored_body_kinematics, advance_body_kinematics, gate_authored_offset,
-    project_pose_forward_distance,
+    advance_body_kinematics, gate_authored_offset, project_pose_forward_distance,
+};
+pub use pose_reconciliation::{
+    AuthoritativePoseEffect, AuthoritativePoseResetCause, PoseReconciliationComposition,
+    PoseReconciliationState, PoseTranslationSource, RETAIL_INTERPOLATION_NEAR_COMPLETE_DISTANCE_M,
+    RETAIL_INTERPOLATION_SNAP_DISTANCE_M, RETAIL_INTERPOLATION_TARGET_THRESHOLD_M,
+    RETAIL_MAX_INTERPOLATED_VELOCITY_MPS, damp_constraint_translation, retail_constraint_distances,
+    retail_interpolated_speed,
 };
 pub use scene::{
     DynamicBodyRelocationOutcome, DynamicEntityCollectionCoverageRejection,

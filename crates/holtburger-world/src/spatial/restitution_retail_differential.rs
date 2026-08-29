@@ -1,8 +1,8 @@
 //! Asset-free oracle for retail static-contact and sledding response.
 //!
 //! This reconstructs `CPhysicsObj::handle_all_collisions` (`acclient.c:309982-310068`) without
-//! borrowing current host collision behavior. It consumes the tangent motion produced by
-//! `CTransition::adjust_offset` and also reconstructs `calc_acceleration`, `calc_friction`, and
+//! borrowing current host collision behavior. It also reconstructs `calc_acceleration`,
+//! `calc_friction`, and
 //! velocity-facing (`acclient.c:300589-300730,304541-304619,306180-306209,310875-310897`). Phase 2
 //! compares production response to this oracle.
 
@@ -64,7 +64,6 @@ fn bounded_elasticity(elasticity: f32) -> f32 {
 /// Returns the velocity and support consequence after retail's static-contact response branches.
 fn collision_response(
     incoming: Vector3,
-    achieved_velocity: Vector3,
     response: RetailRestitution,
     collision: RetailCollision,
 ) -> RetailCollisionResponse {
@@ -76,8 +75,10 @@ fn collision_response(
     }
     let continuous_support = collision.previously_walkable && collision.support_normal.is_some();
     if continuous_support && !collision.sledding {
+        // Retail suppresses collision response by leaving `m_velocityVector` untouched here
+        // (`acclient.c:309982-310051`). Accepted tangent motion is a separate cached fact.
         return RetailCollisionResponse {
-            velocity: achieved_velocity,
+            velocity: incoming,
             separates_from_support: false,
         };
     }
@@ -192,7 +193,6 @@ fn default_elasticity_reflects_only_the_incoming_normal_component() {
     let incoming = Vector3::new(2.0, 3.0, -10.0);
     let result = collision_response(
         incoming,
-        incoming,
         RetailRestitution::Elastic(DEFAULT_ELASTICITY),
         unsupported_collision(Some(Vector3::new(0.0, 0.0, 1.0))),
     );
@@ -204,7 +204,6 @@ fn default_elasticity_reflects_only_the_incoming_normal_component() {
 fn maximum_elasticity_preserves_glancing_tangent() {
     let incoming = Vector3::new(-4.0, 3.0, 0.0);
     let result = collision_response(
-        incoming,
         incoming,
         RetailRestitution::Elastic(MAXIMUM_ELASTICITY),
         unsupported_collision(Some(Vector3::new(1.0, 0.0, 0.0))),
@@ -220,7 +219,6 @@ fn elasticity_is_bounded_and_zero_elasticity_is_not_inelastic() {
 
     let result = collision_response(
         Vector3::new(-4.0, 3.0, 0.0),
-        Vector3::new(-4.0, 3.0, 0.0),
         RetailRestitution::Elastic(0.0),
         unsupported_collision(Some(Vector3::new(1.0, 0.0, 0.0))),
     );
@@ -233,7 +231,6 @@ fn separating_and_normal_less_contacts_do_not_change_velocity() {
     assert_eq!(
         collision_response(
             separating,
-            separating,
             RetailRestitution::Elastic(DEFAULT_ELASTICITY),
             unsupported_collision(Some(Vector3::new(0.0, 0.0, 1.0))),
         )
@@ -244,7 +241,6 @@ fn separating_and_normal_less_contacts_do_not_change_velocity() {
     let incoming = Vector3::new(1.0, 2.0, -3.0);
     assert_eq!(
         collision_response(
-            incoming,
             incoming,
             RetailRestitution::Elastic(DEFAULT_ELASTICITY),
             unsupported_collision(None),
@@ -257,7 +253,6 @@ fn separating_and_normal_less_contacts_do_not_change_velocity() {
 #[test]
 fn continuous_walkable_support_suppresses_bounce_unless_sledding() {
     let incoming = Vector3::new(1.0, 0.0, -2.0);
-    let achieved = Vector3::new(0.8, 0.0, -0.2);
     let supported = RetailCollision {
         previously_walkable: true,
         support_normal: Some(Vector3::new(0.0, 0.0, 1.0)),
@@ -267,11 +262,10 @@ fn continuous_walkable_support_suppresses_bounce_unless_sledding() {
     };
     let stable = collision_response(
         incoming,
-        achieved,
         RetailRestitution::Elastic(DEFAULT_ELASTICITY),
         supported,
     );
-    assert_eq!(stable.velocity, achieved);
+    assert_eq!(stable.velocity, incoming);
     assert!(!stable.separates_from_support);
 
     let sledding = RetailCollision {
@@ -280,7 +274,6 @@ fn continuous_walkable_support_suppresses_bounce_unless_sledding() {
     };
     let result = collision_response(
         incoming,
-        achieved,
         RetailRestitution::Elastic(DEFAULT_ELASTICITY),
         sledding,
     );
@@ -293,7 +286,6 @@ fn inelastic_and_stationary_fall_stops_are_distinct_zero_velocity_paths() {
     let incoming = Vector3::new(2.0, 3.0, -4.0);
     assert_eq!(
         collision_response(
-            incoming,
             incoming,
             RetailRestitution::Inelastic,
             unsupported_collision(Some(Vector3::new(0.0, 0.0, 1.0))),
@@ -309,7 +301,6 @@ fn inelastic_and_stationary_fall_stops_are_distinct_zero_velocity_paths() {
     };
     assert_eq!(
         collision_response(
-            incoming,
             incoming,
             RetailRestitution::Elastic(DEFAULT_ELASTICITY),
             stationary_stop,
@@ -475,7 +466,6 @@ fn production_collision_response_matches_retail_oracle_matrix() {
         };
         let expected = collision_response(
             incoming,
-            incoming,
             oracle_restitution,
             RetailCollision {
                 previously_walkable: prior,
@@ -485,14 +475,12 @@ fn production_collision_response_matches_retail_oracle_matrix() {
                 stationary_fall_frames: stationary,
             },
         );
+        let continuous_stable_support = prior && current && motion == PhysicalSurfaceMotion::Stable;
         let actual = super::collision_response(super::CollisionResponseInput {
             incoming,
-            achieved_velocity: incoming,
             restitution: production_restitution,
-            collision_normal: Some(normal),
-            previously_walkable: prior,
-            current_support_normal: current.then_some(normal),
-            surface_motion: motion,
+            collision_normal: (!continuous_stable_support).then_some(normal),
+            current_support_normal: (!continuous_stable_support && current).then_some(normal),
             stationary_fall_frames: stationary,
         });
         assert_vector_close(actual.velocity, expected.velocity);
@@ -504,19 +492,17 @@ fn production_collision_response_matches_retail_oracle_matrix() {
 }
 
 #[test]
-fn production_stable_support_commits_achieved_slope_motion_without_takeoff() {
-    use super::{PhysicalElasticity, PhysicalRestitution, PhysicalSurfaceMotion};
+fn production_stable_support_retains_physical_motion_without_takeoff() {
+    use super::{PhysicalElasticity, PhysicalRestitution};
 
     let normal = Vector3::new(0.6, 0.0, 0.8);
     let cases = [
-        // Downhill horizontal drive points outward from the plane before the solver redirects it.
-        (Vector3::new(4.0, 0.0, 0.0), Vector3::new(2.56, 0.0, -1.92)),
-        // Uphill and cross-slope drive must use the same continuous-support policy.
-        (Vector3::new(-4.0, 0.0, 0.0), Vector3::new(-2.56, 0.0, 1.92)),
-        (Vector3::new(0.0, 4.0, 0.0), Vector3::new(0.0, 4.0, 0.0)),
+        Vector3::new(4.0, 0.0, 0.0),
+        Vector3::new(-4.0, 0.0, 0.0),
+        Vector3::new(0.0, 4.0, 0.0),
     ];
 
-    for (incoming, achieved) in cases {
+    for incoming in cases {
         let collision = RetailCollision {
             previously_walkable: true,
             support_normal: Some(normal),
@@ -526,18 +512,14 @@ fn production_stable_support_commits_achieved_slope_motion_without_takeoff() {
         };
         let expected = collision_response(
             incoming,
-            achieved,
             RetailRestitution::Elastic(DEFAULT_ELASTICITY),
             collision,
         );
         let actual = super::collision_response(super::CollisionResponseInput {
             incoming,
-            achieved_velocity: achieved,
             restitution: PhysicalRestitution::Elastic(PhysicalElasticity::DEFAULT),
-            collision_normal: collision.collision_normal,
-            previously_walkable: collision.previously_walkable,
-            current_support_normal: collision.support_normal,
-            surface_motion: PhysicalSurfaceMotion::Stable,
+            collision_normal: None,
+            current_support_normal: None,
             stationary_fall_frames: collision.stationary_fall_frames,
         });
 

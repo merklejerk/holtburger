@@ -1575,7 +1575,22 @@ mod tests {
                 direction: Vector3::new(3.0, 4.0, 0.0),
             })
             .unwrap();
-        assert_eq!(flame_launch.body.velocity, Vector3::new(9.0, 12.0, 0.0));
+        assert_eq!(
+            flame_launch.body.velocity,
+            Vector3::zero(),
+            "a vector replacement between ticks has no accepted path yet"
+        );
+        assert_eq!(
+            driver
+                .simulation
+                .physical_body_snapshot(holtburger_world::SpatialBodyId::Entity(
+                    flame.instance.definition.identity.guid
+                ))
+                .unwrap()
+                .retained
+                .velocity,
+            Vector3::new(9.0, 12.0, 0.0)
+        );
 
         let blade = driver
             .spawn_by_wcid(request(300, EntityPhysicalIntent::Simulated))

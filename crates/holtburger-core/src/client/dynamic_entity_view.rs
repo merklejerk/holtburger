@@ -190,7 +190,10 @@ impl ClientRuntime {
         after: Vec<crate::DynamicEntityView>,
         host_time: DynamicEntityHostTime,
         duration_ms: f64,
-        kind: DynamicEntityPlacementAdvanceKind,
+        placement_kind_overrides: &std::collections::HashMap<
+            Guid,
+            DynamicEntityPlacementAdvanceKind,
+        >,
     ) -> Option<DynamicEntityEvent> {
         let before_by_guid = before
             .into_iter()
@@ -242,7 +245,10 @@ impl ClientRuntime {
 
             advances.push(DynamicEntityAdvance {
                 entity: Box::new(entity),
-                kind,
+                kind: placement_kind_overrides
+                    .get(&previous.identity.guid)
+                    .copied()
+                    .unwrap_or(DynamicEntityPlacementAdvanceKind::Integrated),
                 path: DynamicEntityPlacedPath {
                     initial,
                     legs: vec![DynamicEntityPathLeg {
@@ -253,6 +259,15 @@ impl ClientRuntime {
             });
         }
 
+        let duration_ms = if !advances.is_empty()
+            && advances
+                .iter()
+                .all(|advance| advance.kind != DynamicEntityPlacementAdvanceKind::Integrated)
+        {
+            0.0
+        } else {
+            duration_ms
+        };
         DynamicEntityTickBatch::new(host_time, duration_ms, advances, updates)
             .map(|batch| DynamicEntityEvent::Ticked { batch })
     }
@@ -623,7 +638,7 @@ mod tests {
                 after,
                 DynamicEntityHostTime::new(12.5).expect("test host time is valid"),
                 30.0,
-                DynamicEntityPlacementAdvanceKind::Integrated,
+                &Default::default(),
             )
             .expect("changed world placement should produce one advance");
 
@@ -640,6 +655,106 @@ mod tests {
         assert_eq!(advance.path.initial.pose, start);
         assert_eq!(advance.path.legs[0].end_fraction, 1.0);
         assert_eq!(advance.path.legs[0].end.pose, end);
+    }
+
+    #[test]
+    fn near_remote_packet_changes_authority_without_changing_projected_placement() {
+        let player_guid = Guid(0x5000_0010);
+        let remote_guid = Guid(0x5000_0011);
+        let pose = |x| WorldPosition {
+            landblock_id: Guid(0xda55_0001),
+            coords: Vector3::new(x, 0.0, 0.0),
+            rotation: Quaternion::identity(),
+        };
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        client.world.player.guid = player_guid;
+        client
+            .world
+            .add_entity(projectable_entity(player_guid, pose(0.0)));
+        client
+            .world
+            .add_entity(projectable_entity(remote_guid, pose(8.0)));
+        let before = project_client_dynamic_entity(&client.world, remote_guid)
+            .expect("remote should project before packet");
+
+        let events = client.world.handle_message(
+            &holtburger_protocol::messages::GameMessage::UpdatePosition(Box::new(
+                holtburger_protocol::messages::UpdatePositionData {
+                    guid: remote_guid,
+                    pos: holtburger_protocol::messages::PositionPack {
+                        pos: pose(10.0),
+                        position_sequence: 1,
+                        flags: holtburger_protocol::messages::UpdatePositionFlag::HAS_CONTACT,
+                        ..Default::default()
+                    },
+                },
+            )),
+        );
+        assert!(!events.is_empty());
+        let after = project_client_dynamic_entity(&client.world, remote_guid)
+            .expect("remote should project after packet");
+        let (
+            DynamicEntityPlacementView::World {
+                pose: before_pose,
+                spatial_membership: before_membership,
+                ..
+            },
+            DynamicEntityPlacementView::World {
+                pose: after_pose,
+                spatial_membership: after_membership,
+                ..
+            },
+        ) = (&before.placement, &after.placement)
+        else {
+            panic!("remote fixture should stay world placed");
+        };
+        assert_eq!(before_pose, after_pose);
+        assert_eq!(before_membership, after_membership);
+        assert_eq!(
+            client.world.entities.get(remote_guid).unwrap().position,
+            pose(10.0)
+        );
+    }
+
+    #[test]
+    fn correction_only_tick_uses_zero_duration_and_distinct_kind() {
+        let guid = Guid(0x5000_0005);
+        let start = WorldPosition {
+            landblock_id: Guid(0xda55_0001),
+            coords: Vector3::new(1.0, 2.0, 3.0),
+            rotation: Quaternion::identity(),
+        };
+        let end = WorldPosition {
+            coords: Vector3::new(99.0, 2.0, 3.0),
+            ..start
+        };
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        client.world.player.guid = guid;
+        client.world.add_entity(projectable_entity(guid, start));
+        let before = client.current_dynamic_entity_views();
+        client.world.set_local_player_runtime_pose(end);
+        let kinds = std::collections::HashMap::from([(
+            guid,
+            DynamicEntityPlacementAdvanceKind::CorrectionSnap,
+        )]);
+
+        let event = client
+            .dynamic_entity_tick_event(
+                before,
+                client.current_dynamic_entity_views(),
+                DynamicEntityHostTime::new(12.75).expect("test host time is valid"),
+                30.0,
+                &kinds,
+            )
+            .expect("correction snap should produce one advance");
+        let DynamicEntityEvent::Ticked { batch } = event else {
+            panic!("expected a tick event");
+        };
+        assert_eq!(batch.duration_ms, 0.0);
+        assert_eq!(
+            batch.advances[0].kind,
+            DynamicEntityPlacementAdvanceKind::CorrectionSnap
+        );
     }
 
     #[test]
@@ -667,7 +782,7 @@ mod tests {
                 client.current_dynamic_entity_views(),
                 DynamicEntityHostTime::new(13.0).expect("test host time is valid"),
                 30.0,
-                DynamicEntityPlacementAdvanceKind::Integrated,
+                &Default::default(),
             )
             .expect("path-stable contact change should produce one update");
 
@@ -702,7 +817,7 @@ mod tests {
                     before,
                     DynamicEntityHostTime::new(14.0).expect("test host time is valid"),
                     30.0,
-                    DynamicEntityPlacementAdvanceKind::Integrated,
+                    &Default::default(),
                 )
                 .is_none()
         );

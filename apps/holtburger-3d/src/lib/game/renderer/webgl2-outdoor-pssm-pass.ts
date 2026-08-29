@@ -25,10 +25,16 @@ import {
 	type WebGL2PssmShadowTargetDiagnostics,
 	type WebGL2PssmShadowTargetSet,
 } from "./webgl2-pssm-shadow-targets";
+import type { RendererOutdoorShadowMapFrameMetrics } from "./renderer";
 import type {
 	WebGL2GeometryBinding,
 	WebGL2ResourceManager,
 } from "./webgl2-resource-manager";
+
+/** Caller-owned profiling sink; omitted entirely when renderer profiling is disabled. */
+export type WebGL2OutdoorPssmPassProfileMetrics = {
+	-readonly [Key in keyof RendererOutdoorShadowMapFrameMetrics]: number;
+};
 
 /** Per-view outdoor map state consumed immediately by eligible receiver programs. */
 export interface ActiveOutdoorPssmFrame {
@@ -117,7 +123,10 @@ export class WebGL2OutdoorPssmPass {
 	}
 
 	/** Build and submit every cascade, returning the state receivers may sample for this view. */
-	render(input: WebGL2OutdoorPssmPassInput): ActiveOutdoorPssmFrame | null {
+	render(
+		input: WebGL2OutdoorPssmPassInput,
+		profileMetrics: WebGL2OutdoorPssmPassProfileMetrics | null,
+	): ActiveOutdoorPssmFrame | null {
 		if (!hasOutdoorPssmLightAndInterval(input)) return null;
 		buildOutdoorPssmCascades(
 			{
@@ -143,6 +152,7 @@ export class WebGL2OutdoorPssmPass {
 		try {
 			for (const cascade of this.#cascades) {
 				this.#beginCascade(cascade.index, targets.resolution, input.settings);
+				if (profileMetrics) profileMetrics.cascadeQueryCount += 1;
 				collectOutdoorPssmCasters(
 					this.#world,
 					cascade.lightFrustum,
@@ -150,10 +160,20 @@ export class WebGL2OutdoorPssmPass {
 					input.selectedDynamicNodeIds,
 					this.#batch,
 				);
+				if (profileMetrics) {
+					profileMetrics.selectedCasterPartCount +=
+						this.#batch.instances.length;
+					profileMetrics.compatibleDepthRunCount += this.#batch.runs.length;
+				}
 				if (this.#drawCascade(cascade, input.anchorCoordinates)) {
-					instanceUploadCount += 1;
-					instanceUploadBytes +=
+					const uploadBytes =
 						this.#batch.instances.length * OBJECT_INSTANCE_RECORD_BYTES;
+					instanceUploadCount += 1;
+					instanceUploadBytes += uploadBytes;
+					if (profileMetrics) {
+						profileMetrics.instanceUploadCount += 1;
+						profileMetrics.instanceUploadBytes += uploadBytes;
+					}
 				}
 			}
 		} finally {

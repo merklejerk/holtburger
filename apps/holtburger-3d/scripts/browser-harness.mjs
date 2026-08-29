@@ -19,6 +19,8 @@ const DEFAULT_FOLLOW_FLIGHT_MS = 20_000;
 const DEFAULT_VIEWPORT_WIDTH = 1_280;
 const DEFAULT_VIEWPORT_HEIGHT = 720;
 const DEFAULT_DEVICE_SCALE_FACTOR = 1;
+/** Settle policy changes before each timed shadow benchmark window. */
+const ENTITY_SHADOW_BENCHMARK_WARMUP_MS = 500;
 /** Harness-local mirror of the browser policy contract, including capability admission. */
 const TEXTURE_FILTERING_OPTIONS = [
 	{ minimumAnisotropy: 1, policy: "nearest" },
@@ -92,6 +94,7 @@ try {
 						textureFiltering: options.textureFiltering,
 						filteringCycleStates: result.filteringCycleStates,
 						entityShadowCycleStates: result.entityShadowCycleStates,
+						entityShadowBenchmark: result.entityShadowBenchmark,
 						modeCycleStates: result.modeCycleStates,
 						portalExecution: result.portalExecution,
 						portalTransitionDemo: options.portalTransitionDemo,
@@ -242,6 +245,7 @@ function parseArgs(args) {
 		ambientOcclusionCoverage: false,
 		entityShadows: null,
 		entityShadowCycle: false,
+		entityShadowBenchmarkPairs: 0,
 		traceTerrainGl: false,
 		vitePort: null,
 		colorGrade: null,
@@ -697,6 +701,19 @@ function parseArgs(args) {
 			case "--entity-shadow-cycle":
 				parsed.entityShadowCycle = true;
 				break;
+			case "--entity-shadow-benchmark-pairs":
+				parsed.entityShadowBenchmarkPairs = Number(
+					requireValue(args, ++index, arg),
+				);
+				if (
+					!Number.isInteger(parsed.entityShadowBenchmarkPairs) ||
+					parsed.entityShadowBenchmarkPairs <= 0
+				) {
+					throw new Error(
+						"--entity-shadow-benchmark-pairs must be a positive integer.",
+					);
+				}
+				break;
 			case "--vite-port":
 				parsed.vitePort = parseVitePort(requireValue(args, ++index, arg), arg);
 				break;
@@ -1021,6 +1038,16 @@ function parseArgs(args) {
 	if (parsed.entityPairWcid !== null && parsed.entityTicks === 0) {
 		throw new Error("--entity-pair-wcid requires --entity-ticks.");
 	}
+	if (parsed.entityShadowBenchmarkPairs > 0) {
+		if (!parsed.gpu) {
+			throw new Error("--entity-shadow-benchmark-pairs requires --gpu.");
+		}
+		if (parsed.measureMs <= 0) {
+			throw new Error(
+				"--entity-shadow-benchmark-pairs requires a positive --measure-ms.",
+			);
+		}
+	}
 	return parsed;
 }
 
@@ -1171,6 +1198,10 @@ Options:
                          Replace the complete entity-shadow policy. Copy frameSettings.entityShadows
                          from harness output, then edit values for a reproducible capture.
   --entity-shadow-cycle Exercise none, simple, shadow-maps, and target resize without reloading.
+  --entity-shadow-benchmark-pairs <n>
+                         Measure alternating none/shadow-maps windows in one settled session.
+                         Requires --gpu and positive --measure-ms; add --profile-renderer for
+                         attributed CPU/GPU samples or omit it to measure profiler overhead.
   --mode-cycle           Exercise portal, flat, portal, flat frames without reloading content.
   --filtering-cycle      Change filtering during loading, then cycle supported modes without reload.
   --gpu                  Render on the real GPU adapter instead of SwiftShader. Required for
@@ -1481,6 +1512,7 @@ function briefHarnessReport(result) {
 			mode: state.frameSettings.entityShadows.mode,
 			resources: state.entityShadowResources,
 		})),
+		entityShadowBenchmark: result.entityShadowBenchmark,
 		filteringCycle: result.filteringCycleStates.map(
 			({ frameSettings }) => frameSettings.quality.textureFiltering,
 		),
@@ -4029,6 +4061,14 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				[true],
 			);
 		}
+		const entityShadowBenchmark =
+			options.entityShadowBenchmarkPairs > 0
+				? await runEntityShadowBenchmark(
+						client,
+						options.entityShadowBenchmarkPairs,
+						options.measureMs,
+					)
+				: null;
 		if (options.traceTerrainGl) {
 			await evaluate(
 				client,
@@ -4126,6 +4166,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			cpuProfile,
 			ambientOcclusionCycleStates,
 			entityShadowCycleStates,
+			entityShadowBenchmark,
 			audioFlyby,
 			cameraSweepScreenshots,
 			map: mapEvidence,
@@ -4168,6 +4209,82 @@ function supportedTextureFilteringPolicies(maximumAnisotropy) {
 	return TEXTURE_FILTERING_OPTIONS.filter(
 		({ minimumAnisotropy }) => minimumAnisotropy <= maximumAnisotropy,
 	).map(({ policy }) => policy);
+}
+
+/**
+ * Preserve only the evidence needed to compare paired shadow windows.
+ *
+ * Keeping this diagnostic compact matters because a complete harness state contains the authored
+ * resident census and static layer payloads, which obscure timing results without strengthening
+ * the workload proof.
+ */
+function entityShadowBenchmarkSample(state, pairIndex, orderIndex, mode) {
+	return {
+		pairIndex,
+		orderIndex,
+		mode,
+		timing: state.timing,
+		frameProfile: state.frameProfile,
+		tickProfile: state.tickProfile,
+		effectiveSettings: state.frameSettings.entityShadows,
+		resources: state.entityShadowResources,
+		outdoorPssm: state.outdoorPssm,
+		selectionMetrics: state.metrics,
+		workload: {
+			authoredDynamicResidentCount:
+				state.authoredDynamics?.residents.length ?? null,
+			spawnedEntityCount: state.spawnedEntities?.length ?? null,
+			staticObjectNodeCount: state.staticObjects?.staticObjectNodeCount ?? null,
+			geometryResourceCount: state.staticObjects?.geometryResourceCount ?? null,
+		},
+	};
+}
+
+/** Measure paired policies inside one settled browser session, reversing order every pair. */
+async function runEntityShadowBenchmark(client, pairCount, measureMs) {
+	const samples = [];
+	for (let pairIndex = 0; pairIndex < pairCount; pairIndex += 1) {
+		const modes =
+			pairIndex % 2 === 0 ? ["none", "shadow-maps"] : ["shadow-maps", "none"];
+		for (let orderIndex = 0; orderIndex < modes.length; orderIndex += 1) {
+			const mode = modes[orderIndex];
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setEntityShadowMode",
+				[mode],
+			);
+			await delay(ENTITY_SHADOW_BENCHMARK_WARMUP_MS);
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.resetTiming",
+				[],
+			);
+			await delay(measureMs);
+			const state = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
+				[],
+			);
+			samples.push(
+				entityShadowBenchmarkSample(state, pairIndex, orderIndex, mode),
+			);
+		}
+	}
+
+	// The existing final measurement window owns native CPU profiling. Leave it in the policy whose
+	// cost is under investigation so --cpu-profile produces directly relevant evidence.
+	await evaluate(
+		client,
+		"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setEntityShadowMode",
+		["shadow-maps"],
+	);
+	await delay(ENTITY_SHADOW_BENCHMARK_WARMUP_MS);
+	return {
+		measureMs,
+		pairCount,
+		warmupMs: ENTITY_SHADOW_BENCHMARK_WARMUP_MS,
+		samples,
+	};
 }
 
 function startChild(command, args) {

@@ -26,7 +26,7 @@ describe("WebGL2OutdoorPssmPass", () => {
 		const fixture = createFixture();
 		const input = createInput(Vec3.zero());
 
-		expect(fixture.pass.render(input)).toBeNull();
+		expect(fixture.pass.render(input, null)).toBeNull();
 
 		expect(fixture.state.targetResizes).toBe(0);
 		expect(fixture.state.queries).toBe(0);
@@ -37,8 +37,15 @@ describe("WebGL2OutdoorPssmPass", () => {
 	it("clears and submits every cascade with one lazy material-free program", () => {
 		const fixture = createFixture(true);
 		const input = createInput(new Vec3(0.2, 1, -0.3));
+		const profileMetrics = {
+			cascadeQueryCount: 0,
+			compatibleDepthRunCount: 0,
+			instanceUploadBytes: 0,
+			instanceUploadCount: 0,
+			selectedCasterPartCount: 0,
+		};
 
-		const active = fixture.pass.render(input);
+		const active = fixture.pass.render(input, profileMetrics);
 
 		expect(active?.cascades).toHaveLength(2);
 		expect(active?.instanceUploads).toEqual({ bytes: 160, count: 2 });
@@ -48,6 +55,13 @@ describe("WebGL2OutdoorPssmPass", () => {
 		expect(fixture.state.queries).toBe(2);
 		expect(fixture.state.programCreations).toBe(1);
 		expect(fixture.state.preparedInstanceCounts).toEqual([1, 1]);
+		expect(profileMetrics).toEqual({
+			cascadeQueryCount: 2,
+			compatibleDepthRunCount: 2,
+			instanceUploadBytes: 160,
+			instanceUploadCount: 2,
+			selectedCasterPartCount: 2,
+		});
 		expect(fixture.state.draws).toEqual([
 			{ count: 6, instanceCount: 1, offset: 0 },
 			{ count: 6, instanceCount: 1, offset: 0 },
@@ -66,7 +80,8 @@ describe("WebGL2OutdoorPssmPass", () => {
 		const fixture = createFixture(false);
 
 		expect(
-			fixture.pass.render(createInput(new Vec3(0, 1, 0)))?.instanceUploads,
+			fixture.pass.render(createInput(new Vec3(0, 1, 0)), null)
+				?.instanceUploads,
 		).toEqual({ bytes: 0, count: 0 });
 
 		expect(fixture.state.attachedLayers).toEqual([0, 1]);
@@ -77,7 +92,7 @@ describe("WebGL2OutdoorPssmPass", () => {
 
 	it("forwards master disable and destroys a compiled program once", () => {
 		const fixture = createFixture(true);
-		fixture.pass.render(createInput(new Vec3(0, 1, 0)));
+		fixture.pass.render(createInput(new Vec3(0, 1, 0)), null);
 
 		fixture.pass.disable();
 		fixture.pass.destroy();

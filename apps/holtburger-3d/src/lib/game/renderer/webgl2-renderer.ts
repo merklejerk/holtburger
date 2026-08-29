@@ -93,6 +93,7 @@ import { FrameInstanceStreamArena } from "./frame-instance-stream-arena";
 import {
 	WebGL2OutdoorPssmPass,
 	type ActiveOutdoorPssmFrame,
+	type WebGL2OutdoorPssmPassProfileMetrics,
 } from "./webgl2-outdoor-pssm-pass";
 import { terrainLandblockIntersectsShadowDistance } from "./outdoor-pssm";
 import {
@@ -335,6 +336,17 @@ const PROBE_SHADING: SceneShading = {
 /** Ranking position used before any view has been committed. */
 const ORIGIN = sceneVec3(Vec3.zero());
 const EMPTY_LIGHTS: readonly RuntimeLight[] = [];
+
+/** Allocate explanatory shadow counters only for an explicitly profiled frame. */
+function createEmptyOutdoorShadowMapProfileMetrics(): WebGL2OutdoorPssmPassProfileMetrics {
+	return {
+		cascadeQueryCount: 0,
+		compatibleDepthRunCount: 0,
+		instanceUploadBytes: 0,
+		instanceUploadCount: 0,
+		selectedCasterPartCount: 0,
+	};
+}
 /** Synthetic single render domain used by the deliberately unpartitioned flat debug mode. */
 const FLAT_PARTICLE_DOMAIN = "particle-render-domain:flat";
 const FLAT_SKY_PARTICLE_DOMAIN = "particle-render-domain:flat-sky";
@@ -1222,7 +1234,7 @@ export class WebGL2Renderer implements Renderer {
 				if (profile && preparationStartedAt !== undefined) {
 					profile.finishCpuPhase("viewPreparation", preparationStartedAt);
 				}
-				this.#renderOutdoorPssm(geometry, entityShadows, shading);
+				this.#renderOutdoorPssm(geometry, entityShadows, shading, profile);
 				const contributions = this.#collectScene(
 					geometry,
 					input.frameSettings,
@@ -1311,7 +1323,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#accumulatePortalScopeAtlasMetrics(frame);
 		this.#activeOutdoorPssmFrame = null;
 		if (frame.atlas.visibility.selectedScopeOrdinal("outdoor") !== null) {
-			this.#renderOutdoorPssm(prepared, entityShadows, shading);
+			this.#renderOutdoorPssm(prepared, entityShadows, shading, profile);
 		}
 		this.#executePortalScopeAtlasFrame(
 			prepared,
@@ -1630,25 +1642,44 @@ export class WebGL2Renderer implements Renderer {
 		prepared: PreparedViewGeometry,
 		entityShadows: EntityShadowSettings,
 		shading: SceneShading,
+		profile: WebGL2FrameProfileCapture | null,
 	): void {
 		if (entityShadows.mode !== "shadow-maps") return;
-		this.#activeOutdoorPssmFrame = this.#outdoorPssmPass.render({
-			anchorCoordinates: prepared.anchorCoordinates,
-			anchorLandblockId: prepared.anchorLandblockId,
-			aspectRatio: this.#frameWidth / Math.max(1, this.#frameHeight),
-			camera: {
-				far: prepared.camera.far,
-				near: prepared.camera.near,
-				position: prepared.cameraPosition,
-				rotation: prepared.camera.placement.rotation,
-				verticalFovDegrees: prepared.camera.fov,
-			},
-			frameHeight: this.#frameHeight,
-			frameWidth: this.#frameWidth,
-			selectedDynamicNodeIds: this.#selectedDynamicNodeIds,
-			settings: entityShadows.pssm,
-			sunVector: shading.lighting.terrain.sunVector,
-		});
+		const profileMetrics: WebGL2OutdoorPssmPassProfileMetrics | null = profile
+			? createEmptyOutdoorShadowMapProfileMetrics()
+			: null;
+		const cpuStartedAt = profile?.beginCpuPhase();
+		const gpuPhase = profile ? profile.beginGpuPhase("outdoorShadowMap") : null;
+		try {
+			this.#activeOutdoorPssmFrame = this.#outdoorPssmPass.render(
+				{
+					anchorCoordinates: prepared.anchorCoordinates,
+					anchorLandblockId: prepared.anchorLandblockId,
+					aspectRatio: this.#frameWidth / Math.max(1, this.#frameHeight),
+					camera: {
+						far: prepared.camera.far,
+						near: prepared.camera.near,
+						position: prepared.cameraPosition,
+						rotation: prepared.camera.placement.rotation,
+						verticalFovDegrees: prepared.camera.fov,
+					},
+					frameHeight: this.#frameHeight,
+					frameWidth: this.#frameWidth,
+					selectedDynamicNodeIds: this.#selectedDynamicNodeIds,
+					settings: entityShadows.pssm,
+					sunVector: shading.lighting.terrain.sunVector,
+				},
+				profileMetrics,
+			);
+		} finally {
+			gpuPhase?.finish();
+			if (profile && cpuStartedAt !== undefined) {
+				profile.finishCpuPhase("outdoorShadowMap", cpuStartedAt);
+			}
+		}
+		if (profile && profileMetrics) {
+			profile.recordOutdoorShadowMap(profileMetrics);
+		}
 		if (this.#activeOutdoorPssmFrame) {
 			this.#frameSelectionMetrics.frameInstanceUploadCount +=
 				this.#activeOutdoorPssmFrame.instanceUploads.count;

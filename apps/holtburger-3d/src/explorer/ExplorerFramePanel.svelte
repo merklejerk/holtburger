@@ -201,7 +201,17 @@
 							<span class="ac-param-key">Particle submit</span>
 							<code>{profile.cpu.mean.particleSubmissionMs.toFixed(2)} ms</code>
 						</div>
+						<div class="ac-param-row">
+							<span class="ac-param-key">Outdoor shadow maps</span>
+							<code
+								>{profile.cpu.mean.outdoorShadowMapMs.toFixed(2)} ms CPU</code
+							>
+						</div>
 						{#if profile.gpu.kind === "available"}
+							<div class="ac-param-row">
+								<span class="ac-param-key">GPU outdoor shadow maps</span>
+								<code>{profile.gpu.outdoorShadowMapMs.toFixed(2)} ms</code>
+							</div>
 							<div class="ac-param-row">
 								<span class="ac-param-key">GPU ambient occlusion</span>
 								<code>{profile.gpu.ambientOcclusionMs.toFixed(2)} ms</code>
@@ -261,6 +271,33 @@
 								>{profile.cpu.mean.blendedOrderingMs.toFixed(2)} / {profile.cpu.mean.otherMs.toFixed(
 									2,
 								)} ms</code
+							>
+						</div>
+					</div>
+				</details>
+				<details class="explorer-frame-details">
+					<summary>Outdoor shadow work</summary>
+					<div class="ac-param-panel">
+						<div class="ac-param-row">
+							<span class="ac-param-key">Cascade queries / parts / runs</span>
+							<code
+								>{profile.cpu.outdoorShadowMap.mean.cascadeQueryCount.toFixed(
+									1,
+								)} / {profile.cpu.outdoorShadowMap.mean.selectedCasterPartCount.toFixed(
+									1,
+								)} / {profile.cpu.outdoorShadowMap.mean.compatibleDepthRunCount.toFixed(
+									1,
+								)}</code
+							>
+						</div>
+						<div class="ac-param-row">
+							<span class="ac-param-key">Uploads / bytes</span>
+							<code
+								>{profile.cpu.outdoorShadowMap.mean.instanceUploadCount.toFixed(
+									1,
+								)} / {profile.cpu.outdoorShadowMap.mean.instanceUploadBytes.toFixed(
+									0,
+								)}</code
 							>
 						</div>
 					</div>

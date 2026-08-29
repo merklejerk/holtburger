@@ -6,6 +6,7 @@ import type {
 	RendererFrameProfile,
 	RendererGpuFrameProfile,
 	RendererGpuFrameTimings,
+	RendererOutdoorShadowMapFrameMetrics,
 } from "./renderer";
 import { FRONTEND_TUNING } from "../../frontend-tuning";
 
@@ -15,6 +16,7 @@ export type WebGL2GpuFramePhase =
 	| "sky"
 	| "nearTerrain"
 	| "farTerrain"
+	| "outdoorShadowMap"
 	| "opaque"
 	| "blended"
 	| "particle"
@@ -30,6 +32,7 @@ export type WebGL2CpuFramePhase =
 	| "blendedOrdering"
 	| "instanceRunPreparation"
 	| "instanceUpload"
+	| "outdoorShadowMap"
 	| "portalPlanning"
 	| "terrainSubmission"
 	| "opaqueSubmission"
@@ -70,6 +73,7 @@ const CPU_TIMING_KEYS = [
 	"instanceRunPreparationMs",
 	"instanceUploadMs",
 	"opaqueSubmissionMs",
+	"outdoorShadowMapMs",
 	"otherMs",
 	"particleSubmissionMs",
 	"portalCompositionMs",
@@ -87,6 +91,14 @@ const CONTRIBUTION_METRIC_KEYS = [
 	"staticObjectPreparationCount",
 ] as const satisfies readonly (keyof RendererContributionFrameMetrics)[];
 
+const OUTDOOR_SHADOW_MAP_METRIC_KEYS = [
+	"cascadeQueryCount",
+	"compatibleDepthRunCount",
+	"instanceUploadBytes",
+	"instanceUploadCount",
+	"selectedCasterPartCount",
+] as const satisfies readonly (keyof RendererOutdoorShadowMapFrameMetrics)[];
+
 type MutableContributionFrameMetrics = {
 	-readonly [Key in keyof RendererContributionFrameMetrics]: number;
 };
@@ -95,6 +107,20 @@ function createEmptyContributionMetrics(): MutableContributionFrameMetrics {
 	return {
 		dynamicObjectPreparationCount: 0,
 		staticObjectPreparationCount: 0,
+	};
+}
+
+type MutableOutdoorShadowMapFrameMetrics = {
+	-readonly [Key in keyof RendererOutdoorShadowMapFrameMetrics]: number;
+};
+
+function createEmptyOutdoorShadowMapMetrics(): MutableOutdoorShadowMapFrameMetrics {
+	return {
+		cascadeQueryCount: 0,
+		compatibleDepthRunCount: 0,
+		instanceUploadBytes: 0,
+		instanceUploadCount: 0,
+		selectedCasterPartCount: 0,
 	};
 }
 
@@ -190,6 +216,7 @@ function emptyGpuTimings(): MutableGpuTimings {
 		farTerrainMs: 0,
 		nearTerrainMs: 0,
 		opaqueMs: 0,
+		outdoorShadowMapMs: 0,
 		particleMs: 0,
 		portalCompositionMs: 0,
 		presentationMs: 0,
@@ -371,6 +398,7 @@ export class WebGL2GpuFrameProfiler {
 		let nearTerrainMs = 0;
 		let farTerrainMs = 0;
 		let opaqueMs = 0;
+		let outdoorShadowMapMs = 0;
 		let blendedMs = 0;
 		let particleMs = 0;
 		let presentationMs = 0;
@@ -393,6 +421,9 @@ export class WebGL2GpuFrameProfiler {
 				case "opaque":
 					opaqueMs += durationMs;
 					break;
+				case "outdoorShadowMap":
+					outdoorShadowMapMs += durationMs;
+					break;
 				case "blended":
 					blendedMs += durationMs;
 					break;
@@ -412,6 +443,7 @@ export class WebGL2GpuFrameProfiler {
 			blendedMs,
 			farTerrainMs,
 			opaqueMs,
+			outdoorShadowMapMs,
 			particleMs,
 			presentationMs,
 			portalCompositionMs,
@@ -425,6 +457,7 @@ export class WebGL2GpuFrameProfiler {
 				ambientOcclusionMs +
 				skyMs +
 				terrainMs +
+				outdoorShadowMapMs +
 				opaqueMs +
 				blendedMs +
 				particleMs +
@@ -463,6 +496,7 @@ export class WebGL2FrameProfileCapture {
 		instanceRunPreparationMs: 0,
 		instanceUploadMs: 0,
 		opaqueSubmissionMs: 0,
+		outdoorShadowMapMs: 0,
 		portalPlanningMs: 0,
 		portalCompositionMs: 0,
 		sceneQueryMs: 0,
@@ -472,6 +506,7 @@ export class WebGL2FrameProfileCapture {
 		viewPreparationMs: 0,
 	};
 	readonly #contribution = createEmptyContributionMetrics();
+	readonly #outdoorShadowMap = createEmptyOutdoorShadowMapMetrics();
 	#finished = false;
 
 	constructor(
@@ -512,6 +547,13 @@ export class WebGL2FrameProfileCapture {
 		this.#contribution.dynamicObjectPreparationCount += dynamicCount;
 	}
 
+	/** Accumulate one view's shadow-map work after its pass completes. */
+	recordOutdoorShadowMap(metrics: RendererOutdoorShadowMapFrameMetrics): void {
+		for (const key of OUTDOOR_SHADOW_MAP_METRIC_KEYS) {
+			this.#outdoorShadowMap[key] += metrics[key];
+		}
+	}
+
 	/** Begin one GPU phase interval when timestamp queries are supported and admitted. */
 	beginGpuPhase(phase: WebGL2GpuFramePhase): WebGL2GpuFramePhaseCapture | null {
 		return this.#gpu?.beginPhase(phase) ?? null;
@@ -532,6 +574,7 @@ export class WebGL2FrameProfileCapture {
 			this.#cpu.blendedOrderingMs +
 			this.#cpu.instanceRunPreparationMs +
 			this.#cpu.instanceUploadMs +
+			this.#cpu.outdoorShadowMapMs +
 			this.#cpu.portalPlanningMs +
 			this.#cpu.portalCompositionMs +
 			this.#cpu.terrainSubmissionMs +
@@ -543,6 +586,7 @@ export class WebGL2FrameProfileCapture {
 			...this.#cpu,
 			contribution: { ...this.#contribution },
 			frameNumber: this.#frameNumber,
+			outdoorShadowMap: { ...this.#outdoorShadowMap },
 			otherMs: Math.max(0, totalMs - namedMs),
 			totalMs,
 		});
@@ -617,6 +661,9 @@ export class WebGL2FrameProfiler {
 		for (const key of CONTRIBUTION_METRIC_KEYS) {
 			aggregate.contributionTotals[key] += cpu.contribution[key];
 		}
+		for (const key of OUTDOOR_SHADOW_MAP_METRIC_KEYS) {
+			aggregate.outdoorShadowMapTotals[key] += cpu.outdoorShadowMap[key];
+		}
 		aggregate.sampleCount += 1;
 		aggregate.latest = cpu;
 		this.#recentCpuFrames.push(cpu);
@@ -633,6 +680,7 @@ export class WebGL2FrameProfiler {
 interface CpuFrameAggregate {
 	readonly totals: Record<keyof RendererCpuFrameTimings, number>;
 	readonly contributionTotals: MutableContributionFrameMetrics;
+	readonly outdoorShadowMapTotals: MutableOutdoorShadowMapFrameMetrics;
 	sampleCount: number;
 	latest: RendererCpuFrameProfile | null;
 }
@@ -641,6 +689,7 @@ function createEmptyCpuAggregate(): CpuFrameAggregate {
 	return {
 		contributionTotals: createEmptyContributionMetrics(),
 		latest: null,
+		outdoorShadowMapTotals: createEmptyOutdoorShadowMapMetrics(),
 		sampleCount: 0,
 		totals: createEmptyCpuTimings(),
 	};
@@ -664,6 +713,7 @@ function createEmptyCpuTimings(): Record<
 		instanceRunPreparationMs: 0,
 		instanceUploadMs: 0,
 		opaqueSubmissionMs: 0,
+		outdoorShadowMapMs: 0,
 		otherMs: 0,
 		particleSubmissionMs: 0,
 		portalCompositionMs: 0,
@@ -707,6 +757,13 @@ function summarizeCpuAggregate(
 		},
 		latestFrameNumber: latest.frameNumber,
 		latestTotalMs: latest.totalMs,
+		outdoorShadowMap: {
+			latest: latest.outdoorShadowMap,
+			mean: averageOutdoorShadowMapMetrics(
+				aggregate.outdoorShadowMapTotals,
+				sampleCount,
+			),
+		},
 		mean,
 		p95RecentTotalMs,
 		sampleCount,
@@ -722,5 +779,18 @@ function averageContributionMetrics(
 			totals.dynamicObjectPreparationCount / sampleCount,
 		staticObjectPreparationCount:
 			totals.staticObjectPreparationCount / sampleCount,
+	};
+}
+
+function averageOutdoorShadowMapMetrics(
+	totals: RendererOutdoorShadowMapFrameMetrics,
+	sampleCount: number,
+): RendererOutdoorShadowMapFrameMetrics {
+	return {
+		cascadeQueryCount: totals.cascadeQueryCount / sampleCount,
+		compatibleDepthRunCount: totals.compatibleDepthRunCount / sampleCount,
+		instanceUploadBytes: totals.instanceUploadBytes / sampleCount,
+		instanceUploadCount: totals.instanceUploadCount / sampleCount,
+		selectedCasterPartCount: totals.selectedCasterPartCount / sampleCount,
 	};
 }

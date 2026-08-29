@@ -40,6 +40,16 @@ use crate::physical_body_definition::{
     SetupPhysicalShapeError, resolve_setup_physical_spheres, retail_grounded_body_with_policy,
 };
 
+/// Narrow producer-resolved category consumed by frontend presentation policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DynamicEntityCategory {
+    Player,
+    Npc,
+    Mob,
+    Other,
+}
+
 /// Stable game identity owned by either a client or Explorer registry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DynamicEntityIdentity {
@@ -163,24 +173,17 @@ pub fn semantic_radar_blip_color(
     flags: ObjectDescriptionFlag,
     item_type: Option<ItemType>,
 ) -> RadarColor {
-    if flags.contains(ObjectDescriptionFlag::PLAYER) {
-        return RadarColor::Yellow;
-    }
-
-    if item_type.is_some_and(|value| value.contains(ItemType::CREATURE)) {
-        return if flags.contains(ObjectDescriptionFlag::ATTACKABLE) {
-            RadarColor::Red
-        } else {
-            RadarColor::BrightGreen
-        };
+    match semantic_dynamic_entity_category(flags, item_type) {
+        DynamicEntityCategory::Player => return RadarColor::Yellow,
+        DynamicEntityCategory::Npc => return RadarColor::BrightGreen,
+        DynamicEntityCategory::Mob => return RadarColor::Red,
+        DynamicEntityCategory::Other => {}
     }
 
     if flags.contains(ObjectDescriptionFlag::PORTAL)
         || item_type.is_some_and(|value| value.contains(ItemType::PORTAL))
     {
         RadarColor::Purple
-    } else if flags.contains(ObjectDescriptionFlag::VENDOR) {
-        RadarColor::BrightGreen
     } else if flags
         .intersects(ObjectDescriptionFlag::LIFE_STONE | ObjectDescriptionFlag::BIND_STONE)
         || item_type.is_some_and(|value| value.contains(ItemType::LIFE_STONE))
@@ -199,27 +202,78 @@ pub fn semantic_radar_blip_color(
     }
 }
 
+/// Classifies live entity facts once for frontend presentation policy.
+///
+/// This is the color-independent semantic decision already consumed by radar fallback coloring.
+/// Vendors are friendly NPCs; their attackable flag does not promote them to mobs.
+pub fn semantic_dynamic_entity_category(
+    flags: ObjectDescriptionFlag,
+    item_type: Option<ItemType>,
+) -> DynamicEntityCategory {
+    if flags.contains(ObjectDescriptionFlag::PLAYER) {
+        return DynamicEntityCategory::Player;
+    }
+    if flags.contains(ObjectDescriptionFlag::VENDOR) {
+        return DynamicEntityCategory::Npc;
+    }
+    if item_type.is_some_and(|value| value.contains(ItemType::CREATURE)) {
+        return if flags.contains(ObjectDescriptionFlag::ATTACKABLE) {
+            DynamicEntityCategory::Mob
+        } else {
+            DynamicEntityCategory::Npc
+        };
+    }
+    DynamicEntityCategory::Other
+}
+
+/// Classifies the equivalent static facts available to Explorer.
+///
+/// ACE defaults an absent `Attackable` property to true. Admin and Sentinel templates retain the
+/// minimap's established friendly classification rather than inheriting that generic default.
+pub fn explorer_dynamic_entity_category(
+    weenie_type: WeenieType,
+    item_type: Option<ItemType>,
+    attackable: Option<bool>,
+) -> DynamicEntityCategory {
+    if weenie_type == WeenieType::Vendor {
+        return DynamicEntityCategory::Npc;
+    }
+    if matches!(weenie_type, WeenieType::Admin | WeenieType::Sentinel) {
+        return DynamicEntityCategory::Npc;
+    }
+    let is_creature = matches!(
+        weenie_type,
+        WeenieType::Creature
+            | WeenieType::Cow
+            | WeenieType::AI
+            | WeenieType::Pet
+            | WeenieType::CombatPet
+    ) || item_type.is_some_and(|value| value.contains(ItemType::CREATURE));
+    if !is_creature {
+        return DynamicEntityCategory::Other;
+    }
+    if attackable.unwrap_or(true) {
+        DynamicEntityCategory::Mob
+    } else {
+        DynamicEntityCategory::Npc
+    }
+}
+
 /// Selects the same semantic fallback from the static facts available to Explorer.
 pub fn explorer_radar_blip_color(
     weenie_type: WeenieType,
     item_type: Option<ItemType>,
     attackable: Option<bool>,
 ) -> RadarColor {
+    match explorer_dynamic_entity_category(weenie_type, item_type, attackable) {
+        DynamicEntityCategory::Player => return RadarColor::Yellow,
+        DynamicEntityCategory::Npc => return RadarColor::BrightGreen,
+        DynamicEntityCategory::Mob => return RadarColor::Red,
+        DynamicEntityCategory::Other => {}
+    }
+
     match weenie_type {
         WeenieType::Portal | WeenieType::HousePortal => RadarColor::Purple,
-        WeenieType::Vendor => RadarColor::BrightGreen,
-        WeenieType::Creature
-        | WeenieType::Cow
-        | WeenieType::AI
-        | WeenieType::Pet
-        | WeenieType::CombatPet => {
-            if attackable.unwrap_or(true) {
-                RadarColor::Red
-            } else {
-                RadarColor::BrightGreen
-            }
-        }
-        WeenieType::Admin | WeenieType::Sentinel => RadarColor::BrightGreen,
         WeenieType::LifeStone | WeenieType::AllegianceBindstone => RadarColor::Blue,
         WeenieType::ManaStone => RadarColor::Cyan,
         WeenieType::Door => RadarColor::White,

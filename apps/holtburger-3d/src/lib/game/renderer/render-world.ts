@@ -1,9 +1,10 @@
-import type { LandblockOwnerId } from "../game-types";
+import type { EnvCellId, LandblockOwnerId } from "../game-types";
 import type { GeometryKey } from "../geometry/types";
 import type { Frustum } from "../math/frustum";
 import type {
 	ResolvedScenePlacement,
 	ResolvedSceneBounds,
+	SceneSpatialMembership,
 	SceneNodeId,
 	SceneScope,
 	SceneScopeSelection,
@@ -38,6 +39,7 @@ import type {
 import type { StaticDetailRole } from "../resolution/static-detail-role";
 import { LandblockLayerKind } from "../runtime/scene-interest";
 import { scopeKey } from "../scene/scope";
+import type { DynamicEntityCategory } from "../dynamic-entity-category";
 
 /** Private read-only query ports captured by one RenderWorld. */
 interface RenderWorldSystems {
@@ -52,7 +54,11 @@ interface RenderWorldSystems {
 		getResolvedPlacement(
 			nodeId: SceneNodeId,
 		): ResolvedScenePlacement | undefined;
+		getResolvedSpatialMembership(
+			nodeId: SceneNodeId,
+		): SceneSpatialMembership | undefined;
 		getPortalTopologyView(): SceneTopologyView;
+		queryEnvCellBounds(envCellId: EnvCellId): AABB3 | null;
 		queryScopesFrustum(
 			frustum: Frustum,
 			anchorLandblockId: LandblockOwnerId,
@@ -78,7 +84,10 @@ interface RenderWorldSystems {
 		getRenderable(nodeId: SceneNodeId): StaticObjectRenderable | null;
 	};
 	readonly dynamics: {
+		getPresentationCategory(nodeId: SceneNodeId): DynamicEntityCategory | null;
+		getPresentationIdentity(nodeId: SceneNodeId): string | null;
 		getPublishedPresentationBounds(nodeId: SceneNodeId): AABB3 | null;
+		getPublishedRigidPresentationBounds(nodeId: SceneNodeId): AABB3 | null;
 		getVisibleContributions(
 			nodeId: SceneNodeId,
 		): readonly VisibleRigidPartContribution[] | null;
@@ -136,6 +145,7 @@ export type RenderContribution =
 			readonly renderable: StaticObjectRenderable;
 	  }
 	| {
+			readonly category: DynamicEntityCategory;
 			readonly kind: "dynamic";
 			readonly footprint: Extract<
 				ObjectPresentationFootprint,
@@ -159,6 +169,20 @@ export interface ResolvedStaticObjectNode {
 		readonly template: FrameStreamedObjectInstanceTemplate;
 		readonly geometry: GeometryResourceKey;
 	}[];
+}
+
+/** Dynamic facts read only when analytic grounding is active for a visibly drawn entity. */
+export interface EntityGroundingDynamicFacts {
+	readonly identity: string;
+	/** Exact current rigid-pose bounds before particle-envelope expansion. */
+	readonly rigidBounds: AABB3;
+	readonly spatialMembership: SceneSpatialMembership;
+}
+
+/** EnvCell facts read only when indoor grounding is active for a visible shell. */
+export interface IndoorGroundingEnvCellFacts {
+	readonly bounds: AABB3;
+	readonly scope: Extract<SceneScope, { readonly kind: "env-cell" }>;
 }
 
 /** Backend geometry selection for a rigid dynamic or cell-shell draw. */
@@ -248,7 +272,14 @@ export class RenderWorld {
 		const dynamicBounds =
 			this.#systems.dynamics.getPublishedPresentationBounds(nodeId);
 		if (dynamicBounds) {
+			const category = this.#systems.dynamics.getPresentationCategory(nodeId);
+			if (category === null) {
+				throw new Error(
+					`Dynamic entity ${nodeId} has no presentation category.`,
+				);
+			}
 			return {
+				category,
 				footprint: {
 					kind: "eligible",
 					localBounds: dynamicBounds,
@@ -273,6 +304,44 @@ export class RenderWorld {
 		if (!contributions)
 			throw new Error(`Dynamic entity ${nodeId} no longer exists.`);
 		return contributions;
+	}
+
+	/** Resolve the two facts not already carried by a visible dynamic contribution. */
+	getEntityGroundingDynamicFacts(
+		nodeId: SceneNodeId,
+	): EntityGroundingDynamicFacts {
+		const identity = this.#systems.dynamics.getPresentationIdentity(nodeId);
+		const rigidBounds =
+			this.#systems.dynamics.getPublishedRigidPresentationBounds(nodeId);
+		const spatialMembership =
+			this.#systems.scene.getResolvedSpatialMembership(nodeId);
+		if (
+			identity === null ||
+			rigidBounds === null ||
+			spatialMembership === undefined
+		) {
+			throw new Error(`Dynamic entity ${nodeId} lacks grounding facts.`);
+		}
+		return { identity, rigidBounds, spatialMembership };
+	}
+
+	/** Resolve immutable world bounds and exact scope for one visible EnvCell shell. */
+	getIndoorGroundingEnvCellFacts(
+		nodeId: SceneNodeId,
+	): IndoorGroundingEnvCellFacts {
+		const placement = this.#requiredPlacement(nodeId, "EnvCell shell");
+		if (placement.scope.kind !== "env-cell") {
+			throw new Error(`EnvCell shell node ${nodeId} has outdoor residency.`);
+		}
+		const bounds = this.#systems.scene.queryEnvCellBounds(
+			placement.scope.envCellId,
+		);
+		if (bounds === null) {
+			throw new Error(
+				`EnvCell shell node ${nodeId} has no installed cell bounds.`,
+			);
+		}
+		return { bounds, scope: placement.scope };
 	}
 
 	getPortalDrawUnit(
@@ -345,7 +414,7 @@ export class RenderWorld {
 
 	#requiredPlacement(
 		nodeId: SceneNodeId,
-		label: "Dynamic entity" | "Static object",
+		label: "Dynamic entity" | "EnvCell shell" | "Static object",
 	): ResolvedScenePlacement {
 		const placement = this.#systems.scene.getResolvedPlacement(nodeId);
 		if (!placement)

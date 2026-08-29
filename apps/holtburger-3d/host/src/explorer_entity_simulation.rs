@@ -97,8 +97,8 @@ mod tests {
     use holtburger_common::{Guid, Quaternion, Sphere, Vector3};
     use holtburger_content::{ColliderScale, LandblockCollisionAsset};
     use holtburger_core::{
-        DynamicEntityContent, DynamicEntityDefinition, DynamicEntityDefinitionInput,
-        DynamicEntityIdentity, DynamicEntityInitialState,
+        DynamicEntityCategory, DynamicEntityContent, DynamicEntityDefinition,
+        DynamicEntityDefinitionInput, DynamicEntityIdentity, DynamicEntityInitialState,
     };
     use holtburger_world::{
         DynamicBodyCollisionDefinition, DynamicPhysicalBodyDefinition, EdgeProtection,
@@ -109,6 +109,7 @@ mod tests {
         PreparedEntityTargetGeometry, resolve_effective_entity_physics_state,
     };
 
+    use crate::explorer_entity_runtime::ExplorerPreparedEntity;
     use crate::host_fixed_tick_runtime::HOST_FIXED_TICK_HZ;
     use crate::host_simulation_runtime::{CollisionSource, HostSimulationRuntime};
 
@@ -216,7 +217,7 @@ mod tests {
         let guid = entities.reserve_guid().unwrap();
         let spawned = entities
             .spawn_prepared(
-                definition(guid),
+                prepared(definition(guid)),
                 EntityPhysicalIntent::Simulated,
                 Some(physical()),
             )
@@ -265,7 +266,7 @@ mod tests {
         let guid = entities.reserve_guid().unwrap();
         entities
             .spawn_prepared(
-                definition_at(guid, Guid(0xda55_0100)),
+                prepared(definition_at(guid, Guid(0xda55_0100))),
                 EntityPhysicalIntent::Simulated,
                 Some(physical()),
             )
@@ -331,6 +332,13 @@ mod tests {
             physics: resolve_effective_entity_physics_state(PhysicsState::GRAVITY),
         })
         .unwrap()
+    }
+
+    fn prepared(definition: DynamicEntityDefinition) -> ExplorerPreparedEntity {
+        ExplorerPreparedEntity {
+            presentation_category: DynamicEntityCategory::Other,
+            definition,
+        }
     }
 
     fn physical() -> DynamicPhysicalBodyDefinition {

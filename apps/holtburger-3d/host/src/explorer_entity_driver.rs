@@ -11,10 +11,11 @@ use holtburger_common::properties::{ItemType, PhysicsState, WeenieType};
 use holtburger_common::{Guid, Quaternion, Vector3};
 use holtburger_content::ContentRepository;
 use holtburger_core::{
-    DynamicEntityContent, DynamicEntityDefinition, DynamicEntityDefinitionError,
-    DynamicEntityDefinitionInput, DynamicEntityIdentity, DynamicEntityInitialState,
-    DynamicEntityLaunchError, DynamicEntityPhysicalPreparationError, DynamicEntitySetupPreparation,
-    prepare_dynamic_entity_physics, prepare_dynamic_entity_setup, resolve_dynamic_entity_launch,
+    DynamicEntityCategory, DynamicEntityContent, DynamicEntityDefinition,
+    DynamicEntityDefinitionError, DynamicEntityDefinitionInput, DynamicEntityIdentity,
+    DynamicEntityInitialState, DynamicEntityLaunchError, DynamicEntityPhysicalPreparationError,
+    DynamicEntitySetupPreparation, prepare_dynamic_entity_physics, prepare_dynamic_entity_setup,
+    resolve_dynamic_entity_launch,
 };
 use holtburger_dat::file_type::{CharGen, ClothingTable, PaletteSet};
 use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
@@ -32,7 +33,7 @@ use serde::Deserialize;
 use crate::explorer_entity_runtime::{
     ExplorerEntityDespawnOutcome, ExplorerEntityLaunchOutcome, ExplorerEntityPhysicsStateOutcome,
     ExplorerEntityRelocationOutcome, ExplorerEntityReplacementOutcome, ExplorerEntityRuntime,
-    ExplorerEntityRuntimeError, ExplorerEntitySpawnOutcome,
+    ExplorerEntityRuntimeError, ExplorerEntitySpawnOutcome, ExplorerPreparedEntity,
 };
 use crate::explorer_weenie_catalog::{
     ExplorerCatalogCapability, ExplorerCatalogLookupError, ExplorerCatalogSearchError,
@@ -513,9 +514,9 @@ impl ExplorerEntityDriver {
         request: ExplorerEntitySpawnRequest,
     ) -> Result<
         (
-            DynamicEntityDefinition,
+            ExplorerPreparedEntity,
             Option<DynamicPhysicalBodyDefinition>,
-            Vec<DynamicEntityDefinition>,
+            Vec<ExplorerPreparedEntity>,
         ),
         ExplorerEntityDriverError,
     > {
@@ -535,6 +536,15 @@ impl ExplorerEntityDriver {
             ));
         }
         let resolved_appearance = self.resolve_appearance(guid, &template, content.setup_did)?;
+        let weenie_type = template_weenie_type(&template)?;
+        let presentation_category = holtburger_core::explorer_dynamic_entity_category(
+            weenie_type,
+            template
+                .appearance
+                .item_type
+                .map(|value| ItemType::from_bits_retain(value as u32)),
+            template.attackable,
+        );
         let placement = EntityPlacement::World(DynamicEntityInitialState {
             pose: candidate_pose(request.camera_pose, request.candidate, request.rotation)?,
             velocity: Vector3::zero(),
@@ -544,6 +554,7 @@ impl ExplorerEntityDriver {
         });
         let mut definition = DynamicEntityDefinition::prepare(template_definition_input(
             &template,
+            weenie_type,
             guid,
             &content,
             resolved_appearance.wearer,
@@ -565,20 +576,28 @@ impl ExplorerEntityDriver {
             content.setup.movement_spheres.primary().radius,
         )?;
         let children = self.prepare_held_children(guid, resolved_appearance.wielded)?;
-        Ok((definition, physical, children))
+        Ok((
+            ExplorerPreparedEntity {
+                presentation_category,
+                definition,
+            },
+            physical,
+            children,
+        ))
     }
 
     fn prepare_held_children(
         &self,
         parent: Guid,
         wielded: Vec<SelectedWieldedItem>,
-    ) -> Result<Vec<DynamicEntityDefinition>, ExplorerEntityDriverError> {
+    ) -> Result<Vec<ExplorerPreparedEntity>, ExplorerEntityDriverError> {
         let mut children = Vec::new();
         for selected in wielded {
             let Some(WieldedItemClassification::Held(held)) = selected.item.classification else {
                 continue;
             };
             let template = selected.template;
+            let weenie_type = template_weenie_type(&template)?;
             let guid = self.entities.reserve_guid()?;
             let content = self.prepare_template_content(&template)?;
             let mut appearance =
@@ -599,15 +618,17 @@ impl ExplorerEntityDriver {
                     source,
                 })?;
             }
-            children.push(DynamicEntityDefinition::prepare(
-                template_definition_input(
+            children.push(ExplorerPreparedEntity {
+                presentation_category: DynamicEntityCategory::Other,
+                definition: DynamicEntityDefinition::prepare(template_definition_input(
                     &template,
+                    weenie_type,
                     guid,
                     &content,
                     appearance,
                     EntityPlacement::Attached(held.attach_to(parent)),
-                )?,
-            )?);
+                )?)?,
+            });
         }
         Ok(children)
     }
@@ -967,17 +988,12 @@ struct PreparedTemplateContent {
 /// Assembles the template-derived definition input identically for every placement arm.
 fn template_definition_input(
     template: &WeenieTemplate,
+    weenie_type: WeenieType,
     guid: Guid,
     content: &PreparedTemplateContent,
     appearance: EntityAppearance,
     placement: EntityPlacement<DynamicEntityInitialState>,
 ) -> Result<DynamicEntityDefinitionInput, ExplorerEntityDriverError> {
-    let weenie_type = WeenieType::from_repr(template.weenie_type).ok_or(
-        ExplorerEntityDriverError::InvalidWeenieType {
-            wcid: template.wcid,
-            value: template.weenie_type,
-        },
-    )?;
     Ok(DynamicEntityDefinitionInput {
         identity: DynamicEntityIdentity {
             guid,
@@ -1024,6 +1040,18 @@ fn template_definition_input(
         body_height: content.setup.body_height,
         physics: content.physics,
     })
+}
+
+/// Type one catalog category once before definition and presentation projections consume it.
+fn template_weenie_type(
+    template: &WeenieTemplate,
+) -> Result<WeenieType, ExplorerEntityDriverError> {
+    WeenieType::from_repr(template.weenie_type).ok_or(
+        ExplorerEntityDriverError::InvalidWeenieType {
+            wcid: template.wcid,
+            value: template.weenie_type,
+        },
+    )
 }
 
 fn resolve_spawn_placement(
@@ -1082,6 +1110,46 @@ mod tests {
         PreparedEntityTargetGeometry,
     };
     use std::collections::BTreeMap;
+
+    #[test]
+    fn explorer_category_uses_template_family_and_ace_attackable_default() {
+        assert_eq!(
+            holtburger_core::explorer_dynamic_entity_category(
+                WeenieType::Creature,
+                Some(ItemType::CREATURE),
+                Some(false),
+            ),
+            DynamicEntityCategory::Npc
+        );
+        assert_eq!(
+            holtburger_core::explorer_dynamic_entity_category(WeenieType::Creature, None, None),
+            DynamicEntityCategory::Mob
+        );
+        assert_eq!(
+            holtburger_core::explorer_dynamic_entity_category(
+                WeenieType::Vendor,
+                Some(ItemType::CREATURE),
+                Some(true),
+            ),
+            DynamicEntityCategory::Npc
+        );
+        assert_eq!(
+            holtburger_core::explorer_dynamic_entity_category(
+                WeenieType::Generic,
+                Some(ItemType::CREATURE),
+                Some(false),
+            ),
+            DynamicEntityCategory::Npc
+        );
+        assert_eq!(
+            holtburger_core::explorer_dynamic_entity_category(
+                WeenieType::Generic,
+                Some(ItemType::ARMOR),
+                None,
+            ),
+            DynamicEntityCategory::Other
+        );
+    }
 
     #[derive(Default)]
     struct EmptySpaceCollisionSource;
@@ -1467,6 +1535,10 @@ mod tests {
             first.instance.definition.identity.guid,
             second.instance.definition.identity.guid
         );
+        assert_eq!(
+            first.instance.presentation_category,
+            DynamicEntityCategory::Mob
+        );
         let mut normalized_definition = second.instance.definition.clone();
         normalized_definition.identity.guid = first.instance.definition.identity.guid;
         assert_eq!(first.instance.definition, normalized_definition);
@@ -1503,6 +1575,10 @@ mod tests {
         assert_eq!(
             wire["snapshot"]["entities"][0]["placement"]["pose"]["landblockId"],
             first.body.body.runtime_pose.landblock_id.0
+        );
+        assert_eq!(
+            wire["snapshot"]["entities"][0]["presentation"]["category"],
+            "mob"
         );
     }
 

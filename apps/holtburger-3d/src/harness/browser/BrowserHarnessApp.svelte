@@ -55,6 +55,7 @@
 	} from "../../lib/game/renderer/webgl2-device";
 	import type { WebGL2PortalScopeAtlasTargetsFixtureResult } from "../../lib/game/renderer/webgl2-portal-scope-atlas-targets-fixture";
 	import type { WebGL2PortalScopeAtlasExecutorFixtureResult } from "../../lib/game/renderer/webgl2-portal-scope-atlas-executor-fixture";
+	import type { WebGL2PssmFixtureResult } from "../../lib/game/renderer/webgl2-pssm-fixture";
 	import {
 		GamePresentationRuntime,
 		type PortalTransitionRuntimeDiagnostics,
@@ -71,11 +72,17 @@
 	import { ActiveRegionStaticDetailOwner } from "../../lib/game/resolution/active-region-static-detail";
 	import {
 		DEFAULT_FRAME_SETTINGS,
+		type EntityShadowResourceDiagnostics,
 		type FrameSelectionMetrics,
 		type FrameSettings,
 		type RendererFrameProfile,
 	} from "../../lib/game/renderer/renderer";
 	import { validateRenderScale } from "../../lib/game/renderer/render-scale";
+	import {
+		createEntityShadowSettings,
+		type EntityShadowMode,
+		type EntityShadowSettings,
+	} from "../../lib/game/renderer/entity-shadow-policy";
 	import type { RenderExtent } from "../../lib/game/renderer/render-extent";
 	import type {
 		PortalExecutionProbeResult,
@@ -412,6 +419,10 @@
 		readonly setMinimumObjectFootprintCssPixelArea: (pixelArea: number) => void;
 		/** Change device pixels per CSS pixel, which is also the only anti-aliasing control. */
 		readonly setRenderScale: (renderScale: number) => void;
+		/** Replace the complete validated entity-shadow policy without rebuilding content. */
+		readonly setEntityShadowSettings: (settings: EntityShadowSettings) => void;
+		/** Select one exhaustive shadow mode while retaining inactive appearance parameters. */
+		readonly setEntityShadowMode: (mode: EntityShadowMode) => void;
 		/** Change offscreen visual animation cadence without changing semantic advancement. */
 		readonly setOffscreenAnimationSampleIntervalSeconds: (
 			intervalSeconds: number,
@@ -620,6 +631,8 @@
 		/** Required authored portal closure and transition cursor/resource evidence. */
 		readonly portalTransition: PortalTransitionRuntimeDiagnostics | null;
 		readonly frameSettings: FrameSettings;
+		/** Cold shadow-target ownership used by same-runtime toggle and resize fixtures. */
+		readonly entityShadowResources: EntityShadowResourceDiagnostics | null;
 		readonly textureFilteringCapabilities: TextureFilteringCapabilities | null;
 		/** Browser main-thread timing facts accumulated during this harness session. */
 		readonly timing: BrowserHarnessTiming;
@@ -640,6 +653,8 @@
 		readonly portalScopeAtlasTargets: WebGL2PortalScopeAtlasTargetsFixtureResult | null;
 		/** Numeric real-GPU evidence for the scope-atlas shader executor. */
 		readonly portalScopeAtlasExecutor: WebGL2PortalScopeAtlasExecutorFixtureResult | null;
+		/** Real-browser depth-array and caster-program evidence for outdoor PSSM. */
+		readonly outdoorPssm: WebGL2PssmFixtureResult | null;
 		/** One read-only observation for every host source-batch response received by this harness. */
 		readonly sourceBatches: readonly HttpLandblockSourceBatchDiagnostic[];
 		/** One read-only observation for every profile transport request. */
@@ -858,6 +873,7 @@
 		null;
 	let portalScopeAtlasExecutor: WebGL2PortalScopeAtlasExecutorFixtureResult | null =
 		null;
+	let outdoorPssm: WebGL2PssmFixtureResult | null = null;
 	let ready = false;
 	const fixture = query.get("fixture");
 
@@ -2246,6 +2262,19 @@
 		runtime.setFrameSettings(frameSettings);
 	}
 
+	function setEntityShadowSettings(settings: EntityShadowSettings): void {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		frameSettings = {
+			...frameSettings,
+			entityShadows: createEntityShadowSettings(settings),
+		};
+		runtime.setFrameSettings(frameSettings);
+	}
+
+	function setEntityShadowMode(mode: EntityShadowMode): void {
+		setEntityShadowSettings({ ...frameSettings.entityShadows, mode });
+	}
+
 	function setOffscreenAnimationSampleIntervalSeconds(
 		intervalSeconds: number,
 	): void {
@@ -2462,6 +2491,9 @@
 					portalScopeAtlasTargets = device.probePortalScopeAtlasTargets();
 					portalScopeAtlasExecutor = device.probePortalScopeAtlasExecutor();
 					portalContextLossPolicy = await WebGL2Device.probeContextLossPolicy();
+				}
+				if (fixture === "outdoor-pssm") {
+					outdoorPssm = device.probeOutdoorPssm();
 				}
 				pipeline =
 					fixture === "blended"
@@ -2814,6 +2846,8 @@
 					setMinimumObjectFootprintCssPixelArea,
 					setMinimumPortalFootprintCssPixelArea,
 					setRenderScale,
+					setEntityShadowSettings,
+					setEntityShadowMode,
 					setOffscreenAnimationSampleIntervalSeconds,
 					setTextureFiltering,
 					resetTiming,
@@ -2854,6 +2888,7 @@
 							camera: cameraEvidence,
 							error,
 							frameSettings,
+							entityShadowResources: frameDiagnostics?.entityShadows ?? null,
 							compiledObjectDraws:
 								frameDiagnostics?.compiledObjectDraws ?? null,
 							frameProfile: frameDiagnostics?.profile ?? null,
@@ -2862,6 +2897,7 @@
 							portalContextLossPolicy,
 							portalScopeAtlasExecutor,
 							portalScopeAtlasTargets,
+							outdoorPssm,
 							ready,
 							staticObjectLayers: {
 								buildings:

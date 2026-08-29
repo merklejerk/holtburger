@@ -22,7 +22,10 @@ import type {
 } from "./resource-manager";
 import type { GeometryKey, ObjectGeometryKey } from "../geometry/types";
 import type { StaticGeometryKey } from "../systems/static-resources";
-import type { StaticObjectRenderable } from "../commit/artifacts";
+import type {
+	EnvCellRenderable,
+	StaticObjectRenderable,
+} from "../commit/artifacts";
 import type { ObjectMaterialBinding } from "../commit/artifacts";
 import { TexturePurpose, TextureWrapMode } from "../textures/types";
 import { landblockVec3 } from "../../assets/ac-frame";
@@ -52,6 +55,19 @@ const PLACEMENT = {
 	localToLandblock: Mat4.identity(),
 	scope: { kind: "outdoor" },
 } as const satisfies ResolvedScenePlacement;
+const ENV_CELL_PLACEMENT = {
+	envCellId: "0x00010100",
+	landblockId: "0x0001ffff",
+	localToLandblock: Mat4.identity(),
+	scope: {
+		kind: "env-cell",
+		landblockId: "0x0001ffff",
+		envCellId: "0x00010100",
+	},
+} as const satisfies ResolvedScenePlacement;
+const ENV_CELL_BOUNDS = new AABB3(Vec3.zero(), new Vec3(10, 10, 10));
+const RIGID_DYNAMIC_BOUNDS = new AABB3(new Vec3(-1, -2, -3), new Vec3(4, 5, 6));
+const ENV_CELL_RENDERABLE = { drawUnits: [] } satisfies EnvCellRenderable;
 const TEXTURE_2D = "texture-2d-resource:1" as Texture2DResourceKey;
 const ARRAY = {
 	layersByAssetId: new Map(),
@@ -93,9 +109,15 @@ describe("RenderWorld", () => {
 							}
 						: null,
 				getResolvedPlacement: (nodeId) =>
-					nodeId === "scene-node:8" || nodeId === "scene-node:9"
-						? PLACEMENT
-						: undefined,
+					nodeId === "scene-node:7"
+						? ENV_CELL_PLACEMENT
+						: nodeId === "scene-node:8" || nodeId === "scene-node:9"
+							? PLACEMENT
+							: undefined,
+				getResolvedSpatialMembership: (nodeId) =>
+					nodeId === "scene-node:9" ? { scopes: [PLACEMENT.scope] } : undefined,
+				queryEnvCellBounds: (envCellId) =>
+					envCellId === ENV_CELL_PLACEMENT.envCellId ? ENV_CELL_BOUNDS : null,
 				queryScopesFrustum: () => {
 					calls.push("scene-scopes");
 					return VISIBLE_SCENE;
@@ -119,15 +141,22 @@ describe("RenderWorld", () => {
 					nodeId === "scene-node:8" ? selectedStaticRenderable : null,
 			},
 			dynamics: {
+				getPresentationCategory: (nodeId) =>
+					nodeId === "scene-node:9" ? "mob" : null,
+				getPresentationIdentity: (nodeId) =>
+					nodeId === "scene-node:9" ? "guid:9" : null,
 				getPublishedPresentationBounds: (nodeId) =>
 					nodeId === "scene-node:9" ? AABB3.zero() : null,
+				getPublishedRigidPresentationBounds: (nodeId) =>
+					nodeId === "scene-node:9" ? RIGID_DYNAMIC_BOUNDS : null,
 				getVisibleContributions: (nodeId) => {
 					calls.push("dynamic-expand");
 					return nodeId === "scene-node:9" ? [dynamic] : null;
 				},
 			},
 			envCells: {
-				getCellRenderable: () => null,
+				getCellRenderable: (nodeId) =>
+					nodeId === "scene-node:7" ? ENV_CELL_RENDERABLE : null,
 				getPortalDrawUnit: () => null,
 			},
 			textures: {
@@ -160,6 +189,7 @@ describe("RenderWorld", () => {
 		expect(world.getPortalTopologyView()).toBe(TOPOLOGY);
 		expect(world.resolveTerrainDrawUnit("scene-node:1")).toBe(TERRAIN);
 		expect(world.getRenderContributionDescriptor("scene-node:9")).toEqual({
+			category: "mob",
 			footprint: {
 				kind: "eligible",
 				localBounds: AABB3.zero(),
@@ -169,6 +199,19 @@ describe("RenderWorld", () => {
 			kind: "dynamic",
 		});
 		expect(calls).not.toContain("dynamic-expand");
+		expect(world.getEntityGroundingDynamicFacts("scene-node:9")).toEqual({
+			identity: "guid:9",
+			rigidBounds: RIGID_DYNAMIC_BOUNDS,
+			spatialMembership: { scopes: [PLACEMENT.scope] },
+		});
+		expect(world.getRenderContributionDescriptor("scene-node:7")).toEqual({
+			kind: "env-cell",
+			renderable: ENV_CELL_RENDERABLE,
+		});
+		expect(world.getIndoorGroundingEnvCellFacts("scene-node:7")).toEqual({
+			bounds: ENV_CELL_BOUNDS,
+			scope: ENV_CELL_PLACEMENT.scope,
+		});
 		expect(world.expandDynamicContributions("scene-node:9")).toEqual([dynamic]);
 		expect(world.resolveDynamicContributions([dynamic])).toEqual([
 			{ drawUnit: dynamic, geometry: GEOMETRY },

@@ -267,10 +267,10 @@
 		</div>
 
 		<div class="explorer-texture-controls">
-			<label class="explorer-form-field">
+			<label class="ac-form-field">
 				<span>Filter page ID</span>
 				<input
-					class="explorer-control"
+					class="ac-control"
 					bind:value={query}
 					placeholder="Any word in the page ID"
 				/>

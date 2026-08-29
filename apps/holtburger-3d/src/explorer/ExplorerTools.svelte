@@ -22,6 +22,7 @@
 	import type { ColorGradeSettings } from "../lib/game/renderer/color-grade-policy";
 	import type { PhysicalFlyStatus } from "./physical-fly-session";
 	import type { ExplorerCameraMode } from "../lib/game/motion/host-physical-fly-path";
+	import type { EntityShadowSettings } from "../lib/game/renderer/entity-shadow-policy";
 	import ExplorerGradingPanel from "./ExplorerGradingPanel.svelte";
 	import ExplorerEntitiesPanel from "./ExplorerEntitiesPanel.svelte";
 	import type {
@@ -71,6 +72,10 @@
 		/** Explorer-local switch controlling distance-fog presentation. */
 		readonly distanceFogEnabled: boolean;
 		readonly ambientOcclusion: AmbientOcclusionSettings;
+		readonly entityShadows: EntityShadowSettings;
+		readonly updateEntityShadowSettings: (
+			settings: EntityShadowSettings,
+		) => void;
 		/** Presentation grade authored in the grading panel. */
 		readonly colorGrade: ColorGradeSettings;
 		readonly updateColorGradeSettings: (settings: ColorGradeSettings) => void;
@@ -169,6 +174,8 @@
 		updateEnvironment,
 		distanceFogEnabled,
 		ambientOcclusion,
+		entityShadows,
+		updateEntityShadowSettings,
 		colorGrade,
 		updateColorGradeSettings,
 		viewerLightEnabled,
@@ -317,6 +324,8 @@
 								{updateEnvironment}
 								{distanceFogEnabled}
 								{ambientOcclusion}
+								{entityShadows}
+								{updateEntityShadowSettings}
 								{viewerLightEnabled}
 								{weatherEnabled}
 								{clockFollowing}

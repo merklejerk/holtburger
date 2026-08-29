@@ -4,10 +4,23 @@ import {
 	requireWebGL2Uniform,
 } from "../webgl/shader-program";
 import { WEBGL2_DISTANCE_FOG_GLSL } from "./webgl2-fog";
+import {
+	requireWebGL2EntityGroundingUniforms,
+	WEBGL2_ENTITY_GROUNDING_GLSL,
+	type WebGL2EntityGroundingUniforms,
+} from "./webgl2-entity-grounding";
 import { WEBGL2_SCENE_LIGHTING_GLSL } from "./webgl2-lighting";
+import {
+	requireWebGL2OutdoorPssmUniforms,
+	WEBGL2_OUTDOOR_PSSM_GLSL,
+	type WebGL2OutdoorPssmUniforms,
+} from "./webgl2-pssm-receiver";
 
 /** Integer attribute carrying one authored terrain type code per terrain vertex. */
 export const TERRAIN_COLOR_CODE_ATTRIBUTE = 3;
+
+/** Mutually exclusive optional entity-shadow treatment compiled into one near-terrain program. */
+export type TerrainEntityShadowMode = "none" | "pssm" | "grounding";
 
 const TERRAIN_VERTEX_SHADER = `#version 300 es
 layout(location = 0) in vec3 aPosition;
@@ -308,9 +321,121 @@ void main() {
 }
 `;
 
+/** Build the ordinary or dedicated outdoor-shadow terrain vertex variant. */
+export function createTerrainVertexShader(
+	entityShadowMode: TerrainEntityShadowMode = "none",
+): string {
+	if (entityShadowMode !== "pssm") return TERRAIN_VERTEX_SHADER;
+	return replaceRequiredShaderSection(
+		replaceRequiredShaderSection(
+			TERRAIN_VERTEX_SHADER,
+			"out vec3 vAmbientSun;",
+			"out vec3 vAmbientSun;\nout vec3 vAmbientWithoutSun;",
+			"terrain PSSM ambient varying",
+		),
+		`vAmbientSun = evaluateAmbientAndSun(mat3(uLocalToLandblock) * aNormal);
+	vAnchoredPosition = anchoredPosition;
+	vSurfaceNormal = mat3(uLocalToLandblock) * aNormal;`,
+		`vec3 surfaceNormal = mat3(uLocalToLandblock) * aNormal;
+	vAmbientSun = evaluateAmbientAndSun(surfaceNormal);
+	vAmbientWithoutSun = evaluateAmbient();
+	vAnchoredPosition = anchoredPosition;
+	vSurfaceNormal = surfaceNormal;`,
+		"terrain PSSM directional split",
+	);
+}
+
+/** Build the ordinary or dedicated outdoor-shadow terrain fragment variant. */
+export function createTerrainFragmentShader(
+	entityShadowMode: TerrainEntityShadowMode = "none",
+): string {
+	if (entityShadowMode === "none") return TERRAIN_FRAGMENT_SHADER;
+	if (entityShadowMode === "grounding") {
+		const withGlsl = replaceRequiredShaderSection(
+			TERRAIN_FRAGMENT_SHADER,
+			`${WEBGL2_SCENE_LIGHTING_GLSL}\n\nin vec2 vGridUv;`,
+			`${WEBGL2_SCENE_LIGHTING_GLSL}\n${WEBGL2_ENTITY_GROUNDING_GLSL}\n\nin vec2 vGridUv;`,
+			"terrain grounding GLSL",
+		);
+		return replaceRequiredShaderSection(
+			withGlsl,
+			`color *= min(
+		vAmbientSun
+			+ evaluateDynamicLights(vAnchoredPosition, surfaceNormal)
+			+ evaluateMaskedStaticLights(vAnchoredPosition, surfaceNormal),
+		vec3(1.0)
+	);`,
+			`color *= min(
+		vAmbientSun
+			+ evaluateDynamicLights(vAnchoredPosition, surfaceNormal)
+			+ evaluateMaskedStaticLights(vAnchoredPosition, surfaceNormal),
+		vec3(1.0)
+	);
+	color *= 1.0 - evaluateEntityGrounding(
+		vAnchoredPosition,
+		dot(surfaceNormal, vec3(0.0, 1.0, 0.0))
+	);`,
+			"terrain grounding application",
+		);
+	}
+	const withGlsl = replaceRequiredShaderSection(
+		TERRAIN_FRAGMENT_SHADER,
+		`${WEBGL2_SCENE_LIGHTING_GLSL}\n\nin vec2 vGridUv;`,
+		`${WEBGL2_SCENE_LIGHTING_GLSL}\n${WEBGL2_OUTDOOR_PSSM_GLSL}\n\nin vec2 vGridUv;`,
+		"terrain PSSM GLSL",
+	);
+	const withVarying = replaceRequiredShaderSection(
+		withGlsl,
+		"in vec3 vAmbientSun;",
+		"in vec3 vAmbientSun;\nin vec3 vAmbientWithoutSun;",
+		"terrain PSSM ambient input",
+	);
+	return replaceRequiredShaderSection(
+		withVarying,
+		`color *= min(
+		vAmbientSun
+			+ evaluateDynamicLights(vAnchoredPosition, surfaceNormal)
+			+ evaluateMaskedStaticLights(vAnchoredPosition, surfaceNormal),
+		vec3(1.0)
+	);`,
+		`vec3 runtimeLighting = evaluateDynamicLights(vAnchoredPosition, surfaceNormal)
+		+ evaluateMaskedStaticLights(vAnchoredPosition, surfaceNormal);
+	vec3 unshadowedLighting = min(vAmbientSun + runtimeLighting, vec3(1.0));
+	vec3 lightingWithoutSun = min(vAmbientWithoutSun + runtimeLighting, vec3(1.0));
+	color *= mix(
+		lightingWithoutSun,
+		unshadowedLighting,
+		evaluateOutdoorPssmVisibility(
+			vViewDepth,
+			vAnchoredPosition,
+			vSurfaceNormal
+		)
+	);`,
+		"terrain PSSM lighting application",
+	);
+}
+
+function replaceRequiredShaderSection(
+	source: string,
+	expected: string,
+	replacement: string,
+	label: string,
+): string {
+	if (!source.includes(expected)) {
+		throw new Error(
+			`Cannot construct ${label}; base shader section is absent.`,
+		);
+	}
+	return source.replace(expected, replacement);
+}
+
 /** Linked GPU program that composes one terrain cell directly from canonical source resources. */
 export interface WebGL2NearTerrainProgram {
 	readonly program: WebGLProgram;
+	/** Present only on the dedicated analytic-grounding receiver variant. */
+	readonly entityGroundingUniforms: WebGL2EntityGroundingUniforms | null;
+	/** Present only on the dedicated outdoor receiver variant. */
+	readonly outdoorPssmUniforms: WebGL2OutdoorPssmUniforms | null;
 	readonly uniforms: {
 		readonly ambientColor: WebGLUniformLocation;
 		readonly dynamicLightCount: WebGLUniformLocation;
@@ -347,16 +472,17 @@ export interface WebGL2NearTerrainProgram {
 /** Compile the canonical terrain-composition draw program. */
 export function createWebGL2NearTerrainProgram(
 	gl: WebGL2RenderingContext,
+	entityShadowMode: TerrainEntityShadowMode = "none",
 ): WebGL2NearTerrainProgram {
 	const vertexShader = compileWebGL2Shader(
 		gl,
 		gl.VERTEX_SHADER,
-		TERRAIN_VERTEX_SHADER,
+		createTerrainVertexShader(entityShadowMode),
 	);
 	const fragmentShader = compileWebGL2Shader(
 		gl,
 		gl.FRAGMENT_SHADER,
-		TERRAIN_FRAGMENT_SHADER,
+		createTerrainFragmentShader(entityShadowMode),
 	);
 	const program = gl.createProgram();
 	if (!program) {
@@ -374,6 +500,14 @@ export function createWebGL2NearTerrainProgram(
 			);
 		}
 		return {
+			entityGroundingUniforms:
+				entityShadowMode === "grounding"
+					? requireWebGL2EntityGroundingUniforms(gl, program)
+					: null,
+			outdoorPssmUniforms:
+				entityShadowMode === "pssm"
+					? requireWebGL2OutdoorPssmUniforms(gl, program)
+					: null,
 			program,
 			uniforms: {
 				ambientColor: requireWebGL2Uniform(gl, program, "uAmbientColor"),

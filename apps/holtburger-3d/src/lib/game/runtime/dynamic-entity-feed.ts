@@ -3,6 +3,7 @@ import {
 	validateHostPlacedPath,
 	validateHostPlacedPathShape,
 } from "../motion/host-placed-path";
+import { DYNAMIC_ENTITY_CATEGORIES } from "../dynamic-entity-category";
 
 const finiteNumber = z.number().finite();
 const nonNegativeInteger = z.number().int().nonnegative();
@@ -174,6 +175,8 @@ const dynamicEntityViewSchema = z.object({
 		name: z.string(),
 	}),
 	presentation: z.object({
+		/** Producer-resolved frontend category; consumers never reconstruct it from radar color. */
+		category: z.enum(DYNAMIC_ENTITY_CATEGORIES),
 		content: z.object({
 			/** Table this entity animates from, or `null` when neither it nor its setup declares one. */
 			motionTableDid: guid.nullable(),

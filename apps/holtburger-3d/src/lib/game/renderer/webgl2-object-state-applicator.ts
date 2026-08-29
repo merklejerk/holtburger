@@ -11,13 +11,8 @@ type UnknownState = typeof UNKNOWN_STATE;
 /** Components in the mat4 uniforms this applicator compares. */
 const MAT4_COMPONENTS = 16;
 
-/**
- * Storage width per cached uniform.
- *
- * Sized by the widest uniform rather than per location, so one slot fits any of them and the cache
- * never reallocates when a location's kind is first seen.
- */
-const MAXIMUM_UNIFORM_COMPONENTS = MAT4_COMPONENTS;
+/** Components in the widest scalar/vector uniform assembled in the reusable scratch buffer. */
+const UNIFORM_SCRATCH_COMPONENTS = 4;
 
 /**
  * Applies only WebGL state owned by one object phase.
@@ -38,6 +33,8 @@ export class WebGL2ObjectStateApplicator {
 		number,
 		PreparedObjectTextureBinding<WebGLTexture, WebGLSampler>
 	>();
+	/** Array textures are independent bindings but share the context's active-unit selector. */
+	readonly #textureArrayUnits = new Map<number, WebGLTexture>();
 	#vertexArray: WebGLVertexArrayObject | UnknownState = UNKNOWN_STATE;
 	/**
 	 * Last applied components per uniform location, for redundancy filtering.
@@ -49,7 +46,7 @@ export class WebGL2ObjectStateApplicator {
 	 */
 	readonly #uniformComponents = new Map<WebGLUniformLocation, Float64Array>();
 	/** Reused so per-draw comparison of scalar and vector uniforms allocates nothing. */
-	readonly #uniformScratch = new Float64Array(MAXIMUM_UNIFORM_COMPONENTS);
+	readonly #uniformScratch = new Float64Array(UNIFORM_SCRATCH_COMPONENTS);
 
 	constructor(gl: WebGL2RenderingContext) {
 		this.#gl = gl;
@@ -65,6 +62,7 @@ export class WebGL2ObjectStateApplicator {
 		this.#staticLightScope = UNKNOWN_STATE;
 		this.#program = UNKNOWN_STATE;
 		this.#textureUnits.clear();
+		this.#textureArrayUnits.clear();
 		this.#vertexArray = UNKNOWN_STATE;
 	}
 
@@ -151,6 +149,22 @@ export class WebGL2ObjectStateApplicator {
 		return textureBound;
 	}
 
+	/** Bind one texture-array unit without desynchronizing later material texture mutations. */
+	applyTextureArrayUnit(unit: number, texture: WebGLTexture): boolean {
+		const previous = this.#textureArrayUnits.get(unit);
+		if (previous === texture) return false;
+		if (this.#activeTextureUnit !== unit) {
+			this.#gl.activeTexture(this.#gl.TEXTURE0 + unit);
+			this.#activeTextureUnit = unit;
+		}
+		this.#gl.bindTexture(this.#gl.TEXTURE_2D_ARRAY, texture);
+		// Manual PCF relies on the depth texture's nearest comparison parameters, not a sampler
+		// object that some earlier pass may have left on this otherwise independent unit.
+		this.#gl.bindSampler(unit, null);
+		this.#textureArrayUnits.set(unit, texture);
+		return true;
+	}
+
 	/**
 	 * Upload one object uniform only when its value differs from the one already applied.
 	 *
@@ -205,6 +219,16 @@ export class WebGL2ObjectStateApplicator {
 		return true;
 	}
 
+	/** A vec4 array is compared component-wise before one bulk upload. */
+	applyUniform4fv(
+		location: WebGLUniformLocation,
+		value: Float32Array,
+	): boolean {
+		if (!this.#recordUniform(location, value, value.length)) return false;
+		this.#gl.uniform4fv(location, value);
+		return true;
+	}
+
 	/** The caller owns the matrix buffer; it is read here and never retained. */
 	applyUniformMatrix4fv(
 		location: WebGLUniformLocation,
@@ -231,8 +255,12 @@ export class WebGL2ObjectStateApplicator {
 	): boolean {
 		let stored = this.#uniformComponents.get(location);
 		if (stored === undefined) {
-			stored = new Float64Array(MAXIMUM_UNIFORM_COMPONENTS).fill(Number.NaN);
+			stored = new Float64Array(count).fill(Number.NaN);
 			this.#uniformComponents.set(location, stored);
+		} else if (stored.length !== count) {
+			throw new Error(
+				`Uniform location changed component width from ${stored.length} to ${count}.`,
+			);
 		}
 		let changed = false;
 		for (let index = 0; index < count; index += 1) {

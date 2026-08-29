@@ -69,7 +69,7 @@ export interface ScenePointResidencyCandidates {
 /** Stable identity for one directed portal-topology crossing. */
 export type PortalCrossingId = `portal-crossing:${string}`;
 /** Stable identity for one proof-backed indoor visibility island. */
-type SceneVisibilityIslandId = `env-cell-island:${string}`;
+export type SceneVisibilityIslandId = `env-cell-island:${string}`;
 
 /** One material-free planar aperture expressed in an owning landblock frame. */
 interface ScenePortalAperture {

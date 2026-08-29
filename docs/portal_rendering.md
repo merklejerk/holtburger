@@ -438,6 +438,43 @@ transparent objects, additive effects, and particles retain their existing order
 and therefore neither cast nor receive ambient occlusion. The feature defaults on after passing its
 visual, motion, and performance gates, while the user switch can restore retail presentation.
 
+### Receiver-owned entity grounding
+
+Portal composition does not own a shadow map, grounding atlas, or lighting traversal. The two
+entity-grounding techniques remain properties of the physical receivers drawn into ordinary
+render-domain tiles:
+
+- in `shadow-maps`, outdoor terrain and Buildings-layer programs may sample the frame's
+  directional PSSM array;
+- in `simple`, outdoor near terrain may evaluate that landblock's fixed analytic grounding records;
+- in both enabled modes, EnvCell-shell programs may evaluate that shell scope's fixed analytic
+  grounding records; and
+- EnvCell residents, other outdoor object classes, particles, sky, weather, and deferred transition
+  geometry use neither receiver path.
+
+Portal planning runs before any outdoor shadow work. In `shadow-maps`, a portal view builds outdoor
+maps only when its selected scope set contains `outdoor`; a sealed indoor view performs no outdoor
+caster query or depth submission. In `simple`, each selected outdoor terrain landblock owns its
+analytic record set and PSSM targets remain released. Both lookups use anchor-relative world
+position and are independent of tile UVs, so packing or portal seams cannot move a shadow. The
+same outdoor frame state is consumed by every eligible outdoor receiver in the selected view and
+is invalidated before the next view reuses the instance stream.
+
+Indoor candidate construction consumes the same selected scene identities as color rendering.
+Each eligible dynamic contributes one bounds-derived proxy, while every selected shell contributes
+its world bounds and stable visibility-island identity. A proxy reaches a shell only when its short
+influence volume intersects those bounds and both belong to the same depth-continuous island. The
+renderer selects no more than eight records per shell, converts only retained records into the
+current anchor-relative frame, and reuses that record set across all material draws for the scope.
+This policy crosses invisible grid seams inside one open room without allowing a nearby overlapping
+or stacked island to receive the cue.
+
+Both effects are complete before opaque scope-atlas resolve, so propagation and composition see
+ordinary shaded pixels. Deferred shell materials retain their scope-envelope routing and evaluate
+the same shell records before fog. An outgoing portal-transition snapshot captures the already
+shaded scene picture; the incoming scene computes current effects normally; the authored tunnel is
+an explicit nonreceiver and owns no shadow resource.
+
 ### Targets and lifecycle
 
 One lazy renderer-owned target generation contains four framebuffers and six textures:

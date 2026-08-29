@@ -16,7 +16,11 @@ import {
 } from "../math/matrices";
 import { createFrustumFromClipMatrix, type Frustum } from "../math/frustum";
 import { Mat4, Quat, Vec3 } from "../math/types";
-import { type SceneNodeId, type SceneScope } from "../scene";
+import {
+	type SceneNodeId,
+	type SceneScope,
+	type SceneVisibilityIslandId,
+} from "../scene";
 import { scopeFor, scopeKey } from "../scene/scope";
 import { createCameraNearClipVolume } from "./portal-near-plane";
 import type { TerrainDrawUnit } from "../terrain/types";
@@ -27,6 +31,11 @@ import type {
 import type { ObjectMaterialOrdering } from "../resolution/object-material-planner";
 import { TextureWrapMode } from "../textures/types";
 import type { ColorGradeSettings } from "./color-grade-policy";
+import {
+	createEntityShadowSettings,
+	isOutdoorPssmReceiverFootprint,
+	type EntityShadowSettings,
+} from "./entity-shadow-policy";
 import {
 	DEFAULT_FRAME_SETTINGS,
 	type FrameInput,
@@ -81,6 +90,37 @@ import {
 	type WebGL2FarTerrainProgram,
 } from "./webgl2-far-terrain-program";
 import { FrameInstanceStreamArena } from "./frame-instance-stream-arena";
+import {
+	WebGL2OutdoorPssmPass,
+	type ActiveOutdoorPssmFrame,
+	type WebGL2OutdoorPssmPassProfileMetrics,
+} from "./webgl2-outdoor-pssm-pass";
+import { terrainLandblockIntersectsShadowDistance } from "./outdoor-pssm";
+import {
+	bindWebGL2OutdoorPssmUniforms,
+	createWebGL2OutdoorPssmUniformScratch,
+	OUTDOOR_PSSM_TEXTURE_UNIT,
+} from "./webgl2-pssm-receiver";
+import { WebGL2OutdoorPssmReceiverPrograms } from "./webgl2-pssm-receiver-programs";
+import { WebGL2EntityGroundingPrograms } from "./webgl2-entity-grounding-programs";
+import {
+	applyWebGL2EntityGroundingUniforms,
+	entityGroundingUniformAttemptCount,
+	WebGL2DirectEntityGroundingUniformApplicator,
+} from "./webgl2-entity-grounding";
+import {
+	createEntityGroundingCaster,
+	createEntityGroundingSelection,
+	createEntityGroundingSelectionScratch,
+	createIndoorGroundingCell,
+	createOutdoorGroundingLandblock,
+	indexIndoorVisibilityIslands,
+	selectIndoorGroundingCasters,
+	selectOutdoorGroundingCasters,
+	type EntityGroundingCaster,
+	type EntityGroundingSelection,
+	type IndoorGroundingCell,
+} from "./entity-grounding";
 import {
 	createWebGL2ObjectProgram,
 	OBJECT_TEXTURE_UNITS,
@@ -296,6 +336,17 @@ const PROBE_SHADING: SceneShading = {
 /** Ranking position used before any view has been committed. */
 const ORIGIN = sceneVec3(Vec3.zero());
 const EMPTY_LIGHTS: readonly RuntimeLight[] = [];
+
+/** Allocate explanatory shadow counters only for an explicitly profiled frame. */
+function createEmptyOutdoorShadowMapProfileMetrics(): WebGL2OutdoorPssmPassProfileMetrics {
+	return {
+		cascadeQueryCount: 0,
+		compatibleDepthRunCount: 0,
+		instanceUploadBytes: 0,
+		instanceUploadCount: 0,
+		selectedCasterPartCount: 0,
+	};
+}
 /** Synthetic single render domain used by the deliberately unpartitioned flat debug mode. */
 const FLAT_PARTICLE_DOMAIN = "particle-render-domain:flat";
 const FLAT_SKY_PARTICLE_DOMAIN = "particle-render-domain:flat-sky";
@@ -366,6 +417,8 @@ interface ObjectFrameInput {
 	readonly localToLandblock: Mat4;
 	readonly material: ObjectMaterialBinding;
 	readonly ordering: ObjectMaterialOrdering;
+	/** Buildings provenance projected once; no draw consumer reconstructs it from source labels. */
+	readonly receivesOutdoorPssm: boolean;
 	/** Landblock-space ordering facts; the brand holds every producer to that frame. */
 	readonly transparentSort: {
 		readonly stableId: string;
@@ -423,6 +476,7 @@ function createObjectSubmission(
 		localToLandblock: object.localToLandblock,
 		material: object.material,
 		ordering: object.ordering,
+		receivesOutdoorPssm: object.receivesOutdoorPssm,
 		renderScopeKey: object.renderScopeKey,
 		source: object.source,
 		transparentSort: object.transparentSort,
@@ -482,6 +536,16 @@ interface PreparedViewGeometry extends PreparedPortalProjection {
 }
 
 /** Resolved scene contributions independent from flat or portal scheduling policy. */
+interface PreparedEntityGrounding {
+	readonly indoorByScopeKey: ReadonlyMap<string, EntityGroundingSelection>;
+	readonly outdoorByLandblockId: ReadonlyMap<
+		LandblockOwnerId,
+		EntityGroundingSelection
+	>;
+	readonly outdoorEnabled: boolean;
+	readonly settings: EntityShadowSettings["grounding"];
+}
+
 interface PreparedSceneContributions {
 	/** Terrain selected by this renderer from its RenderWorld. */
 	readonly terrain: readonly TerrainFrameInput[];
@@ -498,6 +562,8 @@ interface PreparedSceneContributions {
 	readonly particles: readonly ParticleDrawRange[];
 	/** Sky-attached particle batches drawn before the landscape. */
 	readonly skyParticles: readonly ParticleDrawRange[];
+	/** Fixed per-receiver grounding records produced from the same visible-entry walk. */
+	readonly entityGrounding: PreparedEntityGrounding | null;
 }
 
 /** Anchor-relative matrices and content reused by all passes for one view. */
@@ -669,10 +735,35 @@ export class WebGL2Renderer implements Renderer {
 	/** Device-wide guard preventing draws through any stale handle after context loss. */
 	readonly #assertDeviceReady: () => void;
 	readonly #frameInstances: FrameInstanceStreamArena;
+	/** Lazy-resource outdoor actor depth schedule sharing the ordinary frame instance arena. */
+	readonly #outdoorPssmPass: WebGL2OutdoorPssmPass;
+	readonly #outdoorPssmReceiverPrograms: WebGL2OutdoorPssmReceiverPrograms;
+	readonly #entityGroundingPrograms: WebGL2EntityGroundingPrograms;
+	readonly #directGroundingUniforms: WebGL2DirectEntityGroundingUniformApplicator;
+	readonly #outdoorPssmUniformScratch = createWebGL2OutdoorPssmUniformScratch();
+	/** Current sequential view's receiver state; null prevents every inactive sample path. */
+	#activeOutdoorPssmFrame: ActiveOutdoorPssmFrame | null = null;
+	/** Reused frame-hot storage for analytic candidate collection and receiver selection. */
+	readonly #entityGroundingCasters: EntityGroundingCaster[] = [];
+	readonly #indoorGroundingCells = new Map<string, IndoorGroundingCell>();
+	readonly #indoorGroundingByScopeKey = new Map<
+		string,
+		EntityGroundingSelection
+	>();
+	readonly #outdoorGroundingByLandblockId = new Map<
+		LandblockOwnerId,
+		EntityGroundingSelection
+	>();
+	readonly #entityGroundingSelectionPool: EntityGroundingSelection[] = [];
+	readonly #entityGroundingSelectionScratch =
+		createEntityGroundingSelectionScratch();
+	readonly #indoorVisibilityIslands = new Map<
+		string,
+		SceneVisibilityIslandId
+	>();
 	/** Reusable dynamic-light upload staging; renderer-owned to keep draw loops allocation-free. */
 	readonly #dynamicLightScratch: ReturnType<typeof createDynamicLightScratch>;
 	readonly #terrainLightMask: WebGL2TerrainLightMaskTexture;
-	/** Reuses one generated-stream selection across all material partitions in a view. */
 	/** Exact state mirror scoped to independently invalidated object phases. */
 	readonly #objectState: WebGL2ObjectStateApplicator;
 	/** Portal owner created lazily when the first portal frame needs GPU resources. */
@@ -870,6 +961,18 @@ export class WebGL2Renderer implements Renderer {
 			textureFilteringSupport,
 		);
 		this.#frameInstances = new FrameInstanceStreamArena(gl);
+		this.#outdoorPssmPass = new WebGL2OutdoorPssmPass(
+			gl,
+			resources,
+			world,
+			this.#frameInstances,
+		);
+		this.#outdoorPssmReceiverPrograms = new WebGL2OutdoorPssmReceiverPrograms(
+			gl,
+		);
+		this.#entityGroundingPrograms = new WebGL2EntityGroundingPrograms(gl);
+		this.#directGroundingUniforms =
+			new WebGL2DirectEntityGroundingUniformApplicator(gl);
 		this.#dynamicLightScratch = createDynamicLightScratch();
 		this.#terrainLightMask = createWebGL2TerrainLightMaskTexture(gl);
 		this.#objectState = new WebGL2ObjectStateApplicator(gl);
@@ -900,6 +1003,9 @@ export class WebGL2Renderer implements Renderer {
 		this.frameDiagnostics = {
 			snapshot: () => ({
 				compiledObjectDraws: this.#compiledDraws.getDiagnostics(),
+				entityShadows: {
+					outdoorTargets: this.#outdoorPssmPass.getDiagnostics(),
+				},
 				profile: this.#frameProfiler?.getProfile() ?? null,
 				profilingEnabled: this.#frameProfiler !== null,
 				selectionMetrics: {
@@ -998,6 +1104,11 @@ export class WebGL2Renderer implements Renderer {
 		profile: WebGL2FrameProfileCapture | null,
 	): void {
 		const setupStartedAt = profile?.beginCpuPhase();
+		const entityShadows = createEntityShadowSettings(
+			input.frameSettings.entityShadows,
+		);
+		if (entityShadows.mode !== "shadow-maps") this.#outdoorPssmPass.disable();
+		this.#activeOutdoorPssmFrame = null;
 		this.#frameTextureFiltering = input.frameSettings.quality.textureFiltering;
 		// Compiled facts embed the samplers filtering selects and the cull-face override the
 		// env-cell mode selects, so a change to either invalidates every compiled entry. Both
@@ -1048,7 +1159,7 @@ export class WebGL2Renderer implements Renderer {
 		// RETAIL DIVERGENCE: Retail draws before-landscape sky, opaque landblocks, then the
 		// after-landscape weather overlay and deferred alpha work with no screen-space obscurance
 		// stage (acclient.c:296701-296729, 297381-297434, 441096). This default-on
-		// presentation adds near-field grounding before weather; removing it as a retail
+		// presentation adds ambient occlusion before weather; removing it as a retail
 		// "correction" loses that enabled visual benefit, while moving it later would incorrectly
 		// attenuate weather/transparency. The retained DA55 portal census measured 102,140 opaque
 		// committed tile pixels: 204 (0.2%) full/fading and 101,936 neutral after distance policy,
@@ -1123,6 +1234,7 @@ export class WebGL2Renderer implements Renderer {
 				if (profile && preparationStartedAt !== undefined) {
 					profile.finishCpuPhase("viewPreparation", preparationStartedAt);
 				}
+				this.#renderOutdoorPssm(geometry, entityShadows, shading, profile);
 				const contributions = this.#collectScene(
 					geometry,
 					input.frameSettings,
@@ -1158,6 +1270,7 @@ export class WebGL2Renderer implements Renderer {
 					clearColor,
 					shading,
 					input.frameSettings,
+					entityShadows,
 					profile,
 				);
 			}
@@ -1188,6 +1301,7 @@ export class WebGL2Renderer implements Renderer {
 		clearColor: readonly [number, number, number, number],
 		shading: SceneShading,
 		frameSettings: FrameSettings,
+		entityShadows: EntityShadowSettings,
 		profile: WebGL2FrameProfileCapture | null,
 	): void {
 		const placement = viewInput.camera.placement;
@@ -1207,6 +1321,10 @@ export class WebGL2Renderer implements Renderer {
 			profile.finishCpuPhase("portalPlanning", planningStartedAt);
 		}
 		this.#accumulatePortalScopeAtlasMetrics(frame);
+		this.#activeOutdoorPssmFrame = null;
+		if (frame.atlas.visibility.selectedScopeOrdinal("outdoor") !== null) {
+			this.#renderOutdoorPssm(prepared, entityShadows, shading, profile);
+		}
 		this.#executePortalScopeAtlasFrame(
 			prepared,
 			frame,
@@ -1513,7 +1631,62 @@ export class WebGL2Renderer implements Renderer {
 		}
 		this.#portalBlendedInstancedObjectProgram = null;
 		this.#gl.deleteTexture(this.#objectFallbackBinding.texture);
+		this.#outdoorPssmReceiverPrograms.destroy();
+		this.#entityGroundingPrograms.destroy();
+		this.#outdoorPssmPass.destroy();
 		this.#frameInstances.destroy();
+	}
+
+	/** Submit one view's outdoor maps before any scene query reuses its selection storage. */
+	#renderOutdoorPssm(
+		prepared: PreparedViewGeometry,
+		entityShadows: EntityShadowSettings,
+		shading: SceneShading,
+		profile: WebGL2FrameProfileCapture | null,
+	): void {
+		if (entityShadows.mode !== "shadow-maps") return;
+		const profileMetrics: WebGL2OutdoorPssmPassProfileMetrics | null = profile
+			? createEmptyOutdoorShadowMapProfileMetrics()
+			: null;
+		const cpuStartedAt = profile?.beginCpuPhase();
+		const gpuPhase = profile ? profile.beginGpuPhase("outdoorShadowMap") : null;
+		try {
+			this.#activeOutdoorPssmFrame = this.#outdoorPssmPass.render(
+				{
+					anchorCoordinates: prepared.anchorCoordinates,
+					anchorLandblockId: prepared.anchorLandblockId,
+					aspectRatio: this.#frameWidth / Math.max(1, this.#frameHeight),
+					camera: {
+						far: prepared.camera.far,
+						near: prepared.camera.near,
+						position: prepared.cameraPosition,
+						rotation: prepared.camera.placement.rotation,
+						verticalFovDegrees: prepared.camera.fov,
+					},
+					frameHeight: this.#frameHeight,
+					frameWidth: this.#frameWidth,
+					selectedDynamicNodeIds: this.#selectedDynamicNodeIds,
+					settings: entityShadows.pssm,
+					sunVector: shading.lighting.terrain.sunVector,
+				},
+				profileMetrics,
+			);
+		} finally {
+			gpuPhase?.finish();
+			if (profile && cpuStartedAt !== undefined) {
+				profile.finishCpuPhase("outdoorShadowMap", cpuStartedAt);
+			}
+		}
+		if (profile && profileMetrics) {
+			profile.recordOutdoorShadowMap(profileMetrics);
+		}
+		if (this.#activeOutdoorPssmFrame) {
+			this.#frameSelectionMetrics.frameInstanceUploadCount +=
+				this.#activeOutdoorPssmFrame.instanceUploads.count;
+			this.#frameSelectionMetrics.frameInstanceUploadBytes +=
+				this.#activeOutdoorPssmFrame.instanceUploads.bytes;
+			this.#objectState.invalidate();
+		}
 	}
 
 	#beginFrame(
@@ -1645,6 +1818,19 @@ export class WebGL2Renderer implements Renderer {
 		const resolutionStartedAt = profile?.beginCpuPhase();
 		const terrain: TerrainFrameInput[] = [];
 		const objects: PreparedObjectFrameInput[] = [];
+		const groundingEnabled = frameSettings.entityShadows.mode !== "none";
+		const outdoorGroundingEnabled =
+			frameSettings.entityShadows.mode === "simple";
+		this.#entityGroundingCasters.length = 0;
+		this.#indoorGroundingCells.clear();
+		this.#indoorGroundingByScopeKey.clear();
+		this.#outdoorGroundingByLandblockId.clear();
+		if (groundingEnabled) {
+			indexIndoorVisibilityIslands(
+				this.#world.getPortalTopologyView(),
+				this.#indoorVisibilityIslands,
+			);
+		}
 		let staticObjectCount = 0;
 		// One offset per visible landblock, not one per object: it is the same value for every
 		// object in a landblock. Submissions carry only their landblock id, so a cached static
@@ -1692,6 +1878,30 @@ export class WebGL2Renderer implements Renderer {
 				}
 				const dynamicContributions =
 					this.#world.expandDynamicContributions(nodeId);
+				if (groundingEnabled && dynamicContributions.length > 0) {
+					const facts = this.#world.getEntityGroundingDynamicFacts(nodeId);
+					const reachesIndoor = facts.spatialMembership.scopes.some(
+						(scope) => scope.kind === "env-cell",
+					);
+					const reachesOutdoors = facts.spatialMembership.scopes.some(
+						(scope) => scope.kind === "outdoor",
+					);
+					const caster =
+						reachesIndoor || (outdoorGroundingEnabled && reachesOutdoors)
+							? createEntityGroundingCaster(
+									{
+										category: contribution.category,
+										identity: facts.identity,
+										rigidBounds: facts.rigidBounds,
+										placement: contribution.footprint.placement,
+										spatialMembership: facts.spatialMembership,
+									},
+									this.#indoorVisibilityIslands,
+									frameSettings.entityShadows.grounding,
+								)
+							: null;
+					if (caster) this.#entityGroundingCasters.push(caster);
+				}
 				this.#selectedDynamicNodeIds.add(nodeId);
 				this.#frameSelectionMetrics.visibleDynamicEntityCount += 1;
 				this.#frameSelectionMetrics.visibleDynamicPartCount +=
@@ -1743,6 +1953,7 @@ export class WebGL2Renderer implements Renderer {
 									localToLandblock: instance.sourceToLandblock,
 									material: drawUnit.material,
 									ordering,
+									receivesOutdoorPssm: false,
 									renderScopeKey,
 									source: "dynamic",
 									transparentSort,
@@ -1755,6 +1966,15 @@ export class WebGL2Renderer implements Renderer {
 				continue;
 			}
 			if (contribution.kind === "env-cell") {
+				if (groundingEnabled) {
+					const facts = this.#world.getIndoorGroundingEnvCellFacts(nodeId);
+					const cell = createIndoorGroundingCell(
+						facts.scope,
+						facts.bounds,
+						this.#indoorVisibilityIslands,
+					);
+					this.#indoorGroundingCells.set(cell.scopeKey, cell);
+				}
 				this.#frameSelectionMetrics.visibleEnvCellShells += 1;
 				const compiled = this.#compiledDraws.resolveNodeSubmissions(
 					contribution.renderable,
@@ -1778,6 +1998,55 @@ export class WebGL2Renderer implements Renderer {
 			terrain.push(this.#resolveTerrainFrameInput(contribution.drawUnit));
 			this.#frameSelectionMetrics.terrainFrameInputs += 1;
 		}
+		if (groundingEnabled) {
+			const cameraPosition = new Vec3(
+				prepared.camera.placement.position.x,
+				prepared.camera.placement.position.y,
+				prepared.camera.placement.position.z,
+			);
+			const anchorOrigin = createLandblockWorldOrigin(
+				prepared.anchorLandblockId,
+			);
+			let selectionIndex = 0;
+			for (const cell of this.#indoorGroundingCells.values()) {
+				const selection = (this.#entityGroundingSelectionPool[
+					selectionIndex
+				] ??= createEntityGroundingSelection());
+				selectIndoorGroundingCasters(
+					cell,
+					this.#entityGroundingCasters,
+					cameraPosition,
+					anchorOrigin,
+					selection,
+					this.#entityGroundingSelectionScratch,
+				);
+				this.#indoorGroundingByScopeKey.set(cell.scopeKey, selection);
+				selectionIndex += 1;
+			}
+			if (outdoorGroundingEnabled) {
+				for (const terrainInput of terrain) {
+					const landblock = createOutdoorGroundingLandblock(
+						terrainInput.drawUnit.landblockId,
+					);
+					const selection = (this.#entityGroundingSelectionPool[
+						selectionIndex
+					] ??= createEntityGroundingSelection());
+					selectOutdoorGroundingCasters(
+						landblock,
+						this.#entityGroundingCasters,
+						cameraPosition,
+						anchorOrigin,
+						selection,
+						this.#entityGroundingSelectionScratch,
+					);
+					this.#outdoorGroundingByLandblockId.set(
+						landblock.landblockId,
+						selection,
+					);
+					selectionIndex += 1;
+				}
+			}
+		}
 		if (profile && resolutionStartedAt !== undefined) {
 			profile.finishCpuPhase(
 				"sceneContributionResolution",
@@ -1791,6 +2060,14 @@ export class WebGL2Renderer implements Renderer {
 			);
 		}
 		return {
+			entityGrounding: groundingEnabled
+				? {
+						indoorByScopeKey: this.#indoorGroundingByScopeKey,
+						outdoorByLandblockId: this.#outdoorGroundingByLandblockId,
+						outdoorEnabled: outdoorGroundingEnabled,
+						settings: frameSettings.entityShadows.grounding,
+					}
+				: null,
 			landblockOffsets,
 			objects,
 			particles: [],
@@ -1903,6 +2180,7 @@ export class WebGL2Renderer implements Renderer {
 					localToLandblock: node.placement.localToLandblock,
 					material: resolved.drawUnit.material,
 					ordering: resolved.drawUnit.ordering,
+					receivesOutdoorPssm: false,
 					renderScopeKey: scopeKey(scope),
 					source: "env-cell-shell",
 					transparentSort: resolved.drawUnit.transparentSort,
@@ -1945,6 +2223,9 @@ export class WebGL2Renderer implements Renderer {
 		);
 		const scope = node.placement.scope;
 		const renderScopeKey = scopeKey(scope);
+		const receivesOutdoorPssm = isOutdoorPssmReceiverFootprint(
+			contribution.footprint,
+		);
 		for (const resolved of node.drawUnits) {
 			const { drawUnit } = resolved;
 			objects.push(
@@ -1959,6 +2240,7 @@ export class WebGL2Renderer implements Renderer {
 					localToLandblock: node.placement.localToLandblock,
 					material: drawUnit.material,
 					ordering: drawUnit.ordering,
+					receivesOutdoorPssm,
 					renderScopeKey,
 					source,
 					transparentSort: drawUnit.transparentSort,
@@ -1983,6 +2265,7 @@ export class WebGL2Renderer implements Renderer {
 					localToLandblock: node.placement.localToLandblock,
 					material: template.material,
 					ordering: "transparent",
+					receivesOutdoorPssm,
 					renderScopeKey,
 					source,
 					transparentSort: template.transparentSort,
@@ -2622,6 +2905,7 @@ export class WebGL2Renderer implements Renderer {
 						localToLandblock,
 						material: drawUnit.material,
 						ordering: drawUnit.ordering,
+						receivesOutdoorPssm: false,
 						renderScopeKey: PORTAL_TRANSITION_SCOPE,
 						source: "portal-transition",
 						transparentSort: {
@@ -2957,7 +3241,7 @@ export class WebGL2Renderer implements Renderer {
 		if (nearCount > 0) {
 			const gpu = profile?.beginGpuPhase("nearTerrain") ?? null;
 			try {
-				this.#beginNearTerrainGroup(
+				const nearProgram = this.#beginNearTerrainGroup(
 					view,
 					shading,
 					passResources,
@@ -2965,7 +3249,7 @@ export class WebGL2Renderer implements Renderer {
 					view.terrain.length,
 				);
 				routedTerrainPass = true;
-				this.#drawNearTerrainGroup(view, shading, farCutoff);
+				this.#drawNearTerrainGroup(view, shading, farCutoff, nearProgram);
 			} finally {
 				gpu?.finish();
 			}
@@ -3041,8 +3325,13 @@ export class WebGL2Renderer implements Renderer {
 		passResources: TerrainFrameInput,
 		portalPipeline: WebGL2PortalScopeAtlasPipeline | null,
 		routeSubmissionCount: number,
-	): void {
-		const { program, uniforms } = this.#nearTerrainProgram;
+	): WebGL2NearTerrainProgram {
+		const selected = this.#activeOutdoorPssmFrame
+			? this.#outdoorPssmReceiverPrograms.terrain()
+			: view.entityGrounding?.outdoorEnabled
+				? this.#entityGroundingPrograms.terrain()
+				: this.#nearTerrainProgram;
+		const { program, uniforms } = selected;
 		this.#beginTerrainGroup(
 			view,
 			shading,
@@ -3067,8 +3356,26 @@ export class WebGL2Renderer implements Renderer {
 			shading.anchorOrigin,
 			this.#dynamicLightScratch,
 		);
-		this.#beginTerrainLightMasks();
-		this.#beginTerrainPassResources(passResources);
+		const outdoorPssm = this.#activeOutdoorPssmFrame;
+		if (outdoorPssm) {
+			const pssmUniforms = selected.outdoorPssmUniforms;
+			if (!pssmUniforms) {
+				throw new Error("Active outdoor PSSM selected plain terrain program.");
+			}
+			bindWebGL2OutdoorPssmUniforms(
+				gl,
+				pssmUniforms,
+				outdoorPssm,
+				this.#outdoorPssmUniformScratch,
+			);
+			gl.activeTexture(gl.TEXTURE0 + OUTDOOR_PSSM_TEXTURE_UNIT);
+			gl.bindTexture(gl.TEXTURE_2D_ARRAY, outdoorPssm.targets.depth);
+			gl.bindSampler(OUTDOOR_PSSM_TEXTURE_UNIT, null);
+			gl.activeTexture(gl.TEXTURE0);
+		}
+		this.#beginTerrainLightMasks(selected);
+		this.#beginTerrainPassResources(passResources, selected);
+		return selected;
 	}
 
 	#beginFarTerrainGroup(
@@ -3098,6 +3405,7 @@ export class WebGL2Renderer implements Renderer {
 		view: PreparedView,
 		shading: SceneShading,
 		farCutoff: number | null,
+		program: WebGL2NearTerrainProgram,
 	): void {
 		for (const terrain of view.terrain) {
 			if (this.#isFarTerrain(terrain, view, farCutoff)) continue;
@@ -3106,13 +3414,13 @@ export class WebGL2Renderer implements Renderer {
 				view.anchorCoordinates,
 				this.#offsetScratch,
 			);
-			this.#bindTerrainSurfaceField(terrain);
+			this.#bindTerrainSurfaceField(terrain, program);
 			const landblockLights = shading.staticLights(
 				terrain.drawUnit.landblockId,
 			);
 			bindWebGL2StaticLights(
 				this.#gl,
-				this.#nearTerrainProgram.uniforms,
+				program.uniforms,
 				landblockLights.lights,
 				shading.anchorOrigin,
 				shading.authoredLightResponse,
@@ -3120,9 +3428,10 @@ export class WebGL2Renderer implements Renderer {
 			);
 			this.#uploadTerrainLightMask(landblockLights);
 			this.#frameSelectionMetrics.staticLightBinds += 1;
+			this.#applyTerrainGrounding(program, terrain, view);
 			this.#drawTerrainGeometry(
 				terrain.program.geometry,
-				this.#nearTerrainProgram.uniforms.landblockOffset,
+				program.uniforms.landblockOffset,
 				landblockOffset,
 			);
 		}
@@ -3150,12 +3459,59 @@ export class WebGL2Renderer implements Renderer {
 		view: PreparedView,
 		farCutoff: number | null,
 	): boolean {
+		const outdoorGrounding = view.entityGrounding?.outdoorByLandblockId.get(
+			terrain.drawUnit.landblockId,
+		);
+		if (outdoorGrounding && outdoorGrounding.count > 0) return false;
+		if (
+			this.#activeOutdoorPssmFrame &&
+			terrainLandblockIntersectsShadowDistance(
+				terrain.drawUnit.coordinates,
+				view.anchorCoordinates,
+				view.cameraPosition,
+				this.#activeOutdoorPssmFrame.settings.maximumDistance,
+			)
+		) {
+			return false;
+		}
 		return (
 			farCutoff !== null &&
 			landblockChebyshevDistance(
 				terrain.drawUnit.coordinates,
 				view.anchorCoordinates,
 			) >= farCutoff
+		);
+	}
+
+	/** Bind one simple-mode terrain landblock's analytic records before its existing draw. */
+	#applyTerrainGrounding(
+		program: WebGL2NearTerrainProgram,
+		terrain: TerrainFrameInput,
+		view: PreparedView,
+	): void {
+		const uniforms = program.entityGroundingUniforms;
+		const active = view.entityGrounding;
+		const selection = active?.outdoorByLandblockId.get(
+			terrain.drawUnit.landblockId,
+		);
+		if (!uniforms) {
+			if (active?.outdoorEnabled && selection !== undefined) {
+				throw new Error(
+					"Active outdoor grounding draw selected an ordinary terrain program.",
+				);
+			}
+			return;
+		}
+		if (!active?.outdoorEnabled || selection === undefined) {
+			throw new Error(
+				"Terrain grounding program selected without an active landblock record set.",
+			);
+		}
+		applyWebGL2EntityGroundingUniforms(
+			this.#directGroundingUniforms,
+			uniforms,
+			selection,
+			active.settings,
 		);
 	}
 
@@ -3170,7 +3526,10 @@ export class WebGL2Renderer implements Renderer {
 	 * Bound per pass rather than once at program build because other passes own these texture
 	 * units between terrain passes.
 	 */
-	#beginTerrainPassResources(input: TerrainFrameInput): void {
+	#beginTerrainPassResources(
+		input: TerrainFrameInput,
+		program: WebGL2NearTerrainProgram,
+	): void {
 		const { textures } = input.program;
 		const composition = this.#resources.getTexture2D(input.program.composition);
 		const colors = this.#resources.getTextureArray(textures.colors.resource);
@@ -3185,14 +3544,14 @@ export class WebGL2Renderer implements Renderer {
 		this.#bindTexture2D(
 			1,
 			composition,
-			this.#nearTerrainProgram.uniforms.composition,
+			program.uniforms.composition,
 			"exact",
 			TextureWrapMode.Clamp,
 		);
 		this.#bindTextureArray(
 			2,
 			colors,
-			this.#nearTerrainProgram.uniforms.colors,
+			program.uniforms.colors,
 			"filterable",
 			TextureWrapMode.Repeat,
 		);
@@ -3203,21 +3562,21 @@ export class WebGL2Renderer implements Renderer {
 		this.#bindTextureArray(
 			3,
 			blendMasks,
-			this.#nearTerrainProgram.uniforms.blendMasks,
+			program.uniforms.blendMasks,
 			"filterable",
 			TextureWrapMode.Clamp,
 		);
 		this.#bindTextureArray(
 			4,
 			roadMasks,
-			this.#nearTerrainProgram.uniforms.roadMasks,
+			program.uniforms.roadMasks,
 			"filterable",
 			TextureWrapMode.Clamp,
 		);
 		this.#bindTexture2D(
 			5,
 			detail,
-			this.#nearTerrainProgram.uniforms.detail,
+			program.uniforms.detail,
 			"filterable",
 			TextureWrapMode.Repeat,
 		);
@@ -3230,7 +3589,10 @@ export class WebGL2Renderer implements Renderer {
 	 * Everything else the terrain shader samples is region-constant and already bound for the pass
 	 * by `#beginTerrainPassResources`.
 	 */
-	#bindTerrainSurfaceField(input: TerrainFrameInput): void {
+	#bindTerrainSurfaceField(
+		input: TerrainFrameInput,
+		program: WebGL2NearTerrainProgram,
+	): void {
 		const surfaceField = this.#resources.getTexture2D(
 			input.program.surfaceField,
 		);
@@ -3238,7 +3600,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#bindTexture2D(
 			0,
 			surfaceField,
-			this.#nearTerrainProgram.uniforms.surfaceField,
+			program.uniforms.surfaceField,
 			"exact",
 			TextureWrapMode.Clamp,
 		);
@@ -3251,7 +3613,7 @@ export class WebGL2Renderer implements Renderer {
 	 * Uses an `exact` sampler because integer textures are not filterable. Bound once per pass so
 	 * each landblock pays only its table upload, and only when it has lights to name.
 	 */
-	#beginTerrainLightMasks(): void {
+	#beginTerrainLightMasks(program: WebGL2NearTerrainProgram): void {
 		const gl = this.#gl;
 		gl.activeTexture(gl.TEXTURE0 + TERRAIN_LIGHT_MASK_TEXTURE_UNIT);
 		gl.bindTexture(gl.TEXTURE_2D, this.#terrainLightMask.texture);
@@ -3262,7 +3624,7 @@ export class WebGL2Renderer implements Renderer {
 			wrap: TextureWrapMode.Clamp,
 		});
 		gl.uniform1i(
-			this.#nearTerrainProgram.uniforms.staticLightMask,
+			program.uniforms.staticLightMask,
 			TERRAIN_LIGHT_MASK_TEXTURE_UNIT,
 		);
 		gl.activeTexture(gl.TEXTURE0);
@@ -3448,15 +3810,27 @@ export class WebGL2Renderer implements Renderer {
 			gl.depthMask(true);
 			this.#objectState.applyBlend(null);
 			for (const object of objects) {
-				const program =
-					object.drawKind === "instanced"
-						? this.#instancedObjectProgram
-						: this.#objectProgram;
+				const receivesIndoorGrounding =
+					object.source === "env-cell-shell" &&
+					view.entityGrounding?.indoorByScopeKey.has(object.renderScopeKey) ===
+						true;
+				const receivesOutdoorPssm =
+					this.#activeOutdoorPssmFrame !== null && object.receivesOutdoorPssm;
+				const program = receivesIndoorGrounding
+					? this.#entityGroundingPrograms.fogged()
+					: receivesOutdoorPssm
+						? object.drawKind === "instanced"
+							? this.#outdoorPssmReceiverPrograms.foggedInstanced()
+							: this.#outdoorPssmReceiverPrograms.foggedBaked()
+						: object.drawKind === "instanced"
+							? this.#instancedObjectProgram
+							: this.#objectProgram;
 				const programChanged = this.#objectState.applyProgram(program.program);
 				if (programChanged) {
 					this.#activateObjectProgram(program, view, shading);
 				}
 				this.#applyObjectLighting(program, object, shading);
+				this.#applyObjectGrounding(program, object, view);
 				portalPipeline?.routeObjectSubmission(
 					object.renderScopeKey,
 					program.uniforms.clipTransform,
@@ -3499,14 +3873,41 @@ export class WebGL2Renderer implements Renderer {
 			// with an integer texture bound under a float sampler and every draw failed validation.
 			this.#beginObjectPhase();
 			gl.depthMask(false);
-			const portalPrograms = portalPipeline
-				? this.#requirePortalBlendedObjectPrograms()
-				: null;
+			let portalPrograms: {
+				readonly baked: WebGL2ObjectProgram;
+				readonly instanced: WebGL2InstancedObjectProgram;
+			} | null = null;
 			for (const object of sortedBlended) {
-				const program =
-					object.drawKind === "instanced"
-						? (portalPrograms?.instanced ?? this.#blendedInstancedObjectProgram)
-						: (portalPrograms?.baked ?? this.#blendedObjectProgram);
+				const receivesIndoorGrounding =
+					object.source === "env-cell-shell" &&
+					view.entityGrounding?.indoorByScopeKey.has(object.renderScopeKey) ===
+						true;
+				const receivesOutdoorPssm =
+					this.#activeOutdoorPssmFrame !== null && object.receivesOutdoorPssm;
+				let program: AnyObjectProgram;
+				if (receivesIndoorGrounding) {
+					program = this.#entityGroundingPrograms.blended(
+						portalPipeline !== null,
+					);
+				} else if (receivesOutdoorPssm) {
+					program =
+						object.drawKind === "instanced"
+							? this.#outdoorPssmReceiverPrograms.blendedInstanced(
+									portalPipeline !== null,
+								)
+							: this.#outdoorPssmReceiverPrograms.blendedBaked(
+									portalPipeline !== null,
+								);
+				} else {
+					if (portalPipeline) {
+						portalPrograms ??= this.#requirePortalBlendedObjectPrograms();
+					}
+					program =
+						object.drawKind === "instanced"
+							? (portalPrograms?.instanced ??
+								this.#blendedInstancedObjectProgram)
+							: (portalPrograms?.baked ?? this.#blendedObjectProgram);
+				}
 				if (this.#objectState.applyProgram(program.program)) {
 					this.#activateObjectProgram(program, view, shading);
 				}
@@ -3523,6 +3924,7 @@ export class WebGL2Renderer implements Renderer {
 					);
 				}
 				this.#applyObjectLighting(program, object, shading);
+				this.#applyObjectGrounding(program, object, view);
 				this.#objectState.applyBlend(object.blendPolicy);
 				this.#drawObjectRange(program, object, view.landblockOffsets);
 			}
@@ -3940,6 +4342,23 @@ export class WebGL2Renderer implements Renderer {
 			shading.anchorOrigin,
 			this.#dynamicLightScratch,
 		);
+		const pssmUniforms = program.outdoorPssmUniforms;
+		if (pssmUniforms) {
+			const active = this.#activeOutdoorPssmFrame;
+			if (!active) {
+				throw new Error("Outdoor PSSM receiver program has no active frame.");
+			}
+			bindWebGL2OutdoorPssmUniforms(
+				gl,
+				pssmUniforms,
+				active,
+				this.#outdoorPssmUniformScratch,
+			);
+			this.#objectState.applyTextureArrayUnit(
+				OUTDOOR_PSSM_TEXTURE_UNIT,
+				active.targets.depth,
+			);
+		}
 		if ("fogUniforms" in program) {
 			gl.uniform3f(
 				program.fogUniforms.cameraPosition,
@@ -3987,6 +4406,44 @@ export class WebGL2Renderer implements Renderer {
 			this.#dynamicLightScratch,
 		);
 		this.#frameSelectionMetrics.staticLightBinds += 1;
+	}
+
+	/** Bind one shell scope's fixed analytic-grounding set through the object uniform cache. */
+	#applyObjectGrounding(
+		program: AnyObjectProgram,
+		object: ObjectFrameInput,
+		view: PreparedView,
+	): void {
+		const uniforms = program.entityGroundingUniforms;
+		const active = view.entityGrounding;
+		const selection = active?.indoorByScopeKey.get(object.renderScopeKey);
+		if (!uniforms) {
+			if (object.source === "env-cell-shell" && selection !== undefined) {
+				throw new Error(
+					"Active EnvCell grounding draw selected an ordinary object program.",
+				);
+			}
+			return;
+		}
+		if (
+			object.source !== "env-cell-shell" ||
+			active === null ||
+			selection === undefined
+		) {
+			throw new Error(
+				"Indoor grounding program selected without an active EnvCell record set.",
+			);
+		}
+		const attempted = entityGroundingUniformAttemptCount(selection);
+		const issued = applyWebGL2EntityGroundingUniforms(
+			this.#objectState,
+			uniforms,
+			selection,
+			active.settings,
+		);
+		this.#frameSelectionMetrics.objectUniformUploads += issued;
+		this.#frameSelectionMetrics.objectSuppressedUniformUploads +=
+			attempted - issued;
 	}
 
 	/**
@@ -4092,6 +4549,7 @@ function frameTemplateBatchIdentityEquals(
 	return (
 		leftInstances.cohortKey === rightInstances.cohortKey &&
 		left.source === right.source &&
+		left.receivesOutdoorPssm === right.receivesOutdoorPssm &&
 		left.renderScopeKey === right.renderScopeKey &&
 		left.geometry === right.geometry &&
 		left.landblockId === right.landblockId &&
@@ -4110,7 +4568,7 @@ function opaqueObjectInstanceBatchKey(
 			"Opaque instance grouping received a non-frame instance input.",
 		);
 	}
-	return `${object.ordering}\0${object.source}\0${object.renderScopeKey}\0${object.landblockId}\0${instances.cohortKey}\0${object.geometry}\0${object.indexStart}\0${object.indexCount}`;
+	return `${object.ordering}\0${object.source}\0${object.receivesOutdoorPssm ? "pssm" : "plain"}\0${object.renderScopeKey}\0${object.landblockId}\0${instances.cohortKey}\0${object.geometry}\0${object.indexStart}\0${object.indexCount}`;
 }
 
 function createObjectFallbackTexture(gl: WebGL2RenderingContext): WebGLTexture {

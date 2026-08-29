@@ -228,6 +228,17 @@ describe("GamePresentationRuntime view and interest control", () => {
 				resetProfile: vi.fn(),
 				snapshot: () => ({
 					compiledObjectDraws: null,
+					entityShadows: {
+						outdoorTargets: {
+							activeBytes: 0,
+							activeFramebufferCount: 0,
+							activeTextureCount: 0,
+							allocatedGenerationCount: 0,
+							cascadeCount: null,
+							disposedGenerationCount: 0,
+							resolution: null,
+						},
+					},
 					profile: null,
 					profilingEnabled: false,
 					selectionMetrics: frameSelectionMetrics,
@@ -297,6 +308,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 			layerVisibility: DEFAULT_FRAME_SETTINGS.layerVisibility,
 			ambientOcclusion: DEFAULT_FRAME_SETTINGS.ambientOcclusion,
 			colorGrade: DEFAULT_FRAME_SETTINGS.colorGrade,
+			entityShadows: DEFAULT_FRAME_SETTINGS.entityShadows,
 			distanceFogEnabled: true,
 			viewerLightEnabled:
 				FRONTEND_TUNING.rendering.viewerLight.enabledByDefault,
@@ -327,6 +339,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 				},
 			},
 			colorGrade: DEFAULT_FRAME_SETTINGS.colorGrade,
+			entityShadows: DEFAULT_FRAME_SETTINGS.entityShadows,
 			distanceFogEnabled: false,
 			viewerLightEnabled: false,
 			weatherEnabled: true,
@@ -351,6 +364,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 				},
 			},
 			colorGrade: DEFAULT_FRAME_SETTINGS.colorGrade,
+			entityShadows: DEFAULT_FRAME_SETTINGS.entityShadows,
 			distanceFogEnabled: false,
 			viewerLightEnabled: false,
 			weatherEnabled: true,
@@ -365,6 +379,17 @@ describe("GamePresentationRuntime view and interest control", () => {
 		});
 		expect(runtime.getRendererFrameDiagnostics()).toEqual({
 			compiledObjectDraws: null,
+			entityShadows: {
+				outdoorTargets: {
+					activeBytes: 0,
+					activeFramebufferCount: 0,
+					activeTextureCount: 0,
+					allocatedGenerationCount: 0,
+					cascadeCount: null,
+					disposedGenerationCount: 0,
+					resolution: null,
+				},
+			},
 			profile: null,
 			profilingEnabled: false,
 			selectionMetrics: frameSelectionMetrics,
@@ -1590,6 +1615,7 @@ function spawnedEntity(
 			sampleMode: "authoritative-only",
 		},
 		presentation: {
+			category: "other",
 			appearance: {
 				paletteDid: null,
 				partChanges: [],

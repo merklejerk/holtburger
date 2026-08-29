@@ -19,6 +19,10 @@ import {
 	runWebGL2PortalScopeAtlasExecutorFixture,
 	type WebGL2PortalScopeAtlasExecutorFixtureResult,
 } from "./webgl2-portal-scope-atlas-executor-fixture";
+import {
+	runWebGL2PssmFixture,
+	type WebGL2PssmFixtureResult,
+} from "./webgl2-pssm-fixture";
 
 /** One transient RGBA preview copied from a live two-dimensional GPU texture. */
 export interface Texture2DReadback {
@@ -185,6 +189,12 @@ export class WebGL2Device {
 	probePortalScopeAtlasExecutor(): WebGL2PortalScopeAtlasExecutorFixtureResult {
 		this.#assertReady();
 		return runWebGL2PortalScopeAtlasExecutorFixture(this.#gl);
+	}
+
+	/** Prove the outdoor depth-array and material-free caster shader on this browser context. */
+	probeOutdoorPssm(): WebGL2PssmFixtureResult {
+		this.#assertReady();
+		return runWebGL2PssmFixture(this.#gl);
 	}
 
 	/** Return a copied discriminant suitable for app-level restart policy and diagnostics. */

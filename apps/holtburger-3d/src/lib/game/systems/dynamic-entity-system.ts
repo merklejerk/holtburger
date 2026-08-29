@@ -110,7 +110,9 @@ interface DynamicEntityRecord {
 	/** The resident's installed sound table, staged so a `SoundTable` key resolves from memory. */
 	soundTableHandle: PreparedAssetHandle<DecodedSoundTable> | null;
 	preparedAnimation: PreparedDynamicAnimation | null;
-	/** Conservative object-local envelope matching the exact pose currently published to draw. */
+	/** Exact object-local rigid bounds matching the pose currently published to draw. */
+	rigidPresentationBounds: AABB3;
+	/** Current rigid pose expanded only by its particle-preservation envelope. */
 	publishedPresentationBounds: AABB3;
 	/**
 	 * Pose-independent envelope the scene graph's broadphase culls against, before any particle
@@ -408,6 +410,7 @@ export class DynamicEntitySystem<
 			this.#scene.destroyNode(rootNodeId);
 			throw cause;
 		}
+		const rigidPresentationBounds = staticPresentationBounds(source);
 		const record: DynamicEntityRecord = {
 			animationHandle: null,
 			emitterHandles: [],
@@ -420,7 +423,8 @@ export class DynamicEntitySystem<
 			rootNodeId,
 			source,
 			preparedAnimation: null,
-			publishedPresentationBounds: staticPresentationBounds(source),
+			rigidPresentationBounds,
+			publishedPresentationBounds: rigidPresentationBounds,
 			cullingBounds: null,
 			appliedEnvelopeRadius: 0,
 			presentationState: {
@@ -535,6 +539,7 @@ export class DynamicEntitySystem<
 		}
 		child.articulatedPose = pose;
 		const placedBounds = presentationBoundsForPose(child.source, pose);
+		child.rigidPresentationBounds = placedBounds;
 		child.publishedPresentationBounds = expandBounds(
 			placedBounds,
 			child.appliedEnvelopeRadius,
@@ -554,9 +559,26 @@ export class DynamicEntitySystem<
 		return this.#entities.get(nodeId)?.renderable ?? null;
 	}
 
-	/** Return the current drawn-pose envelope without expanding rigid-part contributions. */
+	/** Return producer-resolved presentation policy without exposing the mutable entity record. */
+	getPresentationCategory(
+		nodeId: SceneNodeId,
+	): DynamicPresentationSource["category"] | null {
+		return this.#entities.get(nodeId)?.source.category ?? null;
+	}
+
+	/** Return producer-stable identity for deterministic frontend presentation policy. */
+	getPresentationIdentity(nodeId: SceneNodeId): string | null {
+		return this.#entities.get(nodeId)?.source.identity ?? null;
+	}
+
+	/** Return the current drawn pose expanded by its particle-preservation envelope. */
 	getPublishedPresentationBounds(nodeId: SceneNodeId): AABB3 | null {
 		return this.#entities.get(nodeId)?.publishedPresentationBounds ?? null;
+	}
+
+	/** Return exact current rigid-pose bounds without particle-envelope expansion. */
+	getPublishedRigidPresentationBounds(nodeId: SceneNodeId): AABB3 | null {
+		return this.#entities.get(nodeId)?.rigidPresentationBounds ?? null;
 	}
 
 	/** Resolve every active rigid part with the selected entity's plural source-domain scopes. */
@@ -777,7 +799,6 @@ export class DynamicEntitySystem<
 		this.#lastParticleEnvelopeQueryCount = particleEnvelopeQueryCount;
 	}
 
-	/** Grow presentation bounds to contain whatever this entity is currently emitting. */
 	/**
 	 * Fold the current particle envelope into every bounds that culls this entity.
 	 *
@@ -1131,12 +1152,13 @@ export class DynamicEntitySystem<
 						sample.articulatedPose.authoredRootTransform,
 						sample.effects.rootTransformModifier,
 					);
+		const rigidPresentationBounds = presentationBoundsForSample(
+			updatedParts,
+			entity.source.scale,
+			visualRootTransform,
+		);
 		const publishedPresentationBounds = expandBounds(
-			presentationBoundsForSample(
-				updatedParts,
-				entity.source.scale,
-				visualRootTransform,
-			),
+			rigidPresentationBounds,
 			entity.appliedEnvelopeRadius,
 		);
 		this.#scene.updateLocalTransform(
@@ -1160,6 +1182,7 @@ export class DynamicEntitySystem<
 			})),
 		};
 		entity.articulatedPose = sample.articulatedPose;
+		entity.rigidPresentationBounds = rigidPresentationBounds;
 		entity.publishedPresentationBounds = publishedPresentationBounds;
 	}
 

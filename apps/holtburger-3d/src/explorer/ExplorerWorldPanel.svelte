@@ -28,6 +28,8 @@
 	} from "../lib/game/renderer/ambient-occlusion-policy";
 	import type { PhysicalFlyStatus } from "./physical-fly-session";
 	import type { ExplorerCameraMode } from "../lib/game/motion/host-physical-fly-path";
+	import type { EntityShadowSettings } from "../lib/game/renderer/entity-shadow-policy";
+	import ExplorerShadowControls from "./ExplorerShadowControls.svelte";
 
 	interface Props {
 		/** Whether Explorer has a runtime available to accept world operations. */
@@ -55,6 +57,8 @@
 		readonly distanceFogEnabled: boolean;
 		/** User-switchable near-field ambient-occlusion presentation. */
 		readonly ambientOcclusion: AmbientOcclusionSettings;
+		/** Complete outdoor and indoor entity-shadow presentation policy. */
+		readonly entityShadows: EntityShadowSettings;
 		readonly viewerLightEnabled: boolean;
 		/** Mirrors retail's `DisableMostWeatherEffects` player option, inverted. */
 		readonly weatherEnabled: boolean;
@@ -71,6 +75,9 @@
 		readonly updateDistanceFog: (enabled: boolean) => void;
 		readonly updateAmbientOcclusionSettings: (
 			settings: AmbientOcclusionSettings,
+		) => void;
+		readonly updateEntityShadowSettings: (
+			settings: EntityShadowSettings,
 		) => void;
 		readonly updateViewerLight: (enabled: boolean) => void;
 		readonly updateWeather: (enabled: boolean) => void;
@@ -115,6 +122,7 @@
 		updateEnvironment,
 		distanceFogEnabled,
 		ambientOcclusion,
+		entityShadows,
 		viewerLightEnabled,
 		weatherEnabled,
 		clockFollowing,
@@ -128,6 +136,7 @@
 		updateAmbientVolume,
 		updateDistanceFog,
 		updateAmbientOcclusionSettings,
+		updateEntityShadowSettings,
 		updateViewerLight,
 		updateWeather,
 		updateClockFollowing,
@@ -250,10 +259,10 @@
 	<form class="explorer-world-form" onsubmit={submitInterest}>
 		<fieldset class="explorer-section" disabled={!runtimeReady}>
 			<legend>Scene interest</legend>
-			<label class="explorer-form-field">
+			<label class="ac-form-field">
 				<span>Target landblock, cell, or coordinates</span>
 				<input
-					class="explorer-control"
+					class="ac-control"
 					autocomplete="off"
 					bind:value={interestInput}
 					placeholder="da55, da550123, or 33.6N 40W"
@@ -391,10 +400,10 @@
 		disabled={!runtimeReady || cameraModePending}
 	>
 		<legend>Camera navigation</legend>
-		<label class="explorer-form-field">
+		<label class="ac-form-field">
 			<span>Position authority</span>
 			<select
-				class="explorer-control explorer-control--select"
+				class="ac-control ac-control--select"
 				value={cameraMode}
 				onchange={handleCameraModeChange}
 			>
@@ -433,7 +442,7 @@
 			<label class="explorer-environment-field">
 				<span>Day</span>
 				<input
-					class="explorer-control"
+					class="ac-control"
 					min="0"
 					step="1"
 					type="number"
@@ -455,7 +464,7 @@
 			<label class="explorer-environment-field">
 				<span>Sky group</span>
 				<select
-					class="explorer-control explorer-control--select"
+					class="ac-control ac-control--select"
 					value={environmentSelection.dayGroupOverride ?? "auto"}
 					onchange={(event) =>
 						updateEnvironmentSelection("dayGroupOverride", event)}
@@ -623,10 +632,14 @@
 					updateAmbientOcclusionParameter("bilateralDepthThreshold", event)}
 			/>
 		</label>
+		<ExplorerShadowControls
+			settings={entityShadows}
+			updateSettings={updateEntityShadowSettings}
+		/>
 		<label class="explorer-environment-field">
 			<span>Render scale</span>
 			<select
-				class="explorer-control explorer-control--select"
+				class="ac-control ac-control--select"
 				value={renderScale}
 				onchange={(event) =>
 					updateRenderScale(
@@ -645,7 +658,7 @@
 		<label class="explorer-environment-field">
 			<span>Texture filtering</span>
 			<select
-				class="explorer-control explorer-control--select"
+				class="ac-control ac-control--select"
 				disabled={maximumTextureAnisotropy === null}
 				value={textureFiltering}
 				onchange={(event) =>

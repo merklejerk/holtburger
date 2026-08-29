@@ -10,8 +10,8 @@ use holtburger_world::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    DynamicEntityContent, DynamicEntityProjectionInput, DynamicEntitySpatialMembership,
-    DynamicEntityWorldProjection,
+    DynamicEntityCategory, DynamicEntityContent, DynamicEntityProjectionInput,
+    DynamicEntitySpatialMembership, DynamicEntityWorldProjection,
 };
 
 /// One monotonic host instant used to align snapshot/event facts with frontend time.
@@ -45,6 +45,8 @@ pub struct DynamicEntityIdentityView {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DynamicEntityPresentationView {
+    /// Producer-resolved frontend category used by presentation participation policy.
+    pub category: DynamicEntityCategory,
     /// Setup, sound, and physics-effect identities.
     pub content: DynamicEntityContent,
     /// Lossless ordered material and part substitutions.
@@ -140,6 +142,8 @@ pub enum DynamicEntityPlacementView {
 pub struct DynamicEntityViewSource {
     /// Producer-composition generation guarding async realization work.
     pub generation: u64,
+    /// Producer-resolved frontend category; the source-neutral projector never classifies.
+    pub category: DynamicEntityCategory,
     /// Frontend-relevant identity without solver-only template category.
     pub identity: DynamicEntityIdentityView,
     /// Immutable presentation and behavior identities.
@@ -165,11 +169,13 @@ impl DynamicEntityViewSource {
     /// definition/body join rather than inside it.
     pub fn from_projection(
         generation: u64,
+        category: DynamicEntityCategory,
         input: DynamicEntityProjectionInput,
         playing_clip: Option<PlayingMotionClip>,
     ) -> Self {
         Self {
             generation,
+            category,
             identity: DynamicEntityIdentityView {
                 guid: input.identity.guid,
                 wcid: input.identity.wcid,
@@ -433,6 +439,7 @@ pub fn project_dynamic_entity_view(source: DynamicEntityViewSource) -> DynamicEn
         generation: source.generation,
         identity: source.identity,
         presentation: DynamicEntityPresentationView {
+            category: source.category,
             content: source.content,
             appearance: source.appearance,
             object_scale: source.object_scale,

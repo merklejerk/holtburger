@@ -181,12 +181,12 @@
 <form class="spawn-composer" onsubmit={submit}>
 	<fieldset class="explorer-section" disabled={!enabled || busy}>
 		<legend>Spawn entity</legend>
-		<label class="explorer-form-field">
+		<label class="ac-form-field">
 			<span>Weenie</span>
 			<div class="weenie-picker">
 				<input
 					bind:this={inputElement}
-					class="explorer-control weenie-input"
+					class="ac-control weenie-input"
 					value={picker.input}
 					placeholder="Name, class, or WCID"
 					spellcheck="false"
@@ -253,10 +253,10 @@
 		{/if}
 
 		<div class="spawn-actions">
-			<label class="explorer-form-field distance-field">
+			<label class="ac-form-field distance-field">
 				<span>Distance</span>
 				<input
-					class="explorer-control"
+					class="ac-control"
 					bind:value={distance}
 					type="number"
 					min={EXPLORER_SPAWN_DISTANCE.minimum}

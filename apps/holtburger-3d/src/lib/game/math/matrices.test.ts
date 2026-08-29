@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	createOrthographicMat4,
 	createScaleMat4,
 	createTranslationMat4,
 	createViewMat4,
@@ -14,6 +15,30 @@ import {
 import { AABB3, Mat4, Quat, Vec3 } from "./types";
 
 describe("matrix composition", () => {
+	it("maps an orthographic box onto the WebGL clip cube", () => {
+		const storage = Mat4.zero();
+		const projection = createOrthographicMat4(-2, 6, -4, 2, 3, 11, storage);
+		expect(projection).toBe(storage);
+		expect(transformPoint3(projection, new Vec3(-2, -4, -3))).toEqual(
+			new Vec3(-1, -1, -1),
+		);
+		expect(transformPoint3(projection, new Vec3(6, 2, -11))).toEqual(
+			new Vec3(1, 1, 1),
+		);
+	});
+
+	it("rejects malformed orthographic bounds", () => {
+		expect(() => createOrthographicMat4(0, Number.NaN, -1, 1, 0, 1)).toThrow(
+			"must be finite",
+		);
+		expect(() => createOrthographicMat4(1, 1, -1, 1, 0, 1)).toThrow(
+			"extents must be non-empty",
+		);
+		expect(() => createOrthographicMat4(-1, 1, -1, 1, -1, 1)).toThrow(
+			"zero or positive near",
+		);
+	});
+
 	it("composes child translations into their parent coordinate frame", () => {
 		const parent = createTranslationMat4(new Vec3(10, 20, 30));
 		const child = createTranslationMat4(new Vec3(1, 2, 3));

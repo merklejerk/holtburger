@@ -19,6 +19,8 @@ const DEFAULT_FOLLOW_FLIGHT_MS = 20_000;
 const DEFAULT_VIEWPORT_WIDTH = 1_280;
 const DEFAULT_VIEWPORT_HEIGHT = 720;
 const DEFAULT_DEVICE_SCALE_FACTOR = 1;
+/** Settle policy changes before each timed shadow benchmark window. */
+const ENTITY_SHADOW_BENCHMARK_WARMUP_MS = 500;
 /** Harness-local mirror of the browser policy contract, including capability admission. */
 const TEXTURE_FILTERING_OPTIONS = [
 	{ minimumAnisotropy: 1, policy: "nearest" },
@@ -91,11 +93,14 @@ try {
 							result.state.ambientOcclusionCoverageCensus,
 						textureFiltering: options.textureFiltering,
 						filteringCycleStates: result.filteringCycleStates,
+						entityShadowCycleStates: result.entityShadowCycleStates,
+						entityShadowBenchmark: result.entityShadowBenchmark,
 						modeCycleStates: result.modeCycleStates,
 						portalExecution: result.portalExecution,
 						portalTransitionDemo: options.portalTransitionDemo,
 						portalContextLossPolicy: result.state.portalContextLossPolicy,
 						portalScopeAtlasTargets: result.state.portalScopeAtlasTargets,
+						outdoorPssm: result.state.outdoorPssm,
 						consoleMessages: result.consoleMessages,
 						generatedDisabledState: result.generatedDisabledState,
 						fixture: options.fixture,
@@ -142,8 +147,17 @@ try {
 	if (options.filteringCycle) {
 		assertFilteringCycle(result.initialState, result.filteringCycleStates);
 	}
+	if (options.entityShadowCycle) {
+		assertEntityShadowCycle(
+			result.initialState,
+			result.entityShadowCycleStates,
+		);
+	}
 	if (options.fixture === "portal-scope-atlas") {
 		assertPortalScopeAtlasFixture(result.state);
+	}
+	if (options.fixture === "outdoor-pssm") {
+		assertOutdoorPssmFixture(result.state.outdoorPssm);
 	}
 	if (options.spawnWcid !== null && options.entityShowcaseCount === 0) {
 		assertSpawnedEntityLifecycle(result);
@@ -229,6 +243,9 @@ function parseArgs(args) {
 		ambientOcclusion: null,
 		ambientOcclusionCycle: false,
 		ambientOcclusionCoverage: false,
+		entityShadows: null,
+		entityShadowCycle: false,
+		entityShadowBenchmarkPairs: 0,
 		traceTerrainGl: false,
 		vitePort: null,
 		colorGrade: null,
@@ -669,6 +686,34 @@ function parseArgs(args) {
 			case "--ambient-occlusion-cycle":
 				parsed.ambientOcclusionCycle = true;
 				break;
+			case "--entity-shadows": {
+				const source = requireValue(args, ++index, arg);
+				try {
+					parsed.entityShadows = JSON.parse(source);
+				} catch (cause) {
+					throw new Error(
+						"--entity-shadows must be a complete JSON entity-shadow policy.",
+						{ cause },
+					);
+				}
+				break;
+			}
+			case "--entity-shadow-cycle":
+				parsed.entityShadowCycle = true;
+				break;
+			case "--entity-shadow-benchmark-pairs":
+				parsed.entityShadowBenchmarkPairs = Number(
+					requireValue(args, ++index, arg),
+				);
+				if (
+					!Number.isInteger(parsed.entityShadowBenchmarkPairs) ||
+					parsed.entityShadowBenchmarkPairs <= 0
+				) {
+					throw new Error(
+						"--entity-shadow-benchmark-pairs must be a positive integer.",
+					);
+				}
+				break;
 			case "--vite-port":
 				parsed.vitePort = parseVitePort(requireValue(args, ++index, arg), arg);
 				break;
@@ -713,12 +758,15 @@ function parseArgs(args) {
 			case "--fixture":
 				parsed.fixture = requireValue(args, ++index, arg);
 				if (
-					!["blended", "instanced", "portal-scope-atlas"].includes(
-						parsed.fixture,
-					)
+					![
+						"blended",
+						"instanced",
+						"outdoor-pssm",
+						"portal-scope-atlas",
+					].includes(parsed.fixture)
 				) {
 					throw new Error(
-						"--fixture must be blended, instanced, or portal-scope-atlas.",
+						"--fixture must be blended, instanced, outdoor-pssm, or portal-scope-atlas.",
 					);
 				}
 				break;
@@ -990,6 +1038,16 @@ function parseArgs(args) {
 	if (parsed.entityPairWcid !== null && parsed.entityTicks === 0) {
 		throw new Error("--entity-pair-wcid requires --entity-ticks.");
 	}
+	if (parsed.entityShadowBenchmarkPairs > 0) {
+		if (!parsed.gpu) {
+			throw new Error("--entity-shadow-benchmark-pairs requires --gpu.");
+		}
+		if (parsed.measureMs <= 0) {
+			throw new Error(
+				"--entity-shadow-benchmark-pairs requires a positive --measure-ms.",
+			);
+		}
+	}
 	return parsed;
 }
 
@@ -1136,6 +1194,14 @@ Options:
                          full-resolution opaque-depth census. Implies --ambient-occlusion.
   --ambient-occlusion-cycle
                          Exercise on, off, on policy and scratch ownership without reloading.
+  --entity-shadows <json>
+                         Replace the complete entity-shadow policy. Copy frameSettings.entityShadows
+                         from harness output, then edit values for a reproducible capture.
+  --entity-shadow-cycle Exercise none, simple, shadow-maps, and target resize without reloading.
+  --entity-shadow-benchmark-pairs <n>
+                         Measure alternating none/shadow-maps windows in one settled session.
+                         Requires --gpu and positive --measure-ms; add --profile-renderer for
+                         attributed CPU/GPU samples or omit it to measure profiler overhead.
   --mode-cycle           Exercise portal, flat, portal, flat frames without reloading content.
   --filtering-cycle      Change filtering during loading, then cycle supported modes without reload.
   --gpu                  Render on the real GPU adapter instead of SwiftShader. Required for
@@ -1155,7 +1221,7 @@ Options:
   --merge-census         Report how far the frame's baked object draws could merge.
   --texture-filtering <mode>
                          Select nearest, linear, or anisotropic-2x/4x/8x before content settles.
-  --fixture <name>      Use the blended, instanced, or portal-scope-atlas fixture.
+  --fixture <name>      Use the blended, instanced, outdoor-pssm, or portal-scope-atlas fixture.
   --settle-ms <ms>      Wait after requesting scene content. Default: ${DEFAULT_SETTLE_MS}
   --measure-ms <ms>     Reset timings after settling, then measure steady-state frames.
   --screenshot <path>   Persist the captured PNG after the harness exits.
@@ -1328,6 +1394,64 @@ function assertPortalScopeAtlasTargetsFixture(fixture) {
 	});
 }
 
+function assertOutdoorPssmFixture(fixture) {
+	if (!fixture) {
+		throw new Error("Outdoor PSSM fixture did not publish evidence.");
+	}
+	for (const field of [
+		"casterProgramLinked",
+		"groundingProgramsLinked",
+		"receiverProgramsLinked",
+		"initialLayersComplete",
+		"initialResourcesValid",
+		"resizedLayersComplete",
+		"resizedResourcesValid",
+		"resizedTargetReplaced",
+		"sameConfigurationReused",
+	]) {
+		if (fixture[field] !== true) {
+			throw new Error(
+				`Outdoor PSSM fixture failed ${field}: ${JSON.stringify(fixture)}.`,
+			);
+		}
+	}
+	assertOutdoorPssmDiagnostics(fixture.initialDiagnostics, {
+		activeBytes: 524_288,
+		activeFramebufferCount: 1,
+		activeTextureCount: 1,
+		allocatedGenerationCount: 1,
+		cascadeCount: 2,
+		disposedGenerationCount: 0,
+		resolution: 256,
+	});
+	assertOutdoorPssmDiagnostics(fixture.resizedDiagnostics, {
+		activeBytes: 3_145_728,
+		activeFramebufferCount: 1,
+		activeTextureCount: 1,
+		allocatedGenerationCount: 2,
+		cascadeCount: 3,
+		disposedGenerationCount: 1,
+		resolution: 512,
+	});
+	assertOutdoorPssmDiagnostics(fixture.disposedDiagnostics, {
+		activeBytes: 0,
+		activeFramebufferCount: 0,
+		activeTextureCount: 0,
+		allocatedGenerationCount: 2,
+		cascadeCount: null,
+		disposedGenerationCount: 2,
+		resolution: null,
+	});
+}
+
+function assertOutdoorPssmDiagnostics(actual, expected) {
+	if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+		throw new Error(
+			`Outdoor PSSM target diagnostics mismatch: expected ${JSON.stringify(expected)}, received ${JSON.stringify(actual)}.`,
+		);
+	}
+}
+
 function assertScopeAtlasTargetDiagnostics(actual, expected) {
 	if (JSON.stringify(actual) !== JSON.stringify(expected)) {
 		throw new Error(
@@ -1374,6 +1498,7 @@ function briefHarnessReport(result) {
 		frameProfile: result.state.frameProfile,
 		tickProfile: result.state.tickProfile,
 		frameSettings: result.state.frameSettings,
+		entityShadowResources: result.state.entityShadowResources,
 		portalScopeAtlasExecutorFixture: result.state.portalScopeAtlasExecutor,
 		portalExecution: result.portalExecution,
 		initialMetrics: result.initialState.metrics,
@@ -1383,6 +1508,11 @@ function briefHarnessReport(result) {
 		ambientOcclusionCycleMetrics: result.ambientOcclusionCycleStates.map(
 			(state) => state.metrics,
 		),
+		entityShadowCycle: result.entityShadowCycleStates.map((state) => ({
+			mode: state.frameSettings.entityShadows.mode,
+			resources: state.entityShadowResources,
+		})),
+		entityShadowBenchmark: result.entityShadowBenchmark,
 		filteringCycle: result.filteringCycleStates.map(
 			({ frameSettings }) => frameSettings.quality.textureFiltering,
 		),
@@ -2876,6 +3006,91 @@ function assertFilteringCycle(initialState, states) {
 	}
 }
 
+function assertEntityShadowCycle(initialState, states) {
+	if (states.length !== 5) {
+		throw new Error(
+			`Entity-shadow cycle produced ${states.length} snapshots, expected 5.`,
+		);
+	}
+	const initial = initialState.entityShadowResources?.outdoorTargets;
+	const disabled = states[0]?.entityShadowResources?.outdoorTargets;
+	const simple = states[1]?.entityShadowResources?.outdoorTargets;
+	const enabled = states[2]?.entityShadowResources?.outdoorTargets;
+	const reconfigured = states[3]?.entityShadowResources?.outdoorTargets;
+	const restored = states[4]?.entityShadowResources?.outdoorTargets;
+	if (
+		!initial ||
+		!disabled ||
+		!simple ||
+		!enabled ||
+		!reconfigured ||
+		!restored
+	) {
+		throw new Error("Entity-shadow cycle did not publish target diagnostics.");
+	}
+	if (states[0].frameSettings.entityShadows.mode !== "none") {
+		throw new Error("Entity-shadow disable step retained a non-none policy.");
+	}
+	if (
+		disabled.activeBytes !== 0 ||
+		disabled.activeFramebufferCount !== 0 ||
+		disabled.activeTextureCount !== 0
+	) {
+		throw new Error(
+			`Entity-shadow disable step retained GPU targets: ${JSON.stringify(disabled)}.`,
+		);
+	}
+	if (
+		states[1].frameSettings.entityShadows.mode !== "simple" ||
+		simple.activeBytes !== 0 ||
+		simple.activeFramebufferCount !== 0 ||
+		simple.activeTextureCount !== 0
+	) {
+		throw new Error(
+			`Entity-shadow simple step retained PSSM targets: ${JSON.stringify(simple)}.`,
+		);
+	}
+	if (states[2].frameSettings.entityShadows.mode !== "shadow-maps") {
+		throw new Error("Entity-shadow hybrid step did not select shadow-maps.");
+	}
+	if (
+		initial.activeBytes > 0 &&
+		disabled.disposedGenerationCount <= initial.disposedGenerationCount
+	) {
+		throw new Error(
+			"Entity-shadow disable step did not dispose its active generation.",
+		);
+	}
+	if (
+		enabled.activeBytes <= 0 ||
+		enabled.allocatedGenerationCount <= disabled.allocatedGenerationCount
+	) {
+		throw new Error(
+			"Entity-shadow re-enable step did not allocate one active generation.",
+		);
+	}
+	if (
+		reconfigured.resolution === enabled.resolution ||
+		reconfigured.allocatedGenerationCount <= enabled.allocatedGenerationCount ||
+		reconfigured.disposedGenerationCount <= enabled.disposedGenerationCount
+	) {
+		throw new Error(
+			"Entity-shadow resize step did not replace its target generation.",
+		);
+	}
+	if (
+		restored.resolution !==
+			initialState.frameSettings.entityShadows.pssm.mapResolution ||
+		restored.allocatedGenerationCount <=
+			reconfigured.allocatedGenerationCount ||
+		restored.disposedGenerationCount <= reconfigured.disposedGenerationCount
+	) {
+		throw new Error(
+			"Entity-shadow restore step did not replace the resized generation.",
+		);
+	}
+}
+
 function assertSpawnedEntityLifecycle(result) {
 	const lifecycle = result.entityLifecycle;
 	if (lifecycle === null) {
@@ -3158,6 +3373,13 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				client,
 				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setRenderScale",
 				[options.renderScale],
+			);
+		}
+		if (options.entityShadows !== null) {
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setEntityShadowSettings",
+				[options.entityShadows],
 			);
 		}
 		if (options.minimumPortalFootprintCssPixelArea !== null) {
@@ -3490,6 +3712,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		}
 		const modeCycleStates = [];
 		const ambientOcclusionCycleStates = [];
+		const entityShadowCycleStates = [];
 		const filteringCycleStates = [];
 		if (options.filteringCycle) {
 			const maximum =
@@ -3551,6 +3774,51 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				[options.ambientOcclusion],
 			);
 			await delay(250);
+		}
+		if (options.entityShadowCycle) {
+			for (const mode of ["none", "simple", "shadow-maps"]) {
+				await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setEntityShadowMode",
+					[mode],
+				);
+				await delay(250);
+				entityShadowCycleStates.push(
+					await evaluate(
+						client,
+						"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
+						[],
+					),
+				);
+			}
+			const enabledState = entityShadowCycleStates[2];
+			const originalSettings = enabledState.frameSettings.entityShadows;
+			const alternateResolution =
+				originalSettings.pssm.mapResolution === 256 ? 512 : 256;
+			for (const settings of [
+				{
+					...originalSettings,
+					pssm: {
+						...originalSettings.pssm,
+						mapResolution: alternateResolution,
+					},
+				},
+				originalSettings,
+			]) {
+				await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setEntityShadowSettings",
+					[settings],
+				);
+				await delay(250);
+				entityShadowCycleStates.push(
+					await evaluate(
+						client,
+						"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
+						[],
+					),
+				);
+			}
 		}
 		if (options.ambientOcclusionCoverage) {
 			await evaluate(
@@ -3802,6 +4070,14 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				[true],
 			);
 		}
+		const entityShadowBenchmark =
+			options.entityShadowBenchmarkPairs > 0
+				? await runEntityShadowBenchmark(
+						client,
+						options.entityShadowBenchmarkPairs,
+						options.measureMs,
+					)
+				: null;
 		if (options.traceTerrainGl) {
 			await evaluate(
 				client,
@@ -3907,6 +4183,8 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			bakedDrawMergeCensus,
 			cpuProfile,
 			ambientOcclusionCycleStates,
+			entityShadowCycleStates,
+			entityShadowBenchmark,
 			audioFlyby,
 			cameraSweepScreenshots,
 			map: mapEvidence,
@@ -3949,6 +4227,82 @@ function supportedTextureFilteringPolicies(maximumAnisotropy) {
 	return TEXTURE_FILTERING_OPTIONS.filter(
 		({ minimumAnisotropy }) => minimumAnisotropy <= maximumAnisotropy,
 	).map(({ policy }) => policy);
+}
+
+/**
+ * Preserve only the evidence needed to compare paired shadow windows.
+ *
+ * Keeping this diagnostic compact matters because a complete harness state contains the authored
+ * resident census and static layer payloads, which obscure timing results without strengthening
+ * the workload proof.
+ */
+function entityShadowBenchmarkSample(state, pairIndex, orderIndex, mode) {
+	return {
+		pairIndex,
+		orderIndex,
+		mode,
+		timing: state.timing,
+		frameProfile: state.frameProfile,
+		tickProfile: state.tickProfile,
+		effectiveSettings: state.frameSettings.entityShadows,
+		resources: state.entityShadowResources,
+		outdoorPssm: state.outdoorPssm,
+		selectionMetrics: state.metrics,
+		workload: {
+			authoredDynamicResidentCount:
+				state.authoredDynamics?.residents.length ?? null,
+			spawnedEntityCount: state.spawnedEntities?.length ?? null,
+			staticObjectNodeCount: state.staticObjects?.staticObjectNodeCount ?? null,
+			geometryResourceCount: state.staticObjects?.geometryResourceCount ?? null,
+		},
+	};
+}
+
+/** Measure paired policies inside one settled browser session, reversing order every pair. */
+async function runEntityShadowBenchmark(client, pairCount, measureMs) {
+	const samples = [];
+	for (let pairIndex = 0; pairIndex < pairCount; pairIndex += 1) {
+		const modes =
+			pairIndex % 2 === 0 ? ["none", "shadow-maps"] : ["shadow-maps", "none"];
+		for (let orderIndex = 0; orderIndex < modes.length; orderIndex += 1) {
+			const mode = modes[orderIndex];
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setEntityShadowMode",
+				[mode],
+			);
+			await delay(ENTITY_SHADOW_BENCHMARK_WARMUP_MS);
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.resetTiming",
+				[],
+			);
+			await delay(measureMs);
+			const state = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
+				[],
+			);
+			samples.push(
+				entityShadowBenchmarkSample(state, pairIndex, orderIndex, mode),
+			);
+		}
+	}
+
+	// The existing final measurement window owns native CPU profiling. Leave it in the policy whose
+	// cost is under investigation so --cpu-profile produces directly relevant evidence.
+	await evaluate(
+		client,
+		"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setEntityShadowMode",
+		["shadow-maps"],
+	);
+	await delay(ENTITY_SHADOW_BENCHMARK_WARMUP_MS);
+	return {
+		measureMs,
+		pairCount,
+		warmupMs: ENTITY_SHADOW_BENCHMARK_WARMUP_MS,
+		samples,
+	};
 }
 
 function startChild(command, args) {

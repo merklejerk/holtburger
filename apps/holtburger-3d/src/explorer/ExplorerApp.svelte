@@ -142,6 +142,10 @@
 		createExplorerFrameDiagnosticReport,
 		type ExplorerFrameDiagnosticReport,
 	} from "./explorer-frame-diagnostic-report";
+	import {
+		createEntityShadowSettings,
+		type EntityShadowSettings,
+	} from "../lib/game/renderer/entity-shadow-policy";
 
 	let canvasElement: HTMLCanvasElement | null = $state(null);
 	let frameHandle: number | null = null;
@@ -168,7 +172,8 @@
 		ready: boolean;
 	} | null = null;
 	let entityCatalog = $state<ExplorerCatalogCapability | null>(null);
-	let spawnedEntities = $state<readonly DynamicEntityView[]>([]);
+	/** Cold replace-only panel snapshot; raw keeps host DTOs cloneable across later IPC boundaries. */
+	let spawnedEntities = $state.raw<readonly DynamicEntityView[]>([]);
 	let spawnedEntityPresentationError = $state<string | null>(null);
 	let physicalSimulationAnchor: string | null = null;
 	let cameraMode = $state<ExplorerCameraMode>("free-fly");
@@ -440,6 +445,16 @@
 		ambientOcclusion: AmbientOcclusionSettings,
 	): void {
 		frameSettings = { ...frameSettings, ambientOcclusion };
+		applyFrameSettings();
+	}
+
+	function updateEntityShadowSettings(
+		entityShadows: EntityShadowSettings,
+	): void {
+		frameSettings = {
+			...frameSettings,
+			entityShadows: createEntityShadowSettings(entityShadows),
+		};
 		applyFrameSettings();
 	}
 
@@ -2004,6 +2019,8 @@
 			{updateEnvironment}
 			distanceFogEnabled={frameSettings.distanceFogEnabled}
 			ambientOcclusion={frameSettings.ambientOcclusion}
+			entityShadows={frameSettings.entityShadows}
+			{updateEntityShadowSettings}
 			colorGrade={frameSettings.colorGrade}
 			{updateColorGradeSettings}
 			{clockFollowing}

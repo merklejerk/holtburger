@@ -9,6 +9,16 @@ import {
 	PORTAL_DEFERRED_VISIBILITY_GLSL,
 	type WebGL2PortalDeferredVisibilityUniforms,
 } from "./portal-deferred-visibility-glsl";
+import {
+	requireWebGL2OutdoorPssmUniforms,
+	WEBGL2_OUTDOOR_PSSM_GLSL,
+	type WebGL2OutdoorPssmUniforms,
+} from "./webgl2-pssm-receiver";
+import {
+	requireWebGL2EntityGroundingUniforms,
+	WEBGL2_ENTITY_GROUNDING_GLSL,
+	type WebGL2EntityGroundingUniforms,
+} from "./webgl2-entity-grounding";
 
 /**
  * Where a vertex shader reads its object transform, selected at shader compilation rather than
@@ -20,6 +30,9 @@ import {
  * `prepareBakedStaticObjectGeometry`, not about this field.
  */
 export type ObjectVertexTransformSource = "uniform" | "attribute";
+
+/** Optional analytic receiver mode compiled only for authored EnvCell shell geometry. */
+export type ObjectGroundingMode = "none" | "env-cell-shell";
 
 /**
  * Vertex attribute carrying burned-in interior static light.
@@ -41,6 +54,8 @@ export const OBJECT_TEXTURE_UNITS = {
 export function createObjectVertexShader(
 	distanceFog: boolean,
 	transformSource: ObjectVertexTransformSource = "uniform",
+	outdoorPssm = false,
+	groundingMode: ObjectGroundingMode = "none",
 ): string {
 	const fogDeclarations = distanceFog
 		? `
@@ -62,6 +77,47 @@ layout(location = 7) in vec4 aInstanceColor;`
 			: "uLocalToLandblock";
 	const instanceColor =
 		transformSource === "attribute" ? "aInstanceColor" : "vec4(1.0)";
+	const pssmDeclarations = outdoorPssm
+		? `
+out float vOutdoorPssmViewDepth;
+out vec3 vOutdoorPssmPosition;
+out vec3 vOutdoorPssmNormal;
+out vec3 vLightingWithoutSun;`
+		: "";
+	const groundingDeclarations =
+		groundingMode === "env-cell-shell"
+			? `
+out vec3 vGroundingPosition;
+out float vGroundingUpFacing;`
+			: "";
+	const groundingCalculation =
+		groundingMode === "env-cell-shell"
+			? `vGroundingPosition = anchoredPosition;
+	vGroundingUpFacing = dot(
+		safeNormal(mat3(${transform}) * aNormal),
+		vec3(0.0, 1.0, 0.0)
+	);`
+			: "";
+	const lightingCalculation = outdoorPssm
+		? `vec3 worldNormal = mat3(${transform}) * aNormal;
+	vec3 unitNormal = safeNormal(worldNormal);
+	vec3 lightingWithoutSun = evaluateAmbient()
+		+ aBakedLight
+		+ evaluateRuntimeLights(anchoredPosition, unitNormal);
+	vLightingWithoutSun = min(lightingWithoutSun, vec3(1.0));
+	vLighting = min(lightingWithoutSun + evaluateSun(worldNormal), vec3(1.0));
+	vec4 viewPosition = uView * vec4(anchoredPosition, 1.0);
+	vOutdoorPssmViewDepth = -viewPosition.z;
+	vOutdoorPssmPosition = anchoredPosition;
+	vOutdoorPssmNormal = worldNormal;`
+		: `vLighting = evaluateSceneLighting(
+		anchoredPosition,
+		mat3(${transform}) * aNormal,
+		aBakedLight
+	);`;
+	const clipCalculation = outdoorPssm
+		? "vec4 clipPosition = uProjection * viewPosition;"
+		: "vec4 clipPosition = uProjection * uView * vec4(anchoredPosition, 1.0);";
 	return `#version 300 es
 layout(location = 0) in vec3 aPosition;
 layout(location = 1) in vec3 aNormal;
@@ -82,6 +138,8 @@ ${WEBGL2_SCENE_LIGHTING_GLSL}
 out vec2 vTextureCoordinate;
 out vec4 vInstanceColor;
 out vec3 vLighting;
+${pssmDeclarations}
+${groundingDeclarations}
 
 void main() {
 	vec3 landblockPosition = (${transform} * vec4(aPosition, 1.0)).xyz;
@@ -90,13 +148,10 @@ void main() {
 	vInstanceColor = ${instanceColor};
 	// Retail's fixed-function pipeline lights meshes per vertex; the emissive term is added
 	// in the fragment stage where the per-draw surface luminosity lives.
-	vLighting = evaluateSceneLighting(
-		anchoredPosition,
-		mat3(${transform}) * aNormal,
-		aBakedLight
-	);
+	${lightingCalculation}
+	${groundingCalculation}
 	${fogCalculation}
-	vec4 clipPosition = uProjection * uView * vec4(anchoredPosition, 1.0);
+	${clipCalculation}
 	clipPosition.xy = clipPosition.xy * uClipTransform.xy
 		+ clipPosition.ww * uClipTransform.zw;
 	gl_Position = clipPosition;
@@ -105,18 +160,38 @@ void main() {
 }
 
 /** Build the object fragment variant; the unfogged variant omits fog uniforms entirely. */
-export function createObjectFragmentShader(distanceFog: boolean): string {
-	return createObjectFragmentShaderVariant(distanceFog, false);
+export function createObjectFragmentShader(
+	distanceFog: boolean,
+	outdoorPssm = false,
+	groundingMode: ObjectGroundingMode = "none",
+): string {
+	return createObjectFragmentShaderVariant(
+		distanceFog,
+		false,
+		outdoorPssm,
+		groundingMode,
+	);
 }
 
 /** Build the deferred object variant that rejects fragments outside one authored scope envelope. */
-export function createPortalObjectFragmentShader(distanceFog: boolean): string {
-	return createObjectFragmentShaderVariant(distanceFog, true);
+export function createPortalObjectFragmentShader(
+	distanceFog: boolean,
+	outdoorPssm = false,
+	groundingMode: ObjectGroundingMode = "none",
+): string {
+	return createObjectFragmentShaderVariant(
+		distanceFog,
+		true,
+		outdoorPssm,
+		groundingMode,
+	);
 }
 
 function createObjectFragmentShaderVariant(
 	distanceFog: boolean,
 	portalVisibility: boolean,
+	outdoorPssm: boolean,
+	groundingMode: ObjectGroundingMode,
 ): string {
 	const fogDeclarations = distanceFog
 		? `
@@ -136,12 +211,42 @@ ${WEBGL2_DISTANCE_FOG_GLSL}`
 	const portalApplication = portalVisibility
 		? "if (!portalDeferredFragmentVisible()) discard;"
 		: "";
+	const pssmDeclarations = outdoorPssm
+		? `${WEBGL2_OUTDOOR_PSSM_GLSL}
+in float vOutdoorPssmViewDepth;
+in vec3 vOutdoorPssmPosition;
+in vec3 vOutdoorPssmNormal;
+in vec3 vLightingWithoutSun;`
+		: "";
+	const lighting = outdoorPssm
+		? `mix(
+		vLightingWithoutSun,
+		vLighting,
+		evaluateOutdoorPssmVisibility(
+			vOutdoorPssmViewDepth,
+			vOutdoorPssmPosition,
+			vOutdoorPssmNormal
+		)
+	)`
+		: "vLighting";
+	const groundingDeclarations =
+		groundingMode === "env-cell-shell"
+			? `${WEBGL2_ENTITY_GROUNDING_GLSL}
+in vec3 vGroundingPosition;
+in float vGroundingUpFacing;`
+			: "";
+	const groundingApplication =
+		groundingMode === "env-cell-shell"
+			? "color.rgb *= 1.0 - evaluateEntityGrounding(vGroundingPosition, vGroundingUpFacing);"
+			: "";
 	return `#version 300 es
 precision highp float;
 precision highp int;
 precision highp sampler2D;
 
 ${portalDeclarations}
+${pssmDeclarations}
+${groundingDeclarations}
 
 uniform sampler2D uBase;
 uniform sampler2D uPalette;
@@ -286,7 +391,7 @@ void main() {
 	// Retail builds one clamped vertex color from emissive plus the lit terms, then the
 	// texture stage modulates it (acclient.c:345688 sets Emissive = surface luminosity).
 	// Luminosity therefore scales the surface rather than washing it out additively.
-	color.rgb *= min(vLighting + vec3(max(uLuminosity, 0.0)), vec3(1.0));
+	color.rgb *= min(${lighting} + vec3(max(uLuminosity, 0.0)), vec3(1.0));
 	if (uUseDetail != 0) {
 		vec4 detail = sampleRepeatingAtlasRect(
 			uDetail,
@@ -301,6 +406,7 @@ void main() {
 			vec3(1.0)
 		);
 	}
+	${groundingApplication}
 	${fogApplication}
 	fragmentColor = color;
 }
@@ -312,6 +418,10 @@ interface WebGL2ObjectProgramBase {
 	readonly program: WebGLProgram;
 	/** Null for ordinary draws; otherwise the sole per-draw authored-scope selector. */
 	readonly portalVisibilityUniforms: WebGL2PortalDeferredVisibilityUniforms | null;
+	/** Present only on the dedicated outdoor receiver variant. */
+	readonly outdoorPssmUniforms: WebGL2OutdoorPssmUniforms | null;
+	/** Present only on the dedicated EnvCell-shell grounding variant. */
+	readonly entityGroundingUniforms: WebGL2EntityGroundingUniforms | null;
 	readonly uniforms: {
 		readonly alphaTest: WebGLUniformLocation;
 		readonly ambientColor: WebGLUniformLocation;
@@ -375,6 +485,8 @@ export interface WebGL2FogInstancedObjectProgram extends WebGL2InstancedObjectPr
 
 interface WebGL2ObjectProgramOptions {
 	readonly distanceFog: boolean;
+	readonly groundingMode: ObjectGroundingMode;
+	readonly outdoorPssm: boolean;
 	readonly portalVisibility: boolean;
 	readonly transformSource: ObjectVertexTransformSource;
 }
@@ -383,11 +495,24 @@ interface WebGL2ObjectProgramOptions {
 export function createWebGL2ObjectProgram(
 	gl: WebGL2RenderingContext,
 ): WebGL2FogObjectProgram;
+/** Compile a fogged baked program with optional outdoor shadow reception. */
+export function createWebGL2ObjectProgram(
+	gl: WebGL2RenderingContext,
+	options: {
+		readonly distanceFog: true;
+		readonly groundingMode?: ObjectGroundingMode;
+		readonly outdoorPssm?: boolean;
+		readonly portalVisibility?: false;
+		readonly transformSource?: "uniform";
+	},
+): WebGL2FogObjectProgram;
 /** Compile an unfogged program for transparent and additive static materials. */
 export function createWebGL2ObjectProgram(
 	gl: WebGL2RenderingContext,
 	options: {
 		readonly distanceFog: false;
+		readonly groundingMode?: ObjectGroundingMode;
+		readonly outdoorPssm?: boolean;
 		readonly portalVisibility?: false;
 		readonly transformSource?: "uniform";
 	},
@@ -397,6 +522,7 @@ export function createWebGL2ObjectProgram(
 	gl: WebGL2RenderingContext,
 	options: {
 		readonly distanceFog: true;
+		readonly outdoorPssm?: boolean;
 		readonly portalVisibility?: false;
 		readonly transformSource: "attribute";
 	},
@@ -406,6 +532,7 @@ export function createWebGL2ObjectProgram(
 	gl: WebGL2RenderingContext,
 	options: {
 		readonly distanceFog: false;
+		readonly outdoorPssm?: boolean;
 		readonly portalVisibility?: false;
 		readonly transformSource: "attribute";
 	},
@@ -415,6 +542,8 @@ export function createWebGL2ObjectProgram(
 	gl: WebGL2RenderingContext,
 	options: {
 		readonly distanceFog: false;
+		readonly groundingMode?: ObjectGroundingMode;
+		readonly outdoorPssm?: boolean;
 		readonly portalVisibility: true;
 		readonly transformSource?: "uniform";
 	},
@@ -424,6 +553,7 @@ export function createWebGL2ObjectProgram(
 	gl: WebGL2RenderingContext,
 	options: {
 		readonly distanceFog: false;
+		readonly outdoorPssm?: boolean;
 		readonly portalVisibility: true;
 		readonly transformSource: "attribute";
 	},
@@ -438,18 +568,37 @@ export function createWebGL2ObjectProgram(
 	| WebGL2FogInstancedObjectProgram {
 	const distanceFog = options.distanceFog ?? true;
 	const portalVisibility = options.portalVisibility ?? false;
+	const outdoorPssm = options.outdoorPssm ?? false;
+	const groundingMode = options.groundingMode ?? "none";
 	const transformSource = options.transformSource ?? "uniform";
+	if (
+		groundingMode === "env-cell-shell" &&
+		(outdoorPssm || transformSource !== "uniform")
+	) {
+		throw new Error(
+			"EnvCell grounding requires a baked non-PSSM object program.",
+		);
+	}
 	const vertexShader = compileWebGL2Shader(
 		gl,
 		gl.VERTEX_SHADER,
-		createObjectVertexShader(distanceFog, transformSource),
+		createObjectVertexShader(
+			distanceFog,
+			transformSource,
+			outdoorPssm,
+			groundingMode,
+		),
 	);
 	const fragmentShader = compileWebGL2Shader(
 		gl,
 		gl.FRAGMENT_SHADER,
 		portalVisibility
-			? createPortalObjectFragmentShader(distanceFog)
-			: createObjectFragmentShader(distanceFog),
+			? createPortalObjectFragmentShader(
+					distanceFog,
+					outdoorPssm,
+					groundingMode,
+				)
+			: createObjectFragmentShader(distanceFog, outdoorPssm, groundingMode),
 	);
 	const program = gl.createProgram();
 	if (!program) throw new Error("Failed to allocate object shader program.");
@@ -521,10 +670,19 @@ export function createWebGL2ObjectProgram(
 		const portalVisibilityUniforms = portalVisibility
 			? bindWebGL2PortalDeferredVisibilityProgram(gl, program)
 			: null;
+		const outdoorPssmUniforms = outdoorPssm
+			? requireWebGL2OutdoorPssmUniforms(gl, program)
+			: null;
+		const entityGroundingUniforms =
+			groundingMode === "env-cell-shell"
+				? requireWebGL2EntityGroundingUniforms(gl, program)
+				: null;
 		const objectProgram: WebGL2ObjectProgram | WebGL2InstancedObjectProgram =
 			transformSource === "uniform"
 				? {
 						program,
+						entityGroundingUniforms,
+						outdoorPssmUniforms,
 						portalVisibilityUniforms,
 						transformSource,
 						uniforms: {
@@ -538,6 +696,8 @@ export function createWebGL2ObjectProgram(
 					}
 				: {
 						program,
+						entityGroundingUniforms,
+						outdoorPssmUniforms,
 						portalVisibilityUniforms,
 						transformSource,
 						uniforms,

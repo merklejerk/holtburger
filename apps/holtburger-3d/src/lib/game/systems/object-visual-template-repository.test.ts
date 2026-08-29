@@ -281,6 +281,7 @@ function createRepository(
 
 function source(id: string, appearanceKey: string): DynamicPresentationSource {
 	return {
+		category: "other",
 		behavior: {
 			animationId: "0x03000001",
 			kind: "animation-only",

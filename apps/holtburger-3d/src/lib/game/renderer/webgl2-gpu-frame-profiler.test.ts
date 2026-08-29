@@ -32,6 +32,7 @@ describe("WebGL2GpuFrameProfiler", () => {
 		frame.beginPhase("nearTerrain").finish();
 		frame.beginPhase("farTerrain").finish();
 		frame.beginPhase("ambientOcclusion").finish();
+		frame.beginPhase("outdoorShadowMap").finish();
 		frame.beginPhase("opaque").finish();
 		frame.beginPhase("particle").finish();
 		frame.beginPhase("presentation").finish();
@@ -50,6 +51,7 @@ describe("WebGL2GpuFrameProfiler", () => {
 			blendedMs: 0,
 			farTerrainMs: 1,
 			opaqueMs: 1,
+			outdoorShadowMapMs: 1,
 			particleMs: 1,
 			presentationMs: 1,
 			portalCompositionMs: 2,
@@ -58,7 +60,7 @@ describe("WebGL2GpuFrameProfiler", () => {
 			nearTerrainMs: 1,
 			// Near and far terrain remain available as one aggregate for existing consumers.
 			terrainMs: 2,
-			totalMs: 8,
+			totalMs: 9,
 		};
 		expect(profiler.getProfile()).toEqual({
 			...timings,
@@ -70,7 +72,7 @@ describe("WebGL2GpuFrameProfiler", () => {
 			sampleCount: 1,
 		});
 		// One query per phase, where the timestamp profiler needed a pair plus a frame pair.
-		expect(harness.deleteQuery).toHaveBeenCalledTimes(8);
+		expect(harness.deleteQuery).toHaveBeenCalledTimes(9);
 	});
 
 	it("means every resolved frame, so one stalled batch cannot stand as the result", () => {
@@ -182,6 +184,8 @@ describe("WebGL2FrameProfiler", () => {
 				instanceRunPreparationMs: 0,
 				instanceUploadMs: 0,
 				opaqueSubmissionMs: 0,
+				outdoorShadowMap: outdoorShadowMapMetrics(frameNumber),
+				outdoorShadowMapMs: 0,
 				otherMs: 0,
 				particleSubmissionMs: 0,
 				portalCompositionMs: 0,
@@ -211,6 +215,7 @@ describe("WebGL2FrameProfiler", () => {
 		expect(profile?.cpu.contribution.mean.staticObjectPreparationCount).toBe(
 			31,
 		);
+		expect(profile?.cpu.outdoorShadowMap.mean.cascadeQueryCount).toBe(31);
 	});
 
 	it("drops accumulated samples on reset so the next mean covers one window", () => {
@@ -225,6 +230,8 @@ describe("WebGL2FrameProfiler", () => {
 				instanceRunPreparationMs: 0,
 				instanceUploadMs: 0,
 				opaqueSubmissionMs: 0,
+				outdoorShadowMap: outdoorShadowMapMetrics(),
+				outdoorShadowMapMs: 0,
 				otherMs: 0,
 				particleSubmissionMs: 0,
 				portalCompositionMs: 0,
@@ -256,11 +263,25 @@ describe("WebGL2FrameProfiler", () => {
 		const profiler = new WebGL2FrameProfiler(harness.gl);
 		const frame = profiler.beginFrame();
 		frame.recordObjectPreparation(5, 2);
+		frame.recordOutdoorShadowMap({
+			cascadeQueryCount: 3,
+			compatibleDepthRunCount: 9,
+			instanceUploadBytes: 240,
+			instanceUploadCount: 3,
+			selectedCasterPartCount: 12,
+		});
 		frame.finish();
 
 		expect(profiler.getProfile()?.cpu.contribution.latest).toEqual({
 			dynamicObjectPreparationCount: 2,
 			staticObjectPreparationCount: 5,
+		});
+		expect(profiler.getProfile()?.cpu.outdoorShadowMap.latest).toEqual({
+			cascadeQueryCount: 3,
+			compatibleDepthRunCount: 9,
+			instanceUploadBytes: 240,
+			instanceUploadCount: 3,
+			selectedCasterPartCount: 12,
 		});
 	});
 
@@ -293,6 +314,16 @@ function contributionMetrics(staticObjectPreparationCount: number) {
 	return {
 		dynamicObjectPreparationCount: 0,
 		staticObjectPreparationCount,
+	};
+}
+
+function outdoorShadowMapMetrics(cascadeQueryCount = 0) {
+	return {
+		cascadeQueryCount,
+		compatibleDepthRunCount: 0,
+		instanceUploadBytes: 0,
+		instanceUploadCount: 0,
+		selectedCasterPartCount: 0,
 	};
 }
 

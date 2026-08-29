@@ -2,6 +2,9 @@
 	"extends": "./tsconfig.node.json",
 	"compilerOptions": {
 		"tsBuildInfoFile": "./node_modules/.tmp/tsconfig.electron.tsbuildinfo",
+		// Electron's main-process contracts import shared renderer payload types. Those imports are
+		// erased at runtime, but their declarations still require DOM/WebGL/worker library types.
+		"lib": ["ES2023", "DOM", "DOM.Iterable"],
 		"erasableSyntaxOnly": false
 	},
 	"include": ["electron/**/*.ts"]

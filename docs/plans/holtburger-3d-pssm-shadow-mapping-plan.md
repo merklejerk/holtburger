@@ -1,8 +1,8 @@
 # Holtburger 3D Hybrid Entity Shadowing Plan
 
-Status: Complete (Phases 1-10 accepted and verified)
+Status: Complete (Phases 1-14 accepted and verified)
 Created: 2026-08-26
-Resteered: 2026-08-28
+Resteered: 2026-08-29
 Revalidated against `3d-next`: 2026-08-28 (`68e65e46`)
 
 ## Context and Boundaries
@@ -41,6 +41,8 @@ the same indoor analytic grounding.
 - One default-`shadow-maps` Explorer mode selector with `none`, `simple`, and `shadow-maps` levels,
   plus live controls for the tunable PSSM and analytic-grounding appearance parameters.
 - Focused pure, shader, target-lifecycle, and browser-harness verification.
+- A targeted PSSM performance addendum covering isolated measurement, removal of redundant
+  framebuffer validation, honest shadow-specific profiling, and evidence-gated cleanup.
 
 ### Out of Scope
 
@@ -61,8 +63,9 @@ the same indoor analytic grounding.
 - A general render graph, generic light/shadow framework, deferred renderer, or new material system.
 - Copying the TUI's complete item taxonomy or promoting 3D presentation policy into authoritative
   world state.
-- Profiling or hardware-performance acceptance gates. Final tuning and three-mode acceptance are
-  user-owned visual-review decisions.
+- A general renderer performance budget or hardware/browser matrix. The performance addendum uses
+  one controlled real-GPU workload to find avoidable PSSM work; final quality tuning remains a
+  user-owned visual decision.
 - Investigating retail shadow code paths or adding retail compatibility markers for this feature.
 - Modifying `acclient-eor-source`.
 
@@ -474,6 +477,23 @@ large floor triangle and would disappear if only its vertices sampled the blob.
   participates in neither mechanism; no shadow state crosses into the final screen-space blend.
 - Same-island structures do not occlude grounding blobs. The short drop/radius bounds and up-facing
   weight limit the artifact; full portal/light transport remains out of scope.
+
+### Performance Addendum Evidence
+
+- The first shadows-on/off timing comparison is invalid as baseline or acceptance evidence because
+  another client instance was active during the capture. Its absolute and relative timings must not
+  justify an optimization.
+- The contaminated native profile nevertheless exposed a code-level synchronization candidate:
+  `WebGL2PssmShadowTargets.attachLayer` calls `gl.checkFramebufferStatus` after every layer
+  attachment on every frame, even though allocation already attaches and validates every immutable
+  array layer. Phase 11 independently reproduced the synchronization cost; none of the contaminated
+  capture's timings remain decision evidence.
+- Shadow CPU work currently falls into renderer `otherMs`, and shadow-map GPU commands are absent
+  from the GPU phase total. Whole-frame deltas are therefore the only current comparison, not an
+  attribution contract.
+- Equal-resolution cascade layers and the selected map resolution are accepted quality policy, not
+  presumed defects. Resolution, PCF, caster scheduling, and far-terrain routing change only after
+  controlled evidence separates their costs.
 
 ## Phased Implementation
 
@@ -1250,6 +1270,256 @@ large floor triangle and would disappear if only its vertices sampled the blob.
   GL error: `none` and `simple` retained zero PSSM textures, while `shadow-maps` allocated one
   three-layer array, resized from 1024 to 256, and restored it to 1024.
 
+### Phase 11: Isolated PSSM Baseline
+
+#### Deliverables
+
+- Record one canonical steady-state outdoor workload with exact commit, effective shadow settings,
+  camera, viewport, render scale, content radii, spawned population, AO state, and GPU adapter.
+- Ensure no other Holtburger client, Explorer, or browser-harness instance is consuming the GPU
+  during the measurement window. Use a dedicated random Vite port and report the process check with
+  the capture rather than assuming isolation.
+- Compare `none` and `shadow-maps` in the same loaded browser/content session, resetting timing
+  immediately before each equal-duration window. Alternate mode order across repeated pairs so
+  compilation, temperature, and first-run effects cannot consistently favor one mode.
+- Capture whole-frame/tick timings, existing renderer CPU/GPU profiles, frame-instance upload
+  metrics, visible/submitted workload counts, shadow-target diagnostics, and a native CPU profile.
+- Mark the earlier concurrent-client capture as contaminated evidence; retain it only as the reason
+  this addendum exists.
+
+#### Acceptance Criteria
+
+- At least three matched pairs complete on the real GPU with identical workload facts and no page,
+  WebGL, framebuffer, or harness errors.
+- The median and spread are reported for both modes; no conclusion relies on a single run.
+- The native profile confirms or rejects hot-path framebuffer-status synchronization under isolated
+  conditions.
+- No production renderer behavior changes in this phase.
+
+#### Task Checklist
+
+- [x] Freeze and report the canonical workload and effective settings.
+- [x] Prove the measurement environment has no competing Holtburger renderer process.
+- [x] Capture alternating same-session `none`/`shadow-maps` windows and a native CPU profile.
+- [x] Record the isolated baseline and retire the contaminated comparison from decision-making.
+
+#### Decisions and Course Corrections
+
+- Production revision `9cf2f6b1` was measured with only a diagnostic harness change in the working
+  tree. A process census immediately before capture found no other Holtburger client, Explorer,
+  Vite server, content host, harness Chrome, or browser-harness process. The run then owned random
+  content/Vite ports 37555/34887 and reported the hardware adapter as AMD Radeon RX 7900 XT through
+  ANGLE/Vulkan RADV; SwiftShader evidence is excluded.
+- The canonical workload is outdoor `0xda55ffff` at 1280x720 CSS/device pixels, DPR/render scale 1,
+  explicit outdoor camera at `[41952, 600, -16416]`, yaw 0, pitch -45, 90-degree FOV, building,
+  explicit-object, and generated-object radii 1, one spawned WCID 193 at distance 5, 93 authored
+  dynamic residents, 21 static object nodes, and 53 geometry resources. AO and weather were off;
+  time of day was 0.5, particle seed 7, and runtime frame advancement 16.666 ms. Every paired window
+  retained those workload counts exactly and the page/GL console remained clean.
+- Effective PSSM policy was three 2048 layers (48 MiB), maximum distance 192, minimum light
+  elevation 33 degrees, split lambda 0.65, transition 0.1, one-pixel PCF radius, strength 0.5,
+  receiver bias 0.001, normal offset 0.15, polygon offset 1.1/2, and caster padding 64. The harness
+  allocated targets only in `shadow-maps` windows and released them in every `none` window.
+- A harness-only `--entity-shadow-benchmark-pairs` diagnostic now performs equal 5,000 ms windows
+  with 500 ms policy warm-up, resets harness and renderer profiles together, reverses order every
+  pair, records compact settings/workload/resource evidence, and leaves `shadow-maps` active for the
+  existing native CPU-profile window. It requires real GPU, renderer profiling, and a positive
+  measurement duration; no production renderer contract or behavior changed.
+- Across three pairs, renderer CPU means were 0.492-0.499 ms for `none` (median 0.498 ms, 0.007 ms
+  spread) and 1.843-1.850 ms for `shadow-maps` (median 1.843 ms, 0.007 ms spread). Harness render
+  means were 0.570-0.581 ms (median 0.578 ms) and 1.939-1.948 ms (median 1.941 ms), respectively.
+  Existing GPU-profile means moved only from 0.232-0.241 ms (median 0.235 ms) to 0.281-0.284 ms
+  (median 0.283 ms); Phase 13 still must attribute shadow GPU commands before that delta is treated
+  as the complete GPU cost.
+- The isolated 5.159-second native shadow-map profile sampled `checkFramebufferStatus` directly
+  15,964 times for 2,455.662 ms of sampled self time. This confirms the hot synchronization path
+  independently of the order-balanced frame measurements and earns the narrow Phase 12 cut.
+
+### Phase 12: Remove Redundant Framebuffer Revalidation
+
+#### Deliverables
+
+- Keep layer-index validation, framebuffer binding, and `framebufferTextureLayer` in
+  `WebGL2PssmShadowTargets.attachLayer`, but remove its per-frame completeness query.
+- Retain transactional allocation-time validation of every array layer. Resize, disable, failure,
+  and destruction behavior remain unchanged.
+- Strengthen target-lifecycle tests to prove repeated layer attachments do not issue additional
+  completeness checks, while a new target generation validates each allocated layer exactly once.
+- Repeat the Phase 11 matched workload without changing map resolution, cascade count, PCF, shadow
+  distance, content, or camera.
+
+#### Acceptance Criteria
+
+- The hot path issues zero `checkFramebufferStatus` calls after a validated target generation is
+  allocated.
+- Invalid configuration and allocation-time incomplete-layer failures still fail loudly and retain
+  the previous valid generation.
+- Shadow output, target diagnostics, mode cycling, resize, restoration, and renderer destruction
+  remain correct.
+- The isolated before/after result records whether removing the synchronization changes CPU time,
+  GPU throughput, or merely moves an unavoidable wait elsewhere.
+
+#### Task Checklist
+
+- [x] Make attachment selection-only and preserve allocation-time validation.
+- [x] Update deterministic target lifecycle/failure tests.
+- [x] Run focused tests, complete frontend gates, and real-GPU lifecycle verification.
+- [x] Repeat the isolated A/B and record the result without extrapolating to other hardware.
+
+#### Decisions and Course Corrections
+
+- The cut remained narrow: immutable allocation owns completeness; frame submission now owns only
+  layer selection. `attachLayer` retains alive/allocation/index validation, framebuffer binding, and
+  `framebufferTextureLayer`; only the completeness query was deleted. No periodic, debug-only, or
+  implicit fallback validation path was added.
+- The focused fake-WebGL lifecycle test now proves repeated frame attachments leave the check count
+  unchanged, then proves a replacement generation checks each of its layers exactly once. Existing
+  incomplete-layer rollback, unrelated-binding restoration, disable/re-enable, and destruction
+  coverage remains intact. All 225 TypeScript files (1,685 tests), Svelte/TypeScript checks, ESLint,
+  and formatting passed.
+- A real-GPU lifecycle cycle retained zero targets in `none` and `simple`, allocated one 48 MiB
+  2048x3 generation in `shadow-maps`, replaced it with 256x3, and restored 2048x3. Generation and
+  disposal counts advanced exactly once per replacement and the page/GL console remained clean.
+- The exact Phase 11 six-window workload was repeated on the same RX 7900 XT adapter. `none` CPU
+  means were 0.494-0.500 ms (median 0.496 ms, 0.006 ms spread); `shadow-maps` means were
+  0.725-0.738 ms (median 0.735 ms, 0.013 ms spread). Against the Phase 11 shadow median of 1.843 ms,
+  the cut removed 1.108 ms (60.1 percent); the mode's residual median CPU delta over `none` fell
+  from 1.345 ms to 0.238 ms. Harness render medians likewise fell from 1.941 ms to 0.821 ms for
+  `shadow-maps`, while `none` remained 0.580 ms.
+- The post-cut native shadow-map profile contains no `checkFramebufferStatus` node. Existing GPU
+  profile medians were 0.237 ms for `none` and 0.354 ms for `shadow-maps`, but shadow-map commands
+  are still outside that profiler contract. Phase 13 owns attribution before this residual GPU
+  delta can justify another change.
+
+### Phase 13: First-Class Shadow Profiling and Remeasurement
+
+#### Deliverables
+
+- Add one non-overlapping `outdoorShadowMap` CPU phase around cascade construction, caster
+  query/resolve/batching, instance uploads, and depth submission.
+- Add one `outdoorShadowMap` GPU elapsed phase around layer clears and caster depth draws. Include it
+  in the reported GPU sum, Explorer Frame panel, harness output, empty-profile constructors, and
+  profiler tests.
+- Add only counters needed to distinguish competing explanations: cascade query count, selected
+  caster part count, compatible depth-run count, and shadow-specific upload count/bytes. Reuse
+  existing metrics where they already answer the question.
+- Rerun the Phase 11 workload with profiling off for frame-cost evidence and profiling on for
+  attribution. Record profiler overhead rather than treating profiled timings as ordinary frame
+  cost.
+
+#### Acceptance Criteria
+
+- Shadow CPU and GPU work no longer appears as unattributed `otherMs` or disappears from GPU total.
+- `none` and sealed-indoor views record zero shadow-map phase work and zero shadow-map counters.
+- Profile phases remain sequential and non-nested, respecting the elapsed-query contract.
+- The new capture separates depth-map construction/submission from receiver terrain/object cost
+  well enough to accept or reject every Phase 14 candidate.
+
+#### Task Checklist
+
+- [x] Extend renderer profile contracts, accumulation, presentation, and tests.
+- [x] Instrument the existing PSSM owner without spreading clocks through pure selection helpers.
+- [x] Add the minimum explanatory counters with named Explorer/harness consumers.
+- [x] Capture profiled attribution and unprofiled cost under the isolated workload.
+
+#### Decisions and Course Corrections
+
+- `outdoorShadowMapMs` is one CPU span around the existing pass owner and one sequential GPU elapsed
+  span around its layer clears and depth draws. It enters the existing aggregate/mean/zero contracts
+  and measured GPU sum; `otherMs` excludes the named CPU span. No clock entered cascade math,
+  selection, batching, or target classes.
+- The pass accepts a caller-owned counter sink only during an active profile. It records three
+  cascade-query facts, selected caster parts and compatible runs from its existing batch, and the
+  upload count/bytes it already returned for ordinary frame diagnostics. With profiling disabled,
+  the sink is null and no new counter allocation or accumulation executes.
+- Explorer's existing Frame panel and the browser harness's existing frame-profile payload consume
+  the shared composite. Profiler tests prove sequential GPU aggregation, exact totals, zero-filled
+  inactive frames, latest/mean counter accumulation, and reset behavior; pass tests prove the
+  production facts populate the composite without a parallel selection path.
+- Under the exact Phase 11 workload with profiling disabled, harness render means were
+  0.549-0.555 ms for `none` (median 0.555 ms, 0.005 ms spread) and 0.821-0.827 ms for
+  `shadow-maps` (median 0.822 ms, 0.006 ms spread), a 0.268 ms median cost. With profiling enabled,
+  observed medians were 0.582 and 0.821 ms respectively; the separate-session difference was
+  +0.027 ms for `none` and -0.001 ms for `shadow-maps`, so only the unprofiled result is treated as
+  ordinary cost.
+- Profiled shadow-map frames attributed 0.199-0.205 ms CPU and 0.045-0.053 ms GPU to map
+  construction/submission. Every frame performed exactly three cascade queries, retained 135 part
+  instances across cascades, formed 123 compatible depth runs, and uploaded three ranges totaling
+  10,800 bytes. `otherMs` remained 0.040-0.048 ms in `shadow-maps` versus 0.044-0.048 ms in `none`,
+  so the formerly unattributed CPU cost is now named.
+- `none` recorded zero for the CPU/GPU phase and all five counters in every outdoor window. A
+  separate real-GPU portal run from sealed EnvCell `0x7d64010e` selected one indoor scope and, even
+  in `shadow-maps`, recorded the same zeros and retained no active outdoor target. All captures had
+  stable workload facts and clean page/GL consoles.
+- Existing profiled GPU means rose from 0.241 ms in `none` to 0.482 ms in `shadow-maps`, but only
+  0.050 ms belongs to the depth phase. Opaque rose 0.090 ms while unrelated sky and particle spans
+  also rose 0.073 and 0.017 ms between separate policy windows. That covariance is not honest
+  evidence for PCF specialization; the unprofiled whole-render delta remains the decision surface.
+
+### Phase 14: Evidence-Gated Optimization, Cleanup, and Acceptance
+
+#### Deliverables
+
+- Resteer after Phase 13 and implement only an optimization whose repeatable cost justifies its
+  additional shader/resource/scheduling complexity:
+  - specialize 1-, 9-, and 25-tap PCF kernels if receiver GPU sampling dominates;
+  - consolidate cascade caster query/batching/uploads if shadow CPU selection or upload dominates;
+  - add a shadow-capable far-terrain variant if near-terrain promotion dominates receiver cost; or
+  - stop with no further optimization if the redundant validation removal resolves the complaint.
+- Keep equal-sized cascade layers, current tuning values, caster/receiver policy, and visual output
+  unchanged unless the user separately requests a quality tradeoff.
+- Re-run the isolated workload, complete automated gates, real-GPU mode/resize/restoration cycles,
+  and a focused visual regression review.
+- Update this plan and permanent renderer documentation with the result, rejected candidates, and
+  any remaining measured debt.
+
+#### Acceptance Criteria
+
+- Every implemented optimization has a repeatable before/after result against identical workload
+  facts and preserves accepted shadow appearance and mode semantics.
+- No speculative PCF variants, retained caster structures, or far-terrain program families remain
+  if their measured benefit does not earn their maintenance cost.
+- Complete TypeScript/Svelte, lint, format, shader, host/core, and browser-harness gates pass.
+- The user accepts the final shadow-map cost/quality balance.
+
+#### Task Checklist
+
+- [x] Resteer from Phase 13 attribution and select zero or one primary optimization.
+- [x] Implement and verify only the selected candidate.
+- [x] Sweep temporary probes, stale profiler vocabulary, and rejected abstractions.
+- [x] Record final measurements, visual acceptance, remaining debt, and addendum completion.
+
+#### Decisions and Course Corrections
+
+- Resteer selects zero additional optimizations. Allocation-time-only validation removed the
+  dominant 1.108 ms CPU defect, and the complete remaining unprofiled mode cost is 0.268 ms on the
+  measured workload. No narrower candidate owns enough demonstrated cost to justify another
+  shader, retained caster structure, or terrain program family.
+- PCF specialization is rejected because the shadow depth phase is only about 0.050 ms GPU and the
+  receiver-phase comparison covaries with unrelated sky/particle spans. Cascade consolidation is
+  rejected because the complete named CPU phase is about 0.202 ms for only 10.8 KiB of uploads;
+  a retained cross-cascade structure would add lifetime and invalidation complexity. Far-terrain
+  specialization is rejected because near terrain changes by only about 0.002 ms and far-terrain
+  promotion remains the simpler correctness invariant at the configured 192-unit reach.
+- Equal-sized cascade layers, current tuning, caster/receiver policy, and accepted visual output
+  remain unchanged. Phase 14 is cleanup and verification only.
+- Final real-GPU verification reran the outdoor fixture and `none`/`simple`/`shadow-maps` target
+  lifecycle on the RX 7900 XT. The fixture's layer/resource assertions passed; mode cycling retained
+  zero targets in the first two modes, allocated 2048x3, replaced it with 256x3, and restored
+  2048x3 with exact generation/disposal counts and a clean page/GL console. A captured fixture frame
+  showed no gross state-restoration or presentation regression. Because the production change
+  removes a validation query and adds opt-in diagnostics without changing cascade, caster,
+  receiver, or shader math, the user's prior final visual acceptance remains applicable.
+- Final gates passed all 225 TypeScript files (1,685 tests), complete Svelte/TypeScript checks,
+  TypeScript and dead-export lint, Prettier, generated near/far terrain shader validation, 295 core
+  tests, 246 host tests, and combined core/host clippy with warnings denied.
+- Remaining measured debt is explicit rather than actionable: on this workload and adapter,
+  `shadow-maps` costs about 0.268 ms more renderer time than `none`, with about 0.202 ms attributed
+  to shadow CPU construction/submission and 0.050 ms to shadow depth GPU commands. Receiver-side
+  GPU comparison remains noisy across unrelated phases. Revisit only with a representative
+  workload that demonstrates a materially larger repeatable cost; no speculative structure is
+  retained for it now.
+
 ## Risks and Mitigations
 
 | Risk                                                          | Consequence                                                  | Mitigation                                                                                                                            |
@@ -1281,6 +1551,10 @@ large floor triangle and would disappear if only its vertices sampled the blob.
 | Adjacent outdoor landblocks choose different overflow sets    | A dense border crowd can expose a simple-shadow seam         | Intersect each influence with both bounds and use identical camera/identity ranking; verify overflow borders visually                 |
 | Simple grounding promotes distant terrain to the near shader  | A remote visible caster defeats the far-terrain optimization | Retain near terrain only for landblocks with nonempty records; keep the configured record cap and omit analytic code from far terrain |
 | Portal transition invents a second shadow lifecycle           | Snapshot/tunnel resources become tangled with world shading  | Keep effects inside ordinary scene rendering; outgoing color is already shaded and the tunnel is excluded                             |
+| Another renderer contaminates the performance baseline        | An unrelated GPU workload is misdiagnosed as PSSM cost       | Prove process isolation, compare modes in one loaded session, alternate order, and report median plus spread                          |
+| Frame submission revalidates immutable framebuffer layers     | Driver synchronization serializes CPU and GPU every cascade  | Validate every layer transactionally at allocation; hot attachment only selects a previously validated layer                          |
+| New profiling changes the workload it measures                | Diagnostic overhead is mistaken for ordinary shadow cost     | Keep instrumentation opt-in and compare unprofiled cost separately from profiled attribution                                          |
+| Speculative optimization multiplies renderer variants         | Maintenance cost grows without a meaningful frame benefit    | Phase 14 admits zero or one primary candidate only after repeatable phase-specific evidence                                           |
 
 ## Definition of Done
 
@@ -1322,8 +1596,20 @@ large floor triangle and would disappear if only its vertices sampled the blob.
 - [x] Final visual review accepts the defaults and records the user's three-mode acceptance.
 - [x] Lighting, portal documentation, and this plan describe the hybrid implementation and accepted
       limitations.
+- [x] An isolated same-session baseline replaces the contaminated performance comparison.
+- [x] Frame submission performs no framebuffer-completeness query for an already validated PSSM
+      target generation.
+- [x] Opt-in profiling attributes outdoor shadow-map CPU and GPU work without affecting disabled
+      profiling or `none` mode.
+- [x] Any follow-on optimization is justified by repeatable attribution, preserves the accepted
+      picture, and passes the complete verification matrix.
 
-## Open Questions
+## Resolved Questions
 
-None. The user accepted the landed PSSM and analytic-grounding defaults across the complete
-three-mode visual matrix.
+- Allocation-time-only framebuffer validation leaves a 0.268 ms median unprofiled mode delta in the
+  canonical workload on the measured adapter.
+- No PCF, caster-schedule, or far-terrain optimization earns its additional complexity from the
+  captured attribution; Phase 14 deliberately selected none.
+
+The user has already accepted the landed PSSM and analytic-grounding appearance, equal-sized
+cascade layers, and three-mode semantics. The addendum does not reopen those decisions.

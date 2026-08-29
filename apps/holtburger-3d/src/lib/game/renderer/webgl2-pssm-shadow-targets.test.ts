@@ -5,7 +5,7 @@ import {
 } from "./webgl2-pssm-shadow-targets";
 
 describe("WebGL2 PSSM shadow targets", () => {
-	it("allocates one complete depth array and validates every layer", () => {
+	it("validates each new depth-array layer once and only selects layers during submission", () => {
 		const state = createFakeWebGL2();
 		const targets = new WebGL2PssmShadowTargets(state.gl);
 		expect(targets.getDiagnostics()).toEqual({
@@ -36,8 +36,18 @@ describe("WebGL2 PSSM shadow targets", () => {
 		});
 
 		expect(targets.attachLayer(1)).toBe(first);
-		expect(state.attachedLayers).toEqual([0, 1, 2, 1]);
+		targets.attachLayer(0);
+		targets.attachLayer(2);
+		expect(state.attachedLayers).toEqual([0, 1, 2, 1, 0, 2]);
+		expect(state.framebufferChecks).toBe(3);
 		expect(() => targets.attachLayer(3)).toThrow("outside cascade count 3");
+
+		targets.resize(256, 2);
+		expect(state.attachedLayers).toEqual([0, 1, 2, 1, 0, 2, 0, 1]);
+		expect(state.framebufferChecks).toBe(5);
+		targets.attachLayer(0);
+		targets.attachLayer(1);
+		expect(state.framebufferChecks).toBe(5);
 	});
 
 	it("replaces, disables, re-enables, and destroys each generation once", () => {

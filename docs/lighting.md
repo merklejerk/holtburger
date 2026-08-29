@@ -490,6 +490,14 @@ targets. `simple` retains no PSSM resources. The implementation and defaults liv
 `apps/holtburger-3d/src/lib/game/renderer/entity-shadow-policy.ts` and
 `apps/holtburger-3d/src/lib/frontend-tuning.ts`.
 
+Each immutable PSSM array layer is checked for framebuffer completeness transactionally when a
+target generation is allocated or resized. Per-frame cascade attachment only selects one of those
+validated layers; repeating the completeness query there forces an avoidable CPU/GPU
+synchronization. The opt-in renderer frame profile reports `outdoorShadowMap` CPU/GPU time plus
+cascade-query, selected-part, compatible-run, and instance-upload counts. Those counters and clocks
+do not execute while profiling is disabled, and sealed indoor views report zero because portal
+planning does not schedule the outdoor pass.
+
 ### Retail-equivalent implementation differences
 
 - **Sun and ambient evaluate in the vertex shader** for both landscape and meshes, rather than

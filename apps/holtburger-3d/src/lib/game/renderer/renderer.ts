@@ -422,6 +422,8 @@ export interface RendererCpuFrameTimings {
 	readonly instanceRunPreparationMs: number;
 	/** CPU wall time spent submitting opaque object work. */
 	readonly opaqueSubmissionMs: number;
+	/** CPU wall time spent constructing and submitting outdoor shadow maps. */
+	readonly outdoorShadowMapMs: number;
 	/** CPU cost of routing sources and uploading particle batches, separate from blended work. */
 	readonly particleSubmissionMs: number;
 	/** Renderer work outside the named spans. */
@@ -452,12 +454,28 @@ export interface RendererContributionFrameMetrics {
 	readonly staticObjectPreparationCount: number;
 }
 
+/** Explanatory outdoor-shadow work recorded only by an explicitly active renderer profile. */
+export interface RendererOutdoorShadowMapFrameMetrics {
+	/** Cascade-frustum scene queries issued by the shadow pass. */
+	readonly cascadeQueryCount: number;
+	/** Compatible geometry/material runs submitted across every cascade. */
+	readonly compatibleDepthRunCount: number;
+	/** Frame-instance bytes uploaded specifically for outdoor shadow depth submission. */
+	readonly instanceUploadBytes: number;
+	/** Nonempty cascade instance uploads issued specifically for outdoor shadow maps. */
+	readonly instanceUploadCount: number;
+	/** Caster parts retained across cascades, counting a part once per intersected cascade. */
+	readonly selectedCasterPartCount: number;
+}
+
 /** Renderer CPU timings for one explicitly profiled frame. */
 export interface RendererCpuFrameProfile extends RendererCpuFrameTimings {
 	/** Contribution work counters for this profiled frame. */
 	readonly contribution: RendererContributionFrameMetrics;
 	/** Monotonic renderer-local frame identifier. */
 	readonly frameNumber: number;
+	/** Outdoor shadow-map work counters for this profiled frame. */
+	readonly outdoorShadowMap: RendererOutdoorShadowMapFrameMetrics;
 }
 
 /** CPU profile accumulated since the last reset, exposing attribution and frame-time variance. */
@@ -471,6 +489,11 @@ export interface RendererCpuFrameProfileWindow {
 	readonly latestFrameNumber: number;
 	/** Total CPU wall time of the most recently captured sample. */
 	readonly latestTotalMs: number;
+	/** Latest and arithmetic-mean outdoor shadow work since the last profile reset. */
+	readonly outdoorShadowMap: {
+		readonly latest: RendererOutdoorShadowMapFrameMetrics;
+		readonly mean: RendererOutdoorShadowMapFrameMetrics;
+	};
 	/**
 	 * Per-phase arithmetic mean over every frame since the last profile reset.
 	 *
@@ -501,6 +524,8 @@ export interface RendererGpuFrameTimings {
 	readonly farTerrainMs: number;
 	/** GPU elapsed-time span covering opaque object commands. */
 	readonly opaqueMs: number;
+	/** GPU elapsed-time span covering outdoor shadow layer clears and caster depth draws. */
+	readonly outdoorShadowMapMs: number;
 	/**
 	 * GPU elapsed-time span covering particle commands.
 	 *

@@ -62,7 +62,7 @@ export class WebGL2PssmShadowTargets {
 		return replacement;
 	}
 
-	/** Attach and validate one cascade layer before its depth submission. */
+	/** Select one allocation-validated cascade layer for depth submission. */
 	attachLayer(layer: number): WebGL2PssmShadowTargetSet {
 		this.#assertAlive();
 		const targets = this.#targets;
@@ -84,7 +84,6 @@ export class WebGL2PssmShadowTargets {
 			0,
 			layer,
 		);
-		requireCompleteLayer(this.#gl, layer);
 		return targets;
 	}
 

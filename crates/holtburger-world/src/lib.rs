@@ -80,8 +80,9 @@ pub use spatial::{
     SelfPlayerDriveProjectionState, SettlePermission, SolveBodyInput, SolvedBodyKinematics,
     SpatialBody, SpatialBodyEvent, SpatialBodyId, SpatialEntitySample, SpatialMembership,
     SpatialSampleMode, SpatialSamplingConfig, SpatialSamplingState, SpatialScene, SphereSweep,
-    StaticContact, StaticSphereSweepHit, StaticSphereSweepRequest, SupportContact, SupportFeature,
-    SupportRequest, UncoveredCollisionQuery, advance_body_kinematics, gate_authored_offset,
+    StaticContact, StaticSphereSweepHit, StaticSphereSweepRequest, StaticSurfaceRayHit,
+    StaticSurfaceRayRequest, SupportContact, SupportFeature, SupportRequest,
+    UncoveredCollisionQuery, advance_body_kinematics, gate_authored_offset,
     physical_body_scene_residency, project_pose_forward_distance, resolve_physical_body_cell,
     settle_free_sphere, settle_free_sphere_with_policy, solve_free_sphere, solve_grounded,
 };

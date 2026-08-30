@@ -22,6 +22,17 @@ const RETAIL_MAXIMUM_SIDESTEP_RATE: f32 = 3.0;
 /// (`acclient.c:329739-329778`).
 const RETAIL_RUN_TURN_RATE: f32 = 1.5;
 
+/// Maximum continuous backward launch speed under retail's signed walk-axis adjustment.
+pub(super) fn maximum_backward_speed(kinematics: CharacterMovementKinematics) -> f32 {
+    kinematics.base_walk_forward_speed() * RETAIL_BACKWARD_FACTOR * kinematics.run_rate_scalar()
+}
+
+/// Maximum continuous lateral launch speed under retail's sidestep rate cap.
+pub(super) fn maximum_lateral_speed(kinematics: CharacterMovementKinematics) -> f32 {
+    (RETAIL_WALK_ANIMATION_SPEED * RETAIL_SIDESTEP_FACTOR * kinematics.run_rate_scalar())
+        .min(RETAIL_SIDESTEP_ANIMATION_SPEED * RETAIL_MAXIMUM_SIDESTEP_RATE)
+}
+
 /// Canonical forward command plus its signed playback-rate multiplier.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AdjustedForwardAxis {

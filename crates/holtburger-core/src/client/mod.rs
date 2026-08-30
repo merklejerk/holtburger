@@ -22,6 +22,8 @@ mod dynamic_entity_view;
 mod messages;
 mod movement;
 pub mod movement_types;
+pub mod precise_jump;
+pub mod precise_jump_prediction;
 mod runtime;
 pub mod runtime_body_view_cache;
 mod simulation;

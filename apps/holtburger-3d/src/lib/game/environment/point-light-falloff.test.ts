@@ -5,7 +5,6 @@ import {
 	WRAP_DISTANCE_SCALE,
 	WRAP_DIVISOR,
 } from "./point-light-falloff";
-import { VIEWER_LIGHT } from "./viewer-light";
 
 /** Facing the light head-on from `distance` away, with a unit normal along the delta. */
 function headOn(distance: number, range: number, intensity: number): number {
@@ -28,24 +27,6 @@ describe("pointLightFalloff", () => {
 	it("saturates well inside the range at authored intensities", () => {
 		// Median authored outdoor light: intensity 100, falloff 6, so range 9.
 		expect(headOn(5, 9, 100)).toBeGreaterThan(1);
-	});
-
-	it("reproduces retail's viewer-light reach at the midpoint of its range", () => {
-		// Retail tuned intensity 2.25 against hardware 1/d, which gives 0.3 at the midpoint of a
-		// 15-unit range. VIEWER_LIGHT.intensity is recalibrated so this shape matches there.
-		expect(headOn(7.5, VIEWER_LIGHT.range, VIEWER_LIGHT.intensity)).toBeCloseTo(
-			2.25 / 7.5,
-			1,
-		);
-	});
-
-	it("gives the viewer light a saturated core that tapers within its range", () => {
-		expect(
-			headOn(3, VIEWER_LIGHT.range, VIEWER_LIGHT.intensity),
-		).toBeGreaterThan(1);
-		expect(headOn(14, VIEWER_LIGHT.range, VIEWER_LIGHT.intensity)).toBeLessThan(
-			0.1,
-		);
 	});
 
 	it("still lights a zero normal, since the wrap term uses the unnormalized delta", () => {

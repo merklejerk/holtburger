@@ -477,13 +477,12 @@ export const SHARED_FRONTEND_TUNING = {
 			 */
 			falloff: 10,
 			/**
-			 * Recalibrated for the authored falloff, not retail's `0.5 * 4.5 = 2.25`.
+			 * Presentation tuning for the shared authored-light falloff.
 			 *
 			 * Retail's value was tuned against hardware `1/d`. The authored falloff we now use for
 			 * every light is effectively inverse-square, so 2.25 would leave the headlamp roughly
-			 * thirty times dimmer at ten units and useless past two. This value reproduces retail's
-			 * contribution at the midpoint of the light's range, giving a saturated core out to
-			 * about five units that tapers to nothing at fifteen.
+			 * thirty times dimmer at ten units and useless past two. Its value is therefore calibrated
+			 * visually rather than copied from retail or derived from an exact sample point.
 			 *
 			 * Interdependent with `falloff`: changing the reach without retuning this changes how
 			 * bright the pool is, not just how far it goes.

@@ -275,6 +275,31 @@ search-based audits unreliable.
 **Preferred correction:** Treat the vocabulary sweep as part of the same change. Search code,
 tests, metrics, logs, UI labels, and active documentation before declaring the cutover complete.
 
+## Do Not Freeze Tuning as a Behavioral Contract
+
+**Pattern:** A unit test promotes a subjective or deliberately adjustable tuning value into a
+required product invariant.
+
+**Detection signals:**
+
+- A primitive's unit test imports application tuning and asserts an exact perceptual result.
+- Changing a documented presentation knob breaks tests without violating the primitive's shape,
+  bounds, continuity, or other semantic contract.
+- Comments describe one historical calibration target as though it were an enduring requirement.
+
+**Why it matters:** The test prevents the parameter from serving its stated purpose and produces a
+false regression whenever the product is intentionally retuned. It also obscures genuine defects
+in the underlying algorithm among failures caused only by taste or hardware-dependent calibration.
+
+**Preferred correction:** Test the primitive with local representative inputs and assert stable
+properties such as bounds, monotonicity, continuity, and scaling. Verify that consumers propagate
+tuning where that wiring is meaningful, but leave the chosen perceptual value to visual evaluation,
+an explicit product specification, or a separately owned calibration benchmark.
+
+**False positives:** A value is not merely tuning when compatibility evidence, accessibility,
+safety, a wire format, or an explicit product requirement fixes it. In those cases, name that
+external contract in the test instead of presenting the number as an aesthetic default.
+
 ## Audit Checklist Seed
 
 For each changed lifecycle or cross-layer contract, ask:
@@ -293,3 +318,4 @@ For each changed lifecycle or cross-layer contract, ask:
 12. Did diagnostics remain consumers rather than authorities?
 13. Are production changes still reviewable without understanding a large fixture framework?
 14. Has obsolete vocabulary been removed from every surviving surface?
+15. Does any test freeze a subjective tuning value instead of the behavior around it?

@@ -1,321 +1,397 @@
-# Code Quality Audit Patterns
+# Software Quality Smell Worksheet
 
-This document is a living catalog of implementation-independent problem patterns found during
-code review. It is intended to become source material for a universal audit rubric. Entries
-describe detection signals, risks, and preferred corrections without naming a particular feature,
-file, or product.
+This is a working collection of domain-independent software quality smells observed during real
+code review. It is raw material for a future audit rubric, not a rubric itself.
 
-The catalog is evidence-led: add a pattern when a real review demonstrates that it can hide a bug,
-inflate a contract, or materially obstruct verification. Do not add stylistic preferences that
-cannot name a failure mode.
+The collection is deliberately incomplete, unranked, and non-prescriptive. An entry records a
+reason to investigate; it does not prove that a design is wrong. Absence from this worksheet says
+nothing about a codebase's quality, and the number of matched smells is not a score.
 
-## Validate Before Mutating
+Keep entries universal. Local names, architecture, and incidents may motivate an entry, but the
+entry should describe a pattern that can recur across languages and product domains.
 
-**Pattern:** Admission, freshness, authorization, or validation occurs after state has already been
-changed.
+## Entry Template
 
-**Detection signals:**
+### Short name
 
-- A function mutates outer state before calling a reducer that can reject the input.
-- A stale or duplicate branch returns successfully after counters, ownership, queues, or pending
-  work have changed.
-- Validation is repeated in several consumers because no single boundary owns admission.
+**Smell:** What general condition prompted investigation?
 
-**Why it matters:** Rejected input becomes observably non-idempotent. Stale resets can retire newer
-work, malformed commands can consume capacity, and retries can change state even when their result
-says they were ignored.
+**Signals:** What concrete shapes, flows, or behavior might reveal it?
 
-**Preferred correction:** Reduce or validate first, return immediately on rejection, and commit all
-related mutations in one explicit accepted branch. Test both stale destructive input and stale
-constructive input.
+**Possible failure:** What can go wrong if the suspicion is correct?
 
-**False positives:** Some protocols intentionally advance one timestamp before rejecting a later
-gate. Preserve that ordering only with primary-source evidence and a regression that names the
-exception.
+**Questions:** What should a reviewer establish before calling it a problem?
 
-## Retain the Operands of a Stateful Decision
+**Counterexamples:** When might the same shape be intentional or harmless?
 
-**Pattern:** A lifecycle stores only part of a decision, then recomputes the missing operands from
-moving input while deciding whether the original work completed.
+**Possible responses:** What kinds of correction may address the underlying risk? These are options,
+not required implementations.
 
-**Detection signals:**
+## Effects Before Acceptance
 
-- State retains a direction, boolean, or enum but not the target/value that produced it.
-- Completion compares the current result of a moving query with a choice made on an earlier tick.
-- An external target changing sides can masquerade as the controlled object crossing its target.
+**Smell:** Input can change state or begin an external effect before validation, authorization,
+freshness, deduplication, or admission finishes.
 
-**Why it matters:** Completion and reversal become functions of unrelated external motion. Stateful
-work may terminate early, oscillate, or reverse even though the controlled system made no progress.
+**Signals:**
 
-**Preferred correction:** Store the admitted target and chosen direction in one progress value.
-Evaluate completion against that fixed decision until the lifecycle explicitly starts a new node.
+- Mutations, resource acquisition, queue writes, or outbound calls precede a rejecting branch.
+- Rejected, stale, duplicate, or retried input changes counters, ownership, pending work, or stored
+  state.
+- Several consumers repeat admission rules because no boundary clearly owns acceptance.
 
-**False positives:** A controller designed to continuously track a target should recompute it, but
-that tracking policy must be explicit and must not reuse a fixed-target crossing test.
+**Possible failure:** Rejected input is observably non-idempotent. Retries duplicate effects, stale
+input overwrites newer state, or unauthorized requests consume resources.
 
-## Collapse Interdependent State into a Composite Type
+**Questions:** Which effects occur before each rejection? Can rejected input be replayed safely? Is
+the pre-rejection effect part of an explicit contract?
 
-**Pattern:** Fields that must change together are represented independently or encoded through
-opaque combinations such as nested optionals and sentinel values.
+**Counterexamples:** Recording receipt, rate-limiting attempts, or advancing an audit sequence may
+intentionally happen before later rejection.
 
-**Detection signals:**
+**Possible responses:** Decide acceptance before effects, return immediately on rejection, or model
+the intentional pre-rejection effect explicitly and test its ordering.
 
-- Only a subset of the Cartesian product of several fields is valid.
-- `Option<Option<T>>`, paired booleans, or nullable values encode lifecycle phases.
-- Consumers need assertions, fallbacks, or comments to explain impossible combinations.
+## Invalid Combinations Hidden in Loose Fields
 
-**Why it matters:** Partial updates create invalid intermediate states, while reviewers must infer a
-hidden state machine from field combinations.
+**Smell:** Facts that must change together are represented independently, or phases are encoded
+through undocumented combinations of booleans, nulls, sentinels, or loosely related fields.
 
-**Preferred correction:** Use an enum for mutually exclusive phases and a struct for facts that
-must travel together. Give every representable state a domain name.
+**Signals:**
 
-**False positives:** A nested optional can be appropriate in a generic patch/merge format where
-“omitted,” “clear,” and “set” are the format's public semantics. It should not leak into domain
-state merely because it is compact.
+- Only a small subset of possible field combinations is valid.
+- Consumers use assertions, fallbacks, or comments to exclude states permitted by the type or
+  schema.
+- An update can expose half of a logically atomic transition.
 
-## Treat Explicit Empty State as State
+**Possible failure:** Partial updates and overlooked combinations produce states that consumers
+interpret inconsistently. The real state machine exists only as convention.
 
-**Pattern:** An initialized but empty value is collapsed into “never initialized” or “no update.”
+**Questions:** Which combinations are valid? Can construction and update APIs represent an invalid
+one? Can another observer see an intermediate combination?
 
-**Detection signals:**
+**Counterexamples:** Generic patch formats may legitimately distinguish omitted, cleared, and set
+values even when the domain model does not.
 
-- `None` represents both “no authority received” and “authority explicitly says idle/empty.”
-- Empty collections or absent channels skip publication despite needing to retire prior work.
-- A stop depends on a later timeout because the empty successor was discarded.
+**Possible responses:** Introduce a composite value, sum type, explicit state machine, or atomic
+transition at the owning boundary.
 
-**Why it matters:** Previous level-triggered behavior survives explicit retirement. Animations,
-subscriptions, motion, or cached results can run forever after a valid empty update.
+## Several Meanings Share One Empty Value
 
-**Preferred correction:** Model initialization separately from payload contents. Publish and apply
-empty successors when they carry authority.
+**Smell:** One representation stands for semantically different states such as not loaded, loaded
+and empty, explicitly cleared, unknown, or use the default.
 
-## Make Lifecycle Retirement Exact
+**Signals:**
 
-**Pattern:** One-shot work ends through elapsed time, lack of recent input, or an unrelated state
-change instead of its authored completion boundary.
+- Empty values skip publication even when they should clear previous state.
+- Missing or null sometimes means none and sometimes means unknown.
+- Correctness relies on a later refresh or timeout because an empty successor was discarded.
 
-**Detection signals:**
+**Possible failure:** Previous state survives an explicit clear, initialization races with
+consumption, or callers invent conflicting interpretations.
 
-- A timeout approximates completion of queued work with known internal boundaries.
-- The next command implicitly retires the current command.
-- Cyclic and non-cyclic portions are not distinguished in sequence state.
+**Questions:** Which empty-like states can callers observe? Do they require different behavior? Is
+the distinction lost at a boundary?
 
-**Why it matters:** Variable rates, frame ranges, and transition paths make wall-clock guesses
-incorrect. Work either loops forever or is cut off early.
+**Counterexamples:** Collapsing states is harmless when every consumer treats them identically and
+no future transition depends on their origin.
 
-**Preferred correction:** Mark the exact terminal node/event when selecting the work and propagate
-that edge through the owning runtime. Keep steady state and transient FIFO state separate.
+**Possible responses:** Give each behaviorally distinct state an explicit representation and
+preserve authoritative empty results.
 
-## Require a Named Consumer for Public Surface
+## Stateful Work Forgets Why It Started
 
-**Pattern:** A helper, field, metric, or abstraction is public without an existing production
-consumer.
+**Smell:** A process stores its chosen result but later recomputes the inputs that originally
+justified it when deciding whether to continue, reverse, or complete.
 
-**Detection signals:**
+**Signals:**
 
-- Repository search finds only tests or the defining module using a public item.
-- A metric cannot name a scenario in which it changes a decision.
-- A generic abstraction exists for one concrete use and has no second caller.
+- State retains a direction, mode, or boolean but not the target, threshold, version, or policy
+  used to choose it.
+- Completion compares current external data with a choice made from an earlier snapshot.
+- Unrelated changes can look like progress by changing the recomputed inputs.
 
-**Why it matters:** Public visibility creates a compatibility and validation obligation. Premature
-primitives encourage callers to bypass the composite contract that owns the real invariant.
+**Possible failure:** Work finishes early, oscillates, reverses, or violates snapshot consistency
+without making the progress the original decision required.
 
-**Preferred correction:** Keep the item private until a named consumer exists. Export the smallest
-composite semantic contract, not intermediate formulae or transport-shaped pieces.
+**Questions:** Is this operation fixed against its admitted inputs or intended to track live state?
+Does completion use the same decision basis as admission?
 
-## Keep Source Adapters Separate and Converge Early
+**Counterexamples:** Continuously adaptive systems should recompute targets, provided their
+completion rule is also defined against live state.
 
-**Pattern:** Entity categories or input sources acquire parallel controllers after ingestion even
-though they share the same semantic behavior.
+**Possible responses:** Store the admitted decision and its required operands together, or make
+continuous replanning an explicit policy.
 
-**Detection signals:**
+## Completion Is Inferred from an Unrelated Event
 
-- Local, remote, automated, or category-specific branches independently select equivalent motion,
-  animation, or physical effects.
-- Fixes repeatedly land in one category while another continues to skate, loop, or diverge.
-- Presentation infers semantic intent from displacement because the authoritative adapter dropped
+**Smell:** Transient work ends because time passed, another operation began, an observer stopped
+seeing it, or unrelated state changed instead of because its own lifecycle completed.
+
+**Signals:**
+
+- A timeout approximates a completion event the system could represent directly.
+- Starting new work is the only way to retire old work.
+- Persistent state and one-shot work share storage without a lifecycle distinction.
+- Cancellation, success, failure, and supersession are conflated.
+
+**Possible failure:** Work runs forever, is truncated, completes twice, leaks ownership, or leaves
+stale state behind.
+
+**Questions:** Who owns the work? What are its terminal outcomes? Which component can know that each
+outcome actually occurred?
+
+**Counterexamples:** A timeout may be the real contract when the external system provides no
+completion signal, or may be a valid safety backstop distinct from ordinary completion.
+
+**Possible responses:** Represent ownership and terminal outcomes explicitly and propagate the
+actual completion, cancellation, or supersession event.
+
+## Narrowing Relies on Today's Data
+
+**Smell:** A value is narrowed, rounded, truncated, or reinterpreted because current producers
+happen to fit the destination domain.
+
+**Signals:**
+
+- Unchecked numeric casts at storage, serialization, foreign-function, or public API boundaries.
+- Unit conversions have no explicit rounding or overflow policy.
+- Identifiers or enumerations can enter values the destination cannot faithfully represent.
+
+**Possible failure:** The receiver gets a valid-looking but false value once production data grows
+beyond today's informal range.
+
+**Questions:** What is the source domain? What is the destination domain? What happens at every
+boundary value and outside the range?
+
+**Counterexamples:** A conversion may be proven safe by a stronger source type or a preceding check
+that dominates every path.
+
+**Possible responses:** Use checked conversion, narrow the source type, or state and enforce the
+rounding, saturation, or overflow policy.
+
+## The Same Fact Has Several Owners
+
+**Smell:** Multiple components independently derive the same semantic fact from lower-level input.
+
+**Signals:**
+
+- The same formula, fallback chain, classification, or policy appears in several layers.
+- A downstream consumer reconstructs intent from side effects because an upstream layer discarded
   it.
+- Callers use slightly different defaults for nominally identical facts.
 
-**Why it matters:** Parallel pipelines drift and turn every behavior fix into a matrix of patches.
-Inference from effects also misclassifies corrections, teleports, and knockback as intentional
-actions.
+**Possible failure:** Consumers produce contradictory answers that are individually plausible and
+difficult to diagnose.
 
-**Preferred correction:** Preserve source-specific ordering and authority rules at ingestion, then
-normalize into one semantic order/event contract consumed by one runtime and solver.
+**Questions:** Which component has all authoritative inputs? Is the duplicated calculation truly the
+same policy? Can callers observe a difference in timing or defaults?
 
-**False positives:** Different authority sources may require genuinely different admission,
-prediction, or reconciliation. Convergence begins after those policies have produced equivalent
-semantic facts, not before.
+**Counterexamples:** Similar formulas can represent distinct policies with independent ownership;
+deduplicating them may create false coupling.
 
-## Compute Derived Facts Once at Their Owning Boundary
+**Possible responses:** Compute the fact once at its owning boundary and include it in the contract,
+or name the distinct policies so their differences are explicit.
 
-**Pattern:** Several layers independently derive the same semantic fact from lower-level inputs.
+## Equivalent Inputs Stay in Parallel Pipelines
 
-**Detection signals:**
+**Smell:** Inputs from different transports, callers, user types, or execution modes keep separate
+implementations after their genuine semantic differences have ended.
 
-- Physics, presentation, and transport each interpret support, stance, capability, or effective
-  resource identity.
-- A frontend or renderer reconstructs gameplay state from poses or velocities.
-- The same fallback chain appears in more than one layer.
+**Signals:**
 
-**Why it matters:** Slightly different defaults and timing produce contradictory outputs that are
-individually plausible and difficult to diagnose.
+- Equivalent behavior is independently implemented for each source category.
+- Fixes repeatedly land in one path while another retains the defect.
+- Consumers branch on provenance even when provenance no longer affects policy.
+- Effects are inspected to infer intent that an adapter could have preserved.
 
-**Preferred correction:** Compute the fact once where all authoritative inputs exist, include it in
-the contract, and make downstream consumers read it without re-deriving it.
+**Possible failure:** Parallel paths drift and turn each behavior change into a matrix of patches.
 
-## Avoid Duplicating Complete Products on Hot Paths
+**Questions:** Which differences are required by trust, ordering, consistency, latency, or
+reconciliation? At what point do the inputs mean the same thing?
 
-**Pattern:** A wrapper allocates or clones a second complete result even when the wrapped operation
-already produced exactly the required golden-path value.
+**Counterexamples:** Sources with genuinely different authority or consistency requirements may
+need distinct policies throughout more of the pipeline.
 
-**Detection signals:**
+**Possible responses:** Keep source-specific rules in adapters, then normalize accepted input into
+one semantic contract as soon as the real differences end.
 
-- Frame/tick code maps or clones a complete array solely to preserve a sparse exceptional case.
-- A merge function always allocates despite equal source and destination coverage.
-- Memoization is proposed before eliminating structural duplicate work.
+## Public Surface Without a Named Consumer
 
-**Why it matters:** Per-frame allocation increases garbage collection and cache pressure in the
-most common case, while obscuring the simpler ownership contract.
+**Smell:** A public helper, field, metric, extension point, or abstraction exists for hypothetical
+reuse rather than current production behavior.
 
-**Preferred correction:** Return the already-complete product on the golden path. Allocate only
-when extending, truncating, or isolating ownership is actually required.
+**Signals:**
 
-## Use Checked Contract Conversions
+- Only tests or the defining module use a public item.
+- A metric cannot name a decision or investigation where it differs from existing telemetry.
+- A generic mechanism has one concrete caller and no demonstrated variation.
+- Public primitives let callers bypass a higher-level invariant.
 
-**Pattern:** A boundary narrows a value with an unchecked cast because current producers happen to
-fit.
+**Possible failure:** Unused surface creates compatibility, documentation, testing, and security
+obligations while exposing states that should remain owned.
 
-**Detection signals:**
+**Questions:** Who consumes it today? Which supported variation requires it? What obligation does
+public visibility create?
 
-- Duration, identifier, count, or sequence values use `as` at a wire/UI boundary.
-- The source domain is wider than the destination schema.
-- A future producer can silently truncate rather than fail at the owner boundary.
+**Counterexamples:** Framework and library boundaries may intentionally define extension points
+before in-repository consumers exist, but should have an external contract and audience.
 
-**Why it matters:** Contract corruption remains invisible until a value exceeds today's informal
-range. The receiving side sees a valid but false value.
+**Possible responses:** Keep the item private, export a complete semantic operation, or document the
+external consumer and compatibility commitment.
 
-**Preferred correction:** Use a checked conversion and fail loudly with an invariant-specific
-message, or narrow the source type if the smaller range is authoritative.
+## Diagnostics Become Part of the Control Plane
 
-## Isolate Outlier Payloads in Sum Types
+**Smell:** Logging, metrics, tests, or debugging tools shape production state or become required for
+correct behavior.
 
-**Pattern:** One large variant determines the size of every value in an otherwise small event or
-command enum.
+**Signals:**
 
-**Detection signals:**
+- Production types retain fields used only by diagnostics.
+- Behavior changes merely to make an observation easier.
+- A diagnostic reconstructs important semantics the runtime discarded.
+- Disabling instrumentation changes ordering, lifecycle, or outcomes.
 
-- Size analysis or linting reports a large difference between enum variants.
-- A queue of tiny tick/key/control events reserves space for an occasional aggregate snapshot.
-- Adding one field to a cold payload unexpectedly inflates a hot dispatcher type.
+**Possible failure:** Observability becomes an accidental authority, expands permanent state, or
+masks a missing production contract.
 
-**Why it matters:** Every queued or moved value pays the outlier's stack and cache footprint even
-when the common variant is tiny. Small unrelated additions can also push the enum across warning or
-stack-size thresholds.
+**Questions:** Does the system behave identically without the diagnostic? Is the observed fact
+already owned by production code? Is temporary instrumentation leaking into durable design?
 
-**Preferred correction:** Put deliberate indirection around the cold outlier at the dispatch
-boundary, preserving direct storage for common small variants. Keep the allocation at ownership
-transfer rather than repeatedly boxing and unboxing inside consumers.
+**Counterexamples:** Auditing, metering, and safety monitoring can be product requirements rather
+than optional diagnostics.
 
-**False positives:** Do not add indirection to a hot large variant merely to satisfy an arbitrary
-size ratio. Measure frequency and ownership; a uniformly large enum or latency-critical payload may
-be better represented directly.
+**Possible responses:** Expose existing decisions at a read-only edge, separate required auditing
+from debugging, and remove temporary diagnostic state after evidence gathering.
 
-## Keep Diagnostics Downstream of Semantics
+## The Common Path Duplicates a Complete Result
 
-**Pattern:** Logging, probes, or debug needs shape the production state contract or become required
-for correctness.
+**Smell:** A wrapper allocates, clones, copies, serializes, or recomputes a second complete result
+when the wrapped operation already produced what the caller needs.
 
-**Detection signals:**
+**Signals:**
 
-- Production types retain fields used only for messages or tests.
-- Behavior changes to make a probe easier to observe.
-- A diagnostic reconstructs semantics that the runtime itself discarded.
+- A complete collection is copied solely to support an uncommon partial case.
+- A merge or transformation always allocates even when the input already satisfies the contract.
+- Caching is proposed before structurally duplicated work is removed.
+- Duplication occurs on a high-frequency or high-volume path.
 
-**Why it matters:** Diagnostics become accidental authorities, add permanent state, and can mask
-the missing production contract they were meant to investigate.
+**Possible failure:** The common case pays unnecessary CPU, memory bandwidth, garbage collection,
+allocation, or network cost while ownership becomes less clear.
 
-**Preferred correction:** Expose existing semantic decisions to diagnostics at a read-only edge.
-Keep temporary instrumentation out of durable state, and remove it after evidence is gathered.
+**Questions:** Can ownership of the existing result be transferred? How common is the exceptional
+case? Is isolation actually required?
 
-## Control Test-Fixture Gravity
+**Counterexamples:** Copying may be required for isolation, immutability, ownership transfer, or
+concurrency safety.
 
-**Pattern:** Integration fixtures and scenario setup grow until they dominate the module containing
-the production code.
+**Possible responses:** Reuse or transfer the complete result on the common path and pay copying or
+merging costs only when needed.
 
-**Detection signals:**
+## A Rare Outlier Sets Every Value's Cost
 
-- Reviewers cannot see the production change in an ordinary diff because thousands of fixture
-  lines surround it.
-- Multiple tests rebuild the same world, graph, or protocol payload with small variations.
-- Helper setup silently establishes unrelated invariants.
+**Smell:** An uncommon case determines the memory, allocation, serialization, or dispatch cost of
+every value in a frequently used representation.
 
-**Why it matters:** Auditability declines, fixture behavior becomes a shadow framework, and broad
-setup makes tests brittle or misleading.
+**Signals:**
 
-**Preferred correction:** Keep focused unit fixtures near their owner, move large scenario suites
-to dedicated test modules, and extract only honest shared builders whose names state every
-important invariant. Do not create a generic test framework merely to reduce line count.
+- One variant is much larger than the rest of a sum type.
+- Every small queue item reserves capacity for an occasional large payload.
+- Adding one cold field changes stack size, cache density, or copy cost for common work.
+- Sparse records are materialized densely without evidence that density is cheaper.
 
-## Sweep Vocabulary with Structural Changes
+**Possible failure:** Every common operation pays for an uncommon case, producing disproportionate
+memory or throughput regressions.
 
-**Pattern:** A mechanism is removed or renamed while old terminology survives in symbols,
-diagnostics, comments, tests, or documentation.
+**Questions:** How frequent is each shape? Where is ownership transferred? What do measurement and
+allocation profiles show?
 
-**Detection signals:**
+**Counterexamples:** Indirection can cost more when the large case is common, uniformly accessed, or
+latency critical.
 
-- Searches find both old and new names for one concept.
+**Possible responses:** Isolate cold outliers through indirection, separate storage, or a different
+transfer path after measuring frequency and locality.
+
+## Tests Freeze an Adjustable Choice
+
+**Smell:** A test promotes a subjective default, tuning value, implementation detail, or historical
+calibration into a permanent behavioral requirement.
+
+**Signals:**
+
+- A lower-level test imports application configuration and asserts an exact product result.
+- Refactoring internals breaks tests without changing observable behavior.
+- Changing a documented tuning knob fails tests while preserving meaningful behavioral properties.
+- A historical value is described as an enduring requirement without an external source.
+
+**Possible failure:** Tests resist legitimate change, obscure real regressions among false failures,
+and make adjustable values non-adjustable in practice.
+
+**Questions:** What external contract owns the expected value? Is the test checking behavior,
+wiring, or a preference? Which properties must remain stable when the value changes?
+
+**Counterexamples:** Compatibility, accessibility, safety, regulation, and public protocols can fix
+exact values.
+
+**Possible responses:** Test stable properties and externally owned requirements, verify
+configuration propagation separately, and leave subjective calibration to its actual evaluation
+process.
+
+## Fixture Setup Becomes a Shadow Framework
+
+**Smell:** Test setup grows until its implicit behavior dominates the behavior under test.
+
+**Signals:**
+
+- Reviewers must understand large builders or fixtures to know what one test establishes.
+- Many tests rebuild the same graph with small variations.
+- Helpers silently establish unrelated invariants or defaults.
+- Production changes are buried beneath much larger fixture churn.
+
+**Possible failure:** Tests become brittle, misleading, and difficult to audit. One fixture defect
+can make a large suite agree on the wrong behavior.
+
+**Questions:** Which setup facts matter to the assertion? Are they visible at the call site? Does
+the fixture have more policy than the production interface?
+
+**Counterexamples:** Large end-to-end scenarios may require substantial setup; the concern is hidden
+policy, not line count alone.
+
+**Possible responses:** Keep focused fixtures near their owner, separate large scenarios, and
+extract only builders whose names and parameters reveal their relevant invariants.
+
+## Old Concepts Survive a Structural Change
+
+**Smell:** A mechanism is removed or renamed while its terminology, dead branches, configuration,
+telemetry, tests, comments, or documentation survive.
+
+**Signals:**
+
+- Searches find old and new names for one concept.
 - Comments describe a superseded architecture despite compiling code.
-- A diagnostic label implies behavior the runtime no longer performs.
+- Configuration and metrics imply behavior that no longer exists.
+- Compatibility shims have no remaining caller or removal condition.
 
-**Why it matters:** Stale vocabulary sends future maintainers toward dead architecture and makes
-search-based audits unreliable.
+**Possible failure:** Future work follows an architecture that no longer exists, while search-based
+audits and operational interpretation become unreliable.
 
-**Preferred correction:** Treat the vocabulary sweep as part of the same change. Search code,
-tests, metrics, logs, UI labels, and active documentation before declaring the cutover complete.
+**Questions:** Which surfaces still expose the old concept? Is compatibility required? If so, who
+owns its removal condition?
 
-## Do Not Freeze Tuning as a Behavioral Contract
+**Counterexamples:** Staged migrations may deliberately retain old vocabulary and adapters for a
+defined compatibility window.
 
-**Pattern:** A unit test promotes a subjective or deliberately adjustable tuning value into a
-required product invariant.
+**Possible responses:** Sweep code, tests, configuration, telemetry, labels, and active
+documentation as part of the change, or document the migration boundary and removal trigger.
 
-**Detection signals:**
+## Adding Observations
 
-- A primitive's unit test imports application tuning and asserts an exact perceptual result.
-- Changing a documented presentation knob breaks tests without violating the primitive's shape,
-  bounds, continuity, or other semantic contract.
-- Comments describe one historical calibration target as though it were an enduring requirement.
+An observation belongs here when it has:
 
-**Why it matters:** The test prevents the parameter from serving its stated purpose and produces a
-false regression whenever the product is intentionally retuned. It also obscures genuine defects
-in the underlying algorithm among failures caused only by taste or hardware-dependent calibration.
+- a domain-independent shape;
+- concrete signals a reviewer can look for;
+- a plausible failure beyond formatting or taste;
+- questions that distinguish the smell from legitimate designs; and
+- responses expressed as options rather than mandatory patterns.
 
-**Preferred correction:** Test the primitive with local representative inputs and assert stable
-properties such as bounds, monotonicity, continuity, and scaling. Verify that consumers propagate
-tuning where that wiring is meaningful, but leave the chosen perceptual value to visual evaluation,
-an explicit product specification, or a separately owned calibration benchmark.
-
-**False positives:** A value is not merely tuning when compatibility evidence, accessibility,
-safety, a wire format, or an explicit product requirement fixes it. In those cases, name that
-external contract in the test instead of presenting the number as an aesthetic default.
-
-## Audit Checklist Seed
-
-For each changed lifecycle or cross-layer contract, ask:
-
-1. Can rejected, stale, duplicate, or unauthorized input mutate anything?
-2. Does completion use the exact operands admitted when the work began?
-3. Can the type represent an invalid phase or partial combination?
-4. Is explicit empty/idle distinct from uninitialized or absent input?
-5. Is transient retirement tied to an exact semantic boundary?
-6. Does every public field, helper, metric, and abstraction have a named production consumer?
-7. Do different sources normalize into one semantic runtime after their authority-specific gates?
-8. Is each derived fact computed once by the layer that owns all of its inputs?
-9. Does the frame/tick golden path avoid redundant allocations and clones?
-10. Are boundary conversions checked against the destination domain?
-11. Does a cold outlier inflate every value of a frequently moved sum type?
-12. Did diagnostics remain consumers rather than authorities?
-13. Are production changes still reviewable without understanding a large fixture framework?
-14. Has obsolete vocabulary been removed from every surviving surface?
-15. Does any test freeze a subjective tuning value instead of the behavior around it?
+Do not reorganize the worksheet into a scored or comprehensive rubric until enough observations
+exist to justify coverage, grouping, severity, and evaluation rules with evidence.

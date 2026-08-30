@@ -4,13 +4,20 @@ import {
 	type GeometrySource,
 	type ObjectGeometryKey,
 } from "../geometry/types";
-import { resolveObjectMaterialRanges } from "../commit/object-material-ranges";
+import {
+	resolveObjectMaterialRanges,
+	type ObjectMaterialRange,
+} from "../commit/object-material-ranges";
 import type { ResolvedObjectPart } from "../resolution/presentation";
 import type { ObjectGeometryData } from "../renderer/geometry";
 import type { AABB3, Vec3 } from "../math/types";
 import type { AssetTextureFact, AssetTextureKey } from "../textures/types";
 import type { AtlasRequirementCompletion } from "../textures/atlas/resident-texture-atlas";
-import type { PartVisualTemplateKey, RigidPartDrawUnit } from "./components";
+import type {
+	PartVisualTemplateKey,
+	RigidPartDepthDrawUnit,
+	RigidPartDrawUnit,
+} from "./components";
 
 declare const objectVisualTemplateKeyBrand: unique symbol;
 
@@ -39,6 +46,8 @@ export interface PartVisualTemplate {
 	/** Untransformed geometry-local bounds used by animation sweeps. */
 	readonly localBounds: AABB3 | null;
 	readonly drawUnits: readonly RigidPartDrawUnit[];
+	/** Maximal contiguous ranges consumed by material-independent depth passes. */
+	readonly depthDrawUnits: readonly RigidPartDepthDrawUnit[];
 }
 
 /** CPU-heavy visual preparation boundary injected into the sharing/lifetime manager. */
@@ -545,13 +554,19 @@ function prepareObjectVisualTemplate(
 			});
 		}
 		const templatePartKey = partVisualTemplateKey(key, part);
+		const ranges = resolveObjectMaterialRanges(
+			part,
+			`Object part ${part.partIndex}`,
+			textureRequirements,
+		);
 		return {
 			defaultScale: part.defaultScale,
+			depthDrawUnits: depthPartitions(ranges, geometryKey),
 			drawUnits: materialPartitions(
-				part,
+				ranges,
 				geometryKey,
+				part.partIndex,
 				templatePartKey,
-				textureRequirements,
 			),
 			geometry: geometryKey,
 			key: templatePartKey,
@@ -572,25 +587,50 @@ function prepareObjectVisualTemplate(
 }
 
 function materialPartitions(
-	part: ResolvedObjectPart,
+	ranges: readonly ObjectMaterialRange[],
 	geometry: ObjectGeometryKey,
+	partIndex: number,
 	templatePartKey: PartVisualTemplateKey,
-	textureRequirements: Map<AssetTextureKey, AssetTextureFact>,
 ): readonly RigidPartDrawUnit[] {
-	return resolveObjectMaterialRanges(
-		part,
-		`Object part ${part.partIndex}`,
-		textureRequirements,
-	).map((range) => ({
+	return ranges.map((range) => ({
 		batchKey: `${templatePartKey}/${range.bindingId}/${range.indexStart}/${range.indexCount}`,
 		geometry,
 		indexCount: range.indexCount,
 		indexStart: range.indexStart,
 		material: range.material,
 		ordering: range.ordering,
-		partIndex: part.partIndex,
+		partIndex,
 		templatePartKey,
 	}));
+}
+
+/** Collapse material boundaries while retaining the sole material-derived depth fact. */
+function depthPartitions(
+	ranges: readonly ObjectMaterialRange[],
+	geometry: ObjectGeometryKey,
+): readonly RigidPartDepthDrawUnit[] {
+	const depth: RigidPartDepthDrawUnit[] = [];
+	for (const range of ranges) {
+		const cullFace = range.material.polygon.cullFace;
+		const previous = depth.at(-1);
+		if (
+			previous?.cullFace === cullFace &&
+			previous.indexStart + previous.indexCount === range.indexStart
+		) {
+			depth[depth.length - 1] = {
+				...previous,
+				indexCount: previous.indexCount + range.indexCount,
+			};
+			continue;
+		}
+		depth.push({
+			cullFace,
+			geometry,
+			indexCount: range.indexCount,
+			indexStart: range.indexStart,
+		});
+	}
+	return depth;
 }
 
 function objectGeometryData(part: ResolvedObjectPart): ObjectGeometryData {

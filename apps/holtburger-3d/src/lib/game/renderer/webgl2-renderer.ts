@@ -72,6 +72,7 @@ import {
 	OBJECT_INSTANCE_RECORD_BYTES,
 	type ObjectInstanceData,
 } from "../systems/static-resources";
+import type { VisibleDynamicContributions } from "../systems/components";
 import {
 	assertSharedTerrainRegion,
 	type TerrainProgramInput,
@@ -174,6 +175,7 @@ import {
 	type ObjectBlendPolicy,
 	createObjectSubmissionPhases,
 	objectBlendPolicy,
+	type ObjectFrameSubmission,
 	type ObjectSubmissionPhases,
 	type PreparedObjectAtlasBinding,
 	type PreparedObjectMaterial,
@@ -343,10 +345,13 @@ const EMPTY_LIGHTS: readonly RuntimeLight[] = [];
 function createEmptyOutdoorShadowMapProfileMetrics(): WebGL2OutdoorPssmPassProfileMetrics {
 	return {
 		cascadeQueryCount: 0,
+		cascadeSelectedRootCount: 0,
 		compatibleDepthRunCount: 0,
 		instanceUploadBytes: 0,
 		instanceUploadCount: 0,
+		retainedCasterRootCount: 0,
 		selectedCasterPartCount: 0,
+		uniqueSelectedRootCount: 0,
 	};
 }
 /** Synthetic single render domain used by the deliberately unpartitioned flat debug mode. */
@@ -406,7 +411,8 @@ interface ObjectFrameInput {
 	readonly instances:
 		| null
 		| {
-				readonly cohortKey: string;
+				/** Stable grouping identity, absent when the submission phase ignores authored cohorts. */
+				readonly transparentCohortKey: string | null;
 				readonly instance: import("../systems/static-resources").ObjectInstanceData;
 				readonly kind: "frame-template";
 		  }
@@ -443,6 +449,8 @@ type PreparedObjectDrawCompatibility = PreparedStaticObjectDrawCompatibility<
  * across re-anchoring.
  */
 interface PreparedObjectFrameInput extends ObjectFrameInput {
+	/** Compiled coarse partition; exact prepared compatibility remains authoritative. */
+	readonly batchKey: string;
 	/**
 	 * Compiled facts held directly rather than behind their cache entry.
 	 *
@@ -452,6 +460,12 @@ interface PreparedObjectFrameInput extends ObjectFrameInput {
 	 */
 	readonly blendPolicy: ObjectBlendPolicy;
 	readonly compatibility: PreparedObjectDrawCompatibility;
+}
+
+/** One ordered phase's scheduling semantics; cohort identity is explicit instead of incidental. */
+interface FrameInstancePhasePolicy {
+	readonly grouping: "adjacent" | "grouped";
+	readonly cohort: "ignore" | "require";
 }
 
 /**
@@ -466,6 +480,7 @@ function createObjectSubmission(
 	compiled: CompiledObjectDraw<PreparedObjectDrawCompatibility>,
 ): PreparedObjectFrameInput {
 	return {
+		batchKey: compiled.batchKey,
 		blendPolicy: compiled.blendPolicy,
 		compatibility: compiled.compatibility,
 		cullFaceOverride: object.cullFaceOverride,
@@ -799,6 +814,14 @@ export class WebGL2Renderer implements Renderer {
 	} | null = null;
 	readonly #visibleStaticLayers = new Set<string>();
 	readonly #visibleEnvCellScopes = new Set<string>();
+	/** Frame-owned expansion cache shared by PSSM and ordinary view selection. */
+	readonly #dynamicContributions = new Map<
+		SceneNodeId,
+		{
+			readonly contributions: VisibleDynamicContributions;
+			readonly includesDepth: boolean;
+		}
+	>();
 	/** Dynamic roots selected in any view of the frame, retained as production feedback. */
 	readonly #selectedDynamicNodeIds = new Set<SceneNodeId>();
 	/** Read-only runtime gateway used to collect this renderer's frame submissions. */
@@ -961,6 +984,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#canvas = canvas;
 		this.#gl = gl;
 		this.#resources = resources;
+		this.#world = world;
 		this.#assertDeviceReady = assertDeviceReady;
 		this.#textureSamplers = new WebGL2TextureSamplerCatalog(
 			gl,
@@ -970,7 +994,14 @@ export class WebGL2Renderer implements Renderer {
 		this.#outdoorPssmPass = new WebGL2OutdoorPssmPass(
 			gl,
 			resources,
-			world,
+			{
+				expandDynamicContributions: (nodeId, includeDepth) =>
+					this.#expandDynamicContributions(nodeId, includeDepth),
+				getRenderContributionDescriptor: (nodeId) =>
+					world.getRenderContributionDescriptor(nodeId),
+				queryScopesScene: (...args) => world.queryScopesScene(...args),
+				resolveGeometry: (key) => world.resolveGeometry(key),
+			},
 			this.#frameInstances,
 		);
 		this.#outdoorPssmReceiverPrograms = new WebGL2OutdoorPssmReceiverPrograms(
@@ -982,7 +1013,6 @@ export class WebGL2Renderer implements Renderer {
 		this.#dynamicLightScratch = createDynamicLightScratch();
 		this.#terrainLightMask = createWebGL2TerrainLightMaskTexture(gl);
 		this.#objectState = new WebGL2ObjectStateApplicator(gl);
-		this.#world = world;
 		this.#nearTerrainProgram = createWebGL2NearTerrainProgram(gl);
 		this.#farTerrainProgram = createWebGL2FarTerrainProgram(gl);
 		this.#objectProgram = createWebGL2ObjectProgram(gl);
@@ -1644,6 +1674,25 @@ export class WebGL2Renderer implements Renderer {
 		this.#frameInstances.destroy();
 	}
 
+	/** Expand one dynamic root at most once per frame across ordinary and shadow consumers. */
+	#expandDynamicContributions(
+		nodeId: SceneNodeId,
+		includeDepth: boolean,
+	): VisibleDynamicContributions {
+		const existing = this.#dynamicContributions.get(nodeId);
+		if (existing !== undefined && (!includeDepth || existing.includesDepth))
+			return existing.contributions;
+		const contributions = this.#world.expandDynamicContributions(
+			nodeId,
+			includeDepth,
+		);
+		this.#dynamicContributions.set(nodeId, {
+			contributions,
+			includesDepth: includeDepth,
+		});
+		return contributions;
+	}
+
 	/** Submit one view's outdoor maps before any scene query reuses its selection storage. */
 	#renderOutdoorPssm(
 		prepared: PreparedViewGeometry,
@@ -1883,8 +1932,8 @@ export class WebGL2Renderer implements Renderer {
 				if (!this.#retainsObjectFootprint(contribution.footprint, prepared)) {
 					continue;
 				}
-				const dynamicContributions =
-					this.#world.expandDynamicContributions(nodeId);
+				const expandedDynamic = this.#expandDynamicContributions(nodeId, false);
+				const dynamicContributions = expandedDynamic.material;
 				if (groundingEnabled && dynamicContributions.length > 0) {
 					const facts = this.#world.getEntityGroundingDynamicFacts(nodeId);
 					const reachesIndoor = facts.spatialMembership.scopes.some(
@@ -1913,34 +1962,29 @@ export class WebGL2Renderer implements Renderer {
 				this.#frameSelectionMetrics.visibleDynamicEntityCount += 1;
 				this.#frameSelectionMetrics.visibleDynamicPartCount +=
 					dynamicContributions.length;
-				for (const resolved of this.#world.resolveDynamicContributions(
-					dynamicContributions,
-				)) {
-					const {
-						drawUnit,
-						instance,
-						landblockId,
-						ordering,
-						renderScopes,
-						transparentSort,
-					} = resolved.drawUnit;
-					retainOffset(landblockId);
+				if (expandedDynamic.kind === "hidden") continue;
+				const renderScopeKeys = selectedDynamicRenderScopeKeys(
+					expandedDynamic.renderScopes,
+					portalVisibility,
+				);
+				const landblockId = expandedDynamic.landblockId;
+				retainOffset(landblockId);
+				for (const contribution of dynamicContributions) {
+					const { drawUnit, instance, ordering, transparentSort } =
+						contribution;
+					const geometry = this.#world.resolveGeometry(drawUnit.geometry);
 					const compiled = this.#compiledDraws.resolveDraw(
 						drawUnit,
 						ordering,
 						() =>
 							this.#compileObjectDraw({
 								cullFaceOverride: null,
-								geometry: resolved.geometry,
+								geometry,
 								indexCount: drawUnit.indexCount,
 								indexStart: drawUnit.indexStart,
 								material: drawUnit.material,
 								ordering,
 							}),
-					);
-					const renderScopeKeys = selectedDynamicRenderScopeKeys(
-						renderScopes,
-						portalVisibility,
 					);
 					for (const renderScopeKey of renderScopeKeys) {
 						objects.push(
@@ -1948,11 +1992,14 @@ export class WebGL2Renderer implements Renderer {
 								{
 									cullFaceOverride: null,
 									drawKind: "instanced",
-									geometry: resolved.geometry,
+									geometry,
 									indexCount: drawUnit.indexCount,
 									indexStart: drawUnit.indexStart,
 									instances: {
-										cohortKey: `${landblockId}/${renderScopeKey}/${drawUnit.batchKey}`,
+										transparentCohortKey:
+											ordering === "opaque" || ordering === "alpha-test"
+												? null
+												: `${landblockId}/${renderScopeKey}/${drawUnit.batchKey}`,
 										instance,
 										kind: "frame-template",
 									},
@@ -2264,7 +2311,7 @@ export class WebGL2Renderer implements Renderer {
 					indexCount: template.indexCount,
 					indexStart: template.indexStart,
 					instances: {
-						cohortKey: template.cohortKey,
+						transparentCohortKey: template.cohortKey,
 						instance: template.instance,
 						kind: "frame-template",
 					},
@@ -2365,33 +2412,35 @@ export class WebGL2Renderer implements Renderer {
 		const detail = resolveStaticMaterialDetail(material, (role) =>
 			this.#world.resolveActiveRegionStaticDetail(role),
 		);
+		const compatibility: PreparedObjectDrawCompatibility = {
+			alphaTest:
+				object.ordering === "alpha-test" && material.source.kind === "texture"
+					? 200 / 255
+					: 0,
+			cullFace: object.cullFaceOverride ?? material.polygon.cullFace,
+			detail:
+				detail === null
+					? null
+					: {
+							...this.#prepareObjectTextureBinding(
+								this.#world.resolveTexture2D(detail.key),
+								"filterable",
+							),
+							rect: [0, 0, 1, 1],
+							tiling: detail.tiling,
+						},
+			geometry,
+			indexCount: object.indexCount,
+			indexStart: object.indexStart,
+			luminosity: material.source.luminosity,
+			material: preparedMaterial,
+			palettedClipMap: material.palettedClipMap,
+			wrapRepeat: material.sampler.wrap === TextureWrapMode.Repeat,
+		};
 		return {
+			batchKey: `${object.ordering}\0${object.geometry}\0${object.indexStart}\0${object.indexCount}`,
 			blendPolicy: objectBlendPolicy(material.source.rawSurfaceFlags),
-			compatibility: {
-				alphaTest:
-					object.ordering === "alpha-test" && material.source.kind === "texture"
-						? 200 / 255
-						: 0,
-				cullFace: object.cullFaceOverride ?? material.polygon.cullFace,
-				detail:
-					detail === null
-						? null
-						: {
-								...this.#prepareObjectTextureBinding(
-									this.#world.resolveTexture2D(detail.key),
-									"filterable",
-								),
-								rect: [0, 0, 1, 1],
-								tiling: detail.tiling,
-							},
-				geometry,
-				indexCount: object.indexCount,
-				indexStart: object.indexStart,
-				luminosity: material.source.luminosity,
-				material: preparedMaterial,
-				palettedClipMap: material.palettedClipMap,
-				wrapRepeat: material.sampler.wrap === TextureWrapMode.Repeat,
-			},
+			compatibility,
 		};
 	}
 
@@ -2479,6 +2528,7 @@ export class WebGL2Renderer implements Renderer {
 		metrics.visibleSceneEntries = 0;
 		this.#visibleStaticLayers.clear();
 		this.#visibleEnvCellScopes.clear();
+		this.#dynamicContributions.clear();
 		this.#selectedDynamicNodeIds.clear();
 		metrics.visibleStaticLayerCount = 0;
 		metrics.visibleStaticNodeCount = 0;
@@ -3722,7 +3772,7 @@ export class WebGL2Renderer implements Renderer {
 				(object) => this.#transparentRange(object, view),
 				(object) =>
 					object.instances?.kind === "frame-template"
-						? object.instances.cohortKey
+						? object.instances.transparentCohortKey
 						: null,
 				(object) => this.#transparentCameraDepth(object, view),
 			);
@@ -3808,7 +3858,7 @@ export class WebGL2Renderer implements Renderer {
 	): void {
 		if (candidates.length === 0) return;
 		const objects = this.#prepareFrameInstanceRuns([candidates], profile, [
-			"grouped",
+			{ cohort: "ignore", grouping: "grouped" },
 		]).objects;
 		const submissionStartedAt = profile?.beginCpuPhase();
 		const gl = this.#gl;
@@ -3979,7 +4029,20 @@ export class WebGL2Renderer implements Renderer {
 		const prepared = this.#prepareFrameInstanceRuns(
 			[ordered.far, ordered.near, ordered.additive],
 			profile,
-			["adjacent", "adjacent", "grouped"],
+			[
+				{
+					cohort: "require",
+					grouping: "adjacent",
+				},
+				{
+					cohort: "require",
+					grouping: "adjacent",
+				},
+				{
+					cohort: "require",
+					grouping: "grouped",
+				},
+			],
 		);
 		const [farRunCount = 0, nearRunCount = 0] = prepared.runCounts;
 		this.#frameSelectionMetrics.transparentFrameRunCount +=
@@ -3993,7 +4056,7 @@ export class WebGL2Renderer implements Renderer {
 	#prepareFrameInstanceRuns(
 		phases: readonly (readonly PreparedObjectFrameInput[])[],
 		profile: WebGL2FrameProfileCapture | null,
-		groupings: readonly ("adjacent" | "grouped")[],
+		policies: readonly FrameInstancePhasePolicy[],
 	): {
 		readonly objects: readonly PreparedObjectFrameInput[];
 		readonly runCounts: readonly number[];
@@ -4003,41 +4066,13 @@ export class WebGL2Renderer implements Renderer {
 		const runCounts: number[] = [];
 		const preparationStartedAt = profile?.beginCpuPhase();
 		for (const [phaseIndex, phase] of phases.entries()) {
-			const grouping = groupings[phaseIndex];
-			if (!grouping) {
+			const policy = policies[phaseIndex];
+			if (!policy) {
 				throw new Error(
 					`Object instance phase ${phaseIndex} has no grouping policy.`,
 				);
 			}
-			const isFrameInstance = (object: PreparedObjectFrameInput): boolean =>
-				object.instances?.kind === "frame-template";
-			const isCompatible = (
-				left: PreparedObjectFrameInput,
-				right: PreparedObjectFrameInput,
-			): boolean =>
-				// One offset per landblock this frame, so equal landblocks mean equal offsets:
-				// this replaces the component comparison the compatibility value used to carry.
-				left.landblockId === right.landblockId &&
-				areStaticObjectDrawsCompatible(
-					left.compatibility,
-					right.compatibility,
-				) &&
-				left.instances?.kind === "frame-template" &&
-				right.instances?.kind === "frame-template" &&
-				frameTemplateBatchIdentityEquals(left, right);
-			const scheduled =
-				grouping === "grouped"
-					? formGroupedObjectInstanceRuns(
-							phase,
-							isFrameInstance,
-							opaqueObjectInstanceBatchKey,
-							isCompatible,
-						)
-					: formAdjacentObjectInstanceRuns(
-							phase,
-							isFrameInstance,
-							isCompatible,
-						);
+			const scheduled = scheduleFrameInstanceRuns(phase, policy);
 			runCounts.push(
 				scheduled.filter(
 					(submission) => submission.kind === "frame-instance-run",
@@ -4538,8 +4573,31 @@ function validateDrawRange(
 	}
 }
 
-/** Check the semantic frame-template identity required in addition to prepared compatibility. */
-function frameTemplateBatchIdentityEquals(
+/** Schedule one phase under its explicit ordering and cohort semantics. */
+function scheduleFrameInstanceRuns(
+	ordered: readonly PreparedObjectFrameInput[],
+	policy: FrameInstancePhasePolicy,
+): readonly ObjectFrameSubmission<PreparedObjectFrameInput>[] {
+	const isFrameInstance = (object: PreparedObjectFrameInput): boolean =>
+		object.instances?.kind === "frame-template";
+	const isCompatible = (
+		left: PreparedObjectFrameInput,
+		right: PreparedObjectFrameInput,
+	): boolean =>
+		frameTemplateDrawIdentityEquals(left, right) &&
+		(policy.cohort === "ignore" || frameTemplateCohortEquals(left, right));
+	return policy.grouping === "grouped"
+		? formGroupedObjectInstanceRuns(
+				ordered,
+				isFrameInstance,
+				(object) => objectInstanceBatchKey(object, policy.cohort),
+				isCompatible,
+			)
+		: formAdjacentObjectInstanceRuns(ordered, isFrameInstance, isCompatible);
+}
+
+/** Check every non-cohort identity required in addition to prepared draw compatibility. */
+function frameTemplateDrawIdentityEquals(
 	left: PreparedObjectFrameInput,
 	right: PreparedObjectFrameInput,
 ): boolean {
@@ -4554,7 +4612,10 @@ function frameTemplateBatchIdentityEquals(
 		);
 	}
 	return (
-		leftInstances.cohortKey === rightInstances.cohortKey &&
+		// One offset per landblock this frame, so equal landblocks mean equal offsets. This replaces
+		// the component comparison the compatibility value used to carry.
+		left.landblockId === right.landblockId &&
+		areStaticObjectDrawsCompatible(left.compatibility, right.compatibility) &&
 		left.source === right.source &&
 		left.receivesOutdoorPssm === right.receivesOutdoorPssm &&
 		left.renderScopeKey === right.renderScopeKey &&
@@ -4565,17 +4626,39 @@ function frameTemplateBatchIdentityEquals(
 	);
 }
 
-/** Stable semantic partition used to narrow exact opaque instance compatibility checks. */
-function opaqueObjectInstanceBatchKey(
+/** Preserve order-sensitive template identity only for phases that explicitly require it. */
+function frameTemplateCohortEquals(
+	left: PreparedObjectFrameInput,
+	right: PreparedObjectFrameInput,
+): boolean {
+	const leftInstances = left.instances;
+	const rightInstances = right.instances;
+	if (
+		leftInstances?.kind !== "frame-template" ||
+		rightInstances?.kind !== "frame-template"
+	) {
+		throw new Error(
+			"Frame-template cohort identity requires two frame templates.",
+		);
+	}
+	return (
+		leftInstances.transparentCohortKey === rightInstances.transparentCohortKey
+	);
+}
+
+/** Stable semantic partition used to narrow exact instance compatibility checks. */
+function objectInstanceBatchKey(
 	object: PreparedObjectFrameInput,
+	cohort: FrameInstancePhasePolicy["cohort"],
 ): string {
 	const instances = object.instances;
 	if (instances?.kind !== "frame-template") {
 		throw new Error(
-			"Opaque instance grouping received a non-frame instance input.",
+			"Object instance grouping received a non-frame instance input.",
 		);
 	}
-	return `${object.ordering}\0${object.source}\0${object.receivesOutdoorPssm ? "pssm" : "plain"}\0${object.renderScopeKey}\0${object.landblockId}\0${instances.cohortKey}\0${object.geometry}\0${object.indexStart}\0${object.indexCount}`;
+	if (cohort === "ignore") return object.batchKey;
+	return `${object.ordering}\0${object.source}\0${object.receivesOutdoorPssm ? "pssm" : "plain"}\0${object.renderScopeKey}\0${object.landblockId}\0${object.geometry}\0${object.indexStart}\0${object.indexCount}\0${instances.transparentCohortKey}`;
 }
 
 function createObjectFallbackTexture(gl: WebGL2RenderingContext): WebGLTexture {

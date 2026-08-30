@@ -44,6 +44,9 @@ describe("ObjectVisualTemplateRepository", () => {
 			{ indexCount: 3, indexStart: 3, partIndex: 0 },
 			{ indexCount: 3, indexStart: 6, partIndex: 0 },
 		]);
+		expect(template?.parts[0]?.depthDrawUnits).toMatchObject([
+			{ cullFace: "back", indexCount: 9, indexStart: 0 },
+		]);
 		expect(geometry.resources.size).toBe(1);
 		expect(atlas.activeOwnerCount).toBe(1);
 
@@ -68,6 +71,31 @@ describe("ObjectVisualTemplateRepository", () => {
 
 		expect(preparer.count).toBe(2);
 		expect(outcome.size).toBe(2);
+	});
+
+	it("keeps effective cull changes as material-independent depth boundaries", async () => {
+		const preparer = new InlineObjectVisualTemplatePreparer();
+		const base = source("mixed-cull", "appearance:mixed-cull");
+		const visual: DynamicPresentationSource = {
+			...base,
+			presentation: {
+				...base.presentation,
+				parts: base.presentation.parts.map((part) => ({
+					...part,
+					geometry: {
+						...part.geometry,
+						materialSideTypes: new Uint8Array([0, 0, 3]),
+					},
+				})),
+			},
+		};
+
+		const template = await preparer.prepare(visual);
+
+		expect(template.parts[0]?.depthDrawUnits).toMatchObject([
+			{ cullFace: "back", indexCount: 6, indexStart: 0 },
+			{ cullFace: "front", indexCount: 3, indexStart: 6 },
+		]);
 	});
 
 	it("uses prepared template texture facts as the atlas requirement", async () => {

@@ -177,6 +177,7 @@ function template(): ObjectVisualTemplate {
 		parts: [
 			{
 				defaultScale: new Vec3(2, 1, 1),
+				depthDrawUnits: [],
 				drawUnits: [],
 				geometry: "object-geometry:test" as never,
 				key: "part-visual-template:test" as never,

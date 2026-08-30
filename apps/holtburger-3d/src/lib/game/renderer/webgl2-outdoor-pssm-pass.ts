@@ -9,10 +9,14 @@ import {
 	type OutdoorPssmCascade,
 } from "./outdoor-pssm";
 import {
-	collectOutdoorPssmCasters,
+	collectOutdoorPssmCastersForCascades,
 	createOutdoorPssmCasterBatch,
+	createOutdoorPssmCasterSelectionScratch,
+	OutdoorPssmDepthDrawCatalog,
+	type OutdoorPssmCasterBatch,
 	type OutdoorPssmCasterWorld,
 } from "./outdoor-pssm-casters";
+import type { Frustum } from "../math/frustum";
 import type { SceneNodeId } from "../scene";
 import { OBJECT_INSTANCE_RECORD_BYTES } from "../systems/static-resources";
 import { bindWebGL2ObjectInstanceRange } from "./webgl2-instance-buffer";
@@ -92,8 +96,12 @@ export interface WebGL2OutdoorPssmPassDependencies {
  * therefore preserve the pre-shadow GPU path exactly.
  */
 export class WebGL2OutdoorPssmPass {
-	readonly #batch = createOutdoorPssmCasterBatch();
+	readonly #batches: OutdoorPssmCasterBatch[] = [];
+	readonly #batchPool: OutdoorPssmCasterBatch[] = [];
+	readonly #cascadeFrusta: Frustum[] = [];
+	readonly #casterSelectionScratch = createOutdoorPssmCasterSelectionScratch();
 	readonly #cascades: OutdoorPssmCascade[] = [];
+	readonly #depthDraws = new OutdoorPssmDepthDrawCatalog();
 	readonly #frameInstances: OutdoorPssmInstanceArena;
 	readonly #gl: WebGL2RenderingContext;
 	readonly #matrixScratch = new Float32Array(16);
@@ -127,7 +135,10 @@ export class WebGL2OutdoorPssmPass {
 		input: WebGL2OutdoorPssmPassInput,
 		profileMetrics: WebGL2OutdoorPssmPassProfileMetrics | null,
 	): ActiveOutdoorPssmFrame | null {
-		if (!hasOutdoorPssmLightAndInterval(input)) return null;
+		if (!hasOutdoorPssmLightAndInterval(input)) {
+			this.#releaseCasterStorage();
+			return null;
+		}
 		buildOutdoorPssmCascades(
 			{
 				camera: {
@@ -149,25 +160,34 @@ export class WebGL2OutdoorPssmPass {
 		);
 		let instanceUploadCount = 0;
 		let instanceUploadBytes = 0;
+		this.#prepareCascadeStorage();
+		collectOutdoorPssmCastersForCascades(
+			this.#world,
+			this.#cascadeFrusta,
+			input.anchorLandblockId,
+			input.selectedDynamicNodeIds,
+			this.#batches,
+			this.#casterSelectionScratch,
+			this.#depthDraws,
+			profileMetrics,
+		);
 		try {
-			for (const cascade of this.#cascades) {
-				this.#beginCascade(cascade.index, targets.resolution, input.settings);
-				if (profileMetrics) profileMetrics.cascadeQueryCount += 1;
-				collectOutdoorPssmCasters(
-					this.#world,
-					cascade.lightFrustum,
-					input.anchorLandblockId,
-					input.selectedDynamicNodeIds,
-					this.#batch,
-				);
-				if (profileMetrics) {
-					profileMetrics.selectedCasterPartCount +=
-						this.#batch.instances.length;
-					profileMetrics.compatibleDepthRunCount += this.#batch.runs.length;
+			for (
+				let cascadeIndex = 0;
+				cascadeIndex < this.#cascades.length;
+				cascadeIndex += 1
+			) {
+				const cascade = this.#cascades[cascadeIndex];
+				const batch = this.#batches[cascadeIndex];
+				if (cascade === undefined || batch === undefined) {
+					throw new Error(
+						`Outdoor PSSM cascade ${cascadeIndex} is incomplete.`,
+					);
 				}
-				if (this.#drawCascade(cascade, input.anchorCoordinates)) {
+				this.#beginCascade(cascade.index, targets.resolution, input.settings);
+				if (this.#drawCascade(cascade, batch, input.anchorCoordinates)) {
 					const uploadBytes =
-						this.#batch.instances.length * OBJECT_INSTANCE_RECORD_BYTES;
+						batch.instances.length * OBJECT_INSTANCE_RECORD_BYTES;
 					instanceUploadCount += 1;
 					instanceUploadBytes += uploadBytes;
 					if (profileMetrics) {
@@ -193,6 +213,7 @@ export class WebGL2OutdoorPssmPass {
 	/** Release active target storage when the composite master setting turns off. */
 	disable(): void {
 		this.#targets.disable();
+		this.#releaseCasterStorage();
 	}
 
 	getDiagnostics(): WebGL2PssmShadowTargetDiagnostics {
@@ -205,6 +226,38 @@ export class WebGL2OutdoorPssmPass {
 		this.#targets.destroy();
 		if (this.#program) this.#gl.deleteProgram(this.#program.program);
 		this.#program = null;
+		this.#releaseCasterStorage();
+		this.#depthDraws.clear();
+	}
+
+	/** Drop scene-owned payload references while retaining only cheap reusable container capacity. */
+	#releaseCasterStorage(): void {
+		for (const batch of this.#batchPool) {
+			batch.instances.length = 0;
+			batch.parts.length = 0;
+			batch.runs.length = 0;
+		}
+		this.#casterSelectionScratch.casterParts.length = 0;
+		this.#casterSelectionScratch.activeCasterPartCount = 0;
+		this.#casterSelectionScratch.rootCascadeMasks.clear();
+	}
+
+	/** Retain one reusable batch per high-water cascade and publish current frusta by reference. */
+	#prepareCascadeStorage(): void {
+		while (this.#batchPool.length < this.#cascades.length) {
+			this.#batchPool.push(createOutdoorPssmCasterBatch());
+		}
+		this.#batches.length = this.#cascades.length;
+		this.#cascadeFrusta.length = this.#cascades.length;
+		for (let index = 0; index < this.#cascades.length; index += 1) {
+			const cascade = this.#cascades[index];
+			const batch = this.#batchPool[index];
+			if (cascade === undefined || batch === undefined) {
+				throw new Error(`Outdoor PSSM cascade ${index} is missing.`);
+			}
+			this.#batches[index] = batch;
+			this.#cascadeFrusta[index] = cascade.lightFrustum;
+		}
 	}
 
 	#beginCascade(
@@ -233,9 +286,10 @@ export class WebGL2OutdoorPssmPass {
 
 	#drawCascade(
 		cascade: OutdoorPssmCascade,
+		batch: OutdoorPssmCasterBatch,
 		anchorCoordinates: WebGL2OutdoorPssmPassInput["anchorCoordinates"],
 	): boolean {
-		if (this.#batch.instances.length === 0) return false;
+		if (batch.instances.length === 0) return false;
 		const gl = this.#gl;
 		const program = (this.#program ??= this.#createProgram(gl));
 		gl.useProgram(program.program);
@@ -244,8 +298,8 @@ export class WebGL2OutdoorPssmPass {
 			false,
 			mat4ToFloat32Array(cascade.lightClip, this.#matrixScratch),
 		);
-		this.#frameInstances.prepareView(this.#batch.instances);
-		for (const run of this.#batch.runs) {
+		this.#frameInstances.prepareView(batch.instances);
+		for (const run of batch.runs) {
 			const geometry = this.#resources.getGeometry(run.geometry);
 			validateCasterDrawRange(geometry, run.indexStart, run.indexCount);
 			const landblockOffset = createLandblockOffset(

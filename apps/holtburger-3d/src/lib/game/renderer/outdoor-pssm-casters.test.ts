@@ -1,24 +1,21 @@
 import { describe, expect, it } from "vitest";
-import type { ObjectMaterialBinding } from "../commit/artifacts";
 import type { DynamicEntityCategory } from "../dynamic-entity-category";
 import type { ObjectGeometryKey } from "../geometry/types";
 import type { Frustum } from "../math/frustum";
 import { AABB3, Mat4, Vec3 } from "../math/types";
 import type { SceneNodeId } from "../scene";
 import type {
-	PartVisualTemplateKey,
-	VisibleRigidPartContribution,
+	VisibleDynamicContributions,
+	VisibleRigidDepthContribution,
 } from "../systems/components";
 import type { ObjectInstanceData } from "../systems/static-resources";
-import { TextureWrapMode } from "../textures/types";
-import type {
-	RenderContribution,
-	ResolvedGeometryDrawUnit,
-} from "./render-world";
+import type { RenderContribution } from "./render-world";
 import {
-	collectOutdoorPssmCasters,
+	collectOutdoorPssmCastersForCascades,
 	createOutdoorPssmCasterBatch,
+	createOutdoorPssmCasterSelectionScratch,
 	formOutdoorPssmCasterRuns,
+	OutdoorPssmDepthDrawCatalog,
 	type OutdoorPssmCasterPart,
 	type OutdoorPssmCasterWorld,
 } from "./outdoor-pssm-casters";
@@ -41,15 +38,12 @@ describe("outdoor PSSM caster selection", () => {
 			[indoorOnly, dynamicDescriptor("mob")],
 			[emptyMob, dynamicDescriptor("mob")],
 		]);
-		const contributions = new Map<
-			SceneNodeId,
-			readonly VisibleRigidPartContribution[]
-		>([
-			[player, [part(0, "outdoor")]],
-			[npc, [part(1, "outdoor")]],
-			[other, [part(2, "outdoor")]],
-			[indoorOnly, [part(3, "env-cell")]],
-			[emptyMob, []],
+		const contributions = new Map<SceneNodeId, VisibleDynamicContributions>([
+			[player, visible([part(0)], "outdoor")],
+			[npc, visible([part(1)], "outdoor")],
+			[other, visible([part(2)], "outdoor")],
+			[indoorOnly, visible([part(3)], "env-cell")],
+			[emptyMob, visible([], "outdoor")],
 		]);
 		const observed: string[] = [];
 		const world = createWorld(
@@ -60,8 +54,20 @@ describe("outdoor PSSM caster selection", () => {
 		);
 		const selected = new Set<SceneNodeId>();
 		const batch = createOutdoorPssmCasterBatch();
+		const scratch = createOutdoorPssmCasterSelectionScratch();
+		const depthDraws = new OutdoorPssmDepthDrawCatalog();
 
-		collectOutdoorPssmCasters(world, FRUSTUM, ANCHOR, selected, batch);
+		const metrics = collectionMetrics();
+		collectOutdoorPssmCastersForCascades(
+			world,
+			[FRUSTUM],
+			ANCHOR,
+			selected,
+			[batch],
+			scratch,
+			depthDraws,
+			metrics,
+		);
 
 		expect(observed).toEqual([
 			"query:outdoor:true:false",
@@ -74,17 +80,35 @@ describe("outdoor PSSM caster selection", () => {
 			"descriptor:scene-node:3",
 			"descriptor:scene-node:4",
 			"expand:scene-node:4",
-			"resolve:scene-node:4",
 			"descriptor:scene-node:5",
 			"expand:scene-node:5",
-			"resolve:scene-node:5",
 		]);
 		expect(batch.parts).toHaveLength(2);
 		expect(batch.instances).toEqual([
-			contributions.get(player)?.[0]?.instance,
-			contributions.get(npc)?.[0]?.instance,
+			contributions.get(player)?.depth[0]?.instance,
+			contributions.get(npc)?.depth[0]?.instance,
 		]);
 		expect(selected).toEqual(new Set([player, npc]));
+		expect(metrics).toEqual({
+			cascadeQueryCount: 1,
+			cascadeSelectedRootCount: 4,
+			compatibleDepthRunCount: 2,
+			retainedCasterRootCount: 2,
+			selectedCasterPartCount: 2,
+			uniqueSelectedRootCount: 4,
+		});
+		const retainedPart = batch.parts[0];
+		collectOutdoorPssmCastersForCascades(
+			world,
+			[FRUSTUM],
+			ANCHOR,
+			selected,
+			[batch],
+			scratch,
+			depthDraws,
+			null,
+		);
+		expect(batch.parts[0]).toBe(retainedPart);
 	});
 
 	it("owns compact results before the next reused scene query", () => {
@@ -95,20 +119,96 @@ describe("outdoor PSSM caster selection", () => {
 			[first, dynamicDescriptor("mob")],
 			[second, dynamicDescriptor("mob")],
 		]);
-		const contributions = new Map([
-			[first, [part(0, "outdoor")]],
-			[second, [part(1, "outdoor")]],
+		const contributions = new Map<SceneNodeId, VisibleDynamicContributions>([
+			[first, visible([part(0)], "outdoor")],
+			[second, visible([part(1)], "outdoor")],
 		]);
 		const world = createWorld(reusedEntries, descriptors, contributions, []);
 		const selected = new Set<SceneNodeId>();
 		const batch = createOutdoorPssmCasterBatch();
 
-		collectOutdoorPssmCasters(world, FRUSTUM, ANCHOR, selected, batch);
+		collectOutdoorPssmCastersForCascades(
+			world,
+			[FRUSTUM],
+			ANCHOR,
+			selected,
+			[batch],
+			createOutdoorPssmCasterSelectionScratch(),
+			new OutdoorPssmDepthDrawCatalog(),
+			null,
+		);
 		const firstInstance = batch.instances[0];
 		reusedEntries[0] = second;
 
 		expect(batch.instances).toEqual([firstInstance]);
 		expect(selected).toEqual(new Set([first]));
+	});
+
+	it("consumes reused query storage and expands an overlapping root once", () => {
+		const first = "scene-node:20" as SceneNodeId;
+		const shared = "scene-node:21" as SceneNodeId;
+		const second = "scene-node:22" as SceneNodeId;
+		const firstFrustum = FRUSTUM;
+		const secondFrustum: Frustum = {
+			cameraPosition: new Vec3(1, 0, 0),
+			planes: [],
+		};
+		const reusedEntries = [first, shared];
+		const expansionCounts = new Map<SceneNodeId, number>();
+		let queryIndex = 0;
+		const world: OutdoorPssmCasterWorld = {
+			expandDynamicContributions(nodeId) {
+				expansionCounts.set(nodeId, (expansionCounts.get(nodeId) ?? 0) + 1);
+				return {
+					depth: [part(Number(nodeId.slice("scene-node:".length)))],
+					kind: "visible",
+					landblockId: ANCHOR,
+					material: [],
+					renderScopes: [{ kind: "outdoor" }],
+				};
+			},
+			getRenderContributionDescriptor: () => dynamicDescriptor("mob"),
+			queryScopesScene() {
+				if (queryIndex === 1) reusedEntries.splice(0, 2, shared, second);
+				queryIndex += 1;
+				return { entries: reusedEntries };
+			},
+			resolveGeometry: (key) =>
+				`geometry-resource:${Number(key.slice("object-geometry:".length)) + 1}`,
+		};
+		const batches = [
+			createOutdoorPssmCasterBatch(),
+			createOutdoorPssmCasterBatch(),
+		];
+
+		const metrics = collectionMetrics();
+		collectOutdoorPssmCastersForCascades(
+			world,
+			[firstFrustum, secondFrustum],
+			ANCHOR,
+			new Set(),
+			batches,
+			createOutdoorPssmCasterSelectionScratch(),
+			new OutdoorPssmDepthDrawCatalog(),
+			metrics,
+		);
+
+		expect(expansionCounts).toEqual(
+			new Map([
+				[first, 1],
+				[shared, 1],
+				[second, 1],
+			]),
+		);
+		expect(batches[0]?.parts).toHaveLength(2);
+		expect(batches[1]?.parts).toHaveLength(2);
+		expect(batches[0]?.parts[1]).toBe(batches[1]?.parts[0]);
+		expect(metrics).toMatchObject({
+			cascadeSelectedRootCount: 4,
+			retainedCasterRootCount: 3,
+			selectedCasterPartCount: 4,
+			uniqueSelectedRootCount: 3,
+		});
 	});
 });
 
@@ -125,6 +225,7 @@ describe("outdoor PSSM caster run formation", () => {
 		);
 
 		formOutdoorPssmCasterRuns(batch);
+		const firstRun = batch.runs[0];
 
 		expect(batch.instances).toBe(instances);
 		expect(batch.runs).toBe(runs);
@@ -144,16 +245,15 @@ describe("outdoor PSSM caster run formation", () => {
 				cullFace: "front",
 			},
 		]);
+		formOutdoorPssmCasterRuns(batch);
+		expect(batch.runs[0]).toBe(firstRun);
 	});
 });
 
 function createWorld(
 	queryEntries: SceneNodeId[],
 	descriptors: ReadonlyMap<SceneNodeId, RenderContribution>,
-	contributions: ReadonlyMap<
-		SceneNodeId,
-		readonly VisibleRigidPartContribution[]
-	>,
+	contributions: ReadonlyMap<SceneNodeId, VisibleDynamicContributions>,
 	observed: string[],
 ): OutdoorPssmCasterWorld {
 	let resolvingNode: SceneNodeId | null = null;
@@ -161,7 +261,7 @@ function createWorld(
 		expandDynamicContributions(nodeId) {
 			observed.push(`expand:${nodeId}`);
 			resolvingNode = nodeId;
-			return contributions.get(nodeId) ?? [];
+			return contributions.get(nodeId) ?? visible([], "outdoor");
 		},
 		getRenderContributionDescriptor(nodeId) {
 			observed.push(`descriptor:${nodeId}`);
@@ -175,14 +275,11 @@ function createWorld(
 			);
 			return { entries: queryEntries };
 		},
-		resolveDynamicContributions(values) {
+		resolveGeometry(key) {
 			if (resolvingNode === null)
 				throw new Error("Resolve called before expansion.");
 			observed.push(`resolve:${resolvingNode}`);
-			return values.map((drawUnit, index) => ({
-				drawUnit,
-				geometry: `geometry-resource:${index + Number(resolvingNode?.slice(11))}`,
-			})) as readonly ResolvedGeometryDrawUnit<VisibleRigidPartContribution>[];
+			return `geometry-resource:${Number(key.slice("object-geometry:".length)) + 1}`;
 		},
 	};
 }
@@ -207,30 +304,31 @@ function dynamicDescriptor(
 	};
 }
 
-function part(
-	partIndex: number,
-	scope: "outdoor" | "env-cell",
-): VisibleRigidPartContribution {
+function part(partIndex: number): VisibleRigidDepthContribution {
 	return {
 		drawUnit: {
-			batchKey: `part:${partIndex}`,
+			cullFace: "back",
 			geometry: `object-geometry:${partIndex}` as ObjectGeometryKey,
 			indexCount: 3,
 			indexStart: 0,
-			material: material("back"),
-			ordering: "opaque",
-			partIndex,
-			templatePartKey:
-				`part-visual-template:${partIndex}` as PartVisualTemplateKey,
 		},
 		instance: instance(partIndex),
+	};
+}
+
+function visible(
+	depth: readonly VisibleRigidDepthContribution[],
+	scope: "outdoor" | "env-cell",
+): VisibleDynamicContributions {
+	return {
+		depth,
+		kind: "visible",
 		landblockId: ANCHOR,
-		ordering: "opaque",
+		material: [],
 		renderScopes:
 			scope === "outdoor"
 				? [{ kind: "outdoor" }]
 				: [{ envCellId: "0x0100", kind: "env-cell", landblockId: ANCHOR }],
-		transparentSort: null,
 	};
 }
 
@@ -241,6 +339,7 @@ function casterPart(
 ): OutdoorPssmCasterPart {
 	return {
 		cullFace,
+		depthBatchKey: `${geometry}/${cullFace}`,
 		geometry,
 		indexCount: 3,
 		indexStart: 0,
@@ -258,21 +357,13 @@ function instance(translation: number): ObjectInstanceData {
 	};
 }
 
-function material(cullFace: "back" | "front"): ObjectMaterialBinding {
+function collectionMetrics() {
 	return {
-		detailRole: null,
-		palettedClipMap: false,
-		polygon: { cullFace, stippled: false },
-		sampler: { wrap: TextureWrapMode.Clamp },
-		source: {
-			color: [1, 1, 1, 1],
-			diffuseScale: 1,
-			id: "material:shadow-caster-test",
-			kind: "solid-color",
-			luminosity: 0,
-			rawSurfaceFlags: 0,
-			translucency: 0,
-		},
-		textures: { base: null, palette: null },
+		cascadeQueryCount: 0,
+		cascadeSelectedRootCount: 0,
+		compatibleDepthRunCount: 0,
+		retainedCasterRootCount: 0,
+		selectedCasterPartCount: 0,
+		uniqueSelectedRootCount: 0,
 	};
 }

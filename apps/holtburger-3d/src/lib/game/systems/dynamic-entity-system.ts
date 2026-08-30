@@ -21,7 +21,8 @@ import {
 	transformPoint3,
 } from "../math/matrices";
 import { landblockVec3 } from "../../assets/ac-frame";
-import type { SceneGraph, SceneNodeId } from "../scene";
+import type { LandblockOwnerId } from "../game-types";
+import type { SceneGraph, SceneNodeId, SceneScope } from "../scene";
 import type { SceneSpatialPlacement } from "../scene";
 import {
 	type ParentLocation,
@@ -35,6 +36,10 @@ import type {
 	ActiveDynamicPart,
 	ArticulatedPose,
 	DynamicEntityRenderable,
+	RigidPartDepthDrawUnit,
+	RigidPartDrawUnit,
+	VisibleDynamicContributions,
+	VisibleRigidDepthContribution,
 	VisibleRigidPartContribution,
 } from "./components";
 import type { DynamicPresentationSample } from "./animation-system";
@@ -123,6 +128,51 @@ interface DynamicEntityRecord {
 	/** Envelope already folded into both culling bounds, so a change republishes them. */
 	appliedEnvelopeRadius: number;
 	presentationState: DynamicEntityPresentationState;
+	/** Reused outputs borrowed by consumers only until this entity's next expansion. */
+	visibleContributions: {
+		readonly kind: "visible";
+		readonly depth: VisibleRigidDepthContribution[];
+		landblockId: LandblockOwnerId;
+		readonly material: VisibleRigidPartContribution[];
+		renderScopes: readonly SceneScope[];
+	} | null;
+	/** Stable depth-range records retaining frame payloads without retaining obsolete templates. */
+	readonly visibleDepthContributionEntries: Map<
+		RigidPartDepthDrawUnit,
+		MutableVisibleRigidDepthContribution
+	>;
+	/** Stable draw-unit records retaining frame payloads without retaining obsolete templates. */
+	readonly visibleContributionEntries: Map<
+		RigidPartDrawUnit,
+		ReusableVisibleContribution
+	>;
+}
+
+type MutableVisibleRigidPartContribution = {
+	-readonly [
+		Key in keyof VisibleRigidPartContribution
+	]: VisibleRigidPartContribution[Key];
+};
+
+const HIDDEN_DYNAMIC_CONTRIBUTIONS: VisibleDynamicContributions = Object.freeze(
+	{
+		depth: Object.freeze([]),
+		kind: "hidden",
+		material: Object.freeze([]),
+	},
+);
+
+type MutableVisibleRigidDepthContribution = {
+	-readonly [
+		Key in keyof VisibleRigidDepthContribution
+	]: VisibleRigidDepthContribution[Key];
+};
+
+interface ReusableVisibleContribution {
+	readonly contribution: MutableVisibleRigidPartContribution;
+	readonly transparentSort: NonNullable<
+		VisibleRigidPartContribution["transparentSort"]
+	>;
 }
 
 interface DynamicOwnerRecord<TTemplateOwnerId extends string> {
@@ -438,6 +488,9 @@ export class DynamicEntitySystem<
 				noDraw: false,
 			},
 			visualRootNodeId,
+			visibleContributions: null,
+			visibleDepthContributionEntries: new Map(),
+			visibleContributionEntries: new Map(),
 		};
 		return record;
 	}
@@ -532,14 +585,18 @@ export class DynamicEntitySystem<
 					`Dynamic child ${childRootNodeId} placement ${placementKey} has no frame for part ${part.partIndex}.`,
 				);
 			}
-			this.#scene.updateLocalTransform(
-				part.nodeId,
-				composeObjectPartTransform(
-					transform,
-					child.source.scale,
-					part.defaultScale,
-				),
+		}
+		for (const part of child.renderable.parts) {
+			const transform = pose.partToObjectTransforms[part.partIndex];
+			if (!transform)
+				throw new Error("Validated child pose became incomplete.");
+			composeObjectPartTransform(
+				transform,
+				child.source.scale,
+				part.defaultScale,
+				part.localToVisualRoot,
 			);
+			this.#scene.updateLocalTransform(part.nodeId, part.localToVisualRoot);
 		}
 		child.articulatedPose = pose;
 		const placedBounds = presentationBoundsForPose(child.source, pose);
@@ -585,62 +642,109 @@ export class DynamicEntitySystem<
 		return this.#entities.get(nodeId)?.rigidPresentationBounds ?? null;
 	}
 
-	/** Resolve every active rigid part with the selected entity's plural source-domain scopes. */
+	/**
+	 * Resolve every active rigid part with the selected entity's plural source-domain scopes.
+	 *
+	 * The returned arrays and records are borrowed until this entity's next expansion. Renderer and
+	 * shadow consumers finish each expansion synchronously before issuing another one.
+	 */
 	getVisibleContributions(
 		nodeId: SceneNodeId,
-	): readonly VisibleRigidPartContribution[] | null {
+		includeDepth: boolean,
+	): VisibleDynamicContributions | null {
 		const entity = this.#entities.get(nodeId);
 		if (!entity) return null;
 		if (entity.presentationState.noDraw || entity.presentationState.hidden)
-			return [];
-		return entity.renderable.parts.flatMap((part) => {
+			return HIDDEN_DYNAMIC_CONTRIBUTIONS;
+		const visualPlacement = this.#scene.getResolvedPlacement(
+			entity.visualRootNodeId,
+		);
+		const spatialMembership = this.#scene.getResolvedSpatialMembership(
+			entity.visualRootNodeId,
+		);
+		if (!visualPlacement || !spatialMembership) {
+			throw new Error(
+				`Dynamic visual root ${entity.visualRootNodeId} no longer exists.`,
+			);
+		}
+		const contributions = (entity.visibleContributions ??= {
+			depth: [],
+			kind: "visible",
+			landblockId: visualPlacement.landblockId,
+			material: [],
+			renderScopes: spatialMembership.scopes,
+		});
+		contributions.landblockId = visualPlacement.landblockId;
+		contributions.renderScopes = spatialMembership.scopes;
+		contributions.depth.length = 0;
+		contributions.material.length = 0;
+		for (const part of entity.renderable.parts) {
 			const translucency = part.renderState.translucency;
 			// Retail sets the skip-draw bit only at exactly full translucency.
-			if (translucency === 1) return [];
-			const placement = this.#scene.getResolvedPlacement(part.nodeId);
-			const spatialMembership = this.#scene.getResolvedSpatialMembership(
-				part.nodeId,
+			if (translucency === 1) continue;
+			const instance = part.frameInstance;
+			multiplyMat4(
+				visualPlacement.localToLandblock,
+				part.localToVisualRoot,
+				instance.sourceToLandblock,
 			);
-			if (!placement || !spatialMembership) {
-				throw new Error(`Dynamic part node ${part.nodeId} no longer exists.`);
-			}
-			return part.drawUnits.map((activeDrawUnit) => {
+			instance.color.a = 1 - translucency;
+			for (const activeDrawUnit of part.drawUnits) {
 				const drawUnit = activeDrawUnit.drawUnit;
 				const ordering =
 					translucency !== 0 && drawUnit.ordering === "opaque"
 						? "transparent"
 						: drawUnit.ordering;
-				return {
-					// The draw unit is passed by reference, never cloned to carry an overridden
-					// ordering: consumers cache compiled facts against its identity, and an
-					// effect can hold a part translucent indefinitely.
-					drawUnit,
-					landblockId: placement.landblockId,
-					ordering,
-					renderScopes: spatialMembership.scopes,
-					instance: {
-						color: { a: 1 - translucency, b: 1, g: 1, r: 1 },
-						sourceToLandblock: placement.localToLandblock,
-					},
-					transparentSort:
-						ordering === "transparent"
-							? {
-									// Dynamic parts animate, so unlike static contributions their
-									// landblock-space center is genuinely per-frame. It is resolved
-									// here, where the pose is owned, so every transparent center
-									// reaching the renderer is in one frame.
-									center: landblockVec3(
-										transformPoint3(
-											placement.localToLandblock,
-											activeDrawUnit.transparentSortCenter,
-										),
-									),
-									stableId: `${entity.source.identity}/part:${part.partIndex}/${drawUnit.batchKey}`,
-								}
-							: null,
-				};
-			});
-		});
+				let entry = entity.visibleContributionEntries.get(drawUnit);
+				if (entry === undefined) {
+					const transparentSort = {
+						center: landblockVec3(Vec3.zero()),
+						stableId: `${entity.source.identity}/part:${part.partIndex}/${drawUnit.batchKey}`,
+					};
+					entry = {
+						contribution: {
+							// Draw-unit identity remains the compiled cache key across every frame.
+							drawUnit,
+							instance,
+							ordering,
+							transparentSort: null,
+						},
+						transparentSort,
+					};
+					entity.visibleContributionEntries.set(drawUnit, entry);
+				}
+				const reusable = entry.contribution;
+				reusable.ordering = ordering;
+				if (ordering === "transparent") {
+					// The center is genuinely frame-current; only its storage is reused.
+					transformPoint3(
+						instance.sourceToLandblock,
+						activeDrawUnit.transparentSortCenter,
+						entry.transparentSort.center,
+					);
+					reusable.transparentSort = entry.transparentSort;
+				} else {
+					reusable.transparentSort = null;
+				}
+				contributions.material.push(reusable);
+			}
+			if (!includeDepth) continue;
+			for (const drawUnit of part.depthDrawUnits) {
+				let reusable = entity.visibleDepthContributionEntries.get(drawUnit);
+				if (reusable === undefined) {
+					reusable = {
+						drawUnit,
+						instance,
+					};
+					entity.visibleDepthContributionEntries.set(drawUnit, reusable);
+				}
+				contributions.depth.push(reusable);
+			}
+		}
+		return contributions.material.length === 0 &&
+			contributions.depth.length === 0
+			? HIDDEN_DYNAMIC_CONTRIBUTIONS
+			: contributions;
 	}
 
 	/** Apply one complete producer placement through the sole dynamic-root writer. */
@@ -1054,6 +1158,9 @@ export class DynamicEntitySystem<
 				entity.soundTableHandle = result.soundTableHandle;
 				entity.preparedAnimation = result.animation;
 				entity.renderable = { parts: result.parts };
+				entity.visibleContributions = null;
+				entity.visibleDepthContributionEntries.clear();
+				entity.visibleContributionEntries.clear();
 			}
 		} catch (cause) {
 			for (const handle of acquiredHandles) handle.release();
@@ -1139,7 +1246,7 @@ export class DynamicEntitySystem<
 				`Dynamic entity ${entity.rootNodeId} effect sample has ${sample.effects.partRenderStates.length} parts, expected ${entity.renderable.parts.length}.`,
 			);
 		}
-		const updatedParts = entity.renderable.parts.map((part) => {
+		for (const part of entity.renderable.parts) {
 			const transform =
 				sample.articulatedPose.partToObjectTransforms[part.partIndex];
 			const sampledRenderState =
@@ -1148,11 +1255,25 @@ export class DynamicEntitySystem<
 				throw new Error(
 					`Dynamic entity ${entity.rootNodeId} has an incomplete presentation for part ${part.partIndex}.`,
 				);
-			const renderState = entity.presentationState.cloaked
-				? part.renderState
-				: sampledRenderState;
-			return { part, renderState, transform };
-		});
+		}
+		for (const part of entity.renderable.parts) {
+			const transform =
+				sample.articulatedPose.partToObjectTransforms[part.partIndex];
+			const sampledRenderState =
+				sample.effects.partRenderStates[part.partIndex];
+			if (!transform || !sampledRenderState) {
+				throw new Error("Validated dynamic sample became incomplete.");
+			}
+			if (!entity.presentationState.cloaked) {
+				part.renderState = sampledRenderState;
+			}
+			composeObjectPartTransform(
+				transform,
+				entity.source.scale,
+				part.defaultScale,
+				part.localToVisualRoot,
+			);
+		}
 		// Two independent sources can turn the visual root: continuous effect omega and an
 		// authored root frame. They compose rather than compete, with the authored frame innermost
 		// because it is part of the pose the clip describes.
@@ -1164,8 +1285,7 @@ export class DynamicEntitySystem<
 						sample.effects.rootTransformModifier,
 					);
 		const rigidPresentationBounds = presentationBoundsForSample(
-			updatedParts,
-			entity.source.scale,
+			entity.renderable.parts,
 			visualRootTransform,
 		);
 		const publishedPresentationBounds = expandBounds(
@@ -1176,22 +1296,9 @@ export class DynamicEntitySystem<
 			entity.visualRootNodeId,
 			visualRootTransform,
 		);
-		for (const { part, transform } of updatedParts) {
-			this.#scene.updateLocalTransform(
-				part.nodeId,
-				composeObjectPartTransform(
-					transform,
-					entity.source.scale,
-					part.defaultScale,
-				),
-			);
+		for (const part of entity.renderable.parts) {
+			this.#scene.updateLocalTransform(part.nodeId, part.localToVisualRoot);
 		}
-		entity.renderable = {
-			parts: updatedParts.map(({ part, renderState }) => ({
-				...part,
-				renderState,
-			})),
-		};
 		entity.articulatedPose = sample.articulatedPose;
 		entity.rigidPresentationBounds = rigidPresentationBounds;
 		entity.publishedPresentationBounds = publishedPresentationBounds;
@@ -1283,17 +1390,24 @@ function createActiveParts(
 				throw new Error(
 					`Presentation ${presentation.id} has no pose for part ${partIndex}.`,
 				);
+			const localToVisualRoot = composeObjectPartTransform(
+				transform,
+				scale,
+				part.defaultScale,
+			);
 			parts.push({
 				defaultScale: part.defaultScale,
+				depthDrawUnits: [],
 				drawUnits: [],
+				frameInstance: {
+					color: { a: 1, b: 1, g: 1, r: 1 },
+					sourceToLandblock: Mat4.zero(),
+				},
 				localBounds: requiredPartBounds(part.geometry.bounds, partIndex),
+				localToVisualRoot,
 				nodeId: scene.createNode({
 					localBounds: null,
-					localTransform: composeObjectPartTransform(
-						transform,
-						scale,
-						part.defaultScale,
-					),
+					localTransform: localToVisualRoot,
 					parentId: visualRootNodeId,
 				}),
 				partIndex,
@@ -1327,6 +1441,7 @@ function mergePreparedParts(
 		return {
 			...active,
 			defaultScale: template.defaultScale,
+			depthDrawUnits: template.depthDrawUnits,
 			localBounds,
 			drawUnits: template.drawUnits.map((drawUnit) => ({
 				drawUnit,
@@ -1340,22 +1455,13 @@ function mergePreparedParts(
 }
 
 function presentationBoundsForSample(
-	parts: readonly {
-		readonly part: ActiveDynamicPart;
-		readonly transform: Mat4;
-	}[],
-	sourceScale: Vec3,
+	parts: readonly ActiveDynamicPart[],
 	rootTransform: Mat4,
 ): AABB3 {
 	let bounds: AABB3 | null = null;
-	for (const { part, transform } of parts) {
-		const partToObject = composeObjectPartTransform(
-			transform,
-			sourceScale,
-			part.defaultScale,
-		);
+	for (const part of parts) {
 		const partBounds = transformAABB3(
-			multiplyMat4(rootTransform, partToObject),
+			multiplyMat4(rootTransform, part.localToVisualRoot),
 			part.localBounds,
 		);
 		if (bounds === null) bounds = partBounds;

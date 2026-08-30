@@ -31,12 +31,19 @@ export interface RigidPartDrawUnit {
 	readonly templatePartKey: PartVisualTemplateKey;
 }
 
+/** Persistent material-independent depth range for one rigid setup part. */
+export interface RigidPartDepthDrawUnit {
+	/** Effective authored face rejection; every other material fact is intentionally absent. */
+	readonly cullFace: "back" | "front";
+	/** Reusable object geometry selected for the part. */
+	readonly geometry: ObjectGeometryKey;
+	/** Maximal contiguous authored triangle range sharing the effective cull mode. */
+	readonly indexStart: number;
+	readonly indexCount: number;
+}
+
 /** Renderer-neutral visible rigid-part instance emitted from one selected dynamic root. */
 export interface VisibleRigidPartContribution {
-	/** Landblock coordinate frame containing `instance.sourceToLandblock`. */
-	readonly landblockId: LandblockOwnerId;
-	/** Source-domain scopes reached by the owning entity's accepted spatial geometry. */
-	readonly renderScopes: readonly SceneScope[];
 	/** Stable authored draw unit; its identity is a cache key, so it is never cloned per frame. */
 	readonly drawUnit: RigidPartDrawUnit;
 	/**
@@ -58,6 +65,32 @@ export interface VisibleRigidPartContribution {
 		readonly stableId: string;
 	} | null;
 }
+
+/** Renderer-neutral rigid-part instance emitted for material-independent depth rendering. */
+export interface VisibleRigidDepthContribution {
+	/** Stable depth range compiled once with the shared visual template. */
+	readonly drawUnit: RigidPartDepthDrawUnit;
+	/** Final part transform and per-entity modifiers shared with material rendering. */
+	readonly instance: ObjectInstanceData;
+}
+
+/** One producer expansion shared by material and material-independent renderer consumers. */
+export type VisibleDynamicContributions =
+	| {
+			/** No draw-visible contribution exists under the entity's current presentation state. */
+			readonly kind: "hidden";
+			readonly depth: readonly VisibleRigidDepthContribution[];
+			readonly material: readonly VisibleRigidPartContribution[];
+	  }
+	| {
+			readonly kind: "visible";
+			/** Landblock coordinate frame containing every emitted instance transform. */
+			readonly landblockId: LandblockOwnerId;
+			/** Source-domain scopes shared by every contribution from this visual root. */
+			readonly renderScopes: readonly SceneScope[];
+			readonly depth: readonly VisibleRigidDepthContribution[];
+			readonly material: readonly VisibleRigidPartContribution[];
+	  };
 
 /** Current object-local transforms sampled for every rigid setup part. */
 export interface ArticulatedPose {
@@ -84,14 +117,20 @@ export interface ActiveDynamicPart {
 	readonly defaultScale: Vec3;
 	/** Material, geometry, and ordering facts selected once by reusable visual preparation. */
 	readonly drawUnits: readonly ActiveDynamicDrawUnit[];
+	/** Material-independent depth ranges selected once by reusable visual preparation. */
+	readonly depthDrawUnits: readonly RigidPartDepthDrawUnit[];
 	/** Geometry-local envelope retained for publication-time pose bounds. */
 	readonly localBounds: AABB3;
+	/** Current composed setup scale and rigid pose, relative to the entity's visual root. */
+	readonly localToVisualRoot: Mat4;
+	/** Reusable renderer-neutral instance payload rewritten from the current placement and effects. */
+	readonly frameInstance: ObjectInstanceData;
 	/** Transform-only scene node carrying the current rigid-part pose. */
 	readonly nodeId: SceneNodeId;
 	/** Authored setup part addressed by animation frame tables. */
 	readonly partIndex: number;
-	/** Current effect state sampled atomically with this part's pose. */
-	readonly renderState: PartRenderState;
+	/** Current effect state, updated in place with the retained part record after sample validation. */
+	renderState: PartRenderState;
 }
 
 /** One active draw range with the sort center needed by authored or effect-driven transparency. */

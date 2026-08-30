@@ -93,10 +93,13 @@ const CONTRIBUTION_METRIC_KEYS = [
 
 const OUTDOOR_SHADOW_MAP_METRIC_KEYS = [
 	"cascadeQueryCount",
+	"cascadeSelectedRootCount",
 	"compatibleDepthRunCount",
 	"instanceUploadBytes",
 	"instanceUploadCount",
+	"retainedCasterRootCount",
 	"selectedCasterPartCount",
+	"uniqueSelectedRootCount",
 ] as const satisfies readonly (keyof RendererOutdoorShadowMapFrameMetrics)[];
 
 type MutableContributionFrameMetrics = {
@@ -117,10 +120,13 @@ type MutableOutdoorShadowMapFrameMetrics = {
 function createEmptyOutdoorShadowMapMetrics(): MutableOutdoorShadowMapFrameMetrics {
 	return {
 		cascadeQueryCount: 0,
+		cascadeSelectedRootCount: 0,
 		compatibleDepthRunCount: 0,
 		instanceUploadBytes: 0,
 		instanceUploadCount: 0,
+		retainedCasterRootCount: 0,
 		selectedCasterPartCount: 0,
+		uniqueSelectedRootCount: 0,
 	};
 }
 
@@ -788,9 +794,12 @@ function averageOutdoorShadowMapMetrics(
 ): RendererOutdoorShadowMapFrameMetrics {
 	return {
 		cascadeQueryCount: totals.cascadeQueryCount / sampleCount,
+		cascadeSelectedRootCount: totals.cascadeSelectedRootCount / sampleCount,
 		compatibleDepthRunCount: totals.compatibleDepthRunCount / sampleCount,
 		instanceUploadBytes: totals.instanceUploadBytes / sampleCount,
 		instanceUploadCount: totals.instanceUploadCount / sampleCount,
+		retainedCasterRootCount: totals.retainedCasterRootCount / sampleCount,
 		selectedCasterPartCount: totals.selectedCasterPartCount / sampleCount,
+		uniqueSelectedRootCount: totals.uniqueSelectedRootCount / sampleCount,
 	};
 }

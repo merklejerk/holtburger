@@ -179,6 +179,8 @@ rounding, saturation, or overflow policy.
 - A downstream consumer reconstructs intent from side effects because an upstream layer discarded
   it.
 - Callers use slightly different defaults for nominally identical facts.
+- Every element repeats one collection-wide invariant, and consumers choose an arbitrary
+  "representative" element to recover it.
 
 **Possible failure:** Consumers produce contradictory answers that are individually plausible and
 difficult to diagnose.
@@ -250,6 +252,8 @@ correct behavior.
 - Behavior changes merely to make an observation easier.
 - A diagnostic reconstructs important semantics the runtime discarded.
 - Disabling instrumentation changes ordering, lifecycle, or outcomes.
+- Counters, diagnostic result objects, or alternative schedules are still computed when
+  instrumentation is disabled.
 
 **Possible failure:** Observability becomes an accidental authority, expands permanent state, or
 masks a missing production contract.
@@ -382,6 +386,59 @@ defined compatibility window.
 
 **Possible responses:** Sweep code, tests, configuration, telemetry, labels, and active
 documentation as part of the change, or document the migration boundary and removal trigger.
+
+## An Auxiliary Index Outlives the Data It Indexes
+
+**Smell:** A cache, interner, registry, reverse lookup, or side table has a stronger or longer
+retention policy than the primary data it accelerates.
+
+**Signals:**
+
+- Weakly keyed or explicitly evictable primary records are also referenced by a strong auxiliary
+  map.
+- Primary eviction removes operational state but leaves compatibility keys, prepared values, or
+  resource handles in a process-lifetime index.
+- The auxiliary structure is cleared only by a global reset that ordinary workload churn need not
+  trigger.
+
+**Possible failure:** Traversing an unbounded sequence of otherwise evictable data grows memory,
+retains retired resources, or lets stale auxiliary state influence newly created owners.
+
+**Questions:** Which object actually determines lifetime? Does every primary eviction retire its
+auxiliary entries? Can the index retain payloads or resources, rather than cheap value-only keys?
+Is its domain genuinely bounded for the process lifetime?
+
+**Counterexamples:** A process-lifetime index over a proven finite value domain can intentionally
+outlive individual users, especially when its entries contain no externally owned payloads.
+
+**Possible responses:** Tie the index to the same owner and invalidation generation, use weak keys,
+store non-retaining value keys, remove entries on eviction, or bound the index with a measured
+policy.
+
+## Reusable Storage Retains Retired Payloads
+
+**Smell:** A pool or high-water scratch structure preserves references to inactive payloads after
+their reusable shell is no longer part of the current result.
+
+**Signals:**
+
+- Logical length shrinks while backing records beyond that length still reference scene objects,
+  requests, buffers, or resources.
+- Disabling a subsystem releases external resources but leaves its last submitted workload in
+  reusable arrays or maps.
+- Pool entries clear scalar counters but not object-valued fields or nested collections.
+
+**Possible failure:** Short-lived workload spikes pin large object graphs for the process lifetime,
+making a bounded allocation optimization behave like a memory leak.
+
+**Questions:** Which retained fields point outside the pool? When workload shrinks or the subsystem
+turns off, what severs those references? Is retaining payload identity necessary to reuse the shell?
+
+**Counterexamples:** Retaining payloads is harmless when the pool and payload have the same explicit
+lifetime, or when measurement proves the complete retained graph is small and intentionally bounded.
+
+**Possible responses:** Clear retired object-valued fields, retain only payload-free shells, release
+active prefixes on disable, truncate cold pools, or add a measured high-water shrink policy.
 
 ## Adding Observations
 

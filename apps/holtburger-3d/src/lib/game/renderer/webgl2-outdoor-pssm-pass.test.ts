@@ -1,14 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { ObjectMaterialBinding } from "../commit/artifacts";
 import type { ObjectGeometryKey } from "../geometry/types";
 import { AABB3, Mat4, Quat, Vec3 } from "../math/types";
 import type { SceneNodeId } from "../scene";
-import type {
-	PartVisualTemplateKey,
-	VisibleRigidPartContribution,
-} from "../systems/components";
-import { TextureWrapMode } from "../textures/types";
+import type { VisibleRigidDepthContribution } from "../systems/components";
 import { DEFAULT_ENTITY_SHADOW_SETTINGS } from "./entity-shadow-policy";
+import type { OutdoorPssmCasterWorld } from "./outdoor-pssm-casters";
 import type { RenderContribution } from "./render-world";
 import type { WebGL2PssmCasterProgram } from "./webgl2-pssm-caster-program";
 import type { WebGL2PssmShadowTargetSet } from "./webgl2-pssm-shadow-targets";
@@ -39,10 +35,13 @@ describe("WebGL2OutdoorPssmPass", () => {
 		const input = createInput(new Vec3(0.2, 1, -0.3));
 		const profileMetrics = {
 			cascadeQueryCount: 0,
+			cascadeSelectedRootCount: 0,
 			compatibleDepthRunCount: 0,
 			instanceUploadBytes: 0,
 			instanceUploadCount: 0,
+			retainedCasterRootCount: 0,
 			selectedCasterPartCount: 0,
+			uniqueSelectedRootCount: 0,
 		};
 
 		const active = fixture.pass.render(input, profileMetrics);
@@ -57,11 +56,15 @@ describe("WebGL2OutdoorPssmPass", () => {
 		expect(fixture.state.preparedInstanceCounts).toEqual([1, 1]);
 		expect(profileMetrics).toEqual({
 			cascadeQueryCount: 2,
+			cascadeSelectedRootCount: 2,
 			compatibleDepthRunCount: 2,
 			instanceUploadBytes: 160,
 			instanceUploadCount: 2,
+			retainedCasterRootCount: 1,
 			selectedCasterPartCount: 2,
+			uniqueSelectedRootCount: 1,
 		});
+		expect(fixture.state.expansions).toBe(1);
 		expect(fixture.state.draws).toEqual([
 			{ count: 6, instanceCount: 1, offset: 0 },
 			{ count: 6, instanceCount: 1, offset: 0 },
@@ -127,6 +130,7 @@ interface FixtureState {
 	attachedLayers: number[];
 	deletedPrograms: number;
 	draws: Array<{ count: number; instanceCount: number; offset: number }>;
+	expansions: number;
 	glCalls: string[];
 	preparedInstanceCounts: number[];
 	programCreations: number;
@@ -145,6 +149,7 @@ function createFixture(withCaster = false): {
 		attachedLayers: [],
 		deletedPrograms: 0,
 		draws: [],
+		expansions: 0,
 		glCalls: [],
 		preparedInstanceCounts: [],
 		programCreations: 0,
@@ -162,20 +167,23 @@ function createFixture(withCaster = false): {
 	};
 	const contribution = dynamicContribution();
 	const descriptor = dynamicDescriptor();
-	const world = {
-		expandDynamicContributions: () => (withCaster ? [contribution] : []),
+	const world: OutdoorPssmCasterWorld = {
+		expandDynamicContributions: () => {
+			state.expansions += 1;
+			return {
+				depth: withCaster ? [contribution] : [],
+				kind: "visible",
+				landblockId: ANCHOR,
+				material: [],
+				renderScopes: [{ kind: "outdoor" }],
+			};
+		},
 		getRenderContributionDescriptor: () => descriptor,
 		queryScopesScene: () => {
 			state.queries += 1;
 			return { entries: withCaster ? [NODE] : [] };
 		},
-		resolveDynamicContributions: (
-			contributions: readonly VisibleRigidPartContribution[],
-		) =>
-			contributions.map((drawUnit) => ({
-				drawUnit,
-				geometry: "geometry-resource:1" as const,
-			})),
+		resolveGeometry: () => "geometry-resource:1" as const,
 	};
 	let populatedInstanceCount = 0;
 	const frameInstances = {
@@ -352,45 +360,18 @@ function dynamicDescriptor(): RenderContribution {
 	};
 }
 
-function dynamicContribution(): VisibleRigidPartContribution {
+function dynamicContribution(): VisibleRigidDepthContribution {
 	return {
 		drawUnit: {
-			batchKey: "caster",
+			cullFace: "back",
 			geometry: "object-geometry:caster" as ObjectGeometryKey,
 			indexCount: 6,
 			indexStart: 0,
-			material: material(),
-			ordering: "opaque",
-			partIndex: 0,
-			templatePartKey: "part-visual-template:caster" as PartVisualTemplateKey,
 		},
 		instance: {
 			color: { a: 1, b: 1, g: 1, r: 1 },
 			sourceToLandblock: Mat4.identity(),
 		},
-		landblockId: ANCHOR,
-		ordering: "opaque",
-		renderScopes: [{ kind: "outdoor" }],
-		transparentSort: null,
-	};
-}
-
-function material(): ObjectMaterialBinding {
-	return {
-		detailRole: null,
-		palettedClipMap: false,
-		polygon: { cullFace: "back", stippled: false },
-		sampler: { wrap: TextureWrapMode.Clamp },
-		source: {
-			color: [1, 1, 1, 1],
-			diffuseScale: 1,
-			id: "material:shadow-pass-test",
-			kind: "solid-color",
-			luminosity: 0,
-			rawSurfaceFlags: 0,
-			translucency: 0,
-		},
-		textures: { base: null, palette: null },
 	};
 }
 

@@ -411,14 +411,20 @@ export interface RendererContributionFrameMetrics {
 export interface RendererOutdoorShadowMapFrameMetrics {
 	/** Cascade-frustum scene queries issued by the shadow pass. */
 	readonly cascadeQueryCount: number;
-	/** Compatible geometry/material runs submitted across every cascade. */
+	/** Eligible root selections summed across cascades, including repeated roots. */
+	readonly cascadeSelectedRootCount: number;
+	/** Compatible geometry/raster-state runs submitted across every cascade. */
 	readonly compatibleDepthRunCount: number;
 	/** Frame-instance bytes uploaded specifically for outdoor shadow depth submission. */
 	readonly instanceUploadBytes: number;
 	/** Nonempty cascade instance uploads issued specifically for outdoor shadow maps. */
 	readonly instanceUploadCount: number;
+	/** Unique expanded roots that retained at least one outdoor caster part. */
+	readonly retainedCasterRootCount: number;
 	/** Caster parts retained across cascades, counting a part once per intersected cascade. */
 	readonly selectedCasterPartCount: number;
+	/** Unique eligible roots selected by at least one cascade before part expansion. */
+	readonly uniqueSelectedRootCount: number;
 }
 
 /** Renderer CPU timings for one explicitly profiled frame. */

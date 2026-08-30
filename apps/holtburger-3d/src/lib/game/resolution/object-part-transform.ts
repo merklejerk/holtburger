@@ -1,4 +1,3 @@
-import { createScaleMat4, multiplyMat4 } from "../math/matrices";
 import { Mat4, Vec3 } from "../math/types";
 
 /**
@@ -11,16 +10,30 @@ export function composeObjectPartTransform(
 	rigidPose: Mat4,
 	sourceScale: Vec3,
 	defaultGeometryScale: Vec3,
+	targetMatrix?: Mat4,
 ): Mat4 {
-	// Worker structured cloning preserves matrix fields but not the `Mat4` prototype.
-	const scaledPose = Mat4.zero().copy(rigidPose);
-	scaledPose.m41 *= sourceScale.x;
-	scaledPose.m42 *= sourceScale.y;
-	scaledPose.m43 *= sourceScale.z;
-	const geometryScale = new Vec3(
-		defaultGeometryScale.x * sourceScale.x,
-		defaultGeometryScale.y * sourceScale.y,
-		defaultGeometryScale.z * sourceScale.z,
-	);
-	return multiplyMat4(scaledPose, createScaleMat4(geometryScale));
+	const target = targetMatrix ?? Mat4.zero();
+	const scaleX = defaultGeometryScale.x * sourceScale.x;
+	const scaleY = defaultGeometryScale.y * sourceScale.y;
+	const scaleZ = defaultGeometryScale.z * sourceScale.z;
+	// `scaledPose * scaleMatrix` scales the three basis columns while preserving the separately
+	// source-scaled translation. Writing that product directly avoids three temporary objects in
+	// the animation-hot path and remains safe when `target` aliases `rigidPose`.
+	target.m11 = rigidPose.m11 * scaleX;
+	target.m12 = rigidPose.m12 * scaleX;
+	target.m13 = rigidPose.m13 * scaleX;
+	target.m14 = rigidPose.m14 * scaleX;
+	target.m21 = rigidPose.m21 * scaleY;
+	target.m22 = rigidPose.m22 * scaleY;
+	target.m23 = rigidPose.m23 * scaleY;
+	target.m24 = rigidPose.m24 * scaleY;
+	target.m31 = rigidPose.m31 * scaleZ;
+	target.m32 = rigidPose.m32 * scaleZ;
+	target.m33 = rigidPose.m33 * scaleZ;
+	target.m34 = rigidPose.m34 * scaleZ;
+	target.m41 = rigidPose.m41 * sourceScale.x;
+	target.m42 = rigidPose.m42 * sourceScale.y;
+	target.m43 = rigidPose.m43 * sourceScale.z;
+	target.m44 = rigidPose.m44;
+	return target;
 }

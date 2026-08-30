@@ -151,7 +151,15 @@ describe("RenderWorld", () => {
 					nodeId === "scene-node:9" ? RIGID_DYNAMIC_BOUNDS : null,
 				getVisibleContributions: (nodeId) => {
 					calls.push("dynamic-expand");
-					return nodeId === "scene-node:9" ? [dynamic] : null;
+					return nodeId === "scene-node:9"
+						? {
+								depth: [],
+								kind: "visible",
+								landblockId: "0x0001ffff",
+								material: [dynamic],
+								renderScopes: [{ kind: "outdoor" }],
+							}
+						: null;
 				},
 			},
 			envCells: {
@@ -212,23 +220,20 @@ describe("RenderWorld", () => {
 			bounds: ENV_CELL_BOUNDS,
 			scope: ENV_CELL_PLACEMENT.scope,
 		});
-		expect(world.expandDynamicContributions("scene-node:9")).toEqual([dynamic]);
-		expect(world.resolveDynamicContributions([dynamic])).toEqual([
-			{ drawUnit: dynamic, geometry: GEOMETRY },
-		]);
+		expect(world.expandDynamicContributions("scene-node:9", true)).toEqual({
+			depth: [],
+			kind: "visible",
+			landblockId: "0x0001ffff",
+			material: [dynamic],
+			renderScopes: [{ kind: "outdoor" }],
+		});
 		const translucent = dynamicContribution("transparent", 0.6);
-		expect(world.resolveDynamicContributions([translucent])).toEqual([
-			{
-				drawUnit: expect.objectContaining({
-					drawUnit: expect.objectContaining({ ordering: "transparent" }),
-					instance: expect.objectContaining({
-						color: expect.objectContaining({ a: 0.6 }),
-					}),
-					transparentSort: expect.objectContaining({ stableId: "part/range" }),
-				}),
-				geometry: GEOMETRY,
-			},
-		]);
+		expect(dynamic.drawUnit.ordering).toBe("opaque");
+		expect(translucent).toMatchObject({
+			drawUnit: { ordering: "transparent" },
+			instance: { color: { a: 0.6 } },
+			transparentSort: { stableId: "part/range" },
+		});
 		expect(world.resolveGeometry("terrain-geometry:0001" as GeometryKey)).toBe(
 			GEOMETRY,
 		);
@@ -294,8 +299,6 @@ describe("RenderWorld", () => {
 			"terrain",
 			"dynamic-expand",
 			"geometry",
-			"geometry",
-			"geometry",
 			"texture-2d",
 			"texture-2d",
 			"texture-array",
@@ -319,8 +322,6 @@ function dynamicContribution(
 			partIndex: 0,
 			templatePartKey: "part-visual-template:fixture" as PartVisualTemplateKey,
 		},
-		landblockId: "0x0001ffff",
-		renderScopes: [{ kind: "outdoor" }],
 		instance: {
 			color: { a: alpha, b: 1, g: 1, r: 1 },
 			sourceToLandblock: Mat4.identity(),

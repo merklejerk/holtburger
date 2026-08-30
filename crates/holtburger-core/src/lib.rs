@@ -34,6 +34,20 @@ pub use client::collision::{
     ClientCollisionSource, ClientEntityBodyFacts, ClientEntityBodyFactsError, ClientPlayerIdentity,
     ContentClientCollisionSource, client_entity_body_facts, client_player_body_facts,
 };
+pub use client::precise_jump::{
+    PreciseJumpCandidateBudget, PreciseJumpCandidateBudgetError, PreciseJumpCandidateRejection,
+    PreciseJumpCandidateSet, PreciseJumpCapabilityEnvelope, PreciseJumpLandingTolerance,
+    PreciseJumpLaunchCandidate, PreciseJumpWorldDisplacement, PreciseJumpWorldDisplacementError,
+    generate_precise_jump_candidates,
+};
+pub use client::precise_jump_prediction::{
+    PRECISE_JUMP_FIXED_TICK, PreciseJumpCandidateFailure, PreciseJumpPredictedLanding,
+    PreciseJumpPredictionBudget, PreciseJumpPredictionBudgetError,
+    PreciseJumpPredictionDiagnostics, PreciseJumpPredictionError, PreciseJumpPredictionEvaluation,
+    PreciseJumpPredictionOutcome, PreciseJumpPredictionRequest, PreciseJumpStaticTarget,
+    PreciseJumpStaticTargetError, PreciseJumpUnprovenReason, PreciseJumpUnreachableReason,
+    diagnose_precise_jump, predict_precise_jump,
+};
 pub use client::runtime_body_view_cache::RuntimeBodyViewCache;
 pub use client::types::{
     ActionResultReason, ActionResultSource, ActiveCharacterConfirmation, BusyOperationKind,

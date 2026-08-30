@@ -53,7 +53,8 @@ pub use collision::{
     MovementRestrictionRequest, PlacedMotionLeg, PlacedMotionPath, PlacedMotionPathRequest,
     PlacedMotionPoint, PlacementRecovery, PlacementRequest, PlacementRestrictionRequest,
     SpatialMembership, SphereSweep, StaticContact, StaticSphereSweepHit, StaticSphereSweepRequest,
-    SupportContact, SupportFeature, SupportRequest, UncoveredCollisionQuery,
+    StaticSurfaceRayHit, StaticSurfaceRayRequest, SupportContact, SupportFeature, SupportRequest,
+    UncoveredCollisionQuery,
 };
 pub use collision_report::{
     CollisionReportClassification, CollisionReportContact, CollisionReportOutcome,

@@ -1223,7 +1223,7 @@ mod tests {
     use holtburger_protocol::messages::magic::Enchantment;
     use holtburger_protocol::messages::movement::InterpretedMotionCommand;
     use holtburger_protocol::messages::object::types::ArmorProfile;
-    use holtburger_world::entity::{Entity, EntityMotionSnapshot};
+    use holtburger_world::entity::{Entity, EntityMotionSnapshot, EntityNetworkMotion};
     use holtburger_world::state::{TradeSide, TradeState};
     use holtburger_world::stats::{
         Attribute, AttributeType, Skill, SkillType, TrainingLevel, Vital, VitalType,
@@ -2131,7 +2131,7 @@ mod tests {
         data.player_pos = Some(player_position);
 
         let mut entity = Entity::new(entity_guid, "Drudge".to_string(), player_position);
-        entity.motion_snapshot = Some(EntityMotionSnapshot {
+        entity.network_motion = EntityNetworkMotion::Initialized(EntityMotionSnapshot {
             forward_command: Some(InterpretedMotionCommand::DEAD),
             ..Default::default()
         });

@@ -793,7 +793,7 @@ mod tests {
     const NON_COMBAT: u32 = MotionStance::NonCombat as u32;
     const DUAL_WIELD: u32 = MotionStance::DualWieldCombat as u32;
     const STAND: u32 = 0x4500_0003;
-    const READY: u32 = 0x4000_003C;
+    const READY: u32 = MotionCommand::READY.raw();
 
     fn intent_snapshot(
         revision: u64,

@@ -1,7 +1,7 @@
 use super::*;
 use crate::attachment::PhysicsAttachment;
 use crate::context::WorldContextExt;
-use crate::entity::EntityMotionSnapshot;
+use crate::entity::{EntityMotionSnapshot, EntityNetworkMotion};
 use crate::spatial::{
     AuthoritativeBodyVectors, AuthoritativePoseEffect, AuthoritativePoseResetCause, ContactState,
     PhysicalBodyTickResult, RETAIL_INTERPOLATION_SNAP_DISTANCE_M, RuntimeBodyResetCause,
@@ -9,7 +9,6 @@ use crate::spatial::{
     SpatialSampleMode, SpatialSamplingConfig,
 };
 use crate::state::types::PendingChildLink;
-use holtburger_common::math::Quaternion;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_common::{ParentLocation, Placement};
@@ -171,7 +170,7 @@ impl WorldState {
                 velocity: entity.velocity,
                 acceleration: entity.acceleration,
                 omega: entity.omega,
-                motion_state: entity.motion_snapshot,
+                motion_state: entity.network_motion.snapshot(),
                 contact: ContactState::Unknown,
                 sample_mode: SpatialSampleMode::AuthoritativeOnly,
             })
@@ -216,16 +215,20 @@ impl WorldState {
         let current_style = self
             .entities
             .get(guid)
-            .and_then(|entity| entity.motion_snapshot)
+            .and_then(|entity| entity.network_motion.snapshot())
             .and_then(|snapshot| snapshot.current_style)
             .or(self.player.last_server_motion_style);
         let replacement = current_style.map(|current_style| EntityMotionSnapshot {
             current_style: Some(current_style),
             ..EntityMotionSnapshot::default()
         });
+        let network_motion = replacement.map_or(
+            EntityNetworkMotion::Uninitialized,
+            EntityNetworkMotion::Initialized,
+        );
         let snapshot_changed = self.entities.get_mut(guid).is_some_and(|entity| {
-            let changed = entity.motion_snapshot != replacement;
-            entity.motion_snapshot = replacement;
+            let changed = entity.network_motion != network_motion;
+            entity.network_motion = network_motion;
             changed
         });
         self.reset_authored_motion(guid, replacement);
@@ -236,7 +239,7 @@ impl WorldState {
         if snapshot_changed {
             events.push(WorldEvent::EntityMotionUpdated {
                 guid,
-                snapshot: replacement,
+                motion: network_motion,
             });
         }
     }
@@ -675,7 +678,8 @@ impl WorldState {
         let current_position_sequence = entity.position_sequence();
         let current_teleport_sequence = entity.teleport_sequence();
         let keep_heading = entity
-            .motion_snapshot
+            .network_motion
+            .snapshot()
             .is_some_and(EntityMotionSnapshot::is_moving_to);
         if !holtburger_common::sequence::is_newer_u16(
             pos_pack.position_sequence,
@@ -887,30 +891,33 @@ impl WorldState {
         let _ = self.update_player_position(AuthoritativePoseEffect::Initialize { pose: pos });
     }
 
-    pub fn set_player_vector(&mut self, velocity: Vector3, omega: Vector3) -> Vec<WorldEvent> {
+    /// Records a fresh server vector sample for the retail-default autonomous player.
+    ///
+    /// Retail advances the vector timestamp but does not apply the sample to the local physics
+    /// object while `UsePositionFromServer` is false at autonomy level 2
+    /// (`acclient.c:137324-137338,682017-682019`). The entity retains the server-authored facts;
+    /// the runtime body keeps its locally integrated vectors.
+    pub fn record_player_server_vectors(
+        &mut self,
+        velocity: Vector3,
+        omega: Vector3,
+    ) -> Vec<WorldEvent> {
         let mut events = Vec::new();
         let guid = self.player.guid;
         if guid == Guid::NULL {
             return events;
         }
 
-        if let Some(pose) = self.entities.get_mut(guid).map(|entity| {
-            entity.velocity = velocity;
-            entity.omega = omega;
-            entity.position
-        }) {
-            if !self.apply_authoritative_vectors(guid, velocity, omega) {
-                self.initialize_authoritative_body(guid, pose, velocity, omega);
-            }
-            if let Some(body_id) = self.runtime_body_id_for_guid(guid) {
-                Self::emit_runtime_body_changed(&mut events, body_id);
-            }
-            events.push(WorldEvent::EntityVectorUpdated {
-                guid,
-                velocity,
-                omega,
-            });
-        }
+        let Some(entity) = self.entities.get_mut(guid) else {
+            return events;
+        };
+        entity.velocity = velocity;
+        entity.omega = omega;
+        events.push(WorldEvent::EntityVectorUpdated {
+            guid,
+            velocity,
+            omega,
+        });
 
         events
     }
@@ -1071,30 +1078,6 @@ impl WorldState {
         }
 
         updated
-    }
-
-    pub(crate) fn set_entity_rotation(
-        &mut self,
-        guid: Guid,
-        rotation: Quaternion,
-        events: &mut Vec<WorldEvent>,
-    ) -> bool {
-        let pos = {
-            let Some(entity) = self.entities.get_mut(guid) else {
-                return false;
-            };
-
-            entity.position.rotation = rotation;
-            entity.position
-        };
-
-        self.emit_entity_pose_effect(
-            guid,
-            AuthoritativePoseEffect::Confirm { pose: pos },
-            0,
-            events,
-        );
-        true
     }
 
     pub(crate) fn clear_entity_world_presence(&mut self, guid: Guid) -> Option<WorldPosition> {

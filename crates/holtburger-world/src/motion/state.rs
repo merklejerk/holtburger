@@ -5,8 +5,83 @@
 //! queues them on the same struct, but nothing in this codebase issues an action yet, and a queue
 //! with no producer would be a field nothing fills.
 
-use crate::entity::{EntityMotionSnapshot, OrderedMotionSpeed};
+use crate::entity::{EntityMotionSnapshot, OrderedMotionScalar};
+use crate::spatial::ContactState;
 use holtburger_protocol::messages::movement::InterpretedMotionCommand;
+
+/// Inclusive interpreted-index runs sharing one retail command prefix.
+///
+/// Retail's exact 412-entry `dword_7C8190` expansion table (`acclient.c:39406`) has the interpreted
+/// index in the low 16 bits of every entry. Compressing equal high halves yields these 66 runs
+/// without losing information; exhaustive tests use an independent per-index fixture.
+const INTERPRETED_COMMAND_PREFIX_RUNS: &[(u16, u16, u16)] = &[
+    (0, 0, 0x8000),
+    (1, 2, 0x8500),
+    (3, 3, 0x4100),
+    (4, 4, 0x4000),
+    (5, 6, 0x4500),
+    (7, 7, 0x4400),
+    (8, 12, 0x4000),
+    (13, 16, 0x6500),
+    (17, 17, 0x4000),
+    (18, 20, 0x4100),
+    (21, 57, 0x4000),
+    (58, 58, 0x2000),
+    (59, 59, 0x2500),
+    (60, 73, 0x8000),
+    (74, 75, 0x1000),
+    (76, 76, 0x1300),
+    (77, 120, 0x1000),
+    (121, 154, 0x1300),
+    (155, 155, 0x1200),
+    (156, 161, 0x1000),
+    (162, 162, 0x0800),
+    (163, 168, 0x0900),
+    (169, 169, 0x0800),
+    (170, 177, 0x0900),
+    (178, 180, 0x0D00),
+    (181, 183, 0x0800),
+    (184, 185, 0x0900),
+    (186, 191, 0x0D00),
+    (192, 192, 0x0900),
+    (193, 193, 0x0C00),
+    (194, 196, 0x0900),
+    (197, 197, 0x0D00),
+    (198, 201, 0x0900),
+    (202, 204, 0x1300),
+    (205, 210, 0x1000),
+    (211, 211, 0x4000),
+    (212, 212, 0x1200),
+    (213, 222, 0x0900),
+    (223, 223, 0x1200),
+    (224, 225, 0x4000),
+    (226, 227, 0x1000),
+    (228, 230, 0x4000),
+    (231, 231, 0x0900),
+    (232, 233, 0x8000),
+    (234, 248, 0x4300),
+    (249, 249, 0x4200),
+    (250, 253, 0x4300),
+    (254, 269, 0x0900),
+    (270, 273, 0x1000),
+    (274, 279, 0x0900),
+    (280, 280, 0x4300),
+    (281, 281, 0x1300),
+    (282, 284, 0x4300),
+    (285, 285, 0x0900),
+    (286, 308, 0x1000),
+    (309, 309, 0x1300),
+    (310, 313, 0x4000),
+    (314, 314, 0x1000),
+    (315, 316, 0x8000),
+    (317, 329, 0x4300),
+    (330, 338, 0x1300),
+    (339, 339, 0x1000),
+    (340, 356, 0x0900),
+    (357, 359, 0x1000),
+    (360, 368, 0x0900),
+    (369, 411, 0x1000),
+];
 
 /// A 32-bit motion-table command.
 ///
@@ -54,31 +129,33 @@ impl MotionCommand {
     /// class differs per command: forward locomotion is a substate, while turning and sidestepping
     /// are modifiers that layer on top of it.
     ///
-    /// Values from ACE `MotionCommand`, cross-checked against
-    /// `holtburger_dat::file_type::MotionTable`'s own constants.
+    /// The exact mapping is retail's `dword_7C8190` (`acclient.c:39406`). Values above the retail
+    /// table remain lossless in `InterpretedMotionCommand`, but are explicitly unsupported here.
     pub fn from_interpreted(command: InterpretedMotionCommand) -> Option<Self> {
-        Some(Self(match command {
-            InterpretedMotionCommand::WALK_FORWARD => 0x4500_0005,
-            InterpretedMotionCommand::WALK_BACKWARDS => 0x4500_0006,
-            InterpretedMotionCommand::RUN_FORWARD => 0x4400_0007,
-            InterpretedMotionCommand::TURN_RIGHT => 0x6500_000D,
-            InterpretedMotionCommand::TURN_LEFT => 0x6500_000E,
-            InterpretedMotionCommand::SIDESTEP_RIGHT => 0x6500_000F,
-            InterpretedMotionCommand::SIDESTEP_LEFT => 0x6500_0010,
-            _ => return None,
-        }))
+        let index = command.raw();
+        let (_, _, prefix) = INTERPRETED_COMMAND_PREFIX_RUNS
+            .iter()
+            .find(|(start, end, _)| (*start..=*end).contains(&index))?;
+        Some(Self((u32::from(*prefix) << 16) | u32::from(index)))
     }
 
     /// Canonical forward substate selected for walking and reversed for backward movement.
     pub const WALK_FORWARD: Self = Self(0x4500_0005);
+    /// Canonical backwards-walking substate.
+    pub const WALK_BACKWARDS: Self = Self(0x4500_0006);
     /// Canonical forward substate selected for running.
     pub const RUN_FORWARD: Self = Self(0x4400_0007);
-    /// Standing/default jump-charge presentation selected by retail.
-    pub const READY: Self = Self(0x4000_003C);
+    /// Standing/default jump-charge presentation selected by retail (`Motion_Ready`,
+    /// `acclient.c:40605`; ACE `MotionCommand.Ready`).
+    pub const READY: Self = Self(0x4100_0003);
     /// Airborne presentation selected when contact disallows grounded locomotion.
     pub const FALLING: Self = Self(0x4000_0015);
     /// Turning is a modifier, so stopping it names the command retail stops: `TurnRight`.
     pub const TURN: Self = Self(0x6500_000D);
+    /// Clockwise turn command selected by retail's heading reducer.
+    pub const TURN_RIGHT: Self = Self(0x6500_000D);
+    /// Counter-clockwise turn command selected by retail's heading reducer.
+    pub const TURN_LEFT: Self = Self(0x6500_000E);
     /// Sidestepping is likewise one modifier, stopped by naming `SideStepRight`.
     pub const SIDESTEP: Self = Self(0x6500_000F);
 }
@@ -105,6 +182,39 @@ pub struct MotionOrder {
     pub turn: Option<(MotionCommand, f32)>,
 }
 
+/// Authored character presentation selected from physical support and jump lifecycle state.
+///
+/// Physics owns support, while an actor adapter owns whether a supported character is performing a
+/// standing charge. Keeping the resolved state composite prevents physics and presentation from
+/// independently interpreting the same transition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CharacterMotionPresentation {
+    /// Preserve the actor's current grounded locomotion order.
+    Grounded,
+    /// Select the stance's supported standing-charge substate.
+    Ready,
+    /// Select the stance's unsupported travel substate.
+    Falling,
+    /// Stop planar presentation at the stance default when content lacks a requested jump row.
+    StanceDefault,
+}
+
+impl CharacterMotionPresentation {
+    /// Resolves retail's support-driven character presentation for one tick.
+    ///
+    /// `Unknown` preserves current movement until collision classifies the body. Explorer and the
+    /// client otherwise agree that sliding is unsupported for authored planar locomotion.
+    pub const fn resolve(contact: ContactState, launching: bool, standing_charge: bool) -> Self {
+        if launching || matches!(contact, ContactState::Airborne | ContactState::Sliding) {
+            Self::Falling
+        } else if matches!(contact, ContactState::Grounded) && standing_charge {
+            Self::Ready
+        } else {
+            Self::Grounded
+        }
+    }
+}
+
 impl MotionOrder {
     /// Reads one server-reported motion snapshot as an order.
     ///
@@ -113,9 +223,9 @@ impl MotionOrder {
     /// (`MotionInterp.cs:460`). An earlier reduction treated them as absolute metres per second.
     pub fn from_snapshot(snapshot: EntityMotionSnapshot) -> Self {
         let ordered = |command: Option<InterpretedMotionCommand>,
-                       speed: Option<OrderedMotionSpeed>| {
+                       speed: Option<OrderedMotionScalar>| {
             let command = MotionCommand::from_interpreted(command?)?;
-            Some((command, speed.map_or(1.0, OrderedMotionSpeed::to_f32)))
+            Some((command, speed.map_or(1.0, OrderedMotionScalar::to_f32)))
         };
 
         Self {
@@ -126,6 +236,29 @@ impl MotionOrder {
             sidestep: ordered(snapshot.sidestep_command, snapshot.sidestep_speed),
             turn: ordered(snapshot.turn_command, snapshot.turn_speed),
         }
+    }
+
+    /// Applies one already-resolved support presentation without changing stance or turn.
+    pub const fn with_character_presentation(
+        mut self,
+        presentation: CharacterMotionPresentation,
+    ) -> Self {
+        match presentation {
+            CharacterMotionPresentation::Grounded => {}
+            CharacterMotionPresentation::Ready => {
+                self.forward = Some((MotionCommand::READY, 1.0));
+                self.sidestep = None;
+            }
+            CharacterMotionPresentation::Falling => {
+                self.forward = Some((MotionCommand::FALLING, 1.0));
+                self.sidestep = None;
+            }
+            CharacterMotionPresentation::StanceDefault => {
+                self.forward = None;
+                self.sidestep = None;
+            }
+        }
+        self
     }
 }
 

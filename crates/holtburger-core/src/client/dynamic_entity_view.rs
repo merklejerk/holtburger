@@ -90,7 +90,7 @@ pub fn project_client_dynamic_entity(
         identity: DynamicEntityIdentityView { guid, wcid, name },
         content: DynamicEntityContent {
             setup_did,
-            motion_table_did: entity.mtable_id().map(|did| did.0),
+            motion_table_did: world.effective_motion_table_id_for_guid(guid),
             sound_table_did: entity.stable_id().map(|did| did.0),
             physics_effect_table_did: entity.petable_id().map(|did| did.0),
         },
@@ -283,6 +283,8 @@ mod tests {
         WeenieType, WorldObjectPropertyAccessorsMut as _,
     };
     use holtburger_common::{ParentLocation, Placement, Quaternion, Vector3};
+    use holtburger_content::MotionSequenceCatalog;
+    use holtburger_dat::file_type::MotionTable;
     use holtburger_world::entity::Entity;
     use holtburger_world::{
         ContactState, EntityAppearance, PhysicalBodyParticipation, PhysicsAttachment,
@@ -312,6 +314,45 @@ mod tests {
         entity.physics = resolve_effective_entity_physics_state(PhysicsState::GRAVITY);
         world.add_entity(entity);
         Box::new(project_client_dynamic_entity(&world, guid).unwrap())
+    }
+
+    #[test]
+    fn client_projection_uses_the_world_resolved_setup_motion_table() {
+        let guid = Guid(0x7000_0010);
+        let setup_did = 0x0200_0010;
+        let motion_table_did = 0x0900_0010;
+        let mut world = WorldState::synthetic();
+        world.set_motion_sequences(
+            MotionSequenceCatalog::assemble(
+                [MotionTable {
+                    id: motion_table_did,
+                    default_style: 0,
+                    style_defaults: std::collections::HashMap::new(),
+                    cycles: std::collections::HashMap::new(),
+                    modifiers: std::collections::HashMap::new(),
+                    links: std::collections::HashMap::new(),
+                }],
+                [],
+                [(setup_did, motion_table_did)],
+            )
+            .expect("empty setup-fallback motion table should assemble"),
+        );
+        let mut entity = projectable_entity(
+            guid,
+            WorldPosition {
+                landblock_id: Guid(0xda55_0001),
+                ..WorldPosition::default()
+            },
+        );
+        entity.set_did_prop(PropertyDataId::Setup, Guid(setup_did));
+        world.add_entity(entity);
+
+        let projected = project_client_dynamic_entity(&world, guid).expect("projectable entity");
+
+        assert_eq!(
+            projected.presentation.content.motion_table_did,
+            Some(motion_table_did)
+        );
     }
 
     #[test]

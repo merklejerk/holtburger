@@ -52,13 +52,12 @@ export function prepareDynamicAnimation(
 			localBounds: staticBounds,
 		};
 	}
-	validatePartCoverage(animation, template.parts);
-	const bounds = sweepPartBounds(animation, template.parts, sourceScale);
-	if (bounds === null) {
-		throw new Error(
-			`Animation ${animation.id} appearance ${template.appearanceKey} has no geometry bounds.`,
-		);
-	}
+	const bounds = sweepPartBounds(
+		animation,
+		template.parts,
+		sourceScale,
+		staticBounds,
+	);
 	const hasUnboundedVisualRootRotation = animation.hooks.some(
 		(hook) => hook.kind === "set-omega",
 	);
@@ -77,25 +76,13 @@ export function prepareDynamicAnimation(
 	};
 }
 
-function validatePartCoverage(
-	animation: PreparedAnimation,
-	parts: readonly PartVisualTemplate[],
-): void {
-	for (const part of parts) {
-		if (part.partIndex >= animation.partCount) {
-			throw new Error(
-				`Animation ${animation.id} has ${animation.partCount} parts but appearance requires part ${part.partIndex}.`,
-			);
-		}
-	}
-}
-
 function sweepPartBounds(
 	animation: PreparedAnimation,
 	parts: readonly PartVisualTemplate[],
 	sourceScale: Vec3,
-): AABB3 | null {
-	let result: AABB3 | null = null;
+	staticBounds: AABB3,
+): AABB3 {
+	const result = staticBounds.clone();
 	for (const part of parts) {
 		if (part.localBounds === null) continue;
 		const radius = scaledPartRadius(
@@ -110,11 +97,7 @@ function sweepPartBounds(
 		) {
 			const pose =
 				animation.partFrames[frameIndex * animation.partCount + part.partIndex];
-			if (!pose) {
-				throw new Error(
-					`Animation ${animation.id} has no frame ${frameIndex} pose for part ${part.partIndex}.`,
-				);
-			}
+			if (!pose) continue;
 			// Translation interpolates linearly and rigid rotation preserves this radius, so the
 			// endpoint sphere AABBs cover every slerped pose between authored frames.
 			const center = new Vec3(
@@ -126,8 +109,7 @@ function sweepPartBounds(
 				new Vec3(center.x - radius, center.y - radius, center.z - radius),
 				new Vec3(center.x + radius, center.y + radius, center.z + radius),
 			);
-			if (result === null) result = partBounds;
-			else result.union(partBounds);
+			result.union(partBounds);
 		}
 	}
 	return result;

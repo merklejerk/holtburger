@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from "svelte";
+	import { onMount, untrack } from "svelte";
 	import {
 		createFrameRateSampler,
 		type FrameRates,
@@ -8,6 +8,8 @@
 
 	import {
 		CharacterInputController,
+		type CharacterDrive,
+		type CharacterInputEdge,
 		type CharacterInputKey,
 	} from "../lib/game/controls/character-input-controller";
 	import { CLIENT_TUNING } from "./client-tuning";
@@ -28,7 +30,13 @@
 	import ClientCharacterSelect from "./ClientCharacterSelect.svelte";
 	import ClientWorldView from "./ClientWorldView.svelte";
 	import type { MapPanelFrame } from "../app/map-panel-frame";
-	import type { ClientDriveRequest, ClientVital } from "./client-host-contract";
+	import type {
+		ClientCharacterMotionCapabilities,
+		ClientCharacterMotionEventRequest,
+		ClientCharacterMotionRejection,
+		ClientDriveRequest,
+		ClientVital,
+	} from "./client-host-contract";
 	import type { ClientChatLine } from "./ClientChat.svelte";
 	import {
 		clientLifecycleEnablesWorldInput,
@@ -49,6 +57,9 @@
 	let playerName = $state<string | null>(null);
 	let worldName = $state<string | null>(null);
 	let vitals = $state<readonly ClientVital[]>([]);
+	let characterMotion = $state<ClientCharacterMotionCapabilities | null>(null);
+	let activeJumpBeginSequence = $state<number | null>(null);
+	let jumpStatus = $state<string | null>(null);
 	let chatMessages = $state<readonly ClientChatLine[]>([]);
 	let nextChatMessageId = 1;
 	const MAXIMUM_CHAT_LINES = 250;
@@ -74,19 +85,17 @@
 		clientLifecycleEnablesWorldInput(lifecycle),
 	);
 
-	const IDLE_CLIENT_DRIVE: ClientDriveRequest = {
-		gait: "run",
-		longitudinal: null,
-		turning: null,
-	};
-
 	function clientInputKey(key: string): CharacterInputKey | null {
 		switch (key) {
 			case "w":
 			case "s":
 			case "a":
 			case "d":
+			case "z":
+			case "c":
 				return key;
+			case " ":
+				return "space";
 			case "Shift":
 				return "shift";
 			default:
@@ -94,22 +103,70 @@
 		}
 	}
 
+	function queueCharacterMotionEdge(
+		currentSession: ClientLifecycleSession,
+		edge: CharacterInputEdge,
+		active: () => boolean,
+	): void {
+		if (edge.kind === "begin-jump") {
+			activeJumpBeginSequence = edge.sequence;
+			jumpStatus = null;
+		} else {
+			activeJumpBeginSequence = null;
+		}
+		const request: ClientCharacterMotionEventRequest =
+			edge.kind === "reset"
+				? edge
+				: {
+						...edge,
+						drive: {
+							gait: edge.drive.gait,
+							longitudinal: edge.drive.longitudinal,
+							lateral: edge.drive.lateral,
+							turning: edge.drive.turn,
+						},
+					};
+		inputDispatch = inputDispatch
+			.then(() => currentSession.queueCharacterMotionEvent(request))
+			.catch((error: unknown) => {
+				if (active()) commandFailure = diagnostic(error);
+			});
+	}
+
+	function jumpRejectionText(reason: ClientCharacterMotionRejection): string {
+		switch (reason) {
+			case "airborne":
+				return "You are already airborne.";
+			case "unsupported":
+				return "You need stable ground to jump.";
+			case "overburdened":
+				return "You are carrying too much to jump.";
+			case "capability-unavailable":
+			case "body-unavailable":
+			case "collision-unavailable":
+				return "Jump is not ready yet.";
+			case "charge-not-active":
+				return "The jump charge is no longer active.";
+			case "launch-rejected":
+				return "The jump could not be launched.";
+		}
+	}
+
 	function replaceClientDrive(
 		currentSession: ClientLifecycleSession,
-		drive: {
-			readonly gait: "run" | "walk";
-			readonly longitudinal: "forward" | "backward" | null;
-			readonly turn: "left" | "right" | null;
-		},
+		drive: CharacterDrive,
 		active: () => boolean,
 	): void {
 		cameraController?.setTranslationIntent(
-			drive.longitudinal !== null || drive.turn !== null,
+			drive.longitudinal !== null ||
+				drive.lateral !== null ||
+				drive.turn !== null,
 			performance.now(),
 		);
 		const request: ClientDriveRequest = {
 			gait: drive.gait,
 			longitudinal: drive.longitudinal,
+			lateral: drive.lateral,
 			turning: drive.turn,
 		};
 		inputDispatch = inputDispatch
@@ -125,6 +182,11 @@
 				playerName = event.state.playerName;
 				worldName = event.state.worldName;
 				vitals = event.state.vitals;
+				characterMotion = event.state.characterMotion;
+				if (characterMotion !== null)
+					inputController?.setFullChargeDurationMs(
+						characterMotion.fullChargeDurationMs,
+					);
 				lifecycle = reduceClientLifecycleUiState(lifecycle, {
 					type: "authority",
 					lifecycle: event.state.lifecycle,
@@ -135,6 +197,21 @@
 					type: "authority",
 					lifecycle: event.lifecycle,
 				});
+				return;
+			case "character-motion-capabilities":
+				characterMotion = event.capabilities;
+				if (event.capabilities !== null)
+					inputController?.setFullChargeDurationMs(
+						event.capabilities.fullChargeDurationMs,
+					);
+				return;
+			case "character-motion-feedback":
+				if (event.feedback.outcome.kind === "rejected") {
+					inputController?.rejectBegin(event.feedback.sequence);
+					if (activeJumpBeginSequence === event.feedback.sequence)
+						activeJumpBeginSequence = null;
+					jumpStatus = jumpRejectionText(event.feedback.outcome.reason);
+				}
 				return;
 			case "world-name":
 				worldName = event.name;
@@ -229,6 +306,7 @@
 		if (lifecycle.kind !== "in-world") return;
 		const key = clientInputKey(event.key);
 		if (key === null || inputController === null) return;
+		if (key === "space" && characterMotion === null) return;
 		event.preventDefault();
 		inputController.applyKey(key, true, event.repeat);
 	}
@@ -379,12 +457,16 @@
 
 		let cancelled = false;
 		const isActive = (): boolean => !cancelled && session === currentSession;
+		const initialCharacterMotion = untrack(() => characterMotion);
 		const controller = new CharacterInputController({
-			fullChargeDurationMs: 1000,
+			// Space remains gated until authority supplies capability; this value only permits the
+			// shared drive controller to exist early enough for W/S/A/D/Z/C.
+			fullChargeDurationMs:
+				initialCharacterMotion?.fullChargeDurationMs ?? 1000,
 			now: () => performance.now(),
 			onDrive: (drive) => replaceClientDrive(currentSession, drive, isActive),
-			// Jump edges remain intentionally unbound: the client host contract has no jump consumer.
-			onEdge: () => {},
+			onEdge: (edge) =>
+				queueCharacterMotionEdge(currentSession, edge, isActive),
 		});
 		inputController = controller;
 
@@ -395,6 +477,7 @@
 
 		return () => {
 			cancelled = true;
+			activeJumpBeginSequence = null;
 			window.removeEventListener("blur", clearHeldInput);
 			window.removeEventListener("focusout", clearHeldInput);
 			document.removeEventListener("visibilitychange", clearHeldInput);
@@ -440,6 +523,9 @@
 		{playerName}
 		{worldName}
 		{vitals}
+		jumpChargeActive={activeJumpBeginSequence !== null}
+		readJumpExtent={() => inputController?.chargeExtent() ?? 0}
+		{jumpStatus}
 		{chatMessages}
 		onSendChat={sendChat}
 		onChatFocusChange={handleChatFocusChange}

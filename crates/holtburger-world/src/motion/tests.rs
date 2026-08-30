@@ -1,5 +1,10 @@
 use super::registry::RETAIL_RUN_FORWARD_BASE_SPEED_MPS;
 use super::*;
+use crate::entity::{
+    EntityMotionAction, EntityMotionActionSource, EntityMotionAdmission, EntityMotionSnapshot,
+    OrderedMotionScalar,
+};
+use crate::spatial::ContactState;
 use holtburger_common::{Quaternion, RigidTransform, Vector3};
 use holtburger_content::{MotionHookDirection, MotionSequenceCatalog, MotionSequenceTable};
 use holtburger_dat::file_type::animation::AnimationFlags;
@@ -9,17 +14,20 @@ use holtburger_dat::file_type::setup_model::{
 };
 use holtburger_dat::file_type::{Animation, MotionTable};
 use holtburger_dat::graphics::Frame;
+use holtburger_protocol::messages::movement::InterpretedMotionCommand;
 use std::collections::HashMap;
 
 const STYLE: u32 = 0x8000_003D;
 const COMBAT_STYLE: u32 = 0x8000_003C;
 const STAND: u32 = 0x4500_0003;
+const COMBAT_STAND: u32 = 0x4100_0050;
 const WALK: u32 = MotionTable::WALK_FORWARD_COMMAND;
 const RUN: u32 = MotionTable::RUN_FORWARD_COMMAND;
 const MODIFIER: u32 = 0x2000_0021;
 const SECOND_MODIFIER: u32 = 0x2000_0022;
 const DUAL_TURN: u32 = MotionTable::TURN_RIGHT_COMMAND;
 const HOOKED: u32 = 0x4500_0009;
+const ACTION: u32 = 0x1000_004A;
 
 const STAND_ANIM: u32 = 0x0300_0001;
 const WALK_ANIM: u32 = 0x0300_0002;
@@ -27,6 +35,126 @@ const RUN_ANIM: u32 = 0x0300_0003;
 const LINK_ANIM: u32 = 0x0300_0004;
 const HOOK_ANIM: u32 = 0x0300_0005;
 const SIDESTEP_ANIM: u32 = 0x0300_0006;
+const ACTION_ANIM: u32 = 0x0300_0007;
+
+/// High halves copied independently from retail's 412-entry `dword_7C8190` initializer.
+const RETAIL_INTERPRETED_COMMAND_PREFIXES: [u16; 412] = [
+    0x8000, 0x8500, 0x8500, 0x4100, 0x4000, 0x4500, 0x4500, 0x4400, 0x4000, 0x4000, 0x4000, 0x4000,
+    0x4000, 0x6500, 0x6500, 0x6500, 0x6500, 0x4000, 0x4100, 0x4100, 0x4100, 0x4000, 0x4000, 0x4000,
+    0x4000, 0x4000, 0x4000, 0x4000, 0x4000, 0x4000, 0x4000, 0x4000, 0x4000, 0x4000, 0x4000, 0x4000,
+    0x4000, 0x4000, 0x4000, 0x4000, 0x4000, 0x4000, 0x4000, 0x4000, 0x4000, 0x4000, 0x4000, 0x4000,
+    0x4000, 0x4000, 0x4000, 0x4000, 0x4000, 0x4000, 0x4000, 0x4000, 0x4000, 0x4000, 0x2000, 0x2500,
+    0x8000, 0x8000, 0x8000, 0x8000, 0x8000, 0x8000, 0x8000, 0x8000, 0x8000, 0x8000, 0x8000, 0x8000,
+    0x8000, 0x8000, 0x1000, 0x1000, 0x1300, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000,
+    0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000,
+    0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000,
+    0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000,
+    0x1000, 0x1300, 0x1300, 0x1300, 0x1300, 0x1300, 0x1300, 0x1300, 0x1300, 0x1300, 0x1300, 0x1300,
+    0x1300, 0x1300, 0x1300, 0x1300, 0x1300, 0x1300, 0x1300, 0x1300, 0x1300, 0x1300, 0x1300, 0x1300,
+    0x1300, 0x1300, 0x1300, 0x1300, 0x1300, 0x1300, 0x1300, 0x1300, 0x1300, 0x1300, 0x1300, 0x1200,
+    0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x0800, 0x0900, 0x0900, 0x0900, 0x0900, 0x0900,
+    0x0900, 0x0800, 0x0900, 0x0900, 0x0900, 0x0900, 0x0900, 0x0900, 0x0900, 0x0900, 0x0D00, 0x0D00,
+    0x0D00, 0x0800, 0x0800, 0x0800, 0x0900, 0x0900, 0x0D00, 0x0D00, 0x0D00, 0x0D00, 0x0D00, 0x0D00,
+    0x0900, 0x0C00, 0x0900, 0x0900, 0x0900, 0x0D00, 0x0900, 0x0900, 0x0900, 0x0900, 0x1300, 0x1300,
+    0x1300, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x4000, 0x1200, 0x0900, 0x0900, 0x0900,
+    0x0900, 0x0900, 0x0900, 0x0900, 0x0900, 0x0900, 0x0900, 0x1200, 0x4000, 0x4000, 0x1000, 0x1000,
+    0x4000, 0x4000, 0x4000, 0x0900, 0x8000, 0x8000, 0x4300, 0x4300, 0x4300, 0x4300, 0x4300, 0x4300,
+    0x4300, 0x4300, 0x4300, 0x4300, 0x4300, 0x4300, 0x4300, 0x4300, 0x4300, 0x4200, 0x4300, 0x4300,
+    0x4300, 0x4300, 0x0900, 0x0900, 0x0900, 0x0900, 0x0900, 0x0900, 0x0900, 0x0900, 0x0900, 0x0900,
+    0x0900, 0x0900, 0x0900, 0x0900, 0x0900, 0x0900, 0x1000, 0x1000, 0x1000, 0x1000, 0x0900, 0x0900,
+    0x0900, 0x0900, 0x0900, 0x0900, 0x4300, 0x1300, 0x4300, 0x4300, 0x4300, 0x0900, 0x1000, 0x1000,
+    0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000,
+    0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1300, 0x4000, 0x4000,
+    0x4000, 0x4000, 0x1000, 0x8000, 0x8000, 0x4300, 0x4300, 0x4300, 0x4300, 0x4300, 0x4300, 0x4300,
+    0x4300, 0x4300, 0x4300, 0x4300, 0x4300, 0x4300, 0x1300, 0x1300, 0x1300, 0x1300, 0x1300, 0x1300,
+    0x1300, 0x1300, 0x1300, 0x1000, 0x0900, 0x0900, 0x0900, 0x0900, 0x0900, 0x0900, 0x0900, 0x0900,
+    0x0900, 0x0900, 0x0900, 0x0900, 0x0900, 0x0900, 0x0900, 0x0900, 0x0900, 0x1000, 0x1000, 0x1000,
+    0x0900, 0x0900, 0x0900, 0x0900, 0x0900, 0x0900, 0x0900, 0x0900, 0x0900, 0x1000, 0x1000, 0x1000,
+    0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000,
+    0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000,
+    0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000, 0x1000,
+    0x1000, 0x1000, 0x1000, 0x1000,
+];
+
+#[test]
+fn every_retail_interpreted_command_expands_exactly() {
+    for (index, prefix) in RETAIL_INTERPRETED_COMMAND_PREFIXES.into_iter().enumerate() {
+        let interpreted = InterpretedMotionCommand(index as u16);
+        assert_eq!(
+            MotionCommand::from_interpreted(interpreted),
+            Some(MotionCommand((u32::from(prefix) << 16) | index as u32)),
+            "interpreted command {index}"
+        );
+    }
+
+    assert_eq!(
+        MotionCommand::from_interpreted(InterpretedMotionCommand(412)),
+        None
+    );
+    assert_eq!(
+        MotionCommand::from_interpreted(InterpretedMotionCommand(u16::MAX)),
+        None
+    );
+}
+
+#[test]
+fn retained_non_locomotion_commands_survive_motion_order_reduction() {
+    for (interpreted, expected) in [
+        (InterpretedMotionCommand::DEAD, 0x4000_0011),
+        (InterpretedMotionCommand(74), 0x1000_004A),
+    ] {
+        let order = MotionOrder::from_snapshot(EntityMotionSnapshot {
+            forward_command: Some(interpreted),
+            ..EntityMotionSnapshot::default()
+        });
+
+        assert_eq!(order.forward, Some((MotionCommand(expected), 1.0)));
+    }
+}
+
+#[test]
+fn character_presentation_resolves_support_and_preserves_turn() {
+    let grounded = MotionOrder {
+        style: Some(MotionCommand(STYLE)),
+        forward: Some((MotionCommand::RUN_FORWARD, 1.5)),
+        sidestep: Some((MotionCommand::SIDESTEP, 1.0)),
+        turn: Some((MotionCommand::TURN, 0.5)),
+    };
+
+    assert_eq!(
+        CharacterMotionPresentation::resolve(ContactState::Grounded, false, false),
+        CharacterMotionPresentation::Grounded
+    );
+    assert_eq!(
+        grounded.with_character_presentation(CharacterMotionPresentation::Grounded),
+        grounded
+    );
+
+    let ready = grounded.with_character_presentation(CharacterMotionPresentation::resolve(
+        ContactState::Grounded,
+        false,
+        true,
+    ));
+    assert_eq!(ready.forward, Some((MotionCommand::READY, 1.0)));
+    assert_eq!(ready.sidestep, None);
+    assert_eq!(ready.turn, grounded.turn);
+
+    for contact in [ContactState::Airborne, ContactState::Sliding] {
+        let falling = grounded.with_character_presentation(CharacterMotionPresentation::resolve(
+            contact, false, false,
+        ));
+        assert_eq!(falling.forward, Some((MotionCommand::FALLING, 1.0)));
+        assert_eq!(falling.sidestep, None);
+        assert_eq!(falling.turn, grounded.turn);
+    }
+
+    let launching = grounded.with_character_presentation(CharacterMotionPresentation::resolve(
+        ContactState::Grounded,
+        true,
+        false,
+    ));
+    assert_eq!(launching.forward, Some((MotionCommand::FALLING, 1.0)));
+}
 
 /// Builds an animation whose every frame translates `step` along local Y.
 fn animation(id: u32, frames: usize, step: f32) -> Animation {
@@ -99,6 +227,11 @@ fn motion(anims: Vec<AnimData>, velocity: Option<Vector3>, omega: Option<Vector3
 
 /// A table with a stand/walk/run cycle set, links between them, one modifier, and a combat style.
 fn catalog() -> MotionSequenceCatalog {
+    catalog_with_combat_default(STAND)
+}
+
+/// Builds the shared table fixture with an independently selectable combat resting substate.
+fn catalog_with_combat_default(combat_default: u32) -> MotionSequenceCatalog {
     let mut cycles = HashMap::new();
     cycles.insert(
         MotionTable::cycle_key(STYLE, STAND),
@@ -128,7 +261,7 @@ fn catalog() -> MotionSequenceCatalog {
     standing_turn.bitfield = 2;
     cycles.insert(MotionTable::cycle_key(STYLE, DUAL_TURN), standing_turn);
     cycles.insert(
-        MotionTable::cycle_key(COMBAT_STYLE, STAND),
+        MotionTable::cycle_key(COMBAT_STYLE, combat_default),
         motion(vec![clip(STAND_ANIM, 10.0)], None, None),
     );
 
@@ -155,6 +288,7 @@ fn catalog() -> MotionSequenceCatalog {
             (WALK, motion(vec![clip(LINK_ANIM, 2.0)], None, None)),
             (RUN, motion(vec![clip(LINK_ANIM, 2.0)], None, None)),
             (COMBAT_STYLE, motion(vec![clip(LINK_ANIM, 2.0)], None, None)),
+            (ACTION, motion(vec![clip(ACTION_ANIM, 4.0)], None, None)),
         ]);
     links
         .entry(MotionTable::cycle_key(STYLE, WALK))
@@ -168,7 +302,7 @@ fn catalog() -> MotionSequenceCatalog {
     let table = MotionTable {
         id: 0x0900_0001,
         default_style: STYLE,
-        style_defaults: HashMap::from([(STYLE, STAND), (COMBAT_STYLE, STAND)]),
+        style_defaults: HashMap::from([(STYLE, STAND), (COMBAT_STYLE, combat_default)]),
         cycles,
         modifiers,
         links,
@@ -182,6 +316,7 @@ fn catalog() -> MotionSequenceCatalog {
             animation(RUN_ANIM, 4, 2.0),
             animation(LINK_ANIM, 2, 0.5),
             hook_animation(),
+            animation(ACTION_ANIM, 4, 0.25),
         ],
         [],
     )
@@ -211,6 +346,133 @@ fn animation_ids(sequence: &MotionSequenceRuntime) -> Vec<u32> {
         .iter()
         .map(|node| node.animation().id)
         .collect()
+}
+
+fn action(sequence: u16) -> EntityMotionAction {
+    EntityMotionAction {
+        command: MotionCommand(ACTION),
+        speed: OrderedMotionScalar::from_f32(1.0).unwrap(),
+        action_sequence: sequence,
+        is_autonomous: false,
+        admission: EntityMotionAdmission {
+            object_instance_sequence: 1,
+            movement_sequence: sequence,
+            server_control_sequence: 2,
+            is_autonomous: false,
+        },
+        source: EntityMotionActionSource::CommandList,
+    }
+}
+
+#[test]
+fn action_from_default_owns_an_exact_completion_boundary_and_return_cycle() {
+    let catalog = catalog();
+    let table = catalog.table(0x0900_0001).unwrap();
+    let mut body = standing(table);
+
+    assert_eq!(
+        select_action(
+            table,
+            &mut body.state,
+            &mut body.sequence,
+            MotionCommand(ACTION),
+            1.0,
+        ),
+        ActionSelectionOutcome::Selected,
+    );
+    assert_eq!(animation_ids(&body.sequence), vec![ACTION_ANIM, STAND_ANIM]);
+    let tick = body.sequence.advance(1.1);
+    assert!(tick.action_completed);
+    assert_eq!(
+        body.sequence.current_clip().unwrap().node.animation().id,
+        STAND_ANIM,
+    );
+}
+
+#[test]
+fn action_without_direct_route_uses_default_and_returns_to_current_substate() {
+    let catalog = catalog();
+    let table = catalog.table(0x0900_0001).unwrap();
+    let mut body = standing(table);
+    select_motion(
+        table,
+        &mut body.state,
+        &mut body.sequence,
+        MotionCommand(WALK),
+        1.0,
+    );
+    body.sequence.advance(1.1);
+
+    assert_eq!(
+        select_action(
+            table,
+            &mut body.state,
+            &mut body.sequence,
+            MotionCommand(ACTION),
+            1.0,
+        ),
+        ActionSelectionOutcome::Selected,
+    );
+    assert_eq!(
+        animation_ids(&body.sequence),
+        vec![LINK_ANIM, ACTION_ANIM, LINK_ANIM, WALK_ANIM],
+    );
+}
+
+#[test]
+fn runtime_queue_is_bounded_and_returns_to_latest_steady_order() {
+    let catalog = catalog();
+    let table = catalog.table(0x0900_0001).unwrap();
+    let guid = holtburger_common::Guid(0x5000_0001);
+    let mut registry = MotionRuntimeRegistry::new();
+    for sequence in 1..=6 {
+        assert_eq!(
+            registry.enqueue_action(table, guid, action(sequence)),
+            MotionActionEnqueueOutcome::Queued,
+        );
+    }
+    assert_eq!(
+        registry.enqueue_action(table, guid, action(7)),
+        MotionActionEnqueueOutcome::Overflow,
+    );
+    registry.drive(
+        table,
+        guid,
+        MotionOrder {
+            style: Some(MotionCommand(STYLE)),
+            ..MotionOrder::default()
+        },
+        0.0,
+    );
+    assert_eq!(registry.get(guid).unwrap().active_action(), Some(action(1)));
+
+    registry.drive(
+        table,
+        guid,
+        MotionOrder {
+            style: Some(MotionCommand(STYLE)),
+            forward: Some((MotionCommand(WALK), 1.0)),
+            ..MotionOrder::default()
+        },
+        0.0,
+    );
+    assert_eq!(
+        animation_ids(registry.get(guid).unwrap().sequence()),
+        vec![ACTION_ANIM, LINK_ANIM, WALK_ANIM],
+        "steady movement must replace the return tail without restarting the action prefix",
+    );
+    registry.drive(
+        table,
+        guid,
+        MotionOrder {
+            style: Some(MotionCommand(STYLE)),
+            forward: Some((MotionCommand(WALK), 1.0)),
+            ..MotionOrder::default()
+        },
+        1.1,
+    );
+    assert_eq!(registry.get(guid).unwrap().active_action(), Some(action(2)));
+    assert_eq!(registry.state(guid).unwrap().substate, MotionCommand(WALK));
 }
 
 #[test]
@@ -492,7 +754,7 @@ fn reversing_direction_routes_through_the_style_default() {
 
 #[test]
 fn a_style_change_transitions_into_the_new_styles_default_substate() {
-    let catalog = catalog();
+    let catalog = catalog_with_combat_default(COMBAT_STAND);
     let table = catalog.table(0x0900_0001).expect("table");
     let mut body = standing(table);
 
@@ -506,7 +768,7 @@ fn a_style_change_transitions_into_the_new_styles_default_substate() {
 
     assert_eq!(outcome, MotionSelectionOutcome::Selected);
     assert_eq!(body.state.style, MotionCommand(COMBAT_STYLE));
-    assert_eq!(body.state.substate, MotionCommand(STAND));
+    assert_eq!(body.state.substate, MotionCommand(COMBAT_STAND));
     assert_eq!(
         select_motion(
             table,
@@ -566,6 +828,54 @@ fn a_modifier_layers_its_omega_onto_the_running_cycle_and_stops_cleanly() {
 
     assert!(body.state.modifiers().is_empty());
     assert_eq!(body.sequence.omega(), Vector3::zero());
+}
+
+#[test]
+fn a_negative_canonical_turn_retires_before_action_and_return_idle() {
+    let catalog = catalog();
+    let table = catalog.table(0x0900_0001).expect("table");
+    let mut body = standing(table);
+
+    assert_eq!(
+        select_motion(
+            table,
+            &mut body.state,
+            &mut body.sequence,
+            MotionCommand(DUAL_TURN),
+            -1.0,
+        ),
+        MotionSelectionOutcome::Selected
+    );
+    assert_eq!(body.sequence.omega(), Vector3::new(0.0, 0.0, -0.5));
+
+    assert_eq!(
+        stop_motion(
+            table,
+            &mut body.state,
+            &mut body.sequence,
+            MotionCommand(DUAL_TURN),
+        ),
+        MotionSelectionOutcome::Selected
+    );
+    assert!(body.state.modifiers().is_empty());
+    assert_eq!(body.sequence.omega(), Vector3::zero());
+    assert_eq!(
+        select_action(
+            table,
+            &mut body.state,
+            &mut body.sequence,
+            MotionCommand(ACTION),
+            1.0,
+        ),
+        ActionSelectionOutcome::Selected,
+    );
+    assert_eq!(body.sequence.omega(), Vector3::zero());
+    body.sequence.advance(1.1);
+    assert_eq!(body.sequence.omega(), Vector3::zero());
+    assert_eq!(
+        body.sequence.current_clip().unwrap().node.animation().id,
+        STAND_ANIM
+    );
 }
 
 /// Rebuilding the sequence for a new substate drops the modifier contributions with it, so they

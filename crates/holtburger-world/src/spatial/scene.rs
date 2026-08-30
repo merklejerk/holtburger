@@ -406,7 +406,12 @@ fn reconcile_physical_body_actuation(
                 GroundedBodyActuation::coast()
             };
             let heading = match composition.source {
-                PoseTranslationSource::Interpolation if composition.keep_heading => None,
+                // Retail zeros only the interpolation offset's heading when MoveTo owns yaw;
+                // the ordinary authored turn still rotates the object
+                // (`InterpolationManager::adjust_offset`, acclient.c:372078-372092).
+                PoseTranslationSource::Interpolation if composition.keep_heading => {
+                    original_heading
+                }
                 PoseTranslationSource::Interpolation => body
                     .authoritative_pose
                     .map(|target| target.rotation.to_heading()),
@@ -1549,7 +1554,9 @@ impl SpatialScene {
         }
 
         body.authoritative_pose = Some(pose);
-        body.retained = vectors.into();
+        if !matches!(effect, AuthoritativePoseEffect::Confirm { .. }) {
+            body.retained = vectors.into();
+        }
         body.sampling.last_authoritative_update = now;
         body.sampling.last_derived_at = now;
         match effect {
@@ -2053,6 +2060,42 @@ mod physical_body_tests {
             (physical_delta - pose_only_delta).length() < 0.002,
             "coordinate re-anchoring may quantize the equivalent delta by less than 2 mm"
         );
+    }
+
+    #[test]
+    fn grounded_interpolation_preserves_authored_heading_only_when_retail_keeps_heading() {
+        let current = pose(Vector3::zero());
+        let authored_heading = 0.75;
+        let mut target = pose(Vector3::new(2.0, 0.0, 0.0));
+        target.rotation = Quaternion::from_heading(1.5);
+
+        for (keep_heading, expected_heading) in [
+            (true, authored_heading),
+            (false, target.rotation.to_heading()),
+        ] {
+            let mut body = SpatialBody::new(
+                SpatialBodyId::Entity(Guid(0x5000_0045)),
+                current,
+                Instant::now(),
+            );
+            body.authoritative_pose = Some(target);
+            body.contact = ContactState::Grounded;
+            let mut reconciliation = PoseReconciliationState::default();
+            reconciliation.interpolate(target, current, keep_heading, None);
+            body.reconciliation = Some(Box::new(reconciliation));
+            let ordinary = PhysicalBodyActuation::Grounded(
+                GroundedBodyActuation::coast()
+                    .with_control_heading(authored_heading)
+                    .expect("fixture heading is finite"),
+            );
+
+            let composed = reconcile_test_body_actuation(&mut body, ordinary, 0.03)
+                .expect("interpolation actuation should compose");
+            let PhysicalBodyActuation::Grounded(composed) = composed else {
+                panic!("grounded reconciliation must preserve the physical response variant");
+            };
+            assert_eq!(composed.control_heading(), Some(expected_heading));
+        }
     }
 
     fn tick_pose_only_body(scene: &mut SpatialScene, body_id: SpatialBodyId, delta_seconds: f32) {

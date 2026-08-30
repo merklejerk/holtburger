@@ -104,9 +104,9 @@ pub(super) fn reduce_view_event(
                 result.request_redraw(RedrawPriority::Motion);
             }
         }
-        ClientViewEvent::EntityMotionUpdated { guid, snapshot } => {
+        ClientViewEvent::EntityMotionUpdated { guid, motion } => {
             if let Some(entity) = state.data.entities.get_mut(guid) {
-                entity.motion_snapshot = *snapshot;
+                entity.network_motion = *motion;
                 inventory::refresh_entity_context_if_visible(state, *guid, &mut result);
                 result.request_redraw(RedrawPriority::Motion);
             }

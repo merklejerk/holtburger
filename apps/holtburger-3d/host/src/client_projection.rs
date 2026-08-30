@@ -4,8 +4,10 @@ use std::collections::HashMap;
 
 use holtburger_common::{Guid, stats::VitalType};
 use holtburger_core::{
-    ClientApplicationSnapshot, ClientCameraStartReceipt, ClientCameraTick, ClientExitCause,
-    ClientLifecycleState, ClientViewEvent, ClientWorldActivationCause, DynamicEntityEvent,
+    ClientApplicationSnapshot, ClientCameraStartReceipt, ClientCameraTick,
+    ClientCharacterMotionCapabilities, ClientCharacterMotionFeedback, ClientCharacterMotionOutcome,
+    ClientCharacterMotionRejection, ClientExitCause, ClientLifecycleState, ClientViewEvent,
+    ClientWorldActivationCause, DynamicEntityEvent,
 };
 use holtburger_world::stats::Vital;
 use serde::Serialize;
@@ -129,8 +131,101 @@ pub struct ClientCurrentState {
     pub player_name: Option<String>,
     /// Complete local-player vital replacement level.
     pub vitals: Vec<ClientVitalWire>,
+    /// Current jump charge timing, absent until core has complete authority facts.
+    pub character_motion: Option<ClientCharacterMotionCapabilitiesWire>,
     /// Complete focused dynamic-entity replacement level.
     pub dynamic: holtburger_core::DynamicEntitySnapshot,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientCharacterMotionCapabilitiesWire {
+    pub full_charge_duration_ms: u64,
+}
+
+impl From<ClientCharacterMotionCapabilities> for ClientCharacterMotionCapabilitiesWire {
+    fn from(capabilities: ClientCharacterMotionCapabilities) -> Self {
+        Self {
+            full_charge_duration_ms: capabilities
+                .full_charge_duration
+                .as_millis()
+                .try_into()
+                .expect("character jump charge duration must fit the host wire contract"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientCharacterMotionFeedbackWire {
+    pub sequence: u64,
+    pub outcome: ClientCharacterMotionOutcomeWire,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum ClientCharacterMotionOutcomeWire {
+    ChargeAccepted,
+    ChargeContinues,
+    JumpCommitted,
+    Reset,
+    Rejected {
+        reason: ClientCharacterMotionRejectionWire,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClientCharacterMotionRejectionWire {
+    ChargeNotActive,
+    Airborne,
+    Unsupported,
+    Overburdened,
+    CapabilityUnavailable,
+    BodyUnavailable,
+    CollisionUnavailable,
+    LaunchRejected,
+}
+
+impl From<ClientCharacterMotionFeedback> for ClientCharacterMotionFeedbackWire {
+    fn from(feedback: ClientCharacterMotionFeedback) -> Self {
+        let outcome = match feedback.outcome {
+            ClientCharacterMotionOutcome::ChargeAccepted => {
+                ClientCharacterMotionOutcomeWire::ChargeAccepted
+            }
+            ClientCharacterMotionOutcome::ChargeContinues => {
+                ClientCharacterMotionOutcomeWire::ChargeContinues
+            }
+            ClientCharacterMotionOutcome::JumpCommitted => {
+                ClientCharacterMotionOutcomeWire::JumpCommitted
+            }
+            ClientCharacterMotionOutcome::Reset => ClientCharacterMotionOutcomeWire::Reset,
+            ClientCharacterMotionOutcome::Rejected(reason) => {
+                ClientCharacterMotionOutcomeWire::Rejected {
+                    reason: reason.into(),
+                }
+            }
+        };
+        Self {
+            sequence: feedback.sequence.0,
+            outcome,
+        }
+    }
+}
+
+impl From<ClientCharacterMotionRejection> for ClientCharacterMotionRejectionWire {
+    fn from(reason: ClientCharacterMotionRejection) -> Self {
+        match reason {
+            ClientCharacterMotionRejection::ChargeNotActive => Self::ChargeNotActive,
+            ClientCharacterMotionRejection::Airborne => Self::Airborne,
+            ClientCharacterMotionRejection::Unsupported => Self::Unsupported,
+            ClientCharacterMotionRejection::Overburdened => Self::Overburdened,
+            ClientCharacterMotionRejection::CapabilityUnavailable => Self::CapabilityUnavailable,
+            ClientCharacterMotionRejection::BodyUnavailable => Self::BodyUnavailable,
+            ClientCharacterMotionRejection::CollisionUnavailable => Self::CollisionUnavailable,
+            ClientCharacterMotionRejection::LaunchRejected => Self::LaunchRejected,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -157,6 +252,8 @@ pub struct ClientExitRequested {
 pub enum ClientHostEvent {
     CurrentState(ClientCurrentState),
     LifecycleChanged(ClientLifecycleWire),
+    CharacterMotionCapabilitiesUpdated(Option<ClientCharacterMotionCapabilitiesWire>),
+    CharacterMotionFeedback(ClientCharacterMotionFeedbackWire),
     LocalPlayerEstablished { player_guid: Guid },
     ServerTimeUpdated { time: f64 },
     WorldNameUpdated { name: String },
@@ -248,6 +345,7 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
             world_name: snapshot.world_name.clone(),
             player_name: snapshot.player_name.clone(),
             vitals: project_vitals(&snapshot.vitals),
+            character_motion: snapshot.character_motion.map(Into::into),
             dynamic: snapshot.dynamic.clone(),
         }
     }
@@ -261,6 +359,12 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
         }
         ClientViewEvent::LifecycleChanged(lifecycle) => {
             Some(ClientHostEvent::LifecycleChanged((&lifecycle).into()))
+        }
+        ClientViewEvent::CharacterMotionCapabilitiesUpdated { capabilities } => Some(
+            ClientHostEvent::CharacterMotionCapabilitiesUpdated(capabilities.map(Into::into)),
+        ),
+        ClientViewEvent::CharacterMotionFeedback(feedback) => {
+            Some(ClientHostEvent::CharacterMotionFeedback(feedback.into()))
         }
         ClientViewEvent::LocalPlayerEstablished { player_guid } => {
             Some(ClientHostEvent::LocalPlayerEstablished { player_guid })

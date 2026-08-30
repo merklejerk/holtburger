@@ -138,8 +138,8 @@ mod tests {
         jump_kinematics_from_movement_capabilities,
     };
     use crate::client::character_motion::{
-        CharacterMotionContact, CharacterMotionController, CharacterMotionEvent,
-        CharacterMotionEventResult, CharacterMotionSequence, SequencedCharacterMotionEvent,
+        CharacterMotionController, CharacterMotionEvent, CharacterMotionEventResult,
+        CharacterMotionReadiness, CharacterMotionSequence, SequencedCharacterMotionEvent,
     };
     use crate::client::movement::character_motion_retail_differential::{
         oracle_planar_launch, oracle_vertical_launch,
@@ -373,7 +373,7 @@ mod tests {
                         drive: CharacterDrive::default(),
                     },
                 },
-                CharacterMotionContact::Walkable,
+                CharacterMotionReadiness::Ready,
             );
             assert_eq!(begin, CharacterMotionEventResult::ChargeAccepted);
             let released = controller.apply_event(
@@ -384,7 +384,7 @@ mod tests {
                         extent: JumpExtent::MAXIMUM,
                     },
                 },
-                CharacterMotionContact::Walkable,
+                CharacterMotionReadiness::Ready,
             );
             let CharacterMotionEventResult::JumpReleased(attempt) = released else {
                 panic!("accepted release must emit one jump attempt");

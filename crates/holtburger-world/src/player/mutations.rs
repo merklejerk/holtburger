@@ -279,8 +279,22 @@ impl PlayerState {
         }
     }
 
-    pub fn update_vector_sequence(&mut self, instance_sequence: u16) {
-        self.instance_sequence = instance_sequence;
+    /// Admits a vector packet for the current object instance and advances its independent
+    /// freshness sequence. Retail performs these checks before deciding whether vectors may mutate
+    /// the local physics object (`acclient.c:138277-138326,137324-137338`).
+    pub fn admit_server_vector_sequences(
+        &mut self,
+        instance_sequence: u16,
+        vector_sequence: u16,
+    ) -> bool {
+        if instance_sequence != self.instance_sequence
+            || !is_newer_u16(vector_sequence, self.vector_sequence)
+        {
+            return false;
+        }
+
+        self.vector_sequence = vector_sequence;
+        true
     }
 
     pub fn set_teleport_sequence(&mut self, teleport_sequence: u16) {

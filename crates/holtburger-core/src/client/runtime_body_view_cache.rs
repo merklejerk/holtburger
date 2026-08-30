@@ -111,7 +111,7 @@ impl RuntimeBodyViewCache {
                 velocity: entity.velocity,
                 acceleration: entity.acceleration,
                 omega: entity.omega,
-                motion_state: entity.motion_snapshot,
+                motion_state: entity.network_motion.snapshot(),
                 projection_mode: SpatialSampleMode::AuthoritativeOnly,
             })
     }

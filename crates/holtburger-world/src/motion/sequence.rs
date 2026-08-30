@@ -30,6 +30,8 @@ pub struct SequenceNode {
     framerate: f32,
     /// Same-style substate selection that installed this live clip, when one exists.
     substate_selection: Option<SubstateSelection>,
+    /// Whether leaving this clip completes the active transient action.
+    action_completion: bool,
 }
 
 impl SequenceNode {
@@ -45,6 +47,7 @@ impl SequenceNode {
             high_frame: clip.high_frame as i32,
             framerate: clip.framerate * speed,
             substate_selection: None,
+            action_completion: false,
         }
     }
 
@@ -141,10 +144,12 @@ pub struct SequenceTick {
     pub offset: RigidTransform,
     /// Simulation hooks the departed frames fired, in departure order.
     ///
-    /// Retail also synthesises an `AnimDoneHook` when a one-shot clip finishes. It is not modelled:
-    /// nothing consumes it, and "the transition finished" is observable as the projected clip
-    /// changing. Add it when something needs it, with that consumer named.
+    /// Retail also synthesises an `AnimDoneHook` when a one-shot clip finishes. The public hook is
+    /// not modelled because nothing consumes that payload; action ownership instead marks its exact
+    /// terminal sequence node through [`Self::action_completed`].
     pub hooks: Vec<FiredMotionHook>,
+    /// Whether the exact selector-owned action boundary was crossed this tick.
+    pub action_completed: bool,
 }
 
 impl SequenceTick {
@@ -157,6 +162,7 @@ impl SequenceTick {
         Self {
             offset: RigidTransform::identity(),
             hooks: Vec::new(),
+            action_completed: false,
         }
     }
 }
@@ -318,6 +324,14 @@ impl MotionSequenceRuntime {
     /// Number of clips currently retained, used to delimit one newly appended selection.
     pub(super) fn clip_count(&self) -> usize {
         self.nodes.len()
+    }
+
+    /// Marks the exact last clip owned by one newly installed transient action.
+    pub(super) fn mark_action_completion(&mut self, index: usize) {
+        self.nodes
+            .get_mut(index)
+            .expect("action completion index must name an installed clip")
+            .action_completion = true;
     }
 
     /// Prevents a later return to a style from collapsing through the intervening style change.
@@ -552,6 +566,7 @@ impl MotionSequenceRuntime {
             tick,
             frame_forward,
         );
+        tick.action_completed |= leaving.action_completion;
 
         let next = if forward {
             if current + 1 < self.nodes.len() {

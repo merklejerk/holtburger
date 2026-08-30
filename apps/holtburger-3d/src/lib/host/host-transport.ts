@@ -14,6 +14,8 @@ import type {
 	ClientChatMessage,
 	ClientPlayerEntered,
 	ClientVital,
+	ClientCharacterMotionCapabilities,
+	ClientCharacterMotionFeedback,
 } from "../../client/client-host-contract";
 
 /** Content/status commands implemented by the shared host-content capability. */
@@ -65,6 +67,7 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"request_client_current_state",
 	"select_client_character",
 	"replace_client_drive",
+	"queue_client_character_motion_event",
 	"send_client_chat",
 	"start_client_camera",
 	"set_client_camera_intent",
@@ -112,6 +115,8 @@ const EXPLORER_HOST_EVENT_NAMES = [
 const CLIENT_HOST_EVENT_NAMES = [
 	"client-current-state",
 	"client-lifecycle-changed",
+	"client-character-motion-capabilities-updated",
+	"client-character-motion-feedback",
 	"client-local-player-established",
 	"client-server-time-updated",
 	"client-world-name-updated",
@@ -170,6 +175,8 @@ export interface HostEventPayloadMap {
 	"explorer-physical-fly-failure": HostPhysicalFlyFailure;
 	"client-current-state": ClientCurrentState;
 	"client-lifecycle-changed": ClientLifecycle;
+	"client-character-motion-capabilities-updated": ClientCharacterMotionCapabilities | null;
+	"client-character-motion-feedback": ClientCharacterMotionFeedback;
 	"client-local-player-established": ClientLocalPlayerEstablished;
 	"client-server-time-updated": { time: number };
 	"client-world-name-updated": { name: string };

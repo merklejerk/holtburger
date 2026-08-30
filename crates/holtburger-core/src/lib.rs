@@ -25,8 +25,8 @@ pub use client::character_kinematics::{
     jump_kinematics_from_movement_capabilities,
 };
 pub use client::character_motion::{
-    CharacterMotionContact, CharacterMotionController, CharacterMotionEvent,
-    CharacterMotionEventResult, CharacterMotionRejection, CharacterMotionSequence, JumpAttempt,
+    CharacterMotionController, CharacterMotionEvent, CharacterMotionEventResult,
+    CharacterMotionReadiness, CharacterMotionRejection, CharacterMotionSequence, JumpAttempt,
     JumpChargeProfile, JumpExtent, JumpExtentError, SequencedCharacterMotionEvent,
 };
 pub use client::collision::{
@@ -37,9 +37,11 @@ pub use client::collision::{
 pub use client::runtime_body_view_cache::RuntimeBodyViewCache;
 pub use client::types::{
     ActionResultReason, ActionResultSource, ActiveCharacterConfirmation, BusyOperationKind,
-    BusyOperationResult, ClientApplicationSnapshot, ClientCharacterSummary, ClientCommand,
-    ClientExitCause, ClientLifecycleState, ClientPresentationDiscontinuityKind, ClientState,
-    ClientViewEvent, ClientWorldActivationCause, PlayerCharacterOptions, RetryState,
+    BusyOperationResult, ClientApplicationSnapshot, ClientCharacterMotionCapabilities,
+    ClientCharacterMotionFeedback, ClientCharacterMotionOutcome, ClientCharacterMotionRejection,
+    ClientCharacterSummary, ClientCommand, ClientExitCause, ClientLifecycleState,
+    ClientPresentationDiscontinuityKind, ClientState, ClientViewEvent, ClientWorldActivationCause,
+    PlayerCharacterOptions, RetryState,
 };
 pub use client::{
     ClientCameraClearance, ClientCameraClearanceRequest, ClientCameraCollisionProof,

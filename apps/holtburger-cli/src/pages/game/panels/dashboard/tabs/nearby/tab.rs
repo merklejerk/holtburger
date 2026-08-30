@@ -565,7 +565,7 @@ mod tests {
     };
     use holtburger_core::ClientViewEvent;
     use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
-    use holtburger_world::entity::EntityMotionSnapshot;
+    use holtburger_world::entity::{EntityMotionSnapshot, EntityNetworkMotion};
     use holtburger_world::{
         ContactState, RuntimeSpatialBodyView, SpatialBodyId, SpatialSampleMode,
     };
@@ -652,7 +652,7 @@ mod tests {
         monster.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
         monster.set_bool_prop(PropertyBool::Attackable, true);
         monster.flags |= ObjectDescriptionFlag::ATTACKABLE;
-        monster.motion_snapshot = Some(EntityMotionSnapshot {
+        monster.network_motion = EntityNetworkMotion::Initialized(EntityMotionSnapshot {
             current_style: Some(MotionStance::NonCombat),
             forward_command: Some(InterpretedMotionCommand::DEAD),
             sidestep_command: None,

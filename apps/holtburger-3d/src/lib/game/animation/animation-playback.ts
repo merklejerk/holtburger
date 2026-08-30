@@ -169,6 +169,37 @@ export function sampleAnimationPose(
 }
 
 /**
+ * Apply the prefix one animation authors over a complete retained setup pose.
+ *
+ * Retail updates only `min(setup parts, animation-frame parts)` and leaves every higher setup part
+ * untouched (`CPartArray::UpdateParts`, acclient.c:314107-314135). The returned array therefore
+ * remains a complete setup-indexed pose even when the clip intentionally authors fewer parts.
+ */
+export function sampleAnimationPoseOver(
+	clip: PlayingClip,
+	framePosition: number,
+	retainedPartToObjectTransforms: readonly Mat4[],
+): readonly Mat4[] {
+	const sampled = sampleAnimationPose(clip, framePosition);
+	const coveredPartCount = Math.min(
+		retainedPartToObjectTransforms.length,
+		sampled.length,
+	);
+	// Full-coverage clips are the frame-hot golden path and already produced a complete pose.
+	if (sampled.length === retainedPartToObjectTransforms.length) return sampled;
+
+	const completePose = sampled.slice(0, coveredPartCount);
+	for (
+		let partIndex = coveredPartCount;
+		partIndex < retainedPartToObjectTransforms.length;
+		partIndex++
+	) {
+		completePose.push(retainedPartToObjectTransforms[partIndex]!.clone());
+	}
+	return completePose;
+}
+
+/**
  * Whether this animation's authored root frames are applied to the visual root.
  *
  * The single predicate behind both the sampled transform and the culling bound that has to cover

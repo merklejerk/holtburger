@@ -6,9 +6,12 @@
 use std::sync::Arc;
 
 use holtburger_core::client::movement_types::{
-    CharacterDrive, Gait, LongitudinalMotion, PlayerDriveIntent, Turn,
+    CharacterDrive, Gait, LateralMotion, LongitudinalMotion, PlayerDriveIntent, Turn,
 };
-use holtburger_core::{ClientExitCause, ClientLifecycleState, ClientViewEvent};
+use holtburger_core::{
+    CharacterMotionEvent, CharacterMotionSequence, ClientExitCause, ClientLifecycleState,
+    ClientViewEvent, JumpExtent, SequencedCharacterMotionEvent,
+};
 use serde::Deserialize;
 use tokio::sync::{broadcast, mpsc};
 
@@ -30,6 +33,14 @@ pub enum ClientDriveLongitudinal {
     Backward,
 }
 
+/// Signed lateral axis accepted at the renderer boundary.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClientDriveLateral {
+    Left,
+    Right,
+}
+
 /// Signed facing turn accepted at the renderer boundary.
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -47,13 +58,15 @@ pub struct ClientDriveRequest {
     pub gait: ClientDriveGait,
     /// Optional forward/backward held axis.
     pub longitudinal: Option<ClientDriveLongitudinal>,
+    /// Optional left/right sidestep axis.
+    pub lateral: Option<ClientDriveLateral>,
     /// Optional left/right held turn axis.
     pub turning: Option<ClientDriveTurning>,
 }
 
 impl ClientDriveRequest {
-    pub fn into_intent(self) -> PlayerDriveIntent {
-        PlayerDriveIntent::ManualHeld(CharacterDrive {
+    fn into_drive(self) -> CharacterDrive {
+        CharacterDrive {
             gait: match self.gait {
                 ClientDriveGait::Walk => Gait::Walk,
                 ClientDriveGait::Run => Gait::Run,
@@ -62,12 +75,67 @@ impl ClientDriveRequest {
                 ClientDriveLongitudinal::Forward => LongitudinalMotion::Forward,
                 ClientDriveLongitudinal::Backward => LongitudinalMotion::Backward,
             }),
-            lateral: None,
+            lateral: self.lateral.map(|motion| match motion {
+                ClientDriveLateral::Left => LateralMotion::Left,
+                ClientDriveLateral::Right => LateralMotion::Right,
+            }),
             turning: self.turning.map(|turn| match turn {
                 ClientDriveTurning::Left => Turn::Left,
                 ClientDriveTurning::Right => Turn::Right,
             }),
             turn_rate_scalar: None,
+        }
+    }
+
+    pub fn into_intent(self) -> PlayerDriveIntent {
+        PlayerDriveIntent::ManualHeld(self.into_drive())
+    }
+}
+
+/// Ordered jump lifecycle edge accepted at the renderer boundary.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum ClientCharacterMotionEventRequest {
+    BeginJump {
+        sequence: u64,
+        drive: ClientDriveRequest,
+    },
+    ReleaseJump {
+        sequence: u64,
+        drive: ClientDriveRequest,
+        extent: f32,
+    },
+    Reset {
+        sequence: u64,
+    },
+}
+
+impl ClientCharacterMotionEventRequest {
+    pub fn into_event(self) -> anyhow::Result<SequencedCharacterMotionEvent> {
+        let (sequence, event) = match self {
+            Self::BeginJump { sequence, drive } => (
+                sequence,
+                CharacterMotionEvent::BeginJump {
+                    drive: drive.into_drive(),
+                },
+            ),
+            Self::ReleaseJump {
+                sequence,
+                drive,
+                extent,
+            } => (
+                sequence,
+                CharacterMotionEvent::ReleaseJump {
+                    drive: drive.into_drive(),
+                    extent: JumpExtent::new(extent)
+                        .map_err(|error| anyhow::anyhow!("invalid jump extent: {error:?}"))?,
+                },
+            ),
+            Self::Reset { sequence } => (sequence, CharacterMotionEvent::Reset),
+        };
+        Ok(SequencedCharacterMotionEvent {
+            sequence: CharacterMotionSequence(sequence),
+            event,
         })
     }
 }
@@ -169,6 +237,7 @@ mod tests {
         let request: ClientDriveRequest = serde_json::from_value(serde_json::json!({
             "gait": "run",
             "longitudinal": "backward",
+            "lateral": "right",
             "turning": "left",
         }))
         .expect("drive request should decode");
@@ -178,7 +247,7 @@ mod tests {
             PlayerDriveIntent::ManualHeld(CharacterDrive {
                 gait: Gait::Run,
                 longitudinal: Some(LongitudinalMotion::Backward),
-                lateral: None,
+                lateral: Some(LateralMotion::Right),
                 turning: Some(Turn::Left),
                 turn_rate_scalar: None,
             })
@@ -187,8 +256,95 @@ mod tests {
             serde_json::from_value::<ClientDriveRequest>(serde_json::json!({
                 "gait": "run",
                 "longitudinal": null,
+                "lateral": null,
                 "turning": null,
                 "extra": true,
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn character_motion_requests_preserve_ordered_edges_and_release_drive() {
+        let begin: ClientCharacterMotionEventRequest = serde_json::from_value(serde_json::json!({
+            "kind": "begin-jump",
+            "sequence": 41,
+            "drive": {
+                "gait": "walk",
+                "longitudinal": null,
+                "lateral": null,
+                "turning": "right"
+            }
+        }))
+        .expect("begin request should decode");
+        assert_eq!(
+            begin.into_event().expect("begin edge should convert"),
+            SequencedCharacterMotionEvent {
+                sequence: CharacterMotionSequence(41),
+                event: CharacterMotionEvent::BeginJump {
+                    drive: CharacterDrive {
+                        gait: Gait::Walk,
+                        longitudinal: None,
+                        lateral: None,
+                        turning: Some(Turn::Right),
+                        turn_rate_scalar: None,
+                    },
+                },
+            }
+        );
+
+        let release: ClientCharacterMotionEventRequest =
+            serde_json::from_value(serde_json::json!({
+                "kind": "release-jump",
+                "sequence": 42,
+                "drive": {
+                    "gait": "run",
+                    "longitudinal": "forward",
+                    "lateral": "left",
+                    "turning": null
+                },
+                "extent": 0.75
+            }))
+            .expect("release request should decode");
+        assert_eq!(
+            release.into_event().expect("release edge should convert"),
+            SequencedCharacterMotionEvent {
+                sequence: CharacterMotionSequence(42),
+                event: CharacterMotionEvent::ReleaseJump {
+                    drive: CharacterDrive {
+                        gait: Gait::Run,
+                        longitudinal: Some(LongitudinalMotion::Forward),
+                        lateral: Some(LateralMotion::Left),
+                        turning: None,
+                        turn_rate_scalar: None,
+                    },
+                    extent: JumpExtent::new(0.75).unwrap(),
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn character_motion_request_rejects_invalid_extent_and_unknown_fields() {
+        let invalid_extent: ClientCharacterMotionEventRequest =
+            serde_json::from_value(serde_json::json!({
+                "kind": "release-jump",
+                "sequence": 2,
+                "drive": {
+                    "gait": "run",
+                    "longitudinal": null,
+                    "lateral": null,
+                    "turning": null
+                },
+                "extent": 1.1
+            }))
+            .expect("finite extent is decoded before semantic validation");
+        assert!(invalid_extent.into_event().is_err());
+        assert!(
+            serde_json::from_value::<ClientCharacterMotionEventRequest>(serde_json::json!({
+                "kind": "reset",
+                "sequence": 3,
+                "extra": true
             }))
             .is_err()
         );
@@ -225,6 +381,7 @@ mod tests {
             world_name: Some("Leafcull".to_string()),
             player_name: Some("Mira".to_string()),
             vitals: std::collections::HashMap::new(),
+            character_motion: None,
             dynamic: DynamicEntitySnapshot::new(
                 DynamicEntityHostTime::new(22.0).unwrap(),
                 Vec::new(),

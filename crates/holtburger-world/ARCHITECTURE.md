@@ -91,7 +91,9 @@ These modules own movement-facing invariants:
 - player/entity movement synchronization
 - retention/visibility housekeeping for the world graph
 - conservative visibility tracking for prune deadlines
-- authoritative player-entity helpers such as `set_player_position()` and `set_player_vector()`
+- authoritative player-entity helpers such as `set_player_position()` and
+  `record_player_server_vectors()`; ordinary server samples remain entity facts without replacing
+  locally integrated self kinematics at retail's default autonomy level
 
 `SpatialScene` is the world-owned spatial composite and solve/query context. Shared runtime
 sampling behavior lives inside it via `BodySamplingStore`, and that world-owned sampling state is
@@ -268,8 +270,9 @@ than as a service. Nothing here caches, records history, or reaches back into co
   replay defect. The divergence marker there carries the citation and content census.
 - `MotionRuntimeRegistry` holds the sole per-body playback cursor for one authority, and
   `actuation.rs` converts that cursor's exact tick offset into the solver's drive basis. Cursor
-  lifetime follows entity lifetime rather than snapshot presence: an explicit snapshot reset or
-  entity removal retires it, while a locally predicted order can precede its server echo.
+  lifetime follows entity lifetime. `EntityNetworkMotion::Uninitialized` means that generation has
+  supplied no order; `Initialized` includes idle and therefore actively retires a previous cycle.
+  A locally predicted order may still precede its server echo without making absence mean stop.
 
 Playback is _not_ frontend animation. Only simulation-relevant facts live here; articulated part
 frames never enter this crate.
@@ -374,9 +377,26 @@ world helpers rather than layering on handler-specific cleanup.
 `WorldEvent` emission should describe meaningful observable changes or packet-scoped processing outcomes after mutation, not serve as a
 shadow source of truth.
 
-Compact entity motion snapshots now follow this rule too: `holtburger-world` owns the authoritative
-per-entity motion snapshot and emits state events when that snapshot changes. Consumers may project
-or render from those events, but the motion snapshot itself remains world-owned state.
+Entity movement follows this rule too. `holtburger-world` owns `EntityNetworkMotion`, admits updates
+by exact object instance plus retail movement/server-control timestamp ordering, and emits state
+events only when the resulting initialized order changes. The initialized order is reduced to a
+compact solver snapshot; consumers may project or render the resulting body and playing-clip
+levels, but neither the event nor the renderer is a second movement authority.
+
+Retained steady motion and transient actions are separate contracts. Command-list actions use their
+own wrapping 15-bit sequence and autonomous bit; an ACE action-class forward command becomes one
+edge at outer movement-event admission and is removed from the retained forward channel. The
+world-owned `MotionRuntimeRegistry` keeps the six-action FIFO, exact sequence completion boundary,
+latest steady return destination, playing clip, and authored root contribution for local players,
+remote players, and creatures alike. A fresh steady update retargets an active action's cyclic
+return suffix without restarting its non-cyclic prefix.
+
+MoveTo and TurnTo remain source authority, not playback implementations. Their retained composite
+parameters enter the pure server-directed reducer with current pose, support, and target facts; its
+ordinary `MotionOrder` then crosses the same table selector, runtime, and authored-root solver seam
+as every other actor. Setup fallback is resolved once by
+`WorldState::effective_motion_table_id_for_guid`, so solver and client projection cannot choose
+different tables.
 
 ## Adding New Functionality
 

@@ -46,6 +46,14 @@ enum OracleSelfDisposition {
     ConfirmAndInterpolate { keep_heading: bool },
 }
 
+/// Retail's disposition for a server vector sample targeting the local player.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OracleSelfVectorDisposition {
+    Ignored,
+    AdvanceSequenceOnly,
+    ApplyVectors,
+}
+
 /// Packet and client-authority facts consumed by retail's self-player receive branch.
 #[derive(Debug, Clone, Copy)]
 struct OracleSelfUpdate {
@@ -130,6 +138,23 @@ fn oracle_self_received_position(
         };
     }
     OracleSelfDisposition::Confirm
+}
+
+/// Transliteration of `SmartBox::HandleVectorUpdate` and `DoVectorUpdate`
+/// (`acclient.c:138277-138326,137324-137338`).
+fn oracle_self_vector_update(
+    instance_matches: bool,
+    vector_newer: bool,
+    use_position_from_server: bool,
+) -> OracleSelfVectorDisposition {
+    if !instance_matches || !vector_newer {
+        return OracleSelfVectorDisposition::Ignored;
+    }
+    if use_position_from_server {
+        OracleSelfVectorDisposition::ApplyVectors
+    } else {
+        OracleSelfVectorDisposition::AdvanceSequenceOnly
+    }
 }
 
 /// Runtime contact projected from retail's `transient_state & Contact` bit.
@@ -395,6 +420,26 @@ mod tests {
             4,
         );
         assert_eq!(disposition, OracleSelfDisposition::Confirm);
+    }
+
+    #[test]
+    fn self_vector_freshness_and_autonomy_are_independent_decisions() {
+        assert_eq!(
+            oracle_self_vector_update(true, true, false),
+            OracleSelfVectorDisposition::AdvanceSequenceOnly
+        );
+        assert_eq!(
+            oracle_self_vector_update(true, true, true),
+            OracleSelfVectorDisposition::ApplyVectors
+        );
+        assert_eq!(
+            oracle_self_vector_update(false, true, false),
+            OracleSelfVectorDisposition::Ignored
+        );
+        assert_eq!(
+            oracle_self_vector_update(true, false, false),
+            OracleSelfVectorDisposition::Ignored
+        );
     }
 
     #[test]

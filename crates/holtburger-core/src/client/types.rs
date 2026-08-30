@@ -2,6 +2,7 @@ use crate::client::camera::{
     ClientCameraClearanceRequest, ClientCameraIdentity, ClientCameraIntentRequest,
     ClientCameraStartRequest,
 };
+use crate::client::character_motion::SequencedCharacterMotionEvent;
 use crate::client::movement_types::PlayerDriveIntent;
 use holtburger_common::properties::DamageType;
 use holtburger_common::{
@@ -23,7 +24,7 @@ use holtburger_protocol::messages::{
 use holtburger_world::FellowshipActivity;
 use holtburger_world::SelfMovementKinematics;
 use holtburger_world::book::BookData;
-use holtburger_world::entity::{Entity, EntityMotionSnapshot};
+use holtburger_world::entity::{Entity, EntityNetworkMotion};
 use holtburger_world::state::{FellowshipState, TradeState};
 use holtburger_world::stats::{
     Attribute, AttributeType, CharacterLevelInfo, Resistances, Skill, SkillType, Vital, VitalType,
@@ -272,10 +273,51 @@ pub struct ClientApplicationSnapshot {
     pub player_name: Option<String>,
     /// Complete current/max local-player vitals used by client HUDs.
     pub vitals: HashMap<VitalType, Vital>,
+    /// Current renderer-consumed jump timing, absent until authoritative capability is complete.
+    pub character_motion: Option<ClientCharacterMotionCapabilities>,
     /// Complete focused dynamic-entity replacement level.
     pub dynamic: DynamicEntitySnapshot,
     /// Broad runtime-body replacement retained for authority-facing clients such as the TUI.
     pub runtime_bodies: Arc<[RuntimeSpatialBodyView]>,
+}
+
+/// Renderer-consumed timing facts derived from authoritative character motion state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClientCharacterMotionCapabilities {
+    /// Current retail full-charge duration; stance changes may replace it during a charge.
+    pub full_charge_duration: Duration,
+}
+
+/// One ordered character-motion lifecycle outcome projected to the current input owner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClientCharacterMotionFeedback {
+    /// Originating renderer sequence, used to ignore feedback for an older optimistic gesture.
+    pub sequence: crate::client::character_motion::CharacterMotionSequence,
+    /// Authority outcome without exposing the gameplay facts used to reach it.
+    pub outcome: ClientCharacterMotionOutcome,
+}
+
+/// Renderer-reconstructible character-motion lifecycle outcomes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClientCharacterMotionOutcome {
+    ChargeAccepted,
+    ChargeContinues,
+    JumpCommitted,
+    Reset,
+    Rejected(ClientCharacterMotionRejection),
+}
+
+/// Stable renderer-facing reasons why a jump edge could not proceed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClientCharacterMotionRejection {
+    ChargeNotActive,
+    Airborne,
+    Unsupported,
+    Overburdened,
+    CapabilityUnavailable,
+    BodyUnavailable,
+    CollisionUnavailable,
+    LaunchRejected,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -365,6 +407,12 @@ pub enum ClientViewEvent {
     ApplicationSnapshot(ClientApplicationSnapshot),
     /// Source-neutral lifecycle projection emitted whenever the authoritative client state changes.
     LifecycleChanged(ClientLifecycleState),
+    /// Ordered jump gesture result used only to reconcile optimistic client presentation.
+    CharacterMotionFeedback(ClientCharacterMotionFeedback),
+    /// Replacement timing capability emitted when authoritative stance/completeness changes.
+    CharacterMotionCapabilitiesUpdated {
+        capabilities: Option<ClientCharacterMotionCapabilities>,
+    },
     /// First exact local-player identity established by the server for this world session.
     LocalPlayerEstablished {
         player_guid: Guid,
@@ -440,7 +488,7 @@ pub enum ClientViewEvent {
     },
     EntityMotionUpdated {
         guid: Guid,
-        snapshot: Option<EntityMotionSnapshot>,
+        motion: EntityNetworkMotion,
     },
     RuntimeBodySnapshot {
         bodies: Arc<[RuntimeSpatialBodyView]>,
@@ -652,6 +700,8 @@ pub enum ClientCommand {
         amount: u32,
     },
     DriveSelf(PlayerDriveIntent),
+    /// Applies one ordered, non-coalescible character-motion lifecycle edge.
+    ControlCharacter(SequencedCharacterMotionEvent),
     StartClientCamera(ClientCameraStartRequest),
     SetClientCameraIntent(ClientCameraIntentRequest),
     SetClientCameraClearance(ClientCameraClearanceRequest),

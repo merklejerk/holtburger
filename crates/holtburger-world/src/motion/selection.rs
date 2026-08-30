@@ -34,6 +34,17 @@ pub enum MotionSelectionOutcome {
     Unmodelled,
 }
 
+/// Result of installing one transient action into the ordinary sequence runtime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActionSelectionOutcome {
+    /// Action clips were installed and own an exact completion boundary.
+    Selected,
+    /// The table modelled the route but authored no clips, so completion is immediate.
+    CompletedWithoutClips,
+    /// The current style/substate has no retail route to this action.
+    Unmodelled,
+}
+
 impl MotionSelectionOutcome {
     pub fn changed(self) -> bool {
         matches!(self, Self::Selected)
@@ -78,6 +89,89 @@ pub fn select_motion(
     speed_mod: f32,
 ) -> MotionSelectionOutcome {
     select(table, state, sequence, command, speed_mod, false)
+}
+
+/// Installs retail's action route while preserving the current substate as the return cycle.
+pub fn select_action(
+    table: &MotionSequenceTable,
+    state: &mut MotionState,
+    sequence: &mut MotionSequenceRuntime,
+    command: MotionCommand,
+    speed_mod: f32,
+) -> ActionSelectionOutcome {
+    if !command.is_action() || state.style.raw() == 0 || state.substate.raw() == 0 {
+        return ActionSelectionOutcome::Unmodelled;
+    }
+    let Some(return_cycle) = table.cycle(state.style.raw(), state.substate.raw()) else {
+        return ActionSelectionOutcome::Unmodelled;
+    };
+
+    let direct = get_link(
+        table,
+        state.style.raw(),
+        state.substate.raw(),
+        state.substate_mod,
+        command.raw(),
+        speed_mod,
+    );
+    let fallback = if direct.is_none() {
+        let Some(default_substate) = table.style_default(state.style.raw()) else {
+            return ActionSelectionOutcome::Unmodelled;
+        };
+        let Some(exit) = get_link(
+            table,
+            state.style.raw(),
+            state.substate.raw(),
+            state.substate_mod,
+            default_substate,
+            1.0,
+        ) else {
+            return ActionSelectionOutcome::Unmodelled;
+        };
+        let Some(action) = get_link(
+            table,
+            state.style.raw(),
+            default_substate,
+            1.0,
+            command.raw(),
+            speed_mod,
+        ) else {
+            return ActionSelectionOutcome::Unmodelled;
+        };
+        let return_link = get_link(
+            table,
+            state.style.raw(),
+            default_substate,
+            1.0,
+            state.substate.raw(),
+            state.substate_mod,
+        );
+        Some((exit, action, return_link))
+    } else {
+        None
+    };
+
+    sequence.clear_physics();
+    sequence.remove_cyclic_clips();
+    let action_start = sequence.clip_count();
+    if let Some(direct) = direct {
+        add_motion(sequence, Some(direct), speed_mod);
+    } else {
+        let (exit, action, return_link) =
+            fallback.expect("a missing direct action route must have a validated fallback");
+        add_motion(sequence, Some(exit), 1.0);
+        add_motion(sequence, Some(action), speed_mod);
+        add_motion(sequence, return_link, 1.0);
+    }
+    let action_end = sequence.clip_count();
+    add_motion(sequence, Some(return_cycle), state.substate_mod);
+    re_modify(table, state, sequence);
+    if action_end == action_start {
+        ActionSelectionOutcome::CompletedWithoutClips
+    } else {
+        sequence.mark_action_completion(action_end - 1);
+        ActionSelectionOutcome::Selected
+    }
 }
 
 /// Stops one motion, returning the body to its style's default substate.
@@ -198,30 +292,36 @@ fn select_style(
     sequence: &mut MotionSequenceRuntime,
     command: MotionCommand,
     speed_mod: f32,
-    style_default: Option<u32>,
+    source_style_default: Option<u32>,
 ) -> MotionSelectionOutcome {
     if state.style == command {
         return MotionSelectionOutcome::AlreadyActive;
     }
-    let Some(style_default) = style_default.filter(|default| *default != 0) else {
+    let Some(source_style_default) = source_style_default.filter(|default| *default != 0) else {
+        return MotionSelectionOutcome::Unmodelled;
+    };
+    let Some(destination_style_default) = table
+        .style_default(command.raw())
+        .filter(|default| *default != 0)
+    else {
         return MotionSelectionOutcome::Unmodelled;
     };
 
     // Leaving whatever substate is running for the style's default one.
-    let exit = (style_default != state.substate.raw())
+    let exit = (source_style_default != state.substate.raw())
         .then(|| {
             get_link(
                 table,
                 state.style.raw(),
                 state.substate.raw(),
                 state.substate_mod,
-                style_default,
+                source_style_default,
                 speed_mod,
             )
         })
         .flatten();
 
-    let Some(cycle) = table.cycle(command.raw(), style_default) else {
+    let Some(cycle) = table.cycle(command.raw(), destination_style_default) else {
         return MotionSelectionOutcome::Unmodelled;
     };
     if cycle.clears_modifiers {
@@ -231,7 +331,7 @@ fn select_style(
     let mut link = get_link(
         table,
         state.style.raw(),
-        style_default,
+        source_style_default,
         state.substate_mod,
         command.raw(),
         speed_mod,
@@ -242,7 +342,7 @@ fn select_style(
         link = get_link(
             table,
             state.style.raw(),
-            style_default,
+            source_style_default,
             1.0,
             table.default_style,
             1.0,
@@ -270,7 +370,7 @@ fn select_style(
     add_motion(sequence, through_default_style, speed_mod);
     add_motion(sequence, Some(cycle), speed_mod);
 
-    state.substate = MotionCommand(style_default);
+    state.substate = MotionCommand(destination_style_default);
     state.style = command;
     state.substate_mod = speed_mod;
     re_modify(table, state, sequence);

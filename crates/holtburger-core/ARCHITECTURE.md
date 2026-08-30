@@ -85,9 +85,14 @@ The important ownership rule is that frontends submit intent, not packet cadence
 
 The same split applies to entity motion coming back from the server:
 
-1. `holtburger-world` owns compact authoritative motion snapshots per entity.
-2. `holtburger-core` projects those snapshots into client-view events for frontends that want to render or inspect motion.
-3. Shared gameplay decisions such as combat-target viability should consume world-derived semantics, not re-derive meaning from raw motion updates inside each frontend.
+1. `holtburger-world` reduces retail-current movement packets into `EntityNetworkMotion`, whose
+   type distinguishes an uninitialized generation from initialized idle or active movement.
+2. The retained state becomes `MotionOrder` only at the shared support resolver; local character
+   intent is a different source adapter into that same motion runtime, root-actuation boundary,
+   and physical solver.
+3. `holtburger-core` projects the resulting playing-clip and body levels into client-view events
+   for frontends that want to render or inspect motion.
+4. Shared gameplay decisions such as combat-target viability should consume world-derived semantics, not re-derive meaning from raw motion updates inside each frontend.
 
 Render-oriented consumers should keep that boundary explicit: core publishes a frontend-facing runtime-body view contract over `ClientViewEvent`, frontends keep mirrored read caches keyed by `SpatialBodyId`, and those caches are updated mechanically rather than ticked into an independent truth.
 
@@ -122,7 +127,21 @@ Manages the multi-stage handshake with GLS (Global Login Service) and the World 
 
 The `MovementSystem` runs on the shared fixed 30ms client physics cadence. It ingests resolved movement commands, supplies local ordinary actuation, and pushes reliable synchronization with the server's authoritative position.
 
-Today, this module owns resolved motion expiry, edge-based movement packet emission, stop-pulse obligations, snap-facing execution, and server-directed `MoveTo` drive lifecycle. It does not retain server pose-correction targets or an animation cursor: packet-scoped self authority policy selects a world-owned confirmation or reset, while local authored input advances the same world-owned `MotionRuntimeRegistry` cursor consumed by presentation and root actuation. `SpatialBody` reconciliation composes with that ordinary drive inside the shared spatial tick. Reusable approach behavior lives in [src/client/controllers/approach_target.rs](src/client/controllers/approach_target.rs), and navigation translates those controller outputs into resolved `MovementCommand` values before crossing into the movement executor.
+Today, this module owns resolved motion expiry, edge-based movement packet emission, stop-pulse obligations, snap-facing execution, and server-directed `MoveTo`/`TurnTo` command lifecycle. A classified `ServerControlledMotion` retains command ownership and its target; it does not retain contact or physical velocity. Each tick samples the world-owned runtime body: heading remains eligible while unsupported, MoveTo translation and distance completion require `Grounded`, and TurnTo completes from normalized heading agreement. This matches retail's separate turn/translation nodes and contact-gated MoveTo progress (`acclient.c:331901-332108`, `325850-325904`) while leaving the ballistic vector in `SpatialBody::retained` untouched.
+
+Packet-scoped self authority policy separately selects a world-owned position confirmation or explicit reset. Local authored input advances the same world-owned `MotionRuntimeRegistry` cursor consumed by presentation and root actuation. `SpatialBody` reconciliation composes with that ordinary drive inside the shared spatial tick. Reusable approach behavior lives in [src/client/controllers/approach_target.rs](src/client/controllers/approach_target.rs), and navigation translates those controller outputs into resolved `MovementCommand` values before crossing into the movement executor.
+
+Server-authored actions do not create another controller. World admission emits transient action
+edges separately from the retained steady order, and the same `MotionRuntimeRegistry` used by bulk
+remote advancement owns selection, FIFO order, completion, and return-to-steady playback. For the
+local character, `MovementSystem::advance_local_authored_motion` is only the adapter that advances
+that same runtime inside the local fixed-tick transaction and returns its exact authored offset to
+the existing solver. Remote players and creatures use the bulk adapter; entity category never
+selects a different animation or root-motion implementation.
+
+Client-authored command-list actions enter that same registry when `MovementSystem` constructs the
+outbound pulse. The predicted edge and wire item share one command, speed, and 15-bit stamp; the
+world's existing local autonomous-echo policy rejects the later echo so playback cannot duplicate.
 
 Combat automation now follows the same pattern from [src/client/controllers/combat.rs](src/client/controllers/combat.rs): frontends own a controller, feed it world-derived snapshots, and translate emitted facing or targeted-attack intents into their preferred execution path. Sticky melee range maintenance now does the same through [src/client/controllers/maintain_range.rs](src/client/controllers/maintain_range.rs), which owns the repeat latch and pursuit reissue cadence while leaving activation policy in the frontend.
 
@@ -244,7 +263,8 @@ assembled its facts, and it never claims producer authority.
   only for the world arm and forwarding bodyless attachment facts directly. It is the only
   producer of `DynamicEntityView`, so the client adapter
   (`client/dynamic_entity_view.rs`) and the Explorer host emit identical shapes. The view carries
-  no semantic motion object and no motion-table identity; world roots are solver-owned while
+  no semantic motion object. For client entities it carries the world-resolved effective motion
+  table identity needed to prepare the projected clip; world roots remain solver-owned while
   attached roots inherit transform authority from their parent.
 - Client fixed ticks publish one per-body placement consequence. Integrated bodies retain the
   ordinary host duration; an ordinary far correction uses `CorrectionSnap`, clears frontend path

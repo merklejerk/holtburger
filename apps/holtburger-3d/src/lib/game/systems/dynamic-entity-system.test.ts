@@ -363,15 +363,17 @@ describe("DynamicEntitySystem authored ownership", () => {
 		expect(destroyed).toBe(true);
 	});
 
-	it("releases every acquired animation when prepared-part validation fails", async () => {
+	it("stages a partial animation and releases it with its uncommitted owner", async () => {
 		const { system } = createSystem(new InlineObjectVisualTemplatePreparer());
 		const installation = system.replaceOwner("layer", [
 			source("incomplete-animation", [0, 1]),
 		]);
 
-		await expect(installation.ready).rejects.toThrow(
-			"has 1 parts but appearance requires part 1",
+		expect(await installation.ready).toBe("ready");
+		expect(installation.getPreparedEntities()[0]?.animation.kind).toBe(
+			"activatable",
 		);
+		installation.release();
 		expect(system.getDiagnostics().animationResources.referenceCount).toBe(0);
 	});
 

@@ -74,6 +74,43 @@ const lifecycleSchema = z.discriminatedUnion("kind", [
 		.strict(),
 ]);
 
+const clientCharacterMotionCapabilitiesSchema = z
+	.object({
+		fullChargeDurationMs: finiteNumber.positive(),
+	})
+	.strict();
+
+const clientCharacterMotionRejectionSchema = z.enum([
+	"charge-not-active",
+	"airborne",
+	"unsupported",
+	"overburdened",
+	"capability-unavailable",
+	"body-unavailable",
+	"collision-unavailable",
+	"launch-rejected",
+]);
+
+const clientCharacterMotionOutcomeSchema = z.discriminatedUnion("kind", [
+	z.object({ kind: z.literal("charge-accepted") }).strict(),
+	z.object({ kind: z.literal("charge-continues") }).strict(),
+	z.object({ kind: z.literal("jump-committed") }).strict(),
+	z.object({ kind: z.literal("reset") }).strict(),
+	z
+		.object({
+			kind: z.literal("rejected"),
+			reason: clientCharacterMotionRejectionSchema,
+		})
+		.strict(),
+]);
+
+const clientCharacterMotionFeedbackSchema = z
+	.object({
+		sequence: z.number().int().nonnegative().safe(),
+		outcome: clientCharacterMotionOutcomeSchema,
+	})
+	.strict();
+
 const currentStateSchema = z
 	.object({
 		lifecycle: lifecycleSchema,
@@ -83,6 +120,7 @@ const currentStateSchema = z
 		worldName: z.string().nullable(),
 		playerName: z.string().nullable(),
 		vitals: z.array(vitalSchema),
+		characterMotion: clientCharacterMotionCapabilitiesSchema.nullable(),
 		dynamic: z.unknown(),
 	})
 	.strict();
@@ -110,9 +148,34 @@ const clientDriveRequestSchema = z
 	.object({
 		gait: z.enum(["walk", "run"]),
 		longitudinal: z.enum(["forward", "backward"]).nullable(),
+		lateral: z.enum(["left", "right"]).nullable(),
 		turning: z.enum(["left", "right"]).nullable(),
 	})
 	.strict();
+
+const clientCharacterMotionEventRequestSchema = z.discriminatedUnion("kind", [
+	z
+		.object({
+			kind: z.literal("begin-jump"),
+			sequence: z.number().int().nonnegative().safe(),
+			drive: clientDriveRequestSchema,
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("release-jump"),
+			sequence: z.number().int().nonnegative().safe(),
+			drive: clientDriveRequestSchema,
+			extent: finiteNumber.min(0.001).max(1),
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("reset"),
+			sequence: z.number().int().nonnegative().safe(),
+		})
+		.strict(),
+]);
 
 const cameraIdentitySchema = z
 	.object({
@@ -255,6 +318,18 @@ export type ClientVital = z.infer<typeof vitalSchema>;
 export type ClientChatMessage = z.infer<typeof chatMessageSchema>;
 export type ClientPlayerEntered = z.infer<typeof playerEnteredSchema>;
 export type ClientDriveRequest = z.infer<typeof clientDriveRequestSchema>;
+export type ClientCharacterMotionEventRequest = z.infer<
+	typeof clientCharacterMotionEventRequestSchema
+>;
+export type ClientCharacterMotionCapabilities = z.infer<
+	typeof clientCharacterMotionCapabilitiesSchema
+>;
+export type ClientCharacterMotionFeedback = z.infer<
+	typeof clientCharacterMotionFeedbackSchema
+>;
+export type ClientCharacterMotionRejection = z.infer<
+	typeof clientCharacterMotionRejectionSchema
+>;
 export type ClientCameraIdentity = z.infer<typeof cameraIdentitySchema>;
 export type ClientCameraTick = z.infer<typeof cameraTickSchema>;
 export type ClientCameraStartReceipt = z.infer<typeof cameraStartedSchema>;
@@ -346,6 +421,25 @@ export function decodeClientExitRequested(value: unknown): ClientExitRequested {
 /** Strictly validates one renderer-held drive replacement before it crosses the host boundary. */
 export function decodeClientDriveRequest(value: unknown): ClientDriveRequest {
 	return clientDriveRequestSchema.parse(value);
+}
+
+/** Strictly validates one ordered character-motion edge before it crosses the host boundary. */
+export function decodeClientCharacterMotionEventRequest(
+	value: unknown,
+): ClientCharacterMotionEventRequest {
+	return clientCharacterMotionEventRequestSchema.parse(value);
+}
+
+export function decodeClientCharacterMotionCapabilities(
+	value: unknown,
+): ClientCharacterMotionCapabilities | null {
+	return clientCharacterMotionCapabilitiesSchema.nullable().parse(value);
+}
+
+export function decodeClientCharacterMotionFeedback(
+	value: unknown,
+): ClientCharacterMotionFeedback {
+	return clientCharacterMotionFeedbackSchema.parse(value);
 }
 
 /** Strictly validates one client camera generation receipt. */

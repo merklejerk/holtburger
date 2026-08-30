@@ -2,6 +2,7 @@ use crate::DynamicEntitySnapshot;
 use holtburger_common::Guid;
 use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_protocol::errors::WeenieError;
+use holtburger_protocol::messages::movement::MotionStance;
 use holtburger_session::Session;
 use holtburger_world::{SpatialBodyId, WorldEvent, WorldState};
 use std::collections::HashMap;
@@ -49,6 +50,13 @@ struct PendingBusyOperation {
     pending_error: Option<(WeenieError, Option<String>)>,
 }
 
+/// Publication state distinguishes an unpublished baseline from a published unavailable value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PublishedCharacterMotionCapabilities {
+    Unpublished,
+    Published(Option<ClientCharacterMotionCapabilities>),
+}
+
 pub struct ClientRuntime {
     pub session: Session,
     pub world: WorldState,
@@ -66,6 +74,8 @@ pub struct ClientRuntime {
     client_view_event_tx: broadcast::Sender<ClientViewEvent>,
     /// Monotonic origin shared by focused dynamic-entity snapshots and deltas.
     dynamic_entity_time_origin: Instant,
+    /// Last character-motion capability level projected on the current event baseline.
+    published_character_motion_capabilities: PublishedCharacterMotionCapabilities,
     command_rx: Option<mpsc::UnboundedReceiver<ClientCommand>>,
     message_dump_dir: Option<std::path::PathBuf>,
     message_counter: usize,
@@ -182,12 +192,34 @@ impl ClientRuntime {
                 .player_entity()
                 .map(|entity| entity.name().to_string()),
             vitals: self.world.player.vitals.clone(),
+            character_motion: self.character_motion_capabilities(),
             dynamic: DynamicEntitySnapshot::new(
                 self.dynamic_entity_host_time(),
                 self.current_dynamic_entity_views(),
             ),
             runtime_bodies: self.world.runtime_body_views().into(),
         }
+    }
+
+    fn character_motion_capabilities(&self) -> Option<ClientCharacterMotionCapabilities> {
+        let capabilities = self.world.resolve_self_jump_capabilities().ok()?;
+        let stance = MotionStance::from_repr(capabilities.movement.stance())?;
+        Some(ClientCharacterMotionCapabilities {
+            full_charge_duration: character_jump::retail_jump_charge_profile(stance)
+                .full_charge_duration(),
+        })
+    }
+
+    fn publish_character_motion_capabilities_if_changed(&mut self) {
+        let capabilities = self.character_motion_capabilities();
+        let publication = PublishedCharacterMotionCapabilities::Published(capabilities);
+        if self.published_character_motion_capabilities == publication {
+            return;
+        }
+        self.published_character_motion_capabilities = publication;
+        let _ = self
+            .client_view_event_tx
+            .send(ClientViewEvent::CharacterMotionCapabilitiesUpdated { capabilities });
     }
 
     /// Returns the staged spatial-product state, when this composition supplied a collision source.
@@ -805,12 +837,12 @@ impl ClientRuntime {
                     });
                 self.emit_dynamic_entity_upsert(*guid);
             }
-            WorldEvent::EntityMotionUpdated { guid, snapshot } => {
+            WorldEvent::EntityMotionUpdated { guid, motion } => {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::EntityMotionUpdated {
                         guid: *guid,
-                        snapshot: *snapshot,
+                        motion: *motion,
                     });
                 self.emit_dynamic_entity_upsert(*guid);
             }
@@ -945,7 +977,11 @@ impl ClientWorldActivationRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeMap;
+    use crate::{
+        CharacterMotionEvent, CharacterMotionSequence, DynamicEntityEvent, DynamicEntityHostTime,
+        JumpExtent, SequencedCharacterMotionEvent,
+    };
+    use std::collections::{BTreeMap, HashMap};
     use std::sync::Arc;
 
     use crate::{
@@ -961,25 +997,390 @@ mod tests {
         ColliderScale, LandblockColliders, LandblockCollisionAsset, LandblockTerrain,
         MotionSequenceCatalog, TerrainCellDiagonals, TerrainCollisionSurface,
     };
-    use holtburger_dat::file_type::MotionTable;
-    use holtburger_protocol::messages::CharacterEntry;
-    use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
+    use holtburger_dat::file_type::animation::AnimationFlags;
+    use holtburger_dat::file_type::motion_table::{AnimData, MotionData, MotionDataFlags};
+    use holtburger_dat::file_type::setup_model::AnimationFrame;
+    use holtburger_dat::file_type::{Animation, MotionTable};
+    use holtburger_dat::graphics::Frame;
+    use holtburger_protocol::messages::movement::{
+        InterpretedMotionCommand, InterpretedMotionState, MotionStance, MovementEventData,
+        MovementInvalid, MovementStateFlags, MovementType, MovementTypeData, PositionPack,
+        UpdatePositionData, UpdatePositionFlag,
+    };
+    use holtburger_protocol::messages::{CharacterEntry, GameMessage, VectorUpdateData};
+    use holtburger_protocol::traits::{ProtocolPack, ProtocolUnpack};
     use holtburger_world::FellowshipActivity;
-    use holtburger_world::entity::{Entity, EntityMotionSnapshot, OrderedMotionSpeed};
-    use holtburger_world::state::motion_resolution::test_support::{
-        FixtureCycle, explicit_motion_catalog,
+    use holtburger_world::entity::{
+        Entity, EntityMotionSnapshot, EntityNetworkMotion, OrderedMotionScalar,
+    };
+    use holtburger_world::state::motion_resolution::test_support::FIXTURE_STAND_COMMAND;
+    use holtburger_world::stats::{
+        Attribute, AttributeType, Skill, SkillType, TrainingLevel, Vital, VitalType,
     };
     use holtburger_world::{
-        CollisionScene, DynamicBodyCollisionDefinition, DynamicPhysicalBodyConfiguration,
-        DynamicPhysicalBodyDefinition, EdgeProtection, EntityCollisionParticipation,
-        EntityCollisionReportPolicy, EntityDynamicCollisionPolicy, FreeSphereConfig,
-        GroundedConfig, LocalIntegrationDemand, LocalPhysicalDemand, LocalTargetDemand,
-        PhysicalBodyDefinition, PhysicalBodyResponsePolicy, PhysicalCollisionFilter,
-        PhysicalElasticity, PhysicalFriction, PhysicalRestitution, PhysicalSphereSet,
-        PhysicalSurfaceMotion, PlayerMotionTableSource, PreparedEntityTargetGeometry,
-        RETAIL_AIRBORNE_STEP_DOWN_HEIGHT, RETAIL_LANDING_NORMAL_Z, RETAIL_WALKABLE_NORMAL_Z,
-        SelfMovementCapabilities, SelfMovementKinematics,
+        AuthoritativeBodyVectors, CollisionScene, DynamicBodyCollisionDefinition,
+        DynamicPhysicalBodyConfiguration, DynamicPhysicalBodyDefinition, EdgeProtection,
+        EntityCollisionParticipation, EntityCollisionReportPolicy, EntityDynamicCollisionPolicy,
+        FreeSphereConfig, GroundedConfig, LocalIntegrationDemand, LocalPhysicalDemand,
+        LocalTargetDemand, PhysicalBodyDefinition, PhysicalBodyResponsePolicy,
+        PhysicalCollisionFilter, PhysicalElasticity, PhysicalFriction, PhysicalRestitution,
+        PhysicalSphereSet, PhysicalSurfaceMotion, PlayerMotionTableSource,
+        PreparedEntityTargetGeometry, RETAIL_AIRBORNE_STEP_DOWN_HEIGHT, RETAIL_LANDING_NORMAL_Z,
+        RETAIL_WALKABLE_NORMAL_Z, SelfMovementCapabilities, SelfMovementKinematics,
     };
+
+    const JUMP_FIXTURE_STAND_ANIMATION: u32 = 0x0300_1001;
+    const JUMP_FIXTURE_RUN_ANIMATION: u32 = 0x0300_1002;
+    const JUMP_FIXTURE_TAKEOFF_ANIMATION: u32 = 0x0300_1004;
+    const JUMP_FIXTURE_FALLING_ANIMATION: u32 = 0x0300_1005;
+    const JUMP_FIXTURE_LANDING_ANIMATION: u32 = 0x0300_1006;
+    const JUMP_FIXTURE_ACTION_ANIMATION: u32 = 0x0300_1007;
+    const JUMP_FIXTURE_ACTION_COMMAND: u32 = 0x1000_004A;
+
+    /// A real motion-table fixture for jump presentation tests.
+    ///
+    /// Explicit motion vectors keep physical expectations readable while actual animation records
+    /// and authored links make clip identity independently observable. Production still selects
+    /// content IDs from the actor's table; none of these fixture IDs cross the test boundary.
+    fn jump_presentation_motion_catalog(motion_table_id: u32) -> MotionSequenceCatalog {
+        let style = MotionStance::NonCombat as u32;
+        let cycle = |animation_id: u32, velocity: Option<Vector3>, omega: Option<Vector3>| {
+            let mut flags = MotionDataFlags::empty();
+            flags.set(MotionDataFlags::HAS_VELOCITY, velocity.is_some());
+            flags.set(MotionDataFlags::HAS_OMEGA, omega.is_some());
+            MotionData {
+                bitfield: 0,
+                flags,
+                anims: vec![AnimData {
+                    anim_id: animation_id,
+                    low_frame: 0,
+                    high_frame: -1,
+                    framerate: 10.0,
+                }],
+                velocity,
+                omega,
+            }
+        };
+        let link = |animation_id, framerate| MotionData {
+            bitfield: 0,
+            flags: MotionDataFlags::empty(),
+            anims: vec![AnimData {
+                anim_id: animation_id,
+                low_frame: 0,
+                high_frame: -1,
+                framerate,
+            }],
+            velocity: None,
+            omega: None,
+        };
+        let cycles = HashMap::from([
+            (
+                MotionTable::cycle_key(style, FIXTURE_STAND_COMMAND),
+                cycle(JUMP_FIXTURE_STAND_ANIMATION, None, None),
+            ),
+            (
+                MotionTable::cycle_key(style, MotionTable::WALK_FORWARD_COMMAND),
+                cycle(
+                    JUMP_FIXTURE_RUN_ANIMATION,
+                    Some(Vector3::new(1.0, 0.0, 0.0)),
+                    None,
+                ),
+            ),
+            (
+                MotionTable::cycle_key(style, MotionTable::RUN_FORWARD_COMMAND),
+                cycle(
+                    JUMP_FIXTURE_RUN_ANIMATION,
+                    Some(Vector3::new(2.5, 0.0, 0.0)),
+                    None,
+                ),
+            ),
+            (
+                MotionTable::cycle_key(style, MotionTable::TURN_LEFT_COMMAND),
+                cycle(
+                    JUMP_FIXTURE_STAND_ANIMATION,
+                    None,
+                    Some(Vector3::new(0.0, 0.0, -1.0)),
+                ),
+            ),
+            (
+                MotionTable::cycle_key(style, MotionTable::TURN_RIGHT_COMMAND),
+                cycle(
+                    JUMP_FIXTURE_STAND_ANIMATION,
+                    None,
+                    Some(Vector3::new(0.0, 0.0, 1.0)),
+                ),
+            ),
+            (
+                MotionTable::cycle_key(
+                    style,
+                    holtburger_world::motion::MotionCommand::FALLING.raw(),
+                ),
+                cycle(JUMP_FIXTURE_FALLING_ANIMATION, None, None),
+            ),
+        ]);
+        let takeoff_targets = HashMap::from([(
+            holtburger_world::motion::MotionCommand::FALLING.raw(),
+            link(JUMP_FIXTURE_TAKEOFF_ANIMATION, 20.0),
+        )]);
+        let landing_targets = HashMap::from([
+            (
+                FIXTURE_STAND_COMMAND,
+                link(JUMP_FIXTURE_LANDING_ANIMATION, 200.0),
+            ),
+            (
+                MotionTable::RUN_FORWARD_COMMAND,
+                link(JUMP_FIXTURE_LANDING_ANIMATION, 200.0),
+            ),
+        ]);
+        let links = HashMap::from([
+            (
+                MotionTable::cycle_key(style, holtburger_world::motion::MotionCommand::READY.raw()),
+                takeoff_targets.clone(),
+            ),
+            (
+                MotionTable::cycle_key(style, MotionTable::RUN_FORWARD_COMMAND),
+                takeoff_targets,
+            ),
+            (
+                MotionTable::cycle_key(
+                    style,
+                    holtburger_world::motion::MotionCommand::FALLING.raw(),
+                ),
+                landing_targets,
+            ),
+        ]);
+        let table = MotionTable {
+            id: motion_table_id,
+            default_style: style,
+            style_defaults: HashMap::from([(style, FIXTURE_STAND_COMMAND)]),
+            cycles,
+            modifiers: HashMap::new(),
+            links,
+        };
+        let animation = |id| Animation {
+            id,
+            flags: AnimationFlags::empty(),
+            num_parts: 0,
+            num_frames: 4,
+            pos_frames: Vec::new(),
+            part_frames: (0..4)
+                .map(|_| AnimationFrame {
+                    frames: Vec::new(),
+                    hooks: Vec::new(),
+                })
+                .collect(),
+        };
+        MotionSequenceCatalog::assemble(
+            [table],
+            [
+                animation(JUMP_FIXTURE_STAND_ANIMATION),
+                animation(JUMP_FIXTURE_RUN_ANIMATION),
+                animation(JUMP_FIXTURE_TAKEOFF_ANIMATION),
+                animation(JUMP_FIXTURE_FALLING_ANIMATION),
+                animation(JUMP_FIXTURE_LANDING_ANIMATION),
+            ],
+            [],
+        )
+        .expect("jump presentation fixture should assemble")
+    }
+
+    /// Minimal action fixture with a measurable root track for the local-adapter boundary.
+    fn local_action_motion_catalog(motion_table_id: u32) -> MotionSequenceCatalog {
+        let style = MotionStance::NonCombat as u32;
+        let clip = |animation_id| MotionData {
+            bitfield: 0,
+            flags: MotionDataFlags::empty(),
+            anims: vec![AnimData {
+                anim_id: animation_id,
+                low_frame: 0,
+                high_frame: -1,
+                framerate: 10.0,
+            }],
+            velocity: None,
+            omega: None,
+        };
+        let animation = |id, step| Animation {
+            id,
+            flags: AnimationFlags::POS_FRAMES,
+            num_parts: 0,
+            num_frames: 4,
+            pos_frames: (0..4)
+                .map(|_| Frame {
+                    origin: step,
+                    orientation: Quaternion::identity(),
+                })
+                .collect(),
+            part_frames: (0..4)
+                .map(|_| AnimationFrame {
+                    frames: Vec::new(),
+                    hooks: Vec::new(),
+                })
+                .collect(),
+        };
+        let table = MotionTable {
+            id: motion_table_id,
+            default_style: style,
+            style_defaults: HashMap::from([(style, FIXTURE_STAND_COMMAND)]),
+            cycles: HashMap::from([(
+                MotionTable::cycle_key(style, FIXTURE_STAND_COMMAND),
+                clip(JUMP_FIXTURE_STAND_ANIMATION),
+            )]),
+            modifiers: HashMap::new(),
+            links: HashMap::from([(
+                MotionTable::cycle_key(style, FIXTURE_STAND_COMMAND),
+                HashMap::from([(
+                    JUMP_FIXTURE_ACTION_COMMAND,
+                    clip(JUMP_FIXTURE_ACTION_ANIMATION),
+                )]),
+            )]),
+        };
+        MotionSequenceCatalog::assemble(
+            [table],
+            [
+                animation(JUMP_FIXTURE_STAND_ANIMATION, Vector3::zero()),
+                animation(JUMP_FIXTURE_ACTION_ANIMATION, Vector3::new(0.0, 0.25, 0.0)),
+            ],
+            [],
+        )
+        .expect("local action fixture should assemble")
+    }
+
+    /// Routes a constructed message through the same pack/unpack boundary as an ACE datagram.
+    fn encoded_game_message(message: GameMessage) -> GameMessage {
+        let mut bytes = Vec::new();
+        message.pack(&mut bytes);
+        let mut offset = 0;
+        let decoded = GameMessage::unpack(&bytes, &mut offset)
+            .expect("encoded movement fixture should decode");
+        assert_eq!(offset, bytes.len());
+        decoded
+    }
+
+    #[test]
+    fn server_authored_local_action_uses_the_local_adapter_for_its_exact_root_offset() {
+        let mut world = WorldState::synthetic();
+        let guid = Guid(0x0102_1007);
+        let motion_table_id = 0x0900_1007;
+        world.set_motion_sequences(local_action_motion_catalog(motion_table_id));
+        world.seed_local_player_entity(guid, "Player", WorldPosition::default());
+        world
+            .entities
+            .get_mut(guid)
+            .unwrap()
+            .properties
+            .set_did_prop(PropertyDataId::MotionTable, Guid(motion_table_id));
+        assert_eq!(
+            world.effective_motion_table_id_for_guid(guid),
+            Some(motion_table_id),
+        );
+
+        let message =
+            encoded_game_message(GameMessage::UpdateMotion(Box::new(MovementEventData {
+                guid,
+                object_instance_sequence: 0,
+                movement_sequence: 1,
+                server_control_sequence: 1,
+                is_autonomous: false,
+                movement_type: MovementType::Invalid,
+                motion_flags: 0,
+                current_style: MotionStance::NonCombat.interpreted(),
+                data: MovementTypeData::Invalid(MovementInvalid {
+                    state: InterpretedMotionState {
+                        flags: MovementStateFlags::CURRENT_STYLE
+                            | MovementStateFlags::FORWARD_COMMAND,
+                        current_style: Some(MotionStance::NonCombat.interpreted()),
+                        forward_command: Some(InterpretedMotionCommand(74)),
+                        ..Default::default()
+                    },
+                    sticky_object: None,
+                }),
+            })));
+        let GameMessage::UpdateMotion(decoded) = &message else {
+            panic!("encoded fixture changed message kind");
+        };
+        let MovementTypeData::Invalid(decoded) = &decoded.data else {
+            panic!("encoded fixture changed movement kind");
+        };
+        assert_eq!(
+            decoded.state.forward_command,
+            Some(InterpretedMotionCommand(74)),
+        );
+        assert_eq!(
+            holtburger_world::motion::MotionCommand::from_interpreted(
+                decoded.state.forward_command.unwrap(),
+            )
+            .map(holtburger_world::motion::MotionCommand::raw),
+            Some(JUMP_FIXTURE_ACTION_COMMAND),
+        );
+        world.handle_message(&message);
+
+        assert!(world.has_authored_motion_actions(guid));
+        assert_eq!(
+            world
+                .player_entity()
+                .unwrap()
+                .network_motion
+                .snapshot()
+                .unwrap()
+                .forward_command,
+            None,
+            "the action edge must not become retained forward locomotion",
+        );
+        let offset = MovementSystem::new()
+            .advance_local_authored_motion(&mut world, Duration::from_millis(150))
+            .expect("local action playback should resolve")
+            .expect("the local adapter must return the action's authored offset");
+        assert_eq!(
+            world
+                .motion_runtimes
+                .playing_clip(guid)
+                .map(|clip| clip.animation_id),
+            Some(JUMP_FIXTURE_ACTION_ANIMATION),
+        );
+        assert!(
+            offset.translation.length() > 0.0,
+            "action root offset was {offset:?}",
+        );
+    }
+
+    #[tokio::test]
+    async fn client_authored_action_predicts_the_edge_filtered_from_its_autonomous_echo() {
+        let mut world = WorldState::synthetic();
+        let guid = Guid(0x0102_1008);
+        let motion_table_id = 0x0900_1008;
+        world.set_motion_sequences(local_action_motion_catalog(motion_table_id));
+        world.seed_local_player_entity(guid, "Player", WorldPosition::default());
+        world
+            .entities
+            .get_mut(guid)
+            .unwrap()
+            .properties
+            .set_did_prop(PropertyDataId::MotionTable, Guid(motion_table_id));
+
+        let mut movement = MovementSystem::new();
+        movement.enqueue_transient_motion(
+            InterpretedMotionCommand(74),
+            crate::client::movement_types::MotionStyle::Explicit(MotionStance::NonCombat),
+        );
+        let mut session = holtburger_session::Session::new_test();
+        movement
+            .tick(Instant::now(), &mut world, &mut session)
+            .await
+            .expect("client-authored action pulse should send");
+
+        assert!(world.has_authored_motion_actions(guid));
+        movement
+            .advance_local_authored_motion(&mut world, Duration::from_millis(150))
+            .expect("predicted local action should advance")
+            .expect("predicted local action should expose its authored offset");
+        assert_eq!(
+            world
+                .motion_runtimes
+                .playing_clip(guid)
+                .map(|clip| clip.animation_id),
+            Some(JUMP_FIXTURE_ACTION_ANIMATION),
+        );
+    }
 
     fn dynamic_definition(
         movement: PhysicalBodyDefinition,
@@ -1103,6 +1504,45 @@ mod tests {
         }
     }
 
+    fn test_grounded_body_definition() -> PhysicalBodyDefinition {
+        PhysicalBodyDefinition::grounded(
+            PhysicalSphereSet::new(
+                holtburger_common::Sphere {
+                    center: Vector3::new(0.0, 0.0, 0.5),
+                    radius: 0.5,
+                },
+                None,
+            )
+            .unwrap(),
+            GroundedConfig {
+                gravity: -9.8,
+                walkable_normal_z: RETAIL_WALKABLE_NORMAL_Z,
+                landing_normal_z: RETAIL_LANDING_NORMAL_Z,
+                airborne_step_down_height: RETAIL_AIRBORNE_STEP_DOWN_HEIGHT,
+                step_up_height: 0.6,
+                step_down_height: 1.5,
+                edge_protection: EdgeProtection::Creature,
+                maximum_substep_distance: 0.24,
+                maximum_substeps: 32,
+                maximum_contact_passes: 8,
+                separation_epsilon: 0.0005,
+            },
+        )
+        .unwrap()
+    }
+
+    fn stable_dynamic_body_definition() -> DynamicPhysicalBodyConfiguration {
+        dynamic_definition(
+            test_grounded_body_definition(),
+            PhysicalBodyResponsePolicy {
+                restitution: PhysicalRestitution::Inelastic,
+                friction: PhysicalFriction::DEFAULT,
+                surface_motion: PhysicalSurfaceMotion::Stable,
+                align_path: false,
+            },
+        )
+    }
+
     fn seed_test_self_movement_capabilities(
         client: &mut ClientRuntime,
     ) -> SelfMovementCapabilities {
@@ -1111,6 +1551,560 @@ mod tests {
             .world
             .set_self_movement_capabilities_override(capabilities.clone());
         capabilities
+    }
+
+    fn seed_test_jump_authority(client: &mut ClientRuntime) {
+        client.world.player.attributes.insert(
+            AttributeType::StrengthAttr,
+            Attribute {
+                attr_type: AttributeType::StrengthAttr,
+                ranks: 0,
+                start: 100,
+                spent_xp: 0,
+                next_rank_xp: None,
+                base: 100,
+                current: 100,
+            },
+        );
+        client.world.player.skills.insert(
+            SkillType::Jump,
+            Skill {
+                skill_type: SkillType::Jump,
+                ranks: 0,
+                init: 400,
+                spent_xp: 0,
+                next_rank_xp: None,
+                base: 400,
+                current: 400,
+                training: TrainingLevel::Trained,
+                trained_cost: 0,
+                specialized_cost: 0,
+            },
+        );
+        client.world.player.skills.insert(
+            SkillType::Run,
+            Skill {
+                skill_type: SkillType::Run,
+                ranks: 0,
+                init: 300,
+                spent_xp: 0,
+                next_rank_xp: None,
+                base: 300,
+                current: 300,
+                training: TrainingLevel::Trained,
+                trained_cost: 0,
+                specialized_cost: 0,
+            },
+        );
+        client.world.player.vitals.insert(
+            VitalType::Stamina,
+            Vital {
+                vital_type: VitalType::Stamina,
+                ranks: 0,
+                start: 100,
+                spent_xp: 0,
+                next_rank_xp: None,
+                base: 100,
+                buffed_max: 100,
+                current: 100,
+            },
+        );
+    }
+
+    #[tokio::test]
+    async fn fixed_tick_commits_one_grounded_jump_from_the_release_origin() {
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let guid = Guid(0x0102_0304);
+        let release_pose = WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            coords: Vector3::new(48.0, 48.0, 0.0),
+            rotation: Quaternion::from_heading(0.5),
+        };
+        client
+            .world
+            .seed_local_player_entity(guid, "Player", release_pose);
+        const MOTION_TABLE_ID: u32 = 0x0900_0020;
+        client
+            .world
+            .set_motion_sequences(jump_presentation_motion_catalog(MOTION_TABLE_ID));
+        client
+            .world
+            .player_entity_mut()
+            .unwrap()
+            .properties
+            .set_did_prop(PropertyDataId::MotionTable, Guid(MOTION_TABLE_ID));
+        seed_test_self_movement_capabilities(&mut client);
+        seed_test_jump_authority(&mut client);
+        client.world.player.instance_sequence = 11;
+        client.world.player.server_control_sequence = 12;
+        client.world.player.teleport_sequence = 13;
+        client.world.player.force_position_sequence = 14;
+
+        let body_id = holtburger_world::SpatialBodyId::LocalPlayer(guid);
+        client
+            .world
+            .scene
+            .set_dynamic_physical_body(
+                body_id,
+                Some(stable_dynamic_body_definition()),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+        let interest = SimulationSceneInterest::prefetch_neighborhood(
+            release_pose,
+            CLIENT_COLLISION_OWNER_RADIUS,
+        )
+        .unwrap();
+        let collision = collision_snapshot(
+            interest.clone(),
+            flat_collision_scene_for_interest(&interest),
+        );
+        let now = Instant::now();
+        simulation::tick(
+            now,
+            Duration::from_millis(PHYSICS_TICK_MS),
+            &mut client.world,
+            &mut client.movement,
+            Some(&collision),
+        )
+        .unwrap();
+        assert_eq!(
+            client.world.scene.body(body_id).unwrap().contact,
+            holtburger_world::ContactState::Grounded
+        );
+        let idle_drive = movement_types::CharacterDrive::default();
+        client.movement.enqueue_drive_intent(
+            movement_types::PlayerDriveIntent::ManualHeld(idle_drive),
+            now,
+        );
+        client
+            .movement
+            .tick(now, &mut client.world, &mut client.session)
+            .await
+            .unwrap();
+        simulation::tick(
+            now + Duration::from_millis(1),
+            Duration::from_millis(PHYSICS_TICK_MS),
+            &mut client.world,
+            &mut client.movement,
+            Some(&collision),
+        )
+        .unwrap();
+        let clip_before_rejected_launch = client.world.motion_runtimes.playing_clip(guid);
+        let grounded_release_pose = client.world.scene.body(body_id).unwrap().pose;
+
+        client
+            .movement
+            .enqueue_character_motion_event(SequencedCharacterMotionEvent {
+                sequence: CharacterMotionSequence(1),
+                event: CharacterMotionEvent::BeginJump { drive: idle_drive },
+            });
+        client
+            .movement
+            .enqueue_character_motion_event(SequencedCharacterMotionEvent {
+                sequence: CharacterMotionSequence(2),
+                event: CharacterMotionEvent::ReleaseJump {
+                    drive: idle_drive,
+                    extent: JumpExtent::new(0.75).unwrap(),
+                },
+            });
+        client
+            .movement
+            .tick(
+                now + Duration::from_millis(PHYSICS_TICK_MS),
+                &mut client.world,
+                &mut client.session,
+            )
+            .await
+            .unwrap();
+        let unavailable = simulation::tick(
+            now + Duration::from_millis(PHYSICS_TICK_MS * 2),
+            Duration::from_millis(PHYSICS_TICK_MS),
+            &mut client.world,
+            &mut client.movement,
+            None,
+        )
+        .unwrap();
+        assert!(unavailable.committed_jump.is_none());
+        assert_eq!(
+            unavailable.character_motion_feedback,
+            Some(ClientCharacterMotionFeedback {
+                sequence: CharacterMotionSequence(2),
+                outcome: ClientCharacterMotionOutcome::Rejected(
+                    ClientCharacterMotionRejection::CollisionUnavailable,
+                ),
+            })
+        );
+        let no_replay = simulation::tick(
+            now + Duration::from_millis(PHYSICS_TICK_MS * 3),
+            Duration::from_millis(PHYSICS_TICK_MS),
+            &mut client.world,
+            &mut client.movement,
+            Some(&collision),
+        )
+        .unwrap();
+        assert!(no_replay.committed_jump.is_none());
+        assert!(no_replay.character_motion_feedback.is_none());
+        assert_eq!(
+            client.world.motion_runtimes.playing_clip(guid),
+            clip_before_rejected_launch,
+            "a rejected launch must not replace the grounded clip"
+        );
+
+        client
+            .movement
+            .enqueue_character_motion_event(SequencedCharacterMotionEvent {
+                sequence: CharacterMotionSequence(3),
+                event: CharacterMotionEvent::BeginJump { drive: idle_drive },
+            });
+        client
+            .movement
+            .tick(
+                now + Duration::from_millis(PHYSICS_TICK_MS * 3),
+                &mut client.world,
+                &mut client.session,
+            )
+            .await
+            .unwrap();
+        let charging = simulation::tick(
+            now + Duration::from_millis(PHYSICS_TICK_MS * 4),
+            Duration::from_millis(PHYSICS_TICK_MS),
+            &mut client.world,
+            &mut client.movement,
+            Some(&collision),
+        )
+        .unwrap();
+        assert!(charging.committed_jump.is_none());
+        assert_eq!(
+            client.world.motion_runtimes.state(guid).unwrap().substate,
+            holtburger_world::motion::MotionCommand::READY
+        );
+        assert_eq!(
+            client
+                .world
+                .motion_runtimes
+                .playing_clip(guid)
+                .map(|clip| clip.animation_id),
+            Some(JUMP_FIXTURE_STAND_ANIMATION),
+            "retail Ready and Stand must resolve through their shared motion-table row"
+        );
+
+        client
+            .movement
+            .enqueue_character_motion_event(SequencedCharacterMotionEvent {
+                sequence: CharacterMotionSequence(4),
+                event: CharacterMotionEvent::ReleaseJump {
+                    drive: idle_drive,
+                    extent: JumpExtent::new(0.75).unwrap(),
+                },
+            });
+        client
+            .movement
+            .tick(
+                now + Duration::from_millis(PHYSICS_TICK_MS * 4),
+                &mut client.world,
+                &mut client.session,
+            )
+            .await
+            .unwrap();
+        let tick = simulation::tick(
+            now + Duration::from_millis(PHYSICS_TICK_MS * 5),
+            Duration::from_millis(PHYSICS_TICK_MS),
+            &mut client.world,
+            &mut client.movement,
+            Some(&collision),
+        )
+        .unwrap();
+        let committed = tick
+            .committed_jump
+            .expect("supported local launch should commit exactly once");
+
+        assert_eq!(committed.position, grounded_release_pose);
+        assert_eq!(committed.resolved.extent(), JumpExtent::new(0.75).unwrap());
+        assert_eq!(
+            (
+                committed.instance_sequence,
+                committed.server_control_sequence,
+                committed.teleport_sequence,
+                committed.force_position_sequence,
+            ),
+            (11, 12, 13, 14)
+        );
+        assert!(committed.resolved.world_velocity().z > 0.0);
+        assert!(
+            client
+                .world
+                .scene
+                .body(body_id)
+                .unwrap()
+                .retained
+                .velocity
+                .z
+                > 0.0
+        );
+        assert_eq!(
+            client.world.motion_runtimes.state(guid).unwrap().substate,
+            holtburger_world::motion::MotionCommand::FALLING,
+            "accepted launch and airborne presentation must commit in the same fixed tick"
+        );
+        assert_eq!(
+            client
+                .world
+                .motion_runtimes
+                .playing_clip(guid)
+                .map(|clip| clip.animation_id),
+            Some(JUMP_FIXTURE_TAKEOFF_ANIMATION),
+            "accepted launch must begin the table-authored Ready-to-Falling transition"
+        );
+
+        let mut falling_step = None;
+        for step in 6..=25 {
+            let airborne = simulation::tick(
+                now + Duration::from_millis(PHYSICS_TICK_MS * step),
+                Duration::from_millis(PHYSICS_TICK_MS),
+                &mut client.world,
+                &mut client.movement,
+                Some(&collision),
+            )
+            .unwrap();
+            assert!(airborne.committed_jump.is_none());
+            if client
+                .world
+                .motion_runtimes
+                .playing_clip(guid)
+                .is_some_and(|clip| clip.animation_id == JUMP_FIXTURE_FALLING_ANIMATION)
+            {
+                assert_eq!(
+                    client.world.scene.body(body_id).unwrap().contact,
+                    holtburger_world::ContactState::Airborne
+                );
+                falling_step = Some(step);
+                break;
+            }
+        }
+        let falling_step = falling_step
+            .expect("stationary takeoff must advance into Falling independently from the body arc");
+
+        let mut landed = false;
+        let mut landing_step = 0;
+        for step in (falling_step + 1)..=400 {
+            simulation::tick(
+                now + Duration::from_millis(PHYSICS_TICK_MS * step),
+                Duration::from_millis(PHYSICS_TICK_MS),
+                &mut client.world,
+                &mut client.movement,
+                Some(&collision),
+            )
+            .unwrap();
+            if client.world.scene.body(body_id).unwrap().contact
+                == holtburger_world::ContactState::Grounded
+            {
+                landed = true;
+                landing_step = step;
+                break;
+            }
+        }
+        assert!(landed, "local jump should return to flat support");
+        assert_eq!(
+            client.world.motion_runtimes.state(guid).unwrap().substate,
+            holtburger_world::motion::MotionCommand(FIXTURE_STAND_COMMAND),
+            "landing should reapply current grounded movement without another playback quantum"
+        );
+        assert_eq!(
+            client
+                .world
+                .motion_runtimes
+                .playing_clip(guid)
+                .map(|clip| clip.animation_id),
+            Some(JUMP_FIXTURE_LANDING_ANIMATION),
+            "support recovery must begin the table-authored landing transition"
+        );
+        simulation::tick(
+            now + Duration::from_millis(PHYSICS_TICK_MS * (landing_step + 1)),
+            Duration::from_millis(PHYSICS_TICK_MS),
+            &mut client.world,
+            &mut client.movement,
+            Some(&collision),
+        )
+        .unwrap();
+        assert_eq!(
+            client
+                .world
+                .motion_runtimes
+                .playing_clip(guid)
+                .map(|clip| clip.animation_id),
+            Some(JUMP_FIXTURE_STAND_ANIMATION),
+            "the authored landing transition must complete into idle"
+        );
+
+        let fixed_dt = Duration::from_millis(PHYSICS_TICK_MS);
+        let moving_start = now + Duration::from_millis(PHYSICS_TICK_MS * (landing_step + 2));
+        let moving_drive = movement_types::CharacterDrive::builder()
+            .run()
+            .forward()
+            .build();
+        client.movement.enqueue_drive_intent(
+            movement_types::PlayerDriveIntent::ManualHeld(moving_drive),
+            moving_start,
+        );
+        client
+            .movement
+            .enqueue_character_motion_event(SequencedCharacterMotionEvent {
+                sequence: CharacterMotionSequence(5),
+                event: CharacterMotionEvent::BeginJump {
+                    drive: moving_drive,
+                },
+            });
+        client
+            .movement
+            .tick(moving_start, &mut client.world, &mut client.session)
+            .await
+            .unwrap();
+        simulation::tick(
+            moving_start + fixed_dt,
+            fixed_dt,
+            &mut client.world,
+            &mut client.movement,
+            Some(&collision),
+        )
+        .unwrap();
+        assert_eq!(
+            client.world.motion_runtimes.state(guid).unwrap().substate,
+            holtburger_world::motion::MotionCommand::RUN_FORWARD,
+            "moving charge must retain locomotion presentation rather than select Ready"
+        );
+        assert_eq!(
+            client
+                .world
+                .motion_runtimes
+                .playing_clip(guid)
+                .map(|clip| clip.animation_id),
+            Some(JUMP_FIXTURE_RUN_ANIMATION)
+        );
+
+        client
+            .movement
+            .enqueue_character_motion_event(SequencedCharacterMotionEvent {
+                sequence: CharacterMotionSequence(6),
+                event: CharacterMotionEvent::ReleaseJump {
+                    drive: moving_drive,
+                    extent: JumpExtent::new(0.75).unwrap(),
+                },
+            });
+        client
+            .movement
+            .tick(
+                moving_start + fixed_dt,
+                &mut client.world,
+                &mut client.session,
+            )
+            .await
+            .unwrap();
+        let moving_launch = simulation::tick(
+            moving_start + fixed_dt * 2,
+            fixed_dt,
+            &mut client.world,
+            &mut client.movement,
+            Some(&collision),
+        )
+        .unwrap()
+        .committed_jump
+        .expect("held-run jump should commit from grounded support");
+        let moving_velocity = moving_launch.resolved.world_velocity();
+        assert!(moving_velocity.z > 0.0);
+        assert!(
+            moving_velocity.x * moving_velocity.x + moving_velocity.y * moving_velocity.y > 0.0,
+            "moving launch must retain a horizontal velocity component"
+        );
+        assert_eq!(
+            client.world.motion_runtimes.state(guid).unwrap().substate,
+            holtburger_world::motion::MotionCommand::FALLING
+        );
+        assert_eq!(
+            client
+                .world
+                .motion_runtimes
+                .playing_clip(guid)
+                .map(|clip| clip.animation_id),
+            Some(JUMP_FIXTURE_TAKEOFF_ANIMATION),
+            "moving takeoff must use the authored run-to-Falling transition"
+        );
+
+        let mut moving_falling_step = None;
+        for step in 3..=20 {
+            simulation::tick(
+                moving_start + fixed_dt * step,
+                fixed_dt,
+                &mut client.world,
+                &mut client.movement,
+                Some(&collision),
+            )
+            .unwrap();
+            if client
+                .world
+                .motion_runtimes
+                .playing_clip(guid)
+                .is_some_and(|clip| clip.animation_id == JUMP_FIXTURE_FALLING_ANIMATION)
+            {
+                assert_eq!(
+                    client.world.scene.body(body_id).unwrap().contact,
+                    holtburger_world::ContactState::Airborne
+                );
+                moving_falling_step = Some(step);
+                break;
+            }
+        }
+        let moving_falling_step =
+            moving_falling_step.expect("moving takeoff must advance into Falling");
+        let mut moving_landing_step = None;
+        for step in (moving_falling_step + 1)..=400 {
+            simulation::tick(
+                moving_start + fixed_dt * step,
+                fixed_dt,
+                &mut client.world,
+                &mut client.movement,
+                Some(&collision),
+            )
+            .unwrap();
+            if client.world.scene.body(body_id).unwrap().contact
+                == holtburger_world::ContactState::Grounded
+            {
+                moving_landing_step = Some(step);
+                break;
+            }
+        }
+        let moving_landing_step =
+            moving_landing_step.expect("moving jump should return to flat support");
+        assert_eq!(
+            client.world.motion_runtimes.state(guid).unwrap().substate,
+            holtburger_world::motion::MotionCommand::RUN_FORWARD
+        );
+        assert_eq!(
+            client
+                .world
+                .motion_runtimes
+                .playing_clip(guid)
+                .map(|clip| clip.animation_id),
+            Some(JUMP_FIXTURE_LANDING_ANIMATION)
+        );
+        simulation::tick(
+            moving_start + fixed_dt * (moving_landing_step + 1),
+            fixed_dt,
+            &mut client.world,
+            &mut client.movement,
+            Some(&collision),
+        )
+        .unwrap();
+        assert_eq!(
+            client
+                .world
+                .motion_runtimes
+                .playing_clip(guid)
+                .map(|clip| clip.animation_id),
+            Some(JUMP_FIXTURE_RUN_ANIMATION),
+            "held locomotion must resume after the authored landing transition"
+        );
     }
 
     #[test]
@@ -1289,21 +2283,746 @@ mod tests {
     }
 
     fn test_remote_motion_catalog(motion_table_id: u32) -> MotionSequenceCatalog {
-        explicit_motion_catalog(
-            motion_table_id,
-            MotionStance::NonCombat as u32,
-            [
-                FixtureCycle::moving(
-                    MotionTable::RUN_FORWARD_COMMAND,
-                    Vector3::new(2.5, 0.0, 0.0),
-                ),
-                FixtureCycle::turning(
-                    MotionTable::TURN_RIGHT_COMMAND,
-                    Vector3::new(0.0, 0.0, 1.25),
-                ),
-            ],
-            [],
+        jump_presentation_motion_catalog(motion_table_id)
+    }
+
+    #[test]
+    fn remote_stop_and_landing_drive_initialized_idle_without_changing_placement() {
+        let mut world = WorldState::synthetic();
+        let remote_guid = Guid(0x0102_2201);
+        let motion_table_id = 0x0900_0040;
+        world.set_motion_sequences(jump_presentation_motion_catalog(motion_table_id));
+
+        let mut remote = Entity::new(remote_guid, "Remote".to_owned(), WorldPosition::default());
+        remote
+            .properties
+            .set_did_prop(PropertyDataId::MotionTable, Guid(motion_table_id));
+        world.add_entity(remote);
+
+        let run_events = world.handle_message(&encoded_game_message(GameMessage::UpdateMotion(
+            Box::new(MovementEventData {
+                guid: remote_guid,
+                object_instance_sequence: 0,
+                movement_sequence: 1,
+                server_control_sequence: 0,
+                is_autonomous: true,
+                movement_type: MovementType::Invalid,
+                motion_flags: 0,
+                current_style: MotionStance::NonCombat.interpreted(),
+                data: MovementTypeData::Invalid(MovementInvalid {
+                    state: InterpretedMotionState {
+                        flags: MovementStateFlags::CURRENT_STYLE
+                            | MovementStateFlags::FORWARD_COMMAND,
+                        current_style: Some(MotionStance::NonCombat.interpreted()),
+                        forward_command: Some(InterpretedMotionCommand::RUN_FORWARD),
+                        ..Default::default()
+                    },
+                    sticky_object: None,
+                }),
+            }),
+        )));
+        assert!(run_events.iter().any(|event| matches!(
+            event,
+            WorldEvent::EntityMotionUpdated { guid, motion }
+                if *guid == remote_guid
+                    && motion.snapshot().is_some_and(|snapshot| {
+                        snapshot.forward_command == Some(InterpretedMotionCommand::RUN_FORWARD)
+                    })
+        )));
+        world.advance_authored_motion(Duration::from_millis(30));
+        assert_eq!(
+            world
+                .motion_runtimes
+                .playing_clip(remote_guid)
+                .map(|clip| clip.animation_id),
+            Some(JUMP_FIXTURE_RUN_ANIMATION)
+        );
+        let pose_before_stop = world
+            .entities
+            .get(remote_guid)
+            .expect("remote authority must remain registered")
+            .position;
+
+        world.handle_message(&encoded_game_message(GameMessage::UpdateMotion(Box::new(
+            MovementEventData {
+                guid: remote_guid,
+                object_instance_sequence: 0,
+                movement_sequence: 2,
+                server_control_sequence: 0,
+                is_autonomous: true,
+                movement_type: MovementType::Invalid,
+                motion_flags: 0,
+                current_style: 0,
+                data: MovementTypeData::Invalid(MovementInvalid::default()),
+            },
+        ))));
+        world.advance_authored_motion(Duration::ZERO);
+        assert_eq!(
+            world
+                .motion_runtimes
+                .playing_clip(remote_guid)
+                .map(|clip| clip.animation_id),
+            Some(JUMP_FIXTURE_STAND_ANIMATION),
+            "an admitted empty update must retire the prior run cycle"
+        );
+        assert_eq!(
+            world.entities.get(remote_guid).unwrap().position,
+            pose_before_stop,
+            "a clip-only stop must not reconstruct or move the runtime body"
+        );
+
+        world
+            .drive_authored_motion_for_body(
+                remote_guid,
+                holtburger_world::motion::MotionOrder {
+                    style: Some(holtburger_world::motion::MotionCommand(
+                        MotionStance::NonCombat as u32,
+                    )),
+                    forward: Some((holtburger_world::motion::MotionCommand::FALLING, 1.0)),
+                    ..Default::default()
+                },
+                Duration::from_millis(250),
+            )
+            .expect("fixture must model Falling");
+        assert_eq!(
+            world
+                .motion_runtimes
+                .playing_clip(remote_guid)
+                .map(|clip| clip.animation_id),
+            Some(JUMP_FIXTURE_FALLING_ANIMATION),
+            "fixture setup must reach the unsupported cycle before landing"
+        );
+
+        world.reconcile_authored_motion_support(
+            remote_guid,
+            holtburger_world::ContactState::Grounded,
+        );
+        assert_eq!(
+            world
+                .motion_runtimes
+                .playing_clip(remote_guid)
+                .map(|clip| clip.animation_id),
+            Some(JUMP_FIXTURE_LANDING_ANIMATION),
+            "grounded support must actively retire Falling into authored landing"
+        );
+
+        world.advance_authored_motion(Duration::from_millis(30));
+        assert_eq!(
+            world
+                .motion_runtimes
+                .playing_clip(remote_guid)
+                .map(|clip| clip.animation_id),
+            Some(JUMP_FIXTURE_STAND_ANIMATION),
+            "initialized idle authority must complete landing into the stance default"
+        );
+    }
+
+    #[test]
+    fn remote_clip_only_stop_projects_as_a_path_stable_dynamic_update() {
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let remote_guid = Guid(0x0102_2202);
+        let motion_table_id = 0x0900_0042;
+        client
+            .world
+            .set_motion_sequences(jump_presentation_motion_catalog(motion_table_id));
+        let mut remote = Entity::new(remote_guid, "Remote".to_owned(), WorldPosition::default());
+        remote.wcid = Some(42);
+        remote
+            .properties
+            .set_did_prop(PropertyDataId::Setup, Guid(0x0200_0001));
+        remote
+            .properties
+            .set_did_prop(PropertyDataId::MotionTable, Guid(motion_table_id));
+        remote.physics =
+            holtburger_world::resolve_effective_entity_physics_state(PhysicsState::GRAVITY);
+        client.world.add_entity(remote);
+        client.world.scene.apply_authoritative_body_effect(
+            holtburger_world::SpatialBodyId::Entity(remote_guid),
+            holtburger_world::AuthoritativePoseEffect::Initialize {
+                pose: WorldPosition::default(),
+            },
+            AuthoritativeBodyVectors {
+                velocity: Vector3::zero(),
+                acceleration: Vector3::zero(),
+                omega: Vector3::zero(),
+            },
+            Instant::now(),
+        );
+
+        client
+            .world
+            .handle_message(&encoded_game_message(GameMessage::UpdateMotion(Box::new(
+                MovementEventData {
+                    guid: remote_guid,
+                    object_instance_sequence: 0,
+                    movement_sequence: 1,
+                    server_control_sequence: 0,
+                    is_autonomous: true,
+                    movement_type: MovementType::Invalid,
+                    motion_flags: 0,
+                    current_style: MotionStance::NonCombat.interpreted(),
+                    data: MovementTypeData::Invalid(MovementInvalid {
+                        state: InterpretedMotionState {
+                            flags: MovementStateFlags::CURRENT_STYLE
+                                | MovementStateFlags::FORWARD_COMMAND,
+                            current_style: Some(MotionStance::NonCombat.interpreted()),
+                            forward_command: Some(InterpretedMotionCommand::RUN_FORWARD),
+                            ..Default::default()
+                        },
+                        sticky_object: None,
+                    }),
+                },
+            ))));
+        client.world.advance_authored_motion(Duration::ZERO);
+        let before = client.current_dynamic_entity_views();
+        assert_eq!(
+            before[0].playing_clip.map(|clip| clip.animation_id),
+            Some(JUMP_FIXTURE_RUN_ANIMATION)
+        );
+
+        client
+            .world
+            .handle_message(&encoded_game_message(GameMessage::UpdateMotion(Box::new(
+                MovementEventData {
+                    guid: remote_guid,
+                    object_instance_sequence: 0,
+                    movement_sequence: 2,
+                    server_control_sequence: 0,
+                    is_autonomous: true,
+                    movement_type: MovementType::Invalid,
+                    motion_flags: 0,
+                    current_style: 0,
+                    data: MovementTypeData::Invalid(MovementInvalid::default()),
+                },
+            ))));
+        client.world.advance_authored_motion(Duration::ZERO);
+        let after = client.current_dynamic_entity_views();
+        assert_eq!(before[0].placement, after[0].placement);
+
+        let event = client
+            .dynamic_entity_tick_event(
+                before,
+                after,
+                DynamicEntityHostTime::new(1.0).unwrap(),
+                30.0,
+                &Default::default(),
+            )
+            .expect("clip-only change must publish a path-stable update");
+        let DynamicEntityEvent::Ticked { batch } = event else {
+            panic!("expected a dynamic entity tick");
+        };
+        assert!(batch.advances.is_empty());
+        assert_eq!(batch.updates.len(), 1);
+        assert_eq!(
+            batch.updates[0].playing_clip.map(|clip| clip.animation_id),
+            Some(JUMP_FIXTURE_STAND_ANIMATION)
+        );
+    }
+
+    #[test]
+    fn fixed_tick_remote_upward_vector_launches_once_and_selects_falling() {
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let player_guid = Guid(0x0102_2300);
+        let remote_guid = Guid(0x0102_2301);
+        let motion_table_id = 0x0900_0041;
+        let player_pose = WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            coords: Vector3::new(48.0, 48.0, 0.0),
+            rotation: Quaternion::identity(),
+        };
+        let remote_pose = WorldPosition {
+            coords: Vector3::new(52.0, 48.0, 0.0),
+            ..player_pose
+        };
+        client
+            .world
+            .set_motion_sequences(jump_presentation_motion_catalog(motion_table_id));
+        client
+            .world
+            .seed_local_player_entity(player_guid, "Player", player_pose);
+
+        let mut remote = Entity::new(remote_guid, "Remote".to_string(), remote_pose);
+        remote
+            .properties
+            .set_did_prop(PropertyDataId::MotionTable, Guid(motion_table_id));
+        remote.acceleration = Vector3::new(0.0, 0.0, -9.8);
+        client.world.add_entity(remote);
+        let motion_events =
+            client
+                .world
+                .handle_message(&encoded_game_message(GameMessage::UpdateMotion(Box::new(
+                    MovementEventData {
+                        guid: remote_guid,
+                        object_instance_sequence: 0,
+                        movement_sequence: 1,
+                        server_control_sequence: 0,
+                        is_autonomous: true,
+                        movement_type: MovementType::Invalid,
+                        motion_flags: 0,
+                        current_style: MotionStance::NonCombat.interpreted(),
+                        data: MovementTypeData::Invalid(MovementInvalid {
+                            state: InterpretedMotionState {
+                                flags: MovementStateFlags::CURRENT_STYLE
+                                    | MovementStateFlags::FORWARD_COMMAND
+                                    | MovementStateFlags::FORWARD_SPEED,
+                                current_style: Some(MotionStance::NonCombat.interpreted()),
+                                forward_command: Some(InterpretedMotionCommand::RUN_FORWARD),
+                                forward_speed: Some(1.0),
+                                ..Default::default()
+                            },
+                            sticky_object: None,
+                        }),
+                    },
+                ))));
+        assert!(motion_events.iter().any(|event| matches!(
+            event,
+            WorldEvent::EntityMotionUpdated { guid, motion }
+                if *guid == remote_guid
+                    && motion.snapshot().is_some_and(|snapshot| {
+                        snapshot.forward_command == Some(InterpretedMotionCommand::RUN_FORWARD)
+                    })
+        )));
+
+        let body_id = holtburger_world::SpatialBodyId::Entity(remote_guid);
+        client
+            .world
+            .scene
+            .set_dynamic_physical_body(
+                body_id,
+                Some(stable_dynamic_body_definition()),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+        let interest = SimulationSceneInterest::prefetch_neighborhood(
+            player_pose,
+            CLIENT_COLLISION_OWNER_RADIUS,
         )
+        .unwrap();
+        let collision = collision_snapshot(
+            interest.clone(),
+            flat_collision_scene_for_interest(&interest),
+        );
+        let now = Instant::now();
+        let dt = Duration::from_millis(PHYSICS_TICK_MS);
+        simulation::tick(
+            now,
+            dt,
+            &mut client.world,
+            &mut client.movement,
+            Some(&collision),
+        )
+        .unwrap();
+        assert_eq!(
+            client.world.scene.body(body_id).unwrap().contact,
+            holtburger_world::ContactState::Grounded
+        );
+
+        assert_eq!(
+            client
+                .world
+                .motion_runtimes
+                .playing_clip(remote_guid)
+                .map(|clip| clip.animation_id),
+            Some(JUMP_FIXTURE_RUN_ANIMATION)
+        );
+
+        let jump_velocity = Vector3::new(2.0, 1.0, 5.0);
+        let jump_update =
+            encoded_game_message(GameMessage::VectorUpdate(Box::new(VectorUpdateData {
+                guid: remote_guid,
+                velocity: jump_velocity,
+                omega: Vector3::zero(),
+                instance_sequence: 0,
+                vector_sequence: 1,
+            })));
+        let jump_events = client.world.handle_message(&jump_update);
+        assert!(jump_events.iter().any(|event| matches!(
+            event,
+            WorldEvent::EntityVectorUpdated { guid, velocity, .. }
+                if *guid == remote_guid && *velocity == jump_velocity
+        )));
+        let ignored_duplicate =
+            client
+                .world
+                .handle_message(&encoded_game_message(GameMessage::VectorUpdate(Box::new(
+                    VectorUpdateData {
+                        guid: remote_guid,
+                        velocity: Vector3::new(99.0, 99.0, 99.0),
+                        omega: Vector3::zero(),
+                        instance_sequence: 0,
+                        vector_sequence: 1,
+                    },
+                ))));
+        assert!(ignored_duplicate.is_empty());
+        assert_eq!(
+            client.world.entities.get(remote_guid).unwrap().velocity,
+            jump_velocity
+        );
+        assert_eq!(
+            client.world.scene.body(body_id).unwrap().retained.velocity,
+            jump_velocity
+        );
+        assert_eq!(
+            client.world.entities.get(remote_guid).unwrap().acceleration,
+            Vector3::new(0.0, 0.0, -9.8)
+        );
+        assert_eq!(
+            client
+                .world
+                .resolve_body_projection_input(body_id)
+                .unwrap()
+                .retained,
+            holtburger_world::RetainedBodyKinematics {
+                velocity: jump_velocity,
+                acceleration: Vector3::new(0.0, 0.0, -9.8),
+                omega: Vector3::zero(),
+            }
+        );
+
+        simulation::tick(
+            now + dt,
+            dt,
+            &mut client.world,
+            &mut client.movement,
+            Some(&collision),
+        )
+        .unwrap();
+        let launched = client.world.scene.body(body_id).unwrap().clone();
+        assert_eq!(launched.contact, holtburger_world::ContactState::Airborne);
+        assert!(launched.pose.coords.z > remote_pose.coords.z);
+        assert!(launched.retained.velocity.z > 0.0);
+        assert!(launched.retained.velocity.z < jump_velocity.z);
+        assert_eq!(
+            client
+                .world
+                .motion_runtimes
+                .state(remote_guid)
+                .unwrap()
+                .substate,
+            holtburger_world::motion::MotionCommand::FALLING
+        );
+        assert_eq!(
+            client
+                .world
+                .motion_runtimes
+                .playing_clip(remote_guid)
+                .map(|clip| clip.animation_id),
+            Some(JUMP_FIXTURE_TAKEOFF_ANIMATION),
+            "the observer must enter the table-authored takeoff transition independently from its arc"
+        );
+
+        let duplicate_after_integration =
+            client
+                .world
+                .handle_message(&encoded_game_message(GameMessage::VectorUpdate(Box::new(
+                    VectorUpdateData {
+                        guid: remote_guid,
+                        velocity: jump_velocity,
+                        omega: Vector3::zero(),
+                        instance_sequence: 0,
+                        vector_sequence: 1,
+                    },
+                ))));
+        assert!(duplicate_after_integration.is_empty());
+        assert_eq!(
+            client.world.scene.body(body_id).unwrap().retained.velocity,
+            launched.retained.velocity,
+            "a duplicate observer packet must not reset gravity-integrated velocity"
+        );
+        for rejected in [
+            VectorUpdateData {
+                guid: remote_guid,
+                velocity: Vector3::new(88.0, 88.0, 88.0),
+                omega: Vector3::zero(),
+                instance_sequence: 0,
+                vector_sequence: 0,
+            },
+            VectorUpdateData {
+                guid: remote_guid,
+                velocity: Vector3::new(77.0, 77.0, 77.0),
+                omega: Vector3::zero(),
+                instance_sequence: 1,
+                vector_sequence: 2,
+            },
+        ] {
+            assert!(
+                client
+                    .world
+                    .handle_message(&encoded_game_message(GameMessage::VectorUpdate(Box::new(
+                        rejected,
+                    ))))
+                    .is_empty(),
+                "stale or wrong-instance vector samples must be handled without mutation"
+            );
+        }
+        assert_eq!(
+            client.world.scene.body(body_id).unwrap().retained.velocity,
+            launched.retained.velocity
+        );
+
+        simulation::tick(
+            now + dt + dt,
+            dt,
+            &mut client.world,
+            &mut client.movement,
+            Some(&collision),
+        )
+        .unwrap();
+        let continued = client.world.scene.body(body_id).unwrap();
+        assert_eq!(continued.contact, holtburger_world::ContactState::Airborne);
+        assert!(continued.pose.coords.z > launched.pose.coords.z);
+        assert!(continued.retained.velocity.z < launched.retained.velocity.z);
+        assert_eq!(
+            client
+                .world
+                .motion_runtimes
+                .playing_clip(remote_guid)
+                .map(|clip| clip.animation_id),
+            Some(JUMP_FIXTURE_TAKEOFF_ANIMATION)
+        );
+
+        let mut falling_step = None;
+        for step in 3..=20 {
+            simulation::tick(
+                now + dt * step,
+                dt,
+                &mut client.world,
+                &mut client.movement,
+                Some(&collision),
+            )
+            .unwrap();
+            if client
+                .world
+                .motion_runtimes
+                .playing_clip(remote_guid)
+                .is_some_and(|clip| clip.animation_id == JUMP_FIXTURE_FALLING_ANIMATION)
+            {
+                assert_eq!(
+                    client.world.scene.body(body_id).unwrap().contact,
+                    holtburger_world::ContactState::Airborne,
+                    "the Falling clip must be observed during the physical arc"
+                );
+                falling_step = Some(step);
+                break;
+            }
+        }
+        let falling_step = falling_step.expect("takeoff must advance into the Falling cycle");
+        assert_eq!(
+            client
+                .world
+                .motion_runtimes
+                .playing_clip(remote_guid)
+                .map(|clip| clip.animation_id),
+            Some(JUMP_FIXTURE_FALLING_ANIMATION),
+            "the observer must visibly play Falling instead of sliding in its run cycle"
+        );
+
+        let mut landed = false;
+        let mut landing_step = 0;
+        for step in (falling_step + 1)..=240 {
+            simulation::tick(
+                now + dt * step,
+                dt,
+                &mut client.world,
+                &mut client.movement,
+                Some(&collision),
+            )
+            .unwrap();
+            if client.world.scene.body(body_id).unwrap().contact
+                == holtburger_world::ContactState::Grounded
+            {
+                landed = true;
+                landing_step = step;
+                break;
+            }
+        }
+        assert!(landed, "remote jump should return to flat support");
+        assert_eq!(
+            client
+                .world
+                .motion_runtimes
+                .state(remote_guid)
+                .unwrap()
+                .substate,
+            holtburger_world::motion::MotionCommand::RUN_FORWARD,
+            "remote landing should restore the server-authored locomotion snapshot"
+        );
+        assert_eq!(
+            client
+                .world
+                .motion_runtimes
+                .playing_clip(remote_guid)
+                .map(|clip| clip.animation_id),
+            Some(JUMP_FIXTURE_LANDING_ANIMATION),
+            "remote support recovery must start the authored landing transition"
+        );
+        simulation::tick(
+            now + dt * (landing_step + 1),
+            dt,
+            &mut client.world,
+            &mut client.movement,
+            Some(&collision),
+        )
+        .unwrap();
+        assert_eq!(
+            client
+                .world
+                .motion_runtimes
+                .playing_clip(remote_guid)
+                .map(|clip| clip.animation_id),
+            Some(JUMP_FIXTURE_RUN_ANIMATION),
+            "the authored landing transition must complete into the server's held run"
+        );
+
+        client
+            .world
+            .handle_message(&encoded_game_message(GameMessage::UpdateMotion(Box::new(
+                MovementEventData {
+                    guid: remote_guid,
+                    object_instance_sequence: 0,
+                    movement_sequence: 2,
+                    server_control_sequence: 0,
+                    is_autonomous: true,
+                    movement_type: MovementType::Invalid,
+                    motion_flags: 0,
+                    current_style: 0,
+                    data: MovementTypeData::Invalid(MovementInvalid::default()),
+                },
+            ))));
+        client.world.advance_authored_motion(Duration::ZERO);
+        assert_eq!(
+            client
+                .world
+                .motion_runtimes
+                .playing_clip(remote_guid)
+                .map(|clip| clip.animation_id),
+            Some(JUMP_FIXTURE_STAND_ANIMATION),
+            "the next launch must begin from initialized style-zero idle authority"
+        );
+
+        let correction_start = now + dt * (landing_step + 2);
+        let second_jump_velocity = Vector3::new(-1.0, 2.0, 4.0);
+        let second_jump_events =
+            client
+                .world
+                .handle_message(&encoded_game_message(GameMessage::VectorUpdate(Box::new(
+                    VectorUpdateData {
+                        guid: remote_guid,
+                        velocity: second_jump_velocity,
+                        omega: Vector3::zero(),
+                        instance_sequence: 0,
+                        vector_sequence: 2,
+                    },
+                ))));
+        assert!(second_jump_events.iter().any(|event| matches!(
+            event,
+            WorldEvent::EntityVectorUpdated { guid, velocity, .. }
+                if *guid == remote_guid && *velocity == second_jump_velocity
+        )));
+        simulation::tick(
+            correction_start,
+            dt,
+            &mut client.world,
+            &mut client.movement,
+            Some(&collision),
+        )
+        .unwrap();
+        assert_eq!(
+            client.world.scene.body(body_id).unwrap().contact,
+            holtburger_world::ContactState::Airborne
+        );
+
+        let airborne_before_stop = client.world.scene.body(body_id).unwrap().retained.velocity;
+        let stop_events =
+            client
+                .world
+                .handle_message(&encoded_game_message(GameMessage::UpdateMotion(Box::new(
+                    MovementEventData {
+                        guid: remote_guid,
+                        object_instance_sequence: 0,
+                        movement_sequence: 3,
+                        server_control_sequence: 0,
+                        is_autonomous: true,
+                        movement_type: MovementType::Invalid,
+                        motion_flags: 0,
+                        current_style: 0,
+                        data: MovementTypeData::Invalid(MovementInvalid::default()),
+                    },
+                ))));
+        assert!(
+            stop_events.is_empty(),
+            "repeating the retained idle order must not restart playback"
+        );
+        assert!(
+            client
+                .world
+                .entities
+                .get(remote_guid)
+                .and_then(|entity| entity.network_motion.snapshot())
+                .is_some_and(|snapshot| {
+                    snapshot.current_style == Some(MotionStance::NonCombat)
+                        && snapshot.motion_command().is_none()
+                })
+        );
+        assert_eq!(
+            client.world.scene.body(body_id).unwrap().retained.velocity,
+            airborne_before_stop,
+            "an airborne stop changes future grounded presentation, not committed ballistics"
+        );
+
+        let corrected_pose = WorldPosition {
+            coords: Vector3::new(54.0, 48.0, 0.0),
+            ..remote_pose
+        };
+        let correction_events =
+            client
+                .world
+                .handle_message(&encoded_game_message(GameMessage::UpdatePosition(
+                    Box::new(UpdatePositionData {
+                        guid: remote_guid,
+                        pos: PositionPack {
+                            flags: UpdatePositionFlag::HAS_CONTACT,
+                            pos: corrected_pose,
+                            instance_sequence: 0,
+                            position_sequence: 1,
+                            teleport_sequence: 1,
+                            force_position_sequence: 0,
+                            ..PositionPack::default()
+                        },
+                    }),
+                )));
+        assert!(correction_events.iter().any(|event| matches!(
+            event,
+            WorldEvent::ForcedReposition { guid, pos, .. }
+                if *guid == remote_guid && *pos == corrected_pose
+        )));
+        let corrected = client.world.scene.body(body_id).unwrap();
+        assert_eq!(corrected.pose, corrected_pose);
+        assert_eq!(corrected.retained.velocity, Vector3::zero());
+        // Contact is a solver product. The reset clears the launch immediately, while the next
+        // collision tick reclassifies support at the corrected pose.
+
+        simulation::tick(
+            correction_start + dt,
+            dt,
+            &mut client.world,
+            &mut client.movement,
+            Some(&collision),
+        )
+        .unwrap();
+        let settled_correction = client.world.scene.body(body_id).unwrap();
+        assert_eq!(
+            settled_correction.contact,
+            holtburger_world::ContactState::Grounded
+        );
+        assert_eq!(settled_correction.pose.coords.z, corrected_pose.coords.z);
+        assert_eq!(settled_correction.retained.velocity.x, 0.0);
+        assert_eq!(settled_correction.retained.velocity.y, 0.0);
+        assert!(
+            settled_correction.retained.velocity.z <= 0.0,
+            "support solve may retain its gravity sample but must not resurrect upward launch"
+        );
     }
 
     #[test]
@@ -1723,14 +3442,14 @@ mod tests {
         remote
             .properties
             .set_did_prop(PropertyDataId::MotionTable, Guid(motion_table_id));
-        remote.motion_snapshot = Some(EntityMotionSnapshot {
+        remote.network_motion = EntityNetworkMotion::Initialized(EntityMotionSnapshot {
             current_style: Some(MotionStance::NonCombat),
             forward_command: Some(InterpretedMotionCommand::RUN_FORWARD),
             sidestep_command: None,
             turn_command: Some(InterpretedMotionCommand::TURN_RIGHT),
-            forward_speed: OrderedMotionSpeed::from_f32(3.5),
+            forward_speed: OrderedMotionScalar::from_f32(3.5),
             sidestep_speed: None,
-            turn_speed: OrderedMotionSpeed::from_f32(0.75),
+            turn_speed: OrderedMotionScalar::from_f32(0.75),
             directive: None,
         });
         client.world.add_entity(remote);
@@ -1806,7 +3525,7 @@ mod tests {
             .body(holtburger_world::SpatialBodyId::LocalPlayer(guid))
             .expect("local player runtime body should exist after solve");
         assert_eq!(body.pose, player_pose);
-        assert!(!events.iter().any(|event| matches!(
+        assert!(!events.events.iter().any(|event| matches!(
             event,
             WorldEvent::RuntimeBodyChanged {
                 body_id: holtburger_world::SpatialBodyId::LocalPlayer(_)
@@ -1911,7 +3630,7 @@ mod tests {
                 .expect("authoritative player pose should remain available"),
             player_pose
         );
-        assert!(events.iter().any(|event| matches!(
+        assert!(events.events.iter().any(|event| matches!(
             event,
             WorldEvent::RuntimeBodyAdvanced {
                 body_id: event_id,
@@ -2009,13 +3728,13 @@ mod tests {
             .expect("local player runtime body should exist after solve");
         assert_eq!(player_body.pose, player_pose);
         assert!(remote_after.pose.coords.x > remote_start.x);
-        assert!(!events.iter().any(|event| matches!(
+        assert!(!events.events.iter().any(|event| matches!(
             event,
             WorldEvent::RuntimeBodyChanged {
                 body_id: holtburger_world::SpatialBodyId::LocalPlayer(_)
             }
         )));
-        assert!(events.iter().any(|event| matches!(
+        assert!(events.events.iter().any(|event| matches!(
             event,
             WorldEvent::RuntimeBodyAdvanced {
                 body_id: holtburger_world::SpatialBodyId::Entity(event_guid),
@@ -2206,14 +3925,14 @@ mod tests {
         remote
             .properties
             .set_did_prop(PropertyDataId::MotionTable, Guid(motion_table_id));
-        remote.motion_snapshot = Some(EntityMotionSnapshot {
+        remote.network_motion = EntityNetworkMotion::Initialized(EntityMotionSnapshot {
             current_style: Some(MotionStance::NonCombat),
             forward_command: Some(InterpretedMotionCommand::RUN_FORWARD),
             sidestep_command: None,
             turn_command: Some(InterpretedMotionCommand::TURN_RIGHT),
-            forward_speed: OrderedMotionSpeed::from_f32(3.5),
+            forward_speed: OrderedMotionScalar::from_f32(3.5),
             sidestep_speed: None,
-            turn_speed: OrderedMotionSpeed::from_f32(0.75),
+            turn_speed: OrderedMotionScalar::from_f32(0.75),
             directive: None,
         });
         client.world.add_entity(remote.clone());

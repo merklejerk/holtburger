@@ -1,7 +1,9 @@
 use super::*;
 use crate::WorldEvent;
 use crate::WorldState;
-use crate::entity::{Entity, EntityMotionDirective, EntityMotionSnapshot, OrderedMotionSpeed};
+use crate::entity::{
+    Entity, EntityMotionDirective, EntityMotionSnapshot, EntityNetworkMotion, OrderedMotionScalar,
+};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
     EnchantmentTypeFlags, PropertyFloat, PropertyInt, WorldObjectPropertyAccessorsMut,
@@ -446,6 +448,7 @@ fn test_vector_update_routing() {
 
     let mut state = WorldState::synthetic();
     state.player.guid = Guid(0x50000001);
+    state.player.instance_sequence = 123;
     state.entities.insert(Entity::new(
         state.player.guid,
         "Player".to_string(),
@@ -463,13 +466,14 @@ fn test_vector_update_routing() {
     let msg = GameMessage::VectorUpdate(Box::new(data));
     let events = state.handle_message(&msg);
 
-    assert_eq!(events.len(), 2);
+    assert_eq!(events.len(), 1);
     assert_eq!(state.player.instance_sequence, 123);
-    assert!(events.iter().any(|event| matches!(
-        event,
-        WorldEvent::RuntimeBodyChanged { body_id }
-            if *body_id == crate::SpatialBodyId::LocalPlayer(Guid(0x50000001))
-    )));
+    assert_eq!(state.player.vector_sequence, 456);
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, WorldEvent::RuntimeBodyChanged { .. }))
+    );
     assert!(events.iter().any(|event| matches!(
         event,
         WorldEvent::EntityVectorUpdated { guid, velocity, omega }
@@ -651,6 +655,7 @@ fn test_update_motion_caches_remote_entity_motion_snapshot_and_emits_event() {
     let guid = Guid(0x60000001);
 
     let mut entity = Entity::new(guid, "Drudge".to_string(), WorldPosition::default());
+    entity.sequences[8] = 7;
     entity.health_fraction = Some(0.42);
     state.add_entity(entity);
 
@@ -680,7 +685,7 @@ fn test_update_motion_caches_remote_entity_motion_snapshot_and_emits_event() {
     let snapshot = state
         .entities
         .get(guid)
-        .and_then(|entity| entity.motion_snapshot)
+        .and_then(|entity| entity.network_motion.snapshot())
         .expect("expected motion snapshot to be cached");
 
     assert_eq!(snapshot.current_style, Some(MotionStance::NonCombat));
@@ -698,10 +703,10 @@ fn test_update_motion_caches_remote_entity_motion_snapshot_and_emits_event() {
     );
     assert!(events.iter().any(|event| matches!(
         event,
-        WorldEvent::EntityMotionUpdated { guid: target, snapshot }
+        WorldEvent::EntityMotionUpdated { guid: target, motion }
             if *target == guid
-            && snapshot.as_ref().is_some_and(|snapshot| snapshot.current_style == Some(MotionStance::NonCombat))
-            && snapshot.as_ref().is_some_and(|snapshot| snapshot.motion_command() == Some(InterpretedMotionCommand::DEAD))
+            && motion.snapshot().is_some_and(|snapshot| snapshot.current_style == Some(MotionStance::NonCombat))
+            && motion.snapshot().is_some_and(|snapshot| snapshot.motion_command() == Some(InterpretedMotionCommand::DEAD))
     )));
     assert!(events.iter().any(|event| matches!(
         event,
@@ -713,12 +718,13 @@ fn test_update_motion_caches_remote_entity_motion_snapshot_and_emits_event() {
 }
 
 #[test]
-fn test_update_motion_clears_remote_entity_motion_snapshot_and_emits_event() {
+fn test_empty_update_motion_initializes_remote_entity_idle_and_emits_event() {
     let mut state = WorldState::synthetic();
     let guid = Guid(0x60000001);
 
     let mut entity = Entity::new(guid, "Drudge".to_string(), WorldPosition::default());
-    entity.motion_snapshot = Some(EntityMotionSnapshot {
+    entity.sequences[8] = 1;
+    entity.network_motion = EntityNetworkMotion::Initialized(EntityMotionSnapshot {
         current_style: Some(MotionStance::NonCombat),
         forward_command: Some(InterpretedMotionCommand::WALK_FORWARD),
         sidestep_command: None,
@@ -745,13 +751,18 @@ fn test_update_motion_clears_remote_entity_motion_snapshot_and_emits_event() {
         state
             .entities
             .get(guid)
-            .and_then(|entity| entity.motion_snapshot),
-        None
+            .and_then(|entity| entity.network_motion.snapshot())
+            .map(|snapshot| snapshot.current_style),
+        Some(Some(MotionStance::NonCombat))
     );
     assert!(events.iter().any(|event| matches!(
         event,
-        WorldEvent::EntityMotionUpdated { guid: target, snapshot }
-            if *target == guid && snapshot.is_none()
+        WorldEvent::EntityMotionUpdated { guid: target, motion }
+            if *target == guid
+            && motion.snapshot().is_some_and(|snapshot| {
+                snapshot.current_style == Some(MotionStance::NonCombat)
+                    && snapshot.motion_command().is_none()
+            })
     )));
 }
 
@@ -760,11 +771,9 @@ fn test_update_motion_retains_interpreted_motion_speeds() {
     let mut state = WorldState::synthetic();
     let guid = Guid(0x60000001);
 
-    state.add_entity(Entity::new(
-        guid,
-        "Drudge".to_string(),
-        WorldPosition::default(),
-    ));
+    let mut entity = Entity::new(guid, "Drudge".to_string(), WorldPosition::default());
+    entity.sequences[8] = 7;
+    state.add_entity(entity);
 
     let msg = GameMessage::UpdateMotion(Box::new(MovementEventData {
         guid,
@@ -797,25 +806,25 @@ fn test_update_motion_retains_interpreted_motion_speeds() {
     let snapshot = state
         .entities
         .get(guid)
-        .and_then(|entity| entity.motion_snapshot)
+        .and_then(|entity| entity.network_motion.snapshot())
         .expect("expected motion snapshot to be cached");
 
     assert_eq!(
         snapshot.forward_command,
         Some(InterpretedMotionCommand::RUN_FORWARD)
     );
-    assert_eq!(snapshot.forward_speed, OrderedMotionSpeed::from_f32(3.5));
+    assert_eq!(snapshot.forward_speed, OrderedMotionScalar::from_f32(3.5));
     assert_eq!(
         snapshot.turn_command,
         Some(InterpretedMotionCommand::TURN_RIGHT)
     );
-    assert_eq!(snapshot.turn_speed, OrderedMotionSpeed::from_f32(1.25));
+    assert_eq!(snapshot.turn_speed, OrderedMotionScalar::from_f32(1.25));
     assert!(events.iter().any(|event| matches!(
         event,
-        WorldEvent::EntityMotionUpdated { guid: target, snapshot }
+        WorldEvent::EntityMotionUpdated { guid: target, motion }
             if *target == guid
-            && snapshot.as_ref().is_some_and(|snapshot| snapshot.forward_speed == OrderedMotionSpeed::from_f32(3.5))
-            && snapshot.as_ref().is_some_and(|snapshot| snapshot.turn_speed == OrderedMotionSpeed::from_f32(1.25))
+            && motion.snapshot().is_some_and(|snapshot| snapshot.forward_speed == OrderedMotionScalar::from_f32(3.5))
+            && motion.snapshot().is_some_and(|snapshot| snapshot.turn_speed == OrderedMotionScalar::from_f32(1.25))
     )));
 }
 
@@ -824,11 +833,9 @@ fn test_update_motion_retains_turn_to_heading_directive() {
     let mut state = WorldState::synthetic();
     let guid = Guid(0x60000001);
 
-    state.add_entity(Entity::new(
-        guid,
-        "Drudge".to_string(),
-        WorldPosition::default(),
-    ));
+    let mut entity = Entity::new(guid, "Drudge".to_string(), WorldPosition::default());
+    entity.sequences[8] = 7;
+    state.add_entity(entity);
 
     let msg = GameMessage::UpdateMotion(Box::new(MovementEventData {
         guid,
@@ -856,25 +863,51 @@ fn test_update_motion_retains_turn_to_heading_directive() {
     let snapshot = state
         .entities
         .get(guid)
-        .and_then(|entity| entity.motion_snapshot)
+        .and_then(|entity| entity.network_motion.snapshot())
         .expect("expected motion snapshot to be cached");
 
     assert_eq!(
         snapshot.directive,
         Some(EntityMotionDirective::TurnToHeading {
-            desired_heading: OrderedMotionSpeed::from_f32(0.75).expect("finite desired heading"),
-            speed: OrderedMotionSpeed::from_f32(1.5).expect("finite speed"),
+            admission: crate::entity::EntityMotionAdmission {
+                object_instance_sequence: 7,
+                movement_sequence: 8,
+                server_control_sequence: 9,
+                is_autonomous: false,
+            },
+            params: crate::entity::EntityTurnToParameters {
+                flags: 0,
+                desired_heading_degrees: OrderedMotionScalar::from_f32(0.75)
+                    .expect("finite desired heading"),
+                speed: OrderedMotionScalar::from_f32(1.5).expect("finite speed"),
+            },
         })
     );
 }
 
 #[test]
-fn test_vector_update_applies_self_velocity_and_omega() {
+fn self_vector_update_records_server_facts_without_replacing_runtime_vectors() {
     let mut state = WorldState::synthetic();
     state.player.guid = Guid(0x50000001);
+    state.player.instance_sequence = 11;
 
-    let start = WorldPosition::default();
+    let start = WorldPosition {
+        landblock_id: Guid(0x1234_0000),
+        ..WorldPosition::default()
+    };
     state.seed_local_player_entity(state.player.guid, "Player", start);
+    let body_id = crate::SpatialBodyId::LocalPlayer(state.player.guid);
+    let local_velocity = holtburger_common::Vector3::new(4.0, 5.0, 6.0);
+    let local_omega = holtburger_common::Vector3::new(0.0, 0.0, 0.75);
+    assert!(state.scene.apply_authoritative_body_vectors(
+        body_id,
+        crate::AuthoritativeBodyVectors {
+            velocity: local_velocity,
+            acceleration: holtburger_common::Vector3::zero(),
+            omega: local_omega,
+        },
+        std::time::Instant::now(),
+    ));
 
     let msg = GameMessage::VectorUpdate(Box::new(VectorUpdateData {
         guid: state.player.guid,
@@ -887,6 +920,7 @@ fn test_vector_update_applies_self_velocity_and_omega() {
     let events = state.handle_message(&msg);
 
     assert_eq!(state.player.instance_sequence, 11);
+    assert_eq!(state.player.vector_sequence, 12);
     assert_eq!(
         state
             .entities
@@ -910,6 +944,36 @@ fn test_vector_update_applies_self_velocity_and_omega() {
             && *velocity == holtburger_common::Vector3::new(0.0, 0.0, 0.0)
             && *omega == holtburger_common::Vector3::new(0.0, 0.0, 1.25)
     )));
+    let body = state
+        .scene
+        .body(body_id)
+        .expect("player body should remain");
+    assert_eq!(body.retained.velocity, local_velocity);
+    assert_eq!(body.retained.omega, local_omega);
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, WorldEvent::RuntimeBodyChanged { .. }))
+    );
+
+    let stale = GameMessage::VectorUpdate(Box::new(VectorUpdateData {
+        guid: state.player.guid,
+        velocity: holtburger_common::Vector3::new(9.0, 9.0, 9.0),
+        omega: holtburger_common::Vector3::new(8.0, 8.0, 8.0),
+        instance_sequence: 11,
+        vector_sequence: 11,
+    }));
+    assert!(state.handle_message(&stale).is_empty());
+    assert_eq!(state.player.vector_sequence, 12);
+    let entity = state
+        .entities
+        .get(state.player.guid)
+        .expect("player entity should remain");
+    assert_eq!(entity.velocity, holtburger_common::Vector3::zero());
+    assert_eq!(
+        entity.omega,
+        holtburger_common::Vector3::new(0.0, 0.0, 1.25)
+    );
 }
 
 #[test]

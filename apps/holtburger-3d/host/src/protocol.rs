@@ -86,6 +86,10 @@ pub enum HostEvent {
     ExplorerDynamicEntity(holtburger_core::DynamicEntityEvent),
     ClientCurrentState(crate::client_projection::ClientCurrentState),
     ClientLifecycleChanged(crate::client_projection::ClientLifecycleWire),
+    ClientCharacterMotionCapabilitiesUpdated(
+        Option<crate::client_projection::ClientCharacterMotionCapabilitiesWire>,
+    ),
+    ClientCharacterMotionFeedback(crate::client_projection::ClientCharacterMotionFeedbackWire),
     ClientLocalPlayerEstablished {
         #[serde(rename = "playerGuid")]
         player_guid: holtburger_common::Guid,
@@ -329,6 +333,12 @@ impl ClientEventSink for StdioEventSink {
             }
             crate::client_projection::ClientHostEvent::LifecycleChanged(lifecycle) => {
                 HostEvent::ClientLifecycleChanged(lifecycle)
+            }
+            crate::client_projection::ClientHostEvent::CharacterMotionCapabilitiesUpdated(
+                capabilities,
+            ) => HostEvent::ClientCharacterMotionCapabilitiesUpdated(capabilities),
+            crate::client_projection::ClientHostEvent::CharacterMotionFeedback(feedback) => {
+                HostEvent::ClientCharacterMotionFeedback(feedback)
             }
             crate::client_projection::ClientHostEvent::LocalPlayerEstablished { player_guid } => {
                 HostEvent::ClientLocalPlayerEstablished { player_guid }

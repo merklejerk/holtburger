@@ -53,22 +53,14 @@ pub(crate) fn handle_message(
         GameMessage::VectorUpdate(data) => {
             if data.guid == state.player.guid && state.player.guid != holtburger_common::Guid::NULL
             {
-                state.player.update_vector_sequence(data.instance_sequence);
-                events.extend(state.set_player_vector(data.velocity, data.omega));
-                return true;
-            }
-            false
-        }
-        GameMessage::UpdateMotion(data) => {
-            if data.guid == state.player.guid && state.player.guid != holtburger_common::Guid::NULL
-            {
-                let accepted = state.player.apply_self_update_motion(data);
-                if accepted && !data.is_autonomous {
-                    events.push(WorldEvent::SelfServerControlledMotion(Box::new(
-                        (**data).clone(),
-                    )));
+                if !state
+                    .player
+                    .admit_server_vector_sequences(data.instance_sequence, data.vector_sequence)
+                {
+                    return true;
                 }
-                return !data.is_autonomous && !accepted;
+                events.extend(state.record_player_server_vectors(data.velocity, data.omega));
+                return true;
             }
             false
         }

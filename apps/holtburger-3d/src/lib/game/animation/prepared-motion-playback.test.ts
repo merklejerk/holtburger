@@ -56,7 +56,7 @@ function closure(
 	};
 }
 
-const staticBounds = new AABB3(new Vec3(-9, -9, -9), new Vec3(9, 9, 9));
+const staticBounds = AABB3.zero();
 
 beforeEach(() => {
 	vi.restoreAllMocks();
@@ -133,7 +133,7 @@ describe("prepareMotionPlayback", () => {
 		expect([...playback.clips.keys()]).toEqual(["0x03000001"]);
 	});
 
-	it("skips a clip that does not cover every part the appearance needs", () => {
+	it("accepts a partial clip and retains static coverage for untouched parts", () => {
 		const playback = prepareMotionPlayback(
 			closure([animation("0x03000001", [0, 1], [], 1)]),
 			template(3),
@@ -141,7 +141,9 @@ describe("prepareMotionPlayback", () => {
 			staticBounds,
 		);
 
-		expect(playback.clips.size).toBe(0);
+		expect(playback.clips.size).toBe(1);
+		expect(playback.localBounds.max.x).toBe(1);
+		expect(console.warn).not.toHaveBeenCalled();
 	});
 
 	/// An entity whose every clip was refused keeps its authored pose, which is what an entity with
@@ -157,7 +159,8 @@ describe("prepareMotionPlayback", () => {
 		);
 
 		expect(playback.clips.size).toBe(0);
-		expect(playback.localBounds).toBe(staticBounds);
+		expect(playback.localBounds).toEqual(staticBounds);
+		expect(playback.localBounds).not.toBe(staticBounds);
 	});
 
 	it("complains once per table and clip rather than once per entity", () => {

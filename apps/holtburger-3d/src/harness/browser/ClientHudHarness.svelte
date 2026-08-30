@@ -5,6 +5,12 @@
 	import type { MapPanelFrame } from "../../app/map-panel-frame";
 	import type { ClientPresentationDiagnostics } from "../../client/client-presentation-session";
 
+	const jumpFixture = new URLSearchParams(window.location.search).get("jump");
+	const jumpChargeActive = jumpFixture === "charging" || jumpFixture === "full";
+	const jumpExtent = jumpFixture === "full" ? 1 : 0.45;
+	const jumpStatus =
+		jumpFixture === "rejected" ? "You need stable ground to jump." : null;
+
 	const messages: readonly ClientChatLine[] = [
 		line(
 			1,
@@ -77,6 +83,9 @@
 		{ kind: "stamina", current: 210, maximum: 245 },
 		{ kind: "mana", current: 302, maximum: 410 },
 	]}
+	{jumpChargeActive}
+	readJumpExtent={() => jumpExtent}
+	{jumpStatus}
 	chatMessages={messages}
 	onSendChat={async () => {}}
 	onChatFocusChange={() => {}}

@@ -165,6 +165,8 @@ interface StagedBehaviorAssets {
 
 interface PreparedDynamicEntity {
 	readonly animation: PreparedDynamicAnimation;
+	/** Complete setup pose retained beneath any partial-part animation clip. */
+	readonly initialPartToObjectTransforms: readonly Mat4[];
 	readonly nodeId: SceneNodeId;
 	readonly source: DynamicPresentationSource;
 	/** Staged script closure, or `null` for a resident whose setup owns no default script. */
@@ -362,6 +364,8 @@ export class DynamicEntitySystem<
 						);
 					return {
 						animation: entity.preparedAnimation,
+						initialPartToObjectTransforms:
+							entity.articulatedPose.partToObjectTransforms,
 						nodeId: entity.rootNodeId,
 						scriptClosure: entity.scriptClosure,
 						motionClosure: entity.motionClosure,
@@ -715,6 +719,13 @@ export class DynamicEntitySystem<
 			);
 		}
 		return entity.motionPlayback.clips.get(animationId) ?? null;
+	}
+
+	/** Complete currently published pose used to seed a motion-driven entity's first clip. */
+	getPartToObjectTransforms(nodeId: SceneNodeId): readonly Mat4[] {
+		const entity = this.#entities.get(nodeId);
+		if (!entity) throw new Error(`Dynamic entity ${nodeId} does not exist.`);
+		return entity.articulatedPose.partToObjectTransforms;
 	}
 
 	getDiagnostics() {

@@ -1942,6 +1942,7 @@ export class GamePresentationRuntime {
 				clip.framerate,
 				clip.completion,
 			),
+			this.#dynamics.getPartToObjectTransforms(installed.nodeId),
 		);
 	}
 
@@ -3392,19 +3393,21 @@ export class GamePresentationRuntime {
 		try {
 			animationStage = this.#animation.stageOwner(
 				ownerId,
-				prepared.flatMap(({ animation, nodeId, source }) =>
-					animation.kind === "activatable"
-						? [
-								{
-									animation: animation.animation,
-									residentIdentity: source.identity,
-									target: {
-										generation: installation.generation,
-										targetId: behaviorTargetId(nodeId),
+				prepared.flatMap(
+					({ animation, initialPartToObjectTransforms, nodeId, source }) =>
+						animation.kind === "activatable"
+							? [
+									{
+										animation: animation.animation,
+										initialPartToObjectTransforms,
+										residentIdentity: source.identity,
+										target: {
+											generation: installation.generation,
+											targetId: behaviorTargetId(nodeId),
+										},
 									},
-								},
-							]
-						: [],
+								]
+							: [],
 				),
 			);
 		} catch (cause) {

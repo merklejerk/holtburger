@@ -28,6 +28,9 @@ pub enum ClientHostCommand {
     ReplaceClientDrive {
         request: crate::client_host::ClientDriveRequest,
     },
+    QueueClientCharacterMotionEvent {
+        request: crate::client_host::ClientCharacterMotionEventRequest,
+    },
     SendClientChat {
         message: String,
     },
@@ -58,6 +61,7 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "request_client_current_state",
     "select_client_character",
     "replace_client_drive",
+    "queue_client_character_motion_event",
     "send_client_chat",
     "start_client_camera",
     "set_client_camera_intent",
@@ -206,6 +210,14 @@ impl ClientHostRuntime {
             .await
     }
 
+    pub async fn queue_character_motion_event(
+        &self,
+        request: crate::client_host::ClientCharacterMotionEventRequest,
+    ) -> Result<()> {
+        self.send_command(ClientCommand::ControlCharacter(request.into_event()?))
+            .await
+    }
+
     pub async fn start_camera(
         &self,
         request: holtburger_core::ClientCameraStartRequest,
@@ -306,6 +318,11 @@ pub async fn dispatch_client(
             .map_err(application_error),
         ReplaceClientDrive { request } => runtime
             .replace_drive(request)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        QueueClientCharacterMotionEvent { request } => runtime
+            .queue_character_motion_event(request)
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),

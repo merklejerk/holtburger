@@ -10,16 +10,17 @@ use holtburger_common::{Guid, RigidTransform, Vector3};
 use holtburger_content::MotionSequenceCatalog;
 use holtburger_core::client::movement_types::CharacterDrive;
 use holtburger_core::{
-    AdjustedForwardAxis, CharacterJumpReadiness, CharacterJumpRejection, CharacterMotionContact,
-    CharacterMotionEventResult, CharacterMotionRejection, CharacterMotionSequence,
-    DynamicEntityBodyCommitOutcome, DynamicEntityBodyOperationError,
+    AdjustedForwardAxis, CharacterJumpReadiness, CharacterJumpRejection,
+    CharacterMotionEventResult, CharacterMotionReadiness, CharacterMotionRejection,
+    CharacterMotionSequence, DynamicEntityBodyCommitOutcome, DynamicEntityBodyOperationError,
     DynamicEntityBodyRemovalOutcome, DynamicEntityBodyReplacementOutcome, DynamicEntityCategory,
     DynamicEntityDefinition, DynamicEntityInitialState, DynamicEntityLaunchPlan,
     DynamicEntityProjectionInput, SequencedCharacterMotionEvent,
     dynamic_entity_projection_input_from_body, resolve_character_jump,
 };
 use holtburger_world::motion::{
-    BodyMotionRuntime, MotionCommand, MotionOrder, MotionRuntimeRegistry, PlayingMotionClip,
+    BodyMotionRuntime, CharacterMotionPresentation, MotionOrder, MotionRuntimeRegistry,
+    PlayingMotionClip,
 };
 use holtburger_world::{
     CollisionReportOutcome, ContactState, DynamicPhysicalBodyConfiguration,
@@ -549,6 +550,8 @@ pub enum PossessionEventRejection {
     NonphysicalResponse,
     UnsupportedContact,
     Airborne,
+    Overburdened,
+    CapabilityUnavailable,
 }
 
 /// Physical result retained with the possession probe after one fixed-tick body commit.
@@ -680,11 +683,13 @@ fn propose_possession_tick(
             }
         } else {
             let contact = if launch.is_some() {
-                CharacterMotionContact::Unsupported
+                CharacterMotionReadiness::Unsupported
             } else if body.contact == ContactState::Grounded {
-                CharacterMotionContact::Walkable
+                CharacterMotionReadiness::Ready
+            } else if body.contact == ContactState::Airborne {
+                CharacterMotionReadiness::Airborne
             } else {
-                CharacterMotionContact::Unsupported
+                CharacterMotionReadiness::Unsupported
             };
             let event_result = active.controller.apply_event(
                 SequencedCharacterMotionEvent {
@@ -772,8 +777,13 @@ fn possession_event_result(
                 CharacterMotionRejection::ChargeNotActive => {
                     PossessionEventRejection::ChargeNotActive
                 }
+                CharacterMotionRejection::Airborne => PossessionEventRejection::Airborne,
                 CharacterMotionRejection::Unsupported => {
                     PossessionEventRejection::UnsupportedContact
+                }
+                CharacterMotionRejection::Overburdened => PossessionEventRejection::Overburdened,
+                CharacterMotionRejection::CapabilityUnavailable => {
+                    PossessionEventRejection::CapabilityUnavailable
                 }
             },
         },
@@ -821,25 +831,29 @@ fn effective_possession_order(
         .capabilities
         .get(effective.stance)
         .expect("effective possession stance lost its capability");
-    let mut order = effective.visible_order;
+    let requested = CharacterMotionPresentation::resolve(
+        contact,
+        launching,
+        active.controller.is_standing_long_jump(),
+    );
     // RETAIL DIVERGENCE: retail synchronously selects target `Ready`/`Falling` while charging and
     // crossing support (`acclient.c:330342-330453`). Possession still performs the physical jump
     // when either target row is absent, retaining only the target stance/default presentation;
     // requiring those clips would disable jump for content that cannot observe a borrowed player
     // animation. Census 2026-08-21: 4,999 of 7,788 projected creature templates lack at least one
     // effective standard non-combat jump-presentation state; the full stance matrix is in the plan.
-    if launching || matches!(contact, ContactState::Airborne | ContactState::Sliding) {
-        order.forward = capability
-            .has_falling_presentation()
-            .then_some((MotionCommand::FALLING, 1.0));
-        order.sidestep = None;
-    } else if active.controller.is_standing_long_jump() {
-        order.forward = capability
-            .has_ready_presentation()
-            .then_some((MotionCommand::READY, 1.0));
-        order.sidestep = None;
-    }
-    Ok(order)
+    let presentation = match requested {
+        CharacterMotionPresentation::Falling if !capability.has_falling_presentation() => {
+            CharacterMotionPresentation::StanceDefault
+        }
+        CharacterMotionPresentation::Ready if !capability.has_ready_presentation() => {
+            CharacterMotionPresentation::StanceDefault
+        }
+        presentation => presentation,
+    };
+    Ok(effective
+        .visible_order
+        .with_character_presentation(presentation))
 }
 
 fn possession_grounded_actuation(
@@ -2103,6 +2117,7 @@ mod tests {
     use holtburger_dat::file_type::setup_model::AnimationFrame;
     use holtburger_dat::file_type::{Animation, MotionTable};
     use holtburger_dat::graphics::Frame;
+    use holtburger_world::motion::MotionCommand;
     use holtburger_world::{
         DynamicBodyCollisionDefinition, EdgeProtection, EntityAppearance,
         EntityCollisionParticipation, EntityCollisionReportPolicy, EntityDynamicCollisionPolicy,
@@ -3791,13 +3806,13 @@ mod tests {
     }
 
     #[test]
-    fn jump_launches_without_ready_or_falling_target_presentation() {
+    fn jump_launches_without_falling_target_presentation() {
         let (simulation, runtime, guid) = walking_runtime();
         let settled_at = settle(&simulation, Instant::now());
         let possession = runtime.possess(guid).unwrap();
         assert_eq!(
             possession.stances[0].jump_presentation,
-            crate::explorer_possession_control::PossessionJumpPresentation::StanceDefault
+            crate::explorer_possession_control::PossessionJumpPresentation::ReadyOnly
         );
         runtime
             .queue_possession_event(ExplorerPossessionEventRequest {

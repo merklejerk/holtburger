@@ -12,6 +12,10 @@ import {
 
 class FakeClientTransport implements ClientLifecycleTransport {
 	readonly calls: string[] = [];
+	readonly invocations: Array<{
+		command: string;
+		args: Record<string, unknown> | undefined;
+	}> = [];
 	readonly handlers = new Map<string, (payload: unknown) => void>();
 	#currentState: ClientCurrentState = currentState(0x5000_0001);
 	#emitLaggedDeltaBeforeSnapshot = false;
@@ -30,6 +34,7 @@ class FakeClientTransport implements ClientLifecycleTransport {
 
 	async invoke(command: string, args?: Record<string, unknown>): Promise<void> {
 		this.calls.push(`invoke:${command}`);
+		this.invocations.push({ command, args });
 		if (command === "request_client_current_state") {
 			if (this.#emitLaggedDeltaBeforeSnapshot) {
 				this.emit("client-dynamic-entity", {
@@ -62,10 +67,12 @@ describe("ClientLifecycleSession", () => {
 
 		await session.start();
 
-		expect(transport.calls.slice(0, 14)).toEqual([
+		expect(transport.calls.slice(0, 16)).toEqual([
 			"listen:client-dynamic-entity",
 			"listen:client-current-state",
 			"listen:client-lifecycle-changed",
+			"listen:client-character-motion-capabilities-updated",
+			"listen:client-character-motion-feedback",
 			"listen:client-local-player-established",
 			"listen:client-server-time-updated",
 			"listen:client-world-name-updated",
@@ -171,6 +178,7 @@ describe("ClientLifecycleSession", () => {
 		await session.replaceDrive({
 			gait: "run",
 			longitudinal: "forward",
+			lateral: "left",
 			turning: null,
 		});
 		expect(transport.calls).toEqual(["invoke:replace_client_drive"]);
@@ -178,10 +186,69 @@ describe("ClientLifecycleSession", () => {
 			session.replaceDrive({
 				gait: "sprint",
 				longitudinal: null,
+				lateral: null,
 				turning: null,
 			} as never),
 		).rejects.toThrow();
 		expect(transport.calls).toHaveLength(1);
+	});
+
+	it("validates and forwards ordered character-motion edges without reshaping them", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const release = {
+			kind: "release-jump" as const,
+			sequence: 12,
+			drive: {
+				gait: "run" as const,
+				longitudinal: "forward" as const,
+				lateral: "right" as const,
+				turning: null,
+			},
+			extent: 0.625,
+		};
+
+		await session.queueCharacterMotionEvent(release);
+
+		expect(transport.invocations).toEqual([
+			{
+				command: "queue_client_character_motion_event",
+				args: { request: release },
+			},
+		]);
+		await expect(
+			session.queueCharacterMotionEvent({
+				...release,
+				sequence: 13,
+				extent: 1.1,
+			}),
+		).rejects.toThrow();
+		expect(transport.invocations).toHaveLength(1);
+	});
+
+	it("replaces charge timing and projects sequenced character-motion feedback", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const events: string[] = [];
+		session.subscribe((event) => events.push(event.type));
+		await session.start();
+		events.length = 0;
+
+		transport.emit("client-character-motion-capabilities-updated", {
+			fullChargeDurationMs: 800,
+		});
+		transport.emit("client-character-motion-feedback", {
+			sequence: 17,
+			outcome: { kind: "rejected", reason: "overburdened" },
+		});
+
+		expect(session.state().characterMotion).toEqual({
+			fullChargeDurationMs: 800,
+		});
+		expect(events).toEqual([
+			"character-motion-capabilities",
+			"character-motion-feedback",
+		]);
 	});
 
 	it("submits one exact character identity for an explicit enter action", async () => {
@@ -214,6 +281,7 @@ function currentState(playerGuid: number): ClientCurrentState {
 		worldName: "Leafcull",
 		playerName: "Drudge",
 		vitals: [],
+		characterMotion: null,
 		dynamic: {
 			hostTime: { seconds: 10 },
 			entities: [view(playerGuid)],

@@ -5,11 +5,16 @@
 //! client `WorldState` and an Explorer registry can each own their own playback without sharing a
 //! table — which is what keeps them separate semantic authorities.
 
+use crate::entity::EntityMotionAction;
 use holtburger_common::{Guid, RigidTransform};
 use holtburger_content::MotionSequenceTable;
 use std::collections::HashMap;
+use std::collections::VecDeque;
 
-use super::selection::{select_modifier, select_motion, set_default_state, stop_motion};
+use super::selection::{
+    ActionSelectionOutcome, select_action, select_modifier, select_motion, set_default_state,
+    stop_motion,
+};
 use super::sequence::{CurrentSequenceClip, MotionClipCompletion};
 use super::sequence::{MotionSequenceRuntime, SequenceTick};
 use super::state::{MotionCommand, MotionOrder, MotionState};
@@ -31,6 +36,55 @@ pub struct BodyMotionRuntime {
     tick: SequenceTick,
     /// Last valid `RunForward` multiplier, matching retail's persistent `my_run_rate` fact.
     retained_run_rate_multiplier: Option<f32>,
+    /// Explicit ordered channels the current table could not model, retained to deduplicate the
+    /// producer diagnostic until the order changes.
+    unmodelled: UnmodelledMotionChannels,
+    /// Latest steady destination retained while a transient action owns playback.
+    steady_order: MotionOrder,
+    /// FIFO transient edges awaiting installation after the active action.
+    action_queue: VecDeque<EntityMotionAction>,
+    /// Action whose exact selector-owned boundary has not completed yet.
+    active_action: Option<EntityMotionAction>,
+    /// Fresh selector rejections awaiting body-context reporting by the registry owner.
+    rejected_actions: Vec<EntityMotionAction>,
+}
+
+/// Result of offering one transient edge to retail's six-action runtime bound.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MotionActionEnqueueOutcome {
+    /// Edge entered the FIFO and will start through ordinary selector advancement.
+    Queued,
+    /// Active plus pending actions already reached retail's bound of six.
+    Overflow,
+}
+
+/// Explicit order channels rejected by motion-table selection on the latest drive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct UnmodelledMotionChannels {
+    /// Requested style that could not be selected.
+    style: Option<MotionCommand>,
+    /// Requested forward/substate command that could not be selected.
+    forward: Option<MotionCommand>,
+    /// Requested sidestep command that could not be selected.
+    sidestep: Option<MotionCommand>,
+    /// Requested turn command that could not be selected.
+    turn: Option<MotionCommand>,
+}
+
+impl UnmodelledMotionChannels {
+    fn newly_present_since(
+        self,
+        previous: Self,
+    ) -> impl Iterator<Item = (&'static str, MotionCommand)> {
+        [
+            ("style", self.style, previous.style),
+            ("forward", self.forward, previous.forward),
+            ("sidestep", self.sidestep, previous.sidestep),
+            ("turn", self.turn, previous.turn),
+        ]
+        .into_iter()
+        .filter_map(|(channel, current, prior)| (current != prior).then_some((channel, current?)))
+    }
 }
 
 /// Which clip the host has a body playing, and how to play it.
@@ -77,6 +131,11 @@ impl BodyMotionRuntime {
             sequence: MotionSequenceRuntime::new(),
             tick: SequenceTick::identity(),
             retained_run_rate_multiplier: None,
+            unmodelled: UnmodelledMotionChannels::default(),
+            steady_order: MotionOrder::default(),
+            action_queue: VecDeque::new(),
+            active_action: None,
+            rejected_actions: Vec::new(),
         };
         set_default_state(table, &mut runtime.state, &mut runtime.sequence);
         runtime
@@ -100,6 +159,26 @@ impl BodyMotionRuntime {
 
     pub fn tick(&self) -> &SequenceTick {
         &self.tick
+    }
+
+    /// Currently playing transient edge, if one owns the sequence.
+    pub const fn active_action(&self) -> Option<EntityMotionAction> {
+        self.active_action
+    }
+
+    /// Number of active plus pending transient actions.
+    pub fn action_count(&self) -> usize {
+        self.action_queue.len() + usize::from(self.active_action.is_some())
+    }
+
+    /// Offers one edge to retail's bounded FIFO without selecting content yet.
+    pub fn enqueue_action(&mut self, action: EntityMotionAction) -> MotionActionEnqueueOutcome {
+        const MAX_ACTIONS: usize = 6;
+        if self.action_count() >= MAX_ACTIONS {
+            return MotionActionEnqueueOutcome::Overflow;
+        }
+        self.action_queue.push_back(action);
+        MotionActionEnqueueOutcome::Queued
     }
 
     /// Returns retail's adjusted maximum interpolation speed for this playback, when usable.
@@ -129,9 +208,46 @@ impl BodyMotionRuntime {
         {
             self.retained_run_rate_multiplier = Some(speed);
         }
-        apply_order(table, &mut self.state, &mut self.sequence, order);
+        self.steady_order = order;
+        // Retail applies steady commands to the same sequence even while an action owns its
+        // non-cyclic prefix. Selection replaces only the cyclic return suffix, so a stance or
+        // locomotion update retargets the action's authored return without restarting it
+        // (`CMotionTable::GetObjectSequence`, `acclient.c:324230-324400`).
+        self.unmodelled = apply_order(table, &mut self.state, &mut self.sequence, order);
+        if self.active_action.is_none() {
+            self.start_next_action(table);
+        }
         self.tick = self.sequence.advance(quantum);
+        if self.tick.action_completed {
+            self.active_action = None;
+            self.unmodelled = apply_order(
+                table,
+                &mut self.state,
+                &mut self.sequence,
+                self.steady_order,
+            );
+            self.start_next_action(table);
+        }
         &self.tick
+    }
+
+    fn start_next_action(&mut self, table: &MotionSequenceTable) {
+        while self.active_action.is_none() {
+            let Some(action) = self.action_queue.pop_front() else {
+                return;
+            };
+            match select_action(
+                table,
+                &mut self.state,
+                &mut self.sequence,
+                action.command,
+                action.speed.to_f32(),
+            ) {
+                ActionSelectionOutcome::Selected => self.active_action = Some(action),
+                ActionSelectionOutcome::CompletedWithoutClips => {}
+                ActionSelectionOutcome::Unmodelled => self.rejected_actions.push(action),
+            }
+        }
     }
 }
 
@@ -171,6 +287,13 @@ impl MotionRuntimeRegistry {
         self.bodies.get(&guid).map(|runtime| runtime.tick.offset)
     }
 
+    /// Whether one body has an active or queued transient action owning future playback.
+    pub fn has_actions(&self, guid: Guid) -> bool {
+        self.bodies
+            .get(&guid)
+            .is_some_and(|runtime| runtime.action_count() != 0)
+    }
+
     pub fn forget(&mut self, guid: Guid) {
         self.bodies.remove(&guid);
     }
@@ -192,6 +315,23 @@ impl MotionRuntimeRegistry {
         self.bodies.is_empty()
     }
 
+    /// Enqueues one transient action on the body runtime selected by its effective table.
+    pub fn enqueue_action(
+        &mut self,
+        table: &MotionSequenceTable,
+        guid: Guid,
+        action: EntityMotionAction,
+    ) -> MotionActionEnqueueOutcome {
+        let runtime = self
+            .bodies
+            .entry(guid)
+            .or_insert_with(|| BodyMotionRuntime::new(table));
+        if runtime.motion_table_id != table.id {
+            *runtime = BodyMotionRuntime::new(table);
+        }
+        runtime.enqueue_action(action)
+    }
+
     /// Brings one body's playback in line with its order, then advances it by the tick.
     ///
     /// Applying the order every tick is what makes this idempotent: re-issuing the motion already
@@ -204,10 +344,32 @@ impl MotionRuntimeRegistry {
         order: MotionOrder,
         quantum: f32,
     ) -> &SequenceTick {
-        self.bodies
+        let runtime = self
+            .bodies
             .entry(guid)
-            .or_insert_with(|| BodyMotionRuntime::new(table))
-            .drive(table, order, quantum)
+            .or_insert_with(|| BodyMotionRuntime::new(table));
+        let previous_unmodelled = runtime.unmodelled;
+        runtime.drive(table, order, quantum);
+        for action in std::mem::take(&mut runtime.rejected_actions) {
+            log::warn!(
+                "body 0x{guid:08X} motion table 0x{:08X} cannot route admitted action 0x{:08X} in style 0x{:08X} from substate 0x{:08X} (source {:?}, action sequence {})",
+                table.id,
+                action.command.raw(),
+                runtime.state.style.raw(),
+                runtime.state.substate.raw(),
+                action.source,
+                action.action_sequence,
+            );
+        }
+        for (channel, command) in runtime.unmodelled.newly_present_since(previous_unmodelled) {
+            log::warn!(
+                "body 0x{guid:08X} motion table 0x{:08X} cannot play admitted {channel} command 0x{:08X} in style 0x{:08X}",
+                table.id,
+                command.raw(),
+                runtime.state.style.raw(),
+            );
+        }
+        &runtime.tick
     }
 }
 
@@ -220,14 +382,19 @@ fn apply_order(
     state: &mut MotionState,
     sequence: &mut MotionSequenceRuntime,
     order: MotionOrder,
-) {
-    if let Some(style) = order.style {
-        select_motion(table, state, sequence, style, 1.0);
+) -> UnmodelledMotionChannels {
+    let mut unmodelled = UnmodelledMotionChannels::default();
+    if let Some(style) = order.style
+        && !select_motion(table, state, sequence, style, 1.0).is_modelled()
+    {
+        unmodelled.style = Some(style);
     }
 
     match order.forward {
         Some((command, speed)) => {
-            select_motion(table, state, sequence, command, speed);
+            if !select_motion(table, state, sequence, command, speed).is_modelled() {
+                unmodelled.forward = Some(command);
+            }
         }
         None => {
             // Stopping locomotion means returning to the style's default substate, which is what
@@ -247,14 +414,15 @@ fn apply_order(
         }
     }
 
-    apply_modifier(
+    unmodelled.sidestep = apply_modifier(
         table,
         state,
         sequence,
         order.sidestep,
         MotionCommand::SIDESTEP,
     );
-    apply_modifier(table, state, sequence, order.turn, MotionCommand::TURN);
+    unmodelled.turn = apply_modifier(table, state, sequence, order.turn, MotionCommand::TURN);
+    unmodelled
 }
 
 fn apply_modifier(
@@ -263,10 +431,10 @@ fn apply_modifier(
     sequence: &mut MotionSequenceRuntime,
     ordered: Option<(MotionCommand, f32)>,
     family: MotionCommand,
-) {
+) -> Option<MotionCommand> {
     match ordered {
         Some((command, speed)) => {
-            if state
+            let outcome = if state
                 .modifiers()
                 .iter()
                 .any(|modifier| modifier.command == command)
@@ -277,13 +445,15 @@ fn apply_modifier(
                 // back through generic selection after locomotion stops can promote the same
                 // turn/sidestep command into its default-state cycle while its modifier remains,
                 // stacking the authored physics twice.
-                select_modifier(table, state, sequence, command, speed);
+                select_modifier(table, state, sequence, command, speed)
             } else {
-                select_motion(table, state, sequence, command, speed);
-            }
+                select_motion(table, state, sequence, command, speed)
+            };
+            (!outcome.is_modelled()).then_some(command)
         }
         None => {
             stop_motion(table, state, sequence, family);
+            None
         }
     }
 }

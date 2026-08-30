@@ -13,13 +13,14 @@ pub use fellowship::{
     FellowshipMemberState, FellowshipState,
 };
 pub use motion_resolution::{
-    AuthoredMotionDriveError, BodyProjectionResolver, MotionCommandKinematics,
-    MotionTableMovementProfile, PlayerMotionTableLookupError, PlayerMotionTableResolution,
-    PlayerMotionTableSource,
+    AuthoredMotionDriveError, BodyProjectionResolver, LocalAuthoredMotionActionError,
+    MotionCommandKinematics, MotionTableMovementProfile, PlayerMotionTableLookupError,
+    PlayerMotionTableResolution, PlayerMotionTableSource,
 };
 pub use self_movement::{
-    RequiredSelfMovementKinematics, SelfMovementCapabilities, SelfMovementCapabilitiesError,
-    SelfMovementKinematics, SelfMovementKinematicsError,
+    RequiredSelfMovementKinematics, SelfJumpCapabilities, SelfJumpCapabilitiesError,
+    SelfMovementCapabilities, SelfMovementCapabilitiesError, SelfMovementKinematics,
+    SelfMovementKinematicsError,
 };
 pub use trade::{TradeSide, TradeState};
 pub use types::{ServerTimeSync, WorldState};

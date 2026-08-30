@@ -68,11 +68,11 @@ pub struct DynamicEntityIdentity {
 pub struct DynamicEntityContent {
     /// SetupModel identity that owns parts, volumes, and default behavior.
     pub setup_did: u32,
-    /// Optional MotionTable identity that owns this entity's authored motion.
+    /// Effective MotionTable identity that owns this entity's authored motion.
     ///
-    /// Absent means the entity declares none of its own and falls back to the default its setup
-    /// model installs, which is what retail's `CPhysicsObj::InitDefaults` does
-    /// (`acclient.c:309099-309103`). Only 57 setups declare one, so the fallback is narrow but real.
+    /// The producer resolves a directly authored table before this projection and otherwise uses
+    /// the default installed by the setup model, matching retail's `CPhysicsObj::InitDefaults`
+    /// (`acclient.c:309099-309103`). Absence therefore means neither source provides a table.
     pub motion_table_did: Option<u32>,
     /// Optional SoundTable identity used by presentation effects.
     pub sound_table_did: Option<u32>,

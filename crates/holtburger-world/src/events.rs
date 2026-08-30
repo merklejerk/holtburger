@@ -1,5 +1,5 @@
 use crate::book::BookData;
-use crate::entity::{Entity, EntityMotionSnapshot};
+use crate::entity::{Entity, EntityNetworkMotion};
 use crate::spatial::{RuntimeBodyAdvanceKind, RuntimeBodyResetCause, SpatialBodyId};
 use crate::state;
 use crate::stats;
@@ -73,7 +73,7 @@ pub enum WorldEvent {
     },
     EntityMotionUpdated {
         guid: Guid,
-        snapshot: Option<EntityMotionSnapshot>,
+        motion: EntityNetworkMotion,
     },
     /// A runtime body's structure or externally-authored state changed.
     RuntimeBodyChanged {

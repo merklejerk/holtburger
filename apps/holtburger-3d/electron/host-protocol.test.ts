@@ -196,6 +196,7 @@ describe("wireCommand", () => {
 				request: {
 					gait: "run",
 					longitudinal: "forward",
+					lateral: "right",
 					turning: null,
 				},
 			}),
@@ -204,7 +205,34 @@ describe("wireCommand", () => {
 			request: {
 				gait: "run",
 				longitudinal: "forward",
+				lateral: "right",
 				turning: null,
+			},
+		});
+		expect(
+			wireCommand("queue_client_character_motion_event", {
+				request: {
+					kind: "begin-jump",
+					sequence: 8,
+					drive: {
+						gait: "run",
+						longitudinal: null,
+						lateral: null,
+						turning: "left",
+					},
+				},
+			}),
+		).toEqual({
+			command: "queue_client_character_motion_event",
+			request: {
+				kind: "begin-jump",
+				sequence: 8,
+				drive: {
+					gait: "run",
+					longitudinal: null,
+					lateral: null,
+					turning: "left",
+				},
 			},
 		});
 		expect(

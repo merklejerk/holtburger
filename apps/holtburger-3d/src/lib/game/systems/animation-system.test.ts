@@ -63,7 +63,15 @@ function install(
 		readonly residentIdentity: string;
 	}[],
 ) {
-	const staged = system.stageOwner(ownerId, installations);
+	const staged = system.stageOwner(
+		ownerId,
+		installations.map((installation) => ({
+			...installation,
+			initialPartToObjectTransforms: initialPose(
+				installation.animation.partCount,
+			),
+		})),
+	);
 	staged.commit();
 	return staged.samples;
 }
@@ -192,6 +200,7 @@ describe("AnimationSystem", () => {
 		const staged = system.stageOwner("owner", [
 			{
 				animation: testAnimation(),
+				initialPartToObjectTransforms: initialPose(),
 				target: testTarget("scene-node:11"),
 				residentIdentity: "resident:new",
 			},
@@ -219,6 +228,7 @@ describe("AnimationSystem", () => {
 		const staged = system.stageOwner("owner", [
 			{
 				animation: testAnimation(),
+				initialPartToObjectTransforms: initialPose(),
 				target: testTarget("scene-node:11"),
 				residentIdentity: "resident:new",
 			},
@@ -367,11 +377,50 @@ describe("AnimationSystem", () => {
 			"owner",
 			target,
 			playingClip(testAnimation(Vec3.zero()), 1, 2, 30, "loop"),
+			initialPose(),
 		);
 
 		const sample = requiredAt(advanceAndSample(system, 0), 0);
 		// Frame translations are the frame index, so the entry pose names the window's low frame.
 		expect(sample.articulatedPose.partToObjectTransforms[0]?.m41).toBe(1);
+	});
+
+	it("retains untouched setup parts across full, partial, and full clips", () => {
+		const effects = new EffectSystem();
+		const system = buildAnimationSystemOver(effects);
+		const target = testTarget("scene-node:1");
+		installEffectState(effects, target.targetId, 2);
+		const play = (animation: PreparedAnimation) =>
+			system.playClip(
+				"owner",
+				target,
+				playingClip(animation, 0, 0, 30, "loop"),
+				initialPose(2),
+			);
+
+		play(fixedPoseAnimation("0x03000010", [1, 9]));
+		expect(
+			requiredAt(
+				advanceAndSample(system, 0),
+				0,
+			).articulatedPose.partToObjectTransforms.map(({ m41 }) => m41),
+		).toEqual([1, 9]);
+
+		play(fixedPoseAnimation("0x03000011", [2]));
+		expect(
+			requiredAt(
+				advanceAndSample(system, 0),
+				0,
+			).articulatedPose.partToObjectTransforms.map(({ m41 }) => m41),
+		).toEqual([2, 9]);
+
+		play(fixedPoseAnimation("0x03000012", [3, 4]));
+		expect(
+			requiredAt(
+				advanceAndSample(system, 0),
+				0,
+			).articulatedPose.partToObjectTransforms.map(({ m41 }) => m41),
+		).toEqual([3, 4]);
 	});
 
 	it("re-enters at the replacement clip's own starting frame", () => {
@@ -384,7 +433,12 @@ describe("AnimationSystem", () => {
 		advanceAndSample(system, 0);
 		advanceAndSample(system, 2 / 30);
 
-		system.playClip("owner", target, playingClip(animation, 0, 3, -30, "loop"));
+		system.playClip(
+			"owner",
+			target,
+			playingClip(animation, 0, 3, -30, "loop"),
+			initialPose(),
+		);
 
 		// A reversed clip enters just inside its high frame rather than resuming where it was.
 		const sample = requiredAt(advanceAndSample(system, 2 / 30), 0);
@@ -404,6 +458,7 @@ describe("AnimationSystem", () => {
 				"owner",
 				{ ...target, generation: target.generation + 1 },
 				playingClip(animation, 1, 1, 30, "loop"),
+				initialPose(),
 			),
 		).toThrow("names generation");
 		const sample = requiredAt(advanceAndSample(system, 0), 0);
@@ -419,7 +474,12 @@ describe("AnimationSystem", () => {
 		]);
 		const frame = system.advance(0);
 
-		system.playClip("owner", target, playingClip(animation, 0, 1, 30, "loop"));
+		system.playClip(
+			"owner",
+			target,
+			playingClip(animation, 0, 1, 30, "loop"),
+			initialPose(),
+		);
 
 		expect(() => system.sample(frame, ["scene-node:1"])).toThrow(
 			"latest advanced frame",
@@ -484,6 +544,30 @@ function testAnimation(omega = new Vec3(0, 0, 1)): PreparedAnimation {
 		id: "0x03000001",
 		partCount: 1,
 		partFrames: [0, 1, 2, 3].map((translation) => {
+			const transform = Mat4.identity();
+			transform.m41 = translation;
+			return transform;
+		}),
+		positionFrames: [],
+	};
+}
+
+function initialPose(partCount = 1): readonly Mat4[] {
+	return Array.from({ length: partCount }, () => Mat4.identity());
+}
+
+function fixedPoseAnimation(
+	id: string,
+	partTranslations: readonly number[],
+): PreparedAnimation {
+	return {
+		authoredRootTranslates: false,
+		frameCount: 1,
+		framesPerSecond: 30,
+		hooks: [],
+		id: id as PreparedAnimation["id"],
+		partCount: partTranslations.length,
+		partFrames: partTranslations.map((translation) => {
 			const transform = Mat4.identity();
 			transform.m41 = translation;
 			return transform;

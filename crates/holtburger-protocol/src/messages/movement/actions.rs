@@ -2,7 +2,6 @@ use crate::messages::movement::types::RawMotionState;
 use crate::messages::utils::{align_offset, pad_to_4};
 use crate::traits::{ProtocolPack, ProtocolUnpack};
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
-use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
 use serde::{Deserialize, Serialize};
 
@@ -69,21 +68,28 @@ impl ProtocolPack for MoveToStateActionData {
     }
 }
 
+/// Retail client-authored jump action (`0xF61B`) payload.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct JumpActionData {
+    /// Requested charge extent, clamped by the client to `[0.001, 1.0]`.
     pub extent: f32,
+    /// Release velocity in body-local X/Y/Z coordinates.
     pub velocity: holtburger_common::Vector3,
+    /// Exact client position captured when the local launch commits.
+    pub position: WorldPosition,
+    /// Current object-instance movement epoch.
     pub instance_sequence: u16,
+    /// Current server-control movement epoch.
     pub server_control_sequence: u16,
+    /// Current teleport movement epoch.
     pub teleport_sequence: u16,
+    /// Current forced-position movement epoch.
     pub force_position_sequence: u16,
-    pub object_guid: Guid,
-    pub spell_id: u32,
 }
 
 impl ProtocolUnpack for JumpActionData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 32 > data.len() {
+        if *offset + 56 > data.len() {
             return None;
         }
         let extent = LittleEndian::read_f32(&data[*offset..*offset + 4]);
@@ -94,6 +100,7 @@ impl ProtocolUnpack for JumpActionData {
         *offset += 4;
         let z = LittleEndian::read_f32(&data[*offset..*offset + 4]);
         *offset += 4;
+        let position = WorldPosition::unpack(data, offset)?;
         let instance_sequence = LittleEndian::read_u16(&data[*offset..*offset + 2]);
         *offset += 2;
         let server_control_sequence = LittleEndian::read_u16(&data[*offset..*offset + 2]);
@@ -102,19 +109,15 @@ impl ProtocolUnpack for JumpActionData {
         *offset += 2;
         let force_position_sequence = LittleEndian::read_u16(&data[*offset..*offset + 2]);
         *offset += 2;
-        let object_guid = Guid::unpack(data, offset)?;
-        let spell_id = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        *offset += 4;
 
         Some(JumpActionData {
             extent,
             velocity: holtburger_common::Vector3 { x, y, z },
+            position,
             instance_sequence,
             server_control_sequence,
             teleport_sequence,
             force_position_sequence,
-            object_guid,
-            spell_id,
         })
     }
 }
@@ -125,6 +128,7 @@ impl ProtocolPack for JumpActionData {
         buf.write_f32::<LittleEndian>(self.velocity.x).unwrap();
         buf.write_f32::<LittleEndian>(self.velocity.y).unwrap();
         buf.write_f32::<LittleEndian>(self.velocity.z).unwrap();
+        self.position.pack(buf);
         buf.write_u16::<LittleEndian>(self.instance_sequence)
             .unwrap();
         buf.write_u16::<LittleEndian>(self.server_control_sequence)
@@ -133,8 +137,6 @@ impl ProtocolPack for JumpActionData {
             .unwrap();
         buf.write_u16::<LittleEndian>(self.force_position_sequence)
             .unwrap();
-        self.object_guid.pack(buf);
-        buf.write_u32::<LittleEndian>(self.spell_id).unwrap();
     }
 }
 
@@ -197,28 +199,97 @@ mod tests {
     use crate::messages::movement::types::{MotionItem, RawMotionState};
     use crate::test_fixtures;
     use crate::test_helpers::assert_pack_unpack_parity;
+    use holtburger_common::Guid;
+
+    const RETAIL_JUMP_ACTION_BODY: [u8; 56] = [
+        0x00, 0x00, 0x00, 0x3F, // extent: 0.5
+        0x00, 0x00, 0x80, 0x3F, // velocity.x: 1.0
+        0x00, 0x00, 0x00, 0xC0, // velocity.y: -2.0
+        0x00, 0x00, 0x40, 0x40, // velocity.z: 3.0
+        0x78, 0x56, 0x34, 0x12, // position cell: 0x12345678
+        0x00, 0x00, 0x20, 0x41, // position x: 10.0
+        0x00, 0x00, 0xA0, 0x41, // position y: 20.0
+        0x00, 0x00, 0xF0, 0x41, // position z: 30.0
+        0x00, 0x00, 0x00, 0x3F, // rotation w: 0.5
+        0x00, 0x00, 0x80, 0x3E, // rotation x: 0.25
+        0x00, 0x00, 0x00, 0xBF, // rotation y: -0.5
+        0x00, 0x00, 0x80, 0x3F, // rotation z: 1.0
+        0x02, 0x01, // instance sequence: 0x0102
+        0x04, 0x03, // server-control sequence: 0x0304
+        0x06, 0x05, // teleport sequence: 0x0506
+        0x08, 0x07, // force-position sequence: 0x0708
+    ];
+
+    fn retail_jump_action_data() -> JumpActionData {
+        JumpActionData {
+            extent: 0.5,
+            velocity: holtburger_common::Vector3 {
+                x: 1.0,
+                y: -2.0,
+                z: 3.0,
+            },
+            position: WorldPosition {
+                landblock_id: Guid(0x1234_5678),
+                coords: holtburger_common::Vector3 {
+                    x: 10.0,
+                    y: 20.0,
+                    z: 30.0,
+                },
+                rotation: holtburger_common::math::Quaternion {
+                    w: 0.5,
+                    x: 0.25,
+                    y: -0.5,
+                    z: 1.0,
+                },
+            },
+            instance_sequence: 0x0102,
+            server_control_sequence: 0x0304,
+            teleport_sequence: 0x0506,
+            force_position_sequence: 0x0708,
+        }
+    }
 
     #[test]
     fn test_jump_data_fixture() {
-        let hex = "B1F700002A0000001BF60000000020410000803F000000400000404001000200030004007856341200000000";
+        let mut fixture = hex::decode("B1F700002A0000001BF60000").unwrap();
+        fixture.extend_from_slice(&RETAIL_JUMP_ACTION_BODY);
         let expected = GameMessage::GameAction(Box::new(GameActionMessage {
             sequence: 0x2A,
-            action: GameAction::Jump(Box::new(JumpActionData {
-                extent: 10.0,
-                velocity: holtburger_common::Vector3 {
-                    x: 1.0,
-                    y: 2.0,
-                    z: 3.0,
-                },
-                instance_sequence: 1,
-                server_control_sequence: 2,
-                teleport_sequence: 3,
-                force_position_sequence: 4,
-                object_guid: Guid(0x12345678),
-                spell_id: 0,
-            })),
+            action: GameAction::Jump(Box::new(retail_jump_action_data())),
         }));
-        assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
+        assert_pack_unpack_parity(&fixture, &expected);
+    }
+
+    #[test]
+    fn jump_data_uses_retail_offsets_and_consumes_the_complete_body() {
+        let expected = retail_jump_action_data();
+        let mut offset = 0;
+        let unpacked = JumpActionData::unpack(&RETAIL_JUMP_ACTION_BODY, &mut offset).unwrap();
+
+        assert_eq!(unpacked, expected);
+        assert_eq!(offset, 56);
+
+        let mut packed = Vec::new();
+        expected.pack(&mut packed);
+        assert_eq!(packed.len(), 56);
+        assert_eq!(&packed[0..4], &0.5_f32.to_le_bytes());
+        assert_eq!(&packed[4..16], &RETAIL_JUMP_ACTION_BODY[4..16]);
+        assert_eq!(&packed[16..48], &RETAIL_JUMP_ACTION_BODY[16..48]);
+        assert_eq!(&packed[48..56], &RETAIL_JUMP_ACTION_BODY[48..56]);
+        assert_eq!(packed, RETAIL_JUMP_ACTION_BODY);
+    }
+
+    #[test]
+    fn jump_data_rejects_truncation_at_each_composite_boundary() {
+        for truncated_length in [3, 15, 47, 55] {
+            let mut offset = 0;
+            assert_eq!(
+                JumpActionData::unpack(&RETAIL_JUMP_ACTION_BODY[..truncated_length], &mut offset),
+                None,
+                "accepted {truncated_length}-byte jump body",
+            );
+            assert_eq!(offset, 0);
+        }
     }
 
     #[test]

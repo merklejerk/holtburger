@@ -2,10 +2,13 @@ use super::*;
 use binrw::BinRead;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::attachment::PhysicsAttachment;
-use crate::entity::Entity;
+use crate::entity::{
+    Entity, EntityMotionAdmission, EntityMotionDirective, EntityMotionSnapshot,
+    EntityMoveToParameters, EntityNetworkMotion, OrderedMotionPosition, OrderedMotionScalar,
+};
 use crate::state::liveness::EntityCreateDisposition;
 use crate::{
     ContactState, RuntimeBodyResetCause, SolvedBodyKinematics, SpatialBodyEvent, SpatialBodyId,
@@ -142,6 +145,10 @@ fn test_motion_catalog(motion_table_id: u32) -> MotionSequenceCatalog {
     )
 }
 
+fn ordered_motion_scalar(value: f32) -> OrderedMotionScalar {
+    OrderedMotionScalar::from_f32(value).expect("fixture scalar must be finite")
+}
+
 fn seed_player_run_skill(world: &mut WorldState, run_skill: u32) {
     world.player.skills.insert(
         SkillType::Run,
@@ -179,6 +186,11 @@ fn resolve_player_motion_table_profile_prefers_direct_motion_table_property() {
         Guid(0x0200_0010),
     );
     state.entities.insert(player);
+
+    assert_eq!(
+        state.effective_motion_table_id_for_guid(player_guid),
+        Some(motion_table_id)
+    );
 
     let resolved = state
         .resolve_player_motion_table_profile()
@@ -221,6 +233,11 @@ fn resolve_player_motion_table_profile_falls_back_to_setup_model_default() {
         Guid(setup_model_id),
     );
     state.entities.insert(player);
+
+    assert_eq!(
+        state.effective_motion_table_id_for_guid(player_guid),
+        Some(motion_table_id)
+    );
 
     let resolved = state
         .resolve_player_motion_table_profile()
@@ -487,14 +504,14 @@ fn resolve_body_projection_input_uses_grounded_motion_snapshot_without_vector_up
         holtburger_common::properties::PropertyDataId::MotionTable,
         Guid(motion_table_id),
     );
-    entity.motion_snapshot = Some(crate::entity::EntityMotionSnapshot {
+    entity.network_motion = EntityNetworkMotion::Initialized(crate::entity::EntityMotionSnapshot {
         current_style: Some(MotionStance::NonCombat),
         forward_command: Some(InterpretedMotionCommand::RUN_FORWARD),
         sidestep_command: None,
         turn_command: Some(InterpretedMotionCommand::TURN_RIGHT),
-        forward_speed: crate::entity::OrderedMotionSpeed::from_f32(3.5),
+        forward_speed: crate::entity::OrderedMotionScalar::from_f32(3.5),
         sidestep_speed: None,
-        turn_speed: crate::entity::OrderedMotionSpeed::from_f32(0.75),
+        turn_speed: crate::entity::OrderedMotionScalar::from_f32(0.75),
         directive: None,
     });
     state.entities.insert(entity);
@@ -548,7 +565,7 @@ fn resolve_body_projection_input_retains_physical_vectors_for_airborne_body() {
     let mut entity = Entity::new(guid, "Remote".to_string(), pose);
     entity.velocity = Vector3::new(0.0, 0.0, 4.0);
     entity.omega = Vector3::new(0.0, 0.0, 0.5);
-    entity.motion_snapshot = Some(crate::entity::EntityMotionSnapshot {
+    entity.network_motion = EntityNetworkMotion::Initialized(crate::entity::EntityMotionSnapshot {
         current_style: Some(MotionStance::NonCombat),
         forward_command: Some(InterpretedMotionCommand::RUN_FORWARD),
         sidestep_command: None,
@@ -586,7 +603,7 @@ fn resolve_body_projection_input_retains_physical_vectors_for_airborne_body() {
 }
 
 #[test]
-fn test_set_player_vector_updates_authoritative_player_entity() {
+fn player_server_vector_sample_updates_entity_without_creating_runtime_body() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000123);
     state.player.guid = player_guid;
@@ -597,7 +614,7 @@ fn test_set_player_vector_updates_authoritative_player_entity() {
 
     let new_vel = Vector3::new(1.0, 2.0, 3.0);
     let new_omega = Vector3::new(0.0, 0.0, 4.0);
-    let events = state.set_player_vector(new_vel, new_omega);
+    let events = state.record_player_server_vectors(new_vel, new_omega);
 
     assert_eq!(state.entities.get(player_guid).unwrap().velocity, new_vel);
     assert_eq!(state.entities.get(player_guid).unwrap().omega, new_omega);
@@ -606,6 +623,12 @@ fn test_set_player_vector_updates_authoritative_player_entity() {
         WorldEvent::EntityVectorUpdated { guid, velocity, omega }
             if *guid == player_guid && *velocity == new_vel && *omega == new_omega
     )));
+    assert!(
+        state
+            .scene
+            .body(SpatialBodyId::LocalPlayer(player_guid))
+            .is_none()
+    );
 }
 
 #[test]
@@ -953,7 +976,7 @@ fn player_teleport_suspends_runtime_bodies_and_emits_reset_signal() {
     let motion_snapshot = crate::entity::EntityMotionSnapshot {
         current_style: Some(MotionStance::NonCombat),
         forward_command: Some(InterpretedMotionCommand::RUN_FORWARD),
-        forward_speed: crate::entity::OrderedMotionSpeed::from_f32(1.0),
+        forward_speed: crate::entity::OrderedMotionScalar::from_f32(1.0),
         ..Default::default()
     };
     let mut state = WorldState::synthetic();
@@ -975,7 +998,7 @@ fn player_teleport_suspends_runtime_bodies_and_emits_reset_signal() {
         holtburger_common::properties::PropertyDataId::MotionTable,
         Guid(motion_table_id),
     );
-    player.motion_snapshot = Some(motion_snapshot);
+    player.network_motion = EntityNetworkMotion::Initialized(motion_snapshot);
     state.advance_authored_motion(std::time::Duration::from_millis(30));
     assert_eq!(state.motion_runtimes.len(), 1);
     assert_eq!(
@@ -1014,7 +1037,7 @@ fn player_teleport_suspends_runtime_bodies_and_emits_reset_signal() {
     let reset_snapshot = state
         .entities
         .get(player_guid)
-        .and_then(|entity| entity.motion_snapshot)
+        .and_then(|entity| entity.network_motion.snapshot())
         .expect("teleport should retain an idle stance snapshot");
     assert_eq!(reset_snapshot.current_style, Some(MotionStance::NonCombat));
     assert_eq!(reset_snapshot.motion_command(), None);
@@ -1029,10 +1052,102 @@ fn player_teleport_suspends_runtime_bodies_and_emits_reset_signal() {
     );
     assert!(events.iter().any(|event| matches!(
         event,
-        WorldEvent::EntityMotionUpdated { guid, snapshot }
+        WorldEvent::EntityMotionUpdated { guid, motion }
             if *guid == player_guid
-                && snapshot.as_ref().is_some_and(|snapshot| snapshot.motion_command().is_none())
+                && motion.snapshot().is_some_and(|snapshot| snapshot.motion_command().is_none())
     )));
+}
+
+#[test]
+fn remote_creature_directive_uses_shared_authored_root_and_retires_to_default() {
+    let motion_table_id = 0x0900_0041;
+    let guid = Guid(0x5000_0241);
+    let mut target = WorldPosition {
+        landblock_id: Guid(0x1234_0001),
+        coords: Vector3::new(20.0, 0.0, 0.0),
+        rotation: Quaternion::identity(),
+    };
+    let mut start = WorldPosition {
+        coords: Vector3::zero(),
+        ..target
+    };
+    start.rotation = Quaternion::from_heading(start.heading_to(&target));
+    target.rotation = start.rotation;
+
+    let mut state = WorldState::synthetic();
+    state.set_motion_sequences(test_motion_catalog(motion_table_id));
+    let mut creature = Entity::new(guid, "Drudge".to_string(), start);
+    creature.properties.set_did_prop(
+        holtburger_common::properties::PropertyDataId::MotionTable,
+        Guid(motion_table_id),
+    );
+    creature.network_motion = EntityNetworkMotion::Initialized(EntityMotionSnapshot {
+        current_style: Some(MotionStance::NonCombat),
+        directive: Some(EntityMotionDirective::MoveToPosition {
+            admission: EntityMotionAdmission {
+                object_instance_sequence: 1,
+                movement_sequence: 2,
+                server_control_sequence: 3,
+                is_autonomous: false,
+            },
+            target: OrderedMotionPosition {
+                cell_id: target.landblock_id,
+                x: ordered_motion_scalar(target.coords.x),
+                y: ordered_motion_scalar(target.coords.y),
+                z: ordered_motion_scalar(target.coords.z),
+            },
+            params: EntityMoveToParameters {
+                flags: 0x0000_0203,
+                distance_to_object: ordered_motion_scalar(1.0),
+                min_distance: ordered_motion_scalar(0.0),
+                fail_distance: ordered_motion_scalar(100.0),
+                speed: ordered_motion_scalar(1.0),
+                walk_run_threshold: ordered_motion_scalar(5.0),
+                desired_heading_degrees: ordered_motion_scalar(0.0),
+            },
+            run_rate: ordered_motion_scalar(1.25),
+        }),
+        ..EntityMotionSnapshot::default()
+    });
+    state.add_entity(creature);
+    let body_id = SpatialBodyId::Entity(guid);
+    assert!(
+        state
+            .scene
+            .apply_runtime_body_contact(body_id, ContactState::Grounded)
+    );
+
+    state.advance_authored_motion(Duration::from_millis(100));
+
+    assert_eq!(
+        state.motion_runtimes.state(guid).unwrap().substate,
+        crate::motion::MotionCommand::RUN_FORWARD,
+    );
+    let authored = state
+        .resolve_body_projection_input(body_id)
+        .and_then(|input| input.authored_offset)
+        .expect("active creature directive should contribute authored root motion");
+    assert!(authored.translation.x > 0.0);
+
+    assert!(state.scene.apply_runtime_body_pose(
+        body_id,
+        target,
+        SpatialSampleMode::SimulatingMotionState,
+    ));
+    state.advance_authored_motion(Duration::from_millis(100));
+
+    assert_eq!(
+        state.motion_runtimes.state(guid).unwrap().substate,
+        crate::motion::MotionCommand(FIXTURE_STAND_COMMAND),
+    );
+    assert_eq!(
+        state
+            .server_directed_motion
+            .get(&guid)
+            .expect("retained packet directive should keep a terminal lifecycle marker")
+            .state,
+        None,
+    );
 }
 
 #[test]
@@ -2497,7 +2612,8 @@ fn test_self_object_create_bootstraps_player_position() {
         .entities
         .get(player_guid)
         .unwrap()
-        .motion_snapshot
+        .network_motion
+        .snapshot()
         .expect("self object create should hydrate motion snapshot from spawn movement data");
     assert_eq!(motion_snapshot.current_style, Some(MotionStance::NonCombat));
     assert_eq!(
@@ -2835,7 +2951,7 @@ fn test_add_entity_seeds_remote_body_sidecar() {
 }
 
 #[test]
-fn player_confirmation_and_vector_update_preserve_existing_runtime_placement() {
+fn player_confirmation_and_server_vectors_preserve_local_runtime_kinematics() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0100);
     let initial_pos = WorldPosition {
@@ -2852,18 +2968,36 @@ fn player_confirmation_and_vector_update_preserve_existing_runtime_placement() {
         rotation: holtburger_common::math::Quaternion::identity(),
     };
 
+    let body_id = SpatialBodyId::LocalPlayer(player_guid);
+    let local_velocity = Vector3::new(1.0, 2.0, 3.0);
+    let local_omega = Vector3::new(0.0, 0.0, 0.5);
+    assert!(state.scene.apply_authoritative_body_vectors(
+        body_id,
+        crate::AuthoritativeBodyVectors {
+            velocity: local_velocity,
+            acceleration: Vector3::zero(),
+            omega: local_omega,
+        },
+        Instant::now(),
+    ));
+
     state.set_player_position(moved);
-    state.set_player_vector(Vector3::new(4.0, 5.0, 0.0), Vector3::new(0.0, 0.0, 2.0));
+    let events = state
+        .record_player_server_vectors(Vector3::new(4.0, 5.0, 0.0), Vector3::new(0.0, 0.0, 2.0));
 
     let body = state
         .scene
-        .body(SpatialBodyId::LocalPlayer(player_guid))
+        .body(body_id)
         .expect("local player body should be reconciled from authoritative entity state");
     assert_eq!(body.authoritative_pose, Some(moved));
     assert_eq!(body.pose, initial_pos);
-    assert_eq!(body.retained.velocity, Vector3::new(4.0, 5.0, 0.0));
-    assert_eq!(body.retained.omega, Vector3::new(0.0, 0.0, 2.0));
+    assert_eq!(body.retained.velocity, local_velocity);
+    assert_eq!(body.retained.omega, local_omega);
     assert_eq!(body.sampling.mode, SpatialSampleMode::AuthoritativeOnly);
+    assert!(!events.iter().any(|event| matches!(
+        event,
+        WorldEvent::RuntimeBodyChanged { body_id: changed } if *changed == body_id
+    )));
 }
 
 #[test]

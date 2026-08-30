@@ -851,6 +851,7 @@ function currentState(playerGuid: number): ClientCurrentState {
 		worldName: "Leafcull",
 		playerName: "Player",
 		vitals: [],
+		characterMotion: null,
 		dynamic: {
 			hostTime: { seconds: 75 },
 			entities: [view(playerGuid, landblockId)],

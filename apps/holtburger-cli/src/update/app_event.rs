@@ -18,11 +18,13 @@ impl AppState {
                 res
             }
             AppEvent::ReceivedViewEvent(event) => {
-                let should_redraw =
-                    !matches!(event, holtburger_core::ClientViewEvent::LogMessage(_));
+                let should_redraw = !matches!(
+                    event.as_ref(),
+                    holtburger_core::ClientViewEvent::LogMessage(_)
+                );
 
                 // Global routing must happen first for character lists/login
-                let mut res = self.handle_client_view_event(event);
+                let mut res = self.handle_client_view_event(*event);
                 if should_redraw && !res.redraw_requested() {
                     res.request_redraw(RedrawPriority::Immediate);
                 }

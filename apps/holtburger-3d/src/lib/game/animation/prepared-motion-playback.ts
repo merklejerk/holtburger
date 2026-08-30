@@ -28,8 +28,7 @@ export interface PreparedMotionPlayback {
 }
 
 /** Why one clip in a closure cannot be played. */
-type ClipRefusal =
-	"blocking-hooks" | "unbounded-root-rotation" | "part-coverage";
+type ClipRefusal = "blocking-hooks" | "unbounded-root-rotation";
 
 const reported = new Set<string>();
 
@@ -60,9 +59,9 @@ function complain(
  * entity that animates from the rest of its table is more useful than one that refuses to spawn.
  * Skipped clips are absent from `clips`, so a projection naming one holds the current pose.
  *
- * The archive census says none of the three refusals is reachable through a motion table — no
- * table-reachable clip carries a blocking hook or `SetOmega` — so a complaint here is a tripwire
- * rather than an expected event.
+ * The archive census says no table-reachable clip carries a blocking hook or `SetOmega`.
+ * Clips that author fewer parts than the appearance remain playable: retail overlays their
+ * authored prefix and retains the remaining setup-part transforms.
  */
 export function prepareMotionPlayback(
 	closure: PreparedMotionClosure,
@@ -81,10 +80,10 @@ export function prepareMotionPlayback(
 	}));
 
 	const clips = new Map<DatAssetId, PreparedAnimation>();
-	let bounds: AABB3 | null = null;
+	const bounds = staticBounds.clone();
 
 	for (const [animationId, animation] of closure.animations) {
-		const refusal = refuseClip(animation, template);
+		const refusal = refuseClip(animation);
 		if (refusal !== null) {
 			complain(
 				closure.motionTableId,
@@ -94,21 +93,18 @@ export function prepareMotionPlayback(
 			);
 			continue;
 		}
-		bounds = sweepInto(bounds, animation, radii, sourceScale);
+		sweepInto(bounds, animation, radii, sourceScale);
 		clips.set(animationId, animation);
 	}
 
 	return {
 		clips,
-		// A closure whose every clip was refused leaves the entity on its authored pose, which is
-		// exactly what an entity with no playback already does.
-		localBounds: bounds ?? staticBounds,
+		localBounds: bounds,
 	};
 }
 
 function refuseClip(
 	animation: PreparedAnimation,
-	template: ObjectVisualTemplate,
 ): { kind: ClipRefusal; detail: string } | null {
 	const blocking = animation.hooks.filter(animationHookBlocksActivation);
 	if (blocking.length > 0) {
@@ -125,24 +121,15 @@ function refuseClip(
 			kind: "unbounded-root-rotation",
 		};
 	}
-	for (const part of template.parts) {
-		if (part.partIndex >= animation.partCount) {
-			return {
-				detail: `appearance requires part ${part.partIndex} but the clip has ${animation.partCount}`,
-				kind: "part-coverage",
-			};
-		}
-	}
 	return null;
 }
 
 function sweepInto(
-	accumulated: AABB3 | null,
+	accumulated: AABB3,
 	animation: PreparedAnimation,
 	radii: readonly { part: PartVisualTemplate; radius: number | null }[],
 	sourceScale: Vec3,
-): AABB3 | null {
-	let result = accumulated;
+): void {
 	for (const { part, radius } of radii) {
 		if (radius === null) continue;
 		for (
@@ -164,11 +151,9 @@ function sweepInto(
 				new Vec3(center.x - radius, center.y - radius, center.z - radius),
 				new Vec3(center.x + radius, center.y + radius, center.z + radius),
 			);
-			if (result === null) result = partBounds;
-			else result.union(partBounds);
+			accumulated.union(partBounds);
 		}
 	}
-	return result;
 }
 
 /** Radius of the setup-scaled geometry box about the rigid part's authored origin. */

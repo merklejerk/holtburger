@@ -865,11 +865,6 @@ mod tests {
             .world
             .seed_local_player_entity(guid, "Player", outdoors);
         let _ = client.world.set_local_player_runtime_pose(outdoors);
-        let _ = client.world.set_player_vector(
-            holtburger_common::Vector3::new(1.0, 2.0, 3.0),
-            holtburger_common::Vector3::new(0.0, 0.0, 1.0),
-        );
-
         let teleport = encode_message(&GameMessage::PlayerTeleport(Box::new(PlayerTeleportData {
             teleport_sequence: 42,
         })));
@@ -1155,7 +1150,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn server_controlled_move_to_position_registers_deferred_projection() {
+    async fn server_controlled_move_to_position_registers_authored_directive() {
         let mut client = build_test_client();
         let player_guid = holtburger_common::Guid(0x50000001);
         let start = WorldPosition {
@@ -1193,15 +1188,20 @@ mod tests {
             .body(holtburger_world::SpatialBodyId::LocalPlayer(player_guid))
             .expect("server-controlled movement should retain the local runtime body");
         assert_eq!(body.pose, start);
-        let drive = client
-            .movement
-            .current_local_drive_control(
+        assert!(client.movement.has_server_controlled_motion());
+        assert_eq!(
+            client.movement.current_local_drive_control(
                 &client.world,
                 std::time::Duration::from_millis(PHYSICS_TICK_MS),
-            )
-            .expect("server-controlled movement should expose an ordinary drive target");
-        assert_eq!(drive.target_hint, Some(destination));
-        assert!(drive.desired_world_delta.length_squared() > 0.0);
+            ),
+            None,
+            "server directives must not leak into the autonomous velocity controller",
+        );
+        assert!(client.world.scene.apply_runtime_body_contact(
+            holtburger_world::SpatialBodyId::LocalPlayer(player_guid),
+            holtburger_world::ContactState::Grounded,
+        ));
+        assert!(client.movement.has_server_controlled_motion());
         assert_eq!(client.session.packet_sequence, 1);
     }
 

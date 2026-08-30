@@ -401,7 +401,7 @@ pub enum AppEvent {
     Tick(f64),
     KeyPress(KeyEvent), // key
     Mouse(MouseEvent),  // mouse
-    ReceivedViewEvent(ClientViewEvent),
+    ReceivedViewEvent(Box<ClientViewEvent>),
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

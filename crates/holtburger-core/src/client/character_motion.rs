@@ -89,11 +89,14 @@ pub struct CharacterMotionSequence(
     pub u64,
 );
 
-/// Contact fact required to accept the start of a retail-style jump charge.
+/// World-owned readiness required to accept the start of a retail-style jump charge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CharacterMotionContact {
-    Walkable,
+pub enum CharacterMotionReadiness {
+    Ready,
+    Airborne,
     Unsupported,
+    Overburdened,
+    CapabilityUnavailable,
 }
 
 /// An ordered, non-replaceable character-motion lifecycle edge.
@@ -151,7 +154,10 @@ pub enum CharacterMotionEventResult {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CharacterMotionRejection {
     ChargeNotActive,
+    Airborne,
     Unsupported,
+    Overburdened,
+    CapabilityUnavailable,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -225,7 +231,7 @@ impl CharacterMotionController {
     pub fn apply_event(
         &mut self,
         input: SequencedCharacterMotionEvent,
-        contact: CharacterMotionContact,
+        readiness: CharacterMotionReadiness,
     ) -> CharacterMotionEventResult {
         if let Some(last_accepted) = self.last_sequence
             && input.sequence <= last_accepted
@@ -240,10 +246,21 @@ impl CharacterMotionController {
                 if self.is_charging() {
                     return CharacterMotionEventResult::ChargeContinues;
                 }
-                if contact != CharacterMotionContact::Walkable {
-                    return CharacterMotionEventResult::Rejected(
-                        CharacterMotionRejection::Unsupported,
-                    );
+                let rejection = match readiness {
+                    CharacterMotionReadiness::Ready => None,
+                    CharacterMotionReadiness::Airborne => Some(CharacterMotionRejection::Airborne),
+                    CharacterMotionReadiness::Unsupported => {
+                        Some(CharacterMotionRejection::Unsupported)
+                    }
+                    CharacterMotionReadiness::Overburdened => {
+                        Some(CharacterMotionRejection::Overburdened)
+                    }
+                    CharacterMotionReadiness::CapabilityUnavailable => {
+                        Some(CharacterMotionRejection::CapabilityUnavailable)
+                    }
+                };
+                if let Some(rejection) = rejection {
+                    return CharacterMotionEventResult::Rejected(rejection);
                 }
 
                 self.phase = CharacterMotionPhase::Charging {
@@ -364,7 +381,7 @@ mod tests {
                         drive: CharacterDrive::default(),
                     },
                 ),
-                CharacterMotionContact::Walkable,
+                CharacterMotionReadiness::Ready,
             ),
             CharacterMotionEventResult::ChargeAccepted
         );
@@ -387,7 +404,7 @@ mod tests {
                         extent: JumpExtent::new(0.5).expect("valid extent"),
                     },
                 ),
-                CharacterMotionContact::Walkable,
+                CharacterMotionReadiness::Ready,
             ),
             CharacterMotionEventResult::JumpReleased(JumpAttempt {
                 drive: release_drive,
@@ -405,7 +422,7 @@ mod tests {
 
         controller.apply_event(
             event(1, CharacterMotionEvent::BeginJump { drive }),
-            CharacterMotionContact::Walkable,
+            CharacterMotionReadiness::Ready,
         );
 
         assert_eq!(controller.effective_drive(), drive);
@@ -419,16 +436,16 @@ mod tests {
         };
 
         assert_eq!(
-            controller.apply_event(event(1, begin), CharacterMotionContact::Unsupported),
+            controller.apply_event(event(1, begin), CharacterMotionReadiness::Unsupported),
             CharacterMotionEventResult::Rejected(CharacterMotionRejection::Unsupported)
         );
         assert!(!controller.is_charging());
         assert_eq!(
-            controller.apply_event(event(2, begin), CharacterMotionContact::Walkable),
+            controller.apply_event(event(2, begin), CharacterMotionReadiness::Ready),
             CharacterMotionEventResult::ChargeAccepted
         );
         assert_eq!(
-            controller.apply_event(event(3, begin), CharacterMotionContact::Walkable),
+            controller.apply_event(event(3, begin), CharacterMotionReadiness::Ready),
             CharacterMotionEventResult::ChargeContinues
         );
         assert!(controller.is_charging());
@@ -444,24 +461,24 @@ mod tests {
                     drive: CharacterDrive::default(),
                 },
             ),
-            CharacterMotionContact::Walkable,
+            CharacterMotionReadiness::Ready,
         );
         let release = CharacterMotionEvent::ReleaseJump {
             drive: CharacterDrive::default(),
             extent: JumpExtent::MAXIMUM,
         };
         assert!(matches!(
-            controller.apply_event(event(11, release), CharacterMotionContact::Walkable),
+            controller.apply_event(event(11, release), CharacterMotionReadiness::Ready),
             CharacterMotionEventResult::JumpReleased(_)
         ));
         assert_eq!(
-            controller.apply_event(event(11, release), CharacterMotionContact::Walkable),
+            controller.apply_event(event(11, release), CharacterMotionReadiness::Ready),
             CharacterMotionEventResult::IgnoredStale {
                 last_accepted: CharacterMotionSequence(11)
             }
         );
         assert_eq!(
-            controller.apply_event(event(9, release), CharacterMotionContact::Walkable),
+            controller.apply_event(event(9, release), CharacterMotionReadiness::Ready),
             CharacterMotionEventResult::IgnoredStale {
                 last_accepted: CharacterMotionSequence(11)
             }
@@ -478,12 +495,12 @@ mod tests {
                     drive: CharacterDrive::default(),
                 },
             ),
-            CharacterMotionContact::Walkable,
+            CharacterMotionReadiness::Ready,
         );
         assert_eq!(
             controller.apply_event(
                 event(2, CharacterMotionEvent::Reset),
-                CharacterMotionContact::Unsupported
+                CharacterMotionReadiness::Unsupported
             ),
             CharacterMotionEventResult::Reset
         );
@@ -498,7 +515,7 @@ mod tests {
                         drive: CharacterDrive::default(),
                     },
                 ),
-                CharacterMotionContact::Walkable,
+                CharacterMotionReadiness::Ready,
             ),
             CharacterMotionEventResult::ChargeAccepted
         );
@@ -518,7 +535,7 @@ mod tests {
                         extent: JumpExtent::MINIMUM,
                     },
                 ),
-                CharacterMotionContact::Walkable,
+                CharacterMotionReadiness::Ready,
             ),
             CharacterMotionEventResult::Rejected(CharacterMotionRejection::ChargeNotActive)
         );
@@ -547,7 +564,7 @@ mod tests {
                         drive: CharacterDrive::default(),
                     },
                 ),
-                CharacterMotionContact::Walkable,
+                CharacterMotionReadiness::Ready,
             );
             let result = controller.apply_event(
                 event(
@@ -557,7 +574,7 @@ mod tests {
                         extent: JumpExtent::MAXIMUM,
                     },
                 ),
-                CharacterMotionContact::Walkable,
+                CharacterMotionReadiness::Ready,
             );
 
             assert!(matches!(

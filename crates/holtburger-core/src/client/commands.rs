@@ -171,7 +171,9 @@ impl ClientRuntime {
             | ClientCommand::GetAndWield { .. }
             | ClientCommand::SplitToWield { .. } => self.handle_inventory_command(cmd).await,
 
-            ClientCommand::DriveSelf(_) => self.handle_movement_command(cmd).await,
+            ClientCommand::DriveSelf(_) | ClientCommand::ControlCharacter(_) => {
+                self.handle_movement_command(cmd).await
+            }
 
             ClientCommand::StartClientCamera(_)
             | ClientCommand::SetClientCameraIntent(_)
@@ -888,6 +890,13 @@ impl ClientRuntime {
                 self.movement.enqueue_drive_intent(intent, Instant::now());
                 Ok(())
             }
+            ClientCommand::ControlCharacter(event) => {
+                if self.activation.is_some() || !matches!(self.state, ClientState::InWorld) {
+                    return Ok(());
+                }
+                self.movement.enqueue_character_motion_event(event);
+                Ok(())
+            }
             _ => unreachable!(),
         }
     }
@@ -1334,6 +1343,7 @@ mod tests {
     };
     use crate::client::{ClientRuntime, ClientState};
     use holtburger_common::position::WorldPosition;
+    use holtburger_common::properties::{PropertyDataId, WorldObjectPropertyAccessorsMut as _};
     use holtburger_common::{CharacterOption, CharacterOptions1, ConfirmationType, Guid};
     use holtburger_content::{SoulEmoteCatalog, SoulEmotePose, SoulEmoteToken};
     use holtburger_protocol::messages::{
@@ -1343,6 +1353,7 @@ mod tests {
     use holtburger_world::RuntimeBodyResetCause;
     use holtburger_world::WorldState;
     use holtburger_world::spell::{MagicSchool, SpellCatalog, SpellExtrasInfo, SpellInfo};
+    use holtburger_world::state::motion_resolution::test_support::explicit_motion_catalog;
     use holtburger_world::state::{
         FellowshipDepartedMemberState, FellowshipLockEntryState, FellowshipLockState,
         FellowshipMemberState, FellowshipState, TradeSide, TradeState,
@@ -1372,6 +1383,25 @@ mod tests {
             )]),
         });
         client
+    }
+
+    fn seed_action_capable_player(client: &mut ClientRuntime, guid: Guid) {
+        const MOTION_TABLE_ID: u32 = 0x0900_2001;
+        client.world.set_motion_sequences(explicit_motion_catalog(
+            MOTION_TABLE_ID,
+            holtburger_protocol::messages::movement::MotionStance::NonCombat as u32,
+            [],
+            [],
+        ));
+        client
+            .world
+            .seed_local_player_entity(guid, "Player", WorldPosition::default());
+        client
+            .world
+            .entities
+            .get_mut(guid)
+            .expect("seeded player should exist")
+            .set_did_prop(PropertyDataId::MotionTable, Guid(MOTION_TABLE_ID));
     }
 
     #[tokio::test]
@@ -2019,7 +2049,8 @@ mod tests {
     #[tokio::test]
     async fn soul_emote_command_sends_dedicated_game_action() {
         let mut client = build_test_client();
-        client.world.player.guid = Guid(0x5000_0001);
+        let guid = Guid(0x5000_0001);
+        seed_action_capable_player(&mut client, guid);
 
         client
             .handle_command(ClientCommand::SoulEmote("wave".to_string()))
@@ -2036,6 +2067,7 @@ mod tests {
 
         assert_eq!(client.session.game_action_sequence, 2);
         assert!(client.session.bytes_out > 0);
+        assert!(client.world.has_authored_motion_actions(guid));
     }
 
     #[tokio::test]

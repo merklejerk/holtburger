@@ -95,8 +95,14 @@ pub enum MotionStance {
 impl MotionStance {
     const RAW_PREFIX: u32 = 0x8000_0000;
 
+    /// Resolves a wire style only when it names an actual stance.
+    ///
+    /// Interpreted zero is retail's absent/invalid sentinel. Callers represent that absence with
+    /// `None`; admitting `Some(MotionStance::Invalid)` would let the sentinel outrank a cached or
+    /// motion-table default stance.
     pub fn from_interpreted(style: u16) -> Option<Self> {
         Self::from_repr(Self::RAW_PREFIX | u32::from(style))
+            .filter(|stance| *stance != Self::Invalid)
     }
 
     pub const fn interpreted(self) -> u16 {
@@ -560,6 +566,11 @@ mod tests {
 
         assert_eq!(stance, Some(MotionStance::SwordCombat));
         assert_eq!(MotionStance::SwordCombat.interpreted(), 0x003e);
+    }
+
+    #[test]
+    fn zero_interpreted_style_is_absent_not_a_semantic_stance() {
+        assert_eq!(MotionStance::from_interpreted(0), None);
     }
 
     #[test]

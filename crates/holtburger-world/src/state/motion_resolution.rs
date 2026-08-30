@@ -1,9 +1,19 @@
-use crate::entity::{EntityManager, EntityMotionSnapshot};
-use crate::motion::{MotionOrder, MotionRuntimeRegistry};
+use crate::entity::{
+    EntityManager, EntityMotionAction, EntityMotionActionRejection, EntityMotionAdmission,
+    EntityMotionSnapshot,
+};
+use crate::motion::{
+    CharacterMotionPresentation, MotionCommand, MotionOrder, MotionRuntimeRegistry,
+    ServerDirectedMotionResolution, ServerDirectedTarget, begin_server_directed_motion,
+    resolve_server_directed_motion,
+};
 use crate::spatial::{
-    RetainedBodyKinematics, SolveBodyInput, SpatialBody, SpatialBodyId, SpatialSampleMode,
+    ContactState, RetainedBodyKinematics, SolveBodyInput, SpatialBody, SpatialBodyId,
+    SpatialSampleMode,
 };
 use crate::state::WorldState;
+use crate::state::types::RetainedServerDirectedMotion;
+use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_common::{Guid, RigidTransform, Vector3};
 use holtburger_content::{MotionSequence, MotionSequenceTable};
@@ -36,7 +46,7 @@ impl<'a> BodyProjectionResolver<'a> {
                     acceleration: entity.acceleration,
                     omega: entity.omega,
                 },
-                entity.motion_snapshot,
+                entity.network_motion.snapshot(),
             )
         });
         let (retained, motion_snapshot) = match entity_state {
@@ -76,12 +86,6 @@ impl<'a> BodyProjectionResolver<'a> {
         {
             return None;
         }
-        // TODO: Extend grounded basis resolution for TurnToHeading and TurnToObject once
-        // continuous command-driven observer projection is validated.
-        if snapshot.directive.is_some() {
-            return None;
-        }
-
         // Participation follows the installed sequence, not this tick's offset magnitude: a slow
         // turn can produce a rotation smaller than a useful identity threshold at 30 Hz.
         let runtime = self.motion_runtimes.get(guid)?;
@@ -130,6 +134,37 @@ pub enum AuthoredMotionDriveError {
     MotionTableSourceUnavailable { guid: u32 },
     #[error("body 0x{guid:08X} resolved missing motion table 0x{motion_table_id:08X}")]
     MotionTableUnavailable { guid: u32, motion_table_id: u32 },
+    #[error(
+        "body 0x{guid:08X} motion table 0x{motion_table_id:08X} does not model command 0x{command:08X} in style 0x{style:08X}"
+    )]
+    RequiredCycleUnavailable {
+        guid: u32,
+        motion_table_id: u32,
+        style: u32,
+        command: u32,
+    },
+}
+
+/// Why a client-authored transient edge could not enter the local body's shared runtime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum LocalAuthoredMotionActionError {
+    /// The interpreted command or speed is not a valid action edge.
+    #[error("local authored motion action is invalid: {rejection:?}")]
+    InvalidAction {
+        /// Exact action reduction failure.
+        rejection: EntityMotionActionRejection,
+    },
+    /// The local player has no direct or setup-default motion table.
+    #[error("local player 0x{guid:08X} has no effective motion table for authored action")]
+    MotionTableSourceUnavailable { guid: u32 },
+    /// The effective table identity is not present in the runtime catalog.
+    #[error(
+        "local player 0x{guid:08X} resolved unavailable motion table 0x{motion_table_id:08X} for authored action"
+    )]
+    MotionTableUnavailable { guid: u32, motion_table_id: u32 },
+    /// Active plus pending actions already occupy retail's six slots.
+    #[error("local player 0x{guid:08X} authored action queue is full")]
+    QueueOverflow { guid: u32 },
 }
 
 impl WorldState {
@@ -223,6 +258,131 @@ impl WorldState {
             .offset)
     }
 
+    /// Predicts one client-authored command-list edge into the local body's sole runtime.
+    ///
+    /// The later autonomous server echo is intentionally filtered at packet admission; predicting
+    /// here is therefore the only local presentation edge and cannot double-enqueue the action.
+    pub fn enqueue_local_authored_motion_action(
+        &mut self,
+        command: InterpretedMotionCommand,
+        speed: f32,
+        action_sequence: u16,
+    ) -> Result<(), LocalAuthoredMotionActionError> {
+        let action_sequence = action_sequence & 0x7FFF;
+        let guid = self.player.guid;
+        let admission = EntityMotionAdmission {
+            object_instance_sequence: self.player.instance_sequence,
+            movement_sequence: action_sequence,
+            server_control_sequence: self.player.server_control_sequence,
+            is_autonomous: true,
+        };
+        let action =
+            EntityMotionAction::from_local_command_list(command, speed, action_sequence, admission)
+                .map_err(|rejection| LocalAuthoredMotionActionError::InvalidAction { rejection })?;
+        let source = self.motion_table_source_for_guid(guid).ok_or(
+            LocalAuthoredMotionActionError::MotionTableSourceUnavailable {
+                guid: u32::from(guid),
+            },
+        )?;
+        let motion_table_id = motion_table_id_for_source(source);
+        let table = self.motion_sequences.table(motion_table_id).ok_or(
+            LocalAuthoredMotionActionError::MotionTableUnavailable {
+                guid: u32::from(guid),
+                motion_table_id,
+            },
+        )?;
+        if self.motion_runtimes.enqueue_action(table, guid, action)
+            == crate::motion::MotionActionEnqueueOutcome::Overflow
+        {
+            return Err(LocalAuthoredMotionActionError::QueueOverflow {
+                guid: u32::from(guid),
+            });
+        }
+        Ok(())
+    }
+
+    /// Offers freshly admitted transient edges to the body's sole authored runtime queue.
+    pub(crate) fn enqueue_entity_motion_actions(
+        &mut self,
+        guid: Guid,
+        actions: impl IntoIterator<Item = crate::entity::EntityMotionAction>,
+    ) {
+        let Some(source) = self.motion_table_source_for_guid(guid) else {
+            for action in actions {
+                log::warn!(
+                    "body 0x{guid:08X} has no motion table for admitted action 0x{:08X} (source {:?}, action sequence {})",
+                    action.command.raw(),
+                    action.source,
+                    action.action_sequence,
+                );
+            }
+            return;
+        };
+        let motion_table_id = motion_table_id_for_source(source);
+        let Some(table) = self.motion_sequences.table(motion_table_id) else {
+            for action in actions {
+                log::warn!(
+                    "body 0x{guid:08X} resolved missing motion table 0x{motion_table_id:08X} for admitted action 0x{:08X} (source {:?}, action sequence {})",
+                    action.command.raw(),
+                    action.source,
+                    action.action_sequence,
+                );
+            }
+            return;
+        };
+        for action in actions {
+            if self.motion_runtimes.enqueue_action(table, guid, action)
+                == crate::motion::MotionActionEnqueueOutcome::Overflow
+            {
+                log::warn!(
+                    "body 0x{guid:08X} motion table 0x{motion_table_id:08X} rejected action 0x{:08X}: retail six-action queue is full (source {:?}, action sequence {})",
+                    action.command.raw(),
+                    action.source,
+                    action.action_sequence,
+                );
+            }
+        }
+    }
+
+    /// Whether the local adapter must advance this body's sole authored cursor for an action.
+    pub fn has_authored_motion_actions(&self, guid: Guid) -> bool {
+        self.motion_runtimes.has_actions(guid)
+    }
+
+    /// Requires one style/command cycle before a playable-character adapter selects it.
+    ///
+    /// Generic remote content may legitimately leave a command unmodelled and retain its existing
+    /// presentation. A playable player table is a stronger contract: silently remaining in idle
+    /// would hide a broken required-content dependency.
+    pub fn require_authored_motion_cycle_for_body(
+        &self,
+        guid: Guid,
+        style: MotionCommand,
+        command: MotionCommand,
+    ) -> Result<(), AuthoredMotionDriveError> {
+        let source = self.motion_table_source_for_guid(guid).ok_or(
+            AuthoredMotionDriveError::MotionTableSourceUnavailable {
+                guid: u32::from(guid),
+            },
+        )?;
+        let motion_table_id = motion_table_id_for_source(source);
+        let table = self.motion_sequences.table(motion_table_id).ok_or(
+            AuthoredMotionDriveError::MotionTableUnavailable {
+                guid: u32::from(guid),
+                motion_table_id,
+            },
+        )?;
+        if table.cycle(style.raw(), command.raw()).is_none() {
+            return Err(AuthoredMotionDriveError::RequiredCycleUnavailable {
+                guid: u32::from(guid),
+                motion_table_id,
+                style: style.raw(),
+                command: command.raw(),
+            });
+        }
+        Ok(())
+    }
+
     pub fn resolve_body_projection_input(&self, body_id: SpatialBodyId) -> Option<SolveBodyInput> {
         let body = self.scene.body(body_id)?;
         BodyProjectionResolver::new(&self.entities, &self.motion_runtimes).resolve(body)
@@ -250,19 +410,22 @@ impl WorldState {
         let Some(entity) = self.entities.get(guid) else {
             return false;
         };
-        let Some(snapshot) = entity.motion_snapshot else {
+        let Some(snapshot) = entity.network_motion.snapshot() else {
             return false;
         };
         if snapshot
             .motion_command()
             .is_some_and(InterpretedMotionCommand::is_dead)
-            || snapshot.directive.is_some()
         {
             return false;
         }
 
         let order = MotionOrder::from_snapshot(snapshot);
-        if order.forward.is_none() && order.sidestep.is_none() && order.turn.is_none() {
+        if snapshot.directive.is_none()
+            && order.forward.is_none()
+            && order.sidestep.is_none()
+            && order.turn.is_none()
+        {
             return false;
         }
 
@@ -302,26 +465,30 @@ impl WorldState {
 
         // Collected first because driving playback needs the contract, the registry, and the entity
         // set at once, and only the registry is mutated.
-        let driving: Vec<(Guid, u32, MotionOrder)> = self
+        let driving: Vec<(Guid, u32, EntityMotionSnapshot, WorldPosition, ContactState)> = self
             .entities
             .iter()
             .filter_map(|entity| {
                 if excluded == Some(entity.guid) {
                     return None;
                 }
-                let snapshot = entity.motion_snapshot?;
+                let snapshot = entity.network_motion.snapshot()?;
                 if snapshot
                     .motion_command()
                     .is_some_and(InterpretedMotionCommand::is_dead)
-                    || snapshot.directive.is_some()
                 {
                     return None;
                 }
                 let source = self.motion_table_source_for_guid(entity.guid)?;
+                let body = self
+                    .runtime_body_id_for_guid(entity.guid)
+                    .and_then(|body_id| self.scene.body(body_id));
                 Some((
                     entity.guid,
                     motion_table_id_for_source(source),
-                    MotionOrder::from_snapshot(snapshot),
+                    snapshot,
+                    body.map_or(entity.position, |body| body.pose),
+                    body.map_or(ContactState::Unknown, |body| body.contact),
                 ))
             })
             .collect();
@@ -333,13 +500,152 @@ impl WorldState {
             self.entities.iter().map(|entity| entity.guid).collect();
         self.motion_runtimes
             .retain_bodies(|guid| live.contains(&guid));
+        self.server_directed_motion
+            .retain(|guid, _| live.contains(guid));
 
-        for (guid, motion_table_id, order) in driving {
+        for (guid, motion_table_id, snapshot, pose, contact) in driving {
+            let order = self.resolve_remote_motion_order(guid, snapshot, pose, contact);
             let Some(table) = self.motion_sequences.table(motion_table_id) else {
                 continue;
             };
             self.motion_runtimes.drive(table, guid, order, quantum);
         }
+    }
+
+    /// Re-selects one server-authored body's presentation after a committed support transition.
+    ///
+    /// The zero quantum changes the selected sequence without double-advancing the tick. Remote
+    /// root actuation already consumed the offset selected from the pre-solve support state.
+    pub fn reconcile_authored_motion_support(&mut self, guid: Guid, contact: ContactState) {
+        let Some(snapshot) = self
+            .entities
+            .get(guid)
+            .and_then(|entity| entity.network_motion.snapshot())
+        else {
+            return;
+        };
+        if snapshot
+            .motion_command()
+            .is_some_and(InterpretedMotionCommand::is_dead)
+        {
+            return;
+        }
+        let Some(source) = self.motion_table_source_for_guid(guid) else {
+            return;
+        };
+        let pose = self
+            .runtime_body_id_for_guid(guid)
+            .and_then(|body_id| self.scene.body(body_id))
+            .map_or_else(
+                || self.entities.get(guid).map(|entity| entity.position),
+                |body| Some(body.pose),
+            );
+        let Some(pose) = pose else {
+            return;
+        };
+        let order = self.resolve_remote_motion_order(guid, snapshot, pose, contact);
+        let Some(table) = self
+            .motion_sequences
+            .table(motion_table_id_for_source(source))
+        else {
+            return;
+        };
+        self.motion_runtimes.drive(table, guid, order, 0.0);
+    }
+
+    /// Samples the current target facts used by retail object-directed movement.
+    pub fn server_directed_target(&self, guid: Guid) -> Option<ServerDirectedTarget> {
+        let entity = self.entities.get(guid)?;
+        let pose = self
+            .runtime_body_id_for_guid(guid)
+            .and_then(|body_id| self.scene.body(body_id))
+            .map_or(entity.position, |body| body.pose);
+        let use_radius = entity.use_radius().unwrap_or(0.0) as f32;
+        ServerDirectedTarget::new(pose, use_radius)
+    }
+
+    fn resolve_remote_motion_order(
+        &mut self,
+        guid: Guid,
+        snapshot: EntityMotionSnapshot,
+        current_pose: WorldPosition,
+        contact: ContactState,
+    ) -> MotionOrder {
+        let steady_order = MotionOrder::from_snapshot(snapshot);
+        let Some(directive) = snapshot.directive else {
+            self.server_directed_motion.remove(&guid);
+            return support_presented_snapshot_order(snapshot, contact);
+        };
+
+        let retained = self.server_directed_motion.remove(&guid);
+        let state = match retained {
+            Some(retained) if retained.directive == directive => retained.state,
+            _ => {
+                let target = directive
+                    .target_guid()
+                    .and_then(|target| self.server_directed_target(target));
+                Some(begin_server_directed_motion(
+                    directive,
+                    current_pose,
+                    target,
+                ))
+            }
+        };
+        let Some(state) = state else {
+            self.server_directed_motion.insert(
+                guid,
+                RetainedServerDirectedMotion {
+                    directive,
+                    state: None,
+                },
+            );
+            return support_presented_snapshot_order(snapshot, contact);
+        };
+        let target = state
+            .target_guid()
+            .and_then(|target| self.server_directed_target(target));
+        match resolve_server_directed_motion(state, steady_order, current_pose, contact, target) {
+            ServerDirectedMotionResolution::Active(step) => {
+                self.server_directed_motion.insert(
+                    guid,
+                    RetainedServerDirectedMotion {
+                        directive,
+                        state: Some(step.state),
+                    },
+                );
+                step.order
+            }
+            ServerDirectedMotionResolution::Complete => {
+                self.server_directed_motion.insert(
+                    guid,
+                    RetainedServerDirectedMotion {
+                        directive,
+                        state: None,
+                    },
+                );
+                support_presented_snapshot_order(snapshot, contact)
+            }
+            ServerDirectedMotionResolution::Failed(failure) => {
+                log::warn!("entity 0x{guid:08X} server-directed motion failed: {failure:?}");
+                self.server_directed_motion.insert(
+                    guid,
+                    RetainedServerDirectedMotion {
+                        directive,
+                        state: None,
+                    },
+                );
+                support_presented_snapshot_order(snapshot, contact)
+            }
+        }
+    }
+
+    /// Resolves the motion table every playback and presentation consumer must use for an entity.
+    ///
+    /// A direct DID wins; otherwise the setup model's authored default supplies the table. Keeping
+    /// fallback ownership here prevents solver and frontend projection from disagreeing.
+    pub fn effective_motion_table_id_for_guid(&self, guid: Guid) -> Option<u32> {
+        self.motion_table_source_for_guid(guid)
+            .map(motion_table_id_for_source)
     }
 
     fn motion_table_source_for_guid(&self, guid: Guid) -> Option<PlayerMotionTableSource> {
@@ -374,6 +680,14 @@ impl WorldState {
             movement_profile: MotionTableMovementProfile::reduce(table, motion_table_id, stance),
         })
     }
+}
+
+fn support_presented_snapshot_order(
+    snapshot: EntityMotionSnapshot,
+    contact: ContactState,
+) -> MotionOrder {
+    MotionOrder::from_snapshot(snapshot)
+        .with_character_presentation(CharacterMotionPresentation::resolve(contact, false, false))
 }
 
 /// Velocity-grade summary of the four movement commands for one table and stance.

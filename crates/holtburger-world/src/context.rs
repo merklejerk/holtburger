@@ -654,7 +654,7 @@ mod tests {
         run_rate_from_skill_and_burden,
     };
     use crate::attachment::PhysicsAttachment;
-    use crate::entity::{Entity, EntityMotionSnapshot};
+    use crate::entity::{Entity, EntityMotionSnapshot, EntityNetworkMotion};
     use crate::stats::{AttributeType, SkillType};
     use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::EquipMask;
@@ -1022,7 +1022,7 @@ mod tests {
             .properties
             .ints
             .insert(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
-        target.motion_snapshot = Some(EntityMotionSnapshot {
+        target.network_motion = EntityNetworkMotion::Initialized(EntityMotionSnapshot {
             current_style: Some(MotionStance::NonCombat),
             forward_command: Some(InterpretedMotionCommand::DEAD),
             sidestep_command: None,

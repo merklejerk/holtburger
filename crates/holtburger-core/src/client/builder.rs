@@ -9,8 +9,8 @@ use std::time::Instant;
 use tokio::sync::broadcast;
 
 use super::{
-    ClientRuntime, ClientState, TurbineChatState, character_selection::CharacterSelectionState,
-    movement::MovementSystem,
+    ClientRuntime, ClientState, PublishedCharacterMotionCapabilities, TurbineChatState,
+    character_selection::CharacterSelectionState, movement::MovementSystem,
 };
 
 #[derive(Clone)]
@@ -166,6 +166,8 @@ impl ClientRuntimeBuilder {
             exit_cause: None,
             client_view_event_tx,
             dynamic_entity_time_origin: Instant::now(),
+            published_character_motion_capabilities:
+                PublishedCharacterMotionCapabilities::Unpublished,
             command_rx: None,
             message_dump_dir: self.message_dump_dir,
             message_counter: 0,
@@ -198,6 +200,7 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> ClientRuntime {
         exit_cause: None,
         client_view_event_tx,
         dynamic_entity_time_origin: Instant::now(),
+        published_character_motion_capabilities: PublishedCharacterMotionCapabilities::Unpublished,
         command_rx: None,
         message_dump_dir: None,
         message_counter: 0,

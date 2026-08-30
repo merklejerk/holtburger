@@ -184,15 +184,28 @@ function createCensus() {
 		const clip = JSON.stringify(entity.playingClip ?? null);
 		const previous = actorMotion.get(entity.identity.guid);
 		const step = previous === undefined ? 0 : distance(previous.point, point);
+		const clipChanged = previous === undefined || previous.clip !== clip;
 		actorMotion.set(entity.identity.guid, {
 			point,
+			name: entity.identity.name,
+			wcid: entity.identity.wcid,
+			category: entity.presentation?.category ?? null,
+			setupDid: entity.presentation?.content?.setupDid ?? null,
+			motionTableDid: entity.presentation?.content?.motionTableDid ?? null,
 			sampleCount: (previous?.sampleCount ?? 0) + 1,
 			totalDistance: (previous?.totalDistance ?? 0) + step,
 			maximumStep: Math.max(previous?.maximumStep ?? 0, step),
 			clip,
+			clipHistory: clipChanged
+				? [...(previous?.clipHistory ?? []), entity.playingClip ?? null]
+				: previous.clipHistory,
+			contacts: new Set([
+				...(previous?.contacts ?? []),
+				entity.placement.contact,
+			]),
 			clipTransitions:
 				(previous?.clipTransitions ?? 0) +
-				(previous !== undefined && previous.clip !== clip ? 1 : 0),
+				(previous !== undefined && clipChanged ? 1 : 0),
 		});
 	}
 
@@ -238,10 +251,17 @@ function createCensus() {
 						.map(([guid, motion]) => [
 							guidString(guid),
 							{
+								name: motion.name,
+								wcid: motion.wcid,
+								category: motion.category,
+								setupDid: motion.setupDid,
+								motionTableDid: motion.motionTableDid,
 								sampleCount: motion.sampleCount,
 								totalDistance: motion.totalDistance,
 								maximumStep: motion.maximumStep,
 								clipTransitions: motion.clipTransitions,
+								clipHistory: motion.clipHistory,
+								contacts: [...motion.contacts].sort(),
 							},
 						]),
 				),
@@ -281,9 +301,12 @@ function wrappedAngleDelta(from, to) {
 function actorPhaseSample(entity) {
 	if (entity?.placement?.kind !== "world") return null;
 	return {
+		cellId: entity.placement.pose.landblockId,
+		contact: entity.placement.contact,
 		heading: entityHeading(entity),
 		point: worldPoint(entity.placement.pose),
 		playingClip: entity.playingClip ?? null,
+		sampleMode: entity.placement.sampleMode,
 	};
 }
 
@@ -456,6 +479,9 @@ async function main() {
 	const lifecycle = [];
 	const cameras = [];
 	const discontinuities = [];
+	const characterMotionFeedback = [];
+	let characterMotionCapabilities = null;
+	let jump = null;
 	const terminalEvents = [];
 	const latestEntities = new Map();
 	let teleport = null;
@@ -463,6 +489,8 @@ async function main() {
 	const events = [
 		"client-current-state",
 		"client-lifecycle-changed",
+		"client-character-motion-capabilities-updated",
+		"client-character-motion-feedback",
 		"client-local-player-established",
 		"client-server-time-updated",
 		"client-dynamic-entity",
@@ -479,6 +507,10 @@ async function main() {
 				census.observe(event, payload);
 				waiter.push(event, payload);
 				if (event === "client-lifecycle-changed") lifecycle.push(payload);
+				if (event === "client-character-motion-capabilities-updated")
+					characterMotionCapabilities = payload;
+				if (event === "client-character-motion-feedback")
+					characterMotionFeedback.push(payload);
 				if (event === "client-current-state") {
 					for (const entity of payload?.dynamic?.entities ?? []) {
 						latestEntities.set(entity.identity.guid, entity);
@@ -678,6 +710,7 @@ async function main() {
 		void currentStatePromise.catch(() => undefined);
 		await client.invoke("request_client_current_state");
 		const currentState = await currentStatePromise;
+		characterMotionCapabilities = currentState.characterMotion;
 		lastCompletedPhase = "current-state-received";
 		if (currentState.localPlayerGuid !== playerGuid) {
 			throw new Error(
@@ -805,7 +838,8 @@ async function main() {
 				sourcePlayer = destinationPlayer;
 				previousLifecycle = teleportLifecycle;
 			}
-		} else if (mode === "passive") {
+		}
+		if (mode === "passive") {
 			await delay(observationMs);
 			lastCompletedPhase = "passive-observation-completed";
 		} else {
@@ -832,24 +866,220 @@ async function main() {
 			try {
 				await runDrivePhase(
 					"forward",
-					{ gait: "run", longitudinal: "forward", turning: null },
+					{
+						gait: "run",
+						longitudinal: "forward",
+						lateral: null,
+						turning: null,
+					},
 					observationMs,
 				);
 				await runDrivePhase(
+					"strafe-left",
+					{
+						gait: "run",
+						longitudinal: null,
+						lateral: "left",
+						turning: null,
+					},
+					Math.max(500, Math.floor(observationMs / 4)),
+				);
+				await runDrivePhase(
+					"forward-and-strafe-right",
+					{
+						gait: "run",
+						longitudinal: "forward",
+						lateral: "right",
+						turning: null,
+					},
+					Math.max(500, Math.floor(observationMs / 4)),
+				);
+				await runDrivePhase(
 					"forward-and-turn",
-					{ gait: "run", longitudinal: "forward", turning: "right" },
+					{
+						gait: "run",
+						longitudinal: "forward",
+						lateral: null,
+						turning: "right",
+					},
 					Math.max(500, Math.floor(observationMs / 4)),
 				);
 				await runDrivePhase(
 					"turn-after-forward-release",
-					{ gait: "run", longitudinal: null, turning: "right" },
+					{
+						gait: "run",
+						longitudinal: null,
+						lateral: null,
+						turning: "right",
+					},
 					Math.max(1_000, Math.floor(observationMs / 2)),
 				);
 				await runDrivePhase(
 					"stop",
-					{ gait: "walk", longitudinal: null, turning: null },
+					{
+						gait: "walk",
+						longitudinal: null,
+						lateral: null,
+						turning: null,
+					},
 					1_000,
 				);
+				if (characterMotionCapabilities === null) {
+					throw new Error(
+						"current state did not contain authoritative character-motion capability",
+					);
+				}
+				const idleDrive = {
+					gait: "run",
+					longitudinal: null,
+					lateral: null,
+					turning: null,
+				};
+				const releaseDrive = {
+					gait: "run",
+					longitudinal: "forward",
+					lateral: "right",
+					turning: null,
+				};
+				const beginSequence = 10_000;
+				const releaseSequence = beginSequence + 1;
+				const acceptedPromise = waiter.wait(
+					"client-character-motion-feedback",
+					(payload) =>
+						payload?.sequence === beginSequence &&
+						(payload.outcome?.kind === "charge-accepted" ||
+							payload.outcome?.kind === "rejected"),
+					timeoutMs,
+					"jump charge feedback",
+				);
+				void acceptedPromise.catch(() => undefined);
+				await invokeMovement("queue_client_character_motion_event", {
+					request: {
+						kind: "begin-jump",
+						sequence: beginSequence,
+						drive: idleDrive,
+					},
+				});
+				const accepted = await acceptedPromise;
+				if (accepted.outcome.kind !== "charge-accepted") {
+					throw new Error(
+						`jump charge was rejected: ${accepted.outcome.reason ?? "unknown"}`,
+					);
+				}
+				await delay(
+					Math.max(
+						50,
+						Math.floor(characterMotionCapabilities.fullChargeDurationMs / 2),
+					),
+				);
+				const beforeJump = actorPhaseSample(latestEntities.get(playerGuid));
+				const committedPromise = waiter.wait(
+					"client-character-motion-feedback",
+					(payload) =>
+						payload?.sequence === releaseSequence &&
+						(payload.outcome?.kind === "jump-committed" ||
+							payload.outcome?.kind === "rejected"),
+					timeoutMs,
+					"jump release feedback",
+				);
+				void committedPromise.catch(() => undefined);
+				await invokeMovement("queue_client_character_motion_event", {
+					request: {
+						kind: "release-jump",
+						sequence: releaseSequence,
+						drive: releaseDrive,
+						extent: 0.5,
+					},
+				});
+				const committed = await committedPromise;
+				if (committed.outcome.kind !== "jump-committed") {
+					throw new Error(
+						`jump release was rejected: ${committed.outcome.reason ?? "unknown"}`,
+					);
+				}
+				await invokeMovement("replace_client_drive", { request: idleDrive });
+				const trajectory = [];
+				for (let elapsed = 0; elapsed <= 5_000; elapsed += 50) {
+					const sample = actorPhaseSample(latestEntities.get(playerGuid));
+					if (sample !== null) trajectory.push(sample);
+					await delay(50);
+				}
+				const afterJump = actorPhaseSample(latestEntities.get(playerGuid));
+				const lateTrajectory = trajectory.slice(-10);
+				const trajectoryStates = trajectory.map((sample) => ({
+					cellId: sample.cellId,
+					contact: sample.contact,
+					sampleMode: sample.sampleMode,
+				}));
+				const airborneTrajectory = trajectory.filter(
+					(sample) => sample.contact === "airborne",
+				);
+				const playingClipTransitions = trajectory
+					.filter(
+						(sample, index, samples) =>
+							index === 0 ||
+							sample.playingClip?.animationId !==
+								samples[index - 1].playingClip?.animationId,
+					)
+					.map((sample) => ({
+						animationId: sample.playingClip?.animationId ?? null,
+						contact: sample.contact,
+					}));
+				const contactTransitions = trajectoryStates.filter(
+					(state, index, states) =>
+						index === 0 || state.contact !== states[index - 1].contact,
+				);
+				jump = {
+					beginSequence,
+					releaseSequence,
+					extent: 0.5,
+					chargeDurationMs: characterMotionCapabilities.fullChargeDurationMs,
+					feedback: [accepted, committed],
+					peakVerticalDisplacement:
+						beforeJump === null || trajectory.length === 0
+							? null
+							: Math.max(
+									...trajectory.map(
+										(sample) => sample.point.z - beforeJump.point.z,
+									),
+								),
+					airbornePeakVerticalDisplacement:
+						beforeJump === null || airborneTrajectory.length === 0
+							? null
+							: Math.max(
+									...airborneTrajectory.map(
+										(sample) => sample.point.z - beforeJump.point.z,
+									),
+								),
+					planarDisplacement:
+						beforeJump === null || afterJump === null
+							? null
+							: Math.hypot(
+									afterJump.point.x - beforeJump.point.x,
+									afterJump.point.y - beforeJump.point.y,
+								),
+					finalVerticalDisplacement:
+						beforeJump === null || afterJump === null
+							? null
+							: afterJump.point.z - beforeJump.point.z,
+					lateVerticalRange:
+						lateTrajectory.length === 0
+							? null
+							: Math.max(...lateTrajectory.map((sample) => sample.point.z)) -
+								Math.min(...lateTrajectory.map((sample) => sample.point.z)),
+					contactStates: [
+						...new Set(trajectoryStates.map((state) => state.contact)),
+					],
+					contactTransitions,
+					playingClipTransitions,
+					sampleModes: [
+						...new Set(trajectoryStates.map((state) => state.sampleMode)),
+					],
+					cellIds: [...new Set(trajectoryStates.map((state) => state.cellId))],
+					finalContact: afterJump?.contact ?? null,
+					finalSampleMode: afterJump?.sampleMode ?? null,
+					playingClipAfter: afterJump?.playingClip ?? null,
+				};
 			} catch (error) {
 				driveError = safeError(error);
 			}
@@ -857,7 +1087,12 @@ async function main() {
 			lastCompletedPhase = "observation-completed";
 			if (driveError === null) {
 				await invokeMovement("replace_client_drive", {
-					request: { gait: "walk", longitudinal: null, turning: null },
+					request: {
+						gait: "walk",
+						longitudinal: null,
+						lateral: null,
+						turning: null,
+					},
 				}).catch(() => undefined);
 			}
 		}
@@ -886,6 +1121,9 @@ async function main() {
 			},
 			driveError,
 			drivePhases,
+			characterMotionCapabilities,
+			characterMotionFeedback,
+			jump,
 			discontinuityCount: discontinuities.length,
 			terminalEvents,
 			census: census.toJSON(),
@@ -903,6 +1141,9 @@ async function main() {
 			mode,
 			teleport,
 			teleports,
+			characterMotionCapabilities,
+			characterMotionFeedback,
+			jump,
 			census: census.toJSON(),
 		};
 	} finally {

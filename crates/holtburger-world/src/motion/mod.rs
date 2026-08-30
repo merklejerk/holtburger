@@ -14,6 +14,7 @@
 mod tests;
 
 mod actuation;
+mod directed;
 mod registry;
 mod selection;
 mod sequence;
@@ -29,11 +30,21 @@ use std::sync::Arc;
 pub type MotionAnimationRef = Arc<MotionAnimation>;
 
 pub use actuation::{authored_grounded_actuation, grounded_character_actuation};
-pub use registry::{BodyMotionRuntime, MotionRuntimeRegistry, PlayingMotionClip};
+pub use directed::{
+    ServerDirectedMotionFailure, ServerDirectedMotionResolution, ServerDirectedMotionState,
+    ServerDirectedMotionStep, ServerDirectedTarget, begin_server_directed_motion,
+    resolve_server_directed_motion,
+};
+pub use registry::{
+    BodyMotionRuntime, MotionActionEnqueueOutcome, MotionRuntimeRegistry, PlayingMotionClip,
+};
 pub use selection::{
-    MotionSelectionOutcome, select_motion, set_default_state, stop_completely, stop_motion,
+    ActionSelectionOutcome, MotionSelectionOutcome, select_action, select_motion,
+    set_default_state, stop_completely, stop_motion,
 };
 pub use sequence::{
     FiredMotionHook, MotionClipCompletion, MotionSequenceRuntime, SequenceNode, SequenceTick,
 };
-pub use state::{ActiveMotion, MotionCommand, MotionOrder, MotionState};
+pub use state::{
+    ActiveMotion, CharacterMotionPresentation, MotionCommand, MotionOrder, MotionState,
+};

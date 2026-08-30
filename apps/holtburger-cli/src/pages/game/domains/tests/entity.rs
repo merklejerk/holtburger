@@ -165,9 +165,9 @@ fn entity_kinematics_event_updates_cached_entity_state_and_requests_redraw() {
 }
 
 #[test]
-fn entity_motion_updated_none_clears_cached_motion_snapshot() {
+fn entity_motion_updated_initialized_idle_replaces_cached_motion() {
     use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
-    use holtburger_world::entity::EntityMotionSnapshot;
+    use holtburger_world::entity::{EntityMotionSnapshot, EntityNetworkMotion};
 
     let player_guid = Guid(0x50000001);
     let target_guid = Guid(0x60000001);
@@ -178,7 +178,7 @@ fn entity_motion_updated_none_clears_cached_motion_snapshot() {
         ..WorldPosition::default()
     };
     let mut target = Entity::new(target_guid, "Drudge".to_string(), target_position);
-    target.motion_snapshot = Some(EntityMotionSnapshot {
+    target.network_motion = EntityNetworkMotion::Initialized(EntityMotionSnapshot {
         current_style: Some(MotionStance::NonCombat),
         forward_command: Some(InterpretedMotionCommand::DEAD),
         sidestep_command: None,
@@ -189,7 +189,10 @@ fn entity_motion_updated_none_clears_cached_motion_snapshot() {
 
     let _ = state.handle_view_event(ClientViewEvent::EntityMotionUpdated {
         guid: target_guid,
-        snapshot: None,
+        motion: EntityNetworkMotion::Initialized(EntityMotionSnapshot {
+            current_style: Some(MotionStance::NonCombat),
+            ..Default::default()
+        }),
     });
 
     assert_eq!(
@@ -197,7 +200,10 @@ fn entity_motion_updated_none_clears_cached_motion_snapshot() {
             .data
             .entities
             .get(&target_guid)
-            .and_then(|entity| entity.motion_snapshot),
-        None
+            .and_then(|entity| entity.network_motion.snapshot()),
+        Some(EntityMotionSnapshot {
+            current_style: Some(MotionStance::NonCombat),
+            ..Default::default()
+        })
     );
 }

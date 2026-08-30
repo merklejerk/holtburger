@@ -183,6 +183,7 @@ function currentState(): ClientCurrentState {
 		worldName: "Leafcull",
 		playerName: "Drudge",
 		vitals: [],
+		characterMotion: null,
 		dynamic: {
 			hostTime: { seconds: 10 },
 			entities: [

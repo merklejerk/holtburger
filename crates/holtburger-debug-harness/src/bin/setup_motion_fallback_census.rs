@@ -22,6 +22,9 @@ struct Args {
     catalog: std::path::PathBuf,
     #[arg(long)]
     content: Option<std::path::PathBuf>,
+    /// Print this many representative templates that resolve through their setup model.
+    #[arg(long, default_value_t = 0)]
+    sample_limit: usize,
 }
 
 fn main() -> Result<()> {
@@ -52,6 +55,7 @@ fn main() -> Result<()> {
     let mut fallback_misses = 0usize;
     let mut disagreements = 0usize;
     let mut fallback_setups: HashSet<u32> = HashSet::new();
+    let mut fallback_samples = Vec::new();
 
     let wcids: Vec<u32> = catalog.records().map(|record| record.wcid).collect();
     for wcid in wcids {
@@ -75,7 +79,14 @@ fn main() -> Result<()> {
                 if let Some(table) = default_table_by_setup.get(&setup_id) {
                     fallback_resolves += 1;
                     fallback_setups.insert(setup_id);
-                    let _ = table;
+                    if fallback_samples.len() < args.sample_limit {
+                        fallback_samples.push((
+                            template.wcid,
+                            template.name.clone(),
+                            setup_id,
+                            *table,
+                        ));
+                    }
                 } else {
                     fallback_misses += 1;
                 }
@@ -99,6 +110,12 @@ fn main() -> Result<()> {
         "  distinct setups the fallback reaches:  {}",
         fallback_setups.len()
     );
+    if !fallback_samples.is_empty() {
+        println!("\nrepresentative setup fallbacks:");
+        for (wcid, name, setup, table) in fallback_samples {
+            println!("  wcid {wcid:>6}  setup 0x{setup:08X}  motion 0x{table:08X}  name {name:?}");
+        }
+    }
 
     Ok(())
 }

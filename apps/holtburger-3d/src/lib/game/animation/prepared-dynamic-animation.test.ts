@@ -124,6 +124,32 @@ describe("prepareDynamicAnimation", () => {
 			new AABB3(new Vec3(-2, -2, -2), new Vec3(2, 2, 2)),
 		);
 	});
+
+	it("accepts partial clips and keeps static bounds for untouched setup parts", () => {
+		const partialTemplate = {
+			...template(),
+			parts: [
+				...template().parts,
+				{
+					...template().parts[0]!,
+					partIndex: 1,
+				},
+			],
+		};
+		const staticBounds = new AABB3(new Vec3(-20, -1, -1), new Vec3(20, 1, 1));
+
+		const prepared = prepareDynamicAnimation(
+			animation([Mat4.identity()], []),
+			partialTemplate,
+			new Vec3(1, 1, 1),
+			staticBounds,
+		);
+
+		expect(prepared.kind).toBe("activatable");
+		expect(prepared.localBounds).toEqual(
+			new AABB3(new Vec3(-20, -2, -2), new Vec3(20, 2, 2)),
+		);
+	});
 });
 
 function animation(

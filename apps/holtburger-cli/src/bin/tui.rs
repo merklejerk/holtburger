@@ -828,7 +828,7 @@ async fn run() -> Result<()> {
     };
 
     for event in initial_events {
-        let res = app_state.handle_app_event(AppEvent::ReceivedViewEvent(event));
+        let res = app_state.handle_app_event(AppEvent::ReceivedViewEvent(Box::new(event)));
         let mut should_quit = false;
         update_state(res, &mut pending_redraw, &server_cmd_tx, &mut should_quit);
         if should_quit {
@@ -885,17 +885,18 @@ async fn run() -> Result<()> {
                 Ok(event) => {
                     requested_initial_view_state = false;
 
-                    let res = app_state.handle_app_event(AppEvent::ReceivedViewEvent(event));
+                    let res =
+                        app_state.handle_app_event(AppEvent::ReceivedViewEvent(Box::new(event)));
                     update_state(res, &mut pending_redraw, &server_cmd_tx, &mut should_quit);
                     should_quit |= app_state.has_pending_exit();
                 }
                 Err(tokio::sync::broadcast::error::TryRecvError::Empty) => break,
                 Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => {
-                    let reset = app_state.handle_app_event(AppEvent::ReceivedViewEvent(
+                    let reset = app_state.handle_app_event(AppEvent::ReceivedViewEvent(Box::new(
                         ClientViewEvent::RuntimeBodiesReset {
                             cause: RuntimeBodyResetCause::Resync,
                         },
-                    ));
+                    )));
                     update_state(reset, &mut pending_redraw, &server_cmd_tx, &mut should_quit);
                     if !requested_initial_view_state {
                         requested_initial_view_state = true;

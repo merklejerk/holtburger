@@ -9,6 +9,7 @@
 	} from "../app/map-panel-frame";
 	import { MAP_DEFAULT_VIEW_DIAMETERS } from "../lib/game/map/map-appearance";
 	import ClientCharacterHud from "./ClientCharacterHud.svelte";
+	import ClientJumpPowerBar from "./ClientJumpPowerBar.svelte";
 	import ClientChat, { type ClientChatLine } from "./ClientChat.svelte";
 	import ClientDebugPanel from "./ClientDebugPanel.svelte";
 	import ClientFloatingPanel from "./ClientFloatingPanel.svelte";
@@ -45,6 +46,9 @@
 		readonly playerName: string | null;
 		readonly worldName: string | null;
 		readonly vitals: readonly ClientVital[];
+		readonly jumpChargeActive: boolean;
+		readonly readJumpExtent: () => number;
+		readonly jumpStatus: string | null;
 		readonly chatMessages: readonly ClientChatLine[];
 		readonly onSendChat: (message: string) => Promise<void>;
 		readonly onChatFocusChange: (focused: boolean) => void;
@@ -64,6 +68,9 @@
 		playerName,
 		worldName,
 		vitals,
+		jumpChargeActive,
+		readJumpExtent,
+		jumpStatus,
 		chatMessages,
 		onSendChat,
 		onChatFocusChange,
@@ -244,6 +251,11 @@
 	>
 		<ClientCharacterHud {playerName} {worldName} {vitals} />
 	</ClientHudPanel>
+	<ClientJumpPowerBar
+		active={jumpChargeActive}
+		readExtent={readJumpExtent}
+		status={jumpStatus}
+	/>
 	<ClientHudPanel
 		label="Chat"
 		placement={hudLayout.chat}

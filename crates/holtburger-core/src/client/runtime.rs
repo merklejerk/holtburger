@@ -2,6 +2,7 @@ use super::*;
 use crate::DynamicEntityEvent;
 use crate::DynamicEntityPlacementAdvanceKind;
 use anyhow::Result;
+use holtburger_protocol::messages::game_action::{GameAction, JumpActionData};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -53,7 +54,7 @@ impl ClientRuntime {
     ) {
         match event {
             WorldEvent::RuntimeBodiesReset { .. } => {
-                self.movement.clear_server_controlled_projection();
+                self.movement.clear_server_controlled_motion();
                 self.reset_camera();
                 if let Some(coordinator) = self.collision_coordinator.as_mut() {
                     coordinator.invalidate();
@@ -72,7 +73,7 @@ impl ClientRuntime {
                 }
             }
             WorldEvent::ForcedReposition { guid, .. } if *guid == self.world.player.guid => {
-                self.movement.clear_server_controlled_projection();
+                self.movement.clear_server_controlled_motion();
                 self.reset_camera();
                 if let Some(coordinator) = self.collision_coordinator.as_mut() {
                     coordinator.invalidate();
@@ -200,6 +201,11 @@ impl ClientRuntime {
                         for event in movement_events {
                             self.handle_runtime_world_event(&event);
                         }
+                        for feedback in self.movement.take_character_motion_feedback() {
+                            let _ = self
+                                .client_view_event_tx
+                                .send(ClientViewEvent::CharacterMotionFeedback(feedback));
+                        }
                     }
 
                     let physics_events = self.world.tick();
@@ -230,7 +236,7 @@ impl ClientRuntime {
                         .map(super::collision::ClientCollisionCoordinator::snapshot);
                     let mut placement_kind_overrides = std::collections::HashMap::new();
                     if active_world {
-                        let simulation_events = super::simulation::tick(
+                        let simulation_tick = super::simulation::tick(
                             now,
                             dt_duration,
                             &mut self.world,
@@ -240,7 +246,7 @@ impl ClientRuntime {
                             self.set_exit_cause(ClientExitCause::RuntimeFailure);
                         })?;
                         let mut advanced_runtime_bodies = Vec::new();
-                        for event in simulation_events {
+                        for event in simulation_tick.events {
                             if let WorldEvent::RuntimeBodyAdvanced { body_id, kind } = event {
                                 if let Some(guid) = body_id.authoritative_guid() {
                                     placement_kind_overrides.insert(
@@ -269,7 +275,27 @@ impl ClientRuntime {
                                 },
                             );
                         }
+                        if let Some(jump) = simulation_tick.committed_jump {
+                            self.session
+                                .send_action(GameAction::Jump(Box::new(JumpActionData {
+                                extent: jump.resolved.extent().get(),
+                                velocity: jump.resolved.local_velocity(),
+                                position: jump.position,
+                                instance_sequence: jump.instance_sequence,
+                                server_control_sequence: jump.server_control_sequence,
+                                teleport_sequence: jump.teleport_sequence,
+                                force_position_sequence: jump.force_position_sequence,
+                                })))
+                                .await?;
+                        }
+                        if let Some(feedback) = simulation_tick.character_motion_feedback {
+                            let _ = self
+                                .client_view_event_tx
+                                .send(ClientViewEvent::CharacterMotionFeedback(feedback));
+                        }
                     }
+
+                    self.publish_character_motion_capabilities_if_changed();
 
                     let dynamic_event = if !before_dynamic.is_empty() {
                         self.dynamic_entity_tick_event(

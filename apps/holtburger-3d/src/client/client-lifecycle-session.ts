@@ -4,6 +4,9 @@ import {
 	decodeClientCameraStartReceipt,
 	decodeClientCameraTick,
 	decodeClientDriveRequest,
+	decodeClientCharacterMotionEventRequest,
+	decodeClientCharacterMotionCapabilities,
+	decodeClientCharacterMotionFeedback,
 	decodeClientExitRequested,
 	decodeClientLifecycle,
 	decodeClientPresentationDiscontinuity,
@@ -20,6 +23,9 @@ import {
 	type ClientCameraStartRequest,
 	type ClientCameraTick,
 	type ClientDriveRequest,
+	type ClientCharacterMotionEventRequest,
+	type ClientCharacterMotionCapabilities,
+	type ClientCharacterMotionFeedback,
 	type ClientExitRequested,
 	type ClientLifecycle,
 	type ClientLocalPlayerEstablished,
@@ -45,6 +51,7 @@ type ClientCommandName = Extract<
 	| "request_client_current_state"
 	| "select_client_character"
 	| "replace_client_drive"
+	| "queue_client_character_motion_event"
 	| "send_client_chat"
 	| "start_client_camera"
 	| "set_client_camera_intent"
@@ -57,6 +64,8 @@ type ClientEventName = Extract<
 	HostEventName,
 	| "client-current-state"
 	| "client-lifecycle-changed"
+	| "client-character-motion-capabilities-updated"
+	| "client-character-motion-feedback"
 	| "client-local-player-established"
 	| "client-server-time-updated"
 	| "client-world-name-updated"
@@ -91,6 +100,7 @@ export interface ClientLifecycleSessionState {
 	readonly worldName: string | null;
 	readonly playerName: string | null;
 	readonly vitals: readonly ClientVital[];
+	readonly characterMotion: ClientCharacterMotionCapabilities | null;
 	readonly exit: ClientExitRequested | null;
 }
 
@@ -98,6 +108,14 @@ export interface ClientLifecycleSessionState {
 export type ClientLifecycleSessionEvent =
 	| { readonly type: "current-state"; readonly state: ClientCurrentState }
 	| { readonly type: "lifecycle"; readonly lifecycle: ClientLifecycle }
+	| {
+			readonly type: "character-motion-capabilities";
+			readonly capabilities: ClientCharacterMotionCapabilities | null;
+	  }
+	| {
+			readonly type: "character-motion-feedback";
+			readonly feedback: ClientCharacterMotionFeedback;
+	  }
 	| {
 			readonly type: "local-player-established";
 			readonly identity: ClientLocalPlayerEstablished;
@@ -223,6 +241,16 @@ export class ClientLifecycleSession {
 		});
 	}
 
+	/** Submit one ordered, non-coalescible jump lifecycle edge. */
+	async queueCharacterMotionEvent(
+		request: ClientCharacterMotionEventRequest,
+	): Promise<void> {
+		const validated = decodeClientCharacterMotionEventRequest(request);
+		await this.#transport.invoke("queue_client_character_motion_event", {
+			request: validated,
+		});
+	}
+
 	/** Send one ordinary local-speech message. */
 	async sendChat(message: string): Promise<void> {
 		if (message.trim().length === 0) {
@@ -273,6 +301,18 @@ export class ClientLifecycleSession {
 			unlisteners.push(
 				await this.#transport.listen("client-lifecycle-changed", (payload) =>
 					this.#receiveLifecycle(payload),
+				),
+			);
+			unlisteners.push(
+				await this.#transport.listen(
+					"client-character-motion-capabilities-updated",
+					(payload) => this.#receiveCharacterMotionCapabilities(payload),
+				),
+			);
+			unlisteners.push(
+				await this.#transport.listen(
+					"client-character-motion-feedback",
+					(payload) => this.#receiveCharacterMotionFeedback(payload),
 				),
 			);
 			unlisteners.push(
@@ -349,6 +389,7 @@ export class ClientLifecycleSession {
 			worldName: state.worldName,
 			playerName: state.playerName,
 			vitals: state.vitals,
+			characterMotion: state.characterMotion,
 			exit: null,
 		};
 		const dynamic: DynamicEntityEvent = {
@@ -371,6 +412,19 @@ export class ClientLifecycleSession {
 		}
 		this.#state = { ...this.#state, lifecycle };
 		this.#emit({ type: "lifecycle", lifecycle });
+	}
+
+	#receiveCharacterMotionCapabilities(payload: unknown): void {
+		const capabilities = decodeClientCharacterMotionCapabilities(payload);
+		this.#state = { ...this.#state, characterMotion: capabilities };
+		this.#emit({ type: "character-motion-capabilities", capabilities });
+	}
+
+	#receiveCharacterMotionFeedback(payload: unknown): void {
+		this.#emit({
+			type: "character-motion-feedback",
+			feedback: decodeClientCharacterMotionFeedback(payload),
+		});
 	}
 
 	#receiveLocalPlayerEstablished(payload: unknown): void {
@@ -459,6 +513,7 @@ function emptyState(): ClientLifecycleSessionState {
 		worldName: null,
 		playerName: null,
 		vitals: [],
+		characterMotion: null,
 		exit: null,
 	};
 }

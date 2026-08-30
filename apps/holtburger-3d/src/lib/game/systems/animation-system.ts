@@ -2,7 +2,7 @@ import type { PreparedAnimation } from "../animation/animation-asset-repository"
 import {
 	advancePlayingFrame,
 	clipEntryFrame,
-	sampleAnimationPose,
+	sampleAnimationPoseOver,
 	sampleAuthoredRootTransform,
 	wholeAnimationClip,
 	type PlayingClip,
@@ -13,6 +13,7 @@ import type {
 } from "../behavior/behavior-event-router";
 import { requireSceneNodeId, sceneNodeIdOf } from "../scene/utils";
 import type { SceneNodeId } from "../scene";
+import type { Mat4 } from "../math/types";
 import type { ArticulatedPose } from "./components";
 import {
 	BEHAVIOR_STEP_SECONDS,
@@ -35,6 +36,8 @@ interface AnimationRecord {
 	framePosition: number;
 	lastTimeSeconds: number | null;
 	fractionalSeconds: number;
+	/** Complete setup pose retained beneath whichever prefix the current clip authors. */
+	readonly retainedPartToObjectTransforms: readonly Mat4[];
 }
 
 export interface AnimationRuntimeDiagnostics {
@@ -118,7 +121,12 @@ export class AnimationSystem<TOwnerId extends string> {
 	 * change only inside one synchronous commit. Rejecting loudly surfaces a drift between the
 	 * entity generation and the dynamics owner generation, which are separate counters.
 	 */
-	playClip(ownerId: TOwnerId, target: BehaviorTarget, clip: PlayingClip): void {
+	playClip(
+		ownerId: TOwnerId,
+		target: BehaviorTarget,
+		clip: PlayingClip,
+		initialPartToObjectTransforms: readonly Mat4[],
+	): void {
 		if (this.#destroyed)
 			throw new Error("Cannot play a clip on destroyed animation playback.");
 		const nodeId = requireSceneNodeId(target.targetId, "AnimationSystem");
@@ -128,7 +136,21 @@ export class AnimationSystem<TOwnerId extends string> {
 				`Clip for ${nodeId} names generation ${target.generation}, but its playback holds ${existing.target.generation}.`,
 			);
 		}
-		this.#records.set(nodeId, this.#createRecord(target, clip, 0));
+		const retainedPartToObjectTransforms = existing
+			? sampleAnimationPoseOver(
+					existing.clip,
+					advancePlayingFrame(
+						existing.clip,
+						existing.framePosition,
+						existing.fractionalSeconds,
+					).framePosition,
+					existing.retainedPartToObjectTransforms,
+				)
+			: cloneCompletePose(initialPartToObjectTransforms);
+		this.#records.set(
+			nodeId,
+			this.#createRecord(target, clip, 0, retainedPartToObjectTransforms),
+		);
 		let nodes = this.#owners.get(ownerId);
 		if (!nodes) {
 			nodes = new Set();
@@ -200,6 +222,7 @@ export class AnimationSystem<TOwnerId extends string> {
 		ownerId: TOwnerId,
 		installations: readonly {
 			readonly animation: PreparedAnimation;
+			readonly initialPartToObjectTransforms: readonly Mat4[];
 			readonly target: BehaviorTarget;
 			readonly residentIdentity: string;
 		}[],
@@ -224,6 +247,7 @@ export class AnimationSystem<TOwnerId extends string> {
 						installation.residentIdentity,
 						installation.animation,
 					),
+					cloneCompletePose(installation.initialPartToObjectTransforms),
 				);
 				records.set(nodeId, record);
 				this.#stagedNodeIds.add(nodeId);
@@ -328,9 +352,10 @@ export class AnimationSystem<TOwnerId extends string> {
 					record.clip,
 					visualAdvance.framePosition,
 				),
-				partToObjectTransforms: sampleAnimationPose(
+				partToObjectTransforms: sampleAnimationPoseOver(
 					record.clip,
 					visualAdvance.framePosition,
+					record.retainedPartToObjectTransforms,
 				),
 			},
 			effects: this.#effects.samplePresentation(nodeId),
@@ -349,6 +374,7 @@ export class AnimationSystem<TOwnerId extends string> {
 		target: BehaviorTarget,
 		clip: PlayingClip,
 		phaseSeconds: number,
+		retainedPartToObjectTransforms: readonly Mat4[],
 	): AnimationRecord {
 		const nodeId = requireSceneNodeId(target.targetId, "AnimationSystem");
 		const record: AnimationRecord = {
@@ -356,6 +382,7 @@ export class AnimationSystem<TOwnerId extends string> {
 			fractionalSeconds: 0,
 			framePosition: clipEntryFrame(clip),
 			lastTimeSeconds: null,
+			retainedPartToObjectTransforms,
 			target,
 		};
 		let remainingSeconds = phaseSeconds;
@@ -414,6 +441,11 @@ export class AnimationSystem<TOwnerId extends string> {
 			}
 		}
 	}
+}
+
+/** Clone caller-owned matrices so animation retention cannot alias entity presentation state. */
+function cloneCompletePose(transforms: readonly Mat4[]): readonly Mat4[] {
+	return transforms.map((transform) => transform.clone());
 }
 
 /** Stable FNV-1a phase keeps entities reproducible without sharing playback clocks. */

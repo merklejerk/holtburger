@@ -463,7 +463,7 @@ impl GameData {
                         entity.velocity,
                         entity.acceleration,
                         entity.omega,
-                        entity.motion_snapshot,
+                        entity.network_motion.snapshot(),
                     )
                 })
                 .unwrap_or_default();

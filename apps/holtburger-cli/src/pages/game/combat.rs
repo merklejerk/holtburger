@@ -1047,7 +1047,7 @@ mod tests {
     use holtburger_core::client::types::ClientCommand;
     use holtburger_core::{ActionResultReason, ActionResultSource, ClientViewEvent};
     use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
-    use holtburger_world::entity::EntityMotionSnapshot;
+    use holtburger_world::entity::{EntityMotionSnapshot, EntityNetworkMotion};
 
     fn creature_entity(guid: Guid, name: &str, position: WorldPosition) -> Entity {
         let mut entity = Entity::new(guid, name.to_string(), position);
@@ -1528,7 +1528,7 @@ mod tests {
 
         let _ = state.handle_view_event(ClientViewEvent::EntityMotionUpdated {
             guid: target_guid,
-            snapshot: Some(EntityMotionSnapshot {
+            motion: EntityNetworkMotion::Initialized(EntityMotionSnapshot {
                 current_style: Some(MotionStance::NonCombat),
                 forward_command: Some(InterpretedMotionCommand::DEAD),
                 sidestep_command: None,

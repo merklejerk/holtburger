@@ -227,6 +227,8 @@ pub struct PlayerState {
     pub instance_sequence: u16,
     /// Sequence for server-controlled movement/actions.
     pub server_control_sequence: u16,
+    /// Freshness sequence for server vector samples; admitted samples do not own local physics.
+    pub vector_sequence: u16,
     /// Last non-zero server-reported motion stance/style cached for outbound movement packets.
     pub last_server_motion_style: Option<MotionStance>,
     /// Sequence for teleportation events to ignore stale position updates.
@@ -287,6 +289,7 @@ impl PlayerState {
             skill_bases: HashMap::new(),
             instance_sequence: 0,
             server_control_sequence: 0,
+            vector_sequence: 0,
             last_server_motion_style: None,
             teleport_sequence: 0,
             force_position_sequence: 0,

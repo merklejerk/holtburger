@@ -744,6 +744,53 @@ fn authoritative_pose_effects_do_not_infer_initialization_or_replace_ordinary_ru
 }
 
 #[test]
+fn authoritative_confirmation_preserves_locally_integrated_vectors() {
+    let mut scene = SpatialScene::new();
+    let body_id = SpatialBodyId::LocalPlayer(Guid(0x7000_0012));
+    let now = Instant::now();
+    let initial_pose = WorldPosition {
+        landblock_id: Guid(0x1111_0000),
+        ..Default::default()
+    };
+    let confirmed_pose = WorldPosition {
+        coords: Vector3::new(2.0, 0.0, 0.0),
+        ..initial_pose
+    };
+    let local_vectors = AuthoritativeBodyVectors {
+        velocity: Vector3::new(3.0, 4.0, 5.0),
+        acceleration: Vector3::new(0.0, 0.0, -9.8),
+        omega: Vector3::new(0.0, 0.0, 0.5),
+    };
+    let echoed_vectors = AuthoritativeBodyVectors {
+        velocity: Vector3::new(30.0, 40.0, 50.0),
+        acceleration: Vector3::zero(),
+        omega: Vector3::new(0.0, 0.0, 5.0),
+    };
+
+    assert!(scene.apply_authoritative_body_effect(
+        body_id,
+        AuthoritativePoseEffect::Initialize { pose: initial_pose },
+        local_vectors,
+        now,
+    ));
+    assert!(scene.apply_authoritative_body_effect(
+        body_id,
+        AuthoritativePoseEffect::Confirm {
+            pose: confirmed_pose,
+        },
+        echoed_vectors,
+        now + Duration::from_millis(30),
+    ));
+
+    let body = scene.body(body_id).expect("confirmed body must survive");
+    assert_eq!(body.authoritative_pose, Some(confirmed_pose));
+    assert_eq!(body.pose, initial_pose);
+    assert_eq!(body.retained.velocity, local_vectors.velocity);
+    assert_eq!(body.retained.acceleration, local_vectors.acceleration);
+    assert_eq!(body.retained.omega, local_vectors.omega);
+}
+
+#[test]
 fn reset_and_world_suspension_clear_pose_reconciliation_state() {
     let mut scene = SpatialScene::new();
     let now = Instant::now();

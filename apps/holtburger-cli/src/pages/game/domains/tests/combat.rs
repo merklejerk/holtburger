@@ -248,7 +248,7 @@ fn attack_feedback_updates_only_the_current_attack_drive_state() {
 #[test]
 fn explicit_attack_rejects_targets_already_in_death_motion() {
     use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
-    use holtburger_world::entity::EntityMotionSnapshot;
+    use holtburger_world::entity::{EntityMotionSnapshot, EntityNetworkMotion};
 
     let player_guid = Guid(0x50000001);
     let target_guid = Guid(0x60000001);
@@ -260,7 +260,7 @@ fn explicit_attack_rejects_targets_already_in_death_motion() {
     };
     let mut target = creature_entity(target_guid, "Drudge", target_position);
     target.set_bool_prop(PropertyBool::Attackable, true);
-    target.motion_snapshot = Some(EntityMotionSnapshot {
+    target.network_motion = EntityNetworkMotion::Initialized(EntityMotionSnapshot {
         current_style: Some(MotionStance::NonCombat),
         forward_command: Some(InterpretedMotionCommand::DEAD),
         sidestep_command: None,
@@ -834,7 +834,7 @@ fn pending_server_controlled_melee_move_suppresses_reissued_attack() {
 #[test]
 fn target_death_motion_prevents_sticky_rearm_after_cancel() {
     use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
-    use holtburger_world::entity::EntityMotionSnapshot;
+    use holtburger_world::entity::{EntityMotionSnapshot, EntityNetworkMotion};
 
     let player_guid = Guid(0x50000001);
     let target_guid = Guid(0x60000001);
@@ -851,7 +851,7 @@ fn target_death_motion_prevents_sticky_rearm_after_cancel() {
     let mut target = Entity::new(target_guid, "Drudge".to_string(), target_position);
     target.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
     target.set_bool_prop(PropertyBool::Attackable, true);
-    target.motion_snapshot = Some(EntityMotionSnapshot {
+    target.network_motion = EntityNetworkMotion::Initialized(EntityMotionSnapshot {
         current_style: Some(MotionStance::NonCombat),
         forward_command: Some(InterpretedMotionCommand::DEAD),
         sidestep_command: None,
@@ -887,7 +887,7 @@ fn target_death_motion_prevents_sticky_rearm_after_cancel() {
 #[test]
 fn player_death_motion_prevents_sticky_rearm_after_cancel() {
     use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
-    use holtburger_world::entity::EntityMotionSnapshot;
+    use holtburger_world::entity::{EntityMotionSnapshot, EntityNetworkMotion};
 
     let player_guid = Guid(0x50000001);
     let target_guid = Guid(0x60000001);
@@ -907,7 +907,7 @@ fn player_death_motion_prevents_sticky_rearm_after_cancel() {
     state.data.entities.insert(target_guid, target);
 
     let mut player = Entity::new(player_guid, "Player".to_string(), WorldPosition::default());
-    player.motion_snapshot = Some(EntityMotionSnapshot {
+    player.network_motion = EntityNetworkMotion::Initialized(EntityMotionSnapshot {
         current_style: Some(MotionStance::NonCombat),
         forward_command: Some(InterpretedMotionCommand::DEAD),
         sidestep_command: None,

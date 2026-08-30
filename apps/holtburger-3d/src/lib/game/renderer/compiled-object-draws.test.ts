@@ -138,7 +138,11 @@ function createStore() {
 	>();
 	const compile = (): CompiledObjectDraw<{ readonly id: number }> => {
 		compilations += 1;
-		return { blendPolicy: BLEND_POLICY, compatibility: { id: compilations } };
+		return {
+			batchKey: "compiled-draw:test",
+			blendPolicy: BLEND_POLICY,
+			compatibility: { id: compilations },
+		};
 	};
 	return { compile, compileCount: () => compilations, store };
 }

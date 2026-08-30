@@ -10,6 +10,8 @@ import type { CompiledObjectDrawDiagnostics } from "./renderer";
  * per-landblock offset map, so a compiled entry is shared by reference and survives re-anchoring.
  */
 export interface CompiledObjectDraw<TCompatibility> {
+	/** Stable coarse partition used before the authoritative compatibility comparison. */
+	readonly batchKey: string;
 	readonly blendPolicy: ObjectBlendPolicy;
 	readonly compatibility: TCompatibility;
 }

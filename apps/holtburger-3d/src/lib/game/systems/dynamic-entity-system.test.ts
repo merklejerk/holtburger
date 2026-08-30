@@ -408,25 +408,50 @@ describe("DynamicEntitySystem authored ownership", () => {
 		commit(installation);
 		const firstNodeId = requiredAt(installation.nodeIds, 0);
 		const secondNodeId = requiredAt(installation.nodeIds, 1);
-		const first = system.getVisibleContributions(firstNodeId);
-		const second = system.getVisibleContributions(secondNodeId);
-		expect(first).toHaveLength(1);
-		expect(second).toHaveLength(1);
-		expect(first?.[0]?.drawUnit.batchKey).toBe(second?.[0]?.drawUnit.batchKey);
-		expect(first?.[0]).toMatchObject({
+		const materialOnly = system.getVisibleContributions(firstNodeId, false);
+		expect(materialOnly).toMatchObject({
+			depth: [],
+			kind: "visible",
+			material: [{}],
+		});
+		const first = system.getVisibleContributions(firstNodeId, true);
+		const second = system.getVisibleContributions(secondNodeId, true);
+		expect(first).toBe(materialOnly);
+		expect(first?.material).toHaveLength(1);
+		expect(first?.depth).toHaveLength(1);
+		expect(second?.material).toHaveLength(1);
+		expect(second?.depth).toHaveLength(1);
+		expect(first?.material[0]?.drawUnit.batchKey).toBe(
+			second?.material[0]?.drawUnit.batchKey,
+		);
+		expect(first).toMatchObject({
 			landblockId: "0x0001ffff",
 			renderScopes: [{ kind: "outdoor" }],
 		});
-		expect(first?.[0]?.instance.sourceToLandblock).toMatchObject({
+		expect(first?.material[0]?.instance.sourceToLandblock).toMatchObject({
 			m11: 2,
 			m22: 3,
 			m33: 4,
 			m41: 12,
 		});
-		expect(second?.[0]?.instance.sourceToLandblock).toMatchObject({
+		expect(second?.material[0]?.instance.sourceToLandblock).toMatchObject({
 			m11: 5,
 			m22: 6,
 			m33: 7,
+		});
+		const firstContribution = first?.material[0];
+		const firstDepthContribution = first?.depth[0];
+		const firstInstance = firstContribution?.instance;
+		const firstAgain = system.getVisibleContributions(firstNodeId, true);
+		expect(firstAgain).toBe(first);
+		expect(firstAgain?.material[0]).toBe(firstContribution);
+		expect(firstAgain?.depth[0]).toBe(firstDepthContribution);
+		expect(firstAgain?.material[0]?.instance).toBe(firstInstance);
+		expect(firstAgain?.depth[0]?.instance).toBe(firstInstance);
+		expect(system.getVisibleContributions(firstNodeId, false)).toMatchObject({
+			depth: [],
+			kind: "visible",
+			material: [{ instance: firstInstance }],
 		});
 		expect(
 			scene.queryFlatFrustum(
@@ -516,8 +541,10 @@ describe("DynamicEntitySystem authored ownership", () => {
 
 		const firstNodeId = requiredAt(installation.nodeIds, 0);
 		const secondNodeId = requiredAt(installation.nodeIds, 1);
-		const first = system.getVisibleContributions(firstNodeId)?.[0];
-		const second = system.getVisibleContributions(secondNodeId)?.[0];
+		const first = system.getVisibleContributions(firstNodeId, true)
+			?.material[0];
+		const second = system.getVisibleContributions(secondNodeId, true)
+			?.material[0];
 		// A translucency ramp promotes the part into the transparent phase for this frame without
 		// rewriting its authored draw unit, whose identity consumers cache compiled facts against.
 		expect(first).toMatchObject({
@@ -545,10 +572,16 @@ describe("DynamicEntitySystem authored ownership", () => {
 		).toThrow("scene-node:999 does not exist");
 
 		system.publishPresentation([presentationSample(firstPrepared, 1)]);
-		expect(system.getVisibleContributions(firstNodeId)).toEqual([]);
+		expect(system.getVisibleContributions(firstNodeId, true)).toEqual({
+			depth: [],
+			kind: "hidden",
+			material: [],
+		});
 
 		system.publishPresentation([presentationSample(firstPrepared, 0)]);
-		expect(system.getVisibleContributions(firstNodeId)?.[0]).toMatchObject({
+		expect(
+			system.getVisibleContributions(firstNodeId, true)?.material[0],
+		).toMatchObject({
 			drawUnit: { ordering: "opaque" },
 			instance: { color: { a: 1 } },
 			transparentSort: null,
@@ -559,14 +592,22 @@ describe("DynamicEntitySystem authored ownership", () => {
 			lighting: false,
 			noDraw: true,
 		});
-		expect(system.getVisibleContributions(firstNodeId)).toEqual([]);
+		expect(system.getVisibleContributions(firstNodeId, true)).toEqual({
+			depth: [],
+			kind: "hidden",
+			material: [],
+		});
 		system.updatePresentationState(firstNodeId, {
 			cloaked: false,
 			hidden: true,
 			lighting: false,
 			noDraw: false,
 		});
-		expect(system.getVisibleContributions(firstNodeId)).toEqual([]);
+		expect(system.getVisibleContributions(firstNodeId, true)).toEqual({
+			depth: [],
+			kind: "hidden",
+			material: [],
+		});
 
 		system.updatePresentationState(firstNodeId, {
 			cloaked: false,
@@ -583,7 +624,9 @@ describe("DynamicEntitySystem authored ownership", () => {
 		});
 		// Retail ignores later SetTranslucency writes while cloaked; it does not invent cloak alpha.
 		system.publishPresentation([presentationSample(firstPrepared, 0.8)]);
-		expect(system.getVisibleContributions(firstNodeId)?.[0]).toMatchObject({
+		expect(
+			system.getVisibleContributions(firstNodeId, true)?.material[0],
+		).toMatchObject({
 			instance: { color: { a: 0.8 } },
 		});
 		system.updatePresentationState(firstNodeId, {
@@ -594,7 +637,8 @@ describe("DynamicEntitySystem authored ownership", () => {
 		});
 		system.publishPresentation([presentationSample(firstPrepared, 0.8)]);
 		expect(
-			system.getVisibleContributions(firstNodeId)?.[0]?.instance.color.a,
+			system.getVisibleContributions(firstNodeId, true)?.material[0]?.instance
+				.color.a,
 		).toBeCloseTo(0.2);
 		expect(system.getDiagnostics()).toMatchObject({
 			lastParticleEnvelopeChangeCount: 0,
@@ -976,6 +1020,7 @@ function prepared(id: string): ObjectVisualTemplate {
 		parts: [
 			{
 				defaultScale: new Vec3(1, 1, 1),
+				depthDrawUnits: [],
 				drawUnits: [],
 				geometry: key,
 				key: `part-visual-template:${id}` as never,

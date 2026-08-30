@@ -41,4 +41,22 @@ describe("composeObjectPartTransform", () => {
 			new Vec3(-19, 6, 12),
 		);
 	});
+
+	it("supports rewriting the rigid pose in place", () => {
+		const rigidPose = new Mat4(0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1, 0, 1, 2, 3, 1);
+		const expected = composeObjectPartTransform(
+			rigidPose,
+			new Vec3(2, 3, 4),
+			new Vec3(5, 7, 11),
+		);
+
+		expect(
+			composeObjectPartTransform(
+				rigidPose,
+				new Vec3(2, 3, 4),
+				new Vec3(5, 7, 11),
+				rigidPose,
+			),
+		).toEqual(expected);
+	});
 });

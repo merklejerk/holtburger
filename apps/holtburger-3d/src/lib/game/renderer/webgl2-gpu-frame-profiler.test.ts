@@ -265,10 +265,13 @@ describe("WebGL2FrameProfiler", () => {
 		frame.recordObjectPreparation(5, 2);
 		frame.recordOutdoorShadowMap({
 			cascadeQueryCount: 3,
+			cascadeSelectedRootCount: 18,
 			compatibleDepthRunCount: 9,
 			instanceUploadBytes: 240,
 			instanceUploadCount: 3,
+			retainedCasterRootCount: 7,
 			selectedCasterPartCount: 12,
+			uniqueSelectedRootCount: 8,
 		});
 		frame.finish();
 
@@ -278,10 +281,13 @@ describe("WebGL2FrameProfiler", () => {
 		});
 		expect(profiler.getProfile()?.cpu.outdoorShadowMap.latest).toEqual({
 			cascadeQueryCount: 3,
+			cascadeSelectedRootCount: 18,
 			compatibleDepthRunCount: 9,
 			instanceUploadBytes: 240,
 			instanceUploadCount: 3,
+			retainedCasterRootCount: 7,
 			selectedCasterPartCount: 12,
+			uniqueSelectedRootCount: 8,
 		});
 	});
 
@@ -320,10 +326,13 @@ function contributionMetrics(staticObjectPreparationCount: number) {
 function outdoorShadowMapMetrics(cascadeQueryCount = 0) {
 	return {
 		cascadeQueryCount,
+		cascadeSelectedRootCount: 0,
 		compatibleDepthRunCount: 0,
 		instanceUploadBytes: 0,
 		instanceUploadCount: 0,
+		retainedCasterRootCount: 0,
 		selectedCasterPartCount: 0,
+		uniqueSelectedRootCount: 0,
 	};
 }
 

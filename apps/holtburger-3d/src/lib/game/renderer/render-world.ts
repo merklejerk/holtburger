@@ -14,7 +14,7 @@ import type {
 } from "../scene";
 import type { AABB3 } from "../math/types";
 import type { TerrainDrawUnit } from "../terrain/types";
-import type { VisibleRigidPartContribution } from "../systems/components";
+import type { VisibleDynamicContributions } from "../systems/components";
 import type {
 	EnvCellRenderable,
 	FrameStreamedObjectInstanceTemplate,
@@ -90,7 +90,8 @@ interface RenderWorldSystems {
 		getPublishedRigidPresentationBounds(nodeId: SceneNodeId): AABB3 | null;
 		getVisibleContributions(
 			nodeId: SceneNodeId,
-		): readonly VisibleRigidPartContribution[] | null;
+			includeDepth: boolean,
+		): VisibleDynamicContributions | null;
 	};
 	readonly envCells: {
 		getCellRenderable(nodeId: SceneNodeId): EnvCellRenderable | null;
@@ -298,9 +299,12 @@ export class RenderWorld {
 	/** Expand a retained dynamic root only after renderer fidelity policy accepts it. */
 	expandDynamicContributions(
 		nodeId: SceneNodeId,
-	): readonly VisibleRigidPartContribution[] {
-		const contributions =
-			this.#systems.dynamics.getVisibleContributions(nodeId);
+		includeDepth: boolean,
+	): VisibleDynamicContributions {
+		const contributions = this.#systems.dynamics.getVisibleContributions(
+			nodeId,
+			includeDepth,
+		);
 		if (!contributions)
 			throw new Error(`Dynamic entity ${nodeId} no longer exists.`);
 		return contributions;
@@ -420,15 +424,6 @@ export class RenderWorld {
 		if (!placement)
 			throw new Error(`${label} node ${nodeId} no longer exists.`);
 		return placement;
-	}
-
-	resolveDynamicContributions(
-		contributions: readonly VisibleRigidPartContribution[],
-	): readonly ResolvedGeometryDrawUnit<VisibleRigidPartContribution>[] {
-		return contributions.map((contribution) => ({
-			drawUnit: contribution,
-			geometry: this.resolveGeometry(contribution.drawUnit.geometry),
-		}));
 	}
 
 	resolveEnvCellRenderable(

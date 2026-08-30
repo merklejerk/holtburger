@@ -410,17 +410,17 @@ export function formAdjacentObjectInstanceRuns<T>(
  * Group compatible opaque frame instances by an owner-provided semantic cohort in first-seen
  * order. Exact compatibility remains authoritative when a cohort key is stale or collides.
  */
-export function formGroupedObjectInstanceRuns<T>(
+export function formGroupedObjectInstanceRuns<T, TBatchKey>(
 	ordered: readonly T[],
 	isFrameInstance: (value: T) => boolean,
-	batchKey: (value: T) => string,
+	batchKey: (value: T) => TBatchKey,
 	isCompatible: (left: T, right: T) => boolean,
 ): readonly ObjectFrameSubmission<T>[] {
 	type MutableRun = { kind: "frame-instance-run"; values: [T, ...T[]] };
 	const submissions: Array<
 		{ readonly kind: "single"; readonly value: T } | MutableRun
 	> = [];
-	const runsByBatchKey = new Map<string, MutableRun[]>();
+	const runsByBatchKey = new Map<TBatchKey, MutableRun[]>();
 	for (const value of ordered) {
 		if (!isFrameInstance(value)) {
 			submissions.push({ kind: "single", value });

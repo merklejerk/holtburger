@@ -444,7 +444,9 @@
 			session: currentSession,
 			onError: reportPresentationError,
 		});
-		presentation.setFrameSettings(frameSettings);
+		// Frame settings are cold presentation policy, not renderer identity. The control handler
+		// updates the live owner directly; this snapshot only initializes a genuinely new owner.
+		presentation.setFrameSettings(untrack(() => frameSettings));
 		const currentFrameRateSampler = createFrameRateSampler(
 			CLIENT_TUNING.diagnostics.frameMetricsEmaWindowMs,
 		);

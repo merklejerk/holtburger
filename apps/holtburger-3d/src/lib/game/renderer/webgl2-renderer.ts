@@ -29,6 +29,8 @@ import type {
 	StaticObjectDrawUnit,
 } from "../commit/artifacts";
 import type { ObjectMaterialOrdering } from "../resolution/object-material-planner";
+import type { RetailGeometryVisibility } from "../resolution/presentation";
+import { retainsRetailGeometry } from "./retail-geometry-visibility";
 import { TextureWrapMode } from "../textures/types";
 import {
 	DEFAULT_COLOR_GRADE_PARAMETERS,
@@ -425,6 +427,8 @@ interface ObjectFrameInput {
 	readonly localToLandblock: Mat4;
 	readonly material: ObjectMaterialBinding;
 	readonly ordering: ObjectMaterialOrdering;
+	/** Retail draw eligibility retained through compilation for frame-time filtering. */
+	readonly retailVisibility: RetailGeometryVisibility;
 	/** Buildings provenance projected once; no draw consumer reconstructs it from source labels. */
 	readonly receivesOutdoorPssm: boolean;
 	/** Landblock-space ordering facts; the brand holds every producer to that frame. */
@@ -493,6 +497,7 @@ function createObjectSubmission(
 		localToLandblock: object.localToLandblock,
 		material: object.material,
 		ordering: object.ordering,
+		retailVisibility: object.retailVisibility,
 		receivesOutdoorPssm: object.receivesOutdoorPssm,
 		renderScopeKey: object.renderScopeKey,
 		source: object.source,
@@ -1270,7 +1275,13 @@ export class WebGL2Renderer implements Renderer {
 				if (profile && preparationStartedAt !== undefined) {
 					profile.finishCpuPhase("viewPreparation", preparationStartedAt);
 				}
-				this.#renderOutdoorPssm(geometry, entityShadows, shading, profile);
+				this.#renderOutdoorPssm(
+					geometry,
+					entityShadows,
+					input.frameSettings.showRetailHiddenGeometry,
+					shading,
+					profile,
+				);
 				const contributions = this.#collectScene(
 					geometry,
 					input.frameSettings,
@@ -1280,6 +1291,7 @@ export class WebGL2Renderer implements Renderer {
 					{ ...geometry, ...contributions },
 					shading,
 					"exterior",
+					input.frameSettings.showRetailHiddenGeometry,
 					profile,
 				);
 			}
@@ -1359,7 +1371,13 @@ export class WebGL2Renderer implements Renderer {
 		this.#accumulatePortalScopeAtlasMetrics(frame);
 		this.#activeOutdoorPssmFrame = null;
 		if (frame.atlas.visibility.selectedScopeOrdinal("outdoor") !== null) {
-			this.#renderOutdoorPssm(prepared, entityShadows, shading, profile);
+			this.#renderOutdoorPssm(
+				prepared,
+				entityShadows,
+				frameSettings.showRetailHiddenGeometry,
+				shading,
+				profile,
+			);
 		}
 		this.#executePortalScopeAtlasFrame(
 			prepared,
@@ -1620,7 +1638,13 @@ export class WebGL2Renderer implements Renderer {
 		}
 		this.#submitBlendedPhase(view, objectPhases, shading, profile, pipeline);
 		this.#drawScopedParticles(view, particlesByScope, pipeline, profile);
-		this.#drawPortalTransitionTunnel(view, shading, target, profile);
+		this.#drawPortalTransitionTunnel(
+			view,
+			shading,
+			target,
+			frameSettings.showRetailHiddenGeometry,
+			profile,
+		);
 		this.#presentFlatScene(target, profile);
 	}
 
@@ -1697,6 +1721,7 @@ export class WebGL2Renderer implements Renderer {
 	#renderOutdoorPssm(
 		prepared: PreparedViewGeometry,
 		entityShadows: EntityShadowSettings,
+		showRetailHiddenGeometry: boolean,
 		shading: SceneShading,
 		profile: WebGL2FrameProfileCapture | null,
 	): void {
@@ -1722,6 +1747,7 @@ export class WebGL2Renderer implements Renderer {
 					frameHeight: this.#frameHeight,
 					frameWidth: this.#frameWidth,
 					selectedDynamicNodeIds: this.#selectedDynamicNodeIds,
+					showRetailHiddenGeometry,
 					settings: entityShadows.pssm,
 					sunVector: shading.lighting.terrain.sunVector,
 				},
@@ -1924,8 +1950,17 @@ export class WebGL2Renderer implements Renderer {
 					this.#visibleEnvCellScopes.add(compiled.envCellScopeKey);
 				}
 				retainOffset(compiled.landblockId);
-				staticObjectCount += compiled.objects.length;
-				for (const object of compiled.objects) objects.push(object);
+				for (const object of compiled.objects) {
+					if (
+						!retainsRetailGeometry(
+							object.retailVisibility,
+							frameSettings.showRetailHiddenGeometry,
+						)
+					)
+						continue;
+					staticObjectCount += 1;
+					objects.push(object);
+				}
 				continue;
 			}
 			if (contribution.kind === "dynamic") {
@@ -1934,44 +1969,31 @@ export class WebGL2Renderer implements Renderer {
 				}
 				const expandedDynamic = this.#expandDynamicContributions(nodeId, false);
 				const dynamicContributions = expandedDynamic.material;
-				if (groundingEnabled && dynamicContributions.length > 0) {
-					const facts = this.#world.getEntityGroundingDynamicFacts(nodeId);
-					const reachesIndoor = facts.spatialMembership.scopes.some(
-						(scope) => scope.kind === "env-cell",
-					);
-					const reachesOutdoors = facts.spatialMembership.scopes.some(
-						(scope) => scope.kind === "outdoor",
-					);
-					const caster =
-						reachesIndoor || (outdoorGroundingEnabled && reachesOutdoors)
-							? createEntityGroundingCaster(
-									{
-										category: contribution.category,
-										identity: facts.identity,
-										rigidBounds: facts.rigidBounds,
-										placement: contribution.footprint.placement,
-										spatialMembership: facts.spatialMembership,
-									},
-									this.#indoorVisibilityIslands,
-									frameSettings.entityShadows.grounding,
-								)
-							: null;
-					if (caster) this.#entityGroundingCasters.push(caster);
-				}
-				this.#selectedDynamicNodeIds.add(nodeId);
-				this.#frameSelectionMetrics.visibleDynamicEntityCount += 1;
-				this.#frameSelectionMetrics.visibleDynamicPartCount +=
-					dynamicContributions.length;
-				if (expandedDynamic.kind === "hidden") continue;
-				const renderScopeKeys = selectedDynamicRenderScopeKeys(
-					expandedDynamic.renderScopes,
-					portalVisibility,
-				);
-				const landblockId = expandedDynamic.landblockId;
-				retainOffset(landblockId);
+				const renderTarget =
+					expandedDynamic.kind === "hidden"
+						? null
+						: {
+								landblockId: expandedDynamic.landblockId,
+								renderScopeKeys: selectedDynamicRenderScopeKeys(
+									expandedDynamic.renderScopes,
+									portalVisibility,
+								),
+							};
+				if (renderTarget !== null) retainOffset(renderTarget.landblockId);
+				let retainedDynamicContributionCount = 0;
 				for (const contribution of dynamicContributions) {
 					const { drawUnit, instance, ordering, transparentSort } =
 						contribution;
+					if (
+						!retainsRetailGeometry(
+							drawUnit.retailVisibility,
+							frameSettings.showRetailHiddenGeometry,
+						)
+					)
+						continue;
+					retainedDynamicContributionCount += 1;
+					if (renderTarget === null) continue;
+					const { landblockId, renderScopeKeys } = renderTarget;
 					const geometry = this.#world.resolveGeometry(drawUnit.geometry);
 					const compiled = this.#compiledDraws.resolveDraw(
 						drawUnit,
@@ -2008,6 +2030,7 @@ export class WebGL2Renderer implements Renderer {
 									material: drawUnit.material,
 									ordering,
 									receivesOutdoorPssm: false,
+									retailVisibility: drawUnit.retailVisibility,
 									renderScopeKey,
 									source: "dynamic",
 									transparentSort,
@@ -2017,6 +2040,34 @@ export class WebGL2Renderer implements Renderer {
 						);
 					}
 				}
+				if (groundingEnabled && retainedDynamicContributionCount > 0) {
+					const facts = this.#world.getEntityGroundingDynamicFacts(nodeId);
+					const reachesIndoor = facts.spatialMembership.scopes.some(
+						(scope) => scope.kind === "env-cell",
+					);
+					const reachesOutdoors = facts.spatialMembership.scopes.some(
+						(scope) => scope.kind === "outdoor",
+					);
+					const caster =
+						reachesIndoor || (outdoorGroundingEnabled && reachesOutdoors)
+							? createEntityGroundingCaster(
+									{
+										category: contribution.category,
+										identity: facts.identity,
+										rigidBounds: facts.rigidBounds,
+										placement: contribution.footprint.placement,
+										spatialMembership: facts.spatialMembership,
+									},
+									this.#indoorVisibilityIslands,
+									frameSettings.entityShadows.grounding,
+								)
+							: null;
+					if (caster) this.#entityGroundingCasters.push(caster);
+				}
+				this.#selectedDynamicNodeIds.add(nodeId);
+				this.#frameSelectionMetrics.visibleDynamicEntityCount += 1;
+				this.#frameSelectionMetrics.visibleDynamicPartCount +=
+					retainedDynamicContributionCount;
 				continue;
 			}
 			if (contribution.kind === "env-cell") {
@@ -2235,6 +2286,7 @@ export class WebGL2Renderer implements Renderer {
 					material: resolved.drawUnit.material,
 					ordering: resolved.drawUnit.ordering,
 					receivesOutdoorPssm: false,
+					retailVisibility: "normally-visible",
 					renderScopeKey: scopeKey(scope),
 					source: "env-cell-shell",
 					transparentSort: resolved.drawUnit.transparentSort,
@@ -2295,6 +2347,7 @@ export class WebGL2Renderer implements Renderer {
 					material: drawUnit.material,
 					ordering: drawUnit.ordering,
 					receivesOutdoorPssm,
+					retailVisibility: drawUnit.retailVisibility,
 					renderScopeKey,
 					source,
 					transparentSort: drawUnit.transparentSort,
@@ -2320,6 +2373,7 @@ export class WebGL2Renderer implements Renderer {
 					material: template.material,
 					ordering: "transparent",
 					receivesOutdoorPssm,
+					retailVisibility: template.retailVisibility,
 					renderScopeKey,
 					source,
 					transparentSort: template.transparentSort,
@@ -2820,6 +2874,7 @@ export class WebGL2Renderer implements Renderer {
 		view: PreparedView,
 		shading: SceneShading,
 		domain: SceneRenderDomain,
+		showRetailHiddenGeometry: boolean,
 		profile: WebGL2FrameProfileCapture | null,
 	): void {
 		const target = this.#acquireFlatSceneTarget();
@@ -2874,7 +2929,13 @@ export class WebGL2Renderer implements Renderer {
 			1.0,
 		);
 		this.#gl.bindVertexArray(null);
-		this.#drawPortalTransitionTunnel(view, shading, target, profile);
+		this.#drawPortalTransitionTunnel(
+			view,
+			shading,
+			target,
+			showRetailHiddenGeometry,
+			profile,
+		);
 		this.#presentFlatScene(target, profile);
 	}
 
@@ -2890,6 +2951,7 @@ export class WebGL2Renderer implements Renderer {
 		view: PreparedView,
 		shading: SceneShading,
 		sceneTarget: WebGL2FlatSceneTargetSet,
+		showRetailHiddenGeometry: boolean,
 		profile: WebGL2FrameProfileCapture | null,
 	): void {
 		const transition = this.#activeTransition;
@@ -2950,6 +3012,13 @@ export class WebGL2Renderer implements Renderer {
 					transformPoint3(localToLandblock, center),
 				);
 				for (const drawUnit of part.drawUnits) {
+					if (
+						!retainsRetailGeometry(
+							drawUnit.retailVisibility,
+							showRetailHiddenGeometry,
+						)
+					)
+						continue;
 					const geometry = this.#world.resolveGeometry(drawUnit.geometry);
 					const object: ObjectFrameInput = {
 						cullFaceOverride: null,
@@ -2963,6 +3032,7 @@ export class WebGL2Renderer implements Renderer {
 						material: drawUnit.material,
 						ordering: drawUnit.ordering,
 						receivesOutdoorPssm: false,
+						retailVisibility: drawUnit.retailVisibility,
 						renderScopeKey: PORTAL_TRANSITION_SCOPE,
 						source: "portal-transition",
 						transparentSort: {

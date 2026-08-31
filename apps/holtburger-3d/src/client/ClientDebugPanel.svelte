@@ -7,9 +7,15 @@
 
 	interface Props {
 		readonly readDiagnostics: () => ClientPresentationDiagnostics | null;
+		readonly showRetailHiddenGeometry: boolean;
+		readonly onShowRetailHiddenGeometryChange: (visible: boolean) => void;
 	}
 
-	const { readDiagnostics }: Props = $props();
+	const {
+		readDiagnostics,
+		showRetailHiddenGeometry,
+		onShowRetailHiddenGeometryChange,
+	}: Props = $props();
 	let diagnostics = $state<ClientPresentationDiagnostics | null>(null);
 
 	onMount(() => {
@@ -36,6 +42,15 @@
 </script>
 
 <div class="debug-panel-body ac-panel-body">
+	<label>
+		<input
+			checked={showRetailHiddenGeometry}
+			type="checkbox"
+			onchange={(event) =>
+				onShowRetailHiddenGeometryChange(event.currentTarget.checked)}
+		/>
+		Show retail-hidden geometry
+	</label>
 	{#if diagnostics === null}
 		<p>Presentation unavailable.</p>
 	{:else}

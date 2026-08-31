@@ -103,6 +103,36 @@ describe("prepareStaticObjectGeometry", () => {
 		});
 	});
 
+	it("keeps retail-hidden triangles independently selectable after baking", () => {
+		const visible = resident("opaque", Mat4.identity(), new Vec3(1, 1, 1));
+		const hiddenBase = resident(
+			"opaque",
+			translation(2, 0, 0),
+			new Vec3(1, 1, 1),
+		);
+		const hidden = {
+			...hiddenBase,
+			presentation: {
+				...hiddenBase.presentation,
+				parts: hiddenBase.presentation.parts.map((part) => ({
+					...part,
+					retailVisibility: "degrade-hidden" as const,
+				})),
+			},
+		};
+
+		const result = bake({
+			resourceNamespace: "static-install:retail-visibility" as const,
+			source: source([visible, hidden]),
+		});
+
+		expect(
+			result?.objects[0]?.drawUnits
+				.map(({ retailVisibility }) => retailVisibility)
+				.sort(),
+		).toEqual(["degrade-hidden", "normally-visible"]);
+	});
+
 	it("returns no placeholder output when every resident is promoted dynamic", () => {
 		expect(
 			bake({
@@ -804,6 +834,7 @@ function resident(
 					},
 					materials: [material],
 					partIndex: 0,
+					retailVisibility: "normally-visible",
 				},
 			],
 			holdingLocations: new Map(),

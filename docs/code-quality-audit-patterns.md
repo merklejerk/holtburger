@@ -440,6 +440,89 @@ lifetime, or when measurement proves the complete retained graph is small and in
 **Possible responses:** Clear retired object-valued fields, retain only payload-free shells, release
 active prefixes on disable, truncate cold pools, or add a measured high-water shrink policy.
 
+## Preflight Repeats the Real Traversal
+
+**Smell:** A collection is scanned to count, classify, or decide whether work is needed, then scanned
+again immediately to perform the work using the same admission predicate.
+
+**Signals:**
+
+- The same filter or guard appears in a preflight loop and the following execution loop.
+- A boolean such as `hasEligibleItems` or a retained-item count is computed before processing even
+  though execution could produce it.
+- Cost grows with the same collection twice on a hot or high-volume path.
+- The preflight and execution predicates can evolve independently.
+
+**Possible failure:** Common-path work is duplicated, and later edits can make the decision disagree
+with the items actually processed. A gate may admit work that produces nothing or suppress work that
+would have produced output.
+
+**Questions:** Does execution naturally know the count or eligibility result? Must a decision happen
+before any item can be processed? Does processing have effects that make a speculative traversal
+necessary?
+
+**Counterexamples:** Preflight may be required to reserve exact storage, make an atomic all-or-none
+decision, choose an algorithm, or avoid effects that cannot be rolled back.
+
+**Possible responses:** Accumulate the summary during execution, return processing facts with the
+result, or retain preflight only where its earlier decision has a concrete consumer.
+
+## Reversible Policy Is Lost During Preparation
+
+**Smell:** Loading, baking, batching, or compilation discards a semantic distinction that a later
+runtime policy is expected to switch without rebuilding the prepared data.
+
+**Signals:**
+
+- A toggle requires reloading source assets or rebuilding geometry despite changing only admission
+  or presentation.
+- Prepared batches merge items that differ under a supported runtime policy.
+- Consumers try to recover a discarded distinction from asset names, geometry, materials, or other
+  incidental properties.
+- One mode filters source data early while another mode needs the same loaded content intact.
+
+**Possible failure:** Runtime changes become expensive or impossible, prepared batches leak excluded
+items, and downstream consumers invent inconsistent heuristics to reconstruct lost intent.
+
+**Questions:** At which stage is the distinction last authoritative? Is the later choice genuinely
+reversible? Must the distinction participate in batch compatibility, or is object-level admission
+sufficient?
+
+**Counterexamples:** Early removal is appropriate when policy is immutable for the prepared
+artifact's lifetime and rebuilding is the explicit ownership contract, especially when retaining
+excluded data has material cost.
+
+**Possible responses:** Preserve the smallest semantic discriminator through preparation, include it
+in compatibility keys where unlike values must not merge, and apply reversible policy at the latest
+shared admission boundary.
+
+## Relay Components Become Wiring Buses
+
+**Smell:** A component, controller, or service receives a broad set of values and callbacks primarily
+to forward each one unchanged to one of several descendants.
+
+**Signals:**
+
+- Adding one leaf control requires edits at several intermediate layers with no new behavior there.
+- Large parameter or prop lists contain many adjacent value/update pairs owned elsewhere.
+- Intermediate code destructures and republishes fields without interpreting them.
+- Related fields can be accidentally omitted or paired with the wrong callback during forwarding.
+
+**Possible failure:** Routine changes create wide, low-value churn; wiring mistakes compile when
+types are structurally similar; and the relay's apparent API obscures which descendant owns each
+operation.
+
+**Questions:** Does the intermediate layer enforce policy, adapt the contract, or coordinate the
+children? Which fields form a coherent capability? Would grouping them expose too much authority to
+the leaf?
+
+**Counterexamples:** Explicit forwarding can be clearest for a small stable surface, and a relay may
+intentionally be the composition boundary that makes dependencies visible and testable.
+
+**Possible responses:** Pass focused capability objects, colocate state with the owning leaf, split
+the relay by responsibility, or retain explicit wiring until a demonstrated cohesive boundary
+emerges.
+
 ## Adding Observations
 
 An observation belongs here when it has:

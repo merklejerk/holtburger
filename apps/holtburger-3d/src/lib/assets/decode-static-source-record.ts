@@ -152,12 +152,14 @@ const directDefinition = z.object({
 	sourceAssetId: z.string().min(1),
 	geometryId: z.string().min(1),
 	materialIds: z.array(z.string().min(1)),
+	retailVisibility: z.enum(["normally-visible", "degrade-hidden"]),
 });
 const setupPart = z.object({
 	partIndex: z.number().int().nonnegative(),
 	geometryId: z.string().min(1),
 	defaultScale: vec3,
 	materialIds: z.array(z.string().min(1)),
+	retailVisibility: z.enum(["normally-visible", "degrade-hidden"]),
 });
 const setupPlacementFrames = z.object({
 	placementId: z.number().int().nonnegative(),
@@ -804,6 +806,7 @@ export function decodeStaticPresentation(
 						definition.geometryId,
 						[1, 1, 1],
 						definition.materialIds,
+						definition.retailVisibility,
 						geometries,
 						materials,
 					),
@@ -814,6 +817,7 @@ export function decodeStaticPresentation(
 						part.geometryId,
 						part.defaultScale,
 						part.materialIds,
+						part.retailVisibility,
 						geometries,
 						materials,
 					),
@@ -981,6 +985,7 @@ function decodePart(
 	geometryId: string,
 	defaultScale: readonly [number, number, number],
 	materialIds: readonly string[],
+	retailVisibility: ResolvedObjectPart["retailVisibility"],
 	geometries: ReadonlyMap<string, ResolvedGeometry>,
 	materials: ReadonlyMap<string, ResolvedMaterial>,
 ): ResolvedObjectPart {
@@ -1011,6 +1016,7 @@ function decodePart(
 		geometry,
 		defaultScale: renderScale(defaultScale),
 		materials: resolvedMaterials,
+		retailVisibility,
 	};
 }
 

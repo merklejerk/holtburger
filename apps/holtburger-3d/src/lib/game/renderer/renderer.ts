@@ -50,6 +50,8 @@ interface RenderQualitySettings {
 export interface FrameSettings {
 	/** Materialized landblock layers that may contribute work and draws to this frame. */
 	readonly layerVisibility: RenderLayerVisibility;
+	/** Whether debug presentation includes GfxObjs retail's degradation chain suppresses. */
+	readonly showRetailHiddenGeometry: boolean;
 	/** Optional nearby opaque-geometry occlusion and its runtime-adjustable presentation values. */
 	readonly ambientOcclusion: AmbientOcclusionSettings;
 	/**

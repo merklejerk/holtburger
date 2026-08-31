@@ -92,6 +92,7 @@ function presentation(
 				geometry: triangleGeometry(index),
 				materials: [material(flags, index)],
 				partIndex: 0,
+				retailVisibility: "normally-visible",
 			},
 		],
 		lights: [],

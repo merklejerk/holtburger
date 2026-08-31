@@ -250,6 +250,7 @@ function parseArgs(args) {
 		vitePort: null,
 		colorGrade: null,
 		staticLights: true,
+		showRetailHiddenGeometry: true,
 		weather: true,
 		profileRenderer: false,
 		mergeCensus: false,
@@ -734,6 +735,9 @@ function parseArgs(args) {
 			case "--no-static-lights":
 				parsed.staticLights = false;
 				break;
+			case "--hide-retail-hidden-geometry":
+				parsed.showRetailHiddenGeometry = false;
+				break;
 			case "--no-weather":
 				parsed.weather = false;
 				break;
@@ -1215,6 +1219,8 @@ Options:
                          '{"temperature":0.6,"tint":0,"saturation":1.4,"curves":{...}}'. Omit it
                          to use whatever Explorer tuning currently ships.
   --no-static-lights     Disable authored outdoor lamps, for same-scene A/B of their cost.
+  --hide-retail-hidden-geometry
+                         Hide GfxObjs suppressed by retail degradation without reloading content.
   --no-weather           Disable authored weather, mirroring retail's player option. Use it to
                          A/B a Rainy day group against the same scene without rain.
   --profile-renderer     Enable opt-in renderer CPU/GPU profiling before capture.
@@ -4043,6 +4049,14 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			await evaluate(
 				client,
 				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setStaticLights",
+				[false],
+			);
+			await delay(50);
+		}
+		if (!options.showRetailHiddenGeometry) {
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setShowRetailHiddenGeometry",
 				[false],
 			);
 			await delay(50);

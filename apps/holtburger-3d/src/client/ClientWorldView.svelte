@@ -43,6 +43,8 @@
 		readonly readMapPanelFrame: () => MapPanelFrame;
 		readonly readDiagnostics: () => ClientPresentationDiagnostics | null;
 		readonly readFrameRates: () => FrameRates | null;
+		readonly showRetailHiddenGeometry: boolean;
+		readonly onShowRetailHiddenGeometryChange: (visible: boolean) => void;
 		readonly playerName: string | null;
 		readonly worldName: string | null;
 		readonly vitals: readonly ClientVital[];
@@ -65,6 +67,8 @@
 		readMapPanelFrame,
 		readDiagnostics,
 		readFrameRates,
+		showRetailHiddenGeometry,
+		onShowRetailHiddenGeometryChange,
 		playerName,
 		worldName,
 		vitals,
@@ -314,7 +318,11 @@
 			onClose={() => (debugOpen = false)}
 			onPlacementChange={(placement) => (debugPlacement = placement)}
 		>
-			<ClientDebugPanel {readDiagnostics} />
+			<ClientDebugPanel
+				{readDiagnostics}
+				{showRetailHiddenGeometry}
+				{onShowRetailHiddenGeometryChange}
+			/>
 		</ClientFloatingPanel>
 	{/if}
 </main>

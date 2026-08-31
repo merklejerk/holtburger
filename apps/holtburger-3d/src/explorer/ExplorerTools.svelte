@@ -71,6 +71,9 @@
 		) => void;
 		/** Explorer-local switch controlling distance-fog presentation. */
 		readonly distanceFogEnabled: boolean;
+		/** Whether meshes suppressed by retail's degradation sentinel remain visible. */
+		readonly showRetailHiddenGeometry: boolean;
+		readonly updateShowRetailHiddenGeometry: (visible: boolean) => void;
 		readonly ambientOcclusion: AmbientOcclusionSettings;
 		readonly entityShadows: EntityShadowSettings;
 		readonly updateEntityShadowSettings: (
@@ -173,6 +176,8 @@
 		dayGroupNames,
 		updateEnvironment,
 		distanceFogEnabled,
+		showRetailHiddenGeometry,
+		updateShowRetailHiddenGeometry,
 		ambientOcclusion,
 		entityShadows,
 		updateEntityShadowSettings,
@@ -323,6 +328,8 @@
 								{dayGroupNames}
 								{updateEnvironment}
 								{distanceFogEnabled}
+								{showRetailHiddenGeometry}
+								{updateShowRetailHiddenGeometry}
 								{ambientOcclusion}
 								{entityShadows}
 								{updateEntityShadowSettings}

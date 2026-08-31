@@ -17,6 +17,9 @@ export type ResolvedMaterialId = `material:${string}`;
 export type ResolvedObjectTextureEncoding =
 	"direct-color" | "index8" | "index16";
 
+/** Retail draw eligibility derived from one GfxObj's authored degradation chain. */
+export type RetailGeometryVisibility = "normally-visible" | "degrade-hidden";
+
 /**
  * Derived overhead-map geometry: positions and indices, and deliberately nothing else.
  *
@@ -109,6 +112,8 @@ export interface ResolvedObjectPart {
 	readonly geometry: ResolvedGeometry;
 	readonly defaultScale: Vec3;
 	readonly materials: readonly ResolvedMaterial[];
+	/** Retail draw eligibility derived from this GfxObj's authored degradation chain. */
+	readonly retailVisibility: RetailGeometryVisibility;
 }
 
 /** Derive conservative object-local bounds from rigid poses at unit object source scale. */

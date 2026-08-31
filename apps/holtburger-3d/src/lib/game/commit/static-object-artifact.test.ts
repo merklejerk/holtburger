@@ -112,6 +112,7 @@ function geometryResult(
 						indexStart: 0,
 						instance: instance(),
 						material: material(),
+						retailVisibility: "normally-visible",
 						transparentSort: {
 							center: landblockVec3(Vec3.zero()),
 							stableId: "transparent:0",
@@ -145,6 +146,7 @@ function drawUnit(): StaticObjectDrawUnit {
 		indexStart: 0,
 		material: material(),
 		ordering: "opaque" as const,
+		retailVisibility: "normally-visible",
 		transparentSort: null,
 	};
 }

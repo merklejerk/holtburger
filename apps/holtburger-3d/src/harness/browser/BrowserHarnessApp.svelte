@@ -444,6 +444,8 @@
 		readonly setColorGrade: (parameters: ColorGradeParameters | null) => void;
 		/** Toggle authored outdoor lamps, to measure their cost against an identical scene. */
 		readonly setStaticLights: (enabled: boolean) => void;
+		/** Toggle degradation-hidden geometry without rebuilding loaded scene content. */
+		readonly setShowRetailHiddenGeometry: (visible: boolean) => void;
 		/** Toggle authored weather, mirroring retail's `DisableMostWeatherEffects` player option. */
 		readonly setWeather: (enabled: boolean) => void;
 		/** Withdraw every requested scene layer while retaining the harness runtime. */
@@ -2320,6 +2322,12 @@
 		runtime.setFrameSettings(frameSettings);
 	}
 
+	function setShowRetailHiddenGeometry(visible: boolean): void {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		frameSettings = { ...frameSettings, showRetailHiddenGeometry: visible };
+		runtime.setFrameSettings(frameSettings);
+	}
+
 	function setWeather(enabled: boolean): void {
 		if (!runtime) throw new Error("Browser harness runtime is not ready.");
 		frameSettings = { ...frameSettings, weatherEnabled: enabled };
@@ -2840,6 +2848,7 @@
 					setFrameProfiling,
 					captureBakedDrawMergeCensus,
 					setStaticLights,
+					setShowRetailHiddenGeometry,
 					setWeather,
 					setMinimumObjectFootprintCssPixelArea,
 					setMinimumPortalFootprintCssPixelArea,

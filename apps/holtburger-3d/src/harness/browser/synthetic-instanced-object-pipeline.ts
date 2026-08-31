@@ -115,6 +115,7 @@ function presentation(
 				geometry: geometry(id, materials.length),
 				materials,
 				partIndex: 0,
+				retailVisibility: "normally-visible",
 			},
 		],
 		lights: [],

@@ -3,6 +3,7 @@ import { sceneVec3 } from "../lib/assets/ac-frame";
 import { Vec3 } from "../lib/game/math/types";
 import type { HostPhysicalFlyPath } from "../lib/game/motion/host-physical-fly-path";
 import type { HostCameraPlacement } from "../lib/game/motion/host-placed-path";
+import { EXPLORER_TUNING } from "./explorer-tuning";
 import {
 	PhysicalFlySession,
 	type HostPhysicalFlyFailure,
@@ -118,8 +119,10 @@ describe("PhysicalFlySession", () => {
 		expect(test.calls[0]?.args?.registration).toEqual({
 			speedEnvelope: {
 				kind: "linear-ramp",
-				accelerationSeconds: 2,
-				initialSpeedMultiplier: 0.125,
+				accelerationSeconds:
+					EXPLORER_TUNING.camera.controls.keyboardAccelerationSeconds,
+				initialSpeedMultiplier:
+					EXPLORER_TUNING.camera.controls.keyboardInitialSpeedMultiplier,
 			},
 			residency: { envCellId: null, landblockId: "0xda55ffff" },
 			scenePosition: [0xda * 192 + 96, 20, -(0x55 * 192 + 96)],

@@ -28,7 +28,8 @@ function entity(
 			localTransform: transform,
 		} as ScenePlacement,
 		view: {
-			identity: { guid: 1, name: "Drudge", wcid: 42 },
+			identity: { guid: 1, wcid: 42 },
+			display: { name: "Drudge", level: null },
 			presentation: {
 				radar: {
 					behavior:

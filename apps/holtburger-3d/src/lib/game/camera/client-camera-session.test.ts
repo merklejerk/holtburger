@@ -189,7 +189,8 @@ function currentState(): ClientCurrentState {
 			entities: [
 				{
 					generation: 1,
-					identity: { guid: PLAYER_GUID, wcid: 42, name: "Drudge" },
+					identity: { guid: PLAYER_GUID, wcid: 42 },
+					display: { name: "Drudge", level: null },
 					presentation: {
 						category: "player",
 						content: {

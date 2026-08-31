@@ -204,7 +204,7 @@ export interface ClientPresentationRuntime extends MapTerrainSource {
 	setWorldIndicator(indicator: WorldIndicatorInput | null): void;
 	setAudioListener(placement: AudioListenerPlacement | null): void;
 	setSceneEnvironment(environment: ResolvedSceneEnvironment): void;
-	setViewerLightCarrier(guid: number | null): void;
+	setViewerEntity(guid: number | null): void;
 	setPortalTransition(transition: PortalTransitionFrame | undefined): void;
 	/** Play a validated head-locked portal transition cue when the runtime owns audio. */
 	playPortalTransitionSound?(kind: "enter" | "exit"): void;
@@ -566,7 +566,7 @@ export class ClientPresentationSession {
 		}
 		const player = this.#authoritativePlayer(playerGuid);
 		if (player === null) {
-			owner.runtime.setViewerLightCarrier(null);
+			owner.runtime.setViewerEntity(null);
 			this.#clearSceneDemand(owner);
 			this.#setStatus(
 				"loading-player",
@@ -575,7 +575,7 @@ export class ClientPresentationSession {
 			return { rendered: false, status: this.#status };
 		}
 		if (player.placement.kind !== "world") {
-			owner.runtime.setViewerLightCarrier(null);
+			owner.runtime.setViewerEntity(null);
 			this.#clearSceneDemand(owner);
 			this.#setStatus(
 				"loading-player",
@@ -597,7 +597,7 @@ export class ClientPresentationSession {
 			this.#portalSceneActivation = null;
 			this.#syncSceneInterest(player);
 		}
-		owner.runtime.setViewerLightCarrier(playerGuid);
+		owner.runtime.setViewerEntity(playerGuid);
 		owner.runtime.tick();
 		if (portal) {
 			const sceneActivation = this.#portalSceneActivation;

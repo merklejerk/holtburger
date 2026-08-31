@@ -172,7 +172,12 @@ const dynamicEntityViewSchema = z.object({
 	identity: z.object({
 		guid,
 		wcid: guid,
+	}),
+	display: z.object({
+		/** Required producer-resolved display name. */
 		name: z.string(),
+		/** Optional validated authored level. */
+		level: nonNegativeInteger.nullable(),
 	}),
 	presentation: z.object({
 		/** Producer-resolved frontend category; consumers never reconstruct it from radar color. */

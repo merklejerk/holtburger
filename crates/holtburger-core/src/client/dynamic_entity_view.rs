@@ -2,7 +2,8 @@
 
 use holtburger_common::Guid;
 use holtburger_common::properties::{
-    PropertyFloat, PropertyString, WorldObjectExt as _, WorldObjectPropertyAccessors as _,
+    PropertyFloat, PropertyInt, PropertyString, WorldObjectExt as _,
+    WorldObjectPropertyAccessors as _,
 };
 use holtburger_world::{EntityPlacement, PhysicalBodyParticipation, WorldState};
 use thiserror::Error;
@@ -12,7 +13,8 @@ use crate::{
     DynamicEntityIdentityView, DynamicEntityPathLeg, DynamicEntityPathPoint,
     DynamicEntityPlacedPath, DynamicEntityPlacementAdvanceKind, DynamicEntitySnapshot,
     DynamicEntitySpatialMembership, DynamicEntityTickBatch, DynamicEntityViewSource,
-    DynamicEntityWorldProjection, project_dynamic_entity_view, semantic_dynamic_entity_category,
+    DynamicEntityWorldProjection, dynamic_entity_display_view, project_dynamic_entity_view,
+    semantic_dynamic_entity_category,
 };
 
 use super::{ClientRuntime, ClientViewEvent};
@@ -87,7 +89,8 @@ pub fn project_client_dynamic_entity(
     Ok(project_dynamic_entity_view(DynamicEntityViewSource {
         generation: u64::from(entity.instance_sequence()),
         category: semantic_dynamic_entity_category(entity.flags, entity.item_type()),
-        identity: DynamicEntityIdentityView { guid, wcid, name },
+        identity: DynamicEntityIdentityView { guid, wcid },
+        display: dynamic_entity_display_view(name, entity.get_int_prop(PropertyInt::Level), guid),
         content: DynamicEntityContent {
             setup_did,
             motion_table_did: world.effective_motion_table_id_for_guid(guid),
@@ -280,7 +283,7 @@ mod tests {
     use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::{
         ItemType, ObjectDescriptionFlag, PhysicsState, PropertyDataId, PropertyFloat, PropertyInt,
-        WeenieType, WorldObjectPropertyAccessorsMut as _,
+        PropertyUpdate, WeenieType, WorldObjectPropertyAccessorsMut as _,
     };
     use holtburger_common::{ParentLocation, Placement, Quaternion, Vector3};
     use holtburger_content::MotionSequenceCatalog;
@@ -499,6 +502,7 @@ mod tests {
             .properties
             .ints
             .insert(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        entity.properties.ints.insert(PropertyInt::Level, 12);
         entity.set_did_prop(PropertyDataId::Setup, Guid(0x0200_0001));
         entity.set_did_prop(PropertyDataId::MotionTable, Guid(0x0900_0001));
         entity.set_float_prop(PropertyFloat::DefaultScale, 1.25);
@@ -519,6 +523,7 @@ mod tests {
                     name: "Drudge".to_owned(),
                     weenie_type: WeenieType::Creature,
                 },
+                level: Some(12),
                 content: DynamicEntityContent {
                     motion_table_did: Some(0x0900_0001),
                     setup_did: 0x0200_0001,
@@ -579,6 +584,24 @@ mod tests {
             ClientViewEvent::DynamicEntity(DynamicEntityEvent::Upserted { entity, .. })
                 if entity.identity.guid == guid
         )));
+
+        client
+            .world
+            .entities
+            .get_mut(guid)
+            .expect("spawned entity")
+            .properties
+            .ints
+            .insert(PropertyInt::Level, 27);
+        client.handle_world_event(&holtburger_world::WorldEvent::PropertiesUpdated {
+            guid,
+            updates: vec![PropertyUpdate::Int(PropertyInt::Level, 27)],
+        });
+        let updated = std::iter::from_fn(|| events.try_recv().ok()).find_map(|event| match event {
+            ClientViewEvent::DynamicEntity(DynamicEntityEvent::Upserted { entity }) => Some(entity),
+            _ => None,
+        });
+        assert_eq!(updated.expect("level upsert").display.level, Some(27));
 
         client.emit_current_application_snapshot();
         let snapshot =

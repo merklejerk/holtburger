@@ -86,7 +86,7 @@ export function selectMapBlips(
 			clipY,
 			color: entity.presentation.radar.blipColor,
 			guid: entity.identity.guid,
-			name: entity.identity.name,
+			name: entity.display.name,
 		});
 	}
 	return blips;

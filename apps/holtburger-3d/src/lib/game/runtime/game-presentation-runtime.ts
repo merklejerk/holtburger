@@ -34,6 +34,7 @@ import {
 	type RendererFrameDiagnosticsSnapshot,
 	type WorldIndicatorInput,
 } from "../renderer/renderer";
+import { validateNameplateSettings } from "../renderer/nameplate-policy";
 import { RenderWorld } from "../renderer/render-world";
 import {
 	type RenderExtent,
@@ -187,6 +188,7 @@ import { adaptAuthoredDynamicPresentation } from "../resolution/authored-dynamic
 import {
 	adaptDynamicEntityPresentation,
 	datAssetId,
+	dynamicEntityPresentationIdentity,
 	dynamicEntityPlacement,
 	dynamicEntityPlacementKey,
 	type DynamicEntityRealizationDisposition,
@@ -937,13 +939,13 @@ export class GamePresentationRuntime {
 	#portalTransitionAnimationGeneration: number | null = null;
 	#portalTransitionLastTimeSeconds: number | null = null;
 	/**
-	 * Spawned entity carrying the viewer light, or null while the camera carries it itself.
+	 * Spawned entity driven by the viewer, or null while the camera is unbound.
 	 *
 	 * Held as an identity rather than a pose: the carrier is walking, and the scene is what
-	 * presentation rate updates, so the light is resolved from the live placement every frame
-	 * instead of from whatever the frontend last sampled.
+	 * presentation rate updates, so viewer-relative presentation resolves from live installed state
+	 * every frame instead of from whatever the frontend last sampled.
 	 */
-	#viewerLightCarrier: number | null = null;
+	#viewerEntityGuid: number | null = null;
 	/** Terrain interest constraining the frontend's effective distance-fog range. */
 	#terrainFogCoverage: TerrainFogCoverage | null = null;
 	/** Complete static demand selected by the latest accepted scene target. */
@@ -965,6 +967,7 @@ export class GamePresentationRuntime {
 		commitPipeline: CommitPipeline,
 		dependencies: GamePresentationRuntimeDependencies,
 	) {
+		validateNameplateSettings(dependencies.frameSettings.nameplates);
 		this.#tickProfiler = dependencies.tickProfiler;
 		this.#frameSettings = dependencies.frameSettings;
 		this.#setupVisualSource = dependencies.setupVisualSource;
@@ -2077,6 +2080,7 @@ export class GamePresentationRuntime {
 			});
 			installed.presentationStateIdentity = identity;
 		}
+		this.#dynamics.updateNameplateContent(installed.nodeId, entity.display);
 		this.#applyDynamicEntityClip(installed, entity.playingClip);
 	}
 
@@ -2449,6 +2453,7 @@ export class GamePresentationRuntime {
 
 	/** Replace frontend-selected dynamic display choices without altering world data. */
 	setFrameSettings(settings: FrameSettings): void {
+		validateNameplateSettings(settings.nameplates);
 		this.#frameSettings = settings;
 	}
 
@@ -2579,6 +2584,7 @@ export class GamePresentationRuntime {
 		);
 		const source: DynamicPresentationSource = {
 			category: "other",
+			nameplate: null,
 			behavior: assets.visual.behavior,
 			identity: "portal-transition",
 			localBounds: assets.visual.localBounds,
@@ -2623,13 +2629,25 @@ export class GamePresentationRuntime {
 	}
 
 	/**
-	 * Nominate the spawned entity carrying the viewer light; null returns it to the camera.
+	 * Nominate the spawned entity driven by the viewer; null returns control to the camera.
 	 *
 	 * Only the frontend knows whether the viewer is driving a body at all, which is the same split
 	 * retail has: `SmartBox` nominates, and the renderer places what it is given.
 	 */
-	setViewerLightCarrier(guid: number | null): void {
-		this.#viewerLightCarrier = guid;
+	setViewerEntity(guid: number | null): void {
+		this.#viewerEntityGuid = guid;
+	}
+
+	/** Resolve the driven entity's installed generation to the renderer's stable identity. */
+	#viewerEntityIdentity(): string | null {
+		if (this.#viewerEntityGuid === null) return null;
+		const installed = this.#spawnedPresentations.get(this.#viewerEntityGuid);
+		return installed === undefined
+			? null
+			: dynamicEntityPresentationIdentity(
+					this.#viewerEntityGuid,
+					installed.generation,
+				);
 	}
 
 	/** Set offscreen visual sampling cadence; zero preserves full render cadence. */
@@ -3038,11 +3056,12 @@ export class GamePresentationRuntime {
 			outdoorLights: this.#outdoorLights,
 			timeSeconds,
 			viewerLightOrigin: resolveViewerLightOrigin(
-				this.#viewerLightCarrier === null
+				this.#viewerEntityGuid === null
 					? null
-					: this.spawnedEntityPlacement(this.#viewerLightCarrier),
+					: this.spawnedEntityPlacement(this.#viewerEntityGuid),
 				this.#camera.placement.position,
 			),
+			viewerEntityIdentity: this.#viewerEntityIdentity(),
 			views: [
 				{
 					camera: this.#camera,

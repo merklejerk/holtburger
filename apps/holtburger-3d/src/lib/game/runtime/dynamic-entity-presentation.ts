@@ -21,6 +21,14 @@ export type DynamicEntityRealizationResults = ReadonlyMap<
 	DynamicEntityRealizationDisposition
 >;
 
+/** Build the generation-qualified identity shared by runtime ownership and renderer policy. */
+export function dynamicEntityPresentationIdentity(
+	guid: number,
+	generation: number,
+): string {
+	return `dynamic-entity:${formatGuid(guid)}/${generation}`;
+}
+
 /** Join one host-projected live entity with its separately resolved immutable visual closure. */
 export function adaptDynamicEntityPresentation(
 	entity: DynamicEntityView,
@@ -37,6 +45,7 @@ export function adaptDynamicEntityPresentation(
 		placement,
 		source: {
 			category: entity.presentation.category,
+			nameplate: entity.display,
 			behavior: {
 				...visual.behavior,
 				// The entity names the table it animates from; the setup's own default already
@@ -50,7 +59,10 @@ export function adaptDynamicEntityPresentation(
 						? visual.behavior.soundTableId
 						: datAssetId(entity.presentation.content.soundTableDid),
 			},
-			identity: `dynamic-entity:${formatGuid(entity.identity.guid)}/${entity.generation}`,
+			identity: dynamicEntityPresentationIdentity(
+				entity.identity.guid,
+				entity.generation,
+			),
 			localBounds: visual.localBounds,
 			presentation: visual.presentation,
 			scale: new Vec3(

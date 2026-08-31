@@ -21,6 +21,10 @@ const DEFAULT_VIEWPORT_HEIGHT = 720;
 const DEFAULT_DEVICE_SCALE_FACTOR = 1;
 /** Settle policy changes before each timed shadow benchmark window. */
 const ENTITY_SHADOW_BENCHMARK_WARMUP_MS = 500;
+/** Settle the cold nameplate setting before each paired timing window. */
+const NAMEPLATE_BENCHMARK_WARMUP_MS = 500;
+/** Test-owned enabled ceiling held constant across nameplate benchmark runs. */
+const NAMEPLATE_BENCHMARK_VISIBLE_LIMIT = 50;
 /** Harness-local mirror of the browser policy contract, including capability admission. */
 const TEXTURE_FILTERING_OPTIONS = [
 	{ minimumAnisotropy: 1, policy: "nearest" },
@@ -73,57 +77,63 @@ try {
 	}
 	process.stdout.write(
 		`${JSON.stringify(
-			options.brief
-				? briefHarnessReport(result)
-				: {
-						glRenderer: result.glRenderer,
-						buildingRadius: options.buildingRadius,
-						camera: result.state.camera,
-						envCellRadius: options.envCellRadius,
-						cameraPitchDegrees: options.cameraPitchDegrees,
-						cameraYawDegrees: options.cameraYawDegrees,
-						explicitObjectRadius: options.explicitObjectRadius,
-						generatedObjectRadius: options.generatedObjectRadius,
-						cameraLandblockId: options.cameraLandblockId,
-						relocateLandblockId: options.relocateLandblockId,
-						frameMode: options.frameMode,
-						frameSettings: result.state.frameSettings,
-						frameProfile: result.state.frameProfile,
-						ambientOcclusionCoverageCensus:
-							result.state.ambientOcclusionCoverageCensus,
-						textureFiltering: options.textureFiltering,
-						filteringCycleStates: result.filteringCycleStates,
-						entityShadowCycleStates: result.entityShadowCycleStates,
-						entityShadowBenchmark: result.entityShadowBenchmark,
-						modeCycleStates: result.modeCycleStates,
-						portalExecution: result.portalExecution,
-						portalTransitionDemo: options.portalTransitionDemo,
-						portalContextLossPolicy: result.state.portalContextLossPolicy,
-						portalScopeAtlasTargets: result.state.portalScopeAtlasTargets,
-						outdoorPssm: result.state.outdoorPssm,
-						consoleMessages: result.consoleMessages,
-						generatedDisabledState: result.generatedDisabledState,
-						fixture: options.fixture,
-						frames: result.state.frames,
-						initialState: result.initialState,
-						landblockId: options.landblockId,
-						lifecycleState: result.lifecycleState,
-						entityLifecycle: result.entityLifecycle,
-						possessionScenario: result.possessionScenario,
-						followFlight: result.followFlight,
-						relocationSequence: result.relocationSequence,
-						relocationState: result.relocationState,
-						metrics: result.state.metrics,
-						terrainGlTrace: result.state.terrainGlTrace,
-						ready: result.state.ready,
-						screenshotPath: options.screenshotPath,
-						isolateAuthoredDynamics: options.isolateAuthoredDynamics,
-						excludeAuthoredDynamics: options.excludeAuthoredDynamics,
-						measureMs: options.measureMs,
-						settleMs: options.settleMs,
-						viewport: result.state.viewport,
-						audioFlyby: result.audioFlyby,
-					},
+			options.nameplateReportOnly
+				? nameplateHarnessReport(result)
+				: options.brief
+					? briefHarnessReport(result)
+					: {
+							glRenderer: result.glRenderer,
+							buildingRadius: options.buildingRadius,
+							camera: result.state.camera,
+							envCellRadius: options.envCellRadius,
+							cameraPitchDegrees: options.cameraPitchDegrees,
+							cameraYawDegrees: options.cameraYawDegrees,
+							explicitObjectRadius: options.explicitObjectRadius,
+							generatedObjectRadius: options.generatedObjectRadius,
+							cameraLandblockId: options.cameraLandblockId,
+							relocateLandblockId: options.relocateLandblockId,
+							frameMode: options.frameMode,
+							frameSettings: result.state.frameSettings,
+							frameProfile: result.state.frameProfile,
+							nameplates: result.state.nameplates,
+							nameplateWorkload: result.nameplateWorkload,
+							nameplateLifecycle: result.nameplateLifecycle,
+							nameplateBenchmark: result.nameplateBenchmark,
+							ambientOcclusionCoverageCensus:
+								result.state.ambientOcclusionCoverageCensus,
+							textureFiltering: options.textureFiltering,
+							filteringCycleStates: result.filteringCycleStates,
+							entityShadowCycleStates: result.entityShadowCycleStates,
+							entityShadowBenchmark: result.entityShadowBenchmark,
+							modeCycleStates: result.modeCycleStates,
+							portalExecution: result.portalExecution,
+							portalTransitionDemo: options.portalTransitionDemo,
+							portalContextLossPolicy: result.state.portalContextLossPolicy,
+							portalScopeAtlasTargets: result.state.portalScopeAtlasTargets,
+							outdoorPssm: result.state.outdoorPssm,
+							consoleMessages: result.consoleMessages,
+							generatedDisabledState: result.generatedDisabledState,
+							fixture: options.fixture,
+							frames: result.state.frames,
+							initialState: result.initialState,
+							landblockId: options.landblockId,
+							lifecycleState: result.lifecycleState,
+							entityLifecycle: result.entityLifecycle,
+							possessionScenario: result.possessionScenario,
+							followFlight: result.followFlight,
+							relocationSequence: result.relocationSequence,
+							relocationState: result.relocationState,
+							metrics: result.state.metrics,
+							terrainGlTrace: result.state.terrainGlTrace,
+							ready: result.state.ready,
+							screenshotPath: options.screenshotPath,
+							isolateAuthoredDynamics: options.isolateAuthoredDynamics,
+							excludeAuthoredDynamics: options.excludeAuthoredDynamics,
+							measureMs: options.measureMs,
+							settleMs: options.settleMs,
+							viewport: result.state.viewport,
+							audioFlyby: result.audioFlyby,
+						},
 			null,
 			2,
 		)}\n`,
@@ -138,6 +148,19 @@ try {
 			`Browser harness observed browser errors: ${browserErrors.map(({ text }) => text).join(" | ")}`,
 		);
 	}
+	if (options.nameplateWorkload !== null) {
+		const assertionState = options.nameplateLifecycle
+			? result.initialState
+			: result.state;
+		assertNameplateWorkload(
+			assertionState.nameplates,
+			options.nameplateWorkload,
+			options.envCellCameraId !== null,
+			assertionState.frameSettings.nameplates.maximumVisible,
+		);
+	}
+	if (options.nameplateLifecycle)
+		assertNameplateLifecycle(result.nameplateLifecycle);
 	if (options.traceTerrainGl) {
 		assertTerrainGlTrace(result.state);
 	}
@@ -184,6 +207,7 @@ function parseArgs(args) {
 	const parsed = {
 		chromePath: process.env.CHROME_PATH ?? DEFAULT_CHROME_PATH,
 		brief: false,
+		nameplateReportOnly: false,
 		landblockId: DEFAULT_LANDBLOCK_ID,
 		buildingRadius: 0,
 		envCellRadius: null,
@@ -259,6 +283,10 @@ function parseArgs(args) {
 		textureFiltering: null,
 		lifecycle: false,
 		fixture: null,
+		nameplateWorkload: null,
+		nameplateLifecycle: false,
+		nameplateBenchmarkPairs: 0,
+		nameplatesDisabled: false,
 		screenshotPath: null,
 		map: false,
 		mapSize: 512,
@@ -277,6 +305,9 @@ function parseArgs(args) {
 		switch (arg) {
 			case "--brief":
 				parsed.brief = true;
+				break;
+			case "--nameplate-report-only":
+				parsed.nameplateReportOnly = true;
 				break;
 			case "--chrome-path":
 				parsed.chromePath = requireValue(args, ++index, arg);
@@ -778,6 +809,44 @@ function parseArgs(args) {
 					);
 				}
 				break;
+			case "--nameplate-workload":
+				parsed.nameplateWorkload = requireValue(args, ++index, arg);
+				if (
+					![
+						"repeated-100",
+						"unique-100",
+						"ordered-500",
+						"occlusion-open",
+						"occlusion-wall",
+						"portal-open",
+						"portal-wall",
+						"portal-plural",
+					].includes(parsed.nameplateWorkload)
+				) {
+					throw new Error(
+						"--nameplate-workload must name a supported synthetic nameplate fixture.",
+					);
+				}
+				break;
+			case "--nameplate-lifecycle":
+				parsed.nameplateLifecycle = true;
+				break;
+			case "--disable-nameplates":
+				parsed.nameplatesDisabled = true;
+				break;
+			case "--nameplate-benchmark-pairs":
+				parsed.nameplateBenchmarkPairs = Number(
+					requireValue(args, ++index, arg),
+				);
+				if (
+					!Number.isInteger(parsed.nameplateBenchmarkPairs) ||
+					parsed.nameplateBenchmarkPairs <= 0
+				) {
+					throw new Error(
+						"--nameplate-benchmark-pairs must be a positive integer.",
+					);
+				}
+				break;
 			case "--screenshot":
 				parsed.screenshotPath = requireValue(args, ++index, arg);
 				break;
@@ -1056,6 +1125,21 @@ function parseArgs(args) {
 			);
 		}
 	}
+	if (parsed.nameplateBenchmarkPairs > 0) {
+		if (!parsed.gpu) {
+			throw new Error("--nameplate-benchmark-pairs requires --gpu.");
+		}
+		if (parsed.nameplateWorkload === null) {
+			throw new Error(
+				"--nameplate-benchmark-pairs requires --nameplate-workload.",
+			);
+		}
+		if (parsed.measureMs <= 0) {
+			throw new Error(
+				"--nameplate-benchmark-pairs requires a positive --measure-ms.",
+			);
+		}
+	}
 	return parsed;
 }
 
@@ -1090,6 +1174,8 @@ function printHelp() {
 Options:
   --landblock <hex>     Outdoor landblock to render. Default: ${DEFAULT_LANDBLOCK_ID}
   --brief               Print frame and content-summary evidence instead of full diagnostics.
+  --nameplate-report-only
+                        Print only renderer identity, errors, profiling, and nameplate evidence.
   --world-marker        Draw the depth-tested world marker and trajectory fixture.
   --map                 Draw the overhead map onto a harness canvas before the screenshot.
   --map-size <px>       Square pixel size of the map canvas (default 512).
@@ -1233,6 +1319,17 @@ Options:
   --texture-filtering <mode>
                          Select nearest, linear, or anisotropic-2x/4x/8x before content settles.
   --fixture <name>      Use the blended, instanced, outdoor-pssm, or portal-scope-atlas fixture.
+  --nameplate-workload <name>
+                         Install repeated-100, unique-100, ordered-500, occlusion-open/wall, or
+                         portal-open/wall/plural synthetic dynamic
+                         entities through the shared runtime without requiring a catalog record.
+  --nameplate-lifecycle Move one unchanged same-generation target, then retire the workload and
+                         assert stable rasterization plus complete texture release. Requires
+                         --nameplate-workload.
+  --nameplate-benchmark-pairs <n>
+                         Measure n paired enabled/disabled windows in one hardware-GPU session.
+                         Requires --nameplate-workload, --gpu, and positive --measure-ms.
+  --disable-nameplates   Set the nameplate budget to zero before installing the workload.
   --settle-ms <ms>      Wait after requesting scene content. Default: ${DEFAULT_SETTLE_MS}
   --measure-ms <ms>     Reset timings after settling, then measure steady-state frames.
   --screenshot <path>   Persist the captured PNG after the harness exits.
@@ -1507,6 +1604,9 @@ function briefHarnessReport(result) {
 		terrainGlTrace: result.state.terrainGlTrace,
 		ambientOcclusionCoverageCensus: result.state.ambientOcclusionCoverageCensus,
 		frameProfile: result.state.frameProfile,
+		nameplates: result.state.nameplates,
+		nameplateWorkload: result.nameplateWorkload,
+		nameplateLifecycle: result.nameplateLifecycle,
 		tickProfile: result.state.tickProfile,
 		frameSettings: result.state.frameSettings,
 		entityShadowResources: result.state.entityShadowResources,
@@ -1562,6 +1662,107 @@ function briefHarnessReport(result) {
 		terrainWorker: result.state.terrainWorker,
 		timing: result.state.timing,
 	};
+}
+
+function nameplateHarnessReport(result) {
+	return {
+		glRenderer: result.glRenderer,
+		consoleMessages: result.consoleMessages.filter(
+			({ level }) => level === "error" || level === "exception",
+		),
+		frameProfile: result.state.frameProfile,
+		nameplates: result.state.nameplates,
+		nameplateWorkload: result.nameplateWorkload,
+		nameplateLifecycle: result.nameplateLifecycle,
+		nameplateBenchmark: result.nameplateBenchmark,
+	};
+}
+
+function assertNameplateWorkload(
+	diagnostics,
+	workload,
+	hasEnvCellCamera,
+	maximumVisible,
+) {
+	if (diagnostics === null || diagnostics === undefined) {
+		throw new Error(
+			"Synthetic nameplate workload published no renderer diagnostics.",
+		);
+	}
+	const eligibleCandidateCount =
+		workload === "ordered-500"
+			? 500
+			: workload === "repeated-100" || workload === "unique-100"
+				? 100
+				: 1;
+	const submittedCandidateCount = Math.min(
+		eligibleCandidateCount,
+		maximumVisible,
+	);
+	const expected =
+		submittedCandidateCount === 0
+			? {
+					budgetRejectedCandidateCount: 0,
+					eligibleCandidateCount: 0,
+					liveEntryCount: 0,
+					submittedDrawCount: 0,
+					submittedInstanceCount: 0,
+				}
+			: {
+					budgetRejectedCandidateCount:
+						eligibleCandidateCount - submittedCandidateCount,
+					eligibleCandidateCount,
+					liveEntryCount:
+						workload === "unique-100" ? submittedCandidateCount : 1,
+					submittedDrawCount:
+						workload === "unique-100" ? submittedCandidateCount : 1,
+					submittedInstanceCount:
+						submittedCandidateCount *
+						(workload === "portal-plural" && hasEnvCellCamera ? 2 : 1),
+				};
+	const actual = {
+		budgetRejectedCandidateCount: diagnostics.budgetRejectedCandidateCount,
+		eligibleCandidateCount: diagnostics.eligibleCandidateCount,
+		liveEntryCount: diagnostics.cache.liveEntryCount,
+		submittedDrawCount: diagnostics.submittedDrawCount,
+		submittedInstanceCount: diagnostics.submittedInstanceCount,
+	};
+	if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+		throw new Error(
+			`Synthetic ${workload} nameplate evidence mismatch: expected ${JSON.stringify(expected)}, received ${JSON.stringify(actual)}.`,
+		);
+	}
+}
+
+function assertNameplateLifecycle(lifecycle) {
+	if (lifecycle === null)
+		throw new Error("Synthetic nameplate lifecycle published no evidence.");
+	if (lifecycle.movedY === lifecycle.previousY) {
+		throw new Error("Synthetic nameplate lifecycle did not move its target.");
+	}
+	if (
+		lifecycle.moved.cache.rasterizationCount !==
+		lifecycle.before.cache.rasterizationCount
+	) {
+		throw new Error(
+			"Moving unchanged nameplate content caused a second rasterization.",
+		);
+	}
+	if (
+		lifecycle.cleared.cache.liveEntryCount !== 0 ||
+		lifecycle.cleared.cache.byteCount !== 0
+	) {
+		throw new Error(
+			`Cleared nameplate workload retained cache residency: ${JSON.stringify(lifecycle.cleared.cache)}.`,
+		);
+	}
+	const expectedReleases =
+		lifecycle.before.cache.releaseCount + lifecycle.before.cache.liveEntryCount;
+	if (lifecycle.cleared.cache.releaseCount !== expectedReleases) {
+		throw new Error(
+			`Cleared nameplate workload expected ${expectedReleases} releases, received ${lifecycle.cleared.cache.releaseCount}.`,
+		);
+	}
 }
 
 function summarizePossessionScenario(scenario) {
@@ -3454,11 +3655,54 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		) {
 			await placeEnvCellCamera(client, options);
 		}
+		if (options.nameplatesDisabled) {
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setNameplateMaximumVisible",
+				[0],
+			);
+		}
+		let nameplateWorkload = null;
+		if (options.nameplateWorkload !== null) {
+			if (
+				["repeated-100", "unique-100", "ordered-500"].includes(
+					options.nameplateWorkload,
+				)
+			) {
+				// These fixtures isolate cache and budget behavior. Keep their deliberately deep rows
+				// eligible so a presentation cutoff does not silently weaken the workload under test.
+				await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setNameplateMinimumLegiblePixels",
+					[0.1],
+				);
+			}
+			const entities = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.installSyntheticNameplateWorkload",
+				[options.nameplateWorkload],
+			);
+			nameplateWorkload = {
+				entityCount: entities.length,
+				kind: options.nameplateWorkload,
+			};
+			await delay(500);
+		}
 		const initialState = await evaluate(
 			client,
 			"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
 			[],
 		);
+		let nameplateLifecycle = null;
+		if (options.nameplateLifecycle) {
+			if (options.nameplateWorkload === null)
+				throw new Error("--nameplate-lifecycle requires --nameplate-workload.");
+			nameplateLifecycle = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.probeSyntheticNameplateLifecycle",
+				[],
+			);
+		}
 		let spawnedEntity = null;
 		let launchedEntity = null;
 		let relocatedEntity = null;
@@ -4098,6 +4342,14 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 						options.measureMs,
 					)
 				: null;
+		const nameplateBenchmark =
+			options.nameplateBenchmarkPairs > 0
+				? await runNameplateBenchmark(
+						client,
+						options.nameplateBenchmarkPairs,
+						options.measureMs,
+					)
+				: null;
 		if (options.traceTerrainGl) {
 			await evaluate(
 				client,
@@ -4205,6 +4457,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			ambientOcclusionCycleStates,
 			entityShadowCycleStates,
 			entityShadowBenchmark,
+			nameplateBenchmark,
 			audioFlyby,
 			cameraSweepScreenshots,
 			map: mapEvidence,
@@ -4227,6 +4480,8 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 						},
 			generatedDisabledState,
 			initialState,
+			nameplateWorkload,
+			nameplateLifecycle,
 			filteringCycleStates,
 			modeCycleStates,
 			lifecycleState,
@@ -4321,6 +4576,90 @@ async function runEntityShadowBenchmark(client, pairCount, measureMs) {
 		measureMs,
 		pairCount,
 		warmupMs: ENTITY_SHADOW_BENCHMARK_WARMUP_MS,
+		samples,
+	};
+}
+
+/** Measure paired nameplate budgets inside one settled browser session, reversing order by pair. */
+async function runNameplateBenchmark(client, pairCount, measureMs) {
+	const samples = [];
+	const initialState = await evaluate(
+		client,
+		"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
+		[],
+	);
+	const previousMaximumVisible =
+		initialState.frameSettings.nameplates.maximumVisible;
+	try {
+		for (let pairIndex = 0; pairIndex < pairCount; pairIndex += 1) {
+			const maximumVisibleValues =
+				pairIndex % 2 === 0
+					? [0, NAMEPLATE_BENCHMARK_VISIBLE_LIMIT]
+					: [NAMEPLATE_BENCHMARK_VISIBLE_LIMIT, 0];
+			for (
+				let orderIndex = 0;
+				orderIndex < maximumVisibleValues.length;
+				orderIndex += 1
+			) {
+				const maximumVisible = maximumVisibleValues[orderIndex];
+				await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setNameplateMaximumVisible",
+					[maximumVisible],
+				);
+				await delay(NAMEPLATE_BENCHMARK_WARMUP_MS);
+				await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.resetTiming",
+					[],
+				);
+				await delay(measureMs);
+				const state = await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
+					[],
+				);
+				const cpuProfile = state.frameProfile?.cpu ?? null;
+				const gpuProfile = state.frameProfile?.gpu ?? null;
+				samples.push({
+					pairIndex,
+					orderIndex,
+					maximumVisible,
+					timing: {
+						averageRenderMs: state.timing.averageRenderMs,
+						longestRenderMs: state.timing.longestRenderMs,
+						sampleCount: state.timing.sampleCount,
+					},
+					rendererCpu: {
+						meanTotalMs: cpuProfile?.mean.totalMs ?? null,
+						p95RecentTotalMs: cpuProfile?.p95RecentTotalMs ?? null,
+						meanSceneContributionResolutionMs:
+							cpuProfile?.mean.sceneContributionResolutionMs ?? null,
+						meanOtherMs: cpuProfile?.mean.otherMs ?? null,
+						sampleCount: cpuProfile?.sampleCount ?? 0,
+					},
+					gpu: {
+						kind: gpuProfile?.kind ?? "unavailable",
+						meanTotalMs: gpuProfile?.mean?.totalMs ?? null,
+						meanPresentationMs: gpuProfile?.mean?.presentationMs ?? null,
+						sampleCount: gpuProfile?.sampleCount ?? 0,
+					},
+					nameplates: state.nameplates,
+				});
+			}
+		}
+	} finally {
+		await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setNameplateMaximumVisible",
+			[previousMaximumVisible],
+		);
+		await delay(NAMEPLATE_BENCHMARK_WARMUP_MS);
+	}
+	return {
+		measureMs,
+		pairCount,
+		warmupMs: NAMEPLATE_BENCHMARK_WARMUP_MS,
 		samples,
 	};
 }

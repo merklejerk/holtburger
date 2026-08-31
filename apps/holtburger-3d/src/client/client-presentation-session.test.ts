@@ -118,11 +118,15 @@ describe("ClientPresentationSession", () => {
 		expect(runtime.viewerLightGuid).toBe(playerGuid);
 		const landblockOrigin = createLandblockWorldOrigin("0x0100ffff");
 		expect(presentation.readMapPanelFrame()).toMatchObject({
-			anchor: {
-				residency: { envCellId: null, landblockId: "0x0100ffff" },
-				worldX: landblockOrigin.x + 12,
-				worldY: landblockOrigin.y + 3,
-				worldZ: landblockOrigin.z - 4,
+			subject: {
+				anchor: {
+					residency: { envCellId: null, landblockId: "0x0100ffff" },
+					worldX: landblockOrigin.x + 12,
+					worldY: landblockOrigin.y + 3,
+					worldZ: landblockOrigin.z - 4,
+				},
+				guid: playerGuid,
+				kind: "controlled-entity",
 			},
 			presentedEntityRevision: 0,
 			source: runtime,

@@ -506,6 +506,89 @@ describe("ClientPresentationSession", () => {
 		await presentation.destroy();
 	});
 
+	it("applies a later tick while an unrelated entity realization remains pending", async () => {
+		const playerGuid = 0x0101_0001;
+		const transport = new FakeClientTransport(currentState(playerGuid));
+		const lifecycle = new ClientLifecycleSession(transport);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		const releaseRealization = runtime.holdNextUpsertRealization();
+		const presentation = new ClientPresentationSession({
+			canvas: fakeCanvas(),
+			hostTransport: {} as never,
+			session: lifecycle,
+			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+		});
+		await presentation.start();
+		const now = vi.spyOn(performance, "now");
+		let clockMs = 1_000;
+		now.mockImplementation(() => clockMs);
+
+		try {
+			transport.emit("client-dynamic-entity", {
+				kind: "upserted",
+				entity: view(0x0101_0002),
+			});
+			expect(runtime.upserted).toHaveLength(1);
+
+			const batch = advanceBatch(playerGuid);
+			transport.emit("client-dynamic-entity", { kind: "ticked", batch });
+			transport.emit("client-dynamic-entity", {
+				kind: "removed",
+				guid: 0x0101_0002,
+				generation: 1,
+			});
+			clockMs = 2_000;
+
+			expect(runtime.advances).toEqual([{ batch, receivedAtMs: 1_000 }]);
+			expect(runtime.removed).toEqual([{ guid: 0x0101_0002, generation: 1 }]);
+		} finally {
+			releaseRealization();
+			now.mockRestore();
+			await presentation.destroy();
+		}
+	});
+
+	it("reports an upsert realization failure without blocking later ticks", async () => {
+		const playerGuid = 0x0101_0001;
+		const transport = new FakeClientTransport(currentState(playerGuid));
+		const lifecycle = new ClientLifecycleSession(transport);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		const failure = new Error("visual realization failed");
+		runtime.failNextUpsertRealization(failure);
+		const onError = vi.fn();
+		const presentation = new ClientPresentationSession({
+			canvas: fakeCanvas(),
+			hostTransport: {} as never,
+			session: lifecycle,
+			onError,
+			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+		});
+		await presentation.start();
+
+		try {
+			transport.emit("client-dynamic-entity", {
+				kind: "upserted",
+				entity: view(0x0101_0002),
+			});
+			const batch = advanceBatch(playerGuid);
+			transport.emit("client-dynamic-entity", { kind: "ticked", batch });
+
+			expect(runtime.advances).toEqual([
+				{ batch, receivedAtMs: expect.any(Number) },
+			]);
+			await vi.waitFor(() => expect(onError).toHaveBeenCalledWith(failure));
+			expect(onError).toHaveBeenCalledTimes(1);
+			expect(presentation.status()).toEqual({
+				kind: "error",
+				diagnostic: "visual realization failed",
+			});
+		} finally {
+			await presentation.destroy();
+		}
+	});
+
 	it("holds rendering and rejects lagged advances during mirror recovery", async () => {
 		const transport = new FakeClientTransport(currentState(0x0100_0001));
 		const lifecycle = new ClientLifecycleSession(transport);
@@ -754,6 +837,23 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 	realizationDisposition: DynamicEntityRealizationDisposition = "installed";
 	#activationRevision = 0;
 	readonly #desired = new Map<number, DynamicEntityView>();
+	#nextUpsertRealization:
+		| { readonly kind: "completion"; readonly completion: Promise<void> }
+		| { readonly kind: "failure"; readonly error: Error }
+		| null = null;
+
+	holdNextUpsertRealization(): () => void {
+		const controlled = controlledPromise<void>();
+		this.#nextUpsertRealization = {
+			kind: "completion",
+			completion: controlled.promise,
+		};
+		return () => controlled.resolve(undefined);
+	}
+
+	failNextUpsertRealization(error: Error): void {
+		this.#nextUpsertRealization = { kind: "failure", error };
+	}
 
 	setFrameSettings(
 		settings: Parameters<ClientPresentationRuntime["setFrameSettings"]>[0],
@@ -781,6 +881,10 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 	): ReturnType<ClientPresentationRuntime["upsertDynamicEntity"]> {
 		this.upserted.push(entity);
 		this.#desired.set(entity.identity.guid, entity);
+		const outcome = this.#nextUpsertRealization;
+		this.#nextUpsertRealization = null;
+		if (outcome?.kind === "completion") await outcome.completion;
+		if (outcome?.kind === "failure") throw outcome.error;
 		return this.realizationDisposition;
 	}
 
@@ -1103,4 +1207,17 @@ function advanceBatch(
 		],
 		updates: [],
 	};
+}
+
+function controlledPromise<T>(): {
+	readonly promise: Promise<T>;
+	readonly resolve: (value: T) => void;
+} {
+	let resolve: (value: T) => void = () => {
+		throw new Error("Controlled promise was not initialized.");
+	};
+	const promise = new Promise<T>((accept) => {
+		resolve = accept;
+	});
+	return { promise, resolve: (value) => resolve(value) };
 }

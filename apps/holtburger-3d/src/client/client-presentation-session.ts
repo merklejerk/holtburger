@@ -180,9 +180,11 @@ export type ClientPresentationCameraController = PossessionCameraController<
 /** Runtime surface consumed by the client orchestration seam and injected by focused tests. */
 export interface ClientPresentationRuntime extends MapTerrainSource {
 	setFrameSettings(settings: FrameSettings): void;
+	/** Accept every desired record before returning the visual-realization promise. */
 	replaceDynamicEntitySnapshot(
 		entities: readonly DynamicEntityView[],
 	): Promise<DynamicEntityRealizationResults>;
+	/** Accept this desired level before returning the visual-realization promise. */
 	upsertDynamicEntity(
 		entity: DynamicEntityView,
 	): Promise<DynamicEntityRealizationDisposition>;
@@ -265,7 +267,6 @@ export class ClientPresentationSession {
 	#unsubscribe: (() => void) | null = null;
 	#playerGuid: number | null = null;
 	#startPromise: Promise<void> | null = null;
-	#mutationQueue: Promise<void> = Promise.resolve();
 	#sceneTargetKey: string | null = null;
 	#portalSceneActivation: PortalSceneActivation | null = null;
 	readonly #portalTransition = new PortalTransitionController();
@@ -834,9 +835,7 @@ export class ClientPresentationSession {
 				this.#receiveDynamic(event.event);
 				return;
 			case "server-time":
-				this.#enqueueMutation(async () => {
-					this.#applyServerEnvironment(event.time);
-				});
+				this.#applyServerEnvironment(event.time);
 				return;
 			case "presentation-discontinuity":
 				this.#receivePresentationDiscontinuity(event.discontinuity);
@@ -861,6 +860,7 @@ export class ClientPresentationSession {
 	#receiveDynamic(event: DynamicEntityEvent): void {
 		switch (event.kind) {
 			case "ticked": {
+				const receivedAtMs = performance.now();
 				if (this.#session.mirror.isAwaitingSnapshot()) {
 					this.#setStatus("awaiting-snapshot");
 					return;
@@ -877,37 +877,31 @@ export class ClientPresentationSession {
 						realization: "idle",
 					};
 				}
-				this.#enqueueMutation(async () => {
-					if (this.#owner === null || this.#session.mirror.isAwaitingSnapshot())
-						return;
-					this.#owner.runtime.applyDynamicEntityTick(
-						event.batch,
-						performance.now(),
-					);
-				});
+				if (this.#owner !== null) {
+					this.#owner.runtime.applyDynamicEntityTick(event.batch, receivedAtMs);
+				}
 				if (retryDeferred) this.#ensureScenePresentationConvergence();
 				return;
 			}
 			case "snapshot":
 				this.#invalidatePlayerPresentationConvergence();
-				void this.#requestDynamicSnapshotReplacement(event.snapshot.entities);
+				this.#observePresentationCompletion(
+					this.#requestDynamicSnapshotReplacement(event.snapshot.entities),
+				);
 				return;
 			case "upserted":
 				if (event.entity.identity.guid === this.#playerGuid)
 					this.#invalidatePlayerPresentationConvergence();
-				this.#enqueueMutation(async () => {
-					await this.#owner?.runtime.upsertDynamicEntity(event.entity);
-				});
+				if (this.#owner !== null) {
+					this.#observePresentationCompletion(
+						this.#owner.runtime.upsertDynamicEntity(event.entity),
+					);
+				}
 				return;
 			case "removed":
 				if (event.guid === this.#playerGuid)
 					this.#invalidatePlayerPresentationConvergence();
-				this.#enqueueMutation(() => {
-					this.#owner?.runtime.removeDynamicEntity(
-						event.guid,
-						event.generation,
-					);
-				});
+				this.#owner?.runtime.removeDynamicEntity(event.guid, event.generation);
 				return;
 		}
 	}
@@ -924,10 +918,7 @@ export class ClientPresentationSession {
 		this.#hasRenderedFrame = false;
 		this.#lastPrimaryView = null;
 		this.#sceneInterestCoordinator?.invalidate();
-		this.#enqueueMutation(async () => {
-			if (this.#owner === null) return;
-			this.#owner.runtime.clearSceneInterest();
-		});
+		this.#owner?.runtime.clearSceneInterest();
 		// The host's next reset/teleport batch owns placement invalidation. This edge only drops
 		// frontend demand/camera history; no canonical pose is manufactured here.
 		void discontinuity;
@@ -1048,56 +1039,56 @@ export class ClientPresentationSession {
 	#requestDynamicSnapshotReplacement(
 		entities: readonly DynamicEntityView[],
 	): Promise<void> {
-		return this.#enqueueMutation(async () => {
-			if (this.#owner === null) return;
-			await this.#owner.runtime.replaceDynamicEntitySnapshot(entities);
-		});
+		const owner = this.#owner;
+		if (owner === null) return Promise.resolve();
+		// Snapshot acceptance is synchronous inside the runtime; this promise names only realization.
+		return owner.runtime
+			.replaceDynamicEntitySnapshot(entities)
+			.then(() => undefined);
 	}
 
-	#requestDynamicEligibilityReevaluation(): Promise<void> {
-		return this.#enqueueMutation(async () => {
-			if (this.#owner === null || this.#session.mirror.isAwaitingSnapshot())
-				return;
-			const lifecycle = this.#session.state().lifecycle;
-			const portalActivation = this.#portalSceneActivation;
-			if (
-				lifecycle?.kind === "portal-space" &&
-				(portalActivation?.kind !== "accepted" ||
-					portalActivation.realization !== "pending")
-			)
-				return;
-			const results =
-				await this.#owner.runtime.reevaluateDynamicEntityEligibility();
-			if (
-				lifecycle?.kind !== "portal-space" ||
-				portalActivation?.kind !== "accepted"
-			)
-				return;
-			const current = this.#portalSceneActivation;
-			if (
-				current?.kind !== "accepted" ||
-				current.receipt !== portalActivation.receipt
-			)
-				return;
-			const realization = this.#localPlayerInstalled(results)
-				? "ready"
-				: "deferred";
+	async #requestDynamicEligibilityReevaluation(): Promise<void> {
+		if (this.#owner === null || this.#session.mirror.isAwaitingSnapshot())
+			return;
+		const lifecycle = this.#session.state().lifecycle;
+		const portalActivation = this.#portalSceneActivation;
+		if (
+			lifecycle?.kind === "portal-space" &&
+			(portalActivation?.kind !== "accepted" ||
+				portalActivation.realization !== "pending")
+		)
+			return;
+		const results =
+			await this.#owner.runtime.reevaluateDynamicEntityEligibility();
+		if (
+			lifecycle?.kind !== "portal-space" ||
+			portalActivation?.kind !== "accepted"
+		)
+			return;
+		const current = this.#portalSceneActivation;
+		if (
+			current?.kind !== "accepted" ||
+			current.receipt !== portalActivation.receipt
+		)
+			return;
+		const realization = this.#localPlayerInstalled(results)
+			? "ready"
+			: "deferred";
+		this.#portalSceneActivation = {
+			...current,
+			realization,
+		};
+		if (
+			realization === "deferred" &&
+			current.realizedPlayerPlacementKey !==
+				this.#authoritativePlayerConvergenceKey()
+		) {
 			this.#portalSceneActivation = {
-				...current,
-				realization,
+				...this.#portalSceneActivation,
+				realization: "idle",
 			};
-			if (
-				realization === "deferred" &&
-				current.realizedPlayerPlacementKey !==
-					this.#authoritativePlayerConvergenceKey()
-			) {
-				this.#portalSceneActivation = {
-					...this.#portalSceneActivation,
-					realization: "idle",
-				};
-				this.#ensureScenePresentationConvergence();
-			}
-		});
+			this.#ensureScenePresentationConvergence();
+		}
 	}
 
 	/** Force the exact local-player installation barrier to observe its latest desired level. */
@@ -1121,7 +1112,9 @@ export class ClientPresentationSession {
 			realization: "pending",
 			realizedPlayerPlacementKey: this.#authoritativePlayerConvergenceKey(),
 		};
-		void this.#requestDynamicEligibilityReevaluation();
+		this.#observePresentationCompletion(
+			this.#requestDynamicEligibilityReevaluation(),
+		);
 	}
 
 	#localPlayerInstalled(results: DynamicEntityRealizationResults): boolean {
@@ -1138,15 +1131,9 @@ export class ClientPresentationSession {
 				);
 	}
 
-	#enqueueMutation(operation: () => void | Promise<void>): Promise<void> {
-		const next = this.#mutationQueue.then(async () => {
-			if (this.#destroyed) return;
-			await operation();
-		});
-		this.#mutationQueue = next.catch((error: unknown) => {
-			this.#reportError(error);
-		});
-		return next;
+	/** Observe asynchronous realization failures without ordering later accepted state behind them. */
+	#observePresentationCompletion(completion: Promise<unknown>): void {
+		void completion.catch((error: unknown) => this.#reportError(error));
 	}
 
 	/** Resolve and install one exact destination before any portal frame is acknowledged. */

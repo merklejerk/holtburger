@@ -596,6 +596,92 @@ intentionally be the composition boundary that makes dependencies visible and te
 the relay by responsibility, or retain explicit wiring until a demonstrated cohesive boundary
 emerges.
 
+## Unrelated Work Shares One Ordering Lane
+
+**Smell:** Operations with different correctness dependencies are placed behind one FIFO, promise
+chain, lock, actor mailbox, or single-consumer queue merely because they enter through the same
+component.
+
+**Signals:**
+
+- Fast state acceptance waits for unrelated resource loading, I/O, retries, or presentation work.
+- One slow item delays later operations that neither read its result nor require its effects.
+- A neighboring consumer bypasses the lane and therefore observes newer state than queued peers.
+- Removing the queue raises no concrete ordering requirement between most item kinds.
+
+**Possible failure:** Head-of-line blocking makes independent state diverge temporarily, turns
+variable background latency into visible stalls, and encourages stale work to execute in a burst
+after the blockage clears.
+
+**Questions:** Which exact operation pairs require order? Does the lane protect accepted state,
+effect completion, or both? Can slow completion be generation-guarded while acceptance remains
+immediate?
+
+**Counterexamples:** A transaction log, protocol sequence, rate-limited device, or destructive
+resource lifecycle may genuinely require every operation to share one total order.
+
+**Possible responses:** Separate acceptance from completion, retain ordering only for dependent
+operations, use per-key lanes, or guard asynchronous publication by identity/generation rather than
+serializing unrelated work.
+
+## Acceptance Is Hidden in an Async Prefix
+
+**Smell:** Correctness depends on an asynchronous function mutating accepted state before its first
+`await`, while its type exposes only one eventual completion promise.
+
+**Signals:**
+
+- Callers intentionally invoke a promise-returning operation without awaiting it before dispatching
+  later state.
+- Moving or adding the first `await` would silently change ordering despite preserving the function's
+  type.
+- Comments or tests must explain that invocation means acceptance while resolution means effect
+  completion.
+- Rejection, cancellation, or teardown semantics differ between the synchronous prefix and the
+  asynchronous suffix.
+
+**Possible failure:** An innocent refactor delays acceptance, reintroduces races or starvation, or
+causes callers to mistake completion for the only observable state transition.
+
+**Questions:** Is immediate acceptance a public contract or only an implementation coincidence? Is
+the language's run-to-first-suspension behavior stable for every implementation? Do callers need
+separate acceptance and completion facts?
+
+**Counterexamples:** A small, closed implementation may deliberately use the language guarantee
+when the contract is prominently documented and a focused test fails if suspension moves ahead of
+acceptance.
+
+**Possible responses:** Return a completion handle from a synchronous acceptance method, split
+acceptance and realization into named operations, model both phases in the return type, or retain the
+compact API with explicit contract documentation and ordering tests.
+
+## Cleanup Exists Only on the Success Path
+
+**Smell:** A test, command, request handler, or scoped operation releases resources only after all
+ordinary work and assertions succeed.
+
+**Signals:**
+
+- Teardown appears at the end of a test instead of in `finally` or an owner-managed fixture.
+- A deferred promise, lock, temporary file, renderer, worker, or connection remains live when an
+  intermediate assertion throws.
+- One test failure causes later hangs, port conflicts, open-handle warnings, or misleading secondary
+  failures.
+- Cleanup is duplicated across success branches but absent from rejection paths.
+
+**Possible failure:** The original defect is masked by leaked state or a hung suite, and later work
+observes resources or authority left behind by an operation that already failed.
+
+**Questions:** What must be released after partial construction? Can cleanup itself fail? Does the
+owner need to aggregate the primary and cleanup failures without losing either?
+
+**Counterexamples:** Pure value tests and operations whose complete state is transactionally owned by
+an external runner may have nothing local to release.
+
+**Possible responses:** Establish cleanup immediately after acquisition with `try`/`finally`, use a
+fixture that owns disposal, make teardown idempotent, and aggregate cleanup failures where dropping
+the primary failure would be misleading.
+
 ## Adding Observations
 
 An observation belongs here when it has:

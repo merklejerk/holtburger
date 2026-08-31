@@ -1434,7 +1434,12 @@ export class GamePresentationRuntime {
 		);
 	}
 
-	/** Replace the complete accepted producer snapshot and converge its eligible presentations. */
+	/**
+	 * Replace accepted authority synchronously, then converge its eligible presentations.
+	 *
+	 * Callers may rely on every record entering desired authority before this call returns its
+	 * realization promise. The promise names visual completion, not authority acceptance.
+	 */
 	async replaceDynamicEntitySnapshot(
 		entities: readonly DynamicEntityView[],
 	): Promise<DynamicEntityRealizationResults> {
@@ -1469,7 +1474,11 @@ export class GamePresentationRuntime {
 		return this.reevaluateDynamicEntityEligibility();
 	}
 
-	/** Apply one mirror-accepted entity level without revisiting unrelated desired entities. */
+	/**
+	 * Accept one mirror-approved level synchronously, then realize its visual asynchronously.
+	 *
+	 * Callers may dispatch later accepted ticks after invocation without awaiting visual completion.
+	 */
 	async upsertDynamicEntity(
 		entity: DynamicEntityView,
 	): Promise<DynamicEntityRealizationDisposition> {

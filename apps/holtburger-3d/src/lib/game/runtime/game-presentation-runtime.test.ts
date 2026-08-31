@@ -1056,44 +1056,93 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 	});
 
 	it("cannot publish a visual load that completes after exact removal", async () => {
-		let resolveVisual!: (value: DecodedStaticPresentation) => void;
+		const visualLoad = controlledPromise<DecodedStaticPresentation>();
 		const source: SetupVisualSource = {
-			load: () =>
-				new Promise((resolve) => {
-					resolveVisual = resolve;
-				}),
+			load: () => visualLoad.promise,
 		};
 		const runtime = await buildSpawnRuntime(source);
-		const stale = runtime.replaceDynamicEntitySnapshot([spawnedEntity(9, 1)]);
-		await runtime.replaceDynamicEntitySnapshot([]);
-		resolveVisual(spawnedVisual());
-		await stale;
+		try {
+			const stale = runtime.replaceDynamicEntitySnapshot([spawnedEntity(9, 1)]);
+			await runtime.replaceDynamicEntitySnapshot([]);
+			visualLoad.resolve(spawnedVisual());
+			await stale;
 
-		expect(
-			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
-		).toBe(0);
-		await runtime.destroy();
+			expect(
+				runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
+			).toBe(0);
+		} finally {
+			visualLoad.resolve(spawnedVisual());
+			await runtime.destroy();
+		}
+	});
+
+	it("installs the latest accepted placement when a tick arrives during visual loading", async () => {
+		const visualLoad = controlledPromise<DecodedStaticPresentation>();
+		const runtime = await buildSpawnRuntime({
+			load: () => visualLoad.promise,
+		});
+		try {
+			const initial = spawnedEntity(9, 1);
+			const realization = runtime.upsertDynamicEntity(initial);
+			const moved = spawnedEntity(9, 1, { noDraw: true });
+			if (moved.placement.kind !== "world")
+				throw new Error("Moved fixture lost world placement.");
+			moved.placement.pose.coords.x = 19;
+			const endpoint = {
+				pose: moved.placement.pose,
+				spatialMembership: moved.placement.spatialMembership,
+			};
+
+			runtime.applyDynamicEntityTick(
+				{
+					hostTime: { seconds: 2 },
+					durationMs: 30,
+					advances: [
+						{
+							entity: moved,
+							kind: "integrated",
+							path: {
+								initial: endpoint,
+								legs: [{ endFraction: 1, end: endpoint }],
+							},
+						},
+					],
+					updates: [],
+				},
+				1_000,
+			);
+			visualLoad.resolve(spawnedVisual());
+			await realization;
+
+			expect(runtime.spawnedEntityPlacement(9)?.localTransform.m41).toBe(19);
+			expect(
+				[...runtime.listPresentedSpawnedEntities()][0]?.view.physics.noDraw,
+			).toBe(true);
+		} finally {
+			visualLoad.resolve(spawnedVisual());
+			await runtime.destroy();
+		}
 	});
 
 	it("cannot publish a superseded generation when one shared visual load completes", async () => {
-		let resolveVisual!: (value: DecodedStaticPresentation) => void;
+		const visualLoad = controlledPromise<DecodedStaticPresentation>();
 		const runtime = await buildSpawnRuntime({
-			load: () =>
-				new Promise((resolve) => {
-					resolveVisual = resolve;
-				}),
+			load: () => visualLoad.promise,
 		});
+		try {
+			const stale = runtime.upsertDynamicEntity(spawnedEntity(9, 1));
+			const current = runtime.upsertDynamicEntity(spawnedEntity(9, 2));
+			visualLoad.resolve(spawnedVisual());
+			await Promise.all([stale, current]);
 
-		const stale = runtime.upsertDynamicEntity(spawnedEntity(9, 1));
-		const current = runtime.upsertDynamicEntity(spawnedEntity(9, 2));
-		resolveVisual(spawnedVisual());
-		await Promise.all([stale, current]);
-
-		runtime.removeDynamicEntity(9, 1);
-		expect(runtime.dynamicEntityOrigin(9)).not.toBeNull();
-		runtime.removeDynamicEntity(9, 2);
-		expect(runtime.dynamicEntityOrigin(9)).toBeNull();
-		await runtime.destroy();
+			runtime.removeDynamicEntity(9, 1);
+			expect(runtime.dynamicEntityOrigin(9)).not.toBeNull();
+			runtime.removeDynamicEntity(9, 2);
+			expect(runtime.dynamicEntityOrigin(9)).toBeNull();
+		} finally {
+			visualLoad.resolve(spawnedVisual());
+			await runtime.destroy();
+		}
 	});
 
 	it("defers child-first attachment and tears children down before their parent", async () => {
@@ -1633,6 +1682,19 @@ function spawnedEntity(
 			radar: { blipColor: "Default", behavior: null, obviousRange: null },
 		},
 	};
+}
+
+function controlledPromise<T>(): {
+	readonly promise: Promise<T>;
+	readonly resolve: (value: T) => void;
+} {
+	let resolve: (value: T) => void = () => {
+		throw new Error("Controlled promise was not initialized.");
+	};
+	const promise = new Promise<T>((accept) => {
+		resolve = accept;
+	});
+	return { promise, resolve: (value) => resolve(value) };
 }
 
 function attachedEntity(

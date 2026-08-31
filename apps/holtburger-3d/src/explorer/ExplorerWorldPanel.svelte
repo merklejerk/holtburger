@@ -31,6 +31,7 @@
 	import type { ExplorerCameraMode } from "../lib/game/motion/host-physical-fly-path";
 	import type { EntityShadowSettings } from "../lib/game/renderer/entity-shadow-policy";
 	import ExplorerShadowControls from "./ExplorerShadowControls.svelte";
+	import ToggleField from "../app/ToggleField.svelte";
 
 	interface Props {
 		/** Whether Explorer has a runtime available to accept world operations. */
@@ -214,20 +215,10 @@
 		});
 	}
 
-	function handleDistanceFogChange(event: Event): void {
-		updateDistanceFog((event.currentTarget as HTMLInputElement).checked);
-	}
-
-	function handleRetailHiddenGeometryChange(event: Event): void {
-		updateShowRetailHiddenGeometry(
-			(event.currentTarget as HTMLInputElement).checked,
-		);
-	}
-
-	function handleAmbientOcclusionChange(event: Event): void {
+	function updateAmbientOcclusionEnabled(enabled: boolean): void {
 		updateAmbientOcclusionSettings({
 			...ambientOcclusion,
-			enabled: (event.currentTarget as HTMLInputElement).checked,
+			enabled,
 		});
 	}
 
@@ -240,28 +231,6 @@
 			[field]: Number((event.currentTarget as HTMLInputElement).value),
 		});
 		updateAmbientOcclusionSettings({ ...ambientOcclusion, parameters });
-	}
-
-	function handleViewerLightChange(event: Event): void {
-		updateViewerLight((event.currentTarget as HTMLInputElement).checked);
-	}
-
-	function handleWeatherChange(event: Event): void {
-		updateWeather((event.currentTarget as HTMLInputElement).checked);
-	}
-
-	function handleClockFollowingChange(event: Event): void {
-		updateClockFollowing((event.currentTarget as HTMLInputElement).checked);
-	}
-
-	function handleAudioFollowsCameraChange(event: Event): void {
-		updateAudioFollowsCamera((event.currentTarget as HTMLInputElement).checked);
-	}
-
-	function handleInterestFollowsCameraChange(event: Event): void {
-		updateInterestFollowsCamera(
-			(event.currentTarget as HTMLInputElement).checked,
-		);
 	}
 
 	function handleCameraModeChange(event: Event): void {
@@ -299,15 +268,13 @@
 				{parsedInterest?.label ??
 					"Enter four or eight hexadecimal digits, or N/S E/W coordinates."}
 			</p>
-			<label class="explorer-toggle">
-				<input
-					checked={interestFollowsCamera}
-					type="checkbox"
-					onchange={handleInterestFollowsCameraChange}
-				/>
-				<span>Interest follows camera</span>
-				<strong>{interestFollowsCamera ? "On" : "Off"}</strong>
-			</label>
+			<ToggleField
+				checked={interestFollowsCamera}
+				label="Interest follows camera"
+				checkedLabel="On"
+				uncheckedLabel="Off"
+				onCheckedChange={updateInterestFollowsCamera}
+			/>
 			<div
 				class="explorer-residency-controls"
 				aria-label="Scene interest level of detail"
@@ -501,51 +468,41 @@
 					{/each}
 				</select>
 			</label>
-			<label class="explorer-toggle">
-				<input
-					checked={distanceFogEnabled}
-					type="checkbox"
-					onchange={handleDistanceFogChange}
-				/>
-				<span>Distance fog</span>
-				<strong>{distanceFogEnabled ? "On" : "Off"}</strong>
-			</label>
-			<label class="explorer-toggle">
-				<input
-					checked={viewerLightEnabled}
-					type="checkbox"
-					onchange={handleViewerLightChange}
-				/>
-				<span>Viewer light</span>
-				<strong>{viewerLightEnabled ? "On" : "Off"}</strong>
-			</label>
-			<label class="explorer-toggle">
-				<input
-					checked={weatherEnabled}
-					type="checkbox"
-					onchange={handleWeatherChange}
-				/>
-				<span>Weather</span>
-				<strong>{weatherEnabled ? "On" : "Off"}</strong>
-			</label>
-			<label class="explorer-toggle">
-				<input
-					checked={clockFollowing}
-					type="checkbox"
-					onchange={handleClockFollowingChange}
-				/>
-				<span>Follow clock</span>
-				<strong>{clockFollowing ? "On" : "Off"}</strong>
-			</label>
-			<label class="explorer-toggle">
-				<input
-					checked={audioFollowsCamera}
-					type="checkbox"
-					onchange={handleAudioFollowsCameraChange}
-				/>
-				<span>Audio follows camera</span>
-				<strong>{audioFollowsCamera ? "On" : "Off"}</strong>
-			</label>
+			<ToggleField
+				checked={distanceFogEnabled}
+				label="Distance fog"
+				checkedLabel="On"
+				uncheckedLabel="Off"
+				onCheckedChange={updateDistanceFog}
+			/>
+			<ToggleField
+				checked={viewerLightEnabled}
+				label="Viewer light"
+				checkedLabel="On"
+				uncheckedLabel="Off"
+				onCheckedChange={updateViewerLight}
+			/>
+			<ToggleField
+				checked={weatherEnabled}
+				label="Weather"
+				checkedLabel="On"
+				uncheckedLabel="Off"
+				onCheckedChange={updateWeather}
+			/>
+			<ToggleField
+				checked={clockFollowing}
+				label="Follow clock"
+				checkedLabel="On"
+				uncheckedLabel="Off"
+				onCheckedChange={updateClockFollowing}
+			/>
+			<ToggleField
+				checked={audioFollowsCamera}
+				label="Audio follows camera"
+				checkedLabel="On"
+				uncheckedLabel="Off"
+				onCheckedChange={updateAudioFollowsCamera}
+			/>
 			<label class="explorer-environment-field">
 				<span>Effect volume</span>
 				<input
@@ -574,20 +531,14 @@
 						)}
 				/>
 			</label>
-			<label class="explorer-toggle">
-				<input
-					checked={envCellRenderMode === "portal"}
-					type="checkbox"
-					onchange={(event) =>
-						updateEnvCellRenderMode(
-							(event.currentTarget as HTMLInputElement).checked
-								? "portal"
-								: "flat",
-						)}
-				/>
-				<span>Portal rendering</span>
-				<strong>{envCellRenderMode === "portal" ? "On" : "Off"}</strong>
-			</label>
+			<ToggleField
+				checked={envCellRenderMode === "portal"}
+				label="Portal rendering"
+				checkedLabel="On"
+				uncheckedLabel="Off"
+				onCheckedChange={(checked) =>
+					updateEnvCellRenderMode(checked ? "portal" : "flat")}
+			/>
 		</fieldset>
 	{/if}
 	<fieldset
@@ -595,24 +546,20 @@
 		disabled={!runtimeReady}
 	>
 		<legend>Render quality</legend>
-		<label class="explorer-toggle">
-			<input
-				checked={showRetailHiddenGeometry}
-				type="checkbox"
-				onchange={handleRetailHiddenGeometryChange}
-			/>
-			<span>Retail-hidden geometry</span>
-			<strong>{showRetailHiddenGeometry ? "Shown" : "Hidden"}</strong>
-		</label>
-		<label class="explorer-toggle">
-			<input
-				checked={ambientOcclusion.enabled}
-				type="checkbox"
-				onchange={handleAmbientOcclusionChange}
-			/>
-			<span>Near-field ambient occlusion</span>
-			<strong>{ambientOcclusion.enabled ? "On" : "Off"}</strong>
-		</label>
+		<ToggleField
+			checked={showRetailHiddenGeometry}
+			label="Retail-hidden geometry"
+			checkedLabel="Shown"
+			uncheckedLabel="Hidden"
+			onCheckedChange={updateShowRetailHiddenGeometry}
+		/>
+		<ToggleField
+			checked={ambientOcclusion.enabled}
+			label="Near-field ambient occlusion"
+			checkedLabel="On"
+			uncheckedLabel="Off"
+			onCheckedChange={updateAmbientOcclusionEnabled}
+		/>
 		<label class="explorer-environment-field">
 			<span
 				>AO strength ({ambientOcclusion.parameters.intensity.toFixed(2)})</span

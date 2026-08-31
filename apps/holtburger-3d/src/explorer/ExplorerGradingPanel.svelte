@@ -19,6 +19,7 @@
 		withCurve,
 		type ColorGradeCurveChannel,
 	} from "./explorer-color-grade";
+	import ToggleField from "../app/ToggleField.svelte";
 
 	interface Props {
 		readonly colorGrade: ColorGradeSettings;
@@ -178,19 +179,14 @@
 </script>
 
 <div class="explorer-grading-panel">
-	<label class="explorer-toggle">
-		<input
-			checked={colorGrade.enabled}
-			type="checkbox"
-			onchange={(event) =>
-				updateColorGradeSettings({
-					...colorGrade,
-					enabled: (event.currentTarget as HTMLInputElement).checked,
-				})}
-		/>
-		<span>Color grade</span>
-		<strong>{colorGrade.enabled ? "On" : "Off"}</strong>
-	</label>
+	<ToggleField
+		checked={colorGrade.enabled}
+		label="Color grade"
+		checkedLabel="On"
+		uncheckedLabel="Off"
+		onCheckedChange={(enabled) =>
+			updateColorGradeSettings({ ...colorGrade, enabled })}
+	/>
 	<p>
 		A deliberate departure from retail, which presents its output ungraded. Off
 		is bit-exact retail-faithful presentation.

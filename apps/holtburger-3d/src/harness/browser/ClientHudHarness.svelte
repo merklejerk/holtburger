@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from "svelte";
 	import type { FrameRates } from "../../app/frame-rate-sampler";
 	import ClientWorldView from "../../client/ClientWorldView.svelte";
 	import type { ClientChatLine } from "../../client/ClientChat.svelte";
@@ -69,12 +70,76 @@
 	}
 
 	function readDiagnostics(): ClientPresentationDiagnostics | null {
-		return null;
+		return {
+			playerGuid: 0x5000_0001,
+			playerResidency: {
+				landblockId: "0xda55ffff",
+				envCellId: null,
+			},
+			cameraResidency: {
+				landblockId: "0xda55ffff",
+				envCellId: null,
+			},
+			cameraStatus: {
+				kind: "active",
+				identity: {
+					cameraGeneration: 3,
+					playerGuid: 0x5000_0001,
+					entityGeneration: 2,
+				},
+				sequence: 184,
+				targetSphereRole: "primary",
+				clearance: { projectionRevision: 12, radius: 0.2 },
+				desiredReach: 4.5,
+				renderedReach: 4.5,
+				placementOutcome: {
+					kind: "reseeded",
+					reason: "initial-placement",
+				},
+				droppedPaths: 0,
+				diagnostics: {
+					collisionProof: { status: "covered" },
+					controlLegs: 0,
+					clearanceSweeps: 1,
+					transitSubsteps: 0,
+					contactPasses: 1,
+				},
+			},
+			renderedFrameCount: 12_846,
+			viewport: {
+				cssWidth: 1280,
+				cssHeight: 720,
+				drawingBufferWidth: 1280,
+				drawingBufferHeight: 720,
+			},
+			draw: {
+				viewCount: 1,
+				visibleSceneEntries: 148,
+				visibleStaticNodes: 912,
+				visibleDynamicEntities: 37,
+				visibleDynamicParts: 104,
+				objectDrawCalls: 286,
+				dynamicDrawCalls: 81,
+				particleBatches: 7,
+			},
+		};
 	}
 
 	function readFrameRates(): FrameRates {
 		return { capped: 60, uncapped: 144 };
 	}
+
+	onMount(() => {
+		const debugButton = document.querySelector<HTMLButtonElement>(
+			'button[aria-label="Debug"]',
+		);
+		if (debugButton === null) {
+			throw new Error(
+				"Client HUD harness could not find the diagnostics control.",
+			);
+		}
+		debugButton.click();
+	});
 </script>
 
 <ClientWorldView

@@ -4,6 +4,7 @@
 		ClientDiagnosticResidency,
 		ClientPresentationDiagnostics,
 	} from "./client-presentation-session";
+	import ToggleField from "../app/ToggleField.svelte";
 
 	interface Props {
 		readonly readDiagnostics: () => ClientPresentationDiagnostics | null;
@@ -41,68 +42,91 @@
 	}
 </script>
 
+{#snippet diagnosticRow(label: string, value: string | number)}
+	<div class="ac-param-row">
+		<dt class="ac-param-key">{label}</dt>
+		<dd><code>{value}</code></dd>
+	</div>
+{/snippet}
+
 <div class="debug-panel-body ac-panel-body">
-	<label>
-		<input
-			checked={showRetailHiddenGeometry}
-			type="checkbox"
-			onchange={(event) =>
-				onShowRetailHiddenGeometryChange(event.currentTarget.checked)}
-		/>
-		Show retail-hidden geometry
-	</label>
+	<ToggleField
+		checked={showRetailHiddenGeometry}
+		label="Retail-hidden geometry"
+		checkedLabel="Shown"
+		uncheckedLabel="Hidden"
+		onCheckedChange={onShowRetailHiddenGeometryChange}
+	/>
 	{#if diagnostics === null}
 		<p>Presentation unavailable.</p>
 	{:else}
-		<dl>
-			<dt>Player</dt>
-			<dd>{formatGuid(diagnostics.playerGuid)}</dd>
-			<dt>Player residency</dt>
-			<dd>{formatResidency(diagnostics.playerResidency)}</dd>
-			<dt>Camera residency</dt>
-			<dd>{formatResidency(diagnostics.cameraResidency)}</dd>
-			<dt>Camera state</dt>
-			<dd>{diagnostics.cameraStatus.kind}</dd>
+		<dl class="ac-param-panel">
+			{@render diagnosticRow("Player", formatGuid(diagnostics.playerGuid))}
+			{@render diagnosticRow(
+				"Player residency",
+				formatResidency(diagnostics.playerResidency),
+			)}
+			{@render diagnosticRow(
+				"Camera residency",
+				formatResidency(diagnostics.cameraResidency),
+			)}
+			{@render diagnosticRow("Camera state", diagnostics.cameraStatus.kind)}
 			{#if diagnostics.cameraStatus.kind === "active"}
-				<dt>Camera reach</dt>
-				<dd>
-					{diagnostics.cameraStatus.renderedReach.toFixed(2)} / {diagnostics.cameraStatus.desiredReach.toFixed(
-						2,
-					)}
-				</dd>
-				<dt>Camera sequence</dt>
-				<dd>{diagnostics.cameraStatus.sequence}</dd>
-				<dt>Dropped paths</dt>
-				<dd>{diagnostics.cameraStatus.droppedPaths}</dd>
+				{@render diagnosticRow(
+					"Camera reach",
+					`${diagnostics.cameraStatus.renderedReach.toFixed(2)} / ${diagnostics.cameraStatus.desiredReach.toFixed(2)}`,
+				)}
+				{@render diagnosticRow(
+					"Camera sequence",
+					diagnostics.cameraStatus.sequence,
+				)}
+				{@render diagnosticRow(
+					"Dropped paths",
+					diagnostics.cameraStatus.droppedPaths,
+				)}
 			{/if}
-			<dt>Rendered frames</dt>
-			<dd>{diagnostics.renderedFrameCount.toLocaleString()}</dd>
-			<dt>Viewport</dt>
-			<dd>
-				{diagnostics.viewport.cssWidth} × {diagnostics.viewport.cssHeight}
-			</dd>
-			<dt>Draw buffer</dt>
-			<dd>
-				{diagnostics.viewport.drawingBufferWidth} × {diagnostics.viewport
-					.drawingBufferHeight}
-			</dd>
+			{@render diagnosticRow(
+				"Rendered frames",
+				diagnostics.renderedFrameCount.toLocaleString(),
+			)}
+			{@render diagnosticRow(
+				"Viewport",
+				`${diagnostics.viewport.cssWidth} × ${diagnostics.viewport.cssHeight}`,
+			)}
+			{@render diagnosticRow(
+				"Draw buffer",
+				`${diagnostics.viewport.drawingBufferWidth} × ${diagnostics.viewport.drawingBufferHeight}`,
+			)}
 			{#if diagnostics.draw !== null}
-				<dt>Views</dt>
-				<dd>{diagnostics.draw.viewCount}</dd>
-				<dt>Scene entries</dt>
-				<dd>{diagnostics.draw.visibleSceneEntries}</dd>
-				<dt>Static nodes</dt>
-				<dd>{diagnostics.draw.visibleStaticNodes}</dd>
-				<dt>Dynamic entities</dt>
-				<dd>{diagnostics.draw.visibleDynamicEntities}</dd>
-				<dt>Dynamic parts</dt>
-				<dd>{diagnostics.draw.visibleDynamicParts}</dd>
-				<dt>Object draws</dt>
-				<dd>{diagnostics.draw.objectDrawCalls}</dd>
-				<dt>Dynamic draws</dt>
-				<dd>{diagnostics.draw.dynamicDrawCalls}</dd>
-				<dt>Particle batches</dt>
-				<dd>{diagnostics.draw.particleBatches}</dd>
+				{@render diagnosticRow("Views", diagnostics.draw.viewCount)}
+				{@render diagnosticRow(
+					"Scene entries",
+					diagnostics.draw.visibleSceneEntries,
+				)}
+				{@render diagnosticRow(
+					"Static nodes",
+					diagnostics.draw.visibleStaticNodes,
+				)}
+				{@render diagnosticRow(
+					"Dynamic entities",
+					diagnostics.draw.visibleDynamicEntities,
+				)}
+				{@render diagnosticRow(
+					"Dynamic parts",
+					diagnostics.draw.visibleDynamicParts,
+				)}
+				{@render diagnosticRow(
+					"Object draws",
+					diagnostics.draw.objectDrawCalls,
+				)}
+				{@render diagnosticRow(
+					"Dynamic draws",
+					diagnostics.draw.dynamicDrawCalls,
+				)}
+				{@render diagnosticRow(
+					"Particle batches",
+					diagnostics.draw.particleBatches,
+				)}
 			{/if}
 		</dl>
 	{/if}
@@ -110,27 +134,19 @@
 
 <style>
 	.debug-panel-body {
+		display: grid;
+		align-content: start;
+		gap: 12px;
 		height: 100%;
 		min-height: 0;
 		overflow: auto;
 	}
 	dl {
-		display: grid;
-		grid-template-columns: max-content minmax(0, 1fr);
-		align-content: start;
-		gap: 4px 12px;
 		margin: 0;
-	}
-	dt {
-		color: var(--ac-ink-muted);
 	}
 	dd {
 		min-width: 0;
 		margin: 0;
-		color: var(--ac-ink);
-		font-family: var(--ac-font-ui);
-		overflow-wrap: anywhere;
-		font-variant-numeric: tabular-nums;
 	}
 	p {
 		margin: 0;

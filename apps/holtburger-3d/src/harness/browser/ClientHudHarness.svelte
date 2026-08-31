@@ -76,6 +76,8 @@
 	{readMapPanelFrame}
 	{readDiagnostics}
 	{readFrameRates}
+	showRetailHiddenGeometry={false}
+	onShowRetailHiddenGeometryChange={() => undefined}
 	playerName="Alice"
 	worldName="ACE Emulator"
 	vitals={[

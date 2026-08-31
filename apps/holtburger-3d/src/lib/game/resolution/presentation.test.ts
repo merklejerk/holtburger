@@ -38,6 +38,7 @@ function part(
 		geometry: { bounds } as ResolvedGeometry,
 		materials: [],
 		partIndex,
+		retailVisibility: "normally-visible",
 	};
 }
 

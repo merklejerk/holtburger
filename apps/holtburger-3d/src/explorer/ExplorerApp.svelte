@@ -440,6 +440,11 @@
 		applyFrameSettings();
 	}
 
+	function updateShowRetailHiddenGeometry(visible: boolean): void {
+		frameSettings = { ...frameSettings, showRetailHiddenGeometry: visible };
+		applyFrameSettings();
+	}
+
 	function updateAmbientOcclusionSettings(
 		ambientOcclusion: AmbientOcclusionSettings,
 	): void {
@@ -2019,6 +2024,8 @@
 			) ?? []}
 			{updateEnvironment}
 			distanceFogEnabled={frameSettings.distanceFogEnabled}
+			showRetailHiddenGeometry={frameSettings.showRetailHiddenGeometry}
+			{updateShowRetailHiddenGeometry}
 			ambientOcclusion={frameSettings.ambientOcclusion}
 			entityShadows={frameSettings.entityShadows}
 			{updateEntityShadowSettings}

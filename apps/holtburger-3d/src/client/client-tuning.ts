@@ -3,6 +3,7 @@ import {
 	type FrontendUiDiagnosticsTuning,
 } from "../lib/frontend-tuning";
 import { SHARED_FRAME_SETTINGS } from "../lib/frontend-frame-settings";
+import type { FrameSettings } from "../lib/game/renderer/renderer";
 
 const CLIENT_DIAGNOSTICS = {
 	/** Smoothing window used by the client frame-rate readout. */
@@ -12,6 +13,12 @@ const CLIENT_DIAGNOSTICS = {
 	/** Largest numeric frame rate rendered by client diagnostics. */
 	maximumDisplayedFramesPerSecond: 1_000,
 } as const satisfies FrontendUiDiagnosticsTuning;
+
+const CLIENT_FRAME_SETTINGS = {
+	...SHARED_FRAME_SETTINGS,
+	/** Match retail presentation until an explicitly enabled client diagnostic asks otherwise. */
+	showRetailHiddenGeometry: false,
+} as const satisfies FrameSettings;
 
 /** Client-owned camera, scene-interest, diagnostics, and initial presentation policy. */
 export const CLIENT_TUNING = {
@@ -48,6 +55,6 @@ export const CLIENT_TUNING = {
 		generatedObjectRadius: 2,
 		terrainRadius: 3,
 	},
-	/** Shared starting display policy; client-specific frame overrides can be composed here. */
-	frameSettings: SHARED_FRAME_SETTINGS,
+	/** Client-owned starting display policy. */
+	frameSettings: CLIENT_FRAME_SETTINGS,
 } as const;

@@ -561,12 +561,17 @@ function prepareObjectVisualTemplate(
 		);
 		return {
 			defaultScale: part.defaultScale,
-			depthDrawUnits: depthPartitions(ranges, geometryKey),
+			depthDrawUnits: depthPartitions(
+				ranges,
+				geometryKey,
+				part.retailVisibility,
+			),
 			drawUnits: materialPartitions(
 				ranges,
 				geometryKey,
 				part.partIndex,
 				templatePartKey,
+				part.retailVisibility,
 			),
 			geometry: geometryKey,
 			key: templatePartKey,
@@ -591,6 +596,7 @@ function materialPartitions(
 	geometry: ObjectGeometryKey,
 	partIndex: number,
 	templatePartKey: PartVisualTemplateKey,
+	retailVisibility: ResolvedObjectPart["retailVisibility"],
 ): readonly RigidPartDrawUnit[] {
 	return ranges.map((range) => ({
 		batchKey: `${templatePartKey}/${range.bindingId}/${range.indexStart}/${range.indexCount}`,
@@ -600,6 +606,7 @@ function materialPartitions(
 		material: range.material,
 		ordering: range.ordering,
 		partIndex,
+		retailVisibility,
 		templatePartKey,
 	}));
 }
@@ -608,6 +615,7 @@ function materialPartitions(
 function depthPartitions(
 	ranges: readonly ObjectMaterialRange[],
 	geometry: ObjectGeometryKey,
+	retailVisibility: ResolvedObjectPart["retailVisibility"],
 ): readonly RigidPartDepthDrawUnit[] {
 	const depth: RigidPartDepthDrawUnit[] = [];
 	for (const range of ranges) {
@@ -628,6 +636,7 @@ function depthPartitions(
 			geometry,
 			indexCount: range.indexCount,
 			indexStart: range.indexStart,
+			retailVisibility,
 		});
 	}
 	return depth;
@@ -654,6 +663,7 @@ function sourceFingerprint(source: DynamicPresentationSource): string {
 			geometry: part.geometry.id,
 			materials: part.materials.map(({ id }) => id),
 			partIndex: part.partIndex,
+			retailVisibility: part.retailVisibility,
 		})),
 		presentation: source.presentation.id,
 		setup: source.setupId,

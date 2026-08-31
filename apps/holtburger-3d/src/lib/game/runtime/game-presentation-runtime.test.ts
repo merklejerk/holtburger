@@ -307,6 +307,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 		expect(frames[0]?.extent).toEqual({ height: 480, width: 640 });
 		expect(frames[0]?.frameSettings).toEqual({
 			layerVisibility: SHARED_FRAME_SETTINGS.layerVisibility,
+			showRetailHiddenGeometry: false,
 			ambientOcclusion: SHARED_FRAME_SETTINGS.ambientOcclusion,
 			colorGrade: SHARED_FRAME_SETTINGS.colorGrade,
 			entityShadows: SHARED_FRAME_SETTINGS.entityShadows,
@@ -332,6 +333,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 		});
 		runtime.setFrameSettings({
 			layerVisibility: SHARED_FRAME_SETTINGS.layerVisibility,
+			showRetailHiddenGeometry: false,
 			ambientOcclusion: {
 				...SHARED_FRAME_SETTINGS.ambientOcclusion,
 				enabled: true,
@@ -357,6 +359,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 		runtime.render(2);
 		expect(frames[1]?.frameSettings).toEqual({
 			layerVisibility: SHARED_FRAME_SETTINGS.layerVisibility,
+			showRetailHiddenGeometry: false,
 			ambientOcclusion: {
 				...SHARED_FRAME_SETTINGS.ambientOcclusion,
 				enabled: true,
@@ -1693,6 +1696,7 @@ function spawnedVisual(): DecodedStaticPresentation {
 						},
 					],
 					partIndex: 0,
+					retailVisibility: "normally-visible",
 				},
 			],
 			placementPoses: new Map([
@@ -1924,6 +1928,7 @@ function promotedStaticArtifact(
 						},
 					],
 					partIndex: 0,
+					retailVisibility: "normally-visible",
 				},
 			],
 			lights: [],

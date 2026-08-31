@@ -35,6 +35,12 @@ describe("decodeOutdoorStaticRecord", () => {
 		]);
 		expect(source.dynamicSources[0]?.behavior.animationId).toBe("0x030005cf");
 		expect(source.dynamicSources[0]?.setupId).toBe("0x02000001");
+		expect(
+			source.staticResidents[0]?.presentation.parts[0]?.retailVisibility,
+		).toBe("normally-visible");
+		expect(
+			source.dynamicSources[0]?.presentation.parts[0]?.retailVisibility,
+		).toBe("degrade-hidden");
 	});
 
 	it("decodes a Level 2 object record with its typed layer identity", () => {
@@ -425,6 +431,7 @@ function buildResponse(
 				sourceAssetId: "gfx-obj/01000001",
 				geometryId: "geometry",
 				materialIds: ["surface/08000001"],
+				retailVisibility: "normally-visible",
 			},
 			{
 				id: "animated",
@@ -438,6 +445,7 @@ function buildResponse(
 						geometryId: "geometry",
 						defaultScale: [1, 1, 1],
 						materialIds: ["surface/08000001"],
+						retailVisibility: "degrade-hidden",
 					},
 				],
 				lights: options.lights ?? [],

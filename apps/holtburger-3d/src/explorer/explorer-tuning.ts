@@ -102,6 +102,8 @@ const EXPLORER_TUNING_OVERRIDES = {
 
 const EXPLORER_FRAME_SETTINGS = {
 	...SHARED_FRAME_SETTINGS,
+	/** Explorer is a content-inspection surface, so authored debug/collision meshes remain visible. */
+	showRetailHiddenGeometry: true,
 	colorGrade: {
 		...SHARED_FRAME_SETTINGS.colorGrade,
 		enabled: EXPLORER_TUNING_OVERRIDES.colorGrade.enabledByDefault,

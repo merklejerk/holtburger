@@ -67,19 +67,38 @@ describe("selectMapBlips", () => {
 			view(),
 			256,
 			256,
+			null,
 		);
 
 		expect(blips).toHaveLength(1);
 		expect(blips[0]?.clipX).toBeCloseTo(1);
 		expect(blips[0]?.clipY).toBeCloseTo(1);
-		expect(blips[0]?.color).toBe("Red");
+		expect(blips[0]?.appearance).toEqual({ kind: "radar", color: "Red" });
+	});
+
+	it("marks the controlled entity with its screen-relative heading", () => {
+		const controlled = entity({ behavior: "ShowNever", hidden: true });
+
+		const blips = selectMapBlips([controlled], view(), 256, 256, 1);
+
+		expect(blips).toHaveLength(1);
+		expect(blips[0]).toMatchObject({
+			appearance: { kind: "controlled" },
+			guid: 1,
+			name: "Drudge",
+		});
+		const appearance = blips[0]?.appearance;
+		expect(appearance?.kind).toBe("controlled");
+		if (appearance?.kind === "controlled") {
+			expect(appearance.headingRadians).toBeCloseTo(0);
+		}
 	});
 
 	it.each(["ShowMovement", "ShowAttacking", "ShowAlways"] as const)(
 		"honours retail's unconditional %s radar behaviour",
 		(behavior) => {
 			expect(
-				selectMapBlips([entity({ behavior })], view(), 256, 256),
+				selectMapBlips([entity({ behavior })], view(), 256, 256, null),
 			).toHaveLength(1);
 		},
 	);
@@ -88,20 +107,20 @@ describe("selectMapBlips", () => {
 		"hides retail radar behaviour %s",
 		(behavior) => {
 			expect(
-				selectMapBlips([entity({ behavior })], view(), 256, 256),
+				selectMapBlips([entity({ behavior })], view(), 256, 256, null),
 			).toHaveLength(0);
 		},
 	);
 
 	it("skips hidden entities", () => {
 		expect(
-			selectMapBlips([entity({ hidden: true })], view(), 256, 256),
+			selectMapBlips([entity({ hidden: true })], view(), 256, 256, null),
 		).toHaveLength(0);
 	});
 
 	it("drops entities outside the visible extent", () => {
 		expect(
-			selectMapBlips([entity({ localX: 500 })], view(), 256, 256),
+			selectMapBlips([entity({ localX: 500 })], view(), 256, 256, null),
 		).toHaveLength(0);
 	});
 });

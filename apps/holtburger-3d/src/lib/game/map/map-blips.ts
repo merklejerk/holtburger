@@ -4,6 +4,7 @@ import type { ScenePlacement } from "../scene";
 import {
 	type MapViewParameters,
 	computeMapWorldToClip,
+	mapHeadingFromSceneTransform,
 	projectMapWorldPoint,
 } from "./map-view";
 
@@ -33,8 +34,20 @@ export interface MapBlip {
 	/** Clip-space position, both axes in [-1, 1] for anything on screen. */
 	readonly clipX: number;
 	readonly clipY: number;
-	/** Effective producer-resolved radar colour. */
-	readonly color: DynamicEntityView["presentation"]["radar"]["blipColor"];
+	/** Marker treatment, including the controlled entity's screen-relative facing. */
+	readonly appearance:
+		| {
+				/** Selects the directional marker reserved for the user-driven entity. */
+				readonly kind: "controlled";
+				/** Facing relative to the map anchor, clockwise from screen-up. */
+				readonly headingRadians: number;
+		  }
+		| {
+				/** Selects the ordinary circular marker styled by radar colour. */
+				readonly kind: "radar";
+				/** Effective producer-resolved radar colour. */
+				readonly color: DynamicEntityView["presentation"]["radar"]["blipColor"];
+		  };
 }
 
 /**
@@ -56,23 +69,28 @@ export function selectMapBlips(
 	view: MapViewParameters,
 	canvasWidth: number,
 	canvasHeight: number,
+	controlledEntityGuid: number | null,
 ): readonly MapBlip[] {
 	const worldToClip = computeMapWorldToClip(view, canvasWidth, canvasHeight);
 	const blips: MapBlip[] = [];
 	for (const { view: entity, placement } of entities) {
+		const controlled = entity.identity.guid === controlledEntityGuid;
 		const behavior = entity.presentation.radar.behavior;
+		// The controlled marker is navigation chrome rather than an object's radar appearance. It
+		// remains available even when the controlled entity is hidden or authored as ShowNever.
 		// RETAIL QUIRK: despite their conditional names, ShowMovement and ShowAttacking are always
 		// accepted alongside ShowAlways; InqShowableOnRadar performs no state test
 		// (acclient.c:417954-417970). Gating either would hide authored objects retail shows. The
 		// 43,913-template catalog census found every defined value 0..4 in shipped content.
 		if (
+			!controlled &&
 			behavior !== "ShowMovement" &&
 			behavior !== "ShowAttacking" &&
 			behavior !== "ShowAlways"
 		) {
 			continue;
 		}
-		if (entity.physics.hidden) continue;
+		if (!controlled && entity.physics.hidden) continue;
 		const origin = createLandblockWorldOrigin(placement.landblockId);
 		const [clipX, clipY] = projectMapWorldPoint(
 			worldToClip,
@@ -82,9 +100,16 @@ export function selectMapBlips(
 		);
 		if (Math.abs(clipX) > 1 || Math.abs(clipY) > 1) continue;
 		blips.push({
+			appearance: controlled
+				? {
+						kind: "controlled",
+						headingRadians:
+							mapHeadingFromSceneTransform(placement.localTransform) -
+							view.anchor.headingRadians,
+					}
+				: { kind: "radar", color: entity.presentation.radar.blipColor },
 			clipX,
 			clipY,
-			color: entity.presentation.radar.blipColor,
 			guid: entity.identity.guid,
 			name: entity.display.name,
 		});

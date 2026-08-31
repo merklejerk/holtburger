@@ -622,6 +622,61 @@ intentionally be the composition boundary that makes dependencies visible and te
 the relay by responsibility, or retain explicit wiring until a demonstrated cohesive boundary
 emerges.
 
+## Coordinate Spaces Are Compared Implicitly
+
+**Smell:** Geometry from different coordinate systems, units, scales, or origins is compared as if
+the values shared one basis.
+
+**Signals:**
+
+- Pointer coordinates in CSS pixels are tested against a canvas backing store, framebuffer, image,
+  or device-pixel grid without an explicit conversion.
+- Local, world, viewport, screen, or transformed coordinates share bare numeric types and names.
+- Correctness depends on two independently sized surfaces currently having nearly equal dimensions.
+- Scaling, zoom, device-pixel ratio, scrolling, or a layout transform changes only one side of a
+  geometry calculation.
+
+**Possible failure:** Hit testing, selection, overlays, and spatial effects drift or fail only under
+particular display scales, layouts, transforms, or devices.
+
+**Questions:** What space owns each value? Where are origin, axis direction, scale, and units
+converted? Does the conversion use one coherent geometry snapshot?
+
+**Counterexamples:** Direct comparison is correct when an owning boundary proves both values use the
+same coordinate contract and preserves that invariant across resizing and transformation.
+
+**Possible responses:** Name coordinate spaces in types and fields, convert once at the interaction
+boundary, derive scale from the two current extents, or expose a single projection/unprojection
+operation owned by the renderer.
+
+## Derived Interaction State Outlives Its Inputs
+
+**Smell:** Hover, focus, selection, snapping, or another derived interaction result updates only on
+input events even though the underlying targets can change independently.
+
+**Signals:**
+
+- A tooltip is recomputed on pointer movement but not when its target moves, disappears, or changes
+  identity.
+- Cached hit targets are replaced without reconciling the active hover or selection.
+- Animated, streamed, virtualized, or presentation-rate content can change beneath a stationary
+  pointer.
+- Interaction state stores a derived label or object without the source identity or invalidation
+  path needed to confirm it remains valid.
+
+**Possible failure:** The interface presents stale identity or actions for an object no longer under
+the pointer, and the error persists until unrelated user input forces recomputation.
+
+**Questions:** Which inputs determine the interaction result? Which of them can change without a new
+input event? Who owns invalidation when targets are replaced or removed?
+
+**Counterexamples:** Event-only recomputation is sufficient when targets and geometry are immutable
+for the entire interaction or when stale output is deliberately frozen by capture semantics.
+
+**Possible responses:** Reconcile derived interaction state whenever either input side changes,
+retain the pointer query and rerun it against new targets, or represent explicit capture whose
+lifetime ends on a named event.
+
 ## Adding Observations
 
 An observation belongs here when it has:

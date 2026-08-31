@@ -95,7 +95,10 @@ import type {
 import type { MapPanelFrame } from "../app/map-panel-frame";
 import type { MapEntity } from "../lib/game/map/map-blips";
 import type { MapTerrainSource } from "../lib/game/map/map-renderer";
-import { mapHeadingFromSceneTransform } from "../lib/game/map/map-view";
+import {
+	type MapAnchor,
+	mapHeadingFromSceneTransform,
+} from "../lib/game/map/map-view";
 import type { ScenePlacement } from "../lib/game/scene";
 
 /** Presentation state exposed to the thin client shell. */
@@ -331,7 +334,6 @@ export class ClientPresentationSession {
 				? null
 				: owner.runtime.spawnedEntityPlacement(playerGuid);
 		return {
-			anchor: placement === null ? null : mapAnchorFromPlacement(placement),
 			cameraFovRadians: (CLIENT_TUNING.camera.fov * Math.PI) / 180,
 			cameraHeadingRadians: this.camera.desiredLook().yawRadians,
 			presentedEntities: () =>
@@ -339,6 +341,14 @@ export class ClientPresentationSession {
 			presentedEntityRevision:
 				owner?.runtime.dynamicEntityPlacementRevision ?? 0,
 			source: owner?.runtime ?? null,
+			subject:
+				placement === null || playerGuid === null
+					? null
+					: {
+							anchor: mapAnchorFromPlacement(placement),
+							guid: playerGuid,
+							kind: "controlled-entity",
+						},
 		};
 	}
 
@@ -1497,9 +1507,7 @@ function preciseJumpMarkerColor(
 }
 
 /** Convert the player's live scene placement into the world-space subject used by the radar. */
-function mapAnchorFromPlacement(
-	placement: ScenePlacement,
-): NonNullable<MapPanelFrame["anchor"]> {
+function mapAnchorFromPlacement(placement: ScenePlacement): MapAnchor {
 	const origin = createLandblockWorldOrigin(placement.landblockId);
 	return {
 		headingRadians: mapHeadingFromSceneTransform(placement.localTransform),

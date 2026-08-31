@@ -288,13 +288,25 @@
 	/** Pull the scene's current map picture without publishing presentation-rate Svelte state. */
 	function readMapPanelFrame(): MapPanelFrame {
 		const runtime = runtimeReady ? (gameRuntime ?? null) : null;
+		const controlledGuid = explorerPossession?.guid ?? null;
+		const controlledAnchor = anchorFromPossession();
+		const freeCameraAnchor = anchorFromCamera();
 		return {
-			anchor: anchorFromPossession() ?? anchorFromCamera(),
 			cameraFovRadians: (EXPLORER_TUNING.camera.framing.fov * Math.PI) / 180,
 			cameraHeadingRadians: cameraYawRadians,
 			presentedEntities: readPresentedMapEntities,
 			presentedEntityRevision: runtime?.dynamicEntityPlacementRevision ?? 0,
 			source: runtime,
+			subject:
+				controlledGuid !== null && controlledAnchor !== null
+					? {
+							anchor: controlledAnchor,
+							guid: controlledGuid,
+							kind: "controlled-entity",
+						}
+					: freeCameraAnchor === null
+						? null
+						: { anchor: freeCameraAnchor, kind: "free-camera" },
 		};
 	}
 

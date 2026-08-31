@@ -13,6 +13,23 @@ interface MapPanelViewDiameters {
 	readonly outdoor: number;
 }
 
+/** The map's centre and whether it represents a user-controlled entity or a free camera. */
+export type MapPanelSubject =
+	| {
+			/** Distinguishes a player or possessed explorer entity from a free camera. */
+			readonly kind: "controlled-entity";
+			/** Entity whose live placement produced the anchor. */
+			readonly guid: number;
+			/** Live map centre and facing derived from the controlled entity. */
+			readonly anchor: MapAnchor;
+	  }
+	| {
+			/** Distinguishes explorer navigation without a possessed entity. */
+			readonly kind: "free-camera";
+			/** Live map centre and facing derived from the free camera. */
+			readonly anchor: MapAnchor;
+	  };
+
 /** Panel geometry and view choices, owned by whichever shell mounts the map. */
 export interface MapPanelState {
 	readonly left: number;
@@ -25,7 +42,8 @@ export interface MapPanelState {
 export interface MapPanelFrame {
 	/** Null until the runtime is ready; the map remains blank meanwhile. */
 	readonly source: MapTerrainSource | null;
-	readonly anchor: MapAnchor | null;
+	/** Null until there is a coherent position and ownership for the map's centre. */
+	readonly subject: MapPanelSubject | null;
 	/** Monotonic owner-produced fact covering live entity placement changes. */
 	readonly presentedEntityRevision: number;
 	readonly presentedEntities: () => Iterable<MapEntity>;
@@ -51,12 +69,12 @@ export function captureMapPanelGpuDrawState(
 	panel: MapPanelState,
 ): MapPanelGpuDrawState {
 	return {
-		anchor: frame.anchor,
+		anchor: frame.subject?.anchor ?? null,
 		geometryRevision: frame.source?.mapGeometry.revision ?? -1,
 		panelSize: panel.size,
 		source: frame.source,
 		terrainRevision: frame.source?.terrainInstallationRevision ?? -1,
-		viewDiameter: mapPanelViewDiameter(panel, frame.anchor),
+		viewDiameter: mapPanelViewDiameter(panel, frame.subject?.anchor ?? null),
 	};
 }
 

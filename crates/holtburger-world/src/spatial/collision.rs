@@ -1,8 +1,12 @@
 //! Resident static collision geometry and explicit query families.
 
+mod entity_surface_ray;
 mod static_sphere_sweep;
+mod static_surface_ray;
 
+pub use entity_surface_ray::{CollisionSurfaceRayHit, EntitySurfaceRayHit};
 pub use static_sphere_sweep::{StaticSphereSweepHit, StaticSphereSweepRequest};
+pub use static_surface_ray::{StaticSurfaceRayHit, StaticSurfaceRayRequest};
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -43,6 +47,12 @@ pub enum CollisionQueryError {
     /// A bounded probe distance is non-finite or negative.
     #[error("collision query distance must be finite and non-negative")]
     InvalidDistance,
+    /// A ray direction contains NaN or infinity.
+    #[error("collision query direction must be finite")]
+    NonFiniteDirection,
+    /// A ray direction is not unit length.
+    #[error("collision query direction must be normalized")]
+    UnnormalizedDirection,
     /// The collision backend does not support one authored static shape pairing.
     #[error("static sphere sweep reached an unsupported collision shape pairing")]
     UnsupportedSphereSweep,
@@ -1395,6 +1405,14 @@ impl CollisionScene {
         &self,
         request: CellTransitRequest,
     ) -> Result<UncoveredCollisionQuery<SpatialMembership>, CollisionQueryError> {
+        self.transit_cell_allow_uncovered_internal(request, false)
+    }
+
+    fn transit_cell_allow_uncovered_internal(
+        &self,
+        request: CellTransitRequest,
+        allow_zero_radius: bool,
+    ) -> Result<UncoveredCollisionQuery<SpatialMembership>, CollisionQueryError> {
         if let Some(previous_cell) = request.previous_cell
             && !self.contains_env_cell(previous_cell)
         {
@@ -1408,7 +1426,7 @@ impl CollisionScene {
             end: request.center,
             radius: request.radius,
         };
-        validate_sweep(sweep)?;
+        validate_sweep_radius(sweep, allow_zero_radius)?;
         let touched = touched_landblocks(sweep);
         let value = self.transit_cell_installed(request, &touched);
         let required = required_query_owners(&touched, &value);
@@ -1527,12 +1545,29 @@ impl CollisionScene {
         &self,
         request: PlacedMotionPathRequest<'_>,
     ) -> Result<PlacedMotionPath, CollisionQueryError> {
+        self.transit_motion_path_internal(request, false)
+    }
+
+    /// Point rays share portal traversal with body motion but intentionally have no body radius.
+    fn transit_motion_path_allowing_point_radius(
+        &self,
+        request: PlacedMotionPathRequest<'_>,
+    ) -> Result<PlacedMotionPath, CollisionQueryError> {
+        self.transit_motion_path_internal(request, true)
+    }
+
+    fn transit_motion_path_internal(
+        &self,
+        request: PlacedMotionPathRequest<'_>,
+        allow_zero_radius: bool,
+    ) -> Result<PlacedMotionPath, CollisionQueryError> {
         validate_motion_waypoints(request.waypoints)?;
         let (initial_placement, initial_recovery) = self.infer_placement_from_cell(
             request.anchor,
             request.start,
             request.radius,
             request.previous_cell,
+            allow_zero_radius,
         )?;
         let mut path = PlacedMotionPath {
             anchor: landblock_key(request.anchor),
@@ -1555,7 +1590,7 @@ impl CollisionScene {
                 end: waypoint.center,
                 radius: request.radius,
             };
-            validate_sweep(sweep)?;
+            validate_sweep_radius(sweep, allow_zero_radius)?;
             let touched = touched_landblocks(sweep);
             let transition_limit = self
                 .landblocks
@@ -1593,6 +1628,7 @@ impl CollisionScene {
                     center,
                     request.radius,
                     transition.target_cell,
+                    allow_zero_radius,
                 )?;
                 let end_fraction = geometric_start_fraction
                     + (waypoint.end_fraction - geometric_start_fraction) * transition.fraction;
@@ -1614,6 +1650,7 @@ impl CollisionScene {
                 waypoint.center,
                 request.radius,
                 current_cell,
+                allow_zero_radius,
             )?;
             let (placement, recovery) = match waypoint.placement {
                 MotionWaypointPlacement::Traverse => inferred,
@@ -1632,6 +1669,7 @@ impl CollisionScene {
                         waypoint.center,
                         request.radius,
                         cell,
+                        allow_zero_radius,
                     )?
                 }
             };
@@ -1658,9 +1696,15 @@ impl CollisionScene {
         center: Vector3,
         radius: f32,
         committed_cell: Option<Guid>,
+        allow_zero_radius: bool,
     ) -> Result<(SpatialMembership, Option<PlacementRecovery>), CollisionQueryError> {
-        let (mut placement, recovery) =
-            self.infer_placement_from_cell(anchor, center, radius, committed_cell)?;
+        let (mut placement, recovery) = self.infer_placement_from_cell(
+            anchor,
+            center,
+            radius,
+            committed_cell,
+            allow_zero_radius,
+        )?;
         if recovery.is_some() {
             return Ok((placement, recovery));
         }
@@ -1683,14 +1727,18 @@ impl CollisionScene {
         center: Vector3,
         radius: f32,
         previous_cell: Option<Guid>,
+        allow_zero_radius: bool,
     ) -> Result<(SpatialMembership, Option<PlacementRecovery>), CollisionQueryError> {
         let mut placement = self
-            .transit_cell_allow_uncovered(CellTransitRequest {
-                previous_cell,
-                anchor,
-                center,
-                radius,
-            })?
+            .transit_cell_allow_uncovered_internal(
+                CellTransitRequest {
+                    previous_cell,
+                    anchor,
+                    center,
+                    radius,
+                },
+                allow_zero_radius,
+            )?
             .value;
         let recovery = if let Some(previous_cell) =
             previous_cell.filter(|_| placement.center_domain_is_unresolved())
@@ -1701,18 +1749,22 @@ impl CollisionScene {
                 radius,
                 previous_cell,
                 placement.committed_cell,
+                allow_zero_radius,
             )?)
         } else {
             None
         };
         if let Some(PlacementRecovery::Recovered { recovered_cell, .. }) = &recovery {
             placement = self
-                .transit_cell_allow_uncovered(CellTransitRequest {
-                    previous_cell: *recovered_cell,
-                    anchor,
-                    center,
-                    radius,
-                })?
+                .transit_cell_allow_uncovered_internal(
+                    CellTransitRequest {
+                        previous_cell: *recovered_cell,
+                        anchor,
+                        center,
+                        radius,
+                    },
+                    allow_zero_radius,
+                )?
                 .value;
             return Ok((placement, recovery));
         }
@@ -1736,6 +1788,7 @@ impl CollisionScene {
         radius: f32,
         previous_cell: Guid,
         transit_cell: Option<Guid>,
+        allow_zero_radius: bool,
     ) -> Result<PlacementRecovery, CollisionQueryError> {
         let sweep = SphereSweep {
             anchor,
@@ -1743,7 +1796,7 @@ impl CollisionScene {
             end: center,
             radius,
         };
-        validate_sweep(sweep)?;
+        validate_sweep_radius(sweep, allow_zero_radius)?;
         let touched = touched_landblocks(sweep);
         let mut candidates = touched
             .into_iter()
@@ -2680,6 +2733,17 @@ fn append_motion_leg(path: &mut PlacedMotionPath, end_fraction: f32, mut end: Pl
 }
 
 fn validate_sweep(request: SphereSweep) -> Result<(), CollisionQueryError> {
+    validate_sweep_radius(request, false)
+}
+
+fn validate_point_sweep(request: SphereSweep) -> Result<(), CollisionQueryError> {
+    validate_sweep_radius(request, true)
+}
+
+fn validate_sweep_radius(
+    request: SphereSweep,
+    allow_zero_radius: bool,
+) -> Result<(), CollisionQueryError> {
     if !request.start.x.is_finite()
         || !request.start.y.is_finite()
         || !request.start.z.is_finite()
@@ -2689,7 +2753,10 @@ fn validate_sweep(request: SphereSweep) -> Result<(), CollisionQueryError> {
     {
         return Err(CollisionQueryError::NonFiniteCenter);
     }
-    if !request.radius.is_finite() || request.radius <= 0.0 {
+    if !request.radius.is_finite()
+        || request.radius < 0.0
+        || (!allow_zero_radius && request.radius == 0.0)
+    {
         return Err(CollisionQueryError::InvalidRadius);
     }
     Ok(())

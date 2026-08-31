@@ -440,6 +440,79 @@ lifetime, or when measurement proves the complete retained graph is small and in
 **Possible responses:** Clear retired object-valued fields, retain only payload-free shells, release
 active prefixes on disable, truncate cold pools, or add a measured high-water shrink policy.
 
+## Normalization and Matching Use Different Vocabularies
+
+**Smell:** Input is normalized before branching, but one or more branches still match the source
+representation rather than the normalized representation.
+
+**Signals:**
+
+- A value is lowercased, canonicalized, decoded, or stripped before a switch whose cases include
+  pre-normalization spellings.
+- Tests cover common normalized values but omit case-sensitive modifiers, sentinels, or aliases.
+- A refactor adds normalization without deleting the older comparison vocabulary.
+
+**Possible failure:** Valid input silently falls through to an unknown or default branch, often only
+for one modifier, locale, legacy spelling, or edge-case representation.
+
+**Questions:** What is the exact domain after normalization? Can every branch value occur in that
+domain? Is normalization owned once at the boundary and tested there?
+
+**Counterexamples:** A branch may intentionally compare both raw and normalized values when both are
+retained as distinct, clearly named inputs.
+
+**Possible responses:** Normalize once into a canonical type, match only that vocabulary, and test
+representative values whose source and canonical spellings differ.
+
+## Required Behavior Is Optionalized for Incidental Consumers
+
+**Smell:** A capability required by the production path is declared optional so tests, fixtures, or
+partial adapters do not need to implement it.
+
+**Signals:**
+
+- Production calls use optional chaining for behavior whose absence makes the feature silently fail.
+- Every real implementation provides a method, while only lightweight consumers rely on omission.
+- Interface optionality describes implementation convenience rather than a supported runtime mode.
+
+**Possible failure:** A new production adapter type-checks while omitting required behavior, turning
+an integration error into a silent no-op.
+
+**Questions:** Is absence a supported product state with defined semantics? Which production
+consumer intentionally omits the capability? Was optionality introduced only to reduce fixture
+churn?
+
+**Counterexamples:** Diagnostics, progressive enhancement, and genuinely capability-negotiated
+adapters may intentionally expose optional operations.
+
+**Possible responses:** Make production behavior required, split genuinely narrower interfaces, or
+provide an explicit adapter whose no-op semantics are named and supported.
+
+## Representation Bridging Allocates in a Hot Loop
+
+**Smell:** A high-frequency consumer repeatedly allocates a wrapper or converted representation for
+an unchanged retained value.
+
+**Signals:**
+
+- Frame, audio, simulation, or input loops construct short-lived vectors, arrays, records, or class
+  wrappers solely to satisfy a neighboring API.
+- The source contract already has the required components but the consumer API demands another
+  shape.
+- Allocation repeats per view, pass, entity, or sample even though conversion has no semantic work.
+
+**Possible failure:** Small bridging allocations multiply with cadence and fan-out, adding garbage
+collection pressure while obscuring which representation the boundary actually owns.
+
+**Questions:** Can the consumer accept the existing lossless representation? Is mutation or identity
+part of the destination contract? Does the converted value change at the loop's cadence?
+
+**Counterexamples:** Allocation can be appropriate for ownership isolation, infrequent cold paths,
+or conversions whose result is itself retained.
+
+**Possible responses:** Align adjacent contract shapes, accept structural read-only input, retain a
+scratch value, or compute the conversion once at the producer that owns the change.
+
 ## Adding Observations
 
 An observation belongs here when it has:

@@ -29,7 +29,7 @@ export const CLIENT_TUNING = {
 		distance: {
 			initial: 4.5,
 			minimum: 1.2,
-			maximum: 8,
+			maximum: 50,
 		},
 		orbit: {
 			maximumPitchRadians: 1.35,
@@ -40,6 +40,14 @@ export const CLIENT_TUNING = {
 			delayMs: 350,
 			durationMs: 180,
 		},
+	},
+	preciseJump: {
+		/** Maximum authority evaluation cadence; raw pointer samples are coalesced behind it. */
+		aimEvaluationIntervalMs: 1_000 / 30,
+		/** Finite camera-ray reach; static prediction may reject targets long before this limit. */
+		maximumAimDistance: 120,
+		/** World-space outer radius of the compact surface-aligned target ring. */
+		markerRadius: 0.65,
 	},
 	sceneInterest: {
 		buildingRadius: 2,

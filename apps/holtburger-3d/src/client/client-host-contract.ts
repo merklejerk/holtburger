@@ -3,6 +3,10 @@ import {
 	decodeDynamicEntitySnapshot,
 	type DynamicEntitySnapshot,
 } from "../lib/game/runtime/dynamic-entity-feed";
+import {
+	landblockVector3,
+	type LandblockVector3,
+} from "../lib/assets/ac-frame";
 
 const guid = z.number().int().nonnegative().max(0xffff_ffff);
 const finiteNumber = z.number().finite();
@@ -300,6 +304,149 @@ const cameraTickSchema = z.discriminatedUnion("kind", [
 		.strict(),
 ]);
 const cameraStartedSchema = cameraIdentitySchema.extend({}).strict();
+const vector3TupleSchema = z.tuple([finiteNumber, finiteNumber, finiteNumber]);
+const preciseJumpTargetSchema = z
+	.object({
+		anchor: guid,
+		point: vector3TupleSchema,
+		normal: vector3TupleSchema,
+		committedCell: guid.nullable(),
+	})
+	.strict();
+const preciseJumpDiagnosticsSchema = z
+	.object({
+		generatedCandidates: z.number().int().nonnegative().safe(),
+		evaluatedCandidates: z.number().int().nonnegative().safe(),
+		solverTicks: z.number().int().nonnegative().safe(),
+	})
+	.strict();
+
+const preciseJumpTrajectoryPlacementSchema = z
+	.object({
+		startFraction: finiteNumber.min(0).max(1),
+		endFraction: finiteNumber.min(0).max(1),
+		committedCell: guid.nullable(),
+	})
+	.strict()
+	.refine(
+		(placement) => placement.endFraction > placement.startFraction,
+		"Trajectory placement must span a positive time interval.",
+	);
+const preciseJumpTrajectorySchema = z
+	.object({
+		anchor: guid,
+		origin: vector3TupleSchema,
+		velocity: vector3TupleSchema,
+		acceleration: vector3TupleSchema,
+		durationSeconds: finiteNumber.positive(),
+		placements: z.array(preciseJumpTrajectoryPlacementSchema).nonempty(),
+	})
+	.strict()
+	.superRefine((trajectory, context) => {
+		if (trajectory.placements[0]?.startFraction !== 0) {
+			context.addIssue({
+				code: "custom",
+				message: "Trajectory placements must begin at zero.",
+				path: ["placements", 0, "startFraction"],
+			});
+		}
+		for (let index = 1; index < trajectory.placements.length; index += 1) {
+			if (
+				trajectory.placements[index - 1]?.endFraction !==
+				trajectory.placements[index]?.startFraction
+			) {
+				context.addIssue({
+					code: "custom",
+					message: "Trajectory placements must form a gap-free partition.",
+					path: ["placements", index, "startFraction"],
+				});
+			}
+		}
+		if (trajectory.placements.at(-1)?.endFraction !== 1) {
+			context.addIssue({
+				code: "custom",
+				message: "Trajectory placements must end at one.",
+				path: ["placements", trajectory.placements.length - 1, "endFraction"],
+			});
+		}
+	});
+const preciseJumpEvaluationCommonShape = {
+	evaluationId: z.number().int().positive().safe(),
+	camera: cameraIdentitySchema,
+	sequence: z.number().int().nonnegative().safe(),
+	diagnostics: preciseJumpDiagnosticsSchema,
+} as const;
+const preciseJumpEvaluationSchema = z.discriminatedUnion("status", [
+	z
+		.object({
+			...preciseJumpEvaluationCommonShape,
+			status: z.literal("reachable"),
+			target: preciseJumpTargetSchema,
+			trajectory: preciseJumpTrajectorySchema,
+		})
+		.strict(),
+	...(
+		[
+			"no-surface",
+			"unreachable",
+			"unproven",
+			"invalid-aim",
+			"solver-failed",
+		] as const
+	).map((status) =>
+		z
+			.object({
+				...preciseJumpEvaluationCommonShape,
+				status: z.literal(status),
+				target: preciseJumpTargetSchema.nullable(),
+			})
+			.strict(),
+	),
+]);
+const preciseJumpTransactionRejectionSchema = z.enum([
+	"stale-action",
+	"commit-pending",
+	"no-reachable-evaluation",
+	"evaluation-mismatch",
+	"authority-changed",
+	"fresh-resolution-rejected",
+	"launch-rejected",
+]);
+const preciseJumpTransactionFeedbackSchema = z
+	.object({
+		sequence: z.number().int().nonnegative().safe(),
+		outcome: z.discriminatedUnion("kind", [
+			z.object({ kind: z.literal("cancelled") }).strict(),
+			z.object({ kind: z.literal("committed") }).strict(),
+			z
+				.object({
+					kind: z.literal("rejected"),
+					reason: preciseJumpTransactionRejectionSchema,
+				})
+				.strict(),
+		]),
+	})
+	.strict();
+const preciseJumpAimRequestSchema = z
+	.object({
+		camera: cameraIdentitySchema,
+		sequence: z.number().int().nonnegative().safe(),
+		anchor: guid,
+		start: vector3TupleSchema,
+		direction: vector3TupleSchema,
+		maximumDistance: finiteNumber.nonnegative(),
+		previousCell: guid.nullable(),
+	})
+	.strict();
+const preciseJumpCommitRequestSchema = z
+	.object({
+		sequence: z.number().int().nonnegative().safe(),
+		evaluationId: z.number().int().positive().safe(),
+	})
+	.strict();
+const preciseJumpCancelRequestSchema = z
+	.object({ sequence: z.number().int().nonnegative().safe() })
+	.strict();
 
 export type ClientLifecycle = z.infer<typeof lifecycleSchema>;
 export type ClientCharacter = z.infer<typeof characterSchema>;
@@ -333,6 +480,49 @@ export type ClientCharacterMotionRejection = z.infer<
 export type ClientCameraIdentity = z.infer<typeof cameraIdentitySchema>;
 export type ClientCameraTick = z.infer<typeof cameraTickSchema>;
 export type ClientCameraStartReceipt = z.infer<typeof cameraStartedSchema>;
+type DecodedClientPreciseJumpEvaluation = z.infer<
+	typeof preciseJumpEvaluationSchema
+>;
+type ClientPreciseJumpTarget = Omit<
+	z.infer<typeof preciseJumpTargetSchema>,
+	"point"
+> & {
+	readonly point: LandblockVector3;
+};
+type ClientPreciseJumpTrajectory = Omit<
+	z.infer<typeof preciseJumpTrajectorySchema>,
+	"origin"
+> & {
+	readonly origin: LandblockVector3;
+};
+type ClientPreciseJumpEvaluationCommon = Pick<
+	DecodedClientPreciseJumpEvaluation,
+	"evaluationId" | "camera" | "sequence" | "diagnostics"
+>;
+export type ClientPreciseJumpEvaluation = ClientPreciseJumpEvaluationCommon &
+	(
+		| {
+				readonly status: "reachable";
+				readonly target: ClientPreciseJumpTarget;
+				readonly trajectory: ClientPreciseJumpTrajectory;
+		  }
+		| {
+				readonly status: Exclude<
+					DecodedClientPreciseJumpEvaluation["status"],
+					"reachable"
+				>;
+				readonly target: ClientPreciseJumpTarget | null;
+		  }
+	);
+export type ClientPreciseJumpTransactionFeedback = z.infer<
+	typeof preciseJumpTransactionFeedbackSchema
+>;
+export type ClientPreciseJumpCommitRequest = z.infer<
+	typeof preciseJumpCommitRequestSchema
+>;
+export type ClientPreciseJumpCancelRequest = z.infer<
+	typeof preciseJumpCancelRequestSchema
+>;
 
 /** Complete renderer-authored registration for one authority-owned camera generation. */
 export interface ClientCameraStartRequest {
@@ -359,6 +549,17 @@ export interface ClientCameraIntentRequest extends ClientCameraIdentity {
 export interface ClientCameraClearanceRequest extends ClientCameraIdentity {
 	readonly projectionRevision: number;
 	readonly clearanceRadius: number;
+}
+
+/** One replaceable camera ray; launch and capability facts never enter this request. */
+export interface ClientPreciseJumpAimRequest {
+	readonly camera: ClientCameraIdentity;
+	readonly sequence: number;
+	readonly anchor: number;
+	readonly start: LandblockVector3;
+	readonly direction: readonly [number, number, number];
+	readonly maximumDistance: number;
+	readonly previousCell: number | null;
 }
 
 /** Strictly validates the atomic client replacement level before mutable UI observes it. */
@@ -452,4 +653,55 @@ export function decodeClientCameraStartReceipt(
 /** Strictly validates one client camera tick with explicit projection-proof state. */
 export function decodeClientCameraTick(value: unknown): ClientCameraTick {
 	return cameraTickSchema.parse(value);
+}
+
+export function decodeClientPreciseJumpAimRequest(
+	value: unknown,
+): ClientPreciseJumpAimRequest {
+	const parsed = preciseJumpAimRequestSchema.parse(value);
+	return { ...parsed, start: landblockVector3(parsed.start) };
+}
+
+export function decodeClientPreciseJumpCommitRequest(
+	value: unknown,
+): ClientPreciseJumpCommitRequest {
+	return preciseJumpCommitRequestSchema.parse(value);
+}
+
+export function decodeClientPreciseJumpCancelRequest(
+	value: unknown,
+): ClientPreciseJumpCancelRequest {
+	return preciseJumpCancelRequestSchema.parse(value);
+}
+
+export function decodeClientPreciseJumpEvaluation(
+	value: unknown,
+): ClientPreciseJumpEvaluation {
+	const parsed = preciseJumpEvaluationSchema.parse(value);
+	if (parsed.status === "reachable") {
+		return {
+			...parsed,
+			target: {
+				...parsed.target,
+				point: landblockVector3(parsed.target.point),
+			},
+			trajectory: {
+				...parsed.trajectory,
+				origin: landblockVector3(parsed.trajectory.origin),
+			},
+		};
+	}
+	return {
+		...parsed,
+		target:
+			parsed.target === null
+				? null
+				: { ...parsed.target, point: landblockVector3(parsed.target.point) },
+	};
+}
+
+export function decodeClientPreciseJumpTransactionFeedback(
+	value: unknown,
+): ClientPreciseJumpTransactionFeedback {
+	return preciseJumpTransactionFeedbackSchema.parse(value);
 }

@@ -77,6 +77,18 @@ impl ResolvedJump {
     pub const fn world_velocity(&self) -> Vector3 {
         self.world_velocity
     }
+
+    /// Adapts one core-generated precise candidate into the ordinary launch transaction.
+    pub(super) fn from_precise_candidate(
+        candidate: super::precise_jump::PreciseJumpLaunchCandidate,
+    ) -> Self {
+        Self {
+            extent: candidate.extent(),
+            standing_long_jump: false,
+            local_velocity: candidate.local_velocity(),
+            world_velocity: candidate.world_velocity(),
+        }
+    }
 }
 
 /// Resolves one supported attempt without consulting input devices, skills, resources, or physics.
@@ -95,9 +107,11 @@ pub fn resolve_character_jump(
             CharacterAxisAdjustmentError::InvalidRunRate => CharacterJumpRejection::InvalidRunRate,
         })?
         .local_planar_velocity(kinematics.movement());
-    let height = (kinematics.full_extent_jump_height() * attempt.extent.get())
-        .max(RETAIL_MINIMUM_JUMP_HEIGHT);
-    let local_velocity = Vector3::new(planar.x, planar.y, (height * RETAIL_DOUBLE_GRAVITY).sqrt());
+    let local_velocity = Vector3::new(
+        planar.x,
+        planar.y,
+        character_jump_vertical_velocity(kinematics, attempt.extent),
+    );
     let world_planar = world_planar_velocity(planar, heading)
         .map_err(|_| CharacterJumpRejection::InvalidHeading)?;
     let world_velocity = world_planar + Vector3::new(0.0, 0.0, local_velocity.z);
@@ -108,6 +122,16 @@ pub fn resolve_character_jump(
         local_velocity,
         world_velocity,
     })
+}
+
+/// Resolves the retail extent-to-upward-velocity rule shared by ordinary and precise jumps.
+pub(super) fn character_jump_vertical_velocity(
+    kinematics: CharacterJumpKinematics,
+    extent: JumpExtent,
+) -> f32 {
+    let height =
+        (kinematics.full_extent_jump_height() * extent.get()).max(RETAIL_MINIMUM_JUMP_HEIGHT);
+    (height * RETAIL_DOUBLE_GRAVITY).sqrt()
 }
 
 fn world_planar_velocity(

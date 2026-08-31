@@ -48,11 +48,12 @@ pub(crate) use dead_reckoning::project_pose_by_velocity;
 mod tests;
 pub use collision::{
     CellTransitRequest, CollisionOwnerProof, CollisionQueryError, CollisionQueryPolicy,
-    CollisionScene, CollisionSceneUpdateError, GroundedObstruction, GroundedObstructionRequest,
-    MotionWaypoint, MotionWaypointPlacement, MovementObstructionRequest,
-    MovementRestrictionRequest, PlacedMotionLeg, PlacedMotionPath, PlacedMotionPathRequest,
-    PlacedMotionPoint, PlacementRecovery, PlacementRequest, PlacementRestrictionRequest,
-    SpatialMembership, SphereSweep, StaticContact, StaticSphereSweepHit, StaticSphereSweepRequest,
+    CollisionScene, CollisionSceneUpdateError, CollisionSurfaceRayHit, EntitySurfaceRayHit,
+    GroundedObstruction, GroundedObstructionRequest, MotionWaypoint, MotionWaypointPlacement,
+    MovementObstructionRequest, MovementRestrictionRequest, PlacedMotionLeg, PlacedMotionPath,
+    PlacedMotionPathRequest, PlacedMotionPoint, PlacementRecovery, PlacementRequest,
+    PlacementRestrictionRequest, SpatialMembership, SphereSweep, StaticContact,
+    StaticSphereSweepHit, StaticSphereSweepRequest, StaticSurfaceRayHit, StaticSurfaceRayRequest,
     SupportContact, SupportFeature, SupportRequest, UncoveredCollisionQuery,
 };
 pub use collision_report::{
@@ -65,6 +66,7 @@ pub use dynamic_body::{
     PreparedEntityTargetGeometry,
 };
 pub use dynamic_contact::{MAXIMUM_DYNAMIC_SLICE_DISTANCE, MAXIMUM_DYNAMIC_SLICES};
+pub use dynamic_index::{EntityCollisionProof, EntityCollisionSnapshot};
 pub use free_sphere::{
     FreeSphereBudget, FreeSphereConfig, FreeSphereOutcome, FreeSphereRequest,
     FreeSphereSettleOutcome, FreeSphereState, settle_free_sphere, settle_free_sphere_with_policy,
@@ -78,10 +80,10 @@ pub use grounded::{
 };
 pub(crate) use physical_body::DynamicBodyActivity;
 pub use physical_body::{
-    DynamicBodyPhysicsStateChange, GroundedBodyActuation, GroundedLaunch, PhysicalBodyActuation,
-    PhysicalBodyActuationError, PhysicalBodyDefinition, PhysicalBodyDefinitionError,
-    PhysicalBodyMotion, PhysicalBodyParticipation, PhysicalBodyReconfiguration,
-    PhysicalBodyReconfigurationOutcome, PhysicalBodyResponsePolicy,
+    DynamicBodyContact, DynamicBodyPhysicsStateChange, GroundedBodyActuation, GroundedLaunch,
+    PhysicalBodyActuation, PhysicalBodyActuationError, PhysicalBodyDefinition,
+    PhysicalBodyDefinitionError, PhysicalBodyMotion, PhysicalBodyParticipation,
+    PhysicalBodyReconfiguration, PhysicalBodyReconfigurationOutcome, PhysicalBodyResponsePolicy,
     PhysicalBodyResponsePolicyError, PhysicalBodyResponseState, PhysicalBodySceneResidency,
     PhysicalBodyState, PhysicalBodyTickResult, PhysicalBodyTickStatus, PhysicalCollisionExclusions,
     PhysicalCollisionFilter, PhysicalElasticity, PhysicalFriction, PhysicalRestitution,

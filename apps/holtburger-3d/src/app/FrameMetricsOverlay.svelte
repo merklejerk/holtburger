@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, untrack } from "svelte";
+	import { onMount } from "svelte";
 	import type { FrameRates } from "./frame-rate-sampler";
 	import type { FrontendUiDiagnosticsTuning } from "../lib/frontend-tuning";
 
@@ -13,8 +13,8 @@
 	}
 
 	interface Props {
-		/** Latest measured runtime frame timings. */
-		metrics: FrameMetrics | null;
+		/** Cold read of the imperative frame-timing accumulator. */
+		readonly readMetrics: () => FrameMetrics | null;
 		/** Cold read of frame cadence and estimated capacity from the Explorer render loop. */
 		readonly readFrameRates: () => FrameRates | null;
 		/** Mode-owned display cadence and formatting policy. */
@@ -24,7 +24,7 @@
 	}
 
 	let {
-		metrics,
+		readMetrics,
 		readFrameRates,
 		diagnosticsTuning,
 		emaWindowMs = diagnosticsTuning.frameMetricsEmaWindowMs,
@@ -35,42 +35,36 @@
 
 	const smooth = (current: number, next: number, alpha: number): number =>
 		current + (next - current) * alpha;
-	$effect(() => {
-		const nextMetrics = metrics;
-
-		untrack(() => {
-			if (nextMetrics === null) {
-				smoothedMetrics = null;
-				lastSampleAt = null;
-				return;
-			}
-
-			const sampledAt = performance.now();
-
-			if (smoothedMetrics === null || lastSampleAt === null) {
-				smoothedMetrics = nextMetrics;
-				lastSampleAt = sampledAt;
-				return;
-			}
-
-			const elapsedMs = Math.max(0, sampledAt - lastSampleAt);
-			const alpha = 1 - Math.exp(-elapsedMs / Math.max(1, emaWindowMs));
-
-			smoothedMetrics = {
-				tickMs: smooth(smoothedMetrics.tickMs, nextMetrics.tickMs, alpha),
-				updateFrameMs: smooth(
-					smoothedMetrics.updateFrameMs,
-					nextMetrics.updateFrameMs,
-					alpha,
-				),
-				frameMs: smooth(smoothedMetrics.frameMs, nextMetrics.frameMs, alpha),
-			};
-			lastSampleAt = sampledAt;
-		});
-	});
 
 	onMount(() => {
 		const sample = (): void => {
+			const nextMetrics = readMetrics();
+			if (nextMetrics === null) {
+				smoothedMetrics = null;
+				lastSampleAt = null;
+			} else {
+				const sampledAt = performance.now();
+				if (smoothedMetrics === null || lastSampleAt === null) {
+					smoothedMetrics = nextMetrics;
+				} else {
+					const elapsedMs = Math.max(0, sampledAt - lastSampleAt);
+					const alpha = 1 - Math.exp(-elapsedMs / Math.max(1, emaWindowMs));
+					smoothedMetrics = {
+						tickMs: smooth(smoothedMetrics.tickMs, nextMetrics.tickMs, alpha),
+						updateFrameMs: smooth(
+							smoothedMetrics.updateFrameMs,
+							nextMetrics.updateFrameMs,
+							alpha,
+						),
+						frameMs: smooth(
+							smoothedMetrics.frameMs,
+							nextMetrics.frameMs,
+							alpha,
+						),
+					};
+				}
+				lastSampleAt = sampledAt;
+			}
 			frameRates = readFrameRates();
 		};
 		sample();

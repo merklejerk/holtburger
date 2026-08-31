@@ -247,6 +247,7 @@ function parseArgs(args) {
 		entityShadowCycle: false,
 		entityShadowBenchmarkPairs: 0,
 		traceTerrainGl: false,
+		worldMarker: false,
 		vitePort: null,
 		colorGrade: null,
 		staticLights: true,
@@ -673,6 +674,9 @@ function parseArgs(args) {
 			case "--trace-terrain-gl":
 				parsed.traceTerrainGl = true;
 				break;
+			case "--world-marker":
+				parsed.worldMarker = true;
+				break;
 			case "--ambient-occlusion":
 				parsed.ambientOcclusion = true;
 				break;
@@ -1082,6 +1086,7 @@ function printHelp() {
 Options:
   --landblock <hex>     Outdoor landblock to render. Default: ${DEFAULT_LANDBLOCK_ID}
   --brief               Print frame and content-summary evidence instead of full diagnostics.
+  --world-marker        Draw the depth-tested world marker and trajectory fixture.
   --map                 Draw the overhead map onto a harness canvas before the screenshot.
   --map-size <px>       Square pixel size of the map canvas (default 512).
   --map-view-diameter <m> World metres across the map's visible circle.
@@ -3304,7 +3309,8 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			? ""
 			: "&audioTrace=1";
 	const terrainGlTrace = options.traceTerrainGl ? "&traceTerrainGl=true" : "";
-	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&cameraHeight=${encodeURIComponent(options.cameraHeight)}&viewportWidth=${encodeURIComponent(options.viewportWidth)}&viewportHeight=${encodeURIComponent(options.viewportHeight)}${dynamicIsolation}${dynamicExclusion}${attachmentExclusion}${fixture}${portalTransitionDemo}${timeOfDay}${dayGroup}${particleSeed}${frameIntervalMs}${captureFrame}${audioTrace}${terrainGlTrace}`;
+	const worldMarker = options.worldMarker ? "&worldMarker=true" : "";
+	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&cameraHeight=${encodeURIComponent(options.cameraHeight)}&viewportWidth=${encodeURIComponent(options.viewportWidth)}&viewportHeight=${encodeURIComponent(options.viewportHeight)}${dynamicIsolation}${dynamicExclusion}${attachmentExclusion}${fixture}${portalTransitionDemo}${timeOfDay}${dayGroup}${particleSeed}${frameIntervalMs}${captureFrame}${audioTrace}${terrainGlTrace}${worldMarker}`;
 	const chrome = startChild(options.chromePath, [
 		"--remote-debugging-port=0",
 		`--user-data-dir=${userDataDirectory}`,

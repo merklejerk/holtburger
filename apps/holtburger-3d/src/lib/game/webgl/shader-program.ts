@@ -18,9 +18,15 @@ export function compileWebGL2Shader(
 	gl.shaderSource(shader, source);
 	gl.compileShader(shader);
 	if (gl.getShaderParameter(shader, gl.COMPILE_STATUS)) return shader;
-	const message = gl.getShaderInfoLog(shader) ?? "unknown error";
+	const driverLog = gl.getShaderInfoLog(shader)?.trim();
+	const message = gl.isContextLost()
+		? "WebGL2 context was lost during shader compilation."
+		: driverLog && driverLog.length > 0
+			? driverLog
+			: `The driver returned no diagnostic (GL error 0x${gl.getError().toString(16)}).`;
 	gl.deleteShader(shader);
-	throw new Error(`Failed to compile WebGL shader: ${message}`);
+	const stage = type === gl.VERTEX_SHADER ? "vertex" : "fragment";
+	throw new Error(`Failed to compile WebGL ${stage} shader: ${message}`);
 }
 
 /** Resolve one required program uniform without allowing a silent null binding. */

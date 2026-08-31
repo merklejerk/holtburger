@@ -221,6 +221,21 @@ impl ClientRuntime {
                         }
                     }
 
+                    let precise_collision = self
+                        .collision_coordinator
+                        .as_ref()
+                        .map(super::collision::ClientCollisionCoordinator::snapshot);
+                    for evaluation in self.precise_jump.poll(
+                        self.world_generation,
+                        self.camera.identity(),
+                        &self.world,
+                        precise_collision.as_deref(),
+                    ) {
+                        let _ = self
+                            .client_view_event_tx
+                            .send(ClientViewEvent::PreciseJumpEvaluation(evaluation));
+                    }
+
                     self.try_complete_world_activation().await?;
 
                     let active_world = self.activation.is_none()
@@ -236,12 +251,29 @@ impl ClientRuntime {
                         .map(super::collision::ClientCollisionCoordinator::snapshot);
                     let mut placement_kind_overrides = std::collections::HashMap::new();
                     if active_world {
-                        let simulation_tick = super::simulation::tick(
+                        let prepared_precise_jump = match self.precise_jump.prepare_queued_commit(
+                            self.world_generation,
+                            self.camera.identity(),
+                            &self.world,
+                            collision_snapshot.as_deref(),
+                            now,
+                        ) {
+                            Some(Ok(prepared)) => Some(prepared),
+                            Some(Err(feedback)) => {
+                                let _ = self.client_view_event_tx.send(
+                                    ClientViewEvent::PreciseJumpTransactionFeedback(feedback),
+                                );
+                                None
+                            }
+                            None => None,
+                        };
+                        let simulation_tick = super::simulation::tick_with_precise_jump(
                             now,
                             dt_duration,
                             &mut self.world,
                             &mut self.movement,
                             collision_snapshot.as_deref(),
+                            prepared_precise_jump,
                         ).inspect_err(|_| {
                             self.set_exit_cause(ClientExitCause::RuntimeFailure);
                         })?;
@@ -292,6 +324,11 @@ impl ClientRuntime {
                             let _ = self
                                 .client_view_event_tx
                                 .send(ClientViewEvent::CharacterMotionFeedback(feedback));
+                        }
+                        if let Some(feedback) = simulation_tick.precise_jump_feedback {
+                            let _ = self.client_view_event_tx.send(
+                                ClientViewEvent::PreciseJumpTransactionFeedback(feedback),
+                            );
                         }
                     }
 

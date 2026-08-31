@@ -4,12 +4,22 @@
 	import type { ClientChatLine } from "../../client/ClientChat.svelte";
 	import type { MapPanelFrame } from "../../app/map-panel-frame";
 	import type { ClientPresentationDiagnostics } from "../../client/client-presentation-session";
+	import type { ClientToast } from "../../client/client-toast-center";
 
 	const jumpFixture = new URLSearchParams(window.location.search).get("jump");
 	const jumpChargeActive = jumpFixture === "charging" || jumpFixture === "full";
 	const jumpExtent = jumpFixture === "full" ? 1 : 0.45;
-	const jumpStatus =
-		jumpFixture === "rejected" ? "You need stable ground to jump." : null;
+	const toastFixture = new URLSearchParams(window.location.search).get("toast");
+	const toast: ClientToast | null =
+		toastFixture === "precise"
+			? { id: 1, message: "Precise jump enabled", tone: "status" }
+			: toastFixture === "rejected"
+				? {
+						id: 1,
+						message: "You need stable ground to jump.",
+						tone: "warning",
+					}
+				: null;
 
 	const messages: readonly ClientChatLine[] = [
 		line(
@@ -69,6 +79,10 @@
 
 <ClientWorldView
 	cameraController={null}
+	preciseJumpActive={false}
+	onPreciseJumpAim={() => undefined}
+	onPreciseJumpActivate={() => undefined}
+	onPreciseJumpEnter={() => undefined}
 	debugEnabled={true}
 	presentationStatus={{ kind: "ready", diagnostic: null }}
 	presentationStatusText={() => "World ready"}
@@ -85,7 +99,7 @@
 	]}
 	{jumpChargeActive}
 	readJumpExtent={() => jumpExtent}
-	{jumpStatus}
+	{toast}
 	chatMessages={messages}
 	onSendChat={async () => {}}
 	onChatFocusChange={() => {}}

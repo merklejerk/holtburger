@@ -7,7 +7,9 @@ use holtburger_core::{
     ClientApplicationSnapshot, ClientCameraStartReceipt, ClientCameraTick,
     ClientCharacterMotionCapabilities, ClientCharacterMotionFeedback, ClientCharacterMotionOutcome,
     ClientCharacterMotionRejection, ClientExitCause, ClientLifecycleState, ClientViewEvent,
-    ClientWorldActivationCause, DynamicEntityEvent,
+    ClientWorldActivationCause, DynamicEntityEvent, PreciseJumpEvaluation,
+    PreciseJumpEvaluationStatus, PreciseJumpTransactionFeedback, PreciseJumpTransactionOutcome,
+    PreciseJumpTransactionRejection,
 };
 use holtburger_world::stats::Vital;
 use serde::Serialize;
@@ -228,6 +230,209 @@ impl From<ClientCharacterMotionRejection> for ClientCharacterMotionRejectionWire
     }
 }
 
+/// Collision target placement in one explicit normalized outdoor anchor frame.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientPreciseJumpTargetWire {
+    pub anchor: Guid,
+    pub point: [f32; 3],
+    pub normal: [f32; 3],
+    pub committed_cell: Option<Guid>,
+}
+
+/// Bounded speculative-work facts used by client diagnostics only.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientPreciseJumpDiagnosticsWire {
+    pub generated_candidates: usize,
+    pub evaluated_candidates: usize,
+    pub solver_ticks: u64,
+}
+
+/// One portal/render-domain interval over the trajectory's normalized time.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientPreciseJumpTrajectoryPlacementWire {
+    /// Inclusive start of this render-domain interval.
+    pub start_fraction: f32,
+    /// Exclusive interval end, except that the final interval includes one.
+    pub end_fraction: f32,
+    /// EnvCell identity, or `None` for the outdoor domain.
+    pub committed_cell: Option<Guid>,
+}
+
+/// Compact read-only analytic curve authorized by the collision predictor.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientPreciseJumpTrajectoryWire {
+    /// Normalized outdoor coordinate frame containing every coefficient.
+    pub anchor: Guid,
+    /// Body-reference launch point in anchor-local AC axes.
+    pub origin: [f32; 3],
+    /// Launch velocity in anchor-local AC axes.
+    pub velocity: [f32; 3],
+    /// Constant acceleration in anchor-local AC axes.
+    pub acceleration: [f32; 3],
+    /// Positive analytic curve duration.
+    pub duration_seconds: f32,
+    /// Gap-free render-domain partition over normalized curve time.
+    pub placements: Vec<ClientPreciseJumpTrajectoryPlacementWire>,
+}
+
+/// Status-discriminated presentation result; only reachable can contain a trajectory.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "status", rename_all = "kebab-case")]
+pub enum ClientPreciseJumpResultWire {
+    NoSurface,
+    Reachable {
+        /// Read-only presentation curve; commit authority never consumes it.
+        trajectory: ClientPreciseJumpTrajectoryWire,
+    },
+    Unreachable,
+    Unproven,
+    InvalidAim,
+    SolverFailed,
+}
+
+/// Narrow renderer-safe evaluation. Curve coefficients are one-way presentation evidence.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientPreciseJumpEvaluationWire {
+    pub evaluation_id: u64,
+    pub camera: holtburger_core::ClientCameraIdentity,
+    pub sequence: u64,
+    pub target: Option<ClientPreciseJumpTargetWire>,
+    #[serde(flatten)]
+    pub result: ClientPreciseJumpResultWire,
+    pub diagnostics: ClientPreciseJumpDiagnosticsWire,
+}
+
+impl From<PreciseJumpEvaluation> for ClientPreciseJumpEvaluationWire {
+    fn from(evaluation: PreciseJumpEvaluation) -> Self {
+        let result = match evaluation.status {
+            PreciseJumpEvaluationStatus::NoSurface => ClientPreciseJumpResultWire::NoSurface,
+            PreciseJumpEvaluationStatus::Reachable(trajectory) => {
+                let origin = trajectory.origin();
+                let velocity = trajectory.velocity();
+                let acceleration = trajectory.acceleration();
+                ClientPreciseJumpResultWire::Reachable {
+                    trajectory: ClientPreciseJumpTrajectoryWire {
+                        anchor: trajectory.anchor(),
+                        origin: [origin.x, origin.y, origin.z],
+                        velocity: [velocity.x, velocity.y, velocity.z],
+                        acceleration: [acceleration.x, acceleration.y, acceleration.z],
+                        duration_seconds: trajectory.duration_seconds(),
+                        placements: trajectory
+                            .placements()
+                            .iter()
+                            .map(|placement| ClientPreciseJumpTrajectoryPlacementWire {
+                                start_fraction: placement.start_fraction(),
+                                end_fraction: placement.end_fraction(),
+                                committed_cell: placement.committed_cell(),
+                            })
+                            .collect(),
+                    },
+                }
+            }
+            PreciseJumpEvaluationStatus::Unreachable(_) => ClientPreciseJumpResultWire::Unreachable,
+            PreciseJumpEvaluationStatus::Unproven(_) => ClientPreciseJumpResultWire::Unproven,
+            PreciseJumpEvaluationStatus::InvalidAim => ClientPreciseJumpResultWire::InvalidAim,
+            PreciseJumpEvaluationStatus::SolverFailed => ClientPreciseJumpResultWire::SolverFailed,
+        };
+        let target = evaluation.target.map(|target| ClientPreciseJumpTargetWire {
+            anchor: target.anchor,
+            point: [target.point.x, target.point.y, target.point.z],
+            normal: [target.normal.x, target.normal.y, target.normal.z],
+            committed_cell: target.committed_cell,
+        });
+        Self {
+            evaluation_id: evaluation.id.get(),
+            camera: evaluation.camera,
+            sequence: evaluation.sequence.0,
+            target,
+            result,
+            diagnostics: ClientPreciseJumpDiagnosticsWire {
+                generated_candidates: evaluation.diagnostics.generated_candidates(),
+                evaluated_candidates: evaluation.diagnostics.evaluated_candidates(),
+                solver_ticks: evaluation.diagnostics.solver_ticks(),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClientPreciseJumpTransactionRejectionWire {
+    StaleAction,
+    CommitPending,
+    NoReachableEvaluation,
+    EvaluationMismatch,
+    AuthorityChanged,
+    FreshResolutionRejected,
+    LaunchRejected,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum ClientPreciseJumpTransactionOutcomeWire {
+    Cancelled,
+    Committed,
+    Rejected {
+        reason: ClientPreciseJumpTransactionRejectionWire,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientPreciseJumpTransactionFeedbackWire {
+    pub sequence: u64,
+    pub outcome: ClientPreciseJumpTransactionOutcomeWire,
+}
+
+impl From<PreciseJumpTransactionFeedback> for ClientPreciseJumpTransactionFeedbackWire {
+    fn from(feedback: PreciseJumpTransactionFeedback) -> Self {
+        let outcome = match feedback.outcome {
+            PreciseJumpTransactionOutcome::Cancelled => {
+                ClientPreciseJumpTransactionOutcomeWire::Cancelled
+            }
+            PreciseJumpTransactionOutcome::Committed => {
+                ClientPreciseJumpTransactionOutcomeWire::Committed
+            }
+            PreciseJumpTransactionOutcome::Rejected(reason) => {
+                ClientPreciseJumpTransactionOutcomeWire::Rejected {
+                    reason: match reason {
+                        PreciseJumpTransactionRejection::StaleAction => {
+                            ClientPreciseJumpTransactionRejectionWire::StaleAction
+                        }
+                        PreciseJumpTransactionRejection::CommitPending => {
+                            ClientPreciseJumpTransactionRejectionWire::CommitPending
+                        }
+                        PreciseJumpTransactionRejection::NoReachableEvaluation => {
+                            ClientPreciseJumpTransactionRejectionWire::NoReachableEvaluation
+                        }
+                        PreciseJumpTransactionRejection::EvaluationMismatch => {
+                            ClientPreciseJumpTransactionRejectionWire::EvaluationMismatch
+                        }
+                        PreciseJumpTransactionRejection::AuthorityChanged => {
+                            ClientPreciseJumpTransactionRejectionWire::AuthorityChanged
+                        }
+                        PreciseJumpTransactionRejection::FreshResolutionRejected => {
+                            ClientPreciseJumpTransactionRejectionWire::FreshResolutionRejected
+                        }
+                        PreciseJumpTransactionRejection::LaunchRejected => {
+                            ClientPreciseJumpTransactionRejectionWire::LaunchRejected
+                        }
+                    },
+                }
+            }
+        };
+        Self {
+            sequence: feedback.sequence.0,
+            outcome,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientPresentationDiscontinuity {
@@ -254,6 +459,8 @@ pub enum ClientHostEvent {
     LifecycleChanged(ClientLifecycleWire),
     CharacterMotionCapabilitiesUpdated(Option<ClientCharacterMotionCapabilitiesWire>),
     CharacterMotionFeedback(ClientCharacterMotionFeedbackWire),
+    PreciseJumpEvaluation(ClientPreciseJumpEvaluationWire),
+    PreciseJumpTransactionFeedback(ClientPreciseJumpTransactionFeedbackWire),
     LocalPlayerEstablished { player_guid: Guid },
     ServerTimeUpdated { time: f64 },
     WorldNameUpdated { name: String },
@@ -366,6 +573,12 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
         ClientViewEvent::CharacterMotionFeedback(feedback) => {
             Some(ClientHostEvent::CharacterMotionFeedback(feedback.into()))
         }
+        ClientViewEvent::PreciseJumpEvaluation(evaluation) => {
+            Some(ClientHostEvent::PreciseJumpEvaluation(evaluation.into()))
+        }
+        ClientViewEvent::PreciseJumpTransactionFeedback(feedback) => Some(
+            ClientHostEvent::PreciseJumpTransactionFeedback(feedback.into()),
+        ),
         ClientViewEvent::LocalPlayerEstablished { player_guid } => {
             Some(ClientHostEvent::LocalPlayerEstablished { player_guid })
         }

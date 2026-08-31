@@ -308,7 +308,7 @@ fn update_earliest(earliest: &mut Option<StaticSphereSweepHit>, candidate: Stati
     }
 }
 
-fn placed_anchor_point(
+pub(super) fn placed_anchor_point(
     collider: &PlacedCollisionShape,
     point: Vector3,
     owner: Guid,
@@ -317,7 +317,7 @@ fn placed_anchor_point(
     point_between_landblocks(collider.point_to_landblock_space(point), owner.0, anchor.0)
 }
 
-fn swept_query_cells(sweep: SphereSweep) -> GlobalCellRange {
+pub(super) fn swept_query_cells(sweep: SphereSweep) -> GlobalCellRange {
     let minimum = Vector3::new(
         sweep.start.x.min(sweep.end.x) - sweep.radius,
         sweep.start.y.min(sweep.end.y) - sweep.radius,
@@ -356,7 +356,10 @@ fn update_water_restriction_hit(
     }
 }
 
-fn landblock_entry_hit(start: Vector3, displacement: Vector3) -> Option<StaticSphereSweepHit> {
+pub(super) fn landblock_entry_hit(
+    start: Vector3,
+    displacement: Vector3,
+) -> Option<StaticSphereSweepHit> {
     let extent = holtburger_common::position::METERS_PER_LANDBLOCK;
     let mut enter = 0.0_f32;
     let mut exit = 1.0_f32;
@@ -405,10 +408,10 @@ fn landblock_entry_hit(start: Vector3, displacement: Vector3) -> Option<StaticSp
         })
 }
 
-fn parry_vector(value: Vector3) -> ParryVector {
+pub(super) fn parry_vector(value: Vector3) -> ParryVector {
     ParryVector::new(value.x, value.y, value.z)
 }
 
-fn world_vector(value: ParryVector) -> Vector3 {
+pub(super) fn world_vector(value: ParryVector) -> Vector3 {
     Vector3::new(value.x, value.y, value.z)
 }

@@ -7,9 +7,9 @@ use super::collision_report::{
 };
 use super::dynamic_contact::{
     DynamicContactEpoch, DynamicContactResolution, DynamicEpochParticipant, DynamicResponseContact,
-    PreparedDynamicTrajectory, resolve_dynamic_contacts,
+    PreparedDynamicTrajectory, resolve_dynamic_contacts, resolve_dynamic_contacts_for_mover,
 };
-use super::dynamic_index::DynamicShadowIndex;
+use super::dynamic_index::{DynamicShadowIndex, EntityCollisionProof, EntityCollisionSnapshot};
 #[cfg(test)]
 use super::{
     AcceptedBodyMotion, RETAIL_AIRBORNE_STEP_DOWN_HEIGHT, RETAIL_LANDING_NORMAL_Z,
@@ -478,6 +478,17 @@ impl SpatialScene {
         self.body_store.body_for_guid(guid)
     }
 
+    /// Seals the current entity target population once for replaceable speculative work.
+    pub fn entity_collision_snapshot(&self) -> anyhow::Result<EntityCollisionSnapshot> {
+        EntityCollisionSnapshot::compile(self.body_store.bodies.values())
+    }
+
+    /// Verifies that one retained selectable entity surface still names identical live geometry.
+    pub fn proves_entity_collision(&self, proof: &EntityCollisionProof) -> bool {
+        self.body(proof.body_id())
+            .is_some_and(|body| proof.matches(body))
+    }
+
     /// Returns integration-demanded active dynamic entities in stable body-ID order.
     ///
     /// The canonical body store remains the only population. Callers receive a stable identity
@@ -672,7 +683,7 @@ impl SpatialScene {
         let contact_epoch = DynamicContactEpoch {
             collision,
             index: &next,
-            participants: &participants,
+            targets: &participants,
             trajectories: &trajectories,
             delta_seconds,
         };
@@ -744,7 +755,7 @@ impl SpatialScene {
                 .values()
                 .map(|participant| &participant.body),
         )?;
-        Ok(targets.candidates(mover, anchor, minimum, maximum, placement))
+        Ok(targets.candidates(Some(mover), anchor, minimum, maximum, placement))
     }
 
     /// Ends naturally expired report lifetimes after all movers in one collection were attempted.
@@ -1169,6 +1180,72 @@ impl SpatialScene {
         .map(|(result, ())| result)
     }
 
+    /// Advances one mover against installed environment plus a sealed, non-integrated entity set.
+    ///
+    /// Peer poses and physical state remain immutable. This is the bounded prediction counterpart
+    /// to the ordinary collection epoch, not an alternate authoritative simulation path.
+    pub fn tick_physical_body_against_entity_snapshot(
+        &mut self,
+        body_id: SpatialBodyId,
+        collision: &CollisionScene,
+        targets: &EntityCollisionSnapshot,
+        actuation: PhysicalBodyActuation,
+        delta_seconds: f32,
+        now: Instant,
+    ) -> anyhow::Result<PhysicalBodyTickResult> {
+        let (body, reconciliation) = {
+            let body = self
+                .body_store
+                .body_mut(body_id)
+                .ok_or_else(|| anyhow::anyhow!("physical body {body_id:?} is not registered"))?;
+            let retained_reconciliation = body.reconciliation.take();
+            let reconciliation = retained_reconciliation.as_deref().copied();
+            let captured = body.clone();
+            body.reconciliation = retained_reconciliation;
+            (captured, reconciliation)
+        };
+        let actuation_permits_settling = actuation.permits_dynamic_settling();
+        let environment_plan =
+            solve_physical_body_tick(collision, &body, &actuation, delta_seconds)?;
+        let mut trajectories = BTreeMap::new();
+        trajectories.insert(
+            body_id,
+            PreparedDynamicTrajectory {
+                actuation,
+                environment_plan,
+            },
+        );
+        let resolution = resolve_dynamic_contacts_for_mover(
+            DynamicContactEpoch {
+                collision,
+                index: &targets.index,
+                targets,
+                trajectories: &trajectories,
+                delta_seconds,
+            },
+            &body,
+        )?;
+        let trajectory = trajectories
+            .remove(&body_id)
+            .expect("sealed mover trajectory cannot disappear during contact resolution");
+        let commit = resolution
+            .replacement_plan
+            .unwrap_or(trajectory.environment_plan);
+        let tentative = self.prepare_physical_body_commit(
+            collision,
+            PhysicalBodyCommitInput {
+                body,
+                reconciliation,
+                commit,
+                actuation_permits_settling,
+                dynamic_response: resolution.response,
+                report_touches: resolution.report_touches,
+            },
+            now,
+        )?;
+        Ok(self.publish_physical_body_commit(tentative, now))
+    }
+
     /// Solves one body provisionally and commits it only after its consumer accepts the result.
     ///
     /// The callback sees the complete tentative body and observable result while the scene still
@@ -1367,7 +1444,7 @@ impl SpatialScene {
             .as_ref()
             .expect("physical definition was just validated")
             .response;
-        if commit.environment_contact
+        if commit.static_contact_normal.is_some()
             && body
                 .physical
                 .as_ref()
@@ -1385,6 +1462,10 @@ impl SpatialScene {
         let collision_reports = self
             .collision_reports
             .preview_touches(&report_touches, now)?;
+        let dynamic_contact = dynamic_response.map(|response| super::DynamicBodyContact {
+            peer: response.peer,
+            normal: response.normal,
+        });
         let projectile_state_change = dynamic_response
             .and_then(|response| response.state_change)
             .or_else(|| {
@@ -1392,7 +1473,8 @@ impl SpatialScene {
                     .physical
                     .as_ref()
                     .and_then(|physical| physical.dynamic.as_ref())?;
-                (commit.environment_contact && dynamic.collision.dynamic_collision.missile)
+                (commit.static_contact_normal.is_some()
+                    && dynamic.collision.dynamic_collision.missile)
                     .then_some(super::DynamicBodyPhysicsStateChange {
                         cleared: holtburger_common::properties::PhysicsState::MISSILE
                             | holtburger_common::properties::PhysicsState::ALIGN_PATH
@@ -1406,7 +1488,7 @@ impl SpatialScene {
             contact,
             response,
             motion,
-            environment_contact: _,
+            static_contact_normal,
             residual_contacts,
         } = commit;
         let result = PhysicalBodyTickResult {
@@ -1419,6 +1501,8 @@ impl SpatialScene {
             ),
             dynamic_state_change: projectile_state_change,
             collision_reports,
+            static_contact_normal,
+            dynamic_contact,
         };
         let mut tentative = body;
         // The accepted pose is already final, physical omega included; re-integrating it here would
@@ -2664,7 +2748,7 @@ mod physical_body_tests {
         let index = DynamicShadowIndex::compile(scene.body_store.bodies.values()).unwrap();
         assert_eq!(
             index.candidates(
-                SpatialBodyId::Ephemeral(999),
+                Some(SpatialBodyId::Ephemeral(999)),
                 Guid(0xda55_ffff),
                 Vector3::new(-1.0, -1.0, -1.0),
                 Vector3::new(6.0, 1.0, 2.0),
@@ -3890,7 +3974,7 @@ mod physical_body_tests {
         let index = DynamicShadowIndex::compile(scene.body_store.bodies.values()).unwrap();
         assert_eq!(
             index.candidates(
-                cylinder_id,
+                Some(cylinder_id),
                 Guid(0xda55_ffff),
                 Vector3::zero(),
                 Vector3::zero(),
@@ -3901,7 +3985,7 @@ mod physical_body_tests {
         assert!(
             index
                 .candidates(
-                    cylinder_id,
+                    Some(cylinder_id),
                     Guid(0xda55_ffff),
                     Vector3::zero(),
                     Vector3::zero(),

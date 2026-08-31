@@ -16,6 +16,8 @@ import type {
 	ClientVital,
 	ClientCharacterMotionCapabilities,
 	ClientCharacterMotionFeedback,
+	ClientPreciseJumpEvaluation,
+	ClientPreciseJumpTransactionFeedback,
 } from "../../client/client-host-contract";
 
 /** Content/status commands implemented by the shared host-content capability. */
@@ -72,6 +74,9 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"start_client_camera",
 	"set_client_camera_intent",
 	"set_client_camera_clearance",
+	"set_client_precise_jump_aim",
+	"commit_client_precise_jump",
+	"cancel_client_precise_jump",
 	"acknowledge_client_world_reveal",
 	"stop_client_camera",
 	"disconnect_client",
@@ -117,6 +122,8 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-lifecycle-changed",
 	"client-character-motion-capabilities-updated",
 	"client-character-motion-feedback",
+	"client-precise-jump-evaluation",
+	"client-precise-jump-transaction-feedback",
 	"client-local-player-established",
 	"client-server-time-updated",
 	"client-world-name-updated",
@@ -177,6 +184,8 @@ export interface HostEventPayloadMap {
 	"client-lifecycle-changed": ClientLifecycle;
 	"client-character-motion-capabilities-updated": ClientCharacterMotionCapabilities | null;
 	"client-character-motion-feedback": ClientCharacterMotionFeedback;
+	"client-precise-jump-evaluation": ClientPreciseJumpEvaluation;
+	"client-precise-jump-transaction-feedback": ClientPreciseJumpTransactionFeedback;
 	"client-local-player-established": ClientLocalPlayerEstablished;
 	"client-server-time-updated": { time: number };
 	"client-world-name-updated": { name: string };

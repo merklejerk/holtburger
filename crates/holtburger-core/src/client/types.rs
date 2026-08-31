@@ -4,6 +4,10 @@ use crate::client::camera::{
 };
 use crate::client::character_motion::SequencedCharacterMotionEvent;
 use crate::client::movement_types::PlayerDriveIntent;
+use crate::client::precise_jump_runtime::{
+    PreciseJumpAimRequest, PreciseJumpCancelRequest, PreciseJumpCommitRequest,
+    PreciseJumpEvaluation, PreciseJumpTransactionFeedback,
+};
 use holtburger_common::properties::DamageType;
 use holtburger_common::{
     CharacterOption, CharacterOptions1, CharacterOptions2, ConfirmationType, Guid,
@@ -409,6 +413,10 @@ pub enum ClientViewEvent {
     LifecycleChanged(ClientLifecycleState),
     /// Ordered jump gesture result used only to reconcile optimistic client presentation.
     CharacterMotionFeedback(ClientCharacterMotionFeedback),
+    /// Latest correlated precise-jump hover evaluation; older pointer samples are replaceable.
+    PreciseJumpEvaluation(PreciseJumpEvaluation),
+    /// Ordered result of an explicit precise-jump commit or cancellation request.
+    PreciseJumpTransactionFeedback(PreciseJumpTransactionFeedback),
     /// Replacement timing capability emitted when authoritative stance/completeness changes.
     CharacterMotionCapabilitiesUpdated {
         capabilities: Option<ClientCharacterMotionCapabilities>,
@@ -702,6 +710,12 @@ pub enum ClientCommand {
     DriveSelf(PlayerDriveIntent),
     /// Applies one ordered, non-coalescible character-motion lifecycle edge.
     ControlCharacter(SequencedCharacterMotionEvent),
+    /// Replaces any queued precise-jump hover sample for the same active camera generation.
+    SetPreciseJumpAim(PreciseJumpAimRequest),
+    /// Requests a fresh authoritative solve for one previously reachable evaluation.
+    CommitPreciseJump(PreciseJumpCommitRequest),
+    /// Explicitly leaves precise-jump mode without launching.
+    CancelPreciseJump(PreciseJumpCancelRequest),
     StartClientCamera(ClientCameraStartRequest),
     SetClientCameraIntent(ClientCameraIntentRequest),
     SetClientCameraClearance(ClientCameraClearanceRequest),

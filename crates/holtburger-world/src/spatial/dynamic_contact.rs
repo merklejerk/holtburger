@@ -14,7 +14,7 @@ use super::collision_report::{
     CollisionReportClassification, CollisionReportContact, CollisionReportSource,
     CollisionReportTouch,
 };
-use super::dynamic_index::{DynamicShadowIndex, placed_target_shapes};
+use super::dynamic_index::{DynamicShadowIndex, EntityCollisionSnapshot, placed_target_shapes};
 use super::physical_body::{
     DynamicBodyRuntimeState, PhysicalBodyTickCommit, solve_physical_body_tick,
     trace_body_reference_path,
@@ -49,20 +49,39 @@ pub(crate) struct PreparedDynamicTrajectory {
     pub(crate) environment_plan: PhysicalBodyTickCommit,
 }
 
+/// Read-only body lookup shared by ordinary epochs and sealed speculative target snapshots.
+pub(crate) trait DynamicContactTargetLookup {
+    fn target_body(&self, body_id: SpatialBodyId) -> Option<&SpatialBody>;
+}
+
+impl DynamicContactTargetLookup for BTreeMap<SpatialBodyId, DynamicEpochParticipant> {
+    fn target_body(&self, body_id: SpatialBodyId) -> Option<&SpatialBody> {
+        self.get(&body_id).map(|participant| &participant.body)
+    }
+}
+
+impl DynamicContactTargetLookup for EntityCollisionSnapshot {
+    fn target_body(&self, body_id: SpatialBodyId) -> Option<&SpatialBody> {
+        self.body(body_id)
+    }
+}
+
 /// Immutable inputs shared by every directional query in one prepared collection.
 #[derive(Clone, Copy)]
 pub(crate) struct DynamicContactEpoch<'a> {
     pub(crate) collision: &'a CollisionScene,
     pub(crate) index: &'a DynamicShadowIndex,
-    pub(crate) participants: &'a BTreeMap<SpatialBodyId, DynamicEpochParticipant>,
+    pub(crate) targets: &'a dyn DynamicContactTargetLookup,
     pub(crate) trajectories: &'a BTreeMap<SpatialBodyId, PreparedDynamicTrajectory>,
     pub(crate) delta_seconds: f32,
 }
 
 /// Blocking peer accepted by one directional solve.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct DynamicResponseContact {
     pub(crate) peer: SpatialBodyId,
+    /// Accepted outward normal from the blocking peer toward the mover.
+    pub(crate) normal: Vector3,
     pub(crate) state_change: Option<DynamicBodyPhysicsStateChange>,
 }
 
@@ -80,11 +99,19 @@ pub(crate) fn resolve_dynamic_contacts(
     epoch: DynamicContactEpoch<'_>,
     mover_id: SpatialBodyId,
 ) -> Result<DynamicContactResolution> {
-    let mover = &epoch
-        .participants
-        .get(&mover_id)
-        .context("dynamic mover has no tick-start participant")?
-        .body;
+    let mover = epoch
+        .targets
+        .target_body(mover_id)
+        .context("dynamic mover has no tick-start participant")?;
+    resolve_dynamic_contacts_for_mover(epoch, mover)
+}
+
+/// Resolves one mover that is not itself retained by the read-only target lookup.
+pub(crate) fn resolve_dynamic_contacts_for_mover(
+    epoch: DynamicContactEpoch<'_>,
+    mover: &SpatialBody,
+) -> Result<DynamicContactResolution> {
+    let mover_id = mover.id;
     let trajectory = epoch
         .trajectories
         .get(&mover_id)
@@ -117,17 +144,16 @@ pub(crate) fn resolve_dynamic_contacts(
     let placement = swept_mover_placement(epoch.collision, mover, environment_plan)?;
     let candidates = epoch
         .index
-        .candidates(mover.id, anchor, minimum, maximum, &placement);
+        .candidates(Some(mover.id), anchor, minimum, maximum, &placement);
 
     let mut selected = None::<SelectedBlockingContact>;
     let mut sampled_report_touches = Vec::new();
     let mut accepted_fraction = 1.0_f32;
     for peer_id in candidates {
-        let Some(peer) = epoch.participants.get(&peer_id) else {
+        let Some(peer) = epoch.targets.target_body(peer_id) else {
             continue;
         };
         let peer_dynamic = peer
-            .body
             .physical
             .as_ref()
             .and_then(|physical| physical.dynamic.as_ref())
@@ -242,6 +268,7 @@ pub(crate) fn resolve_dynamic_contacts(
         replacement_plan: Some(replacement_plan),
         response: Some(DynamicResponseContact {
             peer: selected.peer,
+            normal: selected.contact.normal,
             state_change: selected.clears_projectile_state.then_some(
                 DynamicBodyPhysicsStateChange {
                     cleared: PhysicsState::MISSILE
@@ -315,7 +342,7 @@ struct SelectedBlockingContact {
 struct PairTrajectories<'a> {
     mover: &'a SpatialBody,
     mover_commit: &'a PhysicalBodyTickCommit,
-    peer: &'a DynamicEpochParticipant,
+    peer: &'a SpatialBody,
     peer_plan: Option<&'a PhysicalBodyTickCommit>,
     anchor: Guid,
 }
@@ -324,7 +351,7 @@ impl<'a> PairTrajectories<'a> {
     fn new(
         mover: &'a SpatialBody,
         mover_commit: &'a PhysicalBodyTickCommit,
-        peer: &'a DynamicEpochParticipant,
+        peer: &'a SpatialBody,
         peer_plan: Option<&'a PhysicalBodyTickCommit>,
         delta_seconds: f32,
         anchor: Guid,
@@ -353,7 +380,7 @@ impl<'a> PairTrajectories<'a> {
             + quaternion_angle(mover_start.rotation, mover_end.rotation)
                 * moving_sphere_extent(self.mover)
             + quaternion_angle(peer_start.rotation, peer_end.rotation)
-                * target_furthest_extent(&self.peer.body)?)
+                * target_furthest_extent(self.peer)?)
     }
 
     fn swept_bounds_overlap(&self) -> Result<bool> {
@@ -362,13 +389,12 @@ impl<'a> PairTrajectories<'a> {
             moving_sphere_extent(self.mover),
             self.anchor,
         )?;
-        let peer_extent = target_furthest_extent(&self.peer.body)?;
+        let peer_extent = target_furthest_extent(self.peer)?;
         let peer_bounds = if let Some(planned) = self.peer_plan {
             swept_root_bounds_in_anchor(&planned.motion.path, peer_extent, self.anchor)?
         } else {
             let pose = self
                 .peer
-                .body
                 .pose
                 .reanchor_to_landblock_owner(self.anchor)
                 .context("could not reanchor stationary peer bounds")?;
@@ -389,7 +415,7 @@ impl<'a> PairTrajectories<'a> {
             .iter()
             .map(|sphere| sphere.radius)
             .fold(f32::INFINITY, f32::min);
-        let peer = placed_target_shapes(&self.peer.body, self.peer.body.pose, self.anchor)?
+        let peer = placed_target_shapes(self.peer, self.peer.pose, self.anchor)?
             .iter()
             .map(shape_collision_scale)
             .fold(f32::INFINITY, f32::min);
@@ -406,7 +432,7 @@ impl<'a> PairTrajectories<'a> {
             let fraction = index as f32 / slices as f32 * end_fraction;
             let mover_pose = self.mover_pose(fraction)?;
             let peer_pose = self.peer_pose(fraction)?;
-            let shapes = placed_target_shapes(&self.peer.body, peer_pose, self.anchor)?;
+            let shapes = placed_target_shapes(self.peer, peer_pose, self.anchor)?;
             let mut deepest = None;
             for sphere in self
                 .mover
@@ -453,14 +479,13 @@ impl<'a> PairTrajectories<'a> {
         let Some(planned) = self.peer_plan else {
             return self
                 .peer
-                .body
                 .pose
                 .reanchor_to_landblock_owner(self.anchor)
                 .context("could not reanchor stationary dynamic peer");
         };
         sampled_planned_pose(
             &planned.motion.path,
-            self.peer.body.pose,
+            self.peer.pose,
             planned.pose.rotation,
             fraction,
             self.anchor,

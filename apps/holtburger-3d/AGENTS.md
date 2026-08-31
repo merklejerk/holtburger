@@ -52,6 +52,31 @@ target.
   and genuinely event-driven UI state should remain reactive where that keeps
   ownership and code clearer.
 
+### Svelte `$state` Hygiene
+
+Treat `$state`, `$derived`, and `$effect` as a cold UI graph, never as an application event bus or a
+presentation transport:
+
+- Do not store cursor-rate, frame-rate, simulation-rate, network-rate, or otherwise producer-rate
+  payloads in Svelte reactive state. This includes aim evaluations, camera and entity transforms,
+  renderer inputs, collision results, and raw diagnostic snapshots. Keep them in the imperative
+  owner that produces or consumes them. A mounted UI consumer may pull a consumer-specific display
+  snapshot into `$state` at an explicit bounded display cadence.
+- Split mixed subscriptions at the boundary: a cold mode discriminant needed by markup may update
+  `$state`, while the accompanying hot payload must flow directly to its imperative consumer. Do
+  not assign the composite event or session state to `$state` for convenience.
+- An effect that constructs or destroys an imperative owner must depend only on that owner's true
+  lifecycle identity: mounted DOM nodes, route/mode identity, transport/session identity, and
+  explicit cold configuration. It must not read reactive presentation or interaction payloads.
+  Such a read makes payload publication own resource lifetime and can repeatedly destroy and
+  rebuild WebGL, audio, workers, or host sessions.
+- Reads hidden in helper calls still create dependencies. Use `untrack` only for a one-time snapshot
+  that closes a proven initialization race; it is not permission to move a hot path into the
+  reactive graph. Document why the untracked read cannot own lifecycle.
+- Before adding a reactive field, name the markup, cold control, or lifecycle decision that consumes
+  it and the maximum expected update cadence. If the consumer is imperative or the cadence follows
+  input, rendering, simulation, or network publication, do not add the field.
+
 ## Runtime Verification and Browser Harness
 
 Runtime verification is expected whenever a change crosses browser, WebGL,

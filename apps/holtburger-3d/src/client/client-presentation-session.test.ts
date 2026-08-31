@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { ActiveRegionSource } from "../lib/assets/active-region-source";
+import { landblockVector3 } from "../lib/assets/ac-frame";
 import type { LandblockProfileSource } from "../lib/assets/landblock-profile-source";
 import {
 	cellId,
@@ -29,6 +30,8 @@ import {
 } from "./client-presentation-session";
 import type { ClientLifecycleTransport } from "./client-lifecycle-session";
 import { ClientLifecycleSession } from "./client-lifecycle-session";
+import { CLIENT_TUNING } from "./client-tuning";
+import type { WorldIndicatorInput } from "../lib/game/renderer/renderer";
 
 describe("resolveClientEnvironmentSelection", () => {
 	it("uses synchronized portal-year time and the archive calendar offset", () => {
@@ -101,6 +104,102 @@ describe("ClientPresentationSession", () => {
 			cameraStatus: { kind: "active" },
 			renderedFrameCount: 1,
 			draw: null,
+		});
+		await presentation.destroy();
+	});
+
+	it("samples aim from the exact presented CSS viewport and camera identity", async () => {
+		const playerGuid = 0x0101_0001;
+		const transport = new FakeClientTransport(currentState(playerGuid));
+		const lifecycle = new ClientLifecycleSession(transport);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		const presentation = new ClientPresentationSession({
+			canvas: fakeCanvas(),
+			hostTransport: {} as never,
+			session: lifecycle,
+			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+		});
+
+		await presentation.start();
+		expect(presentation.frame(1_000).rendered).toBe(true);
+		const center = presentation.samplePreciseJumpRay(420, 290);
+		const right = presentation.samplePreciseJumpRay(740, 290);
+
+		expect(center).toMatchObject({
+			anchor: 0x0100_ffff,
+			camera: {
+				cameraGeneration: 1,
+				playerGuid,
+				entityGeneration: 1,
+			},
+			maximumDistance: CLIENT_TUNING.preciseJump.maximumAimDistance,
+		});
+		expect(Math.hypot(...(center?.direction ?? []))).toBeCloseTo(1);
+		expect(right?.direction).not.toEqual(center?.direction);
+		await presentation.destroy();
+	});
+
+	it("projects an accepted evaluation into one scoped render-axis marker", async () => {
+		const playerGuid = 0x0101_0001;
+		const transport = new FakeClientTransport(currentState(playerGuid));
+		const lifecycle = new ClientLifecycleSession(transport);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		const presentation = new ClientPresentationSession({
+			canvas: fakeCanvas(),
+			hostTransport: {} as never,
+			session: lifecycle,
+			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+		});
+		await presentation.start();
+
+		presentation.setPreciseJumpMarker({
+			evaluationId: 4,
+			camera: { cameraGeneration: 1, entityGeneration: 1, playerGuid },
+			sequence: 8,
+			status: "reachable",
+			target: {
+				anchor: 0x0100_ffff,
+				committedCell: 0x0100_0102,
+				normal: [0, 0, 1],
+				point: landblockVector3([10, 20, 4]),
+			},
+			trajectory: {
+				anchor: 0x0100_ffff,
+				origin: landblockVector3([12, 18, 1]),
+				velocity: [-2, 0, 5],
+				acceleration: [0, 0, -9.8],
+				durationSeconds: 1,
+				placements: [
+					{
+						startFraction: 0,
+						endFraction: 1,
+						committedCell: 0x0100_0102,
+					},
+				],
+			},
+			diagnostics: {
+				evaluatedCandidates: 2,
+				generatedCandidates: 6,
+				solverTicks: 30,
+			},
+		});
+
+		const origin = createLandblockWorldOrigin("0x0100ffff");
+		expect(runtime.worldIndicators.at(-1)).toMatchObject({
+			marker: {
+				color: [0.08, 0.48, 1, 0.9],
+				normal: [0, 1, -0],
+				position: { x: origin.x + 10, y: 4, z: origin.z - 20 },
+				renderScopeKey: "0x01000102",
+			},
+			trajectory: {
+				origin: { x: origin.x + 12, y: 1, z: origin.z - 18 },
+				velocity: [-2, 5, -0],
+				acceleration: [0, -9.8, -0],
+				placements: [{ renderScopeKey: "0x01000102" }],
+			},
 		});
 		await presentation.destroy();
 	});
@@ -616,6 +715,7 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 	viewerLightGuid: number | null = null;
 	clearCount = 0;
 	portalTransitions: unknown[] = [];
+	worldIndicators: Array<WorldIndicatorInput | null> = [];
 	completedActivations: number[] = [];
 	realizationDisposition: DynamicEntityRealizationDisposition = "installed";
 	#activationRevision = 0;
@@ -707,6 +807,10 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 		this.primaryViews.push(view);
 	}
 
+	setWorldIndicator(indicator: WorldIndicatorInput | null): void {
+		this.worldIndicators.push(indicator);
+	}
+
 	setAudioListener(listener: unknown): void {
 		this.audioListeners.push(listener);
 	}
@@ -794,7 +898,23 @@ function fakeOwner(
 }
 
 function fakeCanvas(): HTMLCanvasElement {
-	return { clientWidth: 640, clientHeight: 480 } as HTMLCanvasElement;
+	return {
+		clientWidth: 640,
+		clientHeight: 480,
+		width: 1_280,
+		height: 960,
+		getBoundingClientRect: () => ({
+			bottom: 530,
+			height: 480,
+			left: 100,
+			right: 740,
+			top: 50,
+			width: 640,
+			x: 100,
+			y: 50,
+			toJSON: () => undefined,
+		}),
+	} as HTMLCanvasElement;
 }
 
 function activeRegion(

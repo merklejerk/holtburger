@@ -6,7 +6,7 @@ import type { Camera } from "../runtime/types";
 import type { ResolvedSceneEnvironment } from "../environment/scene-environment";
 import type { LandblockLights } from "../environment/outdoor-light-index";
 import type { RuntimeLight } from "../environment/runtime-lights";
-import type { SceneVec3 } from "../../assets/ac-frame";
+import type { SceneVec3, SceneVector3 } from "../../assets/ac-frame";
 import { LandblockLayerKind } from "../runtime/scene-interest";
 import type { PreparedAnimation } from "../animation/animation-asset-repository";
 import type { ObjectVisualTemplate } from "../systems/object-visual-template-repository";
@@ -167,6 +167,52 @@ export interface FrameInput {
 	/** Optional transition composition; ordinary frames allocate no transition resources. */
 	readonly portalTransition?: PortalTransitionFrame;
 	readonly views: readonly FrameViewInput[];
+	/** Optional frontend-resolved precise-jump indicator; absent frames draw no marker or curve. */
+	readonly worldIndicator?: WorldIndicatorInput | null;
+}
+
+/** One atomic precise-jump presentation snapshot. */
+export interface WorldIndicatorInput {
+	readonly marker: WorldMarkerInput;
+	readonly trajectory?: WorldTrajectoryInput;
+}
+
+/** Minimal renderer input for one depth-tested, surface-aligned world ring. */
+export interface WorldMarkerInput {
+	readonly color: readonly [number, number, number, number];
+	readonly normal: SceneVector3;
+	readonly position: SceneVec3;
+	readonly radius: number;
+	/** Physical portal render domain, or `outdoor` for terrain/static exterior geometry. */
+	readonly renderScopeKey: string;
+}
+
+/** One render-domain interval over a trajectory's normalized time. */
+interface WorldTrajectoryPlacementInput {
+	/** Inclusive start of this scope interval. */
+	readonly startFraction: number;
+	/** Exclusive interval end, except that the final interval includes one. */
+	readonly endFraction: number;
+	/** Canonical portal visibility key, or `outdoor`. */
+	readonly renderScopeKey: string;
+}
+
+/** Compact semantic curve; the renderer exclusively owns its geometric approximation. */
+export interface WorldTrajectoryInput {
+	/** Accepted evaluation identity used as the renderer-side geometry revision. */
+	readonly revision: number;
+	/** Semantic reachable blue in linear renderer color space. */
+	readonly color: readonly [number, number, number, number];
+	/** Absolute scene-space body-reference launch point. */
+	readonly origin: SceneVec3;
+	/** Scene-axis launch velocity. */
+	readonly velocity: readonly [number, number, number];
+	/** Scene-axis constant acceleration. */
+	readonly acceleration: readonly [number, number, number];
+	/** Positive analytic curve duration. */
+	readonly durationSeconds: number;
+	/** Gap-free render-domain partition over normalized curve time. */
+	readonly placements: readonly WorldTrajectoryPlacementInput[];
 }
 
 /** Latest renderer-side selection counts, aggregated across every view in one frame. */

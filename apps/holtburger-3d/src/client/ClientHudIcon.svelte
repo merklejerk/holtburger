@@ -13,6 +13,7 @@
 		| "settings"
 		| "debug"
 		| "speech"
+		| "precise-jump"
 		| "locked"
 		| "unlocked";
 
@@ -56,6 +57,10 @@
 		<path d="M8 9h8v8a4 4 0 0 1-8 0Zm4 0V5m-3 0h6M5 12h3m8 0h3M5 17h3m8 0h3" />
 	{:else if name === "speech"}
 		<path d="M3 4h18v13H9l-5 4v-4H3Z" />
+	{:else if name === "precise-jump"}
+		<circle cx="12" cy="12" r="6.5" /><circle cx="12" cy="12" r="2" /><path
+			d="M12 2v3M12 19v3M2 12h3M19 12h3"
+		/>
 	{:else if name === "locked"}
 		<rect x="5" y="10" width="14" height="11" rx="2" /><path
 			d="M8 10V7a4 4 0 0 1 8 0v3"

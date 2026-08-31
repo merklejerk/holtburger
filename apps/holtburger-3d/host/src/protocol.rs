@@ -90,6 +90,10 @@ pub enum HostEvent {
         Option<crate::client_projection::ClientCharacterMotionCapabilitiesWire>,
     ),
     ClientCharacterMotionFeedback(crate::client_projection::ClientCharacterMotionFeedbackWire),
+    ClientPreciseJumpEvaluation(crate::client_projection::ClientPreciseJumpEvaluationWire),
+    ClientPreciseJumpTransactionFeedback(
+        crate::client_projection::ClientPreciseJumpTransactionFeedbackWire,
+    ),
     ClientLocalPlayerEstablished {
         #[serde(rename = "playerGuid")]
         player_guid: holtburger_common::Guid,
@@ -339,6 +343,12 @@ impl ClientEventSink for StdioEventSink {
             ) => HostEvent::ClientCharacterMotionCapabilitiesUpdated(capabilities),
             crate::client_projection::ClientHostEvent::CharacterMotionFeedback(feedback) => {
                 HostEvent::ClientCharacterMotionFeedback(feedback)
+            }
+            crate::client_projection::ClientHostEvent::PreciseJumpEvaluation(evaluation) => {
+                HostEvent::ClientPreciseJumpEvaluation(evaluation)
+            }
+            crate::client_projection::ClientHostEvent::PreciseJumpTransactionFeedback(feedback) => {
+                HostEvent::ClientPreciseJumpTransactionFeedback(feedback)
             }
             crate::client_projection::ClientHostEvent::LocalPlayerEstablished { player_guid } => {
                 HostEvent::ClientLocalPlayerEstablished { player_guid }

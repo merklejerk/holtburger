@@ -34,6 +34,21 @@ pub use client::collision::{
     ClientCollisionSource, ClientEntityBodyFacts, ClientEntityBodyFactsError, ClientPlayerIdentity,
     ContentClientCollisionSource, client_entity_body_facts, client_player_body_facts,
 };
+pub use client::precise_jump::{
+    PreciseJumpCandidateBudget, PreciseJumpCandidateBudgetError, PreciseJumpCandidateRejection,
+    PreciseJumpCandidateSet, PreciseJumpCapabilityEnvelope, PreciseJumpLandingTolerance,
+    PreciseJumpLaunchCandidate, PreciseJumpWorldDisplacement, PreciseJumpWorldDisplacementError,
+    generate_precise_jump_candidates,
+};
+pub use client::precise_jump_prediction::{
+    PRECISE_JUMP_FIXED_TICK, PreciseJumpCandidateFailure, PreciseJumpPredictedLanding,
+    PreciseJumpPredictionBudget, PreciseJumpPredictionBudgetError,
+    PreciseJumpPredictionDiagnostics, PreciseJumpPredictionError, PreciseJumpPredictionEvaluation,
+    PreciseJumpPredictionOutcome, PreciseJumpPredictionRequest, PreciseJumpTarget,
+    PreciseJumpTargetError, PreciseJumpTrajectory, PreciseJumpTrajectoryPlacement,
+    PreciseJumpUnprovenReason, PreciseJumpUnreachableReason, diagnose_precise_jump,
+    predict_precise_jump,
+};
 pub use client::runtime_body_view_cache::RuntimeBodyViewCache;
 pub use client::types::{
     ActionResultReason, ActionResultSource, ActiveCharacterConfirmation, BusyOperationKind,
@@ -48,7 +63,11 @@ pub use client::{
     ClientCameraDiagnostics, ClientCameraFailureReason, ClientCameraIdentity,
     ClientCameraIntentRequest, ClientCameraReseedReason, ClientCameraStartReceipt,
     ClientCameraStartRequest, ClientCameraTargetSphereRole, ClientCameraTick,
-    ClientCameraUpdateReceipt,
+    ClientCameraUpdateReceipt, PreciseJumpActionSequence, PreciseJumpAimRequest,
+    PreciseJumpAimSequence, PreciseJumpCancelRequest, PreciseJumpCommitRequest,
+    PreciseJumpEvaluation, PreciseJumpEvaluationId, PreciseJumpEvaluationStatus,
+    PreciseJumpTargetView, PreciseJumpTransactionFeedback, PreciseJumpTransactionOutcome,
+    PreciseJumpTransactionRejection,
 };
 pub use client::{ClientRuntime, ClientRuntimeBuilder};
 pub use content_assets::{

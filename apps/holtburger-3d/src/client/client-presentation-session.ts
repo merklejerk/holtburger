@@ -1,4 +1,12 @@
-import { sceneVec3, sceneVector3 } from "../lib/assets/ac-frame";
+import {
+	acVector3,
+	acVectorToRender,
+	landblockVector3,
+	renderVector3,
+	renderVectorToAc,
+	sceneVec3,
+	sceneVector3,
+} from "../lib/assets/ac-frame";
 import type { ActiveRegionSource } from "../lib/assets/active-region-source";
 import type { LandblockProfileSource } from "../lib/assets/landblock-profile-source";
 import { CLIENT_TUNING } from "./client-tuning";
@@ -56,7 +64,9 @@ import type {
 	ClientCameraTick,
 	ClientLifecycle,
 	ClientPresentationDiscontinuity,
+	ClientPreciseJumpEvaluation,
 } from "./client-host-contract";
+import type { ClientPreciseJumpRay } from "./client-precise-jump-session";
 import {
 	ClientLifecycleSession,
 	type ClientLifecycleSessionEvent,
@@ -79,6 +89,7 @@ import {
 import type {
 	PortalTransitionFrame,
 	RendererFrameDiagnosticsSnapshot,
+	WorldIndicatorInput,
 } from "../lib/game/renderer/renderer";
 import type { MapPanelFrame } from "../app/map-panel-frame";
 import type { MapEntity } from "../lib/game/map/map-blips";
@@ -188,6 +199,7 @@ export interface ClientPresentationRuntime extends MapTerrainSource {
 	clearSceneInterest(): unknown;
 	resolveViewportExtent(cssWidth: number, cssHeight: number): RenderExtent;
 	setPrimaryView(view: PrimaryCameraView): void;
+	setWorldIndicator(indicator: WorldIndicatorInput | null): void;
 	setAudioListener(placement: AudioListenerPlacement | null): void;
 	setSceneEnvironment(environment: ResolvedSceneEnvironment): void;
 	setViewerLightCarrier(guid: number | null): void;
@@ -265,6 +277,8 @@ export class ClientPresentationSession {
 	#cameraTarget: ClientCameraTarget | null = null;
 	#cameraProjection: ProjectionClearanceRevision | null = null;
 	#cameraSynchronization: Promise<void> = Promise.resolve();
+	/** Exact camera/extent pair used by the most recently presented frame. */
+	#lastPrimaryView: PrimaryCameraView | null = null;
 	readonly #constructionAbortController = new AbortController();
 
 	constructor(dependencies: ClientPresentationSessionDependencies) {
@@ -366,6 +380,138 @@ export class ClientPresentationSession {
 							particleBatches: selection.submittedParticleBatchCount,
 						},
 		};
+	}
+
+	/** Sample an anchored AC-axis ray from the exact camera and viewport last presented. */
+	samplePreciseJumpRay(
+		clientX: number,
+		clientY: number,
+	): ClientPreciseJumpRay | null {
+		const view = this.#lastPrimaryView;
+		const cameraStatus = this.camera.status();
+		if (view === null || cameraStatus.kind !== "active") return null;
+		const bounds = this.#canvas.getBoundingClientRect();
+		if (bounds.width <= 0 || bounds.height <= 0) return null;
+		const normalizedX = ((clientX - bounds.left) / bounds.width) * 2 - 1;
+		const normalizedY = 1 - ((clientY - bounds.top) / bounds.height) * 2;
+		if (!Number.isFinite(normalizedX) || !Number.isFinite(normalizedY))
+			return null;
+		const tangent = Math.tan((view.camera.fov * Math.PI) / 360);
+		const aspect = view.extent.width / view.extent.height;
+		const localDirection = new Vec3(
+			normalizedX * tangent * aspect,
+			normalizedY * tangent,
+			-1,
+		);
+		const localLength = Math.hypot(
+			localDirection.x,
+			localDirection.y,
+			localDirection.z,
+		);
+		const renderDirection = rotateRenderVector(
+			new Vec3(
+				localDirection.x / localLength,
+				localDirection.y / localLength,
+				localDirection.z / localLength,
+			),
+			view.camera.placement.rotation,
+		);
+		const acDirection = renderVectorToAc(
+			renderVector3([renderDirection.x, renderDirection.y, renderDirection.z]),
+		);
+		const landblockOrigin = createLandblockWorldOrigin(
+			view.camera.placement.landblockId,
+		);
+		const acStart = renderVectorToAc(
+			renderVector3([
+				view.camera.placement.position.x - landblockOrigin.x,
+				view.camera.placement.position.y - landblockOrigin.y,
+				view.camera.placement.position.z - landblockOrigin.z,
+			]),
+		);
+		return {
+			camera: cameraStatus.identity,
+			anchor: parseCellId(view.camera.placement.landblockId),
+			start: landblockVector3(acStart),
+			direction: acDirection,
+			maximumDistance: CLIENT_TUNING.preciseJump.maximumAimDistance,
+			previousCell:
+				view.camera.placement.envCellId === null
+					? null
+					: parseCellId(view.camera.placement.envCellId),
+		};
+	}
+
+	/** Publish one accepted atomic marker and optional reachable trajectory. */
+	setPreciseJumpMarker(evaluation: ClientPreciseJumpEvaluation | null): void {
+		const runtime = this.#owner?.runtime;
+		if (runtime === undefined) return;
+		if (evaluation === null || evaluation.target === null) {
+			runtime.setWorldIndicator(null);
+			return;
+		}
+		const target = evaluation.target;
+		const landblockId = normalizeLandblockOwner(
+			`0x${target.anchor.toString(16).padStart(8, "0")}`,
+		);
+		const origin = createLandblockWorldOrigin(landblockId);
+		const local = acVectorToRender(acVector3(target.point));
+		const normal = acVectorToRender(acVector3(target.normal));
+		const color = preciseJumpMarkerColor(evaluation.status);
+		const marker: WorldIndicatorInput["marker"] = {
+			color,
+			normal: sceneVector3([normal[0], normal[1], normal[2]]),
+			position: sceneVec3(origin.add(new Vec3(local[0], local[1], local[2]))),
+			radius: CLIENT_TUNING.preciseJump.markerRadius,
+			renderScopeKey:
+				target.committedCell === null
+					? "outdoor"
+					: `0x${target.committedCell.toString(16).padStart(8, "0")}`,
+		};
+		if (evaluation.status !== "reachable") {
+			runtime.setWorldIndicator({ marker });
+			return;
+		}
+		const trajectoryAnchor = normalizeLandblockOwner(
+			`0x${evaluation.trajectory.anchor.toString(16).padStart(8, "0")}`,
+		);
+		const trajectoryOrigin = createLandblockWorldOrigin(trajectoryAnchor);
+		const trajectoryLocal = acVectorToRender(
+			acVector3(evaluation.trajectory.origin),
+		);
+		const velocity = acVectorToRender(
+			acVector3(evaluation.trajectory.velocity),
+		);
+		const acceleration = acVectorToRender(
+			acVector3(evaluation.trajectory.acceleration),
+		);
+		runtime.setWorldIndicator({
+			marker,
+			trajectory: {
+				revision: evaluation.evaluationId,
+				color,
+				origin: sceneVec3(
+					trajectoryOrigin.add(
+						new Vec3(
+							trajectoryLocal[0],
+							trajectoryLocal[1],
+							trajectoryLocal[2],
+						),
+					),
+				),
+				velocity: [velocity[0], velocity[1], velocity[2]],
+				acceleration: [acceleration[0], acceleration[1], acceleration[2]],
+				durationSeconds: evaluation.trajectory.durationSeconds,
+				placements: evaluation.trajectory.placements.map((placement) => ({
+					startFraction: placement.startFraction,
+					endFraction: placement.endFraction,
+					renderScopeKey:
+						placement.committedCell === null
+							? "outdoor"
+							: `0x${placement.committedCell.toString(16).padStart(8, "0")}`,
+				})),
+			},
+		});
 	}
 
 	/**
@@ -536,7 +682,9 @@ export class ClientPresentationSession {
 				envCellId: camera.placement.envCellId,
 			};
 		}
-		owner.runtime.setPrimaryView({ camera, extent });
+		const primaryView = { camera, extent };
+		owner.runtime.setPrimaryView(primaryView);
+		this.#lastPrimaryView = primaryView;
 		if (!portal) owner.runtime.setAudioListener(audioListenerFor(camera));
 		owner.runtime.render(timeMs / 1_000);
 		this.#hasRenderedFrame = true;
@@ -765,6 +913,7 @@ export class ClientPresentationSession {
 		this.#portalSceneActivation = null;
 		this.#portalTransition.reset();
 		this.#hasRenderedFrame = false;
+		this.#lastPrimaryView = null;
 		this.#sceneInterestCoordinator?.invalidate();
 		this.#enqueueMutation(async () => {
 			if (this.#owner === null) return;
@@ -1295,6 +1444,47 @@ function createClientCamera(
 			rotation: fallbackRotation,
 		},
 	};
+}
+
+function rotateRenderVector(vector: Vec3, rotation: Quat): Vec3 {
+	const length = Math.hypot(rotation.w, rotation.x, rotation.y, rotation.z);
+	if (!Number.isFinite(length) || length <= Number.EPSILON)
+		throw new Error("Client camera rotation must be finite and non-zero.");
+	const w = rotation.w / length;
+	const x = rotation.x / length;
+	const y = rotation.y / length;
+	const z = rotation.z / length;
+	const tx = 2 * (y * vector.z - z * vector.y);
+	const ty = 2 * (z * vector.x - x * vector.z);
+	const tz = 2 * (x * vector.y - y * vector.x);
+	return new Vec3(
+		vector.x + w * tx + (y * tz - z * ty),
+		vector.y + w * ty + (z * tx - x * tz),
+		vector.z + w * tz + (x * ty - y * tx),
+	);
+}
+
+function parseCellId(value: string): number {
+	const parsed = Number.parseInt(
+		value.startsWith("0x") ? value.slice(2) : value,
+		16,
+	);
+	if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > 0xffff_ffff)
+		throw new Error(`Client camera placement has invalid cell id ${value}.`);
+	return parsed;
+}
+
+function preciseJumpMarkerColor(
+	status: ClientPreciseJumpEvaluation["status"],
+): readonly [number, number, number, number] {
+	switch (status) {
+		case "reachable":
+			return [0.08, 0.48, 1, 0.9];
+		case "unreachable":
+			return [1, 0.12, 0.08, 0.9];
+		default:
+			return [0.62, 0.68, 0.75, 0.8];
+	}
 }
 
 /** Convert the player's live scene placement into the world-space subject used by the radar. */

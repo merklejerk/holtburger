@@ -7,6 +7,11 @@ import {
 	decodeClientCharacterMotionEventRequest,
 	decodeClientCharacterMotionCapabilities,
 	decodeClientCharacterMotionFeedback,
+	decodeClientPreciseJumpAimRequest,
+	decodeClientPreciseJumpCommitRequest,
+	decodeClientPreciseJumpCancelRequest,
+	decodeClientPreciseJumpEvaluation,
+	decodeClientPreciseJumpTransactionFeedback,
 	decodeClientExitRequested,
 	decodeClientLifecycle,
 	decodeClientPresentationDiscontinuity,
@@ -26,6 +31,11 @@ import {
 	type ClientCharacterMotionEventRequest,
 	type ClientCharacterMotionCapabilities,
 	type ClientCharacterMotionFeedback,
+	type ClientPreciseJumpAimRequest,
+	type ClientPreciseJumpCommitRequest,
+	type ClientPreciseJumpCancelRequest,
+	type ClientPreciseJumpEvaluation,
+	type ClientPreciseJumpTransactionFeedback,
 	type ClientExitRequested,
 	type ClientLifecycle,
 	type ClientLocalPlayerEstablished,
@@ -56,6 +66,9 @@ type ClientCommandName = Extract<
 	| "start_client_camera"
 	| "set_client_camera_intent"
 	| "set_client_camera_clearance"
+	| "set_client_precise_jump_aim"
+	| "commit_client_precise_jump"
+	| "cancel_client_precise_jump"
 	| "acknowledge_client_world_reveal"
 	| "stop_client_camera"
 	| "disconnect_client"
@@ -66,6 +79,8 @@ type ClientEventName = Extract<
 	| "client-lifecycle-changed"
 	| "client-character-motion-capabilities-updated"
 	| "client-character-motion-feedback"
+	| "client-precise-jump-evaluation"
+	| "client-precise-jump-transaction-feedback"
 	| "client-local-player-established"
 	| "client-server-time-updated"
 	| "client-world-name-updated"
@@ -115,6 +130,14 @@ export type ClientLifecycleSessionEvent =
 	| {
 			readonly type: "character-motion-feedback";
 			readonly feedback: ClientCharacterMotionFeedback;
+	  }
+	| {
+			readonly type: "precise-jump-evaluation";
+			readonly evaluation: ClientPreciseJumpEvaluation;
+	  }
+	| {
+			readonly type: "precise-jump-transaction-feedback";
+			readonly feedback: ClientPreciseJumpTransactionFeedback;
 	  }
 	| {
 			readonly type: "local-player-established";
@@ -274,6 +297,31 @@ export class ClientLifecycleSession {
 		await this.#transport.invoke("set_client_camera_clearance", { request });
 	}
 
+	/** Replace the queued precise-jump aim sample for the active camera generation. */
+	async setPreciseJumpAim(request: ClientPreciseJumpAimRequest): Promise<void> {
+		await this.#transport.invoke("set_client_precise_jump_aim", {
+			request: decodeClientPreciseJumpAimRequest(request),
+		});
+	}
+
+	/** Submit one ordered commit edge carrying only core's opaque evaluation identity. */
+	async commitPreciseJump(
+		request: ClientPreciseJumpCommitRequest,
+	): Promise<void> {
+		await this.#transport.invoke("commit_client_precise_jump", {
+			request: decodeClientPreciseJumpCommitRequest(request),
+		});
+	}
+
+	/** Explicitly cancel precise-jump mode without launching. */
+	async cancelPreciseJump(
+		request: ClientPreciseJumpCancelRequest,
+	): Promise<void> {
+		await this.#transport.invoke("cancel_client_precise_jump", {
+			request: decodeClientPreciseJumpCancelRequest(request),
+		});
+	}
+
 	/** Acknowledge one installed, first-pure-destination frame for the current activation. */
 	async acknowledgeWorldReveal(worldGeneration: number): Promise<void> {
 		await this.#transport.invoke("acknowledge_client_world_reveal", {
@@ -313,6 +361,18 @@ export class ClientLifecycleSession {
 				await this.#transport.listen(
 					"client-character-motion-feedback",
 					(payload) => this.#receiveCharacterMotionFeedback(payload),
+				),
+			);
+			unlisteners.push(
+				await this.#transport.listen(
+					"client-precise-jump-evaluation",
+					(payload) => this.#receivePreciseJumpEvaluation(payload),
+				),
+			);
+			unlisteners.push(
+				await this.#transport.listen(
+					"client-precise-jump-transaction-feedback",
+					(payload) => this.#receivePreciseJumpTransactionFeedback(payload),
 				),
 			);
 			unlisteners.push(
@@ -424,6 +484,20 @@ export class ClientLifecycleSession {
 		this.#emit({
 			type: "character-motion-feedback",
 			feedback: decodeClientCharacterMotionFeedback(payload),
+		});
+	}
+
+	#receivePreciseJumpEvaluation(payload: unknown): void {
+		this.#emit({
+			type: "precise-jump-evaluation",
+			evaluation: decodeClientPreciseJumpEvaluation(payload),
+		});
+	}
+
+	#receivePreciseJumpTransactionFeedback(payload: unknown): void {
+		this.#emit({
+			type: "precise-jump-transaction-feedback",
+			feedback: decodeClientPreciseJumpTransactionFeedback(payload),
 		});
 	}
 

@@ -92,6 +92,22 @@ describe("CharacterInputController", () => {
 		expect(input.chargeExtent()).toBeNull();
 	});
 
+	it("snapshots Shift walk gait into both manual jump edges", () => {
+		const { edges, input } = fixture();
+		input.applyKey("w", true);
+		input.applyKey("shift", true);
+		input.applyKey("space", true);
+		input.applyKey("space", false);
+
+		expect(edges).toMatchObject([
+			{ drive: { gait: "walk", longitudinal: "forward" }, kind: "begin-jump" },
+			{
+				drive: { gait: "walk", longitudinal: "forward" },
+				kind: "release-jump",
+			},
+		]);
+	});
+
 	it("clamps over-full charge and ignores release without an active charge", () => {
 		const { edges, input, setNow } = fixture();
 		input.applyKey("space", false);

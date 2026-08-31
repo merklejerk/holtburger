@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from "svelte";
 	import type { RendererFrameDiagnosticsSnapshot } from "../lib/game/renderer/renderer";
 	import type { GamePresentationRuntime } from "../lib/game/runtime/game-presentation-runtime";
 	import {
@@ -6,12 +7,13 @@
 		serializeExplorerFrameDiagnosticReport,
 		type ExplorerFrameDiagnosticReport,
 	} from "./explorer-frame-diagnostic-report";
+	import { EXPLORER_TUNING } from "./explorer-tuning";
 
 	interface Props {
-		/** Latest atomic renderer diagnostic read, or null until a renderer is available. */
-		readonly diagnostics: RendererFrameDiagnosticsSnapshot | null;
-		/** Latest authored-dynamic residency diagnostics. */
-		readonly dynamics: ReturnType<
+		/** Pull the latest atomic renderer diagnostic read. */
+		readonly readRendererFrameDiagnostics: () => RendererFrameDiagnosticsSnapshot | null;
+		/** Pull the latest authored-dynamic residency diagnostics. */
+		readonly readAuthoredDynamicRuntimeDiagnostics: () => ReturnType<
 			GamePresentationRuntime["getAuthoredDynamicRuntimeDiagnostics"]
 		> | null;
 		/** Explicitly create or tear down the renderer profiling session. */
@@ -20,9 +22,31 @@
 		readonly captureReport: () => ExplorerFrameDiagnosticReport | null;
 	}
 
-	let { diagnostics, dynamics, setProfilingEnabled, captureReport }: Props =
-		$props();
+	let {
+		readRendererFrameDiagnostics,
+		readAuthoredDynamicRuntimeDiagnostics,
+		setProfilingEnabled,
+		captureReport,
+	}: Props = $props();
+	let diagnostics = $state<RendererFrameDiagnosticsSnapshot | null>(null);
+	let dynamics = $state<ReturnType<
+		GamePresentationRuntime["getAuthoredDynamicRuntimeDiagnostics"]
+	> | null>(null);
 	let exportStatus = $state<string | null>(null);
+
+	function sampleDiagnostics(): void {
+		diagnostics = readRendererFrameDiagnostics();
+		dynamics = readAuthoredDynamicRuntimeDiagnostics();
+	}
+
+	onMount(() => {
+		sampleDiagnostics();
+		const interval = window.setInterval(
+			sampleDiagnostics,
+			EXPLORER_TUNING.diagnostics.frameRateDisplayIntervalMs,
+		);
+		return () => window.clearInterval(interval);
+	});
 
 	const metrics = $derived(diagnostics?.selectionMetrics ?? null);
 	const compiledDraws = $derived(diagnostics?.compiledObjectDraws ?? null);
@@ -51,6 +75,7 @@
 		const next = !profilingEnabled;
 		try {
 			setProfilingEnabled(next);
+			sampleDiagnostics();
 			exportStatus = next ? "Profiling started." : "Profiling stopped.";
 		} catch (error) {
 			exportStatus = `Could not ${next ? "start" : "stop"} profiling: ${

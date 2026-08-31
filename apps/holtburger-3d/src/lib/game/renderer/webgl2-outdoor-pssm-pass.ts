@@ -67,6 +67,8 @@ export interface WebGL2OutdoorPssmPassInput {
 	readonly frameHeight: number;
 	readonly frameWidth: number;
 	readonly selectedDynamicNodeIds: Set<SceneNodeId>;
+	/** Whether degradation-hidden dynamic parts may cast into this frame's maps. */
+	readonly showRetailHiddenGeometry: boolean;
 	readonly settings: OutdoorPssmSettings;
 	readonly sunVector: Vec3;
 }
@@ -166,6 +168,7 @@ export class WebGL2OutdoorPssmPass {
 			this.#cascadeFrusta,
 			input.anchorLandblockId,
 			input.selectedDynamicNodeIds,
+			input.showRetailHiddenGeometry,
 			this.#batches,
 			this.#casterSelectionScratch,
 			this.#depthDraws,

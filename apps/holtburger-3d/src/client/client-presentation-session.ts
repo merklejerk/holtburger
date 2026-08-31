@@ -87,6 +87,7 @@ import {
 	type PortalTransitionState,
 } from "../lib/client/portal-transition-controller";
 import type {
+	FrameSettings,
 	PortalTransitionFrame,
 	RendererFrameDiagnosticsSnapshot,
 	WorldIndicatorInput,
@@ -178,6 +179,7 @@ export type ClientPresentationCameraController = PossessionCameraController<
 
 /** Runtime surface consumed by the client orchestration seam and injected by focused tests. */
 export interface ClientPresentationRuntime extends MapTerrainSource {
+	setFrameSettings(settings: FrameSettings): void;
 	replaceDynamicEntitySnapshot(
 		entities: readonly DynamicEntityView[],
 	): Promise<DynamicEntityRealizationResults>;
@@ -258,6 +260,7 @@ export class ClientPresentationSession {
 	readonly #onError: (error: unknown) => void;
 	readonly #ownerFactory: ClientPresentationOwnerFactory;
 	#owner: ClientPresentationOwner | null = null;
+	#frameSettings: FrameSettings = CLIENT_TUNING.frameSettings;
 	#sceneInterestCoordinator: SceneInterestRequestCoordinator | null = null;
 	#unsubscribe: (() => void) | null = null;
 	#playerGuid: number | null = null;
@@ -512,6 +515,12 @@ export class ClientPresentationSession {
 				})),
 			},
 		});
+	}
+
+	/** Replace cold presentation policy immediately, or retain it until owner construction lands. */
+	setFrameSettings(settings: FrameSettings): void {
+		this.#frameSettings = settings;
+		this.#owner?.runtime.setFrameSettings(settings);
 	}
 
 	/**
@@ -774,7 +783,7 @@ export class ClientPresentationSession {
 				canvas: this.#canvas,
 				hostTransport: this.#hostTransport,
 				signal: this.#constructionAbortController.signal,
-				frameSettings: CLIENT_TUNING.frameSettings,
+				frameSettings: this.#frameSettings,
 				audioTuning: {
 					placementSmoothingSeconds:
 						CLIENT_TUNING.audio.placementSmoothingSeconds,

@@ -926,6 +926,7 @@ function source(
 			geometry: geometry(`geometry:${id}`),
 			materials: [material(`material:${id}`)],
 			partIndex,
+			retailVisibility: "normally-visible",
 		})),
 		placementPoses: new Map([
 			[

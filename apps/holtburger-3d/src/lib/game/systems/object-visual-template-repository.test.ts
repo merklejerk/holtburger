@@ -331,6 +331,7 @@ function source(id: string, appearanceKey: string): DynamicPresentationSource {
 					geometry: multiMaterialGeometry(),
 					materials: [material("first"), material("second")],
 					partIndex: 0,
+					retailVisibility: "normally-visible",
 				},
 			],
 			placementPoses: new Map([

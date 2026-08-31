@@ -37,6 +37,7 @@
 		ClientVital,
 	} from "./client-host-contract";
 	import type { ClientChatLine } from "./ClientChat.svelte";
+	import type { FrameSettings } from "../lib/game/renderer/renderer";
 	import {
 		clientLifecycleEnablesWorldInput,
 		clientLifecycleUsesWorldPresentation,
@@ -89,6 +90,7 @@
 			schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
 		},
 	});
+	let frameSettings = $state<FrameSettings>({ ...CLIENT_TUNING.frameSettings });
 	let inputController: CharacterInputController | null = null;
 	let inputArbiter: ClientInputArbiter | null = null;
 	let preciseJumpSession: ClientPreciseJumpSession | null = null;
@@ -409,6 +411,11 @@
 		return frameRateSampler?.readFrameRates() ?? null;
 	}
 
+	function setShowRetailHiddenGeometry(visible: boolean): void {
+		frameSettings = { ...frameSettings, showRetailHiddenGeometry: visible };
+		presentationSession?.setFrameSettings(frameSettings);
+	}
+
 	/** Build and drive the renderer after Svelte mounts the world-presentation canvas. */
 	$effect(() => {
 		const currentSession = session;
@@ -437,6 +444,7 @@
 			session: currentSession,
 			onError: reportPresentationError,
 		});
+		presentation.setFrameSettings(frameSettings);
 		const currentFrameRateSampler = createFrameRateSampler(
 			CLIENT_TUNING.diagnostics.frameMetricsEmaWindowMs,
 		);
@@ -597,6 +605,8 @@
 		{readMapPanelFrame}
 		{readDiagnostics}
 		{readFrameRates}
+		showRetailHiddenGeometry={frameSettings.showRetailHiddenGeometry}
+		onShowRetailHiddenGeometryChange={setShowRetailHiddenGeometry}
 		{playerName}
 		{worldName}
 		{vitals}

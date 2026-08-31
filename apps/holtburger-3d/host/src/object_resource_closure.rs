@@ -7,6 +7,7 @@ use holtburger_content::{
 use holtburger_core::{
     ContentAsset, ContentAssetRequest, ContentAssetRuntime, SetupAppearanceRequest,
 };
+use holtburger_dat::file_type::{GfxObj, GfxObjDegradeInfo};
 use serde_json::{Value, json};
 
 use crate::{
@@ -30,8 +31,25 @@ pub(crate) struct ObjectResourceClosure {
     setup_definition_ids: HashMap<SetupAppearanceRequest, String>,
     pub(crate) geometries: Vec<Value>,
     geometry_ids: BTreeMap<u32, String>,
+    retail_visibility: BTreeMap<u32, RetailGeometryVisibility>,
     pub(crate) materials: BTreeMap<String, Value>,
     pub(crate) texture_dependencies: BTreeMap<String, Value>,
+}
+
+/// Retail draw eligibility derived once from one GfxObj's authored degradation chain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RetailGeometryVisibility {
+    NormallyVisible,
+    DegradeHidden,
+}
+
+impl RetailGeometryVisibility {
+    fn manifest_name(self) -> &'static str {
+        match self {
+            Self::NormallyVisible => "normally-visible",
+            Self::DegradeHidden => "degrade-hidden",
+        }
+    }
 }
 
 impl ObjectResourceClosure {
@@ -63,6 +81,7 @@ impl ObjectResourceClosure {
         let ContentAsset::GfxObj(gfx_obj) = asset else {
             unreachable!("GfxObj request must return a GfxObj")
         };
+        let retail_visibility = self.retail_geometry_visibility(runtime, &gfx_obj).await?;
         let geometry_id = self.add_geometry(&gfx_obj)?;
         let material_ids = self.add_materials(runtime, &gfx_obj.surfaces).await?;
         let id = format!("gfx-obj/{gfx_obj_id:08x}");
@@ -73,6 +92,7 @@ impl ObjectResourceClosure {
             "sourceAssetId": id,
             "geometryId": geometry_id,
             "materialIds": material_ids,
+            "retailVisibility": retail_visibility.manifest_name(),
         }));
         self.gfx_definition_ids.insert(gfx_obj_id, id.clone());
         Ok(id)
@@ -124,6 +144,7 @@ impl ObjectResourceClosure {
             let ContentAsset::GfxObj(gfx_obj) = gfx_asset else {
                 unreachable!("GfxObj request must return a GfxObj")
             };
+            let retail_visibility = self.retail_geometry_visibility(runtime, &gfx_obj).await?;
             let geometry_id = self.add_geometry(&gfx_obj)?;
             let material_ids = self
                 .add_resolved_materials(runtime, &part.material_slots)
@@ -133,6 +154,7 @@ impl ObjectResourceClosure {
                 "geometryId": geometry_id,
                 "defaultScale": setup_model.default_scale.get(part.part_index).map(ac_vec3_json).unwrap_or_else(unit_vec3_json),
                 "materialIds": material_ids,
+                "retailVisibility": retail_visibility.manifest_name(),
             }));
         }
         let id = if request.appearance.obj_desc.is_none() {
@@ -161,6 +183,30 @@ impl ObjectResourceClosure {
         }));
         self.setup_definition_ids.insert(request, id.clone());
         Ok(id)
+    }
+
+    async fn retail_geometry_visibility(
+        &mut self,
+        runtime: &ContentAssetRuntime,
+        gfx_obj: &GfxObj,
+    ) -> Result<RetailGeometryVisibility> {
+        if let Some(visibility) = self.retail_visibility.get(&gfx_obj.id) {
+            return Ok(*visibility);
+        }
+        let visibility = match gfx_obj.did_degrade {
+            None => RetailGeometryVisibility::NormallyVisible,
+            Some(degrade_id) => {
+                let asset = runtime
+                    .load(ContentAssetRequest::DegradeInfo(degrade_id))
+                    .await?;
+                let ContentAsset::DegradeInfo(info) = asset else {
+                    unreachable!("DegradeInfo request must return degrade info")
+                };
+                classify_retail_geometry_visibility(gfx_obj.id, &info)
+            }
+        };
+        self.retail_visibility.insert(gfx_obj.id, visibility);
+        Ok(visibility)
     }
 
     fn add_geometry(&mut self, gfx_obj: &holtburger_dat::file_type::GfxObj) -> Result<String> {
@@ -278,6 +324,30 @@ impl ObjectResourceClosure {
             anyhow::bail!("object resource closure contains a non-object geometry record");
         }
         Ok(())
+    }
+}
+
+/// Recognize the shipped-content sentinel chain that advances immediately from its real mesh to
+/// a null draw. Retail uses `distance >= threshold` while selecting a band (acclient.c:319299), so
+/// the all-zero first threshold advances even at distance zero; `CPhysicsPart::Draw` then skips the
+/// null GfxObj (acclient.c:303122). The narrow shape covers 11 GfxObjs referenced by 920 setups and
+/// 19,016 indoor part placements without pretending to implement general distance LOD.
+fn classify_retail_geometry_visibility(
+    gfx_obj_id: u32,
+    info: &GfxObjDegradeInfo,
+) -> RetailGeometryVisibility {
+    let [near, hidden] = info.bands.as_slice() else {
+        return RetailGeometryVisibility::NormallyVisible;
+    };
+    if near.gfx_obj_id == gfx_obj_id
+        && near.min_distance == 0.0
+        && near.ideal_distance == 0.0
+        && near.max_distance == 0.0
+        && hidden.gfx_obj_id == 0
+    {
+        RetailGeometryVisibility::DegradeHidden
+    } else {
+        RetailGeometryVisibility::NormallyVisible
     }
 }
 
@@ -618,4 +688,77 @@ fn ac_vec3_json(vector: &holtburger_common::Vector3) -> Value {
 
 fn unit_vec3_json() -> Value {
     json!([1.0, 1.0, 1.0])
+}
+
+#[cfg(test)]
+mod tests {
+    use holtburger_dat::file_type::{DegradeBand, DegradeOrientation, GfxObjDegradeInfo};
+
+    use super::{RetailGeometryVisibility, classify_retail_geometry_visibility};
+
+    const GFX_OBJ_ID: u32 = 0x0100_28CA;
+
+    fn band(gfx_obj_id: u32, min: f32, ideal: f32, max: f32) -> DegradeBand {
+        DegradeBand {
+            gfx_obj_id,
+            orientation: DegradeOrientation::Authored,
+            min_distance: min,
+            ideal_distance: ideal,
+            max_distance: max,
+        }
+    }
+
+    #[test]
+    fn classifies_zero_distance_mesh_followed_by_null_as_degrade_hidden() {
+        let info = GfxObjDegradeInfo {
+            id: 0x1100_0118,
+            bands: vec![band(GFX_OBJ_ID, 0.0, 0.0, 0.0), band(0, 0.0, 0.0, 0.0)],
+        };
+
+        assert_eq!(
+            classify_retail_geometry_visibility(GFX_OBJ_ID, &info),
+            RetailGeometryVisibility::DegradeHidden,
+        );
+    }
+
+    #[test]
+    fn leaves_general_distance_lod_normally_visible() {
+        let info = GfxObjDegradeInfo {
+            id: 0x1100_0118,
+            bands: vec![
+                band(GFX_OBJ_ID, 0.0, 32.0, 64.0),
+                band(0x0100_28CB, 32.0, 64.0, 128.0),
+            ],
+        };
+
+        assert_eq!(
+            classify_retail_geometry_visibility(GFX_OBJ_ID, &info),
+            RetailGeometryVisibility::NormallyVisible,
+        );
+    }
+
+    #[test]
+    fn leaves_unrecognized_zero_distance_chains_normally_visible() {
+        let wrong_source = GfxObjDegradeInfo {
+            id: 0x1100_0118,
+            bands: vec![band(0x0100_28CB, 0.0, 0.0, 0.0), band(0, 0.0, 0.0, 0.0)],
+        };
+        let extra_band = GfxObjDegradeInfo {
+            id: 0x1100_0119,
+            bands: vec![
+                band(GFX_OBJ_ID, 0.0, 0.0, 0.0),
+                band(0, 0.0, 0.0, 0.0),
+                band(0, 0.0, 0.0, 0.0),
+            ],
+        };
+
+        assert_eq!(
+            classify_retail_geometry_visibility(GFX_OBJ_ID, &wrong_source),
+            RetailGeometryVisibility::NormallyVisible,
+        );
+        assert_eq!(
+            classify_retail_geometry_visibility(GFX_OBJ_ID, &extra_band),
+            RetailGeometryVisibility::NormallyVisible,
+        );
+    }
 }

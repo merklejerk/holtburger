@@ -424,6 +424,7 @@ function presentation(): ResolvedObjectPresentation {
 				geometry: SHARED_GEOMETRY,
 				defaultScale: new Vec3(1, 1, 1),
 				materials: [SHARED_MATERIAL],
+				retailVisibility: "normally-visible",
 			},
 		],
 		lights: [],

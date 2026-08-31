@@ -268,6 +268,7 @@ function createInput(sunVector: Vec3): WebGL2OutdoorPssmPassInput {
 		frameHeight: 360,
 		frameWidth: 640,
 		selectedDynamicNodeIds: new Set(),
+		showRetailHiddenGeometry: false,
 		settings: {
 			...DEFAULT_ENTITY_SHADOW_SETTINGS.pssm,
 			cascadeCount: 2,
@@ -367,6 +368,7 @@ function dynamicContribution(): VisibleRigidDepthContribution {
 			geometry: "object-geometry:caster" as ObjectGeometryKey,
 			indexCount: 6,
 			indexStart: 0,
+			retailVisibility: "normally-visible",
 		},
 		instance: {
 			color: { a: 1, b: 1, g: 1, r: 1 },

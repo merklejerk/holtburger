@@ -80,6 +80,25 @@ import type { VisibleDynamicContributions } from "../systems/components";
 import { WebGL2WorldMarkerPass } from "./webgl2-world-marker-pass";
 import { WebGL2WorldTrajectoryPass } from "./webgl2-world-trajectory-pass";
 import {
+	type NameplateDrawInstance,
+	type NameplateScopedDrawInstance,
+	WebGL2NameplatePass,
+} from "./webgl2-nameplate-pass";
+import {
+	type NameplateTextureBinding,
+	WebGL2NameplateTextureCache,
+} from "./webgl2-nameplate-texture-cache";
+import { resolveNameplateAnchor } from "./nameplate-anchor";
+import {
+	retainLegibleNameplates,
+	retainNearestNameplates,
+} from "./nameplate-selection";
+import {
+	resolveNameplateCategory,
+	type NameplateAppearance,
+	type NameplateVisual,
+} from "./nameplate-policy";
+import {
 	assertSharedTerrainRegion,
 	type TerrainProgramInput,
 } from "./terrain-program-input";
@@ -572,6 +591,25 @@ interface PreparedEntityGrounding {
 	readonly settings: EntityShadowSettings["grounding"];
 }
 
+interface PreparedNameplateCandidate {
+	readonly anchor: Vec3;
+	readonly distanceSquared: number;
+	readonly identity: string;
+	readonly renderScopeKeys: readonly string[];
+	readonly visual: NameplateVisual;
+}
+
+interface MutableNameplateDrawInstance extends NameplateDrawInstance {
+	anchor: Vec3;
+	binding: NameplateTextureBinding;
+}
+
+interface MutableNameplateScopedDrawInstance extends NameplateScopedDrawInstance {
+	anchor: Vec3;
+	binding: NameplateTextureBinding;
+	renderScopeKey: string;
+}
+
 interface PreparedSceneContributions {
 	/** Terrain selected by this renderer from its RenderWorld. */
 	readonly terrain: readonly TerrainFrameInput[];
@@ -590,6 +628,10 @@ interface PreparedSceneContributions {
 	readonly skyParticles: readonly ParticleDrawRange[];
 	/** Fixed per-receiver grounding records produced from the same visible-entry walk. */
 	readonly entityGrounding: PreparedEntityGrounding | null;
+	/** Budgeted candidates collected only from already-selected visible dynamic entities. */
+	readonly nameplates: readonly PreparedNameplateCandidate[];
+	/** Perspective scale applied by the nameplate pass for this prepared view. */
+	readonly nameplateReferenceDistance: number;
 }
 
 /** Anchor-relative matrices and content reused by all passes for one view. */
@@ -720,7 +762,22 @@ export class WebGL2Renderer implements Renderer {
 	#particlePass: WebGL2ParticlePass | null = null;
 	readonly #worldMarkerPass: WebGL2WorldMarkerPass;
 	readonly #worldTrajectoryPass: WebGL2WorldTrajectoryPass;
+	readonly #nameplatePass: WebGL2NameplatePass;
+	readonly #nameplateTextureCache: WebGL2NameplateTextureCache;
+	readonly #nameplateDrawScratch: MutableNameplateDrawInstance[] = [];
+	readonly #scopedNameplateDrawScratch: MutableNameplateScopedDrawInstance[] =
+		[];
+	readonly #nameplatePopulationScratch: NameplateVisual[] = [];
+	#reconciledNameplateAppearance: NameplateAppearance | null = null;
+	#reconciledNameplatePopulationRevision = -1;
+	#reconciledNameplateDensity = Number.NaN;
+	#reconciledNameplateViewerIdentity: string | null | undefined = undefined;
+	#eligibleNameplateCandidateCount = 0;
+	#budgetRejectedNameplateCandidateCount = 0;
+	#submittedNameplateInstanceCount = 0;
+	#submittedNameplateDrawCount = 0;
 	#frameWorldIndicator: WorldIndicatorInput | null = null;
+	#frameViewerEntityIdentity: string | null = null;
 	/** This frame's owner-local sources, replaced every submission rather than retained. */
 	#particleSources: readonly ParticleSourceRange[] = [];
 	/** Record storage published with the ranges that index into it. */
@@ -1004,6 +1061,16 @@ export class WebGL2Renderer implements Renderer {
 			gl,
 			textureFilteringSupport,
 		);
+		this.#nameplatePass = new WebGL2NameplatePass(
+			gl,
+			this.#textureSamplers.getSampler({
+				mipLevels: 1,
+				policy: "linear",
+				samplingClass: "filterable",
+				wrap: TextureWrapMode.Clamp,
+			}),
+		);
+		this.#nameplateTextureCache = new WebGL2NameplateTextureCache(gl);
 		this.#frameInstances = new FrameInstanceStreamArena(gl);
 		this.#outdoorPssmPass = new WebGL2OutdoorPssmPass(
 			gl,
@@ -1055,6 +1122,14 @@ export class WebGL2Renderer implements Renderer {
 				compiledObjectDraws: this.#compiledDraws.getDiagnostics(),
 				entityShadows: {
 					outdoorTargets: this.#outdoorPssmPass.getDiagnostics(),
+				},
+				nameplates: {
+					budgetRejectedCandidateCount:
+						this.#budgetRejectedNameplateCandidateCount,
+					cache: this.#nameplateTextureCache.diagnostics(),
+					eligibleCandidateCount: this.#eligibleNameplateCandidateCount,
+					submittedDrawCount: this.#submittedNameplateDrawCount,
+					submittedInstanceCount: this.#submittedNameplateInstanceCount,
 				},
 				profile: this.#frameProfiler?.getProfile() ?? null,
 				profilingEnabled: this.#frameProfiler !== null,
@@ -1179,6 +1254,7 @@ export class WebGL2Renderer implements Renderer {
 		}
 		this.#skyClockSeconds = input.timeSeconds;
 		this.#frameWorldIndicator = input.worldIndicator ?? null;
+		this.#frameViewerEntityIdentity = input.viewerEntityIdentity;
 		// Snapshotted here because the flat schedule never receives frame settings, and both
 		// schedules reach presentation through the same shared helper.
 		this.#frameColorGrade = input.frameSettings.colorGrade;
@@ -1648,6 +1724,7 @@ export class WebGL2Renderer implements Renderer {
 		}
 		this.#submitBlendedPhase(view, objectPhases, shading, profile, pipeline);
 		this.#drawScopedParticles(view, particlesByScope, pipeline, profile);
+		this.#drawNameplates(view, pipeline);
 		const indicator = this.#frameWorldIndicator;
 		if (indicator?.trajectory) {
 			this.#drawWorldTrajectory(view, indicator.trajectory, {
@@ -1701,6 +1778,8 @@ export class WebGL2Renderer implements Renderer {
 		this.#skyPass = null;
 		this.#worldMarkerPass.destroy();
 		this.#worldTrajectoryPass.destroy();
+		this.#nameplatePass.destroy();
+		this.#nameplateTextureCache.destroy();
 		if (this.#skyProgram) this.#gl.deleteProgram(this.#skyProgram.program);
 		this.#skyProgram = null;
 		if (this.#portalAtlasSkyProgram) {
@@ -1928,8 +2007,14 @@ export class WebGL2Renderer implements Renderer {
 		portalVisibility: DynamicRenderDomainSelection | null,
 	): PreparedSceneContributions {
 		const resolutionStartedAt = profile?.beginCpuPhase();
+		this.#reconcileNameplateTextureCache(
+			frameSettings.nameplates.appearance,
+			frameSettings.quality.renderScale,
+			this.#frameViewerEntityIdentity,
+		);
 		const terrain: TerrainFrameInput[] = [];
 		const objects: PreparedObjectFrameInput[] = [];
+		const nameplates: PreparedNameplateCandidate[] = [];
 		const groundingEnabled = frameSettings.entityShadows.mode !== "none";
 		const outdoorGroundingEnabled =
 			frameSettings.entityShadows.mode === "simple";
@@ -2094,6 +2179,44 @@ export class WebGL2Renderer implements Renderer {
 							: null;
 					if (caster) this.#entityGroundingCasters.push(caster);
 				}
+				if (
+					renderTarget !== null &&
+					renderTarget.renderScopeKeys.length > 0 &&
+					retainedDynamicContributionCount > 0 &&
+					frameSettings.nameplates.maximumVisible > 0
+				) {
+					const facts = this.#world.getEntityNameplateFacts(nodeId);
+					if (facts !== null) {
+						const category = resolveNameplateCategory(
+							contribution.category,
+							facts.identity,
+							this.#frameViewerEntityIdentity,
+						);
+						if (frameSettings.nameplates.categoryVisibility[category]) {
+							const landblockOffset = createLandblockOffset(
+								getLandblockCoordinates(renderTarget.landblockId),
+								prepared.anchorCoordinates,
+							);
+							const { anchor, distanceSquared } = resolveNameplateAnchor(
+								facts.rigidBounds,
+								contribution.footprint.placement.localToLandblock,
+								landblockOffset,
+								prepared.cameraPosition,
+								frameSettings.nameplates.anchorPaddingWorldUnits,
+							);
+							nameplates.push({
+								anchor,
+								distanceSquared,
+								identity: facts.identity,
+								renderScopeKeys: renderTarget.renderScopeKeys,
+								visual: {
+									category,
+									content: facts.content,
+								},
+							});
+						}
+					}
+				}
 				this.#selectedDynamicNodeIds.add(nodeId);
 				this.#frameSelectionMetrics.visibleDynamicEntityCount += 1;
 				this.#frameSelectionMetrics.visibleDynamicPartCount +=
@@ -2188,6 +2311,19 @@ export class WebGL2Renderer implements Renderer {
 				resolutionStartedAt,
 			);
 		}
+		retainLegibleNameplates(
+			nameplates,
+			prepared.clipFromAnchor,
+			frameSettings.nameplates,
+		);
+		const eligibleNameplateCandidateCount = nameplates.length;
+		retainNearestNameplates(
+			nameplates,
+			frameSettings.nameplates.maximumVisible,
+		);
+		this.#eligibleNameplateCandidateCount += eligibleNameplateCandidateCount;
+		this.#budgetRejectedNameplateCandidateCount +=
+			eligibleNameplateCandidateCount - nameplates.length;
 		if (profile) {
 			profile.recordObjectPreparation(
 				staticObjectCount,
@@ -2204,6 +2340,8 @@ export class WebGL2Renderer implements Renderer {
 					}
 				: null,
 			landblockOffsets,
+			nameplates,
+			nameplateReferenceDistance: frameSettings.nameplates.referenceDistance,
 			objects,
 			particles: [],
 			skyParticles: [],
@@ -2566,6 +2704,10 @@ export class WebGL2Renderer implements Renderer {
 		envCellRenderMode: FrameInput["frameSettings"]["envCellRenderMode"],
 	): void {
 		const metrics = this.#frameSelectionMetrics;
+		this.#eligibleNameplateCandidateCount = 0;
+		this.#budgetRejectedNameplateCandidateCount = 0;
+		this.#submittedNameplateInstanceCount = 0;
+		this.#submittedNameplateDrawCount = 0;
 		metrics.ambientOcclusion.activeBytes = 0;
 		metrics.ambientOcclusion.allocatedGenerationCount = 0;
 		metrics.ambientOcclusion.disposedGenerationCount = 0;
@@ -2958,6 +3100,7 @@ export class WebGL2Renderer implements Renderer {
 			this.#skyClockSeconds,
 			1.0,
 		);
+		this.#drawNameplates(view, null);
 		const indicator = this.#frameWorldIndicator;
 		if (indicator?.trajectory)
 			this.#drawWorldTrajectory(view, indicator.trajectory, null);
@@ -2971,6 +3114,110 @@ export class WebGL2Renderer implements Renderer {
 			profile,
 		);
 		this.#presentFlatScene(target, profile);
+	}
+
+	#reconcileNameplateTextureCache(
+		appearance: NameplateAppearance,
+		density: number,
+		viewerEntityIdentity: string | null,
+	): void {
+		const revision = this.#world.getNameplatePopulationRevision();
+		if (
+			revision === this.#reconciledNameplatePopulationRevision &&
+			appearance === this.#reconciledNameplateAppearance &&
+			density === this.#reconciledNameplateDensity &&
+			viewerEntityIdentity === this.#reconciledNameplateViewerIdentity
+		)
+			return;
+		this.#nameplatePopulationScratch.length = 0;
+		this.#world.forEachNameplateVisual((identity, visual) => {
+			this.#nameplatePopulationScratch.push({
+				...visual,
+				category: resolveNameplateCategory(
+					visual.category,
+					identity,
+					viewerEntityIdentity,
+				),
+			});
+		});
+		this.#nameplateTextureCache.reconcile(
+			this.#nameplatePopulationScratch,
+			appearance,
+			density,
+		);
+		this.#reconciledNameplatePopulationRevision = revision;
+		this.#reconciledNameplateAppearance = appearance;
+		this.#reconciledNameplateDensity = density;
+		this.#reconciledNameplateViewerIdentity = viewerEntityIdentity;
+	}
+
+	#drawNameplates(
+		view: PreparedView,
+		portalRouting: WebGL2PortalScopeAtlasPipeline | null,
+	): void {
+		const context = {
+			clipFromAnchor: mat4ToFloat32Array(
+				view.clipFromAnchor,
+				this.#matrixScratch,
+			),
+			referenceDistance: view.nameplateReferenceDistance,
+			viewportHeight: this.#frameHeight,
+			viewportWidth: this.#frameWidth,
+		};
+		if (view.nameplates.length === 0) {
+			if (portalRouting)
+				this.#nameplatePass.drawScoped(context, [], portalRouting);
+			else this.#nameplatePass.draw(context, []);
+			return;
+		}
+		if (portalRouting) {
+			let instanceCount = 0;
+			for (const candidate of view.nameplates) {
+				const binding = this.#nameplateTextureCache.acquire(candidate.visual);
+				for (const renderScopeKey of candidate.renderScopeKeys) {
+					const instance = this.#scopedNameplateDrawScratch[instanceCount];
+					if (instance === undefined) {
+						this.#scopedNameplateDrawScratch.push({
+							anchor: candidate.anchor,
+							binding,
+							renderScopeKey,
+						});
+					} else {
+						instance.anchor = candidate.anchor;
+						instance.binding = binding;
+						instance.renderScopeKey = renderScopeKey;
+					}
+					instanceCount += 1;
+				}
+			}
+			this.#scopedNameplateDrawScratch.length = instanceCount;
+			this.#nameplatePass.drawScoped(
+				context,
+				this.#scopedNameplateDrawScratch,
+				portalRouting,
+			);
+		} else {
+			let instanceCount = 0;
+			for (const candidate of view.nameplates) {
+				const binding = this.#nameplateTextureCache.acquire(candidate.visual);
+				const instance = this.#nameplateDrawScratch[instanceCount];
+				if (instance === undefined) {
+					this.#nameplateDrawScratch.push({
+						anchor: candidate.anchor,
+						binding,
+					});
+				} else {
+					instance.anchor = candidate.anchor;
+					instance.binding = binding;
+				}
+				instanceCount += 1;
+			}
+			this.#nameplateDrawScratch.length = instanceCount;
+			this.#nameplatePass.draw(context, this.#nameplateDrawScratch);
+		}
+		const diagnostics = this.#nameplatePass.diagnostics();
+		this.#submittedNameplateDrawCount += diagnostics.drawCount;
+		this.#submittedNameplateInstanceCount += diagnostics.instanceCount;
 	}
 
 	#drawWorldMarker(

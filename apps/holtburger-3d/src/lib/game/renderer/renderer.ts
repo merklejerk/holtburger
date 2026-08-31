@@ -25,6 +25,7 @@ import type { TexturePreparer } from "../textures/texture-preparer";
 import type { AmbientOcclusionSettings } from "./ambient-occlusion-policy";
 import type { ColorGradeSettings } from "./color-grade-policy";
 import type { EntityShadowSettings } from "./entity-shadow-policy";
+import type { NameplateSettings } from "./nameplate-policy";
 
 /** Environment-cell visibility scheduler selected without rebuilding resident content. */
 export type EnvCellRenderMode = "flat" | "portal";
@@ -52,6 +53,8 @@ export interface FrameSettings {
 	readonly layerVisibility: RenderLayerVisibility;
 	/** Whether debug presentation includes GfxObjs retail's degradation chain suppresses. */
 	readonly showRetailHiddenGeometry: boolean;
+	/** Category participation and per-view submission ceiling for entity nameplates. */
+	readonly nameplates: NameplateSettings;
 	/** Optional nearby opaque-geometry occlusion and its runtime-adjustable presentation values. */
 	readonly ambientOcclusion: AmbientOcclusionSettings;
 	/**
@@ -164,6 +167,8 @@ export interface FrameInput {
 	 * being driven. Always resolved, so the light is placed rather than defaulted.
 	 */
 	readonly viewerLightOrigin: SceneVec3;
+	/** Stable identity of the frontend-driven entity, or null when the camera is unbound. */
+	readonly viewerEntityIdentity: string | null;
 	/** Dynamic display choices applied to this frame. */
 	readonly frameSettings: FrameSettings;
 	/** Optional transition composition; ordinary frames allocate no transition resources. */
@@ -614,6 +619,8 @@ export interface RendererFrameProfile {
 export interface RendererFrameDiagnosticsSnapshot {
 	/** Cold entity-shadow resource ownership, independent from optional timing profiling. */
 	readonly entityShadows: EntityShadowResourceDiagnostics;
+	/** Plate selection, submission, and cache facts from the latest frame and renderer lifetime. */
+	readonly nameplates: RendererNameplateDiagnostics;
 	/** Latest completed profile, or null before the first sample and while profiling is disabled. */
 	readonly profile: RendererFrameProfile | null;
 	readonly profilingEnabled: boolean;
@@ -626,6 +633,34 @@ export interface RendererFrameDiagnosticsSnapshot {
 	 * attributable instead of appearing as unexplained frame cost.
 	 */
 	readonly compiledObjectDraws: CompiledObjectDrawDiagnostics | null;
+}
+
+/** Exact nameplate work needed to distinguish selection, budget, draw, and residency costs. */
+interface RendererNameplateDiagnostics {
+	/** Category-enabled, entity-visible, legible candidates before the per-view budget. */
+	readonly eligibleCandidateCount: number;
+	/** Eligible candidates rejected solely by the configured per-view maximum. */
+	readonly budgetRejectedCandidateCount: number;
+	/** Instanced quads submitted across all views in the latest frame. */
+	readonly submittedInstanceCount: number;
+	/** Physical per-texture instanced draws submitted across all views in the latest frame. */
+	readonly submittedDrawCount: number;
+	readonly cache: {
+		/** Exact RGBA8 bytes owned by live complete-plate textures. */
+		readonly byteCount: number;
+		/** Reused visible-key acquisitions over this renderer lifetime. */
+		readonly hitCount: number;
+		/** Complete plate textures currently resident. */
+		readonly liveEntryCount: number;
+		/** Visible-key acquisitions that required rasterization over this renderer lifetime. */
+		readonly missCount: number;
+		/** Complete Canvas plate rasterizations over this renderer lifetime. */
+		readonly rasterizationCount: number;
+		/** Oversized rasters rejected before texture allocation over this renderer lifetime. */
+		readonly rejectedRasterCount: number;
+		/** Complete plate textures explicitly released over this renderer lifetime. */
+		readonly releaseCount: number;
+	};
 }
 
 /** Renderer-lifetime outdoor target ownership exposed for toggle/reconfigure verification. */

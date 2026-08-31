@@ -26,6 +26,11 @@
 	import { SyntheticBlendedBuildingPipeline } from "./synthetic-blended-building-pipeline";
 	import { SyntheticInstancedObjectPipeline } from "./synthetic-instanced-object-pipeline";
 	import {
+		createSyntheticNameplateWorkload,
+		SyntheticNameplateSetupVisualSource,
+		type SyntheticNameplateWorkload,
+	} from "./synthetic-nameplate-workload";
+	import {
 		DynamicOnlyLandblockSource,
 		WithoutAuthoredDynamicsLandblockSource,
 	} from "./dynamic-only-landblock-source";
@@ -74,6 +79,7 @@
 		type EntityShadowResourceDiagnostics,
 		type FrameSelectionMetrics,
 		type FrameSettings,
+		type RendererFrameDiagnosticsSnapshot,
 		type RendererFrameProfile,
 	} from "../../lib/game/renderer/renderer";
 	import { validateRenderScale } from "../../lib/game/renderer/render-scale";
@@ -420,6 +426,10 @@
 		readonly setMinimumObjectFootprintCssPixelArea: (pixelArea: number) => void;
 		/** Change device pixels per CSS pixel, which is also the only anti-aliasing control. */
 		readonly setRenderScale: (renderScale: number) => void;
+		/** Change only the nameplate submission ceiling without rebuilding entity content. */
+		readonly setNameplateMaximumVisible: (maximumVisible: number) => void;
+		/** Change only the projected name-font cutoff without rebuilding entity content. */
+		readonly setNameplateMinimumLegiblePixels: (minimumPixels: number) => void;
 		/** Replace the complete validated entity-shadow policy without rebuilding content. */
 		readonly setEntityShadowSettings: (settings: EntityShadowSettings) => void;
 		/** Select one exhaustive shadow mode while retaining inactive appearance parameters. */
@@ -484,6 +494,19 @@
 			offsets: readonly (readonly [number, number, number])[],
 			physicalMode: "pose-only" | "integrated",
 		) => Promise<readonly DynamicEntityView[]>;
+		/** Install a deterministic catalog-independent population through the shared dynamic runtime. */
+		readonly installSyntheticNameplateWorkload: (
+			workload: SyntheticNameplateWorkload,
+		) => Promise<readonly DynamicEntityView[]>;
+		/** Move unchanged plate content, then retire it, returning renderer-owned lifecycle evidence. */
+		readonly probeSyntheticNameplateLifecycle: () => Promise<{
+			readonly before: RendererFrameDiagnosticsSnapshot["nameplates"];
+			readonly moved: RendererFrameDiagnosticsSnapshot["nameplates"];
+			readonly cleared: RendererFrameDiagnosticsSnapshot["nameplates"];
+			readonly movedGuid: number;
+			readonly previousY: number;
+			readonly movedY: number;
+		}>;
 		/** Retire every live harness-spawned generation through the same host lifecycle. */
 		readonly despawnExplorerEntityFleet: () => Promise<number>;
 		/** Apply catalog-authored launch speed/spin to one exact generation. */
@@ -627,6 +650,8 @@
 		>;
 		/** Latest explicit renderer profile, or null while profiling is disabled. */
 		readonly frameProfile: RendererFrameProfile | null;
+		/** Latest plate selection, submission, and renderer-local cache evidence. */
+		readonly nameplates: RendererFrameDiagnosticsSnapshot["nameplates"] | null;
 		readonly tickProfile: ReturnType<
 			GamePresentationRuntime["getTickProfile"]
 		> | null;
@@ -1626,6 +1651,88 @@
 		return spawned;
 	}
 
+	async function installSyntheticNameplateWorkload(
+		workload: SyntheticNameplateWorkload,
+	): Promise<readonly DynamicEntityView[]> {
+		if (!runtime || cameraEvidence === null)
+			throw new Error(
+				"Synthetic nameplate workload requires a current camera and runtime.",
+			);
+		const entities = createSyntheticNameplateWorkload(
+			workload,
+			cameraEvidence.landblockId,
+			cameraEvidence.position,
+			cameraEvidence.envCellId,
+		);
+		await runtime.replaceDynamicEntitySnapshot(entities);
+		spawnedEntities = entities;
+		return entities;
+	}
+
+	async function probeSyntheticNameplateLifecycle(): Promise<{
+		readonly before: RendererFrameDiagnosticsSnapshot["nameplates"];
+		readonly moved: RendererFrameDiagnosticsSnapshot["nameplates"];
+		readonly cleared: RendererFrameDiagnosticsSnapshot["nameplates"];
+		readonly movedGuid: number;
+		readonly previousY: number;
+		readonly movedY: number;
+	}> {
+		if (!runtime)
+			throw new Error(
+				"Synthetic nameplate lifecycle requires an active runtime.",
+			);
+		const current = spawnedEntities[0];
+		if (current?.placement.kind !== "world")
+			throw new Error("Synthetic nameplate lifecycle has no world target.");
+		const readNameplates =
+			(): RendererFrameDiagnosticsSnapshot["nameplates"] => {
+				const diagnostics = runtime?.getRendererFrameDiagnostics()?.nameplates;
+				if (!diagnostics)
+					throw new Error(
+						"Synthetic nameplate lifecycle has no renderer diagnostics.",
+					);
+				return diagnostics;
+			};
+		const before = readNameplates();
+		const previousY = current.placement.pose.coords.y;
+		const movedY = previousY + 2;
+		const movedEntity: DynamicEntityView = {
+			...current,
+			placement: {
+				...current.placement,
+				pose: {
+					...current.placement.pose,
+					coords: { ...current.placement.pose.coords, y: movedY },
+				},
+			},
+		};
+		spawnedEntities = spawnedEntities.map((entity) =>
+			entity.identity.guid === movedEntity.identity.guid ? movedEntity : entity,
+		);
+		await runtime.upsertDynamicEntity(movedEntity);
+		await waitForTwoAnimationFrames();
+		const moved = readNameplates();
+		await runtime.replaceDynamicEntitySnapshot([]);
+		spawnedEntities = [];
+		await waitForTwoAnimationFrames();
+		return {
+			before,
+			cleared: readNameplates(),
+			moved,
+			movedGuid: movedEntity.identity.guid,
+			movedY,
+			previousY,
+		};
+	}
+
+	function waitForTwoAnimationFrames(): Promise<void> {
+		return new Promise((resolve) =>
+			window.requestAnimationFrame(() =>
+				window.requestAnimationFrame(() => resolve()),
+			),
+		);
+	}
+
 	async function launchExplorerEntity(
 		guid: number,
 		generation: number,
@@ -2318,6 +2425,27 @@
 		runtime.setFrameSettings(frameSettings);
 	}
 
+	function setNameplateMaximumVisible(maximumVisible: number): void {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		frameSettings = {
+			...frameSettings,
+			nameplates: { ...frameSettings.nameplates, maximumVisible },
+		};
+		runtime.setFrameSettings(frameSettings);
+	}
+
+	function setNameplateMinimumLegiblePixels(minimumPixels: number): void {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		frameSettings = {
+			...frameSettings,
+			nameplates: {
+				...frameSettings.nameplates,
+				minimumLegibleNamePixels: minimumPixels,
+			},
+		};
+		runtime.setFrameSettings(frameSettings);
+	}
+
 	function setEntityShadowSettings(settings: EntityShadowSettings): void {
 		if (!runtime) throw new Error("Browser harness runtime is not ready.");
 		frameSettings = {
@@ -2588,7 +2716,7 @@
 					contentSource,
 					contentSource,
 					contentSource,
-					contentSource,
+					new SyntheticNameplateSetupVisualSource(contentSource),
 					EXPLORER_TUNING.frameSettings,
 					PARTICLE_SEED === null
 						? undefined
@@ -2911,6 +3039,8 @@
 					setMinimumObjectFootprintCssPixelArea,
 					setMinimumPortalFootprintCssPixelArea,
 					setRenderScale,
+					setNameplateMaximumVisible,
+					setNameplateMinimumLegiblePixels,
 					setEntityShadowSettings,
 					setEntityShadowMode,
 					setOffscreenAnimationSampleIntervalSeconds,
@@ -2919,6 +3049,8 @@
 					resetTerrainGlTrace: () => terrainGlTrace?.reset(),
 					spawnExplorerEntity,
 					spawnExplorerEntityFleet,
+					installSyntheticNameplateWorkload,
+					probeSyntheticNameplateLifecycle,
 					despawnExplorerEntityFleet,
 					spawnSimulatedExplorerEntity,
 					possessExplorerEntity,
@@ -2957,6 +3089,7 @@
 							compiledObjectDraws:
 								frameDiagnostics?.compiledObjectDraws ?? null,
 							frameProfile: frameDiagnostics?.profile ?? null,
+							nameplates: frameDiagnostics?.nameplates ?? null,
 							frames,
 							metrics: frameDiagnostics?.selectionMetrics ?? null,
 							portalContextLossPolicy,

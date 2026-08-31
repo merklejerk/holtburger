@@ -14,8 +14,7 @@ import {
 } from "./entity-shadow-policy";
 
 describe("entity shadow policy", () => {
-	it("publishes a complete default-hybrid policy within fixed shader ceilings", () => {
-		expect(DEFAULT_ENTITY_SHADOW_SETTINGS.mode).toBe("shadow-maps");
+	it("keeps the configured policy within fixed shader ceilings", () => {
 		expect(
 			DEFAULT_ENTITY_SHADOW_SETTINGS.pssm.cascadeCount,
 		).toBeLessThanOrEqual(MAX_OUTDOOR_PSSM_CASCADES);

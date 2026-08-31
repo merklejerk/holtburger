@@ -293,6 +293,8 @@ pub fn explorer_radar_blip_color(
 pub struct DynamicEntityDefinitionInput {
     /// Producer-owned instance and template identity.
     pub identity: DynamicEntityIdentity,
+    /// Optional raw authored level retained for frontend display validation.
+    pub level: Option<i32>,
     /// Immutable DAT content identities.
     pub content: DynamicEntityContent,
     /// Lossless ordered material and part substitutions.
@@ -341,6 +343,8 @@ pub struct DynamicEntityPhysicalPreparationInput {
 pub struct DynamicEntityDefinition {
     /// Producer-owned instance and template identity.
     pub identity: DynamicEntityIdentity,
+    /// Optional raw authored level retained for frontend display validation.
+    pub level: Option<i32>,
     /// Immutable DAT content identities.
     pub content: DynamicEntityContent,
     /// Lossless ordered material and part substitutions.
@@ -452,6 +456,7 @@ impl DynamicEntityDefinition {
 
         Ok(Self {
             identity: input.identity,
+            level: input.level,
             content: input.content,
             appearance: input.appearance,
             placement: input.placement,
@@ -627,6 +632,8 @@ pub struct DynamicEntityBodyReplacementOutcome {
 pub struct DynamicEntityProjectionInput {
     /// Current semantic identity copied from the producer definition.
     pub identity: DynamicEntityIdentity,
+    /// Optional raw authored level retained for frontend display validation.
+    pub level: Option<i32>,
     /// Immutable presentation content identities.
     pub content: DynamicEntityContent,
     /// Ordered presentation appearance substitutions.
@@ -842,6 +849,7 @@ fn projection_input(
 ) -> DynamicEntityProjectionInput {
     DynamicEntityProjectionInput {
         identity: definition.identity.clone(),
+        level: definition.level,
         content: definition.content,
         appearance: definition.appearance.clone(),
         object_scale: definition.object_scale,
@@ -1593,6 +1601,7 @@ mod tests {
                 name: "Clay".to_owned(),
                 weenie_type: WeenieType::Creature,
             },
+            level: None,
             content: DynamicEntityContent {
                 motion_table_did: None,
                 setup_did: 0x0200_0001,

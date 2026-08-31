@@ -340,6 +340,32 @@ exact values.
 configuration propagation separately, and leave subjective calibration to its actual evaluation
 process.
 
+## Temporary Overrides Restore an Assumed Default
+
+**Smell:** A test, diagnostic, benchmark, preview, or scoped operation temporarily changes shared
+state, then restores a hard-coded “normal” value instead of the value that was actually present.
+
+**Signals:**
+
+- Cleanup assigns a literal default after applying a temporary override.
+- Restoration runs only on the successful path rather than in guaranteed cleanup.
+- The helper assumes no caller, user, environment, or concurrent owner customized the state first.
+- Changing an adjustable default requires changing diagnostic cleanup code.
+
+**Possible failure:** The observing tool leaves production state changed after failure, clobbers a
+caller's valid customization, or makes later measurements and tests depend on execution order.
+
+**Questions:** Who owns the state being overridden? Can the operation fail or be nested? Is the
+original value readable and sufficient to restore the complete state? Can another writer change it
+while the override is active?
+
+**Counterexamples:** A disposable isolated process may intentionally end instead of restoring
+state, and a reset operation may explicitly promise to replace all state with a canonical baseline.
+
+**Possible responses:** Capture the complete prior value, restore it from guaranteed cleanup such
+as `finally` or an RAII guard, serialize competing writers where necessary, or run the experiment
+against an isolated owner whose lifetime ends with the override.
+
 ## Fixture Setup Becomes a Shadow Framework
 
 **Smell:** Test setup grows until its implicit behavior dominates the behavior under test.

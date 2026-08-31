@@ -1,3 +1,5 @@
+import type { NameplateSettings } from "./game/renderer/nameplate-policy";
+
 /**
  * Tuning defaults shared by the browser frontends.
  *
@@ -300,6 +302,56 @@ export const SHARED_FRONTEND_TUNING = {
 	rendering: {
 		/** Fallback framebuffer color exposed when no scene presentation covers a pixel. */
 		clearColor: { red: 0.15, green: 0.05, blue: 0.05, alpha: 1 },
+		/** Shared initial nameplate workload and Canvas appearance for Client and Explorer. */
+		nameplates: {
+			/** Renderer-space clearance above the current rigid-pose top. */
+			anchorPaddingWorldUnits: 0.15,
+			appearance: {
+				fillColors: {
+					/** Hostile and attackable creatures. */
+					mob: { red: 1, green: 0.502, blue: 0.471, alpha: 1 },
+					/** Non-player characters and service providers. */
+					npc: { red: 1, green: 0.82, blue: 0.4, alpha: 1 },
+					/** Other connected players. */
+					player: { red: 0.49, green: 0.827, blue: 0.988, alpha: 1 },
+					/** The locally driven player, when explicitly enabled. */
+					selfPlayer: { red: 0.525, green: 0.937, blue: 0.675, alpha: 1 },
+					/** Uncategorized dynamic presentations when explicitly enabled. */
+					other: { red: 0.82, green: 0.835, blue: 0.859, alpha: 1 },
+				},
+				/** CSS font-family expression consumed directly by Canvas2D. */
+				fontFamily: "sans-serif",
+				horizontalPaddingPixels: 6,
+				level: {
+					fontSizePixels: 42,
+					fontStyle: "normal",
+					fontWeight: 400,
+					outlineWidthPixels: 2.5,
+				},
+				lineGapPixels: 4,
+				name: {
+					fontSizePixels: 48,
+					fontStyle: "normal",
+					fontWeight: 600,
+					outlineWidthPixels: 3,
+				},
+				outlineColor: { red: 0, green: 0, blue: 0, alpha: 0.9 },
+				verticalPaddingPixels: 5,
+			},
+			categoryVisibility: {
+				mob: true,
+				npc: true,
+				other: false,
+				player: true,
+				selfPlayer: false,
+			},
+			/** Nearest already-visible candidates retained independently for each rendered view. */
+			maximumVisible: 50,
+			/** Cull once even the larger name line falls below this CSS-pixel height. */
+			minimumLegibleNamePixels: 4,
+			/** Camera-forward distance where raster pixels map one-for-one to viewport pixels. */
+			referenceDistance: 4,
+		} satisfies NameplateSettings,
 		/**
 		 * Presentation color grade, applied once to the finished scene.
 		 *

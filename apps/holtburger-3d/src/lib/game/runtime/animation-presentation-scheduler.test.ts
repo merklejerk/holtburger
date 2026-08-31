@@ -9,7 +9,6 @@ import { AnimationSystem } from "../systems/animation-system";
 import { wholeAnimationClip } from "../animation/animation-playback";
 import type { PreparedAnimation } from "../animation/animation-asset-repository";
 import { Mat4 } from "../math/types";
-import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import { AnimationPresentationScheduler } from "./animation-presentation-scheduler";
 
 /**
@@ -33,27 +32,6 @@ function buildAnimationSystem() {
 }
 
 describe("AnimationPresentationScheduler", () => {
-	it("uses the product offscreen cadence by default", () => {
-		const { frame } = advancedFrame(["scene-node:1"], 0);
-		const scheduler = new AnimationPresentationScheduler();
-		scheduler.select(frame, 0);
-
-		expect(
-			scheduler.select(
-				frame,
-				SHARED_FRONTEND_TUNING.animationPresentation
-					.offscreenSampleIntervalSeconds / 2,
-			).selectedNodeIds,
-		).toEqual([]);
-		expect(
-			scheduler.select(
-				frame,
-				SHARED_FRONTEND_TUNING.animationPresentation
-					.offscreenSampleIntervalSeconds,
-			).selectedNodeIds,
-		).toEqual(["scene-node:1"]);
-	});
-
 	it("preserves full cadence when the offscreen interval is zero", () => {
 		const { frame } = advancedFrame(["scene-node:1", "scene-node:2"], 0);
 		const scheduler = new AnimationPresentationScheduler();

@@ -406,6 +406,41 @@
 		</fieldset>
 
 		<details class="explorer-frame-details">
+			<summary>Nameplates</summary>
+			<div class="ac-param-panel">
+				<div class="ac-param-row">
+					<span class="ac-param-key">Eligible / budget rejected</span>
+					<code
+						>{diagnostics?.nameplates.eligibleCandidateCount ?? 0} / {diagnostics
+							?.nameplates.budgetRejectedCandidateCount ?? 0}</code
+					>
+				</div>
+				<div class="ac-param-row">
+					<span class="ac-param-key">Submitted instances / draws</span>
+					<code
+						>{diagnostics?.nameplates.submittedInstanceCount ?? 0} / {diagnostics
+							?.nameplates.submittedDrawCount ?? 0}</code
+					>
+				</div>
+				<div class="ac-param-row">
+					<span class="ac-param-key">Live textures / cache bytes</span>
+					<code
+						>{diagnostics?.nameplates.cache.liveEntryCount ?? 0} / {diagnostics
+							?.nameplates.cache.byteCount ?? 0}</code
+					>
+				</div>
+				<div class="ac-param-row">
+					<span class="ac-param-key">Rasterized / rejected / released</span>
+					<code
+						>{diagnostics?.nameplates.cache.rasterizationCount ?? 0} / {diagnostics
+							?.nameplates.cache.rejectedRasterCount ?? 0} / {diagnostics
+							?.nameplates.cache.releaseCount ?? 0}</code
+					>
+				</div>
+			</div>
+		</details>
+
+		<details class="explorer-frame-details">
 			<summary>Entity shadows</summary>
 			<div class="ac-param-panel">
 				<div class="ac-param-row">

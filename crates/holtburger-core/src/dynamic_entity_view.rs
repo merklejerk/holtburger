@@ -37,8 +37,16 @@ pub struct DynamicEntityIdentityView {
     pub guid: Guid,
     /// Static template identity.
     pub wcid: u32,
-    /// Producer-resolved display name.
+}
+
+/// Producer-resolved facts presented to a person rather than used as entity identity.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DynamicEntityDisplayView {
+    /// Required display name.
     pub name: String,
+    /// Optional nonnegative authored level.
+    pub level: Option<u32>,
 }
 
 /// Immutable visual and behavior identities consumed by frontend realization.
@@ -146,6 +154,8 @@ pub struct DynamicEntityViewSource {
     pub category: DynamicEntityCategory,
     /// Frontend-relevant identity without solver-only template category.
     pub identity: DynamicEntityIdentityView,
+    /// Producer-resolved display facts.
+    pub display: DynamicEntityDisplayView,
     /// Immutable presentation and behavior identities.
     pub content: DynamicEntityContent,
     /// Lossless ordered appearance substitutions.
@@ -179,8 +189,12 @@ impl DynamicEntityViewSource {
             identity: DynamicEntityIdentityView {
                 guid: input.identity.guid,
                 wcid: input.identity.wcid,
-                name: input.identity.name,
             },
+            display: dynamic_entity_display_view(
+                input.identity.name,
+                input.level,
+                input.identity.guid,
+            ),
             content: input.content,
             appearance: input.appearance,
             object_scale: input.object_scale,
@@ -200,6 +214,8 @@ pub struct DynamicEntityView {
     pub generation: u64,
     /// Live identity and display facts.
     pub identity: DynamicEntityIdentityView,
+    /// Person-facing name and optional authored level.
+    pub display: DynamicEntityDisplayView,
     /// Immutable presentation inputs.
     pub presentation: DynamicEntityPresentationView,
     /// Complete semantic presentation consequences and physical status.
@@ -438,6 +454,7 @@ pub fn project_dynamic_entity_view(source: DynamicEntityViewSource) -> DynamicEn
     DynamicEntityView {
         generation: source.generation,
         identity: source.identity,
+        display: source.display,
         presentation: DynamicEntityPresentationView {
             category: source.category,
             content: source.content,
@@ -458,6 +475,25 @@ pub fn project_dynamic_entity_view(source: DynamicEntityViewSource) -> DynamicEn
         placement,
         playing_clip: source.playing_clip.map(DynamicEntityPlayingClip::from),
     }
+}
+
+/// Validates raw producer display facts once at the shared projection boundary.
+pub fn dynamic_entity_display_view(
+    name: String,
+    raw_level: Option<i32>,
+    guid: Guid,
+) -> DynamicEntityDisplayView {
+    let level = raw_level.and_then(|level| match u32::try_from(level) {
+        Ok(level) => Some(level),
+        Err(_) => {
+            log::warn!(
+                "dynamic entity 0x{:08X} has negative display level {level}; treating it as absent",
+                guid.0
+            );
+            None
+        }
+    });
+    DynamicEntityDisplayView { name, level }
 }
 
 impl From<PhysicalBodyParticipation> for PhysicalBodyParticipationView {
@@ -488,5 +524,32 @@ impl From<SpatialSampleMode> for DynamicEntitySampleModeView {
             SpatialSampleMode::SimulatingVelocity => Self::SimulatingVelocity,
             SpatialSampleMode::Suspended => Self::Suspended,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use holtburger_common::Guid;
+
+    use super::dynamic_entity_display_view;
+
+    #[test]
+    fn display_level_preserves_absence_and_zero() {
+        assert_eq!(
+            dynamic_entity_display_view("Absent".to_owned(), None, Guid(1)).level,
+            None
+        );
+        assert_eq!(
+            dynamic_entity_display_view("Zero".to_owned(), Some(0), Guid(2)).level,
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn negative_display_level_becomes_absent() {
+        assert_eq!(
+            dynamic_entity_display_view("Invalid".to_owned(), Some(-1), Guid(3)).level,
+            None
+        );
     }
 }

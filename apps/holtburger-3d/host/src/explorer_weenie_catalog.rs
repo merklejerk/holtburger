@@ -447,6 +447,7 @@ mod tests {
             class_name: format!("class_{wcid}"),
             weenie_type: 10,
             name: Some(format!("Template {wcid}")),
+            level: None,
             setup_did: Some(0x0200_0001),
             motion_table_did: None,
             sound_table_did: None,

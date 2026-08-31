@@ -14,10 +14,10 @@ import type {
 	ResolvedObjectResident,
 } from "../resolution/landblock-layer";
 import {
+	type FrameInput,
 	type FrameSelectionMetrics,
 	type Renderer,
 } from "../renderer/renderer";
-import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import { SHARED_FRAME_SETTINGS } from "../../frontend-frame-settings";
 import type { ParticleEmitterSource } from "../../assets/particle-emitter-source";
 import type { SoundTableSource } from "../../assets/sound-table-source";
@@ -240,6 +240,21 @@ describe("GamePresentationRuntime view and interest control", () => {
 							resolution: null,
 						},
 					},
+					nameplates: {
+						budgetRejectedCandidateCount: 0,
+						cache: {
+							byteCount: 0,
+							hitCount: 0,
+							liveEntryCount: 0,
+							missCount: 0,
+							rasterizationCount: 0,
+							rejectedRasterCount: 0,
+							releaseCount: 0,
+						},
+						eligibleCandidateCount: 0,
+						submittedDrawCount: 0,
+						submittedInstanceCount: 0,
+					},
 					profile: null,
 					profilingEnabled: false,
 					selectionMetrics: frameSelectionMetrics,
@@ -305,35 +320,11 @@ describe("GamePresentationRuntime view and interest control", () => {
 		expect(requestedLayers).toEqual([{ id: "0x1010ffff", layer: "terrain" }]);
 		expect(frames[0]?.anchorLandblockId).toBe("0x2020ffff");
 		expect(frames[0]?.extent).toEqual({ height: 480, width: 640 });
-		expect(frames[0]?.frameSettings).toEqual({
-			layerVisibility: SHARED_FRAME_SETTINGS.layerVisibility,
-			showRetailHiddenGeometry: false,
-			ambientOcclusion: SHARED_FRAME_SETTINGS.ambientOcclusion,
-			colorGrade: SHARED_FRAME_SETTINGS.colorGrade,
-			entityShadows: SHARED_FRAME_SETTINGS.entityShadows,
-			distanceFogEnabled: true,
-			viewerLightEnabled:
-				SHARED_FRONTEND_TUNING.rendering.viewerLight.enabledByDefault,
-			weatherEnabled:
-				SHARED_FRONTEND_TUNING.rendering.frameDefaults.weatherEnabled,
-			staticLightsEnabled:
-				SHARED_FRONTEND_TUNING.rendering.frameDefaults.staticLightsEnabled,
-			envCellRenderMode: "portal",
-			quality: {
-				minimumObjectFootprintCssPixelArea:
-					SHARED_FRONTEND_TUNING.rendering.frameDefaults
-						.minimumObjectFootprintCssPixelArea,
-				minimumPortalFootprintCssPixelArea:
-					SHARED_FRONTEND_TUNING.rendering.frameDefaults
-						.minimumPortalFootprintCssPixelArea,
-				renderScale: SHARED_FRONTEND_TUNING.rendering.frameDefaults.renderScale,
-				textureFiltering:
-					SHARED_FRONTEND_TUNING.rendering.frameDefaults.textureFiltering,
-			},
-		});
+		expect(frames[0]?.frameSettings).toEqual(SHARED_FRAME_SETTINGS);
 		runtime.setFrameSettings({
 			layerVisibility: SHARED_FRAME_SETTINGS.layerVisibility,
 			showRetailHiddenGeometry: false,
+			nameplates: SHARED_FRAME_SETTINGS.nameplates,
 			ambientOcclusion: {
 				...SHARED_FRAME_SETTINGS.ambientOcclusion,
 				enabled: true,
@@ -352,7 +343,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 			quality: {
 				minimumObjectFootprintCssPixelArea: 8,
 				minimumPortalFootprintCssPixelArea: 4,
-				renderScale: SHARED_FRONTEND_TUNING.rendering.frameDefaults.renderScale,
+				renderScale: SHARED_FRAME_SETTINGS.quality.renderScale,
 				textureFiltering: "nearest",
 			},
 		});
@@ -360,6 +351,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 		expect(frames[1]?.frameSettings).toEqual({
 			layerVisibility: SHARED_FRAME_SETTINGS.layerVisibility,
 			showRetailHiddenGeometry: false,
+			nameplates: SHARED_FRAME_SETTINGS.nameplates,
 			ambientOcclusion: {
 				...SHARED_FRAME_SETTINGS.ambientOcclusion,
 				enabled: true,
@@ -378,7 +370,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 			quality: {
 				minimumObjectFootprintCssPixelArea: 8,
 				minimumPortalFootprintCssPixelArea: 4,
-				renderScale: SHARED_FRONTEND_TUNING.rendering.frameDefaults.renderScale,
+				renderScale: SHARED_FRAME_SETTINGS.quality.renderScale,
 				textureFiltering: "nearest",
 			},
 		});
@@ -394,6 +386,21 @@ describe("GamePresentationRuntime view and interest control", () => {
 					disposedGenerationCount: 0,
 					resolution: null,
 				},
+			},
+			nameplates: {
+				budgetRejectedCandidateCount: 0,
+				cache: {
+					byteCount: 0,
+					hitCount: 0,
+					liveEntryCount: 0,
+					missCount: 0,
+					rasterizationCount: 0,
+					rejectedRasterCount: 0,
+					releaseCount: 0,
+				},
+				eligibleCandidateCount: 0,
+				submittedDrawCount: 0,
+				submittedInstanceCount: 0,
 			},
 			profile: null,
 			profilingEnabled: false,
@@ -740,6 +747,44 @@ describe("GamePresentationRuntime view and interest control", () => {
 });
 
 describe("GamePresentationRuntime dynamic-entity presentation", () => {
+	it("publishes the installed generation identity of the viewer-driven entity", async () => {
+		const frames: FrameInput[] = [];
+		const runtime = await buildSpawnRuntime(
+			{ load: async () => spawnedVisual() },
+			ANIMATION_SOURCE,
+			{
+				async destroy() {},
+				drawFrame(input) {
+					frames.push(input);
+					return EMPTY_RENDERER_FRAME_FEEDBACK;
+				},
+			},
+		);
+		await runtime.replaceDynamicEntitySnapshot([spawnedEntity(7, 3)]);
+		runtime.setViewerEntity(7);
+		setTestCamera(runtime, {
+			far: 800,
+			fov: 90,
+			near: 0.5,
+			placement: {
+				envCellId: null,
+				landblockId: "0x0001ffff",
+				position: sceneVec3(createLandblockWorldOrigin("0x0001ffff")),
+				rotation: Quat.identity(),
+			},
+		});
+
+		runtime.render(1);
+		expect(frames.at(-1)?.viewerEntityIdentity).toBe(
+			"dynamic-entity:0x00000007/3",
+		);
+
+		runtime.setViewerEntity(null);
+		runtime.render(2);
+		expect(frames.at(-1)?.viewerEntityIdentity).toBeNull();
+		await runtime.destroy();
+	});
+
 	it("applies path-stable tick updates without mutating scene placement", async () => {
 		const runtime = await buildSpawnRuntime({
 			load: async () => spawnedVisual(),
@@ -963,6 +1008,9 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		await runtime.replaceDynamicEntitySnapshot([
 			spawnedEntity(7, 1, { noDraw: true }),
 		]);
+		const renamed = spawnedEntity(7, 1, { noDraw: true });
+		renamed.display = { level: 13, name: "Renamed entity" };
+		await runtime.replaceDynamicEntitySnapshot([renamed]);
 		await runtime.replaceDynamicEntitySnapshot([spawnedEntity(7, 2)]);
 
 		expect(load).toHaveBeenCalledTimes(1);
@@ -1363,10 +1411,12 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 async function buildSpawnRuntime(
 	setupVisualSource: SetupVisualSource,
 	animationSource: AnimationAssetSource = ANIMATION_SOURCE,
+	renderer?: Renderer,
 ): Promise<GamePresentationRuntime> {
 	const runtime = await buildUnscopedSpawnRuntime(
 		setupVisualSource,
 		animationSource,
+		renderer,
 	);
 	await activateSpawnScene(runtime, "0x0001ffff", 1);
 	return runtime;
@@ -1376,12 +1426,14 @@ async function buildSpawnRuntime(
 async function buildUnscopedSpawnRuntime(
 	setupVisualSource: SetupVisualSource,
 	animationSource: AnimationAssetSource = ANIMATION_SOURCE,
+	renderer?: Renderer,
 ): Promise<GamePresentationRuntime> {
 	const device: GamePresentationRuntimeRenderDevice = {
-		buildRenderer: async () => ({
-			async destroy() {},
-			drawFrame: () => EMPTY_RENDERER_FRAME_FEEDBACK,
-		}),
+		buildRenderer: async () =>
+			renderer ?? {
+				async destroy() {},
+				drawFrame: () => EMPTY_RENDERER_FRAME_FEEDBACK,
+			},
 		resources: TEST_RESOURCES,
 	};
 	return buildGamePresentationRuntimeForTest(
@@ -1589,7 +1641,8 @@ function spawnedEntity(
 	return {
 		generation,
 		playingClip: null,
-		identity: { guid, name: `Entity ${guid}`, wcid: 42 },
+		identity: { guid, wcid: 42 },
+		display: { name: `Entity ${guid}`, level: null },
 		physics: {
 			cloaked: false,
 			defaultAnimation: true,

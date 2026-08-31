@@ -1032,6 +1032,7 @@ fn template_definition_input(
                 })?,
             weenie_type,
         },
+        level: template.level,
         content: DynamicEntityContent {
             setup_did: content.setup_did,
             motion_table_did: template.motion_table_did,
@@ -1401,6 +1402,7 @@ mod tests {
             class_name: format!("class_{wcid}"),
             weenie_type: WeenieType::Creature as i32,
             name: Some(format!("Template {wcid}")),
+            level: Some(12),
             setup_did: Some(0x0200_0001),
             motion_table_did: Some(0x0900_0001),
             sound_table_did: None,

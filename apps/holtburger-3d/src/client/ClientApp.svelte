@@ -10,7 +10,6 @@
 		CharacterInputController,
 		type CharacterDrive,
 		type CharacterInputEdge,
-		type CharacterInputKey,
 	} from "../lib/game/controls/character-input-controller";
 	import { CLIENT_TUNING } from "./client-tuning";
 	import { createElectronHostTransport } from "../lib/host/electron-host-transport";
@@ -45,6 +44,13 @@
 		reduceClientLifecycleUiState,
 		type ClientLifecycleUiState,
 	} from "./client-lifecycle-state";
+	import { clientInputKey, ClientInputArbiter } from "./client-input-arbiter";
+	import { ClientPreciseJumpSession } from "./client-precise-jump-session";
+	import {
+		CLIENT_TOAST_DURATION_MS,
+		ClientToastCenter,
+		type ClientToast,
+	} from "./client-toast-center";
 
 	let lifecycle = $state<ClientLifecycleUiState>(
 		initialClientLifecycleUiState(),
@@ -59,7 +65,7 @@
 	let vitals = $state<readonly ClientVital[]>([]);
 	let characterMotion = $state<ClientCharacterMotionCapabilities | null>(null);
 	let activeJumpBeginSequence = $state<number | null>(null);
-	let jumpStatus = $state<string | null>(null);
+	let toast = $state<ClientToast | null>(null);
 	let chatMessages = $state<readonly ClientChatLine[]>([]);
 	let nextChatMessageId = 1;
 	const MAXIMUM_CHAT_LINES = 250;
@@ -76,7 +82,17 @@
 	/** Imperative presentation source sampled by the radar on its own bounded cadence. */
 	let presentationSession: ClientPresentationSession | null = null;
 	let frameRateSampler: FrameRateSampler | null = null;
+	const toastCenter = new ClientToastCenter({
+		durationMs: CLIENT_TOAST_DURATION_MS,
+		scheduler: {
+			cancel: (handle) => window.clearTimeout(handle),
+			schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
+		},
+	});
 	let inputController: CharacterInputController | null = null;
+	let inputArbiter: ClientInputArbiter | null = null;
+	let preciseJumpSession: ClientPreciseJumpSession | null = null;
+	let preciseJumpActive = $state(false);
 	let inputDispatch: Promise<void> = Promise.resolve();
 	const usesWorldPresentation = $derived(
 		clientLifecycleUsesWorldPresentation(lifecycle),
@@ -85,24 +101,6 @@
 		clientLifecycleEnablesWorldInput(lifecycle),
 	);
 
-	function clientInputKey(key: string): CharacterInputKey | null {
-		switch (key) {
-			case "w":
-			case "s":
-			case "a":
-			case "d":
-			case "z":
-			case "c":
-				return key;
-			case " ":
-				return "space";
-			case "Shift":
-				return "shift";
-			default:
-				return null;
-		}
-	}
-
 	function queueCharacterMotionEdge(
 		currentSession: ClientLifecycleSession,
 		edge: CharacterInputEdge,
@@ -110,7 +108,6 @@
 	): void {
 		if (edge.kind === "begin-jump") {
 			activeJumpBeginSequence = edge.sequence;
-			jumpStatus = null;
 		} else {
 			activeJumpBeginSequence = null;
 		}
@@ -179,6 +176,7 @@
 	function receive(event: ClientLifecycleSessionEvent): void {
 		switch (event.type) {
 			case "current-state":
+				if (event.state.lifecycle.kind !== "in-world") inputArbiter?.reset();
 				playerName = event.state.playerName;
 				worldName = event.state.worldName;
 				vitals = event.state.vitals;
@@ -193,6 +191,7 @@
 				});
 				return;
 			case "lifecycle":
+				if (event.lifecycle.kind !== "in-world") inputArbiter?.reset();
 				lifecycle = reduceClientLifecycleUiState(lifecycle, {
 					type: "authority",
 					lifecycle: event.lifecycle,
@@ -210,7 +209,10 @@
 					inputController?.rejectBegin(event.feedback.sequence);
 					if (activeJumpBeginSequence === event.feedback.sequence)
 						activeJumpBeginSequence = null;
-					jumpStatus = jumpRejectionText(event.feedback.outcome.reason);
+					toastCenter.publish({
+						message: jumpRejectionText(event.feedback.outcome.reason),
+						tone: "warning",
+					});
 				}
 				return;
 			case "world-name":
@@ -234,10 +236,14 @@
 				return;
 			}
 			case "exit-requested":
+				inputArbiter?.reset();
 				lifecycle = reduceClientLifecycleUiState(lifecycle, {
 					type: "exit",
 					exit: event.exit,
 				});
+				return;
+			case "presentation-discontinuity":
+				inputArbiter?.reset();
 				return;
 			default:
 				return;
@@ -278,7 +284,7 @@
 	async function disconnect(): Promise<void> {
 		if (session === null || lifecycle.kind === "exiting") return;
 		try {
-			inputController?.reset();
+			inputArbiter?.reset();
 			await inputDispatch;
 			await session.disconnect();
 		} catch (error) {
@@ -292,7 +298,7 @@
 	}
 
 	function handleChatFocusChange(focused: boolean): void {
-		if (focused) inputController?.reset();
+		if (focused) inputArbiter?.reset();
 	}
 
 	function handleWindowKeydown(event: KeyboardEvent): void {
@@ -304,20 +310,54 @@
 			return;
 		}
 		if (lifecycle.kind !== "in-world") return;
+		if (
+			event.key === "Escape" &&
+			inputArbiter?.applyEscape(true, event.repeat)
+		) {
+			event.preventDefault();
+			return;
+		}
+		if (
+			event.key.toLowerCase() === "j" &&
+			event.shiftKey &&
+			inputArbiter !== null
+		) {
+			event.preventDefault();
+			if (!event.repeat) inputArbiter.enterPrecise();
+			return;
+		}
 		const key = clientInputKey(event.key);
-		if (key === null || inputController === null) return;
-		if (key === "space" && characterMotion === null) return;
+		if (key === null || inputArbiter === null) return;
+		if (
+			key === "space" &&
+			characterMotion === null &&
+			!inputArbiter.preciseActive
+		)
+			return;
 		event.preventDefault();
-		inputController.applyKey(key, true, event.repeat);
+		inputArbiter.applyKey(key, true, event.repeat);
 	}
 
 	function handleWindowKeyup(event: KeyboardEvent): void {
 		if (event.target instanceof HTMLInputElement) return;
 		if (lifecycle.kind !== "in-world") return;
 		const key = clientInputKey(event.key);
-		if (key === null || inputController === null) return;
+		if (key === null || inputArbiter === null) return;
 		event.preventDefault();
-		inputController.applyKey(key, false);
+		inputArbiter.applyKey(key, false, event.repeat);
+	}
+
+	function aimPreciseJump(clientX: number, clientY: number): void {
+		const ray = presentationSession?.samplePreciseJumpRay(clientX, clientY);
+		if (ray !== null && ray !== undefined) preciseJumpSession?.aim(ray);
+	}
+
+	function activatePreciseJump(): void {
+		inputArbiter?.activatePointer();
+	}
+
+	function enterPreciseJump(): void {
+		inputArbiter?.enterPrecise();
 	}
 
 	function diagnostic(error: unknown): string {
@@ -426,7 +466,14 @@
 		void presentation
 			.start()
 			.then(() => {
-				if (!cancelled) frameHandle = window.requestAnimationFrame(frame);
+				if (!cancelled) {
+					// The imperative owner remains authoritative; this snapshot only closes the
+					// race between marker publication and presentation startup.
+					presentation.setPreciseJumpMarker(
+						preciseJumpSession?.snapshot().marker ?? null,
+					);
+					frameHandle = window.requestAnimationFrame(frame);
+				}
 			})
 			.catch(reportPresentationError);
 
@@ -469,8 +516,21 @@
 				queueCharacterMotionEdge(currentSession, edge, isActive),
 		});
 		inputController = controller;
+		const arbiter = new ClientInputArbiter({
+			ordinary: controller,
+			onEnter: () => {
+				preciseJumpSession?.enter();
+				toastCenter.publish({
+					message: "Precise jump enabled",
+					tone: "status",
+				});
+			},
+			onActivate: () => preciseJumpSession?.activate(),
+			onCancel: () => preciseJumpSession?.cancel(),
+		});
+		inputArbiter = arbiter;
 
-		const clearHeldInput = (): void => controller.reset();
+		const clearHeldInput = (): void => arbiter.reset();
 		window.addEventListener("blur", clearHeldInput);
 		window.addEventListener("focusout", clearHeldInput);
 		document.addEventListener("visibilitychange", clearHeldInput);
@@ -481,13 +541,15 @@
 			window.removeEventListener("blur", clearHeldInput);
 			window.removeEventListener("focusout", clearHeldInput);
 			document.removeEventListener("visibilitychange", clearHeldInput);
-			controller.reset();
+			arbiter.reset();
 			controller.releaseOwnership();
+			if (inputArbiter === arbiter) inputArbiter = null;
 			if (inputController === controller) inputController = null;
 		};
 	});
 
 	onMount(() => {
+		const unsubscribeToast = toastCenter.subscribe((next) => (toast = next));
 		const transport = createElectronHostTransport();
 		hostTransport = transport;
 		const owner = new ClientLifecycleSession(
@@ -495,11 +557,26 @@
 		);
 		session = owner;
 		const unsubscribe = owner.subscribe(receive);
+		const precise = new ClientPreciseJumpSession(owner, (error) => {
+			commandFailure = diagnostic(error);
+		});
+		preciseJumpSession = precise;
+		const unsubscribePrecise = precise.subscribe((snapshot) => {
+			if (preciseJumpActive !== snapshot.active)
+				preciseJumpActive = snapshot.active;
+			presentationSession?.setPreciseJumpMarker(snapshot.marker);
+			if (!snapshot.active) inputArbiter?.deactivate();
+		});
 		void owner.start().catch((error: unknown) => {
 			startupError = diagnostic(error);
 		});
 
 		return () => {
+			unsubscribeToast();
+			toastCenter.destroy();
+			unsubscribePrecise();
+			precise.destroy();
+			if (preciseJumpSession === precise) preciseJumpSession = null;
 			unsubscribe();
 			owner.stop();
 			session = null;
@@ -525,7 +602,11 @@
 		{vitals}
 		jumpChargeActive={activeJumpBeginSequence !== null}
 		readJumpExtent={() => inputController?.chargeExtent() ?? 0}
-		{jumpStatus}
+		{toast}
+		{preciseJumpActive}
+		onPreciseJumpAim={aimPreciseJump}
+		onPreciseJumpActivate={activatePreciseJump}
+		onPreciseJumpEnter={enterPreciseJump}
 		{chatMessages}
 		onSendChat={sendChat}
 		onChatFocusChange={handleChatFocusChange}

@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use anyhow::{Result, bail};
+use anyhow::{Result, bail, ensure};
 use holtburger_core::ClientCommand;
 use serde::Deserialize;
 
@@ -12,6 +12,81 @@ use crate::host_event_sink::ClientEventSink;
 use crate::host_mode::ClientLaunchConfiguration;
 use crate::protocol::{HostResponse, ProtocolError, application_error};
 use crate::shared_host_content::SharedHostContent;
+
+/// Strict renderer-owned camera identity reused by precise-jump commands.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClientPreciseJumpCameraIdentity {
+    pub camera_generation: u64,
+    pub player_guid: holtburger_common::Guid,
+    pub entity_generation: u64,
+}
+
+impl From<ClientPreciseJumpCameraIdentity> for holtburger_core::ClientCameraIdentity {
+    fn from(identity: ClientPreciseJumpCameraIdentity) -> Self {
+        Self {
+            camera_generation: identity.camera_generation,
+            player_guid: identity.player_guid,
+            entity_generation: identity.entity_generation,
+        }
+    }
+}
+
+/// Strict renderer camera-ray request; authority and launch facts are intentionally absent.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClientPreciseJumpAimRequest {
+    pub camera: ClientPreciseJumpCameraIdentity,
+    pub sequence: u64,
+    pub anchor: holtburger_common::Guid,
+    pub start: [f32; 3],
+    pub direction: [f32; 3],
+    pub maximum_distance: f32,
+    pub previous_cell: Option<holtburger_common::Guid>,
+}
+
+impl ClientPreciseJumpAimRequest {
+    fn into_core(self) -> Result<holtburger_core::PreciseJumpAimRequest> {
+        let finite = |vector: [f32; 3]| vector.into_iter().all(f32::is_finite);
+        ensure!(finite(self.start), "precise-jump ray start must be finite");
+        ensure!(
+            finite(self.direction),
+            "precise-jump ray direction must be finite"
+        );
+        ensure!(
+            self.maximum_distance.is_finite() && self.maximum_distance >= 0.0,
+            "precise-jump ray distance must be finite and non-negative"
+        );
+        Ok(holtburger_core::PreciseJumpAimRequest {
+            camera: self.camera.into(),
+            sequence: holtburger_core::PreciseJumpAimSequence(self.sequence),
+            anchor: self.anchor,
+            start: holtburger_common::Vector3::new(self.start[0], self.start[1], self.start[2]),
+            direction: holtburger_common::Vector3::new(
+                self.direction[0],
+                self.direction[1],
+                self.direction[2],
+            ),
+            maximum_distance: self.maximum_distance,
+            previous_cell: self.previous_cell,
+        })
+    }
+}
+
+/// Strict opaque commit identity returned by one earlier evaluation event.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClientPreciseJumpCommitRequest {
+    pub sequence: u64,
+    pub evaluation_id: u64,
+}
+
+/// Strict ordered cancellation edge.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClientPreciseJumpCancelRequest {
+    pub sequence: u64,
+}
 
 /// Commands accepted only by the client authority.
 #[derive(Debug, Clone, Deserialize)]
@@ -43,6 +118,15 @@ pub enum ClientHostCommand {
     SetClientCameraClearance {
         request: holtburger_core::ClientCameraClearanceRequest,
     },
+    SetClientPreciseJumpAim {
+        request: ClientPreciseJumpAimRequest,
+    },
+    CommitClientPreciseJump {
+        request: ClientPreciseJumpCommitRequest,
+    },
+    CancelClientPreciseJump {
+        request: ClientPreciseJumpCancelRequest,
+    },
     /// Renderer acknowledgement after the matching destination has been installed and revealed.
     AcknowledgeClientWorldReveal {
         /// Renderer wire contracts use camelCase; keep the inline enum field explicit.
@@ -66,6 +150,9 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "start_client_camera",
     "set_client_camera_intent",
     "set_client_camera_clearance",
+    "set_client_precise_jump_aim",
+    "commit_client_precise_jump",
+    "cancel_client_precise_jump",
     "acknowledge_client_world_reveal",
     "stop_client_camera",
     "disconnect_client",
@@ -250,6 +337,32 @@ impl ClientHostRuntime {
             .await
     }
 
+    pub async fn set_precise_jump_aim(&self, request: ClientPreciseJumpAimRequest) -> Result<()> {
+        self.send_command(ClientCommand::SetPreciseJumpAim(request.into_core()?))
+            .await
+    }
+
+    pub async fn commit_precise_jump(&self, request: ClientPreciseJumpCommitRequest) -> Result<()> {
+        self.send_command(ClientCommand::CommitPreciseJump(
+            holtburger_core::PreciseJumpCommitRequest {
+                sequence: holtburger_core::PreciseJumpActionSequence(request.sequence),
+                evaluation: holtburger_core::PreciseJumpEvaluationId::from_wire(
+                    request.evaluation_id,
+                ),
+            },
+        ))
+        .await
+    }
+
+    pub async fn cancel_precise_jump(&self, request: ClientPreciseJumpCancelRequest) -> Result<()> {
+        self.send_command(ClientCommand::CancelPreciseJump(
+            holtburger_core::PreciseJumpCancelRequest {
+                sequence: holtburger_core::PreciseJumpActionSequence(request.sequence),
+            },
+        ))
+        .await
+    }
+
     pub async fn stop_camera(&self, identity: holtburger_core::ClientCameraIdentity) -> Result<()> {
         self.send_command(ClientCommand::StopClientCamera(identity))
             .await
@@ -346,6 +459,21 @@ pub async fn dispatch_client(
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),
+        SetClientPreciseJumpAim { request } => runtime
+            .set_precise_jump_aim(request)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        CommitClientPreciseJump { request } => runtime
+            .commit_precise_jump(request)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        CancelClientPreciseJump { request } => runtime
+            .cancel_precise_jump(request)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
         AcknowledgeClientWorldReveal { world_generation } => runtime
             .acknowledge_world_reveal(world_generation)
             .await
@@ -361,5 +489,61 @@ pub async fn dispatch_client(
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn aim_json() -> serde_json::Value {
+        serde_json::json!({
+            "camera": {
+                "cameraGeneration": 2,
+                "playerGuid": 0x5000_0001_u32,
+                "entityGeneration": 7
+            },
+            "sequence": 9,
+            "anchor": 0xda55_ffff_u32,
+            "start": [10.0, 20.0, 4.0],
+            "direction": [0.0, 1.0, 0.0],
+            "maximumDistance": 80.0,
+            "previousCell": null
+        })
+    }
+
+    #[test]
+    fn precise_jump_aim_rejects_unknown_and_non_finite_renderer_fields() {
+        let mut unknown = aim_json();
+        unknown["extent"] = serde_json::json!(1.0);
+        assert!(serde_json::from_value::<ClientPreciseJumpAimRequest>(unknown).is_err());
+
+        let mut nested_unknown = aim_json();
+        nested_unknown["camera"]["velocity"] = serde_json::json!([1, 2, 3]);
+        assert!(serde_json::from_value::<ClientPreciseJumpAimRequest>(nested_unknown).is_err());
+
+        let mut non_finite = serde_json::from_value::<ClientPreciseJumpAimRequest>(aim_json())
+            .expect("finite strict aim request");
+        non_finite.start[0] = f32::NAN;
+        assert!(non_finite.into_core().is_err());
+    }
+
+    #[test]
+    fn precise_jump_commit_and_cancel_reject_unknown_fields() {
+        assert!(
+            serde_json::from_value::<ClientPreciseJumpCommitRequest>(serde_json::json!({
+                "sequence": 3,
+                "evaluationId": 11,
+                "velocity": [1, 2, 3]
+            }))
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<ClientPreciseJumpCancelRequest>(serde_json::json!({
+                "sequence": 4,
+                "evaluationId": 11
+            }))
+            .is_err()
+        );
     }
 }

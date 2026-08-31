@@ -335,6 +335,14 @@ impl ClientCameraRuntime {
         })
     }
 
+    /// Identity currently accepted for semantic camera-dependent commands.
+    pub(super) fn identity(&self) -> Option<ClientCameraIdentity> {
+        self.active
+            .as_ref()
+            .map(|camera| camera.identity)
+            .or_else(|| self.pending.as_ref().map(|camera| camera.identity))
+    }
+
     pub(super) fn start(
         &mut self,
         request: ClientCameraStartRequest,
@@ -699,6 +707,7 @@ impl ClientRuntime {
         request: ClientCameraStartRequest,
     ) -> Result<ClientCameraStartReceipt> {
         let receipt = self.camera.start(request, &self.world)?;
+        self.precise_jump.invalidate();
         let _ = self
             .client_view_event_tx
             .send(ClientViewEvent::CameraStarted(receipt));
@@ -720,11 +729,16 @@ impl ClientRuntime {
     }
 
     pub(super) fn stop_camera(&mut self, identity: ClientCameraIdentity) -> bool {
-        self.camera.stop(identity)
+        let stopped = self.camera.stop(identity);
+        if stopped {
+            self.precise_jump.invalidate();
+        }
+        stopped
     }
 
     pub(super) fn reset_camera(&mut self) {
         self.camera.reset();
+        self.precise_jump.invalidate();
     }
 
     pub(super) fn advance_camera(

@@ -177,18 +177,12 @@
 	let physicalSimulationAnchor: string | null = null;
 	let cameraMode = $state<ExplorerCameraMode>("free-fly");
 	let cameraModePending = $state(false);
-	let physicalCameraStatus = $state<PhysicalFlyStatus | null>(null);
+	let physicalCameraStatus: PhysicalFlyStatus | null = null;
 	let physicalCameraError = $state<string | null>(null);
-	let frameMetrics: FrameMetrics | null = $state(null);
+	let frameMetrics: FrameMetrics | null = null;
 	const frameRateSampler: FrameRateSampler = createFrameRateSampler(
 		EXPLORER_TUNING.diagnostics.frameMetricsEmaWindowMs,
 	);
-	let rendererFrameDiagnostics: RendererFrameDiagnosticsSnapshot | null =
-		$state(null);
-	let authoredDynamicRuntimeDiagnostics: ReturnType<
-		GamePresentationRuntime["getAuthoredDynamicRuntimeDiagnostics"]
-	> | null = $state(null);
-	let lastFrameSelectionSampleAt = 0;
 	let startupError: string | null = $state(null);
 	let runtimeReady = $state(false);
 	let cameraFocusStatus = $state<ExplorerCameraFocusStatus>(
@@ -309,6 +303,14 @@
 
 	function readFrameRates(): FrameRates | null {
 		return frameRateSampler.readFrameRates();
+	}
+
+	function readFrameMetrics(): FrameMetrics | null {
+		return frameMetrics;
+	}
+
+	function readPhysicalCameraStatus(): PhysicalFlyStatus | null {
+		return physicalCameraStatus;
 	}
 	let activeRegion = $state<ActiveRegionSource | undefined>(undefined);
 	/** Fast enough that a tick boundary is never visibly late; resolution is tick-quantized. */
@@ -524,7 +526,16 @@
 		if (!gameRuntime)
 			throw new Error("Renderer profiling requires an active runtime.");
 		gameRuntime.setRendererFrameProfilingEnabled(enabled);
-		rendererFrameDiagnostics = gameRuntime.getRendererFrameDiagnostics();
+	}
+
+	function readRendererFrameDiagnostics(): RendererFrameDiagnosticsSnapshot | null {
+		return gameRuntime?.getRendererFrameDiagnostics() ?? null;
+	}
+
+	function readAuthoredDynamicRuntimeDiagnostics(): ReturnType<
+		GamePresentationRuntime["getAuthoredDynamicRuntimeDiagnostics"]
+	> | null {
+		return gameRuntime?.getAuthoredDynamicRuntimeDiagnostics() ?? null;
 	}
 
 	function captureFrameDiagnosticReport(): ExplorerFrameDiagnosticReport | null {
@@ -1696,8 +1707,6 @@
 			gameRuntime = undefined;
 			runtimeReady = false;
 			publishCameraLocation(null);
-			rendererFrameDiagnostics = null;
-			authoredDynamicRuntimeDiagnostics = null;
 			presentationOwner = undefined;
 			textureFilteringCapabilities = null;
 			sceneInterestCoordinator = undefined;
@@ -1822,8 +1831,6 @@
 				const step = (animationFrameTimeMs: number): void => {
 					if (gameRuntime === undefined) {
 						frameMetrics = null;
-						rendererFrameDiagnostics = null;
-						authoredDynamicRuntimeDiagnostics = null;
 						frameHandle = window.requestAnimationFrame(step);
 						return;
 					}
@@ -1938,13 +1945,6 @@
 						updateFrameMs: frameFinishedAt - updateAndDrawStartedAt,
 						frameMs: frameFinishedAt - tickStartedAt,
 					};
-					if (frameFinishedAt - lastFrameSelectionSampleAt >= 250) {
-						rendererFrameDiagnostics =
-							gameRuntime.getRendererFrameDiagnostics();
-						authoredDynamicRuntimeDiagnostics =
-							gameRuntime.getAuthoredDynamicRuntimeDiagnostics();
-						lastFrameSelectionSampleAt = frameFinishedAt;
-					}
 					frameHandle = window.requestAnimationFrame(step);
 				};
 
@@ -1989,7 +1989,7 @@
 		{/if}
 
 		<FrameMetricsOverlay
-			metrics={frameMetrics}
+			readMetrics={readFrameMetrics}
 			{readFrameRates}
 			diagnosticsTuning={EXPLORER_TUNING.diagnostics}
 		/>
@@ -2010,7 +2010,7 @@
 			{cameraResidencyLabel}
 			{cameraMode}
 			{cameraModePending}
-			{physicalCameraStatus}
+			{readPhysicalCameraStatus}
 			{physicalCameraError}
 			{updateCameraMode}
 			{environmentSelection}
@@ -2052,10 +2052,10 @@
 			renderScale={frameSettings.quality.renderScale}
 			renderScaleOptions={RENDER_SCALE_OPTIONS}
 			{updateRenderScale}
-			{rendererFrameDiagnostics}
+			{readRendererFrameDiagnostics}
 			{updateRendererFrameProfiling}
 			{captureFrameDiagnosticReport}
-			{authoredDynamicRuntimeDiagnostics}
+			{readAuthoredDynamicRuntimeDiagnostics}
 			{readStaticObjectRuntimeDiagnostics}
 			{readTextureAtlasPage}
 			{entityCatalog}

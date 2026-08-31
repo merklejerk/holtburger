@@ -17,7 +17,9 @@
 	import ClientHudIcon from "./ClientHudIcon.svelte";
 	import ClientHudPanel from "./ClientHudPanel.svelte";
 	import ClientShortcutDock from "./ClientShortcutDock.svelte";
+	import ClientToastOverlay from "./ClientToastOverlay.svelte";
 	import type { ClientVital } from "./client-host-contract";
+	import type { ClientToast } from "./client-toast-center";
 	import {
 		anchorClientHudPlacement,
 		CLIENT_FPS_PANEL_WIDTH,
@@ -48,7 +50,11 @@
 		readonly vitals: readonly ClientVital[];
 		readonly jumpChargeActive: boolean;
 		readonly readJumpExtent: () => number;
-		readonly jumpStatus: string | null;
+		readonly toast: ClientToast | null;
+		readonly preciseJumpActive: boolean;
+		readonly onPreciseJumpAim: (clientX: number, clientY: number) => void;
+		readonly onPreciseJumpActivate: () => void;
+		readonly onPreciseJumpEnter: () => void;
 		readonly chatMessages: readonly ClientChatLine[];
 		readonly onSendChat: (message: string) => Promise<void>;
 		readonly onChatFocusChange: (focused: boolean) => void;
@@ -70,7 +76,11 @@
 		vitals,
 		jumpChargeActive,
 		readJumpExtent,
-		jumpStatus,
+		toast,
+		preciseJumpActive,
+		onPreciseJumpAim,
+		onPreciseJumpActivate,
+		onPreciseJumpEnter,
 		chatMessages,
 		onSendChat,
 		onChatFocusChange,
@@ -129,6 +139,14 @@
 	let pointerId: number | null = null;
 	let pointerX = 0;
 	let pointerY = 0;
+	let hasPointerPosition = false;
+
+	$effect(() => {
+		if (!preciseJumpActive) return;
+		untrack(() => {
+			if (hasPointerPosition) onPreciseJumpAim(pointerX, pointerY);
+		});
+	});
 
 	$effect(() => {
 		onCanvas(canvasElement);
@@ -159,6 +177,12 @@
 	}
 
 	function handlePointerDown(event: PointerEvent): void {
+		if (preciseJumpActive && event.button === 0) {
+			event.preventDefault();
+			canvasElement?.focus();
+			onPreciseJumpActivate();
+			return;
+		}
 		if (cameraController === null || event.button !== 0 || pointerId !== null)
 			return;
 		pointerId = event.pointerId;
@@ -169,11 +193,24 @@
 	}
 
 	function handlePointerMove(event: PointerEvent): void {
-		if (pointerId !== event.pointerId || cameraController === null) return;
+		if (preciseJumpActive) {
+			pointerX = event.clientX;
+			pointerY = event.clientY;
+			hasPointerPosition = true;
+			onPreciseJumpAim(event.clientX, event.clientY);
+			return;
+		}
+		if (pointerId !== event.pointerId || cameraController === null) {
+			pointerX = event.clientX;
+			pointerY = event.clientY;
+			hasPointerPosition = true;
+			return;
+		}
 		const deltaX = event.clientX - pointerX;
 		const deltaY = event.clientY - pointerY;
 		pointerX = event.clientX;
 		pointerY = event.clientY;
+		hasPointerPosition = true;
 		if (deltaX === 0 && deltaY === 0) return;
 		cameraController.orbit(deltaX, -deltaY, performance.now());
 	}
@@ -254,8 +291,9 @@
 	<ClientJumpPowerBar
 		active={jumpChargeActive}
 		readExtent={readJumpExtent}
-		status={jumpStatus}
+		onEnterPrecise={onPreciseJumpEnter}
 	/>
+	<ClientToastOverlay {toast} />
 	<ClientHudPanel
 		label="Chat"
 		placement={hudLayout.chat}

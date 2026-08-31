@@ -190,6 +190,8 @@
 
 	const query = new URLSearchParams(window.location.search);
 	const TRACE_TERRAIN_GL = query.get("traceTerrainGl") === "true";
+	/** Exercise the depth-tested world-marker draw path in renderer screenshots. */
+	const WORLD_MARKER = query.get("worldMarker") === "true";
 	/** Harness-only loading screen demo; production frontends own this transition policy. */
 	const PORTAL_TRANSITION_DEMO = query.get("portalTransitionDemo") === "true";
 	let portalTransitionDemoFrames = 0;
@@ -830,7 +832,7 @@
 	let error: string | null = $state(null);
 	let frames = 0;
 	let lastFrameAt: number | undefined;
-	let timing: BrowserHarnessTimingAccumulator = $state({
+	let timing: BrowserHarnessTimingAccumulator = {
 		sampleCount: 0,
 		totalTickMs: 0,
 		totalRenderMs: 0,
@@ -840,7 +842,7 @@
 		longestFrameGapMs: 0,
 		longTaskCount: 0,
 		longestLongTaskMs: 0,
-	});
+	};
 	let contentSource: HttpLandblockContentSource | undefined;
 	let landblockProfileSource: CachedLandblockProfileSource | undefined;
 	let sceneInterestCoordinator: SceneInterestRequestCoordinator | undefined;
@@ -1061,6 +1063,12 @@
 				rotation: cameraRotation(cameraYawDegrees, cameraPitchDegrees),
 			},
 		});
+		installWorldIndicatorFixture(
+			cameraPosition,
+			cameraYawDegrees,
+			cameraPitchDegrees,
+			"outdoor",
+		);
 		cameraEvidence = {
 			...projection,
 			envCellId: null,
@@ -1290,6 +1298,7 @@
 		}
 		const envCellId = parseEnvCellId(rawEnvCellId, "portal frame");
 		const landblockId = `${envCellId.slice(0, 6)}ffff` as LandblockOwnerId;
+		const cameraPosition = new Vec3(...position);
 		applyHarnessCamera(runtime, {
 			far: CAMERA_FAR,
 			fov: CAMERA_FOV_DEGREES,
@@ -1297,10 +1306,16 @@
 			placement: {
 				envCellId,
 				landblockId,
-				position: sceneVec3(new Vec3(...position)),
+				position: sceneVec3(cameraPosition),
 				rotation: cameraRotation(cameraYawDegrees, cameraPitchDegrees),
 			},
 		});
+		installWorldIndicatorFixture(
+			cameraPosition,
+			cameraYawDegrees,
+			cameraPitchDegrees,
+			envCellId,
+		);
 		cameraEvidence = {
 			envCellId,
 			far: CAMERA_FAR,
@@ -1312,6 +1327,49 @@
 			position,
 			yawDegrees: cameraYawDegrees,
 		};
+	}
+
+	/** Installs one synthetic semantic curve through the production world-indicator seam. */
+	function installWorldIndicatorFixture(
+		cameraPosition: Vec3,
+		cameraYawDegrees: number,
+		cameraPitchDegrees: number,
+		renderScopeKey: string,
+	): void {
+		if (!WORLD_MARKER || !runtime) return;
+		const axes = createCameraAxesRadians(
+			(cameraYawDegrees * Math.PI) / 180,
+			(cameraPitchDegrees * Math.PI) / 180,
+		);
+		const durationSeconds = 1.5;
+		const velocity = new Vec3(axes.forward.x * 8, 9, axes.forward.z * 8);
+		const acceleration = new Vec3(0, -9.8, 0);
+		const halfDurationSquared = 0.5 * durationSeconds * durationSeconds;
+		const markerPosition = cameraPosition.add(
+			new Vec3(
+				velocity.x * durationSeconds + acceleration.x * halfDurationSquared,
+				velocity.y * durationSeconds + acceleration.y * halfDurationSquared,
+				velocity.z * durationSeconds + acceleration.z * halfDurationSquared,
+			),
+		);
+		runtime.setWorldIndicator({
+			marker: {
+				color: [0.08, 0.48, 1, 0.9],
+				normal: sceneVector3([0, 1, 0]),
+				position: sceneVec3(markerPosition),
+				radius: 0.65,
+				renderScopeKey,
+			},
+			trajectory: {
+				revision: 1,
+				color: [0.08, 0.48, 1, 0.9],
+				origin: sceneVec3(cameraPosition),
+				velocity: [velocity.x, velocity.y, velocity.z],
+				acceleration: [acceleration.x, acceleration.y, acceleration.z],
+				durationSeconds,
+				placements: [{ startFraction: 0, endFraction: 1, renderScopeKey }],
+			},
+		});
 	}
 
 	function focusExplorerEnvCell(

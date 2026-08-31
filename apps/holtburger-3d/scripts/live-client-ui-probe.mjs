@@ -9,18 +9,18 @@ import { stringifyRedactedProbeReport } from "./live-client-probe-report.mjs";
 const PASSIVE_CAMERA_SETTLE_MS = 3_000;
 const PASSIVE_CAMERA_INPUT_COUNT = 40;
 const PASSIVE_CAMERA_INPUT_INTERVAL_MS = 25;
+const PRECISE_JUMP_SWEEP_INPUT_COUNT = 120;
+const PRECISE_JUMP_SWEEP_INPUT_INTERVAL_MS = 5;
 
 const appRoot = resolve(fileURLToPath(new URL("../", import.meta.url)));
 const account = requiredEnvironment("HOLTBURGER_PROBE_ACCOUNT");
 const password = requiredEnvironment("HOLTBURGER_PROBE_PASSWORD");
 const mode = probeMode(process.env.HOLTBURGER_PROBE_MODE);
 if (
-	mode === "passive-camera" &&
+	mode !== "teleport" &&
 	process.env.HOLTBURGER_PROBE_TELEPORT_SEQUENCE !== undefined
 ) {
-	throw new Error(
-		"Passive camera mode rejects HOLTBURGER_PROBE_TELEPORT_SEQUENCE.",
-	);
+	throw new Error(`${mode} mode rejects HOLTBURGER_PROBE_TELEPORT_SEQUENCE.`);
 }
 let commands =
 	mode === "teleport" && process.env.HOLTBURGER_PROBE_TELEPORT_SEQUENCE
@@ -35,7 +35,7 @@ const child = spawn(
 	process.platform === "win32" ? "npm.cmd" : "npm",
 	[
 		"run",
-		mode === "passive-camera" ? "dev:client:release" : "dev:client",
+		mode === "teleport" ? "dev:client" : "dev:client:release",
 		"--",
 		"--vite-port",
 		"1432",
@@ -130,6 +130,30 @@ try {
 			hostOutput: redact(output).slice(-30_000),
 		});
 		process.exitCode = captureComplete ? 0 : 1;
+	} else if (mode === "precise-jump") {
+		const preciseJump = await capturePreciseJumpEntry(client, timeoutMs);
+		const responsive =
+			preciseJump.sweep.evaluationCount > 1 &&
+			Number.isFinite(preciseJump.sweep.postStopLatencyMs);
+		printReport({
+			ok:
+				responsive &&
+				preciseJump.page.error === null &&
+				!preciseJump.webgl.contextLost,
+			mode,
+			commands: [],
+			teleports: [],
+			preciseJump,
+			consoleMessages: [...consoleMessages.values()],
+			page: preciseJump.page,
+			hostOutput: redact(output).slice(-30_000),
+		});
+		process.exitCode =
+			responsive &&
+			preciseJump.page.error === null &&
+			!preciseJump.webgl.contextLost
+				? 0
+				: 1;
 	} else {
 		commands ??= defaultTeleportSequence(initial.lastState.bodyText);
 
@@ -205,13 +229,17 @@ function requiredEnvironment(name) {
 function probeMode(value) {
 	if (value === undefined) {
 		throw new Error(
-			"HOLTBURGER_PROBE_MODE must be explicitly set to teleport or passive-camera.",
+			"HOLTBURGER_PROBE_MODE must be explicitly set to teleport, passive-camera, or precise-jump.",
 		);
 	}
 	const mode = value;
-	if (mode !== "teleport" && mode !== "passive-camera") {
+	if (
+		mode !== "teleport" &&
+		mode !== "passive-camera" &&
+		mode !== "precise-jump"
+	) {
 		throw new Error(
-			"HOLTBURGER_PROBE_MODE must be teleport or passive-camera.",
+			"HOLTBURGER_PROBE_MODE must be teleport, passive-camera, or precise-jump.",
 		);
 	}
 	return mode;
@@ -386,6 +414,8 @@ async function installEvidenceCollector(client_) {
 				cameraEvents: [],
 				animationFrames: [],
 				inputEvents: [],
+				preciseJumpEvaluations: [],
+				preciseJumpEvaluationTimes: [],
 			};
 			Object.defineProperty(window, "__holtburgerProbeEvidence", {
 				configurable: true,
@@ -421,6 +451,10 @@ async function installEvidenceCollector(client_) {
 				evidence.lifecycle = lifecycle;
 				evidence.lifecycles.push(lifecycle);
 			});
+			await bridge.listen("client-precise-jump-evaluation", (evaluation) => {
+				evidence.preciseJumpEvaluations.push(evaluation);
+				evidence.preciseJumpEvaluationTimes.push(performance.now());
+			});
 			const collectAnimationFrame = (timestamp) => {
 				if (evidence.collecting) evidence.animationFrames.push(timestamp);
 				requestAnimationFrame(collectAnimationFrame);
@@ -428,6 +462,122 @@ async function installEvidenceCollector(client_) {
 			requestAnimationFrame(collectAnimationFrame);
 		}`,
 	);
+}
+
+async function capturePreciseJumpEntry(client_, milliseconds) {
+	const bounds = await evaluate(
+		client_,
+		`() => {
+			const canvas = document.querySelector(".client-canvas");
+			if (!(canvas instanceof HTMLCanvasElement)) {
+				throw new Error("Client canvas is unavailable.");
+			}
+			canvas.focus();
+			const rect = canvas.getBoundingClientRect();
+			window.__holtburgerProbeEvidence.preciseJumpEvaluations = [];
+			window.__holtburgerProbeEvidence.preciseJumpEvaluationTimes = [];
+			return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+		}`,
+	);
+	const x = bounds.x + bounds.width * 0.5;
+	const y = bounds.y + bounds.height * 0.6;
+	await client_.send("Input.dispatchMouseEvent", {
+		type: "mouseMoved",
+		x,
+		y,
+		button: "none",
+		buttons: 0,
+	});
+	await evaluate(
+		client_,
+		`() => {
+			const dispatch = (type, key, shiftKey) =>
+				window.dispatchEvent(
+					new KeyboardEvent(type, { bubbles: true, key, shiftKey }),
+				);
+			dispatch("keydown", "J", true);
+			dispatch("keyup", "J", false);
+		}`,
+	);
+	const startedAt = Date.now();
+	for (;;) {
+		const state = await evaluate(
+			client_,
+			`() => ({
+				evaluations: window.__holtburgerProbeEvidence.preciseJumpEvaluations,
+				error: document.querySelector('[role="alert"]')?.textContent?.trim() ?? null,
+			})`,
+		);
+		if (state.evaluations.length > 0 || state.error !== null) break;
+		if (Date.now() - startedAt >= milliseconds) {
+			throw new Error("Timed out waiting for precise-jump evaluation.");
+		}
+		await delay(100);
+	}
+	const sweepStartedAt = await evaluate(client_, "() => performance.now()");
+	for (let index = 0; index < PRECISE_JUMP_SWEEP_INPUT_COUNT; index += 1) {
+		const fraction = index / (PRECISE_JUMP_SWEEP_INPUT_COUNT - 1);
+		await client_.send("Input.dispatchMouseEvent", {
+			type: "mouseMoved",
+			x: bounds.x + bounds.width * (0.35 + fraction * 0.3),
+			y: bounds.y + bounds.height * 0.6,
+			button: "none",
+			buttons: 0,
+		});
+		await delay(PRECISE_JUMP_SWEEP_INPUT_INTERVAL_MS);
+	}
+	const stoppedAt = await evaluate(client_, "() => performance.now()");
+	await waitFor(
+		client_,
+		`() => window.__holtburgerProbeEvidence.preciseJumpEvaluationTimes.some(
+			(time) => time >= ${stoppedAt},
+		)`,
+		milliseconds,
+		"post-sweep precise-jump evaluation",
+	);
+	await delay(100);
+	const result = await evaluate(
+		client_,
+		`() => {
+			const canvas = document.querySelector(".client-canvas");
+			const gl = canvas instanceof HTMLCanvasElement ? canvas.getContext("webgl2") : null;
+			return {
+				evaluations: window.__holtburgerProbeEvidence.preciseJumpEvaluations,
+				evaluationTimes: window.__holtburgerProbeEvidence.preciseJumpEvaluationTimes,
+				page: {
+					status: document.querySelector(".client-world-status span")?.textContent?.trim() ?? null,
+					error: document.querySelector('[role="alert"]')?.textContent?.trim() ?? null,
+				},
+				webgl: {
+					contextLost: gl?.isContextLost() ?? true,
+					renderer: gl?.getParameter(gl.RENDERER) ?? null,
+					vendor: gl?.getParameter(gl.VENDOR) ?? null,
+				},
+			};
+		}`,
+	);
+	const sweepEvaluationTimes = result.evaluationTimes.filter(
+		(time) => time >= sweepStartedAt,
+	);
+	return {
+		...result,
+		sweep: {
+			inputCount: PRECISE_JUMP_SWEEP_INPUT_COUNT,
+			durationMs: stoppedAt - sweepStartedAt,
+			evaluationCount: sweepEvaluationTimes.length,
+			maximumEvaluationGapMs: maximumAdjacentGap(sweepEvaluationTimes),
+			postStopLatencyMs:
+				sweepEvaluationTimes.find((time) => time >= stoppedAt) - stoppedAt,
+		},
+	};
+}
+
+function maximumAdjacentGap(values) {
+	let maximum = 0;
+	for (let index = 1; index < values.length; index += 1) {
+		maximum = Math.max(maximum, values[index] - values[index - 1]);
+	}
+	return maximum;
 }
 
 async function capturePassiveCameraGesture(client_) {

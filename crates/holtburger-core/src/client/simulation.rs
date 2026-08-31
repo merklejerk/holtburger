@@ -7,6 +7,9 @@ use crate::client::character_kinematics::jump_kinematics_from_movement_capabilit
 use crate::client::types::{
     ClientCharacterMotionFeedback, ClientCharacterMotionOutcome, ClientCharacterMotionRejection,
 };
+use crate::client::{
+    PreciseJumpTransactionFeedback, PreciseJumpTransactionOutcome, PreciseJumpTransactionRejection,
+};
 use anyhow::Result;
 #[cfg(test)]
 use holtburger_common::Quaternion;
@@ -36,6 +39,8 @@ pub(super) struct ClientSimulationTick {
     pub committed_jump: Option<CommittedPlayerJump>,
     /// Release outcome emitted only after the physical transaction accepts or rejects it.
     pub character_motion_feedback: Option<ClientCharacterMotionFeedback>,
+    /// Precise-jump result emitted only after the shared physical launch transaction resolves.
+    pub precise_jump_feedback: Option<PreciseJumpTransactionFeedback>,
 }
 
 /// Release facts retained across the local-physics-to-network transaction boundary.
@@ -57,12 +62,19 @@ struct PreparedPlayerJump {
     launch: GroundedLaunch,
 }
 
+struct PreparedPrecisePlayerJump {
+    sequence: crate::client::PreciseJumpActionSequence,
+    committed: CommittedPlayerJump,
+    launch: GroundedLaunch,
+}
+
 /// Pose-only projection inputs retained for diagnostic and remote dead-reckoning consumers.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct ClientProjectionRequest {
     pub bodies: Vec<SolveBodyInput>,
 }
 
+#[cfg(test)]
 pub(super) fn tick(
     now: Instant,
     dt: Duration,
@@ -70,11 +82,23 @@ pub(super) fn tick(
     movement: &mut MovementSystem,
     collision: Option<&SimulationSceneSnapshot>,
 ) -> Result<ClientSimulationTick> {
+    tick_with_precise_jump(now, dt, world, movement, collision, None)
+}
+
+pub(super) fn tick_with_precise_jump(
+    now: Instant,
+    dt: Duration,
+    world: &mut WorldState,
+    movement: &mut MovementSystem,
+    collision: Option<&SimulationSceneSnapshot>,
+    precise_jump: Option<super::precise_jump_runtime::PreparedPreciseJumpCommit>,
+) -> Result<ClientSimulationTick> {
     if dt.is_zero() {
         return Ok(ClientSimulationTick {
             events: Vec::new(),
             committed_jump: None,
             character_motion_feedback: None,
+            precise_jump_feedback: None,
         });
     }
 
@@ -90,9 +114,13 @@ pub(super) fn tick(
     let pending_jump = movement
         .take_pending_jump_attempt()
         .map(|pending| prepare_player_jump(world, pending));
+    let precise_jump = precise_jump.map(|pending| prepare_precise_player_jump(world, pending));
     let mut events = Vec::new();
     let mut committed_jump = None;
     let mut character_motion_feedback = pending_jump
+        .as_ref()
+        .and_then(|result| result.as_ref().err().copied());
+    let mut precise_jump_feedback = precise_jump
         .as_ref()
         .and_then(|result| result.as_ref().err().copied());
     if let Some(collision) = collision {
@@ -100,6 +128,10 @@ pub(super) fn tick(
         let prepared_jump = pending_jump
             .as_ref()
             .and_then(|result| result.as_ref().ok());
+        let prepared_precise_jump = precise_jump
+            .as_ref()
+            .and_then(|result| result.as_ref().ok());
+        let ordinary_selected = prepared_jump.is_some();
         let (physical_events, jump_committed) = tick_physical_entities(
             now,
             dt,
@@ -107,7 +139,9 @@ pub(super) fn tick(
             movement,
             collision,
             authored_offset,
-            prepared_jump.map(|jump| jump.launch),
+            prepared_jump
+                .map(|jump| jump.launch)
+                .or_else(|| prepared_precise_jump.map(|jump| jump.launch)),
         )?;
         events.extend(physical_events);
         if let Some(Ok(jump)) = pending_jump {
@@ -124,10 +158,40 @@ pub(super) fn tick(
                 ));
             }
         }
+        if let Some(Ok(jump)) = precise_jump {
+            if ordinary_selected {
+                precise_jump_feedback = Some(rejected_precise_release(
+                    jump.sequence,
+                    PreciseJumpTransactionRejection::LaunchRejected,
+                ));
+            } else if jump_committed {
+                precise_jump_feedback = Some(PreciseJumpTransactionFeedback {
+                    sequence: jump.sequence,
+                    outcome: PreciseJumpTransactionOutcome::Committed,
+                });
+                committed_jump = Some(jump.committed);
+            } else {
+                precise_jump_feedback = Some(rejected_precise_release(
+                    jump.sequence,
+                    PreciseJumpTransactionRejection::LaunchRejected,
+                ));
+            }
+        }
     } else if let Some(Ok(jump)) = pending_jump {
         character_motion_feedback = Some(rejected_release(
             jump.sequence,
             ClientCharacterMotionRejection::CollisionUnavailable,
+        ));
+        if let Some(Ok(precise)) = precise_jump {
+            precise_jump_feedback = Some(rejected_precise_release(
+                precise.sequence,
+                PreciseJumpTransactionRejection::LaunchRejected,
+            ));
+        }
+    } else if let Some(Ok(precise)) = precise_jump {
+        precise_jump_feedback = Some(rejected_precise_release(
+            precise.sequence,
+            PreciseJumpTransactionRejection::LaunchRejected,
         ));
     }
     events.extend(tick_pose_only_remote_entities(dt, world));
@@ -135,6 +199,37 @@ pub(super) fn tick(
         events,
         committed_jump,
         character_motion_feedback,
+        precise_jump_feedback,
+    })
+}
+
+fn prepare_precise_player_jump(
+    world: &WorldState,
+    pending: super::precise_jump_runtime::PreparedPreciseJumpCommit,
+) -> Result<PreparedPrecisePlayerJump, PreciseJumpTransactionFeedback> {
+    let launch = GroundedLaunch::new(pending.resolved.world_velocity()).map_err(|_| {
+        rejected_precise_release(
+            pending.sequence,
+            PreciseJumpTransactionRejection::LaunchRejected,
+        )
+    })?;
+    let position = world.local_player_runtime_pose().ok_or_else(|| {
+        rejected_precise_release(
+            pending.sequence,
+            PreciseJumpTransactionRejection::AuthorityChanged,
+        )
+    })?;
+    Ok(PreparedPrecisePlayerJump {
+        sequence: pending.sequence,
+        committed: CommittedPlayerJump {
+            resolved: pending.resolved,
+            position,
+            instance_sequence: world.player.instance_sequence,
+            server_control_sequence: world.player.server_control_sequence,
+            teleport_sequence: world.player.teleport_sequence,
+            force_position_sequence: world.player.force_position_sequence,
+        },
+        launch,
     })
 }
 
@@ -217,6 +312,16 @@ fn rejected_release(
     }
 }
 
+fn rejected_precise_release(
+    sequence: crate::client::PreciseJumpActionSequence,
+    rejection: PreciseJumpTransactionRejection,
+) -> PreciseJumpTransactionFeedback {
+    PreciseJumpTransactionFeedback {
+        sequence,
+        outcome: PreciseJumpTransactionOutcome::Rejected(rejection),
+    }
+}
+
 /// Builds pose-only projection inputs directly from authoritative scene membership.
 ///
 /// The returned values are consumed by the client projection lane, never by a collision callback.
@@ -274,6 +379,12 @@ fn tick_physical_entities(
     local_authored_offset: Option<RigidTransform>,
     player_launch: Option<GroundedLaunch>,
 ) -> Result<(Vec<WorldEvent>, bool)> {
+    let local_body_id = SpatialBodyId::LocalPlayer(world.player.guid);
+    // Settled bodies are normally absent from the collection schedule. A one-shot launch is fresh
+    // integration work, so wake it before the scheduler takes its active-body snapshot.
+    if player_launch.is_some() {
+        world.scene.wake_dynamic_body(local_body_id);
+    }
     let local_drive = movement.current_local_drive_control(world, dt);
     let local_object_scale = world
         .player_entity()
@@ -327,7 +438,7 @@ fn tick_physical_entities(
             now,
         )?;
         if player_launch.is_some()
-            && body_id == SpatialBodyId::LocalPlayer(world.player.guid)
+            && body_id == local_body_id
             && result.motion.status == holtburger_world::PhysicalBodyTickStatus::Solved
         {
             jump_committed = true;

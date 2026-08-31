@@ -50,6 +50,8 @@ import {
 	type PortalTransitionVisual,
 	type Renderer,
 	type ResolvedResourceInvalidation,
+	type WorldIndicatorInput,
+	type WorldMarkerInput,
 } from "./renderer";
 import { renderCullingGroupFilter } from "./render-layer-visibility";
 import {
@@ -73,6 +75,8 @@ import {
 	type ObjectInstanceData,
 } from "../systems/static-resources";
 import type { VisibleDynamicContributions } from "../systems/components";
+import { WebGL2WorldMarkerPass } from "./webgl2-world-marker-pass";
+import { WebGL2WorldTrajectoryPass } from "./webgl2-world-trajectory-pass";
 import {
 	assertSharedTerrainRegion,
 	type TerrainProgramInput,
@@ -709,6 +713,9 @@ export class WebGL2Renderer implements Renderer {
 	#skyPass: WebGL2SkyPass | null = null;
 	#particleResidency: ParticleMeshResidency | null = null;
 	#particlePass: WebGL2ParticlePass | null = null;
+	readonly #worldMarkerPass: WebGL2WorldMarkerPass;
+	readonly #worldTrajectoryPass: WebGL2WorldTrajectoryPass;
+	#frameWorldIndicator: WorldIndicatorInput | null = null;
 	/** This frame's owner-local sources, replaced every submission rather than retained. */
 	#particleSources: readonly ParticleSourceRange[] = [];
 	/** Record storage published with the ranges that index into it. */
@@ -986,6 +993,8 @@ export class WebGL2Renderer implements Renderer {
 		this.#resources = resources;
 		this.#world = world;
 		this.#assertDeviceReady = assertDeviceReady;
+		this.#worldMarkerPass = new WebGL2WorldMarkerPass(gl);
+		this.#worldTrajectoryPass = new WebGL2WorldTrajectoryPass(gl);
 		this.#textureSamplers = new WebGL2TextureSamplerCatalog(
 			gl,
 			textureFilteringSupport,
@@ -1164,6 +1173,7 @@ export class WebGL2Renderer implements Renderer {
 			this.#compiledEnvCellRenderMode = input.frameSettings.envCellRenderMode;
 		}
 		this.#skyClockSeconds = input.timeSeconds;
+		this.#frameWorldIndicator = input.worldIndicator ?? null;
 		// Snapshotted here because the flat schedule never receives frame settings, and both
 		// schedules reach presentation through the same shared helper.
 		this.#frameColorGrade = input.frameSettings.colorGrade;
@@ -1620,6 +1630,24 @@ export class WebGL2Renderer implements Renderer {
 		}
 		this.#submitBlendedPhase(view, objectPhases, shading, profile, pipeline);
 		this.#drawScopedParticles(view, particlesByScope, pipeline, profile);
+		const indicator = this.#frameWorldIndicator;
+		if (indicator?.trajectory) {
+			this.#drawWorldTrajectory(view, indicator.trajectory, {
+				visibility: frame.atlas.visibility,
+				routing: pipeline,
+			});
+		}
+		if (
+			indicator !== null &&
+			frame.atlas.visibility.selectedScopeOrdinal(
+				indicator.marker.renderScopeKey,
+			) !== null
+		) {
+			this.#drawWorldMarker(view, indicator.marker, {
+				key: indicator.marker.renderScopeKey,
+				routing: pipeline,
+			});
+		}
 		this.#drawPortalTransitionTunnel(view, shading, target, profile);
 		this.#presentFlatScene(target, profile);
 	}
@@ -1647,6 +1675,8 @@ export class WebGL2Renderer implements Renderer {
 		this.#saoPass = null;
 		this.#skyPass?.destroy();
 		this.#skyPass = null;
+		this.#worldMarkerPass.destroy();
+		this.#worldTrajectoryPass.destroy();
 		if (this.#skyProgram) this.#gl.deleteProgram(this.#skyProgram.program);
 		this.#skyProgram = null;
 		if (this.#portalAtlasSkyProgram) {
@@ -2873,9 +2903,55 @@ export class WebGL2Renderer implements Renderer {
 			this.#skyClockSeconds,
 			1.0,
 		);
+		const indicator = this.#frameWorldIndicator;
+		if (indicator?.trajectory)
+			this.#drawWorldTrajectory(view, indicator.trajectory, null);
+		if (indicator !== null) this.#drawWorldMarker(view, indicator.marker, null);
 		this.#gl.bindVertexArray(null);
 		this.#drawPortalTransitionTunnel(view, shading, target, profile);
 		this.#presentFlatScene(target, profile);
+	}
+
+	#drawWorldMarker(
+		view: PreparedViewGeometry,
+		marker: WorldMarkerInput,
+		portal: Parameters<WebGL2WorldMarkerPass["draw"]>[1],
+	): void {
+		const center = anchorRelativePosition(
+			marker.position,
+			view.anchorLandblockId,
+		);
+		const cameraDistance = Math.sqrt(
+			center.distanceSquaredTo(view.cameraPosition),
+		);
+		this.#worldMarkerPass.draw(
+			{
+				center,
+				clipFromAnchor: view.clipFromAnchor,
+				color: marker.color,
+				normal: marker.normal,
+				radius: Math.min(2.4, Math.max(marker.radius, cameraDistance * 0.012)),
+			},
+			portal,
+		);
+	}
+
+	#drawWorldTrajectory(
+		view: PreparedViewGeometry,
+		trajectory: NonNullable<WorldIndicatorInput["trajectory"]>,
+		portal: Parameters<WebGL2WorldTrajectoryPass["draw"]>[2],
+	): void {
+		this.#worldTrajectoryPass.draw(
+			trajectory,
+			{
+				anchorOrigin: createLandblockWorldOrigin(view.anchorLandblockId),
+				clipFromAnchor: view.clipFromAnchor,
+				color: trajectory.color,
+				viewportHeight: this.#frameHeight,
+				viewportWidth: this.#frameWidth,
+			},
+			portal,
+		);
 	}
 
 	/**

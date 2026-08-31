@@ -16,7 +16,7 @@ use super::{
     FreeSphereRequest, FreeSphereState, GroundState, GroundSupport, GroundedBody,
     GroundedBodySpheres, GroundedBudget, GroundedConfig, GroundedOutcome, GroundedRequest,
     GroundedSphere, MotionWaypoint, PlacedMotionPath, PlacedMotionPathRequest, SettlePermission,
-    SpatialBody, SpatialMembership, solve_free_sphere, solve_grounded,
+    SpatialBody, SpatialBodyId, SpatialMembership, solve_free_sphere, solve_grounded,
 };
 
 /// Retail's canonical velocity floor (`PhysicsGlobals.SmallVelocity`) squared.
@@ -777,6 +777,19 @@ pub struct PhysicalBodyTickResult {
     pub dynamic_state_change: Option<DynamicBodyPhysicsStateChange>,
     /// First-touch report edges committed by this body transaction; refreshes remain silent.
     pub collision_reports: Vec<CollisionReportOutcome>,
+    /// Strongest accepted static-environment contact normal for this tick, if any.
+    pub static_contact_normal: Option<Vector3>,
+    /// Blocking entity contact selected by the ordinary directional peer solver, if any.
+    pub dynamic_contact: Option<DynamicBodyContact>,
+}
+
+/// Solver-owned blocking entity fact independent from optional collision-report policy.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DynamicBodyContact {
+    /// Entity body that supplied the accepted blocking surface.
+    pub peer: SpatialBodyId,
+    /// Outward unit normal from the peer surface toward the mover.
+    pub normal: Vector3,
 }
 
 /// Source-neutral complete-state mutation a producer applies to its semantic authority.
@@ -801,8 +814,8 @@ pub(super) struct PhysicalBodyTickCommit {
     pub response: PhysicalBodyResponseState,
     /// Placed motion returned to the caller.
     pub motion: PhysicalBodyMotion,
-    /// Whether the accepted static-environment solve confirmed contact this tick.
-    pub environment_contact: bool,
+    /// Strongest accepted static-environment contact normal for this tick, if any.
+    pub static_contact_normal: Option<Vector3>,
     /// Whether the final accepted placement still requires bounded contact correction.
     pub residual_contacts: bool,
 }
@@ -1048,7 +1061,7 @@ fn solve_free_sphere_tick(
             substeps,
             contact_passes,
         },
-        environment_contact: collision_normal.is_some(),
+        static_contact_normal: collision_normal,
         residual_contacts: false,
     })
 }
@@ -1332,7 +1345,8 @@ fn solve_grounded_body_tick(
             substeps,
             contact_passes,
         },
-        environment_contact: collision_normal.is_some() || ground.contact_plane().is_some(),
+        static_contact_normal: collision_normal
+            .or_else(|| ground.contact_plane().map(|support| support.normal)),
         residual_contacts,
     })
 }

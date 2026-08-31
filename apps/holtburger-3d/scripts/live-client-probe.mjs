@@ -64,6 +64,20 @@ function optionalGuid(value) {
 	return guid;
 }
 
+function optionalPlanarOffset(value) {
+	if (value === undefined) return [0, 0];
+	const components = value.split(",").map(Number);
+	if (
+		components.length !== 2 ||
+		components.some((component) => !Number.isFinite(component))
+	) {
+		throw new Error(
+			"HOLTBURGER_PROBE_PRECISE_JUMP_LOCAL_OFFSET must be two finite comma-separated numbers.",
+		);
+	}
+	return components;
+}
+
 function probeMode(value) {
 	const mode = value ?? "drive";
 	if (mode !== "drive" && mode !== "passive") {
@@ -310,6 +324,40 @@ function actorPhaseSample(entity) {
 	};
 }
 
+function isGroundedWorldEntity(entity, guid) {
+	return (
+		entity?.identity?.guid === guid &&
+		entity.placement?.kind === "world" &&
+		entity.placement.contact === "grounded"
+	);
+}
+
+async function waitForGroundedPlayer(waiter, latestEntities, guid, timeoutMs) {
+	const current = latestEntities.get(guid);
+	if (isGroundedWorldEntity(current, guid)) return current;
+	const payload = await waiter.wait(
+		"client-dynamic-entity",
+		(candidate) =>
+			entitiesInPayload("client-dynamic-entity", candidate).some((entity) =>
+				isGroundedWorldEntity(entity, guid),
+			),
+		timeoutMs,
+		"grounded local-player collision body",
+	);
+	return entitiesInPayload("client-dynamic-entity", payload).find((entity) =>
+		isGroundedWorldEntity(entity, guid),
+	);
+}
+
+function firstGroundedSampleAfterAirborne(trajectory) {
+	let observedAirborne = false;
+	for (const sample of trajectory) {
+		if (sample.contact === "airborne") observedAirborne = true;
+		if (observedAirborne && sample.contact === "grounded") return sample;
+	}
+	return null;
+}
+
 const TELEPORT_DESTINATIONS = [
 	{ coordinates: "22n 2w", point: { x: 23_988, y: 29_748, z: 0 } },
 	{ coordinates: "11n 2w", point: { x: 23_988, y: 27_108, z: 0 } },
@@ -439,6 +487,13 @@ async function main() {
 		process.env.HOLTBURGER_PROBE_CHARACTER_GUID,
 	);
 	const mode = probeMode(process.env.HOLTBURGER_PROBE_MODE);
+	const probePreciseJump = process.env.HOLTBURGER_PROBE_PRECISE_JUMP === "1";
+	const preciseJumpTargetGuid = optionalGuid(
+		process.env.HOLTBURGER_PROBE_PRECISE_JUMP_TARGET_GUID,
+	);
+	const preciseJumpLocalOffset = optionalPlanarOffset(
+		process.env.HOLTBURGER_PROBE_PRECISE_JUMP_LOCAL_OFFSET,
+	);
 	const requestedTeleport = process.env.HOLTBURGER_PROBE_TELEPORT;
 	const requestedTeleportSequence =
 		process.env.HOLTBURGER_PROBE_TELEPORT_SEQUENCE;
@@ -482,6 +537,7 @@ async function main() {
 	const characterMotionFeedback = [];
 	let characterMotionCapabilities = null;
 	let jump = null;
+	let preciseJump = null;
 	const terminalEvents = [];
 	const latestEntities = new Map();
 	let teleport = null;
@@ -491,6 +547,8 @@ async function main() {
 		"client-lifecycle-changed",
 		"client-character-motion-capabilities-updated",
 		"client-character-motion-feedback",
+		"client-precise-jump-evaluation",
+		"client-precise-jump-transaction-feedback",
 		"client-local-player-established",
 		"client-server-time-updated",
 		"client-dynamic-entity",
@@ -843,6 +901,160 @@ async function main() {
 			await delay(observationMs);
 			lastCompletedPhase = "passive-observation-completed";
 		} else {
+			if (probePreciseJump) {
+				const entity = await waitForGroundedPlayer(
+					waiter,
+					latestEntities,
+					playerGuid,
+					timeoutMs,
+				);
+				if (entity?.placement?.kind !== "world") {
+					throw new Error("precise-jump probe requires a world-placed player");
+				}
+				const camera = [...cameras]
+					.reverse()
+					.find(({ event }) => event === "client-camera-started")?.payload;
+				if (camera === undefined) {
+					throw new Error("precise-jump probe has no active camera identity");
+				}
+				const pose = entity.placement.pose;
+				const targetEntity =
+					preciseJumpTargetGuid === undefined
+						? null
+						: latestEntities.get(preciseJumpTargetGuid);
+				if (
+					preciseJumpTargetGuid !== undefined &&
+					targetEntity?.placement?.kind !== "world"
+				) {
+					throw new Error(
+						"precise-jump target entity is absent or not world-placed",
+					);
+				}
+				const before = actorPhaseSample(entity);
+				if (before === null) {
+					throw new Error("precise-jump probe has no world-space actor sample");
+				}
+				const [localRight, localForward] = preciseJumpLocalOffset;
+				const offsetX =
+					Math.sin(before.heading) * localRight -
+					Math.cos(before.heading) * localForward;
+				const offsetY =
+					Math.cos(before.heading) * localRight +
+					Math.sin(before.heading) * localForward;
+				const targetPose = targetEntity?.placement.pose;
+				const exactCell =
+					Number(targetPose?.landblockId ?? pose.landblockId) >>> 0;
+				const anchor = ((exactCell & 0xffff0000) | 0x0000ffff) >>> 0;
+				const cellSelector = exactCell & 0xffff;
+				const aimSequence = 20_000;
+				const evaluationPromise = waiter.wait(
+					"client-precise-jump-evaluation",
+					(payload) => payload?.sequence === aimSequence,
+					timeoutMs,
+					"precise-jump evaluation",
+				);
+				void evaluationPromise.catch(() => undefined);
+				const evaluationStartedAt = performance.now();
+				await invokeMovement("set_client_precise_jump_aim", {
+					request: {
+						camera,
+						sequence: aimSequence,
+						anchor,
+						start:
+							targetPose === undefined
+								? [
+										pose.coords.x + offsetX,
+										pose.coords.y + offsetY,
+										pose.coords.z + 2,
+									]
+								: [
+										targetPose.coords.x,
+										targetPose.coords.y,
+										targetPose.coords.z + 5,
+									],
+						direction: [0, 0, -1],
+						maximumDistance: 8,
+						previousCell:
+							cellSelector >= 0x0100 && cellSelector !== 0xffff
+								? exactCell
+								: null,
+					},
+				});
+				const evaluation = await evaluationPromise;
+				const evaluationLatencyMs = performance.now() - evaluationStartedAt;
+				preciseJump = { evaluation };
+				if (evaluation.status !== "reachable" || evaluation.target === null) {
+					throw new Error(
+						`precise-jump standing target was ${evaluation.status}`,
+					);
+				}
+				const actionSequence = 20_001;
+				const feedbackPromise = waiter.wait(
+					"client-precise-jump-transaction-feedback",
+					(payload) => payload?.sequence === actionSequence,
+					timeoutMs,
+					"precise-jump commit feedback",
+				);
+				void feedbackPromise.catch(() => undefined);
+				await invokeMovement("commit_client_precise_jump", {
+					request: {
+						sequence: actionSequence,
+						evaluationId: evaluation.evaluationId,
+					},
+				});
+				const feedback = await feedbackPromise;
+				if (feedback.outcome?.kind !== "committed") {
+					throw new Error(
+						`precise-jump commit was ${feedback.outcome?.reason ?? feedback.outcome?.kind ?? "unknown"}`,
+					);
+				}
+				const trajectory = [];
+				for (let elapsed = 0; elapsed <= 5_000; elapsed += 50) {
+					const sample = actorPhaseSample(latestEntities.get(playerGuid));
+					if (sample !== null) trajectory.push(sample);
+					await delay(50);
+				}
+				const firstLanding = firstGroundedSampleAfterAirborne(trajectory);
+				const after = trajectory.at(-1) ?? null;
+				const predicted = worldPoint({
+					landblockId: evaluation.target.anchor,
+					coords: {
+						x: evaluation.target.point[0],
+						y: evaluation.target.point[1],
+						z: evaluation.target.point[2],
+					},
+				});
+				const closestApproach = trajectory.reduce((closest, sample) => {
+					const separation = distance(predicted, sample.point);
+					return closest === null || separation < closest.separation
+						? { sample, separation }
+						: closest;
+				}, null);
+				preciseJump = {
+					aimSequence,
+					actionSequence,
+					localTargetOffset: preciseJumpLocalOffset,
+					evaluationLatencyMs,
+					targetEntityGuid:
+						preciseJumpTargetGuid === undefined
+							? null
+							: guidString(preciseJumpTargetGuid),
+					evaluation,
+					feedback,
+					before,
+					after,
+					predictedFirstLanding: predicted,
+					observedFirstLanding: firstLanding,
+					observedLandingError:
+						firstLanding === null
+							? null
+							: distance(predicted, firstLanding.point),
+					closestObservedApproach: closestApproach,
+					contactStates: [
+						...new Set(trajectory.map((sample) => sample.contact)),
+					],
+				};
+			}
 			const runDrivePhase = async (label, request, durationMilliseconds) => {
 				const before = actorPhaseSample(latestEntities.get(playerGuid));
 				await invokeMovement("replace_client_drive", { request });
@@ -1124,6 +1336,7 @@ async function main() {
 			characterMotionCapabilities,
 			characterMotionFeedback,
 			jump,
+			preciseJump,
 			discontinuityCount: discontinuities.length,
 			terminalEvents,
 			census: census.toJSON(),
@@ -1144,6 +1357,7 @@ async function main() {
 			characterMotionCapabilities,
 			characterMotionFeedback,
 			jump,
+			preciseJump,
 			census: census.toJSON(),
 		};
 	} finally {

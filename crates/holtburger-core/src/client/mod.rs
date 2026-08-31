@@ -22,6 +22,9 @@ mod dynamic_entity_view;
 mod messages;
 mod movement;
 pub mod movement_types;
+pub mod precise_jump;
+pub mod precise_jump_prediction;
+mod precise_jump_runtime;
 mod runtime;
 pub mod runtime_body_view_cache;
 mod simulation;
@@ -37,6 +40,12 @@ pub use camera::{
 };
 use character_selection::CharacterSelectionState;
 use movement::MovementSystem;
+pub use precise_jump_runtime::{
+    PreciseJumpActionSequence, PreciseJumpAimRequest, PreciseJumpAimSequence,
+    PreciseJumpCancelRequest, PreciseJumpCommitRequest, PreciseJumpEvaluation,
+    PreciseJumpEvaluationId, PreciseJumpEvaluationStatus, PreciseJumpTargetView,
+    PreciseJumpTransactionFeedback, PreciseJumpTransactionOutcome, PreciseJumpTransactionRejection,
+};
 use types::*;
 
 /// Physics tick interval in milliseconds.
@@ -89,6 +98,8 @@ pub struct ClientRuntime {
     activation: Option<ClientWorldActivationRuntime>,
     /// Client-local camera boom advanced inside the same authority clock as entity presentation.
     camera: ClientCameraRuntime,
+    /// Replaceable speculative aim work and ordered precise-jump commit state.
+    precise_jump: precise_jump_runtime::PreciseJumpRuntime,
     character_selection: CharacterSelectionState,
     turbine_chat: TurbineChatState,
 }
@@ -238,6 +249,7 @@ impl ClientRuntime {
 
     pub(crate) fn bump_world_generation(&mut self) -> u64 {
         self.world_generation = self.world_generation.saturating_add(1);
+        self.precise_jump.invalidate();
         self.world_generation
     }
 

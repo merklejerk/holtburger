@@ -61,7 +61,8 @@
 		readonly cameraResidencyLabel: string | null;
 		readonly cameraMode: ExplorerCameraMode;
 		readonly cameraModePending: boolean;
-		readonly physicalCameraStatus: PhysicalFlyStatus | null;
+		/** Pull physical-camera diagnostics only while the World panel is mounted. */
+		readonly readPhysicalCameraStatus: () => PhysicalFlyStatus | null;
 		readonly physicalCameraError: string | null;
 		readonly updateCameraMode: (mode: ExplorerCameraMode) => void;
 		readonly environmentSelection: ExplorerEnvironmentSelection;
@@ -116,13 +117,13 @@
 		readonly renderScale: number;
 		readonly renderScaleOptions: readonly number[];
 		readonly updateRenderScale: (renderScale: number) => void;
-		/** Latest atomic read of renderer selection and explicit profiling state. */
-		readonly rendererFrameDiagnostics: RendererFrameDiagnosticsSnapshot | null;
+		/** Pull renderer diagnostics only while the Frame panel is mounted. */
+		readonly readRendererFrameDiagnostics: () => RendererFrameDiagnosticsSnapshot | null;
 		/** Explicitly create or tear down the renderer profiling session. */
 		readonly updateRendererFrameProfiling: (enabled: boolean) => void;
 		/** Compose current renderer and Explorer context into one exportable report. */
 		readonly captureFrameDiagnosticReport: () => ExplorerFrameDiagnosticReport | null;
-		readonly authoredDynamicRuntimeDiagnostics: ReturnType<
+		readonly readAuthoredDynamicRuntimeDiagnostics: () => ReturnType<
 			GamePresentationRuntime["getAuthoredDynamicRuntimeDiagnostics"]
 		> | null;
 		/** Read an outdoor-static and texture atlas snapshot for the Explorer inspector. */
@@ -166,7 +167,7 @@
 		cameraResidencyLabel,
 		cameraMode,
 		cameraModePending,
-		physicalCameraStatus,
+		readPhysicalCameraStatus,
 		physicalCameraError,
 		updateCameraMode,
 		environmentSelection,
@@ -205,10 +206,10 @@
 		renderScale,
 		renderScaleOptions,
 		updateRenderScale,
-		rendererFrameDiagnostics,
+		readRendererFrameDiagnostics,
 		updateRendererFrameProfiling,
 		captureFrameDiagnosticReport,
-		authoredDynamicRuntimeDiagnostics,
+		readAuthoredDynamicRuntimeDiagnostics,
 		readStaticObjectRuntimeDiagnostics,
 		readTextureAtlasPage,
 		entityCatalog,
@@ -316,7 +317,7 @@
 								{cameraResidencyLabel}
 								{cameraMode}
 								{cameraModePending}
-								{physicalCameraStatus}
+								{readPhysicalCameraStatus}
 								{physicalCameraError}
 								{updateCameraMode}
 								{environmentSelection}
@@ -358,8 +359,8 @@
 							<ExplorerGradingPanel {colorGrade} {updateColorGradeSettings} />
 						{:else if activeTab.id === "frame"}
 							<ExplorerFramePanel
-								diagnostics={rendererFrameDiagnostics}
-								dynamics={authoredDynamicRuntimeDiagnostics}
+								{readRendererFrameDiagnostics}
+								{readAuthoredDynamicRuntimeDiagnostics}
 								setProfilingEnabled={updateRendererFrameProfiling}
 								captureReport={captureFrameDiagnosticReport}
 							/>

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from "svelte";
 	import type { SceneResidency } from "../lib/game/scene";
 	import type { SceneInterestTarget } from "../lib/game/runtime/scene-target";
 	import type { SceneInterestRadii } from "../lib/game/runtime/types";
@@ -45,7 +46,8 @@
 		readonly cameraResidencyLabel: string | null;
 		readonly cameraMode: ExplorerCameraMode;
 		readonly cameraModePending: boolean;
-		readonly physicalCameraStatus: PhysicalFlyStatus | null;
+		/** Bounded diagnostic read owned by this mounted panel. */
+		readonly readPhysicalCameraStatus: () => PhysicalFlyStatus | null;
 		readonly physicalCameraError: string | null;
 		readonly updateCameraMode: (mode: ExplorerCameraMode) => void;
 		readonly environmentSelection: ExplorerEnvironmentSelection;
@@ -114,7 +116,7 @@
 		cameraResidencyLabel,
 		cameraMode,
 		cameraModePending,
-		physicalCameraStatus,
+		readPhysicalCameraStatus,
 		physicalCameraError,
 		updateCameraMode,
 		environmentSelection,
@@ -152,6 +154,19 @@
 		maximumTextureAnisotropy,
 		updateTextureFiltering,
 	}: Props = $props();
+	let physicalCameraStatus = $state<PhysicalFlyStatus | null>(null);
+
+	onMount(() => {
+		const sample = (): void => {
+			physicalCameraStatus = readPhysicalCameraStatus();
+		};
+		sample();
+		const interval = window.setInterval(
+			sample,
+			EXPLORER_TUNING.diagnostics.frameRateDisplayIntervalMs,
+		);
+		return () => window.clearInterval(interval);
+	});
 
 	let interestInput = $state("0000");
 	let interestStatus = $state("No scene interest requested.");

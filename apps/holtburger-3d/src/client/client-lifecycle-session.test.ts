@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { landblockVector3 } from "../lib/assets/ac-frame";
 import type { DynamicEntityView } from "../lib/game/runtime/dynamic-entity-feed";
 import type {
 	ClientCurrentState,
@@ -67,12 +68,14 @@ describe("ClientLifecycleSession", () => {
 
 		await session.start();
 
-		expect(transport.calls.slice(0, 16)).toEqual([
+		expect(transport.calls.slice(0, 18)).toEqual([
 			"listen:client-dynamic-entity",
 			"listen:client-current-state",
 			"listen:client-lifecycle-changed",
 			"listen:client-character-motion-capabilities-updated",
 			"listen:client-character-motion-feedback",
+			"listen:client-precise-jump-evaluation",
+			"listen:client-precise-jump-transaction-feedback",
 			"listen:client-local-player-established",
 			"listen:client-server-time-updated",
 			"listen:client-world-name-updated",
@@ -92,6 +95,91 @@ describe("ClientLifecycleSession", () => {
 		expect(
 			session.mirror.entities().map((entity) => entity.identity.guid),
 		).toEqual([0x5000_0001]);
+	});
+
+	it("validates precise-jump commands and projects correlated results", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const events: string[] = [];
+		session.subscribe((event) => events.push(event.type));
+		await session.start();
+		events.length = 0;
+
+		const camera = {
+			cameraGeneration: 2,
+			playerGuid: 0x5000_0001,
+			entityGeneration: 7,
+		};
+		await session.setPreciseJumpAim({
+			camera,
+			sequence: 9,
+			anchor: 0xda55_ffff,
+			start: landblockVector3([10, 20, 4]),
+			direction: [0, 1, 0],
+			maximumDistance: 80,
+			previousCell: null,
+		});
+		await session.commitPreciseJump({ sequence: 3, evaluationId: 11 });
+		await session.cancelPreciseJump({ sequence: 4 });
+
+		transport.emit("client-precise-jump-evaluation", {
+			evaluationId: 11,
+			camera,
+			sequence: 9,
+			target: {
+				anchor: 0xda55_ffff,
+				point: [10, 40, 0],
+				normal: [0, 0, 1],
+				committedCell: null,
+			},
+			status: "reachable",
+			trajectory: {
+				anchor: 0xda55_ffff,
+				origin: [10, 20, 4],
+				velocity: [0, 14, 8],
+				acceleration: [0, 0, -9.8],
+				durationSeconds: 1.5,
+				placements: [
+					{
+						startFraction: 0,
+						endFraction: 1,
+						committedCell: null,
+					},
+				],
+			},
+			diagnostics: {
+				generatedCandidates: 6,
+				evaluatedCandidates: 2,
+				solverTicks: 71,
+			},
+		});
+		transport.emit("client-precise-jump-transaction-feedback", {
+			sequence: 3,
+			outcome: { kind: "committed" },
+		});
+
+		expect(
+			transport.invocations.slice(-3).map(({ command }) => command),
+		).toEqual([
+			"set_client_precise_jump_aim",
+			"commit_client_precise_jump",
+			"cancel_client_precise_jump",
+		]);
+		expect(events).toEqual([
+			"precise-jump-evaluation",
+			"precise-jump-transaction-feedback",
+		]);
+		await expect(
+			session.setPreciseJumpAim({
+				camera,
+				sequence: 10,
+				anchor: 0xda55_ffff,
+				start: landblockVector3([Number.NaN, 0, 0]),
+				direction: [0, 1, 0],
+				maximumDistance: 80,
+				previousCell: null,
+			}),
+		).rejects.toThrow();
 	});
 
 	it("suppresses deltas during recovery and accepts only the replacement snapshot", async () => {

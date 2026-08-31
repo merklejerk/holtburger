@@ -1,6 +1,7 @@
 //! Tick-start broad-phase membership for dynamic entity targets.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use holtburger_common::position::WorldPosition;
@@ -9,7 +10,67 @@ use holtburger_content::{CollisionBox, LandblockPlacement, PlacedCollisionShape}
 
 use super::cell_index::GlobalCellRange;
 use super::{DynamicBodyActivity, SpatialBody, SpatialBodyId, SpatialMembership};
-use crate::{EntityCollisionParticipation, LocalTargetDemand};
+use crate::{EntityCollisionParticipation, LocalTargetDemand, PreparedEntityTargetGeometry};
+
+/// Immutable entity targets and broad-phase membership sealed for one speculative evaluation.
+#[derive(Debug, Clone)]
+pub struct EntityCollisionSnapshot {
+    pub(crate) targets: BTreeMap<SpatialBodyId, SpatialBody>,
+    pub(crate) index: DynamicShadowIndex,
+}
+
+/// Exact collision-relevant identity of one selectable entity surface.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EntityCollisionProof {
+    body_id: SpatialBodyId,
+    pose: WorldPosition,
+    target_geometry: Arc<PreparedEntityTargetGeometry>,
+    uses_physics_bsp: bool,
+    placement: SpatialMembership,
+}
+
+impl EntityCollisionProof {
+    /// Entity body whose selected geometry supplied the surface.
+    pub const fn body_id(&self) -> SpatialBodyId {
+        self.body_id
+    }
+
+    pub(crate) fn matches(&self, body: &SpatialBody) -> bool {
+        selectable_target_proof(body).is_some_and(|current| current == *self)
+    }
+}
+
+impl EntityCollisionSnapshot {
+    pub(crate) fn compile<'a>(bodies: impl IntoIterator<Item = &'a SpatialBody>) -> Result<Self> {
+        let targets = bodies
+            .into_iter()
+            .filter(|body| matches!(body.id, SpatialBodyId::Entity(_)))
+            .filter(|body| {
+                body.physical
+                    .as_ref()
+                    .and_then(|physical| physical.dynamic.as_ref())
+                    .is_some()
+            })
+            .map(|body| (body.id, body.clone()))
+            .collect::<BTreeMap<_, _>>();
+        let index = DynamicShadowIndex::compile(targets.values())?;
+        Ok(Self { targets, index })
+    }
+
+    pub(crate) fn body(&self, body_id: SpatialBodyId) -> Option<&SpatialBody> {
+        self.targets.get(&body_id)
+    }
+
+    pub(crate) fn proof(&self, body_id: SpatialBodyId) -> Option<EntityCollisionProof> {
+        self.body(body_id).and_then(selectable_target_proof)
+    }
+
+    /// Verifies one retained entity surface against this sealed target population.
+    pub fn proves(&self, proof: &EntityCollisionProof) -> bool {
+        self.body(proof.body_id())
+            .is_some_and(|body| proof.matches(body))
+    }
+}
 
 /// Scene-owned dynamic equivalent of retail's outdoor and EnvCell shadow lists.
 #[derive(Debug, Clone, Default)]
@@ -85,7 +146,7 @@ impl DynamicShadowIndex {
     /// Returns stable, deduplicated candidates from swept outdoor cells and provisional EnvCells.
     pub(crate) fn candidates(
         &self,
-        mover: SpatialBodyId,
+        excluded: Option<SpatialBodyId>,
         anchor: Guid,
         minimum: Vector3,
         maximum: Vector3,
@@ -106,9 +167,30 @@ impl DynamicShadowIndex {
         }
         selected.sort_unstable();
         selected.dedup();
-        selected.retain(|body_id| *body_id != mover);
+        if let Some(excluded) = excluded {
+            selected.retain(|body_id| *body_id != excluded);
+        }
         selected
     }
+}
+
+fn selectable_target_proof(body: &SpatialBody) -> Option<EntityCollisionProof> {
+    let dynamic = body.physical.as_ref()?.dynamic.as_ref()?;
+    if !matches!(body.id, SpatialBodyId::Entity(_))
+        || dynamic.activity != DynamicBodyActivity::Settled
+        || dynamic.demand.target != LocalTargetDemand::Retained
+        || dynamic.collision.dynamic_collision.target != EntityCollisionParticipation::Solid
+        || dynamic.collision.dynamic_collision.missile
+    {
+        return None;
+    }
+    Some(EntityCollisionProof {
+        body_id: body.id,
+        pose: body.pose,
+        target_geometry: dynamic.collision.target_geometry.clone(),
+        uses_physics_bsp: dynamic.collision.uses_physics_bsp,
+        placement: dynamic.placement.clone(),
+    })
 }
 
 /// Current conservative bounds for the effective target-geometry branch.

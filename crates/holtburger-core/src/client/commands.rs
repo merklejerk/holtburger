@@ -175,6 +175,42 @@ impl ClientRuntime {
                 self.handle_movement_command(cmd).await
             }
 
+            ClientCommand::SetPreciseJumpAim(request) => {
+                let collision = self
+                    .collision_coordinator
+                    .as_ref()
+                    .map(super::collision::ClientCollisionCoordinator::snapshot);
+                if let Some(evaluation) = self.precise_jump.submit_aim(
+                    request,
+                    self.world_generation,
+                    self.camera.identity(),
+                    &self.world,
+                    collision,
+                ) {
+                    let _ = self.client_view_event_tx.send(
+                        crate::client::types::ClientViewEvent::PreciseJumpEvaluation(evaluation),
+                    );
+                }
+                Ok(())
+            }
+            ClientCommand::CancelPreciseJump(request) => {
+                let feedback = self.precise_jump.cancel(request);
+                let _ = self.client_view_event_tx.send(
+                    crate::client::types::ClientViewEvent::PreciseJumpTransactionFeedback(feedback),
+                );
+                Ok(())
+            }
+            ClientCommand::CommitPreciseJump(request) => {
+                if let Some(feedback) = self.precise_jump.queue_commit(request) {
+                    let _ = self.client_view_event_tx.send(
+                        crate::client::types::ClientViewEvent::PreciseJumpTransactionFeedback(
+                            feedback,
+                        ),
+                    );
+                }
+                Ok(())
+            }
+
             ClientCommand::StartClientCamera(_)
             | ClientCommand::SetClientCameraIntent(_)
             | ClientCommand::SetClientCameraClearance(_)

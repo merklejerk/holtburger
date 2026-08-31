@@ -489,7 +489,7 @@ export const SHARED_FRONTEND_TUNING = {
 			 * Interdependent with `falloff`: changing the reach without retuning this changes how
 			 * bright the pool is, not just how far it goes.
 			 */
-			intensity: 10,
+			intensity: 2,
 			/** Retail uses opaque white (`0xFFFFFFFF`) for the viewer light. */
 			color: { red: 1, green: 1, blue: 1 },
 			/**

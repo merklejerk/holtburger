@@ -32,6 +32,7 @@ import {
 	type PortalTransitionFrame,
 	type Renderer,
 	type RendererFrameDiagnosticsSnapshot,
+	type WorldIndicatorInput,
 } from "../renderer/renderer";
 import { RenderWorld } from "../renderer/render-world";
 import {
@@ -926,6 +927,8 @@ export class GamePresentationRuntime {
 	#frameSettings: FrameSettings;
 	/** Presentation-only transition input consumed by the renderer's final-frame compositor. */
 	#portalTransition: PortalTransitionFrame | undefined;
+	/** Atomic frontend-resolved precise-jump marker and optional trajectory. */
+	#worldIndicator: WorldIndicatorInput | null = null;
 	/** Prepared authored portal closure retained until runtime teardown. */
 	#portalTransitionAssets: PortalTransitionAssets | null = null;
 	/** Authored 40fps traversal sampled at render cadence for the portal's setup and sound hooks. */
@@ -2423,6 +2426,11 @@ export class GamePresentationRuntime {
 		this.#primaryViewExtent = { ...extent };
 	}
 
+	/** Replace the complete presentation-only world indicator without touching scene authority. */
+	setWorldIndicator(indicator: WorldIndicatorInput | null): void {
+		this.#worldIndicator = indicator;
+	}
+
 	/** Replace the frontend-resolved environment without changing scene residency or interest. */
 	setSceneEnvironment(environment: ResolvedSceneEnvironment): void {
 		this.#environment = environment;
@@ -3041,6 +3049,7 @@ export class GamePresentationRuntime {
 					cameraInsideSealedCell: this.#cameraInsideSealedCell(),
 				},
 			],
+			worldIndicator: this.#worldIndicator,
 		});
 		tick?.mark("render");
 		this.#selectedDynamicNodeIds = new Set(feedback.selectedDynamicNodeIds);

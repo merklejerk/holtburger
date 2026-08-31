@@ -258,6 +258,7 @@ describe("RenderWorld", () => {
 					indexStart: 0,
 					material: staticMaterial(),
 					ordering: "opaque",
+					retailVisibility: "normally-visible",
 					transparentSort: null,
 				},
 			],
@@ -320,6 +321,7 @@ function dynamicContribution(
 			material: staticMaterial(),
 			ordering,
 			partIndex: 0,
+			retailVisibility: "normally-visible",
 			templatePartKey: "part-visual-template:fixture" as PartVisualTemplateKey,
 		},
 		instance: {

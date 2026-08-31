@@ -14,7 +14,10 @@ import type {
 	ScenePlacement,
 	ScenePortalCrossingInput,
 } from "../scene";
-import type { ResolvedMaterial } from "../resolution/presentation";
+import type {
+	ResolvedMaterial,
+	RetailGeometryVisibility,
+} from "../resolution/presentation";
 import type {
 	StaticGeometryKey,
 	StaticInstallResourceNamespace,
@@ -100,6 +103,8 @@ export interface StaticObjectDrawUnit {
 	readonly material: ObjectMaterialBinding;
 	/** Renderer-neutral ordering class selected from lossless source material facts. */
 	readonly ordering: ObjectMaterialOrdering;
+	/** Retail draw eligibility shared by every triangle in this immutable range. */
+	readonly retailVisibility: RetailGeometryVisibility;
 	/**
 	 * Stable distance-sort input present only for transparent ranges.
 	 *
@@ -123,6 +128,8 @@ export interface FrameStreamedObjectInstanceTemplate {
 	readonly indexStart: number;
 	readonly indexCount: number;
 	readonly material: ObjectMaterialBinding;
+	/** Retail draw eligibility shared by the source geometry partition. */
+	readonly retailVisibility: RetailGeometryVisibility;
 	readonly instance: ObjectInstanceData;
 	/**
 	 * Stable distance-sort facts for this instance.

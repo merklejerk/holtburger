@@ -100,6 +100,7 @@ function objectsSourceWithOneReferencedMaterial(): ResolvedOutdoorStaticLayerSou
 								indexedMaterial("0x05000002", "0x04000002"),
 							],
 							partIndex: 0,
+							retailVisibility: "normally-visible",
 						},
 					],
 					lights: [],

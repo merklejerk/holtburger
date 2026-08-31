@@ -7,6 +7,7 @@ import type { ObjectInstanceData } from "../systems/static-resources";
 import type { GeometryResourceKey } from "./resource-manager";
 import type { RenderWorld } from "./render-world";
 import { isEntityShadowCasterCategory } from "./entity-shadow-policy";
+import { retainsRetailGeometry } from "./retail-geometry-visibility";
 
 const OUTDOOR_SCOPE = [{ kind: "outdoor" }] as const;
 const DYNAMIC_CULLING_GROUP = "dynamic";
@@ -177,6 +178,7 @@ export function collectOutdoorPssmCastersForCascades(
 	cascadeFrusta: readonly Frustum[],
 	anchorLandblockId: LandblockOwnerId,
 	selectedDynamicNodeIds: Set<SceneNodeId>,
+	showRetailHiddenGeometry: boolean,
 	batches: readonly OutdoorPssmCasterBatch[],
 	scratch: OutdoorPssmCasterSelectionScratch,
 	depthDraws: OutdoorPssmDepthDrawCatalog,
@@ -246,6 +248,13 @@ export function collectOutdoorPssmCastersForCascades(
 			continue;
 		}
 		for (const contribution of contributions.depth) {
+			if (
+				!retainsRetailGeometry(
+					contribution.drawUnit.retailVisibility,
+					showRetailHiddenGeometry,
+				)
+			)
+				continue;
 			const depthDraw = depthDraws.resolve(world, contribution.drawUnit);
 			let part = scratch.casterParts[casterPartCount];
 			if (part === undefined) {

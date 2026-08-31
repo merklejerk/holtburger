@@ -5,6 +5,7 @@ import type { LandblockVec3 } from "../../assets/ac-frame";
 import type { SceneNodeId, SceneScope } from "../scene";
 import type { ObjectMaterialBinding } from "../commit/artifacts";
 import type { ObjectMaterialOrdering } from "../resolution/object-material-planner";
+import type { RetailGeometryVisibility } from "../resolution/presentation";
 import type { ObjectInstanceData } from "./static-resources";
 
 declare const partVisualTemplateKeyBrand: unique symbol;
@@ -27,6 +28,8 @@ export interface RigidPartDrawUnit {
 	readonly indexCount: number;
 	readonly material: ObjectMaterialBinding;
 	readonly ordering: ObjectMaterialOrdering;
+	/** Retail draw eligibility inherited from the GfxObj-backed setup part. */
+	readonly retailVisibility: RetailGeometryVisibility;
 	/** Shared immutable part template; entity identity never enters batching compatibility. */
 	readonly templatePartKey: PartVisualTemplateKey;
 }
@@ -40,6 +43,8 @@ export interface RigidPartDepthDrawUnit {
 	/** Maximal contiguous authored triangle range sharing the effective cull mode. */
 	readonly indexStart: number;
 	readonly indexCount: number;
+	/** Retail draw eligibility inherited from the GfxObj-backed setup part. */
+	readonly retailVisibility: RetailGeometryVisibility;
 }
 
 /** Renderer-neutral visible rigid-part instance emitted from one selected dynamic root. */

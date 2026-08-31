@@ -57,6 +57,9 @@
 		) => void;
 		/** Explorer-local switch controlling distance-fog presentation. */
 		readonly distanceFogEnabled: boolean;
+		/** Whether meshes suppressed by retail's degradation sentinel remain visible. */
+		readonly showRetailHiddenGeometry: boolean;
+		readonly updateShowRetailHiddenGeometry: (visible: boolean) => void;
 		/** User-switchable near-field ambient-occlusion presentation. */
 		readonly ambientOcclusion: AmbientOcclusionSettings;
 		/** Complete outdoor and indoor entity-shadow presentation policy. */
@@ -123,6 +126,8 @@
 		dayGroupNames,
 		updateEnvironment,
 		distanceFogEnabled,
+		showRetailHiddenGeometry,
+		updateShowRetailHiddenGeometry,
 		ambientOcclusion,
 		entityShadows,
 		viewerLightEnabled,
@@ -211,6 +216,12 @@
 
 	function handleDistanceFogChange(event: Event): void {
 		updateDistanceFog((event.currentTarget as HTMLInputElement).checked);
+	}
+
+	function handleRetailHiddenGeometryChange(event: Event): void {
+		updateShowRetailHiddenGeometry(
+			(event.currentTarget as HTMLInputElement).checked,
+		);
 	}
 
 	function handleAmbientOcclusionChange(event: Event): void {
@@ -584,6 +595,15 @@
 		disabled={!runtimeReady}
 	>
 		<legend>Render quality</legend>
+		<label class="explorer-toggle">
+			<input
+				checked={showRetailHiddenGeometry}
+				type="checkbox"
+				onchange={handleRetailHiddenGeometryChange}
+			/>
+			<span>Retail-hidden geometry</span>
+			<strong>{showRetailHiddenGeometry ? "Shown" : "Hidden"}</strong>
+		</label>
 		<label class="explorer-toggle">
 			<input
 				checked={ambientOcclusion.enabled}

@@ -51,6 +51,7 @@ interface BakedStaticObjectRange {
 	readonly indexCount: number;
 	readonly material: ObjectMaterialBinding;
 	readonly ordering: ObjectMaterialOrdering;
+	readonly retailVisibility: ResolvedObjectPart["retailVisibility"];
 	/** Stable sorter input exists only for transparent ranges; centers are landblock space. */
 	readonly transparentSort: {
 		readonly stableId: string;
@@ -96,6 +97,7 @@ interface SourceTriangleContribution {
 	readonly binding: ObjectMaterialBinding;
 	readonly bindingId: string;
 	readonly ordering: ObjectMaterialOrdering;
+	readonly retailVisibility: ResolvedObjectPart["retailVisibility"];
 	/** Source triangle identity retained for exact partition membership. */
 	readonly sourceTriangleIndex: number;
 	/** Interleaved XYZ values for the triangle's three positions. */
@@ -113,6 +115,7 @@ interface ContributionGroup {
 	readonly binding: ObjectMaterialBinding;
 	readonly bindingId: string;
 	readonly ordering: ObjectMaterialOrdering;
+	readonly retailVisibility: ResolvedObjectPart["retailVisibility"];
 	readonly triangles: BakedTriangleContribution[];
 	readonly transparentStableId: string | null;
 }
@@ -166,8 +169,10 @@ function prepareBakedStaticObjectGeometry(
 				part.residentId,
 				part.partIndex,
 			);
-			const groupKey =
-				contribution.transparentStableId ?? contribution.bindingId;
+			const groupKey = JSON.stringify([
+				contribution.retailVisibility,
+				contribution.transparentStableId ?? contribution.bindingId,
+			]);
 			const existing = groups.get(groupKey);
 			if (existing) {
 				existing.triangles.push(contribution);
@@ -177,6 +182,7 @@ function prepareBakedStaticObjectGeometry(
 				binding: contribution.binding,
 				bindingId: contribution.bindingId,
 				ordering: contribution.ordering,
+				retailVisibility: contribution.retailVisibility,
 				triangles: [contribution],
 				transparentStableId: contribution.transparentStableId,
 			});
@@ -241,6 +247,7 @@ function prepareBakedStaticObjectGeometry(
 			indexStart,
 			material: group.binding,
 			ordering: group.ordering,
+			retailVisibility: group.retailVisibility,
 			transparentSort,
 		});
 	}
@@ -281,6 +288,7 @@ function prepareBakedStaticObjectGeometry(
 					kind: "baked" as const,
 					material: range.material,
 					ordering: range.ordering,
+					retailVisibility: range.retailVisibility,
 					transparentSort: range.transparentSort,
 				})),
 				frameStreamedInstances: [],
@@ -383,6 +391,7 @@ interface TemplateGeometryPartition {
 	readonly binding: ObjectMaterialBinding;
 	readonly contributions: readonly SourceTriangleContribution[];
 	readonly identity: string;
+	readonly retailVisibility: ResolvedObjectPart["retailVisibility"];
 }
 
 /** A template partition with its realized shared geometry and per-partition sort centre. */
@@ -391,6 +400,7 @@ interface RealizedTemplatePartition {
 	readonly center: Vec3;
 	readonly data: ObjectGeometryData;
 	readonly key: StaticGeometryKey;
+	readonly retailVisibility: ResolvedObjectPart["retailVisibility"];
 }
 
 /**
@@ -466,6 +476,7 @@ function prepareGeneratedSceneryGeometry(
 					binding: first.binding,
 					contributions,
 					identity,
+					retailVisibility: first.retailVisibility,
 				});
 			}
 			expandTransformedContributionBounds(
@@ -512,6 +523,7 @@ function prepareGeneratedSceneryGeometry(
 			center: sourcePartitionCenter(partition.contributions),
 			data,
 			key,
+			retailVisibility: partition.retailVisibility,
 		});
 		instancedGeometryBytes += objectGeometryBytes(data);
 	}
@@ -530,6 +542,7 @@ function prepareGeneratedSceneryGeometry(
 				indexStart: 0,
 				instance: member.instance,
 				material: partition.binding,
+				retailVisibility: partition.retailVisibility,
 				transparentSort: {
 					// The partition's center is shared source-local geometry, but a template's sort
 					// center must be landblock space. This instance's placement never changes, so
@@ -583,6 +596,7 @@ function groupSourceContributions(
 		const contract = JSON.stringify([
 			contribution.bindingId,
 			contribution.ordering,
+			contribution.retailVisibility,
 		]);
 		const existing = contributionsByContract.get(contract);
 		if (existing) existing.push(contribution);
@@ -801,6 +815,7 @@ function createSourceTriangleContribution(options: {
 		normals,
 		ordering,
 		positions,
+		retailVisibility: options.part.retailVisibility,
 		sourceTriangleIndex: options.triangle,
 		textureCoordinates,
 	};
@@ -846,6 +861,10 @@ function compareGroups(
 ): number {
 	const order = orderingRank(left.ordering) - orderingRank(right.ordering);
 	if (order !== 0) return order;
+	const visibility = left.retailVisibility.localeCompare(
+		right.retailVisibility,
+	);
+	if (visibility !== 0) return visibility;
 	return (left.transparentStableId ?? left.bindingId).localeCompare(
 		right.transparentStableId ?? right.bindingId,
 	);

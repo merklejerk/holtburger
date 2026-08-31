@@ -58,6 +58,37 @@ describe("resolveClientEnvironmentSelection", () => {
 });
 
 describe("ClientPresentationSession", () => {
+	it("retains frame settings across owner construction and applies later changes", async () => {
+		const playerGuid = 0x0101_0001;
+		const lifecycle = new ClientLifecycleSession(
+			new FakeClientTransport(currentState(playerGuid)),
+		);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		let constructedWith: Parameters<
+			ClientPresentationRuntime["setFrameSettings"]
+		>[0] = CLIENT_TUNING.frameSettings;
+		const presentation = new ClientPresentationSession({
+			canvas: fakeCanvas(),
+			hostTransport: {} as never,
+			session: lifecycle,
+			ownerFactory: async (dependencies) => {
+				constructedWith = dependencies.frameSettings;
+				return fakeOwner(runtime, activeRegion());
+			},
+		});
+		presentation.setFrameSettings({
+			...CLIENT_TUNING.frameSettings,
+			showRetailHiddenGeometry: true,
+		});
+
+		await presentation.start();
+		expect(constructedWith.showRetailHiddenGeometry).toBe(true);
+		presentation.setFrameSettings(CLIENT_TUNING.frameSettings);
+		expect(runtime.frameSettings.at(-1)?.showRetailHiddenGeometry).toBe(false);
+		await presentation.destroy();
+	});
+
 	it("installs before identity and binds possession from the authority edge", async () => {
 		const playerGuid = 0x0101_0001;
 		const transport = new FakeClientTransport({
@@ -717,9 +748,18 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 	portalTransitions: unknown[] = [];
 	worldIndicators: Array<WorldIndicatorInput | null> = [];
 	completedActivations: number[] = [];
+	frameSettings: Parameters<
+		ClientPresentationRuntime["setFrameSettings"]
+	>[0][] = [];
 	realizationDisposition: DynamicEntityRealizationDisposition = "installed";
 	#activationRevision = 0;
 	readonly #desired = new Map<number, DynamicEntityView>();
+
+	setFrameSettings(
+		settings: Parameters<ClientPresentationRuntime["setFrameSettings"]>[0],
+	): void {
+		this.frameSettings.push(settings);
+	}
 
 	async replaceDynamicEntitySnapshot(
 		entities: readonly DynamicEntityView[],

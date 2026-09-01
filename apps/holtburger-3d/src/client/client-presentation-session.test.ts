@@ -182,9 +182,17 @@ describe("ClientPresentationSession", () => {
 		);
 		await lifecycle.start();
 		const runtime = new FakePresentationRuntime();
+		const hiddenSettings = {
+			...CLIENT_TUNING.frameSettings,
+			showRetailHiddenGeometry: false,
+		};
+		const visibleSettings = {
+			...CLIENT_TUNING.frameSettings,
+			showRetailHiddenGeometry: true,
+		};
 		let constructedWith: Parameters<
 			ClientPresentationRuntime["setFrameSettings"]
-		>[0] = CLIENT_TUNING.frameSettings;
+		>[0] = hiddenSettings;
 		const presentation = new ClientPresentationSession({
 			canvas: fakeCanvas(),
 			hostTransport: {} as never,
@@ -194,14 +202,11 @@ describe("ClientPresentationSession", () => {
 				return fakeOwner(runtime, activeRegion());
 			},
 		});
-		presentation.setFrameSettings({
-			...CLIENT_TUNING.frameSettings,
-			showRetailHiddenGeometry: true,
-		});
+		presentation.setFrameSettings(visibleSettings);
 
 		await presentation.start();
 		expect(constructedWith.showRetailHiddenGeometry).toBe(true);
-		presentation.setFrameSettings(CLIENT_TUNING.frameSettings);
+		presentation.setFrameSettings(hiddenSettings);
 		expect(runtime.frameSettings.at(-1)?.showRetailHiddenGeometry).toBe(false);
 		await presentation.destroy();
 	});
@@ -230,11 +235,15 @@ describe("ClientPresentationSession", () => {
 		expect(runtime.viewerLightGuid).toBe(playerGuid);
 		const landblockOrigin = createLandblockWorldOrigin("0x0100ffff");
 		expect(presentation.readMapPanelFrame()).toMatchObject({
-			anchor: {
-				residency: { envCellId: null, landblockId: "0x0100ffff" },
-				worldX: landblockOrigin.x + 12,
-				worldY: landblockOrigin.y + 3,
-				worldZ: landblockOrigin.z - 4,
+			subject: {
+				anchor: {
+					residency: { envCellId: null, landblockId: "0x0100ffff" },
+					worldX: landblockOrigin.x + 12,
+					worldY: landblockOrigin.y + 3,
+					worldZ: landblockOrigin.z - 4,
+				},
+				guid: playerGuid,
+				kind: "controlled-entity",
 			},
 			presentedEntityRevision: 0,
 			source: runtime,
@@ -1182,7 +1191,7 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 
 	setSceneEnvironment(): void {}
 
-	setViewerLightCarrier(guid: number | null): void {
+	setViewerEntity(guid: number | null): void {
 		this.viewerLightGuid = guid;
 	}
 
@@ -1393,7 +1402,8 @@ function portalLifecycle(
 function view(guid: number, landblockId = 0x0101_0100): DynamicEntityView {
 	return {
 		generation: 1,
-		identity: { guid, wcid: 42, name: "Player" },
+		identity: { guid, wcid: 42 },
+		display: { name: "Player", level: null },
 		presentation: {
 			category: "other",
 			content: {

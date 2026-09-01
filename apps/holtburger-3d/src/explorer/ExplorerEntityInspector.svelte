@@ -192,7 +192,7 @@
 <section class="entity-inspector" aria-labelledby="selected-entity-heading">
 	<p class="ac-section-label">Selected</p>
 	<div class="selected-heading">
-		<h3 id="selected-entity-heading">{selected.identity.name}</h3>
+		<h3 id="selected-entity-heading">{selected.display.name}</h3>
 		<span>WCID {selected.identity.wcid}</span>
 	</div>
 	<p class="selected-identity">
@@ -233,7 +233,7 @@
 	{:else}
 		<div class="wearer-context">
 			<span
-				>Held by {wearer?.identity.name ??
+				>Held by {wearer?.display.name ??
 					formatGuid(selected.placement.parent)}</span
 			>
 			{#if wearer !== null}

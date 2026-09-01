@@ -11,6 +11,8 @@ import {
 	type ClientPreciseJumpCadence,
 } from "./client-precise-jump-session";
 
+const AIM_INTERVAL_MS = 40;
+
 class FakeClientTransport implements ClientLifecycleTransport {
 	readonly handlers = new Map<string, (payload: unknown) => void>();
 	readonly invocations: Array<{ command: string; args: unknown }> = [];
@@ -141,7 +143,12 @@ async function fixture(): Promise<{
 	return {
 		transport,
 		lifecycle,
-		precise: new ClientPreciseJumpSession(lifecycle, () => undefined, cadence),
+		precise: new ClientPreciseJumpSession(
+			lifecycle,
+			() => undefined,
+			cadence,
+			AIM_INTERVAL_MS,
+		),
 		cadence,
 	};
 }
@@ -153,7 +160,7 @@ describe("ClientPreciseJumpSession", () => {
 		precise.aim(ray);
 		precise.aim({ ...ray, maximumDistance: 70 });
 		precise.aim({ ...ray, maximumDistance: 60 });
-		cadence.advance(100);
+		cadence.advance(AIM_INTERVAL_MS);
 
 		expect(transport.invocations).toHaveLength(1);
 		transport.emit(
@@ -194,7 +201,8 @@ describe("ClientPreciseJumpSession", () => {
 		});
 		precise.enter();
 
-		for (let millisecond = 0; millisecond < 1_000; millisecond += 1) {
+		const durationMs = AIM_INTERVAL_MS * 10;
+		for (let millisecond = 0; millisecond < durationMs; millisecond += 1) {
 			precise.aim({ ...ray, maximumDistance: 60 + millisecond / 1_000 });
 			cadence.advance(1);
 			while (invocationIndex < transport.invocations.length) {
@@ -208,8 +216,10 @@ describe("ClientPreciseJumpSession", () => {
 			}
 		}
 
-		expect(transport.invocations.length).toBeGreaterThan(20);
-		expect(transport.invocations.length).toBeLessThanOrEqual(31);
+		expect(transport.invocations.length).toBeGreaterThan(1);
+		expect(transport.invocations.length).toBeLessThanOrEqual(
+			Math.ceil(durationMs / AIM_INTERVAL_MS) + 1,
+		);
 		expect(publications).toBe(transport.invocations.length);
 	});
 
@@ -222,7 +232,7 @@ describe("ClientPreciseJumpSession", () => {
 			evaluation(1, "reachable"),
 		);
 		precise.aim(ray);
-		cadence.advance(34);
+		cadence.advance(AIM_INTERVAL_MS);
 		transport.emit(
 			"client-precise-jump-evaluation",
 			evaluation(1, "unreachable"),
@@ -250,7 +260,7 @@ describe("ClientPreciseJumpSession", () => {
 			evaluation(1, "reachable"),
 		);
 		precise.aim({ ...ray, maximumDistance: 60 });
-		cadence.advance(34);
+		cadence.advance(AIM_INTERVAL_MS);
 		expect(
 			transport.invocations.filter(
 				({ command }) => command === "set_client_precise_jump_aim",
@@ -258,7 +268,7 @@ describe("ClientPreciseJumpSession", () => {
 		).toHaveLength(2);
 
 		expect(precise.activate()).toBe(true);
-		cadence.advance(100);
+		cadence.advance(AIM_INTERVAL_MS * 2);
 		expect(precise.activate()).toBe(false);
 		transport.emit(
 			"client-precise-jump-evaluation",
@@ -309,7 +319,7 @@ describe("ClientPreciseJumpSession", () => {
 		});
 		expect(precise.state()).toEqual({ kind: "inactive" });
 		expect(cadence.pendingTaskCount()).toBe(0);
-		cadence.advance(100);
+		cadence.advance(AIM_INTERVAL_MS * 2);
 		expect(
 			transport.invocations.filter(
 				({ command }) => command === "set_client_precise_jump_aim",

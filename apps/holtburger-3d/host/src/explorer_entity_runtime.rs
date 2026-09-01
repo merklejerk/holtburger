@@ -2181,6 +2181,7 @@ mod tests {
                 name: format!("WCID {wcid}"),
                 weenie_type: WeenieType::Creature,
             },
+            level: None,
             content: DynamicEntityContent {
                 motion_table_did: None,
                 setup_did: FIXTURE_SETUP_DID,

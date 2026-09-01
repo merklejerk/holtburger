@@ -141,6 +141,9 @@ describe("RenderWorld", () => {
 					nodeId === "scene-node:8" ? selectedStaticRenderable : null,
 			},
 			dynamics: {
+				getNameplatePopulationRevision: () => 0,
+				forEachNameplateVisual: () => {},
+				getNameplateFacts: () => null,
 				getPresentationCategory: (nodeId) =>
 					nodeId === "scene-node:9" ? "mob" : null,
 				getPresentationIdentity: (nodeId) =>

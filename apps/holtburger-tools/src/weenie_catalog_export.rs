@@ -38,6 +38,7 @@ const PROPERTY_FLOAT_ELASTICITY: u16 = 79;
 const PROPERTY_FLOAT_OBVIOUS_RADAR_RANGE: u16 = 104;
 
 const PROPERTY_INT_ITEM_TYPE: u16 = 1;
+const PROPERTY_INT_LEVEL: u16 = 25;
 const PROPERTY_INT_DEFAULT_COMBAT_STYLE: u16 = 46;
 const PROPERTY_INT_PHYSICS_STATE: u16 = 93;
 const PROPERTY_INT_CLOTHING_PRIORITY: u16 = 4;
@@ -202,7 +203,7 @@ fn load_rows(connection: &mut Conn) -> Result<AceWorldRows> {
             .context("could not query ACE table weenie_properties_float")?,
         ints: connection
             .query_map(
-                "SELECT object_Id, type, value FROM weenie_properties_int WHERE type IN (1, 3, 4, 9, 46, 93, 95, 113, 133, 188) ORDER BY object_Id, type",
+                "SELECT object_Id, type, value FROM weenie_properties_int WHERE type IN (1, 3, 4, 9, 25, 46, 93, 95, 113, 133, 188) ORDER BY object_Id, type",
                 |(wcid, property_type, value)| ScalarRow { wcid, property_type, value },
             )
             .context("could not query ACE table weenie_properties_int")?,
@@ -260,6 +261,7 @@ fn project_rows(rows: AceWorldRows) -> std::result::Result<Vec<WeenieTemplate>, 
             class_name: row.class_name,
             weenie_type: row.weenie_type,
             name: None,
+            level: None,
             setup_did: None,
             motion_table_did: None,
             sound_table_did: None,
@@ -382,6 +384,13 @@ fn project_rows(rows: AceWorldRows) -> std::result::Result<Vec<WeenieTemplate>, 
     for row in rows.ints {
         let template = template_mut(&mut templates, row.wcid, "weenie_properties_int")?;
         match row.property_type {
+            PROPERTY_INT_LEVEL => set_once(
+                &mut template.level,
+                row.value,
+                row.wcid,
+                "weenie_properties_int",
+                "level",
+            )?,
             PROPERTY_INT_PHYSICS_STATE => {
                 let value = u32::from_le_bytes(row.value.to_le_bytes());
                 set_once(
@@ -826,6 +835,11 @@ mod tests {
             property_type: PROPERTY_INT_DEFAULT_COMBAT_STYLE,
             value: 2,
         });
+        rows.ints.push(ScalarRow {
+            wcid: 42,
+            property_type: PROPERTY_INT_LEVEL,
+            value: 17,
+        });
         rows.bools.push(ScalarRow {
             wcid: 42,
             property_type: PROPERTY_BOOL_IS_FROZEN,
@@ -869,6 +883,7 @@ mod tests {
         assert_eq!(template.physics.overrides.frozen, Some(false));
         assert_eq!(template.attackable, Some(false));
         assert_eq!(template.appearance.default_combat_style, Some(2));
+        assert_eq!(template.level, Some(17));
         assert_eq!(template.appearance.palette_template, Some(61));
         assert_eq!(template.appearance.shade, Some(0.5));
         assert_eq!(template.sub_palettes[0].sub_palette_did, 1);

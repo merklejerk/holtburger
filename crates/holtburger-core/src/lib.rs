@@ -91,12 +91,12 @@ pub use dynamic_entity::{
 };
 pub use dynamic_entity_view::{
     DynamicEntityAdvance, DynamicEntityClipCompletion, DynamicEntityContactView,
-    DynamicEntityEvent, DynamicEntityHostTime, DynamicEntityIdentityView, DynamicEntityPathLeg,
-    DynamicEntityPathPoint, DynamicEntityPhysicsView, DynamicEntityPlacedPath,
-    DynamicEntityPlacementAdvanceKind, DynamicEntityPlacementView, DynamicEntityPlayingClip,
-    DynamicEntityPresentationView, DynamicEntitySampleModeView, DynamicEntitySnapshot,
-    DynamicEntityTickBatch, DynamicEntityView, DynamicEntityViewSource,
-    PhysicalBodyParticipationView, project_dynamic_entity_view,
+    DynamicEntityDisplayView, DynamicEntityEvent, DynamicEntityHostTime, DynamicEntityIdentityView,
+    DynamicEntityPathLeg, DynamicEntityPathPoint, DynamicEntityPhysicsView,
+    DynamicEntityPlacedPath, DynamicEntityPlacementAdvanceKind, DynamicEntityPlacementView,
+    DynamicEntityPlayingClip, DynamicEntityPresentationView, DynamicEntitySampleModeView,
+    DynamicEntitySnapshot, DynamicEntityTickBatch, DynamicEntityView, DynamicEntityViewSource,
+    PhysicalBodyParticipationView, dynamic_entity_display_view, project_dynamic_entity_view,
 };
 pub use holtburger_content::LandblockCollisionAsset;
 pub use kinematic_boom::{

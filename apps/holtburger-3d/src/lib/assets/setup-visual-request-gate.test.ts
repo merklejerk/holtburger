@@ -62,7 +62,8 @@ function snapshot(count: number, hostSeconds: number): DynamicEntitySnapshot {
 function view(guid: number, generation: number): DynamicEntityView {
 	return {
 		generation,
-		identity: { guid, wcid: 42, name: `Entity ${guid}` },
+		identity: { guid, wcid: 42 },
+		display: { name: `Entity ${guid}`, level: null },
 		presentation: {
 			category: "other",
 			content: {

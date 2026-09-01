@@ -60,12 +60,12 @@
 
 	function readMapPanelFrame(): MapPanelFrame {
 		return {
-			anchor: null,
 			cameraFovRadians: Math.PI / 3,
 			cameraHeadingRadians: 0,
 			presentedEntities: () => [],
 			presentedEntityRevision: 0,
 			source: null,
+			subject: null,
 		};
 	}
 

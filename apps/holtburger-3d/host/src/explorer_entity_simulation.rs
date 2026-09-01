@@ -304,6 +304,7 @@ mod tests {
                 name: "Test Entity".to_owned(),
                 weenie_type: WeenieType::Creature,
             },
+            level: None,
             content: DynamicEntityContent {
                 motion_table_did: None,
                 setup_did: 0x0200_0001,

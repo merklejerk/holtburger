@@ -38,6 +38,50 @@ import { RUNTIME_LIGHT_RANGE_SCALE } from "../environment/runtime-lights";
 import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 
 describe("DynamicEntitySystem authored ownership", () => {
+	it("reconciles installed nameplate content without replacing entity ownership", async () => {
+		const { system } = createSystem(new InlineObjectVisualTemplatePreparer());
+		const base = source("named");
+		const installation = system.replaceOwner("layer", [
+			{
+				...base,
+				source: {
+					...base.source,
+					nameplate: { level: 12, name: "Drudge" },
+				},
+			},
+		]);
+		expect(await installation.ready).toBe("ready");
+		commit(installation);
+		const nodeId = requiredAt(installation.nodeIds, 0);
+		const installedRevision = system.getNameplatePopulationRevision();
+		const values: unknown[] = [];
+		system.forEachNameplateVisual((identity, visual) =>
+			values.push({ identity, visual }),
+		);
+		expect(values).toEqual([
+			{
+				identity: base.source.identity,
+				visual: {
+					category: base.source.category,
+					content: { level: 12, name: "Drudge" },
+				},
+			},
+		]);
+
+		system.updateNameplateContent(nodeId, { level: 13, name: "Drudge" });
+		expect(system.getNameplatePopulationRevision()).toBe(installedRevision + 1);
+		expect(system.getNameplateFacts(nodeId)?.content).toEqual({
+			level: 13,
+			name: "Drudge",
+		});
+		expect(system.getRenderable(nodeId)).not.toBeNull();
+
+		system.updateNameplateContent(nodeId, { level: 13, name: "Drudge" });
+		expect(system.getNameplatePopulationRevision()).toBe(installedRevision + 1);
+		system.removeOwner("layer");
+		expect(system.getNameplatePopulationRevision()).toBe(installedRevision + 2);
+	});
+
 	it("installs and removes a promoted owner population as one set", async () => {
 		const { system } = createSystem(new InlineObjectVisualTemplatePreparer());
 		const installation = system.replaceOwner("layer", [
@@ -953,6 +997,7 @@ function source(
 		},
 		source: {
 			category: "other",
+			nameplate: null,
 			behavior: {
 				animationId: "0x03000001",
 				kind: "animation-only",

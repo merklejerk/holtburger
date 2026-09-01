@@ -1866,6 +1866,7 @@ mod tests {
             class_name: "ace42-test".to_owned(),
             weenie_type: 10,
             name: Some("Test".to_owned()),
+            level: None,
             setup_did: Some(0x0200_0042),
             motion_table_did: None,
             sound_table_did: None,

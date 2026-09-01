@@ -20,6 +20,7 @@ export const SHARED_FRAME_SETTINGS = {
 		[LandblockLayerKind.EnvCells]: true,
 	},
 	showRetailHiddenGeometry: false,
+	nameplates: SHARED_FRONTEND_TUNING.rendering.nameplates,
 	ambientOcclusion: {
 		enabled: SHARED_FRONTEND_TUNING.rendering.ambientOcclusion.enabledByDefault,
 		parameters: DEFAULT_AMBIENT_OCCLUSION_PARAMETERS,

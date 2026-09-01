@@ -17,7 +17,8 @@ function entity(
 	return {
 		generation,
 		playingClip: null,
-		identity: { guid, wcid: 42, name: "Drudge" },
+		identity: { guid, wcid: 42 },
+		display: { name: "Drudge", level: null },
 		presentation: {
 			category: "other",
 			content: {
@@ -157,6 +158,23 @@ describe("dynamic-entity view contract", () => {
 		).toThrow();
 	});
 
+	it("preserves absent and zero display levels and rejects negative levels", () => {
+		const view = entity(1, 1);
+		expect(decodeDynamicEntityView(view).display.level).toBeNull();
+		expect(
+			decodeDynamicEntityView({
+				...view,
+				display: { ...view.display, level: 0 },
+			}).display.level,
+		).toBe(0);
+		expect(() =>
+			decodeDynamicEntityView({
+				...view,
+				display: { ...view.display, level: -1 },
+			}),
+		).toThrow();
+	});
+
 	it("decodes the attached arm and rejects mixed world-motion facts", () => {
 		const attached = {
 			...entity(2, 1),
@@ -223,6 +241,7 @@ describe("dynamic-entity view contract", () => {
 			},
 		});
 		expect(Object.keys(decoded).sort()).toEqual([
+			"display",
 			"generation",
 			"identity",
 			"physics",

@@ -200,7 +200,8 @@ function dynamicEntity(
 	return {
 		generation: 1,
 		playingClip: null,
-		identity: { guid: 1, name: "Entity", wcid: 1 },
+		identity: { guid: 1, wcid: 1 },
+		display: { name: "Entity", level: null },
 		physics: {
 			cloaked: false,
 			defaultAnimation: false,

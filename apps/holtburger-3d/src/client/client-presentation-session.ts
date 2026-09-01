@@ -96,7 +96,10 @@ import type {
 import type { MapPanelFrame } from "../app/map-panel-frame";
 import type { MapEntity } from "../lib/game/map/map-blips";
 import type { MapTerrainSource } from "../lib/game/map/map-renderer";
-import { mapHeadingFromSceneTransform } from "../lib/game/map/map-view";
+import {
+	type MapAnchor,
+	mapHeadingFromSceneTransform,
+} from "../lib/game/map/map-view";
 import type { ScenePlacement } from "../lib/game/scene";
 
 /** Presentation state exposed to the thin client shell. */
@@ -228,7 +231,7 @@ export interface ClientPresentationRuntime extends MapTerrainSource {
 	setWorldIndicator(indicator: WorldIndicatorInput | null): void;
 	setAudioListener(placement: AudioListenerPlacement | null): void;
 	setSceneEnvironment(environment: ResolvedSceneEnvironment): void;
-	setViewerLightCarrier(guid: number | null): void;
+	setViewerEntity(guid: number | null): void;
 	setPortalTransition(
 		transition: PortalTransitionPresentationPlan | undefined,
 	): void;
@@ -369,7 +372,6 @@ export class ClientPresentationSession {
 				? null
 				: owner.runtime.spawnedEntityPlacement(playerGuid);
 		return {
-			anchor: placement === null ? null : mapAnchorFromPlacement(placement),
 			cameraFovRadians: (CLIENT_TUNING.camera.fov * Math.PI) / 180,
 			cameraHeadingRadians: this.camera.desiredLook().yawRadians,
 			presentedEntities: () =>
@@ -377,6 +379,14 @@ export class ClientPresentationSession {
 			presentedEntityRevision:
 				owner?.runtime.dynamicEntityPlacementRevision ?? 0,
 			source: owner?.runtime ?? null,
+			subject:
+				placement === null || playerGuid === null
+					? null
+					: {
+							anchor: mapAnchorFromPlacement(placement),
+							guid: playerGuid,
+							kind: "controlled-entity",
+						},
 		};
 	}
 
@@ -627,7 +637,7 @@ export class ClientPresentationSession {
 		}
 		const player = this.#authoritativePlayer(playerGuid);
 		if (player === null) {
-			owner.runtime.setViewerLightCarrier(null);
+			owner.runtime.setViewerEntity(null);
 			this.#clearSceneDemand(owner);
 			this.#setStatus(
 				"loading-player",
@@ -638,7 +648,7 @@ export class ClientPresentationSession {
 				: { rendered: false, status: this.#status };
 		}
 		if (player.placement.kind !== "world") {
-			owner.runtime.setViewerLightCarrier(null);
+			owner.runtime.setViewerEntity(null);
 			this.#clearSceneDemand(owner);
 			this.#setStatus(
 				"loading-player",
@@ -666,7 +676,7 @@ export class ClientPresentationSession {
 			this.#portalSceneActivation = null;
 			this.#syncSceneInterest(player);
 		}
-		owner.runtime.setViewerLightCarrier(playerGuid);
+		owner.runtime.setViewerEntity(playerGuid);
 		if (!portal) owner.runtime.tick();
 		let primaryView: PrimaryCameraView;
 		if (portal) {
@@ -1648,9 +1658,7 @@ function preciseJumpMarkerColor(
 }
 
 /** Convert the player's live scene placement into the world-space subject used by the radar. */
-function mapAnchorFromPlacement(
-	placement: ScenePlacement,
-): NonNullable<MapPanelFrame["anchor"]> {
+function mapAnchorFromPlacement(placement: ScenePlacement): MapAnchor {
 	const origin = createLandblockWorldOrigin(placement.landblockId);
 	return {
 		headingRadians: mapHeadingFromSceneTransform(placement.localTransform),

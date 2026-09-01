@@ -79,7 +79,8 @@ function entity(guid: number) {
 	return {
 		generation: 1,
 		playingClip: null,
-		identity: { guid, wcid: 42, name: "Drudge" },
+		identity: { guid, wcid: 42 },
+		display: { name: "Drudge", level: null },
 		presentation: {
 			category: "other",
 			content: {

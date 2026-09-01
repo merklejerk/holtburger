@@ -20,6 +20,7 @@ export function adaptAuthoredDynamicPresentation(
 		},
 		source: {
 			category: "other",
+			nameplate: null,
 			behavior: authored.behavior,
 			identity: authored.identity.sourceId,
 			localBounds: authored.localBounds,

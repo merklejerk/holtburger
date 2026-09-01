@@ -1,11 +1,11 @@
 import {
-	DYNAMIC_ENTITY_CATEGORIES,
-	type DynamicEntityCategory,
-} from "../dynamic-entity-category";
+	DYNAMIC_ENTITY_PRESENTATION_CLASSES,
+	type DynamicEntityPresentationClass,
+} from "../dynamic-entity-presentation-class";
 import type { NameplateContent } from "../systems/dynamic-presentation-source";
 
 export const NAMEPLATE_CATEGORIES = [
-	...DYNAMIC_ENTITY_CATEGORIES,
+	...DYNAMIC_ENTITY_PRESENTATION_CLASSES,
 	"selfPlayer",
 ] as const;
 export type NameplateCategory = (typeof NAMEPLATE_CATEGORIES)[number];
@@ -42,7 +42,7 @@ export interface NameplateAppearance {
 
 /** Producer-authored display value before frontend-local viewer classification. */
 export interface NameplateSourceVisual {
-	readonly category: DynamicEntityCategory;
+	readonly entityClass: DynamicEntityPresentationClass;
 	readonly content: NameplateContent;
 }
 
@@ -108,15 +108,15 @@ export function validateNameplateSettings(settings: NameplateSettings): void {
 	validateTextAppearance(settings.appearance.level, "level");
 }
 
-/** Refine only the locally driven player; every other producer category remains authoritative. */
+/** Refine only the locally driven player; every other producer class remains authoritative. */
 export function resolveNameplateCategory(
-	category: DynamicEntityCategory,
+	entityClass: DynamicEntityPresentationClass,
 	identity: string,
 	viewerEntityIdentity: string | null,
 ): NameplateCategory {
-	return category === "player" && identity === viewerEntityIdentity
+	return entityClass === "player" && identity === viewerEntityIdentity
 		? "selfPlayer"
-		: category;
+		: entityClass;
 }
 
 function validateTextAppearance(

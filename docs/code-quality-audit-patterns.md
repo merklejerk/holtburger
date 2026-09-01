@@ -820,6 +820,38 @@ hidden—but the distinction should be explicit and independently named.
 and test each genuinely distinct policy. For effects that outlive dispatch, preserve a live
 eligibility input or explicit cancellation path so a later policy change reaches existing work as
 well as future emissions.
+
+## A Lossy Classifier Governs an Orthogonal Policy
+
+**Smell:** A mutually exclusive class created for one decision is reused as a proxy for an
+independent capability, eligibility rule, or behavior.
+
+**Signals:**
+
+- A display, reporting, storage, or routing class appears in authorization, physics, lifecycle, or
+  other unrelated control flow.
+- One catch-all class becomes shorthand for a positive capability such as selectable, mutable, or
+  executable.
+- Adding or splitting a class requires unrelated behavioral code to preserve old outcomes.
+- Entities can possess several relevant traits, but the reused classifier forces exactly one to
+  win by precedence.
+
+**Possible failure:** A cosmetic or organizational taxonomy change silently enables or disables
+behavior. Overlapping traits are discarded, and the catch-all class accumulates meanings that
+cannot be stated or tested independently.
+
+**Questions:** What decision originally owns the classifier? Does the second policy truly share the
+same partition and precedence? Which inputs differ between the two decisions? Can a new class alter
+behavior without any underlying capability changing?
+
+**Counterexamples:** A domain state machine or protocol discriminant may legitimately govern many
+consequences when those consequences are defined by that exact state and the representation is
+lossless for them.
+
+**Possible responses:** Give the orthogonal policy its own predicate or capability fact, derive
+each decision independently from authoritative traits, or replace the lossy partition with a
+composite representation when consumers genuinely need overlapping facts.
+
 ## Adding Observations
 
 An observation belongs here when it has:

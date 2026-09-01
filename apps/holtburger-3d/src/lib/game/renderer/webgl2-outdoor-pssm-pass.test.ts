@@ -345,7 +345,7 @@ function createFakeGl(state: FixtureState): WebGL2RenderingContext {
 
 function dynamicDescriptor(): RenderContribution {
 	return {
-		category: "mob",
+		entityClass: "mob",
 		footprint: {
 			kind: "eligible",
 			localBounds: AABB3.zero(),

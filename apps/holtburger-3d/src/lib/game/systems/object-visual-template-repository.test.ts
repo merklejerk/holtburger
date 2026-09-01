@@ -309,7 +309,7 @@ function createRepository(
 
 function source(id: string, appearanceKey: string): DynamicPresentationSource {
 	return {
-		category: "other",
+		entityClass: "other",
 		nameplate: null,
 		behavior: {
 			animationId: "0x03000001",

@@ -20,7 +20,7 @@ function entity(
 		identity: { guid, wcid: 42 },
 		display: { name: "Drudge", level: null },
 		presentation: {
-			category: "other",
+			entityClass: "other",
 			content: {
 				motionTableDid: null,
 				setupDid: 0x02000001,
@@ -139,21 +139,23 @@ function worldPlacement(value: DynamicEntityView): DynamicEntityWorldPlacement {
 }
 
 describe("dynamic-entity view contract", () => {
-	it("requires and preserves the producer-resolved presentation category", () => {
+	it("requires and preserves the producer-resolved presentation class", () => {
 		const view = entity(1, 1);
-		expect(decodeDynamicEntityView(view).presentation.category).toBe("other");
+		expect(decodeDynamicEntityView(view).presentation.entityClass).toBe(
+			"other",
+		);
 		expect(() =>
 			decodeDynamicEntityView({
 				...view,
-				presentation: { ...view.presentation, category: "vendor" },
+				presentation: { ...view.presentation, entityClass: "vendor" },
 			}),
 		).toThrow();
-		const { category, ...presentationWithoutCategory } = view.presentation;
-		expect(category).toBe("other");
+		const { entityClass, ...presentationWithoutClass } = view.presentation;
+		expect(entityClass).toBe("other");
 		expect(() =>
 			decodeDynamicEntityView({
 				...view,
-				presentation: presentationWithoutCategory,
+				presentation: presentationWithoutClass,
 			}),
 		).toThrow();
 	});

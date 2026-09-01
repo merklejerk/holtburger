@@ -5,7 +5,7 @@ import {
 } from "../landblocks";
 import { getMat4Translation, transformAABB3 } from "../math/matrices";
 import { AABB3, Vec3 } from "../math/types";
-import type { DynamicEntityCategory } from "../dynamic-entity-category";
+import type { DynamicEntityPresentationClass } from "../dynamic-entity-presentation-class";
 import type {
 	ResolvedScenePlacement,
 	SceneScope,
@@ -16,7 +16,7 @@ import type {
 import { scopeKey } from "../scene/scope";
 import {
 	MAX_ENTITY_GROUNDING_CASTERS_PER_RECEIVER,
-	isEntityShadowCasterCategory,
+	isEntityShadowCasterClass,
 	type EntityGroundingSettings,
 } from "./entity-shadow-policy";
 
@@ -80,7 +80,7 @@ export function indexIndoorVisibilityIslands(
 /** Construct one world-space proxy from rigid horizontal bounds and stable root height. */
 export function createEntityGroundingCaster(
 	input: {
-		readonly category: DynamicEntityCategory;
+		readonly entityClass: DynamicEntityPresentationClass;
 		readonly identity: string;
 		readonly rigidBounds: AABB3;
 		readonly placement: ResolvedScenePlacement;
@@ -89,7 +89,7 @@ export function createEntityGroundingCaster(
 	visibilityIslands: ReadonlyMap<string, SceneVisibilityIslandId>,
 	settings: EntityGroundingSettings,
 ): EntityGroundingCaster | null {
-	if (!isEntityShadowCasterCategory(input.category)) return null;
+	if (!isEntityShadowCasterClass(input.entityClass)) return null;
 	const islandIds: SceneVisibilityIslandId[] = [];
 	let reachesOutdoors = false;
 	for (const scope of input.spatialMembership.scopes) {

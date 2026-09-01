@@ -11,11 +11,11 @@ use holtburger_common::properties::{ItemType, PhysicsState, WeenieType};
 use holtburger_common::{Guid, Quaternion, Vector3};
 use holtburger_content::ContentRepository;
 use holtburger_core::{
-    DynamicEntityCategory, DynamicEntityContent, DynamicEntityDefinition,
-    DynamicEntityDefinitionError, DynamicEntityDefinitionInput, DynamicEntityIdentity,
-    DynamicEntityInitialState, DynamicEntityLaunchError, DynamicEntityPhysicalPreparationError,
-    DynamicEntitySetupPreparation, prepare_dynamic_entity_physics, prepare_dynamic_entity_setup,
-    resolve_dynamic_entity_launch,
+    DynamicEntityContent, DynamicEntityDefinition, DynamicEntityDefinitionError,
+    DynamicEntityDefinitionInput, DynamicEntityIdentity, DynamicEntityInitialState,
+    DynamicEntityLaunchError, DynamicEntityPhysicalPreparationError,
+    DynamicEntityPresentationClass, DynamicEntitySetupPreparation, prepare_dynamic_entity_physics,
+    prepare_dynamic_entity_setup, resolve_dynamic_entity_launch,
 };
 use holtburger_dat::file_type::{CharGen, ClothingTable, PaletteSet};
 use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
@@ -564,7 +564,7 @@ impl ExplorerEntityDriver {
         }
         let resolved_appearance = self.resolve_appearance(guid, &template, content.setup_did)?;
         let weenie_type = template_weenie_type(&template)?;
-        let presentation_category = holtburger_core::explorer_dynamic_entity_category(
+        let presentation_class = holtburger_core::explorer_dynamic_entity_presentation_class(
             weenie_type,
             template
                 .appearance
@@ -607,7 +607,7 @@ impl ExplorerEntityDriver {
         let children = self.prepare_held_children(guid, resolved_appearance.wielded)?;
         Ok((
             ExplorerPreparedEntity {
-                presentation_category,
+                presentation_class,
                 definition,
             },
             physical,
@@ -648,7 +648,7 @@ impl ExplorerEntityDriver {
                 })?;
             }
             children.push(ExplorerPreparedEntity {
-                presentation_category: DynamicEntityCategory::Other,
+                presentation_class: DynamicEntityPresentationClass::Other,
                 definition: DynamicEntityDefinition::prepare(template_definition_input(
                     &template,
                     weenie_type,
@@ -1069,7 +1069,7 @@ fn template_definition_input(
     })
 }
 
-/// Type one catalog category once before definition and presentation projections consume it.
+/// Type one catalog class once before definition and presentation projections consume it.
 fn template_weenie_type(
     template: &WeenieTemplate,
 ) -> Result<WeenieType, ExplorerEntityDriverError> {
@@ -1138,42 +1138,70 @@ mod tests {
     use std::collections::BTreeMap;
 
     #[test]
-    fn explorer_category_uses_template_family_and_ace_attackable_default() {
+    fn explorer_presentation_class_uses_template_family_and_attackable_default() {
         assert_eq!(
-            holtburger_core::explorer_dynamic_entity_category(
+            holtburger_core::explorer_dynamic_entity_presentation_class(
                 WeenieType::Creature,
                 Some(ItemType::CREATURE),
                 Some(false),
             ),
-            DynamicEntityCategory::Npc
+            DynamicEntityPresentationClass::Npc
         );
         assert_eq!(
-            holtburger_core::explorer_dynamic_entity_category(WeenieType::Creature, None, None),
-            DynamicEntityCategory::Mob
+            holtburger_core::explorer_dynamic_entity_presentation_class(
+                WeenieType::Creature,
+                None,
+                None,
+            ),
+            DynamicEntityPresentationClass::Mob
         );
         assert_eq!(
-            holtburger_core::explorer_dynamic_entity_category(
+            holtburger_core::explorer_dynamic_entity_presentation_class(
                 WeenieType::Vendor,
                 Some(ItemType::CREATURE),
                 Some(true),
             ),
-            DynamicEntityCategory::Npc
+            DynamicEntityPresentationClass::Npc
         );
         assert_eq!(
-            holtburger_core::explorer_dynamic_entity_category(
+            holtburger_core::explorer_dynamic_entity_presentation_class(
                 WeenieType::Generic,
                 Some(ItemType::CREATURE),
                 Some(false),
             ),
-            DynamicEntityCategory::Npc
+            DynamicEntityPresentationClass::Npc
         );
         assert_eq!(
-            holtburger_core::explorer_dynamic_entity_category(
+            holtburger_core::explorer_dynamic_entity_presentation_class(
                 WeenieType::Generic,
                 Some(ItemType::ARMOR),
                 None,
             ),
-            DynamicEntityCategory::Other
+            DynamicEntityPresentationClass::Other
+        );
+        assert_eq!(
+            holtburger_core::explorer_dynamic_entity_presentation_class(
+                WeenieType::Portal,
+                None,
+                None,
+            ),
+            DynamicEntityPresentationClass::Portal
+        );
+        assert_eq!(
+            holtburger_core::explorer_dynamic_entity_presentation_class(
+                WeenieType::HousePortal,
+                None,
+                None,
+            ),
+            DynamicEntityPresentationClass::Portal
+        );
+        assert_eq!(
+            holtburger_core::explorer_dynamic_entity_presentation_class(
+                WeenieType::Generic,
+                Some(ItemType::PORTAL),
+                None,
+            ),
+            DynamicEntityPresentationClass::Portal
         );
     }
 
@@ -1561,8 +1589,8 @@ mod tests {
             second.instance.definition.identity.guid
         );
         assert_eq!(
-            first.instance.presentation_category,
-            DynamicEntityCategory::Mob
+            first.instance.presentation_class,
+            DynamicEntityPresentationClass::Mob
         );
         let mut normalized_definition = second.instance.definition.clone();
         normalized_definition.identity.guid = first.instance.definition.identity.guid;
@@ -1602,7 +1630,7 @@ mod tests {
             first.body.body.runtime_pose.landblock_id.0
         );
         assert_eq!(
-            wire["snapshot"]["entities"][0]["presentation"]["category"],
+            wire["snapshot"]["entities"][0]["presentation"]["entityClass"],
             "mob"
         );
     }

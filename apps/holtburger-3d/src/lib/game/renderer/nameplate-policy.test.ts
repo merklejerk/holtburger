@@ -20,6 +20,10 @@ describe("nameplate frame policy", () => {
 		expect(() => validateNameplateSettings(SETTINGS)).not.toThrow();
 	});
 
+	it("shows portals by default", () => {
+		expect(SETTINGS.categoryVisibility.portal).toBe(true);
+	});
+
 	it("classifies only the driven player as self", () => {
 		expect(resolveNameplateCategory("player", "local", "local")).toBe(
 			"selfPlayer",

@@ -114,7 +114,7 @@ function view(guid: number): DynamicEntityView {
 		identity: { guid, wcid: 42 },
 		display: { name: "Drudge", level: null },
 		presentation: {
-			category: "other",
+			entityClass: "other",
 			content: {
 				motionTableDid: null,
 				setupDid: 0x02000001,

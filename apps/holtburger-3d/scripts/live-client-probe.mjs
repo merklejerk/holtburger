@@ -203,7 +203,7 @@ function createCensus() {
 			point,
 			name: entity.display.name,
 			wcid: entity.identity.wcid,
-			category: entity.presentation?.category ?? null,
+			entityClass: entity.presentation?.entityClass ?? null,
 			setupDid: entity.presentation?.content?.setupDid ?? null,
 			motionTableDid: entity.presentation?.content?.motionTableDid ?? null,
 			sampleCount: (previous?.sampleCount ?? 0) + 1,
@@ -267,7 +267,7 @@ function createCensus() {
 							{
 								name: motion.name,
 								wcid: motion.wcid,
-								category: motion.category,
+								entityClass: motion.entityClass,
 								setupDid: motion.setupDid,
 								motionTableDid: motion.motionTableDid,
 								sampleCount: motion.sampleCount,

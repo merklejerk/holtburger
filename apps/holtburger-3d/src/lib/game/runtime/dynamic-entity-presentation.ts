@@ -44,7 +44,7 @@ export function adaptDynamicEntityPresentation(
 	return {
 		placement,
 		source: {
-			category: entity.presentation.category,
+			entityClass: entity.presentation.entityClass,
 			nameplate: entity.display,
 			behavior: {
 				...visual.behavior,

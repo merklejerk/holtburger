@@ -628,10 +628,10 @@ export class DynamicEntitySystem<
 	}
 
 	/** Return producer-resolved presentation policy without exposing the mutable entity record. */
-	getPresentationCategory(
+	getPresentationClass(
 		nodeId: SceneNodeId,
-	): DynamicPresentationSource["category"] | null {
-		return this.#entities.get(nodeId)?.source.category ?? null;
+	): DynamicPresentationSource["entityClass"] | null {
+		return this.#entities.get(nodeId)?.source.entityClass ?? null;
 	}
 
 	/** Return producer-stable identity for deterministic frontend presentation policy. */
@@ -651,7 +651,7 @@ export class DynamicEntitySystem<
 		for (const entity of this.#entities.values()) {
 			if (entity.nameplateContent !== null)
 				visit(entity.source.identity, {
-					category: entity.source.category,
+					entityClass: entity.source.entityClass,
 					content: entity.nameplateContent,
 				});
 		}

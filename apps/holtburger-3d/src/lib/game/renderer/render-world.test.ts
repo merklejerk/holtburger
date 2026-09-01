@@ -144,7 +144,7 @@ describe("RenderWorld", () => {
 				getNameplatePopulationRevision: () => 0,
 				forEachNameplateVisual: () => {},
 				getNameplateFacts: () => null,
-				getPresentationCategory: (nodeId) =>
+				getPresentationClass: (nodeId) =>
 					nodeId === "scene-node:9" ? "mob" : null,
 				getPresentationIdentity: (nodeId) =>
 					nodeId === "scene-node:9" ? "guid:9" : null,
@@ -200,7 +200,7 @@ describe("RenderWorld", () => {
 		expect(world.getPortalTopologyView()).toBe(TOPOLOGY);
 		expect(world.resolveTerrainDrawUnit("scene-node:1")).toBe(TERRAIN);
 		expect(world.getRenderContributionDescriptor("scene-node:9")).toEqual({
-			category: "mob",
+			entityClass: "mob",
 			footprint: {
 				kind: "eligible",
 				localBounds: AABB3.zero(),

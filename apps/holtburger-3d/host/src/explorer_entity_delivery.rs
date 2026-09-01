@@ -78,7 +78,7 @@ impl ExplorerEntityDelivery {
         Ok(project_dynamic_entity_view(
             DynamicEntityViewSource::from_projection(
                 projection.generation,
-                projection.presentation_category,
+                projection.presentation_class,
                 projection.input,
                 projection.playing_clip,
             ),
@@ -94,7 +94,7 @@ impl ExplorerEntityDelivery {
             .map(|projection| {
                 project_dynamic_entity_view(DynamicEntityViewSource::from_projection(
                     projection.generation,
-                    projection.presentation_category,
+                    projection.presentation_class,
                     projection.input,
                     projection.playing_clip,
                 ))
@@ -218,7 +218,7 @@ fn project_entity_advances(
                 entity: Box::new(project_dynamic_entity_view(
                     DynamicEntityViewSource::from_projection(
                         tick.generation,
-                        tick.presentation_category,
+                        tick.presentation_class,
                         tick.input,
                         tick.playing_clip,
                     ),

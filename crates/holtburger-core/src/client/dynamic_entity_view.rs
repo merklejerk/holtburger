@@ -14,7 +14,7 @@ use crate::{
     DynamicEntityPlacedPath, DynamicEntityPlacementAdvanceKind, DynamicEntitySnapshot,
     DynamicEntitySpatialMembership, DynamicEntityTickBatch, DynamicEntityViewSource,
     DynamicEntityWorldProjection, dynamic_entity_display_view, project_dynamic_entity_view,
-    semantic_dynamic_entity_category,
+    semantic_dynamic_entity_presentation_class,
 };
 
 use super::{ClientRuntime, ClientViewEvent};
@@ -88,7 +88,10 @@ pub fn project_client_dynamic_entity(
 
     Ok(project_dynamic_entity_view(DynamicEntityViewSource {
         generation: u64::from(entity.instance_sequence()),
-        category: semantic_dynamic_entity_category(entity.flags, entity.item_type()),
+        presentation_class: semantic_dynamic_entity_presentation_class(
+            entity.flags,
+            entity.item_type(),
+        ),
         identity: DynamicEntityIdentityView { guid, wcid },
         display: dynamic_entity_display_view(name, entity.get_int_prop(PropertyInt::Level), guid),
         content: DynamicEntityContent {
@@ -296,8 +299,8 @@ mod tests {
 
     use crate::client::{ClientState, builder};
     use crate::{
-        DynamicEntityCategory, DynamicEntityContent, DynamicEntityIdentity,
-        DynamicEntityPlacementView, DynamicEntityProjectionInput, DynamicEntityViewSource,
+        DynamicEntityContent, DynamicEntityIdentity, DynamicEntityPlacementView,
+        DynamicEntityPresentationClass, DynamicEntityProjectionInput, DynamicEntityViewSource,
     };
 
     fn projectable_entity(guid: Guid, pose: WorldPosition) -> Entity {
@@ -359,41 +362,52 @@ mod tests {
     }
 
     #[test]
-    fn client_category_uses_live_description_facts_and_includes_vendors_as_npcs() {
+    fn client_presentation_class_uses_live_facts_and_includes_vendors_as_npcs() {
         assert_eq!(
-            semantic_dynamic_entity_category(
+            semantic_dynamic_entity_presentation_class(
                 ObjectDescriptionFlag::PLAYER,
                 Some(ItemType::CREATURE),
             ),
-            DynamicEntityCategory::Player
+            DynamicEntityPresentationClass::Player
         );
         assert_eq!(
-            semantic_dynamic_entity_category(
+            semantic_dynamic_entity_presentation_class(
                 ObjectDescriptionFlag::empty(),
                 Some(ItemType::CREATURE)
             ),
-            DynamicEntityCategory::Npc
+            DynamicEntityPresentationClass::Npc
         );
         assert_eq!(
-            semantic_dynamic_entity_category(
+            semantic_dynamic_entity_presentation_class(
                 ObjectDescriptionFlag::ATTACKABLE,
                 Some(ItemType::CREATURE),
             ),
-            DynamicEntityCategory::Mob
+            DynamicEntityPresentationClass::Mob
         );
         assert_eq!(
-            semantic_dynamic_entity_category(
+            semantic_dynamic_entity_presentation_class(
                 ObjectDescriptionFlag::VENDOR | ObjectDescriptionFlag::ATTACKABLE,
                 Some(ItemType::CREATURE),
             ),
-            DynamicEntityCategory::Npc
+            DynamicEntityPresentationClass::Npc
         );
         assert_eq!(
-            semantic_dynamic_entity_category(
+            semantic_dynamic_entity_presentation_class(
                 ObjectDescriptionFlag::ATTACKABLE,
                 Some(ItemType::ARMOR)
             ),
-            DynamicEntityCategory::Other
+            DynamicEntityPresentationClass::Other
+        );
+        assert_eq!(
+            semantic_dynamic_entity_presentation_class(ObjectDescriptionFlag::PORTAL, None),
+            DynamicEntityPresentationClass::Portal
+        );
+        assert_eq!(
+            semantic_dynamic_entity_presentation_class(
+                ObjectDescriptionFlag::empty(),
+                Some(ItemType::PORTAL),
+            ),
+            DynamicEntityPresentationClass::Portal
         );
     }
 
@@ -515,7 +529,7 @@ mod tests {
             .unwrap();
         let explorer = project_dynamic_entity_view(DynamicEntityViewSource::from_projection(
             0,
-            DynamicEntityCategory::Npc,
+            DynamicEntityPresentationClass::Npc,
             DynamicEntityProjectionInput {
                 identity: DynamicEntityIdentity {
                     guid,

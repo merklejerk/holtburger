@@ -1,5 +1,5 @@
 import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
-import type { DynamicEntityCategory } from "../dynamic-entity-category";
+import type { DynamicEntityPresentationClass } from "../dynamic-entity-presentation-class";
 import type { ObjectPresentationFootprint } from "./render-world";
 
 /** Largest cascade count compiled into the first outdoor shadow shader family. */
@@ -104,10 +104,12 @@ export interface EntityShadowSettings {
 }
 
 /** Whether producer-resolved presentation policy admits a spawned entity as a shadow caster. */
-export function isEntityShadowCasterCategory(
-	category: DynamicEntityCategory,
+export function isEntityShadowCasterClass(
+	entityClass: DynamicEntityPresentationClass,
 ): boolean {
-	return category === "player" || category === "npc" || category === "mob";
+	return (
+		entityClass === "player" || entityClass === "npc" || entityClass === "mob"
+	);
 }
 
 /** Whether one static presentation is authored as an outdoor PSSM receiver. */

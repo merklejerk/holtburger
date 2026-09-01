@@ -39,13 +39,15 @@ use crate::physical_body_definition::{
     SetupPhysicalShapeError, resolve_setup_physical_spheres, retail_grounded_body_with_policy,
 };
 
-/// Narrow producer-resolved category consumed by frontend presentation policy.
+/// Narrow producer-resolved class consumed only by client presentation policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum DynamicEntityCategory {
+pub enum DynamicEntityPresentationClass {
     Player,
     Npc,
     Mob,
+    /// Portal objects, independently selectable by frontend presentation policy.
+    Portal,
     Other,
 }
 
@@ -58,7 +60,7 @@ pub struct DynamicEntityIdentity {
     pub wcid: u32,
     /// Producer-resolved display name.
     pub name: String,
-    /// Gameplay category consumed by presentation and collision filtering.
+    /// Authoritative weenie type consumed by presentation and collision policy.
     pub weenie_type: WeenieType,
 }
 
@@ -111,7 +113,7 @@ impl DynamicEntityRadarFacts {
     /// Types raw authored radar properties and resolves the effective base blip color.
     ///
     /// Radar facts are cosmetic map presentation, so each field degrades independently rather than
-    /// failing the entity: an unmappable value selects the producer's category fallback. Drops are
+    /// failing the entity: an unmappable value selects the producer's semantic fallback. Drops are
     /// logged rather than swallowed, because they mean the source authored
     /// something neither ACE's enums nor retail's blip table describe. The census over the shipped
     /// ACE World catalog found no such value, so a warning here indicates genuinely novel content.
@@ -127,7 +129,7 @@ impl DynamicEntityRadarFacts {
                 let typed = u8::try_from(value).ok().and_then(RadarColor::from_repr);
                 if typed.is_none() {
                     log::warn!(
-                        "{context} radar blip color {value} is outside RadarColor; using category fallback"
+                        "{context} radar blip color {value} is outside RadarColor; using semantic fallback"
                     );
                 }
                 // Retail treats the authored Default value exactly like an absent property and
@@ -172,19 +174,15 @@ pub fn semantic_radar_blip_color(
     flags: ObjectDescriptionFlag,
     item_type: Option<ItemType>,
 ) -> RadarColor {
-    match semantic_dynamic_entity_category(flags, item_type) {
-        DynamicEntityCategory::Player => return RadarColor::Yellow,
-        DynamicEntityCategory::Npc => return RadarColor::BrightGreen,
-        DynamicEntityCategory::Mob => return RadarColor::Red,
-        DynamicEntityCategory::Other => {}
+    match semantic_dynamic_entity_presentation_class(flags, item_type) {
+        DynamicEntityPresentationClass::Player => return RadarColor::Yellow,
+        DynamicEntityPresentationClass::Npc => return RadarColor::BrightGreen,
+        DynamicEntityPresentationClass::Mob => return RadarColor::Red,
+        DynamicEntityPresentationClass::Portal => return RadarColor::Purple,
+        DynamicEntityPresentationClass::Other => {}
     }
 
-    if flags.contains(ObjectDescriptionFlag::PORTAL)
-        || item_type.is_some_and(|value| value.contains(ItemType::PORTAL))
-    {
-        RadarColor::Purple
-    } else if flags
-        .intersects(ObjectDescriptionFlag::LIFE_STONE | ObjectDescriptionFlag::BIND_STONE)
+    if flags.intersects(ObjectDescriptionFlag::LIFE_STONE | ObjectDescriptionFlag::BIND_STONE)
         || item_type.is_some_and(|value| value.contains(ItemType::LIFE_STONE))
     {
         RadarColor::Blue
@@ -205,40 +203,50 @@ pub fn semantic_radar_blip_color(
 ///
 /// This is the color-independent semantic decision already consumed by radar fallback coloring.
 /// Vendors are friendly NPCs; their attackable flag does not promote them to mobs.
-pub fn semantic_dynamic_entity_category(
+pub fn semantic_dynamic_entity_presentation_class(
     flags: ObjectDescriptionFlag,
     item_type: Option<ItemType>,
-) -> DynamicEntityCategory {
+) -> DynamicEntityPresentationClass {
     if flags.contains(ObjectDescriptionFlag::PLAYER) {
-        return DynamicEntityCategory::Player;
+        return DynamicEntityPresentationClass::Player;
     }
     if flags.contains(ObjectDescriptionFlag::VENDOR) {
-        return DynamicEntityCategory::Npc;
+        return DynamicEntityPresentationClass::Npc;
+    }
+    if flags.contains(ObjectDescriptionFlag::PORTAL)
+        || item_type.is_some_and(|value| value.contains(ItemType::PORTAL))
+    {
+        return DynamicEntityPresentationClass::Portal;
     }
     if item_type.is_some_and(|value| value.contains(ItemType::CREATURE)) {
         return if flags.contains(ObjectDescriptionFlag::ATTACKABLE) {
-            DynamicEntityCategory::Mob
+            DynamicEntityPresentationClass::Mob
         } else {
-            DynamicEntityCategory::Npc
+            DynamicEntityPresentationClass::Npc
         };
     }
-    DynamicEntityCategory::Other
+    DynamicEntityPresentationClass::Other
 }
 
 /// Classifies the equivalent static facts available to Explorer.
 ///
 /// ACE defaults an absent `Attackable` property to true. Admin and Sentinel templates retain the
 /// minimap's established friendly classification rather than inheriting that generic default.
-pub fn explorer_dynamic_entity_category(
+pub fn explorer_dynamic_entity_presentation_class(
     weenie_type: WeenieType,
     item_type: Option<ItemType>,
     attackable: Option<bool>,
-) -> DynamicEntityCategory {
+) -> DynamicEntityPresentationClass {
     if weenie_type == WeenieType::Vendor {
-        return DynamicEntityCategory::Npc;
+        return DynamicEntityPresentationClass::Npc;
     }
     if matches!(weenie_type, WeenieType::Admin | WeenieType::Sentinel) {
-        return DynamicEntityCategory::Npc;
+        return DynamicEntityPresentationClass::Npc;
+    }
+    if matches!(weenie_type, WeenieType::Portal | WeenieType::HousePortal)
+        || item_type.is_some_and(|value| value.contains(ItemType::PORTAL))
+    {
+        return DynamicEntityPresentationClass::Portal;
     }
     let is_creature = matches!(
         weenie_type,
@@ -249,12 +257,12 @@ pub fn explorer_dynamic_entity_category(
             | WeenieType::CombatPet
     ) || item_type.is_some_and(|value| value.contains(ItemType::CREATURE));
     if !is_creature {
-        return DynamicEntityCategory::Other;
+        return DynamicEntityPresentationClass::Other;
     }
     if attackable.unwrap_or(true) {
-        DynamicEntityCategory::Mob
+        DynamicEntityPresentationClass::Mob
     } else {
-        DynamicEntityCategory::Npc
+        DynamicEntityPresentationClass::Npc
     }
 }
 
@@ -264,15 +272,15 @@ pub fn explorer_radar_blip_color(
     item_type: Option<ItemType>,
     attackable: Option<bool>,
 ) -> RadarColor {
-    match explorer_dynamic_entity_category(weenie_type, item_type, attackable) {
-        DynamicEntityCategory::Player => return RadarColor::Yellow,
-        DynamicEntityCategory::Npc => return RadarColor::BrightGreen,
-        DynamicEntityCategory::Mob => return RadarColor::Red,
-        DynamicEntityCategory::Other => {}
+    match explorer_dynamic_entity_presentation_class(weenie_type, item_type, attackable) {
+        DynamicEntityPresentationClass::Player => return RadarColor::Yellow,
+        DynamicEntityPresentationClass::Npc => return RadarColor::BrightGreen,
+        DynamicEntityPresentationClass::Mob => return RadarColor::Red,
+        DynamicEntityPresentationClass::Portal => return RadarColor::Purple,
+        DynamicEntityPresentationClass::Other => {}
     }
 
     match weenie_type {
-        WeenieType::Portal | WeenieType::HousePortal => RadarColor::Purple,
         WeenieType::LifeStone | WeenieType::AllegianceBindstone => RadarColor::Blue,
         WeenieType::ManaStone => RadarColor::Cyan,
         WeenieType::Door => RadarColor::White,
@@ -1515,7 +1523,7 @@ mod tests {
     }
 
     #[test]
-    fn absent_and_default_authored_colors_use_the_producer_category_fallback() {
+    fn absent_and_default_authored_colors_use_the_producer_semantic_fallback() {
         for authored in [None, Some(RadarColor::Default as i32)] {
             let facts = DynamicEntityRadarFacts::from_authored(
                 "portal",

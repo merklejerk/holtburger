@@ -331,6 +331,8 @@ export const SHARED_FRONTEND_TUNING = {
 					mob: { red: 1, green: 0.502, blue: 0.471, alpha: 1 },
 					/** Non-player characters and service providers. */
 					npc: { red: 1, green: 0.82, blue: 0.4, alpha: 1 },
+					/** Portal objects. */
+					portal: { red: 0.753, green: 0.518, blue: 0.988, alpha: 1 },
 					/** Other connected players. */
 					player: { red: 0.49, green: 0.827, blue: 0.988, alpha: 1 },
 					/** The locally driven player, when explicitly enabled. */
@@ -362,6 +364,7 @@ export const SHARED_FRONTEND_TUNING = {
 				npc: true,
 				other: false,
 				player: true,
+				portal: true,
 				selfPlayer: false,
 			},
 			/** Nearest already-visible candidates retained independently for each rendered view. */

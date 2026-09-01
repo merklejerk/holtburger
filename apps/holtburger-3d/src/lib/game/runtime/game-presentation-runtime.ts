@@ -2628,7 +2628,7 @@ export class GamePresentationRuntime {
 			assets.catalog.animationFramesPerSecond,
 		);
 		const source: DynamicPresentationSource = {
-			category: "other",
+			entityClass: "other",
 			nameplate: null,
 			behavior: assets.visual.behavior,
 			identity: "portal-transition",

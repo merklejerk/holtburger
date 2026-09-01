@@ -298,19 +298,6 @@ Implemented behavior is subject to normal correctness and regression scrutiny.
 Obvious placeholders should remain honest and localized, but they do not lower
 the quality bar for the surrounding system.
 
-## Legacy Frontend
-
-`apps/holtburger-3d-legacy` remains useful evidence for source data, render
-products, and client flows that must eventually exist. Compare its browser mode
-with the current Explorer only to answer concrete behavioral or data-shape
-questions.
-
-Do not copy the legacy architecture wholesale. It accumulated excessive
-lifecycle indirection, diagnostics, provenance, ownership records, and
-cross-system orchestration. Express proven knowledge using the simpler current
-architecture, and do not carry diagnostics or provenance through operational
-contracts merely because the legacy app did.
-
 ## Retail Decompile
 
 When referencing the retail decompile, we generally want to approximate its behavior but not necessarily its architecture. Do not fall into the trap of rebuilding the retail client in rust/typescript. That client was written in 1999 under 1999 constraints. We have modern techniques and more mature software patterns available to us and should be able to improve on its design and performance.

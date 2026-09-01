@@ -59,6 +59,36 @@ describe("synthetic nameplate workload", () => {
 		});
 	});
 
+	it("reproduces the measured outdoor shadow root and rigid-part cardinality", async () => {
+		const entities = createSyntheticNameplateWorkload(
+			"shadow-crowd-112x61",
+			LANDBLOCK,
+			CAMERA,
+			null,
+		);
+		const load = vi.fn(async () => {
+			throw new Error("delegated");
+		});
+		const source = new SyntheticNameplateSetupVisualSource({
+			load,
+		} as SetupVisualSource);
+		const first = entities[0];
+		if (first === undefined)
+			throw new Error("Synthetic shadow crowd unexpectedly has no entities.");
+
+		const visual = await source.load(
+			first.presentation.content.setupDid,
+			first.presentation.appearance,
+		);
+
+		expect(entities).toHaveLength(112);
+		expect(visual.presentation.parts).toHaveLength(61);
+		expect(
+			visual.presentation.placementPoses.get(0)?.partTransforms,
+		).toHaveLength(61);
+		expect(load).not.toHaveBeenCalled();
+	});
+
 	it("uses the camera EnvCell as the exact indoor membership", () => {
 		const [entity] = createSyntheticNameplateWorkload(
 			"repeated-100",

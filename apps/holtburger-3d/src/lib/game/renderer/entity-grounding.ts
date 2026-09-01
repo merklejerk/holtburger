@@ -15,24 +15,48 @@ import type {
 } from "../scene";
 import { scopeKey } from "../scene/scope";
 import {
-	MAX_ENTITY_GROUNDING_CASTERS_PER_RECEIVER,
+	MAX_ENTITY_ANALYTIC_SHADOW_CASTERS_PER_RECEIVER,
 	isEntityShadowCasterClass,
-	type EntityGroundingSettings,
+	type IndoorGroundingSettings,
+	type OutdoorDirectionalShadowSettings,
 } from "./entity-shadow-policy";
+import {
+	outdoorShadowCastLength,
+	type ResolvedOutdoorShadowProjection,
+} from "./outdoor-pssm";
 
-/** One visible dynamic's analytic grounding proxy in canonical scene coordinates. */
-export interface EntityGroundingCaster {
+/** Shared immutable rigid-pose facts consumed by either analytic shadow mechanism. */
+export interface EntityShadowCasterShape {
 	/** Producer-stable identity used only for deterministic overflow ties. */
 	readonly identity: string;
 	/** Animated horizontal center plus authoritative root-contact height. */
 	readonly contactAnchor: Vec3;
+	/** Current rigid-pose height before outdoor projection-policy clamping. */
+	readonly height: number;
+	readonly radius: number;
+}
+
+/** One visible dynamic's indoor radial-grounding proxy in canonical scene coordinates. */
+export interface EntityGroundingCaster extends EntityShadowCasterShape {
 	/** Conservative receiver influence used only for CPU cell intersection. */
 	readonly influenceBounds: AABB3;
-	readonly radius: number;
-	/** Whether the entity's plural spatial membership reaches the outdoor domain. */
-	readonly reachesOutdoors: boolean;
 	/** Every proof-backed indoor island reached by the entity's plural spatial membership. */
 	readonly visibilityIslandIds: readonly SceneVisibilityIslandId[];
+}
+
+/** One dynamic root's shared shape plus independently eligible receiver projections. */
+export interface ResolvedEntityShadowCaster {
+	readonly indoorGrounding: EntityGroundingCaster | null;
+	readonly reachesOutdoors: boolean;
+	readonly shape: EntityShadowCasterShape;
+}
+
+/** One selected root's complete terrain-only sun-aligned capsule. */
+export interface OutdoorDirectionalShadowCaster extends EntityShadowCasterShape {
+	/** Projected capsule endpoint in the same canonical scene frame as the contact anchor. */
+	readonly projectedEnd: Vec3;
+	/** Conservative receiver influence containing the full projected capsule. */
+	readonly influenceBounds: AABB3;
 }
 
 /** One visible EnvCell shell's immutable grounding-selection facts. */
@@ -43,12 +67,25 @@ export interface IndoorGroundingCell {
 }
 
 /** One visible terrain landblock's canonical horizontal grounding-selection facts. */
-export interface OutdoorGroundingLandblock {
+export interface OutdoorDirectionalShadowTerrain {
 	readonly landblockId: LandblockOwnerId;
 	readonly maximumX: number;
 	readonly maximumZ: number;
 	readonly minimumX: number;
 	readonly minimumZ: number;
+}
+
+/** Fixed GPU-ready capsule records selected for one terrain receiver. */
+export interface OutdoorDirectionalShadowSelection {
+	count: number;
+	readonly anchorsAndRadii: Float32Array;
+	readonly projectedEnds: Float32Array;
+}
+
+/** Caller-owned directional selection storage reused across terrain receivers. */
+export interface OutdoorDirectionalShadowSelectionScratch {
+	readonly eligible: OutdoorDirectionalShadowCaster[];
+	readonly nearest: OutdoorDirectionalShadowCaster[];
 }
 
 /** Fixed GPU-ready contact-anchor/radius records selected for one receiver. */
@@ -78,7 +115,7 @@ export function indexIndoorVisibilityIslands(
 }
 
 /** Construct one world-space proxy from rigid horizontal bounds and stable root height. */
-export function createEntityGroundingCaster(
+export function resolveEntityShadowCaster(
 	input: {
 		readonly entityClass: DynamicEntityPresentationClass;
 		readonly identity: string;
@@ -87,8 +124,8 @@ export function createEntityGroundingCaster(
 		readonly spatialMembership: SceneSpatialMembership;
 	},
 	visibilityIslands: ReadonlyMap<string, SceneVisibilityIslandId>,
-	settings: EntityGroundingSettings,
-): EntityGroundingCaster | null {
+	settings: IndoorGroundingSettings,
+): ResolvedEntityShadowCaster | null {
 	if (!isEntityShadowCasterClass(input.entityClass)) return null;
 	const islandIds: SceneVisibilityIslandId[] = [];
 	let reachesOutdoors = false;
@@ -118,32 +155,44 @@ export function createEntityGroundingCaster(
 			worldRigidBounds.max.x - worldRigidBounds.min.x,
 			worldRigidBounds.max.z - worldRigidBounds.min.z,
 		) * 0.5;
-	if (!Number.isFinite(radius) || radius <= 0) return null;
+	const height = worldRigidBounds.max.y - worldRigidBounds.min.y;
+	if (
+		!Number.isFinite(radius) ||
+		radius <= 0 ||
+		!Number.isFinite(height) ||
+		height <= 0
+	)
+		return null;
 	const contactAnchor = new Vec3(
 		(worldRigidBounds.min.x + worldRigidBounds.max.x) * 0.5,
 		rootPosition.y + landblockOrigin.y,
 		(worldRigidBounds.min.z + worldRigidBounds.max.z) * 0.5,
 	);
+	const shape = { contactAnchor, height, identity: input.identity, radius };
 	const influenceRadius =
 		radius * settings.radiusScale * (1 + settings.dropSpread);
 	return {
-		contactAnchor,
-		identity: input.identity,
-		influenceBounds: new AABB3(
-			new Vec3(
-				contactAnchor.x - influenceRadius,
-				contactAnchor.y - settings.maximumDrop,
-				contactAnchor.z - influenceRadius,
-			),
-			new Vec3(
-				contactAnchor.x + influenceRadius,
-				contactAnchor.y + settings.contactBias,
-				contactAnchor.z + influenceRadius,
-			),
-		),
-		radius,
+		indoorGrounding:
+			islandIds.length === 0
+				? null
+				: {
+						...shape,
+						influenceBounds: new AABB3(
+							new Vec3(
+								contactAnchor.x - influenceRadius,
+								contactAnchor.y - settings.maximumDrop,
+								contactAnchor.z - influenceRadius,
+							),
+							new Vec3(
+								contactAnchor.x + influenceRadius,
+								contactAnchor.y + settings.contactBias,
+								contactAnchor.z + influenceRadius,
+							),
+						),
+						visibilityIslandIds: islandIds,
+					},
 		reachesOutdoors,
-		visibilityIslandIds: islandIds,
+		shape,
 	};
 }
 
@@ -162,9 +211,9 @@ export function createIndoorGroundingCell(
 }
 
 /** Resolve one terrain landblock to its canonical horizontal world footprint. */
-export function createOutdoorGroundingLandblock(
+export function createOutdoorDirectionalShadowTerrain(
 	landblockId: LandblockOwnerId,
-): OutdoorGroundingLandblock {
+): OutdoorDirectionalShadowTerrain {
 	const origin = createLandblockWorldOrigin(landblockId);
 	return {
 		landblockId,
@@ -175,10 +224,59 @@ export function createOutdoorGroundingLandblock(
 	};
 }
 
+/** Project one rigid root into a bounded directional capsule in its existing coordinate frame. */
+export function createOutdoorDirectionalShadowCaster(
+	shape: EntityShadowCasterShape,
+	projection: ResolvedOutdoorShadowProjection,
+	settings: OutdoorDirectionalShadowSettings,
+): OutdoorDirectionalShadowCaster {
+	const castLength = outdoorShadowCastLength(projection, shape.height);
+	const projectedEnd = new Vec3(
+		shape.contactAnchor.x + projection.horizontalCastDirection.x * castLength,
+		shape.contactAnchor.y,
+		shape.contactAnchor.z + projection.horizontalCastDirection.z * castLength,
+	);
+	const influenceRadius = shape.radius * settings.radiusScale;
+	return {
+		...shape,
+		influenceBounds: new AABB3(
+			new Vec3(
+				Math.min(shape.contactAnchor.x, projectedEnd.x) - influenceRadius,
+				shape.contactAnchor.y - settings.maximumReceiverDrop,
+				Math.min(shape.contactAnchor.z, projectedEnd.z) - influenceRadius,
+			),
+			new Vec3(
+				Math.max(shape.contactAnchor.x, projectedEnd.x) + influenceRadius,
+				shape.contactAnchor.y + settings.contactBias,
+				Math.max(shape.contactAnchor.z, projectedEnd.z) + influenceRadius,
+			),
+		),
+		projectedEnd,
+	};
+}
+
+export function createOutdoorDirectionalShadowSelection(): OutdoorDirectionalShadowSelection {
+	return {
+		anchorsAndRadii: new Float32Array(
+			MAX_ENTITY_ANALYTIC_SHADOW_CASTERS_PER_RECEIVER * 4,
+		),
+		count: 0,
+		projectedEnds: new Float32Array(
+			MAX_ENTITY_ANALYTIC_SHADOW_CASTERS_PER_RECEIVER * 2,
+		),
+	};
+}
+
+export function createOutdoorDirectionalShadowSelectionScratch(): OutdoorDirectionalShadowSelectionScratch {
+	return { eligible: [], nearest: [] };
+}
+
 export function createEntityGroundingSelection(): EntityGroundingSelection {
 	return {
 		count: 0,
-		records: new Float32Array(MAX_ENTITY_GROUNDING_CASTERS_PER_RECEIVER * 4),
+		records: new Float32Array(
+			MAX_ENTITY_ANALYTIC_SHADOW_CASTERS_PER_RECEIVER * 4,
+		),
 	};
 }
 
@@ -215,31 +313,42 @@ export function selectIndoorGroundingCasters(
 }
 
 /** Select one terrain landblock's outdoor candidates with the same overflow-only budget. */
-export function selectOutdoorGroundingCasters(
-	landblock: OutdoorGroundingLandblock,
-	casters: readonly EntityGroundingCaster[],
+export function selectOutdoorDirectionalShadowCasters(
+	landblock: OutdoorDirectionalShadowTerrain,
+	casters: readonly OutdoorDirectionalShadowCaster[],
 	cameraPosition: Vec3,
 	anchorOrigin: Vec3,
-	out: EntityGroundingSelection,
-	scratch: EntityGroundingSelectionScratch,
-): EntityGroundingSelection {
+	out: OutdoorDirectionalShadowSelection,
+	scratch: OutdoorDirectionalShadowSelectionScratch,
+): OutdoorDirectionalShadowSelection {
 	const eligible = scratch.eligible;
 	eligible.length = 0;
 	for (const caster of casters) {
-		if (
-			caster.reachesOutdoors &&
-			horizontalBoundsIntersect(caster.influenceBounds, landblock)
-		) {
+		if (horizontalBoundsIntersect(caster.influenceBounds, landblock)) {
 			eligible.push(caster);
 		}
 	}
-	return writeGroundingSelection(
+	const retained = retainNearestCasters(
 		eligible,
 		cameraPosition,
-		anchorOrigin,
-		out,
 		scratch.nearest,
 	);
+	out.count = retained.length;
+	let index = 0;
+	for (const caster of retained) {
+		const anchorOffset = index * 4;
+		out.anchorsAndRadii[anchorOffset] = caster.contactAnchor.x - anchorOrigin.x;
+		out.anchorsAndRadii[anchorOffset + 1] =
+			caster.contactAnchor.y - anchorOrigin.y;
+		out.anchorsAndRadii[anchorOffset + 2] =
+			caster.contactAnchor.z - anchorOrigin.z;
+		out.anchorsAndRadii[anchorOffset + 3] = caster.radius;
+		const endOffset = index * 2;
+		out.projectedEnds[endOffset] = caster.projectedEnd.x - anchorOrigin.x;
+		out.projectedEnds[endOffset + 1] = caster.projectedEnd.z - anchorOrigin.z;
+		index += 1;
+	}
+	return out;
 }
 
 /** Retain common-path order, rank only overflow, and write one anchor-relative GPU set. */
@@ -250,47 +359,51 @@ function writeGroundingSelection(
 	out: EntityGroundingSelection,
 	nearest: EntityGroundingCaster[],
 ): EntityGroundingSelection {
-	let retained = eligible;
-	if (eligible.length > MAX_ENTITY_GROUNDING_CASTERS_PER_RECEIVER) {
-		nearest.length = 0;
-		for (const caster of eligible) {
-			const distance = distanceSquared(caster.contactAnchor, cameraPosition);
-			let insertion = 0;
-			while (
-				insertion < nearest.length &&
-				compareCasterDistance(
-					nearest[insertion]!,
-					caster,
-					cameraPosition,
-					distance,
-				) <= 0
-			) {
-				insertion += 1;
-			}
-			if (insertion < MAX_ENTITY_GROUNDING_CASTERS_PER_RECEIVER) {
-				nearest.splice(insertion, 0, caster);
-				if (nearest.length > MAX_ENTITY_GROUNDING_CASTERS_PER_RECEIVER) {
-					nearest.pop();
-				}
-			}
-		}
-		retained = nearest;
-	}
+	const retained = retainNearestCasters(eligible, cameraPosition, nearest);
 	out.count = retained.length;
-	for (let index = 0; index < retained.length; index += 1) {
-		const caster = retained[index]!;
+	let index = 0;
+	for (const caster of retained) {
 		const offset = index * 4;
 		out.records[offset] = caster.contactAnchor.x - anchorOrigin.x;
 		out.records[offset + 1] = caster.contactAnchor.y - anchorOrigin.y;
 		out.records[offset + 2] = caster.contactAnchor.z - anchorOrigin.z;
 		out.records[offset + 3] = caster.radius;
+		index += 1;
 	}
 	return out;
 }
 
+function retainNearestCasters<T extends EntityShadowCasterShape>(
+	eligible: readonly T[],
+	cameraPosition: Vec3,
+	nearest: T[],
+): readonly T[] {
+	if (eligible.length <= MAX_ENTITY_ANALYTIC_SHADOW_CASTERS_PER_RECEIVER)
+		return eligible;
+	nearest.length = 0;
+	for (const caster of eligible) {
+		const distance = distanceSquared(caster.contactAnchor, cameraPosition);
+		let insertion = 0;
+		for (const retained of nearest) {
+			if (
+				compareCasterDistance(retained, caster, cameraPosition, distance) > 0
+			) {
+				break;
+			}
+			insertion += 1;
+		}
+		if (insertion < MAX_ENTITY_ANALYTIC_SHADOW_CASTERS_PER_RECEIVER) {
+			nearest.splice(insertion, 0, caster);
+			if (nearest.length > MAX_ENTITY_ANALYTIC_SHADOW_CASTERS_PER_RECEIVER)
+				nearest.pop();
+		}
+	}
+	return nearest;
+}
+
 function compareCasterDistance(
-	left: EntityGroundingCaster,
-	right: EntityGroundingCaster,
+	left: EntityShadowCasterShape,
+	right: EntityShadowCasterShape,
 	cameraPosition: Vec3,
 	rightDistance: number,
 ): number {
@@ -321,7 +434,7 @@ function boundsIntersect(left: AABB3, right: AABB3): boolean {
 
 function horizontalBoundsIntersect(
 	left: AABB3,
-	right: OutdoorGroundingLandblock,
+	right: OutdoorDirectionalShadowTerrain,
 ): boolean {
 	return !(
 		left.max.x < right.minimumX ||

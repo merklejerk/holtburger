@@ -3,15 +3,9 @@ import {
 	type WebGL2FogObjectProgram,
 	type WebGL2ObjectProgram,
 } from "./webgl2-object-program";
-import {
-	createWebGL2NearTerrainProgram,
-	type WebGL2NearTerrainProgram,
-} from "./webgl2-terrain-program";
-
-/** Lazy analytic-grounding receiver programs for terrain and EnvCell-shell submissions. */
+/** Lazy radial-grounding receiver programs for EnvCell-shell submissions. */
 export class WebGL2EntityGroundingPrograms {
 	readonly #gl: WebGL2RenderingContext;
-	#terrain: WebGL2NearTerrainProgram | null = null;
 	#fogged: WebGL2FogObjectProgram | null = null;
 	#blended: WebGL2ObjectProgram | null = null;
 	#portalBlended: WebGL2ObjectProgram | null = null;
@@ -19,14 +13,6 @@ export class WebGL2EntityGroundingPrograms {
 
 	constructor(gl: WebGL2RenderingContext) {
 		this.#gl = gl;
-	}
-
-	terrain(): WebGL2NearTerrainProgram {
-		this.#assertAlive();
-		return (this.#terrain ??= createWebGL2NearTerrainProgram(
-			this.#gl,
-			"grounding",
-		));
 	}
 
 	fogged(): WebGL2FogObjectProgram {
@@ -61,8 +47,6 @@ export class WebGL2EntityGroundingPrograms {
 		this.#fogged = null;
 		this.#blended = null;
 		this.#portalBlended = null;
-		if (this.#terrain) this.#gl.deleteProgram(this.#terrain.program);
-		this.#terrain = null;
 	}
 
 	#assertAlive(): void {

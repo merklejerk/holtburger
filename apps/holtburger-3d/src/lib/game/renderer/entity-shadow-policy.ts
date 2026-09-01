@@ -2,8 +2,8 @@ import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import type { DynamicEntityPresentationClass } from "../dynamic-entity-presentation-class";
 import type { ObjectPresentationFootprint } from "./render-world";
 
-/** Largest cascade count compiled into the first outdoor shadow shader family. */
-export const MAX_OUTDOOR_PSSM_CASCADES = 4;
+/** Complete cascade capacity compiled into the bounded outdoor shadow shader family. */
+export const MAX_OUTDOOR_PSSM_CASCADES = 2;
 
 /** Smallest selectable square depth-map edge. */
 const MIN_OUTDOOR_PSSM_MAP_RESOLUTION = 256;
@@ -21,25 +21,25 @@ export const MAX_OUTDOOR_PSSM_PCF_RADIUS = 2;
  * Conservative ceiling after the baseline-sized static and dynamic light arrays consume their
  * fragment-uniform vectors. The configured value still sizes CPU storage and generated GLSL.
  */
-const MAX_BASELINE_WEBGL2_GROUNDING_CASTERS_PER_RECEIVER = 32;
+const MAX_BASELINE_WEBGL2_ANALYTIC_SHADOW_CASTERS_PER_RECEIVER = 32;
 
-const configuredGroundingCasterCapacity =
+const configuredAnalyticCasterCapacity =
 	SHARED_FRONTEND_TUNING.rendering.entityShadows
-		.maximumGroundingCastersPerReceiver;
+		.maximumAnalyticShadowCastersPerReceiver;
 if (
-	!Number.isInteger(configuredGroundingCasterCapacity) ||
-	configuredGroundingCasterCapacity < 1 ||
-	configuredGroundingCasterCapacity >
-		MAX_BASELINE_WEBGL2_GROUNDING_CASTERS_PER_RECEIVER
+	!Number.isInteger(configuredAnalyticCasterCapacity) ||
+	configuredAnalyticCasterCapacity < 1 ||
+	configuredAnalyticCasterCapacity >
+		MAX_BASELINE_WEBGL2_ANALYTIC_SHADOW_CASTERS_PER_RECEIVER
 ) {
 	throw new Error(
-		`Entity grounding caster capacity must be an integer from 1 through ${MAX_BASELINE_WEBGL2_GROUNDING_CASTERS_PER_RECEIVER}.`,
+		`Entity analytic-shadow caster capacity must be an integer from 1 through ${MAX_BASELINE_WEBGL2_ANALYTIC_SHADOW_CASTERS_PER_RECEIVER}.`,
 	);
 }
 
-/** Build-time per-receiver grounding capacity shared by CPU selection and generated GLSL. */
-export const MAX_ENTITY_GROUNDING_CASTERS_PER_RECEIVER =
-	configuredGroundingCasterCapacity;
+/** Build-time analytic-caster capacity shared by CPU selection and generated GLSL. */
+export const MAX_ENTITY_ANALYTIC_SHADOW_CASTERS_PER_RECEIVER =
+	configuredAnalyticCasterCapacity;
 
 /** Exhaustive entity-shadow quality policy consumed directly by renderer scheduling. */
 export const ENTITY_SHADOW_MODES = ["none", "simple", "shadow-maps"] as const;
@@ -53,8 +53,6 @@ export interface OutdoorPssmSettings {
 	readonly mapResolution: number;
 	/** Maximum camera distance covered in world units. */
 	readonly maximumDistance: number;
-	/** Minimum light-view elevation above the horizon; does not alter scene sunlight. */
-	readonly minimumLightElevationDegrees: number;
 	/** Uniform/logarithmic split interpolation, from uniform 0 to logarithmic 1. */
 	readonly splitLambda: number;
 	/** Fraction of each cascade interval blended into its successor. */
@@ -71,12 +69,31 @@ export interface OutdoorPssmSettings {
 	readonly pcfRadius: number;
 	/** Maximum fractional attenuation of regional-sun diffuse. */
 	readonly strength: number;
-	/** Light-depth extension toward the sun used to admit off-camera casters. */
-	readonly casterSearchPadding: number;
 }
 
-/** Complete runtime-adjustable analytic-grounding policy shared by terrain and EnvCell shells. */
-export interface EntityGroundingSettings {
+/** Shared bounded projection policy for mapped and analytic outdoor entity shadows. */
+export interface OutdoorShadowProjectionSettings {
+	/** Minimum effective shadow elevation above the horizon; scene sunlight remains authored. */
+	readonly minimumLightElevationDegrees: number;
+	/** Maximum rigid caster height allowed to extend an outdoor shadow. */
+	readonly maximumCasterHeight: number;
+	/** Maximum horizontal distance reached by an outdoor shadow. */
+	readonly maximumCastLength: number;
+}
+
+/** Complete-root budget independently enforced for every rendered outdoor view. */
+export interface OutdoorShadowCasterBudget {
+	/** Maximum eligible caster roots retained by one view (N). */
+	readonly maximumSelectedRoots: number;
+	/** Selected-root prefix admitted to mapped PSSM work (M). */
+	readonly maximumMappedRoots: number;
+}
+
+/** Harness-backed safety ceiling; final defaults remain a visual/performance tuning decision. */
+export const MAX_OUTDOOR_SHADOW_SELECTED_ROOTS = 512;
+
+/** Complete runtime-adjustable radial-grounding policy for EnvCell shells. */
+export interface IndoorGroundingSettings {
 	/** Maximum fractional darkening applied to an upward-facing receiver surface. */
 	readonly strength: number;
 	/** Multiplier from horizontal presentation radius to contact radius. */
@@ -95,12 +112,68 @@ export interface EntityGroundingSettings {
 	readonly contactBias: number;
 }
 
+/** Terrain-only sun-aligned analytic fallback appearance and receiver policy. */
+export interface OutdoorDirectionalShadowSettings {
+	/** Maximum fractional attenuation of regional-sun diffuse. */
+	readonly strength: number;
+	/** Multiplier from rigid horizontal radius to capsule radius. */
+	readonly radiusScale: number;
+	/** Fraction of the capsule radius occupied by its soft edge. */
+	readonly softness: number;
+	/** Largest vertical distance below the root contact that may receive the shadow. */
+	readonly maximumReceiverDrop: number;
+	/** Up-facing scalar at or below which terrain receives no analytic shadow. */
+	readonly minimumUpFacing: number;
+	/** Up-facing scalar at or above which terrain receives full analytic shadow strength. */
+	readonly fullStrengthUpFacing: number;
+	/** Small downward offset compensating for contact bounds exactly on terrain. */
+	readonly contactBias: number;
+	/** Default strength retained at the projected capsule endpoint. */
+	readonly tailStrength: number;
+}
+
 /** Complete entity-shadow presentation choice snapshotted with every frame. */
 export interface EntityShadowSettings {
 	/** Sole authority for disabled, analytic-only, or hybrid shadow scheduling. */
 	readonly mode: EntityShadowMode;
+	/** Coupled per-view N/M limit; analytic capacity is the derived N-M remainder. */
+	readonly casterBudget: OutdoorShadowCasterBudget;
 	readonly pssm: OutdoorPssmSettings;
-	readonly grounding: EntityGroundingSettings;
+	/** Sole projection authority shared by both outdoor shadow mechanisms. */
+	readonly projection: OutdoorShadowProjectionSettings;
+	/** Radial indoor EnvCell grounding only. */
+	readonly indoorGrounding: IndoorGroundingSettings;
+	/** Terrain-only directional analytic fallback appearance. */
+	readonly outdoorDirectional: OutdoorDirectionalShadowSettings;
+}
+
+/** Validate and retain one coupled complete-root budget. */
+export function createOutdoorShadowCasterBudget(
+	budget: OutdoorShadowCasterBudget,
+): OutdoorShadowCasterBudget {
+	if (
+		!Number.isInteger(budget.maximumSelectedRoots) ||
+		budget.maximumSelectedRoots < 1 ||
+		budget.maximumSelectedRoots > MAX_OUTDOOR_SHADOW_SELECTED_ROOTS
+	) {
+		throw new Error(
+			`Outdoor shadow selected-root budget must be an integer from 1 through ${MAX_OUTDOOR_SHADOW_SELECTED_ROOTS}.`,
+		);
+	}
+	if (
+		!Number.isInteger(budget.maximumMappedRoots) ||
+		budget.maximumMappedRoots < 0
+	) {
+		throw new Error(
+			"Outdoor shadow mapped-root budget must be a non-negative integer.",
+		);
+	}
+	if (budget.maximumMappedRoots > budget.maximumSelectedRoots) {
+		throw new Error(
+			"Outdoor shadow mapped-root budget must not exceed the selected-root budget.",
+		);
+	}
+	return budget;
 }
 
 /** Whether producer-resolved presentation policy admits a spawned entity as a shadow caster. */
@@ -148,13 +221,6 @@ export function createOutdoorPssmSettings(
 		MAX_OUTDOOR_PSSM_DISTANCE,
 		false,
 		"Outdoor shadow maximum distance must be finite and in (0, 2048].",
-	);
-	finiteRange(
-		settings.minimumLightElevationDegrees,
-		0,
-		90,
-		true,
-		"Outdoor shadow minimum light elevation must be finite and within [0, 90] degrees.",
 	);
 	finiteRange(
 		settings.splitLambda,
@@ -214,20 +280,41 @@ export function createOutdoorPssmSettings(
 		true,
 		"Outdoor shadow strength must be finite and within [0, 1].",
 	);
+	return settings;
+}
+
+/** Validate and retain the projection caps consumed by all outdoor entity shadows. */
+export function createOutdoorShadowProjectionSettings(
+	settings: OutdoorShadowProjectionSettings,
+): OutdoorShadowProjectionSettings {
 	finiteRange(
-		settings.casterSearchPadding,
+		settings.minimumLightElevationDegrees,
+		0,
+		90,
+		true,
+		"Outdoor shadow minimum light elevation must be finite and within [0, 90] degrees.",
+	);
+	finiteRange(
+		settings.maximumCasterHeight,
+		0,
+		64,
+		false,
+		"Outdoor shadow maximum caster height must be finite and in (0, 64].",
+	);
+	finiteRange(
+		settings.maximumCastLength,
 		0,
 		512,
-		true,
-		"Outdoor shadow caster-search padding must be finite and within [0, 512].",
+		false,
+		"Outdoor shadow maximum cast length must be finite and in (0, 512].",
 	);
 	return settings;
 }
 
 /** Validate and retain one complete analytic-grounding policy. */
-export function createEntityGroundingSettings(
-	settings: EntityGroundingSettings,
-): EntityGroundingSettings {
+export function createIndoorGroundingSettings(
+	settings: IndoorGroundingSettings,
+): IndoorGroundingSettings {
 	finiteRange(
 		settings.strength,
 		0,
@@ -292,6 +379,74 @@ export function createEntityGroundingSettings(
 	return settings;
 }
 
+/** Validate and retain the complete terrain-only analytic shadow policy. */
+export function createOutdoorDirectionalShadowSettings(
+	settings: OutdoorDirectionalShadowSettings,
+): OutdoorDirectionalShadowSettings {
+	finiteRange(
+		settings.strength,
+		0,
+		1,
+		true,
+		"Outdoor shadow strength must be within [0, 1].",
+	);
+	finiteRange(
+		settings.radiusScale,
+		0.1,
+		4,
+		true,
+		"Outdoor shadow radius scale must be within [0.1, 4].",
+	);
+	finiteRange(
+		settings.softness,
+		0,
+		1,
+		false,
+		"Outdoor shadow softness must be within (0, 1].",
+	);
+	finiteRange(
+		settings.maximumReceiverDrop,
+		0,
+		16,
+		false,
+		"Outdoor shadow maximum receiver drop must be within (0, 16].",
+	);
+	finiteRange(
+		settings.minimumUpFacing,
+		0,
+		1,
+		true,
+		"Outdoor shadow minimum up-facing must be within [0, 1].",
+	);
+	finiteRange(
+		settings.fullStrengthUpFacing,
+		0,
+		1,
+		false,
+		"Outdoor shadow full-strength up-facing must be within (0, 1].",
+	);
+	if (settings.fullStrengthUpFacing <= settings.minimumUpFacing) {
+		throw new Error(
+			"Outdoor shadow up-facing thresholds must be strictly ordered.",
+		);
+	}
+	finiteRange(
+		settings.contactBias,
+		0,
+		1,
+		true,
+		"Outdoor shadow contact bias must be within [0, 1].",
+	);
+	finiteRange(
+		settings.tailStrength,
+		0,
+		1,
+		true,
+		"Outdoor shadow tail strength must be within [0, 1].",
+	);
+	return settings;
+}
+
 /** Validate one complete settings value before renderer resource or shader code consumes it. */
 export function createEntityShadowSettings(
 	settings: EntityShadowSettings,
@@ -299,8 +454,11 @@ export function createEntityShadowSettings(
 	if (!ENTITY_SHADOW_MODES.includes(settings.mode)) {
 		throw new Error("Entity shadow mode must be none, simple, or shadow-maps.");
 	}
+	createOutdoorShadowCasterBudget(settings.casterBudget);
 	createOutdoorPssmSettings(settings.pssm);
-	createEntityGroundingSettings(settings.grounding);
+	createOutdoorShadowProjectionSettings(settings.projection);
+	createIndoorGroundingSettings(settings.indoorGrounding);
+	createOutdoorDirectionalShadowSettings(settings.outdoorDirectional);
 	return settings;
 }
 
@@ -325,6 +483,11 @@ const tuning = SHARED_FRONTEND_TUNING.rendering.entityShadows;
 /** Validated default-hybrid entity-shadow settings used by every frontend composition. */
 export const DEFAULT_ENTITY_SHADOW_SETTINGS = createEntityShadowSettings({
 	mode: tuning.defaultMode,
+	casterBudget: createOutdoorShadowCasterBudget(tuning.casterBudget),
 	pssm: createOutdoorPssmSettings(tuning.pssm),
-	grounding: createEntityGroundingSettings(tuning.grounding),
+	projection: createOutdoorShadowProjectionSettings(tuning.projection),
+	indoorGrounding: createIndoorGroundingSettings(tuning.indoorGrounding),
+	outdoorDirectional: createOutdoorDirectionalShadowSettings(
+		tuning.outdoorDirectional,
+	),
 });

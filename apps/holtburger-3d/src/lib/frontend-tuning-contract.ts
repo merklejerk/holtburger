@@ -2,9 +2,12 @@ import type { HexRgbColor, HexRgbaColor } from "./frontend-color";
 import type { AmbientOcclusionParameters } from "./game/renderer/ambient-occlusion-policy";
 import type { ColorGradeParameters } from "./game/renderer/color-grade-policy";
 import type {
-	EntityGroundingSettings,
+	IndoorGroundingSettings,
 	EntityShadowMode,
+	OutdoorShadowCasterBudget,
 	OutdoorPssmSettings,
+	OutdoorShadowProjectionSettings,
+	OutdoorDirectionalShadowSettings,
 } from "./game/renderer/entity-shadow-policy";
 import type {
 	NameplateAppearance,
@@ -199,11 +202,17 @@ interface FrontendEntityShadowTuning {
 	/** Shadow mode installed into new frame settings. */
 	readonly defaultMode: EntityShadowMode;
 	/** Build-time analytic-caster capacity per receiver. */
-	readonly maximumGroundingCastersPerReceiver: number;
+	readonly maximumAnalyticShadowCastersPerReceiver: number;
+	/** Complete-root N/M defaults retained together for manual calibration. */
+	readonly casterBudget: OutdoorShadowCasterBudget;
 	/** Outdoor parallel-split shadow-map policy. */
 	readonly pssm: OutdoorPssmSettings;
+	/** Shared bounded projection policy for mapped and analytic outdoor shadows. */
+	readonly projection: OutdoorShadowProjectionSettings;
 	/** Analytic actor-grounding policy. */
-	readonly grounding: EntityGroundingSettings;
+	readonly indoorGrounding: IndoorGroundingSettings;
+	/** Terrain-only directional analytic fallback appearance. */
+	readonly outdoorDirectional: OutdoorDirectionalShadowSettings;
 }
 
 /** Initial frame choices flattened for convenient tuning authoring. */

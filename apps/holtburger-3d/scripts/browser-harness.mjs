@@ -274,6 +274,8 @@ function parseArgs(args) {
 		ambientOcclusionCycle: false,
 		ambientOcclusionCoverage: false,
 		entityShadows: null,
+		entityShadowSelectedRoots: null,
+		entityShadowMappedRoots: null,
 		entityShadowCycle: false,
 		entityShadowBenchmarkPairs: 0,
 		traceTerrainGl: false,
@@ -772,6 +774,20 @@ function parseArgs(args) {
 			case "--entity-shadow-cycle":
 				parsed.entityShadowCycle = true;
 				break;
+			case "--entity-shadow-selected-roots":
+				parsed.entityShadowSelectedRoots = parsePositiveInteger(
+					requireValue(args, ++index, arg),
+					arg,
+				);
+				break;
+			case "--entity-shadow-mapped-roots": {
+				const value = Number(requireValue(args, ++index, arg));
+				if (!Number.isInteger(value) || value < 0) {
+					throw new Error(`${arg} must be a non-negative integer.`);
+				}
+				parsed.entityShadowMappedRoots = value;
+				break;
+			}
 			case "--entity-shadow-benchmark-pairs":
 				parsed.entityShadowBenchmarkPairs = Number(
 					requireValue(args, ++index, arg),
@@ -851,6 +867,7 @@ function parseArgs(args) {
 						"repeated-100",
 						"unique-100",
 						"ordered-500",
+						"shadow-crowd-112x61",
 						"occlusion-open",
 						"occlusion-wall",
 						"portal-open",
@@ -1335,6 +1352,10 @@ Options:
                          Replace the complete entity-shadow policy. Copy frameSettings.entityShadows
                          from harness output, then edit values for a reproducible capture.
   --entity-shadow-cycle Exercise none, simple, shadow-maps, and target resize without reloading.
+  --entity-shadow-selected-roots <n>
+                         Override the per-view selected-root budget (N).
+  --entity-shadow-mapped-roots <n>
+                         Override the per-view mapped-root budget (M); requires selected roots.
   --entity-shadow-benchmark-pairs <n>
                          Measure alternating none/shadow-maps windows in one settled session.
                          Requires --gpu and positive --measure-ms; add --profile-renderer for
@@ -1362,8 +1383,8 @@ Options:
                          Select nearest, linear, or anisotropic-2x/4x/8x before content settles.
   --fixture <name>      Use the blended, instanced, outdoor-pssm, or portal-scope-atlas fixture.
   --nameplate-workload <name>
-                         Install repeated-100, unique-100, ordered-500, occlusion-open/wall, or
-                         portal-open/wall/plural synthetic dynamic
+                        Install repeated-100, unique-100, ordered-500, shadow-crowd-112x61,
+                        occlusion-open/wall, or portal-open/wall/plural synthetic dynamic
                          entities through the shared runtime without requiring a catalog record.
   --nameplate-lifecycle Move one unchanged same-generation target, then retire the workload and
                          assert stable rasterization plus complete texture release. Requires
@@ -1566,20 +1587,20 @@ function assertOutdoorPssmFixture(fixture) {
 		}
 	}
 	assertOutdoorPssmDiagnostics(fixture.initialDiagnostics, {
-		activeBytes: 524_288,
+		activeBytes: 262_144,
 		activeFramebufferCount: 1,
 		activeTextureCount: 1,
 		allocatedGenerationCount: 1,
-		cascadeCount: 2,
+		cascadeCount: 1,
 		disposedGenerationCount: 0,
 		resolution: 256,
 	});
 	assertOutdoorPssmDiagnostics(fixture.resizedDiagnostics, {
-		activeBytes: 3_145_728,
+		activeBytes: 2_097_152,
 		activeFramebufferCount: 1,
 		activeTextureCount: 1,
 		allocatedGenerationCount: 2,
-		cascadeCount: 3,
+		cascadeCount: 2,
 		disposedGenerationCount: 1,
 		resolution: 512,
 	});
@@ -1738,9 +1759,11 @@ function assertNameplateWorkload(
 	const eligibleCandidateCount =
 		workload === "ordered-500"
 			? 500
-			: workload === "repeated-100" || workload === "unique-100"
-				? 100
-				: 1;
+			: workload === "shadow-crowd-112x61"
+				? 112
+				: workload === "repeated-100" || workload === "unique-100"
+					? 100
+					: 1;
 	const submittedCandidateCount = Math.min(
 		eligibleCandidateCount,
 		maximumVisible,
@@ -3646,6 +3669,24 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				[options.entityShadows],
 			);
 		}
+		if (
+			options.entityShadowSelectedRoots !== null ||
+			options.entityShadowMappedRoots !== null
+		) {
+			if (
+				options.entityShadowSelectedRoots === null ||
+				options.entityShadowMappedRoots === null
+			) {
+				throw new Error(
+					"Caster-budget tuning requires both --entity-shadow-selected-roots and --entity-shadow-mapped-roots.",
+				);
+			}
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setEntityShadowCasterBudget",
+				[options.entityShadowSelectedRoots, options.entityShadowMappedRoots],
+			);
+		}
 		if (options.minimumPortalFootprintCssPixelArea !== null) {
 			await evaluate(
 				client,
@@ -3716,9 +3757,12 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		let nameplateWorkload = null;
 		if (options.nameplateWorkload !== null) {
 			if (
-				["repeated-100", "unique-100", "ordered-500"].includes(
-					options.nameplateWorkload,
-				)
+				[
+					"repeated-100",
+					"unique-100",
+					"ordered-500",
+					"shadow-crowd-112x61",
+				].includes(options.nameplateWorkload)
 			) {
 				// These fixtures isolate cache and budget behavior. Keep their deliberately deep rows
 				// eligible so a presentation cutoff does not silently weaken the workload under test.
@@ -3968,12 +4012,6 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
 				[],
 			);
-			const retired = await evaluate(
-				client,
-				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.despawnExplorerEntityFleet",
-				[],
-			);
-			await delay(400);
 			entityPopulation = {
 				wcids: populationWcids,
 				requestedCount: options.entityPopulationCount,
@@ -3988,14 +4026,10 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 					minimum: advancedPerTick.length ? Math.min(...advancedPerTick) : null,
 					maximum: advancedPerTick.length ? Math.max(...advancedPerTick) : null,
 				},
-				retiredCount: retired,
-				teardownState: summarizeEntityRuntimeState(
-					await evaluate(
-						client,
-						"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
-						[],
-					),
-				),
+				// The fleet remains installed through policy cycles, profiling, and capture so those
+				// diagnostics measure the requested population rather than its empty teardown state.
+				retiredCount: null,
+				teardownState: null,
 			};
 		}
 		if (options.cameraEndYawDegrees !== null) {
@@ -4083,47 +4117,75 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			await delay(250);
 		}
 		if (options.entityShadowCycle) {
-			for (const mode of ["none", "simple", "shadow-maps"]) {
+			const initialOutdoorTargets =
+				initialState.entityShadowResources?.outdoorTargets;
+			if (!initialOutdoorTargets || initialOutdoorTargets.activeBytes <= 0) {
+				throw new Error(
+					"Entity-shadow cycle requires an initial frame with active outdoor shadow targets.",
+				);
+			}
+			for (const mode of ["none", "simple"]) {
 				await evaluate(
 					client,
 					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setEntityShadowMode",
 					[mode],
 				);
-				await delay(250);
 				entityShadowCycleStates.push(
-					await evaluate(
-						client,
-						"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
-						[],
-					),
+					await waitForEntityShadowTargets(client, {
+						active: false,
+						description: `${mode} mode`,
+						mode,
+					}),
 				);
 			}
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setEntityShadowMode",
+				["shadow-maps"],
+			);
+			entityShadowCycleStates.push(
+				await waitForEntityShadowTargets(client, {
+					active: true,
+					description: "shadow-map re-enable",
+					minimumAllocatedGenerationCount:
+						initialOutdoorTargets.allocatedGenerationCount + 1,
+					mode: "shadow-maps",
+					resolution: initialOutdoorTargets.resolution,
+				}),
+			);
 			const enabledState = entityShadowCycleStates[2];
 			const originalSettings = enabledState.frameSettings.entityShadows;
 			const alternateResolution =
 				originalSettings.pssm.mapResolution === 256 ? 512 : 256;
-			for (const settings of [
-				{
-					...originalSettings,
-					pssm: {
-						...originalSettings.pssm,
-						mapResolution: alternateResolution,
+			for (const [description, settings] of [
+				[
+					"shadow-map resize",
+					{
+						...originalSettings,
+						pssm: {
+							...originalSettings.pssm,
+							mapResolution: alternateResolution,
+						},
 					},
-				},
-				originalSettings,
+				],
+				["shadow-map restore", originalSettings],
 			]) {
+				const previousTargets =
+					entityShadowCycleStates.at(-1).entityShadowResources.outdoorTargets;
 				await evaluate(
 					client,
 					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setEntityShadowSettings",
 					[settings],
 				);
-				await delay(250);
 				entityShadowCycleStates.push(
-					await evaluate(
-						client,
-						"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
-						[],
-					),
+					await waitForEntityShadowTargets(client, {
+						active: true,
+						description,
+						minimumAllocatedGenerationCount:
+							previousTargets.allocatedGenerationCount + 1,
+						mode: "shadow-maps",
+						resolution: settings.pssm.mapResolution,
+					}),
 				);
 			}
 		}
@@ -4487,6 +4549,21 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 					captureBeyondViewport: false,
 					format: "png",
 				});
+		if (entityPopulation !== null) {
+			entityPopulation.retiredCount = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.despawnExplorerEntityFleet",
+				[],
+			);
+			await delay(400);
+			entityPopulation.teardownState = summarizeEntityRuntimeState(
+				await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
+					[],
+				),
+			);
+		}
 		let despawnedEntityState = null;
 		if (spawnedEntity !== null) {
 			const stillLive = state.spawnedEntities.some(
@@ -4976,6 +5053,51 @@ async function waitForFrameMode(client, expectedMode) {
 	}
 	throw new Error(
 		`Browser harness renderer did not observe ${expectedMode} mode within 30 seconds.`,
+	);
+}
+
+/** Wait until a rendered frame, rather than only frontend settings, realizes shadow ownership. */
+async function waitForEntityShadowTargets(
+	client,
+	{
+		active,
+		description,
+		minimumAllocatedGenerationCount = 0,
+		mode,
+		resolution = null,
+	},
+) {
+	const timeoutAt = Date.now() + 30_000;
+	while (Date.now() < timeoutAt) {
+		const state = await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
+			[],
+		);
+		if (state.error) {
+			throw new Error(
+				`Browser harness failed while awaiting ${description}: ${state.error}`,
+			);
+		}
+		const targets = state.entityShadowResources?.outdoorTargets;
+		const hasExpectedActivity = active
+			? targets?.activeBytes > 0 &&
+				targets.activeFramebufferCount === 1 &&
+				targets.activeTextureCount === 1
+			: targets?.activeBytes === 0 &&
+				targets.activeFramebufferCount === 0 &&
+				targets.activeTextureCount === 0;
+		if (
+			state.frameSettings?.entityShadows?.mode === mode &&
+			hasExpectedActivity &&
+			targets.allocatedGenerationCount >= minimumAllocatedGenerationCount &&
+			(resolution === null || targets.resolution === resolution)
+		)
+			return state;
+		await delay(50);
+	}
+	throw new Error(
+		`Browser harness renderer did not realize ${description} within 30 seconds.`,
 	);
 }
 

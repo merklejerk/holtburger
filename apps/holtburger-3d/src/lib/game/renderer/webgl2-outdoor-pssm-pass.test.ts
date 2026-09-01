@@ -34,14 +34,18 @@ describe("WebGL2OutdoorPssmPass", () => {
 		const fixture = createFixture(true);
 		const input = createInput(new Vec3(0.2, 1, -0.3));
 		const profileMetrics = {
+			analyticRootCount: 0,
+			candidateRootCount: 0,
+			cascadeCandidateMembershipCount: 0,
 			cascadeQueryCount: 0,
-			cascadeSelectedRootCount: 0,
 			compatibleDepthRunCount: 0,
+			emptyMappedViewCount: 0,
 			instanceUploadBytes: 0,
 			instanceUploadCount: 0,
-			retainedCasterRootCount: 0,
+			mappedRootCount: 0,
+			rejectedRootCount: 0,
+			selectedRootCount: 0,
 			selectedCasterPartCount: 0,
-			uniqueSelectedRootCount: 0,
 		};
 
 		const active = fixture.pass.render(input, profileMetrics);
@@ -55,14 +59,18 @@ describe("WebGL2OutdoorPssmPass", () => {
 		expect(fixture.state.programCreations).toBe(1);
 		expect(fixture.state.preparedInstanceCounts).toEqual([1, 1]);
 		expect(profileMetrics).toEqual({
+			analyticRootCount: 0,
+			candidateRootCount: 1,
+			cascadeCandidateMembershipCount: 2,
 			cascadeQueryCount: 2,
-			cascadeSelectedRootCount: 2,
 			compatibleDepthRunCount: 2,
+			emptyMappedViewCount: 0,
 			instanceUploadBytes: 160,
 			instanceUploadCount: 2,
-			retainedCasterRootCount: 1,
+			mappedRootCount: 1,
+			rejectedRootCount: 0,
+			selectedRootCount: 1,
 			selectedCasterPartCount: 2,
-			uniqueSelectedRootCount: 1,
 		});
 		expect(fixture.state.expansions).toBe(1);
 		expect(fixture.state.draws).toEqual([
@@ -79,18 +87,35 @@ describe("WebGL2OutdoorPssmPass", () => {
 		]);
 	});
 
-	it("clears empty cascades without compiling the caster program", () => {
+	it("skips target allocation, clears, and program compilation for an empty mapped tier", () => {
 		const fixture = createFixture(false);
 
 		expect(
-			fixture.pass.render(createInput(new Vec3(0, 1, 0)), null)
-				?.instanceUploads,
-		).toEqual({ bytes: 0, count: 0 });
+			fixture.pass.render(createInput(new Vec3(0, 1, 0)), null),
+		).toBeNull();
 
-		expect(fixture.state.attachedLayers).toEqual([0, 1]);
+		expect(fixture.state.targetResizes).toBe(0);
+		expect(fixture.state.attachedLayers).toEqual([]);
 		expect(fixture.state.queries).toBe(2);
 		expect(fixture.state.programCreations).toBe(0);
 		expect(fixture.state.draws).toEqual([]);
+	});
+
+	it("keeps M=0 casters analytic without geometry expansion or mapped GPU work", () => {
+		const fixture = createFixture(true);
+		const input = {
+			...createInput(new Vec3(0, 1, 0)),
+			casterBudget: { maximumMappedRoots: 0, maximumSelectedRoots: 1 },
+		};
+
+		expect(fixture.pass.render(input, null)).toBeNull();
+
+		expect(fixture.pass.getAnalyticCasters()).toHaveLength(1);
+		expect(input.selectedDynamicNodeIds).toEqual(new Set([NODE]));
+		expect(fixture.state.expansions).toBe(0);
+		expect(fixture.state.targetResizes).toBe(0);
+		expect(fixture.state.programCreations).toBe(0);
+		expect(fixture.state.attachedLayers).toEqual([]);
 	});
 
 	it("forwards master disable and destroys a compiled program once", () => {
@@ -179,6 +204,11 @@ function createFixture(withCaster = false): {
 			};
 		},
 		getRenderContributionDescriptor: () => descriptor,
+		getEntityShadowDynamicFacts: () => ({
+			identity: NODE,
+			rigidBounds: new AABB3(Vec3.zero(), new Vec3(1, 2, 1)),
+			spatialMembership: { scopes: [{ kind: "outdoor" }] },
+		}),
 		queryScopesScene: () => {
 			state.queries += 1;
 			return { entries: withCaster ? [NODE] : [] };
@@ -265,8 +295,11 @@ function createInput(sunVector: Vec3): WebGL2OutdoorPssmPassInput {
 			rotation: Quat.identity(),
 			verticalFovDegrees: 60,
 		},
+		cameraFrustum: { cameraPosition: new Vec3(96, 8, -96), planes: [] },
+		casterBudget: DEFAULT_ENTITY_SHADOW_SETTINGS.casterBudget,
 		frameHeight: 360,
 		frameWidth: 640,
+		projectionSettings: DEFAULT_ENTITY_SHADOW_SETTINGS.projection,
 		selectedDynamicNodeIds: new Set(),
 		showRetailHiddenGeometry: false,
 		settings: {

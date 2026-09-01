@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import { Mat4, AABB3, Vec3 } from "../math/types";
 import type {
 	ResolvedScenePlacement,
@@ -7,18 +8,22 @@ import type {
 } from "../scene";
 import {
 	DEFAULT_ENTITY_SHADOW_SETTINGS,
-	MAX_ENTITY_GROUNDING_CASTERS_PER_RECEIVER,
+	MAX_ENTITY_ANALYTIC_SHADOW_CASTERS_PER_RECEIVER,
 } from "./entity-shadow-policy";
 import {
-	createEntityGroundingCaster,
+	resolveEntityShadowCaster,
 	createEntityGroundingSelection,
 	createEntityGroundingSelectionScratch,
 	createIndoorGroundingCell,
-	createOutdoorGroundingLandblock,
+	createOutdoorDirectionalShadowCaster,
+	createOutdoorDirectionalShadowSelection,
+	createOutdoorDirectionalShadowSelectionScratch,
+	createOutdoorDirectionalShadowTerrain,
 	indexIndoorVisibilityIslands,
 	selectIndoorGroundingCasters,
-	selectOutdoorGroundingCasters,
+	selectOutdoorDirectionalShadowCasters,
 } from "./entity-grounding";
+import { resolveOutdoorShadowProjection } from "./outdoor-pssm";
 
 const CELL_A = {
 	kind: "env-cell",
@@ -57,11 +62,17 @@ const TOPOLOGY = {
 	],
 } satisfies SceneTopologyView;
 const ISLANDS = indexIndoorVisibilityIslands(TOPOLOGY);
-const SETTINGS = DEFAULT_ENTITY_SHADOW_SETTINGS.grounding;
+const SETTINGS = DEFAULT_ENTITY_SHADOW_SETTINGS.indoorGrounding;
+const OUTDOOR_SETTINGS =
+	SHARED_FRONTEND_TUNING.rendering.entityShadows.outdoorDirectional;
+const PROJECTION = resolveOutdoorShadowProjection(
+	new Vec3(1, 1, 0),
+	DEFAULT_ENTITY_SHADOW_SETTINGS.projection,
+);
 
 describe("entity grounding", () => {
 	it("combines a transformed rigid footprint with authoritative root height", () => {
-		const caster = createEntityGroundingCaster(
+		const caster = resolveEntityShadowCaster(
 			{
 				entityClass: "mob",
 				identity: "guid:1",
@@ -72,12 +83,18 @@ describe("entity grounding", () => {
 			ISLANDS,
 			SETTINGS,
 		);
-		expect(caster).not.toBeNull();
-		expect(caster!.contactAnchor).toEqual(new Vec3(195, 7, -379));
-		expect(caster!.radius).toBe(2);
-		expect(caster!.visibilityIslandIds).toEqual([ISLAND_A]);
-		expect(caster!.influenceBounds.min.y).toBe(7 - SETTINGS.maximumDrop);
-		expect(caster!.influenceBounds.max.y).toBe(7 + SETTINGS.contactBias);
+		if (caster === null || caster.indoorGrounding === null) {
+			throw new Error("Expected a resolved indoor shadow caster.");
+		}
+		expect(caster.shape.contactAnchor).toEqual(new Vec3(195, 7, -379));
+		expect(caster.shape.radius).toBe(2);
+		expect(caster.indoorGrounding.visibilityIslandIds).toEqual([ISLAND_A]);
+		expect(caster.indoorGrounding.influenceBounds.min.y).toBe(
+			7 - SETTINGS.maximumDrop,
+		);
+		expect(caster.indoorGrounding.influenceBounds.max.y).toBe(
+			7 + SETTINGS.contactBias,
+		);
 	});
 
 	it("keeps root contact stable while rigid-pose center and radius animate", () => {
@@ -87,7 +104,7 @@ describe("entity grounding", () => {
 			placement: placementAt(3, 5, 7),
 			spatialMembership: membership(CELL_A),
 		};
-		const narrow = createEntityGroundingCaster(
+		const narrow = resolveEntityShadowCaster(
 			{
 				...common,
 				rigidBounds: new AABB3(new Vec3(-1, -100, -1), new Vec3(1, 100, 1)),
@@ -95,7 +112,7 @@ describe("entity grounding", () => {
 			ISLANDS,
 			SETTINGS,
 		);
-		const wide = createEntityGroundingCaster(
+		const wide = resolveEntityShadowCaster(
 			{
 				...common,
 				rigidBounds: new AABB3(new Vec3(1, -200, -4), new Vec3(7, 300, 2)),
@@ -103,17 +120,17 @@ describe("entity grounding", () => {
 			ISLANDS,
 			SETTINGS,
 		);
-		expect(narrow?.contactAnchor.y).toBe(7);
-		expect(wide?.contactAnchor.y).toBe(7);
-		expect(wide?.contactAnchor.x).not.toBe(narrow?.contactAnchor.x);
-		expect(narrow?.radius).toBe(1);
-		expect(wide?.radius).toBe(3);
+		expect(narrow?.shape.contactAnchor.y).toBe(7);
+		expect(wide?.shape.contactAnchor.y).toBe(7);
+		expect(wide?.shape.contactAnchor.x).not.toBe(narrow?.shape.contactAnchor.x);
+		expect(narrow?.shape.radius).toBe(1);
+		expect(wide?.shape.radius).toBe(3);
 	});
 
 	it("moves contact height exactly with authoritative root placement", () => {
 		const rigidBounds = new AABB3(new Vec3(-1, -100, -1), new Vec3(1, 100, 1));
 		const createAt = (y: number) =>
-			createEntityGroundingCaster(
+			resolveEntityShadowCaster(
 				{
 					entityClass: "npc",
 					identity: "guid:moving",
@@ -124,9 +141,12 @@ describe("entity grounding", () => {
 				ISLANDS,
 				SETTINGS,
 			);
-		expect(createAt(9)?.contactAnchor.y).toBe(
-			(createAt(2)?.contactAnchor.y ?? Number.NaN) + 7,
-		);
+		const lower = createAt(2);
+		const upper = createAt(9);
+		if (lower === null || upper === null) {
+			throw new Error("Expected both moving shadow casters to resolve.");
+		}
+		expect(upper.shape.contactAnchor.y).toBe(lower.shape.contactAnchor.y + 7);
 	});
 
 	it("retains outdoor-only membership and rejects a zero horizontal radius", () => {
@@ -135,7 +155,7 @@ describe("entity grounding", () => {
 			identity: "guid:1",
 			placement: placementAt(0, 0),
 		};
-		const outdoor = createEntityGroundingCaster(
+		const outdoor = resolveEntityShadowCaster(
 			{
 				...common,
 				rigidBounds: new AABB3(Vec3.zero(), new Vec3(1, 1, 1)),
@@ -145,9 +165,9 @@ describe("entity grounding", () => {
 			SETTINGS,
 		);
 		expect(outdoor?.reachesOutdoors).toBe(true);
-		expect(outdoor?.visibilityIslandIds).toEqual([]);
+		expect(outdoor?.indoorGrounding).toBeNull();
 		expect(
-			createEntityGroundingCaster(
+			resolveEntityShadowCaster(
 				{
 					...common,
 					rigidBounds: new AABB3(Vec3.zero(), new Vec3(0, 1, 0)),
@@ -160,14 +180,14 @@ describe("entity grounding", () => {
 	});
 
 	it("selects outdoor candidates per landblock and ranks only overflow", () => {
-		const selection = createEntityGroundingSelection();
-		const scratch = createEntityGroundingSelectionScratch();
-		const landblock = createOutdoorGroundingLandblock("0x0000ffff");
-		const capacity = MAX_ENTITY_GROUNDING_CASTERS_PER_RECEIVER;
+		const selection = createOutdoorDirectionalShadowSelection();
+		const scratch = createOutdoorDirectionalShadowSelectionScratch();
+		const landblock = createOutdoorDirectionalShadowTerrain("0x0000ffff");
+		const capacity = MAX_ENTITY_ANALYTIC_SHADOW_CASTERS_PER_RECEIVER;
 		const withinCapacity = Array.from({ length: capacity }, (_, index) =>
 			outdoorCaster(`guid:${index}`, capacity - index),
 		);
-		selectOutdoorGroundingCasters(
+		selectOutdoorDirectionalShadowCasters(
 			landblock,
 			withinCapacity,
 			Vec3.zero(),
@@ -179,7 +199,7 @@ describe("entity grounding", () => {
 			withinCapacity.map((caster) => caster.contactAnchor.x),
 		);
 
-		selectOutdoorGroundingCasters(
+		selectOutdoorDirectionalShadowCasters(
 			landblock,
 			[...withinCapacity, outdoorCaster("guid:near", 0.5)],
 			Vec3.zero(),
@@ -195,11 +215,11 @@ describe("entity grounding", () => {
 
 	it("admits one border influence to both adjacent outdoor landblocks", () => {
 		const caster = outdoorCaster("guid:border", 192);
-		const selection = createEntityGroundingSelection();
-		const scratch = createEntityGroundingSelectionScratch();
+		const selection = createOutdoorDirectionalShadowSelection();
+		const scratch = createOutdoorDirectionalShadowSelectionScratch();
 		for (const landblockId of ["0x0000ffff", "0x0100ffff"]) {
-			selectOutdoorGroundingCasters(
-				createOutdoorGroundingLandblock(landblockId),
+			selectOutdoorDirectionalShadowCasters(
+				createOutdoorDirectionalShadowTerrain(landblockId),
 				[caster],
 				Vec3.zero(),
 				Vec3.zero(),
@@ -210,22 +230,22 @@ describe("entity grounding", () => {
 		}
 	});
 
-	it("rejects indoor-only casters from outdoor terrain", () => {
-		const selection = createEntityGroundingSelection();
-		selectOutdoorGroundingCasters(
-			createOutdoorGroundingLandblock("0x0000ffff"),
-			[requiredCaster("guid:indoor", 4, membership(CELL_A))],
+	it("rejects directional casters outside the terrain footprint", () => {
+		const selection = createOutdoorDirectionalShadowSelection();
+		selectOutdoorDirectionalShadowCasters(
+			createOutdoorDirectionalShadowTerrain("0x0000ffff"),
+			[outdoorCaster("guid:far", 1_000)],
 			Vec3.zero(),
 			Vec3.zero(),
 			selection,
-			createEntityGroundingSelectionScratch(),
+			createOutdoorDirectionalShadowSelectionScratch(),
 		);
 		expect(selection.count).toBe(0);
 	});
 
 	it("rejects categories outside the shared actor-caster policy", () => {
 		expect(
-			createEntityGroundingCaster(
+			resolveEntityShadowCaster(
 				{
 					entityClass: "other",
 					identity: "ordinary-item",
@@ -269,7 +289,7 @@ describe("entity grounding", () => {
 		const selection = createEntityGroundingSelection();
 		const scratch = createEntityGroundingSelectionScratch();
 		const cell = createIndoorGroundingCell(CELL_A, wideBounds(), ISLANDS);
-		const capacity = MAX_ENTITY_GROUNDING_CASTERS_PER_RECEIVER;
+		const capacity = MAX_ENTITY_ANALYTIC_SHADOW_CASTERS_PER_RECEIVER;
 		const withinCapacity = Array.from({ length: capacity }, (_, index) =>
 			requiredCaster(`guid:${index}`, capacity - index, membership(CELL_A)),
 		);
@@ -307,7 +327,7 @@ describe("entity grounding", () => {
 		const selection = createEntityGroundingSelection();
 		const scratch = createEntityGroundingSelectionScratch();
 		const cell = createIndoorGroundingCell(CELL_A, wideBounds(), ISLANDS);
-		const capacity = MAX_ENTITY_GROUNDING_CASTERS_PER_RECEIVER;
+		const capacity = MAX_ENTITY_ANALYTIC_SHADOW_CASTERS_PER_RECEIVER;
 		const casters = Array.from({ length: capacity - 1 }, (_, index) =>
 			requiredCaster(`guid:${index}`, index + 1, membership(CELL_A)),
 		);
@@ -368,7 +388,7 @@ function requiredCaster(
 	x: number,
 	spatialMembership: SceneSpatialMembership,
 ) {
-	const caster = createEntityGroundingCaster(
+	const caster = resolveEntityShadowCaster(
 		{
 			entityClass: "npc",
 			identity,
@@ -379,15 +399,15 @@ function requiredCaster(
 		ISLANDS,
 		SETTINGS,
 	);
-	if (!caster) throw new Error("Fixture caster was rejected.");
-	return caster;
+	if (!caster?.indoorGrounding) throw new Error("Fixture caster was rejected.");
+	return caster.indoorGrounding;
 }
 
 function outdoorCaster(identity: string, x: number) {
 	const localToLandblock = Mat4.identity();
 	localToLandblock.m41 = x;
 	localToLandblock.m43 = -1;
-	const caster = createEntityGroundingCaster(
+	const caster = resolveEntityShadowCaster(
 		{
 			entityClass: "npc",
 			identity,
@@ -404,7 +424,11 @@ function outdoorCaster(identity: string, x: number) {
 		SETTINGS,
 	);
 	if (!caster) throw new Error("Outdoor fixture caster was rejected.");
-	return caster;
+	return createOutdoorDirectionalShadowCaster(
+		caster.shape,
+		PROJECTION,
+		OUTDOOR_SETTINGS,
+	);
 }
 
 function boundsAround(x: number): AABB3 {
@@ -416,10 +440,17 @@ function wideBounds(): AABB3 {
 }
 
 function recordXs(
-	selection: ReturnType<typeof createEntityGroundingSelection>,
+	selection:
+		| ReturnType<typeof createEntityGroundingSelection>
+		| ReturnType<typeof createOutdoorDirectionalShadowSelection>,
 ): number[] {
-	return Array.from(
-		{ length: selection.count },
-		(_, index) => selection.records[index * 4]!,
-	);
+	const records =
+		"records" in selection ? selection.records : selection.anchorsAndRadii;
+	const values: number[] = [];
+	for (let index = 0; index < selection.count; index += 1) {
+		const value = records[index * 4];
+		if (value === undefined) throw new Error(`Missing caster record ${index}.`);
+		values.push(value);
+	}
+	return values;
 }

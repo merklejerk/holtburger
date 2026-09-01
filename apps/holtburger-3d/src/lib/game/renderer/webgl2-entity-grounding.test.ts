@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	DEFAULT_ENTITY_SHADOW_SETTINGS,
-	MAX_ENTITY_GROUNDING_CASTERS_PER_RECEIVER,
+	MAX_ENTITY_ANALYTIC_SHADOW_CASTERS_PER_RECEIVER,
 } from "./entity-shadow-policy";
 import { createEntityGroundingSelection } from "./entity-grounding";
 import {
@@ -17,7 +17,7 @@ describe("WebGL2 entity grounding uniforms", () => {
 			fixture.state,
 			fixture.uniforms,
 			createEntityGroundingSelection(),
-			DEFAULT_ENTITY_SHADOW_SETTINGS.grounding,
+			DEFAULT_ENTITY_SHADOW_SETTINGS.indoorGrounding,
 		);
 		expect(issued).toBe(entityGroundingUniformAttemptCount({ count: 0 }));
 		expect(fixture.calls).toEqual(["1i:count:0"]);
@@ -32,12 +32,12 @@ describe("WebGL2 entity grounding uniforms", () => {
 			fixture.state,
 			fixture.uniforms,
 			selection,
-			DEFAULT_ENTITY_SHADOW_SETTINGS.grounding,
+			DEFAULT_ENTITY_SHADOW_SETTINGS.indoorGrounding,
 		);
 		expect(issued).toBe(entityGroundingUniformAttemptCount(selection));
 		expect(fixture.calls[0]).toBe("1i:count:1");
 		expect(fixture.calls[1]).toBe(
-			`4fv:casters:${MAX_ENTITY_GROUNDING_CASTERS_PER_RECEIVER * 4}:1,2,3,4`,
+			`4fv:casters:${MAX_ENTITY_ANALYTIC_SHADOW_CASTERS_PER_RECEIVER * 4}:1,2,3,4`,
 		);
 		expect(fixture.calls).toHaveLength(
 			entityGroundingUniformAttemptCount(selection),

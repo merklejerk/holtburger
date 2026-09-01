@@ -425,18 +425,21 @@ export const SHARED_FRONTEND_TUNING = {
 			/** Renderer-owned camera-distance interval over which AO becomes neutral. */
 			distanceFade: { fullStrengthUntil: 64, disabledAt: 128 },
 		},
-		/** Accepted entity-shadow quality and appearance defaults, kept together for later tuning. */
+		/** Accepted entity-shadow quality and appearance defaults. */
 		entityShadows: {
-			/** Hybrid PSSM outdoors plus analytic grounding indoors. */
+			/** Bounded hybrid shadows outdoors plus radial grounding indoors. */
 			defaultMode: "shadow-maps" as const,
 			/** Build-time analytic-caster capacity shared by every terrain and EnvCell receiver. */
-			maximumGroundingCastersPerReceiver: 8,
+			maximumAnalyticShadowCastersPerReceiver: 8,
+			/** Manually calibrated per-view complete-root budgets. */
+			casterBudget: {
+				maximumSelectedRoots: 32,
+				maximumMappedRoots: 8,
+			},
 			pssm: {
-				cascadeCount: 3,
-				mapResolution: 2_048,
-				maximumDistance: 192,
-				/** Lowest elevation used to construct shadow maps; scene sunlight remains authored. */
-				minimumLightElevationDegrees: 33,
+				cascadeCount: 2,
+				mapResolution: 1_024,
+				maximumDistance: 128,
 				splitLambda: 0.65,
 				transitionFraction: 0.1,
 				receiverDepthBias: 0.001,
@@ -444,11 +447,15 @@ export const SHARED_FRONTEND_TUNING = {
 				casterPolygonOffsetFactor: 1.1,
 				casterPolygonOffsetUnits: 2,
 				pcfRadius: 1,
-				strength: 0.5,
-				casterSearchPadding: 64,
+				strength: 0.6,
 			},
-			grounding: {
-				strength: 0.33,
+			projection: {
+				minimumLightElevationDegrees: 33,
+				maximumCasterHeight: 16,
+				maximumCastLength: 64,
+			},
+			indoorGrounding: {
+				strength: 0.4,
 				radiusScale: 0.8,
 				softness: 0.4,
 				dropSpread: 0.3,
@@ -456,6 +463,16 @@ export const SHARED_FRONTEND_TUNING = {
 				minimumUpFacing: 0.2,
 				fullStrengthUpFacing: 0.75,
 				contactBias: 0.05,
+			},
+			outdoorDirectional: {
+				strength: 0.33,
+				radiusScale: 0.8,
+				softness: 0.4,
+				maximumReceiverDrop: 3,
+				minimumUpFacing: 0.2,
+				fullStrengthUpFacing: 0.75,
+				contactBias: 0.05,
+				tailStrength: 0.5,
 			},
 		},
 		/** Authored weather presentation, which is ours to shape rather than inherit. */

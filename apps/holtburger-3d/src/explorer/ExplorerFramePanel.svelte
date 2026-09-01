@@ -201,6 +201,28 @@
 					<summary>Phase timings</summary>
 					<div class="ac-param-panel">
 						<div class="ac-param-row">
+							<span class="ac-param-key">Candidates / selected / rejected</span>
+							<code
+								>{profile.cpu.outdoorShadowMap.mean.candidateRootCount.toFixed(
+									1,
+								)} / {profile.cpu.outdoorShadowMap.mean.selectedRootCount.toFixed(
+									1,
+								)} / {profile.cpu.outdoorShadowMap.mean.rejectedRootCount.toFixed(
+									1,
+								)}</code
+							>
+						</div>
+						<div class="ac-param-row">
+							<span class="ac-param-key">Mapped / analytic / empty views</span>
+							<code
+								>{profile.cpu.outdoorShadowMap.mean.mappedRootCount.toFixed(1)} /
+								{profile.cpu.outdoorShadowMap.mean.analyticRootCount.toFixed(1)} /
+								{profile.cpu.outdoorShadowMap.mean.emptyMappedViewCount.toFixed(
+									1,
+								)}</code
+							>
+						</div>
+						<div class="ac-param-row">
 							<span class="ac-param-key">View / scene query</span>
 							<code
 								>{profile.cpu.mean.viewPreparationMs.toFixed(2)} / {profile.cpu.mean.sceneQueryMs.toFixed(
@@ -304,9 +326,13 @@
 					<summary>Outdoor shadow work</summary>
 					<div class="ac-param-panel">
 						<div class="ac-param-row">
-							<span class="ac-param-key">Cascade queries / parts / runs</span>
+							<span class="ac-param-key"
+								>Cascade queries / memberships / parts / runs</span
+							>
 							<code
 								>{profile.cpu.outdoorShadowMap.mean.cascadeQueryCount.toFixed(
+									1,
+								)} / {profile.cpu.outdoorShadowMap.mean.cascadeCandidateMembershipCount.toFixed(
 									1,
 								)} / {profile.cpu.outdoorShadowMap.mean.selectedCasterPartCount.toFixed(
 									1,

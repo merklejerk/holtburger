@@ -452,6 +452,11 @@
 		readonly setNameplateMinimumLegiblePixels: (minimumPixels: number) => void;
 		/** Replace the complete validated entity-shadow policy without rebuilding content. */
 		readonly setEntityShadowSettings: (settings: EntityShadowSettings) => void;
+		/** Change the coupled per-view N/M budget without copying the full shadow policy. */
+		readonly setEntityShadowCasterBudget: (
+			maximumSelectedRoots: number,
+			maximumMappedRoots: number,
+		) => void;
 		/** Select one exhaustive shadow mode while retaining inactive appearance parameters. */
 		readonly setEntityShadowMode: (mode: EntityShadowMode) => void;
 		/** Change offscreen visual animation cadence without changing semantic advancement. */
@@ -2514,6 +2519,16 @@
 		setEntityShadowSettings({ ...frameSettings.entityShadows, mode });
 	}
 
+	function setEntityShadowCasterBudget(
+		maximumSelectedRoots: number,
+		maximumMappedRoots: number,
+	): void {
+		setEntityShadowSettings({
+			...frameSettings.entityShadows,
+			casterBudget: { maximumMappedRoots, maximumSelectedRoots },
+		});
+	}
+
 	function setOffscreenAnimationSampleIntervalSeconds(
 		intervalSeconds: number,
 	): void {
@@ -3447,6 +3462,7 @@
 					setNameplateMaximumVisible,
 					setNameplateMinimumLegiblePixels,
 					setEntityShadowSettings,
+					setEntityShadowCasterBudget,
 					setEntityShadowMode,
 					setOffscreenAnimationSampleIntervalSeconds,
 					setTextureFiltering,

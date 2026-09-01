@@ -82,13 +82,14 @@ import {
 	type ProjectionClearanceRevision,
 } from "../lib/game/camera/projection-clearance";
 import type { HostKinematicBoomPresentation } from "../lib/game/motion/host-kinematic-boom-path";
-import {
-	PortalTransitionController,
-	type PortalTransitionState,
-} from "../lib/client/portal-transition-controller";
+import { PortalTransitionController } from "../lib/client/portal-transition-controller";
+import type {
+	PortalRevealReceipt,
+	PortalTransitionPresentationPlan,
+	PortalTransitionPresentationReceipt,
+} from "../lib/client/portal-transition-presentation";
 import type {
 	FrameSettings,
-	PortalTransitionFrame,
 	RendererFrameDiagnosticsSnapshot,
 	WorldIndicatorInput,
 } from "../lib/game/renderer/renderer";
@@ -169,6 +170,27 @@ type PortalSceneActivation =
 			readonly revealAcknowledged: boolean;
 	  };
 
+/** One generation-current answer to whether the destination may begin portal exit rendering. */
+type PortalDestinationReadiness =
+	| {
+			readonly kind: "waiting";
+			readonly status: "loading-activation" | "loading-player";
+			readonly diagnostic?: string;
+	  }
+	| { readonly kind: "failed"; readonly diagnostic: string }
+	| {
+			readonly kind: "ready";
+			readonly origin: ResolvedSceneOrigin;
+			readonly extent: RenderExtent;
+			readonly cameraPresentation: HostKinematicBoomPresentation;
+	  };
+
+/** Settled destination view retained unchanged for every frame of one portal exit. */
+interface PortalDestinationFrame {
+	readonly generation: number;
+	readonly primaryView: PrimaryCameraView;
+}
+
 /** Client-local camera controller exposed only to the client shell's semantic input handlers. */
 export type ClientPresentationCameraController = PossessionCameraController<
 	ClientCameraTarget,
@@ -207,7 +229,9 @@ export interface ClientPresentationRuntime extends MapTerrainSource {
 	setAudioListener(placement: AudioListenerPlacement | null): void;
 	setSceneEnvironment(environment: ResolvedSceneEnvironment): void;
 	setViewerLightCarrier(guid: number | null): void;
-	setPortalTransition(transition: PortalTransitionFrame | undefined): void;
+	setPortalTransition(
+		transition: PortalTransitionPresentationPlan | undefined,
+	): void;
 	/** Play a validated head-locked portal transition cue when the runtime owns audio. */
 	playPortalTransitionSound?(kind: "enter" | "exit"): void;
 	dynamicEntityOrigin(guid: number): ResolvedSceneOrigin | null;
@@ -218,8 +242,16 @@ export interface ClientPresentationRuntime extends MapTerrainSource {
 	/** Monotonic change fact for live dynamic placements. */
 	readonly dynamicEntityPlacementRevision: number;
 	hasEnvCellScope(residency: ResolvedSceneOrigin): boolean;
+	/** Commit pending loading artifacts without advancing live world presentation. */
+	pollPortalTransitionLoading(): void;
 	tick(): void;
-	render(timeSeconds: number): void;
+	clearPresentation(): void;
+	/** Present portal space without requiring or advancing a committed world view. */
+	renderPortalTransition(
+		timeSeconds: number,
+		extent: RenderExtent,
+	): PortalTransitionPresentationReceipt | null;
+	render(timeSeconds: number): PortalTransitionPresentationReceipt | null;
 	/** Optional cold renderer counters used only by explicitly enabled client diagnostics. */
 	getRendererFrameDiagnostics?(): RendererFrameDiagnosticsSnapshot | null;
 }
@@ -269,7 +301,10 @@ export class ClientPresentationSession {
 	#startPromise: Promise<void> | null = null;
 	#sceneTargetKey: string | null = null;
 	#portalSceneActivation: PortalSceneActivation | null = null;
-	readonly #portalTransition = new PortalTransitionController();
+	#portalDestinationFrame: PortalDestinationFrame | null = null;
+	readonly #portalTransition = new PortalTransitionController(
+		CLIENT_TUNING.portalTransition.timing,
+	);
 	#hasRenderedFrame = false;
 	#renderedFrameCount = 0;
 	#lastCameraResidency: ClientPresentationDiagnostics["cameraResidency"] = null;
@@ -277,6 +312,8 @@ export class ClientPresentationSession {
 		kind: "starting",
 		diagnostic: null,
 	};
+	/** Terminal visual failure retained so an authority grace handoff cannot reveal on a later frame. */
+	#terminalPresentationError: string | null = null;
 	#destroyed = false;
 	#cameraTarget: ClientCameraTarget | null = null;
 	#cameraProjection: ProjectionClearanceRevision | null = null;
@@ -537,33 +574,56 @@ export class ClientPresentationSession {
 		if (this.#destroyed || owner === null) {
 			return { rendered: false, status: this.#status };
 		}
+		if (this.#terminalPresentationError !== null) {
+			this.#setStatus("error", this.#terminalPresentationError);
+			return { rendered: false, status: this.#status };
+		}
 		if (this.#session.mirror.isAwaitingSnapshot()) {
 			this.#setStatus("awaiting-snapshot");
 			return { rendered: false, status: this.#status };
 		}
 		const lifecycle = this.#session.state().lifecycle;
-		const portal = lifecycle?.kind === "portal-space";
+		const authorityPortal = lifecycle?.kind === "portal-space";
 		if (
 			lifecycle?.kind !== "entering-world" &&
 			lifecycle?.kind !== "in-world" &&
-			!portal
+			!authorityPortal
 		) {
 			this.#setStatus("stopped");
 			return { rendered: false, status: this.#status };
+		}
+		if (authorityPortal) {
+			this.#ensurePortalTransition(owner, lifecycle);
+		}
+		const portalGeneration = this.#portalTransition.activeGeneration();
+		// Authority may enter the world after its retail completion grace while presentation is
+		// still loading. The generation-keyed presentation barrier remains active until its own
+		// neutral destination frame is acknowledged.
+		const portal =
+			authorityPortal ||
+			(portalGeneration !== null &&
+				this.#isCurrentPortalPresentation(portalGeneration) &&
+				!this.#isPortalPresentationRevealed(portalGeneration));
+		if (portal) {
+			owner.runtime.pollPortalTransitionLoading();
 		}
 		if (playerGuid === null) {
 			this.#setStatus(
 				"loading-player",
 				"Waiting for the server to establish local-player identity.",
 			);
-			return { rendered: false, status: this.#status };
+			return portal
+				? this.#renderPortalLoadingFrame(owner, timeMs)
+				: { rendered: false, status: this.#status };
 		}
 		if (lifecycle.kind === "entering-world") {
 			this.#setStatus(
 				"loading-player",
 				"Local-player identity is established, but authority has not entered portal space.",
 			);
-			return { rendered: false, status: this.#status };
+			return portal
+				? this.#renderPortalLoadingFrame(owner, timeMs)
+				: { rendered: false, status: this.#status };
 		}
 		const player = this.#authoritativePlayer(playerGuid);
 		if (player === null) {
@@ -573,7 +633,9 @@ export class ClientPresentationSession {
 				"loading-player",
 				`Local player 0x${playerGuid.toString(16).padStart(8, "0")} is absent from the authoritative dynamic mirror.`,
 			);
-			return { rendered: false, status: this.#status };
+			return portal
+				? this.#renderPortalLoadingFrame(owner, timeMs)
+				: { rendered: false, status: this.#status };
 		}
 		if (player.placement.kind !== "world") {
 			owner.runtime.setViewerLightCarrier(null);
@@ -582,11 +644,17 @@ export class ClientPresentationSession {
 				"loading-player",
 				`Local player has ${player.placement.kind} placement instead of world placement.`,
 			);
-			return { rendered: false, status: this.#status };
+			return portal
+				? this.#renderPortalLoadingFrame(owner, timeMs)
+				: { rendered: false, status: this.#status };
 		}
 		if (portal) {
-			this.#ensurePortalTransition(owner, lifecycle);
-			this.#syncSceneActivation(player, lifecycle.worldGeneration);
+			if (portalGeneration === null) {
+				throw new Error(
+					"Portal presentation is active without a generation-owned transition.",
+				);
+			}
+			this.#syncSceneActivation(player, portalGeneration);
 		} else {
 			this.#portalTransition.reset();
 			owner.runtime.setPortalTransition(undefined);
@@ -599,64 +667,73 @@ export class ClientPresentationSession {
 			this.#syncSceneInterest(player);
 		}
 		owner.runtime.setViewerLightCarrier(playerGuid);
-		owner.runtime.tick();
+		if (!portal) owner.runtime.tick();
+		let primaryView: PrimaryCameraView;
 		if (portal) {
-			const sceneActivation = this.#portalSceneActivation;
-			if (sceneActivation?.kind !== "accepted") {
+			if (portalGeneration === null) {
+				throw new Error(
+					"Portal destination rendering requires an active generation.",
+				);
+			}
+			const destinationFrame =
+				this.#portalDestinationFrame?.generation === portalGeneration
+					? this.#portalDestinationFrame
+					: null;
+			if (destinationFrame !== null) {
+				primaryView = destinationFrame.primaryView;
+			} else {
+				const readiness = this.#portalDestinationReadiness(
+					owner,
+					player,
+					playerGuid,
+					timeMs,
+				);
+				if (readiness.kind === "failed") {
+					return this.#failPortalPresentation(owner, readiness.diagnostic);
+				}
+				if (readiness.kind === "waiting") {
+					this.#setStatus(readiness.status, readiness.diagnostic);
+					return this.#renderPortalLoadingFrame(owner, timeMs);
+				}
+				const camera = createClientCamera(
+					player,
+					readiness.origin,
+					readiness.cameraPresentation,
+					this.camera.acknowledgedProjection(timeMs),
+				);
+				primaryView = { camera, extent: readiness.extent };
+				this.#portalDestinationFrame = {
+					generation: portalGeneration,
+					primaryView,
+				};
+			}
+			const plan = this.#publishPortalTransition(owner, timeMs, true);
+			if (plan.kind === "origin-to-tunnel" || plan.kind === "tunnel-only") {
 				this.#setStatus("loading-activation");
-				return { rendered: false, status: this.#status };
-			}
-			const receipt = sceneActivation.receipt;
-			const activation = owner.runtime.sceneActivationStatus(receipt);
-			if (activation.kind === "failed") {
-				this.#setStatus("error", activation.diagnostic);
-				return { rendered: false, status: this.#status };
-			}
-			if (activation.kind !== "ready") {
-				this.#publishPortalTransition(owner, timeMs, false, false);
-				this.#setStatus("loading-activation");
-				return { rendered: false, status: this.#status };
-			}
-			this.#ensureScenePresentationConvergence();
-			if (this.#portalSceneActivation?.kind !== "accepted") {
-				this.#setStatus("loading-activation");
-				return { rendered: false, status: this.#status };
-			}
-			if (this.#portalSceneActivation.realization !== "ready") {
-				this.#setStatus("loading-player");
-				return { rendered: false, status: this.#status };
-			}
-		}
-		const origin = owner.runtime.dynamicEntityOrigin(playerGuid);
-		if (origin === null) {
-			this.#setStatus(
-				"loading-player",
-				"The authoritative local player has no installed runtime presentation.",
-			);
-			return { rendered: false, status: this.#status };
-		}
-		if (origin.envCellId !== null && !owner.runtime.hasEnvCellScope(origin)) {
-			this.#setStatus("loading-activation");
-			return { rendered: false, status: this.#status };
-		}
-		const extent = owner.runtime.resolveViewportExtent(
-			this.#canvas.clientWidth,
-			this.#canvas.clientHeight,
-		);
-		const projection = this.#resolveCameraProjection(extent);
-		let cameraPresentation: HostKinematicBoomPresentation | null;
-		if (portal) {
-			// Portal activation requires one generation-current host-authored camera placement.
-			// It may be either projection-proven or the controller's explicit target fallback;
-			// absence and stale-generation output remain non-presentable.
-			this.#ensureCamera(player, projection);
-			cameraPresentation = this.camera.presentation(timeMs);
-			if (cameraPresentation === null) {
-				this.#publishPortalTransition(owner, timeMs, false, false);
-				this.#setStatus("loading-activation");
-				return { rendered: false, status: this.#status };
+				return this.#renderPortalLoadingFrame(owner, timeMs, false);
 			}
 		} else {
+			this.#portalDestinationFrame = null;
+			const resolvedOrigin = owner.runtime.dynamicEntityOrigin(playerGuid);
+			if (resolvedOrigin === null) {
+				this.#setStatus(
+					"loading-player",
+					"The authoritative local player has no installed runtime presentation.",
+				);
+				return { rendered: false, status: this.#status };
+			}
+			if (
+				resolvedOrigin.envCellId !== null &&
+				!owner.runtime.hasEnvCellScope(resolvedOrigin)
+			) {
+				this.#setStatus("loading-activation");
+				return { rendered: false, status: this.#status };
+			}
+			const extent = owner.runtime.resolveViewportExtent(
+				this.#canvas.clientWidth,
+				this.#canvas.clientHeight,
+			);
+			const projection = this.#resolveCameraProjection(extent);
 			this.#ensureCamera(player, projection);
 			const facingYaw = createEntityFacingCameraYaw(
 				player.placement.pose.rotation,
@@ -664,8 +741,8 @@ export class ClientPresentationSession {
 			this.#cameraSynchronization = this.#cameraSynchronization
 				.then(() => this.camera.synchronize(projection, timeMs, facingYaw))
 				.catch((error: unknown) => this.#reportError(error));
-			cameraPresentation = this.camera.presentation(timeMs);
-			if (cameraPresentation === null) {
+			const presentation = this.camera.presentation(timeMs);
+			if (presentation === null) {
 				const cameraStatus = this.camera.status();
 				this.#setStatus(
 					cameraStatus.kind === "awaiting-first-path"
@@ -675,14 +752,15 @@ export class ClientPresentationSession {
 				);
 				return { rendered: false, status: this.#status };
 			}
+			const camera = createClientCamera(
+				player,
+				resolvedOrigin,
+				presentation,
+				this.camera.acknowledgedProjection(timeMs),
+			);
+			primaryView = { camera, extent };
 		}
-		if (portal) this.#publishPortalTransition(owner, timeMs, true, false);
-		const camera = createClientCamera(
-			player,
-			origin,
-			cameraPresentation,
-			this.camera.acknowledgedProjection(timeMs),
-		);
+		const { camera } = primaryView;
 		if (
 			this.#lastCameraResidency?.landblockId !== camera.placement.landblockId ||
 			this.#lastCameraResidency.envCellId !== camera.placement.envCellId
@@ -692,29 +770,18 @@ export class ClientPresentationSession {
 				envCellId: camera.placement.envCellId,
 			};
 		}
-		const primaryView = { camera, extent };
 		owner.runtime.setPrimaryView(primaryView);
 		this.#lastPrimaryView = primaryView;
 		if (!portal) owner.runtime.setAudioListener(audioListenerFor(camera));
-		owner.runtime.render(timeMs / 1_000);
+		const transitionReceipt = owner.runtime.render(timeMs / 1_000);
 		this.#hasRenderedFrame = true;
 		this.#renderedFrameCount += 1;
 		this.#setStatus("ready");
 		if (portal && this.#portalSceneActivation?.kind === "accepted") {
 			const sceneActivation = this.#portalSceneActivation;
 			const generation = sceneActivation.generation;
-			const update = this.#portalTransition.tick({
-				nowMs: timeMs,
-				activationReady: true,
-				destinationFrameRendered: true,
-			});
-			if (update.audio !== undefined) {
-				owner.runtime.playPortalTransitionSound?.(update.audio);
-			}
-			owner.runtime.setPortalTransition(
-				this.#portalTransitionFrame(update.state),
-			);
-			if (update.reveal !== null && !sceneActivation.revealAcknowledged) {
+			const reveal = this.#acknowledgePortalPresentation(transitionReceipt);
+			if (reveal !== null && !sceneActivation.revealAcknowledged) {
 				this.#portalSceneActivation = {
 					...sceneActivation,
 					revealAcknowledged: true,
@@ -785,6 +852,7 @@ export class ClientPresentationSession {
 				hostTransport: this.#hostTransport,
 				signal: this.#constructionAbortController.signal,
 				frameSettings: this.#frameSettings,
+				portalWarpDriveTuning: CLIENT_TUNING.portalTransition.visual,
 				audioTuning: {
 					placementSmoothingSeconds:
 						CLIENT_TUNING.audio.placementSmoothingSeconds,
@@ -914,6 +982,7 @@ export class ClientPresentationSession {
 		this.#cameraProjection = null;
 		this.#sceneTargetKey = null;
 		this.#portalSceneActivation = null;
+		this.#portalDestinationFrame = null;
 		this.#portalTransition.reset();
 		this.#hasRenderedFrame = false;
 		this.#lastPrimaryView = null;
@@ -929,24 +998,27 @@ export class ClientPresentationSession {
 		owner: ClientPresentationOwner,
 		lifecycle: Extract<ClientLifecycle, { kind: "portal-space" }>,
 	): void {
-		const state = this.#portalTransition.state();
-		if (state?.generation === lifecycle.worldGeneration) return;
+		const generation = this.#portalTransition.activeGeneration();
+		if (generation === lifecycle.worldGeneration) return;
 		if (this.#portalSceneActivation?.kind === "accepted") {
 			owner.runtime.completeSceneActivation(
 				this.#portalSceneActivation.generation,
 			);
 		}
 		this.#portalSceneActivation = null;
+		this.#portalDestinationFrame = null;
 		owner.runtime.setAudioListener(null);
 		// The core resets its camera at the same generation edge. Drop the frontend registration too
 		// so the next seed is accepted even when the player instance itself was reused by the server.
 		void this.camera.stop().catch((error: unknown) => this.#reportError(error));
 		this.#cameraTarget = null;
-		const outgoingAvailable =
-			state === null &&
+		const origin =
+			generation === null &&
 			lifecycle.cause === "teleport" &&
-			this.#hasRenderedFrame;
-		this.#portalTransition.begin(lifecycle.worldGeneration, outgoingAvailable);
+			this.#hasRenderedFrame
+				? { kind: "capture-last-world" as const }
+				: { kind: "absent" as const };
+		this.#portalTransition.begin(lifecycle.worldGeneration, origin);
 		owner.runtime.playPortalTransitionSound?.("enter");
 	}
 
@@ -954,35 +1026,126 @@ export class ClientPresentationSession {
 	#publishPortalTransition(
 		owner: ClientPresentationOwner,
 		nowMs: number,
-		activationReady: boolean,
-		destinationFrameRendered: boolean,
-	): void {
-		const update = this.#portalTransition.tick({
-			nowMs,
-			activationReady,
-			destinationFrameRendered,
-		});
+		destinationReady: boolean,
+	): PortalTransitionPresentationPlan {
+		const update = this.#portalTransition.advance({ nowMs, destinationReady });
 		if (update.audio !== undefined) {
 			owner.runtime.playPortalTransitionSound?.(update.audio);
 		}
-		owner.runtime.setPortalTransition(
-			this.#portalTransitionFrame(update.state),
-		);
+		owner.runtime.setPortalTransition(update.plan);
+		return update.plan;
 	}
 
-	#portalTransitionFrame(state: PortalTransitionState): PortalTransitionFrame {
-		return {
-			generation: state.generation,
-			outgoingAvailable:
-				state.kind !== "revealed-awaiting-handoff" && state.outgoingCaptured,
-			phase: state.kind,
-			progress:
-				state.kind === "exiting"
-					? state.progress
-					: state.kind === "revealed-awaiting-handoff"
-						? 1
-						: 0,
-		};
+	#portalDestinationReadiness(
+		owner: ClientPresentationOwner,
+		player: DynamicEntityView,
+		playerGuid: number,
+		timeMs: number,
+	): PortalDestinationReadiness {
+		const sceneActivation = this.#portalSceneActivation;
+		if (sceneActivation?.kind !== "accepted") {
+			return { kind: "waiting", status: "loading-activation" };
+		}
+		const activation = owner.runtime.sceneActivationStatus(
+			sceneActivation.receipt,
+		);
+		if (activation.kind === "failed") {
+			return { kind: "failed", diagnostic: activation.diagnostic };
+		}
+		if (activation.kind !== "ready") {
+			return { kind: "waiting", status: "loading-activation" };
+		}
+		this.#ensureScenePresentationConvergence();
+		const convergedActivation = this.#portalSceneActivation;
+		if (convergedActivation?.kind !== "accepted") {
+			return { kind: "waiting", status: "loading-activation" };
+		}
+		if (convergedActivation.realization !== "ready") {
+			return { kind: "waiting", status: "loading-player" };
+		}
+		const origin = owner.runtime.dynamicEntityOrigin(playerGuid);
+		if (origin === null) {
+			return {
+				kind: "waiting",
+				status: "loading-player",
+				diagnostic:
+					"The authoritative local player has no installed runtime presentation.",
+			};
+		}
+		if (origin.envCellId !== null && !owner.runtime.hasEnvCellScope(origin)) {
+			return { kind: "waiting", status: "loading-activation" };
+		}
+		const extent = owner.runtime.resolveViewportExtent(
+			this.#canvas.clientWidth,
+			this.#canvas.clientHeight,
+		);
+		const projection = this.#resolveCameraProjection(extent);
+		this.#ensureCamera(player, projection);
+		const cameraPresentation = this.camera.presentation(timeMs);
+		const cameraStatus = this.camera.status();
+		if (
+			cameraPresentation === null ||
+			cameraStatus.kind !== "active" ||
+			cameraStatus.convergence !== "settled"
+		) {
+			return {
+				kind: "waiting",
+				status: "loading-activation",
+				diagnostic: "Waiting for the destination boom camera to settle.",
+			};
+		}
+		return { kind: "ready", origin, extent, cameraPresentation };
+	}
+
+	/** Present one portal-only frame while destination prerequisites remain unavailable. */
+	#renderPortalLoadingFrame(
+		owner: ClientPresentationOwner,
+		timeMs: number,
+		advanceTransition = true,
+	): ClientPresentationFrame {
+		if (advanceTransition) {
+			this.#publishPortalTransition(owner, timeMs, false);
+		}
+		const extent = owner.runtime.resolveViewportExtent(
+			this.#canvas.clientWidth,
+			this.#canvas.clientHeight,
+		);
+		const receipt = owner.runtime.renderPortalTransition(
+			timeMs / 1_000,
+			extent,
+		);
+		this.#acknowledgePortalPresentation(receipt);
+		this.#hasRenderedFrame = true;
+		this.#renderedFrameCount += 1;
+		return { rendered: true, status: this.#status };
+	}
+
+	#acknowledgePortalPresentation(
+		receipt: PortalTransitionPresentationReceipt | null,
+	): PortalRevealReceipt | null {
+		return receipt === null
+			? null
+			: this.#portalTransition.acknowledgePresented(receipt);
+	}
+
+	/** Retire every portal-owned presentation edge and latch the explicit black error surface. */
+	#failPortalPresentation(
+		owner: ClientPresentationOwner,
+		diagnostic: string,
+	): ClientPresentationFrame {
+		if (this.#portalSceneActivation?.kind === "accepted") {
+			owner.runtime.completeSceneActivation(
+				this.#portalSceneActivation.generation,
+			);
+		}
+		this.#portalSceneActivation = null;
+		this.#portalDestinationFrame = null;
+		this.#portalTransition.reset();
+		owner.runtime.setPortalTransition(undefined);
+		owner.runtime.clearPresentation();
+		this.#terminalPresentationError = diagnostic;
+		this.#setStatus("error", diagnostic);
+		return { rendered: false, status: this.#status };
 	}
 
 	#resolveCameraProjection(extent: RenderExtent): ProjectionClearanceRevision {
@@ -1050,21 +1213,16 @@ export class ClientPresentationSession {
 	async #requestDynamicEligibilityReevaluation(): Promise<void> {
 		if (this.#owner === null || this.#session.mirror.isAwaitingSnapshot())
 			return;
-		const lifecycle = this.#session.state().lifecycle;
 		const portalActivation = this.#portalSceneActivation;
 		if (
-			lifecycle?.kind === "portal-space" &&
-			(portalActivation?.kind !== "accepted" ||
-				portalActivation.realization !== "pending")
+			portalActivation?.kind !== "accepted" ||
+			portalActivation.realization !== "pending" ||
+			!this.#isCurrentPortalPresentation(portalActivation.generation)
 		)
 			return;
 		const results =
 			await this.#owner.runtime.reevaluateDynamicEntityEligibility();
-		if (
-			lifecycle?.kind !== "portal-space" ||
-			portalActivation?.kind !== "accepted"
-		)
-			return;
+		if (!this.#isCurrentPortalPresentation(portalActivation.generation)) return;
 		const current = this.#portalSceneActivation;
 		if (
 			current?.kind !== "accepted" ||
@@ -1151,7 +1309,8 @@ export class ClientPresentationSession {
 		if (this.#portalSceneActivation !== null) {
 			// A later destination within the same authority generation supersedes any fade progress
 			// earned by the provisional scene. Only the replacement may produce the reveal frame.
-			this.#portalTransition.begin(worldGeneration, false);
+			this.#portalTransition.begin(worldGeneration, { kind: "absent" });
+			this.#portalDestinationFrame = null;
 		}
 		if (this.#portalSceneActivation?.kind === "accepted") {
 			owner.runtime.completeSceneActivation(
@@ -1179,10 +1338,7 @@ export class ClientPresentationSession {
 					!coordinator.isCurrent(request.revision) ||
 					current?.kind !== "requesting" ||
 					current.key !== key ||
-					!isCurrentPortalGeneration(
-						this.#session.state().lifecycle,
-						worldGeneration,
-					)
+					!this.#isCurrentPortalPresentation(worldGeneration)
 				)
 					return;
 				this.#portalSceneActivation = {
@@ -1199,6 +1355,23 @@ export class ClientPresentationSession {
 				if (!this.#destroyed && coordinator.isCurrent(request.revision))
 					this.#reportError(error);
 			});
+	}
+
+	/** Whether one controller generation still owns the session's current presentation barrier. */
+	#isCurrentPortalPresentation(generation: number): boolean {
+		return (
+			this.#portalTransition.activeGeneration() === generation &&
+			this.#session.state().worldGeneration === generation
+		);
+	}
+
+	/** Whether the generation has presented and acknowledged its neutral destination frame. */
+	#isPortalPresentationRevealed(generation: number): boolean {
+		return (
+			this.#portalSceneActivation?.kind === "accepted" &&
+			this.#portalSceneActivation.generation === generation &&
+			this.#portalSceneActivation.revealAcknowledged
+		);
 	}
 
 	#syncSceneInterest(player: DynamicEntityView): void {
@@ -1242,6 +1415,7 @@ export class ClientPresentationSession {
 			);
 		}
 		this.#portalSceneActivation = null;
+		this.#portalDestinationFrame = null;
 		this.#sceneInterestCoordinator?.invalidate();
 		if (owner !== null) owner.runtime.clearSceneInterest();
 	}
@@ -1344,16 +1518,6 @@ function playerPresentationConvergenceKey(
 		membership.reachesOutdoors ? "outdoor" : "interior",
 		...membership.reachedEnvCellIds,
 	].join(":");
-}
-
-function isCurrentPortalGeneration(
-	lifecycle: ClientLifecycle | null,
-	generation: number,
-): boolean {
-	return (
-		lifecycle?.kind === "portal-space" &&
-		lifecycle.worldGeneration === generation
-	);
 }
 
 /** Exact non-rendering camera prerequisite surfaced by the client instead of one vague wait. */

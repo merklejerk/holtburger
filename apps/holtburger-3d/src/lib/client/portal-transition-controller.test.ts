@@ -2,155 +2,153 @@ import { describe, expect, it } from "vitest";
 
 import { PortalTransitionController } from "./portal-transition-controller";
 
+const POLICY = {
+	enterDurationMs: 100,
+	exitDurationMs: 100,
+} as const;
+
 describe("PortalTransitionController", () => {
-	it("waits without a timeout and reveals once after a pure destination frame", () => {
-		const controller = new PortalTransitionController({ exitDurationMs: 100 });
-		controller.begin(4, false);
+	it("produces one complete plan per advance and reveals only from presentation proof", () => {
+		const controller = new PortalTransitionController(POLICY);
+		controller.begin(4, { kind: "capture-last-world" });
 
-		expect(
-			controller.tick({
-				nowMs: 0,
-				activationReady: false,
-				destinationFrameRendered: false,
-			}),
-		).toMatchObject({
-			state: { kind: "waiting", generation: 4, outgoingCaptured: false },
-			reveal: null,
+		expect(advance(controller, 0).plan).toMatchObject({
+			kind: "origin-to-tunnel",
+			generation: 4,
+			progress: 0,
 		});
-		expect(
-			controller.tick({
-				nowMs: 10_000,
-				activationReady: false,
-				destinationFrameRendered: false,
-			}).state,
-		).toMatchObject({ kind: "waiting" });
-
-		expect(
-			controller.tick({
-				nowMs: 10_001,
-				activationReady: true,
-				destinationFrameRendered: false,
-			}),
-		).toMatchObject({ state: { kind: "exiting", progress: 0 }, reveal: null });
-		expect(
-			controller.tick({
-				nowMs: 10_101,
-				activationReady: true,
-				destinationFrameRendered: false,
-			}).state,
-		).toMatchObject({ kind: "revealed-awaiting-handoff", generation: 4 });
-
-		expect(
-			controller.tick({
-				nowMs: 10_102,
-				activationReady: true,
-				destinationFrameRendered: true,
-			}),
-		).toEqual({
-			state: { kind: "revealed-awaiting-handoff", generation: 4 },
-			reveal: { generation: 4 },
+		expect(advance(controller, 100, true).plan).toEqual({
+			kind: "tunnel-only",
+			generation: 4,
 		});
+		expect(advance(controller, 10_000, false).plan.kind).toBe("tunnel-only");
 		expect(
-			controller.tick({
-				nowMs: 10_103,
-				activationReady: true,
-				destinationFrameRendered: true,
-			}),
-		).toEqual({
-			state: { kind: "revealed-awaiting-handoff", generation: 4 },
-			reveal: null,
-		});
-	});
+			controller.acknowledgePresented({ kind: "tunnel-only", generation: 4 }),
+		).toBeNull();
 
-	it("captures an outgoing world only for a fresh transition", () => {
-		const controller = new PortalTransitionController({ exitDurationMs: 0 });
-		controller.begin(1, true);
-		expect(
-			controller.tick({
-				nowMs: 0,
-				activationReady: false,
-				destinationFrameRendered: false,
-			}).state,
-		).toMatchObject({ kind: "waiting", outgoingCaptured: true });
-
-		controller.begin(2, true);
-		expect(
-			controller.tick({
-				nowMs: 1,
-				activationReady: false,
-				destinationFrameRendered: false,
-			}).state,
-		).toMatchObject({
-			kind: "waiting",
-			generation: 2,
-			outgoingCaptured: false,
-		});
-	});
-
-	it("supports a zero-duration exit without skipping the state edge", () => {
-		const controller = new PortalTransitionController({ exitDurationMs: 0 });
-		controller.begin(7, false);
-		expect(
-			controller.tick({
-				nowMs: 0,
-				activationReady: true,
-				destinationFrameRendered: false,
-			}),
-		).toMatchObject({
+		expect(advance(controller, 10_001, false)).toMatchObject({
 			audio: "exit",
-			state: { kind: "exiting", progress: 1 },
+			plan: { kind: "tunnel-to-destination", progress: 0 },
+		});
+		expect(advance(controller, 10_101, true).plan).toEqual({
+			kind: "destination-only-awaiting-handoff",
+			generation: 4,
 		});
 		expect(
-			controller.tick({
-				nowMs: 1,
-				activationReady: true,
-				destinationFrameRendered: false,
-			}).state,
-		).toMatchObject({ kind: "revealed-awaiting-handoff" });
-	});
-
-	it("emits the exit sound edge once when activation becomes ready", () => {
-		const controller = new PortalTransitionController({ exitDurationMs: 100 });
-		controller.begin(9, true);
-
-		const waiting = controller.tick({
-			nowMs: 0,
-			activationReady: false,
-			destinationFrameRendered: false,
-		});
-		expect(waiting.audio).toBeUndefined();
-
-		const exiting = controller.tick({
-			nowMs: 1,
-			activationReady: true,
-			destinationFrameRendered: false,
-		});
-		expect(exiting.audio).toBe("exit");
-
-		const stillExiting = controller.tick({
-			nowMs: 2,
-			activationReady: true,
-			destinationFrameRendered: false,
-		});
-		expect(stillExiting.audio).toBeUndefined();
-	});
-
-	it("rejects invalid generations and durations", () => {
-		expect(
-			() => new PortalTransitionController({ exitDurationMs: -1 }),
-		).toThrow();
-		expect(
-			() => new PortalTransitionController({ exitDurationMs: Number.NaN }),
-		).toThrow();
-		const controller = new PortalTransitionController();
-		expect(() => controller.begin(-1, false)).toThrow();
-		expect(() => controller.begin(1.5, false)).toThrow();
-		expect(() =>
-			controller.tick({
-				nowMs: Number.POSITIVE_INFINITY,
-				activationReady: false,
-				destinationFrameRendered: false,
+			controller.acknowledgePresented({
+				kind: "destination-only-awaiting-handoff",
+				generation: 4,
 			}),
+		).toEqual({ generation: 4 });
+		expect(
+			controller.acknowledgePresented({
+				kind: "destination-only-awaiting-handoff",
+				generation: 4,
+			}),
+		).toBeNull();
+	});
+
+	it("starts directly in portal space when no origin scene exists", () => {
+		const controller = new PortalTransitionController(POLICY);
+		controller.begin(6, { kind: "absent" });
+
+		expect(advance(controller, 0).plan).toEqual({
+			kind: "tunnel-only",
+			generation: 6,
+		});
+	});
+
+	it("suppresses capture when a live portal generation is superseded", () => {
+		const controller = new PortalTransitionController(POLICY);
+		controller.begin(1, { kind: "capture-last-world" });
+		expect(advance(controller, 0).plan.kind).toBe("origin-to-tunnel");
+
+		controller.begin(2, { kind: "capture-last-world" });
+		expect(advance(controller, 1).plan).toEqual({
+			kind: "tunnel-only",
+			generation: 2,
+		});
+	});
+
+	it("ignores stale and wrong-barrier presentation receipts", () => {
+		const controller = new PortalTransitionController(POLICY);
+		controller.begin(3, { kind: "absent" });
+		advance(controller, 0, true);
+
+		expect(
+			controller.acknowledgePresented({ kind: "tunnel-only", generation: 2 }),
+		).toBeNull();
+		expect(
+			controller.acknowledgePresented({
+				kind: "destination-only-awaiting-handoff",
+				generation: 3,
+			}),
+		).toBeNull();
+		expect(advance(controller, 1, true).plan.kind).toBe("tunnel-only");
+	});
+
+	it("supports zero-duration visual edges without collapsing barrier frames", () => {
+		const controller = new PortalTransitionController({
+			...POLICY,
+			enterDurationMs: 0,
+			exitDurationMs: 0,
+		});
+		controller.begin(7, { kind: "capture-last-world" });
+
+		expect(advance(controller, 0, true).plan.kind).toBe("tunnel-only");
+		controller.acknowledgePresented({ kind: "tunnel-only", generation: 7 });
+		expect(advance(controller, 1, true)).toMatchObject({
+			audio: "exit",
+			plan: { kind: "tunnel-to-destination", progress: 1 },
+		});
+		expect(advance(controller, 2, true).plan.kind).toBe(
+			"destination-only-awaiting-handoff",
+		);
+	});
+
+	it("emits the exit sound edge exactly once", () => {
+		const controller = new PortalTransitionController(POLICY);
+		controller.begin(9, { kind: "absent" });
+		advance(controller, 0, true);
+		controller.acknowledgePresented({ kind: "tunnel-only", generation: 9 });
+
+		expect(advance(controller, 1, true).audio).toBe("exit");
+		expect(advance(controller, 2, true).audio).toBeUndefined();
+	});
+
+	it("rejects invalid generations, policy, and clocks", () => {
+		expect(
+			() => new PortalTransitionController({ ...POLICY, enterDurationMs: -1 }),
 		).toThrow();
+		expect(
+			() =>
+				new PortalTransitionController({
+					...POLICY,
+					enterDurationMs: Number.NaN,
+				}),
+		).toThrow();
+		expect(
+			() => new PortalTransitionController({ ...POLICY, exitDurationMs: -1 }),
+		).toThrow();
+		expect(
+			() =>
+				new PortalTransitionController({
+					...POLICY,
+					exitDurationMs: Number.NaN,
+				}),
+		).toThrow();
+		const controller = new PortalTransitionController(POLICY);
+		expect(() => controller.begin(-1, { kind: "absent" })).toThrow();
+		expect(() => controller.begin(1.5, { kind: "absent" })).toThrow();
+		controller.begin(1, { kind: "absent" });
+		expect(() => advance(controller, Number.POSITIVE_INFINITY)).toThrow();
 	});
 });
+
+function advance(
+	controller: PortalTransitionController,
+	nowMs: number,
+	destinationReady = false,
+) {
+	return controller.advance({ nowMs, destinationReady });
+}

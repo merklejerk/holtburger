@@ -32,6 +32,10 @@ import type { ClientLifecycleTransport } from "./client-lifecycle-session";
 import { ClientLifecycleSession } from "./client-lifecycle-session";
 import { CLIENT_TUNING } from "./client-tuning";
 import type { WorldIndicatorInput } from "../lib/game/renderer/renderer";
+import type {
+	PortalTransitionPresentationPlan,
+	PortalTransitionPresentationReceipt,
+} from "../lib/client/portal-transition-presentation";
 
 describe("resolveClientEnvironmentSelection", () => {
 	it("uses synchronized portal-year time and the archive calendar offset", () => {
@@ -58,6 +62,119 @@ describe("resolveClientEnvironmentSelection", () => {
 });
 
 describe("ClientPresentationSession", () => {
+	it("presents portal space before local-player identity exists", async () => {
+		const playerGuid = 0x0101_0001;
+		const transport = new FakeClientTransport({
+			...currentState(playerGuid),
+			lifecycle: portalLifecycle(4),
+			localPlayerGuid: null,
+			worldGeneration: 4,
+		});
+		const lifecycle = new ClientLifecycleSession(transport);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		const presentation = new ClientPresentationSession({
+			canvas: fakeCanvas(),
+			hostTransport: {} as never,
+			session: lifecycle,
+			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+		});
+
+		await presentation.start();
+		expect(presentation.frame(1_000)).toMatchObject({
+			rendered: true,
+			status: { kind: "loading-player" },
+		});
+		expect(runtime.portalTransitionRenderTimes).toEqual([1]);
+		expect(runtime.portalTransitionSounds).toEqual(["enter"]);
+		expect(presentation.frame(1_016).rendered).toBe(true);
+		expect(runtime.portalTransitionSounds).toEqual(["enter"]);
+		await presentation.destroy();
+	});
+
+	it("clears portal pixels to black when destination activation fails", async () => {
+		const playerGuid = 0x0101_0001;
+		const transport = new FakeClientTransport({
+			...currentState(playerGuid),
+			lifecycle: portalLifecycle(4),
+			worldGeneration: 4,
+		});
+		const lifecycle = new ClientLifecycleSession(transport);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		const presentation = new ClientPresentationSession({
+			canvas: fakeCanvas(),
+			hostTransport: {} as never,
+			session: lifecycle,
+			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+		});
+
+		await presentation.start();
+		presentation.frame(1_000);
+		await vi.waitFor(() => expect(runtime.sceneRequests).toHaveLength(1));
+		runtime.activationFailure = "Destination scene failed.";
+		expect(presentation.frame(1_016)).toMatchObject({
+			rendered: false,
+			status: { kind: "error", diagnostic: "Destination scene failed." },
+		});
+		expect(runtime.clearPresentationCount).toBe(1);
+		expect(runtime.portalTransitions.at(-1)).toBeUndefined();
+		await presentation.destroy();
+	});
+
+	it("keeps presenting the tunnel until the destination EnvCell scope exists", async () => {
+		const playerGuid = 0x0101_0001;
+		const transport = new FakeClientTransport({
+			...currentState(playerGuid),
+			lifecycle: portalLifecycle(4),
+			worldGeneration: 4,
+		});
+		const lifecycle = new ClientLifecycleSession(transport);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		runtime.dynamicOriginEnvCellId = "0x01000100";
+		runtime.envCellScopeAvailable = false;
+		const presentation = new ClientPresentationSession({
+			canvas: fakeCanvas(),
+			hostTransport: {} as never,
+			session: lifecycle,
+			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+		});
+
+		await presentation.start();
+		presentation.frame(1_000);
+		await vi.waitFor(() => expect(runtime.sceneRequests).toHaveLength(1));
+		await vi.waitFor(() => {
+			expect(presentation.frame(1_016)).toMatchObject({
+				rendered: true,
+				status: { kind: "loading-activation" },
+			});
+		});
+		expect(runtime.portalTransitions.at(-1)?.kind).toBe("tunnel-only");
+		expect(transport.acknowledgedWorldReveals).toEqual([]);
+
+		runtime.envCellScopeAvailable = true;
+		expect(presentation.frame(2_000).rendered).toBe(true);
+		expect(runtime.portalTransitions.at(-1)).toMatchObject({
+			kind: "tunnel-to-destination",
+			progress: 0,
+		});
+		expect(transport.acknowledgedWorldReveals).toEqual([]);
+
+		const portalOnlyFramesAtExit = runtime.portalTransitionRenderTimes.length;
+		runtime.envCellScopeAvailable = false;
+		expect(presentation.frame(2_500).rendered).toBe(true);
+		expect(runtime.portalTransitions.at(-1)).toMatchObject({
+			kind: "tunnel-to-destination",
+			progress: 0.5,
+		});
+		expect(runtime.portalTransitionRenderTimes).toHaveLength(
+			portalOnlyFramesAtExit,
+		);
+		expect(runtime.worldRenderCount).toBe(2);
+		await presentation.destroy();
+	});
+
 	it("retains frame settings across owner construction and applies later changes", async () => {
 		const playerGuid = 0x0101_0001;
 		const lifecycle = new ClientLifecycleSession(
@@ -262,14 +379,74 @@ describe("ClientPresentationSession", () => {
 		expect(runtime.sceneRequests).toHaveLength(1);
 		expect(runtime.completedActivations).toEqual([]);
 
-		transport.emit("client-lifecycle-changed", { kind: "in-world" });
-		expect(presentation.frame(1_040).status.kind).toBe("ready");
-		expect(runtime.completedActivations).toEqual([4]);
-
 		transport.emit("client-lifecycle-changed", portalLifecycle(5));
-		presentation.frame(1_048);
+		presentation.frame(1_040);
 		await vi.waitFor(() => expect(runtime.sceneRequests).toHaveLength(2));
 		expect(runtime.completedActivations).toEqual([4]);
+		expect(runtime.portalTransitionSounds).toEqual(["enter", "enter"]);
+		await presentation.destroy();
+	});
+
+	it("keeps the portal presentation active across authority grace until neutral handoff", async () => {
+		const playerGuid = 0x0101_0001;
+		const transport = new FakeClientTransport({
+			...currentState(playerGuid),
+			lifecycle: portalLifecycle(4, "initial-entry"),
+			worldGeneration: 4,
+		});
+		const lifecycle = new ClientLifecycleSession(transport);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		runtime.dynamicOriginEnvCellId = "0x01000100";
+		runtime.envCellScopeAvailable = false;
+		const releaseSceneActivation = runtime.holdNextSceneActivation();
+		const presentation = new ClientPresentationSession({
+			canvas: fakeCanvas(),
+			hostTransport: {} as never,
+			session: lifecycle,
+			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+		});
+
+		await presentation.start();
+		presentation.frame(1_000);
+		await vi.waitFor(() => expect(runtime.sceneRequests).toHaveLength(1));
+		transport.emit("client-lifecycle-changed", { kind: "in-world" });
+
+		expect(presentation.frame(8_016)).toMatchObject({
+			rendered: true,
+			status: { kind: "loading-activation" },
+		});
+		expect(runtime.portalTransitions.at(-1)?.kind).toBe("tunnel-only");
+		expect(runtime.completedActivations).toEqual([]);
+		expect(runtime.clearPresentationCount).toBe(0);
+		expect(runtime.worldRenderCount).toBe(0);
+
+		releaseSceneActivation();
+		await vi.waitFor(() => {
+			expect(presentation.frame(8_032).status.kind).toBe("loading-activation");
+			expect(runtime.eligibilityReevaluationCount).toBeGreaterThan(0);
+		});
+		runtime.envCellScopeAvailable = true;
+		expect(presentation.frame(9_000).rendered).toBe(true);
+		expect(runtime.portalTransitions.at(-1)).toMatchObject({
+			kind: "tunnel-to-destination",
+			progress: 0,
+		});
+		expect(presentation.frame(10_000).rendered).toBe(true);
+		expect(runtime.portalTransitions.at(-1)?.kind).toBe(
+			"destination-only-awaiting-handoff",
+		);
+		await vi.waitFor(() =>
+			expect(transport.acknowledgedWorldReveals).toEqual([4]),
+		);
+
+		expect(presentation.frame(10_016)).toMatchObject({
+			rendered: true,
+			status: { kind: "ready" },
+		});
+		expect(runtime.portalTransitions.at(-1)).toBeUndefined();
+		expect(runtime.completedActivations).toEqual([4]);
+		expect(runtime.clearPresentationCount).toBe(0);
 		await presentation.destroy();
 	});
 
@@ -325,14 +502,29 @@ describe("ClientPresentationSession", () => {
 		expect(runtime.upserted).toHaveLength(1);
 
 		expect(presentation.frame(2_000).rendered).toBe(true);
-		expect(presentation.frame(4_100).rendered).toBe(true);
+		expect(runtime.portalTransitions.at(-1)).toMatchObject({
+			kind: "tunnel-to-destination",
+			progress: 0,
+		});
+		expect(runtime.portalTransitionSounds).toEqual(["enter", "exit"]);
+		expect(presentation.frame(2_500).rendered).toBe(true);
+		expect(runtime.portalTransitionSounds).toEqual(["enter", "exit"]);
+		expect(runtime.portalTransitions.at(-1)).toMatchObject({
+			kind: "tunnel-to-destination",
+			progress: 0.5,
+		});
+		expect(transport.acknowledgedWorldReveals).toEqual([]);
+		expect(presentation.frame(3_000).rendered).toBe(true);
+		expect(runtime.portalTransitions.at(-1)).toMatchObject({
+			kind: "destination-only-awaiting-handoff",
+		});
 		await vi.waitFor(() =>
 			expect(transport.acknowledgedWorldReveals).toEqual([4]),
 		);
 		await presentation.destroy();
 	});
 
-	it("reveals a portal destination from a current fallback camera placement", async () => {
+	it("keeps portal space visible for an unsettled fallback camera", async () => {
 		const playerGuid = 0x0101_0001;
 		const transport = new FakeClientTransport({
 			...currentState(playerGuid),
@@ -370,14 +562,16 @@ describe("ClientPresentationSession", () => {
 			},
 		});
 		expect(presentation.frame(4_100).rendered).toBe(true);
-		await vi.waitFor(() =>
-			expect(transport.acknowledgedWorldReveals).toEqual([4]),
-		);
+		expect(presentation.frame(5_100).rendered).toBe(true);
+		expect(presentation.frame(6_100).rendered).toBe(true);
+		expect(presentation.frame(6_101).rendered).toBe(true);
+		expect(transport.acknowledgedWorldReveals).toEqual([]);
+		expect(runtime.portalTransitionRenderTimes.length).toBeGreaterThan(0);
 		await presentation.destroy();
 	});
 
 	it.each(["none", "wrong-generation"] as const)(
-		"keeps a portal destination hidden for %s camera output",
+		"keeps portal space presenting for %s camera output",
 		async (cameraOutput) => {
 			const playerGuid = 0x0101_0001;
 			const transport = new FakeClientTransport({
@@ -408,7 +602,8 @@ describe("ClientPresentationSession", () => {
 					"loading-activation",
 				),
 			);
-			expect(presentation.frame(4_100).rendered).toBe(false);
+			expect(presentation.frame(4_100).rendered).toBe(true);
+			expect(runtime.portalTransitionRenderTimes.length).toBeGreaterThan(0);
 			expect(transport.acknowledgedWorldReveals).toEqual([]);
 			await presentation.destroy();
 		},
@@ -768,6 +963,7 @@ function cameraTick(identity: {
 		clearance: { projectionRevision: 1, radius: 0.2 },
 		desiredReach: 4.5,
 		renderedReach: 4.5,
+		convergence: "settled",
 		path: {
 			initial: { position: point, visualPivot: point },
 			legs: [{ endFraction: 1, end: { position: point, visualPivot: point } }],
@@ -799,6 +995,7 @@ function fallbackCameraTick(identity: {
 		durationMs: 30,
 		targetSphereRole: "primary",
 		desiredReach: 4.5,
+		convergence: "converging",
 		path: {
 			initial: { position: point, visualPivot: point },
 			legs: [{ endFraction: 1, end: { position: point, visualPivot: point } }],
@@ -828,19 +1025,33 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 	audioListeners: unknown[] = [];
 	viewerLightGuid: number | null = null;
 	clearCount = 0;
-	portalTransitions: unknown[] = [];
+	portalTransitions: Array<PortalTransitionPresentationPlan | undefined> = [];
+	portalTransitionRenderTimes: number[] = [];
+	portalTransitionSounds: Array<"enter" | "exit"> = [];
+	clearPresentationCount = 0;
+	worldRenderCount = 0;
+	activationFailure: string | null = null;
 	worldIndicators: Array<WorldIndicatorInput | null> = [];
 	completedActivations: number[] = [];
 	frameSettings: Parameters<
 		ClientPresentationRuntime["setFrameSettings"]
 	>[0][] = [];
 	realizationDisposition: DynamicEntityRealizationDisposition = "installed";
+	dynamicOriginEnvCellId: string | null = null;
+	envCellScopeAvailable = true;
 	#activationRevision = 0;
 	readonly #desired = new Map<number, DynamicEntityView>();
 	#nextUpsertRealization:
 		| { readonly kind: "completion"; readonly completion: Promise<void> }
 		| { readonly kind: "failure"; readonly error: Error }
 		| null = null;
+	#nextSceneActivationCompletion: Promise<void> | null = null;
+
+	holdNextSceneActivation(): () => void {
+		const controlled = controlledPromise<void>();
+		this.#nextSceneActivationCompletion = controlled.promise;
+		return () => controlled.resolve(undefined);
+	}
 
 	holdNextUpsertRealization(): () => void {
 		const controlled = controlledPromise<void>();
@@ -921,6 +1132,9 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 		request: SceneActivationRequest,
 	): Promise<SceneActivationReceipt> {
 		this.sceneRequests.push(request.target);
+		const completion = this.#nextSceneActivationCompletion;
+		this.#nextSceneActivationCompletion = null;
+		if (completion !== null) await completion;
 		this.#activationRevision += 1;
 		return {
 			generation: request.generation,
@@ -932,6 +1146,13 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 	sceneActivationStatus(
 		receipt: SceneActivationReceipt,
 	): SceneActivationStatus {
+		if (this.activationFailure !== null) {
+			return {
+				kind: "failed",
+				receipt,
+				diagnostic: this.activationFailure,
+			};
+		}
 		return { kind: "ready", receipt };
 	}
 
@@ -965,8 +1186,30 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 		this.viewerLightGuid = guid;
 	}
 
-	setPortalTransition(transition: unknown): void {
+	setPortalTransition(
+		transition: PortalTransitionPresentationPlan | undefined,
+	): void {
 		this.portalTransitions.push(transition);
+	}
+
+	pollPortalTransitionLoading(): void {}
+
+	playPortalTransitionSound(kind: "enter" | "exit"): void {
+		this.portalTransitionSounds.push(kind);
+	}
+
+	renderPortalTransition(
+		timeSeconds: number,
+	): PortalTransitionPresentationReceipt | null {
+		this.portalTransitionRenderTimes.push(timeSeconds);
+		const transition = this.portalTransitions.at(-1);
+		return transition?.kind === "tunnel-only"
+			? { kind: transition.kind, generation: transition.generation }
+			: null;
+	}
+
+	clearPresentation(): void {
+		this.clearPresentationCount += 1;
 	}
 
 	dynamicEntityOrigin(): ReturnType<
@@ -974,10 +1217,17 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 	> {
 		if (this.realizationDisposition === "deferred") return null;
 		return {
-			envCellId: null,
+			envCellId: this.dynamicOriginEnvCellId,
 			landblockId: "0x0100ffff",
 			landblockOrigin: new Vec3(12, 3, -4),
-			scope: { kind: "outdoor" },
+			scope:
+				this.dynamicOriginEnvCellId === null
+					? { kind: "outdoor" }
+					: {
+							kind: "env-cell",
+							envCellId: this.dynamicOriginEnvCellId,
+							landblockId: "0x0100ffff",
+						},
 		};
 	}
 
@@ -987,7 +1237,7 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 		localTransform.m42 = 3;
 		localTransform.m43 = -4;
 		return {
-			envCellId: null,
+			envCellId: this.dynamicOriginEnvCellId,
 			landblockId: "0x0100ffff",
 			localTransform,
 		};
@@ -1006,12 +1256,18 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 	}
 
 	hasEnvCellScope(): boolean {
-		return true;
+		return this.envCellScopeAvailable;
 	}
 
 	tick(): void {}
 
-	render(): void {}
+	render(): PortalTransitionPresentationReceipt | null {
+		this.worldRenderCount += 1;
+		const transition = this.portalTransitions.at(-1);
+		return transition?.kind === "destination-only-awaiting-handoff"
+			? { kind: transition.kind, generation: transition.generation }
+			: null;
+	}
 }
 
 function fakeOwner(
@@ -1125,11 +1381,12 @@ function currentState(playerGuid: number): ClientCurrentState {
 
 function portalLifecycle(
 	worldGeneration: number,
-): ClientCurrentState["lifecycle"] {
+	cause: "initial-entry" | "teleport" = "teleport",
+): Extract<ClientCurrentState["lifecycle"], { kind: "portal-space" }> {
 	return {
 		kind: "portal-space",
 		worldGeneration,
-		cause: "teleport",
+		cause,
 	};
 }
 

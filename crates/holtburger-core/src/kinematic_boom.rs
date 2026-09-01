@@ -55,6 +55,8 @@ pub struct KinematicBoomProfile {
     maximum_control_leg_displacement: f32,
     maximum_control_legs: usize,
     surface_clearance: f32,
+    settled_position_tolerance: f32,
+    settled_pivot_tolerance: f32,
     transit: FreeSphereConfig,
 }
 
@@ -79,6 +81,10 @@ pub struct KinematicBoomProfileDefinition {
     pub maximum_control_legs: usize,
     /// Distance retained before the first obstructing surface.
     pub surface_clearance: f32,
+    /// Maximum camera displacement between stationary solves that still counts as settled.
+    pub settled_position_tolerance: f32,
+    /// Maximum raw-to-filtered pivot error that still counts as settled.
+    pub settled_pivot_tolerance: f32,
     /// Sliding camera-transit work and separation policy.
     pub transit: FreeSphereConfig,
 }
@@ -99,6 +105,8 @@ pub fn standard_kinematic_boom_profile() -> Result<KinematicBoomProfile> {
         maximum_control_leg_displacement: 0.50,
         maximum_control_legs: 64,
         surface_clearance: 0.000_5,
+        settled_position_tolerance: 0.001,
+        settled_pivot_tolerance: 0.001,
         transit: FreeSphereConfig {
             maximum_substep_distance: 0.25,
             maximum_substeps: 64,
@@ -281,6 +289,8 @@ impl KinematicBoomProfile {
             maximum_control_leg_displacement,
             maximum_control_legs,
             surface_clearance,
+            settled_position_tolerance,
+            settled_pivot_tolerance,
             transit,
         } = definition;
         if !minimum_reach.is_finite() || minimum_reach < 0.0 {
@@ -311,6 +321,12 @@ impl KinematicBoomProfile {
         if !surface_clearance.is_finite() || surface_clearance <= 0.0 {
             return Err(KinematicBoomProfileError::InvalidSurfaceClearance);
         }
+        if !settled_position_tolerance.is_finite() || settled_position_tolerance <= 0.0 {
+            return Err(KinematicBoomProfileError::InvalidSettledPositionTolerance);
+        }
+        if !settled_pivot_tolerance.is_finite() || settled_pivot_tolerance <= 0.0 {
+            return Err(KinematicBoomProfileError::InvalidSettledPivotTolerance);
+        }
         validate_transit_config(transit)?;
         Ok(Self {
             minimum_reach,
@@ -322,6 +338,8 @@ impl KinematicBoomProfile {
             maximum_control_leg_displacement,
             maximum_control_legs,
             surface_clearance,
+            settled_position_tolerance,
+            settled_pivot_tolerance,
             transit,
         })
     }
@@ -342,6 +360,8 @@ impl KinematicBoomProfile {
             maximum_control_leg_displacement: self.maximum_control_leg_displacement,
             maximum_control_legs: self.maximum_control_legs,
             surface_clearance: self.surface_clearance,
+            settled_position_tolerance: self.settled_position_tolerance,
+            settled_pivot_tolerance: self.settled_pivot_tolerance,
             transit: self.transit,
         })
     }
@@ -368,6 +388,10 @@ pub enum KinematicBoomProfileError {
     EmptyControlLegBudget,
     #[error("kinematic boom surface clearance must be finite and positive")]
     InvalidSurfaceClearance,
+    #[error("kinematic boom settled position tolerance must be finite and positive")]
+    InvalidSettledPositionTolerance,
+    #[error("kinematic boom settled pivot tolerance must be finite and positive")]
+    InvalidSettledPivotTolerance,
     #[error("kinematic boom free-sphere transit configuration is invalid")]
     InvalidTransitConfig,
 }
@@ -538,6 +562,8 @@ pub enum KinematicBoomOutcome {
         /// Projection clearance proven by the published camera placement.
         clearance: KinematicBoomClearance,
         diagnostics: KinematicBoomDiagnostics,
+        /// Whether the published placement has reached the profile's positional tolerances.
+        convergence: KinematicBoomConvergence,
     },
     Held {
         reason: KinematicBoomFailureReason,
@@ -552,6 +578,14 @@ pub enum KinematicBoomOutcome {
         placement: KinematicBoomPlacement,
         diagnostics: KinematicBoomDiagnostics,
     },
+}
+
+/// Controller-owned classification of whether another stationary solve can change presentation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum KinematicBoomConvergence {
+    Converging,
+    Settled,
 }
 
 /// Interdependent camera placement facts retained by one boom generation.
@@ -939,6 +973,7 @@ impl KinematicBoomController {
                 reason: KinematicBoomReseedReason::InitialPlacement,
             },
             clearance: requested,
+            convergence: KinematicBoomConvergence::Converging,
             diagnostics: KinematicBoomDiagnostics {
                 collision_proof,
                 contact_passes,
@@ -1107,6 +1142,7 @@ impl KinematicBoomController {
         KinematicBoomClearanceGrowth::Published(KinematicBoomOutcome::Advanced {
             advance: KinematicBoomAdvance::Continuous { path },
             clearance: committed,
+            convergence: KinematicBoomConvergence::Converging,
             diagnostics: KinematicBoomDiagnostics {
                 collision_proof: *collision_proof,
                 transit_substeps: substeps,
@@ -1154,11 +1190,14 @@ impl KinematicBoomController {
                 ));
             }
         };
+        let convergence =
+            staged.classify_convergence(camera, self.filtered_visual_pivot, clearance);
         *self = staged;
         Ok(KinematicBoomOutcome::Advanced {
             advance,
             clearance,
             diagnostics,
+            convergence,
         })
     }
 
@@ -1219,6 +1258,27 @@ impl KinematicBoomController {
             advance: KinematicBoomAdvance::Reseeded { placement, reason },
             clearance,
             diagnostics,
+            convergence: KinematicBoomConvergence::Converging,
+        }
+    }
+
+    fn classify_convergence(
+        &self,
+        previous_camera: KinematicBoomPlacement,
+        previous_pivot: WorldPosition,
+        clearance: KinematicBoomClearance,
+    ) -> KinematicBoomConvergence {
+        let camera_error = placement_distance(previous_camera.pose, self.camera().pose);
+        let pivot_motion = placement_distance(previous_pivot, self.filtered_visual_pivot);
+        let pivot_error = placement_distance(self.filtered_visual_pivot, self.raw_visual_pivot);
+        if clearance == self.requested_clearance
+            && camera_error.is_ok_and(|error| error <= self.profile.settled_position_tolerance)
+            && pivot_motion.is_ok_and(|error| error <= self.profile.settled_pivot_tolerance)
+            && pivot_error.is_ok_and(|error| error <= self.profile.settled_pivot_tolerance)
+        {
+            KinematicBoomConvergence::Settled
+        } else {
+            KinematicBoomConvergence::Converging
         }
     }
 
@@ -1709,6 +1769,8 @@ mod tests {
             maximum_control_leg_displacement: 0.5,
             maximum_control_legs,
             surface_clearance: 0.000_5,
+            settled_position_tolerance: 0.001,
+            settled_pivot_tolerance: 0.001,
             transit: FreeSphereConfig {
                 maximum_substep_distance: 0.25,
                 maximum_substeps: 64,
@@ -1949,6 +2011,64 @@ mod tests {
             let outcome = controller.advance(scene, 1.0 / 30.0, &[target]).unwrap();
             assert!(matches!(outcome, KinematicBoomOutcome::Advanced { .. }));
         }
+    }
+
+    #[test]
+    fn initial_placement_is_presentable_but_stationary_solves_own_settlement() {
+        let scene = empty_scene();
+        let target = sample();
+        let mut controller = controller(64);
+        let initial = controller.advance(&scene, 1.0 / 60.0, &[target]).unwrap();
+        assert!(matches!(
+            initial,
+            KinematicBoomOutcome::Advanced {
+                convergence: KinematicBoomConvergence::Converging,
+                ..
+            }
+        ));
+
+        let mut settled = false;
+        for _ in 0..256 {
+            let outcome = controller.advance(&scene, 0.016, &[target]).unwrap();
+            if matches!(
+                outcome,
+                KinematicBoomOutcome::Advanced {
+                    convergence: KinematicBoomConvergence::Settled,
+                    ..
+                }
+            ) {
+                settled = true;
+                break;
+            }
+        }
+        assert!(
+            settled,
+            "unobstructed boom did not settle within activation work"
+        );
+    }
+
+    #[test]
+    fn obstruction_limited_boom_settles_below_desired_reach() {
+        let scene = wall_scene();
+        let target = wall_sample();
+        let mut controller = wall_controller(Vector3::new(1.0, 0.0, 0.0));
+        initialize(&mut controller, &scene, target);
+        let mut settled = false;
+        for _ in 0..256 {
+            let outcome = controller.advance(&scene, 0.016, &[target]).unwrap();
+            if matches!(
+                outcome,
+                KinematicBoomOutcome::Advanced {
+                    convergence: KinematicBoomConvergence::Settled,
+                    ..
+                }
+            ) {
+                settled = true;
+                break;
+            }
+        }
+        assert!(settled, "obstruction-limited boom did not settle");
+        assert!(controller.rendered_reach() < controller.desired_reach());
     }
 
     fn initialize(

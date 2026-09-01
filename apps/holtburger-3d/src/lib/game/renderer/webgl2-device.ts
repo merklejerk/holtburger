@@ -23,6 +23,7 @@ import {
 	runWebGL2PssmFixture,
 	type WebGL2PssmFixtureResult,
 } from "./webgl2-pssm-fixture";
+import type { PortalWarpDriveTuning } from "./portal-warp-drive-tuning";
 
 /** One transient RGBA preview copied from a live two-dimensional GPU texture. */
 export interface Texture2DReadback {
@@ -83,6 +84,8 @@ export class WebGL2Device {
 	readonly #gl: WebGL2RenderingContext;
 	/** One context-lifetime filtering probe shared by UI capability and backend sampler consumers. */
 	readonly #textureFilteringSupport: WebGL2TextureFilteringSupport;
+	/** Frontend-selected portal look retained for every renderer built on this device. */
+	readonly #portalWarpDriveTuning: PortalWarpDriveTuning;
 	#status: WebGL2DeviceStatus = { kind: "ready" };
 	readonly #onContextLost = (event: Event): void => {
 		event.preventDefault();
@@ -102,11 +105,13 @@ export class WebGL2Device {
 		gl: WebGL2RenderingContext,
 		resources: WebGL2ResourceManager,
 		textureFilteringSupport: WebGL2TextureFilteringSupport,
+		portalWarpDriveTuning: PortalWarpDriveTuning,
 	) {
 		this.#canvas = canvas;
 		this.#gl = gl;
 		this.resources = resources;
 		this.#textureFilteringSupport = textureFilteringSupport;
+		this.#portalWarpDriveTuning = portalWarpDriveTuning;
 		this.#canvas.addEventListener("webglcontextlost", this.#onContextLost);
 		this.#canvas.addEventListener(
 			"webglcontextrestored",
@@ -114,7 +119,10 @@ export class WebGL2Device {
 		);
 	}
 
-	static async build(canvas: HTMLCanvasElement): Promise<WebGL2Device> {
+	static async build(
+		canvas: HTMLCanvasElement,
+		portalWarpDriveTuning: PortalWarpDriveTuning,
+	): Promise<WebGL2Device> {
 		const gl = canvas.getContext("webgl2", {
 			alpha: false,
 			antialias: false,
@@ -126,13 +134,21 @@ export class WebGL2Device {
 
 		const resources = new WebGL2ResourceManager(gl);
 		const textureFilteringSupport = probeWebGL2TextureFilteringSupport(gl);
-		return new WebGL2Device(canvas, gl, resources, textureFilteringSupport);
+		return new WebGL2Device(
+			canvas,
+			gl,
+			resources,
+			textureFilteringSupport,
+			portalWarpDriveTuning,
+		);
 	}
 
 	/** Exercise context loss on an isolated device so the active renderer remains usable. */
-	static async probeContextLossPolicy(): Promise<WebGL2ContextLossPolicyProbe> {
+	static async probeContextLossPolicy(
+		portalWarpDriveTuning: PortalWarpDriveTuning,
+	): Promise<WebGL2ContextLossPolicyProbe> {
 		const canvas = document.createElement("canvas");
-		const device = await WebGL2Device.build(canvas);
+		const device = await WebGL2Device.build(canvas, portalWarpDriveTuning);
 		const renderer = await device.buildRenderer({} as RenderWorld);
 		try {
 			const lossEvent = await device.#loseContextForProbe();
@@ -175,6 +191,7 @@ export class WebGL2Device {
 			this.resources,
 			world,
 			this.#textureFilteringSupport,
+			this.#portalWarpDriveTuning,
 			() => this.#assertReady(),
 		);
 	}

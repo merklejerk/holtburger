@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount, tick as svelteTick } from "svelte";
+	import { PortalTransitionController } from "../../lib/client/portal-transition-controller";
+	import type { PortalTransitionPresentationReceipt } from "../../lib/client/portal-transition-presentation";
 	import { resolveExplorerOutdoorFocusPose } from "../../explorer/explorer-camera-framing";
 	import { ExplorerCameraInputController } from "../../explorer/explorer-camera-input-controller";
 	import { EXPLORER_TUNING } from "../../explorer/explorer-tuning";
@@ -56,6 +58,10 @@
 	import type { WebGL2PortalScopeAtlasTargetsFixtureResult } from "../../lib/game/renderer/webgl2-portal-scope-atlas-targets-fixture";
 	import type { WebGL2PortalScopeAtlasExecutorFixtureResult } from "../../lib/game/renderer/webgl2-portal-scope-atlas-executor-fixture";
 	import type { WebGL2PssmFixtureResult } from "../../lib/game/renderer/webgl2-pssm-fixture";
+	import {
+		runPortalTransitionPresentationFixture,
+		type PortalTransitionPresentationFixtureResult,
+	} from "../../lib/game/renderer/webgl2-portal-transition-presentation-fixture";
 	import {
 		GamePresentationRuntime,
 		type PortalTransitionRuntimeDiagnostics,
@@ -192,9 +198,23 @@
 	const TRACE_TERRAIN_GL = query.get("traceTerrainGl") === "true";
 	/** Exercise the depth-tested world-marker draw path in renderer screenshots. */
 	const WORLD_MARKER = query.get("worldMarker") === "true";
-	/** Harness-only loading screen demo; production frontends own this transition policy. */
-	const PORTAL_TRANSITION_DEMO = query.get("portalTransitionDemo") === "true";
-	let portalTransitionDemoFrames = 0;
+	/** Harness-only fixed compositor input; this deliberately does not claim lifecycle coverage. */
+	const PORTAL_TRANSITION_COMPOSITOR_DIAGNOSTIC =
+		query.get("portalTransitionCompositorDiagnostic") === "true";
+	const PORTAL_TRANSITION_LIFECYCLE_FIXTURE =
+		query.get("portalTransitionLifecycleFixture") === "true";
+	const PORTAL_TRANSITION_COMPOSITION =
+		query.get("portalTransitionComposition") === "origin-to-tunnel" ||
+		query.get("portalTransitionComposition") === "tunnel-to-destination"
+			? query.get("portalTransitionComposition")
+			: "tunnel-only";
+	const PORTAL_TRANSITION_PROGRESS = Math.max(
+		0,
+		Math.min(1, Number(query.get("portalTransitionProgress") ?? 0)),
+	);
+	let portalTransitionCompositorDiagnosticFrames = 0;
+	let portalTransitionPresentationFixture: PortalTransitionPresentationFixtureResult | null =
+		null;
 	/** Sits above the runtime's conservative ±510 outdoor terrain bound. */
 	const cameraHeightSource = query.get("cameraHeight");
 	const CAMERA_HEIGHT =
@@ -586,6 +606,8 @@
 			cameraYawDegrees: number,
 			cameraPitchDegrees: number,
 		) => PortalExecutionProbeResult;
+		/** Drive production portal plans through the real runtime/renderer and assert GPU lifetimes. */
+		readonly probePortalTransitionLifecycle: () => PortalTransitionLifecycleFixtureResult;
 		/** Sweep the camera past an audio emitter over discrete steps and record voice gains/pans. */
 		readonly probeAudioFlyby: (
 			rawLandblockId: string,
@@ -633,6 +655,8 @@
 		readonly authoredDynamics: AuthoredDynamicDiagnostics | null;
 		/** Required authored portal closure and transition cursor/resource evidence. */
 		readonly portalTransition: PortalTransitionRuntimeDiagnostics | null;
+		/** Real-controller synthetic framebuffer proof, enabled with the transition demo. */
+		readonly portalTransitionPresentationFixture: PortalTransitionPresentationFixtureResult | null;
 		readonly frameSettings: FrameSettings;
 		/** Cold shadow-target ownership used by same-runtime toggle and resize fixtures. */
 		readonly entityShadowResources: EntityShadowResourceDiagnostics | null;
@@ -669,6 +693,37 @@
 		readonly ready: boolean;
 		/** CSS and physical viewport dimensions that determine visible work. */
 		readonly viewport: BrowserHarnessViewportEvidence;
+	}
+
+	interface PortalTransitionLifecycleResourceEvidence {
+		readonly animationFramePosition: number | null;
+		readonly axialRollFramePosition: number | null;
+		readonly generation: number | null;
+		readonly kind: FrameSelectionMetrics["portalTransitionKind"];
+		readonly originCaptured: boolean;
+		readonly snapshotAllocatedGenerationCount: number;
+		readonly snapshotBytes: number;
+		readonly snapshotDisposedGenerationCount: number;
+		readonly submittedTunnelDrawCount: number;
+		readonly transitionOnlyFramePresented: boolean;
+		readonly tunnelTargetBytes: number;
+	}
+
+	interface PortalTransitionLifecycleFixtureResult {
+		readonly baseline: PortalTransitionLifecycleResourceEvidence;
+		readonly initialEntry: PortalTransitionLifecycleResourceEvidence;
+		readonly entry: PortalTransitionLifecycleResourceEvidence;
+		readonly entryMidpoint: PortalTransitionLifecycleResourceEvidence;
+		readonly superseded: PortalTransitionLifecycleResourceEvidence;
+		readonly resizedWaiting: PortalTransitionLifecycleResourceEvidence;
+		readonly exitStart: PortalTransitionLifecycleResourceEvidence;
+		readonly exitMidpoint: PortalTransitionLifecycleResourceEvidence;
+		readonly handoff: PortalTransitionLifecycleResourceEvidence;
+		readonly inactive: PortalTransitionLifecycleResourceEvidence;
+		readonly failureBeforeClear: PortalTransitionLifecycleResourceEvidence;
+		readonly failureAfterClear: PortalTransitionLifecycleResourceEvidence;
+		readonly failureBlackPixel: readonly [number, number, number, number];
+		readonly revealGeneration: number;
 	}
 
 	interface BrowserHarnessSceneInterestEvidence {
@@ -2480,6 +2535,338 @@
 		);
 	}
 
+	function probePortalTransitionLifecycle(): PortalTransitionLifecycleFixtureResult {
+		const activeRuntime = runtime;
+		const canvas = canvasElement;
+		if (activeRuntime === undefined || canvas === null) {
+			throw new Error("Browser harness runtime and viewport are not ready.");
+		}
+		if (!PORTAL_TRANSITION_LIFECYCLE_FIXTURE) {
+			throw new Error(
+				"Portal transition lifecycle assets were not requested for this harness run.",
+			);
+		}
+		const extent = activeRuntime.resolveViewportExtent(
+			canvas.clientWidth,
+			canvas.clientHeight,
+		);
+		const evidence = (): PortalTransitionLifecycleResourceEvidence => {
+			const selection =
+				activeRuntime.getRendererFrameDiagnostics()?.selectionMetrics;
+			if (selection === undefined) {
+				throw new Error(
+					"Portal lifecycle fixture requires renderer diagnostics.",
+				);
+			}
+			const animation =
+				activeRuntime.getPortalTransitionDiagnostics()?.animation ?? null;
+			return {
+				animationFramePosition: animation?.framePosition ?? null,
+				axialRollFramePosition: animation?.axialRollFramePosition ?? null,
+				generation: selection.portalTransitionGeneration,
+				kind: selection.portalTransitionKind,
+				originCaptured: selection.portalTransitionOriginCaptured,
+				snapshotAllocatedGenerationCount:
+					selection.portalTransitionSnapshotAllocatedGenerationCount,
+				snapshotBytes: selection.portalTransitionSnapshotBytes,
+				snapshotDisposedGenerationCount:
+					selection.portalTransitionSnapshotDisposedGenerationCount,
+				submittedTunnelDrawCount: selection.submittedPortalTransitionDrawCount,
+				transitionOnlyFramePresented:
+					selection.portalTransitionOnlyFramePresented,
+				tunnelTargetBytes: selection.portalTransitionTargetBytes,
+			};
+		};
+		const renderPortal = (
+			controller: PortalTransitionController,
+			nowMs: number,
+			destinationReady: boolean,
+			frameExtent = extent,
+		) => {
+			const update = controller.advance({ destinationReady, nowMs });
+			activeRuntime.setPortalTransition(update.plan);
+			const receipt = activeRuntime.renderPortalTransition(
+				performance.now() / 1_000,
+				frameExtent,
+			);
+			return { receipt, update };
+		};
+		const renderWorld = (
+			controller: PortalTransitionController,
+			nowMs: number,
+		) => {
+			const update = controller.advance({ destinationReady: true, nowMs });
+			activeRuntime.setPortalTransition(update.plan);
+			return {
+				receipt: activeRuntime.render(performance.now() / 1_000),
+				update,
+			};
+		};
+
+		activeRuntime.setPortalTransition(undefined);
+		activeRuntime.render(performance.now() / 1_000);
+		const baseline = evidence();
+		const initialController = new PortalTransitionController(
+			EXPLORER_TUNING.portalTransition.timing,
+		);
+		initialController.begin(100, { kind: "absent" });
+		renderPortal(initialController, 0, false);
+		const initialEntry = evidence();
+		initialController.reset();
+		activeRuntime.setPortalTransition(undefined);
+		activeRuntime.render(performance.now() / 1_000);
+		const controller = new PortalTransitionController(
+			EXPLORER_TUNING.portalTransition.timing,
+		);
+		controller.begin(101, { kind: "capture-last-world" });
+		renderPortal(controller, 0, false);
+		const entry = evidence();
+		renderPortal(controller, 500, false);
+		const entryMidpoint = evidence();
+
+		controller.begin(102, { kind: "capture-last-world" });
+		const supersededFrame = renderPortal(controller, 600, false);
+		const superseded = evidence();
+		controller.acknowledgePresented(
+			requirePortalPresentationReceipt(supersededFrame.receipt, "superseded"),
+		);
+		const resizedExtent = {
+			height: Math.max(1, extent.height - 17),
+			width: Math.max(1, extent.width - 19),
+		};
+		renderPortal(controller, 1_600, false, resizedExtent);
+		const resizedWaiting = evidence();
+
+		const exitStartFrame = renderWorld(controller, 2_000);
+		const exitStart = evidence();
+		if (exitStartFrame.update.plan.kind !== "tunnel-to-destination") {
+			throw new Error(
+				"Portal lifecycle fixture did not begin destination exit.",
+			);
+		}
+		renderWorld(controller, 2_500);
+		const exitMidpoint = evidence();
+		const handoffFrame = renderWorld(controller, 3_000);
+		const handoff = evidence();
+		const reveal = controller.acknowledgePresented(
+			requirePortalPresentationReceipt(handoffFrame.receipt, "handoff"),
+		);
+		if (reveal === null) {
+			throw new Error(
+				"Portal lifecycle fixture did not acknowledge neutral handoff.",
+			);
+		}
+
+		controller.reset();
+		activeRuntime.setPortalTransition(undefined);
+		activeRuntime.render(performance.now() / 1_000);
+		const inactive = evidence();
+
+		controller.begin(103, { kind: "capture-last-world" });
+		renderPortal(controller, 4_000, false);
+		const failureBeforeClear = evidence();
+		controller.reset();
+		activeRuntime.setPortalTransition(undefined);
+		activeRuntime.clearPresentation();
+		const failureAfterClear = evidence();
+		const failureGl = canvas.getContext("webgl2");
+		if (failureGl === null) {
+			throw new Error(
+				"Portal lifecycle failure proof lost its WebGL2 context.",
+			);
+		}
+		const failurePixel = new Uint8Array(4);
+		failureGl.readPixels(
+			Math.floor(extent.width / 2),
+			Math.floor(extent.height / 2),
+			1,
+			1,
+			failureGl.RGBA,
+			failureGl.UNSIGNED_BYTE,
+			failurePixel,
+		);
+		const [failureRed, failureGreen, failureBlue, failureAlpha] = failurePixel;
+		if (
+			failureRed === undefined ||
+			failureGreen === undefined ||
+			failureBlue === undefined ||
+			failureAlpha === undefined
+		) {
+			throw new Error("Portal lifecycle failure proof returned no RGBA pixel.");
+		}
+		const failureBlackPixel = [
+			failureRed,
+			failureGreen,
+			failureBlue,
+			failureAlpha,
+		] as const;
+
+		assertPortalTransitionLifecycleFixture({
+			baseline,
+			entry,
+			entryMidpoint,
+			exitMidpoint,
+			exitStart,
+			failureAfterClear,
+			failureBlackPixel,
+			failureBeforeClear,
+			handoff,
+			inactive,
+			initialEntry,
+			resizedWaiting,
+			revealGeneration: reveal.generation,
+			superseded,
+		});
+		return {
+			baseline,
+			entry,
+			entryMidpoint,
+			exitMidpoint,
+			exitStart,
+			failureAfterClear,
+			failureBlackPixel,
+			failureBeforeClear,
+			handoff,
+			inactive,
+			initialEntry,
+			resizedWaiting,
+			revealGeneration: reveal.generation,
+			superseded,
+		};
+	}
+
+	function requirePortalPresentationReceipt(
+		receipt: PortalTransitionPresentationReceipt | null,
+		stage: "superseded" | "handoff",
+	): PortalTransitionPresentationReceipt {
+		if (receipt === null) {
+			throw new Error(`Portal lifecycle ${stage} frame produced no receipt.`);
+		}
+		return receipt;
+	}
+
+	function assertPortalTransitionLifecycleFixture(
+		result: PortalTransitionLifecycleFixtureResult,
+	): void {
+		if (
+			result.baseline.generation !== null ||
+			result.baseline.snapshotBytes !== 0 ||
+			result.baseline.tunnelTargetBytes !== 0 ||
+			result.baseline.submittedTunnelDrawCount !== 0 ||
+			result.baseline.transitionOnlyFramePresented
+		) {
+			throw new Error(
+				"Portal lifecycle baseline retained transition resources.",
+			);
+		}
+		if (
+			result.initialEntry.generation !== 100 ||
+			result.initialEntry.kind !== "tunnel-only" ||
+			result.initialEntry.originCaptured ||
+			result.initialEntry.snapshotBytes !== 0 ||
+			result.initialEntry.snapshotAllocatedGenerationCount !== 0 ||
+			result.initialEntry.tunnelTargetBytes === 0 ||
+			result.initialEntry.submittedTunnelDrawCount === 0 ||
+			!result.initialEntry.transitionOnlyFramePresented
+		) {
+			throw new Error(
+				"Portal lifecycle initial entry sampled or allocated an origin.",
+			);
+		}
+		if (
+			result.entry.generation !== 101 ||
+			result.entry.kind !== "origin-to-tunnel" ||
+			!result.entry.originCaptured ||
+			result.entry.snapshotBytes === 0 ||
+			result.entry.tunnelTargetBytes === 0
+		) {
+			throw new Error(
+				"Portal lifecycle entry did not capture one real origin.",
+			);
+		}
+		if (
+			result.entryMidpoint.snapshotAllocatedGenerationCount !==
+				result.entry.snapshotAllocatedGenerationCount ||
+			result.entryMidpoint.snapshotBytes !== result.entry.snapshotBytes ||
+			(result.entryMidpoint.axialRollFramePosition ?? 0) <= 0
+		) {
+			throw new Error(
+				"Portal lifecycle entry recaptured its origin or stopped roll.",
+			);
+		}
+		if (
+			result.superseded.generation !== 102 ||
+			result.superseded.kind !== "tunnel-only" ||
+			result.superseded.originCaptured ||
+			result.superseded.snapshotBytes !== 0 ||
+			result.superseded.snapshotDisposedGenerationCount <=
+				result.entry.snapshotDisposedGenerationCount ||
+			result.superseded.axialRollFramePosition !== 0
+		) {
+			throw new Error(
+				"Portal lifecycle supersession retained the origin or failed to reset roll.",
+			);
+		}
+		if (
+			result.resizedWaiting.tunnelTargetBytes === 0 ||
+			result.resizedWaiting.tunnelTargetBytes ===
+				result.superseded.tunnelTargetBytes ||
+			(result.resizedWaiting.axialRollFramePosition ?? 0) <= 0
+		) {
+			throw new Error(
+				"Portal lifecycle resize did not replace the tunnel target.",
+			);
+		}
+		if (
+			result.exitStart.kind !== "tunnel-to-destination" ||
+			result.exitMidpoint.kind !== "tunnel-to-destination" ||
+			result.exitStart.tunnelTargetBytes === 0 ||
+			result.exitMidpoint.tunnelTargetBytes === 0
+		) {
+			throw new Error(
+				"Portal lifecycle destination exit lost its tunnel target.",
+			);
+		}
+		if (
+			result.handoff.kind !== "destination-only-awaiting-handoff" ||
+			result.handoff.snapshotBytes !== 0 ||
+			result.handoff.tunnelTargetBytes !== 0 ||
+			result.revealGeneration !== 102
+		) {
+			throw new Error(
+				"Portal lifecycle handoff retained resources or wrong authority.",
+			);
+		}
+		if (
+			result.inactive.generation !== null ||
+			result.inactive.kind !== null ||
+			result.inactive.snapshotBytes !== 0 ||
+			result.inactive.tunnelTargetBytes !== 0 ||
+			result.inactive.submittedTunnelDrawCount !== 0 ||
+			result.inactive.transitionOnlyFramePresented
+		) {
+			throw new Error(
+				"Portal lifecycle inactive frame retained transition work.",
+			);
+		}
+		if (
+			!result.failureBeforeClear.originCaptured ||
+			result.failureBeforeClear.snapshotBytes === 0 ||
+			result.failureBeforeClear.tunnelTargetBytes === 0 ||
+			result.failureAfterClear.generation !== null ||
+			result.failureAfterClear.snapshotBytes !== 0 ||
+			result.failureAfterClear.tunnelTargetBytes !== 0 ||
+			result.failureBlackPixel[0] !== 0 ||
+			result.failureBlackPixel[1] !== 0 ||
+			result.failureBlackPixel[2] !== 0 ||
+			result.failureBlackPixel[3] !== 255
+		) {
+			throw new Error(
+				"Portal lifecycle failure did not release resources to opaque black.",
+			);
+		}
+	}
+
 	function parseEnvCellId(rawEnvCellId: string, operation: string): EnvCellId {
 		const match = /^(?:0x)?([0-9a-f]{8})$/i.exec(rawEnvCellId.trim());
 		if (!match) {
@@ -2535,6 +2922,15 @@
 		const hostGlobal = globalThis as typeof globalThis & HarnessGlobal;
 		const start = async (): Promise<void> => {
 			try {
+				if (
+					PORTAL_TRANSITION_COMPOSITOR_DIAGNOSTIC ||
+					PORTAL_TRANSITION_LIFECYCLE_FIXTURE
+				) {
+					portalTransitionPresentationFixture =
+						runPortalTransitionPresentationFixture(
+							EXPLORER_TUNING.portalTransition.visual,
+						);
+				}
 				contentSource = await HttpLandblockContentSource.build(hostUrl);
 				landblockProfileSource = new CachedLandblockProfileSource(
 					contentSource,
@@ -2548,12 +2944,17 @@
 					: EXCLUDE_AUTHORED_DYNAMICS
 						? new WithoutAuthoredDynamicsLandblockSource(contentSource)
 						: contentSource;
-				device = await WebGL2Device.build(canvasElement!);
+				device = await WebGL2Device.build(
+					canvasElement!,
+					EXPLORER_TUNING.portalTransition.visual,
+				);
 				textureFilteringCapabilities = device.getTextureFilteringCapabilities();
 				if (fixture === "portal-scope-atlas") {
 					portalScopeAtlasTargets = device.probePortalScopeAtlasTargets();
 					portalScopeAtlasExecutor = device.probePortalScopeAtlasExecutor();
-					portalContextLossPolicy = await WebGL2Device.probeContextLossPolicy();
+					portalContextLossPolicy = await WebGL2Device.probeContextLossPolicy(
+						EXPLORER_TUNING.portalTransition.visual,
+					);
 				}
 				if (fixture === "outdoor-pssm") {
 					outdoorPssm = device.probeOutdoorPssm();
@@ -2596,7 +2997,10 @@
 					// The harness is a measurement surface, so it always wants tick timing.
 					new RuntimeTickProfiler(),
 				);
-				if (PORTAL_TRANSITION_DEMO) {
+				if (
+					PORTAL_TRANSITION_COMPOSITOR_DIAGNOSTIC ||
+					PORTAL_TRANSITION_LIFECYCLE_FIXTURE
+				) {
 					await runtime.installPortalTransitionAssets(
 						await loadPortalTransitionAssets({
 							audio: {
@@ -2892,6 +3296,7 @@
 					probeNextFrameState,
 					probeBoomFraming,
 					probePortalExecution,
+					probePortalTransitionLifecycle,
 					relocateExplorerEntity,
 					requestSceneInterest,
 					runFollowFlight,
@@ -2949,6 +3354,7 @@
 								runtime?.getAuthoredDynamicRuntimeDiagnostics() ?? null,
 							portalTransition:
 								runtime?.getPortalTransitionDiagnostics() ?? null,
+							portalTransitionPresentationFixture,
 							tickProfile: runtime?.getTickProfile() ?? null,
 							camera: cameraEvidence,
 							error,
@@ -3019,15 +3425,34 @@
 					lastFrameAt = now;
 					advanceFollowFlight(now);
 					syncHarnessBoomCamera(now);
-					if (PORTAL_TRANSITION_DEMO && portalTransitionDemoFrames >= 2) {
-						runtime.setPortalTransition({
-							generation: 1,
-							phase: "waiting",
-							progress: 0,
-							outgoingAvailable: true,
-						});
+					if (
+						PORTAL_TRANSITION_COMPOSITOR_DIAGNOSTIC &&
+						portalTransitionCompositorDiagnosticFrames >= 2
+					) {
+						if (PORTAL_TRANSITION_COMPOSITION === "origin-to-tunnel") {
+							runtime.setPortalTransition({
+								generation: 1,
+								kind: "origin-to-tunnel",
+								progress: PORTAL_TRANSITION_PROGRESS,
+							});
+						} else if (
+							PORTAL_TRANSITION_COMPOSITION === "tunnel-to-destination"
+						) {
+							runtime.setPortalTransition({
+								generation: 1,
+								kind: "tunnel-to-destination",
+								progress: PORTAL_TRANSITION_PROGRESS,
+							});
+						} else {
+							runtime.setPortalTransition({
+								generation: 1,
+								kind: "tunnel-only",
+							});
+						}
 					}
-					if (PORTAL_TRANSITION_DEMO) portalTransitionDemoFrames += 1;
+					if (PORTAL_TRANSITION_COMPOSITOR_DIAGNOSTIC) {
+						portalTransitionCompositorDiagnosticFrames += 1;
+					}
 					const tickStartedAt = performance.now();
 					runtime.tick();
 					const renderStartedAt = performance.now();

@@ -61,6 +61,7 @@ describe("loadPortalTransitionAssets", () => {
 		});
 
 		expect(calls).toEqual({ animation: 1, setup: 1, soundTable: 1 });
+		expect(assets.catalog.animationLowFrame).toBe(1);
 		expect(assets.waveIds).toEqual([ENTER_SOUND, EXIT_SOUND, HOOK_SOUND]);
 		expect(assets.sourceBytes).toEqual({
 			animation: 200,

@@ -196,6 +196,39 @@ describe("ClientLifecycleSession", () => {
 		).toEqual([0x5000_0002]);
 	});
 
+	it("advances world generation atomically with portal lifecycle and rejects stale portals", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const lifecycles: ClientLifecycle[] = [];
+		session.subscribe((event) => {
+			if (event.type === "lifecycle") lifecycles.push(event.lifecycle);
+		});
+		await session.start();
+		lifecycles.length = 0;
+
+		const currentPortal: ClientLifecycle = {
+			kind: "portal-space",
+			cause: "teleport",
+			worldGeneration: 4,
+		};
+		transport.emit("client-lifecycle-changed", currentPortal);
+		expect(session.state()).toMatchObject({
+			lifecycle: currentPortal,
+			worldGeneration: 4,
+		});
+
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			cause: "teleport",
+			worldGeneration: 3,
+		});
+		expect(session.state()).toMatchObject({
+			lifecycle: currentPortal,
+			worldGeneration: 4,
+		});
+		expect(lifecycles).toEqual([currentPortal]);
+	});
+
 	it("projects strict lifecycle, time, correction, and terminal updates", async () => {
 		const transport = new FakeClientTransport();
 		const session = new ClientLifecycleSession(transport);

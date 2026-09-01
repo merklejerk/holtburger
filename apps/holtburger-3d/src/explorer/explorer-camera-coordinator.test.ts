@@ -145,7 +145,7 @@ describe("ExplorerCameraCoordinator", () => {
 			},
 			9,
 		);
-		expect(coordinator.portalTransitionFrame()).toBeDefined();
+		expect(coordinator.advancePortalTransition(0, false)).toBeDefined();
 
 		activationStatus = {
 			diagnostic,
@@ -165,7 +165,7 @@ describe("ExplorerCameraCoordinator", () => {
 			`Initial camera placement failed: ${diagnostic}`,
 		);
 		expect(coordinator.activationPending()).toBe(false);
-		expect(coordinator.portalTransitionFrame()).toBeUndefined();
+		expect(coordinator.advancePortalTransition(1, false)).toBeUndefined();
 		coordinator.dispose();
 		consoleError.mockRestore();
 	});
@@ -215,7 +215,7 @@ describe("ExplorerCameraCoordinator", () => {
 		resolveActivation.get(2)?.(receipt(2));
 		await second;
 		expect(setAutomaticPose).toHaveBeenCalledOnce();
-		expect(coordinator.portalTransitionFrame()?.generation).toBe(2);
+		expect(coordinator.advancePortalTransition(0, false)?.generation).toBe(2);
 		coordinator.dispose();
 	});
 

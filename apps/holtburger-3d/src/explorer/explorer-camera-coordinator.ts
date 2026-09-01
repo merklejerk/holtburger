@@ -16,12 +16,12 @@ import type { Camera } from "../lib/game/runtime/types";
 import type { ProjectionClearanceRevision } from "../lib/game/camera/projection-clearance";
 import type { SceneInterestRadii } from "../lib/game/runtime/types";
 import type { SceneResidency } from "../lib/game/scene";
-import type { PortalTransitionFrame } from "../lib/game/renderer/renderer";
-import {
-	PortalTransitionController,
-	type PortalRevealReceipt,
-	type PortalTransitionState,
-} from "../lib/client/portal-transition-controller";
+import { PortalTransitionController } from "../lib/client/portal-transition-controller";
+import type {
+	PortalRevealReceipt,
+	PortalTransitionPresentationPlan,
+	PortalTransitionPresentationReceipt,
+} from "../lib/client/portal-transition-presentation";
 import type {
 	ResolvedSceneInterestTarget,
 	SceneInterestTarget,
@@ -133,7 +133,9 @@ export class ExplorerCameraCoordinator {
 	#pendingFollowSceneInterest: PendingExplorerFollowSceneInterest | null = null;
 	/** The source-neutral replacement currently being requested or installed, if any. */
 	#sceneActivation: ExplorerSceneActivation | null = null;
-	readonly #portalTransition = new PortalTransitionController();
+	readonly #portalTransition = new PortalTransitionController(
+		EXPLORER_TUNING.portalTransition.timing,
+	);
 	#hasRenderedFrame = false;
 	#lastResidency: SceneResidency | null = null;
 	/** Exact position/residency most recently applied to the runtime camera. */
@@ -176,7 +178,12 @@ export class ExplorerCameraCoordinator {
 		};
 		this.#pending = null;
 		this.#sceneActivation = { kind: "requesting", generation };
-		this.#portalTransition.begin(generation, this.#hasRenderedFrame);
+		this.#portalTransition.begin(
+			generation,
+			this.#hasRenderedFrame
+				? { kind: "capture-last-world" }
+				: { kind: "absent" },
+		);
 		this.#runtime.playPortalTransitionSound?.("enter");
 		this.#onStatus(
 			residency.envCellId === null
@@ -221,28 +228,29 @@ export class ExplorerCameraCoordinator {
 			});
 	}
 
-	/** Current renderer input for the shared portal presentation, if a replacement is active. */
-	portalTransitionFrame(): PortalTransitionFrame | undefined {
-		const state = this.#portalTransition.state();
-		return state === null ? undefined : portalTransitionFrame(state);
-	}
-
-	/** Advance the shared presentation state and return a one-shot reveal edge when emitted. */
+	/** Advance exactly once before one frame and publish its complete renderer plan. */
 	advancePortalTransition(
 		nowMs: number,
-		destinationFrameRendered: boolean,
-	): PortalRevealReceipt | null {
-		if (this.#portalTransition.state() === null) return null;
-		const update = this.#portalTransition.tick({
+		destinationReady: boolean,
+	): PortalTransitionPresentationPlan | undefined {
+		if (this.#portalTransition.activeGeneration() === null) return undefined;
+		const update = this.#portalTransition.advance({
 			nowMs,
-			activationReady: this.activationReady(),
-			destinationFrameRendered,
+			destinationReady,
 		});
 		if (update.audio !== undefined) {
 			this.#runtime.playPortalTransitionSound?.(update.audio);
 		}
-		if (destinationFrameRendered) this.#hasRenderedFrame = true;
-		return update.reveal;
+		return update.plan;
+	}
+
+	/** Consume visible-surface proof without advancing the transition clock. */
+	acknowledgePortalPresentation(
+		receipt: PortalTransitionPresentationReceipt | null,
+	): PortalRevealReceipt | null {
+		return receipt === null
+			? null
+			: this.#portalTransition.acknowledgePresented(receipt);
 	}
 
 	/** Record a normal finished frame so a later replacement may retain it as outgoing content. */
@@ -879,21 +887,4 @@ function sameResidency(
 
 function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
-}
-
-function portalTransitionFrame(
-	state: PortalTransitionState,
-): PortalTransitionFrame {
-	return {
-		generation: state.generation,
-		outgoingAvailable:
-			state.kind !== "revealed-awaiting-handoff" && state.outgoingCaptured,
-		phase: state.kind,
-		progress:
-			state.kind === "exiting"
-				? state.progress
-				: state.kind === "revealed-awaiting-handoff"
-					? 1
-					: 0,
-	};
 }

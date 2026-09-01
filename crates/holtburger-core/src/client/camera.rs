@@ -22,12 +22,13 @@ use crate::SimulationSceneSnapshot;
 use crate::client::types::ClientViewEvent;
 use crate::kinematic_boom::{
     KinematicBoomAdvance, KinematicBoomClearance, KinematicBoomCollisionProof,
-    KinematicBoomController, KinematicBoomDiagnostics, KinematicBoomFailureReason,
-    KinematicBoomIntent, KinematicBoomOutcome, KinematicBoomPlacedPath, KinematicBoomPlacement,
-    KinematicBoomProfile, KinematicBoomReseedReason, KinematicBoomTargetSample,
-    KinematicBoomTargetSeed, KinematicBoomUpdateAcceptance, interpolate_pose,
-    present_placed_motion_pose, resolve_camera_pivot_offset, serialize_kinematic_boom_path,
-    standard_kinematic_boom_profile, stationary_kinematic_boom_path,
+    KinematicBoomController, KinematicBoomConvergence, KinematicBoomDiagnostics,
+    KinematicBoomFailureReason, KinematicBoomIntent, KinematicBoomOutcome, KinematicBoomPathLeg,
+    KinematicBoomPlacedPath, KinematicBoomPlacement, KinematicBoomProfile,
+    KinematicBoomReseedReason, KinematicBoomTargetSample, KinematicBoomTargetSeed,
+    KinematicBoomUpdateAcceptance, interpolate_pose, present_placed_motion_pose,
+    resolve_camera_pivot_offset, serialize_kinematic_boom_path, standard_kinematic_boom_profile,
+    stationary_kinematic_boom_path,
 };
 use crate::{DynamicEntityPlacementAdvanceKind, DynamicEntityTickBatch};
 
@@ -247,6 +248,8 @@ pub enum ClientCameraTick {
         rendered_reach: f32,
         path: KinematicBoomPlacedPath,
         diagnostics: ClientCameraDiagnostics,
+        /// Host-owned convergence classification for the published placement.
+        convergence: KinematicBoomConvergence,
     },
     Reseeded {
         #[serde(flatten)]
@@ -261,6 +264,8 @@ pub enum ClientCameraTick {
         path: KinematicBoomPlacedPath,
         reason: ClientCameraReseedReason,
         diagnostics: ClientCameraDiagnostics,
+        /// Host-owned convergence classification for the published placement.
+        convergence: KinematicBoomConvergence,
     },
     Held {
         #[serde(flatten)]
@@ -275,6 +280,8 @@ pub enum ClientCameraTick {
         path: KinematicBoomPlacedPath,
         reason: ClientCameraFailureReason,
         diagnostics: ClientCameraDiagnostics,
+        /// Held results remain converging because this tick could not advance the controller.
+        convergence: KinematicBoomConvergence,
     },
     /// Current target placement used before projection clearance can be proven.
     Fallback {
@@ -288,7 +295,42 @@ pub enum ClientCameraTick {
         path: KinematicBoomPlacedPath,
         reason: ClientCameraFailureReason,
         diagnostics: ClientCameraDiagnostics,
+        /// Fallback results remain converging until projection clearance can be proven.
+        convergence: KinematicBoomConvergence,
     },
+}
+
+impl ClientCameraTick {
+    fn convergence(&self) -> KinematicBoomConvergence {
+        match self {
+            Self::Advanced { convergence, .. }
+            | Self::Reseeded { convergence, .. }
+            | Self::Held { convergence, .. }
+            | Self::Fallback { convergence, .. } => *convergence,
+        }
+    }
+
+    fn make_path_stationary(&mut self) -> Result<()> {
+        let path = match self {
+            Self::Advanced { path, .. }
+            | Self::Reseeded { path, .. }
+            | Self::Held { path, .. }
+            | Self::Fallback { path, .. } => path,
+        };
+        let final_point = path
+            .legs
+            .last()
+            .context("cannot settle a client camera path without a terminal leg")?
+            .end;
+        path.initial = final_point;
+        // A settled activation publishes no elapsed transit, but the shared path contract remains
+        // non-empty so every consumer can sample its exact terminal placement at fraction one.
+        path.legs = vec![KinematicBoomPathLeg {
+            end_fraction: 1.0,
+            end: final_point,
+        }];
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -297,6 +339,16 @@ struct SelectedSphere {
     center: Vector3,
     radius: f32,
 }
+
+/// Result of one bounded activation-only camera convergence transaction.
+pub(super) enum ClientCameraSettlement {
+    Pending,
+    Settled(ClientCameraTick),
+    Exhausted,
+}
+
+const ACTIVATION_SETTLE_STEP: Duration = Duration::from_millis(16);
+const ACTIVATION_SETTLE_MAXIMUM_STEPS: usize = 256;
 
 struct PendingCamera {
     identity: ClientCameraIdentity,
@@ -605,27 +657,23 @@ impl ClientCameraRuntime {
         Ok(Some(tick))
     }
 
-    /// Produce the one collision-backed, input-free seed needed before a desktop portal reveal.
-    ///
-    /// The seed uses the normal controller clearance transaction with a tiny presentation-only
-    /// duration and no dynamic target batch. It never consumes a drive, advances the authority
-    /// clock, or runs while an active camera already has a sequence.
-    pub(super) fn seed(
+    /// Run ordinary stationary boom solves synchronously without publishing intermediate paths.
+    pub(super) fn settle_for_activation(
         &mut self,
         world: &WorldState,
         collision: Option<&SimulationSceneSnapshot>,
-    ) -> Result<Option<ClientCameraTick>> {
-        if self
-            .active
-            .as_ref()
-            .is_some_and(|camera| camera.sequence > 0)
-        {
-            return Ok(None);
+    ) -> Result<ClientCameraSettlement> {
+        for _ in 0..ACTIVATION_SETTLE_MAXIMUM_STEPS {
+            let Some(mut tick) = self.advance(world, collision, None, ACTIVATION_SETTLE_STEP)?
+            else {
+                return Ok(ClientCameraSettlement::Pending);
+            };
+            if tick.convergence() == KinematicBoomConvergence::Settled {
+                tick.make_path_stationary()?;
+                return Ok(ClientCameraSettlement::Settled(tick));
+            }
         }
-        let Some(collision) = collision else {
-            return Ok(None);
-        };
-        self.advance(world, Some(collision), None, Duration::from_millis(1))
+        Ok(ClientCameraSettlement::Exhausted)
     }
 
     fn initialize_if_ready(
@@ -748,13 +796,6 @@ impl ClientRuntime {
         duration: Duration,
     ) -> Result<Option<ClientCameraTick>> {
         self.camera.advance(&self.world, collision, batch, duration)
-    }
-
-    pub(super) fn seed_camera(
-        &mut self,
-        collision: Option<&SimulationSceneSnapshot>,
-    ) -> Result<Option<ClientCameraTick>> {
-        self.camera.seed(&self.world, collision)
     }
 
     pub(super) fn emit_camera_event(&self, tick: ClientCameraTick) {
@@ -898,6 +939,7 @@ fn project_camera_outcome(
             advance,
             clearance,
             diagnostics,
+            convergence,
         } => match advance {
             KinematicBoomAdvance::Continuous { path } => {
                 match serialize_kinematic_boom_path(
@@ -918,6 +960,7 @@ fn project_camera_outcome(
                         rendered_reach: active.controller.rendered_reach(),
                         path,
                         diagnostics: diagnostics.into(),
+                        convergence,
                     },
                     Err(_) => held_tick(
                         active,
@@ -942,6 +985,7 @@ fn project_camera_outcome(
                 path: stationary_kinematic_boom_path(placement, active.controller.visual_pivot()),
                 reason: reason.into(),
                 diagnostics: diagnostics.into(),
+                convergence,
             },
         },
         KinematicBoomOutcome::Held {
@@ -1011,6 +1055,7 @@ fn held_tick(
         ),
         reason,
         diagnostics: diagnostics.into(),
+        convergence: KinematicBoomConvergence::Converging,
     }
 }
 
@@ -1030,6 +1075,7 @@ fn fallback_tick(
         path: stationary_kinematic_boom_path(placement, active.controller.visual_pivot()),
         reason,
         diagnostics: diagnostics.into(),
+        convergence: KinematicBoomConvergence::Converging,
     }
 }
 
@@ -1131,6 +1177,39 @@ mod tests {
             availability,
             scene: Arc::new(scene),
         }
+    }
+
+    #[test]
+    fn activation_settlement_retains_a_non_empty_stationary_wire_path() {
+        let pose = WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            coords: Vector3::new(1.0, 2.0, 3.0),
+            rotation: holtburger_common::Quaternion::identity(),
+        };
+        let mut tick = ClientCameraTick::Fallback {
+            identity: ClientCameraIdentity {
+                player_guid: Guid(0x0102_0304),
+                entity_generation: 1,
+                camera_generation: 1,
+            },
+            sequence: 1,
+            duration_ms: 30.0,
+            target_sphere_role: ClientCameraTargetSphereRole::Primary,
+            desired_reach: 4.5,
+            path: stationary_kinematic_boom_path(KinematicBoomPlacement { pose, cell: None }, pose),
+            reason: ClientCameraFailureReason::TargetContract,
+            diagnostics: KinematicBoomDiagnostics::default().into(),
+            convergence: KinematicBoomConvergence::Settled,
+        };
+
+        tick.make_path_stationary().unwrap();
+
+        let ClientCameraTick::Fallback { path, .. } = tick else {
+            unreachable!("test constructs a fallback tick")
+        };
+        assert_eq!(path.legs.len(), 1);
+        assert_eq!(path.legs[0].end_fraction, 1.0);
+        assert_eq!(path.legs[0].end, path.initial);
     }
 
     #[test]

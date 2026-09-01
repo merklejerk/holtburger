@@ -21,6 +21,7 @@ import { ActiveRegionStaticDetailOwner } from "../resolution/active-region-stati
 import { RuntimeTickProfiler } from "./runtime-tick-profiler";
 import { GamePresentationRuntime } from "./game-presentation-runtime";
 import type { TextureFilteringCapabilities } from "../renderer/texture-filtering-policy";
+import type { PortalWarpDriveTuning } from "../renderer/portal-warp-drive-tuning";
 import type { LandblockSourceBatchSource } from "../../assets/landblock-source-batch";
 import type { AmbientRegionFacts } from "../systems/ambient-region";
 import {
@@ -35,6 +36,8 @@ export interface GamePresentationOwnerDependencies {
 	readonly audioTuning: GamePresentationAudioTuning;
 	/** Mode-owned initial display policy forwarded to the shared runtime. */
 	readonly frameSettings: FrameSettings;
+	/** Mode-owned portal transition look forwarded unchanged into the renderer device. */
+	readonly portalWarpDriveTuning: PortalWarpDriveTuning;
 	/** Optional lifecycle signal; construction stops between expensive host/GPU steps when aborted. */
 	readonly signal?: AbortSignal;
 	/** Optional frame profiler; a diagnostics-oriented frontend may inject one. */
@@ -102,6 +105,7 @@ export class GamePresentationOwner {
 			hostTransport,
 			audioTuning,
 			frameSettings,
+			portalWarpDriveTuning,
 			signal,
 			tickProfiler,
 			audioContextFactory = () => new AudioContext(),
@@ -132,7 +136,7 @@ export class GamePresentationOwner {
 			staticDetailOwner = new ActiveRegionStaticDetailOwner(texturePixelSource);
 			const staticDetailBinding = await staticDetailOwner.install(activeRegion);
 			throwIfPresentationConstructionAborted(signal);
-			device = await WebGL2Device.build(canvas);
+			device = await WebGL2Device.build(canvas, portalWarpDriveTuning);
 			throwIfPresentationConstructionAborted(signal);
 			const textureFilteringCapabilities =
 				device.getTextureFilteringCapabilities();

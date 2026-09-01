@@ -677,6 +677,37 @@ for the entire interaction or when stale output is deliberately frozen by captur
 retain the pointer query and rerun it against new targets, or represent explicit capture whose
 lifetime ends on a named event.
 
+## Sibling Outputs Disagree on Eligibility
+
+**Smell:** One logical producer drives several observable outputs, but each output independently
+decides whether the producer is currently eligible.
+
+**Signals:**
+
+- Rendering, audio, notifications, persistence, telemetry, or other sibling consumers repeat
+  similar visibility, authorization, lifecycle, or context gates.
+- Disabling or hiding a feature removes one output while another remains active.
+- A producer continues advancing because one output may still need its state, leaving every other
+  consumer responsible for suppressing its own effects.
+- Tests verify each output in isolation but never assert that their admission decisions agree.
+
+**Possible failure:** Users observe contradictory state, such as invisible effects that remain
+audible, hidden operations that still notify, or unauthorized work that is omitted from one surface
+but persists through another.
+
+**Questions:** Which layer owns eligibility? Must every output share one decision, or do some have
+legitimate exceptions? Does an output need the producer stopped, its new effects rejected, its
+existing effects withdrawn, or some combination of those?
+
+**Counterexamples:** Outputs may intentionally use different admission policies when their
+semantics differ—for example, an accessibility channel can remain active when a visual channel is
+hidden—but the distinction should be explicit and independently named.
+
+**Possible responses:** Compute shared eligibility once and carry it to sibling consumers, or name
+and test each genuinely distinct policy. For effects that outlive dispatch, preserve a live
+eligibility input or explicit cancellation path so a later policy change reaches existing work as
+well as future emissions.
+
 ## Adding Observations
 
 An observation belongs here when it has:

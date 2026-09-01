@@ -1230,13 +1230,20 @@ export class GamePresentationRuntime {
 						// point rather than following the emitter.
 						const origin = this.#originOf(target);
 						if (origin === null) return "unprepared";
+						const skyTarget = this.#skyTargets.has(target.targetId);
 						const outcome = this.#audio.trigger({
 							// Authored hook sounds are effect sounds: `PlaySoundA` gates on
 							// `effect_sounds_enabled` and passes `is_ambient = 0`.
 							category: "effect",
 							probability: sound.probability,
 							soundId: sound.soundId,
-							source: { mode: "world", position: origin, volume: sound.volume },
+							source: skyTarget
+								? {
+										mode: "world-live",
+										position: origin,
+										volume: () => (this.#skyAudioEnabled() ? sound.volume : 0),
+									}
+								: { mode: "world", position: origin, volume: sound.volume },
 						});
 						return outcome === "played" ? "played" : "suppressed";
 					},
@@ -2364,6 +2371,24 @@ export class GamePresentationRuntime {
 			? this.#scene.getEnvCellSeenOutside(this.#audioListenerEnvCellId) !==
 					false
 			: true;
+	}
+
+	/**
+	 * Whether sky-authored audio is eligible in the accepted static-content context.
+	 *
+	 * RETAIL DIVERGENCE: retail keeps weather Setups alive indoors and therefore keeps dispatching
+	 * their sounds; `GameSky::MakeObject` gates only on the weather option (acclient.c:297347), while
+	 * `GameSky::Draw` applies `is_player_outside` only to the after-landscape draw
+	 * (acclient.c:297392). Removing this gate restores invisible rain and thunder in dungeons. The
+	 * shipped-region census found 92 weather objects in eight Rainy day groups, with all audible sky
+	 * behavior confined to the three weather Setup/script families `0x02000588`, `0x02000589`, and
+	 * `0x02000BA6`; the sole celestial script produces particles and no sound.
+	 */
+	#skyAudioEnabled(): boolean {
+		const target = this.#resolvedSceneInterestTarget;
+		// No accepted target is not evidence of dungeon context. Modes may install regional sky
+		// before their first scene request, so only the authoritative dungeon classification mutes it.
+		return target === null || target.kind === "outdoor";
 	}
 
 	/** Installed terrain with identity, expressed in the scene frame the bake retains. */

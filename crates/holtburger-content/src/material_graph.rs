@@ -14,6 +14,9 @@ use crate::{
     texture_pixels::decode_render_surface_pixels,
 };
 
+/// Family-root DID produced when a null palette is packed with the palette's known wire type.
+const INVALID_PALETTE_DID: u32 = 0x0400_0000;
+
 const REGION_DETAIL_ROLE_ORDER: [ResolvedRegionDetailRoleKind; 4] = [
     ResolvedRegionDetailRoleKind::Landscape,
     ResolvedRegionDetailRoleKind::Building,
@@ -118,7 +121,6 @@ pub struct ResolvedSetupAppearance {
     pub appearance_key: String,
     pub parts: Vec<ResolvedSetupAppearancePart>,
     pub material_asset_ids: Vec<u32>,
-    pub palette_dependencies: Vec<u32>,
     pub texture_changes: Vec<ResolvedTextureChange>,
     pub anim_part_changes: Vec<ResolvedAnimationPartChange>,
     pub sub_palettes: Vec<SubPalette>,
@@ -531,24 +533,14 @@ impl ContentRepository {
         }
 
         let mut material_asset_ids = collect_setup_material_asset_ids(&parts);
-        let mut palette_dependencies = collect_setup_palette_dependencies(&parts);
-        if let Some(obj_desc) = appearance {
-            if let Some(palette_id) = obj_desc.palette_id {
-                palette_dependencies.push(palette_id);
-            }
-            palette_dependencies.extend(obj_desc.sub_palettes.iter().map(|sub| sub.sub_id));
-        }
         material_asset_ids.sort_unstable();
         material_asset_ids.dedup();
-        palette_dependencies.sort_unstable();
-        palette_dependencies.dedup();
 
         Ok(ResolvedSetupAppearance {
             setup_model_id,
             appearance_key: build_setup_appearance_key(setup_model_id, appearance),
             parts,
             material_asset_ids,
-            palette_dependencies,
             texture_changes: appearance
                 .map(|obj_desc| {
                     obj_desc
@@ -850,6 +842,19 @@ fn resolve_palette_composite(
         return Ok(None);
     }
 
+    // ACE emits a null replacement when a palette-set shade is outside [0, 1]. Known-type wire
+    // packing expands that zero to the palette family root, which is not a DAT record. Retail lets
+    // the whole palette operation fail and still installs the object (acclient.c:313977-314022,
+    // 374749-374758), so preserve the base appearance rather than rejecting entity realization.
+    if base_palette_id == INVALID_PALETTE_DID
+        || obj_desc
+            .sub_palettes
+            .iter()
+            .any(|sub_palette| sub_palette.sub_id == INVALID_PALETTE_DID)
+    {
+        return Ok(None);
+    }
+
     let base = read_palette(content, base_palette_id)?;
     let replacements = obj_desc
         .sub_palettes
@@ -945,17 +950,6 @@ fn collect_setup_material_asset_ids(parts: &[ResolvedSetupAppearancePart]) -> Ve
         .iter()
         .flat_map(|part| part.material_slots.iter())
         .map(|slot| slot.material.surface_id)
-        .collect()
-}
-
-fn collect_setup_palette_dependencies(parts: &[ResolvedSetupAppearancePart]) -> Vec<u32> {
-    parts
-        .iter()
-        .flat_map(|part| part.material_slots.iter())
-        .flat_map(|slot| match &slot.material.source {
-            ResolvedMaterialSource::SolidColor(_) => Vec::new(),
-            ResolvedMaterialSource::Texture(texture) => texture.palette_id.into_iter().collect(),
-        })
         .collect()
 }
 

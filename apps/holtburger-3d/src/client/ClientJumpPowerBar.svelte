@@ -3,23 +3,45 @@
 
 	interface Props {
 		readonly active: boolean;
+		/** Editor-only extent used when no live charge exists; null removes the surface. */
+		readonly previewExtent: number | null;
+		/** Whether the precise-jump action may dispatch gameplay input. */
+		readonly actionEnabled: boolean;
 		readonly readExtent: () => number;
 		readonly onEnterPrecise: () => void;
 	}
 
-	let { active, readExtent, onEnterPrecise }: Props = $props();
+	let {
+		active,
+		previewExtent,
+		actionEnabled,
+		readExtent,
+		onEnterPrecise,
+	}: Props = $props();
 	let trackElement = $state<HTMLDivElement | null>(null);
 	let fillElement = $state<HTMLDivElement | null>(null);
 
 	$effect(() => {
-		if (!active || trackElement === null || fillElement === null) return;
+		if (
+			(!active && previewExtent === null) ||
+			trackElement === null ||
+			fillElement === null
+		)
+			return;
 		const track = trackElement;
 		const fill = fillElement;
+		const updateExtent = (extent: number): void => {
+			const clamped = Math.max(0, Math.min(1, extent));
+			track.setAttribute("aria-valuenow", String(clamped));
+			fill.style.height = `${clamped * 100}%`;
+		};
+		if (!active) {
+			updateExtent(previewExtent ?? 0);
+			return;
+		}
 		let frameHandle = 0;
 		const sample = (): void => {
-			const extent = Math.max(0, Math.min(1, readExtent()));
-			track.setAttribute("aria-valuenow", String(extent));
-			fill.style.height = `${extent * 100}%`;
+			updateExtent(readExtent());
 			frameHandle = window.requestAnimationFrame(sample);
 		};
 		sample();
@@ -27,7 +49,7 @@
 	});
 </script>
 
-{#if active}
+{#if active || previewExtent !== null}
 	<div class="jump-power" aria-label="Jump charge">
 		<div
 			bind:this={trackElement}
@@ -45,6 +67,7 @@
 			class="jump-precise"
 			aria-label="Switch to precise jump"
 			title="Cancel charge and enter precise jump"
+			disabled={!actionEnabled}
 			onpointerdown={(event) => event.preventDefault()}
 			onclick={onEnterPrecise}><ClientHudIcon name="precise-jump" /></button
 		>
@@ -53,12 +76,8 @@
 
 <style>
 	.jump-power {
-		position: fixed;
-		left: 50%;
-		z-index: 5;
-		transform: translateX(-50%);
-		bottom: 72px;
-		width: 38px;
+		width: 100%;
+		height: 100%;
 		padding: 4px;
 		display: flex;
 		flex-direction: column;
@@ -91,6 +110,12 @@
 
 	.jump-precise:hover {
 		background: rgb(81 61 31 / 0.96);
+	}
+
+	.jump-precise:disabled {
+		cursor: default;
+		filter: grayscale(0.8);
+		opacity: 0.55;
 	}
 
 	.jump-power-fill {

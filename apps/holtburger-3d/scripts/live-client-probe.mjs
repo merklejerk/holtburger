@@ -138,7 +138,7 @@ function payloadFrameBytes(event, payload) {
 	}).byteLength;
 }
 
-function createCensus() {
+function createCensus(inspectGuid) {
 	const byEvent = new Map();
 	const entityGuids = new Set();
 	const actorMotion = new Map();
@@ -150,6 +150,7 @@ function createCensus() {
 	let peakEntityBatchEntities = 0;
 	let totalBytes = 0;
 	let largestFrameBytes = 0;
+	let inspectedEntity = null;
 
 	function observe(event, payload) {
 		const bytes = payloadFrameBytes(event, payload);
@@ -171,6 +172,7 @@ function createCensus() {
 			if (entity && typeof entity.identity?.guid === "number") {
 				entityGuids.add(entity.identity.guid);
 				rememberActorMotion(entity);
+				if (entity.identity.guid === inspectGuid) inspectedEntity = entity;
 			}
 		}
 		if (event === "client-current-state") {
@@ -246,6 +248,7 @@ function createCensus() {
 				(left, right) => left - right,
 			);
 			return {
+				inspectedEntity,
 				uniqueEntityGuids: [...entityGuids]
 					.sort((left, right) => left - right)
 					.map(guidString),
@@ -486,6 +489,9 @@ async function main() {
 	const requestedCharacterGuid = optionalGuid(
 		process.env.HOLTBURGER_PROBE_CHARACTER_GUID,
 	);
+	const requestedInspectGuid = optionalGuid(
+		process.env.HOLTBURGER_PROBE_INSPECT_GUID,
+	);
 	const mode = probeMode(process.env.HOLTBURGER_PROBE_MODE);
 	const probePreciseJump = process.env.HOLTBURGER_PROBE_PRECISE_JUMP === "1";
 	const preciseJumpTargetGuid = optionalGuid(
@@ -529,7 +535,7 @@ async function main() {
 		return client.invoke(command, args);
 	};
 	let lastCompletedPhase = "host-started";
-	const census = createCensus();
+	const census = createCensus(requestedInspectGuid);
 	const waiter = createWaiter();
 	const lifecycle = [];
 	const cameras = [];

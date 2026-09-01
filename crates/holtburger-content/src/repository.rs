@@ -1540,9 +1540,104 @@ mod tests {
             overridden.material_asset_ids,
             vec![0x0800_0030, 0x0800_0032]
         );
-        assert_eq!(
-            overridden.palette_dependencies,
-            vec![0x0400_0030, 0x0400_0032, 0x0400_0040, 0x0400_0041]
+    }
+
+    #[test]
+    fn invalid_wire_palette_rejects_the_entire_optional_composition() {
+        use crate::{MaterialAppearanceInput, ResolvedMaterialSource};
+
+        let dir = tempdir().expect("tempdir should be created");
+        write_setup_appearance_hba(&dir.path().join("materials.hba"));
+
+        let repository =
+            ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
+        for obj_desc in [
+            ObjDesc {
+                palette_id: Some(0x0400_0000),
+                sub_palettes: vec![SubPalette {
+                    sub_id: 0x0400_0041,
+                    offset: 0,
+                    num_colors: 2048,
+                }],
+                texture_changes: Vec::new(),
+                anim_part_changes: Vec::new(),
+            },
+            ObjDesc {
+                palette_id: Some(0x0400_0030),
+                sub_palettes: vec![SubPalette {
+                    sub_id: 0x0400_0000,
+                    offset: 0,
+                    num_colors: 2048,
+                }],
+                texture_changes: Vec::new(),
+                anim_part_changes: Vec::new(),
+            },
+            ObjDesc {
+                palette_id: Some(0x0400_0030),
+                sub_palettes: vec![
+                    SubPalette {
+                        sub_id: 0x0400_0041,
+                        offset: 0,
+                        num_colors: 8,
+                    },
+                    SubPalette {
+                        sub_id: 0x0400_0000,
+                        offset: 8,
+                        num_colors: 2040,
+                    },
+                ],
+                texture_changes: Vec::new(),
+                anim_part_changes: Vec::new(),
+            },
+        ] {
+            let appearance = repository
+                .resolve_setup_appearance(
+                    0x0200_0030,
+                    MaterialAppearanceInput {
+                        obj_desc: Some(obj_desc),
+                    },
+                )
+                .expect("an invalid optional palette composition should preserve the setup");
+            let ResolvedMaterialSource::Texture(texture) =
+                &appearance.parts[0].material_slots[0].material.source
+            else {
+                panic!("fixture material should be textured");
+            };
+            assert_eq!(texture.palette_id, Some(0x0400_0030));
+            assert_eq!(texture.palette_composite, None);
+        }
+    }
+
+    #[test]
+    fn missing_non_sentinel_palette_remains_an_error() {
+        use crate::MaterialAppearanceInput;
+
+        let dir = tempdir().expect("tempdir should be created");
+        write_setup_appearance_hba(&dir.path().join("materials.hba"));
+
+        let repository =
+            ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
+        let error = repository
+            .resolve_setup_appearance(
+                0x0200_0030,
+                MaterialAppearanceInput {
+                    obj_desc: Some(ObjDesc {
+                        palette_id: Some(0x0400_0030),
+                        sub_palettes: vec![SubPalette {
+                            sub_id: 0x0400_0099,
+                            offset: 0,
+                            num_colors: 2048,
+                        }],
+                        texture_changes: Vec::new(),
+                        anim_part_changes: Vec::new(),
+                    }),
+                },
+            )
+            .expect_err("a non-sentinel missing palette should remain a content error");
+
+        assert!(
+            format!("{error:#}").contains("missing resource eor/portal:0x04000099"),
+            "unexpected error: {error:#}"
         );
     }
 
@@ -1600,10 +1695,6 @@ mod tests {
             direct_appearance.appearance_key
         );
         assert_eq!(clothing_appearance.parts, direct_appearance.parts);
-        assert_eq!(
-            clothing_appearance.palette_dependencies,
-            direct_appearance.palette_dependencies
-        );
         assert_eq!(
             clothing_appearance.texture_changes,
             direct_appearance.texture_changes

@@ -4,21 +4,38 @@
 
 	interface Props {
 		readonly toast: ClientToast | null;
+		/** Inert editor-only copy shown when no live toast exists. */
+		readonly previewMessage: string | null;
 	}
 
-	const { toast }: Props = $props();
+	const { toast, previewMessage }: Props = $props();
+	const presentation = $derived(
+		toast !== null
+			? { kind: "toast" as const, toast }
+			: previewMessage !== null
+				? { kind: "preview" as const, message: previewMessage }
+				: null,
+	);
 </script>
 
 <div class="client-toast-overlay">
-	{#if toast !== null}
-		{#key toast.id}
+	{#if presentation !== null}
+		{#key presentation.kind === "toast" ? presentation.toast.id : "preview"}
 			<p
 				class="client-toast"
-				class:client-toast-warning={toast.tone === "warning"}
-				role={toast.tone === "warning" ? "alert" : "status"}
+				class:client-toast-preview={presentation.kind === "preview"}
+				class:client-toast-warning={presentation.kind === "toast" &&
+					presentation.toast.tone === "warning"}
+				role={presentation.kind === "toast"
+					? presentation.toast.tone === "warning"
+						? "alert"
+						: "status"
+					: undefined}
 				transition:fade={{ duration: 120 }}
 			>
-				{toast.message}
+				{presentation.kind === "toast"
+					? presentation.toast.message
+					: presentation.message}
 			</p>
 		{/key}
 	{/if}
@@ -26,12 +43,11 @@
 
 <style>
 	.client-toast-overlay {
-		position: fixed;
-		bottom: 48px;
-		left: 50%;
-		z-index: 6;
-		width: min(420px, calc(100vw - 48px));
-		transform: translateX(-50%);
+		display: grid;
+		width: 100%;
+		height: 100%;
+		padding-inline: min(24px, 5vw);
+		place-items: center;
 		pointer-events: none;
 	}
 
@@ -52,5 +68,10 @@
 	.client-toast-warning {
 		border-color: rgb(184 86 62 / 0.88);
 		color: rgb(255 210 183);
+	}
+
+	.client-toast-preview {
+		border-style: dashed;
+		color: rgb(235 232 219 / 0.76);
 	}
 </style>

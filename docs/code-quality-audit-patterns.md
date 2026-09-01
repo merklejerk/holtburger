@@ -1106,6 +1106,35 @@ that separation.
 **Possible responses:** Model the shared physical state once, invalidate every alias on mutation,
 encode disjoint slot domains in the type/API, and test same-slot transitions across logical paths.
 
+## Registrations Outlive Their Owner
+
+**Smell:** An operation registers callbacks with a longer-lived object, but cleanup exists only on
+the operation's expected completion path rather than on disposal of the owner that initiated it.
+
+**Signals:**
+
+- A component or request installs listeners on a window, document, process, bus, timer, observer,
+  or shared service without retaining a cancellation handle.
+- Cleanup depends on a success, release, response, or other terminal event that may never arrive.
+- Replacing an in-progress operation starts another registration without cancelling the first.
+- The callback closes over state whose owner can unmount, disconnect, time out, or be superseded.
+
+**Possible failure:** Retired callbacks mutate stale state, duplicate later work, retain resources,
+or act on a replacement owner. The defect often appears only when disposal interrupts an operation,
+so normal completion tests do not expose it.
+
+**Questions:** Which lifetime owns the registration? Can that owner disappear before the normal
+terminal event? Are cancellation and completion both idempotent? Does starting a replacement
+operation first retire the previous one?
+
+**Counterexamples:** A process-lifetime singleton may intentionally retain a process-lifetime
+registration, and a target proven to have the same or shorter lifetime than its owner needs no
+separate owner cleanup.
+
+**Possible responses:** Return and retain an idempotent disposer, bind registration to an abort
+signal, cancel the previous operation before replacement, and invoke cancellation from owner
+teardown as well as normal completion.
+
 ## Adding Observations
 
 An observation belongs here when it has:

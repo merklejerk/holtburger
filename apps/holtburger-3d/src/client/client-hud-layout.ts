@@ -1,25 +1,17 @@
-/** Horizontal content edge that owns a HUD surface's canonical offset. */
-type ClientHudHorizontalEdge = "left" | "right";
+/** Viewport reference point that owns one axis of a HUD surface's canonical offset. */
+type ClientHudAxisAlignment = "start" | "center" | "end";
 
-/** Vertical content edge that owns a HUD surface's canonical offset. */
-type ClientHudVerticalEdge = "top" | "bottom";
-
-/** Canonical horizontal attachment, independent of the current content width. */
-interface ClientHudHorizontalAnchor {
-	readonly edge: ClientHudHorizontalEdge;
-	readonly offset: number;
-}
-
-/** Canonical vertical attachment, independent of the current content height. */
-interface ClientHudVerticalAnchor {
-	readonly edge: ClientHudVerticalEdge;
+/** Canonical attachment on one axis, independent of the current viewport extent. */
+interface ClientHudAxisAnchor {
+	readonly alignment: ClientHudAxisAlignment;
+	/** Inward edge distance, or signed surface-center displacement for `center`. */
 	readonly offset: number;
 }
 
 /** Preferred HUD geometry; the rendered extent may temporarily relax in a smaller viewport. */
 export interface ClientHudPlacement {
-	readonly horizontal: ClientHudHorizontalAnchor;
-	readonly vertical: ClientHudVerticalAnchor;
+	readonly horizontal: ClientHudAxisAnchor;
+	readonly vertical: ClientHudAxisAnchor;
 	readonly preferredWidth: number;
 	readonly preferredHeight: number;
 }
@@ -38,7 +30,7 @@ export interface ResolvedClientHudPlacement {
 	readonly height: number;
 }
 
-/** Border ownership for one floating-panel resize gesture. */
+/** Border ownership for one HUD-window resize gesture. */
 export interface ClientPanelResizeEdges {
 	readonly horizontal?: "left" | "right";
 	readonly vertical?: "top" | "bottom";
@@ -47,12 +39,25 @@ export interface ClientPanelResizeEdges {
 export interface ClientHudLayout {
 	readonly character: ClientHudPlacement;
 	readonly chat: ClientHudPlacement;
-	readonly fps: ClientHudPlacement;
+	readonly diagnostics: ClientHudPlacement;
+	readonly frameRate: ClientHudPlacement;
+	readonly jumpPower: ClientHudPlacement;
+	readonly map: ClientHudPlacement;
 	readonly shortcuts: ClientHudPlacement;
+	readonly toast: ClientHudPlacement;
 }
 
 /** Width reserved for the capped/uncapped frame-rate pair and its unit label. */
 export const CLIENT_FPS_PANEL_WIDTH = 120;
+
+/** Fixed layout footprint for the centered jump-charge control. */
+export const CLIENT_JUMP_POWER_PANEL_SIZE = { width: 38, height: 132 } as const;
+
+/** Default and preferred diameter of the client radar. */
+const CLIENT_MAP_PANEL_SIZE = 220;
+
+/** Bounded notification lane; individual toast content remains centered within it. */
+export const CLIENT_TOAST_PANEL_SIZE = { width: 420, height: 64 } as const;
 
 interface PreferredClientHudExtent {
 	readonly width: number;
@@ -66,6 +71,8 @@ interface ClientPointerDelta {
 }
 
 interface ResolvedAxis {
+	readonly alignment: ClientHudAxisAlignment;
+	readonly extent: number;
 	readonly offset: number;
 	readonly size: number;
 }
@@ -75,21 +82,44 @@ function clamp(value: number, minimum: number, maximum: number): number {
 }
 
 function resolveAxis(
-	offset: number,
+	anchor: ClientHudAxisAnchor,
 	preferredSize: number,
 	minimumSize: number,
 	viewportSize: number,
 ): ResolvedAxis {
 	const extent = Math.max(0, viewportSize);
 	const reachableMinimum = Math.min(minimumSize, extent);
-	const anchoredOffset = clamp(offset, 0, extent - reachableMinimum);
+	const maximumOffset =
+		anchor.alignment === "center"
+			? (extent - reachableMinimum) / 2
+			: extent - reachableMinimum;
+	const anchoredOffset = clamp(
+		anchor.offset,
+		anchor.alignment === "center" ? -maximumOffset : 0,
+		maximumOffset,
+	);
+	const availableSize =
+		anchor.alignment === "center"
+			? extent - 2 * Math.abs(anchoredOffset)
+			: extent - anchoredOffset;
 	return {
+		alignment: anchor.alignment,
+		extent,
 		offset: anchoredOffset,
-		size: Math.min(
-			Math.max(preferredSize, reachableMinimum),
-			extent - anchoredOffset,
-		),
+		size: Math.min(Math.max(preferredSize, reachableMinimum), availableSize),
 	};
+}
+
+/** Place a resolved size against its canonical axis reference. */
+function positionAxis(axis: ResolvedAxis, size: number): number {
+	switch (axis.alignment) {
+		case "start":
+			return axis.offset;
+		case "center":
+			return axis.extent / 2 + axis.offset - size / 2;
+		case "end":
+			return axis.extent - axis.offset - size;
+	}
 }
 
 /** Resolve preferred geometry without allowing any part of the surface outside client content. */
@@ -99,26 +129,20 @@ export function resolveClientHudPlacement(
 	minimum: PreferredClientHudExtent,
 ): ResolvedClientHudPlacement {
 	const horizontal = resolveAxis(
-		placement.horizontal.offset,
+		placement.horizontal,
 		placement.preferredWidth,
 		minimum.width,
 		viewport.width,
 	);
 	const vertical = resolveAxis(
-		placement.vertical.offset,
+		placement.vertical,
 		placement.preferredHeight,
 		minimum.height,
 		viewport.height,
 	);
 	return {
-		left:
-			placement.horizontal.edge === "left"
-				? horizontal.offset
-				: viewport.width - horizontal.offset - horizontal.size,
-		top:
-			placement.vertical.edge === "top"
-				? vertical.offset
-				: viewport.height - vertical.offset - vertical.size,
+		left: positionAxis(horizontal, horizontal.size),
+		top: positionAxis(vertical, vertical.size),
 		width: horizontal.size,
 		height: vertical.size,
 	};
@@ -131,30 +155,48 @@ export function resolveClientHudSquarePlacement(
 	minimumSize: number,
 ): ResolvedClientHudPlacement {
 	const horizontal = resolveAxis(
-		placement.horizontal.offset,
+		placement.horizontal,
 		placement.preferredWidth,
 		minimumSize,
 		viewport.width,
 	);
 	const vertical = resolveAxis(
-		placement.vertical.offset,
+		placement.vertical,
 		placement.preferredHeight,
 		minimumSize,
 		viewport.height,
 	);
 	const size = Math.min(horizontal.size, vertical.size);
 	return {
-		left:
-			placement.horizontal.edge === "left"
-				? horizontal.offset
-				: viewport.width - horizontal.offset - size,
-		top:
-			placement.vertical.edge === "top"
-				? vertical.offset
-				: viewport.height - vertical.offset - size,
+		left: positionAxis(horizontal, size),
+		top: positionAxis(vertical, size),
 		width: size,
 		height: size,
 	};
+}
+
+/** Capture the closest viewport reference without changing the rendered axis geometry. */
+function anchorAxis(
+	start: number,
+	size: number,
+	viewportSize: number,
+): ClientHudAxisAnchor {
+	const offsets: Readonly<Record<ClientHudAxisAlignment, number>> = {
+		start,
+		center: start + size / 2 - viewportSize / 2,
+		end: viewportSize - start - size,
+	};
+	const alignments: readonly ClientHudAxisAlignment[] = [
+		"start",
+		"center",
+		"end",
+	];
+	const alignment = alignments.reduce((closest, candidate) =>
+		Math.abs(offsets[candidate]) < Math.abs(offsets[closest])
+			? candidate
+			: closest,
+	);
+	return { alignment, offset: offsets[alignment] };
 }
 
 /** Capture a rendered rectangle against whichever content edges are currently nearest. */
@@ -167,17 +209,9 @@ export function anchorClientHudPlacement(
 	const height = Math.min(Math.max(0, rectangle.height), viewport.height);
 	const left = clamp(rectangle.left, 0, viewport.width - width);
 	const top = clamp(rectangle.top, 0, viewport.height - height);
-	const right = viewport.width - left - width;
-	const bottom = viewport.height - top - height;
 	return {
-		horizontal:
-			left <= right
-				? { edge: "left", offset: left }
-				: { edge: "right", offset: right },
-		vertical:
-			top <= bottom
-				? { edge: "top", offset: top }
-				: { edge: "bottom", offset: bottom },
+		horizontal: anchorAxis(left, width, viewport.width),
+		vertical: anchorAxis(top, height, viewport.height),
 		preferredWidth: preferred.width,
 		preferredHeight: preferred.height,
 	};
@@ -229,40 +263,60 @@ export function resizeClientPanelRectangle(
 
 /** Build the first-cut HUD arrangement from the current viewport. */
 export function createDefaultClientHudLayout(
-	viewportWidth: number,
-	viewportHeight: number,
+	viewport: ClientHudViewport,
 	shortcutCount: number,
 ): ClientHudLayout {
 	const margin = 16;
 	const shortcutWidth = shortcutCount * 42;
-	const chatHeight = Math.min(450, Math.max(260, viewportHeight - 188));
+	const chatHeight = Math.min(450, Math.max(260, viewport.height - 188));
 	return {
 		character: {
-			horizontal: { edge: "left", offset: margin },
-			vertical: { edge: "top", offset: margin },
+			horizontal: { alignment: "start", offset: margin },
+			vertical: { alignment: "start", offset: margin },
 			preferredWidth: 340,
 			preferredHeight: 132,
 		},
 		chat: {
-			horizontal: { edge: "left", offset: margin },
-			vertical: { edge: "bottom", offset: margin },
+			horizontal: { alignment: "start", offset: margin },
+			vertical: { alignment: "end", offset: margin },
 			preferredWidth: 400,
 			preferredHeight: chatHeight,
 		},
-		fps: {
-			horizontal: {
-				edge: "left",
-				offset: Math.max(0, (viewportWidth - CLIENT_FPS_PANEL_WIDTH) / 2),
-			},
-			vertical: { edge: "top", offset: 8 },
+		diagnostics: {
+			horizontal: { alignment: "end", offset: margin },
+			vertical: { alignment: "start", offset: 260 },
+			preferredWidth: 330,
+			preferredHeight: 310,
+		},
+		frameRate: {
+			horizontal: { alignment: "center", offset: 0 },
+			vertical: { alignment: "start", offset: 8 },
 			preferredWidth: CLIENT_FPS_PANEL_WIDTH,
 			preferredHeight: 26,
 		},
+		jumpPower: {
+			horizontal: { alignment: "center", offset: 0 },
+			vertical: { alignment: "end", offset: 72 },
+			preferredWidth: CLIENT_JUMP_POWER_PANEL_SIZE.width,
+			preferredHeight: CLIENT_JUMP_POWER_PANEL_SIZE.height,
+		},
+		map: {
+			horizontal: { alignment: "end", offset: margin + 32 },
+			vertical: { alignment: "start", offset: margin },
+			preferredWidth: CLIENT_MAP_PANEL_SIZE,
+			preferredHeight: CLIENT_MAP_PANEL_SIZE,
+		},
 		shortcuts: {
-			horizontal: { edge: "right", offset: margin },
-			vertical: { edge: "bottom", offset: margin },
+			horizontal: { alignment: "end", offset: margin },
+			vertical: { alignment: "end", offset: margin },
 			preferredWidth: shortcutWidth,
 			preferredHeight: 42,
+		},
+		toast: {
+			horizontal: { alignment: "center", offset: 0 },
+			vertical: { alignment: "end", offset: 48 },
+			preferredWidth: CLIENT_TOAST_PANEL_SIZE.width,
+			preferredHeight: CLIENT_TOAST_PANEL_SIZE.height,
 		},
 	};
 }

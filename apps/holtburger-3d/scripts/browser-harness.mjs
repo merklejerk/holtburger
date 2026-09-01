@@ -50,9 +50,11 @@ const children = [];
 const tempDirectories = [];
 
 try {
-	const contentHostUrl = await startContentHost();
+	const contentHostUrl = options.clientHud ? null : await startContentHost();
 	const viteUrl = await startViteServer(options.vitePort);
-	const result = await runHarness({ contentHostUrl, viteUrl });
+	const result = options.clientHud
+		? await runClientHudHarness({ viteUrl })
+		: await runHarness({ contentHostUrl, viteUrl });
 	const browserErrors = result.consoleMessages.filter(
 		({ level }) => level === "error" || level === "exception",
 	);
@@ -76,7 +78,13 @@ try {
 		}
 	}
 	let report;
-	if (options.reportMode === "particle-sao") {
+	if (options.clientHud) {
+		report = {
+			clientHud: result.clientHud,
+			consoleMessages: result.consoleMessages,
+			viewport: result.state.viewport,
+		};
+	} else if (options.reportMode === "particle-sao") {
 		report = particleSaoHarnessReport(result);
 	} else if (options.reportMode === "nameplate") {
 		report = nameplateHarnessReport(result);
@@ -85,6 +93,7 @@ try {
 	} else {
 		report = {
 			glRenderer: result.glRenderer,
+			clientHud: result.clientHud,
 			buildingRadius: options.buildingRadius,
 			camera: result.state.camera,
 			envCellRadius: options.envCellRadius,
@@ -150,6 +159,7 @@ try {
 			`Browser harness observed browser errors: ${browserErrors.map(({ text }) => text).join(" | ")}`,
 		);
 	}
+	if (options.clientHud) assertClientHudHarness(result.clientHud);
 	if (options.nameplateWorkload !== null) {
 		const assertionState = options.nameplateLifecycle
 			? result.initialState
@@ -208,6 +218,7 @@ try {
 function parseArgs(args) {
 	const parsed = {
 		chromePath: process.env.CHROME_PATH ?? DEFAULT_CHROME_PATH,
+		clientHud: false,
 		reportMode: "full",
 		landblockId: DEFAULT_LANDBLOCK_ID,
 		buildingRadius: 0,
@@ -309,6 +320,9 @@ function parseArgs(args) {
 	for (let index = 0; index < args.length; index += 1) {
 		const arg = args[index];
 		switch (arg) {
+			case "--client-hud":
+				parsed.clientHud = true;
+				break;
 			case "--brief":
 				parsed.reportMode = "brief";
 				break;
@@ -1399,6 +1413,8 @@ Options:
   --settle-ms <ms>      Wait after requesting scene content. Default: ${DEFAULT_SETTLE_MS}
   --measure-ms <ms>     Reset timings after settling, then measure steady-state frames.
   --screenshot <path>   Persist the captured PNG after the harness exits.
+  --client-hud          Exercise runtime/layout HUD visibility, centered drag anchoring, and
+                         constrained viewport restoration using the deterministic client fixture.
   --relocate-sequence <hex,hex,...>
                          Re-issue scene interest at each landblock in turn, so sustained streaming
                          churn can be measured without the interactive client. Reports per-hop
@@ -3590,6 +3606,283 @@ async function placeEnvCellCamera(client, options) {
 	);
 }
 
+/** Exercise the production client HUD shell without starting a gameplay presentation runtime. */
+async function runClientHudHarness({ viteUrl }) {
+	const userDataDirectory = await mkdtemp(
+		join(tmpdir(), "holtburger-3d-client-hud-harness-"),
+	);
+	tempDirectories.push(userDataDirectory);
+	const pageUrl = `${viteUrl}/harness/browser/?client-hud=1`;
+	const chrome = startChild(options.chromePath, [
+		"--remote-debugging-port=0",
+		`--user-data-dir=${userDataDirectory}`,
+		"--no-first-run",
+		"--disable-background-networking",
+		"--headless=new",
+		`--window-size=${options.viewportWidth},${options.viewportHeight}`,
+		`--force-device-scale-factor=${options.deviceScaleFactor}`,
+		pageUrl,
+	]);
+	const browserWebSocketUrl = await waitForChromeDevToolsUrl(chrome);
+	const pageWebSocketUrl = await waitForPageWebSocketUrl(
+		browserWebSocketUrl,
+		pageUrl,
+	);
+	const client = await createCdpClient(pageWebSocketUrl);
+	try {
+		const consoleMessages = [];
+		client.on("Runtime.consoleAPICalled", (message) => {
+			consoleMessages.push({
+				level: message.type,
+				text: message.args
+					.map((argument) => argument.value ?? argument.description ?? "")
+					.join(" "),
+			});
+		});
+		client.on("Runtime.exceptionThrown", (message) => {
+			consoleMessages.push({
+				level: "exception",
+				text:
+					message.exceptionDetails.exception?.description ??
+					message.exceptionDetails.text ??
+					"Unspecified browser exception.",
+			});
+		});
+		await client.send("Runtime.enable");
+		await waitForClientHudHarnessApi(client);
+		const capture = () =>
+			evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.capture",
+				[],
+			);
+		const toggleMode = async () => {
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.toggleMode",
+				[],
+			);
+			await delay(180);
+		};
+
+		const runtime = await capture();
+		await toggleMode();
+		const layout = await capture();
+		const wideScreenshot = await client.send("Page.captureScreenshot", {
+			captureBeyondViewport: false,
+			format: "png",
+		});
+		await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.dragSurface",
+			["Jump power", 80, -16],
+		);
+		await delay(50);
+		const moved = await capture();
+
+		const narrowDimensions = {
+			height: options.viewportHeight,
+			width: Math.min(options.viewportWidth, 520),
+		};
+		await client.send("Emulation.setDeviceMetricsOverride", {
+			deviceScaleFactor: options.deviceScaleFactor,
+			height: narrowDimensions.height,
+			mobile: false,
+			width: narrowDimensions.width,
+		});
+		await delay(180);
+		const narrow = await capture();
+		const narrowScreenshot = await client.send("Page.captureScreenshot", {
+			captureBeyondViewport: false,
+			format: "png",
+		});
+
+		await client.send("Emulation.setDeviceMetricsOverride", {
+			deviceScaleFactor: options.deviceScaleFactor,
+			height: Math.min(options.viewportHeight, 360),
+			mobile: false,
+			width: narrowDimensions.width,
+		});
+		await delay(180);
+		const constrained = await capture();
+		const constrainedScreenshot = await client.send("Page.captureScreenshot", {
+			captureBeyondViewport: false,
+			format: "png",
+		});
+
+		await client.send("Emulation.setDeviceMetricsOverride", {
+			deviceScaleFactor: options.deviceScaleFactor,
+			height: options.viewportHeight,
+			mobile: false,
+			width: options.viewportWidth,
+		});
+		await delay(180);
+		const restored = await capture();
+		await toggleMode();
+		const runtimeRestored = await capture();
+		await toggleMode();
+		const layoutReopened = await capture();
+		await toggleMode();
+		await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.setRuntimeTransients",
+			[true],
+		);
+		await delay(180);
+		const runtimeTransients = await capture();
+
+		const clientHud = {
+			constrained,
+			layout,
+			layoutReopened,
+			moved,
+			narrow,
+			restored,
+			runtime,
+			runtimeRestored,
+			runtimeTransients,
+		};
+		return {
+			cameraSweepScreenshots: {
+				constrained: constrainedScreenshot.data,
+				narrow: narrowScreenshot.data,
+			},
+			clientHud,
+			consoleMessages,
+			screenshot: wideScreenshot.data,
+			state: {
+				error: null,
+				ready: true,
+				viewport: runtime.viewport,
+			},
+		};
+	} finally {
+		client.close();
+	}
+}
+
+function assertClientHudHarness(evidence) {
+	const runtimeLabels = [
+		"Character HUD",
+		"Chat",
+		"Frame rate",
+		"Game shortcuts",
+		"Overhead map",
+	].toSorted();
+	const layoutLabels = [
+		...runtimeLabels,
+		"Client diagnostics",
+		"Jump power",
+		"Notifications",
+	].toSorted();
+	assertClientHudLabels(evidence.runtime, "runtime", runtimeLabels);
+	assertClientHudLabels(evidence.layout, "layout", layoutLabels);
+	assertClientHudLabels(evidence.runtimeRestored, "runtime", runtimeLabels);
+	assertClientHudLabels(evidence.layoutReopened, "layout", layoutLabels);
+	assertClientHudLabels(
+		evidence.runtimeTransients,
+		"runtime",
+		[...runtimeLabels, "Jump power", "Notifications"].toSorted(),
+	);
+	if (
+		evidence.layout.toast?.preview !== true ||
+		evidence.layout.toast.role !== null ||
+		evidence.layout.toast.text !== "Notification preview"
+	) {
+		throw new Error(
+			`Client HUD layout toast is not an inert preview: ${JSON.stringify(evidence.layout.toast)}.`,
+		);
+	}
+	if (evidence.layout.jumpActionDisabled !== true) {
+		throw new Error("Client HUD layout jump action remained interactive.");
+	}
+	if (evidence.layout.diagnosticsCloseDisabled !== true) {
+		throw new Error(
+			"Client HUD layout diagnostics close action remained active.",
+		);
+	}
+	if (
+		evidence.runtimeTransients.toast?.preview !== false ||
+		evidence.runtimeTransients.toast.role !== "status" ||
+		evidence.runtimeTransients.jumpActionDisabled !== false
+	) {
+		throw new Error(
+			`Client HUD runtime transients did not retain live semantics: ${JSON.stringify(evidence.runtimeTransients)}.`,
+		);
+	}
+	for (const state of Object.values(evidence)) {
+		if (state.preciseJumpEnterCount !== 0) {
+			throw new Error(
+				"Client HUD layout preview dispatched precise-jump input.",
+			);
+		}
+	}
+	const movedOffset = clientHudHorizontalCenterOffset(
+		evidence.moved.surfaces["Jump power"],
+		evidence.moved.viewport,
+	);
+	for (const [name, state] of [
+		["narrow", evidence.narrow],
+		["constrained", evidence.constrained],
+		["restored", evidence.restored],
+		["layout-reopened", evidence.layoutReopened],
+	]) {
+		const offset = clientHudHorizontalCenterOffset(
+			state.surfaces["Jump power"],
+			state.viewport,
+		);
+		if (Math.abs(offset - movedOffset) > 1) {
+			throw new Error(
+				`Client HUD center offset drifted in ${name}: ${offset} versus ${movedOffset}.`,
+			);
+		}
+	}
+	for (const state of [
+		evidence.layout,
+		evidence.narrow,
+		evidence.constrained,
+	]) {
+		for (const [label, rectangle] of Object.entries(state.surfaces))
+			assertClientHudRectangleInsideViewport(label, rectangle, state.viewport);
+		for (const [label, rectangle] of Object.entries(state.moveHandles))
+			assertClientHudRectangleInsideViewport(
+				`${label} move handle`,
+				rectangle,
+				state.viewport,
+			);
+	}
+}
+
+function assertClientHudLabels(state, expectedMode, expectedLabels) {
+	const labels = Object.keys(state.surfaces).toSorted();
+	if (
+		state.mode !== expectedMode ||
+		JSON.stringify(labels) !== JSON.stringify(expectedLabels)
+	) {
+		throw new Error(
+			`Client HUD ${expectedMode} inventory mismatch: ${JSON.stringify({ labels, mode: state.mode })}.`,
+		);
+	}
+}
+
+function clientHudHorizontalCenterOffset(rectangle, viewport) {
+	return rectangle.left + rectangle.width / 2 - viewport.width / 2;
+}
+
+function assertClientHudRectangleInsideViewport(label, rectangle, viewport) {
+	const epsilon = 0.5;
+	if (
+		rectangle.left < -epsilon ||
+		rectangle.top < -epsilon ||
+		rectangle.left + rectangle.width > viewport.width + epsilon ||
+		rectangle.top + rectangle.height > viewport.height + epsilon
+	) {
+		throw new Error(
+			`Client HUD rectangle escaped the viewport: ${JSON.stringify({ label, rectangle, viewport })}.`,
+		);
+	}
+}
+
 async function runHarness({ contentHostUrl, viteUrl }) {
 	const userDataDirectory = await mkdtemp(
 		join(tmpdir(), "holtburger-3d-browser-harness-"),
@@ -5036,6 +5329,25 @@ async function waitForHarnessApi(client) {
 			);
 		}
 		await delay(250);
+	}
+}
+
+async function waitForClientHudHarnessApi(client) {
+	const startedAt = Date.now();
+	for (;;) {
+		if (
+			await evaluateExpression(
+				client,
+				"Boolean(globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__)",
+			)
+		)
+			return;
+		if (Date.now() - startedAt >= 60_000) {
+			throw new Error(
+				`Timed out waiting for client HUD harness API: ${JSON.stringify(await evaluateExpression(client, "({ text: document.body.innerText, title: document.title })"))}`,
+			);
+		}
+		await delay(100);
 	}
 }
 

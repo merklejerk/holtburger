@@ -3,6 +3,7 @@ import {
 	type FrontendUiDiagnosticsTuning,
 } from "../lib/frontend-tuning";
 import { SHARED_FRAME_SETTINGS } from "../lib/frontend-frame-settings";
+import type { PortalTransitionPolicy } from "../lib/client/portal-transition-controller";
 import type { FrameSettings } from "../lib/game/renderer/renderer";
 
 const CLIENT_DIAGNOSTICS = {
@@ -20,11 +21,24 @@ const CLIENT_FRAME_SETTINGS = {
 	showRetailHiddenGeometry: false,
 } as const satisfies FrameSettings;
 
+const CLIENT_PORTAL_TRANSITION = {
+	/** Lifecycle timing consumed once by the client transition controller. */
+	timing: {
+		/** Time available for the captured origin to warp into portal space. */
+		enterDurationMs: 1_000,
+		/** Time available for portal space to reveal the settled destination. */
+		exitDurationMs: 1_000,
+	} as const satisfies PortalTransitionPolicy,
+	/** Shared browser-frontend look selected explicitly by the client composition root. */
+	visual: SHARED_FRONTEND_TUNING.portalTransition.visual,
+} as const;
+
 /** Client-owned camera, scene-interest, diagnostics, and initial presentation policy. */
 export const CLIENT_TUNING = {
 	/** Shared audio policy selected explicitly by the client composition root. */
 	audio: SHARED_FRONTEND_TUNING.audio,
 	diagnostics: CLIENT_DIAGNOSTICS,
+	portalTransition: CLIENT_PORTAL_TRANSITION,
 	camera: {
 		/** Projection used by the host-authored third-person camera. */
 		far: 2_000,

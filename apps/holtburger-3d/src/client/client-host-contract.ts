@@ -240,6 +240,7 @@ const cameraFailureReasonSchema = z.enum([
 	"controller-input",
 	"path-projection",
 ]);
+const cameraConvergenceSchema = z.enum(["converging", "settled"]);
 const cameraTickSchema = z.discriminatedUnion("kind", [
 	z
 		.object({
@@ -253,6 +254,7 @@ const cameraTickSchema = z.discriminatedUnion("kind", [
 			renderedReach: finiteNumber.nonnegative(),
 			path: cameraPathSchema,
 			diagnostics: cameraDiagnosticsSchema,
+			convergence: cameraConvergenceSchema,
 		})
 		.strict(),
 	z
@@ -272,6 +274,7 @@ const cameraTickSchema = z.discriminatedUnion("kind", [
 				"placement-recovery",
 			]),
 			diagnostics: cameraDiagnosticsSchema,
+			convergence: cameraConvergenceSchema,
 		})
 		.strict(),
 	z
@@ -287,6 +290,7 @@ const cameraTickSchema = z.discriminatedUnion("kind", [
 			path: cameraPathSchema,
 			reason: cameraFailureReasonSchema,
 			diagnostics: cameraDiagnosticsSchema,
+			convergence: cameraConvergenceSchema,
 		})
 		.strict(),
 	z
@@ -300,6 +304,7 @@ const cameraTickSchema = z.discriminatedUnion("kind", [
 			path: cameraPathSchema,
 			reason: cameraFailureReasonSchema,
 			diagnostics: cameraDiagnosticsSchema,
+			convergence: cameraConvergenceSchema,
 		})
 		.strict(),
 ]);

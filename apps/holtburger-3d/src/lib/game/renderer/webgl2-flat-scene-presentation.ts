@@ -14,6 +14,11 @@ import {
 	type ColorGradeParameters,
 	type ColorGradeSettings,
 } from "./color-grade-policy";
+import type { PortalTransitionComposition } from "./portal-transition-composition";
+import {
+	validatePortalWarpDriveTuning,
+	type PortalWarpDriveTuning,
+} from "./portal-warp-drive-tuning";
 
 /** Stand-in until the first enabled frame bakes real gains; never reaches a graded draw. */
 const NEUTRAL_WHITE_BALANCE: ColorGradeChannelGains = {
@@ -27,14 +32,9 @@ const COLOR_GRADE_STRIP_TEXTURE_UNIT = 1;
 const OUTGOING_SCENE_TEXTURE_UNIT = 2;
 const TUNNEL_SCENE_TEXTURE_UNIT = 3;
 
-/** Renderer-owned outgoing snapshot fed into the final transition composite. */
-export interface FlatSceneTransitionInput {
-	readonly outgoingScene: WebGLTexture | null;
-	readonly progress: number;
-	/** Optional authored tunnel target composited after the outgoing-world blend. */
-	readonly tunnelScene?: WebGLTexture | null;
-	readonly tunnelOpacity?: number;
-}
+/** Exhaustive WebGL specialization of the pure flat-scene composition contract. */
+export type FlatScenePresentationInput =
+	PortalTransitionComposition<WebGLTexture>;
 
 const PRESENTATION_VERTEX_SHADER = `#version 300 es
 precision highp float;
@@ -61,10 +61,14 @@ uniform sampler2D uTunnelScene;
 uniform vec3 uWhiteBalance;
 uniform float uSaturation;
 uniform float uTransitionProgress;
-uniform float uTunnelOpacity;
 uniform int uColorGradeEnabled;
-uniform int uTransitionEnabled;
+uniform int uCompositionKind;
 uniform int uTunnelEnabled;
+uniform float uWarpAccelerationExponent;
+uniform float uWarpMaximumZoom;
+uniform vec2 uWarpRadialSmear;
+uniform float uWarpStreakIntensity;
+uniform float uWarpWorldOpacityExponent;
 layout(location = 0) out vec4 outColor;
 
 const vec3 LUMA_WEIGHTS = vec3(
@@ -108,24 +112,86 @@ vec3 applyColorGrade(vec3 color, vec2 pixel) {
 	return saturated + (ditherAmount(pixel) - 0.5) / 255.0;
 }
 
+/** Sample the origin on entry and the settled destination on the exact reverse exit path. */
+vec4 sampleTransitionWorld(vec2 uv) {
+	return
+		uCompositionKind == 1
+			? texture(uOutgoingScene, uv)
+			: texture(uSceneColor, uv);
+}
+
+vec2 warpDriveSourceUv(
+	vec2 radialPosition,
+	vec2 textureExtent,
+	float zoom
+) {
+	float minimumExtent = min(textureExtent.x, textureExtent.y);
+	return
+		0.5 + radialPosition / zoom * (minimumExtent * 0.5) / textureExtent;
+}
+
+/** Forward zoom plus radial sample history, evaluated backward for destination reveal. */
+vec4 sampleWarpDriveWorld(vec2 textureExtent, float acceleration) {
+	float minimumExtent = min(textureExtent.x, textureExtent.y);
+	vec2 radialPosition =
+		(gl_FragCoord.xy - textureExtent * 0.5) / (minimumExtent * 0.5);
+	float radius = length(radialPosition);
+	float easedAcceleration = acceleration * acceleration * (3.0 - 2.0 * acceleration);
+	float motion = pow(easedAcceleration, uWarpAccelerationExponent);
+	float radialWeight = smoothstep(uWarpRadialSmear.x, uWarpRadialSmear.y, radius);
+	float currentZoom = 1.0 + motion * radialWeight * (uWarpMaximumZoom - 1.0);
+	vec4 base = sampleTransitionWorld(
+		warpDriveSourceUv(radialPosition, textureExtent, currentZoom)
+	);
+	vec3 streak = vec3(0.0);
+	for (int sampleIndex = 0; sampleIndex < 12; sampleIndex += 1) {
+		float history = float(sampleIndex + 1) / 12.0;
+		float historyZoom = mix(1.0, currentZoom, history);
+		vec3 sampleColor = sampleTransitionWorld(
+			warpDriveSourceUv(radialPosition, textureExtent, historyZoom)
+		).rgb;
+		float luminance = dot(sampleColor, LUMA_WEIGHTS);
+		float highlight = smoothstep(0.65, 0.95, luminance);
+		streak += sampleColor * highlight;
+	}
+	float streakEnvelope = 4.0 * acceleration * (1.0 - acceleration);
+	return vec4(
+		base.rgb + streak / 12.0 * streakEnvelope * radialWeight * uWarpStreakIntensity,
+		base.a
+	);
+}
+
 void main() {
-	vec4 scene = texelFetch(uSceneColor, ivec2(gl_FragCoord.xy), 0);
-	if (uTransitionEnabled != 0) {
-		// RETAIL DIVERGENCE: the first pass keeps the compositor as a normalized screen-space
-		// blend; retail swaps viewport/FOV state while the portal is open
-		// (acclient.c:252638-252799). Correcting this would affect only the portal presentation
-		// pass, not activation or world state. The current census is one snapshot texture and this
-		// shader, so an authored tunnel can replace this seam without widening the state contract.
+	vec2 textureExtent = vec2(textureSize(uSceneColor, 0));
+	vec2 uv = gl_FragCoord.xy / textureExtent;
+	vec4 scene = texture(uSceneColor, uv);
+	if (uCompositionKind == 1 || uCompositionKind == 2) {
+		// RETAIL DIVERGENCE: retail drives portal entry/exit through viewport-distance changes
+		// (acclient.c:252720-252752); this client uses a bounded radial zoom-history smear so the
+		// effect works on both a retained origin and the settled destination. Replacing it with the
+		// retail projection change would alter only portal presentation. The blast radius is this pass,
+		// one optional origin texture, and one destination texture; world/camera state is untouched.
 		// The outgoing capture may retain the previous drawing-buffer extent during a resize. Sample
 		// by normalized screen coordinates so that old-sized frames remain valid warp sources.
-		vec2 outgoingUv = gl_FragCoord.xy / vec2(textureSize(uSceneColor, 0));
-		vec4 outgoing = texture(uOutgoingScene, outgoingUv);
-		scene = mix(outgoing, scene, clamp(uTransitionProgress, 0.0, 1.0));
-	}
-	if (uTunnelEnabled != 0) {
-		vec2 tunnelUv = gl_FragCoord.xy / vec2(textureSize(uSceneColor, 0));
-		vec4 tunnel = texture(uTunnelScene, tunnelUv);
-		scene = mix(scene, tunnel, clamp(uTunnelOpacity * tunnel.a, 0.0, 1.0));
+		float progress = clamp(uTransitionProgress, 0.0, 1.0);
+		float acceleration = uCompositionKind == 1 ? progress : 1.0 - progress;
+		float easedAcceleration = acceleration * acceleration * (3.0 - 2.0 * acceleration);
+		float motion = pow(easedAcceleration, uWarpAccelerationExponent);
+		vec4 world = sampleWarpDriveWorld(textureExtent, acceleration);
+		float worldOpacity = 1.0 - pow(motion, uWarpWorldOpacityExponent);
+		vec4 tunnelLayer = vec4(0.0, 0.0, 0.0, 1.0);
+		if (uTunnelEnabled != 0) {
+			vec4 tunnel = texture(uTunnelScene, uv);
+			tunnelLayer = mix(
+				tunnelLayer,
+				vec4(tunnel.rgb, 1.0),
+				clamp(tunnel.a, 0.0, 1.0)
+			);
+		}
+		scene = mix(tunnelLayer, world, worldOpacity);
+	} else if (uTunnelEnabled != 0) {
+		vec4 tunnel = texture(uTunnelScene, uv);
+		scene = mix(scene, tunnel, clamp(tunnel.a, 0.0, 1.0));
 	}
 	outColor =
 		uColorGradeEnabled != 0
@@ -145,9 +211,13 @@ export class WebGL2FlatScenePresentation {
 		readonly whiteBalance: WebGLUniformLocation;
 		readonly saturation: WebGLUniformLocation;
 		readonly transitionProgress: WebGLUniformLocation;
-		readonly tunnelOpacity: WebGLUniformLocation;
-		readonly transitionEnabled: WebGLUniformLocation;
+		readonly compositionKind: WebGLUniformLocation;
 		readonly tunnelEnabled: WebGLUniformLocation;
+		readonly warpAccelerationExponent: WebGLUniformLocation;
+		readonly warpMaximumZoom: WebGLUniformLocation;
+		readonly warpRadialSmear: WebGLUniformLocation;
+		readonly warpStreakIntensity: WebGLUniformLocation;
+		readonly warpWorldOpacityExponent: WebGLUniformLocation;
 		readonly enabled: WebGLUniformLocation;
 	};
 	/** Parameters the resident strip and gains were derived from; identity-compared for staleness. */
@@ -156,7 +226,11 @@ export class WebGL2FlatScenePresentation {
 	#whiteBalance: ColorGradeChannelGains = NEUTRAL_WHITE_BALANCE;
 	#destroyed = false;
 
-	constructor(gl: WebGL2RenderingContext) {
+	constructor(
+		gl: WebGL2RenderingContext,
+		warpDriveTuning: PortalWarpDriveTuning,
+	) {
+		validatePortalWarpDriveTuning(warpDriveTuning);
 		this.#gl = gl;
 		const previousProgram = gl.getParameter(
 			gl.CURRENT_PROGRAM,
@@ -212,15 +286,45 @@ export class WebGL2FlatScenePresentation {
 					program,
 					"uTransitionProgress",
 				),
-				tunnelOpacity: requireWebGL2Uniform(gl, program, "uTunnelOpacity"),
-				transitionEnabled: requireWebGL2Uniform(
+				compositionKind: requireWebGL2Uniform(gl, program, "uCompositionKind"),
+				tunnelEnabled: requireWebGL2Uniform(gl, program, "uTunnelEnabled"),
+				warpAccelerationExponent: requireWebGL2Uniform(
 					gl,
 					program,
-					"uTransitionEnabled",
+					"uWarpAccelerationExponent",
 				),
-				tunnelEnabled: requireWebGL2Uniform(gl, program, "uTunnelEnabled"),
+				warpMaximumZoom: requireWebGL2Uniform(gl, program, "uWarpMaximumZoom"),
+				warpRadialSmear: requireWebGL2Uniform(gl, program, "uWarpRadialSmear"),
+				warpStreakIntensity: requireWebGL2Uniform(
+					gl,
+					program,
+					"uWarpStreakIntensity",
+				),
+				warpWorldOpacityExponent: requireWebGL2Uniform(
+					gl,
+					program,
+					"uWarpWorldOpacityExponent",
+				),
 				enabled: requireWebGL2Uniform(gl, program, "uColorGradeEnabled"),
 			};
+			gl.uniform1f(
+				this.#uniforms.warpAccelerationExponent,
+				warpDriveTuning.accelerationExponent,
+			);
+			gl.uniform1f(this.#uniforms.warpMaximumZoom, warpDriveTuning.maximumZoom);
+			gl.uniform2f(
+				this.#uniforms.warpRadialSmear,
+				warpDriveTuning.radialSmear.startRadius,
+				warpDriveTuning.radialSmear.fullRadius,
+			);
+			gl.uniform1f(
+				this.#uniforms.warpStreakIntensity,
+				warpDriveTuning.streakIntensity,
+			);
+			gl.uniform1f(
+				this.#uniforms.warpWorldOpacityExponent,
+				warpDriveTuning.worldOpacityExponent,
+			);
 			this.#program = program;
 		} catch (cause) {
 			if (program) gl.deleteProgram(program);
@@ -258,7 +362,7 @@ export class WebGL2FlatScenePresentation {
 	present(
 		target: WebGL2FlatSceneTargetSet,
 		colorGrade: ColorGradeSettings,
-		transition: FlatSceneTransitionInput | undefined = undefined,
+		composition: FlatScenePresentationInput = { kind: "scene-only" },
 	): void {
 		if (this.#destroyed) {
 			throw new Error("Flat scene presentation has been destroyed.");
@@ -279,45 +383,35 @@ export class WebGL2FlatScenePresentation {
 		gl.depthFunc(gl.ALWAYS);
 		gl.useProgram(this.#program);
 		this.#applyColorGrade(colorGrade);
-		if (transition !== undefined) {
-			if (
-				!Number.isFinite(transition.progress) ||
-				transition.progress < 0 ||
-				transition.progress > 1
-			) {
-				throw new Error(
-					"Flat scene transition progress must be within [0, 1].",
-				);
-			}
-			const tunnelOpacity = transition.tunnelOpacity ?? 0;
-			if (
-				!Number.isFinite(tunnelOpacity) ||
-				tunnelOpacity < 0 ||
-				tunnelOpacity > 1
-			) {
-				throw new Error("Flat scene tunnel opacity must be within [0, 1].");
-			}
+		if (
+			composition.kind === "origin-to-tunnel" ||
+			composition.kind === "tunnel-to-destination"
+		) {
 			gl.uniform1i(
-				this.#uniforms.transitionEnabled,
-				transition.outgoingScene === null ? 0 : 1,
+				this.#uniforms.compositionKind,
+				composition.kind === "origin-to-tunnel" ? 1 : 2,
 			);
-			gl.uniform1f(this.#uniforms.transitionProgress, transition.progress);
-			gl.uniform1i(
-				this.#uniforms.tunnelEnabled,
-				transition.tunnelScene === null || transition.tunnelScene === undefined
-					? 0
-					: 1,
-			);
-			gl.uniform1f(this.#uniforms.tunnelOpacity, tunnelOpacity);
+			gl.uniform1f(this.#uniforms.transitionProgress, composition.progress);
+			gl.uniform1i(this.#uniforms.tunnelEnabled, 1);
 			gl.activeTexture(gl.TEXTURE0 + OUTGOING_SCENE_TEXTURE_UNIT);
-			gl.bindTexture(gl.TEXTURE_2D, transition.outgoingScene);
+			gl.bindTexture(
+				gl.TEXTURE_2D,
+				composition.kind === "origin-to-tunnel" ? composition.origin : null,
+			);
 			gl.activeTexture(gl.TEXTURE0 + TUNNEL_SCENE_TEXTURE_UNIT);
-			gl.bindTexture(gl.TEXTURE_2D, transition.tunnelScene ?? null);
+			gl.bindTexture(gl.TEXTURE_2D, composition.tunnel);
+		} else if (composition.kind === "tunnel-only") {
+			gl.uniform1i(this.#uniforms.compositionKind, 0);
+			gl.uniform1f(this.#uniforms.transitionProgress, 0);
+			gl.uniform1i(this.#uniforms.tunnelEnabled, 1);
+			gl.activeTexture(gl.TEXTURE0 + OUTGOING_SCENE_TEXTURE_UNIT);
+			gl.bindTexture(gl.TEXTURE_2D, null);
+			gl.activeTexture(gl.TEXTURE0 + TUNNEL_SCENE_TEXTURE_UNIT);
+			gl.bindTexture(gl.TEXTURE_2D, composition.tunnel);
 		} else {
-			gl.uniform1i(this.#uniforms.transitionEnabled, 0);
+			gl.uniform1i(this.#uniforms.compositionKind, 0);
 			gl.uniform1f(this.#uniforms.transitionProgress, 1);
 			gl.uniform1i(this.#uniforms.tunnelEnabled, 0);
-			gl.uniform1f(this.#uniforms.tunnelOpacity, 0);
 			gl.activeTexture(gl.TEXTURE0 + OUTGOING_SCENE_TEXTURE_UNIT);
 			gl.bindTexture(gl.TEXTURE_2D, null);
 			gl.activeTexture(gl.TEXTURE0 + TUNNEL_SCENE_TEXTURE_UNIT);

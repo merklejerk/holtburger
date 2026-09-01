@@ -467,10 +467,22 @@ export class ClientLifecycleSession {
 
 	#receiveLifecycle(payload: unknown): void {
 		const lifecycle = decodeClientLifecycle(payload);
+		if (
+			lifecycle.kind === "portal-space" &&
+			lifecycle.worldGeneration < this.#state.worldGeneration
+		)
+			return;
 		if (lifecycle.kind !== "entering-world") {
 			this.#entryRequestGuid = null;
 		}
-		this.#state = { ...this.#state, lifecycle };
+		this.#state = {
+			...this.#state,
+			lifecycle,
+			worldGeneration:
+				lifecycle.kind === "portal-space"
+					? lifecycle.worldGeneration
+					: this.#state.worldGeneration,
+		};
 		this.#emit({ type: "lifecycle", lifecycle });
 	}
 

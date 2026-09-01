@@ -3,13 +3,13 @@ import {
 	createLandblockWorldOrigin,
 	getLandblockCoordinates,
 	landblockChebyshevDistance,
+	normalizeLandblockOwner,
 } from "../landblocks";
 import { farTerrainCutoffLandblocks } from "../environment/terrain-fog";
 import {
 	createPerspectiveMat4,
 	createViewMat4,
 	createRotationMat4,
-	createTranslationMat4,
 	mat4ToFloat32Array,
 	multiplyMat4,
 	transformPoint3,
@@ -49,12 +49,18 @@ import {
 	type RendererFrameFeedback,
 	type FrameViewInput,
 	type PortalTransitionFrame,
+	type PortalTransitionOnlyFrameInput,
 	type PortalTransitionVisual,
 	type Renderer,
 	type ResolvedResourceInvalidation,
 	type WorldIndicatorInput,
 	type WorldMarkerInput,
 } from "./renderer";
+import { portalTunnelRollRadians } from "../../client/portal-transition-visual";
+import {
+	type PortalTransitionPresentationReceipt,
+	validatePortalTransitionPresentationPlan,
+} from "../../client/portal-transition-presentation";
 import { renderCullingGroupFilter } from "./render-layer-visibility";
 import {
 	landblockVec3,
@@ -255,8 +261,10 @@ import {
 } from "./webgl2-flat-scene-target";
 import {
 	WebGL2FlatScenePresentation,
-	type FlatSceneTransitionInput,
+	type FlatScenePresentationInput,
 } from "./webgl2-flat-scene-presentation";
+import type { PortalWarpDriveTuning } from "./portal-warp-drive-tuning";
+import { resolvePortalTransitionComposition } from "./portal-transition-composition";
 import { WebGL2TransitionSnapshot } from "./webgl2-transition-snapshot";
 import {
 	AMBIENT_OCCLUSION_DISTANCE_FADE,
@@ -266,8 +274,8 @@ import {
 import { WebGL2SaoPass, type WebGL2SaoCoverageCensus } from "./webgl2-sao-pass";
 import { composeObjectPartTransform } from "../resolution/object-part-transform";
 import {
-	sampleAnimationPose,
 	playingClip,
+	sampleAnimationPose,
 	type PlayingClip,
 } from "../animation/animation-playback";
 
@@ -377,6 +385,18 @@ const PORTAL_TRANSITION_LIGHTING = {
 	sunColor: { red: 1, green: 1, blue: 1, alpha: 1 },
 } as const;
 const PORTAL_TRANSITION_SCOPE = "portal-transition";
+const PORTAL_TRANSITION_ANCHOR = normalizeLandblockOwner("0x0000ffff");
+const PORTAL_TRANSITION_CAMERA: Camera = {
+	far: 100,
+	fov: 75,
+	near: 0.01,
+	placement: {
+		envCellId: null,
+		landblockId: PORTAL_TRANSITION_ANCHOR,
+		position: sceneVec3(Vec3.zero()),
+		rotation: Quat.identity(),
+	},
+};
 
 interface TerrainFrameInput {
 	/** Logical geometry and texture identities for one landblock's terrain. */
@@ -652,6 +672,7 @@ interface MutableFrameSelectionMetrics {
 	portalFramebufferCount: number;
 	portalTargetBytes: number;
 	portalTransitionSnapshotBytes: number;
+	portalTransitionOriginCaptured: boolean;
 	portalTransitionSnapshotAllocatedGenerationCount: number;
 	portalTransitionSnapshotDisposedGenerationCount: number;
 	portalTransitionFramebufferCount: number;
@@ -659,7 +680,8 @@ interface MutableFrameSelectionMetrics {
 	submittedPortalTransitionDrawCount: number;
 	portalTransitionVisualInstalled: boolean;
 	portalTransitionGeneration: number | null;
-	portalTransitionPhase: PortalTransitionFrame["phase"] | null;
+	portalTransitionKind: PortalTransitionFrame["kind"] | null;
+	portalTransitionOnlyFramePresented: boolean;
 	flatSceneFramebufferCount: number;
 	flatSceneTargetBytes: number;
 	flatSceneAllocatedGenerationCount: number;
@@ -761,6 +783,8 @@ export class WebGL2Renderer implements Renderer {
 	readonly #gl: WebGL2RenderingContext;
 	readonly #resources: WebGL2ResourceManager;
 	readonly #textureSamplers: WebGL2TextureSamplerCatalog;
+	/** Frontend-selected portal look consumed only by the lazy fullscreen presenter. */
+	readonly #portalWarpDriveTuning: PortalWarpDriveTuning;
 	/** Device-wide guard preventing draws through any stale handle after context loss. */
 	readonly #assertDeviceReady: () => void;
 	readonly #frameInstances: FrameInstanceStreamArena;
@@ -911,6 +935,7 @@ export class WebGL2Renderer implements Renderer {
 		portalFramebufferCount: 0,
 		portalTargetBytes: 0,
 		portalTransitionSnapshotBytes: 0,
+		portalTransitionOriginCaptured: false,
 		portalTransitionSnapshotAllocatedGenerationCount: 0,
 		portalTransitionSnapshotDisposedGenerationCount: 0,
 		portalTransitionFramebufferCount: 0,
@@ -918,7 +943,8 @@ export class WebGL2Renderer implements Renderer {
 		submittedPortalTransitionDrawCount: 0,
 		portalTransitionVisualInstalled: false,
 		portalTransitionGeneration: null,
-		portalTransitionPhase: null,
+		portalTransitionKind: null,
+		portalTransitionOnlyFramePresented: false,
 		flatSceneFramebufferCount: 0,
 		flatSceneTargetBytes: 0,
 		flatSceneAllocatedGenerationCount: 0,
@@ -973,6 +999,7 @@ export class WebGL2Renderer implements Renderer {
 		resources: WebGL2ResourceManager,
 		world: RenderWorld,
 		textureFilteringSupport: WebGL2TextureFilteringSupport,
+		portalWarpDriveTuning: PortalWarpDriveTuning,
 		assertDeviceReady: () => void,
 	): Promise<WebGL2Renderer> {
 		return new WebGL2Renderer(
@@ -981,6 +1008,7 @@ export class WebGL2Renderer implements Renderer {
 			resources,
 			world,
 			textureFilteringSupport,
+			portalWarpDriveTuning,
 			assertDeviceReady,
 		);
 	}
@@ -991,6 +1019,7 @@ export class WebGL2Renderer implements Renderer {
 		resources: WebGL2ResourceManager,
 		world: RenderWorld,
 		textureFilteringSupport: WebGL2TextureFilteringSupport,
+		portalWarpDriveTuning: PortalWarpDriveTuning,
 		assertDeviceReady: () => void,
 	) {
 		this.#canvas = canvas;
@@ -998,6 +1027,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#resources = resources;
 		this.#world = world;
 		this.#assertDeviceReady = assertDeviceReady;
+		this.#portalWarpDriveTuning = portalWarpDriveTuning;
 		this.#worldMarkerPass = new WebGL2WorldMarkerPass(gl);
 		this.#worldTrajectoryPass = new WebGL2WorldTrajectoryPass(gl);
 		this.#textureSamplers = new WebGL2TextureSamplerCatalog(
@@ -1100,6 +1130,9 @@ export class WebGL2Renderer implements Renderer {
 		try {
 			this.#drawFrameContent(input, profile);
 			return Object.freeze({
+				portalTransitionReceipt: portalTransitionPresentationReceipt(
+					input.portalTransition,
+				),
 				selectedDynamicNodeIds: Object.freeze([
 					...this.#selectedDynamicNodeIds,
 				]),
@@ -1107,6 +1140,43 @@ export class WebGL2Renderer implements Renderer {
 		} finally {
 			profile?.finish();
 		}
+	}
+
+	/** Present the authored portal room without querying or advancing the render world. */
+	drawPortalTransitionFrame(
+		input: PortalTransitionOnlyFrameInput,
+	): PortalTransitionPresentationReceipt | null {
+		this.#assertDeviceReady();
+		const profile = this.#frameProfiler?.beginFrame() ?? null;
+		try {
+			this.#drawPortalTransitionFrameContent(input, profile);
+			return portalTransitionPresentationReceipt(input.portalTransition);
+		} finally {
+			profile?.finish();
+		}
+	}
+
+	clearPresentation(): void {
+		this.#assertDeviceReady();
+		// Exceptional presentation failure is a clean cutover: stale portal/origin resources must not
+		// remain live behind the explicit black error surface.
+		this.#activeTransition = null;
+		this.#transitionSnapshot?.clear();
+		this.#transitionSnapshotGeneration = null;
+		this.#portalTransitionTarget?.destroy();
+		this.#portalTransitionTarget = null;
+		// `clearPresentation` is itself an observable presentation edge. Refresh the owned-resource
+		// facts now so failure diagnostics cannot report targets that this call already destroyed.
+		this.#frameSelectionMetrics.portalTransitionOnlyFramePresented = false;
+		this.#updateRenderTargetMetrics();
+		const gl = this.#gl;
+		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+		gl.viewport(0, 0, this.#frameWidth, this.#frameHeight);
+		gl.clearColor(0, 0, 0, 1);
+		gl.colorMask(true, true, true, true);
+		gl.depthMask(true);
+		gl.stencilMask(0xff);
+		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
 	}
 
 	/** Install one validated setup/animation pair for the transition-only authored tunnel pass. */
@@ -1121,7 +1191,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#portalTransitionVisual = visual;
 		this.#portalTransitionClip = playingClip(
 			visual.animation,
-			0,
+			visual.lowFrame,
 			visual.animation.frameCount - 1,
 			visual.animation.framesPerSecond,
 			"loop",
@@ -1342,6 +1412,45 @@ export class WebGL2Renderer implements Renderer {
 		void input.timeSeconds;
 	}
 
+	#drawPortalTransitionFrameContent(
+		input: PortalTransitionOnlyFrameInput,
+		profile: WebGL2FrameProfileCapture | null,
+	): void {
+		const setupStartedAt = profile?.beginCpuPhase();
+		this.#frameTextureFiltering = input.frameSettings.quality.textureFiltering;
+		if (this.#compiledTextureFiltering !== this.#frameTextureFiltering) {
+			if (this.#compiledTextureFiltering !== null) {
+				this.#compiledDraws.flush("texture-filtering");
+			}
+			this.#compiledTextureFiltering = this.#frameTextureFiltering;
+		}
+		this.#frameColorGrade = input.frameSettings.colorGrade;
+		validateRenderScale(
+			input.frameSettings.quality.renderScale,
+			"Frame settings",
+		);
+		this.#renderScale = input.frameSettings.quality.renderScale;
+		this.#prepareTransitionSnapshot(input.portalTransition);
+		this.#applyRenderExtent(input.extent);
+		this.#activeTransition = input.portalTransition;
+		this.#resetFrameSelectionMetrics(0, input.frameSettings.envCellRenderMode);
+		this.#frameSelectionMetrics.portalTransitionOnlyFramePresented = true;
+		if (profile && setupStartedAt !== undefined) {
+			profile.finishCpuPhase("setup", setupStartedAt);
+		}
+
+		const target = this.#acquireFlatSceneTarget();
+		this.#beginFlatOpaqueScene(target);
+		this.#drawPortalTransitionTunnel(
+			target,
+			input.frameSettings.showRetailHiddenGeometry,
+			profile,
+		);
+		this.#presentFlatScene(target, profile);
+		this.#updateRenderTargetMetrics();
+		this.#finishFrameSelectionMetrics();
+	}
+
 	#setFrameProfilingEnabled(enabled: boolean): void {
 		this.#assertDeviceReady();
 		if (enabled) {
@@ -1429,6 +1538,8 @@ export class WebGL2Renderer implements Renderer {
 		const transitionSnapshot = this.#transitionSnapshot?.getDiagnostics();
 		this.#frameSelectionMetrics.portalTransitionSnapshotBytes =
 			transitionSnapshot?.activeBytes ?? 0;
+		this.#frameSelectionMetrics.portalTransitionOriginCaptured =
+			(transitionSnapshot?.activeBytes ?? 0) > 0;
 		this.#frameSelectionMetrics.portalTransitionSnapshotAllocatedGenerationCount =
 			transitionSnapshot?.allocatedGenerationCount ?? 0;
 		this.#frameSelectionMetrics.portalTransitionSnapshotDisposedGenerationCount =
@@ -1442,8 +1553,8 @@ export class WebGL2Renderer implements Renderer {
 			this.#portalTransitionVisual !== null;
 		this.#frameSelectionMetrics.portalTransitionGeneration =
 			this.#activeTransition?.generation ?? null;
-		this.#frameSelectionMetrics.portalTransitionPhase =
-			this.#activeTransition?.phase ?? null;
+		this.#frameSelectionMetrics.portalTransitionKind =
+			this.#activeTransition?.kind ?? null;
 		const flatTarget = this.#flatSceneTarget;
 		this.#frameSelectionMetrics.flatSceneFramebufferCount =
 			flatTarget?.activeFramebufferCount ?? 0;
@@ -1667,8 +1778,6 @@ export class WebGL2Renderer implements Renderer {
 			});
 		}
 		this.#drawPortalTransitionTunnel(
-			view,
-			shading,
 			target,
 			frameSettings.showRetailHiddenGeometry,
 			profile,
@@ -2597,6 +2706,7 @@ export class WebGL2Renderer implements Renderer {
 		metrics.portalFramebufferCount = 0;
 		metrics.portalTargetBytes = 0;
 		metrics.portalTransitionSnapshotBytes = 0;
+		metrics.portalTransitionOriginCaptured = false;
 		metrics.portalTransitionSnapshotAllocatedGenerationCount = 0;
 		metrics.portalTransitionSnapshotDisposedGenerationCount = 0;
 		metrics.portalTransitionFramebufferCount = 0;
@@ -2604,7 +2714,8 @@ export class WebGL2Renderer implements Renderer {
 		metrics.submittedPortalTransitionDrawCount = 0;
 		metrics.portalTransitionVisualInstalled = false;
 		metrics.portalTransitionGeneration = null;
-		metrics.portalTransitionPhase = null;
+		metrics.portalTransitionKind = null;
+		metrics.portalTransitionOnlyFramePresented = false;
 		metrics.flatSceneFramebufferCount = 0;
 		metrics.flatSceneTargetBytes = 0;
 		metrics.flatSceneAllocatedGenerationCount = 0;
@@ -2963,13 +3074,7 @@ export class WebGL2Renderer implements Renderer {
 			this.#drawWorldTrajectory(view, indicator.trajectory, null);
 		if (indicator !== null) this.#drawWorldMarker(view, indicator.marker, null);
 		this.#gl.bindVertexArray(null);
-		this.#drawPortalTransitionTunnel(
-			view,
-			shading,
-			target,
-			showRetailHiddenGeometry,
-			profile,
-		);
+		this.#drawPortalTransitionTunnel(target, showRetailHiddenGeometry, profile);
 		this.#presentFlatScene(target, profile);
 	}
 
@@ -3024,8 +3129,6 @@ export class WebGL2Renderer implements Renderer {
 	 * by ordinary setup visuals.
 	 */
 	#drawPortalTransitionTunnel(
-		view: PreparedView,
-		shading: SceneShading,
 		sceneTarget: WebGL2FlatSceneTargetSet,
 		showRetailHiddenGeometry: boolean,
 		profile: WebGL2FrameProfileCapture | null,
@@ -3035,7 +3138,7 @@ export class WebGL2Renderer implements Renderer {
 		const clip = this.#portalTransitionClip;
 		if (
 			transition === null ||
-			transition.phase === "revealed-awaiting-handoff" ||
+			transition.kind === "destination-only-awaiting-handoff" ||
 			visual === null ||
 			clip === null
 		) {
@@ -3049,19 +3152,28 @@ export class WebGL2Renderer implements Renderer {
 		const startedAt = profile?.beginCpuPhase();
 		try {
 			this.#beginPortalTransitionTarget(target);
+			const view = this.#prepareViewGeometry(PORTAL_TRANSITION_ANCHOR, {
+				camera: PORTAL_TRANSITION_CAMERA,
+				cameraInsideSealedCell: false,
+			});
 			// `animationFramePosition` is already a fractional cursor advanced at render cadence.
 			// The authored 40 fps rate belongs to traversal, not to the display refresh cap.
-			const framePosition = Math.max(0, transition.animationFramePosition ?? 0);
+			const framePosition = transition.tunnel.animationFramePosition;
 			const partPoses = sampleAnimationPose(clip, framePosition);
-			const currentCameraWorld = multiplyMat4(
-				createTranslationMat4(view.cameraPosition),
-				createRotationMat4(view.camera.placement.rotation),
-			);
 			const portalView = createViewMat4(
 				new Vec3(0.24, -2.7, 0.88),
 				Quat.identity(),
 			);
-			const portalCameraWorld = multiplyMat4(currentCameraWorld, portalView);
+			const roll = portalTunnelRollRadians(
+				transition.generation,
+				transition.tunnel.axialRollFramePosition,
+			);
+			const portalCameraWorld = multiplyMat4(
+				portalView,
+				createRotationMat4(
+					new Quat(Math.cos(roll / 2), 0, 0, Math.sin(roll / 2)),
+				),
+			);
 			const objects: PreparedObjectFrameInput[] = [];
 			for (const part of visual.template.parts) {
 				const pose = partPoses[part.partIndex];
@@ -3131,11 +3243,12 @@ export class WebGL2Renderer implements Renderer {
 				particles: [],
 				skyParticles: [],
 				terrain: [],
+				entityGrounding: null,
 			};
 			const portalShading: SceneShading = {
-				...shading,
 				authoredLightResponse: 0,
 				ambientOcclusion: { kind: "disabled" },
+				anchorOrigin: { x: 0, z: 0 },
 				dynamicLights: [],
 				fog: null,
 				sky: null,
@@ -3228,6 +3341,7 @@ export class WebGL2Renderer implements Renderer {
 			const transition = this.#transitionPresentationInput();
 			(this.#flatScenePresentation ??= new WebGL2FlatScenePresentation(
 				this.#gl,
+				this.#portalWarpDriveTuning,
 			)).present(target, this.#frameColorGrade, transition);
 		} finally {
 			presentationGpu?.finish();
@@ -3235,11 +3349,15 @@ export class WebGL2Renderer implements Renderer {
 		const activeTransition = this.#activeTransition;
 		if (
 			activeTransition === null ||
-			activeTransition.phase === "revealed-awaiting-handoff" ||
-			activeTransition.progress >= 1
+			activeTransition.kind !== "origin-to-tunnel"
 		) {
 			this.#transitionSnapshot?.clear();
 			this.#transitionSnapshotGeneration = null;
+		}
+		if (
+			activeTransition === null ||
+			activeTransition.kind === "destination-only-awaiting-handoff"
+		) {
 			this.#portalTransitionTarget?.destroy();
 			this.#portalTransitionTarget = null;
 		}
@@ -3251,32 +3369,18 @@ export class WebGL2Renderer implements Renderer {
 	#prepareTransitionSnapshot(transition: FrameInput["portalTransition"]): void {
 		if (
 			transition === undefined ||
-			transition.phase === "revealed-awaiting-handoff"
+			transition.kind === "destination-only-awaiting-handoff"
 		) {
 			this.#transitionSnapshot?.clear();
 			this.#transitionSnapshotGeneration = null;
 			return;
 		}
-		if (
-			!Number.isSafeInteger(transition.generation) ||
-			transition.generation < 0
-		) {
-			throw new Error(
-				"Portal transition generation must be a non-negative safe integer.",
-			);
-		}
-		if (
-			!Number.isFinite(transition.progress) ||
-			transition.progress < 0 ||
-			transition.progress > 1
-		) {
-			throw new Error("Portal transition progress must be within [0, 1].");
-		}
+		validatePortalTransitionPresentationPlan(transition);
 		if (this.#transitionSnapshotGeneration !== transition.generation) {
 			this.#transitionSnapshot?.clear();
 			this.#transitionSnapshotGeneration = transition.generation;
 		}
-		if (!transition.outgoingAvailable) {
+		if (transition.kind !== "origin-to-tunnel") {
 			this.#transitionSnapshot?.clear();
 			return;
 		}
@@ -3296,26 +3400,14 @@ export class WebGL2Renderer implements Renderer {
 	}
 
 	/** Convert renderer-owned snapshot state into the final presenter input. */
-	#transitionPresentationInput(): FlatSceneTransitionInput | undefined {
+	#transitionPresentationInput(): FlatScenePresentationInput {
 		const transition = this.#activeTransition;
-		if (transition === null) return undefined;
 		const snapshot = this.#transitionSnapshot?.getCurrentTarget();
 		const tunnel = this.#portalTransitionTarget?.getCurrentTarget();
-		if (snapshot === null && tunnel === null) return undefined;
-		const tunnelOpacity =
-			tunnel === null
-				? 0
-				: transition.phase === "exiting"
-					? 1 - transition.progress
-					: transition.phase === "revealed-awaiting-handoff"
-						? 0
-						: 1;
-		return {
-			outgoingScene: snapshot?.texture ?? null,
-			progress: transition.progress,
-			tunnelOpacity,
-			tunnelScene: tunnel?.color ?? null,
-		};
+		return resolvePortalTransitionComposition(transition ?? undefined, {
+			origin: snapshot?.texture ?? null,
+			tunnel: tunnel?.color ?? null,
+		});
 	}
 
 	/** Bind and clear one complete flat-scene target before any world submission. */
@@ -4834,4 +4926,16 @@ function createObjectFallbackTexture(gl: WebGL2RenderingContext): WebGLTexture {
 	} finally {
 		gl.bindTexture(gl.TEXTURE_2D, null);
 	}
+}
+
+function portalTransitionPresentationReceipt(
+	transition: PortalTransitionFrame | undefined,
+): PortalTransitionPresentationReceipt | null {
+	if (
+		transition?.kind === "tunnel-only" ||
+		transition?.kind === "destination-only-awaiting-handoff"
+	) {
+		return { kind: transition.kind, generation: transition.generation };
+	}
+	return null;
 }

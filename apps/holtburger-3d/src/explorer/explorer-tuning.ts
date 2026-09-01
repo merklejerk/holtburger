@@ -3,6 +3,7 @@ import {
 	type FrontendUiDiagnosticsTuning,
 } from "../lib/frontend-tuning";
 import { SHARED_FRAME_SETTINGS } from "../lib/frontend-frame-settings";
+import type { PortalTransitionPolicy } from "../lib/client/portal-transition-controller";
 import type { FrameSettings } from "../lib/game/renderer/renderer";
 
 const EXPLORER_DIAGNOSTICS = {
@@ -19,6 +20,17 @@ const EXPLORER_TUNING_OVERRIDES = {
 	/** Shared audio policy selected explicitly by the Explorer composition root. */
 	audio: SHARED_FRONTEND_TUNING.audio,
 	diagnostics: EXPLORER_DIAGNOSTICS,
+	portalTransition: {
+		/** Lifecycle timing consumed once by the Explorer transition controller. */
+		timing: {
+			/** Time available for the previous Explorer view to enter portal space. */
+			enterDurationMs: 1_000,
+			/** Time available for portal space to reveal the installed Explorer view. */
+			exitDurationMs: 1_000,
+		} as const satisfies PortalTransitionPolicy,
+		/** Shared browser-frontend look selected explicitly by the Explorer composition root. */
+		visual: SHARED_FRONTEND_TUNING.portalTransition.visual,
+	},
 	camera: {
 		controls: {
 			/** Seconds over which held keyboard movement reaches full speed. */

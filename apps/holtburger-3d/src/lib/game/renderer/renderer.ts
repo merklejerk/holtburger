@@ -10,6 +10,10 @@ import type { SceneVec3, SceneVector3 } from "../../assets/ac-frame";
 import { LandblockLayerKind } from "../runtime/scene-interest";
 import type { PreparedAnimation } from "../animation/animation-asset-repository";
 import type { ObjectVisualTemplate } from "../systems/object-visual-template-repository";
+import type {
+	PortalTransitionPresentationPlan,
+	PortalTransitionPresentationReceipt,
+} from "../../client/portal-transition-presentation";
 
 /** Minimal read side of the outdoor light index the renderer depends on. */
 export interface OutdoorLightLookup {
@@ -105,36 +109,43 @@ export interface FrameViewInput {
 }
 
 /**
- * Presentation-only portal composition state.
+ * Runtime-owned visual sample for portal plans that require the authored tunnel.
  *
- * The renderer owns the outgoing snapshot and any tunnel target; callers provide only the
- * generation-independent state edge and progress. This keeps transition resources out of world
- * authority and lets a later authored warp replace the simple blend without changing lifecycle
- * contracts.
+ * The renderer owns the outgoing snapshot and tunnel target. The runtime contributes only these
+ * independent authored clocks; it cannot reinterpret the controller's complete composition plan.
  */
-export interface PortalTransitionFrame {
-	/** Authority generation used to reject a snapshot from a superseded transition. */
-	readonly generation: number;
-	readonly phase:
-		"entering" | "waiting" | "exiting" | "revealed-awaiting-handoff";
-	/** Monotonic presentation progress in [0, 1], meaningful during `exiting`. */
-	readonly progress: number;
-	/** Whether the controller captured a finished outgoing world for this generation. */
-	readonly outgoingAvailable: boolean;
-	/**
-	 * Fractional authored frame position sampled at render cadence.
-	 *
-	 * The portal's 40 fps value is the authored traversal rate, not a render cap. Keeping the
-	 * already-fractional cursor here lets the renderer use the same rigid-pose sampler as ordinary
-	 * authored animations without quantising a 60/120 Hz frame to an integer animation frame.
-	 */
-	readonly animationFramePosition?: number;
+export interface PortalTunnelVisualSample {
+	/** Fractional authored frame position sampled at render cadence. */
+	readonly animationFramePosition: number;
+	/** Monotonic generation-local clock for independent retail-inspired axial roll. */
+	readonly axialRollFramePosition: number;
 }
+
+/** Complete presentation plan enriched only with the authored tunnel sample it requires. */
+export type PortalTransitionFrame =
+	| (Extract<
+			PortalTransitionPresentationPlan,
+			{ readonly kind: "origin-to-tunnel" }
+	  > & { readonly tunnel: PortalTunnelVisualSample })
+	| (Extract<
+			PortalTransitionPresentationPlan,
+			{ readonly kind: "tunnel-only" }
+	  > & { readonly tunnel: PortalTunnelVisualSample })
+	| (Extract<
+			PortalTransitionPresentationPlan,
+			{ readonly kind: "tunnel-to-destination" }
+	  > & { readonly tunnel: PortalTunnelVisualSample })
+	| Extract<
+			PortalTransitionPresentationPlan,
+			{ readonly kind: "destination-only-awaiting-handoff" }
+	  >;
 
 /** Prepared setup visual and animation retained for the transition-only authored tunnel pass. */
 export interface PortalTransitionVisual {
 	readonly template: ObjectVisualTemplate;
 	readonly animation: PreparedAnimation;
+	/** Inclusive authored sequence entry frame selected by retail portal playback. */
+	readonly lowFrame: number;
 }
 
 /** Immutable renderer input carrying frame state rather than preassembled draw submissions. */
@@ -171,6 +182,19 @@ export interface FrameInput {
 	readonly views: readonly FrameViewInput[];
 	/** Optional frontend-resolved precise-jump indicator; absent frames draw no marker or curve. */
 	readonly worldIndicator?: WorldIndicatorInput | null;
+}
+
+/** Minimal presentation input for portal-space frames that must not observe or advance a world. */
+export interface PortalTransitionOnlyFrameInput {
+	/** Physical presentation target size for the transition framebuffer. */
+	readonly extent: RenderExtent;
+	/** Display policy still required by the shared presentation pass. */
+	readonly frameSettings: FrameSettings;
+	/** Generation-current complete portal presentation instruction. */
+	readonly portalTransition: Extract<
+		PortalTransitionFrame,
+		{ readonly kind: "origin-to-tunnel" | "tunnel-only" }
+	>;
 }
 
 /** One atomic precise-jump presentation snapshot. */
@@ -285,6 +309,8 @@ export interface FrameSelectionMetrics {
 	readonly portalTargetBytes: number;
 	/** Exact live RGBA8 bytes retained for the outgoing transition snapshot. */
 	readonly portalTransitionSnapshotBytes: number;
+	/** Whether the current transition owns an origin snapshot. */
+	readonly portalTransitionOriginCaptured: boolean;
 	/** Transition snapshot generations allocated over this renderer lifetime. */
 	readonly portalTransitionSnapshotAllocatedGenerationCount: number;
 	/** Transition snapshot generations released over this renderer lifetime. */
@@ -299,9 +325,11 @@ export interface FrameSelectionMetrics {
 	readonly portalTransitionVisualInstalled: boolean;
 	/** Current transition generation, or null when the compositor is idle. */
 	readonly portalTransitionGeneration: number | null;
-	/** Current transition state, or null when the compositor is idle. */
-	readonly portalTransitionPhase:
-		"entering" | "waiting" | "exiting" | "revealed-awaiting-handoff" | null;
+	/** Current complete presentation instruction, or null when the compositor is idle. */
+	readonly portalTransitionKind:
+		PortalTransitionPresentationPlan["kind"] | null;
+	/** Whether the most recent presented frame used the transition-only schedule. */
+	readonly portalTransitionOnlyFramePresented: boolean;
 	/** Live framebuffer owned by the unconditional flat-scene target generation. */
 	readonly flatSceneFramebufferCount: number;
 	/** Exact live color/depth texture bytes owned by the flat-scene target generation. */
@@ -674,6 +702,8 @@ export interface RendererFrameDiagnostics {
 export interface RendererFrameFeedback {
 	/** Dynamic roots selected in at least one view, deduplicated across the frame. */
 	readonly selectedDynamicNodeIds: readonly SceneNodeId[];
+	/** Visible-surface proof for a transition barrier completed by this frame. */
+	readonly portalTransitionReceipt: PortalTransitionPresentationReceipt | null;
 }
 
 /**
@@ -743,6 +773,12 @@ export interface Renderer {
 	readonly particles?: RendererParticleCapability;
 	/** Install the already prepared authored portal visual, when this backend can draw it. */
 	installPortalTransitionVisual?(visual: PortalTransitionVisual): void;
+	/** Draw portal space without a committed world view or any world-system advancement. */
+	drawPortalTransitionFrame(
+		input: PortalTransitionOnlyFrameInput,
+	): PortalTransitionPresentationReceipt | null;
+	/** Clear the visible surface to black and retire any active transition-only resources. */
+	clearPresentation(): void;
 	drawFrame(input: FrameInput): RendererFrameFeedback;
 	/** Drop cached derivations of world resources; absent on backends that cache none. */
 	invalidateResolvedResources?(reason: ResolvedResourceInvalidation): void;

@@ -97,7 +97,9 @@ try {
 						entityShadowBenchmark: result.entityShadowBenchmark,
 						modeCycleStates: result.modeCycleStates,
 						portalExecution: result.portalExecution,
-						portalTransitionDemo: options.portalTransitionDemo,
+						portalTransitionCompositorDiagnostic:
+							options.portalTransitionCompositorDiagnostic,
+						portalTransitionLifecycleFixture: result.portalTransitionLifecycle,
 						portalContextLossPolicy: result.state.portalContextLossPolicy,
 						portalScopeAtlasTargets: result.state.portalScopeAtlasTargets,
 						outdoorPssm: result.state.outdoorPssm,
@@ -233,7 +235,10 @@ function parseArgs(args) {
 		minimumObjectFootprintCssPixelArea: null,
 		offscreenAnimationSampleIntervalMs: null,
 		executePortal: false,
-		portalTransitionDemo: false,
+		portalTransitionCompositorDiagnostic: false,
+		portalTransitionLifecycleFixture: false,
+		portalTransitionComposition: "tunnel-only",
+		portalTransitionProgress: 0,
 		frameMode: null,
 		timeOfDay: null,
 		dayGroup: null,
@@ -614,9 +619,38 @@ function parseArgs(args) {
 			case "--execute-portal":
 				parsed.executePortal = true;
 				break;
-			case "--portal-transition-demo":
-				parsed.portalTransitionDemo = true;
+			case "--portal-transition-compositor-diagnostic":
+				parsed.portalTransitionCompositorDiagnostic = true;
 				break;
+			case "--portal-transition-lifecycle-fixture":
+				parsed.portalTransitionLifecycleFixture = true;
+				break;
+			case "--portal-transition-composition": {
+				const value = requireValue(args, ++index, arg);
+				if (
+					![
+						"origin-to-tunnel",
+						"tunnel-only",
+						"tunnel-to-destination",
+					].includes(value)
+				) {
+					throw new Error(
+						"--portal-transition-composition must be origin-to-tunnel, tunnel-only, or tunnel-to-destination.",
+					);
+				}
+				parsed.portalTransitionComposition = value;
+				break;
+			}
+			case "--portal-transition-progress": {
+				const value = Number(requireValue(args, ++index, arg));
+				if (!Number.isFinite(value) || value < 0 || value > 1) {
+					throw new Error(
+						"--portal-transition-progress must be within [0, 1].",
+					);
+				}
+				parsed.portalTransitionProgress = value;
+				break;
+			}
 			case "--capture-frame": {
 				const value = Number(requireValue(args, ++index, arg));
 				if (!Number.isInteger(value) || value <= 0) {
@@ -1178,9 +1212,16 @@ Options:
                          Override offscreen visual animation sampling; zero is full cadence.
   --execute-portal
                          Execute the public portal compositor once through production GPU passes.
-  --portal-transition-demo
-                         Load the authored transition closure and hold the renderer in the loading
-                         transition for a screenshot. This is a harness-only diagnostic.
+  --portal-transition-compositor-diagnostic
+                         Load the authored transition closure and freeze one compositor input for
+                         a screenshot. This does not exercise the production lifecycle.
+  --portal-transition-lifecycle-fixture
+                         Drive real controller plans through the runtime and renderer, asserting
+                         supersession, resize, handoff, inactive, and black cleanup resources.
+  --portal-transition-composition <origin-to-tunnel|tunnel-only|tunnel-to-destination>
+                         Select the fixed compositor input used by the diagnostic.
+  --portal-transition-progress <0..1>
+                         Freeze timed entry or exit at one normalized progress sample.
   --particle-seed <n>   Seed particle emission randomness so runs repeat exactly. Required for any
                          screenshot comparison of a scene containing particles.
   --capture-frame <n>   Freeze runtime time at frame n, so the captured instant is identical no
@@ -1503,7 +1544,11 @@ function briefHarnessReport(result) {
 		envCellLayers: summarizeEnvCellLayers(staticObjects?.envCellLayers ?? []),
 		finalMetrics: result.state.metrics,
 		portalTransition: result.state.portalTransition,
-		portalTransitionDemo: options.portalTransitionDemo,
+		portalTransitionCompositorDiagnostic:
+			options.portalTransitionCompositorDiagnostic,
+		portalTransitionLifecycleFixture: result.portalTransitionLifecycle,
+		portalTransitionPresentationFixture:
+			result.state.portalTransitionPresentationFixture,
 		terrainGlTrace: result.state.terrainGlTrace,
 		ambientOcclusionCoverageCensus: result.state.ambientOcclusionCoverageCensus,
 		frameProfile: result.state.frameProfile,
@@ -3277,9 +3322,14 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 	const fixture = options.fixture
 		? `&fixture=${encodeURIComponent(options.fixture)}`
 		: "";
-	const portalTransitionDemo = options.portalTransitionDemo
-		? "&portalTransitionDemo=true"
-		: "";
+	const portalTransitionCompositorDiagnostic =
+		options.portalTransitionCompositorDiagnostic
+			? `&portalTransitionCompositorDiagnostic=true&portalTransitionComposition=${options.portalTransitionComposition}&portalTransitionProgress=${options.portalTransitionProgress}`
+			: "";
+	const portalTransitionLifecycleFixture =
+		options.portalTransitionLifecycleFixture
+			? "&portalTransitionLifecycleFixture=true"
+			: "";
 	const dynamicIsolation = options.isolateAuthoredDynamics
 		? "&isolateAuthoredDynamics=true"
 		: "";
@@ -3316,7 +3366,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			: "&audioTrace=1";
 	const terrainGlTrace = options.traceTerrainGl ? "&traceTerrainGl=true" : "";
 	const worldMarker = options.worldMarker ? "&worldMarker=true" : "";
-	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&cameraHeight=${encodeURIComponent(options.cameraHeight)}&viewportWidth=${encodeURIComponent(options.viewportWidth)}&viewportHeight=${encodeURIComponent(options.viewportHeight)}${dynamicIsolation}${dynamicExclusion}${attachmentExclusion}${fixture}${portalTransitionDemo}${timeOfDay}${dayGroup}${particleSeed}${frameIntervalMs}${captureFrame}${audioTrace}${terrainGlTrace}${worldMarker}`;
+	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&cameraHeight=${encodeURIComponent(options.cameraHeight)}&viewportWidth=${encodeURIComponent(options.viewportWidth)}&viewportHeight=${encodeURIComponent(options.viewportHeight)}${dynamicIsolation}${dynamicExclusion}${attachmentExclusion}${fixture}${portalTransitionCompositorDiagnostic}${portalTransitionLifecycleFixture}${timeOfDay}${dayGroup}${particleSeed}${frameIntervalMs}${captureFrame}${audioTrace}${terrainGlTrace}${worldMarker}`;
 	const chrome = startChild(options.chromePath, [
 		"--remote-debugging-port=0",
 		`--user-data-dir=${userDataDirectory}`,
@@ -3893,6 +3943,14 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		}
 		let portalScreenshot = null;
 		let portalExecution = null;
+		let portalTransitionLifecycle = null;
+		if (options.portalTransitionLifecycleFixture) {
+			portalTransitionLifecycle = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.probePortalTransitionLifecycle",
+				[],
+			);
+		}
 		if (options.executePortal) {
 			const args = [
 				options.envCellCameraId,
@@ -4231,6 +4289,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			modeCycleStates,
 			lifecycleState,
 			portalExecution,
+			portalTransitionLifecycle,
 			possessionScenario,
 			followFlight,
 			relocationSequence,

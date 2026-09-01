@@ -122,7 +122,10 @@ export class AnimationPresentationScheduler {
 	}
 
 	/** Replace visibility with the deduplicated selection from one completed renderer frame. */
-	completeFrame(feedback: RendererFrameFeedback, timeSeconds: number): void {
+	completeFrame(
+		feedback: Pick<RendererFrameFeedback, "selectedDynamicNodeIds">,
+		timeSeconds: number,
+	): void {
 		if (!Number.isFinite(timeSeconds))
 			throw new Error("Renderer feedback time must be finite.");
 		const selectedDynamicNodeIds = new Set(feedback.selectedDynamicNodeIds);

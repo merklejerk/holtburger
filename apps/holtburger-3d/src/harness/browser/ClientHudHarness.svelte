@@ -92,6 +92,7 @@
 				clearance: { projectionRevision: 12, radius: 0.2 },
 				desiredReach: 4.5,
 				renderedReach: 4.5,
+				convergence: "settled",
 				placementOutcome: {
 					kind: "reseeded",
 					reason: "initial-placement",

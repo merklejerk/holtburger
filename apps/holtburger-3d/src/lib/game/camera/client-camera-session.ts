@@ -41,6 +41,7 @@ export type ClientCameraStatus =
 			readonly clearance: ClientCameraProvenTick["clearance"] | null;
 			readonly desiredReach: number;
 			readonly renderedReach: number;
+			readonly convergence: ClientCameraTick["convergence"];
 			readonly placementOutcome:
 				| {
 						readonly kind: "held";
@@ -297,6 +298,7 @@ export class ClientCameraSession {
 			clearance: latest.kind === "fallback" ? null : latest.clearance,
 			desiredReach: latest.desiredReach,
 			renderedReach: latest.kind === "fallback" ? 0 : latest.renderedReach,
+			convergence: latest.convergence,
 			placementOutcome:
 				latest.kind === "held"
 					? { kind: "held", reason: latest.reason }

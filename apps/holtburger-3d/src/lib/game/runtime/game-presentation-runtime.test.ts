@@ -124,7 +124,20 @@ const TEST_RESOURCES = {
 	uploadTextureArrayLayer() {},
 } as RendererResourceManager;
 
-const EMPTY_RENDERER_FRAME_FEEDBACK = { selectedDynamicNodeIds: [] } as const;
+const EMPTY_RENDERER_FRAME_FEEDBACK = {
+	portalTransitionReceipt: null,
+	selectedDynamicNodeIds: [],
+} as const;
+
+function testRenderer(overrides: Partial<Renderer> = {}): Renderer {
+	return {
+		clearPresentation() {},
+		async destroy() {},
+		drawFrame: () => EMPTY_RENDERER_FRAME_FEEDBACK,
+		drawPortalTransitionFrame: () => null,
+		...overrides,
+	};
+}
 
 describe("GamePresentationRuntime view and interest control", () => {
 	it("keeps frontend scene interest independent from the primary camera", async () => {
@@ -150,6 +163,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 			portalFramebufferCount: 0,
 			portalTargetBytes: 0,
 			portalTransitionSnapshotBytes: 0,
+			portalTransitionOriginCaptured: false,
 			portalTransitionSnapshotAllocatedGenerationCount: 0,
 			portalTransitionSnapshotDisposedGenerationCount: 0,
 			portalTransitionFramebufferCount: 0,
@@ -157,7 +171,8 @@ describe("GamePresentationRuntime view and interest control", () => {
 			submittedPortalTransitionDrawCount: 0,
 			portalTransitionVisualInstalled: false,
 			portalTransitionGeneration: null,
-			portalTransitionPhase: null,
+			portalTransitionKind: null,
+			portalTransitionOnlyFramePresented: false,
 			flatSceneFramebufferCount: 0,
 			flatSceneTargetBytes: 0,
 			flatSceneAllocatedGenerationCount: 0,
@@ -217,8 +232,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 			objectSuppressedUniformUploads: 0,
 		};
 		const setFrameProfilingEnabled = vi.fn();
-		const renderer: Renderer = {
-			async destroy() {},
+		const renderer = testRenderer({
 			drawFrame(input) {
 				frames.push(input);
 				return EMPTY_RENDERER_FRAME_FEEDBACK;
@@ -245,7 +259,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 					selectionMetrics: frameSelectionMetrics,
 				}),
 			},
-		};
+		});
 		const pipeline: CommitPipeline = {
 			async prepareLandblockLayers(
 				layers,
@@ -431,10 +445,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 	it("discards a terrain commit whose scene interest was withdrawn while loading", async () => {
 		const pipeline = new DeferredCommitPipeline();
 		const device: GamePresentationRuntimeRenderDevice = {
-			buildRenderer: async () => ({
-				async destroy() {},
-				drawFrame: () => EMPTY_RENDERER_FRAME_FEEDBACK,
-			}),
+			buildRenderer: async () => testRenderer(),
 			resources: TEST_RESOURCES,
 		};
 		const runtime = await buildGamePresentationRuntimeForTest(
@@ -463,10 +474,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 	it("keeps an in-flight layer current across an unchanged interest refresh", async () => {
 		const pipeline = new DeferredCommitPipeline();
 		const device: GamePresentationRuntimeRenderDevice = {
-			buildRenderer: async () => ({
-				async destroy() {},
-				drawFrame: () => EMPTY_RENDERER_FRAME_FEEDBACK,
-			}),
+			buildRenderer: async () => testRenderer(),
 			resources: TEST_RESOURCES,
 		};
 		const runtime = await buildGamePresentationRuntimeForTest(
@@ -508,10 +516,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 	it("rejects an old completion after withdrawal and same-layer re-request", async () => {
 		const pipeline = new DeferredCommitPipeline();
 		const device: GamePresentationRuntimeRenderDevice = {
-			buildRenderer: async () => ({
-				async destroy() {},
-				drawFrame: () => EMPTY_RENDERER_FRAME_FEEDBACK,
-			}),
+			buildRenderer: async () => testRenderer(),
 			resources: TEST_RESOURCES,
 		};
 		const runtime = await buildGamePresentationRuntimeForTest(
@@ -550,10 +555,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 	it("rejects a queued completion after withdrawal and same-layer re-request", async () => {
 		const pipeline = new DeferredCommitPipeline();
 		const device: GamePresentationRuntimeRenderDevice = {
-			buildRenderer: async () => ({
-				async destroy() {},
-				drawFrame: () => EMPTY_RENDERER_FRAME_FEEDBACK,
-			}),
+			buildRenderer: async () => testRenderer(),
 			resources: TEST_RESOURCES,
 		};
 		const runtime = await buildGamePresentationRuntimeForTest(
@@ -584,10 +586,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 	it("activates a promoted building owner set with shared playback", async () => {
 		const pipeline = new DeferredCommitPipeline();
 		const device: GamePresentationRuntimeRenderDevice = {
-			buildRenderer: async () => ({
-				async destroy() {},
-				drawFrame: () => EMPTY_RENDERER_FRAME_FEEDBACK,
-			}),
+			buildRenderer: async () => testRenderer(),
 			resources: TEST_RESOURCES,
 		};
 		const runtime = await buildGamePresentationRuntimeForTest(
@@ -638,10 +637,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 	it("routes a synthetic explicit-object source through static realization", async () => {
 		const pipeline = new DeferredCommitPipeline();
 		const device: GamePresentationRuntimeRenderDevice = {
-			buildRenderer: async () => ({
-				async destroy() {},
-				drawFrame: () => EMPTY_RENDERER_FRAME_FEEDBACK,
-			}),
+			buildRenderer: async () => testRenderer(),
 			resources: TEST_RESOURCES,
 		};
 		const runtime = await buildGamePresentationRuntimeForTest(
@@ -689,10 +685,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 	it("routes generated source through independent static realization", async () => {
 		const pipeline = new DeferredCommitPipeline();
 		const device: GamePresentationRuntimeRenderDevice = {
-			buildRenderer: async () => ({
-				async destroy() {},
-				drawFrame: () => EMPTY_RENDERER_FRAME_FEEDBACK,
-			}),
+			buildRenderer: async () => testRenderer(),
 			resources: TEST_RESOURCES,
 		};
 		const runtime = await buildGamePresentationRuntimeForTest(
@@ -785,10 +778,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		const landblockId = "0x0001ffff";
 		const runtime = await buildGamePresentationRuntimeForTest(
 			{
-				buildRenderer: async () => ({
-					async destroy() {},
-					drawFrame: () => EMPTY_RENDERER_FRAME_FEEDBACK,
-				}),
+				buildRenderer: async () => testRenderer(),
 				resources: TEST_RESOURCES,
 			},
 			{
@@ -1194,10 +1184,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		const requests: LandblockIdLayer[][] = [];
 		const runtime = await buildGamePresentationRuntimeForTest(
 			{
-				buildRenderer: async () => ({
-					async destroy() {},
-					drawFrame: () => EMPTY_RENDERER_FRAME_FEEDBACK,
-				}),
+				buildRenderer: async () => testRenderer(),
 				resources: TEST_RESOURCES,
 			},
 			{
@@ -1321,10 +1308,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 	it("filters ambient EnvCells for outdoor intent and replaces it with explicit dungeon demand", async () => {
 		const runtime = await buildGamePresentationRuntimeForTest(
 			{
-				buildRenderer: async () => ({
-					async destroy() {},
-					drawFrame: () => EMPTY_RENDERER_FRAME_FEEDBACK,
-				}),
+				buildRenderer: async () => testRenderer(),
 				resources: TEST_RESOURCES,
 			},
 			{
@@ -1427,10 +1411,7 @@ async function buildUnscopedSpawnRuntime(
 	animationSource: AnimationAssetSource = ANIMATION_SOURCE,
 ): Promise<GamePresentationRuntime> {
 	const device: GamePresentationRuntimeRenderDevice = {
-		buildRenderer: async () => ({
-			async destroy() {},
-			drawFrame: () => EMPTY_RENDERER_FRAME_FEEDBACK,
-		}),
+		buildRenderer: async () => testRenderer(),
 		resources: TEST_RESOURCES,
 	};
 	return buildGamePresentationRuntimeForTest(

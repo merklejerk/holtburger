@@ -18,6 +18,8 @@ const PORTAL_TRANSITION_CATALOG = Object.freeze({
 	setupDid: 0x0200_0306,
 	setupDidText: "0x02000306" as DatAssetId,
 	animationId: "0x030005ac" as DatAssetId,
+	/** Retail enters this portal sequence at frame 1 (`acclient.c:252663-252668`). */
+	animationLowFrame: 1,
 	animationFramesPerSecond: 40,
 	soundTableId: "0x2000004b" as DatAssetId,
 	enterSoundId: "0x0a000246" as DatAssetId,

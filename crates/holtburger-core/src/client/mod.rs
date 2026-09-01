@@ -30,7 +30,6 @@ pub mod runtime_body_view_cache;
 mod simulation;
 pub mod types;
 pub use builder::ClientRuntimeBuilder;
-use camera::ClientCameraRuntime;
 pub use camera::{
     ClientCameraClearance, ClientCameraClearanceRequest, ClientCameraCollisionProof,
     ClientCameraDiagnostics, ClientCameraFailureReason, ClientCameraIdentity,
@@ -38,6 +37,7 @@ pub use camera::{
     ClientCameraStartRequest, ClientCameraTargetSphereRole, ClientCameraTick,
     ClientCameraUpdateReceipt,
 };
+use camera::{ClientCameraRuntime, ClientCameraSettlement};
 use character_selection::CharacterSelectionState;
 use movement::MovementSystem;
 pub use precise_jump_runtime::{
@@ -113,8 +113,15 @@ struct ClientWorldActivationRuntime {
     destination: Option<ClientActivationDestination>,
     /// When the server's destination position became authoritative for this generation.
     destination_accepted_at: Option<Instant>,
-    camera_seed_ready: bool,
+    camera_settlement: ClientActivationCameraSettlement,
     external_reveal_generation: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ClientActivationCameraSettlement {
+    Pending,
+    Settled,
+    Exhausted,
 }
 
 /// Maximum retail tunnel completion after an authoritative destination position is accepted.
@@ -274,7 +281,11 @@ impl ClientRuntime {
             player_guid,
             destination: None,
             destination_accepted_at: None,
-            camera_seed_ready: !self.requires_external_world_reveal,
+            camera_settlement: if self.requires_external_world_reveal {
+                ClientActivationCameraSettlement::Pending
+            } else {
+                ClientActivationCameraSettlement::Settled
+            },
             external_reveal_generation: (!self.requires_external_world_reveal)
                 .then_some(generation),
         });
@@ -356,7 +367,11 @@ impl ClientRuntime {
         if activation.destination != Some(destination) {
             activation.destination = Some(destination);
             activation.destination_accepted_at = Some(now);
-            activation.camera_seed_ready = !self.requires_external_world_reveal;
+            activation.camera_settlement = if self.requires_external_world_reveal {
+                ClientActivationCameraSettlement::Pending
+            } else {
+                ClientActivationCameraSettlement::Settled
+            };
         }
 
         let body_ready = self
@@ -384,21 +399,37 @@ impl ClientRuntime {
         // Body preparation and static residency complete independently. A registered camera may
         // arrive before either worker; seeding it against the retained prior/empty scene would
         // turn ordinary asynchronous loading into a terminal missing-cell failure.
-        if body_ready && destination_scene_ready && !activation.camera_seed_ready {
+        if body_ready
+            && destination_scene_ready
+            && activation.camera_settlement == ClientActivationCameraSettlement::Pending
+        {
             let collision_snapshot = self
                 .collision_coordinator
                 .as_ref()
                 .map(collision::ClientCollisionCoordinator::snapshot);
-            if let Some(tick) = self.seed_camera(collision_snapshot.as_deref())? {
-                self.emit_camera_event(tick);
-                activation.camera_seed_ready = true;
+            match self
+                .camera
+                .settle_for_activation(&self.world, collision_snapshot.as_deref())?
+            {
+                ClientCameraSettlement::Pending => {}
+                ClientCameraSettlement::Settled(tick) => {
+                    self.emit_camera_event(tick);
+                    activation.camera_settlement = ClientActivationCameraSettlement::Settled;
+                }
+                ClientCameraSettlement::Exhausted => {
+                    activation.camera_settlement = ClientActivationCameraSettlement::Exhausted;
+                    log::warn!(
+                        "Camera settlement exhausted its bounded work for world generation {}",
+                        activation.generation
+                    );
+                }
             }
         }
 
         let presentation_ready = body_ready
             && destination_scene_ready
             && containment_ready
-            && activation.camera_seed_ready
+            && activation.camera_settlement == ClientActivationCameraSettlement::Settled
             && reveal_ready;
         // RETAIL QUIRK: `SmartBox::UseTime` completes a received position independently of scene
         // rendering (acclient.c:140024-140027), then `gmSmartBoxUI::UseTime` bounds tunnel exit and

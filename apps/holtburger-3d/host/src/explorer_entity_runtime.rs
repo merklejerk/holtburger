@@ -4833,6 +4833,8 @@ mod tests {
             maximum_control_leg_displacement: 0.01,
             maximum_control_legs: 1,
             surface_clearance: 0.000_5,
+            settled_position_tolerance: 0.001,
+            settled_pivot_tolerance: 0.001,
             transit: FreeSphereConfig {
                 maximum_substep_distance: 0.25,
                 maximum_substeps: 64,

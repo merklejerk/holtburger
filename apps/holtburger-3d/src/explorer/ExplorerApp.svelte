@@ -108,6 +108,7 @@
 	} from "../lib/game/runtime/dynamic-entity-feed";
 	import { Vec3 } from "../lib/game/math/types";
 	import { EXPLORER_TUNING } from "./explorer-tuning";
+	import { presentExplorerPortalFrame } from "./explorer-portal-presentation";
 	import {
 		resolveSceneEnvironment,
 		type ExplorerEnvironmentSelection,
@@ -1779,6 +1780,7 @@
 					canvas,
 					hostTransport,
 					frameSettings: EXPLORER_TUNING.frameSettings,
+					portalWarpDriveTuning: EXPLORER_TUNING.portalTransition.visual,
 					audioTuning: {
 						placementSmoothingSeconds:
 							EXPLORER_TUNING.audio.placementSmoothingSeconds,
@@ -1871,9 +1873,6 @@
 						void replaceSpawnedEntitySnapshot();
 					}
 					cameraController?.setInputEnabled(!activationPending);
-					gameRuntime.setPortalTransition(
-						cameraCoordinator?.portalTransitionFrame(),
-					);
 					const projection = resolveCameraProjection(gameRuntime, canvas);
 					const residencySync = syncActiveCamera(
 						physicalPlacement,
@@ -1908,35 +1907,29 @@
 					const activationReady =
 						staticActivationReady &&
 						(sceneActivationPresentationConvergence?.ready ?? false);
-					if (
-						residencySync.renderable &&
-						(!activationPending || activationReady)
-					) {
-						if (activationReady) {
-							cameraCoordinator?.advancePortalTransition(tickStartedAt, false);
-							gameRuntime.setPortalTransition(
-								cameraCoordinator?.portalTransitionFrame(),
-							);
-						}
-						gameRuntime.render(performance.now() / 1_000);
-						let reveal = null;
-						if (activationReady) {
-							reveal =
-								cameraCoordinator?.advancePortalTransition(
-									tickStartedAt,
-									true,
-								) ?? null;
-							gameRuntime.setPortalTransition(
-								cameraCoordinator?.portalTransitionFrame(),
-							);
-						} else {
-							cameraCoordinator?.markRenderedFrame();
-						}
-						if (reveal !== null) {
-							cameraCoordinator?.completeSceneActivation();
-							sceneActivationPresentationConvergence = null;
-							cameraController?.setInputEnabled(true);
-						}
+					const activeCameraCoordinator = cameraCoordinator;
+					if (activeCameraCoordinator === undefined) {
+						throw new Error(
+							"Explorer camera coordinator is unavailable during portal presentation.",
+						);
+					}
+					const reveal = presentExplorerPortalFrame({
+						activationReady,
+						coordinator: activeCameraCoordinator,
+						extent: gameRuntime.resolveViewportExtent(
+							canvas.clientWidth,
+							canvas.clientHeight,
+						),
+						nowMs: tickStartedAt,
+						runtime: gameRuntime,
+						worldRenderable:
+							residencySync.renderable &&
+							(!activationPending || activationReady),
+					});
+					if (reveal !== null) {
+						activeCameraCoordinator.completeSceneActivation();
+						sceneActivationPresentationConvergence = null;
+						cameraController?.setInputEnabled(true);
 					}
 					const frameFinishedAt = performance.now();
 					frameRateSampler.recordFrame({

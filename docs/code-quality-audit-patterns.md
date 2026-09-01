@@ -682,6 +682,33 @@ an external runner may have nothing local to release.
 fixture that owns disposal, make teardown idempotent, and aggregate cleanup failures where dropping
 the primary failure would be misleading.
 
+## State Preserves a Control-Flow-Impossible Outcome
+
+**Smell:** A flag, enum variant, or optional value records an outcome that every path reaching its
+consumer has already made impossible.
+
+**Signals:**
+
+- A value is initialized defensively and assigned the same result on every loop iteration or branch
+  that can reach its later test.
+- Early returns remove all paths for one state, but downstream code still handles that state.
+- Tests cannot produce one branch without bypassing the function's real control flow.
+- Comments describe the impossible arm as a fallback despite no supported input reaching it.
+
+**Possible failure:** Readers and future changes preserve a fictitious failure mode, real omissions
+hide among dead handling, and added branches may accidentally give the stale state new semantics.
+
+**Questions:** Which concrete path reaches each state? Does the state carry information not already
+proved by loop completion, an early return, or a discriminated result? Can control flow return the
+real outcomes directly?
+
+**Counterexamples:** A value may intentionally mirror externally observable state for diagnostics,
+serialization, or model checking even when one local caller currently narrows it further.
+
+**Possible responses:** Delete the redundant state and return from the decisive branch, encode the
+remaining outcomes in a smaller discriminated type, or move the distinction to the boundary where
+both outcomes can actually occur.
+
 ## Adding Observations
 
 An observation belongs here when it has:

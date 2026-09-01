@@ -9,12 +9,11 @@ use holtburger_core::{
     KinematicBoomAdvance, KinematicBoomClearance, KinematicBoomCollisionProof,
     KinematicBoomController, KinematicBoomDiagnostics, KinematicBoomFailureReason,
     KinematicBoomIntent, KinematicBoomOutcome, KinematicBoomPlacement, KinematicBoomProfile,
-    KinematicBoomProfileDefinition, KinematicBoomReseedReason, KinematicBoomTargetSample,
-    KinematicBoomTargetSeed, KinematicBoomUpdateAcceptance, resolve_camera_pivot_offset,
+    KinematicBoomReseedReason, KinematicBoomTargetSample, KinematicBoomTargetSeed,
+    KinematicBoomUpdateAcceptance, resolve_camera_pivot_offset, standard_kinematic_boom_profile,
 };
 use holtburger_world::{
-    ChildSpatialBody, ChildSpatialBodyDefinition, ChildSpatialBodyWaypoint, FreeSphereConfig,
-    PlacedMotionPath,
+    ChildSpatialBody, ChildSpatialBodyDefinition, ChildSpatialBodyWaypoint, PlacedMotionPath,
 };
 use serde::{Deserialize, Serialize};
 
@@ -433,7 +432,7 @@ impl HostKinematicBoomRuntime {
         Ok(Self {
             entities,
             simulation,
-            profile: standard_profile()?,
+            profile: standard_kinematic_boom_profile()?,
             state: Mutex::new(HostKinematicBoomState::default()),
         })
     }
@@ -800,6 +799,7 @@ fn project_outcome(
             advance,
             clearance,
             diagnostics,
+            ..
         } => match advance {
             KinematicBoomAdvance::Continuous { path } => match serialize_path(
                 &path,
@@ -1127,26 +1127,6 @@ fn intent(sequence: u64, direction: [f32; 3], zoom: f32) -> KinematicBoomIntent 
         view_direction: Vector3::new(direction[0], direction[1], direction[2]),
         cumulative_zoom_displacement: zoom,
     }
-}
-
-fn standard_profile() -> Result<KinematicBoomProfile> {
-    Ok(KinematicBoomProfile::new(KinematicBoomProfileDefinition {
-        minimum_reach: 1.2,
-        maximum_reach: 8.0,
-        vertical_pivot_half_life: 0.08,
-        maximum_vertical_pivot_lag: 0.30,
-        clearance_recovery_half_life: 0.10,
-        clearance_hysteresis: 0.05,
-        maximum_control_leg_displacement: 0.50,
-        maximum_control_legs: 64,
-        surface_clearance: 0.000_5,
-        transit: FreeSphereConfig {
-            maximum_substep_distance: 0.25,
-            maximum_substeps: 64,
-            maximum_contact_passes: 8,
-            separation_epsilon: 0.000_5,
-        },
-    })?)
 }
 
 #[cfg(test)]

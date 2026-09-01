@@ -252,6 +252,7 @@ function tick(
 		},
 		desiredReach: 4.5,
 		renderedReach: 4.5,
+		convergence: "converging",
 		path: {
 			initial: pathPoint(startX),
 			legs: [{ endFraction: 1, end: pathPoint(endX) }],
@@ -274,6 +275,7 @@ function fallback(sequence: number, x: number): ClientCameraTick {
 		durationMs: 32,
 		targetSphereRole: "primary",
 		desiredReach: 4.5,
+		convergence: "converging",
 		path: {
 			initial: pathPoint(x),
 			legs: [{ endFraction: 1, end: pathPoint(x) }],

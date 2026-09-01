@@ -81,6 +81,11 @@ import type { ParticleMeshSource } from "../../assets/particle-mesh-source";
 import type { SoundTableSource } from "../../assets/sound-table-source";
 import type { DecodedSoundTable } from "../../assets/decode-sound-table-record";
 import type { PortalTransitionAssets } from "../../client/portal-transition-assets";
+import {
+	type PortalTransitionPresentationPlan,
+	type PortalTransitionPresentationReceipt,
+	validatePortalTransitionPresentationPlan,
+} from "../../client/portal-transition-presentation";
 import { selectSoundCandidate } from "../../assets/decode-sound-table-record";
 import {
 	SKY_PARTICLE_RENDER_OWNER,
@@ -248,6 +253,7 @@ import type {
 } from "./scene-availability";
 import { SceneInterestCommitCoordinator } from "./scene-interest-commit-coordinator";
 import { AnimationPresentationScheduler } from "./animation-presentation-scheduler";
+import { enrichPortalTransitionFrame } from "./portal-transition-frame";
 import type { TerrainSurfaceSample } from "../terrain/terrain-surface";
 import {
 	type ResolvedSceneEnvironment,
@@ -483,17 +489,23 @@ export interface PortalTransitionRuntimeDiagnostics {
 	readonly sourceBytes: PortalTransitionAssets["sourceBytes"] | null;
 	/** Direct playback cursor facts, or null before the closure is installed. */
 	readonly animation: {
+		/** Monotonic generation-local frame clock driving axial roll independently of clip laps. */
+		readonly axialRollFramePosition: number;
 		readonly frameCount: number;
 		readonly framePosition: number;
 		readonly framesPerSecond: number;
+		/** Inclusive sequence end after retail's playback-window selection. */
+		readonly highFrame: number;
 		readonly id: DatAssetId;
+		/** Inclusive sequence entry selected by retail portal playback. */
+		readonly lowFrame: number;
 		readonly partCount: number;
 	} | null;
 	/** Current transition edge and generation, or null while no transition is active. */
 	readonly transition: {
 		readonly generation: number;
-		readonly phase: PortalTransitionFrame["phase"];
-		readonly progress: number;
+		readonly kind: PortalTransitionPresentationPlan["kind"];
+		readonly progress: number | null;
 	} | null;
 	/** Shared persistent resource totals; transition resources remain in renderer metrics. */
 	readonly persistent: {
@@ -926,7 +938,7 @@ export class GamePresentationRuntime {
 	/** Frontend-selected dynamic display choices forwarded unchanged to each frame. */
 	#frameSettings: FrameSettings;
 	/** Presentation-only transition input consumed by the renderer's final-frame compositor. */
-	#portalTransition: PortalTransitionFrame | undefined;
+	#portalTransition: PortalTransitionPresentationPlan | undefined;
 	/** Atomic frontend-resolved precise-jump marker and optional trajectory. */
 	#worldIndicator: WorldIndicatorInput | null = null;
 	/** Prepared authored portal closure retained until runtime teardown. */
@@ -934,6 +946,8 @@ export class GamePresentationRuntime {
 	/** Authored 40fps traversal sampled at render cadence for the portal's setup and sound hooks. */
 	#portalTransitionClip: PlayingClip | null = null;
 	#portalTransitionFramePosition = 0;
+	/** Monotonic roll clock; unlike the authored clip cursor, this never laps at frame 119. */
+	#portalTransitionAxialRollFramePosition = 0;
 	#portalTransitionAnimationGeneration: number | null = null;
 	#portalTransitionLastTimeSeconds: number | null = null;
 	/**
@@ -2462,29 +2476,18 @@ export class GamePresentationRuntime {
 	}
 
 	/** Update the app-local portal compositor state without touching authority or scene demand. */
-	setPortalTransition(transition: PortalTransitionFrame | undefined): void {
+	setPortalTransition(
+		transition: PortalTransitionPresentationPlan | undefined,
+	): void {
 		if (transition === undefined) {
 			this.#portalTransition = undefined;
 			this.#portalTransitionAnimationGeneration = null;
 			this.#portalTransitionFramePosition = 0;
+			this.#portalTransitionAxialRollFramePosition = 0;
 			this.#portalTransitionLastTimeSeconds = null;
 			return;
 		}
-		if (
-			!Number.isSafeInteger(transition.generation) ||
-			transition.generation < 0
-		) {
-			throw new Error(
-				"Portal transition generation must be a non-negative safe integer.",
-			);
-		}
-		if (
-			!Number.isFinite(transition.progress) ||
-			transition.progress < 0 ||
-			transition.progress > 1
-		) {
-			throw new Error("Portal transition progress must be within [0, 1].");
-		}
+		validatePortalTransitionPresentationPlan(transition);
 		this.#portalTransition = transition;
 	}
 
@@ -2508,17 +2511,23 @@ export class GamePresentationRuntime {
 		const clip = this.#portalTransitionClip;
 		if (
 			transition === undefined ||
-			transition.phase === "revealed-awaiting-handoff" ||
-			clip === null
+			transition.kind === "destination-only-awaiting-handoff"
 		) {
 			this.#portalTransitionAnimationGeneration = null;
 			this.#portalTransitionFramePosition = 0;
+			this.#portalTransitionAxialRollFramePosition = 0;
 			this.#portalTransitionLastTimeSeconds = null;
 			return transition;
+		}
+		if (clip === null) {
+			throw new Error(
+				"Portal transition plan requires an installed tunnel clip.",
+			);
 		}
 		if (this.#portalTransitionAnimationGeneration !== transition.generation) {
 			this.#portalTransitionAnimationGeneration = transition.generation;
 			this.#portalTransitionFramePosition = clipEntryFrame(clip);
+			this.#portalTransitionAxialRollFramePosition = 0;
 			this.#portalTransitionLastTimeSeconds = timeSeconds;
 		} else {
 			const previous = this.#portalTransitionLastTimeSeconds ?? timeSeconds;
@@ -2529,15 +2538,17 @@ export class GamePresentationRuntime {
 				elapsedSeconds,
 			);
 			this.#portalTransitionFramePosition = advanced.framePosition;
+			this.#portalTransitionAxialRollFramePosition +=
+				elapsedSeconds * Math.abs(clip.framesPerSecond);
 			this.#portalTransitionLastTimeSeconds = timeSeconds;
 			this.#dispatchPortalAnimationHooks(advanced.departedFrames);
 		}
-		return {
-			...transition,
+		return enrichPortalTransitionFrame(transition, {
 			// This is deliberately fractional: the renderer samples it at the display cadence rather
 			// than rounding to the 40 authored frames-per-second ticks.
 			animationFramePosition: this.#portalTransitionFramePosition,
-		};
+			axialRollFramePosition: this.#portalTransitionAxialRollFramePosition,
+		});
 	}
 
 	#dispatchPortalAnimationHooks(departedFrames: readonly number[]): void {
@@ -2613,6 +2624,7 @@ export class GamePresentationRuntime {
 		try {
 			this.#renderer?.installPortalTransitionVisual?.({
 				animation,
+				lowFrame: assets.catalog.animationLowFrame,
 				template,
 			});
 		} catch (cause) {
@@ -2624,7 +2636,7 @@ export class GamePresentationRuntime {
 		this.#portalTransitionAssets = assets;
 		this.#portalTransitionClip = playingClip(
 			animation,
-			0,
+			assets.catalog.animationLowFrame,
 			animation.frameCount - 1,
 			assets.catalog.animationFramesPerSecond,
 			"loop",
@@ -2716,10 +2728,14 @@ export class GamePresentationRuntime {
 				assets === null || clip === null
 					? null
 					: {
+							axialRollFramePosition:
+								this.#portalTransitionAxialRollFramePosition,
 							frameCount: clip.animation.frameCount,
 							framePosition: this.#portalTransitionFramePosition,
 							framesPerSecond: clip.framesPerSecond,
+							highFrame: clip.highFrame,
 							id: clip.animation.id,
+							lowFrame: clip.lowFrame,
 							partCount: clip.animation.partCount,
 						},
 			installed: assets !== null,
@@ -2741,8 +2757,12 @@ export class GamePresentationRuntime {
 					? null
 					: {
 							generation: transition.generation,
-							phase: transition.phase,
-							progress: transition.progress,
+							kind: transition.kind,
+							progress:
+								transition.kind === "origin-to-tunnel" ||
+								transition.kind === "tunnel-to-destination"
+									? transition.progress
+									: null,
 						},
 		};
 	}
@@ -2941,6 +2961,13 @@ export class GamePresentationRuntime {
 
 	tick(): void {
 		if (this.#destroyed) return;
+		this.pollPortalTransitionLoading();
+		this.#dynamicPlacements.advance(performance.now());
+	}
+
+	/** Commit loading work while portal space is the only presented scene. */
+	pollPortalTransitionLoading(): void {
+		if (this.#destroyed) return;
 		this.#drainCommitArtifacts();
 		const failures = this.#dynamicRealizationFailures.splice(0);
 		if (failures.length === 1) throw failures[0];
@@ -2950,7 +2977,6 @@ export class GamePresentationRuntime {
 				`${failures.length} deferred dynamic entities failed presentation realization.`,
 			);
 		}
-		this.#dynamicPlacements.advance(performance.now());
 	}
 
 	/** Advance ordered runtime state and draw one frontend-scheduled frame. */
@@ -2961,7 +2987,42 @@ export class GamePresentationRuntime {
 	}
 
 	/** Draw the current runtime state after a frontend-owned tick measurement. */
-	render(timeSeconds: number): void {
+	renderPortalTransition(
+		timeSeconds: number,
+		extent: RenderExtent,
+	): PortalTransitionPresentationReceipt | null {
+		if (this.#destroyed) throw new Error("Game runtime has been destroyed.");
+		const renderer = this.#renderer;
+		if (!renderer) throw new Error("Game runtime has no renderer device.");
+		const portalTransition = this.#advancePortalTransition(timeSeconds);
+		if (portalTransition === undefined) {
+			throw new Error("Portal-space-only frame has no active transition.");
+		}
+		this.#lastFrameTimeSeconds = timeSeconds;
+		if (
+			portalTransition.kind !== "origin-to-tunnel" &&
+			portalTransition.kind !== "tunnel-only"
+		) {
+			throw new Error(
+				`Portal-only rendering cannot present ${portalTransition.kind}.`,
+			);
+		}
+		return renderer.drawPortalTransitionFrame({
+			extent,
+			frameSettings: this.#frameSettings,
+			portalTransition,
+		});
+	}
+
+	clearPresentation(): void {
+		if (this.#destroyed) throw new Error("Game runtime has been destroyed.");
+		const renderer = this.#renderer;
+		if (!renderer) throw new Error("Game runtime has no renderer device.");
+		renderer.clearPresentation();
+	}
+
+	/** Draw the current runtime state after a frontend-owned tick measurement. */
+	render(timeSeconds: number): PortalTransitionPresentationReceipt | null {
 		if (this.#destroyed) throw new Error("Game runtime has been destroyed.");
 		const renderer = this.#renderer;
 		if (!renderer) throw new Error("Game runtime has no renderer device.");
@@ -3065,6 +3126,7 @@ export class GamePresentationRuntime {
 		this.#animationPresentation.completeFrame(feedback, timeSeconds);
 		tick?.mark("frameCompletion");
 		tick?.finishTick();
+		return feedback.portalTransitionReceipt;
 	}
 
 	/** Per-phase update-tick timing; null unless a frontend injected a profiler. */
@@ -3107,6 +3169,7 @@ export class GamePresentationRuntime {
 		this.#portalTransitionClip = null;
 		this.#portalTransitionAnimationGeneration = null;
 		this.#portalTransitionFramePosition = 0;
+		this.#portalTransitionAxialRollFramePosition = 0;
 		this.#portalTransitionLastTimeSeconds = null;
 		this.#animationPresentation.clear();
 		this.#animation.destroy();

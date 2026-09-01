@@ -91,6 +91,7 @@ describe("client host wire contract", () => {
 			durationMs: 30,
 			targetSphereRole: "upper-constraint",
 			desiredReach: 4.5,
+			convergence: "converging",
 			path: {
 				initial: point,
 				legs: [{ endFraction: 1, end: point }],

@@ -1,12 +1,22 @@
 import type { LandblockOwnerId } from "../game-types";
-import type { Frustum } from "../math/frustum";
-import { Mat4 } from "../math/types";
+import {
+	createLandblockOffset,
+	createLandblockWorldOrigin,
+	getLandblockCoordinates,
+} from "../landblocks";
+import { frustumIntersectsAABB, type Frustum } from "../math/frustum";
+import { transformAABB3 } from "../math/matrices";
+import { AABB3, Mat4, Vec3 } from "../math/types";
 import type { SceneNodeId } from "../scene";
 import type { RigidPartDepthDrawUnit } from "../systems/components";
 import type { ObjectInstanceData } from "../systems/static-resources";
 import type { GeometryResourceKey } from "./resource-manager";
 import type { RenderWorld } from "./render-world";
-import { isEntityShadowCasterClass } from "./entity-shadow-policy";
+import type { EntityShadowCasterShape } from "./entity-grounding";
+import {
+	isEntityShadowCasterClass,
+	type OutdoorShadowCasterBudget,
+} from "./entity-shadow-policy";
 import { retainsRetailGeometry } from "./retail-geometry-visibility";
 
 const OUTDOOR_SCOPE = [{ kind: "outdoor" }] as const;
@@ -20,6 +30,7 @@ const RELEASED_OBJECT_INSTANCE: ObjectInstanceData = {
 export type OutdoorPssmCasterWorld = Pick<
 	RenderWorld,
 	| "expandDynamicContributions"
+	| "getEntityShadowDynamicFacts"
 	| "getRenderContributionDescriptor"
 	| "queryScopesScene"
 	| "resolveGeometry"
@@ -56,6 +67,19 @@ export interface OutdoorPssmCasterBatch {
 	readonly runs: OutdoorPssmCasterRun[];
 }
 
+/** Geometry-free rigid shape assigned to the outdoor analytic fallback tier. */
+interface OutdoorShadowCasterCandidate extends EntityShadowCasterShape {
+	identity: string;
+	nodeId: SceneNodeId;
+	contactAnchor: Vec3;
+	radius: number;
+	height: number;
+	readonly bounds: AABB3;
+	cameraVisible: boolean;
+	cascadeMask: number;
+	distanceSquared: number;
+}
+
 /** Reusable frame scratch for consuming reused cascade-query storage into owned membership. */
 interface OutdoorPssmCasterSelectionScratch {
 	/** Active prefix whose instance references must be released if the next frame shrinks. */
@@ -64,6 +88,8 @@ interface OutdoorPssmCasterSelectionScratch {
 	readonly rootCascadeMasks: Map<SceneNodeId, number>;
 	/** High-water caster records republished only after the prior frame is fully consumed. */
 	readonly casterParts: MutableOutdoorPssmCasterPart[];
+	/** Reused complete-root facts ranked once before either tier consumes them. */
+	readonly candidates: OutdoorShadowCasterCandidate[];
 }
 
 type MutableOutdoorPssmCasterPart = {
@@ -94,14 +120,22 @@ const OUTDOOR_PSSM_RUN_SCRATCH = new WeakMap<
 interface OutdoorPssmCasterCollectionMetrics {
 	/** Cascade-frustum queries issued by the collector. */
 	readonly cascadeQueryCount: number;
-	/** Eligible root selections summed across cascades, including overlap. */
-	readonly cascadeSelectedRootCount: number;
+	/** Candidate memberships summed across cascades, including overlap. */
+	readonly cascadeCandidateMembershipCount: number;
+	/** Unique eligible complete roots before budget selection. */
+	readonly candidateRootCount: number;
 	/** Compatible depth runs formed across every cascade. */
 	readonly compatibleDepthRunCount: number;
-	/** Unique eligible roots expanded after all cascade queries are consumed. */
-	readonly uniqueSelectedRootCount: number;
-	/** Unique expanded roots that retained at least one outdoor caster part. */
-	readonly retainedCasterRootCount: number;
+	/** Selected roots assigned to mapped PSSM work. */
+	readonly mappedRootCount: number;
+	/** Selected roots assigned to analytic fallback. */
+	readonly analyticRootCount: number;
+	/** Candidate roots rejected by N. */
+	readonly rejectedRootCount: number;
+	/** Roots retained across both tiers. */
+	readonly selectedRootCount: number;
+	/** Views whose mapped tier produced no depth parts. */
+	readonly emptyMappedViewCount: number;
 	/** Caster parts retained across cascades, counting one part per intersected cascade. */
 	readonly selectedCasterPartCount: number;
 }
@@ -162,6 +196,7 @@ export function createOutdoorPssmCasterBatch(): OutdoorPssmCasterBatch {
 export function createOutdoorPssmCasterSelectionScratch(): OutdoorPssmCasterSelectionScratch {
 	return {
 		activeCasterPartCount: 0,
+		candidates: [],
 		casterParts: [],
 		rootCascadeMasks: new Map(),
 	};
@@ -173,11 +208,14 @@ export function createOutdoorPssmCasterSelectionScratch(): OutdoorPssmCasterSele
  * Presentation-class and outdoor-domain checks happen before expansion where possible. A root enters the
  * shared animation-liveness set only after at least one draw-visible outdoor part survives.
  */
-export function collectOutdoorPssmCastersForCascades(
+export function planOutdoorShadowCastersForView(
 	world: OutdoorPssmCasterWorld,
 	cascadeFrusta: readonly Frustum[],
+	cameraFrustum: Frustum,
 	anchorLandblockId: LandblockOwnerId,
+	budget: OutdoorShadowCasterBudget,
 	selectedDynamicNodeIds: Set<SceneNodeId>,
+	analyticCasters: EntityShadowCasterShape[],
 	showRetailHiddenGeometry: boolean,
 	batches: readonly OutdoorPssmCasterBatch[],
 	scratch: OutdoorPssmCasterSelectionScratch,
@@ -199,6 +237,7 @@ export function collectOutdoorPssmCastersForCascades(
 		batch.instances.length = 0;
 		batch.runs.length = 0;
 	}
+	analyticCasters.length = 0;
 	const rootCascadeMasks = scratch.rootCascadeMasks;
 	rootCascadeMasks.clear();
 	if (metrics !== null) metrics.cascadeQueryCount += cascadeFrusta.length;
@@ -226,7 +265,9 @@ export function collectOutdoorPssmCastersForCascades(
 			);
 		}
 	}
-	let casterPartCount = 0;
+	const candidates = scratch.candidates;
+	const anchorOrigin = createLandblockWorldOrigin(anchorLandblockId);
+	let candidateCount = 0;
 	for (const [nodeId, cascadeMask] of rootCascadeMasks) {
 		const descriptor = world.getRenderContributionDescriptor(nodeId);
 		if (
@@ -235,10 +276,101 @@ export function collectOutdoorPssmCastersForCascades(
 		) {
 			continue;
 		}
-		if (metrics !== null) {
-			metrics.uniqueSelectedRootCount += 1;
-			metrics.cascadeSelectedRootCount += countSetBits(cascadeMask);
+		const facts = world.getEntityShadowDynamicFacts(nodeId);
+		if (!facts.spatialMembership.scopes.some(isOutdoorScope)) continue;
+		const placement = descriptor.footprint.placement;
+		let candidate = candidates[candidateCount];
+		if (candidate === undefined) {
+			candidate = {
+				bounds: AABB3.zero(),
+				cameraVisible: false,
+				cascadeMask: 0,
+				contactAnchor: Vec3.zero(),
+				distanceSquared: 0,
+				height: 0,
+				identity: facts.identity,
+				nodeId,
+				radius: 0,
+			};
+			candidates.push(candidate);
 		}
+		transformAABB3(
+			placement.localToLandblock,
+			facts.rigidBounds,
+			candidate.bounds,
+		);
+		const landblockOffset = createLandblockOffset(
+			getLandblockCoordinates(placement.landblockId),
+			getLandblockCoordinates(anchorLandblockId),
+		);
+		candidate.bounds.min.x += landblockOffset.x;
+		candidate.bounds.max.x += landblockOffset.x;
+		candidate.bounds.min.z += landblockOffset.z;
+		candidate.bounds.max.z += landblockOffset.z;
+		const radius =
+			Math.max(
+				candidate.bounds.max.x - candidate.bounds.min.x,
+				candidate.bounds.max.z - candidate.bounds.min.z,
+			) * 0.5;
+		const height = candidate.bounds.max.y - candidate.bounds.min.y;
+		if (
+			!Number.isFinite(radius) ||
+			radius <= 0 ||
+			!Number.isFinite(height) ||
+			height <= 0
+		)
+			continue;
+		candidate.identity = facts.identity;
+		candidate.nodeId = nodeId;
+		candidate.cascadeMask = cascadeMask;
+		candidate.radius = radius;
+		candidate.height = height;
+		candidate.contactAnchor.x =
+			(candidate.bounds.min.x + candidate.bounds.max.x) * 0.5 + anchorOrigin.x;
+		candidate.contactAnchor.y = placement.localToLandblock.m42 + anchorOrigin.y;
+		candidate.contactAnchor.z =
+			(candidate.bounds.min.z + candidate.bounds.max.z) * 0.5 + anchorOrigin.z;
+		candidate.cameraVisible = frustumIntersectsAABB(
+			cameraFrustum,
+			candidate.bounds,
+			0,
+			0,
+			0,
+		);
+		candidate.distanceSquared = distanceSquaredToBounds(
+			cameraFrustum.cameraPosition,
+			candidate.bounds,
+		);
+		candidateCount += 1;
+		if (metrics !== null) {
+			metrics.candidateRootCount += 1;
+			metrics.cascadeCandidateMembershipCount += countSetBits(cascadeMask);
+		}
+	}
+	candidates.length = candidateCount;
+	if (candidateCount > budget.maximumMappedRoots) {
+		candidates.sort(compareOutdoorShadowCandidates);
+	}
+	const selectedCount = Math.min(candidateCount, budget.maximumSelectedRoots);
+	const mappedCount = Math.min(selectedCount, budget.maximumMappedRoots);
+	if (metrics !== null) {
+		metrics.selectedRootCount += selectedCount;
+		metrics.rejectedRootCount += candidateCount - selectedCount;
+		metrics.mappedRootCount += mappedCount;
+		metrics.analyticRootCount += selectedCount - mappedCount;
+	}
+	for (const [index, candidate] of candidates.entries()) {
+		if (index >= selectedCount) break;
+		if (index < mappedCount) continue;
+		analyticCasters.push(candidate);
+		selectedDynamicNodeIds.add(candidate.nodeId);
+	}
+	let casterPartCount = 0;
+	let mappedIndex = 0;
+	for (const candidate of candidates) {
+		if (mappedIndex >= mappedCount) break;
+		mappedIndex += 1;
+		const { cascadeMask, nodeId } = candidate;
 		let retainedRoot = false;
 		const contributions = world.expandDynamicContributions(nodeId, true);
 		if (
@@ -295,7 +427,6 @@ export function collectOutdoorPssmCastersForCascades(
 		}
 		if (retainedRoot) {
 			selectedDynamicNodeIds.add(nodeId);
-			if (metrics !== null) metrics.retainedCasterRootCount += 1;
 		}
 	}
 	for (const batch of batches) {
@@ -313,6 +444,25 @@ export function collectOutdoorPssmCastersForCascades(
 		if (retired !== undefined) retired.instance = RELEASED_OBJECT_INSTANCE;
 	}
 	scratch.activeCasterPartCount = casterPartCount;
+}
+
+function compareOutdoorShadowCandidates(
+	left: OutdoorShadowCasterCandidate,
+	right: OutdoorShadowCasterCandidate,
+): number {
+	if (left.cameraVisible !== right.cameraVisible)
+		return left.cameraVisible ? -1 : 1;
+	return (
+		left.distanceSquared - right.distanceSquared ||
+		left.identity.localeCompare(right.identity)
+	);
+}
+
+function distanceSquaredToBounds(point: Vec3, bounds: AABB3): number {
+	const x = Math.max(bounds.min.x - point.x, 0, point.x - bounds.max.x);
+	const y = Math.max(bounds.min.y - point.y, 0, point.y - bounds.max.y);
+	const z = Math.max(bounds.min.z - point.z, 0, point.z - bounds.max.z);
+	return x * x + y * y + z * z;
 }
 
 /** Group compatible caster records and flatten their transforms into one contiguous upload. */

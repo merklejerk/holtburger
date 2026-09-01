@@ -210,7 +210,7 @@ describe("RenderWorld", () => {
 			kind: "dynamic",
 		});
 		expect(calls).not.toContain("dynamic-expand");
-		expect(world.getEntityGroundingDynamicFacts("scene-node:9")).toEqual({
+		expect(world.getEntityShadowDynamicFacts("scene-node:9")).toEqual({
 			identity: "guid:9",
 			rigidBounds: RIGID_DYNAMIC_BOUNDS,
 			spatialMembership: { scopes: [PLACEMENT.scope] },

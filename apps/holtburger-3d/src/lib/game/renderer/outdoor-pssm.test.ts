@@ -5,6 +5,9 @@ import { DEFAULT_ENTITY_SHADOW_SETTINGS } from "./entity-shadow-policy";
 import {
 	buildOutdoorPssmCascades,
 	createPracticalCascadeSplits,
+	hasOutdoorShadowLight,
+	outdoorShadowCastLength,
+	resolveOutdoorShadowProjection,
 	terrainLandblockIntersectsShadowDistance,
 	type OutdoorPssmCascade,
 	type OutdoorPssmCamera,
@@ -22,11 +25,20 @@ const CAMERA: OutdoorPssmCamera = {
 
 const SETTINGS = {
 	...DEFAULT_ENTITY_SHADOW_SETTINGS.pssm,
-	cascadeCount: 4,
+	cascadeCount: 2,
 	mapResolution: 1_024,
 	maximumDistance: 101,
-	casterSearchPadding: 20,
 };
+
+const PROJECTION_SETTINGS = {
+	...DEFAULT_ENTITY_SHADOW_SETTINGS.projection,
+	maximumCasterHeight: 20,
+	maximumCastLength: 20,
+};
+
+function projection(sunVector: Vec3, settings = PROJECTION_SETTINGS) {
+	return resolveOutdoorShadowProjection(sunVector, settings);
+}
 
 describe("outdoor PSSM", () => {
 	it("keeps only terrain landblocks horizontally reachable by a cascade", () => {
@@ -58,15 +70,15 @@ describe("outdoor PSSM", () => {
 	});
 
 	it("builds uniform, logarithmic, and interpolated practical splits", () => {
-		const uniform = createPracticalCascadeSplits(1, 101, 4, 0);
-		expect(uniform).toEqual([1, 26, 51, 76, 101]);
+		const uniform = createPracticalCascadeSplits(1, 101, 2, 0);
+		expect(uniform).toEqual([1, 51, 101]);
 
-		const logarithmic = createPracticalCascadeSplits(1, 101, 4, 1);
-		const mixed = createPracticalCascadeSplits(1, 101, 4, 0.5);
+		const logarithmic = createPracticalCascadeSplits(1, 101, 2, 1);
+		const mixed = createPracticalCascadeSplits(1, 101, 2, 0.5);
 		expect(logarithmic[0]).toBe(1);
-		expect(logarithmic[4]).toBe(101);
-		for (let index = 1; index < 4; index += 1) {
-			expect(logarithmic[index]).toBeCloseTo(Math.pow(101, index / 4));
+		expect(logarithmic[2]).toBe(101);
+		for (let index = 1; index < 2; index += 1) {
+			expect(logarithmic[index]).toBeCloseTo(Math.pow(101, index / 2));
 			expect(mixed[index]).toBeCloseTo(
 				(uniform[index]! + logarithmic[index]!) / 2,
 			);
@@ -99,15 +111,15 @@ describe("outdoor PSSM", () => {
 		const cascades = buildOutdoorPssmCascades(
 			{
 				camera: CAMERA,
-				sunVector: new Vec3(0.4, 0.8, -0.2),
+				projection: projection(new Vec3(0.4, 0.8, -0.2)),
 				settings: SETTINGS,
 			},
 			storage,
 		);
 		expect(cascades).toBe(storage);
-		expect(cascades).toHaveLength(4);
+		expect(cascades).toHaveLength(2);
 		expect(cascades[0]!.splitNear).toBe(CAMERA.near);
-		expect(cascades[3]!.splitFar).toBe(SETTINGS.maximumDistance);
+		expect(cascades[1]!.splitFar).toBe(SETTINGS.maximumDistance);
 		for (let index = 0; index < cascades.length; index += 1) {
 			const cascade = cascades[index]!;
 			expect(cascade.splitFar).toBeGreaterThan(cascade.splitNear);
@@ -125,7 +137,7 @@ describe("outdoor PSSM", () => {
 	it("contains all slice corners and the toward-sun caster extension", () => {
 		const [cascade] = buildOutdoorPssmCascades({
 			camera: CAMERA,
-			sunVector: new Vec3(0, 1, 0),
+			projection: projection(new Vec3(0, 1, 0)),
 			settings: { ...SETTINGS, cascadeCount: 1 },
 		});
 		for (const corner of cascade!.sliceCorners) {
@@ -138,7 +150,7 @@ describe("outdoor PSSM", () => {
 			corner.y > highest.y ? corner : highest,
 		);
 		const paddedCaster = highestCorner.add(
-			new Vec3(0, SETTINGS.casterSearchPadding * 0.5, 0),
+			new Vec3(0, PROJECTION_SETTINGS.maximumCasterHeight * 0.5, 0),
 		);
 		const paddedClip = transformPoint3(cascade!.lightClip, paddedCaster);
 		expect(Math.abs(paddedClip.x)).toBeLessThanOrEqual(1);
@@ -150,12 +162,11 @@ describe("outdoor PSSM", () => {
 		const minimumLightElevationDegrees = 30;
 		const low = buildOutdoorPssmCascades({
 			camera: CAMERA,
-			sunVector: new Vec3(2, 0, -2),
-			settings: {
-				...SETTINGS,
-				cascadeCount: 1,
+			projection: projection(new Vec3(2, 0, -2), {
+				...PROJECTION_SETTINGS,
 				minimumLightElevationDegrees,
-			},
+			}),
+			settings: { ...SETTINGS, cascadeCount: 1 },
 		})[0]!;
 		const expectedHorizontal =
 			Math.cos((minimumLightElevationDegrees * Math.PI) / 180) / Math.sqrt(2);
@@ -165,12 +176,11 @@ describe("outdoor PSSM", () => {
 
 		const authored = buildOutdoorPssmCascades({
 			camera: CAMERA,
-			sunVector: new Vec3(0, 1, 1),
-			settings: {
-				...SETTINGS,
-				cascadeCount: 1,
+			projection: projection(new Vec3(0, 1, 1), {
+				...PROJECTION_SETTINGS,
 				minimumLightElevationDegrees,
-			},
+			}),
+			settings: { ...SETTINGS, cascadeCount: 1 },
 		})[0]!;
 		expect(authored.lightView.m23).toBeCloseTo(1 / Math.sqrt(2));
 		expect(authored.lightView.m33).toBeCloseTo(1 / Math.sqrt(2));
@@ -180,7 +190,7 @@ describe("outdoor PSSM", () => {
 		const buildAtX = (x: number) =>
 			buildOutdoorPssmCascades({
 				camera: { ...CAMERA, position: new Vec3(x, 0, 0) },
-				sunVector: new Vec3(0, 1, 0),
+				projection: projection(new Vec3(0, 1, 0)),
 				settings: { ...SETTINGS, cascadeCount: 1 },
 			})[0]!;
 		const original = buildAtX(0);
@@ -195,7 +205,11 @@ describe("outdoor PSSM", () => {
 	it("rewrites caller-owned cascade, corner, matrix, and frustum storage", () => {
 		const storage: OutdoorPssmCascade[] = [];
 		buildOutdoorPssmCascades(
-			{ camera: CAMERA, sunVector: new Vec3(0, 1, 0), settings: SETTINGS },
+			{
+				camera: CAMERA,
+				projection: projection(new Vec3(0, 1, 0)),
+				settings: SETTINGS,
+			},
 			storage,
 		);
 		const records = storage.slice();
@@ -206,7 +220,7 @@ describe("outdoor PSSM", () => {
 		buildOutdoorPssmCascades(
 			{
 				camera: { ...CAMERA, position: new Vec3(0.01, 0, 0) },
-				sunVector: new Vec3(0, 1, 0),
+				projection: projection(new Vec3(0, 1, 0)),
 				settings: SETTINGS,
 			},
 			storage,
@@ -224,19 +238,61 @@ describe("outdoor PSSM", () => {
 	});
 
 	it("rejects degenerate frame inputs before producing partial output", () => {
-		expect(() =>
-			buildOutdoorPssmCascades({
-				camera: CAMERA,
-				sunVector: Vec3.zero(),
-				settings: SETTINGS,
-			}),
-		).toThrow("non-zero sun vector");
+		expect(() => projection(Vec3.zero())).toThrow("non-zero sun vector");
+		expect(hasOutdoorShadowLight(Vec3.zero())).toBe(false);
+		expect(() => hasOutdoorShadowLight(new Vec3(Number.NaN, 0, 0))).toThrow(
+			"finite sun vector",
+		);
 		expect(() =>
 			buildOutdoorPssmCascades({
 				camera: { ...CAMERA, aspectRatio: 0 },
-				sunVector: new Vec3(0, 1, 0),
+				projection: projection(new Vec3(0, 1, 0)),
 				settings: SETTINGS,
 			}),
 		).toThrow("framing must be finite and non-degenerate");
+	});
+
+	it("bounds low-angle projection independently by height and cast length", () => {
+		const castLimited = projection(new Vec3(1, 0.01, 0), {
+			minimumLightElevationDegrees: 0,
+			maximumCasterHeight: 16,
+			maximumCastLength: 12,
+		});
+		expect(castLimited.maximumProjectedCastLength).toBeCloseTo(12);
+		expect(outdoorShadowCastLength(castLimited, 4)).toBeCloseTo(12);
+
+		const heightLimited = projection(new Vec3(1, 1, 0), {
+			minimumLightElevationDegrees: 0,
+			maximumCasterHeight: 4,
+			maximumCastLength: 100,
+		});
+		expect(heightLimited.maximumCasterReach).toBeCloseTo(4 * Math.sqrt(2));
+		expect(outdoorShadowCastLength(heightLimited, 2)).toBeCloseTo(2);
+	});
+
+	it("never shrinks maximum caster reach when either projection cap grows", () => {
+		const sun = new Vec3(1, 0.5, -1);
+		const baseline = projection(sun, {
+			minimumLightElevationDegrees: 0,
+			maximumCasterHeight: 4,
+			maximumCastLength: 8,
+		});
+		const taller = projection(sun, {
+			minimumLightElevationDegrees: 0,
+			maximumCasterHeight: 8,
+			maximumCastLength: 8,
+		});
+		const longer = projection(sun, {
+			minimumLightElevationDegrees: 0,
+			maximumCasterHeight: 4,
+			maximumCastLength: 16,
+		});
+
+		expect(taller.maximumCasterReach).toBeGreaterThanOrEqual(
+			baseline.maximumCasterReach,
+		);
+		expect(longer.maximumCasterReach).toBeGreaterThanOrEqual(
+			baseline.maximumCasterReach,
+		);
 	});
 });

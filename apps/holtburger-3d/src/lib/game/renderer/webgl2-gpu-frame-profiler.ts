@@ -92,14 +92,18 @@ const CONTRIBUTION_METRIC_KEYS = [
 ] as const satisfies readonly (keyof RendererContributionFrameMetrics)[];
 
 const OUTDOOR_SHADOW_MAP_METRIC_KEYS = [
+	"analyticRootCount",
+	"candidateRootCount",
+	"cascadeCandidateMembershipCount",
 	"cascadeQueryCount",
-	"cascadeSelectedRootCount",
 	"compatibleDepthRunCount",
+	"emptyMappedViewCount",
 	"instanceUploadBytes",
 	"instanceUploadCount",
-	"retainedCasterRootCount",
+	"mappedRootCount",
+	"rejectedRootCount",
+	"selectedRootCount",
 	"selectedCasterPartCount",
-	"uniqueSelectedRootCount",
 ] as const satisfies readonly (keyof RendererOutdoorShadowMapFrameMetrics)[];
 
 type MutableContributionFrameMetrics = {
@@ -119,14 +123,18 @@ type MutableOutdoorShadowMapFrameMetrics = {
 
 function createEmptyOutdoorShadowMapMetrics(): MutableOutdoorShadowMapFrameMetrics {
 	return {
+		analyticRootCount: 0,
+		candidateRootCount: 0,
+		cascadeCandidateMembershipCount: 0,
 		cascadeQueryCount: 0,
-		cascadeSelectedRootCount: 0,
 		compatibleDepthRunCount: 0,
+		emptyMappedViewCount: 0,
 		instanceUploadBytes: 0,
 		instanceUploadCount: 0,
-		retainedCasterRootCount: 0,
+		mappedRootCount: 0,
+		rejectedRootCount: 0,
+		selectedRootCount: 0,
 		selectedCasterPartCount: 0,
-		uniqueSelectedRootCount: 0,
 	};
 }
 
@@ -793,13 +801,18 @@ function averageOutdoorShadowMapMetrics(
 	sampleCount: number,
 ): RendererOutdoorShadowMapFrameMetrics {
 	return {
+		analyticRootCount: totals.analyticRootCount / sampleCount,
+		candidateRootCount: totals.candidateRootCount / sampleCount,
+		cascadeCandidateMembershipCount:
+			totals.cascadeCandidateMembershipCount / sampleCount,
 		cascadeQueryCount: totals.cascadeQueryCount / sampleCount,
-		cascadeSelectedRootCount: totals.cascadeSelectedRootCount / sampleCount,
 		compatibleDepthRunCount: totals.compatibleDepthRunCount / sampleCount,
+		emptyMappedViewCount: totals.emptyMappedViewCount / sampleCount,
 		instanceUploadBytes: totals.instanceUploadBytes / sampleCount,
 		instanceUploadCount: totals.instanceUploadCount / sampleCount,
-		retainedCasterRootCount: totals.retainedCasterRootCount / sampleCount,
+		mappedRootCount: totals.mappedRootCount / sampleCount,
+		rejectedRootCount: totals.rejectedRootCount / sampleCount,
+		selectedRootCount: totals.selectedRootCount / sampleCount,
 		selectedCasterPartCount: totals.selectedCasterPartCount / sampleCount,
-		uniqueSelectedRootCount: totals.uniqueSelectedRootCount / sampleCount,
 	};
 }

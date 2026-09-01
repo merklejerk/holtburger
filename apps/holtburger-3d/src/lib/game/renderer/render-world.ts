@@ -185,8 +185,8 @@ export interface ResolvedStaticObjectNode {
 	}[];
 }
 
-/** Dynamic facts read only when analytic grounding is active for a visibly drawn entity. */
-export interface EntityGroundingDynamicFacts {
+/** Dynamic facts shared by indoor radial and outdoor directional entity shadows. */
+export interface EntityShadowDynamicFacts {
 	readonly identity: string;
 	/** Exact current rigid-pose bounds before particle-envelope expansion. */
 	readonly rigidBounds: AABB3;
@@ -343,9 +343,7 @@ export class RenderWorld {
 	}
 
 	/** Resolve the two facts not already carried by a visible dynamic contribution. */
-	getEntityGroundingDynamicFacts(
-		nodeId: SceneNodeId,
-	): EntityGroundingDynamicFacts {
+	getEntityShadowDynamicFacts(nodeId: SceneNodeId): EntityShadowDynamicFacts {
 		const identity = this.#systems.dynamics.getPresentationIdentity(nodeId);
 		const rigidBounds =
 			this.#systems.dynamics.getPublishedRigidPresentationBounds(nodeId);
@@ -356,7 +354,7 @@ export class RenderWorld {
 			rigidBounds === null ||
 			spatialMembership === undefined
 		) {
-			throw new Error(`Dynamic entity ${nodeId} lacks grounding facts.`);
+			throw new Error(`Dynamic entity ${nodeId} lacks shadow-caster facts.`);
 		}
 		return { identity, rigidBounds, spatialMembership };
 	}

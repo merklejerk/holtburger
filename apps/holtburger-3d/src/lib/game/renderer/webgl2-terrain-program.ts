@@ -4,12 +4,12 @@ import {
 	requireWebGL2Uniform,
 } from "../webgl/shader-program";
 import { WEBGL2_DISTANCE_FOG_GLSL } from "./webgl2-fog";
-import {
-	requireWebGL2EntityGroundingUniforms,
-	WEBGL2_ENTITY_GROUNDING_GLSL,
-	type WebGL2EntityGroundingUniforms,
-} from "./webgl2-entity-grounding";
 import { WEBGL2_SCENE_LIGHTING_GLSL } from "./webgl2-lighting";
+import {
+	requireWebGL2OutdoorDirectionalShadowUniforms,
+	WEBGL2_OUTDOOR_DIRECTIONAL_SHADOW_GLSL,
+	type WebGL2OutdoorDirectionalShadowUniforms,
+} from "./webgl2-outdoor-directional-shadow";
 import {
 	requireWebGL2OutdoorPssmUniforms,
 	WEBGL2_OUTDOOR_PSSM_GLSL,
@@ -20,7 +20,8 @@ import {
 export const TERRAIN_COLOR_CODE_ATTRIBUTE = 3;
 
 /** Mutually exclusive optional entity-shadow treatment compiled into one near-terrain program. */
-export type TerrainEntityShadowMode = "none" | "pssm" | "grounding";
+export type TerrainEntityShadowMode =
+	"none" | "pssm" | "directional" | "hybrid";
 
 const TERRAIN_VERTEX_SHADER = `#version 300 es
 layout(location = 0) in vec3 aPosition;
@@ -325,7 +326,7 @@ void main() {
 export function createTerrainVertexShader(
 	entityShadowMode: TerrainEntityShadowMode = "none",
 ): string {
-	if (entityShadowMode !== "pssm") return TERRAIN_VERTEX_SHADER;
+	if (entityShadowMode === "none") return TERRAIN_VERTEX_SHADER;
 	return replaceRequiredShaderSection(
 		replaceRequiredShaderSection(
 			TERRAIN_VERTEX_SHADER,
@@ -350,46 +351,36 @@ export function createTerrainFragmentShader(
 	entityShadowMode: TerrainEntityShadowMode = "none",
 ): string {
 	if (entityShadowMode === "none") return TERRAIN_FRAGMENT_SHADER;
-	if (entityShadowMode === "grounding") {
-		const withGlsl = replaceRequiredShaderSection(
-			TERRAIN_FRAGMENT_SHADER,
-			`${WEBGL2_SCENE_LIGHTING_GLSL}\n\nin vec2 vGridUv;`,
-			`${WEBGL2_SCENE_LIGHTING_GLSL}\n${WEBGL2_ENTITY_GROUNDING_GLSL}\n\nin vec2 vGridUv;`,
-			"terrain grounding GLSL",
-		);
-		return replaceRequiredShaderSection(
-			withGlsl,
-			`color *= min(
-		vAmbientSun
-			+ evaluateDynamicLights(vAnchoredPosition, surfaceNormal)
-			+ evaluateMaskedStaticLights(vAnchoredPosition, surfaceNormal),
-		vec3(1.0)
-	);`,
-			`color *= min(
-		vAmbientSun
-			+ evaluateDynamicLights(vAnchoredPosition, surfaceNormal)
-			+ evaluateMaskedStaticLights(vAnchoredPosition, surfaceNormal),
-		vec3(1.0)
-	);
-	color *= 1.0 - evaluateEntityGrounding(
-		vAnchoredPosition,
-		dot(surfaceNormal, vec3(0.0, 1.0, 0.0))
-	);`,
-			"terrain grounding application",
-		);
-	}
+	const mapped = entityShadowMode === "pssm" || entityShadowMode === "hybrid";
+	const directional =
+		entityShadowMode === "directional" || entityShadowMode === "hybrid";
+	const shadowGlsl = `${mapped ? WEBGL2_OUTDOOR_PSSM_GLSL : ""}${directional ? WEBGL2_OUTDOOR_DIRECTIONAL_SHADOW_GLSL : ""}`;
 	const withGlsl = replaceRequiredShaderSection(
 		TERRAIN_FRAGMENT_SHADER,
 		`${WEBGL2_SCENE_LIGHTING_GLSL}\n\nin vec2 vGridUv;`,
-		`${WEBGL2_SCENE_LIGHTING_GLSL}\n${WEBGL2_OUTDOOR_PSSM_GLSL}\n\nin vec2 vGridUv;`,
-		"terrain PSSM GLSL",
+		`${WEBGL2_SCENE_LIGHTING_GLSL}\n${shadowGlsl}\nin vec2 vGridUv;`,
+		"terrain outdoor-shadow GLSL",
 	);
 	const withVarying = replaceRequiredShaderSection(
 		withGlsl,
 		"in vec3 vAmbientSun;",
 		"in vec3 vAmbientSun;\nin vec3 vAmbientWithoutSun;",
-		"terrain PSSM ambient input",
+		"terrain outdoor-shadow ambient input",
 	);
+	const mappedVisibility = `evaluateOutdoorPssmVisibility(
+			vViewDepth,
+			vAnchoredPosition,
+			vSurfaceNormal
+		)`;
+	const directionalVisibility = `evaluateOutdoorDirectionalShadowVisibility(
+			vAnchoredPosition,
+			dot(surfaceNormal, vec3(0.0, 1.0, 0.0))
+		)`;
+	const visibility = mapped
+		? directional
+			? `min(${mappedVisibility}, ${directionalVisibility})`
+			: mappedVisibility
+		: directionalVisibility;
 	return replaceRequiredShaderSection(
 		withVarying,
 		`color *= min(
@@ -405,13 +396,9 @@ export function createTerrainFragmentShader(
 	color *= mix(
 		lightingWithoutSun,
 		unshadowedLighting,
-		evaluateOutdoorPssmVisibility(
-			vViewDepth,
-			vAnchoredPosition,
-			vSurfaceNormal
-		)
+		${visibility}
 	);`,
-		"terrain PSSM lighting application",
+		"terrain outdoor-shadow lighting application",
 	);
 }
 
@@ -432,8 +419,8 @@ function replaceRequiredShaderSection(
 /** Linked GPU program that composes one terrain cell directly from canonical source resources. */
 export interface WebGL2NearTerrainProgram {
 	readonly program: WebGLProgram;
-	/** Present only on the dedicated analytic-grounding receiver variant. */
-	readonly entityGroundingUniforms: WebGL2EntityGroundingUniforms | null;
+	/** Present only on directional or hybrid terrain receiver variants. */
+	readonly outdoorDirectionalShadowUniforms: WebGL2OutdoorDirectionalShadowUniforms | null;
 	/** Present only on the dedicated outdoor receiver variant. */
 	readonly outdoorPssmUniforms: WebGL2OutdoorPssmUniforms | null;
 	readonly uniforms: {
@@ -500,12 +487,12 @@ export function createWebGL2NearTerrainProgram(
 			);
 		}
 		return {
-			entityGroundingUniforms:
-				entityShadowMode === "grounding"
-					? requireWebGL2EntityGroundingUniforms(gl, program)
+			outdoorDirectionalShadowUniforms:
+				entityShadowMode === "directional" || entityShadowMode === "hybrid"
+					? requireWebGL2OutdoorDirectionalShadowUniforms(gl, program)
 					: null,
 			outdoorPssmUniforms:
-				entityShadowMode === "pssm"
+				entityShadowMode === "pssm" || entityShadowMode === "hybrid"
 					? requireWebGL2OutdoorPssmUniforms(gl, program)
 					: null,
 			program,

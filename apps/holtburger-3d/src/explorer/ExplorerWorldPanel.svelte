@@ -12,31 +12,10 @@
 	} from "./explorer-residency-radius";
 	import { parseResidenceInput } from "./world-input";
 	import type { ExplorerEnvironmentSelection } from "../lib/game/environment/scene-environment";
-	import type {
-		EnvCellRenderMode,
-		RenderLayerVisibility,
-	} from "../lib/game/renderer/renderer";
-	import { LandblockLayerKind } from "../lib/game/runtime/scene-interest";
-	import ExplorerLayerVisibilityButton from "./ExplorerLayerVisibilityButton.svelte";
-	import {
-		textureFilteringPolicyLabel,
-		type TextureFilteringPolicy,
-	} from "../lib/game/renderer/texture-filtering-policy";
-	import {
-		createAmbientOcclusionParameters,
-		type AmbientOcclusionParameters,
-		type AmbientOcclusionSettings,
-	} from "../lib/game/renderer/ambient-occlusion-policy";
 	import type { PhysicalFlyStatus } from "./physical-fly-session";
 	import type { ExplorerCameraMode } from "../lib/game/motion/host-physical-fly-path";
-	import type { EntityShadowSettings } from "../lib/game/renderer/entity-shadow-policy";
-	import ExplorerShadowControls from "./ExplorerShadowControls.svelte";
 	import ToggleField from "../app/ToggleField.svelte";
-	import {
-		NAMEPLATE_CATEGORIES,
-		type NameplateCategory,
-		type NameplateSettings,
-	} from "../lib/game/renderer/nameplate-policy";
+	import ExplorerControlGroup from "./ExplorerControlGroup.svelte";
 
 	interface Props {
 		/** Whether Explorer has a runtime available to accept world operations. */
@@ -61,21 +40,6 @@
 		readonly updateEnvironment: (
 			selection: ExplorerEnvironmentSelection,
 		) => void;
-		/** Explorer-local switch controlling distance-fog presentation. */
-		readonly distanceFogEnabled: boolean;
-		/** Whether meshes suppressed by retail's degradation sentinel remain visible. */
-		readonly showRetailHiddenGeometry: boolean;
-		readonly updateShowRetailHiddenGeometry: (visible: boolean) => void;
-		readonly nameplates: NameplateSettings;
-		readonly updateNameplateCategory: (
-			category: NameplateCategory,
-			visible: boolean,
-		) => void;
-		/** User-switchable near-field ambient-occlusion presentation. */
-		readonly ambientOcclusion: AmbientOcclusionSettings;
-		/** Complete outdoor and indoor entity-shadow presentation policy. */
-		readonly entityShadows: EntityShadowSettings;
-		readonly viewerLightEnabled: boolean;
 		/** Mirrors retail's `DisableMostWeatherEffects` player option, inverted. */
 		readonly weatherEnabled: boolean;
 		readonly clockFollowing: boolean;
@@ -87,40 +51,11 @@
 		/** Effect-category volume in [0, 1]; retail's other categories are not produced yet. */
 		readonly effectVolume: number;
 		readonly ambientVolume: number;
-		/** Update Explorer's distance-fog presentation switch. */
-		readonly updateDistanceFog: (enabled: boolean) => void;
-		readonly updateAmbientOcclusionSettings: (
-			settings: AmbientOcclusionSettings,
-		) => void;
-		readonly updateEntityShadowSettings: (
-			settings: EntityShadowSettings,
-		) => void;
-		readonly updateViewerLight: (enabled: boolean) => void;
 		readonly updateWeather: (enabled: boolean) => void;
 		readonly updateClockFollowing: (enabled: boolean) => void;
 		readonly updateAudioFollowsCamera: (enabled: boolean) => void;
 		readonly updateEffectVolume: (volume: number) => void;
 		readonly updateAmbientVolume: (volume: number) => void;
-		readonly envCellRenderMode: EnvCellRenderMode;
-		readonly updateEnvCellRenderMode: (mode: EnvCellRenderMode) => void;
-		/** Renderer-only layer switches; these do not alter requested scene interest. */
-		readonly layerVisibility: RenderLayerVisibility;
-		readonly updateLayerVisibility: (
-			layer: LandblockLayerKind,
-			visible: boolean,
-		) => void;
-		/** Effective filterable texture quality selected for the next frame. */
-		readonly textureFiltering: TextureFilteringPolicy;
-		/** Device-supported texture filtering choices in display order. */
-		readonly textureFilteringOptions: readonly TextureFilteringPolicy[];
-		/** Device pixels rendered per CSS pixel, and the only anti-aliasing control we have. */
-		readonly renderScale: number;
-		/** Frontend-chosen densities offered to the viewer, not the renderer's full range. */
-		readonly renderScaleOptions: readonly number[];
-		readonly updateRenderScale: (renderScale: number) => void;
-		/** Raw device maximum reported independently from the client 8x ceiling. */
-		readonly maximumTextureAnisotropy: number | null;
-		readonly updateTextureFiltering: (policy: TextureFilteringPolicy) => void;
 	}
 
 	let {
@@ -136,14 +71,6 @@
 		environmentSelection,
 		dayGroupNames,
 		updateEnvironment,
-		distanceFogEnabled,
-		showRetailHiddenGeometry,
-		updateShowRetailHiddenGeometry,
-		nameplates,
-		updateNameplateCategory,
-		ambientOcclusion,
-		entityShadows,
-		viewerLightEnabled,
 		weatherEnabled,
 		clockFollowing,
 		interestFollowsCamera,
@@ -154,23 +81,8 @@
 		ambientVolume,
 		updateEffectVolume,
 		updateAmbientVolume,
-		updateDistanceFog,
-		updateAmbientOcclusionSettings,
-		updateEntityShadowSettings,
-		updateViewerLight,
 		updateWeather,
 		updateClockFollowing,
-		envCellRenderMode,
-		updateEnvCellRenderMode,
-		layerVisibility,
-		updateLayerVisibility,
-		textureFiltering,
-		textureFilteringOptions,
-		renderScale,
-		renderScaleOptions,
-		updateRenderScale,
-		maximumTextureAnisotropy,
-		updateTextureFiltering,
 	}: Props = $props();
 	let physicalCameraStatus = $state<PhysicalFlyStatus | null>(null);
 
@@ -227,24 +139,6 @@
 		});
 	}
 
-	function updateAmbientOcclusionEnabled(enabled: boolean): void {
-		updateAmbientOcclusionSettings({
-			...ambientOcclusion,
-			enabled,
-		});
-	}
-
-	function updateAmbientOcclusionParameter(
-		field: keyof AmbientOcclusionParameters,
-		event: Event,
-	): void {
-		const parameters = createAmbientOcclusionParameters({
-			...ambientOcclusion.parameters,
-			[field]: Number((event.currentTarget as HTMLInputElement).value),
-		});
-		updateAmbientOcclusionSettings({ ...ambientOcclusion, parameters });
-	}
-
 	function handleCameraModeChange(event: Event): void {
 		updateCameraMode(
 			(event.currentTarget as HTMLSelectElement).value as ExplorerCameraMode,
@@ -264,8 +158,11 @@
 		<strong>{cameraResidencyLabel ?? "—"}</strong>
 	</p>
 	<form class="explorer-world-form" onsubmit={submitInterest}>
-		<fieldset class="explorer-section" disabled={!runtimeReady}>
-			<legend>Scene interest</legend>
+		<ExplorerControlGroup
+			title="Scene interest"
+			initiallyOpen
+			disabled={!runtimeReady}
+		>
 			<label class="ac-form-field">
 				<span>Target landblock, cell, or coordinates</span>
 				<input
@@ -288,17 +185,11 @@
 				onCheckedChange={updateInterestFollowsCamera}
 			/>
 			<div
-				class="explorer-residency-controls"
+				class="explorer-lod-controls"
 				aria-label="Scene interest level of detail"
 			>
 				<p class="ac-section-label">Outdoor residency</p>
-				<div class="explorer-residency-control">
-					<ExplorerLayerVisibilityButton
-						label="terrain"
-						visible={layerVisibility[LandblockLayerKind.Terrain]}
-						updateVisible={(visible) =>
-							updateLayerVisibility(LandblockLayerKind.Terrain, visible)}
-					/>
+				<div class="explorer-lod-control">
 					<label for="explorer-residency-terrain">Terrain</label>
 					<strong>{formatResidencyRadius(radii.terrainRadius)}</strong>
 					<input
@@ -311,13 +202,7 @@
 						oninput={(event) => updateRadius("terrain", event)}
 					/>
 				</div>
-				<div class="explorer-residency-control">
-					<ExplorerLayerVisibilityButton
-						label="building"
-						visible={layerVisibility[LandblockLayerKind.Buildings]}
-						updateVisible={(visible) =>
-							updateLayerVisibility(LandblockLayerKind.Buildings, visible)}
-					/>
+				<div class="explorer-lod-control">
 					<label for="explorer-residency-buildings">Buildings</label>
 					<strong>{formatResidencyRadius(radii.buildingRadius)}</strong>
 					<input
@@ -330,13 +215,7 @@
 						oninput={(event) => updateRadius("buildings", event)}
 					/>
 				</div>
-				<div class="explorer-residency-control">
-					<ExplorerLayerVisibilityButton
-						label="explicit object"
-						visible={layerVisibility[LandblockLayerKind.Objects]}
-						updateVisible={(visible) =>
-							updateLayerVisibility(LandblockLayerKind.Objects, visible)}
-					/>
+				<div class="explorer-lod-control">
 					<label for="explorer-residency-objects">Explicit objects</label>
 					<strong>{formatResidencyRadius(radii.explicitObjectRadius)}</strong>
 					<input
@@ -350,13 +229,7 @@
 						oninput={(event) => updateRadius("explicitObjects", event)}
 					/>
 				</div>
-				<div class="explorer-residency-control">
-					<ExplorerLayerVisibilityButton
-						label="generated scenery"
-						visible={layerVisibility[LandblockLayerKind.Generated]}
-						updateVisible={(visible) =>
-							updateLayerVisibility(LandblockLayerKind.Generated, visible)}
-					/>
+				<div class="explorer-lod-control">
 					<label for="explorer-residency-generated">Generated scenery</label>
 					<strong>{formatResidencyRadius(radii.generatedObjectRadius)}</strong>
 					<input
@@ -370,13 +243,7 @@
 						oninput={(event) => updateRadius("generatedObjects", event)}
 					/>
 				</div>
-				<div class="explorer-residency-control">
-					<ExplorerLayerVisibilityButton
-						label="environment cell"
-						visible={layerVisibility[LandblockLayerKind.EnvCells]}
-						updateVisible={(visible) =>
-							updateLayerVisibility(LandblockLayerKind.EnvCells, visible)}
-					/>
+				<div class="explorer-lod-control">
 					<label for="explorer-residency-env-cells">Env cells</label>
 					<strong>{formatResidencyRadius(radii.envCellRadius)}</strong>
 					<input
@@ -398,13 +265,12 @@
 				Request content and focus
 			</button>
 			<p>{requestStatus}</p>
-		</fieldset>
+		</ExplorerControlGroup>
 	</form>
-	<fieldset
-		class="explorer-section"
+	<ExplorerControlGroup
+		title="Camera navigation"
 		disabled={!runtimeReady || cameraModePending}
 	>
-		<legend>Camera navigation</legend>
 		<label class="ac-form-field">
 			<span>Position authority</span>
 			<select
@@ -437,13 +303,13 @@
 		{#if physicalCameraError !== null}
 			<p class="invalid">Physical camera failed: {physicalCameraError}</p>
 		{/if}
-	</fieldset>
+	</ExplorerControlGroup>
 	{#if dayGroupNames.length > 0}
-		<fieldset
-			class="explorer-section explorer-environment-controls"
+		<ExplorerControlGroup
+			title="Regional environment"
+			initiallyOpen
 			disabled={!runtimeReady}
 		>
-			<legend>Regional environment</legend>
 			<label class="explorer-environment-field">
 				<span>Day</span>
 				<input
@@ -480,20 +346,6 @@
 					{/each}
 				</select>
 			</label>
-			<ToggleField
-				checked={distanceFogEnabled}
-				label="Distance fog"
-				checkedLabel="On"
-				uncheckedLabel="Off"
-				onCheckedChange={updateDistanceFog}
-			/>
-			<ToggleField
-				checked={viewerLightEnabled}
-				label="Viewer light"
-				checkedLabel="On"
-				uncheckedLabel="Off"
-				onCheckedChange={updateViewerLight}
-			/>
 			<ToggleField
 				checked={weatherEnabled}
 				label="Weather"
@@ -543,146 +395,6 @@
 						)}
 				/>
 			</label>
-			<ToggleField
-				checked={envCellRenderMode === "portal"}
-				label="Portal rendering"
-				checkedLabel="On"
-				uncheckedLabel="Off"
-				onCheckedChange={(checked) =>
-					updateEnvCellRenderMode(checked ? "portal" : "flat")}
-			/>
-		</fieldset>
+		</ExplorerControlGroup>
 	{/if}
-	<fieldset
-		class="explorer-section explorer-environment-controls"
-		disabled={!runtimeReady}
-	>
-		<legend>Render quality</legend>
-		<ToggleField
-			checked={showRetailHiddenGeometry}
-			label="Retail-hidden geometry"
-			checkedLabel="Shown"
-			uncheckedLabel="Hidden"
-			onCheckedChange={updateShowRetailHiddenGeometry}
-		/>
-		{#each NAMEPLATE_CATEGORIES as category (category)}
-			<ToggleField
-				checked={nameplates.categoryVisibility[category]}
-				label={`Nameplates: ${category === "selfPlayer" ? "self player" : category}`}
-				checkedLabel="Shown"
-				uncheckedLabel="Hidden"
-				onCheckedChange={(visible) =>
-					updateNameplateCategory(category, visible)}
-			/>
-		{/each}
-		<ToggleField
-			checked={ambientOcclusion.enabled}
-			label="Near-field ambient occlusion"
-			checkedLabel="On"
-			uncheckedLabel="Off"
-			onCheckedChange={updateAmbientOcclusionEnabled}
-		/>
-		<label class="explorer-environment-field">
-			<span
-				>AO strength ({ambientOcclusion.parameters.intensity.toFixed(2)})</span
-			>
-			<input
-				max="8"
-				min="0"
-				step="0.1"
-				type="range"
-				value={ambientOcclusion.parameters.intensity}
-				oninput={(event) => updateAmbientOcclusionParameter("intensity", event)}
-			/>
-		</label>
-		<label class="explorer-environment-field">
-			<span
-				>AO radius ({ambientOcclusion.parameters.sampleRadius.toFixed(2)})</span
-			>
-			<input
-				max="8"
-				min={ambientOcclusion.parameters.bias + 0.05}
-				step="0.05"
-				type="range"
-				value={ambientOcclusion.parameters.sampleRadius}
-				oninput={(event) =>
-					updateAmbientOcclusionParameter("sampleRadius", event)}
-			/>
-		</label>
-		<label class="explorer-environment-field">
-			<span>AO bias ({ambientOcclusion.parameters.bias.toFixed(2)})</span>
-			<input
-				max={ambientOcclusion.parameters.sampleRadius - 0.05}
-				min="0"
-				step="0.01"
-				type="range"
-				value={ambientOcclusion.parameters.bias}
-				oninput={(event) => updateAmbientOcclusionParameter("bias", event)}
-			/>
-		</label>
-		<label class="explorer-environment-field">
-			<span
-				>Edge threshold ({ambientOcclusion.parameters.bilateralDepthThreshold.toFixed(
-					2,
-				)})</span
-			>
-			<input
-				max="4"
-				min="0.05"
-				step="0.05"
-				type="range"
-				value={ambientOcclusion.parameters.bilateralDepthThreshold}
-				oninput={(event) =>
-					updateAmbientOcclusionParameter("bilateralDepthThreshold", event)}
-			/>
-		</label>
-		<ExplorerShadowControls
-			settings={entityShadows}
-			updateSettings={updateEntityShadowSettings}
-		/>
-		<label class="explorer-environment-field">
-			<span>Render scale</span>
-			<select
-				class="ac-control ac-control--select"
-				value={renderScale}
-				onchange={(event) =>
-					updateRenderScale(
-						Number((event.currentTarget as HTMLSelectElement).value),
-					)}
-			>
-				{#each renderScaleOptions as scale}
-					<option value={scale}>{scale}x</option>
-				{/each}
-			</select>
-		</label>
-		<p>
-			Above 1x supersamples, which is the only anti-aliasing there is. Cost
-			scales with its square.
-		</p>
-		<label class="explorer-environment-field">
-			<span>Texture filtering</span>
-			<select
-				class="ac-control ac-control--select"
-				disabled={maximumTextureAnisotropy === null}
-				value={textureFiltering}
-				onchange={(event) =>
-					updateTextureFiltering(
-						(event.currentTarget as HTMLSelectElement)
-							.value as TextureFilteringPolicy,
-					)}
-			>
-				{#each textureFilteringOptions as policy}
-					<option value={policy}>{textureFilteringPolicyLabel(policy)}</option>
-				{/each}
-			</select>
-		</label>
-		<p>
-			Device maximum:
-			{maximumTextureAnisotropy === null
-				? "detecting"
-				: maximumTextureAnisotropy > 1
-					? `${maximumTextureAnisotropy}x`
-					: "linear only"}
-		</p>
-	</fieldset>
 </div>

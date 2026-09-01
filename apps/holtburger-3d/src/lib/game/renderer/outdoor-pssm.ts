@@ -9,7 +9,9 @@ import { crossVec3, normalizeVec3 } from "../math/vector-utils";
 import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
 import {
 	createOutdoorPssmSettings,
+	createOutdoorShadowProjectionSettings,
 	type OutdoorPssmSettings,
+	type OutdoorShadowProjectionSettings,
 } from "./entity-shadow-policy";
 
 /** Anchor-relative camera facts required to construct directional shadow cascades. */
@@ -25,9 +27,104 @@ export interface OutdoorPssmCamera {
 /** Pure inputs for one frame's outdoor cascade construction. */
 export interface OutdoorPssmBuildInput {
 	readonly camera: OutdoorPssmCamera;
-	/** Regional vector toward the sun; magnitude is ignored by light-view construction. */
-	readonly sunVector: Vec3;
+	/** Per-view projection resolved once for every outdoor shadow consumer. */
+	readonly projection: ResolvedOutdoorShadowProjection;
 	readonly settings: OutdoorPssmSettings;
+}
+
+/** Immutable per-view direction and caps shared by mapped and analytic outdoor shadows. */
+export interface ResolvedOutdoorShadowProjection {
+	/** Normalized direction toward the effective shadow sun. */
+	readonly directionTowardSun: Vec3;
+	/** Normalized horizontal direction in which shadows extend away from the sun. */
+	readonly horizontalCastDirection: Vec3;
+	/** Largest along-ray reach admitted into mapped-caster query volumes. */
+	readonly maximumCasterReach: number;
+	/** Largest horizontal cast length after both projection caps are applied. */
+	readonly maximumProjectedCastLength: number;
+	/** Validated maximum rigid height used by per-caster analytic projection. */
+	readonly maximumCasterHeight: number;
+}
+
+/** Whether finite authored lighting contains a directional term worth projecting. */
+export function hasOutdoorShadowLight(sunVector: Vec3): boolean {
+	const length = Math.hypot(sunVector.x, sunVector.y, sunVector.z);
+	if (!Number.isFinite(length)) {
+		throw new Error("Outdoor shadows require a finite sun vector.");
+	}
+	return length > Number.EPSILON;
+}
+
+/** Resolve authored sunlight into one finite bounded outdoor-shadow projection. */
+export function resolveOutdoorShadowProjection(
+	sunVector: Vec3,
+	settings: OutdoorShadowProjectionSettings,
+): ResolvedOutdoorShadowProjection {
+	createOutdoorShadowProjectionSettings(settings);
+	if (!hasOutdoorShadowLight(sunVector)) {
+		throw new Error("Outdoor shadows require a non-zero sun vector.");
+	}
+	const directionTowardSun = clampLightElevation(
+		normalizeVec3(sunVector),
+		settings.minimumLightElevationDegrees,
+	);
+	const horizontalMagnitude = Math.hypot(
+		directionTowardSun.x,
+		directionTowardSun.z,
+	);
+	const heightReach =
+		directionTowardSun.y > Number.EPSILON
+			? settings.maximumCasterHeight / directionTowardSun.y
+			: Number.POSITIVE_INFINITY;
+	const horizontalReach =
+		horizontalMagnitude > Number.EPSILON
+			? settings.maximumCastLength / horizontalMagnitude
+			: Number.POSITIVE_INFINITY;
+	const maximumCasterReach = Math.min(heightReach, horizontalReach);
+	if (!Number.isFinite(maximumCasterReach) || maximumCasterReach <= 0) {
+		throw new Error(
+			"Outdoor shadow projection produced no finite caster reach.",
+		);
+	}
+	const horizontalCastDirection =
+		horizontalMagnitude > Number.EPSILON
+			? new Vec3(
+					-directionTowardSun.x / horizontalMagnitude,
+					0,
+					-directionTowardSun.z / horizontalMagnitude,
+				)
+			: Vec3.zero();
+	return {
+		directionTowardSun,
+		horizontalCastDirection,
+		maximumCasterHeight: settings.maximumCasterHeight,
+		maximumCasterReach,
+		maximumProjectedCastLength: maximumCasterReach * horizontalMagnitude,
+	};
+}
+
+/** Project one rigid caster height through an already resolved per-view sun policy. */
+export function outdoorShadowCastLength(
+	projection: ResolvedOutdoorShadowProjection,
+	casterHeight: number,
+): number {
+	if (!Number.isFinite(casterHeight) || casterHeight < 0) {
+		throw new Error(
+			"Outdoor shadow caster height must be finite and non-negative.",
+		);
+	}
+	if (projection.maximumProjectedCastLength === 0) return 0;
+	const cappedHeight = Math.min(casterHeight, projection.maximumCasterHeight);
+	const vertical = projection.directionTowardSun.y;
+	if (vertical <= Number.EPSILON) return projection.maximumProjectedCastLength;
+	const horizontal = Math.hypot(
+		projection.directionTowardSun.x,
+		projection.directionTowardSun.z,
+	);
+	return Math.min(
+		(cappedHeight * horizontal) / vertical,
+		projection.maximumProjectedCastLength,
+	);
 }
 
 /** Conservatively retain a landblock whose horizontal footprint reaches shadow distance. */
@@ -169,14 +266,6 @@ export function buildOutdoorPssmCascades(
 ): OutdoorPssmCascade[] {
 	validateCamera(input.camera);
 	const settings = createOutdoorPssmSettings(input.settings);
-	const sunLength = Math.hypot(
-		input.sunVector.x,
-		input.sunVector.y,
-		input.sunVector.z,
-	);
-	if (!Number.isFinite(sunLength) || sunLength <= Number.EPSILON) {
-		throw new Error("Outdoor PSSM requires a finite non-zero sun vector.");
-	}
 	const coveredFar = Math.min(input.camera.far, settings.maximumDistance);
 	if (coveredFar <= input.camera.near) {
 		throw new Error(
@@ -189,10 +278,7 @@ export function buildOutdoorPssmCascades(
 		settings.cascadeCount,
 		settings.splitLambda,
 	);
-	const directionTowardSun = clampLightElevation(
-		normalizeVec3(input.sunVector),
-		settings.minimumLightElevationDegrees,
-	);
+	const directionTowardSun = input.projection.directionTowardSun;
 	const lightForward = new Vec3(
 		-directionTowardSun.x,
 		-directionTowardSun.y,
@@ -244,7 +330,7 @@ export function buildOutdoorPssmCascades(
 			minimumForward = Math.min(minimumForward, forward);
 			maximumForward = Math.max(maximumForward, forward);
 		}
-		const eyeForward = minimumForward - settings.casterSearchPadding;
+		const eyeForward = minimumForward - input.projection.maximumCasterReach;
 		const eye = new Vec3(
 			lightRight.x * snappedCenterX +
 				lightUp.x * snappedCenterY +

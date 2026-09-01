@@ -12,11 +12,14 @@ import {
 
 export const SYNTHETIC_NAMEPLATE_SETUP_DID = 0x0200_fffe;
 const SYNTHETIC_NAMEPLATE_WALL_SETUP_DID = 0x0200_fffd;
+const SYNTHETIC_SHADOW_CROWD_SETUP_DID = 0x0200_fffc;
+const SYNTHETIC_SHADOW_CROWD_PART_COUNT = 61;
 
 export type SyntheticNameplateWorkload =
 	| "repeated-100"
 	| "unique-100"
 	| "ordered-500"
+	| "shadow-crowd-112x61"
 	| "occlusion-open"
 	| "occlusion-wall"
 	| "portal-open"
@@ -26,6 +29,7 @@ export type SyntheticNameplateWorkload =
 const BOUNDS = new AABB3(new Vec3(-0.5, 0, -0.5), new Vec3(0.5, 2, 0.5));
 const VISUAL = createVisual();
 const WALL_VISUAL = createWallVisual();
+const SHADOW_CROWD_VISUAL = createShadowCrowdVisual();
 
 /** Harness-only setup source preserving the production source for every non-fixture setup. */
 export class SyntheticNameplateSetupVisualSource implements SetupVisualSource {
@@ -39,6 +43,8 @@ export class SyntheticNameplateSetupVisualSource implements SetupVisualSource {
 			return Promise.resolve(VISUAL);
 		if (setupDid === SYNTHETIC_NAMEPLATE_WALL_SETUP_DID)
 			return Promise.resolve(WALL_VISUAL);
+		if (setupDid === SYNTHETIC_SHADOW_CROWD_SETUP_DID)
+			return Promise.resolve(SHADOW_CROWD_VISUAL);
 		return this.delegate.load(setupDid, appearance);
 	}
 }
@@ -53,11 +59,13 @@ export function createSyntheticNameplateWorkload(
 	const count =
 		workload === "ordered-500"
 			? 500
-			: workload === "occlusion-open" ||
-				  workload === "occlusion-wall" ||
-				  workload.startsWith("portal-")
-				? 1
-				: 100;
+			: workload === "shadow-crowd-112x61"
+				? 112
+				: workload === "occlusion-open" ||
+					  workload === "occlusion-wall" ||
+					  workload.startsWith("portal-")
+					? 1
+					: 100;
 	const owner = parseInt(landblockId.slice(2, 6), 16);
 	const residencyCellId = cellId(
 		envCellId === null
@@ -69,7 +77,12 @@ export function createSyntheticNameplateWorkload(
 	const localCameraY = -cameraPosition[2] - ownerY(owner);
 	const cameraHeight = cameraPosition[1];
 	const targets = Array.from({ length: count }, (_, index) => {
-		const columnCount = workload === "ordered-500" ? 20 : 10;
+		const columnCount =
+			workload === "ordered-500"
+				? 20
+				: workload === "shadow-crowd-112x61"
+					? 14
+					: 10;
 		const column = index % columnCount;
 		const row = Math.floor(index / columnCount);
 		const lateral = workload.startsWith("portal-")
@@ -93,7 +106,10 @@ export function createSyntheticNameplateWorkload(
 					: [residencyCellId],
 			residencyCellId,
 			reachesOutdoors: envCellId === null || workload === "portal-plural",
-			setupDid: SYNTHETIC_NAMEPLATE_SETUP_DID,
+			setupDid:
+				workload === "shadow-crowd-112x61"
+					? SYNTHETIC_SHADOW_CROWD_SETUP_DID
+					: SYNTHETIC_NAMEPLATE_SETUP_DID,
 			x: localCameraX + lateral,
 			y: localCameraY + forward,
 			z: cameraHeight - 1.5,
@@ -294,5 +310,44 @@ function createVisual(): DecodedStaticPresentation {
 			sourceAssetId: "0x0200fffe",
 		},
 		setupId: "0x0200fffe",
+	};
+}
+
+/**
+ * Repeat one catalog-independent rigid part to match the measured client crowd's parts-per-root
+ * distribution without depending on a locally generated weenie catalog.
+ *
+ * Every part intentionally consumes the same geometry and depth state. The fixture reproduces
+ * selection and instance-record cardinality, not the live crowd's geometry/run distribution.
+ */
+function createShadowCrowdVisual(): DecodedStaticPresentation {
+	const sourcePart = VISUAL.presentation.parts[0];
+	if (sourcePart === undefined)
+		throw new Error("Synthetic shadow crowd source visual has no rigid part.");
+	return {
+		...VISUAL,
+		presentation: {
+			...VISUAL.presentation,
+			appearanceKey: "appearance:synthetic-shadow-crowd",
+			id: "presentation:synthetic-shadow-crowd",
+			parts: Array.from(
+				{ length: SYNTHETIC_SHADOW_CROWD_PART_COUNT },
+				(_, partIndex) => ({ ...sourcePart, partIndex }),
+			),
+			placementPoses: new Map([
+				[
+					0,
+					{
+						partTransforms: Array.from(
+							{ length: SYNTHETIC_SHADOW_CROWD_PART_COUNT },
+							() => Mat4.identity(),
+						),
+						placementId: 0,
+					},
+				],
+			]),
+			sourceAssetId: "0x0200fffc",
+		},
+		setupId: "0x0200fffc",
 	};
 }

@@ -3,19 +3,26 @@ import { mat4ToFloat32Array } from "../math/matrices";
 import type { Quat, Vec3 } from "../math/types";
 import type { FrameInstanceStreamArena } from "./frame-instance-stream-arena";
 import type { LandblockOwnerId } from "../game-types";
-import type { OutdoorPssmSettings } from "./entity-shadow-policy";
+import type {
+	OutdoorPssmSettings,
+	OutdoorShadowCasterBudget,
+	OutdoorShadowProjectionSettings,
+} from "./entity-shadow-policy";
 import {
 	buildOutdoorPssmCascades,
+	hasOutdoorShadowLight,
+	resolveOutdoorShadowProjection,
 	type OutdoorPssmCascade,
 } from "./outdoor-pssm";
 import {
-	collectOutdoorPssmCastersForCascades,
+	planOutdoorShadowCastersForView,
 	createOutdoorPssmCasterBatch,
 	createOutdoorPssmCasterSelectionScratch,
 	OutdoorPssmDepthDrawCatalog,
 	type OutdoorPssmCasterBatch,
 	type OutdoorPssmCasterWorld,
 } from "./outdoor-pssm-casters";
+import type { EntityShadowCasterShape } from "./entity-grounding";
 import type { Frustum } from "../math/frustum";
 import type { SceneNodeId } from "../scene";
 import { OBJECT_INSTANCE_RECORD_BYTES } from "../systems/static-resources";
@@ -64,12 +71,15 @@ export interface WebGL2OutdoorPssmPassInput {
 		readonly rotation: Quat;
 		readonly verticalFovDegrees: number;
 	};
+	readonly cameraFrustum: Frustum;
+	readonly casterBudget: OutdoorShadowCasterBudget;
 	readonly frameHeight: number;
 	readonly frameWidth: number;
 	readonly selectedDynamicNodeIds: Set<SceneNodeId>;
 	/** Whether degradation-hidden dynamic parts may cast into this frame's maps. */
 	readonly showRetailHiddenGeometry: boolean;
 	readonly settings: OutdoorPssmSettings;
+	readonly projectionSettings: OutdoorShadowProjectionSettings;
 	readonly sunVector: Vec3;
 }
 
@@ -98,6 +108,10 @@ export interface WebGL2OutdoorPssmPassDependencies {
  * therefore preserve the pre-shadow GPU path exactly.
  */
 export class WebGL2OutdoorPssmPass {
+	readonly #analyticCasters: EntityShadowCasterShape[] = [];
+	#resolvedProjection: ReturnType<
+		typeof resolveOutdoorShadowProjection
+	> | null = null;
 	readonly #batches: OutdoorPssmCasterBatch[] = [];
 	readonly #batchPool: OutdoorPssmCasterBatch[] = [];
 	readonly #cascadeFrusta: Frustum[] = [];
@@ -138,9 +152,16 @@ export class WebGL2OutdoorPssmPass {
 		profileMetrics: WebGL2OutdoorPssmPassProfileMetrics | null,
 	): ActiveOutdoorPssmFrame | null {
 		if (!hasOutdoorPssmLightAndInterval(input)) {
+			this.#analyticCasters.length = 0;
+			this.#resolvedProjection = null;
 			this.#releaseCasterStorage();
 			return null;
 		}
+		const projection = resolveOutdoorShadowProjection(
+			input.sunVector,
+			input.projectionSettings,
+		);
+		this.#resolvedProjection = projection;
 		buildOutdoorPssmCascades(
 			{
 				camera: {
@@ -151,28 +172,35 @@ export class WebGL2OutdoorPssmPass {
 					rotation: input.camera.rotation,
 					verticalFovDegrees: input.camera.verticalFovDegrees,
 				},
+				projection,
 				settings: input.settings,
-				sunVector: input.sunVector,
 			},
 			this.#cascades,
-		);
-		const targets = this.#targets.resize(
-			input.settings.mapResolution,
-			input.settings.cascadeCount,
 		);
 		let instanceUploadCount = 0;
 		let instanceUploadBytes = 0;
 		this.#prepareCascadeStorage();
-		collectOutdoorPssmCastersForCascades(
+		planOutdoorShadowCastersForView(
 			this.#world,
 			this.#cascadeFrusta,
+			input.cameraFrustum,
 			input.anchorLandblockId,
+			input.casterBudget,
 			input.selectedDynamicNodeIds,
+			this.#analyticCasters,
 			input.showRetailHiddenGeometry,
 			this.#batches,
 			this.#casterSelectionScratch,
 			this.#depthDraws,
 			profileMetrics,
+		);
+		if (this.#batches.every((batch) => batch.parts.length === 0)) {
+			if (profileMetrics) profileMetrics.emptyMappedViewCount += 1;
+			return null;
+		}
+		const targets = this.#targets.resize(
+			input.settings.mapResolution,
+			input.settings.cascadeCount,
 		);
 		try {
 			for (
@@ -213,8 +241,22 @@ export class WebGL2OutdoorPssmPass {
 		};
 	}
 
+	/** Frame-owned analytic tier populated by the same complete-root decision as mapped batches. */
+	getAnalyticCasters(): readonly EntityShadowCasterShape[] {
+		return this.#analyticCasters;
+	}
+
+	/** Projection resolved once for the current view's mapped and analytic tiers. */
+	getResolvedProjection(): ReturnType<
+		typeof resolveOutdoorShadowProjection
+	> | null {
+		return this.#resolvedProjection;
+	}
+
 	/** Release active target storage when the composite master setting turns off. */
 	disable(): void {
+		this.#analyticCasters.length = 0;
+		this.#resolvedProjection = null;
 		this.#targets.disable();
 		this.#releaseCasterStorage();
 	}
@@ -356,8 +398,7 @@ export function hasOutdoorPssmLightAndInterval(
 	input: Pick<WebGL2OutdoorPssmPassInput, "camera" | "settings" | "sunVector">,
 ): boolean {
 	return (
-		Math.hypot(input.sunVector.x, input.sunVector.y, input.sunVector.z) >
-			Number.EPSILON &&
+		hasOutdoorShadowLight(input.sunVector) &&
 		Math.min(input.camera.far, input.settings.maximumDistance) >
 			input.camera.near
 	);

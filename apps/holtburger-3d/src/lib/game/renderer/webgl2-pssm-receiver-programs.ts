@@ -14,6 +14,8 @@ import {
 export class WebGL2OutdoorPssmReceiverPrograms {
 	readonly #gl: WebGL2RenderingContext;
 	#terrain: WebGL2NearTerrainProgram | null = null;
+	#directionalTerrain: WebGL2NearTerrainProgram | null = null;
+	#hybridTerrain: WebGL2NearTerrainProgram | null = null;
 	#foggedBaked: WebGL2FogObjectProgram | null = null;
 	#foggedInstanced: WebGL2FogInstancedObjectProgram | null = null;
 	#blendedBaked: WebGL2ObjectProgram | null = null;
@@ -29,6 +31,22 @@ export class WebGL2OutdoorPssmReceiverPrograms {
 	terrain(): WebGL2NearTerrainProgram {
 		this.#assertAlive();
 		return (this.#terrain ??= createWebGL2NearTerrainProgram(this.#gl, "pssm"));
+	}
+
+	directionalTerrain(): WebGL2NearTerrainProgram {
+		this.#assertAlive();
+		return (this.#directionalTerrain ??= createWebGL2NearTerrainProgram(
+			this.#gl,
+			"directional",
+		));
+	}
+
+	hybridTerrain(): WebGL2NearTerrainProgram {
+		this.#assertAlive();
+		return (this.#hybridTerrain ??= createWebGL2NearTerrainProgram(
+			this.#gl,
+			"hybrid",
+		));
 	}
 
 	foggedBaked(): WebGL2FogObjectProgram {
@@ -88,6 +106,8 @@ export class WebGL2OutdoorPssmReceiverPrograms {
 		this.#destroyed = true;
 		const programs = [
 			this.#terrain,
+			this.#directionalTerrain,
+			this.#hybridTerrain,
 			this.#foggedBaked,
 			this.#foggedInstanced,
 			this.#blendedBaked,
@@ -99,6 +119,8 @@ export class WebGL2OutdoorPssmReceiverPrograms {
 			if (program) this.#gl.deleteProgram(program.program);
 		}
 		this.#terrain = null;
+		this.#directionalTerrain = null;
+		this.#hybridTerrain = null;
 		this.#foggedBaked = null;
 		this.#foggedInstanced = null;
 		this.#blendedBaked = null;

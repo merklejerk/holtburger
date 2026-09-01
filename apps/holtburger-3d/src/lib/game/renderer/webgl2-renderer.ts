@@ -129,7 +129,12 @@ import {
 	type ActiveOutdoorPssmFrame,
 	type WebGL2OutdoorPssmPassProfileMetrics,
 } from "./webgl2-outdoor-pssm-pass";
-import { terrainLandblockIntersectsShadowDistance } from "./outdoor-pssm";
+import {
+	hasOutdoorShadowLight,
+	resolveOutdoorShadowProjection,
+	terrainLandblockIntersectsShadowDistance,
+	type ResolvedOutdoorShadowProjection,
+} from "./outdoor-pssm";
 import {
 	bindWebGL2OutdoorPssmUniforms,
 	createWebGL2OutdoorPssmUniformScratch,
@@ -140,21 +145,26 @@ import { WebGL2EntityGroundingPrograms } from "./webgl2-entity-grounding-program
 import {
 	applyWebGL2EntityGroundingUniforms,
 	entityGroundingUniformAttemptCount,
-	WebGL2DirectEntityGroundingUniformApplicator,
 } from "./webgl2-entity-grounding";
 import {
-	createEntityGroundingCaster,
 	createEntityGroundingSelection,
 	createEntityGroundingSelectionScratch,
 	createIndoorGroundingCell,
-	createOutdoorGroundingLandblock,
+	createOutdoorDirectionalShadowCaster,
+	createOutdoorDirectionalShadowSelection,
+	createOutdoorDirectionalShadowSelectionScratch,
+	createOutdoorDirectionalShadowTerrain,
 	indexIndoorVisibilityIslands,
+	resolveEntityShadowCaster,
 	selectIndoorGroundingCasters,
-	selectOutdoorGroundingCasters,
+	selectOutdoorDirectionalShadowCasters,
 	type EntityGroundingCaster,
 	type EntityGroundingSelection,
 	type IndoorGroundingCell,
+	type OutdoorDirectionalShadowCaster,
+	type OutdoorDirectionalShadowSelection,
 } from "./entity-grounding";
+import { bindWebGL2OutdoorDirectionalShadowUniforms } from "./webgl2-outdoor-directional-shadow";
 import {
 	createWebGL2ObjectProgram,
 	OBJECT_TEXTURE_UNITS,
@@ -383,14 +393,18 @@ const EMPTY_LIGHTS: readonly RuntimeLight[] = [];
 /** Allocate explanatory shadow counters only for an explicitly profiled frame. */
 function createEmptyOutdoorShadowMapProfileMetrics(): WebGL2OutdoorPssmPassProfileMetrics {
 	return {
+		analyticRootCount: 0,
+		candidateRootCount: 0,
+		cascadeCandidateMembershipCount: 0,
 		cascadeQueryCount: 0,
-		cascadeSelectedRootCount: 0,
 		compatibleDepthRunCount: 0,
+		emptyMappedViewCount: 0,
 		instanceUploadBytes: 0,
 		instanceUploadCount: 0,
-		retainedCasterRootCount: 0,
+		mappedRootCount: 0,
+		rejectedRootCount: 0,
+		selectedRootCount: 0,
 		selectedCasterPartCount: 0,
-		uniqueSelectedRootCount: 0,
 	};
 }
 /** Synthetic single render domain used by the deliberately unpartitioned flat debug mode. */
@@ -607,14 +621,15 @@ interface PreparedViewGeometry extends PreparedPortalProjection {
 }
 
 /** Resolved scene contributions independent from flat or portal scheduling policy. */
-interface PreparedEntityGrounding {
+interface PreparedEntityAnalyticShadows {
 	readonly indoorByScopeKey: ReadonlyMap<string, EntityGroundingSelection>;
 	readonly outdoorByLandblockId: ReadonlyMap<
 		LandblockOwnerId,
-		EntityGroundingSelection
+		OutdoorDirectionalShadowSelection
 	>;
 	readonly outdoorEnabled: boolean;
-	readonly settings: EntityShadowSettings["grounding"];
+	readonly indoorSettings: EntityShadowSettings["indoorGrounding"];
+	readonly outdoorSettings: EntityShadowSettings["outdoorDirectional"];
 }
 
 interface PreparedNameplateCandidate {
@@ -652,8 +667,8 @@ interface PreparedSceneContributions {
 	readonly particles: readonly ParticleDrawRange[];
 	/** Sky-attached particle batches drawn before the landscape. */
 	readonly skyParticles: readonly ParticleDrawRange[];
-	/** Fixed per-receiver grounding records produced from the same visible-entry walk. */
-	readonly entityGrounding: PreparedEntityGrounding | null;
+	/** Fixed per-receiver analytic-shadow records produced from the same visible-entry walk. */
+	readonly entityAnalyticShadows: PreparedEntityAnalyticShadows | null;
 	/** Budgeted candidates collected only from already-selected visible dynamic entities. */
 	readonly nameplates: readonly PreparedNameplateCandidate[];
 	/** Perspective scale applied by the nameplate pass for this prepared view. */
@@ -855,24 +870,30 @@ export class WebGL2Renderer implements Renderer {
 	readonly #outdoorPssmPass: WebGL2OutdoorPssmPass;
 	readonly #outdoorPssmReceiverPrograms: WebGL2OutdoorPssmReceiverPrograms;
 	readonly #entityGroundingPrograms: WebGL2EntityGroundingPrograms;
-	readonly #directGroundingUniforms: WebGL2DirectEntityGroundingUniformApplicator;
 	readonly #outdoorPssmUniformScratch = createWebGL2OutdoorPssmUniformScratch();
 	/** Current sequential view's receiver state; null prevents every inactive sample path. */
 	#activeOutdoorPssmFrame: ActiveOutdoorPssmFrame | null = null;
+	/** Projection shared by the current view's mapped and directional analytic tiers. */
+	#activeOutdoorShadowProjection: ResolvedOutdoorShadowProjection | null = null;
 	/** Reused frame-hot storage for analytic candidate collection and receiver selection. */
 	readonly #entityGroundingCasters: EntityGroundingCaster[] = [];
+	readonly #outdoorDirectionalCasters: OutdoorDirectionalShadowCaster[] = [];
 	readonly #indoorGroundingCells = new Map<string, IndoorGroundingCell>();
 	readonly #indoorGroundingByScopeKey = new Map<
 		string,
 		EntityGroundingSelection
 	>();
-	readonly #outdoorGroundingByLandblockId = new Map<
+	readonly #outdoorDirectionalByLandblockId = new Map<
 		LandblockOwnerId,
-		EntityGroundingSelection
+		OutdoorDirectionalShadowSelection
 	>();
 	readonly #entityGroundingSelectionPool: EntityGroundingSelection[] = [];
 	readonly #entityGroundingSelectionScratch =
 		createEntityGroundingSelectionScratch();
+	readonly #outdoorDirectionalSelectionPool: OutdoorDirectionalShadowSelection[] =
+		[];
+	readonly #outdoorDirectionalSelectionScratch =
+		createOutdoorDirectionalShadowSelectionScratch();
 	readonly #indoorVisibilityIslands = new Map<
 		string,
 		SceneVisibilityIslandId
@@ -1116,6 +1137,8 @@ export class WebGL2Renderer implements Renderer {
 					this.#expandDynamicContributions(nodeId, includeDepth),
 				getRenderContributionDescriptor: (nodeId) =>
 					world.getRenderContributionDescriptor(nodeId),
+				getEntityShadowDynamicFacts: (nodeId) =>
+					world.getEntityShadowDynamicFacts(nodeId),
 				queryScopesScene: (...args) => world.queryScopesScene(...args),
 				resolveGeometry: (key) => world.resolveGeometry(key),
 			},
@@ -1125,8 +1148,6 @@ export class WebGL2Renderer implements Renderer {
 			gl,
 		);
 		this.#entityGroundingPrograms = new WebGL2EntityGroundingPrograms(gl);
-		this.#directGroundingUniforms =
-			new WebGL2DirectEntityGroundingUniformApplicator(gl);
 		this.#dynamicLightScratch = createDynamicLightScratch();
 		this.#terrainLightMask = createWebGL2TerrainLightMaskTexture(gl);
 		this.#objectState = new WebGL2ObjectStateApplicator(gl);
@@ -1310,6 +1331,7 @@ export class WebGL2Renderer implements Renderer {
 		);
 		if (entityShadows.mode !== "shadow-maps") this.#outdoorPssmPass.disable();
 		this.#activeOutdoorPssmFrame = null;
+		this.#activeOutdoorShadowProjection = null;
 		this.#frameTextureFiltering = input.frameSettings.quality.textureFiltering;
 		// Compiled facts embed the samplers filtering selects and the cull-face override the
 		// env-cell mode selects, so a change to either invalidates every compiled entry. Both
@@ -1571,6 +1593,7 @@ export class WebGL2Renderer implements Renderer {
 		}
 		this.#accumulatePortalScopeAtlasMetrics(frame);
 		this.#activeOutdoorPssmFrame = null;
+		this.#activeOutdoorShadowProjection = null;
 		if (frame.atlas.visibility.selectedScopeOrdinal("outdoor") !== null) {
 			this.#renderOutdoorPssm(
 				prepared,
@@ -1949,7 +1972,17 @@ export class WebGL2Renderer implements Renderer {
 		shading: SceneShading,
 		profile: WebGL2FrameProfileCapture | null,
 	): void {
-		if (entityShadows.mode !== "shadow-maps") return;
+		this.#activeOutdoorPssmFrame = null;
+		this.#activeOutdoorShadowProjection = null;
+		if (entityShadows.mode === "none") return;
+		if (entityShadows.mode === "simple") {
+			if (!hasOutdoorShadowLight(shading.lighting.terrain.sunVector)) return;
+			this.#activeOutdoorShadowProjection = resolveOutdoorShadowProjection(
+				shading.lighting.terrain.sunVector,
+				entityShadows.projection,
+			);
+			return;
+		}
 		const profileMetrics: WebGL2OutdoorPssmPassProfileMetrics | null = profile
 			? createEmptyOutdoorShadowMapProfileMetrics()
 			: null;
@@ -1968,10 +2001,13 @@ export class WebGL2Renderer implements Renderer {
 						rotation: prepared.camera.placement.rotation,
 						verticalFovDegrees: prepared.camera.fov,
 					},
+					cameraFrustum: prepared.frustum,
+					casterBudget: entityShadows.casterBudget,
 					frameHeight: this.#frameHeight,
 					frameWidth: this.#frameWidth,
 					selectedDynamicNodeIds: this.#selectedDynamicNodeIds,
 					showRetailHiddenGeometry,
+					projectionSettings: entityShadows.projection,
 					settings: entityShadows.pssm,
 					sunVector: shading.lighting.terrain.sunVector,
 				},
@@ -1986,6 +2022,8 @@ export class WebGL2Renderer implements Renderer {
 		if (profile && profileMetrics) {
 			profile.recordOutdoorShadowMap(profileMetrics);
 		}
+		this.#activeOutdoorShadowProjection =
+			this.#outdoorPssmPass.getResolvedProjection();
 		if (this.#activeOutdoorPssmFrame) {
 			this.#frameSelectionMetrics.frameInstanceUploadCount +=
 				this.#activeOutdoorPssmFrame.instanceUploads.count;
@@ -2130,14 +2168,14 @@ export class WebGL2Renderer implements Renderer {
 		const terrain: TerrainFrameInput[] = [];
 		const objects: PreparedObjectFrameInput[] = [];
 		const nameplates: PreparedNameplateCandidate[] = [];
-		const groundingEnabled = frameSettings.entityShadows.mode !== "none";
-		const outdoorGroundingEnabled =
-			frameSettings.entityShadows.mode === "simple";
+		const entityShadowsEnabled = frameSettings.entityShadows.mode !== "none";
+		const simpleOutdoorShadows = frameSettings.entityShadows.mode === "simple";
 		this.#entityGroundingCasters.length = 0;
+		this.#outdoorDirectionalCasters.length = 0;
 		this.#indoorGroundingCells.clear();
 		this.#indoorGroundingByScopeKey.clear();
-		this.#outdoorGroundingByLandblockId.clear();
-		if (groundingEnabled) {
+		this.#outdoorDirectionalByLandblockId.clear();
+		if (entityShadowsEnabled) {
 			indexIndoorVisibilityIslands(
 				this.#world.getPortalTopologyView(),
 				this.#indoorVisibilityIslands,
@@ -2270,8 +2308,8 @@ export class WebGL2Renderer implements Renderer {
 						);
 					}
 				}
-				if (groundingEnabled && retainedDynamicContributionCount > 0) {
-					const facts = this.#world.getEntityGroundingDynamicFacts(nodeId);
+				if (entityShadowsEnabled && retainedDynamicContributionCount > 0) {
+					const facts = this.#world.getEntityShadowDynamicFacts(nodeId);
 					const reachesIndoor = facts.spatialMembership.scopes.some(
 						(scope) => scope.kind === "env-cell",
 					);
@@ -2279,8 +2317,8 @@ export class WebGL2Renderer implements Renderer {
 						(scope) => scope.kind === "outdoor",
 					);
 					const caster =
-						reachesIndoor || (outdoorGroundingEnabled && reachesOutdoors)
-							? createEntityGroundingCaster(
+						reachesIndoor || (simpleOutdoorShadows && reachesOutdoors)
+							? resolveEntityShadowCaster(
 									{
 										entityClass: contribution.entityClass,
 										identity: facts.identity,
@@ -2289,10 +2327,21 @@ export class WebGL2Renderer implements Renderer {
 										spatialMembership: facts.spatialMembership,
 									},
 									this.#indoorVisibilityIslands,
-									frameSettings.entityShadows.grounding,
+									frameSettings.entityShadows.indoorGrounding,
 								)
 							: null;
-					if (caster) this.#entityGroundingCasters.push(caster);
+					if (caster?.indoorGrounding) {
+						this.#entityGroundingCasters.push(caster.indoorGrounding);
+					}
+					if (caster?.reachesOutdoors && this.#activeOutdoorShadowProjection) {
+						this.#outdoorDirectionalCasters.push(
+							createOutdoorDirectionalShadowCaster(
+								caster.shape,
+								this.#activeOutdoorShadowProjection,
+								frameSettings.entityShadows.outdoorDirectional,
+							),
+						);
+					}
 				}
 				if (
 					renderTarget !== null &&
@@ -2339,7 +2388,7 @@ export class WebGL2Renderer implements Renderer {
 				continue;
 			}
 			if (contribution.kind === "env-cell") {
-				if (groundingEnabled) {
+				if (entityShadowsEnabled) {
 					const facts = this.#world.getIndoorGroundingEnvCellFacts(nodeId);
 					const cell = createIndoorGroundingCell(
 						facts.scope,
@@ -2371,7 +2420,8 @@ export class WebGL2Renderer implements Renderer {
 			terrain.push(this.#resolveTerrainFrameInput(contribution.drawUnit));
 			this.#frameSelectionMetrics.terrainFrameInputs += 1;
 		}
-		if (groundingEnabled) {
+		let outdoorDirectionalEnabled = false;
+		if (entityShadowsEnabled) {
 			const cameraPosition = new Vec3(
 				prepared.camera.placement.position.x,
 				prepared.camera.placement.position.y,
@@ -2396,27 +2446,44 @@ export class WebGL2Renderer implements Renderer {
 				this.#indoorGroundingByScopeKey.set(cell.scopeKey, selection);
 				selectionIndex += 1;
 			}
-			if (outdoorGroundingEnabled) {
+			const outdoorShapes = simpleOutdoorShadows
+				? []
+				: this.#outdoorPssmPass.getAnalyticCasters();
+			const projection = this.#activeOutdoorShadowProjection;
+			if (projection) {
+				for (const shape of outdoorShapes) {
+					this.#outdoorDirectionalCasters.push(
+						createOutdoorDirectionalShadowCaster(
+							shape,
+							projection,
+							frameSettings.entityShadows.outdoorDirectional,
+						),
+					);
+				}
+			}
+			if (this.#outdoorDirectionalCasters.length > 0) {
+				let outdoorSelectionIndex = 0;
 				for (const terrainInput of terrain) {
-					const landblock = createOutdoorGroundingLandblock(
+					const landblock = createOutdoorDirectionalShadowTerrain(
 						terrainInput.drawUnit.landblockId,
 					);
-					const selection = (this.#entityGroundingSelectionPool[
-						selectionIndex
-					] ??= createEntityGroundingSelection());
-					selectOutdoorGroundingCasters(
+					const selection = (this.#outdoorDirectionalSelectionPool[
+						outdoorSelectionIndex
+					] ??= createOutdoorDirectionalShadowSelection());
+					selectOutdoorDirectionalShadowCasters(
 						landblock,
-						this.#entityGroundingCasters,
+						this.#outdoorDirectionalCasters,
 						cameraPosition,
 						anchorOrigin,
 						selection,
-						this.#entityGroundingSelectionScratch,
+						this.#outdoorDirectionalSelectionScratch,
 					);
-					this.#outdoorGroundingByLandblockId.set(
+					this.#outdoorDirectionalByLandblockId.set(
 						landblock.landblockId,
 						selection,
 					);
-					selectionIndex += 1;
+					outdoorDirectionalEnabled ||= selection.count > 0;
+					outdoorSelectionIndex += 1;
 				}
 			}
 		}
@@ -2446,12 +2513,13 @@ export class WebGL2Renderer implements Renderer {
 			);
 		}
 		return {
-			entityGrounding: groundingEnabled
+			entityAnalyticShadows: entityShadowsEnabled
 				? {
 						indoorByScopeKey: this.#indoorGroundingByScopeKey,
-						outdoorByLandblockId: this.#outdoorGroundingByLandblockId,
-						outdoorEnabled: outdoorGroundingEnabled,
-						settings: frameSettings.entityShadows.grounding,
+						outdoorByLandblockId: this.#outdoorDirectionalByLandblockId,
+						outdoorEnabled: outdoorDirectionalEnabled,
+						outdoorSettings: frameSettings.entityShadows.outdoorDirectional,
+						indoorSettings: frameSettings.entityShadows.indoorGrounding,
 					}
 				: null,
 			landblockOffsets,
@@ -3500,7 +3568,7 @@ export class WebGL2Renderer implements Renderer {
 				particles: [],
 				skyParticles: [],
 				terrain: [],
-				entityGrounding: null,
+				entityAnalyticShadows: null,
 			};
 			const portalShading: SceneShading = {
 				authoredLightResponse: 0,
@@ -3772,6 +3840,7 @@ export class WebGL2Renderer implements Renderer {
 		const farCutoff = farTerrainCutoffLandblocks(shading.fog);
 		this.#frameSelectionMetrics.farTerrainCutoffLandblocks = farCutoff;
 		let nearCount = 0;
+		let directionalCount = 0;
 		let farCount = 0;
 		for (const terrain of view.terrain) {
 			assertSharedTerrainRegion(
@@ -3780,7 +3849,12 @@ export class WebGL2Renderer implements Renderer {
 				terrain.drawUnit.landblockId,
 			);
 			if (this.#isFarTerrain(terrain, view, farCutoff)) farCount += 1;
-			else nearCount += 1;
+			else {
+				nearCount += 1;
+				if (this.#hasTerrainDirectionalShadow(terrain, view)) {
+					directionalCount += 1;
+				}
+			}
 		}
 		const gl = this.#gl;
 		gl.depthMask(true);
@@ -3793,15 +3867,28 @@ export class WebGL2Renderer implements Renderer {
 		if (nearCount > 0) {
 			const gpu = profile?.beginGpuPhase("nearTerrain") ?? null;
 			try {
-				const nearProgram = this.#beginNearTerrainGroup(
-					view,
-					shading,
-					passResources,
-					portalPipeline,
-					view.terrain.length,
-				);
-				routedTerrainPass = true;
-				this.#drawNearTerrainGroup(view, shading, farCutoff, nearProgram);
+				for (const directional of [false, true]) {
+					const count = directional
+						? directionalCount
+						: nearCount - directionalCount;
+					if (count === 0) continue;
+					const nearProgram = this.#beginNearTerrainGroup(
+						view,
+						shading,
+						passResources,
+						portalPipeline,
+						routedTerrainPass ? null : view.terrain.length,
+						directional,
+					);
+					routedTerrainPass = true;
+					this.#drawNearTerrainGroup(
+						view,
+						shading,
+						farCutoff,
+						nearProgram,
+						directional,
+					);
+				}
 			} finally {
 				gpu?.finish();
 			}
@@ -3876,12 +3963,16 @@ export class WebGL2Renderer implements Renderer {
 		shading: SceneShading,
 		passResources: TerrainFrameInput,
 		portalPipeline: WebGL2PortalScopeAtlasPipeline | null,
-		routeSubmissionCount: number,
+		routeSubmissionCount: number | null,
+		directional: boolean,
 	): WebGL2NearTerrainProgram {
-		const selected = this.#activeOutdoorPssmFrame
-			? this.#outdoorPssmReceiverPrograms.terrain()
-			: view.entityGrounding?.outdoorEnabled
-				? this.#entityGroundingPrograms.terrain()
+		const mapped = this.#activeOutdoorPssmFrame !== null;
+		const selected = mapped
+			? directional
+				? this.#outdoorPssmReceiverPrograms.hybridTerrain()
+				: this.#outdoorPssmReceiverPrograms.terrain()
+			: directional
+				? this.#outdoorPssmReceiverPrograms.directionalTerrain()
 				: this.#nearTerrainProgram;
 		const { program, uniforms } = selected;
 		this.#beginTerrainGroup(
@@ -3958,9 +4049,12 @@ export class WebGL2Renderer implements Renderer {
 		shading: SceneShading,
 		farCutoff: number | null,
 		program: WebGL2NearTerrainProgram,
+		directional: boolean,
 	): void {
 		for (const terrain of view.terrain) {
 			if (this.#isFarTerrain(terrain, view, farCutoff)) continue;
+			if (this.#hasTerrainDirectionalShadow(terrain, view) !== directional)
+				continue;
 			const landblockOffset = createLandblockOffset(
 				terrain.drawUnit.coordinates,
 				view.anchorCoordinates,
@@ -3980,13 +4074,26 @@ export class WebGL2Renderer implements Renderer {
 			);
 			this.#uploadTerrainLightMask(landblockLights);
 			this.#frameSelectionMetrics.staticLightBinds += 1;
-			this.#applyTerrainGrounding(program, terrain, view);
+			if (directional) {
+				this.#applyTerrainDirectionalShadow(program, terrain, view);
+			}
 			this.#drawTerrainGeometry(
 				terrain.program.geometry,
 				program.uniforms.landblockOffset,
 				landblockOffset,
 			);
 		}
+	}
+
+	#hasTerrainDirectionalShadow(
+		terrain: TerrainFrameInput,
+		view: PreparedView,
+	): boolean {
+		return (
+			(view.entityAnalyticShadows?.outdoorByLandblockId.get(
+				terrain.drawUnit.landblockId,
+			)?.count ?? 0) > 0
+		);
 	}
 
 	#drawFarTerrainGroup(view: PreparedView, farCutoff: number | null): void {
@@ -4011,10 +4118,11 @@ export class WebGL2Renderer implements Renderer {
 		view: PreparedView,
 		farCutoff: number | null,
 	): boolean {
-		const outdoorGrounding = view.entityGrounding?.outdoorByLandblockId.get(
-			terrain.drawUnit.landblockId,
-		);
-		if (outdoorGrounding && outdoorGrounding.count > 0) return false;
+		const outdoorDirectional =
+			view.entityAnalyticShadows?.outdoorByLandblockId.get(
+				terrain.drawUnit.landblockId,
+			);
+		if (outdoorDirectional && outdoorDirectional.count > 0) return false;
 		if (
 			this.#activeOutdoorPssmFrame &&
 			terrainLandblockIntersectsShadowDistance(
@@ -4035,35 +4143,35 @@ export class WebGL2Renderer implements Renderer {
 		);
 	}
 
-	/** Bind one simple-mode terrain landblock's analytic records before its existing draw. */
-	#applyTerrainGrounding(
+	/** Bind one terrain landblock's directional analytic records before its existing draw. */
+	#applyTerrainDirectionalShadow(
 		program: WebGL2NearTerrainProgram,
 		terrain: TerrainFrameInput,
 		view: PreparedView,
 	): void {
-		const uniforms = program.entityGroundingUniforms;
-		const active = view.entityGrounding;
+		const uniforms = program.outdoorDirectionalShadowUniforms;
+		const active = view.entityAnalyticShadows;
 		const selection = active?.outdoorByLandblockId.get(
 			terrain.drawUnit.landblockId,
 		);
 		if (!uniforms) {
 			if (active?.outdoorEnabled && selection !== undefined) {
 				throw new Error(
-					"Active outdoor grounding draw selected an ordinary terrain program.",
+					"Active directional-shadow draw selected an ordinary terrain program.",
 				);
 			}
 			return;
 		}
 		if (!active?.outdoorEnabled || selection === undefined) {
 			throw new Error(
-				"Terrain grounding program selected without an active landblock record set.",
+				"Directional-shadow program selected without an active landblock record set.",
 			);
 		}
-		applyWebGL2EntityGroundingUniforms(
-			this.#directGroundingUniforms,
+		bindWebGL2OutdoorDirectionalShadowUniforms(
+			this.#gl,
 			uniforms,
 			selection,
-			active.settings,
+			active.outdoorSettings,
 		);
 	}
 
@@ -4364,8 +4472,9 @@ export class WebGL2Renderer implements Renderer {
 			for (const object of objects) {
 				const receivesIndoorGrounding =
 					object.source === "env-cell-shell" &&
-					view.entityGrounding?.indoorByScopeKey.has(object.renderScopeKey) ===
-						true;
+					view.entityAnalyticShadows?.indoorByScopeKey.has(
+						object.renderScopeKey,
+					) === true;
 				const receivesOutdoorPssm =
 					this.#activeOutdoorPssmFrame !== null && object.receivesOutdoorPssm;
 				const program = receivesIndoorGrounding
@@ -4432,8 +4541,9 @@ export class WebGL2Renderer implements Renderer {
 			for (const object of sortedBlended) {
 				const receivesIndoorGrounding =
 					object.source === "env-cell-shell" &&
-					view.entityGrounding?.indoorByScopeKey.has(object.renderScopeKey) ===
-						true;
+					view.entityAnalyticShadows?.indoorByScopeKey.has(
+						object.renderScopeKey,
+					) === true;
 				const receivesOutdoorPssm =
 					this.#activeOutdoorPssmFrame !== null && object.receivesOutdoorPssm;
 				let program: AnyObjectProgram;
@@ -4952,7 +5062,7 @@ export class WebGL2Renderer implements Renderer {
 		view: PreparedView,
 	): void {
 		const uniforms = program.entityGroundingUniforms;
-		const active = view.entityGrounding;
+		const active = view.entityAnalyticShadows;
 		const selection = active?.indoorByScopeKey.get(object.renderScopeKey);
 		if (!uniforms) {
 			if (object.source === "env-cell-shell" && selection !== undefined) {
@@ -4976,7 +5086,7 @@ export class WebGL2Renderer implements Renderer {
 			this.#objectState,
 			uniforms,
 			selection,
-			active.settings,
+			active.indoorSettings,
 		);
 		this.#frameSelectionMetrics.objectUniformUploads += issued;
 		this.#frameSelectionMetrics.objectSuppressedUniformUploads +=

@@ -5,7 +5,7 @@ import {
 	createWebGL2ObjectProgram,
 	OBJECT_TEXTURE_UNITS,
 } from "./webgl2-object-program";
-import { MAX_ENTITY_GROUNDING_CASTERS_PER_RECEIVER } from "./entity-shadow-policy";
+import { MAX_ENTITY_ANALYTIC_SHADOW_CASTERS_PER_RECEIVER } from "./entity-shadow-policy";
 
 describe("createWebGL2ObjectProgram", () => {
 	it("initializes invariant sampler units exactly once for every program variant", () => {
@@ -79,7 +79,7 @@ describe("EnvCell grounding object variant", () => {
 		expect(vertex).toContain("vGroundingPosition = anchoredPosition");
 		expect(vertex).toContain("vGroundingUpFacing = dot(");
 		expect(fragment).toContain(
-			`MAX_ENTITY_GROUNDING_CASTERS = ${MAX_ENTITY_GROUNDING_CASTERS_PER_RECEIVER}`,
+			`MAX_ENTITY_GROUNDING_CASTERS = ${MAX_ENTITY_ANALYTIC_SHADOW_CASTERS_PER_RECEIVER}`,
 		);
 		expect(fragment).toContain(
 			"uGroundingCasters[MAX_ENTITY_GROUNDING_CASTERS]",

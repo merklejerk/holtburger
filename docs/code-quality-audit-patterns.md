@@ -364,6 +364,59 @@ exact values.
 configuration propagation separately, and leave subjective calibration to its actual evaluation
 process.
 
+## Adjustable Values Are Copied into Narrative
+
+**Smell:** A manually tuned default or operational threshold is repeated as a literal in durable
+documentation, help text, plans, examples, or comments that do not own the value.
+
+**Signals:**
+
+- Changing one configuration literal requires searching prose for matching numbers.
+- Documentation describes an adjustable default as though it were a behavioral invariant.
+- Runtime output and written guidance disagree after an otherwise valid calibration change.
+- Several non-executable surfaces claim to be the source of truth for one mutable choice.
+
+**Possible failure:** Users tune the wrong control, reviewers “correct” a valid runtime value back
+to stale prose, or operational decisions rely on documentation that no longer describes the
+running system.
+
+**Questions:** Does the exact value need to be durable, or only its meaning and valid range? Which
+artifact owns calibration? Can another surface link to, generate from, or validate against that
+owner?
+
+**Counterexamples:** Historical measurements, migration records, protocol constants, and externally
+fixed compatibility values may need exact literals when their date and authority are explicit.
+
+**Possible responses:** Keep behavior documentation value-independent, name the executable source
+of truth, generate user-facing defaults where practical, or add a validation step when duplication
+is unavoidable.
+
+## A Valid Inactive State Enters a Strict Constructor
+
+**Smell:** A disabled, empty, zero-signal, or otherwise valid no-work state is passed into a
+constructor or resolver whose contract accepts only active inputs.
+
+**Signals:**
+
+- One mode gates an inactive input while a sibling mode calls the same strict resolver directly.
+- Zero magnitude, an empty interval, or no selected work throws even though the feature can
+  legitimately have nothing to produce.
+- Callers catch construction errors to represent ordinary inactivity.
+- The active constructor accumulates mode-specific fallback behavior to tolerate no-work inputs.
+
+**Possible failure:** Normal lifecycle states become crashes, or broad exception handling hides
+genuinely malformed inputs together with ordinary inactivity.
+
+**Questions:** Is inactivity a valid domain state? Which boundary can distinguish it from malformed
+input? Should the active value's type permit an inactive representation at all?
+
+**Counterexamples:** A required resource or command may legitimately reject emptiness when the
+caller contract guarantees active work.
+
+**Possible responses:** Gate once before strict construction, model active/inactive as a sum type,
+or provide a clearly named optional resolver while continuing to reject NaN, corruption, and other
+invalid active inputs.
+
 ## Temporary Overrides Restore an Assumed Default
 
 **Smell:** A test, diagnostic, benchmark, preview, or scoped operation temporarily changes shared
@@ -704,6 +757,31 @@ acceptance.
 **Possible responses:** Return a completion handle from a synchronous acceptance method, split
 acceptance and realization into named operations, model both phases in the return type, or retain the
 compact API with explicit contract documentation and ordering tests.
+
+## Elapsed Time Stands In for Observable Readiness
+
+**Smell:** A test, harness, or coordinator waits a fixed duration and assumes an asynchronous state
+transition or resource effect has completed when the timer expires.
+
+**Signals:**
+
+- A delay immediately follows a setting change, request, or lifecycle command.
+- Correctness varies with machine speed, workload size, scheduling, or rendering backend.
+- The accepted setting is observable before the subsystem that consumes it has completed a cycle.
+- Increasing the delay appears to fix the failure without proving which condition became true.
+
+**Possible failure:** Fast runs waste time, slow runs capture an intermediate state, and load or
+architecture changes turn deterministic checks into intermittent failures.
+
+**Questions:** What exact fact proves completion? Which layer owns that fact? Can the caller poll an
+existing diagnostic, await a generation change, or receive an explicit completion signal?
+
+**Counterexamples:** A deliberate soak interval, animation sample, debounce contract, or performance
+window measures elapsed time itself rather than using time as a proxy for readiness.
+
+**Possible responses:** Wait for an observable state predicate with a bounded timeout, expose a
+generation or completion handle, or make synchronous lifecycle effects complete before the command
+returns when their cost and ownership permit it.
 
 ## Cleanup Exists Only on the Success Path
 

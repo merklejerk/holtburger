@@ -5,6 +5,7 @@
 	import ExplorerFramePanel from "./ExplorerFramePanel.svelte";
 	import ExplorerTexturesPanel from "./ExplorerTexturesPanel.svelte";
 	import ExplorerWorldPanel from "./ExplorerWorldPanel.svelte";
+	import ExplorerRendererPanel from "./ExplorerRendererPanel.svelte";
 	import type { StaticObjectRuntimeDiagnostics } from "../lib/game/runtime/game-presentation-runtime";
 	import type { GamePresentationRuntime } from "../lib/game/runtime/game-presentation-runtime";
 	import type { ExplorerEnvironmentSelection } from "../lib/game/environment/scene-environment";
@@ -43,7 +44,8 @@
 	import type { HostKinematicBoomStatus } from "../lib/game/camera/host-kinematic-boom-session";
 	import type { ExplorerEntitySelection } from "./explorer-entity-panel-state";
 
-	type ExplorerTabId = "world" | "grading" | "frame" | "textures" | "entities";
+	type ExplorerTabId =
+		"world" | "renderer" | "grading" | "frame" | "textures" | "entities";
 
 	interface ExplorerTab {
 		/** Stable tab id used for selection and panel ids. */
@@ -251,6 +253,11 @@
 			label: "World",
 		},
 		{
+			id: "renderer",
+			icon: "🖥️",
+			label: "Renderer",
+		},
+		{
 			id: "grading",
 			icon: "🎨",
 			label: "Grading",
@@ -339,15 +346,6 @@
 								{environmentSelection}
 								{dayGroupNames}
 								{updateEnvironment}
-								{distanceFogEnabled}
-								{showRetailHiddenGeometry}
-								{updateShowRetailHiddenGeometry}
-								{nameplates}
-								{updateNameplateCategory}
-								{ambientOcclusion}
-								{entityShadows}
-								{updateEntityShadowSettings}
-								{viewerLightEnabled}
 								{weatherEnabled}
 								{clockFollowing}
 								{interestFollowsCamera}
@@ -355,18 +353,31 @@
 								{audioFollowsCamera}
 								{effectVolume}
 								{ambientVolume}
-								{updateDistanceFog}
-								{updateAmbientOcclusionSettings}
-								{updateViewerLight}
 								{updateWeather}
 								{updateClockFollowing}
 								{updateAudioFollowsCamera}
 								{updateEffectVolume}
 								{updateAmbientVolume}
+							/>
+						{:else if activeTab.id === "renderer"}
+							<ExplorerRendererPanel
+								{runtimeReady}
+								{distanceFogEnabled}
+								{updateDistanceFog}
+								{viewerLightEnabled}
+								{updateViewerLight}
 								{envCellRenderMode}
 								{updateEnvCellRenderMode}
 								{layerVisibility}
 								{updateLayerVisibility}
+								{showRetailHiddenGeometry}
+								{updateShowRetailHiddenGeometry}
+								{nameplates}
+								{updateNameplateCategory}
+								{ambientOcclusion}
+								{updateAmbientOcclusionSettings}
+								{entityShadows}
+								{updateEntityShadowSettings}
 								{textureFiltering}
 								{textureFilteringOptions}
 								{maximumTextureAnisotropy}

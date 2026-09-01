@@ -1,6 +1,6 @@
 import { requireWebGL2Uniform } from "../webgl/shader-program";
-import type { EntityGroundingSettings } from "./entity-shadow-policy";
-import { MAX_ENTITY_GROUNDING_CASTERS_PER_RECEIVER } from "./entity-shadow-policy";
+import type { IndoorGroundingSettings } from "./entity-shadow-policy";
+import { MAX_ENTITY_ANALYTIC_SHADOW_CASTERS_PER_RECEIVER } from "./entity-shadow-policy";
 import type { EntityGroundingSelection } from "./entity-grounding";
 
 const EMPTY_ENTITY_GROUNDING_UNIFORM_ATTEMPTS = 1;
@@ -8,7 +8,7 @@ const POPULATED_ENTITY_GROUNDING_UNIFORM_ATTEMPTS = 10;
 
 /** Fixed analytic grounding evaluator compiled only into explicit receiver variants. */
 export const WEBGL2_ENTITY_GROUNDING_GLSL = `
-const int MAX_ENTITY_GROUNDING_CASTERS = ${MAX_ENTITY_GROUNDING_CASTERS_PER_RECEIVER};
+const int MAX_ENTITY_GROUNDING_CASTERS = ${MAX_ENTITY_ANALYTIC_SHADOW_CASTERS_PER_RECEIVER};
 uniform int uGroundingCasterCount;
 uniform vec4 uGroundingCasters[MAX_ENTITY_GROUNDING_CASTERS];
 uniform float uGroundingStrength;
@@ -104,7 +104,7 @@ export function applyWebGL2EntityGroundingUniforms(
 	state: WebGL2EntityGroundingUniformApplicator,
 	uniforms: WebGL2EntityGroundingUniforms,
 	selection: EntityGroundingSelection,
-	settings: EntityGroundingSettings,
+	settings: IndoorGroundingSettings,
 ): number {
 	let issued = Number(
 		state.applyUniform1i(uniforms.casterCount, selection.count),
@@ -144,31 +144,4 @@ export function entityGroundingUniformAttemptCount(
 	return selection.count === 0
 		? EMPTY_ENTITY_GROUNDING_UNIFORM_ATTEMPTS
 		: POPULATED_ENTITY_GROUNDING_UNIFORM_ATTEMPTS;
-}
-
-/** Uncached writer for terrain, whose record set intentionally changes with every landblock draw. */
-export class WebGL2DirectEntityGroundingUniformApplicator implements WebGL2EntityGroundingUniformApplicator {
-	readonly #gl: WebGL2RenderingContext;
-
-	constructor(gl: WebGL2RenderingContext) {
-		this.#gl = gl;
-	}
-
-	applyUniform1f(location: WebGLUniformLocation, value: number): boolean {
-		this.#gl.uniform1f(location, value);
-		return true;
-	}
-
-	applyUniform1i(location: WebGLUniformLocation, value: number): boolean {
-		this.#gl.uniform1i(location, value);
-		return true;
-	}
-
-	applyUniform4fv(
-		location: WebGLUniformLocation,
-		value: Float32Array,
-	): boolean {
-		this.#gl.uniform4fv(location, value);
-		return true;
-	}
 }

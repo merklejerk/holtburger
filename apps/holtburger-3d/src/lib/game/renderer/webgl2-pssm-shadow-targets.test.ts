@@ -18,43 +18,41 @@ describe("WebGL2 PSSM shadow targets", () => {
 			resolution: null,
 		});
 
-		const first = targets.resize(512, 3);
-		expect(targets.resize(512, 3)).toBe(first);
+		const first = targets.resize(512, 2);
+		expect(targets.resize(512, 2)).toBe(first);
 		expect(state.storage).toEqual([
-			{ depth: 3, format: state.gl.DEPTH_COMPONENT24, height: 512, width: 512 },
+			{ depth: 2, format: state.gl.DEPTH_COMPONENT24, height: 512, width: 512 },
 		]);
-		expect(state.attachedLayers).toEqual([0, 1, 2]);
-		expect(state.framebufferChecks).toBe(3);
+		expect(state.attachedLayers).toEqual([0, 1]);
+		expect(state.framebufferChecks).toBe(2);
 		expect(targets.getDiagnostics()).toEqual({
-			activeBytes: pssmShadowTargetByteLength(512, 3),
+			activeBytes: pssmShadowTargetByteLength(512, 2),
 			activeFramebufferCount: 1,
 			activeTextureCount: 1,
 			allocatedGenerationCount: 1,
-			cascadeCount: 3,
+			cascadeCount: 2,
 			disposedGenerationCount: 0,
 			resolution: 512,
 		});
 
 		expect(targets.attachLayer(1)).toBe(first);
 		targets.attachLayer(0);
-		targets.attachLayer(2);
-		expect(state.attachedLayers).toEqual([0, 1, 2, 1, 0, 2]);
-		expect(state.framebufferChecks).toBe(3);
-		expect(() => targets.attachLayer(3)).toThrow("outside cascade count 3");
+		expect(state.attachedLayers).toEqual([0, 1, 1, 0]);
+		expect(state.framebufferChecks).toBe(2);
+		expect(() => targets.attachLayer(2)).toThrow("outside cascade count 2");
 
-		targets.resize(256, 2);
-		expect(state.attachedLayers).toEqual([0, 1, 2, 1, 0, 2, 0, 1]);
-		expect(state.framebufferChecks).toBe(5);
+		targets.resize(256, 1);
+		expect(state.attachedLayers).toEqual([0, 1, 1, 0, 0]);
+		expect(state.framebufferChecks).toBe(3);
 		targets.attachLayer(0);
-		targets.attachLayer(1);
-		expect(state.framebufferChecks).toBe(5);
+		expect(state.framebufferChecks).toBe(3);
 	});
 
 	it("replaces, disables, re-enables, and destroys each generation once", () => {
 		const state = createFakeWebGL2();
 		const targets = new WebGL2PssmShadowTargets(state.gl);
-		targets.resize(256, 2);
-		targets.resize(512, 3);
+		targets.resize(256, 1);
+		targets.resize(512, 2);
 		expect(state.deleted).toEqual({ framebuffers: 1, textures: 1 });
 		targets.disable();
 		targets.disable();
@@ -75,14 +73,14 @@ describe("WebGL2 PSSM shadow targets", () => {
 	it("retains the previous generation and array bindings after allocation failure", () => {
 		const state = createFakeWebGL2();
 		const targets = new WebGL2PssmShadowTargets(state.gl);
-		const first = targets.resize(256, 2);
+		const first = targets.resize(256, 1);
 		const bindings = installUnrelatedBindings(state.gl);
-		state.failFramebufferCheckAt = state.framebufferChecks + 2;
+		state.failFramebufferCheckAt = state.framebufferChecks + 1;
 
-		expect(() => targets.resize(512, 3)).toThrow(
-			"framebuffer layer 1 is incomplete",
+		expect(() => targets.resize(512, 2)).toThrow(
+			"framebuffer layer 0 is incomplete",
 		);
-		expect(targets.resize(256, 2)).toBe(first);
+		expect(targets.resize(256, 1)).toBe(first);
 		expect(targets.getDiagnostics()).toMatchObject({
 			allocatedGenerationCount: 1,
 			disposedGenerationCount: 0,
@@ -93,7 +91,7 @@ describe("WebGL2 PSSM shadow targets", () => {
 
 	it("rejects invalid and unsupported configurations before allocation", () => {
 		const state = createFakeWebGL2({
-			maximumArrayLayers: 2,
+			maximumArrayLayers: 1,
 			maximumTextureSize: 512,
 		});
 		const targets = new WebGL2PssmShadowTargets(state.gl);
@@ -102,8 +100,8 @@ describe("WebGL2 PSSM shadow targets", () => {
 		expect(() => targets.resize(1_024, 1)).toThrow(
 			"exceeds maximum texture size 512",
 		);
-		expect(() => targets.resize(512, 3)).toThrow(
-			"exceeds maximum array layers 2",
+		expect(() => targets.resize(512, 2)).toThrow(
+			"exceeds maximum array layers 1",
 		);
 		expect(state.created).toEqual({ framebuffers: 0, textures: 0 });
 	});

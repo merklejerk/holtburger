@@ -6,8 +6,8 @@ import {
 	type WebGL2PssmShadowTargetDiagnostics,
 } from "./webgl2-pssm-shadow-targets";
 
-const INITIAL_CONFIGURATION = { cascadeCount: 2, resolution: 256 } as const;
-const RESIZED_CONFIGURATION = { cascadeCount: 3, resolution: 512 } as const;
+const INITIAL_CONFIGURATION = { cascadeCount: 1, resolution: 256 } as const;
+const RESIZED_CONFIGURATION = { cascadeCount: 2, resolution: 512 } as const;
 
 /** Real-browser evidence for the outdoor depth-array format, lifecycle, and caster shader. */
 export interface WebGL2PssmFixtureResult {
@@ -75,6 +75,8 @@ export function runWebGL2PssmFixture(
 			Boolean(gl.getProgramParameter(casterProgram, gl.LINK_STATUS));
 		const receivers = [
 			receiverPrograms.terrain(),
+			receiverPrograms.directionalTerrain(),
+			receiverPrograms.hybridTerrain(),
 			receiverPrograms.foggedBaked(),
 			receiverPrograms.foggedInstanced(),
 			receiverPrograms.blendedBaked(false),
@@ -88,7 +90,6 @@ export function runWebGL2PssmFixture(
 				Boolean(gl.getProgramParameter(receiver.program, gl.LINK_STATUS)),
 		);
 		const groundingReceivers = [
-			groundingPrograms.terrain(),
 			groundingPrograms.fogged(),
 			groundingPrograms.blended(false),
 			groundingPrograms.blended(true),

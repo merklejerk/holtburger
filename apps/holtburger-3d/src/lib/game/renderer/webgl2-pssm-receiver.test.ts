@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { Quat, Vec3 } from "../math/types";
 import { DEFAULT_ENTITY_SHADOW_SETTINGS } from "./entity-shadow-policy";
-import { buildOutdoorPssmCascades } from "./outdoor-pssm";
+import {
+	buildOutdoorPssmCascades,
+	resolveOutdoorShadowProjection,
+} from "./outdoor-pssm";
 import type { ActiveOutdoorPssmFrame } from "./webgl2-outdoor-pssm-pass";
 import {
 	bindWebGL2OutdoorPssmUniforms,
@@ -49,7 +52,10 @@ describe("bindWebGL2OutdoorPssmUniforms", () => {
 				verticalFovDegrees: 60,
 			},
 			settings,
-			sunVector: new Vec3(0, 1, 0),
+			projection: resolveOutdoorShadowProjection(
+				new Vec3(0, 1, 0),
+				DEFAULT_ENTITY_SHADOW_SETTINGS.projection,
+			),
 		});
 		const frame: ActiveOutdoorPssmFrame = {
 			cascades,

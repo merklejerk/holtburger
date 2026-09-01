@@ -764,7 +764,7 @@ async fn resolve_building_aperture(
     )?;
     let resolved = ResolvedBuildingAperture {
         aperture_index,
-        mask_depth_policy: if selected.has_render_surface {
+        mask_depth_policy: if selected.has_drawing_bsp_node_polygon {
             MaskDepthPolicy::RejectEqualDepth
         } else {
             MaskDepthPolicy::AllowEqualDepth

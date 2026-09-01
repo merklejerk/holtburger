@@ -1382,7 +1382,7 @@ mod tests {
             Some(JUMP_FIXTURE_ACTION_ANIMATION),
         );
         assert!(
-            offset.translation.length() > 0.0,
+            offset.offset.translation.length() > 0.0,
             "action root offset was {offset:?}",
         );
     }
@@ -2477,8 +2477,11 @@ mod tests {
         remote
             .properties
             .set_did_prop(PropertyDataId::MotionTable, Guid(motion_table_id));
-        remote.physics =
-            holtburger_world::resolve_effective_entity_physics_state(PhysicsState::GRAVITY);
+        remote
+            .physics
+            .reconcile(holtburger_world::resolve_effective_entity_physics_state(
+                PhysicsState::GRAVITY,
+            ));
         client.world.add_entity(remote);
         client.world.scene.apply_authoritative_body_effect(
             holtburger_world::SpatialBodyId::Entity(remote_guid),
@@ -2520,7 +2523,9 @@ mod tests {
         client.world.advance_authored_motion(Duration::ZERO);
         let before = client.current_dynamic_entity_views();
         assert_eq!(
-            before[0].playing_clip.map(|clip| clip.animation_id),
+            before[0]
+                .motion
+                .map(crate::DynamicEntityMotion::animation_id),
             Some(JUMP_FIXTURE_RUN_ANIMATION)
         );
 
@@ -2558,7 +2563,9 @@ mod tests {
         assert!(batch.advances.is_empty());
         assert_eq!(batch.updates.len(), 1);
         assert_eq!(
-            batch.updates[0].playing_clip.map(|clip| clip.animation_id),
+            batch.updates[0]
+                .motion
+                .map(crate::DynamicEntityMotion::animation_id),
             Some(JUMP_FIXTURE_STAND_ANIMATION)
         );
     }
@@ -3730,8 +3737,11 @@ mod tests {
         remote
             .properties
             .set_did_prop(PropertyDataId::Setup, Guid(0x0200_0001));
-        remote.physics =
-            holtburger_world::resolve_effective_entity_physics_state(PhysicsState::STATIC);
+        remote
+            .physics
+            .reconcile(holtburger_world::resolve_effective_entity_physics_state(
+                PhysicsState::STATIC,
+            ));
         client.world.remove_entity(remote_guid);
         client.world.add_entity(remote);
 

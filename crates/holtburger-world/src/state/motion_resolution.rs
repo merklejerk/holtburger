@@ -3,7 +3,7 @@ use crate::entity::{
     EntityMotionSnapshot,
 };
 use crate::motion::{
-    CharacterMotionPresentation, MotionCommand, MotionOrder, MotionRuntimeRegistry,
+    CharacterMotionPresentation, MotionCommand, MotionOrder, MotionRuntimeRegistry, SequenceTick,
     ServerDirectedMotionResolution, ServerDirectedTarget, begin_server_directed_motion,
     resolve_server_directed_motion,
 };
@@ -13,10 +13,11 @@ use crate::spatial::{
 };
 use crate::state::WorldState;
 use crate::state::types::RetainedServerDirectedMotion;
+use crate::{PhysicalBodyReconfiguration, WorldEvent};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_common::{Guid, RigidTransform, Vector3};
-use holtburger_content::{MotionSequence, MotionSequenceTable};
+use holtburger_content::{MotionHookEffect, MotionSequence, MotionSequenceTable};
 use holtburger_dat::file_type::MotionTable;
 use holtburger_protocol::messages::movement::InterpretedMotionCommand;
 use std::time::Duration;
@@ -145,6 +146,15 @@ pub enum AuthoredMotionDriveError {
     },
 }
 
+/// Complete authored-motion result for one body advanced by the world clock.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AuthoredBodyMotionTick {
+    /// Body whose sole authored cursor produced this tick.
+    pub guid: Guid,
+    /// Root contribution, ordered hooks, and action completion from that cursor advance.
+    pub tick: SequenceTick,
+}
+
 /// Why a client-authored transient edge could not enter the local body's shared runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum LocalAuthoredMotionActionError {
@@ -228,7 +238,7 @@ impl WorldState {
             .ok_or(PlayerMotionTableLookupError::MotionTableAbsentFromContract { motion_table_id })
     }
 
-    /// Drives one named body's sole authored playback cursor and returns this tick's exact offset.
+    /// Drives one named body's sole authored playback cursor and returns its complete tick.
     ///
     /// The world owns table selection and cursor state. Callers own only the semantic order, so
     /// presentation and root motion cannot accidentally advance different playback instances.
@@ -237,7 +247,7 @@ impl WorldState {
         guid: Guid,
         order: MotionOrder,
         dt: Duration,
-    ) -> Result<RigidTransform, AuthoredMotionDriveError> {
+    ) -> Result<SequenceTick, AuthoredMotionDriveError> {
         let quantum = dt.as_secs_f32();
         let source = self.motion_table_source_for_guid(guid).ok_or(
             AuthoredMotionDriveError::MotionTableSourceUnavailable {
@@ -255,7 +265,7 @@ impl WorldState {
         Ok(self
             .motion_runtimes
             .drive(table, guid, order, quantum)
-            .offset)
+            .clone())
     }
 
     /// Predicts one client-authored command-list edge into the local body's sole runtime.
@@ -449,18 +459,22 @@ impl WorldState {
     /// at the layer that owns the world clock. `resolve_body_projection_input` then reads the
     /// contribution rather than producing it, which is what keeps the tick's authored offset a
     /// single computed fact.
-    pub fn advance_authored_motion(&mut self, dt: Duration) {
-        self.advance_authored_motion_except(dt, None);
+    pub fn advance_authored_motion(&mut self, dt: Duration) -> Vec<AuthoredBodyMotionTick> {
+        self.advance_authored_motion_except(dt, None)
     }
 
     /// Advances authored playback while excluding a body explicitly driven by its local adapter.
     ///
     /// The authoritative snapshot for that entity can still be present, so bulk advancement must
     /// not advance its world-owned cursor before the adapter drives that same cursor for the tick.
-    pub fn advance_authored_motion_except(&mut self, dt: Duration, excluded: Option<Guid>) {
+    pub fn advance_authored_motion_except(
+        &mut self,
+        dt: Duration,
+        excluded: Option<Guid>,
+    ) -> Vec<AuthoredBodyMotionTick> {
         let quantum = dt.as_secs_f32();
         if !quantum.is_finite() || quantum < 0.0 {
-            return;
+            return Vec::new();
         }
 
         // Collected first because driving playback needs the contract, the registry, and the entity
@@ -503,13 +517,102 @@ impl WorldState {
         self.server_directed_motion
             .retain(|guid, _| live.contains(guid));
 
+        let mut ticks = Vec::with_capacity(driving.len());
         for (guid, motion_table_id, snapshot, pose, contact) in driving {
             let order = self.resolve_remote_motion_order(guid, snapshot, pose, contact);
             let Some(table) = self.motion_sequences.table(motion_table_id) else {
                 continue;
             };
-            self.motion_runtimes.drive(table, guid, order, quantum);
+            ticks.push(AuthoredBodyMotionTick {
+                guid,
+                tick: self
+                    .motion_runtimes
+                    .drive(table, guid, order, quantum)
+                    .clone(),
+            });
         }
+        ticks
+    }
+
+    /// Executes host-owned physics hooks and blocked-solidification retries for one world tick.
+    pub fn apply_authored_motion_physics(
+        &mut self,
+        ticks: &[AuthoredBodyMotionTick],
+    ) -> anyhow::Result<Vec<WorldEvent>> {
+        let pending = self
+            .entities
+            .iter()
+            .filter(|entity| entity.physics.has_pending_solidification())
+            .map(|entity| entity.guid)
+            .collect::<Vec<_>>();
+        let mut events = Vec::new();
+        for guid in pending {
+            self.apply_authored_ethereal(guid, false, &mut events)?;
+        }
+        for produced in ticks {
+            for fired in &produced.tick.hooks {
+                if let MotionHookEffect::Ethereal { ethereal } = fired.hook.effect {
+                    self.apply_authored_ethereal(produced.guid, ethereal, &mut events)?;
+                }
+            }
+        }
+        Ok(events)
+    }
+
+    fn apply_authored_ethereal(
+        &mut self,
+        guid: Guid,
+        ethereal: bool,
+        events: &mut Vec<WorldEvent>,
+    ) -> anyhow::Result<()> {
+        let body_id = self.runtime_body_id_for_guid(guid);
+        let obstructed = if ethereal {
+            false
+        } else if let Some(body_id) = body_id {
+            if self
+                .scene
+                .body(body_id)
+                .and_then(|body| body.physical.as_ref())
+                .is_some()
+            {
+                self.scene.dynamic_body_overlaps_peer(body_id)?
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+        let effective = {
+            let entity = self
+                .entities
+                .get_mut(guid)
+                .expect("authored motion tick outlived its entity");
+            if obstructed {
+                entity.physics.defer_authored_solidification();
+            } else {
+                entity.physics.apply_authored_ethereal(ethereal);
+            }
+            entity.physics.effective()
+        };
+        let Some(body_id) = body_id else {
+            return Ok(());
+        };
+        let has_physics = self
+            .scene
+            .body(body_id)
+            .and_then(|body| body.physical.as_ref())
+            .is_some();
+        if !has_physics {
+            return Ok(());
+        }
+        let outcome = self
+            .scene
+            .reconfigure_dynamic_body_for_state(body_id, effective)
+            .expect("authored ethereal transition lost compatible prepared geometry");
+        if outcome.change != PhysicalBodyReconfiguration::Unchanged {
+            events.push(WorldEvent::RuntimeBodyChanged { body_id });
+        }
+        Ok(())
     }
 
     /// Re-selects one server-authored body's presentation after a committed support transition.

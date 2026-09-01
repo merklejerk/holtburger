@@ -232,10 +232,15 @@ fn catalog() -> MotionSequenceCatalog {
 
 /// Builds the shared table fixture with an independently selectable combat resting substate.
 fn catalog_with_combat_default(combat_default: u32) -> MotionSequenceCatalog {
+    catalog_with_defaults(combat_default, 10.0)
+}
+
+/// Builds the shared table fixture with independently selectable resting motion facts.
+fn catalog_with_defaults(combat_default: u32, stand_framerate: f32) -> MotionSequenceCatalog {
     let mut cycles = HashMap::new();
     cycles.insert(
         MotionTable::cycle_key(STYLE, STAND),
-        motion(vec![clip(STAND_ANIM, 10.0)], None, None),
+        motion(vec![clip(STAND_ANIM, stand_framerate)], None, None),
     );
     cycles.insert(
         MotionTable::cycle_key(STYLE, WALK),
@@ -1392,6 +1397,53 @@ mod playing_clip {
         assert_eq!(clip.high_frame, 3);
         assert_eq!(clip.framerate, 10.0);
         assert_eq!(clip.completion, MotionClipCompletion::Loop);
+    }
+
+    #[test]
+    fn stationary_playback_projects_its_exact_settled_frame() {
+        let catalog = catalog_with_defaults(STAND, 0.0);
+        let (registry, guid) = possessed(&catalog);
+
+        assert_eq!(
+            registry.motion_presentation(guid),
+            Some(MotionPresentation::Settled(SettledMotionPose {
+                animation_id: STAND_ANIM,
+                frame: 0,
+            }))
+        );
+    }
+
+    #[test]
+    fn stopping_an_active_clip_projects_the_frame_its_cursor_reached() {
+        let catalog = catalog();
+        let table = catalog.table(0x0900_0001).expect("table");
+        let (mut registry, guid) = possessed(&catalog);
+        registry.drive(table, guid, MotionOrder::default(), 0.25);
+        let reached_frame = registry
+            .get(guid)
+            .expect("playback")
+            .sequence()
+            .current_frame();
+
+        registry.drive(
+            table,
+            guid,
+            MotionOrder {
+                style: Some(MotionCommand(STYLE)),
+                forward: Some((MotionCommand(STAND), 0.0)),
+                sidestep: None,
+                turn: None,
+            },
+            1.0 / 30.0,
+        );
+
+        assert_eq!(
+            registry.motion_presentation(guid),
+            Some(MotionPresentation::Settled(SettledMotionPose {
+                animation_id: STAND_ANIM,
+                frame: reached_frame,
+            }))
+        );
     }
 
     /// A clip change reaches the frontend only as a new projection, never as something it chose.

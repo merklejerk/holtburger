@@ -2,7 +2,7 @@
 
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, ParentLocation, Placement};
-use holtburger_world::motion::{MotionClipCompletion, PlayingMotionClip};
+use holtburger_world::motion::{MotionClipCompletion, MotionPresentation};
 use holtburger_world::{
     ContactState, EffectiveEntityPhysicsState, EntityAppearance, EntityPlacement,
     PhysicalBodyParticipation, SpatialSampleMode,
@@ -168,8 +168,8 @@ pub struct DynamicEntityViewSource {
     pub radar: crate::DynamicEntityRadarFacts,
     /// Current mutually exclusive solver state or parent-owned attachment.
     pub placement: EntityPlacement<DynamicEntityWorldProjection>,
-    /// Clip the producer's playback currently has this entity playing.
-    pub playing_clip: Option<PlayingMotionClip>,
+    /// Current motion-derived presentation level.
+    pub motion: Option<MotionPresentation>,
 }
 
 impl DynamicEntityViewSource {
@@ -181,7 +181,7 @@ impl DynamicEntityViewSource {
         generation: u64,
         presentation_class: DynamicEntityPresentationClass,
         input: DynamicEntityProjectionInput,
-        playing_clip: Option<PlayingMotionClip>,
+        motion: Option<MotionPresentation>,
     ) -> Self {
         Self {
             generation,
@@ -201,7 +201,7 @@ impl DynamicEntityViewSource {
             physics: input.physics,
             radar: input.radar,
             placement: input.placement,
-            playing_clip,
+            motion,
         }
     }
 }
@@ -222,14 +222,14 @@ pub struct DynamicEntityView {
     pub physics: DynamicEntityPhysicsView,
     /// Current canonical placement and kinematics.
     pub placement: DynamicEntityPlacementView,
-    /// Clip this entity is playing right now, or `None` when it animates nothing.
+    /// Motion-derived presentation right now, or `None` when it animates nothing.
     ///
-    /// A level, not an edge: every view that reaches a consumer states the current clip, so a
-    /// consumer that realizes an entity late — or re-realizes one from a snapshot — starts it
-    /// playing without having witnessed the transition that selected it. This is the shape the
-    /// retail protocol uses, where `CreateObject` carries `PhysicsDescriptionFlag.Movement` with
-    /// the object's current motion state (`WorldObject_Networking.cs:306`).
-    pub playing_clip: Option<DynamicEntityPlayingClip>,
+    /// A level, not an edge: every view states the current presentation, so a consumer that
+    /// realizes an entity late — or re-realizes one from a snapshot — reconstructs it without
+    /// having witnessed the transition that selected it. This is the shape the retail protocol
+    /// uses, where `CreateObject` carries `PhysicsDescriptionFlag.Movement` with the object's
+    /// current motion state (`WorldObject_Networking.cs:306`).
+    pub motion: Option<DynamicEntityMotion>,
 }
 
 /// One complete replacement snapshot; no replay history is required to reconstruct it.
@@ -309,36 +309,52 @@ pub struct DynamicEntityAdvance {
     pub path: DynamicEntityPlacedPath,
 }
 
-/// The clip the host has one entity playing, projected for presentation.
-///
-/// Carries no frame number. Host and receiver both advance by `framerate x dt`, so a phase offset
-/// never accumulates, and entering a clip re-anchors both at the same frame regardless.
-///
-/// Deliberately narrow: the receiver advances within this clip's window at render rate and obeys
-/// its projected completion behavior, but never selects the next clip. Which clip follows is link
-/// resolution against host state the receiver does not have, so a successor arrives only as a
-/// later view.
+/// Current motion-derived presentation level.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DynamicEntityPlayingClip {
-    pub animation_id: u32,
-    /// Rate to advance at. Negative plays the window backwards.
-    pub framerate: f32,
-    /// Inclusive traversal bounds, already resolved against the animation's frame count.
-    pub low_frame: i32,
-    pub high_frame: i32,
-    /// Host-owned terminal behavior derived from the sequence's cyclic-tail boundary.
-    pub completion: DynamicEntityClipCompletion,
+#[serde(
+    tag = "kind",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
+pub enum DynamicEntityMotion {
+    /// Advancing clip whose local phase is intentionally not synchronized frame-by-frame.
+    Playing {
+        animation_id: u32,
+        /// Rate to advance at. Negative plays the window backwards.
+        framerate: f32,
+        /// Inclusive traversal bounds, already resolved against the animation's frame count.
+        low_frame: i32,
+        high_frame: i32,
+        /// Host-owned terminal behavior derived from the sequence's cyclic-tail boundary.
+        completion: DynamicEntityClipCompletion,
+    },
+    /// Exact stationary pose used for snapshots, late realization, and reconciliation.
+    Settled { animation_id: u32, frame: i32 },
 }
 
-impl From<PlayingMotionClip> for DynamicEntityPlayingClip {
-    fn from(clip: PlayingMotionClip) -> Self {
-        Self {
-            animation_id: clip.animation_id,
-            framerate: clip.framerate,
-            low_frame: clip.low_frame,
-            high_frame: clip.high_frame,
-            completion: clip.completion.into(),
+impl DynamicEntityMotion {
+    /// Animation shared by either the moving or settled presentation state.
+    pub const fn animation_id(self) -> u32 {
+        match self {
+            Self::Playing { animation_id, .. } | Self::Settled { animation_id, .. } => animation_id,
+        }
+    }
+}
+
+impl From<MotionPresentation> for DynamicEntityMotion {
+    fn from(presentation: MotionPresentation) -> Self {
+        match presentation {
+            MotionPresentation::Playing(clip) => Self::Playing {
+                animation_id: clip.animation_id,
+                framerate: clip.framerate,
+                low_frame: clip.low_frame,
+                high_frame: clip.high_frame,
+                completion: clip.completion.into(),
+            },
+            MotionPresentation::Settled(pose) => Self::Settled {
+                animation_id: pose.animation_id,
+                frame: pose.frame,
+            },
         }
     }
 }
@@ -473,7 +489,7 @@ pub fn project_dynamic_entity_view(source: DynamicEntityViewSource) -> DynamicEn
             default_script: presentation.default_script,
         },
         placement,
-        playing_clip: source.playing_clip.map(DynamicEntityPlayingClip::from),
+        motion: source.motion.map(DynamicEntityMotion::from),
     }
 }
 

@@ -21,9 +21,10 @@ use holtburger_session::Session;
 use holtburger_world::entity::EntityMotionDirective;
 use holtburger_world::motion::{ServerDirectedMotionState, begin_server_directed_motion};
 use holtburger_world::{
-    BodyProjectionResolver, ContactState, GroundedBodyActuation, GroundedLaunch, LocalDriveControl,
-    PhysicalBodyActuation, PhysicalBodyDefinition, SolveBodyInput, SpatialBodyId, WorldEvent,
-    WorldState, advance_body_kinematics, authored_grounded_actuation,
+    AuthoredBodyMotionTick, BodyProjectionResolver, ContactState, GroundedBodyActuation,
+    GroundedLaunch, LocalDriveControl, PhysicalBodyActuation, PhysicalBodyDefinition,
+    SolveBodyInput, SpatialBodyId, WorldEvent, WorldState, advance_body_kinematics,
+    authored_grounded_actuation,
 };
 use std::time::{Duration, Instant};
 
@@ -110,12 +111,24 @@ pub(super) fn tick_with_precise_jump(
         || world.has_authored_motion_actions(local_guid))
     .then_some(local_guid)
     .filter(|guid| !guid.is_null());
-    world.advance_authored_motion_except(dt, excluded);
+    let mut authored_ticks = world.advance_authored_motion_except(dt, excluded);
+    let authored_tick = if collision.is_some() {
+        movement.advance_local_authored_motion(world, dt)?
+    } else {
+        None
+    };
+    let authored_offset = authored_tick.as_ref().map(|tick| tick.offset);
+    if let Some(tick) = authored_tick {
+        authored_ticks.push(AuthoredBodyMotionTick {
+            guid: local_guid,
+            tick,
+        });
+    }
+    let mut events = world.apply_authored_motion_physics(&authored_ticks)?;
     let pending_jump = movement
         .take_pending_jump_attempt()
         .map(|pending| prepare_player_jump(world, pending));
     let precise_jump = precise_jump.map(|pending| prepare_precise_player_jump(world, pending));
-    let mut events = Vec::new();
     let mut committed_jump = None;
     let mut character_motion_feedback = pending_jump
         .as_ref()
@@ -124,7 +137,6 @@ pub(super) fn tick_with_precise_jump(
         .as_ref()
         .and_then(|result| result.as_ref().err().copied());
     if let Some(collision) = collision {
-        let authored_offset = movement.advance_local_authored_motion(world, dt)?;
         let prepared_jump = pending_jump
             .as_ref()
             .and_then(|result| result.as_ref().ok());

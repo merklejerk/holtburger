@@ -18,15 +18,15 @@ use crate::client::types::{
 };
 use anyhow::{Context as _, Result};
 use holtburger_common::sequence::is_newer_u16;
-use holtburger_common::{Guid, Quaternion, RigidTransform, Vector3};
+use holtburger_common::{Guid, Quaternion, Vector3};
 use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::RawMotionState;
 use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionItem};
 use holtburger_session::Session;
 use holtburger_world::context::WorldContextExt as _;
 use holtburger_world::motion::{
-    CharacterMotionPresentation, MotionCommand, MotionOrder, ServerDirectedMotionResolution,
-    ServerDirectedMotionState, resolve_server_directed_motion,
+    CharacterMotionPresentation, MotionCommand, MotionOrder, SequenceTick,
+    ServerDirectedMotionResolution, ServerDirectedMotionState, resolve_server_directed_motion,
 };
 use holtburger_world::spatial::{ContactState, LocalDriveControl, LocalDriveGait};
 use holtburger_world::{SpatialBodyId, WorldEvent, WorldState};
@@ -740,17 +740,17 @@ impl MovementSystem {
         })
     }
 
-    /// Advances the held local drive's authored motion once and returns that exact tick offset.
+    /// Advances the held local drive's authored motion once and returns that complete tick.
     ///
     /// Local prediction begins immediately while the authoritative snapshot may arrive later, but
     /// both root actuation and presentation read the same world-owned cursor. No velocity is
-    /// reconstructed here; the returned offset is consumed by the shared physical actuation
-    /// boundary.
+    /// reconstructed here; physical actuation consumes the tick's offset while host semantics
+    /// consume its ordered hooks.
     pub(crate) fn advance_local_authored_motion(
         &mut self,
         world: &mut WorldState,
         dt: Duration,
-    ) -> Result<Option<RigidTransform>> {
+    ) -> Result<Option<SequenceTick>> {
         let guid = world.player.guid;
         if guid == Guid::NULL {
             return Ok(None);
@@ -799,12 +799,12 @@ impl MovementSystem {
                     terminal_order
                 }
             };
-            let offset = world
+            let tick = world
                 .drive_authored_motion_for_body(guid, order, dt)
                 .map_err(|error| {
                     anyhow::anyhow!("local server-directed authored playback failed: {error}")
                 })?;
-            return Ok(Some(offset));
+            return Ok(Some(tick));
         }
         if !self.has_active_manual_drive()
             && !self.pending_manual_playback_stop
@@ -818,12 +818,12 @@ impl MovementSystem {
                 .and_then(|entity| entity.network_motion.snapshot())
                 .map(MotionOrder::from_snapshot)
                 .unwrap_or_default();
-            let offset = world
+            let tick = world
                 .drive_authored_motion_for_body(guid, steady_order, dt)
                 .map_err(|error| {
                     anyhow::anyhow!("local action authored playback failed: {error}")
                 })?;
-            return Ok(Some(offset));
+            return Ok(Some(tick));
         }
         let (state, run_rate) = match self.active_drive {
             Some(ActiveDriveState {
@@ -886,10 +886,10 @@ impl MovementSystem {
         // `acclient.c:330390-330453`).
         order = order.with_character_presentation(presentation);
 
-        let offset = world
+        let tick = world
             .drive_authored_motion_for_body(guid, order, dt)
             .map_err(|error| anyhow::anyhow!("manual local authored playback failed: {error}"))?;
-        Ok(Some(offset))
+        Ok(Some(tick))
     }
 
     pub(crate) fn record_force_position_sequence(&mut self, force_position_sequence: u16) {

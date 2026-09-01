@@ -80,7 +80,7 @@ impl ExplorerEntityDelivery {
                 projection.generation,
                 projection.presentation_class,
                 projection.input,
-                projection.playing_clip,
+                projection.motion,
             ),
         ))
     }
@@ -96,7 +96,7 @@ impl ExplorerEntityDelivery {
                     projection.generation,
                     projection.presentation_class,
                     projection.input,
-                    projection.playing_clip,
+                    projection.motion,
                 ))
             })
             .collect();
@@ -220,7 +220,7 @@ fn project_entity_advances(
                         tick.generation,
                         tick.presentation_class,
                         tick.input,
-                        tick.playing_clip,
+                        tick.motion,
                     ),
                 )),
                 kind: DynamicEntityPlacementAdvanceKind::Integrated,

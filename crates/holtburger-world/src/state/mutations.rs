@@ -1460,12 +1460,25 @@ impl WorldState {
 
         if self.entities.get(data.guid).is_some() {
             let next = crate::resolve_effective_entity_physics_state(data.physics_state);
-            let entity = self
-                .entities
-                .get_mut(data.guid)
-                .expect("entity presence was checked above");
-            entity.physics = next;
-            entity.properties.hydrate_from_set_state(data);
+            {
+                let entity = self
+                    .entities
+                    .get_mut(data.guid)
+                    .expect("entity presence was checked above");
+                entity.physics.reconcile(next);
+                entity.properties.hydrate_from_set_state(data);
+            }
+            if let Some(body_id) = self.runtime_body_id_for_guid(data.guid)
+                && self
+                    .scene
+                    .body(body_id)
+                    .and_then(|body| body.physical.as_ref())
+                    .is_some()
+                && let Some(outcome) = self.scene.reconfigure_dynamic_body_for_state(body_id, next)
+                && outcome.change != crate::PhysicalBodyReconfiguration::Unchanged
+            {
+                events.push(WorldEvent::RuntimeBodyChanged { body_id });
+            }
             events.push(WorldEvent::EntityStateUpdated {
                 guid: data.guid,
                 physics_state: data.physics_state,

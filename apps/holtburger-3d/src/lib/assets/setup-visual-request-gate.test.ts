@@ -97,6 +97,6 @@ function view(guid: number, generation: number): DynamicEntityView {
 			parentLocation: "none",
 			placement: "default",
 		},
-		playingClip: null,
+		motion: null,
 	};
 }

@@ -31,7 +31,7 @@ function testAnimation(frameCount: number): PreparedAnimation {
 	};
 }
 
-describe("playingClip", () => {
+describe("motion", () => {
 	it("rejects a window that does not fit the animation it indexes", () => {
 		expect(() => playingClip(testAnimation(5), 0, 5, 30, "loop")).toThrow(
 			/does not fit/,

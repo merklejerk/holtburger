@@ -126,6 +126,7 @@ const TYPED_PAYLOAD_KIND_BY_HOOK_TYPE = new Map<
 const NON_BLOCKING_UNIMPLEMENTED_HOOK_TYPES = new Set([
 	1, // sound
 	3, // attack
+	6, // ethereal (executed by host simulation)
 	14, // destroy-particle
 	15, // stop-particle
 	17, // default-script
@@ -231,8 +232,8 @@ export function decodeBehaviorCommand(
 				partIndex: payload.partIndex,
 			};
 		// Attack cones and ethereal toggles are simulation facts the host owns. They decode so the
-		// transport stays lossless and so a future consumer needs no re-plumbing, but the frontend
-		// has neither combat nor collision state to apply them to.
+		// transport stays lossless, but the frontend has neither combat nor collision state to apply
+		// them to. Ethereal is presentation-safe because the host executes it on the shared cursor.
 		case "attack":
 			return unimplemented(hook, expectedName, {
 				height: payload.height,

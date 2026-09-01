@@ -168,7 +168,7 @@ function entity(input: {
 				reachesOutdoors: input.reachesOutdoors,
 			},
 		},
-		playingClip: null,
+		motion: null,
 		presentation: {
 			appearance: {
 				paletteDid: null,

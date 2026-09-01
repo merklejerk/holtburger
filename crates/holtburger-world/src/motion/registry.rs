@@ -110,6 +110,34 @@ pub struct PlayingMotionClip {
     pub completion: MotionClipCompletion,
 }
 
+/// One authored animation held at an exact host-owned frame.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SettledMotionPose {
+    /// Animation whose pose should be sampled.
+    pub animation_id: u32,
+    /// Integral frame at which the authoritative cursor is resting.
+    pub frame: i32,
+}
+
+/// Current presentation level derived from the authoritative motion cursor.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MotionPresentation {
+    /// An advancing clip whose phase remains presentation-owned.
+    Playing(PlayingMotionClip),
+    /// A stationary pose whose exact frame must survive late realization.
+    Settled(SettledMotionPose),
+}
+
+impl MotionPresentation {
+    /// Animation shared by either the moving or settled presentation state.
+    pub const fn animation_id(self) -> u32 {
+        match self {
+            Self::Playing(clip) => clip.animation_id,
+            Self::Settled(pose) => pose.animation_id,
+        }
+    }
+}
+
 impl PlayingMotionClip {
     fn of(current: CurrentSequenceClip<'_>) -> Self {
         Self {
@@ -147,6 +175,19 @@ impl BodyMotionRuntime {
     /// rather than one whose animation is unknown.
     pub fn playing_clip(&self) -> Option<PlayingMotionClip> {
         self.sequence.current_clip().map(PlayingMotionClip::of)
+    }
+
+    /// Current lossless presentation level without projecting a hot cursor for moving clips.
+    pub fn motion_presentation(&self) -> Option<MotionPresentation> {
+        let current = self.sequence.current_clip()?;
+        if current.node.is_advancing() {
+            Some(MotionPresentation::Playing(PlayingMotionClip::of(current)))
+        } else {
+            Some(MotionPresentation::Settled(SettledMotionPose {
+                animation_id: current.node.animation().id,
+                frame: self.sequence.current_frame(),
+            }))
+        }
     }
 
     pub fn state(&self) -> &MotionState {
@@ -275,6 +316,13 @@ impl MotionRuntimeRegistry {
         self.bodies
             .get(&guid)
             .and_then(BodyMotionRuntime::playing_clip)
+    }
+
+    /// Current presentation level for one body, including an exact frame when it is stationary.
+    pub fn motion_presentation(&self, guid: Guid) -> Option<MotionPresentation> {
+        self.bodies
+            .get(&guid)
+            .and_then(BodyMotionRuntime::motion_presentation)
     }
 
     /// Current semantic playback state for diagnostics owned by the producer registry.

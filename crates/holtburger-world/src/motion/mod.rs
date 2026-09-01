@@ -36,7 +36,8 @@ pub use directed::{
     resolve_server_directed_motion,
 };
 pub use registry::{
-    BodyMotionRuntime, MotionActionEnqueueOutcome, MotionRuntimeRegistry, PlayingMotionClip,
+    BodyMotionRuntime, MotionActionEnqueueOutcome, MotionPresentation, MotionRuntimeRegistry,
+    PlayingMotionClip, SettledMotionPose,
 };
 pub use selection::{
     ActionSelectionOutcome, MotionSelectionOutcome, select_action, select_motion,

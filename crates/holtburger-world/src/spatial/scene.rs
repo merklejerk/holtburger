@@ -7,7 +7,8 @@ use super::collision_report::{
 };
 use super::dynamic_contact::{
     DynamicContactEpoch, DynamicContactResolution, DynamicEpochParticipant, DynamicResponseContact,
-    PreparedDynamicTrajectory, resolve_dynamic_contacts, resolve_dynamic_contacts_for_mover,
+    PreparedDynamicTrajectory, current_dynamic_peer_overlap, resolve_dynamic_contacts,
+    resolve_dynamic_contacts_for_mover,
 };
 use super::dynamic_index::{DynamicShadowIndex, EntityCollisionProof, EntityCollisionSnapshot};
 #[cfg(test)]
@@ -29,8 +30,8 @@ use super::{
         physical_body_scene_residency, resolve_physical_body_placement, solve_physical_body_tick,
     },
 };
-use crate::LocalIntegrationDemand;
 use crate::entity::EntityMotionSnapshot;
+use crate::{EffectiveEntityPhysicsState, LocalIntegrationDemand};
 use anyhow::Context;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion, Vector3};
@@ -468,6 +469,15 @@ impl SpatialScene {
 
     pub fn iter_runtime_body_views(&self) -> impl Iterator<Item = RuntimeSpatialBodyView> + '_ {
         self.body_store.iter_runtime_body_views()
+    }
+
+    /// Whether one dynamic object's current target geometry overlaps an eligible dynamic peer.
+    pub fn dynamic_body_overlaps_peer(&self, body_id: SpatialBodyId) -> anyhow::Result<bool> {
+        let object = self
+            .body_store
+            .body(body_id)
+            .context("solidifying body is not registered")?;
+        current_dynamic_peer_overlap(object, self.body_store.bodies.values())
     }
 
     pub fn body(&self, body_id: SpatialBodyId) -> Option<&SpatialBody> {
@@ -1020,6 +1030,21 @@ impl SpatialScene {
             response_memory_preserved,
             collision_reports,
         })
+    }
+
+    /// Rebuilds state-derived policy while retaining a dynamic body's geometry and producer demand.
+    pub fn reconfigure_dynamic_body_for_state(
+        &mut self,
+        body_id: SpatialBodyId,
+        state: EffectiveEntityPhysicsState,
+    ) -> Option<PhysicalBodyReconfigurationOutcome> {
+        let body = self.body_store.body(body_id)?;
+        let physical = body.physical.as_ref()?;
+        let dynamic = physical.dynamic.as_ref()?;
+        let replacement = physical.dynamic_configuration_for_state(state, dynamic.demand)?;
+        let collision_filter = physical.collision_filter;
+        let initial_cell = body.pose.is_indoors().then_some(body.pose.landblock_id);
+        self.set_dynamic_physical_body(body_id, Some(replacement), collision_filter, initial_cell)
     }
 
     /// Replaces live local kinematics and clears incompatible response memory in one scene write.
@@ -2625,6 +2650,51 @@ mod physical_body_tests {
             .as_ref()
             .unwrap()
             .activity
+    }
+
+    #[test]
+    fn ethereal_solidification_queries_only_current_dynamic_peer_overlap() {
+        let now = Instant::now();
+        let object = SpatialBodyId::Entity(Guid(0x7000_1001));
+        let peer = SpatialBodyId::LocalPlayer(Guid(0x5000_1002));
+        let mut scene = SpatialScene::new();
+        install_free_dynamic(
+            &mut scene,
+            object,
+            Vector3::zero(),
+            Vector3::zero(),
+            fallback_target(Arc::new(CollisionShape::Ball(CollisionBall {
+                center: Vector3::zero(),
+                radius: 0.5,
+            }))),
+            now,
+        );
+        install_free_dynamic(
+            &mut scene,
+            peer,
+            Vector3::new(0.75, 0.0, 0.0),
+            Vector3::zero(),
+            fallback_target(Arc::new(CollisionShape::Ball(CollisionBall {
+                center: Vector3::zero(),
+                radius: 0.5,
+            }))),
+            now,
+        );
+        scene
+            .reconfigure_dynamic_body_for_state(
+                object,
+                crate::resolve_effective_entity_physics_state(PhysicsState::ETHEREAL),
+            )
+            .unwrap();
+
+        assert!(scene.dynamic_body_overlaps_peer(object).unwrap());
+
+        assert!(scene.apply_runtime_body_pose(
+            peer,
+            pose(Vector3::new(2.0, 0.0, 0.0)),
+            SpatialSampleMode::AuthoritativeOnly,
+        ));
+        assert!(!scene.dynamic_body_overlaps_peer(object).unwrap());
     }
 
     #[test]

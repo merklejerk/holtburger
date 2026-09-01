@@ -3905,7 +3905,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 						wcid: entity.identity.wcid,
 						coords: entity.placement.pose.coords,
 						contact: entity.placement.contact,
-						playingClip: entity.playingClip,
+						motion: entity.motion,
 						semanticMask: entity.physics.semanticMask,
 					})),
 				contactState: summarizeEntityRuntimeState(contactState),

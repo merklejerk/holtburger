@@ -281,6 +281,71 @@ pub(crate) fn resolve_dynamic_contacts_for_mover(
     })
 }
 
+/// Tests retail's directionless ethereal-to-solid transaction against current dynamic peers.
+///
+/// Retail calls `check_collision(peer, object)` for each other unparented object in the object's
+/// shadow cells (`acclient.c:307351-307389,333172-333187`). The peer therefore supplies movement
+/// spheres and `object` supplies target geometry; no static scene query or sweep participates.
+pub(crate) fn current_dynamic_peer_overlap<'a>(
+    object: &SpatialBody,
+    peers: impl IntoIterator<Item = &'a SpatialBody>,
+) -> Result<bool> {
+    let object_dynamic = object
+        .physical
+        .as_ref()
+        .and_then(|physical| physical.dynamic.as_ref())
+        .context("solidifying object has no dynamic physical state")?;
+    let anchor = Guid((object.pose.landblock_id.0 & 0xffff_0000) | 0xffff);
+    let object_shapes = placed_target_shapes(object, object.pose, anchor)?;
+    if object_shapes.is_empty() {
+        return Ok(false);
+    }
+
+    for peer in peers {
+        if peer.id == object.id {
+            continue;
+        }
+        let Some(peer_physical) = peer.physical.as_ref() else {
+            continue;
+        };
+        let Some(peer_dynamic) = peer_physical.dynamic.as_ref() else {
+            continue;
+        };
+        if peer_dynamic.activity == super::DynamicBodyActivity::Suspended
+            || !dynamic_memberships_intersect(&object_dynamic.placement, &peer_dynamic.placement)
+            || !peer_dynamic
+                .collision
+                .dynamic_collision
+                .mover_accepts_response
+            || pair_is_filtered(peer_dynamic, object_dynamic)
+        {
+            continue;
+        }
+        let peer_pose = peer
+            .pose
+            .reanchor_to_landblock_owner(anchor)
+            .context("could not reanchor solidification peer")?;
+        for sphere in peer_physical.definition.spheres().iter() {
+            let center = peer_pose.coords + peer_pose.rotation.rotate_vector(sphere.center);
+            if object_shapes.iter().any(|shape| {
+                shape.bounds.intersects_sphere(center, sphere.radius)
+                    && !shape_contacts(shape, center, sphere.radius).is_empty()
+            }) {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+fn dynamic_memberships_intersect(left: &SpatialMembership, right: &SpatialMembership) -> bool {
+    (left.reaches_outdoors() && right.reaches_outdoors())
+        || left
+            .reached_env_cells()
+            .iter()
+            .any(|cell| right.reached_env_cells().iter().any(|peer| peer == cell))
+}
+
 #[derive(Debug, Clone, Copy)]
 struct SampledReportTouch {
     fraction: f32,

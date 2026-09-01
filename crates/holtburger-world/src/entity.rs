@@ -1,7 +1,7 @@
 use crate::attachment::PhysicsAttachment;
 use crate::book::BookData;
 use crate::entity_appearance::EntityAppearance;
-use crate::entity_physics::{EffectiveEntityPhysicsState, resolve_effective_entity_physics_state};
+use crate::entity_physics::{EntityPhysicsRuntimeState, resolve_effective_entity_physics_state};
 use crate::hydration::WorldObjectPropertiesHydrationExt;
 use crate::identify::{self, IdentifyTarget};
 use crate::motion::MotionCommand;
@@ -1116,8 +1116,8 @@ pub struct Entity {
     pub flags: ObjectDescriptionFlag,
     pub weenie_flags: WeenieHeaderFlag,
     pub weenie_flags2: WeenieHeaderFlag2,
-    /// Complete semantic physics state and its once-derived runtime decisions.
-    pub physics: EffectiveEntityPhysicsState,
+    /// Server-owned state and temporary authored collision prediction as one invariant.
+    pub physics: EntityPhysicsRuntimeState,
     /// Lossless ordered visual substitutions normalized from the producer's source format.
     pub appearance: EntityAppearance,
     /// Set while another object owns this entity's position. See [`PhysicsAttachment`].
@@ -1506,7 +1506,8 @@ impl Entity {
             data.public_weenie_desc.item_type as i32,
         );
 
-        self.physics = resolve_effective_entity_physics_state(data.physics_state);
+        self.physics
+            .reconcile(resolve_effective_entity_physics_state(data.physics_state));
         self.appearance = EntityAppearance::from(&data.model_data);
         // The wire carries placement in the ANIMFRAME slot, defaulting to 0 when the flag is
         // absent, exactly as `PhysicsDesc` initializes `animframe_id` (`acclient.c:318475`).
@@ -1580,7 +1581,9 @@ impl Entity {
             weenie_flags: WeenieHeaderFlag::empty(),
             weenie_flags2: WeenieHeaderFlag2::empty(),
 
-            physics: resolve_effective_entity_physics_state(PhysicsState::NONE),
+            physics: EntityPhysicsRuntimeState::reconciled(resolve_effective_entity_physics_state(
+                PhysicsState::NONE,
+            )),
             appearance: EntityAppearance::default(),
             attachment: None,
             autonomous_movement: false,

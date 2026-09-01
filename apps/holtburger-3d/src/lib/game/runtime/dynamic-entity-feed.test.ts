@@ -16,7 +16,7 @@ function entity(
 ): DynamicEntityView & { placement: DynamicEntityWorldPlacement } {
 	return {
 		generation,
-		playingClip: null,
+		motion: null,
 		identity: { guid, wcid: 42 },
 		display: { name: "Drudge", level: null },
 		presentation: {
@@ -139,6 +139,23 @@ function worldPlacement(value: DynamicEntityView): DynamicEntityWorldPlacement {
 }
 
 describe("dynamic-entity view contract", () => {
+	it("preserves an exact settled motion pose", () => {
+		const decoded = decodeDynamicEntityView({
+			...entity(1, 1),
+			motion: {
+				kind: "settled",
+				animationId: 0x03000559,
+				frame: 31,
+			},
+		});
+
+		expect(decoded.motion).toEqual({
+			kind: "settled",
+			animationId: 0x03000559,
+			frame: 31,
+		});
+	});
+
 	it("requires and preserves the producer-resolved presentation class", () => {
 		const view = entity(1, 1);
 		expect(decodeDynamicEntityView(view).presentation.entityClass).toBe(
@@ -236,7 +253,7 @@ describe("dynamic-entity view contract", () => {
 		const view = entity(1, 1);
 		const decoded = decodeDynamicEntityView({
 			...view,
-			motion: { forwardCommand: 3 },
+			undeclaredField: { forwardCommand: 3 },
 			presentation: {
 				...view.presentation,
 				content: { ...view.presentation.content, motionTableDid: 0x09000001 },
@@ -246,9 +263,9 @@ describe("dynamic-entity view contract", () => {
 			"display",
 			"generation",
 			"identity",
+			"motion",
 			"physics",
 			"placement",
-			"playingClip",
 			"presentation",
 		]);
 		expect(decoded.presentation.content.motionTableDid).toBe(0x09000001);

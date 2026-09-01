@@ -200,10 +200,15 @@ import {
 	type DynamicEntityRealizationResults,
 } from "./dynamic-entity-presentation";
 import type {
+	DynamicEntityMotion,
 	DynamicEntityTickBatch,
-	DynamicEntityPlayingClip,
 	DynamicEntityView,
 } from "./dynamic-entity-feed";
+import {
+	classifyDynamicEntityMotionUpdate,
+	playingClipForDynamicEntityMotion,
+	type DynamicEntityMotionState,
+} from "./dynamic-entity-motion";
 import {
 	advancePlayingFrame,
 	clipEntryFrame,
@@ -378,12 +383,13 @@ interface DynamicEntityPresentationRecord {
 	/** Mutable visibility/lighting level already applied to the dynamic system. */
 	presentationStateIdentity: string;
 	/**
-	 * Clip level this presentation last applied, so a restated level is not re-entered.
+	 * Motion level this presentation last accepted, so a restated level is not re-entered.
 	 *
 	 * Mutable because it tracks what this record is doing, not what it is. Every other field
 	 * identifies the record and is fixed for its lifetime.
 	 */
-	playingClip: DynamicEntityPlayingClip | null;
+	/** Accepted host motion level and whether it successfully reached frontend playback. */
+	motionState: DynamicEntityMotionState | null;
 }
 
 /** One unavailable prerequisite that can make a desired entity realizable later. */
@@ -403,21 +409,6 @@ interface DesiredDynamicEntityRecord {
 	deferral: DynamicEntityDeferral | null;
 	/** Exact asynchronous realization owned by this desired record. */
 	realization: Promise<void> | null;
-}
-
-/** Whether two clip levels name the same playback, so restating one changes nothing. */
-function samePlayingClip(
-	current: DynamicEntityPlayingClip | null,
-	next: DynamicEntityPlayingClip,
-): boolean {
-	return (
-		current !== null &&
-		current.animationId === next.animationId &&
-		current.framerate === next.framerate &&
-		current.lowFrame === next.lowFrame &&
-		current.highFrame === next.highFrame &&
-		current.completion === next.completion
-	);
 }
 
 interface CachedDynamicVisual {
@@ -1939,14 +1930,12 @@ export class GamePresentationRuntime {
 	}
 
 	/**
-	 * Swap one entity's rendered clip to the level its latest view states.
+	 * Apply one entity's current motion-derived presentation level.
 	 *
-	 * Idempotent, because a view restates the current level on every tick and re-entering a clip
-	 * would restart it. That is what lets an entity realized late start playing correctly: the
-	 * level is applied at install from whatever view is current, with no transition to have
-	 * witnessed. The entity's whole motion closure was staged before it activated, so this resolves
-	 * from memory and loads nothing. An unplayable clip was already complained about at preparation
-	 * and simply leaves the current pose in place.
+	 * An advancing clip owns its frontend phase. A matching settled successor therefore confirms
+	 * the terminal frame without reinstalling playback: the local clip finishes and holds naturally,
+	 * avoiding a network-jitter pop. A settled initial level or contradictory correction installs a
+	 * one-frame clip so late realization still reconstructs the authoritative pose exactly.
 	 *
 	 * A `null` level names an entity with no playback at all, and there is no stop: the host drops
 	 * an entity's playback only along with the entity, so nothing that has played can reach one.
@@ -1954,32 +1943,39 @@ export class GamePresentationRuntime {
 	 * The level is recorded before the clip resolves, so an unplayable one is refused once rather
 	 * than re-attempted on every view that restates it.
 	 */
-	#applyDynamicEntityClip(
+	#applyDynamicEntityMotion(
 		installed: DynamicEntityPresentationRecord,
-		clip: DynamicEntityPlayingClip | null,
+		motion: DynamicEntityMotion | null,
 	): void {
-		if (clip === null || samePlayingClip(installed.playingClip, clip)) return;
-		installed.playingClip = clip;
+		if (motion === null) return;
+		const update = classifyDynamicEntityMotionUpdate(
+			installed.motionState,
+			motion,
+		);
+		if (update === "unchanged") return;
+		if (update === "confirm") {
+			installed.motionState = { level: motion, playback: "installed" };
+			return;
+		}
 		const animation = this.#dynamics.getMotionClip(
 			installed.nodeId,
-			datAssetId(clip.animationId),
+			datAssetId(motion.animationId),
 		);
-		if (animation === null) return;
+		if (animation === null) {
+			installed.motionState = { level: motion, playback: "unplayable" };
+			return;
+		}
+		const clip = playingClipForDynamicEntityMotion(animation, motion);
 		this.#animation.playClip(
 			installed.ownerId,
 			{
 				generation: installed.behaviorGeneration,
 				targetId: behaviorTargetId(installed.nodeId),
 			},
-			playingClip(
-				animation,
-				clip.lowFrame,
-				clip.highFrame,
-				clip.framerate,
-				clip.completion,
-			),
+			clip,
 			this.#dynamics.getPartToObjectTransforms(installed.nodeId),
 		);
+		installed.motionState = { level: motion, playback: "installed" };
 	}
 
 	async #realizeDynamicEntity(
@@ -2025,7 +2021,7 @@ export class GamePresentationRuntime {
 			nodeId,
 			ownerId,
 			placementIdentity: record.placementIdentity,
-			playingClip: null,
+			motionState: null,
 			presentationStateIdentity: "",
 			visualKey: record.visualKey,
 		};
@@ -2111,7 +2107,7 @@ export class GamePresentationRuntime {
 			installed.presentationStateIdentity = identity;
 		}
 		this.#dynamics.updateNameplateContent(installed.nodeId, entity.display);
-		this.#applyDynamicEntityClip(installed, entity.playingClip);
+		this.#applyDynamicEntityMotion(installed, entity.motion);
 	}
 
 	#retainSpawnedVisual(

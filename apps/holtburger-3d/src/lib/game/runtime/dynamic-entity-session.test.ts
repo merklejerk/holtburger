@@ -146,6 +146,6 @@ function view(guid: number): DynamicEntityView {
 			parentLocation: "none",
 			placement: "default",
 		},
-		playingClip: null,
+		motion: null,
 	};
 }

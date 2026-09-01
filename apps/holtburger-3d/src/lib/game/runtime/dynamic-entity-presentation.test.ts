@@ -172,7 +172,7 @@ function fixtureVisual(): DecodedStaticPresentation {
 function fixtureEntity(): DynamicEntityView {
 	return {
 		generation: 3,
-		playingClip: null,
+		motion: null,
 		identity: { guid: 7, wcid: 42 },
 		display: { name: "Fixture", level: null },
 		physics: {

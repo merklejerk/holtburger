@@ -146,6 +146,30 @@ completion signal, or may be a valid safety backstop distinct from ordinary comp
 **Possible responses:** Represent ownership and terminal outcomes explicitly and propagate the
 actual completion, cancellation, or supersession event.
 
+## Partial Readiness Is Mistaken for Quiescence
+
+**Smell:** A test or runtime decision observes one requested result and assumes that all related
+concurrent work has finished.
+
+**Signals:**
+
+- A wait condition names one item while later assertions inspect aggregate counters or collections.
+- Several jobs start together, but the code captures a supposedly stable baseline after awaiting
+  only one of them.
+- Timing changes alter counts or ordering without changing any individual result.
+
+**Possible failure:** Legitimate late completions look like duplicate work, flaky tests pass in
+isolation but fail in a suite, or downstream logic acts on an incomplete batch.
+
+**Questions:** Which operations were started before the readiness check? Does the later assertion
+concern only the awaited item or the whole group? What event proves the relevant scope is quiescent?
+
+**Counterexamples:** One result can be sufficient when pending siblings cannot affect the observed
+state or the contract explicitly permits a partial snapshot.
+
+**Possible responses:** Await every operation whose result contributes to the assertion, expose a
+batch-completion signal, or scope observations and counters to the specific item being tested.
+
 ## Narrowing Relies on Today's Data
 
 **Smell:** A value is narrowed, rounded, truncated, or reinterpreted because current producers

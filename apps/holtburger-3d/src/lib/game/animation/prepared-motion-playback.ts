@@ -59,7 +59,9 @@ function complain(
  * entity that animates from the rest of its table is more useful than one that refuses to spawn.
  * Skipped clips are absent from `clips`, so a projection naming one holds the current pose.
  *
- * The archive census says no table-reachable clip carries a blocking hook or `SetOmega`.
+ * Host-owned simulation hooks are presentation-safe even though the behavior dispatcher does not
+ * execute them. The archive census still says no table-reachable clip carries a genuinely visual
+ * blocking hook or `SetOmega`.
  * Clips that author fewer parts than the appearance remain playable: retail overlays their
  * authored prefix and retains the remaining setup-part transforms.
  */

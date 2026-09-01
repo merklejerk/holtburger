@@ -67,6 +67,11 @@ impl SequenceNode {
         self.high_frame
     }
 
+    /// Whether retail advances this node's cursor rather than holding its current frame.
+    pub(super) fn is_advancing(&self) -> bool {
+        self.framerate.abs() >= FRAMERATE_EPSILON
+    }
+
     /// Frame the cursor enters this clip at, given its rate's direction.
     ///
     /// The reverse case starts just inside the high frame rather than on it, so the first departure

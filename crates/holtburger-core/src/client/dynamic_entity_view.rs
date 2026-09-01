@@ -102,7 +102,7 @@ pub fn project_client_dynamic_entity(
         },
         appearance: entity.appearance.clone(),
         object_scale,
-        physics: entity.physics,
+        physics: entity.physics.effective(),
         radar: crate::DynamicEntityRadarFacts::from_authored(
             format_args!("client entity 0x{:08X}", guid.0),
             entity.radar_blip_color().map(|value| value as i32),
@@ -111,7 +111,7 @@ pub fn project_client_dynamic_entity(
             entity.get_float_prop(PropertyFloat::ObviousRadarRange),
         ),
         placement,
-        playing_clip: world.motion_runtimes.playing_clip(guid),
+        motion: world.motion_runtimes.motion_presentation(guid),
     }))
 }
 
@@ -317,7 +317,11 @@ mod tests {
             ..WorldPosition::default()
         };
         let mut entity = projectable_entity(guid, pose);
-        entity.physics = resolve_effective_entity_physics_state(PhysicsState::GRAVITY);
+        entity
+            .physics
+            .reconcile(resolve_effective_entity_physics_state(
+                PhysicsState::GRAVITY,
+            ));
         world.add_entity(entity);
         Box::new(project_client_dynamic_entity(&world, guid).unwrap())
     }
@@ -510,7 +514,7 @@ mod tests {
         );
         let appearance = EntityAppearance::default();
         let mut entity = projectable_entity(guid, pose);
-        entity.physics = physics;
+        entity.physics.reconcile(physics);
         entity.appearance = appearance.clone();
         entity
             .properties
@@ -567,7 +571,7 @@ mod tests {
                     participation: PhysicalBodyParticipation::PoseOnly,
                 }),
             },
-            world.motion_runtimes.playing_clip(guid),
+            world.motion_runtimes.motion_presentation(guid),
         ));
 
         assert_eq!(client, explorer);

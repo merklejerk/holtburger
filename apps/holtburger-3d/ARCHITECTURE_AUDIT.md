@@ -1,6 +1,6 @@
 # Architectural Snapshot: holtburger-3d
 
-_Last updated: 2026-08-26_
+_Last updated: 2026-09-01_
 
 ## Tech Lead North Stars
 
@@ -184,8 +184,11 @@ each frame, matching `animate_static_object`.
 
 `ParticleSystem` schedules and reaps but never integrates: particle motion is closed form in elapsed
 time, so a live particle is spawn constants plus a birth time, and a dedicated vertex stage evaluates
-its trajectory on the GPU. Emitters cull at emitter granularity against a preparation-time envelope
-and cost nothing per frame while hidden — the suspended interval is reconciled once on return.
+its trajectory on the GPU. Spawn records retain record-owned origins for leave-behind motion, while
+following emitters resolve one current range origin which the vertex stage selects for every record
+in that range. Parent motion therefore does not rewrite or upload the emitter's live records.
+Emitters cull at emitter granularity against a preparation-time envelope and perform no
+particle-level work while hidden — the suspended interval is reconciled once on return.
 `AudioSystem` plays one-shot voices whose spatial parameters are computed once at trigger time and
 never updated; voices deliberately outlive their emitting owner, matching retail's fire-and-forget
 copies.
@@ -347,6 +350,15 @@ Outdoor/indoor transitions render directly into one renderer-owned full-size col
 depth-stencil target. Exterior color and depth render once per view. The same contribution path
 handles opaque, alpha-tested, transparent, and additive content. The target is lazy, extent-keyed,
 retained across a switch back to flat mode, and disposed on resize or renderer destruction.
+
+SAO remains an external consumer of the complete flat target or selected portal-atlas tiles. It
+evaluates the configured deterministic kernel into two resolution-scaled R8 scratch targets,
+filters within exact scaled tile bounds, and composites only those fully written regions; no scratch
+clear or secondary portal-tile cutoff is required. Particle and object passes share one
+phase-invalidated device-state applicator for redundant program, texture, sampler, vertex-array,
+blend, cull, and uniform state. The applicator is renderer-local state ownership, not a global
+observer of WebGL mutations; passes continue to bind their own framebuffer, buffer, viewport,
+depth, stencil, and mask state explicitly.
 
 ## 8. Boundary Audit
 

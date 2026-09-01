@@ -12,6 +12,7 @@ import { objectBlendPolicy } from "./object-rendering-policy";
 import { TextureWrapMode } from "../textures/types";
 import type { TextureFilteringPolicy } from "./texture-filtering-policy";
 import type { WebGL2TextureSamplerCatalog } from "./webgl2-texture-sampler-catalog";
+import type { WebGL2DeviceStateApplicator } from "./webgl2-device-state-applicator";
 
 /** One batch's drawable mesh, already resident on the GPU. */
 /** Neutral colour for a textured mesh, which never reads the solid-colour uniform. */
@@ -50,6 +51,8 @@ export interface ParticleDrawContext {
 	readonly anchorOrigin: readonly [number, number, number];
 	readonly clockSeconds: number;
 	readonly samplers: WebGL2TextureSamplerCatalog;
+	/** Renderer-owned device-state mirror shared with object submission. */
+	readonly state: WebGL2DeviceStateApplicator;
 	readonly textureFiltering: TextureFilteringPolicy;
 	/** Global opacity scale applied to all particles in this context, in [0, 1]. Defaults to 1. */
 	readonly opacityScale?: number;
@@ -202,19 +205,26 @@ export class WebGL2ParticlePass {
 			);
 		}
 
-		gl.useProgram(program.program);
-		gl.activeTexture(gl.TEXTURE0 + PARTICLE_TEXTURE_UNITS.records);
-		gl.bindTexture(gl.TEXTURE_2D, records.texture);
+		// Record synchronization mutates texture state directly. Begin the particle-owned phase only
+		// after it completes, then let the renderer's one device-state mirror own every draw bind.
+		const state = context.state;
+		state.invalidate();
+		state.applyProgram(program.program);
 		// The record texture is RGBA32F and read with texelFetch, so it requires exact sampling.
 		// Own the sampler explicitly: outdoor object passes also use this texture unit and may leave
 		// a sampler requiring unsupported float filtering or absent mip levels behind, which makes
 		// the particle vertex texture incomplete.
-		context.samplers.bind(PARTICLE_TEXTURE_UNITS.records, {
+		const recordSampler = context.samplers.getSampler({
 			mipLevels: 1,
 			policy: context.textureFiltering,
 			samplingClass: "exact",
 			wrap: TextureWrapMode.Clamp,
 		});
+		state.applyTexture2D(
+			PARTICLE_TEXTURE_UNITS.records,
+			records.texture,
+			recordSampler,
+		);
 		gl.uniformMatrix4fv(program.uniforms.projection, false, context.projection);
 		gl.uniformMatrix4fv(program.uniforms.view, false, context.view);
 		gl.uniform1f(program.uniforms.clockSeconds, context.clockSeconds);
@@ -236,11 +246,9 @@ export class WebGL2ParticlePass {
 		// occluding it, which is what retail's transparent staging produces for them.
 		gl.enable(gl.DEPTH_TEST);
 		gl.depthMask(false);
-		gl.enable(gl.BLEND);
-		// Blend mode is selected per batch below. Enabling BLEND without a func inherits whatever
-		// the previous pass left bound, which renders particles opaque over their own backing.
-		// Unit 1 is always exact single-level clamp sampling for palette lookups across all batches.
-		context.samplers.bind(PARTICLE_TEXTURE_UNITS.palette, {
+		// Blend enablement and policy are selected per batch through the shared device-state owner.
+		// Unit 1 always uses exact single-level clamp sampling for palette lookups.
+		const paletteSampler = context.samplers.getSampler({
 			mipLevels: 1,
 			policy: context.textureFiltering,
 			samplingClass: "exact",
@@ -267,19 +275,8 @@ export class WebGL2ParticlePass {
 			// Retail's own flag-to-blend mapping, shared with the object and sky paths: additive
 			// surfaces keep their destination so a particle's black backing adds nothing.
 			const blend = objectBlendPolicy(geometry.rawSurfaceFlags);
-			gl.blendFunc(
-				blend.source === "one"
-					? gl.ONE
-					: blend.source === "one-minus-src-alpha"
-						? gl.ONE_MINUS_SRC_ALPHA
-						: gl.SRC_ALPHA,
-				blend.destination === "one"
-					? gl.ONE
-					: blend.destination === "src-alpha"
-						? gl.SRC_ALPHA
-						: gl.ONE_MINUS_SRC_ALPHA,
-			);
-			gl.bindVertexArray(geometry.vertexArray);
+			state.applyBlend(blend);
+			state.applyVertexArray(geometry.vertexArray);
 			// One uniform selects this range's records, where binding six attribute pointers to the
 			// same range would cost about twenty GL calls.
 			gl.uniform1i(program.uniforms.instanceBase, batch.baseSlot);
@@ -300,40 +297,64 @@ export class WebGL2ParticlePass {
 			}
 
 			// Motion type and orientation are per-batch constants, never per-instance attributes.
-			gl.uniform1i(program.uniforms.motionType, batch.motionType);
-			gl.uniform1i(program.uniforms.orientation, geometry.orientation);
-			gl.uniform3f(
+			state.applyUniform1i(program.uniforms.motionType, batch.motionType);
+			state.applyUniform1i(
+				program.uniforms.usesRangeOrigin,
+				batch.origin.kind === "range" ? 1 : 0,
+			);
+			if (batch.origin.kind === "range") {
+				state.applyUniform3f(
+					program.uniforms.rangeLandblockOrigin,
+					batch.origin.landblockOrigin[0],
+					batch.origin.landblockOrigin[1],
+					batch.origin.landblockOrigin[2],
+				);
+				state.applyUniform3f(
+					program.uniforms.rangeLocalOrigin,
+					batch.origin.localOrigin[0],
+					batch.origin.localOrigin[1],
+					batch.origin.localOrigin[2],
+				);
+			}
+			state.applyUniform1i(program.uniforms.orientation, geometry.orientation);
+			state.applyUniform3f(
 				program.uniforms.lockedAxis,
 				geometry.lockedAxis[0],
 				geometry.lockedAxis[1],
 				geometry.lockedAxis[2],
 			);
-			gl.uniform1i(program.uniforms.materialKind, geometry.materialKind);
+			state.applyUniform1i(
+				program.uniforms.materialKind,
+				geometry.materialKind,
+			);
 			// Only the solid-colour kind reads this, but it is written unconditionally: a stale
 			// colour left by a previous batch would otherwise tint the next untextured draw.
 			const color = geometry.materialColor ?? OPAQUE_WHITE;
-			gl.uniform4f(program.uniforms.materialColor, ...color);
-			gl.uniform1i(
+			state.applyUniform4f(program.uniforms.materialColor, ...color);
+			state.applyUniform1i(
 				program.uniforms.palettedClipMap,
 				geometry.palettedClipMap ? 1 : 0,
 			);
-			gl.uniform1f(program.uniforms.alphaTest, geometry.alphaTest);
-			gl.activeTexture(gl.TEXTURE0);
-			gl.bindTexture(gl.TEXTURE_2D, geometry.baseTexture);
-			context.samplers.bind(PARTICLE_TEXTURE_UNITS.base, {
+			state.applyUniform1f(program.uniforms.alphaTest, geometry.alphaTest);
+			const baseSampler = context.samplers.getSampler({
 				mipLevels: geometry.baseMipLevels,
 				policy: context.textureFiltering,
 				samplingClass: "filterable",
 				wrap: geometry.wrap,
 			});
+			state.applyTexture2D(
+				PARTICLE_TEXTURE_UNITS.base,
+				geometry.baseTexture,
+				baseSampler,
+			);
 			// Unit 1 is bound unconditionally, falling back to the base texture for an unpaletted
 			// mesh. WebGL validates every *active* sampler against its bound texture at draw time,
 			// even when the shader branches away from it, so leaving unit 1 to whatever a previous
 			// pass left there fails the draw with a format/sampler mismatch.
-			gl.activeTexture(gl.TEXTURE1);
-			gl.bindTexture(
-				gl.TEXTURE_2D,
+			state.applyTexture2D(
+				PARTICLE_TEXTURE_UNITS.palette,
 				geometry.paletteTexture ?? geometry.baseTexture,
+				paletteSampler,
 			);
 			gl.drawElementsInstanced(
 				gl.TRIANGLES,
@@ -354,7 +375,10 @@ export class WebGL2ParticlePass {
 
 		gl.bindVertexArray(null);
 		gl.depthMask(true);
-		gl.disable(gl.BLEND);
+		state.applyBlend(null);
+		// The explicit null VAO bind is outside the applicator contract; forget the phase before any
+		// later owner begins so no cached binding can survive it.
+		state.invalidate();
 		this.#diagnostics = {
 			drawnBatchCount,
 			uploadedRecordRowCount: records.uploadedRowCount,

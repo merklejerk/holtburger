@@ -5,7 +5,7 @@ import type {
 	PreparedObjectTextureBinding,
 } from "./object-rendering-policy";
 
-const UNKNOWN_STATE = Symbol("unknown-object-device-state");
+const UNKNOWN_STATE = Symbol("unknown-device-state");
 type UnknownState = typeof UNKNOWN_STATE;
 
 /** Components in the mat4 uniforms this applicator compares. */
@@ -15,12 +15,12 @@ const MAT4_COMPONENTS = 16;
 const UNIFORM_SCRATCH_COMPONENTS = 4;
 
 /**
- * Applies only WebGL state owned by one object phase.
+ * Applies WebGL state owned by one explicitly bounded renderer phase.
  *
  * Terrain and portal execution are independent state owners, so callers must invalidate before
  * entering each object phase instead of assuming this cache observed their mutations.
  */
-export class WebGL2ObjectStateApplicator {
+export class WebGL2DeviceStateApplicator {
 	readonly #gl: WebGL2RenderingContext;
 	#activeTextureUnit: number | UnknownState = UNKNOWN_STATE;
 	#blendEnabled: boolean | UnknownState = UNKNOWN_STATE;
@@ -29,10 +29,9 @@ export class WebGL2ObjectStateApplicator {
 	#lightingRole: SceneLightingRole | UnknownState = UNKNOWN_STATE;
 	#staticLightScope: LandblockOwnerId | null | UnknownState = UNKNOWN_STATE;
 	#program: WebGLProgram | UnknownState = UNKNOWN_STATE;
-	readonly #textureUnits = new Map<
-		number,
-		PreparedObjectTextureBinding<WebGLTexture, WebGLSampler>
-	>();
+	readonly #texture2DUnits = new Map<number, WebGLTexture>();
+	/** Samplers are physical per unit and therefore shared by the 2D and array binding paths. */
+	readonly #samplerUnits = new Map<number, WebGLSampler | null>();
 	/** Array textures are independent bindings but share the context's active-unit selector. */
 	readonly #textureArrayUnits = new Map<number, WebGLTexture>();
 	#vertexArray: WebGLVertexArrayObject | UnknownState = UNKNOWN_STATE;
@@ -52,7 +51,12 @@ export class WebGL2ObjectStateApplicator {
 		this.#gl = gl;
 	}
 
-	/** Forget every applied value after another state owner may have touched the context. */
+	/**
+	 * Forget shared device bindings after another owner may have touched the context.
+	 *
+	 * Uniform values remain cached because WebGL stores them on their program and every cached
+	 * location has one writer; callers must not route a second writer around this applicator.
+	 */
 	invalidate(): void {
 		this.#activeTextureUnit = UNKNOWN_STATE;
 		this.#blendEnabled = UNKNOWN_STATE;
@@ -61,7 +65,8 @@ export class WebGL2ObjectStateApplicator {
 		this.#lightingRole = UNKNOWN_STATE;
 		this.#staticLightScope = UNKNOWN_STATE;
 		this.#program = UNKNOWN_STATE;
-		this.#textureUnits.clear();
+		this.#texture2DUnits.clear();
+		this.#samplerUnits.clear();
 		this.#textureArrayUnits.clear();
 		this.#vertexArray = UNKNOWN_STATE;
 	}
@@ -132,37 +137,51 @@ export class WebGL2ObjectStateApplicator {
 		unit: number,
 		binding: PreparedObjectTextureBinding<WebGLTexture, WebGLSampler>,
 	): boolean {
-		const previous = this.#textureUnits.get(unit);
+		return this.applyTexture2D(unit, binding.texture, binding.sampler);
+	}
+
+	/** Apply one texture and sampler pair without requiring a caller-owned binding wrapper. */
+	applyTexture2D(
+		unit: number,
+		texture: WebGLTexture,
+		sampler: WebGLSampler,
+	): boolean {
 		let textureBound = false;
-		if (previous?.texture !== binding.texture) {
+		if (this.#texture2DUnits.get(unit) !== texture) {
 			if (this.#activeTextureUnit !== unit) {
 				this.#gl.activeTexture(this.#gl.TEXTURE0 + unit);
 				this.#activeTextureUnit = unit;
 			}
-			this.#gl.bindTexture(this.#gl.TEXTURE_2D, binding.texture);
+			this.#gl.bindTexture(this.#gl.TEXTURE_2D, texture);
+			this.#texture2DUnits.set(unit, texture);
 			textureBound = true;
 		}
-		if (previous?.sampler !== binding.sampler) {
-			this.#gl.bindSampler(unit, binding.sampler);
+		if (this.#samplerUnits.get(unit) !== sampler) {
+			this.#gl.bindSampler(unit, sampler);
+			this.#samplerUnits.set(unit, sampler);
 		}
-		this.#textureUnits.set(unit, binding);
 		return textureBound;
 	}
 
 	/** Bind one texture-array unit without desynchronizing later material texture mutations. */
 	applyTextureArrayUnit(unit: number, texture: WebGLTexture): boolean {
-		const previous = this.#textureArrayUnits.get(unit);
-		if (previous === texture) return false;
-		if (this.#activeTextureUnit !== unit) {
-			this.#gl.activeTexture(this.#gl.TEXTURE0 + unit);
-			this.#activeTextureUnit = unit;
+		let textureBound = false;
+		if (this.#textureArrayUnits.get(unit) !== texture) {
+			if (this.#activeTextureUnit !== unit) {
+				this.#gl.activeTexture(this.#gl.TEXTURE0 + unit);
+				this.#activeTextureUnit = unit;
+			}
+			this.#gl.bindTexture(this.#gl.TEXTURE_2D_ARRAY, texture);
+			this.#textureArrayUnits.set(unit, texture);
+			textureBound = true;
 		}
-		this.#gl.bindTexture(this.#gl.TEXTURE_2D_ARRAY, texture);
 		// Manual PCF relies on the depth texture's nearest comparison parameters, not a sampler
-		// object that some earlier pass may have left on this otherwise independent unit.
-		this.#gl.bindSampler(unit, null);
-		this.#textureArrayUnits.set(unit, texture);
-		return true;
+		// object that some earlier binding path may have left on this physical unit.
+		if (this.#samplerUnits.get(unit) !== null) {
+			this.#gl.bindSampler(unit, null);
+			this.#samplerUnits.set(unit, null);
+		}
+		return textureBound;
 	}
 
 	/**

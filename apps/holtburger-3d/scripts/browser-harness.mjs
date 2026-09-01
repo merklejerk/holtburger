@@ -75,72 +75,71 @@ try {
 			);
 		}
 	}
-	process.stdout.write(
-		`${JSON.stringify(
-			options.nameplateReportOnly
-				? nameplateHarnessReport(result)
-				: options.brief
-					? briefHarnessReport(result)
-					: {
-							glRenderer: result.glRenderer,
-							buildingRadius: options.buildingRadius,
-							camera: result.state.camera,
-							envCellRadius: options.envCellRadius,
-							cameraPitchDegrees: options.cameraPitchDegrees,
-							cameraYawDegrees: options.cameraYawDegrees,
-							explicitObjectRadius: options.explicitObjectRadius,
-							generatedObjectRadius: options.generatedObjectRadius,
-							cameraLandblockId: options.cameraLandblockId,
-							relocateLandblockId: options.relocateLandblockId,
-							frameMode: options.frameMode,
-							frameSettings: result.state.frameSettings,
-							frameProfile: result.state.frameProfile,
-							nameplates: result.state.nameplates,
-							nameplateWorkload: result.nameplateWorkload,
-							nameplateLifecycle: result.nameplateLifecycle,
-							nameplateBenchmark: result.nameplateBenchmark,
-							ambientOcclusionCoverageCensus:
-								result.state.ambientOcclusionCoverageCensus,
-							textureFiltering: options.textureFiltering,
-							filteringCycleStates: result.filteringCycleStates,
-							entityShadowCycleStates: result.entityShadowCycleStates,
-							entityShadowBenchmark: result.entityShadowBenchmark,
-							modeCycleStates: result.modeCycleStates,
-							portalExecution: result.portalExecution,
-							portalTransitionCompositorDiagnostic:
-								options.portalTransitionCompositorDiagnostic,
-							portalTransitionLifecycleFixture:
-								result.portalTransitionLifecycle,
-							portalContextLossPolicy: result.state.portalContextLossPolicy,
-							portalScopeAtlasTargets: result.state.portalScopeAtlasTargets,
-							outdoorPssm: result.state.outdoorPssm,
-							consoleMessages: result.consoleMessages,
-							generatedDisabledState: result.generatedDisabledState,
-							fixture: options.fixture,
-							frames: result.state.frames,
-							initialState: result.initialState,
-							landblockId: options.landblockId,
-							lifecycleState: result.lifecycleState,
-							entityLifecycle: result.entityLifecycle,
-							possessionScenario: result.possessionScenario,
-							followFlight: result.followFlight,
-							relocationSequence: result.relocationSequence,
-							relocationState: result.relocationState,
-							metrics: result.state.metrics,
-							terrainGlTrace: result.state.terrainGlTrace,
-							ready: result.state.ready,
-							screenshotPath: options.screenshotPath,
-							isolateAuthoredDynamics: options.isolateAuthoredDynamics,
-							excludeAuthoredDynamics: options.excludeAuthoredDynamics,
-							measureMs: options.measureMs,
-							settleMs: options.settleMs,
-							viewport: result.state.viewport,
-							audioFlyby: result.audioFlyby,
-						},
-			null,
-			2,
-		)}\n`,
-	);
+	let report;
+	if (options.reportMode === "particle-sao") {
+		report = particleSaoHarnessReport(result);
+	} else if (options.reportMode === "nameplate") {
+		report = nameplateHarnessReport(result);
+	} else if (options.reportMode === "brief") {
+		report = briefHarnessReport(result);
+	} else {
+		report = {
+			glRenderer: result.glRenderer,
+			buildingRadius: options.buildingRadius,
+			camera: result.state.camera,
+			envCellRadius: options.envCellRadius,
+			cameraPitchDegrees: options.cameraPitchDegrees,
+			cameraYawDegrees: options.cameraYawDegrees,
+			explicitObjectRadius: options.explicitObjectRadius,
+			generatedObjectRadius: options.generatedObjectRadius,
+			cameraLandblockId: options.cameraLandblockId,
+			relocateLandblockId: options.relocateLandblockId,
+			frameMode: options.frameMode,
+			frameSettings: result.state.frameSettings,
+			frameProfile: result.state.frameProfile,
+			nameplates: result.state.nameplates,
+			nameplateWorkload: result.nameplateWorkload,
+			nameplateLifecycle: result.nameplateLifecycle,
+			nameplateBenchmark: result.nameplateBenchmark,
+			ambientOcclusionCoverageCensus:
+				result.state.ambientOcclusionCoverageCensus,
+			textureFiltering: options.textureFiltering,
+			filteringCycleStates: result.filteringCycleStates,
+			entityShadowCycleStates: result.entityShadowCycleStates,
+			entityShadowBenchmark: result.entityShadowBenchmark,
+			modeCycleStates: result.modeCycleStates,
+			portalExecution: result.portalExecution,
+			portalTransitionCompositorDiagnostic:
+				options.portalTransitionCompositorDiagnostic,
+			portalTransitionLifecycleFixture: result.portalTransitionLifecycle,
+			portalContextLossPolicy: result.state.portalContextLossPolicy,
+			portalScopeAtlasTargets: result.state.portalScopeAtlasTargets,
+			outdoorPssm: result.state.outdoorPssm,
+			consoleMessages: result.consoleMessages,
+			generatedDisabledState: result.generatedDisabledState,
+			fixture: options.fixture,
+			frames: result.state.frames,
+			initialState: result.initialState,
+			landblockId: options.landblockId,
+			lifecycleState: result.lifecycleState,
+			entityLifecycle: result.entityLifecycle,
+			possessionScenario: result.possessionScenario,
+			followFlight: result.followFlight,
+			relocationSequence: result.relocationSequence,
+			relocationState: result.relocationState,
+			metrics: result.state.metrics,
+			terrainGlTrace: result.state.terrainGlTrace,
+			ready: result.state.ready,
+			screenshotPath: options.screenshotPath,
+			isolateAuthoredDynamics: options.isolateAuthoredDynamics,
+			excludeAuthoredDynamics: options.excludeAuthoredDynamics,
+			measureMs: options.measureMs,
+			settleMs: options.settleMs,
+			viewport: result.state.viewport,
+			audioFlyby: result.audioFlyby,
+		};
+	}
+	process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 	if (result.state.error) {
 		throw new Error(
 			`Browser harness reported startup failure: ${result.state.error}`,
@@ -209,8 +208,7 @@ try {
 function parseArgs(args) {
 	const parsed = {
 		chromePath: process.env.CHROME_PATH ?? DEFAULT_CHROME_PATH,
-		brief: false,
-		nameplateReportOnly: false,
+		reportMode: "full",
 		landblockId: DEFAULT_LANDBLOCK_ID,
 		buildingRadius: 0,
 		envCellRadius: null,
@@ -312,10 +310,13 @@ function parseArgs(args) {
 		const arg = args[index];
 		switch (arg) {
 			case "--brief":
-				parsed.brief = true;
+				parsed.reportMode = "brief";
+				break;
+			case "--particle-sao-report-only":
+				parsed.reportMode = "particle-sao";
 				break;
 			case "--nameplate-report-only":
-				parsed.nameplateReportOnly = true;
+				parsed.reportMode = "nameplate";
 				break;
 			case "--chrome-path":
 				parsed.chromePath = requireValue(args, ++index, arg);
@@ -1226,6 +1227,8 @@ function printHelp() {
 Options:
   --landblock <hex>     Outdoor landblock to render. Default: ${DEFAULT_LANDBLOCK_ID}
   --brief               Print frame and content-summary evidence instead of full diagnostics.
+  --particle-sao-report-only
+                        Print only workload identity, particle/SAO metrics, timings, and errors.
   --nameplate-report-only
                         Print only renderer identity, errors, profiling, and nameplate evidence.
   --world-marker        Draw the depth-tested world marker and trajectory fixture.
@@ -1742,6 +1745,54 @@ function nameplateHarnessReport(result) {
 		nameplateWorkload: result.nameplateWorkload,
 		nameplateLifecycle: result.nameplateLifecycle,
 		nameplateBenchmark: result.nameplateBenchmark,
+	};
+}
+
+/** Compact evidence surface for the particle/SAO optimization plan's repeated hardware runs. */
+function particleSaoHarnessReport(result) {
+	const metrics = result.state.metrics;
+	return {
+		ambientOcclusionCoverageCensus: result.state.ambientOcclusionCoverageCensus,
+		camera: result.state.camera,
+		configuration: {
+			buildingRadius: options.buildingRadius,
+			captureFrame: options.captureFrame ?? null,
+			envCellRadius: options.envCellRadius,
+			explicitObjectRadius: options.explicitObjectRadius,
+			frameIntervalMs: options.frameIntervalMs ?? null,
+			frameMode: options.frameMode,
+			generatedObjectRadius: options.generatedObjectRadius,
+			landblockId: options.landblockId,
+			measureMs: options.measureMs,
+			particleSeed: options.particleSeed ?? null,
+			renderScale: result.state.frameSettings.quality.renderScale,
+			settleMs: options.settleMs,
+			terrainRadius: options.terrainRadius,
+		},
+		consoleMessages: result.consoleMessages.filter(
+			({ level }) => level === "error" || level === "exception",
+		),
+		frameProfile: result.state.frameProfile,
+		glRenderer: result.glRenderer,
+		metrics:
+			metrics === null
+				? null
+				: {
+						ambientOcclusion: metrics.ambientOcclusion,
+						portalAtlasTilePixelCount: metrics.portalAtlasTilePixelCount,
+						submittedParticleBatchCount: metrics.submittedParticleBatchCount,
+						submittedParticleInstanceCount:
+							metrics.submittedParticleInstanceCount,
+						unresolvedParticleBatchCount: metrics.unresolvedParticleBatchCount,
+						uploadedParticleRecordRowCount:
+							metrics.uploadedParticleRecordRowCount,
+						visibleDynamicEntityCount: metrics.visibleDynamicEntityCount,
+						visibleDynamicPartCount: metrics.visibleDynamicPartCount,
+					},
+		particles: result.state.authoredDynamics?.particles ?? null,
+		tickProfile: result.state.tickProfile,
+		timing: result.state.timing,
+		viewport: result.state.viewport,
 	};
 }
 

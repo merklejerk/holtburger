@@ -3086,7 +3086,12 @@ export class GamePresentationRuntime {
 		this.#effects.advance(timeSeconds);
 		this.#physicsScriptSystem.advance(timeSeconds);
 		tick?.mark("scriptAdvance");
-		this.#particles.advance(timeSeconds);
+		// Advance against the same previous-frame owner selection used below for draw routing. Sky
+		// owners remain unconditionally visible through #particleRenderOwner.
+		this.#particles.advance(
+			timeSeconds,
+			(target) => this.#particleRenderOwner(target) !== null,
+		);
 		const ambientRefreshed = this.#audioListenerEnabled
 			? this.#refreshAmbient(timeSeconds)
 			: false;
@@ -3114,9 +3119,7 @@ export class GamePresentationRuntime {
 			),
 		);
 		tick?.mark("presentationPublish");
-		// Cohorts are rebuilt every frame from live emitters rather than retained, and cull at
-		// emitter granularity before any instance record is written.
-		// Culled at emitter granularity against the previous frame's selection. Cohorts are built
+		// Ranges cull at emitter granularity against the previous frame's selection. They are built
 		// before the renderer selects, so this is one frame behind; the owner's bounds already
 		// include the particle envelope, so an emitter entering view is selected on the frame its
 		// envelope crosses the frustum rather than when its mesh does.

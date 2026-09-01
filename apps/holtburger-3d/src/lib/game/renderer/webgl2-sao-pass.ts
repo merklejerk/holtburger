@@ -24,7 +24,6 @@ const SAO_TILE_VERTEX_COUNT = 6;
 const SAO_TEXTURE_UNIT = 0;
 const SCENE_DEPTH_TEXTURE_UNIT = 1;
 const R8_BYTES_PER_PIXEL = 1;
-const NEUTRAL_SAO_CLEAR = new Float32Array([1, 1, 1, 1]);
 
 const TILE_METADATA_GLSL = `
 struct SaoTileMetadata {
@@ -35,6 +34,16 @@ struct SaoTileMetadata {
 layout(std140) uniform SaoTileMetadataBlock {
 	SaoTileMetadata uTiles[${MAXIMUM_SAO_TILE_COUNT}];
 };
+
+ivec2 saoScratchOrigin(SaoTileMetadata tile, float resolutionScale) {
+	return ivec2(floor(vec2(tile.atlasRect.xy) * resolutionScale));
+}
+
+ivec2 saoScratchExtent(SaoTileMetadata tile, float resolutionScale) {
+	ivec2 origin = saoScratchOrigin(tile, resolutionScale);
+	ivec2 end = ivec2(floor(vec2(tile.atlasRect.xy + tile.atlasRect.zw) * resolutionScale));
+	return max(end - origin, ivec2(1));
+}
 `;
 
 const TILE_VERTEX_SHADER = `#version 300 es
@@ -62,9 +71,8 @@ vec2 unitVertex(int vertex) {
 void main() {
 	vTileOrdinal = uint(gl_InstanceID);
 	SaoTileMetadata tile = uTiles[vTileOrdinal];
-	vec2 origin = floor(vec2(tile.atlasRect.xy) * uOutputScale);
-	vec2 end = floor(vec2(tile.atlasRect.xy + tile.atlasRect.zw) * uOutputScale);
-	vec2 extent = max(end - origin, vec2(1.0));
+	vec2 origin = vec2(saoScratchOrigin(tile, uOutputScale));
+	vec2 extent = vec2(saoScratchExtent(tile, uOutputScale));
 	vec2 outputPixel = origin + unitVertex(gl_VertexID) * extent;
 	gl_Position = vec4(outputPixel * 2.0 / uOutputExtent - 1.0, 0.0, 1.0);
 }
@@ -98,18 +106,8 @@ float linearDepth(float depth) {
 		/ (uCameraFar + uCameraNear - ndcDepth * (uCameraFar - uCameraNear));
 }
 
-ivec2 scratchOrigin(SaoTileMetadata tile) {
-	return ivec2(floor(vec2(tile.atlasRect.xy) * uResolutionScale));
-}
-
-ivec2 scratchExtent(SaoTileMetadata tile) {
-	ivec2 origin = scratchOrigin(tile);
-	ivec2 end = ivec2(floor(vec2(tile.atlasRect.xy + tile.atlasRect.zw) * uResolutionScale));
-	return max(end - origin, ivec2(1));
-}
-
 ivec2 fullLocalFromScratch(SaoTileMetadata tile, ivec2 scratchLocal) {
-	ivec2 extent = scratchExtent(tile);
+	ivec2 extent = saoScratchExtent(tile, uResolutionScale);
 	return min(
 		ivec2(tile.atlasRect.zw) - 1,
 		ivec2((vec2(scratchLocal) + 0.5) * vec2(tile.atlasRect.zw) / vec2(extent))
@@ -142,7 +140,8 @@ float distanceWeight(float distance) {
 
 void main() {
 	SaoTileMetadata tile = uTiles[vTileOrdinal];
-	ivec2 localScratch = ivec2(gl_FragCoord.xy) - scratchOrigin(tile);
+	ivec2 localScratch = ivec2(gl_FragCoord.xy)
+		- saoScratchOrigin(tile, uResolutionScale);
 	ivec2 fullLocal = fullLocalFromScratch(tile, localScratch);
 	ivec2 atlasPixel = ivec2(tile.atlasRect.xy) + fullLocal;
 	float centerDepth = texelFetch(uSceneDepth, atlasPixel, 0).r;
@@ -234,20 +233,11 @@ float linearDepth(float depth) {
 		/ (uCameraFar + uCameraNear - ndcDepth * (uCameraFar - uCameraNear));
 }
 
-ivec2 scratchOrigin(SaoTileMetadata tile) {
-	return ivec2(floor(vec2(tile.atlasRect.xy) * uResolutionScale));
-}
-
-ivec2 scratchExtent(SaoTileMetadata tile) {
-	ivec2 origin = scratchOrigin(tile);
-	ivec2 end = ivec2(floor(vec2(tile.atlasRect.xy + tile.atlasRect.zw) * uResolutionScale));
-	return max(end - origin, ivec2(1));
-}
-
 ivec2 fullLocalFromScratch(SaoTileMetadata tile, ivec2 scratchLocal) {
 	return min(
 		ivec2(tile.atlasRect.zw) - 1,
-		ivec2((vec2(scratchLocal) + 0.5) * vec2(tile.atlasRect.zw) / vec2(scratchExtent(tile)))
+		ivec2((vec2(scratchLocal) + 0.5) * vec2(tile.atlasRect.zw)
+			/ vec2(saoScratchExtent(tile, uResolutionScale)))
 	);
 }
 
@@ -258,8 +248,8 @@ float sceneDepthAtScratch(SaoTileMetadata tile, ivec2 scratchLocal) {
 
 void main() {
 	SaoTileMetadata tile = uTiles[vTileOrdinal];
-	ivec2 tileScratchOrigin = scratchOrigin(tile);
-	ivec2 tileScratchExtent = scratchExtent(tile);
+	ivec2 tileScratchOrigin = saoScratchOrigin(tile, uResolutionScale);
+	ivec2 tileScratchExtent = saoScratchExtent(tile, uResolutionScale);
 	ivec2 centerLocal = ivec2(gl_FragCoord.xy) - tileScratchOrigin;
 	float centerDepth = sceneDepthAtScratch(tile, centerLocal);
 	if (centerDepth >= 1.0) {
@@ -310,9 +300,8 @@ layout(location = 0) out vec4 outFactor;
 void main() {
 	SaoTileMetadata tile = uTiles[vTileOrdinal];
 	ivec2 fullLocal = ivec2(gl_FragCoord.xy) - ivec2(tile.atlasRect.xy);
-	ivec2 scratchOrigin = ivec2(floor(vec2(tile.atlasRect.xy) * uResolutionScale));
-	ivec2 scratchEnd = ivec2(floor(vec2(tile.atlasRect.xy + tile.atlasRect.zw) * uResolutionScale));
-	ivec2 scratchExtent = max(scratchEnd - scratchOrigin, ivec2(1));
+	ivec2 scratchOrigin = saoScratchOrigin(tile, uResolutionScale);
+	ivec2 scratchExtent = saoScratchExtent(tile, uResolutionScale);
 	ivec2 scratchLocal = min(
 		scratchExtent - 1,
 		ivec2((vec2(fullLocal) + 0.5) * vec2(scratchExtent) / vec2(tile.atlasRect.zw))
@@ -664,9 +653,8 @@ export class WebGL2SaoPass {
 			);
 		}
 		const tuning = SHARED_FRONTEND_TUNING.rendering.ambientOcclusion;
-		const scratch = this.#scratchTargets.resizeDimensions(
-			Math.max(1, Math.floor(sceneExtent.width * tuning.resolutionScale)),
-			Math.max(1, Math.floor(sceneExtent.height * tuning.resolutionScale)),
+		const scratch = this.#scratchTargets.resize(
+			scaledSaoExtent(sceneExtent, tuning.resolutionScale),
 		);
 		const gl = this.#gl;
 		gl.bindBuffer(gl.UNIFORM_BUFFER, this.#metadataBuffer);
@@ -691,7 +679,7 @@ export class WebGL2SaoPass {
 			projection,
 			policy,
 			scratch.extent,
-			SHARED_FRONTEND_TUNING.rendering.ambientOcclusion.resolutionScale,
+			tuning.resolutionScale,
 		);
 		gl.drawArraysInstanced(gl.TRIANGLES, 0, SAO_TILE_VERTEX_COUNT, tileCount);
 		if (this.#coverageCensusRequested) {
@@ -715,6 +703,7 @@ export class WebGL2SaoPass {
 				camera,
 				policy,
 				scratch.extent,
+				tuning.resolutionScale,
 				1,
 				0,
 			);
@@ -727,13 +716,19 @@ export class WebGL2SaoPass {
 				camera,
 				policy,
 				scratch.extent,
+				tuning.resolutionScale,
 				0,
 				1,
 			);
 			gl.drawArraysInstanced(gl.TRIANGLES, 0, SAO_TILE_VERTEX_COUNT, tileCount);
 		}
 
-		this.#bindComposite(sceneFramebuffer, sceneExtent, scratch.first.texture);
+		this.#bindComposite(
+			sceneFramebuffer,
+			sceneExtent,
+			scratch.first.texture,
+			tuning.resolutionScale,
+		);
 		gl.drawArraysInstanced(gl.TRIANGLES, 0, SAO_TILE_VERTEX_COUNT, tileCount);
 		gl.disable(gl.BLEND);
 		gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -802,6 +797,7 @@ export class WebGL2SaoPass {
 			{ readonly kind: "enabled" }
 		>,
 		scratchExtent: RenderExtent,
+		resolutionScale: number,
 		directionX: number,
 		directionY: number,
 	): void {
@@ -814,16 +810,10 @@ export class WebGL2SaoPass {
 			scratchExtent.width,
 			scratchExtent.height,
 		);
-		gl.uniform1f(
-			program.outputScale,
-			SHARED_FRONTEND_TUNING.rendering.ambientOcclusion.resolutionScale,
-		);
+		gl.uniform1f(program.outputScale, resolutionScale);
 		gl.uniform1f(program.cameraNear, camera.near);
 		gl.uniform1f(program.cameraFar, camera.far);
-		gl.uniform1f(
-			program.resolutionScale,
-			SHARED_FRONTEND_TUNING.rendering.ambientOcclusion.resolutionScale,
-		);
+		gl.uniform1f(program.resolutionScale, resolutionScale);
 		gl.uniform1f(
 			program.bilateralDepthThreshold,
 			tuning.bilateralDepthThreshold,
@@ -839,6 +829,7 @@ export class WebGL2SaoPass {
 		sceneFramebuffer: WebGLFramebuffer,
 		sceneExtent: RenderExtent,
 		ambientOcclusion: WebGLTexture,
+		resolutionScale: number,
 	): void {
 		const gl = this.#gl;
 		const program = this.#compositeProgram;
@@ -847,10 +838,7 @@ export class WebGL2SaoPass {
 		gl.useProgram(program.program);
 		gl.uniform2f(program.outputExtent, sceneExtent.width, sceneExtent.height);
 		gl.uniform1f(program.outputScale, 1);
-		gl.uniform1f(
-			program.resolutionScale,
-			SHARED_FRONTEND_TUNING.rendering.ambientOcclusion.resolutionScale,
-		);
+		gl.uniform1f(program.resolutionScale, resolutionScale);
 		gl.uniform1i(
 			program.coverageVisualization,
 			this.#coverageVisualizationEnabled ? 1 : 0,
@@ -956,7 +944,6 @@ export class WebGL2SaoPass {
 		gl.disable(gl.STENCIL_TEST);
 		gl.colorMask(true, true, true, true);
 		gl.depthMask(false);
-		gl.clearBufferfv(gl.COLOR, 0, NEUTRAL_SAO_CLEAR);
 	}
 
 	#writeFlatTile(extent: RenderExtent): void {
@@ -1024,6 +1011,34 @@ export function scaledSaoExtent(
 	return scaledExtent(extent, resolutionScale);
 }
 
+/** Integer interval covered by one scaled tile quad, matching the shared GLSL floor rule. */
+export function scaledSaoInterval(
+	origin: number,
+	extent: number,
+	resolutionScale: number,
+): { readonly end: number; readonly extent: number; readonly origin: number } {
+	if (
+		!Number.isSafeInteger(origin) ||
+		origin < 0 ||
+		!Number.isSafeInteger(extent) ||
+		extent <= 0 ||
+		!Number.isFinite(resolutionScale) ||
+		resolutionScale <= 0 ||
+		resolutionScale > 1
+	) {
+		throw new Error(
+			"SAO interval requires a non-negative origin, positive extent, and scale in (0, 1].",
+		);
+	}
+	const scaledOrigin = Math.floor(origin * resolutionScale);
+	const end = Math.floor((origin + extent) * resolutionScale);
+	return {
+		end: Math.max(scaledOrigin + 1, end),
+		extent: Math.max(1, end - scaledOrigin),
+		origin: scaledOrigin,
+	};
+}
+
 function scaledExtent(
 	extent: RenderExtent,
 	resolutionScale: number,
@@ -1042,8 +1057,8 @@ function scaledExtent(
 		);
 	}
 	return {
-		height: Math.max(1, Math.floor(extent.height * resolutionScale)),
-		width: Math.max(1, Math.floor(extent.width * resolutionScale)),
+		height: scaledSaoInterval(0, extent.height, resolutionScale).extent,
+		width: scaledSaoInterval(0, extent.width, resolutionScale).extent,
 	};
 }
 

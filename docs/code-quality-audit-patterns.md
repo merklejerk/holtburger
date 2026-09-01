@@ -968,6 +968,37 @@ consumers rely on it.
 scoped to the operation it serves, name raw structural facts without inferred behavior, and add a
 regression where valid primary records are absent from the subset.
 
+## Correctness Depends on Ambient Mutable State
+
+**Smell:** An operation establishes only part of the state its result requires and silently relies
+on whatever a previous, unrelated operation left behind.
+
+**Signals:**
+
+- Reordering callers, enabling another feature, or adding an otherwise valid predecessor changes
+  the operation's result.
+- Code binds a resource but omits its associated mode, policy, transaction, locale, permissions,
+  namespace, or other interpretation state.
+- A subsystem works in isolation or in one environment but fails after a different code path runs.
+- Cleanup resets shared state, but the next consumer still assumes that reset occurred rather than
+  declaring its own prerequisites.
+
+**Possible failure:** Valid local changes expose distant failures through execution order. Results
+become scene-, request-, test-, thread-, or environment-dependent even though the operation's
+inputs appear unchanged.
+
+**Questions:** What complete state determines the result? Which component owns each part? Can any
+predecessor legally leave a different value? Is inherited state an intentional protocol or merely
+an optimization assumption?
+
+**Counterexamples:** Explicitly stateful protocols may define inheritance as part of their public
+contract, especially inside a single tightly owned command sequence. The dependency should still
+be named and bounded by that owner.
+
+**Possible responses:** Bind or pass every required state at the operation boundary, bundle
+interdependent resource and policy values into one contract, or centralize transitions in a state
+owner that can prove the required predecessor state.
+
 ## Adding Observations
 
 An observation belongs here when it has:

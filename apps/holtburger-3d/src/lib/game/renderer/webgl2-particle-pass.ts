@@ -205,6 +205,16 @@ export class WebGL2ParticlePass {
 		gl.useProgram(program.program);
 		gl.activeTexture(gl.TEXTURE0 + PARTICLE_TEXTURE_UNITS.records);
 		gl.bindTexture(gl.TEXTURE_2D, records.texture);
+		// The record texture is RGBA32F and read with texelFetch, so it requires exact sampling.
+		// Own the sampler explicitly: outdoor object passes also use this texture unit and may leave
+		// a sampler requiring unsupported float filtering or absent mip levels behind, which makes
+		// the particle vertex texture incomplete.
+		context.samplers.bind(PARTICLE_TEXTURE_UNITS.records, {
+			mipLevels: 1,
+			policy: context.textureFiltering,
+			samplingClass: "exact",
+			wrap: TextureWrapMode.Clamp,
+		});
 		gl.uniformMatrix4fv(program.uniforms.projection, false, context.projection);
 		gl.uniformMatrix4fv(program.uniforms.view, false, context.view);
 		gl.uniform1f(program.uniforms.clockSeconds, context.clockSeconds);

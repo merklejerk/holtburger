@@ -1,5 +1,5 @@
-import type { PortalWarpDriveTuning } from "./game/renderer/portal-warp-drive-tuning";
-import type { NameplateSettings } from "./game/renderer/nameplate-policy";
+import { hexRgb, hexRgba } from "./frontend-color";
+import type { FrontendTuning } from "./frontend-tuning-contract";
 
 /**
  * Tuning defaults shared by the browser frontends.
@@ -9,15 +9,6 @@ import type { NameplateSettings } from "./game/renderer/nameplate-policy";
  * safety remain beside their owning implementations instead of masquerading as product knobs
  * here.
  */
-export interface FrontendUiDiagnosticsTuning {
-	/** Smoothing window used by an on-screen frame-time readout. */
-	readonly frameMetricsEmaWindowMs: number;
-	/** UI publication cadence for a frame rate sampled imperatively by the render loop. */
-	readonly frameRateDisplayIntervalMs: number;
-	/** Largest numeric frame rate rendered by a compact frame-time readout. */
-	readonly maximumDisplayedFramesPerSecond: number;
-}
-
 export const SHARED_FRONTEND_TUNING = {
 	animationPresentation: {
 		/** Visual sampling cadence for animated roots omitted by the previous rendered frame. */
@@ -92,14 +83,14 @@ export const SHARED_FRONTEND_TUNING = {
 			streakIntensity: 5.0,
 			/** Exponent controlling how long the world remains visible before the tunnel wins. */
 			worldOpacityExponent: 2,
-		} as const satisfies PortalWarpDriveTuning,
+		},
 	},
 	map: {
 		/**
 		 * Overhead-map presentation. Shared by the Explorer and the future client shell, so this
 		 * sits beside `rendering` rather than inside `explorer`.
 		 *
-		 * Colours are authored channel-wise here and converted to GPU-ready buffers once in
+		 * Colours are authored as hex here and converted to GPU-ready buffers once in
 		 * `game/map/map-appearance.ts`, which holds the conversion and no values of its own.
 		 * Retail constants the map obeys are deliberately absent: the walkable-slope threshold
 		 * lives in `game/walkability.ts` because it is a fact about the ground, not a preference.
@@ -126,9 +117,9 @@ export const SHARED_FRONTEND_TUNING = {
 		},
 		colors: {
 			/** Background where no geometry is drawn, and the colour distant floors fade into. */
-			void: { red: 0.05, green: 0.05, blue: 0.07 },
+			void: hexRgb("#0d0d12"),
 			/** Building footprints on the outdoor map. */
-			blocker: { red: 0.13, green: 0.12, blue: 0.15 },
+			blocker: hexRgb("#211f26"),
 			/**
 			 * Outline drawn around building footprints, and its width in pixels.
 			 *
@@ -138,10 +129,10 @@ export const SHARED_FRONTEND_TUNING = {
 			 * slope hatching, so a building stays outlined at every zoom instead of the outline
 			 * thinning away as the map pulls back.
 			 */
-			blockerStroke: { red: 0.83, green: 0.8, blue: 0.72 },
+			blockerStroke: hexRgb("#d4ccb8"),
 			blockerStrokePixels: 1.5,
 			/** Roads, and how strongly authored road cells are tinted toward it. */
-			road: { red: 0.85, green: 0.76, blue: 0.55 },
+			road: hexRgb("#d9c28c"),
 			roadTintStrength: 0.85,
 			/**
 			 * Dark rim drawn just outside the road fill, in pixels, and how much ink it carries.
@@ -169,7 +160,7 @@ export const SHARED_FRONTEND_TUNING = {
 			 * alone: ground between them is left exactly as it is, because a wash underneath only
 			 * darkened the ground without saying anything the stripes had not already said.
 			 */
-			impassable: { red: 0.9, green: 0.3, blue: 0.3 },
+			impassable: hexRgb("#e64d4d"),
 			/** Screen-space period of the hatch stripes, in pixels, and how opaque they are. */
 			impassableHatchPeriodPixels: 7,
 			impassableHatchStrength: 0.25,
@@ -212,7 +203,7 @@ export const SHARED_FRONTEND_TUNING = {
 			 */
 			contourHeightSpanMeters: 30,
 			/** Doorways between inside and outside, marked in both map modes. */
-			transitionAccent: { red: 0.95, green: 0.83, blue: 0.35 },
+			transitionAccent: hexRgb("#f2d459"),
 		},
 		heightRamp: {
 			/**
@@ -232,9 +223,9 @@ export const SHARED_FRONTEND_TUNING = {
 			 * redundant channel a reader who resolves no hue at all is left with. Collapsing two of
 			 * them to similar luminance costs that silently, and nothing will fail to warn you.
 			 */
-			sameLevelColor: { red: 0.9, green: 0.9, blue: 0.9 },
-			aboveColor: { red: 0.29, green: 0.45, blue: 0.51 },
-			belowColor: { red: 0.99, green: 0.55, blue: 0.27 },
+			sameLevelColor: hexRgb("#e6e6e6"),
+			aboveColor: hexRgb("#4a7382"),
+			belowColor: hexRgb("#fc8c45"),
 		},
 		interior: {
 			/**
@@ -285,17 +276,17 @@ export const SHARED_FRONTEND_TUNING = {
 			 * styling so a client shell can restyle markers without touching map semantics.
 			 */
 			colorsByRadarColor: {
-				Default: "#d8d8e0",
-				Blue: "#5b8dd6",
-				Gold: "#d6b23f",
-				White: "#f0f0f2",
-				Purple: "#9b6dd6",
-				Red: "#d24b45",
-				Pink: "#dd7fb0",
-				Green: "#4fb256",
-				Yellow: "#e2d24a",
-				Cyan: "#4fc4cc",
-				BrightGreen: "#6fe86f",
+				Default: hexRgb("#d8d8e0"),
+				Blue: hexRgb("#5b8dd6"),
+				Gold: hexRgb("#d6b23f"),
+				White: hexRgb("#f0f0f2"),
+				Purple: hexRgb("#9b6dd6"),
+				Red: hexRgb("#d24b45"),
+				Pink: hexRgb("#dd7fb0"),
+				Green: hexRgb("#4fb256"),
+				Yellow: hexRgb("#e2d24a"),
+				Cyan: hexRgb("#4fc4cc"),
+				BrightGreen: hexRgb("#6fe86f"),
 			} as const,
 			/** Marker radius in canvas pixels, sized to stay legible without hiding the ground. */
 			radiusPixels: 3.5,
@@ -320,7 +311,7 @@ export const SHARED_FRONTEND_TUNING = {
 
 	rendering: {
 		/** Fallback framebuffer color exposed when no scene presentation covers a pixel. */
-		clearColor: { red: 0.15, green: 0.05, blue: 0.05, alpha: 1 },
+		clearColor: hexRgba("#260d0dff"),
 		/** Shared initial nameplate workload and Canvas appearance for Client and Explorer. */
 		nameplates: {
 			/** Renderer-space clearance above the current rigid-pose top. */
@@ -328,17 +319,17 @@ export const SHARED_FRONTEND_TUNING = {
 			appearance: {
 				fillColors: {
 					/** Hostile and attackable creatures. */
-					mob: { red: 1, green: 0.502, blue: 0.471, alpha: 1 },
+					mob: hexRgba("#ff8078ff"),
 					/** Non-player characters and service providers. */
-					npc: { red: 1, green: 0.82, blue: 0.4, alpha: 1 },
+					npc: hexRgba("#ffd166ff"),
 					/** Portal objects. */
-					portal: { red: 0.753, green: 0.518, blue: 0.988, alpha: 1 },
+					portal: hexRgba("#c084fcff"),
 					/** Other connected players. */
-					player: { red: 0.49, green: 0.827, blue: 0.988, alpha: 1 },
+					player: hexRgba("#7dd3fcff"),
 					/** The locally driven player, when explicitly enabled. */
-					selfPlayer: { red: 0.525, green: 0.937, blue: 0.675, alpha: 1 },
+					selfPlayer: hexRgba("#86efacff"),
 					/** Uncategorized dynamic presentations when explicitly enabled. */
-					other: { red: 0.82, green: 0.835, blue: 0.859, alpha: 1 },
+					other: hexRgba("#d1d5dbff"),
 				},
 				/** CSS font-family expression consumed directly by Canvas2D. */
 				fontFamily: "sans-serif",
@@ -356,7 +347,7 @@ export const SHARED_FRONTEND_TUNING = {
 					fontWeight: 600,
 					outlineWidthPixels: 3,
 				},
-				outlineColor: { red: 0, green: 0, blue: 0, alpha: 0.9 },
+				outlineColor: hexRgba("#000000e6"),
 				verticalPaddingPixels: 5,
 			},
 			categoryVisibility: {
@@ -373,7 +364,7 @@ export const SHARED_FRONTEND_TUNING = {
 			minimumLegibleNamePixels: 4,
 			/** Camera-forward distance where raster pixels map one-for-one to viewport pixels. */
 			referenceDistance: 4,
-		} satisfies NameplateSettings,
+		},
 		/**
 		 * Presentation color grade, applied once to the finished scene.
 		 *
@@ -563,7 +554,7 @@ export const SHARED_FRONTEND_TUNING = {
 			 */
 			intensity: 2,
 			/** `RGBColor::SetColor32(&viewer_light.color, 0xFFFFFFFF)`, acclient.c:139346. */
-			color: { red: 1, green: 1, blue: 1 },
+			color: hexRgb("#ffffff"),
 			/**
 			 * How far up its own frame a carrying body lifts the light.
 			 *
@@ -651,4 +642,4 @@ export const SHARED_FRONTEND_TUNING = {
 			pageSize: 2_048,
 		},
 	},
-} as const;
+} as const satisfies FrontendTuning;

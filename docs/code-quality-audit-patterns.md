@@ -852,6 +852,40 @@ lossless for them.
 each decision independently from authoritative traits, or replace the lossy partition with a
 composite representation when consumers genuinely need overlapping facts.
 
+## Configuration Describes Only Its Current Value
+
+**Smell:** A configuration, policy, fixture, or declarative object has no independent complete
+contract; its accepted shape is inferred from the value currently present or weakened to a partial
+shape for editing convenience.
+
+**Signals:**
+
+- The authoritative type is `typeof` the configured object, so it cannot guide completion while
+  that object is being authored.
+- Missing required fields receive no editor suggestions until a distant consumer reports an error.
+- `Partial`, a recursive optional mapping, an index signature, or a broad record is introduced so
+  incomplete literals type-check during editing.
+- Misspelled or omitted fields survive because every key is optional or because only consumers are
+  typed.
+- A separate schema exists, but it restates domain-owned subcontracts instead of reusing them and
+  can drift independently.
+
+**Possible failure:** Configuration becomes valid only by convention. New required fields are
+silently omitted, typos become inert knobs, editor assistance disappears at the point of change,
+or a duplicated schema and runtime contract accept different shapes.
+
+**Questions:** Which fields are genuinely optional product semantics, and which are merely awkward
+to enter? Does an independent contract exist before the value? Can it reuse the types owned by
+runtime consumers? Must literals retain narrow types after completeness is checked?
+
+**Counterexamples:** Open-ended property bags, sparse patches, negotiated capabilities, and formats
+whose omission semantics are intrinsic may legitimately be partial or index-based. Data inferred
+from an external schema can also have a single source of truth without a handwritten contract.
+
+**Possible responses:** Define a complete authoring contract independently of the value, reuse
+domain-owned component types, check the literal with a non-widening conformance mechanism, and use
+a narrowly named override or patch contract only where omission has explicit semantics.
+
 ## Adding Observations
 
 An observation belongs here when it has:

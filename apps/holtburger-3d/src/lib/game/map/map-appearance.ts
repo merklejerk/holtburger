@@ -1,4 +1,5 @@
 import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
+import { normalizedRgbColor, type HexRgbColor } from "../../frontend-color";
 
 /**
  * GPU-ready form of the overhead map's tuning policy.
@@ -11,12 +12,9 @@ import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 const MAP_TUNING = SHARED_FRONTEND_TUNING.map;
 
 /** One authored colour as a GL uniform payload. */
-function colorVector(color: {
-	readonly red: number;
-	readonly green: number;
-	readonly blue: number;
-}): Float32Array {
-	return new Float32Array([color.red, color.green, color.blue]);
+function colorVector(color: HexRgbColor): Float32Array {
+	const channels = normalizedRgbColor(color);
+	return new Float32Array([channels.red, channels.green, channels.blue]);
 }
 
 export const MAP_SUN_DIRECTION = new Float32Array([
@@ -52,10 +50,11 @@ export const MAP_TRANSITION_ACCENT_COLOR = colorVector(
 );
 
 /** The clear colour needs its channels spread, so it keeps a tuple beside its vector form. */
+const mapVoidChannels = normalizedRgbColor(MAP_TUNING.colors.void);
 export const MAP_VOID_COLOR: readonly [number, number, number] = [
-	MAP_TUNING.colors.void.red,
-	MAP_TUNING.colors.void.green,
-	MAP_TUNING.colors.void.blue,
+	mapVoidChannels.red,
+	mapVoidChannels.green,
+	mapVoidChannels.blue,
 ];
 export const MAP_VOID_COLOR_VECTOR = new Float32Array(MAP_VOID_COLOR);
 

@@ -343,6 +343,21 @@ The bar for departing: authored content must be unable to observe the difference
 must be provably an improvement no content depended on. Prove the defect from the decompile rather
 than inferring it, and measure how much content is affected before changing anything.
 
+## Frontend Tuning Tests
+
+**Hard rule: changing only a value in `frontend-tuning.ts`, `client-tuning.ts`, or
+`explorer-tuning.ts` must never require editing a test.** These files contain knobs intended for
+routine adjustment, not constants whose current values are behavioral invariants.
+
+- Never copy a tuning value into a test as a literal or assert that a knob still equals its current
+  value.
+- Test algorithms with explicit test-owned inputs. When an integration test verifies that a tuning
+  value is wired through production, derive the expectation from the exported tuning value rather
+  than duplicating it.
+- Test hard safety limits and inter-field invariants only at the layer that owns those constraints;
+  do not turn a current preference into a limit merely to make it testable.
+- Delete tests whose only claim is that today's configurable default remains today's default.
+
 ## Working Style
 
 - Prefer clean cutovers. Remove aliases, compatibility wrappers, stale comments,

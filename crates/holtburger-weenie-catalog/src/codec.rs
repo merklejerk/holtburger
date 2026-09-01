@@ -121,6 +121,7 @@ pub(crate) fn encode_template(template: &WeenieTemplate) -> Result<Vec<u8>, Code
     encoder.i32(template.weenie_type);
     encoder.string(&template.class_name)?;
     encoder.optional_string(template.name.as_deref())?;
+    encoder.optional_i32(template.level);
     encoder.optional_u32(template.setup_did);
     encoder.optional_u32(template.motion_table_did);
     encoder.optional_u32(template.sound_table_did);
@@ -169,6 +170,7 @@ pub(crate) fn encode_template(template: &WeenieTemplate) -> Result<Vec<u8>, Code
 pub(crate) fn decode_template(bytes: &[u8]) -> Result<WeenieTemplate, CodecError> {
     let mut decoder = Decoder::new(bytes);
     let (identity, weenie_type) = decode_template_identity_fields(&mut decoder)?;
+    let level = decoder.optional_i32("level")?;
     let setup_did = decoder.optional_u32("setup_did")?;
     let motion_table_did = decoder.optional_u32("motion_table_did")?;
     let sound_table_did = decoder.optional_u32("sound_table_did")?;
@@ -230,6 +232,7 @@ pub(crate) fn decode_template(bytes: &[u8]) -> Result<WeenieTemplate, CodecError
         class_name: identity.class_name,
         weenie_type,
         name: identity.name,
+        level,
         setup_did,
         motion_table_did,
         sound_table_did,

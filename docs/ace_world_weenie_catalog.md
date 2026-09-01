@@ -121,12 +121,12 @@ review condition rather than permission to trust incidental MySQL row order.
 The catalog includes every base `weenie` row, including records without setup or display-name
 properties, so Phase R0 can measure missing facts. A missing setup is not an export error.
 
-## `.hwc` File Format Version 6
+## `.hwc` File Format Version 9
 
 Every integer and binary64 float bit pattern is little-endian. Strings are length-prefixed UTF-8.
 There is no compression, checksum, implicit serializer metadata, or unknown-field skipping in
-version 6, and the only padding is the reserved word that aligns the header's 64-bit offset fields.
-Readers reject trailing bytes and every nonzero reserved byte. Versions are clean cutovers; the v6
+version 9, and the only padding is the reserved word that aligns the header's 64-bit offset fields.
+Readers reject trailing bytes and every nonzero reserved byte. Versions are clean cutovers; the v9
 reader does not reinterpret older payloads.
 
 The file layout is:
@@ -140,7 +140,7 @@ The file layout is:
 | Offset | Width | Field          | Contract                                   |
 | -----: | ----: | -------------- | ------------------------------------------ |
 |      0 |     8 | magic          | Bytes `48 42 57 43 41 54 00 1A` (`HBWCAT`) |
-|      8 |     4 | version        | `6`                                        |
+|      8 |     4 | version        | `9`                                        |
 |     12 |     4 | header length  | `64`                                       |
 |     16 |     4 | record count   | `0..=1,048,576`                            |
 |     20 |     4 | reserved       | All zero; aligns the 64-bit offset fields  |
@@ -148,7 +148,7 @@ The file layout is:
 |     32 |     8 | payload length | Sum of every indexed record length         |
 |     40 |     8 | index offset   | Exactly `payload offset + payload length`  |
 |     48 |     8 | index length   | Exactly `record count * 16`                |
-|     56 |     8 | reserved       | All zero in version 6                      |
+|     56 |     8 | reserved       | All zero in version 9                      |
 
 The file ends exactly after the index. A valid index has no gaps or overlapping payload ranges.
 
@@ -169,19 +169,23 @@ Every other tag is invalid.
 2. `weenie_type: i32`
 3. `class_name: string`
 4. `name: Option<string>`
-5. five `Option<u32>` DIDs: setup, motion table, sound table, physics-effect table, palette base
-6. five `Option<f64>` values: default scale, friction, elasticity, maximum velocity, rotation speed
-7. `physics.base_mask: Option<u32>`
-8. eleven nullable booleans in the order of the nullable-override table above
-9. `appearance`: eleven optional DIDs in the order documented above; optional heritage and gender
+5. `level: Option<i32>`
+6. five `Option<u32>` DIDs: setup, motion table, sound table, physics-effect table, palette base
+7. five `Option<f64>` values: default scale, friction, elasticity, maximum velocity, rotation speed
+8. optional radar blip color and behavior integers, optional obvious radar range, and nullable
+   authored attackable
+9. `physics.base_mask: Option<u32>`
+10. eleven nullable booleans in the order of the nullable-override table above
+11. `appearance`: eleven optional DIDs in the order documented above; optional heritage and gender
    ints; optional heritage and sex strings; then optional `item_type`, `default_combat_style`,
-   `clothing_priority`, and `valid_locations` ints
-10. `wielded`: `u32` count then
+   `clothing_priority`, and `valid_locations` ints; optional unsigned palette template; and optional
+   shade
+12. `wielded`: `u32` count then
     `{ wcid: u32, destination_type: i32, palette_template: u32, shade: f64 }`
-11. `sub_palettes`: `u32` count then `{ sub_palette_did: u32, offset: u16, length: u16 }`
-12. `texture_changes`: `u32` count then
+13. `sub_palettes`: `u32` count then `{ sub_palette_did: u32, offset: u16, length: u16 }`
+14. `texture_changes`: `u32` count then
     `{ part_index: u8, old_texture_did: u32, new_texture_did: u32 }`
-13. `anim_part_changes`: `u32` count then `{ part_index: u8, animation_part_did: u32 }`
+15. `anim_part_changes`: `u32` count then `{ part_index: u8, animation_part_did: u32 }`
 
 Strings and collection counts are each bounded at 1,048,576. Floats must be finite. Records must
 already obey the canonical collection order and semantic uniqueness rules.

@@ -24,6 +24,12 @@
 		const y = -Math.cos(half) * DISC_RADIUS;
 		return `M 0 0 L ${-x} ${y} A ${DISC_RADIUS} ${DISC_RADIUS} 0 0 1 ${x} ${y} Z`;
 	}
+
+	/** Controlled-character arrow dimensions in canvas pixels. */
+	const CONTROLLED_ARROW_LENGTH = 11;
+	const CONTROLLED_ARROW_HALF_WIDTH = 5;
+	/** Generous pointer target around deliberately small map markers. */
+	const BLIP_HIT_RADIUS = 8;
 </script>
 
 <script lang="ts">
@@ -51,6 +57,34 @@
 		type MapPanelState,
 	} from "./map-panel-frame";
 
+	/** One rendered marker's canvas-space interaction geometry. */
+	interface BlipHitTarget {
+		/** Display label shown while this marker is hovered. */
+		readonly name: string;
+		/** Horizontal coordinate in canvas backing-store pixels. */
+		readonly x: number;
+		/** Vertical coordinate in canvas backing-store pixels. */
+		readonly y: number;
+	}
+
+	/** Last pointer position in viewport space, retained while presentation targets move. */
+	interface BlipHoverPoint {
+		/** Horizontal pointer coordinate in viewport CSS pixels. */
+		readonly clientX: number;
+		/** Vertical pointer coordinate in viewport CSS pixels. */
+		readonly clientY: number;
+	}
+
+	/** Tooltip content and placement relative to the map frame. */
+	interface BlipTooltip {
+		/** Horizontal tooltip coordinate in map-frame CSS pixels. */
+		readonly left: number;
+		/** Deduplicated labels for every marker under the pointer. */
+		readonly names: readonly string[];
+		/** Vertical tooltip coordinate in map-frame CSS pixels. */
+		readonly top: number;
+	}
+
 	interface Props {
 		/**
 		 * Pull every presentation-rate input in one snapshot.
@@ -74,9 +108,13 @@
 	let blipCanvas = $state<HTMLCanvasElement | null>(null);
 	let coneElement = $state<SVGPathElement | null>(null);
 	let northGroup = $state<SVGGElement | null>(null);
+	let freeAnchorElement = $state<SVGCircleElement | null>(null);
 	let coordinatesElement = $state<HTMLSpanElement | null>(null);
+	let tooltip = $state<BlipTooltip | null>(null);
 	let renderer: MapRenderer | null = null;
 	let rendererSource: MapPanelFrame["source"] = null;
+	let blipHitTargets: readonly BlipHitTarget[] = [];
+	let blipHoverPoint: BlipHoverPoint | null = null;
 
 	onMount(() => {
 		let frameHandle: number | undefined;
@@ -104,12 +142,11 @@
 	});
 
 	function view(frame: MapPanelFrame): MapViewParameters | null {
-		if (!frame.anchor) return null;
+		const anchor = frame.subject?.anchor;
+		if (!anchor) return null;
 		return {
-			anchor: frame.anchor,
-			viewDiameter: clampMapViewDiameter(
-				mapPanelViewDiameter(panel, frame.anchor),
-			),
+			anchor,
+			viewDiameter: clampMapViewDiameter(mapPanelViewDiameter(panel, anchor)),
 		};
 	}
 
@@ -166,6 +203,8 @@
 	}
 
 	function clearBlipCanvas(): void {
+		blipHitTargets = [];
+		reconcileBlipTooltip();
 		const context = blipCanvas?.getContext("2d");
 		if (blipCanvas) {
 			context?.clearRect(0, 0, blipCanvas.width, blipCanvas.height);
@@ -192,23 +231,138 @@
 		const context = canvas.getContext("2d");
 		if (!context) return;
 		context.clearRect(0, 0, size, size);
+		const hitTargets: BlipHitTarget[] = [];
 		for (const blip of selectMapBlips(
 			frame.presentedEntities(),
 			parameters,
 			size,
 			size,
+			frame.subject?.kind === "controlled-entity" ? frame.subject.guid : null,
 		)) {
 			// Clip space is [-1, 1] with +Y up; canvas pixels run down from the top-left.
 			const x = ((blip.clipX + 1) / 2) * size;
 			const y = ((1 - blip.clipY) / 2) * size;
+			hitTargets.push({ name: blip.name, x, y });
+			if (blip.appearance.kind === "controlled") {
+				drawControlledArrow(context, x, y, blip.appearance.headingRadians);
+				continue;
+			}
 			context.beginPath();
 			context.arc(x, y, MAP_BLIP_RADIUS_PIXELS, 0, Math.PI * 2);
-			context.fillStyle = MAP_BLIP_COLORS[blip.color];
+			context.fillStyle = MAP_BLIP_COLORS[blip.appearance.color];
 			context.fill();
 			context.lineWidth = 1;
 			context.strokeStyle = "rgba(0, 0, 0, 0.65)";
 			context.stroke();
 		}
+		blipHitTargets = hitTargets;
+		reconcileBlipTooltip();
+	}
+
+	/** Draw the controlled character as an arrowhead pointing along its map-relative heading. */
+	function drawControlledArrow(
+		context: CanvasRenderingContext2D,
+		x: number,
+		y: number,
+		headingRadians: number,
+	): void {
+		context.save();
+		context.translate(x, y);
+		context.rotate(headingRadians);
+		context.beginPath();
+		context.moveTo(0, -CONTROLLED_ARROW_LENGTH / 2);
+		context.lineTo(CONTROLLED_ARROW_HALF_WIDTH, CONTROLLED_ARROW_LENGTH / 2);
+		context.lineTo(0, CONTROLLED_ARROW_LENGTH / 4);
+		context.lineTo(-CONTROLLED_ARROW_HALF_WIDTH, CONTROLLED_ARROW_LENGTH / 2);
+		context.closePath();
+		context.fillStyle = "rgb(150 220 150 / 0.95)";
+		context.fill();
+		context.lineWidth = 1;
+		context.strokeStyle = "rgba(0, 0, 0, 0.7)";
+		context.stroke();
+		context.restore();
+	}
+
+	/** Convert CSS pointer coordinates into canvas pixels before marker hit testing. */
+	function showBlipTooltip(event: PointerEvent): void {
+		blipHoverPoint = {
+			clientX: event.clientX,
+			clientY: event.clientY,
+		};
+		reconcileBlipTooltip();
+	}
+
+	/** Keep hover output valid as either the pointer or presentation-rate markers move. */
+	function reconcileBlipTooltip(): void {
+		const hover = blipHoverPoint;
+		if (!hover) {
+			if (tooltip !== null) tooltip = null;
+			return;
+		}
+		const canvas = blipCanvas;
+		const canvasBounds = canvas?.getBoundingClientRect();
+		const frameBounds = canvas
+			?.closest(".map-panel-frame")
+			?.getBoundingClientRect();
+		if (
+			!canvas ||
+			!canvasBounds ||
+			!frameBounds ||
+			canvasBounds.width <= 0 ||
+			canvasBounds.height <= 0
+		) {
+			if (tooltip !== null) tooltip = null;
+			return;
+		}
+		const canvasX =
+			((hover.clientX - canvasBounds.left) * canvas.width) / canvasBounds.width;
+		const canvasY =
+			((hover.clientY - canvasBounds.top) * canvas.height) /
+			canvasBounds.height;
+		const names = [
+			...new Set(
+				blipHitTargets
+					.filter(
+						(target) =>
+							Math.hypot(target.x - canvasX, target.y - canvasY) <=
+							BLIP_HIT_RADIUS,
+					)
+					.map((target) => target.name),
+			),
+		];
+		if (names.length === 0) {
+			if (tooltip !== null) tooltip = null;
+			return;
+		}
+		const left = hover.clientX - frameBounds.left;
+		const top = hover.clientY - frameBounds.top;
+		if (
+			tooltip?.left === left &&
+			tooltip.top === top &&
+			sameNames(tooltip.names, names)
+		) {
+			return;
+		}
+		tooltip = {
+			left,
+			names,
+			top,
+		};
+	}
+
+	function clearBlipTooltip(): void {
+		blipHoverPoint = null;
+		reconcileBlipTooltip();
+	}
+
+	function sameNames(
+		left: readonly string[],
+		right: readonly string[],
+	): boolean {
+		return (
+			left.length === right.length &&
+			left.every((name, index) => name === right[index])
+		);
 	}
 
 	/**
@@ -218,7 +372,7 @@
 	 * relative to that bearing and therefore points straight up whenever camera and subject agree.
 	 */
 	function drawChrome(frame: MapPanelFrame): void {
-		const anchor = frame.anchor;
+		const anchor = frame.subject?.anchor ?? null;
 		if (coneElement) {
 			coneElement.style.display = anchor ? "" : "none";
 			coneElement.setAttribute("d", conePath(frame.cameraFovRadians));
@@ -230,6 +384,10 @@
 		if (northGroup) {
 			const rotation = anchor ? (-anchor.headingRadians * 180) / Math.PI : 0;
 			northGroup.setAttribute("transform", `rotate(${rotation})`);
+		}
+		if (freeAnchorElement) {
+			freeAnchorElement.style.display =
+				frame.subject?.kind === "free-camera" ? "" : "none";
 		}
 		if (coordinatesElement) {
 			coordinatesElement.textContent = anchor
@@ -296,13 +454,14 @@
 		// Multiplicative so each notch covers the same proportion at every scale.
 		const factor = event.deltaY > 0 ? 1.2 : 1 / 1.2;
 		const frame = readFrame();
-		const environment = mapEnvironment(frame.anchor);
+		const anchor = frame.subject?.anchor ?? null;
+		const environment = mapEnvironment(anchor);
 		onStateChange({
 			...panel,
 			viewDiameters: {
 				...panel.viewDiameters,
 				[environment]: clampMapViewDiameter(
-					mapPanelViewDiameter(panel, frame.anchor) * factor,
+					mapPanelViewDiameter(panel, anchor) * factor,
 				),
 			},
 		});
@@ -331,7 +490,12 @@
 	>
 		<div class="map-panel-disc">
 			<canvas bind:this={mapCanvas} class="map-panel-canvas"></canvas>
-			<canvas bind:this={blipCanvas} class="map-panel-canvas"></canvas>
+			<canvas
+				bind:this={blipCanvas}
+				class="map-panel-canvas"
+				onpointermove={showBlipTooltip}
+				onpointerleave={clearBlipTooltip}
+			></canvas>
 		</div>
 		<svg
 			class="map-panel-compass"
@@ -351,8 +515,25 @@
 					>
 				{/each}
 			</g>
-			<circle class="map-panel-anchor" cx="0" cy="0" r="3.5" />
+			<!-- Free-camera explorer mode has an anchor but no controlled character. -->
+			<circle
+				bind:this={freeAnchorElement}
+				class="map-panel-free-anchor"
+				cx="0"
+				cy="0"
+				r="3.5"
+			/>
 		</svg>
+		{#if tooltip}
+			<div
+				class="map-panel-tooltip"
+				role="tooltip"
+				style:left={`${tooltip.left}px`}
+				style:top={`${tooltip.top}px`}
+			>
+				{tooltip.names.join(", ")}
+			</div>
+		{/if}
 		{#if editable}
 			<button
 				type="button"
@@ -476,10 +657,28 @@
 		fill: var(--ac-gold-bright);
 	}
 
-	.map-panel-anchor {
+	.map-panel-free-anchor {
 		fill: rgb(150 220 150 / 0.95);
 		stroke: rgb(0 0 0 / 0.7);
 		stroke-width: 1;
+	}
+
+	.map-panel-tooltip {
+		position: absolute;
+		z-index: 2;
+		max-width: 180px;
+		padding: 3px 6px;
+		border: var(--ac-border);
+		border-radius: 3px;
+		color: var(--ac-ink);
+		font-size: 12px;
+		line-height: 1.25;
+		text-align: center;
+		white-space: normal;
+		background: rgb(24 18 13 / 0.96);
+		box-shadow: 0 2px 6px rgb(0 0 0 / 0.55);
+		pointer-events: none;
+		transform: translate(-50%, calc(-100% - 8px));
 	}
 
 	.map-panel-move,

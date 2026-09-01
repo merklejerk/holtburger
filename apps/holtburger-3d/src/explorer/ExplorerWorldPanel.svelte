@@ -32,6 +32,11 @@
 	import type { EntityShadowSettings } from "../lib/game/renderer/entity-shadow-policy";
 	import ExplorerShadowControls from "./ExplorerShadowControls.svelte";
 	import ToggleField from "../app/ToggleField.svelte";
+	import {
+		NAMEPLATE_CATEGORIES,
+		type NameplateCategory,
+		type NameplateSettings,
+	} from "../lib/game/renderer/nameplate-policy";
 
 	interface Props {
 		/** Whether Explorer has a runtime available to accept world operations. */
@@ -61,6 +66,11 @@
 		/** Whether meshes suppressed by retail's degradation sentinel remain visible. */
 		readonly showRetailHiddenGeometry: boolean;
 		readonly updateShowRetailHiddenGeometry: (visible: boolean) => void;
+		readonly nameplates: NameplateSettings;
+		readonly updateNameplateCategory: (
+			category: NameplateCategory,
+			visible: boolean,
+		) => void;
 		/** User-switchable near-field ambient-occlusion presentation. */
 		readonly ambientOcclusion: AmbientOcclusionSettings;
 		/** Complete outdoor and indoor entity-shadow presentation policy. */
@@ -129,6 +139,8 @@
 		distanceFogEnabled,
 		showRetailHiddenGeometry,
 		updateShowRetailHiddenGeometry,
+		nameplates,
+		updateNameplateCategory,
 		ambientOcclusion,
 		entityShadows,
 		viewerLightEnabled,
@@ -553,6 +565,16 @@
 			uncheckedLabel="Hidden"
 			onCheckedChange={updateShowRetailHiddenGeometry}
 		/>
+		{#each NAMEPLATE_CATEGORIES as category (category)}
+			<ToggleField
+				checked={nameplates.categoryVisibility[category]}
+				label={`Nameplates: ${category === "selfPlayer" ? "self player" : category}`}
+				checkedLabel="Shown"
+				uncheckedLabel="Hidden"
+				onCheckedChange={(visible) =>
+					updateNameplateCategory(category, visible)}
+			/>
+		{/each}
 		<ToggleField
 			checked={ambientOcclusion.enabled}
 			label="Near-field ambient occlusion"

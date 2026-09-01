@@ -59,6 +59,8 @@ export class ClientPreciseJumpSession {
 	readonly #lifecycle: ClientLifecycleSession;
 	readonly #onError: (error: unknown) => void;
 	readonly #cadence: ClientPreciseJumpCadence;
+	/** Minimum delay between host aim evaluations for this session. */
+	readonly #aimEvaluationIntervalMs: number;
 	readonly #listeners = new Set<
 		(snapshot: ClientPreciseJumpSnapshot) => void
 	>();
@@ -78,10 +80,12 @@ export class ClientPreciseJumpSession {
 		lifecycle: ClientLifecycleSession,
 		onError: (error: unknown) => void = () => undefined,
 		cadence: ClientPreciseJumpCadence = browserPreciseJumpCadence,
+		aimEvaluationIntervalMs = CLIENT_TUNING.preciseJump.aimEvaluationIntervalMs,
 	) {
 		this.#lifecycle = lifecycle;
 		this.#onError = onError;
 		this.#cadence = cadence;
+		this.#aimEvaluationIntervalMs = aimEvaluationIntervalMs;
 		this.#unsubscribe = lifecycle.subscribe((event) => this.#receive(event));
 	}
 
@@ -178,10 +182,7 @@ export class ClientPreciseJumpSession {
 			this.#lastSubmissionMilliseconds === null
 				? Number.POSITIVE_INFINITY
 				: now - this.#lastSubmissionMilliseconds;
-		const delay = Math.max(
-			0,
-			CLIENT_TUNING.preciseJump.aimEvaluationIntervalMs - elapsed,
-		);
+		const delay = Math.max(0, this.#aimEvaluationIntervalMs - elapsed);
 		if (delay === 0) {
 			this.#submitPendingAim();
 			return;

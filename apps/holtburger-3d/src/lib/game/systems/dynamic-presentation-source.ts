@@ -5,12 +5,20 @@ import type { ResolvedObjectPresentation } from "../resolution/presentation";
 import type { SceneSpatialPlacement } from "../scene";
 import type { DynamicEntityCategory } from "../dynamic-entity-category";
 
+/** Complete visual value currently painted into one entity nameplate. */
+export interface NameplateContent {
+	readonly name: string;
+	readonly level: number | null;
+}
+
 /** Immutable visual and setup-default behavior facts shared by every dynamic producer. */
 export interface DynamicPresentationSource {
 	/** Producer-resolved frontend category controlling presentation participation. */
 	readonly category: DynamicEntityCategory;
 	/** Producer-stable identity used for behavior, diagnostics, and deterministic presentation ties. */
 	readonly identity: string;
+	/** Entity display content, or null for authored dynamics without an entity authority. */
+	readonly nameplate: NameplateContent | null;
 	/** Exact SetupModel DAT identity that owns setup-default behavior. */
 	readonly setupId: DatAssetId;
 	/** Host-resolved appearance and rigid-part inputs. */

@@ -62,6 +62,7 @@ describe("map panel GPU draw state", () => {
 			frame({
 				cameraFovRadians: 1.25,
 				cameraHeadingRadians: 0.75,
+				controlledGuid: 7,
 				presentedEntityRevision: 2,
 				source,
 			}),
@@ -74,10 +75,15 @@ describe("map panel GPU draw state", () => {
 	it("remembers indoor and outdoor zoom independently", () => {
 		const state = panel({ indoorViewDiameter: 48, outdoorViewDiameter: 384 });
 
-		expect(mapPanelViewDiameter(state, frame().anchor)).toBe(48);
-		expect(mapPanelViewDiameter(state, frame({ envCellId: null }).anchor)).toBe(
-			384,
+		expect(mapPanelViewDiameter(state, frame().subject?.anchor ?? null)).toBe(
+			48,
 		);
+		expect(
+			mapPanelViewDiameter(
+				state,
+				frame({ envCellId: null }).subject?.anchor ?? null,
+			),
+		).toBe(384);
 		expect(mapPanelViewDiameter(state, null)).toBe(384);
 	});
 });
@@ -106,27 +112,36 @@ function frame(
 		readonly presentedEntityRevision?: number;
 		readonly cameraFovRadians?: number;
 		readonly cameraHeadingRadians?: number;
+		readonly controlledGuid?: number;
 	} = {},
 ): MapPanelFrame {
 	return {
-		anchor: {
-			headingRadians: overrides.headingRadians ?? 0,
-			residency: {
-				envCellId:
-					overrides.envCellId === undefined
-						? "0x01020100"
-						: overrides.envCellId,
-				landblockId: "0x0102ffff",
-			},
-			worldX: overrides.worldX ?? 10,
-			worldY: overrides.worldY ?? 20,
-			worldZ: 30,
-		},
 		cameraFovRadians: overrides.cameraFovRadians ?? 1,
 		cameraHeadingRadians: overrides.cameraHeadingRadians ?? 0,
 		presentedEntities: () => [],
 		presentedEntityRevision: overrides.presentedEntityRevision ?? 1,
 		source: overrides.source ?? mapSource(),
+		subject: {
+			anchor: {
+				headingRadians: overrides.headingRadians ?? 0,
+				residency: {
+					envCellId:
+						overrides.envCellId === undefined
+							? "0x01020100"
+							: overrides.envCellId,
+					landblockId: "0x0102ffff",
+				},
+				worldX: overrides.worldX ?? 10,
+				worldY: overrides.worldY ?? 20,
+				worldZ: 30,
+			},
+			...(overrides.controlledGuid === undefined
+				? { kind: "free-camera" as const }
+				: {
+						guid: overrides.controlledGuid,
+						kind: "controlled-entity" as const,
+					}),
+		},
 	};
 }
 

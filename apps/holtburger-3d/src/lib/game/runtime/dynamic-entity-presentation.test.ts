@@ -6,6 +6,7 @@ import { adaptAuthoredDynamicPresentation } from "../resolution/authored-dynamic
 import type { AuthoredDynamicSource } from "../resolution/landblock-layer";
 import {
 	adaptDynamicEntityPresentation,
+	dynamicEntityPresentationIdentity,
 	dynamicEntityPlacement,
 } from "./dynamic-entity-presentation";
 import { cellId, type DynamicEntityView } from "./dynamic-entity-feed";
@@ -78,6 +79,9 @@ describe("dynamic presentation producer adapters", () => {
 			},
 		});
 		expect(dynamicEntityPlacement(entity)).toEqual(adapted.placement);
+		expect(dynamicEntityPresentationIdentity(7, 3)).toBe(
+			adapted.source.identity,
+		);
 	});
 
 	it("rejects a visual closure for a different setup", () => {
@@ -169,7 +173,8 @@ function fixtureEntity(): DynamicEntityView {
 	return {
 		generation: 3,
 		playingClip: null,
-		identity: { guid: 7, name: "Fixture", wcid: 42 },
+		identity: { guid: 7, wcid: 42 },
+		display: { name: "Fixture", level: null },
 		physics: {
 			cloaked: false,
 			defaultAnimation: false,

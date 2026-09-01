@@ -33,6 +33,7 @@
 		type EnvCellRenderMode,
 		type RendererFrameDiagnosticsSnapshot,
 	} from "../lib/game/renderer/renderer";
+	import type { NameplateCategory } from "../lib/game/renderer/nameplate-policy";
 	import type { AmbientOcclusionSettings } from "../lib/game/renderer/ambient-occlusion-policy";
 	import type { ColorGradeSettings } from "../lib/game/renderer/color-grade-policy";
 	import {
@@ -288,13 +289,25 @@
 	/** Pull the scene's current map picture without publishing presentation-rate Svelte state. */
 	function readMapPanelFrame(): MapPanelFrame {
 		const runtime = runtimeReady ? (gameRuntime ?? null) : null;
+		const controlledGuid = explorerPossession?.guid ?? null;
+		const controlledAnchor = anchorFromPossession();
+		const freeCameraAnchor = anchorFromCamera();
 		return {
-			anchor: anchorFromPossession() ?? anchorFromCamera(),
 			cameraFovRadians: (EXPLORER_TUNING.camera.framing.fov * Math.PI) / 180,
 			cameraHeadingRadians: cameraYawRadians,
 			presentedEntities: readPresentedMapEntities,
 			presentedEntityRevision: runtime?.dynamicEntityPlacementRevision ?? 0,
 			source: runtime,
+			subject:
+				controlledGuid !== null && controlledAnchor !== null
+					? {
+							anchor: controlledAnchor,
+							guid: controlledGuid,
+							kind: "controlled-entity",
+						}
+					: freeCameraAnchor === null
+						? null
+						: { anchor: freeCameraAnchor, kind: "free-camera" },
 		};
 	}
 
@@ -445,6 +458,23 @@
 
 	function updateShowRetailHiddenGeometry(visible: boolean): void {
 		frameSettings = { ...frameSettings, showRetailHiddenGeometry: visible };
+		applyFrameSettings();
+	}
+
+	function updateNameplateCategory(
+		category: NameplateCategory,
+		visible: boolean,
+	): void {
+		frameSettings = {
+			...frameSettings,
+			nameplates: {
+				...frameSettings.nameplates,
+				categoryVisibility: {
+					...frameSettings.nameplates.categoryVisibility,
+					[category]: visible,
+				},
+			},
+		};
 		applyFrameSettings();
 	}
 
@@ -1898,7 +1928,7 @@
 							: (gameRuntime.spawnedEntityPlacement(possessedGuid) ?? null);
 					// The possessed character is what the viewer is driving, so it carries the
 					// viewer light; with nothing possessed the camera carries it, as retail does.
-					gameRuntime.setViewerLightCarrier(possessedGuid);
+					gameRuntime.setViewerEntity(possessedGuid);
 					const followResidency = residencySync.location?.residency;
 					if (interestFollowsCamera && followResidency) {
 						followCameraSceneInterest(followResidency);
@@ -2019,6 +2049,8 @@
 			distanceFogEnabled={frameSettings.distanceFogEnabled}
 			showRetailHiddenGeometry={frameSettings.showRetailHiddenGeometry}
 			{updateShowRetailHiddenGeometry}
+			nameplates={frameSettings.nameplates}
+			{updateNameplateCategory}
 			ambientOcclusion={frameSettings.ambientOcclusion}
 			entityShadows={frameSettings.entityShadows}
 			{updateEntityShadowSettings}

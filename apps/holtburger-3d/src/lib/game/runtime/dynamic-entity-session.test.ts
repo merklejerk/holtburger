@@ -111,7 +111,8 @@ describe("DynamicEntitySession", () => {
 function view(guid: number): DynamicEntityView {
 	return {
 		generation: 1,
-		identity: { guid, wcid: 42, name: "Drudge" },
+		identity: { guid, wcid: 42 },
+		display: { name: "Drudge", level: null },
 		presentation: {
 			category: "other",
 			content: {

@@ -8,7 +8,7 @@ import type { ExplorerSceneInterestSnapshot } from "./explorer-camera-coordinato
 import type { ExplorerCameraLocation } from "./explorer-camera-location";
 import type { FreeFlyCameraState } from "./explorer-camera-input-controller";
 
-const EXPLORER_FRAME_DIAGNOSTIC_REPORT_VERSION = 5;
+const EXPLORER_FRAME_DIAGNOSTIC_REPORT_VERSION = 6;
 
 /** Browser-owned viewport facts recorded at the same instant as the diagnostic snapshot. */
 interface ExplorerViewportDiagnosticSnapshot {

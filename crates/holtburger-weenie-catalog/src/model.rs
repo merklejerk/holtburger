@@ -24,6 +24,8 @@ pub struct WeenieTemplate {
     pub weenie_type: i32,
     /// Optional `PropertyString::Name` display name.
     pub name: Option<String>,
+    /// Optional raw `PropertyInt::Level` (25).
+    pub level: Option<i32>,
     /// Optional setup-model data ID.
     pub setup_did: Option<u32>,
     /// Optional motion-table data ID.

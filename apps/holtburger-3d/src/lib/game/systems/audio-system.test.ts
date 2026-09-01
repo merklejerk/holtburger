@@ -129,6 +129,62 @@ describe("AudioSystem", () => {
 		expect(played).toEqual([{ gain: 0.3, pan: 0, soundId: SOUND }]);
 	});
 
+	it("silences and restores an existing world-live voice from its producer policy", () => {
+		let volume = 0.3;
+		const { played, stops, system } = build();
+		const source = {
+			mode: "world-live" as const,
+			position: sceneVector3([0, 0, 0]),
+			volume: () => volume,
+		};
+
+		expect(
+			system.trigger({
+				category: "effect",
+				probability: 1,
+				soundId: SOUND,
+				source,
+			}),
+		).toBe("played");
+		expect(played[0]!.gain).toBeCloseTo(0.3);
+
+		volume = 0;
+		system.updatePlacements();
+		expect(stops[0]!.placements.at(-1)?.gain).toBe(0);
+
+		volume = 0.3;
+		system.updatePlacements();
+		expect(stops[0]!.placements.at(-1)?.gain).toBeCloseTo(0.3);
+	});
+
+	it("does not replay a warmed world-live sound after its producer withdraws gain", async () => {
+		let volume = 0.3;
+		const { played, system } = build({ coldSounds: new Set([SOUND]) });
+
+		expect(
+			system.trigger({
+				category: "effect",
+				probability: 1,
+				soundId: SOUND,
+				source: {
+					mode: "world-live",
+					position: sceneVector3([0, 0, 0]),
+					volume: () => volume,
+				},
+			}),
+		).toBe("device-refused");
+		volume = 0;
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(played).toHaveLength(0);
+		expect(system.getDiagnostics()).toMatchObject({
+			inaudibleCount: 1,
+			playedCount: 0,
+			warmedPlayedCount: 0,
+		});
+	});
+
 	it("rolls probability before doing any spatial work", () => {
 		// A roll of 0.9 against a 0.5 chance loses.
 		const { played, system } = build({ roll: 0.9 });

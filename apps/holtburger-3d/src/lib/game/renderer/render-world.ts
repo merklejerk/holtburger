@@ -40,6 +40,8 @@ import type { StaticDetailRole } from "../resolution/static-detail-role";
 import { LandblockLayerKind } from "../runtime/scene-interest";
 import { scopeKey } from "../scene/scope";
 import type { DynamicEntityCategory } from "../dynamic-entity-category";
+import type { NameplateContent } from "../systems/dynamic-presentation-source";
+import type { NameplateSourceVisual } from "./nameplate-policy";
 
 /** Private read-only query ports captured by one RenderWorld. */
 interface RenderWorldSystems {
@@ -88,6 +90,15 @@ interface RenderWorldSystems {
 		getPresentationIdentity(nodeId: SceneNodeId): string | null;
 		getPublishedPresentationBounds(nodeId: SceneNodeId): AABB3 | null;
 		getPublishedRigidPresentationBounds(nodeId: SceneNodeId): AABB3 | null;
+		getNameplatePopulationRevision(): number;
+		forEachNameplateVisual(
+			visit: (identity: string, visual: NameplateSourceVisual) => void,
+		): void;
+		getNameplateFacts(nodeId: SceneNodeId): {
+			readonly content: NameplateContent;
+			readonly identity: string;
+			readonly rigidBounds: AABB3;
+		} | null;
 		getVisibleContributions(
 			nodeId: SceneNodeId,
 			includeDepth: boolean,
@@ -178,6 +189,13 @@ export interface EntityGroundingDynamicFacts {
 	/** Exact current rigid-pose bounds before particle-envelope expansion. */
 	readonly rigidBounds: AABB3;
 	readonly spatialMembership: SceneSpatialMembership;
+}
+
+/** Display value and exact current rigid bounds for one selected dynamic entity. */
+export interface EntityNameplateFacts {
+	readonly content: NameplateContent;
+	readonly identity: string;
+	readonly rigidBounds: AABB3;
 }
 
 /** EnvCell facts read only when indoor grounding is active for a visible shell. */
@@ -308,6 +326,20 @@ export class RenderWorld {
 		if (!contributions)
 			throw new Error(`Dynamic entity ${nodeId} no longer exists.`);
 		return contributions;
+	}
+
+	getNameplatePopulationRevision(): number {
+		return this.#systems.dynamics.getNameplatePopulationRevision();
+	}
+
+	forEachNameplateVisual(
+		visit: (identity: string, visual: NameplateSourceVisual) => void,
+	): void {
+		this.#systems.dynamics.forEachNameplateVisual(visit);
+	}
+
+	getEntityNameplateFacts(nodeId: SceneNodeId): EntityNameplateFacts | null {
+		return this.#systems.dynamics.getNameplateFacts(nodeId);
 	}
 
 	/** Resolve the two facts not already carried by a visible dynamic contribution. */

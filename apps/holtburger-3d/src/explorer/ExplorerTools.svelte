@@ -23,6 +23,10 @@
 	import type { PhysicalFlyStatus } from "./physical-fly-session";
 	import type { ExplorerCameraMode } from "../lib/game/motion/host-physical-fly-path";
 	import type { EntityShadowSettings } from "../lib/game/renderer/entity-shadow-policy";
+	import type {
+		NameplateCategory,
+		NameplateSettings,
+	} from "../lib/game/renderer/nameplate-policy";
 	import ExplorerGradingPanel from "./ExplorerGradingPanel.svelte";
 	import ExplorerEntitiesPanel from "./ExplorerEntitiesPanel.svelte";
 	import type {
@@ -75,6 +79,11 @@
 		/** Whether meshes suppressed by retail's degradation sentinel remain visible. */
 		readonly showRetailHiddenGeometry: boolean;
 		readonly updateShowRetailHiddenGeometry: (visible: boolean) => void;
+		readonly nameplates: NameplateSettings;
+		readonly updateNameplateCategory: (
+			category: NameplateCategory,
+			visible: boolean,
+		) => void;
 		readonly ambientOcclusion: AmbientOcclusionSettings;
 		readonly entityShadows: EntityShadowSettings;
 		readonly updateEntityShadowSettings: (
@@ -179,6 +188,8 @@
 		distanceFogEnabled,
 		showRetailHiddenGeometry,
 		updateShowRetailHiddenGeometry,
+		nameplates,
+		updateNameplateCategory,
 		ambientOcclusion,
 		entityShadows,
 		updateEntityShadowSettings,
@@ -331,6 +342,8 @@
 								{distanceFogEnabled}
 								{showRetailHiddenGeometry}
 								{updateShowRetailHiddenGeometry}
+								{nameplates}
+								{updateNameplateCategory}
 								{ambientOcclusion}
 								{entityShadows}
 								{updateEntityShadowSettings}

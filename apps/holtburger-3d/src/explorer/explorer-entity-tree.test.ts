@@ -73,7 +73,8 @@ function base(guid: number): Omit<DynamicEntityView, "placement"> {
 	return {
 		generation: 1,
 		playingClip: null,
-		identity: { guid, wcid: 42, name: "Entity" },
+		identity: { guid, wcid: 42 },
+		display: { name: "Entity", level: null },
 		presentation: {
 			category: "other",
 			content: {

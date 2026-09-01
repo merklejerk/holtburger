@@ -340,6 +340,32 @@ exact values.
 configuration propagation separately, and leave subjective calibration to its actual evaluation
 process.
 
+## Temporary Overrides Restore an Assumed Default
+
+**Smell:** A test, diagnostic, benchmark, preview, or scoped operation temporarily changes shared
+state, then restores a hard-coded “normal” value instead of the value that was actually present.
+
+**Signals:**
+
+- Cleanup assigns a literal default after applying a temporary override.
+- Restoration runs only on the successful path rather than in guaranteed cleanup.
+- The helper assumes no caller, user, environment, or concurrent owner customized the state first.
+- Changing an adjustable default requires changing diagnostic cleanup code.
+
+**Possible failure:** The observing tool leaves production state changed after failure, clobbers a
+caller's valid customization, or makes later measurements and tests depend on execution order.
+
+**Questions:** Who owns the state being overridden? Can the operation fail or be nested? Is the
+original value readable and sufficient to restore the complete state? Can another writer change it
+while the override is active?
+
+**Counterexamples:** A disposable isolated process may intentionally end instead of restoring
+state, and a reset operation may explicitly promise to replace all state with a canonical baseline.
+
+**Possible responses:** Capture the complete prior value, restore it from guaranteed cleanup such
+as `finally` or an RAII guard, serialize competing writers where necessary, or run the experiment
+against an isolated owner whose lifetime ends with the override.
+
 ## Fixture Setup Becomes a Shadow Framework
 
 **Smell:** Test setup grows until its implicit behavior dominates the behavior under test.
@@ -709,6 +735,91 @@ serialization, or model checking even when one local caller currently narrows it
 remaining outcomes in a smaller discriminated type, or move the distinction to the boundary where
 both outcomes can actually occur.
 
+## Coordinate Spaces Are Compared Implicitly
+
+**Smell:** Geometry from different coordinate systems, units, scales, or origins is compared as if
+the values shared one basis.
+
+**Signals:**
+
+- Pointer coordinates in CSS pixels are tested against a canvas backing store, framebuffer, image,
+  or device-pixel grid without an explicit conversion.
+- Local, world, viewport, screen, or transformed coordinates share bare numeric types and names.
+- Correctness depends on two independently sized surfaces currently having nearly equal dimensions.
+- Scaling, zoom, device-pixel ratio, scrolling, or a layout transform changes only one side of a
+  geometry calculation.
+
+**Possible failure:** Hit testing, selection, overlays, and spatial effects drift or fail only under
+particular display scales, layouts, transforms, or devices.
+
+**Questions:** What space owns each value? Where are origin, axis direction, scale, and units
+converted? Does the conversion use one coherent geometry snapshot?
+
+**Counterexamples:** Direct comparison is correct when an owning boundary proves both values use the
+same coordinate contract and preserves that invariant across resizing and transformation.
+
+**Possible responses:** Name coordinate spaces in types and fields, convert once at the interaction
+boundary, derive scale from the two current extents, or expose a single projection/unprojection
+operation owned by the renderer.
+
+## Derived Interaction State Outlives Its Inputs
+
+**Smell:** Hover, focus, selection, snapping, or another derived interaction result updates only on
+input events even though the underlying targets can change independently.
+
+**Signals:**
+
+- A tooltip is recomputed on pointer movement but not when its target moves, disappears, or changes
+  identity.
+- Cached hit targets are replaced without reconciling the active hover or selection.
+- Animated, streamed, virtualized, or presentation-rate content can change beneath a stationary
+  pointer.
+- Interaction state stores a derived label or object without the source identity or invalidation
+  path needed to confirm it remains valid.
+
+**Possible failure:** The interface presents stale identity or actions for an object no longer under
+the pointer, and the error persists until unrelated user input forces recomputation.
+
+**Questions:** Which inputs determine the interaction result? Which of them can change without a new
+input event? Who owns invalidation when targets are replaced or removed?
+
+**Counterexamples:** Event-only recomputation is sufficient when targets and geometry are immutable
+for the entire interaction or when stale output is deliberately frozen by capture semantics.
+
+**Possible responses:** Reconcile derived interaction state whenever either input side changes,
+retain the pointer query and rerun it against new targets, or represent explicit capture whose
+lifetime ends on a named event.
+
+## Sibling Outputs Disagree on Eligibility
+
+**Smell:** One logical producer drives several observable outputs, but each output independently
+decides whether the producer is currently eligible.
+
+**Signals:**
+
+- Rendering, audio, notifications, persistence, telemetry, or other sibling consumers repeat
+  similar visibility, authorization, lifecycle, or context gates.
+- Disabling or hiding a feature removes one output while another remains active.
+- A producer continues advancing because one output may still need its state, leaving every other
+  consumer responsible for suppressing its own effects.
+- Tests verify each output in isolation but never assert that their admission decisions agree.
+
+**Possible failure:** Users observe contradictory state, such as invisible effects that remain
+audible, hidden operations that still notify, or unauthorized work that is omitted from one surface
+but persists through another.
+
+**Questions:** Which layer owns eligibility? Must every output share one decision, or do some have
+legitimate exceptions? Does an output need the producer stopped, its new effects rejected, its
+existing effects withdrawn, or some combination of those?
+
+**Counterexamples:** Outputs may intentionally use different admission policies when their
+semantics differ—for example, an accessibility channel can remain active when a visual channel is
+hidden—but the distinction should be explicit and independently named.
+
+**Possible responses:** Compute shared eligibility once and carry it to sibling consumers, or name
+and test each genuinely distinct policy. For effects that outlive dispatch, preserve a live
+eligibility input or explicit cancellation path so a later policy change reaches existing work as
+well as future emissions.
 ## Adding Observations
 
 An observation belongs here when it has:

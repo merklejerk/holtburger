@@ -201,7 +201,7 @@ function createCensus() {
 		const clipChanged = previous === undefined || previous.clip !== clip;
 		actorMotion.set(entity.identity.guid, {
 			point,
-			name: entity.identity.name,
+			name: entity.display.name,
 			wcid: entity.identity.wcid,
 			category: entity.presentation?.category ?? null,
 			setupDid: entity.presentation?.content?.setupDid ?? null,

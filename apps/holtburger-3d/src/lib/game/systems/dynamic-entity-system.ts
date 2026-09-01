@@ -12,8 +12,10 @@ import type { SoundTableRepository } from "../behavior/sound-table-repository";
 import type { DecodedSoundTable } from "../../assets/decode-sound-table-record";
 import type {
 	DynamicPresentationSource,
+	NameplateContent,
 	PlacedDynamicPresentationSource,
 } from "./dynamic-presentation-source";
+import type { NameplateSourceVisual } from "../renderer/nameplate-policy";
 import { AABB3, Mat4, Vec3 } from "../math/types";
 import {
 	multiplyMat4,
@@ -86,6 +88,8 @@ interface DynamicEntityRecord {
 	readonly visualRootNodeId: SceneNodeId;
 	/** Source-neutral visual facts retained for behavior staging and deterministic phase identity. */
 	readonly source: DynamicPresentationSource;
+	/** Mutable display content updated independently from immutable visual setup facts. */
+	nameplateContent: NameplateContent | null;
 	renderable: DynamicEntityRenderable;
 	articulatedPose: ArticulatedPose;
 	animationHandle: PreparedAnimationHandle | null;
@@ -265,6 +269,8 @@ export class DynamicEntitySystem<
 	#lastParticleEnvelopeChangeCount = 0;
 	/** Owner-aggregate lookups performed during the last publication. */
 	#lastParticleEnvelopeQueryCount = 0;
+	/** Changes only when the installed nameplate population or one of its visual values changes. */
+	#nameplatePopulationRevision = 0;
 
 	constructor(
 		scene: SceneGraph,
@@ -476,6 +482,7 @@ export class DynamicEntitySystem<
 			renderable: { parts },
 			rootNodeId,
 			source,
+			nameplateContent: source.nameplate,
 			preparedAnimation: null,
 			rigidPresentationBounds,
 			publishedPresentationBounds: rigidPresentationBounds,
@@ -630,6 +637,52 @@ export class DynamicEntitySystem<
 	/** Return producer-stable identity for deterministic frontend presentation policy. */
 	getPresentationIdentity(nodeId: SceneNodeId): string | null {
 		return this.#entities.get(nodeId)?.source.identity ?? null;
+	}
+
+	/** Return the revision guarding exact installed nameplate-content enumeration. */
+	getNameplatePopulationRevision(): number {
+		return this.#nameplatePopulationRevision;
+	}
+
+	/** Visit each installed nameplate source with the identity needed for viewer classification. */
+	forEachNameplateVisual(
+		visit: (identity: string, visual: NameplateSourceVisual) => void,
+	): void {
+		for (const entity of this.#entities.values()) {
+			if (entity.nameplateContent !== null)
+				visit(entity.source.identity, {
+					category: entity.source.category,
+					content: entity.nameplateContent,
+				});
+		}
+	}
+
+	/** Return display content and current rigid bounds for one already-selected entity. */
+	getNameplateFacts(nodeId: SceneNodeId): {
+		readonly content: NameplateContent;
+		readonly identity: string;
+		readonly rigidBounds: AABB3;
+	} | null {
+		const entity = this.#entities.get(nodeId);
+		if (entity === undefined || entity.nameplateContent === null) return null;
+		return {
+			content: entity.nameplateContent,
+			identity: entity.source.identity,
+			rigidBounds: entity.rigidPresentationBounds,
+		};
+	}
+
+	/** Replace one installed entity's display value without rebuilding visual resources. */
+	updateNameplateContent(nodeId: SceneNodeId, content: NameplateContent): void {
+		const entity = this.#entities.get(nodeId);
+		if (!entity) throw new Error(`Dynamic entity ${nodeId} does not exist.`);
+		if (
+			entity.nameplateContent?.name === content.name &&
+			entity.nameplateContent.level === content.level
+		)
+			return;
+		entity.nameplateContent = content;
+		this.#nameplatePopulationRevision += 1;
 	}
 
 	/** Return the current drawn pose expanded by its particle-preservation envelope. */
@@ -1226,6 +1279,11 @@ export class DynamicEntitySystem<
 		const previous = this.#owners.get(ownerId);
 		for (const entity of entities)
 			this.#entities.set(entity.rootNodeId, entity);
+		if (
+			entities.some((entity) => entity.nameplateContent !== null) ||
+			previous?.entities.some((entity) => entity.nameplateContent !== null)
+		)
+			this.#nameplatePopulationRevision += 1;
 		this.#owners.set(ownerId, { entities, generation, templateOwnerId });
 		if (!previous) return;
 		for (const entity of previous.entities) {
@@ -1315,6 +1373,8 @@ export class DynamicEntitySystem<
 	#removeOwnerEntities(ownerId: TOwnerId): void {
 		const owner = this.#owners.get(ownerId);
 		if (owner) {
+			if (owner.entities.some((entity) => entity.nameplateContent !== null))
+				this.#nameplatePopulationRevision += 1;
 			for (const entity of owner.entities) {
 				this.#destroyEntityTree(entity);
 				this.#entities.delete(entity.rootNodeId);

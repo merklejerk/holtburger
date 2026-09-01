@@ -17,6 +17,7 @@ fn template(wcid: u32) -> WeenieTemplate {
         class_name: format!("wcid_{wcid}_class"),
         weenie_type: 10,
         name: Some(format!("WCID {wcid}")),
+        level: Some(42),
         setup_did: Some(0x0200_0001),
         motion_table_did: Some(0x0900_0001),
         sound_table_did: Some(0x2000_0001),

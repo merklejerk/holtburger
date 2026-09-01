@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { Vec3 } from "../lib/game/math/types";
 import { ExplorerCameraInputController } from "./explorer-camera-input-controller";
+import { EXPLORER_TUNING } from "./explorer-tuning";
+
+const WHEEL_DELTA = 100;
+const WHEEL_DISTANCE =
+	-Math.min(WHEEL_DELTA, EXPLORER_TUNING.camera.controls.wheelDeltaClamp) *
+	EXPLORER_TUNING.camera.controls.wheelLocalUpUnitsPerDelta;
 
 function controllerHarness(
 	keyboardYawRadiansPerSecond?: (shiftActive: boolean) => number,
@@ -152,9 +158,13 @@ describe("ExplorerCameraInputController scheme routing", () => {
 		const test = controllerHarness();
 		test.controller.setControlScheme({ kind: "physical-fly" });
 
-		test.dispatch("wheel", { deltaX: 0, deltaY: 100, shiftKey: false });
+		test.dispatch("wheel", {
+			deltaX: 0,
+			deltaY: WHEEL_DELTA,
+			shiftKey: false,
+		});
 
-		expect(test.physicalWheel).toHaveBeenCalledWith(2.5);
+		expect(test.physicalWheel).toHaveBeenCalledWith(WHEEL_DISTANCE);
 		expect(test.controller.snapshotState().position).toEqual(Vec3.zero());
 		expect(test.changes).not.toHaveBeenCalled();
 	});
@@ -173,10 +183,14 @@ describe("ExplorerCameraInputController scheme routing", () => {
 			clientY: 17,
 			pointerId: 1,
 		});
-		test.dispatch("wheel", { deltaX: 0, deltaY: 100, shiftKey: false });
+		test.dispatch("wheel", {
+			deltaX: 0,
+			deltaY: WHEEL_DELTA,
+			shiftKey: false,
+		});
 
 		expect(test.possessionOrbit).toHaveBeenCalledWith(4, -3);
-		expect(test.possessionWheel).toHaveBeenCalledWith(2.5);
+		expect(test.possessionWheel).toHaveBeenCalledWith(WHEEL_DISTANCE);
 		expect(test.controller.snapshotState().yawRadians).toBe(0);
 	});
 
@@ -245,10 +259,14 @@ describe("ExplorerCameraInputController scheme routing", () => {
 			pointerId: 1,
 			shiftKey: false,
 		});
-		test.dispatch("wheel", { deltaX: 0, deltaY: 100, shiftKey: true });
+		test.dispatch("wheel", {
+			deltaX: 0,
+			deltaY: WHEEL_DELTA,
+			shiftKey: true,
+		});
 
 		expect(test.controller.snapshotState()).toEqual(initial);
-		expect(test.possessionWheel).toHaveBeenCalledWith(2.5);
+		expect(test.possessionWheel).toHaveBeenCalledWith(WHEEL_DISTANCE);
 	});
 
 	it("does not apply Shift precision to possessed pointer orbit", () => {

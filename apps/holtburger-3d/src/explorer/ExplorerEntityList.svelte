@@ -44,7 +44,7 @@
 		onclick={() => select(explorerEntitySelection(entity))}
 	>
 		<span class="entity-heading">
-			<strong>{entity.identity.name}</strong>
+			<strong>{entity.display.name}</strong>
 			<span>WCID {entity.identity.wcid}</span>
 		</span>
 		<span>

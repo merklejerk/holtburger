@@ -276,13 +276,22 @@ describe("WebGL2ParticlePass", () => {
 		expect(pass.getDiagnostics().drawnBatchCount).toBe(0);
 	});
 
-	it("binds samplers with the configured policy for base and palette units", () => {
+	it("owns sampler state for every texture unit", () => {
 		const { gl, samplerBinds, samplers } = fakeGl();
 		const pass = new WebGL2ParticlePass(() => GEOMETRY);
 
 		pass.draw(context(gl, samplers), [batch(2, 3)]);
 
 		expect(samplerBinds).toEqual([
+			{
+				request: {
+					mipLevels: 1,
+					policy: "linear",
+					samplingClass: "exact",
+					wrap: TextureWrapMode.Clamp,
+				},
+				unit: 2,
+			},
 			{
 				request: {
 					mipLevels: 1,

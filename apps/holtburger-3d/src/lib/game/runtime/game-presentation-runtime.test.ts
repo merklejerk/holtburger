@@ -1697,7 +1697,7 @@ function spawnedEntity(
 			sampleMode: "authoritative-only",
 		},
 		presentation: {
-			category: "other",
+			entityClass: "other",
 			appearance: {
 				paletteDid: null,
 				partChanges: [],

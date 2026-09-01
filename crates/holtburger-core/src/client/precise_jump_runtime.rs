@@ -4,7 +4,6 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Instant;
 
-use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_common::{Guid, Vector3};
 use holtburger_world::state::SelfJumpCapabilities;
 use holtburger_world::{
@@ -20,7 +19,7 @@ use super::precise_jump_prediction::{
     PreciseJumpPredictionBudget, PreciseJumpPredictionDiagnostics, PreciseJumpPredictionOutcome,
     PreciseJumpPredictionRequest, PreciseJumpTarget, PreciseJumpTrajectory, diagnose_precise_jump,
 };
-use crate::{DynamicEntityCategory, SimulationSceneSnapshot, semantic_dynamic_entity_category};
+use crate::SimulationSceneSnapshot;
 
 const PRECISE_JUMP_CANDIDATES: usize = 6;
 const PRECISE_JUMP_MAXIMUM_TICKS: usize = 160;
@@ -158,7 +157,7 @@ struct PreciseJumpWork {
     aim: PreciseJumpAimRequest,
     authority: PreciseJumpAuthority,
     spatial_scene: SpatialScene,
-    targetable_entities: BTreeMap<SpatialBodyId, u16>,
+    peer_entity_generations: BTreeMap<SpatialBodyId, u16>,
     collision: Arc<SimulationSceneSnapshot>,
     start_time: Instant,
 }
@@ -255,7 +254,7 @@ impl PreciseJumpRuntime {
             aim,
             authority,
             spatial_scene: world.scene.clone(),
-            targetable_entities: targetable_precise_jump_entities(world),
+            peer_entity_generations: precise_jump_peer_entity_generations(world),
             collision,
             start_time: Instant::now(),
         };
@@ -566,14 +565,12 @@ fn capture_authority(
     })
 }
 
-fn targetable_precise_jump_entities(world: &WorldState) -> BTreeMap<SpatialBodyId, u16> {
+/// Captures every server peer while explicitly excluding the local player's entity record.
+fn precise_jump_peer_entity_generations(world: &WorldState) -> BTreeMap<SpatialBodyId, u16> {
     world
         .entities
         .iter()
-        .filter(|entity| {
-            semantic_dynamic_entity_category(entity.flags, entity.item_type())
-                == DynamicEntityCategory::Other
-        })
+        .filter(|entity| entity.guid != world.player.guid)
         .map(|entity| {
             (
                 SpatialBodyId::Entity(entity.guid),
@@ -626,7 +623,7 @@ fn evaluate(work: PreciseJumpWork) -> PreciseJumpCompletion {
         .collision
         .scene
         .cast_surface_ray(&entity_collision, ray, |body_id| {
-            work.targetable_entities.contains_key(&body_id)
+            work.peer_entity_generations.contains_key(&body_id)
         }) {
         Ok(Some(hit)) => hit,
         Ok(None) => {
@@ -664,7 +661,7 @@ fn evaluate(work: PreciseJumpWork) -> PreciseJumpCompletion {
             Some((
                 guid,
                 *work
-                    .targetable_entities
+                    .peer_entity_generations
                     .get(&hit.proof.body_id())
                     .expect("selected entity must have a captured server generation"),
             ))

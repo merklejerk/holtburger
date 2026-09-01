@@ -36,7 +36,7 @@ describe("synthetic nameplate workload", () => {
 			new Set(unique.map(({ display }) => JSON.stringify(display))).size,
 		).toBe(100);
 		expect(
-			unique.every(({ presentation }) => presentation.category === "mob"),
+			unique.every(({ presentation }) => presentation.entityClass === "mob"),
 		).toBe(true);
 	});
 
@@ -95,7 +95,7 @@ describe("synthetic nameplate workload", () => {
 		expect(covered).toHaveLength(2);
 		expect(covered[0]?.display).toEqual(open[0]?.display);
 		expect(covered[1]?.presentation).toMatchObject({
-			category: "other",
+			entityClass: "other",
 			content: { setupDid: 0x0200_fffd },
 		});
 	});

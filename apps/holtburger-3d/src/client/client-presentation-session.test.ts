@@ -1405,7 +1405,7 @@ function view(guid: number, landblockId = 0x0101_0100): DynamicEntityView {
 		identity: { guid, wcid: 42 },
 		display: { name: "Player", level: null },
 		presentation: {
-			category: "other",
+			entityClass: "other",
 			content: {
 				motionTableDid: null,
 				setupDid: 0x0200_0001,

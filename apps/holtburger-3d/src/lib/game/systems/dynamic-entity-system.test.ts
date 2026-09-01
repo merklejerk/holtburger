@@ -62,7 +62,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 			{
 				identity: base.source.identity,
 				visual: {
-					category: base.source.category,
+					entityClass: base.source.entityClass,
 					content: { level: 12, name: "Drudge" },
 				},
 			},
@@ -996,7 +996,7 @@ function source(
 			spatialMembership: { scopes: [{ kind: "outdoor" }] },
 		},
 		source: {
-			category: "other",
+			entityClass: "other",
 			nameplate: null,
 			behavior: {
 				animationId: "0x03000001",

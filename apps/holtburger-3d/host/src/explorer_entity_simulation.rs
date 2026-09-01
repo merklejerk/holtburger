@@ -97,8 +97,8 @@ mod tests {
     use holtburger_common::{Guid, Quaternion, Sphere, Vector3};
     use holtburger_content::{ColliderScale, LandblockCollisionAsset};
     use holtburger_core::{
-        DynamicEntityCategory, DynamicEntityContent, DynamicEntityDefinition,
-        DynamicEntityDefinitionInput, DynamicEntityIdentity, DynamicEntityInitialState,
+        DynamicEntityContent, DynamicEntityDefinition, DynamicEntityDefinitionInput,
+        DynamicEntityIdentity, DynamicEntityInitialState, DynamicEntityPresentationClass,
     };
     use holtburger_world::{
         DynamicBodyCollisionDefinition, DynamicPhysicalBodyDefinition, EdgeProtection,
@@ -337,7 +337,7 @@ mod tests {
 
     fn prepared(definition: DynamicEntityDefinition) -> ExplorerPreparedEntity {
         ExplorerPreparedEntity {
-            presentation_category: DynamicEntityCategory::Other,
+            presentation_class: DynamicEntityPresentationClass::Other,
             definition,
         }
     }

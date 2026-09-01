@@ -6,7 +6,7 @@ import type { RigidPartDepthDrawUnit } from "../systems/components";
 import type { ObjectInstanceData } from "../systems/static-resources";
 import type { GeometryResourceKey } from "./resource-manager";
 import type { RenderWorld } from "./render-world";
-import { isEntityShadowCasterCategory } from "./entity-shadow-policy";
+import { isEntityShadowCasterClass } from "./entity-shadow-policy";
 import { retainsRetailGeometry } from "./retail-geometry-visibility";
 
 const OUTDOOR_SCOPE = [{ kind: "outdoor" }] as const;
@@ -170,7 +170,7 @@ export function createOutdoorPssmCasterSelectionScratch(): OutdoorPssmCasterSele
 /**
  * Consume one light-frustum query before SceneGraph reuses its entry storage.
  *
- * Category and outdoor-domain checks happen before expansion where possible. A root enters the
+ * Presentation-class and outdoor-domain checks happen before expansion where possible. A root enters the
  * shared animation-liveness set only after at least one draw-visible outdoor part survives.
  */
 export function collectOutdoorPssmCastersForCascades(
@@ -231,7 +231,7 @@ export function collectOutdoorPssmCastersForCascades(
 		const descriptor = world.getRenderContributionDescriptor(nodeId);
 		if (
 			descriptor?.kind !== "dynamic" ||
-			!isEntityShadowCasterCategory(descriptor.category)
+			!isEntityShadowCasterClass(descriptor.entityClass)
 		) {
 			continue;
 		}

@@ -81,7 +81,7 @@ export function createSyntheticNameplateWorkload(
 		// every near-row entity sits comfortably inside the camera frustum on every backend.
 		const forward = (workload === "ordered-500" ? 24 : 8) + row * 1.75;
 		return entity({
-			category: "mob",
+			entityClass: "mob",
 			guid: 0xff00_0000 + index,
 			level: workload === "unique-100" ? index + 1 : 42,
 			name: workload === "unique-100" ? `Nameplate ${index + 1}` : "Drudge",
@@ -104,7 +104,7 @@ export function createSyntheticNameplateWorkload(
 	return [
 		...targets,
 		entity({
-			category: "other",
+			entityClass: "other",
 			guid: 0xff10_0000,
 			level: null,
 			name: "Occluder",
@@ -128,7 +128,7 @@ function ownerY(owner: number): number {
 }
 
 function entity(input: {
-	readonly category: DynamicEntityView["presentation"]["category"];
+	readonly entityClass: DynamicEntityView["presentation"]["entityClass"];
 	readonly guid: number;
 	readonly level: number | null;
 	readonly name: string;
@@ -176,7 +176,7 @@ function entity(input: {
 				subPalettes: [],
 				textureChanges: [],
 			},
-			category: input.category,
+			entityClass: input.entityClass,
 			content: {
 				motionTableDid: null,
 				physicsEffectTableDid: null,

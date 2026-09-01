@@ -39,7 +39,7 @@ import type {
 import type { StaticDetailRole } from "../resolution/static-detail-role";
 import { LandblockLayerKind } from "../runtime/scene-interest";
 import { scopeKey } from "../scene/scope";
-import type { DynamicEntityCategory } from "../dynamic-entity-category";
+import type { DynamicEntityPresentationClass } from "../dynamic-entity-presentation-class";
 import type { NameplateContent } from "../systems/dynamic-presentation-source";
 import type { NameplateSourceVisual } from "./nameplate-policy";
 
@@ -86,7 +86,9 @@ interface RenderWorldSystems {
 		getRenderable(nodeId: SceneNodeId): StaticObjectRenderable | null;
 	};
 	readonly dynamics: {
-		getPresentationCategory(nodeId: SceneNodeId): DynamicEntityCategory | null;
+		getPresentationClass(
+			nodeId: SceneNodeId,
+		): DynamicEntityPresentationClass | null;
 		getPresentationIdentity(nodeId: SceneNodeId): string | null;
 		getPublishedPresentationBounds(nodeId: SceneNodeId): AABB3 | null;
 		getPublishedRigidPresentationBounds(nodeId: SceneNodeId): AABB3 | null;
@@ -157,7 +159,7 @@ export type RenderContribution =
 			readonly renderable: StaticObjectRenderable;
 	  }
 	| {
-			readonly category: DynamicEntityCategory;
+			readonly entityClass: DynamicEntityPresentationClass;
 			readonly kind: "dynamic";
 			readonly footprint: Extract<
 				ObjectPresentationFootprint,
@@ -291,14 +293,12 @@ export class RenderWorld {
 		const dynamicBounds =
 			this.#systems.dynamics.getPublishedPresentationBounds(nodeId);
 		if (dynamicBounds) {
-			const category = this.#systems.dynamics.getPresentationCategory(nodeId);
-			if (category === null) {
-				throw new Error(
-					`Dynamic entity ${nodeId} has no presentation category.`,
-				);
+			const entityClass = this.#systems.dynamics.getPresentationClass(nodeId);
+			if (entityClass === null) {
+				throw new Error(`Dynamic entity ${nodeId} has no presentation class.`);
 			}
 			return {
-				category,
+				entityClass,
 				footprint: {
 					kind: "eligible",
 					localBounds: dynamicBounds,

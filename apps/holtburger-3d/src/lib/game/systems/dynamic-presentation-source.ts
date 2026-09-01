@@ -3,7 +3,7 @@ import type { AABB3, Vec3 } from "../math/types";
 import type { ResolvedObjectBehavior } from "../resolution/landblock-layer";
 import type { ResolvedObjectPresentation } from "../resolution/presentation";
 import type { SceneSpatialPlacement } from "../scene";
-import type { DynamicEntityCategory } from "../dynamic-entity-category";
+import type { DynamicEntityPresentationClass } from "../dynamic-entity-presentation-class";
 
 /** Complete visual value currently painted into one entity nameplate. */
 export interface NameplateContent {
@@ -13,8 +13,8 @@ export interface NameplateContent {
 
 /** Immutable visual and setup-default behavior facts shared by every dynamic producer. */
 export interface DynamicPresentationSource {
-	/** Producer-resolved frontend category controlling presentation participation. */
-	readonly category: DynamicEntityCategory;
+	/** Producer-resolved entity class controlling presentation participation. */
+	readonly entityClass: DynamicEntityPresentationClass;
 	/** Producer-stable identity used for behavior, diagnostics, and deterministic presentation ties. */
 	readonly identity: string;
 	/** Entity display content, or null for authored dynamics without an entity authority. */

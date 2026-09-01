@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
+import { DYNAMIC_ENTITY_PRESENTATION_CLASSES } from "../dynamic-entity-presentation-class";
 import { AABB3, Mat4, Vec3 } from "../math/types";
 import {
 	DEFAULT_ENTITY_SHADOW_SETTINGS,
@@ -9,7 +10,7 @@ import {
 	createEntityShadowSettings,
 	createEntityGroundingSettings,
 	createOutdoorPssmSettings,
-	isEntityShadowCasterCategory,
+	isEntityShadowCasterClass,
 	isOutdoorPssmReceiverFootprint,
 } from "./entity-shadow-policy";
 
@@ -40,12 +41,10 @@ describe("entity shadow policy", () => {
 		},
 	);
 
-	it("admits only the three producer-resolved actor categories", () => {
+	it("admits only the three producer-resolved actor classes", () => {
 		expect(
-			(["player", "npc", "mob", "other"] as const).map(
-				isEntityShadowCasterCategory,
-			),
-		).toEqual([true, true, true, false]);
+			DYNAMIC_ENTITY_PRESENTATION_CLASSES.map(isEntityShadowCasterClass),
+		).toEqual([true, true, true, false, false]);
 	});
 
 	it("admits only authored buildings as outdoor object receivers", () => {

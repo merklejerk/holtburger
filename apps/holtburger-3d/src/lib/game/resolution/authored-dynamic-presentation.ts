@@ -19,7 +19,7 @@ export function adaptAuthoredDynamicPresentation(
 			},
 		},
 		source: {
-			category: "other",
+			entityClass: "other",
 			nameplate: null,
 			behavior: authored.behavior,
 			identity: authored.identity.sourceId,

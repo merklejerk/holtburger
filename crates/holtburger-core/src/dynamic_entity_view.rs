@@ -10,7 +10,7 @@ use holtburger_world::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    DynamicEntityCategory, DynamicEntityContent, DynamicEntityProjectionInput,
+    DynamicEntityContent, DynamicEntityPresentationClass, DynamicEntityProjectionInput,
     DynamicEntitySpatialMembership, DynamicEntityWorldProjection,
 };
 
@@ -53,8 +53,8 @@ pub struct DynamicEntityDisplayView {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DynamicEntityPresentationView {
-    /// Producer-resolved frontend category used by presentation participation policy.
-    pub category: DynamicEntityCategory,
+    /// Producer-resolved entity class used by frontend presentation participation policy.
+    pub entity_class: DynamicEntityPresentationClass,
     /// Setup, sound, and physics-effect identities.
     pub content: DynamicEntityContent,
     /// Lossless ordered material and part substitutions.
@@ -150,8 +150,8 @@ pub enum DynamicEntityPlacementView {
 pub struct DynamicEntityViewSource {
     /// Producer-composition generation guarding async realization work.
     pub generation: u64,
-    /// Producer-resolved frontend category; the source-neutral projector never classifies.
-    pub category: DynamicEntityCategory,
+    /// Producer-resolved presentation class; the source-neutral projector never classifies.
+    pub presentation_class: DynamicEntityPresentationClass,
     /// Frontend-relevant identity without solver-only template category.
     pub identity: DynamicEntityIdentityView,
     /// Producer-resolved display facts.
@@ -179,13 +179,13 @@ impl DynamicEntityViewSource {
     /// definition/body join rather than inside it.
     pub fn from_projection(
         generation: u64,
-        category: DynamicEntityCategory,
+        presentation_class: DynamicEntityPresentationClass,
         input: DynamicEntityProjectionInput,
         playing_clip: Option<PlayingMotionClip>,
     ) -> Self {
         Self {
             generation,
-            category,
+            presentation_class,
             identity: DynamicEntityIdentityView {
                 guid: input.identity.guid,
                 wcid: input.identity.wcid,
@@ -456,7 +456,7 @@ pub fn project_dynamic_entity_view(source: DynamicEntityViewSource) -> DynamicEn
         identity: source.identity,
         display: source.display,
         presentation: DynamicEntityPresentationView {
-            category: source.category,
+            entity_class: source.presentation_class,
             content: source.content,
             appearance: source.appearance,
             object_scale: source.object_scale,

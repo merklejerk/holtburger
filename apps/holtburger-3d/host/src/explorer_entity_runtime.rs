@@ -13,8 +13,8 @@ use holtburger_core::{
     AdjustedForwardAxis, CharacterJumpReadiness, CharacterJumpRejection,
     CharacterMotionEventResult, CharacterMotionReadiness, CharacterMotionRejection,
     CharacterMotionSequence, DynamicEntityBodyCommitOutcome, DynamicEntityBodyOperationError,
-    DynamicEntityBodyRemovalOutcome, DynamicEntityBodyReplacementOutcome, DynamicEntityCategory,
-    DynamicEntityDefinition, DynamicEntityInitialState, DynamicEntityLaunchPlan,
+    DynamicEntityBodyRemovalOutcome, DynamicEntityBodyReplacementOutcome, DynamicEntityDefinition,
+    DynamicEntityInitialState, DynamicEntityLaunchPlan, DynamicEntityPresentationClass,
     DynamicEntityProjectionInput, SequencedCharacterMotionEvent,
     dynamic_entity_projection_input_from_body, resolve_character_jump,
 };
@@ -215,8 +215,8 @@ pub struct ExplorerEntityInstance {
     pub generation: u64,
     /// Final producer-owned target and integration demand.
     pub physical_demand: LocalPhysicalDemand,
-    /// Explorer-resolved frontend category retained outside the source-neutral definition.
-    pub presentation_category: DynamicEntityCategory,
+    /// Explorer-resolved presentation class retained outside the source-neutral definition.
+    pub presentation_class: DynamicEntityPresentationClass,
     /// Current complete source-neutral semantic definition.
     pub definition: DynamicEntityDefinition,
 }
@@ -224,8 +224,8 @@ pub struct ExplorerEntityInstance {
 /// Prepared source-neutral definition paired with Explorer-owned presentation policy.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExplorerPreparedEntity {
-    /// Explorer-resolved category computed while complete template facts are available.
-    pub presentation_category: DynamicEntityCategory,
+    /// Explorer-resolved presentation class computed while complete template facts are available.
+    pub presentation_class: DynamicEntityPresentationClass,
     /// Validated definition consumed unchanged by shared simulation behavior.
     pub definition: DynamicEntityDefinition,
 }
@@ -272,8 +272,8 @@ pub struct ExplorerEntityDespawnOutcome {
 pub struct ExplorerEntityProjection {
     /// Current semantic generation guarding consumers against stale work.
     pub generation: u64,
-    /// Explorer-resolved frontend category carried without reclassification.
-    pub presentation_category: DynamicEntityCategory,
+    /// Explorer-resolved presentation class carried without reclassification.
+    pub presentation_class: DynamicEntityPresentationClass,
     /// Source-neutral semantic facts joined with the current canonical body view.
     pub input: DynamicEntityProjectionInput,
     /// Clip this entity is playing right now, read from the same locked registry transaction.
@@ -290,8 +290,8 @@ pub struct ExplorerEntityPhysicalTick {
     pub possession_event_outcomes: Vec<PossessionEventOutcome>,
     /// Current instance generation held stable across the collection transaction.
     pub generation: u64,
-    /// Explorer-resolved frontend category carried with this exact semantic generation.
-    pub presentation_category: DynamicEntityCategory,
+    /// Explorer-resolved presentation class carried with this exact semantic generation.
+    pub presentation_class: DynamicEntityPresentationClass,
     /// Source-neutral semantic/body projection read from the committed body without relocking.
     pub input: DynamicEntityProjectionInput,
     /// Complete accepted solver path and immutable collision snapshot used by the solve.
@@ -992,13 +992,13 @@ impl ExplorerEntityRegistry {
         generation: u64,
     ) -> ExplorerEntityInstance {
         let ExplorerPreparedEntity {
-            presentation_category,
+            presentation_class,
             definition,
         } = prepared;
         let instance = ExplorerEntityInstance {
             generation,
             physical_demand,
-            presentation_category,
+            presentation_class,
             definition,
         };
         let displaced = self
@@ -1018,14 +1018,14 @@ impl ExplorerEntityRegistry {
         generation: u64,
     ) -> (ExplorerEntityInstance, ExplorerEntityInstance) {
         let ExplorerPreparedEntity {
-            presentation_category,
+            presentation_class,
             definition,
         } = prepared;
         let guid = definition.identity.guid;
         let installed = ExplorerEntityInstance {
             generation,
             physical_demand,
-            presentation_category,
+            presentation_class,
             definition,
         };
         let removed = self
@@ -1427,7 +1427,7 @@ impl ExplorerEntityRuntime {
             .project_dynamic_entity(&instance.definition)?;
         Ok(ExplorerEntityProjection {
             generation: instance.generation,
-            presentation_category: instance.presentation_category,
+            presentation_class: instance.presentation_class,
             input,
             playing_clip: registry.motion.playback.playing_clip(guid),
         })
@@ -1445,7 +1445,7 @@ impl ExplorerEntityRuntime {
             .map(|instance| {
                 Ok(ExplorerEntityProjection {
                     generation: instance.generation,
-                    presentation_category: instance.presentation_category,
+                    presentation_class: instance.presentation_class,
                     input: self
                         .simulation
                         .project_dynamic_entity(&instance.definition)?,
@@ -1950,7 +1950,7 @@ impl ExplorerEntityRuntime {
                     );
                 }
                 let generation = instance.generation;
-                let presentation_category = instance.presentation_category;
+                let presentation_class = instance.presentation_class;
                 let input = dynamic_entity_projection_input_from_body(
                     &instance.definition,
                     &solved.current,
@@ -1968,7 +1968,7 @@ impl ExplorerEntityRuntime {
                         .remove(&guid)
                         .unwrap_or_default(),
                     generation,
-                    presentation_category,
+                    presentation_class,
                     input,
                     solved,
                 })
@@ -2226,7 +2226,7 @@ mod tests {
 
     fn prepared(definition: DynamicEntityDefinition) -> ExplorerPreparedEntity {
         ExplorerPreparedEntity {
-            presentation_category: DynamicEntityCategory::Other,
+            presentation_class: DynamicEntityPresentationClass::Other,
             definition,
         }
     }

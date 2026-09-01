@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { DynamicEntityCategory } from "../dynamic-entity-category";
+import type { DynamicEntityPresentationClass } from "../dynamic-entity-presentation-class";
 import type { ObjectGeometryKey } from "../geometry/types";
 import type { Frustum } from "../math/frustum";
 import { AABB3, Mat4, Vec3 } from "../math/types";
@@ -289,10 +289,10 @@ function createWorld(
 }
 
 function dynamicDescriptor(
-	category: DynamicEntityCategory,
+	entityClass: DynamicEntityPresentationClass,
 ): RenderContribution {
 	return {
-		category,
+		entityClass,
 		footprint: {
 			kind: "eligible",
 			localBounds: AABB3.zero(),

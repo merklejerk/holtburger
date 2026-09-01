@@ -2276,7 +2276,7 @@ export class WebGL2Renderer implements Renderer {
 						reachesIndoor || (outdoorGroundingEnabled && reachesOutdoors)
 							? createEntityGroundingCaster(
 									{
-										category: contribution.category,
+										entityClass: contribution.entityClass,
 										identity: facts.identity,
 										rigidBounds: facts.rigidBounds,
 										placement: contribution.footprint.placement,
@@ -2297,7 +2297,7 @@ export class WebGL2Renderer implements Renderer {
 					const facts = this.#world.getEntityNameplateFacts(nodeId);
 					if (facts !== null) {
 						const category = resolveNameplateCategory(
-							contribution.category,
+							contribution.entityClass,
 							facts.identity,
 							this.#frameViewerEntityIdentity,
 						);
@@ -3239,7 +3239,7 @@ export class WebGL2Renderer implements Renderer {
 			this.#nameplatePopulationScratch.push({
 				...visual,
 				category: resolveNameplateCategory(
-					visual.category,
+					visual.entityClass,
 					identity,
 					viewerEntityIdentity,
 				),

@@ -76,7 +76,7 @@ function base(guid: number): Omit<DynamicEntityView, "placement"> {
 		identity: { guid, wcid: 42 },
 		display: { name: "Entity", level: null },
 		presentation: {
-			category: "other",
+			entityClass: "other",
 			content: {
 				motionTableDid: null,
 				setupDid: 0x02000001,

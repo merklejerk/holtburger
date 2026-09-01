@@ -231,6 +231,7 @@ import {
 } from "./dynamic-render-scopes";
 import type { WebGL2TextureFilteringSupport } from "./webgl2-texture-filtering-support";
 import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
+import { normalizedRgbaColor } from "../../frontend-color";
 import {
 	WebGL2TextureSamplerCatalog,
 	type TextureSamplingClass,
@@ -304,6 +305,11 @@ import {
  * Object programs bind only units 0-2, so nothing contends for it.
  */
 const TERRAIN_LIGHT_MASK_TEXTURE_UNIT = 6;
+
+/** Frontend-authored fallback decoded once for every clear path owned by this renderer. */
+const FRONTEND_CLEAR_COLOR = normalizedRgbaColor(
+	SHARED_FRONTEND_TUNING.rendering.clearColor,
+);
 
 /** Stand-in before any emitter has published records, so the context is never partially built. */
 const EMPTY_PARTICLE_RECORDS: ParticleRecordFrame = {
@@ -1191,10 +1197,10 @@ export class WebGL2Renderer implements Renderer {
 				}),
 		};
 		gl.clearColor(
-			SHARED_FRONTEND_TUNING.rendering.clearColor.red,
-			SHARED_FRONTEND_TUNING.rendering.clearColor.green,
-			SHARED_FRONTEND_TUNING.rendering.clearColor.blue,
-			SHARED_FRONTEND_TUNING.rendering.clearColor.alpha,
+			FRONTEND_CLEAR_COLOR.red,
+			FRONTEND_CLEAR_COLOR.green,
+			FRONTEND_CLEAR_COLOR.blue,
+			FRONTEND_CLEAR_COLOR.alpha,
 		);
 		gl.enable(gl.DEPTH_TEST);
 	}
@@ -1683,10 +1689,10 @@ export class WebGL2Renderer implements Renderer {
 			prepared,
 			frame,
 			[
-				SHARED_FRONTEND_TUNING.rendering.clearColor.red,
-				SHARED_FRONTEND_TUNING.rendering.clearColor.green,
-				SHARED_FRONTEND_TUNING.rendering.clearColor.blue,
-				SHARED_FRONTEND_TUNING.rendering.clearColor.alpha,
+				FRONTEND_CLEAR_COLOR.red,
+				FRONTEND_CLEAR_COLOR.green,
+				FRONTEND_CLEAR_COLOR.blue,
+				FRONTEND_CLEAR_COLOR.alpha,
 			],
 			PROBE_SHADING,
 			frameSettings,

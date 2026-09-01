@@ -1,10 +1,11 @@
-import {
-	SHARED_FRONTEND_TUNING,
-	type FrontendUiDiagnosticsTuning,
-} from "../lib/frontend-tuning";
+import { SHARED_FRONTEND_TUNING } from "../lib/frontend-tuning";
 import { SHARED_FRAME_SETTINGS } from "../lib/frontend-frame-settings";
-import type { PortalTransitionPolicy } from "../lib/client/portal-transition-controller";
 import type { FrameSettings } from "../lib/game/renderer/renderer";
+import type { FrontendUiDiagnosticsTuning } from "../lib/frontend-tuning-contract";
+import type {
+	ExplorerTuning,
+	ExplorerTuningOverrides,
+} from "./explorer-tuning-contract";
 
 const EXPLORER_DIAGNOSTICS = {
 	/** Smoothing window used by the Explorer frame-time readout. */
@@ -27,7 +28,7 @@ const EXPLORER_TUNING_OVERRIDES = {
 			enterDurationMs: 1_000,
 			/** Time available for portal space to reveal the installed Explorer view. */
 			exitDurationMs: 1_000,
-		} as const satisfies PortalTransitionPolicy,
+		},
 		/** Shared browser-frontend look selected explicitly by the Explorer composition root. */
 		visual: SHARED_FRONTEND_TUNING.portalTransition.visual,
 	},
@@ -110,7 +111,7 @@ const EXPLORER_TUNING_OVERRIDES = {
 			SHARED_FRONTEND_TUNING.rendering.colorGrade.enabledByDefault,
 		parameters: SHARED_FRONTEND_TUNING.rendering.colorGrade.parameters,
 	},
-} as const;
+} as const satisfies ExplorerTuningOverrides;
 
 const EXPLORER_FRAME_SETTINGS = {
 	...SHARED_FRAME_SETTINGS,
@@ -127,4 +128,4 @@ export const EXPLORER_TUNING = {
 	...EXPLORER_TUNING_OVERRIDES,
 	/** Explorer's initial display policy, composed from shared defaults and its authored grade. */
 	frameSettings: EXPLORER_FRAME_SETTINGS,
-} as const;
+} as const satisfies ExplorerTuning;

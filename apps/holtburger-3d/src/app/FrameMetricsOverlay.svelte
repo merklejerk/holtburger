@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from "svelte";
 	import type { FrameRates } from "./frame-rate-sampler";
-	import type { FrontendUiDiagnosticsTuning } from "../lib/frontend-tuning";
+	import type { FrontendUiDiagnosticsTuning } from "../lib/frontend-tuning-contract";
 
 	export interface FrameMetrics {
 		/** Total milliseconds spent in the runtime tick phase. */

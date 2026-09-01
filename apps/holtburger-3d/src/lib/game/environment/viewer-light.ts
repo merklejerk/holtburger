@@ -1,5 +1,6 @@
 import { sceneVec3, type SceneVec3 } from "../../assets/ac-frame";
 import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
+import { normalizedRgbColor } from "../../frontend-color";
 import { createLandblockWorldOrigin } from "../landblocks";
 import { transformPoint3 } from "../math/matrices";
 import { Vec3 } from "../math/types";
@@ -18,7 +19,7 @@ const TUNING = SHARED_FRONTEND_TUNING.rendering.viewerLight;
 export const VIEWER_LIGHT = {
 	range: TUNING.falloff * RUNTIME_LIGHT_RANGE_SCALE,
 	intensity: TUNING.intensity,
-	color: TUNING.color,
+	color: normalizedRgbColor(TUNING.color),
 } as const;
 
 /** Reused because the offset is a fixed constant and this resolves once per frame. */

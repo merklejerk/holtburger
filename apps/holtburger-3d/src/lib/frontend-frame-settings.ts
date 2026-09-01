@@ -1,9 +1,36 @@
 import { SHARED_FRONTEND_TUNING } from "./frontend-tuning";
+import { normalizedRgbaColor } from "./frontend-color";
 import { DEFAULT_AMBIENT_OCCLUSION_PARAMETERS } from "./game/renderer/ambient-occlusion-policy";
 import { DEFAULT_COLOR_GRADE_PARAMETERS } from "./game/renderer/color-grade-policy";
 import { DEFAULT_ENTITY_SHADOW_SETTINGS } from "./game/renderer/entity-shadow-policy";
+import type { NameplateSettings } from "./game/renderer/nameplate-policy";
 import type { FrameSettings } from "./game/renderer/renderer";
 import { LandblockLayerKind } from "./game/runtime/scene-interest";
+
+const NAMEPLATE_TUNING = SHARED_FRONTEND_TUNING.rendering.nameplates;
+
+/** Resolve tuning-only hex colors once into the normalized renderer frame contract. */
+const SHARED_NAMEPLATE_SETTINGS = {
+	...NAMEPLATE_TUNING,
+	appearance: {
+		...NAMEPLATE_TUNING.appearance,
+		fillColors: {
+			mob: normalizedRgbaColor(NAMEPLATE_TUNING.appearance.fillColors.mob),
+			npc: normalizedRgbaColor(NAMEPLATE_TUNING.appearance.fillColors.npc),
+			other: normalizedRgbaColor(NAMEPLATE_TUNING.appearance.fillColors.other),
+			player: normalizedRgbaColor(
+				NAMEPLATE_TUNING.appearance.fillColors.player,
+			),
+			portal: normalizedRgbaColor(
+				NAMEPLATE_TUNING.appearance.fillColors.portal,
+			),
+			selfPlayer: normalizedRgbaColor(
+				NAMEPLATE_TUNING.appearance.fillColors.selfPlayer,
+			),
+		},
+		outlineColor: normalizedRgbaColor(NAMEPLATE_TUNING.appearance.outlineColor),
+	},
+} satisfies NameplateSettings;
 
 /**
  * Shared starting display policy for a mode composition.
@@ -20,7 +47,7 @@ export const SHARED_FRAME_SETTINGS = {
 		[LandblockLayerKind.EnvCells]: true,
 	},
 	showRetailHiddenGeometry: false,
-	nameplates: SHARED_FRONTEND_TUNING.rendering.nameplates,
+	nameplates: SHARED_NAMEPLATE_SETTINGS,
 	ambientOcclusion: {
 		enabled: SHARED_FRONTEND_TUNING.rendering.ambientOcclusion.enabledByDefault,
 		parameters: DEFAULT_AMBIENT_OCCLUSION_PARAMETERS,

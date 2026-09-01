@@ -1,10 +1,11 @@
-import {
-	SHARED_FRONTEND_TUNING,
-	type FrontendUiDiagnosticsTuning,
-} from "../lib/frontend-tuning";
+import { SHARED_FRONTEND_TUNING } from "../lib/frontend-tuning";
 import { SHARED_FRAME_SETTINGS } from "../lib/frontend-frame-settings";
-import type { PortalTransitionPolicy } from "../lib/client/portal-transition-controller";
 import type { FrameSettings } from "../lib/game/renderer/renderer";
+import type { FrontendUiDiagnosticsTuning } from "../lib/frontend-tuning-contract";
+import type {
+	ClientPortalTransitionTuning,
+	ClientTuning,
+} from "./client-tuning-contract";
 
 const CLIENT_DIAGNOSTICS = {
 	/** Smoothing window used by the client frame-rate readout. */
@@ -28,10 +29,10 @@ const CLIENT_PORTAL_TRANSITION = {
 		enterDurationMs: 1_000,
 		/** Time available for portal space to reveal the settled destination. */
 		exitDurationMs: 1_000,
-	} as const satisfies PortalTransitionPolicy,
+	},
 	/** Shared browser-frontend look selected explicitly by the client composition root. */
 	visual: SHARED_FRONTEND_TUNING.portalTransition.visual,
-} as const;
+} as const satisfies ClientPortalTransitionTuning;
 
 /** Client-owned camera, scene-interest, diagnostics, and initial presentation policy. */
 export const CLIENT_TUNING = {
@@ -79,4 +80,4 @@ export const CLIENT_TUNING = {
 	},
 	/** Client-owned starting display policy. */
 	frameSettings: CLIENT_FRAME_SETTINGS,
-} as const;
+} as const satisfies ClientTuning;

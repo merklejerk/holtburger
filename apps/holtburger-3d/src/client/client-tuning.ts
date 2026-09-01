@@ -72,11 +72,11 @@ export const CLIENT_TUNING = {
 		markerRadius: 0.65,
 	},
 	sceneInterest: {
-		buildingRadius: 2,
+		buildingRadius: 6,
 		envCellRadius: 1,
-		explicitObjectRadius: 2,
+		explicitObjectRadius: 1,
 		generatedObjectRadius: 2,
-		terrainRadius: 3,
+		terrainRadius: 6,
 	},
 	/** Client-owned starting display policy. */
 	frameSettings: CLIENT_FRAME_SETTINGS,

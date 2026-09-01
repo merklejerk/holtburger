@@ -913,6 +913,37 @@ and reserves every matching value for that class.
 owner, test members plus adjacent and reserved values, and name representation-level prefix helpers
 differently from semantic classifiers when both are useful.
 
+## An Auxiliary Subset Masquerades as the Canonical Collection
+
+**Smell:** A subset built for traversal, acceleration, partitioning, caching, or another local
+purpose is treated as the authoritative inventory for an independent operation.
+
+**Signals:**
+
+- Membership in a spatial index, tree node, cache, manifest, or work queue is used to filter the
+  source collection without an explicit completeness guarantee.
+- A structural field is renamed to behavioral language such as visible, valid, supported, or
+  renderable even though its producer establishes only membership.
+- Records absent from the auxiliary structure remain valid in the primary collection.
+- Sparse or partial auxiliary data silently removes output instead of reporting a violated
+  invariant.
+
+**Possible failure:** Valid records disappear from rendering, serialization, search, processing, or
+publication according to incidental index coverage. The failure follows data layout rather than
+the operation's real eligibility rules, so it often appears as irregular holes or missing cases.
+
+**Questions:** What operation owns the subset? Does its format guarantee exhaustive membership for
+the consuming operation? Can the primary collection contain valid records absent from it? How does
+the authoritative implementation enumerate the operation's inputs?
+
+**Counterexamples:** An index may be the canonical inventory when its contract explicitly defines
+complete membership, or when construction validates equality with the primary collection before
+consumers rely on it.
+
+**Possible responses:** Enumerate the authoritative collection directly, keep auxiliary membership
+scoped to the operation it serves, name raw structural facts without inferred behavior, and add a
+regression where valid primary records are absent from the subset.
+
 ## Adding Observations
 
 An observation belongs here when it has:

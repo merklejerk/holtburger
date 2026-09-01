@@ -230,9 +230,7 @@ async fn collect_crossings(
                 "building {} (0x{:08X}) portal {} -> 0x{source_cell:08X}",
                 building_ref.building_index, building.source_did, building_ref.portal_index
             ),
-            // Building apertures come from GfxObj portal polygons, which carry no shell-side
-            // surface fact of their own.
-            has_render_surface: false,
+            has_render_surface: selected_building.has_drawing_bsp_node_polygon,
             aperture: transform_aperture(&selected_building.aperture, building.placement)?,
         });
     }

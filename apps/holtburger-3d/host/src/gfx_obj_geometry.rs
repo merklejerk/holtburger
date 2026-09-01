@@ -23,25 +23,20 @@ const APERTURE_PLANE_EQUALITY_EPSILON: f32 = 0.0005;
 pub struct GfxObjPortalAperture {
     pub portal_index: usize,
     pub polygon_ids: Vec<u16>,
-    /// Whether any aperture polygon is also selected as visible drawing-BSP geometry.
-    pub has_render_surface: bool,
+    /// Whether any aperture polygon also occurs in a drawing-BSP node's `poly_ids` list.
+    pub has_drawing_bsp_node_polygon: bool,
     pub aperture: PortalAperture,
 }
 
-/// Select GfxObj drawing-BSP polygons, then delegate polygon emission to the shared mechanic.
+/// Emit every authored GfxObj polygon through the shared polygon mechanic.
+///
+/// Retail constructs the mesh from `CGfxObj::num_polygons` and `CGfxObj::polygons` directly
+/// (`acclient.c:436052`). The drawing BSP supplies portal traversal data; its node polygon lists
+/// are not an exhaustive mesh visibility set.
 pub fn build_gfx_obj_geometry(gfx_obj: &GfxObj) -> Result<PolygonSetGeometry> {
-    let render_polygon_ids = gfx_obj
-        .drawing_bsp
-        .as_ref()
-        .map(collect_drawing_bsp_renderable_polygon_ids);
     let mut polygon_entries = gfx_obj
         .polygons
         .iter()
-        .filter(|(polygon_id, _)| {
-            render_polygon_ids
-                .as_ref()
-                .is_none_or(|ids| ids.contains(polygon_id))
-        })
         .map(|(polygon_id, polygon)| (*polygon_id, polygon))
         .collect::<Vec<_>>();
     polygon_entries.sort_by_key(|(polygon_id, _)| *polygon_id);
@@ -74,7 +69,7 @@ pub fn build_gfx_obj_portal_apertures(gfx_obj: &GfxObj) -> Result<Vec<GfxObjPort
     let mut pairs = Vec::new();
     collect_drawing_bsp_portal_pairs(drawing_bsp, &mut pairs)
         .with_context(|| format!("Could not decode GfxObj 0x{:08X} portal pairs", gfx_obj.id))?;
-    let renderable_polygon_ids = collect_drawing_bsp_renderable_polygon_ids(drawing_bsp);
+    let node_polygon_ids = collect_drawing_bsp_node_polygon_ids(drawing_bsp);
     pairs.sort_unstable();
     pairs.dedup();
     let mut apertures = Vec::new();
@@ -110,9 +105,9 @@ pub fn build_gfx_obj_portal_apertures(gfx_obj: &GfxObj) -> Result<Vec<GfxObjPort
             .collect::<Result<Vec<_>>>()?;
         apertures.push(GfxObjPortalAperture {
             portal_index,
-            has_render_surface: polygon_ids
+            has_drawing_bsp_node_polygon: polygon_ids
                 .iter()
-                .any(|polygon_id| renderable_polygon_ids.contains(polygon_id)),
+                .any(|polygon_id| node_polygon_ids.contains(polygon_id)),
             polygon_ids,
             aperture: merge_coplanar_apertures(gfx_obj.id, portal_index, pieces)?,
         });
@@ -175,9 +170,9 @@ fn union_bounds(left: RenderAabb, right: RenderAabb) -> RenderAabb {
     }
 }
 
-fn collect_drawing_bsp_renderable_polygon_ids(node: &BspNode) -> HashSet<u16> {
+fn collect_drawing_bsp_node_polygon_ids(node: &BspNode) -> HashSet<u16> {
     let mut polygon_ids = HashSet::new();
-    collect_drawing_bsp_node_polygon_ids(node, &mut polygon_ids);
+    extend_drawing_bsp_node_polygon_ids(node, &mut polygon_ids);
     polygon_ids
 }
 
@@ -207,12 +202,12 @@ fn collect_drawing_bsp_portal_pairs(node: &BspNode, pairs: &mut Vec<(usize, u16)
     Ok(())
 }
 
-fn collect_drawing_bsp_node_polygon_ids(node: &BspNode, polygon_ids: &mut HashSet<u16>) {
+fn extend_drawing_bsp_node_polygon_ids(node: &BspNode, polygon_ids: &mut HashSet<u16>) {
     match node {
         BspNode::Port(portal) => {
             polygon_ids.extend(portal.poly_ids.iter().copied());
-            collect_drawing_bsp_node_polygon_ids(&portal.pos, polygon_ids);
-            collect_drawing_bsp_node_polygon_ids(&portal.neg, polygon_ids);
+            extend_drawing_bsp_node_polygon_ids(&portal.pos, polygon_ids);
+            extend_drawing_bsp_node_polygon_ids(&portal.neg, polygon_ids);
         }
         BspNode::Leaf(leaf) => {
             polygon_ids.extend(leaf.poly_ids.iter().copied());
@@ -220,10 +215,10 @@ fn collect_drawing_bsp_node_polygon_ids(node: &BspNode, polygon_ids: &mut HashSe
         BspNode::Internal(internal) => {
             polygon_ids.extend(internal.poly_ids.iter().copied());
             if let Some(pos) = &internal.pos {
-                collect_drawing_bsp_node_polygon_ids(pos, polygon_ids);
+                extend_drawing_bsp_node_polygon_ids(pos, polygon_ids);
             }
             if let Some(neg) = &internal.neg {
-                collect_drawing_bsp_node_polygon_ids(neg, polygon_ids);
+                extend_drawing_bsp_node_polygon_ids(neg, polygon_ids);
             }
         }
     }
@@ -254,13 +249,45 @@ mod tests {
     }
 
     #[test]
-    fn rejects_malformed_selected_geometry() {
+    fn rejects_malformed_geometry() {
         let mut gfx_obj = triangle_gfx_obj();
         gfx_obj.polygons.get_mut(&7).unwrap().vertex_ids[2] = 99;
 
         let error = build_gfx_obj_geometry(&gfx_obj).unwrap_err();
 
         assert!(error.to_string().contains("missing vertex 99"));
+    }
+
+    #[test]
+    fn drawing_bsp_node_polygon_ids_do_not_filter_authored_geometry() {
+        const AUTHORED_POLYGON_COUNT: u16 = 182;
+
+        let mut gfx_obj = triangle_gfx_obj();
+        gfx_obj.polygons = (0..AUTHORED_POLYGON_COUNT)
+            .map(|polygon_id| (polygon_id, triangle_polygon()))
+            .collect();
+        gfx_obj.drawing_bsp = Some(BspNode::Port(BspPortal {
+            plane: holtburger_common::Plane {
+                normal: Vector3::new(1.0, 0.0, 0.0),
+                d: 0.0,
+            },
+            pos: Box::new(leaf()),
+            neg: Box::new(leaf()),
+            sphere: None,
+            poly_ids: vec![0],
+            portal_polys: Vec::new(),
+        }));
+
+        let geometry = build_gfx_obj_geometry(&gfx_obj).unwrap();
+
+        assert_eq!(
+            geometry.triangles.len(),
+            usize::from(AUTHORED_POLYGON_COUNT)
+        );
+        assert_eq!(
+            geometry.triangles.last().unwrap().polygon_id,
+            AUTHORED_POLYGON_COUNT - 1
+        );
     }
 
     #[test]
@@ -286,12 +313,12 @@ mod tests {
         assert_eq!(apertures.len(), 1);
         assert_eq!(apertures[0].portal_index, 3);
         assert_eq!(apertures[0].polygon_ids, [7]);
-        assert!(!apertures[0].has_render_surface);
+        assert!(!apertures[0].has_drawing_bsp_node_polygon);
         assert_eq!(apertures[0].aperture.triangle_indices, [0, 1, 2]);
     }
 
     #[test]
-    fn marks_a_building_portal_that_also_contributes_visible_geometry() {
+    fn marks_a_building_portal_that_also_occurs_in_a_bsp_node_polygon_list() {
         let mut gfx_obj = triangle_gfx_obj();
         gfx_obj.drawing_bsp = Some(BspNode::Port(BspPortal {
             plane: holtburger_common::Plane {
@@ -310,7 +337,7 @@ mod tests {
 
         let apertures = build_gfx_obj_portal_apertures(&gfx_obj).unwrap();
 
-        assert!(apertures[0].has_render_surface);
+        assert!(apertures[0].has_drawing_bsp_node_polygon);
     }
 
     #[test]

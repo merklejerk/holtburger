@@ -17,6 +17,7 @@ pub mod character_kinematics;
 pub mod character_motion;
 mod character_selection;
 pub mod collision;
+pub mod combat_feedback;
 mod commands;
 mod dynamic_entity_view;
 mod messages;

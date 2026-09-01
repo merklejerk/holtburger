@@ -2,7 +2,11 @@
 	import { onMount } from "svelte";
 	import type { FrameRates } from "../../app/frame-rate-sampler";
 	import ClientWorldView from "../../client/ClientWorldView.svelte";
-	import type { ClientChatLine } from "../../client/ClientChat.svelte";
+	import type {
+		ClientChatErrorMessage,
+		ClientChatLine,
+	} from "../../client/client-chat-policy";
+	import type { ClientChatMessage } from "../../client/client-host-contract";
 	import type { MapPanelFrame } from "../../app/map-panel-frame";
 	import type { ClientPresentationDiagnostics } from "../../client/client-presentation-session";
 	import type { ClientToast } from "../../client/client-toast-center";
@@ -23,38 +27,52 @@
 				: null;
 
 	const messages: readonly ClientChatLine[] = [
-		line(
-			1,
-			"system",
-			null,
-			"Welcome to the Holtburger client HUD harness.\nEmbedded chat line breaks remain visible.",
-		),
-		line(2, "speech", "Alex", "Duis aute irure dolor in reprehenderit."),
-		line(
-			3,
-			"channel",
-			"Taylor",
-			"Excepteur sint occaecat cupidatat non proident.",
-			"General",
-		),
-		line(4, "emote", "Sam", "salutes smartly"),
-		line(5, "tell", "Jordan", "Consectetur adipiscing elit, sed do eiusmod."),
+		line(1, {
+			kind: "system",
+			message:
+				"Welcome to the Holtburger client HUD harness.\nEmbedded chat line breaks remain visible.",
+		}),
+		line(2, {
+			kind: "speech",
+			sender: "Ulgrim the Unpleasant",
+			speakerKind: "non-player",
+			message: "Duis aute irure dolor in reprehenderit.",
+		}),
+		line(3, {
+			kind: "channel",
+			channel: "general",
+			sender: "Taylor",
+			speakerKind: "player",
+			message: "Excepteur sint occaecat cupidatat non proident.",
+		}),
+		line(4, {
+			kind: "emote",
+			sender: "Sam",
+			speakerKind: "player",
+			message: "salutes smartly",
+		}),
+		line(5, {
+			kind: "tell",
+			sender: "Jordan",
+			speakerKind: "player",
+			message: "Consectetur adipiscing elit, sed do eiusmod.",
+		}),
+		line(6, { kind: "error", message: "Example presentation failure." }),
+		line(7, {
+			kind: "combat",
+			message: "You hit a Drudge for 37 slashing damage. Critical hit.",
+			emphasized: true,
+		}),
 	];
 
 	function line(
 		id: number,
-		kind: ClientChatLine["kind"],
-		sender: string | null,
-		message: string,
-		channel: string | null = null,
+		message: ClientChatMessage | ClientChatErrorMessage,
 	): ClientChatLine {
 		return {
-			channel,
+			...message,
 			id,
-			kind,
-			message,
 			receivedAt: new Date(2026, 7, 27, 9, id),
-			sender,
 		};
 	}
 
@@ -150,9 +168,6 @@
 	onPreciseJumpActivate={() => undefined}
 	onPreciseJumpEnter={() => undefined}
 	debugEnabled={true}
-	presentationStatus={{ kind: "ready", diagnostic: null }}
-	presentationStatusText={() => "World ready"}
-	presentationError={null}
 	{readMapPanelFrame}
 	{readDiagnostics}
 	{readFrameRates}
@@ -172,7 +187,6 @@
 	onSendChat={async () => {}}
 	onChatFocusChange={() => {}}
 	onCanvas={() => {}}
-	onDisconnect={() => {}}
 />
 
 <style>

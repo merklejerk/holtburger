@@ -52,22 +52,58 @@ describe("client host wire contract", () => {
 			decodeClientChatMessage({
 				kind: "channel",
 				sender: "Mira",
-				channel: "General",
+				speakerKind: "player",
+				channel: "general",
 				message: "Hello",
 			}),
 		).toEqual({
 			kind: "channel",
 			sender: "Mira",
-			channel: "General",
+			speakerKind: "player",
+			channel: "general",
 			message: "Hello",
 		});
 		expect(() =>
 			decodeClientChatMessage({
 				kind: "channel",
 				sender: "Mira",
-				channel: "General",
+				speakerKind: "player",
+				channel: "general",
 				message: "Hello",
 				extra: true,
+			}),
+		).toThrow();
+		expect(
+			decodeClientChatMessage({
+				kind: "combat",
+				message: "You hit a Drudge for 37 slash damage.",
+				emphasized: true,
+			}),
+		).toEqual({
+			kind: "combat",
+			message: "You hit a Drudge for 37 slash damage.",
+			emphasized: true,
+		});
+		expect(
+			decodeClientChatMessage({
+				kind: "speech",
+				sender: "Drudge",
+				speakerKind: "non-player",
+				message: "Grrr.",
+			}),
+		).toEqual({
+			kind: "speech",
+			sender: "Drudge",
+			speakerKind: "non-player",
+			message: "Grrr.",
+		});
+		expect(() =>
+			decodeClientChatMessage({
+				kind: "speech",
+				sender: "Mira",
+				speakerKind: "player",
+				channel: "general",
+				message: "Hello",
 			}),
 		).toThrow();
 	});

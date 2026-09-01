@@ -19,14 +19,55 @@ const vitalSchema = z
 	})
 	.strict();
 
-const chatMessageSchema = z
-	.object({
-		kind: z.enum(["speech", "tell", "channel", "system", "emote"]),
-		sender: z.string().nullable(),
-		channel: z.string().nullable(),
-		message: z.string(),
-	})
-	.strict();
+const chatChannelSchema = z.enum([
+	"fellowship",
+	"allegiance",
+	"vassals",
+	"patron",
+	"monarch",
+	"co-vassals",
+	"general",
+	"trade",
+	"lfg",
+	"roleplay",
+	"society",
+	"olthoi",
+	"unknown",
+]);
+const chatSpeakerKindSchema = z.enum(["player", "non-player", "unknown"]);
+
+const chatMessageSchema = z.discriminatedUnion("kind", [
+	z
+		.object({
+			kind: z.enum(["speech", "tell", "emote"]),
+			sender: z.string(),
+			speakerKind: chatSpeakerKindSchema,
+			message: z.string(),
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("channel"),
+			channel: chatChannelSchema,
+			sender: z.string(),
+			speakerKind: chatSpeakerKindSchema,
+			message: z.string(),
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("system"),
+			message: z.string(),
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("combat"),
+			message: z.string(),
+			emphasized: z.boolean(),
+		})
+		.strict(),
+]);
 
 const characterSchema = z
 	.object({
@@ -467,6 +508,7 @@ export type ClientLocalPlayerEstablished = z.infer<
 >;
 export type ClientExitRequested = z.infer<typeof exitRequestedSchema>;
 export type ClientVital = z.infer<typeof vitalSchema>;
+export type ClientChatChannel = z.infer<typeof chatChannelSchema>;
 export type ClientChatMessage = z.infer<typeof chatMessageSchema>;
 export type ClientPlayerEntered = z.infer<typeof playerEnteredSchema>;
 export type ClientDriveRequest = z.infer<typeof clientDriveRequestSchema>;

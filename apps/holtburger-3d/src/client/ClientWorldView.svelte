@@ -10,7 +10,8 @@
 	import { MAP_DEFAULT_VIEW_DIAMETERS } from "../lib/game/map/map-appearance";
 	import ClientCharacterHud from "./ClientCharacterHud.svelte";
 	import ClientJumpPowerBar from "./ClientJumpPowerBar.svelte";
-	import ClientChat, { type ClientChatLine } from "./ClientChat.svelte";
+	import ClientChat from "./ClientChat.svelte";
+	import type { ClientChatLine } from "./client-chat-policy";
 	import ClientDebugPanel from "./ClientDebugPanel.svelte";
 	import ClientFloatingPanel from "./ClientFloatingPanel.svelte";
 	import ClientFpsCounter from "./ClientFpsCounter.svelte";
@@ -31,17 +32,11 @@
 	import type {
 		ClientPresentationCameraController,
 		ClientPresentationDiagnostics,
-		ClientPresentationStatus,
 	} from "./client-presentation-session";
 
 	interface Props {
 		readonly cameraController: ClientPresentationCameraController | null;
 		readonly debugEnabled: boolean;
-		readonly presentationStatus: ClientPresentationStatus;
-		readonly presentationStatusText: (
-			status: ClientPresentationStatus,
-		) => string;
-		readonly presentationError: string | null;
 		readonly readMapPanelFrame: () => MapPanelFrame;
 		readonly readDiagnostics: () => ClientPresentationDiagnostics | null;
 		readonly readFrameRates: () => FrameRates | null;
@@ -61,15 +56,11 @@
 		readonly onSendChat: (message: string) => Promise<void>;
 		readonly onChatFocusChange: (focused: boolean) => void;
 		readonly onCanvas: (canvas: HTMLCanvasElement | null) => void;
-		readonly onDisconnect: () => void | Promise<void>;
 	}
 
 	let {
 		cameraController,
 		debugEnabled,
-		presentationStatus,
-		presentationStatusText,
-		presentationError,
 		readMapPanelFrame,
 		readDiagnostics,
 		readFrameRates,
@@ -89,7 +80,6 @@
 		onSendChat,
 		onChatFocusChange,
 		onCanvas,
-		onDisconnect,
 	}: Props = $props();
 	const MAP_PANEL_SIZE = 220;
 	const MAP_PANEL_MARGIN = 16;
@@ -249,19 +239,6 @@
 		onpointercancel={releasePointer}
 		onwheel={handleWheel}
 	></canvas>
-	{#if presentationStatus.kind !== "ready" || presentationError !== null}
-		<section class="client-world-status" aria-live="polite">
-			<strong>Holtburger 3D Client</strong>
-			<span>{presentationStatusText(presentationStatus)}</span>
-			{#if presentationError !== null}
-				<span class="client-status-error" role="alert">{presentationError}</span
-				>
-			{/if}
-			<button class="client-action" onclick={() => void onDisconnect()}
-				>Disconnect</button
-			>
-		</section>
-	{/if}
 	<button
 		type="button"
 		class="client-ui-lock"
@@ -387,24 +364,6 @@
 		cursor: grabbing;
 	}
 
-	.client-world-status {
-		position: fixed;
-		top: 16px;
-		left: 50%;
-		z-index: 4;
-		transform: translateX(-50%);
-		display: grid;
-		gap: 6px;
-		max-width: min(360px, calc(100vw - 32px));
-		padding: 10px 12px;
-		border: 1px solid rgb(162 117 33 / 55%);
-		background: rgb(16 12 7 / 86%);
-		color: var(--ac-ink);
-		font-family: var(--ac-font-ui);
-		font-size: var(--ac-panel-font-size);
-		text-shadow: 1px 1px 0 #000;
-	}
-
 	.client-ui-lock {
 		position: fixed;
 		top: 8px;
@@ -424,22 +383,5 @@
 		border-color: rgb(239 208 111 / 0.82);
 		color: #efd06f;
 		background: rgb(45 38 22 / 0.72);
-	}
-
-	.client-world-status span {
-		color: var(--ac-ink-muted);
-	}
-
-	.client-status-error {
-		padding: 10px;
-		border: 1px solid rgb(179 41 27 / 0.9);
-		background: rgb(65 14 11 / 0.72);
-		color: var(--ac-ink);
-	}
-
-	.client-action {
-		min-width: 120px;
-		padding: 6px 12px;
-		cursor: pointer;
 	}
 </style>

@@ -857,40 +857,40 @@ pub(crate) fn script_event_from_view_event(event: &ClientViewEvent) -> Option<Sc
             }))
         }
         ClientViewEvent::Chat {
-            sender, message, ..
+            speaker, message, ..
         } => Some(ScriptEvent::ChatMessage(ScriptChatEvent {
             channel: ScriptChatChannelKind::Say,
-            sender: Some(sender.clone()),
+            sender: Some(speaker.name().to_string()),
             message: message.clone(),
         })),
-        ClientViewEvent::Tell { sender, message } => {
+        ClientViewEvent::Tell { speaker, message } => {
             Some(ScriptEvent::ChatMessage(ScriptChatEvent {
                 channel: ScriptChatChannelKind::Tell,
-                sender: Some(sender.clone()),
+                sender: Some(speaker.name().to_string()),
                 message: message.clone(),
             }))
         }
-        ClientViewEvent::Emote { sender, text } => {
+        ClientViewEvent::Emote { speaker, text } => {
             Some(ScriptEvent::ChatMessage(ScriptChatEvent {
                 channel: ScriptChatChannelKind::Emote,
-                sender: Some(sender.clone()),
+                sender: Some(speaker.name().to_string()),
                 message: text.clone(),
             }))
         }
-        ClientViewEvent::SoulEmote { sender, text, .. } => {
+        ClientViewEvent::SoulEmote { speaker, text, .. } => {
             Some(ScriptEvent::ChatMessage(ScriptChatEvent {
                 channel: ScriptChatChannelKind::SoulEmote,
-                sender: Some(sender.clone()),
+                sender: Some(speaker.name().to_string()),
                 message: text.clone(),
             }))
         }
         ClientViewEvent::ChannelMessage {
             channel,
-            sender,
+            speaker,
             message,
         } => Some(ScriptEvent::ChatMessage(ScriptChatEvent {
             channel: map_chat_channel(channel.kind),
-            sender: Some(sender.clone()),
+            sender: Some(speaker.name().to_string()),
             message: message.clone(),
         })),
         ClientViewEvent::ActionResult {

@@ -19,7 +19,17 @@ impl Guid {
     }
 
     pub fn is_player(&self) -> bool {
-        (self.0 & 0xF0000000) == 0x50000000
+        (0x50000001..=0x5FFFFFFF).contains(&self.0)
+    }
+
+    /// Whether this GUID belongs to ACE's landblock-organized static world-object range.
+    pub fn is_static_object(&self) -> bool {
+        (0x70000000..=0x7FFFFFFF).contains(&self.0)
+    }
+
+    /// Whether this GUID belongs to ACE's generated dynamic world-object range.
+    pub fn is_dynamic_object(&self) -> bool {
+        (0x80000000..=0xFFFFFFFE).contains(&self.0)
     }
 
     pub fn is_item(&self) -> bool {

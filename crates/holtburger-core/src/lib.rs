@@ -34,6 +34,7 @@ pub use client::collision::{
     ClientCollisionSource, ClientEntityBodyFacts, ClientEntityBodyFactsError, ClientPlayerIdentity,
     ContentClientCollisionSource, client_entity_body_facts, client_player_body_facts,
 };
+pub use client::combat_feedback::combat_feedback_message;
 pub use client::precise_jump::{
     PreciseJumpCandidateBudget, PreciseJumpCandidateBudgetError, PreciseJumpCandidateRejection,
     PreciseJumpCandidateSet, PreciseJumpCapabilityEnvelope, PreciseJumpLandingTolerance,

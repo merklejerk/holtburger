@@ -886,6 +886,33 @@ from an external schema can also have a single source of truth without a handwri
 domain-owned component types, check the literal with a non-widening conformance mechanism, and use
 a narrowly named override or patch contract only where omission has explicit semantics.
 
+## A Bit Pattern Pretends to Be a Semantic Range
+
+**Smell:** A mask, prefix, modulo, truncation, or other compact bit test is used as though it exactly
+described a domain-owned numeric range or identifier class.
+
+**Signals:**
+
+- A prefix comparison admits reserved endpoints or holes excluded by the authoritative range.
+- Classification code uses bit layout folklore while a protocol, schema, or source system defines
+  explicit minimum and maximum values.
+- Tests cover ordinary members of each class but omit boundary, sentinel, and adjacent values.
+- A helper named for domain meaning implements only a convenient representation approximation.
+
+**Possible failure:** Reserved, malformed, or future identifiers acquire valid-looking semantics and
+flow into authorization, routing, presentation, ownership, or persistence as members of the wrong
+class.
+
+**Questions:** Is the class formally prefix-defined or merely stored near values with that prefix?
+Are endpoints, gaps, and sentinels part of the class? Which source owns the partition?
+
+**Counterexamples:** A bit test is exact when the external contract defines membership by those bits
+and reserves every matching value for that class.
+
+**Possible responses:** Encode the authoritative inclusive ranges or discriminant rules in one
+owner, test members plus adjacent and reserved values, and name representation-level prefix helpers
+differently from semantic classifiers when both are useful.
+
 ## Adding Observations
 
 An observation belongs here when it has:

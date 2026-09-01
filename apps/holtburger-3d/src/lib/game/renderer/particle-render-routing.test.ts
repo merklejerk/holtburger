@@ -11,6 +11,7 @@ import { ParticleRenderBatcher } from "./particle-render-routing";
 const MESH = "0x01000001" as DatAssetId;
 const FIRST_OWNER = "scene-node:first" as SceneNodeId;
 const SECOND_OWNER = "scene-node:second" as SceneNodeId;
+const RECORD_ORIGIN = { kind: "record" } as const;
 
 describe("particle render routing", () => {
 	it("erases owner boundaries after routing into one final domain", () => {
@@ -24,8 +25,20 @@ describe("particle render routing", () => {
 
 		// Both owners land in one domain, and ownership is gone from what comes out.
 		expect(routed.get("shared-domain")).toEqual([
-			{ baseSlot: 0, count: 1, hwGfxObjId: MESH, motionType: 2 },
-			{ baseSlot: 8, count: 1, hwGfxObjId: MESH, motionType: 2 },
+			{
+				baseSlot: 0,
+				count: 1,
+				hwGfxObjId: MESH,
+				motionType: 2,
+				origin: RECORD_ORIGIN,
+			},
+			{
+				baseSlot: 8,
+				count: 1,
+				hwGfxObjId: MESH,
+				motionType: 2,
+				origin: RECORD_ORIGIN,
+			},
 		]);
 	});
 
@@ -70,8 +83,24 @@ describe("particle render routing", () => {
 		const batcher = new ParticleRenderBatcher();
 
 		const merged = batcher.mergeContribution([
-			[{ baseSlot: 0, count: 2, hwGfxObjId: MESH, motionType: 2 }],
-			[{ baseSlot: 8, count: 3, hwGfxObjId: MESH, motionType: 2 }],
+			[
+				{
+					baseSlot: 0,
+					count: 2,
+					hwGfxObjId: MESH,
+					motionType: 2,
+					origin: RECORD_ORIGIN,
+				},
+			],
+			[
+				{
+					baseSlot: 8,
+					count: 3,
+					hwGfxObjId: MESH,
+					motionType: 2,
+					origin: RECORD_ORIGIN,
+				},
+			],
 		]);
 
 		// Ranges never combine even when they would draw identically: each names its own slots.
@@ -103,6 +132,7 @@ function source(
 		count: 1,
 		hwGfxObjId: MESH,
 		motionType: 2,
+		origin: RECORD_ORIGIN,
 		renderOwner,
 	};
 }

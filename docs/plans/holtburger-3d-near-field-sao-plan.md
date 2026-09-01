@@ -494,7 +494,7 @@ particles remain after presentation/resolve and likewise cannot cast or receive 
 - Completed 2026-08-11.
 - `WebGL2SaoPass` batches flat or planner-owned portal rectangles through one metadata UBO and one
   instanced exact-tile-quad schedule. Evaluation reconstructs view positions and conservative
-  local normals from D24 depth, rejects clear/far/malformed pixels before the fixed 12-tap loop,
+  local normals from D24 depth, rejects clear/far/malformed pixels before the fixed sample loop,
   then runs separable five-tap depth-bilateral filtering in two configured-resolution R8 targets.
 - The plan's proposed "vertical blur and multiplicative application" draw was split into vertical
   blur plus a dedicated composite draw. Sampling attached scene depth while writing back into the
@@ -667,10 +667,11 @@ particles remain after presentation/resolve and likewise cannot cast or receive 
   their duplicate vocabulary were deleted. Failed replacement allocation remains transactional and
   retains the previous target generation and caller bindings.
 - The state audit found and removed one genuine leak: scratch initialization used global
-  `clearColor`, which could contaminate a later view in the same frame. It now clears the R8
-  attachment with `clearBufferfv` and a retained neutral value. SAO program construction is also
-  transactional: partial programs, VAO, and metadata-buffer allocation are deleted on failure, and
-  the caller's current program/generic uniform-buffer binding are restored. Successful draws leave
+  `clearColor`, which could contaminate a later view in the same frame. This implementation first
+  replaced it with attachment-local `clearBufferfv`; the later particle/SAO cost-reduction plan
+  proved exact scaled-tile coverage and removed scratch initialization entirely. SAO program
+  construction is also transactional: partial programs, VAO, and metadata-buffer allocation are
+  deleted on failure, and the caller's current program/generic uniform-buffer binding are restored. Successful draws leave
   the renderer's documented baseline, explicitly reset blend equation/function, depth state,
   color/depth masks, VAO, generic UBO binding, and binding point 1. Portal tile state is explicitly
   invalidated before weather resumes; flat presentation explicitly replaces the pass's program and

@@ -66,7 +66,7 @@ export interface WebGL2EntityGroundingUniforms {
 	readonly strength: WebGLUniformLocation;
 }
 
-/** Minimal cached-uniform port implemented by the object-state applicator. */
+/** Minimal cached-uniform port implemented by the renderer device-state applicator. */
 export interface WebGL2EntityGroundingUniformApplicator {
 	applyUniform1f(location: WebGLUniformLocation, value: number): boolean;
 	applyUniform1i(location: WebGLUniformLocation, value: number): boolean;

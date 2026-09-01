@@ -105,12 +105,35 @@ type MutableParticleSourceRange = {
 	-readonly [K in keyof ParticleSourceRange]: ParticleSourceRange[K];
 };
 
+const RECORD_PARTICLE_RANGE_ORIGIN = { kind: "record" } as const;
+
+/** Lifetime-owned mutable storage exposed downstream as a readonly split origin. */
+class FollowingRangeOrigin {
+	readonly kind = "range";
+	readonly #mutableLandblockOrigin: [number, number, number] = [0, 0, 0];
+	readonly #mutableLocalOrigin: [number, number, number] = [0, 0, 0];
+	readonly landblockOrigin = sceneVector3(this.#mutableLandblockOrigin);
+	readonly localOrigin = landblockVector3(this.#mutableLocalOrigin);
+
+	update(origin: SceneVector3): void {
+		const landblockX = quantizeToLandblock(origin[0]);
+		const landblockZ = quantizeToLandblock(origin[2]);
+		this.#mutableLandblockOrigin[0] = landblockX;
+		this.#mutableLandblockOrigin[1] = 0;
+		this.#mutableLandblockOrigin[2] = landblockZ;
+		this.#mutableLocalOrigin[0] = origin[0] - landblockX;
+		this.#mutableLocalOrigin[1] = origin[1];
+		this.#mutableLocalOrigin[2] = origin[2] - landblockZ;
+	}
+}
+
 function blankRange(): MutableParticleSourceRange {
 	return {
 		baseSlot: 0,
 		count: 0,
 		hwGfxObjId: "" as DatAssetId,
 		motionType: 0,
+		origin: RECORD_PARTICLE_RANGE_ORIGIN,
 		renderOwner: EXTERIOR_PARTICLE_RENDER_OWNER,
 	};
 }
@@ -269,6 +292,8 @@ interface LiveParticle {
 
 interface EmitterInstance {
 	readonly emitter: DrawableParticleEmitter;
+	/** Origin source carried by this emitter's draw range and selected in the vertex stage. */
+	readonly drawOrigin: ParticleRangeOrigin;
 	/** Owner-relative conservative extent, computed once because no emitter property changes live. */
 	readonly envelopeRadius: number;
 	/**
@@ -301,7 +326,8 @@ interface EmitterInstance {
 	 *
 	 * Hidden emitters are not ticked at all. Retail instead ticks them every frame purely for
 	 * bookkeeping (acclient.c:318219-318252); closed-form state lets us replace that with one
-	 * reconciliation at the visibility transition, so a hidden emitter costs nothing per frame.
+	 * reconciliation at the visibility transition, so a hidden emitter pays only owner-liveness and
+	 * visibility checks per frame, with no particle-level work.
 	 */
 	hiddenSince: number | null;
 	/**
@@ -344,12 +370,27 @@ export type ParticleRenderOwner =
 	| typeof EXTERIOR_PARTICLE_RENDER_OWNER
 	| typeof SKY_PARTICLE_RENDER_OWNER;
 
+/** Where a draw range obtains the origin shared by its particles. */
+type ParticleRangeOrigin =
+	| {
+			/** Particles that leave their parent retain the origin stored in each spawn record. */
+			readonly kind: "record";
+	  }
+	| {
+			/** Parent-following particles share this one live split-precision emitter origin. */
+			readonly kind: "range";
+			readonly landblockOrigin: SceneVector3;
+			readonly localOrigin: LandblockVector3;
+	  };
+
 /** One emitter's slot range awaiting renderer-owned portal-domain routing. */
 export interface ParticleSourceRange {
 	/** Particle mesh shared by every instance in this range. */
 	readonly hwGfxObjId: DatAssetId;
 	/** Vertex-stage motion law shared by every instance in this range. */
 	readonly motionType: number;
+	/** Record-local or one live emitter origin, selected once for the whole range. */
+	readonly origin: ParticleRangeOrigin;
 	/** First record slot this range draws. */
 	readonly baseSlot: number;
 	/** Live particles in the range, drawn as instances from `baseSlot`. */
@@ -371,10 +412,22 @@ export interface ParticleSystemDiagnostics {
 	/** Emitters removed immediately by an authored destroy command. */
 	readonly destroyedEmitterTotal: number;
 	readonly emitterCount: number;
+	/** Emitters rejected by the latest advancement visibility decision. */
+	readonly hiddenEmitterCount: number;
 	/** Targets currently owning at least one emitter. */
 	readonly emitterOwnerCount: number;
 	readonly particleCount: number;
 	readonly emittedTotal: number;
+	/** Finite emitters reconciled analytically after a hidden interval. */
+	readonly finiteHiddenReconciliationTotal: number;
+	/** Following emitters retained by the latest draw-range collection. */
+	readonly lastVisibleFollowingEmitterCount: number;
+	/** Particles covered by those retained following-emitter ranges. */
+	readonly lastVisibleFollowingParticleCount: number;
+	/** Emitters admitted by the latest advancement visibility decision. */
+	readonly visibleEmitterCount: number;
+	/** Persistent emitters reconciled by shifting their clocks after a hidden interval. */
+	readonly persistentHiddenReconciliationTotal: number;
 	/** Emitters halted by an explicit stop command and left to drain. */
 	readonly explicitlyStoppedEmitterTotal: number;
 	/** Emitters removed because their target stopped publishing a transform. */
@@ -431,6 +484,12 @@ export class ParticleSystem {
 	/** Immediate authored destroy removals. */
 	#destroyedEmitterTotal = 0;
 	#emittedTotal = 0;
+	#finiteHiddenReconciliationTotal = 0;
+	#hiddenEmitterCount = 0;
+	#lastVisibleFollowingEmitterCount = 0;
+	#lastVisibleFollowingParticleCount = 0;
+	#persistentHiddenReconciliationTotal = 0;
+	#visibleEmitterCount = 0;
 	/** First explicit stop transition per live emitter. */
 	#explicitlyStoppedEmitterTotal = 0;
 	/** Removals caused by loss of the target transform. */
@@ -515,6 +574,9 @@ export class ParticleSystem {
 		}
 		const envelopeRadius = drawableEnvelopeRadius(emitter, hookOffset);
 		const instance: EmitterInstance = {
+			drawOrigin: emitter.info.followsParent
+				? new FollowingRangeOrigin()
+				: RECORD_PARTICLE_RANGE_ORIGIN,
 			region: this.#slots.allocate(Math.max(1, emitter.info.maxParticles)),
 			emittedCount: 0,
 			emitter,
@@ -586,6 +648,8 @@ export class ParticleSystem {
 		timeSeconds: number,
 		isVisible: (target: BehaviorTarget) => boolean = () => true,
 	): void {
+		this.#hiddenEmitterCount = 0;
+		this.#visibleEmitterCount = 0;
 		for (let index = this.#instances.length - 1; index >= 0; index -= 1) {
 			const instance = this.#instances[index]!;
 			// A target that no longer exists has gone away underneath us.
@@ -594,10 +658,12 @@ export class ParticleSystem {
 				continue;
 			}
 			if (!isVisible(instance.target)) {
+				this.#hiddenEmitterCount += 1;
 				// Record the suspension start once, then do no work at all until it ends.
 				instance.hiddenSince ??= timeSeconds;
 				continue;
 			}
+			this.#visibleEmitterCount += 1;
 			if (instance.hiddenSince !== null) {
 				this.#reconcileVisible(instance, timeSeconds);
 				instance.hiddenSince = null;
@@ -631,6 +697,8 @@ export class ParticleSystem {
 		) => ParticleRenderOwner | null = () => EXTERIOR_PARTICLE_RENDER_OWNER,
 	): ParticleSourceRange[] {
 		this.#rangeOutput.length = 0;
+		this.#lastVisibleFollowingEmitterCount = 0;
+		this.#lastVisibleFollowingParticleCount = 0;
 		let rangesUsed = 0;
 		for (const instance of this.#instances) {
 			if (instance.particles.length === 0) continue;
@@ -640,16 +708,12 @@ export class ParticleSystem {
 			if (info.motionType === null) continue;
 			const renderOwner = resolveRenderOwner(instance.target);
 			if (renderOwner === null) continue;
-			// A following emitter's particles all sit at its parent's current position, so their
-			// origins are the one part of a record that is not fixed at spawn.
+			// A following emitter's particles all share one current parent origin. Resolve and split it
+			// once for the range; the vertex stage selects it instead of each particle's spawn record.
 			if (info.followsParent) {
-				for (let index = 0; index < instance.particles.length; index += 1) {
-					this.#writeParticleRecord(
-						instance,
-						index,
-						instance.region.base + index,
-					);
-				}
+				this.#lastVisibleFollowingEmitterCount += 1;
+				this.#lastVisibleFollowingParticleCount += instance.particles.length;
+				this.#updateFollowingRangeOrigin(instance);
 			}
 			const range = (this.#rangePool[rangesUsed] ??= blankRange());
 			rangesUsed += 1;
@@ -657,6 +721,7 @@ export class ParticleSystem {
 			range.count = instance.particles.length;
 			range.hwGfxObjId = instance.emitter.mesh.id;
 			range.motionType = info.motionType;
+			range.origin = instance.drawOrigin;
 			range.renderOwner = renderOwner;
 			this.#rangeOutput.push(range);
 		}
@@ -745,6 +810,11 @@ export class ParticleSystem {
 			emittedTotal: this.#emittedTotal,
 			emitterCount: this.#instances.length,
 			emitterOwnerCount: this.#ownerAggregates.size,
+			finiteHiddenReconciliationTotal: this.#finiteHiddenReconciliationTotal,
+			hiddenEmitterCount: this.#hiddenEmitterCount,
+			lastVisibleFollowingEmitterCount: this.#lastVisibleFollowingEmitterCount,
+			lastVisibleFollowingParticleCount:
+				this.#lastVisibleFollowingParticleCount,
 			explicitlyStoppedEmitterTotal: this.#explicitlyStoppedEmitterTotal,
 			lostTargetEmitterTotal: this.#lostTargetEmitterTotal,
 			maximumEmitterCountPerOwner,
@@ -756,9 +826,12 @@ export class ParticleSystem {
 				0,
 			),
 			reapedEmitterCount: this.#reapedEmitterCount,
+			persistentHiddenReconciliationTotal:
+				this.#persistentHiddenReconciliationTotal,
 			recordSlotCapacity: this.#slots.capacity,
 			reservedRecordSlotCount: this.#slots.reservedSlotCount,
 			replacedEmitterTotal: this.#replacedEmitterTotal,
+			visibleEmitterCount: this.#visibleEmitterCount,
 		};
 	}
 
@@ -774,6 +847,7 @@ export class ParticleSystem {
 		const hiddenSeconds = timeSeconds - (instance.hiddenSince ?? timeSeconds);
 		if (hiddenSeconds <= 0) return;
 		if (instance.emitter.info.isPersistent) {
+			this.#persistentHiddenReconciliationTotal += 1;
 			// Shifting every birth time forward by the suspension is exactly an age freeze, and it
 			// keeps the emission clock in step so the next particle is not immediately overdue.
 			for (let index = 0; index < instance.particles.length; index += 1) {
@@ -794,6 +868,7 @@ export class ParticleSystem {
 				instance.lastEmissionTime += hiddenSeconds;
 			return;
 		}
+		this.#finiteHiddenReconciliationTotal += 1;
 		// A finite emitter's hidden emissions are analytic: elapsed / interval, capped by its
 		// remaining budget. Retail would have released them one frame at a time.
 		const info = instance.emitter.info;
@@ -1044,9 +1119,8 @@ export class ParticleSystem {
 	/**
 	 * Write one live particle's record into its slot.
 	 *
-	 * Everything a record carries is fixed at spawn except a following emitter's origin, so this
-	 * runs on birth, on the compaction that follows a death, and — until the origin becomes a draw
-	 * uniform — per frame for following emitters only.
+	 * Every record field is fixed at spawn except birth/death compaction. Following emitters select
+	 * their current range origin in the vertex stage, so parent motion never dirties particle rows.
 	 */
 	#writeParticleRecord(
 		instance: EmitterInstance,
@@ -1079,6 +1153,15 @@ export class ParticleSystem {
 		this.#recordScratch.startScale = particle.spawn.startScale;
 		this.#recordScratch.startTranslucency = particle.spawn.startTranslucency;
 		this.#slots.writeRecord(slot, this.#recordScratch);
+	}
+
+	/** Resolve and split one following emitter origin into its lifetime-owned range storage. */
+	#updateFollowingRangeOrigin(instance: EmitterInstance): void {
+		const origin = instance.drawOrigin;
+		if (!(origin instanceof FollowingRangeOrigin)) {
+			throw new Error("A parent-following emitter has no range origin.");
+		}
+		origin.update(this.#liveOriginOf(instance));
 	}
 
 	/**

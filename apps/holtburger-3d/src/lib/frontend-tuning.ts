@@ -411,7 +411,7 @@ export const SHARED_FRONTEND_TUNING = {
 			/** Modern near-field presentation divergence; users may explicitly disable it. */
 			enabledByDefault: true,
 			/** Linear resolution multiplier applied independently to both scratch-target axes. */
-			resolutionScale: 1,
+			resolutionScale: 0.5,
 			/** World-space neighborhood radius sampled around each receiving surface. */
 			sampleRadius: 2,
 			/** Minimum view-space separation required before a sample can occlude. */
@@ -419,7 +419,7 @@ export const SHARED_FRONTEND_TUNING = {
 			/** Strength applied to accumulated obscurance before composition. */
 			intensity: 1.5,
 			/** Number of deterministic spiral taps evaluated for each eligible pixel. */
-			sampleCount: 12,
+			sampleCount: 8,
 			/** View-space depth separation at which bilateral neighbors stop contributing. */
 			bilateralDepthThreshold: 0.75,
 			/** Renderer-owned camera-distance interval over which AO becomes neutral. */

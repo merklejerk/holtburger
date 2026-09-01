@@ -1,4 +1,8 @@
-import { renderVector3, sceneVector3 } from "../../assets/ac-frame";
+import {
+	landblockVector3,
+	renderVector3,
+	sceneVector3,
+} from "../../assets/ac-frame";
 import { describe, expect, it, vi } from "vitest";
 import type { DatAssetId } from "../game-types";
 import type { ParticleDrawRange } from "./particle-render-routing";
@@ -11,8 +15,10 @@ import { createParticleFragmentShader } from "./webgl2-particle-program";
 
 import { TextureWrapMode } from "../textures/types";
 import type { WebGL2TextureSamplerCatalog } from "./webgl2-texture-sampler-catalog";
+import { WebGL2DeviceStateApplicator } from "./webgl2-device-state-applicator";
 
 const MESH = "0x01000ff4" as DatAssetId;
+const RECORD_ORIGIN = { kind: "record" } as const;
 
 let nextBaseSlot = 0;
 
@@ -21,10 +27,17 @@ function batch(
 	motionType: number,
 	particleCount: number,
 	hwGfxObjId: DatAssetId = MESH,
+	origin: ParticleDrawRange["origin"] = RECORD_ORIGIN,
 ): ParticleDrawRange {
 	const baseSlot = nextBaseSlot;
 	nextBaseSlot += particleCount;
-	return { baseSlot, count: particleCount, hwGfxObjId, motionType };
+	return {
+		baseSlot,
+		count: particleCount,
+		hwGfxObjId,
+		motionType,
+		origin,
+	};
 }
 
 const GEOMETRY: ParticleDrawGeometry = {
@@ -49,6 +62,7 @@ function fakeGl() {
 	const draws: number[] = [];
 	const blendFuncs: Array<[number, number]> = [];
 	const intUniforms: Array<[string, number]> = [];
+	const vec3Uniforms: Array<[string, number, number, number]> = [];
 	const samplerBinds: Array<{
 		readonly unit: number;
 		readonly request: unknown;
@@ -87,6 +101,8 @@ function fakeGl() {
 		attachShader: () => undefined,
 		bindBuffer: () => undefined,
 		bindTexture: () => undefined,
+		bindSampler: (unit: number, sampler: { request: unknown }) =>
+			samplerBinds.push({ request: sampler.request, unit }),
 		bindVertexArray: () => undefined,
 		blendFunc: (source: number, destination: number) =>
 			blendFuncs.push([source, destination]),
@@ -130,7 +146,8 @@ function fakeGl() {
 		uniform1i: (location: { name: string }, value: number) =>
 			intUniforms.push([location.name, value]),
 		uniform1ui: () => undefined,
-		uniform3f: () => undefined,
+		uniform3f: (location: { name: string }, x: number, y: number, z: number) =>
+			vec3Uniforms.push([location.name, x, y, z]),
 		uniform4f: () => undefined,
 		uniformMatrix4fv: () => undefined,
 		useProgram: () => undefined,
@@ -139,9 +156,7 @@ function fakeGl() {
 		vertexAttribPointer: () => undefined,
 	} as unknown as WebGL2RenderingContext;
 	const samplers = {
-		bind: (unit: number, request: unknown) => {
-			samplerBinds.push({ request, unit });
-		},
+		getSampler: (request: unknown) => ({ request }) as unknown as WebGLSampler,
 	} as unknown as WebGL2TextureSamplerCatalog;
 	return {
 		calls: { blendFuncs, texImage2D, texSubImage2D },
@@ -150,6 +165,7 @@ function fakeGl() {
 		intUniforms,
 		samplerBinds,
 		samplers,
+		vec3Uniforms,
 	};
 }
 
@@ -166,8 +182,9 @@ const context = (
 	samplers:
 		samplers ??
 		({
-			bind: () => undefined,
+			getSampler: () => ({}) as WebGLSampler,
 		} as unknown as WebGL2TextureSamplerCatalog),
+	state: new WebGL2DeviceStateApplicator(gl),
 	textureFiltering: "linear" as const,
 	view: new Float32Array(16),
 });
@@ -199,6 +216,46 @@ describe("WebGL2ParticlePass", () => {
 
 		expect(intUniforms).toContainEqual(["uMotionType", 6]);
 		expect(intUniforms).toContainEqual(["uOrientation", 1]);
+	});
+
+	it("filters repeated batch state while retaining the required slot-base write", () => {
+		const { calls, gl, intUniforms } = fakeGl();
+		const pass = new WebGL2ParticlePass(() => GEOMETRY);
+
+		pass.draw(context(gl), [batch(2, 1), batch(2, 1)]);
+
+		expect(calls.blendFuncs).toHaveLength(1);
+		expect(intUniforms.filter(([name]) => name === "uMotionType")).toHaveLength(
+			1,
+		);
+		expect(
+			intUniforms.filter(([name]) => name === "uUsesRangeOrigin"),
+		).toHaveLength(1);
+		expect(
+			intUniforms.filter(([name]) => name === "uInstanceBase"),
+		).toHaveLength(2);
+	});
+
+	it("binds one split live origin for a parent-following range", () => {
+		const { gl, intUniforms, vec3Uniforms } = fakeGl();
+		const pass = new WebGL2ParticlePass(() => GEOMETRY);
+
+		pass.draw(context(gl), [
+			batch(2, 4, MESH, {
+				kind: "range",
+				landblockOrigin: sceneVector3([384, 0, -576]),
+				localOrigin: landblockVector3([12, 7, 18]),
+			}),
+		]);
+
+		expect(intUniforms).toContainEqual(["uUsesRangeOrigin", 1]);
+		expect(vec3Uniforms).toContainEqual([
+			"uRangeLandblockOrigin",
+			384,
+			0,
+			-576,
+		]);
+		expect(vec3Uniforms).toContainEqual(["uRangeLocalOrigin", 12, 7, 18]);
 	});
 
 	it("routes scoped batches without splitting their one frame upload", () => {
@@ -282,15 +339,15 @@ describe("WebGL2ParticlePass", () => {
 
 		pass.draw(context(gl, samplers), [batch(2, 3)]);
 
-		expect(samplerBinds).toEqual([
+		expect(samplerBinds.sort((left, right) => left.unit - right.unit)).toEqual([
 			{
 				request: {
-					mipLevels: 1,
+					mipLevels: 2,
 					policy: "linear",
-					samplingClass: "exact",
+					samplingClass: "filterable",
 					wrap: TextureWrapMode.Clamp,
 				},
-				unit: 2,
+				unit: 0,
 			},
 			{
 				request: {
@@ -303,12 +360,12 @@ describe("WebGL2ParticlePass", () => {
 			},
 			{
 				request: {
-					mipLevels: 2,
+					mipLevels: 1,
 					policy: "linear",
-					samplingClass: "filterable",
+					samplingClass: "exact",
 					wrap: TextureWrapMode.Clamp,
 				},
-				unit: 0,
+				unit: 2,
 			},
 		]);
 	});

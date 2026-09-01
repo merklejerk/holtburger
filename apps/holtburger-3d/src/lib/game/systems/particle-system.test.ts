@@ -618,10 +618,14 @@ describe("ParticleSystem", () => {
 		particles.advance(10, visible);
 
 		// Retail freezes ages off-screen, so the particle is still alive on return.
-		expect(particles.getDiagnostics().particleCount).toBe(1);
+		expect(particles.getDiagnostics()).toMatchObject({
+			particleCount: 1,
+			persistentHiddenReconciliationTotal: 1,
+			visibleEmitterCount: 1,
+		});
 	});
 
-	it("does no per-tick work while an emitter is hidden", () => {
+	it("does no particle-level work while an emitter is hidden", () => {
 		const particles = runtime();
 		particles.create(
 			TARGET,
@@ -636,7 +640,11 @@ describe("ParticleSystem", () => {
 		for (let step = 0; step < 50; step += 1) particles.advance(step, hidden);
 
 		// Retail ticks hidden emitters every frame; closed-form state lets us emit nothing at all.
-		expect(particles.getDiagnostics().particleCount).toBe(0);
+		expect(particles.getDiagnostics()).toMatchObject({
+			hiddenEmitterCount: 1,
+			particleCount: 0,
+			visibleEmitterCount: 0,
+		});
 	});
 
 	it("completes a hidden finite emitter's burst analytically", () => {
@@ -660,8 +668,11 @@ describe("ParticleSystem", () => {
 		// Ten hidden seconds at a one-second interval exhausts the four-particle budget.
 		particles.advance(10, () => true);
 
-		expect(particles.getDiagnostics().emitterCount).toBe(0);
-		expect(particles.getDiagnostics().reapedEmitterCount).toBe(1);
+		expect(particles.getDiagnostics()).toMatchObject({
+			emitterCount: 0,
+			finiteHiddenReconciliationTotal: 1,
+			reapedEmitterCount: 1,
+		});
 	});
 
 	it("creates an emitter through the router port when its definition is staged", () => {
@@ -1061,26 +1072,43 @@ describe("ParticleSystem", () => {
 		expect(originReads).toBe(0);
 	});
 
-	// A following emitter is the one case that still writes per frame, because every one of its
-	// particles sits at its parent's current position rather than where it was born.
-	it("rewrites a following emitter's origins as its parent moves", () => {
+	// A following emitter resolves one shared live origin per range. Its spawn records remain fixed,
+	// even when several particles follow the same moving parent.
+	it("carries one live range origin without rewriting following records", () => {
 		let parentX = 0;
+		let originReads = 0;
 		const particles = runtime({
-			sceneOriginOf: () => sceneVector3([parentX, 0, 0]),
+			sceneOriginOf: () => {
+				originReads += 1;
+				return sceneVector3([parentX, 0, 0]);
+			},
 		});
 		particles.create(
 			TARGET,
-			prepared({ followsParent: true, initialParticles: 1 }),
+			prepared({ followsParent: true, initialParticles: 4 }),
 			NO_OFFSET,
 			0,
 			0,
 			ORIGIN,
 		);
 
-		parentX = 40;
-		particles.collectDrawRanges();
+		// Cross a landblock boundary so this also proves the live range retains the same split-origin
+		// precision contract as record-owned spawns.
+		parentX = 200;
+		originReads = 0;
+		const [range] = particles.collectDrawRanges();
 
-		expect(storedRecord(particles).localOrigin[0]).toBeCloseTo(40);
+		expect(range?.origin).toEqual({
+			kind: "range",
+			landblockOrigin: [192, 0, 0],
+			localOrigin: [8, 0, 0],
+		});
+		expect(originReads).toBe(1);
+		expect(storedRecord(particles).localOrigin[0]).toBe(0);
+		expect(particles.getDiagnostics()).toMatchObject({
+			lastVisibleFollowingEmitterCount: 1,
+			lastVisibleFollowingParticleCount: 4,
+		});
 	});
 
 	it("gives each exploding particle its own unit direction", () => {

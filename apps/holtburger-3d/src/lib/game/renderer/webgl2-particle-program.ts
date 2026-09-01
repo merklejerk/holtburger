@@ -124,6 +124,11 @@ uniform vec3 uCameraPosition;
  * cancellation, and that error would land on every particle.
  */
 uniform vec3 uAnchorOrigin;
+/** One when this emitter follows its parent and supplies one live origin for the whole range. */
+uniform int uUsesRangeOrigin;
+/** Split-precision live emitter origin, read only when uUsesRangeOrigin is one. */
+uniform vec3 uRangeLandblockOrigin;
+uniform vec3 uRangeLocalOrigin;
 /** Authored ParticleType, constant per drawn range. */
 uniform int uMotionType;
 
@@ -216,8 +221,11 @@ void main() {
 	// Re-anchor exactly: the coarse difference cancels on the landblock grid, then the precise
 	// landblock-local part is added. Only the authored displacement needs converting, and it is
 	// converted exactly once here.
-	vec3 anchoredOrigin =
-		(record.landblockOrigin - uAnchorOrigin) + record.localOrigin;
+	vec3 landblockOrigin = uUsesRangeOrigin == 1
+		? uRangeLandblockOrigin
+		: record.landblockOrigin;
+	vec3 localOrigin = uUsesRangeOrigin == 1 ? uRangeLocalOrigin : record.localOrigin;
+	vec3 anchoredOrigin = (landblockOrigin - uAnchorOrigin) + localOrigin;
 	vec3 worldPosition =
 		anchoredOrigin + acToRender(acDisplacement(record, elapsed));
 	float scale = mix(record.appearance.x, record.appearance.y, progress);
@@ -372,6 +380,9 @@ export interface WebGL2ParticleProgram {
 		readonly orientation: WebGLUniformLocation;
 		readonly palette: WebGLUniformLocation;
 		readonly projection: WebGLUniformLocation;
+		readonly rangeLandblockOrigin: WebGLUniformLocation;
+		readonly rangeLocalOrigin: WebGLUniformLocation;
+		readonly usesRangeOrigin: WebGLUniformLocation;
 		readonly view: WebGLUniformLocation;
 	};
 }
@@ -419,6 +430,13 @@ export function createWebGL2ParticleProgram(
 		orientation: requireWebGL2Uniform(gl, program, "uOrientation"),
 		palette: requireWebGL2Uniform(gl, program, "uPalette"),
 		projection: requireWebGL2Uniform(gl, program, "uProjection"),
+		rangeLandblockOrigin: requireWebGL2Uniform(
+			gl,
+			program,
+			"uRangeLandblockOrigin",
+		),
+		rangeLocalOrigin: requireWebGL2Uniform(gl, program, "uRangeLocalOrigin"),
+		usesRangeOrigin: requireWebGL2Uniform(gl, program, "uUsesRangeOrigin"),
 		view: requireWebGL2Uniform(gl, program, "uView"),
 	};
 	// Sampler units are invariant for the program's lifetime, so bind them once at creation.

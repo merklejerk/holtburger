@@ -256,6 +256,10 @@ export interface FrameSelectionMetrics {
 		readonly allocatedGenerationCount: number;
 		/** Replaced, disabled, or destroyed scratch generations released. */
 		readonly disposedGenerationCount: number;
+		/** Full-resolution pixels whose SAO evaluation, blur, and composition ran. */
+		readonly pixelCount: number;
+		/** Render-domain tiles whose SAO evaluation, blur, and composition ran. */
+		readonly tileCount: number;
 		/** Renderer-owned distance fade when AO is enabled for the frame. */
 		readonly effectiveDistanceFade: {
 			readonly disabledAt: number;

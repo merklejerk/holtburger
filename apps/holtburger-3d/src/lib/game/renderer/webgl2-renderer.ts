@@ -275,7 +275,7 @@ import {
 	createWebGL2SkyProgram,
 	type WebGL2SkyProgram,
 } from "./webgl2-sky-program";
-import { WebGL2ObjectStateApplicator } from "./webgl2-object-state-applicator";
+import { WebGL2DeviceStateApplicator } from "./webgl2-device-state-applicator";
 import { sourceOpacity } from "./object-rendering-policy";
 import {
 	WebGL2FrameProfiler,
@@ -699,6 +699,8 @@ interface MutableFrameSelectionMetrics {
 	ambientOcclusion: {
 		activeBytes: number;
 		allocatedGenerationCount: number;
+		pixelCount: number;
+		tileCount: number;
 		disposedGenerationCount: number;
 		effectiveDistanceFade: {
 			disabledAt: number;
@@ -902,7 +904,7 @@ export class WebGL2Renderer implements Renderer {
 	readonly #dynamicLightScratch: ReturnType<typeof createDynamicLightScratch>;
 	readonly #terrainLightMask: WebGL2TerrainLightMaskTexture;
 	/** Exact state mirror scoped to independently invalidated object phases. */
-	readonly #objectState: WebGL2ObjectStateApplicator;
+	readonly #deviceState: WebGL2DeviceStateApplicator;
 	/** Portal owner created lazily when the first portal frame needs GPU resources. */
 	#portalScopeAtlasPipeline: WebGL2PortalScopeAtlasPipeline | null = null;
 	/** Unconditional flat-scene attachments, allocated lazily on the first flat frame. */
@@ -989,6 +991,8 @@ export class WebGL2Renderer implements Renderer {
 		ambientOcclusion: {
 			activeBytes: 0,
 			allocatedGenerationCount: 0,
+			pixelCount: 0,
+			tileCount: 0,
 			disposedGenerationCount: 0,
 			effectiveDistanceFade: null,
 		},
@@ -1150,7 +1154,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#entityGroundingPrograms = new WebGL2EntityGroundingPrograms(gl);
 		this.#dynamicLightScratch = createDynamicLightScratch();
 		this.#terrainLightMask = createWebGL2TerrainLightMaskTexture(gl);
-		this.#objectState = new WebGL2ObjectStateApplicator(gl);
+		this.#deviceState = new WebGL2DeviceStateApplicator(gl);
 		this.#nearTerrainProgram = createWebGL2NearTerrainProgram(gl);
 		this.#farTerrainProgram = createWebGL2FarTerrainProgram(gl);
 		this.#objectProgram = createWebGL2ObjectProgram(gl);
@@ -1843,6 +1847,10 @@ export class WebGL2Renderer implements Renderer {
 					view.projection,
 					shading.ambientOcclusion,
 				);
+				this.#recordAmbientOcclusionWork(
+					frame.atlas.tileCount,
+					frame.atlas.trace.tilePixelCount,
+				);
 				pipeline.invalidateOpaqueTileState();
 			} finally {
 				ambientOcclusionGpu?.finish();
@@ -2029,7 +2037,7 @@ export class WebGL2Renderer implements Renderer {
 				this.#activeOutdoorPssmFrame.instanceUploads.count;
 			this.#frameSelectionMetrics.frameInstanceUploadBytes +=
 				this.#activeOutdoorPssmFrame.instanceUploads.bytes;
-			this.#objectState.invalidate();
+			this.#deviceState.invalidate();
 		}
 	}
 
@@ -2893,6 +2901,8 @@ export class WebGL2Renderer implements Renderer {
 		this.#submittedNameplateDrawCount = 0;
 		metrics.ambientOcclusion.activeBytes = 0;
 		metrics.ambientOcclusion.allocatedGenerationCount = 0;
+		metrics.ambientOcclusion.pixelCount = 0;
+		metrics.ambientOcclusion.tileCount = 0;
 		metrics.ambientOcclusion.disposedGenerationCount = 0;
 		metrics.ambientOcclusion.effectiveDistanceFade = null;
 		metrics.envCellRenderMode = envCellRenderMode;
@@ -3160,6 +3170,7 @@ export class WebGL2Renderer implements Renderer {
 				this.#particleProjectionScratch,
 			),
 			samplers: this.#textureSamplers,
+			state: this.#deviceState,
 			textureFiltering: this.#frameTextureFiltering,
 			view: mat4ToFloat32Array(view.view, this.#particleViewScratch),
 		};
@@ -3264,6 +3275,10 @@ export class WebGL2Renderer implements Renderer {
 					view.camera,
 					view.projection,
 					shading.ambientOcclusion,
+				);
+				this.#recordAmbientOcclusionWork(
+					1,
+					target.extent.width * target.extent.height,
 				);
 			} finally {
 				ambientOcclusionGpu?.finish();
@@ -3686,7 +3701,7 @@ export class WebGL2Renderer implements Renderer {
 			this.#portalTransitionTarget?.destroy();
 			this.#portalTransitionTarget = null;
 		}
-		// Presentation changes program and texture bindings outside the object-state mirror.
+		// Presentation changes program and texture bindings outside the device-state mirror.
 		this.#beginObjectPhase();
 	}
 
@@ -3756,6 +3771,13 @@ export class WebGL2Renderer implements Renderer {
 		pass.setCoverageVisualizationEnabled(this.#saoCoverageVisualizationEnabled);
 		this.#saoPass = pass;
 		return pass;
+	}
+
+	/** Account for the exact full-resolution workload of one successful SAO invocation. */
+	#recordAmbientOcclusionWork(tileCount: number, pixelCount: number): void {
+		const metrics = this.#frameSelectionMetrics.ambientOcclusion;
+		metrics.tileCount += tileCount;
+		metrics.pixelCount += pixelCount;
 	}
 
 	/** Submit one sky pass while preserving the caller's portal routing and optional GPU span. */
@@ -4468,7 +4490,7 @@ export class WebGL2Renderer implements Renderer {
 		try {
 			this.#beginObjectPhase();
 			gl.depthMask(true);
-			this.#objectState.applyBlend(null);
+			this.#deviceState.applyBlend(null);
 			for (const object of objects) {
 				const receivesIndoorGrounding =
 					object.source === "env-cell-shell" &&
@@ -4486,7 +4508,7 @@ export class WebGL2Renderer implements Renderer {
 						: object.drawKind === "instanced"
 							? this.#instancedObjectProgram
 							: this.#objectProgram;
-				const programChanged = this.#objectState.applyProgram(program.program);
+				const programChanged = this.#deviceState.applyProgram(program.program);
 				if (programChanged) {
 					this.#activateObjectProgram(program, view, shading);
 				}
@@ -4570,7 +4592,7 @@ export class WebGL2Renderer implements Renderer {
 								this.#blendedInstancedObjectProgram)
 							: (portalPrograms?.baked ?? this.#blendedObjectProgram);
 				}
-				if (this.#objectState.applyProgram(program.program)) {
+				if (this.#deviceState.applyProgram(program.program)) {
 					this.#activateObjectProgram(program, view, shading);
 				}
 				if (portalPipeline) {
@@ -4587,7 +4609,7 @@ export class WebGL2Renderer implements Renderer {
 				}
 				this.#applyObjectLighting(program, object, shading);
 				this.#applyObjectGrounding(program, object, view);
-				this.#objectState.applyBlend(object.blendPolicy);
+				this.#deviceState.applyBlend(object.blendPolicy);
 				this.#drawObjectRange(program, object, view.landblockOffsets);
 			}
 		} finally {
@@ -4755,7 +4777,7 @@ export class WebGL2Renderer implements Renderer {
 		}
 		const { compatibility } = object;
 		const gl = this.#gl;
-		const state = this.#objectState;
+		const state = this.#deviceState;
 		state.applyCullFace(compatibility.cullFace);
 		if (program.transformSource === "uniform") {
 			this.#countUniformWrite(
@@ -5001,7 +5023,7 @@ export class WebGL2Renderer implements Renderer {
 				active,
 				this.#outdoorPssmUniformScratch,
 			);
-			this.#objectState.applyTextureArrayUnit(
+			this.#deviceState.applyTextureArrayUnit(
 				OUTDOOR_PSSM_TEXTURE_UNIT,
 				active.targets.depth,
 			);
@@ -5029,7 +5051,7 @@ export class WebGL2Renderer implements Renderer {
 		shading: SceneShading,
 	): void {
 		const role = objectLightingRole(object.source);
-		if (this.#objectState.applyLightingRole(role)) {
+		if (this.#deviceState.applyLightingRole(role)) {
 			bindWebGL2SceneLighting(
 				this.#gl,
 				program.uniforms,
@@ -5043,7 +5065,7 @@ export class WebGL2Renderer implements Renderer {
 			role === "interior-object" || object.source === "portal-transition"
 				? null
 				: object.landblockId;
-		if (!this.#objectState.applyStaticLightScope(scope)) return;
+		if (!this.#deviceState.applyStaticLightScope(scope)) return;
 		bindWebGL2StaticLights(
 			this.#gl,
 			program.uniforms,
@@ -5083,7 +5105,7 @@ export class WebGL2Renderer implements Renderer {
 		}
 		const attempted = entityGroundingUniformAttemptCount(selection);
 		const issued = applyWebGL2EntityGroundingUniforms(
-			this.#objectState,
+			this.#deviceState,
 			uniforms,
 			selection,
 			active.indoorSettings,
@@ -5126,7 +5148,7 @@ export class WebGL2Renderer implements Renderer {
 
 	/** Start one object-owned phase with complete bindings for every active sampler. */
 	#beginObjectPhase(): void {
-		this.#objectState.invalidate();
+		this.#deviceState.invalidate();
 		for (const unit of Object.values(OBJECT_TEXTURE_UNITS)) {
 			this.#bindPreparedObjectTexture(unit, this.#objectFallbackBinding);
 		}
@@ -5136,7 +5158,7 @@ export class WebGL2Renderer implements Renderer {
 		unit: number,
 		binding: PreparedObjectTextureBinding<WebGLTexture, WebGLSampler>,
 	): void {
-		if (this.#objectState.applyTextureUnit(unit, binding)) {
+		if (this.#deviceState.applyTextureUnit(unit, binding)) {
 			this.#frameSelectionMetrics.objectTextureBinds += 1;
 		}
 	}

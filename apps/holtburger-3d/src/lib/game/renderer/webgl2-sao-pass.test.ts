@@ -4,6 +4,7 @@ import {
 	WebGL2SaoScratchTargets,
 	saoScratchByteLength,
 	scaledSaoExtent,
+	scaledSaoInterval,
 } from "./webgl2-sao-pass";
 
 const INITIAL_EXTENT = { height: 3, width: 4 } as const;
@@ -38,6 +39,24 @@ describe("WebGL2 SAO scratch policy", () => {
 		expect(() => scaledSaoExtent({ height: 1, width: 1 }, 0)).toThrow(
 			"scale in (0, 1]",
 		);
+	});
+
+	it("covers adjacent scaled tiles exactly across fractional edge rounding", () => {
+		const left = scaledSaoInterval(0, 5, 0.5);
+		const right = scaledSaoInterval(5, 7, 0.5);
+
+		expect(left).toEqual({ end: 2, extent: 2, origin: 0 });
+		expect(right).toEqual({ end: 6, extent: 4, origin: 2 });
+		expect(left.end).toBe(right.origin);
+	});
+
+	it("leaves atlas gaps outside every scaled tile and retains one-pixel tiles", () => {
+		const left = scaledSaoInterval(0, 3, 0.5);
+		const right = scaledSaoInterval(6, 3, 0.5);
+		const tiny = scaledSaoInterval(11, 1, 0.25);
+
+		expect(left.end).toBeLessThan(right.origin);
+		expect(tiny).toEqual({ end: 3, extent: 1, origin: 2 });
 	});
 
 	it("transactionally replaces, disables, and destroys complete generations", () => {

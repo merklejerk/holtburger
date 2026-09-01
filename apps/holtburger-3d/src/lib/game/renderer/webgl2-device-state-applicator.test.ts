@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { WebGL2ObjectStateApplicator } from "./webgl2-object-state-applicator";
+import { WebGL2DeviceStateApplicator } from "./webgl2-device-state-applicator";
 
-describe("WebGL2ObjectStateApplicator", () => {
+describe("WebGL2DeviceStateApplicator", () => {
 	it("skips repeated program, cull, blend, texture, sampler, active-unit, and VAO calls", () => {
 		const fixture = createFixture();
-		const state = new WebGL2ObjectStateApplicator(fixture.gl);
+		const state = new WebGL2DeviceStateApplicator(fixture.gl);
 		const binding = { sampler: fixture.samplerA, texture: fixture.textureA };
 
 		expect(state.applyProgram(fixture.programA)).toBe(true);
@@ -33,7 +33,7 @@ describe("WebGL2ObjectStateApplicator", () => {
 
 	it("applies texture-only and sampler-only changes without redundant active-unit calls", () => {
 		const fixture = createFixture();
-		const state = new WebGL2ObjectStateApplicator(fixture.gl);
+		const state = new WebGL2DeviceStateApplicator(fixture.gl);
 
 		state.applyTextureUnit(1, {
 			sampler: fixture.samplerA,
@@ -61,32 +61,41 @@ describe("WebGL2ObjectStateApplicator", () => {
 		]);
 	});
 
-	it("tracks array textures on the shared active-unit selector", () => {
+	it("tracks array textures and samplers on their shared physical unit", () => {
 		const fixture = createFixture();
-		const state = new WebGL2ObjectStateApplicator(fixture.gl);
+		const state = new WebGL2DeviceStateApplicator(fixture.gl);
 
-		expect(state.applyTextureArrayUnit(7, fixture.textureA)).toBe(true);
-		expect(state.applyTextureArrayUnit(7, fixture.textureA)).toBe(false);
 		expect(
-			state.applyTextureUnit(0, {
+			state.applyTextureUnit(7, {
 				sampler: fixture.samplerA,
 				texture: fixture.textureB,
 			}),
 		).toBe(true);
+		expect(state.applyTextureArrayUnit(7, fixture.textureA)).toBe(true);
+		// Restoring the same 2D binding must still restore the sampler cleared by the array path.
+		expect(
+			state.applyTextureUnit(7, {
+				sampler: fixture.samplerA,
+				texture: fixture.textureB,
+			}),
+		).toBe(false);
+		// Likewise, an unchanged array texture must still clear the sampler again.
+		expect(state.applyTextureArrayUnit(7, fixture.textureA)).toBe(false);
 
 		expect(fixture.calls).toEqual([
 			"activeTexture:17",
+			"bindTexture:9:b",
+			"bindSampler:7:a",
 			"bindTexture:12:a",
 			"bindSampler:7:null",
-			"activeTexture:10",
-			"bindTexture:9:b",
-			"bindSampler:0:a",
+			"bindSampler:7:a",
+			"bindSampler:7:null",
 		]);
 	});
 
 	it("reapplies every required value after invalidation", () => {
 		const fixture = createFixture();
-		const state = new WebGL2ObjectStateApplicator(fixture.gl);
+		const state = new WebGL2DeviceStateApplicator(fixture.gl);
 		const apply = () => {
 			state.applyProgram(fixture.programA);
 			state.applyCullFace("front");
@@ -107,7 +116,7 @@ describe("WebGL2ObjectStateApplicator", () => {
 
 	it("issues a uniform once and skips it while the value is unchanged", () => {
 		const fixture = createFixture();
-		const state = new WebGL2ObjectStateApplicator(fixture.gl);
+		const state = new WebGL2DeviceStateApplicator(fixture.gl);
 
 		expect(state.applyUniform1i(fixture.locationA, 1)).toBe(true);
 		expect(state.applyUniform1i(fixture.locationA, 1)).toBe(false);
@@ -127,7 +136,7 @@ describe("WebGL2ObjectStateApplicator", () => {
 
 	it("keeps uniform values across a program switch, because GL retains them per program", () => {
 		const fixture = createFixture();
-		const state = new WebGL2ObjectStateApplicator(fixture.gl);
+		const state = new WebGL2DeviceStateApplicator(fixture.gl);
 
 		state.applyProgram(fixture.programA);
 		expect(state.applyUniform1f(fixture.locationA, 0.5)).toBe(true);
@@ -140,7 +149,7 @@ describe("WebGL2ObjectStateApplicator", () => {
 
 	it("treats an unseen location as changed and does not confuse zero with negative zero", () => {
 		const fixture = createFixture();
-		const state = new WebGL2ObjectStateApplicator(fixture.gl);
+		const state = new WebGL2DeviceStateApplicator(fixture.gl);
 
 		expect(state.applyUniform1f(fixture.locationA, 0)).toBe(true);
 		// -0 and 0 are the same uniform value; a NaN-seeded slot must not report them as different.
@@ -149,7 +158,7 @@ describe("WebGL2ObjectStateApplicator", () => {
 
 	it("compares every matrix component rather than the buffer identity", () => {
 		const fixture = createFixture();
-		const state = new WebGL2ObjectStateApplicator(fixture.gl);
+		const state = new WebGL2DeviceStateApplicator(fixture.gl);
 		const scratch = new Float32Array(16);
 		scratch[0] = 1;
 
@@ -162,7 +171,7 @@ describe("WebGL2ObjectStateApplicator", () => {
 
 	it("compares the full configurable-width vec4 array", () => {
 		const fixture = createFixture();
-		const state = new WebGL2ObjectStateApplicator(fixture.gl);
+		const state = new WebGL2DeviceStateApplicator(fixture.gl);
 		const records = new Float32Array(128);
 
 		expect(state.applyUniform4fv(fixture.locationA, records)).toBe(true);

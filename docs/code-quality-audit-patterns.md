@@ -1077,6 +1077,35 @@ be named and bounded by that owner.
 interdependent resource and policy values into one contract, or centralize transitions in a state
 owner that can prove the required predecessor state.
 
+## A State Mirror Tracks Logical Paths Instead of Physical Aliases
+
+**Smell:** A cache or state applicator models several API paths independently even though those
+paths mutate one shared physical slot, resource, or piece of ambient state.
+
+**Signals:**
+
+- Separate maps cache bindings by resource kind while another property, such as a sampler, mode,
+  lock, namespace, or active selector, is shared across those kinds.
+- One path changes shared state without updating or invalidating the sibling path's cached value.
+- A repeated logical binding is skipped after an intervening operation reached the same physical
+  state through a different API.
+- Tests transition between categories only on different slots, so they never exercise aliasing.
+
+**Possible failure:** The cache suppresses a required mutation and leaves the physical system in a
+state that disagrees with its mirror. Correctness then depends on reserved slots or current call
+ordering rather than the applicator's stated contract.
+
+**Questions:** Which logical operations alias the same physical state? Does every mutation update
+all cached views of that state? Can a sibling operation change a value while leaving the primary
+resource identity unchanged?
+
+**Counterexamples:** Independent caches are sound when the underlying API guarantees disjoint
+state, or when a stronger owner proves the logical paths can never share a slot and the API encodes
+that separation.
+
+**Possible responses:** Model the shared physical state once, invalidate every alias on mutation,
+encode disjoint slot domains in the type/API, and test same-slot transitions across logical paths.
+
 ## Adding Observations
 
 An observation belongs here when it has:

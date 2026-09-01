@@ -1,5 +1,6 @@
 <script lang="ts">
-	import type { Snippet } from "svelte";
+	import { onDestroy, type Snippet } from "svelte";
+	import { trackPointerGesture } from "../app/pointer-gesture";
 	import {
 		anchorClientHudPlacement,
 		resizeClientPanelRectangle,
@@ -16,6 +17,8 @@
 		readonly placement: ClientHudPlacement;
 		readonly title: string;
 		readonly viewport: ClientHudViewport;
+		/** Whether the titlebar exposes its runtime close action. */
+		readonly closable: boolean;
 		readonly onClose: () => void;
 		readonly onPlacementChange: (placement: ClientHudPlacement) => void;
 	}
@@ -27,6 +30,7 @@
 		placement,
 		title,
 		viewport,
+		closable,
 		onClose,
 		onPlacementChange,
 	}: Props = $props();
@@ -34,6 +38,8 @@
 	const resolved = $derived(
 		resolveClientHudPlacement(placement, viewport, minimum),
 	);
+	let cancelPointerGesture: (() => void) | null = null;
+	onDestroy(() => cancelPointerGesture?.());
 	const resizeHandles: readonly {
 		readonly name: string;
 		readonly edges: ClientPanelResizeEdges;
@@ -66,19 +72,24 @@
 			width: placement.preferredWidth,
 			height: placement.preferredHeight,
 		};
-		trackPointer(event.pointerId, (moved) => {
-			onPlacementChange(
-				anchorClientHudPlacement(
-					{
-						...start,
-						left: start.left + moved.clientX - startX,
-						top: start.top + moved.clientY - startY,
-					},
-					startViewport,
-					preferred,
-				),
-			);
-		});
+		cancelPointerGesture?.();
+		cancelPointerGesture = trackPointerGesture(
+			window,
+			event.pointerId,
+			(moved) => {
+				onPlacementChange(
+					anchorClientHudPlacement(
+						{
+							...start,
+							left: start.left + moved.clientX - startX,
+							top: start.top + moved.clientY - startY,
+						},
+						startViewport,
+						preferred,
+					),
+				);
+			},
+		);
 	}
 
 	function beginResize(
@@ -92,44 +103,31 @@
 		const startY = event.clientY;
 		const start = resolved;
 		const startViewport = viewport;
-		trackPointer(event.pointerId, (moved) => {
-			const rectangle = resizeClientPanelRectangle(
-				start,
-				startViewport,
-				minimum,
-				{ x: moved.clientX - startX, y: moved.clientY - startY },
-				edges,
-			);
-			onPlacementChange(
-				anchorClientHudPlacement(rectangle, startViewport, {
-					width: rectangle.width,
-					height: rectangle.height,
-				}),
-			);
-		});
-	}
-
-	function trackPointer(
-		pointerId: number,
-		update: (event: PointerEvent) => void,
-	): void {
-		const move = (event: PointerEvent): void => {
-			if (event.pointerId === pointerId) update(event);
-		};
-		const end = (event: PointerEvent): void => {
-			if (event.pointerId !== pointerId) return;
-			window.removeEventListener("pointermove", move);
-			window.removeEventListener("pointerup", end);
-			window.removeEventListener("pointercancel", end);
-		};
-		window.addEventListener("pointermove", move);
-		window.addEventListener("pointerup", end);
-		window.addEventListener("pointercancel", end);
+		cancelPointerGesture?.();
+		cancelPointerGesture = trackPointerGesture(
+			window,
+			event.pointerId,
+			(moved) => {
+				const rectangle = resizeClientPanelRectangle(
+					start,
+					startViewport,
+					minimum,
+					{ x: moved.clientX - startX, y: moved.clientY - startY },
+					edges,
+				);
+				onPlacementChange(
+					anchorClientHudPlacement(rectangle, startViewport, {
+						width: rectangle.width,
+						height: rectangle.height,
+					}),
+				);
+			},
+		);
 	}
 </script>
 
 <section
-	class="floating-panel ac-panel"
+	class="hud-window ac-panel"
 	style:left={`${resolved.left}px`}
 	style:top={`${resolved.top}px`}
 	style:width={`${resolved.width}px`}
@@ -137,7 +135,7 @@
 	aria-label={title}
 >
 	<header
-		class="floating-panel-titlebar ac-titlebar"
+		class="hud-window-titlebar ac-titlebar"
 		role="group"
 		aria-label={`${title} window controls`}
 		onpointerdown={beginDrag}
@@ -145,16 +143,17 @@
 		<span>{title}</span>
 		<button
 			type="button"
-			class="emoji-button floating-panel-close"
+			class="emoji-button hud-window-close"
 			aria-label={`Close ${title}`}
+			disabled={!closable}
 			onpointerdown={(event) => event.stopPropagation()}
 			onclick={onClose}>×</button
 		>
 	</header>
-	<div class="floating-panel-content">{@render children()}</div>
+	<div class="hud-window-content">{@render children()}</div>
 	{#each resizeHandles as handle}
 		<div
-			class={`floating-panel-resize floating-panel-resize-${handle.name}`}
+			class={`hud-window-resize hud-window-resize-${handle.name}`}
 			role="presentation"
 			onpointerdown={(event) => beginResize(event, handle.edges)}
 		></div>
@@ -162,7 +161,7 @@
 </section>
 
 <style>
-	.floating-panel {
+	.hud-window {
 		position: absolute;
 		z-index: 4;
 		display: grid;
@@ -171,17 +170,17 @@
 		user-select: none;
 	}
 
-	.floating-panel-titlebar {
+	.hud-window-titlebar {
 		justify-content: space-between;
 		cursor: move;
 		touch-action: none;
 	}
 
-	.floating-panel-titlebar:active {
+	.hud-window-titlebar:active {
 		cursor: grabbing;
 	}
 
-	.floating-panel-close {
+	.hud-window-close {
 		width: 28px;
 		height: 26px;
 		min-height: 26px;
@@ -189,82 +188,82 @@
 		cursor: pointer;
 	}
 
-	.floating-panel-content {
+	.hud-window-content {
 		min-width: 0;
 		min-height: 0;
 		overflow: hidden;
 		user-select: text;
 	}
 
-	.floating-panel-resize {
+	.hud-window-resize {
 		position: absolute;
 		z-index: 2;
 		touch-action: none;
 	}
 
-	.floating-panel-resize-top,
-	.floating-panel-resize-bottom {
+	.hud-window-resize-top,
+	.hud-window-resize-bottom {
 		left: 8px;
 		width: calc(100% - 16px);
 		height: 8px;
 	}
 
-	.floating-panel-resize-left,
-	.floating-panel-resize-right {
+	.hud-window-resize-left,
+	.hud-window-resize-right {
 		top: 8px;
 		width: 8px;
 		height: calc(100% - 16px);
 	}
 
-	.floating-panel-resize-top {
-		top: -4px;
+	.hud-window-resize-top {
+		top: 0;
 		cursor: ns-resize;
 	}
 
-	.floating-panel-resize-right {
-		right: -4px;
+	.hud-window-resize-right {
+		right: 0;
 		cursor: ew-resize;
 	}
 
-	.floating-panel-resize-bottom {
-		bottom: -4px;
+	.hud-window-resize-bottom {
+		bottom: 0;
 		cursor: ns-resize;
 	}
 
-	.floating-panel-resize-left {
-		left: -4px;
+	.hud-window-resize-left {
+		left: 0;
 		cursor: ew-resize;
 	}
 
-	.floating-panel-resize-top-left,
-	.floating-panel-resize-top-right,
-	.floating-panel-resize-bottom-right,
-	.floating-panel-resize-bottom-left {
+	.hud-window-resize-top-left,
+	.hud-window-resize-top-right,
+	.hud-window-resize-bottom-right,
+	.hud-window-resize-bottom-left {
 		width: 12px;
 		height: 12px;
 	}
 
-	.floating-panel-resize-top-left {
-		top: -4px;
-		left: -4px;
+	.hud-window-resize-top-left {
+		top: 0;
+		left: 0;
 		cursor: nwse-resize;
 	}
 
-	.floating-panel-resize-top-right {
-		top: -4px;
-		right: -4px;
+	.hud-window-resize-top-right {
+		top: 0;
+		right: 0;
 		cursor: nesw-resize;
 	}
 
-	.floating-panel-resize-bottom-right {
-		right: -4px;
-		bottom: -4px;
+	.hud-window-resize-bottom-right {
+		right: 0;
+		bottom: 0;
 		cursor: nwse-resize;
 	}
 
-	.floating-panel-resize-bottom-left {
-		bottom: -4px;
-		left: -4px;
+	.hud-window-resize-bottom-left {
+		bottom: 0;
+		left: 0;
 		cursor: nesw-resize;
 	}
 </style>

@@ -11,11 +11,46 @@
 	import type { ClientPresentationDiagnostics } from "../../client/client-presentation-session";
 	import type { ClientToast } from "../../client/client-toast-center";
 
+	interface ClientHudHarnessRectangle {
+		readonly height: number;
+		readonly left: number;
+		readonly top: number;
+		readonly width: number;
+	}
+
+	interface ClientHudHarnessState {
+		readonly diagnosticsCloseDisabled: boolean | null;
+		readonly jumpActionDisabled: boolean | null;
+		readonly mode: "runtime" | "layout";
+		readonly moveHandles: Readonly<Record<string, ClientHudHarnessRectangle>>;
+		readonly preciseJumpEnterCount: number;
+		readonly surfaces: Readonly<Record<string, ClientHudHarnessRectangle>>;
+		readonly toast: {
+			readonly preview: boolean;
+			readonly role: string | null;
+			readonly text: string;
+		} | null;
+		readonly viewport: { readonly height: number; readonly width: number };
+	}
+
+	interface ClientHudHarnessApi {
+		readonly capture: () => ClientHudHarnessState;
+		readonly dragSurface: (
+			label: string,
+			deltaX: number,
+			deltaY: number,
+		) => void;
+		readonly setRuntimeTransients: (visible: boolean) => void;
+		readonly toggleMode: () => void;
+	}
+
 	const jumpFixture = new URLSearchParams(window.location.search).get("jump");
-	const jumpChargeActive = jumpFixture === "charging" || jumpFixture === "full";
+	let jumpChargeActive = $state(
+		jumpFixture === "charging" || jumpFixture === "full",
+	);
 	const jumpExtent = jumpFixture === "full" ? 1 : 0.45;
 	const toastFixture = new URLSearchParams(window.location.search).get("toast");
-	const toast: ClientToast | null =
+	let toast = $state<ClientToast | null>(
 		toastFixture === "precise"
 			? { id: 1, message: "Precise jump enabled", tone: "status" }
 			: toastFixture === "rejected"
@@ -24,7 +59,9 @@
 						message: "You need stable ground to jump.",
 						tone: "warning",
 					}
-				: null;
+				: null,
+	);
+	let preciseJumpEnterCount = 0;
 
 	const messages: readonly ClientChatLine[] = [
 		line(1, {
@@ -148,16 +185,152 @@
 		return { capped: 60, uncapped: 144 };
 	}
 
-	onMount(() => {
-		const debugButton = document.querySelector<HTMLButtonElement>(
-			'button[aria-label="Debug"]',
+	function clientWorld(): HTMLElement {
+		const world = document.querySelector<HTMLElement>(".client-world");
+		if (world === null)
+			throw new Error("Client HUD harness world is unavailable.");
+		return world;
+	}
+
+	function surface(label: string): HTMLElement {
+		const candidate = Array.from(
+			clientWorld().querySelectorAll<HTMLElement>(
+				":scope > section[aria-label]",
+			),
+		).find((element) => element.getAttribute("aria-label") === label);
+		if (candidate === undefined)
+			throw new Error(`Client HUD surface is unavailable: ${label}.`);
+		return candidate;
+	}
+
+	function rectangle(element: HTMLElement): ClientHudHarnessRectangle {
+		const bounds = element.getBoundingClientRect();
+		return {
+			height: bounds.height,
+			left: bounds.left,
+			top: bounds.top,
+			width: bounds.width,
+		};
+	}
+
+	function capture(): ClientHudHarnessState {
+		const lock = document.querySelector<HTMLButtonElement>(".client-ui-lock");
+		if (lock === null)
+			throw new Error("Client HUD harness layout control is unavailable.");
+		const surfaces = Object.fromEntries(
+			Array.from(
+				clientWorld().querySelectorAll<HTMLElement>(
+					":scope > section[aria-label]",
+				),
+			).map((element) => [
+				element.getAttribute("aria-label") ?? "",
+				rectangle(element),
+			]),
 		);
-		if (debugButton === null) {
-			throw new Error(
-				"Client HUD harness could not find the diagnostics control.",
-			);
-		}
-		debugButton.click();
+		const moveHandles = Object.fromEntries(
+			Object.keys(surfaces).flatMap((label) => {
+				const handle = surface(label).querySelector<HTMLElement>(
+					".hud-panel-move, .map-panel-move, .hud-window-titlebar",
+				);
+				return handle === null ? [] : [[label, rectangle(handle)]];
+			}),
+		);
+		const toastElement = document.querySelector<HTMLElement>(".client-toast");
+		const jumpAction =
+			document.querySelector<HTMLButtonElement>(".jump-precise");
+		const diagnosticsClose = document.querySelector<HTMLButtonElement>(
+			'.hud-window-close[aria-label="Close Client diagnostics"]',
+		);
+		return {
+			diagnosticsCloseDisabled: diagnosticsClose?.disabled ?? null,
+			jumpActionDisabled: jumpAction?.disabled ?? null,
+			mode: lock.getAttribute("aria-pressed") === "true" ? "layout" : "runtime",
+			moveHandles,
+			preciseJumpEnterCount,
+			surfaces,
+			toast:
+				toastElement === null
+					? null
+					: {
+							preview: toastElement.classList.contains("client-toast-preview"),
+							role: toastElement.getAttribute("role"),
+							text: toastElement.textContent?.trim() ?? "",
+						},
+			viewport: {
+				height: clientWorld().clientHeight,
+				width: clientWorld().clientWidth,
+			},
+		};
+	}
+
+	function toggleMode(): void {
+		const lock = document.querySelector<HTMLButtonElement>(".client-ui-lock");
+		if (lock === null)
+			throw new Error("Client HUD harness layout control is unavailable.");
+		lock.click();
+	}
+
+	function setRuntimeTransients(visible: boolean): void {
+		jumpChargeActive = visible;
+		toast = visible
+			? { id: 2, message: "Runtime notification", tone: "status" }
+			: null;
+	}
+
+	function dragSurface(label: string, deltaX: number, deltaY: number): void {
+		const target = surface(label);
+		const handle = target.querySelector<HTMLElement>(
+			".hud-panel-move, .map-panel-move, .hud-window-titlebar",
+		);
+		if (handle === null)
+			throw new Error(`Client HUD surface has no move handle: ${label}.`);
+		const bounds = handle.getBoundingClientRect();
+		const clientX = bounds.left + bounds.width / 2;
+		const clientY = bounds.top + bounds.height / 2;
+		const pointerId = 37;
+		handle.dispatchEvent(
+			new PointerEvent("pointerdown", {
+				bubbles: true,
+				button: 0,
+				buttons: 1,
+				clientX,
+				clientY,
+				pointerId,
+			}),
+		);
+		window.dispatchEvent(
+			new PointerEvent("pointermove", {
+				bubbles: true,
+				buttons: 1,
+				clientX: clientX + deltaX,
+				clientY: clientY + deltaY,
+				pointerId,
+			}),
+		);
+		window.dispatchEvent(
+			new PointerEvent("pointerup", {
+				bubbles: true,
+				button: 0,
+				clientX: clientX + deltaX,
+				clientY: clientY + deltaY,
+				pointerId,
+			}),
+		);
+	}
+
+	onMount(() => {
+		const harnessGlobal = globalThis as typeof globalThis & {
+			__HOLTBURGER_3D_CLIENT_HUD_HARNESS__: ClientHudHarnessApi | undefined;
+		};
+		harnessGlobal.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__ = {
+			capture,
+			dragSurface,
+			setRuntimeTransients,
+			toggleMode,
+		};
+		return () => {
+			harnessGlobal.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__ = undefined;
+		};
 	});
 </script>
 
@@ -166,7 +339,9 @@
 	preciseJumpActive={false}
 	onPreciseJumpAim={() => undefined}
 	onPreciseJumpActivate={() => undefined}
-	onPreciseJumpEnter={() => undefined}
+	onPreciseJumpEnter={() => {
+		preciseJumpEnterCount += 1;
+	}}
 	debugEnabled={true}
 	{readMapPanelFrame}
 	{readDiagnostics}

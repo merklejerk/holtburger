@@ -1,7 +1,9 @@
 <script lang="ts">
-	import type { Snippet } from "svelte";
+	import { onDestroy, type Snippet } from "svelte";
+	import { trackPointerGesture } from "../app/pointer-gesture";
 	import {
 		anchorClientHudPlacement,
+		resizeClientPanelRectangle,
 		resolveClientHudPlacement,
 		type ClientHudPlacement,
 		type ClientHudViewport,
@@ -40,6 +42,8 @@
 			height: minHeight,
 		}),
 	);
+	let cancelPointerGesture: (() => void) | null = null;
+	onDestroy(() => cancelPointerGesture?.());
 
 	function beginDrag(event: PointerEvent): void {
 		if (event.button !== 0) return;
@@ -53,19 +57,24 @@
 			width: placement.preferredWidth,
 			height: placement.preferredHeight,
 		};
-		trackPointer(event.pointerId, (moved) => {
-			onPlacementChange(
-				anchorClientHudPlacement(
-					{
-						...start,
-						left: start.left + moved.clientX - startX,
-						top: start.top + moved.clientY - startY,
-					},
-					startViewport,
-					preferred,
-				),
-			);
-		});
+		cancelPointerGesture?.();
+		cancelPointerGesture = trackPointerGesture(
+			window,
+			event.pointerId,
+			(moved) => {
+				onPlacementChange(
+					anchorClientHudPlacement(
+						{
+							...start,
+							left: start.left + moved.clientX - startX,
+							top: start.top + moved.clientY - startY,
+						},
+						startViewport,
+						preferred,
+					),
+				);
+			},
+		);
 	}
 
 	function beginResize(event: PointerEvent): void {
@@ -76,46 +85,26 @@
 		const startY = event.clientY;
 		const start = resolved;
 		const startViewport = viewport;
-		trackPointer(event.pointerId, (moved) => {
-			const width = Math.min(
-				startViewport.width - start.left,
-				Math.max(
-					Math.min(minWidth, startViewport.width - start.left),
-					start.width + moved.clientX - startX,
-				),
-			);
-			const height = Math.min(
-				startViewport.height - start.top,
-				Math.max(
-					Math.min(minHeight, startViewport.height - start.top),
-					start.height + moved.clientY - startY,
-				),
-			);
-			onPlacementChange(
-				anchorClientHudPlacement({ ...start, width, height }, startViewport, {
-					width,
-					height,
-				}),
-			);
-		});
-	}
-
-	function trackPointer(
-		pointerId: number,
-		update: (event: PointerEvent) => void,
-	): void {
-		const move = (event: PointerEvent): void => {
-			if (event.pointerId === pointerId) update(event);
-		};
-		const end = (event: PointerEvent): void => {
-			if (event.pointerId !== pointerId) return;
-			window.removeEventListener("pointermove", move);
-			window.removeEventListener("pointerup", end);
-			window.removeEventListener("pointercancel", end);
-		};
-		window.addEventListener("pointermove", move);
-		window.addEventListener("pointerup", end);
-		window.addEventListener("pointercancel", end);
+		cancelPointerGesture?.();
+		cancelPointerGesture = trackPointerGesture(
+			window,
+			event.pointerId,
+			(moved) => {
+				const rectangle = resizeClientPanelRectangle(
+					start,
+					startViewport,
+					{ width: minWidth, height: minHeight },
+					{ x: moved.clientX - startX, y: moved.clientY - startY },
+					{ horizontal: "right", vertical: "bottom" },
+				);
+				onPlacementChange(
+					anchorClientHudPlacement(rectangle, startViewport, {
+						width: rectangle.width,
+						height: rectangle.height,
+					}),
+				);
+			},
+		);
 	}
 </script>
 
@@ -192,14 +181,14 @@
 	}
 
 	.hud-panel-move {
-		top: -11px;
-		left: -11px;
+		top: 2px;
+		left: 2px;
 		cursor: grab;
 	}
 
 	.hud-panel-resize {
-		right: -11px;
-		bottom: -11px;
+		right: 2px;
+		bottom: 2px;
 		cursor: nwse-resize;
 	}
 </style>

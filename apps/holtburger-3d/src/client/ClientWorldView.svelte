@@ -13,7 +13,7 @@
 	import ClientChat from "./ClientChat.svelte";
 	import type { ClientChatLine } from "./client-chat-policy";
 	import ClientDebugPanel from "./ClientDebugPanel.svelte";
-	import ClientFloatingPanel from "./ClientFloatingPanel.svelte";
+	import ClientHudWindow from "./ClientHudWindow.svelte";
 	import ClientFpsCounter from "./ClientFpsCounter.svelte";
 	import ClientHudIcon from "./ClientHudIcon.svelte";
 	import ClientHudPanel from "./ClientHudPanel.svelte";
@@ -24,9 +24,10 @@
 	import {
 		anchorClientHudPlacement,
 		CLIENT_FPS_PANEL_WIDTH,
+		CLIENT_JUMP_POWER_PANEL_SIZE,
+		CLIENT_TOAST_PANEL_SIZE,
 		createDefaultClientHudLayout,
 		resolveClientHudSquarePlacement,
-		type ClientHudPlacement,
 		type ClientHudViewport,
 	} from "./client-hud-layout";
 	import type {
@@ -81,44 +82,27 @@
 		onChatFocusChange,
 		onCanvas,
 	}: Props = $props();
-	const MAP_PANEL_SIZE = 220;
-	const MAP_PANEL_MARGIN = 16;
 	const initialViewport: ClientHudViewport = {
 		width: window.innerWidth,
 		height: window.innerHeight,
 	};
-	let uiLocked = $state(true);
+	/** Cold client presentation policy: runtime visibility or explicit HUD layout editing. */
+	type ClientHudMode = "runtime" | "layout";
+	let hudMode = $state<ClientHudMode>("runtime");
 	let debugOpen = $state(false);
 	let worldElement = $state<HTMLElement | null>(null);
 	let viewport = $state<ClientHudViewport>(initialViewport);
 	// The launch capability is immutable; snapshotting it avoids resetting edited HUD layout.
 	const initialShortcutCount = untrack(() => (debugEnabled ? 8 : 7));
 	let hudLayout = $state(
-		createDefaultClientHudLayout(
-			initialViewport.width,
-			initialViewport.height,
-			initialShortcutCount,
-		),
+		createDefaultClientHudLayout(initialViewport, initialShortcutCount),
 	);
-	let debugPlacement = $state<ClientHudPlacement>({
-		horizontal: { edge: "right", offset: 16 },
-		vertical: { edge: "top", offset: 260 },
-		preferredWidth: 330,
-		preferredHeight: 310,
-	});
-	/** Client-local radar placement is right-anchored; its view choices remain map-owned state. */
-	let mapPlacement = $state<ClientHudPlacement>({
-		horizontal: { edge: "right", offset: MAP_PANEL_MARGIN + 32 },
-		vertical: { edge: "top", offset: MAP_PANEL_MARGIN },
-		preferredWidth: MAP_PANEL_SIZE,
-		preferredHeight: MAP_PANEL_SIZE,
-	});
 	let mapViewDiameters = $state<MapPanelState["viewDiameters"]>({
 		...MAP_DEFAULT_VIEW_DIAMETERS,
 	});
 	const resolvedMapPlacement = $derived(
 		resolveClientHudSquarePlacement(
-			mapPlacement,
+			hudLayout.map,
 			viewport,
 			MAP_PANEL_MINIMUM_SIZE,
 		),
@@ -134,6 +118,8 @@
 	let pointerX = 0;
 	let pointerY = 0;
 	let hasPointerPosition = false;
+	const HUD_PREVIEW_JUMP_EXTENT = 0.45;
+	const HUD_PREVIEW_TOAST_MESSAGE = "Notification preview";
 
 	$effect(() => {
 		if (!preciseJumpActive) return;
@@ -162,12 +148,15 @@
 	function updateMapPanel(next: MapPanelState): void {
 		mapViewDiameters = next.viewDiameters;
 		const sizeChanged = next.size !== resolvedMapPlacement.width;
-		const preferredSize = sizeChanged ? next.size : mapPlacement.preferredWidth;
-		mapPlacement = anchorClientHudPlacement(
+		const preferredSize = sizeChanged
+			? next.size
+			: hudLayout.map.preferredWidth;
+		const map = anchorClientHudPlacement(
 			{ left: next.left, top: next.top, width: next.size, height: next.size },
 			viewport,
 			{ width: preferredSize, height: preferredSize },
 		);
+		hudLayout = { ...hudLayout, map };
 	}
 
 	function handlePointerDown(event: PointerEvent): void {
@@ -242,24 +231,24 @@
 	<button
 		type="button"
 		class="client-ui-lock"
-		class:client-ui-unlocked={!uiLocked}
-		aria-label={uiLocked ? "Unlock UI layout" : "Lock UI layout"}
-		aria-pressed={!uiLocked}
-		title={uiLocked ? "Unlock UI layout" : "Lock UI layout"}
-		onclick={() => (uiLocked = !uiLocked)}
+		class:client-ui-unlocked={hudMode === "layout"}
+		aria-label={hudMode === "runtime" ? "Unlock UI layout" : "Lock UI layout"}
+		aria-pressed={hudMode === "layout"}
+		title={hudMode === "runtime" ? "Unlock UI layout" : "Lock UI layout"}
+		onclick={() => (hudMode = hudMode === "runtime" ? "layout" : "runtime")}
 	>
-		<ClientHudIcon name={uiLocked ? "locked" : "unlocked"} />
+		<ClientHudIcon name={hudMode === "runtime" ? "locked" : "unlocked"} />
 	</button>
 	<MapPanel
 		readFrame={readMapPanelFrame}
 		panel={mapPanel}
-		editable={!uiLocked}
+		editable={hudMode === "layout"}
 		onStateChange={updateMapPanel}
 	/>
 	<ClientHudPanel
 		label="Character HUD"
 		placement={hudLayout.character}
-		editable={!uiLocked}
+		editable={hudMode === "layout"}
 		minWidth={250}
 		minHeight={116}
 		resizable={true}
@@ -269,16 +258,53 @@
 	>
 		<ClientCharacterHud {playerName} {worldName} {vitals} />
 	</ClientHudPanel>
-	<ClientJumpPowerBar
-		active={jumpChargeActive}
-		readExtent={readJumpExtent}
-		onEnterPrecise={onPreciseJumpEnter}
-	/>
-	<ClientToastOverlay {toast} />
+	{#if jumpChargeActive || hudMode === "layout"}
+		<ClientHudPanel
+			label="Jump power"
+			placement={hudLayout.jumpPower}
+			editable={hudMode === "layout"}
+			minWidth={CLIENT_JUMP_POWER_PANEL_SIZE.width}
+			minHeight={CLIENT_JUMP_POWER_PANEL_SIZE.height}
+			resizable={false}
+			contentHitTesting="surface"
+			{viewport}
+			onPlacementChange={(jumpPower) =>
+				(hudLayout = { ...hudLayout, jumpPower })}
+		>
+			<ClientJumpPowerBar
+				active={jumpChargeActive}
+				previewExtent={hudMode === "layout" ? HUD_PREVIEW_JUMP_EXTENT : null}
+				actionEnabled={hudMode === "runtime" && jumpChargeActive}
+				readExtent={readJumpExtent}
+				onEnterPrecise={onPreciseJumpEnter}
+			/>
+		</ClientHudPanel>
+	{/if}
+	{#if toast !== null || hudMode === "layout"}
+		<ClientHudPanel
+			label="Notifications"
+			placement={hudLayout.toast}
+			editable={hudMode === "layout"}
+			minWidth={200}
+			minHeight={CLIENT_TOAST_PANEL_SIZE.height}
+			resizable={false}
+			contentHitTesting="descendants"
+			{viewport}
+			onPlacementChange={(toastPlacement) =>
+				(hudLayout = { ...hudLayout, toast: toastPlacement })}
+		>
+			<ClientToastOverlay
+				{toast}
+				previewMessage={hudMode === "layout" && toast === null
+					? HUD_PREVIEW_TOAST_MESSAGE
+					: null}
+			/>
+		</ClientHudPanel>
+	{/if}
 	<ClientHudPanel
 		label="Chat"
 		placement={hudLayout.chat}
-		editable={!uiLocked}
+		editable={hudMode === "layout"}
 		minWidth={280}
 		minHeight={240}
 		resizable={true}
@@ -295,21 +321,21 @@
 	</ClientHudPanel>
 	<ClientHudPanel
 		label="Frame rate"
-		placement={hudLayout.fps}
-		editable={!uiLocked}
+		placement={hudLayout.frameRate}
+		editable={hudMode === "layout"}
 		minWidth={CLIENT_FPS_PANEL_WIDTH}
 		minHeight={24}
 		resizable={false}
 		contentHitTesting="descendants"
 		{viewport}
-		onPlacementChange={(fps) => (hudLayout = { ...hudLayout, fps })}
+		onPlacementChange={(frameRate) => (hudLayout = { ...hudLayout, frameRate })}
 	>
 		<ClientFpsCounter {readFrameRates} />
 	</ClientHudPanel>
 	<ClientHudPanel
 		label="Game shortcuts"
 		placement={hudLayout.shortcuts}
-		editable={!uiLocked}
+		editable={hudMode === "layout"}
 		minWidth={280}
 		minHeight={36}
 		resizable={true}
@@ -323,22 +349,24 @@
 			onDebug={() => (debugOpen = !debugOpen)}
 		/>
 	</ClientHudPanel>
-	{#if debugEnabled && debugOpen}
-		<ClientFloatingPanel
+	{#if debugEnabled && (debugOpen || hudMode === "layout")}
+		<ClientHudWindow
 			title="Client diagnostics"
-			placement={debugPlacement}
+			placement={hudLayout.diagnostics}
 			minWidth={280}
 			minHeight={220}
 			{viewport}
+			closable={hudMode === "runtime"}
 			onClose={() => (debugOpen = false)}
-			onPlacementChange={(placement) => (debugPlacement = placement)}
+			onPlacementChange={(diagnostics) =>
+				(hudLayout = { ...hudLayout, diagnostics })}
 		>
 			<ClientDebugPanel
 				{readDiagnostics}
 				{showRetailHiddenGeometry}
 				{onShowRetailHiddenGeometryChange}
 			/>
-		</ClientFloatingPanel>
+		</ClientHudWindow>
 	{/if}
 </main>
 

@@ -33,8 +33,9 @@
 </script>
 
 <script lang="ts">
-	import { onMount } from "svelte";
+	import { onDestroy, onMount } from "svelte";
 
+	import { trackPointerGesture } from "./pointer-gesture";
 	import { MapRenderer } from "../lib/game/map/map-renderer";
 	import { selectMapBlips } from "../lib/game/map/map-blips";
 	import {
@@ -115,6 +116,8 @@
 	let rendererSource: MapPanelFrame["source"] = null;
 	let blipHitTargets: readonly BlipHitTarget[] = [];
 	let blipHoverPoint: BlipHoverPoint | null = null;
+	let cancelPointerGesture: (() => void) | null = null;
+	onDestroy(() => cancelPointerGesture?.());
 
 	onMount(() => {
 		let frameHandle: number | undefined;
@@ -400,53 +403,46 @@
 	}
 
 	function beginDrag(event: PointerEvent): void {
+		if (event.button !== 0) return;
 		event.preventDefault();
 		event.stopPropagation();
 		const startX = event.clientX;
 		const startY = event.clientY;
 		const { left, top } = panel;
-		trackPointer(event.pointerId, (moved) => {
-			onStateChange({
-				...panel,
-				left: left + moved.clientX - startX,
-				top: top + moved.clientY - startY,
-			});
-		});
+		cancelPointerGesture?.();
+		cancelPointerGesture = trackPointerGesture(
+			window,
+			event.pointerId,
+			(moved) => {
+				onStateChange({
+					...panel,
+					left: left + moved.clientX - startX,
+					top: top + moved.clientY - startY,
+				});
+			},
+		);
 	}
 
 	function beginResize(event: PointerEvent): void {
+		if (event.button !== 0) return;
 		event.preventDefault();
 		event.stopPropagation();
 		const startX = event.clientX;
 		const startY = event.clientY;
 		const startSize = panel.size;
-		trackPointer(event.pointerId, (moved) => {
-			// Square by construction, so the larger drag axis wins.
-			const delta = Math.max(moved.clientX - startX, moved.clientY - startY);
-			onStateChange({
-				...panel,
-				size: Math.max(MAP_PANEL_MINIMUM_SIZE, Math.round(startSize + delta)),
-			});
-		});
-	}
-
-	/** Track exactly the pointer that began a handle gesture and clean up cancellation too. */
-	function trackPointer(
-		pointerId: number,
-		update: (event: PointerEvent) => void,
-	): void {
-		const move = (event: PointerEvent): void => {
-			if (event.pointerId === pointerId) update(event);
-		};
-		const end = (event: PointerEvent): void => {
-			if (event.pointerId !== pointerId) return;
-			window.removeEventListener("pointermove", move);
-			window.removeEventListener("pointerup", end);
-			window.removeEventListener("pointercancel", end);
-		};
-		window.addEventListener("pointermove", move);
-		window.addEventListener("pointerup", end);
-		window.addEventListener("pointercancel", end);
+		cancelPointerGesture?.();
+		cancelPointerGesture = trackPointerGesture(
+			window,
+			event.pointerId,
+			(moved) => {
+				// Square by construction, so the larger drag axis wins.
+				const delta = Math.max(moved.clientX - startX, moved.clientY - startY);
+				onStateChange({
+					...panel,
+					size: Math.max(MAP_PANEL_MINIMUM_SIZE, Math.round(startSize + delta)),
+				});
+			},
+		);
 	}
 
 	function zoom(event: WheelEvent): void {

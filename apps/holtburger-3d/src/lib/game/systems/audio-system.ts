@@ -31,11 +31,11 @@ export interface AudioVoice {
 /**
  * Where a sound's gain and pan come from, for its whole playback.
  *
- * A discriminated union so the illegal states cannot be spelled: a world sound has a fixed emitting
- * point and a fixed authored volume; a listener-locked bed has neither — no position at all, and a
- * gain supplier read on each audio-control tick. This mirrors the ambient invariant that the
- * surroundings scale exactly one of gain and probability: a `"world"` sound's static volume is
- * correct, not an omission.
+ * A discriminated union so the illegal states cannot be spelled: an ordinary world sound has a
+ * fixed emitting point and authored volume; a live world sound keeps that point but reads a live
+ * volume owned by its producer; a listener-locked bed has neither a world position nor fixed gain.
+ * The live variants are re-read on each audio-control tick, so withdrawing their producer's
+ * eligibility silences an existing voice rather than merely suppressing the next trigger.
  */
 export type AudioPlacementSource =
 	| {
@@ -43,6 +43,13 @@ export type AudioPlacementSource =
 			/** Scene space, matching the listener; spatialization is purely relative. */
 			readonly position: SceneVector3;
 			readonly volume: number;
+	  }
+	| {
+			readonly mode: "world-live";
+			/** Fixed scene-space point sampled when the authored sound command fired. */
+			readonly position: SceneVector3;
+			/** Live authored gain after producer-owned eligibility policy. */
+			readonly volume: () => number;
 	  }
 	| {
 			readonly mode: "listener";
@@ -338,11 +345,27 @@ export class AudioSystem {
 		category: AudioCategory,
 	): SpatialAudioPlacement | null {
 		const listener = this.#listener;
+		let sourcePosition: SceneVector3;
+		let sourceVolume: number;
+		switch (source.mode) {
+			case "world":
+				sourcePosition = source.position;
+				sourceVolume = source.volume;
+				break;
+			case "world-live":
+				sourcePosition = source.position;
+				sourceVolume = source.volume();
+				break;
+			case "listener":
+				sourcePosition = listener.position;
+				sourceVolume = source.volume();
+				break;
+		}
 		return placeSpatialAudio(
-			source.mode === "world" ? source.position : listener.position,
+			sourcePosition,
 			listener.position,
 			listener.right,
-			source.mode === "world" ? source.volume : source.volume(),
+			sourceVolume,
 			this.#categoryVolume(category),
 		);
 	}

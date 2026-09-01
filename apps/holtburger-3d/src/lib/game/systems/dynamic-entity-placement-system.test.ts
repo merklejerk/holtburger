@@ -199,7 +199,7 @@ function dynamicEntity(
 ): DynamicEntityView & { placement: DynamicEntityWorldPlacement } {
 	return {
 		generation: 1,
-		playingClip: null,
+		motion: null,
 		identity: { guid: 1, wcid: 1 },
 		display: { name: "Entity", level: null },
 		physics: {

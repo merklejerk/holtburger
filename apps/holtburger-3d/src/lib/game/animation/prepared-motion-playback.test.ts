@@ -146,6 +146,28 @@ describe("prepareMotionPlayback", () => {
 		expect(console.warn).not.toHaveBeenCalled();
 	});
 
+	it("keeps a clip whose collision hook is owned by host simulation", () => {
+		const ethereal: DecodedAnimationHook = {
+			authoredOrder: 0,
+			frameIndex: 0,
+			direction: "forward",
+			blocksActivation: false,
+			command: "ethereal",
+			kind: "unimplemented",
+			sourceType: 6,
+			payload: { kind: "ethereal", ethereal: true },
+		};
+		const playback = prepareMotionPlayback(
+			closure([animation("0x03000559", [0, 1], [ethereal])]),
+			template(),
+			new Vec3(1, 1, 1),
+			staticBounds,
+		);
+
+		expect([...playback.clips.keys()]).toEqual(["0x03000559"]);
+		expect(console.warn).not.toHaveBeenCalled();
+	});
+
 	/// An entity whose every clip was refused keeps its authored pose, which is what an entity with
 	/// no playback at all already does.
 	it("falls back to the static bound when nothing is playable", () => {

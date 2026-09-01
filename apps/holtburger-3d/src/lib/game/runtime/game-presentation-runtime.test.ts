@@ -917,6 +917,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 
 		await runtime.replaceDynamicEntitySnapshot([
 			motionDrivenEntity(1, {
+				kind: "playing",
 				animationId: Number(IDLE_ANIMATION_ID),
 				completion: "loop",
 				framerate: 4,
@@ -1540,12 +1541,12 @@ const SPAWN_TEST_CAMERA: Camera = {
 /// An entity that animates from a table, optionally already playing a clip when it is realized.
 function motionDrivenEntity(
 	guid: number,
-	playingClip: DynamicEntityView["playingClip"],
+	motion: DynamicEntityView["motion"],
 ): DynamicEntityView {
 	const entity = spawnedEntity(guid, 1);
 	return {
 		...entity,
-		playingClip,
+		motion,
 		presentation: {
 			...entity.presentation,
 			content: {
@@ -1668,7 +1669,7 @@ function spawnedEntity(
 ): DynamicEntityView {
 	return {
 		generation,
-		playingClip: null,
+		motion: null,
 		identity: { guid, wcid: 42 },
 		display: { name: `Entity ${guid}`, level: null },
 		physics: {

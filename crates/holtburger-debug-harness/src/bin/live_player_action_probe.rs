@@ -10,7 +10,7 @@ use holtburger_content::{ContentDecodeCache, ContentRepository};
 use holtburger_core::{
     ClientCommand, ClientLifecycleState, ClientRuntimeBuilder, ClientViewEvent,
     ContentAssetService, ContentClientCollisionSource, DynamicEntityClipCompletion,
-    DynamicEntityEvent, DynamicEntityPlayingClip,
+    DynamicEntityEvent, DynamicEntityMotion,
 };
 use holtburger_protocol::messages::combat::CombatMode;
 use std::sync::Arc;
@@ -19,7 +19,7 @@ use tokio::sync::{broadcast, mpsc};
 use tokio::time::{Instant, timeout_at};
 
 #[derive(Debug, Parser)]
-#[command(about = "Prove a live local-player SoulEmote clip leaves and returns to steady motion")]
+#[command(about = "Prove a live local-player SoulEmote motion leaves and returns to steady motion")]
 struct Args {
     /// ACE server host.
     #[arg(long, default_value = "127.0.0.1")]
@@ -62,7 +62,7 @@ impl From<CombatModeArg> for CombatMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct ObservedClip(Option<DynamicEntityPlayingClip>);
+struct ObservedMotion(Option<DynamicEntityMotion>);
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -129,7 +129,7 @@ async fn main() -> Result<()> {
         .send(ClientCommand::RequestCurrentApplicationState)
         .context("client stopped before baseline request")?;
     let baseline = wait_for_player_clip(&mut events, player_guid, phase_timeout).await?;
-    println!("baseline clip {}", describe_clip(baseline.0));
+    println!("baseline motion {}", describe_motion(baseline.0));
 
     commands
         .send(ClientCommand::SoulEmote(args.token.clone()))
@@ -151,12 +151,12 @@ async fn main() -> Result<()> {
         }
     };
 
-    println!("observed {} clip transitions:", transitions.len());
-    for (index, clip) in transitions.iter().enumerate() {
-        println!("  {index}: {}", describe_clip(clip.0));
+    println!("observed {} motion transitions:", transitions.len());
+    for (index, motion) in transitions.iter().enumerate() {
+        println!("  {index}: {}", describe_motion(motion.0));
     }
     println!(
-        "PASS local player action {:?} left and returned to its steady clip",
+        "PASS local player action {:?} left and returned to its steady motion",
         args.token
     );
 
@@ -174,15 +174,15 @@ async fn main() -> Result<()> {
     .await;
     let _ = commands.send(ClientCommand::SetCombatMode(CombatMode::NonCombat));
     let combat_clip = match combat_clip {
-        Ok(clip) => clip,
+        Ok(motion) => motion,
         Err(error) => {
             let _ = commands.send(ClientCommand::Disconnect);
             return Err(error);
         }
     };
     println!(
-        "combat mode {combat_mode:?} steady clip {}",
-        describe_clip(combat_clip.0)
+        "combat mode {combat_mode:?} steady motion {}",
+        describe_motion(combat_clip.0)
     );
     let noncombat_result =
         wait_for_noncombat_return(&mut events, player_guid, baseline, phase_timeout).await;
@@ -202,10 +202,10 @@ async fn main() -> Result<()> {
 async fn wait_for_combat_stance(
     events: &mut broadcast::Receiver<ClientViewEvent>,
     player_guid: Guid,
-    baseline: ObservedClip,
+    baseline: ObservedMotion,
     requested_mode: CombatMode,
     duration: Duration,
-) -> Result<ObservedClip> {
+) -> Result<ObservedMotion> {
     let deadline = Instant::now() + duration;
     let mut confirmed = false;
     loop {
@@ -219,16 +219,22 @@ async fn wait_for_combat_stance(
             confirmed = true;
             continue;
         }
-        let Some(clip) = player_clip_from_event(&event, player_guid) else {
+        let Some(motion) = player_motion_from_event(&event, player_guid) else {
             continue;
         };
         if confirmed
-            && clip != baseline
-            && clip
-                .0
-                .is_some_and(|playing| playing.completion == DynamicEntityClipCompletion::Loop)
+            && motion != baseline
+            && motion.0.is_some_and(|motion| {
+                matches!(
+                    motion,
+                    DynamicEntityMotion::Playing {
+                        completion: DynamicEntityClipCompletion::Loop,
+                        ..
+                    }
+                )
+            })
         {
-            return Ok(clip);
+            return Ok(motion);
         }
     }
 }
@@ -236,7 +242,7 @@ async fn wait_for_combat_stance(
 async fn wait_for_noncombat_return(
     events: &mut broadcast::Receiver<ClientViewEvent>,
     player_guid: Guid,
-    baseline: ObservedClip,
+    baseline: ObservedMotion,
     duration: Duration,
 ) -> Result<()> {
     let deadline = Instant::now() + duration;
@@ -250,7 +256,7 @@ async fn wait_for_noncombat_return(
             }
             continue;
         }
-        returned |= player_clip_from_event(&event, player_guid) == Some(baseline);
+        returned |= player_motion_from_event(&event, player_guid) == Some(baseline);
     }
     Ok(())
 }
@@ -327,12 +333,12 @@ async fn wait_for_player_clip(
     events: &mut broadcast::Receiver<ClientViewEvent>,
     player_guid: Guid,
     duration: Duration,
-) -> Result<ObservedClip> {
+) -> Result<ObservedMotion> {
     let deadline = Instant::now() + duration;
     loop {
-        let event = recv_before(events, deadline, "local-player baseline clip").await?;
-        if let Some(clip) = player_clip_from_event(&event, player_guid) {
-            return Ok(clip);
+        let event = recv_before(events, deadline, "local-player baseline motion").await?;
+        if let Some(motion) = player_motion_from_event(&event, player_guid) {
+            return Ok(motion);
         }
     }
 }
@@ -340,10 +346,10 @@ async fn wait_for_player_clip(
 async fn wait_for_action_return(
     events: &mut broadcast::Receiver<ClientViewEvent>,
     player_guid: Guid,
-    baseline: ObservedClip,
+    baseline: ObservedMotion,
     token: &str,
     duration: Duration,
-) -> Result<Vec<ObservedClip>> {
+) -> Result<Vec<ObservedMotion>> {
     let deadline = Instant::now() + duration;
     let mut current = baseline;
     let mut transitions = vec![baseline];
@@ -357,7 +363,7 @@ async fn wait_for_action_return(
                     "action {token:?}: server_confirmed={server_confirmed}, left_baseline={left_baseline}, transitions={}",
                     transitions
                         .iter()
-                        .map(|clip| describe_clip(clip.0))
+                        .map(|motion| describe_motion(motion.0))
                         .collect::<Vec<_>>()
                         .join(" -> ")
                 )
@@ -365,14 +371,14 @@ async fn wait_for_action_return(
         if matches!(&event, ClientViewEvent::SoulEmote { .. }) {
             server_confirmed = true;
         }
-        let Some(clip) = player_clip_from_event(&event, player_guid) else {
+        let Some(motion) = player_motion_from_event(&event, player_guid) else {
             continue;
         };
-        if clip != current {
-            current = clip;
-            transitions.push(clip);
+        if motion != current {
+            current = motion;
+            transitions.push(motion);
         }
-        if clip != baseline {
+        if motion != baseline {
             left_baseline = true;
         } else if left_baseline && server_confirmed {
             return Ok(transitions);
@@ -402,7 +408,7 @@ async fn recv_before(
     }
 }
 
-fn player_clip_from_event(event: &ClientViewEvent, guid: Guid) -> Option<ObservedClip> {
+fn player_motion_from_event(event: &ClientViewEvent, guid: Guid) -> Option<ObservedMotion> {
     let view = match event {
         ClientViewEvent::ApplicationSnapshot(snapshot) => snapshot
             .dynamic
@@ -424,17 +430,27 @@ fn player_clip_from_event(event: &ClientViewEvent, guid: Guid) -> Option<Observe
             .find(|entity| entity.identity.guid == guid),
         _ => None,
     }?;
-    Some(ObservedClip(view.playing_clip))
+    Some(ObservedMotion(view.motion))
 }
 
-fn describe_clip(clip: Option<DynamicEntityPlayingClip>) -> String {
-    clip.map_or_else(
+fn describe_motion(motion: Option<DynamicEntityMotion>) -> String {
+    motion.map_or_else(
         || "none".to_owned(),
-        |clip| {
-            format!(
+        |motion| match motion {
+            DynamicEntityMotion::Playing {
+                animation_id,
+                completion,
+                framerate,
+                high_frame,
+                low_frame,
+            } => format!(
                 "0x{:08X} rate={} frames={}..={} completion={:?}",
-                clip.animation_id, clip.framerate, clip.low_frame, clip.high_frame, clip.completion
-            )
+                animation_id, framerate, low_frame, high_frame, completion
+            ),
+            DynamicEntityMotion::Settled {
+                animation_id,
+                frame,
+            } => format!("0x{animation_id:08X} settled frame={frame}"),
         },
     )
 }

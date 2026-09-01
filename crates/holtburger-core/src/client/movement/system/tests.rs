@@ -239,7 +239,8 @@ fn equivalent_local_remote_player_and_creature_directives_share_one_runtime_cont
     let local_offset = movement
         .advance_local_authored_motion(&mut world, quantum)
         .unwrap()
-        .expect("local directive should contribute authored root");
+        .expect("local directive should contribute authored root")
+        .offset;
     let remote_player_offset = world
         .resolve_body_projection_input(SpatialBodyId::Entity(remote_player_guid))
         .and_then(|input| input.authored_offset)
@@ -896,8 +897,11 @@ fn manual_motion_resolves_one_authored_offset_for_diagonal_and_turning_axes() {
         .advance_local_authored_motion(&mut world, Duration::from_millis(100))
         .expect("authored manual motion should resolve")
         .expect("active drive should produce one offset");
-    assert!(offset.translation.length_squared() > 0.0);
-    assert_eq!(world.motion_runtimes.authored_offset(guid), Some(offset));
+    assert!(offset.offset.translation.length_squared() > 0.0);
+    assert_eq!(
+        world.motion_runtimes.authored_offset(guid),
+        Some(offset.offset)
+    );
 
     install_manual_drive(
         &mut movement,
@@ -908,8 +912,11 @@ fn manual_motion_resolves_one_authored_offset_for_diagonal_and_turning_axes() {
         .advance_local_authored_motion(&mut world, Duration::from_millis(100))
         .expect("turn-only motion should resolve")
         .expect("turn-only drive should produce an offset");
-    assert!(turn.rotation.to_heading().abs() > 0.0);
-    assert_eq!(world.motion_runtimes.authored_offset(guid), Some(turn));
+    assert!(turn.offset.rotation.to_heading().abs() > 0.0);
+    assert_eq!(
+        world.motion_runtimes.authored_offset(guid),
+        Some(turn.offset)
+    );
     assert_eq!(
         world.motion_runtimes.state(guid).unwrap().substate,
         holtburger_world::motion::MotionCommand(MotionTable::TURN_RIGHT_COMMAND)
@@ -949,9 +956,9 @@ fn manual_motion_reversal_uses_the_same_table_without_a_fixed_backwards_speed() 
         .expect("backward motion should resolve")
         .expect("backward drive should produce an offset");
 
-    assert!(forward.translation.length_squared() > 0.0);
-    assert!(backward.translation.length_squared() > 0.0);
-    assert!(forward.translation.x.signum() != backward.translation.x.signum());
+    assert!(forward.offset.translation.length_squared() > 0.0);
+    assert!(backward.offset.translation.length_squared() > 0.0);
+    assert!(forward.offset.translation.x.signum() != backward.offset.translation.x.signum());
 }
 
 #[test]
@@ -1649,7 +1656,7 @@ fn sequential_position_confirmations_preserve_manual_playback_cursor() {
         .advance_local_authored_motion(&mut world, quantum)
         .expect("initial authored playback should resolve")
         .expect("held forward input should produce an offset");
-    assert!(first.translation.x > 0.0);
+    assert!(first.offset.translation.x > 0.0);
     assert_eq!(
         world
             .motion_runtimes
@@ -1673,7 +1680,7 @@ fn sequential_position_confirmations_preserve_manual_playback_cursor() {
             .advance_local_authored_motion(&mut world, quantum)
             .expect("confirmation must not invalidate authored playback")
             .expect("held forward input should continue after confirmation");
-        assert!(offset.translation.x > 0.0);
+        assert!(offset.offset.translation.x > 0.0);
     }
 }
 

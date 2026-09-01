@@ -127,7 +127,7 @@ pub fn client_entity_body_facts(
         instance_sequence: entity.instance_sequence(),
         wcid,
         appearance: entity.appearance.clone(),
-        physics: entity.physics,
+        physics: entity.physics.effective(),
         setup_did,
         object_scale: entity
             .properties
@@ -835,7 +835,7 @@ fn client_remote_body_target(world: &WorldState, guid: Guid) -> Option<ClientRem
     let body_id = SpatialBodyId::Entity(guid);
     if guid == world.player.guid
         || entity.attachment.is_some()
-        || !entity.physics.supports_local_simulation()
+        || !entity.physics.effective().supports_local_simulation()
     {
         return None;
     }
@@ -1180,7 +1180,11 @@ mod tests {
         ));
         facts(&mut world, guid);
         let entity = world.entities.get_mut(guid).unwrap();
-        entity.physics = holtburger_world::resolve_effective_entity_physics_state(state);
+        entity
+            .physics
+            .reconcile(holtburger_world::resolve_effective_entity_physics_state(
+                state,
+            ));
         entity.velocity = velocity;
         client_remote_body_target(&world, guid).map(|target| target.demand)
     }
@@ -1246,10 +1250,11 @@ mod tests {
             initial,
         ));
         facts(&mut world, guid);
-        world.entities.get_mut(guid).unwrap().physics =
+        world.entities.get_mut(guid).unwrap().physics.reconcile(
             holtburger_world::resolve_effective_entity_physics_state(
                 PhysicsState::ETHEREAL | PhysicsState::IGNORE_COLLISIONS,
-            );
+            ),
+        );
         let target = WorldPosition {
             coords: initial.coords + Vector3::new(1.0, 0.0, 0.0),
             ..initial
@@ -1458,10 +1463,14 @@ mod tests {
             position(0x1234_0002),
         ));
         facts(&mut world, remote_guid);
-        world.entities.get_mut(remote_guid).unwrap().physics =
-            holtburger_world::resolve_effective_entity_physics_state(
+        world
+            .entities
+            .get_mut(remote_guid)
+            .unwrap()
+            .physics
+            .reconcile(holtburger_world::resolve_effective_entity_physics_state(
                 PhysicsState::ETHEREAL | PhysicsState::IGNORE_COLLISIONS,
-            );
+            ));
 
         let source = Arc::new(FakeSource::default());
         let mut coordinator = ClientCollisionCoordinator::new(source.clone());
@@ -1500,6 +1509,12 @@ mod tests {
         let mut coordinator = ClientCollisionCoordinator::new(source.clone());
         let _ = coordinator.observe(&mut world);
         let body_id = SpatialBodyId::Entity(remote_guid);
+        wait_for_physical_body(
+            &mut coordinator,
+            &mut world,
+            SpatialBodyId::LocalPlayer(player_guid),
+        )
+        .await;
         wait_for_physical_body(&mut coordinator, &mut world, body_id).await;
         assert!(
             !world

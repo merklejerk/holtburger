@@ -10,7 +10,7 @@ use holtburger_content::ContentRepository;
 use holtburger_dat::file_type::setup_model::AnimationHookPayload;
 use holtburger_dat::file_type::{Animation, MotionTable, SetupModel};
 use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::Cursor;
 
 const SETUP_MODEL_TYPE: u32 = 0x02;
@@ -64,6 +64,7 @@ fn main() -> Result<()> {
 
     // Every animation a motion table can select, with the clip windows that select it.
     let mut clip_windows: HashMap<u32, Vec<(i32, i32, f32)>> = HashMap::new();
+    let mut tables_by_animation: BTreeMap<u32, BTreeSet<u32>> = BTreeMap::new();
     let mut records = 0usize;
     let mut records_with_velocity = 0usize;
     let mut records_with_omega = 0usize;
@@ -141,6 +142,10 @@ fn main() -> Result<()> {
             }
             max_clips = max_clips.max(motion_data.anims.len());
             for anim in &motion_data.anims {
+                tables_by_animation
+                    .entry(anim.anim_id)
+                    .or_default()
+                    .insert(*id);
                 clip_windows.entry(anim.anim_id).or_default().push((
                     anim.low_frame,
                     anim.high_frame,
@@ -177,6 +182,9 @@ fn main() -> Result<()> {
     let mut attack_part_indices: BTreeMap<i32, usize> = BTreeMap::new();
     let mut replaced_gfx_objs: BTreeMap<u32, usize> = BTreeMap::new();
     let mut ethereal_values: BTreeMap<bool, usize> = BTreeMap::new();
+    // Carrier identity keeps the collision-hook implementation scoped to content that motion
+    // tables can actually select, instead of every orphaned animation present in the archive.
+    let mut ethereal_carriers: BTreeMap<u32, BTreeMap<(i32, bool), usize>> = BTreeMap::new();
     // Whether the solver's velocity-and-heading actuation can express authored root motion at all
     // depends on these: a vertical translation is not planar drive, and a tilting rotation is not a
     // heading.
@@ -271,6 +279,11 @@ fn main() -> Result<()> {
                     }
                     (AnimationHookPayload::Ethereal(payload), _) => {
                         *ethereal_values.entry(payload.ethereal).or_insert(0) += 1;
+                        *ethereal_carriers
+                            .entry(animation_id)
+                            .or_default()
+                            .entry((hook.direction, payload.ethereal))
+                            .or_insert(0) += 1;
                     }
                     _ => {}
                 }
@@ -342,6 +355,15 @@ fn main() -> Result<()> {
     println!("attack cone part indices:      {attack_part_indices:?}");
     println!("replaced gfx objs:             {replaced_gfx_objs:?}");
     println!("ethereal payload values:       {ethereal_values:?}");
+    println!("ethereal carrier animations:");
+    for (animation_id, hooks) in ethereal_carriers {
+        let motion_tables = tables_by_animation[&animation_id]
+            .iter()
+            .map(|table_id| format!("0x{table_id:08X}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        println!("  0x{animation_id:08X}: hooks={hooks:?}, motion_tables=[{motion_tables}]");
+    }
 
     Ok(())
 }

@@ -114,9 +114,9 @@ pub fn get_debug_info(
 
             lines.push(Line::from(format!(
                 "Phys:   {:08X}",
-                e.physics.semantic.bits()
+                e.physics.effective().semantic.bits()
             )));
-            for (name, _) in e.physics.semantic.iter_names() {
+            for (name, _) in e.physics.effective().semantic.iter_names() {
                 lines.push(Line::from(format!("  [X] {}", name)));
             }
 

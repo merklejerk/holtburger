@@ -147,25 +147,24 @@ const dynamicEntityPlacementSchema = z.discriminatedUnion("kind", [
 		.strict(),
 ]);
 
-/**
- * The clip the host has an entity playing, projected for presentation.
- *
- * Narrow on purpose: the frontend advances within this clip's window at render rate, obeys the
- * host-derived terminal behavior, and never chooses the next clip. Which clip follows is link
- * resolution against host state the frontend does not have, so a successor arrives only as a
- * later view.
- *
- * There is no frame number. Host and frontend both advance by `framerate * dt`, so a phase offset
- * never accumulates, and entering a clip re-anchors both at the same frame regardless.
- */
-const dynamicEntityPlayingClipSchema = z.object({
-	animationId: guid,
-	completion: z.enum(["hold", "loop"]),
-	/** Negative plays the window backwards; zero holds. */
-	framerate: finiteNumber,
-	highFrame: z.number().int(),
-	lowFrame: z.number().int(),
-});
+/** Current motion-derived presentation level selected by the authoritative host cursor. */
+const dynamicEntityMotionSchema = z.discriminatedUnion("kind", [
+	z.object({
+		kind: z.literal("playing"),
+		animationId: guid,
+		completion: z.enum(["hold", "loop"]),
+		/** Negative plays the window backwards. */
+		framerate: finiteNumber,
+		highFrame: z.number().int(),
+		lowFrame: z.number().int(),
+	}),
+	z.object({
+		kind: z.literal("settled"),
+		animationId: guid,
+		/** Exact integral frame at which the authoritative cursor is resting. */
+		frame: z.number().int(),
+	}),
+]);
 
 const dynamicEntityViewSchema = z.object({
 	generation: nonNegativeInteger,
@@ -231,13 +230,13 @@ const dynamicEntityViewSchema = z.object({
 	}),
 	placement: dynamicEntityPlacementSchema,
 	/**
-	 * Clip this entity is playing right now, or `null` when it animates nothing.
+	 * Motion presentation held right now, or `null` when it animates nothing.
 	 *
-	 * A level, not an edge: every view states the current clip, so an entity realized late — or
-	 * re-realized from a snapshot — starts playing without having witnessed the transition that
-	 * selected it. Applying it is idempotent; swap only when it differs from what is playing.
+	 * A level, not an edge: every view states the current presentation, so an entity realized late
+	 * or re-realized from a snapshot reconstructs it without witnessing the selecting transition.
+	 * Applying it is idempotent; swap only when it differs from what is already presented.
 	 */
-	playingClip: dynamicEntityPlayingClipSchema.nullable(),
+	motion: dynamicEntityMotionSchema.nullable(),
 });
 
 const hostTimeSchema = z.object({ seconds: finiteNumber.nonnegative() });
@@ -311,9 +310,7 @@ export type DynamicEntityAttachedPlacement = Extract<
 	{ kind: "attached" }
 >;
 export type DynamicEntityAdvance = z.infer<typeof dynamicEntityAdvanceSchema>;
-export type DynamicEntityPlayingClip = z.infer<
-	typeof dynamicEntityPlayingClipSchema
->;
+export type DynamicEntityMotion = z.infer<typeof dynamicEntityMotionSchema>;
 export type DynamicEntityTickBatch = z.infer<
 	typeof dynamicEntityTickBatchSchema
 >;

@@ -153,6 +153,25 @@ describe("decodeAnimationRecord", () => {
 			),
 		).toThrow("hook payload exceeds its section");
 	});
+
+	it("classifies Ethereal as host-owned and presentation-safe", () => {
+		const decoded = decodeAnimationRecord(
+			animationResponse("ethereal", {
+				direction: "forward",
+				hookType: 6,
+				payload: { ethereal: true, kind: "ethereal" },
+				rawDirection: 1,
+			}),
+			"0x03000001",
+		);
+
+		expect(decoded.hooks[0]).toMatchObject({
+			blocksActivation: false,
+			command: "ethereal",
+			kind: "unimplemented",
+			payload: { ethereal: true, kind: "ethereal" },
+		});
+	});
 });
 
 function transparentPartResponse(

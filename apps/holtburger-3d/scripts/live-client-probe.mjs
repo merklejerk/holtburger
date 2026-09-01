@@ -195,10 +195,10 @@ function createCensus() {
 	function rememberActorMotion(entity) {
 		if (entity.placement?.kind !== "world") return;
 		const point = worldPoint(entity.placement.pose);
-		const clip = JSON.stringify(entity.playingClip ?? null);
+		const motion = JSON.stringify(entity.motion ?? null);
 		const previous = actorMotion.get(entity.identity.guid);
 		const step = previous === undefined ? 0 : distance(previous.point, point);
-		const clipChanged = previous === undefined || previous.clip !== clip;
+		const motionChanged = previous === undefined || previous.motion !== motion;
 		actorMotion.set(entity.identity.guid, {
 			point,
 			name: entity.display.name,
@@ -209,17 +209,17 @@ function createCensus() {
 			sampleCount: (previous?.sampleCount ?? 0) + 1,
 			totalDistance: (previous?.totalDistance ?? 0) + step,
 			maximumStep: Math.max(previous?.maximumStep ?? 0, step),
-			clip,
-			clipHistory: clipChanged
-				? [...(previous?.clipHistory ?? []), entity.playingClip ?? null]
-				: previous.clipHistory,
+			motion,
+			motionHistory: motionChanged
+				? [...(previous?.motionHistory ?? []), entity.motion ?? null]
+				: previous.motionHistory,
 			contacts: new Set([
 				...(previous?.contacts ?? []),
 				entity.placement.contact,
 			]),
-			clipTransitions:
-				(previous?.clipTransitions ?? 0) +
-				(previous !== undefined && clipChanged ? 1 : 0),
+			motionTransitions:
+				(previous?.motionTransitions ?? 0) +
+				(previous !== undefined && motionChanged ? 1 : 0),
 		});
 	}
 
@@ -273,8 +273,8 @@ function createCensus() {
 								sampleCount: motion.sampleCount,
 								totalDistance: motion.totalDistance,
 								maximumStep: motion.maximumStep,
-								clipTransitions: motion.clipTransitions,
-								clipHistory: motion.clipHistory,
+								motionTransitions: motion.motionTransitions,
+								motionHistory: motion.motionHistory,
 								contacts: [...motion.contacts].sort(),
 							},
 						]),
@@ -319,7 +319,7 @@ function actorPhaseSample(entity) {
 		contact: entity.placement.contact,
 		heading: entityHeading(entity),
 		point: worldPoint(entity.placement.pose),
-		playingClip: entity.playingClip ?? null,
+		motion: entity.motion ?? null,
 		sampleMode: entity.placement.sampleMode,
 	};
 }
@@ -1071,8 +1071,8 @@ async function main() {
 						before === null || after === null
 							? null
 							: wrappedAngleDelta(before.heading, after.heading),
-					playingClipBefore: before?.playingClip ?? null,
-					playingClipAfter: after?.playingClip ?? null,
+					motionBefore: before?.motion ?? null,
+					motionAfter: after?.motion ?? null,
 				});
 			};
 			try {
@@ -1226,15 +1226,15 @@ async function main() {
 				const airborneTrajectory = trajectory.filter(
 					(sample) => sample.contact === "airborne",
 				);
-				const playingClipTransitions = trajectory
+				const motionTransitions = trajectory
 					.filter(
 						(sample, index, samples) =>
 							index === 0 ||
-							sample.playingClip?.animationId !==
-								samples[index - 1].playingClip?.animationId,
+							sample.motion?.animationId !==
+								samples[index - 1].motion?.animationId,
 					)
 					.map((sample) => ({
-						animationId: sample.playingClip?.animationId ?? null,
+						animationId: sample.motion?.animationId ?? null,
 						contact: sample.contact,
 					}));
 				const contactTransitions = trajectoryStates.filter(
@@ -1283,14 +1283,14 @@ async function main() {
 						...new Set(trajectoryStates.map((state) => state.contact)),
 					],
 					contactTransitions,
-					playingClipTransitions,
+					motionTransitions,
 					sampleModes: [
 						...new Set(trajectoryStates.map((state) => state.sampleMode)),
 					],
 					cellIds: [...new Set(trajectoryStates.map((state) => state.cellId))],
 					finalContact: afterJump?.contact ?? null,
 					finalSampleMode: afterJump?.sampleMode ?? null,
-					playingClipAfter: afterJump?.playingClip ?? null,
+					motionAfter: afterJump?.motion ?? null,
 				};
 			} catch (error) {
 				driveError = safeError(error);

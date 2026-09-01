@@ -42,10 +42,10 @@ pub use entity_appearance::{
 pub use entity_physics::{
     DEFAULT_ENTITY_PHYSICS_STATE, EffectiveEntityPhysicsState, EntityCollisionParticipation,
     EntityCollisionReportPolicy, EntityDynamicCollisionPolicy, EntityIntegrationEligibility,
-    EntityPhysicsPresentation, EntityPhysicsResponse, EntityPhysicsSetupFacts,
-    EntityPhysicsStateInput, EntityPhysicsStateOverrides, LocalIntegrationDemand,
-    LocalPhysicalDemand, LocalTargetDemand, calculate_effective_entity_physics_state,
-    resolve_effective_entity_physics_state,
+    EntityPhysicsPresentation, EntityPhysicsResponse, EntityPhysicsRuntimeState,
+    EntityPhysicsSetupFacts, EntityPhysicsStateInput, EntityPhysicsStateOverrides,
+    LocalIntegrationDemand, LocalPhysicalDemand, LocalTargetDemand,
+    calculate_effective_entity_physics_state, resolve_effective_entity_physics_state,
 };
 pub use events::{DerivedStatsData, FellowshipActivity, PlayerInfoData, WorldEvent};
 pub use motion::{authored_grounded_actuation, grounded_character_actuation};
@@ -89,8 +89,9 @@ pub use spatial::{
     settle_free_sphere, settle_free_sphere_with_policy, solve_free_sphere, solve_grounded,
 };
 pub use state::{
-    AuthoredMotionDriveError, BodyProjectionResolver, MotionCommandKinematics,
-    MotionTableMovementProfile, PlayerMotionTableLookupError, PlayerMotionTableResolution,
-    PlayerMotionTableSource, RequiredSelfMovementKinematics, SelfMovementCapabilities,
-    SelfMovementCapabilitiesError, SelfMovementKinematics, SelfMovementKinematicsError,
+    AuthoredBodyMotionTick, AuthoredMotionDriveError, BodyProjectionResolver,
+    MotionCommandKinematics, MotionTableMovementProfile, PlayerMotionTableLookupError,
+    PlayerMotionTableResolution, PlayerMotionTableSource, RequiredSelfMovementKinematics,
+    SelfMovementCapabilities, SelfMovementCapabilitiesError, SelfMovementKinematics,
+    SelfMovementKinematicsError,
 };

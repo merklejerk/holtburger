@@ -1445,7 +1445,7 @@ function view(guid: number, landblockId = 0x0101_0100): DynamicEntityView {
 			contact: "grounded",
 			sampleMode: "authoritative-only",
 		},
-		playingClip: null,
+		motion: null,
 	};
 }
 

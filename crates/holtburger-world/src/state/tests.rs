@@ -27,7 +27,10 @@ use holtburger_common::properties::{
 use holtburger_common::{
     CharacterOption, CharacterOptions1, CharacterOptions2, ParentLocation, Placement, Quaternion,
 };
-use holtburger_content::{MotionSequenceCatalog, SoulEmoteCatalog};
+use holtburger_content::{
+    ColliderScale, CollisionBall, CollisionShape, MotionHook, MotionHookDirection,
+    MotionHookEffect, MotionSequenceCatalog, SoulEmoteCatalog,
+};
 use holtburger_dat::file_type::{MotionTable, SkillTable, SpellTable, XpTable};
 use holtburger_dat::{DatFileType, EOR_PORTAL_NAMESPACE, HbaReader, HbaWriter};
 use holtburger_protocol::messages::game_event::{GameEvent, GameEventMessage};
@@ -3397,7 +3400,7 @@ fn apply_set_state_updates_local_player_instance_sequence_and_entity_physics_sta
         .player_entity()
         .expect("local player entity should exist");
     assert_eq!(
-        player_entity.physics.semantic,
+        player_entity.physics.effective().semantic,
         PhysicsState::REPORT_COLLISIONS | PhysicsState::IGNORE_COLLISIONS
     );
     assert_eq!(
@@ -3453,8 +3456,11 @@ fn set_state_dynamic_definition() -> crate::DynamicPhysicalBodyConfiguration {
             target_geometry: Arc::new(crate::PreparedEntityTargetGeometry {
                 physics_bsp_parts: Vec::new(),
                 fallback_setup_did: 0x0200_0001,
-                fallback_shapes: Vec::new(),
-                fallback_scale: holtburger_content::ColliderScale::uniform(1.0).unwrap(),
+                fallback_shapes: vec![Arc::new(CollisionShape::Ball(CollisionBall {
+                    center: Vector3::zero(),
+                    radius: 0.5,
+                }))],
+                fallback_scale: ColliderScale::uniform(1.0).unwrap(),
             }),
             dynamic_collision: crate::EntityDynamicCollisionPolicy {
                 target: crate::EntityCollisionParticipation::Solid,
@@ -3481,6 +3487,168 @@ fn set_state_dynamic_definition() -> crate::DynamicPhysicalBodyConfiguration {
         },
     )
     .unwrap()
+}
+
+fn authored_ethereal_tick(guid: Guid, ethereal: bool) -> AuthoredBodyMotionTick {
+    let mut tick = crate::motion::SequenceTick::identity();
+    tick.hooks.push(crate::motion::FiredMotionHook {
+        animation_id: 0x0300_0559,
+        hook: MotionHook {
+            frame: 1,
+            direction: if ethereal {
+                MotionHookDirection::Forward
+            } else {
+                MotionHookDirection::Backward
+            },
+            effect: MotionHookEffect::Ethereal { ethereal },
+        },
+    });
+    AuthoredBodyMotionTick { guid, tick }
+}
+
+#[test]
+fn authored_ethereal_hook_blocks_solidification_until_the_peer_clears() {
+    let mut state = WorldState::synthetic();
+    let door_guid = Guid(0x7000_0101);
+    let peer_guid = Guid(0x7000_0102);
+    let door_pose = WorldPosition {
+        landblock_id: Guid(0xDA55_0020),
+        coords: Vector3::zero(),
+        rotation: Quaternion::identity(),
+    };
+    let peer_pose = WorldPosition {
+        coords: Vector3::new(0.75, 0.0, 0.0),
+        ..door_pose
+    };
+    state.add_entity(Entity::new(door_guid, "Door".to_owned(), door_pose));
+    state.add_entity(Entity::new(peer_guid, "Peer".to_owned(), peer_pose));
+    for guid in [door_guid, peer_guid] {
+        state
+            .scene
+            .set_dynamic_physical_body(
+                SpatialBodyId::Entity(guid),
+                Some(set_state_dynamic_definition()),
+                crate::PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+    }
+
+    state
+        .apply_authored_motion_physics(&[authored_ethereal_tick(door_guid, true)])
+        .unwrap();
+    assert!(
+        state
+            .entities
+            .get(door_guid)
+            .unwrap()
+            .physics
+            .effective()
+            .semantic
+            .contains(PhysicsState::ETHEREAL)
+    );
+
+    state
+        .apply_authored_motion_physics(&[authored_ethereal_tick(door_guid, false)])
+        .unwrap();
+    assert!(
+        state
+            .entities
+            .get(door_guid)
+            .unwrap()
+            .physics
+            .has_pending_solidification()
+    );
+
+    assert!(state.scene.apply_runtime_body_pose(
+        SpatialBodyId::Entity(peer_guid),
+        WorldPosition {
+            coords: Vector3::new(2.0, 0.0, 0.0),
+            ..peer_pose
+        },
+        SpatialSampleMode::AuthoritativeOnly,
+    ));
+    state.apply_authored_motion_physics(&[]).unwrap();
+    let door_physics = state.entities.get(door_guid).unwrap().physics;
+    assert!(!door_physics.has_pending_solidification());
+    assert!(
+        !door_physics
+            .effective()
+            .semantic
+            .contains(PhysicsState::ETHEREAL)
+    );
+    assert!(door_physics.authoritative().semantic.is_empty());
+}
+
+#[test]
+fn admitted_set_state_reconciles_authored_prediction_and_runtime_body_policy() {
+    let mut state = WorldState::synthetic();
+    let guid = Guid(0x7000_0103);
+    let pose = WorldPosition {
+        landblock_id: Guid(0xDA55_0020),
+        coords: Vector3::zero(),
+        rotation: Quaternion::identity(),
+    };
+    state.add_entity(Entity::new(guid, "Door".to_owned(), pose));
+    let body_id = SpatialBodyId::Entity(guid);
+    state
+        .scene
+        .set_dynamic_physical_body(
+            body_id,
+            Some(set_state_dynamic_definition()),
+            crate::PhysicalCollisionFilter::ALL,
+            None,
+        )
+        .unwrap();
+    state
+        .apply_authored_motion_physics(&[authored_ethereal_tick(guid, true)])
+        .unwrap();
+    assert_eq!(
+        state
+            .entities
+            .get(guid)
+            .unwrap()
+            .physics
+            .authored_transition(),
+        crate::entity_physics::AuthoredEtherealTransition::Predicted { ethereal: true }
+    );
+
+    let mut events = Vec::new();
+    assert!(state.apply_set_state_update(
+        &SetStateData {
+            guid,
+            physics_state: PhysicsState::NONE,
+            instance_sequence: 0,
+            state_sequence: 1,
+        },
+        &mut events,
+    ));
+
+    let physics = state.entities.get(guid).unwrap().physics;
+    assert_eq!(
+        physics.authored_transition(),
+        crate::entity_physics::AuthoredEtherealTransition::Reconciled
+    );
+    assert_eq!(physics.effective().semantic, PhysicsState::NONE);
+    assert_eq!(
+        state
+            .scene
+            .body(body_id)
+            .unwrap()
+            .physical
+            .as_ref()
+            .unwrap()
+            .dynamic
+            .as_ref()
+            .unwrap()
+            .collision
+            .dynamic_collision
+            .target,
+        crate::EntityCollisionParticipation::Solid
+    );
+    assert!(events.iter().any(
+        |event| matches!(event, WorldEvent::RuntimeBodyChanged { body_id: changed } if *changed == body_id)
+    ));
 }
 
 #[test]
@@ -3515,7 +3683,13 @@ fn set_state_updates_semantic_truth_without_inferring_client_physical_policy() {
         &mut frozen_events,
     ));
     assert_eq!(
-        state.entities.get(guid).unwrap().physics.semantic,
+        state
+            .entities
+            .get(guid)
+            .unwrap()
+            .physics
+            .effective()
+            .semantic,
         PhysicsState::FROZEN
     );
     assert!(state.scene.body(body_id).unwrap().physical.is_some());
@@ -3536,7 +3710,13 @@ fn set_state_updates_semantic_truth_without_inferring_client_physical_policy() {
     ));
     assert!(state.scene.body(body_id).unwrap().physical.is_some());
     assert_eq!(
-        state.entities.get(guid).unwrap().physics.semantic,
+        state
+            .entities
+            .get(guid)
+            .unwrap()
+            .physics
+            .effective()
+            .semantic,
         PhysicsState::PUSHABLE
     );
     assert!(matches!(

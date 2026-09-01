@@ -173,6 +173,86 @@ impl EffectiveEntityPhysicsState {
     }
 }
 
+/// Host-authored collision transition layered over the latest admitted server state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AuthoredEtherealTransition {
+    /// Effective physics is exactly the latest admitted server state.
+    Reconciled,
+    /// An authored hook temporarily overrides the server's `Ethereal` bit.
+    Predicted { ethereal: bool },
+    /// Solidification was requested but a dynamic peer still occupies the object.
+    PendingSolidification,
+}
+
+/// One invariant-bearing entity physics state with explicit server and prediction ownership.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EntityPhysicsRuntimeState {
+    authoritative: EffectiveEntityPhysicsState,
+    effective: EffectiveEntityPhysicsState,
+    authored_transition: AuthoredEtherealTransition,
+}
+
+impl EntityPhysicsRuntimeState {
+    /// Starts reconciled from one complete create or `SetState` value.
+    pub const fn reconciled(authoritative: EffectiveEntityPhysicsState) -> Self {
+        Self {
+            authoritative,
+            effective: authoritative,
+            authored_transition: AuthoredEtherealTransition::Reconciled,
+        }
+    }
+
+    /// Latest admitted server state, independent from local hook timing.
+    #[cfg(test)]
+    pub(crate) const fn authoritative(self) -> EffectiveEntityPhysicsState {
+        self.authoritative
+    }
+
+    /// Single collision and presentation state consumed by downstream systems.
+    pub const fn effective(self) -> EffectiveEntityPhysicsState {
+        self.effective
+    }
+
+    /// Current relationship between authored prediction and server authority.
+    #[cfg(test)]
+    pub(crate) const fn authored_transition(self) -> AuthoredEtherealTransition {
+        self.authored_transition
+    }
+
+    /// Replaces server authority and retires any obsolete authored transition.
+    pub fn reconcile(&mut self, authoritative: EffectiveEntityPhysicsState) {
+        *self = Self::reconciled(authoritative);
+    }
+
+    /// Applies an unobstructed authored replacement for the `Ethereal` bit.
+    pub fn apply_authored_ethereal(&mut self, ethereal: bool) {
+        let mut semantic = self.authoritative.semantic;
+        semantic.set(PhysicsState::ETHEREAL, ethereal);
+        self.effective = resolve_effective_entity_physics_state(semantic);
+        self.authored_transition = if self.effective == self.authoritative {
+            AuthoredEtherealTransition::Reconciled
+        } else {
+            AuthoredEtherealTransition::Predicted { ethereal }
+        };
+    }
+
+    /// Keeps the entity ethereal until a later collision-free retry can make it solid.
+    pub fn defer_authored_solidification(&mut self) {
+        let mut semantic = self.authoritative.semantic;
+        semantic.insert(PhysicsState::ETHEREAL);
+        self.effective = resolve_effective_entity_physics_state(semantic);
+        self.authored_transition = AuthoredEtherealTransition::PendingSolidification;
+    }
+
+    /// Whether retail's blocked solidification retry is still outstanding.
+    pub const fn has_pending_solidification(self) -> bool {
+        matches!(
+            self.authored_transition,
+            AuthoredEtherealTransition::PendingSolidification
+        )
+    }
+}
+
 /// Whether prepared target geometry is retained for directional peer queries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LocalTargetDemand {
@@ -334,6 +414,57 @@ pub fn resolve_effective_entity_physics_state(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn authored_ethereal_prediction_is_separate_and_reconciled_by_server_state() {
+        let solid = resolve_effective_entity_physics_state(PhysicsState::REPORT_COLLISIONS);
+        let mut runtime = EntityPhysicsRuntimeState::reconciled(solid);
+
+        runtime.apply_authored_ethereal(true);
+        assert_eq!(runtime.authoritative(), solid);
+        assert!(
+            runtime
+                .effective()
+                .semantic
+                .contains(PhysicsState::ETHEREAL)
+        );
+        assert_eq!(
+            runtime.authored_transition(),
+            AuthoredEtherealTransition::Predicted { ethereal: true }
+        );
+
+        runtime.reconcile(solid);
+        assert_eq!(runtime.effective(), solid);
+        assert_eq!(
+            runtime.authored_transition(),
+            AuthoredEtherealTransition::Reconciled
+        );
+    }
+
+    #[test]
+    fn obstructed_solidification_remains_ethereal_until_a_retry_clears() {
+        let ethereal = resolve_effective_entity_physics_state(PhysicsState::ETHEREAL);
+        let mut runtime = EntityPhysicsRuntimeState::reconciled(ethereal);
+
+        runtime.defer_authored_solidification();
+        assert!(runtime.has_pending_solidification());
+        assert!(
+            runtime
+                .effective()
+                .semantic
+                .contains(PhysicsState::ETHEREAL)
+        );
+
+        runtime.apply_authored_ethereal(false);
+        assert!(!runtime.has_pending_solidification());
+        assert!(
+            !runtime
+                .effective()
+                .semantic
+                .contains(PhysicsState::ETHEREAL)
+        );
+        assert_eq!(runtime.authoritative(), ethereal);
+    }
 
     #[test]
     fn initial_state_applies_absent_false_true_and_setup_precedence() {

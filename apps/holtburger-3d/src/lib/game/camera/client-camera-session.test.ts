@@ -229,7 +229,7 @@ function currentState(): ClientCurrentState {
 						contact: "grounded",
 						sampleMode: "authoritative-only",
 					},
-					playingClip: null,
+					motion: null,
 				},
 			],
 		},

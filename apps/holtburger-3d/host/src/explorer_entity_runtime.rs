@@ -19,8 +19,8 @@ use holtburger_core::{
     dynamic_entity_projection_input_from_body, resolve_character_jump,
 };
 use holtburger_world::motion::{
-    BodyMotionRuntime, CharacterMotionPresentation, MotionOrder, MotionRuntimeRegistry,
-    PlayingMotionClip,
+    BodyMotionRuntime, CharacterMotionPresentation, MotionOrder, MotionPresentation,
+    MotionRuntimeRegistry,
 };
 use holtburger_world::{
     CollisionReportOutcome, ContactState, DynamicPhysicalBodyConfiguration,
@@ -276,16 +276,16 @@ pub struct ExplorerEntityProjection {
     pub presentation_class: DynamicEntityPresentationClass,
     /// Source-neutral semantic facts joined with the current canonical body view.
     pub input: DynamicEntityProjectionInput,
-    /// Clip this entity is playing right now, read from the same locked registry transaction.
-    pub playing_clip: Option<holtburger_world::motion::PlayingMotionClip>,
+    /// Motion presentation held now, read from the same locked registry transaction.
+    pub motion: Option<holtburger_world::motion::MotionPresentation>,
 }
 
 /// One accepted fixed-tick body path paired with its still-current semantic generation.
 pub struct ExplorerEntityPhysicalTick {
     /// Whether frontend entity presentation consumes this tick; host-side followers ignore this.
     pub publish: bool,
-    /// Clip this entity is playing at the end of this tick, changed or not.
-    pub playing_clip: Option<holtburger_world::motion::PlayingMotionClip>,
+    /// Motion presentation held at the end of this tick, changed or not.
+    pub motion: Option<holtburger_world::motion::MotionPresentation>,
     /// Possession lifecycle edges committed with this exact body solve.
     pub possession_event_outcomes: Vec<PossessionEventOutcome>,
     /// Current instance generation held stable across the collection transaction.
@@ -404,8 +404,9 @@ struct ExplorerMotionState {
     playback: MotionRuntimeRegistry,
     /// Exact entity/possession generation and all controller-owned input state.
     active: Option<ActivePossession>,
-    /// Clip each body's most recent publication carried, so an unchanged level costs no traffic.
-    published: BTreeMap<Guid, PlayingMotionClip>,
+    /// Motion level each body's most recent publication carried, so unchanged state costs no
+    /// traffic.
+    published: BTreeMap<Guid, MotionPresentation>,
     /// Latest accepted physical result for the active possession, including bounded prefixes.
     last_physical_status: Option<ExplorerPossessionPhysicalStatus>,
     /// Planar speed achieved by the latest accepted body tick, for clamp diagnostics.
@@ -418,26 +419,26 @@ impl ExplorerMotionState {
         self.published.retain(|guid, _| live.contains(guid));
     }
 
-    /// Whether one body's current clip has yet to reach a consumer.
+    /// Whether one body's current motion presentation has yet to reach a consumer.
     ///
     /// Read before the collection scan so a body whose only news is a clip change can be woken
     /// into it. Playback alone does not schedule a body: an idle contributes no motion, so a
     /// settled entity would otherwise have no tick to carry its level on.
-    fn clip_awaits_publication(&self, guid: Guid) -> bool {
-        self.playback.playing_clip(guid) != self.published.get(&guid).copied()
+    fn motion_awaits_publication(&self, guid: Guid) -> bool {
+        self.playback.motion_presentation(guid) != self.published.get(&guid).copied()
     }
 
-    /// Commits the clip one body's publication carries, reporting whether it changed.
+    /// Commits the motion presentation one body's publication carries, reporting whether it changed.
     ///
     /// Only a body that actually produced a tick commits. A body with no tick this epoch has
     /// nothing to carry its level, so it stays pending and re-offers the change on its next one.
-    fn commit_published_clip(&mut self, guid: Guid) -> (Option<PlayingMotionClip>, bool) {
-        let clip = self.playback.playing_clip(guid);
-        let changed = match clip {
-            Some(clip) => self.published.insert(guid, clip) != Some(clip),
+    fn commit_published_motion(&mut self, guid: Guid) -> (Option<MotionPresentation>, bool) {
+        let motion = self.playback.motion_presentation(guid);
+        let changed = match motion {
+            Some(motion) => self.published.insert(guid, motion) != Some(motion),
             None => self.published.remove(&guid).is_some(),
         };
-        (clip, changed)
+        (motion, changed)
     }
 
     fn release(&mut self) -> Option<Guid> {
@@ -591,7 +592,7 @@ pub struct ExplorerPossessionMotionProbe {
     pub style: u32,
     pub substate: ExplorerPossessionActiveMotionProbe,
     pub modifiers: Vec<ExplorerPossessionActiveMotionProbe>,
-    pub clip: Option<holtburger_core::DynamicEntityPlayingClip>,
+    pub motion: Option<holtburger_core::DynamicEntityMotion>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
@@ -1429,7 +1430,7 @@ impl ExplorerEntityRuntime {
             generation: instance.generation,
             presentation_class: instance.presentation_class,
             input,
-            playing_clip: registry.motion.playback.playing_clip(guid),
+            motion: registry.motion.playback.motion_presentation(guid),
         })
     }
 
@@ -1449,10 +1450,10 @@ impl ExplorerEntityRuntime {
                     input: self
                         .simulation
                         .project_dynamic_entity(&instance.definition)?,
-                    playing_clip: registry
+                    motion: registry
                         .motion
                         .playback
-                        .playing_clip(instance.definition.identity.guid),
+                        .motion_presentation(instance.definition.identity.guid),
                 })
             })
             .collect()
@@ -1674,11 +1675,11 @@ impl ExplorerEntityRuntime {
             .expect("Explorer entity registry lock poisoned");
         let active = registry.motion.active.as_ref()?;
         let state = registry.motion.playback.state(active.guid)?;
-        let clip = registry
+        let motion = registry
             .motion
             .playback
-            .playing_clip(active.guid)
-            .map(holtburger_core::DynamicEntityPlayingClip::from);
+            .motion_presentation(active.guid)
+            .map(holtburger_core::DynamicEntityMotion::from);
         Some(ExplorerPossessionMotionProbe {
             guid: active.guid,
             entity_generation: active.entity_generation,
@@ -1699,7 +1700,7 @@ impl ExplorerEntityRuntime {
                     speed: motion.speed_mod,
                 })
                 .collect(),
-            clip,
+            motion,
         })
     }
 
@@ -1824,7 +1825,7 @@ impl ExplorerEntityRuntime {
                 .playback
                 .get(guid)
                 .is_some_and(|runtime| runtime.sequence().contributes_motion());
-            if moving || registry.motion.clip_awaits_publication(guid) {
+            if moving || registry.motion.motion_awaits_publication(guid) {
                 self.simulation
                     .wake_dynamic_body(SpatialBodyId::Entity(guid));
             }
@@ -1955,15 +1956,16 @@ impl ExplorerEntityRuntime {
                     &instance.definition,
                     &solved.current,
                 )?;
-                // A clip change is worth publishing even when the body did not move. Possessed
-                // playback is sampled only after its accepted proposal commits, so a held solve
-                // cannot leak a clip.
-                let (playing_clip, clip_changed) = registry.motion.commit_published_clip(guid);
-                let publish =
-                    physical_tick_changed(&solved) || clip_changed || outcome_guids.contains(&guid);
+                // A motion-presentation change is worth publishing even when the body did not
+                // move. Possessed playback is sampled only after its accepted proposal commits,
+                // so a held solve cannot leak a presentation level.
+                let (motion, motion_changed) = registry.motion.commit_published_motion(guid);
+                let publish = physical_tick_changed(&solved)
+                    || motion_changed
+                    || outcome_guids.contains(&guid);
                 Ok(ExplorerEntityPhysicalTick {
                     publish,
-                    playing_clip,
+                    motion,
                     possession_event_outcomes: possession_outcomes
                         .remove(&guid)
                         .unwrap_or_default(),
@@ -3468,9 +3470,9 @@ mod tests {
         );
         assert_eq!(
             probe
-                .clip
+                .motion
                 .expect("run playback must be committed")
-                .animation_id,
+                .animation_id(),
             RUN_ANIM
         );
         assert_eq!(probe.substate.speed, 10.0);
@@ -3496,7 +3498,8 @@ mod tests {
             .unwrap();
         assert!(
             first.ticks.iter().any(|tick| {
-                tick.publish && tick.playing_clip.map(|clip| clip.animation_id) == Some(STAND_ANIM)
+                tick.publish
+                    && tick.motion.map(MotionPresentation::animation_id) == Some(STAND_ANIM)
             }),
             "the first tick publishes the idle the entity is already playing"
         );
@@ -3510,11 +3513,15 @@ mod tests {
                 .ticks
             {
                 assert!(
-                    tick.playing_clip.is_some(),
+                    tick.motion.is_some(),
                     "a body driven by a motion table always has a clip to state"
                 );
                 if tick.publish {
-                    levels.push(tick.playing_clip.expect("a stated clip").animation_id);
+                    levels.push(
+                        tick.motion
+                            .expect("a stated motion presentation")
+                            .animation_id(),
+                    );
                 }
             }
         }
@@ -3542,8 +3549,8 @@ mod tests {
             runtime
                 .project(guid)
                 .expect("the spawned entity must project")
-                .playing_clip
-                .map(|clip| clip.animation_id),
+                .motion
+                .map(MotionPresentation::animation_id),
             Some(STAND_ANIM),
             "a projection taken long after spawn still states the idle"
         );
@@ -3554,8 +3561,8 @@ mod tests {
                 .into_iter()
                 .find(|projection| projection.input.identity.guid == guid)
                 .expect("the spawned entity must appear in its snapshot")
-                .playing_clip
-                .map(|clip| clip.animation_id),
+                .motion
+                .map(MotionPresentation::animation_id),
             Some(STAND_ANIM),
             "a complete snapshot reconstructs playback without replaying history"
         );
@@ -3625,9 +3632,9 @@ mod tests {
             runtime
                 .project(guid)
                 .unwrap()
-                .playing_clip
+                .motion
                 .unwrap()
-                .animation_id,
+                .animation_id(),
             STAND_ANIM,
             "the settled body is still on the first clip of its idle"
         );
@@ -3641,9 +3648,9 @@ mod tests {
                 .ticks
                 .iter()
                 .filter(|tick| tick.publish)
-                .find_map(|tick| tick.playing_clip)
+                .find_map(|tick| tick.motion)
             {
-                published = Some(clip.animation_id);
+                published = Some(clip.animation_id());
                 break;
             }
         }
@@ -3938,8 +3945,8 @@ mod tests {
                 saw_airborne_turn = true;
             }
             restored_walk_clip |= ticks.ticks.iter().any(|tick| {
-                tick.playing_clip
-                    .is_some_and(|clip| clip.animation_id == WALK_ANIM)
+                tick.motion
+                    .is_some_and(|motion| motion.animation_id() == WALK_ANIM)
             });
             if body.contact == ContactState::Grounded && step > 3 {
                 landed = true;
@@ -4048,8 +4055,8 @@ mod tests {
             .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(33))
             .unwrap();
         assert!(charged.ticks.iter().any(|tick| {
-            tick.playing_clip
-                .is_some_and(|clip| clip.animation_id == READY_ANIM)
+            tick.motion
+                .is_some_and(|motion| motion.animation_id() == READY_ANIM)
         }));
 
         runtime
@@ -4069,8 +4076,8 @@ mod tests {
             .tick_physical_collection(1.0 / 30.0, settled_at + Duration::from_millis(66))
             .unwrap();
         assert!(launched.ticks.iter().any(|tick| {
-            tick.playing_clip
-                .is_some_and(|clip| clip.animation_id == FALLING_ANIM)
+            tick.motion
+                .is_some_and(|motion| motion.animation_id() == FALLING_ANIM)
         }));
     }
 

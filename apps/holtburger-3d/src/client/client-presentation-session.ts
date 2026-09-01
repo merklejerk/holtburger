@@ -358,7 +358,7 @@ export class ClientPresentationSession {
 		return this.#startPromise;
 	}
 
-	/** Current presentation status for the minimal client overlay. */
+	/** Current presentation status consumed by the client shell's notice policy. */
 	status(): ClientPresentationStatus {
 		return this.#status;
 	}

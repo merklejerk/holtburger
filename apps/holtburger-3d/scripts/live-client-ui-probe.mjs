@@ -11,6 +11,7 @@ const PASSIVE_CAMERA_INPUT_COUNT = 40;
 const PASSIVE_CAMERA_INPUT_INTERVAL_MS = 25;
 const PRECISE_JUMP_SWEEP_INPUT_COUNT = 120;
 const PRECISE_JUMP_SWEEP_INPUT_INTERVAL_MS = 5;
+const WORLD_READY_NOTICE = "World ready";
 
 const appRoot = resolve(fileURLToPath(new URL("../", import.meta.url)));
 const account = requiredEnvironment("HOLTBURGER_PROBE_ACCOUNT");
@@ -176,7 +177,7 @@ try {
 				cameraGeneration.first.reason === "initial-placement" &&
 				cameraGeneration.first.clearance !== null;
 			const lastState = {
-				status: outcome.lastState.status,
+				notice: outcome.lastState.notice,
 				error: outcome.lastState.error,
 				camera: outcome.lastState.camera,
 				bodyText: outcome.lastState.bodyText,
@@ -545,7 +546,7 @@ async function capturePreciseJumpEntry(client_, milliseconds) {
 				evaluations: window.__holtburgerProbeEvidence.preciseJumpEvaluations,
 				evaluationTimes: window.__holtburgerProbeEvidence.preciseJumpEvaluationTimes,
 				page: {
-					status: document.querySelector(".client-world-status span")?.textContent?.trim() ?? null,
+					notice: document.querySelector(".client-toast")?.textContent?.trim() ?? null,
 					error: document.querySelector('[role="alert"]')?.textContent?.trim() ?? null,
 				},
 				webgl: {
@@ -709,13 +710,15 @@ async function waitForReady(
 	let sawLoading = false;
 	for (;;) {
 		const state = await pageState(client_);
-		if (state.status !== null) sawLoading = true;
+		if (state.notice !== null && state.notice !== WORLD_READY_NOTICE) {
+			sawLoading = true;
+		}
 		const hasCurrentCamera =
 			state.camera !== null &&
 			(previousCameraGeneration === null ||
 				state.camera.cameraGeneration !== previousCameraGeneration);
 		if (
-			state.status === null &&
+			state.notice === WORLD_READY_NOTICE &&
 			hasCurrentCamera &&
 			(!requireLoading || sawLoading)
 		) {
@@ -740,7 +743,7 @@ function pageState(client_) {
 	return evaluate(
 		client_,
 		`() => ({
-			status: document.querySelector(".client-world-status span")?.textContent?.trim() ?? null,
+			notice: document.querySelector(".client-toast")?.textContent?.trim() ?? null,
 			error: document.querySelector('[role="alert"]')?.textContent?.trim() ?? null,
 			camera: window.__holtburgerProbeEvidence?.camera ?? null,
 			cameraGenerations: window.__holtburgerProbeEvidence?.cameraGenerations ?? [],

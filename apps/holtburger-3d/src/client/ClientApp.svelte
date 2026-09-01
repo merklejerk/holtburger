@@ -33,10 +33,14 @@
 		ClientCharacterMotionCapabilities,
 		ClientCharacterMotionEventRequest,
 		ClientCharacterMotionRejection,
+		ClientChatMessage,
 		ClientDriveRequest,
 		ClientVital,
 	} from "./client-host-contract";
-	import type { ClientChatLine } from "./ClientChat.svelte";
+	import type {
+		ClientChatErrorMessage,
+		ClientChatLine,
+	} from "./client-chat-policy";
 	import type { FrameSettings } from "../lib/game/renderer/renderer";
 	import {
 		clientLifecycleEnablesWorldInput,
@@ -70,11 +74,6 @@
 	let chatMessages = $state<readonly ClientChatLine[]>([]);
 	let nextChatMessageId = 1;
 	const MAXIMUM_CHAT_LINES = 250;
-	let presentationError = $state<string | null>(null);
-	let presentationStatus = $state<ClientPresentationStatus>({
-		kind: "starting",
-		diagnostic: null,
-	});
 	let entryPending = $state(false);
 	let canvasElement = $state<HTMLCanvasElement | null>(null);
 	let cameraController = $state<ClientPresentationCameraController | null>(
@@ -229,12 +228,7 @@
 				vitals = event.vitals;
 				return;
 			case "chat": {
-				const line: ClientChatLine = {
-					...event.message,
-					id: nextChatMessageId++,
-					receivedAt: new Date(),
-				};
-				chatMessages = [...chatMessages, line].slice(-MAXIMUM_CHAT_LINES);
+				appendChatLine(event.message);
 				return;
 			}
 			case "exit-requested":
@@ -250,6 +244,21 @@
 			default:
 				return;
 		}
+	}
+
+	function appendChatLine(
+		message: ClientChatMessage | ClientChatErrorMessage,
+	): void {
+		const line: ClientChatLine = {
+			...message,
+			id: nextChatMessageId++,
+			receivedAt: new Date(),
+		};
+		chatMessages = [...chatMessages, line].slice(-MAXIMUM_CHAT_LINES);
+	}
+
+	function appendChatError(error: unknown): void {
+		appendChatLine({ kind: "error", message: diagnostic(error) });
 	}
 
 	function chooseCharacter(guid: number): void {
@@ -363,9 +372,9 @@
 	}
 
 	function diagnostic(error: unknown): string {
-		return error instanceof Error
-			? error.message
-			: "The client command failed.";
+		if (error instanceof Error) return error.message;
+		if (typeof error === "string" && error.trim().length > 0) return error;
+		return "The client command failed.";
 	}
 
 	function presentationStatusText(status: ClientPresentationStatus): string {
@@ -433,10 +442,38 @@
 
 		let cancelled = false;
 		let frameHandle = 0;
+		let lastStatus: ClientPresentationStatus | null = null;
+		let lastErrorMessage: string | null = null;
 		const reportPresentationError = (error: unknown): void => {
 			if (cancelled) return;
 			console.error(error);
-			presentationError = diagnostic(error);
+			const message = diagnostic(error);
+			if (message === lastErrorMessage) return;
+			lastErrorMessage = message;
+			appendChatError(error);
+		};
+		const reportPresentationStatus = (
+			nextStatus: ClientPresentationStatus,
+		): void => {
+			if (
+				nextStatus.kind === lastStatus?.kind &&
+				nextStatus.diagnostic === lastStatus.diagnostic
+			) {
+				return;
+			}
+			lastStatus = nextStatus;
+			if (nextStatus.kind === "error") {
+				reportPresentationError(
+					nextStatus.diagnostic ?? "World presentation failed.",
+				);
+				return;
+			}
+			lastErrorMessage = null;
+			if (nextStatus.kind === "stopped") return;
+			toastCenter.publish({
+				message: presentationStatusText(nextStatus),
+				tone: "status",
+			});
 		};
 		const presentation = new ClientPresentationSession({
 			canvas,
@@ -453,7 +490,7 @@
 		presentationSession = presentation;
 		frameRateSampler = currentFrameRateSampler;
 		cameraController = presentation.camera;
-		presentationError = null;
+		reportPresentationStatus({ kind: "starting", diagnostic: null });
 
 		const frame = (timeMs: number): void => {
 			if (cancelled) return;
@@ -465,12 +502,7 @@
 				startedAtMs: frameStartedAt,
 				workMs: frameFinishedAt - frameStartedAt,
 			});
-			if (
-				nextStatus.kind !== presentationStatus.kind ||
-				nextStatus.diagnostic !== presentationStatus.diagnostic
-			) {
-				presentationStatus = nextStatus;
-			}
+			reportPresentationStatus(nextStatus);
 			frameHandle = window.requestAnimationFrame(frame);
 		};
 		void presentation
@@ -491,14 +523,13 @@
 			cancelled = true;
 			window.cancelAnimationFrame(frameHandle);
 			void presentation.destroy().catch((error: unknown) => {
-				// The route is already leaving, but a release failure still belongs on the one
-				// presentation diagnostic surface rather than becoming an unhandled rejection.
-				presentationError = diagnostic(error);
+				// The route is already leaving, so keep teardown failure visible to diagnostics
+				// without mutating an unmounted chat surface.
+				console.error(error);
 			});
 			if (cameraController === presentation.camera) cameraController = null;
 			if (presentationSession === presentation) presentationSession = null;
 			if (frameRateSampler === currentFrameRateSampler) frameRateSampler = null;
-			presentationStatus = { kind: "stopped", diagnostic: null };
 		};
 	});
 
@@ -601,9 +632,6 @@
 	<ClientWorldView
 		cameraController={lifecycle.kind === "in-world" ? cameraController : null}
 		{debugEnabled}
-		{presentationStatus}
-		{presentationStatusText}
-		{presentationError}
 		{readMapPanelFrame}
 		{readDiagnostics}
 		{readFrameRates}
@@ -623,7 +651,6 @@
 		onSendChat={sendChat}
 		onChatFocusChange={handleChatFocusChange}
 		onCanvas={(canvas) => (canvasElement = canvas)}
-		onDisconnect={disconnect}
 	/>
 {:else}
 	<main class="client-screen" aria-label="Holtburger client">

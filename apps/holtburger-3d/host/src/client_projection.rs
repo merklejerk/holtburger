@@ -3,14 +3,16 @@
 use std::collections::HashMap;
 
 use holtburger_common::{Guid, stats::VitalType};
+use holtburger_core::client::types::{ChatChannelKind, ChatSpeakerKind, CombatFeedback};
 use holtburger_core::{
     ClientApplicationSnapshot, ClientCameraStartReceipt, ClientCameraTick,
     ClientCharacterMotionCapabilities, ClientCharacterMotionFeedback, ClientCharacterMotionOutcome,
     ClientCharacterMotionRejection, ClientExitCause, ClientLifecycleState, ClientViewEvent,
     ClientWorldActivationCause, DynamicEntityEvent, PreciseJumpEvaluation,
     PreciseJumpEvaluationStatus, PreciseJumpTransactionFeedback, PreciseJumpTransactionOutcome,
-    PreciseJumpTransactionRejection,
+    PreciseJumpTransactionRejection, combat_feedback_message,
 };
+use holtburger_protocol::messages::{ChatMessageType, ChatMessageTypeId};
 use holtburger_world::stats::Vital;
 use serde::Serialize;
 
@@ -31,24 +33,100 @@ pub struct ClientVitalWire {
     pub maximum: u32,
 }
 
+/// Stable semantic channel identity retained after protocol-specific routing is interpreted.
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum ClientChatKind {
-    Speech,
-    Tell,
-    Channel,
-    System,
-    Emote,
+pub enum ClientChatChannelWire {
+    Fellowship,
+    Allegiance,
+    Vassals,
+    Patron,
+    Monarch,
+    CoVassals,
+    General,
+    Trade,
+    Lfg,
+    Roleplay,
+    Society,
+    Olthoi,
+    Unknown,
 }
 
-/// One already-interpreted chat line for the combined client buffer.
+impl From<ChatChannelKind> for ClientChatChannelWire {
+    fn from(value: ChatChannelKind) -> Self {
+        match value {
+            ChatChannelKind::Fellowship => Self::Fellowship,
+            ChatChannelKind::Allegiance => Self::Allegiance,
+            ChatChannelKind::Vassals => Self::Vassals,
+            ChatChannelKind::Patron => Self::Patron,
+            ChatChannelKind::Monarch => Self::Monarch,
+            ChatChannelKind::CoVassals => Self::CoVassals,
+            ChatChannelKind::General => Self::General,
+            ChatChannelKind::Trade => Self::Trade,
+            ChatChannelKind::Lfg => Self::Lfg,
+            ChatChannelKind::Roleplay => Self::Roleplay,
+            ChatChannelKind::Society => Self::Society,
+            ChatChannelKind::Olthoi => Self::Olthoi,
+            ChatChannelKind::Unknown => Self::Unknown,
+        }
+    }
+}
+
+/// Stable speaker identity retained after GUID ranges are interpreted by shared client logic.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClientChatSpeakerKindWire {
+    Player,
+    NonPlayer,
+    Unknown,
+}
+
+impl From<ChatSpeakerKind> for ClientChatSpeakerKindWire {
+    fn from(value: ChatSpeakerKind) -> Self {
+        match value {
+            ChatSpeakerKind::Player => Self::Player,
+            ChatSpeakerKind::NonPlayer => Self::NonPlayer,
+            ChatSpeakerKind::Unknown => Self::Unknown,
+        }
+    }
+}
+
+/// One already-interpreted chat line with variant-specific fields enforced by the wire shape.
 #[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ClientChatMessageWire {
-    pub kind: ClientChatKind,
-    pub sender: Option<String>,
-    pub channel: Option<String>,
-    pub message: String,
+#[serde(
+    tag = "kind",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
+pub enum ClientChatMessageWire {
+    Speech {
+        sender: String,
+        speaker_kind: ClientChatSpeakerKindWire,
+        message: String,
+    },
+    Tell {
+        sender: String,
+        speaker_kind: ClientChatSpeakerKindWire,
+        message: String,
+    },
+    Channel {
+        channel: ClientChatChannelWire,
+        sender: String,
+        speaker_kind: ClientChatSpeakerKindWire,
+        message: String,
+    },
+    System {
+        message: String,
+    },
+    Combat {
+        message: String,
+        emphasized: bool,
+    },
+    Emote {
+        sender: String,
+        speaker_kind: ClientChatSpeakerKindWire,
+        message: String,
+    },
 }
 
 /// Renderer-safe lifecycle state. Core's broad state and protocol packet values stop here.
@@ -595,47 +673,54 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
                 vitals: project_vitals(&vitals),
             })
         }
-        ClientViewEvent::ServerMessage { message, .. } => {
-            Some(ClientHostEvent::ChatMessage(ClientChatMessageWire {
-                kind: ClientChatKind::System,
-                sender: None,
-                channel: None,
-                message,
-            }))
-        }
+        ClientViewEvent::ServerMessage { message, chat_type } => Some(
+            ClientHostEvent::ChatMessage(project_server_message(message, chat_type)),
+        ),
         ClientViewEvent::Chat {
-            sender, message, ..
-        } => Some(ClientHostEvent::ChatMessage(ClientChatMessageWire {
-            kind: ClientChatKind::Speech,
-            sender: Some(sender),
-            channel: None,
-            message,
-        })),
-        ClientViewEvent::Tell { sender, message } => {
-            Some(ClientHostEvent::ChatMessage(ClientChatMessageWire {
-                kind: ClientChatKind::Tell,
-                sender: Some(sender),
-                channel: None,
+            speaker, message, ..
+        } => {
+            let (sender, speaker_kind) = speaker.into_name_and_kind();
+            Some(ClientHostEvent::ChatMessage(
+                ClientChatMessageWire::Speech {
+                    sender,
+                    speaker_kind: speaker_kind.into(),
+                    message,
+                },
+            ))
+        }
+        ClientViewEvent::Tell { speaker, message } => {
+            let (sender, speaker_kind) = speaker.into_name_and_kind();
+            Some(ClientHostEvent::ChatMessage(ClientChatMessageWire::Tell {
+                sender,
+                speaker_kind: speaker_kind.into(),
                 message,
             }))
         }
         ClientViewEvent::ChannelMessage {
             channel,
-            sender,
+            speaker,
             message,
-        } => Some(ClientHostEvent::ChatMessage(ClientChatMessageWire {
-            kind: ClientChatKind::Channel,
-            sender: Some(sender),
-            channel: Some(format!("{:?}", channel.kind)),
-            message,
-        })),
-        ClientViewEvent::Emote { sender, text } | ClientViewEvent::SoulEmote { sender, text } => {
-            Some(ClientHostEvent::ChatMessage(ClientChatMessageWire {
-                kind: ClientChatKind::Emote,
-                sender: Some(sender),
-                channel: None,
+        } => {
+            let (sender, speaker_kind) = speaker.into_name_and_kind();
+            Some(ClientHostEvent::ChatMessage(
+                ClientChatMessageWire::Channel {
+                    channel: channel.kind.into(),
+                    sender,
+                    speaker_kind: speaker_kind.into(),
+                    message,
+                },
+            ))
+        }
+        ClientViewEvent::Emote { speaker, text } | ClientViewEvent::SoulEmote { speaker, text } => {
+            let (sender, speaker_kind) = speaker.into_name_and_kind();
+            Some(ClientHostEvent::ChatMessage(ClientChatMessageWire::Emote {
+                sender,
+                speaker_kind: speaker_kind.into(),
                 message: text,
             }))
+        }
+        ClientViewEvent::CombatFeedback(feedback) => {
+            project_combat_feedback(feedback).map(ClientHostEvent::ChatMessage)
         }
         ClientViewEvent::DynamicEntity(event) => Some(ClientHostEvent::DynamicEntity(event)),
         ClientViewEvent::Camera(tick) => Some(ClientHostEvent::Camera(tick)),
@@ -651,6 +736,29 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
         )),
         _ => None,
     }
+}
+
+fn project_server_message(message: String, chat_type: ChatMessageTypeId) -> ClientChatMessageWire {
+    match chat_type.known() {
+        Some(ChatMessageType::Combat)
+        | Some(ChatMessageType::CombatEnemy)
+        | Some(ChatMessageType::CombatSelf) => ClientChatMessageWire::Combat {
+            message,
+            emphasized: false,
+        },
+        _ => ClientChatMessageWire::System { message },
+    }
+}
+
+/// Projects shared player-facing combat feedback; attack lifecycle edges remain diagnostics only.
+fn project_combat_feedback(feedback: CombatFeedback) -> Option<ClientChatMessageWire> {
+    combat_feedback_message(&feedback).map(|message| {
+        let (message, emphasized) = message.into_text_and_emphasis();
+        ClientChatMessageWire::Combat {
+            message,
+            emphasized,
+        }
+    })
 }
 
 fn project_vitals(vitals: &HashMap<VitalType, Vital>) -> Vec<ClientVitalWire> {
@@ -680,4 +788,89 @@ pub fn client_exit_requested(
         cause: cause.into(),
         diagnostic: diagnostic.into(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use holtburger_common::properties::DamageType;
+    use holtburger_core::client::types::ChatSpeaker;
+    use holtburger_protocol::messages::ChatMessageType;
+    use holtburger_protocol::messages::combat::AttackConditions;
+
+    #[test]
+    fn non_player_speech_identity_survives_host_projection() {
+        let projected = project_client_event(ClientViewEvent::Chat {
+            speaker: ChatSpeaker::from_guid("Drudge".to_string(), Guid(0x7000_0001)),
+            message: "Grrr.".to_string(),
+            chat_type: ChatMessageType::Speech.into(),
+        });
+
+        let Some(ClientHostEvent::ChatMessage(ClientChatMessageWire::Speech {
+            sender,
+            speaker_kind,
+            message,
+        })) = projected
+        else {
+            panic!("speech should project to the chat contract");
+        };
+        assert_eq!(sender, "Drudge");
+        assert!(matches!(speaker_kind, ClientChatSpeakerKindWire::NonPlayer));
+        assert_eq!(message, "Grrr.");
+    }
+
+    #[test]
+    fn combat_typed_server_message_remains_filterable_combat() {
+        let projected = project_client_event(ClientViewEvent::ServerMessage {
+            message: "You enter combat.".to_string(),
+            chat_type: ChatMessageType::Combat.into(),
+        });
+
+        let Some(ClientHostEvent::ChatMessage(ClientChatMessageWire::Combat {
+            message,
+            emphasized,
+        })) = projected
+        else {
+            panic!("combat-typed server text should remain combat");
+        };
+        assert_eq!(message, "You enter combat.");
+        assert!(!emphasized);
+    }
+
+    #[test]
+    fn combat_damage_projects_as_a_typed_chat_line() {
+        let projected = project_client_event(ClientViewEvent::CombatFeedback(
+            CombatFeedback::AttackerNotification {
+                defender_name: "Drudge".to_string(),
+                damage_type: DamageType::SLASH,
+                health_percent: 0.25,
+                damage: 37,
+                critical_hit: true,
+                attack_conditions: AttackConditions::RECKLESSNESS | AttackConditions::SNEAK_ATTACK,
+            },
+        ));
+
+        let Some(ClientHostEvent::ChatMessage(ClientChatMessageWire::Combat {
+            message,
+            emphasized,
+        })) = projected
+        else {
+            panic!("combat damage should project to the chat contract");
+        };
+        assert_eq!(
+            message,
+            "You hit Drudge for 37 slashing damage. Critical hit. [Recklessness, Sneak Attack]"
+        );
+        assert!(emphasized);
+    }
+
+    #[test]
+    fn attack_lifecycle_edges_remain_diagnostic_only() {
+        assert!(
+            project_client_event(ClientViewEvent::CombatFeedback(
+                CombatFeedback::AttackCommenced
+            ))
+            .is_none()
+        );
+    }
 }

@@ -251,7 +251,7 @@ describe("ClientLifecycleSession", () => {
 		transport.emit("client-chat-message", {
 			kind: "speech",
 			sender: "Mira",
-			channel: null,
+			speakerKind: "player",
 			message: "Hello",
 		});
 		transport.emit("client-presentation-discontinuity", {

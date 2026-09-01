@@ -1,12 +1,15 @@
 <script lang="ts">
 	import { tick } from "svelte";
-	import type { ClientChatMessage } from "./client-host-contract";
 	import ClientHudIcon from "./ClientHudIcon.svelte";
-
-	export interface ClientChatLine extends ClientChatMessage {
-		readonly id: number;
-		readonly receivedAt: Date;
-	}
+	import {
+		CLIENT_CHAT_FILTER_TAGS,
+		clientChatChannelLabel,
+		clientChatFilterLabel,
+		clientChatFiltersAllow,
+		clientChatTone,
+		type ClientChatFilterTag,
+		type ClientChatLine,
+	} from "./client-chat-policy";
 
 	interface Props {
 		readonly gameCanvas: HTMLCanvasElement | null;
@@ -16,17 +19,24 @@
 	}
 
 	const { gameCanvas, messages, onFocusChange, onSend }: Props = $props();
-	type ChatFocusMode = "inactive" | "input" | "buffer";
+	type ChatFocusMode = "inactive" | "input" | "buffer" | "filters";
 
 	let inputElement = $state<HTMLInputElement | null>(null);
 	let message = $state("");
 	let sending = $state(false);
 	let failure = $state<string | null>(null);
 	let bufferElement = $state<HTMLDivElement | null>(null);
+	let filtersElement = $state<HTMLDivElement | null>(null);
 	let focusMode = $state<ChatFocusMode>("inactive");
+	let enabledTags = $state<readonly ClientChatFilterTag[]>([
+		...CLIENT_CHAT_FILTER_TAGS,
+	]);
+	const visibleMessages = $derived(
+		messages.filter((line) => clientChatFiltersAllow(enabledTags, line)),
+	);
 
 	$effect(() => {
-		messages;
+		visibleMessages;
 		void tick().then(() => {
 			if (bufferElement) bufferElement.scrollTop = bufferElement.scrollHeight;
 		});
@@ -87,9 +97,21 @@
 			transitionFocus("input");
 		} else if (event.relatedTarget === bufferElement) {
 			transitionFocus("buffer");
+		} else if (
+			event.relatedTarget instanceof Node &&
+			filtersElement?.contains(event.relatedTarget)
+		) {
+			transitionFocus("filters");
 		} else {
 			transitionFocus("inactive");
 		}
+	}
+
+	function toggleTag(tag: ClientChatFilterTag): void {
+		const disabling = enabledTags.includes(tag);
+		enabledTags = CLIENT_CHAT_FILTER_TAGS.filter((candidate) =>
+			candidate === tag ? !disabling : enabledTags.includes(candidate),
+		);
 	}
 
 	function linePrefix(line: ClientChatLine): string {
@@ -97,8 +119,11 @@
 			hour: "2-digit",
 			minute: "2-digit",
 		});
-		const channel = line.channel ? ` [${line.channel}]` : "";
-		const sender = line.sender ? ` ${line.sender}` : "";
+		const channel =
+			line.kind === "channel"
+				? ` [${clientChatChannelLabel(line.channel)}]`
+				: "";
+		const sender = "sender" in line ? ` ${line.sender}` : "";
 		return `[${time}]${channel}${sender}`;
 	}
 </script>
@@ -112,18 +137,48 @@
 		tabindex="-1"
 		role="log"
 		aria-live="polite"
-		aria-label="Combined chat"
+		aria-label="Chat messages"
 		onfocus={() => transitionFocus("buffer")}
 		onblur={handleFocusOut}
 	>
-		{#each messages as line (line.id)}
+		{#each visibleMessages as line (line.id)}
+			{@const tone = clientChatTone(line)}
 			<p
-				class:chat-system={line.kind === "system"}
+				class:chat-tone-tell={tone === "tell"}
+				class:chat-tone-emote={tone === "emote"}
+				class:chat-tone-npc={tone === "npc"}
+				class:chat-tone-combat={tone === "combat"}
+				class:chat-tone-system={tone === "system"}
+				class:chat-tone-error={tone === "error"}
+				class:chat-tone-party={tone === "party"}
+				class:chat-tone-guild={tone === "guild"}
+				class:chat-tone-trade={tone === "trade"}
+				class:chat-tone-society={tone === "society"}
+				class:chat-emphasized={line.kind === "combat" && line.emphasized}
 				class:chat-emote={line.kind === "emote"}
 			>
 				<strong>{linePrefix(line)}:</strong>
 				<span class="chat-message">{line.message}</span>
 			</p>
+		{/each}
+	</div>
+	<div
+		bind:this={filtersElement}
+		class="chat-filters"
+		role="group"
+		aria-label="Message filters"
+	>
+		{#each CLIENT_CHAT_FILTER_TAGS as tag}
+			<button
+				type="button"
+				aria-pressed={enabledTags.includes(tag)}
+				class:active={enabledTags.includes(tag)}
+				onfocus={() => transitionFocus("filters")}
+				onblur={handleFocusOut}
+				onclick={() => toggleTag(tag)}
+			>
+				{clientChatFilterLabel(tag)}
+			</button>
 		{/each}
 	</div>
 	{#if failure}<div class="chat-failure" role="alert">{failure}</div>{/if}
@@ -160,12 +215,38 @@
 		display: grid;
 		box-sizing: border-box;
 		height: 100%;
-		grid-template-rows: minmax(0, 1fr) auto auto;
+		grid-template-rows: minmax(0, 1fr) auto auto auto;
 		color: white;
 		font: var(--ac-panel-font-size) / 1.25 var(--ac-font-ui);
 		pointer-events: none;
 		text-shadow: 0 1px 2px #000;
 		user-select: none;
+	}
+	.chat-filters {
+		display: flex;
+		gap: 2px;
+		padding: 0 3px 3px;
+		background: rgb(13 15 15 / 0.56);
+		pointer-events: auto;
+		user-select: auto;
+	}
+	.chat-filters button {
+		min-height: 22px;
+		padding: 2px 8px;
+		border: 1px solid rgb(230 230 220 / 0.22);
+		background: rgb(20 22 21 / 0.44);
+		color: rgb(235 238 231 / 0.7);
+		font: inherit;
+	}
+	.chat-filters button:hover,
+	.chat-filters button:focus-visible {
+		border-color: rgb(239 208 111 / 0.56);
+		outline: none;
+	}
+	.chat-filters button.active {
+		border-color: rgb(239 208 111 / 0.7);
+		background: rgb(87 67 25 / 0.56);
+		color: #f3dc8c;
 	}
 	.chat-focused {
 		pointer-events: auto;
@@ -213,16 +294,43 @@
 		white-space: pre-wrap;
 		overflow-wrap: anywhere;
 	}
+	.chat-emphasized .chat-message {
+		font-weight: 700;
+	}
 	p strong {
 		color: rgb(235 238 231 / 0.82);
 		font-weight: 700;
 	}
-	.chat-system {
-		color: #eadb9b;
+	.chat-tone-system {
+		color: #9fc9e9;
+	}
+	.chat-tone-tell {
+		color: #f09bea;
+	}
+	.chat-tone-emote,
+	.chat-tone-party {
+		color: #cfdcc1;
 	}
 	.chat-emote {
-		color: #cfdcc1;
 		font-style: italic;
+	}
+	.chat-tone-npc {
+		color: #f2bd7f;
+	}
+	.chat-tone-error {
+		color: #ff8177;
+	}
+	.chat-tone-combat {
+		color: #ff938b;
+	}
+	.chat-tone-guild {
+		color: #8edbe6;
+	}
+	.chat-tone-trade {
+		color: #f4d878;
+	}
+	.chat-tone-society {
+		color: #8dafff;
 	}
 	.chat-failure {
 		padding: 3px 7px;

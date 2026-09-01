@@ -1,8 +1,8 @@
 use super::{ClientRuntime, ClientWorldActivationState, types::*};
 use anyhow::Result;
-use holtburger_common::ConfirmationType;
 use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_common::sequence::is_newer_u16;
+use holtburger_common::{ConfirmationType, Guid};
 use holtburger_protocol::errors::{CharacterError, WeenieError};
 use holtburger_protocol::messages::*;
 use holtburger_protocol::traits::ProtocolUnpack;
@@ -314,7 +314,10 @@ impl ClientRuntime {
                 GameEvent::ViewContents(_data) => Ok(()),
                 GameEvent::Tell(data) => {
                     let _ = self.client_view_event_tx.send(ClientViewEvent::Tell {
-                        sender: data.sender_name.clone(),
+                        speaker: ChatSpeaker::from_guid(
+                            data.sender_name.clone(),
+                            Guid(data.sender_id),
+                        ),
                         message: data.message.clone(),
                     });
                     Ok(())
@@ -324,7 +327,7 @@ impl ClientRuntime {
                         .client_view_event_tx
                         .send(ClientViewEvent::ChannelMessage {
                             channel: ChatChannelInfo::legacy(data.channel),
-                            sender: data.sender_name.clone(),
+                            speaker: ChatSpeaker::unknown(data.sender_name.clone()),
                             message: data.message.clone(),
                         });
                     Ok(())
@@ -679,7 +682,7 @@ impl ClientRuntime {
                     data.sender_name.clone()
                 };
                 let _ = self.client_view_event_tx.send(ClientViewEvent::Chat {
-                    sender: sender.clone(),
+                    speaker: ChatSpeaker::from_guid(sender, Guid(data.sender)),
                     message: data.message.clone(),
                     chat_type: data.chat_type.into(),
                 });
@@ -687,7 +690,7 @@ impl ClientRuntime {
             }
             GameMessage::HearRangedSpeech(data) => {
                 let _ = self.client_view_event_tx.send(ClientViewEvent::Chat {
-                    sender: data.sender_name.clone(),
+                    speaker: ChatSpeaker::from_guid(data.sender_name.clone(), Guid(data.sender)),
                     message: data.message.clone(),
                     chat_type: data.chat_type.into(),
                 });
@@ -695,14 +698,14 @@ impl ClientRuntime {
             }
             GameMessage::EmoteText(data) => {
                 let _ = self.client_view_event_tx.send(ClientViewEvent::Emote {
-                    sender: data.sender_name.clone(),
+                    speaker: ChatSpeaker::from_guid(data.sender_name.clone(), Guid(data.sender)),
                     text: data.text.clone(),
                 });
                 Ok(())
             }
             GameMessage::SoulEmote(data) => {
                 let _ = self.client_view_event_tx.send(ClientViewEvent::SoulEmote {
-                    sender: data.sender_name.clone(),
+                    speaker: ChatSpeaker::from_guid(data.sender_name.clone(), Guid(data.sender)),
                     text: data.text.clone(),
                 });
                 Ok(())
@@ -713,6 +716,7 @@ impl ClientRuntime {
                     sender_name,
                     message,
                     chat_type,
+                    sender_id,
                     ..
                 } = &data.payload
                 {
@@ -722,7 +726,7 @@ impl ClientRuntime {
                         .client_view_event_tx
                         .send(ClientViewEvent::ChannelMessage {
                             channel: channel_info,
-                            sender: sender_name.clone(),
+                            speaker: ChatSpeaker::from_guid(sender_name.clone(), Guid(*sender_id)),
                             message: message.clone(),
                         });
                 }
@@ -1029,8 +1033,10 @@ mod tests {
 
         let mut saw_soul_emote = false;
         while let Ok(event) = events.try_recv() {
-            if let ClientViewEvent::SoulEmote { sender, text } = event {
-                assert_eq!(sender, "Fellow");
+            if let ClientViewEvent::SoulEmote { speaker, text } = event {
+                let (name, kind) = speaker.into_name_and_kind();
+                assert_eq!(name, "Fellow");
+                assert_eq!(kind, ChatSpeakerKind::Player);
                 assert_eq!(text, "wave.");
                 saw_soul_emote = true;
                 break;
@@ -1055,8 +1061,10 @@ mod tests {
 
         let mut saw_soul_emote = false;
         while let Ok(event) = events.try_recv() {
-            if let ClientViewEvent::SoulEmote { sender, text } = event {
-                assert_eq!(sender, "Fellow");
+            if let ClientViewEvent::SoulEmote { speaker, text } = event {
+                let (name, kind) = speaker.into_name_and_kind();
+                assert_eq!(name, "Fellow");
+                assert_eq!(kind, ChatSpeakerKind::Player);
                 assert_eq!(text, "*mystery*");
                 saw_soul_emote = true;
                 break;

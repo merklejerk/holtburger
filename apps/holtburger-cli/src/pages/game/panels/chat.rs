@@ -5,12 +5,11 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem};
 
 use crossterm::event::{KeyCode, KeyEvent};
-use holtburger_common::properties::DamageType;
 use holtburger_core::client::types::{
     ChatChannelInfo, ChatChannelKind, ChatChannelSource, CombatFeedback,
 };
+use holtburger_core::combat_feedback_message;
 use holtburger_protocol::errors::WeenieError;
-use holtburger_protocol::messages::combat::{AttackConditions, DamageLocation};
 use holtburger_protocol::messages::{ChatMessageType, ChatMessageTypeId};
 use holtburger_world::FellowshipActivity;
 use std::fs::File;
@@ -122,24 +121,24 @@ impl ChatState {
                 self.log(chat_message_tags(*chat_type), message.clone());
             }
             ClientViewEvent::Chat {
-                sender,
+                speaker,
                 message,
                 chat_type,
             } => {
                 self.log(
                     chat_message_tags(*chat_type),
-                    format!("{}: {}", sender, message),
+                    format!("{}: {}", speaker.name(), message),
                 );
             }
             ClientViewEvent::ChannelMessage {
                 channel,
-                sender,
+                speaker,
                 message,
             } => {
                 self.log_channel(
                     *channel,
                     channel_tags(*channel),
-                    format_channel_message(*channel, sender, message, local_player_name),
+                    format_channel_message(*channel, speaker.name(), message, local_player_name),
                 );
             }
             ClientViewEvent::FellowshipActivity { activity } => {
@@ -148,18 +147,24 @@ impl ChatState {
                     format_fellowship_activity(activity),
                 );
             }
-            ClientViewEvent::Tell { sender, message } => {
-                self.last_incoming_tell_sender = Some(sender.clone());
+            ClientViewEvent::Tell { speaker, message } => {
+                self.last_incoming_tell_sender = Some(speaker.name().to_string());
                 self.log(
                     ChatMessageTags::tell(),
-                    format!("{} tells you: {}", sender, message),
+                    format!("{} tells you: {}", speaker.name(), message),
                 );
             }
-            ClientViewEvent::Emote { sender, text } => {
-                self.log(ChatMessageTags::emote(), format!("{} {}", sender, text));
+            ClientViewEvent::Emote { speaker, text } => {
+                self.log(
+                    ChatMessageTags::emote(),
+                    format!("{} {}", speaker.name(), text),
+                );
             }
-            ClientViewEvent::SoulEmote { sender, text, .. } => {
-                self.log(ChatMessageTags::emote(), format!("{} {}", sender, text));
+            ClientViewEvent::SoulEmote { speaker, text, .. } => {
+                self.log(
+                    ChatMessageTags::emote(),
+                    format!("{} {}", speaker.name(), text),
+                );
             }
             ClientViewEvent::CombatFeedback(feedback) => {
                 self.log_combat_feedback(feedback);
@@ -236,6 +241,12 @@ impl ChatState {
     }
 
     fn log_combat_feedback(&mut self, feedback: &CombatFeedback) {
+        if let Some(message) = combat_feedback_message(feedback) {
+            let (text, _) = message.into_text_and_emphasis();
+            self.log(ChatMessageTags::info().combat(), text);
+            return;
+        }
+
         match feedback {
             CombatFeedback::AttackDone { error } => {
                 if *error == WeenieError::None {
@@ -247,71 +258,7 @@ impl ChatState {
             CombatFeedback::AttackCommenced => {
                 log::info!("Attack sequence started.");
             }
-            CombatFeedback::AttackerNotification {
-                defender_name,
-                damage_type,
-                health_percent,
-                damage,
-                critical_hit,
-                attack_conditions,
-            } => {
-                self.log(
-                    ChatMessageTags::info().combat(),
-                    format!(
-                        "You hit {} for {} {} damage ({}).{}{}",
-                        defender_name,
-                        damage,
-                        format_damage_type(*damage_type),
-                        format_percent(*health_percent),
-                        if *critical_hit { " Critical hit." } else { "" },
-                        format_attack_conditions_suffix(*attack_conditions),
-                    ),
-                );
-            }
-            CombatFeedback::DefenderNotification {
-                attacker_name,
-                damage_type,
-                health_percent,
-                damage,
-                damage_location,
-                critical_hit,
-                attack_conditions,
-            } => {
-                self.log(
-                    ChatMessageTags::info().combat(),
-                    format!(
-                        "{} hit you for {} {} damage to your {} ({}).{}{}",
-                        attacker_name,
-                        damage,
-                        format_damage_type(*damage_type),
-                        format_damage_location(*damage_location),
-                        format_percent(*health_percent),
-                        if *critical_hit { " Critical hit." } else { "" },
-                        format_attack_conditions_suffix(*attack_conditions),
-                    ),
-                );
-            }
-            CombatFeedback::EvasionAttackerNotification { defender_name } => {
-                self.log(
-                    ChatMessageTags::info().combat(),
-                    format!("{} evaded your attack.", defender_name),
-                );
-            }
-            CombatFeedback::EvasionDefenderNotification { attacker_name } => {
-                self.log(
-                    ChatMessageTags::info().combat(),
-                    format!("You evaded {}'s attack.", attacker_name),
-                );
-            }
-            CombatFeedback::VictimNotification { death_message } => {
-                self.log(ChatMessageTags::info().combat(), death_message.clone());
-            }
-            CombatFeedback::KillerNotification { death_message } => {
-                self.log(ChatMessageTags::info().combat(), death_message.clone());
-            }
-            CombatFeedback::PlayerKilled { death_message, .. } => {
-                self.log(ChatMessageTags::info().combat(), death_message.clone());
-            }
+            _ => unreachable!("player-facing combat feedback returned no message"),
         }
     }
 
@@ -566,42 +513,6 @@ fn format_fellowship_activity(activity: &FellowshipActivity) -> String {
     }
 }
 
-fn format_damage_type(damage_type: DamageType) -> String {
-    let names: Vec<_> = damage_type.iter_display_names().collect();
-    if names.is_empty() {
-        "unknown".to_string()
-    } else {
-        names.join("/").to_ascii_lowercase()
-    }
-}
-
-fn format_percent(value: f64) -> String {
-    format!("{:.1}%", value * 100.0)
-}
-
-fn format_damage_location(location: DamageLocation) -> &'static str {
-    match location {
-        DamageLocation::Head => "head",
-        DamageLocation::Chest => "chest",
-        DamageLocation::Abdomen => "abdomen",
-        DamageLocation::UpperArm => "upper arm",
-        DamageLocation::LowerArm => "lower arm",
-        DamageLocation::Hand => "hand",
-        DamageLocation::UpperLeg => "upper leg",
-        DamageLocation::LowerLeg => "lower leg",
-        DamageLocation::Foot => "foot",
-    }
-}
-
-fn format_attack_conditions_suffix(attack_conditions: AttackConditions) -> String {
-    let names: Vec<_> = attack_conditions.iter_display_names().collect();
-    if names.is_empty() {
-        String::new()
-    } else {
-        format!(" [{}]", names.join(", "))
-    }
-}
-
 fn chat_message_tags(chat_type: ChatMessageTypeId) -> ChatMessageTags {
     match chat_type.known() {
         Some(ChatMessageType::Broadcast)
@@ -756,6 +667,10 @@ pub fn render_chat_pane(f: &mut Frame, chat: &ChatState, is_focused: bool, area:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use holtburger_common::Guid;
+    use holtburger_common::properties::DamageType;
+    use holtburger_core::client::types::ChatSpeaker;
+    use holtburger_protocol::messages::combat::{AttackConditions, DamageLocation};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use std::cell::RefCell;
@@ -815,7 +730,7 @@ mod tests {
                 channel: ChatChannelInfo::legacy(
                     holtburger_protocol::messages::ChatChannel::Fellow.into(),
                 ),
-                sender: String::new(),
+                speaker: ChatSpeaker::unknown(String::new()),
                 message: "party check".to_string(),
             },
             Some("Player"),
@@ -842,7 +757,7 @@ mod tests {
                 channel: ChatChannelInfo::legacy(
                     holtburger_protocol::messages::ChatChannel::AllegianceBroadcast.into(),
                 ),
-                sender: "Bestie".to_string(),
+                speaker: ChatSpeaker::unknown("Bestie".to_string()),
                 message: "guild check".to_string(),
             },
             Some("Player"),
@@ -871,7 +786,7 @@ mod tests {
                     holtburger_protocol::messages::TurbineChatType::General.into(),
                     holtburger_protocol::messages::TurbineChatDispatchType::SendToRoomByName,
                 ),
-                sender: "Bestie".to_string(),
+                speaker: ChatSpeaker::from_guid("Bestie".to_string(), Guid(0x5000_0001)),
                 message: "world check".to_string(),
             },
             Some("Player"),
@@ -891,7 +806,7 @@ mod tests {
                 channel: ChatChannelInfo::legacy(
                     holtburger_protocol::messages::ChatChannel::Fellow.into(),
                 ),
-                sender: String::new(),
+                speaker: ChatSpeaker::unknown(String::new()),
                 message: "party check".to_string(),
             },
             None,
@@ -1008,7 +923,7 @@ mod tests {
 
         chat.handle_event(
             &holtburger_core::ClientViewEvent::SoulEmote {
-                sender: "Bestie".to_string(),
+                speaker: ChatSpeaker::from_guid("Bestie".to_string(), Guid(0x5000_0001)),
                 text: "waves.".to_string(),
             },
             Some("Player"),
@@ -1041,15 +956,10 @@ mod tests {
         let message = chat.messages.last().expect("combat feedback should log");
 
         assert!(message.chat_tags.contains(ChatMessageTags::COMBAT));
-        assert!(
-            message
-                .text
-                .contains("You hit Drudge for 37 slashing damage")
+        assert_eq!(
+            message.text,
+            "You hit Drudge for 37 slashing damage. Critical hit. [Recklessness, Sneak Attack]"
         );
-        assert!(message.text.contains("25.0%"));
-        assert!(message.text.contains("Critical hit."));
-        assert!(message.text.contains("Recklessness"));
-        assert!(message.text.contains("Sneak Attack"));
     }
 
     #[test]
@@ -1074,13 +984,10 @@ mod tests {
         let message = chat.messages.last().expect("combat feedback should log");
 
         assert!(message.chat_tags.contains(ChatMessageTags::COMBAT));
-        assert!(
-            message
-                .text
-                .contains("Banderling hit you for 18 fire damage to your chest")
+        assert_eq!(
+            message.text,
+            "Banderling hit you for 18 fire damage to your chest. [Overpower]"
         );
-        assert!(message.text.contains("12.5%"));
-        assert!(message.text.contains("Overpower"));
     }
 
     #[test]
@@ -1109,7 +1016,7 @@ mod tests {
 
         chat.handle_event(
             &holtburger_core::ClientViewEvent::Chat {
-                sender: "Bestie".to_string(),
+                speaker: ChatSpeaker::from_guid("Bestie".to_string(), Guid(0x5000_0001)),
                 message: "hello world".to_string(),
                 chat_type: holtburger_protocol::messages::ChatMessageType::Speech.into(),
             },

@@ -61,6 +61,86 @@ pub enum ChatChannelKind {
     Unknown,
 }
 
+/// Authoritative speaker category derived from the protocol sender GUID when available.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ChatSpeakerKind {
+    Player,
+    NonPlayer,
+    Unknown,
+}
+
+/// A chat speaker whose display name and known identity category travel together.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatSpeaker {
+    /// Server-authored display name, including any suffix.
+    name: String,
+    /// GUID-derived speaker category; legacy packets without a sender GUID remain unknown.
+    kind: ChatSpeakerKind,
+}
+
+impl ChatSpeaker {
+    pub fn from_guid(name: String, guid: Guid) -> Self {
+        let kind = if guid.is_null() {
+            ChatSpeakerKind::Unknown
+        } else if guid.is_player() {
+            ChatSpeakerKind::Player
+        } else if guid.is_static_object() || guid.is_dynamic_object() {
+            ChatSpeakerKind::NonPlayer
+        } else {
+            ChatSpeakerKind::Unknown
+        };
+        Self { name, kind }
+    }
+
+    pub fn unknown(name: String) -> Self {
+        Self {
+            name,
+            kind: ChatSpeakerKind::Unknown,
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn into_name_and_kind(self) -> (String, ChatSpeakerKind) {
+        (self.name, self.kind)
+    }
+}
+
+#[cfg(test)]
+mod chat_speaker_tests {
+    use super::*;
+
+    #[test]
+    fn speaker_kind_uses_authoritative_guid_ranges_without_guessing_unknown_ids() {
+        assert_eq!(
+            ChatSpeaker::from_guid("Player".to_string(), Guid(0x5000_0001)).kind,
+            ChatSpeakerKind::Player
+        );
+        assert_eq!(
+            ChatSpeaker::from_guid("Drudge".to_string(), Guid(0x7000_0001)).kind,
+            ChatSpeakerKind::NonPlayer
+        );
+        assert_eq!(
+            ChatSpeaker::from_guid("Merchant".to_string(), Guid(0x8000_0001)).kind,
+            ChatSpeakerKind::NonPlayer
+        );
+        assert_eq!(
+            ChatSpeaker::from_guid("Unknown".to_string(), Guid::NULL).kind,
+            ChatSpeakerKind::Unknown
+        );
+        assert_eq!(
+            ChatSpeaker::from_guid("Invalid".to_string(), Guid(1)).kind,
+            ChatSpeakerKind::Unknown
+        );
+        assert_eq!(
+            ChatSpeaker::from_guid("Reserved".to_string(), Guid(0x5000_0000)).kind,
+            ChatSpeakerKind::Unknown
+        );
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ChatChannelSource {
     Legacy {
@@ -579,17 +659,17 @@ pub enum ClientViewEvent {
         chat_type: ChatMessageTypeId,
     },
     Chat {
-        sender: String,
+        speaker: ChatSpeaker,
         message: String,
         chat_type: ChatMessageTypeId,
     },
     ChannelMessage {
         channel: ChatChannelInfo,
-        sender: String,
+        speaker: ChatSpeaker,
         message: String,
     },
     Tell {
-        sender: String,
+        speaker: ChatSpeaker,
         message: String,
     },
     WeenieError {
@@ -609,11 +689,11 @@ pub enum ClientViewEvent {
     },
     WorldNameUpdated(String),
     Emote {
-        sender: String,
+        speaker: ChatSpeaker,
         text: String,
     },
     SoulEmote {
-        sender: String,
+        speaker: ChatSpeaker,
         text: String,
     },
     PingResponse,

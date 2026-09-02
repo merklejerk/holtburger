@@ -1274,6 +1274,88 @@ consumer with an independent reference evaluator, use a deterministic runtime or
 and retain lower-level packing tests for precise fault localization rather than treating them as
 behavioral proof.
 
+## A Contract Depends on Its Implementation
+
+**Smell:** A shared configuration, schema, or domain contract imports a type from the concrete
+component that happens to consume it.
+
+**Signals:**
+
+- A policy or configuration module imports from a renderer, controller, handler, or feature entry
+  point solely to name a value's shape.
+- Reusing the contract pulls an implementation-oriented module into otherwise independent code.
+- Moving or replacing one consumer requires edits to a supposedly shared vocabulary.
+- Dependency cycles are avoided only because the import is erased at compile time.
+
+**Possible failure:** Ownership becomes inverted, implementation refactors churn unrelated contracts,
+and later runtime imports can turn a conceptual cycle into an actual initialization defect.
+
+**Questions:** Which layer owns the vocabulary independent of its current consumer? Is the imported
+type truly implementation-specific, or is it a misplaced domain contract? Would extracting it
+create a meaningful boundary or merely another indirection?
+
+**Counterexamples:** A component-local configuration used by exactly that component should remain
+colocated, and type-only imports can be a pragmatic choice when no broader ownership exists.
+
+**Possible responses:** Move the smallest shared vocabulary to a neutral owner, have both the
+contract and implementation depend on it, or keep the type local until a second independent
+consumer proves the boundary.
+
+## A Serialized Vocabulary Is Hand-Copied Across Boundaries
+
+**Smell:** Two languages, processes, services, or storage layers independently declare the same
+closed vocabulary without one generated artifact or compatibility check owning the relationship.
+
+**Signals:**
+
+- Adding an enum member requires matching edits in producer and consumer source trees.
+- Each side compiles independently even when serialized names, casing, or membership differ.
+- Unit tests prove local parsing or serialization but never exchange every supported member across
+  the real boundary.
+- Deployment order can expose a newer producer to an older consumer that rejects an otherwise valid
+  value.
+
+**Possible failure:** Valid messages fail only at runtime, unknown values silently select a fallback,
+or rolling deployments become order-dependent. Local exhaustiveness checks create confidence while
+the actual wire contract drifts.
+
+**Questions:** Which artifact owns the vocabulary? Can either side change independently? Is unknown
+input rejected, preserved, or degraded? What compatibility window must deployment support?
+
+**Counterexamples:** Independently implemented protocol stacks may deliberately duplicate a stable,
+externally governed specification; their independence can provide useful conformance evidence when
+cross-boundary fixtures test every member.
+
+**Possible responses:** Generate both declarations from one schema, generate one side from the
+other's published contract, add an exhaustive producer-consumer compatibility fixture, or version
+the vocabulary with an explicit unknown-value policy.
+
+## Meaning Is Encoded by Parallel Position
+
+**Smell:** Tests or production logic associate values by array position when each value already has
+a stable domain key.
+
+**Signals:**
+
+- Expected Boolean or scalar arrays correspond implicitly to a separately declared enum or item
+  list.
+- Inserting or reordering one category shifts the meaning of every later expected value.
+- Failure output reports an index rather than the entity, category, phase, or field that disagreed.
+- Reviewers must count positions to establish which behavior an assertion covers.
+
+**Possible failure:** Reordering creates false regressions, aligned mistakes pass together, and a
+new member receives the behavior intended for a neighbor without an informative failure.
+
+**Questions:** Is order itself part of the contract, or merely iteration mechanics? Does every
+position have a unique stable identity? Would keyed output make omissions visible?
+
+**Counterexamples:** Numeric vectors, matrices, protocol tuples, and ranked sequences legitimately
+derive meaning from position when order is the domain contract.
+
+**Possible responses:** Assert a record or map keyed by semantic identity, compare named cases, or
+represent intentional positional meaning with a domain type that documents and validates its
+layout.
+
 ## Adding Observations
 
 An observation belongs here when it has:

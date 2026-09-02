@@ -200,7 +200,12 @@ function entity(input: {
 				soundTableDid: null,
 			},
 			objectScale: 1,
-			radar: { behavior: null, blipColor: "Red", obviousRange: null },
+			radar: {
+				behavior: null,
+				blipColor: "Red",
+				category: input.entityClass,
+				obviousRange: null,
+			},
 		},
 	};
 }

@@ -39,7 +39,7 @@
 	import { MapRenderer } from "../lib/game/map/map-renderer";
 	import { selectMapBlips } from "../lib/game/map/map-blips";
 	import {
-		MAP_BLIP_COLORS,
+		MAP_BLIP_FILL_COLORS,
 		MAP_BLIP_RADIUS_PIXELS,
 	} from "../lib/game/map/map-appearance";
 	import {
@@ -246,13 +246,13 @@
 			const x = ((blip.clipX + 1) / 2) * size;
 			const y = ((1 - blip.clipY) / 2) * size;
 			hitTargets.push({ name: blip.name, x, y });
-			if (blip.appearance.kind === "controlled") {
+			if (blip.appearance.category === "controlled") {
 				drawControlledArrow(context, x, y, blip.appearance.headingRadians);
 				continue;
 			}
 			context.beginPath();
 			context.arc(x, y, MAP_BLIP_RADIUS_PIXELS, 0, Math.PI * 2);
-			context.fillStyle = MAP_BLIP_COLORS[blip.appearance.color];
+			context.fillStyle = MAP_BLIP_FILL_COLORS[blip.appearance.category];
 			context.fill();
 			context.lineWidth = 1;
 			context.strokeStyle = "rgba(0, 0, 0, 0.65)";
@@ -278,7 +278,7 @@
 		context.lineTo(0, CONTROLLED_ARROW_LENGTH / 4);
 		context.lineTo(-CONTROLLED_ARROW_HALF_WIDTH, CONTROLLED_ARROW_LENGTH / 2);
 		context.closePath();
-		context.fillStyle = "rgb(150 220 150 / 0.95)";
+		context.fillStyle = MAP_BLIP_FILL_COLORS.controlled;
 		context.fill();
 		context.lineWidth = 1;
 		context.strokeStyle = "rgba(0, 0, 0, 0.7)";

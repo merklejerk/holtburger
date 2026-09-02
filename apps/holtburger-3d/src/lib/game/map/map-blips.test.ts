@@ -11,8 +11,10 @@ const LANDBLOCK = "0x0101ffff";
 
 function entity(
 	overrides: {
+		readonly guid?: number;
 		readonly localX?: number;
 		readonly localZ?: number;
+		readonly mapCategory?: DynamicEntityView["presentation"]["radar"]["category"];
 		readonly behavior?:
 			"ShowNever" | "ShowMovement" | "ShowAttacking" | "ShowAlways" | null;
 		readonly hidden?: boolean;
@@ -28,10 +30,12 @@ function entity(
 			localTransform: transform,
 		} as ScenePlacement,
 		view: {
-			identity: { guid: 1, wcid: 42 },
+			identity: { guid: overrides.guid ?? 1, wcid: 42 },
 			display: { name: "Drudge", level: null },
 			presentation: {
+				entityClass: "other",
 				radar: {
+					category: overrides.mapCategory ?? "mob",
 					behavior:
 						overrides.behavior === undefined
 							? "ShowAlways"
@@ -73,7 +77,27 @@ describe("selectMapBlips", () => {
 		expect(blips).toHaveLength(1);
 		expect(blips[0]?.clipX).toBeCloseTo(1);
 		expect(blips[0]?.clipY).toBeCloseTo(1);
-		expect(blips[0]?.appearance).toEqual({ kind: "radar", color: "Red" });
+		expect(blips[0]?.appearance).toEqual({ category: "mob" });
+	});
+
+	it("distinguishes semantic categories that share one authored radar color", () => {
+		const blips = selectMapBlips(
+			[
+				entity({ guid: 1, mapCategory: "player" }),
+				entity({ guid: 2, mapCategory: "npc" }),
+				entity({ guid: 3, mapCategory: "lifestone" }),
+			],
+			view(),
+			256,
+			256,
+			null,
+		);
+
+		expect(blips.map((blip) => blip.appearance)).toEqual([
+			{ category: "player" },
+			{ category: "npc" },
+			{ category: "lifestone" },
+		]);
 	});
 
 	it("marks the controlled entity with its screen-relative heading", () => {
@@ -83,13 +107,13 @@ describe("selectMapBlips", () => {
 
 		expect(blips).toHaveLength(1);
 		expect(blips[0]).toMatchObject({
-			appearance: { kind: "controlled" },
+			appearance: { category: "controlled" },
 			guid: 1,
 			name: "Drudge",
 		});
 		const appearance = blips[0]?.appearance;
-		expect(appearance?.kind).toBe("controlled");
-		if (appearance?.kind === "controlled") {
+		expect(appearance?.category).toBe("controlled");
+		if (appearance?.category === "controlled") {
 			expect(appearance.headingRadians).toBeCloseTo(0);
 		}
 	});

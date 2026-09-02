@@ -1020,6 +1020,10 @@ fn template_definition_input(
     appearance: EntityAppearance,
     placement: EntityPlacement<DynamicEntityInitialState>,
 ) -> Result<DynamicEntityDefinitionInput, ExplorerEntityDriverError> {
+    let item_type = template
+        .appearance
+        .item_type
+        .map(|value| ItemType::from_bits_retain(value as u32));
     Ok(DynamicEntityDefinitionInput {
         identity: DynamicEntityIdentity {
             guid,
@@ -1052,15 +1056,12 @@ fn template_definition_input(
         rotation_speed: optional_f32(template.wcid, "rotation speed", template.rotation_speed)?,
         radar: holtburger_core::DynamicEntityRadarFacts::from_authored(
             format_args!("WCID {}", template.wcid),
-            template.radar_blip_color,
-            holtburger_core::explorer_radar_blip_color(
+            holtburger_core::explorer_dynamic_entity_map_semantics(
                 weenie_type,
-                template
-                    .appearance
-                    .item_type
-                    .map(|value| ItemType::from_bits_retain(value as u32)),
+                item_type,
                 template.attackable,
             ),
+            template.radar_blip_color,
             template.radar_behavior,
             template.obvious_radar_range,
         ),
@@ -1202,6 +1203,24 @@ mod tests {
                 None,
             ),
             DynamicEntityPresentationClass::Portal
+        );
+        assert_eq!(
+            holtburger_core::explorer_dynamic_entity_map_semantics(
+                WeenieType::LifeStone,
+                None,
+                None,
+            )
+            .category,
+            holtburger_core::DynamicEntityMapBlipCategory::Lifestone
+        );
+        assert_eq!(
+            holtburger_core::explorer_dynamic_entity_map_semantics(
+                WeenieType::Generic,
+                Some(ItemType::LIFE_STONE),
+                None,
+            )
+            .category,
+            holtburger_core::DynamicEntityMapBlipCategory::Lifestone
         );
     }
 

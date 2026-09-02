@@ -270,23 +270,26 @@ export const SHARED_FRONTEND_TUNING = {
 		},
 		blips: {
 			/**
-			 * Marker fill per effective `RadarColor`.
+			 * Marker fill per semantic entity category.
 			 *
-			 * Presentation, not protocol: retail's palette is a client asset, and the map owns its
-			 * styling so a client shell can restyle markers without touching map semantics.
+			 * Presentation, not protocol: the producer resolves map category once, while the map owns
+			 * its styling so a client shell can restyle markers without touching entity semantics.
 			 */
-			colorsByRadarColor: {
-				Default: hexRgb("#d8d8e0"),
-				Blue: hexRgb("#5b8dd6"),
-				Gold: hexRgb("#d6b23f"),
-				White: hexRgb("#f0f0f2"),
-				Purple: hexRgb("#9b6dd6"),
-				Red: hexRgb("#d24b45"),
-				Pink: hexRgb("#dd7fb0"),
-				Green: hexRgb("#4fb256"),
-				Yellow: hexRgb("#e2d24a"),
-				Cyan: hexRgb("#4fc4cc"),
-				BrightGreen: hexRgb("#6fe86f"),
+			fillColors: {
+				/** Other connected players. */
+				player: hexRgba("#38d64fff"),
+				/** Non-player characters and service providers. */
+				npc: hexRgba("#d6b23fff"),
+				/** Hostile and attackable creatures. */
+				mob: hexRgba("#d24b45ff"),
+				/** Portal objects. */
+				portal: hexRgba("#9b6dd6ff"),
+				/** Lifestones and allegiance bindstones. */
+				lifestone: hexRgba("#4fc4ccff"),
+				/** Uncategorized dynamic presentations. */
+				other: hexRgba("#d8d8e0ff"),
+				/** The locally driven entity's directional marker. */
+				controlled: hexRgba("#bce8aeff"),
 			} as const,
 			/** Marker radius in canvas pixels, sized to stay legible without hiding the ground. */
 			radiusPixels: 3.5,

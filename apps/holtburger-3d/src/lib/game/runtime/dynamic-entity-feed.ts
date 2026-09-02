@@ -4,6 +4,7 @@ import {
 	validateHostPlacedPathShape,
 } from "../motion/host-placed-path";
 import { DYNAMIC_ENTITY_PRESENTATION_CLASSES } from "../dynamic-entity-presentation-class";
+import { DYNAMIC_ENTITY_MAP_BLIP_CATEGORIES } from "../map/map-blip-category";
 
 const finiteNumber = z.number().finite();
 const nonNegativeInteger = z.number().int().nonnegative();
@@ -190,8 +191,10 @@ const dynamicEntityViewSchema = z.object({
 		}),
 		appearance: appearanceSchema,
 		objectScale: finiteNumber.positive(),
-		/** Producer-resolved retail radar presentation facts. */
+		/** Producer-resolved overhead-map visibility, authored color, and semantic category facts. */
 		radar: z.object({
+			/** Producer-resolved semantic marker category, independent from authored color. */
+			category: z.enum(DYNAMIC_ENTITY_MAP_BLIP_CATEGORIES),
 			blipColor: z.enum([
 				"Default",
 				"Blue",

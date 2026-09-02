@@ -77,7 +77,7 @@ export const MAP_FLOOR_DEPTH_SPAN = MAP_TUNING.interior.depthSpanMeters;
 export const MAP_TRANSITION_ACCENT_THICKNESS =
 	MAP_TUNING.interior.transitionAccentThicknessMeters;
 
-export const MAP_BLIP_COLORS = MAP_TUNING.blips.colorsByRadarColor;
+export const MAP_BLIP_FILL_COLORS = MAP_TUNING.blips.fillColors;
 export const MAP_BLIP_RADIUS_PIXELS = MAP_TUNING.blips.radiusPixels;
 
 export const MAP_DEFAULT_VIEW_DIAMETERS =

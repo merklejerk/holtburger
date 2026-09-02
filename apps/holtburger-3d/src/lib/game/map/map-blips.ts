@@ -1,6 +1,7 @@
 import { createLandblockWorldOrigin } from "../landblocks";
 import type { DynamicEntityView } from "../runtime/dynamic-entity-feed";
 import type { ScenePlacement } from "../scene";
+import type { DynamicEntityMapBlipCategory } from "./map-blip-category";
 import {
 	type MapViewParameters,
 	computeMapWorldToClip,
@@ -37,16 +38,14 @@ export interface MapBlip {
 	/** Marker treatment, including the controlled entity's screen-relative facing. */
 	readonly appearance:
 		| {
-				/** Selects the directional marker reserved for the user-driven entity. */
-				readonly kind: "controlled";
+				/** Selects the directional marker and its frontend-authored color. */
+				readonly category: "controlled";
 				/** Facing relative to the map anchor, clockwise from screen-up. */
 				readonly headingRadians: number;
 		  }
 		| {
-				/** Selects the ordinary circular marker styled by radar colour. */
-				readonly kind: "radar";
-				/** Effective producer-resolved radar colour. */
-				readonly color: DynamicEntityView["presentation"]["radar"]["blipColor"];
+				/** Producer-resolved class selecting an ordinary circular marker's color. */
+				readonly category: DynamicEntityMapBlipCategory;
 		  };
 }
 
@@ -100,14 +99,21 @@ export function selectMapBlips(
 		);
 		if (Math.abs(clipX) > 1 || Math.abs(clipY) > 1) continue;
 		blips.push({
+			// RETAIL DIVERGENCE: retail selects marker fill from the effective RadarColor
+			// (acclient.c:252944-253079). We use the producer-resolved semantic category so players,
+			// NPCs, mobs, portals, and lifestones retain stable frontend-tunable identities instead
+			// of inheriting an arbitrary authored palette entry. Restoring retail would make members
+			// of one class vary and can collapse unrelated classes onto one color. The shipped-catalog
+			// census found 8,739 of 10,883 radar-visible templates use semantic fallback colors; the
+			// remaining 2,144 explicitly authored colors are the affected population.
 			appearance: controlled
 				? {
-						kind: "controlled",
+						category: "controlled",
 						headingRadians:
 							mapHeadingFromSceneTransform(placement.localTransform) -
 							view.anchor.headingRadians,
 					}
-				: { kind: "radar", color: entity.presentation.radar.blipColor },
+				: { category: entity.presentation.radar.category },
 			clipX,
 			clipY,
 			guid: entity.identity.guid,

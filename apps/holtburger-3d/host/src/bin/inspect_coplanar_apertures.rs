@@ -15,6 +15,7 @@ use holtburger_3d_host::cell_struct_projection::{
     CellStructProjection, CellStructProjectionContext, project_cell_struct,
 };
 use holtburger_3d_host::discover_content_runtime;
+use holtburger_3d_host::env_cell_source::paired_exterior_portal_polygon_ids_by_cell;
 use holtburger_3d_host::gfx_obj_geometry::build_gfx_obj_portal_apertures;
 use holtburger_3d_host::interior_seam::{
     IndoorSeamClassification, IndoorSeamEvidence, classify_indoor_seam,
@@ -104,6 +105,7 @@ fn project_cells(
     interior: &LandblockInteriorSystemAsset,
 ) -> Result<BTreeMap<u32, CellStructProjection>> {
     let mut projections = BTreeMap::new();
+    let excluded_shell_polygon_ids_by_cell = paired_exterior_portal_polygon_ids_by_cell(interior);
     for cell in &interior.cells {
         let environment = interior
             .environments
@@ -123,6 +125,10 @@ fn project_cells(
                     environment.id, cell.structure.local_selector
                 )
             })?;
+        let excluded_shell_polygon_ids = excluded_shell_polygon_ids_by_cell
+            .get(&cell.env_cell_id)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
         let projection = project_cell_struct(
             CellStructProjectionContext {
                 landblock_id: interior.landblock_id,
@@ -130,6 +136,7 @@ fn project_cells(
                 environment_id: environment.id,
                 cell_structure_id: cell.structure.local_selector,
                 surface_count: cell.surface_ids.len(),
+                excluded_shell_polygon_ids,
             },
             cell_struct,
         )?;

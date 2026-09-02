@@ -8,12 +8,14 @@ use crate::portal_geometry::{PORTAL_PLANE_EPSILON, PortalAperture, build_portal_
 
 /// Complete source identity needed to diagnose one EnvCell-selected CellStruct projection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CellStructProjectionContext {
+pub struct CellStructProjectionContext<'a> {
     pub landblock_id: u32,
     pub env_cell_id: u32,
     pub environment_id: u32,
     pub cell_structure_id: u32,
     pub surface_count: usize,
+    /// Portal polygons whose topology role replaces their ordinary visible shell role.
+    pub excluded_shell_polygon_ids: &'a [u16],
 }
 
 /// Renderer-neutral local geometry and containment facts selected for one EnvCell.
@@ -51,7 +53,7 @@ impl CellContainmentHull {
 
 /// Project all CellStruct render polygons, portal apertures, and containment planes.
 pub fn project_cell_struct(
-    context: CellStructProjectionContext,
+    context: CellStructProjectionContext<'_>,
     cell_struct: &CellStruct,
 ) -> Result<CellStructProjection> {
     ensure!(
@@ -119,11 +121,14 @@ pub fn project_cell_struct(
 }
 
 fn select_shell_side(
-    context: CellStructProjectionContext,
+    context: CellStructProjectionContext<'_>,
     polygon_id: u16,
     side_kind: PolygonSideKind,
     surface_index: i16,
 ) -> Result<bool> {
+    if context.excluded_shell_polygon_ids.contains(&polygon_id) {
+        return Ok(false);
+    }
     if surface_index < 0 {
         return Ok(false);
     }
@@ -178,7 +183,7 @@ fn normalized_plane(plane: Plane) -> Result<Plane> {
     })
 }
 
-fn source_label(context: CellStructProjectionContext) -> String {
+fn source_label(context: CellStructProjectionContext<'_>) -> String {
     format!(
         "landblock 0x{:08X} EnvCell 0x{:08X} Environment 0x{:08X} CellStruct 0x{:04X}",
         context.landblock_id,
@@ -234,6 +239,18 @@ mod tests {
     }
 
     #[test]
+    fn excluded_portal_remains_an_aperture_without_shell_geometry() {
+        let mut context = context(1);
+        context.excluded_shell_polygon_ids = &[8];
+
+        let projection = project_cell_struct(context, &triangle_cell_struct()).unwrap();
+
+        assert_eq!(projection.shell.triangles.len(), 1);
+        assert_eq!(projection.shell.triangles[0].polygon_id, 7);
+        assert!(!projection.apertures[0].has_render_surface);
+    }
+
+    #[test]
     fn compact_hull_matches_synthetic_full_positive_bsp_walk() {
         let bsp = internal(
             Plane {
@@ -283,13 +300,14 @@ mod tests {
         }
     }
 
-    fn context(surface_count: usize) -> CellStructProjectionContext {
+    fn context(surface_count: usize) -> CellStructProjectionContext<'static> {
         CellStructProjectionContext {
             landblock_id: 0x1234_ffff,
             env_cell_id: 0x1234_0100,
             environment_id: 0x0d00_0001,
             cell_structure_id: 0x11,
             surface_count,
+            excluded_shell_polygon_ids: &[],
         }
     }
 

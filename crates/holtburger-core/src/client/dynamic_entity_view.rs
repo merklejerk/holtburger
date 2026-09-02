@@ -105,8 +105,7 @@ pub fn project_client_dynamic_entity(
         physics: entity.physics.effective(),
         radar: crate::DynamicEntityRadarFacts::from_authored(
             format_args!("client entity 0x{:08X}", guid.0),
-            crate::semantic_dynamic_entity_map_semantics(entity.flags, entity.item_type()),
-            entity.radar_blip_color().map(|value| value as i32),
+            crate::semantic_dynamic_entity_map_blip_category(entity.flags, entity.item_type()),
             entity.radar_enum().map(|value| value as i32),
             entity.get_float_prop(PropertyFloat::ObviousRadarRange),
         ),
@@ -414,16 +413,17 @@ mod tests {
             DynamicEntityPresentationClass::Portal
         );
         assert_eq!(
-            crate::semantic_dynamic_entity_map_semantics(ObjectDescriptionFlag::LIFE_STONE, None,)
-                .category,
+            crate::semantic_dynamic_entity_map_blip_category(
+                ObjectDescriptionFlag::LIFE_STONE,
+                None
+            ),
             crate::DynamicEntityMapBlipCategory::Lifestone
         );
         assert_eq!(
-            crate::semantic_dynamic_entity_map_semantics(
+            crate::semantic_dynamic_entity_map_blip_category(
                 ObjectDescriptionFlag::empty(),
                 Some(ItemType::LIFE_STONE),
-            )
-            .category,
+            ),
             crate::DynamicEntityMapBlipCategory::Lifestone
         );
     }
@@ -566,12 +566,11 @@ mod tests {
                 physics,
                 radar: crate::DynamicEntityRadarFacts::from_authored(
                     "test explorer entity",
-                    crate::explorer_dynamic_entity_map_semantics(
+                    crate::explorer_dynamic_entity_map_blip_category(
                         WeenieType::Creature,
                         Some(ItemType::CREATURE),
                         Some(false),
                     ),
-                    None,
                     None,
                     None,
                 ),

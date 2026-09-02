@@ -215,7 +215,6 @@ function fixtureEntity(): DynamicEntityView {
 			},
 			objectScale: 2,
 			radar: {
-				blipColor: "Default",
 				behavior: null,
 				category: "other",
 				obviousRange: null,

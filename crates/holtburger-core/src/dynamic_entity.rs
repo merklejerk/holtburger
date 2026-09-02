@@ -9,7 +9,7 @@ use std::time::Instant;
 use anyhow::Context;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
-    ItemType, ObjectDescriptionFlag, PhysicsState, RadarBehavior, RadarColor, WeenieType,
+    ItemType, ObjectDescriptionFlag, PhysicsState, RadarBehavior, WeenieType,
 };
 use holtburger_common::{Guid, Placement, Quaternion, Vector3};
 use holtburger_content::{
@@ -64,15 +64,6 @@ pub enum DynamicEntityMapBlipCategory {
     Other,
 }
 
-/// Map category and semantic fallback color derived together from one authoritative snapshot.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DynamicEntityMapSemantics {
-    /// Semantic category consumed by frontend-authored marker styling.
-    pub category: DynamicEntityMapBlipCategory,
-    /// Effective radar color used only when content does not author a non-default value.
-    pub fallback_blip_color: RadarColor,
-}
-
 /// Stable game identity owned by either a client or Explorer registry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DynamicEntityIdentity {
@@ -125,8 +116,6 @@ pub struct DynamicEntityInitialState {
 pub struct DynamicEntityRadarFacts {
     /// Semantic marker category resolved independently from authored color.
     pub category: DynamicEntityMapBlipCategory,
-    /// Effective blip color after explicit property and semantic fallback resolution.
-    pub blip_color: holtburger_common::properties::RadarColor,
     /// Authored `PropertyInt::ShowableOnRadar` (133).
     pub behavior: Option<holtburger_common::properties::RadarBehavior>,
     /// Authored `PropertyFloat::ObviousRadarRange` (104) in metres.
@@ -134,34 +123,19 @@ pub struct DynamicEntityRadarFacts {
 }
 
 impl DynamicEntityRadarFacts {
-    /// Types raw authored radar properties and resolves the effective base blip color.
+    /// Types authored radar visibility properties for frontend consumption.
     ///
-    /// Radar facts are cosmetic map presentation, so each field degrades independently rather than
-    /// failing the entity: an unmappable value selects the producer's semantic fallback. Drops are
-    /// logged rather than swallowed, because they mean the source authored
-    /// something neither ACE's enums nor retail's blip table describe. The census over the shipped
-    /// ACE World catalog found no such value, so a warning here indicates genuinely novel content.
+    /// Radar facts are cosmetic map presentation, so unusable values are omitted rather than
+    /// failing the entity. Drops are logged because they indicate content outside the domains
+    /// described by ACE and retail.
     pub fn from_authored(
         context: impl std::fmt::Display,
-        semantics: DynamicEntityMapSemantics,
-        blip_color: Option<i32>,
+        category: DynamicEntityMapBlipCategory,
         behavior: Option<i32>,
         obvious_range: Option<f64>,
     ) -> Self {
         Self {
-            category: semantics.category,
-            blip_color: blip_color.map_or(semantics.fallback_blip_color, |value| {
-                let typed = u8::try_from(value).ok().and_then(RadarColor::from_repr);
-                if typed.is_none() {
-                    log::warn!(
-                        "{context} radar blip color {value} is outside RadarColor; using semantic fallback"
-                    );
-                }
-                // Retail treats the authored Default value exactly like an absent property and
-                // continues into its object-category checks (`acclient.c:252944-253021`).
-                typed.filter(|color| *color != RadarColor::Default)
-                    .unwrap_or(semantics.fallback_blip_color)
-            }),
+            category,
             behavior: behavior.and_then(|value| {
                 let typed = u8::try_from(value).ok().and_then(RadarBehavior::from_repr);
                 if typed.is_none() {
@@ -185,38 +159,17 @@ impl DynamicEntityRadarFacts {
     }
 }
 
-/// Selects our semantic fallback color from live entity classification facts.
-///
-/// RETAIL DIVERGENCE: retail's absent-color fallback makes portals purple, vendors yellow,
-/// attackable non-player creatures gold, and most remaining entities neutral
-/// (`acclient.c:253001-253079`). We instead follow the CLI's more informative presentation policy:
-/// players yellow, friendly creatures/vendors bright green, hostile creatures red, portals purple,
-/// lifestones blue, mana stones cyan, and recognized objects white. Restoring retail would erase the
-/// hostile/friendly distinction. This is client-only presentation that authored content cannot
-/// observe; the shipped-catalog census found 8,739 of 10,883 radar-visible templates rely on a
-/// fallback rather than an explicit `RadarBlipColor`.
-pub fn semantic_dynamic_entity_map_semantics(
+/// Classifies live entity facts once for overhead-map marker presentation.
+pub fn semantic_dynamic_entity_map_blip_category(
     flags: ObjectDescriptionFlag,
     item_type: Option<ItemType>,
-) -> DynamicEntityMapSemantics {
-    let category = semantic_dynamic_entity_map_blip_category(flags, item_type);
-    let fallback_blip_color = map_category_radar_color(category).unwrap_or_else(|| {
-        if item_type.is_some_and(|value| value.contains(ItemType::MANA_STONE)) {
-            RadarColor::Cyan
-        } else if flags.contains(ObjectDescriptionFlag::HEALER) {
-            RadarColor::Pink
-        } else if flags.intersects(ObjectDescriptionFlag::DOOR | ObjectDescriptionFlag::STUCK)
-            || item_type.is_some_and(|value| !value.is_empty())
-        {
-            RadarColor::White
-        } else {
-            RadarColor::Default
-        }
-    });
-    DynamicEntityMapSemantics {
-        category,
-        fallback_blip_color,
-    }
+) -> DynamicEntityMapBlipCategory {
+    let presentation_class = semantic_dynamic_entity_presentation_class(flags, item_type);
+    map_blip_category(
+        presentation_class,
+        flags.intersects(ObjectDescriptionFlag::LIFE_STONE | ObjectDescriptionFlag::BIND_STONE)
+            || item_type.is_some_and(|value| value.contains(ItemType::LIFE_STONE)),
+    )
 }
 
 /// Classifies live entity facts once for frontend presentation policy.
@@ -246,19 +199,6 @@ pub fn semantic_dynamic_entity_presentation_class(
         };
     }
     DynamicEntityPresentationClass::Other
-}
-
-/// Classifies live entity facts once for overhead-map marker presentation.
-fn semantic_dynamic_entity_map_blip_category(
-    flags: ObjectDescriptionFlag,
-    item_type: Option<ItemType>,
-) -> DynamicEntityMapBlipCategory {
-    let presentation_class = semantic_dynamic_entity_presentation_class(flags, item_type);
-    map_blip_category(
-        presentation_class,
-        flags.intersects(ObjectDescriptionFlag::LIFE_STONE | ObjectDescriptionFlag::BIND_STONE)
-            || item_type.is_some_and(|value| value.contains(ItemType::LIFE_STONE)),
-    )
 }
 
 /// Classifies the equivalent static facts available to Explorer.
@@ -300,7 +240,7 @@ pub fn explorer_dynamic_entity_presentation_class(
 }
 
 /// Classifies the equivalent static facts available to Explorer for overhead-map markers.
-fn explorer_dynamic_entity_map_blip_category(
+pub fn explorer_dynamic_entity_map_blip_category(
     weenie_type: WeenieType,
     item_type: Option<ItemType>,
     attackable: Option<bool>,
@@ -330,49 +270,6 @@ fn map_blip_category(
             DynamicEntityMapBlipCategory::Lifestone
         }
         DynamicEntityPresentationClass::Other => DynamicEntityMapBlipCategory::Other,
-    }
-}
-
-/// Returns the complete fallback for semantic categories that own one directly.
-fn map_category_radar_color(category: DynamicEntityMapBlipCategory) -> Option<RadarColor> {
-    match category {
-        DynamicEntityMapBlipCategory::Player => Some(RadarColor::Yellow),
-        DynamicEntityMapBlipCategory::Npc => Some(RadarColor::BrightGreen),
-        DynamicEntityMapBlipCategory::Mob => Some(RadarColor::Red),
-        DynamicEntityMapBlipCategory::Portal => Some(RadarColor::Purple),
-        DynamicEntityMapBlipCategory::Lifestone => Some(RadarColor::Blue),
-        DynamicEntityMapBlipCategory::Other => None,
-    }
-}
-
-/// Selects the same semantic fallback from the static facts available to Explorer.
-pub fn explorer_dynamic_entity_map_semantics(
-    weenie_type: WeenieType,
-    item_type: Option<ItemType>,
-    attackable: Option<bool>,
-) -> DynamicEntityMapSemantics {
-    let category = explorer_dynamic_entity_map_blip_category(weenie_type, item_type, attackable);
-    let fallback_blip_color =
-        map_category_radar_color(category).unwrap_or_else(|| match weenie_type {
-            WeenieType::ManaStone => RadarColor::Cyan,
-            WeenieType::Door => RadarColor::White,
-            WeenieType::Undef | WeenieType::Unknown31 => RadarColor::Default,
-            _ => {
-                let inferred = semantic_dynamic_entity_map_semantics(
-                    ObjectDescriptionFlag::empty(),
-                    item_type,
-                )
-                .fallback_blip_color;
-                if inferred == RadarColor::Default {
-                    RadarColor::White
-                } else {
-                    inferred
-                }
-            }
-        });
-    DynamicEntityMapSemantics {
-        category,
-        fallback_blip_color,
     }
 }
 
@@ -1555,189 +1452,126 @@ mod tests {
     fn authored_radar_facts_type_in_domain_values() {
         let facts = DynamicEntityRadarFacts::from_authored(
             "test",
-            map_semantics(DynamicEntityMapBlipCategory::Other, RadarColor::Purple),
-            Some(5),
+            DynamicEntityMapBlipCategory::Other,
             Some(2),
             Some(10.0),
         );
 
         assert_eq!(facts.category, DynamicEntityMapBlipCategory::Other);
-        assert_eq!(facts.blip_color, RadarColor::Red);
         assert_eq!(facts.behavior, Some(RadarBehavior::ShowMovement));
         assert_eq!(facts.obvious_range, Some(10.0));
     }
 
-    /// Radar facts are cosmetic, so each unusable field drops independently instead of failing the
-    /// entity. `0x0A` sits in the authored gap between `RadarColor::Cyan` and `BrightGreen`.
     #[test]
-    fn unusable_radar_values_drop_independently_without_failing_the_entity() {
+    fn unusable_radar_visibility_values_do_not_discard_the_category() {
         let facts = DynamicEntityRadarFacts::from_authored(
             "test",
-            map_semantics(DynamicEntityMapBlipCategory::Other, RadarColor::Default),
-            Some(0x0A),
+            DynamicEntityMapBlipCategory::Portal,
             Some(99),
             Some(f64::NAN),
         );
 
-        assert_eq!(facts, DynamicEntityRadarFacts::default());
-
-        let partial = DynamicEntityRadarFacts::from_authored(
-            "test",
-            map_semantics(DynamicEntityMapBlipCategory::Other, RadarColor::Purple),
-            Some(-1),
-            Some(4),
-            Some(-5.0),
-        );
-        assert_eq!(partial.blip_color, RadarColor::Purple);
-        assert_eq!(partial.behavior, Some(RadarBehavior::ShowAlways));
-        assert_eq!(partial.obvious_range, None);
-
-        let mut input = definition_input();
-        input.radar = DynamicEntityRadarFacts::from_authored(
-            "test",
-            map_semantics(DynamicEntityMapBlipCategory::Other, RadarColor::Default),
-            Some(0x0A),
-            None,
-            None,
-        );
-        assert!(DynamicEntityDefinition::prepare(input).is_ok());
+        assert_eq!(facts.category, DynamicEntityMapBlipCategory::Portal);
+        assert_eq!(facts.behavior, None);
+        assert_eq!(facts.obvious_range, None);
     }
 
     #[test]
-    fn absent_and_default_authored_colors_use_the_producer_semantic_fallback() {
-        for authored in [None, Some(RadarColor::Default as i32)] {
-            let facts = DynamicEntityRadarFacts::from_authored(
+    fn live_map_categories_are_independent_from_radar_color() {
+        let cases = [
+            (
+                "player",
+                ObjectDescriptionFlag::PLAYER,
+                Some(ItemType::CREATURE),
+                DynamicEntityMapBlipCategory::Player,
+            ),
+            (
+                "mob",
+                ObjectDescriptionFlag::ATTACKABLE,
+                Some(ItemType::CREATURE),
+                DynamicEntityMapBlipCategory::Mob,
+            ),
+            (
+                "npc",
+                ObjectDescriptionFlag::VENDOR,
+                Some(ItemType::CREATURE),
+                DynamicEntityMapBlipCategory::Npc,
+            ),
+            (
                 "portal",
-                map_semantics(DynamicEntityMapBlipCategory::Portal, RadarColor::Purple),
-                authored,
-                Some(RadarBehavior::ShowAlways as i32),
+                ObjectDescriptionFlag::PORTAL,
                 None,
-            );
+                DynamicEntityMapBlipCategory::Portal,
+            ),
+            (
+                "lifestone",
+                ObjectDescriptionFlag::LIFE_STONE,
+                None,
+                DynamicEntityMapBlipCategory::Lifestone,
+            ),
+            (
+                "other",
+                ObjectDescriptionFlag::empty(),
+                None,
+                DynamicEntityMapBlipCategory::Other,
+            ),
+        ];
 
-            assert_eq!(facts.blip_color, RadarColor::Purple);
+        for (name, flags, item_type, expected) in cases {
+            assert_eq!(
+                semantic_dynamic_entity_map_blip_category(flags, item_type),
+                expected,
+                "{name}"
+            );
         }
     }
 
     #[test]
-    fn semantic_radar_colors_distinguish_map_categories() {
-        assert_eq!(
-            semantic_dynamic_entity_map_semantics(
-                ObjectDescriptionFlag::PLAYER,
-                Some(ItemType::CREATURE)
-            )
-            .fallback_blip_color,
-            RadarColor::Yellow
-        );
-        assert_eq!(
-            semantic_dynamic_entity_map_semantics(
-                ObjectDescriptionFlag::ATTACKABLE,
-                Some(ItemType::CREATURE)
-            )
-            .fallback_blip_color,
-            RadarColor::Red
-        );
-        assert_eq!(
-            semantic_dynamic_entity_map_semantics(
-                ObjectDescriptionFlag::empty(),
-                Some(ItemType::CREATURE)
-            )
-            .fallback_blip_color,
-            RadarColor::BrightGreen
-        );
-        assert_eq!(
-            semantic_dynamic_entity_map_semantics(
-                ObjectDescriptionFlag::VENDOR,
-                Some(ItemType::CREATURE)
-            )
-            .fallback_blip_color,
-            RadarColor::BrightGreen
-        );
-        assert_eq!(
-            semantic_dynamic_entity_map_semantics(ObjectDescriptionFlag::PORTAL, None)
-                .fallback_blip_color,
-            RadarColor::Purple
-        );
-        assert_eq!(
-            semantic_dynamic_entity_map_semantics(ObjectDescriptionFlag::LIFE_STONE, None)
-                .fallback_blip_color,
-            RadarColor::Blue
-        );
-        assert_eq!(
-            semantic_dynamic_entity_map_semantics(
-                ObjectDescriptionFlag::empty(),
-                Some(ItemType::MANA_STONE)
-            )
-            .fallback_blip_color,
-            RadarColor::Cyan
-        );
-        assert_eq!(
-            semantic_dynamic_entity_map_semantics(ObjectDescriptionFlag::DOOR, None)
-                .fallback_blip_color,
-            RadarColor::White
-        );
-    }
-
-    #[test]
-    fn explorer_categories_use_the_semantic_color_policy() {
-        assert_eq!(
-            explorer_dynamic_entity_map_semantics(WeenieType::Portal, None, None)
-                .fallback_blip_color,
-            RadarColor::Purple
-        );
-        assert_eq!(
-            explorer_dynamic_entity_map_semantics(
+    fn explorer_map_categories_match_live_semantics() {
+        let cases = [
+            (
+                "portal",
+                WeenieType::Portal,
+                None,
+                None,
+                DynamicEntityMapBlipCategory::Portal,
+            ),
+            (
+                "mob",
                 WeenieType::Creature,
                 Some(ItemType::CREATURE),
-                Some(true)
-            )
-            .fallback_blip_color,
-            RadarColor::Red
-        );
-        assert_eq!(
-            explorer_dynamic_entity_map_semantics(
-                WeenieType::Creature,
-                Some(ItemType::CREATURE),
-                Some(false)
-            )
-            .fallback_blip_color,
-            RadarColor::BrightGreen
-        );
-        assert_eq!(
-            explorer_dynamic_entity_map_semantics(
+                Some(true),
+                DynamicEntityMapBlipCategory::Mob,
+            ),
+            (
+                "npc",
                 WeenieType::Vendor,
                 Some(ItemType::CREATURE),
-                None
-            )
-            .fallback_blip_color,
-            RadarColor::BrightGreen
-        );
-        assert_eq!(
-            explorer_dynamic_entity_map_semantics(
+                None,
+                DynamicEntityMapBlipCategory::Npc,
+            ),
+            (
+                "lifestone",
                 WeenieType::LifeStone,
                 Some(ItemType::LIFE_STONE),
-                None
-            )
-            .fallback_blip_color,
-            RadarColor::Blue
-        );
-        assert_eq!(
-            explorer_dynamic_entity_map_semantics(
-                WeenieType::ManaStone,
-                Some(ItemType::MANA_STONE),
-                None
-            )
-            .fallback_blip_color,
-            RadarColor::Cyan
-        );
-    }
+                None,
+                DynamicEntityMapBlipCategory::Lifestone,
+            ),
+            (
+                "other",
+                WeenieType::Generic,
+                None,
+                None,
+                DynamicEntityMapBlipCategory::Other,
+            ),
+        ];
 
-    fn map_semantics(
-        category: DynamicEntityMapBlipCategory,
-        fallback_blip_color: RadarColor,
-    ) -> DynamicEntityMapSemantics {
-        DynamicEntityMapSemantics {
-            category,
-            fallback_blip_color,
+        for (name, weenie_type, item_type, attackable, expected) in cases {
+            assert_eq!(
+                explorer_dynamic_entity_map_blip_category(weenie_type, item_type, attackable),
+                expected,
+                "{name}"
+            );
         }
     }
 

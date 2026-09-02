@@ -1056,12 +1056,11 @@ fn template_definition_input(
         rotation_speed: optional_f32(template.wcid, "rotation speed", template.rotation_speed)?,
         radar: holtburger_core::DynamicEntityRadarFacts::from_authored(
             format_args!("WCID {}", template.wcid),
-            holtburger_core::explorer_dynamic_entity_map_semantics(
+            holtburger_core::explorer_dynamic_entity_map_blip_category(
                 weenie_type,
                 item_type,
                 template.attackable,
             ),
-            template.radar_blip_color,
             template.radar_behavior,
             template.obvious_radar_range,
         ),
@@ -1205,21 +1204,19 @@ mod tests {
             DynamicEntityPresentationClass::Portal
         );
         assert_eq!(
-            holtburger_core::explorer_dynamic_entity_map_semantics(
+            holtburger_core::explorer_dynamic_entity_map_blip_category(
                 WeenieType::LifeStone,
                 None,
                 None,
-            )
-            .category,
+            ),
             holtburger_core::DynamicEntityMapBlipCategory::Lifestone
         );
         assert_eq!(
-            holtburger_core::explorer_dynamic_entity_map_semantics(
+            holtburger_core::explorer_dynamic_entity_map_blip_category(
                 WeenieType::Generic,
                 Some(ItemType::LIFE_STONE),
                 None,
-            )
-            .category,
+            ),
             holtburger_core::DynamicEntityMapBlipCategory::Lifestone
         );
     }

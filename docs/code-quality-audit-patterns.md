@@ -1356,6 +1356,35 @@ derive meaning from position when order is the domain contract.
 represent intentional positional meaning with a domain type that documents and validates its
 layout.
 
+## A Field Travels Without a Behavioral Consumer
+
+**Smell:** A derived view, message, or intermediate contract carries a field that no production
+decision reads after validation or transport.
+
+**Signals:**
+
+- Repository search finds the field only in producers, schemas, fixtures, and equality tests.
+- A former consumer was removed or switched to a different discriminator, but its old input remains.
+- Producers perform fallback, normalization, or enrichment work solely to populate the unused field.
+- Adding the field to fixtures creates broad mechanical churn without exercising behavior.
+
+**Possible failure:** Dead payload obscures the real contract, preserves obsolete policy in the
+wrong layer, and makes future changes appear more coupled than they are. Tests can keep the field
+alive indefinitely while proving only that unused data survives transit.
+
+**Questions:** Which named production decision reads this field? Is it authoritative source data or
+a derived projection? Would removing it lose information at its owning boundary, or only stop
+forwarding information no current consumer requested?
+
+**Counterexamples:** Protocol decoders, authoritative stores, audit logs, and lossless interchange
+formats may intentionally retain fields for fidelity even without a current application consumer.
+That retention should stop at the lossless boundary rather than automatically propagating into
+every derived view.
+
+**Possible responses:** Delete the field from derived contracts and fixtures, remove producer-only
+computation with it, retain raw data at its authoritative owner, or add the concrete consumer whose
+requirement justifies carrying it.
+
 ## Adding Observations
 
 An observation belongs here when it has:

@@ -104,8 +104,8 @@ export function selectMapBlips(
 			// NPCs, mobs, portals, and lifestones retain stable frontend-tunable identities instead
 			// of inheriting an arbitrary authored palette entry. Restoring retail would make members
 			// of one class vary and can collapse unrelated classes onto one color. The shipped-catalog
-			// census found 8,739 of 10,883 radar-visible templates use semantic fallback colors; the
-			// remaining 2,144 explicitly authored colors are the affected population.
+			// census found 8,739 of 10,883 radar-visible templates omit an explicit color and therefore
+			// use retail's category fallback; the remaining 2,144 author colors that this map ignores.
 			appearance: controlled
 				? {
 						category: "controlled",

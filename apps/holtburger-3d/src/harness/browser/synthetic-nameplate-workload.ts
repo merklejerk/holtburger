@@ -202,7 +202,6 @@ function entity(input: {
 			objectScale: 1,
 			radar: {
 				behavior: null,
-				blipColor: "Red",
 				category: input.entityClass,
 				obviousRange: null,
 			},

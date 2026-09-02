@@ -41,6 +41,7 @@
 	import {
 		MAP_BLIP_FILL_COLORS,
 		MAP_BLIP_RADIUS_PIXELS,
+		mapBlipFillStyle,
 	} from "../lib/game/map/map-appearance";
 	import {
 		type MapViewParameters,
@@ -235,6 +236,7 @@
 		if (!context) return;
 		context.clearRect(0, 0, size, size);
 		const hitTargets: BlipHitTarget[] = [];
+		const environment = mapEnvironment(parameters.anchor);
 		for (const blip of selectMapBlips(
 			frame.presentedEntities(),
 			parameters,
@@ -252,7 +254,11 @@
 			}
 			context.beginPath();
 			context.arc(x, y, MAP_BLIP_RADIUS_PIXELS, 0, Math.PI * 2);
-			context.fillStyle = MAP_BLIP_FILL_COLORS[blip.appearance.category];
+			context.fillStyle = mapBlipFillStyle(
+				blip.appearance.category,
+				blip.appearance.heightOffsetMeters,
+				environment,
+			);
 			context.fill();
 			context.lineWidth = 1;
 			context.strokeStyle = "rgba(0, 0, 0, 0.65)";

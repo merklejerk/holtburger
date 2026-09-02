@@ -13,6 +13,7 @@ function entity(
 	overrides: {
 		readonly guid?: number;
 		readonly localX?: number;
+		readonly localY?: number;
 		readonly localZ?: number;
 		readonly mapCategory?: DynamicEntityView["presentation"]["radar"]["category"];
 		readonly behavior?:
@@ -22,6 +23,7 @@ function entity(
 ): MapEntity {
 	const transform = Mat4.identity();
 	transform.m41 = overrides.localX ?? 0;
+	transform.m42 = overrides.localY ?? 0;
 	transform.m43 = overrides.localZ ?? 0;
 	return {
 		placement: {
@@ -76,7 +78,28 @@ describe("selectMapBlips", () => {
 		expect(blips).toHaveLength(1);
 		expect(blips[0]?.clipX).toBeCloseTo(1);
 		expect(blips[0]?.clipY).toBeCloseTo(1);
-		expect(blips[0]?.appearance).toEqual({ category: "mob" });
+		expect(blips[0]?.appearance).toEqual({
+			category: "mob",
+			heightOffsetMeters: 0,
+		});
+	});
+
+	it("retains entity height relative to the map anchor", () => {
+		const blips = selectMapBlips(
+			[entity({ localY: 18 })],
+			{
+				...view(),
+				anchor: { ...view().anchor, worldY: 5 },
+			},
+			256,
+			256,
+			null,
+		);
+
+		expect(blips[0]?.appearance).toEqual({
+			category: "mob",
+			heightOffsetMeters: 13,
+		});
 	});
 
 	it("distinguishes semantic categories that share one authored radar color", () => {
@@ -92,10 +115,10 @@ describe("selectMapBlips", () => {
 			null,
 		);
 
-		expect(blips.map((blip) => blip.appearance)).toEqual([
-			{ category: "player" },
-			{ category: "npc" },
-			{ category: "lifestone" },
+		expect(blips.map((blip) => blip.appearance.category)).toEqual([
+			"player",
+			"npc",
+			"lifestone",
 		]);
 	});
 

@@ -37,7 +37,8 @@ export interface MapAnchor {
 	readonly residency: SceneResidency | null;
 }
 
-type MapEnvironment = "indoor" | "outdoor";
+/** Geometry and elevation scale selected by the map anchor's residency. */
+export type MapEnvironment = "indoor" | "outdoor";
 
 /** Resolve the geometry mode selected by an anchor, treating absent knowledge as outdoors. */
 export function mapEnvironment(anchor: MapAnchor | null): MapEnvironment {

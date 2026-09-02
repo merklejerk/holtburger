@@ -46,6 +46,8 @@ export interface MapBlip {
 		| {
 				/** Producer-resolved class selecting an ordinary circular marker's color. */
 				readonly category: DynamicEntityMapBlipCategory;
+				/** Entity height minus map-anchor height in world metres. */
+				readonly heightOffsetMeters: number;
 		  };
 }
 
@@ -113,7 +115,11 @@ export function selectMapBlips(
 							mapHeadingFromSceneTransform(placement.localTransform) -
 							view.anchor.headingRadians,
 					}
-				: { category: entity.presentation.radar.category },
+				: {
+						category: entity.presentation.radar.category,
+						heightOffsetMeters:
+							placement.localTransform.m42 - view.anchor.worldY,
+					},
 			clipX,
 			clipY,
 			guid: entity.identity.guid,

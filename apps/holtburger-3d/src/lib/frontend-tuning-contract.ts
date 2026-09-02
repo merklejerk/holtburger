@@ -148,6 +148,8 @@ interface FrontendMapTuning {
 	readonly blips: {
 		/** Marker fill and opacity selected by producer-resolved map category or controlled status. */
 		readonly fillColors: Readonly<Record<MapBlipCategory, HexRgbaColor>>;
+		/** Largest fractional brightness change in [0, 1] used to show relative elevation. */
+		readonly maximumElevationBrightnessAdjustment: number;
 		/** Marker radius in canvas pixels. */
 		readonly radiusPixels: number;
 	};

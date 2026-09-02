@@ -1385,6 +1385,34 @@ every derived view.
 computation with it, retain raw data at its authoritative owner, or add the concrete consumer whose
 requirement justifies carrying it.
 
+## A Convenience Effect Hides Per-Item Pipeline Work
+
+**Smell:** A high-level rendering or transformation effect is invoked independently for every item
+in a hot loop even though equivalent arithmetic could be folded into the item's existing inputs.
+
+**Signals:**
+
+- Each primitive changes a filter, shadow, mask, blend mode, or other effect with implementation-
+  dependent setup cost.
+- The desired result is a simple channel, coordinate, or scalar transformation.
+- The convenience API may allocate intermediate surfaces or trigger pipeline transitions that are
+  invisible at the call site.
+- Performance depends more on browser, driver, or backend strategy than on the visible operation.
+
+**Possible failure:** A feature that is cheap for a few items scales unpredictably, creates hidden
+temporary work, or becomes disproportionately expensive on one rendering backend.
+
+**Questions:** Can the effect be expressed by changing values already submitted for the primitive?
+Is it applied once to a batch or repeatedly per item? Is the item count tightly bounded and proven?
+
+**Counterexamples:** A batch-wide effect, a genuinely complex transformation, or a small bounded
+diagnostic view may justify the clearer convenience API. Measurement can also prove that a backend
+already folds the operation into its ordinary draw path.
+
+**Possible responses:** Precompute transformed inputs, use direct scalar or channel arithmetic,
+batch items sharing the effect, move the operation into an existing shader, or measure and document
+the bounded convenience path.
+
 ## Adding Observations
 
 An observation belongs here when it has:

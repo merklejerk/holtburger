@@ -228,7 +228,7 @@ export class MapRenderer {
 			const uniforms = this.#program.uniforms;
 			gl.useProgram(this.#program.program);
 			gl.uniformMatrix2fv(uniforms.worldToClip, false, this.#worldToClip);
-			gl.uniform2f(uniforms.mapCenter, view.anchor.worldX, view.anchor.worldZ);
+			gl.uniform2f(uniforms.mapCenter, view.center.worldX, view.center.worldZ);
 			gl.uniform3fv(uniforms.palette, palette);
 			gl.uniform3fv(uniforms.sunDirection, MAP_SUN_DIRECTION);
 			gl.uniform1f(uniforms.ambientLevel, MAP_AMBIENT_LEVEL);
@@ -298,7 +298,7 @@ export class MapRenderer {
 		const uniforms = this.#surfaceProgram.uniforms;
 		gl.useProgram(this.#surfaceProgram.program);
 		gl.uniformMatrix2fv(uniforms.worldToClip, false, this.#worldToClip);
-		gl.uniform2f(uniforms.mapCenter, view.anchor.worldX, view.anchor.worldZ);
+		gl.uniform2f(uniforms.mapCenter, view.center.worldX, view.center.worldZ);
 		gl.uniform3fv(uniforms.voidColor, MAP_VOID_COLOR_VECTOR);
 		gl.uniform1f(uniforms.anchorHeight, view.anchor.worldY);
 		gl.uniform1f(uniforms.depthSpan, MAP_FLOOR_DEPTH_SPAN);

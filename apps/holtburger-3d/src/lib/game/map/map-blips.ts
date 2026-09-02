@@ -3,9 +3,8 @@ import type { DynamicEntityView } from "../runtime/dynamic-entity-feed";
 import type { ScenePlacement } from "../scene";
 import type { DynamicEntityMapBlipCategory } from "./map-blip-category";
 import {
-	type MapViewParameters,
-	computeMapWorldToClip,
 	mapHeadingFromSceneTransform,
+	type ProjectedMapView,
 	projectMapWorldPoint,
 } from "./map-view";
 
@@ -67,12 +66,10 @@ export interface MapBlip {
  */
 export function selectMapBlips(
 	entities: Iterable<MapEntity>,
-	view: MapViewParameters,
-	canvasWidth: number,
-	canvasHeight: number,
+	projection: ProjectedMapView,
 	controlledEntityGuid: number | null,
 ): readonly MapBlip[] {
-	const worldToClip = computeMapWorldToClip(view, canvasWidth, canvasHeight);
+	const { view, worldToClip } = projection;
 	const blips: MapBlip[] = [];
 	for (const { view: entity, placement } of entities) {
 		const controlled = entity.identity.guid === controlledEntityGuid;

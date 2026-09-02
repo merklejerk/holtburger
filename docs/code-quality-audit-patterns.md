@@ -1413,6 +1413,66 @@ already folds the operation into its ordinary draw path.
 batch items sharing the effect, move the operation into an existing shader, or measure and document
 the bounded convenience path.
 
+## One Value Carries Two Independent Frames of Reference
+
+**Smell:** A single position, time, identity, or context value represents both a subject and the
+view or operation centred on that subject, even though the two can vary independently.
+
+**Signals:**
+
+- A field documented as an anchor is read both for subject-relative policy and viewport projection.
+- Adding pan, replay, prediction, comparison, or offset behavior requires partially overwriting a
+  value whose remaining fields must still describe the original subject.
+- Consumers disagree over whether coordinates name the observed object or the place being viewed.
+- A copied composite changes only one axis or timestamp while retaining unrelated context from its
+  source.
+
+**Possible failure:** Once the two frames diverge, subject-relative decisions use viewport facts or
+viewport placement uses subject facts. The initial centred case masks the mismatch because both
+values happen to be equal.
+
+**Questions:** Which decisions belong to the subject, and which belong to the view or operation?
+Can either move, rotate, advance, or change identity without the other? Is their present equality an
+invariant or merely the default state?
+
+**Counterexamples:** A domain invariant may genuinely require both concepts to coincide, such as a
+transaction timestamp established by one authoritative commit or a local transform whose origin is
+definitionally its owning frame. Encode that relationship so independent variation is impossible.
+
+**Possible responses:** Split subject context from view or operation context, name both in the
+contract, derive their initially equal values once at the owner, and make each consumer read the
+frame whose meaning it actually needs.
+
+## A Boundary Inherits the Content Transform It Must Constrain
+
+**Smell:** A clip, mask, viewport, limit, or other container-owned boundary is attached to content
+that translates, rotates, or scales inside it, causing the boundary to move with the thing it is
+supposed to constrain.
+
+**Signals:**
+
+- A clipping or masking primitive sits on the same transformed node as the visual it clips.
+- Overflow appears only after panning, animation, zooming, or changing the content origin.
+- A coverage length or radius is sufficient only while content happens to start at the container's
+  centre.
+- Fixing one translated pose requires enlarging a local bound without defining when the content is
+  no longer meaningfully inside the container.
+
+**Possible failure:** Content escapes a viewport, a mask exposes pixels outside its intended frame,
+or a supposedly fixed boundary changes apparent size as its child moves. The default centred pose
+can hide the defect indefinitely because the two coordinate spaces initially coincide.
+
+**Questions:** Who owns the boundary: the stationary container or the moving content? In which
+coordinate space is its extent defined? What is the maximum distance from every allowed content
+origin to the boundary, and what should happen once the origin leaves it?
+
+**Counterexamples:** A content-local mask intentionally moves with the content when it describes the
+content's own silhouette, reveal animation, or transformed material rather than a container limit.
+
+**Possible responses:** Put the boundary on an untransformed parent, transform only the constrained
+child, derive coverage from the full set of allowed origins, and explicitly hide or change treatment
+when the origin leaves the container.
+
 ## Adding Observations
 
 An observation belongs here when it has:

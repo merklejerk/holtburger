@@ -16,13 +16,15 @@
 	 * outside its own viewBox, which is why it is the one element allowed to overflow.
 	 */
 	const CARDINAL_RADIUS = 100;
+	/** From any origin inside the disc, two radii reach every point on its rim. */
+	const CONE_LENGTH = DISC_RADIUS * 2;
 
-	/** Wedge from the centre spanning one field of view, in the compass viewBox's units. */
+	/** Wedge from the subject spanning one field of view, in the compass viewBox's units. */
 	function conePath(fovRadians: number): string {
 		const half = Math.max(0.05, Math.min(Math.PI - 0.05, fovRadians)) / 2;
-		const x = Math.sin(half) * DISC_RADIUS;
-		const y = -Math.cos(half) * DISC_RADIUS;
-		return `M 0 0 L ${-x} ${y} A ${DISC_RADIUS} ${DISC_RADIUS} 0 0 1 ${x} ${y} Z`;
+		const x = Math.sin(half) * CONE_LENGTH;
+		const y = -Math.cos(half) * CONE_LENGTH;
+		return `M 0 0 L ${-x} ${y} A ${CONE_LENGTH} ${CONE_LENGTH} 0 0 1 ${x} ${y} Z`;
 	}
 
 	/** Controlled-character arrow dimensions in canvas pixels. */
@@ -30,6 +32,8 @@
 	const CONTROLLED_ARROW_HALF_WIDTH = 5;
 	/** Generous pointer target around deliberately small map markers. */
 	const BLIP_HIT_RADIUS = 8;
+	/** Ignore click-scale pointer jitter before detaching the viewed centre. */
+	const MAP_PAN_DRAG_THRESHOLD_PIXELS = 3;
 </script>
 
 <script lang="ts">
@@ -39,6 +43,7 @@
 	import { MapRenderer } from "../lib/game/map/map-renderer";
 	import { selectMapBlips } from "../lib/game/map/map-blips";
 	import {
+		MAP_AUTOMATIC_REANCHOR_DISTANCE_METERS,
 		MAP_BLIP_FILL_COLORS,
 		MAP_BLIP_RADIUS_PIXELS,
 		mapBlipFillStyle,
@@ -46,7 +51,11 @@
 	import {
 		type MapViewParameters,
 		clampMapViewDiameter,
+		mapCenterAfterCanvasDrag,
 		mapEnvironment,
+		projectMapView,
+		projectMapWorldPoint,
+		type ProjectedMapView,
 	} from "../lib/game/map/map-view";
 	import { formatWorldMapCoordinates } from "../lib/game/map/map-coordinates";
 	import {
@@ -57,7 +66,15 @@
 		type MapPanelFrame,
 		type MapPanelGpuDrawState,
 		type MapPanelState,
+		type MapPanelSubject,
 	} from "./map-panel-frame";
+	import {
+		ANCHORED_MAP_PAN_STATE,
+		detachMapPan,
+		mapPanCenter,
+		reanchorMapPanAfterSubjectTravel,
+		type MapPanState,
+	} from "./map-pan-policy";
 
 	/** One rendered marker's canvas-space interaction geometry. */
 	interface BlipHitTarget {
@@ -87,6 +104,24 @@
 		readonly top: number;
 	}
 
+	/** Fixed inputs captured at pointer-down so one drag cannot warp as live presentation changes. */
+	interface MapPanGesture {
+		/** Pointer exclusively owning this drag. */
+		readonly pointerId: number;
+		/** Horizontal viewport coordinate where the drag began. */
+		readonly startClientX: number;
+		/** Vertical viewport coordinate where the drag began. */
+		readonly startClientY: number;
+		/** CSS width whose coordinate scale the captured drag uses. */
+		readonly canvasWidth: number;
+		/** CSS height whose coordinate scale the captured drag uses. */
+		readonly canvasHeight: number;
+		/** Subject identity and position that arm automatic re-anchoring. */
+		readonly subject: MapPanelSubject;
+		/** Complete starting view from which total pointer displacement is projected. */
+		readonly view: MapViewParameters;
+	}
+
 	interface Props {
 		/**
 		 * Pull every presentation-rate input in one snapshot.
@@ -113,10 +148,14 @@
 	let freeAnchorElement = $state<SVGCircleElement | null>(null);
 	let coordinatesElement = $state<HTMLSpanElement | null>(null);
 	let tooltip = $state<BlipTooltip | null>(null);
+	/** Cold markup projection; cursor-rate pan coordinates remain in imperative `mapPanState`. */
+	let mapDetached = $state(false);
 	let renderer: MapRenderer | null = null;
 	let rendererSource: MapPanelFrame["source"] = null;
 	let blipHitTargets: readonly BlipHitTarget[] = [];
 	let blipHoverPoint: BlipHoverPoint | null = null;
+	let mapPanState: MapPanState = ANCHORED_MAP_PAN_STATE;
+	let mapPanGesture: MapPanGesture | null = null;
 	let cancelPointerGesture: (() => void) | null = null;
 	onDestroy(() => cancelPointerGesture?.());
 
@@ -127,12 +166,23 @@
 		const step = (now: number): void => {
 			frameHandle = window.requestAnimationFrame(step);
 			const frame = readFrame();
-			drawOverlay(frame);
-			const next = captureMapPanelGpuDrawState(frame, panel);
+			if (mapPanGesture === null) {
+				replaceMapPanState(
+					reanchorMapPanAfterSubjectTravel(
+						mapPanState,
+						frame.subject,
+						MAP_AUTOMATIC_REANCHOR_DISTANCE_METERS,
+					),
+				);
+			}
+			const parameters = view(frame);
+			const size = discPixelSize();
+			drawOverlay(frame, parameters, size);
+			const next = captureMapPanelGpuDrawState(frame, panel, parameters);
 			if (sameMapPanelGpuDrawState(lastGpuDrawn, next)) return;
 			if (now - lastGpuAttemptedAt < MINIMUM_GPU_FRAME_INTERVAL_MS) return;
 			lastGpuAttemptedAt = now;
-			if (drawMap(frame)) {
+			if (drawMap(frame, parameters, size)) {
 				lastGpuDrawn = next;
 			}
 		};
@@ -150,6 +200,7 @@
 		if (!anchor) return null;
 		return {
 			anchor,
+			center: mapPanCenter(mapPanState, frame.subject),
 			viewDiameter: clampMapViewDiameter(mapPanelViewDiameter(panel, anchor)),
 		};
 	}
@@ -165,26 +216,37 @@
 	}
 
 	/** Draw DOM and 2D overlay work at the display's animation cadence. */
-	function drawOverlay(frame: MapPanelFrame): void {
-		drawChrome(frame);
-		const parameters = view(frame);
-		if (!parameters || !frame.source) {
+	function drawOverlay(
+		frame: MapPanelFrame,
+		parameters: MapViewParameters | null,
+		size: number,
+	): void {
+		if (parameters === null) {
+			drawChrome(frame, null);
 			clearBlipCanvas();
 			return;
 		}
-		drawBlips(frame, parameters, discPixelSize());
+		const overlay = projectMapView(parameters, size, size);
+		drawChrome(frame, overlay);
+		if (!frame.source) {
+			clearBlipCanvas();
+			return;
+		}
+		drawBlips(frame, overlay, size);
 	}
 
 	/** Draw only the map content that requires WebGL, subject to the 30 Hz cap. */
-	function drawMap(frame: MapPanelFrame): boolean {
+	function drawMap(
+		frame: MapPanelFrame,
+		parameters: MapViewParameters | null,
+		size: number,
+	): boolean {
 		reconcileRenderer(frame.source);
-		const parameters = view(frame);
 		const canvas = mapCanvas;
 		if (!parameters || !canvas || !frame.source) {
 			clearMapCanvas();
 			return true;
 		}
-		const size = discPixelSize();
 		if (canvas.width !== size || canvas.height !== size) {
 			canvas.width = size;
 			canvas.height = size;
@@ -223,7 +285,7 @@
 	 */
 	function drawBlips(
 		frame: MapPanelFrame,
-		parameters: MapViewParameters,
+		overlay: ProjectedMapView,
 		size: number,
 	): void {
 		const canvas = blipCanvas;
@@ -236,12 +298,10 @@
 		if (!context) return;
 		context.clearRect(0, 0, size, size);
 		const hitTargets: BlipHitTarget[] = [];
-		const environment = mapEnvironment(parameters.anchor);
+		const environment = mapEnvironment(overlay.view.anchor);
 		for (const blip of selectMapBlips(
 			frame.presentedEntities(),
-			parameters,
-			size,
-			size,
+			overlay,
 			frame.subject?.kind === "controlled-entity" ? frame.subject.guid : null,
 		)) {
 			// Clip space is [-1, 1] with +Y up; canvas pixels run down from the top-left.
@@ -380,15 +440,34 @@
 	 * The map always faces the subject up, so north turns opposite its bearing. The camera cone is
 	 * relative to that bearing and therefore points straight up whenever camera and subject agree.
 	 */
-	function drawChrome(frame: MapPanelFrame): void {
+	function drawChrome(
+		frame: MapPanelFrame,
+		overlay: ProjectedMapView | null,
+	): void {
 		const anchor = frame.subject?.anchor ?? null;
+		const subjectClip =
+			overlay === null || anchor === null
+				? null
+				: projectMapWorldPoint(
+						overlay.worldToClip,
+						overlay.view,
+						anchor.worldX,
+						anchor.worldZ,
+					);
+		const subjectX = (subjectClip?.[0] ?? 0) * DISC_RADIUS;
+		const subjectY = -(subjectClip?.[1] ?? 0) * DISC_RADIUS;
+		const subjectInsideDisc =
+			subjectClip !== null && Math.hypot(subjectClip[0], subjectClip[1]) <= 1;
 		if (coneElement) {
-			coneElement.style.display = anchor ? "" : "none";
+			coneElement.style.display = subjectInsideDisc ? "" : "none";
 			coneElement.setAttribute("d", conePath(frame.cameraFovRadians));
 			const rotation = anchor
 				? ((frame.cameraHeadingRadians - anchor.headingRadians) * 180) / Math.PI
 				: 0;
-			coneElement.setAttribute("transform", `rotate(${rotation})`);
+			coneElement.setAttribute(
+				"transform",
+				`translate(${subjectX} ${subjectY}) rotate(${rotation})`,
+			);
 		}
 		if (northGroup) {
 			const rotation = anchor ? (-anchor.headingRadians * 180) / Math.PI : 0;
@@ -397,15 +476,95 @@
 		if (freeAnchorElement) {
 			freeAnchorElement.style.display =
 				frame.subject?.kind === "free-camera" ? "" : "none";
+			freeAnchorElement.setAttribute("cx", String(subjectX));
+			freeAnchorElement.setAttribute("cy", String(subjectY));
 		}
 		if (coordinatesElement) {
-			coordinatesElement.textContent = anchor
+			coordinatesElement.textContent = overlay
 				? formatWorldMapCoordinates({
-						x: anchor.worldX,
-						z: anchor.worldZ,
+						x: overlay.view.center.worldX,
+						z: overlay.view.center.worldZ,
 					})
 				: "";
 		}
+	}
+
+	function beginMapPan(event: PointerEvent): void {
+		if (event.button !== 0) return;
+		const frame = readFrame();
+		const parameters = view(frame);
+		const subject = frame.subject;
+		const canvas = blipCanvas;
+		const bounds = canvas?.getBoundingClientRect();
+		if (
+			parameters === null ||
+			subject === null ||
+			canvas === null ||
+			bounds === undefined ||
+			bounds.width <= 0 ||
+			bounds.height <= 0
+		) {
+			return;
+		}
+		event.preventDefault();
+		event.stopPropagation();
+		clearBlipTooltip();
+		mapPanGesture = {
+			canvasHeight: bounds.height,
+			canvasWidth: bounds.width,
+			pointerId: event.pointerId,
+			startClientX: event.clientX,
+			startClientY: event.clientY,
+			subject,
+			view: parameters,
+		};
+		canvas.setPointerCapture(event.pointerId);
+	}
+
+	function moveMapPointer(event: PointerEvent): void {
+		const gesture = mapPanGesture;
+		if (gesture === null || gesture.pointerId !== event.pointerId) {
+			showBlipTooltip(event);
+			return;
+		}
+		event.preventDefault();
+		event.stopPropagation();
+		const deltaX = event.clientX - gesture.startClientX;
+		const deltaY = event.clientY - gesture.startClientY;
+		if (Math.hypot(deltaX, deltaY) <= MAP_PAN_DRAG_THRESHOLD_PIXELS) return;
+		replaceMapPanState(
+			detachMapPan(
+				mapCenterAfterCanvasDrag(
+					gesture.view,
+					gesture.canvasWidth,
+					gesture.canvasHeight,
+					deltaX,
+					deltaY,
+				),
+				gesture.subject,
+			),
+		);
+	}
+
+	function endMapPan(event: PointerEvent): void {
+		if (mapPanGesture?.pointerId !== event.pointerId) return;
+		mapPanGesture = null;
+		const canvas = blipCanvas;
+		if (canvas?.hasPointerCapture(event.pointerId)) {
+			canvas.releasePointerCapture(event.pointerId);
+		}
+	}
+
+	function replaceMapPanState(state: MapPanState): void {
+		if (mapPanState === state) return;
+		mapPanState = state;
+		const detached = state.kind === "detached";
+		if (mapDetached !== detached) mapDetached = detached;
+	}
+
+	function resetMapPan(event: MouseEvent): void {
+		event.stopPropagation();
+		replaceMapPanState(ANCHORED_MAP_PAN_STATE);
 	}
 
 	function beginDrag(event: PointerEvent): void {
@@ -495,7 +654,11 @@
 			<canvas
 				bind:this={blipCanvas}
 				class="map-panel-canvas"
-				onpointermove={showBlipTooltip}
+				onpointerdown={beginMapPan}
+				onpointermove={moveMapPointer}
+				onpointerup={endMapPan}
+				onpointercancel={endMapPan}
+				onlostpointercapture={endMapPan}
 				onpointerleave={clearBlipTooltip}
 			></canvas>
 		</div>
@@ -504,8 +667,16 @@
 			viewBox="-100 -100 200 200"
 			aria-hidden="true"
 		>
-			<!-- The camera's own cone, drawn at the centre where the anchor stands. -->
-			<path bind:this={coneElement} class="map-panel-cone" />
+			<!-- The camera's own cone, attached to the subject even when the viewed centre is panned. -->
+			<defs>
+				<clipPath id="map-panel-disc-clip">
+					<circle cx="0" cy="0" r={DISC_RADIUS} />
+				</clipPath>
+			</defs>
+			<!-- The fixed parent clips the translated cone; clipping the path would move its mask too. -->
+			<g clip-path="url(#map-panel-disc-clip)">
+				<path bind:this={coneElement} class="map-panel-cone" />
+			</g>
 			<g bind:this={northGroup}>
 				{#each [["N", 0], ["E", 90], ["S", 180], ["W", 270]] as const as [label, degrees]}
 					<text
@@ -521,11 +692,29 @@
 			<circle
 				bind:this={freeAnchorElement}
 				class="map-panel-free-anchor"
+				clip-path="url(#map-panel-disc-clip)"
 				cx="0"
 				cy="0"
 				r="3.5"
 			/>
 		</svg>
+		{#if mapDetached}
+			<button
+				type="button"
+				class="map-panel-reset"
+				onclick={resetMapPan}
+				aria-label="Re-anchor map"
+				title="Re-anchor map"
+			>
+				<svg
+					class="map-panel-handle-icon"
+					viewBox="0 0 12 12"
+					aria-hidden="true"
+				>
+					<path d="M 9.8 5 A 4 4 0 1 0 10 7 M 9.8 5 V 1.8 M 9.8 5 H 6.6" />
+				</svg>
+			</button>
+		{/if}
 		{#if tooltip}
 			<div
 				class="map-panel-tooltip"
@@ -606,6 +795,12 @@
 		overflow: hidden;
 		border-radius: 50%;
 		background: var(--ac-panel-deep);
+		cursor: grab;
+		touch-action: none;
+	}
+
+	.map-panel-disc:active {
+		cursor: grabbing;
 	}
 
 	/* Seats the map inside the bezel: a gold lip at the rim and a shadow cast over the edge. */
@@ -684,7 +879,8 @@
 	}
 
 	.map-panel-move,
-	.map-panel-resize {
+	.map-panel-resize,
+	.map-panel-reset {
 		position: absolute;
 		width: 20px;
 		height: 20px;
@@ -721,6 +917,13 @@
 		top: 85.355%;
 		left: 85.355%;
 		cursor: nwse-resize;
+	}
+
+	.map-panel-reset {
+		/* Remaining diagonal rim position, clear of the layout handles and cardinal labels. */
+		top: 14.645%;
+		left: 85.355%;
+		cursor: pointer;
 	}
 
 	.map-panel-handle-icon {

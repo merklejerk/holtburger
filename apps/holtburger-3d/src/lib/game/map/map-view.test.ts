@@ -9,6 +9,7 @@ import {
 	type MapViewParameters,
 	clampMapViewDiameter,
 	computeMapWorldToClip,
+	mapCenterAfterCanvasDrag,
 	mapHeadingFromSceneTransform,
 	projectMapWorldPoint,
 } from "./map-view";
@@ -22,6 +23,7 @@ function view(overrides: Partial<MapViewParameters> = {}): MapViewParameters {
 			worldY: 0,
 			worldZ: -200,
 		},
+		center: { worldX: 100, worldZ: -200 },
 		viewDiameter: OUTDOOR_LANDBLOCK_WORLD_SIZE,
 		...overrides,
 	};
@@ -54,6 +56,16 @@ describe("computeMapWorldToClip", () => {
 		expect(east[0]).toBeCloseTo(0.5);
 	});
 
+	it("projects around the viewed centre independently of the subject", () => {
+		const parameters = view({ center: { worldX: 25, worldZ: 50 } });
+		const matrix = computeMapWorldToClip(parameters, 256, 256);
+
+		expect(projectMapWorldPoint(matrix, parameters, 25, 50)).toEqual([0, 0]);
+		const subject = projectMapWorldPoint(matrix, parameters, 100, -200);
+		expect(subject[0]).toBeCloseTo(75 / 96);
+		expect(subject[1]).toBeCloseTo(250 / 96);
+	});
+
 	it("rotates the anchor's facing direction to screen up when heading-up", () => {
 		// Facing east: the map turns so east is up and south is right.
 		const parameters = view({
@@ -64,6 +76,7 @@ describe("computeMapWorldToClip", () => {
 				worldY: 0,
 				worldZ: 0,
 			},
+			center: { worldX: 0, worldZ: 0 },
 		});
 		const matrix = computeMapWorldToClip(parameters, 256, 256);
 		const radius = OUTDOOR_LANDBLOCK_WORLD_SIZE / 2;
@@ -85,6 +98,7 @@ describe("computeMapWorldToClip", () => {
 				worldY: 0,
 				worldZ: 0,
 			},
+			center: { worldX: 0, worldZ: 0 },
 		});
 		const matrix = computeMapWorldToClip(northFacing, 256, 256);
 
@@ -99,6 +113,39 @@ describe("computeMapWorldToClip", () => {
 		expect(() => computeMapWorldToClip(view(), 0, 256)).toThrow(
 			/positive extent/,
 		);
+	});
+});
+
+describe("mapCenterAfterCanvasDrag", () => {
+	it("moves the viewed centre opposite a north-up paper drag", () => {
+		const parameters = view({ viewDiameter: 200 });
+
+		expect(mapCenterAfterCanvasDrag(parameters, 200, 200, 25, 40)).toEqual({
+			worldX: 75,
+			worldZ: -240,
+		});
+	});
+
+	it("uses the subject heading without moving the subject anchor", () => {
+		const parameters = view({
+			anchor: {
+				...view().anchor,
+				headingRadians: Math.PI / 2,
+			},
+			viewDiameter: 200,
+		});
+
+		// With east facing up, dragging upward moves the viewed centre west.
+		const center = mapCenterAfterCanvasDrag(parameters, 200, 200, 0, -50);
+		expect(center.worldX).toBeCloseTo(50);
+		expect(center.worldZ).toBeCloseTo(-200);
+		expect(parameters.anchor.worldX).toBe(100);
+	});
+
+	it("rejects non-finite pointer displacement", () => {
+		expect(() =>
+			mapCenterAfterCanvasDrag(view(), 200, 200, Number.NaN, 0),
+		).toThrow(/finite/);
 	});
 });
 

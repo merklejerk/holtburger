@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import type { MapTerrainSource } from "../lib/game/map/map-renderer";
-import type { MapPanelFrame, MapPanelState } from "./map-panel-frame";
+import type {
+	MapPanelFrame,
+	MapPanelGpuDrawState,
+	MapPanelState,
+} from "./map-panel-frame";
 import {
 	captureMapPanelGpuDrawState,
 	mapPanelViewDiameter,
@@ -11,8 +15,8 @@ import {
 describe("map panel GPU draw state", () => {
 	it("stays current across equivalent imperative reads", () => {
 		const source = mapSource();
-		const first = captureMapPanelGpuDrawState(frame({ source }), panel());
-		const second = captureMapPanelGpuDrawState(frame({ source }), panel());
+		const first = gpuDrawState(frame({ source }), panel());
+		const second = gpuDrawState(frame({ source }), panel());
 
 		expect(sameMapPanelGpuDrawState(first, second)).toBe(true);
 	});
@@ -28,7 +32,7 @@ describe("map panel GPU draw state", () => {
 		["indoor zoom", { indoorViewDiameter: 384 }],
 	] as const)("invalidates for changed %s", (_label, change) => {
 		const source = mapSource();
-		const before = captureMapPanelGpuDrawState(frame({ source }), panel());
+		const before = gpuDrawState(frame({ source }), panel());
 		if ("terrainRevision" in change)
 			source.terrainInstallationRevision = change.terrainRevision;
 		if ("geometryRevision" in change)
@@ -50,23 +54,39 @@ describe("map panel GPU draw state", () => {
 		expect(
 			sameMapPanelGpuDrawState(
 				before,
-				captureMapPanelGpuDrawState(changedFrame, changedPanel),
+				gpuDrawState(changedFrame, changedPanel),
 			),
 		).toBe(false);
 	});
 
 	it("ignores changes drawn only by the uncapped overlay", () => {
 		const source = mapSource();
-		const before = captureMapPanelGpuDrawState(frame({ source }), panel());
-		const after = captureMapPanelGpuDrawState(
+		const before = gpuDrawState(frame({ source }), panel());
+		const after = gpuDrawState(
 			frame({
 				cameraFovRadians: 1.25,
 				cameraHeadingRadians: 0.75,
 				controlledGuid: 7,
-				presentedEntityRevision: 2,
 				source,
 			}),
 			panel(),
+		);
+
+		expect(sameMapPanelGpuDrawState(before, after)).toBe(true);
+	});
+
+	it("does not redraw detached terrain for subject translation alone", () => {
+		const source = mapSource();
+		const center = { worldX: 50, worldZ: 60 };
+		const before = gpuDrawStateAtCenter(
+			frame({ source, worldX: 10 }),
+			panel(),
+			center,
+		);
+		const after = gpuDrawStateAtCenter(
+			frame({ source, worldX: 11 }),
+			panel(),
+			center,
 		);
 
 		expect(sameMapPanelGpuDrawState(before, after)).toBe(true);
@@ -109,7 +129,6 @@ function frame(
 		readonly worldY?: number;
 		readonly envCellId?: "0x01020101" | null;
 		readonly headingRadians?: number;
-		readonly presentedEntityRevision?: number;
 		readonly cameraFovRadians?: number;
 		readonly cameraHeadingRadians?: number;
 		readonly controlledGuid?: number;
@@ -119,7 +138,6 @@ function frame(
 		cameraFovRadians: overrides.cameraFovRadians ?? 1,
 		cameraHeadingRadians: overrides.cameraHeadingRadians ?? 0,
 		presentedEntities: () => [],
-		presentedEntityRevision: overrides.presentedEntityRevision ?? 1,
 		source: overrides.source ?? mapSource(),
 		subject: {
 			anchor: {
@@ -161,4 +179,35 @@ function panel(
 			outdoor: overrides.outdoorViewDiameter ?? 192,
 		},
 	};
+}
+
+function gpuDrawState(
+	frameValue: MapPanelFrame,
+	panelValue: MapPanelState,
+): MapPanelGpuDrawState {
+	const anchor = frameValue.subject?.anchor ?? null;
+	return gpuDrawStateAtCenter(
+		frameValue,
+		panelValue,
+		anchor === null ? null : { worldX: anchor.worldX, worldZ: anchor.worldZ },
+	);
+}
+
+function gpuDrawStateAtCenter(
+	frameValue: MapPanelFrame,
+	panelValue: MapPanelState,
+	center: { readonly worldX: number; readonly worldZ: number } | null,
+): MapPanelGpuDrawState {
+	const anchor = frameValue.subject?.anchor ?? null;
+	return captureMapPanelGpuDrawState(
+		frameValue,
+		panelValue,
+		anchor === null || center === null
+			? null
+			: {
+					anchor,
+					center,
+					viewDiameter: mapPanelViewDiameter(panelValue, anchor),
+				},
+	);
 }

@@ -3395,7 +3395,11 @@
 							(mapHeadingFromSceneTransform(placement.localTransform) * 180) /
 							Math.PI;
 					}
-					const drew = mapRenderer.render({ anchor, viewDiameter });
+					const drew = mapRenderer.render({
+						anchor,
+						center: { worldX: anchor.worldX, worldZ: anchor.worldZ },
+						viewDiameter,
+					});
 					return {
 						available: mapRenderer.available,
 						centerX,

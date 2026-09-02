@@ -7,14 +7,14 @@ import {
 } from "./map-appearance";
 
 /**
- * The point of view every map decision reads.
+ * The subject context every map decision reads.
  *
  * There is deliberately no notion of "the player": the Explorer has a free camera and no player at
  * all, so whatever the app shell nominates — a possessed entity's pose, or the camera — is the
- * anchor. Residency joins this type in Phase 2, when the interior flood becomes its first consumer.
+ * anchor. Residency selects the map environment and seeds the subject's interior component.
  */
 export interface MapAnchor {
-	/** World-space position the map centres on. */
+	/** World-space subject position the map follows whenever its viewed centre is anchored. */
 	readonly worldX: number;
 	readonly worldZ: number;
 	/** World height, which the terrain contours and interior depth rule measure against. */
@@ -45,9 +45,20 @@ export function mapEnvironment(anchor: MapAnchor | null): MapEnvironment {
 	return anchor?.residency?.envCellId != null ? "indoor" : "outdoor";
 }
 
+/** World-space horizontal point shown at the centre of the map. */
+export interface MapCenter {
+	/** East-west world coordinate. */
+	readonly worldX: number;
+	/** South-north world coordinate. */
+	readonly worldZ: number;
+}
+
 /** Everything that decides what the map draws this frame, beyond the geometry itself. */
 export interface MapViewParameters {
+	/** Subject context controlling orientation, elevation treatment, and interior selection. */
 	readonly anchor: MapAnchor;
+	/** Viewed position, separate from the subject while the user pans the map. */
+	readonly center: MapCenter;
 	/**
 	 * World-metre diameter across the map's visible circle.
 	 *
@@ -81,6 +92,14 @@ export interface MapWorldToClip {
 	readonly m01: number;
 	/** Clip y per world south metre. */
 	readonly m11: number;
+}
+
+/** One view paired with the canvas-specific projection derived from it. */
+export interface ProjectedMapView {
+	/** Semantic subject, viewed centre, and zoom. */
+	readonly view: MapViewParameters;
+	/** World-to-clip mapping derived from this exact view. */
+	readonly worldToClip: MapWorldToClip;
 }
 
 /**
@@ -118,6 +137,18 @@ export function computeMapWorldToClip(
 	};
 }
 
+/** Bind one map view to its canvas projection so consumers cannot accidentally mix snapshots. */
+export function projectMapView(
+	view: MapViewParameters,
+	canvasWidth: number,
+	canvasHeight: number,
+): ProjectedMapView {
+	return {
+		view,
+		worldToClip: computeMapWorldToClip(view, canvasWidth, canvasHeight),
+	};
+}
+
 /** Write one mapping into a caller-owned column-major buffer for `uniformMatrix2fv`. */
 export function writeMapWorldToClip(
 	matrix: MapWorldToClip,
@@ -140,12 +171,44 @@ export function projectMapWorldPoint(
 	worldX: number,
 	worldZ: number,
 ): readonly [number, number] {
-	const offsetX = worldX - view.anchor.worldX;
-	const offsetZ = worldZ - view.anchor.worldZ;
+	const offsetX = worldX - view.center.worldX;
+	const offsetZ = worldZ - view.center.worldZ;
 	return [
 		matrix.m00 * offsetX + matrix.m01 * offsetZ,
 		matrix.m10 * offsetX + matrix.m11 * offsetZ,
 	];
+}
+
+/**
+ * Move the viewed centre opposite one pointer drag so the map behaves like paper under the hand.
+ *
+ * Pointer deltas use canvas coordinates (+Y down), while the projection uses clip coordinates
+ * (+Y up). Inverting the existing world-to-clip matrix keeps panning exactly aligned with every
+ * heading and aspect ratio instead of maintaining a second rotation convention.
+ */
+export function mapCenterAfterCanvasDrag(
+	view: MapViewParameters,
+	canvasWidth: number,
+	canvasHeight: number,
+	deltaX: number,
+	deltaY: number,
+): MapCenter {
+	if (!Number.isFinite(deltaX) || !Number.isFinite(deltaY)) {
+		throw new Error("Map pointer displacement must be finite.");
+	}
+	const matrix = computeMapWorldToClip(view, canvasWidth, canvasHeight);
+	const clipX = (2 * deltaX) / canvasWidth;
+	const clipY = (-2 * deltaY) / canvasHeight;
+	const determinant = matrix.m00 * matrix.m11 - matrix.m01 * matrix.m10;
+	if (!Number.isFinite(determinant) || determinant === 0) {
+		throw new Error("Map projection must be invertible while panning.");
+	}
+	const worldX = (matrix.m11 * clipX - matrix.m01 * clipY) / determinant;
+	const worldZ = (-matrix.m10 * clipX + matrix.m00 * clipY) / determinant;
+	return {
+		worldX: view.center.worldX - worldX,
+		worldZ: view.center.worldZ - worldZ,
+	};
 }
 
 /**

@@ -88,6 +88,11 @@ type MapHeightColor = "sameLevelColor" | "aboveColor" | "belowColor";
 
 /** Complete shared overhead-map appearance and navigation policy. */
 interface FrontendMapTuning {
+	/** Transient map navigation behavior. */
+	readonly navigation: {
+		/** Subject displacement that returns a panned map to follow mode. */
+		readonly automaticReanchorDistanceMeters: number;
+	};
 	/** Directional relief-light presentation. */
 	readonly hillshade: {
 		/** Direction toward the relief light in scene axes. */

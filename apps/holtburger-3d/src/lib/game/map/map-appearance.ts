@@ -17,12 +17,6 @@ import type { MapEnvironment } from "./map-view";
  */
 const MAP_TUNING = SHARED_FRONTEND_TUNING.map;
 
-/** Player travel after which a detached map resumes following automatically. */
-export const MAP_AUTOMATIC_REANCHOR_DISTANCE_METERS = positiveFinite(
-	"map.navigation.automaticReanchorDistanceMeters",
-	MAP_TUNING.navigation.automaticReanchorDistanceMeters,
-);
-
 /** One authored colour as a GL uniform payload. */
 function colorVector(color: HexRgbColor): Float32Array {
 	const channels = normalizedRgbColor(color);
@@ -99,10 +93,10 @@ export const MAP_BLIP_RADIUS_PIXELS = MAP_TUNING.blips.radiusPixels;
 /**
  * Convert anchor-relative elevation into a clamped Canvas brightness multiplier.
  *
- * Indoor markers reach the endpoint over one floor-tint span; outdoor markers use the broader
+ * Indoor overlays reach the endpoint over one floor-tint span; outdoor overlays use the broader
  * contour-height span. Positive elevation brightens and negative elevation darkens.
  */
-export function mapBlipBrightness(
+export function mapElevationBrightness(
 	heightOffsetMeters: number,
 	environment: MapEnvironment,
 ): number {
@@ -121,11 +115,15 @@ export function mapBlipFillStyle(
 	environment: MapEnvironment,
 ): string {
 	const color = normalizedRgbaColor(MAP_BLIP_FILL_COLORS[category]);
-	const brightness = mapBlipBrightness(heightOffsetMeters, environment);
-	return `rgba(${mapBlipChannelByte(color.red, brightness)}, ${mapBlipChannelByte(color.green, brightness)}, ${mapBlipChannelByte(color.blue, brightness)}, ${color.alpha})`;
+	const brightness = mapElevationBrightness(heightOffsetMeters, environment);
+	return `rgba(${mapBrightnessAdjustedChannelByte(color.red, brightness)}, ${mapBrightnessAdjustedChannelByte(color.green, brightness)}, ${mapBrightnessAdjustedChannelByte(color.blue, brightness)}, ${color.alpha})`;
 }
 
-function mapBlipChannelByte(channel: number, brightness: number): number {
+/** Convert one normalized channel and brightness multiplier into a clamped Canvas byte. */
+export function mapBrightnessAdjustedChannelByte(
+	channel: number,
+	brightness: number,
+): number {
 	return Math.round(Math.min(channel * brightness, 1) * 255);
 }
 
@@ -135,14 +133,6 @@ function unitInterval(name: string, value: number): number {
 		throw new Error(
 			`${name} must be finite and within [0, 1]; received ${value}.`,
 		);
-	}
-	return value;
-}
-
-/** Validate a hand-authored positive tuning value once when the map adapter is initialized. */
-function positiveFinite(name: string, value: number): number {
-	if (!Number.isFinite(value) || value <= 0) {
-		throw new Error(`${name} must be finite and positive; received ${value}.`);
 	}
 	return value;
 }

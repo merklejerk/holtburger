@@ -85,6 +85,42 @@ export const SHARED_FRONTEND_TUNING = {
 			worldOpacityExponent: 2,
 		},
 	},
+	minimap: {
+		breadcrumbs: {
+			/** Neutral route core, kept distinct from the semantic entity-blip palette. */
+			color: hexRgb("#878787"),
+			/** Warm near-black edge remains visible against pale dungeon floors. */
+			haloColor: hexRgb("#17110c"),
+			/** One backing pixel is enough to separate the core without making a large token. */
+			haloWidthPixels: 1,
+			/** Bounded recency window; revisiting covered space does not spend another slot. */
+			maximumSamples: 128,
+			/** A single larger 3D observation is treated as teleportation or correction. */
+			maximumContinuousStepMeters: 30,
+			/** Old history remains visible without competing with recent route evidence. */
+			oldestOpacity: 0.18,
+			/** Recent dots remain subordinate to live entity markers. */
+			newestOpacity: 0.72,
+			/** Smaller than entity blips, which are current actionable positions. */
+			radiusPixels: 1.75,
+			spacingMeters: {
+				/** Dungeon corridors retain turns and doorway-scale movement. */
+				indoor: 5,
+				/** Outdoor travel avoids producing a nearly continuous dotted stroke. */
+				outdoor: 10,
+			},
+		},
+		navigation: {
+			/**
+			 * Subject displacement after panning before the minimap resumes following, in metres.
+			 *
+			 * Distance makes the policy independent of input device and ignores turning in place. The
+			 * threshold is intentionally much smaller than the default outdoor view while still leaving
+			 * enough room to inspect nearby ground without an incidental step cancelling the pan.
+			 */
+			automaticReanchorDistanceMeters: 8,
+		},
+	},
 	map: {
 		/**
 		 * Overhead-map presentation. Shared by the Explorer and the future client shell, so this
@@ -95,16 +131,6 @@ export const SHARED_FRONTEND_TUNING = {
 		 * Retail constants the map obeys are deliberately absent: the walkable-slope threshold
 		 * lives in `game/walkability.ts` because it is a fact about the ground, not a preference.
 		 */
-		navigation: {
-			/**
-			 * Subject displacement after panning before the map resumes following, in metres.
-			 *
-			 * Distance makes the policy independent of input device and ignores turning in place. The
-			 * threshold is intentionally much smaller than the default outdoor view while still leaving
-			 * enough room to inspect nearby ground without an incidental step cancelling the pan.
-			 */
-			automaticReanchorDistanceMeters: 8,
-		},
 		hillshade: {
 			/**
 			 * Direction toward the relief light, in scene axes (+x east, +y up, -z north).

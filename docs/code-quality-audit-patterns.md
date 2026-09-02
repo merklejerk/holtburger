@@ -1504,6 +1504,98 @@ content's own silhouette, reveal animation, or transformed material rather than 
 child, derive coverage from the full set of allowed origins, and explicitly hide or change treatment
 when the origin leaves the container.
 
+## One Knob Governs Independent Behaviors
+
+**Smell:** One configuration value calibrates multiple behaviors that share units or present
+defaults but may need to vary independently.
+
+**Signals:**
+
+- A field comment names two different policies, thresholds, radii, budgets, or lifecycles.
+- Tuning one observed problem necessarily changes another behavior with a different user-facing
+  purpose.
+- Callers ask whether one behavior is tunable, but the only available control also governs a
+  neighboring behavior.
+- Tests must change unrelated scenarios whenever one calibration value changes.
+
+**Possible failure:** Operators cannot tune either behavior without accepting hidden collateral
+changes. One current data distribution makes the coupling look principled until a new scenario
+requires dense behavior in one dimension and aggressive suppression in another.
+
+**Questions:** Do the behaviors merely use the same unit, or does one domain invariant require the
+same value? Is there a demonstrated scenario where their desired values diverge? Would splitting
+the control clarify policy or only create speculative knobs?
+
+**Counterexamples:** One physical resolution, protocol limit, safety margin, or product invariant
+may definitionally govern several consequences. A deliberately coupled first version can also be
+the more maintainable choice while no evidence supports independent calibration.
+
+**Possible responses:** Keep and document an evidence-backed invariant, split independently owned
+controls once a divergent scenario exists, expose a composite policy that names the relationship,
+or derive one value through an explicit documented rule instead of incidental reuse.
+
+## Presentation Footprint Stands In for Semantic State
+
+**Smell:** A test infers semantic state, cardinality, or transition behavior from incidental
+presentation output such as painted pixels, layout area, serialized length, timing, or allocation
+size.
+
+**Signals:**
+
+- Pixel coverage is compared to prove that an item was added, removed, retained, or deduplicated.
+- Equality of a rendered footprint is treated as equality of the model that produced it.
+- Antialiasing, resolution, font, outline, opacity, batching, or backend changes fail a test whose
+  stated requirement is not visual.
+- A proxy is monotonic only under the current presentation style, overlap pattern, or data layout.
+
+**Possible failure:** Legitimate presentation changes look like semantic regressions, while
+different semantic states can accidentally produce the same footprint and pass. Tests freeze an
+implementation detail without actually proving the behavior named by their error messages.
+
+**Questions:** Which exact fact does the assertion claim? Does the observed footprint vary only
+with that fact across every supported style, scale, backend, and overlap case? Can the owning policy
+or a harness-local interpretation-boundary observation expose stronger evidence?
+
+**Counterexamples:** Golden-image, accessibility-contrast, layout, and rendering conformance tests
+may intentionally make final presentation the contract when their environment and tolerances are
+controlled. A coarse footprint can also be a useful smoke signal when it is not promoted into proof
+of a different semantic property.
+
+**Possible responses:** Assert semantic transitions at their owning policy, instrument the exact
+boundary operation in test-only code, reserve pixel checks for visible-output requirements, or use
+an independent reference measurement whose invariance matches the claim.
+
+## Test Scenario Relies on Accidental Tuning Order
+
+**Smell:** A multi-policy test only reaches its intended state while independently tunable
+thresholds happen to have a particular ordering.
+
+**Signals:**
+
+- A scenario crosses one threshold while assuming another threshold will not fire first.
+- Retuning a valid production value makes a later test control disappear or changes the branch
+  reached before the asserted behavior.
+- The test fixture encodes a convenient absolute movement, duration, capacity, or size instead of
+  constructing inputs from the policy whose behavior it is exercising.
+- Failure output names the later expected state even though an earlier policy correctly preempted
+  it.
+
+**Possible failure:** A legitimate tuning change looks like a product regression, or the test
+silently stops exercising the behavior named by its assertions. The suite couples independent
+product choices more tightly than production does.
+
+**Questions:** Which policy owns the transition under test? What other policies can preempt it?
+Does the domain require their thresholds to be ordered, or did the fixture merely assume today's
+values? Can the fixture select a valid environment or derive an input that isolates one policy?
+
+**Counterexamples:** Ordering can be the contract when validation enforces it and production logic
+depends on it. An integration test may also intentionally cover a collision between thresholds,
+provided the expected winner is explicit.
+
+**Possible responses:** Build the scenario from runtime policy values, select fixture conditions
+that isolate the intended transition, add a separate collision test when precedence matters, or
+encode and validate a real ordering invariant rather than leaving it implicit in test data.
+
 ## Adding Observations
 
 An observation belongs here when it has:

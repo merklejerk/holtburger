@@ -7,8 +7,11 @@
 		ClientChatLine,
 	} from "../../client/client-chat-policy";
 	import type { ClientChatMessage } from "../../client/client-host-contract";
-	import type { MapPanelFrame } from "../../app/map-panel-frame";
-	import { MAP_AUTOMATIC_REANCHOR_DISTANCE_METERS } from "../../lib/game/map/map-appearance";
+	import type { MinimapFrame } from "../../app/minimap-frame";
+	import {
+		MINIMAP_AUTOMATIC_REANCHOR_DISTANCE_METERS,
+		MINIMAP_BREADCRUMB_POLICY,
+	} from "../../app/minimap-tuning";
 	import type { ClientPresentationDiagnostics } from "../../client/client-presentation-session";
 	import type { ClientToast } from "../../client/client-toast-center";
 
@@ -23,11 +26,15 @@
 		readonly jumpActionDisabled: boolean | null;
 		readonly mode: "runtime" | "layout";
 		/** Coordinates currently displayed beneath the map. */
-		readonly mapCoordinates: string;
+		readonly minimapCoordinates: string;
 		/** Whether the subject-attached camera cone is currently rendered. */
-		readonly mapConeVisible: boolean;
+		readonly minimapConeVisible: boolean;
 		/** Whether detached-map chrome is currently available. */
-		readonly mapResetVisible: boolean;
+		readonly minimapResetVisible: boolean;
+		/** Non-transparent backing pixels in the Canvas2D breadcrumb/blip overlay. */
+		readonly minimapOverlayInkPixels: number;
+		/** Last overlay arc count; this fixture's null map source leaves breadcrumbs as its only arcs. */
+		readonly minimapOverlayArcCalls: number;
 		readonly moveHandles: Readonly<Record<string, ClientHudHarnessRectangle>>;
 		readonly preciseJumpEnterCount: number;
 		readonly surfaces: Readonly<Record<string, ClientHudHarnessRectangle>>;
@@ -47,9 +54,15 @@
 			deltaY: number,
 		) => void;
 		/** Move the imperative subject fixture beyond the production automatic-reset threshold. */
-		readonly moveMapSubjectPastAutomaticReanchor: () => void;
+		readonly moveMinimapSubjectPastAutomaticReanchor: () => void;
+		/** Move by a fraction of the current environment's production breadcrumb spacing. */
+		readonly moveMinimapSubjectByBreadcrumbSpacing: (fraction: number) => void;
+		/** Move beyond the production continuous-step threshold in one observation. */
+		readonly teleportMinimapSubject: () => void;
+		/** Select controlled identity and environment; null identity selects a free camera. */
+		readonly setMinimapSubject: (guid: number | null, indoor: boolean) => void;
 		/** Activate the map's visible reset control. */
-		readonly resetMap: () => void;
+		readonly resetMinimap: () => void;
 		readonly setRuntimeTransients: (visible: boolean) => void;
 		readonly toggleMode: () => void;
 	}
@@ -73,8 +86,12 @@
 	);
 	let preciseJumpEnterCount = 0;
 	/** Imperative fixture position, matching the production map frame's presentation-rate source. */
-	let mapSubjectWorldX = 100;
-	const mapSubjectWorldZ = -200;
+	let minimapSubjectWorldX = 100;
+	const minimapSubjectWorldY = 20;
+	const minimapSubjectWorldZ = -200;
+	let minimapSubjectGuid: number | null = 1;
+	let minimapSubjectIndoor = false;
+	let readMinimapOverlayArcCalls = (): number => 0;
 
 	const messages: readonly ClientChatLine[] = [
 		line(1, {
@@ -126,7 +143,7 @@
 		};
 	}
 
-	function readMapPanelFrame(): MapPanelFrame {
+	function readMinimapFrame(): MinimapFrame {
 		return {
 			cameraFovRadians: Math.PI / 3,
 			cameraHeadingRadians: 0,
@@ -135,13 +152,19 @@
 			subject: {
 				anchor: {
 					headingRadians: 0,
-					residency: null,
-					worldX: mapSubjectWorldX,
-					worldY: 20,
-					worldZ: mapSubjectWorldZ,
+					residency: minimapSubjectIndoor
+						? {
+								envCellId: "0x01020100",
+								landblockId: "0x0102ffff",
+							}
+						: null,
+					worldX: minimapSubjectWorldX,
+					worldY: minimapSubjectWorldY,
+					worldZ: minimapSubjectWorldZ,
 				},
-				guid: 1,
-				kind: "controlled-entity",
+				...(minimapSubjectGuid === null
+					? { kind: "free-camera" as const }
+					: { guid: minimapSubjectGuid, kind: "controlled-entity" as const }),
 			},
 		};
 	}
@@ -252,7 +275,7 @@
 		const moveHandles = Object.fromEntries(
 			Object.keys(surfaces).flatMap((label) => {
 				const handle = surface(label).querySelector<HTMLElement>(
-					".hud-panel-move, .map-panel-move, .hud-window-titlebar",
+					".hud-panel-move, .minimap-move, .hud-window-titlebar",
 				);
 				return handle === null ? [] : [[label, rectangle(handle)]];
 			}),
@@ -263,13 +286,15 @@
 		return {
 			jumpActionDisabled: jumpAction?.disabled ?? null,
 			mode: lock.getAttribute("aria-pressed") === "true" ? "layout" : "runtime",
-			mapCoordinates:
-				document.querySelector<HTMLElement>(".map-panel-coordinates")
+			minimapCoordinates:
+				document.querySelector<HTMLElement>(".minimap-coordinates")
 					?.textContent ?? "",
-			mapConeVisible:
-				document.querySelector<SVGPathElement>(".map-panel-cone")?.style
+			minimapConeVisible:
+				document.querySelector<SVGPathElement>(".minimap-cone")?.style
 					.display !== "none",
-			mapResetVisible: document.querySelector(".map-panel-reset") !== null,
+			minimapResetVisible: document.querySelector(".minimap-reset") !== null,
+			minimapOverlayArcCalls: readMinimapOverlayArcCalls(),
+			minimapOverlayInkPixels: countMinimapOverlayInkPixels(),
 			moveHandles,
 			preciseJumpEnterCount,
 			surfaces,
@@ -284,6 +309,72 @@
 			viewport: {
 				height: clientWorld().clientHeight,
 				width: clientWorld().clientWidth,
+			},
+		};
+	}
+
+	function countMinimapOverlayInkPixels(): number {
+		const canvas = document.querySelector<HTMLCanvasElement>(
+			".minimap-overlay-canvas",
+		);
+		const context = canvas?.getContext("2d");
+		if (!canvas || !context) return 0;
+		const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+		let count = 0;
+		for (let alpha = 3; alpha < pixels.length; alpha += 4) {
+			if (pixels[alpha] !== 0) count += 1;
+		}
+		return count;
+	}
+
+	/** Observe final Canvas operations without adding diagnostic state to production components. */
+	function observeMinimapOverlayArcCalls(): {
+		readonly read: () => number;
+		readonly restore: () => void;
+	} {
+		const canvas = document.querySelector<HTMLCanvasElement>(
+			".minimap-overlay-canvas",
+		);
+		const context = canvas?.getContext("2d");
+		if (!canvas || !context) {
+			throw new Error("Client HUD minimap overlay is unavailable.");
+		}
+		let arcCalls = 0;
+		const originalArc = context.arc;
+		const originalClearRect = context.clearRect;
+		context.arc = (
+			x: number,
+			y: number,
+			radius: number,
+			startAngle: number,
+			endAngle: number,
+			counterclockwise?: boolean,
+		): void => {
+			arcCalls += 1;
+			originalArc.call(
+				context,
+				x,
+				y,
+				radius,
+				startAngle,
+				endAngle,
+				counterclockwise,
+			);
+		};
+		context.clearRect = (
+			x: number,
+			y: number,
+			width: number,
+			height: number,
+		) => {
+			arcCalls = 0;
+			originalClearRect.call(context, x, y, width, height);
+		};
+		return {
+			read: () => arcCalls,
+			restore: () => {
+				context.arc = originalArc;
+				context.clearRect = originalClearRect;
 			},
 		};
 	}
@@ -305,7 +396,7 @@
 	function dragSurface(label: string, deltaX: number, deltaY: number): void {
 		const target = surface(label);
 		const handle = target.querySelector<HTMLElement>(
-			".hud-panel-move, .map-panel-move, .hud-window-titlebar",
+			".hud-panel-move, .minimap-move, .hud-window-titlebar",
 		);
 		if (handle === null)
 			throw new Error(`Client HUD surface has no move handle: ${label}.`);
@@ -343,29 +434,52 @@
 		);
 	}
 
-	function resetMap(): void {
-		const reset = document.querySelector<HTMLButtonElement>(".map-panel-reset");
-		if (reset === null) throw new Error("Client HUD map reset is unavailable.");
+	function resetMinimap(): void {
+		const reset = document.querySelector<HTMLButtonElement>(".minimap-reset");
+		if (reset === null) throw new Error("Client HUD minimap reset is unavailable.");
 		reset.click();
 	}
 
-	function moveMapSubjectPastAutomaticReanchor(): void {
-		mapSubjectWorldX += MAP_AUTOMATIC_REANCHOR_DISTANCE_METERS + 1;
+	function moveMinimapSubjectPastAutomaticReanchor(): void {
+		minimapSubjectWorldX += MINIMAP_AUTOMATIC_REANCHOR_DISTANCE_METERS + 1;
+	}
+
+	function moveMinimapSubjectByBreadcrumbSpacing(fraction: number): void {
+		const environment = minimapSubjectIndoor ? "indoor" : "outdoor";
+		minimapSubjectWorldX +=
+			MINIMAP_BREADCRUMB_POLICY.spacingMeters[environment] * fraction;
+	}
+
+	function teleportMinimapSubject(): void {
+		minimapSubjectWorldX +=
+			MINIMAP_BREADCRUMB_POLICY.maximumContinuousStepMeters + 1;
+	}
+
+	function setMinimapSubject(guid: number | null, indoor: boolean): void {
+		minimapSubjectGuid = guid;
+		minimapSubjectIndoor = indoor;
 	}
 
 	onMount(() => {
+		const overlayObservation = observeMinimapOverlayArcCalls();
+		readMinimapOverlayArcCalls = overlayObservation.read;
 		const harnessGlobal = globalThis as typeof globalThis & {
 			__HOLTBURGER_3D_CLIENT_HUD_HARNESS__: ClientHudHarnessApi | undefined;
 		};
 		harnessGlobal.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__ = {
 			capture,
 			dragSurface,
-			moveMapSubjectPastAutomaticReanchor,
-			resetMap,
+			moveMinimapSubjectByBreadcrumbSpacing,
+			moveMinimapSubjectPastAutomaticReanchor,
+			resetMinimap,
+			setMinimapSubject,
 			setRuntimeTransients,
+			teleportMinimapSubject,
 			toggleMode,
 		};
 		return () => {
+			overlayObservation.restore();
+			readMinimapOverlayArcCalls = () => 0;
 			harnessGlobal.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__ = undefined;
 		};
 	});
@@ -380,7 +494,7 @@
 		preciseJumpEnterCount += 1;
 	}}
 	debugEnabled={true}
-	{readMapPanelFrame}
+	{readMinimapFrame}
 	{readDiagnostics}
 	{readFrameRates}
 	showRetailHiddenGeometry={false}

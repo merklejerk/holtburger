@@ -1,9 +1,9 @@
 <script lang="ts" module>
 	/**
-	 * Bezel thickness as a fraction of the panel's diameter.
+	 * Bezel thickness as a fraction of the widget's diameter.
 	 *
 	 * Proportional rather than a fixed pixel width so the frame, its cardinal letters, and the map
-	 * disc scale together when the panel is resized, the way one piece of compass art would.
+	 * disc scale together when the widget is resized, the way one piece of compass art would.
 	 */
 	const RIM_FRACTION = 0.055;
 	/** Map disc radius in the compass viewBox's units, where the frame's outer edge is 100. */
@@ -33,7 +33,7 @@
 	/** Generous pointer target around deliberately small map markers. */
 	const BLIP_HIT_RADIUS = 8;
 	/** Ignore click-scale pointer jitter before detaching the viewed centre. */
-	const MAP_PAN_DRAG_THRESHOLD_PIXELS = 3;
+	const MINIMAP_PAN_DRAG_THRESHOLD_PIXELS = 3;
 </script>
 
 <script lang="ts">
@@ -43,7 +43,6 @@
 	import { MapRenderer } from "../lib/game/map/map-renderer";
 	import { selectMapBlips } from "../lib/game/map/map-blips";
 	import {
-		MAP_AUTOMATIC_REANCHOR_DISTANCE_METERS,
 		MAP_BLIP_FILL_COLORS,
 		MAP_BLIP_RADIUS_PIXELS,
 		mapBlipFillStyle,
@@ -59,22 +58,32 @@
 	} from "../lib/game/map/map-view";
 	import { formatWorldMapCoordinates } from "../lib/game/map/map-coordinates";
 	import {
-		captureMapPanelGpuDrawState,
-		MAP_PANEL_MINIMUM_SIZE,
-		mapPanelViewDiameter,
-		sameMapPanelGpuDrawState,
-		type MapPanelFrame,
-		type MapPanelGpuDrawState,
-		type MapPanelState,
-		type MapPanelSubject,
-	} from "./map-panel-frame";
+		captureMinimapGpuDrawState,
+		MINIMAP_MINIMUM_SIZE,
+		minimapViewDiameter,
+		sameMinimapGpuDrawState,
+		type MinimapFrame,
+		type MinimapGpuDrawState,
+		type MinimapState,
+		type MinimapSubject,
+	} from "./minimap-frame";
 	import {
-		ANCHORED_MAP_PAN_STATE,
-		detachMapPan,
-		mapPanCenter,
-		reanchorMapPanAfterSubjectTravel,
-		type MapPanState,
-	} from "./map-pan-policy";
+		ANCHORED_MINIMAP_PAN_STATE,
+		detachMinimapPan,
+		minimapPanCenter,
+		reanchorMinimapPanAfterSubjectTravel,
+		type MinimapPanState,
+	} from "./minimap-pan-policy";
+	import {
+		EMPTY_MINIMAP_BREADCRUMB_TRAIL,
+		observeMinimapBreadcrumbTrail,
+		type MinimapBreadcrumbTrail,
+	} from "./minimap-breadcrumb-trail";
+	import { drawMinimapBreadcrumbTrail } from "./minimap-breadcrumb-renderer";
+	import {
+		MINIMAP_AUTOMATIC_REANCHOR_DISTANCE_METERS,
+		MINIMAP_BREADCRUMB_POLICY,
+	} from "./minimap-tuning";
 
 	/** One rendered marker's canvas-space interaction geometry. */
 	interface BlipHitTarget {
@@ -105,7 +114,7 @@
 	}
 
 	/** Fixed inputs captured at pointer-down so one drag cannot warp as live presentation changes. */
-	interface MapPanGesture {
+	interface MinimapPanGesture {
 		/** Pointer exclusively owning this drag. */
 		readonly pointerId: number;
 		/** Horizontal viewport coordinate where the drag began. */
@@ -117,7 +126,7 @@
 		/** CSS height whose coordinate scale the captured drag uses. */
 		readonly canvasHeight: number;
 		/** Subject identity and position that arm automatic re-anchoring. */
-		readonly subject: MapPanelSubject;
+		readonly subject: MinimapSubject;
 		/** Complete starting view from which total pointer displacement is projected. */
 		readonly view: MapViewParameters;
 	}
@@ -129,57 +138,63 @@
 		 * This is deliberately imperative. The scene must not schedule Svelte work just because a
 		 * camera or entity moved; overlays pull at display cadence and the WebGL map pulls at its cap.
 		 */
-		readonly readFrame: () => MapPanelFrame;
-		readonly panel: MapPanelState;
+		readonly readFrame: () => MinimapFrame;
+		readonly viewState: MinimapState;
 		/** Whether shell-owned placement and sizing controls are currently available. */
 		readonly editable: boolean;
-		readonly onStateChange: (state: MapPanelState) => void;
+		readonly onStateChange: (state: MinimapState) => void;
 	}
 
-	const { readFrame, panel, editable, onStateChange }: Props = $props();
+	const { readFrame, viewState, editable, onStateChange }: Props = $props();
 
 	/** No faster than this; only the expensive WebGL map picture is cadence-limited. */
 	const MINIMUM_GPU_FRAME_INTERVAL_MS = 1000 / 30;
 
 	let mapCanvas = $state<HTMLCanvasElement | null>(null);
-	let blipCanvas = $state<HTMLCanvasElement | null>(null);
+	let overlayCanvas = $state<HTMLCanvasElement | null>(null);
 	let coneElement = $state<SVGPathElement | null>(null);
 	let northGroup = $state<SVGGElement | null>(null);
 	let freeAnchorElement = $state<SVGCircleElement | null>(null);
 	let coordinatesElement = $state<HTMLSpanElement | null>(null);
 	let tooltip = $state<BlipTooltip | null>(null);
-	/** Cold markup projection; cursor-rate pan coordinates remain in imperative `mapPanState`. */
-	let mapDetached = $state(false);
+	/** Cold markup projection; cursor-rate pan coordinates remain in imperative `minimapPanState`. */
+	let minimapDetached = $state(false);
 	let renderer: MapRenderer | null = null;
-	let rendererSource: MapPanelFrame["source"] = null;
+	let rendererSource: MinimapFrame["source"] = null;
 	let blipHitTargets: readonly BlipHitTarget[] = [];
 	let blipHoverPoint: BlipHoverPoint | null = null;
-	let mapPanState: MapPanState = ANCHORED_MAP_PAN_STATE;
-	let mapPanGesture: MapPanGesture | null = null;
+	let minimapPanState: MinimapPanState = ANCHORED_MINIMAP_PAN_STATE;
+	let minimapPanGesture: MinimapPanGesture | null = null;
+	let breadcrumbTrail: MinimapBreadcrumbTrail = EMPTY_MINIMAP_BREADCRUMB_TRAIL;
 	let cancelPointerGesture: (() => void) | null = null;
 	onDestroy(() => cancelPointerGesture?.());
 
 	onMount(() => {
 		let frameHandle: number | undefined;
 		let lastGpuAttemptedAt = Number.NEGATIVE_INFINITY;
-		let lastGpuDrawn: MapPanelGpuDrawState | null = null;
+		let lastGpuDrawn: MinimapGpuDrawState | null = null;
 		const step = (now: number): void => {
 			frameHandle = window.requestAnimationFrame(step);
 			const frame = readFrame();
-			if (mapPanGesture === null) {
-				replaceMapPanState(
-					reanchorMapPanAfterSubjectTravel(
-						mapPanState,
+			breadcrumbTrail = observeMinimapBreadcrumbTrail(
+				breadcrumbTrail,
+				frame.subject,
+				MINIMAP_BREADCRUMB_POLICY,
+			);
+			if (minimapPanGesture === null) {
+				replaceMinimapPanState(
+					reanchorMinimapPanAfterSubjectTravel(
+						minimapPanState,
 						frame.subject,
-						MAP_AUTOMATIC_REANCHOR_DISTANCE_METERS,
+						MINIMAP_AUTOMATIC_REANCHOR_DISTANCE_METERS,
 					),
 				);
 			}
 			const parameters = view(frame);
 			const size = discPixelSize();
 			drawOverlay(frame, parameters, size);
-			const next = captureMapPanelGpuDrawState(frame, panel, parameters);
-			if (sameMapPanelGpuDrawState(lastGpuDrawn, next)) return;
+			const next = captureMinimapGpuDrawState(frame, viewState, parameters);
+			if (sameMinimapGpuDrawState(lastGpuDrawn, next)) return;
 			if (now - lastGpuAttemptedAt < MINIMUM_GPU_FRAME_INTERVAL_MS) return;
 			lastGpuAttemptedAt = now;
 			if (drawMap(frame, parameters, size)) {
@@ -195,49 +210,47 @@
 		};
 	});
 
-	function view(frame: MapPanelFrame): MapViewParameters | null {
+	function view(frame: MinimapFrame): MapViewParameters | null {
 		const anchor = frame.subject?.anchor;
 		if (!anchor) return null;
 		return {
 			anchor,
-			center: mapPanCenter(mapPanState, frame.subject),
-			viewDiameter: clampMapViewDiameter(mapPanelViewDiameter(panel, anchor)),
+			center: minimapPanCenter(minimapPanState, frame.subject),
+			viewDiameter: clampMapViewDiameter(
+				minimapViewDiameter(viewState, anchor),
+			),
 		};
 	}
 
 	/**
-	 * Pixel size of the map disc, which is the panel inset by the bezel on both sides.
+	 * Pixel size of the map disc, which is the widget inset by the bezel on both sides.
 	 *
 	 * The drawn map is square and the disc clips it to a circle, so this is what both canvases are
-	 * sized to. The panel's own size stays the outer diameter, which the resize stud changes.
+	 * sized to. The widget's own size stays the outer diameter, which the resize stud changes.
 	 */
 	function discPixelSize(): number {
-		return Math.max(1, Math.round(panel.size * (1 - 2 * RIM_FRACTION)));
+		return Math.max(1, Math.round(viewState.size * (1 - 2 * RIM_FRACTION)));
 	}
 
 	/** Draw DOM and 2D overlay work at the display's animation cadence. */
 	function drawOverlay(
-		frame: MapPanelFrame,
+		frame: MinimapFrame,
 		parameters: MapViewParameters | null,
 		size: number,
 	): void {
 		if (parameters === null) {
 			drawChrome(frame, null);
-			clearBlipCanvas();
+			clearOverlayCanvas();
 			return;
 		}
 		const overlay = projectMapView(parameters, size, size);
 		drawChrome(frame, overlay);
-		if (!frame.source) {
-			clearBlipCanvas();
-			return;
-		}
-		drawBlips(frame, overlay, size);
+		drawCanvasOverlay(frame, overlay, size);
 	}
 
 	/** Draw only the map content that requires WebGL, subject to the 30 Hz cap. */
 	function drawMap(
-		frame: MapPanelFrame,
+		frame: MinimapFrame,
 		parameters: MapViewParameters | null,
 		size: number,
 	): boolean {
@@ -255,7 +268,7 @@
 		return true;
 	}
 
-	function reconcileRenderer(source: MapPanelFrame["source"]): void {
+	function reconcileRenderer(source: MinimapFrame["source"]): void {
 		if (rendererSource === source) return;
 		renderer?.destroy();
 		renderer = null;
@@ -268,27 +281,27 @@
 		if (mapCanvas) mapCanvas.width = mapCanvas.width;
 	}
 
-	function clearBlipCanvas(): void {
+	function clearOverlayCanvas(): void {
 		blipHitTargets = [];
 		reconcileBlipTooltip();
-		const context = blipCanvas?.getContext("2d");
-		if (blipCanvas) {
-			context?.clearRect(0, 0, blipCanvas.width, blipCanvas.height);
+		const context = overlayCanvas?.getContext("2d");
+		if (overlayCanvas) {
+			context?.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
 		}
 	}
 
 	/**
-	 * Blips are drawn in 2D above the map rather than in its GL pass.
+	 * Breadcrumbs and blips are drawn in 2D above the map rather than in its GL pass.
 	 *
 	 * They want crisp UI styling and they change for different reasons than geometry does, so
 	 * keeping them here lets a future client restyle markers without touching a shader.
 	 */
-	function drawBlips(
-		frame: MapPanelFrame,
+	function drawCanvasOverlay(
+		frame: MinimapFrame,
 		overlay: ProjectedMapView,
 		size: number,
 	): void {
-		const canvas = blipCanvas;
+		const canvas = overlayCanvas;
 		if (!canvas) return;
 		if (canvas.width !== size || canvas.height !== size) {
 			canvas.width = size;
@@ -297,7 +310,13 @@
 		const context = canvas.getContext("2d");
 		if (!context) return;
 		context.clearRect(0, 0, size, size);
+		drawMinimapBreadcrumbTrail(context, breadcrumbTrail, overlay, size);
 		const hitTargets: BlipHitTarget[] = [];
+		if (!frame.source) {
+			blipHitTargets = hitTargets;
+			reconcileBlipTooltip();
+			return;
+		}
 		const environment = mapEnvironment(overlay.view.anchor);
 		for (const blip of selectMapBlips(
 			frame.presentedEntities(),
@@ -368,10 +387,10 @@
 			if (tooltip !== null) tooltip = null;
 			return;
 		}
-		const canvas = blipCanvas;
+		const canvas = overlayCanvas;
 		const canvasBounds = canvas?.getBoundingClientRect();
 		const frameBounds = canvas
-			?.closest(".map-panel-frame")
+			?.closest(".minimap-frame")
 			?.getBoundingClientRect();
 		if (
 			!canvas ||
@@ -441,7 +460,7 @@
 	 * relative to that bearing and therefore points straight up whenever camera and subject agree.
 	 */
 	function drawChrome(
-		frame: MapPanelFrame,
+		frame: MinimapFrame,
 		overlay: ProjectedMapView | null,
 	): void {
 		const anchor = frame.subject?.anchor ?? null;
@@ -489,12 +508,12 @@
 		}
 	}
 
-	function beginMapPan(event: PointerEvent): void {
+	function beginMinimapPan(event: PointerEvent): void {
 		if (event.button !== 0) return;
 		const frame = readFrame();
 		const parameters = view(frame);
 		const subject = frame.subject;
-		const canvas = blipCanvas;
+		const canvas = overlayCanvas;
 		const bounds = canvas?.getBoundingClientRect();
 		if (
 			parameters === null ||
@@ -509,7 +528,7 @@
 		event.preventDefault();
 		event.stopPropagation();
 		clearBlipTooltip();
-		mapPanGesture = {
+		minimapPanGesture = {
 			canvasHeight: bounds.height,
 			canvasWidth: bounds.width,
 			pointerId: event.pointerId,
@@ -522,7 +541,7 @@
 	}
 
 	function moveMapPointer(event: PointerEvent): void {
-		const gesture = mapPanGesture;
+		const gesture = minimapPanGesture;
 		if (gesture === null || gesture.pointerId !== event.pointerId) {
 			showBlipTooltip(event);
 			return;
@@ -531,9 +550,9 @@
 		event.stopPropagation();
 		const deltaX = event.clientX - gesture.startClientX;
 		const deltaY = event.clientY - gesture.startClientY;
-		if (Math.hypot(deltaX, deltaY) <= MAP_PAN_DRAG_THRESHOLD_PIXELS) return;
-		replaceMapPanState(
-			detachMapPan(
+		if (Math.hypot(deltaX, deltaY) <= MINIMAP_PAN_DRAG_THRESHOLD_PIXELS) return;
+		replaceMinimapPanState(
+			detachMinimapPan(
 				mapCenterAfterCanvasDrag(
 					gesture.view,
 					gesture.canvasWidth,
@@ -546,25 +565,25 @@
 		);
 	}
 
-	function endMapPan(event: PointerEvent): void {
-		if (mapPanGesture?.pointerId !== event.pointerId) return;
-		mapPanGesture = null;
-		const canvas = blipCanvas;
+	function endMinimapPan(event: PointerEvent): void {
+		if (minimapPanGesture?.pointerId !== event.pointerId) return;
+		minimapPanGesture = null;
+		const canvas = overlayCanvas;
 		if (canvas?.hasPointerCapture(event.pointerId)) {
 			canvas.releasePointerCapture(event.pointerId);
 		}
 	}
 
-	function replaceMapPanState(state: MapPanState): void {
-		if (mapPanState === state) return;
-		mapPanState = state;
+	function replaceMinimapPanState(state: MinimapPanState): void {
+		if (minimapPanState === state) return;
+		minimapPanState = state;
 		const detached = state.kind === "detached";
-		if (mapDetached !== detached) mapDetached = detached;
+		if (minimapDetached !== detached) minimapDetached = detached;
 	}
 
-	function resetMapPan(event: MouseEvent): void {
+	function resetMinimapPan(event: MouseEvent): void {
 		event.stopPropagation();
-		replaceMapPanState(ANCHORED_MAP_PAN_STATE);
+		replaceMinimapPanState(ANCHORED_MINIMAP_PAN_STATE);
 	}
 
 	function beginDrag(event: PointerEvent): void {
@@ -573,14 +592,14 @@
 		event.stopPropagation();
 		const startX = event.clientX;
 		const startY = event.clientY;
-		const { left, top } = panel;
+		const { left, top } = viewState;
 		cancelPointerGesture?.();
 		cancelPointerGesture = trackPointerGesture(
 			window,
 			event.pointerId,
 			(moved) => {
 				onStateChange({
-					...panel,
+					...viewState,
 					left: left + moved.clientX - startX,
 					top: top + moved.clientY - startY,
 				});
@@ -594,7 +613,7 @@
 		event.stopPropagation();
 		const startX = event.clientX;
 		const startY = event.clientY;
-		const startSize = panel.size;
+		const startSize = viewState.size;
 		cancelPointerGesture?.();
 		cancelPointerGesture = trackPointerGesture(
 			window,
@@ -603,8 +622,8 @@
 				// Square by construction, so the larger drag axis wins.
 				const delta = Math.max(moved.clientX - startX, moved.clientY - startY);
 				onStateChange({
-					...panel,
-					size: Math.max(MAP_PANEL_MINIMUM_SIZE, Math.round(startSize + delta)),
+					...viewState,
+					size: Math.max(MINIMAP_MINIMUM_SIZE, Math.round(startSize + delta)),
 				});
 			},
 		);
@@ -618,11 +637,11 @@
 		const anchor = frame.subject?.anchor ?? null;
 		const environment = mapEnvironment(anchor);
 		onStateChange({
-			...panel,
+			...viewState,
 			viewDiameters: {
-				...panel.viewDiameters,
+				...viewState.viewDiameters,
 				[environment]: clampMapViewDiameter(
-					mapPanelViewDiameter(panel, anchor) * factor,
+					minimapViewDiameter(viewState, anchor) * factor,
 				),
 			},
 		});
@@ -630,58 +649,55 @@
 </script>
 
 <section
-	class="map-panel"
-	style:left={`${panel.left}px`}
-	style:top={`${panel.top}px`}
-	style:width={`${panel.size}px`}
-	style:height={`${panel.size}px`}
+	class="minimap"
+	style:left={`${viewState.left}px`}
+	style:top={`${viewState.top}px`}
+	style:width={`${viewState.size}px`}
+	style:height={`${viewState.size}px`}
 	style:--map-rim={`${RIM_FRACTION * 100}%`}
-	aria-label="Overhead map"
+	aria-label="Minimap"
 >
 	<!--
 		The round frame owns wheel zoom, while its two dedicated studs own moving and resizing. The
 		square corners around the compass stay transparent to the scene behind.
 	-->
 	<div
-		class="map-panel-frame"
+		class="minimap-frame"
 		role="toolbar"
-		aria-label="Map frame"
+		aria-label="Minimap frame"
 		tabindex="-1"
 		onwheel={zoom}
 	>
-		<div class="map-panel-disc">
-			<canvas bind:this={mapCanvas} class="map-panel-canvas"></canvas>
+		<div class="minimap-disc">
+			<canvas bind:this={mapCanvas} class="minimap-canvas minimap-map-canvas"
+			></canvas>
 			<canvas
-				bind:this={blipCanvas}
-				class="map-panel-canvas"
-				onpointerdown={beginMapPan}
+				bind:this={overlayCanvas}
+				class="minimap-canvas minimap-overlay-canvas"
+				onpointerdown={beginMinimapPan}
 				onpointermove={moveMapPointer}
-				onpointerup={endMapPan}
-				onpointercancel={endMapPan}
-				onlostpointercapture={endMapPan}
+				onpointerup={endMinimapPan}
+				onpointercancel={endMinimapPan}
+				onlostpointercapture={endMinimapPan}
 				onpointerleave={clearBlipTooltip}
 			></canvas>
 		</div>
-		<svg
-			class="map-panel-compass"
-			viewBox="-100 -100 200 200"
-			aria-hidden="true"
-		>
+		<svg class="minimap-compass" viewBox="-100 -100 200 200" aria-hidden="true">
 			<!-- The camera's own cone, attached to the subject even when the viewed centre is panned. -->
 			<defs>
-				<clipPath id="map-panel-disc-clip">
+				<clipPath id="minimap-disc-clip">
 					<circle cx="0" cy="0" r={DISC_RADIUS} />
 				</clipPath>
 			</defs>
 			<!-- The fixed parent clips the translated cone; clipping the path would move its mask too. -->
-			<g clip-path="url(#map-panel-disc-clip)">
-				<path bind:this={coneElement} class="map-panel-cone" />
+			<g clip-path="url(#minimap-disc-clip)">
+				<path bind:this={coneElement} class="minimap-cone" />
 			</g>
 			<g bind:this={northGroup}>
 				{#each [["N", 0], ["E", 90], ["S", 180], ["W", 270]] as const as [label, degrees]}
 					<text
-						class="map-panel-cardinal"
-						class:map-panel-cardinal-north={degrees === 0}
+						class="minimap-cardinal"
+						class:minimap-cardinal-north={degrees === 0}
 						x="0"
 						y={-CARDINAL_RADIUS}
 						transform={`rotate(${degrees})`}>{label}</text
@@ -691,33 +707,29 @@
 			<!-- Free-camera explorer mode has an anchor but no controlled character. -->
 			<circle
 				bind:this={freeAnchorElement}
-				class="map-panel-free-anchor"
-				clip-path="url(#map-panel-disc-clip)"
+				class="minimap-free-anchor"
+				clip-path="url(#minimap-disc-clip)"
 				cx="0"
 				cy="0"
 				r="3.5"
 			/>
 		</svg>
-		{#if mapDetached}
+		{#if minimapDetached}
 			<button
 				type="button"
-				class="map-panel-reset"
-				onclick={resetMapPan}
-				aria-label="Re-anchor map"
-				title="Re-anchor map"
+				class="minimap-reset"
+				onclick={resetMinimapPan}
+				aria-label="Re-anchor minimap"
+				title="Re-anchor minimap"
 			>
-				<svg
-					class="map-panel-handle-icon"
-					viewBox="0 0 12 12"
-					aria-hidden="true"
-				>
+				<svg class="minimap-handle-icon" viewBox="0 0 12 12" aria-hidden="true">
 					<path d="M 9.8 5 A 4 4 0 1 0 10 7 M 9.8 5 V 1.8 M 9.8 5 H 6.6" />
 				</svg>
 			</button>
 		{/if}
 		{#if tooltip}
 			<div
-				class="map-panel-tooltip"
+				class="minimap-tooltip"
 				role="tooltip"
 				style:left={`${tooltip.left}px`}
 				style:top={`${tooltip.top}px`}
@@ -728,15 +740,11 @@
 		{#if editable}
 			<button
 				type="button"
-				class="map-panel-move"
+				class="minimap-move"
 				onpointerdown={beginDrag}
-				aria-label="Move map"
+				aria-label="Move minimap"
 			>
-				<svg
-					class="map-panel-handle-icon"
-					viewBox="0 0 12 12"
-					aria-hidden="true"
-				>
+				<svg class="minimap-handle-icon" viewBox="0 0 12 12" aria-hidden="true">
 					<path
 						d="M 6 1 V 11 M 1 6 H 11 M 6 1 L 4.5 2.5 M 6 1 L 7.5 2.5 M 6 11 L 4.5 9.5 M 6 11 L 7.5 9.5 M 1 6 L 2.5 4.5 M 1 6 L 2.5 7.5 M 11 6 L 9.5 4.5 M 11 6 L 9.5 7.5"
 					/>
@@ -744,32 +752,28 @@
 			</button>
 			<button
 				type="button"
-				class="map-panel-resize"
+				class="minimap-resize"
 				onpointerdown={beginResize}
-				aria-label="Resize map"
+				aria-label="Resize minimap"
 			>
-				<svg
-					class="map-panel-handle-icon"
-					viewBox="0 0 12 12"
-					aria-hidden="true"
-				>
+				<svg class="minimap-handle-icon" viewBox="0 0 12 12" aria-hidden="true">
 					<path d="M 2 10 L 10 2 M 2 10 V 7 M 2 10 H 5 M 10 2 H 7 M 10 2 V 5" />
 				</svg>
 			</button>
 		{/if}
 	</div>
-	<span bind:this={coordinatesElement} class="map-panel-coordinates"></span>
+	<span bind:this={coordinatesElement} class="minimap-coordinates"></span>
 </section>
 
 <style>
-	.map-panel {
+	.minimap {
 		position: absolute;
 		/* Only the frame and its handle take input; the corners belong to the scene behind. */
 		pointer-events: none;
 		user-select: none;
 	}
 
-	.map-panel-frame {
+	.minimap-frame {
 		position: relative;
 		width: 100%;
 		height: 100%;
@@ -789,7 +793,7 @@
 		pointer-events: auto;
 	}
 
-	.map-panel-disc {
+	.minimap-disc {
 		position: absolute;
 		inset: var(--map-rim);
 		overflow: hidden;
@@ -799,12 +803,12 @@
 		touch-action: none;
 	}
 
-	.map-panel-disc:active {
+	.minimap-disc:active {
 		cursor: grabbing;
 	}
 
 	/* Seats the map inside the bezel: a gold lip at the rim and a shadow cast over the edge. */
-	.map-panel-disc::after {
+	.minimap-disc::after {
 		content: "";
 		position: absolute;
 		inset: 0;
@@ -815,14 +819,14 @@
 		pointer-events: none;
 	}
 
-	.map-panel-canvas {
+	.minimap-canvas {
 		position: absolute;
 		inset: 0;
 		width: 100%;
 		height: 100%;
 	}
 
-	.map-panel-compass {
+	.minimap-compass {
 		position: absolute;
 		inset: 0;
 		width: 100%;
@@ -832,11 +836,11 @@
 		pointer-events: none;
 	}
 
-	.map-panel-cone {
+	.minimap-cone {
 		fill: rgb(230 230 245 / 0.12);
 	}
 
-	.map-panel-cardinal {
+	.minimap-cardinal {
 		fill: var(--ac-ink);
 		font-family: var(--ac-font-serif);
 		font-size: 18px;
@@ -850,17 +854,17 @@
 		filter: drop-shadow(0 1px 0 rgb(0 0 0 / 0.9));
 	}
 
-	.map-panel-cardinal-north {
+	.minimap-cardinal-north {
 		fill: var(--ac-gold-bright);
 	}
 
-	.map-panel-free-anchor {
+	.minimap-free-anchor {
 		fill: rgb(150 220 150 / 0.95);
 		stroke: rgb(0 0 0 / 0.7);
 		stroke-width: 1;
 	}
 
-	.map-panel-tooltip {
+	.minimap-tooltip {
 		position: absolute;
 		z-index: 2;
 		max-width: 180px;
@@ -878,9 +882,9 @@
 		transform: translate(-50%, calc(-100% - 8px));
 	}
 
-	.map-panel-move,
-	.map-panel-resize,
-	.map-panel-reset {
+	.minimap-move,
+	.minimap-resize,
+	.minimap-reset {
 		position: absolute;
 		width: 20px;
 		height: 20px;
@@ -901,32 +905,32 @@
 		transform: translate(-50%, -50%);
 	}
 
-	.map-panel-move {
+	.minimap-move {
 		/* Opposite the resize stud, centred on the rim at 225 degrees. */
 		top: 14.645%;
 		left: 14.645%;
 		cursor: grab;
 	}
 
-	.map-panel-move:active {
+	.minimap-move:active {
 		cursor: grabbing;
 	}
 
-	.map-panel-resize {
+	.minimap-resize {
 		/* Centred on the rim at 45 degrees: 50% + (50% / sqrt 2). */
 		top: 85.355%;
 		left: 85.355%;
 		cursor: nwse-resize;
 	}
 
-	.map-panel-reset {
+	.minimap-reset {
 		/* Remaining diagonal rim position, clear of the layout handles and cardinal labels. */
 		top: 14.645%;
 		left: 85.355%;
 		cursor: pointer;
 	}
 
-	.map-panel-handle-icon {
+	.minimap-handle-icon {
 		position: absolute;
 		inset: 3px;
 		width: 12px;
@@ -939,7 +943,7 @@
 		pointer-events: none;
 	}
 
-	.map-panel-coordinates {
+	.minimap-coordinates {
 		position: absolute;
 		top: 100%;
 		left: 50%;

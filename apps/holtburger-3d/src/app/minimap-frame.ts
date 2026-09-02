@@ -7,10 +7,10 @@ import {
 } from "../lib/game/map/map-view";
 
 /** Smallest usable compass diameter when the containing viewport has enough room. */
-export const MAP_PANEL_MINIMUM_SIZE = 140;
+export const MINIMAP_MINIMUM_SIZE = 140;
 
 /** Independently remembered map extents for the two geometry modes. */
-interface MapPanelViewDiameters {
+interface MinimapViewDiameters {
 	/** World-metre diameter restored whenever the anchor is inside an EnvCell. */
 	readonly indoor: number;
 	/** World-metre diameter restored outdoors or while residency is unknown. */
@@ -18,7 +18,7 @@ interface MapPanelViewDiameters {
 }
 
 /** Subject the map follows and whether it represents a controlled entity or a free camera. */
-export type MapPanelSubject =
+export type MinimapSubject =
 	| {
 			/** Distinguishes a player or possessed explorer entity from a free camera. */
 			readonly kind: "controlled-entity";
@@ -34,20 +34,20 @@ export type MapPanelSubject =
 			readonly anchor: MapAnchor;
 	  };
 
-/** Panel geometry and view choices, owned by whichever shell mounts the map. */
-export interface MapPanelState {
+/** Minimap geometry and view choices, owned by whichever shell mounts the widget. */
+export interface MinimapState {
 	readonly left: number;
 	readonly top: number;
 	readonly size: number;
-	readonly viewDiameters: MapPanelViewDiameters;
+	readonly viewDiameters: MinimapViewDiameters;
 }
 
 /** One imperative read of every hot input the map and compass render. */
-export interface MapPanelFrame {
+export interface MinimapFrame {
 	/** Null until the runtime is ready; the map remains blank meanwhile. */
 	readonly source: MapTerrainSource | null;
 	/** Null until there is a coherent subject position and ownership. */
-	readonly subject: MapPanelSubject | null;
+	readonly subject: MinimapSubject | null;
 	readonly presentedEntities: () => Iterable<MapEntity>;
 	/** Camera field of view in radians, drawn as the view cone. */
 	readonly cameraFovRadians: number;
@@ -56,17 +56,17 @@ export interface MapPanelFrame {
 }
 
 /** Facts captured for the last completed WebGL map draw. */
-export interface MapPanelGpuDrawState {
+export interface MinimapGpuDrawState {
 	readonly source: MapTerrainSource | null;
 	readonly terrainRevision: number;
 	readonly geometryRevision: number;
 	/** Renderer-consumed projection of the current map view. */
-	readonly view: MapPanelGpuViewState | null;
-	readonly panelSize: number;
+	readonly view: MinimapGpuViewState | null;
+	readonly minimapSize: number;
 }
 
 /** Exact map-view facts whose changes invalidate the WebGL terrain and surface picture. */
-interface MapPanelGpuViewState {
+interface MinimapGpuViewState {
 	/** Subject bearing that rotates the map. */
 	readonly anchorHeadingRadians: number;
 	/** Subject height driving terrain contours and interior floor treatment. */
@@ -80,14 +80,14 @@ interface MapPanelGpuViewState {
 }
 
 /** Capture only facts whose change invalidates the WebGL map picture. */
-export function captureMapPanelGpuDrawState(
-	frame: MapPanelFrame,
-	panel: MapPanelState,
+export function captureMinimapGpuDrawState(
+	frame: MinimapFrame,
+	state: MinimapState,
 	view: MapViewParameters | null,
-): MapPanelGpuDrawState {
+): MinimapGpuDrawState {
 	return {
 		geometryRevision: frame.source?.mapGeometry.revision ?? -1,
-		panelSize: panel.size,
+		minimapSize: state.size,
 		source: frame.source,
 		terrainRevision: frame.source?.terrainInstallationRevision ?? -1,
 		view:
@@ -104,31 +104,31 @@ export function captureMapPanelGpuDrawState(
 }
 
 /** Select the remembered extent for the anchor's current geometry mode. */
-export function mapPanelViewDiameter(
-	panel: MapPanelState,
+export function minimapViewDiameter(
+	state: MinimapState,
 	anchor: MapAnchor | null,
 ): number {
-	return panel.viewDiameters[mapEnvironment(anchor)];
+	return state.viewDiameters[mapEnvironment(anchor)];
 }
 
 /** Whether a previously drawn WebGL picture still represents the latest imperative read. */
-export function sameMapPanelGpuDrawState(
-	left: MapPanelGpuDrawState | null,
-	right: MapPanelGpuDrawState,
+export function sameMinimapGpuDrawState(
+	left: MinimapGpuDrawState | null,
+	right: MinimapGpuDrawState,
 ): boolean {
 	return (
 		left !== null &&
 		left.source === right.source &&
 		left.terrainRevision === right.terrainRevision &&
 		left.geometryRevision === right.geometryRevision &&
-		left.panelSize === right.panelSize &&
+		left.minimapSize === right.minimapSize &&
 		sameGpuView(left.view, right.view)
 	);
 }
 
 function sameGpuView(
-	left: MapPanelGpuViewState | null,
-	right: MapPanelGpuViewState | null,
+	left: MinimapGpuViewState | null,
+	right: MinimapGpuViewState | null,
 ): boolean {
 	if (left === null || right === null) return left === right;
 	return (

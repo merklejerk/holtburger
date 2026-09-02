@@ -382,7 +382,7 @@ export const SHARED_FRONTEND_TUNING = {
 			parameters: {
 				temperature: 0.03,
 				tint: 0,
-				saturation: 1.06,
+				saturation: 1.1,
 				curves: {
 					master: [
 						{ x: 0, y: 0 },
@@ -447,7 +447,7 @@ export const SHARED_FRONTEND_TUNING = {
 				casterPolygonOffsetFactor: 1.1,
 				casterPolygonOffsetUnits: 2,
 				pcfRadius: 1,
-				strength: 0.6,
+				strength: 0.8,
 			},
 			projection: {
 				minimumLightElevationDegrees: 33,
@@ -455,7 +455,7 @@ export const SHARED_FRONTEND_TUNING = {
 				maximumCastLength: 64,
 			},
 			indoorGrounding: {
-				strength: 0.4,
+				strength: 0.5,
 				radiusScale: 0.8,
 				softness: 0.4,
 				dropSpread: 0.3,

@@ -17,8 +17,6 @@
 		readonly placement: ClientHudPlacement;
 		readonly title: string;
 		readonly viewport: ClientHudViewport;
-		/** Whether the titlebar exposes its runtime close action. */
-		readonly closable: boolean;
 		readonly onClose: () => void;
 		readonly onPlacementChange: (placement: ClientHudPlacement) => void;
 	}
@@ -30,7 +28,6 @@
 		placement,
 		title,
 		viewport,
-		closable,
 		onClose,
 		onPlacementChange,
 	}: Props = $props();
@@ -145,7 +142,6 @@
 			type="button"
 			class="emoji-button hud-window-close"
 			aria-label={`Close ${title}`}
-			disabled={!closable}
 			onpointerdown={(event) => event.stopPropagation()}
 			onclick={onClose}>×</button
 		>

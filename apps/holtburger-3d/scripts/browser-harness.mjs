@@ -3771,7 +3771,6 @@ function assertClientHudHarness(evidence) {
 	].toSorted();
 	const layoutLabels = [
 		...runtimeLabels,
-		"Client diagnostics",
 		"Jump power",
 		"Notifications",
 	].toSorted();
@@ -3795,11 +3794,6 @@ function assertClientHudHarness(evidence) {
 	}
 	if (evidence.layout.jumpActionDisabled !== true) {
 		throw new Error("Client HUD layout jump action remained interactive.");
-	}
-	if (evidence.layout.diagnosticsCloseDisabled !== true) {
-		throw new Error(
-			"Client HUD layout diagnostics close action remained active.",
-		);
 	}
 	if (
 		evidence.runtimeTransients.toast?.preview !== false ||

@@ -19,7 +19,6 @@
 	}
 
 	interface ClientHudHarnessState {
-		readonly diagnosticsCloseDisabled: boolean | null;
 		readonly jumpActionDisabled: boolean | null;
 		readonly mode: "runtime" | "layout";
 		readonly moveHandles: Readonly<Record<string, ClientHudHarnessRectangle>>;
@@ -238,11 +237,7 @@
 		const toastElement = document.querySelector<HTMLElement>(".client-toast");
 		const jumpAction =
 			document.querySelector<HTMLButtonElement>(".jump-precise");
-		const diagnosticsClose = document.querySelector<HTMLButtonElement>(
-			'.hud-window-close[aria-label="Close Client diagnostics"]',
-		);
 		return {
-			diagnosticsCloseDisabled: diagnosticsClose?.disabled ?? null,
 			jumpActionDisabled: jumpAction?.disabled ?? null,
 			mode: lock.getAttribute("aria-pressed") === "true" ? "layout" : "runtime",
 			moveHandles,

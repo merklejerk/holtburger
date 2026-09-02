@@ -51,6 +51,33 @@ intentionally happen before later rejection.
 **Possible responses:** Decide acceptance before effects, return immediately on rejection, or model
 the intentional pre-rejection effect explicitly and test its ordering.
 
+## A Guard Mutates the State It Guards
+
+**Smell:** A readiness check, prerequisite, assertion helper, or `ensure` operation rewrites the
+state whose suitability it is supposed to establish, even when that state is already suitable.
+
+**Signals:**
+
+- A function named `check`, `await`, `require`, or `ensure` unconditionally performs replacement,
+  normalization, publication, or reset.
+- Calling a prerequisite twice changes revisions, ownership, cache contents, residency, or pending
+  work despite no change in the requested condition.
+- Validation passes only because the guard first coerces richer valid state into one canonical form.
+
+**Possible failure:** Safety checks become destructive transitions. They can discard useful state,
+restart expensive work, invalidate concurrent consumers, or hide that the caller inspected the
+wrong authority.
+
+**Questions:** Can the current state already satisfy the prerequisite? Which mutation is necessary
+only when it does not? Must callers observe the distinction between reused and newly established
+readiness?
+
+**Counterexamples:** An `ensure` operation may intentionally converge state when its contract names
+that mutation and equivalent current state is defined narrowly enough that replacement is a no-op.
+
+**Possible responses:** Separate observation from transition, reuse an already-current proof, make
+replacement conditional on an actual mismatch, or rename the operation so its mutation is explicit.
+
 ## Invalid Combinations Hidden in Loose Fields
 
 **Smell:** Facts that must change together are represented independently, or phases are encoded
@@ -97,6 +124,32 @@ no future transition depends on their origin.
 
 **Possible responses:** Give each behaviorally distinct state an explicit representation and
 preserve authoritative empty results.
+
+## Failures Collapse Into Ordinary Absence
+
+**Smell:** An operation discards an error or invariant violation by converting it into the same
+empty, optional, false, or default result used for an expected no-result case.
+
+**Signals:**
+
+- A fallible result is converted with an operation such as `ok`, `unwrap_or_default`, an empty catch,
+  or a broad fallback without classifying the failure.
+- A return type cannot distinguish malformed input, internal invariant failure, unavailable data,
+  and legitimate absence even though callers should react differently.
+- Tests cover the absent case but cannot assert that defects remain visible.
+
+**Possible failure:** Programming errors and corrupt input masquerade as normal absence, causing the
+system to skip required work, preserve stale state, or retry an operation whose real defect is no
+longer observable.
+
+**Questions:** Which failures can reach the conversion? Are all of them behaviorally equivalent to
+absence for every caller? Does another boundary already own reporting or recovery?
+
+**Counterexamples:** Best-effort discovery, optional enrichment, and explicitly lossy queries may
+define failure as absence when that policy is named and no consumer requires the distinction.
+
+**Possible responses:** Preserve a typed error, fail loudly on an impossible invariant, classify
+expected absence separately, or move the lossy policy to the caller that can justify it.
 
 ## Stateful Work Forgets Why It Started
 

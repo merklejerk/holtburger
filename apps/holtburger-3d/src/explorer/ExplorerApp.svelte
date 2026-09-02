@@ -421,11 +421,12 @@
 					return;
 				}
 				if (!coordinator.applyFollowCameraResidency(pending, resolved)) return;
-				void requestSimulationInterest(pending.residency.landblockId).catch(
-					(error: unknown) => {
-						physicalCameraError = errorMessage(error);
-					},
-				);
+				void requestSimulationInterest(
+					pending.residency.landblockId,
+					"follow",
+				).catch((error: unknown) => {
+					physicalCameraError = errorMessage(error);
+				});
 			})
 			.catch((error: unknown) => {
 				coordinator.rejectFollowCameraResidency(pending);
@@ -654,6 +655,7 @@
 				if (!requestCoordinator.isCurrent(request.revision)) return;
 				void requestSimulationInterest(
 					resolved.target.requested.landblockId,
+					"replace",
 				).catch((error: unknown) => {
 					physicalCameraError = errorMessage(error);
 				});
@@ -673,12 +675,13 @@
 
 	async function requestSimulationInterest(
 		anchorLandblockId: LandblockOwnerId,
+		mode: "ensure" | "follow" | "replace",
 	): Promise<SimulationInterestReceipt> {
 		const controller = simulationInterestController;
 		if (!controller) {
 			throw new Error("Simulation-interest policy is not initialized.");
 		}
-		const receipt = await controller.request(anchorLandblockId);
+		const receipt = await controller[mode](anchorLandblockId);
 		// A newer application anchor superseding this request is ordinary asynchronous currentness.
 		if (!receipt.committed) return receipt;
 		if (
@@ -697,7 +700,10 @@
 	async function awaitCurrentSimulationInterest(
 		anchorLandblockId: LandblockOwnerId,
 	): Promise<SimulationInterestReceipt> {
-		const receipt = await requestSimulationInterest(anchorLandblockId);
+		const receipt = await requestSimulationInterest(
+			anchorLandblockId,
+			"ensure",
+		);
 		if (!receipt.committed) {
 			throw new Error(
 				`Collision interest for ${anchorLandblockId} was superseded before the operation could start.`,
@@ -778,7 +784,7 @@
 	): void {
 		if (physicalSimulationAnchor === anchorLandblockId) return;
 		physicalSimulationAnchor = anchorLandblockId;
-		void requestSimulationInterest(anchorLandblockId).catch(
+		void requestSimulationInterest(anchorLandblockId, "follow").catch(
 			(error: unknown) => {
 				if (physicalSimulationAnchor === anchorLandblockId) {
 					physicalSimulationAnchor = null;

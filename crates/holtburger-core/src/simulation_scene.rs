@@ -56,6 +56,33 @@ impl SimulationSceneInterest {
         Some(Self::new(owners).expect("bounded prefetch owners are normalized by construction"))
     }
 
+    /// Acquires the nominal neighborhood and retains prior owners inside its wider exit radius.
+    pub(crate) fn follow_neighborhood(
+        position: WorldPosition,
+        radius: i8,
+        exit_margin: i8,
+        previous: &Self,
+    ) -> Option<Self> {
+        if exit_margin < 0 {
+            return None;
+        }
+        let nominal = Self::prefetch_neighborhood(position, radius)?;
+        let (anchor_x, anchor_y) = position.landblock_coords();
+        let exit_radius = i16::from(radius) + i16::from(exit_margin);
+        let retained = previous.owners().iter().copied().filter(|owner| {
+            let owner_x = ((owner.0 >> 24) & 0xff) as i16;
+            let owner_y = ((owner.0 >> 16) & 0xff) as i16;
+            let distance = (owner_x - i16::from(anchor_x))
+                .abs()
+                .max((owner_y - i16::from(anchor_y)).abs());
+            distance <= exit_radius
+        });
+        Some(
+            Self::new(nominal.owners().iter().copied().chain(retained))
+                .expect("followed neighborhood owners are normalized by construction"),
+        )
+    }
+
     /// Returns owners in deterministic ascending order.
     pub fn owners(&self) -> &[Guid] {
         &self.owners
@@ -273,6 +300,13 @@ impl SimulationSceneResidency {
     /// Returns current desired-owner availability, including pending work.
     pub fn availability(&self) -> &BTreeMap<Guid, SimulationSceneOwnerAvailability> {
         &self.availability
+    }
+
+    /// Returns the latest desired interest, or installed interest when no request is pending.
+    pub(crate) fn desired_interest(&self) -> &SimulationSceneInterest {
+        self.desired
+            .as_ref()
+            .map_or(&self.installed.interest, |desired| &desired.interest)
     }
 
     /// Starts a new desired revision, or returns `None` when policy demand is unchanged.
@@ -612,7 +646,16 @@ pub enum SimulationSceneResidencyError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use holtburger_common::{Quaternion, Vector3};
     use holtburger_content::{LandblockColliders, TerrainCollisionSurface};
+
+    fn position(owner: u32) -> WorldPosition {
+        WorldPosition {
+            landblock_id: Guid(owner),
+            coords: Vector3::new(96.0, 96.0, 0.0),
+            rotation: Quaternion::identity(),
+        }
+    }
 
     fn asset(owner: Guid) -> LandblockCollisionAsset {
         LandblockCollisionAsset {
@@ -647,6 +690,34 @@ mod tests {
             SimulationSceneInterest::new([Guid(0xda55_0100)]),
             Err(SimulationSceneResidencyError::InvalidOwner { .. })
         ));
+    }
+
+    #[test]
+    fn followed_neighborhood_converges_at_four_owner_corner() {
+        let mut effective = SimulationSceneInterest::default();
+        for owner in [0xda55_ffff, 0xdb55_ffff, 0xdb56_ffff, 0xda56_ffff] {
+            effective =
+                SimulationSceneInterest::follow_neighborhood(position(owner), 1, 1, &effective)
+                    .unwrap();
+        }
+
+        assert_eq!(effective.owners().len(), 16);
+        assert!(effective.owners().contains(&Guid(0xd954_ffff)));
+        assert!(effective.owners().contains(&Guid(0xdc57_ffff)));
+    }
+
+    #[test]
+    fn followed_neighborhood_evicts_beyond_exit_radius() {
+        let mut effective = SimulationSceneInterest::default();
+        for owner in [0xda55_ffff, 0xdb55_ffff, 0xdc55_ffff, 0xdd55_ffff] {
+            effective =
+                SimulationSceneInterest::follow_neighborhood(position(owner), 1, 1, &effective)
+                    .unwrap();
+        }
+
+        assert_eq!(effective.owners().len(), 12);
+        assert!(!effective.owners().contains(&Guid(0xd955_ffff)));
+        assert!(effective.owners().contains(&Guid(0xdb55_ffff)));
     }
 
     #[test]

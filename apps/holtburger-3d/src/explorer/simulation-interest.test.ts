@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+	computeEffectiveSimulationInterest,
 	computeSimulationInterest,
 	SimulationInterestController,
 	type SimulationInterestReceipt,
@@ -32,6 +33,39 @@ describe("computeSimulationInterest", () => {
 	});
 });
 
+describe("computeEffectiveSimulationInterest", () => {
+	it("converges at a four-owner corner without growing beyond radius three", () => {
+		let owners: readonly string[] = [];
+		for (const anchor of [
+			"0xda55ffff",
+			"0xdb55ffff",
+			"0xdb56ffff",
+			"0xda56ffff",
+		]) {
+			owners = computeEffectiveSimulationInterest(anchor, owners);
+		}
+
+		expect(owners).toHaveLength(36);
+		expect(owners).toContain("0xd853ffff");
+		expect(owners).toContain("0xdc58ffff");
+	});
+
+	it("evicts prior owners after sustained travel crosses the exit radius", () => {
+		let owners: readonly string[] = [];
+		for (const anchor of [
+			"0xda55ffff",
+			"0xdb55ffff",
+			"0xdc55ffff",
+			"0xdd55ffff",
+		]) {
+			owners = computeEffectiveSimulationInterest(anchor, owners);
+		}
+
+		expect(owners).toHaveLength(30);
+		expect(owners).not.toContain("0xd855ffff");
+	});
+});
+
 describe("SimulationInterestController", () => {
 	it("does not replace simulation interest when only render residency radii change", async () => {
 		const replace = vi.fn(async (request: SimulationInterestRequest) => ({
@@ -41,9 +75,9 @@ describe("SimulationInterestController", () => {
 		}));
 		const controller = new SimulationInterestController({ replace });
 
-		const first = controller.request("0xda55ffff");
+		const first = controller.replace("0xda55ffff");
 		// Render residency radii are deliberately not an input. Re-requesting the same anchor is a no-op.
-		const afterResidencyChange = controller.request("0xda55ffff");
+		const afterResidencyChange = controller.replace("0xda55ffff");
 
 		expect(afterResidencyChange).toBe(first);
 		await first;
@@ -64,8 +98,8 @@ describe("SimulationInterestController", () => {
 		};
 		const controller = new SimulationInterestController(transport);
 
-		await controller.request("0xda55ffff");
-		await controller.request("0xdb55ffff");
+		await controller.replace("0xda55ffff");
+		await controller.replace("0xdb55ffff");
 
 		expect(requests.map(({ revision }) => revision)).toEqual([1, 2]);
 		expect(requests[1]!.landblockIds).toContain("0xdb55ffff");
@@ -83,9 +117,9 @@ describe("SimulationInterestController", () => {
 		};
 		const controller = new SimulationInterestController(transport);
 
-		const first = await controller.request("0xda55ffff");
+		const first = await controller.replace("0xda55ffff");
 		expect(controller.isCurrent("0xda55ffff", first.revision)).toBe(true);
-		const secondPromise = controller.request("0xdb55ffff");
+		const secondPromise = controller.replace("0xdb55ffff");
 		expect(controller.isCurrent("0xda55ffff", first.revision)).toBe(false);
 		const second = await secondPromise;
 		expect(controller.isCurrent("0xdb55ffff", second.revision)).toBe(true);
@@ -111,8 +145,8 @@ describe("SimulationInterestController", () => {
 		};
 		const controller = new SimulationInterestController(transport);
 
-		const first = controller.request("0xda55ffff");
-		const second = controller.request("0xdb55ffff");
+		const first = controller.replace("0xda55ffff");
+		const second = controller.replace("0xdb55ffff");
 		const secondReceipt = await second;
 
 		expect(controller.isCurrent("0xda55ffff", 1)).toBe(false);
@@ -142,11 +176,60 @@ describe("SimulationInterestController", () => {
 			}));
 		const controller = new SimulationInterestController({ replace });
 
-		await expect(controller.request("0xda55ffff")).rejects.toThrow(
+		await expect(controller.replace("0xda55ffff")).rejects.toThrow(
 			"host unavailable",
 		);
-		await controller.request("0xda55ffff");
+		await controller.replace("0xda55ffff");
 
 		expect(replace).toHaveBeenCalledTimes(2);
+	});
+
+	it("coalesces a settled corner follow once its effective owner set converges", async () => {
+		const requests: SimulationInterestRequest[] = [];
+		const controller = new SimulationInterestController({
+			async replace(request) {
+				requests.push(request);
+				return {
+					committed: true,
+					revision: request.revision,
+					unavailableLandblockIds: [],
+				};
+			},
+		});
+		const corners = [
+			"0xda55ffff",
+			"0xdb55ffff",
+			"0xdb56ffff",
+			"0xda56ffff",
+		] as const;
+		for (const anchor of [...corners, ...corners])
+			await controller.follow(anchor);
+		const convergedRequestCount = requests.length;
+		const receipt = await controller.follow("0xda55ffff");
+
+		expect(requests).toHaveLength(convergedRequestCount);
+		expect(controller.isCurrent("0xda55ffff", receipt.revision)).toBe(true);
+	});
+
+	it("ensures a current follow anchor without collapsing its retained owner set", async () => {
+		const requests: SimulationInterestRequest[] = [];
+		const controller = new SimulationInterestController({
+			async replace(request) {
+				requests.push(request);
+				return {
+					committed: true,
+					revision: request.revision,
+					unavailableLandblockIds: [],
+				};
+			},
+		});
+
+		await controller.follow("0xda55ffff");
+		const followed = await controller.follow("0xdb55ffff");
+		expect(requests.at(-1)?.landblockIds).toHaveLength(30);
+		const ensured = await controller.ensure("0xdb55ffff");
+
+		expect(ensured).toBe(followed);
+		expect(requests).toHaveLength(2);
 	});
 });

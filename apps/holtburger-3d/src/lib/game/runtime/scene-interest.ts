@@ -35,7 +35,14 @@ export function isOutdoorStaticLayer(
 	);
 }
 
-export type SceneInterestMap = Map<LandblockOwnerId, Set<LandblockLayerKind>>;
+/** Read-only layer demand keyed by normalized landblock owner. */
+export type SceneInterestMap = ReadonlyMap<
+	LandblockOwnerId,
+	ReadonlySet<LandblockLayerKind>
+>;
+
+/** One landblock of render residency beyond each layer's nominal acquisition radius. */
+const RENDER_SCENE_INTEREST_EXIT_MARGIN = 1;
 
 export interface LandblockIdLayer {
 	readonly id: LandblockOwnerId;
@@ -100,7 +107,7 @@ export function computeOutdoorSceneInterest(
 ): SceneInterestMap {
 	const anchor = getLandblockCoordinates(landblockId);
 	const suffix = landblockIdSuffix(landblockId);
-	const interest: SceneInterestMap = new Map();
+	const interest = new Map<LandblockOwnerId, Set<LandblockLayerKind>>();
 	for (
 		let y = anchor.y - config.terrainRadius;
 		y <= anchor.y + config.terrainRadius;
@@ -137,6 +144,64 @@ export function computeOutdoorSceneInterest(
 		}
 	}
 	return interest;
+}
+
+/** Return the configured nominal radius for a layer, or null when that layer is disabled. */
+function sceneInterestEntryRadius(
+	layer: LandblockLayerKind,
+	config: SceneInterestRadii,
+): number | null {
+	switch (layer) {
+		case LandblockLayerKind.Terrain:
+			return config.terrainRadius;
+		case LandblockLayerKind.Buildings:
+			return config.buildingRadius;
+		case LandblockLayerKind.Objects:
+			return config.explicitObjectRadius;
+		case LandblockLayerKind.Generated:
+			return config.generatedObjectRadius;
+		case LandblockLayerKind.EnvCells:
+			return config.envCellRadius;
+	}
+}
+
+/**
+ * Retain only previously acquired layers that remain inside their exit radius.
+ *
+ * This is a spatial Schmitt trigger: the nominal map acquires at radius R, while prior effective
+ * memberships leave at R + the fixed margin. It never preloads the outer ring.
+ */
+export function retainSceneInterestWithinExitMargin(
+	nominal: SceneInterestMap,
+	previous: SceneInterestMap,
+	anchorId: LandblockOwnerId,
+	config: SceneInterestRadii,
+): SceneInterestMap {
+	const anchor = getLandblockCoordinates(normalizeLandblockOwner(anchorId));
+	const effective = new Map<LandblockOwnerId, Set<LandblockLayerKind>>(
+		[...nominal].map(([owner, layers]) => [owner, new Set(layers)]),
+	);
+
+	for (const [owner, layers] of previous) {
+		const coordinates = getLandblockCoordinates(owner);
+		const distance = Math.max(
+			Math.abs(coordinates.x - anchor.x),
+			Math.abs(coordinates.y - anchor.y),
+		);
+		for (const layer of layers) {
+			const entryRadius = sceneInterestEntryRadius(layer, config);
+			if (
+				entryRadius === null ||
+				distance > entryRadius + RENDER_SCENE_INTEREST_EXIT_MARGIN
+			)
+				continue;
+			const retained = effective.get(owner);
+			if (retained) retained.add(layer);
+			else effective.set(owner, new Set([layer]));
+		}
+	}
+
+	return effective;
 }
 
 /** Derive the one EnvCells layer required by a dungeon owner. */

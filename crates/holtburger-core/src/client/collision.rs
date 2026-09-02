@@ -37,6 +37,9 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 /// One landblock of collision coverage on either side of the authoritative owner.
 pub const CLIENT_COLLISION_OWNER_RADIUS: i8 = 1;
 
+/// Keep acquired collision owners for one extra landblock beyond the nominal radius.
+const CLIENT_COLLISION_EXIT_MARGIN: i8 = 1;
+
 /// Exact authoritative player identity used to guard asynchronous completion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ClientPlayerIdentity {
@@ -348,7 +351,7 @@ impl ClientCollisionCoordinator {
     /// Independently refreshes scene interest and immutable authoritative-body definition demand.
     pub fn observe(&mut self, world: &mut WorldState) -> Vec<WorldEvent> {
         let mut events = self.observe_remote_bodies(world);
-        let Some(target) = Self::target_from_world(world) else {
+        let Some(target) = Self::target_from_world(world, self.residency.desired_interest()) else {
             self.clear();
             return events;
         };
@@ -415,7 +418,9 @@ impl ClientCollisionCoordinator {
                         continue;
                     }
                     self.body_worker = None;
-                    let Some(current) = Self::target_from_world(world) else {
+                    let Some(current) =
+                        Self::target_from_world(world, self.residency.desired_interest())
+                    else {
                         self.body_target = None;
                         self.body_readiness = ClientBodyReadiness::Waiting;
                         continue;
@@ -576,7 +581,10 @@ impl ClientCollisionCoordinator {
         }
     }
 
-    fn target_from_world(world: &WorldState) -> Option<ClientSpatialTarget> {
+    fn target_from_world(
+        world: &WorldState,
+        previous_interest: &SimulationSceneInterest,
+    ) -> Option<ClientSpatialTarget> {
         let guid = world.player.guid;
         if guid == Guid::NULL {
             return None;
@@ -584,9 +592,11 @@ impl ClientCollisionCoordinator {
         let entity = world.player_entity()?;
         let position = entity.position;
         let facts = client_player_body_facts(world).ok()?;
-        let interest = SimulationSceneInterest::prefetch_neighborhood(
+        let interest = SimulationSceneInterest::follow_neighborhood(
             position,
             CLIENT_COLLISION_OWNER_RADIUS,
+            CLIENT_COLLISION_EXIT_MARGIN,
+            previous_interest,
         )?;
         Some(ClientSpatialTarget {
             player: ClientPlayerIdentity {
@@ -1342,7 +1352,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn exact_cell_motion_schedules_no_work_and_seam_loading_retains_the_snapshot() {
+    async fn exact_cell_motion_and_repeated_seam_crossing_avoid_reloading_collision() {
         let mut world = WorldState::synthetic();
         let guid = Guid(0x5000_0001);
         world.seed_local_player_entity(guid, "Player", position(0x1234_0001));
@@ -1373,6 +1383,17 @@ mod tests {
         wait_for_scene_revision(&mut coordinator, &mut world, 2).await;
         assert_eq!(source.loaded.lock().unwrap().len(), 12);
         assert_eq!(source.prepared.load(Ordering::SeqCst), 1);
+
+        for owner in [0x1234_0001, 0x1334_0001, 0x1234_0001] {
+            world.entities.get_mut(guid).unwrap().position.landblock_id = Guid(owner);
+            coordinator.observe(&mut world);
+            assert!(
+                coordinator.scene_worker.is_none(),
+                "a retained seam crossing must not schedule collision loading"
+            );
+        }
+        assert_eq!(coordinator.snapshot().revision, 2);
+        assert_eq!(source.loaded.lock().unwrap().len(), 12);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

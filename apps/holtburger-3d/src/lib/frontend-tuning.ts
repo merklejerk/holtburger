@@ -279,7 +279,7 @@ export const SHARED_FRONTEND_TUNING = {
 				/** Other connected players. */
 				player: hexRgba("#38d64fff"),
 				/** Non-player characters and service providers. */
-				npc: hexRgba("#d6b23fff"),
+				npc: hexRgba("#e3b932ff"),
 				/** Hostile and attackable creatures. */
 				mob: hexRgba("#d24b45ff"),
 				/** Portal objects. */
@@ -291,6 +291,13 @@ export const SHARED_FRONTEND_TUNING = {
 				/** The locally driven entity's directional marker. */
 				controlled: hexRgba("#bce8aeff"),
 			} as const,
+			/**
+			 * Maximum fractional brightness change for entities above or below the map anchor.
+			 *
+			 * The adjustment reaches this value over the map's existing indoor floor or outdoor
+			 * contour-height span, so marker elevation agrees with the geometry beneath it.
+			 */
+			maximumElevationBrightnessAdjustment: 0.5,
 			/** Marker radius in canvas pixels, sized to stay legible without hiding the ground. */
 			radiusPixels: 3.5,
 		},

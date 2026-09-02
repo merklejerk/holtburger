@@ -1,5 +1,11 @@
 import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
-import { normalizedRgbColor, type HexRgbColor } from "../../frontend-color";
+import {
+	normalizedRgbColor,
+	normalizedRgbaColor,
+	type HexRgbColor,
+} from "../../frontend-color";
+import type { MapBlipCategory } from "./map-blip-category";
+import type { MapEnvironment } from "./map-view";
 
 /**
  * GPU-ready form of the overhead map's tuning policy.
@@ -78,7 +84,54 @@ export const MAP_TRANSITION_ACCENT_THICKNESS =
 	MAP_TUNING.interior.transitionAccentThicknessMeters;
 
 export const MAP_BLIP_FILL_COLORS = MAP_TUNING.blips.fillColors;
+export const MAP_BLIP_MAXIMUM_ELEVATION_BRIGHTNESS_ADJUSTMENT = unitInterval(
+	"map.blips.maximumElevationBrightnessAdjustment",
+	MAP_TUNING.blips.maximumElevationBrightnessAdjustment,
+);
 export const MAP_BLIP_RADIUS_PIXELS = MAP_TUNING.blips.radiusPixels;
+
+/**
+ * Convert anchor-relative elevation into a clamped Canvas brightness multiplier.
+ *
+ * Indoor markers reach the endpoint over one floor-tint span; outdoor markers use the broader
+ * contour-height span. Positive elevation brightens and negative elevation darkens.
+ */
+export function mapBlipBrightness(
+	heightOffsetMeters: number,
+	environment: MapEnvironment,
+): number {
+	const span =
+		environment === "indoor" ? MAP_FLOOR_TINT_SPAN : MAP_CONTOUR_HEIGHT_SPAN;
+	const normalizedHeight = Math.min(Math.abs(heightOffsetMeters) / span, 1);
+	const adjustment =
+		normalizedHeight * MAP_BLIP_MAXIMUM_ELEVATION_BRIGHTNESS_ADJUSTMENT;
+	return heightOffsetMeters < 0 ? 1 - adjustment : 1 + adjustment;
+}
+
+/** Resolve one elevation-shaded category color into a Canvas-compatible straight-alpha fill. */
+export function mapBlipFillStyle(
+	category: MapBlipCategory,
+	heightOffsetMeters: number,
+	environment: MapEnvironment,
+): string {
+	const color = normalizedRgbaColor(MAP_BLIP_FILL_COLORS[category]);
+	const brightness = mapBlipBrightness(heightOffsetMeters, environment);
+	return `rgba(${mapBlipChannelByte(color.red, brightness)}, ${mapBlipChannelByte(color.green, brightness)}, ${mapBlipChannelByte(color.blue, brightness)}, ${color.alpha})`;
+}
+
+function mapBlipChannelByte(channel: number, brightness: number): number {
+	return Math.round(Math.min(channel * brightness, 1) * 255);
+}
+
+/** Validate a hand-authored fractional tuning value once when the map adapter is initialized. */
+function unitInterval(name: string, value: number): number {
+	if (!Number.isFinite(value) || value < 0 || value > 1) {
+		throw new Error(
+			`${name} must be finite and within [0, 1]; received ${value}.`,
+		);
+	}
+	return value;
+}
 
 export const MAP_DEFAULT_VIEW_DIAMETERS =
 	MAP_TUNING.zoom.defaultViewDiameterMeters;

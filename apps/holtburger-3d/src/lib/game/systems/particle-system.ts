@@ -10,7 +10,11 @@ import {
 	rotateAcVector,
 	sceneVector3,
 } from "../../assets/ac-frame";
-import type { AcRotation } from "../../assets/ac-frame";
+import type {
+	MutableRenderQuaternion,
+	RenderQuaternion,
+	ResolvedFrameRotation,
+} from "../../assets/ac-frame";
 import type {
 	DrawableParticleEmitter,
 	PreparedParticleEmitter,
@@ -68,14 +72,28 @@ export interface ParticleSystemDependencies {
 	 */
 	readonly targetLives: (target: BehaviorTarget) => boolean;
 	/**
-	 * Current rotation of a target's frame, in AC's authored axes, or `null` once it stops
-	 * publishing one.
+	 * Current rotation of a target's frame in paired AC and render representations, or `null` once
+	 * it stops publishing one.
 	 *
-	 * Read at spawn and never retained, mirroring retail's `start_frame` snapshot. It must be the
+	 * Resolved at spawn, mirroring retail's `start_frame` snapshot: AC rotation bakes the trajectory
+	 * constants, while render rotation is retained for detached particle records. It must be the
 	 * *live* frame rather than the authored one: a script that rotates its owner changes where its
 	 * emitters fire, and an authored decode-time rotation would miss that.
 	 */
-	readonly sceneRotationOf: (target: BehaviorTarget) => AcRotation | null;
+	readonly sceneRotationOf: (
+		target: BehaviorTarget,
+	) => ResolvedFrameRotation | null;
+	/**
+	 * Write only a target's live render rotation for a parent-following draw range.
+	 *
+	 * This is the frame-tier counterpart to the spawn-tier composite resolver above. It writes into
+	 * emitter-owned storage so following particles do not allocate or derive the unused AC
+	 * trajectory representation every rendered frame.
+	 */
+	readonly writeSceneRenderRotationOf: (
+		target: BehaviorTarget,
+		output: MutableRenderQuaternion,
+	) => boolean;
 	/**
 	 * Resolve the node whose frame positions a part-attached emitter, or `null` when the part is
 	 * unknown.
@@ -105,17 +123,24 @@ type MutableParticleSourceRange = {
 	-readonly [K in keyof ParticleSourceRange]: ParticleSourceRange[K];
 };
 
-const RECORD_PARTICLE_RANGE_ORIGIN = { kind: "record" } as const;
+const RECORD_PARTICLE_FRAME = { kind: "record" } as const;
 
-/** Lifetime-owned mutable storage exposed downstream as a readonly split origin. */
-class FollowingRangeOrigin {
+/** Lifetime-owned mutable storage exposed downstream as one coherent live parent frame. */
+class FollowingRangeFrame {
 	readonly kind = "range";
 	readonly #mutableLandblockOrigin: [number, number, number] = [0, 0, 0];
 	readonly #mutableLocalOrigin: [number, number, number] = [0, 0, 0];
+	readonly rotationOutput: MutableRenderQuaternion = {
+		w: 1,
+		x: 0,
+		y: 0,
+		z: 0,
+	};
 	readonly landblockOrigin = sceneVector3(this.#mutableLandblockOrigin);
 	readonly localOrigin = landblockVector3(this.#mutableLocalOrigin);
+	readonly rotation = this.rotationOutput as RenderQuaternion;
 
-	update(origin: SceneVector3): void {
+	updateOrigin(origin: SceneVector3): void {
 		const landblockX = quantizeToLandblock(origin[0]);
 		const landblockZ = quantizeToLandblock(origin[2]);
 		this.#mutableLandblockOrigin[0] = landblockX;
@@ -133,7 +158,7 @@ function blankRange(): MutableParticleSourceRange {
 		count: 0,
 		hwGfxObjId: "" as DatAssetId,
 		motionType: 0,
-		origin: RECORD_PARTICLE_RANGE_ORIGIN,
+		frame: RECORD_PARTICLE_FRAME,
 		renderOwner: EXTERIOR_PARTICLE_RENDER_OWNER,
 	};
 }
@@ -160,6 +185,7 @@ function blankRecord(): MutableParticleInstanceRecord {
 			SceneVector3,
 		localOrigin: landblockVector3([0, 0, 0]) as [number, number, number] &
 			LandblockVector3,
+		rotation: { w: 1, x: 0, y: 0, z: 0 },
 		startScale: 0,
 		startTranslucency: 0,
 	};
@@ -279,6 +305,8 @@ interface LiveParticle {
 	 */
 	deathTime: number;
 	readonly spawn: ParticleSpawnConstants;
+	/** Spawn-time mesh frame consumed by detached records; following ranges override it live. */
+	readonly rotation: RenderQuaternion;
 	/**
 	 * Spawn origin frozen in the fixed scene frame, for an emitter that leaves particles behind.
 	 *
@@ -292,8 +320,8 @@ interface LiveParticle {
 
 interface EmitterInstance {
 	readonly emitter: DrawableParticleEmitter;
-	/** Origin source carried by this emitter's draw range and selected in the vertex stage. */
-	readonly drawOrigin: ParticleRangeOrigin;
+	/** Frame source carried by this emitter's draw range and selected in the vertex stage. */
+	readonly drawFrame: ParticleRangeFrame;
 	/** Owner-relative conservative extent, computed once because no emitter property changes live. */
 	readonly envelopeRadius: number;
 	/**
@@ -370,10 +398,10 @@ export type ParticleRenderOwner =
 	| typeof EXTERIOR_PARTICLE_RENDER_OWNER
 	| typeof SKY_PARTICLE_RENDER_OWNER;
 
-/** Where a draw range obtains the origin shared by its particles. */
-type ParticleRangeOrigin =
+/** Where a draw range obtains the position and rotation used by its particles. */
+type ParticleRangeFrame =
 	| {
-			/** Particles that leave their parent retain the origin stored in each spawn record. */
+			/** Detached particles retain their complete frame in each spawn record. */
 			readonly kind: "record";
 	  }
 	| {
@@ -381,6 +409,7 @@ type ParticleRangeOrigin =
 			readonly kind: "range";
 			readonly landblockOrigin: SceneVector3;
 			readonly localOrigin: LandblockVector3;
+			readonly rotation: RenderQuaternion;
 	  };
 
 /** One emitter's slot range awaiting renderer-owned portal-domain routing. */
@@ -389,8 +418,8 @@ export interface ParticleSourceRange {
 	readonly hwGfxObjId: DatAssetId;
 	/** Vertex-stage motion law shared by every instance in this range. */
 	readonly motionType: number;
-	/** Record-local or one live emitter origin, selected once for the whole range. */
-	readonly origin: ParticleRangeOrigin;
+	/** Frozen record-local or one coherent live parent frame, selected once for the range. */
+	readonly frame: ParticleRangeFrame;
 	/** First record slot this range draws. */
 	readonly baseSlot: number;
 	/** Live particles in the range, drawn as instances from `baseSlot`. */
@@ -574,9 +603,9 @@ export class ParticleSystem {
 		}
 		const envelopeRadius = drawableEnvelopeRadius(emitter, hookOffset);
 		const instance: EmitterInstance = {
-			drawOrigin: emitter.info.followsParent
-				? new FollowingRangeOrigin()
-				: RECORD_PARTICLE_RANGE_ORIGIN,
+			drawFrame: emitter.info.followsParent
+				? new FollowingRangeFrame()
+				: RECORD_PARTICLE_FRAME,
 			region: this.#slots.allocate(Math.max(1, emitter.info.maxParticles)),
 			emittedCount: 0,
 			emitter,
@@ -708,12 +737,12 @@ export class ParticleSystem {
 			if (info.motionType === null) continue;
 			const renderOwner = resolveRenderOwner(instance.target);
 			if (renderOwner === null) continue;
-			// A following emitter's particles all share one current parent origin. Resolve and split it
-			// once for the range; the vertex stage selects it instead of each particle's spawn record.
+			// A following emitter's particles all share one current parent frame. Resolve it once for
+			// the range; the vertex stage selects it instead of each particle's spawn record.
 			if (info.followsParent) {
 				this.#lastVisibleFollowingEmitterCount += 1;
 				this.#lastVisibleFollowingParticleCount += instance.particles.length;
-				this.#updateFollowingRangeOrigin(instance);
+				this.#updateFollowingRangeFrame(instance);
 			}
 			const range = (this.#rangePool[rangesUsed] ??= blankRange());
 			rangesUsed += 1;
@@ -721,7 +750,7 @@ export class ParticleSystem {
 			range.count = instance.particles.length;
 			range.hwGfxObjId = instance.emitter.mesh.id;
 			range.motionType = info.motionType;
-			range.origin = instance.drawOrigin;
+			range.frame = instance.drawFrame;
 			range.renderOwner = renderOwner;
 			this.#rangeOutput.push(range);
 		}
@@ -1075,7 +1104,7 @@ export class ParticleSystem {
 		}
 		const rotated = rotatedSpawnConstants(info.motionType);
 		const inFrame = (vector: AcVector3, applies: boolean): AcVector3 =>
-			applies ? rotateAcVector(rotation, vector) : vector;
+			applies ? rotateAcVector(rotation.ac, vector) : vector;
 		// Retail rotates `offset` for every type, `Still` included, so this is unconditional. It is
 		// resolved before `c` because two motion types derive `c` from the rotated offset.
 		const derived = this.#deriveOffsetAndC(
@@ -1094,6 +1123,7 @@ export class ParticleSystem {
 		instance.particles.push({
 			birthTime: timeSeconds,
 			deathTime,
+			rotation: rotation.render,
 			// A following emitter resolves its origin live every frame, so freezing one here would
 			// be a value nothing reads. The hook offset is applied by the shared resolution instead
 			// of here, so both kinds of emitter get it.
@@ -1120,7 +1150,7 @@ export class ParticleSystem {
 	 * Write one live particle's record into its slot.
 	 *
 	 * Every record field is fixed at spawn except birth/death compaction. Following emitters select
-	 * their current range origin in the vertex stage, so parent motion never dirties particle rows.
+	 * their current range frame in the vertex stage, so parent motion never dirties particle rows.
 	 */
 	#writeParticleRecord(
 		instance: EmitterInstance,
@@ -1144,6 +1174,7 @@ export class ParticleSystem {
 		this.#recordScratch.finalTranslucency = particle.spawn.finalTranslucency;
 		this.#recordScratch.lifespan = particle.spawn.lifespan;
 		this.#recordScratch.offset = particle.spawn.offset;
+		this.#recordScratch.rotation = particle.rotation;
 		this.#recordScratch.landblockOrigin[0] = landblockX;
 		this.#recordScratch.landblockOrigin[1] = 0;
 		this.#recordScratch.landblockOrigin[2] = landblockZ;
@@ -1155,13 +1186,23 @@ export class ParticleSystem {
 		this.#slots.writeRecord(slot, this.#recordScratch);
 	}
 
-	/** Resolve and split one following emitter origin into its lifetime-owned range storage. */
-	#updateFollowingRangeOrigin(instance: EmitterInstance): void {
-		const origin = instance.drawOrigin;
-		if (!(origin instanceof FollowingRangeOrigin)) {
-			throw new Error("A parent-following emitter has no range origin.");
+	/** Resolve one following emitter frame into its lifetime-owned range storage. */
+	#updateFollowingRangeFrame(instance: EmitterInstance): void {
+		const frame = instance.drawFrame;
+		if (!(frame instanceof FollowingRangeFrame)) {
+			throw new Error("A parent-following emitter has no range frame.");
 		}
-		origin.update(this.#liveOriginOf(instance));
+		frame.updateOrigin(this.#liveOriginOf(instance));
+		if (
+			!this.#dependencies.writeSceneRenderRotationOf(
+				instance.frameTarget,
+				frame.rotationOutput,
+			)
+		) {
+			throw new Error(
+				`Emitter frame ${instance.frameTarget.targetId} published an origin but no rotation.`,
+			);
+		}
 	}
 
 	/**

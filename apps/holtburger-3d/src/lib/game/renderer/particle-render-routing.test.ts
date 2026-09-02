@@ -11,7 +11,7 @@ import { ParticleRenderBatcher } from "./particle-render-routing";
 const MESH = "0x01000001" as DatAssetId;
 const FIRST_OWNER = "scene-node:first" as SceneNodeId;
 const SECOND_OWNER = "scene-node:second" as SceneNodeId;
-const RECORD_ORIGIN = { kind: "record" } as const;
+const RECORD_FRAME = { kind: "record" } as const;
 
 describe("particle render routing", () => {
 	it("erases owner boundaries after routing into one final domain", () => {
@@ -30,14 +30,14 @@ describe("particle render routing", () => {
 				count: 1,
 				hwGfxObjId: MESH,
 				motionType: 2,
-				origin: RECORD_ORIGIN,
+				frame: RECORD_FRAME,
 			},
 			{
 				baseSlot: 8,
 				count: 1,
 				hwGfxObjId: MESH,
 				motionType: 2,
-				origin: RECORD_ORIGIN,
+				frame: RECORD_FRAME,
 			},
 		]);
 	});
@@ -89,7 +89,7 @@ describe("particle render routing", () => {
 					count: 2,
 					hwGfxObjId: MESH,
 					motionType: 2,
-					origin: RECORD_ORIGIN,
+					frame: RECORD_FRAME,
 				},
 			],
 			[
@@ -98,7 +98,7 @@ describe("particle render routing", () => {
 					count: 3,
 					hwGfxObjId: MESH,
 					motionType: 2,
-					origin: RECORD_ORIGIN,
+					frame: RECORD_FRAME,
 				},
 			],
 		]);
@@ -132,7 +132,7 @@ function source(
 		count: 1,
 		hwGfxObjId: MESH,
 		motionType: 2,
-		origin: RECORD_ORIGIN,
+		frame: RECORD_FRAME,
 		renderOwner,
 	};
 }

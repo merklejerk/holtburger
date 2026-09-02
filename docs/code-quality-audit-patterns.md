@@ -1239,6 +1239,41 @@ separate owner cleanup.
 signal, cancel the previous operation before replacement, and invoke cancellation from owner
 teardown as well as normal completion.
 
+## Verification Stops Before the Interpretation Boundary
+
+**Smell:** Tests prove that data is produced, packed, forwarded, or accepted, but stop before the
+component that gives the data its observable meaning.
+
+**Signals:**
+
+- Tests assert record layout, serialization bytes, uniform writes, generated source text, or mock
+  calls without evaluating the receiving algorithm.
+- A compiler or parser accepts an artifact, but no test exercises its coordinate convention,
+  ordering, units, sign, precedence, or runtime semantics.
+- Every layer has a focused transport test while the original defect can occur only in their
+  composition.
+- A field is demonstrably nonzero at the final boundary, yet output behaves as though it were
+  absent, transposed, reordered, or interpreted in another space.
+
+**Possible failure:** End-to-end behavior is wrong even though every handoff appears correct.
+Convention mismatches and consumer-side omissions survive because tests establish delivery rather
+than interpretation.
+
+**Questions:** At which boundary does the value acquire user-visible or domain-visible meaning?
+What is the smallest deterministic test that crosses that boundary? Can a numeric reference,
+software evaluator, real runtime, or rendered fixture distinguish correct interpretation from mere
+presence?
+
+**Counterexamples:** A transport-only test is sufficient when the receiver is independently proven
+against the same complete contract, or when the handoff itself is the only behavior under review.
+Some hardware, visual, or external-system interpretation may require explicit runtime evidence
+rather than a durable automated test.
+
+**Possible responses:** Add a focused integration test at the interpretation boundary, compare the
+consumer with an independent reference evaluator, use a deterministic runtime or rendering fixture,
+and retain lower-level packing tests for precise fault localization rather than treating them as
+behavioral proof.
+
 ## Adding Observations
 
 An observation belongs here when it has:

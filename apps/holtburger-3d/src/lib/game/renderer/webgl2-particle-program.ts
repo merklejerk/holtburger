@@ -62,7 +62,7 @@ layout(location = 2) in vec2 aTextureCoordinate;
 /**
  * Spawn constants live in a data texture, not in instance attributes.
  *
- * The draw path addresses *ranges* of records, and pointing six attribute pointers at a range costs
+ * The draw path addresses *ranges* of records, and pointing seven attribute pointers at a range costs
  * about twenty GL calls where a texture range costs one uniform. Reading here keeps that cost off
  * the frame regardless of how many ranges are drawn.
  */
@@ -83,6 +83,8 @@ struct ParticleRecord {
 	vec4 appearance;   // startScale, finalScale, startTrans, finalTrans
 	/** Scene origin of the record's landblock; an exact multiple of the landblock size. */
 	vec3 landblockOrigin;
+	/** Frozen authored mesh frame in render axes, ordered wxyz. */
+	vec4 rotation;
 };
 
 ParticleRecord readParticleRecord(int recordIndex) {
@@ -95,6 +97,7 @@ ParticleRecord readParticleRecord(int recordIndex) {
 	vec4 t3 = texelFetch(uParticleRecords, ivec2(column + 3, row), 0);
 	vec4 t4 = texelFetch(uParticleRecords, ivec2(column + 4, row), 0);
 	vec4 t5 = texelFetch(uParticleRecords, ivec2(column + 5, row), 0);
+	vec4 t6 = texelFetch(uParticleRecords, ivec2(column + 6, row), 0);
 	return ParticleRecord(
 		t0.xyz, t0.w,
 		t1.xyz, t1.w,
@@ -102,7 +105,8 @@ ParticleRecord readParticleRecord(int recordIndex) {
 		vec3(t2.w, t3.xy),
 		vec3(t3.zw, t4.x),
 		vec4(t4.yzw, t5.x),
-		t5.yzw
+		t5.yzw,
+		t6
 	);
 }
 
@@ -124,11 +128,13 @@ uniform vec3 uCameraPosition;
  * cancellation, and that error would land on every particle.
  */
 uniform vec3 uAnchorOrigin;
-/** One when this emitter follows its parent and supplies one live origin for the whole range. */
-uniform int uUsesRangeOrigin;
-/** Split-precision live emitter origin, read only when uUsesRangeOrigin is one. */
+/** One when this emitter follows its parent and supplies one live frame for the whole range. */
+uniform int uUsesRangeFrame;
+/** Split-precision live emitter origin, read only when uUsesRangeFrame is one. */
 uniform vec3 uRangeLandblockOrigin;
 uniform vec3 uRangeLocalOrigin;
+/** Live normalized parent-frame quaternion, ordered wxyz and read only for a range frame. */
+uniform vec4 uRangeRotation;
 /** Authored ParticleType, constant per drawn range. */
 uniform int uMotionType;
 
@@ -186,10 +192,52 @@ vec3 acToRender(vec3 v) {
 	return vec3(v.x, v.z, -v.y);
 }
 
-/** Basis that turns the particle mesh to face the viewer, or the authored identity. */
-mat3 orientationBasis(vec3 worldPosition) {
+/** Rotate one render-axis vector by a normalized wxyz quaternion. */
+vec3 quaternionRotate(vec4 quaternion, vec3 vector) {
+	vec3 q = quaternion.yzw;
+	return vector + 2.0 * cross(q, cross(q, vector) + quaternion.x * vector);
+}
+
+/** Hamilton product of normalized wxyz quaternions. */
+vec4 quaternionMultiply(vec4 left, vec4 right) {
+	return vec4(
+		left.x * right.x - dot(left.yzw, right.yzw),
+		left.x * right.yzw + right.x * left.yzw + cross(left.yzw, right.yzw)
+	);
+}
+
+/** Exact quaternion for one render-axis rotation vector. */
+vec4 rotationVectorQuaternion(vec3 rotation) {
+	float magnitude = length(rotation);
+	// Frame::grotate ignores vectors below this authored epsilon (acclient.c:137544-137589).
+	if (magnitude < 0.0002) return vec4(1.0, 0.0, 0.0, 0.0);
+	float halfAngle = magnitude * 0.5;
+	return vec4(cos(halfAngle), rotation * (sin(halfAngle) / magnitude));
+}
+
+/** Retail's draw frame for an authored particle mesh. */
+vec4 authoredRotation(ParticleRecord record, float elapsed) {
+	vec4 base = uUsesRangeFrame == 1 ? uRangeRotation : record.rotation;
+	if (uMotionType != ${PARTICLE_TYPE.parabolicLvgaGr}
+		&& uMotionType != ${PARTICLE_TYPE.parabolicLvlaLr}
+		&& uMotionType != ${PARTICLE_TYPE.parabolicGvgaGr}) {
+		return base;
+	}
+	// Particle::Update copies the parent frame, then Frame::rotate applies c * lifetime in that
+	// frame (acclient.c:317566-317599). The spawn path has already selected GR/LR axis space.
+	vec4 spin = rotationVectorQuaternion(acToRender(record.motionC * elapsed));
+	return normalize(quaternionMultiply(base, spin));
+}
+
+/** Basis that turns the particle mesh to its authored frame or a retail-facing override. */
+mat3 orientationBasis(ParticleRecord record, vec3 worldPosition, float elapsed) {
 	if (uOrientation == ${PARTICLE_ORIENTATION.authored}) {
-		return mat3(1.0);
+		vec4 rotation = authoredRotation(record, elapsed);
+		return mat3(
+			quaternionRotate(rotation, vec3(1.0, 0.0, 0.0)),
+			quaternionRotate(rotation, vec3(0.0, 1.0, 0.0)),
+			quaternionRotate(rotation, vec3(0.0, 0.0, 1.0))
+		);
 	}
 	// Retail heads the draw frame at the viewer position, so the facing axis is toward the eye
 	// rather than along the camera's forward vector; the two differ off the screen centre.
@@ -221,10 +269,10 @@ void main() {
 	// Re-anchor exactly: the coarse difference cancels on the landblock grid, then the precise
 	// landblock-local part is added. Only the authored displacement needs converting, and it is
 	// converted exactly once here.
-	vec3 landblockOrigin = uUsesRangeOrigin == 1
+	vec3 landblockOrigin = uUsesRangeFrame == 1
 		? uRangeLandblockOrigin
 		: record.landblockOrigin;
-	vec3 localOrigin = uUsesRangeOrigin == 1 ? uRangeLocalOrigin : record.localOrigin;
+	vec3 localOrigin = uUsesRangeFrame == 1 ? uRangeLocalOrigin : record.localOrigin;
 	vec3 anchoredOrigin = (landblockOrigin - uAnchorOrigin) + localOrigin;
 	vec3 worldPosition =
 		anchoredOrigin + acToRender(acDisplacement(record, elapsed));
@@ -232,7 +280,7 @@ void main() {
 
 	// The mesh's authored plane faces its own +Z after conversion, so the basis maps local x/y to
 	// screen right/up and local z to the facing axis.
-	vec3 local = orientationBasis(worldPosition) * (aPosition * scale);
+	vec3 local = orientationBasis(record, worldPosition, elapsed) * (aPosition * scale);
 	vTextureCoordinate = aTextureCoordinate;
 	vTranslucency = mix(record.appearance.z, record.appearance.w, progress);
 	// The normal attribute is bound by the shared object geometry layout but unused: particles draw
@@ -382,7 +430,8 @@ export interface WebGL2ParticleProgram {
 		readonly projection: WebGLUniformLocation;
 		readonly rangeLandblockOrigin: WebGLUniformLocation;
 		readonly rangeLocalOrigin: WebGLUniformLocation;
-		readonly usesRangeOrigin: WebGLUniformLocation;
+		readonly rangeRotation: WebGLUniformLocation;
+		readonly usesRangeFrame: WebGLUniformLocation;
 		readonly view: WebGLUniformLocation;
 	};
 }
@@ -436,7 +485,8 @@ export function createWebGL2ParticleProgram(
 			"uRangeLandblockOrigin",
 		),
 		rangeLocalOrigin: requireWebGL2Uniform(gl, program, "uRangeLocalOrigin"),
-		usesRangeOrigin: requireWebGL2Uniform(gl, program, "uUsesRangeOrigin"),
+		rangeRotation: requireWebGL2Uniform(gl, program, "uRangeRotation"),
+		usesRangeFrame: requireWebGL2Uniform(gl, program, "uUsesRangeFrame"),
 		view: requireWebGL2Uniform(gl, program, "uView"),
 	};
 	// Sampler units are invariant for the program's lifetime, so bind them once at creation.

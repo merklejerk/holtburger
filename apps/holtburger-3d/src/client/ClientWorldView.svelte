@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { untrack } from "svelte";
-	import MapPanel from "../app/MapPanel.svelte";
+	import Minimap from "../app/Minimap.svelte";
 	import type { FrameRates } from "../app/frame-rate-sampler";
 	import {
-		MAP_PANEL_MINIMUM_SIZE,
-		type MapPanelFrame,
-		type MapPanelState,
-	} from "../app/map-panel-frame";
+		MINIMAP_MINIMUM_SIZE,
+		type MinimapFrame,
+		type MinimapState,
+	} from "../app/minimap-frame";
 	import { MAP_DEFAULT_VIEW_DIAMETERS } from "../lib/game/map/map-appearance";
 	import ClientCharacterHud from "./ClientCharacterHud.svelte";
 	import ClientJumpPowerBar from "./ClientJumpPowerBar.svelte";
@@ -38,7 +38,7 @@
 	interface Props {
 		readonly cameraController: ClientPresentationCameraController | null;
 		readonly debugEnabled: boolean;
-		readonly readMapPanelFrame: () => MapPanelFrame;
+		readonly readMinimapFrame: () => MinimapFrame;
 		readonly readDiagnostics: () => ClientPresentationDiagnostics | null;
 		readonly readFrameRates: () => FrameRates | null;
 		readonly showRetailHiddenGeometry: boolean;
@@ -62,7 +62,7 @@
 	let {
 		cameraController,
 		debugEnabled,
-		readMapPanelFrame,
+		readMinimapFrame,
 		readDiagnostics,
 		readFrameRates,
 		showRetailHiddenGeometry,
@@ -97,17 +97,17 @@
 	let hudLayout = $state(
 		createDefaultClientHudLayout(initialViewport, initialShortcutCount),
 	);
-	let mapViewDiameters = $state<MapPanelState["viewDiameters"]>({
+	let mapViewDiameters = $state<MinimapState["viewDiameters"]>({
 		...MAP_DEFAULT_VIEW_DIAMETERS,
 	});
 	const resolvedMapPlacement = $derived(
 		resolveClientHudSquarePlacement(
-			hudLayout.map,
+			hudLayout.minimap,
 			viewport,
-			MAP_PANEL_MINIMUM_SIZE,
+			MINIMAP_MINIMUM_SIZE,
 		),
 	);
-	const mapPanel = $derived<MapPanelState>({
+	const minimap = $derived<MinimapState>({
 		left: resolvedMapPlacement.left,
 		top: resolvedMapPlacement.top,
 		size: resolvedMapPlacement.width,
@@ -145,18 +145,18 @@
 		return () => observer.disconnect();
 	});
 
-	function updateMapPanel(next: MapPanelState): void {
+	function updateMinimap(next: MinimapState): void {
 		mapViewDiameters = next.viewDiameters;
 		const sizeChanged = next.size !== resolvedMapPlacement.width;
 		const preferredSize = sizeChanged
 			? next.size
-			: hudLayout.map.preferredWidth;
-		const map = anchorClientHudPlacement(
+			: hudLayout.minimap.preferredWidth;
+		const minimapPlacement = anchorClientHudPlacement(
 			{ left: next.left, top: next.top, width: next.size, height: next.size },
 			viewport,
 			{ width: preferredSize, height: preferredSize },
 		);
-		hudLayout = { ...hudLayout, map };
+		hudLayout = { ...hudLayout, minimap: minimapPlacement };
 	}
 
 	function handlePointerDown(event: PointerEvent): void {
@@ -239,11 +239,11 @@
 	>
 		<ClientHudIcon name={hudMode === "runtime" ? "locked" : "unlocked"} />
 	</button>
-	<MapPanel
-		readFrame={readMapPanelFrame}
-		panel={mapPanel}
+	<Minimap
+		readFrame={readMinimapFrame}
+		viewState={minimap}
 		editable={hudMode === "layout"}
-		onStateChange={updateMapPanel}
+		onStateChange={updateMinimap}
 	/>
 	<ClientHudPanel
 		label="Character HUD"

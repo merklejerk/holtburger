@@ -10,7 +10,9 @@ use super::dynamic_contact::{
     PreparedDynamicTrajectory, current_dynamic_peer_overlap, resolve_dynamic_contacts,
     resolve_dynamic_contacts_for_mover,
 };
-use super::dynamic_index::{DynamicShadowIndex, EntityCollisionProof, EntityCollisionSnapshot};
+use super::dynamic_index::{
+    DynamicShadowIndex, EntityCollisionProof, EntityCollisionSnapshot, placed_target_shapes,
+};
 #[cfg(test)]
 use super::{
     AcceptedBodyMotion, RETAIL_AIRBORNE_STEP_DOWN_HEIGHT, RETAIL_LANDING_NORMAL_Z,
@@ -23,8 +25,8 @@ use super::{
     PhysicalBodyDefinition, PhysicalBodyParticipation, PhysicalBodyReconfiguration,
     PhysicalBodyReconfigurationOutcome, PhysicalBodyState, PhysicalBodyTickResult,
     PhysicalBodyTickStatus, PoseReconciliationState, PoseTranslationSource, RuntimeBodyAdvanceKind,
-    RuntimeSpatialBodyView, SolvedBodyKinematics, SpatialBody, SpatialBodyId, SpatialSampleMode,
-    SpatialSamplingConfig,
+    RuntimeSpatialBodyView, SolvedBodyKinematics, SpatialBody, SpatialBodyId, SpatialMembership,
+    SpatialSampleMode, SpatialSamplingConfig,
     dead_reckoning::{project_pose_by_offset, sample_mode_for_projection_state},
     physical_body::{
         physical_body_scene_residency, resolve_physical_body_placement, solve_physical_body_tick,
@@ -37,6 +39,32 @@ use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion, Vector3};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::Instant;
+
+/// Resolves retail's post-transition shadow residency: physics-BSP entities use transformed part
+/// boxes, while every other body retains the movement-sphere traversal used by the solver.
+fn resolve_dynamic_body_placement(
+    collision: &CollisionScene,
+    body: &SpatialBody,
+    seed_cell: Option<Guid>,
+) -> anyhow::Result<SpatialMembership> {
+    let physical = body
+        .physical
+        .as_ref()
+        .context("dynamic body lost its physical definition")?;
+    let dynamic = physical
+        .dynamic
+        .as_ref()
+        .context("physical body lost its dynamic state")?;
+    let movement =
+        resolve_physical_body_placement(collision, body.pose, physical.definition, seed_cell)?;
+    if !dynamic.collision.uses_physics_bsp {
+        return Ok(movement);
+    }
+
+    let anchor = Guid((body.pose.landblock_id.0 & 0xffff_0000) | 0xffff);
+    let parts = placed_target_shapes(body, body.pose, anchor)?;
+    Ok(collision.part_box_membership(anchor, &parts, movement.committed_cell())?)
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct SpatialBodyStore {
@@ -1155,31 +1183,44 @@ impl SpatialScene {
         body_id: SpatialBodyId,
         collision: &CollisionScene,
     ) -> anyhow::Result<()> {
-        let Some(body) = self.body_store.body_mut(body_id) else {
+        let Some(body) = self.body_store.body(body_id) else {
             return Ok(());
         };
-        let Some(physical) = body.physical.as_mut() else {
+        let Some(physical) = body.physical.as_ref() else {
             return Ok(());
         };
-        let Some(dynamic) = physical.dynamic.as_mut() else {
+        if physical.dynamic.is_none() {
             return Ok(());
-        };
-        let placement = match resolve_physical_body_placement(
-            collision,
-            body.pose,
-            physical.definition,
-            physical.response.cell(),
-        ) {
-            Ok(placement) => placement,
-            Err(CollisionQueryError::UnknownMotionCell { .. }) => {
-                // A scene-interest replacement may evict the dungeon containing this body while
-                // retaining the entity. Preserve its authored pose/cell, but keep it out of
-                // solving and dynamic-contact indexing until that topology is resident again.
-                dynamic.activity = DynamicBodyActivity::Suspended;
-                return Ok(());
-            }
-            Err(error) => return Err(error.into()),
-        };
+        }
+        let placement =
+            match resolve_dynamic_body_placement(collision, body, physical.response.cell()) {
+                Ok(placement) => placement,
+                Err(error)
+                    if matches!(
+                        error.downcast_ref::<CollisionQueryError>(),
+                        Some(CollisionQueryError::UnknownMotionCell { .. })
+                    ) =>
+                {
+                    // A scene-interest replacement may evict the dungeon containing this body while
+                    // retaining the entity. Preserve its authored pose/cell, but keep it out of
+                    // solving and dynamic-contact indexing until that topology is resident again.
+                    let dynamic = self
+                        .body_store
+                        .body_mut(body_id)
+                        .and_then(|body| body.physical.as_mut())
+                        .and_then(|physical| physical.dynamic.as_mut())
+                        .expect("validated dynamic body vanished during placement refresh");
+                    dynamic.activity = DynamicBodyActivity::Suspended;
+                    return Ok(());
+                }
+                Err(error) => return Err(error),
+            };
+        let dynamic = self
+            .body_store
+            .body_mut(body_id)
+            .and_then(|body| body.physical.as_mut())
+            .and_then(|physical| physical.dynamic.as_mut())
+            .expect("validated dynamic body vanished during placement refresh");
         dynamic.placement = placement;
         dynamic.restore_from_suspension();
         Ok(())
@@ -1557,22 +1598,26 @@ impl SpatialScene {
             actuation_permits_settling,
             residual_contacts,
         );
-        if let Some(dynamic) = tentative
+        if tentative
             .physical
-            .as_mut()
-            .and_then(|physical| physical.dynamic.as_mut())
+            .as_ref()
+            .and_then(|physical| physical.dynamic.as_ref())
+            .is_some()
         {
-            dynamic.placement = resolve_physical_body_placement(
-                collision,
-                tentative.pose,
-                definition,
-                result
-                    .motion
-                    .path
-                    .final_point()
-                    .placement()
-                    .committed_cell(),
-            )?;
+            let final_cell = result
+                .motion
+                .path
+                .final_point()
+                .placement()
+                .committed_cell();
+            let resolved_placement =
+                resolve_dynamic_body_placement(collision, &tentative, final_cell)?;
+            let dynamic = tentative
+                .physical
+                .as_mut()
+                .and_then(|physical| physical.dynamic.as_mut())
+                .expect("validated dynamic body lost its state during tick finalization");
+            dynamic.placement = resolved_placement;
             dynamic.activity = if stable {
                 DynamicBodyActivity::Settled
             } else {
@@ -3659,6 +3704,57 @@ mod physical_body_tests {
     }
 
     #[test]
+    fn physics_bsp_placement_uses_part_boxes_beyond_the_movement_sphere() {
+        let cell = Guid(0xda55_0100);
+        let now = Instant::now();
+        let body_id = SpatialBodyId::Entity(Guid(0x7000_0001));
+        let mut scene = SpatialScene::new();
+        scene.register_body(SpatialBody::new(
+            body_id,
+            WorldPosition {
+                landblock_id: cell,
+                ..pose(Vector3::new(-0.2, 0.0, 0.0))
+            },
+            now,
+        ));
+        scene
+            .set_dynamic_physical_body(
+                body_id,
+                Some(dynamic_definition_with_geometry(
+                    free_definition(Vector3::zero(), 0.1),
+                    false,
+                    PreparedEntityTargetGeometry {
+                        physics_bsp_parts: vec![PreparedEntityBspPart {
+                            part_index: 0,
+                            gfx_obj_did: 0x0100_0001,
+                            local_origin: Vector3::new(0.2, 0.0, 0.0),
+                            local_orientation: Quaternion::identity(),
+                            scale: ColliderScale::uniform(1.0).unwrap(),
+                            shape: bsp_shape(Vector3::zero(), 1.0),
+                        }],
+                        fallback_setup_did: 0x0200_0001,
+                        fallback_shapes: Vec::new(),
+                        fallback_scale: ColliderScale::uniform(1.0).unwrap(),
+                    },
+                    true,
+                )),
+                PhysicalCollisionFilter::ALL,
+                Some(cell),
+            )
+            .unwrap();
+
+        let placement = resolve_dynamic_body_placement(
+            &portal_collision_scene(),
+            scene.body(body_id).unwrap(),
+            Some(cell),
+        )
+        .unwrap();
+
+        assert!(placement.reaches_outdoors());
+        assert_eq!(placement.reached_env_cells(), &[cell]);
+    }
+
+    #[test]
     fn authoritative_pose_replacement_rebases_dynamic_membership_before_publication() {
         let now = Instant::now();
         let id = SpatialBodyId::LocalPlayer(Guid(0x5000_0001));
@@ -5615,6 +5711,37 @@ mod physical_body_tests {
                     .unwrap();
             }
         }
+        collision
+    }
+
+    fn portal_collision_scene() -> CollisionScene {
+        let mut collision = collision_scene(None);
+        collision
+            .insert(LandblockCollisionAsset {
+                landblock_id: 0xda55_ffff,
+                terrain: TerrainCollisionSurface::empty(),
+                static_geometry: LandblockColliders {
+                    colliders: Vec::new(),
+                    cell_volumes: vec![CellVolume {
+                        cell_selector: 0x0100,
+                        placement: LandblockPlacement {
+                            origin: Vector3::zero(),
+                            orientation: Quaternion::identity(),
+                        },
+                        planes: Vec::new(),
+                        portals: vec![CellCollisionPortal {
+                            plane: Plane {
+                                normal: Vector3::new(1.0, 0.0, 0.0),
+                                d: 0.0,
+                            },
+                            positive_side: true,
+                            target: CellCollisionPortalTarget::Outdoor,
+                            outdoor_building: None,
+                        }],
+                    }],
+                },
+            })
+            .unwrap();
         collision
     }
 

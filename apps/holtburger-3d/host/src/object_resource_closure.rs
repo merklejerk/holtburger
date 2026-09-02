@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 
 use crate::{
     binary_source_record::BinarySectionWriter,
-    gfx_obj_geometry::build_gfx_obj_geometry,
+    gfx_obj_geometry::{build_building_gfx_obj_geometry, build_gfx_obj_geometry},
     polygon_geometry::{PolygonSideKind, SamplerWrapMode},
     source_projection::{dat_id, render_aabb_json},
 };
@@ -22,7 +22,17 @@ use crate::{
 /// Dispatches on DAT family — `0x01` GfxObj, `0x02` Setup — the way retail's
 /// `CPhysicsObj::InitPartArrayObject` dispatches on `MasterDBMap::DivineType` (acclient.c:307951),
 /// and shares one geometry buffer set across every source it is given. Outdoor statics, interior
-/// EnvCells, and the celestial sky all project through it; nothing here is layer-scoped.
+/// EnvCells, and the celestial sky all project through it. Geometry purpose is explicit because
+/// retail buildings use their portal-only BSP path instead of the ordinary constructed mesh.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum GfxGeometryPurpose {
+    /// Ordinary objects draw their complete constructed mesh in retail.
+    #[default]
+    Ordinary,
+    /// Buildings submit drawing-BSP portal polygons through the portal-only path.
+    Building,
+}
+
 #[derive(Default)]
 pub(crate) struct ObjectResourceClosure {
     pub(crate) buffers: StaticGeometryBuffers,
@@ -32,6 +42,7 @@ pub(crate) struct ObjectResourceClosure {
     pub(crate) geometries: Vec<Value>,
     geometry_ids: BTreeMap<u32, String>,
     retail_visibility: BTreeMap<u32, RetailGeometryVisibility>,
+    geometry_purpose: GfxGeometryPurpose,
     pub(crate) materials: BTreeMap<String, Value>,
     pub(crate) texture_dependencies: BTreeMap<String, Value>,
 }
@@ -53,6 +64,14 @@ impl RetailGeometryVisibility {
 }
 
 impl ObjectResourceClosure {
+    /// Create the resource closure used exclusively by an outdoor building layer.
+    pub(crate) fn for_buildings() -> Self {
+        Self {
+            geometry_purpose: GfxGeometryPurpose::Building,
+            ..Self::default()
+        }
+    }
+
     pub(crate) async fn add_resident(
         &mut self,
         runtime: &ContentAssetRuntime,
@@ -213,8 +232,11 @@ impl ObjectResourceClosure {
         if let Some(existing) = self.geometry_ids.get(&gfx_obj.id) {
             return Ok(existing.clone());
         }
-        let geometry = build_gfx_obj_geometry(gfx_obj)
-            .with_context(|| format!("Could not prepare GfxObj 0x{:08X}", gfx_obj.id))?;
+        let geometry = match self.geometry_purpose {
+            GfxGeometryPurpose::Ordinary => build_gfx_obj_geometry(gfx_obj),
+            GfxGeometryPurpose::Building => build_building_gfx_obj_geometry(gfx_obj),
+        }
+        .with_context(|| format!("Could not prepare GfxObj 0x{:08X}", gfx_obj.id))?;
         let id = format!("geometry:gfx-obj/{:08x}", gfx_obj.id);
         self.geometries.push(append_static_geometry(
             &mut self.buffers,

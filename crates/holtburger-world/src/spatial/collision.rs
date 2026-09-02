@@ -8,7 +8,7 @@ pub use entity_surface_ray::{CollisionSurfaceRayHit, EntitySurfaceRayHit};
 pub use static_sphere_sweep::{StaticSphereSweepHit, StaticSphereSweepRequest};
 pub use static_surface_ray::{StaticSurfaceRayHit, StaticSurfaceRayRequest};
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -18,7 +18,8 @@ use holtburger_common::position::{
 use holtburger_common::{Guid, Vector3};
 use holtburger_content::{
     CellCollisionPortal, CellCollisionPortalTarget, CellVolume, CollisionShape,
-    LandblockCollisionAsset, PlacedCollider, StaticColliderPlacement, TerrainCollisionTriangle,
+    LandblockCollisionAsset, PlacedCollider, PlacedCollisionShape, StaticColliderPlacement,
+    TerrainCollisionTriangle,
 };
 use thiserror::Error;
 
@@ -1396,6 +1397,119 @@ impl CollisionScene {
         Ok(uncovered.value)
     }
 
+    /// Expands one physics-BSP object's source cell through every portal reached by its placed
+    /// part boxes, matching retail's `find_bbox_cell_list` shadow traversal.
+    pub(crate) fn part_box_membership(
+        &self,
+        anchor: Guid,
+        parts: &[PlacedCollisionShape],
+        committed_cell: Option<Guid>,
+    ) -> Result<SpatialMembership, CollisionQueryError> {
+        let mut placement = committed_cell
+            .map(SpatialMembership::interior)
+            .unwrap_or_else(SpatialMembership::outdoor);
+
+        if placement.reaches_outdoors {
+            let mut entries = Vec::new();
+            let target_owners = parts
+                .iter()
+                .flat_map(|part| {
+                    touched_landblocks_for_extent(
+                        anchor,
+                        part.bounds.minimum(),
+                        part.bounds.maximum(),
+                    )
+                })
+                .collect::<BTreeSet<_>>();
+            for target_owner in target_owners {
+                let asset = self.landblocks.get(&target_owner).ok_or(
+                    CollisionQueryError::UnavailableOwner {
+                        owner: target_owner.0,
+                    },
+                )?;
+                for volume in &asset.static_geometry.cell_volumes {
+                    if volume.portals.iter().any(|portal| {
+                        portal.target == CellCollisionPortalTarget::Outdoor
+                            && parts.iter().any(|part| {
+                                part_reaches_building_portal(
+                                    part,
+                                    anchor.0,
+                                    volume,
+                                    target_owner.0,
+                                    portal,
+                                ) && part_box_intersects_volume(
+                                    part,
+                                    anchor.0,
+                                    volume,
+                                    target_owner.0,
+                                )
+                            })
+                    }) {
+                        entries.push(Guid(
+                            (target_owner.0 & 0xffff_0000) | u32::from(volume.cell_selector),
+                        ));
+                    }
+                }
+            }
+            for entry in entries {
+                if !placement.reached_env_cells.contains(&entry) {
+                    placement.reached_env_cells.push(entry);
+                }
+            }
+        }
+
+        let mut index = 0;
+        while index < placement.reached_env_cells.len() {
+            let source_cell = placement.reached_env_cells[index];
+            index += 1;
+            let owner = landblock_key(source_cell);
+            let asset = self
+                .landblocks
+                .get(&owner)
+                .ok_or(CollisionQueryError::UnavailableOwner { owner: owner.0 })?;
+            let source = asset
+                .static_geometry
+                .cell_volumes
+                .iter()
+                .find(|volume| volume.cell_selector == (source_cell.0 & 0xffff) as u16)
+                .ok_or(CollisionQueryError::UnknownMotionCell {
+                    cell: source_cell.0,
+                })?;
+            for portal in &source.portals {
+                if !parts
+                    .iter()
+                    .any(|part| part_reaches_portal(part, anchor.0, source, owner.0, portal))
+                {
+                    continue;
+                }
+                match portal.target {
+                    CellCollisionPortalTarget::Outdoor => placement.reaches_outdoors = true,
+                    CellCollisionPortalTarget::EnvCell(selector) => {
+                        let target_cell = Guid((owner.0 & 0xffff_0000) | u32::from(selector));
+                        let target = asset
+                            .static_geometry
+                            .cell_volumes
+                            .iter()
+                            .find(|volume| volume.cell_selector == selector)
+                            .ok_or(CollisionQueryError::UnknownMotionCell {
+                                cell: target_cell.0,
+                            })?;
+                        if !parts
+                            .iter()
+                            .any(|part| part_box_intersects_volume(part, anchor.0, target, owner.0))
+                        {
+                            continue;
+                        }
+                        if !placement.reached_env_cells.contains(&target_cell) {
+                            placement.reached_env_cells.push(target_cell);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(placement)
+    }
+
     /// Resolves placement from installed topology while honestly reporting missing query coverage.
     ///
     /// This is reserved for authoritative placement and presentation consumers. Physical-body
@@ -2279,7 +2393,7 @@ fn point_between_landblocks(point: Vector3, source_owner: u32, target_owner: u32
 
 /// Applies retail's reverse portal-side test when a building admits an outdoor static.
 fn part_reaches_building_portal(
-    collider: &PlacedCollider,
+    collider: &PlacedCollisionShape,
     collider_owner: u32,
     target: &CellVolume,
     target_owner: u32,
@@ -2369,7 +2483,7 @@ fn static_reached_cells(
 
 /// Mirrors retail's sphere broad phase followed by its authored part-box portal-side test.
 fn part_reaches_portal(
-    collider: &PlacedCollider,
+    collider: &PlacedCollisionShape,
     collider_owner: u32,
     source: &CellVolume,
     cell_owner: u32,
@@ -2404,7 +2518,7 @@ fn part_reaches_portal(
 }
 
 fn part_box_intersects_volume(
-    collider: &PlacedCollider,
+    collider: &PlacedCollisionShape,
     collider_owner: u32,
     volume: &CellVolume,
     cell_owner: u32,
@@ -2419,7 +2533,7 @@ fn part_box_intersects_volume(
 
 /// Returns the cell-local axis-aligned bounds of one transformed part.
 fn part_box_in_cell(
-    collider: &PlacedCollider,
+    collider: &PlacedCollisionShape,
     collider_owner: u32,
     volume: &CellVolume,
     cell_owner: u32,
@@ -2790,7 +2904,12 @@ fn touched_landblocks(request: SphereSweep) -> Vec<Guid> {
         request.start.y.max(request.end.y) + request.radius,
         0.0,
     );
-    let anchor = landblock_key(request.anchor);
+    touched_landblocks_for_extent(request.anchor, minimum, maximum)
+}
+
+/// Returns valid outdoor owners touched by one axis-aligned extent in the anchor frame.
+fn touched_landblocks_for_extent(anchor: Guid, minimum: Vector3, maximum: Vector3) -> Vec<Guid> {
+    let anchor = landblock_key(anchor);
     let anchor_x = i64::from((anchor.0 >> 24) & 0xff);
     let anchor_y = i64::from((anchor.0 >> 16) & 0xff);
     let min_x = anchor_x.saturating_add((minimum.x / METERS_PER_LANDBLOCK).floor() as i64);
@@ -3523,6 +3642,74 @@ mod tests {
             target,
             outdoor_building: None,
         }
+    }
+
+    fn planar_bsp_part(origin_x: f32, local_x: f32) -> PlacedCollisionShape {
+        let bounds = Sphere {
+            center: Vector3::new(local_x, 0.0, 0.0),
+            radius: 1.5,
+        };
+        PlacedCollisionShape::new(
+            Arc::new(CollisionShape::Bsp(BspSolid {
+                bsp: BspNode::Leaf(BspLeaf {
+                    index: 0,
+                    solid: 0,
+                    sphere: Some(bounds),
+                    poly_ids: Vec::new(),
+                }),
+                bounds,
+                box_bounds: CollisionBox::from_points([
+                    Vector3::new(local_x, -1.0, -1.0),
+                    Vector3::new(local_x, 1.0, 1.0),
+                ])
+                .unwrap(),
+                polygons: HashMap::new(),
+            })),
+            LandblockPlacement {
+                origin: Vector3::new(origin_x, 0.0, 0.0),
+                orientation: Quaternion::identity(),
+            },
+            ColliderScale::uniform(1.0).unwrap(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn planar_bsp_part_reaches_portal_that_origin_sphere_misses() {
+        let source_cell = Guid(0xda55_010a);
+        let scene = placement_scene(vec![volume(
+            0x010a,
+            vec![portal(1.0, 0.0, CellCollisionPortalTarget::Outdoor)],
+        )]);
+        let origin_x = -0.2;
+        let sphere_membership = scene
+            .transit_cell(CellTransitRequest {
+                previous_cell: Some(source_cell),
+                anchor: Guid(0xda55_ffff),
+                center: Vector3::new(origin_x, 0.0, 0.0),
+                radius: 0.1,
+            })
+            .unwrap();
+        assert!(!sphere_membership.reaches_outdoors());
+
+        let part = planar_bsp_part(origin_x, 0.2);
+        let part_membership = scene
+            .part_box_membership(Guid(0xda55_ffff), &[part], Some(source_cell))
+            .unwrap();
+
+        assert!(part_membership.reaches_outdoors());
+        assert_eq!(part_membership.reached_env_cells(), &[source_cell]);
+    }
+
+    #[test]
+    fn part_box_membership_reports_missing_outdoor_coverage() {
+        let scene = scene(Vec::new(), Vec::new());
+        let part = planar_bsp_part(METERS_PER_LANDBLOCK, 0.0);
+
+        assert_eq!(
+            scene.part_box_membership(Guid(0xda55_ffff), &[part], None),
+            Err(CollisionQueryError::UnavailableOwner { owner: 0xdb54_ffff })
+        );
     }
 
     fn coincident_outdoor_cells() -> Vec<CellVolume> {

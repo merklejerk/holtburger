@@ -72,13 +72,18 @@ pub(crate) async fn serialize_env_cell_source_record(
     let mut shell_buffers = StaticGeometryBuffers::default();
     let mut object_closure = ObjectResourceClosure::default();
     let mut structures = Vec::<Value>::new();
-    let mut structure_indices = BTreeMap::<(u32, u32), (usize, usize)>::new();
+    let mut structure_indices = BTreeMap::<CellStructShellKey, (usize, usize)>::new();
     let mut prepared_cells = Vec::with_capacity(interior.cells.len());
     let mut containment_planes = Vec::<f32>::new();
     let mut map_floor_positions = Vec::<f32>::new();
     let mut map_floor_indices = Vec::<u32>::new();
+    let mut excluded_shell_polygon_ids_by_cell =
+        paired_exterior_portal_polygon_ids_by_cell(interior);
 
     for cell in &interior.cells {
+        let excluded_shell_polygon_ids = excluded_shell_polygon_ids_by_cell
+            .remove(&cell.env_cell_id)
+            .unwrap_or_default();
         let environment = interior
             .environments
             .get(&cell.structure.environment_id)
@@ -104,10 +109,15 @@ pub(crate) async fn serialize_env_cell_source_record(
                 environment_id: cell.structure.environment_id,
                 cell_structure_id: cell.structure.local_selector,
                 surface_count: cell.surface_ids.len(),
+                excluded_shell_polygon_ids: &excluded_shell_polygon_ids,
             },
             cell_struct,
         )?;
-        let structure_key = (cell.structure.environment_id, cell.structure.local_selector);
+        let structure_key = CellStructShellKey {
+            environment_id: cell.structure.environment_id,
+            local_selector: cell.structure.local_selector,
+            excluded_shell_polygon_ids,
+        };
         let structure_index = if let Some((index, surface_slot_count)) =
             structure_indices.get(&structure_key)
         {
@@ -121,13 +131,15 @@ pub(crate) async fn serialize_env_cell_source_record(
             *index
         } else {
             let index = structures.len();
+            let shell_variant_suffix =
+                shell_variant_suffix(&structure_key.excluded_shell_polygon_ids);
             let geometry_id = format!(
-                "geometry:cell-struct/{:08x}/{:04x}",
-                cell.structure.environment_id, cell.structure.local_selector
+                "geometry:cell-struct/{:08x}/{:04x}{shell_variant_suffix}",
+                structure_key.environment_id, structure_key.local_selector
             );
             let source_asset_id = format!(
                 "cell-struct/{:08x}/{:04x}",
-                cell.structure.environment_id, cell.structure.local_selector
+                structure_key.environment_id, structure_key.local_selector
             );
             let geometry = append_static_geometry(
                 &mut shell_buffers,
@@ -163,9 +175,9 @@ pub(crate) async fn serialize_env_cell_source_record(
             map_floor_positions.extend_from_slice(&map_floor.positions);
             map_floor_indices.extend_from_slice(&map_floor.indices);
             structures.push(json!({
-                "id": format!("cell-struct:{:08x}/{:04x}", cell.structure.environment_id, cell.structure.local_selector),
-                "environmentId": dat_id(cell.structure.environment_id),
-                "localSelector": cell.structure.local_selector,
+                "id": format!("cell-struct:{:08x}/{:04x}{shell_variant_suffix}", structure_key.environment_id, structure_key.local_selector),
+                "environmentId": dat_id(structure_key.environment_id),
+                "localSelector": structure_key.local_selector,
                 "geometry": geometry,
                 "surfaceSlotCount": cell.surface_ids.len(),
                 "containmentPlaneOffset": containment_plane_offset,
@@ -571,6 +583,61 @@ struct PreparedCell {
     source: LandblockEnvCell,
     structure_index: usize,
     projection: CellStructProjection,
+}
+
+/// Geometry cache identity for one CellStruct after topology-owned shell selection.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct CellStructShellKey {
+    /// Environment resource owning the reusable CellStruct.
+    environment_id: u32,
+    /// Environment-local CellStruct selector.
+    local_selector: u32,
+    /// Exterior transition polygons omitted from ordinary shell rendering.
+    excluded_shell_polygon_ids: Vec<u16>,
+}
+
+/// Index sorted CellStruct polygons belonging to proven two-sided exterior transitions by EnvCell.
+pub fn paired_exterior_portal_polygon_ids_by_cell(
+    interior: &LandblockInteriorSystemAsset,
+) -> BTreeMap<u32, Vec<u16>> {
+    // Retail's separate portal pass owns transition depth with an always-pass write
+    // (acclient.c:433593-433607). The atlas compositor owns that same authored polygon as an
+    // aperture, so retaining it in the shell would create two coplanar depth owners. Only paired
+    // transitions are proven to have that separate owner; unpaired outside endpoints stay visible.
+    let mut polygon_ids_by_cell = BTreeMap::<u32, Vec<u16>>::new();
+    for portal in &interior.topology.portals {
+        if matches!(
+            portal.endpoint,
+            LandblockPortalEndpoint::Outside {
+                building_portal: Some(_),
+                ..
+            }
+        ) {
+            polygon_ids_by_cell
+                .entry(portal.source.env_cell_id)
+                .or_default()
+                .push(portal.polygon_id);
+        }
+    }
+    for polygon_ids in polygon_ids_by_cell.values_mut() {
+        polygon_ids.sort_unstable();
+        polygon_ids.dedup();
+    }
+    polygon_ids_by_cell
+}
+
+fn shell_variant_suffix(excluded_shell_polygon_ids: &[u16]) -> String {
+    if excluded_shell_polygon_ids.is_empty() {
+        return String::new();
+    }
+    format!(
+        "/without-exterior-portals-{}",
+        excluded_shell_polygon_ids
+            .iter()
+            .map(|polygon_id| format!("{polygon_id:04x}"))
+            .collect::<Vec<_>>()
+            .join("-")
+    )
 }
 
 struct CrossingProjection {

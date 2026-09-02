@@ -34,9 +34,37 @@ pub struct GfxObjPortalAperture {
 /// (`acclient.c:436052`). The drawing BSP supplies portal traversal data; its node polygon lists
 /// are not an exhaustive mesh visibility set.
 pub fn build_gfx_obj_geometry(gfx_obj: &GfxObj) -> Result<PolygonSetGeometry> {
+    build_gfx_obj_geometry_excluding(gfx_obj, &HashSet::new())
+}
+
+/// Emit the building-visible mesh without polygons submitted by retail's portal-only draw path.
+///
+/// Retail buildings bypass the ordinary constructed mesh and traverse `portal_polys` twice
+/// (`acclient.c:436518-436526`), so they do not belong to the ordinary constructed mesh.
+pub fn build_building_gfx_obj_geometry(gfx_obj: &GfxObj) -> Result<PolygonSetGeometry> {
+    let portal_polygon_ids = if let Some(drawing_bsp) = &gfx_obj.drawing_bsp {
+        let mut pairs = Vec::new();
+        collect_drawing_bsp_portal_pairs(drawing_bsp, &mut pairs).with_context(|| {
+            format!("Could not decode GfxObj 0x{:08X} portal pairs", gfx_obj.id)
+        })?;
+        pairs
+            .into_iter()
+            .map(|(_, polygon_id)| polygon_id)
+            .collect::<HashSet<_>>()
+    } else {
+        HashSet::new()
+    };
+    build_gfx_obj_geometry_excluding(gfx_obj, &portal_polygon_ids)
+}
+
+fn build_gfx_obj_geometry_excluding(
+    gfx_obj: &GfxObj,
+    excluded_polygon_ids: &HashSet<u16>,
+) -> Result<PolygonSetGeometry> {
     let mut polygon_entries = gfx_obj
         .polygons
         .iter()
+        .filter(|(polygon_id, _)| !excluded_polygon_ids.contains(polygon_id))
         .map(|(polygon_id, polygon)| (*polygon_id, polygon))
         .collect::<Vec<_>>();
     polygon_entries.sort_by_key(|(polygon_id, _)| *polygon_id);
@@ -338,6 +366,31 @@ mod tests {
         let apertures = build_gfx_obj_portal_apertures(&gfx_obj).unwrap();
 
         assert!(apertures[0].has_drawing_bsp_node_polygon);
+    }
+
+    #[test]
+    fn excludes_building_portal_polygons_from_visible_geometry() {
+        let mut gfx_obj = triangle_gfx_obj();
+        gfx_obj.drawing_bsp = Some(BspNode::Port(BspPortal {
+            plane: holtburger_common::Plane {
+                normal: Vector3::new(1.0, 0.0, 0.0),
+                d: 0.0,
+            },
+            pos: Box::new(leaf()),
+            neg: Box::new(leaf()),
+            sphere: None,
+            poly_ids: Vec::new(),
+            portal_polys: vec![PortalPoly {
+                poly_id: 7,
+                portal_index: 3,
+            }],
+        }));
+
+        let ordinary_geometry = build_gfx_obj_geometry(&gfx_obj).unwrap();
+        let building_geometry = build_building_gfx_obj_geometry(&gfx_obj).unwrap();
+
+        assert_eq!(ordinary_geometry.triangles.len(), 1);
+        assert!(building_geometry.triangles.is_empty());
     }
 
     #[test]

@@ -42,6 +42,18 @@ void main() {
 		// Keeping z at the positive epsilon makes canonical clipping retain exactly the
 		// w >= epsilon and x/y side planes used by the CPU eye-ray projection.
 		clipPosition.z = ${PORTAL_WINDOW_NDC_EPSILON};
+	} else if ((aPolicy & ${PORTAL_CROSSING_DEPTH_POLICY_REJECT_EQUAL}u) == 0u) {
+		// Retail clears an aperture to far depth before drawing its destination and draws objects
+		// afterward (acclient.c:433600-433663, 441221-441228). Our independently rendered scopes
+		// cannot reproduce that ordering for a material-free building transition, so move only that
+		// synthetic aperture's generated depth one retail portal-plane tolerance into its target
+		// domain. Material-bearing CellStruct transitions use reject-equal policy and retain their
+		// authored depth. X/y coverage remains exact; a coplanar door therefore wins ordinary depth
+		// while geometry genuinely behind the transition does not.
+		PortalArrivalMetadata outputArrival = uArrivals[aOutputArrival - 1u];
+		vec3 depthBias = outputArrival.entryPlane.xyz * ${PORTAL_QUERY_EPSILON};
+		vec4 biasedClipPosition = uClipFromAnchor * vec4(aPosition + depthBias, 1.0);
+		clipPosition.z = biasedClipPosition.z * clipPosition.w / biasedClipPosition.w;
 	}
 	gl_Position = clipPosition;
 }

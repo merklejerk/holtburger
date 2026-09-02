@@ -445,6 +445,37 @@ describe("AnimationSystem", () => {
 		expect(sample.articulatedPose.partToObjectTransforms[0]?.m41).toBe(3);
 	});
 
+	it("dispatches backward hooks and rejects forward hooks during reverse playback", () => {
+		const effects = new EffectSystem();
+		const system = buildAnimationSystemOver(effects);
+		const target = testTarget("scene-node:1");
+		const animation: PreparedAnimation = {
+			...testAnimation(Vec3.zero()),
+			hooks: [
+				transparentPartHook("forward", 0.75),
+				transparentPartHook("backward", 0.25),
+			],
+		};
+		installEffectState(effects, target.targetId);
+		system.playClip(
+			"owner",
+			target,
+			playingClip(animation, 0, 3, -30, "hold"),
+			initialPose(),
+		);
+
+		advanceAndSample(system, 0);
+		advanceAndSample(system, 1 / 30);
+		const sample = requiredAt(advanceAndSample(system, 2 / 30), 0);
+
+		expect(sample.effects.partRenderStates[0]?.translucency).toBe(0.25);
+		expect(
+			observations().filter(
+				(observation) => observation.command === "transparent-part",
+			),
+		).toHaveLength(1);
+	});
+
 	it("refuses a clip whose target generation the node no longer holds", () => {
 		const system = buildAnimationSystem();
 		const target = testTarget("scene-node:1");
@@ -603,6 +634,22 @@ function setOmegaHook(omega: Vec3): DecodedAnimationHook {
 		frameIndex: 0,
 		kind: "set-omega",
 		omega,
+	};
+}
+
+function transparentPartHook(
+	direction: "backward" | "forward",
+	end: number,
+): DecodedAnimationHook {
+	return {
+		authoredOrder: direction === "forward" ? 0 : 1,
+		direction,
+		durationSeconds: 0,
+		end,
+		frameIndex: 2,
+		kind: "transparent-part",
+		partIndex: 0,
+		start: 1,
 	};
 }
 

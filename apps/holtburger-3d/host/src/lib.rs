@@ -496,7 +496,11 @@ async fn serialize_outdoor_static_source_record(
         }
     };
 
-    let mut closure = ObjectResourceClosure::default();
+    let mut closure = if layer == LandblockSourceLayer::Buildings {
+        ObjectResourceClosure::for_buildings()
+    } else {
+        ObjectResourceClosure::default()
+    };
     let mut residents = Vec::with_capacity(statics.len());
     for member in statics {
         let source = closure.add_resident(runtime, member.source_did).await?;

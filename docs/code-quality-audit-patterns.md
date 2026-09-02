@@ -98,6 +98,31 @@ no future transition depends on their origin.
 **Possible responses:** Give each behaviorally distinct state an explicit representation and
 preserve authoritative empty results.
 
+## Incomplete Evidence Looks Like a Negative Result
+
+**Smell:** A query skips unavailable partitions, failed lookups, or uninspected sources and returns
+the same empty or negative result it would return after complete inspection.
+
+**Signals:**
+
+- Missing shards, files, scene regions, pages, or services lead to `continue`, an empty collection,
+  or `false` without any coverage fact.
+- Callers cannot distinguish “nothing matched” from “some required inputs were unavailable.”
+- Objects disappear or decisions change near loading, pagination, tenancy, or interest boundaries.
+
+**Possible failure:** The system states that something is absent when it merely failed to look
+everywhere required to prove absence, producing silent under-selection and boundary-dependent
+behavior.
+
+**Questions:** Which sources must be inspected to make the result authoritative? Is partial output
+a supported contract? Can the caller identify exactly which coverage was missing?
+
+**Counterexamples:** Search previews, diagnostics, and opportunistic caches may intentionally return
+best-effort results when incompleteness is explicit and no correctness decision consumes them.
+
+**Possible responses:** Return typed missing-coverage information, fail the exact query, load the
+required partitions first, or name and isolate a deliberately best-effort operation.
+
 ## Stateful Work Forgets Why It Started
 
 **Smell:** A process stores its chosen result but later recomputes the inputs that originally
@@ -217,6 +242,32 @@ deduplicating them may create false coupling.
 
 **Possible responses:** Compute the fact once at its owning boundary and include it in the contract,
 or name the distinct policies so their differences are explicit.
+
+## Cache Identity Omits Output-Shaping Inputs
+
+**Smell:** Cached or deduplicated output depends on an input that is absent from the cache key or
+from the scope that owns the cache.
+
+**Signals:**
+
+- One source asset can be projected under different filters, modes, permissions, locales, or
+  dependency versions, but the key names only the source identity.
+- A new output filter is added without changing cache identity or invalidation.
+- Correctness depends on whichever variant happens to populate the cache first.
+- Callers append ad hoc suffixes after discovering collisions between otherwise valid variants.
+
+**Possible failure:** A valid result prepared for one context is silently reused in another,
+creating order-dependent behavior that often disappears when caches are cold.
+
+**Questions:** Which inputs can change the produced value? Are omitted inputs invariant for the
+cache's complete lifetime? Does invalidation cover every mutable dependency?
+
+**Counterexamples:** An omitted input is harmless when the producer proves it cannot affect output,
+or when the cache is scoped beneath an owner that fixes that input for its lifetime.
+
+**Possible responses:** Use a composite semantic key, move the cache under the owner of the omitted
+invariant, cache an earlier context-free representation, or invalidate on every output-shaping
+dependency change.
 
 ## Equivalent Inputs Stay in Parallel Pipelines
 

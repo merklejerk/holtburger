@@ -605,6 +605,7 @@ fn project(cell: &EnvCell, environment: &Environment) -> Result<CellStructProjec
             environment_id: environment.id,
             cell_structure_id,
             surface_count: cell.surfaces.len(),
+            excluded_shell_polygon_ids: &[],
         },
         cell_struct,
     )

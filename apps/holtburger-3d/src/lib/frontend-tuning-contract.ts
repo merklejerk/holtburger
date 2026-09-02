@@ -86,13 +86,8 @@ type MapSurfaceColor =
 /** Three anchor-relative elevation stops shared by indoor and outdoor maps. */
 type MapHeightColor = "sameLevelColor" | "aboveColor" | "belowColor";
 
-/** Complete shared overhead-map appearance and navigation policy. */
+/** Complete shared overhead-map appearance and view policy. */
 interface FrontendMapTuning {
-	/** Transient map navigation behavior. */
-	readonly navigation: {
-		/** Subject displacement that returns a panned map to follow mode. */
-		readonly automaticReanchorDistanceMeters: number;
-	};
 	/** Directional relief-light presentation. */
 	readonly hillshade: {
 		/** Direction toward the relief light in scene axes. */
@@ -171,6 +166,41 @@ interface FrontendMapTuning {
 		readonly minimumViewDiameterMeters: number;
 		/** Furthest permitted map zoom. */
 		readonly maximumViewDiameterMeters: number;
+	};
+}
+
+/** Shared interaction policy for the HUD minimap widget. */
+interface FrontendMinimapTuning {
+	/** Bounded, distance-sampled controlled-entity history. */
+	readonly breadcrumbs: {
+		/** Base breadcrumb colour before age opacity and elevation brightness are applied. */
+		readonly color: HexRgbColor;
+		/** Dark outer edge that preserves contrast against pale map surfaces. */
+		readonly haloColor: HexRgbColor;
+		/** Screen-space width extending the halo beyond the core circle. */
+		readonly haloWidthPixels: number;
+		/** Maximum recency-ordered positions retained by one mounted minimap. */
+		readonly maximumSamples: number;
+		/** Consecutive 3D displacement that begins a fresh trail. */
+		readonly maximumContinuousStepMeters: number;
+		/** Opacity assigned to the oldest retained age band. */
+		readonly oldestOpacity: number;
+		/** Opacity assigned to the newest retained age band. */
+		readonly newestOpacity: number;
+		/** Screen-space radius of each breadcrumb circle. */
+		readonly radiusPixels: number;
+		/** Horizontal recording deadband and 3D occupied-space radius. */
+		readonly spacingMeters: {
+			/** Spacing while the subject occupies an environment cell. */
+			readonly indoor: number;
+			/** Spacing outdoors or while residency is unknown. */
+			readonly outdoor: number;
+		};
+	};
+	/** Transient minimap navigation behavior. */
+	readonly navigation: {
+		/** Subject displacement that returns a panned minimap to follow mode. */
+		readonly automaticReanchorDistanceMeters: number;
 	};
 }
 
@@ -305,8 +335,10 @@ export interface FrontendTuning {
 	};
 	/** Shared fullscreen portal-transition presentation. */
 	readonly portalTransition: FrontendPortalTransitionTuning;
-	/** Shared overhead-map presentation and interaction bounds. */
+	/** Shared overhead-map presentation and view bounds. */
 	readonly map: FrontendMapTuning;
+	/** Shared HUD minimap interaction policy. */
+	readonly minimap: FrontendMinimapTuning;
 	/** Renderer presentation defaults and quality policy. */
 	readonly rendering: FrontendRenderingTuning;
 	/** Bounded workload and resource-allocation controls. */

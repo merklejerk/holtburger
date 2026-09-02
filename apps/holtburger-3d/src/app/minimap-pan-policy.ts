@@ -1,8 +1,8 @@
 import type { MapCenter } from "../lib/game/map/map-view";
-import type { MapPanelSubject } from "./map-panel-frame";
+import type { MinimapSubject } from "./minimap-frame";
 
 /** Transient navigation state; detached centres are deliberately not shell-persisted layout. */
-export type MapPanState =
+export type MinimapPanState =
 	| {
 			/** Follows the subject's live horizontal position. */
 			readonly kind: "anchored";
@@ -13,17 +13,17 @@ export type MapPanState =
 			/** Fixed world-space point currently shown at the centre of the map. */
 			readonly center: MapCenter;
 			/** Subject identity and position that begin a fresh automatic-reset measurement. */
-			readonly origin: MapPanOrigin;
+			readonly origin: MinimapPanOrigin;
 	  };
 
 /** Stable identity plus horizontal position captured when the latest pan begins. */
-interface MapPanOrigin extends MapCenter {
+interface MinimapPanOrigin extends MapCenter {
 	/** Subject whose displacement is measured from this position. */
-	readonly subject: MapPanSubjectIdentity;
+	readonly subject: MinimapPanSubjectIdentity;
 }
 
 /** Identity shape prevents a free camera from carrying a meaningless controlled GUID. */
-type MapPanSubjectIdentity =
+type MinimapPanSubjectIdentity =
 	| {
 			/** Identifies Explorer navigation without a possessed entity. */
 			readonly kind: "free-camera";
@@ -36,13 +36,13 @@ type MapPanSubjectIdentity =
 	  };
 
 /** Shared zero-payload state used whenever the map follows its subject. */
-export const ANCHORED_MAP_PAN_STATE: MapPanState = { kind: "anchored" };
+export const ANCHORED_MINIMAP_PAN_STATE: MinimapPanState = { kind: "anchored" };
 
 /** Begin or revise one detached view, rearming travel measurement from the current subject. */
-export function detachMapPan(
+export function detachMinimapPan(
 	center: MapCenter,
-	subject: MapPanelSubject,
-): MapPanState {
+	subject: MinimapSubject,
+): MinimapPanState {
 	return {
 		center,
 		kind: "detached",
@@ -58,9 +58,9 @@ export function detachMapPan(
 }
 
 /** Resolve the viewed centre without mutating the live subject anchor. */
-export function mapPanCenter(
-	state: MapPanState,
-	subject: MapPanelSubject,
+export function minimapPanCenter(
+	state: MinimapPanState,
+	subject: MinimapSubject,
 ): MapCenter {
 	return state.kind === "detached"
 		? state.center
@@ -73,23 +73,26 @@ export function mapPanCenter(
  * Squared distance avoids a square root on the display-rate check. The origin is a displacement
  * measurement rather than accumulated samples, so presentation cadence cannot change the policy.
  */
-export function reanchorMapPanAfterSubjectTravel(
-	state: MapPanState,
-	subject: MapPanelSubject | null,
+export function reanchorMinimapPanAfterSubjectTravel(
+	state: MinimapPanState,
+	subject: MinimapSubject | null,
 	distanceMeters: number,
-): MapPanState {
+): MinimapPanState {
 	if (state.kind === "anchored") return state;
 	if (subject === null || !sameSubject(state.origin, subject)) {
-		return ANCHORED_MAP_PAN_STATE;
+		return ANCHORED_MINIMAP_PAN_STATE;
 	}
 	const deltaX = subject.anchor.worldX - state.origin.worldX;
 	const deltaZ = subject.anchor.worldZ - state.origin.worldZ;
 	return deltaX * deltaX + deltaZ * deltaZ >= distanceMeters * distanceMeters
-		? ANCHORED_MAP_PAN_STATE
+		? ANCHORED_MINIMAP_PAN_STATE
 		: state;
 }
 
-function sameSubject(origin: MapPanOrigin, subject: MapPanelSubject): boolean {
+function sameSubject(
+	origin: MinimapPanOrigin,
+	subject: MinimapSubject,
+): boolean {
 	if (origin.subject.kind !== subject.kind) return false;
 	if (origin.subject.kind === "free-camera") return true;
 	if (subject.kind !== "controlled-entity") return false;

@@ -28,7 +28,7 @@
 	import { clientDebugEnabled } from "./client-debug";
 	import ClientCharacterSelect from "./ClientCharacterSelect.svelte";
 	import ClientWorldView from "./ClientWorldView.svelte";
-	import type { MapPanelFrame } from "../app/map-panel-frame";
+	import type { MinimapFrame } from "../app/minimap-frame";
 	import type {
 		ClientCharacterMotionCapabilities,
 		ClientCharacterMotionEventRequest,
@@ -399,9 +399,9 @@
 		}
 	}
 
-	function readMapPanelFrame(): MapPanelFrame {
+	function readMinimapFrame(): MinimapFrame {
 		return (
-			presentationSession?.readMapPanelFrame() ?? {
+			presentationSession?.readMinimapFrame() ?? {
 				cameraFovRadians: 0,
 				cameraHeadingRadians: 0,
 				presentedEntities: () => [],
@@ -631,7 +631,7 @@
 	<ClientWorldView
 		cameraController={lifecycle.kind === "in-world" ? cameraController : null}
 		{debugEnabled}
-		{readMapPanelFrame}
+		{readMinimapFrame}
 		{readDiagnostics}
 		{readFrameRates}
 		showRetailHiddenGeometry={frameSettings.showRetailHiddenGeometry}

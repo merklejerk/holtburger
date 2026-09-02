@@ -3656,18 +3656,18 @@ async function runClientHudHarness({ viteUrl }) {
 				"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.capture",
 				[],
 			);
-		const mapSurfaceCenter = async () => {
+		const minimapSurfaceCenter = async () => {
 			const state = await capture();
-			const map = state.surfaces["Overhead map"];
+			const map = state.surfaces.Minimap;
 			if (map === undefined)
-				throw new Error("Client HUD map surface is absent.");
+				throw new Error("Client HUD minimap surface is absent.");
 			return {
 				x: map.left + map.width / 2,
 				y: map.top + map.height / 2,
 			};
 		};
-		const panMap = async (deltaX, deltaY) => {
-			const { x, y } = await mapSurfaceCenter();
+		const panMinimap = async (deltaX, deltaY) => {
+			const { x, y } = await minimapSurfaceCenter();
 			await client.send("Input.dispatchMouseEvent", {
 				button: "left",
 				clickCount: 1,
@@ -3690,8 +3690,8 @@ async function runClientHudHarness({ viteUrl }) {
 				y: y + deltaY,
 			});
 		};
-		const zoomMapIn = async (steps) => {
-			const { x, y } = await mapSurfaceCenter();
+		const zoomMinimapIn = async (steps) => {
+			const { x, y } = await minimapSurfaceCenter();
 			for (let step = 0; step < steps; step += 1) {
 				await client.send("Input.dispatchMouseEvent", {
 					deltaX: 0,
@@ -3711,28 +3711,117 @@ async function runClientHudHarness({ viteUrl }) {
 			await delay(180);
 		};
 
+		await delay(100);
 		const runtime = await capture();
-		await panMap(32, 18);
-		await delay(100);
-		const mapPanned = await capture();
-		await zoomMapIn(8);
-		await delay(100);
-		const mapPannedZoomed = await capture();
 		await evaluate(
 			client,
-			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.resetMap",
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.moveMinimapSubjectByBreadcrumbSpacing",
+			[0.5],
+		);
+		await delay(100);
+		const breadcrumbBelowSpacing = await capture();
+		await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.moveMinimapSubjectByBreadcrumbSpacing",
+			[0.5],
+		);
+		await delay(100);
+		const breadcrumbOutdoorSampled = await capture();
+		await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.setMinimapSubject",
+			[1, true],
+		);
+		await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.moveMinimapSubjectByBreadcrumbSpacing",
+			[1],
+		);
+		await delay(100);
+		const breadcrumbIndoorSampled = await capture();
+		await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.setMinimapSubject",
+			[1, false],
+		);
+		await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.moveMinimapSubjectByBreadcrumbSpacing",
+			[1],
+		);
+		await delay(100);
+		const breadcrumbDoorwayTravel = await capture();
+		await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.moveMinimapSubjectByBreadcrumbSpacing",
+			[-1],
+		);
+		await delay(100);
+		const breadcrumbRevisited = await capture();
+		await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.teleportMinimapSubject",
 			[],
 		);
 		await delay(100);
-		const mapManuallyReanchored = await capture();
-		await panMap(32, 18);
+		const breadcrumbAfterDiscontinuity = await capture();
 		await evaluate(
 			client,
-			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.moveMapSubjectPastAutomaticReanchor",
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.setMinimapSubject",
+			[2, false],
+		);
+		await delay(100);
+		const breadcrumbAfterIdentityChange = await capture();
+		await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.setMinimapSubject",
+			[null, false],
+		);
+		await delay(100);
+		const breadcrumbWithoutControlledSubject = await capture();
+		await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.setMinimapSubject",
+			[1, false],
+		);
+		await delay(100);
+		const breadcrumbSubjectRestored = await capture();
+		// Exercise recording while detached in the environment whose sample spacing remains below the
+		// independently tuned automatic re-anchor distance. The automatic-reanchor case follows.
+		await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.setMinimapSubject",
+			[1, true],
+		);
+		await delay(100);
+		await panMinimap(32, 18);
+		await delay(100);
+		const minimapPanned = await capture();
+		await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.moveMinimapSubjectByBreadcrumbSpacing",
+			[1],
+		);
+		await delay(100);
+		const minimapPannedWithBreadcrumb = await capture();
+		await zoomMinimapIn(8);
+		await delay(100);
+		const minimapPannedZoomed = await capture();
+		await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.resetMinimap",
 			[],
 		);
 		await delay(100);
-		const mapAutomaticallyReanchored = await capture();
+		const minimapManuallyReanchored = await capture();
+		await panMinimap(32, 18);
+		await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.moveMinimapSubjectPastAutomaticReanchor",
+			[],
+		);
+		await delay(100);
+		const minimapAutomaticallyReanchored = await capture();
 		await toggleMode();
 		const layout = await capture();
 		const wideScreenshot = await client.send("Page.captureScreenshot", {
@@ -3799,13 +3888,23 @@ async function runClientHudHarness({ viteUrl }) {
 		const runtimeTransients = await capture();
 
 		const clientHud = {
+			breadcrumbAfterDiscontinuity,
+			breadcrumbAfterIdentityChange,
+			breadcrumbBelowSpacing,
+			breadcrumbDoorwayTravel,
+			breadcrumbIndoorSampled,
+			breadcrumbOutdoorSampled,
+			breadcrumbRevisited,
+			breadcrumbSubjectRestored,
+			breadcrumbWithoutControlledSubject,
 			constrained,
 			layout,
 			layoutReopened,
-			mapAutomaticallyReanchored,
-			mapManuallyReanchored,
-			mapPanned,
-			mapPannedZoomed,
+			minimapAutomaticallyReanchored,
+			minimapManuallyReanchored,
+			minimapPanned,
+			minimapPannedZoomed,
+			minimapPannedWithBreadcrumb,
 			moved,
 			narrow,
 			restored,
@@ -3838,7 +3937,7 @@ function assertClientHudHarness(evidence) {
 		"Chat",
 		"Frame rate",
 		"Game shortcuts",
-		"Overhead map",
+		"Minimap",
 	].toSorted();
 	const layoutLabels = [
 		...runtimeLabels,
@@ -3849,33 +3948,135 @@ function assertClientHudHarness(evidence) {
 	assertClientHudLabels(evidence.layout, "layout", layoutLabels);
 	assertClientHudLabels(evidence.runtimeRestored, "runtime", runtimeLabels);
 	assertClientHudLabels(evidence.layoutReopened, "layout", layoutLabels);
-	if (evidence.runtime.mapResetVisible) {
-		throw new Error("Client HUD map reset is visible before panning.");
+	if (
+		evidence.runtime.minimapOverlayArcCalls <= 0 ||
+		evidence.runtime.minimapOverlayInkPixels <= 0
+	) {
+		throw new Error("Client HUD minimap did not draw its initial breadcrumb.");
 	}
-	if (!evidence.mapPanned.mapResetVisible) {
-		throw new Error("Client HUD map drag did not reveal its reset control.");
-	}
-	if (evidence.mapPanned.mapCoordinates === evidence.runtime.mapCoordinates) {
-		throw new Error("Client HUD map drag did not move the viewed coordinates.");
-	}
-	if (!evidence.runtime.mapConeVisible || !evidence.mapPanned.mapConeVisible) {
+	if (
+		evidence.breadcrumbBelowSpacing.minimapOverlayArcCalls !==
+		evidence.runtime.minimapOverlayArcCalls
+	) {
 		throw new Error(
-			"Client HUD map hid the camera cone while its subject was visible.",
+			"Client HUD minimap recorded movement below its breadcrumb spacing.",
 		);
 	}
-	if (evidence.mapPannedZoomed.mapConeVisible) {
+	if (
+		evidence.breadcrumbOutdoorSampled.minimapOverlayArcCalls <=
+		evidence.breadcrumbBelowSpacing.minimapOverlayArcCalls
+	) {
 		throw new Error(
-			"Client HUD map retained the camera cone after zoom moved its subject off-disc.",
+			"Client HUD minimap did not record outdoor breadcrumb travel at its spacing.",
 		);
 	}
-	if (evidence.mapManuallyReanchored.mapResetVisible) {
-		throw new Error("Client HUD map reset did not restore follow mode.");
+	if (
+		evidence.breadcrumbIndoorSampled.minimapOverlayArcCalls <=
+		evidence.breadcrumbOutdoorSampled.minimapOverlayArcCalls
+	) {
+		throw new Error(
+			"Client HUD minimap did not apply denser indoor breadcrumb spacing.",
+		);
 	}
-	if (!evidence.mapManuallyReanchored.mapConeVisible) {
-		throw new Error("Client HUD map reset did not restore its camera cone.");
+	if (
+		evidence.breadcrumbDoorwayTravel.minimapOverlayArcCalls <=
+		evidence.breadcrumbIndoorSampled.minimapOverlayArcCalls
+	) {
+		throw new Error(
+			"Client HUD minimap discarded breadcrumb history at an ordinary doorway transition.",
+		);
 	}
-	if (evidence.mapAutomaticallyReanchored.mapResetVisible) {
-		throw new Error("Client HUD map did not re-anchor after subject travel.");
+	if (
+		evidence.breadcrumbRevisited.minimapOverlayArcCalls >=
+		evidence.breadcrumbDoorwayTravel.minimapOverlayArcCalls
+	) {
+		throw new Error(
+			"Client HUD minimap consumed another breadcrumb slot when revisiting covered space.",
+		);
+	}
+	if (
+		evidence.breadcrumbAfterDiscontinuity.minimapOverlayArcCalls >=
+		evidence.breadcrumbRevisited.minimapOverlayArcCalls
+	) {
+		throw new Error(
+			"Client HUD minimap retained old breadcrumb history after a discontinuity.",
+		);
+	}
+	if (
+		evidence.breadcrumbAfterIdentityChange.minimapOverlayArcCalls !==
+		evidence.breadcrumbAfterDiscontinuity.minimapOverlayArcCalls
+	) {
+		throw new Error(
+			"Client HUD minimap carried breadcrumb history across controlled identities.",
+		);
+	}
+	if (
+		evidence.breadcrumbWithoutControlledSubject.minimapOverlayArcCalls !== 0 ||
+		evidence.breadcrumbWithoutControlledSubject.minimapOverlayInkPixels !== 0
+	) {
+		throw new Error(
+			"Client HUD minimap retained breadcrumbs without a controlled subject.",
+		);
+	}
+	if (evidence.breadcrumbSubjectRestored.minimapOverlayArcCalls <= 0) {
+		throw new Error(
+			"Client HUD minimap did not begin a fresh trail when control returned.",
+		);
+	}
+	if (evidence.runtime.minimapResetVisible) {
+		throw new Error("Client HUD minimap reset is visible before panning.");
+	}
+	if (!evidence.minimapPanned.minimapResetVisible) {
+		throw new Error(
+			"Client HUD minimap drag did not reveal its reset control.",
+		);
+	}
+	if (
+		evidence.minimapPanned.minimapCoordinates ===
+		evidence.runtime.minimapCoordinates
+	) {
+		throw new Error(
+			"Client HUD minimap drag did not move the viewed coordinates.",
+		);
+	}
+	if (
+		!evidence.runtime.minimapConeVisible ||
+		!evidence.minimapPanned.minimapConeVisible
+	) {
+		throw new Error(
+			"Client HUD minimap hid the camera cone while its subject was visible.",
+		);
+	}
+	if (!evidence.minimapPannedWithBreadcrumb.minimapResetVisible) {
+		throw new Error(
+			"Client HUD minimap breadcrumb travel incorrectly cancelled a nearby detached view.",
+		);
+	}
+	if (
+		evidence.minimapPannedWithBreadcrumb.minimapOverlayArcCalls <=
+		evidence.minimapPanned.minimapOverlayArcCalls
+	) {
+		throw new Error(
+			"Client HUD minimap stopped recording breadcrumbs while panned.",
+		);
+	}
+	if (evidence.minimapPannedZoomed.minimapConeVisible) {
+		throw new Error(
+			"Client HUD minimap retained the camera cone after zoom moved its subject off-disc.",
+		);
+	}
+	if (evidence.minimapManuallyReanchored.minimapResetVisible) {
+		throw new Error("Client HUD minimap reset did not restore follow mode.");
+	}
+	if (!evidence.minimapManuallyReanchored.minimapConeVisible) {
+		throw new Error(
+			"Client HUD minimap reset did not restore its camera cone.",
+		);
+	}
+	if (evidence.minimapAutomaticallyReanchored.minimapResetVisible) {
+		throw new Error(
+			"Client HUD minimap did not re-anchor after subject travel.",
+		);
 	}
 	assertClientHudLabels(
 		evidence.runtimeTransients,

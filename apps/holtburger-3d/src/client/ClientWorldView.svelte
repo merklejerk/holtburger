@@ -349,14 +349,13 @@
 			onDebug={() => (debugOpen = !debugOpen)}
 		/>
 	</ClientHudPanel>
-	{#if debugEnabled && (debugOpen || hudMode === "layout")}
+	{#if debugEnabled && debugOpen}
 		<ClientHudWindow
 			title="Client diagnostics"
 			placement={hudLayout.diagnostics}
 			minWidth={280}
 			minHeight={220}
 			{viewport}
-			closable={hudMode === "runtime"}
 			onClose={() => (debugOpen = false)}
 			onPlacementChange={(diagnostics) =>
 				(hudLayout = { ...hudLayout, diagnostics })}

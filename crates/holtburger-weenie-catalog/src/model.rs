@@ -42,6 +42,8 @@ pub struct WeenieTemplate {
     pub friction: Option<f64>,
     /// Optional raw ACE World elasticity.
     pub elasticity: Option<f64>,
+    /// Optional `PropertyFloat::Translucency` (76) applied to every setup part.
+    pub translucency: Option<f64>,
     /// Optional ACE World launch-speed magnitude in metres per second.
     pub maximum_velocity: Option<f64>,
     /// Optional ACE World projectile rotation speed in revolutions per second.

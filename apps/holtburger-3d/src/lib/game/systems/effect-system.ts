@@ -91,20 +91,44 @@ export class EffectSystem implements EffectCommandPort {
 	#fractionalSeconds = 0;
 	#lastTimeSeconds: number | null = null;
 
-	install(nodeId: SceneNodeId, partCount: number): void {
+	install(
+		nodeId: SceneNodeId,
+		partCount: number,
+		initialTranslucency: number,
+	): void {
 		if (this.#states.has(nodeId))
 			throw new Error(`Effect state for ${nodeId} already exists.`);
 		if (!Number.isInteger(partCount) || partCount <= 0)
 			throw new Error("Effect state requires a positive part count.");
+		if (
+			!Number.isFinite(initialTranslucency) ||
+			initialTranslucency < 0 ||
+			initialTranslucency > 1
+		)
+			throw new Error(
+				"Effect state requires initial translucency between zero and one.",
+			);
 		this.#states.set(nodeId, {
 			committedOrientation: Quat.identity(),
 			omega: Vec3.zero(),
 			scale: 1,
 			scaleRamp: null,
 			dirty: true,
-			partTranslucencies: Array.from({ length: partCount }, () => 0),
+			partTranslucencies: Array.from(
+				{ length: partCount },
+				() => initialTranslucency,
+			),
 			translucencyRamps: Array.from({ length: partCount }, () => null),
 		});
+	}
+
+	/** Apply one current whole-object translucency level without disturbing part-local ramps. */
+	applyObjectTranslucency(nodeId: SceneNodeId, translucency: number): void {
+		if (!Number.isFinite(translucency) || translucency < 0 || translucency > 1)
+			throw new Error("Object translucency must be between zero and one.");
+		const state = this.#requiredState(nodeId);
+		state.partTranslucencies.fill(translucency);
+		state.dirty = true;
 	}
 
 	/**

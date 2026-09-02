@@ -11,6 +11,7 @@ import type { EffectSystem } from "./effect-system";
 import type { SoundTableRepository } from "../behavior/sound-table-repository";
 import type { DecodedSoundTable } from "../../assets/decode-sound-table-record";
 import type {
+	DynamicEntityPresentationState,
 	DynamicPresentationSource,
 	NameplateContent,
 	PlacedDynamicPresentationSource,
@@ -74,14 +75,6 @@ import type {
 	DynamicEntityAdvance,
 	DynamicEntityTickBatch,
 } from "../runtime/dynamic-entity-feed";
-
-/** Presentation-owned consequences of one complete producer physics-state projection. */
-export interface DynamicEntityPresentationState {
-	readonly noDraw: boolean;
-	readonly hidden: boolean;
-	readonly cloaked: boolean;
-	readonly lighting: boolean;
-}
 
 interface DynamicEntityRecord {
 	readonly rootNodeId: SceneNodeId;
@@ -488,12 +481,7 @@ export class DynamicEntitySystem<
 			publishedPresentationBounds: rigidPresentationBounds,
 			cullingBounds: null,
 			appliedEnvelopeRadius: 0,
-			presentationState: {
-				cloaked: false,
-				hidden: false,
-				lighting: false,
-				noDraw: false,
-			},
+			presentationState: resident.initialPresentationState,
 			visualRootNodeId,
 			visibleContributions: null,
 			visibleDepthContributionEntries: new Map(),
@@ -826,6 +814,19 @@ export class DynamicEntitySystem<
 	): void {
 		const entity = this.#entities.get(nodeId);
 		if (!entity) throw new Error(`Dynamic entity ${nodeId} does not exist.`);
+		if (
+			state.translucency !== entity.presentationState.translucency &&
+			!entity.presentationState.cloaked &&
+			!state.cloaked
+		) {
+			// RETAIL QUIRK: CPhysicsPart::SetTranslucency ignores whole-object writes while
+			// cloaked, and CPhysicsObj::set_state does not replay them on uncloak
+			// (acclient.c:303936-303962, 310307-310336). Correcting this would make property
+			// updates received during cloak observable when retail leaves the prior part state.
+			// Census 2026-09-02: 928 templates author object translucency; live cloak/update
+			// overlap is runtime state and cannot be sized from static content.
+			this.#effects.applyObjectTranslucency(nodeId, state.translucency);
+		}
 		entity.presentationState = state;
 	}
 
@@ -1202,7 +1203,16 @@ export class DynamicEntitySystem<
 				// Effect state is installed here, before any producer can dispatch into it, and is
 				// owned by the entity rather than by animation: a script-only resident has effect
 				// state and no playback at all.
-				this.#effects.install(entity.rootNodeId, result.effectPartCount);
+				// Retail applies semantic state before PhysicsDesc translucency; an initially cloaked
+				// object therefore ignores that initial whole-object write (acclient.c:310488-310498,
+				// 303936-303962).
+				this.#effects.install(
+					entity.rootNodeId,
+					result.effectPartCount,
+					entity.presentationState.cloaked
+						? 0
+						: entity.presentationState.translucency,
+				);
 				entity.animationHandle = result.handle;
 				entity.scriptClosure = result.scriptClosure;
 				entity.motionClosure = result.motionClosure;
@@ -1471,6 +1481,8 @@ function createActiveParts(
 					parentId: visualRootNodeId,
 				}),
 				partIndex,
+				// Staging-only placeholder. The required effect sample replaces it before the owner
+				// can publish, including a nonzero object-translucency baseline.
 				renderState: { translucency: 0 },
 			});
 		}

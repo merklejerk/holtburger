@@ -175,6 +175,8 @@ pub enum ExplorerEntityDriverError {
     InvalidWeenieType { wcid: u32, value: i32 },
     /// A catalog double cannot enter the validated single-precision runtime contract.
     InvalidScalar { wcid: u32, field: &'static str },
+    /// Catalog translucency is non-finite or outside the inclusive unit interval.
+    InvalidTranslucency { wcid: u32 },
     /// The source-neutral definition rejected catalog/request facts.
     Definition(DynamicEntityDefinitionError),
     /// Immutable catalog facts or the requested direction cannot produce a launch.
@@ -226,6 +228,12 @@ impl Display for ExplorerEntityDriverError {
                 write!(
                     formatter,
                     "WCID {wcid} {field} cannot be represented as finite f32"
+                )
+            }
+            Self::InvalidTranslucency { wcid } => {
+                write!(
+                    formatter,
+                    "WCID {wcid} translucency must be finite and between zero and one"
                 )
             }
             Self::Definition(source) => Display::fmt(source, formatter),
@@ -788,6 +796,14 @@ fn optional_f32(
         .transpose()
 }
 
+fn template_translucency(wcid: u32, value: Option<f64>) -> Result<f32, ExplorerEntityDriverError> {
+    let value = value.unwrap_or(0.0);
+    if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+        return Err(ExplorerEntityDriverError::InvalidTranslucency { wcid });
+    }
+    Ok(value as f32)
+}
+
 fn physics_input(template: &WeenieTemplate) -> EntityPhysicsStateInput {
     let overrides = &template.physics.overrides;
     EntityPhysicsStateInput {
@@ -1044,6 +1060,7 @@ fn template_definition_input(
         object_scale: content.object_scale,
         friction: optional_f32(template.wcid, "friction", template.friction)?,
         elasticity: optional_f32(template.wcid, "elasticity", template.elasticity)?,
+        translucency: template_translucency(template.wcid, template.translucency)?,
         maximum_velocity: optional_f32(
             template.wcid,
             "maximum velocity",
@@ -1136,6 +1153,24 @@ mod tests {
         PhysicalSphereSet, PhysicalSurfaceMotion, PhysicsAttachment, PreparedEntityTargetGeometry,
     };
     use std::collections::BTreeMap;
+
+    #[test]
+    fn template_translucency_validates_before_narrowing() {
+        assert_eq!(template_translucency(1, None).unwrap(), 0.0);
+        assert_eq!(template_translucency(1, Some(1.0)).unwrap(), 1.0);
+        for value in [
+            f64::NAN,
+            -0.01,
+            1.01,
+            -f64::MIN_POSITIVE,
+            1.0 + f64::EPSILON,
+        ] {
+            assert!(matches!(
+                template_translucency(1, Some(value)),
+                Err(ExplorerEntityDriverError::InvalidTranslucency { wcid: 1 })
+            ));
+        }
+    }
 
     #[test]
     fn explorer_presentation_class_uses_template_family_and_attackable_default() {
@@ -1439,6 +1474,7 @@ mod tests {
             default_scale: None,
             friction: None,
             elasticity: None,
+            translucency: None,
             maximum_velocity: None,
             rotation_speed: None,
             radar_blip_color: None,

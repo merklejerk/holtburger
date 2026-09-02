@@ -29,6 +29,7 @@ export.
 | `default_scale: Option<f64>`            | `weenie_properties_float`, `type = PropertyFloat.DefaultScale (39)`                                      | Scale distribution and scaled collision geometry                                     |
 | `friction: Option<f64>`                 | `weenie_properties_float`, `type = PropertyFloat.Friction (78)`                                          | Response-policy distribution and validation                                          |
 | `elasticity: Option<f64>`               | `weenie_properties_float`, `type = PropertyFloat.Elasticity (79)`                                        | Response-policy distribution and validation                                          |
+| `translucency: Option<f64>`             | `weenie_properties_float`, `type = PropertyFloat.Translucency (76)`                                      | Explorer dynamic-entity object translucency                                           |
 | `maximum_velocity: Option<f64>`         | `weenie_properties_float`, `type = PropertyFloat.MaximumVelocity (26)`                                   | Explorer missile launch magnitude; actual velocity is live state                     |
 | `rotation_speed: Option<f64>`           | `weenie_properties_float`, `type = PropertyFloat.RotationSpeed (27)`                                     | Explorer missile spin magnitude; actual omega is live state                          |
 | `radar_blip_color: Option<i32>`         | `weenie_properties_int`, `type = PropertyInt.RadarBlipColor (95)`                                        | Explicit overhead-map color                                                          |
@@ -51,7 +52,7 @@ strings `HeritageGroupName` and `Sex`. `DefaultCombatStyle` is PropertyInt 46 an
 bow/crossbow versus thrown-weapon handedness. A wield row stores destination WCID, destination
 flags, palette template, and raw shade/probability.
 
-The five optional float values remain binary64 in the bootstrap catalog because ACE World stores them
+The six optional float values remain binary64 in the bootstrap catalog because ACE World stores them
 as MySQL `double`. Runtime narrowing and retail validation belong to later resolution, where failures
 can cite the WCID and source value. Maximum velocity and rotation speed are magnitudes, not live
 vectors; absence and explicit zero remain distinct.
@@ -121,12 +122,12 @@ review condition rather than permission to trust incidental MySQL row order.
 The catalog includes every base `weenie` row, including records without setup or display-name
 properties, so Phase R0 can measure missing facts. A missing setup is not an export error.
 
-## `.hwc` File Format Version 9
+## `.hwc` File Format Version 10
 
 Every integer and binary64 float bit pattern is little-endian. Strings are length-prefixed UTF-8.
 There is no compression, checksum, implicit serializer metadata, or unknown-field skipping in
-version 9, and the only padding is the reserved word that aligns the header's 64-bit offset fields.
-Readers reject trailing bytes and every nonzero reserved byte. Versions are clean cutovers; the v9
+version 10, and the only padding is the reserved word that aligns the header's 64-bit offset fields.
+Readers reject trailing bytes and every nonzero reserved byte. Versions are clean cutovers; the v10
 reader does not reinterpret older payloads.
 
 The file layout is:
@@ -140,7 +141,7 @@ The file layout is:
 | Offset | Width | Field          | Contract                                   |
 | -----: | ----: | -------------- | ------------------------------------------ |
 |      0 |     8 | magic          | Bytes `48 42 57 43 41 54 00 1A` (`HBWCAT`) |
-|      8 |     4 | version        | `9`                                        |
+|      8 |     4 | version        | `10`                                       |
 |     12 |     4 | header length  | `64`                                       |
 |     16 |     4 | record count   | `0..=1,048,576`                            |
 |     20 |     4 | reserved       | All zero; aligns the 64-bit offset fields  |
@@ -148,7 +149,7 @@ The file layout is:
 |     32 |     8 | payload length | Sum of every indexed record length         |
 |     40 |     8 | index offset   | Exactly `payload offset + payload length`  |
 |     48 |     8 | index length   | Exactly `record count * 16`                |
-|     56 |     8 | reserved       | All zero in version 9                      |
+|     56 |     8 | reserved       | All zero in version 10                     |
 
 The file ends exactly after the index. A valid index has no gaps or overlapping payload ranges.
 
@@ -171,7 +172,8 @@ Every other tag is invalid.
 4. `name: Option<string>`
 5. `level: Option<i32>`
 6. five `Option<u32>` DIDs: setup, motion table, sound table, physics-effect table, palette base
-7. five `Option<f64>` values: default scale, friction, elasticity, maximum velocity, rotation speed
+7. six `Option<f64>` values: default scale, friction, elasticity, translucency, maximum velocity,
+   rotation speed
 8. optional radar blip color and behavior integers, optional obvious radar range, and nullable
    authored attackable
 9. `physics.base_mask: Option<u32>`

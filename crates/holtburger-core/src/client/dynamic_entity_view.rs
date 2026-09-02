@@ -32,6 +32,8 @@ pub enum ClientDynamicEntityViewError {
     MissingSetup { guid: u32 },
     #[error("client entity 0x{guid:08X} has invalid object scale")]
     InvalidObjectScale { guid: u32 },
+    #[error("client entity 0x{guid:08X} has invalid translucency")]
+    InvalidTranslucency { guid: u32 },
     #[error("client entity 0x{guid:08X} has no canonical runtime body")]
     MissingBody { guid: u32 },
 }
@@ -61,6 +63,13 @@ pub fn project_client_dynamic_entity(
     if !object_scale.is_finite() || object_scale <= 0.0 {
         return Err(ClientDynamicEntityViewError::InvalidObjectScale { guid: guid.0 });
     }
+    let translucency = entity
+        .get_float_prop(PropertyFloat::Translucency)
+        .unwrap_or(0.0);
+    if !translucency.is_finite() || !(0.0..=1.0).contains(&translucency) {
+        return Err(ClientDynamicEntityViewError::InvalidTranslucency { guid: guid.0 });
+    }
+    let translucency = translucency as f32;
     let placement = if let Some(attachment) = entity.attachment {
         EntityPlacement::Attached(attachment)
     } else {
@@ -102,6 +111,7 @@ pub fn project_client_dynamic_entity(
         },
         appearance: entity.appearance.clone(),
         object_scale,
+        translucency,
         physics: entity.physics.effective(),
         radar: crate::DynamicEntityRadarFacts::from_authored(
             format_args!("client entity 0x{:08X}", guid.0),
@@ -524,6 +534,7 @@ mod tests {
         entity.set_did_prop(PropertyDataId::Setup, Guid(0x0200_0001));
         entity.set_did_prop(PropertyDataId::MotionTable, Guid(0x0900_0001));
         entity.set_float_prop(PropertyFloat::DefaultScale, 1.25);
+        entity.set_float_prop(PropertyFloat::Translucency, 0.5);
 
         let mut world = WorldState::synthetic();
         world.add_entity(entity);
@@ -550,6 +561,7 @@ mod tests {
                 },
                 appearance,
                 object_scale: 1.25,
+                translucency: 0.5,
                 physics,
                 radar: crate::DynamicEntityRadarFacts::from_authored(
                     "test explorer entity",
@@ -586,6 +598,7 @@ mod tests {
             rotation: Quaternion::identity(),
         };
         let entity = projectable_entity(guid, pose);
+        let generation = u64::from(entity.instance_sequence());
         let mut client = builder::build_test_client(ClientState::InWorld);
         client.world.add_entity(entity.clone());
         let mut events = client.subscribe_client_view_events();
@@ -620,6 +633,24 @@ mod tests {
             _ => None,
         });
         assert_eq!(updated.expect("level upsert").display.level, Some(27));
+
+        client
+            .world
+            .entities
+            .get_mut(guid)
+            .expect("spawned entity")
+            .set_float_prop(PropertyFloat::Translucency, 0.5);
+        client.handle_world_event(&holtburger_world::WorldEvent::PropertiesUpdated {
+            guid,
+            updates: vec![PropertyUpdate::Float(PropertyFloat::Translucency, 0.5)],
+        });
+        let updated = std::iter::from_fn(|| events.try_recv().ok()).find_map(|event| match event {
+            ClientViewEvent::DynamicEntity(DynamicEntityEvent::Upserted { entity }) => Some(entity),
+            _ => None,
+        });
+        let updated = updated.expect("translucency upsert");
+        assert_eq!(updated.generation, generation);
+        assert_eq!(updated.physics.translucency, 0.5);
 
         client.emit_current_application_snapshot();
         let snapshot =
@@ -680,6 +711,23 @@ mod tests {
             assert_eq!(
                 project_client_dynamic_entity(&world, Guid(guid)),
                 Err(ClientDynamicEntityViewError::InvalidObjectScale { guid })
+            );
+        }
+
+        for (guid, translucency) in [
+            (8, f64::NAN),
+            (9, -0.01),
+            (10, 1.01),
+            (11, -f64::MIN_POSITIVE),
+            (12, 1.0 + f64::EPSILON),
+        ] {
+            let mut world = WorldState::synthetic();
+            let mut invalid_translucency = projectable_entity(Guid(guid), pose);
+            invalid_translucency.set_float_prop(PropertyFloat::Translucency, translucency);
+            world.add_entity(invalid_translucency);
+            assert_eq!(
+                project_client_dynamic_entity(&world, Guid(guid)),
+                Err(ClientDynamicEntityViewError::InvalidTranslucency { guid })
             );
         }
 

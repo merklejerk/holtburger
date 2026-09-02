@@ -543,6 +543,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 			hidden: false,
 			lighting: true,
 			noDraw: true,
+			translucency: 0,
 		});
 		expect(system.getRuntimeLights()).toEqual([
 			{
@@ -560,6 +561,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 			hidden: false,
 			lighting: false,
 			noDraw: false,
+			translucency: 0,
 		});
 		expect(system.getRuntimeLights()).toEqual([]);
 	});
@@ -635,6 +637,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 			hidden: false,
 			lighting: false,
 			noDraw: true,
+			translucency: 0,
 		});
 		expect(system.getVisibleContributions(firstNodeId, true)).toEqual({
 			depth: [],
@@ -646,6 +649,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 			hidden: true,
 			lighting: false,
 			noDraw: false,
+			translucency: 0,
 		});
 		expect(system.getVisibleContributions(firstNodeId, true)).toEqual({
 			depth: [],
@@ -658,6 +662,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 			hidden: false,
 			lighting: false,
 			noDraw: false,
+			translucency: 0,
 		});
 		system.publishPresentation([presentationSample(firstPrepared, 0.2)]);
 		system.updatePresentationState(firstNodeId, {
@@ -665,6 +670,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 			hidden: false,
 			lighting: false,
 			noDraw: false,
+			translucency: 0,
 		});
 		// Retail ignores later SetTranslucency writes while cloaked; it does not invent cloak alpha.
 		system.publishPresentation([presentationSample(firstPrepared, 0.8)]);
@@ -678,6 +684,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 			hidden: false,
 			lighting: false,
 			noDraw: false,
+			translucency: 0,
 		});
 		system.publishPresentation([presentationSample(firstPrepared, 0.8)]);
 		expect(
@@ -689,6 +696,86 @@ describe("DynamicEntitySystem authored ownership", () => {
 			lastParticleEnvelopeQueryCount: 1,
 			lastPresentationEntityVisitCount: 2,
 			lastPublishedPresentationCount: 1,
+		});
+	});
+
+	it("applies object translucency without replacing resident or visual identity", async () => {
+		const { effects, geometry, system } = createSystem(
+			new InlineObjectVisualTemplatePreparer(),
+		);
+		const base = source("object-translucency");
+		const installation = system.replaceOwner("layer", [
+			{
+				...base,
+				initialPresentationState: {
+					...base.initialPresentationState,
+					translucency: 0.5,
+				},
+			},
+		]);
+		expect(await installation.ready).toBe("ready");
+		const prepared = requiredAt(installation.getPreparedEntities(), 0);
+		const nodeId = prepared.nodeId;
+		const sample = presentationSample(prepared, 0);
+		installation.prepareCommit([
+			{ ...sample, effects: effects.samplePresentation(nodeId) },
+		]);
+		installation.commit();
+
+		const initial = system.getVisibleContributions(nodeId, true)?.material[0];
+		expect(initial).toMatchObject({
+			instance: { color: { a: 0.5 } },
+			ordering: "transparent",
+		});
+		const drawUnit = initial?.drawUnit;
+		const geometryUpserts = geometry.upserted.length;
+
+		system.updatePresentationState(nodeId, {
+			...base.initialPresentationState,
+			translucency: 0.25,
+		});
+		system.publishPresentation([
+			{ ...sample, effects: effects.samplePresentation(nodeId) },
+		]);
+		const updated = system.getVisibleContributions(nodeId, true)?.material[0];
+		expect(updated?.instance.color.a).toBe(0.75);
+		expect(updated?.drawUnit).toBe(drawUnit);
+		expect(system.getRenderable(nodeId)).not.toBeNull();
+		expect(geometry.upserted).toHaveLength(geometryUpserts);
+
+		// A whole-object write received while cloaked is ignored and is not replayed when cloak
+		// clears (CPhysicsPart::SetTranslucency and CPhysicsObj::set_state,
+		// acclient.c:303936-303962, 310307-310336).
+		system.updatePresentationState(nodeId, {
+			...base.initialPresentationState,
+			cloaked: true,
+			translucency: 0.75,
+		});
+		system.updatePresentationState(nodeId, {
+			...base.initialPresentationState,
+			// A different carried value on the uncloak snapshot is still not a new uncloaked
+			// SetTranslucency write; retail does not replay it while clearing the cloak bit.
+			translucency: 0.5,
+		});
+		system.publishPresentation([
+			{ ...sample, effects: effects.samplePresentation(nodeId) },
+		]);
+		expect(
+			system.getVisibleContributions(nodeId, true)?.material[0]?.instance.color
+				.a,
+		).toBe(0.75);
+
+		system.updatePresentationState(nodeId, {
+			...base.initialPresentationState,
+			translucency: 1,
+		});
+		system.publishPresentation([
+			{ ...sample, effects: effects.samplePresentation(nodeId) },
+		]);
+		expect(system.getVisibleContributions(nodeId, true)).toEqual({
+			depth: [],
+			kind: "hidden",
+			material: [],
 		});
 	});
 
@@ -989,6 +1076,13 @@ function source(
 		sourceAssetId: `setup-model/${id}`,
 	};
 	return {
+		initialPresentationState: {
+			cloaked: false,
+			hidden: false,
+			lighting: false,
+			noDraw: false,
+			translucency: 0,
+		},
 		placement: {
 			envCellId: null,
 			landblockId: "0x0001ffff",

@@ -43,6 +43,7 @@ fn main() -> Result<()> {
         template.motion_table_did.map(|d| format!("0x{d:08X}"))
     );
     println!("  default_scale    {:?}", template.default_scale);
+    println!("  translucency     {:?}", template.translucency);
 
     let base = template.physics.base_mask.unwrap_or(0);
     let overrides = &template.physics.overrides;

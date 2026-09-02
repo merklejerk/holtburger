@@ -31,8 +31,20 @@ export interface DynamicPresentationSource {
 	readonly localBounds: AABB3 | null;
 }
 
+/** Mutable presentation consequences carried independently from immutable visual identity. */
+export interface DynamicEntityPresentationState {
+	readonly noDraw: boolean;
+	readonly hidden: boolean;
+	readonly cloaked: boolean;
+	readonly lighting: boolean;
+	/** Current whole-object translucency in the inclusive unit interval. */
+	readonly translucency: number;
+}
+
 /** One dynamic presentation plus producer-owned initial scene placement. */
 export interface PlacedDynamicPresentationSource {
 	readonly source: DynamicPresentationSource;
 	readonly placement: SceneSpatialPlacement;
+	/** Complete initial state installed before setup behavior is replayed. */
+	readonly initialPresentationState: DynamicEntityPresentationState;
 }

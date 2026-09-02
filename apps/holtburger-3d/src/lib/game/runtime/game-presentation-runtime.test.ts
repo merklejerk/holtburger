@@ -996,11 +996,16 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 	it("replaces one GUID generation and updates same-generation state without reloading", async () => {
 		const load = vi.fn(async () => spawnedVisual());
 		const runtime = await buildSpawnRuntime({ load });
-		await runtime.replaceDynamicEntitySnapshot([spawnedEntity(7, 1)]);
 		await runtime.replaceDynamicEntitySnapshot([
-			spawnedEntity(7, 1, { noDraw: true }),
+			spawnedEntity(7, 1, { translucency: 0.5 }),
 		]);
-		const renamed = spawnedEntity(7, 1, { noDraw: true });
+		await runtime.replaceDynamicEntitySnapshot([
+			spawnedEntity(7, 1, { noDraw: true, translucency: 0.25 }),
+		]);
+		const renamed = spawnedEntity(7, 1, {
+			noDraw: true,
+			translucency: 0.25,
+		});
 		renamed.display = { level: 13, name: "Renamed entity" };
 		await runtime.replaceDynamicEntitySnapshot([renamed]);
 		await runtime.replaceDynamicEntitySnapshot([spawnedEntity(7, 2)]);
@@ -1009,6 +1014,9 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		expect(
 			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
 		).toBe(1);
+		expect(
+			[...runtime.listPresentedSpawnedEntities()][0]?.view.physics.translucency,
+		).toBe(0);
 		await runtime.destroy();
 	});
 
@@ -1016,7 +1024,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		const runtime = await buildSpawnRuntime({
 			load: async () => spawnedVisual(),
 		});
-		const entity = spawnedEntity(7, 1);
+		const entity = spawnedEntity(7, 1, { translucency: 0.5 });
 		await runtime.upsertDynamicEntity(entity);
 		const installedRevision = runtime.dynamicEntityPlacementRevision;
 
@@ -1067,6 +1075,9 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		expect(hydration.get(7)).toBe("deferred");
 		expect(visualLoads).toBe(0);
 		expect(runtime.dynamicEntityOrigin(7)).toBeNull();
+		await runtime.upsertDynamicEntity(
+			spawnedEntity(7, 1, { translucency: 0.25 }),
+		);
 
 		runtime.updateSceneInterest(sceneInterest("0x0001ffff"));
 		await vi.waitFor(() => {
@@ -1074,6 +1085,9 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			expect(runtime.dynamicEntityOrigin(7)).not.toBeNull();
 		});
 		expect(visualLoads).toBe(1);
+		expect(
+			[...runtime.listPresentedSpawnedEntities()][0]?.view.physics.translucency,
+		).toBe(0.25);
 		await runtime.destroy();
 	});
 
@@ -1206,8 +1220,9 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			},
 		};
 		const runtime = await buildSpawnRuntime({ load: async () => visual });
-		const parent = spawnedEntity(20, 1);
+		const parent = spawnedEntity(20, 1, { translucency: 0.25 });
 		const child = attachedEntity(21, 1, 20);
+		child.physics.translucency = 0.75;
 
 		expect(await runtime.upsertDynamicEntity(child)).toBe("deferred");
 		expect(
@@ -1676,6 +1691,7 @@ function spawnedEntity(
 		display: { name: `Entity ${guid}`, level: null },
 		physics: {
 			cloaked: false,
+			translucency: 0,
 			defaultAnimation: true,
 			defaultScript: false,
 			hidden: false,

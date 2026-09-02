@@ -315,6 +315,8 @@ pub struct DynamicEntityDefinitionInput {
     pub friction: Option<f32>,
     /// Optional authored elasticity; absence selects the ACE default.
     pub elasticity: Option<f32>,
+    /// Current whole-object translucency before unit-interval validation.
+    pub translucency: f32,
     /// Optional authored linear speed cap retained for behavior integration.
     pub maximum_velocity: Option<f32>,
     /// Optional authored rotation speed retained for behavior integration.
@@ -365,6 +367,8 @@ pub struct DynamicEntityDefinition {
     pub friction: PhysicalFriction,
     /// Validated authored elasticity retained across `Inelastic` changes.
     pub elasticity: PhysicalElasticity,
+    /// Validated current whole-object translucency in the inclusive unit interval.
+    pub translucency: f32,
     /// Validated optional linear speed cap for later behavior integration.
     pub maximum_velocity: Option<f32>,
     /// Validated optional rotation speed for later behavior integration.
@@ -392,6 +396,8 @@ pub enum DynamicEntityDefinitionError {
     InvalidFriction,
     #[error("dynamic-entity elasticity must be finite")]
     InvalidElasticity,
+    #[error("dynamic-entity translucency must be finite and between zero and one")]
+    InvalidTranslucency,
     #[error("dynamic-entity maximum velocity must be finite and non-negative")]
     InvalidMaximumVelocity,
     #[error("dynamic-entity rotation speed must be finite and non-negative")]
@@ -448,6 +454,9 @@ impl DynamicEntityDefinition {
             .transpose()
             .map_err(|_| DynamicEntityDefinitionError::InvalidElasticity)?
             .unwrap_or(PhysicalElasticity::DEFAULT);
+        if !input.translucency.is_finite() || !(0.0..=1.0).contains(&input.translucency) {
+            return Err(DynamicEntityDefinitionError::InvalidTranslucency);
+        }
         validate_non_negative_optional(
             input.maximum_velocity,
             DynamicEntityDefinitionError::InvalidMaximumVelocity,
@@ -471,6 +480,7 @@ impl DynamicEntityDefinition {
             object_scale: input.object_scale,
             friction,
             elasticity,
+            translucency: input.translucency,
             maximum_velocity: input.maximum_velocity,
             rotation_speed: input.rotation_speed,
             radar: input.radar,
@@ -648,6 +658,8 @@ pub struct DynamicEntityProjectionInput {
     pub appearance: EntityAppearance,
     /// Uniform root presentation scale.
     pub object_scale: f32,
+    /// Validated current whole-object translucency in the inclusive unit interval.
+    pub translucency: f32,
     /// Current complete semantic physics state.
     pub physics: EffectiveEntityPhysicsState,
     /// Producer-resolved radar presentation facts consumed by overhead-map blips.
@@ -861,6 +873,7 @@ fn projection_input(
         content: definition.content,
         appearance: definition.appearance.clone(),
         object_scale: definition.object_scale,
+        translucency: definition.translucency,
         physics: definition.physics,
         radar: definition.radar,
         placement,
@@ -1627,6 +1640,7 @@ mod tests {
             object_scale: 1.0,
             friction: None,
             elasticity: None,
+            translucency: 0.0,
             maximum_velocity: None,
             rotation_speed: None,
             radar: DynamicEntityRadarFacts::default(),
@@ -1647,12 +1661,31 @@ mod tests {
         let definition = DynamicEntityDefinition::prepare(definition_input()).unwrap();
         assert_eq!(definition.friction, PhysicalFriction::DEFAULT);
         assert_eq!(definition.elasticity, PhysicalElasticity::DEFAULT);
+        assert_eq!(definition.translucency, 0.0);
 
         let mut input = definition_input();
         input.object_scale = 0.0;
         assert_eq!(
             DynamicEntityDefinition::prepare(input),
             Err(DynamicEntityDefinitionError::InvalidObjectScale)
+        );
+
+        for translucency in [f32::NAN, f32::INFINITY, -0.01, 1.01] {
+            let mut input = definition_input();
+            input.translucency = translucency;
+            assert_eq!(
+                DynamicEntityDefinition::prepare(input),
+                Err(DynamicEntityDefinitionError::InvalidTranslucency)
+            );
+        }
+
+        let mut input = definition_input();
+        input.translucency = 1.0;
+        assert_eq!(
+            DynamicEntityDefinition::prepare(input)
+                .expect("the inclusive upper translucency bound is valid")
+                .translucency,
+            1.0
         );
 
         let mut input = definition_input();

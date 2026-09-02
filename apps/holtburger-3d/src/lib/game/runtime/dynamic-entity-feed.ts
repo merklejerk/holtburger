@@ -224,6 +224,8 @@ const dynamicEntityViewSchema = z.object({
 		noDraw: z.boolean(),
 		hidden: z.boolean(),
 		cloaked: z.boolean(),
+		/** Current whole-object translucency in the inclusive unit interval. */
+		translucency: finiteNumber.min(0).max(1),
 		lighting: z.boolean(),
 		defaultAnimation: z.boolean(),
 		defaultScript: z.boolean(),

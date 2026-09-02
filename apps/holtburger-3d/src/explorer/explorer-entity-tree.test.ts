@@ -98,6 +98,7 @@ function base(guid: number): Omit<DynamicEntityView, "placement"> {
 			noDraw: false,
 			hidden: false,
 			cloaked: false,
+			translucency: 0,
 			lighting: false,
 			defaultAnimation: false,
 			defaultScript: false,

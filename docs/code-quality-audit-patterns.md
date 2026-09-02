@@ -1150,6 +1150,37 @@ consumers rely on it.
 scoped to the operation it serves, name raw structural facts without inferred behavior, and add a
 regression where valid primary records are absent from the subset.
 
+## Desired State Is Mistaken for Applied State
+
+**Smell:** A state mirror records the latest requested value even when a guard suppresses its
+effect, then later transitions use that mirror as if the value had actually been applied.
+
+**Signals:**
+
+- A disabled, hidden, unauthorized, paused, or otherwise gated update still replaces the value used
+  for later change detection.
+- Re-enabling a feature conditionally applies state by comparing two desired snapshots rather than
+  consulting the last accepted or effected state.
+- A suppressed update remains harmless only when a later snapshot happens to carry the same value.
+- Tests cover “disable, update, enable” with one repeated value but not a different value at the
+  enabling boundary.
+
+**Possible failure:** Re-enabling or changing modes can apply an update whose effect was supposed to
+remain suppressed, or skip one that was never successfully applied. The visible result depends on
+incidental values carried by later snapshots rather than on the transition contract.
+
+**Questions:** Does the mirror represent requested, accepted, or applied state? Which transitions
+may make those differ? When the guard clears, should suppressed work be replayed, discarded, or
+re-evaluated as a new request?
+
+**Counterexamples:** A convergent desired-state system may intentionally retain gated updates and
+apply the newest value when the gate clears. In that case replay is the explicit contract, and the
+mirror should be named as desired state rather than treated as effect history.
+
+**Possible responses:** Track desired and applied state separately, compare against the state whose
+meaning the transition requires, encode suppression/replay as an explicit state machine, and test
+gate-clear transitions with both equal and unequal carried values.
+
 ## Correctness Depends on Ambient Mutable State
 
 **Smell:** An operation establishes only part of the state its result requires and silently relies

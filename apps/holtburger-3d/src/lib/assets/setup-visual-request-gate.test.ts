@@ -87,6 +87,7 @@ function view(guid: number, generation: number): DynamicEntityView {
 			noDraw: false,
 			hidden: false,
 			cloaked: false,
+			translucency: 0,
 			lighting: true,
 			defaultAnimation: false,
 			defaultScript: false,

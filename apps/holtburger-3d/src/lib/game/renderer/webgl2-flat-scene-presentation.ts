@@ -31,6 +31,11 @@ const SCENE_COLOR_TEXTURE_UNIT = 0;
 const COLOR_GRADE_STRIP_TEXTURE_UNIT = 1;
 const OUTGOING_SCENE_TEXTURE_UNIT = 2;
 const TUNNEL_SCENE_TEXTURE_UNIT = 3;
+const PRESENTATION_SCENE_TEXTURE_UNITS = [
+	SCENE_COLOR_TEXTURE_UNIT,
+	OUTGOING_SCENE_TEXTURE_UNIT,
+	TUNNEL_SCENE_TEXTURE_UNIT,
+] as const;
 
 /** Exhaustive WebGL specialization of the pure flat-scene composition contract. */
 export type FlatScenePresentationInput =
@@ -206,6 +211,8 @@ export class WebGL2FlatScenePresentation {
 	readonly #program: WebGLProgram;
 	readonly #vertexArray: WebGLVertexArrayObject;
 	readonly #stripTexture: WebGLTexture;
+	/** Linear clamp sampler owning the scene, transition-origin, and transition-tunnel reads. */
+	readonly #sceneSampler: WebGLSampler;
 	readonly #stripBuffer = new Float32Array(COLOR_GRADE_STRIP_LENGTH);
 	readonly #uniforms: {
 		readonly whiteBalance: WebGLUniformLocation;
@@ -342,9 +349,13 @@ export class WebGL2FlatScenePresentation {
 			);
 		}
 		this.#vertexArray = vertexArray;
+		let sceneSampler: WebGLSampler | null = null;
 		try {
+			sceneSampler = allocatePresentationSceneSampler(gl);
 			this.#stripTexture = allocateColorGradeStrip(gl);
+			this.#sceneSampler = sceneSampler;
 		} catch (cause) {
+			if (sceneSampler) gl.deleteSampler(sceneSampler);
 			gl.deleteVertexArray(vertexArray);
 			gl.deleteProgram(this.#program);
 			throw cause;
@@ -382,47 +393,56 @@ export class WebGL2FlatScenePresentation {
 		gl.enable(gl.DEPTH_TEST);
 		gl.depthFunc(gl.ALWAYS);
 		gl.useProgram(this.#program);
-		this.#applyColorGrade(colorGrade);
-		if (
-			composition.kind === "origin-to-tunnel" ||
-			composition.kind === "tunnel-to-destination"
-		) {
-			gl.uniform1i(
-				this.#uniforms.compositionKind,
-				composition.kind === "origin-to-tunnel" ? 1 : 2,
-			);
-			gl.uniform1f(this.#uniforms.transitionProgress, composition.progress);
-			gl.uniform1i(this.#uniforms.tunnelEnabled, 1);
-			gl.activeTexture(gl.TEXTURE0 + OUTGOING_SCENE_TEXTURE_UNIT);
-			gl.bindTexture(
-				gl.TEXTURE_2D,
-				composition.kind === "origin-to-tunnel" ? composition.origin : null,
-			);
-			gl.activeTexture(gl.TEXTURE0 + TUNNEL_SCENE_TEXTURE_UNIT);
-			gl.bindTexture(gl.TEXTURE_2D, composition.tunnel);
-		} else if (composition.kind === "tunnel-only") {
-			gl.uniform1i(this.#uniforms.compositionKind, 0);
-			gl.uniform1f(this.#uniforms.transitionProgress, 0);
-			gl.uniform1i(this.#uniforms.tunnelEnabled, 1);
-			gl.activeTexture(gl.TEXTURE0 + OUTGOING_SCENE_TEXTURE_UNIT);
-			gl.bindTexture(gl.TEXTURE_2D, null);
-			gl.activeTexture(gl.TEXTURE0 + TUNNEL_SCENE_TEXTURE_UNIT);
-			gl.bindTexture(gl.TEXTURE_2D, composition.tunnel);
-		} else {
-			gl.uniform1i(this.#uniforms.compositionKind, 0);
-			gl.uniform1f(this.#uniforms.transitionProgress, 1);
-			gl.uniform1i(this.#uniforms.tunnelEnabled, 0);
-			gl.activeTexture(gl.TEXTURE0 + OUTGOING_SCENE_TEXTURE_UNIT);
-			gl.bindTexture(gl.TEXTURE_2D, null);
-			gl.activeTexture(gl.TEXTURE0 + TUNNEL_SCENE_TEXTURE_UNIT);
-			gl.bindTexture(gl.TEXTURE_2D, null);
+		for (const unit of PRESENTATION_SCENE_TEXTURE_UNITS) {
+			gl.bindSampler(unit, this.#sceneSampler);
 		}
-		gl.bindVertexArray(this.#vertexArray);
-		gl.activeTexture(gl.TEXTURE0 + SCENE_COLOR_TEXTURE_UNIT);
-		gl.bindTexture(gl.TEXTURE_2D, target.color);
-		gl.drawArrays(gl.TRIANGLES, 0, 3);
-		gl.bindVertexArray(null);
-		gl.depthFunc(gl.LEQUAL);
+		try {
+			this.#applyColorGrade(colorGrade);
+			if (
+				composition.kind === "origin-to-tunnel" ||
+				composition.kind === "tunnel-to-destination"
+			) {
+				gl.uniform1i(
+					this.#uniforms.compositionKind,
+					composition.kind === "origin-to-tunnel" ? 1 : 2,
+				);
+				gl.uniform1f(this.#uniforms.transitionProgress, composition.progress);
+				gl.uniform1i(this.#uniforms.tunnelEnabled, 1);
+				gl.activeTexture(gl.TEXTURE0 + OUTGOING_SCENE_TEXTURE_UNIT);
+				gl.bindTexture(
+					gl.TEXTURE_2D,
+					composition.kind === "origin-to-tunnel" ? composition.origin : null,
+				);
+				gl.activeTexture(gl.TEXTURE0 + TUNNEL_SCENE_TEXTURE_UNIT);
+				gl.bindTexture(gl.TEXTURE_2D, composition.tunnel);
+			} else if (composition.kind === "tunnel-only") {
+				gl.uniform1i(this.#uniforms.compositionKind, 0);
+				gl.uniform1f(this.#uniforms.transitionProgress, 0);
+				gl.uniform1i(this.#uniforms.tunnelEnabled, 1);
+				gl.activeTexture(gl.TEXTURE0 + OUTGOING_SCENE_TEXTURE_UNIT);
+				gl.bindTexture(gl.TEXTURE_2D, null);
+				gl.activeTexture(gl.TEXTURE0 + TUNNEL_SCENE_TEXTURE_UNIT);
+				gl.bindTexture(gl.TEXTURE_2D, composition.tunnel);
+			} else {
+				gl.uniform1i(this.#uniforms.compositionKind, 0);
+				gl.uniform1f(this.#uniforms.transitionProgress, 1);
+				gl.uniform1i(this.#uniforms.tunnelEnabled, 0);
+				gl.activeTexture(gl.TEXTURE0 + OUTGOING_SCENE_TEXTURE_UNIT);
+				gl.bindTexture(gl.TEXTURE_2D, null);
+				gl.activeTexture(gl.TEXTURE0 + TUNNEL_SCENE_TEXTURE_UNIT);
+				gl.bindTexture(gl.TEXTURE_2D, null);
+			}
+			gl.bindVertexArray(this.#vertexArray);
+			gl.activeTexture(gl.TEXTURE0 + SCENE_COLOR_TEXTURE_UNIT);
+			gl.bindTexture(gl.TEXTURE_2D, target.color);
+			gl.drawArrays(gl.TRIANGLES, 0, 3);
+			gl.bindVertexArray(null);
+		} finally {
+			for (const unit of PRESENTATION_SCENE_TEXTURE_UNITS) {
+				gl.bindSampler(unit, null);
+			}
+			gl.depthFunc(gl.LEQUAL);
+		}
 	}
 
 	/**
@@ -470,13 +490,34 @@ export class WebGL2FlatScenePresentation {
 		gl.bindTexture(gl.TEXTURE_2D, this.#stripTexture);
 	}
 
-	/** Release the renderer-local program, vertex array, and strip texture exactly once. */
+	/** Release the renderer-local program, vertex array, sampler, and strip texture exactly once. */
 	destroy(): void {
 		if (this.#destroyed) return;
 		this.#destroyed = true;
 		this.#gl.deleteVertexArray(this.#vertexArray);
 		this.#gl.deleteProgram(this.#program);
+		this.#gl.deleteSampler(this.#sceneSampler);
 		this.#gl.deleteTexture(this.#stripTexture);
+	}
+}
+
+/** Allocate the pass-owned sampler that isolates presentation from preceding material state. */
+function allocatePresentationSceneSampler(
+	gl: WebGL2RenderingContext,
+): WebGLSampler {
+	const sampler = gl.createSampler();
+	if (!sampler) {
+		throw new Error("Failed to allocate flat scene presentation sampler.");
+	}
+	try {
+		gl.samplerParameteri(sampler, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+		gl.samplerParameteri(sampler, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+		gl.samplerParameteri(sampler, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+		gl.samplerParameteri(sampler, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+		return sampler;
+	} catch (cause) {
+		gl.deleteSampler(sampler);
+		throw cause;
 	}
 }
 

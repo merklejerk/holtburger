@@ -2,23 +2,23 @@ import { describe, expect, it } from "vitest";
 
 import type { MapTerrainSource } from "../lib/game/map/map-renderer";
 import type {
-	MapPanelFrame,
-	MapPanelGpuDrawState,
-	MapPanelState,
-} from "./map-panel-frame";
+	MinimapFrame,
+	MinimapGpuDrawState,
+	MinimapState,
+} from "./minimap-frame";
 import {
-	captureMapPanelGpuDrawState,
-	mapPanelViewDiameter,
-	sameMapPanelGpuDrawState,
-} from "./map-panel-frame";
+	captureMinimapGpuDrawState,
+	minimapViewDiameter,
+	sameMinimapGpuDrawState,
+} from "./minimap-frame";
 
-describe("map panel GPU draw state", () => {
+describe("minimap GPU draw state", () => {
 	it("stays current across equivalent imperative reads", () => {
 		const source = mapSource();
-		const first = gpuDrawState(frame({ source }), panel());
-		const second = gpuDrawState(frame({ source }), panel());
+		const first = gpuDrawState(frame({ source }), minimapState());
+		const second = gpuDrawState(frame({ source }), minimapState());
 
-		expect(sameMapPanelGpuDrawState(first, second)).toBe(true);
+		expect(sameMinimapGpuDrawState(first, second)).toBe(true);
 	});
 
 	it.each([
@@ -28,11 +28,11 @@ describe("map panel GPU draw state", () => {
 		["anchor height", { worldY: 21 }],
 		["anchor residency", { envCellId: "0x01020101" }],
 		["anchor heading", { headingRadians: 0.5 }],
-		["panel size", { size: 240 }],
+		["minimap size", { size: 240 }],
 		["indoor zoom", { indoorViewDiameter: 384 }],
 	] as const)("invalidates for changed %s", (_label, change) => {
 		const source = mapSource();
-		const before = gpuDrawState(frame({ source }), panel());
+		const before = gpuDrawState(frame({ source }), minimapState());
 		if ("terrainRevision" in change)
 			source.terrainInstallationRevision = change.terrainRevision;
 		if ("geometryRevision" in change)
@@ -45,23 +45,23 @@ describe("map panel GPU draw state", () => {
 			worldX: "worldX" in change ? change.worldX : undefined,
 			worldY: "worldY" in change ? change.worldY : undefined,
 		});
-		const changedPanel = panel({
+		const changedMinimap = minimapState({
 			size: "size" in change ? change.size : undefined,
 			indoorViewDiameter:
 				"indoorViewDiameter" in change ? change.indoorViewDiameter : undefined,
 		});
 
 		expect(
-			sameMapPanelGpuDrawState(
+			sameMinimapGpuDrawState(
 				before,
-				gpuDrawState(changedFrame, changedPanel),
+				gpuDrawState(changedFrame, changedMinimap),
 			),
 		).toBe(false);
 	});
 
 	it("ignores changes drawn only by the uncapped overlay", () => {
 		const source = mapSource();
-		const before = gpuDrawState(frame({ source }), panel());
+		const before = gpuDrawState(frame({ source }), minimapState());
 		const after = gpuDrawState(
 			frame({
 				cameraFovRadians: 1.25,
@@ -69,10 +69,10 @@ describe("map panel GPU draw state", () => {
 				controlledGuid: 7,
 				source,
 			}),
-			panel(),
+			minimapState(),
 		);
 
-		expect(sameMapPanelGpuDrawState(before, after)).toBe(true);
+		expect(sameMinimapGpuDrawState(before, after)).toBe(true);
 	});
 
 	it("does not redraw detached terrain for subject translation alone", () => {
@@ -80,31 +80,34 @@ describe("map panel GPU draw state", () => {
 		const center = { worldX: 50, worldZ: 60 };
 		const before = gpuDrawStateAtCenter(
 			frame({ source, worldX: 10 }),
-			panel(),
+			minimapState(),
 			center,
 		);
 		const after = gpuDrawStateAtCenter(
 			frame({ source, worldX: 11 }),
-			panel(),
+			minimapState(),
 			center,
 		);
 
-		expect(sameMapPanelGpuDrawState(before, after)).toBe(true);
+		expect(sameMinimapGpuDrawState(before, after)).toBe(true);
 	});
 
 	it("remembers indoor and outdoor zoom independently", () => {
-		const state = panel({ indoorViewDiameter: 48, outdoorViewDiameter: 384 });
+		const state = minimapState({
+			indoorViewDiameter: 48,
+			outdoorViewDiameter: 384,
+		});
 
-		expect(mapPanelViewDiameter(state, frame().subject?.anchor ?? null)).toBe(
+		expect(minimapViewDiameter(state, frame().subject?.anchor ?? null)).toBe(
 			48,
 		);
 		expect(
-			mapPanelViewDiameter(
+			minimapViewDiameter(
 				state,
 				frame({ envCellId: null }).subject?.anchor ?? null,
 			),
 		).toBe(384);
-		expect(mapPanelViewDiameter(state, null)).toBe(384);
+		expect(minimapViewDiameter(state, null)).toBe(384);
 	});
 });
 
@@ -133,7 +136,7 @@ function frame(
 		readonly cameraHeadingRadians?: number;
 		readonly controlledGuid?: number;
 	} = {},
-): MapPanelFrame {
+): MinimapFrame {
 	return {
 		cameraFovRadians: overrides.cameraFovRadians ?? 1,
 		cameraHeadingRadians: overrides.cameraHeadingRadians ?? 0,
@@ -163,13 +166,13 @@ function frame(
 	};
 }
 
-function panel(
+function minimapState(
 	overrides: {
 		readonly size?: number;
 		readonly indoorViewDiameter?: number;
 		readonly outdoorViewDiameter?: number;
 	} = {},
-): MapPanelState {
+): MinimapState {
 	return {
 		left: 10,
 		size: overrides.size ?? 220,
@@ -182,32 +185,32 @@ function panel(
 }
 
 function gpuDrawState(
-	frameValue: MapPanelFrame,
-	panelValue: MapPanelState,
-): MapPanelGpuDrawState {
+	frameValue: MinimapFrame,
+	minimapStateValue: MinimapState,
+): MinimapGpuDrawState {
 	const anchor = frameValue.subject?.anchor ?? null;
 	return gpuDrawStateAtCenter(
 		frameValue,
-		panelValue,
+		minimapStateValue,
 		anchor === null ? null : { worldX: anchor.worldX, worldZ: anchor.worldZ },
 	);
 }
 
 function gpuDrawStateAtCenter(
-	frameValue: MapPanelFrame,
-	panelValue: MapPanelState,
+	frameValue: MinimapFrame,
+	minimapStateValue: MinimapState,
 	center: { readonly worldX: number; readonly worldZ: number } | null,
-): MapPanelGpuDrawState {
+): MinimapGpuDrawState {
 	const anchor = frameValue.subject?.anchor ?? null;
-	return captureMapPanelGpuDrawState(
+	return captureMinimapGpuDrawState(
 		frameValue,
-		panelValue,
+		minimapStateValue,
 		anchor === null || center === null
 			? null
 			: {
 					anchor,
 					center,
-					viewDiameter: mapPanelViewDiameter(panelValue, anchor),
+					viewDiameter: minimapViewDiameter(minimapStateValue, anchor),
 				},
 	);
 }

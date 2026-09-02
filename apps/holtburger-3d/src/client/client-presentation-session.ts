@@ -93,7 +93,7 @@ import type {
 	RendererFrameDiagnosticsSnapshot,
 	WorldIndicatorInput,
 } from "../lib/game/renderer/renderer";
-import type { MapPanelFrame } from "../app/map-panel-frame";
+import type { MinimapFrame } from "../app/minimap-frame";
 import type { MapEntity } from "../lib/game/map/map-blips";
 import type { MapTerrainSource } from "../lib/game/map/map-renderer";
 import {
@@ -364,7 +364,7 @@ export class ClientPresentationSession {
 	}
 
 	/** Pull one coherent radar frame from the same presentation facts the world scene draws. */
-	readMapPanelFrame(): MapPanelFrame {
+	readMinimapFrame(): MinimapFrame {
 		const owner = this.#owner;
 		const playerGuid = this.#playerGuid;
 		const placement =

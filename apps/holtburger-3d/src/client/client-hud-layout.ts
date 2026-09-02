@@ -42,7 +42,7 @@ export interface ClientHudLayout {
 	readonly diagnostics: ClientHudPlacement;
 	readonly frameRate: ClientHudPlacement;
 	readonly jumpPower: ClientHudPlacement;
-	readonly map: ClientHudPlacement;
+	readonly minimap: ClientHudPlacement;
 	readonly shortcuts: ClientHudPlacement;
 	readonly toast: ClientHudPlacement;
 }
@@ -54,7 +54,7 @@ export const CLIENT_FPS_PANEL_WIDTH = 120;
 export const CLIENT_JUMP_POWER_PANEL_SIZE = { width: 38, height: 132 } as const;
 
 /** Default and preferred diameter of the client radar. */
-const CLIENT_MAP_PANEL_SIZE = 220;
+const CLIENT_MINIMAP_SIZE = 220;
 
 /** Bounded notification lane; individual toast content remains centered within it. */
 export const CLIENT_TOAST_PANEL_SIZE = { width: 420, height: 64 } as const;
@@ -300,11 +300,11 @@ export function createDefaultClientHudLayout(
 			preferredWidth: CLIENT_JUMP_POWER_PANEL_SIZE.width,
 			preferredHeight: CLIENT_JUMP_POWER_PANEL_SIZE.height,
 		},
-		map: {
+		minimap: {
 			horizontal: { alignment: "end", offset: margin + 32 },
 			vertical: { alignment: "start", offset: margin },
-			preferredWidth: CLIENT_MAP_PANEL_SIZE,
-			preferredHeight: CLIENT_MAP_PANEL_SIZE,
+			preferredWidth: CLIENT_MINIMAP_SIZE,
+			preferredHeight: CLIENT_MINIMAP_SIZE,
 		},
 		shortcuts: {
 			horizontal: { alignment: "end", offset: margin },

@@ -36,7 +36,7 @@ describe("client HUD layout", () => {
 			horizontal: { alignment: "end", offset: 16 },
 			vertical: { alignment: "end", offset: 16 },
 		});
-		expect(layout.map).toMatchObject({
+		expect(layout.minimap).toMatchObject({
 			horizontal: { alignment: "end", offset: 48 },
 			vertical: { alignment: "start", offset: 16 },
 		});

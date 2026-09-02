@@ -122,8 +122,8 @@
 		formatExplorerCameraResidency,
 		type ExplorerCameraLocation,
 	} from "./explorer-camera-location";
-	import MapPanel from "../app/MapPanel.svelte";
-	import type { MapPanelFrame, MapPanelState } from "../app/map-panel-frame";
+	import Minimap from "../app/Minimap.svelte";
+	import type { MinimapFrame, MinimapState } from "../app/minimap-frame";
 	import {
 		type MapAnchor,
 		mapHeadingFromSceneTransform,
@@ -193,7 +193,7 @@
 	/**
 	 * Latest presented camera position and residency, republished every frame.
 	 *
-	 * Deliberately not reactive. Its readers — the map panel's anchor and the frame diagnostic
+	 * Deliberately not reactive. Its readers — the minimap's anchor and the frame diagnostic
 	 * report — pull it imperatively on their own cadence, so publishing it through `$state` would
 	 * schedule a Svelte flush per frame to notify a much slower consumer.
 	 */
@@ -219,12 +219,12 @@
 	}
 
 	/**
-	 * Overhead-map panel geometry and view choices.
+	 * Minimap geometry and view choices.
 	 *
-	 * The panel is a controlled component: it owns no persistence policy, so the shell that mounts
+	 * The minimap is a controlled component: it owns no persistence policy, so the shell that mounts
 	 * it owns where it sits and how far it sees. The Explorer keeps that here in memory.
 	 */
-	let mapPanel = $state<MapPanelState>({
+	let minimap = $state<MinimapState>({
 		left: 16,
 		size: 220,
 		top: 96,
@@ -287,7 +287,7 @@
 	}
 
 	/** Pull the scene's current map picture without publishing presentation-rate Svelte state. */
-	function readMapPanelFrame(): MapPanelFrame {
+	function readMinimapFrame(): MinimapFrame {
 		const runtime = runtimeReady ? (gameRuntime ?? null) : null;
 		const controlledGuid = explorerPossession?.guid ?? null;
 		const controlledAnchor = anchorFromPossession();
@@ -2027,12 +2027,12 @@
 			diagnosticsTuning={EXPLORER_TUNING.diagnostics}
 		/>
 		{#if startupError === null}
-			<MapPanel
-				readFrame={readMapPanelFrame}
-				panel={mapPanel}
+			<Minimap
+				readFrame={readMinimapFrame}
+				viewState={minimap}
 				editable={true}
 				onStateChange={(next) => {
-					mapPanel = next;
+					minimap = next;
 				}}
 			/>
 		{/if}

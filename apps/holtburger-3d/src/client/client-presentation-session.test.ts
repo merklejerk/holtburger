@@ -234,7 +234,7 @@ describe("ClientPresentationSession", () => {
 		expect(presentation.frame(1_016).rendered).toBe(true);
 		expect(runtime.viewerLightGuid).toBe(playerGuid);
 		const landblockOrigin = createLandblockWorldOrigin("0x0100ffff");
-		expect(presentation.readMapPanelFrame()).toMatchObject({
+		expect(presentation.readMinimapFrame()).toMatchObject({
 			subject: {
 				anchor: {
 					residency: { envCellId: null, landblockId: "0x0100ffff" },

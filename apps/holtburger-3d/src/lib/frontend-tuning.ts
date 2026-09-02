@@ -71,7 +71,7 @@ export const SHARED_FRONTEND_TUNING = {
 		/** Shared fullscreen warp-drive look selected explicitly by both browser frontends. */
 		visual: {
 			/** Exponent applied after smoothstep; raise above one for later, sharper acceleration. */
-			accelerationExponent: 1,
+			accelerationExponent: 2,
 			/** Largest peripheral source-image zoom, where one is an unchanged frame. */
 			maximumZoom: 30,
 			/** Aspect-correct bounds over which the focal center reaches full radial smear. */

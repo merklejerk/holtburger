@@ -191,23 +191,10 @@ const dynamicEntityViewSchema = z.object({
 		}),
 		appearance: appearanceSchema,
 		objectScale: finiteNumber.positive(),
-		/** Producer-resolved overhead-map visibility, authored color, and semantic category facts. */
+		/** Producer-resolved overhead-map visibility and semantic category facts. */
 		radar: z.object({
 			/** Producer-resolved semantic marker category, independent from authored color. */
 			category: z.enum(DYNAMIC_ENTITY_MAP_BLIP_CATEGORIES),
-			blipColor: z.enum([
-				"Default",
-				"Blue",
-				"Gold",
-				"White",
-				"Purple",
-				"Red",
-				"Pink",
-				"Green",
-				"Yellow",
-				"Cyan",
-				"BrightGreen",
-			]),
 			behavior: z
 				.enum([
 					"Undefined",

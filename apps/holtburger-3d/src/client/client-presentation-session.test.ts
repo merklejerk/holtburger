@@ -1420,7 +1420,6 @@ function view(guid: number, landblockId = 0x0101_0100): DynamicEntityView {
 			},
 			objectScale: 1,
 			radar: {
-				blipColor: "Default",
 				behavior: null,
 				category: "other",
 				obviousRange: null,

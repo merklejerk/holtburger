@@ -97,7 +97,6 @@ function entity(guid: number) {
 			},
 			objectScale: 1,
 			radar: {
-				blipColor: "Default",
 				behavior: null,
 				category: "other",
 				obviousRange: null,

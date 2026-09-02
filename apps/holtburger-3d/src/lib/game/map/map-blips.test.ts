@@ -40,7 +40,6 @@ function entity(
 						overrides.behavior === undefined
 							? "ShowAlways"
 							: overrides.behavior,
-					blipColor: "Red",
 				},
 			},
 			physics: { hidden: overrides.hidden ?? false },

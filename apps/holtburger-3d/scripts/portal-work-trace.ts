@@ -8,7 +8,7 @@ import { decodeLandblockSourceBatch } from "../src/lib/assets/decode-landblock-s
 import { decodeParticleEmitterRecord } from "../src/lib/assets/decode-particle-emitter-record";
 import { decodePhysicsScriptRecord } from "../src/lib/assets/decode-physics-script-record";
 import {
-	acRotationFromRenderTransform,
+	resolvedFrameRotationFromRenderTransform,
 	sceneVector3,
 	type SceneVector3,
 } from "../src/lib/assets/ac-frame";
@@ -1157,7 +1157,7 @@ async function createArchiveParticleArtifacts(
 	const origins = new Map<string, SceneVector3>();
 	const rotations = new Map<
 		string,
-		ReturnType<typeof acRotationFromRenderTransform>
+		ReturnType<typeof resolvedFrameRotationFromRenderTransform>
 	>();
 	const partTargets = new Map<string, BehaviorTarget>();
 	const scopeByTargetId = new Map<string, string>();
@@ -1168,7 +1168,7 @@ async function createArchiveParticleArtifacts(
 			targetId: behaviorTargetId(nodeId),
 		};
 		const origin = dynamicSceneOrigin(dynamic);
-		const rotation = acRotationFromRenderTransform(
+		const rotation = resolvedFrameRotationFromRenderTransform(
 			dynamic.placement.localTransform,
 		);
 		origins.set(target.targetId, origin);
@@ -1200,6 +1200,12 @@ async function createArchiveParticleArtifacts(
 		roll: seededRoll(7),
 		sceneOriginOf: (target) => origins.get(target.targetId) ?? null,
 		sceneRotationOf: (target) => rotations.get(target.targetId) ?? null,
+		writeSceneRenderRotationOf: (target, output) => {
+			const rotation = rotations.get(target.targetId)?.render;
+			if (!rotation) return false;
+			Object.assign(output, rotation);
+			return true;
+		},
 		targetLives: (target) => origins.has(target.targetId),
 	});
 	const router = new BehaviorEventRouter(

@@ -22,6 +22,7 @@ function record(birthTime: number): ParticleInstanceRecord {
 		lifespan: 4,
 		localOrigin: landblockVector3([0, 0, 0]),
 		offset: acVector3([0, 0, 0]),
+		rotation: { w: 1, x: 0, y: 0, z: 0 },
 		startScale: 1,
 		startTranslucency: 0,
 	};

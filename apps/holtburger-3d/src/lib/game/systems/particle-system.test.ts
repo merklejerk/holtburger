@@ -1,8 +1,8 @@
 import { behaviorTargetId } from "../behavior/behavior-event-router";
 import {
-	acRotationFromRenderTransform,
 	acVector3,
 	renderVector3,
+	resolvedFrameRotationFromRenderTransform,
 	sceneVector3,
 } from "../../assets/ac-frame";
 import { Mat4, Quat } from "../math/types";
@@ -87,12 +87,12 @@ function prepared(
 }
 
 /** A quarter turn about AC's up axis, the case the waterfall report turned on. */
-const YAWED_QUARTER_TURN = acRotationFromRenderTransform(
+const YAWED_QUARTER_TURN = resolvedFrameRotationFromRenderTransform(
 	createRotationMat4(new Quat(Math.SQRT1_2, 0, Math.SQRT1_2, 0)),
 );
 
 /** An owner with no rotation, so these tests read authored constants unchanged. */
-const UNROTATED = acRotationFromRenderTransform(Mat4.identity());
+const UNROTATED = resolvedFrameRotationFromRenderTransform(Mat4.identity());
 
 const runtime = (
 	overrides: Partial<ConstructorParameters<typeof ParticleSystem>[0]> = {},
@@ -102,6 +102,10 @@ const runtime = (
 		sceneOriginOf: () => ORIGIN,
 		targetLives: () => true,
 		sceneRotationOf: () => UNROTATED,
+		writeSceneRenderRotationOf: (_target, output) => {
+			Object.assign(output, UNROTATED.render);
+			return true;
+		},
 		partFrameOf: (target, partIndex) => ({
 			generation: target.generation,
 			targetId: behaviorTargetId(`${target.targetId}/part/${partIndex}`),
@@ -132,6 +136,7 @@ function storedRecord(system: ParticleSystem, slot = 0) {
 		lifespan: read(7),
 		localOrigin: [read(0), read(1), read(2)],
 		offset: [read(4), read(5), read(6)],
+		rotation: [read(24), read(25), read(26), read(27)],
 		startScale: read(17),
 		startTranslucency: read(19),
 	};
@@ -1045,6 +1050,24 @@ describe("ParticleSystem", () => {
 		expect(record.offset[1]).toBeCloseTo(0);
 	});
 
+	it("freezes the owner's render rotation in each spawn record", () => {
+		const particles = runtime({ sceneRotationOf: () => YAWED_QUARTER_TURN });
+		particles.create(
+			TARGET,
+			prepared({ followsParent: false, initialParticles: 1 }),
+			NO_OFFSET,
+			0,
+			0,
+			ORIGIN,
+		);
+
+		const rotation = storedRecord(particles).rotation;
+		expect(rotation[0]).toBeCloseTo(Math.SQRT1_2);
+		expect(rotation[1]).toBeCloseTo(0);
+		expect(rotation[2]).toBeCloseTo(Math.SQRT1_2);
+		expect(rotation[3]).toBeCloseTo(0);
+	});
+
 	// The point of persistent records is that a frame touches emitters, never particles. Origin
 	// resolution is the observable proxy: a frozen-origin emitter resolves nothing per frame,
 	// because its records were complete at spawn.
@@ -1072,15 +1095,23 @@ describe("ParticleSystem", () => {
 		expect(originReads).toBe(0);
 	});
 
-	// A following emitter resolves one shared live origin per range. Its spawn records remain fixed,
+	// A following emitter resolves one shared live frame per range. Its spawn records remain fixed,
 	// even when several particles follow the same moving parent.
-	it("carries one live range origin without rewriting following records", () => {
+	it("carries one live range frame without rewriting following records", () => {
 		let parentX = 0;
+		let parentRotation = UNROTATED;
 		let originReads = 0;
+		let renderRotationWrites = 0;
 		const particles = runtime({
 			sceneOriginOf: () => {
 				originReads += 1;
 				return sceneVector3([parentX, 0, 0]);
+			},
+			sceneRotationOf: () => parentRotation,
+			writeSceneRenderRotationOf: (_target, output) => {
+				renderRotationWrites += 1;
+				Object.assign(output, parentRotation.render);
+				return true;
 			},
 		});
 		particles.create(
@@ -1095,15 +1126,24 @@ describe("ParticleSystem", () => {
 		// Cross a landblock boundary so this also proves the live range retains the same split-origin
 		// precision contract as record-owned spawns.
 		parentX = 200;
+		parentRotation = YAWED_QUARTER_TURN;
 		originReads = 0;
+		renderRotationWrites = 0;
 		const [range] = particles.collectDrawRanges();
 
-		expect(range?.origin).toEqual({
+		expect(range?.frame).toMatchObject({
 			kind: "range",
 			landblockOrigin: [192, 0, 0],
 			localOrigin: [8, 0, 0],
 		});
+		if (range?.frame.kind !== "range")
+			throw new Error("Expected a live range frame.");
+		expect(range.frame.rotation.w).toBeCloseTo(Math.SQRT1_2);
+		expect(range.frame.rotation.x).toBeCloseTo(0);
+		expect(range.frame.rotation.y).toBeCloseTo(Math.SQRT1_2);
+		expect(range.frame.rotation.z).toBeCloseTo(0);
 		expect(originReads).toBe(1);
+		expect(renderRotationWrites).toBe(1);
 		expect(storedRecord(particles).localOrigin[0]).toBe(0);
 		expect(particles.getDiagnostics()).toMatchObject({
 			lastVisibleFollowingEmitterCount: 1,

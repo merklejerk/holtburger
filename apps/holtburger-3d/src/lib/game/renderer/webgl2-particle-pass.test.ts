@@ -18,7 +18,7 @@ import type { WebGL2TextureSamplerCatalog } from "./webgl2-texture-sampler-catal
 import { WebGL2DeviceStateApplicator } from "./webgl2-device-state-applicator";
 
 const MESH = "0x01000ff4" as DatAssetId;
-const RECORD_ORIGIN = { kind: "record" } as const;
+const RECORD_FRAME = { kind: "record" } as const;
 
 let nextBaseSlot = 0;
 
@@ -27,7 +27,7 @@ function batch(
 	motionType: number,
 	particleCount: number,
 	hwGfxObjId: DatAssetId = MESH,
-	origin: ParticleDrawRange["origin"] = RECORD_ORIGIN,
+	frame: ParticleDrawRange["frame"] = RECORD_FRAME,
 ): ParticleDrawRange {
 	const baseSlot = nextBaseSlot;
 	nextBaseSlot += particleCount;
@@ -36,7 +36,7 @@ function batch(
 		count: particleCount,
 		hwGfxObjId,
 		motionType,
-		origin,
+		frame,
 	};
 }
 
@@ -63,6 +63,7 @@ function fakeGl() {
 	const blendFuncs: Array<[number, number]> = [];
 	const intUniforms: Array<[string, number]> = [];
 	const vec3Uniforms: Array<[string, number, number, number]> = [];
+	const vec4Uniforms: Array<[string, number, number, number, number]> = [];
 	const samplerBinds: Array<{
 		readonly unit: number;
 		readonly request: unknown;
@@ -148,7 +149,13 @@ function fakeGl() {
 		uniform1ui: () => undefined,
 		uniform3f: (location: { name: string }, x: number, y: number, z: number) =>
 			vec3Uniforms.push([location.name, x, y, z]),
-		uniform4f: () => undefined,
+		uniform4f: (
+			location: { name: string },
+			x: number,
+			y: number,
+			z: number,
+			w: number,
+		) => vec4Uniforms.push([location.name, x, y, z, w]),
 		uniformMatrix4fv: () => undefined,
 		useProgram: () => undefined,
 		uniformBlockBinding: () => undefined,
@@ -166,6 +173,7 @@ function fakeGl() {
 		samplerBinds,
 		samplers,
 		vec3Uniforms,
+		vec4Uniforms,
 	};
 }
 
@@ -229,15 +237,15 @@ describe("WebGL2ParticlePass", () => {
 			1,
 		);
 		expect(
-			intUniforms.filter(([name]) => name === "uUsesRangeOrigin"),
+			intUniforms.filter(([name]) => name === "uUsesRangeFrame"),
 		).toHaveLength(1);
 		expect(
 			intUniforms.filter(([name]) => name === "uInstanceBase"),
 		).toHaveLength(2);
 	});
 
-	it("binds one split live origin for a parent-following range", () => {
-		const { gl, intUniforms, vec3Uniforms } = fakeGl();
+	it("binds one coherent live frame for a parent-following range", () => {
+		const { gl, intUniforms, vec3Uniforms, vec4Uniforms } = fakeGl();
 		const pass = new WebGL2ParticlePass(() => GEOMETRY);
 
 		pass.draw(context(gl), [
@@ -245,10 +253,11 @@ describe("WebGL2ParticlePass", () => {
 				kind: "range",
 				landblockOrigin: sceneVector3([384, 0, -576]),
 				localOrigin: landblockVector3([12, 7, 18]),
+				rotation: { w: 0.5, x: 0.5, y: -0.5, z: 0.5 },
 			}),
 		]);
 
-		expect(intUniforms).toContainEqual(["uUsesRangeOrigin", 1]);
+		expect(intUniforms).toContainEqual(["uUsesRangeFrame", 1]);
 		expect(vec3Uniforms).toContainEqual([
 			"uRangeLandblockOrigin",
 			384,
@@ -256,6 +265,13 @@ describe("WebGL2ParticlePass", () => {
 			-576,
 		]);
 		expect(vec3Uniforms).toContainEqual(["uRangeLocalOrigin", 12, 7, 18]);
+		expect(vec4Uniforms).toContainEqual([
+			"uRangeRotation",
+			0.5,
+			0.5,
+			-0.5,
+			0.5,
+		]);
 	});
 
 	it("routes scoped batches without splitting their one frame upload", () => {

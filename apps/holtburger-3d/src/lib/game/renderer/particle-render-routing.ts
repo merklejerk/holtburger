@@ -10,8 +10,8 @@ export interface ParticleDrawRange {
 	readonly hwGfxObjId: DatAssetId;
 	/** Vertex-stage motion law shared by every instance in this draw. */
 	readonly motionType: number;
-	/** Record-local or one live emitter origin, preserved through domain routing. */
-	readonly origin: ParticleSourceRange["origin"];
+	/** Record-local or one live emitter frame, preserved through domain routing. */
+	readonly frame: ParticleSourceRange["frame"];
 	/** First record slot this draw reads. */
 	readonly baseSlot: number;
 	/** Instances drawn from `baseSlot`. */
@@ -86,14 +86,14 @@ export class ParticleRenderBatcher {
 				count: 0,
 				hwGfxObjId: source.hwGfxObjId,
 				motionType: 0,
-				origin: source.origin,
+				frame: source.frame,
 			});
 			this.#rangesUsed += 1;
 			range.baseSlot = source.baseSlot;
 			range.count = source.count;
 			range.hwGfxObjId = source.hwGfxObjId;
 			range.motionType = source.motionType;
-			range.origin = source.origin;
+			range.frame = source.frame;
 			ranges.push(range);
 		}
 

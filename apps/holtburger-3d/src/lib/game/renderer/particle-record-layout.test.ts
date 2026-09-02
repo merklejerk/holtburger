@@ -21,6 +21,7 @@ const RECORD: ParticleInstanceRecord = {
 	offset: acVector3([5, 6, 7]),
 	landblockOrigin: sceneVector3([20, 21, 22]),
 	localOrigin: landblockVector3([1, 2, 3]),
+	rotation: { w: 23, x: 24, y: 25, z: 26 },
 	startScale: 16,
 	startTranslucency: 18,
 };
@@ -33,10 +34,10 @@ describe("writeParticleRecord", () => {
 
 		expect(next).toBe(PARTICLE_INSTANCE_FLOAT_COUNT);
 		expect([...stream]).toEqual([
-			// local origin, birth | offset, lifespan | a, b | c, appearance | landblock origin
+			// local origin, birth | offset, lifespan | a, b | c, appearance | landblock origin | rotation
 			1,
 			2, 3, 4, 5, 6, 7, 8, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
-			21, 22,
+			21, 22, 23, 24, 25, 26,
 		]);
 	});
 
@@ -58,7 +59,7 @@ describe("writeParticleRecord", () => {
 
 		// Silently truncating here would corrupt whichever particle followed.
 		expect(() => writeParticleRecord(stream, 0, RECORD)).toThrow(
-			"exceeds a 23-float stream",
+			"exceeds a 27-float stream",
 		);
 	});
 });

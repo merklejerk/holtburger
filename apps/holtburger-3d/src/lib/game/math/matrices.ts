@@ -479,13 +479,96 @@ export function createRotationMat4(rotation: Quat): Mat4 {
 	);
 }
 
+/** Extract the normalized quaternion carried by a transform, removing per-axis scale. */
+export function quaternionFromRotationMat4(matrix: Mat4): Quat {
+	const quaternion = Quat.zero();
+	writeQuaternionFromRotationMat4(matrix, quaternion);
+	return quaternion;
+}
+
+/** Write a transform's normalized, scale-free rotation into caller-owned quaternion storage. */
+export function writeQuaternionFromRotationMat4(
+	matrix: Mat4,
+	target: { w: number; x: number; y: number; z: number },
+): void {
+	const firstScale = Math.hypot(matrix.m11, matrix.m12, matrix.m13);
+	const secondScale = Math.hypot(matrix.m21, matrix.m22, matrix.m23);
+	const thirdScale = Math.hypot(matrix.m31, matrix.m32, matrix.m33);
+	if (firstScale === 0 || secondScale === 0 || thirdScale === 0) {
+		throw new Error("Transform basis is degenerate; it carries no rotation.");
+	}
+	const m11 = matrix.m11 / firstScale;
+	const m12 = matrix.m12 / firstScale;
+	const m13 = matrix.m13 / firstScale;
+	const m21 = matrix.m21 / secondScale;
+	const m22 = matrix.m22 / secondScale;
+	const m23 = matrix.m23 / secondScale;
+	const m31 = matrix.m31 / thirdScale;
+	const m32 = matrix.m32 / thirdScale;
+	const m33 = matrix.m33 / thirdScale;
+	const trace = m11 + m22 + m33;
+	if (trace > 0) {
+		const scale = Math.sqrt(trace + 1) * 2;
+		target.w = scale / 4;
+		target.x = (m23 - m32) / scale;
+		target.y = (m31 - m13) / scale;
+		target.z = (m12 - m21) / scale;
+		writeNormalizedQuaternion(target, target);
+		return;
+	}
+	if (m11 > m22 && m11 > m33) {
+		const scale = Math.sqrt(1 + m11 - m22 - m33) * 2;
+		target.w = (m23 - m32) / scale;
+		target.x = scale / 4;
+		target.y = (m21 + m12) / scale;
+		target.z = (m31 + m13) / scale;
+		writeNormalizedQuaternion(target, target);
+		return;
+	}
+	if (m22 > m33) {
+		const scale = Math.sqrt(1 + m22 - m11 - m33) * 2;
+		target.w = (m31 - m13) / scale;
+		target.x = (m21 + m12) / scale;
+		target.y = scale / 4;
+		target.z = (m32 + m23) / scale;
+		writeNormalizedQuaternion(target, target);
+		return;
+	}
+	const scale = Math.sqrt(1 + m33 - m11 - m22) * 2;
+	target.w = (m12 - m21) / scale;
+	target.x = (m31 + m13) / scale;
+	target.y = (m32 + m23) / scale;
+	target.z = scale / 4;
+	writeNormalizedQuaternion(target, target);
+}
+
 function normalizeQuat(rotation: Quat): Quat {
+	const target = Quat.zero();
+	writeNormalizedQuaternion(rotation, target);
+	return target;
+}
+
+function writeNormalizedQuaternion(
+	rotation: {
+		readonly w: number;
+		readonly x: number;
+		readonly y: number;
+		readonly z: number;
+	},
+	target: { w: number; x: number; y: number; z: number },
+): void {
 	const magnitude = Math.hypot(rotation.w, rotation.x, rotation.y, rotation.z);
-	if (magnitude === 0) throw new Error("Camera rotation cannot be zero.");
-	return new Quat(
-		rotation.w / magnitude,
-		rotation.x / magnitude,
-		rotation.y / magnitude,
-		rotation.z / magnitude,
-	);
+	if (magnitude === 0) throw new Error("Rotation quaternion cannot be zero.");
+	target.w = normalizedQuaternionComponent(rotation.w, magnitude);
+	target.x = normalizedQuaternionComponent(rotation.x, magnitude);
+	target.y = normalizedQuaternionComponent(rotation.y, magnitude);
+	target.z = normalizedQuaternionComponent(rotation.z, magnitude);
+}
+
+function normalizedQuaternionComponent(
+	value: number,
+	magnitude: number,
+): number {
+	const result = value / magnitude;
+	return result === 0 ? 0 : result;
 }

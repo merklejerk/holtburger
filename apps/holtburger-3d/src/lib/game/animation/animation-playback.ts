@@ -1,5 +1,8 @@
 import type { PreparedAnimation } from "./animation-asset-repository";
-import { createRotationMat4 } from "../math/matrices";
+import {
+	createRotationMat4,
+	quaternionFromRotationMat4,
+} from "../math/matrices";
 import { Mat4, Quat, Vec3 } from "../math/types";
 
 /**
@@ -286,8 +289,8 @@ export function interpolateRigidTransform(
 	if (!Number.isFinite(fraction) || fraction < 0 || fraction > 1)
 		throw new Error("Rigid interpolation fraction must be within [0, 1].");
 	const rotation = slerpQuaternion(
-		quaternionFromRigidTransform(from),
-		quaternionFromRigidTransform(to),
+		quaternionFromRotationMat4(from),
+		quaternionFromRotationMat4(to),
 		fraction,
 	);
 	const result = createRotationMat4(rotation);
@@ -330,52 +333,6 @@ export function multiplyQuaternion(left: Quat, right: Quat): Quat {
 			left.w * right.x + left.x * right.w + left.y * right.z - left.z * right.y,
 			left.w * right.y - left.x * right.z + left.y * right.w + left.z * right.x,
 			left.w * right.z + left.x * right.y - left.y * right.x + left.z * right.w,
-		),
-	);
-}
-
-function quaternionFromRigidTransform(matrix: Mat4): Quat {
-	const trace = matrix.m11 + matrix.m22 + matrix.m33;
-	if (trace > 0) {
-		const scale = Math.sqrt(trace + 1) * 2;
-		return normalizeQuaternion(
-			new Quat(
-				scale / 4,
-				(matrix.m23 - matrix.m32) / scale,
-				(matrix.m31 - matrix.m13) / scale,
-				(matrix.m12 - matrix.m21) / scale,
-			),
-		);
-	}
-	if (matrix.m11 > matrix.m22 && matrix.m11 > matrix.m33) {
-		const scale = Math.sqrt(1 + matrix.m11 - matrix.m22 - matrix.m33) * 2;
-		return normalizeQuaternion(
-			new Quat(
-				(matrix.m23 - matrix.m32) / scale,
-				scale / 4,
-				(matrix.m21 + matrix.m12) / scale,
-				(matrix.m31 + matrix.m13) / scale,
-			),
-		);
-	}
-	if (matrix.m22 > matrix.m33) {
-		const scale = Math.sqrt(1 + matrix.m22 - matrix.m11 - matrix.m33) * 2;
-		return normalizeQuaternion(
-			new Quat(
-				(matrix.m31 - matrix.m13) / scale,
-				(matrix.m21 + matrix.m12) / scale,
-				scale / 4,
-				(matrix.m32 + matrix.m23) / scale,
-			),
-		);
-	}
-	const scale = Math.sqrt(1 + matrix.m33 - matrix.m11 - matrix.m22) * 2;
-	return normalizeQuaternion(
-		new Quat(
-			(matrix.m12 - matrix.m21) / scale,
-			(matrix.m31 + matrix.m13) / scale,
-			(matrix.m32 + matrix.m23) / scale,
-			scale / 4,
 		),
 	);
 }

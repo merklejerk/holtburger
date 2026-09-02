@@ -43,6 +43,13 @@ export function adaptDynamicEntityPresentation(
 	}
 	return {
 		placement,
+		initialPresentationState: {
+			cloaked: entity.physics.cloaked,
+			hidden: entity.physics.hidden,
+			lighting: entity.physics.lighting,
+			noDraw: entity.physics.noDraw,
+			translucency: entity.physics.translucency,
+		},
 		source: {
 			entityClass: entity.presentation.entityClass,
 			nameplate: entity.display,

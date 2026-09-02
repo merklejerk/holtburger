@@ -162,6 +162,7 @@ function entity(input: {
 		identity: { guid: input.guid, wcid: input.setupDid },
 		physics: {
 			cloaked: false,
+			translucency: 0,
 			defaultAnimation: false,
 			defaultScript: false,
 			hidden: false,

@@ -2205,6 +2205,7 @@ mod tests {
             object_scale: 1.0,
             friction: None,
             elasticity: None,
+            translucency: 0.0,
             maximum_velocity: None,
             rotation_speed: None,
             radar: holtburger_core::DynamicEntityRadarFacts::default(),

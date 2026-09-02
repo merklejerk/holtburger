@@ -46,6 +46,7 @@ function entity(
 			noDraw: false,
 			hidden: false,
 			cloaked: false,
+			translucency: 0,
 			lighting: false,
 			defaultAnimation: false,
 			defaultScript: false,
@@ -139,6 +140,35 @@ function worldPlacement(value: DynamicEntityView): DynamicEntityWorldPlacement {
 }
 
 describe("dynamic-entity view contract", () => {
+	it("requires a finite unit-interval object translucency level", () => {
+		for (const translucency of [0, 0.5, 1]) {
+			const view = entity(1, 1);
+			view.physics.translucency = translucency;
+			expect(decodeDynamicEntityView(view).physics.translucency).toBe(
+				translucency,
+			);
+		}
+
+		for (const translucency of [
+			Number.NaN,
+			Number.POSITIVE_INFINITY,
+			-0.01,
+			1.01,
+		]) {
+			const view = entity(1, 1);
+			view.physics.translucency = translucency;
+			expect(() => decodeDynamicEntityView(view)).toThrow();
+		}
+
+		const view = entity(1, 1);
+		const { translucency: omitted, ...physicsWithoutTranslucency } =
+			view.physics;
+		expect(omitted).toBe(0);
+		expect(() =>
+			decodeDynamicEntityView({ ...view, physics: physicsWithoutTranslucency }),
+		).toThrow();
+	});
+
 	it("preserves an exact settled motion pose", () => {
 		const decoded = decodeDynamicEntityView({
 			...entity(1, 1),

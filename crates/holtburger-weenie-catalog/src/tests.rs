@@ -26,6 +26,7 @@ fn template(wcid: u32) -> WeenieTemplate {
         default_scale: Some(1.25),
         friction: Some(0.95),
         elasticity: Some(0.05),
+        translucency: Some(0.5),
         maximum_velocity: Some(15.0),
         rotation_speed: Some(2.0),
         radar_blip_color: Some(3),
@@ -207,6 +208,7 @@ fn absent_zero_and_false_survive_round_trip_distinctly() {
     absent.physics.overrides.frozen = None;
     absent.maximum_velocity = None;
     absent.rotation_speed = None;
+    absent.translucency = None;
     absent.appearance.skin_palette_did = None;
     absent.appearance.heritage_group = None;
     absent.appearance.default_combat_style = None;
@@ -219,6 +221,7 @@ fn absent_zero_and_false_survive_round_trip_distinctly() {
     explicit.physics.overrides.frozen = Some(false);
     explicit.maximum_velocity = Some(0.0);
     explicit.rotation_speed = Some(0.0);
+    explicit.translucency = Some(0.0);
     explicit.appearance.skin_palette_did = Some(0);
     explicit.appearance.heritage_group = Some(0);
     explicit.appearance.default_combat_style = Some(0);
@@ -226,20 +229,26 @@ fn absent_zero_and_false_survive_round_trip_distinctly() {
     explicit.appearance.sex = Some(String::new());
     explicit.appearance.palette_template = Some(0);
     explicit.appearance.shade = Some(0.0);
+    let mut fully_translucent = template(3);
+    fully_translucent.translucency = Some(1.0);
 
-    write_catalog_atomic(&path, &[absent, explicit]).unwrap();
+    write_catalog_atomic(&path, &[absent, explicit, fully_translucent]).unwrap();
 
     let catalog = WeenieCatalog::open(path).unwrap();
     let absent = catalog.lookup(1).unwrap().unwrap();
     let explicit = catalog.lookup(2).unwrap().unwrap();
+    let fully_translucent = catalog.lookup(3).unwrap().unwrap();
     assert_eq!(absent.physics.base_mask, None);
     assert_eq!(absent.physics.overrides.frozen, None);
     assert_eq!(absent.maximum_velocity, None);
     assert_eq!(absent.rotation_speed, None);
+    assert_eq!(absent.translucency, None);
     assert_eq!(explicit.physics.base_mask, Some(0));
     assert_eq!(explicit.physics.overrides.frozen, Some(false));
     assert_eq!(explicit.maximum_velocity, Some(0.0));
     assert_eq!(explicit.rotation_speed, Some(0.0));
+    assert_eq!(explicit.translucency, Some(0.0));
+    assert_eq!(fully_translucent.translucency, Some(1.0));
     assert_eq!(absent.appearance.skin_palette_did, None);
     assert_eq!(absent.appearance.heritage_group, None);
     assert_eq!(absent.appearance.default_combat_style, None);
@@ -354,6 +363,19 @@ fn nonfinite_source_float_is_rejected_with_wcid_and_field() {
 
     assert!(matches!(error, CatalogWriteError::Record { wcid: 9, .. }));
     assert!(error.to_string().contains("friction"));
+}
+
+#[test]
+fn nonfinite_translucency_is_rejected_with_wcid_and_field() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("nonfinite-translucency.hwc");
+    let mut value = template(9);
+    value.translucency = Some(f64::NAN);
+
+    let error = write_catalog_atomic(&path, &[value]).unwrap_err();
+
+    assert!(matches!(error, CatalogWriteError::Record { wcid: 9, .. }));
+    assert!(error.to_string().contains("translucency"));
 }
 
 #[test]

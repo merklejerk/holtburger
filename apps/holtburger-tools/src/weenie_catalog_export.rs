@@ -33,6 +33,7 @@ const PROPERTY_FLOAT_SHADE: u16 = 12;
 const PROPERTY_FLOAT_MAXIMUM_VELOCITY: u16 = 26;
 const PROPERTY_FLOAT_ROTATION_SPEED: u16 = 27;
 const PROPERTY_FLOAT_DEFAULT_SCALE: u16 = 39;
+const PROPERTY_FLOAT_TRANSLUCENCY: u16 = 76;
 const PROPERTY_FLOAT_FRICTION: u16 = 78;
 const PROPERTY_FLOAT_ELASTICITY: u16 = 79;
 const PROPERTY_FLOAT_OBVIOUS_RADAR_RANGE: u16 = 104;
@@ -197,7 +198,7 @@ fn load_rows(connection: &mut Conn) -> Result<AceWorldRows> {
             .context("could not query ACE table weenie_properties_d_i_d")?,
         floats: connection
             .query_map(
-                "SELECT object_Id, type, value FROM weenie_properties_float WHERE type IN (12, 26, 27, 39, 78, 79, 104) ORDER BY object_Id, type",
+                "SELECT object_Id, type, value FROM weenie_properties_float WHERE type IN (12, 26, 27, 39, 76, 78, 79, 104) ORDER BY object_Id, type",
                 |(wcid, property_type, value)| ScalarRow { wcid, property_type, value },
             )
             .context("could not query ACE table weenie_properties_float")?,
@@ -270,6 +271,7 @@ fn project_rows(rows: AceWorldRows) -> std::result::Result<Vec<WeenieTemplate>, 
             default_scale: None,
             friction: None,
             elasticity: None,
+            translucency: None,
             maximum_velocity: None,
             rotation_speed: None,
             radar_blip_color: None,
@@ -367,6 +369,7 @@ fn project_rows(rows: AceWorldRows) -> std::result::Result<Vec<WeenieTemplate>, 
             PROPERTY_FLOAT_DEFAULT_SCALE => ("default_scale", &mut template.default_scale),
             PROPERTY_FLOAT_FRICTION => ("friction", &mut template.friction),
             PROPERTY_FLOAT_ELASTICITY => ("elasticity", &mut template.elasticity),
+            PROPERTY_FLOAT_TRANSLUCENCY => ("translucency", &mut template.translucency),
             PROPERTY_FLOAT_SHADE => ("appearance.shade", &mut template.appearance.shade),
             PROPERTY_FLOAT_OBVIOUS_RADAR_RANGE => {
                 ("obvious_radar_range", &mut template.obvious_radar_range)
@@ -860,6 +863,11 @@ mod tests {
             property_type: PROPERTY_FLOAT_SHADE,
             value: 0.5,
         });
+        rows.floats.push(ScalarRow {
+            wcid: 42,
+            property_type: PROPERTY_FLOAT_TRANSLUCENCY,
+            value: 0.25,
+        });
         rows.palettes.extend([
             PaletteRow {
                 wcid: 42,
@@ -886,6 +894,7 @@ mod tests {
         assert_eq!(template.level, Some(17));
         assert_eq!(template.appearance.palette_template, Some(61));
         assert_eq!(template.appearance.shade, Some(0.5));
+        assert_eq!(template.translucency, Some(0.25));
         assert_eq!(template.sub_palettes[0].sub_palette_did, 1);
     }
 
@@ -925,6 +934,11 @@ mod tests {
             property_type: PROPERTY_FLOAT_DEFAULT_SCALE,
             value: 1.5,
         });
+        rows.floats.push(ScalarRow {
+            wcid: 42,
+            property_type: PROPERTY_FLOAT_TRANSLUCENCY,
+            value: 0.5,
+        });
         rows.floats.extend([
             ScalarRow {
                 wcid: 42,
@@ -953,6 +967,7 @@ mod tests {
         assert_eq!(decoded, templates[0]);
         assert_eq!(decoded.maximum_velocity, Some(15.0));
         assert_eq!(decoded.rotation_speed, Some(2.0));
+        assert_eq!(decoded.translucency, Some(0.5));
     }
 
     #[test]

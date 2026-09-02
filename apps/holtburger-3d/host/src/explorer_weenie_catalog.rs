@@ -456,6 +456,7 @@ mod tests {
             default_scale: None,
             friction: None,
             elasticity: None,
+            translucency: None,
             maximum_velocity: None,
             rotation_speed: None,
             radar_blip_color: None,

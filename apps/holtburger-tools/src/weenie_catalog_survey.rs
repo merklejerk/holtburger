@@ -82,6 +82,8 @@ pub struct CatalogSurvey {
     pub friction: FloatDistribution,
     /// Present elasticity distribution.
     pub elasticity: FloatDistribution,
+    /// Present object-translucency distribution.
+    pub translucency: FloatDistribution,
     /// Present launch-speed magnitude distribution.
     pub maximum_velocity: FloatDistribution,
     /// Present projectile rotation-speed distribution.
@@ -539,6 +541,7 @@ fn survey_templates(templates: &[WeenieTemplate], encoded_lengths: Vec<u64>) -> 
     let mut default_scale = FloatDistribution::default();
     let mut friction = FloatDistribution::default();
     let mut elasticity = FloatDistribution::default();
+    let mut translucency = FloatDistribution::default();
     let mut maximum_velocity = FloatDistribution::default();
     let mut rotation_speed = FloatDistribution::default();
     let mut zero_length_sub_palettes = 0;
@@ -578,6 +581,11 @@ fn survey_templates(templates: &[WeenieTemplate], encoded_lengths: Vec<u64>) -> 
         count_missing(&mut missing, "elasticity", template.elasticity.is_none());
         count_missing(
             &mut missing,
+            "translucency",
+            template.translucency.is_none(),
+        );
+        count_missing(
+            &mut missing,
             "maximum_velocity",
             template.maximum_velocity.is_none(),
         );
@@ -607,6 +615,7 @@ fn survey_templates(templates: &[WeenieTemplate], encoded_lengths: Vec<u64>) -> 
         default_scale.observe(template.default_scale);
         friction.observe(template.friction);
         elasticity.observe(template.elasticity);
+        translucency.observe(template.translucency);
         maximum_velocity.observe(template.maximum_velocity);
         rotation_speed.observe(template.rotation_speed);
         if template.default_scale.is_some_and(|scale| scale <= 0.0) {
@@ -652,6 +661,7 @@ fn survey_templates(templates: &[WeenieTemplate], encoded_lengths: Vec<u64>) -> 
         default_scale,
         friction,
         elasticity,
+        translucency,
         maximum_velocity,
         rotation_speed,
         appearance: survey_appearance(templates),
@@ -1875,6 +1885,7 @@ mod tests {
             default_scale: Some(1.0),
             friction: None,
             elasticity: None,
+            translucency: None,
             maximum_velocity: None,
             rotation_speed: None,
             radar_blip_color: None,
@@ -1939,6 +1950,7 @@ mod tests {
         template.default_scale = Some(0.0);
         template.maximum_velocity = Some(0.0);
         template.rotation_speed = Some(2.0);
+        template.translucency = Some(0.5);
         template.sub_palettes = vec![
             SubPalette {
                 sub_palette_did: 1,
@@ -1969,6 +1981,9 @@ mod tests {
         assert_eq!(survey.rotation_speed.count, 1);
         assert_eq!(survey.rotation_speed.min, Some(2.0));
         assert_eq!(survey.rotation_speed.max, Some(2.0));
+        assert_eq!(survey.translucency.count, 1);
+        assert_eq!(survey.translucency.min, Some(0.5));
+        assert_eq!(survey.translucency.max, Some(0.5));
     }
 
     #[test]

@@ -311,7 +311,26 @@ impl WorldObjectPropertiesHydrationExt for WorldObjectProperties {
 
 #[cfg(test)]
 mod tests {
-    use super::decode_vendor_item_supply;
+    use holtburger_common::properties::{PropertyFloat, WorldObjectProperties};
+    use holtburger_protocol::messages::object::messages::description::ObjectDescriptionData;
+
+    use super::{WorldObjectPropertiesHydrationExt as _, decode_vendor_item_supply};
+
+    #[test]
+    fn object_description_hydrates_authored_translucency() {
+        let mut properties = WorldObjectProperties::default();
+        let description = ObjectDescriptionData {
+            translucency: Some(0.5),
+            ..ObjectDescriptionData::default()
+        };
+
+        properties.hydrate_from_odd(&description);
+
+        assert_eq!(
+            properties.floats.get(&PropertyFloat::Translucency),
+            Some(&0.5)
+        );
+    }
 
     #[test]
     fn decode_vendor_item_supply_handles_unlimited_stock() {

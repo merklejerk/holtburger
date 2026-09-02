@@ -1427,6 +1427,7 @@ function view(guid: number, landblockId = 0x0101_0100): DynamicEntityView {
 			noDraw: false,
 			hidden: false,
 			cloaked: false,
+			translucency: 0,
 			lighting: false,
 			defaultAnimation: false,
 			defaultScript: false,

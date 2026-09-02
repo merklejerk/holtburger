@@ -74,7 +74,7 @@ pub enum PhysicalBodyParticipationView {
 }
 
 /// Presentation-owned consequences plus current local physical participation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DynamicEntityPhysicsView {
     /// Complete semantic state mask retained without frontend reinterpretation.
@@ -87,6 +87,8 @@ pub struct DynamicEntityPhysicsView {
     pub hidden: bool,
     /// Cloaked translucency policy is active.
     pub cloaked: bool,
+    /// Current whole-object translucency in the inclusive unit interval.
+    pub translucency: f32,
     /// Authored lighting participates in presentation.
     pub lighting: bool,
     /// The setup's default animation should run.
@@ -162,6 +164,8 @@ pub struct DynamicEntityViewSource {
     pub appearance: EntityAppearance,
     /// Validated root scale.
     pub object_scale: f32,
+    /// Validated current whole-object translucency in the inclusive unit interval.
+    pub translucency: f32,
     /// Complete semantic physics state and once-derived consequences.
     pub physics: EffectiveEntityPhysicsState,
     /// Producer-resolved radar presentation facts consumed by overhead-map blips.
@@ -198,6 +202,7 @@ impl DynamicEntityViewSource {
             content: input.content,
             appearance: input.appearance,
             object_scale: input.object_scale,
+            translucency: input.translucency,
             physics: input.physics,
             radar: input.radar,
             placement: input.placement,
@@ -484,6 +489,7 @@ pub fn project_dynamic_entity_view(source: DynamicEntityViewSource) -> DynamicEn
             no_draw: presentation.no_draw,
             hidden: presentation.hidden,
             cloaked: presentation.cloaked,
+            translucency: source.translucency,
             lighting: presentation.lighting,
             default_animation: presentation.default_animation,
             default_script: presentation.default_script,

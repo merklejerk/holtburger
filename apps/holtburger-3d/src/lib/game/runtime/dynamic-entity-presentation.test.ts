@@ -38,6 +38,13 @@ describe("dynamic presentation producer adapters", () => {
 		};
 
 		const adapted = adaptAuthoredDynamicPresentation(authored);
+		expect(adapted.initialPresentationState).toEqual({
+			cloaked: false,
+			hidden: false,
+			lighting: false,
+			noDraw: false,
+			translucency: 0,
+		});
 		expect(adapted.placement).toMatchObject({
 			...placement,
 			spatialMembership: { scopes: [{ kind: "outdoor" }] },
@@ -55,7 +62,15 @@ describe("dynamic presentation producer adapters", () => {
 
 	it("uses host placement, AC axes, generation identity, scale, and explicit sound override", () => {
 		const entity = fixtureEntity();
+		entity.physics.translucency = 0.5;
 		const adapted = adaptDynamicEntityPresentation(entity, fixtureVisual());
+		expect(adapted.initialPresentationState).toEqual({
+			cloaked: false,
+			hidden: false,
+			lighting: false,
+			noDraw: false,
+			translucency: 0.5,
+		});
 
 		expect(adapted.source).toMatchObject({
 			behavior: { soundTableId: "0x20000002" },
@@ -177,6 +192,7 @@ function fixtureEntity(): DynamicEntityView {
 		display: { name: "Fixture", level: null },
 		physics: {
 			cloaked: false,
+			translucency: 0,
 			defaultAnimation: false,
 			defaultScript: false,
 			hidden: false,

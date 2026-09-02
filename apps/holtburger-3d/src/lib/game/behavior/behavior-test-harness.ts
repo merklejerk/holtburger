@@ -49,7 +49,7 @@ export function installEffectState(
 	nodeId: string,
 	partCount = 1,
 ): void {
-	effects.install(nodeId as SceneNodeId, partCount);
+	effects.install(nodeId as SceneNodeId, partCount, 0);
 }
 
 /** The single-generation target a test uses when generation reuse is not what it is proving. */

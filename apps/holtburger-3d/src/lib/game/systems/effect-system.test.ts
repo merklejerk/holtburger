@@ -13,9 +13,9 @@ const TARGET: BehaviorTarget = {
 	targetId: behaviorTargetId(NODE_ID),
 };
 
-function install(partCount = 2) {
+function install(partCount = 2, initialTranslucency = 0) {
 	const effects = new EffectSystem();
-	effects.install(NODE_ID, partCount);
+	effects.install(NODE_ID, partCount, initialTranslucency);
 	return effects;
 }
 
@@ -41,12 +41,41 @@ function advance(effects: EffectSystem, elapsedSeconds: number): void {
 }
 
 describe("EffectSystem", () => {
+	it("seeds every part from whole-object translucency before part commands", () => {
+		const effects = install(3, 0.5);
+		expect(translucencies(effects)).toEqual([0.5, 0.5, 0.5]);
+
+		effects.applyTransparentPart(TARGET, {
+			durationSeconds: 0,
+			end: 1,
+			partIndex: 1,
+			start: 0.5,
+		});
+		expect(translucencies(effects)).toEqual([0.5, 1, 0.5]);
+	});
+
+	it("updates every part without cancelling an in-flight part ramp", () => {
+		const effects = install(2, 0.5);
+		effects.applyTransparentPart(TARGET, {
+			durationSeconds: 1,
+			end: 0.8,
+			partIndex: 1,
+			start: 0.2,
+		});
+
+		effects.applyObjectTranslucency(NODE_ID, 0.4);
+		expect(translucencies(effects)).toEqual([0.4, 0.2]);
+		advance(effects, 0.5);
+		expect(translucencies(effects)[0]).toBe(0.4);
+		expect(translucencies(effects)[1]).toBeCloseTo(0.5);
+	});
+
 	it("steps every installed state, not only those a playback drives", () => {
 		// The defect this clock exists to fix: stepping used to hang off `AnimationSystem`, so a
 		// resident with a script but no animation never advanced and its ramps were inert.
 		const effects = new EffectSystem();
-		effects.install("scene-node:scripted" as SceneNodeId, 1);
-		effects.install("scene-node:animated" as SceneNodeId, 1);
+		effects.install("scene-node:scripted" as SceneNodeId, 1, 0);
+		effects.install("scene-node:animated" as SceneNodeId, 1, 0);
 		for (const nodeId of ["scene-node:scripted", "scene-node:animated"]) {
 			effects.applyTransparentPart(
 				{ generation: 1, targetId: behaviorTargetId(nodeId) },

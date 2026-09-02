@@ -130,6 +130,7 @@ pub(crate) fn encode_template(template: &WeenieTemplate) -> Result<Vec<u8>, Code
     encoder.optional_f64(template.default_scale, "default_scale")?;
     encoder.optional_f64(template.friction, "friction")?;
     encoder.optional_f64(template.elasticity, "elasticity")?;
+    encoder.optional_f64(template.translucency, "translucency")?;
     encoder.optional_f64(template.maximum_velocity, "maximum_velocity")?;
     encoder.optional_f64(template.rotation_speed, "rotation_speed")?;
     encoder.optional_i32(template.radar_blip_color);
@@ -179,6 +180,7 @@ pub(crate) fn decode_template(bytes: &[u8]) -> Result<WeenieTemplate, CodecError
     let default_scale = decoder.optional_f64("default_scale")?;
     let friction = decoder.optional_f64("friction")?;
     let elasticity = decoder.optional_f64("elasticity")?;
+    let translucency = decoder.optional_f64("translucency")?;
     let maximum_velocity = decoder.optional_f64("maximum_velocity")?;
     let rotation_speed = decoder.optional_f64("rotation_speed")?;
     let radar_blip_color = decoder.optional_i32("radar_blip_color")?;
@@ -241,6 +243,7 @@ pub(crate) fn decode_template(bytes: &[u8]) -> Result<WeenieTemplate, CodecError
         default_scale,
         friction,
         elasticity,
+        translucency,
         maximum_velocity,
         rotation_speed,
         radar_blip_color,
@@ -295,6 +298,7 @@ fn validate_template(template: &WeenieTemplate) -> Result<(), CodecError> {
         ("default_scale", template.default_scale),
         ("friction", template.friction),
         ("elasticity", template.elasticity),
+        ("translucency", template.translucency),
         ("maximum_velocity", template.maximum_velocity),
         ("rotation_speed", template.rotation_speed),
     ] {

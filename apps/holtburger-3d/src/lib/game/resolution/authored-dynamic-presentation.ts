@@ -7,6 +7,13 @@ export function adaptAuthoredDynamicPresentation(
 	authored: AuthoredDynamicSource,
 ): PlacedDynamicPresentationSource {
 	return {
+		initialPresentationState: {
+			cloaked: false,
+			hidden: false,
+			lighting: false,
+			noDraw: false,
+			translucency: 0,
+		},
 		placement: {
 			...authored.placement,
 			spatialMembership: {

@@ -565,6 +565,7 @@ function dynamicPresentationStateIdentity(entity: DynamicEntityView): string {
 		hidden: entity.physics.hidden,
 		lighting: entity.physics.lighting,
 		noDraw: entity.physics.noDraw,
+		translucency: entity.physics.translucency,
 	});
 }
 
@@ -2049,7 +2050,9 @@ export class GamePresentationRuntime {
 			ownerId,
 			placementIdentity: record.placementIdentity,
 			motionState: null,
-			presentationStateIdentity: "",
+			// Installation already seeded this state before behavior replay. Mark it current so the
+			// convergence pass cannot erase part-local replay results.
+			presentationStateIdentity: dynamicPresentationStateIdentity(entity),
 			visualKey: record.visualKey,
 		};
 		this.#spawnedPresentations.set(guid, installed);
@@ -2130,6 +2133,7 @@ export class GamePresentationRuntime {
 				hidden: entity.physics.hidden,
 				lighting: entity.physics.lighting,
 				noDraw: entity.physics.noDraw,
+				translucency: entity.physics.translucency,
 			});
 			installed.presentationStateIdentity = identity;
 		}

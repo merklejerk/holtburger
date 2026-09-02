@@ -204,6 +204,7 @@ function dynamicEntity(
 		display: { name: "Entity", level: null },
 		physics: {
 			cloaked: false,
+			translucency: 0,
 			defaultAnimation: false,
 			defaultScript: false,
 			hidden: false,

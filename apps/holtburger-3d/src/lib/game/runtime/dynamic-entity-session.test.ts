@@ -128,7 +128,12 @@ function view(guid: number): DynamicEntityView {
 				partChanges: [],
 			},
 			objectScale: 1,
-			radar: { blipColor: "Default", behavior: null, obviousRange: null },
+			radar: {
+				blipColor: "Default",
+				behavior: null,
+				category: "other",
+				obviousRange: null,
+			},
 		},
 		physics: {
 			semanticMask: 0,

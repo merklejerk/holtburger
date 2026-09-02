@@ -1,4 +1,5 @@
 import type { HexRgbColor, HexRgbaColor } from "./frontend-color";
+import type { MapBlipCategory } from "./game/map/map-blip-category";
 import type { AmbientOcclusionParameters } from "./game/renderer/ambient-occlusion-policy";
 import type { ColorGradeParameters } from "./game/renderer/color-grade-policy";
 import type {
@@ -85,20 +86,6 @@ type MapSurfaceColor =
 /** Three anchor-relative elevation stops shared by indoor and outdoor maps. */
 type MapHeightColor = "sameLevelColor" | "aboveColor" | "belowColor";
 
-/** Effective radar categories whose marker presentation can be tuned. */
-type RadarColorName =
-	| "Default"
-	| "Blue"
-	| "Gold"
-	| "White"
-	| "Purple"
-	| "Red"
-	| "Pink"
-	| "Green"
-	| "Yellow"
-	| "Cyan"
-	| "BrightGreen";
-
 /** Complete shared overhead-map appearance and navigation policy. */
 interface FrontendMapTuning {
 	/** Directional relief-light presentation. */
@@ -159,8 +146,8 @@ interface FrontendMapTuning {
 	};
 	/** Map marker palette and screen-space size. */
 	readonly blips: {
-		/** Marker fill selected by effective radar category. */
-		readonly colorsByRadarColor: Readonly<Record<RadarColorName, HexRgbColor>>;
+		/** Marker fill and opacity selected by producer-resolved map category or controlled status. */
+		readonly fillColors: Readonly<Record<MapBlipCategory, HexRgbaColor>>;
 		/** Marker radius in canvas pixels. */
 		readonly radiusPixels: number;
 	};

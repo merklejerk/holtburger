@@ -105,8 +105,8 @@ pub fn project_client_dynamic_entity(
         physics: entity.physics.effective(),
         radar: crate::DynamicEntityRadarFacts::from_authored(
             format_args!("client entity 0x{:08X}", guid.0),
+            crate::semantic_dynamic_entity_map_semantics(entity.flags, entity.item_type()),
             entity.radar_blip_color().map(|value| value as i32),
-            crate::semantic_radar_blip_color(entity.flags, entity.item_type()),
             entity.radar_enum().map(|value| value as i32),
             entity.get_float_prop(PropertyFloat::ObviousRadarRange),
         ),
@@ -366,7 +366,7 @@ mod tests {
     }
 
     #[test]
-    fn client_presentation_class_uses_live_facts_and_includes_vendors_as_npcs() {
+    fn client_presentation_categories_use_live_semantic_facts() {
         assert_eq!(
             semantic_dynamic_entity_presentation_class(
                 ObjectDescriptionFlag::PLAYER,
@@ -412,6 +412,19 @@ mod tests {
                 Some(ItemType::PORTAL),
             ),
             DynamicEntityPresentationClass::Portal
+        );
+        assert_eq!(
+            crate::semantic_dynamic_entity_map_semantics(ObjectDescriptionFlag::LIFE_STONE, None,)
+                .category,
+            crate::DynamicEntityMapBlipCategory::Lifestone
+        );
+        assert_eq!(
+            crate::semantic_dynamic_entity_map_semantics(
+                ObjectDescriptionFlag::empty(),
+                Some(ItemType::LIFE_STONE),
+            )
+            .category,
+            crate::DynamicEntityMapBlipCategory::Lifestone
         );
     }
 
@@ -553,12 +566,12 @@ mod tests {
                 physics,
                 radar: crate::DynamicEntityRadarFacts::from_authored(
                     "test explorer entity",
-                    None,
-                    crate::explorer_radar_blip_color(
+                    crate::explorer_dynamic_entity_map_semantics(
                         WeenieType::Creature,
                         Some(ItemType::CREATURE),
                         Some(false),
                     ),
+                    None,
                     None,
                     None,
                 ),

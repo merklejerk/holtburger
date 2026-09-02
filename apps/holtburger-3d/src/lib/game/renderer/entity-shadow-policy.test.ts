@@ -54,8 +54,19 @@ describe("entity shadow policy", () => {
 
 	it("admits only the three producer-resolved actor classes", () => {
 		expect(
-			DYNAMIC_ENTITY_PRESENTATION_CLASSES.map(isEntityShadowCasterClass),
-		).toEqual([true, true, true, false, false]);
+			Object.fromEntries(
+				DYNAMIC_ENTITY_PRESENTATION_CLASSES.map((category) => [
+					category,
+					isEntityShadowCasterClass(category),
+				]),
+			),
+		).toEqual({
+			mob: true,
+			npc: true,
+			other: false,
+			player: true,
+			portal: false,
+		});
 	});
 
 	it("admits only authored buildings as outdoor object receivers", () => {

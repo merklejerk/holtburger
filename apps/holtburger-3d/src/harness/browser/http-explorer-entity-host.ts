@@ -89,7 +89,7 @@ export class HttpExplorerEntityHost {
 	ensureSimulationInterest(
 		anchorLandblockId: LandblockOwnerId,
 	): Promise<SimulationInterestReceipt> {
-		return this.#interest.request(anchorLandblockId).then((receipt) => {
+		return this.#interest.follow(anchorLandblockId).then((receipt) => {
 			if (!receipt.committed) {
 				throw new Error(
 					`Collision interest for ${anchorLandblockId} was superseded before the operation could start.`,

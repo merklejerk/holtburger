@@ -8,6 +8,9 @@ import { z } from "zod";
 /** Current Explorer policy radius for collision simulation, independent from render residency radii. */
 const SIMULATION_INTEREST_RADIUS = 2;
 
+/** Keep acquired collision owners for one extra landblock beyond the nominal follow radius. */
+const SIMULATION_INTEREST_EXIT_MARGIN = 1;
+
 /** Complete host replacement of the collision owners required by application policy. */
 export interface SimulationInterestRequest {
 	/** Monotonic replacement revision within the current frontend lifetime. */
@@ -48,47 +51,98 @@ export interface SimulationInterestTransport {
 	): Promise<SimulationInterestReceipt>;
 }
 
-interface CurrentRequest {
-	/** Normalized application anchor associated with the replacement. */
-	readonly anchorLandblockId: LandblockOwnerId;
+interface CurrentPublication {
 	/** Revision used to prevent an older failure from clearing newer state. */
 	readonly revision: number;
-	/** Shared result returned when the same anchor is requested again. */
+	/** Shared result returned while this publication remains current. */
 	readonly promise: Promise<SimulationInterestReceipt>;
+}
+
+interface CurrentInterest {
+	/** Normalized application anchor associated with the replacement. */
+	readonly anchorLandblockId: LandblockOwnerId;
+	/** Complete effective owner set submitted for this revision. */
+	readonly landblockIds: readonly LandblockOwnerId[];
+	/** Host publication, absent after a retryable current failure. */
+	readonly publication: CurrentPublication | null;
 }
 
 /** Owns Explorer simulation-interest revisions without observing render-layer settings. */
 export class SimulationInterestController {
 	readonly #transport: SimulationInterestTransport;
 	#revision = 0;
-	#current: CurrentRequest | null = null;
+	#current: CurrentInterest | null = null;
 
 	constructor(transport: SimulationInterestTransport) {
 		this.#transport = transport;
 	}
 
-	/** Replace collision interest when, and only when, the application anchor changes. */
-	request(
+	/** Follow physical movement with bounded owner retention. */
+	follow(
 		anchorLandblockId: LandblockOwnerId,
 	): Promise<SimulationInterestReceipt> {
 		const anchor = normalizeLandblockOwner(anchorLandblockId);
-		if (this.#current?.anchorLandblockId === anchor) {
-			return this.#current.promise;
+		return this.#request(
+			anchor,
+			computeEffectiveSimulationInterest(
+				anchor,
+				this.#current?.landblockIds ?? [],
+			),
+		);
+	}
+
+	/** Replace collision interest with the exact nominal destination square. */
+	replace(
+		anchorLandblockId: LandblockOwnerId,
+	): Promise<SimulationInterestReceipt> {
+		const anchor = normalizeLandblockOwner(anchorLandblockId);
+		return this.#request(anchor, computeSimulationInterest(anchor));
+	}
+
+	/** Preserve an already-current anchor, otherwise replace with its exact nominal square. */
+	ensure(
+		anchorLandblockId: LandblockOwnerId,
+	): Promise<SimulationInterestReceipt> {
+		const anchor = normalizeLandblockOwner(anchorLandblockId);
+		const current = this.#current;
+		if (current?.anchorLandblockId !== anchor) return this.replace(anchor);
+		if (current.publication !== null) return current.publication.promise;
+		return this.#request(anchor, current.landblockIds);
+	}
+
+	#request(
+		anchor: LandblockOwnerId,
+		landblockIds: readonly LandblockOwnerId[],
+	): Promise<SimulationInterestReceipt> {
+		const current = this.#current;
+		if (
+			current !== null &&
+			current.publication !== null &&
+			sameOwners(current.landblockIds, landblockIds)
+		) {
+			this.#current = { ...current, anchorLandblockId: anchor };
+			return current.publication.promise;
 		}
 
 		const revision = ++this.#revision;
 		const promise = this.#transport
 			.replace({
-				landblockIds: computeSimulationInterest(anchor),
+				landblockIds,
 				revision,
 			})
 			.then((receipt) => validateReceipt(receipt, revision))
 			.catch((error: unknown) => {
 				// A failed current request may be retried. Never roll an older failure over a newer anchor.
-				if (this.#current?.revision === revision) this.#current = null;
+				if (this.#current?.publication?.revision === revision) {
+					this.#current = { ...this.#current, publication: null };
+				}
 				throw error;
 			});
-		this.#current = { anchorLandblockId: anchor, promise, revision };
+		this.#current = {
+			anchorLandblockId: anchor,
+			landblockIds,
+			publication: { promise, revision },
+		};
 		return promise;
 	}
 
@@ -97,7 +151,7 @@ export class SimulationInterestController {
 		const anchor = normalizeLandblockOwner(anchorLandblockId);
 		return (
 			this.#current?.anchorLandblockId === anchor &&
-			this.#current?.revision === revision
+			this.#current.publication?.revision === revision
 		);
 	}
 }
@@ -129,6 +183,41 @@ export function computeSimulationInterest(
 		}
 	}
 	return owners;
+}
+
+/** Union nominal owners with prior owners still inside the current exit square. */
+export function computeEffectiveSimulationInterest(
+	anchorLandblockId: LandblockOwnerId,
+	previousOwners: readonly LandblockOwnerId[],
+): readonly LandblockOwnerId[] {
+	const anchor = getLandblockCoordinates(
+		normalizeLandblockOwner(anchorLandblockId),
+	);
+	const owners = new Set(computeSimulationInterest(anchorLandblockId));
+	for (const previousOwner of previousOwners) {
+		const owner = normalizeLandblockOwner(previousOwner);
+		const coordinates = getLandblockCoordinates(owner);
+		const distance = Math.max(
+			Math.abs(coordinates.x - anchor.x),
+			Math.abs(coordinates.y - anchor.y),
+		);
+		if (
+			distance <=
+			SIMULATION_INTEREST_RADIUS + SIMULATION_INTEREST_EXIT_MARGIN
+		) {
+			owners.add(owner);
+		}
+	}
+	return [...owners].sort();
+}
+
+function sameOwners(
+	left: readonly LandblockOwnerId[],
+	right: readonly LandblockOwnerId[],
+): boolean {
+	if (left.length !== right.length) return false;
+	const rightOwners = new Set(right);
+	return left.every((owner) => rightOwners.has(owner));
 }
 
 function validateReceipt(

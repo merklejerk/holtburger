@@ -225,16 +225,14 @@ import {
 	type ObjectVisualTemplate,
 } from "../systems/object-visual-template-repository";
 import {
-	computeOutdoorSceneInterest,
-	computeDungeonSceneInterest,
 	isOutdoorStaticLayer,
 	LandblockLayerKind,
 	type OutdoorStaticLayerKind,
 	type StaticLayerKind,
 	type SceneInterestMap,
 	type SceneInterestRequest,
-	validateSceneInterestRadiiOrThrow,
 } from "./scene-interest";
+import { RenderSceneInterestController } from "./render-scene-interest-controller";
 import type { ResolvedSceneInterestTarget } from "./scene-target";
 import {
 	EnvCellGeometryPreparer,
@@ -914,6 +912,8 @@ export class GamePresentationRuntime {
 	readonly #texturePreparer: TexturePreparer;
 	/** Asynchronous scene-interest receipt coordination, separate from runtime mutation authority. */
 	readonly #sceneInterestCoordinator: SceneInterestCommitCoordinator;
+	/** Synchronous render-interest policy, target context, and fog state. */
+	readonly #renderSceneInterest = new RenderSceneInterestController();
 	/** Completed asynchronous commits awaiting the next synchronous runtime tick. */
 	readonly #commitArtifacts: PendingCommitArtifact[] = [];
 	/** Resource continuations awaited before runtime-owned sources and renderer state are destroyed. */
@@ -951,12 +951,6 @@ export class GamePresentationRuntime {
 	 * every frame instead of from whatever the frontend last sampled.
 	 */
 	#viewerEntityGuid: number | null = null;
-	/** Terrain interest constraining the frontend's effective distance-fog range. */
-	#terrainFogCoverage: TerrainFogCoverage | null = null;
-	/** Complete static demand selected by the latest accepted scene target. */
-	#sceneInterest: SceneInterestMap = new Map();
-	/** Last resolved target accepted by this runtime, for diagnostics and consumer policy. */
-	#resolvedSceneInterestTarget: ResolvedSceneInterestTarget | null = null;
 	/** One source-neutral replacement barrier layered over the ordinary interest coordinator. */
 	#sceneActivation: SceneActivationReceipt | null = null;
 	/** Exact layer failures retained until the owning interest revision is withdrawn. */
@@ -1792,11 +1786,13 @@ export class GamePresentationRuntime {
 		}
 		if (this.#destroyed)
 			throw new Error("Cannot activate a scene after runtime shutdown.");
-		const interest = this.updateSceneInterest(request.target);
+		const transition = this.#renderSceneInterest.replace(request.target);
+		this.#withdrawOutOfScopeDynamicEntities();
+		const interest = this.#applySceneInterest(transition.effectiveInterest);
 		const receipt: SceneActivationReceipt = {
 			generation: request.generation,
 			revision: interest.revision,
-			requiredLayers: cloneSceneInterest(this.#sceneInterest),
+			requiredLayers: transition.nominalInterest,
 		};
 		this.#sceneActivation = receipt;
 		return receipt;
@@ -1846,7 +1842,9 @@ export class GamePresentationRuntime {
 		// interest. The scene graph indexes those facts without requiring their topology; only the
 		// pose's resident scope must exist so placement and camera resolution have an authority.
 		const placement = dynamicEntityPlacement(entity);
-		const demandedLayers = this.#sceneInterest.get(placement.landblockId);
+		const demandedLayers = this.#renderSceneInterest.layersFor(
+			placement.landblockId,
+		);
 		if (placement.envCellId === null) {
 			if (!demandedLayers?.has(LandblockLayerKind.Terrain)) return false;
 			return this.#terrain.hasInstalledSource(placement.landblockId);
@@ -2167,36 +2165,17 @@ export class GamePresentationRuntime {
 
 	/** Replace profile-resolved static content demand without moving the camera. */
 	updateSceneInterest(request: SceneInterestRequest): SceneInterestReceipt {
-		validateSceneInterestRadiiOrThrow(request.radii);
-		this.#resolvedSceneInterestTarget = request.target;
-		if (request.target.kind === "outdoor") {
-			const landblockId = request.target.requested.landblockId;
-			this.#sceneInterest = computeOutdoorSceneInterest(
-				landblockId,
-				request.radii,
-				request.ambientOutdoorEnvCellOwners,
-			);
-			this.#terrainFogCoverage = {
-				terrainRadius: request.radii.terrainRadius,
-			};
-		} else {
-			this.#sceneInterest = computeDungeonSceneInterest(
-				request.target.requested.landblockId,
-			);
-			this.#terrainFogCoverage = null;
-		}
+		const transition = this.#renderSceneInterest.follow(request);
 		this.#withdrawOutOfScopeDynamicEntities();
-		return this.#applySceneInterest(this.#sceneInterest);
+		return this.#applySceneInterest(transition.effectiveInterest);
 	}
 
 	/** Evict every requested static layer without moving the camera. */
 	clearSceneInterest(): SceneInterestReceipt {
-		this.#terrainFogCoverage = null;
-		this.#sceneInterest = new Map();
-		this.#resolvedSceneInterestTarget = null;
+		const transition = this.#renderSceneInterest.clear();
 		this.#sceneActivation = null;
 		this.#withdrawOutOfScopeDynamicEntities();
-		return this.#applySceneInterest(this.#sceneInterest);
+		return this.#applySceneInterest(transition.effectiveInterest);
 	}
 
 	/** Retire only desired world roots made ineligible by an explicit interest replacement. */
@@ -2221,17 +2200,12 @@ export class GamePresentationRuntime {
 		readonly interest: SceneInterestMap;
 		readonly resolvedTarget: ResolvedSceneInterestTarget | null;
 	} {
-		return {
-			interest: cloneSceneInterest(this.#sceneInterest),
-			resolvedTarget: this.#resolvedSceneInterestTarget,
-		};
+		return this.#renderSceneInterest.snapshot();
 	}
 
 	/** Snapshot current outdoor fog coverage without exposing mutable runtime state. */
 	terrainFogCoverage(): TerrainFogCoverage | null {
-		return this.#terrainFogCoverage === null
-			? null
-			: { ...this.#terrainFogCoverage };
+		return this.#renderSceneInterest.fogCoverage();
 	}
 
 	/** Subscribe to source/topology availability without exposing runtime-owned resources. */
@@ -2404,7 +2378,7 @@ export class GamePresentationRuntime {
 	 * `0x02000BA6`; the sole celestial script produces particles and no sound.
 	 */
 	#skyAudioEnabled(): boolean {
-		const target = this.#resolvedSceneInterestTarget;
+		const target = this.#renderSceneInterest.resolvedTarget();
 		// No accepted target is not evidence of dungeon context. Modes may install regional sky
 		// before their first scene request, so only the authoritative dungeon classification mutes it.
 		return target === null || target.kind === "outdoor";
@@ -3141,7 +3115,7 @@ export class GamePresentationRuntime {
 				...this.#environment,
 				distanceFog: resolveTerrainCoverageFog(
 					this.#environment.distanceFog,
-					this.#terrainFogCoverage,
+					this.#renderSceneInterest.fogCoverage(),
 				),
 			},
 			extent,
@@ -3830,15 +3804,6 @@ class InlineStaticObjectGeometryPreparer extends RuntimeStaticObjectGeometryPrep
 			destroy: () => undefined,
 		} as StaticObjectGeometryWorker);
 	}
-}
-
-function cloneSceneInterest(interest: SceneInterestMap): SceneInterestMap {
-	return new Map(
-		[...interest.entries()].map(([landblockId, layers]) => [
-			landblockId,
-			new Set(layers),
-		]),
-	);
 }
 
 function sceneLayerKey(

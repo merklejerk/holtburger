@@ -139,6 +139,23 @@ describe("computeOutdoorSceneInterest", () => {
 		).toBe(true);
 	});
 
+	it("clips outdoor interest at the world edge", () => {
+		const interest = computeOutdoorSceneInterest(
+			"0x0000ffff",
+			{
+				buildingRadius: null,
+				envCellRadius: null,
+				explicitObjectRadius: null,
+				generatedObjectRadius: null,
+				terrainRadius: 2,
+			},
+			new Set(),
+		);
+
+		expect(interest).toHaveLength(9);
+		expect(interest.has("0x0202ffff")).toBe(true);
+	});
+
 	it("enables optional layers at their independent radii", () => {
 		const interest = computeOutdoorSceneInterest(
 			"0x1010ffff",

@@ -89,7 +89,7 @@ pub struct CharacterMotionSequence(
     pub u64,
 );
 
-/// World-owned readiness required to accept the start of a retail-style jump charge.
+/// World-owned readiness sampled when a charged jump is released.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CharacterMotionReadiness {
     Ready,
@@ -246,6 +246,19 @@ impl CharacterMotionController {
                 if self.is_charging() {
                     return CharacterMotionEventResult::ChargeContinues;
                 }
+                self.phase = CharacterMotionPhase::Charging {
+                    standing_long_jump: drive.is_stationary(),
+                };
+                CharacterMotionEventResult::ChargeAccepted
+            }
+            CharacterMotionEvent::ReleaseJump { drive, extent } => {
+                self.drive = drive;
+                let CharacterMotionPhase::Charging { standing_long_jump } = self.phase else {
+                    return CharacterMotionEventResult::Rejected(
+                        CharacterMotionRejection::ChargeNotActive,
+                    );
+                };
+                self.phase = CharacterMotionPhase::Idle;
                 let rejection = match readiness {
                     CharacterMotionReadiness::Ready => None,
                     CharacterMotionReadiness::Airborne => Some(CharacterMotionRejection::Airborne),
@@ -262,20 +275,6 @@ impl CharacterMotionController {
                 if let Some(rejection) = rejection {
                     return CharacterMotionEventResult::Rejected(rejection);
                 }
-
-                self.phase = CharacterMotionPhase::Charging {
-                    standing_long_jump: drive.is_stationary(),
-                };
-                CharacterMotionEventResult::ChargeAccepted
-            }
-            CharacterMotionEvent::ReleaseJump { drive, extent } => {
-                self.drive = drive;
-                let CharacterMotionPhase::Charging { standing_long_jump } = self.phase else {
-                    return CharacterMotionEventResult::Rejected(
-                        CharacterMotionRejection::ChargeNotActive,
-                    );
-                };
-                self.phase = CharacterMotionPhase::Idle;
                 CharacterMotionEventResult::JumpReleased(JumpAttempt {
                     drive,
                     extent,
@@ -429,7 +428,7 @@ mod tests {
     }
 
     #[test]
-    fn begin_requires_walkable_contact_and_repeated_begin_does_not_restart_charge() {
+    fn begin_ignores_readiness_and_repeated_begin_does_not_restart_charge() {
         let mut controller = CharacterMotionController::new();
         let begin = CharacterMotionEvent::BeginJump {
             drive: CharacterDrive::default(),
@@ -437,18 +436,78 @@ mod tests {
 
         assert_eq!(
             controller.apply_event(event(1, begin), CharacterMotionReadiness::Unsupported),
-            CharacterMotionEventResult::Rejected(CharacterMotionRejection::Unsupported)
-        );
-        assert!(!controller.is_charging());
-        assert_eq!(
-            controller.apply_event(event(2, begin), CharacterMotionReadiness::Ready),
             CharacterMotionEventResult::ChargeAccepted
         );
         assert_eq!(
-            controller.apply_event(event(3, begin), CharacterMotionReadiness::Ready),
+            controller.apply_event(event(2, begin), CharacterMotionReadiness::Airborne),
             CharacterMotionEventResult::ChargeContinues
         );
         assert!(controller.is_charging());
+        assert!(matches!(
+            controller.apply_event(
+                event(
+                    3,
+                    CharacterMotionEvent::ReleaseJump {
+                        drive: CharacterDrive::default(),
+                        extent: JumpExtent::MINIMUM,
+                    },
+                ),
+                CharacterMotionReadiness::Ready,
+            ),
+            CharacterMotionEventResult::JumpReleased(_)
+        ));
+    }
+
+    #[test]
+    fn release_checks_current_readiness_and_ends_rejected_charge() {
+        let cases = [
+            (
+                CharacterMotionReadiness::Airborne,
+                CharacterMotionRejection::Airborne,
+            ),
+            (
+                CharacterMotionReadiness::Unsupported,
+                CharacterMotionRejection::Unsupported,
+            ),
+            (
+                CharacterMotionReadiness::Overburdened,
+                CharacterMotionRejection::Overburdened,
+            ),
+            (
+                CharacterMotionReadiness::CapabilityUnavailable,
+                CharacterMotionRejection::CapabilityUnavailable,
+            ),
+        ];
+
+        for (readiness, rejection) in cases {
+            let mut controller = CharacterMotionController::new();
+            assert_eq!(
+                controller.apply_event(
+                    event(
+                        1,
+                        CharacterMotionEvent::BeginJump {
+                            drive: CharacterDrive::default(),
+                        },
+                    ),
+                    readiness,
+                ),
+                CharacterMotionEventResult::ChargeAccepted
+            );
+            assert_eq!(
+                controller.apply_event(
+                    event(
+                        2,
+                        CharacterMotionEvent::ReleaseJump {
+                            drive: CharacterDrive::default(),
+                            extent: JumpExtent::MINIMUM,
+                        },
+                    ),
+                    readiness,
+                ),
+                CharacterMotionEventResult::Rejected(rejection)
+            );
+            assert!(!controller.is_charging());
+        }
     }
 
     #[test]

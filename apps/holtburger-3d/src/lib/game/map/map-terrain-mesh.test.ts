@@ -31,6 +31,30 @@ function source(
 	};
 }
 
+/** Read the first expanded copy of one grid vertex's normal. */
+function normalAt(
+	mesh: ReturnType<typeof buildMapTerrainMesh>,
+	x: number,
+	z: number,
+): readonly [number, number, number] {
+	for (let vertex = 0; vertex < mesh.vertexCount; vertex += 1) {
+		const positionOffset = vertex * 3;
+		if (
+			mesh.positions[positionOffset] === x &&
+			mesh.positions[positionOffset + 2] === z
+		) {
+			const normal = mesh.normals.slice(positionOffset, positionOffset + 3);
+			if (normal.length !== 3) {
+				throw new Error(
+					`Map terrain vertex ${vertex} has an incomplete normal.`,
+				);
+			}
+			return [normal[0], normal[1], normal[2]];
+		}
+	}
+	throw new Error(`Map terrain mesh has no vertex at (${x}, ${z}).`);
+}
+
 describe("buildMapTerrainMesh", () => {
 	it("expands one triangle pair per authored cell", () => {
 		const mesh = buildMapTerrainMesh(source());
@@ -120,11 +144,11 @@ describe("buildMapTerrainMesh", () => {
 		}
 		const mesh = buildMapTerrainMesh(source({ heights }));
 
-		const [x, y, z] = [mesh.normals[0], mesh.normals[1], mesh.normals[2]] as [
-			number,
-			number,
-			number,
-		];
+		const [x, y, z] = normalAt(
+			mesh,
+			OUTDOOR_TERRAIN_TILE_SIZE,
+			-OUTDOOR_TERRAIN_TILE_SIZE,
+		);
 		expect(Math.hypot(x, y, z)).toBeCloseTo(1);
 		// Leaning west, away from the climb, and too steep to walk up.
 		expect(x).toBeCloseTo(-Math.SQRT1_2);
@@ -132,6 +156,37 @@ describe("buildMapTerrainMesh", () => {
 		expect(z).toBeCloseTo(0);
 		// Retail's limit is about 48.4 degrees, so a 45 degree slope is still walkable.
 		expect(y).toBeGreaterThan(RETAIL_WALKABLE_NORMAL_UP);
+	});
+
+	it("gives independent landblocks the same normal along a shared edge", () => {
+		const westHeights = new Float32Array(SIDE * SIDE);
+		const eastHeights = new Float32Array(SIDE * SIDE);
+		for (let row = 0; row < SIDE; row += 1) {
+			westHeights[row * SIDE + OUTDOOR_TERRAIN_GRID_CELLS] = 10;
+			eastHeights[row * SIDE] = 10;
+			eastHeights[row * SIDE + 1] = 30;
+		}
+
+		const west = buildMapTerrainMesh(
+			source({ heights: westHeights, landblockId: "0xda55ffff" }),
+		);
+		const east = buildMapTerrainMesh(
+			source({ heights: eastHeights, landblockId: "0xdb55ffff" }),
+		);
+		const sharedRowZ = -OUTDOOR_TERRAIN_TILE_SIZE;
+
+		// Each source implies a different one-sided cross-edge slope. Dropping that unavailable
+		// component leaves the shared, flat edge tangent and therefore the same shading normal.
+		const westNormal = normalAt(
+			west,
+			OUTDOOR_TERRAIN_GRID_CELLS * OUTDOOR_TERRAIN_TILE_SIZE,
+			sharedRowZ,
+		);
+		const eastNormal = normalAt(east, 0, sharedRowZ);
+		expect(westNormal).toEqual(eastNormal);
+		expect(westNormal[0]).toBeCloseTo(0);
+		expect(westNormal[1]).toBeCloseTo(1);
+		expect(westNormal[2]).toBeCloseTo(0);
 	});
 
 	it("marks ground past retail's walkable limit as impassable", () => {
@@ -144,7 +199,9 @@ describe("buildMapTerrainMesh", () => {
 		}
 		const mesh = buildMapTerrainMesh(source({ heights }));
 
-		expect(mesh.normals[1]).toBeLessThan(RETAIL_WALKABLE_NORMAL_UP);
+		expect(
+			normalAt(mesh, OUTDOOR_TERRAIN_TILE_SIZE, -OUTDOOR_TERRAIN_TILE_SIZE)[1],
+		).toBeLessThan(RETAIL_WALKABLE_NORMAL_UP);
 		expect([...mesh.passable.slice(0, 3)]).toEqual([0, 0, 0]);
 	});
 

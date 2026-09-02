@@ -245,7 +245,6 @@ describe("ClientPresentationSession", () => {
 				guid: playerGuid,
 				kind: "controlled-entity",
 			},
-			presentedEntityRevision: 0,
 			source: runtime,
 		});
 		expect(presentation.readDiagnostics()).toMatchObject({
@@ -1419,7 +1418,11 @@ function view(guid: number, landblockId = 0x0101_0100): DynamicEntityView {
 				partChanges: [],
 			},
 			objectScale: 1,
-			radar: { blipColor: "Default", behavior: null, obviousRange: null },
+			radar: {
+				behavior: null,
+				category: "other",
+				obviousRange: null,
+			},
 		},
 		physics: {
 			semanticMask: 0,

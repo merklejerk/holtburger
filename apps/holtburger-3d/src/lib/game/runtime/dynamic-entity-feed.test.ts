@@ -35,8 +35,8 @@ function entity(
 			},
 			objectScale: 1,
 			radar: {
-				blipColor: "Default",
 				behavior: null,
+				category: "other",
 				obviousRange: null,
 			},
 		},
@@ -203,6 +203,40 @@ describe("dynamic-entity view contract", () => {
 			decodeDynamicEntityView({
 				...view,
 				presentation: presentationWithoutClass,
+			}),
+		).toThrow();
+	});
+
+	it("requires and preserves the producer-resolved map blip category", () => {
+		const view = entity(1, 1);
+		const lifestone = {
+			...view,
+			presentation: {
+				...view.presentation,
+				radar: { ...view.presentation.radar, category: "lifestone" },
+			},
+		} as const;
+		expect(decodeDynamicEntityView(lifestone).presentation.radar.category).toBe(
+			"lifestone",
+		);
+		expect(() =>
+			decodeDynamicEntityView({
+				...view,
+				presentation: {
+					...view.presentation,
+					radar: { ...view.presentation.radar, category: "bindstone" },
+				},
+			}),
+		).toThrow();
+		const { category, ...radarWithoutCategory } = view.presentation.radar;
+		expect(category).toBe("other");
+		expect(() =>
+			decodeDynamicEntityView({
+				...view,
+				presentation: {
+					...view.presentation,
+					radar: radarWithoutCategory,
+				},
 			}),
 		).toThrow();
 	});

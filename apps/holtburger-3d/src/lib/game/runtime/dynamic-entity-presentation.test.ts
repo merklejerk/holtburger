@@ -230,7 +230,11 @@ function fixtureEntity(): DynamicEntityView {
 				soundTableDid: 0x20000002,
 			},
 			objectScale: 2,
-			radar: { blipColor: "Default", behavior: null, obviousRange: null },
+			radar: {
+				behavior: null,
+				category: "other",
+				obviousRange: null,
+			},
 		},
 	};
 }

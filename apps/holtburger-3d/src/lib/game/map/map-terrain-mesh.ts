@@ -105,9 +105,11 @@ interface TerrainCellCorner {
  * a map wants the smooth shape of the land, and the gradient is both cheaper and less faceted than
  * accumulating triangle normals.
  *
- * Edge vertices fall back to one-sided differences because a landblock cannot see its neighbour's
- * heights here. That leaves a normal discontinuity along landblock boundaries; whether it is
- * visible as hillshade seams is a Phase 1 judgement.
+ * A landblock cannot see its neighbour's heights here. At an outer edge, the normal therefore
+ * keeps the slope along the edge but discards the unknown slope crossing it. Where adjacent
+ * landblocks share authored edge heights, both copies then produce the same hillshade instead of
+ * exposing their independent one-sided estimates as a 192-metre grid. This deliberately flattens
+ * only the shading normal near a boundary; positions and face-derived passability remain exact.
  */
 export function buildMapTerrainMesh(
 	source: TerrainGenerationSource,
@@ -266,19 +268,20 @@ function readTerrainGrid(
 	const grid: TerrainGridVertex[] = [];
 	for (let row = 0; row < side; row += 1) {
 		for (let column = 0; column < side; column += 1) {
-			// Central differences where both neighbours exist, one-sided at the edges. The z
-			// gradient is negated because canonical rows run south-to-north while local z runs
-			// north-negative.
-			const west = Math.max(0, column - 1);
-			const east = Math.min(side - 1, column + 1);
-			const south = Math.max(0, row - 1);
-			const north = Math.min(side - 1, row + 1);
+			// Central differences inside the landblock. An edge has no source-proven sample on its
+			// far side, so erase only that crossing component rather than inventing a one-sided
+			// estimate that disagrees with the neighbouring landblock's estimate. The z gradient is
+			// negated because canonical rows run south-to-north while local z runs north-negative.
 			const dx =
-				(height(row, east) - height(row, west)) /
-				((east - west) * source.tileSize);
+				column === 0 || column === side - 1
+					? 0
+					: (height(row, column + 1) - height(row, column - 1)) /
+						(2 * source.tileSize);
 			const dz =
-				-(height(north, column) - height(south, column)) /
-				((north - south) * source.tileSize);
+				row === 0 || row === side - 1
+					? 0
+					: -(height(row + 1, column) - height(row - 1, column)) /
+						(2 * source.tileSize);
 			const length = Math.hypot(dx, 1, dz);
 			const sample = source.terrainSamples[row * side + column];
 			if (sample === undefined) {

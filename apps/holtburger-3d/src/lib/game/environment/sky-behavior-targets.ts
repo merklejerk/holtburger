@@ -1,11 +1,16 @@
 import {
 	acVector3,
 	acVectorToRender,
+	renderQuaternionFromAcRotation,
 	sceneVector3,
 } from "../../assets/ac-frame";
 import { behaviorTargetId } from "../behavior/behavior-event-router";
 import { skyObjectOrigin } from "./sky-state";
-import type { AcRotation, SceneVector3 } from "../../assets/ac-frame";
+import type {
+	AcRotation,
+	ResolvedFrameRotation,
+	SceneVector3,
+} from "../../assets/ac-frame";
 import type { BehaviorTargetId } from "../behavior/behavior-event-router";
 import type { SkyPlacement } from "./sky-state";
 
@@ -32,8 +37,8 @@ export const SKY_OBJECT_ONLY_PART_INDEX = 0;
 export interface SkyBehaviorTarget {
 	/** Current scene-frame origin, recomputed per read from the live camera. */
 	readonly originOf: () => SceneVector3;
-	/** Current orientation in AC's authored axes, from the object's `CalcFrame` pose. */
-	readonly rotationOf: () => AcRotation;
+	/** Current `CalcFrame` orientation paired in AC-authored and render-space representations. */
+	readonly rotationOf: () => ResolvedFrameRotation;
 }
 
 /**
@@ -61,7 +66,11 @@ export function createSkyBehaviorTarget(
 	orientation: readonly [number, number, number, number],
 	viewerOrigin: () => SceneVector3,
 ): SkyBehaviorTarget {
-	const rotation = skyOrientationRotation(orientation);
+	const acRotation = skyOrientationRotation(orientation);
+	const rotation: ResolvedFrameRotation = {
+		ac: acRotation,
+		render: renderQuaternionFromAcRotation(acRotation),
+	};
 	return {
 		originOf: () => {
 			const viewer = viewerOrigin();

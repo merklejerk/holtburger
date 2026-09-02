@@ -1,4 +1,8 @@
 import { Mat4, Quat, Vec3 } from "../game/math/types";
+import {
+	quaternionFromRotationMat4,
+	writeQuaternionFromRotationMat4,
+} from "../game/math/matrices";
 
 /** One AC-authored position/orientation frame before render-axis conversion. */
 export interface AcFrame {
@@ -92,6 +96,30 @@ export interface AcRotation {
 	readonly columns: readonly [AcVector3, AcVector3, AcVector3];
 }
 
+/** A normalized quaternion whose axes are the renderer's Y-up axes. */
+export interface RenderQuaternion {
+	readonly w: number;
+	readonly x: number;
+	readonly y: number;
+	readonly z: number;
+}
+
+/** Caller-owned writable storage for a render-axis quaternion. */
+export interface MutableRenderQuaternion {
+	w: number;
+	x: number;
+	y: number;
+	z: number;
+}
+
+/** One resolved rotation carrying the representations required on both sides of particle motion. */
+export interface ResolvedFrameRotation {
+	/** Rotation used by authored-axis trajectory constants. */
+	readonly ac: AcRotation;
+	/** The same rotation used by render-axis mesh geometry. */
+	readonly render: RenderQuaternion;
+}
+
 /** AC's basis vectors, whose images under a render rotation define {@link AcRotation}. */
 const AC_BASIS: readonly [AcVector3, AcVector3, AcVector3] = [
 	acVector3([1, 0, 0]),
@@ -157,6 +185,66 @@ export function rotateAcVector(
 		x[1] * vector[0] + y[1] * vector[1] + z[1] * vector[2],
 		x[2] * vector[0] + y[2] * vector[1] + z[2] * vector[2],
 	]);
+}
+
+/**
+ * Express an AC-axis rotation as the equivalent normalized render-axis quaternion.
+ *
+ * Particle trajectories need {@link AcRotation}, while authored particle meshes need the same
+ * frame on the GPU in render axes. Deriving both from this one resolved rotation keeps scale out of
+ * either representation and prevents the two consumers from inventing separate axis conversions.
+ */
+export function renderQuaternionFromAcRotation(
+	rotation: AcRotation,
+): RenderQuaternion {
+	const [acX, acY, acZ] = rotation.columns;
+	const x = acVectorToRender(acX);
+	const convertedY = acVectorToRender(acZ);
+	const convertedNegativeZ = acVectorToRender(acY);
+	const y = convertedY;
+	const z = renderVector3([
+		-convertedNegativeZ[0],
+		-convertedNegativeZ[1],
+		-convertedNegativeZ[2],
+	]);
+	return quaternionFromRotationMat4(
+		new Mat4(
+			x[0],
+			x[1],
+			x[2],
+			0,
+			y[0],
+			y[1],
+			y[2],
+			0,
+			z[0],
+			z[1],
+			z[2],
+			0,
+			0,
+			0,
+			0,
+			1,
+		),
+	);
+}
+
+/** Resolve one render transform into the paired AC/render rotation contract. */
+export function resolvedFrameRotationFromRenderTransform(
+	transform: Mat4,
+): ResolvedFrameRotation {
+	return {
+		ac: acRotationFromRenderTransform(transform),
+		render: quaternionFromRotationMat4(transform),
+	};
+}
+
+/** Write only a transform's render rotation into caller-owned storage without allocating. */
+export function writeRenderQuaternionFromRenderTransform(
+	transform: Mat4,
+	target: MutableRenderQuaternion,
+): void {
+	writeQuaternionFromRotationMat4(transform, target);
 }
 
 /**

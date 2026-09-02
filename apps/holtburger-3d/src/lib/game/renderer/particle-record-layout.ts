@@ -1,6 +1,7 @@
 import type {
 	AcVector3,
 	LandblockVector3,
+	RenderQuaternion,
 	SceneVector3,
 } from "../../assets/ac-frame";
 /**
@@ -11,8 +12,6 @@ import type {
  * record is written once when its particle is born and read every frame after, and no per-frame
  * work scales with the live particle count.
  *
- * Attribute locations 3-8 of `webgl2-particle-program.ts`, in order:
- *
  * | Offset | Texel | Contents                                                      |
  * | -----: | ----: | ------------------------------------------------------------- |
  * |      0 |     0 | landblock-local spawn origin xyz, birth time                   |
@@ -21,16 +20,16 @@ import type {
  * |     12 |     3 | `b.yz`, `c.xy`                                                 |
  * |     16 |     4 | `c.z`, start/final scale, start translucency                   |
  * |     20 |     5 | final translucency, landblock scene origin xyz                 |
+ * |     24 |     6 | frozen render-frame quaternion `[w, x, y, z]`                  |
  */
-export const PARTICLE_INSTANCE_FLOAT_COUNT = 24;
+export const PARTICLE_INSTANCE_FLOAT_COUNT = 28;
 
 /**
  * Texels one record occupies in the record data texture.
  *
- * The record is padded up to whole RGBA texels so the vertex stage reads a fixed count per
- * particle; the spare lane in the final texel is reserved, not packed against.
+ * The record occupies whole RGBA texels so the vertex stage reads a fixed count per particle.
  */
-export const PARTICLE_RECORD_TEXELS = 6;
+export const PARTICLE_RECORD_TEXELS = 7;
 
 /**
  * Float offset of `birthTime` within a record.
@@ -87,6 +86,8 @@ export interface ParticleInstanceRecord {
 	readonly finalScale: number;
 	readonly startTranslucency: number;
 	readonly finalTranslucency: number;
+	/** Authored mesh frame frozen at spawn, in normalized render-axis quaternion form. */
+	readonly rotation: RenderQuaternion;
 }
 
 /**
@@ -135,6 +136,10 @@ export function writeParticleRecord(
 	target[floatOffset + 21] = record.landblockOrigin[0];
 	target[floatOffset + 22] = record.landblockOrigin[1];
 	target[floatOffset + 23] = record.landblockOrigin[2];
+	target[floatOffset + 24] = record.rotation.w;
+	target[floatOffset + 25] = record.rotation.x;
+	target[floatOffset + 26] = record.rotation.y;
+	target[floatOffset + 27] = record.rotation.z;
 
 	return floatOffset + PARTICLE_INSTANCE_FLOAT_COUNT;
 }

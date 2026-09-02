@@ -277,7 +277,7 @@ export class WebGL2ParticlePass {
 			const blend = objectBlendPolicy(geometry.rawSurfaceFlags);
 			state.applyBlend(blend);
 			state.applyVertexArray(geometry.vertexArray);
-			// One uniform selects this range's records, where binding six attribute pointers to the
+			// One uniform selects this range's records, where binding seven attribute pointers to the
 			// same range would cost about twenty GL calls.
 			gl.uniform1i(program.uniforms.instanceBase, batch.baseSlot);
 			if (routing) {
@@ -299,21 +299,28 @@ export class WebGL2ParticlePass {
 			// Motion type and orientation are per-batch constants, never per-instance attributes.
 			state.applyUniform1i(program.uniforms.motionType, batch.motionType);
 			state.applyUniform1i(
-				program.uniforms.usesRangeOrigin,
-				batch.origin.kind === "range" ? 1 : 0,
+				program.uniforms.usesRangeFrame,
+				batch.frame.kind === "range" ? 1 : 0,
 			);
-			if (batch.origin.kind === "range") {
+			if (batch.frame.kind === "range") {
 				state.applyUniform3f(
 					program.uniforms.rangeLandblockOrigin,
-					batch.origin.landblockOrigin[0],
-					batch.origin.landblockOrigin[1],
-					batch.origin.landblockOrigin[2],
+					batch.frame.landblockOrigin[0],
+					batch.frame.landblockOrigin[1],
+					batch.frame.landblockOrigin[2],
 				);
 				state.applyUniform3f(
 					program.uniforms.rangeLocalOrigin,
-					batch.origin.localOrigin[0],
-					batch.origin.localOrigin[1],
-					batch.origin.localOrigin[2],
+					batch.frame.localOrigin[0],
+					batch.frame.localOrigin[1],
+					batch.frame.localOrigin[2],
+				);
+				state.applyUniform4f(
+					program.uniforms.rangeRotation,
+					batch.frame.rotation.w,
+					batch.frame.rotation.x,
+					batch.frame.rotation.y,
+					batch.frame.rotation.z,
 				);
 			}
 			state.applyUniform1i(program.uniforms.orientation, geometry.orientation);

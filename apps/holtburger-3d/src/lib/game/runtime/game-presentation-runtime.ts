@@ -1,10 +1,12 @@
 import { createLandblockWorldOrigin } from "../landblocks";
 import {
-	acRotationFromRenderTransform,
 	renderVector3,
+	resolvedFrameRotationFromRenderTransform,
 	sceneVec3,
 	sceneVector3,
-	type AcRotation,
+	writeRenderQuaternionFromRenderTransform,
+	type MutableRenderQuaternion,
+	type ResolvedFrameRotation,
 	type SceneVector3,
 } from "../../assets/ac-frame";
 import type { TexturePixelSource } from "../../assets/texture-pixel-source";
@@ -770,15 +772,15 @@ export class GamePresentationRuntime {
 	}
 
 	/**
-	 * Current rotation of a target's frame, in AC's authored axes.
+	 * Current rotation of a target's frame in the paired AC/render particle contract.
 	 *
 	 * Read from the same resolved placement as {@link GamePresentationRuntime.#sceneOriginOf}, so it reflects
 	 * whatever a script has rotated the owner to rather than its authored pose.
 	 */
-	#sceneRotationOf(nodeId: SceneNodeId): AcRotation | null {
+	#sceneRotationOf(nodeId: SceneNodeId): ResolvedFrameRotation | null {
 		const placement = this.#scene.getResolvedPlacement(nodeId);
 		if (!placement) return null;
-		return acRotationFromRenderTransform(placement.localToLandblock);
+		return resolvedFrameRotationFromRenderTransform(placement.localToLandblock);
 	}
 
 	/**
@@ -810,11 +812,36 @@ export class GamePresentationRuntime {
 		return nodeId !== null && this.#scene.hasNode(nodeId);
 	}
 
-	#rotationOf(target: BehaviorTarget): AcRotation | null {
+	#rotationOf(target: BehaviorTarget): ResolvedFrameRotation | null {
 		const sky = this.#skyTargets.get(target.targetId);
 		if (sky) return sky.rotationOf();
 		const nodeId = sceneNodeIdOf(target.targetId);
 		return nodeId === null ? null : this.#sceneRotationOf(nodeId);
+	}
+
+	/** Write one target's render rotation without allocating an AC-axis trajectory representation. */
+	#writeRenderRotationOf(
+		target: BehaviorTarget,
+		output: MutableRenderQuaternion,
+	): boolean {
+		const sky = this.#skyTargets.get(target.targetId);
+		if (sky) {
+			const rotation = sky.rotationOf().render;
+			output.w = rotation.w;
+			output.x = rotation.x;
+			output.y = rotation.y;
+			output.z = rotation.z;
+			return true;
+		}
+		const nodeId = sceneNodeIdOf(target.targetId);
+		if (nodeId === null) return false;
+		const placement = this.#scene.getResolvedPlacement(nodeId);
+		if (!placement) return false;
+		writeRenderQuaternionFromRenderTransform(
+			placement.localToLandblock,
+			output,
+		);
+		return true;
 	}
 
 	/**
@@ -1162,6 +1189,8 @@ export class GamePresentationRuntime {
 			sceneOriginOf: (target) => this.#originOf(target),
 			targetLives: (target) => this.#targetLives(target),
 			sceneRotationOf: (target) => this.#rotationOf(target),
+			writeSceneRenderRotationOf: (target, output) =>
+				this.#writeRenderRotationOf(target, output),
 			// A part-attached emitter is positioned by its part's node, which the dynamics system owns.
 			// The generation is carried through unchanged: the part belongs to the same activation, so
 			// a command that has outlived its owner must still be rejected.

@@ -5,7 +5,10 @@ import {
 	acVector3,
 	acVectorToRender,
 	renderVectorToAc,
+	renderQuaternionFromAcRotation,
+	resolvedFrameRotationFromRenderTransform,
 	rotateAcVector,
+	writeRenderQuaternionFromRenderTransform,
 } from "./ac-frame";
 
 const HALF_SQRT2 = Math.SQRT1_2;
@@ -106,5 +109,58 @@ describe("rotateAcVector", () => {
 			acVector3([0, 0, 7]),
 		);
 		expectAcVector(rotated, [0, 0, 7]);
+	});
+});
+
+describe("renderQuaternionFromAcRotation", () => {
+	it("returns render identity for an unrotated AC frame", () => {
+		expect(
+			renderQuaternionFromAcRotation(acRotationForYaw(0, [1, 1, 1])),
+		).toMatchObject({ w: 1, x: 0, y: 0, z: 0 });
+	});
+
+	it("converts AC yaw into rotation about render up", () => {
+		const rotation = renderQuaternionFromAcRotation(
+			acRotationForYaw(Math.PI / 2, [1, 1, 1]),
+		);
+		expect(rotation.w).toBeCloseTo(HALF_SQRT2, 10);
+		expect(rotation.x).toBeCloseTo(0, 10);
+		expect(rotation.y).toBeCloseTo(HALF_SQRT2, 10);
+		expect(rotation.z).toBeCloseTo(0, 10);
+	});
+});
+
+describe("resolved render rotation", () => {
+	it("publishes matching AC and render representations after removing scale", () => {
+		const resolved = resolvedFrameRotationFromRenderTransform(
+			acFrameTransform(
+				{
+					origin: [0, 0, 0],
+					orientation: yawAboutAcUp(Math.PI / 2),
+				},
+				[2, 3, 4],
+			),
+		);
+		expectAcVector(resolved.ac.columns[0], [0, 1, 0]);
+		expect(resolved.render.w).toBeCloseTo(HALF_SQRT2, 10);
+		expect(resolved.render.y).toBeCloseTo(HALF_SQRT2, 10);
+	});
+
+	it("writes a scale-free render quaternion into caller-owned storage", () => {
+		const transform = acFrameTransform(
+			{
+				origin: [0, 0, 0],
+				orientation: yawAboutAcUp(Math.PI / 2),
+			},
+			[2, 3, 4],
+		);
+		const output = { w: 0, x: 0, y: 0, z: 0 };
+
+		writeRenderQuaternionFromRenderTransform(transform, output);
+
+		expect(output.w).toBeCloseTo(HALF_SQRT2, 10);
+		expect(output.x).toBeCloseTo(0, 10);
+		expect(output.y).toBeCloseTo(HALF_SQRT2, 10);
+		expect(output.z).toBeCloseTo(0, 10);
 	});
 });

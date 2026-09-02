@@ -17,6 +17,12 @@ import type { MapEnvironment } from "./map-view";
  */
 const MAP_TUNING = SHARED_FRONTEND_TUNING.map;
 
+/** Player travel after which a detached map resumes following automatically. */
+export const MAP_AUTOMATIC_REANCHOR_DISTANCE_METERS = positiveFinite(
+	"map.navigation.automaticReanchorDistanceMeters",
+	MAP_TUNING.navigation.automaticReanchorDistanceMeters,
+);
+
 /** One authored colour as a GL uniform payload. */
 function colorVector(color: HexRgbColor): Float32Array {
 	const channels = normalizedRgbColor(color);
@@ -129,6 +135,14 @@ function unitInterval(name: string, value: number): number {
 		throw new Error(
 			`${name} must be finite and within [0, 1]; received ${value}.`,
 		);
+	}
+	return value;
+}
+
+/** Validate a hand-authored positive tuning value once when the map adapter is initialized. */
+function positiveFinite(name: string, value: number): number {
+	if (!Number.isFinite(value) || value <= 0) {
+		throw new Error(`${name} must be finite and positive; received ${value}.`);
 	}
 	return value;
 }

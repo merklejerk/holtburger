@@ -95,6 +95,16 @@ export const SHARED_FRONTEND_TUNING = {
 		 * Retail constants the map obeys are deliberately absent: the walkable-slope threshold
 		 * lives in `game/walkability.ts` because it is a fact about the ground, not a preference.
 		 */
+		navigation: {
+			/**
+			 * Subject displacement after panning before the map resumes following, in metres.
+			 *
+			 * Distance makes the policy independent of input device and ignores turning in place. The
+			 * threshold is intentionally much smaller than the default outdoor view while still leaving
+			 * enough room to inspect nearby ground without an incidental step cancelling the pan.
+			 */
+			automaticReanchorDistanceMeters: 8,
+		},
 		hillshade: {
 			/**
 			 * Direction toward the relief light, in scene axes (+x east, +y up, -z north).

@@ -3,8 +3,8 @@ import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
 import { Mat4 } from "../math/types";
 import type { DynamicEntityView } from "../runtime/dynamic-entity-feed";
 import type { ScenePlacement } from "../scene";
-import { type MapEntity, selectMapBlips } from "./map-blips";
-import type { MapViewParameters } from "./map-view";
+import { type MapBlip, type MapEntity, selectMapBlips } from "./map-blips";
+import { type MapViewParameters, projectMapView } from "./map-view";
 
 /** Landblock (1, 1): world origin x = 192, z = -192. */
 const LANDBLOCK = "0x0101ffff";
@@ -59,63 +59,69 @@ function view(): MapViewParameters {
 			worldY: 0,
 			worldZ: -OUTDOOR_LANDBLOCK_WORLD_SIZE,
 		},
+		center: {
+			worldX: OUTDOOR_LANDBLOCK_WORLD_SIZE,
+			worldZ: -OUTDOOR_LANDBLOCK_WORLD_SIZE,
+		},
 		viewDiameter: OUTDOOR_LANDBLOCK_WORLD_SIZE,
 	};
+}
+
+function blips(
+	entities: Iterable<MapEntity>,
+	parameters: MapViewParameters,
+	controlledEntityGuid: number | null,
+): readonly MapBlip[] {
+	return selectMapBlips(
+		entities,
+		projectMapView(parameters, 256, 256),
+		controlledEntityGuid,
+	);
 }
 
 describe("selectMapBlips", () => {
 	it("places an entity from its live scene placement", () => {
 		// Half a radius east and half a radius north of the landblock origin; north is -Z, so the
 		// blip lands up and to the right.
-		const blips = selectMapBlips(
-			[entity({ localX: 96, localZ: -96 })],
-			view(),
-			256,
-			256,
-			null,
-		);
+		const selected = blips([entity({ localX: 96, localZ: -96 })], view(), null);
 
-		expect(blips).toHaveLength(1);
-		expect(blips[0]?.clipX).toBeCloseTo(1);
-		expect(blips[0]?.clipY).toBeCloseTo(1);
-		expect(blips[0]?.appearance).toEqual({
+		expect(selected).toHaveLength(1);
+		expect(selected[0]?.clipX).toBeCloseTo(1);
+		expect(selected[0]?.clipY).toBeCloseTo(1);
+		expect(selected[0]?.appearance).toEqual({
 			category: "mob",
 			heightOffsetMeters: 0,
 		});
 	});
 
 	it("retains entity height relative to the map anchor", () => {
-		const blips = selectMapBlips(
+		const selected = blips(
 			[entity({ localY: 18 })],
 			{
 				...view(),
 				anchor: { ...view().anchor, worldY: 5 },
 			},
-			256,
-			256,
 			null,
 		);
 
-		expect(blips[0]?.appearance).toEqual({
+		expect(selected[0]?.appearance).toEqual({
 			category: "mob",
 			heightOffsetMeters: 13,
 		});
 	});
 
 	it("distinguishes semantic categories that share one authored radar color", () => {
-		const blips = selectMapBlips(
+		const selected = blips(
 			[
 				entity({ guid: 1, mapCategory: "player" }),
 				entity({ guid: 2, mapCategory: "npc" }),
 				entity({ guid: 3, mapCategory: "lifestone" }),
 			],
 			view(),
-			256,
-			256,
 			null,
 		);
 
-		expect(blips.map((blip) => blip.appearance.category)).toEqual([
+		expect(selected.map((blip) => blip.appearance.category)).toEqual([
 			"player",
 			"npc",
 			"lifestone",
@@ -125,15 +131,15 @@ describe("selectMapBlips", () => {
 	it("marks the controlled entity with its screen-relative heading", () => {
 		const controlled = entity({ behavior: "ShowNever", hidden: true });
 
-		const blips = selectMapBlips([controlled], view(), 256, 256, 1);
+		const selected = blips([controlled], view(), 1);
 
-		expect(blips).toHaveLength(1);
-		expect(blips[0]).toMatchObject({
+		expect(selected).toHaveLength(1);
+		expect(selected[0]).toMatchObject({
 			appearance: { category: "controlled" },
 			guid: 1,
 			name: "Drudge",
 		});
-		const appearance = blips[0]?.appearance;
+		const appearance = selected[0]?.appearance;
 		expect(appearance?.category).toBe("controlled");
 		if (appearance?.category === "controlled") {
 			expect(appearance.headingRadians).toBeCloseTo(0);
@@ -143,30 +149,22 @@ describe("selectMapBlips", () => {
 	it.each(["ShowMovement", "ShowAttacking", "ShowAlways"] as const)(
 		"honours retail's unconditional %s radar behaviour",
 		(behavior) => {
-			expect(
-				selectMapBlips([entity({ behavior })], view(), 256, 256, null),
-			).toHaveLength(1);
+			expect(blips([entity({ behavior })], view(), null)).toHaveLength(1);
 		},
 	);
 
 	it.each([null, "ShowNever"] as const)(
 		"hides retail radar behaviour %s",
 		(behavior) => {
-			expect(
-				selectMapBlips([entity({ behavior })], view(), 256, 256, null),
-			).toHaveLength(0);
+			expect(blips([entity({ behavior })], view(), null)).toHaveLength(0);
 		},
 	);
 
 	it("skips hidden entities", () => {
-		expect(
-			selectMapBlips([entity({ hidden: true })], view(), 256, 256, null),
-		).toHaveLength(0);
+		expect(blips([entity({ hidden: true })], view(), null)).toHaveLength(0);
 	});
 
 	it("drops entities outside the visible extent", () => {
-		expect(
-			selectMapBlips([entity({ localX: 500 })], view(), 256, 256, null),
-		).toHaveLength(0);
+		expect(blips([entity({ localX: 500 })], view(), null)).toHaveLength(0);
 	});
 });

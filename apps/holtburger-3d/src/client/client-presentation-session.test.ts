@@ -245,7 +245,6 @@ describe("ClientPresentationSession", () => {
 				guid: playerGuid,
 				kind: "controlled-entity",
 			},
-			presentedEntityRevision: 0,
 			source: runtime,
 		});
 		expect(presentation.readDiagnostics()).toMatchObject({

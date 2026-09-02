@@ -1,10 +1,10 @@
 import { createLandblockWorldOrigin } from "../landblocks";
 import type { DynamicEntityView } from "../runtime/dynamic-entity-feed";
 import type { ScenePlacement } from "../scene";
+import type { DynamicEntityMapBlipCategory } from "./map-blip-category";
 import {
-	type MapViewParameters,
-	computeMapWorldToClip,
 	mapHeadingFromSceneTransform,
+	type ProjectedMapView,
 	projectMapWorldPoint,
 } from "./map-view";
 
@@ -37,16 +37,16 @@ export interface MapBlip {
 	/** Marker treatment, including the controlled entity's screen-relative facing. */
 	readonly appearance:
 		| {
-				/** Selects the directional marker reserved for the user-driven entity. */
-				readonly kind: "controlled";
+				/** Selects the directional marker and its frontend-authored color. */
+				readonly category: "controlled";
 				/** Facing relative to the map anchor, clockwise from screen-up. */
 				readonly headingRadians: number;
 		  }
 		| {
-				/** Selects the ordinary circular marker styled by radar colour. */
-				readonly kind: "radar";
-				/** Effective producer-resolved radar colour. */
-				readonly color: DynamicEntityView["presentation"]["radar"]["blipColor"];
+				/** Producer-resolved class selecting an ordinary circular marker's color. */
+				readonly category: DynamicEntityMapBlipCategory;
+				/** Entity height minus map-anchor height in world metres. */
+				readonly heightOffsetMeters: number;
 		  };
 }
 
@@ -66,12 +66,10 @@ export interface MapBlip {
  */
 export function selectMapBlips(
 	entities: Iterable<MapEntity>,
-	view: MapViewParameters,
-	canvasWidth: number,
-	canvasHeight: number,
+	projection: ProjectedMapView,
 	controlledEntityGuid: number | null,
 ): readonly MapBlip[] {
-	const worldToClip = computeMapWorldToClip(view, canvasWidth, canvasHeight);
+	const { view, worldToClip } = projection;
 	const blips: MapBlip[] = [];
 	for (const { view: entity, placement } of entities) {
 		const controlled = entity.identity.guid === controlledEntityGuid;
@@ -100,14 +98,25 @@ export function selectMapBlips(
 		);
 		if (Math.abs(clipX) > 1 || Math.abs(clipY) > 1) continue;
 		blips.push({
+			// RETAIL DIVERGENCE: retail selects marker fill from the effective RadarColor
+			// (acclient.c:252944-253079). We use the producer-resolved semantic category so players,
+			// NPCs, mobs, portals, and lifestones retain stable frontend-tunable identities instead
+			// of inheriting an arbitrary authored palette entry. Restoring retail would make members
+			// of one class vary and can collapse unrelated classes onto one color. The shipped-catalog
+			// census found 8,739 of 10,883 radar-visible templates omit an explicit color and therefore
+			// use retail's category fallback; the remaining 2,144 author colors that this map ignores.
 			appearance: controlled
 				? {
-						kind: "controlled",
+						category: "controlled",
 						headingRadians:
 							mapHeadingFromSceneTransform(placement.localTransform) -
 							view.anchor.headingRadians,
 					}
-				: { kind: "radar", color: entity.presentation.radar.blipColor },
+				: {
+						category: entity.presentation.radar.category,
+						heightOffsetMeters:
+							placement.localTransform.m42 - view.anchor.worldY,
+					},
 			clipX,
 			clipY,
 			guid: entity.identity.guid,

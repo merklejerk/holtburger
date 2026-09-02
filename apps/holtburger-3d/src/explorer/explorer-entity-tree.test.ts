@@ -90,7 +90,11 @@ function base(guid: number): Omit<DynamicEntityView, "placement"> {
 				partChanges: [],
 			},
 			objectScale: 1,
-			radar: { blipColor: "Default", behavior: null, obviousRange: null },
+			radar: {
+				behavior: null,
+				category: "other",
+				obviousRange: null,
+			},
 		},
 		physics: {
 			semanticMask: 0,

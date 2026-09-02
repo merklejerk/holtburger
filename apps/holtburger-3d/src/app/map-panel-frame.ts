@@ -1,6 +1,10 @@
 import type { MapEntity } from "../lib/game/map/map-blips";
 import type { MapTerrainSource } from "../lib/game/map/map-renderer";
-import { type MapAnchor, mapEnvironment } from "../lib/game/map/map-view";
+import {
+	type MapAnchor,
+	mapEnvironment,
+	type MapViewParameters,
+} from "../lib/game/map/map-view";
 
 /** Smallest usable compass diameter when the containing viewport has enough room. */
 export const MAP_PANEL_MINIMUM_SIZE = 140;
@@ -13,20 +17,20 @@ interface MapPanelViewDiameters {
 	readonly outdoor: number;
 }
 
-/** The map's centre and whether it represents a user-controlled entity or a free camera. */
-type MapPanelSubject =
+/** Subject the map follows and whether it represents a controlled entity or a free camera. */
+export type MapPanelSubject =
 	| {
 			/** Distinguishes a player or possessed explorer entity from a free camera. */
 			readonly kind: "controlled-entity";
 			/** Entity whose live placement produced the anchor. */
 			readonly guid: number;
-			/** Live map centre and facing derived from the controlled entity. */
+			/** Live position and facing derived from the controlled entity. */
 			readonly anchor: MapAnchor;
 	  }
 	| {
 			/** Distinguishes explorer navigation without a possessed entity. */
 			readonly kind: "free-camera";
-			/** Live map centre and facing derived from the free camera. */
+			/** Live position and facing derived from the free camera. */
 			readonly anchor: MapAnchor;
 	  };
 
@@ -42,10 +46,8 @@ export interface MapPanelState {
 export interface MapPanelFrame {
 	/** Null until the runtime is ready; the map remains blank meanwhile. */
 	readonly source: MapTerrainSource | null;
-	/** Null until there is a coherent position and ownership for the map's centre. */
+	/** Null until there is a coherent subject position and ownership. */
 	readonly subject: MapPanelSubject | null;
-	/** Monotonic owner-produced fact covering live entity placement changes. */
-	readonly presentedEntityRevision: number;
 	readonly presentedEntities: () => Iterable<MapEntity>;
 	/** Camera field of view in radians, drawn as the view cone. */
 	readonly cameraFovRadians: number;
@@ -58,8 +60,22 @@ export interface MapPanelGpuDrawState {
 	readonly source: MapTerrainSource | null;
 	readonly terrainRevision: number;
 	readonly geometryRevision: number;
-	readonly anchor: MapAnchor | null;
+	/** Renderer-consumed projection of the current map view. */
+	readonly view: MapPanelGpuViewState | null;
 	readonly panelSize: number;
+}
+
+/** Exact map-view facts whose changes invalidate the WebGL terrain and surface picture. */
+interface MapPanelGpuViewState {
+	/** Subject bearing that rotates the map. */
+	readonly anchorHeadingRadians: number;
+	/** Subject height driving terrain contours and interior floor treatment. */
+	readonly anchorHeight: number;
+	/** Subject residency selecting outdoor terrain or one interior component. */
+	readonly anchorResidency: MapAnchor["residency"];
+	/** World-space horizontal point drawn at the map centre. */
+	readonly center: MapViewParameters["center"];
+	/** World-space diameter visible across the map disc. */
 	readonly viewDiameter: number;
 }
 
@@ -67,14 +83,23 @@ export interface MapPanelGpuDrawState {
 export function captureMapPanelGpuDrawState(
 	frame: MapPanelFrame,
 	panel: MapPanelState,
+	view: MapViewParameters | null,
 ): MapPanelGpuDrawState {
 	return {
-		anchor: frame.subject?.anchor ?? null,
 		geometryRevision: frame.source?.mapGeometry.revision ?? -1,
 		panelSize: panel.size,
 		source: frame.source,
 		terrainRevision: frame.source?.terrainInstallationRevision ?? -1,
-		viewDiameter: mapPanelViewDiameter(panel, frame.subject?.anchor ?? null),
+		view:
+			view === null
+				? null
+				: {
+						anchorHeadingRadians: view.anchor.headingRadians,
+						anchorHeight: view.anchor.worldY,
+						anchorResidency: view.anchor.residency,
+						center: view.center,
+						viewDiameter: view.viewDiameter,
+					},
 	};
 }
 
@@ -97,19 +122,22 @@ export function sameMapPanelGpuDrawState(
 		left.terrainRevision === right.terrainRevision &&
 		left.geometryRevision === right.geometryRevision &&
 		left.panelSize === right.panelSize &&
-		left.viewDiameter === right.viewDiameter &&
-		sameAnchor(left.anchor, right.anchor)
+		sameGpuView(left.view, right.view)
 	);
 }
 
-function sameAnchor(left: MapAnchor | null, right: MapAnchor | null): boolean {
+function sameGpuView(
+	left: MapPanelGpuViewState | null,
+	right: MapPanelGpuViewState | null,
+): boolean {
 	if (left === null || right === null) return left === right;
 	return (
-		left.worldX === right.worldX &&
-		left.worldY === right.worldY &&
-		left.worldZ === right.worldZ &&
-		left.headingRadians === right.headingRadians &&
-		left.residency?.landblockId === right.residency?.landblockId &&
-		left.residency?.envCellId === right.residency?.envCellId
+		left.center.worldX === right.center.worldX &&
+		left.center.worldZ === right.center.worldZ &&
+		left.viewDiameter === right.viewDiameter &&
+		left.anchorHeight === right.anchorHeight &&
+		left.anchorHeadingRadians === right.anchorHeadingRadians &&
+		left.anchorResidency?.landblockId === right.anchorResidency?.landblockId &&
+		left.anchorResidency?.envCellId === right.anchorResidency?.envCellId
 	);
 }

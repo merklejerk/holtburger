@@ -296,7 +296,6 @@
 			cameraFovRadians: (EXPLORER_TUNING.camera.framing.fov * Math.PI) / 180,
 			cameraHeadingRadians: cameraYawRadians,
 			presentedEntities: readPresentedMapEntities,
-			presentedEntityRevision: runtime?.dynamicEntityPlacementRevision ?? 0,
 			source: runtime,
 			subject:
 				controlledGuid !== null && controlledAnchor !== null

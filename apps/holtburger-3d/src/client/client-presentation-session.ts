@@ -376,8 +376,6 @@ export class ClientPresentationSession {
 			cameraHeadingRadians: this.camera.desiredLook().yawRadians,
 			presentedEntities: () =>
 				owner?.runtime.listPresentedSpawnedEntities() ?? [],
-			presentedEntityRevision:
-				owner?.runtime.dynamicEntityPlacementRevision ?? 0,
 			source: owner?.runtime ?? null,
 			subject:
 				placement === null || playerGuid === null

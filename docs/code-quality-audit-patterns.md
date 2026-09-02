@@ -1305,6 +1305,205 @@ consumer with an independent reference evaluator, use a deterministic runtime or
 and retain lower-level packing tests for precise fault localization rather than treating them as
 behavioral proof.
 
+## A Contract Depends on Its Implementation
+
+**Smell:** A shared configuration, schema, or domain contract imports a type from the concrete
+component that happens to consume it.
+
+**Signals:**
+
+- A policy or configuration module imports from a renderer, controller, handler, or feature entry
+  point solely to name a value's shape.
+- Reusing the contract pulls an implementation-oriented module into otherwise independent code.
+- Moving or replacing one consumer requires edits to a supposedly shared vocabulary.
+- Dependency cycles are avoided only because the import is erased at compile time.
+
+**Possible failure:** Ownership becomes inverted, implementation refactors churn unrelated contracts,
+and later runtime imports can turn a conceptual cycle into an actual initialization defect.
+
+**Questions:** Which layer owns the vocabulary independent of its current consumer? Is the imported
+type truly implementation-specific, or is it a misplaced domain contract? Would extracting it
+create a meaningful boundary or merely another indirection?
+
+**Counterexamples:** A component-local configuration used by exactly that component should remain
+colocated, and type-only imports can be a pragmatic choice when no broader ownership exists.
+
+**Possible responses:** Move the smallest shared vocabulary to a neutral owner, have both the
+contract and implementation depend on it, or keep the type local until a second independent
+consumer proves the boundary.
+
+## A Serialized Vocabulary Is Hand-Copied Across Boundaries
+
+**Smell:** Two languages, processes, services, or storage layers independently declare the same
+closed vocabulary without one generated artifact or compatibility check owning the relationship.
+
+**Signals:**
+
+- Adding an enum member requires matching edits in producer and consumer source trees.
+- Each side compiles independently even when serialized names, casing, or membership differ.
+- Unit tests prove local parsing or serialization but never exchange every supported member across
+  the real boundary.
+- Deployment order can expose a newer producer to an older consumer that rejects an otherwise valid
+  value.
+
+**Possible failure:** Valid messages fail only at runtime, unknown values silently select a fallback,
+or rolling deployments become order-dependent. Local exhaustiveness checks create confidence while
+the actual wire contract drifts.
+
+**Questions:** Which artifact owns the vocabulary? Can either side change independently? Is unknown
+input rejected, preserved, or degraded? What compatibility window must deployment support?
+
+**Counterexamples:** Independently implemented protocol stacks may deliberately duplicate a stable,
+externally governed specification; their independence can provide useful conformance evidence when
+cross-boundary fixtures test every member.
+
+**Possible responses:** Generate both declarations from one schema, generate one side from the
+other's published contract, add an exhaustive producer-consumer compatibility fixture, or version
+the vocabulary with an explicit unknown-value policy.
+
+## Meaning Is Encoded by Parallel Position
+
+**Smell:** Tests or production logic associate values by array position when each value already has
+a stable domain key.
+
+**Signals:**
+
+- Expected Boolean or scalar arrays correspond implicitly to a separately declared enum or item
+  list.
+- Inserting or reordering one category shifts the meaning of every later expected value.
+- Failure output reports an index rather than the entity, category, phase, or field that disagreed.
+- Reviewers must count positions to establish which behavior an assertion covers.
+
+**Possible failure:** Reordering creates false regressions, aligned mistakes pass together, and a
+new member receives the behavior intended for a neighbor without an informative failure.
+
+**Questions:** Is order itself part of the contract, or merely iteration mechanics? Does every
+position have a unique stable identity? Would keyed output make omissions visible?
+
+**Counterexamples:** Numeric vectors, matrices, protocol tuples, and ranked sequences legitimately
+derive meaning from position when order is the domain contract.
+
+**Possible responses:** Assert a record or map keyed by semantic identity, compare named cases, or
+represent intentional positional meaning with a domain type that documents and validates its
+layout.
+
+## A Field Travels Without a Behavioral Consumer
+
+**Smell:** A derived view, message, or intermediate contract carries a field that no production
+decision reads after validation or transport.
+
+**Signals:**
+
+- Repository search finds the field only in producers, schemas, fixtures, and equality tests.
+- A former consumer was removed or switched to a different discriminator, but its old input remains.
+- Producers perform fallback, normalization, or enrichment work solely to populate the unused field.
+- Adding the field to fixtures creates broad mechanical churn without exercising behavior.
+
+**Possible failure:** Dead payload obscures the real contract, preserves obsolete policy in the
+wrong layer, and makes future changes appear more coupled than they are. Tests can keep the field
+alive indefinitely while proving only that unused data survives transit.
+
+**Questions:** Which named production decision reads this field? Is it authoritative source data or
+a derived projection? Would removing it lose information at its owning boundary, or only stop
+forwarding information no current consumer requested?
+
+**Counterexamples:** Protocol decoders, authoritative stores, audit logs, and lossless interchange
+formats may intentionally retain fields for fidelity even without a current application consumer.
+That retention should stop at the lossless boundary rather than automatically propagating into
+every derived view.
+
+**Possible responses:** Delete the field from derived contracts and fixtures, remove producer-only
+computation with it, retain raw data at its authoritative owner, or add the concrete consumer whose
+requirement justifies carrying it.
+
+## A Convenience Effect Hides Per-Item Pipeline Work
+
+**Smell:** A high-level rendering or transformation effect is invoked independently for every item
+in a hot loop even though equivalent arithmetic could be folded into the item's existing inputs.
+
+**Signals:**
+
+- Each primitive changes a filter, shadow, mask, blend mode, or other effect with implementation-
+  dependent setup cost.
+- The desired result is a simple channel, coordinate, or scalar transformation.
+- The convenience API may allocate intermediate surfaces or trigger pipeline transitions that are
+  invisible at the call site.
+- Performance depends more on browser, driver, or backend strategy than on the visible operation.
+
+**Possible failure:** A feature that is cheap for a few items scales unpredictably, creates hidden
+temporary work, or becomes disproportionately expensive on one rendering backend.
+
+**Questions:** Can the effect be expressed by changing values already submitted for the primitive?
+Is it applied once to a batch or repeatedly per item? Is the item count tightly bounded and proven?
+
+**Counterexamples:** A batch-wide effect, a genuinely complex transformation, or a small bounded
+diagnostic view may justify the clearer convenience API. Measurement can also prove that a backend
+already folds the operation into its ordinary draw path.
+
+**Possible responses:** Precompute transformed inputs, use direct scalar or channel arithmetic,
+batch items sharing the effect, move the operation into an existing shader, or measure and document
+the bounded convenience path.
+
+## One Value Carries Two Independent Frames of Reference
+
+**Smell:** A single position, time, identity, or context value represents both a subject and the
+view or operation centred on that subject, even though the two can vary independently.
+
+**Signals:**
+
+- A field documented as an anchor is read both for subject-relative policy and viewport projection.
+- Adding pan, replay, prediction, comparison, or offset behavior requires partially overwriting a
+  value whose remaining fields must still describe the original subject.
+- Consumers disagree over whether coordinates name the observed object or the place being viewed.
+- A copied composite changes only one axis or timestamp while retaining unrelated context from its
+  source.
+
+**Possible failure:** Once the two frames diverge, subject-relative decisions use viewport facts or
+viewport placement uses subject facts. The initial centred case masks the mismatch because both
+values happen to be equal.
+
+**Questions:** Which decisions belong to the subject, and which belong to the view or operation?
+Can either move, rotate, advance, or change identity without the other? Is their present equality an
+invariant or merely the default state?
+
+**Counterexamples:** A domain invariant may genuinely require both concepts to coincide, such as a
+transaction timestamp established by one authoritative commit or a local transform whose origin is
+definitionally its owning frame. Encode that relationship so independent variation is impossible.
+
+**Possible responses:** Split subject context from view or operation context, name both in the
+contract, derive their initially equal values once at the owner, and make each consumer read the
+frame whose meaning it actually needs.
+
+## A Boundary Inherits the Content Transform It Must Constrain
+
+**Smell:** A clip, mask, viewport, limit, or other container-owned boundary is attached to content
+that translates, rotates, or scales inside it, causing the boundary to move with the thing it is
+supposed to constrain.
+
+**Signals:**
+
+- A clipping or masking primitive sits on the same transformed node as the visual it clips.
+- Overflow appears only after panning, animation, zooming, or changing the content origin.
+- A coverage length or radius is sufficient only while content happens to start at the container's
+  centre.
+- Fixing one translated pose requires enlarging a local bound without defining when the content is
+  no longer meaningfully inside the container.
+
+**Possible failure:** Content escapes a viewport, a mask exposes pixels outside its intended frame,
+or a supposedly fixed boundary changes apparent size as its child moves. The default centred pose
+can hide the defect indefinitely because the two coordinate spaces initially coincide.
+
+**Questions:** Who owns the boundary: the stationary container or the moving content? In which
+coordinate space is its extent defined? What is the maximum distance from every allowed content
+origin to the boundary, and what should happen once the origin leaves it?
+
+**Counterexamples:** A content-local mask intentionally moves with the content when it describes the
+content's own silhouette, reveal animation, or transformed material rather than a container limit.
+
+**Possible responses:** Put the boundary on an untransformed parent, transform only the constrained
+child, derive coverage from the full set of allowed origins, and explicitly hide or change treatment
+when the origin leaves the container.
+
 ## Adding Observations
 
 An observation belongs here when it has:

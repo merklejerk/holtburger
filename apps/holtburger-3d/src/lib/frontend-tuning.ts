@@ -95,6 +95,16 @@ export const SHARED_FRONTEND_TUNING = {
 		 * Retail constants the map obeys are deliberately absent: the walkable-slope threshold
 		 * lives in `game/walkability.ts` because it is a fact about the ground, not a preference.
 		 */
+		navigation: {
+			/**
+			 * Subject displacement after panning before the map resumes following, in metres.
+			 *
+			 * Distance makes the policy independent of input device and ignores turning in place. The
+			 * threshold is intentionally much smaller than the default outdoor view while still leaving
+			 * enough room to inspect nearby ground without an incidental step cancelling the pan.
+			 */
+			automaticReanchorDistanceMeters: 8,
+		},
 		hillshade: {
 			/**
 			 * Direction toward the relief light, in scene axes (+x east, +y up, -z north).
@@ -270,24 +280,34 @@ export const SHARED_FRONTEND_TUNING = {
 		},
 		blips: {
 			/**
-			 * Marker fill per effective `RadarColor`.
+			 * Marker fill per semantic entity category.
 			 *
-			 * Presentation, not protocol: retail's palette is a client asset, and the map owns its
-			 * styling so a client shell can restyle markers without touching map semantics.
+			 * Presentation, not protocol: the producer resolves map category once, while the map owns
+			 * its styling so a client shell can restyle markers without touching entity semantics.
 			 */
-			colorsByRadarColor: {
-				Default: hexRgb("#d8d8e0"),
-				Blue: hexRgb("#5b8dd6"),
-				Gold: hexRgb("#d6b23f"),
-				White: hexRgb("#f0f0f2"),
-				Purple: hexRgb("#9b6dd6"),
-				Red: hexRgb("#d24b45"),
-				Pink: hexRgb("#dd7fb0"),
-				Green: hexRgb("#4fb256"),
-				Yellow: hexRgb("#e2d24a"),
-				Cyan: hexRgb("#4fc4cc"),
-				BrightGreen: hexRgb("#6fe86f"),
+			fillColors: {
+				/** Other connected players. */
+				player: hexRgba("#38d64fff"),
+				/** Non-player characters and service providers. */
+				npc: hexRgba("#e3b932ff"),
+				/** Hostile and attackable creatures. */
+				mob: hexRgba("#d24b45ff"),
+				/** Portal objects. */
+				portal: hexRgba("#9b6dd6ff"),
+				/** Lifestones and allegiance bindstones. */
+				lifestone: hexRgba("#4fc4ccff"),
+				/** Uncategorized dynamic presentations. */
+				other: hexRgba("#d8d8e0ff"),
+				/** The locally driven entity's directional marker. */
+				controlled: hexRgba("#bce8aeff"),
 			} as const,
+			/**
+			 * Maximum fractional brightness change for entities above or below the map anchor.
+			 *
+			 * The adjustment reaches this value over the map's existing indoor floor or outdoor
+			 * contour-height span, so marker elevation agrees with the geometry beneath it.
+			 */
+			maximumElevationBrightnessAdjustment: 0.5,
 			/** Marker radius in canvas pixels, sized to stay legible without hiding the ground. */
 			radiusPixels: 3.5,
 		},

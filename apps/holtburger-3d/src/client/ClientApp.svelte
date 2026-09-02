@@ -405,7 +405,6 @@
 				cameraFovRadians: 0,
 				cameraHeadingRadians: 0,
 				presentedEntities: () => [],
-				presentedEntityRevision: 0,
 				source: null,
 				subject: null,
 			}

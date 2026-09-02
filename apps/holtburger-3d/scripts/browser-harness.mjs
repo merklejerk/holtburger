@@ -3656,6 +3656,52 @@ async function runClientHudHarness({ viteUrl }) {
 				"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.capture",
 				[],
 			);
+		const mapSurfaceCenter = async () => {
+			const state = await capture();
+			const map = state.surfaces["Overhead map"];
+			if (map === undefined)
+				throw new Error("Client HUD map surface is absent.");
+			return {
+				x: map.left + map.width / 2,
+				y: map.top + map.height / 2,
+			};
+		};
+		const panMap = async (deltaX, deltaY) => {
+			const { x, y } = await mapSurfaceCenter();
+			await client.send("Input.dispatchMouseEvent", {
+				button: "left",
+				clickCount: 1,
+				type: "mousePressed",
+				x,
+				y,
+			});
+			await client.send("Input.dispatchMouseEvent", {
+				button: "left",
+				buttons: 1,
+				type: "mouseMoved",
+				x: x + deltaX,
+				y: y + deltaY,
+			});
+			await client.send("Input.dispatchMouseEvent", {
+				button: "left",
+				clickCount: 1,
+				type: "mouseReleased",
+				x: x + deltaX,
+				y: y + deltaY,
+			});
+		};
+		const zoomMapIn = async (steps) => {
+			const { x, y } = await mapSurfaceCenter();
+			for (let step = 0; step < steps; step += 1) {
+				await client.send("Input.dispatchMouseEvent", {
+					deltaX: 0,
+					deltaY: -100,
+					type: "mouseWheel",
+					x,
+					y,
+				});
+			}
+		};
 		const toggleMode = async () => {
 			await evaluate(
 				client,
@@ -3666,6 +3712,27 @@ async function runClientHudHarness({ viteUrl }) {
 		};
 
 		const runtime = await capture();
+		await panMap(32, 18);
+		await delay(100);
+		const mapPanned = await capture();
+		await zoomMapIn(8);
+		await delay(100);
+		const mapPannedZoomed = await capture();
+		await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.resetMap",
+			[],
+		);
+		await delay(100);
+		const mapManuallyReanchored = await capture();
+		await panMap(32, 18);
+		await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.moveMapSubjectPastAutomaticReanchor",
+			[],
+		);
+		await delay(100);
+		const mapAutomaticallyReanchored = await capture();
 		await toggleMode();
 		const layout = await capture();
 		const wideScreenshot = await client.send("Page.captureScreenshot", {
@@ -3735,6 +3802,10 @@ async function runClientHudHarness({ viteUrl }) {
 			constrained,
 			layout,
 			layoutReopened,
+			mapAutomaticallyReanchored,
+			mapManuallyReanchored,
+			mapPanned,
+			mapPannedZoomed,
 			moved,
 			narrow,
 			restored,
@@ -3778,6 +3849,34 @@ function assertClientHudHarness(evidence) {
 	assertClientHudLabels(evidence.layout, "layout", layoutLabels);
 	assertClientHudLabels(evidence.runtimeRestored, "runtime", runtimeLabels);
 	assertClientHudLabels(evidence.layoutReopened, "layout", layoutLabels);
+	if (evidence.runtime.mapResetVisible) {
+		throw new Error("Client HUD map reset is visible before panning.");
+	}
+	if (!evidence.mapPanned.mapResetVisible) {
+		throw new Error("Client HUD map drag did not reveal its reset control.");
+	}
+	if (evidence.mapPanned.mapCoordinates === evidence.runtime.mapCoordinates) {
+		throw new Error("Client HUD map drag did not move the viewed coordinates.");
+	}
+	if (!evidence.runtime.mapConeVisible || !evidence.mapPanned.mapConeVisible) {
+		throw new Error(
+			"Client HUD map hid the camera cone while its subject was visible.",
+		);
+	}
+	if (evidence.mapPannedZoomed.mapConeVisible) {
+		throw new Error(
+			"Client HUD map retained the camera cone after zoom moved its subject off-disc.",
+		);
+	}
+	if (evidence.mapManuallyReanchored.mapResetVisible) {
+		throw new Error("Client HUD map reset did not restore follow mode.");
+	}
+	if (!evidence.mapManuallyReanchored.mapConeVisible) {
+		throw new Error("Client HUD map reset did not restore its camera cone.");
+	}
+	if (evidence.mapAutomaticallyReanchored.mapResetVisible) {
+		throw new Error("Client HUD map did not re-anchor after subject travel.");
+	}
 	assertClientHudLabels(
 		evidence.runtimeTransients,
 		"runtime",

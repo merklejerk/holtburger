@@ -8,6 +8,7 @@
 	} from "../../client/client-chat-policy";
 	import type { ClientChatMessage } from "../../client/client-host-contract";
 	import type { MapPanelFrame } from "../../app/map-panel-frame";
+	import { MAP_AUTOMATIC_REANCHOR_DISTANCE_METERS } from "../../lib/game/map/map-appearance";
 	import type { ClientPresentationDiagnostics } from "../../client/client-presentation-session";
 	import type { ClientToast } from "../../client/client-toast-center";
 
@@ -21,6 +22,12 @@
 	interface ClientHudHarnessState {
 		readonly jumpActionDisabled: boolean | null;
 		readonly mode: "runtime" | "layout";
+		/** Coordinates currently displayed beneath the map. */
+		readonly mapCoordinates: string;
+		/** Whether the subject-attached camera cone is currently rendered. */
+		readonly mapConeVisible: boolean;
+		/** Whether detached-map chrome is currently available. */
+		readonly mapResetVisible: boolean;
 		readonly moveHandles: Readonly<Record<string, ClientHudHarnessRectangle>>;
 		readonly preciseJumpEnterCount: number;
 		readonly surfaces: Readonly<Record<string, ClientHudHarnessRectangle>>;
@@ -39,6 +46,10 @@
 			deltaX: number,
 			deltaY: number,
 		) => void;
+		/** Move the imperative subject fixture beyond the production automatic-reset threshold. */
+		readonly moveMapSubjectPastAutomaticReanchor: () => void;
+		/** Activate the map's visible reset control. */
+		readonly resetMap: () => void;
 		readonly setRuntimeTransients: (visible: boolean) => void;
 		readonly toggleMode: () => void;
 	}
@@ -61,6 +72,9 @@
 				: null,
 	);
 	let preciseJumpEnterCount = 0;
+	/** Imperative fixture position, matching the production map frame's presentation-rate source. */
+	let mapSubjectWorldX = 100;
+	const mapSubjectWorldZ = -200;
 
 	const messages: readonly ClientChatLine[] = [
 		line(1, {
@@ -117,9 +131,18 @@
 			cameraFovRadians: Math.PI / 3,
 			cameraHeadingRadians: 0,
 			presentedEntities: () => [],
-			presentedEntityRevision: 0,
 			source: null,
-			subject: null,
+			subject: {
+				anchor: {
+					headingRadians: 0,
+					residency: null,
+					worldX: mapSubjectWorldX,
+					worldY: 20,
+					worldZ: mapSubjectWorldZ,
+				},
+				guid: 1,
+				kind: "controlled-entity",
+			},
 		};
 	}
 
@@ -240,6 +263,13 @@
 		return {
 			jumpActionDisabled: jumpAction?.disabled ?? null,
 			mode: lock.getAttribute("aria-pressed") === "true" ? "layout" : "runtime",
+			mapCoordinates:
+				document.querySelector<HTMLElement>(".map-panel-coordinates")
+					?.textContent ?? "",
+			mapConeVisible:
+				document.querySelector<SVGPathElement>(".map-panel-cone")?.style
+					.display !== "none",
+			mapResetVisible: document.querySelector(".map-panel-reset") !== null,
 			moveHandles,
 			preciseJumpEnterCount,
 			surfaces,
@@ -313,6 +343,16 @@
 		);
 	}
 
+	function resetMap(): void {
+		const reset = document.querySelector<HTMLButtonElement>(".map-panel-reset");
+		if (reset === null) throw new Error("Client HUD map reset is unavailable.");
+		reset.click();
+	}
+
+	function moveMapSubjectPastAutomaticReanchor(): void {
+		mapSubjectWorldX += MAP_AUTOMATIC_REANCHOR_DISTANCE_METERS + 1;
+	}
+
 	onMount(() => {
 		const harnessGlobal = globalThis as typeof globalThis & {
 			__HOLTBURGER_3D_CLIENT_HUD_HARNESS__: ClientHudHarnessApi | undefined;
@@ -320,6 +360,8 @@
 		harnessGlobal.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__ = {
 			capture,
 			dragSurface,
+			moveMapSubjectPastAutomaticReanchor,
+			resetMap,
 			setRuntimeTransients,
 			toggleMode,
 		};

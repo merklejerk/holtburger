@@ -1710,6 +1710,8 @@ dependencies = [
  "holtburger-weenie-catalog",
  "holtburger-world",
  "log",
+ "rmp-serde",
+ "serde",
  "tokio",
 ]
 

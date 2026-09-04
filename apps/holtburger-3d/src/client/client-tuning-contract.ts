@@ -82,6 +82,11 @@ export interface ClientTuning {
 			readonly glowBlurCssPixels: number;
 		};
 	};
+	/** Selected-entity HUD display policy. */
+	readonly selectedEntityHud: {
+		/** Bounded cadence for refreshing selected-entity display text. */
+		readonly displayIntervalMs: number;
+	};
 	/** Initial static-content demand around the controlled player. */
 	readonly sceneInterest: SceneInterestRadii;
 	/** Complete starting renderer display policy. */

@@ -2982,6 +2982,11 @@ export class GamePresentationRuntime {
 			: { frame, kind: "realized" };
 	}
 
+	/** Return the latest authority-backed display value without coupling it to realization state. */
+	dynamicEntityDisplay(guid: number): DynamicEntityView["display"] | null {
+		return this.#spawnedDesiredEntities.get(guid)?.entity.display ?? null;
+	}
+
 	#dynamicEntityFrame(guid: number): SelectedDynamicEntityFrame | null {
 		const nodeId = this.#spawnedPresentations.get(guid)?.nodeId ?? null;
 		if (nodeId === null) return null;

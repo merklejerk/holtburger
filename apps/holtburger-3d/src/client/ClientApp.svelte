@@ -429,6 +429,10 @@
 		return presentationSession?.readTargetIndicatorFrame() ?? null;
 	}
 
+	function readSelectedEntityName(): string | null {
+		return presentationSession?.readSelectedEntityName() ?? null;
+	}
+
 	function setShowRetailHiddenGeometry(visible: boolean): void {
 		frameSettings = { ...frameSettings, showRetailHiddenGeometry: visible };
 		presentationSession?.setFrameSettings(frameSettings);
@@ -663,6 +667,7 @@
 		{readDiagnostics}
 		{readFrameRates}
 		{readTargetIndicatorFrame}
+		{readSelectedEntityName}
 		{selectedEntityGuid}
 		{hoveredEntityGuid}
 		showRetailHiddenGeometry={frameSettings.showRetailHiddenGeometry}

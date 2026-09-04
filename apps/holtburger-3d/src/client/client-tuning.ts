@@ -92,6 +92,10 @@ export const CLIENT_TUNING = {
 			glowBlurCssPixels: 8,
 		},
 	},
+	selectedEntityHud: {
+		/** Names change rarely and do not need to follow pointer sampling cadence. */
+		displayIntervalMs: 250,
+	},
 	sceneInterest: {
 		buildingRadius: 6,
 		envCellRadius: 1,

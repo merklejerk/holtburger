@@ -4352,11 +4352,39 @@ function assertClientHudHarness(evidence) {
 		...runtimeLabels,
 		"Jump power",
 		"Notifications",
+		"Selected entity",
 	].toSorted();
 	assertClientHudLabels(evidence.runtime, "runtime", runtimeLabels);
 	assertClientHudLabels(evidence.layout, "layout", layoutLabels);
 	assertClientHudLabels(evidence.runtimeRestored, "runtime", runtimeLabels);
 	assertClientHudLabels(evidence.layoutReopened, "layout", layoutLabels);
+	const selectedEntityPlacement = evidence.layout.surfaces["Selected entity"];
+	const frameRatePlacement = evidence.layout.surfaces["Frame rate"];
+	if (
+		evidence.runtime.selectedEntityHud !== null ||
+		evidence.layout.selectedEntityHud?.name !== "Selected Entity" ||
+		evidence.layout.selectedEntityHud.actionsDisabled !== true ||
+		Math.abs(
+			selectedEntityPlacement.left +
+				selectedEntityPlacement.width / 2 -
+				evidence.layout.viewport.width / 2,
+		) > 1 ||
+		selectedEntityPlacement.top -
+			(frameRatePlacement.top + frameRatePlacement.height) !==
+			8
+	) {
+		throw new Error(
+			`Client HUD selected-entity surface did not preserve its preview, stub, or default placement contract: ${JSON.stringify(evidence.layout)}.`,
+		);
+	}
+	if (
+		evidence.viewportSelected.selectedEntityHud?.name !== "Drudge" ||
+		evidence.viewportSelected.selectedEntityHud.actionsDisabled !== true
+	) {
+		throw new Error(
+			`Client HUD selected-entity surface did not present the selected display value with inert actions: ${JSON.stringify(evidence.viewportSelected)}.`,
+		);
+	}
 	if (
 		evidence.gestureBaseline.selectionEvents.length !== 0 ||
 		evidence.gestureBaseline.orbitDeltas.length !== 0

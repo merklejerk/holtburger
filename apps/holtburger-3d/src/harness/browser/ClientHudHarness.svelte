@@ -60,6 +60,10 @@
 		/** Identity currently read back by the minimap frame. */
 		readonly selectedGuid: number | null;
 		readonly selectionAnnouncement: string;
+		readonly selectedEntityHud: null | {
+			readonly actionsDisabled: boolean;
+			readonly name: string;
+		};
 		readonly targetIndicator: null | {
 			readonly fill: string | null;
 			readonly filter: string;
@@ -397,6 +401,9 @@
 		const targetIndicatorGlass = targetIndicator?.querySelector<SVGPathElement>(
 			".target-indicator__glass",
 		);
+		const selectedEntityHud =
+			document.querySelector<HTMLElement>(".selected-entity");
+		const selectedEntityActions = selectedEntityHud?.querySelectorAll("button");
 		const minimapOverlayCanvas = document.querySelector<HTMLElement>(
 			".minimap-overlay-canvas",
 		);
@@ -430,6 +437,20 @@
 					?.textContent?.trim() ?? "",
 			selectionEvents: [...selectionEvents],
 			selectionMaintenanceCount,
+			selectedEntityHud:
+				selectedEntityHud === null
+					? null
+					: {
+							actionsDisabled:
+								selectedEntityActions?.length === 2 &&
+								Array.from(selectedEntityActions).every(
+									(action) => action.disabled,
+								),
+							name:
+								selectedEntityHud
+									.querySelector("strong")
+									?.textContent?.trim() ?? "",
+						},
 			surfaces,
 			toast:
 				toastElement === null
@@ -707,6 +728,7 @@
 	{readDiagnostics}
 	{readFrameRates}
 	readTargetIndicatorFrame={() => targetIndicatorFrame}
+	readSelectedEntityName={() => (selectedGuid === null ? null : "Drudge")}
 	selectedEntityGuid={selectedGuid}
 	hoveredEntityGuid={hoveredGuid}
 	showRetailHiddenGeometry={false}

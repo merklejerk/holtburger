@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
 	anchorClientHudPlacement,
-	CLIENT_FPS_PANEL_WIDTH,
+	CLIENT_FPS_PANEL_SIZE,
+	CLIENT_SELECTED_ENTITY_PANEL_SIZE,
 	createDefaultClientHudLayout,
 	resizeClientPanelRectangle,
 	resolveClientHudPlacement,
@@ -29,12 +30,18 @@ describe("client HUD layout", () => {
 		expect(layout.frameRate).toEqual({
 			horizontal: { alignment: "center", offset: 0 },
 			vertical: { alignment: "start", offset: 8 },
-			preferredWidth: CLIENT_FPS_PANEL_WIDTH,
-			preferredHeight: 26,
+			preferredWidth: CLIENT_FPS_PANEL_SIZE.width,
+			preferredHeight: CLIENT_FPS_PANEL_SIZE.height,
 		});
 		expect(layout.shortcuts).toMatchObject({
 			horizontal: { alignment: "end", offset: 16 },
 			vertical: { alignment: "end", offset: 16 },
+		});
+		expect(layout.selectedEntity).toEqual({
+			horizontal: { alignment: "center", offset: 0 },
+			vertical: { alignment: "start", offset: 42 },
+			preferredWidth: CLIENT_SELECTED_ENTITY_PANEL_SIZE.width,
+			preferredHeight: CLIENT_SELECTED_ENTITY_PANEL_SIZE.height,
 		});
 		expect(layout.minimap).toMatchObject({
 			horizontal: { alignment: "end", offset: 48 },

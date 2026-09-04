@@ -43,12 +43,19 @@ export interface ClientHudLayout {
 	readonly frameRate: ClientHudPlacement;
 	readonly jumpPower: ClientHudPlacement;
 	readonly minimap: ClientHudPlacement;
+	readonly selectedEntity: ClientHudPlacement;
 	readonly shortcuts: ClientHudPlacement;
 	readonly toast: ClientHudPlacement;
 }
 
-/** Width reserved for the capped/uncapped frame-rate pair and its unit label. */
-export const CLIENT_FPS_PANEL_WIDTH = 120;
+/** Fixed footprint reserved for the capped/uncapped frame-rate pair and its unit label. */
+export const CLIENT_FPS_PANEL_SIZE = { width: 120, height: 26 } as const;
+
+/** Fixed first-cut footprint for the selected-entity action and health surface. */
+export const CLIENT_SELECTED_ENTITY_PANEL_SIZE = {
+	width: 360,
+	height: 72,
+} as const;
 
 /** Fixed layout footprint for the centered jump-charge control. */
 export const CLIENT_JUMP_POWER_PANEL_SIZE = { width: 38, height: 132 } as const;
@@ -267,6 +274,8 @@ export function createDefaultClientHudLayout(
 	shortcutCount: number,
 ): ClientHudLayout {
 	const margin = 16;
+	const centeredTopMargin = 8;
+	const centeredTopGap = 8;
 	const shortcutWidth = shortcutCount * 42;
 	const chatHeight = Math.min(450, Math.max(260, viewport.height - 188));
 	return {
@@ -290,9 +299,9 @@ export function createDefaultClientHudLayout(
 		},
 		frameRate: {
 			horizontal: { alignment: "center", offset: 0 },
-			vertical: { alignment: "start", offset: 8 },
-			preferredWidth: CLIENT_FPS_PANEL_WIDTH,
-			preferredHeight: 26,
+			vertical: { alignment: "start", offset: centeredTopMargin },
+			preferredWidth: CLIENT_FPS_PANEL_SIZE.width,
+			preferredHeight: CLIENT_FPS_PANEL_SIZE.height,
 		},
 		jumpPower: {
 			horizontal: { alignment: "center", offset: 0 },
@@ -311,6 +320,16 @@ export function createDefaultClientHudLayout(
 			vertical: { alignment: "end", offset: margin },
 			preferredWidth: shortcutWidth,
 			preferredHeight: 42,
+		},
+		selectedEntity: {
+			horizontal: { alignment: "center", offset: 0 },
+			vertical: {
+				alignment: "start",
+				offset:
+					centeredTopMargin + CLIENT_FPS_PANEL_SIZE.height + centeredTopGap,
+			},
+			preferredWidth: CLIENT_SELECTED_ENTITY_PANEL_SIZE.width,
+			preferredHeight: CLIENT_SELECTED_ENTITY_PANEL_SIZE.height,
 		},
 		toast: {
 			horizontal: { alignment: "center", offset: 0 },

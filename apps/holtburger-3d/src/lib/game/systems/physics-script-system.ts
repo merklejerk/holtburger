@@ -42,7 +42,10 @@ interface PendingActivation {
 }
 
 interface ScriptRecord {
-	readonly closure: PreparedPhysicsScriptClosure;
+	/** Immutable scripts retained by generation-owned closure handles outside this clock. */
+	readonly scripts: Map<DatAssetId, PreparedPhysicsScript>;
+	/** First installed root used by the bounded runaway resynchronization policy. */
+	readonly primaryRoot: PreparedPhysicsScript;
 	readonly target: BehaviorTarget;
 	activations: ScriptActivation[];
 	pending: PendingActivation[];
@@ -122,6 +125,56 @@ export class PhysicsScriptSystem<TOwnerId extends string> {
 			this.#owners.set(ownerId, targets);
 		}
 		targets.add(target.targetId);
+	}
+
+	/**
+	 * Append another fully staged root to one entity's retail-shaped script manager.
+	 *
+	 * Returns false for a stale generation. The caller still owns and must release the supplied
+	 * closure; this system borrows its immutable scripts for exactly as long as the owner remains.
+	 */
+	appendRoot(
+		ownerId: TOwnerId,
+		target: BehaviorTarget,
+		closure: PreparedPhysicsScriptClosure,
+		timeSeconds: number,
+	): boolean {
+		if (this.#destroyed)
+			throw new Error("Cannot append into a destroyed physics script system.");
+		if (!Number.isFinite(timeSeconds))
+			throw new Error("Script activation time must be finite.");
+		const existing = this.#records.get(target.targetId);
+		if (!existing) {
+			this.install(ownerId, target, closure, timeSeconds);
+			return true;
+		}
+		if (existing.target.generation !== target.generation) return false;
+		const ownedTargets = this.#owners.get(ownerId);
+		if (!ownedTargets?.has(target.targetId)) {
+			throw new Error(
+				`Script target ${target.targetId} is not owned by ${ownerId}.`,
+			);
+		}
+		for (const [scriptId, script] of closure.scripts) {
+			const retained = existing.scripts.get(scriptId);
+			if (retained !== undefined && retained !== script) {
+				throw new Error(
+					`Script ${scriptId} was prepared twice with different immutable values.`,
+				);
+			}
+		}
+		for (const [scriptId, script] of closure.scripts)
+			existing.scripts.set(scriptId, script);
+		const root = existing.scripts.get(closure.rootId);
+		if (!root)
+			throw new Error(
+				`Script closure for ${closure.rootId} does not contain its root.`,
+			);
+		existing.pending.push({
+			scriptId: root.id,
+			startTime: Math.max(timeSeconds, this.#chainedStartTime(existing)),
+		});
+		return true;
 	}
 
 	/** Stage a complete owner replacement without dispatching against unpublished targets. */
@@ -342,11 +395,11 @@ export class PhysicsScriptSystem<TOwnerId extends string> {
 
 	#activate(record: ScriptRecord, pending: PendingActivation): void {
 		record.pending = record.pending.filter((entry) => entry !== pending);
-		const script = record.closure.scripts.get(pending.scriptId);
+		const script = record.scripts.get(pending.scriptId);
 		// The closure is staged transitively before activation, so a miss is a staging defect.
 		if (!script)
 			throw new Error(
-				`Script ${pending.scriptId} is not staged in the closure for ${record.closure.rootId}.`,
+				`Script ${pending.scriptId} is not staged for ${record.target.targetId}.`,
 			);
 		record.activations.push({
 			nextRecordIndex: 0,
@@ -373,9 +426,12 @@ export class PhysicsScriptSystem<TOwnerId extends string> {
 	#resynchronize(record: ScriptRecord, timeSeconds: number): void {
 		record.runawayCount += 1;
 		this.#resynchronizedCount += 1;
-		const root = record.closure.scripts.get(record.closure.rootId)!;
 		record.activations = [
-			{ nextRecordIndex: 0, script: root, startTime: timeSeconds },
+			{
+				nextRecordIndex: 0,
+				script: record.primaryRoot,
+				startTime: timeSeconds,
+			},
 		];
 		record.pending = [];
 	}
@@ -417,6 +473,15 @@ export class PhysicsScriptSystem<TOwnerId extends string> {
 			const end = activation.startTime + activation.script.lengthSeconds;
 			if (latest === null || end > latest) latest = end;
 		}
+		for (const pending of record.pending) {
+			const script = record.scripts.get(pending.scriptId);
+			if (!script)
+				throw new Error(
+					`Pending script ${pending.scriptId} is not staged for ${record.target.targetId}.`,
+				);
+			const end = pending.startTime + script.lengthSeconds;
+			if (latest === null || end > latest) latest = end;
+		}
 		return latest ?? record.lastTimeSeconds ?? 0;
 	}
 }
@@ -435,7 +500,8 @@ function createScriptRecord(
 		);
 	return {
 		activations: [{ nextRecordIndex: 0, script: root, startTime: timeSeconds }],
-		closure,
+		primaryRoot: root,
+		scripts: new Map(closure.scripts),
 		lastTimeSeconds: timeSeconds,
 		pending: [],
 		runawayCount: 0,

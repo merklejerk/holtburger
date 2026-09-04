@@ -31,12 +31,14 @@ import { AABB3, Mat4, Quat, Vec3 } from "../math/types";
 import type { BakedDrawMergeCensus } from "../renderer/baked-draw-merge-census";
 import {
 	type FrameSettings,
+	type EntitySelectionTarget,
 	type PortalTransitionFrame,
 	type Renderer,
 	type RendererFrameDiagnosticsSnapshot,
 	type WorldIndicatorInput,
 } from "../renderer/renderer";
 import { validateNameplateSettings } from "../renderer/nameplate-policy";
+import { validateEntitySelectionOutlineSettings } from "../renderer/entity-selection-outline-policy";
 import { RenderWorld } from "../renderer/render-world";
 import {
 	type RenderExtent,
@@ -54,6 +56,7 @@ import {
 	type SceneSpatialPlacement,
 	type SceneNodeId,
 	type SceneResidency,
+	type ResolvedScenePlacement,
 } from "../scene";
 import type { TerrainGenerator } from "../terrain/terrain-generator";
 import { WorkerTerrainGenerator } from "../terrain/terrain-worker-client";
@@ -62,6 +65,11 @@ import type { InstalledTerrain } from "../terrain/terrain-system";
 import { TerrainSystem } from "../terrain/terrain-system";
 import { StaticObjectSystem } from "../systems/static-object-system";
 import { DynamicEntitySystem } from "../systems/dynamic-entity-system";
+import {
+	selectionSphereFromBounds,
+	usesSelectionSphereProxy,
+} from "../selection/entity-interaction-shape";
+import type { EntitySelectionGeometry } from "../selection/entity-selection-intersection";
 import { DynamicEntityPlacementSystem } from "../systems/dynamic-entity-placement-system";
 import {
 	InlineObjectVisualTemplatePreparer,
@@ -71,13 +79,19 @@ import {
 import { EnvCellSystem } from "../systems/env-cell-system";
 import { AnimationSystem } from "../systems/animation-system";
 import type { PhysicsScriptSource } from "../../assets/physics-script-source";
+import type { PhysicsScriptTableSource } from "../../assets/physics-script-table-source";
+import { selectPhysicsScript } from "../../assets/decode-physics-script-table-record";
 import {
 	PhysicsScriptRepository,
 	type PreparedPhysicsScriptClosure,
 } from "../behavior/physics-script-repository";
 import type { DatAssetId } from "../game-types";
-import { ParticleEmitterRepository } from "../behavior/particle-emitter-repository";
+import {
+	ParticleEmitterRepository,
+	type PreparedParticleEmitter,
+} from "../behavior/particle-emitter-repository";
 import { SoundTableRepository } from "../behavior/sound-table-repository";
+import { PhysicsScriptTableRepository } from "../behavior/physics-script-table-repository";
 import type { PreparedAssetHandle } from "../behavior/prepared-asset-repository";
 import { ParticleMeshCache } from "../behavior/particle-mesh-cache";
 import type { ParticleMeshSource } from "../../assets/particle-mesh-source";
@@ -122,6 +136,7 @@ import {
 	behaviorTargetId,
 } from "../behavior/behavior-event-router";
 import type {
+	BehaviorConsumers,
 	BehaviorTarget,
 	BehaviorTargetId,
 } from "../behavior/behavior-event-router";
@@ -317,6 +332,7 @@ const EMPTY_STATIC_OBJECT_GEOMETRY_DIAGNOSTICS: StaticObjectGeometryDiagnostics 
 export interface GamePresentationRuntimeDependencies {
 	readonly animationSource: AnimationAssetSource;
 	readonly physicsScriptSource: PhysicsScriptSource;
+	readonly physicsScriptTableSource: PhysicsScriptTableSource;
 	readonly audioDevice: AudioDevice;
 	readonly particleEmitterSource: ParticleEmitterSource;
 	readonly soundTableSource: SoundTableSource;
@@ -377,7 +393,11 @@ interface DynamicEntityPresentationRecord {
 	readonly behaviorGeneration: number;
 	readonly nodeId: SceneNodeId;
 	readonly ownerId: DynamicEntityOwnerId;
+	/** Effective explicit-or-setup PhysicsScriptTable used by live high-level cues. */
+	readonly physicsScriptTableId: DatAssetId | null;
 	readonly visualKey: string;
+	/** Last world-owned absolute scale applied to the installed visual root. */
+	objectScale: number;
 	/** Exact desired placement already applied to this scene root. */
 	placementIdentity: string;
 	/** Mutable visibility/lighting level already applied to the dynamic system. */
@@ -391,6 +411,34 @@ interface DynamicEntityPresentationRecord {
 	/** Accepted host motion level and whether it successfully reached frontend playback. */
 	motionState: DynamicEntityMotionState | null;
 }
+
+/** Transient high-level PlayScript input bound to one authoritative entity generation. */
+export interface DynamicEntityScriptCue {
+	readonly guid: number;
+	readonly generation: number;
+	readonly cue: number;
+	readonly intensity: number;
+}
+
+interface DynamicCueAssets {
+	readonly closure: PreparedPhysicsScriptClosure;
+	readonly emitterHandles: readonly PreparedAssetHandle<PreparedParticleEmitter>[];
+}
+
+/** Frame-hot realized identity and current rigid bound for selection presentation. */
+export interface SelectedDynamicEntityFrame {
+	readonly guid: number;
+	/** Borrowed until the next dynamic presentation publication. */
+	readonly localBounds: AABB3;
+	/** Current flattened root placement, including any animated attachment ancestry. */
+	readonly placement: ResolvedScenePlacement;
+}
+
+/** Why a mirror-retained selected identity can or cannot currently participate in tracking. */
+export type SelectedDynamicEntityPresentationState =
+	| { readonly kind: "realized"; readonly frame: SelectedDynamicEntityFrame }
+	| { readonly kind: "frontend-evicted" }
+	| { readonly kind: "temporarily-unrealized" };
 
 /** One unavailable prerequisite that can make a desired entity realizable later. */
 type DynamicEntityDeferral =
@@ -660,8 +708,12 @@ export class GamePresentationRuntime {
 	readonly #animationPresentation = new AnimationPresentationScheduler();
 	/** Persistent visual-effect state advanced only by the authored behavior clock. */
 	readonly #effects: EffectSystem;
+	/** Routes animation plus browser-scale static and sky script consequences. */
 	readonly #behaviorRouter: BehaviorEventRouter;
+	/** Routes spawned-client script consequences while consuming scale as world-owned. */
+	readonly #worldScaleBehaviorRouter: BehaviorEventRouter;
 	readonly #physicsScripts: PhysicsScriptRepository;
+	readonly #physicsScriptTables: PhysicsScriptTableRepository;
 	readonly #particleEmitters: ParticleEmitterRepository;
 	readonly #particles: ParticleSystem;
 	readonly #soundTables: SoundTableRepository;
@@ -669,10 +721,19 @@ export class GamePresentationRuntime {
 	/** Sound table installed by each behaviour target's setup, for `SoundTable` key resolution. */
 	readonly #targetSoundTables = new Map<BehaviorTargetId, DecodedSoundTable>();
 	/** Exact behavior targets installed by each shared dynamic owner. */
-	readonly #dynamicBehaviorTargets = new Map<
+	readonly #dynamicPresentationTargets = new Map<
 		DynamicOwnerId,
 		ReadonlySet<BehaviorTargetId>
 	>();
+	/** High-level cues waiting for their exact entity generation to be visually realized. */
+	readonly #pendingDynamicScriptCues = new Map<
+		number,
+		DynamicEntityScriptCue[]
+	>();
+	/** Additional live-cue assets retained until their dynamic owner generation retires. */
+	readonly #dynamicCueAssets = new Map<DynamicOwnerId, DynamicCueAssets[]>();
+	/** Per-GUID ordered preparation tails joined during shutdown and rechecked before activation. */
+	readonly #dynamicCuePreparations = new Map<number, Promise<void>>();
 	/**
 	 * Sky-module-owned behavior targets, which have no scene residency at all.
 	 *
@@ -685,6 +746,8 @@ export class GamePresentationRuntime {
 	readonly #physicsScriptSystem: PhysicsScriptSystem<
 		DynamicOwnerId | SkyOwnerId
 	>;
+	/** Browser presentation playback for spawned entities whose scale comes from world projection. */
+	readonly #worldScalePhysicsScriptSystem: PhysicsScriptSystem<DynamicOwnerId>;
 	readonly #audio: AudioSystem;
 	readonly #ambient: AmbientSystem;
 	/** Bounded owner for live ambient-weight and voice-placement control work. */
@@ -798,6 +861,69 @@ export class GamePresentationRuntime {
 		if (sky) return sky.originOf();
 		const nodeId = sceneNodeIdOf(target.targetId);
 		return nodeId === null ? null : this.#sceneOriginOf(nodeId);
+	}
+
+	/** Shared audio sink for both script domains; scale ownership is their only distinction. */
+	#createBehaviorAudioCommands(): BehaviorConsumers["audio"] {
+		return {
+			playSound: (target, sound) => {
+				if (!this.#audioListenerEnabled) return "suppressed";
+				// Retail samples the emitting node once. The voice follows the listener from that
+				// fixed point rather than following later movement of the emitter.
+				const origin = this.#originOf(target);
+				if (origin === null) return "unprepared";
+				const skyTarget = this.#skyTargets.has(target.targetId);
+				const outcome = this.#audio.trigger({
+					// Authored hook sounds are effect sounds: `PlaySoundA` gates on
+					// `effect_sounds_enabled` and passes `is_ambient = 0`.
+					category: "effect",
+					probability: sound.probability,
+					soundId: sound.soundId,
+					source: skyTarget
+						? {
+								mode: "world-live",
+								position: origin,
+								volume: () => (this.#skyAudioEnabled() ? sound.volume : 0),
+							}
+						: { mode: "world", position: origin, volume: sound.volume },
+				});
+				return outcome === "played" ? "played" : "suppressed";
+			},
+			playSoundTableKey: (target, soundType) => {
+				if (!this.#audioListenerEnabled) return "suppressed";
+				const table = this.#targetSoundTables.get(target.targetId);
+				const candidates = table?.entries.get(soundType);
+				// A missing table/key and a candidate that deliberately stays silent differ in
+				// diagnostics even though both are visual no-ops.
+				if (!candidates) return "unprepared";
+				const candidate = selectSoundCandidate(candidates, Math.random());
+				if (!candidate) return "unprepared";
+				const origin = this.#originOf(target);
+				if (origin === null) return "unprepared";
+				const outcome = this.#audio.trigger({
+					category: "effect",
+					probability: candidate.probability,
+					soundId: candidate.soundId,
+					source: {
+						mode: "world",
+						position: origin,
+						volume: candidate.volume,
+					},
+				});
+				return outcome === "played" ? "played" : "suppressed";
+			},
+		};
+	}
+
+	/** Shared particle sink; particles stay browser-owned for every script population. */
+	#createBehaviorParticleCommands(): BehaviorConsumers["particles"] {
+		return {
+			createEmitter: (target, command) =>
+				this.#particles.createEmitter(target, command),
+			stop: (target, emitterId) => this.#particles.stop(target, emitterId),
+			destroy: (target, emitterId) =>
+				this.#particles.destroy(target, emitterId),
+		};
 	}
 
 	/**
@@ -979,6 +1105,8 @@ export class GamePresentationRuntime {
 	 * every frame instead of from whatever the frontend last sampled.
 	 */
 	#viewerEntityGuid: number | null = null;
+	/** Frontend-selected identity; realization is resolved lazily so streaming does not clear it. */
+	#selectedEntityGuid: number | null = null;
 	/** One source-neutral replacement barrier layered over the ordinary interest coordinator. */
 	#sceneActivation: SceneActivationReceipt | null = null;
 	/** Exact layer failures retained until the owning interest revision is withdrawn. */
@@ -995,6 +1123,9 @@ export class GamePresentationRuntime {
 		dependencies: GamePresentationRuntimeDependencies,
 	) {
 		validateNameplateSettings(dependencies.frameSettings.nameplates);
+		validateEntitySelectionOutlineSettings(
+			dependencies.frameSettings.entitySelectionOutline,
+		);
 		this.#tickProfiler = dependencies.tickProfiler;
 		this.#frameSettings = dependencies.frameSettings;
 		this.#setupVisualSource = dependencies.setupVisualSource;
@@ -1178,6 +1309,9 @@ export class GamePresentationRuntime {
 		this.#physicsScripts = new PhysicsScriptRepository(
 			dependencies.physicsScriptSource,
 		);
+		this.#physicsScriptTables = new PhysicsScriptTableRepository(
+			dependencies.physicsScriptTableSource,
+		);
 		this.#particleEmitters = new ParticleEmitterRepository(
 			dependencies.particleEmitterSource,
 		);
@@ -1244,69 +1378,39 @@ export class GamePresentationRuntime {
 				this.#resolveAmbientSound(soundTableId, soundType),
 			roll: dependencies.roll ?? Math.random,
 		});
-		// The script system both produces and consumes `CallPES`, so the two are mutually dependent
-		// by design. A holder breaks the construction cycle without making the router mutable.
+		// Each script system both produces and consumes `CallPES`, so its router and scheduler are
+		// mutually dependent by design. Holders break those construction cycles without mutable ports.
 		const scriptWiring: {
 			system?: PhysicsScriptSystem<DynamicOwnerId | SkyOwnerId>;
 		} = {};
+		const worldScaleScriptWiring: {
+			system?: PhysicsScriptSystem<DynamicOwnerId>;
+		} = {};
+		const behaviorAudio = this.#createBehaviorAudioCommands();
+		const behaviorParticles = this.#createBehaviorParticleCommands();
+		const behaviorTargets: BehaviorConsumers["targets"] = {
+			// Animation and scripts install independently. Any current producer makes the exact
+			// generation live; neither script evaluator needs to know which population owns it.
+			isLive: (target) =>
+				this.#animation.holds(target) ||
+				(scriptWiring.system?.holds(target) ?? false) ||
+				(worldScaleScriptWiring.system?.holds(target) ?? false),
+		};
 		this.#behaviorRouter = new BehaviorEventRouter(
 			{
-				audio: {
-					playSound: (target, sound) => {
-						if (!this.#audioListenerEnabled) return "suppressed";
-						// The emitting node's world position is sampled once at trigger time, as
-						// retail samples it; the voice then tracks the listener from that fixed
-						// point rather than following the emitter.
-						const origin = this.#originOf(target);
-						if (origin === null) return "unprepared";
-						const skyTarget = this.#skyTargets.has(target.targetId);
-						const outcome = this.#audio.trigger({
-							// Authored hook sounds are effect sounds: `PlaySoundA` gates on
-							// `effect_sounds_enabled` and passes `is_ambient = 0`.
-							category: "effect",
-							probability: sound.probability,
-							soundId: sound.soundId,
-							source: skyTarget
-								? {
-										mode: "world-live",
-										position: origin,
-										volume: () => (this.#skyAudioEnabled() ? sound.volume : 0),
-									}
-								: { mode: "world", position: origin, volume: sound.volume },
-						});
-						return outcome === "played" ? "played" : "suppressed";
-					},
-					playSoundTableKey: (target, soundType) => {
-						if (!this.#audioListenerEnabled) return "suppressed";
-						const table = this.#targetSoundTables.get(target.targetId);
-						const candidates = table?.entries.get(soundType);
-						// Retail's miss is a silent no-op; reporting it keeps a missing table and a
-						// missing key distinguishable from a sound that chose not to play.
-						if (!candidates) return "unprepared";
-						const candidate = selectSoundCandidate(candidates, Math.random());
-						if (!candidate) return "unprepared";
-						const origin = this.#originOf(target);
-						if (origin === null) return "unprepared";
-						const outcome = this.#audio.trigger({
-							category: "effect",
-							probability: candidate.probability,
-							soundId: candidate.soundId,
-							source: {
-								mode: "world",
-								position: origin,
-								volume: candidate.volume,
-							},
-						});
-						return outcome === "played" ? "played" : "suppressed";
-					},
-				},
+				audio: behaviorAudio,
 				effects: this.#effects,
 				// Authored particles arrive only from physics scripts, and no resident runs one
 				// until Phase 7 activates them. Reporting unprepared keeps the outcome honest
 				// instead of pretending an emitter was created.
-				particles: {
-					createEmitter: (target, command) =>
-						this.#particles.createEmitter(target, command),
+				particles: behaviorParticles,
+				scale: {
+					applyScale: (target, values, mode) => {
+						this.#effects.applyScale(target, values);
+						return mode === "initial-state"
+							? "folded-initial-state"
+							: "executed";
+					},
 				},
 				// Chained script activation lands with the script clock in Phase 7; until an authored
 				// script runs, no `CallPES` can reach this port.
@@ -1320,13 +1424,29 @@ export class GamePresentationRuntime {
 						system.scheduleActivation(target, activation);
 					},
 				},
-				// A target is live if either producer still holds it at this generation; scripts and
-				// animation install independently, so neither alone is authoritative.
-				targets: {
-					isLive: (target) =>
-						this.#animation.holds(target) ||
-						(scriptWiring.system?.holds(target) ?? false),
+				targets: behaviorTargets,
+			},
+			SHARED_FRONTEND_TUNING.diagnostics.maximumRecentEffectObservations,
+		);
+		this.#worldScaleBehaviorRouter = new BehaviorEventRouter(
+			{
+				audio: behaviorAudio,
+				effects: this.#effects,
+				particles: behaviorParticles,
+				// Spawned entities receive their authoritative absolute scale in world projection.
+				// Browser playback records the understood hook but cannot mutate another scalar.
+				scale: { applyScale: () => "owned-by-world" },
+				scheduler: {
+					scheduleActivation: (target, activation) => {
+						const system = worldScaleScriptWiring.system;
+						if (!system)
+							throw new Error(
+								"World-scale script activation reached an unwired scheduler.",
+							);
+						system.scheduleActivation(target, activation);
+					},
 				},
+				targets: behaviorTargets,
 			},
 			SHARED_FRONTEND_TUNING.diagnostics.maximumRecentEffectObservations,
 		);
@@ -1336,6 +1456,12 @@ export class GamePresentationRuntime {
 			Math.random,
 		);
 		scriptWiring.system = this.#physicsScriptSystem;
+		this.#worldScalePhysicsScriptSystem =
+			new PhysicsScriptSystem<DynamicOwnerId>(
+				this.#worldScaleBehaviorRouter,
+				Math.random,
+			);
+		worldScaleScriptWiring.system = this.#worldScalePhysicsScriptSystem;
 		this.#skyScripts = new SkyScriptSystem({
 			acquireClosure: (scriptId) =>
 				this.#physicsScripts.acquireClosure(scriptId),
@@ -1414,6 +1540,7 @@ export class GamePresentationRuntime {
 		texturePixelSource: TexturePixelSource,
 		animationSource: AnimationAssetSource,
 		physicsScriptSource: PhysicsScriptSource,
+		physicsScriptTableSource: PhysicsScriptTableSource,
 		audioDevice: AudioDevice,
 		particleEmitterSource: ParticleEmitterSource,
 		soundTableSource: SoundTableSource,
@@ -1440,6 +1567,7 @@ export class GamePresentationRuntime {
 				audioDevice,
 				particleEmitterSource,
 				physicsScriptSource,
+				physicsScriptTableSource,
 				particleMeshSource,
 				setupVisualSource,
 				frameSettings,
@@ -1498,6 +1626,11 @@ export class GamePresentationRuntime {
 				);
 			requested.set(guid, entity);
 		}
+		for (const guid of this.#pendingDynamicScriptCues.keys())
+			this.#retainPendingDynamicScriptCues(
+				guid,
+				requested.get(guid)?.generation,
+			);
 		const stale = new Set(
 			[...this.#spawnedDesiredEntities.keys()].filter(
 				(guid) => !requested.has(guid),
@@ -1540,6 +1673,7 @@ export class GamePresentationRuntime {
 			throw new Error("Cannot remove a dynamic entity after runtime shutdown.");
 		const desired = this.#spawnedDesiredEntities.get(guid);
 		if (desired?.entity.generation !== generation) return;
+		this.#pendingDynamicScriptCues.delete(guid);
 		this.#retireDynamicPresentationTree(guid);
 		this.#forgetDesiredDynamicEntity(guid, "release-visual");
 		for (const childGuid of this.#spawnedDesiredChildren.get(guid) ?? []) {
@@ -1549,6 +1683,133 @@ export class GamePresentationRuntime {
 					kind: "parent",
 					parentGuid: guid,
 				});
+		}
+	}
+
+	/** Queue one server-authored PlayScript cue for the exact dynamic entity generation. */
+	playDynamicEntityScriptCue(cue: DynamicEntityScriptCue): void {
+		if (this.#destroyed)
+			throw new Error(
+				"Cannot play a dynamic script cue after runtime shutdown.",
+			);
+		if (
+			!Number.isInteger(cue.guid) ||
+			cue.guid < 0 ||
+			!Number.isInteger(cue.generation) ||
+			cue.generation < 0 ||
+			!Number.isInteger(cue.cue) ||
+			cue.cue < 0 ||
+			!Number.isFinite(cue.intensity)
+		) {
+			throw new Error("Dynamic script cue is outside its typed domain.");
+		}
+		const desired = this.#spawnedDesiredEntities.get(cue.guid);
+		if (desired !== undefined && desired.entity.generation !== cue.generation)
+			return;
+		const pending = this.#pendingDynamicScriptCues.get(cue.guid) ?? [];
+		pending.push(cue);
+		this.#pendingDynamicScriptCues.set(cue.guid, pending);
+		this.#drainDynamicScriptCues(cue.guid);
+	}
+
+	/** Discard queued cues that cannot belong to the named desired generation. */
+	#retainPendingDynamicScriptCues(
+		guid: number,
+		generation: number | undefined,
+	): void {
+		const pending = this.#pendingDynamicScriptCues.get(guid);
+		if (pending === undefined) return;
+		const retained = pending.filter((cue) => cue.generation === generation);
+		if (retained.length === 0) this.#pendingDynamicScriptCues.delete(guid);
+		else this.#pendingDynamicScriptCues.set(guid, retained);
+	}
+
+	/** Start queued cue preparation only after its exact visual target is installed. */
+	#drainDynamicScriptCues(guid: number): void {
+		const installed = this.#spawnedPresentations.get(guid);
+		if (installed === undefined) return;
+		const queued = this.#pendingDynamicScriptCues.get(guid);
+		if (queued === undefined) return;
+		const current = queued.filter(
+			(cue) => cue.generation === installed.generation,
+		);
+		this.#pendingDynamicScriptCues.delete(guid);
+		let tail = this.#dynamicCuePreparations.get(guid) ?? Promise.resolve();
+		for (const cue of current) {
+			tail = tail
+				.then(() => this.#prepareDynamicScriptCue(installed, cue))
+				.catch((error: unknown) => {
+					this.#dynamicRealizationFailures.push(error);
+				});
+		}
+		this.#dynamicCuePreparations.set(guid, tail);
+		void tail.finally(() => {
+			if (this.#dynamicCuePreparations.get(guid) !== tail) return;
+			this.#dynamicCuePreparations.delete(guid);
+			this.#drainDynamicScriptCues(guid);
+		});
+	}
+
+	/** Resolve and append one cue without allowing late assets to target a successor generation. */
+	async #prepareDynamicScriptCue(
+		installed: DynamicEntityPresentationRecord,
+		cue: DynamicEntityScriptCue,
+	): Promise<void> {
+		const tableId = installed.physicsScriptTableId;
+		if (tableId === null) return;
+		const tableHandle = await this.#physicsScriptTables.acquire(tableId);
+		let rootId: DatAssetId | null;
+		try {
+			rootId = selectPhysicsScript(tableHandle.asset, cue.cue, cue.intensity);
+		} finally {
+			tableHandle.release();
+		}
+		if (rootId === null) return;
+		const closure = await this.#physicsScripts.acquireClosure(rootId);
+		const emitterHandles: PreparedAssetHandle<PreparedParticleEmitter>[] = [];
+		try {
+			const emitterIds = new Set(
+				[...closure.scripts.values()].flatMap(
+					(script) => script.dependencies.emitterInfoIds,
+				),
+			);
+			for (const emitterId of emitterIds)
+				emitterHandles.push(await this.#particleEmitters.acquire(emitterId));
+			await this.#stageParticleMeshes([{ scriptClosure: closure }]);
+			const current = this.#spawnedPresentations.get(cue.guid);
+			// RETAIL DIVERGENCE: retail appends immediately to the object's ScriptManager
+			// (`acclient.c:316331-316389`); the browser appends only after its immutable script,
+			// emitter, and mesh closure is ready. Backdating would lose or reorder time-zero effects
+			// unless we added a cross-process recovery ledger. The archive census found 10,377 of
+			// 10,743 CreateParticle hooks at time zero, so starting at readiness preserves the common
+			// effect while accepting host/browser activation skew.
+			if (
+				current !== installed ||
+				current.generation !== cue.generation ||
+				!this.#worldScalePhysicsScriptSystem.appendRoot(
+					current.ownerId,
+					{
+						generation: current.behaviorGeneration,
+						targetId: behaviorTargetId(current.nodeId),
+					},
+					closure,
+					this.#lastFrameTimeSeconds,
+				)
+			) {
+				for (const handle of emitterHandles) handle.release();
+				closure.release();
+				return;
+			}
+			let assets = this.#dynamicCueAssets.get(current.ownerId);
+			if (assets === undefined) {
+				assets = [];
+				this.#dynamicCueAssets.set(current.ownerId, assets);
+			}
+			assets.push({ closure, emitterHandles });
+		} catch (cause) {
+			for (const handle of emitterHandles) handle.release();
+			closure.release();
+			throw cause;
 		}
 	}
 
@@ -1694,6 +1955,7 @@ export class GamePresentationRuntime {
 			);
 		}
 		const sameGeneration = previous?.entity.generation === entity.generation;
+		this.#retainPendingDynamicScriptCues(guid, entity.generation);
 		const attachmentTopologyChanged =
 			previous !== undefined &&
 			previous.placementIdentity !== placementIdentity &&
@@ -2028,9 +2290,11 @@ export class GamePresentationRuntime {
 		const stagingPlacement = this.#spawnedStagingPlacement(entity);
 		if (stagingPlacement === null) return;
 		const ownerId = dynamicEntityOwnerId(guid);
-		const activation = await this.#prepareDynamicOwner(ownerId, [
-			adaptDynamicEntityPresentation(entity, resolved, stagingPlacement),
-		]);
+		const activation = await this.#prepareDynamicOwner(
+			ownerId,
+			[adaptDynamicEntityPresentation(entity, resolved, stagingPlacement)],
+			"world",
+		);
 		if (this.#spawnedDesiredEntities.get(guid) !== record) {
 			activation.release();
 			return;
@@ -2043,19 +2307,25 @@ export class GamePresentationRuntime {
 			);
 		}
 		activation.commit();
+		const [preparedEntity] = activation.prepared;
+		if (preparedEntity === undefined)
+			throw new Error("Committed dynamic entity has no prepared source.");
 		const installed: DynamicEntityPresentationRecord = {
 			behaviorGeneration: activation.generation,
 			generation: entity.generation,
 			nodeId,
 			ownerId,
+			physicsScriptTableId: preparedEntity.source.behavior.physicsScriptTableId,
 			placementIdentity: record.placementIdentity,
 			motionState: null,
+			objectScale: entity.presentation.objectScale,
 			// Installation already seeded this state before behavior replay. Mark it current so the
 			// convergence pass cannot erase part-local replay results.
 			presentationStateIdentity: dynamicPresentationStateIdentity(entity),
 			visualKey: record.visualKey,
 		};
 		this.#spawnedPresentations.set(guid, installed);
+		this.#drainDynamicScriptCues(guid);
 		if (entity.placement.kind === "attached") {
 			const parent = this.#spawnedPresentations.get(entity.placement.parent);
 			if (!parent) {
@@ -2126,6 +2396,13 @@ export class GamePresentationRuntime {
 		installed: DynamicEntityPresentationRecord,
 		entity: DynamicEntityView,
 	): void {
+		if (installed.objectScale !== entity.presentation.objectScale) {
+			this.#dynamics.updateRootScale(
+				installed.nodeId,
+				entity.presentation.objectScale,
+			);
+			installed.objectScale = entity.presentation.objectScale;
+		}
 		const identity = dynamicPresentationStateIdentity(entity);
 		if (installed.presentationStateIdentity !== identity) {
 			this.#dynamics.updatePresentationState(installed.nodeId, {
@@ -2505,6 +2782,7 @@ export class GamePresentationRuntime {
 	/** Replace frontend-selected dynamic display choices without altering world data. */
 	setFrameSettings(settings: FrameSettings): void {
 		validateNameplateSettings(settings.nameplates);
+		validateEntitySelectionOutlineSettings(settings.entitySelectionOutline);
 		this.#frameSettings = settings;
 	}
 
@@ -2687,6 +2965,86 @@ export class GamePresentationRuntime {
 		this.#viewerEntityGuid = guid;
 	}
 
+	/** Set the cold selected identity without coupling authority or realization lifetime to it. */
+	setSelectedEntityGuid(guid: number | null): void {
+		this.#selectedEntityGuid = guid;
+	}
+
+	/** Distinguish explicit scene-interest eviction from recoverable realization gaps. */
+	selectedEntityPresentationState(
+		guid: number,
+	): SelectedDynamicEntityPresentationState {
+		if (this.#isDynamicEntityFrontendEvicted(guid))
+			return { kind: "frontend-evicted" };
+		const frame = this.#dynamicEntityFrame(guid);
+		return frame === null
+			? { kind: "temporarily-unrealized" }
+			: { frame, kind: "realized" };
+	}
+
+	#dynamicEntityFrame(guid: number): SelectedDynamicEntityFrame | null {
+		const nodeId = this.#spawnedPresentations.get(guid)?.nodeId ?? null;
+		if (nodeId === null) return null;
+		const localBounds =
+			this.#dynamics.getPublishedRigidPresentationBounds(nodeId);
+		const placement = this.#scene.getResolvedPlacement(nodeId);
+		return localBounds === null || placement === undefined
+			? null
+			: {
+					guid,
+					localBounds,
+					placement,
+				};
+	}
+
+	/** Follow attachment ownership to the world root whose scope controls presentation residency. */
+	#isDynamicEntityFrontendEvicted(guid: number): boolean {
+		const visited = new Set<number>();
+		let record = this.#spawnedDesiredEntities.get(guid);
+		while (record !== undefined) {
+			const currentGuid = record.entity.identity.guid;
+			if (visited.has(currentGuid))
+				throw new Error(
+					`Dynamic entity attachment cycle reached ${formatDynamicGuid(currentGuid)} while resolving selection residency.`,
+				);
+			visited.add(currentGuid);
+			if (record.entity.placement.kind === "world")
+				return !this.#isDynamicScopeReady(record.entity);
+			record = this.#spawnedDesiredEntities.get(record.entity.placement.parent);
+		}
+		return false;
+	}
+
+	/** Resolve one selected root and the same interaction shape policy used by exact picking. */
+	#selectedEntityRenderTarget(): EntitySelectionTarget | null {
+		if (this.#selectedEntityGuid === null) return null;
+		const installed = this.#spawnedPresentations.get(this.#selectedEntityGuid);
+		if (installed === undefined) return null;
+		const frame = this.#dynamicEntityFrame(this.#selectedEntityGuid);
+		if (frame === null) return null;
+		return {
+			nodeId: installed.nodeId,
+			shape: this.#usesSelectionSphereProxy(installed.nodeId)
+				? {
+						kind: "sphere-proxy",
+						placement: frame.placement,
+						sphere: selectionSphereFromBounds(frame.localBounds),
+					}
+				: { kind: "rigid" },
+		};
+	}
+
+	/** Runtime-owned dynamic policy; static morphology and emitter membership are each O(1). */
+	#usesSelectionSphereProxy(nodeId: SceneNodeId): boolean {
+		const morphology = this.#dynamics.getSelectionGeometryMorphology(nodeId);
+		if (morphology === null)
+			throw new Error(`Dynamic entity ${nodeId} has no selection morphology.`);
+		return usesSelectionSphereProxy(
+			morphology,
+			this.#particles.hasEmitterOwner(behaviorTargetId(nodeId)),
+		);
+	}
+
 	/** Resolve the driven entity's installed generation to the renderer's stable identity. */
 	#viewerEntityIdentity(): string | null {
 		if (this.#viewerEntityGuid === null) return null;
@@ -2754,8 +3112,11 @@ export class GamePresentationRuntime {
 			ambientBakes: this.#ambientBakes.getDiagnostics(),
 			dynamics: this.#dynamics.getDiagnostics(),
 			behavior: this.#behaviorRouter.getDiagnostics(),
+			worldScaleBehavior: this.#worldScaleBehaviorRouter.getDiagnostics(),
 			particles: this.#particles.getDiagnostics(),
 			physicsScripts: this.#physicsScriptSystem.getDiagnostics(),
+			worldScalePhysicsScripts:
+				this.#worldScalePhysicsScriptSystem.getDiagnostics(),
 			skyScripts: { activeCount: this.#skyScripts.activeCount },
 			effects: this.#effects.getDiagnostics(),
 			presentationCadence: this.#animationPresentation.getDiagnostics(),
@@ -2972,6 +3333,26 @@ export class GamePresentationRuntime {
 		};
 	}
 
+	/** Borrow one realized entity's current posed CPU geometry for an exact interaction query. */
+	withSpawnedEntitySelectionGeometry<T>(
+		guid: number,
+		visit: (geometry: EntitySelectionGeometry) => T,
+	): T | null {
+		const nodeId = this.#spawnedPresentations.get(guid)?.nodeId;
+		return nodeId === undefined
+			? null
+			: this.#dynamics.withSelectionGeometry(nodeId, (geometry) =>
+					this.#usesSelectionSphereProxy(nodeId)
+						? visit({
+								kind: "sphere-proxy",
+								landblockId: geometry.landblockId,
+								sourceToLandblock: geometry.sourceToLandblock,
+								sphere: selectionSphereFromBounds(geometry.localBounds),
+							})
+						: visit({ kind: "triangles", ...geometry }),
+				);
+	}
+
 	/**
 	 * Every realized spawned entity paired with where it is being drawn right now.
 	 *
@@ -3092,6 +3473,7 @@ export class GamePresentationRuntime {
 		// already reached this frame's behavior step, exactly as it did when animation drove it.
 		this.#effects.advance(timeSeconds);
 		this.#physicsScriptSystem.advance(timeSeconds);
+		this.#worldScalePhysicsScriptSystem.advance(timeSeconds);
 		tick?.mark("scriptAdvance");
 		// Advance against the same previous-frame owner selection used below for draw routing. Sky
 		// owners remain unconditionally visible through #particleRenderOwner.
@@ -3155,6 +3537,7 @@ export class GamePresentationRuntime {
 			frameSettings: this.#frameSettings,
 			portalTransition,
 			outdoorLights: this.#outdoorLights,
+			selectionTarget: this.#selectedEntityRenderTarget(),
 			timeSeconds,
 			viewerLightOrigin: resolveViewerLightOrigin(
 				this.#viewerEntityGuid === null
@@ -3205,6 +3588,7 @@ export class GamePresentationRuntime {
 			this.#forgetDesiredDynamicEntity(guid, "release-visual");
 		this.#spawnedVisuals.clear();
 		this.#spawnedVisualKeys.clear();
+		this.#pendingDynamicScriptCues.clear();
 		this.#destroyed = true;
 		this.#sceneInterestCoordinator.destroy();
 		this.#commitArtifacts.length = 0;
@@ -3213,6 +3597,7 @@ export class GamePresentationRuntime {
 			this.#envCellRealizer.destroy(),
 		]);
 		await Promise.allSettled([...this.#realizationContinuations]);
+		await Promise.allSettled([...this.#dynamicCuePreparations.values()]);
 		await this.#renderer?.destroy();
 		this.#renderer = null;
 		this.#portalTransitionAssets = null;
@@ -3224,6 +3609,7 @@ export class GamePresentationRuntime {
 		this.#animationPresentation.clear();
 		this.#animation.destroy();
 		this.#physicsScriptSystem.destroy();
+		this.#worldScalePhysicsScriptSystem.destroy();
 		this.#audio.destroy();
 		this.#skyScripts.destroy();
 		this.#particleEmitters.destroy();
@@ -3233,9 +3619,11 @@ export class GamePresentationRuntime {
 		this.#ambientSoundTableHandles.clear();
 		this.#ambientSoundTables.clear();
 		this.#soundTables.destroy();
+		this.#physicsScriptTables.destroy();
 		this.#particleMeshes.destroy();
 		this.#targetSoundTables.clear();
 		await this.#dynamics.destroy();
+		this.#physicsScripts.destroy();
 		this.#envCells.destroy();
 		await this.#terrain.destroy();
 		await this.#terrainGenerator.destroy();
@@ -3510,6 +3898,7 @@ export class GamePresentationRuntime {
 	async #prepareDynamicOwner(
 		ownerId: DynamicOwnerId,
 		sources: readonly PlacedDynamicPresentationSource[],
+		scaleAuthority: "browser" | "world",
 	) {
 		if (this.#destroyed)
 			throw new Error("Cannot prepare dynamics after runtime shutdown.");
@@ -3545,11 +3934,15 @@ export class GamePresentationRuntime {
 			installation.release();
 			throw cause;
 		}
+		const scriptSystem =
+			scaleAuthority === "world"
+				? this.#worldScalePhysicsScriptSystem
+				: this.#physicsScriptSystem;
 		let scriptStage: ReturnType<
-			PhysicsScriptSystem<DynamicOwnerId | SkyOwnerId>["stageOwner"]
+			PhysicsScriptSystem<DynamicOwnerId>["stageOwner"]
 		> | null = null;
 		try {
-			scriptStage = this.#physicsScriptSystem.stageOwner(
+			scriptStage = scriptSystem.stageOwner(
 				ownerId,
 				prepared.flatMap(({ nodeId, scriptClosure }) =>
 					scriptClosure === null
@@ -3589,7 +3982,7 @@ export class GamePresentationRuntime {
 			commit: () => {
 				if (state !== "prepared")
 					throw new Error(`Cannot commit dynamic owner in state ${state}.`);
-				const previousTargets = this.#dynamicBehaviorTargets.get(ownerId);
+				const previousTargets = this.#dynamicPresentationTargets.get(ownerId);
 				// No script or animation can advance between these synchronous commits. Publishing
 				// the entity last makes the complete replacement observable as one runtime action.
 				animationStage.commit();
@@ -3606,7 +3999,7 @@ export class GamePresentationRuntime {
 							entity.soundTable,
 						);
 				}
-				this.#dynamicBehaviorTargets.set(ownerId, nextTargets);
+				this.#dynamicPresentationTargets.set(ownerId, nextTargets);
 				state = "committed";
 			},
 			release: () => {
@@ -3639,6 +4032,7 @@ export class GamePresentationRuntime {
 		const activation = await this.#prepareDynamicOwner(
 			ownerId,
 			sources.map(adaptAuthoredDynamicPresentation),
+			"browser",
 		);
 		const diagnostics = activation.prepared.map(
 			({ animation, source }): AuthoredDynamicResidentDiagnostic => ({
@@ -3705,13 +4099,20 @@ export class GamePresentationRuntime {
 
 	/** Retire every presentation and behavior resource for one exact dynamic owner immediately. */
 	#retireDynamicOwner(ownerId: DynamicOwnerId): void {
-		for (const targetId of this.#dynamicBehaviorTargets.get(ownerId) ?? []) {
+		for (const targetId of this.#dynamicPresentationTargets.get(ownerId) ??
+			[]) {
 			this.#particles.destroy({ generation: 0, targetId }, 0);
 			this.#targetSoundTables.delete(targetId);
 		}
-		this.#dynamicBehaviorTargets.delete(ownerId);
+		this.#dynamicPresentationTargets.delete(ownerId);
+		for (const assets of this.#dynamicCueAssets.get(ownerId) ?? []) {
+			for (const handle of assets.emitterHandles) handle.release();
+			assets.closure.release();
+		}
+		this.#dynamicCueAssets.delete(ownerId);
 		this.#animation.removeOwner(ownerId);
 		this.#physicsScriptSystem.removeOwner(ownerId);
+		this.#worldScalePhysicsScriptSystem.removeOwner(ownerId);
 		this.#dynamics.removeOwner(ownerId);
 	}
 

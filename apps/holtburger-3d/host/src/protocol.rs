@@ -94,6 +94,9 @@ pub enum HostEvent {
     ClientPreciseJumpTransactionFeedback(
         crate::client_projection::ClientPreciseJumpTransactionFeedbackWire,
     ),
+    ClientEntitySelectionQueryResult(
+        crate::client_projection::ClientEntitySelectionQueryResultWire,
+    ),
     ClientLocalPlayerEstablished {
         #[serde(rename = "playerGuid")]
         player_guid: holtburger_common::Guid,
@@ -114,6 +117,7 @@ pub enum HostEvent {
     },
     ClientChatMessage(crate::client_projection::ClientChatMessageWire),
     ClientDynamicEntity(holtburger_core::DynamicEntityEvent),
+    ClientDynamicScriptCue(holtburger_core::ClientDynamicScriptCue),
     ClientCamera(holtburger_core::ClientCameraTick),
     ClientCameraStarted(holtburger_core::ClientCameraStartReceipt),
     ClientPresentationDiscontinuity(crate::client_projection::ClientPresentationDiscontinuity),
@@ -350,6 +354,9 @@ impl ClientEventSink for StdioEventSink {
             crate::client_projection::ClientHostEvent::PreciseJumpTransactionFeedback(feedback) => {
                 HostEvent::ClientPreciseJumpTransactionFeedback(feedback)
             }
+            crate::client_projection::ClientHostEvent::EntitySelectionQueryResult(result) => {
+                HostEvent::ClientEntitySelectionQueryResult(result)
+            }
             crate::client_projection::ClientHostEvent::LocalPlayerEstablished { player_guid } => {
                 HostEvent::ClientLocalPlayerEstablished { player_guid }
             }
@@ -370,6 +377,9 @@ impl ClientEventSink for StdioEventSink {
             }
             crate::client_projection::ClientHostEvent::DynamicEntity(event) => {
                 HostEvent::ClientDynamicEntity(event)
+            }
+            crate::client_projection::ClientHostEvent::DynamicScriptCue(cue) => {
+                HostEvent::ClientDynamicScriptCue(cue)
             }
             crate::client_projection::ClientHostEvent::Camera(tick) => {
                 HostEvent::ClientCamera(tick)
@@ -647,6 +657,35 @@ mod tests {
                     "event": "client-local-player-established",
                     "payload": {
                         "playerGuid": 0x5000_0008u64,
+                    },
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn encoded_dynamic_script_cue_has_the_browser_contract_name_and_shape() {
+        let encoded = encode_frame(&ProtocolFrame::Event {
+            event: HostEvent::ClientDynamicScriptCue(holtburger_core::ClientDynamicScriptCue {
+                guid: holtburger_common::Guid(0x5000_0008),
+                generation: 17,
+                cue: 7,
+                intensity: 0.625,
+            }),
+        })
+        .unwrap();
+        let decoded: Value = rmp_serde::from_slice(&encoded[4..]).unwrap();
+        assert_eq!(
+            decoded,
+            serde_json::json!({
+                "kind": "event",
+                "event": {
+                    "event": "client-dynamic-script-cue",
+                    "payload": {
+                        "guid": 0x5000_0008u64,
+                        "generation": 17,
+                        "cue": 7,
+                        "intensity": 0.625,
                     },
                 },
             })

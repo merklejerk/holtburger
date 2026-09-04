@@ -36,34 +36,36 @@ impl ProtocolPack for PlaySoundData {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PlayEffectData {
+pub struct PlayScriptData {
     pub target: Guid,
-    pub script_id: u32,
-    pub speed: f32,
+    /// Raw retail `PlayScript` cue resolved through the target's PhysicsScriptTable.
+    pub script_cue: u32,
+    /// Modifier used to select the first authored table threshold at or above this value.
+    pub intensity: f32,
 }
 
-impl ProtocolUnpack for PlayEffectData {
+impl ProtocolUnpack for PlayScriptData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let target = Guid::unpack(data, offset)?;
         if *offset + 8 > data.len() {
             return None;
         }
-        let script_id = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        let speed = LittleEndian::read_f32(&data[*offset + 4..*offset + 8]);
+        let script_cue = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        let intensity = LittleEndian::read_f32(&data[*offset + 4..*offset + 8]);
         *offset += 8;
-        Some(PlayEffectData {
+        Some(PlayScriptData {
             target,
-            script_id,
-            speed,
+            script_cue,
+            intensity,
         })
     }
 }
 
-impl ProtocolPack for PlayEffectData {
+impl ProtocolPack for PlayScriptData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.target.pack(buf);
-        buf.write_u32::<LittleEndian>(self.script_id).unwrap();
-        buf.write_f32::<LittleEndian>(self.speed).unwrap();
+        buf.write_u32::<LittleEndian>(self.script_cue).unwrap();
+        buf.write_f32::<LittleEndian>(self.intensity).unwrap();
     }
 }
 
@@ -98,23 +100,23 @@ mod tests {
     }
 
     #[test]
-    fn test_play_effect_fixture() {
-        let expected = PlayEffectData {
+    fn test_play_script_fixture() {
+        let expected = PlayScriptData {
             target: Guid(0x50000001),
-            script_id: 200,
-            speed: 1.5,
+            script_cue: 200,
+            intensity: 1.5,
         };
 
         // Opcode (4) + Data (12)
-        let data = &test_fixtures::PLAY_EFFECT[4..];
-        assert_pack_unpack_parity::<PlayEffectData>(data, &expected);
+        let data = &test_fixtures::PLAY_SCRIPT[4..];
+        assert_pack_unpack_parity::<PlayScriptData>(data, &expected);
 
         // Verify top-level dispatch
         let mut offset = 0;
-        let GameMessage::PlayEffect(msg) =
-            GameMessage::unpack(test_fixtures::PLAY_EFFECT, &mut offset).unwrap()
+        let GameMessage::PlayScript(msg) =
+            GameMessage::unpack(test_fixtures::PLAY_SCRIPT, &mut offset).unwrap()
         else {
-            panic!("Expected PlayEffect");
+            panic!("Expected PlayScript");
         };
         assert_eq!(*msg, expected);
     }

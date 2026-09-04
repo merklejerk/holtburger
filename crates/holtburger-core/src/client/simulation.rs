@@ -14,7 +14,6 @@ use anyhow::Result;
 #[cfg(test)]
 use holtburger_common::Quaternion;
 use holtburger_common::position::WorldPosition;
-use holtburger_common::properties::WorldObjectExt;
 use holtburger_common::{Guid, RigidTransform, Vector3};
 use holtburger_protocol::messages::*;
 use holtburger_session::Session;
@@ -400,8 +399,8 @@ fn tick_physical_entities(
     let local_drive = movement.current_local_drive_control(world, dt);
     let local_object_scale = world
         .player_entity()
-        .and_then(|entity| entity.obj_scale())
-        .unwrap_or(1.0) as f32;
+        .map(|entity| entity.scale.effective())
+        .unwrap_or(1.0);
     let projection = BodyProjectionResolver::new(&world.entities, &world.motion_runtimes);
     let entities = &world.entities;
     let prepared = world.scene.prepare_dynamic_entity_collection(
@@ -425,8 +424,8 @@ fn tick_physical_entities(
                     .id
                     .authoritative_guid()
                     .and_then(|guid| entities.get(guid))
-                    .and_then(|entity| entity.obj_scale())
-                    .unwrap_or(1.0) as f32;
+                    .map(|entity| entity.scale.effective())
+                    .unwrap_or(1.0);
                 remote_entity_actuation(body, dt, authored_offset, object_scale)
             }
         },

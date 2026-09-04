@@ -32,6 +32,8 @@
 	const CONTROLLED_ARROW_HALF_WIDTH = 5;
 	/** Generous pointer target around deliberately small map markers. */
 	const BLIP_HIT_RADIUS = 8;
+	/** Gap between a marker and its selected-identity ring. */
+	const SELECTED_BLIP_RING_GAP = 3;
 	/** Ignore click-scale pointer jitter before detaching the viewed centre. */
 	const MINIMAP_PAN_DRAG_THRESHOLD_PIXELS = 3;
 </script>
@@ -80,6 +82,7 @@
 		type MinimapBreadcrumbTrail,
 	} from "./minimap-breadcrumb-trail";
 	import { drawMinimapBreadcrumbTrail } from "./minimap-breadcrumb-renderer";
+	import { closestMinimapSelectionGuid } from "./minimap-selection";
 	import {
 		MINIMAP_AUTOMATIC_REANCHOR_DISTANCE_METERS,
 		MINIMAP_BREADCRUMB_POLICY,
@@ -87,6 +90,8 @@
 
 	/** One rendered marker's canvas-space interaction geometry. */
 	interface BlipHitTarget {
+		/** Source entity selected when this marker wins deterministic hit testing. */
+		readonly guid: number;
 		/** Display label shown while this marker is hovered. */
 		readonly name: string;
 		/** Horizontal coordinate in canvas backing-store pixels. */
@@ -143,9 +148,17 @@
 		/** Whether shell-owned placement and sizing controls are currently available. */
 		readonly editable: boolean;
 		readonly onStateChange: (state: MinimapState) => void;
+		/** Apply one completed marker click, or clear selection for an empty click. */
+		readonly onSelectEntity: (guid: number | null) => void;
 	}
 
-	const { readFrame, viewState, editable, onStateChange }: Props = $props();
+	const {
+		readFrame,
+		viewState,
+		editable,
+		onStateChange,
+		onSelectEntity,
+	}: Props = $props();
 
 	/** No faster than this; only the expensive WebGL map picture is cadence-limited. */
 	const MINIMUM_GPU_FRAME_INTERVAL_MS = 1000 / 30;
@@ -167,7 +180,10 @@
 	let minimapPanGesture: MinimapPanGesture | null = null;
 	let breadcrumbTrail: MinimapBreadcrumbTrail = EMPTY_MINIMAP_BREADCRUMB_TRAIL;
 	let cancelPointerGesture: (() => void) | null = null;
-	onDestroy(() => cancelPointerGesture?.());
+	onDestroy(() => {
+		cancelPointerGesture?.();
+		cancelMinimapPan();
+	});
 
 	onMount(() => {
 		let frameHandle: number | undefined;
@@ -312,11 +328,6 @@
 		context.clearRect(0, 0, size, size);
 		drawMinimapBreadcrumbTrail(context, breadcrumbTrail, overlay, size);
 		const hitTargets: BlipHitTarget[] = [];
-		if (!frame.source) {
-			blipHitTargets = hitTargets;
-			reconcileBlipTooltip();
-			return;
-		}
 		const environment = mapEnvironment(overlay.view.anchor);
 		for (const blip of selectMapBlips(
 			frame.presentedEntities(),
@@ -326,9 +337,10 @@
 			// Clip space is [-1, 1] with +Y up; canvas pixels run down from the top-left.
 			const x = ((blip.clipX + 1) / 2) * size;
 			const y = ((1 - blip.clipY) / 2) * size;
-			hitTargets.push({ name: blip.name, x, y });
+			hitTargets.push({ guid: blip.guid, name: blip.name, x, y });
 			if (blip.appearance.category === "controlled") {
 				drawControlledArrow(context, x, y, blip.appearance.headingRadians);
+				drawSelectedBlipRing(context, frame, blip.guid, x, y);
 				continue;
 			}
 			context.beginPath();
@@ -342,9 +354,32 @@
 			context.lineWidth = 1;
 			context.strokeStyle = "rgba(0, 0, 0, 0.65)";
 			context.stroke();
+			drawSelectedBlipRing(context, frame, blip.guid, x, y);
 		}
 		blipHitTargets = hitTargets;
 		reconcileBlipTooltip();
+	}
+
+	function drawSelectedBlipRing(
+		context: CanvasRenderingContext2D,
+		frame: MinimapFrame,
+		guid: number,
+		x: number,
+		y: number,
+	): void {
+		if (frame.selectedGuid !== guid) return;
+		context.beginPath();
+		context.arc(
+			x,
+			y,
+			Math.max(CONTROLLED_ARROW_HALF_WIDTH, MAP_BLIP_RADIUS_PIXELS) +
+				SELECTED_BLIP_RING_GAP,
+			0,
+			Math.PI * 2,
+		);
+		context.lineWidth = 2;
+		context.strokeStyle = "rgba(255, 244, 128, 0.95)";
+		context.stroke();
 	}
 
 	/** Draw the controlled character as an arrowhead pointing along its map-relative heading. */
@@ -566,12 +601,41 @@
 	}
 
 	function endMinimapPan(event: PointerEvent): void {
-		if (minimapPanGesture?.pointerId !== event.pointerId) return;
+		const gesture = minimapPanGesture;
+		if (gesture?.pointerId !== event.pointerId) return;
+		const dragged =
+			Math.hypot(
+				event.clientX - gesture.startClientX,
+				event.clientY - gesture.startClientY,
+			) > MINIMAP_PAN_DRAG_THRESHOLD_PIXELS;
+		if (dragged) moveMapPointer(event);
 		minimapPanGesture = null;
 		const canvas = overlayCanvas;
 		if (canvas?.hasPointerCapture(event.pointerId)) {
 			canvas.releasePointerCapture(event.pointerId);
 		}
+		if (!dragged) onSelectEntity(closestBlipGuid(event.clientX, event.clientY));
+	}
+
+	function cancelMinimapPan(): void {
+		const gesture = minimapPanGesture;
+		minimapPanGesture = null;
+		if (gesture && overlayCanvas?.hasPointerCapture(gesture.pointerId))
+			overlayCanvas.releasePointerCapture(gesture.pointerId);
+	}
+
+	function cancelMinimapPointer(event: PointerEvent): void {
+		if (minimapPanGesture?.pointerId === event.pointerId) cancelMinimapPan();
+	}
+
+	function closestBlipGuid(clientX: number, clientY: number): number | null {
+		const canvas = overlayCanvas;
+		if (canvas === null) return null;
+		const bounds = canvas.getBoundingClientRect();
+		if (bounds.width <= 0 || bounds.height <= 0) return null;
+		const x = ((clientX - bounds.left) * canvas.width) / bounds.width;
+		const y = ((clientY - bounds.top) * canvas.height) / bounds.height;
+		return closestMinimapSelectionGuid(blipHitTargets, x, y, BLIP_HIT_RADIUS);
 	}
 
 	function replaceMinimapPanState(state: MinimapPanState): void {
@@ -648,6 +712,8 @@
 	}
 </script>
 
+<svelte:window onblur={cancelMinimapPan} />
+
 <section
 	class="minimap"
 	style:left={`${viewState.left}px`}
@@ -677,8 +743,8 @@
 				onpointerdown={beginMinimapPan}
 				onpointermove={moveMapPointer}
 				onpointerup={endMinimapPan}
-				onpointercancel={endMinimapPan}
-				onlostpointercapture={endMinimapPan}
+				onpointercancel={cancelMinimapPointer}
+				onlostpointercapture={cancelMinimapPointer}
 				onpointerleave={clearBlipTooltip}
 			></canvas>
 		</div>

@@ -1385,6 +1385,13 @@ impl WorldState {
     ) -> Guid {
         let target_guid = self.resolve_property_target_guid(guid);
 
+        let scale_changed = matches!(
+            update,
+            PropertyUpdate::Float(
+                holtburger_common::properties::PropertyFloat::DefaultScale,
+                _
+            )
+        );
         if let Some(entity) = self.entities.get_mut(target_guid) {
             entity.set_property(update.clone());
         } else if let Some(vendor) = self.vendor.as_mut()
@@ -1394,6 +1401,9 @@ impl WorldState {
                 .find(|item| item.guid == target_guid)
         {
             item.set_property(update.clone());
+        }
+        if scale_changed {
+            self.synchronize_entity_body_scale(target_guid);
         }
 
         target_guid

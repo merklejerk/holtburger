@@ -23,6 +23,10 @@ import {
 	runWebGL2PssmFixture,
 	type WebGL2PssmFixtureResult,
 } from "./webgl2-pssm-fixture";
+import {
+	runWebGL2EntitySelectionFixture,
+	type WebGL2EntitySelectionFixtureResult,
+} from "./webgl2-entity-selection-fixture";
 import type { PortalWarpDriveTuning } from "./portal-warp-drive-tuning";
 
 /** One transient RGBA preview copied from a live two-dimensional GPU texture. */
@@ -212,6 +216,15 @@ export class WebGL2Device {
 	probeOutdoorPssm(): WebGL2PssmFixtureResult {
 		this.#assertReady();
 		return runWebGL2PssmFixture(this.#gl);
+	}
+
+	/** Prove selected-mask drawing, presentation, resize, and teardown on this browser context. */
+	probeEntitySelection(): WebGL2EntitySelectionFixtureResult {
+		this.#assertReady();
+		return runWebGL2EntitySelectionFixture(
+			this.#gl,
+			this.#portalWarpDriveTuning,
+		);
 	}
 
 	/** Return a copied discriminant suitable for app-level restart policy and diagnostics. */

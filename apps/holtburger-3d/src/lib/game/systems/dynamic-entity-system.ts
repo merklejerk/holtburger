@@ -70,17 +70,25 @@ import {
 } from "../animation/prepared-motion-playback";
 import type { DynamicEntityPlacementSystem } from "./dynamic-entity-placement-system";
 import type { RuntimeLight } from "../environment/runtime-lights";
+import type { ObjectGeometryData } from "../renderer/geometry";
 import { resolveObjectRuntimeLights } from "../environment/object-runtime-lights";
 import type {
 	DynamicEntityAdvance,
 	DynamicEntityTickBatch,
 } from "../runtime/dynamic-entity-feed";
+import type { SelectionGeometryMorphology } from "../selection/entity-interaction-shape";
 
 interface DynamicEntityRecord {
 	readonly rootNodeId: SceneNodeId;
 	readonly visualRootNodeId: SceneNodeId;
 	/** Source-neutral visual facts retained for behavior staging and deterministic phase identity. */
 	readonly source: DynamicPresentationSource;
+	/** Current authoritative whole-object scale, mutable without replacing immutable visual assets. */
+	readonly rootScale: Vec3;
+	/** Current presentation-only root transform retained so scale-only updates can rebuild bounds. */
+	readonly visualRootTransform: Mat4;
+	/** Immutable dimensionality copied from the resolved appearance template at preparation. */
+	selectionGeometryMorphology: SelectionGeometryMorphology | null;
 	/** Mutable display content updated independently from immutable visual setup facts. */
 	nameplateContent: NameplateContent | null;
 	renderable: DynamicEntityRenderable;
@@ -143,6 +151,28 @@ interface DynamicEntityRecord {
 		RigidPartDrawUnit,
 		ReusableVisibleContribution
 	>;
+}
+
+/** One currently drawn rigid part borrowed for the duration of an exact-selection visit. */
+interface DynamicEntitySelectionPart {
+	readonly geometry: ObjectGeometryData;
+	readonly localBounds: AABB3;
+	readonly sourceToLandblock: Mat4;
+	readonly ranges: readonly {
+		readonly cullFace: "back" | "front";
+		readonly indexStart: number;
+		readonly indexCount: number;
+	}[];
+}
+
+/** Current realized geometry in the landblock-local frame that owns it. */
+export interface DynamicEntitySelectionGeometry {
+	readonly landblockId: LandblockOwnerId;
+	/** Current object-local rigid bounds used when policy replaces triangles with a sphere. */
+	readonly localBounds: AABB3;
+	readonly parts: readonly DynamicEntitySelectionPart[];
+	/** Current visual-root placement, including attachment ancestry. */
+	readonly sourceToLandblock: Mat4;
 }
 
 type MutableVisibleRigidPartContribution = {
@@ -438,6 +468,7 @@ export class DynamicEntitySystem<
 		resident: PlacedDynamicPresentationSource,
 	): DynamicEntityRecord {
 		const source = resident.source;
+		const rootScale = source.scale.clone();
 		const rootNodeId = this.#placements.createRoot(
 			resident.placement,
 			// The staged generation publishes conservative bounds with playback activation.
@@ -456,7 +487,7 @@ export class DynamicEntitySystem<
 				visualRootNodeId,
 				source.presentation,
 				pose,
-				source.scale,
+				rootScale,
 			);
 		} catch (cause) {
 			this.#scene.destroyNode(visualRootNodeId);
@@ -474,6 +505,7 @@ export class DynamicEntitySystem<
 			articulatedPose: pose,
 			renderable: { parts },
 			rootNodeId,
+			rootScale,
 			source,
 			nameplateContent: source.nameplate,
 			preparedAnimation: null,
@@ -483,6 +515,8 @@ export class DynamicEntitySystem<
 			appliedEnvelopeRadius: 0,
 			presentationState: resident.initialPresentationState,
 			visualRootNodeId,
+			visualRootTransform: Mat4.identity(),
+			selectionGeometryMorphology: null,
 			visibleContributions: null,
 			visibleDepthContributionEntries: new Map(),
 			visibleContributionEntries: new Map(),
@@ -587,7 +621,7 @@ export class DynamicEntitySystem<
 				throw new Error("Validated child pose became incomplete.");
 			composeObjectPartTransform(
 				transform,
-				child.source.scale,
+				child.rootScale,
 				part.defaultScale,
 				part.localToVisualRoot,
 			);
@@ -613,6 +647,60 @@ export class DynamicEntitySystem<
 
 	getRenderable(nodeId: SceneNodeId): DynamicEntityRenderable | null {
 		return this.#entities.get(nodeId)?.renderable ?? null;
+	}
+
+	/**
+	 * Visit current posed drawing geometry synchronously without copying mesh buffers.
+	 *
+	 * The scene resolution includes attached parent-part ancestry. The view and its composed matrices
+	 * are ephemeral; consumers must finish their query before the callback returns.
+	 */
+	withSelectionGeometry<T>(
+		nodeId: SceneNodeId,
+		visit: (geometry: DynamicEntitySelectionGeometry) => T,
+	): T | null {
+		const entity = this.#entities.get(nodeId);
+		if (
+			entity === undefined ||
+			entity.presentationState.noDraw ||
+			entity.presentationState.hidden
+		)
+			return null;
+		const visualPlacement = this.#scene.getResolvedPlacement(
+			entity.visualRootNodeId,
+		);
+		if (visualPlacement === undefined) return null;
+		const parts: DynamicEntitySelectionPart[] = [];
+		for (const part of entity.renderable.parts) {
+			if (part.renderState.translucency === 1 || part.geometryData === null)
+				continue;
+			const ranges = part.depthDrawUnits.filter(
+				(range) => range.retailVisibility === "normally-visible",
+			);
+			if (ranges.length === 0) continue;
+			parts.push({
+				geometry: part.geometryData,
+				localBounds: part.localBounds,
+				ranges,
+				sourceToLandblock: multiplyMat4(
+					visualPlacement.localToLandblock,
+					part.localToVisualRoot,
+				),
+			});
+		}
+		return visit({
+			landblockId: visualPlacement.landblockId,
+			localBounds: entity.rigidPresentationBounds,
+			parts,
+			sourceToLandblock: visualPlacement.localToLandblock,
+		});
+	}
+
+	/** Return the immutable morphology installed with this entity's resolved appearance. */
+	getSelectionGeometryMorphology(
+		nodeId: SceneNodeId,
+	): SelectionGeometryMorphology | null {
+		return this.#entities.get(nodeId)?.selectionGeometryMorphology ?? null;
 	}
 
 	/** Return producer-resolved presentation policy without exposing the mutable entity record. */
@@ -805,6 +893,58 @@ export class DynamicEntitySystem<
 		if (!this.#entities.has(nodeId))
 			throw new Error(`Dynamic entity ${nodeId} does not exist.`);
 		this.#placements.applyPath(nodeId, advance, durationMs, startedAtMs);
+	}
+
+	/** Apply one projected absolute root scale without reloading or replacing visual resources. */
+	updateRootScale(nodeId: SceneNodeId, scale: number): void {
+		if (!Number.isFinite(scale) || scale <= 0)
+			throw new Error("Dynamic entity root scale must be finite and positive.");
+		const entity = this.#entities.get(nodeId);
+		if (!entity) throw new Error(`Dynamic entity ${nodeId} does not exist.`);
+		if (
+			entity.rootScale.x === scale &&
+			entity.rootScale.y === scale &&
+			entity.rootScale.z === scale
+		)
+			return;
+
+		entity.rootScale.x = scale;
+		entity.rootScale.y = scale;
+		entity.rootScale.z = scale;
+		for (const part of entity.renderable.parts) {
+			const transform =
+				entity.articulatedPose.partToObjectTransforms[part.partIndex];
+			if (!transform)
+				throw new Error(
+					`Dynamic entity ${nodeId} has no current pose for part ${part.partIndex}.`,
+				);
+			composeObjectPartTransform(
+				transform,
+				entity.rootScale,
+				part.defaultScale,
+				part.localToVisualRoot,
+			);
+			this.#scene.updateLocalTransform(part.nodeId, part.localToVisualRoot);
+		}
+		entity.rigidPresentationBounds = presentationBoundsForSample(
+			entity.renderable.parts,
+			entity.visualRootTransform,
+		);
+		entity.publishedPresentationBounds = expandBounds(
+			entity.rigidPresentationBounds,
+			entity.appliedEnvelopeRadius,
+		);
+		const prepared = entity.preparedAnimation;
+		if (!prepared || entity.cullingBounds === null)
+			throw new Error(
+				`Dynamic entity ${nodeId} has no prepared culling bounds.`,
+			);
+		entity.cullingBounds = boundsAtRootScale(
+			prepared.localBounds,
+			entity.source.scale,
+			entity.rootScale,
+		).union(entity.rigidPresentationBounds);
+		this.#publishCullingBounds(entity);
 	}
 
 	/** Replace presentation-only physics consequences without rebuilding entity resources. */
@@ -1189,6 +1329,7 @@ export class DynamicEntitySystem<
 									),
 					handle: animationResult.value,
 					parts: mergePreparedParts(entity.renderable.parts, template.parts),
+					selectionGeometryMorphology: template.selectionGeometryMorphology,
 					effectPartCount: template.parts.length,
 					emitterHandles: scriptResult.value?.emitterHandles ?? [],
 					soundTableHandle: scriptResult.value?.soundTableHandle ?? null,
@@ -1221,6 +1362,7 @@ export class DynamicEntitySystem<
 				entity.soundTableHandle = result.soundTableHandle;
 				entity.preparedAnimation = result.animation;
 				entity.renderable = { parts: result.parts };
+				entity.selectionGeometryMorphology = result.selectionGeometryMorphology;
 				entity.visibleContributions = null;
 				entity.visibleDepthContributionEntries.clear();
 				entity.visibleContributionEntries.clear();
@@ -1337,7 +1479,7 @@ export class DynamicEntitySystem<
 			}
 			composeObjectPartTransform(
 				transform,
-				entity.source.scale,
+				entity.rootScale,
 				part.defaultScale,
 				part.localToVisualRoot,
 			);
@@ -1364,6 +1506,7 @@ export class DynamicEntitySystem<
 			entity.visualRootNodeId,
 			visualRootTransform,
 		);
+		entity.visualRootTransform.copy(visualRootTransform);
 		for (const part of entity.renderable.parts) {
 			this.#scene.updateLocalTransform(part.nodeId, part.localToVisualRoot);
 		}
@@ -1473,6 +1616,7 @@ function createActiveParts(
 					color: { a: 1, b: 1, g: 1, r: 1 },
 					sourceToLandblock: Mat4.zero(),
 				},
+				geometryData: null,
 				localBounds: requiredPartBounds(part.geometry.bounds, partIndex),
 				localToVisualRoot,
 				nodeId: scene.createNode({
@@ -1514,6 +1658,7 @@ function mergePreparedParts(
 			...active,
 			defaultScale: template.defaultScale,
 			depthDrawUnits: template.depthDrawUnits,
+			geometryData: template.geometryData,
 			localBounds,
 			drawUnits: template.drawUnits.map((drawUnit) => ({
 				drawUnit,
@@ -1542,6 +1687,40 @@ function presentationBoundsForSample(
 	if (bounds === null)
 		throw new Error("Dynamic presentation has no bounded active parts.");
 	return bounds;
+}
+
+/** Rescale one origin-relative authored bound without revisiting the geometry or animation sweep. */
+function boundsAtRootScale(
+	bounds: AABB3,
+	authoredScale: Vec3,
+	currentScale: Vec3,
+): AABB3 {
+	if (
+		!Number.isFinite(authoredScale.x) ||
+		!Number.isFinite(authoredScale.y) ||
+		!Number.isFinite(authoredScale.z) ||
+		authoredScale.x <= 0 ||
+		authoredScale.y <= 0 ||
+		authoredScale.z <= 0
+	)
+		throw new Error("Authored dynamic root scale must be finite and positive.");
+	const ratio = new Vec3(
+		currentScale.x / authoredScale.x,
+		currentScale.y / authoredScale.y,
+		currentScale.z / authoredScale.z,
+	);
+	return new AABB3(
+		new Vec3(
+			bounds.min.x * ratio.x,
+			bounds.min.y * ratio.y,
+			bounds.min.z * ratio.z,
+		),
+		new Vec3(
+			bounds.max.x * ratio.x,
+			bounds.max.y * ratio.y,
+			bounds.max.z * ratio.z,
+		),
+	);
 }
 
 function requiredPartBounds(bounds: AABB3 | null, partIndex: number): AABB3 {

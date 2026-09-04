@@ -315,8 +315,6 @@ pub struct DynamicEntityPhysicalPreparationInput {
     pub setup_did: u32,
     /// Lossless part substitutions that may replace target BSP geometry.
     pub appearance: EntityAppearance,
-    /// Uniform root scale applied to movement and target geometry.
-    pub object_scale: f32,
     /// Optional authored friction; absence selects the ACE default.
     pub friction: Option<f32>,
     /// Optional authored elasticity; absence selects the ACE default.
@@ -576,7 +574,7 @@ pub struct DynamicEntitySetupPreparation {
     pub physics: EntityPhysicsSetupFacts,
     /// Validated movement spheres used for placement even when the entity remains pose-only.
     pub movement_spheres: PhysicalSphereSet,
-    /// Authored setup height scaled by the entity's own scale; zero where the setup declares none.
+    /// Authored unit-scale setup height; zero where the setup declares none.
     pub body_height: f32,
 }
 
@@ -890,7 +888,6 @@ pub fn prepare_dynamic_entity_physics(
             wcid: definition.identity.wcid,
             setup_did: definition.content.setup_did,
             appearance: &definition.appearance,
-            object_scale: definition.object_scale,
             friction: definition.friction,
             elasticity: definition.elasticity,
             physics: definition.physics,
@@ -904,9 +901,6 @@ pub fn prepare_dynamic_entity_physical_definition(
     input: DynamicEntityPhysicalPreparationInput,
     content: &ContentRepository,
 ) -> Result<DynamicPhysicalBodyDefinition, DynamicEntityPhysicalPreparationError> {
-    if !input.object_scale.is_finite() || input.object_scale <= 0.0 {
-        return Err(DynamicEntityDefinitionError::InvalidObjectScale.into());
-    }
     let friction = input
         .friction
         .map(PhysicalFriction::new)
@@ -924,7 +918,6 @@ pub fn prepare_dynamic_entity_physical_definition(
             wcid: input.wcid,
             setup_did: input.setup_did,
             appearance: &input.appearance,
-            object_scale: input.object_scale,
             friction,
             elasticity,
             physics: input.physics,
@@ -937,7 +930,6 @@ struct DynamicEntityPhysicalFacts<'a> {
     wcid: u32,
     setup_did: u32,
     appearance: &'a EntityAppearance,
-    object_scale: f32,
     friction: PhysicalFriction,
     elasticity: PhysicalElasticity,
     physics: EffectiveEntityPhysicsState,
@@ -951,7 +943,6 @@ fn prepare_dynamic_entity_physical_facts(
         wcid,
         setup_did,
         appearance,
-        object_scale,
         friction,
         elasticity,
         physics,
@@ -968,7 +959,7 @@ fn prepare_dynamic_entity_physical_facts(
     }
 
     let setup = read_setup(content, wcid, setup_did)?;
-    let setup_preparation = prepare_setup(wcid, setup_did, object_scale, &setup, content)?;
+    let setup_preparation = prepare_setup(wcid, setup_did, &setup, content)?;
     let movement_spheres = setup_preparation.movement_spheres;
     let response_policy = PhysicalBodyResponsePolicy {
         restitution: if physics.response.inelastic {
@@ -1005,7 +996,6 @@ fn prepare_dynamic_entity_physical_facts(
         wcid,
         setup_did,
         appearance,
-        object_scale,
         &setup,
         setup_preparation.physics.has_physics_bsp,
         content,
@@ -1021,7 +1011,7 @@ fn prepare_dynamic_entity_physical_facts(
             uses_physics_bsp: physics.uses_physics_bsp,
             elasticity,
             default_animation_available: setup.default_animation.is_some(),
-            default_script_available: setup.default_script.is_some(),
+            default_script_available: setup.default_script_did.is_some(),
         },
     })
 }
@@ -1033,28 +1023,25 @@ fn prepare_dynamic_entity_physical_facts(
 pub fn prepare_dynamic_entity_setup(
     wcid: u32,
     setup_did: u32,
-    object_scale: f32,
     content: &ContentRepository,
 ) -> Result<DynamicEntitySetupPreparation, DynamicEntityPhysicalPreparationError> {
     let setup = read_setup(content, wcid, setup_did)?;
-    prepare_setup(wcid, setup_did, object_scale, &setup, content)
+    prepare_setup(wcid, setup_did, &setup, content)
 }
 
 fn prepare_setup(
     wcid: u32,
     setup_did: u32,
-    object_scale: f32,
     setup: &SetupModel,
     content: &ContentRepository,
 ) -> Result<DynamicEntitySetupPreparation, DynamicEntityPhysicalPreparationError> {
-    let movement_spheres =
-        resolve_setup_physical_spheres(setup, object_scale).map_err(|source| {
-            DynamicEntityPhysicalPreparationError::MovementGeometry {
-                wcid,
-                setup_did,
-                source,
-            }
-        })?;
+    let movement_spheres = resolve_setup_physical_spheres(setup, 1.0).map_err(|source| {
+        DynamicEntityPhysicalPreparationError::MovementGeometry {
+            wcid,
+            setup_did,
+            source,
+        }
+    })?;
     let mut has_physics_bsp = false;
     for gfx_obj_did in &setup.parts {
         has_physics_bsp |= read_gfx_shape(content, wcid, *gfx_obj_did)?.is_some();
@@ -1063,10 +1050,10 @@ fn prepare_setup(
         physics: EntityPhysicsSetupFacts {
             has_physics_bsp,
             has_default_animation: setup.default_animation.is_some(),
-            has_default_script: setup.default_script.is_some(),
+            has_default_script: setup.default_script_did.is_some(),
         },
         movement_spheres,
-        body_height: setup.height * object_scale,
+        body_height: setup.height,
     })
 }
 
@@ -1113,12 +1100,11 @@ fn prepare_target_geometry(
     wcid: u32,
     setup_did: u32,
     appearance: &EntityAppearance,
-    object_scale: f32,
     setup: &SetupModel,
     cached_bsp_branch: bool,
     content: &ContentRepository,
 ) -> Result<PreparedEntityTargetGeometry, DynamicEntityPhysicalPreparationError> {
-    validate_default_script_stability(wcid, setup_did, setup.default_script, content)?;
+    validate_default_script_stability(wcid, setup_did, setup.default_script_did, content)?;
 
     let mut effective_part_dids = setup.parts.clone();
     for change in &appearance.part_changes {
@@ -1187,7 +1173,7 @@ fn prepare_target_geometry(
             ),
         });
     }
-    let whole_scale = ColliderScale::uniform(object_scale).map_err(|source| {
+    let whole_scale = ColliderScale::uniform(1.0).map_err(|source| {
         DynamicEntityPhysicalPreparationError::Content {
             wcid,
             resource_did: setup_did,
@@ -1207,18 +1193,17 @@ fn prepare_target_geometry(
                 .get(part_index)
                 .copied()
                 .unwrap_or(Vector3::new(1.0, 1.0, 1.0));
-            let scale =
-                ColliderScale::from_components(part_scale * object_scale).map_err(|source| {
-                    DynamicEntityPhysicalPreparationError::Content {
-                        wcid,
-                        resource_did: setup_did,
-                        source,
-                    }
-                })?;
+            let scale = ColliderScale::from_components(part_scale).map_err(|source| {
+                DynamicEntityPhysicalPreparationError::Content {
+                    wcid,
+                    resource_did: setup_did,
+                    source,
+                }
+            })?;
             Ok(PreparedEntityBspPart {
                 part_index,
                 gfx_obj_did,
-                local_origin: local_origin * object_scale,
+                local_origin,
                 local_orientation,
                 scale,
                 shape,

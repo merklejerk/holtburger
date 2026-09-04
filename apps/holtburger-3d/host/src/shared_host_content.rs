@@ -13,8 +13,8 @@ use crate::protocol::{HostResponse, ProtocolError, application_error, encode_jso
 use crate::{
     LoadAnimationRequest, LoadAudioRequest, LoadLandblockProfileRequest,
     LoadLandblockSourceBatchRequest, LoadParticleEmitterRequest, LoadParticleMeshesRequest,
-    LoadPhysicsScriptRequest, LoadSetupVisualRequest, LoadSoundTableRequest,
-    LoadTexturePixelsRequest, MotionTableClosureRequest,
+    LoadPhysicsScriptRequest, LoadPhysicsScriptTableRequest, LoadSetupVisualRequest,
+    LoadSoundTableRequest, LoadTexturePixelsRequest, MotionTableClosureRequest,
 };
 
 /// Static content discovered once and owned by the selected host composition.
@@ -121,6 +121,9 @@ pub enum SharedContentCommand {
     LoadPhysicsScript {
         request: LoadPhysicsScriptRequest,
     },
+    LoadPhysicsScriptTable {
+        request: LoadPhysicsScriptTableRequest,
+    },
     LoadLandblockSourceBatch {
         request: LoadLandblockSourceBatchRequest,
     },
@@ -147,6 +150,7 @@ pub const SHARED_CONTENT_COMMAND_NAMES: &[&str] = &[
     "load_particle_emitter",
     "load_particle_meshes",
     "load_physics_script",
+    "load_physics_script_table",
     "load_landblock_source_batch",
     "load_landblock_profile",
     "load_sky_source",
@@ -209,6 +213,14 @@ pub async fn dispatch_shared_content(
             crate::load_physics_script_bytes(&runtime.content().runtime, &request.script_id)
                 .await
                 .map_err(application_error)?,
+        )),
+        LoadPhysicsScriptTable { request } => Ok(HostResponse::Binary(
+            crate::load_physics_script_table_bytes(
+                &runtime.content().runtime,
+                &request.physics_script_table_id,
+            )
+            .await
+            .map_err(application_error)?,
         )),
         LoadLandblockSourceBatch { request } => Ok(HostResponse::Binary(
             crate::load_landblock_source_batch_bytes(

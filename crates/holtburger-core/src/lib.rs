@@ -3,6 +3,7 @@ pub mod client;
 pub mod content_assets;
 pub mod dynamic_entity;
 pub mod dynamic_entity_view;
+pub mod dynamic_scale_scripts;
 pub mod errors;
 pub mod kinematic_boom;
 pub mod physical_body_definition;
@@ -35,6 +36,10 @@ pub use client::collision::{
     ContentClientCollisionSource, client_entity_body_facts, client_player_body_facts,
 };
 pub use client::combat_feedback::combat_feedback_message;
+pub use client::dynamic_scale::{
+    ClientDynamicScaleFacts, ClientDynamicScaleSource, ContentClientDynamicScaleSource,
+    PreparedClientDynamicScale,
+};
 pub use client::precise_jump::{
     PreciseJumpCandidateBudget, PreciseJumpCandidateBudgetError, PreciseJumpCandidateRejection,
     PreciseJumpCandidateSet, PreciseJumpCapabilityEnvelope, PreciseJumpLandingTolerance,
@@ -51,13 +56,17 @@ pub use client::precise_jump_prediction::{
     predict_precise_jump,
 };
 pub use client::runtime_body_view_cache::RuntimeBodyViewCache;
+pub use client::selection_envelope::{
+    ClientSelectionEnvelopeFacts, ClientSelectionEnvelopeProfile, ClientSelectionEnvelopeSource,
+    ContentClientSelectionEnvelopeSource,
+};
 pub use client::types::{
     ActionResultReason, ActionResultSource, ActiveCharacterConfirmation, BusyOperationKind,
     BusyOperationResult, ClientApplicationSnapshot, ClientCharacterMotionCapabilities,
     ClientCharacterMotionFeedback, ClientCharacterMotionOutcome, ClientCharacterMotionRejection,
-    ClientCharacterSummary, ClientCommand, ClientExitCause, ClientLifecycleState,
-    ClientPresentationDiscontinuityKind, ClientState, ClientViewEvent, ClientWorldActivationCause,
-    PlayerCharacterOptions, RetryState,
+    ClientCharacterSummary, ClientCommand, ClientDynamicScriptCue, ClientExitCause,
+    ClientLifecycleState, ClientPresentationDiscontinuityKind, ClientState, ClientViewEvent,
+    ClientWorldActivationCause, PlayerCharacterOptions, RetryState,
 };
 pub use client::{
     ClientCameraClearance, ClientCameraClearanceRequest, ClientCameraCollisionProof,
@@ -71,6 +80,10 @@ pub use client::{
     PreciseJumpTransactionRejection,
 };
 pub use client::{ClientRuntime, ClientRuntimeBuilder};
+pub use client::{
+    EntitySelectionQueryOutcome, EntitySelectionQueryRequest, EntitySelectionQueryResult,
+    EntitySelectionQuerySequence, EntitySelectionQueryUnavailable,
+};
 pub use content_assets::{
     ContentAsset, ContentAssetRequest, ContentAssetRuntime, ContentAssetService,
     SetupAppearanceRequest, SurfaceTexturePixelsRequest,
@@ -100,6 +113,10 @@ pub use dynamic_entity_view::{
     DynamicEntityPresentationView, DynamicEntitySampleModeView, DynamicEntitySnapshot,
     DynamicEntityTickBatch, DynamicEntityView, DynamicEntityViewSource,
     PhysicalBodyParticipationView, dynamic_entity_display_view, project_dynamic_entity_view,
+};
+pub use dynamic_scale_scripts::{
+    DueDynamicScale, DynamicScaleScriptController, DynamicScaleScriptError, DynamicScaleTarget,
+    PreparedDynamicScaleTimeline, PreparedScaleRecord, prepare_dynamic_scale_timeline,
 };
 pub use holtburger_content::LandblockCollisionAsset;
 pub use kinematic_boom::{

@@ -1,9 +1,9 @@
 //! Measures whether a static host selection envelope covers Client-mode animated presentation.
 //!
 //! The census first measures the rejected default-pose envelope, then benchmarks the accepted
-//! origin-centered closure over effective appearance, motion, and physics-script-table profiles. It
-//! follows table-selected PhysicsScripts and their `CallPES` edges so scale-hook growth cannot hide
-//! behind a setup's `PlayScript` cue.
+//! origin-centered unit-scale closure over effective appearance and motion profiles. Whole-object
+//! scale is intentionally absent: world applies its current value once when a cached envelope is
+//! placed for a query.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::Cursor;
@@ -11,13 +11,11 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
-use byteorder::{LittleEndian, ReadBytesExt};
 use clap::Parser;
 use holtburger_common::{Placement, Sphere, Vector3};
 use holtburger_content::ContentRepository;
 use holtburger_dat::file_type::motion_table::{AnimData, MotionData};
-use holtburger_dat::file_type::setup_model::AnimationHookPayload;
-use holtburger_dat::file_type::{Animation, GfxObj, MotionTable, PhysicsScript, SetupModel};
+use holtburger_dat::file_type::{Animation, GfxObj, MotionTable, SetupModel};
 use holtburger_dat::graphics::Frame;
 use holtburger_dat::physics::BspNode;
 use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
@@ -26,7 +24,6 @@ use serde::Serialize;
 
 const SETUP_MODEL_TYPE: u32 = 0x02;
 const MOTION_TABLE_TYPE: u32 = 0x09;
-const PHYSICS_SCRIPT_TABLE_TYPE: u32 = 0x34;
 const CONTAINMENT_EPSILON: f32 = 0.000_1;
 
 #[derive(Parser)]
@@ -51,7 +48,6 @@ struct ProfileKey {
     setup_did: u32,
     effective_parts: Vec<u32>,
     motion_table_did: Option<u32>,
-    physics_script_table_did: Option<u32>,
 }
 
 #[derive(Default)]
@@ -108,7 +104,6 @@ struct Census {
     affected_catalog_templates: usize,
     affected_attackable_catalog_templates: usize,
     animation_escape_profiles: usize,
-    scale_only_escape_profiles: usize,
     escaping_profile_poses: u64,
     escaping_part_spheres: u64,
     sorting_union_escaping_profiles: usize,
@@ -117,12 +112,7 @@ struct Census {
     sorting_union_maximum_escape: f32,
     root_rotated_profiles: usize,
     root_rotation_escape_profiles: usize,
-    scale_hook_profiles: usize,
-    growing_scale_hook_profiles: usize,
-    maximum_scale_hook_end: f32,
     missing_motion_tables: BTreeSet<u32>,
-    missing_physics_script_tables: BTreeSet<u32>,
-    missing_physics_scripts: BTreeSet<u32>,
     missing_animations: BTreeSet<u32>,
     default_frame_part_mismatches: usize,
     invalid_spheres: usize,
@@ -163,14 +153,11 @@ fn main() -> Result<()> {
 
     let setups = read_setups(&content)?;
     let motion_clips = read_motion_clips(&content)?;
-    let physics_script_tables = read_physics_script_tables(&content)?;
     let templates = read_templates(&catalog)?;
     let profiles = build_profiles(&setups, &templates)?;
 
     let mut animations = HashMap::<u32, Option<Animation>>::new();
     let mut gfx_spheres = HashMap::<u32, Option<GfxSphereFact>>::new();
-    let mut scripts = HashMap::<u32, Option<PhysicsScript>>::new();
-    let mut maximum_scales = BTreeMap::<ProfileKey, f32>::new();
     let mut census = Census {
         setup_count: setups.len(),
         catalog_template_count: templates.len(),
@@ -238,21 +225,10 @@ fn main() -> Result<()> {
         if !clips.is_empty() {
             census.profiles_with_animation += 1;
         }
-        let maximum_scale = reachable_maximum_scale(
-            profile,
-            &clips,
-            &physics_script_tables,
-            &content,
-            &mut animations,
-            &mut scripts,
-            &mut census,
-        )?;
-        maximum_scales.insert(profile.clone(), maximum_scale);
         let profile_escape_start = census.escaping_part_spheres;
         let mut profile_had_root_rotation = false;
         let mut profile_had_root_rotation_escape = false;
         let mut profile_had_animation_escape = false;
-        let mut profile_had_scale_only_escape = false;
         let mut profile_had_sorting_union_escape = false;
 
         for clip in clips {
@@ -289,11 +265,6 @@ fn main() -> Result<()> {
                         let root = &animation.pos_frames[frame_index];
                         posed.center = root.orientation.rotate_vector(posed.center);
                     }
-                    let unscaled_excess = containment_excess(envelope, posed);
-                    if maximum_scale > 1.0 {
-                        posed.center = posed.center * maximum_scale;
-                        posed.radius *= maximum_scale;
-                    }
                     census.part_spheres_sampled += 1;
                     let excess = containment_excess(envelope, posed);
                     let sorting_union_excess = containment_excess(sorting_union, posed);
@@ -308,11 +279,7 @@ fn main() -> Result<()> {
                         continue;
                     }
                     pose_escaped = true;
-                    if unscaled_excess > containment_tolerance(envelope) {
-                        profile_had_animation_escape = true;
-                    } else {
-                        profile_had_scale_only_escape = true;
-                    }
+                    profile_had_animation_escape = true;
                     census.escaping_part_spheres += 1;
                     census.maximum_escape = census.maximum_escape.max(excess);
                     let ratio = containment_ratio(envelope, posed);
@@ -356,9 +323,6 @@ fn main() -> Result<()> {
         if profile_had_animation_escape {
             census.animation_escape_profiles += 1;
         }
-        if profile_had_scale_only_escape {
-            census.scale_only_escape_profiles += 1;
-        }
         if profile_had_sorting_union_escape {
             census.sorting_union_escaping_profiles += 1;
             census.sorting_union_affected_catalog_templates += sources.template_count;
@@ -379,7 +343,6 @@ fn main() -> Result<()> {
             &motion_clips,
             &animations,
             &gfx_spheres,
-            &maximum_scales,
             args.benchmark_rounds,
         );
     }
@@ -454,53 +417,6 @@ fn read_motion_clips(content: &ContentRepository) -> Result<BTreeMap<u32, Vec<Cl
     Ok(tables)
 }
 
-/// Decodes the compact 0x34 table layout proven by ACE.DatLoader's
-/// `PhysicsScriptTable`, `PhysicsScriptTableData`, and `ScriptAndModData` readers.
-fn read_physics_script_tables(content: &ContentRepository) -> Result<BTreeMap<u32, Vec<u32>>> {
-    let mut tables = BTreeMap::new();
-    for entry in content.resource_index().iter().filter(|entry| {
-        entry.namespace == EOR_PORTAL_NAMESPACE && entry.type_id == PHYSICS_SCRIPT_TABLE_TYPE
-    }) {
-        let bytes = read(content, entry.file_id)?;
-        tables.insert(
-            entry.file_id,
-            decode_physics_script_table(&bytes, entry.file_id)?,
-        );
-    }
-    Ok(tables)
-}
-
-fn decode_physics_script_table(bytes: &[u8], indexed_id: u32) -> Result<Vec<u32>> {
-    let mut reader = Cursor::new(bytes);
-    let id = reader.read_u32::<LittleEndian>()?;
-    let cue_count = reader.read_u32::<LittleEndian>()?;
-    let mut scripts = Vec::new();
-    for _ in 0..cue_count {
-        let _cue = reader.read_u32::<LittleEndian>()?;
-        let choice_count = reader.read_u32::<LittleEndian>()?;
-        for _ in 0..choice_count {
-            let modifier = reader.read_f32::<LittleEndian>()?;
-            let script_did = reader.read_u32::<LittleEndian>()?;
-            if !modifier.is_finite() {
-                bail!("PhysicsScriptTable 0x{id:08X} contains a non-finite modifier");
-            }
-            scripts.push(script_did);
-        }
-    }
-    if id != indexed_id {
-        bail!("PhysicsScriptTable index id 0x{indexed_id:08X} contains record 0x{id:08X}");
-    }
-    if reader.position() != bytes.len() as u64 {
-        bail!(
-            "PhysicsScriptTable 0x{id:08X} left {} trailing bytes",
-            bytes.len() as u64 - reader.position()
-        );
-    }
-    scripts.sort_unstable();
-    scripts.dedup();
-    Ok(scripts)
-}
-
 fn motion_data_records(table: &MotionTable) -> impl Iterator<Item = &MotionData> {
     table
         .cycles
@@ -541,7 +457,6 @@ fn build_profiles(
                 setup_did: setup.id,
                 effective_parts: setup.parts.clone(),
                 motion_table_did: setup.default_motion_table,
-                physics_script_table_did: setup.default_script_table,
             })
             .or_insert_with(ProfileSources::default);
     }
@@ -569,9 +484,6 @@ fn build_profiles(
                 setup_did,
                 effective_parts,
                 motion_table_did: template.motion_table_did.or(setup.default_motion_table),
-                physics_script_table_did: template
-                    .physics_effect_table_did
-                    .or(setup.default_script_table),
             })
             .or_insert_with(ProfileSources::default);
         sources.template_count += 1;
@@ -717,77 +629,6 @@ fn deduplicate_clips(clips: impl IntoIterator<Item = ClipSpec>) -> Vec<ClipSpec>
     unique.into_values().collect()
 }
 
-fn reachable_maximum_scale(
-    profile: &ProfileKey,
-    clips: &[ClipSpec],
-    physics_script_tables: &BTreeMap<u32, Vec<u32>>,
-    content: &ContentRepository,
-    animations: &mut HashMap<u32, Option<Animation>>,
-    scripts: &mut HashMap<u32, Option<PhysicsScript>>,
-    census: &mut Census,
-) -> Result<f32> {
-    let mut maximum = 1.0_f32;
-    let mut has_scale_hook = false;
-    for clip in clips {
-        let Some(animation) = read_animation_cached(content, clip.animation_did, animations)?
-        else {
-            continue;
-        };
-        if animation.part_frames.is_empty() {
-            continue;
-        }
-        let (low, high) = resolved_clip_window(animation, *clip);
-        for frame in &animation.part_frames[low..=high] {
-            for hook in &frame.hooks {
-                if !hook_fires_for_rate(hook.direction, clip.framerate) {
-                    continue;
-                }
-                if let AnimationHookPayload::Scale(scale) = hook.payload {
-                    has_scale_hook = true;
-                    maximum = maximum.max(scale.end.abs());
-                }
-            }
-        }
-    }
-    if let Some(table_did) = profile.physics_script_table_did {
-        let Some(table_scripts) = physics_script_tables.get(&table_did) else {
-            census.missing_physics_script_tables.insert(table_did);
-            return Ok(maximum);
-        };
-        let mut pending = table_scripts.iter().copied().collect::<BTreeSet<_>>();
-        let mut visited = BTreeSet::new();
-        while let Some(current) = pending.pop_first() {
-            if !visited.insert(current) {
-                continue;
-            }
-            let Some(script) = read_script_cached(content, current, scripts)? else {
-                census.missing_physics_scripts.insert(current);
-                continue;
-            };
-            for record in &script.records {
-                match record.hook.payload {
-                    AnimationHookPayload::Scale(scale) => {
-                        has_scale_hook = true;
-                        maximum = maximum.max(scale.end.abs());
-                    }
-                    AnimationHookPayload::CallPes(call) => {
-                        pending.insert(call.script_id);
-                    }
-                    _ => {}
-                }
-            }
-        }
-    }
-    if has_scale_hook {
-        census.scale_hook_profiles += 1;
-        census.maximum_scale_hook_end = census.maximum_scale_hook_end.max(maximum);
-        if maximum > 1.0 + CONTAINMENT_EPSILON {
-            census.growing_scale_hook_profiles += 1;
-        }
-    }
-    Ok(maximum)
-}
-
 fn read_animation_cached<'a>(
     content: &ContentRepository,
     animation_did: u32,
@@ -800,20 +641,6 @@ fn read_animation_cached<'a>(
             .and_then(|resource| Animation::read(&mut Cursor::new(resource.bytes)).ok())
     });
     Ok(cache.get(&animation_did).and_then(Option::as_ref))
-}
-
-fn read_script_cached<'a>(
-    content: &ContentRepository,
-    script_did: u32,
-    cache: &'a mut HashMap<u32, Option<PhysicsScript>>,
-) -> Result<Option<&'a PhysicsScript>> {
-    cache.entry(script_did).or_insert_with(|| {
-        content
-            .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, script_did))
-            .ok()
-            .and_then(|resource| PhysicsScript::read(&mut Cursor::new(resource.bytes)).ok())
-    });
-    Ok(cache.get(&script_did).and_then(Option::as_ref))
 }
 
 fn read_gfx_sphere_cached(
@@ -936,10 +763,6 @@ fn animation_applies_visual_root_rotation(animation: &Animation) -> bool {
             .any(|frame| frame.origin.length_squared() > 0.0)
 }
 
-fn hook_fires_for_rate(direction: i32, framerate: f32) -> bool {
-    direction == 0 || (framerate < 0.0 && direction == -1) || (framerate >= 0.0 && direction == 1)
-}
-
 fn read(content: &ContentRepository, did: u32) -> Result<Vec<u8>> {
     Ok(content
         .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, did))
@@ -961,7 +784,6 @@ fn benchmark_animation_closures(
     motion_clips: &BTreeMap<u32, Vec<ClipSpec>>,
     animations: &HashMap<u32, Option<Animation>>,
     gfx_spheres: &HashMap<u32, Option<GfxSphereFact>>,
-    maximum_scales: &BTreeMap<ProfileKey, f32>,
     rounds: usize,
 ) {
     let mut totals = BTreeMap::<ProfileKey, ClosureMeasurement>::new();
@@ -969,7 +791,6 @@ fn benchmark_animation_closures(
     for _ in 0..rounds {
         for (profile, sources) in profiles {
             let setup = &setups[&profile.setup_did];
-            let maximum_scale = maximum_scales.get(profile).copied().unwrap_or(1.0);
             let started = Instant::now();
             let (radius, posed_parts) = compute_animation_closure_radius(
                 profile,
@@ -977,7 +798,6 @@ fn benchmark_animation_closures(
                 motion_clips,
                 animations,
                 gfx_spheres,
-                maximum_scale,
             );
             std::hint::black_box(radius);
             let elapsed_nanos = started.elapsed().as_nanos();
@@ -1073,7 +893,6 @@ fn compute_animation_closure_radius(
     motion_clips: &BTreeMap<u32, Vec<ClipSpec>>,
     animations: &HashMap<u32, Option<Animation>>,
     gfx_spheres: &HashMap<u32, Option<GfxSphereFact>>,
-    maximum_scale: f32,
 ) -> (f32, u64) {
     let stable_pose = stable_pose_from_cache(setup, animations);
     let part_radii = profile
@@ -1134,7 +953,7 @@ fn compute_animation_closure_radius(
             );
         }
     }
-    (radius * maximum_scale, posed_parts)
+    (radius, posed_parts)
 }
 
 fn stable_pose_from_cache(
@@ -1311,10 +1130,6 @@ fn print_report(
         census.animation_escape_profiles
     );
     println!(
-        "    scale-only escape profiles:             {}",
-        census.scale_only_escape_profiles
-    );
-    println!(
         "  escaping profile poses:                   {}",
         census.escaping_profile_poses
     );
@@ -1356,28 +1171,8 @@ fn print_report(
         census.root_rotation_escape_profiles
     );
     println!(
-        "  scale-hook profiles:                      {}",
-        census.scale_hook_profiles
-    );
-    println!(
-        "    with scale end > 1:                     {}",
-        census.growing_scale_hook_profiles
-    );
-    println!(
-        "    maximum scale end:                      {:.6}",
-        census.maximum_scale_hook_end
-    );
-    println!(
         "  missing motion tables:                    {}",
         census.missing_motion_tables.len()
-    );
-    println!(
-        "  missing physics-script tables:            {}",
-        census.missing_physics_script_tables.len()
-    );
-    println!(
-        "  missing physics scripts:                  {}",
-        census.missing_physics_scripts.len()
     );
     println!(
         "  missing animations:                       {}",
@@ -1399,18 +1194,6 @@ fn print_report(
     if !census.missing_motion_tables.is_empty() {
         println!("\nmissing effective motion tables:");
         for did in census.missing_motion_tables.iter().take(worst) {
-            println!("  0x{did:08X}");
-        }
-    }
-    if !census.missing_physics_script_tables.is_empty() {
-        println!("\nmissing effective physics-script tables:");
-        for did in census.missing_physics_script_tables.iter().take(worst) {
-            println!("  0x{did:08X}");
-        }
-    }
-    if !census.missing_physics_scripts.is_empty() {
-        println!("\nmissing physics scripts referenced by effective tables:");
-        for did in census.missing_physics_scripts.iter().take(worst) {
             println!("  0x{did:08X}");
         }
     }
@@ -1585,28 +1368,5 @@ mod tests {
         assert_eq!(examples.len(), 2);
         assert_eq!(examples[0].excess, 3.0);
         assert_eq!(examples[1].excess, 2.0);
-    }
-
-    #[test]
-    fn physics_script_table_decoder_collects_distinct_scripts_across_cues() {
-        const TABLE: u32 = 0x3400_0001;
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(&TABLE.to_le_bytes());
-        bytes.extend_from_slice(&2_u32.to_le_bytes());
-        bytes.extend_from_slice(&7_u32.to_le_bytes());
-        bytes.extend_from_slice(&2_u32.to_le_bytes());
-        bytes.extend_from_slice(&0.5_f32.to_le_bytes());
-        bytes.extend_from_slice(&0x3300_0002_u32.to_le_bytes());
-        bytes.extend_from_slice(&1.0_f32.to_le_bytes());
-        bytes.extend_from_slice(&0x3300_0001_u32.to_le_bytes());
-        bytes.extend_from_slice(&8_u32.to_le_bytes());
-        bytes.extend_from_slice(&1_u32.to_le_bytes());
-        bytes.extend_from_slice(&1.0_f32.to_le_bytes());
-        bytes.extend_from_slice(&0x3300_0002_u32.to_le_bytes());
-
-        assert_eq!(
-            decode_physics_script_table(&bytes, TABLE).unwrap(),
-            vec![0x3300_0001, 0x3300_0002]
-        );
     }
 }

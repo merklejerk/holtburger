@@ -186,8 +186,8 @@ impl ProtocolUnpack for GameMessage {
             GameOpcode::Sound => Some(GameMessage::PlaySound(Box::new(PlaySoundData::unpack(
                 data, offset,
             )?))),
-            GameOpcode::PlayEffect => Some(GameMessage::PlayEffect(Box::new(
-                PlayEffectData::unpack(data, offset)?,
+            GameOpcode::PlayScript => Some(GameMessage::PlayScript(Box::new(
+                PlayScriptData::unpack(data, offset)?,
             ))),
             GameOpcode::PrivateUpdatePropertyInt => Some(GameMessage::PrivateUpdatePropertyInt(
                 Box::new(PrivateUpdatePropertyIntData::unpack(data, offset)?),

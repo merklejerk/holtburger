@@ -190,6 +190,16 @@ impl ClientRuntime {
 
             for event in &pending_events {
                 self.handle_runtime_world_event_with_context(event, teleport_batch);
+                let created_guid = match event {
+                    WorldEvent::EntitySpawned(entity) | WorldEvent::EntityReplaced(entity) => {
+                        Some(entity.guid)
+                    }
+                    WorldEvent::PlayerInfo(data) => Some(data.entity.guid),
+                    _ => None,
+                };
+                if let Some(guid) = created_guid {
+                    self.replay_dynamic_script_cues(guid)?;
+                }
             }
 
             pending_events = follow_up_events;
@@ -626,6 +636,9 @@ impl ClientRuntime {
             }
             GameMessage::PrivateUpdatePropertyInt(_) | GameMessage::PublicUpdatePropertyInt(_) => {
                 Ok(())
+            }
+            GameMessage::PlayScript(data) => {
+                self.route_dynamic_script_cue(data.target, data.script_cue, data.intensity)
             }
             GameMessage::GameAction(data) => self.handle_game_action(&data.action).await,
             GameMessage::ServerMessage(data) => {
@@ -1215,7 +1228,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_level_info_world_event_projects_directly() {
-        let client = build_test_client();
+        let mut client = build_test_client();
         let mut events = client.subscribe_client_view_events();
 
         client.handle_world_event(&WorldEvent::LevelInfoUpdated(CharacterLevelInfo {
@@ -1247,7 +1260,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_spell_world_event_projects_supplied_snapshot() {
-        let client = build_test_client();
+        let mut client = build_test_client();
         let mut events = client.subscribe_client_view_events();
 
         client.handle_world_event(&WorldEvent::SpellUpdated {

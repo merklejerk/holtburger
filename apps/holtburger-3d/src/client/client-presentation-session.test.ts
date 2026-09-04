@@ -8,13 +8,14 @@ import {
 	type DynamicEntityTickBatch,
 	type DynamicEntityView,
 } from "../lib/game/runtime/dynamic-entity-feed";
-import { Mat4, Vec3 } from "../lib/game/math/types";
+import { AABB3, Mat4, Vec3 } from "../lib/game/math/types";
 import type { MapTerrainSource } from "../lib/game/map/map-renderer";
 import type { ScenePlacement } from "../lib/game/scene";
 import { createLandblockWorldOrigin } from "../lib/game/landblocks";
 import type {
 	ClientCameraTick,
 	ClientCurrentState,
+	ClientDynamicScriptCue,
 } from "./client-host-contract";
 import type { ClientPresentationRuntime } from "./client-presentation-session";
 import type { SceneInterestRequest } from "../lib/game/runtime/scene-interest";
@@ -36,6 +37,12 @@ import type {
 	PortalTransitionPresentationPlan,
 	PortalTransitionPresentationReceipt,
 } from "../lib/client/portal-transition-presentation";
+import type {
+	SelectedDynamicEntityFrame,
+	SelectedDynamicEntityPresentationState,
+} from "../lib/game/runtime/game-presentation-runtime";
+import type { PrimaryCameraView } from "../lib/game/runtime/types";
+import { projectClientTargetIndicator } from "./client-target-indicator";
 
 describe("resolveClientEnvironmentSelection", () => {
 	it("uses synchronized portal-year time and the archive calendar offset", () => {
@@ -62,6 +69,38 @@ describe("resolveClientEnvironmentSelection", () => {
 });
 
 describe("ClientPresentationSession", () => {
+	it("forwards a generation-qualified script cue to the presentation runtime", async () => {
+		const playerGuid = 0x0101_0001;
+		const transport = new FakeClientTransport(currentState(playerGuid));
+		const lifecycle = new ClientLifecycleSession(transport);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		const presentation = new ClientPresentationSession({
+			canvas: fakeCanvas(),
+			hostTransport: {} as never,
+			session: lifecycle,
+			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+		});
+		await presentation.start();
+
+		transport.emit("client-dynamic-script-cue", {
+			guid: playerGuid,
+			generation: 4,
+			cue: 7,
+			intensity: 0.5,
+		});
+
+		expect(runtime.dynamicScriptCues).toEqual([
+			{
+				guid: playerGuid,
+				generation: 4,
+				cue: 7,
+				intensity: 0.5,
+			},
+		]);
+		await presentation.destroy();
+	});
+
 	it("presents portal space before local-player identity exists", async () => {
 		const playerGuid = 0x0101_0001;
 		const transport = new FakeClientTransport({
@@ -293,6 +332,68 @@ describe("ClientPresentationSession", () => {
 		});
 		expect(Math.hypot(...(center?.direction ?? []))).toBeCloseTo(1);
 		expect(right?.direction).not.toEqual(center?.direction);
+		await presentation.destroy();
+	});
+
+	it("joins the current selected bound to the exact primary view last presented", async () => {
+		const playerGuid = 0x0101_0001;
+		const transport = new FakeClientTransport(currentState(playerGuid));
+		const lifecycle = new ClientLifecycleSession(transport);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		const presentation = new ClientPresentationSession({
+			canvas: fakeCanvas(),
+			hostTransport: {} as never,
+			session: lifecycle,
+			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+		});
+		await presentation.start();
+		expect(presentation.frame(1_000).rendered).toBe(true);
+		const view = runtime.primaryViews.at(-1);
+		if (view === undefined)
+			throw new Error("Fixture did not publish a primary view.");
+		const localToLandblock = Mat4.identity();
+		localToLandblock.m41 = 12;
+		localToLandblock.m42 = 3;
+		localToLandblock.m43 = -40;
+		const selectedFrame: SelectedDynamicEntityFrame = {
+			guid: 7,
+			localBounds: new AABB3(
+				new Vec3(-0.1, -0.1, -0.1),
+				new Vec3(0.1, 0.1, 0.1),
+			),
+			placement: {
+				envCellId: null,
+				landblockId: "0x0100ffff",
+				localToLandblock,
+				scope: { kind: "outdoor" },
+			},
+		};
+		runtime.selectedFrame = selectedFrame;
+
+		expect(presentation.readTargetIndicatorFrame()).toEqual(
+			projectClientTargetIndicator({
+				bounds: selectedFrame.localBounds,
+				cssHeight: 480,
+				cssWidth: 640,
+				placement: selectedFrame.placement,
+				tuning: CLIENT_TUNING.entitySelection.offscreenIndicator,
+				view,
+			}),
+		);
+		expect(presentation.selectedEntityTrackingStatus(7)).toMatchObject({
+			kind: "tracked",
+		});
+		runtime.selectedPresentationState = { kind: "frontend-evicted" };
+		expect(presentation.selectedEntityTrackingStatus(7)).toEqual({
+			kind: "frontend-evicted",
+		});
+		runtime.selectedPresentationState = null;
+		runtime.selectedFrame = null;
+		expect(presentation.readTargetIndicatorFrame()).toBeNull();
+		expect(presentation.selectedEntityTrackingStatus(7)).toEqual({
+			kind: "temporarily-unrealized",
+		});
 		await presentation.destroy();
 	});
 
@@ -1026,10 +1127,11 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 	snapshotReplacements: DynamicEntityView[][] = [];
 	upserted: DynamicEntityView[] = [];
 	removed: Array<{ guid: number; generation: number }> = [];
+	dynamicScriptCues: ClientDynamicScriptCue[] = [];
 	eligibilityReevaluationCount = 0;
 	advances: Array<{ batch: DynamicEntityTickBatch; receivedAtMs: number }> = [];
 	sceneRequests: SceneInterestRequest[] = [];
-	primaryViews: unknown[] = [];
+	primaryViews: PrimaryCameraView[] = [];
 	audioListeners: unknown[] = [];
 	viewerLightGuid: number | null = null;
 	clearCount = 0;
@@ -1046,6 +1148,9 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 	>[0][] = [];
 	realizationDisposition: DynamicEntityRealizationDisposition = "installed";
 	dynamicOriginEnvCellId: string | null = null;
+	selectedFrame: SelectedDynamicEntityFrame | null = null;
+	selectedPresentationState: SelectedDynamicEntityPresentationState | null =
+		null;
 	envCellScopeAvailable = true;
 	#activationRevision = 0;
 	readonly #desired = new Map<number, DynamicEntityView>();
@@ -1113,6 +1218,10 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 			this.#desired.delete(guid);
 	}
 
+	playDynamicEntityScriptCue(cue: ClientDynamicScriptCue): void {
+		this.dynamicScriptCues.push(cue);
+	}
+
 	async reevaluateDynamicEntityEligibility(): ReturnType<
 		ClientPresentationRuntime["reevaluateDynamicEntityEligibility"]
 	> {
@@ -1176,7 +1285,7 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 		return { width: 640, height: 480 };
 	}
 
-	setPrimaryView(view: unknown): void {
+	setPrimaryView(view: PrimaryCameraView): void {
 		this.primaryViews.push(view);
 	}
 
@@ -1192,6 +1301,21 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 
 	setViewerEntity(guid: number | null): void {
 		this.viewerLightGuid = guid;
+	}
+
+	setSelectedEntityGuid(): void {}
+
+	selectedEntityPresentationState(): SelectedDynamicEntityPresentationState {
+		return (
+			this.selectedPresentationState ??
+			(this.selectedFrame === null
+				? { kind: "temporarily-unrealized" }
+				: { frame: this.selectedFrame, kind: "realized" })
+		);
+	}
+
+	withSpawnedEntitySelectionGeometry<T>(): T | null {
+		return null;
 	}
 
 	setPortalTransition(

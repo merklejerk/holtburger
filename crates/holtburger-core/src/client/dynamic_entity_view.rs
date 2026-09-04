@@ -30,8 +30,6 @@ pub enum ClientDynamicEntityViewError {
     MissingName { guid: u32 },
     #[error("client entity 0x{guid:08X} has no setup-model data ID")]
     MissingSetup { guid: u32 },
-    #[error("client entity 0x{guid:08X} has invalid object scale")]
-    InvalidObjectScale { guid: u32 },
     #[error("client entity 0x{guid:08X} has invalid translucency")]
     InvalidTranslucency { guid: u32 },
     #[error("client entity 0x{guid:08X} has no canonical runtime body")]
@@ -59,10 +57,7 @@ pub fn project_client_dynamic_entity(
         .csetup_id()
         .map(|did| did.0)
         .ok_or(ClientDynamicEntityViewError::MissingSetup { guid: guid.0 })?;
-    let object_scale = entity.obj_scale().unwrap_or(1.0) as f32;
-    if !object_scale.is_finite() || object_scale <= 0.0 {
-        return Err(ClientDynamicEntityViewError::InvalidObjectScale { guid: guid.0 });
-    }
+    let object_scale = entity.scale.effective();
     let translucency = entity
         .get_float_prop(PropertyFloat::Translucency)
         .unwrap_or(0.0);
@@ -525,7 +520,7 @@ mod tests {
     }
 
     #[test]
-    fn client_and_explorer_adapters_project_equal_source_facts() {
+    fn client_projection_publishes_world_owned_absolute_script_scale() {
         let guid = Guid(0x7000_0001);
         let pose = WorldPosition {
             landblock_id: Guid(0xda55_0001),
@@ -546,11 +541,14 @@ mod tests {
         entity.properties.ints.insert(PropertyInt::Level, 12);
         entity.set_did_prop(PropertyDataId::Setup, Guid(0x0200_0001));
         entity.set_did_prop(PropertyDataId::MotionTable, Guid(0x0900_0001));
-        entity.set_float_prop(PropertyFloat::DefaultScale, 1.25);
+        entity.set_property(PropertyUpdate::Float(PropertyFloat::DefaultScale, 1.25));
         entity.set_float_prop(PropertyFloat::Translucency, 0.5);
 
         let mut world = WorldState::synthetic();
         world.add_entity(entity);
+        world
+            .apply_entity_script_scale(guid, 3.0, 0.0, 1.0)
+            .unwrap();
         let client = project_client_dynamic_entity(&world, guid).unwrap();
         let body = world
             .runtime_body_view(SpatialBodyId::Entity(guid))
@@ -573,7 +571,7 @@ mod tests {
                     physics_effect_table_did: None,
                 },
                 appearance,
-                object_scale: 1.25,
+                object_scale: 3.0,
                 translucency: 0.5,
                 physics,
                 radar: crate::DynamicEntityRadarFacts::from_authored(
@@ -714,17 +712,6 @@ mod tests {
             project_client_dynamic_entity(&world, Guid(4)),
             Err(ClientDynamicEntityViewError::MissingSetup { guid: 4 })
         );
-
-        for (guid, scale) in [(5, f64::NAN), (6, 0.0)] {
-            let mut world = WorldState::synthetic();
-            let mut invalid_scale = projectable_entity(Guid(guid), pose);
-            invalid_scale.set_float_prop(PropertyFloat::DefaultScale, scale);
-            world.add_entity(invalid_scale);
-            assert_eq!(
-                project_client_dynamic_entity(&world, Guid(guid)),
-                Err(ClientDynamicEntityViewError::InvalidObjectScale { guid })
-            );
-        }
 
         for (guid, translucency) in [
             (8, f64::NAN),

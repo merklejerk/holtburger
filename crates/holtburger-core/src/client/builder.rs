@@ -25,6 +25,9 @@ pub struct ClientRuntimeBuilder {
     server_endpoint: Option<ServerEndpoint>,
     world_bootstrap: Option<Arc<WorldBootstrap>>,
     collision_source: Option<Arc<dyn super::collision::ClientCollisionSource>>,
+    dynamic_scale_source: Option<Arc<dyn super::dynamic_scale::ClientDynamicScaleSource>>,
+    selection_envelope_source:
+        Option<Arc<dyn super::selection_envelope::ClientSelectionEnvelopeSource>>,
     /// Whether an external 3D presentation must acknowledge the first pure-destination frame.
     /// Non-rendering clients retain the immediate adapter default.
     requires_external_world_reveal: bool,
@@ -38,6 +41,8 @@ impl ClientRuntimeBuilder {
             server_endpoint: None,
             world_bootstrap: None,
             collision_source: None,
+            dynamic_scale_source: None,
+            selection_envelope_source: None,
             requires_external_world_reveal: false,
             message_dump_dir: None,
         }
@@ -90,6 +95,24 @@ impl ClientRuntimeBuilder {
         source: Arc<dyn super::collision::ClientCollisionSource>,
     ) -> Self {
         self.collision_source = Some(source);
+        self
+    }
+
+    /// Injects immutable content preparation for core-owned direct scale timelines.
+    pub fn dynamic_scale_source(
+        mut self,
+        source: Arc<dyn super::dynamic_scale::ClientDynamicScaleSource>,
+    ) -> Self {
+        self.dynamic_scale_source = Some(source);
+        self
+    }
+
+    /// Injects immutable geometry preparation for host-owned selection broad phase.
+    pub fn selection_envelope_source(
+        mut self,
+        source: Arc<dyn super::selection_envelope::ClientSelectionEnvelopeSource>,
+    ) -> Self {
+        self.selection_envelope_source = Some(source);
         self
     }
 
@@ -175,6 +198,13 @@ impl ClientRuntimeBuilder {
             collision_coordinator: self
                 .collision_source
                 .map(super::collision::ClientCollisionCoordinator::new),
+            dynamic_scale_coordinator: self
+                .dynamic_scale_source
+                .map(super::dynamic_scale::ClientDynamicScaleCoordinator::new),
+            dynamic_script_inbox: super::dynamic_script::ClientDynamicScriptInbox::default(),
+            selection_envelope_coordinator: self
+                .selection_envelope_source
+                .map(super::selection_envelope::ClientSelectionEnvelopeCoordinator::new),
             requires_external_world_reveal: self.requires_external_world_reveal,
             activation: None,
             camera: super::camera::ClientCameraRuntime::new()?,
@@ -207,6 +237,9 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> ClientRuntime {
         message_counter: 0,
         movement: MovementSystem::new(),
         collision_coordinator: None,
+        dynamic_scale_coordinator: None,
+        dynamic_script_inbox: super::dynamic_script::ClientDynamicScriptInbox::default(),
+        selection_envelope_coordinator: None,
         requires_external_world_reveal: false,
         activation: None,
         camera: super::camera::ClientCameraRuntime::new().expect("test camera profile"),

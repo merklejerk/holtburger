@@ -15,8 +15,8 @@ use holtburger_content::{
     TexturePixelFormat,
 };
 use holtburger_dat::file_type::{
-    Animation, GfxObj, GfxObjDegradeInfo, Palette, ParticleEmitterInfo, PhysicsScript,
-    RenderSurface, SetupModel, SoundTable, Wave,
+    Animation, GfxObj, GfxObjDegradeInfo, MotionTable, Palette, ParticleEmitterInfo, PhysicsScript,
+    PhysicsScriptTable, RenderSurface, SetupModel, SoundTable, Wave,
 };
 use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
 use tokio::sync::{Mutex as TokioMutex, Semaphore};
@@ -33,7 +33,9 @@ pub enum ContentAssetRequest {
     TerrainMaterial(u32),
     RegionRenderProfile(u32),
     Animation(u32),
+    MotionTable(u32),
     PhysicsScript(u32),
+    PhysicsScriptTable(u32),
     ParticleEmitterInfo(u32),
     Wave(u32),
     SoundTable(u32),
@@ -83,7 +85,9 @@ pub enum ContentAsset {
     /// Shared rather than owned: warming one motion table acquires hundreds of animations, and
     /// tables overlap heavily, so two entities must not each decode the same record.
     Animation(Arc<Animation>),
+    MotionTable(Arc<MotionTable>),
     PhysicsScript(Box<PhysicsScript>),
+    PhysicsScriptTable(Box<PhysicsScriptTable>),
     ParticleEmitterInfo(Box<ParticleEmitterInfo>),
     Wave(Box<Wave>),
     SoundTable(Box<SoundTable>),
@@ -333,6 +337,19 @@ impl ContentAssetService {
                     .animation(&self.content, animation_id)
                     .with_context(|| format!("Could not load Animation 0x{animation_id:08X}"))?,
             )),
+            ContentAssetRequest::MotionTable(motion_table_id) => {
+                let resource = self
+                    .content
+                    .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, motion_table_id))
+                    .with_context(|| {
+                        format!("Could not load MotionTable 0x{motion_table_id:08X}")
+                    })?;
+                Ok(ContentAsset::MotionTable(Arc::new(
+                    MotionTable::read(&mut Cursor::new(resource.bytes)).with_context(|| {
+                        format!("Could not parse MotionTable 0x{motion_table_id:08X}")
+                    })?,
+                )))
+            }
             ContentAssetRequest::PhysicsScript(script_id) => {
                 let resource = self
                     .content
@@ -344,6 +361,19 @@ impl ContentAssetService {
                     PhysicsScript::read(&mut Cursor::new(resource.bytes)).with_context(|| {
                         format!("Could not parse PhysicsScript 0x{script_id:08X}")
                     })?,
+                )))
+            }
+            ContentAssetRequest::PhysicsScriptTable(table_id) => {
+                let resource = self
+                    .content
+                    .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, table_id))
+                    .with_context(|| {
+                        format!("Could not load PhysicsScriptTable 0x{table_id:08X}")
+                    })?;
+                Ok(ContentAsset::PhysicsScriptTable(Box::new(
+                    PhysicsScriptTable::read(&mut Cursor::new(resource.bytes)).with_context(
+                        || format!("Could not parse PhysicsScriptTable 0x{table_id:08X}"),
+                    )?,
                 )))
             }
             ContentAssetRequest::ParticleEmitterInfo(emitter_info_id) => {

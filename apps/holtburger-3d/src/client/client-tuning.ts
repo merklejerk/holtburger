@@ -1,5 +1,6 @@
 import { SHARED_FRONTEND_TUNING } from "../lib/frontend-tuning";
 import { SHARED_FRAME_SETTINGS } from "../lib/frontend-frame-settings";
+import { hexRgba, normalizedRgbaColor } from "../lib/frontend-color";
 import type { FrameSettings } from "../lib/game/renderer/renderer";
 import type { FrontendUiDiagnosticsTuning } from "../lib/frontend-tuning-contract";
 import type {
@@ -20,6 +21,12 @@ const CLIENT_FRAME_SETTINGS = {
 	...SHARED_FRAME_SETTINGS,
 	/** Match retail presentation until an explicitly enabled client diagnostic asks otherwise. */
 	showRetailHiddenGeometry: false,
+	entitySelectionOutline: {
+		/** Golden depth-always edge shared visually with the offscreen arrow. */
+		color: normalizedRgbaColor(hexRgba("#ffd129ff")),
+		/** Authored in CSS pixels so render scale changes sampling rather than apparent thickness. */
+		widthCssPixels: 2,
+	},
 } as const satisfies FrameSettings;
 
 const CLIENT_PORTAL_TRANSITION = {
@@ -70,6 +77,20 @@ export const CLIENT_TUNING = {
 		maximumAimDistance: 120,
 		/** World-space outer radius of the compact surface-aligned target ring. */
 		markerRadius: 0.65,
+	},
+	entitySelection: {
+		/** Modest staleness is sufficient for cursor feedback and selection range expiry. */
+		sampleIntervalMs: 1_000 / 15,
+		offscreenIndicator: {
+			/** Includes half the arrow, its glow radius, and a small viewport-edge gutter. */
+			safeInsetCssPixels: 64,
+			sizeCssPixels: 64,
+			fillColor: hexRgba("#e4a52d99"),
+			outlineColor: hexRgba("#fff0b099"),
+			outlineWidthCssPixels: 2,
+			glowColor: hexRgba("#ffc332cc"),
+			glowBlurCssPixels: 8,
+		},
 	},
 	sceneInterest: {
 		buildingRadius: 6,

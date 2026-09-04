@@ -175,11 +175,11 @@ pub enum GameOpcode {
     /// S2C: Set object state.
     /// Updates the visual/functional state of an object (e.g., door opening).
     SetState = 0xF74B,
-    // /// S2C: Play a script by ID.
+    // /// S2C: Play a 0x33 PhysicsScript directly by DID. Retail supports this separate message,
+    // /// but ACE does not emit it.
     // PlayScriptId = 0xF754,
-    /// S2C: Play a visual effect.
-    /// Triggers a particle system, overlay, or other visual script.
-    PlayEffect = 0xF755,
+    /// S2C: Resolve and play a PhysicsScript by `PlayScript` cue and intensity.
+    PlayScript = 0xF755,
 
     // --- Game Logic & Flow ---
     /// S2C: Wrapper for various game events.

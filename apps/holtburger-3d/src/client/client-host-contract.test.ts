@@ -9,9 +9,80 @@ import {
 	decodeClientVitals,
 	decodeClientPreciseJumpAimRequest,
 	decodeClientPreciseJumpEvaluation,
+	decodeClientEntitySelectionQueryRequest,
+	decodeClientEntitySelectionQueryResult,
 } from "./client-host-contract";
 
 describe("client host wire contract", () => {
+	it("keeps selection availability, emptiness, and strict request shape distinct", () => {
+		const camera = {
+			cameraGeneration: 2,
+			playerGuid: 0x5000_0001,
+			entityGeneration: 7,
+		};
+		expect(
+			decodeClientEntitySelectionQueryRequest({
+				camera,
+				sequence: 9,
+				anchor: 0xda55_ffff,
+				start: [1, 2, 3],
+				direction: [0, 1, 0],
+				previousCell: null,
+			}),
+		).toMatchObject({ sequence: 9 });
+		expect(
+			decodeClientEntitySelectionQueryResult({
+				status: "available",
+				sequence: 9,
+				staticLimitDistance: 192,
+				candidateGuids: [],
+			}),
+		).toMatchObject({ status: "available", candidateGuids: [] });
+		expect(
+			decodeClientEntitySelectionQueryResult({
+				status: "unavailable",
+				sequence: 10,
+				reason: "stale-camera",
+			}),
+		).toMatchObject({ status: "unavailable", reason: "stale-camera" });
+		expect(
+			decodeClientEntitySelectionQueryResult({
+				status: "unavailable",
+				sequence: 11,
+				reason: "missing-collision-owner",
+				missingCollisionOwner: 0xda55_ffff,
+			}),
+		).toMatchObject({
+			missingCollisionOwner: 0xda55_ffff,
+			reason: "missing-collision-owner",
+		});
+		expect(() =>
+			decodeClientEntitySelectionQueryResult({
+				status: "unavailable",
+				sequence: 12,
+				reason: "missing-collision-owner",
+			}),
+		).toThrow();
+		expect(() =>
+			decodeClientEntitySelectionQueryResult({
+				status: "unavailable",
+				sequence: 13,
+				reason: "stale-camera",
+				missingCollisionOwner: 0xda55_ffff,
+			}),
+		).toThrow();
+		expect(() =>
+			decodeClientEntitySelectionQueryRequest({
+				camera,
+				sequence: 9,
+				anchor: 0xda55_ffff,
+				start: [1, 2, 3],
+				direction: [0, 1, 0],
+				previousCell: null,
+				maximumDistance: 192,
+			}),
+		).toThrow();
+	});
 	it("decodes Rust-shaped lifecycle and local-player identity independently", () => {
 		const payload = encode({
 			kind: "event",

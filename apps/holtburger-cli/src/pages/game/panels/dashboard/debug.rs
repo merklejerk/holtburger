@@ -291,7 +291,7 @@ pub fn get_debug_info(
                 || e.petable_id().is_some()
                 || e.csetup_id().is_some()
                 || e.attachment.is_some()
-                || e.default_script_id().is_some()
+                || e.default_script_cue().is_some()
                 || e.autonomous_movement
             {
                 lines.push(Line::from("-- Technical Data --"));
@@ -313,7 +313,7 @@ pub fn get_debug_info(
                         attachment.parent.0, attachment.location, attachment.placement
                     )));
                 }
-                if let Some(v) = e.default_script_id() {
+                if let Some(v) = e.default_script_cue() {
                     lines.push(Line::from(format!(
                         "  DefScript: {} ({:.2})",
                         v,

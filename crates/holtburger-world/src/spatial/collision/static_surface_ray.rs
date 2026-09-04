@@ -50,6 +50,13 @@ pub struct StaticSurfaceRayHit {
     pub proof: CollisionOwnerProof,
 }
 
+/// Portal traversal and static clipping shared by selection without changing nearest-surface API.
+#[derive(Debug, Clone)]
+pub(crate) struct StaticSelectionRayTrace {
+    pub(crate) static_hit: Option<StaticSurfaceRayHit>,
+    pub(crate) reached: SpatialMembership,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(super) struct SurfaceCandidate {
     pub(super) distance: f32,
@@ -64,11 +71,12 @@ impl CollisionScene {
         request: StaticSurfaceRayRequest,
     ) -> Result<Option<StaticSurfaceRayHit>, CollisionQueryError> {
         Ok(self
-            .cast_static_surface_ray_with_policy(
+            .trace_static_surface_ray_with_policy(
                 request,
                 CollisionQueryPolicy::RequireCollisionCoverage,
             )?
-            .value)
+            .value
+            .static_hit)
     }
 
     /// Returns the earliest installed surface under one explicit coverage policy.
@@ -77,6 +85,31 @@ impl CollisionScene {
         request: StaticSurfaceRayRequest,
         policy: CollisionQueryPolicy,
     ) -> Result<UncoveredCollisionQuery<Option<StaticSurfaceRayHit>>, CollisionQueryError> {
+        let traced = self.trace_static_surface_ray_with_policy(request, policy)?;
+        Ok(UncoveredCollisionQuery {
+            value: traced.value.static_hit,
+            unavailable_owner: traced.unavailable_owner,
+        })
+    }
+
+    /// Traces the exact portal domains reached before the first covered static obstruction.
+    pub(crate) fn trace_selection_ray(
+        &self,
+        request: StaticSurfaceRayRequest,
+    ) -> Result<StaticSelectionRayTrace, CollisionQueryError> {
+        Ok(self
+            .trace_static_surface_ray_with_policy(
+                request,
+                CollisionQueryPolicy::RequireCollisionCoverage,
+            )?
+            .value)
+    }
+
+    fn trace_static_surface_ray_with_policy(
+        &self,
+        request: StaticSurfaceRayRequest,
+        policy: CollisionQueryPolicy,
+    ) -> Result<UncoveredCollisionQuery<StaticSelectionRayTrace>, CollisionQueryError> {
         validate_ray(request)?;
         let end = request.start + request.direction * request.maximum_distance;
         let full_path = self.transit_surface_ray_path(request, end)?;
@@ -183,7 +216,10 @@ impl CollisionScene {
                 .expect("an installed collision candidate retains its owner proof"),
         });
         Ok(UncoveredCollisionQuery {
-            value: hit,
+            value: StaticSelectionRayTrace {
+                static_hit: hit,
+                reached: clipped_placement,
+            },
             unavailable_owner,
         })
     }

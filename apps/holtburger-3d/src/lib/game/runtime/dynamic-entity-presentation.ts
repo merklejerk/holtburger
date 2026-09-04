@@ -3,6 +3,7 @@ import type { DecodedStaticPresentation } from "../../assets/decode-static-sourc
 import type { DatAssetId, EnvCellId, LandblockOwnerId } from "../game-types";
 import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
 import { Vec3 } from "../math/types";
+import type { ResolvedObjectBehavior } from "../resolution/landblock-layer";
 import type { PlacedDynamicPresentationSource } from "../systems/dynamic-presentation-source";
 import type {
 	DynamicEntityAttachedPlacement,
@@ -54,7 +55,12 @@ export function adaptDynamicEntityPresentation(
 			entityClass: entity.presentation.entityClass,
 			nameplate: entity.display,
 			behavior: {
-				...visual.behavior,
+				...withPhysicsScriptTableOverride(
+					visual.behavior,
+					entity.presentation.content.physicsEffectTableDid === null
+						? null
+						: datAssetId(entity.presentation.content.physicsEffectTableDid),
+				),
 				// The entity names the table it animates from; the setup's own default already
 				// resolved host-side, so an absent id here means the entity has no motion at all.
 				motionTableId:
@@ -80,6 +86,29 @@ export function adaptDynamicEntityPresentation(
 			setupId: expectedSetupId,
 		},
 	};
+}
+
+/** Apply an entity table override without breaking the closed setup-behavior classification. */
+function withPhysicsScriptTableOverride(
+	behavior: ResolvedObjectBehavior,
+	override: DatAssetId | null,
+): ResolvedObjectBehavior {
+	if (override === null) return behavior;
+	if (behavior.kind === "none") {
+		return {
+			...behavior,
+			kind: "script-only",
+			physicsScriptTableId: override,
+		};
+	}
+	if (behavior.kind === "animation-only") {
+		return {
+			...behavior,
+			kind: "animation-and-script",
+			physicsScriptTableId: override,
+		};
+	}
+	return { ...behavior, physicsScriptTableId: override };
 }
 
 /** Convert one host-accepted AC pose without re-resolving portal residency in the frontend. */

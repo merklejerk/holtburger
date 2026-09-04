@@ -48,6 +48,7 @@ pub mod outdoor_static_source;
 pub mod particle_emitter_source;
 pub mod particle_mesh_source;
 pub mod physics_script_source;
+pub mod physics_script_table_source;
 pub mod placed_motion_presentation;
 pub mod polygon_geometry;
 pub mod portal_geometry;
@@ -85,6 +86,7 @@ use outdoor_static_source::{
 use particle_emitter_source::serialize_particle_emitter_record_binary;
 use particle_mesh_source::load_particle_mesh_bytes;
 use physics_script_source::serialize_physics_script_record_binary;
+use physics_script_table_source::serialize_physics_script_table_record_binary;
 use sound_table_source::serialize_sound_table_record_binary;
 use source_projection::dat_id;
 
@@ -154,6 +156,12 @@ pub struct LoadAnimationRequest {
 #[serde(rename_all = "camelCase")]
 pub struct LoadPhysicsScriptRequest {
     pub script_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadPhysicsScriptTableRequest {
+    pub physics_script_table_id: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -359,6 +367,22 @@ pub async fn load_physics_script_bytes(
         unreachable!("PhysicsScript request must return a PhysicsScript")
     };
     serialize_physics_script_record_binary(&script)
+}
+
+/// Build the canonical typed PhysicsScriptTable response used by browser cue resolution.
+pub async fn load_physics_script_table_bytes(
+    runtime: &ContentAssetRuntime,
+    raw_table_id: &str,
+) -> Result<Vec<u8>> {
+    let table_id = parse_typed_dat_id(raw_table_id, 0x34)?;
+    let asset = runtime
+        .load(ContentAssetRequest::PhysicsScriptTable(table_id))
+        .await
+        .with_context(|| format!("Could not load PhysicsScriptTable 0x{table_id:08X}"))?;
+    let ContentAsset::PhysicsScriptTable(table) = asset else {
+        unreachable!("PhysicsScriptTable request must return a PhysicsScriptTable")
+    };
+    serialize_physics_script_table_record_binary(&table)
 }
 
 /// Build the canonical typed particle-emitter response used by the sidecar and focused host tests.

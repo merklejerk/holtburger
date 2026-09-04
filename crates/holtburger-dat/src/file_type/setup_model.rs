@@ -62,7 +62,7 @@ pub struct LightInfo {
     pub cone_angle: f32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AnimationHook {
     pub hook_type: u32,
     pub direction: i32,
@@ -83,6 +83,8 @@ pub enum AnimationHookPayload {
     SoundTable(SoundTableHookPayload),
     Scale(ScaleHookPayload),
     CreateParticle(CreateParticleHookPayload),
+    DestroyParticle(ParticleEmitterHookPayload),
+    StopParticle(ParticleEmitterHookPayload),
     CallPes(CallPesHookPayload),
     SoundTweaked(SoundTweakedHookPayload),
 }
@@ -161,6 +163,13 @@ pub struct CreateParticleHookPayload {
     /// but has no consumer.
     pub offset: Frame,
     /// Emitter identity; `0` requests an auto-assigned id, nonzero replaces any same-id emitter.
+    pub emitter_id: u32,
+}
+
+/// Identity of an existing particle emitter addressed by a stop or destroy hook.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ParticleEmitterHookPayload {
+    /// Emitter slot previously authored by `CreateParticle`.
     pub emitter_id: u32,
 }
 
@@ -252,8 +261,12 @@ impl AnimationHook {
             11 => AnimationHookPayload::Raw(read_exact_payload(reader, 16)?), // DiffusePart
             12 => AnimationHookPayload::Scale(read_scale_payload(reader)?),
             13 => AnimationHookPayload::CreateParticle(read_create_particle_payload(reader)?),
-            14 => AnimationHookPayload::Raw(read_exact_payload(reader, 4)?), // DestroyParticle
-            15 => AnimationHookPayload::Raw(read_exact_payload(reader, 4)?), // StopParticle
+            14 => AnimationHookPayload::DestroyParticle(ParticleEmitterHookPayload {
+                emitter_id: u32::read_le(reader)?,
+            }),
+            15 => AnimationHookPayload::StopParticle(ParticleEmitterHookPayload {
+                emitter_id: u32::read_le(reader)?,
+            }),
             16 => AnimationHookPayload::Raw(read_exact_payload(reader, 4)?), // NoDraw
             17 => AnimationHookPayload::NoPayload,                           // DefaultScript
             18 => AnimationHookPayload::Raw(read_exact_payload(reader, 4)?), // DefaultScriptPart
@@ -365,6 +378,9 @@ impl AnimationHookPayload {
                 payload.emitter_info_id.write_le(writer)?;
                 payload.part_index.write_le(writer)?;
                 payload.offset.write_le(writer)?;
+                payload.emitter_id.write_le(writer)
+            }
+            Self::DestroyParticle(payload) | Self::StopParticle(payload) => {
                 payload.emitter_id.write_le(writer)
             }
             Self::CallPes(payload) => {
@@ -640,7 +656,8 @@ pub struct SetupModel {
     pub selection_sphere: Sphere,
     pub lights: Vec<LightInfo>,
     pub default_animation: Option<u32>,
-    pub default_script: Option<u32>,
+    /// Direct 0x33 `PhysicsScript` DID started by retail during setup initialization.
+    pub default_script_did: Option<u32>,
     pub default_motion_table: Option<u32>,
     pub default_sound_table: Option<u32>,
     pub default_script_table: Option<u32>,
@@ -760,7 +777,7 @@ impl SetupModel {
         }
 
         let default_animation = Self::decode_optional_resource_id(u32::read_le(reader)?);
-        let default_script = Self::decode_optional_resource_id(u32::read_le(reader)?);
+        let default_script_did = Self::decode_optional_resource_id(u32::read_le(reader)?);
         let default_motion_table = Self::decode_optional_resource_id(u32::read_le(reader)?);
         let default_sound_table = Self::decode_optional_resource_id(u32::read_le(reader)?);
         let default_script_table = Self::decode_optional_resource_id(u32::read_le(reader)?);
@@ -784,7 +801,7 @@ impl SetupModel {
             selection_sphere,
             lights,
             default_animation,
-            default_script,
+            default_script_did,
             default_motion_table,
             default_sound_table,
             default_script_table,
@@ -861,7 +878,7 @@ impl SetupModel {
 
         let trailer = [
             self.default_animation,
-            self.default_script,
+            self.default_script_did,
             self.default_motion_table,
             self.default_sound_table,
             self.default_script_table,
@@ -911,7 +928,7 @@ mod tests {
             },
             lights: Vec::new(),
             default_animation: None,
-            default_script: None,
+            default_script_did: None,
             default_motion_table: None,
             default_sound_table: None,
             default_script_table: None,
@@ -967,7 +984,7 @@ mod tests {
             },
             lights: Vec::new(),
             default_animation: None,
-            default_script: None,
+            default_script_did: None,
             default_motion_table: None,
             default_sound_table: None,
             default_script_table: Some(0x0E00_0123),
@@ -981,7 +998,7 @@ mod tests {
         let unpacked = SetupModel::unpack(&mut reader).unwrap();
 
         assert_eq!(unpacked.default_animation, None);
-        assert_eq!(unpacked.default_script, None);
+        assert_eq!(unpacked.default_script_did, None);
         assert_eq!(unpacked.default_motion_table, None);
         assert_eq!(unpacked.default_sound_table, None);
         assert_eq!(unpacked.default_script_table, Some(0x0E00_0123));

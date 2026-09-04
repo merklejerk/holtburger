@@ -1,7 +1,7 @@
 import type { BakedDrawMergeCensus } from "./baked-draw-merge-census";
 import type { LandblockOwnerId } from "../game-types";
 import type { RenderExtent } from "./render-extent";
-import type { SceneNodeId } from "../scene";
+import type { ResolvedScenePlacement, SceneNodeId } from "../scene";
 import type { Camera } from "../runtime/types";
 import type { ResolvedSceneEnvironment } from "../environment/scene-environment";
 import type { LandblockLights } from "../environment/outdoor-light-index";
@@ -29,6 +29,8 @@ import type { TexturePreparer } from "../textures/texture-preparer";
 import type { AmbientOcclusionSettings } from "./ambient-occlusion-policy";
 import type { ColorGradeSettings } from "./color-grade-policy";
 import type { EntityShadowSettings } from "./entity-shadow-policy";
+import type { EntitySelectionOutlineSettings } from "./entity-selection-outline-policy";
+import type { LocalSelectionSphere } from "../selection/entity-interaction-shape";
 import type { NameplateSettings } from "./nameplate-policy";
 
 /** Environment-cell visibility scheduler selected without rebuilding resident content. */
@@ -71,6 +73,8 @@ export interface FrameSettings {
 	readonly colorGrade: ColorGradeSettings;
 	/** Outdoor directional shadows and indoor analytic actor grounding. */
 	readonly entityShadows: EntityShadowSettings;
+	/** Depth-independent selected-entity outline appearance. */
+	readonly entitySelectionOutline: EntitySelectionOutlineSettings;
 	/** Whether render passes apply the effective region-authored distance fog. */
 	readonly distanceFogEnabled: boolean;
 	/** Retail's viewer headlamp, which makes interiors without authored lights navigable. */
@@ -185,8 +189,24 @@ export interface FrameInput {
 	/** Optional transition composition; ordinary frames allocate no transition resources. */
 	readonly portalTransition?: PortalTransitionFrame;
 	readonly views: readonly FrameViewInput[];
+	/** Current realized selected presentation; null leaves the frame's x-ray pass idle. */
+	readonly selectionTarget: EntitySelectionTarget | null;
 	/** Optional frontend-resolved precise-jump indicator; absent frames draw no marker or curve. */
 	readonly worldIndicator?: WorldIndicatorInput | null;
+}
+
+/** One coherent selected root and the frontend-owned interaction silhouette shape. */
+export interface EntitySelectionTarget {
+	readonly nodeId: SceneNodeId;
+	readonly shape:
+		| { readonly kind: "rigid" }
+		| {
+				readonly kind: "sphere-proxy";
+				/** Current flattened placement, including animated attachment ancestry. */
+				readonly placement: ResolvedScenePlacement;
+				/** Sphere resolved once by the runtime and shared with exact interaction policy. */
+				readonly sphere: LocalSelectionSphere;
+		  };
 }
 
 /** Minimal presentation input for portal-space frames that must not observe or advance a world. */
@@ -265,6 +285,27 @@ export interface FrameSelectionMetrics {
 			readonly disabledAt: number;
 			readonly fullStrengthUntil: number;
 		} | null;
+	};
+	/** Optional selected-entity mask storage and exact work for this frame. */
+	readonly entitySelection: {
+		/** Live bytes owned by the full-resolution R8 mask, including retained idle storage. */
+		readonly activeMaskBytes: number;
+		/** Mask target generations allocated over this renderer lifetime. */
+		readonly allocatedTargetGenerationCount: number;
+		/** Replaced or destroyed mask generations released over this renderer lifetime. */
+		readonly disposedTargetGenerationCount: number;
+		/** Material-free selected ranges submitted into the mask this frame. */
+		readonly maskDrawCount: number;
+		/** Fullscreen composites that sampled a valid selection mask this frame. */
+		readonly compositeDrawCount: number;
+		/** Distinct current-pose rigid parts represented by submitted mask ranges. */
+		readonly selectedPartCount: number;
+		/** Sphere-proxy draws submitted instead of planar rigid carrier geometry. */
+		readonly selectedSphereProxyCount: number;
+		/** Current-pose triangles submitted into the mask this frame. */
+		readonly selectedTriangleCount: number;
+		/** Why no mask was composited, or null when selection work completed. */
+		readonly skippedReason: "no-target" | "hidden-or-empty" | null;
 	};
 	readonly envCellRenderMode: EnvCellRenderMode;
 	/** Number of camera or portal views rendered into this frame. */

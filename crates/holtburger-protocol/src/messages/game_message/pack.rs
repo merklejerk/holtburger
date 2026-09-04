@@ -247,8 +247,8 @@ impl ProtocolPack for GameMessage {
                     .unwrap();
                 data.pack(buf);
             }
-            GameMessage::PlayEffect(data) => {
-                buf.write_u32::<LittleEndian>(GameOpcode::PlayEffect as u32)
+            GameMessage::PlayScript(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::PlayScript as u32)
                     .unwrap();
                 data.pack(buf);
             }

@@ -1596,6 +1596,33 @@ provided the expected winner is explicit.
 that isolate the intended transition, add a separate collision test when precedence matters, or
 encode and validate a real ordering invariant rather than leaving it implicit in test data.
 
+## Sparse Activity Is Advanced Through a Dense Population Scan
+
+**Smell:** A recurring update scans an entire retained population even though only a small,
+explicitly activated subset can change.
+
+**Signals:**
+
+- A method says it advances "active" work but iterates every entity, task, record, or resource.
+- Most visited values immediately report that they are idle.
+- The transition that starts or finishes activity is already observable by the owning coordinator.
+- Tick cost grows with retained population rather than with live work.
+
+**Possible failure:** A rare feature imposes permanent frame or tick cost on unrelated objects.
+Large but mostly idle scenes degrade even though the amount of actual work stays constant.
+
+**Questions:** What exact transition makes an item active? Which layer already owns that transition?
+Can completion remove the item from an active set without creating a second authority? How large are
+the retained and active populations in real workloads?
+
+**Counterexamples:** A dense scan can be simpler and faster when most values are active, the
+population is tightly bounded, iteration is cache-efficient, or maintaining membership would
+duplicate authority across many mutation paths.
+
+**Possible responses:** Let the transition owner maintain a sparse active set, remove entries when
+work becomes terminal, tolerate stale entries only when the next visit removes them safely, or keep
+the dense scan when measurements prove membership accounting costs more.
+
 ## Adding Observations
 
 An observation belongs here when it has:

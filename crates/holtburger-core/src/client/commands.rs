@@ -193,6 +193,9 @@ impl ClientRuntime {
                 }
                 Ok(())
             }
+            ClientCommand::QueryEntitySelectionCandidates(request) => {
+                self.query_entity_selection_candidates(request)
+            }
             ClientCommand::CancelPreciseJump(request) => {
                 let feedback = self.precise_jump.cancel(request);
                 let _ = self.client_view_event_tx.send(

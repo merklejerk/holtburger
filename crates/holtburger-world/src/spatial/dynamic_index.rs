@@ -6,7 +6,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Vector3};
-use holtburger_content::{CollisionBox, LandblockPlacement, PlacedCollisionShape};
+use holtburger_content::{ColliderScale, CollisionBox, LandblockPlacement, PlacedCollisionShape};
 
 use super::cell_index::GlobalCellRange;
 use super::{DynamicBodyActivity, SpatialBody, SpatialBodyId, SpatialMembership};
@@ -213,6 +213,7 @@ pub(crate) fn placed_target_shapes(
         .and_then(|physical| physical.dynamic.as_ref())
         .context("body has no dynamic physical state")?;
     let geometry = &dynamic.collision.target_geometry;
+    let object_scale = dynamic.object_scale;
     let root = root_placement(
         pose.reanchor_to_landblock_owner(anchor)
             .context("could not reanchor dynamic target geometry")?,
@@ -222,15 +223,22 @@ pub(crate) fn placed_target_shapes(
             .physics_bsp_parts
             .iter()
             .map(|part| {
-                let placement = compose_part(&root, part.local_origin, part.local_orientation);
-                PlacedCollisionShape::new(part.shape.clone(), placement, part.scale)
+                let placement = compose_part(
+                    &root,
+                    part.local_origin * object_scale,
+                    part.local_orientation,
+                );
+                let scale = ColliderScale::from_components(part.scale.components() * object_scale)?;
+                PlacedCollisionShape::new(part.shape.clone(), placement, scale)
             })
             .collect()
     } else {
+        let scale =
+            ColliderScale::from_components(geometry.fallback_scale.components() * object_scale)?;
         geometry
             .fallback_shapes
             .iter()
-            .map(|shape| PlacedCollisionShape::new(shape.clone(), root, geometry.fallback_scale))
+            .map(|shape| PlacedCollisionShape::new(shape.clone(), root, scale))
             .collect()
     }
 }

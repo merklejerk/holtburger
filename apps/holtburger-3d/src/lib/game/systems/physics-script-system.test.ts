@@ -36,9 +36,12 @@ function build(options: { roll?: () => number; liveTargets?: boolean } = {}) {
 	const router = new BehaviorEventRouter(
 		{
 			effects: {
-				applyScale: vi.fn(),
 				applySetOmega: vi.fn(),
 				applyTransparentPart: vi.fn(),
+			},
+			scale: {
+				applyScale: (_target, _values, mode) =>
+					mode === "initial-state" ? "folded-initial-state" : "executed",
 			},
 			scheduler: {
 				scheduleActivation: (target, activation) => {
@@ -51,7 +54,11 @@ function build(options: { roll?: () => number; liveTargets?: boolean } = {}) {
 				playSound: () => "unprepared" as const,
 				playSoundTableKey: () => "unprepared" as const,
 			},
-			particles: { createEmitter: () => "unprepared" as const },
+			particles: {
+				createEmitter: () => "unprepared" as const,
+				destroy: () => {},
+				stop: () => {},
+			},
 			targets: { isLive: () => options.liveTargets ?? true },
 		},
 		256,
@@ -175,6 +182,55 @@ describe("PhysicsScriptSystem", () => {
 		expect(harness.repository.getDiagnostics().referenceCount).toBe(1);
 		closure.release();
 		expect(harness.repository.getDiagnostics().referenceCount).toBe(0);
+	});
+
+	it("serializes roots appended before the next frame behind the existing tail", async () => {
+		// The installed root has length zero. The first cue starts immediately and runs for two
+		// seconds; the second cue must queue behind it even though neither cue has activated yet.
+		const initial = await harness.repository.acquireClosure("0x330003ec");
+		const firstCue = await harness.repository.acquireClosure("0x330003d8");
+		const secondCue = await harness.repository.acquireClosure("0x33000711");
+		harness.system.install("owner", TARGET, initial, 0);
+		expect(harness.system.appendRoot("owner", TARGET, firstCue, 0)).toBe(true);
+		expect(harness.system.appendRoot("owner", TARGET, secondCue, 0)).toBe(true);
+
+		harness.system.advance(0);
+		expect(
+			sounds(harness.router.getObservations()).map(
+				(observation) => observation.provenance.assetId,
+			),
+		).toEqual(["0x330003d8"]);
+
+		harness.system.advance(1.99);
+		expect(sounds(harness.router.getObservations())).toHaveLength(1);
+		harness.system.advance(2);
+		expect(
+			sounds(harness.router.getObservations()).map(
+				(observation) => observation.provenance.assetId,
+			),
+		).toEqual(["0x330003d8", "0x33000711"]);
+
+		initial.release();
+		firstCue.release();
+		secondCue.release();
+	});
+
+	it("rejects a live root addressed to a stale generation", async () => {
+		const initial = await harness.repository.acquireClosure("0x330003ec");
+		const cue = await harness.repository.acquireClosure("0x330003d8");
+		harness.system.install("owner", TARGET, initial, 0);
+
+		expect(
+			harness.system.appendRoot(
+				"owner",
+				{ ...TARGET, generation: TARGET.generation + 1 },
+				cue,
+				0,
+			),
+		).toBe(false);
+
+		initial.release();
+		cue.release();
 	});
 
 	it("stages a complete owner replacement without exposing or retiring either side early", async () => {

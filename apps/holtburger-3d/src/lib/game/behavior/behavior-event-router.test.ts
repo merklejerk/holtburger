@@ -39,13 +39,32 @@ function build(isLive = true) {
 		createEmitter: vi.fn<
 			(...args: never[]) => "created" | "intentionally-inert" | "unprepared"
 		>(() => "unprepared"),
+		destroy: vi.fn(),
+		stop: vi.fn(),
 	};
 	const scheduler = { scheduleActivation: vi.fn() };
+	const scale = {
+		applyScale: vi.fn(
+			(
+				_target,
+				_values,
+				mode: "initial-state" | "live",
+			): "executed" | "folded-initial-state" | "owned-by-world" =>
+				mode === "initial-state" ? "folded-initial-state" : "executed",
+		),
+	};
 	const router = new BehaviorEventRouter(
-		{ audio, effects, particles, scheduler, targets: { isLive: () => isLive } },
+		{
+			audio,
+			effects,
+			particles,
+			scale,
+			scheduler,
+			targets: { isLive: () => isLive },
+		},
 		4,
 	);
-	return { audio, effects, particles, router, scheduler };
+	return { audio, effects, particles, router, scale, scheduler };
 }
 
 const SET_OMEGA: PreparedBehaviorCommand = {
@@ -64,6 +83,22 @@ describe("BehaviorEventRouter", () => {
 			router.dispatch(SET_OMEGA, TARGET, PROVENANCE, "initial-state"),
 		).toBe("folded-initial-state");
 		expect(effects.applySetOmega).toHaveBeenCalledTimes(2);
+	});
+
+	it("consumes world-owned scale without touching the browser effect scalar", () => {
+		const { effects, router, scale } = build();
+		scale.applyScale.mockReturnValue("owned-by-world");
+
+		expect(
+			router.dispatch(
+				{ durationSeconds: 2, end: 3, kind: "scale" },
+				TARGET,
+				PROVENANCE,
+				"live",
+			),
+		).toBe("owned-by-world");
+		expect(scale.applyScale).toHaveBeenCalledOnce();
+		expect(effects.applyScale).not.toHaveBeenCalled();
 	});
 
 	it("hands a chained activation to the scheduler instead of running it inline", () => {

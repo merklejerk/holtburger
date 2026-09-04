@@ -1075,6 +1075,42 @@ impl SpatialScene {
         self.set_dynamic_physical_body(body_id, Some(replacement), collision_filter, initial_cell)
     }
 
+    /// Applies one absolute object scale to retained unit geometry and invalidates stale contacts.
+    pub fn set_dynamic_body_object_scale(
+        &mut self,
+        body_id: SpatialBodyId,
+        object_scale: f32,
+    ) -> Result<(), super::PhysicalBodyDefinitionError> {
+        let Some(body) = self.body_store.body_mut(body_id) else {
+            return Ok(());
+        };
+        let Some(physical) = body.physical.as_mut() else {
+            return Ok(());
+        };
+        let Some(dynamic) = physical.dynamic.as_mut() else {
+            return Ok(());
+        };
+        if dynamic.object_scale.to_bits() == object_scale.to_bits() {
+            return Ok(());
+        }
+        let definition = dynamic.unit_movement.uniformly_scaled(object_scale)?;
+        let cell = physical.response.cell();
+        physical.definition = definition;
+        physical.response = super::physical_body::initial_response(definition, cell);
+        dynamic.object_scale = object_scale;
+        dynamic.placement =
+            cell.map_or_else(SpatialMembership::outdoor, SpatialMembership::interior);
+        dynamic.wake();
+        self.collision_reports.force_end_where(|contact| {
+            contact.recipient == body_id
+                || matches!(
+                    contact.source,
+                    CollisionReportSource::DynamicBody { peer, .. } if peer == body_id
+                )
+        });
+        Ok(())
+    }
+
     /// Replaces live local kinematics and clears incompatible response memory in one scene write.
     ///
     /// Launch, wake, and later scenario corrections use this seam instead of mutating public body
@@ -2035,6 +2071,7 @@ impl SpatialScene {
 #[cfg(test)]
 mod physical_body_tests {
     use super::*;
+    use crate::spatial::dynamic_index::target_bounds;
     use crate::{
         CollisionReportClassification, CollisionReportPhase, DynamicBodyCollisionDefinition,
         DynamicPhysicalBodyConfiguration, DynamicPhysicalBodyDefinition, EdgeProtection,
@@ -3752,6 +3789,89 @@ mod physical_body_tests {
 
         assert!(placement.reaches_outdoors());
         assert_eq!(placement.reached_env_cells(), &[cell]);
+    }
+
+    #[test]
+    fn object_scale_reuses_unit_geometry_and_refreshes_portal_membership() {
+        let cell = Guid(0xda55_0100);
+        let now = Instant::now();
+        let body_id = SpatialBodyId::Entity(Guid(0x7000_0001));
+        let target_geometry = PreparedEntityTargetGeometry {
+            physics_bsp_parts: vec![PreparedEntityBspPart {
+                part_index: 0,
+                gfx_obj_did: 0x0100_0001,
+                local_origin: Vector3::new(0.2, 0.0, 0.0),
+                local_orientation: Quaternion::identity(),
+                scale: ColliderScale::uniform(2.0).unwrap(),
+                shape: bsp_shape(Vector3::zero(), 0.05),
+            }],
+            fallback_setup_did: 0x0200_0001,
+            fallback_shapes: Vec::new(),
+            fallback_scale: ColliderScale::uniform(1.0).unwrap(),
+        };
+        let configuration = dynamic_definition_with_geometry(
+            free_definition(Vector3::zero(), 0.1),
+            false,
+            target_geometry,
+            true,
+        );
+        let mut scene = SpatialScene::new();
+        scene.register_body(SpatialBody::new(
+            body_id,
+            WorldPosition {
+                landblock_id: cell,
+                ..pose(Vector3::new(-1.0, 0.0, 0.0))
+            },
+            now,
+        ));
+        scene
+            .set_dynamic_physical_body(
+                body_id,
+                Some(configuration),
+                PhysicalCollisionFilter::ALL,
+                Some(cell),
+            )
+            .unwrap();
+
+        let retained_geometry = Arc::clone(
+            &scene
+                .body(body_id)
+                .unwrap()
+                .physical
+                .as_ref()
+                .unwrap()
+                .dynamic
+                .as_ref()
+                .unwrap()
+                .collision
+                .target_geometry,
+        );
+        scene.set_dynamic_body_object_scale(body_id, 4.0).unwrap();
+
+        let body = scene.body(body_id).unwrap();
+        let physical = body.physical.as_ref().unwrap();
+        let dynamic = physical.dynamic.as_ref().unwrap();
+        assert_eq!(dynamic.unit_movement.spheres().primary().radius, 0.1);
+        assert_eq!(physical.definition.spheres().primary().radius, 0.4);
+        assert!(Arc::ptr_eq(
+            &retained_geometry,
+            &dynamic.collision.target_geometry
+        ));
+        let bounds = target_bounds(body).unwrap();
+        assert_eq!(bounds.len(), 1);
+        assert!((bounds[0].minimum().x - -0.6).abs() < 0.000_01);
+        assert!((bounds[0].maximum().x - 0.2).abs() < 0.000_01);
+
+        scene
+            .prepare_dynamic_entity_collection(
+                &portal_collision_scene(),
+                0.03,
+                collection_actuation,
+            )
+            .unwrap();
+        let membership = scene.body(body_id).unwrap().spatial_membership();
+        assert!(membership.reaches_outdoors());
+        assert_eq!(membership.reached_env_cells(), &[cell]);
     }
 
     #[test]

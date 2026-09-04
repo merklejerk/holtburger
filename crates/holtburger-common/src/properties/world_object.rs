@@ -195,8 +195,10 @@ pub trait WorldObjectExt: WorldObjectPropertyAccessors {
         self.get_data_prop(PropertyDataId::Setup)
     }
 
-    fn default_script_id(&self) -> Option<Guid> {
+    /// Raw retail `PlayScript` cue stored in the historical PhysicsScript property slot.
+    fn default_script_cue(&self) -> Option<u32> {
         self.get_data_prop(PropertyDataId::PhysicsScript)
+            .map(|value| value.0)
     }
 
     fn default_script_intensity(&self) -> Option<f64> {

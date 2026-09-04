@@ -851,7 +851,8 @@ pub struct ObjectDescriptionData {
     pub velocity: Option<Vector3>,
     pub acceleration: Option<Vector3>,
     pub omega: Option<Vector3>,
-    pub default_script_id: Option<u32>,
+    /// Raw retail `PlayScript` cue resolved through the effective PhysicsScriptTable.
+    pub default_script_cue: Option<u32>,
     pub default_script_intensity: Option<f32>,
     pub sequences: [u16; 9],
     pub public_weenie_desc: PublicWeenieDescription,
@@ -880,7 +881,7 @@ impl Default for ObjectDescriptionData {
             velocity: None,
             acceleration: None,
             omega: None,
-            default_script_id: None,
+            default_script_cue: None,
             default_script_intensity: None,
             sequences: [0; 9],
             public_weenie_desc: PublicWeenieDescription::default(),
@@ -1092,12 +1093,12 @@ impl ProtocolUnpack for ObjectDescriptionData {
             *offset += 12;
         }
 
-        let mut default_script_id = None;
+        let mut default_script_cue = None;
         if physics_flags.contains(PhysicsDescriptionFlag::DEFAULT_SCRIPT) {
             if *offset + 4 > data.len() {
                 return None;
             }
-            default_script_id = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+            default_script_cue = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
             *offset += 4;
         }
 
@@ -1143,7 +1144,7 @@ impl ProtocolUnpack for ObjectDescriptionData {
             velocity,
             acceleration,
             omega,
-            default_script_id,
+            default_script_cue,
             default_script_intensity,
             sequences,
             public_weenie_desc,
@@ -1277,7 +1278,7 @@ impl ProtocolPack for ObjectDescriptionData {
             .physics_flags
             .contains(PhysicsDescriptionFlag::DEFAULT_SCRIPT)
         {
-            buf.write_u32::<LittleEndian>(self.default_script_id.unwrap_or(0))
+            buf.write_u32::<LittleEndian>(self.default_script_cue.unwrap_or(0))
                 .unwrap();
         }
         if self
@@ -1345,7 +1346,7 @@ mod tests {
                 y: 8.0,
                 z: 7.0,
             }),
-            default_script_id: Some(0x33000001),
+            default_script_cue: Some(0x5A),
             default_script_intensity: Some(0.75),
             sequences: [1, 2, 3, 4, 5, 6, 7, 8, 9],
             public_weenie_desc: PublicWeenieDescription {

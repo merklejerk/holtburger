@@ -296,6 +296,7 @@
 			cameraFovRadians: (EXPLORER_TUNING.camera.framing.fov * Math.PI) / 180,
 			cameraHeadingRadians: cameraYawRadians,
 			presentedEntities: readPresentedMapEntities,
+			selectedGuid: null,
 			source: runtime,
 			subject:
 				controlledGuid !== null && controlledAnchor !== null
@@ -2034,6 +2035,7 @@
 				onStateChange={(next) => {
 					minimap = next;
 				}}
+				onSelectEntity={() => undefined}
 			/>
 		{/if}
 		<ExplorerTools

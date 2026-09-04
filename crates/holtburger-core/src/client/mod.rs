@@ -20,6 +20,8 @@ pub mod collision;
 pub mod combat_feedback;
 mod commands;
 mod dynamic_entity_view;
+pub mod dynamic_scale;
+mod dynamic_script;
 mod messages;
 mod movement;
 pub mod movement_types;
@@ -28,6 +30,8 @@ pub mod precise_jump_prediction;
 mod precise_jump_runtime;
 mod runtime;
 pub mod runtime_body_view_cache;
+pub mod selection_envelope;
+pub mod selection_query;
 mod simulation;
 pub mod types;
 pub use builder::ClientRuntimeBuilder;
@@ -46,6 +50,10 @@ pub use precise_jump_runtime::{
     PreciseJumpCancelRequest, PreciseJumpCommitRequest, PreciseJumpEvaluation,
     PreciseJumpEvaluationId, PreciseJumpEvaluationStatus, PreciseJumpTargetView,
     PreciseJumpTransactionFeedback, PreciseJumpTransactionOutcome, PreciseJumpTransactionRejection,
+};
+pub use selection_query::{
+    EntitySelectionQueryOutcome, EntitySelectionQueryRequest, EntitySelectionQueryResult,
+    EntitySelectionQuerySequence, EntitySelectionQueryUnavailable,
 };
 use types::*;
 
@@ -92,6 +100,12 @@ pub struct ClientRuntime {
     movement: MovementSystem,
     /// Stages static collision and local-player body products outside the simulation turn.
     collision_coordinator: Option<collision::ClientCollisionCoordinator>,
+    /// Prepares direct scale timelines off-turn and joins them to exact entity instances.
+    dynamic_scale_coordinator: Option<dynamic_scale::ClientDynamicScaleCoordinator>,
+    /// Retains raw script cues that precede entity creation for both script consumers.
+    dynamic_script_inbox: dynamic_script::ClientDynamicScriptInbox,
+    /// Resolves immutable visual profiles off-turn and publishes exact-generation envelopes.
+    selection_envelope_coordinator: Option<selection_envelope::ClientSelectionEnvelopeCoordinator>,
     /// Whether the selected composition owns an asynchronous destination reveal product.
     requires_external_world_reveal: bool,
     /// One generation-scoped replacement transition. `None` means the active scene is continuous
@@ -652,11 +666,11 @@ impl ClientRuntime {
             .send(ClientViewEvent::LifecycleChanged(self.lifecycle()));
     }
 
-    pub fn handle_world_event(&self, event: &WorldEvent) {
+    pub fn handle_world_event(&mut self, event: &WorldEvent) {
         self.emit_world_view_projection(event);
     }
 
-    fn emit_world_view_projection(&self, event: &WorldEvent) {
+    fn emit_world_view_projection(&mut self, event: &WorldEvent) {
         match event {
             WorldEvent::PlayerEnchantmentsUpdated { enchantments } => {
                 let _ =
@@ -777,6 +791,8 @@ impl ClientRuntime {
                         entity: data.entity.clone(),
                     });
                 self.emit_dynamic_entity_upsert(data.entity.guid);
+                self.observe_dynamic_scale_entity(data.entity.guid);
+                self.observe_selection_envelope_entity(data.entity.guid);
                 self.emit_self_movement_kinematics_updated();
             }
             WorldEvent::TeleportStarted { sequence } => {
@@ -793,6 +809,8 @@ impl ClientRuntime {
                         entity: entity.clone(),
                     });
                 self.emit_dynamic_entity_upsert(entity.guid);
+                self.observe_dynamic_scale_entity(entity.guid);
+                self.observe_selection_envelope_entity(entity.guid);
                 if entity.guid == self.world.player.guid {
                     self.emit_self_movement_kinematics_updated();
                 }
@@ -804,6 +822,8 @@ impl ClientRuntime {
                         entity: entity.clone(),
                     });
                 self.emit_dynamic_entity_upsert(entity.guid);
+                self.observe_dynamic_scale_entity(entity.guid);
+                self.observe_selection_envelope_entity(entity.guid);
                 if entity.guid == self.world.player.guid {
                     self.emit_self_movement_kinematics_updated();
                 }
@@ -834,12 +854,28 @@ impl ClientRuntime {
                         entity: entity.clone(),
                     });
                 self.emit_dynamic_entity_upsert(entity.guid);
+                self.observe_dynamic_scale_entity(entity.guid);
+                self.observe_selection_envelope_entity(entity.guid);
+            }
+            WorldEvent::EntityAppearanceUpdated { guid } => {
+                self.emit_dynamic_entity_upsert(*guid);
+                self.observe_selection_envelope_entity(*guid);
             }
             WorldEvent::EntityDespawned { guid, generation } => {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::EntityDespawned { guid: *guid });
                 self.emit_dynamic_entity_removed(*guid, *generation);
+                self.remove_dynamic_scale_entity(crate::DynamicScaleTarget {
+                    guid: *guid,
+                    instance_sequence: u16::try_from(*generation)
+                        .expect("world entity generation is the protocol instance sequence"),
+                });
+                self.remove_selection_envelope_entity(crate::DynamicScaleTarget {
+                    guid: *guid,
+                    instance_sequence: u16::try_from(*generation)
+                        .expect("world entity generation is the protocol instance sequence"),
+                });
                 if *guid == self.world.player.guid {
                     self.emit_self_movement_kinematics_updated();
                 }
@@ -852,6 +888,8 @@ impl ClientRuntime {
                         updates: updates.clone(),
                     });
                 self.emit_dynamic_entity_upsert(*guid);
+                self.observe_dynamic_scale_entity(*guid);
+                self.observe_selection_envelope_entity(*guid);
                 if *guid == self.world.player.guid
                     && Self::updates_affect_self_movement_kinematics(updates.as_slice())
                 {
@@ -3121,7 +3159,7 @@ mod tests {
 
     #[test]
     fn fellowship_activity_is_only_projected_after_entering_world() {
-        let client = builder::build_test_client(ClientState::EnteringWorld);
+        let mut client = builder::build_test_client(ClientState::EnteringWorld);
         let mut events = client.subscribe_client_view_events();
 
         client.handle_world_event(&WorldEvent::FellowshipActivity(
@@ -3135,7 +3173,7 @@ mod tests {
 
     #[test]
     fn fellowship_activity_projects_when_in_world() {
-        let client = builder::build_test_client(ClientState::InWorld);
+        let mut client = builder::build_test_client(ClientState::InWorld);
         let mut events = client.subscribe_client_view_events();
 
         client.handle_world_event(&WorldEvent::FellowshipActivity(
@@ -3200,7 +3238,7 @@ mod tests {
 
     #[test]
     fn entity_vector_updates_project_to_client_view_kinematics() {
-        let client = builder::build_test_client(ClientState::InWorld);
+        let mut client = builder::build_test_client(ClientState::InWorld);
         let mut events = client.subscribe_client_view_events();
         let guid = Guid(0x5000_0001);
         let velocity = Vector3::new(1.0, 2.0, 3.0);

@@ -8,12 +8,17 @@
 	} from "../../client/client-chat-policy";
 	import type { ClientChatMessage } from "../../client/client-host-contract";
 	import type { MinimapFrame } from "../../app/minimap-frame";
+	import type { MapEntity } from "../../lib/game/map/map-blips";
+	import { Mat4 } from "../../lib/game/math/types";
+	import type { DynamicEntityView } from "../../lib/game/runtime/dynamic-entity-feed";
+	import type { ScenePlacement } from "../../lib/game/scene";
 	import {
 		MINIMAP_AUTOMATIC_REANCHOR_DISTANCE_METERS,
 		MINIMAP_BREADCRUMB_POLICY,
 	} from "../../app/minimap-tuning";
 	import type { ClientPresentationDiagnostics } from "../../client/client-presentation-session";
 	import type { ClientToast } from "../../client/client-toast-center";
+	import type { ClientTargetIndicatorFrame } from "../../client/client-target-indicator";
 
 	interface ClientHudHarnessRectangle {
 		readonly height: number;
@@ -23,6 +28,11 @@
 	}
 
 	interface ClientHudHarnessState {
+		/** Bounds used to drive the actual game-canvas pointer handlers. */
+		readonly gameCanvas: ClientHudHarnessRectangle;
+		/** Browser-resolved cursor for the game canvas. */
+		readonly gameCanvasCursor: string;
+		readonly hoveredGuid: number | null;
 		readonly jumpActionDisabled: boolean | null;
 		readonly mode: "runtime" | "layout";
 		/** Coordinates currently displayed beneath the map. */
@@ -35,8 +45,26 @@
 		readonly minimapOverlayInkPixels: number;
 		/** Last overlay arc count; this fixture's null map source leaves breadcrumbs as its only arcs. */
 		readonly minimapOverlayArcCalls: number;
+		/** Bounds used to drive the actual minimap overlay pointer handlers. */
+		readonly minimapOverlayCanvas: ClientHudHarnessRectangle;
 		readonly moveHandles: Readonly<Record<string, ClientHudHarnessRectangle>>;
+		/** Camera deltas emitted by completed drag classification. */
+		readonly orbitDeltas: readonly { readonly x: number; readonly y: number }[];
+		/** Left-clicks consumed by precise-jump mode. */
+		readonly preciseJumpActivationCount: number;
 		readonly preciseJumpEnterCount: number;
+		/** Selection changes emitted by either viewport or minimap input. */
+		readonly selectionEvents: readonly (number | null)[];
+		/** Cadence ticks delivered independently of pointer presence. */
+		readonly selectionMaintenanceCount: number;
+		/** Identity currently read back by the minimap frame. */
+		readonly selectedGuid: number | null;
+		readonly selectionAnnouncement: string;
+		readonly targetIndicator: null | {
+			readonly fill: string | null;
+			readonly filter: string;
+			readonly rectangle: ClientHudHarnessRectangle;
+		};
 		readonly surfaces: Readonly<Record<string, ClientHudHarnessRectangle>>;
 		readonly toast: {
 			readonly preview: boolean;
@@ -44,6 +72,16 @@
 			readonly text: string;
 		} | null;
 		readonly viewport: { readonly height: number; readonly width: number };
+		/** Completed viewport click locations sent to entity acquisition. */
+		readonly viewportSelectionPoints: readonly {
+			readonly x: number;
+			readonly y: number;
+		}[];
+		/** Bounded-cadence viewport hover samples received by the component boundary. */
+		readonly viewportHoverPoints: readonly {
+			readonly x: number;
+			readonly y: number;
+		}[];
 	}
 
 	interface ClientHudHarnessApi {
@@ -63,6 +101,18 @@
 		readonly setMinimapSubject: (guid: number | null, indoor: boolean) => void;
 		/** Activate the map's visible reset control. */
 		readonly resetMinimap: () => void;
+		/** Restore deterministic interaction inputs and clear recorded output. */
+		readonly resetSelectionFixture: () => void;
+		/** Toggle the lifecycle-owned camera capability supplied to the HUD. */
+		readonly setCameraEnabled: (enabled: boolean) => void;
+		/** Choose whether subsequent viewport hover samples resolve an entity. */
+		readonly setHoverHitEnabled: (enabled: boolean) => void;
+		/** Toggle precise-jump pointer ownership. */
+		readonly setPreciseJumpActive: (active: boolean) => void;
+		/** Replace the frame-hot target projection consumed by the real indicator component. */
+		readonly setTargetIndicatorFrame: (
+			frame: ClientTargetIndicatorFrame | null,
+		) => void;
 		readonly setRuntimeTransients: (visible: boolean) => void;
 		readonly toggleMode: () => void;
 	}
@@ -85,6 +135,24 @@
 				: null,
 	);
 	let preciseJumpEnterCount = 0;
+	let preciseJumpActivationCount = 0;
+	let selectionMaintenanceCount = 0;
+	let preciseJumpActive = $state(false);
+	let cameraEnabled = $state(true);
+	let selectedGuid = $state<number | null>(null);
+	let hoveredGuid = $state<number | null>(null);
+	let hoverHitEnabled = true;
+	let targetIndicatorFrame: ClientTargetIndicatorFrame | null = null;
+	const orbitDeltas: { x: number; y: number }[] = [];
+	const selectionEvents: (number | null)[] = [];
+	const viewportSelectionPoints: { x: number; y: number }[] = [];
+	const viewportHoverPoints: { x: number; y: number }[] = [];
+	const cameraController = {
+		orbit(deltaX: number, deltaY: number): void {
+			orbitDeltas.push({ x: deltaX, y: deltaY });
+		},
+		zoom(): void {},
+	};
 	/** Imperative fixture position, matching the production map frame's presentation-rate source. */
 	let minimapSubjectWorldX = 100;
 	const minimapSubjectWorldY = 20;
@@ -147,7 +215,9 @@
 		return {
 			cameraFovRadians: Math.PI / 3,
 			cameraHeadingRadians: 0,
-			presentedEntities: () => [],
+			presentedEntities: () =>
+				minimapSubjectGuid === null ? [] : [minimapEntity()],
+			selectedGuid,
 			source: null,
 			subject: {
 				anchor: {
@@ -166,6 +236,33 @@
 					? { kind: "free-camera" as const }
 					: { guid: minimapSubjectGuid, kind: "controlled-entity" as const }),
 			},
+		};
+	}
+
+	/** One visible marker centred on the fixture subject. */
+	function minimapEntity(): MapEntity {
+		const transform = Mat4.identity();
+		// Landblock (0, 1) begins at world (0, -192), placing this at (100, -200).
+		transform.m41 = 100;
+		transform.m43 = -8;
+		return {
+			placement: {
+				envCellId: null,
+				landblockId: "0x0001ffff",
+				localTransform: transform,
+			} as ScenePlacement,
+			view: {
+				identity: { guid: 7, wcid: 42 },
+				display: { name: "Selection Fixture", level: null },
+				presentation: {
+					entityClass: "mob",
+					radar: {
+						behavior: "ShowAlways",
+						category: "mob",
+					},
+				},
+				physics: { hidden: false },
+			} as unknown as DynamicEntityView,
 		};
 	}
 
@@ -214,6 +311,17 @@
 				drawingBufferHeight: 720,
 			},
 			draw: {
+				entitySelection: {
+					activeMaskBytes: 0,
+					allocatedTargetGenerationCount: 0,
+					compositeDrawCount: 0,
+					disposedTargetGenerationCount: 0,
+					maskDrawCount: 0,
+					selectedSphereProxyCount: 0,
+					selectedPartCount: 0,
+					selectedTriangleCount: 0,
+					skippedReason: "no-target",
+				},
 				viewCount: 1,
 				visibleSceneEntries: 148,
 				visibleStaticNodes: 912,
@@ -283,7 +391,22 @@
 		const toastElement = document.querySelector<HTMLElement>(".client-toast");
 		const jumpAction =
 			document.querySelector<HTMLButtonElement>(".jump-precise");
+		const gameCanvas = document.querySelector<HTMLElement>(".client-canvas");
+		const targetIndicator =
+			document.querySelector<HTMLElement>(".target-indicator");
+		const targetIndicatorGlass = targetIndicator?.querySelector<SVGPathElement>(
+			".target-indicator__glass",
+		);
+		const minimapOverlayCanvas = document.querySelector<HTMLElement>(
+			".minimap-overlay-canvas",
+		);
+		if (gameCanvas === null || minimapOverlayCanvas === null) {
+			throw new Error("Client HUD interaction canvases are unavailable.");
+		}
 		return {
+			gameCanvas: rectangle(gameCanvas),
+			gameCanvasCursor: getComputedStyle(gameCanvas).cursor,
+			hoveredGuid,
 			jumpActionDisabled: jumpAction?.disabled ?? null,
 			mode: lock.getAttribute("aria-pressed") === "true" ? "layout" : "runtime",
 			minimapCoordinates:
@@ -295,8 +418,18 @@
 			minimapResetVisible: document.querySelector(".minimap-reset") !== null,
 			minimapOverlayArcCalls: readMinimapOverlayArcCalls(),
 			minimapOverlayInkPixels: countMinimapOverlayInkPixels(),
+			minimapOverlayCanvas: rectangle(minimapOverlayCanvas),
 			moveHandles,
+			orbitDeltas: orbitDeltas.map((delta) => ({ ...delta })),
+			preciseJumpActivationCount,
 			preciseJumpEnterCount,
+			selectedGuid,
+			selectionAnnouncement:
+				document
+					.querySelector<HTMLElement>(".selection-announcement")
+					?.textContent?.trim() ?? "",
+			selectionEvents: [...selectionEvents],
+			selectionMaintenanceCount,
 			surfaces,
 			toast:
 				toastElement === null
@@ -306,10 +439,26 @@
 							role: toastElement.getAttribute("role"),
 							text: toastElement.textContent?.trim() ?? "",
 						},
+			targetIndicator:
+				targetIndicator === null || targetIndicator.hidden
+					? null
+					: {
+							fill:
+								targetIndicatorGlass === null ||
+								targetIndicatorGlass === undefined
+									? null
+									: getComputedStyle(targetIndicatorGlass).fill,
+							filter: getComputedStyle(targetIndicator).filter,
+							rectangle: rectangle(targetIndicator),
+						},
 			viewport: {
 				height: clientWorld().clientHeight,
 				width: clientWorld().clientWidth,
 			},
+			viewportSelectionPoints: viewportSelectionPoints.map((point) => ({
+				...point,
+			})),
+			viewportHoverPoints: viewportHoverPoints.map((point) => ({ ...point })),
 		};
 	}
 
@@ -436,7 +585,8 @@
 
 	function resetMinimap(): void {
 		const reset = document.querySelector<HTMLButtonElement>(".minimap-reset");
-		if (reset === null) throw new Error("Client HUD minimap reset is unavailable.");
+		if (reset === null)
+			throw new Error("Client HUD minimap reset is unavailable.");
 		reset.click();
 	}
 
@@ -460,6 +610,46 @@
 		minimapSubjectIndoor = indoor;
 	}
 
+	function setCameraEnabled(enabled: boolean): void {
+		cameraEnabled = enabled;
+	}
+
+	function setPreciseJumpActive(active: boolean): void {
+		preciseJumpActive = active;
+	}
+
+	function setTargetIndicatorFrame(
+		frame: ClientTargetIndicatorFrame | null,
+	): void {
+		targetIndicatorFrame = frame;
+	}
+
+	function selectEntity(guid: number | null): void {
+		selectedGuid = guid;
+		selectionEvents.push(guid);
+	}
+
+	function setHoverHitEnabled(enabled: boolean): void {
+		hoverHitEnabled = enabled;
+	}
+
+	function resetSelectionFixture(): void {
+		minimapSubjectWorldX = 100;
+		minimapSubjectGuid = 1;
+		minimapSubjectIndoor = false;
+		selectedGuid = null;
+		hoveredGuid = null;
+		hoverHitEnabled = true;
+		targetIndicatorFrame = null;
+		cameraEnabled = true;
+		preciseJumpActive = false;
+		preciseJumpActivationCount = 0;
+		orbitDeltas.length = 0;
+		selectionEvents.length = 0;
+		viewportSelectionPoints.length = 0;
+		viewportHoverPoints.length = 0;
+	}
+
 	onMount(() => {
 		const overlayObservation = observeMinimapOverlayArcCalls();
 		readMinimapOverlayArcCalls = overlayObservation.read;
@@ -472,7 +662,12 @@
 			moveMinimapSubjectByBreadcrumbSpacing,
 			moveMinimapSubjectPastAutomaticReanchor,
 			resetMinimap,
+			resetSelectionFixture,
+			setCameraEnabled,
+			setHoverHitEnabled,
 			setMinimapSubject,
+			setPreciseJumpActive,
+			setTargetIndicatorFrame,
 			setRuntimeTransients,
 			teleportMinimapSubject,
 			toggleMode,
@@ -486,17 +681,34 @@
 </script>
 
 <ClientWorldView
-	cameraController={null}
-	preciseJumpActive={false}
+	cameraController={cameraEnabled ? cameraController : null}
+	{preciseJumpActive}
 	onPreciseJumpAim={() => undefined}
-	onPreciseJumpActivate={() => undefined}
+	onPreciseJumpActivate={() => {
+		preciseJumpActivationCount += 1;
+	}}
 	onPreciseJumpEnter={() => {
 		preciseJumpEnterCount += 1;
 	}}
+	onViewportSelect={(x, y) => {
+		viewportSelectionPoints.push({ x, y });
+		selectEntity(7);
+	}}
+	onViewportHover={(x, y) => {
+		viewportHoverPoints.push({ x, y });
+		hoveredGuid = hoverHitEnabled ? 7 : null;
+	}}
+	onMaintainEntitySelection={() => {
+		selectionMaintenanceCount += 1;
+	}}
+	onSelectEntity={selectEntity}
 	debugEnabled={true}
 	{readMinimapFrame}
 	{readDiagnostics}
 	{readFrameRates}
+	readTargetIndicatorFrame={() => targetIndicatorFrame}
+	selectedEntityGuid={selectedGuid}
+	hoveredEntityGuid={hoveredGuid}
 	showRetailHiddenGeometry={false}
 	onShowRetailHiddenGeometryChange={() => undefined}
 	playerName="Alice"

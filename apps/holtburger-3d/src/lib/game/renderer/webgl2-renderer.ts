@@ -45,6 +45,7 @@ import {
 	type FrameInput,
 	type FrameSelectionMetrics,
 	type FrameSettings,
+	type EntitySelectionTarget,
 	type RendererFrameDiagnostics,
 	type RendererFrameFeedback,
 	type FrameViewInput,
@@ -85,6 +86,10 @@ import {
 import type { VisibleDynamicContributions } from "../systems/components";
 import { WebGL2WorldMarkerPass } from "./webgl2-world-marker-pass";
 import { WebGL2WorldTrajectoryPass } from "./webgl2-world-trajectory-pass";
+import {
+	WebGL2EntitySelectionPass,
+	type WebGL2EntitySelectionMask,
+} from "./webgl2-entity-selection-pass";
 import {
 	type NameplateDrawInstance,
 	type NameplateScopedDrawInstance,
@@ -294,6 +299,10 @@ import {
 	type FlatScenePresentationInput,
 } from "./webgl2-flat-scene-presentation";
 import type { PortalWarpDriveTuning } from "./portal-warp-drive-tuning";
+import {
+	DEFAULT_ENTITY_SELECTION_OUTLINE_SETTINGS,
+	type EntitySelectionOutlineSettings,
+} from "./entity-selection-outline-policy";
 import { resolvePortalTransitionComposition } from "./portal-transition-composition";
 import { WebGL2TransitionSnapshot } from "./webgl2-transition-snapshot";
 import {
@@ -707,6 +716,17 @@ interface MutableFrameSelectionMetrics {
 			fullStrengthUntil: number;
 		} | null;
 	};
+	entitySelection: {
+		activeMaskBytes: number;
+		allocatedTargetGenerationCount: number;
+		compositeDrawCount: number;
+		disposedTargetGenerationCount: number;
+		maskDrawCount: number;
+		selectedSphereProxyCount: number;
+		selectedPartCount: number;
+		selectedTriangleCount: number;
+		skippedReason: "no-target" | "hidden-or-empty" | null;
+	};
 	envCellRenderMode: FrameInput["frameSettings"]["envCellRenderMode"];
 	viewCount: number;
 	visibleSceneEntries: number;
@@ -822,6 +842,8 @@ export class WebGL2Renderer implements Renderer {
 	#submittedNameplateInstanceCount = 0;
 	#submittedNameplateDrawCount = 0;
 	#frameWorldIndicator: WorldIndicatorInput | null = null;
+	/** Current realized selected root, resolved by the runtime rather than retained by the renderer. */
+	#frameSelectionTarget: EntitySelectionTarget | null = null;
 	#frameViewerEntityIdentity: string | null = null;
 	/** This frame's owner-local sources, replaced every submission rather than retained. */
 	#particleSources: readonly ParticleSourceRange[] = [];
@@ -911,6 +933,8 @@ export class WebGL2Renderer implements Renderer {
 	#flatSceneTarget: WebGL2FlatSceneTarget | null = null;
 	/** Flat color/depth presenter, compiled lazily with the first flat frame. */
 	#flatScenePresentation: WebGL2FlatScenePresentation | null = null;
+	/** Lazy material-free selected-entity mask owner. */
+	#entitySelectionPass: WebGL2EntitySelectionPass | null = null;
 	/** Outgoing world color retained only while a transition compositor needs it. */
 	#transitionSnapshot: WebGL2TransitionSnapshot | null = null;
 	#transitionSnapshotGeneration: number | null = null;
@@ -979,6 +1003,9 @@ export class WebGL2Renderer implements Renderer {
 		enabled: false,
 		parameters: DEFAULT_COLOR_GRADE_PARAMETERS,
 	};
+	/** This frame's depth-independent selection edge appearance. */
+	#frameEntitySelectionOutline: EntitySelectionOutlineSettings =
+		DEFAULT_ENTITY_SELECTION_OUTLINE_SETTINGS;
 	/** Explicit session; null avoids clocks, extension probes, and GPU query resources. */
 	#frameProfiler: WebGL2FrameProfiler | null = null;
 	/** Reused metrics record for the frame's effective AO distance interval. */
@@ -995,6 +1022,17 @@ export class WebGL2Renderer implements Renderer {
 			tileCount: 0,
 			disposedGenerationCount: 0,
 			effectiveDistanceFade: null,
+		},
+		entitySelection: {
+			activeMaskBytes: 0,
+			allocatedTargetGenerationCount: 0,
+			compositeDrawCount: 0,
+			disposedTargetGenerationCount: 0,
+			maskDrawCount: 0,
+			selectedSphereProxyCount: 0,
+			selectedPartCount: 0,
+			selectedTriangleCount: 0,
+			skippedReason: "no-target",
 		},
 		envCellRenderMode: "flat",
 		terrainFrameInputs: 0,
@@ -1206,6 +1244,9 @@ export class WebGL2Renderer implements Renderer {
 								}
 							: null,
 					},
+					entitySelection: {
+						...this.#frameSelectionMetrics.entitySelection,
+					},
 				},
 			}),
 			setProfilingEnabled: (enabled) => this.#setFrameProfilingEnabled(enabled),
@@ -1356,10 +1397,13 @@ export class WebGL2Renderer implements Renderer {
 		}
 		this.#skyClockSeconds = input.timeSeconds;
 		this.#frameWorldIndicator = input.worldIndicator ?? null;
+		this.#frameSelectionTarget = input.selectionTarget;
 		this.#frameViewerEntityIdentity = input.viewerEntityIdentity;
 		// Snapshotted here because the flat schedule never receives frame settings, and both
 		// schedules reach presentation through the same shared helper.
 		this.#frameColorGrade = input.frameSettings.colorGrade;
+		this.#frameEntitySelectionOutline =
+			input.frameSettings.entitySelectionOutline;
 		const quality = input.frameSettings.quality;
 		validateRenderScale(quality.renderScale, "Frame settings");
 		this.#renderScale = quality.renderScale;
@@ -1533,6 +1577,8 @@ export class WebGL2Renderer implements Renderer {
 			this.#compiledTextureFiltering = this.#frameTextureFiltering;
 		}
 		this.#frameColorGrade = input.frameSettings.colorGrade;
+		this.#frameEntitySelectionOutline =
+			input.frameSettings.entitySelectionOutline;
 		validateRenderScale(
 			input.frameSettings.quality.renderScale,
 			"Frame settings",
@@ -1673,6 +1719,13 @@ export class WebGL2Renderer implements Renderer {
 			flatTarget?.allocatedGenerationCount ?? 0;
 		this.#frameSelectionMetrics.flatSceneDisposedGenerationCount =
 			flatTarget?.disposedGenerationCount ?? 0;
+		const selectionDiagnostics = this.#entitySelectionPass?.getDiagnostics();
+		this.#frameSelectionMetrics.entitySelection.activeMaskBytes =
+			selectionDiagnostics?.activeMaskBytes ?? 0;
+		this.#frameSelectionMetrics.entitySelection.allocatedTargetGenerationCount =
+			selectionDiagnostics?.allocatedTargetGenerationCount ?? 0;
+		this.#frameSelectionMetrics.entitySelection.disposedTargetGenerationCount =
+			selectionDiagnostics?.disposedTargetGenerationCount ?? 0;
 		const saoPass = this.#saoPass;
 		const ambientOcclusionMetrics =
 			this.#frameSelectionMetrics.ambientOcclusion;
@@ -1896,7 +1949,14 @@ export class WebGL2Renderer implements Renderer {
 			frameSettings.showRetailHiddenGeometry,
 			profile,
 		);
-		this.#presentFlatScene(target, profile);
+		this.#presentFlatScene(
+			target,
+			profile,
+			this.#drawEntitySelectionMask(
+				view,
+				frameSettings.showRetailHiddenGeometry,
+			),
+		);
 	}
 
 	async destroy(): Promise<void> {
@@ -1918,6 +1978,8 @@ export class WebGL2Renderer implements Renderer {
 		this.#portalTransitionClip = null;
 		this.#flatScenePresentation?.destroy();
 		this.#flatScenePresentation = null;
+		this.#entitySelectionPass?.destroy();
+		this.#entitySelectionPass = null;
 		this.#saoPass?.destroy();
 		this.#saoPass = null;
 		this.#skyPass?.destroy();
@@ -2905,6 +2967,12 @@ export class WebGL2Renderer implements Renderer {
 		metrics.ambientOcclusion.tileCount = 0;
 		metrics.ambientOcclusion.disposedGenerationCount = 0;
 		metrics.ambientOcclusion.effectiveDistanceFade = null;
+		metrics.entitySelection.compositeDrawCount = 0;
+		metrics.entitySelection.maskDrawCount = 0;
+		metrics.entitySelection.selectedSphereProxyCount = 0;
+		metrics.entitySelection.selectedPartCount = 0;
+		metrics.entitySelection.selectedTriangleCount = 0;
+		metrics.entitySelection.skippedReason = "no-target";
 		metrics.envCellRenderMode = envCellRenderMode;
 		metrics.terrainFrameInputs = 0;
 		metrics.viewCount = viewCount;
@@ -3147,7 +3215,7 @@ export class WebGL2Renderer implements Renderer {
 	}
 
 	#createParticleDrawContext(
-		view: PreparedView,
+		view: PreparedViewGeometry,
 		clockSeconds: number,
 		opacityScale: number,
 	): ParticleDrawContext {
@@ -3307,7 +3375,11 @@ export class WebGL2Renderer implements Renderer {
 		if (indicator !== null) this.#drawWorldMarker(view, indicator.marker, null);
 		this.#gl.bindVertexArray(null);
 		this.#drawPortalTransitionTunnel(target, showRetailHiddenGeometry, profile);
-		this.#presentFlatScene(target, profile);
+		this.#presentFlatScene(
+			target,
+			profile,
+			this.#drawEntitySelectionMask(view, showRetailHiddenGeometry),
+		);
 	}
 
 	#reconcileNameplateTextureCache(
@@ -3664,6 +3736,47 @@ export class WebGL2Renderer implements Renderer {
 		return owner.resizeDimensions(this.#frameWidth, this.#frameHeight);
 	}
 
+	/** Draw the selected current pose outside ordinary visibility and scene-depth policy. */
+	#drawEntitySelectionMask(
+		view: PreparedViewGeometry,
+		showRetailHiddenGeometry: boolean,
+	): WebGL2EntitySelectionMask | null {
+		const target = this.#frameSelectionTarget;
+		if (target === null) {
+			this.#frameSelectionMetrics.entitySelection.skippedReason = "no-target";
+			return null;
+		}
+		const nodeId = target.nodeId;
+		const contributions = this.#expandDynamicContributions(nodeId, true);
+		const rendered = (this.#entitySelectionPass ??=
+			new WebGL2EntitySelectionPass(this.#gl, {
+				getGeometry: (key) =>
+					this.#resources.getGeometry(this.#world.resolveGeometry(key)),
+			})).render({
+			anchorCoordinates: view.anchorCoordinates,
+			clipFromAnchor: view.clipFromAnchor,
+			contributions,
+			height: this.#frameHeight,
+			nodeId,
+			shape: target.shape,
+			showRetailHiddenGeometry,
+			width: this.#frameWidth,
+		});
+		if (rendered === null) {
+			this.#frameSelectionMetrics.entitySelection.skippedReason =
+				"hidden-or-empty";
+			return null;
+		}
+		const metrics = this.#frameSelectionMetrics.entitySelection;
+		metrics.compositeDrawCount += 1;
+		metrics.maskDrawCount += rendered.work.maskDrawCount;
+		metrics.selectedSphereProxyCount += rendered.work.selectedSphereProxyCount;
+		metrics.selectedPartCount += rendered.work.selectedPartCount;
+		metrics.selectedTriangleCount += rendered.work.selectedTriangleCount;
+		metrics.skippedReason = null;
+		return rendered.mask;
+	}
+
 	/**
 	 * Write one finished scene target to the default framebuffer.
 	 *
@@ -3675,6 +3788,7 @@ export class WebGL2Renderer implements Renderer {
 	#presentFlatScene(
 		target: WebGL2FlatSceneTargetSet,
 		profile: WebGL2FrameProfileCapture | null,
+		selectionMask: WebGL2EntitySelectionMask | null = null,
 	): void {
 		const presentationGpu = profile?.beginGpuPhase("presentation") ?? null;
 		try {
@@ -3682,7 +3796,14 @@ export class WebGL2Renderer implements Renderer {
 			(this.#flatScenePresentation ??= new WebGL2FlatScenePresentation(
 				this.#gl,
 				this.#portalWarpDriveTuning,
-			)).present(target, this.#frameColorGrade, transition);
+			)).present(
+				target,
+				this.#frameColorGrade,
+				transition,
+				this.#frameEntitySelectionOutline,
+				this.#renderScale,
+				selectionMask,
+			);
 		} finally {
 			presentationGpu?.finish();
 		}

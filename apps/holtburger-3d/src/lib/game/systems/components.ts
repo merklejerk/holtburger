@@ -7,6 +7,7 @@ import type { ObjectMaterialBinding } from "../commit/artifacts";
 import type { ObjectMaterialOrdering } from "../resolution/object-material-planner";
 import type { RetailGeometryVisibility } from "../resolution/presentation";
 import type { ObjectInstanceData } from "./static-resources";
+import type { ObjectGeometryData } from "../renderer/geometry";
 
 declare const partVisualTemplateKeyBrand: unique symbol;
 
@@ -126,6 +127,8 @@ export interface ActiveDynamicPart {
 	readonly depthDrawUnits: readonly RigidPartDepthDrawUnit[];
 	/** Geometry-local envelope retained for publication-time pose bounds. */
 	readonly localBounds: AABB3;
+	/** Shared immutable CPU mesh used by exact selection without copying renderer geometry. */
+	readonly geometryData: ObjectGeometryData | null;
 	/** Current composed setup scale and rigid pose, relative to the entity's visual root. */
 	readonly localToVisualRoot: Mat4;
 	/** Reusable renderer-neutral instance payload rewritten from the current placement and effects. */

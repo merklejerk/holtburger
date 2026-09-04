@@ -57,6 +57,11 @@ export type PreparedBehaviorCommand =
 			readonly emitterId: number;
 	  }
 	| {
+			readonly kind: "destroy-particle" | "stop-particle";
+			/** Existing emitter slot addressed by the authored hook. */
+			readonly emitterId: number;
+	  }
+	| {
 			readonly kind: "call-pes";
 			readonly scriptId: DatAssetId;
 			/** Upper bound of a uniform random activation delay, not a fixed delay. */

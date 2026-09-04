@@ -7,8 +7,8 @@ use holtburger_core::client::types::{ChatChannelKind, ChatSpeakerKind, CombatFee
 use holtburger_core::{
     ClientApplicationSnapshot, ClientCameraStartReceipt, ClientCameraTick,
     ClientCharacterMotionCapabilities, ClientCharacterMotionFeedback, ClientCharacterMotionOutcome,
-    ClientCharacterMotionRejection, ClientExitCause, ClientLifecycleState, ClientViewEvent,
-    ClientWorldActivationCause, DynamicEntityEvent, PreciseJumpEvaluation,
+    ClientCharacterMotionRejection, ClientDynamicScriptCue, ClientExitCause, ClientLifecycleState,
+    ClientViewEvent, ClientWorldActivationCause, DynamicEntityEvent, PreciseJumpEvaluation,
     PreciseJumpEvaluationStatus, PreciseJumpTransactionFeedback, PreciseJumpTransactionOutcome,
     PreciseJumpTransactionRejection, combat_feedback_message,
 };
@@ -539,6 +539,7 @@ pub enum ClientHostEvent {
     CharacterMotionFeedback(ClientCharacterMotionFeedbackWire),
     PreciseJumpEvaluation(ClientPreciseJumpEvaluationWire),
     PreciseJumpTransactionFeedback(ClientPreciseJumpTransactionFeedbackWire),
+    EntitySelectionQueryResult(ClientEntitySelectionQueryResultWire),
     LocalPlayerEstablished { player_guid: Guid },
     ServerTimeUpdated { time: f64 },
     WorldNameUpdated { name: String },
@@ -546,10 +547,76 @@ pub enum ClientHostEvent {
     PlayerVitalsUpdated { vitals: Vec<ClientVitalWire> },
     ChatMessage(ClientChatMessageWire),
     DynamicEntity(DynamicEntityEvent),
+    DynamicScriptCue(ClientDynamicScriptCue),
     Camera(ClientCameraTick),
     CameraStarted(ClientCameraStartReceipt),
     PresentationDiscontinuity(ClientPresentationDiscontinuity),
     ExitRequested(ClientExitRequested),
+}
+
+/// Wire-safe reason for a selection query that cannot mutate frontend selection.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(
+    tag = "reason",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
+pub enum ClientEntitySelectionUnavailableWire {
+    StaleCamera,
+    CollisionCoordinatorUnavailable,
+    MissingCollisionOwner { missing_collision_owner: Guid },
+}
+
+/// Narrow correlated selection broad-phase result.
+#[derive(Debug, Clone, Serialize)]
+#[serde(
+    tag = "status",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
+pub enum ClientEntitySelectionQueryResultWire {
+    Available {
+        sequence: u64,
+        static_limit_distance: f32,
+        candidate_guids: Vec<Guid>,
+    },
+    Unavailable {
+        sequence: u64,
+        #[serde(flatten)]
+        reason: ClientEntitySelectionUnavailableWire,
+    },
+}
+
+impl From<holtburger_core::EntitySelectionQueryResult> for ClientEntitySelectionQueryResultWire {
+    fn from(result: holtburger_core::EntitySelectionQueryResult) -> Self {
+        let sequence = result.sequence.0;
+        match result.outcome {
+            holtburger_core::EntitySelectionQueryOutcome::Available {
+                static_limit_distance,
+                candidate_guids,
+            } => Self::Available {
+                sequence,
+                static_limit_distance,
+                candidate_guids,
+            },
+            holtburger_core::EntitySelectionQueryOutcome::Unavailable(reason) => {
+                let reason = match reason {
+                    holtburger_core::EntitySelectionQueryUnavailable::StaleCamera => {
+                        ClientEntitySelectionUnavailableWire::StaleCamera
+                    }
+                    holtburger_core::EntitySelectionQueryUnavailable::CollisionCoordinatorUnavailable => {
+                        ClientEntitySelectionUnavailableWire::CollisionCoordinatorUnavailable
+                    }
+                    holtburger_core::EntitySelectionQueryUnavailable::MissingCollisionOwner {
+                        owner,
+                    } => ClientEntitySelectionUnavailableWire::MissingCollisionOwner {
+                        missing_collision_owner: owner,
+                    },
+                };
+                Self::Unavailable { sequence, reason }
+            }
+        }
+    }
 }
 
 impl From<&ClientLifecycleState> for ClientLifecycleWire {
@@ -657,6 +724,9 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
         ClientViewEvent::PreciseJumpTransactionFeedback(feedback) => Some(
             ClientHostEvent::PreciseJumpTransactionFeedback(feedback.into()),
         ),
+        ClientViewEvent::EntitySelectionQueryResult(result) => {
+            Some(ClientHostEvent::EntitySelectionQueryResult(result.into()))
+        }
         ClientViewEvent::LocalPlayerEstablished { player_guid } => {
             Some(ClientHostEvent::LocalPlayerEstablished { player_guid })
         }
@@ -723,6 +793,7 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
             project_combat_feedback(feedback).map(ClientHostEvent::ChatMessage)
         }
         ClientViewEvent::DynamicEntity(event) => Some(ClientHostEvent::DynamicEntity(event)),
+        ClientViewEvent::DynamicScriptCue(cue) => Some(ClientHostEvent::DynamicScriptCue(cue)),
         ClientViewEvent::Camera(tick) => Some(ClientHostEvent::Camera(tick)),
         ClientViewEvent::CameraStarted(receipt) => Some(ClientHostEvent::CameraStarted(receipt)),
         ClientViewEvent::PresentationDiscontinuity {
@@ -797,6 +868,68 @@ mod tests {
     use holtburger_core::client::types::ChatSpeaker;
     use holtburger_protocol::messages::ChatMessageType;
     use holtburger_protocol::messages::combat::AttackConditions;
+
+    #[test]
+    fn dynamic_script_cue_retains_generation_and_authored_values() {
+        let cue = holtburger_core::ClientDynamicScriptCue {
+            guid: Guid(0x5000_0008),
+            generation: 17,
+            cue: 7,
+            intensity: 0.625,
+        };
+
+        let projected = project_client_event(ClientViewEvent::DynamicScriptCue(cue));
+
+        assert!(matches!(
+            projected,
+            Some(ClientHostEvent::DynamicScriptCue(projected)) if projected == cue
+        ));
+    }
+
+    #[test]
+    fn selection_projection_keeps_only_correlated_browser_inputs() {
+        let projected = project_client_event(ClientViewEvent::EntitySelectionQueryResult(
+            holtburger_core::EntitySelectionQueryResult {
+                sequence: holtburger_core::EntitySelectionQuerySequence(14),
+                outcome: holtburger_core::EntitySelectionQueryOutcome::Available {
+                    static_limit_distance: 37.5,
+                    candidate_guids: vec![Guid(0x7000_0002), Guid(0x7000_0003)],
+                },
+            },
+        ));
+        let Some(ClientHostEvent::EntitySelectionQueryResult(result)) = projected else {
+            panic!("selection result should project");
+        };
+        assert_eq!(
+            serde_json::to_value(result).unwrap(),
+            serde_json::json!({
+                "status": "available",
+                "sequence": 14,
+                "staticLimitDistance": 37.5,
+                "candidateGuids": [0x7000_0002_u32, 0x7000_0003_u32]
+            })
+        );
+
+        let unavailable = ClientEntitySelectionQueryResultWire::from(
+            holtburger_core::EntitySelectionQueryResult {
+                sequence: holtburger_core::EntitySelectionQuerySequence(15),
+                outcome: holtburger_core::EntitySelectionQueryOutcome::Unavailable(
+                    holtburger_core::EntitySelectionQueryUnavailable::MissingCollisionOwner {
+                        owner: Guid(0xda55_ffff),
+                    },
+                ),
+            },
+        );
+        assert_eq!(
+            serde_json::to_value(unavailable).unwrap(),
+            serde_json::json!({
+                "status": "unavailable",
+                "sequence": 15,
+                "reason": "missing-collision-owner",
+                "missingCollisionOwner": 0xda55_ffff_u32,
+            })
+        );
+    }
 
     #[test]
     fn non_player_speech_identity_survives_host_projection() {

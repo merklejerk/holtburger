@@ -92,6 +92,12 @@ pub(crate) enum BehaviorHookPayloadManifest {
         offset_orientation: [f32; 4],
         emitter_id: u32,
     },
+    DestroyParticle {
+        emitter_id: u32,
+    },
+    StopParticle {
+        emitter_id: u32,
+    },
     CallPes {
         script_id: String,
         /// Upper bound of a uniform random delay, not a fixed delay.
@@ -258,6 +264,14 @@ pub(crate) fn behavior_hook_payload(
                 emitter_id: *emitter_id,
             }
         }
+        AnimationHookPayload::DestroyParticle(payload) => {
+            BehaviorHookPayloadManifest::DestroyParticle {
+                emitter_id: payload.emitter_id,
+            }
+        }
+        AnimationHookPayload::StopParticle(payload) => BehaviorHookPayloadManifest::StopParticle {
+            emitter_id: payload.emitter_id,
+        },
         AnimationHookPayload::CallPes(CallPesHookPayload {
             script_id,
             pause_seconds,

@@ -67,7 +67,7 @@ pub const WEENIE_ERROR_WITH_STRING: &[u8] =
 pub const DDD_INTERROGATION_RESPONSE: &[u8] =
     include_bytes!("../tests/fixtures/ddd_interrogation_response.bin");
 pub const SOUND: &[u8] = include_bytes!("../tests/fixtures/sound.bin");
-pub const PLAY_EFFECT: &[u8] = include_bytes!("../tests/fixtures/play_effect.bin");
+pub const PLAY_SCRIPT: &[u8] = include_bytes!("../tests/fixtures/play_script.bin");
 pub const ACTION_IDENTIFY: &[u8] = include_bytes!("../tests/fixtures/action_identify.bin");
 pub const ACTION_LOGIN_COMPLETE: &[u8] =
     include_bytes!("../tests/fixtures/action_login_complete.bin");

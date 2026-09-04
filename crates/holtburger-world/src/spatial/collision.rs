@@ -1,10 +1,15 @@
 //! Resident static collision geometry and explicit query families.
 
 mod entity_surface_ray;
+mod selection_ray;
 mod static_sphere_sweep;
 mod static_surface_ray;
 
 pub use entity_surface_ray::{CollisionSurfaceRayHit, EntitySurfaceRayHit};
+pub use selection_ray::{
+    AvailableEntitySelectionCandidates, EntitySelectionCandidateResult, EntitySelectionQueryError,
+    EntitySelectionRayRequest, EntitySelectionUnavailable,
+};
 pub use static_sphere_sweep::{StaticSphereSweepHit, StaticSphereSweepRequest};
 pub use static_surface_ray::{StaticSurfaceRayHit, StaticSurfaceRayRequest};
 
@@ -282,6 +287,15 @@ impl SpatialMembership {
     /// Deduplicated EnvCells reached by any body sphere.
     pub fn reached_env_cells(&self) -> &[Guid] {
         &self.reached_env_cells
+    }
+
+    /// Whether two independently traversed placements share any ordinary spatial domain.
+    pub(crate) fn intersects_reached(&self, other: &Self) -> bool {
+        (self.reaches_outdoors && other.reaches_outdoors)
+            || self
+                .reached_env_cells
+                .iter()
+                .any(|cell| other.reached_env_cells.contains(cell))
     }
 
     pub(super) fn merge_reached(mut self, other: Self) -> Self {

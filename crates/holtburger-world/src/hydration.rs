@@ -226,7 +226,9 @@ impl WorldObjectPropertiesHydrationExt for WorldObjectProperties {
         if let Some(v) = odd.translucency {
             self.floats.insert(PropertyFloat::Translucency, v as f64);
         }
-        if let Some(v) = odd.default_script_id {
+        if let Some(v) = odd.default_script_cue {
+            // ACE retains the `PlayScript` cue in the historical PhysicsScript data-id property.
+            // The typed accessor exposes the semantic u32 rather than pretending it is a DID.
             self.dids
                 .insert(PropertyDataId::PhysicsScript, holtburger_common::Guid(v));
         }

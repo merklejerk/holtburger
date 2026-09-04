@@ -1,5 +1,6 @@
 import {
 	decodeClientCurrentState,
+	decodeClientDynamicScriptCue,
 	decodeClientLocalPlayerEstablished,
 	decodeClientCameraStartReceipt,
 	decodeClientCameraTick,
@@ -12,6 +13,8 @@ import {
 	decodeClientPreciseJumpCancelRequest,
 	decodeClientPreciseJumpEvaluation,
 	decodeClientPreciseJumpTransactionFeedback,
+	decodeClientEntitySelectionQueryRequest,
+	decodeClientEntitySelectionQueryResult,
 	decodeClientExitRequested,
 	decodeClientLifecycle,
 	decodeClientPresentationDiscontinuity,
@@ -21,6 +24,7 @@ import {
 	decodeClientVitals,
 	decodeClientChatMessage,
 	type ClientCurrentState,
+	type ClientDynamicScriptCue,
 	type ClientCameraIdentity,
 	type ClientCameraClearanceRequest,
 	type ClientCameraIntentRequest,
@@ -36,6 +40,8 @@ import {
 	type ClientPreciseJumpCancelRequest,
 	type ClientPreciseJumpEvaluation,
 	type ClientPreciseJumpTransactionFeedback,
+	type ClientEntitySelectionQueryRequest,
+	type ClientEntitySelectionQueryResult,
 	type ClientExitRequested,
 	type ClientLifecycle,
 	type ClientLocalPlayerEstablished,
@@ -67,6 +73,7 @@ type ClientCommandName = Extract<
 	| "set_client_camera_intent"
 	| "set_client_camera_clearance"
 	| "set_client_precise_jump_aim"
+	| "query_client_entity_selection_candidates"
 	| "commit_client_precise_jump"
 	| "cancel_client_precise_jump"
 	| "acknowledge_client_world_reveal"
@@ -81,6 +88,7 @@ type ClientEventName = Extract<
 	| "client-character-motion-feedback"
 	| "client-precise-jump-evaluation"
 	| "client-precise-jump-transaction-feedback"
+	| "client-entity-selection-query-result"
 	| "client-local-player-established"
 	| "client-server-time-updated"
 	| "client-world-name-updated"
@@ -88,6 +96,7 @@ type ClientEventName = Extract<
 	| "client-player-vitals-updated"
 	| "client-chat-message"
 	| "client-dynamic-entity"
+	| "client-dynamic-script-cue"
 	| "client-camera-started"
 	| "client-camera"
 	| "client-presentation-discontinuity"
@@ -140,6 +149,10 @@ export type ClientLifecycleSessionEvent =
 			readonly feedback: ClientPreciseJumpTransactionFeedback;
 	  }
 	| {
+			readonly type: "entity-selection-query-result";
+			readonly result: ClientEntitySelectionQueryResult;
+	  }
+	| {
 			readonly type: "local-player-established";
 			readonly identity: ClientLocalPlayerEstablished;
 	  }
@@ -149,6 +162,10 @@ export type ClientLifecycleSessionEvent =
 	| { readonly type: "vitals"; readonly vitals: readonly ClientVital[] }
 	| { readonly type: "chat"; readonly message: ClientChatMessage }
 	| { readonly type: "dynamic"; readonly event: DynamicEntityEvent }
+	| {
+			readonly type: "dynamic-script-cue";
+			readonly cue: ClientDynamicScriptCue;
+	  }
 	| {
 			readonly type: "camera-started";
 			readonly receipt: ClientCameraStartReceipt;
@@ -304,6 +321,15 @@ export class ClientLifecycleSession {
 		});
 	}
 
+	/** Submit one viewport selection action; its correlated result arrives asynchronously. */
+	async queryEntitySelectionCandidates(
+		request: ClientEntitySelectionQueryRequest,
+	): Promise<void> {
+		await this.#transport.invoke("query_client_entity_selection_candidates", {
+			request: decodeClientEntitySelectionQueryRequest(request),
+		});
+	}
+
 	/** Submit one ordered commit edge carrying only core's opaque evaluation identity. */
 	async commitPreciseJump(
 		request: ClientPreciseJumpCommitRequest,
@@ -377,6 +403,12 @@ export class ClientLifecycleSession {
 			);
 			unlisteners.push(
 				await this.#transport.listen(
+					"client-entity-selection-query-result",
+					(payload) => this.#receiveEntitySelectionQueryResult(payload),
+				),
+			);
+			unlisteners.push(
+				await this.#transport.listen(
 					"client-local-player-established",
 					(payload) => this.#receiveLocalPlayerEstablished(payload),
 				),
@@ -405,6 +437,14 @@ export class ClientLifecycleSession {
 			unlisteners.push(
 				await this.#transport.listen("client-chat-message", (payload) =>
 					this.#receiveChat(payload),
+				),
+			);
+			unlisteners.push(
+				await this.#transport.listen("client-dynamic-script-cue", (payload) =>
+					this.#emit({
+						type: "dynamic-script-cue",
+						cue: decodeClientDynamicScriptCue(payload),
+					}),
 				),
 			);
 			unlisteners.push(
@@ -510,6 +550,13 @@ export class ClientLifecycleSession {
 		this.#emit({
 			type: "precise-jump-transaction-feedback",
 			feedback: decodeClientPreciseJumpTransactionFeedback(payload),
+		});
+	}
+
+	#receiveEntitySelectionQueryResult(payload: unknown): void {
+		this.#emit({
+			type: "entity-selection-query-result",
+			result: decodeClientEntitySelectionQueryResult(payload),
 		});
 	}
 

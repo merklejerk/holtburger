@@ -1,7 +1,9 @@
+mod entity_scale;
 pub mod fellowship;
 pub mod liveness;
 pub mod motion_resolution;
 pub mod mutations;
+mod selection;
 pub mod self_movement;
 #[cfg(test)]
 pub mod tests;

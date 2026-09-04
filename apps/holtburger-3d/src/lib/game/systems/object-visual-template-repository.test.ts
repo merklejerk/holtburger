@@ -98,6 +98,29 @@ describe("ObjectVisualTemplateRepository", () => {
 		]);
 	});
 
+	it("caches morphology from the resolved appearance's geometry-local carrier", async () => {
+		const preparer = new InlineObjectVisualTemplatePreparer();
+		const base = source("planar", "appearance:planar");
+		const visual: DynamicPresentationSource = {
+			...base,
+			presentation: {
+				...base.presentation,
+				parts: base.presentation.parts.map((part) => ({
+					...part,
+					geometry: {
+						...part.geometry,
+						bounds: new AABB3(new Vec3(-2, -1, 0), new Vec3(2, 1, 0)),
+					},
+				})),
+			},
+			scale: new Vec3(9, 9, 9),
+		};
+
+		const template = await preparer.prepare(visual);
+
+		expect(template.selectionGeometryMorphology).toBe("planar-carrier");
+	});
+
 	it("uses prepared template texture facts as the atlas requirement", async () => {
 		const atlas = new FixtureAtlas();
 		const repository = createRepository(

@@ -13,17 +13,17 @@ use crate::host_mode::ClientLaunchConfiguration;
 use crate::protocol::{HostResponse, ProtocolError, application_error};
 use crate::shared_host_content::SharedHostContent;
 
-/// Strict renderer-owned camera identity reused by precise-jump commands.
+/// Strict renderer-owned camera identity reused by camera-ray commands.
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ClientPreciseJumpCameraIdentity {
+pub struct ClientCameraIdentityRequest {
     pub camera_generation: u64,
     pub player_guid: holtburger_common::Guid,
     pub entity_generation: u64,
 }
 
-impl From<ClientPreciseJumpCameraIdentity> for holtburger_core::ClientCameraIdentity {
-    fn from(identity: ClientPreciseJumpCameraIdentity) -> Self {
+impl From<ClientCameraIdentityRequest> for holtburger_core::ClientCameraIdentity {
+    fn from(identity: ClientCameraIdentityRequest) -> Self {
         Self {
             camera_generation: identity.camera_generation,
             player_guid: identity.player_guid,
@@ -36,13 +36,51 @@ impl From<ClientPreciseJumpCameraIdentity> for holtburger_core::ClientCameraIden
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ClientPreciseJumpAimRequest {
-    pub camera: ClientPreciseJumpCameraIdentity,
+    pub camera: ClientCameraIdentityRequest,
     pub sequence: u64,
     pub anchor: holtburger_common::Guid,
     pub start: [f32; 3],
     pub direction: [f32; 3],
     pub maximum_distance: f32,
     pub previous_cell: Option<holtburger_common::Guid>,
+}
+
+/// Strict selection ray; its one-landblock maximum remains world-owned.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClientEntitySelectionQueryRequest {
+    pub camera: ClientCameraIdentityRequest,
+    pub sequence: u64,
+    pub anchor: holtburger_common::Guid,
+    pub start: [f32; 3],
+    pub direction: [f32; 3],
+    pub previous_cell: Option<holtburger_common::Guid>,
+}
+
+impl ClientEntitySelectionQueryRequest {
+    fn into_core(self) -> Result<holtburger_core::EntitySelectionQueryRequest> {
+        let finite = |vector: [f32; 3]| vector.into_iter().all(f32::is_finite);
+        ensure!(
+            finite(self.start),
+            "entity-selection ray start must be finite"
+        );
+        ensure!(
+            finite(self.direction),
+            "entity-selection ray direction must be finite"
+        );
+        Ok(holtburger_core::EntitySelectionQueryRequest {
+            camera: self.camera.into(),
+            sequence: holtburger_core::EntitySelectionQuerySequence(self.sequence),
+            anchor: self.anchor,
+            start: holtburger_common::Vector3::new(self.start[0], self.start[1], self.start[2]),
+            direction: holtburger_common::Vector3::new(
+                self.direction[0],
+                self.direction[1],
+                self.direction[2],
+            ),
+            previous_cell: self.previous_cell,
+        })
+    }
 }
 
 impl ClientPreciseJumpAimRequest {
@@ -121,6 +159,9 @@ pub enum ClientHostCommand {
     SetClientPreciseJumpAim {
         request: ClientPreciseJumpAimRequest,
     },
+    QueryClientEntitySelectionCandidates {
+        request: ClientEntitySelectionQueryRequest,
+    },
     CommitClientPreciseJump {
         request: ClientPreciseJumpCommitRequest,
     },
@@ -151,6 +192,7 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "set_client_camera_intent",
     "set_client_camera_clearance",
     "set_client_precise_jump_aim",
+    "query_client_entity_selection_candidates",
     "commit_client_precise_jump",
     "cancel_client_precise_jump",
     "acknowledge_client_world_reveal",
@@ -223,6 +265,16 @@ impl ClientHostRuntime {
                     Arc::clone(&self.content.service),
                     Arc::clone(&self.content.repository),
                 ),
+            ))
+            .dynamic_scale_source(Arc::new(
+                holtburger_core::ContentClientDynamicScaleSource::new(Arc::clone(
+                    &self.content.service,
+                )),
+            ))
+            .selection_envelope_source(Arc::new(
+                holtburger_core::ContentClientSelectionEnvelopeSource::new(Arc::clone(
+                    &self.content.service,
+                )),
             ));
         let mut client = match builder.connect().await {
             Ok(client) => client,
@@ -340,6 +392,16 @@ impl ClientHostRuntime {
     pub async fn set_precise_jump_aim(&self, request: ClientPreciseJumpAimRequest) -> Result<()> {
         self.send_command(ClientCommand::SetPreciseJumpAim(request.into_core()?))
             .await
+    }
+
+    pub async fn query_entity_selection_candidates(
+        &self,
+        request: ClientEntitySelectionQueryRequest,
+    ) -> Result<()> {
+        self.send_command(ClientCommand::QueryEntitySelectionCandidates(
+            request.into_core()?,
+        ))
+        .await
     }
 
     pub async fn commit_precise_jump(&self, request: ClientPreciseJumpCommitRequest) -> Result<()> {
@@ -464,6 +526,11 @@ pub async fn dispatch_client(
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),
+        QueryClientEntitySelectionCandidates { request } => runtime
+            .query_entity_selection_candidates(request)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
         CommitClientPreciseJump { request } => runtime
             .commit_precise_jump(request)
             .await
@@ -545,5 +612,26 @@ mod tests {
             }))
             .is_err()
         );
+    }
+
+    #[test]
+    fn entity_selection_query_rejects_distance_override_and_non_finite_vectors() {
+        let mut value = aim_json();
+        value.as_object_mut().unwrap().remove("maximumDistance");
+        let request = serde_json::from_value::<ClientEntitySelectionQueryRequest>(value.clone())
+            .expect("selection request should share the strict camera ray fields");
+        assert!(request.into_core().is_ok());
+
+        value["maximumDistance"] = serde_json::json!(192.0);
+        assert!(serde_json::from_value::<ClientEntitySelectionQueryRequest>(value).is_err());
+
+        let mut request = serde_json::from_value::<ClientEntitySelectionQueryRequest>({
+            let mut value = aim_json();
+            value.as_object_mut().unwrap().remove("maximumDistance");
+            value
+        })
+        .unwrap();
+        request.direction[2] = f32::INFINITY;
+        assert!(request.into_core().is_err());
     }
 }

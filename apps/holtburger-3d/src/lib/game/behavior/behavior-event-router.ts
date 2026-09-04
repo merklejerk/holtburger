@@ -76,6 +76,8 @@ export type BehaviorDispatchOutcome =
 	| "no-consumer"
 	/** Faithfully reproduced by doing nothing, because retail does nothing either. */
 	| "intentionally-inert"
+	/** A parallel authoritative domain owns this understood consequence. */
+	| "owned-by-world"
 	/** The target was removed or replaced before the command could run. */
 	| "rejected-stale-target";
 
@@ -90,10 +92,6 @@ export interface BehaviorObservation {
 
 /** Persistent visual and material state. Widened only by proven commands, never speculatively. */
 export interface EffectCommandPort {
-	applyScale(
-		target: BehaviorTarget,
-		values: { readonly end: number; readonly durationSeconds: number },
-	): void;
 	applySetOmega(target: BehaviorTarget, omega: Vec3Like): void;
 	applyTransparentPart(
 		target: BehaviorTarget,
@@ -104,6 +102,15 @@ export interface EffectCommandPort {
 			readonly durationSeconds: number;
 		},
 	): void;
+}
+
+/** Composition-selected ownership of whole-object scale. */
+interface ScaleCommandPort {
+	applyScale(
+		target: BehaviorTarget,
+		values: { readonly end: number; readonly durationSeconds: number },
+		mode: BehaviorDispatchMode,
+	): "executed" | "folded-initial-state" | "owned-by-world";
 }
 
 interface Vec3Like {
@@ -140,6 +147,10 @@ interface ParticleCommandPort {
 			readonly emitterId: number;
 		},
 	): "created" | "intentionally-inert" | "unprepared";
+	/** Stop emission while retaining already-spawned particles. Emitter id zero addresses all slots. */
+	stop(target: BehaviorTarget, emitterId: number): void;
+	/** Remove matching emitters and their particles immediately. Emitter id zero addresses all slots. */
+	destroy(target: BehaviorTarget, emitterId: number): void;
 }
 
 /**
@@ -179,6 +190,7 @@ export interface BehaviorConsumers {
 	readonly audio: AudioCommandPort;
 	readonly effects: EffectCommandPort;
 	readonly particles: ParticleCommandPort;
+	readonly scale: ScaleCommandPort;
 	readonly scheduler: ScriptActivationPort;
 	readonly targets: BehaviorTargetRegistry;
 }
@@ -282,11 +294,7 @@ export class BehaviorEventRouter {
 			}
 
 			case "scale":
-				// Persistent whole-object state, so replay behaves exactly as live execution does:
-				// the ramp continues from the object's current scale and the remaining replay steps
-				// advance it to where it should be now.
-				this.#consumers.effects.applyScale(target, command);
-				return mode === "initial-state" ? "folded-initial-state" : "executed";
+				return this.#consumers.scale.applyScale(target, command, mode);
 
 			case "create-particle": {
 				// Replay is delegated rather than decided here: persistence is a property of the
@@ -301,6 +309,14 @@ export class BehaviorEventRouter {
 				if (outcome === "intentionally-inert") return outcome;
 				return mode === "initial-state" ? "folded-initial-state" : "executed";
 			}
+
+			case "stop-particle":
+				this.#consumers.particles.stop(target, command.emitterId);
+				return mode === "initial-state" ? "folded-initial-state" : "executed";
+
+			case "destroy-particle":
+				this.#consumers.particles.destroy(target, command.emitterId);
+				return mode === "initial-state" ? "folded-initial-state" : "executed";
 
 			case "texture-velocity":
 			case "texture-velocity-part":

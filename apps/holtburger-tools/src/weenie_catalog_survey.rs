@@ -845,11 +845,11 @@ fn survey_content(
             SetupFacts {
                 has_physics_bsp: !physics_bsp_part_indices.is_empty(),
                 has_default_animation: setup.default_animation.is_some(),
-                has_default_script: setup.default_script.is_some(),
+                has_default_script: setup.default_script_did.is_some(),
                 physics_bsp_part_indices,
                 parts: setup.parts,
                 default_animation: setup.default_animation,
-                default_script: setup.default_script,
+                default_script: setup.default_script_did,
                 default_motion_table: setup.default_motion_table,
                 sphere_count: setup.spheres.len(),
                 cylsphere_count: setup.cyl_spheres.len(),

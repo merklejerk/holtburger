@@ -9,6 +9,7 @@ pub mod material_graph;
 pub mod motion_sequence;
 pub mod object_collision;
 pub mod repository;
+pub mod selection_envelope;
 pub mod soul_emote;
 mod source_reader;
 pub mod terrain_collision;
@@ -61,6 +62,9 @@ pub use object_collision::{
     resolve_gfx_obj_collision_shape, resolve_setup_volume_collision_shapes,
 };
 pub use repository::ContentRepository;
+pub use selection_envelope::{
+    SelectionEnvelopeProfile, compute_selection_envelope_radius, resolve_selection_envelope_profile,
+};
 pub use soul_emote::{SoulEmoteCatalog, SoulEmotePose, SoulEmoteResolution, SoulEmoteToken};
 pub use terrain_collision::{
     TERRAIN_WATER_COLLISION_DEPTH, TerrainCollisionCell, TerrainCollisionSurface,

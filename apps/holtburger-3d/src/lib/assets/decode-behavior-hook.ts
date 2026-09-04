@@ -83,6 +83,14 @@ export const behaviorHookPayloadSchema = z.discriminatedUnion("kind", [
 		partIndex: z.number().int().min(-1),
 	}),
 	z.object({
+		emitterId: z.number().int().nonnegative(),
+		kind: z.literal("destroy-particle"),
+	}),
+	z.object({
+		emitterId: z.number().int().nonnegative(),
+		kind: z.literal("stop-particle"),
+	}),
+	z.object({
 		kind: z.literal("call-pes"),
 		pauseSeconds: finiteNumber.nonnegative(),
 		scriptId: datId,
@@ -110,6 +118,8 @@ const TYPED_PAYLOAD_KIND_BY_HOOK_TYPE = new Map<
 	[7, "transparent-part"],
 	[12, "scale"],
 	[13, "create-particle"],
+	[14, "destroy-particle"],
+	[15, "stop-particle"],
 	[19, "call-pes"],
 	[21, "sound-tweaked"],
 	[22, "set-omega"],
@@ -127,8 +137,6 @@ const NON_BLOCKING_UNIMPLEMENTED_HOOK_TYPES = new Set([
 	1, // sound
 	3, // attack
 	6, // ethereal (executed by host simulation)
-	14, // destroy-particle
-	15, // stop-particle
 	17, // default-script
 	18, // default-script-part
 	26, // create-blocking-particle
@@ -219,6 +227,10 @@ export function decodeBehaviorCommand(
 				offsetOrigin: acVector3(payload.offsetOrigin),
 				partIndex: payload.partIndex,
 			};
+		case "destroy-particle":
+			return { emitterId: payload.emitterId, kind: "destroy-particle" };
+		case "stop-particle":
+			return { emitterId: payload.emitterId, kind: "stop-particle" };
 		case "call-pes":
 			return {
 				kind: "call-pes",

@@ -141,6 +141,7 @@ function frame(
 		cameraFovRadians: overrides.cameraFovRadians ?? 1,
 		cameraHeadingRadians: overrides.cameraHeadingRadians ?? 0,
 		presentedEntities: () => [],
+		selectedGuid: null,
 		source: overrides.source ?? mapSource(),
 		subject: {
 			anchor: {

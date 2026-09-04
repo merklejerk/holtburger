@@ -2,14 +2,16 @@ use crate::attachment::PhysicsAttachment;
 use crate::book::BookData;
 use crate::entity_appearance::EntityAppearance;
 use crate::entity_physics::{EntityPhysicsRuntimeState, resolve_effective_entity_physics_state};
+use crate::entity_scale::EntityScaleState;
 use crate::hydration::WorldObjectPropertiesHydrationExt;
 use crate::identify::{self, IdentifyTarget};
 use crate::motion::MotionCommand;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
-    HasProperties, HasPropertiesMut, ObjectDescriptionFlag, PhysicsState, PropertyInstanceId,
-    PropertyInt, PropertyString, PropertyUpdate, WeenieHeaderFlag, WeenieHeaderFlag2,
-    WorldObjectProperties, WorldObjectPropertyAccessorsMut,
+    HasProperties, HasPropertiesMut, ObjectDescriptionFlag, PhysicsState, PropertyFloat,
+    PropertyInstanceId, PropertyInt, PropertyString, PropertyUpdate, WeenieHeaderFlag,
+    WeenieHeaderFlag2, WorldObjectProperties, WorldObjectPropertyAccessors,
+    WorldObjectPropertyAccessorsMut,
 };
 use holtburger_common::sequence::is_newer_u16;
 use holtburger_common::{Guid, Vector3};
@@ -1118,6 +1120,10 @@ pub struct Entity {
     pub weenie_flags2: WeenieHeaderFlag2,
     /// Server-owned state and temporary authored collision prediction as one invariant.
     pub physics: EntityPhysicsRuntimeState,
+    /// Server-owned authored scale and temporary PhysicsScript ramp as one invariant.
+    pub scale: EntityScaleState,
+    /// Prepared unit-scale visual envelope, absent until or unless content preparation succeeds.
+    pub selection_envelope: Option<crate::SelectionEnvelope>,
     /// Lossless ordered visual substitutions normalized from the producer's source format.
     pub appearance: EntityAppearance,
     /// Set while another object owns this entity's position. See [`PhysicsAttachment`].
@@ -1155,6 +1161,7 @@ const OBJECT_VECTOR_SEQUENCE_INDEX: usize = 3;
 const OBJECT_TELEPORT_SEQUENCE_INDEX: usize = 4;
 const OBJECT_SERVER_CONTROL_SEQUENCE_INDEX: usize = 5;
 const OBJECT_FORCE_POSITION_SEQUENCE_INDEX: usize = 6;
+const OBJECT_VISUAL_DESCRIPTION_SEQUENCE_INDEX: usize = 7;
 const OBJECT_INSTANCE_SEQUENCE_INDEX: usize = 8;
 
 /// Result of applying retail's movement timestamp admission to one existing entity generation.
@@ -1188,6 +1195,21 @@ impl Entity {
     /// Current server instance sequence used as the client composition's realization generation.
     pub const fn instance_sequence(&self) -> u16 {
         self.sequences[OBJECT_INSTANCE_SEQUENCE_INDEX]
+    }
+
+    /// Latest admitted complete visual-description update for this object incarnation.
+    pub const fn visual_description_sequence(&self) -> u16 {
+        self.sequences[OBJECT_VISUAL_DESCRIPTION_SEQUENCE_INDEX]
+    }
+
+    /// Replaces the complete appearance after its instance and visual sequence gates pass.
+    pub(crate) fn apply_visual_description(
+        &mut self,
+        model_data: &holtburger_protocol::messages::object::types::ModelData,
+        visual_description_sequence: u16,
+    ) {
+        self.appearance = EntityAppearance::from(model_data);
+        self.sequences[OBJECT_VISUAL_DESCRIPTION_SEQUENCE_INDEX] = visual_description_sequence;
     }
 
     /// Current remote-object movement timestamp.
@@ -1463,7 +1485,19 @@ impl Entity {
     }
 
     pub fn set_property(&mut self, update: PropertyUpdate) {
+        let scale_update = match &update {
+            PropertyUpdate::Float(PropertyFloat::DefaultScale, value) => Some(*value as f32),
+            _ => None,
+        };
         self.properties.apply(update);
+        if let Some(scale) = scale_update
+            && let Err(error) = self.scale.reconcile(scale)
+        {
+            log::warn!(
+                "Entity {:?} rejected server object scale {scale}: {error}",
+                self.guid
+            );
+        }
     }
 
     pub fn apply_identify_response(&mut self, data: &IdentifyObjectResponseEventData) -> bool {
@@ -1550,6 +1584,16 @@ impl Entity {
 
         // Hydrate properties from the description (using common mapping logic)
         self.properties.hydrate_from_odd(data);
+        let scale = self
+            .properties
+            .get_float_prop(PropertyFloat::DefaultScale)
+            .unwrap_or(1.0) as f32;
+        if let Err(error) = self.scale.reconcile(scale) {
+            log::warn!(
+                "Entity {:?} rejected description object scale {scale}: {error}",
+                self.guid
+            );
+        }
     }
 
     pub fn new(guid: Guid, name: String, position: WorldPosition) -> Self {
@@ -1584,6 +1628,8 @@ impl Entity {
             physics: EntityPhysicsRuntimeState::reconciled(resolve_effective_entity_physics_state(
                 PhysicsState::NONE,
             )),
+            scale: EntityScaleState::default(),
+            selection_envelope: None,
             appearance: EntityAppearance::default(),
             attachment: None,
             autonomous_movement: false,

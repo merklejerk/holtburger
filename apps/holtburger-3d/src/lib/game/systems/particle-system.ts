@@ -494,8 +494,7 @@ export class ParticleSystem {
 		BehaviorTargetId,
 		ParticleOwnerAggregate
 	>();
-	/** Reused across frames so range collection does not allocate in the renderer's hot path. */
-	/** Persistent record storage; written at spawn and read by the GPU every frame after. */
+	/** Persistent record storage reused across frames and read by the GPU after spawn-time writes. */
 	readonly #slots = new ParticleRecordSlots();
 	/**
 	 * Reused output for the visible draw ranges, rebuilt each frame from emitters alone.
@@ -823,6 +822,11 @@ export class ParticleSystem {
 	 */
 	envelopeRadiusFor(targetId: BehaviorTargetId): number {
 		return this.#ownerAggregates.get(targetId)?.envelopeRadius ?? 0;
+	}
+
+	/** Whether this target currently owns any live emitter instance; one aggregate lookup. */
+	hasEmitterOwner(targetId: BehaviorTargetId): boolean {
+		return this.#ownerAggregates.has(targetId);
 	}
 
 	getDiagnostics(): ParticleSystemDiagnostics {

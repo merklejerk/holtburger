@@ -9,6 +9,7 @@ pub mod material;
 pub mod motion_table;
 pub mod particle_emitter_info;
 pub mod physics_script;
+pub mod physics_script_table;
 pub mod region;
 pub mod scene;
 pub mod setup_model;
@@ -35,6 +36,7 @@ pub use material::{
 pub use motion_table::MotionTable;
 pub use particle_emitter_info::{EmitterTrigger, ParticleEmitterInfo, ParticleMotion};
 pub use physics_script::{PhysicsScript, PhysicsScriptRecord};
+pub use physics_script_table::{PhysicsScriptChoice, PhysicsScriptCue, PhysicsScriptTable};
 pub use region::{REGION_DESC_FILE_ID, RegionDesc};
 pub use scene::{Scene, SceneObjectTemplate};
 pub use setup_model::SetupModel;

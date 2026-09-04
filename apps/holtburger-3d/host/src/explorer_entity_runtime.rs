@@ -1129,9 +1129,14 @@ impl ExplorerEntityRuntime {
     ) -> Result<ExplorerEntitySpawnOutcome, ExplorerEntityRuntimeError> {
         let physical_demand = explorer_physical_demand(physical_mode, prepared.definition.physics);
         validate_prepared_demand(physical_demand, physical.is_some())?;
+        let object_scale = prepared.definition.object_scale;
         let physical = physical.map(|physical| {
-            DynamicPhysicalBodyConfiguration::new(physical, physical_demand)
-                .expect("prepared Explorer body must have non-empty demand")
+            DynamicPhysicalBodyConfiguration::with_object_scale(
+                physical,
+                physical_demand,
+                object_scale,
+            )
+            .expect("prepared Explorer body must have non-empty demand")
         });
         let guid = prepared.definition.identity.guid;
         validate_attached_children(guid, &children)?;
@@ -1196,9 +1201,14 @@ impl ExplorerEntityRuntime {
     ) -> Result<ExplorerEntityReplacementOutcome, ExplorerEntityRuntimeError> {
         let physical_demand = explorer_physical_demand(physical_mode, prepared.definition.physics);
         validate_prepared_demand(physical_demand, physical.is_some())?;
+        let object_scale = prepared.definition.object_scale;
         let physical = physical.map(|physical| {
-            DynamicPhysicalBodyConfiguration::new(physical, physical_demand)
-                .expect("prepared Explorer body must have non-empty demand")
+            DynamicPhysicalBodyConfiguration::with_object_scale(
+                physical,
+                physical_demand,
+                object_scale,
+            )
+            .expect("prepared Explorer body must have non-empty demand")
         });
         let guid = prepared.definition.identity.guid;
         validate_attached_children(guid, &children)?;
@@ -1291,6 +1301,7 @@ impl ExplorerEntityRuntime {
             SpatialBodyId::Entity(guid),
             next,
             next_demand,
+            instance.definition.object_scale,
             replacement,
         )?;
         let current = registry

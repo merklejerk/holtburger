@@ -17,6 +17,7 @@
 	import ClientFpsCounter from "./ClientFpsCounter.svelte";
 	import ClientHudIcon from "./ClientHudIcon.svelte";
 	import ClientHudPanel from "./ClientHudPanel.svelte";
+	import ClientSelectedEntityHud from "./ClientSelectedEntityHud.svelte";
 	import ClientShortcutDock from "./ClientShortcutDock.svelte";
 	import ClientToastOverlay from "./ClientToastOverlay.svelte";
 	import ClientTargetIndicator from "./ClientTargetIndicator.svelte";
@@ -26,7 +27,7 @@
 	import { CLIENT_TUNING } from "./client-tuning";
 	import {
 		anchorClientHudPlacement,
-		CLIENT_FPS_PANEL_WIDTH,
+		CLIENT_FPS_PANEL_SIZE,
 		CLIENT_JUMP_POWER_PANEL_SIZE,
 		CLIENT_TOAST_PANEL_SIZE,
 		createDefaultClientHudLayout,
@@ -47,6 +48,7 @@
 		readonly readMinimapFrame: () => MinimapFrame;
 		readonly readDiagnostics: () => ClientPresentationDiagnostics | null;
 		readonly readFrameRates: () => FrameRates | null;
+		readonly readSelectedEntityName: () => string | null;
 		readonly readTargetIndicatorFrame: () => ClientTargetIndicatorFrame | null;
 		readonly selectedEntityGuid: number | null;
 		readonly hoveredEntityGuid: number | null;
@@ -78,6 +80,7 @@
 		readMinimapFrame,
 		readDiagnostics,
 		readFrameRates,
+		readSelectedEntityName,
 		readTargetIndicatorFrame,
 		selectedEntityGuid,
 		hoveredEntityGuid,
@@ -414,7 +417,7 @@
 		label="Frame rate"
 		placement={hudLayout.frameRate}
 		editable={hudMode === "layout"}
-		minWidth={CLIENT_FPS_PANEL_WIDTH}
+		minWidth={CLIENT_FPS_PANEL_SIZE.width}
 		minHeight={24}
 		resizable={false}
 		contentHitTesting="descendants"
@@ -423,6 +426,25 @@
 	>
 		<ClientFpsCounter {readFrameRates} />
 	</ClientHudPanel>
+	{#if selectedEntityGuid !== null || hudMode === "layout"}
+		<ClientHudPanel
+			label="Selected entity"
+			placement={hudLayout.selectedEntity}
+			editable={hudMode === "layout"}
+			minWidth={240}
+			minHeight={64}
+			resizable={false}
+			contentHitTesting="descendants"
+			{viewport}
+			onPlacementChange={(selectedEntity) =>
+				(hudLayout = { ...hudLayout, selectedEntity })}
+		>
+			<ClientSelectedEntityHud
+				selectedGuid={selectedEntityGuid}
+				readSelectedName={readSelectedEntityName}
+			/>
+		</ClientHudPanel>
+	{/if}
 	<ClientHudPanel
 		label="Game shortcuts"
 		placement={hudLayout.shortcuts}

@@ -262,6 +262,8 @@ export interface ClientPresentationRuntime extends MapTerrainSource {
 	selectedEntityPresentationState(
 		guid: number,
 	): SelectedDynamicEntityPresentationState;
+	/** Latest authority-backed display value for one desired dynamic entity. */
+	dynamicEntityDisplay(guid: number): DynamicEntityView["display"] | null;
 	setPortalTransition(
 		transition: PortalTransitionPresentationPlan | undefined,
 	): void;
@@ -428,6 +430,14 @@ export class ClientPresentationSession {
 	setSelectedEntityGuid(guid: number | null): void {
 		this.#selectedEntityGuid = guid;
 		this.#owner?.runtime.setSelectedEntityGuid(guid);
+	}
+
+	/** Read the selected entity's current display name for a bounded UI consumer. */
+	readSelectedEntityName(): string | null {
+		return this.#selectedEntityGuid === null
+			? null
+			: (this.#owner?.runtime.dynamicEntityDisplay(this.#selectedEntityGuid)
+					?.name ?? null);
 	}
 
 	/** Read one coherent residency and camera-distance fact for app-local selection policy. */

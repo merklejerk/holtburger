@@ -14,6 +14,8 @@
 		| "debug"
 		| "speech"
 		| "precise-jump"
+		| "interact"
+		| "examine"
 		| "locked"
 		| "unlocked";
 
@@ -61,6 +63,12 @@
 		<circle cx="12" cy="12" r="6.5" /><circle cx="12" cy="12" r="2" /><path
 			d="M12 2v3M12 19v3M2 12h3M19 12h3"
 		/>
+	{:else if name === "interact"}
+		<path
+			d="M7.5 11V6.5a1.5 1.5 0 0 1 3 0V10m0-4.5a1.5 1.5 0 0 1 3 0V10m0-3.5a1.5 1.5 0 0 1 3 0v4m0-2a1.5 1.5 0 0 1 3 0v4.25C19.5 18.1 16.4 21 12 21c-2.4 0-4.1-1.1-5.4-3L4 14.2a1.7 1.7 0 0 1 2.7-2Z"
+		/>
+	{:else if name === "examine"}
+		<circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.3 15.3 5 5" />
 	{:else if name === "locked"}
 		<rect x="5" y="10" width="14" height="11" rx="2" /><path
 			d="M8 10V7a4 4 0 0 1 8 0v3"

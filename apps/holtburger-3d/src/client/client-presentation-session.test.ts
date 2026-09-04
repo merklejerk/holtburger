@@ -335,7 +335,7 @@ describe("ClientPresentationSession", () => {
 		await presentation.destroy();
 	});
 
-	it("joins the current selected bound to the exact primary view last presented", async () => {
+	it("joins the current selected display and bound to presentation-owned facts", async () => {
 		const playerGuid = 0x0101_0001;
 		const transport = new FakeClientTransport(currentState(playerGuid));
 		const lifecycle = new ClientLifecycleSession(transport);
@@ -349,8 +349,14 @@ describe("ClientPresentationSession", () => {
 		});
 		await presentation.start();
 		expect(presentation.frame(1_000).rendered).toBe(true);
-		const view = runtime.primaryViews.at(-1);
-		if (view === undefined)
+		await runtime.upsertDynamicEntity({
+			...view(7),
+			display: { level: 6, name: "Drudge" },
+		});
+		presentation.setSelectedEntityGuid(7);
+		expect(presentation.readSelectedEntityName()).toBe("Drudge");
+		const primaryView = runtime.primaryViews.at(-1);
+		if (primaryView === undefined)
 			throw new Error("Fixture did not publish a primary view.");
 		const localToLandblock = Mat4.identity();
 		localToLandblock.m41 = 12;
@@ -378,7 +384,7 @@ describe("ClientPresentationSession", () => {
 				cssWidth: 640,
 				placement: selectedFrame.placement,
 				tuning: CLIENT_TUNING.entitySelection.offscreenIndicator,
-				view,
+				view: primaryView,
 			}),
 		);
 		expect(presentation.selectedEntityTrackingStatus(7)).toMatchObject({
@@ -394,6 +400,8 @@ describe("ClientPresentationSession", () => {
 		expect(presentation.selectedEntityTrackingStatus(7)).toEqual({
 			kind: "temporarily-unrealized",
 		});
+		runtime.removeDynamicEntity(7, 1);
+		expect(presentation.readSelectedEntityName()).toBeNull();
 		await presentation.destroy();
 	});
 
@@ -1312,6 +1320,10 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 				? { kind: "temporarily-unrealized" }
 				: { frame: this.selectedFrame, kind: "realized" })
 		);
+	}
+
+	dynamicEntityDisplay(guid: number): DynamicEntityView["display"] | null {
+		return this.#desired.get(guid)?.display ?? null;
 	}
 
 	withSpawnedEntitySelectionGeometry<T>(): T | null {

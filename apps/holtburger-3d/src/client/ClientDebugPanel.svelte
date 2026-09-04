@@ -127,6 +127,15 @@
 					"Particle batches",
 					diagnostics.draw.particleBatches,
 				)}
+				{@render diagnosticRow(
+					"Selection mask",
+					diagnostics.draw.entitySelection.skippedReason ??
+						`${diagnostics.draw.entitySelection.selectedPartCount} parts / ${diagnostics.draw.entitySelection.selectedSphereProxyCount} sphere proxies / ${diagnostics.draw.entitySelection.selectedTriangleCount} triangles`,
+				)}
+				{@render diagnosticRow(
+					"Selection storage",
+					`${diagnostics.draw.entitySelection.activeMaskBytes.toLocaleString()} bytes`,
+				)}
 			{/if}
 		</dl>
 	{/if}

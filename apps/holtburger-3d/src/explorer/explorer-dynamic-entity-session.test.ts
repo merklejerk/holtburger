@@ -455,11 +455,12 @@ describe("possession", () => {
 	it("decodes the host-applied possession motion probe", async () => {
 		const transport = new RecordingTransport();
 		transport.responses.set("explorer_possession_motion_probe", {
-			clip: {
+			motion: {
 				animationId: 0x03000002,
 				completion: "loop",
 				framerate: 40,
 				highFrame: 3,
+				kind: "playing",
 				lowFrame: 0,
 			},
 			entityGeneration: 7,

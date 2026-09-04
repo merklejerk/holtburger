@@ -64,7 +64,7 @@ pub struct ClientEntityBodyFacts {
     pub physics: EffectiveEntityPhysicsState,
     /// Setup resource defining physical geometry.
     pub setup_did: u32,
-    /// Authored object scale applied to prepared geometry.
+    /// Current world-owned scale joined only when the prepared unit body is installed.
     pub object_scale: f32,
     /// Optional authored surface friction.
     pub friction: Option<f32>,
@@ -88,7 +88,6 @@ impl ClientEntityBodyFacts {
             && self.wcid == other.wcid
             && self.appearance == other.appearance
             && self.setup_did == other.setup_did
-            && self.object_scale.to_bits() == other.object_scale.to_bits()
             && option_f32_eq(self.friction, other.friction)
             && option_f32_eq(self.elasticity, other.elasticity)
     }
@@ -132,11 +131,7 @@ pub fn client_entity_body_facts(
         appearance: entity.appearance.clone(),
         physics: entity.physics.effective(),
         setup_did,
-        object_scale: entity
-            .properties
-            .get_float_prop(PropertyFloat::DefaultScale)
-            .map(|value| value as f32)
-            .unwrap_or(1.0),
+        object_scale: entity.scale.effective(),
         friction: property_f32(&entity.properties, PropertyFloat::Friction),
         elasticity: property_f32(&entity.properties, PropertyFloat::Elasticity),
     })
@@ -191,7 +186,6 @@ impl ClientCollisionSource for ContentClientCollisionSource {
                 wcid: facts.wcid,
                 setup_did: facts.setup_did,
                 appearance: facts.appearance,
-                object_scale: facts.object_scale,
                 friction: facts.friction,
                 elasticity: facts.elasticity,
                 physics: facts.physics,
@@ -463,9 +457,10 @@ impl ClientCollisionCoordinator {
                     let Some(_outcome) = world.scene.set_dynamic_physical_body(
                         body_id,
                         Some(
-                            DynamicPhysicalBodyConfiguration::new(
+                            DynamicPhysicalBodyConfiguration::with_object_scale(
                                 physical,
                                 completion.target.demand,
+                                current.facts.object_scale,
                             )
                             .expect("local-player completion carries integration demand"),
                         ),
@@ -527,8 +522,12 @@ impl ClientCollisionCoordinator {
                         let Some(outcome) = world.scene.set_dynamic_physical_body(
                             target.body_id,
                             Some(
-                                DynamicPhysicalBodyConfiguration::new(physical, target.demand)
-                                    .expect("remote completion carries non-empty demand"),
+                                DynamicPhysicalBodyConfiguration::with_object_scale(
+                                    physical,
+                                    target.demand,
+                                    current.object_scale,
+                                )
+                                .expect("remote completion carries valid non-empty demand"),
                             ),
                             PhysicalCollisionFilter::ALL,
                             initial_cell,

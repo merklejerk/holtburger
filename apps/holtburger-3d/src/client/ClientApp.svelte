@@ -51,11 +51,13 @@
 	} from "./client-lifecycle-state";
 	import { clientInputKey, ClientInputArbiter } from "./client-input-arbiter";
 	import { ClientPreciseJumpSession } from "./client-precise-jump-session";
+	import { ClientEntitySelection } from "./client-entity-selection";
 	import {
 		CLIENT_TOAST_DURATION_MS,
 		ClientToastCenter,
 		type ClientToast,
 	} from "./client-toast-center";
+	import type { ClientTargetIndicatorFrame } from "./client-target-indicator";
 
 	let lifecycle = $state<ClientLifecycleUiState>(
 		initialClientLifecycleUiState(),
@@ -93,6 +95,9 @@
 	let inputController: CharacterInputController | null = null;
 	let inputArbiter: ClientInputArbiter | null = null;
 	let preciseJumpSession: ClientPreciseJumpSession | null = null;
+	let entitySelection: ClientEntitySelection | null = null;
+	let selectedEntityGuid = $state<number | null>(null);
+	let hoveredEntityGuid = $state<number | null>(null);
 	let preciseJumpActive = $state(false);
 	let inputDispatch: Promise<void> = Promise.resolve();
 	const usesWorldPresentation = $derived(
@@ -405,6 +410,7 @@
 				cameraFovRadians: 0,
 				cameraHeadingRadians: 0,
 				presentedEntities: () => [],
+				selectedGuid: selectedEntityGuid,
 				source: null,
 				subject: null,
 			}
@@ -417,6 +423,10 @@
 
 	function readFrameRates(): FrameRates | null {
 		return frameRateSampler?.readFrameRates() ?? null;
+	}
+
+	function readTargetIndicatorFrame(): ClientTargetIndicatorFrame | null {
+		return presentationSession?.readTargetIndicatorFrame() ?? null;
 	}
 
 	function setShowRetailHiddenGeometry(visible: boolean): void {
@@ -487,6 +497,7 @@
 			CLIENT_TUNING.diagnostics.frameMetricsEmaWindowMs,
 		);
 		presentationSession = presentation;
+		presentation.setSelectedEntityGuid(untrack(() => selectedEntityGuid));
 		frameRateSampler = currentFrameRateSampler;
 		cameraController = presentation.camera;
 		reportPresentationStatus({ kind: "starting", diagnostic: null });
@@ -601,6 +612,19 @@
 			commandFailure = diagnostic(error);
 		});
 		preciseJumpSession = precise;
+		const selection = new ClientEntitySelection({
+			lifecycle: owner,
+			presentation: () => presentationSession,
+			onSelectionSubmissionFailed: appendChatError,
+		});
+		entitySelection = selection;
+		const unsubscribeSelection = selection.subscribe((guid) => {
+			selectedEntityGuid = guid;
+			presentationSession?.setSelectedEntityGuid(guid);
+		});
+		const unsubscribeHover = selection.subscribeHovered(
+			(guid) => (hoveredEntityGuid = guid),
+		);
 		const unsubscribePrecise = precise.subscribe((snapshot) => {
 			if (preciseJumpActive !== snapshot.active)
 				preciseJumpActive = snapshot.active;
@@ -615,6 +639,10 @@
 			unsubscribeToast();
 			toastCenter.destroy();
 			unsubscribePrecise();
+			unsubscribeSelection();
+			unsubscribeHover();
+			selection.destroy();
+			if (entitySelection === selection) entitySelection = null;
 			precise.destroy();
 			if (preciseJumpSession === precise) preciseJumpSession = null;
 			unsubscribe();
@@ -634,6 +662,9 @@
 		{readMinimapFrame}
 		{readDiagnostics}
 		{readFrameRates}
+		{readTargetIndicatorFrame}
+		{selectedEntityGuid}
+		{hoveredEntityGuid}
 		showRetailHiddenGeometry={frameSettings.showRetailHiddenGeometry}
 		onShowRetailHiddenGeometryChange={setShowRetailHiddenGeometry}
 		{playerName}
@@ -646,6 +677,12 @@
 		onPreciseJumpAim={aimPreciseJump}
 		onPreciseJumpActivate={activatePreciseJump}
 		onPreciseJumpEnter={enterPreciseJump}
+		onViewportSelect={(clientX, clientY) =>
+			entitySelection?.acquireViewportPoint(clientX, clientY)}
+		onViewportHover={(clientX, clientY) =>
+			entitySelection?.acquireViewportHover(clientX, clientY)}
+		onMaintainEntitySelection={() => entitySelection?.maintainSelection()}
+		onSelectEntity={(guid) => entitySelection?.select(guid)}
 		{chatMessages}
 		onSendChat={sendChat}
 		onChatFocusChange={handleChatFocusChange}

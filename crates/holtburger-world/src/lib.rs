@@ -17,6 +17,7 @@ pub mod damage;
 pub mod entity;
 pub mod entity_appearance;
 pub mod entity_physics;
+pub mod entity_scale;
 pub mod events;
 pub mod handlers;
 pub mod hydration;
@@ -25,6 +26,7 @@ pub mod inspect;
 pub mod magic;
 pub mod motion;
 pub mod player;
+pub mod selection;
 pub mod spatial;
 pub mod spell;
 pub mod state;
@@ -47,26 +49,29 @@ pub use entity_physics::{
     LocalIntegrationDemand, LocalPhysicalDemand, LocalTargetDemand,
     calculate_effective_entity_physics_state, resolve_effective_entity_physics_state,
 };
+pub use entity_scale::{EntityScaleError, EntityScaleState, EntityScaleUpdate};
 pub use events::{DerivedStatsData, FellowshipActivity, PlayerInfoData, WorldEvent};
 pub use motion::{authored_grounded_actuation, grounded_character_actuation};
+pub use selection::{SelectionEnvelope, SelectionEnvelopeError};
 pub use spatial::{
     AcceptedBodyMotion, AuthoritativeBodyVectors, AuthoritativePoseEffect,
-    AuthoritativePoseResetCause, CellTransitRequest, ChildSpatialBody, ChildSpatialBodyDefinition,
-    ChildSpatialBodyDefinitionError, ChildSpatialBodyWaypoint, CollisionOwnerProof,
-    CollisionQueryError, CollisionQueryPolicy, CollisionReportClassification,
-    CollisionReportContact, CollisionReportOutcome, CollisionReportPhase, CollisionReportSource,
-    CollisionScene, CollisionSceneUpdateError, CollisionSurfaceRayHit, ContactState,
-    DynamicBodyCollisionDefinition, DynamicBodyContact, DynamicBodyKinematics,
-    DynamicBodyPhysicsStateChange, DynamicBodyRelocationOutcome,
+    AuthoritativePoseResetCause, AvailableEntitySelectionCandidates, CellTransitRequest,
+    ChildSpatialBody, ChildSpatialBodyDefinition, ChildSpatialBodyDefinitionError,
+    ChildSpatialBodyWaypoint, CollisionOwnerProof, CollisionQueryError, CollisionQueryPolicy,
+    CollisionReportClassification, CollisionReportContact, CollisionReportOutcome,
+    CollisionReportPhase, CollisionReportSource, CollisionScene, CollisionSceneUpdateError,
+    CollisionSurfaceRayHit, ContactState, DynamicBodyCollisionDefinition, DynamicBodyContact,
+    DynamicBodyKinematics, DynamicBodyPhysicsStateChange, DynamicBodyRelocationOutcome,
     DynamicEntityCollectionCoverageRejection, DynamicPhysicalBodyConfiguration,
     DynamicPhysicalBodyConfigurationError, DynamicPhysicalBodyDefinition, EdgeProtection,
-    EntityCollisionProof, EntityCollisionSnapshot, EntitySurfaceRayHit, FreeSphereBudget,
-    FreeSphereConfig, FreeSphereOutcome, FreeSphereRequest, FreeSphereSettleOutcome,
-    FreeSphereState, GroundState, GroundSupport, GroundedBody, GroundedBodyActuation,
-    GroundedBodySpheres, GroundedBudget, GroundedConfig, GroundedLaunch, GroundedObstruction,
-    GroundedObstructionRequest, GroundedOutcome, GroundedRequest, GroundedSphere,
-    LocalDriveControl, LocalDriveGait, MAXIMUM_DYNAMIC_SLICE_DISTANCE, MAXIMUM_DYNAMIC_SLICES,
-    MotionWaypoint, MotionWaypointPlacement, MovementObstructionRequest,
+    EntityCollisionProof, EntityCollisionSnapshot, EntitySelectionCandidateResult,
+    EntitySelectionQueryError, EntitySelectionRayRequest, EntitySelectionUnavailable,
+    EntitySurfaceRayHit, FreeSphereBudget, FreeSphereConfig, FreeSphereOutcome, FreeSphereRequest,
+    FreeSphereSettleOutcome, FreeSphereState, GroundState, GroundSupport, GroundedBody,
+    GroundedBodyActuation, GroundedBodySpheres, GroundedBudget, GroundedConfig, GroundedLaunch,
+    GroundedObstruction, GroundedObstructionRequest, GroundedOutcome, GroundedRequest,
+    GroundedSphere, LocalDriveControl, LocalDriveGait, MAXIMUM_DYNAMIC_SLICE_DISTANCE,
+    MAXIMUM_DYNAMIC_SLICES, MotionWaypoint, MotionWaypointPlacement, MovementObstructionRequest,
     MovementRestrictionRequest, PhysicalBodyActuation, PhysicalBodyActuationError,
     PhysicalBodyDefinition, PhysicalBodyDefinitionError, PhysicalBodyMotion,
     PhysicalBodyParticipation, PhysicalBodyReconfiguration, PhysicalBodyReconfigurationOutcome,

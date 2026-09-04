@@ -18,7 +18,6 @@ clap.workspace = true
 env_logger.workspace = true
 log.workspace = true
 hex.workspace = true
-byteorder.workspace = true
 holtburger-protocol.workspace = true
 holtburger-weenie-catalog.workspace = true
 serde.workspace = true

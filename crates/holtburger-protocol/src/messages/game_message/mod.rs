@@ -91,7 +91,7 @@ pub enum GameMessage {
     SetStackSize(Box<SetStackSizeData>),
     SetState(Box<SetStateData>),
     PlaySound(Box<PlaySoundData>),
-    PlayEffect(Box<PlayEffectData>),
+    PlayScript(Box<PlayScriptData>),
 
     Unknown(u32, Vec<u8>),
 }

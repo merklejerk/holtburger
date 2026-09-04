@@ -5,6 +5,7 @@ import type { HostPhysicalFlyFailure } from "../../explorer/physical-fly-session
 import type { HostPhysicalFlyPath } from "../game/motion/host-physical-fly-path";
 import type {
 	ClientCurrentState,
+	ClientDynamicScriptCue,
 	ClientExitRequested,
 	ClientLifecycle,
 	ClientLocalPlayerEstablished,
@@ -18,6 +19,7 @@ import type {
 	ClientCharacterMotionFeedback,
 	ClientPreciseJumpEvaluation,
 	ClientPreciseJumpTransactionFeedback,
+	ClientEntitySelectionQueryResult,
 } from "../../client/client-host-contract";
 
 /** Content/status commands implemented by the shared host-content capability. */
@@ -31,6 +33,7 @@ const SHARED_HOST_COMMAND_NAMES = [
 	"load_animation",
 	"load_setup_visual",
 	"load_physics_script",
+	"load_physics_script_table",
 	"load_particle_emitter",
 	"load_audio",
 	"load_sound_table",
@@ -75,6 +78,7 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"set_client_camera_intent",
 	"set_client_camera_clearance",
 	"set_client_precise_jump_aim",
+	"query_client_entity_selection_candidates",
 	"commit_client_precise_jump",
 	"cancel_client_precise_jump",
 	"acknowledge_client_world_reveal",
@@ -124,6 +128,7 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-character-motion-feedback",
 	"client-precise-jump-evaluation",
 	"client-precise-jump-transaction-feedback",
+	"client-entity-selection-query-result",
 	"client-local-player-established",
 	"client-server-time-updated",
 	"client-world-name-updated",
@@ -131,6 +136,7 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-player-vitals-updated",
 	"client-chat-message",
 	"client-dynamic-entity",
+	"client-dynamic-script-cue",
 	"client-camera-started",
 	"client-camera",
 	"client-presentation-discontinuity",
@@ -186,6 +192,7 @@ export interface HostEventPayloadMap {
 	"client-character-motion-feedback": ClientCharacterMotionFeedback;
 	"client-precise-jump-evaluation": ClientPreciseJumpEvaluation;
 	"client-precise-jump-transaction-feedback": ClientPreciseJumpTransactionFeedback;
+	"client-entity-selection-query-result": ClientEntitySelectionQueryResult;
 	"client-local-player-established": ClientLocalPlayerEstablished;
 	"client-server-time-updated": { time: number };
 	"client-world-name-updated": { name: string };
@@ -195,6 +202,7 @@ export interface HostEventPayloadMap {
 	};
 	"client-chat-message": ClientChatMessage;
 	"client-dynamic-entity": DynamicEntityEvent;
+	"client-dynamic-script-cue": ClientDynamicScriptCue;
 	"client-camera-started": ClientCameraStartReceipt;
 	"client-camera": ClientCameraTick;
 	"client-presentation-discontinuity": ClientPresentationDiscontinuity;

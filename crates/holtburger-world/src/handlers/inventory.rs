@@ -17,6 +17,10 @@ pub(crate) fn handle_message(
     events: &mut Vec<WorldEvent>,
 ) -> bool {
     match message {
+        GameMessage::ObjDescEvent(data) => {
+            state.apply_object_visual_description(data, events);
+            true
+        }
         GameMessage::ObjectCreate(data) => {
             let entity_name = data
                 .public_weenie_desc

@@ -23,7 +23,17 @@ export function buildEffectRouter(effects: EffectSystem = new EffectSystem()): {
 				playSoundTableKey: () => "unprepared",
 			},
 			effects,
-			particles: { createEmitter: () => "unprepared" },
+			scale: {
+				applyScale: (target, values, mode) => {
+					effects.applyScale(target, values);
+					return mode === "initial-state" ? "folded-initial-state" : "executed";
+				},
+			},
+			particles: {
+				createEmitter: () => "unprepared",
+				destroy: () => {},
+				stop: () => {},
+			},
 			scheduler: {
 				scheduleActivation: () => {
 					throw new Error(

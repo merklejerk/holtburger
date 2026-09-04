@@ -8,6 +8,7 @@ import { LandblockSourceHostBatch } from "../../assets/landblock-source-host-bat
 import { ParticleEmitterHostSource } from "../../assets/particle-emitter-host-source";
 import { ParticleMeshHostSource } from "../../assets/particle-mesh-host-source";
 import { PhysicsScriptHostSource } from "../../assets/physics-script-host-source";
+import { PhysicsScriptTableHostSource } from "../../assets/physics-script-table-host-source";
 import { SkyHostSource } from "../../assets/sky-host-source";
 import { SoundTableHostSource } from "../../assets/sound-table-host-source";
 import { TexturePixelHostSource } from "../../assets/texture-pixel-host-source";
@@ -164,6 +165,7 @@ export class GamePresentationOwner {
 				texturePixelSource,
 				animationSource,
 				PhysicsScriptHostSource.build(hostTransport),
+				PhysicsScriptTableHostSource.build(hostTransport),
 				audioDevice,
 				ParticleEmitterHostSource.build(hostTransport),
 				soundTableSource,

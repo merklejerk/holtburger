@@ -182,6 +182,15 @@ const playerEnteredSchema = z
 	.object({ playerGuid: guid, name: z.string() })
 	.strict();
 
+const dynamicScriptCueSchema = z
+	.object({
+		guid,
+		generation: z.number().int().nonnegative(),
+		cue: z.number().int().nonnegative(),
+		intensity: finiteNumber,
+	})
+	.strict();
+
 const exitRequestedSchema = z
 	.object({
 		cause: exitCauseSchema,
@@ -493,13 +502,57 @@ const preciseJumpCommitRequestSchema = z
 const preciseJumpCancelRequestSchema = z
 	.object({ sequence: z.number().int().nonnegative().safe() })
 	.strict();
+const entitySelectionQueryRequestSchema = z
+	.object({
+		camera: cameraIdentitySchema,
+		sequence: z.number().int().nonnegative().safe(),
+		anchor: guid,
+		start: vector3TupleSchema,
+		direction: vector3TupleSchema,
+		previousCell: guid.nullable(),
+	})
+	.strict();
+const entitySelectionQueryResultSchema = z.union([
+	z
+		.object({
+			status: z.literal("available"),
+			sequence: z.number().int().nonnegative().safe(),
+			staticLimitDistance: finiteNumber.nonnegative(),
+			candidateGuids: z.array(guid),
+		})
+		.strict(),
+	z
+		.object({
+			status: z.literal("unavailable"),
+			sequence: z.number().int().nonnegative().safe(),
+			reason: z.literal("stale-camera"),
+		})
+		.strict(),
+	z
+		.object({
+			status: z.literal("unavailable"),
+			sequence: z.number().int().nonnegative().safe(),
+			reason: z.literal("collision-coordinator-unavailable"),
+		})
+		.strict(),
+	z
+		.object({
+			status: z.literal("unavailable"),
+			sequence: z.number().int().nonnegative().safe(),
+			reason: z.literal("missing-collision-owner"),
+			missingCollisionOwner: guid,
+		})
+		.strict(),
+]);
 
 export type ClientLifecycle = z.infer<typeof lifecycleSchema>;
 export type ClientCharacter = z.infer<typeof characterSchema>;
 export type ClientCurrentState = Omit<
 	z.infer<typeof currentStateSchema>,
 	"dynamic"
-> & { dynamic: DynamicEntitySnapshot };
+> & {
+	dynamic: DynamicEntitySnapshot;
+};
 export type ClientPresentationDiscontinuity = z.infer<
 	typeof presentationDiscontinuitySchema
 >;
@@ -511,6 +564,7 @@ export type ClientVital = z.infer<typeof vitalSchema>;
 export type ClientChatChannel = z.infer<typeof chatChannelSchema>;
 export type ClientChatMessage = z.infer<typeof chatMessageSchema>;
 export type ClientPlayerEntered = z.infer<typeof playerEnteredSchema>;
+export type ClientDynamicScriptCue = z.infer<typeof dynamicScriptCueSchema>;
 export type ClientDriveRequest = z.infer<typeof clientDriveRequestSchema>;
 export type ClientCharacterMotionEventRequest = z.infer<
 	typeof clientCharacterMotionEventRequestSchema
@@ -570,6 +624,9 @@ export type ClientPreciseJumpCommitRequest = z.infer<
 export type ClientPreciseJumpCancelRequest = z.infer<
 	typeof preciseJumpCancelRequestSchema
 >;
+export type ClientEntitySelectionQueryResult = z.infer<
+	typeof entitySelectionQueryResultSchema
+>;
 
 /** Complete renderer-authored registration for one authority-owned camera generation. */
 export interface ClientCameraStartRequest {
@@ -609,6 +666,16 @@ export interface ClientPreciseJumpAimRequest {
 	readonly previousCell: number | null;
 }
 
+/** One correlated selection ray; authority owns its fixed maximum distance. */
+export interface ClientEntitySelectionQueryRequest {
+	readonly camera: ClientCameraIdentity;
+	readonly sequence: number;
+	readonly anchor: number;
+	readonly start: LandblockVector3;
+	readonly direction: readonly [number, number, number];
+	readonly previousCell: number | null;
+}
+
 /** Strictly validates the atomic client replacement level before mutable UI observes it. */
 export function decodeClientCurrentState(value: unknown): ClientCurrentState {
 	const parsed = currentStateSchema.parse(value);
@@ -641,6 +708,13 @@ export function decodeClientWorldName(value: unknown): { name: string } {
 
 export function decodeClientPlayerEntered(value: unknown): ClientPlayerEntered {
 	return playerEnteredSchema.parse(value);
+}
+
+/** Strictly validates one transient script cue bound to an exact entity generation. */
+export function decodeClientDynamicScriptCue(
+	value: unknown,
+): ClientDynamicScriptCue {
+	return dynamicScriptCueSchema.parse(value);
 }
 
 export function decodeClientVitals(value: unknown): { vitals: ClientVital[] } {
@@ -751,4 +825,17 @@ export function decodeClientPreciseJumpTransactionFeedback(
 	value: unknown,
 ): ClientPreciseJumpTransactionFeedback {
 	return preciseJumpTransactionFeedbackSchema.parse(value);
+}
+
+export function decodeClientEntitySelectionQueryRequest(
+	value: unknown,
+): ClientEntitySelectionQueryRequest {
+	const parsed = entitySelectionQueryRequestSchema.parse(value);
+	return { ...parsed, start: landblockVector3(parsed.start) };
+}
+
+export function decodeClientEntitySelectionQueryResult(
+	value: unknown,
+): ClientEntitySelectionQueryResult {
+	return entitySelectionQueryResultSchema.parse(value);
 }

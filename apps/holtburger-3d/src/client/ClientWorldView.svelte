@@ -19,8 +19,11 @@
 	import ClientHudPanel from "./ClientHudPanel.svelte";
 	import ClientShortcutDock from "./ClientShortcutDock.svelte";
 	import ClientToastOverlay from "./ClientToastOverlay.svelte";
+	import ClientTargetIndicator from "./ClientTargetIndicator.svelte";
+	import type { ClientTargetIndicatorFrame } from "./client-target-indicator";
 	import type { ClientVital } from "./client-host-contract";
 	import type { ClientToast } from "./client-toast-center";
+	import { CLIENT_TUNING } from "./client-tuning";
 	import {
 		anchorClientHudPlacement,
 		CLIENT_FPS_PANEL_WIDTH,
@@ -30,17 +33,23 @@
 		resolveClientHudSquarePlacement,
 		type ClientHudViewport,
 	} from "./client-hud-layout";
-	import type {
-		ClientPresentationCameraController,
-		ClientPresentationDiagnostics,
-	} from "./client-presentation-session";
+	import type { ClientPresentationDiagnostics } from "./client-presentation-session";
+	import {
+		advanceClientViewportPointerGesture,
+		beginClientViewportPointerGesture,
+		type ClientViewportCameraController,
+		type ClientViewportPointerGesture,
+	} from "./client-viewport-pointer-gesture";
 
 	interface Props {
-		readonly cameraController: ClientPresentationCameraController | null;
+		readonly cameraController: ClientViewportCameraController | null;
 		readonly debugEnabled: boolean;
 		readonly readMinimapFrame: () => MinimapFrame;
 		readonly readDiagnostics: () => ClientPresentationDiagnostics | null;
 		readonly readFrameRates: () => FrameRates | null;
+		readonly readTargetIndicatorFrame: () => ClientTargetIndicatorFrame | null;
+		readonly selectedEntityGuid: number | null;
+		readonly hoveredEntityGuid: number | null;
 		readonly showRetailHiddenGeometry: boolean;
 		readonly onShowRetailHiddenGeometryChange: (visible: boolean) => void;
 		readonly playerName: string | null;
@@ -53,6 +62,10 @@
 		readonly onPreciseJumpAim: (clientX: number, clientY: number) => void;
 		readonly onPreciseJumpActivate: () => void;
 		readonly onPreciseJumpEnter: () => void;
+		readonly onViewportSelect: (clientX: number, clientY: number) => void;
+		readonly onViewportHover: (clientX: number, clientY: number) => void;
+		readonly onMaintainEntitySelection: () => void;
+		readonly onSelectEntity: (guid: number | null) => void;
 		readonly chatMessages: readonly ClientChatLine[];
 		readonly onSendChat: (message: string) => Promise<void>;
 		readonly onChatFocusChange: (focused: boolean) => void;
@@ -65,6 +78,9 @@
 		readMinimapFrame,
 		readDiagnostics,
 		readFrameRates,
+		readTargetIndicatorFrame,
+		selectedEntityGuid,
+		hoveredEntityGuid,
 		showRetailHiddenGeometry,
 		onShowRetailHiddenGeometryChange,
 		playerName,
@@ -77,6 +93,10 @@
 		onPreciseJumpAim,
 		onPreciseJumpActivate,
 		onPreciseJumpEnter,
+		onViewportSelect,
+		onViewportHover,
+		onMaintainEntitySelection,
+		onSelectEntity,
 		chatMessages,
 		onSendChat,
 		onChatFocusChange,
@@ -114,22 +134,39 @@
 		viewDiameters: mapViewDiameters,
 	});
 	let canvasElement = $state<HTMLCanvasElement | null>(null);
-	let pointerId: number | null = null;
+	let viewportGesture: ClientViewportPointerGesture | null = null;
 	let pointerX = 0;
 	let pointerY = 0;
 	let hasPointerPosition = false;
+	let pointerInsideCanvas = false;
 	const HUD_PREVIEW_JUMP_EXTENT = 0.45;
 	const HUD_PREVIEW_TOAST_MESSAGE = "Notification preview";
 
 	$effect(() => {
 		if (!preciseJumpActive) return;
 		untrack(() => {
+			cancelViewportGesture();
 			if (hasPointerPosition) onPreciseJumpAim(pointerX, pointerY);
 		});
 	});
 
 	$effect(() => {
+		if (cameraController !== null) return;
+		untrack(cancelViewportGesture);
+	});
+
+	$effect(() => {
 		onCanvas(canvasElement);
+	});
+
+	$effect(() => {
+		if (canvasElement === null) return;
+		const handle = window.setInterval(() => {
+			onMaintainEntitySelection();
+			if (!pointerInsideCanvas || !hasPointerPosition) return;
+			onViewportHover(pointerX, pointerY);
+		}, CLIENT_TUNING.entitySelection.sampleIntervalMs);
+		return () => window.clearInterval(handle);
 	});
 
 	$effect(() => {
@@ -166,9 +203,17 @@
 			onPreciseJumpActivate();
 			return;
 		}
-		if (cameraController === null || event.button !== 0 || pointerId !== null)
+		if (
+			cameraController === null ||
+			event.button !== 0 ||
+			viewportGesture !== null
+		)
 			return;
-		pointerId = event.pointerId;
+		viewportGesture = beginClientViewportPointerGesture(
+			event.pointerId,
+			event.clientX,
+			event.clientY,
+		);
 		pointerX = event.clientX;
 		pointerY = event.clientY;
 		canvasElement?.focus();
@@ -183,26 +228,61 @@
 			onPreciseJumpAim(event.clientX, event.clientY);
 			return;
 		}
-		if (pointerId !== event.pointerId || cameraController === null) {
+		const gesture = viewportGesture;
+		if (gesture?.pointerId !== event.pointerId || cameraController === null) {
 			pointerX = event.clientX;
 			pointerY = event.clientY;
 			hasPointerPosition = true;
 			return;
 		}
-		const deltaX = event.clientX - pointerX;
-		const deltaY = event.clientY - pointerY;
+		const advanced = advanceClientViewportPointerGesture(
+			gesture,
+			event.clientX,
+			event.clientY,
+		);
+		viewportGesture = advanced.gesture;
 		pointerX = event.clientX;
 		pointerY = event.clientY;
 		hasPointerPosition = true;
-		if (deltaX === 0 && deltaY === 0) return;
-		cameraController.orbit(deltaX, -deltaY, performance.now());
+		if (advanced.orbitDelta === null) return;
+		cameraController.orbit(
+			advanced.orbitDelta.x,
+			-advanced.orbitDelta.y,
+			performance.now(),
+		);
 	}
 
-	function releasePointer(event: PointerEvent): void {
-		if (pointerId !== event.pointerId) return;
-		pointerId = null;
+	function handlePointerEnter(event: PointerEvent): void {
+		pointerInsideCanvas = true;
+		pointerX = event.clientX;
+		pointerY = event.clientY;
+		hasPointerPosition = true;
+	}
+
+	function handlePointerLeave(): void {
+		pointerInsideCanvas = false;
+	}
+
+	function completeViewportGesture(event: PointerEvent): void {
+		const gesture = viewportGesture;
+		if (gesture?.pointerId !== event.pointerId) return;
+		handlePointerMove(event);
+		const wasClick = viewportGesture?.dragging === false;
+		viewportGesture = null;
 		if (canvasElement?.hasPointerCapture(event.pointerId))
 			canvasElement.releasePointerCapture(event.pointerId);
+		if (wasClick) onViewportSelect(event.clientX, event.clientY);
+	}
+
+	function cancelViewportGesture(): void {
+		const gesture = viewportGesture;
+		viewportGesture = null;
+		if (gesture && canvasElement?.hasPointerCapture(gesture.pointerId))
+			canvasElement.releasePointerCapture(gesture.pointerId);
+	}
+
+	function cancelViewportPointer(event: PointerEvent): void {
+		if (viewportGesture?.pointerId === event.pointerId) cancelViewportGesture();
 	}
 
 	function handleWheel(event: WheelEvent): void {
@@ -212,6 +292,8 @@
 	}
 </script>
 
+<svelte:window onblur={cancelViewportGesture} />
+
 <main
 	bind:this={worldElement}
 	class="client-world"
@@ -220,14 +302,22 @@
 	<canvas
 		bind:this={canvasElement}
 		class="client-canvas"
+		class:client-canvas-entity-hovered={hoveredEntityGuid !== null}
 		aria-label="Game world"
 		tabindex="0"
 		onpointerdown={handlePointerDown}
+		onpointerenter={handlePointerEnter}
+		onpointerleave={handlePointerLeave}
 		onpointermove={handlePointerMove}
-		onpointerup={releasePointer}
-		onpointercancel={releasePointer}
+		onpointerup={completeViewportGesture}
+		onpointercancel={cancelViewportPointer}
+		onlostpointercapture={cancelViewportPointer}
 		onwheel={handleWheel}
 	></canvas>
+	<ClientTargetIndicator
+		readFrame={readTargetIndicatorFrame}
+		selectedGuid={selectedEntityGuid}
+	/>
 	<button
 		type="button"
 		class="client-ui-lock"
@@ -244,6 +334,7 @@
 		viewState={minimap}
 		editable={hudMode === "layout"}
 		onStateChange={updateMinimap}
+		{onSelectEntity}
 	/>
 	<ClientHudPanel
 		label="Character HUD"
@@ -385,6 +476,10 @@
 		cursor: grab;
 		outline: none;
 		touch-action: none;
+	}
+
+	.client-canvas.client-canvas-entity-hovered {
+		cursor: pointer;
 	}
 
 	.client-canvas:active {

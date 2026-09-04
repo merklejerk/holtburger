@@ -132,6 +132,7 @@ try {
 			landblockId: options.landblockId,
 			lifecycleState: result.lifecycleState,
 			entityLifecycle: result.entityLifecycle,
+			spawnedSelection: result.spawnedSelection,
 			possessionScenario: result.possessionScenario,
 			followFlight: result.followFlight,
 			relocationSequence: result.relocationSequence,
@@ -194,6 +195,9 @@ try {
 	if (options.fixture === "outdoor-pssm") {
 		assertOutdoorPssmFixture(result.state.outdoorPssm);
 	}
+	if (options.fixture === "entity-selection") {
+		assertEntitySelectionFixture(result.state.entitySelection);
+	}
 	if (options.spawnWcid !== null && options.entityShowcaseCount === 0) {
 		assertSpawnedEntityLifecycle(result);
 	}
@@ -205,6 +209,12 @@ try {
 	}
 	if (options.possessionScenario) {
 		assertPossessionScenario(result.possessionScenario);
+	}
+	if (options.spawnedSelectionProbe) {
+		assertSpawnedSelectionProbe(
+			result.spawnedSelection,
+			options.spawnSimulated,
+		);
 	}
 } finally {
 	await Promise.allSettled(children.toReversed().map(stopChild));
@@ -241,6 +251,7 @@ function parseArgs(args) {
 		isolateAuthoredDynamics: false,
 		excludeAuthoredDynamics: false,
 		excludeSpawnedAttachments: false,
+		spawnedSelectionProbe: false,
 		spawnWcid: null,
 		entityShowcaseCount: 0,
 		entityPairWcid: null,
@@ -419,6 +430,9 @@ function parseArgs(args) {
 				break;
 			case "--spawn-wcid":
 				parsed.spawnWcid = requireValue(args, ++index, arg);
+				break;
+			case "--spawned-selection-probe":
+				parsed.spawnedSelectionProbe = true;
 				break;
 			case "--entity-showcase-count":
 				parsed.entityShowcaseCount = parsePositiveInteger(
@@ -865,13 +879,14 @@ function parseArgs(args) {
 				if (
 					![
 						"blended",
+						"entity-selection",
 						"instanced",
 						"outdoor-pssm",
 						"portal-scope-atlas",
 					].includes(parsed.fixture)
 				) {
 					throw new Error(
-						"--fixture must be blended, instanced, outdoor-pssm, or portal-scope-atlas.",
+						"--fixture must be blended, entity-selection, instanced, outdoor-pssm, or portal-scope-atlas.",
 					);
 				}
 				break;
@@ -1164,6 +1179,9 @@ function parseArgs(args) {
 	if (parsed.excludeSpawnedAttachments && parsed.spawnWcid === null) {
 		throw new Error("--exclude-spawned-attachments requires --spawn-wcid.");
 	}
+	if (parsed.spawnedSelectionProbe && parsed.spawnWcid === null) {
+		throw new Error("--spawned-selection-probe requires --spawn-wcid.");
+	}
 	// The pair and population scenarios spawn simulated fleets of their own, so they satisfy the
 	// same requirement without --spawn-simulated.
 	const simulatedScenario =
@@ -1274,6 +1292,9 @@ Options:
                          Harness-only A/B: realize a spawned wearer without its attached children.
   --spawn-wcid <id>     Spawn one decimal or 0x WCID through the real catalog host, capture it,
                          then exact-despawn it and assert shared-runtime resource cleanup.
+  --spawned-selection-probe
+                        Select every entity produced by --spawn-wcid through the production runtime.
+                        With --spawn-simulated, first activate a short authored locomotion clip.
   --entity-pair-wcid <id>
                         Launch this simulated WCID along AC +x into the pair target. Needs a
                         catalog maximum velocity, so pick a missile-class template.
@@ -1634,6 +1655,40 @@ function assertOutdoorPssmFixture(fixture) {
 	});
 }
 
+function assertEntitySelectionFixture(fixture) {
+	if (!fixture) {
+		throw new Error("Entity selection fixture did not publish evidence.");
+	}
+	for (const field of [
+		"currentTransformFollowed",
+		"interiorPreserved",
+		"sphereProxyWorkExact",
+		"resizedTargetReplaced",
+		"sameSizeTargetReused",
+		"targetInvalidAfterDestroy",
+	]) {
+		if (fixture[field] !== true) {
+			throw new Error(
+				`Entity selection fixture failed ${field}: ${JSON.stringify(fixture)}.`,
+			);
+		}
+	}
+	if (
+		fixture.depthIndependentMaskPixel !== 255 ||
+		fixture.sphereProxyMaskPixel !== 255 ||
+		fixture.initialActiveMaskBytes !== 64 * 64 ||
+		fixture.resizedActiveMaskBytes !== 32 * 32 ||
+		fixture.outlinePixelCount <= 0 ||
+		fixture.portalWarpOutlinePixelCount <= 0 ||
+		fixture.targetGenerationsAllocated !== 2 ||
+		fixture.targetGenerationsDisposedAfterDestroy !== 2
+	) {
+		throw new Error(
+			`Entity selection fixture reported invalid GPU evidence: ${JSON.stringify(fixture)}.`,
+		);
+	}
+}
+
 function assertOutdoorPssmDiagnostics(actual, expected) {
 	if (JSON.stringify(actual) !== JSON.stringify(expected)) {
 		throw new Error(
@@ -1676,6 +1731,7 @@ function briefHarnessReport(result) {
 			({ level }) => level === "error" || level === "exception",
 		),
 		entityLifecycle: summarizeEntityLifecycle(result.entityLifecycle),
+		spawnedSelection: result.spawnedSelection,
 		possessionScenario: summarizePossessionScenario(result.possessionScenario),
 		entityPair: result.entityPair,
 		entityPopulation: result.entityPopulation,
@@ -2241,6 +2297,100 @@ function summarizeEntityAdvances(events) {
 	};
 }
 
+/** Activate only enough host motion to exercise current-pose selection, then sample every spawn. */
+async function runSpawnedSelectionProbe(client, spawned, activateAnimation) {
+	const invoke = (method, args = []) =>
+		evaluate(
+			client,
+			`globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.${method}`,
+			args,
+		);
+	let motion = null;
+	if (activateAnimation) {
+		const possession = await invoke("possessExplorerEntity", [
+			spawned.identity.guid,
+		]);
+		const result = await invoke("setPossessionIntent", [
+			{
+				drive: {
+					gait: "run",
+					lateral: null,
+					longitudinal: "forward",
+					turn: null,
+				},
+				possessionGeneration: possession.possessionGeneration,
+				revision: 1,
+				runRateScalar: possession.runRateCapability.initial,
+				stance: possession.acceptedStance,
+			},
+		]);
+		if (result !== "accepted") {
+			throw new Error(`Selection animation intent returned ${result}.`);
+		}
+		for (let tick = 0; tick < 3; tick += 1) {
+			await invoke("tickPossession", [1000 / 30]);
+		}
+		motion = await invoke("possessionMotionProbe");
+	}
+	const state = await invoke("state");
+	const targets = [];
+	for (const entity of state.spawnedEntities) {
+		targets.push({
+			evidence: await invoke("probeSpawnedEntitySelection", [
+				entity.identity.guid,
+				150,
+			]),
+			generation: entity.generation,
+			guid: entity.identity.guid,
+			placementKind: entity.placement.kind,
+			wcid: entity.identity.wcid,
+		});
+	}
+	return { motion, targets };
+}
+
+function assertSpawnedSelectionProbe(probe, expectsAnimation) {
+	if (probe === null || probe.targets.length === 0) {
+		throw new Error("Spawned selection probe produced no targets.");
+	}
+	for (const target of probe.targets) {
+		for (const sample of [target.evidence.first, target.evidence.second]) {
+			if (
+				sample.exactHit.selectedGuid !== target.guid ||
+				sample.exactHit.distance === null ||
+				sample.geometry.guid !== target.guid ||
+				sample.geometry.partCount <= 0 ||
+				sample.geometry.triangleCount <= 0 ||
+				sample.mask.activeMaskBytes <= 0 ||
+				sample.mask.maskDrawCount <= 0 ||
+				sample.mask.compositeDrawCount !== 1 ||
+				sample.mask.skippedReason !== null
+			) {
+				throw new Error(
+					`Spawned selection target did not reach exact geometry and mask rendering: ${JSON.stringify(target)}.`,
+				);
+			}
+		}
+	}
+	if (expectsAnimation) {
+		const root = probe.targets.find(
+			(target) => target.placementKind === "world",
+		);
+		if (
+			probe.motion?.motion?.kind !== "playing" ||
+			root === undefined ||
+			Math.abs(
+				root.evidence.second.geometry.transformChecksum -
+					root.evidence.first.geometry.transformChecksum,
+			) <= 1e-6
+		) {
+			throw new Error(
+				`Spawned selection probe did not follow an authored animation: ${JSON.stringify(probe)}.`,
+			);
+		}
+	}
+}
+
 async function runPossessionScenario(
 	client,
 	spawned,
@@ -2550,10 +2700,17 @@ async function runPossessionScenario(
 	await setDrive(drive("backward"));
 	let backwardEntry = await advance(1);
 	for (let tick = 1; tick < transitionTimeoutTicks; tick += 1) {
-		if (backwardEntry.probe?.clip?.completion === "loop") break;
+		if (
+			backwardEntry.probe?.motion?.kind === "playing" &&
+			backwardEntry.probe.motion.completion === "loop"
+		)
+			break;
 		backwardEntry = await advance(1);
 	}
-	if (backwardEntry.probe?.clip?.completion !== "loop") {
+	if (
+		backwardEntry.probe?.motion?.kind !== "playing" ||
+		backwardEntry.probe.motion.completion !== "loop"
+	) {
 		throw new Error(
 			`Possessed S did not reach its reversed cyclic motion: ${JSON.stringify(backwardEntry.probe)}.`,
 		);
@@ -3690,6 +3847,43 @@ async function runClientHudHarness({ viteUrl }) {
 				y: y + deltaY,
 			});
 		};
+		const dispatchPrimaryGesture = async (
+			rectangle,
+			points,
+			release = true,
+		) => {
+			const start = {
+				x: rectangle.left + rectangle.width / 2,
+				y: rectangle.top + rectangle.height / 2,
+			};
+			await client.send("Input.dispatchMouseEvent", {
+				button: "left",
+				buttons: 1,
+				clickCount: 1,
+				type: "mousePressed",
+				...start,
+			});
+			for (const point of points) {
+				await client.send("Input.dispatchMouseEvent", {
+					button: "left",
+					buttons: 1,
+					type: "mouseMoved",
+					x: start.x + point.x,
+					y: start.y + point.y,
+				});
+			}
+			if (!release) return start;
+			const end = points.at(-1) ?? { x: 0, y: 0 };
+			await client.send("Input.dispatchMouseEvent", {
+				button: "left",
+				buttons: 0,
+				clickCount: 1,
+				type: "mouseReleased",
+				x: start.x + end.x,
+				y: start.y + end.y,
+			});
+			return start;
+		};
 		const zoomMinimapIn = async (steps) => {
 			const { x, y } = await minimapSurfaceCenter();
 			for (let step = 0; step < steps; step += 1) {
@@ -3887,6 +4081,201 @@ async function runClientHudHarness({ viteUrl }) {
 		await delay(180);
 		const runtimeTransients = await capture();
 
+		const hoverStartOutside = runtimeTransients.surfaces["Character HUD"];
+		await client.send("Input.dispatchMouseEvent", {
+			buttons: 0,
+			type: "mouseMoved",
+			x: hoverStartOutside.left + hoverStartOutside.width / 2,
+			y: hoverStartOutside.top + hoverStartOutside.height / 2,
+		});
+		await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.resetSelectionFixture",
+			[],
+		);
+		await delay(100);
+		const hoverBaseline = await capture();
+		const hoverPoint = {
+			x: hoverBaseline.gameCanvas.left + hoverBaseline.gameCanvas.width / 2,
+			y: hoverBaseline.gameCanvas.top + hoverBaseline.gameCanvas.height / 2,
+		};
+		await client.send("Input.dispatchMouseEvent", {
+			buttons: 0,
+			type: "mouseMoved",
+			...hoverPoint,
+		});
+		await delay(120);
+		const hoverHit = await capture();
+		await delay(220);
+		const hoverStationary = await capture();
+		await client.send("Input.dispatchMouseEvent", {
+			button: "left",
+			buttons: 1,
+			clickCount: 1,
+			type: "mousePressed",
+			...hoverPoint,
+		});
+		await client.send("Input.dispatchMouseEvent", {
+			button: "left",
+			buttons: 1,
+			type: "mouseMoved",
+			x: hoverPoint.x + 8,
+			y: hoverPoint.y + 5,
+		});
+		const hoverDragging = await capture();
+		await client.send("Input.dispatchMouseEvent", {
+			button: "left",
+			buttons: 0,
+			clickCount: 1,
+			type: "mouseReleased",
+			x: hoverPoint.x + 8,
+			y: hoverPoint.y + 5,
+		});
+		await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.setHoverHitEnabled",
+			[false],
+		);
+		await delay(100);
+		const hoverMiss = await capture();
+		const characterPanel = hoverMiss.surfaces["Character HUD"];
+		await client.send("Input.dispatchMouseEvent", {
+			buttons: 0,
+			type: "mouseMoved",
+			x: characterPanel.left + characterPanel.width / 2,
+			y: characterPanel.top + characterPanel.height / 2,
+		});
+		await delay(160);
+		const hoverExited = await capture();
+		await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.resetSelectionFixture",
+			[],
+		);
+		await delay(100);
+		const gestureBaseline = await capture();
+		await dispatchPrimaryGesture(gestureBaseline.gameCanvas, [{ x: 2, y: 1 }]);
+		await delay(50);
+		const viewportSelected = await capture();
+		await dispatchPrimaryGesture(viewportSelected.gameCanvas, [
+			{ x: 2, y: 1 },
+			{ x: 8, y: 5 },
+			{ x: 11, y: 7 },
+		]);
+		await delay(50);
+		const viewportOrbited = await capture();
+
+		await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.setPreciseJumpActive",
+			[true],
+		);
+		await delay(20);
+		await dispatchPrimaryGesture(viewportOrbited.gameCanvas, []);
+		await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.setPreciseJumpActive",
+			[false],
+		);
+		await delay(20);
+		const preciseJumpSelected = await capture();
+
+		const blurStart = await dispatchPrimaryGesture(
+			preciseJumpSelected.gameCanvas,
+			[],
+			false,
+		);
+		await client.send("Runtime.evaluate", {
+			expression: "window.dispatchEvent(new Event('blur'))",
+		});
+		await client.send("Input.dispatchMouseEvent", {
+			button: "left",
+			buttons: 0,
+			clickCount: 1,
+			type: "mouseReleased",
+			...blurStart,
+		});
+		await delay(20);
+		const viewportBlurCancelled = await capture();
+
+		const lifecycleStart = await dispatchPrimaryGesture(
+			viewportBlurCancelled.gameCanvas,
+			[],
+			false,
+		);
+		await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.setCameraEnabled",
+			[false],
+		);
+		await delay(20);
+		await client.send("Input.dispatchMouseEvent", {
+			button: "left",
+			buttons: 0,
+			clickCount: 1,
+			type: "mouseReleased",
+			...lifecycleStart,
+		});
+		await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.setCameraEnabled",
+			[true],
+		);
+		await delay(20);
+		const viewportLifecycleCancelled = await capture();
+
+		const emptyMapPoint = {
+			x:
+				viewportLifecycleCancelled.minimapOverlayCanvas.left +
+				viewportLifecycleCancelled.minimapOverlayCanvas.width * 0.8,
+			y:
+				viewportLifecycleCancelled.minimapOverlayCanvas.top +
+				viewportLifecycleCancelled.minimapOverlayCanvas.height / 2,
+		};
+		await client.send("Input.dispatchMouseEvent", {
+			button: "left",
+			buttons: 1,
+			clickCount: 1,
+			type: "mousePressed",
+			...emptyMapPoint,
+		});
+		await client.send("Input.dispatchMouseEvent", {
+			button: "left",
+			buttons: 0,
+			clickCount: 1,
+			type: "mouseReleased",
+			...emptyMapPoint,
+		});
+		await delay(50);
+		const minimapCleared = await capture();
+		await dispatchPrimaryGesture(minimapCleared.minimapOverlayCanvas, []);
+		await delay(50);
+		const minimapSelected = await capture();
+		await dispatchPrimaryGesture(minimapSelected.minimapOverlayCanvas, [
+			{ x: 32, y: 18 },
+		]);
+		await delay(50);
+		const minimapDragged = await capture();
+
+		await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.setTargetIndicatorFrame",
+			[{ rotationRadians: Math.PI / 2, x: 30, y: 400 }],
+		);
+		await delay(50);
+		const targetIndicatorOffscreen = await capture();
+		const targetIndicatorOffscreenScreenshot = await client.send(
+			"Page.captureScreenshot",
+			{ captureBeyondViewport: false, format: "png" },
+		);
+		await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.resetSelectionFixture",
+			[],
+		);
+		await delay(50);
+		const targetIndicatorCleared = await capture();
+
 		const clientHud = {
 			breadcrumbAfterDiscontinuity,
 			breadcrumbAfterIdentityChange,
@@ -3905,17 +4294,37 @@ async function runClientHudHarness({ viteUrl }) {
 			minimapPanned,
 			minimapPannedZoomed,
 			minimapPannedWithBreadcrumb,
+			minimapCleared,
+			minimapDragged,
+			minimapSelected,
+			targetIndicatorCleared,
+			targetIndicatorOffscreen,
 			moved,
 			narrow,
 			restored,
 			runtime,
 			runtimeRestored,
 			runtimeTransients,
+			gestureBaseline,
+			hoverBaseline,
+			hoverDragging,
+			hoverExited,
+			hoverHit,
+			hoverMiss,
+			hoverStationary,
+			preciseJumpSelected,
+			viewportBlurCancelled,
+			viewportLifecycleCancelled,
+			viewportOrbited,
+			viewportSelected,
 		};
 		return {
 			cameraSweepScreenshots: {
 				constrained: constrainedScreenshot.data,
 				narrow: narrowScreenshot.data,
+			},
+			targetIndicatorScreenshots: {
+				offscreen: targetIndicatorOffscreenScreenshot.data,
 			},
 			clientHud,
 			consoleMessages,
@@ -3948,6 +4357,163 @@ function assertClientHudHarness(evidence) {
 	assertClientHudLabels(evidence.layout, "layout", layoutLabels);
 	assertClientHudLabels(evidence.runtimeRestored, "runtime", runtimeLabels);
 	assertClientHudLabels(evidence.layoutReopened, "layout", layoutLabels);
+	if (
+		evidence.gestureBaseline.selectionEvents.length !== 0 ||
+		evidence.gestureBaseline.orbitDeltas.length !== 0
+	) {
+		throw new Error(
+			"Client HUD selection gesture fixture did not begin cleanly.",
+		);
+	}
+	if (
+		evidence.hoverBaseline.gameCanvasCursor !== "grab" ||
+		evidence.hoverHit.gameCanvasCursor !== "pointer" ||
+		evidence.hoverHit.hoveredGuid !== 7 ||
+		evidence.hoverHit.selectedGuid !== null
+	) {
+		throw new Error(
+			"Client HUD hover hit did not change only the selectable canvas cursor.",
+		);
+	}
+	if (
+		evidence.hoverStationary.viewportHoverPoints.length <=
+			evidence.hoverHit.viewportHoverPoints.length ||
+		evidence.hoverStationary.viewportHoverPoints.length > 6 ||
+		evidence.hoverStationary.selectionMaintenanceCount <=
+			evidence.hoverHit.selectionMaintenanceCount
+	) {
+		throw new Error(
+			"Client HUD hover did not resample a stationary pointer at the bounded cadence.",
+		);
+	}
+	if (evidence.hoverDragging.gameCanvasCursor !== "grabbing") {
+		throw new Error(
+			"Client HUD selectable cursor overrode active camera-drag feedback.",
+		);
+	}
+	if (
+		evidence.hoverMiss.gameCanvasCursor !== "grab" ||
+		evidence.hoverMiss.hoveredGuid !== null ||
+		evidence.hoverMiss.selectedGuid !== null
+	) {
+		throw new Error(
+			"Client HUD hover miss did not restore the ordinary cursor without selecting.",
+		);
+	}
+	if (
+		evidence.hoverExited.viewportHoverPoints.length >
+			evidence.hoverMiss.viewportHoverPoints.length + 1 ||
+		evidence.hoverExited.selectionMaintenanceCount <=
+			evidence.hoverMiss.selectionMaintenanceCount
+	) {
+		throw new Error(
+			"Client HUD did not separate selection maintenance from canvas hover sampling.",
+		);
+	}
+	if (
+		evidence.viewportSelected.selectedGuid !== 7 ||
+		evidence.viewportSelected.viewportSelectionPoints.length !== 1 ||
+		evidence.viewportSelected.orbitDeltas.length !== 0
+	) {
+		throw new Error(
+			"Client HUD click-scale viewport jitter did not select without orbiting.",
+		);
+	}
+	if (
+		JSON.stringify(evidence.viewportOrbited.orbitDeltas) !==
+			JSON.stringify([
+				{ x: 8, y: -5 },
+				{ x: 3, y: -2 },
+			]) ||
+		evidence.viewportOrbited.viewportSelectionPoints.length !== 1
+	) {
+		throw new Error(
+			"Client HUD viewport drag lost threshold-crossing motion or selected while orbiting.",
+		);
+	}
+	if (
+		evidence.preciseJumpSelected.preciseJumpActivationCount !== 1 ||
+		evidence.preciseJumpSelected.viewportSelectionPoints.length !== 1
+	) {
+		throw new Error(
+			"Client HUD precise-jump mode did not exclusively consume the primary click.",
+		);
+	}
+	if (
+		evidence.viewportBlurCancelled.viewportSelectionPoints.length !== 1 ||
+		evidence.viewportLifecycleCancelled.viewportSelectionPoints.length !== 1
+	) {
+		throw new Error(
+			"Client HUD blur or camera lifecycle teardown completed an armed selection.",
+		);
+	}
+	if (
+		JSON.stringify(evidence.minimapCleared.selectionEvents) !==
+			JSON.stringify([7, null]) ||
+		evidence.minimapCleared.selectedGuid !== null
+	) {
+		throw new Error("Client HUD empty minimap click did not clear selection.");
+	}
+	if (
+		JSON.stringify(evidence.minimapSelected.selectionEvents) !==
+			JSON.stringify([7, null, 7]) ||
+		evidence.minimapSelected.selectedGuid !== 7 ||
+		evidence.minimapSelected.minimapOverlayArcCalls <=
+			evidence.minimapCleared.minimapOverlayArcCalls
+	) {
+		throw new Error(
+			"Client HUD minimap blip click did not select through the shared owner and draw its ring.",
+		);
+	}
+	if (
+		JSON.stringify(evidence.minimapDragged.selectionEvents) !==
+			JSON.stringify(evidence.minimapSelected.selectionEvents) ||
+		!evidence.minimapDragged.minimapResetVisible
+	) {
+		throw new Error("Client HUD minimap drag selected instead of panning.");
+	}
+	const targetIndicatorFillAlphaMatch =
+		evidence.targetIndicatorOffscreen.targetIndicator?.fill?.match(
+			/^rgba\([^)]*,\s*([0-9.]+)\)$/,
+		) ?? null;
+	const targetIndicatorFillAlpha =
+		targetIndicatorFillAlphaMatch === null
+			? null
+			: Number(targetIndicatorFillAlphaMatch[1]);
+	if (
+		targetIndicatorFillAlpha === null ||
+		targetIndicatorFillAlpha <= 0 ||
+		targetIndicatorFillAlpha >= 1 ||
+		Math.abs(
+			evidence.targetIndicatorOffscreen.targetIndicator.rectangle.left +
+				evidence.targetIndicatorOffscreen.targetIndicator.rectangle.width / 2 -
+				30,
+		) > 1 ||
+		Math.abs(
+			evidence.targetIndicatorOffscreen.targetIndicator.rectangle.top +
+				evidence.targetIndicatorOffscreen.targetIndicator.rectangle.height / 2 -
+				400,
+		) > 1 ||
+		!evidence.targetIndicatorOffscreen.targetIndicator.filter.includes(
+			"drop-shadow",
+		) ||
+		!evidence.targetIndicatorOffscreen.selectionAnnouncement.includes(
+			"0x00000007",
+		)
+	) {
+		throw new Error(
+			`Client HUD did not place, glow, or announce the off-screen target marker: ${JSON.stringify(evidence.targetIndicatorOffscreen)}.`,
+		);
+	}
+	if (
+		evidence.targetIndicatorCleared.targetIndicator !== null ||
+		evidence.targetIndicatorCleared.selectionAnnouncement !==
+			"No entity selected"
+	) {
+		throw new Error(
+			"Client HUD retained a marker for an unrealized or cleared target.",
+		);
+	}
 	if (
 		evidence.runtime.minimapOverlayArcCalls <= 0 ||
 		evidence.runtime.minimapOverlayInkPixels <= 0
@@ -4443,6 +5009,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		let spawnedEntityState = null;
 		let completedEntityState = null;
 		let possessionScenario = null;
+		let spawnedSelection = null;
 		if (options.spawnWcid !== null && options.entityShowcaseCount === 0) {
 			spawnedEntity = await evaluate(
 				client,
@@ -4504,6 +5071,13 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
 				[],
 			);
+			if (options.spawnedSelectionProbe) {
+				spawnedSelection = await runSpawnedSelectionProbe(
+					client,
+					spawnedEntity,
+					options.spawnSimulated,
+				);
+			}
 		}
 		let entityShowcase = null;
 		if (options.entityShowcaseCount > 0) {
@@ -5252,6 +5826,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 							spawnedState: spawnedEntityState,
 							despawnedState: despawnedEntityState,
 						},
+			spawnedSelection,
 			generatedDisabledState,
 			initialState,
 			nameplateWorkload,

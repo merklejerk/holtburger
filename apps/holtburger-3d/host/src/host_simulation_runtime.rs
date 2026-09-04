@@ -287,14 +287,19 @@ impl HostSimulationRuntime {
         body_id: SpatialBodyId,
         next: EffectiveEntityPhysicsState,
         demand: LocalPhysicalDemand,
+        object_scale: f32,
         prepared: Option<DynamicPhysicalBodyDefinition>,
     ) -> Result<DynamicEntityBodyCommitOutcome, DynamicEntityBodyOperationError> {
         let mut state = self.state.lock().expect("host simulation lock poisoned");
         let replacement = if demand.requires_physical_body() {
             if let Some(prepared) = prepared {
                 Some(
-                    DynamicPhysicalBodyConfiguration::new(prepared, demand)
-                        .expect("non-empty Explorer demand must produce a configuration"),
+                    DynamicPhysicalBodyConfiguration::with_object_scale(
+                        prepared,
+                        demand,
+                        object_scale,
+                    )
+                    .expect("non-empty Explorer demand must produce a configuration"),
                 )
             } else {
                 let body = state

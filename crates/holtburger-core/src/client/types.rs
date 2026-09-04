@@ -8,6 +8,7 @@ use crate::client::precise_jump_runtime::{
     PreciseJumpAimRequest, PreciseJumpCancelRequest, PreciseJumpCommitRequest,
     PreciseJumpEvaluation, PreciseJumpTransactionFeedback,
 };
+use crate::client::selection_query::{EntitySelectionQueryRequest, EntitySelectionQueryResult};
 use holtburger_common::properties::DamageType;
 use holtburger_common::{
     CharacterOption, CharacterOptions1, CharacterOptions2, ConfirmationType, Guid,
@@ -485,6 +486,17 @@ pub enum BusyOperationResult {
     TimedOut,
 }
 
+/// One transient high-level script cue bound to the exact entity generation that received it.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientDynamicScriptCue {
+    pub guid: Guid,
+    pub generation: u64,
+    /// Raw retail `PlayScript` cue resolved through the entity's effective table by each domain.
+    pub cue: u32,
+    pub intensity: f32,
+}
+
 #[derive(Debug, Clone)]
 pub enum ClientViewEvent {
     /// Complete application-level replacement state for a shell remount or receiver recovery.
@@ -497,6 +509,8 @@ pub enum ClientViewEvent {
     PreciseJumpEvaluation(PreciseJumpEvaluation),
     /// Ordered result of an explicit precise-jump commit or cancellation request.
     PreciseJumpTransactionFeedback(PreciseJumpTransactionFeedback),
+    /// Correlated broad-phase response for one renderer selection action.
+    EntitySelectionQueryResult(EntitySelectionQueryResult),
     /// Replacement timing capability emitted when authoritative stance/completeness changes.
     CharacterMotionCapabilitiesUpdated {
         capabilities: Option<ClientCharacterMotionCapabilities>,
@@ -596,6 +610,8 @@ pub enum ClientViewEvent {
     },
     /// Focused reconstructible entity presentation feed carried inside the broader client surface.
     DynamicEntity(DynamicEntityEvent),
+    /// Transient presentation input; intentionally absent from replacement snapshots.
+    DynamicScriptCue(ClientDynamicScriptCue),
     /// Client-owned collision-safe camera placement, published after the matching entity advance.
     Camera(crate::client::ClientCameraTick),
     /// Receipt for a newly registered client camera generation.
@@ -792,6 +808,8 @@ pub enum ClientCommand {
     ControlCharacter(SequencedCharacterMotionEvent),
     /// Replaces any queued precise-jump hover sample for the same active camera generation.
     SetPreciseJumpAim(PreciseJumpAimRequest),
+    /// Runs one finite portal-aware entity-selection broad phase.
+    QueryEntitySelectionCandidates(EntitySelectionQueryRequest),
     /// Requests a fresh authoritative solve for one previously reachable evaluation.
     CommitPreciseJump(PreciseJumpCommitRequest),
     /// Explicitly leaves precise-jump mode without launching.

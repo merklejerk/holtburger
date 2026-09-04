@@ -832,6 +832,15 @@ describe("ParticleSystem", () => {
 		expect(runtime().envelopeRadiusFor(TARGET.targetId)).toBe(0);
 	});
 
+	it("reports emitter ownership from the lifetime aggregate", () => {
+		const particles = runtime();
+		expect(particles.hasEmitterOwner(TARGET.targetId)).toBe(false);
+		particles.create(TARGET, prepared(), NO_OFFSET, 1, 0, ORIGIN);
+		expect(particles.hasEmitterOwner(TARGET.targetId)).toBe(true);
+		particles.destroy(TARGET, 1);
+		expect(particles.hasEmitterOwner(TARGET.targetId)).toBe(false);
+	});
+
 	it("takes the widest emitter when a target runs several", () => {
 		const particles = runtime();
 		particles.create(TARGET, prepared(), acVector3([0, 0, 0]), 0, 0, ORIGIN);

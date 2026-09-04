@@ -39,6 +39,9 @@ pub enum PhysicalBodyDefinitionError {
     /// Solver response configuration contains a non-finite or unsupported value.
     #[error("physical-body response configuration is invalid")]
     InvalidResponseConfig,
+    /// Runtime whole-object scale must remain finite and positive.
+    #[error("physical-body object scale must be finite and positive")]
+    InvalidObjectScale,
 }
 
 /// Invalid authored or explicit physical response policy.
@@ -392,6 +395,10 @@ pub(crate) enum DynamicBodyActivity {
 /// Dynamic-only physical state kept as one invariant-bearing optional unit.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct DynamicBodyRuntimeState {
+    /// Unit-scale movement definition retained across scale ramps.
+    pub(crate) unit_movement: PhysicalBodyDefinition,
+    /// Current absolute whole-object scale shared by movement and target geometry.
+    pub(crate) object_scale: f32,
     /// Prepared target geometry and effective directional collision policy.
     pub(crate) collision: DynamicBodyCollisionDefinition,
     /// Producer-owned target and integration demand consumed without reinterpretation.
@@ -500,14 +507,19 @@ impl PhysicalBodyState {
         collision_filter: PhysicalCollisionFilter,
         cell: Option<Guid>,
     ) -> Self {
-        let (definition, demand) = configuration.into_parts();
+        let (definition, demand, object_scale) = configuration.into_parts();
         let DynamicPhysicalBodyDefinition {
             movement,
             response_policy,
             entity_collision,
         } = definition;
-        let mut state = Self::new(movement, collision_filter, response_policy, cell);
+        let scaled_movement = movement
+            .uniformly_scaled(object_scale)
+            .expect("dynamic configuration validated its object scale");
+        let mut state = Self::new(scaled_movement, collision_filter, response_policy, cell);
         state.dynamic = Some(DynamicBodyRuntimeState {
+            unit_movement: movement,
+            object_scale,
             collision: entity_collision,
             demand,
             activity: if demand.integration == LocalIntegrationDemand::Eligible {
@@ -554,8 +566,9 @@ impl PhysicalBodyState {
         {
             return None;
         }
-        let movement = match self.definition {
-            PhysicalBodyDefinition::FreeSphere { .. } => self.definition,
+        let dynamic = self.dynamic.as_ref()?;
+        let movement = match dynamic.unit_movement {
+            PhysicalBodyDefinition::FreeSphere { .. } => dynamic.unit_movement,
             PhysicalBodyDefinition::Grounded {
                 spheres,
                 mut config,
@@ -583,20 +596,21 @@ impl PhysicalBodyState {
         entity_collision.reporting = state.reporting;
         entity_collision.uses_physics_bsp = state.uses_physics_bsp;
         Some(
-            DynamicPhysicalBodyConfiguration::new(
+            DynamicPhysicalBodyConfiguration::with_object_scale(
                 DynamicPhysicalBodyDefinition {
                     movement,
                     response_policy,
                     entity_collision,
                 },
                 demand,
+                dynamic.object_scale,
             )
             .expect("non-empty retained demand must produce a physical configuration"),
         )
     }
 }
 
-fn initial_response(
+pub(crate) fn initial_response(
     definition: PhysicalBodyDefinition,
     cell: Option<Guid>,
 ) -> PhysicalBodyResponseState {
@@ -722,6 +736,26 @@ impl PhysicalBodyDefinition {
                 primary: spheres.support,
                 upper_constraint: spheres.upper,
             },
+        }
+    }
+
+    /// Applies one absolute uniform root scale to an immutable unit movement definition.
+    pub(crate) fn uniformly_scaled(self, scale: f32) -> Result<Self, PhysicalBodyDefinitionError> {
+        if !scale.is_finite() || scale <= 0.0 {
+            return Err(PhysicalBodyDefinitionError::InvalidObjectScale);
+        }
+        let scaled = |sphere: GroundedSphere| Sphere {
+            center: sphere.center * scale,
+            radius: sphere.radius * scale,
+        };
+        let spheres = self.spheres();
+        let scaled_spheres = PhysicalSphereSet::new(
+            scaled(spheres.primary()),
+            spheres.upper_constraint().map(scaled),
+        )?;
+        match self {
+            Self::FreeSphere { config, .. } => Self::free_sphere(scaled_spheres, config),
+            Self::Grounded { config, .. } => Self::grounded(scaled_spheres, config),
         }
     }
 }

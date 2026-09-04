@@ -1,4 +1,4 @@
-import { sceneVec3 } from "../../assets/ac-frame";
+import { acVector3, sceneVec3 } from "../../assets/ac-frame";
 import { describe, expect, it, vi } from "vitest";
 import type { TexturePixelSource } from "../../assets/texture-pixel-source";
 import type { AnimationAssetSource } from "../../assets/animation-asset-source";
@@ -20,9 +20,11 @@ import {
 } from "../renderer/renderer";
 import { SHARED_FRAME_SETTINGS } from "../../frontend-frame-settings";
 import type { ParticleEmitterSource } from "../../assets/particle-emitter-source";
+import type { DecodedParticleEmitterInfo } from "../../assets/decode-particle-emitter-record";
 import type { SoundTableSource } from "../../assets/sound-table-source";
 import type { ParticleMeshSource } from "../../assets/particle-mesh-source";
 import type { PhysicsScriptSource } from "../../assets/physics-script-source";
+import type { PhysicsScriptTableSource } from "../../assets/physics-script-table-source";
 import type { RendererResourceManager } from "../renderer/resource-manager";
 import { LandblockLayerKind, type LandblockIdLayer } from "./scene-interest";
 import {
@@ -93,6 +95,41 @@ const PHYSICS_SCRIPT_SOURCE: PhysicsScriptSource = {
 	},
 };
 
+/** No runtime test resolves a live cue unless it injects an explicit table source. */
+const PHYSICS_SCRIPT_TABLE_SOURCE: PhysicsScriptTableSource = {
+	destroy: () => {},
+	async loadPhysicsScriptTable(tableId) {
+		throw new Error(`Unexpected PhysicsScriptTable load for ${tableId}.`);
+	},
+};
+
+/** One immediate scale root used to prove which composition owns its scalar. */
+function scalePhysicsScriptSource(
+	scriptId: DatAssetId,
+	end: number,
+): PhysicsScriptSource {
+	return {
+		destroy() {},
+		async loadPhysicsScript(requestedId) {
+			if (requestedId !== scriptId)
+				throw new Error(`Unexpected physics script ${requestedId}.`);
+			return {
+				id: scriptId,
+				lengthSeconds: 0,
+				records: [
+					{
+						authoredOrder: 0,
+						durationSeconds: 0,
+						end,
+						kind: "scale",
+						startTime: 0,
+					},
+				],
+			};
+		},
+	};
+}
+
 const ANIMATION_SOURCE: AnimationAssetSource = {
 	/** No runtime test spawns a motion-driven entity, so a closure request is a defect. */
 	async loadMotionTableClosure(motionTableId) {
@@ -151,6 +188,17 @@ describe("GamePresentationRuntime view and interest control", () => {
 				tileCount: 0,
 				disposedGenerationCount: 0,
 				effectiveDistanceFade: null,
+			},
+			entitySelection: {
+				activeMaskBytes: 0,
+				allocatedTargetGenerationCount: 0,
+				compositeDrawCount: 0,
+				disposedTargetGenerationCount: 0,
+				maskDrawCount: 0,
+				selectedSphereProxyCount: 0,
+				selectedPartCount: 0,
+				selectedTriangleCount: 0,
+				skippedReason: "no-target",
 			},
 			envCellRenderMode: "portal",
 			envCellShellCullOverrideCount: 0,
@@ -351,6 +399,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 			},
 			colorGrade: SHARED_FRAME_SETTINGS.colorGrade,
 			entityShadows: SHARED_FRAME_SETTINGS.entityShadows,
+			entitySelectionOutline: SHARED_FRAME_SETTINGS.entitySelectionOutline,
 			distanceFogEnabled: false,
 			viewerLightEnabled: false,
 			weatherEnabled: true,
@@ -378,6 +427,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 			},
 			colorGrade: SHARED_FRAME_SETTINGS.colorGrade,
 			entityShadows: SHARED_FRAME_SETTINGS.entityShadows,
+			entitySelectionOutline: SHARED_FRAME_SETTINGS.entitySelectionOutline,
 			distanceFogEnabled: false,
 			viewerLightEnabled: false,
 			weatherEnabled: true,
@@ -643,6 +693,42 @@ describe("GamePresentationRuntime view and interest control", () => {
 		await runtime.destroy();
 	});
 
+	it("keeps promoted authored script scale in the browser effect domain", async () => {
+		const scriptId = "0x33000002" as DatAssetId;
+		const pipeline = new DeferredCommitPipeline();
+		const runtime = await buildGamePresentationRuntimeForTest(
+			{
+				buildRenderer: async () => testRenderer(),
+				resources: TEST_RESOURCES,
+			},
+			pipeline,
+			{} as TexturePixelSource,
+			ANIMATION_SOURCE,
+			scalePhysicsScriptSource(scriptId, 2),
+			{ playOneShot: () => null, prepare: async () => {} },
+			PARTICLE_EMITTER_SOURCE,
+			SOUND_TABLE_SOURCE,
+			PARTICLE_MESH_SOURCE,
+			null,
+		);
+		runtime.updateSceneInterest(buildingSceneInterest("0xda55ffff"));
+		pipeline.resolveNext([promotedBuildingArtifact("0xda55ffff", scriptId)]);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		runtime.tick();
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		setTestCamera(runtime, SPAWN_TEST_CAMERA);
+
+		runtime.render(0);
+
+		const diagnostics = runtime.getAuthoredDynamicRuntimeDiagnostics();
+		expect(diagnostics.behavior.outcomeCounts).toEqual({ executed: 1 });
+		expect(diagnostics.worldScaleBehavior.outcomeCounts).toEqual({});
+		expect(diagnostics.effects.appliedCommandCount).toBe(1);
+		expect(diagnostics.physicsScripts.activeOwnerCount).toBe(1);
+		expect(diagnostics.worldScalePhysicsScripts.activeOwnerCount).toBe(0);
+		await runtime.destroy();
+	});
+
 	it("routes a synthetic explicit-object source through static realization", async () => {
 		const pipeline = new DeferredCommitPipeline();
 		const device: GamePresentationRuntimeRenderDevice = {
@@ -742,6 +828,346 @@ describe("GamePresentationRuntime view and interest control", () => {
 });
 
 describe("GamePresentationRuntime dynamic-entity presentation", () => {
+	it("resolves and executes a live script cue for the installed generation", async () => {
+		const tableId = "0x34000001" as DatAssetId;
+		const scriptId = "0x33000001" as DatAssetId;
+		const runtime = await buildSpawnRuntime(
+			{ load: async () => spawnedVisual() },
+			ANIMATION_SOURCE,
+			undefined,
+			scalePhysicsScriptSource(scriptId, 2),
+			{
+				destroy() {},
+				async loadPhysicsScriptTable(requestedId) {
+					if (requestedId !== tableId)
+						throw new Error(`Unexpected PhysicsScriptTable ${requestedId}.`);
+					return {
+						id: tableId,
+						cues: new Map([[7, [{ maximumIntensity: 1, scriptId }]]]),
+					};
+				},
+			},
+		);
+		const baseEntity = spawnedEntity(7, 3);
+		runtime.playDynamicEntityScriptCue({
+			guid: 7,
+			generation: 3,
+			cue: 7,
+			intensity: 0.5,
+		});
+		await runtime.replaceDynamicEntitySnapshot([
+			{
+				...baseEntity,
+				presentation: {
+					...baseEntity.presentation,
+					content: {
+						...baseEntity.presentation.content,
+						physicsEffectTableDid: Number.parseInt(tableId.slice(2), 16),
+					},
+				},
+			},
+		]);
+		await vi.waitFor(() =>
+			expect(
+				runtime.getAuthoredDynamicRuntimeDiagnostics().worldScalePhysicsScripts
+					.activeOwnerCount,
+			).toBe(1),
+		);
+		setTestCamera(runtime, SPAWN_TEST_CAMERA);
+
+		runtime.render(0);
+
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().worldScaleBehavior
+				.outcomeCounts,
+		).toEqual({ "owned-by-world": 1 });
+		await runtime.destroy();
+	});
+
+	it("prepares live cues in server order for one entity", async () => {
+		const tableId = "0x34000001" as DatAssetId;
+		const firstScriptId = "0x33000001" as DatAssetId;
+		const secondScriptId = "0x33000002" as DatAssetId;
+		const firstScript =
+			controlledPromise<
+				Awaited<ReturnType<PhysicsScriptSource["loadPhysicsScript"]>>
+			>();
+		const requestedScripts: DatAssetId[] = [];
+		const runtime = await buildSpawnRuntime(
+			{ load: async () => spawnedVisual() },
+			ANIMATION_SOURCE,
+			undefined,
+			{
+				destroy() {},
+				async loadPhysicsScript(scriptId) {
+					requestedScripts.push(scriptId);
+					if (scriptId === firstScriptId) return firstScript.promise;
+					if (scriptId !== secondScriptId)
+						throw new Error(`Unexpected physics script ${scriptId}.`);
+					return { id: scriptId, lengthSeconds: 0, records: [] };
+				},
+			},
+			{
+				destroy() {},
+				async loadPhysicsScriptTable() {
+					return {
+						id: tableId,
+						cues: new Map([
+							[7, [{ maximumIntensity: 1, scriptId: firstScriptId }]],
+							[8, [{ maximumIntensity: 1, scriptId: secondScriptId }]],
+						]),
+					};
+				},
+			},
+		);
+		const baseEntity = spawnedEntity(7, 3);
+		await runtime.replaceDynamicEntitySnapshot([
+			{
+				...baseEntity,
+				presentation: {
+					...baseEntity.presentation,
+					content: {
+						...baseEntity.presentation.content,
+						physicsEffectTableDid: Number.parseInt(tableId.slice(2), 16),
+					},
+				},
+			},
+		]);
+
+		runtime.playDynamicEntityScriptCue({
+			guid: 7,
+			generation: 3,
+			cue: 7,
+			intensity: 0.5,
+		});
+		runtime.playDynamicEntityScriptCue({
+			guid: 7,
+			generation: 3,
+			cue: 8,
+			intensity: 0.5,
+		});
+		await vi.waitFor(() => expect(requestedScripts).toEqual([firstScriptId]));
+		firstScript.resolve({
+			id: firstScriptId,
+			lengthSeconds: 0,
+			records: [],
+		});
+		await vi.waitFor(() =>
+			expect(requestedScripts).toEqual([firstScriptId, secondScriptId]),
+		);
+
+		await runtime.destroy();
+	});
+
+	it("releases a live-cue closure that finishes after generation replacement", async () => {
+		const tableId = "0x34000001" as DatAssetId;
+		const scriptId = "0x33000001" as DatAssetId;
+		const delayedScript =
+			controlledPromise<
+				Awaited<ReturnType<PhysicsScriptSource["loadPhysicsScript"]>>
+			>();
+		let scriptRequested = false;
+		const runtime = await buildSpawnRuntime(
+			{ load: async () => spawnedVisual() },
+			ANIMATION_SOURCE,
+			undefined,
+			{
+				destroy() {},
+				loadPhysicsScript: () => {
+					scriptRequested = true;
+					return delayedScript.promise;
+				},
+			},
+			{
+				destroy() {},
+				async loadPhysicsScriptTable() {
+					return {
+						id: tableId,
+						cues: new Map([[7, [{ maximumIntensity: 1, scriptId }]]]),
+					};
+				},
+			},
+		);
+		const withTable = (generation: number): DynamicEntityView => {
+			const entity = spawnedEntity(7, generation);
+			return {
+				...entity,
+				presentation: {
+					...entity.presentation,
+					content: {
+						...entity.presentation.content,
+						physicsEffectTableDid: Number.parseInt(tableId.slice(2), 16),
+					},
+				},
+			};
+		};
+		await runtime.replaceDynamicEntitySnapshot([withTable(3)]);
+		runtime.playDynamicEntityScriptCue({
+			guid: 7,
+			generation: 3,
+			cue: 7,
+			intensity: 0.5,
+		});
+		await vi.waitFor(() => expect(scriptRequested).toBe(true));
+		await runtime.replaceDynamicEntitySnapshot([withTable(4)]);
+		delayedScript.resolve({ id: scriptId, lengthSeconds: 0, records: [] });
+		await Promise.resolve();
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().worldScalePhysicsScripts
+				.activeOwnerCount,
+		).toBe(0);
+
+		// Repository teardown rejects referenced closures, so this also proves the stale handle left.
+		await runtime.destroy();
+	});
+
+	it("does not start a time-zero cue particle until its drawable closure is ready", async () => {
+		const tableId = "0x34000001" as DatAssetId;
+		const scriptId = "0x33000001" as DatAssetId;
+		const emitterId = "0x32000001" as DatAssetId;
+		const meshId = "0x01000001" as DatAssetId;
+		const delayedEmitter = controlledPromise<DecodedParticleEmitterInfo>();
+		let emitterRequested = false;
+		const runtime = await buildSpawnRuntime(
+			{ load: async () => spawnedVisual() },
+			ANIMATION_SOURCE,
+			undefined,
+			{
+				destroy() {},
+				async loadPhysicsScript() {
+					return {
+						id: scriptId,
+						lengthSeconds: 0,
+						records: [
+							{
+								authoredOrder: 0,
+								emitterId: 0,
+								emitterInfoId: emitterId,
+								kind: "create-particle" as const,
+								offsetOrigin: acVector3([0, 0, 0]),
+								partIndex: -1,
+								startTime: 0,
+							},
+						],
+					};
+				},
+			},
+			{
+				destroy() {},
+				async loadPhysicsScriptTable() {
+					return {
+						id: tableId,
+						cues: new Map([[7, [{ maximumIntensity: 1, scriptId }]]]),
+					};
+				},
+			},
+			{
+				destroy() {},
+				loadParticleEmitter: () => {
+					emitterRequested = true;
+					return delayedEmitter.promise;
+				},
+			},
+			{
+				destroy() {},
+				async loadParticleMeshes() {
+					return {
+						presentations: new Map([
+							[
+								meshId,
+								{
+									orientation: "authored" as const,
+									presentation: spawnedVisual(),
+								},
+							],
+						]),
+						textureDependencies: [],
+					};
+				},
+			},
+		);
+		const baseEntity = spawnedEntity(7, 3);
+		await runtime.replaceDynamicEntitySnapshot([
+			{
+				...baseEntity,
+				presentation: {
+					...baseEntity.presentation,
+					content: {
+						...baseEntity.presentation.content,
+						physicsEffectTableDid: Number.parseInt(tableId.slice(2), 16),
+					},
+				},
+			},
+		]);
+		runtime.playDynamicEntityScriptCue({
+			guid: 7,
+			generation: 3,
+			cue: 7,
+			intensity: 0.5,
+		});
+		await vi.waitFor(() => expect(emitterRequested).toBe(true));
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().worldScalePhysicsScripts
+				.activeOwnerCount,
+		).toBe(0);
+		delayedEmitter.resolve(particleEmitterInfo(emitterId, meshId));
+		await vi.waitFor(() =>
+			expect(
+				runtime.getAuthoredDynamicRuntimeDiagnostics().worldScalePhysicsScripts
+					.activeOwnerCount,
+			).toBe(1),
+		);
+		setTestCamera(runtime, SPAWN_TEST_CAMERA);
+
+		runtime.render(0);
+
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().particles.emitterCount,
+		).toBe(1);
+		await runtime.destroy();
+	});
+
+	it("keeps spawned-entity script scale world-owned at the composition seam", async () => {
+		const scriptId = "0x33000001" as DatAssetId;
+		const visual = spawnedVisual();
+		const scriptedVisual: DecodedStaticPresentation = {
+			...visual,
+			behavior: {
+				animationId: "0x03000001" as DatAssetId,
+				kind: "animation-and-script",
+				motionTableId: null,
+				physicsScriptId: scriptId,
+				physicsScriptTableId: null,
+				soundTableId: null,
+			},
+		};
+		const runtime = await buildSpawnRuntime(
+			{ load: async () => scriptedVisual },
+			ANIMATION_SOURCE,
+			undefined,
+			scalePhysicsScriptSource(scriptId, 8),
+		);
+		const baseEntity = spawnedEntity(7, 1);
+		const entity: DynamicEntityView = {
+			...baseEntity,
+			presentation: { ...baseEntity.presentation, objectScale: 3 },
+		};
+		await runtime.replaceDynamicEntitySnapshot([entity]);
+		setTestCamera(runtime, SPAWN_TEST_CAMERA);
+
+		runtime.render(0);
+
+		const diagnostics = runtime.getAuthoredDynamicRuntimeDiagnostics();
+		expect(diagnostics.worldScaleBehavior.outcomeCounts).toEqual({
+			"owned-by-world": 1,
+		});
+		expect(diagnostics.behavior.outcomeCounts).toEqual({});
+		expect(diagnostics.effects.appliedCommandCount).toBe(0);
+		expect(diagnostics.worldScalePhysicsScripts.activeOwnerCount).toBe(1);
+		expect(diagnostics.physicsScripts.activeOwnerCount).toBe(0);
+		await runtime.destroy();
+	});
+
 	it("publishes the installed generation identity of the viewer-driven entity", async () => {
 		const frames: FrameInput[] = [];
 		const runtime = await buildSpawnRuntime(
@@ -776,6 +1202,45 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		runtime.setViewerEntity(null);
 		runtime.render(2);
 		expect(frames.at(-1)?.viewerEntityIdentity).toBeNull();
+		await runtime.destroy();
+	});
+
+	it("resolves the selected GUID to its current installed node at draw time", async () => {
+		const frames: FrameInput[] = [];
+		const runtime = await buildSpawnRuntime(
+			{ load: async () => spawnedVisual() },
+			ANIMATION_SOURCE,
+			testRenderer({
+				drawFrame(input) {
+					frames.push(input);
+					return EMPTY_RENDERER_FRAME_FEEDBACK;
+				},
+			}),
+		);
+		const portalBase = spawnedEntity(8, 3);
+		const portal = {
+			...portalBase,
+			presentation: {
+				...portalBase.presentation,
+				entityClass: "portal" as const,
+			},
+		};
+		await runtime.replaceDynamicEntitySnapshot([spawnedEntity(7, 3)]);
+		setTestCamera(runtime, SPAWN_TEST_CAMERA);
+		runtime.setSelectedEntityGuid(7);
+		expect(runtime.selectedEntityPresentationState(7).kind).toBe("realized");
+
+		runtime.render(1);
+		expect(frames.at(-1)?.selectionTarget?.shape).toEqual({ kind: "rigid" });
+		await runtime.replaceDynamicEntitySnapshot([portal]);
+		runtime.setSelectedEntityGuid(8);
+		expect(runtime.selectedEntityPresentationState(8).kind).toBe("realized");
+		runtime.render(2);
+		expect(frames.at(-1)?.selectionTarget?.shape).toEqual({ kind: "rigid" });
+
+		runtime.setSelectedEntityGuid(null);
+		runtime.render(3);
+		expect(frames.at(-1)?.selectionTarget).toBeNull();
 		await runtime.destroy();
 	});
 
@@ -891,16 +1356,26 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		]);
 		expect(initiallyInstalled.get(player.identity.guid)).toBe("installed");
 		expect(runtime.dynamicEntityOrigin(player.identity.guid)).not.toBeNull();
+		runtime.setSelectedEntityGuid(player.identity.guid);
+		expect(
+			runtime.selectedEntityPresentationState(player.identity.guid).kind,
+		).toBe("realized");
 
 		await activateSpawnScene(runtime, "0x0002ffff", 2);
 		const deferred = await runtime.replaceDynamicEntitySnapshot([player]);
 		expect(deferred.get(player.identity.guid)).toBe("deferred");
 		expect(runtime.dynamicEntityOrigin(player.identity.guid)).toBeNull();
+		expect(
+			runtime.selectedEntityPresentationState(player.identity.guid).kind,
+		).toBe("frontend-evicted");
 
 		await activateSpawnScene(runtime, "0x0001ffff", 3);
 		const reinstalled = await runtime.replaceDynamicEntitySnapshot([player]);
 		expect(reinstalled.get(player.identity.guid)).toBe("installed");
 		expect(runtime.dynamicEntityOrigin(player.identity.guid)).not.toBeNull();
+		expect(
+			runtime.selectedEntityPresentationState(player.identity.guid).kind,
+		).toBe("realized");
 		expect(visualLoads).toBe(1);
 
 		await runtime.replaceDynamicEntitySnapshot([]);
@@ -1097,15 +1572,20 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		});
 		await runtime.upsertDynamicEntity(spawnedEntity(7, 1));
 		expect(runtime.dynamicEntityOrigin(7)).not.toBeNull();
+		expect(runtime.selectedEntityPresentationState(7).kind).toBe("realized");
 
 		await activateSpawnScene(runtime, "0x0002ffff", 2);
 		expect(runtime.dynamicEntityOrigin(7)).toBeNull();
+		expect(runtime.selectedEntityPresentationState(7)).toEqual({
+			kind: "frontend-evicted",
+		});
 
 		await activateSpawnScene(runtime, "0x0001ffff", 3);
 		await vi.waitFor(() => {
 			runtime.tick();
 			expect(runtime.dynamicEntityOrigin(7)).not.toBeNull();
 		});
+		expect(runtime.selectedEntityPresentationState(7).kind).toBe("realized");
 		await runtime.destroy();
 	});
 
@@ -1242,6 +1722,20 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		expect(
 			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
 		).toBe(2);
+		runtime.setSelectedEntityGuid(child.identity.guid);
+		const selectedChild = runtime.selectedEntityPresentationState(
+			child.identity.guid,
+		);
+		if (selectedChild.kind !== "realized")
+			throw new Error("Attached selection fixture was not realized.");
+		expect(selectedChild.frame.guid).toBe(child.identity.guid);
+		expect(selectedChild.frame.placement.localToLandblock.m41).toBeCloseTo(22);
+		await activateSpawnScene(runtime, "0x0002ffff", 2);
+		expect(
+			runtime.selectedEntityPresentationState(child.identity.guid),
+		).toEqual({
+			kind: "frontend-evicted",
+		});
 		await runtime.destroy();
 	});
 
@@ -1462,11 +1956,19 @@ async function buildSpawnRuntime(
 	setupVisualSource: SetupVisualSource,
 	animationSource: AnimationAssetSource = ANIMATION_SOURCE,
 	renderer?: Renderer,
+	physicsScriptSource: PhysicsScriptSource = PHYSICS_SCRIPT_SOURCE,
+	physicsScriptTableSource: PhysicsScriptTableSource = PHYSICS_SCRIPT_TABLE_SOURCE,
+	particleEmitterSource: ParticleEmitterSource = PARTICLE_EMITTER_SOURCE,
+	particleMeshSource: ParticleMeshSource = PARTICLE_MESH_SOURCE,
 ): Promise<GamePresentationRuntime> {
 	const runtime = await buildUnscopedSpawnRuntime(
 		setupVisualSource,
 		animationSource,
 		renderer,
+		physicsScriptSource,
+		physicsScriptTableSource,
+		particleEmitterSource,
+		particleMeshSource,
 	);
 	await activateSpawnScene(runtime, "0x0001ffff", 1);
 	return runtime;
@@ -1477,6 +1979,10 @@ async function buildUnscopedSpawnRuntime(
 	setupVisualSource: SetupVisualSource,
 	animationSource: AnimationAssetSource = ANIMATION_SOURCE,
 	renderer?: Renderer,
+	physicsScriptSource: PhysicsScriptSource = PHYSICS_SCRIPT_SOURCE,
+	physicsScriptTableSource: PhysicsScriptTableSource = PHYSICS_SCRIPT_TABLE_SOURCE,
+	particleEmitterSource: ParticleEmitterSource = PARTICLE_EMITTER_SOURCE,
+	particleMeshSource: ParticleMeshSource = PARTICLE_MESH_SOURCE,
 ): Promise<GamePresentationRuntime> {
 	const device: GamePresentationRuntimeRenderDevice = {
 		buildRenderer: async () => renderer ?? testRenderer(),
@@ -1495,13 +2001,54 @@ async function buildUnscopedSpawnRuntime(
 		},
 		new EchoTexturePixelSource(),
 		animationSource,
-		PHYSICS_SCRIPT_SOURCE,
+		physicsScriptSource,
 		{ playOneShot: () => null, prepare: async () => {} },
-		PARTICLE_EMITTER_SOURCE,
+		particleEmitterSource,
 		SOUND_TABLE_SOURCE,
-		PARTICLE_MESH_SOURCE,
+		particleMeshSource,
 		setupVisualSource,
+		physicsScriptTableSource,
 	);
+}
+
+function particleEmitterInfo(
+	id: DatAssetId,
+	meshId: DatAssetId,
+): DecodedParticleEmitterInfo {
+	return {
+		a: acVector3([0, 0, 0]),
+		b: acVector3([0, 0, 0]),
+		birthrateSeconds: 0.25,
+		c: acVector3([0, 0, 0]),
+		emitsPerMeter: false,
+		emitsPerSecond: true,
+		finalScale: 1,
+		finalTrans: 1,
+		followsParent: false,
+		hardwareMesh: { id: meshId, radius: 1 },
+		id,
+		initialParticles: 1,
+		isPersistent: true,
+		lifespan: 2,
+		lifespanRand: 0,
+		maxA: 1,
+		maxB: 1,
+		maxC: 1,
+		maxOffset: 0,
+		maxParticles: 10,
+		minA: 1,
+		minB: 1,
+		minC: 1,
+		minOffset: 0,
+		motionType: 1,
+		offsetDir: acVector3([0, 0, 1]),
+		scaleRand: 0,
+		startScale: 1,
+		startTrans: 0,
+		totalParticles: 0,
+		totalSeconds: 0,
+		transRand: 0,
+	};
 }
 
 /** Install one explicit outdoor scope before a focused dynamic presentation test uses it. */
@@ -1585,6 +2132,7 @@ async function buildGamePresentationRuntimeForTest(
 	soundTableSource: SoundTableSource,
 	particleMeshSource: ParticleMeshSource,
 	setupVisualSource: SetupVisualSource | null,
+	physicsScriptTableSource: PhysicsScriptTableSource = PHYSICS_SCRIPT_TABLE_SOURCE,
 ): Promise<GamePresentationRuntime> {
 	return GamePresentationRuntime.build(
 		device,
@@ -1592,6 +2140,7 @@ async function buildGamePresentationRuntimeForTest(
 		texturePixelSource,
 		animationSource,
 		physicsScriptSource,
+		physicsScriptTableSource,
 		audioDevice,
 		particleEmitterSource,
 		soundTableSource,
@@ -1978,8 +2527,15 @@ function staleTerrainArtifact(landblockId: string): LandblockLayerCommit {
 }
 
 /** Minimal promoted record: any accidental dynamic installation reaches the throwing resource port. */
-function promotedBuildingArtifact(landblockId: string): LandblockLayerCommit {
-	return promotedStaticArtifact(landblockId, LandblockLayerKind.Buildings);
+function promotedBuildingArtifact(
+	landblockId: string,
+	physicsScriptId: DatAssetId | null = null,
+): LandblockLayerCommit {
+	return promotedStaticArtifact(
+		landblockId,
+		LandblockLayerKind.Buildings,
+		physicsScriptId,
+	);
 }
 
 function promotedObjectArtifact(landblockId: string): LandblockLayerCommit {
@@ -1996,16 +2552,28 @@ function promotedStaticArtifact(
 		| LandblockLayerKind.Buildings
 		| LandblockLayerKind.Objects
 		| LandblockLayerKind.Generated,
+	physicsScriptId: DatAssetId | null = null,
 ): LandblockLayerCommit {
+	const residentBehavior: AuthoredDynamicSource["behavior"] =
+		physicsScriptId === null
+			? {
+					animationId: "0x03000001",
+					kind: "animation-only",
+					physicsScriptId: null,
+					physicsScriptTableId: null,
+					motionTableId: null,
+					soundTableId: null,
+				}
+			: {
+					animationId: "0x03000001",
+					kind: "animation-and-script",
+					physicsScriptId,
+					physicsScriptTableId: null,
+					motionTableId: null,
+					soundTableId: null,
+				};
 	const promotedResident: AuthoredDynamicSource = {
-		behavior: {
-			animationId: "0x03000001",
-			kind: "animation-only",
-			physicsScriptId: null,
-			physicsScriptTableId: null,
-			motionTableId: null,
-			soundTableId: null,
-		},
+		behavior: residentBehavior,
 		identity: { kind: "authored", sourceId: "resident:promoted" },
 		localBounds: null,
 		placement: {

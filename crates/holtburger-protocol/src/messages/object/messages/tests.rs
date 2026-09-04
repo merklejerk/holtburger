@@ -131,7 +131,7 @@ fn test_object_description_data_parity_complex() {
             location_id: 1,
         }),
         obj_scale: Some(1.5),
-        default_script_id: Some(0x0F000001),
+        default_script_cue: Some(0x0F00_0001),
         default_script_intensity: Some(0.5),
         sequences: [0, 0, 0, 0, 0, 0, 0, 0, 9],
         ..ObjectDescriptionData::default()

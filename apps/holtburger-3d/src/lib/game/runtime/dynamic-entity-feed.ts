@@ -149,7 +149,7 @@ const dynamicEntityPlacementSchema = z.discriminatedUnion("kind", [
 ]);
 
 /** Current motion-derived presentation level selected by the authoritative host cursor. */
-const dynamicEntityMotionSchema = z.discriminatedUnion("kind", [
+export const dynamicEntityMotionSchema = z.discriminatedUnion("kind", [
 	z.object({
 		kind: z.literal("playing"),
 		animationId: guid,

@@ -55,7 +55,8 @@
 		createProjectionClearanceRevision,
 		type ProjectionClearanceRevision,
 	} from "../../lib/game/camera/projection-clearance";
-	import { Vec3 } from "../../lib/game/math/types";
+	import { Vec3, type Mat4 } from "../../lib/game/math/types";
+	import { transformPoint3 } from "../../lib/game/math/matrices";
 	import {
 		WebGL2Device,
 		type WebGL2ContextLossPolicyProbe,
@@ -63,6 +64,11 @@
 	import type { WebGL2PortalScopeAtlasTargetsFixtureResult } from "../../lib/game/renderer/webgl2-portal-scope-atlas-targets-fixture";
 	import type { WebGL2PortalScopeAtlasExecutorFixtureResult } from "../../lib/game/renderer/webgl2-portal-scope-atlas-executor-fixture";
 	import type { WebGL2PssmFixtureResult } from "../../lib/game/renderer/webgl2-pssm-fixture";
+	import type { WebGL2EntitySelectionFixtureResult } from "../../lib/game/renderer/webgl2-entity-selection-fixture";
+	import {
+		refineEntitySelectionCandidates,
+		type EntitySelectionRefinement,
+	} from "../../lib/game/selection/entity-selection-intersection";
 	import {
 		runPortalTransitionPresentationFixture,
 		type PortalTransitionPresentationFixtureResult,
@@ -532,6 +538,11 @@
 			readonly previousY: number;
 			readonly movedY: number;
 		}>;
+		/** Select one realized entity and sample its production geometry and mask across two frames. */
+		readonly probeSpawnedEntitySelection: (
+			guid: number,
+			delayMilliseconds: number,
+		) => Promise<BrowserHarnessSpawnedSelectionEvidence>;
 		/** Retire every live harness-spawned generation through the same host lifecycle. */
 		readonly despawnExplorerEntityFleet: () => Promise<number>;
 		/** Apply catalog-authored launch speed/spin to one exact generation. */
@@ -712,6 +723,8 @@
 		readonly portalScopeAtlasExecutor: WebGL2PortalScopeAtlasExecutorFixtureResult | null;
 		/** Real-browser depth-array and caster-program evidence for outdoor PSSM. */
 		readonly outdoorPssm: WebGL2PssmFixtureResult | null;
+		/** Real-browser selected-mask, compositor, resize, and teardown evidence. */
+		readonly entitySelection: WebGL2EntitySelectionFixtureResult | null;
 		/** One read-only observation for every host source-batch response received by this harness. */
 		readonly sourceBatches: readonly HttpLandblockSourceBatchDiagnostic[];
 		/** One read-only observation for every profile transport request. */
@@ -723,6 +736,26 @@
 		readonly ready: boolean;
 		/** CSS and physical viewport dimensions that determine visible work. */
 		readonly viewport: BrowserHarnessViewportEvidence;
+	}
+
+	interface BrowserHarnessSelectionGeometryEvidence {
+		readonly guid: number;
+		readonly landblockId: LandblockOwnerId;
+		readonly partCount: number;
+		readonly transformChecksum: number;
+		readonly triangleCount: number;
+	}
+
+	interface BrowserHarnessSpawnedSelectionSample {
+		readonly exactHit: EntitySelectionRefinement;
+		readonly geometry: BrowserHarnessSelectionGeometryEvidence;
+		readonly mask: RendererFrameDiagnosticsSnapshot["selectionMetrics"]["entitySelection"];
+		readonly resolvedPlacementChecksum: number;
+	}
+
+	interface BrowserHarnessSpawnedSelectionEvidence {
+		readonly first: BrowserHarnessSpawnedSelectionSample;
+		readonly second: BrowserHarnessSpawnedSelectionSample;
 	}
 
 	interface PortalTransitionLifecycleResourceEvidence {
@@ -962,6 +995,7 @@
 	let portalScopeAtlasExecutor: WebGL2PortalScopeAtlasExecutorFixtureResult | null =
 		null;
 	let outdoorPssm: WebGL2PssmFixtureResult | null = null;
+	let entitySelection: WebGL2EntitySelectionFixtureResult | null = null;
 	let ready = false;
 	const fixture = query.get("fixture");
 
@@ -1791,6 +1825,222 @@
 				window.requestAnimationFrame(() => resolve()),
 			),
 		);
+	}
+
+	/**
+	 * Sample the exact borrowed geometry and renderer mask that production selection consumes.
+	 *
+	 * A weighted matrix checksum is compact harness evidence, not runtime identity. Any animated
+	 * part or inherited attachment transform change alters it while the underlying mesh stays borrowed.
+	 */
+	async function probeSpawnedEntitySelection(
+		guid: number,
+		delayMilliseconds: number,
+	): Promise<BrowserHarnessSpawnedSelectionEvidence> {
+		if (!runtime)
+			throw new Error("Spawned selection probe requires an active runtime.");
+		const activeRuntime = runtime;
+		if (!Number.isFinite(delayMilliseconds) || delayMilliseconds < 0)
+			throw new Error(
+				"Spawned selection probe delay must be finite and non-negative.",
+			);
+		activeRuntime.setSelectedEntityGuid(guid);
+		await waitForTwoAnimationFrames();
+		const sample = (): BrowserHarnessSpawnedSelectionSample => {
+			const state = activeRuntime.selectedEntityPresentationState(guid);
+			if (state.kind !== "realized" || state.frame.guid !== guid)
+				throw new Error(`Spawned selection target ${guid} is not realized.`);
+			const selected = state.frame;
+			const geometry = activeRuntime.withSpawnedEntitySelectionGeometry(
+				guid,
+				(current) => {
+					if (current.kind === "sphere-proxy") {
+						return {
+							guid,
+							landblockId: current.landblockId,
+							partCount: 0,
+							transformChecksum: matrixChecksum(current.sourceToLandblock, 1),
+							triangleCount: 0,
+						};
+					}
+					let triangleCount = 0;
+					let transformChecksum = 0;
+					for (const [partIndex, part] of current.parts.entries()) {
+						triangleCount += part.ranges.reduce(
+							(total, range) => total + range.indexCount / 3,
+							0,
+						);
+						transformChecksum += matrixChecksum(
+							part.sourceToLandblock,
+							partIndex + 1,
+						);
+					}
+					return {
+						guid,
+						landblockId: current.landblockId,
+						partCount: current.parts.length,
+						transformChecksum,
+						triangleCount,
+					};
+				},
+			);
+			const mask =
+				activeRuntime.getRendererFrameDiagnostics()?.selectionMetrics
+					.entitySelection;
+			if (geometry === null || geometry === undefined || mask === undefined)
+				throw new Error(
+					`Spawned selection target ${guid} has no frame evidence.`,
+				);
+			return {
+				exactHit: exactSelfHit(activeRuntime, guid),
+				geometry,
+				mask: { ...mask },
+				resolvedPlacementChecksum: matrixChecksum(
+					selected.placement.localToLandblock,
+					1,
+				),
+			};
+		};
+		const first = sample();
+		await new Promise((resolve) =>
+			window.setTimeout(resolve, delayMilliseconds),
+		);
+		await waitForTwoAnimationFrames();
+		return { first, second: sample() };
+	}
+
+	/** Build a short ray through one current visible triangle, then run the production refiner. */
+	function exactSelfHit(
+		runtime: GamePresentationRuntime,
+		guid: number,
+	): EntitySelectionRefinement {
+		const rays = runtime.withSpawnedEntitySelectionGeometry(
+			guid,
+			(geometry) => {
+				const origin = createLandblockWorldOrigin(geometry.landblockId);
+				if (geometry.kind === "sphere-proxy") {
+					const center = origin.add(
+						transformPoint3(geometry.sourceToLandblock, geometry.sphere.center),
+					);
+					return [
+						{
+							direction: new Vec3(1, 0, 0),
+							start: new Vec3(center.x - 1, center.y, center.z),
+						},
+						{
+							direction: new Vec3(-1, 0, 0),
+							start: new Vec3(center.x + 1, center.y, center.z),
+						},
+					] as const;
+				}
+				for (const part of geometry.parts) {
+					for (const range of part.ranges) {
+						const end = range.indexStart + range.indexCount;
+						for (let offset = range.indexStart; offset < end; offset += 3) {
+							const points = [0, 1, 2].map((corner) => {
+								const vertex = part.geometry.indices[offset + corner]! * 3;
+								return origin.add(
+									transformPoint3(
+										part.sourceToLandblock,
+										new Vec3(
+											part.geometry.positions[vertex]!,
+											part.geometry.positions[vertex + 1]!,
+											part.geometry.positions[vertex + 2]!,
+										),
+									),
+								);
+							});
+							const first = points[0]!;
+							const second = points[1]!;
+							const third = points[2]!;
+							const ab = new Vec3(
+								second.x - first.x,
+								second.y - first.y,
+								second.z - first.z,
+							);
+							const ac = new Vec3(
+								third.x - first.x,
+								third.y - first.y,
+								third.z - first.z,
+							);
+							const normal = new Vec3(
+								ab.y * ac.z - ab.z * ac.y,
+								ab.z * ac.x - ab.x * ac.z,
+								ab.x * ac.y - ab.y * ac.x,
+							);
+							const length = Math.hypot(normal.x, normal.y, normal.z);
+							if (length <= Number.EPSILON) continue;
+							const direction = new Vec3(
+								normal.x / length,
+								normal.y / length,
+								normal.z / length,
+							);
+							const center = new Vec3(
+								(first.x + second.x + third.x) / 3,
+								(first.y + second.y + third.y) / 3,
+								(first.z + second.z + third.z) / 3,
+							);
+							return [
+								{
+									direction,
+									start: new Vec3(
+										center.x - direction.x,
+										center.y - direction.y,
+										center.z - direction.z,
+									),
+								},
+								{
+									direction: new Vec3(-direction.x, -direction.y, -direction.z),
+									start: new Vec3(
+										center.x + direction.x,
+										center.y + direction.y,
+										center.z + direction.z,
+									),
+								},
+							] as const;
+						}
+					}
+				}
+				return null;
+			},
+		);
+		if (rays === null)
+			throw new Error(
+				`Spawned selection target ${guid} has no nondegenerate triangle.`,
+			);
+		for (const ray of rays) {
+			const refinement = refineEntitySelectionCandidates(
+				runtime,
+				ray,
+				[guid],
+				2,
+			);
+			if (refinement.selectedGuid === guid) return refinement;
+		}
+		throw new Error(
+			`Spawned selection target ${guid} rejected both triangle faces.`,
+		);
+	}
+
+	function matrixChecksum(matrix: Mat4, weight: number): number {
+		return [
+			matrix.m11,
+			matrix.m12,
+			matrix.m13,
+			matrix.m14,
+			matrix.m21,
+			matrix.m22,
+			matrix.m23,
+			matrix.m24,
+			matrix.m31,
+			matrix.m32,
+			matrix.m33,
+			matrix.m34,
+			matrix.m41,
+			matrix.m42,
+			matrix.m43,
+			matrix.m44,
+		].reduce((sum, value, index) => sum + value * (index + 1) * weight, 0);
 	}
 
 	async function launchExplorerEntity(
@@ -3102,6 +3352,9 @@
 				if (fixture === "outdoor-pssm") {
 					outdoorPssm = device.probeOutdoorPssm();
 				}
+				if (fixture === "entity-selection") {
+					entitySelection = device.probeEntitySelection();
+				}
 				pipeline =
 					fixture === "blended"
 						? new SyntheticBlendedBuildingPipeline()
@@ -3119,6 +3372,7 @@
 						resources: device.resources,
 					},
 					pipeline,
+					contentSource,
 					contentSource,
 					contentSource,
 					contentSource,
@@ -3476,6 +3730,7 @@
 					spawnExplorerEntityFleet,
 					installSyntheticNameplateWorkload,
 					probeSyntheticNameplateLifecycle,
+					probeSpawnedEntitySelection,
 					despawnExplorerEntityFleet,
 					spawnSimulatedExplorerEntity,
 					possessExplorerEntity,
@@ -3512,6 +3767,7 @@
 							error,
 							frameSettings,
 							entityShadowResources: frameDiagnostics?.entityShadows ?? null,
+							entitySelection,
 							compiledObjectDraws:
 								frameDiagnostics?.compiledObjectDraws ?? null,
 							frameProfile: frameDiagnostics?.profile ?? null,

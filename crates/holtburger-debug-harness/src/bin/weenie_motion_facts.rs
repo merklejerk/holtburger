@@ -92,7 +92,7 @@ fn main() -> Result<()> {
     );
     println!(
         "  default_script    {:?}",
-        setup.default_script.map(|d| format!("0x{d:08X}"))
+        setup.default_script_did.map(|d| format!("0x{d:08X}"))
     );
     println!(
         "  default_mtable    {:?}",

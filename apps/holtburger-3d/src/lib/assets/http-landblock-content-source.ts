@@ -6,7 +6,9 @@ import { normalizeLandblockOwner } from "../game/landblocks";
 import type { AnimationAssetSource } from "./animation-asset-source";
 import { decodeAnimationRecord } from "./decode-animation-record";
 import { decodePhysicsScriptRecord } from "./decode-physics-script-record";
+import { decodePhysicsScriptTableRecord } from "./decode-physics-script-table-record";
 import type { PhysicsScriptSource } from "./physics-script-source";
+import type { PhysicsScriptTableSource } from "./physics-script-table-source";
 import { decodeParticleEmitterRecord } from "./decode-particle-emitter-record";
 import type { ParticleEmitterSource } from "./particle-emitter-source";
 import { decodeSoundTableRecord } from "./decode-sound-table-record";
@@ -71,6 +73,7 @@ export class HttpLandblockContentSource
 		TexturePixelSource,
 		AnimationAssetSource,
 		PhysicsScriptSource,
+		PhysicsScriptTableSource,
 		ParticleEmitterSource,
 		SoundTableSource,
 		ParticleMeshSource,
@@ -219,6 +222,15 @@ export class HttpLandblockContentSource
 		return decodePhysicsScriptRecord(
 			await this.#postBinary("physics-script", { scriptId }),
 			scriptId,
+		);
+	}
+
+	async loadPhysicsScriptTable(physicsScriptTableId: DatAssetId) {
+		return decodePhysicsScriptTableRecord(
+			await this.#postBinary("physics-script-table", {
+				physicsScriptTableId,
+			}),
+			physicsScriptTableId,
 		);
 	}
 

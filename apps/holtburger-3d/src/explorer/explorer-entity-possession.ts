@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type { CharacterDrive } from "../lib/game/controls/character-input-controller";
+import { dynamicEntityMotionSchema } from "../lib/game/runtime/dynamic-entity-feed";
 
 const datId = z.string().regex(/^0x[0-9a-f]{8}$/i);
 const unsigned32 = z.number().int().min(0).max(0xffff_ffff);
@@ -204,20 +205,11 @@ const possessionActiveMotionProbe = z
 
 const possessionMotionProbe = z
 	.object({
-		clip: z
-			.object({
-				animationId: unsigned32,
-				completion: z.enum(["hold", "loop"]),
-				framerate: z.number().finite(),
-				highFrame: z.number().int(),
-				lowFrame: z.number().int(),
-			})
-			.strict()
-			.nullable(),
 		entityGeneration: generation,
 		effectivePlanarSpeed: z.number().finite().nullable(),
 		guid: unsigned32,
 		modifiers: z.array(possessionActiveMotionProbe),
+		motion: dynamicEntityMotionSchema.nullable(),
 		physicalStatus: z.enum(["solved", "substep-budget-exceeded"]).nullable(),
 		possessionGeneration: generation,
 		requestedRunRate: z.number().finite(),

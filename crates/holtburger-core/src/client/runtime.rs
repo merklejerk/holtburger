@@ -139,6 +139,7 @@ impl ClientRuntime {
                     }
 
                     self.poll_busy_timeout(now);
+                    self.dynamic_script_inbox.expire(now);
                 }
                 res = self.session.recv_message() => {
                     use holtburger_session::SessionEvent;
@@ -190,6 +191,10 @@ impl ClientRuntime {
 
                     let active_world = self.activation.is_none()
                         && matches!(self.state, ClientState::InWorld);
+                    if active_world {
+                        self.advance_dynamic_scale(self.dynamic_scale_time())?;
+                        self.poll_selection_envelopes();
+                    }
                     if active_world {
                         let movement_events = self
                             .movement

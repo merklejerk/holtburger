@@ -58,9 +58,9 @@ fn test_dispatch_play_sound() {
 }
 
 #[test]
-fn test_dispatch_play_effect() {
-    assert_dispatch_match(test_fixtures::PLAY_EFFECT, |msg| {
-        matches!(msg, GameMessage::PlayEffect(_))
+fn test_dispatch_play_script() {
+    assert_dispatch_match(test_fixtures::PLAY_SCRIPT, |msg| {
+        matches!(msg, GameMessage::PlayScript(_))
     });
 }
 

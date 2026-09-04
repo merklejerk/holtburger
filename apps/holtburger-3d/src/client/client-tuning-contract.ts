@@ -1,4 +1,5 @@
 import type { PortalTransitionPolicy } from "../lib/client/portal-transition-controller";
+import type { HexRgbaColor } from "../lib/frontend-color";
 import type {
 	PossessionCameraOrbitPolicy,
 	PossessionCameraRecenterPolicy,
@@ -58,6 +59,28 @@ export interface ClientTuning {
 		readonly maximumAimDistance: number;
 		/** World-space outer radius of the surface marker. */
 		readonly markerRadius: number;
+	};
+	/** Client-local entity acquisition feedback policy. */
+	readonly entitySelection: {
+		/** Maximum cadence for hover acquisition and selected-target validity sampling. */
+		readonly sampleIntervalMs: number;
+		/** App-local offscreen selected-target arrow appearance. */
+		readonly offscreenIndicator: {
+			/** Minimum arrow-center distance from each viewport edge. */
+			readonly safeInsetCssPixels: number;
+			/** Square arrow extent in CSS pixels. */
+			readonly sizeCssPixels: number;
+			/** Translucent arrow fill color. */
+			readonly fillColor: HexRgbaColor;
+			/** Arrow outline color. */
+			readonly outlineColor: HexRgbaColor;
+			/** Arrow outline thickness in CSS pixels. */
+			readonly outlineWidthCssPixels: number;
+			/** Outer glow color. */
+			readonly glowColor: HexRgbaColor;
+			/** Outer glow blur radius in CSS pixels. */
+			readonly glowBlurCssPixels: number;
+		};
 	};
 	/** Initial static-content demand around the controlled player. */
 	readonly sceneInterest: SceneInterestRadii;

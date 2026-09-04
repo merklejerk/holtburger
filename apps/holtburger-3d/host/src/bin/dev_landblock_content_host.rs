@@ -18,8 +18,8 @@ use holtburger_3d_host::{
     host_simulation_runtime::{CollisionSource, HostSimulationRuntime, SimulationInterestRequest},
     load_active_region_data_bytes, load_animation_bytes, load_landblock_profile_response,
     load_landblock_source_batch_bytes, load_motion_table_closure_ids, load_particle_emitter_bytes,
-    load_particle_meshes_bytes, load_physics_script_bytes, load_sky_source_bytes,
-    load_sound_table_bytes, load_texture_pixels_bytes,
+    load_particle_meshes_bytes, load_physics_script_bytes, load_physics_script_table_bytes,
+    load_sky_source_bytes, load_sound_table_bytes, load_texture_pixels_bytes,
     setup_visual_source::load_setup_visual_source_bytes,
 };
 use holtburger_content::{ContentDecodeCache, ContentRepository};
@@ -68,6 +68,12 @@ struct AnimationRequest {
 #[serde(rename_all = "camelCase")]
 struct PhysicsScriptRequest {
     script_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PhysicsScriptTableRequest {
+    physics_script_table_id: String,
 }
 
 #[derive(Deserialize)]
@@ -246,6 +252,15 @@ async fn handle_connection(mut stream: TcpStream, state: &DevHostState) -> anyho
         ("POST", "/physics-script") => {
             let request = serde_json::from_slice::<PhysicsScriptRequest>(&request.body)?;
             match load_physics_script_bytes(runtime, &request.script_id).await {
+                Ok(bytes) => {
+                    write_response(&mut stream, 200, "application/octet-stream", &bytes).await
+                }
+                Err(error) => write_error(&mut stream, error).await,
+            }
+        }
+        ("POST", "/physics-script-table") => {
+            let request = serde_json::from_slice::<PhysicsScriptTableRequest>(&request.body)?;
+            match load_physics_script_table_bytes(runtime, &request.physics_script_table_id).await {
                 Ok(bytes) => {
                     write_response(&mut stream, 200, "application/octet-stream", &bytes).await
                 }

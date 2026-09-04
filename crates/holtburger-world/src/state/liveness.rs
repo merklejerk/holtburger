@@ -3,6 +3,8 @@ use std::collections::{HashMap, HashSet};
 use holtburger_common::Guid;
 use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_common::sequence::is_newer_u16;
+use holtburger_protocol::messages::object::messages::description::ObjDescEventData;
+use holtburger_protocol::messages::object::types::ModelData;
 
 use crate::WorldEvent;
 use crate::context::WorldContextExt;
@@ -37,6 +39,15 @@ pub(crate) struct EntityLifecycleState {
     pub prune_deadline: Option<f64>,
     pub trade_preview: bool,
     pub container_preview: bool,
+    /// Complete appearance for a not-yet-materialized future object incarnation.
+    pub pending_visual_description: Option<PendingVisualDescription>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PendingVisualDescription {
+    pub instance_sequence: u16,
+    pub visual_description_sequence: u16,
+    pub model_data: ModelData,
 }
 
 impl EntityLifecycleState {
@@ -45,6 +56,7 @@ impl EntityLifecycleState {
             && self.prune_deadline.is_none()
             && !self.trade_preview
             && !self.container_preview
+            && self.pending_visual_description.is_none()
     }
 }
 
@@ -148,6 +160,51 @@ impl EntityRetentionSnapshot {
 }
 
 impl WorldState {
+    /// Applies or queues one complete visual description under retail's two sequence domains.
+    pub(crate) fn apply_object_visual_description(
+        &mut self,
+        data: &ObjDescEventData,
+        events: &mut Vec<WorldEvent>,
+    ) {
+        let Some(entity) = self.entities.get_mut(data.guid) else {
+            self.entity_lifecycle
+                .get_or_default_mut(data.guid)
+                .pending_visual_description = Some(PendingVisualDescription::from(data));
+            return;
+        };
+        let current_instance = entity.instance_sequence();
+        if data.instance_sequence == current_instance {
+            if is_newer_u16(
+                data.visual_desc_sequence,
+                entity.visual_description_sequence(),
+            ) {
+                entity.apply_visual_description(&data.model_data, data.visual_desc_sequence);
+                events.push(WorldEvent::EntityAppearanceUpdated { guid: data.guid });
+            }
+            return;
+        }
+        if !is_newer_u16(data.instance_sequence, current_instance) {
+            return;
+        }
+
+        let incoming = PendingVisualDescription::from(data);
+        let state = self.entity_lifecycle.get_or_default_mut(data.guid);
+        let replace = state
+            .pending_visual_description
+            .as_ref()
+            .is_none_or(|pending| {
+                is_newer_u16(incoming.instance_sequence, pending.instance_sequence)
+                    || (incoming.instance_sequence == pending.instance_sequence
+                        && is_newer_u16(
+                            incoming.visual_description_sequence,
+                            pending.visual_description_sequence,
+                        ))
+            });
+        if replace {
+            state.pending_visual_description = Some(incoming);
+        }
+    }
+
     fn current_visible_world_guids(&self) -> HashSet<Guid> {
         if self.player.guid == Guid::NULL {
             return HashSet::new();
@@ -491,10 +548,11 @@ impl WorldState {
 
     pub(crate) fn upsert_entity_from_create(
         &mut self,
-        entity: Entity,
+        mut entity: Entity,
         events: &mut Vec<WorldEvent>,
     ) -> EntityCreateDisposition {
         let guid = entity.guid;
+        self.reconcile_pending_visual_description_for_create(&mut entity);
         let preserve_container_preview = entity
             .container_id()
             .is_some_and(|container| self.open_containers.contains(&container))
@@ -529,6 +587,40 @@ impl WorldState {
             EntityCreateDisposition::DeleteRequested
         } else {
             EntityCreateDisposition::Active
+        }
+    }
+
+    fn reconcile_pending_visual_description_for_create(&mut self, entity: &mut Entity) {
+        let Some(state) = self.entity_lifecycle.by_guid.get_mut(&entity.guid) else {
+            return;
+        };
+        let Some(pending) = state.pending_visual_description.as_ref() else {
+            return;
+        };
+        if pending.instance_sequence == entity.instance_sequence() {
+            if is_newer_u16(
+                pending.visual_description_sequence,
+                entity.visual_description_sequence(),
+            ) {
+                entity.apply_visual_description(
+                    &pending.model_data,
+                    pending.visual_description_sequence,
+                );
+            }
+            state.pending_visual_description = None;
+        } else if is_newer_u16(entity.instance_sequence(), pending.instance_sequence) {
+            state.pending_visual_description = None;
+        }
+        self.entity_lifecycle.compact(entity.guid);
+    }
+}
+
+impl From<&ObjDescEventData> for PendingVisualDescription {
+    fn from(data: &ObjDescEventData) -> Self {
+        Self {
+            instance_sequence: data.instance_sequence,
+            visual_description_sequence: data.visual_desc_sequence,
+            model_data: data.model_data.clone(),
         }
     }
 }

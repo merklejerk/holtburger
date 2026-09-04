@@ -1215,9 +1215,12 @@ async function createArchiveParticleArtifacts(
 				playSoundTableKey: () => "unprepared",
 			},
 			effects: {
-				applyScale: () => {},
 				applySetOmega: () => {},
 				applyTransparentPart: () => {},
+			},
+			scale: {
+				applyScale: (_target, _values, mode) =>
+					mode === "initial-state" ? "folded-initial-state" : "executed",
 			},
 			particles,
 			scheduler: {

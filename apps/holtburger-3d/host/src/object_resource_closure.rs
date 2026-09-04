@@ -196,7 +196,7 @@ impl ObjectResourceClosure {
             "placementFrames": setup_placement_frames(&setup_model),
             "defaultAnimationId": setup_model.default_animation.map(dat_id),
             "defaultMotionTableId": setup_model.default_motion_table.map(dat_id),
-            "defaultScriptId": setup_model.default_script.map(dat_id),
+            "defaultScriptId": setup_model.default_script_did.map(dat_id),
             "defaultScriptTableId": setup_model.default_script_table.map(dat_id),
             "defaultSoundTableId": setup_model.default_sound_table.map(dat_id),
         }));

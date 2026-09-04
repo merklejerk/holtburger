@@ -100,6 +100,8 @@ pub struct DynamicPhysicalBodyDefinition {
 pub struct DynamicPhysicalBodyConfiguration {
     definition: DynamicPhysicalBodyDefinition,
     demand: LocalPhysicalDemand,
+    /// Current absolute whole-object scale applied when the runtime body is installed.
+    object_scale: f32,
 }
 
 /// Failure to join prepared body facts to producer-owned local demand.
@@ -108,6 +110,8 @@ pub enum DynamicPhysicalBodyConfigurationError {
     /// A pose-only entity must not retain an otherwise unused physical allocation.
     #[error("dynamic physical body configuration requires target or integration demand")]
     NoLocalPhysicalDemand,
+    #[error("dynamic physical body object scale must be finite and positive")]
+    InvalidObjectScale,
 }
 
 impl DynamicPhysicalBodyConfiguration {
@@ -119,7 +123,25 @@ impl DynamicPhysicalBodyConfiguration {
         if !demand.requires_physical_body() {
             return Err(DynamicPhysicalBodyConfigurationError::NoLocalPhysicalDemand);
         }
-        Ok(Self { definition, demand })
+        Ok(Self {
+            definition,
+            demand,
+            object_scale: 1.0,
+        })
+    }
+
+    /// Joins unit geometry to its current absolute whole-object scale.
+    pub fn with_object_scale(
+        definition: DynamicPhysicalBodyDefinition,
+        demand: LocalPhysicalDemand,
+        object_scale: f32,
+    ) -> Result<Self, DynamicPhysicalBodyConfigurationError> {
+        let mut configuration = Self::new(definition, demand)?;
+        if !object_scale.is_finite() || object_scale <= 0.0 {
+            return Err(DynamicPhysicalBodyConfigurationError::InvalidObjectScale);
+        }
+        configuration.object_scale = object_scale;
+        Ok(configuration)
     }
 
     /// Prepared geometry and response facts, independent from producer policy.
@@ -133,8 +155,8 @@ impl DynamicPhysicalBodyConfiguration {
     }
 
     /// Separates the joined configuration at the canonical scene ownership boundary.
-    pub(crate) fn into_parts(self) -> (DynamicPhysicalBodyDefinition, LocalPhysicalDemand) {
-        (self.definition, self.demand)
+    pub(crate) fn into_parts(self) -> (DynamicPhysicalBodyDefinition, LocalPhysicalDemand, f32) {
+        (self.definition, self.demand, self.object_scale)
     }
 }
 

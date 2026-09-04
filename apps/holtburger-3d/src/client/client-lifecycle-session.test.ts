@@ -68,7 +68,7 @@ describe("ClientLifecycleSession", () => {
 
 		await session.start();
 
-		expect(transport.calls.slice(0, 18)).toEqual([
+		expect(transport.calls.slice(0, 20)).toEqual([
 			"listen:client-dynamic-entity",
 			"listen:client-current-state",
 			"listen:client-lifecycle-changed",
@@ -76,12 +76,14 @@ describe("ClientLifecycleSession", () => {
 			"listen:client-character-motion-feedback",
 			"listen:client-precise-jump-evaluation",
 			"listen:client-precise-jump-transaction-feedback",
+			"listen:client-entity-selection-query-result",
 			"listen:client-local-player-established",
 			"listen:client-server-time-updated",
 			"listen:client-world-name-updated",
 			"listen:client-player-entered",
 			"listen:client-player-vitals-updated",
 			"listen:client-chat-message",
+			"listen:client-dynamic-script-cue",
 			"listen:client-presentation-discontinuity",
 			"listen:client-camera-started",
 			"listen:client-camera",
@@ -95,6 +97,49 @@ describe("ClientLifecycleSession", () => {
 		expect(
 			session.mirror.entities().map((entity) => entity.identity.guid),
 		).toEqual([0x5000_0001]);
+	});
+
+	it("submits and delivers correlated entity-selection queries without mutating state", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const delivered: unknown[] = [];
+		session.subscribe((event) => {
+			if (event.type === "entity-selection-query-result")
+				delivered.push(event.result);
+		});
+		await session.start();
+
+		await session.queryEntitySelectionCandidates({
+			camera: {
+				cameraGeneration: 2,
+				playerGuid: 0x5000_0001,
+				entityGeneration: 7,
+			},
+			sequence: 12,
+			anchor: 0xda55_ffff,
+			start: landblockVector3([10, 20, 4]),
+			direction: [0, 1, 0],
+			previousCell: null,
+		});
+		transport.emit("client-entity-selection-query-result", {
+			status: "available",
+			sequence: 12,
+			staticLimitDistance: 45,
+			candidateGuids: [0x7000_0001],
+		});
+
+		expect(transport.invocations.at(-1)?.command).toBe(
+			"query_client_entity_selection_candidates",
+		);
+		expect(delivered).toEqual([
+			{
+				status: "available",
+				sequence: 12,
+				staticLimitDistance: 45,
+				candidateGuids: [0x7000_0001],
+			},
+		]);
+		expect(session.state().playerGuid).toBe(0x5000_0001);
 	});
 
 	it("validates precise-jump commands and projects correlated results", async () => {
@@ -254,6 +299,12 @@ describe("ClientLifecycleSession", () => {
 			speakerKind: "player",
 			message: "Hello",
 		});
+		transport.emit("client-dynamic-script-cue", {
+			guid: 9,
+			generation: 3,
+			cue: 7,
+			intensity: 0.5,
+		});
 		transport.emit("client-presentation-discontinuity", {
 			worldGeneration: 4,
 			kind: "reset",
@@ -286,6 +337,7 @@ describe("ClientLifecycleSession", () => {
 			"player-entered",
 			"vitals",
 			"chat",
+			"dynamic-script-cue",
 			"presentation-discontinuity",
 			"lifecycle",
 			"exit-requested",

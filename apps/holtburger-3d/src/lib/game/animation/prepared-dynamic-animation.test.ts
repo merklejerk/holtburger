@@ -174,12 +174,21 @@ function template(): ObjectVisualTemplate {
 		baseBounds: null,
 		geometry: [],
 		key: "object-visual-template:0x02000001/appearance:test" as never,
+		selectionGeometryMorphology: "volumetric",
 		parts: [
 			{
 				defaultScale: new Vec3(2, 1, 1),
 				depthDrawUnits: [],
 				drawUnits: [],
 				geometry: "object-geometry:test" as never,
+				geometryData: {
+					bakedLight: null,
+					indices: new Uint32Array(),
+					kind: "object",
+					normals: new Float32Array(),
+					positions: new Float32Array(),
+					textureCoordinates: new Float32Array(),
+				},
 				key: "part-visual-template:test" as never,
 				localBounds: new AABB3(new Vec3(1, 0, 0), new Vec3(1, 0, 0)),
 				partIndex: 0,

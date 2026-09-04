@@ -16,6 +16,7 @@ import {
 } from "../geometry/types";
 import { AABB3, Mat4, Quat, Vec3 } from "../math/types";
 import { createRotationMat4 } from "../math/matrices";
+import type { ObjectGeometryData } from "../renderer/geometry";
 import type {
 	ResolvedGeometry,
 	ResolvedMaterial,
@@ -169,6 +170,12 @@ describe("DynamicEntitySystem authored ownership", () => {
 		expect(scene.getResolvedPlacement(childPart)?.localToLandblock.m41).toBe(
 			19,
 		);
+		expect(
+			system.withSelectionGeometry(
+				childRoot,
+				(geometry) => geometry.parts[0]?.sourceToLandblock.m41,
+			),
+		).toBe(19);
 		system.removeOwner("child");
 		system.removeOwner("parent");
 	});
@@ -623,6 +630,9 @@ describe("DynamicEntitySystem authored ownership", () => {
 			kind: "hidden",
 			material: [],
 		});
+		expect(
+			system.withSelectionGeometry(firstNodeId, ({ parts }) => parts.length),
+		).toBe(0);
 
 		system.publishPresentation([presentationSample(firstPrepared, 0)]);
 		expect(
@@ -644,6 +654,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 			kind: "hidden",
 			material: [],
 		});
+		expect(system.withSelectionGeometry(firstNodeId, () => true)).toBeNull();
 		system.updatePresentationState(firstNodeId, {
 			cloaked: false,
 			hidden: true,
@@ -853,6 +864,66 @@ describe("DynamicEntitySystem authored ownership", () => {
 			new AABB3(new Vec3(0, 0, -4), new Vec3(12, 3, 8)),
 		);
 		expect(scene.getNode(nodeId)?.localBounds).toEqual(sweptBounds);
+	});
+
+	it("applies an absolute root scale without replacing prepared visual resources", async () => {
+		const { scene, system } = createSystem(
+			new InlineObjectVisualTemplatePreparer(),
+		);
+		const base = source("root-scale");
+		const part = requiredAt(base.source.presentation.parts, 0);
+		const scaledSource: PlacedDynamicPresentationSource = {
+			...base,
+			source: {
+				...base.source,
+				presentation: {
+					...base.source.presentation,
+					parts: [
+						{
+							...part,
+							geometry: {
+								...part.geometry,
+								bounds: new AABB3(new Vec3(1, 0, 0), new Vec3(2, 1, 1)),
+							},
+						},
+					],
+				},
+			},
+		};
+		const installation = system.replaceOwner("layer", [scaledSource]);
+		expect(await installation.ready).toBe("ready");
+		commit(installation);
+		const nodeId = requiredAt(installation.nodeIds, 0);
+		const partNodeId = system.resolvePartNode(nodeId, 0)!;
+		const prepared = system.getPreparedAnimation(nodeId);
+		const initialCullingBounds = scene.getNode(nodeId)?.localBounds?.clone();
+		if (!initialCullingBounds) throw new Error("Entity has no culling bounds.");
+
+		system.updateRootScale(nodeId, 2);
+
+		expect(system.getPreparedAnimation(nodeId)).toBe(prepared);
+		expect(scene.getResolvedPlacement(partNodeId)?.localToLandblock.m11).toBe(
+			2,
+		);
+		expectBounds(
+			system.getPublishedRigidPresentationBounds(nodeId),
+			new AABB3(new Vec3(2, 0, 0), new Vec3(4, 2, 2)),
+		);
+		expectBounds(
+			scene.getNode(nodeId)?.localBounds ?? null,
+			new AABB3(
+				new Vec3(
+					initialCullingBounds.min.x * 2,
+					initialCullingBounds.min.y * 2,
+					initialCullingBounds.min.z * 2,
+				),
+				new Vec3(
+					initialCullingBounds.max.x * 2,
+					initialCullingBounds.max.y * 2,
+					initialCullingBounds.max.z * 2,
+				),
+			),
+		);
 	});
 
 	/**
@@ -1140,15 +1211,16 @@ function material(id: string): ResolvedMaterial {
 
 function prepared(id: string): ObjectVisualTemplate {
 	const key = createObjectGeometryKey(`prepared/${id}`);
+	const geometryData: ObjectGeometryData = {
+		indices: new Uint32Array([0, 1, 2]),
+		bakedLight: null,
+		kind: "object",
+		normals: new Float32Array(9),
+		positions: new Float32Array(9),
+		textureCoordinates: new Float32Array(6),
+	};
 	const geometrySource: GeometrySource = {
-		geometry: {
-			indices: new Uint32Array([0, 1, 2]),
-			bakedLight: null,
-			kind: "object",
-			normals: new Float32Array(9),
-			positions: new Float32Array(9),
-			textureCoordinates: new Float32Array(6),
-		},
+		geometry: geometryData,
 		key,
 	};
 	const visualSource = source(id);
@@ -1157,12 +1229,14 @@ function prepared(id: string): ObjectVisualTemplate {
 		baseBounds: AABB3.zero(),
 		geometry: [geometrySource],
 		key: objectVisualTemplateKey(visualSource.source),
+		selectionGeometryMorphology: "volumetric",
 		parts: [
 			{
 				defaultScale: new Vec3(1, 1, 1),
 				depthDrawUnits: [],
 				drawUnits: [],
 				geometry: key,
+				geometryData,
 				key: `part-visual-template:${id}` as never,
 				localBounds: AABB3.zero(),
 				partIndex: 0,

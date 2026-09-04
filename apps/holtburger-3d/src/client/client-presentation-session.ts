@@ -62,8 +62,10 @@ import type {
 import type {
 	ClientCurrentState,
 	ClientCameraTick,
+	ClientDynamicScriptCue,
 	ClientLifecycle,
 	ClientPresentationDiscontinuity,
+	ClientEntitySelectionQueryRequest,
 	ClientPreciseJumpEvaluation,
 } from "./client-host-contract";
 import type { ClientPreciseJumpRay } from "./client-precise-jump-session";
@@ -89,6 +91,7 @@ import type {
 	PortalTransitionPresentationReceipt,
 } from "../lib/client/portal-transition-presentation";
 import type {
+	FrameSelectionMetrics,
 	FrameSettings,
 	RendererFrameDiagnosticsSnapshot,
 	WorldIndicatorInput,
@@ -101,6 +104,21 @@ import {
 	mapHeadingFromSceneTransform,
 } from "../lib/game/map/map-view";
 import type { ScenePlacement } from "../lib/game/scene";
+import {
+	refineEntitySelectionCandidates,
+	type EntitySelectionGeometry,
+	type EntitySelectionRefinement,
+	type PresentedSelectionRay,
+} from "../lib/game/selection/entity-selection-intersection";
+import type { SelectedDynamicEntityPresentationState } from "../lib/game/runtime/game-presentation-runtime";
+import {
+	clientSelectedEntityDistance,
+	type ClientSelectedEntityTrackingStatus,
+} from "./client-selection-tracking";
+import {
+	projectClientTargetIndicator,
+	type ClientTargetIndicatorFrame,
+} from "./client-target-indicator";
 
 /** Presentation state exposed to the thin client shell. */
 export type ClientPresentationStatusKind =
@@ -120,6 +138,12 @@ export interface ClientPresentationStatus {
 export interface ClientPresentationFrame {
 	readonly rendered: boolean;
 	readonly status: ClientPresentationStatus;
+}
+
+/** One coherent click ray sampled from the exact camera and viewport last presented. */
+export interface ClientPresentedCameraRay {
+	readonly query: Omit<ClientEntitySelectionQueryRequest, "sequence">;
+	readonly refinement: PresentedSelectionRay;
 }
 
 /** Residency identity shown by the client diagnostics panel. */
@@ -144,6 +168,7 @@ export interface ClientPresentationDiagnostics {
 		readonly drawingBufferHeight: number;
 	};
 	readonly draw: null | {
+		readonly entitySelection: FrameSelectionMetrics["entitySelection"];
 		readonly viewCount: number;
 		readonly visibleSceneEntries: number;
 		readonly visibleStaticNodes: number;
@@ -214,6 +239,7 @@ export interface ClientPresentationRuntime extends MapTerrainSource {
 		entity: DynamicEntityView,
 	): Promise<DynamicEntityRealizationDisposition>;
 	removeDynamicEntity(guid: number, generation: number): void;
+	playDynamicEntityScriptCue(cue: ClientDynamicScriptCue): void;
 	reevaluateDynamicEntityEligibility(): Promise<DynamicEntityRealizationResults>;
 	applyDynamicEntityTick(
 		batch: DynamicEntityTickBatch,
@@ -232,6 +258,10 @@ export interface ClientPresentationRuntime extends MapTerrainSource {
 	setAudioListener(placement: AudioListenerPlacement | null): void;
 	setSceneEnvironment(environment: ResolvedSceneEnvironment): void;
 	setViewerEntity(guid: number | null): void;
+	setSelectedEntityGuid(guid: number | null): void;
+	selectedEntityPresentationState(
+		guid: number,
+	): SelectedDynamicEntityPresentationState;
 	setPortalTransition(
 		transition: PortalTransitionPresentationPlan | undefined,
 	): void;
@@ -240,6 +270,10 @@ export interface ClientPresentationRuntime extends MapTerrainSource {
 	dynamicEntityOrigin(guid: number): ResolvedSceneOrigin | null;
 	/** Current scene placement of one realized dynamic entity. */
 	spawnedEntityPlacement(guid: number): ScenePlacement | null;
+	withSpawnedEntitySelectionGeometry<T>(
+		guid: number,
+		visit: (geometry: EntitySelectionGeometry) => T,
+	): T | null;
 	/** Every realized entity paired with the placement used by the current scene. */
 	listPresentedSpawnedEntities(): Iterable<MapEntity>;
 	/** Monotonic change fact for live dynamic placements. */
@@ -323,6 +357,7 @@ export class ClientPresentationSession {
 	#cameraSynchronization: Promise<void> = Promise.resolve();
 	/** Exact camera/extent pair used by the most recently presented frame. */
 	#lastPrimaryView: PrimaryCameraView | null = null;
+	#selectedEntityGuid: number | null = null;
 	readonly #constructionAbortController = new AbortController();
 
 	constructor(dependencies: ClientPresentationSessionDependencies) {
@@ -376,6 +411,7 @@ export class ClientPresentationSession {
 			cameraHeadingRadians: this.camera.desiredLook().yawRadians,
 			presentedEntities: () =>
 				owner?.runtime.listPresentedSpawnedEntities() ?? [],
+			selectedGuid: this.#selectedEntityGuid,
 			source: owner?.runtime ?? null,
 			subject:
 				placement === null || playerGuid === null
@@ -386,6 +422,52 @@ export class ClientPresentationSession {
 							kind: "controlled-entity",
 						},
 		};
+	}
+
+	/** Forward the cold identity level once; presentation resolves realization and pose per frame. */
+	setSelectedEntityGuid(guid: number | null): void {
+		this.#selectedEntityGuid = guid;
+		this.#owner?.runtime.setSelectedEntityGuid(guid);
+	}
+
+	/** Read one coherent residency and camera-distance fact for app-local selection policy. */
+	selectedEntityTrackingStatus(
+		guid: number,
+	): ClientSelectedEntityTrackingStatus {
+		const view = this.#lastPrimaryView;
+		const state = this.#owner?.runtime.selectedEntityPresentationState(guid);
+		if (state?.kind === "frontend-evicted") return state;
+		if (view === null || state?.kind !== "realized")
+			return { kind: "temporarily-unrealized" };
+		return {
+			distance: clientSelectedEntityDistance(view, state.frame),
+			kind: "tracked",
+		};
+	}
+
+	/** Project the exact current selected bound through the exact primary view last presented. */
+	readTargetIndicatorFrame(): ClientTargetIndicatorFrame | null {
+		const view = this.#lastPrimaryView;
+		const state =
+			this.#selectedEntityGuid === null
+				? null
+				: (this.#owner?.runtime.selectedEntityPresentationState(
+						this.#selectedEntityGuid,
+					) ?? null);
+		const selected = state?.kind === "realized" ? state.frame : null;
+		const cssWidth = this.#canvas.clientWidth;
+		const cssHeight = this.#canvas.clientHeight;
+		if (view === null || selected === null || cssWidth <= 0 || cssHeight <= 0) {
+			return null;
+		}
+		return projectClientTargetIndicator({
+			bounds: selected.localBounds,
+			cssHeight,
+			cssWidth,
+			placement: selected.placement,
+			tuning: CLIENT_TUNING.entitySelection.offscreenIndicator,
+			view,
+		});
 	}
 
 	/** Pull one bounded diagnostics snapshot without making frame-hot facts reactive. */
@@ -419,6 +501,7 @@ export class ClientPresentationSession {
 				selection === undefined
 					? null
 					: {
+							entitySelection: { ...selection.entitySelection },
 							viewCount: selection.viewCount,
 							visibleSceneEntries: selection.visibleSceneEntries,
 							visibleStaticNodes: selection.visibleStaticNodeCount,
@@ -431,11 +514,11 @@ export class ClientPresentationSession {
 		};
 	}
 
-	/** Sample an anchored AC-axis ray from the exact camera and viewport last presented. */
-	samplePreciseJumpRay(
+	/** Sample host-query and exact-render rays from the exact camera and viewport last presented. */
+	samplePresentedCameraRay(
 		clientX: number,
 		clientY: number,
-	): ClientPreciseJumpRay | null {
+	): ClientPresentedCameraRay | null {
 		const view = this.#lastPrimaryView;
 		const cameraStatus = this.camera.status();
 		if (view === null || cameraStatus.kind !== "active") return null;
@@ -479,16 +562,55 @@ export class ClientPresentationSession {
 			]),
 		);
 		return {
-			camera: cameraStatus.identity,
-			anchor: parseCellId(view.camera.placement.landblockId),
-			start: landblockVector3(acStart),
-			direction: acDirection,
-			maximumDistance: CLIENT_TUNING.preciseJump.maximumAimDistance,
-			previousCell:
-				view.camera.placement.envCellId === null
-					? null
-					: parseCellId(view.camera.placement.envCellId),
+			query: {
+				camera: cameraStatus.identity,
+				anchor: parseCellId(view.camera.placement.landblockId),
+				start: landblockVector3(acStart),
+				direction: acDirection,
+				previousCell:
+					view.camera.placement.envCellId === null
+						? null
+						: parseCellId(view.camera.placement.envCellId),
+			},
+			refinement: {
+				direction: renderDirection,
+				start: view.camera.placement.position.clone(),
+			},
 		};
+	}
+
+	/** Preserve precise-jump's established host contract through the shared camera sampler. */
+	samplePreciseJumpRay(
+		clientX: number,
+		clientY: number,
+	): ClientPreciseJumpRay | null {
+		const sampled = this.samplePresentedCameraRay(clientX, clientY);
+		return sampled === null
+			? null
+			: {
+					...sampled.query,
+					maximumDistance: CLIENT_TUNING.preciseJump.maximumAimDistance,
+				};
+	}
+
+	/** Refine a host candidate set against current posed browser geometry. */
+	refineEntitySelection(
+		ray: PresentedSelectionRay,
+		candidateGuids: readonly number[],
+		staticLimitDistance: number,
+	): EntitySelectionRefinement {
+		const runtime = this.#owner?.runtime;
+		return runtime === undefined
+			? {
+					distance: null,
+					selectedGuid: null,
+				}
+			: refineEntitySelectionCandidates(
+					runtime,
+					ray,
+					candidateGuids,
+					staticLimitDistance,
+				);
 	}
 
 	/** Publish one accepted atomic marker and optional reachable trajectory. */
@@ -872,6 +994,7 @@ export class ClientPresentationSession {
 				return;
 			}
 			this.#owner = owner;
+			owner.runtime.setSelectedEntityGuid(this.#selectedEntityGuid);
 			this.#sceneInterestCoordinator = new SceneInterestRequestCoordinator(
 				owner.profileSource,
 			);
@@ -909,6 +1032,9 @@ export class ClientPresentationSession {
 				return;
 			case "dynamic":
 				this.#receiveDynamic(event.event);
+				return;
+			case "dynamic-script-cue":
+				this.#owner?.runtime.playDynamicEntityScriptCue(event.cue);
 				return;
 			case "server-time":
 				this.#applyServerEnvironment(event.time);

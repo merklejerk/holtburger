@@ -39,8 +39,9 @@ use holtburger_protocol::messages::movement::{
 };
 use holtburger_protocol::messages::object::events::UpdateHealthEventData;
 use holtburger_protocol::messages::object::messages::description::{
-    PhysicsChildData, PhysicsDescParent,
+    ObjDescEventData, PhysicsChildData, PhysicsDescParent,
 };
+use holtburger_protocol::messages::object::types::{ModelChange, ModelData};
 use holtburger_protocol::messages::{
     BookDataResponseEventData, BookPageData, BookPageDataResponseEventData, FellowUpdateType,
     FellowshipFullUpdateEventData, FellowshipMemberData, FellowshipQuitEventData,
@@ -2544,6 +2545,120 @@ fn test_object_create_reuses_upsert_path_and_clears_explicit_delete() {
     assert!(state.entity_lifecycle_state(guid).is_none());
 }
 
+fn visual_model(part_index: u8, gfx_obj_did: u32) -> ModelData {
+    ModelData {
+        model_changes: vec![ModelChange {
+            index: part_index,
+            animation_id: gfx_obj_did,
+        }],
+        ..ModelData::default()
+    }
+}
+
+#[test]
+fn object_visual_description_requires_equal_instance_and_wrap_newer_visual_sequence() {
+    let mut state = WorldState::synthetic();
+    let guid = Guid(0x9000_0101);
+    let mut entity = Entity::new(guid, "Target".to_owned(), WorldPosition::default());
+    entity.sequences[7] = u16::MAX - 1;
+    entity.sequences[8] = 4;
+    state.entities.insert(entity);
+
+    let events = state.handle_message(&GameMessage::ObjDescEvent(Box::new(ObjDescEventData {
+        guid,
+        model_data: visual_model(2, 0x0100_0020),
+        instance_sequence: 4,
+        visual_desc_sequence: 1,
+    })));
+    assert!(matches!(
+        events.as_slice(),
+        [WorldEvent::EntityAppearanceUpdated { guid: updated }] if *updated == guid
+    ));
+    assert_eq!(
+        state
+            .entities
+            .get(guid)
+            .unwrap()
+            .visual_description_sequence(),
+        1
+    );
+    assert_eq!(
+        state.entities.get(guid).unwrap().appearance.part_changes[0].part_index,
+        2
+    );
+
+    let stale = state.handle_message(&GameMessage::ObjDescEvent(Box::new(ObjDescEventData {
+        guid,
+        model_data: visual_model(3, 0x0100_0030),
+        instance_sequence: 4,
+        visual_desc_sequence: u16::MAX,
+    })));
+    assert!(stale.is_empty());
+    assert_eq!(
+        state.entities.get(guid).unwrap().appearance.part_changes[0].part_index,
+        2
+    );
+}
+
+#[test]
+fn future_object_visual_description_joins_matching_create_before_publication() {
+    let mut state = WorldState::synthetic();
+    let guid = Guid(0x9000_0102);
+    let mut current = Entity::new(guid, "Current".to_owned(), WorldPosition::default());
+    current.sequences[8] = 4;
+    state.entities.insert(current);
+
+    assert!(
+        state
+            .handle_message(&GameMessage::ObjDescEvent(Box::new(ObjDescEventData {
+                guid,
+                model_data: visual_model(3, 0x0100_0030),
+                instance_sequence: 5,
+                visual_desc_sequence: 8,
+            })))
+            .is_empty()
+    );
+
+    let mut create = ObjectDescriptionData::with_guid(guid);
+    create.public_weenie_desc.name = Some("Replacement".to_owned());
+    create.sequences[7] = 7;
+    create.sequences[8] = 5;
+    let events = state.handle_message(&GameMessage::ObjectCreate(Box::new(create)));
+    let Some(WorldEvent::EntityReplaced(replacement)) = events.first() else {
+        panic!("matching create should replace the existing entity");
+    };
+    assert_eq!(replacement.visual_description_sequence(), 8);
+    assert_eq!(replacement.appearance.part_changes[0].part_index, 3);
+    assert!(state.entity_lifecycle_state(guid).is_none());
+}
+
+#[test]
+fn stale_instance_visual_description_cannot_modify_current_entity() {
+    let mut state = WorldState::synthetic();
+    let guid = Guid(0x9000_0103);
+    let mut entity = Entity::new(guid, "Current".to_owned(), WorldPosition::default());
+    entity.sequences[7] = 10;
+    entity.sequences[8] = 5;
+    state.entities.insert(entity);
+
+    let events = state.handle_message(&GameMessage::ObjDescEvent(Box::new(ObjDescEventData {
+        guid,
+        model_data: visual_model(4, 0x0100_0040),
+        instance_sequence: 4,
+        visual_desc_sequence: 11,
+    })));
+    assert!(events.is_empty());
+    assert!(
+        state
+            .entities
+            .get(guid)
+            .unwrap()
+            .appearance
+            .part_changes
+            .is_empty()
+    );
+}
+
 #[test]
 fn test_self_object_create_bootstraps_player_position() {
     let mut state = WorldState::synthetic();
@@ -3487,6 +3602,80 @@ fn set_state_dynamic_definition() -> crate::DynamicPhysicalBodyConfiguration {
         },
     )
     .unwrap()
+}
+
+#[test]
+fn script_scale_is_absolute_and_updates_the_installed_unit_body() {
+    let mut state = WorldState::synthetic();
+    let guid = Guid(0x7000_0100);
+    let mut entity = Entity::new(
+        guid,
+        "Scaled".to_owned(),
+        WorldPosition {
+            landblock_id: Guid(0xda55_0020),
+            coords: Vector3::zero(),
+            rotation: Quaternion::identity(),
+        },
+    );
+    entity.set_property(PropertyUpdate::Float(
+        holtburger_common::properties::PropertyFloat::DefaultScale,
+        2.0,
+    ));
+    state.add_entity(entity);
+    let unit = set_state_dynamic_definition();
+    let scaled = crate::DynamicPhysicalBodyConfiguration::with_object_scale(
+        unit.definition().clone(),
+        unit.demand(),
+        2.0,
+    )
+    .unwrap();
+    state
+        .scene
+        .set_dynamic_physical_body(
+            SpatialBodyId::Entity(guid),
+            Some(scaled),
+            crate::PhysicalCollisionFilter::ALL,
+            None,
+        )
+        .unwrap();
+
+    assert!(
+        state
+            .apply_entity_script_scale(guid, 3.0, 0.0, 1.0)
+            .unwrap()
+            .effective_changed
+    );
+    assert_eq!(state.entities.get(guid).unwrap().scale.effective(), 3.0);
+    let physical = state
+        .scene
+        .body(SpatialBodyId::Entity(guid))
+        .unwrap()
+        .physical
+        .as_ref()
+        .unwrap();
+    assert_eq!(physical.definition.spheres().primary().radius, 1.5);
+    let dynamic = physical.dynamic.as_ref().unwrap();
+    assert_eq!(dynamic.unit_movement.spheres().primary().radius, 0.5);
+    assert_eq!(dynamic.object_scale, 3.0);
+
+    let started = state
+        .apply_entity_script_scale(guid, 4.0, 2.0, 2.0)
+        .unwrap();
+    assert!(!started.effective_changed);
+    assert!(started.ramp_active);
+    let advanced = state.advance_entity_script_scale(guid, 3.0).unwrap();
+    assert!(advanced.effective_changed);
+    assert!(advanced.ramp_active);
+    assert_eq!(state.entities.get(guid).unwrap().scale.effective(), 3.5);
+    let physical = state
+        .scene
+        .body(SpatialBodyId::Entity(guid))
+        .unwrap()
+        .physical
+        .as_ref()
+        .unwrap();
+    assert_eq!(physical.definition.spheres().primary().radius, 1.75);
+    assert_eq!(physical.dynamic.as_ref().unwrap().object_scale, 3.5);
 }
 
 fn authored_ethereal_tick(guid: Guid, ethereal: bool) -> AuthoredBodyMotionTick {

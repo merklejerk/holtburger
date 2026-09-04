@@ -18,6 +18,10 @@ import type {
 	RigidPartDepthDrawUnit,
 	RigidPartDrawUnit,
 } from "./components";
+import {
+	classifySelectionGeometryMorphology,
+	type SelectionGeometryMorphology,
+} from "../selection/entity-interaction-shape";
 
 declare const objectVisualTemplateKeyBrand: unique symbol;
 
@@ -33,6 +37,8 @@ export interface ObjectVisualTemplate {
 	readonly baseBounds: AABB3 | null;
 	readonly geometry: readonly GeometrySource[];
 	readonly parts: readonly PartVisualTemplate[];
+	/** Cached dimensionality used by the runtime's particle-carrier interaction policy. */
+	readonly selectionGeometryMorphology: SelectionGeometryMorphology;
 	readonly textureRequirements: readonly AssetTextureFact[];
 }
 
@@ -41,6 +47,8 @@ export interface PartVisualTemplate {
 	readonly key: PartVisualTemplateKey;
 	readonly partIndex: number;
 	readonly geometry: ObjectGeometryKey;
+	/** Existing immutable CPU mesh retained for exact app-local interaction queries. */
+	readonly geometryData: ObjectGeometryData;
 	/** Setup-authored geometry scale, composed independently from every rigid pose. */
 	readonly defaultScale: Vec3;
 	/** Untransformed geometry-local bounds used by animation sweeps. */
@@ -547,12 +555,18 @@ function prepareObjectVisualTemplate(
 	const geometry = new Map<ObjectGeometryKey, GeometrySource>();
 	const parts = source.presentation.parts.map((part) => {
 		const geometryKey = createObjectGeometryKey(part.geometry.id);
-		if (!geometry.has(geometryKey)) {
-			geometry.set(geometryKey, {
+		let geometrySource = geometry.get(geometryKey);
+		if (geometrySource === undefined) {
+			geometrySource = {
 				geometry: objectGeometryData(part),
 				key: geometryKey,
-			});
+			};
+			geometry.set(geometryKey, geometrySource);
 		}
+		if (geometrySource.geometry.kind !== "object")
+			throw new Error(
+				`Dynamic part ${part.partIndex} prepared non-object geometry.`,
+			);
 		const templatePartKey = partVisualTemplateKey(key, part);
 		const ranges = resolveObjectMaterialRanges(
 			part,
@@ -574,17 +588,32 @@ function prepareObjectVisualTemplate(
 				part.retailVisibility,
 			),
 			geometry: geometryKey,
+			geometryData: geometrySource.geometry,
 			key: templatePartKey,
 			localBounds: part.geometry.bounds,
 			partIndex: part.partIndex,
 		};
 	});
+	const selectionCarriers = parts.filter(
+		(part) =>
+			part.localBounds !== null &&
+			part.depthDrawUnits.some(
+				(range) => range.retailVisibility === "normally-visible",
+			),
+	);
+	const selectionCarrier =
+		selectionCarriers.length === 1 ? selectionCarriers[0] : undefined;
 	return {
 		appearanceKey: source.presentation.appearanceKey,
 		baseBounds: source.localBounds ?? source.presentation.selectionBounds,
 		geometry: [...geometry.values()],
 		key,
 		parts,
+		selectionGeometryMorphology:
+			selectionCarrier?.localBounds === undefined ||
+			selectionCarrier.localBounds === null
+				? "volumetric"
+				: classifySelectionGeometryMorphology(selectionCarrier.localBounds),
 		textureRequirements: [...textureRequirements.values()].sort((left, right) =>
 			left.key.localeCompare(right.key),
 		),

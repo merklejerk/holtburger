@@ -767,7 +767,7 @@ mod tests {
             },
             lights: Vec::new(),
             default_animation: None,
-            default_script: None,
+            default_script_did: None,
             default_motion_table: None,
             default_sound_table: None,
             default_script_table: None,

@@ -311,7 +311,6 @@ pub trait ExplorerEntityContentPreparer: Send + Sync {
         &self,
         wcid: u32,
         setup_did: u32,
-        object_scale: f32,
     ) -> Result<DynamicEntitySetupPreparation, DynamicEntityPhysicalPreparationError>;
 
     /// Resolves complete stable physical facts for an integrated spawn.
@@ -378,9 +377,8 @@ impl ExplorerEntityContentPreparer for DatExplorerEntityContentPreparer {
         &self,
         wcid: u32,
         setup_did: u32,
-        object_scale: f32,
     ) -> Result<DynamicEntitySetupPreparation, DynamicEntityPhysicalPreparationError> {
-        prepare_dynamic_entity_setup(wcid, setup_did, object_scale, &self.content)
+        prepare_dynamic_entity_setup(wcid, setup_did, &self.content)
     }
 
     fn prepare_physical(
@@ -530,9 +528,7 @@ impl ExplorerEntityDriver {
             .ok_or(ExplorerEntityDriverError::MissingSetup {
                 wcid: template.wcid,
             })?;
-        let setup = self
-            .content
-            .prepare_setup(template.wcid, setup_did, object_scale)?;
+        let setup = self.content.prepare_setup(template.wcid, setup_did)?;
         let physics =
             calculate_effective_entity_physics_state(physics_input(template), setup.physics);
         Ok(PreparedTemplateContent {
@@ -609,8 +605,8 @@ impl ExplorerEntityDriver {
             &self.simulation.snapshot(),
             request.camera_pose,
             initial.pose,
-            content.setup.movement_spheres.primary().center,
-            content.setup.movement_spheres.primary().radius,
+            content.setup.movement_spheres.primary().center * content.object_scale,
+            content.setup.movement_spheres.primary().radius * content.object_scale,
         )?;
         let children = self.prepare_held_children(guid, resolved_appearance.wielded)?;
         Ok((
@@ -754,15 +750,14 @@ impl ExplorerEntityDriver {
         let setup = self.content.prepare_setup(
             instance.definition.identity.wcid,
             instance.definition.content.setup_did,
-            instance.definition.object_scale,
         )?;
         let candidate = candidate_pose(request.camera_pose, request.candidate, request.rotation)?;
         let pose = resolve_spawn_placement(
             &self.simulation.snapshot(),
             request.camera_pose,
             candidate,
-            setup.movement_spheres.primary().center,
-            setup.movement_spheres.primary().radius,
+            setup.movement_spheres.primary().center * instance.definition.object_scale,
+            setup.movement_spheres.primary().radius * instance.definition.object_scale,
         )?;
         self.entities
             .relocate(request.guid, request.generation, pose, self.clock.now())
@@ -1081,7 +1076,7 @@ fn template_definition_input(
             template.radar_behavior,
             template.obvious_radar_range,
         ),
-        body_height: content.setup.body_height,
+        body_height: content.setup.body_height * content.object_scale,
         physics: content.physics,
     })
 }
@@ -1361,7 +1356,6 @@ mod tests {
             &self,
             _wcid: u32,
             _setup_did: u32,
-            _object_scale: f32,
         ) -> Result<DynamicEntitySetupPreparation, DynamicEntityPhysicalPreparationError> {
             Ok(DynamicEntitySetupPreparation {
                 physics: EntityPhysicsSetupFacts::default(),

@@ -66,6 +66,10 @@ pub enum WorldEvent {
         pos: WorldPosition,
     },
     EntityIdentified(Box<Entity>),
+    /// Complete visual appearance changed without replacing the entity incarnation.
+    EntityAppearanceUpdated {
+        guid: Guid,
+    },
     EntityVectorUpdated {
         guid: Guid,
         velocity: holtburger_common::math::Vector3,

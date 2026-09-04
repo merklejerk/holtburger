@@ -47,8 +47,10 @@ pub(crate) use dead_reckoning::project_pose_by_velocity;
 #[cfg(test)]
 mod tests;
 pub use collision::{
-    CellTransitRequest, CollisionOwnerProof, CollisionQueryError, CollisionQueryPolicy,
-    CollisionScene, CollisionSceneUpdateError, CollisionSurfaceRayHit, EntitySurfaceRayHit,
+    AvailableEntitySelectionCandidates, CellTransitRequest, CollisionOwnerProof,
+    CollisionQueryError, CollisionQueryPolicy, CollisionScene, CollisionSceneUpdateError,
+    CollisionSurfaceRayHit, EntitySelectionCandidateResult, EntitySelectionQueryError,
+    EntitySelectionRayRequest, EntitySelectionUnavailable, EntitySurfaceRayHit,
     GroundedObstruction, GroundedObstructionRequest, MotionWaypoint, MotionWaypointPlacement,
     MovementObstructionRequest, MovementRestrictionRequest, PlacedMotionLeg, PlacedMotionPath,
     PlacedMotionPathRequest, PlacedMotionPoint, PlacementRecovery, PlacementRequest,

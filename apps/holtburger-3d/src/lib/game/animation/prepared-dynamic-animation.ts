@@ -39,7 +39,7 @@ export type PreparedDynamicAnimation =
 /** Validate one clip against its resolved appearance and precompute activation-time bounds. */
 export function prepareDynamicAnimation(
 	animation: PreparedAnimation,
-	template: ObjectVisualTemplate,
+	template: Pick<ObjectVisualTemplate, "parts">,
 	sourceScale: Vec3,
 	staticBounds: AABB3,
 ): PreparedDynamicAnimation {

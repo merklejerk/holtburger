@@ -6,65 +6,36 @@ import {
 } from "../landblocks";
 import { frustumIntersectsAABB, type Frustum } from "../math/frustum";
 import { transformAABB3 } from "../math/matrices";
-import { AABB3, Mat4, Vec3 } from "../math/types";
+import { AABB3, Vec3 } from "../math/types";
 import type { SceneNodeId } from "../scene";
-import type { RigidPartDepthDrawUnit } from "../systems/components";
-import type { ObjectInstanceData } from "../systems/static-resources";
-import type { GeometryResourceKey } from "./resource-manager";
+import type { PreparedDynamicDepth } from "./dynamic-depth-preparation";
 import type { RenderWorld } from "./render-world";
 import type { EntityShadowCasterShape } from "./entity-grounding";
 import {
 	isEntityShadowCasterClass,
 	type OutdoorShadowCasterBudget,
 } from "./entity-shadow-policy";
-import { retainsRetailGeometry } from "./retail-geometry-visibility";
 
 const OUTDOOR_SCOPE = [{ kind: "outdoor" }] as const;
 const DYNAMIC_CULLING_GROUP = "dynamic";
-const RELEASED_OBJECT_INSTANCE: ObjectInstanceData = {
-	color: { a: 1, b: 1, g: 1, r: 1 },
-	sourceToLandblock: Mat4.identity(),
-};
-
 /** RenderWorld operations needed by one independent outdoor caster query. */
 export type OutdoorPssmCasterWorld = Pick<
 	RenderWorld,
-	| "expandDynamicContributions"
 	| "getEntityShadowDynamicFacts"
 	| "getRenderContributionDescriptor"
 	| "queryScopesScene"
-	| "resolveGeometry"
->;
+> & {
+	/** Frame-cached material-free geometry; querying does not upload poses or draw. */
+	getDynamicDepth(
+		nodeId: SceneNodeId,
+		showRetailHiddenGeometry: boolean,
+	): PreparedDynamicDepth | null;
+};
 
-/** One visible rigid-part instance admitted to one cascade's material-free depth pass. */
-export interface OutdoorPssmCasterPart {
-	/** Effective authored face rejection; color/material sampling remains absent. */
-	readonly cullFace: "back" | "front";
-	/** Compiled batch partition containing only immutable state consumed by the depth pass. */
-	readonly depthBatchKey: string;
-	readonly geometry: GeometryResourceKey;
-	readonly indexCount: number;
-	readonly indexStart: number;
-	readonly instance: ObjectInstanceData;
-	readonly landblockId: LandblockOwnerId;
-}
-
-/** One compatible instanced depth submission into the current cascade layer. */
-interface OutdoorPssmCasterRun {
-	cullFace: "back" | "front";
-	firstInstance: number;
-	geometry: GeometryResourceKey;
-	indexCount: number;
-	indexStart: number;
-	instanceCount: number;
-	landblockId: LandblockOwnerId;
-}
-
-/** Caller-owned compact storage repopulated for exactly one cascade. */
+/** Whole-root depth geometry shared across the cascades that selected it. */
 export interface OutdoorPssmCasterBatch {
-	readonly instances: ObjectInstanceData[];
-	readonly parts: OutdoorPssmCasterPart[];
-	readonly runs: OutdoorPssmCasterRun[];
+	/** Frame-owned references; emptying the array retires all selected appearance/pose references. */
+	readonly casters: PreparedDynamicDepth[];
 }
 
 /** Geometry-free rigid shape assigned to the outdoor analytic fallback tier. */
@@ -82,39 +53,11 @@ interface OutdoorShadowCasterCandidate extends EntityShadowCasterShape {
 
 /** Reusable frame scratch for consuming reused cascade-query storage into owned membership. */
 interface OutdoorPssmCasterSelectionScratch {
-	/** Active prefix whose instance references must be released if the next frame shrinks. */
-	activeCasterPartCount: number;
 	/** Bit `n` means the root was selected by cascade array index `n`. */
 	readonly rootCascadeMasks: Map<SceneNodeId, number>;
-	/** High-water caster records republished only after the prior frame is fully consumed. */
-	readonly casterParts: MutableOutdoorPssmCasterPart[];
 	/** Reused complete-root facts ranked once before either tier consumes them. */
 	readonly candidates: OutdoorShadowCasterCandidate[];
 }
-
-type MutableOutdoorPssmCasterPart = {
-	-readonly [Key in keyof OutdoorPssmCasterPart]: OutdoorPssmCasterPart[Key];
-};
-
-interface OutdoorPssmCasterRunGroup {
-	first: OutdoorPssmCasterPart | null;
-	readonly instances: ObjectInstanceData[];
-}
-
-interface OutdoorPssmCasterRunScratch {
-	readonly activeGroups: OutdoorPssmCasterRunGroup[];
-	readonly groupsByDepthBatchKey: Map<
-		string,
-		Map<LandblockOwnerId, OutdoorPssmCasterRunGroup>
-	>;
-	readonly groupPool: OutdoorPssmCasterRunGroup[];
-	readonly landblockMapPool: Map<LandblockOwnerId, OutdoorPssmCasterRunGroup>[];
-}
-
-const OUTDOOR_PSSM_RUN_SCRATCH = new WeakMap<
-	OutdoorPssmCasterBatch,
-	OutdoorPssmCasterRunScratch
->();
 
 /** Structural work and retained output produced by one all-cascade selection. */
 interface OutdoorPssmCasterCollectionMetrics {
@@ -124,8 +67,8 @@ interface OutdoorPssmCasterCollectionMetrics {
 	readonly cascadeCandidateMembershipCount: number;
 	/** Unique eligible complete roots before budget selection. */
 	readonly candidateRootCount: number;
-	/** Compatible depth runs formed across every cascade. */
-	readonly compatibleDepthRunCount: number;
+	/** Ordinary merged spans selected across every cascade. */
+	readonly selectedDepthDrawCount: number;
 	/** Selected roots assigned to mapped PSSM work. */
 	readonly mappedRootCount: number;
 	/** Selected roots assigned to analytic fallback. */
@@ -136,8 +79,8 @@ interface OutdoorPssmCasterCollectionMetrics {
 	readonly selectedRootCount: number;
 	/** Views whose mapped tier produced no depth parts. */
 	readonly emptyMappedViewCount: number;
-	/** Caster parts retained across cascades, counting one part per intersected cascade. */
-	readonly selectedCasterPartCount: number;
+	/** Distinct visible parts per root, summed across its intersected cascades. */
+	readonly selectedPartCascadeCount: number;
 }
 
 /** Optional caller-owned profiling sink; absent frames perform no collection accounting. */
@@ -145,59 +88,15 @@ type OutdoorPssmCasterCollectionMetricsSink = {
 	-readonly [Key in keyof OutdoorPssmCasterCollectionMetrics]: number;
 };
 
-interface CompiledOutdoorPssmDepthDraw {
-	readonly batchKey: string;
-	readonly cullFace: OutdoorPssmCasterPart["cullFace"];
-	readonly geometry: GeometryResourceKey;
-	readonly indexCount: number;
-	readonly indexStart: number;
-}
-
-/** Renderer-lifetime owner for material-free depth facts compiled from stable rigid draw units. */
-export class OutdoorPssmDepthDrawCatalog {
-	#draws = new WeakMap<RigidPartDepthDrawUnit, CompiledOutdoorPssmDepthDraw>();
-
-	resolve(
-		world: Pick<OutdoorPssmCasterWorld, "resolveGeometry">,
-		drawUnit: RigidPartDepthDrawUnit,
-	): CompiledOutdoorPssmDepthDraw {
-		const existing = this.#draws.get(drawUnit);
-		if (existing !== undefined) return existing;
-		const geometry = world.resolveGeometry(drawUnit.geometry);
-		const compiled: CompiledOutdoorPssmDepthDraw = {
-			batchKey: `${geometry}\0${drawUnit.indexStart}\0${drawUnit.indexCount}\0${drawUnit.cullFace}`,
-			cullFace: drawUnit.cullFace,
-			geometry,
-			indexCount: drawUnit.indexCount,
-			indexStart: drawUnit.indexStart,
-		};
-		this.#draws.set(drawUnit, compiled);
-		return compiled;
-	}
-
-	clear(): void {
-		this.#draws = new WeakMap();
-	}
-}
-
-/** Allocate reusable CPU storage for sequential cascade selection and submission. */
+/** Allocate one cascade's reusable selected-root list. */
 export function createOutdoorPssmCasterBatch(): OutdoorPssmCasterBatch {
-	const batch = { instances: [], parts: [], runs: [] };
-	OUTDOOR_PSSM_RUN_SCRATCH.set(batch, {
-		activeGroups: [],
-		groupsByDepthBatchKey: new Map(),
-		groupPool: [],
-		landblockMapPool: [],
-	});
-	return batch;
+	return { casters: [] };
 }
 
 /** Allocate reusable membership scratch owned beside the cascade batches that consume it. */
 export function createOutdoorPssmCasterSelectionScratch(): OutdoorPssmCasterSelectionScratch {
 	return {
-		activeCasterPartCount: 0,
 		candidates: [],
-		casterParts: [],
 		rootCascadeMasks: new Map(),
 	};
 }
@@ -205,7 +104,7 @@ export function createOutdoorPssmCasterSelectionScratch(): OutdoorPssmCasterSele
 /**
  * Consume one light-frustum query before SceneGraph reuses its entry storage.
  *
- * Presentation-class and outdoor-domain checks happen before expansion where possible. A root enters the
+ * Presentation-class and outdoor-domain checks happen before depth preparation where possible. A root enters the
  * shared animation-liveness set only after at least one draw-visible outdoor part survives.
  */
 export function planOutdoorShadowCastersForView(
@@ -219,7 +118,6 @@ export function planOutdoorShadowCastersForView(
 	showRetailHiddenGeometry: boolean,
 	batches: readonly OutdoorPssmCasterBatch[],
 	scratch: OutdoorPssmCasterSelectionScratch,
-	depthDraws: OutdoorPssmDepthDrawCatalog,
 	metrics: OutdoorPssmCasterCollectionMetricsSink | null,
 ): void {
 	if (cascadeFrusta.length !== batches.length) {
@@ -233,9 +131,7 @@ export function planOutdoorShadowCastersForView(
 		);
 	}
 	for (const batch of batches) {
-		batch.parts.length = 0;
-		batch.instances.length = 0;
-		batch.runs.length = 0;
+		batch.casters.length = 0;
 	}
 	analyticCasters.length = 0;
 	const rootCascadeMasks = scratch.rootCascadeMasks;
@@ -365,85 +261,30 @@ export function planOutdoorShadowCastersForView(
 		analyticCasters.push(candidate);
 		selectedDynamicNodeIds.add(candidate.nodeId);
 	}
-	let casterPartCount = 0;
-	let mappedIndex = 0;
-	for (const candidate of candidates) {
-		if (mappedIndex >= mappedCount) break;
-		mappedIndex += 1;
+	for (let mappedIndex = 0; mappedIndex < mappedCount; mappedIndex += 1) {
+		const candidate = candidates[mappedIndex];
+		if (candidate === undefined)
+			throw new Error("Mapped shadow candidate is missing.");
 		const { cascadeMask, nodeId } = candidate;
-		let retainedRoot = false;
-		const contributions = world.expandDynamicContributions(nodeId, true);
-		if (
-			contributions.kind === "hidden" ||
-			!contributions.renderScopes.some(isOutdoorScope)
+		const depth = world.getDynamicDepth(nodeId, showRetailHiddenGeometry);
+		if (depth === null || !depth.renderScopes.some(isOutdoorScope)) continue;
+		for (
+			let cascadeIndex = 0;
+			cascadeIndex < batches.length;
+			cascadeIndex += 1
 		) {
-			continue;
-		}
-		for (const contribution of contributions.depth) {
-			if (
-				!retainsRetailGeometry(
-					contribution.drawUnit.retailVisibility,
-					showRetailHiddenGeometry,
-				)
-			)
-				continue;
-			const depthDraw = depthDraws.resolve(world, contribution.drawUnit);
-			let part = scratch.casterParts[casterPartCount];
-			if (part === undefined) {
-				part = {
-					cullFace: depthDraw.cullFace,
-					depthBatchKey: depthDraw.batchKey,
-					geometry: depthDraw.geometry,
-					indexCount: depthDraw.indexCount,
-					indexStart: depthDraw.indexStart,
-					instance: contribution.instance,
-					landblockId: contributions.landblockId,
-				};
-				scratch.casterParts.push(part);
-			} else {
-				part.cullFace = depthDraw.cullFace;
-				part.depthBatchKey = depthDraw.batchKey;
-				part.geometry = depthDraw.geometry;
-				part.indexCount = depthDraw.indexCount;
-				part.indexStart = depthDraw.indexStart;
-				part.instance = contribution.instance;
-				part.landblockId = contributions.landblockId;
+			if ((cascadeMask & (1 << cascadeIndex)) === 0) continue;
+			const batch = batches[cascadeIndex];
+			if (batch === undefined)
+				throw new Error(`Outdoor PSSM cascade ${cascadeIndex} has no batch.`);
+			batch.casters.push(depth);
+			if (metrics !== null) {
+				metrics.selectedPartCascadeCount += depth.selectedPartCount;
+				metrics.selectedDepthDrawCount += depth.ranges.length;
 			}
-			casterPartCount += 1;
-			for (
-				let cascadeIndex = 0;
-				cascadeIndex < batches.length;
-				cascadeIndex += 1
-			) {
-				if ((cascadeMask & (1 << cascadeIndex)) === 0) continue;
-				const batch = batches[cascadeIndex];
-				if (batch === undefined) {
-					throw new Error(`Outdoor PSSM cascade ${cascadeIndex} has no batch.`);
-				}
-				batch.parts.push(part);
-				if (metrics !== null) metrics.selectedCasterPartCount += 1;
-			}
-			retainedRoot = true;
 		}
-		if (retainedRoot) {
-			selectedDynamicNodeIds.add(nodeId);
-		}
+		selectedDynamicNodeIds.add(nodeId);
 	}
-	for (const batch of batches) {
-		formOutdoorPssmCasterRuns(batch);
-		if (metrics !== null) {
-			metrics.compatibleDepthRunCount += batch.runs.length;
-		}
-	}
-	for (
-		let index = casterPartCount;
-		index < scratch.activeCasterPartCount;
-		index += 1
-	) {
-		const retired = scratch.casterParts[index];
-		if (retired !== undefined) retired.instance = RELEASED_OBJECT_INSTANCE;
-	}
-	scratch.activeCasterPartCount = casterPartCount;
 }
 
 function compareOutdoorShadowCandidates(
@@ -463,92 +304,6 @@ function distanceSquaredToBounds(point: Vec3, bounds: AABB3): number {
 	const y = Math.max(bounds.min.y - point.y, 0, point.y - bounds.max.y);
 	const z = Math.max(bounds.min.z - point.z, 0, point.z - bounds.max.z);
 	return x * x + y * y + z * z;
-}
-
-/** Group compatible caster records and flatten their transforms into one contiguous upload. */
-export function formOutdoorPssmCasterRuns(
-	batch: OutdoorPssmCasterBatch,
-): OutdoorPssmCasterBatch {
-	const scratch = OUTDOOR_PSSM_RUN_SCRATCH.get(batch);
-	if (scratch === undefined) {
-		throw new Error(
-			"Outdoor PSSM caster batch was not created by its factory.",
-		);
-	}
-	batch.instances.length = 0;
-	scratch.activeGroups.length = 0;
-	scratch.groupsByDepthBatchKey.clear();
-	let usedLandblockMapCount = 0;
-	for (const part of batch.parts) {
-		let groupsByLandblock = scratch.groupsByDepthBatchKey.get(
-			part.depthBatchKey,
-		);
-		if (groupsByLandblock === undefined) {
-			groupsByLandblock = scratch.landblockMapPool[usedLandblockMapCount];
-			if (groupsByLandblock === undefined) {
-				groupsByLandblock = new Map();
-				scratch.landblockMapPool.push(groupsByLandblock);
-			} else {
-				groupsByLandblock.clear();
-			}
-			usedLandblockMapCount += 1;
-			scratch.groupsByDepthBatchKey.set(part.depthBatchKey, groupsByLandblock);
-		}
-		let group = groupsByLandblock.get(part.landblockId);
-		if (group === undefined) {
-			group = scratch.groupPool[scratch.activeGroups.length];
-			if (group === undefined) {
-				group = { first: part, instances: [] };
-				scratch.groupPool.push(group);
-			} else {
-				group.first = part;
-				group.instances.length = 0;
-			}
-			scratch.activeGroups.push(group);
-			groupsByLandblock.set(part.landblockId, group);
-		}
-		group.instances.push(part.instance);
-	}
-	let runIndex = 0;
-	for (const group of scratch.activeGroups) {
-		const first = group.first;
-		if (first === null) {
-			throw new Error("Outdoor PSSM active run group has no first part.");
-		}
-		const firstInstance = batch.instances.length;
-		for (const instance of group.instances) batch.instances.push(instance);
-		let run = batch.runs[runIndex];
-		if (run === undefined) {
-			run = {
-				cullFace: first.cullFace,
-				firstInstance,
-				geometry: first.geometry,
-				indexCount: first.indexCount,
-				indexStart: first.indexStart,
-				instanceCount: group.instances.length,
-				landblockId: first.landblockId,
-			};
-			batch.runs.push(run);
-		} else {
-			run.cullFace = first.cullFace;
-			run.firstInstance = firstInstance;
-			run.geometry = first.geometry;
-			run.indexCount = first.indexCount;
-			run.indexStart = first.indexStart;
-			run.instanceCount = group.instances.length;
-			run.landblockId = first.landblockId;
-		}
-		runIndex += 1;
-		group.first = null;
-		group.instances.length = 0;
-	}
-	batch.runs.length = runIndex;
-	scratch.activeGroups.length = 0;
-	scratch.groupsByDepthBatchKey.clear();
-	for (let index = 0; index < usedLandblockMapCount; index += 1) {
-		scratch.landblockMapPool[index]?.clear();
-	}
-	return batch;
 }
 
 function isDynamicCullingGroup(cullingGroup: string): boolean {

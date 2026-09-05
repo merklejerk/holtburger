@@ -168,13 +168,8 @@ function animation(
 	};
 }
 
-function template(): ObjectVisualTemplate {
+function template(): Pick<ObjectVisualTemplate, "parts"> {
 	return {
-		appearanceKey: "appearance:test",
-		baseBounds: null,
-		geometry: [],
-		key: "object-visual-template:0x02000001/appearance:test" as never,
-		selectionGeometryMorphology: "volumetric",
 		parts: [
 			{
 				defaultScale: new Vec3(2, 1, 1),
@@ -194,7 +189,6 @@ function template(): ObjectVisualTemplate {
 				partIndex: 0,
 			},
 		],
-		textureRequirements: [],
 	};
 }
 

@@ -395,7 +395,8 @@ interface DynamicEntityPresentationRecord {
 	readonly ownerId: DynamicEntityOwnerId;
 	/** Effective explicit-or-setup PhysicsScriptTable used by live high-level cues. */
 	readonly physicsScriptTableId: DatAssetId | null;
-	readonly visualKey: string;
+	/** Appearance currently committed to the retained root and part targets. */
+	visualKey: string;
 	/** Last world-owned absolute scale applied to the installed visual root. */
 	objectScale: number;
 	/** Exact desired placement already applied to this scene root. */
@@ -405,8 +406,7 @@ interface DynamicEntityPresentationRecord {
 	/**
 	 * Motion level this presentation last accepted, so a restated level is not re-entered.
 	 *
-	 * Mutable because it tracks what this record is doing, not what it is. Every other field
-	 * identifies the record and is fixed for its lifetime.
+	 * Mutable because it tracks playback state independently from appearance replacement.
 	 */
 	/** Accepted host motion level and whether it successfully reached frontend playback. */
 	motionState: DynamicEntityMotionState | null;
@@ -550,6 +550,8 @@ export interface PortalTransitionRuntimeDiagnostics {
 	} | null;
 	/** Shared persistent resource totals; transition resources remain in renderer metrics. */
 	readonly persistent: {
+		/** CPU geometry allocations retained by ready dynamic and transition visual templates. */
+		readonly templateGeometryBufferBytes: number;
 		readonly geometryResourceBytes: number;
 		readonly geometryResourceCount: number;
 		readonly textureAtlasPageBytes: number;
@@ -1339,6 +1341,17 @@ export class GamePresentationRuntime {
 			this.#geometry,
 			this.#residentAtlas,
 			new InlineObjectVisualTemplatePreparer(),
+			(template) => {
+				const renderer = this.#renderer;
+				if (renderer === null)
+					throw new Error(
+						"Cannot prepare a dynamic appearance before renderer initialization.",
+					);
+				return renderer.retainDynamicAppearance(
+					template.layout,
+					template.appearance,
+				);
+			},
 		);
 		this.#dynamics = new DynamicEntitySystem(
 			this.#scene,
@@ -1660,11 +1673,18 @@ export class GamePresentationRuntime {
 			throw new Error("This runtime has no setup visual source capability.");
 		const record = this.#acceptDesiredDynamicEntity(entity);
 		await this.#realizeAcceptedDynamicEntity(record);
-		const guid = entity.identity.guid;
-		return this.#spawnedPresentations.get(guid)?.generation ===
-			entity.generation
-			? "installed"
-			: "deferred";
+		return this.#isDesiredVisualInstalled(record) ? "installed" : "deferred";
+	}
+
+	/** Installation receipts describe the requested appearance, not merely a live incarnation. */
+	#isDesiredVisualInstalled(record: DesiredDynamicEntityRecord): boolean {
+		const guid = record.entity.identity.guid;
+		const installed = this.#spawnedPresentations.get(guid);
+		return (
+			this.#spawnedDesiredEntities.get(guid) === record &&
+			installed?.generation === record.entity.generation &&
+			installed.visualKey === record.visualKey
+		);
 	}
 
 	/** Retire one exact accepted generation while preserving newer desired authority. */
@@ -1829,8 +1849,7 @@ export class GamePresentationRuntime {
 		for (const record of records) {
 			if (
 				record.entity.placement.kind === "attached" &&
-				this.#spawnedPresentations.get(record.entity.identity.guid)
-					?.generation !== record.entity.generation
+				!this.#isDesiredVisualInstalled(record)
 			) {
 				await this.#realizeAcceptedDynamicEntity(record);
 			}
@@ -1848,12 +1867,9 @@ export class GamePresentationRuntime {
 		return new Map(
 			records.map((record) => {
 				const entity = record.entity;
-				const installed = this.#spawnedPresentations.get(entity.identity.guid);
 				return [
 					entity.identity.guid,
-					installed?.generation === entity.generation
-						? "installed"
-						: "deferred",
+					this.#isDesiredVisualInstalled(record) ? "installed" : "deferred",
 				] as const;
 			}),
 		);
@@ -1897,6 +1913,15 @@ export class GamePresentationRuntime {
 			}
 		}
 		this.#clearDynamicEntityDeferral(record);
+		const installed = this.#spawnedPresentations.get(entity.identity.guid);
+		if (
+			installed?.generation === entity.generation &&
+			installed.visualKey === record.visualKey
+		) {
+			this.#applyDynamicEntityState(installed, record);
+			await this.#realizeDesiredDynamicChildren(entity.identity.guid);
+			return;
+		}
 		if (record.realization !== null) {
 			await record.realization;
 			return;
@@ -1909,11 +1934,14 @@ export class GamePresentationRuntime {
 		).catch((cause) => {
 			throw dynamicEntityPresentationFailure(entity, cause);
 		});
-		const continuation = this.#realizeDynamicEntity(record, visual).finally(
-			() => {
+		const continuation = this.#realizeDynamicEntity(record, visual)
+			.catch((cause: unknown) => {
+				if (!this.#isDynamicRealizationEligible(record)) return;
+				throw cause;
+			})
+			.finally(() => {
 				if (record.realization === continuation) record.realization = null;
-			},
-		);
+			});
 		record.realization = continuation;
 		this.#trackRealizationContinuation(continuation);
 		await continuation;
@@ -1946,14 +1974,6 @@ export class GamePresentationRuntime {
 				`Dynamic entity ${formatDynamicGuid(guid)} regressed from generation ${previous.entity.generation} to ${entity.generation}.`,
 			);
 		}
-		if (
-			previous?.entity.generation === entity.generation &&
-			previous.visualKey !== visualKey
-		) {
-			throw new Error(
-				`Dynamic entity ${formatDynamicGuid(guid)} changed immutable visual facts without changing generation.`,
-			);
-		}
 		const sameGeneration = previous?.entity.generation === entity.generation;
 		this.#retainPendingDynamicScriptCues(guid, entity.generation);
 		const attachmentTopologyChanged =
@@ -1964,15 +1984,16 @@ export class GamePresentationRuntime {
 		if (
 			previous !== undefined &&
 			sameGeneration &&
+			previous.visualKey === visualKey &&
 			!attachmentTopologyChanged
 		) {
-			this.#clearDynamicEntityDeferral(previous);
 			previous.entity = entity;
 			previous.placementIdentity = placementIdentity;
 			return previous;
 		}
 		if (previous !== undefined) {
-			this.#retireDynamicPresentationTree(guid);
+			if (!sameGeneration || attachmentTopologyChanged)
+				this.#retireDynamicPresentationTree(guid);
 			this.#forgetDesiredDynamicEntity(
 				guid,
 				previous.visualKey === visualKey ? "retain-visual" : "release-visual",
@@ -2164,7 +2185,7 @@ export class GamePresentationRuntime {
 		);
 	}
 
-	/** Apply one accepted host tick without re-running asynchronous visual realization. */
+	/** Accept tick state immediately; only changed visual requests start asynchronous realization. */
 	applyDynamicEntityTick(
 		batch: DynamicEntityTickBatch,
 		receivedAtMs: number,
@@ -2176,15 +2197,9 @@ export class GamePresentationRuntime {
 		for (const advance of batch.advances) {
 			const entity = advance.entity;
 			const guid = entity.identity.guid;
-			const desired = this.#spawnedDesiredEntities.get(guid);
-			if (desired?.entity.generation !== entity.generation) continue;
-			if (desired.visualKey !== dynamicVisualKey(entity)) {
-				throw new Error(
-					`Dynamic entity ${formatDynamicGuid(guid)} changed immutable visual facts within generation ${entity.generation}.`,
-				);
-			}
-			desired.entity = entity;
-			desired.placementIdentity = dynamicPlacementIdentity(entity);
+			const previous = this.#spawnedDesiredEntities.get(guid);
+			if (previous?.entity.generation !== entity.generation) continue;
+			const desired = this.#acceptDynamicTickEntity(entity, previous);
 			const installed = this.#spawnedPresentations.get(guid);
 			if (installed?.generation !== entity.generation) continue;
 			this.#applySpawnedPresentationState(installed, entity);
@@ -2198,25 +2213,39 @@ export class GamePresentationRuntime {
 		}
 		for (const entity of batch.updates) {
 			const guid = entity.identity.guid;
-			const desired = this.#spawnedDesiredEntities.get(guid);
-			if (desired?.entity.generation !== entity.generation) continue;
-			if (desired.visualKey !== dynamicVisualKey(entity)) {
-				throw new Error(
-					`Dynamic entity ${formatDynamicGuid(guid)} changed immutable visual facts within generation ${entity.generation}.`,
-				);
-			}
-			if (dynamicPathIdentity(desired.entity) !== dynamicPathIdentity(entity)) {
+			const previous = this.#spawnedDesiredEntities.get(guid);
+			if (previous?.entity.generation !== entity.generation) continue;
+			if (
+				dynamicPathIdentity(previous.entity) !== dynamicPathIdentity(entity)
+			) {
 				throw new Error(
 					`Dynamic entity ${formatDynamicGuid(guid)} received a path-changing tick update without an advance.`,
 				);
 			}
-			desired.entity = entity;
-			desired.placementIdentity = dynamicPlacementIdentity(entity);
+			const desired = this.#acceptDynamicTickEntity(entity, previous);
 			const installed = this.#spawnedPresentations.get(guid);
 			if (installed?.generation !== entity.generation) continue;
 			this.#applySpawnedPresentationState(installed, entity);
 			installed.placementIdentity = desired.placementIdentity;
 		}
+	}
+
+	/** Share desired-level reconciliation with upserts without making ordinary pose ticks async. */
+	#acceptDynamicTickEntity(
+		entity: DynamicEntityView,
+		previous: DesiredDynamicEntityRecord,
+	): DesiredDynamicEntityRecord {
+		const record = this.#acceptDesiredDynamicEntity(entity);
+		if (record !== previous) {
+			const continuation = this.#realizeAcceptedDynamicEntity(record).catch(
+				(cause: unknown) => {
+					if (this.#spawnedDesiredEntities.get(entity.identity.guid) === record)
+						this.#dynamicRealizationFailures.push(cause);
+				},
+			);
+			this.#trackRealizationContinuation(continuation);
+		}
+		return record;
 	}
 
 	/**
@@ -2268,34 +2297,70 @@ export class GamePresentationRuntime {
 		installed.motionState = { level: motion, playback: "installed" };
 	}
 
+	/** Revalidate asynchronous publication against current authority and residency/parent lifetime. */
+	#isDynamicRealizationEligible(record: DesiredDynamicEntityRecord): boolean {
+		const entity = record.entity;
+		if (
+			this.#spawnedDesiredEntities.get(entity.identity.guid) !== record ||
+			this.#isDynamicEntityFrontendEvicted(entity.identity.guid)
+		)
+			return false;
+		if (entity.placement.kind === "world") return true;
+		const parent = this.#spawnedPresentations.get(entity.placement.parent);
+		return (
+			parent !== undefined &&
+			parent.generation ===
+				this.#spawnedDesiredEntities.get(entity.placement.parent)?.entity
+					.generation
+		);
+	}
+
 	async #realizeDynamicEntity(
 		record: DesiredDynamicEntityRecord,
 		visual: Promise<DecodedStaticPresentation>,
 	): Promise<void> {
 		let entity = record.entity;
 		const guid = entity.identity.guid;
-		const installedCurrent = this.#spawnedPresentations.get(guid);
-		if (installedCurrent?.generation === entity.generation) {
-			if (installedCurrent.visualKey !== record.visualKey) {
-				throw new Error(
-					`Dynamic entity ${formatDynamicGuid(guid)} changed immutable visual facts without changing generation.`,
-				);
-			}
-			this.#applyDynamicEntityState(installedCurrent, record);
-			return;
-		}
 		const resolved = await visual;
-		if (this.#spawnedDesiredEntities.get(guid) !== record) return;
+		if (!this.#isDynamicRealizationEligible(record)) return;
 		entity = record.entity;
 		const stagingPlacement = this.#spawnedStagingPlacement(entity);
 		if (stagingPlacement === null) return;
 		const ownerId = dynamicEntityOwnerId(guid);
+		const source = adaptDynamicEntityPresentation(
+			entity,
+			resolved,
+			stagingPlacement,
+		);
+		const live = this.#spawnedPresentations.get(guid);
+		if (live?.generation === entity.generation) {
+			const replacement = await this.#dynamics.stageVisualReplacement(
+				ownerId,
+				live.nodeId,
+				source.source,
+			);
+			if (replacement.kind === "staged") {
+				try {
+					if (
+						!this.#isDynamicRealizationEligible(record) ||
+						this.#spawnedPresentations.get(guid) !== live
+					)
+						return;
+					replacement.commit();
+					live.visualKey = record.visualKey;
+					this.#applyDynamicEntityState(live, record);
+				} finally {
+					replacement.release();
+				}
+				return;
+			}
+		}
 		const activation = await this.#prepareDynamicOwner(
 			ownerId,
-			[adaptDynamicEntityPresentation(entity, resolved, stagingPlacement)],
+			[source],
 			"world",
 		);
-		if (this.#spawnedDesiredEntities.get(guid) !== record) {
+		if (!this.#isDynamicRealizationEligible(record)) {
 			activation.release();
 			return;
 		}
@@ -2306,6 +2371,10 @@ export class GamePresentationRuntime {
 				`Dynamic entity ${formatDynamicGuid(guid)} prepared ${activation.nodeIds.length} scene roots.`,
 			);
 		}
+		// An incompatible skeleton replaces its owner atomically; retire only its attached
+		// descendants here, since retiring the parent would invalidate the prepared activation.
+		for (const childGuid of this.#spawnedDesiredChildren.get(guid) ?? [])
+			this.#retireDynamicPresentationTree(childGuid);
 		activation.commit();
 		const [preparedEntity] = activation.prepared;
 		if (preparedEntity === undefined)
@@ -2934,12 +3003,23 @@ export class GamePresentationRuntime {
 			throw cause;
 		}
 		try {
+			// Portal space remains an ordinary per-part consumer, outside dynamic entity submission.
+			// Its owner must retain those buffers explicitly; shared dynamic templates lease only
+			// merged vertices and do not implicitly keep the original part GPU resources alive.
+			this.#geometry.replaceOwner(
+				PORTAL_TRANSITION_RESOURCE_OWNER_ID,
+				template.parts.map((part) => ({
+					key: part.geometry,
+					geometry: part.geometryData,
+				})),
+			);
 			this.#renderer?.installPortalTransitionVisual?.({
 				animation,
 				lowFrame: assets.catalog.animationLowFrame,
 				template,
 			});
 		} catch (cause) {
+			this.#geometry.dropOwner(PORTAL_TRANSITION_RESOURCE_OWNER_ID);
 			this.#objectVisualTemplates.dropOwner(
 				PORTAL_TRANSITION_RESOURCE_OWNER_ID,
 			);
@@ -3135,6 +3215,7 @@ export class GamePresentationRuntime {
 		const clip = this.#portalTransitionClip;
 		const transition = this.#portalTransition;
 		const texture = this.#textures.getDiagnostics();
+		const templates = this.#objectVisualTemplates.getDiagnostics();
 		return {
 			animation:
 				assets === null || clip === null
@@ -3156,6 +3237,7 @@ export class GamePresentationRuntime {
 				portalWaveBuffers: assets?.waveIds.length ?? 0,
 			},
 			persistent: {
+				templateGeometryBufferBytes: templates.retainedGeometryBufferBytes,
 				geometryResourceBytes: this.#geometry.getResourceBytes(),
 				geometryResourceCount: this.#geometry.getResourceCount(),
 				textureAtlasPageBytes: texture.activeAtlasPageBytes,
@@ -3163,7 +3245,7 @@ export class GamePresentationRuntime {
 				textureSourceBytes: texture.residentSourceBytes,
 			},
 			sourceBytes: assets?.sourceBytes ?? null,
-			templates: this.#objectVisualTemplates.getDiagnostics(),
+			templates,
 			transition:
 				transition === undefined
 					? null
@@ -3993,6 +4075,7 @@ export class GamePresentationRuntime {
 				animationStage.commit();
 				committedScriptStage.commit();
 				installation.commit();
+				this.#releaseDynamicCueAssets(ownerId);
 				for (const targetId of previousTargets ?? []) {
 					this.#particles.destroy({ generation: 0, targetId }, 0);
 					this.#targetSoundTables.delete(targetId);
@@ -4110,15 +4193,20 @@ export class GamePresentationRuntime {
 			this.#targetSoundTables.delete(targetId);
 		}
 		this.#dynamicPresentationTargets.delete(ownerId);
+		this.#releaseDynamicCueAssets(ownerId);
+		this.#animation.removeOwner(ownerId);
+		this.#physicsScriptSystem.removeOwner(ownerId);
+		this.#worldScalePhysicsScriptSystem.removeOwner(ownerId);
+		this.#dynamics.removeOwner(ownerId);
+	}
+
+	/** Cue asset leases belong to the retired behavior owner, not its successor's incarnation ID. */
+	#releaseDynamicCueAssets(ownerId: DynamicOwnerId): void {
 		for (const assets of this.#dynamicCueAssets.get(ownerId) ?? []) {
 			for (const handle of assets.emitterHandles) handle.release();
 			assets.closure.release();
 		}
 		this.#dynamicCueAssets.delete(ownerId);
-		this.#animation.removeOwner(ownerId);
-		this.#physicsScriptSystem.removeOwner(ownerId);
-		this.#worldScalePhysicsScriptSystem.removeOwner(ownerId);
-		this.#dynamics.removeOwner(ownerId);
 	}
 
 	#publishSceneAvailability(event: SceneAvailabilityEvent): void {

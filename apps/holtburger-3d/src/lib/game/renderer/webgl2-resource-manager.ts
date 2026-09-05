@@ -12,15 +12,19 @@ import {
 	type Texture2DUpload,
 } from "./resource-manager";
 import { TexturePixelFormat } from "../textures/types";
-import type { RenderGeometryData } from "./geometry";
+import {
+	DYNAMIC_PART_SELECTOR_ATTRIBUTE,
+	DYNAMIC_MATERIAL_SELECTOR_ATTRIBUTE,
+	type RenderGeometryData,
+} from "./geometry";
 import { OBJECT_BAKED_LIGHT_ATTRIBUTE } from "./webgl2-object-program";
 import { TERRAIN_COLOR_CODE_ATTRIBUTE } from "./webgl2-terrain-program";
 
 /** WebGL draw binding retained for one semantic geometry resource. */
 export interface WebGL2GeometryBinding {
-	/** Vertex array containing the geometry attribute and index bindings. */
+	/** Geometry attributes; dynamic draws additionally bind their appearance-owned indices. */
 	readonly vertexArray: WebGLVertexArrayObject;
-	/** Number of indices available to draw units. */
+	/** Source index count; dynamic appearance ranges address their separately organized buffer. */
 	readonly indexCount: number;
 	/** WebGL scalar type used by the element buffer. */
 	readonly indexType: GLenum;
@@ -258,19 +262,28 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 	#uploadGeometry(geometry: RenderGeometryData): WebGL2GeometryResource {
 		validateGeometry(geometry);
 		const gl = this.#gl;
-		const vertexArray = gl.createVertexArray();
-		const indexBuffer = gl.createBuffer();
-		if (!vertexArray || !indexBuffer) {
-			if (vertexArray) gl.deleteVertexArray(vertexArray);
-			if (indexBuffer) gl.deleteBuffer(indexBuffer);
-			throw new Error(`Failed to allocate ${geometry.kind} geometry.`);
+		if (geometry.kind === "dynamic-parts") {
+			// Each entity occupies whole rows in one pose page and one appearance table.
+			// Reject during staging, before any allocation can replace its installed visual.
+			const maximumRows: number = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+			if (geometry.partCount > maximumRows)
+				throw new Error(
+					`Dynamic pose table requires ${geometry.partCount} rows; device limit is ${maximumRows}.`,
+				);
+			if (geometry.materialCount > maximumRows)
+				throw new Error(
+					`Dynamic material table requires ${geometry.materialCount} rows; device limit is ${maximumRows}.`,
+				);
 		}
+		const vertexArray = gl.createVertexArray();
+		if (!vertexArray)
+			throw new Error(`Failed to allocate ${geometry.kind} geometry.`);
 
-		const buffers: WebGLBuffer[] = [indexBuffer];
+		const buffers: WebGLBuffer[] = [];
 		try {
 			gl.bindVertexArray(vertexArray);
 			buffers.push(uploadFloatAttribute(gl, 0, 3, geometry.positions));
-			if (geometry.kind === "terrain" || geometry.kind === "object") {
+			if (geometry.kind !== "portal-aperture") {
 				buffers.push(uploadFloatAttribute(gl, 1, 3, geometry.normals));
 				buffers.push(
 					uploadFloatAttribute(gl, 2, 2, geometry.textureCoordinates),
@@ -286,6 +299,24 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 					),
 				);
 			}
+			if (geometry.kind === "dynamic-parts") {
+				buffers.push(
+					uploadIntegerAttribute(
+						gl,
+						DYNAMIC_PART_SELECTOR_ATTRIBUTE,
+						1,
+						geometry.partSelectors,
+					),
+				);
+				buffers.push(
+					uploadIntegerAttribute(
+						gl,
+						DYNAMIC_MATERIAL_SELECTOR_ATTRIBUTE,
+						1,
+						geometry.materialSelectors,
+					),
+				);
+			}
 			if (geometry.kind === "object" && geometry.bakedLight) {
 				buffers.push(
 					uploadFloatAttribute(
@@ -296,8 +327,18 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 					),
 				);
 			}
-			gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
-			gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, geometry.indices, gl.STATIC_DRAW);
+			// Dynamic appearances own the sole uploaded index organization for every mesh pass.
+			// The layout retains source indices on the CPU for cold appearance compilation only.
+			if (geometry.kind !== "dynamic-parts") {
+				const indexBuffer = requireBuffer(gl);
+				buffers.push(indexBuffer);
+				gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+				gl.bufferData(
+					gl.ELEMENT_ARRAY_BUFFER,
+					geometry.indices,
+					gl.STATIC_DRAW,
+				);
+			}
 			const usesShortIndices = geometry.indices instanceof Uint16Array;
 			return {
 				buffers,
@@ -518,13 +559,19 @@ function uploadIntegerAttribute(
 	gl: WebGL2RenderingContext,
 	location: number,
 	components: number,
-	data: Uint8Array,
+	data: Uint8Array | Uint32Array,
 ): WebGLBuffer {
 	const buffer = requireBuffer(gl);
 	gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
 	gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
 	gl.enableVertexAttribArray(location);
-	gl.vertexAttribIPointer(location, components, gl.UNSIGNED_BYTE, 0, 0);
+	gl.vertexAttribIPointer(
+		location,
+		components,
+		data instanceof Uint32Array ? gl.UNSIGNED_INT : gl.UNSIGNED_BYTE,
+		0,
+		0,
+	);
 	return buffer;
 }
 
@@ -541,6 +588,14 @@ function validateGeometry(geometry: RenderGeometryData): void {
 		);
 	}
 	const vertexCount = geometry.positions.length / 3;
+	if (geometry.kind === "dynamic-parts") {
+		if (geometry.partSelectors.length !== vertexCount)
+			throw new Error("Dynamic part-selector count does not match positions.");
+		if (geometry.materialSelectors.length !== vertexCount)
+			throw new Error(
+				"Dynamic material-selector count does not match positions.",
+			);
+	}
 	if (geometry.kind !== "portal-aperture") {
 		if (geometry.normals.length !== vertexCount * 3) {
 			throw new Error(

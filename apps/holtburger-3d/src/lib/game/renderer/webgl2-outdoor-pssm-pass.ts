@@ -1,7 +1,8 @@
 import { createLandblockOffset, getLandblockCoordinates } from "../landblocks";
 import { mat4ToFloat32Array } from "../math/matrices";
 import type { Quat, Vec3 } from "../math/types";
-import type { FrameInstanceStreamArena } from "./frame-instance-stream-arena";
+import type { ObjectGeometryKey } from "../geometry/types";
+import type { WebGL2DynamicPosePages } from "./webgl2-dynamic-pose-pages";
 import type { LandblockOwnerId } from "../game-types";
 import type {
 	OutdoorPssmSettings,
@@ -18,15 +19,12 @@ import {
 	planOutdoorShadowCastersForView,
 	createOutdoorPssmCasterBatch,
 	createOutdoorPssmCasterSelectionScratch,
-	OutdoorPssmDepthDrawCatalog,
 	type OutdoorPssmCasterBatch,
 	type OutdoorPssmCasterWorld,
 } from "./outdoor-pssm-casters";
 import type { EntityShadowCasterShape } from "./entity-grounding";
 import type { Frustum } from "../math/frustum";
 import type { SceneNodeId } from "../scene";
-import { OBJECT_INSTANCE_RECORD_BYTES } from "../systems/static-resources";
-import { bindWebGL2ObjectInstanceRange } from "./webgl2-instance-buffer";
 import {
 	createWebGL2PssmCasterProgram,
 	type WebGL2PssmCasterProgram,
@@ -37,10 +35,7 @@ import {
 	type WebGL2PssmShadowTargetSet,
 } from "./webgl2-pssm-shadow-targets";
 import type { RendererOutdoorShadowMapFrameMetrics } from "./renderer";
-import type {
-	WebGL2GeometryBinding,
-	WebGL2ResourceManager,
-} from "./webgl2-resource-manager";
+import type { WebGL2GeometryBinding } from "./webgl2-resource-manager";
 
 /** Caller-owned profiling sink; omitted entirely when renderer profiling is disabled. */
 export type WebGL2OutdoorPssmPassProfileMetrics = {
@@ -50,11 +45,6 @@ export type WebGL2OutdoorPssmPassProfileMetrics = {
 /** Per-view outdoor map state consumed immediately by eligible receiver programs. */
 export interface ActiveOutdoorPssmFrame {
 	readonly cascades: readonly OutdoorPssmCascade[];
-	/** Shared instance-arena uploads performed while building this view's cascades. */
-	readonly instanceUploads: {
-		readonly bytes: number;
-		readonly count: number;
-	};
 	readonly settings: OutdoorPssmSettings;
 	readonly targets: WebGL2PssmShadowTargetSet;
 }
@@ -83,11 +73,13 @@ export interface WebGL2OutdoorPssmPassInput {
 	readonly sunVector: Vec3;
 }
 
-type OutdoorPssmGeometryResources = Pick<WebGL2ResourceManager, "getGeometry">;
-type OutdoorPssmInstanceArena = Pick<
-	FrameInstanceStreamArena,
-	"getRange" | "prepareView"
->;
+/** Lookup-only access to staged geometry and the renderer's completed pose upload. */
+interface OutdoorPssmGeometryResources {
+	/** Resolve the shared merged vertex allocation. */
+	getGeometry(key: ObjectGeometryKey): WebGL2GeometryBinding;
+	/** Every draw must have been admitted to the frame's pose upload population. */
+	getPose: WebGL2DynamicPosePages<SceneNodeId>["get"];
+}
 type OutdoorPssmTargetOwner = Pick<
 	WebGL2PssmShadowTargets,
 	"attachLayer" | "destroy" | "disable" | "getDiagnostics" | "resize"
@@ -101,6 +93,45 @@ export interface WebGL2OutdoorPssmPassDependencies {
 	readonly targets?: OutdoorPssmTargetOwner;
 }
 
+/** Independent retained selection storage for one view; subsequent views cannot overwrite it. */
+interface PssmViewStorage {
+	/** Analytic tier from the same whole-root selection as the mapped batches. */
+	readonly analyticCasters: EntityShadowCasterShape[];
+	/** Active batch prefix paired with this view's cascades. */
+	readonly batches: OutdoorPssmCasterBatch[];
+	/** High-water reusable cascade batch storage. */
+	readonly batchPool: OutdoorPssmCasterBatch[];
+	/** Cascade frusta passed together to the complete-root selection. */
+	readonly cascadeFrusta: Frustum[];
+	/** View-owned mutable caster records; sharing these would overwrite earlier plans. */
+	readonly casterSelectionScratch: ReturnType<
+		typeof createOutdoorPssmCasterSelectionScratch
+	>;
+	/** Current light matrices and split intervals, retained for receiver execution. */
+	readonly cascades: OutdoorPssmCascade[];
+}
+
+function createViewStorage(): PssmViewStorage {
+	return {
+		analyticCasters: [],
+		batches: [],
+		batchPool: [],
+		cascadeFrusta: [],
+		casterSelectionScratch: createOutdoorPssmCasterSelectionScratch(),
+		cascades: [],
+	};
+}
+
+/** CPU-only selection for a view, valid until the next explicit frame reset. */
+interface PreparedOutdoorPssmView {
+	/** Original camera, anchor, target settings, and destination size used during execution. */
+	readonly input: WebGL2OutdoorPssmPassInput;
+	/** Per-view matrices, selected ranges, and analytic fallback tier. */
+	readonly storage: PssmViewStorage;
+	/** Shared mapped/analytic projection decision computed once during preparation. */
+	readonly projection: ReturnType<typeof resolveOutdoorShadowProjection>;
+}
+
 /**
  * Owns the material-free outdoor actor depth schedule and all of its renderer-lifetime resources.
  *
@@ -108,17 +139,10 @@ export interface WebGL2OutdoorPssmPassDependencies {
  * therefore preserve the pre-shadow GPU path exactly.
  */
 export class WebGL2OutdoorPssmPass {
-	readonly #analyticCasters: EntityShadowCasterShape[] = [];
-	#resolvedProjection: ReturnType<
-		typeof resolveOutdoorShadowProjection
-	> | null = null;
-	readonly #batches: OutdoorPssmCasterBatch[] = [];
-	readonly #batchPool: OutdoorPssmCasterBatch[] = [];
-	readonly #cascadeFrusta: Frustum[] = [];
-	readonly #casterSelectionScratch = createOutdoorPssmCasterSelectionScratch();
-	readonly #cascades: OutdoorPssmCascade[] = [];
-	readonly #depthDraws = new OutdoorPssmDepthDrawCatalog();
-	readonly #frameInstances: OutdoorPssmInstanceArena;
+	/** Storage is reused by view ordinal each frame, independently from sequential target reuse. */
+	readonly #viewPool: PssmViewStorage[] = [];
+	/** Next unused view slot in the current frame. */
+	#nextView = 0;
 	readonly #gl: WebGL2RenderingContext;
 	readonly #matrixScratch = new Float32Array(16);
 	readonly #createProgram: (
@@ -134,34 +158,40 @@ export class WebGL2OutdoorPssmPass {
 		gl: WebGL2RenderingContext,
 		resources: OutdoorPssmGeometryResources,
 		world: OutdoorPssmCasterWorld,
-		frameInstances: OutdoorPssmInstanceArena,
 		dependencies: WebGL2OutdoorPssmPassDependencies = {},
 	) {
 		this.#gl = gl;
 		this.#resources = resources;
 		this.#world = world;
-		this.#frameInstances = frameInstances;
 		this.#createProgram =
 			dependencies.createProgram ?? createWebGL2PssmCasterProgram;
 		this.#targets = dependencies.targets ?? new WebGL2PssmShadowTargets(gl);
 	}
 
-	/** Build and submit every cascade, returning the state receivers may sample for this view. */
-	render(
+	/** Release prior frame's scene references before preparing any of the next frame's views. */
+	beginFrame(): void {
+		this.#nextView = 0;
+		this.#releaseCasterStorage();
+	}
+
+	/** Select casters and build cascades without issuing GPU commands or instance uploads. */
+	prepare(
 		input: WebGL2OutdoorPssmPassInput,
 		profileMetrics: WebGL2OutdoorPssmPassProfileMetrics | null,
-	): ActiveOutdoorPssmFrame | null {
+	): PreparedOutdoorPssmView | null {
 		if (!hasOutdoorPssmLightAndInterval(input)) {
-			this.#analyticCasters.length = 0;
-			this.#resolvedProjection = null;
-			this.#releaseCasterStorage();
 			return null;
 		}
+		let storage = this.#viewPool[this.#nextView];
+		if (storage === undefined) {
+			storage = createViewStorage();
+			this.#viewPool.push(storage);
+		}
+		this.#nextView += 1;
 		const projection = resolveOutdoorShadowProjection(
 			input.sunVector,
 			input.projectionSettings,
 		);
-		this.#resolvedProjection = projection;
 		buildOutdoorPssmCascades(
 			{
 				camera: {
@@ -175,26 +205,33 @@ export class WebGL2OutdoorPssmPass {
 				projection,
 				settings: input.settings,
 			},
-			this.#cascades,
+			storage.cascades,
 		);
-		let instanceUploadCount = 0;
-		let instanceUploadBytes = 0;
-		this.#prepareCascadeStorage();
+		this.#prepareCascadeStorage(storage);
 		planOutdoorShadowCastersForView(
 			this.#world,
-			this.#cascadeFrusta,
+			storage.cascadeFrusta,
 			input.cameraFrustum,
 			input.anchorLandblockId,
 			input.casterBudget,
 			input.selectedDynamicNodeIds,
-			this.#analyticCasters,
+			storage.analyticCasters,
 			input.showRetailHiddenGeometry,
-			this.#batches,
-			this.#casterSelectionScratch,
-			this.#depthDraws,
+			storage.batches,
+			storage.casterSelectionScratch,
 			profileMetrics,
 		);
-		if (this.#batches.every((batch) => batch.parts.length === 0)) {
+		return { input, storage, projection };
+	}
+
+	/** Execute an already-selected view; this method performs no scene selection. */
+	render(
+		prepared: PreparedOutdoorPssmView | null,
+		profileMetrics: WebGL2OutdoorPssmPassProfileMetrics | null,
+	): ActiveOutdoorPssmFrame | null {
+		if (prepared === null) return null;
+		const { input, storage } = prepared;
+		if (storage.batches.every((batch) => batch.casters.length === 0)) {
 			if (profileMetrics) profileMetrics.emptyMappedViewCount += 1;
 			return null;
 		}
@@ -205,58 +242,31 @@ export class WebGL2OutdoorPssmPass {
 		try {
 			for (
 				let cascadeIndex = 0;
-				cascadeIndex < this.#cascades.length;
+				cascadeIndex < storage.cascades.length;
 				cascadeIndex += 1
 			) {
-				const cascade = this.#cascades[cascadeIndex];
-				const batch = this.#batches[cascadeIndex];
+				const cascade = storage.cascades[cascadeIndex];
+				const batch = storage.batches[cascadeIndex];
 				if (cascade === undefined || batch === undefined) {
 					throw new Error(
 						`Outdoor PSSM cascade ${cascadeIndex} is incomplete.`,
 					);
 				}
 				this.#beginCascade(cascade.index, targets.resolution, input.settings);
-				if (this.#drawCascade(cascade, batch, input.anchorCoordinates)) {
-					const uploadBytes =
-						batch.instances.length * OBJECT_INSTANCE_RECORD_BYTES;
-					instanceUploadCount += 1;
-					instanceUploadBytes += uploadBytes;
-					if (profileMetrics) {
-						profileMetrics.instanceUploadCount += 1;
-						profileMetrics.instanceUploadBytes += uploadBytes;
-					}
-				}
+				this.#drawCascade(cascade, batch, input.anchorCoordinates);
 			}
 		} finally {
 			this.#restoreFrameState(input.frameWidth, input.frameHeight);
 		}
 		return {
-			cascades: this.#cascades,
-			instanceUploads: {
-				bytes: instanceUploadBytes,
-				count: instanceUploadCount,
-			},
+			cascades: storage.cascades,
 			settings: input.settings,
 			targets,
 		};
 	}
 
-	/** Frame-owned analytic tier populated by the same complete-root decision as mapped batches. */
-	getAnalyticCasters(): readonly EntityShadowCasterShape[] {
-		return this.#analyticCasters;
-	}
-
-	/** Projection resolved once for the current view's mapped and analytic tiers. */
-	getResolvedProjection(): ReturnType<
-		typeof resolveOutdoorShadowProjection
-	> | null {
-		return this.#resolvedProjection;
-	}
-
 	/** Release active target storage when the composite master setting turns off. */
 	disable(): void {
-		this.#analyticCasters.length = 0;
-		this.#resolvedProjection = null;
 		this.#targets.disable();
 		this.#releaseCasterStorage();
 	}
@@ -272,36 +282,34 @@ export class WebGL2OutdoorPssmPass {
 		if (this.#program) this.#gl.deleteProgram(this.#program.program);
 		this.#program = null;
 		this.#releaseCasterStorage();
-		this.#depthDraws.clear();
 	}
 
 	/** Drop scene-owned payload references while retaining only cheap reusable container capacity. */
 	#releaseCasterStorage(): void {
-		for (const batch of this.#batchPool) {
-			batch.instances.length = 0;
-			batch.parts.length = 0;
-			batch.runs.length = 0;
+		for (const storage of this.#viewPool) {
+			storage.analyticCasters.length = 0;
+			for (const batch of storage.batchPool) {
+				batch.casters.length = 0;
+			}
+			storage.casterSelectionScratch.rootCascadeMasks.clear();
 		}
-		this.#casterSelectionScratch.casterParts.length = 0;
-		this.#casterSelectionScratch.activeCasterPartCount = 0;
-		this.#casterSelectionScratch.rootCascadeMasks.clear();
 	}
 
 	/** Retain one reusable batch per high-water cascade and publish current frusta by reference. */
-	#prepareCascadeStorage(): void {
-		while (this.#batchPool.length < this.#cascades.length) {
-			this.#batchPool.push(createOutdoorPssmCasterBatch());
+	#prepareCascadeStorage(storage: PssmViewStorage): void {
+		while (storage.batchPool.length < storage.cascades.length) {
+			storage.batchPool.push(createOutdoorPssmCasterBatch());
 		}
-		this.#batches.length = this.#cascades.length;
-		this.#cascadeFrusta.length = this.#cascades.length;
-		for (let index = 0; index < this.#cascades.length; index += 1) {
-			const cascade = this.#cascades[index];
-			const batch = this.#batchPool[index];
+		storage.batches.length = storage.cascades.length;
+		storage.cascadeFrusta.length = storage.cascades.length;
+		for (let index = 0; index < storage.cascades.length; index += 1) {
+			const cascade = storage.cascades[index];
+			const batch = storage.batchPool[index];
 			if (cascade === undefined || batch === undefined) {
 				throw new Error(`Outdoor PSSM cascade ${index} is missing.`);
 			}
-			this.#batches[index] = batch;
-			this.#cascadeFrusta[index] = cascade.lightFrustum;
+			storage.batches[index] = batch;
+			storage.cascadeFrusta[index] = cascade.lightFrustum;
 		}
 	}
 
@@ -333,8 +341,8 @@ export class WebGL2OutdoorPssmPass {
 		cascade: OutdoorPssmCascade,
 		batch: OutdoorPssmCasterBatch,
 		anchorCoordinates: WebGL2OutdoorPssmPassInput["anchorCoordinates"],
-	): boolean {
-		if (batch.instances.length === 0) return false;
+	): void {
+		if (batch.casters.length === 0) return;
 		const gl = this.#gl;
 		const program = (this.#program ??= this.#createProgram(gl));
 		gl.useProgram(program.program);
@@ -343,42 +351,37 @@ export class WebGL2OutdoorPssmPass {
 			false,
 			mat4ToFloat32Array(cascade.lightClip, this.#matrixScratch),
 		);
-		this.#frameInstances.prepareView(batch.instances);
-		for (const run of batch.runs) {
-			const geometry = this.#resources.getGeometry(run.geometry);
-			validateCasterDrawRange(geometry, run.indexStart, run.indexCount);
-			const landblockOffset = createLandblockOffset(
-				getLandblockCoordinates(run.landblockId),
+		gl.activeTexture(gl.TEXTURE0);
+		gl.bindSampler(0, null);
+		gl.uniform1i(program.uniforms.poses, 0);
+		for (const caster of batch.casters) {
+			const geometry = this.#resources.getGeometry(caster.geometry);
+			const pose = this.#resources.getPose(caster.nodeId);
+			gl.bindTexture(gl.TEXTURE_2D, pose.texture);
+			gl.uniform1i(program.uniforms.firstPoseRow, pose.firstRow);
+			const offset = createLandblockOffset(
+				getLandblockCoordinates(caster.landblockId),
 				anchorCoordinates,
 			);
 			gl.uniform3f(
 				program.uniforms.landblockOffset,
-				landblockOffset.x,
-				landblockOffset.y,
-				landblockOffset.z,
+				offset.x,
+				offset.y,
+				offset.z,
 			);
-			gl.enable(gl.CULL_FACE);
-			gl.cullFace(run.cullFace === "front" ? gl.FRONT : gl.BACK);
 			gl.bindVertexArray(geometry.vertexArray);
-			const range = this.#frameInstances.getRange(
-				run.firstInstance,
-				run.instanceCount,
-			);
-			bindWebGL2ObjectInstanceRange(
-				gl,
-				range.binding,
-				range.firstInstance,
-				range.instanceCount,
-			);
-			gl.drawElementsInstanced(
-				gl.TRIANGLES,
-				run.indexCount,
-				geometry.indexType,
-				run.indexStart * geometry.indexElementBytes,
-				run.instanceCount,
-			);
+			gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, caster.appearance.indexBuffer);
+			gl.enable(gl.CULL_FACE);
+			for (const range of caster.ranges) {
+				gl.cullFace(range.cullFace === "front" ? gl.FRONT : gl.BACK);
+				gl.drawElements(
+					gl.TRIANGLES,
+					range.indexCount,
+					gl.UNSIGNED_INT,
+					range.indexStart * Uint32Array.BYTES_PER_ELEMENT,
+				);
+			}
 		}
-		return true;
 	}
 
 	#restoreFrameState(frameWidth: number, frameHeight: number): void {
@@ -402,22 +405,4 @@ export function hasOutdoorPssmLightAndInterval(
 		Math.min(input.camera.far, input.settings.maximumDistance) >
 			input.camera.near
 	);
-}
-
-function validateCasterDrawRange(
-	binding: WebGL2GeometryBinding,
-	indexStart: number,
-	indexCount: number,
-): void {
-	if (
-		!Number.isInteger(indexStart) ||
-		!Number.isInteger(indexCount) ||
-		indexStart < 0 ||
-		indexCount <= 0 ||
-		indexStart + indexCount > binding.indexCount
-	) {
-		throw new Error(
-			`Invalid outdoor caster draw range ${indexStart}+${indexCount}/${binding.indexCount}.`,
-		);
-	}
 }

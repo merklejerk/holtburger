@@ -96,14 +96,12 @@ const OUTDOOR_SHADOW_MAP_METRIC_KEYS = [
 	"candidateRootCount",
 	"cascadeCandidateMembershipCount",
 	"cascadeQueryCount",
-	"compatibleDepthRunCount",
+	"selectedDepthDrawCount",
 	"emptyMappedViewCount",
-	"instanceUploadBytes",
-	"instanceUploadCount",
 	"mappedRootCount",
 	"rejectedRootCount",
 	"selectedRootCount",
-	"selectedCasterPartCount",
+	"selectedPartCascadeCount",
 ] as const satisfies readonly (keyof RendererOutdoorShadowMapFrameMetrics)[];
 
 type MutableContributionFrameMetrics = {
@@ -127,14 +125,12 @@ function createEmptyOutdoorShadowMapMetrics(): MutableOutdoorShadowMapFrameMetri
 		candidateRootCount: 0,
 		cascadeCandidateMembershipCount: 0,
 		cascadeQueryCount: 0,
-		compatibleDepthRunCount: 0,
+		selectedDepthDrawCount: 0,
 		emptyMappedViewCount: 0,
-		instanceUploadBytes: 0,
-		instanceUploadCount: 0,
 		mappedRootCount: 0,
 		rejectedRootCount: 0,
 		selectedRootCount: 0,
-		selectedCasterPartCount: 0,
+		selectedPartCascadeCount: 0,
 	};
 }
 
@@ -806,13 +802,11 @@ function averageOutdoorShadowMapMetrics(
 		cascadeCandidateMembershipCount:
 			totals.cascadeCandidateMembershipCount / sampleCount,
 		cascadeQueryCount: totals.cascadeQueryCount / sampleCount,
-		compatibleDepthRunCount: totals.compatibleDepthRunCount / sampleCount,
+		selectedDepthDrawCount: totals.selectedDepthDrawCount / sampleCount,
 		emptyMappedViewCount: totals.emptyMappedViewCount / sampleCount,
-		instanceUploadBytes: totals.instanceUploadBytes / sampleCount,
-		instanceUploadCount: totals.instanceUploadCount / sampleCount,
 		mappedRootCount: totals.mappedRootCount / sampleCount,
 		rejectedRootCount: totals.rejectedRootCount / sampleCount,
 		selectedRootCount: totals.selectedRootCount / sampleCount,
-		selectedCasterPartCount: totals.selectedCasterPartCount / sampleCount,
+		selectedPartCascadeCount: totals.selectedPartCascadeCount / sampleCount,
 	};
 }

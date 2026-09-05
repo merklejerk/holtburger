@@ -112,6 +112,56 @@ describe("matrix composition", () => {
 		);
 	});
 
+	it("preserves projective corner bounds when input and output alias", () => {
+		const matrix = new Mat4(
+			-2,
+			1,
+			0,
+			0.1,
+			0.5,
+			3,
+			1,
+			0.2,
+			1,
+			0,
+			4,
+			0.3,
+			7,
+			-2,
+			5,
+			3,
+		);
+		const bounds = new AABB3(new Vec3(-1, -2, -3), new Vec3(4, 5, 6));
+		const corners = [];
+		for (const x of [bounds.min.x, bounds.max.x])
+			for (const y of [bounds.min.y, bounds.max.y])
+				for (const z of [bounds.min.z, bounds.max.z])
+					corners.push(transformPoint3(matrix, new Vec3(x, y, z)));
+		const expected = new AABB3(
+			new Vec3(
+				Math.min(...corners.map((p) => p.x)),
+				Math.min(...corners.map((p) => p.y)),
+				Math.min(...corners.map((p) => p.z)),
+			),
+			new Vec3(
+				Math.max(...corners.map((p) => p.x)),
+				Math.max(...corners.map((p) => p.y)),
+				Math.max(...corners.map((p) => p.z)),
+			),
+		);
+		expect(transformAABB3(matrix, bounds, bounds)).toBe(bounds);
+		expect(bounds).toEqual(expected);
+	});
+
+	it("leaves output intact when a later bound corner has zero W", () => {
+		const matrix = Mat4.identity();
+		matrix.m34 = -1;
+		const bounds = new AABB3(Vec3.zero(), new Vec3(1, 1, 1));
+		const previous = bounds.clone();
+		expect(() => transformAABB3(matrix, bounds, bounds)).toThrow("zero W");
+		expect(bounds).toEqual(previous);
+	});
+
 	it("writes scale, points, and normals into caller-owned targets", () => {
 		const matrixTarget = Mat4.zero();
 		const pointTarget = Vec3.zero();

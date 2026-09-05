@@ -18,14 +18,9 @@ import type {
 } from "./dynamic-presentation-source";
 import type { NameplateSourceVisual } from "../renderer/nameplate-policy";
 import { AABB3, Mat4, Vec3 } from "../math/types";
-import {
-	multiplyMat4,
-	transformAABB3,
-	transformPoint3,
-} from "../math/matrices";
-import { landblockVec3 } from "../../assets/ac-frame";
+import { multiplyMat4, transformAABB3 } from "../math/matrices";
 import type { LandblockOwnerId } from "../game-types";
-import type { SceneGraph, SceneNodeId, SceneScope } from "../scene";
+import type { SceneChildTransform, SceneGraph, SceneNodeId } from "../scene";
 import type { SceneSpatialPlacement } from "../scene";
 import {
 	type ParentLocation,
@@ -39,15 +34,12 @@ import type {
 	ActiveDynamicPart,
 	ArticulatedPose,
 	DynamicEntityRenderable,
-	RigidPartDepthDrawUnit,
-	RigidPartDrawUnit,
-	VisibleDynamicContributions,
-	VisibleRigidDepthContribution,
-	VisibleRigidPartContribution,
+	VisibleDynamicPresentation,
 } from "./components";
 import type { DynamicPresentationSample } from "./animation-system";
 import {
 	objectVisualTemplateKey,
+	type ObjectVisualTemplate,
 	type ObjectVisualTemplateRepositoryPort,
 	type PartVisualTemplate,
 	type StagedObjectVisualTemplateOwner,
@@ -82,7 +74,7 @@ interface DynamicEntityRecord {
 	readonly rootNodeId: SceneNodeId;
 	readonly visualRootNodeId: SceneNodeId;
 	/** Source-neutral visual facts retained for behavior staging and deterministic phase identity. */
-	readonly source: DynamicPresentationSource;
+	source: DynamicPresentationSource;
 	/** Current authoritative whole-object scale, mutable without replacing immutable visual assets. */
 	readonly rootScale: Vec3;
 	/** Current presentation-only root transform retained so scale-only updates can rebuild bounds. */
@@ -92,6 +84,8 @@ interface DynamicEntityRecord {
 	/** Mutable display content updated independently from immutable visual setup facts. */
 	nameplateContent: NameplateContent | null;
 	renderable: DynamicEntityRenderable;
+	/** Stable borrowed part matrices submitted together with the visual root's transform. */
+	partTransformPublication: readonly SceneChildTransform[];
 	articulatedPose: ArticulatedPose;
 	animationHandle: PreparedAnimationHandle | null;
 	/**
@@ -133,24 +127,6 @@ interface DynamicEntityRecord {
 	/** Envelope already folded into both culling bounds, so a change republishes them. */
 	appliedEnvelopeRadius: number;
 	presentationState: DynamicEntityPresentationState;
-	/** Reused outputs borrowed by consumers only until this entity's next expansion. */
-	visibleContributions: {
-		readonly kind: "visible";
-		readonly depth: VisibleRigidDepthContribution[];
-		landblockId: LandblockOwnerId;
-		readonly material: VisibleRigidPartContribution[];
-		renderScopes: readonly SceneScope[];
-	} | null;
-	/** Stable depth-range records retaining frame payloads without retaining obsolete templates. */
-	readonly visibleDepthContributionEntries: Map<
-		RigidPartDepthDrawUnit,
-		MutableVisibleRigidDepthContribution
-	>;
-	/** Stable draw-unit records retaining frame payloads without retaining obsolete templates. */
-	readonly visibleContributionEntries: Map<
-		RigidPartDrawUnit,
-		ReusableVisibleContribution
-	>;
 }
 
 /** One currently drawn rigid part borrowed for the duration of an exact-selection visit. */
@@ -175,33 +151,6 @@ export interface DynamicEntitySelectionGeometry {
 	readonly sourceToLandblock: Mat4;
 }
 
-type MutableVisibleRigidPartContribution = {
-	-readonly [
-		Key in keyof VisibleRigidPartContribution
-	]: VisibleRigidPartContribution[Key];
-};
-
-const HIDDEN_DYNAMIC_CONTRIBUTIONS: VisibleDynamicContributions = Object.freeze(
-	{
-		depth: Object.freeze([]),
-		kind: "hidden",
-		material: Object.freeze([]),
-	},
-);
-
-type MutableVisibleRigidDepthContribution = {
-	-readonly [
-		Key in keyof VisibleRigidDepthContribution
-	]: VisibleRigidDepthContribution[Key];
-};
-
-interface ReusableVisibleContribution {
-	readonly contribution: MutableVisibleRigidPartContribution;
-	readonly transparentSort: NonNullable<
-		VisibleRigidPartContribution["transparentSort"]
-	>;
-}
-
 interface DynamicOwnerRecord<TTemplateOwnerId extends string> {
 	/** Monotonic owner generation guarding asynchronous preparation publication. */
 	readonly generation: number;
@@ -209,6 +158,17 @@ interface DynamicOwnerRecord<TTemplateOwnerId extends string> {
 	/** Generation-private geometry owner retained until this active generation retires. */
 	readonly templateOwnerId: TTemplateOwnerId;
 }
+
+/** Prepared mesh replacement, or a topology change requiring full behavior-owner activation. */
+export type DynamicVisualReplacement =
+	| { readonly kind: "requires-owner-replacement" }
+	| {
+			readonly kind: "staged";
+			/** Publish against the still-current owner without resetting behavior or part targets. */
+			commit(): void;
+			/** Withdraw uncommitted resources; safe after cancellation or commit. */
+			release(): void;
+	  };
 
 /** Atomic authored-owner installation and its complete visual-staging outcome. */
 export interface DynamicOwnerInstallation {
@@ -273,6 +233,11 @@ export class DynamicEntitySystem<
 	) => TTemplateOwnerId;
 	readonly #owners = new Map<TOwnerId, DynamicOwnerRecord<TTemplateOwnerId>>();
 	readonly #entities = new Map<SceneNodeId, DynamicEntityRecord>();
+	/** Scratch used only by synchronous bounds derivation, never returned to consumers. */
+	readonly #boundsScratch = {
+		transform: Mat4.identity(),
+		bounds: AABB3.zero(),
+	};
 	readonly #ownerGenerations = new Map<TOwnerId, number>();
 	/** Preparations awaited during shutdown so acquired handles cannot outlive repositories. */
 	readonly #pendingPreparations = new Set<Promise<unknown>>();
@@ -503,25 +468,166 @@ export class DynamicEntitySystem<
 			scriptClosure: null,
 			soundTableHandle: null,
 			articulatedPose: pose,
-			renderable: { parts },
+			renderable: { kind: "preparing", parts },
+			partTransformPublication: parts.map((part) => ({
+				nodeId: part.nodeId,
+				transform: part.localToVisualRoot,
+			})),
 			rootNodeId,
 			rootScale,
 			source,
 			nameplateContent: source.nameplate,
 			preparedAnimation: null,
 			rigidPresentationBounds,
-			publishedPresentationBounds: rigidPresentationBounds,
+			publishedPresentationBounds: rigidPresentationBounds.clone(),
 			cullingBounds: null,
 			appliedEnvelopeRadius: 0,
 			presentationState: resident.initialPresentationState,
 			visualRootNodeId,
 			visualRootTransform: Mat4.identity(),
 			selectionGeometryMorphology: null,
-			visibleContributions: null,
-			visibleDepthContributionEntries: new Map(),
-			visibleContributionEntries: new Map(),
 		};
 		return record;
+	}
+
+	/** Stage changed appearance resources while preserving the live entity and all owner siblings. */
+	async stageVisualReplacement(
+		ownerId: TOwnerId,
+		rootNodeId: SceneNodeId,
+		source: DynamicPresentationSource,
+	): Promise<DynamicVisualReplacement> {
+		const owner = this.#owners.get(ownerId);
+		const entity = this.#entities.get(rootNodeId);
+		if (
+			owner === undefined ||
+			entity === undefined ||
+			!owner.entities.includes(entity)
+		)
+			throw new Error(
+				`Dynamic visual replacement has no entity ${rootNodeId} in owner ${ownerId}.`,
+			);
+		if (source.identity !== entity.source.identity)
+			throw new Error(
+				`Dynamic visual replacement changed identity ${entity.source.identity} to ${source.identity}.`,
+			);
+		const nextPartIndices = new Set(
+			source.presentation.parts.map((part) => part.partIndex),
+		);
+		if (nextPartIndices.size !== source.presentation.parts.length)
+			throw new Error(
+				`Replacement presentation ${source.presentation.id} contains duplicate part indices.`,
+			);
+		if (
+			source.setupId !== entity.source.setupId ||
+			nextPartIndices.size !== entity.renderable.parts.length ||
+			entity.renderable.parts.some(
+				(part) => !nextPartIndices.has(part.partIndex),
+			)
+		)
+			return { kind: "requires-owner-replacement" };
+		const stage = this.#templates.stageOwner(
+			owner.entities.map((sibling) =>
+				sibling === entity ? source : sibling.source,
+			),
+		);
+		this.#pendingTemplateStages.get(ownerId)?.release();
+		this.#pendingTemplateStages.set(ownerId, stage);
+		const release = () => {
+			stage.release();
+			if (this.#pendingTemplateStages.get(ownerId) === stage)
+				this.#pendingTemplateStages.delete(ownerId);
+		};
+		this.#pendingPreparations.add(stage.completion);
+		let templates: ReadonlyMap<
+			ReturnType<typeof objectVisualTemplateKey>,
+			ObjectVisualTemplate
+		>;
+		try {
+			templates = await stage.completion;
+		} catch (cause) {
+			release();
+			throw cause;
+		} finally {
+			this.#pendingPreparations.delete(stage.completion);
+		}
+		const template = templates.get(objectVisualTemplateKey(source));
+		if (template === undefined) {
+			release();
+			throw new Error(
+				`Replacement template for ${source.identity} was not prepared.`,
+			);
+		}
+		return {
+			kind: "staged",
+			release,
+			commit: () => {
+				if (
+					this.#destroyed ||
+					this.#owners.get(ownerId) !== owner ||
+					this.#entities.get(rootNodeId) !== entity ||
+					this.#pendingTemplateStages.get(ownerId) !== stage
+				)
+					throw new Error(
+						`Cannot commit superseded visual replacement for ${source.identity}.`,
+					);
+				// Preparation can span many animation ticks. Derive bounds and transforms from the
+				// current pose/scale now, before publishing any replacement resource or scene state.
+				const visual = prepareEntityVisualState(
+					source,
+					entity.rootScale,
+					template,
+					entity.animationHandle?.asset ?? null,
+					entity.motionClosure,
+				);
+				const parts = mergePreparedParts(
+					entity.renderable.parts,
+					template.parts,
+				).map((part) => {
+					const pose =
+						entity.articulatedPose.partToObjectTransforms[part.partIndex];
+					if (pose === undefined)
+						throw new Error(
+							`Replacement part ${part.partIndex} has no current pose.`,
+						);
+					return {
+						...part,
+						localToVisualRoot: composeObjectPartTransform(
+							pose,
+							entity.rootScale,
+							part.defaultScale,
+						),
+					};
+				});
+				const renderable = prepareRenderable(parts, template);
+				const rigidBounds = this.#presentationBoundsForSample(
+					parts,
+					entity.visualRootTransform,
+				);
+				const expandedBounds = expandBounds(
+					rigidBounds,
+					entity.appliedEnvelopeRadius,
+					AABB3.zero(),
+				);
+				stage.commit(owner.templateOwnerId);
+				entity.source = source;
+				entity.renderable = renderable;
+				entity.partTransformPublication = parts.map((part) => ({
+					nodeId: part.nodeId,
+					transform: part.localToVisualRoot,
+				}));
+				entity.motionPlayback = visual.motionPlayback;
+				entity.preparedAnimation = visual.animation;
+				entity.cullingBounds = visual.animation.localBounds;
+				entity.rigidPresentationBounds = rigidBounds;
+				entity.publishedPresentationBounds = expandedBounds;
+				entity.selectionGeometryMorphology =
+					template.selectionGeometryMorphology;
+				this.#publishCullingBounds(entity);
+				for (const part of parts)
+					this.#scene.updateLocalTransform(part.nodeId, part.localToVisualRoot);
+				this.#pendingTemplateStages.delete(ownerId);
+			},
+		};
 	}
 
 	removeOwner(ownerId: TOwnerId): void {
@@ -633,6 +739,7 @@ export class DynamicEntitySystem<
 		child.publishedPresentationBounds = expandBounds(
 			placedBounds,
 			child.appliedEnvelopeRadius,
+			child.publishedPresentationBounds,
 		);
 		if (child.cullingBounds) {
 			child.cullingBounds.union(placedBounds);
@@ -647,6 +754,43 @@ export class DynamicEntitySystem<
 
 	getRenderable(nodeId: SceneNodeId): DynamicEntityRenderable | null {
 		return this.#entities.get(nodeId)?.renderable ?? null;
+	}
+
+	/** Publish one installed visual and current part payloads without visiting material ranges. */
+	getVisiblePresentation(
+		nodeId: SceneNodeId,
+	): VisibleDynamicPresentation | null {
+		const entity = this.#entities.get(nodeId);
+		if (
+			entity === undefined ||
+			entity.renderable.kind === "preparing" ||
+			entity.presentationState.noDraw ||
+			entity.presentationState.hidden
+		)
+			return null;
+		const placement = this.#scene.getResolvedPlacement(entity.visualRootNodeId);
+		const membership = this.#scene.getResolvedSpatialMembership(
+			entity.visualRootNodeId,
+		);
+		if (placement === undefined || membership === undefined)
+			throw new Error(
+				`Dynamic visual root ${entity.visualRootNodeId} no longer exists.`,
+			);
+		for (const part of entity.renderable.parts) {
+			multiplyMat4(
+				placement.localToLandblock,
+				part.localToVisualRoot,
+				part.frameInstance.sourceToLandblock,
+			);
+			// Hidden parts still occupy their dense layout selector; the shader clips zero opacity.
+			part.frameInstance.color.a = 1 - part.renderState.translucency;
+		}
+		return {
+			visual: entity.renderable,
+			identity: entity.source.identity,
+			landblockId: placement.landblockId,
+			renderScopes: membership.scopes,
+		};
 	}
 
 	/**
@@ -761,119 +905,14 @@ export class DynamicEntitySystem<
 		this.#nameplatePopulationRevision += 1;
 	}
 
-	/** Return the current drawn pose expanded by its particle-preservation envelope. */
+	/** Borrow current particle-expanded bounds until the next publication; clone to retain a snapshot. */
 	getPublishedPresentationBounds(nodeId: SceneNodeId): AABB3 | null {
 		return this.#entities.get(nodeId)?.publishedPresentationBounds ?? null;
 	}
 
-	/** Return exact current rigid-pose bounds without particle-envelope expansion. */
+	/** Borrow current rigid-pose bounds until the next publication; clone to retain a snapshot. */
 	getPublishedRigidPresentationBounds(nodeId: SceneNodeId): AABB3 | null {
 		return this.#entities.get(nodeId)?.rigidPresentationBounds ?? null;
-	}
-
-	/**
-	 * Resolve every active rigid part with the selected entity's plural source-domain scopes.
-	 *
-	 * The returned arrays and records are borrowed until this entity's next expansion. Renderer and
-	 * shadow consumers finish each expansion synchronously before issuing another one.
-	 */
-	getVisibleContributions(
-		nodeId: SceneNodeId,
-		includeDepth: boolean,
-	): VisibleDynamicContributions | null {
-		const entity = this.#entities.get(nodeId);
-		if (!entity) return null;
-		if (entity.presentationState.noDraw || entity.presentationState.hidden)
-			return HIDDEN_DYNAMIC_CONTRIBUTIONS;
-		const visualPlacement = this.#scene.getResolvedPlacement(
-			entity.visualRootNodeId,
-		);
-		const spatialMembership = this.#scene.getResolvedSpatialMembership(
-			entity.visualRootNodeId,
-		);
-		if (!visualPlacement || !spatialMembership) {
-			throw new Error(
-				`Dynamic visual root ${entity.visualRootNodeId} no longer exists.`,
-			);
-		}
-		const contributions = (entity.visibleContributions ??= {
-			depth: [],
-			kind: "visible",
-			landblockId: visualPlacement.landblockId,
-			material: [],
-			renderScopes: spatialMembership.scopes,
-		});
-		contributions.landblockId = visualPlacement.landblockId;
-		contributions.renderScopes = spatialMembership.scopes;
-		contributions.depth.length = 0;
-		contributions.material.length = 0;
-		for (const part of entity.renderable.parts) {
-			const translucency = part.renderState.translucency;
-			// Retail sets the skip-draw bit only at exactly full translucency.
-			if (translucency === 1) continue;
-			const instance = part.frameInstance;
-			multiplyMat4(
-				visualPlacement.localToLandblock,
-				part.localToVisualRoot,
-				instance.sourceToLandblock,
-			);
-			instance.color.a = 1 - translucency;
-			for (const activeDrawUnit of part.drawUnits) {
-				const drawUnit = activeDrawUnit.drawUnit;
-				const ordering =
-					translucency !== 0 && drawUnit.ordering === "opaque"
-						? "transparent"
-						: drawUnit.ordering;
-				let entry = entity.visibleContributionEntries.get(drawUnit);
-				if (entry === undefined) {
-					const transparentSort = {
-						center: landblockVec3(Vec3.zero()),
-						stableId: `${entity.source.identity}/part:${part.partIndex}/${drawUnit.batchKey}`,
-					};
-					entry = {
-						contribution: {
-							// Draw-unit identity remains the compiled cache key across every frame.
-							drawUnit,
-							instance,
-							ordering,
-							transparentSort: null,
-						},
-						transparentSort,
-					};
-					entity.visibleContributionEntries.set(drawUnit, entry);
-				}
-				const reusable = entry.contribution;
-				reusable.ordering = ordering;
-				if (ordering === "transparent") {
-					// The center is genuinely frame-current; only its storage is reused.
-					transformPoint3(
-						instance.sourceToLandblock,
-						activeDrawUnit.transparentSortCenter,
-						entry.transparentSort.center,
-					);
-					reusable.transparentSort = entry.transparentSort;
-				} else {
-					reusable.transparentSort = null;
-				}
-				contributions.material.push(reusable);
-			}
-			if (!includeDepth) continue;
-			for (const drawUnit of part.depthDrawUnits) {
-				let reusable = entity.visibleDepthContributionEntries.get(drawUnit);
-				if (reusable === undefined) {
-					reusable = {
-						drawUnit,
-						instance,
-					};
-					entity.visibleDepthContributionEntries.set(drawUnit, reusable);
-				}
-				contributions.depth.push(reusable);
-			}
-		}
-		return contributions.material.length === 0 &&
-			contributions.depth.length === 0
-			? HIDDEN_DYNAMIC_CONTRIBUTIONS
-			: contributions;
 	}
 
 	/** Apply one complete producer placement through the sole dynamic-root writer. */
@@ -926,13 +965,15 @@ export class DynamicEntitySystem<
 			);
 			this.#scene.updateLocalTransform(part.nodeId, part.localToVisualRoot);
 		}
-		entity.rigidPresentationBounds = presentationBoundsForSample(
+		entity.rigidPresentationBounds = this.#presentationBoundsForSample(
 			entity.renderable.parts,
 			entity.visualRootTransform,
+			entity.rigidPresentationBounds,
 		);
 		entity.publishedPresentationBounds = expandBounds(
 			entity.rigidPresentationBounds,
 			entity.appliedEnvelopeRadius,
+			entity.publishedPresentationBounds,
 		);
 		const prepared = entity.preparedAnimation;
 		if (!prepared || entity.cullingBounds === null)
@@ -1136,7 +1177,11 @@ export class DynamicEntitySystem<
 		}
 		this.#scene.updateBounds(
 			entity.rootNodeId,
-			expandBounds(entity.cullingBounds, entity.appliedEnvelopeRadius),
+			expandBounds(
+				entity.cullingBounds,
+				entity.appliedEnvelopeRadius,
+				this.#boundsScratch.bounds,
+			),
 		);
 	}
 
@@ -1295,40 +1340,19 @@ export class DynamicEntitySystem<
 					);
 				}
 
-				const staticBounds = staticPresentationBounds(entity.source);
-				// A body driven by a motion table plays many clips over its life, so its bound is the
-				// union across the whole closure — computed once, never churning on a transition.
-				// Setup-default playback keeps the single-clip bound it always had.
-				const motionPlayback =
-					motionResult.value === null
-						? null
-						: prepareMotionPlayback(
-								motionResult.value,
-								template,
-								entity.source.scale,
-								staticBounds,
-							);
 				return {
-					motionPlayback,
-					animation:
-						motionPlayback !== null
-							? ({
-									kind: "none",
-									localBounds: motionPlayback.localBounds,
-								} as const)
-							: animationResult.value === null
-								? ({
-										kind: "none",
-										localBounds: staticBounds,
-									} as const)
-								: prepareDynamicAnimation(
-										animationResult.value.asset,
-										template,
-										entity.source.scale,
-										staticBounds,
-									),
+					...prepareEntityVisualState(
+						entity.source,
+						entity.rootScale,
+						template,
+						animationResult.value?.asset ?? null,
+						motionResult.value,
+					),
 					handle: animationResult.value,
-					parts: mergePreparedParts(entity.renderable.parts, template.parts),
+					renderable: prepareRenderable(
+						mergePreparedParts(entity.renderable.parts, template.parts),
+						template,
+					),
 					selectionGeometryMorphology: template.selectionGeometryMorphology,
 					effectPartCount: template.parts.length,
 					emitterHandles: scriptResult.value?.emitterHandles ?? [],
@@ -1361,11 +1385,8 @@ export class DynamicEntitySystem<
 				entity.emitterHandles = result.emitterHandles;
 				entity.soundTableHandle = result.soundTableHandle;
 				entity.preparedAnimation = result.animation;
-				entity.renderable = { parts: result.parts };
+				entity.renderable = result.renderable;
 				entity.selectionGeometryMorphology = result.selectionGeometryMorphology;
-				entity.visibleContributions = null;
-				entity.visibleDepthContributionEntries.clear();
-				entity.visibleContributionEntries.clear();
 			}
 		} catch (cause) {
 			for (const handle of acquiredHandles) handle.release();
@@ -1493,26 +1514,53 @@ export class DynamicEntitySystem<
 				: multiplyMat4(
 						sample.articulatedPose.authoredRootTransform,
 						sample.effects.rootTransformModifier,
+						entity.visualRootTransform,
 					);
-		const rigidPresentationBounds = presentationBoundsForSample(
+		const rigidPresentationBounds = this.#presentationBoundsForSample(
 			entity.renderable.parts,
 			visualRootTransform,
+			entity.rigidPresentationBounds,
 		);
 		const publishedPresentationBounds = expandBounds(
 			rigidPresentationBounds,
 			entity.appliedEnvelopeRadius,
+			entity.publishedPresentationBounds,
 		);
-		this.#scene.updateLocalTransform(
+		this.#scene.updateLocalTransformWithChildren(
 			entity.visualRootNodeId,
 			visualRootTransform,
+			entity.partTransformPublication,
 		);
 		entity.visualRootTransform.copy(visualRootTransform);
-		for (const part of entity.renderable.parts) {
-			this.#scene.updateLocalTransform(part.nodeId, part.localToVisualRoot);
-		}
 		entity.articulatedPose = sample.articulatedPose;
 		entity.rigidPresentationBounds = rigidPresentationBounds;
 		entity.publishedPresentationBounds = publishedPresentationBounds;
+	}
+
+	/** Derive the current rigid bound with reusable part scratch and optional retained output. */
+	#presentationBoundsForSample(
+		parts: readonly ActiveDynamicPart[],
+		rootTransform: Mat4,
+		target: AABB3 = AABB3.zero(),
+	): AABB3 {
+		if (parts.length === 0)
+			throw new Error("Dynamic presentation has no bounded active parts.");
+		let first = true;
+		for (const part of parts) {
+			const partBounds = transformAABB3(
+				multiplyMat4(
+					rootTransform,
+					part.localToVisualRoot,
+					this.#boundsScratch.transform,
+				),
+				part.localBounds,
+				this.#boundsScratch.bounds,
+			);
+			if (first) target.copy(partBounds);
+			else target.union(partBounds);
+			first = false;
+		}
+		return target;
 	}
 
 	#releaseStagedOwner(
@@ -1556,6 +1604,36 @@ export class DynamicEntitySystem<
 		this.#scene.destroyNode(entity.visualRootNodeId);
 		this.#placements.destroyRoot(entity.rootNodeId);
 	}
+}
+
+/** Rebuild geometry-dependent envelopes from retained animation assets, without starting playback. */
+function prepareEntityVisualState(
+	source: DynamicPresentationSource,
+	scale: Vec3,
+	template: ObjectVisualTemplate,
+	animationAsset: PreparedAnimation | null,
+	motionClosure: PreparedMotionClosure | null,
+): {
+	readonly animation: PreparedDynamicAnimation;
+	readonly motionPlayback: PreparedMotionPlayback | null;
+} {
+	const staticBounds = staticPresentationBounds({ ...source, scale });
+	const motionPlayback =
+		motionClosure === null
+			? null
+			: prepareMotionPlayback(motionClosure, template, scale, staticBounds);
+	const animation: PreparedDynamicAnimation =
+		motionPlayback !== null
+			? { kind: "none", localBounds: motionPlayback.localBounds }
+			: animationAsset === null
+				? { kind: "none", localBounds: staticBounds }
+				: prepareDynamicAnimation(
+						animationAsset,
+						template,
+						scale,
+						staticBounds,
+					);
+	return { animation, motionPlayback };
 }
 
 function staticPresentationBounds(source: DynamicPresentationSource) {
@@ -1611,7 +1689,6 @@ function createActiveParts(
 			parts.push({
 				defaultScale: part.defaultScale,
 				depthDrawUnits: [],
-				drawUnits: [],
 				frameInstance: {
 					color: { a: 1, b: 1, g: 1, r: 1 },
 					sourceToLandblock: Mat4.zero(),
@@ -1637,6 +1714,32 @@ function createActiveParts(
 	return parts;
 }
 
+/** Install dense selector order once; frame consumers do not rejoin authored part identities. */
+function prepareRenderable(
+	parts: readonly ActiveDynamicPart[],
+	template: Pick<ObjectVisualTemplate, "layout" | "appearance">,
+): Extract<DynamicEntityRenderable, { kind: "ready" }> {
+	const ordered = [...parts].sort(
+		(left, right) => left.partIndex - right.partIndex,
+	);
+	if (ordered.length !== template.layout.parts.length)
+		throw new Error(
+			`Dynamic layout ${template.layout.key} has a different active part count.`,
+		);
+	for (const [selector, part] of ordered.entries()) {
+		if (template.layout.parts[selector]?.partIndex !== part.partIndex)
+			throw new Error(
+				`Dynamic layout ${template.layout.key} selector ${selector} does not address active part ${part.partIndex}.`,
+			);
+	}
+	return {
+		kind: "ready",
+		parts: ordered,
+		layout: template.layout,
+		appearance: template.appearance,
+	};
+}
+
 function mergePreparedParts(
 	activeParts: readonly ActiveDynamicPart[],
 	templateParts: readonly PartVisualTemplate[],
@@ -1660,33 +1763,8 @@ function mergePreparedParts(
 			depthDrawUnits: template.depthDrawUnits,
 			geometryData: template.geometryData,
 			localBounds,
-			drawUnits: template.drawUnits.map((drawUnit) => ({
-				drawUnit,
-				transparentSortCenter: requiredBoundsCenter(
-					localBounds,
-					template.partIndex,
-				),
-			})),
 		};
 	});
-}
-
-function presentationBoundsForSample(
-	parts: readonly ActiveDynamicPart[],
-	rootTransform: Mat4,
-): AABB3 {
-	let bounds: AABB3 | null = null;
-	for (const part of parts) {
-		const partBounds = transformAABB3(
-			multiplyMat4(rootTransform, part.localToVisualRoot),
-			part.localBounds,
-		);
-		if (bounds === null) bounds = partBounds;
-		else bounds.union(partBounds);
-	}
-	if (bounds === null)
-		throw new Error("Dynamic presentation has no bounded active parts.");
-	return bounds;
 }
 
 /** Rescale one origin-relative authored bound without revisiting the geometry or animation sweep. */
@@ -1729,18 +1807,6 @@ function requiredPartBounds(bounds: AABB3 | null, partIndex: number): AABB3 {
 			`Renderable dynamic part ${partIndex} has no local bounds.`,
 		);
 	return bounds.clone();
-}
-
-function requiredBoundsCenter(bounds: AABB3 | null, partIndex: number): Vec3 {
-	if (!bounds)
-		throw new Error(
-			`Renderable dynamic part ${partIndex} has no local bounds for transparent sorting.`,
-		);
-	return new Vec3(
-		(bounds.min.x + bounds.max.x) / 2,
-		(bounds.min.y + bounds.max.y) / 2,
-		(bounds.min.z + bounds.max.z) / 2,
-	);
 }
 
 function poseFor(

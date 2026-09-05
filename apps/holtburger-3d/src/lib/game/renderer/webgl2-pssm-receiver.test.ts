@@ -59,7 +59,6 @@ describe("bindWebGL2OutdoorPssmUniforms", () => {
 		});
 		const frame: ActiveOutdoorPssmFrame = {
 			cascades,
-			instanceUploads: { bytes: 0, count: 0 },
 			settings,
 			targets: {
 				cascadeCount: 2,

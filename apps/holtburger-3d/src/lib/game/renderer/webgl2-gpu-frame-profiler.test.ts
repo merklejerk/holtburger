@@ -268,14 +268,12 @@ describe("WebGL2FrameProfiler", () => {
 			candidateRootCount: 8,
 			cascadeCandidateMembershipCount: 18,
 			cascadeQueryCount: 3,
-			compatibleDepthRunCount: 9,
+			selectedDepthDrawCount: 9,
 			emptyMappedViewCount: 0,
-			instanceUploadBytes: 240,
-			instanceUploadCount: 3,
 			mappedRootCount: 7,
 			rejectedRootCount: 0,
 			selectedRootCount: 8,
-			selectedCasterPartCount: 12,
+			selectedPartCascadeCount: 12,
 		});
 		frame.finish();
 
@@ -288,14 +286,12 @@ describe("WebGL2FrameProfiler", () => {
 			candidateRootCount: 8,
 			cascadeCandidateMembershipCount: 18,
 			cascadeQueryCount: 3,
-			compatibleDepthRunCount: 9,
+			selectedDepthDrawCount: 9,
 			emptyMappedViewCount: 0,
-			instanceUploadBytes: 240,
-			instanceUploadCount: 3,
 			mappedRootCount: 7,
 			rejectedRootCount: 0,
 			selectedRootCount: 8,
-			selectedCasterPartCount: 12,
+			selectedPartCascadeCount: 12,
 		});
 	});
 
@@ -337,14 +333,12 @@ function outdoorShadowMapMetrics(cascadeQueryCount = 0) {
 		candidateRootCount: 0,
 		cascadeCandidateMembershipCount: 0,
 		cascadeQueryCount,
-		compatibleDepthRunCount: 0,
+		selectedDepthDrawCount: 0,
 		emptyMappedViewCount: 0,
-		instanceUploadBytes: 0,
-		instanceUploadCount: 0,
 		mappedRootCount: 0,
 		rejectedRootCount: 0,
 		selectedRootCount: 0,
-		selectedCasterPartCount: 0,
+		selectedPartCascadeCount: 0,
 	};
 }
 

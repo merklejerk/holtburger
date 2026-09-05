@@ -1,7 +1,12 @@
 import type { ObjectGeometryKey } from "../geometry/types";
 import { Mat4, Vec3 } from "../math/types";
 import type { SceneNodeId } from "../scene";
-import type { VisibleDynamicContributions } from "../systems/components";
+import type { DynamicLayout } from "../geometry/dynamic-layout";
+import type { DynamicAppearance } from "../systems/dynamic-appearance";
+import { TextureWrapMode } from "../textures/types";
+import { WebGL2DynamicAppearances } from "./webgl2-dynamic-appearances";
+import { WebGL2DynamicPosePages } from "./webgl2-dynamic-pose-pages";
+import { DynamicDepthPreparations } from "./dynamic-depth-preparation";
 import {
 	DEFAULT_COLOR_GRADE_PARAMETERS,
 	type ColorGradeSettings,
@@ -12,9 +17,57 @@ import { WebGL2FlatSceneTarget } from "./webgl2-flat-scene-target";
 import type { PortalWarpDriveTuning } from "./portal-warp-drive-tuning";
 import type { EntitySelectionOutlineSettings } from "./entity-selection-outline-policy";
 import type { WebGL2GeometryBinding } from "./webgl2-resource-manager";
+import type { EntitySelectionTarget } from "./renderer";
 
 const GEOMETRY_KEY = "object-geometry:selection-fixture" as ObjectGeometryKey;
 const NODE_ID = "scene-node:selection-fixture" as SceneNodeId;
+const PADDING_NODE_ID = "scene-node:selection-pose-padding" as SceneNodeId;
+const LAYOUT: DynamicLayout = {
+	key: GEOMETRY_KEY,
+	geometry: {
+		kind: "dynamic-parts",
+		partCount: 1,
+		materialCount: 1,
+		positions: new Float32Array([-0.55, -0.55, 0, 0.55, -0.55, 0, 0, 0.55, 0]),
+		normals: new Float32Array(9),
+		textureCoordinates: new Float32Array(6),
+		indices: new Uint32Array([0, 1, 2]),
+		partSelectors: new Uint32Array(3),
+		materialSelectors: new Uint32Array(3),
+	},
+	parts: [{ partIndex: 0, indexStart: 0, indexCount: 3 }],
+};
+const APPEARANCE: DynamicAppearance = {
+	materials: [
+		{
+			source: {
+				id: "material:selection-fixture",
+				kind: "solid-color",
+				color: [1, 1, 1, 1],
+				rawSurfaceFlags: 0,
+				translucency: 0,
+				luminosity: 0,
+				diffuseScale: 1,
+			},
+			detailRole: null,
+			textures: { base: null, palette: null },
+			sampler: { wrap: TextureWrapMode.Clamp },
+			palettedClipMap: false,
+		},
+	],
+	ranges: [
+		{
+			transparentSort: { key: "fixture-order", center: Vec3.zero() },
+			partSelector: 0,
+			materialSelector: 0,
+			indexStart: 0,
+			indexCount: 3,
+			ordering: "opaque",
+			polygon: { cullFace: "back", stippled: false },
+			retailVisibility: "normally-visible",
+		},
+	],
+};
 const INITIAL_SIZE = 64;
 const RESIZED_SIZE = 32;
 const DISABLED_COLOR_GRADE: ColorGradeSettings = {
@@ -51,7 +104,17 @@ export function runWebGL2EntitySelectionFixture(
 ): WebGL2EntitySelectionFixtureResult {
 	requireNoWebGL2Error(gl, "before entity selection fixture");
 	const geometry = createTriangleGeometry(gl);
+	const poses = new WebGL2DynamicPosePages<SceneNodeId>(gl);
+	const appearances = new WebGL2DynamicAppearances(gl, () => ({
+		material: { kind: "solid-color", color: [1, 1, 1, 1] },
+		alphaTest: 0,
+		luminosity: 0,
+		palettedClipMap: false,
+		wrapRepeat: false,
+	}));
+	const releaseAppearance = appearances.retain(LAYOUT, APPEARANCE);
 	const pass = new WebGL2EntitySelectionPass(gl, {
+		getPose: (nodeId) => poses.get(nodeId),
 		getGeometry: (key) => {
 			if (key !== GEOMETRY_KEY) {
 				throw new Error(`Unexpected selection fixture geometry ${key}.`);
@@ -67,8 +130,8 @@ export function runWebGL2EntitySelectionFixture(
 		// depth. The center mask sample proves the production pass disables that state.
 		gl.enable(gl.DEPTH_TEST);
 		gl.depthFunc(gl.NEVER);
-		const initial = requiredMask(
-			pass.render(selectionInput(INITIAL_SIZE, INITIAL_SIZE)),
+		const initial = pass.render(
+			selectionInput(pass, poses, appearances, INITIAL_SIZE, INITIAL_SIZE),
 		);
 		const depthIndependentMaskPixel = readTexturePixel(
 			gl,
@@ -87,8 +150,8 @@ export function runWebGL2EntitySelectionFixture(
 			21,
 		);
 		const initialDiagnostics = pass.getDiagnostics();
-		const sameSize = requiredMask(
-			pass.render(selectionInput(INITIAL_SIZE, INITIAL_SIZE, 0.4)),
+		const sameSize = pass.render(
+			selectionInput(pass, poses, appearances, INITIAL_SIZE, INITIAL_SIZE, 0.4),
 		);
 		const previousPositionMaskPixel = readTexturePixel(
 			gl,
@@ -144,19 +207,16 @@ export function runWebGL2EntitySelectionFixture(
 		const portalWarpOutlinePixelCount = countOutlinePixels(
 			readDefaultPixels(gl, INITIAL_SIZE, INITIAL_SIZE),
 		);
-		const sphereProxy = requiredMask(
-			pass.render({
-				...selectionInput(INITIAL_SIZE, INITIAL_SIZE),
-				shape: {
-					kind: "sphere-proxy",
-					placement: {
-						envCellId: null,
-						landblockId: "0x0000ffff",
-						localToLandblock: Mat4.identity(),
-						scope: { kind: "outdoor" },
-					},
-					sphere: { center: new Vec3(0, 0, 0), radius: 0.4 },
+		const sphereProxy = pass.render(
+			selectionInput(pass, poses, appearances, INITIAL_SIZE, INITIAL_SIZE, 0, {
+				kind: "sphere-proxy",
+				placement: {
+					envCellId: null,
+					landblockId: "0x0000ffff",
+					localToLandblock: Mat4.identity(),
+					scope: { kind: "outdoor" },
 				},
+				sphere: { center: new Vec3(0, 0, 0), radius: 0.4 },
 			}),
 		);
 		const sphereProxyMaskPixel = readTexturePixel(
@@ -168,8 +228,8 @@ export function runWebGL2EntitySelectionFixture(
 			INITIAL_SIZE / 2,
 		);
 
-		const resized = requiredMask(
-			pass.render(selectionInput(RESIZED_SIZE, RESIZED_SIZE)),
+		const resized = pass.render(
+			selectionInput(pass, poses, appearances, RESIZED_SIZE, RESIZED_SIZE),
 		);
 		resizedTexture = resized.mask.texture;
 		const resizedDiagnostics = pass.getDiagnostics();
@@ -206,6 +266,9 @@ export function runWebGL2EntitySelectionFixture(
 		presenter.destroy();
 		sceneTarget.destroy();
 		destroyTriangleGeometry(gl, geometry);
+		releaseAppearance();
+		appearances.destroy();
+		poses.destroy();
 		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 		gl.bindVertexArray(null);
 		gl.bindBuffer(gl.ARRAY_BUFFER, null);
@@ -214,52 +277,48 @@ export function runWebGL2EntitySelectionFixture(
 	}
 }
 
-function selectionInput(width: number, height: number, translationX = 0) {
+function selectionInput(
+	pass: WebGL2EntitySelectionPass,
+	poses: WebGL2DynamicPosePages<SceneNodeId>,
+	appearances: WebGL2DynamicAppearances,
+	width: number,
+	height: number,
+	translationX = 0,
+	shape: EntitySelectionTarget["shape"] = { kind: "rigid" },
+) {
+	const sourceToLandblock = Mat4.identity();
+	sourceToLandblock.m41 = translationX;
+	const parts = [
+		{ frameInstance: { color: { a: 1, b: 1, g: 1, r: 1 }, sourceToLandblock } },
+	];
+	const depths = new DynamicDepthPreparations(
+		() => ({
+			landblockId: "0x0000ffff",
+			renderScopes: [{ kind: "outdoor" }],
+			visual: { layout: LAYOUT, appearance: APPEARANCE, parts },
+		}),
+		(appearance) => appearances.get(appearance),
+	);
+	const selection = pass.prepare(
+		{ nodeId: NODE_ID, shape },
+		depths.prepare(NODE_ID, false),
+	);
+	// Place the selected entity after another root to exercise the nonzero base-row contract.
+	poses.upload(
+		new Map([
+			[PADDING_NODE_ID, parts],
+			[NODE_ID, parts],
+		]),
+	);
+	if (selection === null)
+		throw new Error("Selection fixture produced no geometry.");
 	return {
 		anchorCoordinates: { x: 0, y: 0 },
 		clipFromAnchor: Mat4.identity(),
-		contributions: selectionContributions(translationX),
+		selection,
 		height,
-		nodeId: NODE_ID,
-		shape: { kind: "rigid" as const },
-		showRetailHiddenGeometry: false,
 		width,
 	};
-}
-
-function selectionContributions(
-	translationX: number,
-): VisibleDynamicContributions {
-	const sourceToLandblock = Mat4.identity();
-	sourceToLandblock.m41 = translationX;
-	return {
-		depth: [
-			{
-				drawUnit: {
-					cullFace: "back",
-					geometry: GEOMETRY_KEY,
-					indexCount: 3,
-					indexStart: 0,
-					retailVisibility: "normally-visible",
-				},
-				instance: {
-					color: { a: 1, b: 1, g: 1, r: 1 },
-					sourceToLandblock,
-				},
-			},
-		],
-		kind: "visible",
-		landblockId: "0x0000ffff",
-		material: [],
-		renderScopes: [{ kind: "outdoor" }],
-	};
-}
-
-function requiredMask(
-	result: ReturnType<WebGL2EntitySelectionPass["render"]>,
-): NonNullable<ReturnType<WebGL2EntitySelectionPass["render"]>> {
-	if (result === null) throw new Error("Selection fixture produced no mask.");
-	return result;
 }
 
 function createTriangleGeometry(gl: WebGL2RenderingContext): {
@@ -285,6 +344,8 @@ function createTriangleGeometry(gl: WebGL2RenderingContext): {
 	);
 	gl.enableVertexAttribArray(0);
 	gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+	gl.disableVertexAttribArray(3);
+	gl.vertexAttribI4ui(3, 0, 0, 0, 0);
 	gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
 	gl.bufferData(
 		gl.ELEMENT_ARRAY_BUFFER,

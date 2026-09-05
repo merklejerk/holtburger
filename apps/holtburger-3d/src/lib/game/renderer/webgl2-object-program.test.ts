@@ -6,10 +6,11 @@ import {
 	OBJECT_TEXTURE_UNITS,
 } from "./webgl2-object-program";
 import { MAX_ENTITY_ANALYTIC_SHADOW_CASTERS_PER_RECEIVER } from "./entity-shadow-policy";
+import { PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES } from "./portal-propagation-metadata";
 
 describe("createWebGL2ObjectProgram", () => {
 	it("initializes invariant sampler units exactly once for every program variant", () => {
-		const fixture = fakeGl();
+		const fixture = fakeGl(null);
 
 		createWebGL2ObjectProgram(fixture.gl);
 		createWebGL2ObjectProgram(fixture.gl, {
@@ -34,6 +35,61 @@ describe("createWebGL2ObjectProgram", () => {
 				{ name: "uDetail", program, unit: OBJECT_TEXTURE_UNITS.detail },
 			]);
 		}
+	});
+
+	it("initializes merged pose/material bindings across every receiver variant", () => {
+		const fixture = fakeGl(null);
+		for (const distanceFog of [false, true]) {
+			for (const portalVisibility of [false, true]) {
+				for (const outdoorPssm of [false, true]) {
+					const linked = createWebGL2ObjectProgram(fixture.gl, {
+						distanceFog,
+						portalVisibility,
+						outdoorPssm,
+						transformSource: "pose-table",
+					});
+					expect("fogUniforms" in linked).toBe(distanceFog);
+					expect(linked.portalVisibilityUniforms !== null).toBe(
+						portalVisibility,
+					);
+					expect(linked.outdoorPssmUniforms !== null).toBe(outdoorPssm);
+					expect(linked.uniforms.firstPoseRow).toEqual({
+						name: "uFirstPoseRow",
+					});
+					expect(
+						fixture.samplerAssignments.filter(
+							({ program, name }) =>
+								program === linked.program &&
+								(name === "uPoses" || name === "uMaterials"),
+						),
+					).toEqual([
+						{
+							name: "uPoses",
+							program: linked.program,
+							unit: OBJECT_TEXTURE_UNITS.poses,
+						},
+						{
+							name: "uMaterials",
+							program: linked.program,
+							unit: OBJECT_TEXTURE_UNITS.materials,
+						},
+					]);
+				}
+			}
+		}
+	});
+
+	it("releases the linked program when a required table binding is missing", () => {
+		const fixture = fakeGl("uMaterials");
+		expect(() =>
+			createWebGL2ObjectProgram(fixture.gl, {
+				distanceFog: false,
+				portalVisibility: false,
+				outdoorPssm: false,
+				transformSource: "pose-table",
+			}),
+		).toThrow("WebGL shader is missing uniform uMaterials.");
+		expect(fixture.deletedPrograms).toEqual(fixture.programs);
 	});
 });
 
@@ -96,9 +152,10 @@ describe("EnvCell grounding object variant", () => {
 	});
 });
 
-function fakeGl(): {
+function fakeGl(missingUniform: string | null): {
 	readonly gl: WebGL2RenderingContext;
 	readonly programs: WebGLProgram[];
+	readonly deletedPrograms: WebGLProgram[];
 	readonly samplerAssignments: Array<{
 		readonly name: string;
 		readonly program: WebGLProgram;
@@ -106,6 +163,7 @@ function fakeGl(): {
 	}>;
 } {
 	const programs: WebGLProgram[] = [];
+	const deletedPrograms: WebGLProgram[] = [];
 	const samplerAssignments: Array<{
 		name: string;
 		program: WebGLProgram;
@@ -125,14 +183,20 @@ function fakeGl(): {
 			return program;
 		},
 		createShader: () => ({}) as WebGLShader,
-		deleteProgram: () => undefined,
+		deleteProgram: (program: WebGLProgram) => deletedPrograms.push(program),
 		deleteShader: () => undefined,
 		getProgramInfoLog: () => "",
 		getProgramParameter: () => true,
 		getShaderInfoLog: () => "",
 		getShaderParameter: () => true,
+		getUniformBlockIndex: () => 0,
+		getActiveUniformBlockParameter: () =>
+			PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
+		uniformBlockBinding: () => undefined,
 		getUniformLocation: (_program: WebGLProgram, name: string) =>
-			({ name }) as unknown as WebGLUniformLocation,
+			name === missingUniform
+				? null
+				: ({ name } as unknown as WebGLUniformLocation),
 		linkProgram: () => undefined,
 		shaderSource: () => undefined,
 		uniform1i: (location: { readonly name: string }, unit: number) => {
@@ -148,5 +212,5 @@ function fakeGl(): {
 			activeProgram = program;
 		},
 	} as unknown as WebGL2RenderingContext;
-	return { gl, programs, samplerAssignments };
+	return { gl, programs, deletedPrograms, samplerAssignments };
 }

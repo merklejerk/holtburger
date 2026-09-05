@@ -321,7 +321,7 @@ export interface FrameSelectionMetrics {
 	/** Dynamic entity roots contributing visible rigid parts. */
 	readonly visibleDynamicEntityCount: number;
 	/** Visible rigid-part material ranges emitted by dynamic entities. */
-	readonly visibleDynamicPartCount: number;
+	readonly visibleDynamicSourceRangeCount: number;
 	/** Eligible static or dynamic presentation roots projected under the active cutoff. */
 	readonly testedObjectPresentationCount: number;
 	/** Projected presentation roots retained for contribution expansion. */
@@ -420,10 +420,8 @@ export interface FrameSelectionMetrics {
 	readonly submittedTransparentInstanceCount: number;
 	/** Additive object draw calls submitted in their deterministic phase. */
 	readonly submittedAdditiveObjectDrawCount: number;
-	/** Dynamic compatible runs submitted through shared frame instancing. */
+	/** Dynamic merged ordinary draws submitted through visible material phases. */
 	readonly submittedDynamicDrawCount: number;
-	/** Dynamic rigid-part instances submitted through shared frame instancing. */
-	readonly submittedDynamicInstanceCount: number;
 	/** Particle batches that resolved to one physical instanced draw. */
 	readonly submittedParticleBatchCount: number;
 	/** Particle sprite instances submitted by resolved batches. */
@@ -541,12 +539,8 @@ export interface RendererOutdoorShadowMapFrameMetrics {
 	readonly cascadeCandidateMembershipCount: number;
 	/** Unique eligible complete roots before the per-view N/M budget. */
 	readonly candidateRootCount: number;
-	/** Compatible geometry/raster-state runs submitted across every cascade. */
-	readonly compatibleDepthRunCount: number;
-	/** Frame-instance bytes uploaded specifically for outdoor shadow depth submission. */
-	readonly instanceUploadBytes: number;
-	/** Nonempty cascade instance uploads issued specifically for outdoor shadow maps. */
-	readonly instanceUploadCount: number;
+	/** Ordinary merged depth spans selected across every cascade. */
+	readonly selectedDepthDrawCount: number;
 	/** Selected complete roots assigned to mapped PSSM work. */
 	readonly mappedRootCount: number;
 	/** Selected complete roots assigned to geometry-free analytic fallback. */
@@ -557,8 +551,8 @@ export interface RendererOutdoorShadowMapFrameMetrics {
 	readonly selectedRootCount: number;
 	/** Views that skipped mapped target and submission work because no depth parts survived. */
 	readonly emptyMappedViewCount: number;
-	/** Caster parts retained across cascades, counting a part once per intersected cascade. */
-	readonly selectedCasterPartCount: number;
+	/** Distinct visible parts per root, summed across its intersected cascades. */
+	readonly selectedPartCascadeCount: number;
 }
 
 /** Renderer CPU timings for one explicitly profiled frame. */
@@ -698,6 +692,19 @@ export interface RendererFrameProfile {
 
 /** One cold read of the renderer diagnostics that must describe the same session state. */
 export interface RendererFrameDiagnosticsSnapshot {
+	/** GPU payloads outside shared geometry leases; excludes driver overhead and CPU staging. */
+	readonly dynamicResources: {
+		/** Current appearance generations, counted once regardless of template references. */
+		readonly appearances: {
+			readonly indexBytes: number;
+			readonly materialBytes: number;
+		};
+		/** High-water GPU page capacity and payload of the latest completed pose upload. */
+		readonly poses: {
+			readonly allocatedBytes: number;
+			readonly uploadedBytes: number;
+		};
+	};
 	/** Cold entity-shadow resource ownership, independent from optional timing profiling. */
 	readonly entityShadows: EntityShadowResourceDiagnostics;
 	/** Plate selection, submission, and cache facts from the latest frame and renderer lifetime. */
@@ -853,6 +860,11 @@ export type ResolvedResourceInvalidation =
 	"atlas-publication" | "region-static-detail";
 
 export interface Renderer {
+	/** Stage renderer-owned dynamic tables/indices; the returned release follows template lifetime. */
+	retainDynamicAppearance(
+		layout: ObjectVisualTemplate["layout"],
+		appearance: ObjectVisualTemplate["appearance"],
+	): () => void;
 	/** Backend-specific diagnostics; absent renderers remain valid production implementations. */
 	readonly frameDiagnostics?: RendererFrameDiagnostics;
 	/** Celestial-sky residency, absent on backends that cannot draw one. */

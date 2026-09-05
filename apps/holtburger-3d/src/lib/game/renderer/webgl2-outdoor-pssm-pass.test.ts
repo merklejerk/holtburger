@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { ObjectGeometryKey } from "../geometry/types";
 import { AABB3, Mat4, Quat, Vec3 } from "../math/types";
 import type { SceneNodeId } from "../scene";
-import type { VisibleRigidDepthContribution } from "../systems/components";
+import { createDynamicDepthTestFixture } from "./dynamic-depth-test-fixture";
 import { DEFAULT_ENTITY_SHADOW_SETTINGS } from "./entity-shadow-policy";
 import type { OutdoorPssmCasterWorld } from "./outdoor-pssm-casters";
 import type { RenderContribution } from "./render-world";
@@ -18,11 +17,65 @@ const ANCHOR = "0x0101ffff";
 const NODE = "scene-node:1" as SceneNodeId;
 
 describe("WebGL2OutdoorPssmPass", () => {
+	it("prepares independent views without GPU work and executes them without repeating selection", () => {
+		const fixture = createFixture(true);
+		fixture.pass.beginFrame();
+		const input = createInput(new Vec3(0.2, 1, -0.3));
+		const first = fixture.pass.prepare(input, null);
+		if (first === null) throw new Error("Fixture requires directional light.");
+		const firstMatrices = first.storage.cascades.map((cascade) => ({
+			...cascade.lightClip,
+		}));
+		const batchCapacity = first.storage.batchPool.length;
+		const casterArray = first.storage.batches[0]?.casters;
+		const second = fixture.pass.prepare(
+			{
+				...input,
+				camera: { ...input.camera, position: new Vec3(10, 2, 3) },
+				casterBudget: { maximumMappedRoots: 0, maximumSelectedRoots: 1 },
+			},
+			null,
+		);
+		if (second === null) throw new Error("Fixture requires directional light.");
+		expect(first.storage).not.toBe(second.storage);
+		expect(first.storage.casterSelectionScratch).not.toBe(
+			second.storage.casterSelectionScratch,
+		);
+		expect(
+			first.storage.cascades.map((cascade) => ({ ...cascade.lightClip })),
+		).toEqual(firstMatrices);
+		expect(
+			first.storage.batches.some((batch) => batch.casters.length > 0),
+		).toBe(true);
+		expect(
+			second.storage.batches.every((batch) => batch.casters.length === 0),
+		).toBe(true);
+		expect(fixture.state.glCalls).toEqual([]);
+		expect(fixture.state.poseReads).toEqual([]);
+		expect(fixture.state.targetResizes).toBe(0);
+		const queries = fixture.state.queries;
+		fixture.pass.render(first, null);
+		expect(fixture.state.draws).toHaveLength(input.settings.cascadeCount);
+		fixture.pass.render(second, null);
+		expect(second.storage.analyticCasters).toHaveLength(1);
+		expect(fixture.state.queries).toBe(queries);
+		fixture.pass.beginFrame();
+		expect(
+			first.storage.batches.every((batch) => batch.casters.length === 0),
+		).toBe(true);
+		expect(first.storage.batchPool).toHaveLength(batchCapacity);
+		expect(casterArray).toHaveLength(0);
+		expect(second.storage.analyticCasters).toHaveLength(0);
+		const next = fixture.pass.prepare(input, null);
+		expect(next?.storage).toBe(first.storage);
+	});
 	it("does no GPU, query, target, or shader work for zero sun", () => {
 		const fixture = createFixture();
 		const input = createInput(Vec3.zero());
 
-		expect(fixture.pass.render(input, null)).toBeNull();
+		expect(
+			fixture.pass.render(fixture.pass.prepare(input, null), null),
+		).toBeNull();
 
 		expect(fixture.state.targetResizes).toBe(0);
 		expect(fixture.state.queries).toBe(0);
@@ -38,44 +91,42 @@ describe("WebGL2OutdoorPssmPass", () => {
 			candidateRootCount: 0,
 			cascadeCandidateMembershipCount: 0,
 			cascadeQueryCount: 0,
-			compatibleDepthRunCount: 0,
+			selectedDepthDrawCount: 0,
 			emptyMappedViewCount: 0,
-			instanceUploadBytes: 0,
-			instanceUploadCount: 0,
 			mappedRootCount: 0,
 			rejectedRootCount: 0,
 			selectedRootCount: 0,
-			selectedCasterPartCount: 0,
+			selectedPartCascadeCount: 0,
 		};
 
-		const active = fixture.pass.render(input, profileMetrics);
+		const active = fixture.pass.render(
+			fixture.pass.prepare(input, profileMetrics),
+			profileMetrics,
+		);
 
 		expect(active?.cascades).toHaveLength(2);
-		expect(active?.instanceUploads).toEqual({ bytes: 160, count: 2 });
 		expect(active?.targets).toBe(fixture.targets);
 		expect(fixture.state.targetResizes).toBe(1);
 		expect(fixture.state.attachedLayers).toEqual([0, 1]);
 		expect(fixture.state.queries).toBe(2);
 		expect(fixture.state.programCreations).toBe(1);
-		expect(fixture.state.preparedInstanceCounts).toEqual([1, 1]);
+		expect(fixture.state.poseReads).toEqual([NODE, NODE]);
 		expect(profileMetrics).toEqual({
 			analyticRootCount: 0,
 			candidateRootCount: 1,
 			cascadeCandidateMembershipCount: 2,
 			cascadeQueryCount: 2,
-			compatibleDepthRunCount: 2,
+			selectedDepthDrawCount: 2,
 			emptyMappedViewCount: 0,
-			instanceUploadBytes: 160,
-			instanceUploadCount: 2,
 			mappedRootCount: 1,
 			rejectedRootCount: 0,
 			selectedRootCount: 1,
-			selectedCasterPartCount: 2,
+			selectedPartCascadeCount: 2,
 		});
-		expect(fixture.state.expansions).toBe(1);
+		expect(fixture.state.depthPreparations).toBe(1);
 		expect(fixture.state.draws).toEqual([
-			{ count: 6, instanceCount: 1, offset: 0 },
-			{ count: 6, instanceCount: 1, offset: 0 },
+			{ count: 6, type: 0x1405, offset: 0 },
+			{ count: 6, type: 0x1405, offset: 0 },
 		]);
 		expect(input.selectedDynamicNodeIds).toEqual(new Set([NODE]));
 		expect(fixture.state.glCalls.slice(-5)).toEqual([
@@ -91,7 +142,10 @@ describe("WebGL2OutdoorPssmPass", () => {
 		const fixture = createFixture(false);
 
 		expect(
-			fixture.pass.render(createInput(new Vec3(0, 1, 0)), null),
+			fixture.pass.render(
+				fixture.pass.prepare(createInput(new Vec3(0, 1, 0)), null),
+				null,
+			),
 		).toBeNull();
 
 		expect(fixture.state.targetResizes).toBe(0);
@@ -101,18 +155,17 @@ describe("WebGL2OutdoorPssmPass", () => {
 		expect(fixture.state.draws).toEqual([]);
 	});
 
-	it("keeps M=0 casters analytic without geometry expansion or mapped GPU work", () => {
+	it("keeps M=0 casters analytic without depth preparation or mapped GPU work", () => {
 		const fixture = createFixture(true);
 		const input = {
 			...createInput(new Vec3(0, 1, 0)),
 			casterBudget: { maximumMappedRoots: 0, maximumSelectedRoots: 1 },
 		};
-
-		expect(fixture.pass.render(input, null)).toBeNull();
-
-		expect(fixture.pass.getAnalyticCasters()).toHaveLength(1);
+		const prepared = fixture.pass.prepare(input, null);
+		expect(prepared?.storage.analyticCasters).toHaveLength(1);
+		expect(fixture.pass.render(prepared, null)).toBeNull();
 		expect(input.selectedDynamicNodeIds).toEqual(new Set([NODE]));
-		expect(fixture.state.expansions).toBe(0);
+		expect(fixture.state.depthPreparations).toBe(0);
 		expect(fixture.state.targetResizes).toBe(0);
 		expect(fixture.state.programCreations).toBe(0);
 		expect(fixture.state.attachedLayers).toEqual([]);
@@ -120,7 +173,10 @@ describe("WebGL2OutdoorPssmPass", () => {
 
 	it("forwards master disable and destroys a compiled program once", () => {
 		const fixture = createFixture(true);
-		fixture.pass.render(createInput(new Vec3(0, 1, 0)), null);
+		fixture.pass.render(
+			fixture.pass.prepare(createInput(new Vec3(0, 1, 0)), null),
+			null,
+		);
 
 		fixture.pass.disable();
 		fixture.pass.destroy();
@@ -154,10 +210,10 @@ describe("hasOutdoorPssmLightAndInterval", () => {
 interface FixtureState {
 	attachedLayers: number[];
 	deletedPrograms: number;
-	draws: Array<{ count: number; instanceCount: number; offset: number }>;
-	expansions: number;
+	draws: Array<{ count: number; type: number; offset: number }>;
+	depthPreparations: number;
 	glCalls: string[];
-	preparedInstanceCounts: number[];
+	poseReads: SceneNodeId[];
 	programCreations: number;
 	queries: number;
 	targetDestroys: number;
@@ -174,9 +230,9 @@ function createFixture(withCaster = false): {
 		attachedLayers: [],
 		deletedPrograms: 0,
 		draws: [],
-		expansions: 0,
+		depthPreparations: 0,
 		glCalls: [],
-		preparedInstanceCounts: [],
+		poseReads: [],
 		programCreations: 0,
 		queries: 0,
 		targetDestroys: 0,
@@ -190,18 +246,12 @@ function createFixture(withCaster = false): {
 		framebuffer: fakeResource<WebGLFramebuffer>("framebuffer"),
 		resolution: 256,
 	};
-	const contribution = dynamicContribution();
+	const contribution = createDynamicDepthTestFixture(NODE, ANCHOR, 6);
 	const descriptor = dynamicDescriptor();
 	const world: OutdoorPssmCasterWorld = {
-		expandDynamicContributions: () => {
-			state.expansions += 1;
-			return {
-				depth: withCaster ? [contribution] : [],
-				kind: "visible",
-				landblockId: ANCHOR,
-				material: [],
-				renderScopes: [{ kind: "outdoor" }],
-			};
+		getDynamicDepth: () => {
+			state.depthPreparations += 1;
+			return withCaster ? contribution : null;
 		},
 		getRenderContributionDescriptor: () => descriptor,
 		getEntityShadowDynamicFacts: () => ({
@@ -213,28 +263,12 @@ function createFixture(withCaster = false): {
 			state.queries += 1;
 			return { entries: withCaster ? [NODE] : [] };
 		},
-		resolveGeometry: () => "geometry-resource:1" as const,
-	};
-	let populatedInstanceCount = 0;
-	const frameInstances = {
-		getRange(firstInstance: number, instanceCount: number) {
-			return {
-				binding: {
-					buffer: fakeResource<WebGLBuffer>("instance-buffer"),
-					capacity: populatedInstanceCount,
-					populatedInstanceCount,
-					strideBytes: 80,
-				},
-				firstInstance,
-				instanceCount,
-			};
-		},
-		prepareView(instances: readonly unknown[]) {
-			populatedInstanceCount = instances.length;
-			state.preparedInstanceCounts.push(instances.length);
-		},
 	};
 	const resources = {
+		getPose: (nodeId: SceneNodeId) => {
+			state.poseReads.push(nodeId);
+			return { texture: fakeResource<WebGLTexture>("pose-page"), firstRow: 9 };
+		},
 		getGeometry: () => ({
 			indexCount: 6,
 			indexElementBytes: 2,
@@ -247,9 +281,11 @@ function createFixture(withCaster = false): {
 		uniforms: {
 			landblockOffset: fakeResource<WebGLUniformLocation>("landblock-uniform"),
 			lightClip: fakeResource<WebGLUniformLocation>("matrix-uniform"),
+			poses: fakeResource<WebGLUniformLocation>("poses-uniform"),
+			firstPoseRow: fakeResource<WebGLUniformLocation>("row-uniform"),
 		},
 	};
-	const pass = new WebGL2OutdoorPssmPass(gl, resources, world, frameInstances, {
+	const pass = new WebGL2OutdoorPssmPass(gl, resources, world, {
 		createProgram: () => {
 			state.programCreations += 1;
 			return program;
@@ -328,6 +364,10 @@ function createFakeGl(state: FixtureState): WebGL2RenderingContext {
 		SCISSOR_TEST: 0x0c11,
 		STENCIL_TEST: 0x0b90,
 		TRIANGLES: 0x0004,
+		UNSIGNED_INT: 0x1405,
+		ELEMENT_ARRAY_BUFFER: 0x8893,
+		TEXTURE0: 0x84c0,
+		TEXTURE_2D: 0x0de1,
 	} as const;
 	const capabilityName = (capability: GLenum): string => {
 		switch (capability) {
@@ -342,6 +382,10 @@ function createFakeGl(state: FixtureState): WebGL2RenderingContext {
 	return {
 		...constants,
 		bindBuffer: () => undefined,
+		activeTexture: () => undefined,
+		bindTexture: () => undefined,
+		bindSampler: () => undefined,
+		uniform1i: () => undefined,
 		bindFramebuffer: (_target: GLenum, framebuffer: WebGLFramebuffer | null) =>
 			state.glCalls.push(`framebuffer:${framebuffer ? "target" : "null"}`),
 		bindVertexArray: () => undefined,
@@ -356,21 +400,17 @@ function createFakeGl(state: FixtureState): WebGL2RenderingContext {
 		depthMask: () => undefined,
 		disable: (capability: GLenum) =>
 			state.glCalls.push(`disable:${capabilityName(capability)}`),
-		drawElementsInstanced: (
+		drawElements: (
 			_mode: GLenum,
 			count: GLsizei,
-			_type: GLenum,
+			type: GLenum,
 			offset: GLintptr,
-			instanceCount: GLsizei,
-		) => state.draws.push({ count, instanceCount, offset }),
+		) => state.draws.push({ count, type, offset }),
 		enable: () => undefined,
-		enableVertexAttribArray: () => undefined,
 		polygonOffset: () => undefined,
 		uniform3f: () => undefined,
 		uniformMatrix4fv: () => undefined,
 		useProgram: () => undefined,
-		vertexAttribDivisor: () => undefined,
-		vertexAttribPointer: () => undefined,
 		viewport: (_x: GLint, _y: GLint, width: GLsizei, height: GLsizei) =>
 			state.glCalls.push(`viewport:${width}x${height}`),
 	} as unknown as WebGL2RenderingContext;
@@ -391,22 +431,6 @@ function dynamicDescriptor(): RenderContribution {
 			},
 		},
 		kind: "dynamic",
-	};
-}
-
-function dynamicContribution(): VisibleRigidDepthContribution {
-	return {
-		drawUnit: {
-			cullFace: "back",
-			geometry: "object-geometry:caster" as ObjectGeometryKey,
-			indexCount: 6,
-			indexStart: 0,
-			retailVisibility: "normally-visible",
-		},
-		instance: {
-			color: { a: 1, b: 1, g: 1, r: 1 },
-			sourceToLandblock: Mat4.identity(),
-		},
 	};
 }
 

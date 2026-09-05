@@ -436,23 +436,40 @@ export function transformAABB3(
 	bounds: AABB3,
 	targetBounds?: AABB3,
 ): AABB3 {
-	const corners = [
-		new Vec3(bounds.min.x, bounds.min.y, bounds.min.z),
-		new Vec3(bounds.min.x, bounds.min.y, bounds.max.z),
-		new Vec3(bounds.min.x, bounds.max.y, bounds.min.z),
-		new Vec3(bounds.min.x, bounds.max.y, bounds.max.z),
-		new Vec3(bounds.max.x, bounds.min.y, bounds.min.z),
-		new Vec3(bounds.max.x, bounds.min.y, bounds.max.z),
-		new Vec3(bounds.max.x, bounds.max.y, bounds.min.z),
-		new Vec3(bounds.max.x, bounds.max.y, bounds.max.z),
-	].map((corner) => transformPoint3(matrix, corner));
+	let minX = Infinity;
+	let minY = Infinity;
+	let minZ = Infinity;
+	let maxX = -Infinity;
+	let maxY = -Infinity;
+	let maxZ = -Infinity;
+	// Preserve the point-transform contract, including perspective division. Publish only after
+	// reading every corner so the caller can alias input/output and zero-W failures leave it intact.
+	for (let corner = 0; corner < 8; corner += 1) {
+		const x = (corner & 4) === 0 ? bounds.min.x : bounds.max.x;
+		const y = (corner & 2) === 0 ? bounds.min.y : bounds.max.y;
+		const z = (corner & 1) === 0 ? bounds.min.z : bounds.max.z;
+		const w = matrix.m14 * x + matrix.m24 * y + matrix.m34 * z + matrix.m44;
+		if (w === 0) throw new Error("Cannot transform a point with zero W.");
+		const transformedX =
+			(matrix.m11 * x + matrix.m21 * y + matrix.m31 * z + matrix.m41) / w;
+		const transformedY =
+			(matrix.m12 * x + matrix.m22 * y + matrix.m32 * z + matrix.m42) / w;
+		const transformedZ =
+			(matrix.m13 * x + matrix.m23 * y + matrix.m33 * z + matrix.m43) / w;
+		minX = Math.min(minX, transformedX);
+		minY = Math.min(minY, transformedY);
+		minZ = Math.min(minZ, transformedZ);
+		maxX = Math.max(maxX, transformedX);
+		maxY = Math.max(maxY, transformedY);
+		maxZ = Math.max(maxZ, transformedZ);
+	}
 	const target = targetBounds ?? AABB3.zero();
-	target.min.x = Math.min(...corners.map((corner) => corner.x));
-	target.min.y = Math.min(...corners.map((corner) => corner.y));
-	target.min.z = Math.min(...corners.map((corner) => corner.z));
-	target.max.x = Math.max(...corners.map((corner) => corner.x));
-	target.max.y = Math.max(...corners.map((corner) => corner.y));
-	target.max.z = Math.max(...corners.map((corner) => corner.z));
+	target.min.x = minX;
+	target.min.y = minY;
+	target.min.z = minZ;
+	target.max.x = maxX;
+	target.max.y = maxY;
+	target.max.z = maxZ;
 	return target;
 }
 

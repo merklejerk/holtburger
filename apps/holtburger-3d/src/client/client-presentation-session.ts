@@ -96,6 +96,10 @@ import type {
 	RendererFrameDiagnosticsSnapshot,
 	WorldIndicatorInput,
 } from "../lib/game/renderer/renderer";
+import {
+	RuntimeTickProfiler,
+	type RuntimeTickProfile,
+} from "../lib/game/runtime/runtime-tick-profiler";
 import type { MinimapFrame } from "../app/minimap-frame";
 import type { MapEntity } from "../lib/game/map/map-blips";
 import type { MapTerrainSource } from "../lib/game/map/map-renderer";
@@ -110,7 +114,10 @@ import {
 	type EntitySelectionRefinement,
 	type PresentedSelectionRay,
 } from "../lib/game/selection/entity-selection-intersection";
-import type { SelectedDynamicEntityPresentationState } from "../lib/game/runtime/game-presentation-runtime";
+import type {
+	PortalTransitionRuntimeDiagnostics,
+	SelectedDynamicEntityPresentationState,
+} from "../lib/game/runtime/game-presentation-runtime";
 import {
 	clientSelectedEntityDistance,
 	type ClientSelectedEntityTrackingStatus,
@@ -167,13 +174,20 @@ export interface ClientPresentationDiagnostics {
 		readonly drawingBufferWidth: number;
 		readonly drawingBufferHeight: number;
 	};
+	/** Existing shared runtime clocks, injected only for an explicitly debug-enabled client. */
+	readonly tickProfile: RuntimeTickProfile | null;
+	/** Shared resource totals for cold resident-memory comparisons in client profiles. */
+	readonly residentResources:
+		PortalTransitionRuntimeDiagnostics["persistent"] | null;
+	/** Complete renderer diagnostics, including opt-in CPU/GPU phase clocks and workload counters. */
+	readonly renderer: RendererFrameDiagnosticsSnapshot | null;
 	readonly draw: null | {
 		readonly entitySelection: FrameSelectionMetrics["entitySelection"];
 		readonly viewCount: number;
 		readonly visibleSceneEntries: number;
 		readonly visibleStaticNodes: number;
 		readonly visibleDynamicEntities: number;
-		readonly visibleDynamicParts: number;
+		readonly visibleDynamicSourceRanges: number;
 		readonly objectDrawCalls: number;
 		readonly dynamicDrawCalls: number;
 		readonly particleBatches: number;
@@ -293,6 +307,14 @@ export interface ClientPresentationRuntime extends MapTerrainSource {
 	render(timeSeconds: number): PortalTransitionPresentationReceipt | null;
 	/** Optional cold renderer counters used only by explicitly enabled client diagnostics. */
 	getRendererFrameDiagnostics?(): RendererFrameDiagnosticsSnapshot | null;
+	/** Optional shared runtime timing injected only by a diagnostics-oriented frontend. */
+	getTickProfile?(): RuntimeTickProfile | null;
+	/** Reuse existing runtime resource accounting without adding a frame-hot collector. */
+	getPortalTransitionDiagnostics?(): PortalTransitionRuntimeDiagnostics;
+	/** Explicitly create or tear down the existing renderer profiling session. */
+	setRendererFrameProfilingEnabled?(enabled: boolean): void;
+	/** Delimit the renderer measurement mean without rebuilding presentation. */
+	resetRendererFrameProfile?(): void;
 }
 
 /** Minimal owner surface; keeping it structural makes the feed behavior testable without WebGL. */
@@ -315,6 +337,8 @@ export interface ClientPresentationSessionDependencies {
 	readonly hostTransport: HostTransport;
 	readonly onError?: (error: unknown) => void;
 	readonly ownerFactory?: ClientPresentationOwnerFactory;
+	/** Inject shared update clocks only for an explicit diagnostic client launch. */
+	readonly enablePerformanceProfiling?: boolean;
 }
 
 /**
@@ -332,6 +356,8 @@ export class ClientPresentationSession {
 	readonly #hostTransport: HostTransport;
 	readonly #onError: (error: unknown) => void;
 	readonly #ownerFactory: ClientPresentationOwnerFactory;
+	/** Client-only diagnostic observer; absent from ordinary non-debug composition. */
+	readonly #tickProfiler: RuntimeTickProfiler | undefined;
 	#owner: ClientPresentationOwner | null = null;
 	#frameSettings: FrameSettings = CLIENT_TUNING.frameSettings;
 	#sceneInterestCoordinator: SceneInterestRequestCoordinator | null = null;
@@ -369,6 +395,9 @@ export class ClientPresentationSession {
 		this.#onError = dependencies.onError ?? (() => undefined);
 		this.#ownerFactory =
 			dependencies.ownerFactory ?? defaultClientPresentationOwnerFactory;
+		this.#tickProfiler = dependencies.enablePerformanceProfiling
+			? new RuntimeTickProfiler()
+			: undefined;
 		const cameraSession = new ClientCameraSession(this.#session);
 		this.camera = new PossessionCameraController({
 			initialLook: {
@@ -507,6 +536,10 @@ export class ClientPresentationSession {
 				drawingBufferWidth: this.#canvas.width,
 				drawingBufferHeight: this.#canvas.height,
 			},
+			tickProfile: owner?.runtime.getTickProfile?.() ?? null,
+			residentResources:
+				owner?.runtime.getPortalTransitionDiagnostics?.().persistent ?? null,
+			renderer: frame,
 			draw:
 				selection === undefined
 					? null
@@ -516,12 +549,29 @@ export class ClientPresentationSession {
 							visibleSceneEntries: selection.visibleSceneEntries,
 							visibleStaticNodes: selection.visibleStaticNodeCount,
 							visibleDynamicEntities: selection.visibleDynamicEntityCount,
-							visibleDynamicParts: selection.visibleDynamicPartCount,
+							visibleDynamicSourceRanges:
+								selection.visibleDynamicSourceRangeCount,
 							objectDrawCalls: selection.objectDrawCalls,
 							dynamicDrawCalls: selection.submittedDynamicDrawCount,
 							particleBatches: selection.submittedParticleBatchCount,
 						},
 		};
+	}
+
+	/** Enable the existing renderer phase clocks for an explicit live-client investigation. */
+	setRendererFrameProfilingEnabled(enabled: boolean): void {
+		const runtime = this.#owner?.runtime;
+		if (runtime === undefined)
+			throw new Error("Client presentation is unavailable.");
+		if (runtime.setRendererFrameProfilingEnabled === undefined) {
+			throw new Error("Client renderer profiling is unavailable.");
+		}
+		runtime.setRendererFrameProfilingEnabled(enabled);
+	}
+
+	/** Reset the active renderer window immediately before a bounded measurement. */
+	resetRendererFrameProfile(): void {
+		this.#owner?.runtime.resetRendererFrameProfile?.();
 	}
 
 	/** Sample host-query and exact-render rays from the exact camera and viewport last presented. */
@@ -993,6 +1043,7 @@ export class ClientPresentationSession {
 				signal: this.#constructionAbortController.signal,
 				frameSettings: this.#frameSettings,
 				portalWarpDriveTuning: CLIENT_TUNING.portalTransition.visual,
+				tickProfiler: this.#tickProfiler,
 				audioTuning: {
 					placementSmoothingSeconds:
 						CLIENT_TUNING.audio.placementSmoothingSeconds,

@@ -1623,6 +1623,85 @@ duplicate authority across many mutation paths.
 work becomes terminal, tolerate stale entries only when the next visit removes them safely, or keep
 the dense scan when measurements prove membership accounting costs more.
 
+## Deferred Work Borrows the Next Operation's Scratch
+
+**Smell:** Prepared work retains mutable producer-owned output whose reuse boundary occurs before
+that work is consumed.
+
+**Signals:**
+
+- An immediate prepare/execute loop becomes prepare-all/execute-all without changing output ownership.
+- Multiple queued records reference the same arrays, nested records, or mutable targets.
+- Preparing a second operation changes the first operation's apparent inputs despite no explicit
+  update to the first record.
+- Single-operation tests pass, but reversing preparation order changes unrelated results.
+
+**Possible failure:** Earlier work executes with later work's inputs. Shallow copies or readonly
+types can hide the alias without extending the backing storage's lifetime.
+
+**Questions:** When is each borrowed value last consumed, and when may its producer overwrite it?
+Does a copied container still share mutable elements? Which resources genuinely need independent
+storage, and which can remain shared because execution consumes them sequentially?
+
+**Counterexamples:** Synchronous visitors may safely borrow scratch until they return. Immutable
+shared inputs and sequentially populated execution targets do not require per-operation copies.
+
+**Possible responses:** Give simultaneously pending operations independent output slots, retain
+immutable snapshots, keep immediate consumption where appropriate, or test two differently shaped
+operations in both preparation orders before changing scheduling.
+
+## A Consumer Lives on Another Consumer's Resource Lease
+
+**Smell:** A consumer uses a shared resource without owning a retention claim or participating in
+an explicit enclosing lifetime; another consumer happens to keep the resource available.
+
+**Signals:**
+
+- Removing or optimizing one use unexpectedly breaks an unrelated use of the same resource.
+- A lookup succeeds only while another feature, view, or owner remains active.
+- Resource acquisition names one consumer, but repository searches reveal additional readers with
+  independent startup and teardown paths.
+- A cutover removes an apparently redundant allocation without accounting for auxiliary consumers.
+
+**Possible failure:** A valid cleanup becomes premature disposal for a hidden dependent. The
+failure may appear only during transitions or uncommon combinations of otherwise independent features.
+
+**Questions:** Which lifetime covers every reader's final use? Is sharing explicit, or incidental
+to today's allocation strategy? Can each consumer run after the other releases its claim?
+
+**Counterexamples:** A parent owner can legitimately retain resources for all children when their
+lifetimes are bounded by that parent and teardown enforces the ordering.
+
+**Possible responses:** Give independent consumers explicit leases, move ownership to a genuine
+common lifetime, enumerate readers before removing retention, or test consumers independently and
+across opposite teardown orders.
+
+## A Ratio Combines Different Observation Windows
+
+**Smell:** A rate, mean, or comparative metric combines values sampled over different populations
+or time intervals without making that mismatch explicit.
+
+**Signals:**
+
+- A duration is frozen before an awaited export or teardown, but the count is sampled afterward.
+- One accumulator resets while another continues across the previous measurement window.
+- A report combines a latest snapshot with an earlier interval merely because both describe the
+  same subsystem.
+
+**Possible failure:** Plausible-looking numbers systematically overstate or understate performance.
+Changes to reporting overhead can appear to improve the measured operation itself.
+
+**Questions:** What are the exact start, end, and population of each operand? Can work advance
+between their captures? Does reporting or profiler shutdown occur inside only one operand's window?
+
+**Counterexamples:** Independently sampled estimates can be appropriate when their uncertainty is
+explicit and the reporting claim tolerates the skew. A lifetime total need not match a recent rate
+when the report clearly distinguishes them.
+
+**Possible responses:** Capture related accumulators and elapsed time at one owning boundary, close
+the observation window before exporting it, reset operands together, or label unmatched estimates
+instead of presenting them as a matched measurement.
+
 ## Adding Observations
 
 An observation belongs here when it has:

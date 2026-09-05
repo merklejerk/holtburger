@@ -100,6 +100,44 @@ describe("SceneGraph", () => {
 		).toEqual(new Vec3(10, 40, 30));
 	});
 
+	it("publishes parent and part transforms coherently through unbounded attachment nodes", () => {
+		const scene = new SceneGraph();
+		const root = scene.createNode(rootInput);
+		const visual = scene.createNode({
+			parentId: root,
+			localBounds: null,
+			localTransform: Mat4.identity(),
+		});
+		const part = scene.createNode({
+			parentId: visual,
+			localBounds: null,
+			localTransform: Mat4.identity(),
+		});
+		const held = scene.createNode({
+			...boundedChildFields,
+			parentId: part,
+			localTransform: createTranslationMat4(new Vec3(0, 0, 3)),
+		});
+		scene.updateLocalTransformWithChildren(
+			visual,
+			createTranslationMat4(new Vec3(10, 0, 0)),
+			[{ nodeId: part, transform: createTranslationMat4(new Vec3(0, 20, 0)) }],
+		);
+		expect(
+			getMat4Translation(visiblePlacement(scene, held).localToLandblock),
+		).toEqual(new Vec3(10, 20, 3));
+		// A malformed batch must not publish its valid prefix or its parent transform.
+		expect(() =>
+			scene.updateLocalTransformWithChildren(visual, Mat4.identity(), [
+				{ nodeId: part, transform: Mat4.identity() },
+				{ nodeId: held, transform: Mat4.identity() },
+			]),
+		).toThrow("not a direct child");
+		expect(
+			getMat4Translation(visiblePlacement(scene, held).localToLandblock),
+		).toEqual(new Vec3(10, 20, 3));
+	});
+
 	// `getResolvedOrigin` answers the same question as `getResolvedPlacement` by a different route
 	// (a point walked up the parent chain rather than composed matrices), so the two must agree
 	// wherever a frame-rate consumer swaps one for the other.

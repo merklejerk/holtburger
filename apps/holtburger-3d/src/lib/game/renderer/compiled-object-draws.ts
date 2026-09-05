@@ -83,13 +83,10 @@ export class CompiledObjectDrawStore<TSubmissions, TCompatibility> {
 	/**
 	 * Return one draw unit's compiled facts, compiling them on first sight.
 	 *
-	 * Used where submissions cannot be cached whole because they carry per-frame state, which
-	 * today means dynamic parts: their instance transforms are resampled every frame.
-	 *
-	 * A draw unit can be submitted under more than one ordering class: an effect ramping a
-	 * dynamic part's translucency renders an otherwise opaque unit as transparent, and can settle
-	 * there indefinitely. Variants therefore get their own slot rather than being treated as a
-	 * cache miss that recompiles every frame for as long as the effect holds.
+	 * Static node compilation shares these material/device facts; the portal-transition visual
+	 * also reuses them while rebuilding its animated per-part submissions. Ordering is an explicit
+	 * variant because it participates in the compiled blend/depth policy. Dynamic entity meshes
+	 * own their merged appearance resources separately and do not use this cache.
 	 */
 	resolveDraw(
 		key: object,

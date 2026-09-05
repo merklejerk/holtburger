@@ -111,6 +111,20 @@ export type PreparedObjectMaterial<TTexture, TSampler> =
 			readonly palette: PreparedObjectAtlasBinding<TTexture, TSampler>;
 	  };
 
+/** Shader-consumed surface facts shared by uniform draws and dynamic material tables. */
+export interface PreparedObjectSurface<TTexture, TSampler> {
+	/** Resolved physical bindings and source color/opacity, independent from polygon state. */
+	readonly material: PreparedObjectMaterial<TTexture, TSampler>;
+	/** Fragment alpha rejection threshold; zero disables rejection. */
+	readonly alphaTest: number;
+	/** Authored emissive contribution, preserving the existing object shader semantics. */
+	readonly luminosity: number;
+	/** Indexed texture clip-map rejection, independent from direct-color alpha rejection. */
+	readonly palettedClipMap: boolean;
+	/** Geometry-authored wrapping within the selected atlas rectangle. */
+	readonly wrapRepeat: boolean;
+}
+
 /** Optional detail state whose values are constant for one object draw. */
 interface PreparedObjectDetail<
 	TTexture,
@@ -135,17 +149,12 @@ export interface PreparedStaticObjectDrawCompatibility<
 	TGeometry,
 	TTexture,
 	TSampler,
-> {
-	readonly alphaTest: number;
+> extends PreparedObjectSurface<TTexture, TSampler> {
 	readonly cullFace: "back" | "front";
 	readonly detail: PreparedObjectDetail<TTexture, TSampler> | null;
 	readonly geometry: TGeometry;
 	readonly indexCount: number;
 	readonly indexStart: number;
-	readonly luminosity: number;
-	readonly material: PreparedObjectMaterial<TTexture, TSampler>;
-	readonly palettedClipMap: boolean;
-	readonly wrapRepeat: boolean;
 }
 
 /** Compare only facts consumed as constants by one current generated-static instanced draw. */

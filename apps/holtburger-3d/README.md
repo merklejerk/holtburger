@@ -157,4 +157,19 @@ objects, and particles remain outside ambient occlusion.
 The Explorer's Render quality panel adjusts AO strength, radius, bias, edge
 threshold, and distance fade live without reallocating its scratch targets.
 
+Dynamic entity meshes use one ordinary indexed-draw representation. Effective part geometry
+defines a reusable source-local merged layout; replaceable appearances own material tables and
+index batches. Per-part pose/color records retain landblock-relative transforms. The renderer
+prepares all camera, selection, and shadow consumers, uploads their union of required poses, then
+executes the prepared draws. Portal domains, texture bindings, render state, and transparent order
+still impose draw boundaries. Neither multi-draw nor dynamic mesh instancing is a fallback.
+
+The runtime stages same-generation appearance replacements and checks the current request and
+residency before committing. Animation, held-entity ancestry, particle frame targets, and CPU
+picking retain part identity. Visual-root and part transforms publish together before spatial
+descendants synchronize. Shared geometry leases remain independent of appearance and landblock
+ownership; pose data is rebased for each camera at submission, not rebuilt when the anchor changes.
+Static/particle instancing remains separate. The authored portal-transition tunnel still draws
+ordinary per-part geometry under its own explicit resource lease.
+
 The previous implementation is retained in `../holtburger-3d-legacy` as a runnable reference. Do not import TypeScript from the legacy app into this source tree.

@@ -2,6 +2,110 @@ import { describe, expect, it, vi } from "vitest";
 import { TERRAIN_TYPE_COUNT } from "../terrain/pcode";
 import { TERRAIN_COLOR_CODE_ATTRIBUTE } from "./webgl2-terrain-program";
 import { WebGL2ResourceManager } from "./webgl2-resource-manager";
+import {
+	DYNAMIC_PART_SELECTOR_ATTRIBUTE,
+	DYNAMIC_MATERIAL_SELECTOR_ATTRIBUTE,
+	type DynamicGeometryData,
+} from "./geometry";
+
+describe("WebGL2ResourceManager dynamic geometry", () => {
+	const geometry: DynamicGeometryData = {
+		kind: "dynamic-parts",
+		partCount: 1,
+		materialCount: 3,
+		positions: new Float32Array(9),
+		normals: new Float32Array(9),
+		textureCoordinates: new Float32Array(6),
+		indices: new Uint32Array([0, 1, 2]),
+		partSelectors: new Uint32Array([0, 0, 0]),
+		materialSelectors: new Uint32Array([2, 2, 2]),
+	};
+	it.each(["partCount", "materialCount"] as const)(
+		"rejects oversized %s before allocation and preserves an installed resource",
+		(field) => {
+			const gl = createGeometryWebGL2();
+			const resources = new WebGL2ResourceManager(gl.context);
+			const key = resources.createGeometry(geometry);
+			const installed = resources.getGeometry(key);
+			vi.mocked(gl.context.createBuffer).mockClear();
+			vi.mocked(gl.context.createVertexArray).mockClear();
+			expect(() =>
+				resources.replaceGeometry(key, { ...geometry, [field]: 5 }),
+			).toThrow("requires 5 rows; device limit is 4");
+			expect(gl.context.createBuffer).not.toHaveBeenCalled();
+			expect(gl.context.createVertexArray).not.toHaveBeenCalled();
+			expect(resources.getGeometry(key)).toBe(installed);
+		},
+	);
+	it("accepts tables at the device row limit", () => {
+		const gl = createGeometryWebGL2();
+		const resources = new WebGL2ResourceManager(gl.context);
+		expect(() =>
+			resources.createGeometry({ ...geometry, partCount: 4, materialCount: 4 }),
+		).not.toThrow();
+	});
+	it("uploads dense selectors as unsigned 32-bit integer attributes", () => {
+		const gl = createGeometryWebGL2();
+		const resources = new WebGL2ResourceManager(gl.context);
+		resources.createGeometry(geometry);
+		for (const [location, data] of [
+			[DYNAMIC_PART_SELECTOR_ATTRIBUTE, geometry.partSelectors],
+			[DYNAMIC_MATERIAL_SELECTOR_ATTRIBUTE, geometry.materialSelectors],
+		] as const) {
+			expect(gl.vertexAttribIPointer).toHaveBeenCalledWith(
+				location,
+				1,
+				gl.context.UNSIGNED_INT,
+				0,
+				0,
+			);
+			expect(gl.bufferData).toHaveBeenCalledWith(
+				gl.context.ARRAY_BUFFER,
+				data,
+				gl.context.STATIC_DRAW,
+			);
+		}
+	});
+	it("owns and releases exactly the uploaded dynamic vertex streams", () => {
+		const gl = createGeometryWebGL2();
+		const resources = new WebGL2ResourceManager(gl.context);
+		const key = resources.createGeometry(geometry);
+		const streams = [
+			geometry.positions,
+			geometry.normals,
+			geometry.textureCoordinates,
+			geometry.partSelectors,
+			geometry.materialSelectors,
+		];
+		expect(gl.bufferData.mock.calls).toEqual(
+			streams.map((stream) => [
+				gl.context.ARRAY_BUFFER,
+				stream,
+				gl.context.STATIC_DRAW,
+			]),
+		);
+		const allocated = vi
+			.mocked(gl.context.createBuffer)
+			.mock.results.map((result) => result.value);
+		expect(allocated).toHaveLength(streams.length);
+		resources.releaseResource(key);
+		expect(vi.mocked(gl.context.deleteBuffer).mock.calls).toEqual(
+			allocated.map((buffer) => [buffer]),
+		);
+		expect(gl.context.deleteVertexArray).toHaveBeenCalledTimes(1);
+	});
+	it.each(["partSelectors", "materialSelectors"] as const)(
+		"rejects an incomplete %s stream before uploading",
+		(field) => {
+			const gl = createGeometryWebGL2();
+			const resources = new WebGL2ResourceManager(gl.context);
+			expect(() =>
+				resources.createGeometry({ ...geometry, [field]: new Uint32Array(2) }),
+			).toThrow("selector count");
+			expect(gl.bufferData).not.toHaveBeenCalled();
+		},
+	);
+});
 
 describe("WebGL2ResourceManager terrain geometry", () => {
 	it("uploads authored terrain codes as one unsigned integer component", () => {
@@ -69,6 +173,8 @@ function createGeometryWebGL2(): {
 	return {
 		context: {
 			ARRAY_BUFFER: 0x8892,
+			MAX_TEXTURE_SIZE: 0x0d33,
+			getParameter: vi.fn(() => 4),
 			ELEMENT_ARRAY_BUFFER: 0x8893,
 			FLOAT: 0x1406,
 			STATIC_DRAW: 0x88e4,

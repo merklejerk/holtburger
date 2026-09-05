@@ -14,7 +14,7 @@ import type {
 } from "../scene";
 import type { AABB3 } from "../math/types";
 import type { TerrainDrawUnit } from "../terrain/types";
-import type { VisibleDynamicContributions } from "../systems/components";
+import type { VisibleDynamicPresentation } from "../systems/components";
 import type {
 	EnvCellRenderable,
 	FrameStreamedObjectInstanceTemplate,
@@ -101,10 +101,9 @@ interface RenderWorldSystems {
 			readonly identity: string;
 			readonly rigidBounds: AABB3;
 		} | null;
-		getVisibleContributions(
+		getVisiblePresentation(
 			nodeId: SceneNodeId,
-			includeDepth: boolean,
-		): VisibleDynamicContributions | null;
+		): VisibleDynamicPresentation | null;
 	};
 	readonly envCells: {
 		getCellRenderable(nodeId: SceneNodeId): EnvCellRenderable | null;
@@ -314,18 +313,11 @@ export class RenderWorld {
 		return terrain ? { drawUnit: terrain, kind: "terrain" } : null;
 	}
 
-	/** Expand a retained dynamic root only after renderer fidelity policy accepts it. */
-	expandDynamicContributions(
+	/** Publish installed layout, appearance, and dense part poses without expanding material ranges. */
+	getVisibleDynamicPresentation(
 		nodeId: SceneNodeId,
-		includeDepth: boolean,
-	): VisibleDynamicContributions {
-		const contributions = this.#systems.dynamics.getVisibleContributions(
-			nodeId,
-			includeDepth,
-		);
-		if (!contributions)
-			throw new Error(`Dynamic entity ${nodeId} no longer exists.`);
-		return contributions;
+	): VisibleDynamicPresentation | null {
+		return this.#systems.dynamics.getVisiblePresentation(nodeId);
 	}
 
 	getNameplatePopulationRevision(): number {

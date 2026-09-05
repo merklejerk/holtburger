@@ -1,146 +1,89 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { DynamicEntityPresentationClass } from "../dynamic-entity-presentation-class";
-import type { ObjectGeometryKey } from "../geometry/types";
 import type { Frustum } from "../math/frustum";
 import { AABB3, Mat4, Vec3 } from "../math/types";
 import type { SceneNodeId } from "../scene";
-import type {
-	VisibleDynamicContributions,
-	VisibleRigidDepthContribution,
-} from "../systems/components";
-import type { ObjectInstanceData } from "../systems/static-resources";
+import type { PreparedDynamicDepth } from "./dynamic-depth-preparation";
 import type { RenderContribution } from "./render-world";
 import type { EntityShadowCasterShape } from "./entity-grounding";
+import { createDynamicDepthTestFixture } from "./dynamic-depth-test-fixture";
 import {
 	planOutdoorShadowCastersForView,
 	createOutdoorPssmCasterBatch,
 	createOutdoorPssmCasterSelectionScratch,
-	formOutdoorPssmCasterRuns,
-	OutdoorPssmDepthDrawCatalog,
-	type OutdoorPssmCasterPart,
 	type OutdoorPssmCasterWorld,
 } from "./outdoor-pssm-casters";
 
 const ANCHOR = "0x0001ffff";
 const FRUSTUM: Frustum = { cameraPosition: Vec3.zero(), planes: [] };
 const BUDGET = { maximumMappedRoots: 512, maximumSelectedRoots: 512 };
+const node = (id: number) => `scene-node:${id}` as SceneNodeId;
+const depth = (id: SceneNodeId) => createDynamicDepthTestFixture(id, ANCHOR, 3);
+
+function metrics() {
+	return {
+		analyticRootCount: 0,
+		candidateRootCount: 0,
+		cascadeCandidateMembershipCount: 0,
+		cascadeQueryCount: 0,
+		selectedDepthDrawCount: 0,
+		emptyMappedViewCount: 0,
+		mappedRootCount: 0,
+		rejectedRootCount: 0,
+		selectedRootCount: 0,
+		selectedPartCascadeCount: 0,
+	};
+}
 
 describe("outdoor PSSM caster selection", () => {
-	it("consumes an outdoor dynamic query and retains only eligible visible outdoor parts", () => {
-		const player = "scene-node:1" as SceneNodeId;
-		const npc = "scene-node:2" as SceneNodeId;
-		const other = "scene-node:3" as SceneNodeId;
-		const indoorOnly = "scene-node:4" as SceneNodeId;
-		const emptyMob = "scene-node:5" as SceneNodeId;
-		const queryEntries = [player, npc, other, indoorOnly, emptyMob];
-		const descriptors = new Map<SceneNodeId, RenderContribution>([
-			[player, dynamicDescriptor("player")],
-			[npc, dynamicDescriptor("npc")],
-			[other, dynamicDescriptor("other")],
-			[indoorOnly, dynamicDescriptor("mob")],
-			[emptyMob, dynamicDescriptor("mob")],
+	it("retains eligible outdoor whole roots, preserving the visual-scope and empty-geometry checks", () => {
+		const [player, npc, other, indoor, empty] = [1, 2, 3, 4, 5].map(node);
+		if (!player || !npc || !other || !indoor || !empty)
+			throw new Error("Fixture requires five roots.");
+		const presentations = new Map<SceneNodeId, PreparedDynamicDepth | null>([
+			[player, depth(player)],
+			[npc, depth(npc)],
+			[other, depth(other)],
+			[
+				indoor,
+				{
+					...depth(indoor),
+					renderScopes: [
+						{ kind: "env-cell", envCellId: "0x00010100", landblockId: ANCHOR },
+					],
+				},
+			],
+			[empty, null],
 		]);
-		const contributions = new Map<SceneNodeId, VisibleDynamicContributions>([
-			[player, visible([part(0)], "outdoor")],
-			[npc, visible([part(1)], "outdoor")],
-			[other, visible([part(2)], "outdoor")],
-			[indoorOnly, visible([part(3)], "env-cell")],
-			[emptyMob, visible([], "outdoor")],
-		]);
-		const observed: string[] = [];
-		const world = createWorld(
-			queryEntries,
-			descriptors,
-			contributions,
-			observed,
-		);
-		const selected = new Set<SceneNodeId>();
-		const batch = createOutdoorPssmCasterBatch();
-		const scratch = createOutdoorPssmCasterSelectionScratch();
-		const depthDraws = new OutdoorPssmDepthDrawCatalog();
-
-		const metrics = collectionMetrics();
-		planOutdoorShadowCastersForView(
-			world,
-			[FRUSTUM],
-			FRUSTUM,
-			ANCHOR,
-			BUDGET,
-			selected,
-			[],
-			false,
-			[batch],
-			scratch,
-			depthDraws,
-			metrics,
-		);
-
-		expect(observed).toEqual([
-			"query:outdoor:true:false",
-			"descriptor:scene-node:1",
-			"descriptor:scene-node:2",
-			"descriptor:scene-node:3",
-			"descriptor:scene-node:4",
-			"descriptor:scene-node:5",
-			"expand:scene-node:1",
-			"resolve:scene-node:1",
-			"expand:scene-node:2",
-			"resolve:scene-node:2",
-			"expand:scene-node:4",
-			"expand:scene-node:5",
-		]);
-		expect(batch.parts).toHaveLength(2);
-		expect(batch.instances).toEqual([
-			contributions.get(player)?.depth[0]?.instance,
-			contributions.get(npc)?.depth[0]?.instance,
-		]);
-		expect(selected).toEqual(new Set([player, npc]));
-		expect(metrics).toEqual({
-			analyticRootCount: 0,
-			candidateRootCount: 4,
-			cascadeCandidateMembershipCount: 4,
-			cascadeQueryCount: 1,
-			compatibleDepthRunCount: 2,
-			emptyMappedViewCount: 0,
-			mappedRootCount: 4,
-			rejectedRootCount: 0,
-			selectedRootCount: 4,
-			selectedCasterPartCount: 2,
+		const getDynamicDepth = vi.fn((id: SceneNodeId) => {
+			const found = presentations.get(id);
+			if (found === undefined) throw new Error("Unknown fixture root.");
+			return found;
 		});
-		const retainedPart = batch.parts[0];
-		planOutdoorShadowCastersForView(
-			world,
-			[FRUSTUM],
-			FRUSTUM,
-			ANCHOR,
-			BUDGET,
-			selected,
-			[],
-			false,
-			[batch],
-			scratch,
-			depthDraws,
-			null,
-		);
-		expect(batch.parts[0]).toBe(retainedPart);
-	});
-
-	it("owns compact results before the next reused scene query", () => {
-		const first = "scene-node:10" as SceneNodeId;
-		const second = "scene-node:11" as SceneNodeId;
-		const reusedEntries = [first];
-		const descriptors = new Map<SceneNodeId, RenderContribution>([
-			[first, dynamicDescriptor("mob")],
-			[second, dynamicDescriptor("mob")],
-		]);
-		const contributions = new Map<SceneNodeId, VisibleDynamicContributions>([
-			[first, visible([part(0)], "outdoor")],
-			[second, visible([part(1)], "outdoor")],
-		]);
-		const world = createWorld(reusedEntries, descriptors, contributions, []);
+		const world: OutdoorPssmCasterWorld = {
+			getDynamicDepth,
+			getEntityShadowDynamicFacts: dynamicFacts,
+			getRenderContributionDescriptor: (id) =>
+				dynamicDescriptor(
+					id === other
+						? "other"
+						: id === player
+							? "player"
+							: id === npc
+								? "npc"
+								: "mob",
+				),
+			queryScopesScene: (_frustum, anchor, scopes, filter) => {
+				expect(anchor).toBe(ANCHOR);
+				expect(scopes).toEqual([{ kind: "outdoor" }]);
+				expect(filter("dynamic")).toBe(true);
+				expect(filter("buildings")).toBe(false);
+				return { entries: [player, npc, other, indoor, empty] };
+			},
+		};
 		const selected = new Set<SceneNodeId>();
 		const batch = createOutdoorPssmCasterBatch();
-
+		const result = metrics();
 		planOutdoorShadowCastersForView(
 			world,
 			[FRUSTUM],
@@ -152,151 +95,129 @@ describe("outdoor PSSM caster selection", () => {
 			false,
 			[batch],
 			createOutdoorPssmCasterSelectionScratch(),
-			new OutdoorPssmDepthDrawCatalog(),
-			null,
+			result,
 		);
-		const firstInstance = batch.instances[0];
-		reusedEntries[0] = second;
-
-		expect(batch.instances).toEqual([firstInstance]);
-		expect(selected).toEqual(new Set([first]));
+		expect(batch.casters).toEqual([
+			presentations.get(player),
+			presentations.get(npc),
+		]);
+		expect(selected).toEqual(new Set([player, npc]));
+		expect(getDynamicDepth.mock.calls.map(([id]) => id)).toEqual([
+			player,
+			npc,
+			indoor,
+			empty,
+		]);
+		expect(result).toMatchObject({
+			candidateRootCount: 4,
+			mappedRootCount: 4,
+			selectedPartCascadeCount: 2,
+			selectedDepthDrawCount: 2,
+		});
 	});
 
-	it("consumes reused query storage and expands an overlapping root once", () => {
-		const first = "scene-node:20" as SceneNodeId;
-		const shared = "scene-node:21" as SceneNodeId;
-		const second = "scene-node:22" as SceneNodeId;
-		const firstFrustum = FRUSTUM;
-		const secondFrustum: Frustum = {
-			cameraPosition: new Vec3(1, 0, 0),
-			planes: [],
-		};
-		const reusedEntries = [first, shared];
-		const expansionCounts = new Map<SceneNodeId, number>();
-		let queryIndex = 0;
+	it("consumes reused scene storage and shares a root's prepared depth across overlapping cascades", () => {
+		const first = node(10),
+			shared = node(11),
+			last = node(12);
+		const entries = [first, shared];
+		let queries = 0;
+		const getDynamicDepth = vi.fn(depth);
 		const world: OutdoorPssmCasterWorld = {
-			expandDynamicContributions(nodeId) {
-				expansionCounts.set(nodeId, (expansionCounts.get(nodeId) ?? 0) + 1);
-				return {
-					depth: [part(Number(nodeId.slice("scene-node:".length)))],
-					kind: "visible",
-					landblockId: ANCHOR,
-					material: [],
-					renderScopes: [{ kind: "outdoor" }],
-				};
-			},
+			getDynamicDepth,
+			getEntityShadowDynamicFacts: dynamicFacts,
 			getRenderContributionDescriptor: () => dynamicDescriptor("mob"),
-			getEntityShadowDynamicFacts: (nodeId) => dynamicFacts(nodeId),
-			queryScopesScene() {
-				if (queryIndex === 1) reusedEntries.splice(0, 2, shared, second);
-				queryIndex += 1;
-				return { entries: reusedEntries };
+			queryScopesScene: () => {
+				if (queries++ === 1) entries.splice(0, 2, shared, last);
+				return { entries };
 			},
-			resolveGeometry: (key) =>
-				`geometry-resource:${Number(key.slice("object-geometry:".length)) + 1}`,
 		};
 		const batches = [
 			createOutdoorPssmCasterBatch(),
 			createOutdoorPssmCasterBatch(),
 		];
-
-		const metrics = collectionMetrics();
+		const result = metrics();
 		planOutdoorShadowCastersForView(
 			world,
-			[firstFrustum, secondFrustum],
+			[FRUSTUM, FRUSTUM],
 			FRUSTUM,
 			ANCHOR,
 			BUDGET,
 			new Set(),
 			[],
-			false,
+			true,
 			batches,
 			createOutdoorPssmCasterSelectionScratch(),
-			new OutdoorPssmDepthDrawCatalog(),
-			metrics,
+			result,
 		);
-
-		expect(expansionCounts).toEqual(
-			new Map([
-				[first, 1],
-				[shared, 1],
-				[second, 1],
-			]),
-		);
-		expect(batches[0]?.parts).toHaveLength(2);
-		expect(batches[1]?.parts).toHaveLength(2);
-		expect(batches[0]?.parts[1]).toBe(batches[1]?.parts[0]);
-		expect(metrics).toMatchObject({
+		expect(getDynamicDepth.mock.calls.map(([id]) => id)).toEqual([
+			first,
+			shared,
+			last,
+		]);
+		expect(batches[0]?.casters.map(({ nodeId }) => nodeId)).toEqual([
+			first,
+			shared,
+		]);
+		expect(batches[1]?.casters.map(({ nodeId }) => nodeId)).toEqual([
+			shared,
+			last,
+		]);
+		expect(batches[0]?.casters[1]).toBe(batches[1]?.casters[0]);
+		entries.length = 0;
+		expect(batches[0]?.casters).toHaveLength(2);
+		expect(result).toMatchObject({
 			candidateRootCount: 3,
 			cascadeCandidateMembershipCount: 4,
-			mappedRootCount: 3,
-			selectedCasterPartCount: 4,
+			selectedPartCascadeCount: 4,
 		});
 	});
 
 	it("tiers complete roots by camera membership, bounds distance, and stable identity", () => {
 		const roots = [
-			{ identity: "d", nodeId: "scene-node:30" as SceneNodeId, x: -2 },
-			{ identity: "b", nodeId: "scene-node:31" as SceneNodeId, x: 5 },
-			{ identity: "a", nodeId: "scene-node:32" as SceneNodeId, x: 5 },
-			{ identity: "c", nodeId: "scene-node:33" as SceneNodeId, x: 10 },
+			{ nodeId: node(30), identity: "d", x: -2 },
+			{ nodeId: node(31), identity: "b", x: 5 },
+			{ nodeId: node(32), identity: "a", x: 5 },
+			{ nodeId: node(33), identity: "c", x: 10 },
 		];
-		const rootFor = (nodeId: SceneNodeId) => {
-			const root = roots.find((candidate) => candidate.nodeId === nodeId);
-			if (root === undefined)
-				throw new Error(`Unknown fixture root ${nodeId}.`);
+		const find = (id: SceneNodeId) => {
+			const root = roots.find(({ nodeId }) => nodeId === id);
+			if (root === undefined) throw new Error("Unknown root.");
 			return root;
 		};
-		const expansions: SceneNodeId[] = [];
-		const cameraFrustum: Frustum = {
-			cameraPosition: Vec3.zero(),
-			planes: [{ constant: 0, x: 1, y: 0, z: 0 }],
-		};
+		const getDynamicDepth = vi.fn(depth);
 		const world: OutdoorPssmCasterWorld = {
-			expandDynamicContributions(nodeId) {
-				expansions.push(nodeId);
-				return visible(
-					[part(Number(nodeId.slice("scene-node:".length)))],
-					"outdoor",
-				);
-			},
-			getEntityShadowDynamicFacts(nodeId) {
-				const root = rootFor(nodeId);
-				return {
-					...dynamicFacts(nodeId),
-					identity: root.identity,
-				};
-			},
-			getRenderContributionDescriptor(nodeId) {
-				const root = rootFor(nodeId);
-				return dynamicDescriptorAt(root.x);
-			},
+			getDynamicDepth,
+			getEntityShadowDynamicFacts: (id) => ({
+				...dynamicFacts(id),
+				identity: find(id).identity,
+			}),
+			getRenderContributionDescriptor: (id) => dynamicDescriptorAt(find(id).x),
 			queryScopesScene: () => ({ entries: roots.map(({ nodeId }) => nodeId) }),
-			resolveGeometry: (key) =>
-				`geometry-resource:${Number(key.slice("object-geometry:".length)) + 1}`,
 		};
 		const analytic: EntityShadowCasterShape[] = [];
-		const mapped = createOutdoorPssmCasterBatch();
-		const metrics = collectionMetrics();
-
+		const result = metrics();
+		const selected = new Set<SceneNodeId>();
 		planOutdoorShadowCastersForView(
 			world,
 			[FRUSTUM],
-			cameraFrustum,
+			{
+				cameraPosition: Vec3.zero(),
+				planes: [{ constant: 0, x: 1, y: 0, z: 0 }],
+			},
 			ANCHOR,
 			{ maximumMappedRoots: 1, maximumSelectedRoots: 3 },
-			new Set(),
+			selected,
 			analytic,
 			false,
-			[mapped],
+			[createOutdoorPssmCasterBatch()],
 			createOutdoorPssmCasterSelectionScratch(),
-			new OutdoorPssmDepthDrawCatalog(),
-			metrics,
+			result,
 		);
-
-		expect(expansions).toEqual([rootFor("scene-node:32").nodeId]);
+		expect(getDynamicDepth.mock.calls.map(([id]) => id)).toEqual([node(32)]);
 		expect(analytic.map(({ identity }) => identity)).toEqual(["b", "c"]);
-		expect(metrics).toMatchObject({
+		expect(selected).toEqual(new Set([node(31), node(32), node(33)]));
+		expect(result).toMatchObject({
 			analyticRootCount: 2,
 			candidateRootCount: 4,
 			mappedRootCount: 1,
@@ -305,81 +226,6 @@ describe("outdoor PSSM caster selection", () => {
 		});
 	});
 });
-
-describe("outdoor PSSM caster run formation", () => {
-	it("groups separated compatible parts and splits consumed raster state", () => {
-		const batch = createOutdoorPssmCasterBatch();
-		const instances = batch.instances;
-		const runs = batch.runs;
-		batch.parts.push(
-			casterPart(0, "geometry-resource:1", "back"),
-			casterPart(1, "geometry-resource:2", "back"),
-			casterPart(2, "geometry-resource:1", "back"),
-			casterPart(3, "geometry-resource:1", "front"),
-		);
-
-		formOutdoorPssmCasterRuns(batch);
-		const firstRun = batch.runs[0];
-
-		expect(batch.instances).toBe(instances);
-		expect(batch.runs).toBe(runs);
-		expect(batch.instances).toEqual([
-			batch.parts[0]?.instance,
-			batch.parts[2]?.instance,
-			batch.parts[1]?.instance,
-			batch.parts[3]?.instance,
-		]);
-		expect(batch.runs).toMatchObject([
-			{ firstInstance: 0, instanceCount: 2, geometry: "geometry-resource:1" },
-			{ firstInstance: 2, instanceCount: 1, geometry: "geometry-resource:2" },
-			{
-				firstInstance: 3,
-				instanceCount: 1,
-				geometry: "geometry-resource:1",
-				cullFace: "front",
-			},
-		]);
-		formOutdoorPssmCasterRuns(batch);
-		expect(batch.runs[0]).toBe(firstRun);
-	});
-});
-
-function createWorld(
-	queryEntries: SceneNodeId[],
-	descriptors: ReadonlyMap<SceneNodeId, RenderContribution>,
-	contributions: ReadonlyMap<SceneNodeId, VisibleDynamicContributions>,
-	observed: string[],
-): OutdoorPssmCasterWorld {
-	let resolvingNode: SceneNodeId | null = null;
-	return {
-		expandDynamicContributions(nodeId) {
-			observed.push(`expand:${nodeId}`);
-			resolvingNode = nodeId;
-			return contributions.get(nodeId) ?? visible([], "outdoor");
-		},
-		getRenderContributionDescriptor(nodeId) {
-			observed.push(`descriptor:${nodeId}`);
-			return descriptors.get(nodeId) ?? null;
-		},
-		getEntityShadowDynamicFacts(nodeId) {
-			return dynamicFacts(nodeId);
-		},
-		queryScopesScene(frustum, anchor, scopes, filter) {
-			expect(frustum).toBe(FRUSTUM);
-			expect(anchor).toBe(ANCHOR);
-			observed.push(
-				`query:${scopes[0]?.kind}:${filter("dynamic")}:${filter("buildings")}`,
-			);
-			return { entries: queryEntries };
-		},
-		resolveGeometry(key) {
-			if (resolvingNode === null)
-				throw new Error("Resolve called before expansion.");
-			observed.push(`resolve:${resolvingNode}`);
-			return `geometry-resource:${Number(key.slice("object-geometry:".length)) + 1}`;
-		},
-	};
-}
 
 function dynamicFacts(nodeId: SceneNodeId) {
 	return {
@@ -421,74 +267,5 @@ function dynamicDescriptorAt(x: number): RenderContribution {
 			...descriptor.footprint,
 			placement: { ...descriptor.footprint.placement, localToLandblock },
 		},
-	};
-}
-
-function part(partIndex: number): VisibleRigidDepthContribution {
-	return {
-		drawUnit: {
-			cullFace: "back",
-			geometry: `object-geometry:${partIndex}` as ObjectGeometryKey,
-			indexCount: 3,
-			indexStart: 0,
-			retailVisibility: "normally-visible",
-		},
-		instance: instance(partIndex),
-	};
-}
-
-function visible(
-	depth: readonly VisibleRigidDepthContribution[],
-	scope: "outdoor" | "env-cell",
-): VisibleDynamicContributions {
-	return {
-		depth,
-		kind: "visible",
-		landblockId: ANCHOR,
-		material: [],
-		renderScopes:
-			scope === "outdoor"
-				? [{ kind: "outdoor" }]
-				: [{ envCellId: "0x0100", kind: "env-cell", landblockId: ANCHOR }],
-	};
-}
-
-function casterPart(
-	translation: number,
-	geometry: OutdoorPssmCasterPart["geometry"],
-	cullFace: OutdoorPssmCasterPart["cullFace"],
-): OutdoorPssmCasterPart {
-	return {
-		cullFace,
-		depthBatchKey: `${geometry}/${cullFace}`,
-		geometry,
-		indexCount: 3,
-		indexStart: 0,
-		instance: instance(translation),
-		landblockId: ANCHOR,
-	};
-}
-
-function instance(translation: number): ObjectInstanceData {
-	const sourceToLandblock = Mat4.identity();
-	sourceToLandblock.m41 = translation;
-	return {
-		color: { a: 1, b: 1, g: 1, r: 1 },
-		sourceToLandblock,
-	};
-}
-
-function collectionMetrics() {
-	return {
-		analyticRootCount: 0,
-		candidateRootCount: 0,
-		cascadeCandidateMembershipCount: 0,
-		cascadeQueryCount: 0,
-		compatibleDepthRunCount: 0,
-		emptyMappedViewCount: 0,
-		mappedRootCount: 0,
-		rejectedRootCount: 0,
-		selectedRootCount: 0,
-		selectedCasterPartCount: 0,
 	};
 }

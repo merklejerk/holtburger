@@ -1,5 +1,6 @@
+import { DYNAMIC_POSE_GLSL } from "./dynamic-pose-shader";
 import {
-	compileWebGL2Shader,
+	linkWebGL2Program,
 	requireWebGL2Uniform,
 } from "../webgl/shader-program";
 import { WEBGL2_DISTANCE_FOG_GLSL } from "./webgl2-fog";
@@ -29,7 +30,8 @@ import {
  * different question: a `uniform` draw does read merged geometry, but that is a fact about
  * `prepareBakedStaticObjectGeometry`, not about this field.
  */
-export type ObjectVertexTransformSource = "uniform" | "attribute";
+export type ObjectVertexTransformSource =
+	"uniform" | "attribute" | "pose-table";
 
 /** Optional analytic receiver mode compiled only for authored EnvCell shell geometry. */
 export type ObjectGroundingMode = "none" | "env-cell-shell";
@@ -48,6 +50,10 @@ export const OBJECT_TEXTURE_UNITS = {
 	base: 0,
 	palette: 1,
 	detail: 2,
+	/** Dense part poses; separate from fragment material and portal/shadow samplers. */
+	poses: 3,
+	/** Cold appearance records selected by the merged geometry material attribute. */
+	materials: 4,
 } as const;
 
 /** Build one object vertex variant with explicit fog and transform contracts. */
@@ -66,17 +72,29 @@ out float vViewerDistance;`
 		? "vViewerDistance = length(anchoredPosition - uCameraPosition);"
 		: "";
 	const transformDeclarations =
-		transformSource === "attribute"
+		transformSource === "pose-table"
 			? `
+layout(location = 3) in uint aPart;
+layout(location = 4) in uint aMaterial;
+flat out highp int vMaterial;
+${DYNAMIC_POSE_GLSL}`
+			: transformSource === "attribute"
+				? `
 layout(location = 3) in mat4 aSourceToLandblock;
 layout(location = 7) in vec4 aInstanceColor;`
-			: "uniform mat4 uLocalToLandblock;";
+				: "uniform mat4 uLocalToLandblock;";
 	const transform =
-		transformSource === "attribute"
-			? "aSourceToLandblock"
-			: "uLocalToLandblock";
+		transformSource === "pose-table"
+			? "sourceToLandblock"
+			: transformSource === "attribute"
+				? "aSourceToLandblock"
+				: "uLocalToLandblock";
 	const instanceColor =
-		transformSource === "attribute" ? "aInstanceColor" : "vec4(1.0)";
+		transformSource === "pose-table"
+			? "texelFetch(uPoses, ivec2(4, uFirstPoseRow + int(aPart)), 0)"
+			: transformSource === "attribute"
+				? "aInstanceColor"
+				: "vec4(1.0)";
 	const pssmDeclarations = outdoorPssm
 		? `
 out float vOutdoorPssmViewDepth;
@@ -142,6 +160,7 @@ ${pssmDeclarations}
 ${groundingDeclarations}
 
 void main() {
+	${transformSource === "pose-table" ? "mat4 sourceToLandblock = dynamicSourceToLandblock(aPart);\n\tvMaterial = int(aMaterial);" : ""}
 	vec3 landblockPosition = (${transform} * vec4(aPosition, 1.0)).xyz;
 	vec3 anchoredPosition = landblockPosition + uLandblockOffset;
 	vTextureCoordinate = aTextureCoordinate;
@@ -154,7 +173,7 @@ void main() {
 	${clipCalculation}
 	clipPosition.xy = clipPosition.xy * uClipTransform.xy
 		+ clipPosition.ww * uClipTransform.zw;
-	gl_Position = clipPosition;
+	gl_Position = ${transformSource === "pose-table" ? "vInstanceColor.a == 0.0 ? vec4(2.0, 2.0, 2.0, 1.0) : clipPosition" : "clipPosition"};
 }
 `;
 }
@@ -187,11 +206,27 @@ export function createPortalObjectFragmentShader(
 	);
 }
 
+/** Merged dynamic materials retain the ordinary object sampling, lighting, and portal rules. */
+function createDynamicObjectFragmentShader(
+	distanceFog: boolean,
+	portalVisibility: boolean,
+	outdoorPssm: boolean,
+): string {
+	return createObjectFragmentShaderVariant(
+		distanceFog,
+		portalVisibility,
+		outdoorPssm,
+		"none",
+		true,
+	);
+}
+
 function createObjectFragmentShaderVariant(
 	distanceFog: boolean,
 	portalVisibility: boolean,
 	outdoorPssm: boolean,
 	groundingMode: ObjectGroundingMode,
+	materialTable = false,
 ): string {
 	const fogDeclarations = distanceFog
 		? `
@@ -251,18 +286,35 @@ ${groundingDeclarations}
 uniform sampler2D uBase;
 uniform sampler2D uPalette;
 uniform sampler2D uDetail;
+${
+	materialTable
+		? `
+uniform highp sampler2D uMaterials;
+flat in highp int vMaterial;
+#define uMaterialColor (texelFetch(uMaterials, ivec2(0, vMaterial), 0))
+#define uBaseRect (texelFetch(uMaterials, ivec2(1, vMaterial), 0))
+#define uPaletteRect (texelFetch(uMaterials, ivec2(2, vMaterial), 0))
+#define uMaterialKind (int(texelFetch(uMaterials, ivec2(3, vMaterial), 0).x))
+#define uWrapRepeat (int(texelFetch(uMaterials, ivec2(3, vMaterial), 0).y))
+#define uPalettedClipMap (int(texelFetch(uMaterials, ivec2(3, vMaterial), 0).z))
+#define uLuminosity (texelFetch(uMaterials, ivec2(3, vMaterial), 0).w)
+#define uAlphaTest (texelFetch(uMaterials, ivec2(4, vMaterial), 0).x)
+`
+		: `
 uniform float uAlphaTest;
 uniform int uMaterialKind;
 uniform int uWrapRepeat;
 uniform int uPalettedClipMap;
-uniform int uUseDetail;
 // Packed object rects use pixel-space x, y, width, height for exact texel addressing.
 uniform vec4 uBaseRect;
 uniform vec4 uPaletteRect;
-uniform vec4 uDetailRect;
 uniform vec4 uMaterialColor;
-uniform float uDetailTiling;
 uniform float uLuminosity;
+`
+}
+uniform int uUseDetail;
+uniform vec4 uDetailRect;
+uniform float uDetailTiling;
 ${fogDeclarations}
 
 in vec2 vTextureCoordinate;
@@ -413,8 +465,8 @@ void main() {
 `;
 }
 
-/** Shared uniforms for every renderer-owned static-object material program. */
-interface WebGL2ObjectProgramBase {
+/** View, lighting, and physical sampler bindings shared by every object input representation. */
+interface WebGL2ObjectProgramCommon {
 	readonly program: WebGLProgram;
 	/** Null for ordinary draws; otherwise the sole per-draw authored-scope selector. */
 	readonly portalVisibilityUniforms: WebGL2PortalDeferredVisibilityUniforms | null;
@@ -423,7 +475,6 @@ interface WebGL2ObjectProgramBase {
 	/** Present only on the dedicated EnvCell-shell grounding variant. */
 	readonly entityGroundingUniforms: WebGL2EntityGroundingUniforms | null;
 	readonly uniforms: {
-		readonly alphaTest: WebGLUniformLocation;
 		readonly ambientColor: WebGLUniformLocation;
 		readonly dynamicLightCount: WebGLUniformLocation;
 		readonly dynamicLightPositionRange: WebGLUniformLocation;
@@ -433,25 +484,50 @@ interface WebGL2ObjectProgramBase {
 		readonly staticLightColorIntensity: WebGLUniformLocation;
 		readonly ambientLevel: WebGLUniformLocation;
 		readonly base: WebGLUniformLocation;
-		readonly baseRect: WebGLUniformLocation;
 		readonly clipTransform: WebGLUniformLocation;
 		readonly detail: WebGLUniformLocation;
 		readonly detailRect: WebGLUniformLocation;
 		readonly detailTiling: WebGLUniformLocation;
 		readonly landblockOffset: WebGLUniformLocation;
-		readonly luminosity: WebGLUniformLocation;
-		readonly materialColor: WebGLUniformLocation;
-		readonly materialKind: WebGLUniformLocation;
 		readonly palette: WebGLUniformLocation;
-		readonly paletteRect: WebGLUniformLocation;
-		readonly palettedClipMap: WebGLUniformLocation;
 		readonly projection: WebGLUniformLocation;
 		readonly sunColor: WebGLUniformLocation;
 		readonly sunVector: WebGLUniformLocation;
 		readonly useDetail: WebGLUniformLocation;
 		readonly view: WebGLUniformLocation;
+	};
+}
+
+/** Ordinary materials supply these values per draw rather than through a selector table. */
+interface WebGL2ObjectProgramBase extends WebGL2ObjectProgramCommon {
+	readonly uniforms: WebGL2ObjectProgramCommon["uniforms"] & {
+		readonly alphaTest: WebGLUniformLocation;
+		readonly baseRect: WebGLUniformLocation;
+		readonly luminosity: WebGLUniformLocation;
+		readonly materialColor: WebGLUniformLocation;
+		readonly materialKind: WebGLUniformLocation;
+		readonly paletteRect: WebGLUniformLocation;
+		readonly palettedClipMap: WebGLUniformLocation;
 		readonly wrapRepeat: WebGLUniformLocation;
 	};
+}
+
+/** Merged dynamic meshes supply matrices/colors and appearance values through separate tables. */
+export interface WebGL2DynamicObjectProgram extends WebGL2ObjectProgramCommon {
+	readonly transformSource: "pose-table";
+	readonly uniforms: WebGL2ObjectProgramCommon["uniforms"] & {
+		/** Pose page sampler, initialized once when the program is linked. */
+		readonly poses: WebGLUniformLocation;
+		/** First row of the whole entity in its frame's pose page. */
+		readonly firstPoseRow: WebGLUniformLocation;
+		/** Cold material-table sampler, initialized once when the program is linked. */
+		readonly materials: WebGLUniformLocation;
+	};
+}
+
+/** Fogged merged color shares the ordinary distance-fog binding contract. */
+export interface WebGL2FogDynamicObjectProgram extends WebGL2DynamicObjectProgram {
+	readonly fogUniforms: WebGL2FogObjectProgram["fogUniforms"];
 }
 
 /** Baked object program with one draw-scoped local transform uniform. */
@@ -558,6 +634,16 @@ export function createWebGL2ObjectProgram(
 		readonly transformSource: "attribute";
 	},
 ): WebGL2InstancedObjectProgram;
+/** Compile merged dynamic color with independently selected fog, portal, and shadow semantics. */
+export function createWebGL2ObjectProgram(
+	gl: WebGL2RenderingContext,
+	options: {
+		readonly distanceFog: boolean;
+		readonly outdoorPssm: boolean;
+		readonly portalVisibility: boolean;
+		readonly transformSource: "pose-table";
+	},
+): WebGL2DynamicObjectProgram | WebGL2FogDynamicObjectProgram;
 export function createWebGL2ObjectProgram(
 	gl: WebGL2RenderingContext,
 	options: Partial<WebGL2ObjectProgramOptions> = {},
@@ -565,7 +651,9 @@ export function createWebGL2ObjectProgram(
 	| WebGL2ObjectProgram
 	| WebGL2FogObjectProgram
 	| WebGL2InstancedObjectProgram
-	| WebGL2FogInstancedObjectProgram {
+	| WebGL2FogInstancedObjectProgram
+	| WebGL2DynamicObjectProgram
+	| WebGL2FogDynamicObjectProgram {
 	const distanceFog = options.distanceFog ?? true;
 	const portalVisibility = options.portalVisibility ?? false;
 	const outdoorPssm = options.outdoorPssm ?? false;
@@ -579,40 +667,31 @@ export function createWebGL2ObjectProgram(
 			"EnvCell grounding requires a baked non-PSSM object program.",
 		);
 	}
-	const vertexShader = compileWebGL2Shader(
+	const program = linkWebGL2Program(
 		gl,
-		gl.VERTEX_SHADER,
+		"object",
 		createObjectVertexShader(
 			distanceFog,
 			transformSource,
 			outdoorPssm,
 			groundingMode,
 		),
-	);
-	const fragmentShader = compileWebGL2Shader(
-		gl,
-		gl.FRAGMENT_SHADER,
-		portalVisibility
-			? createPortalObjectFragmentShader(
+		transformSource === "pose-table"
+			? createDynamicObjectFragmentShader(
 					distanceFog,
+					portalVisibility,
 					outdoorPssm,
-					groundingMode,
 				)
-			: createObjectFragmentShader(distanceFog, outdoorPssm, groundingMode),
+			: portalVisibility
+				? createPortalObjectFragmentShader(
+						distanceFog,
+						outdoorPssm,
+						groundingMode,
+					)
+				: createObjectFragmentShader(distanceFog, outdoorPssm, groundingMode),
 	);
-	const program = gl.createProgram();
-	if (!program) throw new Error("Failed to allocate object shader program.");
 	try {
-		gl.attachShader(program, vertexShader);
-		gl.attachShader(program, fragmentShader);
-		gl.linkProgram(program);
-		if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-			throw new Error(
-				`Failed to link object shader program: ${gl.getProgramInfoLog(program) ?? "unknown error"}`,
-			);
-		}
-		const uniforms: WebGL2ObjectProgramBase["uniforms"] = {
-			alphaTest: requireWebGL2Uniform(gl, program, "uAlphaTest"),
+		const uniforms: WebGL2ObjectProgramCommon["uniforms"] = {
 			ambientColor: requireWebGL2Uniform(gl, program, "uAmbientColor"),
 			dynamicLightCount: requireWebGL2Uniform(
 				gl,
@@ -642,24 +721,17 @@ export function createWebGL2ObjectProgram(
 			),
 			ambientLevel: requireWebGL2Uniform(gl, program, "uAmbientLevel"),
 			base: requireWebGL2Uniform(gl, program, "uBase"),
-			baseRect: requireWebGL2Uniform(gl, program, "uBaseRect"),
 			clipTransform: requireWebGL2Uniform(gl, program, "uClipTransform"),
 			detail: requireWebGL2Uniform(gl, program, "uDetail"),
 			detailRect: requireWebGL2Uniform(gl, program, "uDetailRect"),
 			detailTiling: requireWebGL2Uniform(gl, program, "uDetailTiling"),
 			landblockOffset: requireWebGL2Uniform(gl, program, "uLandblockOffset"),
-			luminosity: requireWebGL2Uniform(gl, program, "uLuminosity"),
-			materialColor: requireWebGL2Uniform(gl, program, "uMaterialColor"),
-			materialKind: requireWebGL2Uniform(gl, program, "uMaterialKind"),
 			palette: requireWebGL2Uniform(gl, program, "uPalette"),
-			paletteRect: requireWebGL2Uniform(gl, program, "uPaletteRect"),
-			palettedClipMap: requireWebGL2Uniform(gl, program, "uPalettedClipMap"),
 			projection: requireWebGL2Uniform(gl, program, "uProjection"),
 			sunColor: requireWebGL2Uniform(gl, program, "uSunColor"),
 			sunVector: requireWebGL2Uniform(gl, program, "uSunVector"),
 			useDetail: requireWebGL2Uniform(gl, program, "uUseDetail"),
 			view: requireWebGL2Uniform(gl, program, "uView"),
-			wrapRepeat: requireWebGL2Uniform(gl, program, "uWrapRepeat"),
 		};
 		// Sampler-unit assignments are link-lifetime invariants. Program construction owns this
 		// one-time mutation; renderer state mirrors begin unknown after all programs are created.
@@ -677,31 +749,59 @@ export function createWebGL2ObjectProgram(
 			groundingMode === "env-cell-shell"
 				? requireWebGL2EntityGroundingUniforms(gl, program)
 				: null;
-		const objectProgram: WebGL2ObjectProgram | WebGL2InstancedObjectProgram =
-			transformSource === "uniform"
-				? {
-						program,
-						entityGroundingUniforms,
-						outdoorPssmUniforms,
-						portalVisibilityUniforms,
-						transformSource,
-						uniforms: {
-							...uniforms,
-							localToLandblock: requireWebGL2Uniform(
-								gl,
-								program,
-								"uLocalToLandblock",
-							),
-						},
-					}
-				: {
-						program,
-						entityGroundingUniforms,
-						outdoorPssmUniforms,
-						portalVisibilityUniforms,
-						transformSource,
-						uniforms,
-					};
+		const common = {
+			program,
+			entityGroundingUniforms,
+			outdoorPssmUniforms,
+			portalVisibilityUniforms,
+		};
+		let objectProgram:
+			| WebGL2ObjectProgram
+			| WebGL2InstancedObjectProgram
+			| WebGL2DynamicObjectProgram;
+		if (transformSource === "pose-table") {
+			const poses = requireWebGL2Uniform(gl, program, "uPoses");
+			const materials = requireWebGL2Uniform(gl, program, "uMaterials");
+			gl.uniform1i(poses, OBJECT_TEXTURE_UNITS.poses);
+			gl.uniform1i(materials, OBJECT_TEXTURE_UNITS.materials);
+			objectProgram = {
+				...common,
+				transformSource,
+				uniforms: {
+					...uniforms,
+					poses,
+					materials,
+					firstPoseRow: requireWebGL2Uniform(gl, program, "uFirstPoseRow"),
+				},
+			};
+		} else {
+			const materialUniforms = {
+				...uniforms,
+				alphaTest: requireWebGL2Uniform(gl, program, "uAlphaTest"),
+				baseRect: requireWebGL2Uniform(gl, program, "uBaseRect"),
+				luminosity: requireWebGL2Uniform(gl, program, "uLuminosity"),
+				materialColor: requireWebGL2Uniform(gl, program, "uMaterialColor"),
+				materialKind: requireWebGL2Uniform(gl, program, "uMaterialKind"),
+				paletteRect: requireWebGL2Uniform(gl, program, "uPaletteRect"),
+				palettedClipMap: requireWebGL2Uniform(gl, program, "uPalettedClipMap"),
+				wrapRepeat: requireWebGL2Uniform(gl, program, "uWrapRepeat"),
+			};
+			objectProgram =
+				transformSource === "uniform"
+					? {
+							...common,
+							transformSource,
+							uniforms: {
+								...materialUniforms,
+								localToLandblock: requireWebGL2Uniform(
+									gl,
+									program,
+									"uLocalToLandblock",
+								),
+							},
+						}
+					: { ...common, transformSource, uniforms: materialUniforms };
+		}
 		if (!distanceFog) return objectProgram;
 		return {
 			...objectProgram,
@@ -716,8 +816,5 @@ export function createWebGL2ObjectProgram(
 	} catch (error) {
 		gl.deleteProgram(program);
 		throw error;
-	} finally {
-		gl.deleteShader(vertexShader);
-		gl.deleteShader(fragmentShader);
 	}
 }

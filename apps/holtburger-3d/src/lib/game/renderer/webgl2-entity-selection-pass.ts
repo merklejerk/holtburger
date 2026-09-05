@@ -3,35 +3,44 @@ import { mat4ToFloat32Array, multiplyMat4 } from "../math/matrices";
 import { Mat4 } from "../math/types";
 import type { ObjectGeometryKey } from "../geometry/types";
 import type { SceneNodeId } from "../scene";
-import type {
-	VisibleDynamicContributions,
-	VisibleRigidDepthContribution,
-} from "../systems/components";
-import type { ObjectInstanceData } from "../systems/static-resources";
-import {
-	compileWebGL2Shader,
-	requireWebGL2Uniform,
-} from "../webgl/shader-program";
-import { retainsRetailGeometry } from "./retail-geometry-visibility";
-import { withPreservedWebGL2AllocationBindings } from "./webgl2-render-target";
-import {
-	WebGL2InstanceBuffer,
-	bindWebGL2ObjectInstanceRange,
-} from "./webgl2-instance-buffer";
+import type { PreparedDynamicDepth } from "./dynamic-depth-preparation";
+import type { WebGL2DynamicPosePages } from "./webgl2-dynamic-pose-pages";
 import type { WebGL2GeometryBinding } from "./webgl2-resource-manager";
 import type { EntitySelectionTarget } from "./renderer";
+import {
+	linkWebGL2Program,
+	requireWebGL2Uniform,
+} from "../webgl/shader-program";
+import { withPreservedWebGL2AllocationBindings } from "./webgl2-render-target";
+import { DYNAMIC_POSE_GLSL } from "./dynamic-pose-shader";
 
 const EMPTY_MASK_COLOR = new Float32Array([0, 0, 0, 0]);
-
-const MASK_VERTEX_SHADER = `#version 300 es
+const MASK_RIGID_VERTEX_SHADER = `#version 300 es
+precision highp float;
+precision highp int;
 layout(location = 0) in vec3 aPosition;
-layout(location = 3) in mat4 aSourceToLandblock;
+layout(location = 3) in uint aPartSelector;
 
+${DYNAMIC_POSE_GLSL}
 uniform mat4 uClipFromAnchor;
 uniform vec3 uLandblockOffset;
 
 void main() {
-	vec3 anchorPosition = (aSourceToLandblock * vec4(aPosition, 1.0)).xyz + uLandblockOffset;
+	mat4 sourceToLandblock = dynamicSourceToLandblock(aPartSelector);
+	vec3 anchorPosition = (sourceToLandblock * vec4(aPosition, 1.0)).xyz + uLandblockOffset;
+	gl_Position = uClipFromAnchor * vec4(anchorPosition, 1.0);
+}
+`;
+
+const MASK_SPHERE_VERTEX_SHADER = `#version 300 es
+layout(location = 0) in vec3 aPosition;
+
+uniform mat4 uSourceToLandblock;
+uniform mat4 uClipFromAnchor;
+uniform vec3 uLandblockOffset;
+
+void main() {
+	vec3 anchorPosition = (uSourceToLandblock * vec4(aPosition, 1.0)).xyz + uLandblockOffset;
 	gl_Position = uClipFromAnchor * vec4(anchorPosition, 1.0);
 }
 `;
@@ -72,13 +81,26 @@ export interface WebGL2EntitySelectionPassDiagnostics {
 export interface WebGL2EntitySelectionPassInput {
 	readonly anchorCoordinates: { readonly x: number; readonly y: number };
 	readonly clipFromAnchor: Mat4;
-	readonly contributions: VisibleDynamicContributions;
+	/** Geometry eligibility is resolved once before any view executes. */
+	readonly selection: PreparedEntitySelection;
 	readonly height: number;
-	readonly nodeId: SceneNodeId;
-	readonly shape: EntitySelectionTarget["shape"];
-	readonly showRetailHiddenGeometry: boolean;
 	readonly width: number;
 }
+
+/** One frame's selected geometry, shared by all camera masks until the next preparation. */
+export type PreparedEntitySelection =
+	| ({ readonly kind: "rigid" } & PreparedDynamicDepth)
+	| {
+			/** Analytic proxy uses its own transform and has no rigid pose rows. */
+			readonly kind: "sphere-proxy";
+			/** Root identity shared with the selection target. */
+			readonly nodeId: SceneNodeId;
+			/** Runtime-resolved geometry for planar particle carriers. */
+			readonly shape: Extract<
+				EntitySelectionTarget["shape"],
+				{ kind: "sphere-proxy" }
+			>;
+	  };
 
 interface WebGL2EntitySelectionProgram {
 	readonly program: WebGLProgram;
@@ -101,6 +123,8 @@ interface WebGL2EntitySelectionTargetSet extends WebGL2EntitySelectionMask {
 
 interface EntitySelectionGeometryResources {
 	readonly getGeometry: (key: ObjectGeometryKey) => WebGL2GeometryBinding;
+	/** Every rigid mask reads an address uploaded by the renderer before view execution. */
+	readonly getPose: WebGL2DynamicPosePages<SceneNodeId>["get"];
 }
 
 /**
@@ -115,12 +139,19 @@ export class WebGL2EntitySelectionPass {
 	readonly #matrixScratch = new Float32Array(16);
 	readonly #sphereLocalTransform = Mat4.identity();
 	readonly #sphereToLandblock = Mat4.identity();
-	readonly #instances: ObjectInstanceData[] = [];
-	readonly #instanceIndices = new Map<ObjectInstanceData, number>();
-	readonly #retainedContributions: VisibleRigidDepthContribution[] = [];
-	readonly #submittedPartInstances = new Set<ObjectInstanceData>();
-	#instanceBuffer: WebGL2InstanceBuffer | null = null;
-	#program: WebGL2EntitySelectionProgram | null = null;
+	/** Merged rigid vertices read the shared pose page using their integer selector. */
+	#rigidProgram:
+		| (WebGL2EntitySelectionProgram & {
+				readonly poses: WebGLUniformLocation;
+				readonly firstPoseRow: WebGLUniformLocation;
+		  })
+		| null = null;
+	/** Analytic proxies use a uniform transform and do not consume a rigid pose row. */
+	#sphereProgram:
+		| (WebGL2EntitySelectionProgram & {
+				readonly sourceToLandblock: WebGLUniformLocation;
+		  })
+		| null = null;
 	#sphereGeometry: WebGL2EntitySelectionSphereGeometry | null = null;
 	#target: WebGL2EntitySelectionTargetSet | null = null;
 	#allocatedTargetGenerationCount = 0;
@@ -135,45 +166,29 @@ export class WebGL2EntitySelectionPass {
 		this.#resources = resources;
 	}
 
-	/** Draw one depth-independent current-pose mask, allocating nothing for empty geometry. */
+	/** Resolve the proxy/rigid choice over frame-cached depth geometry without GPU work. */
+	prepare(
+		target: EntitySelectionTarget,
+		depth: PreparedDynamicDepth | null,
+	): PreparedEntitySelection | null {
+		this.#requireAlive();
+		if (target.shape.kind === "sphere-proxy")
+			return {
+				kind: "sphere-proxy",
+				nodeId: target.nodeId,
+				shape: target.shape,
+			};
+		return depth === null ? null : { kind: "rigid", ...depth };
+	}
+
+	/** Draw one previously prepared depth-independent current-pose mask. */
 	render(input: WebGL2EntitySelectionPassInput): {
 		readonly mask: WebGL2EntitySelectionMask;
 		readonly work: WebGL2EntitySelectionPassWork;
-	} | null {
+	} {
 		this.#requireAlive();
-		const visible = input.contributions;
-		const retained = this.#retainedContributions;
-		retained.length = 0;
-		if (input.shape.kind === "rigid" && visible.kind === "visible") {
-			for (const contribution of visible.depth) {
-				if (
-					retainsRetailGeometry(
-						contribution.drawUnit.retailVisibility,
-						input.showRetailHiddenGeometry,
-					)
-				) {
-					retained.push(contribution);
-				}
-			}
-		}
-		if (retained.length === 0 && input.shape.kind === "rigid") return null;
-
 		const target = this.#resizeTarget(input.width, input.height);
-		const program = (this.#program ??= createSelectionProgram(this.#gl));
-		const instanceBuffer = (this.#instanceBuffer ??= new WebGL2InstanceBuffer(
-			this.#gl,
-		));
-		if (input.shape.kind === "rigid")
-			this.#prepareInstances(retained, instanceBuffer);
-		else this.#prepareSphereInstance(input.shape, instanceBuffer);
-		const work = this.#draw(
-			input,
-			visible,
-			retained,
-			target,
-			program,
-			instanceBuffer,
-		);
+		const work = this.#draw(input, target);
 		return {
 			mask: {
 				height: target.height,
@@ -197,44 +212,25 @@ export class WebGL2EntitySelectionPass {
 		if (this.#destroyed) return;
 		this.#destroyed = true;
 		this.#releaseTarget();
-		this.#instanceBuffer?.destroy();
-		this.#instanceBuffer = null;
-		if (this.#program) this.#gl.deleteProgram(this.#program.program);
-		this.#program = null;
+		if (this.#rigidProgram) this.#gl.deleteProgram(this.#rigidProgram.program);
+		if (this.#sphereProgram)
+			this.#gl.deleteProgram(this.#sphereProgram.program);
+		this.#rigidProgram = null;
+		this.#sphereProgram = null;
 		if (this.#sphereGeometry) {
 			this.#gl.deleteBuffer(this.#sphereGeometry.indexBuffer);
 			this.#gl.deleteBuffer(this.#sphereGeometry.positionBuffer);
 			this.#gl.deleteVertexArray(this.#sphereGeometry.vertexArray);
 		}
 		this.#sphereGeometry = null;
-		this.#instances.length = 0;
-		this.#instanceIndices.clear();
-		this.#retainedContributions.length = 0;
-		this.#submittedPartInstances.clear();
 	}
 
-	#prepareInstances(
-		contributions: readonly VisibleRigidDepthContribution[],
-		buffer: WebGL2InstanceBuffer,
-	): void {
-		this.#instances.length = 0;
-		this.#instanceIndices.clear();
-		for (const contribution of contributions) {
-			if (this.#instanceIndices.has(contribution.instance)) continue;
-			this.#instanceIndices.set(contribution.instance, this.#instances.length);
-			this.#instances.push(contribution.instance);
-		}
-		buffer.resetFrame(this.#instances.length);
-		buffer.updateRange(0, this.#instances);
-	}
-
-	/** Upload the one analytic proxy through the same transform stream as rigid parts. */
-	#prepareSphereInstance(
+	/** Compose the analytic proxy independently from rigid entity pose pages. */
+	#prepareSphereTransform(
 		shape: Extract<
 			EntitySelectionTarget["shape"],
 			{ readonly kind: "sphere-proxy" }
 		>,
-		buffer: WebGL2InstanceBuffer,
 	): void {
 		const local = this.#sphereLocalTransform;
 		local.m11 = shape.sphere.radius;
@@ -248,22 +244,11 @@ export class WebGL2EntitySelectionPass {
 			local,
 			this.#sphereToLandblock,
 		);
-		this.#instances.length = 0;
-		this.#instances.push({
-			color: { a: 1, b: 1, g: 1, r: 1 },
-			sourceToLandblock: this.#sphereToLandblock,
-		});
-		buffer.resetFrame(1);
-		buffer.updateRange(0, this.#instances);
 	}
 
 	#draw(
 		input: WebGL2EntitySelectionPassInput,
-		visible: VisibleDynamicContributions,
-		contributions: readonly VisibleRigidDepthContribution[],
 		target: WebGL2EntitySelectionTargetSet,
-		program: WebGL2EntitySelectionProgram,
-		instanceBuffer: WebGL2InstanceBuffer,
 	): WebGL2EntitySelectionPassWork {
 		const gl = this.#gl;
 		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, target.framebuffer);
@@ -275,12 +260,16 @@ export class WebGL2EntitySelectionPass {
 		gl.disable(gl.SCISSOR_TEST);
 		gl.disable(gl.STENCIL_TEST);
 		gl.clearBufferfv(gl.COLOR, 0, EMPTY_MASK_COLOR);
-		const partInstances = this.#submittedPartInstances;
-		partInstances.clear();
-		let selectedTriangleCount = 0;
-		if (contributions.length > 0) {
-			if (visible.kind !== "visible")
-				throw new Error("Selection rigid geometry lost its visible frame.");
+		const selection = input.selection;
+		if (selection.kind === "rigid") {
+			const program = (this.#rigidProgram ??= createSelectionProgram(
+				gl,
+				MASK_RIGID_VERTEX_SHADER,
+				(program) => ({
+					poses: requireWebGL2Uniform(gl, program, "uPoses"),
+					firstPoseRow: requireWebGL2Uniform(gl, program, "uFirstPoseRow"),
+				}),
+			));
 			gl.useProgram(program.program);
 			gl.uniformMatrix4fv(
 				program.uniforms.clipFromAnchor,
@@ -288,7 +277,7 @@ export class WebGL2EntitySelectionPass {
 				mat4ToFloat32Array(input.clipFromAnchor, this.#matrixScratch),
 			);
 			const landblockOffset = createLandblockOffset(
-				getLandblockCoordinates(visible.landblockId),
+				getLandblockCoordinates(selection.landblockId),
 				input.anchorCoordinates,
 			);
 			gl.uniform3f(
@@ -297,46 +286,27 @@ export class WebGL2EntitySelectionPass {
 				landblockOffset.y,
 				landblockOffset.z,
 			);
-		}
-		for (const contribution of contributions) {
-			const geometry = this.#resources.getGeometry(
-				contribution.drawUnit.geometry,
-			);
-			validateSelectionDrawRange(
-				geometry,
-				contribution.drawUnit.indexStart,
-				contribution.drawUnit.indexCount,
-			);
-			gl.enable(gl.CULL_FACE);
-			gl.cullFace(
-				contribution.drawUnit.cullFace === "front" ? gl.FRONT : gl.BACK,
-			);
+			const pose = this.#resources.getPose(selection.nodeId);
+			gl.activeTexture(gl.TEXTURE0);
+			gl.bindTexture(gl.TEXTURE_2D, pose.texture);
+			gl.bindSampler(0, null);
+			gl.uniform1i(program.poses, 0);
+			gl.uniform1i(program.firstPoseRow, pose.firstRow);
+			const geometry = this.#resources.getGeometry(selection.geometry);
 			gl.bindVertexArray(geometry.vertexArray);
-			const instanceIndex = this.#instanceIndices.get(contribution.instance);
-			if (instanceIndex === undefined) {
-				throw new Error(`Selection instance vanished for ${input.nodeId}.`);
+			gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, selection.appearance.indexBuffer);
+			gl.enable(gl.CULL_FACE);
+			for (const range of selection.ranges) {
+				gl.cullFace(range.cullFace === "front" ? gl.FRONT : gl.BACK);
+				gl.drawElements(
+					gl.TRIANGLES,
+					range.indexCount,
+					gl.UNSIGNED_INT,
+					range.indexStart * Uint32Array.BYTES_PER_ELEMENT,
+				);
 			}
-			bindWebGL2ObjectInstanceRange(
-				gl,
-				instanceBuffer.getBinding(),
-				instanceIndex,
-				1,
-			);
-			gl.drawElementsInstanced(
-				gl.TRIANGLES,
-				contribution.drawUnit.indexCount,
-				geometry.indexType,
-				contribution.drawUnit.indexStart * geometry.indexElementBytes,
-				1,
-			);
-			partInstances.add(contribution.instance);
-			selectedTriangleCount += contribution.drawUnit.indexCount / 3;
 		}
-		const sphereProxyCount = this.#drawSphereProxy(
-			input,
-			program,
-			instanceBuffer,
-		);
+		const sphereProxyCount = this.#drawSphereProxy(input);
 		gl.bindVertexArray(null);
 		gl.bindBuffer(gl.ARRAY_BUFFER, null);
 		gl.colorMask(true, true, true, true);
@@ -344,24 +314,40 @@ export class WebGL2EntitySelectionPass {
 		gl.enable(gl.DEPTH_TEST);
 		gl.depthFunc(gl.LEQUAL);
 		return {
-			maskDrawCount: contributions.length + sphereProxyCount,
+			maskDrawCount:
+				selection.kind === "rigid" ? selection.ranges.length : sphereProxyCount,
 			selectedSphereProxyCount: sphereProxyCount,
-			selectedPartCount: partInstances.size,
-			selectedTriangleCount,
+			selectedPartCount:
+				selection.kind === "rigid" ? selection.selectedPartCount : 0,
+			selectedTriangleCount:
+				selection.kind === "rigid" ? selection.selectedTriangleCount : 0,
 		};
 	}
 
 	/** Draw the runtime-resolved proxy that replaces a planar particle carrier's rigid geometry. */
-	#drawSphereProxy(
-		input: WebGL2EntitySelectionPassInput,
-		program: WebGL2EntitySelectionProgram,
-		instanceBuffer: WebGL2InstanceBuffer,
-	): number {
-		const shape = input.shape;
-		if (shape.kind === "rigid") return 0;
+	#drawSphereProxy(input: WebGL2EntitySelectionPassInput): number {
+		if (input.selection.kind === "rigid") return 0;
+		const shape = input.selection.shape;
 		const gl = this.#gl;
+		const program = (this.#sphereProgram ??= createSelectionProgram(
+			gl,
+			MASK_SPHERE_VERTEX_SHADER,
+			(program) => ({
+				sourceToLandblock: requireWebGL2Uniform(
+					gl,
+					program,
+					"uSourceToLandblock",
+				),
+			}),
+		));
 		const geometry = (this.#sphereGeometry ??= createSelectionSphere(gl));
 		gl.useProgram(program.program);
+		this.#prepareSphereTransform(shape);
+		gl.uniformMatrix4fv(
+			program.sourceToLandblock,
+			false,
+			mat4ToFloat32Array(this.#sphereToLandblock, this.#matrixScratch),
+		);
 		gl.uniformMatrix4fv(
 			program.uniforms.clipFromAnchor,
 			false,
@@ -380,14 +366,7 @@ export class WebGL2EntitySelectionPass {
 		gl.enable(gl.CULL_FACE);
 		gl.cullFace(gl.BACK);
 		gl.bindVertexArray(geometry.vertexArray);
-		bindWebGL2ObjectInstanceRange(gl, instanceBuffer.getBinding(), 0, 1);
-		gl.drawElementsInstanced(
-			gl.TRIANGLES,
-			geometry.indexCount,
-			gl.UNSIGNED_SHORT,
-			0,
-			1,
-		);
+		gl.drawElements(gl.TRIANGLES, geometry.indexCount, gl.UNSIGNED_SHORT, 0);
 		return 1;
 	}
 
@@ -462,35 +441,20 @@ function allocateSelectionTarget(
 	});
 }
 
-function createSelectionProgram(
+function createSelectionProgram<T extends Record<string, WebGLUniformLocation>>(
 	gl: WebGL2RenderingContext,
-): WebGL2EntitySelectionProgram {
-	const vertexShader = compileWebGL2Shader(
+	vertexSource: string,
+	resolveTransformUniforms: (program: WebGLProgram) => T,
+): WebGL2EntitySelectionProgram & T {
+	const program = linkWebGL2Program(
 		gl,
-		gl.VERTEX_SHADER,
-		MASK_VERTEX_SHADER,
-	);
-	const fragmentShader = compileWebGL2Shader(
-		gl,
-		gl.FRAGMENT_SHADER,
+		"entity selection",
+		vertexSource,
 		MASK_FRAGMENT_SHADER,
 	);
-	const program = gl.createProgram();
-	if (!program) {
-		gl.deleteShader(vertexShader);
-		gl.deleteShader(fragmentShader);
-		throw new Error("Failed to allocate entity selection program.");
-	}
 	try {
-		gl.attachShader(program, vertexShader);
-		gl.attachShader(program, fragmentShader);
-		gl.linkProgram(program);
-		if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-			throw new Error(
-				`Failed to link entity selection program: ${gl.getProgramInfoLog(program) ?? "unknown error"}`,
-			);
-		}
 		return {
+			...resolveTransformUniforms(program),
 			program,
 			uniforms: {
 				clipFromAnchor: requireWebGL2Uniform(gl, program, "uClipFromAnchor"),
@@ -500,9 +464,6 @@ function createSelectionProgram(
 	} catch (cause) {
 		gl.deleteProgram(program);
 		throw cause;
-	} finally {
-		gl.deleteShader(vertexShader);
-		gl.deleteShader(fragmentShader);
 	}
 }
 
@@ -570,24 +531,6 @@ function createSelectionSphere(
 			vertexArray,
 		};
 	});
-}
-
-function validateSelectionDrawRange(
-	binding: WebGL2GeometryBinding,
-	indexStart: number,
-	indexCount: number,
-): void {
-	if (
-		!Number.isInteger(indexStart) ||
-		!Number.isInteger(indexCount) ||
-		indexStart < 0 ||
-		indexCount <= 0 ||
-		indexStart + indexCount > binding.indexCount
-	) {
-		throw new Error(
-			`Invalid entity selection draw range ${indexStart}+${indexCount}/${binding.indexCount}.`,
-		);
-	}
 }
 
 function requirePositiveInteger(value: number, subject: string): void {

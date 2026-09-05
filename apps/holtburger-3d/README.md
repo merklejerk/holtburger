@@ -15,6 +15,33 @@ catalog and returns bounded ranked identity results to the Entities picker. The 
 exact WCID and the existing numeric spawn path remains the sole mutation contract; neither complete
 catalog records nor fuzzy scores cross the adapter.
 
+## Input configuration
+
+`src/lib/input/input-defaults.ts` owns the default character, Explorer fly, client shortcut, and
+viewport button maps. Keyboard bindings use browser `key` names (case-insensitive), with optional
+modifier constraints. Multiple bindings may activate the same action. Pointer maps use browser
+button numbers: primary `0`, middle `1`, secondary `2`.
+
+`APP_INPUT` is the shared configuration entry point for both modes. Its `InputContext` resolves
+presses to semantic actions, suppresses repeat, and retains physical-key ownership until release.
+Each mounted frontend owns its action context. A per-app `ViewportInputGate`, provided through
+Svelte context, coordinates cancellation across keyboard controllers and pointer gestures.
+Chat focus, Explorer texture modals, and scene/lifecycle transitions hold independent blockers;
+releasing one cannot release another. Blocking cancels current input, and unblocking never resumes
+held actions. Window/viewport focus loss cancels input without adding a persistent blocker.
+
+Participants attach a cancellation callback and detach it on disposal. Event handlers consult
+`allowed` before starting viewport actions and continue processing releases/cancellation. Ordinary
+DOM controls keep their native event delivery. Precise jump remains a client-owned interaction
+within the viewport; it does not block the whole viewport. Cancellation drops held input without
+releasing a charged jump. Host movement contracts do not contain browser bindings.
+
+An `AppInput` accepts a complete `InputConfiguration`, allowing future installation settings to
+resolve defaults and overrides at startup. Persistence, live rebinding, and a binding editor are
+not implemented. Camera rates and sensitivity remain in the existing tuning files. Tests should
+use explicit test bindings or derive expectations from defaults, so editing a default does not
+require updating tests.
+
 ## Development
 
 Install Node.js 22.12 or newer, a current stable Rust toolchain, and the frontend dependencies:

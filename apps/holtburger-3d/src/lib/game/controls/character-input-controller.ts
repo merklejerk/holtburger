@@ -1,3 +1,4 @@
+import type { CharacterAction } from "../../input/input-contract";
 /** Semantic character input accepted by the host-owned grounded controller. */
 export interface CharacterDrive {
 	readonly gait: "run" | "walk";
@@ -5,10 +6,6 @@ export interface CharacterDrive {
 	readonly longitudinal: "backward" | "forward" | null;
 	readonly turn: "left" | "right" | null;
 }
-
-/** Keys that participate in retail-style character drive or jump input. */
-export type CharacterInputKey =
-	"a" | "c" | "d" | "s" | "shift" | "space" | "w" | "z";
 
 /** Non-coalescible lifecycle edge sent in frontend order. */
 export type CharacterInputEdge =
@@ -46,7 +43,7 @@ interface ActiveCharge {
 const MINIMUM_RETAIL_JUMP_EXTENT = 0.001;
 
 /**
- * Frontend-only raw-key arbitration and charge timing.
+ * Frontend-only action arbitration and charge timing.
  *
  * Each opposed axis is a newest-first held list, matching retail `CommandList::AddCommand` and
  * removal behavior (`acclient.c:681378-683004`). The host sees semantics, never browser keys.
@@ -56,10 +53,10 @@ export class CharacterInputController {
 	readonly #now: () => number;
 	readonly #onDrive: (drive: CharacterDrive) => void;
 	readonly #onEdge: (edge: CharacterInputEdge) => void;
-	readonly #held = new Set<CharacterInputKey>();
-	readonly #longitudinal: CharacterInputKey[] = [];
-	readonly #lateral: CharacterInputKey[] = [];
-	readonly #turn: CharacterInputKey[] = [];
+	readonly #held = new Set<CharacterAction>();
+	readonly #longitudinal: CharacterAction[] = [];
+	readonly #lateral: CharacterAction[] = [];
+	readonly #turn: CharacterAction[] = [];
 	#activeCharge: ActiveCharge | null = null;
 	#sequence = 0;
 
@@ -78,48 +75,52 @@ export class CharacterInputController {
 		this.#onEdge = options.onEdge;
 	}
 
-	/** Applies one browser edge; key-repeat cannot rewrite newest-first precedence. */
-	applyKey(key: CharacterInputKey, pressed: boolean, repeat = false): void {
+	/** Applies one action edge; action-repeat cannot rewrite newest-first precedence. */
+	applyAction(action: CharacterAction, pressed: boolean): void {
 		if (pressed) {
-			if (repeat || this.#held.has(key)) return;
-			this.#held.add(key);
-			if (key === "space") {
+			if (this.#held.has(action)) return;
+			this.#held.add(action);
+			if (action === "jump") {
 				this.#beginJump();
 				return;
 			}
-			this.#axisFor(key)?.unshift(key);
+			this.#axisFor(action)?.unshift(action);
 			this.#onDrive(this.drive());
 			return;
 		}
 
-		if (!this.#held.delete(key)) return;
-		if (key === "space") {
+		if (!this.#held.delete(action)) return;
+		if (action === "jump") {
 			this.#releaseJump();
 			return;
 		}
-		const axis = this.#axisFor(key);
-		if (axis !== null) axis.splice(axis.indexOf(key), 1);
+		const axis = this.#axisFor(action);
+		if (axis !== null) axis.splice(axis.indexOf(action), 1);
 		this.#onDrive(this.drive());
 	}
 
 	/** Latest semantic snapshot, composed independently across all three axes. */
 	drive(): CharacterDrive {
 		return {
-			gait: this.#held.has("shift") ? "walk" : "run",
+			gait: this.#held.has("walk") ? "walk" : "run",
 			lateral:
-				this.#lateral[0] === "z"
+				this.#lateral[0] === "strafeLeft"
 					? "left"
-					: this.#lateral[0] === "c"
+					: this.#lateral[0] === "strafeRight"
 						? "right"
 						: null,
 			longitudinal:
-				this.#longitudinal[0] === "w"
+				this.#longitudinal[0] === "forward"
 					? "forward"
-					: this.#longitudinal[0] === "s"
+					: this.#longitudinal[0] === "backward"
 						? "backward"
 						: null,
 			turn:
-				this.#turn[0] === "a" ? "left" : this.#turn[0] === "d" ? "right" : null,
+				this.#turn[0] === "turnLeft"
+					? "left"
+					: this.#turn[0] === "turnRight"
+						? "right"
+						: null,
 		};
 	}
 
@@ -182,10 +183,12 @@ export class CharacterInputController {
 		);
 	}
 
-	#axisFor(key: CharacterInputKey): CharacterInputKey[] | null {
-		if (key === "w" || key === "s") return this.#longitudinal;
-		if (key === "z" || key === "c") return this.#lateral;
-		if (key === "a" || key === "d") return this.#turn;
+	#axisFor(action: CharacterAction): CharacterAction[] | null {
+		if (action === "forward" || action === "backward")
+			return this.#longitudinal;
+		if (action === "strafeLeft" || action === "strafeRight")
+			return this.#lateral;
+		if (action === "turnLeft" || action === "turnRight") return this.#turn;
 		return null;
 	}
 

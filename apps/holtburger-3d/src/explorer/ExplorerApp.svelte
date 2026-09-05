@@ -1,4 +1,7 @@
 <script lang="ts">
+	import { provideViewportInputGate } from "../lib/input/viewport-input-context";
+	import { observeViewportWindowFocus } from "../lib/input/viewport-input-gate";
+	import { APP_INPUT } from "../lib/input/app-input";
 	import { onMount } from "svelte";
 	import FrameMetricsOverlay, {
 		type FrameMetrics,
@@ -43,7 +46,7 @@
 	} from "./explorer-camera-coordinator";
 	import {
 		ExplorerCameraInputController,
-		type CharacterKeyInput,
+		type CharacterActionInput,
 		type FrontendControlScheme,
 	} from "./explorer-camera-input-controller";
 	import {
@@ -150,6 +153,17 @@
 
 	let canvasElement: HTMLCanvasElement | null = $state(null);
 	let frameHandle: number | null = null;
+	const inputGate = provideViewportInputGate();
+	/** Scene activation owns one blocker independently of modal/UI blockers. */
+	let releaseSceneInput: (() => void) | null = null;
+	function setSceneInputBlocked(blocked: boolean): void {
+		if (blocked) {
+			if (releaseSceneInput === null) releaseSceneInput = inputGate.block();
+		} else {
+			releaseSceneInput?.();
+			releaseSceneInput = null;
+		}
+	}
 	/** Borrowed imperative runtime; its lifecycle belongs to the shared presentation owner below. */
 	let presentationOwner: GamePresentationOwner | undefined;
 	let gameRuntime: GamePresentationRuntime | undefined;
@@ -659,7 +673,7 @@
 				).catch((error: unknown) => {
 					physicalCameraError = errorMessage(error);
 				});
-				cameraController?.setInputEnabled(false);
+				setSceneInputBlocked(true);
 				if (cameraCoordinator !== undefined) {
 					await cameraCoordinator.requestSceneInterest(
 						resolved,
@@ -818,7 +832,9 @@
 			movement as PhysicalFlyLocalMovement,
 			cameraBasis,
 			EXPLORER_TUNING.camera.controls.moveSpeed *
-				(precision ? EXPLORER_TUNING.camera.controls.shiftSlowMultiplier : 1),
+				(precision
+					? EXPLORER_TUNING.camera.controls.precisionSlowMultiplier
+					: 1),
 		);
 		return {
 			basis: cameraBasis,
@@ -860,14 +876,14 @@
 			});
 	}
 
-	function handleCameraCharacterInput(input: CharacterKeyInput): void {
+	function handleCameraCharacterInput(input: CharacterActionInput): void {
 		const owner = possessionInput;
 		if (owner === undefined) return;
 		if (input.kind === "reset") {
 			owner.reset();
 			return;
 		}
-		owner.applyKey(input.key, input.pressed, input.repeat);
+		owner.applyAction(input.action, input.pressed);
 	}
 
 	function controlSchemeForCameraMode(
@@ -1725,6 +1741,10 @@
 			return;
 		}
 
+		const stopObservingInputFocus = observeViewportWindowFocus(
+			inputGate,
+			canvas.ownerDocument,
+		);
 		let destroyed = false;
 		let teardown: Promise<void> | undefined;
 
@@ -1781,6 +1801,7 @@
 				coordinator?.dispose();
 				requestCoordinator?.invalidate();
 				controller?.dispose();
+				setSceneInputBlocked(false);
 				try {
 					await boomSession?.stop();
 				} finally {
@@ -1840,12 +1861,14 @@
 				applyFrameSettings();
 				if (destroyed) return;
 				cameraController = new ExplorerCameraInputController({
+					inputGate,
+					input: APP_INPUT,
 					canvas,
-					keyboardYawRadiansPerSecond(shiftActive) {
+					keyboardYawRadiansPerSecond(precisionActive) {
 						const controls = EXPLORER_TUNING.camera.controls;
 						return (
 							controls.keyboardYawRadiansPerSecond *
-							(shiftActive ? controls.shiftSlowMultiplier : 1)
+							(precisionActive ? controls.precisionSlowMultiplier : 1)
 						);
 					},
 					onChange(state) {
@@ -1908,7 +1931,7 @@
 					} else if (sceneActivationPresentationConvergence === null) {
 						void replaceSpawnedEntitySnapshot();
 					}
-					cameraController?.setInputEnabled(!activationPending);
+					setSceneInputBlocked(activationPending);
 					const projection = resolveCameraProjection(gameRuntime, canvas);
 					const residencySync = syncActiveCamera(
 						physicalPlacement,
@@ -1965,7 +1988,7 @@
 					if (reveal !== null) {
 						activeCameraCoordinator.completeSceneActivation();
 						sceneActivationPresentationConvergence = null;
-						cameraController?.setInputEnabled(true);
+						setSceneInputBlocked(false);
 					}
 					const frameFinishedAt = performance.now();
 					frameRateSampler.recordFrame({
@@ -1996,6 +2019,7 @@
 
 		return () => {
 			destroyed = true;
+			stopObservingInputFocus();
 			clearInterval(clockTimer);
 			clockTimer = undefined;
 			void startup

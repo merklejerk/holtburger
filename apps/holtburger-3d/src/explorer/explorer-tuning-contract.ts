@@ -30,7 +30,7 @@ interface ExplorerCameraControlTuning {
 	/** Horizontal rotation applied per pointer pixel. */
 	readonly pointerYawRadiansPerPixel: number;
 	/** Movement multiplier while the precision modifier is active. */
-	readonly shiftSlowMultiplier: number;
+	readonly precisionSlowMultiplier: number;
 	/** Largest browser wheel delta consumed by one event. */
 	readonly wheelDeltaClamp: number;
 	/** Local-up movement applied per normalized wheel unit. */

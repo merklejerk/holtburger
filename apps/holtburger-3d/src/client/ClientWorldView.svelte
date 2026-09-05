@@ -1,5 +1,8 @@
 <script lang="ts">
-	import { untrack } from "svelte";
+	import { useViewportInputGate } from "../lib/input/viewport-input-context";
+	import { observeViewportWindowFocus } from "../lib/input/viewport-input-gate";
+	import { APP_INPUT } from "../lib/input/app-input";
+	import { onMount, untrack } from "svelte";
 	import Minimap from "../app/Minimap.svelte";
 	import type { FrameRates } from "../app/frame-rate-sampler";
 	import {
@@ -70,7 +73,6 @@
 		readonly onSelectEntity: (guid: number | null) => void;
 		readonly chatMessages: readonly ClientChatLine[];
 		readonly onSendChat: (message: string) => Promise<void>;
-		readonly onChatFocusChange: (focused: boolean) => void;
 		readonly onCanvas: (canvas: HTMLCanvasElement | null) => void;
 	}
 
@@ -102,9 +104,14 @@
 		onSelectEntity,
 		chatMessages,
 		onSendChat,
-		onChatFocusChange,
 		onCanvas,
 	}: Props = $props();
+	const inputGate = useViewportInputGate();
+	onMount(() => inputGate.attach(cancelViewportGesture));
+	$effect(() => {
+		if (canvasElement === null) return;
+		return observeViewportWindowFocus(inputGate, canvasElement.ownerDocument);
+	});
 	const initialViewport: ClientHudViewport = {
 		width: window.innerWidth,
 		height: window.innerHeight,
@@ -149,7 +156,8 @@
 		if (!preciseJumpActive) return;
 		untrack(() => {
 			cancelViewportGesture();
-			if (hasPointerPosition) onPreciseJumpAim(pointerX, pointerY);
+			if (inputGate.allowed && hasPointerPosition)
+				onPreciseJumpAim(pointerX, pointerY);
 		});
 	});
 
@@ -166,7 +174,8 @@
 		if (canvasElement === null) return;
 		const handle = window.setInterval(() => {
 			onMaintainEntitySelection();
-			if (!pointerInsideCanvas || !hasPointerPosition) return;
+			if (!inputGate.allowed || !pointerInsideCanvas || !hasPointerPosition)
+				return;
 			onViewportHover(pointerX, pointerY);
 		}, CLIENT_TUNING.entitySelection.sampleIntervalMs);
 		return () => window.clearInterval(handle);
@@ -200,7 +209,8 @@
 	}
 
 	function handlePointerDown(event: PointerEvent): void {
-		if (preciseJumpActive && event.button === 0) {
+		if (!inputGate.allowed) return;
+		if (preciseJumpActive && APP_INPUT.pointer("preciseJumpActivate", event)) {
 			event.preventDefault();
 			canvasElement?.focus();
 			onPreciseJumpActivate();
@@ -208,7 +218,7 @@
 		}
 		if (
 			cameraController === null ||
-			event.button !== 0 ||
+			!APP_INPUT.pointer("clientInteract", event) ||
 			viewportGesture !== null
 		)
 			return;
@@ -224,6 +234,7 @@
 	}
 
 	function handlePointerMove(event: PointerEvent): void {
+		if (!inputGate.allowed) return;
 		if (preciseJumpActive) {
 			pointerX = event.clientX;
 			pointerY = event.clientY;
@@ -289,13 +300,11 @@
 	}
 
 	function handleWheel(event: WheelEvent): void {
-		if (cameraController === null) return;
+		if (!inputGate.allowed || cameraController === null) return;
 		event.preventDefault();
 		cameraController.zoom(event.deltaY * 0.01);
 	}
 </script>
-
-<svelte:window onblur={cancelViewportGesture} />
 
 <main
 	bind:this={worldElement}
@@ -308,6 +317,7 @@
 		class:client-canvas-entity-hovered={hoveredEntityGuid !== null}
 		aria-label="Game world"
 		tabindex="0"
+		onblur={() => inputGate.cancel()}
 		onpointerdown={handlePointerDown}
 		onpointerenter={handlePointerEnter}
 		onpointerleave={handlePointerLeave}
@@ -410,7 +420,6 @@
 			gameCanvas={canvasElement}
 			messages={chatMessages}
 			onSend={onSendChat}
-			onFocusChange={onChatFocusChange}
 		/>
 	</ClientHudPanel>
 	<ClientHudPanel

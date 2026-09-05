@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { provideViewportInputGate } from "../lib/input/viewport-input-context";
+	import { APP_INPUT, isEditingInput } from "../lib/input/app-input";
 	import { onMount, untrack } from "svelte";
 	import {
 		createFrameRateSampler,
@@ -49,7 +51,7 @@
 		reduceClientLifecycleUiState,
 		type ClientLifecycleUiState,
 	} from "./client-lifecycle-state";
-	import { clientInputKey, ClientInputArbiter } from "./client-input-arbiter";
+	import { ClientInputArbiter } from "./client-input-arbiter";
 	import { ClientPreciseJumpSession } from "./client-precise-jump-session";
 	import { ClientEntitySelection } from "./client-entity-selection";
 	import {
@@ -111,7 +113,21 @@
 		...CLIENT_TUNING.frameSettings,
 	});
 	let inputController: CharacterInputController | null = null;
+	const inputGate = provideViewportInputGate();
 	let inputArbiter: ClientInputArbiter | null = null;
+	const characterInput = APP_INPUT.characterContext((action, pressed) => {
+		if (
+			action === "jump" &&
+			characterMotion === null &&
+			!inputArbiter?.preciseActive
+		)
+			return;
+		inputArbiter?.applyAction(action, pressed);
+	});
+
+	$effect(() => {
+		if (!worldInputEnabled) return untrack(() => inputGate.block());
+	});
 	let preciseJumpSession: ClientPreciseJumpSession | null = null;
 	let entitySelection: ClientEntitySelection | null = null;
 	let selectedEntityGuid = $state<number | null>(null);
@@ -200,7 +216,7 @@
 	function receive(event: ClientLifecycleSessionEvent): void {
 		switch (event.type) {
 			case "current-state":
-				if (event.state.lifecycle.kind !== "in-world") inputArbiter?.reset();
+				if (event.state.lifecycle.kind !== "in-world") inputGate.cancel();
 				playerName = event.state.playerName;
 				worldName = event.state.worldName;
 				vitals = event.state.vitals;
@@ -215,7 +231,7 @@
 				});
 				return;
 			case "lifecycle":
-				if (event.lifecycle.kind !== "in-world") inputArbiter?.reset();
+				if (event.lifecycle.kind !== "in-world") inputGate.cancel();
 				lifecycle = reduceClientLifecycleUiState(lifecycle, {
 					type: "authority",
 					lifecycle: event.lifecycle,
@@ -255,14 +271,14 @@
 				return;
 			}
 			case "exit-requested":
-				inputArbiter?.reset();
+				inputGate.cancel();
 				lifecycle = reduceClientLifecycleUiState(lifecycle, {
 					type: "exit",
 					exit: event.exit,
 				});
 				return;
 			case "presentation-discontinuity":
-				inputArbiter?.reset();
+				inputGate.cancel();
 				return;
 			default:
 				return;
@@ -318,7 +334,7 @@
 	async function disconnect(): Promise<void> {
 		if (session === null || lifecycle.kind === "exiting") return;
 		try {
-			inputArbiter?.reset();
+			inputGate.cancel();
 			await inputDispatch;
 			await session.disconnect();
 		} catch (error) {
@@ -331,54 +347,36 @@
 		await session.sendChat(message);
 	}
 
-	function handleChatFocusChange(focused: boolean): void {
-		if (focused) inputArbiter?.reset();
-	}
-
 	function handleWindowKeydown(event: KeyboardEvent): void {
 		if (event.defaultPrevented) return;
-		if (event.target instanceof HTMLInputElement) return;
-		if (lifecycle.kind === "character-selection" && event.key === "Enter") {
+		if (isEditingInput(event.target)) return;
+		if (
+			lifecycle.kind === "character-selection" &&
+			APP_INPUT.shortcut("enterWorld", event)
+		) {
 			event.preventDefault();
 			void enterWorld();
 			return;
 		}
-		if (lifecycle.kind !== "in-world") return;
+		if (!worldInputEnabled || !inputGate.allowed) return;
 		if (
-			event.key === "Escape" &&
-			inputArbiter?.applyEscape(true, event.repeat)
+			APP_INPUT.shortcut("cancel", event) &&
+			inputArbiter?.applyCancel(true, event.repeat)
 		) {
 			event.preventDefault();
 			return;
 		}
-		if (
-			event.key.toLowerCase() === "j" &&
-			event.shiftKey &&
-			inputArbiter !== null
-		) {
+		if (APP_INPUT.shortcut("preciseJump", event) && inputArbiter !== null) {
 			event.preventDefault();
 			if (!event.repeat) inputArbiter.enterPrecise();
 			return;
 		}
-		const key = clientInputKey(event.key);
-		if (key === null || inputArbiter === null) return;
-		if (
-			key === "space" &&
-			characterMotion === null &&
-			!inputArbiter.preciseActive
-		)
-			return;
-		event.preventDefault();
-		inputArbiter.applyKey(key, true, event.repeat);
+		if (inputArbiter !== null && characterInput.apply(event, true))
+			event.preventDefault();
 	}
 
 	function handleWindowKeyup(event: KeyboardEvent): void {
-		if (event.target instanceof HTMLInputElement) return;
-		if (lifecycle.kind !== "in-world") return;
-		const key = clientInputKey(event.key);
-		if (key === null || inputArbiter === null) return;
-		event.preventDefault();
-		inputArbiter.applyKey(key, false, event.repeat);
+		if (characterInput.apply(event, false)) event.preventDefault();
 	}
 
 	function aimPreciseJump(clientX: number, clientY: number): void {
@@ -611,8 +609,7 @@
 		const isActive = (): boolean => !cancelled && session === currentSession;
 		const initialCharacterMotion = untrack(() => characterMotion);
 		const controller = new CharacterInputController({
-			// Space remains gated until authority supplies capability; this value only permits the
-			// shared drive controller to exist early enough for W/S/A/D/Z/C.
+			// Jump remains gated until authority supplies capability; movement can start earlier.
 			fullChargeDurationMs:
 				initialCharacterMotion?.fullChargeDurationMs ?? 1000,
 			now: () => performance.now(),
@@ -635,18 +632,18 @@
 		});
 		inputArbiter = arbiter;
 
-		const clearHeldInput = (): void => arbiter.reset();
-		window.addEventListener("blur", clearHeldInput);
-		window.addEventListener("focusout", clearHeldInput);
-		document.addEventListener("visibilitychange", clearHeldInput);
+		// Attaching while blocked may cancel immediately; those callbacks must not own this effect.
+		const detachInput = untrack(() =>
+			inputGate.attach(() => {
+				characterInput.reset();
+				arbiter.reset();
+			}),
+		);
 
 		return () => {
 			cancelled = true;
 			activeJumpBeginSequence = null;
-			window.removeEventListener("blur", clearHeldInput);
-			window.removeEventListener("focusout", clearHeldInput);
-			document.removeEventListener("visibilitychange", clearHeldInput);
-			arbiter.reset();
+			detachInput();
 			controller.releaseOwnership();
 			if (inputArbiter === arbiter) inputArbiter = null;
 			if (inputController === controller) inputController = null;
@@ -740,7 +737,6 @@
 		onSelectEntity={(guid) => entitySelection?.select(guid)}
 		{chatMessages}
 		onSendChat={sendChat}
-		onChatFocusChange={handleChatFocusChange}
 		onCanvas={(canvas) => (canvasElement = canvas)}
 	/>
 {:else}

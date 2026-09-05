@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { useViewportInputGate } from "../lib/input/viewport-input-context";
 	import { onMount } from "svelte";
 	import type { Texture2DReadback } from "../lib/game/renderer/webgl2-device";
 	import type {
@@ -15,6 +16,8 @@
 	}
 
 	let { page, preview, onClose }: Props = $props();
+	const inputGate = useViewportInputGate();
+	onMount(() => inputGate.block());
 	let canvasElement: HTMLCanvasElement | null = $state(null);
 	let viewportElement: HTMLDivElement | null = $state(null);
 	let sourceCanvas: HTMLCanvasElement | null = $state(null);

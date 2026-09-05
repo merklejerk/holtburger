@@ -53,7 +53,7 @@ const EXPLORER_TUNING_OVERRIDES = {
 			/** Horizontal rotation applied per pointer pixel. */
 			pointerYawRadiansPerPixel: 0.006,
 			/** Free-fly movement multiplier while the precision modifier is active. */
-			shiftSlowMultiplier: 0.05,
+			precisionSlowMultiplier: 0.05,
 			/** Largest browser wheel delta consumed by one camera event. */
 			wheelDeltaClamp: 900,
 			/** Local-up movement applied per normalized browser wheel unit. */

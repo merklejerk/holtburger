@@ -211,6 +211,7 @@ seeing it, or unrelated state changed instead of because its own lifecycle compl
 - Starting new work is the only way to retire old work.
 - Persistent state and one-shot work share storage without a lifecycle distinction.
 - Cancellation, success, failure, and supersession are conflated.
+- A local stop helper also clears independent activity merely because both live in the same owner.
 
 **Possible failure:** Work runs forever, is truncated, completes twice, leaks ownership, or leaves
 stale state behind.
@@ -900,6 +901,8 @@ ordinary work and assertions succeed.
 - One test failure causes later hangs, port conflicts, open-handle warnings, or misleading secondary
   failures.
 - Cleanup is duplicated across success branches but absent from rejection paths.
+- Acquisition publishes a registration or restriction before calling fallible code, but returns its
+  release handle only afterward; a failure leaves the caller unable to release it.
 
 **Possible failure:** The original defect is masked by leaked state or a hung suite, and later work
 observes resources or authority left behind by an operation that already failed.
@@ -1907,6 +1910,51 @@ borrowed handles when a separate, explicit owner controls their lifetime.
 **Possible responses:** Keep derived caches non-owning, attach resources to an existing explicit
 owner, or provide deterministic eviction and shutdown disposal. Test replacement failure and final
 retirement as well as successful reuse; garbage collection is not a substitute for that contract.
+
+## Restoration Preserves Membership but Discards Precedence
+
+**Smell:** Resuming suspended state restores the same members but reconstructs them in an order
+that changes their behavior.
+
+**Signals:** A saved collection is replayed in a fixed enumeration or sorted order even though
+insertion order, recency, or priority determined the original winner. Tests compare membership or
+counts but never compare behavior before suspension and after restoration.
+
+**Possible failure:** Resumption silently changes the active choice, direction, override, or
+scheduling priority even though no member changed during the suspension.
+
+**Questions:** Is order part of this collection's meaning? Which operation established it? Does
+restoration preserve that order, including removals and reinsertions during suspension?
+
+**Counterexamples:** Canonical ordering is appropriate when the collection is semantically unordered
+or when resumption intentionally recalculates priority under a documented policy.
+
+**Possible responses:** Retain the behaviorally relevant ordering, replay from the original ordered
+state, or encode priority explicitly. Test competing members whose acquisition order differs from
+the reconstruction order.
+
+## One Callback Prevents Sibling Cleanup
+
+**Smell:** A shared cancellation or teardown boundary invokes independent participants in a loop,
+but one participant's failure prevents the rest from receiving their required cleanup.
+
+**Signals:** Cleanup callbacks share an exception propagation path despite owning independent state.
+A failure in the first callback leaves later participants active. Tests cover each callback alone
+but never a failing participant followed by a healthy one.
+
+**Possible failure:** The system reports a failure while unrelated work continues under an ownership
+boundary that the caller believed had been cancelled. Resource leaks and stale activity depend on
+callback registration order.
+
+**Questions:** Must every participant be notified even if another fails? Are these independent cleanup
+obligations or ordered steps in one transaction? How are multiple failures preserved for the caller?
+
+**Counterexamples:** Stopping early is appropriate when later operations require successful completion
+of an earlier step. Ordinary command pipelines need not have cleanup-style completion guarantees.
+
+**Possible responses:** Attempt each independent cleanup, collect and report failures afterward, or
+separate dependent phases from independent participants. Preserve errors rather than suppressing
+them to keep the loop running.
 
 ## Adding Observations
 

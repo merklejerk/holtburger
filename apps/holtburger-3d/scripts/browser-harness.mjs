@@ -4200,6 +4200,32 @@ async function runClientHudHarness({ viteUrl }) {
 		);
 		await delay(100);
 		const gestureBaseline = await capture();
+		const gateStart = await dispatchPrimaryGesture(
+			gestureBaseline.gameCanvas,
+			[],
+			false,
+		);
+		await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeViewportBlockers",
+			[],
+		);
+		await client.send("Input.dispatchMouseEvent", {
+			button: "left",
+			buttons: 0,
+			clickCount: 1,
+			type: "mouseReleased",
+			...gateStart,
+		});
+		const gateCancelled = await capture();
+		if (
+			gateCancelled.selectionEvents.length !== 0 ||
+			gateCancelled.orbitDeltas.length !== 0
+		) {
+			throw new Error(
+				"Viewport gate retained a blocked gesture or selected on its release.",
+			);
+		}
 		await dispatchPrimaryGesture(gestureBaseline.gameCanvas, [{ x: 2, y: 1 }]);
 		await delay(50);
 		const viewportSelected = await capture();

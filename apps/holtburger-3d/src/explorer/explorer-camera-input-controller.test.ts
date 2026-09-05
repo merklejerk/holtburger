@@ -1,3 +1,6 @@
+import { AppInput } from "../lib/input/app-input";
+import { INPUT_DEFAULTS } from "../lib/input/input-defaults";
+import { ViewportInputGate } from "../lib/input/viewport-input-gate";
 import { describe, expect, it, vi } from "vitest";
 import { Vec3 } from "../lib/game/math/types";
 import { ExplorerCameraInputController } from "./explorer-camera-input-controller";
@@ -9,7 +12,7 @@ const WHEEL_DISTANCE =
 	EXPLORER_TUNING.camera.controls.wheelLocalUpUnitsPerDelta;
 
 function controllerHarness(
-	keyboardYawRadiansPerSecond?: (shiftActive: boolean) => number,
+	keyboardYawRadiansPerSecond?: (precisionActive: boolean) => number,
 ) {
 	const listeners = new Map<string, EventListener>();
 	let animationFrame: FrameRequestCallback | null = null;
@@ -34,11 +37,43 @@ function controllerHarness(
 		releasePointerCapture,
 	} as unknown as HTMLCanvasElement;
 	const changes = vi.fn();
+	const inputGate = new ViewportInputGate();
 	const physicalWheel = vi.fn();
 	const characterInput = vi.fn();
 	const possessionOrbit = vi.fn();
 	const possessionWheel = vi.fn();
 	const controller = new ExplorerCameraInputController({
+		inputGate,
+		input: new AppInput({
+			...INPUT_DEFAULTS,
+			character: {
+				forward: [{ key: "w" }],
+				backward: [{ key: "s" }],
+				turnLeft: [{ key: "a" }],
+				turnRight: [{ key: "d" }],
+				strafeLeft: [{ key: "z" }],
+				strafeRight: [{ key: "c" }],
+				walk: [{ key: "Shift" }],
+				jump: [{ key: " " }],
+			},
+			fly: {
+				forward: [{ key: "w" }],
+				backward: [{ key: "s" }],
+				turnLeft: [{ key: "a" }],
+				turnRight: [{ key: "d" }],
+				strafeLeft: [{ key: "z" }],
+				strafeRight: [{ key: "c" }],
+				ascend: [{ key: " " }, { key: "PageUp" }],
+				descend: [{ key: "PageDown" }],
+				precision: [{ key: "Shift" }],
+			},
+			pointer: {
+				...INPUT_DEFAULTS.pointer,
+				possessionOrbit: [0],
+				flyRotate: [0],
+				flyPan: [1, 2],
+			},
+		}),
 		canvas,
 		keyboardYawRadiansPerSecond,
 		onChange: changes,
@@ -55,10 +90,13 @@ function controllerHarness(
 	const dispatch = (type: string, event: object): void => {
 		listeners.get(type)?.({
 			preventDefault: vi.fn(),
+			getModifierState: (key: string) =>
+				key === "Shift" && "shiftKey" in event && event.shiftKey === true,
 			...event,
 		} as unknown as Event);
 	};
 	return {
+		inputGate,
 		changes,
 		characterInput,
 		controller,
@@ -76,6 +114,27 @@ function controllerHarness(
 }
 
 describe("ExplorerCameraInputController scheme routing", () => {
+	it("keeps a pointer drag active when the last movement action releases", () => {
+		const test = controllerHarness();
+		test.dispatch("pointerdown", {
+			button: 0,
+			clientX: 0,
+			clientY: 0,
+			pointerId: 7,
+		});
+		test.dispatch("keydown", { key: "w", shiftKey: false });
+		test.dispatch("keyup", { key: "w", shiftKey: false });
+		test.dispatch("pointermove", {
+			clientX: 20,
+			clientY: 0,
+			pointerId: 7,
+			shiftKey: false,
+		});
+		expect(test.releasePointerCapture).not.toHaveBeenCalled();
+		expect(test.controller.snapshotState().yawRadians).not.toBe(
+			EXPLORER_TUNING.camera.initialOrientation.yawRadians,
+		);
+	});
 	it("releases an active drag when input is withdrawn", () => {
 		const test = controllerHarness();
 		test.dispatch("pointerdown", {
@@ -85,14 +144,14 @@ describe("ExplorerCameraInputController scheme routing", () => {
 			pointerId: 7,
 		});
 
-		test.controller.setInputEnabled(false);
+		test.inputGate.block();
 
 		expect(test.releasePointerCapture).toHaveBeenCalledWith(7);
 	});
 
 	it("delegates the complete keyboard-yaw rate to the active app regime", () => {
-		const walking = controllerHarness((shiftActive) =>
-			shiftActive ? 1.5 : 2.25,
+		const walking = controllerHarness((precisionActive) =>
+			precisionActive ? 1.5 : 2.25,
 		);
 		walking.controller.setControlScheme({ kind: "physical-fly" });
 		walking.dispatch("keydown", {
@@ -104,8 +163,8 @@ describe("ExplorerCameraInputController scheme routing", () => {
 		walking.tick(0);
 		walking.tick(50);
 
-		const running = controllerHarness((shiftActive) =>
-			shiftActive ? 1.5 : 2.25,
+		const running = controllerHarness((precisionActive) =>
+			precisionActive ? 1.5 : 2.25,
 		);
 		running.controller.setControlScheme({ kind: "physical-fly" });
 		running.dispatch("keydown", { key: "d", shiftKey: false, repeat: false });
@@ -125,8 +184,8 @@ describe("ExplorerCameraInputController scheme routing", () => {
 		test.dispatch("blur", {});
 
 		expect(test.characterInput.mock.calls.map(([input]) => input)).toEqual([
-			{ key: "space", kind: "key", pressed: true, repeat: false },
-			{ key: "space", kind: "key", pressed: false, repeat: false },
+			{ action: "jump", kind: "action", pressed: true },
+			{ action: "jump", kind: "action", pressed: false },
 			{ kind: "reset" },
 		]);
 	});
@@ -204,10 +263,9 @@ describe("ExplorerCameraInputController scheme routing", () => {
 		test.tick(50);
 
 		expect(test.characterInput).toHaveBeenCalledWith({
-			key: "a",
-			kind: "key",
+			action: "turnLeft",
+			kind: "action",
 			pressed: true,
-			repeat: false,
 		});
 		expect(test.controller.snapshotState().yawRadians).toBe(0);
 	});
@@ -232,9 +290,18 @@ describe("ExplorerCameraInputController scheme routing", () => {
 
 		expect(
 			test.characterInput.mock.calls.map(([input]) =>
-				input.kind === "key" ? input.key : input.kind,
+				input.kind === "action" ? input.action : input.kind,
 			),
-		).toEqual(["w", "s", "z", "c", "a", "d", "shift", "space"]);
+		).toEqual([
+			"forward",
+			"backward",
+			"strafeLeft",
+			"strafeRight",
+			"turnLeft",
+			"turnRight",
+			"walk",
+			"jump",
+		]);
 		expect(test.controller.physicalFlyInput().movement).toEqual({
 			forward: 0,
 			right: 0,
@@ -269,7 +336,7 @@ describe("ExplorerCameraInputController scheme routing", () => {
 		expect(test.possessionWheel).toHaveBeenCalledWith(WHEEL_DISTANCE);
 	});
 
-	it("does not apply Shift precision to possessed pointer orbit", () => {
+	it("does not apply Precision to possessed pointer orbit", () => {
 		const normal = controllerHarness();
 		normal.controller.setControlScheme({ kind: "possessed-character" });
 		normal.dispatch("pointerdown", {

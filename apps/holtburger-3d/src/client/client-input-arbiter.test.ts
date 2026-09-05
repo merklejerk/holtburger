@@ -1,22 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import type { CharacterInputKey } from "../lib/game/controls/character-input-controller";
-import { clientInputKey, ClientInputArbiter } from "./client-input-arbiter";
-
-describe("clientInputKey", () => {
-	it("normalizes browser letter and modifier key names", () => {
-		expect(clientInputKey("W")).toBe("w");
-		expect(clientInputKey("Shift")).toBe("shift");
-		expect(clientInputKey(" ")).toBe("space");
-		expect(clientInputKey("Control")).toBeNull();
-	});
-});
+import type { CharacterAction } from "../lib/input/input-contract";
+import { ClientInputArbiter } from "./client-input-arbiter";
+import { CharacterInputController } from "../lib/game/controls/character-input-controller";
 
 class FakeOrdinaryInput {
 	readonly calls: string[] = [];
 
-	applyKey(key: CharacterInputKey, down: boolean, repeat = false): void {
-		this.calls.push(`${key}:${down ? "down" : "up"}:${repeat}`);
+	applyAction(action: CharacterAction, down: boolean): void {
+		this.calls.push(`${action}:${down ? "down" : "up"}`);
 	}
 
 	reset(): void {
@@ -37,6 +29,28 @@ function fixture() {
 }
 
 describe("ClientInputArbiter", () => {
+	it("preserves opposing action precedence across precise mode", () => {
+		const ordinary = new CharacterInputController({
+			fullChargeDurationMs: 1000,
+			now: () => 0,
+			onDrive() {},
+			onEdge() {},
+		});
+		const arbiter = new ClientInputArbiter({
+			ordinary,
+			onEnter() {},
+			onActivate() {},
+			onCancel() {},
+		});
+		arbiter.applyAction("turnRight", true);
+		arbiter.applyAction("turnLeft", true);
+		expect(ordinary.drive().turn).toBe("left");
+		arbiter.enterPrecise();
+		arbiter.deactivate();
+		expect(ordinary.drive().turn).toBe("left");
+		arbiter.applyAction("turnLeft", false);
+		expect(ordinary.drive().turn).toBe("right");
+	});
 	it("enters precise mode once and resets ordinary input ownership", () => {
 		const { arbiter, edges, ordinary } = fixture();
 		expect(arbiter.enterPrecise()).toBe(true);
@@ -47,56 +61,52 @@ describe("ClientInputArbiter", () => {
 		expect(arbiter.preciseActive).toBe(true);
 	});
 
-	it("leaves Shift+Space on the ordinary walk-jump path", () => {
+	it("routes walking and jumping through the ordinary controller", () => {
 		const { arbiter, edges, ordinary } = fixture();
-		arbiter.applyKey("shift", true);
-		arbiter.applyKey("space", true);
-		arbiter.applyKey("space", false);
+		arbiter.applyAction("walk", true);
+		arbiter.applyAction("jump", true);
+		arbiter.applyAction("jump", false);
 
-		expect(ordinary.calls).toEqual([
-			"shift:down:false",
-			"space:down:false",
-			"space:up:false",
-		]);
+		expect(ordinary.calls).toEqual(["walk:down", "jump:down", "jump:up"]);
 		expect(edges).toEqual([]);
 		expect(arbiter.preciseActive).toBe(false);
 	});
 
-	it("uses only a fresh subsequent Space edge to activate", () => {
+	it("activates once for each fresh jump press", () => {
 		const { arbiter, edges } = fixture();
 		arbiter.enterPrecise();
-		arbiter.applyKey("space", true, true);
-		arbiter.applyKey("space", true);
+		arbiter.applyAction("jump", true);
+		arbiter.applyAction("jump", true);
 
 		expect(edges).toEqual(["enter", "activate"]);
 	});
 
-	it("cancels a button-owned charge and swallows its held Space release", () => {
+	it("cancels a button-owned charge and swallows its held jump release", () => {
 		const { arbiter, edges, ordinary } = fixture();
-		arbiter.applyKey("space", true);
+		arbiter.applyAction("jump", true);
 		arbiter.enterPrecise();
-		arbiter.applyKey("space", false);
+		arbiter.applyAction("jump", false);
 
-		expect(ordinary.calls).toEqual(["space:down:false", "reset"]);
+		expect(ordinary.calls).toEqual(["jump:down", "reset"]);
 		expect(edges).toEqual(["enter"]);
 		expect(arbiter.preciseActive).toBe(true);
 	});
 
-	it("restores held movement after ordinary mode resumes but never restores Space", () => {
+	it("restores held movement after ordinary mode resumes but never restores jump", () => {
 		const { arbiter, ordinary } = fixture();
-		arbiter.applyKey("w", true);
+		arbiter.applyAction("forward", true);
 		arbiter.enterPrecise();
 		ordinary.calls.length = 0;
 
 		arbiter.deactivate();
 
-		expect(ordinary.calls).toEqual(["reset", "w:down:false"]);
+		expect(ordinary.calls).toEqual(["reset", "forward:down"]);
 	});
 
-	it("hard-cancels on focus loss without replaying held keys", () => {
+	it("hard-cancels on focus loss without replaying held actions", () => {
 		const { arbiter, edges, ordinary } = fixture();
 		arbiter.enterPrecise();
-		arbiter.applyKey("w", true);
+		arbiter.applyAction("forward", true);
 		ordinary.calls.length = 0;
 
 		arbiter.reset();

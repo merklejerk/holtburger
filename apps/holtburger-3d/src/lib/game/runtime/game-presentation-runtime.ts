@@ -990,7 +990,7 @@ export class GamePresentationRuntime {
 		}
 		const nodeId = sceneNodeIdOf(target.targetId);
 		if (nodeId === null) return null;
-		const partNodeId = this.#dynamics.resolvePartNode(nodeId, partIndex);
+		const partNodeId = this.#dynamics.requestPartNode(nodeId, partIndex);
 		// The generation is carried through unchanged: the part belongs to the same activation, so
 		// a command that has outlived its owner must still be rejected.
 		return partNodeId === null

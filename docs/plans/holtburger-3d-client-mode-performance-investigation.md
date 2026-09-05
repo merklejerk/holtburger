@@ -4420,3 +4420,349 @@ is required to explain the current capture. The subsequent quality pass confirme
 boundary, FIFO and lifecycle handling, elapsed-time contract, and limited intake budget without
 requiring further production changes. Tests and warnings-as-errors Clippy passed again; the runtime
 change and this follow-up are committed separately from the solver work.
+
+#### Post-Cutover Release Steady-State Matrix
+
+Scheduling was reviewed and committed as `44321446`. Three subsequent approximately 10.018-second
+release-sidecar windows used one login, the worktree `.dev.env`, `+Holtfighter Slot 1`, and unchanged
+player cell `0x63460369`. Each window followed ten seconds of settling and included 320 left-drag
+camera-orbit inputs plus a short post-input tail; no player movement commands were sent. Viewport
+and drawing buffer were 1441×903, render scale 1, with 28–30 visible dynamic entities. This dungeon
+does not exercise outdoor terrain or shadow work and does not replace the outdoor hotspot census.
+Streaming remains out of scope.
+
+Renderer CPU/GPU instrumentation and 100 µs V8 sampling were enabled. Temporary Rust stage clocks
+measured physics work, while `/proc` process CPU deltas at 100 ticks/second independently measured
+total host CPU over closely aligned 10.021–10.022-second windows. The host PID was resolved through
+the probe child tree and its executable verified against this worktree's release binary. These are
+instrumented baseline measurements, not an optimization A/B or a claim of profiler-free capacity.
+
+| Whole-window measurement | Window 1 | Window 2 | Window 3 |
+| --- | ---: | ---: | ---: |
+| Browser frame callback mean | 1.724 ms | 1.643 ms | 1.659 ms |
+| Renderer CPU mean, included in callback | 0.793 ms | 0.738 ms | 0.752 ms |
+| Sum of measured GPU passes | 0.666 ms | 0.714 ms | 0.716 ms |
+| Rust physics work mean | 1.988 ms | 1.903 ms | 1.988 ms |
+| Rust physics work p95 | 2.320 ms | 2.205 ms | 2.284 ms |
+| Rust physics work maximum | 2.677 ms | 2.536 ms | 2.858 ms |
+| Host CPU time | 780 ms | 750 ms | 800 ms |
+| Host fraction of one CPU | 7.78% | 7.48% | 7.98% |
+
+The 1,001 measured Rust ticks all fit within the 30 ms interval; elapsed dt stayed approximately
+30 ms. Host CPU includes work outside the physics transaction. Rust clocks exclude pre-tick command
+intake, and their broad simulation bucket includes resulting-event processing rather than collision
+alone. CPU and GPU work overlap and must not be summed into an end-to-end frame duration. The app's
+reported display rate stayed around 143–144 FPS; reciprocal frame-work estimates are not evidence
+that an uncapped 200 FPS target has been demonstrated.
+
+The resulting investigation priorities are:
+
+| Boundary | Measured cost across windows | Interpretation / priority |
+| --- | --- | --- |
+| Dynamic presentation publication | 0.415–0.426 ms/frame inclusive V8 attribution | First frontend investigation candidate: part transform publication, scene-node synchronization, and presentation bounds. |
+| Renderer scene-contribution resolution | 0.306–0.332 ms/frame | Second related candidate; corroborated by V8 at 0.306–0.329 ms/frame. Establish repeated work and consumers before changing representation. |
+| Animation sampling | 0.148–0.153 ms/frame inclusive V8 attribution | Still relevant but smaller; do not infer its cost from the runtime's animation-advance bucket alone. |
+| Opaque CPU draw submission | 0.111–0.115 ms/frame | Not the leading issue in this scene; no evidence to revisit multi-draw now. |
+| Portal planning CPU | 0.076–0.081 ms/frame | Smaller than contribution preparation; included in renderer total. |
+| Portal composition GPU | 0.280–0.357 ms/frame | Largest measured GPU pass, but total GPU work remains below 0.72 ms. |
+| Ambient occlusion GPU | 0.138–0.157 ms/frame | Not the immediate constraint at this resolution. |
+| Particle GPU | 0.076–0.122 ms/frame | Modest and view-dependent in these orbit windows. |
+| Rust simulation plus resulting-event processing | 1.590–1.668 ms/tick | Largest native stage, but only runs at roughly 33 Hz and has substantial headroom. |
+| Rust pre-simulation work / dynamic projection / camera plus final publication | 0.139–0.146 / 0.052–0.055 / 0.119–0.126 ms/tick | No current evidence for moving these to a separate thread. |
+
+Rows overlap where explicitly inclusive; this is a priority matrix, not an additive budget.
+In particular, sampled dynamic publication contains bounds work (0.156–0.161 ms/frame), while
+`multiplyMat4` self time (0.165–0.168 ms/frame) spans multiple callers and is not a separate saving.
+The runtime tick profiler retains only its latest 60 samples; its final tail means are not used as
+whole-window attribution. V8 frame-stack samples are normalized by observed frame count.
+
+Read-only source inspection confirms that `DynamicEntitySystem.#applySample` composes each part's
+transform, computes presentation bounds, and publishes root/child transforms through
+`SceneGraph.updateLocalTransformWithChildren`. That method validates and copies child transforms,
+then traverses the subtree for spatial synchronization. Placement resolution also walks ancestors
+and multiplies transforms. These are concrete mechanisms to census, not proof that all such work
+is redundant: held descendants, attachments, spatial queries, and residency still need coherent
+placement. The next bounded investigation should enumerate those consumers and measure work per
+entity/part before deciding whether the articulated representation can own a simpler publication
+contract. Do not begin with a faster matrix multiply or a generic transform cache.
+
+No browser errors or exceptions were captured. Dropped camera paths stayed constant within each
+measured window (44, 47, and 51 respectively), but increased between windows; profiling transitions
+were not part of the measured steady state, and no zero-drop lifecycle claim is made. Camera orbit
+changes the visible portal workload, so these windows establish repeated cost ranges rather than
+identical frame populations.
+
+Evidence: `/tmp/holtburger-matrix-release-{1,2,3}.{json,cpuprofile}`, analyzed by
+`/tmp/holtburger-matrix-summary.mjs`. Temporary stage clocks, process-counter readers, and repeated
+orbit-probe edits were removed; production code remains exactly the reviewed scheduling commit.
+Conclusion: prioritize the frontend presentation-to-scene boundary for further evidence. The current
+release swarm does not justify a dedicated simulation thread, another solver restructuring, or
+renewed draw-call strategy branching. Reassess those only against a representative workload that
+actually exhausts their budget.
+
+#### Entity Presentation / Scene-Graph Consumer Investigation
+
+Read-only tracing and two temporary release-client censuses refine the matrix's next candidate.
+The ordinary part nodes created by `createActiveParts` have `localBounds: null`. Therefore
+`#syncSpatialEntry` normally exits without composing a placement or inserting a spatial entry.
+The earlier description must not be read as claiming every part performs those expensive operations:
+the dense cost is transform validation/copying, node lookup, recursion, and empty-entry checks.
+Ancestor matrix composition remains relevant to actual placement consumers and bounded descendants.
+
+The production consumer inventory is small:
+
+| Consumer | Uses per-part scene nodes? | Required behavior |
+| --- | --- | --- |
+| Articulated rendering | No | Uses retained part transforms and the entity/visual-root placement. |
+| Per-pose bounds | No | Transforms each mesh part's local bounds directly from its pose. |
+| Selection geometry | No | Composes visual-root placement with retained part transforms. |
+| Held/attached entity | Yes | `attachEntity` parents the independently posed child root under a named holding part. Descendant placement and inherited residency must remain coherent. |
+| Part-attached particle emitter | Yes | `resolvePartNode` supplies a generation-guarded frame target. Particle code reads origin, rotation, and liveness; the render owner remains the whole entity. |
+| Root placement playback | Indirectly | Moving an entity root walks its descendants, including otherwise unused part nodes. |
+
+Repository-wide `part.nodeId` / `parentPart.nodeId` searches found bookkeeping inside the dynamic
+entity system and the two attachment routes above, not a hidden renderer or selection dependency.
+Origin-only queries were traced separately from full-placement reads. Missing authored parts still
+need their existing explicit unavailable/error semantics; whole-object particle index `-1` must
+continue to use the entity root.
+
+Both censuses used the worktree credentials, `+Holtfighter Slot 1`, unchanged player cell
+`0x63460369`, release sidecar, render scale 1, 1441×903 viewport, ten-second settling, and a roughly
+ten-second window with 320 left-drag orbit inputs. V8/renderer profiling was off. Temporary counters
+recorded work and distinct identities; these captures are not performance A/B measurements.
+The different swarms had 18–20 and 30–33 visible dynamic entities, so their frame times must not be
+compared as a speedup. Counts also include non-visible descendants visited by placement playback.
+
+| Counter | Initial census | Expanded consumer census |
+| --- | ---: | ---: |
+| Root-plus-parts publication batches | 24,760 | 42,826 |
+| Copied child transforms | 609,579 | 1,048,720 |
+| All spatial-subtree node visits | 1,513,987 | 2,406,596 |
+| Visits to known part nodes | 1,419,859 (93.78%) | 2,261,718 (93.98%) |
+| Bounded node visits | 34,684 | 51,026 |
+| Distinct visited part nodes | 1,415 | 1,415 |
+| Distinct visited parts carrying children | 1 | 1 |
+| Full-placement reads of known parts / distinct parts | 8,126 / 6 | 8,121 / 6 |
+| Origin-only reads of known parts / distinct parts | Not instrumented | 8,567 / 6 |
+
+The expanded run additionally recorded attachment requests from startup, including requests made
+before the measured window. It found 84 distinct requested IDs; only four overlapped the 1,415
+parts visited during the window. The other 80 were outside that walked population, so the request
+set is not an active-node count. The union of measured child-carrying, origin-read, and placement-read
+parts was seven; some readers were also outside the visited population. All seven had passed through
+an observed attachment request, and origin-only reads added no new identities beyond the six
+placement readers. Do not simplify these distinct populations into “only seven scene nodes exist”
+or “every other part can never have a consumer.”
+
+The evidence supports a narrow representation cleanup: keep the entity root and visual root, retain
+the full articulated pose for drawing/bounds/selection, and materialize a scene node for an authored
+part only when an emitter or held entity requests its frame. Keep requested nodes until entity
+teardown rather than adding per-frame activity detection or reference-counted eviction. A part with
+no attachment consumer would then have no second scene transform to copy and no descendant node to
+visit when its entity moves. This is a proposal, not an implemented or benchmarked cutover.
+
+The cutover would need to preserve a few concrete invariants:
+
+- Initialize a newly requested node from the current pose immediately, even between animation ticks.
+- Key attachment bindings by authored part identity, not dense renderer selector position.
+- Keep stable requested-node identities through appearance replacement. The current replacement
+  path rebuilds `localToVisualRoot` matrices, so any borrowed publication bindings must be refreshed
+  atomically rather than retaining the previous matrices.
+- Publish visual-root and requested-part transforms before synchronizing held descendants, including
+  root scale changes, placement poses, effect-root rotation, and authored root transforms.
+- Preserve inherited landblock/EnvCell membership, child scale separation, detach behavior, particle
+  frame versus render-owner identity, and owner-generation teardown. No streaming ownership change
+  or shared Rust API is needed for this frontend representation change.
+
+Do not remove real spatial entries or rewrite the general scene graph as the first step. Likewise,
+do not assume the prior 0.42 ms/frame publication scope is all recoverable: pose composition and
+bounds remain, and the current census measures operations rather than saved time. A focused
+attachment-node cutover should be validated with held-child and particle-frame fixtures, appearance
+replacement while attached, and a same-workload timing comparison before claiming an FPS gain.
+The existing audit patterns “A Rare Outlier Sets Every Value's Cost” and “Sparse Activity Is Advanced
+Through a Dense Population Scan” already cover the domain-agnostic smell; no duplicate entry was added.
+
+Artifacts: `/tmp/holtburger-scene-sync-census.json` and
+`/tmp/holtburger-scene-sync-consumers.json`. Both captures completed without browser errors or
+exceptions. All temporary counters, helper modules, and probe changes were removed. Only this
+investigation documentation remains changed; no production fix or commit was made.
+
+#### Hoshino Humanoid / Attachment / Particle Scenario Scouting
+
+The user correctly challenged the olthoi scene as a basis for a general attachment distribution.
+The sparse-consumer finding there establishes local bookkeeping overhead, not representative
+equipment/effect usage. The following scouting used the user's authorization to teleport the same
+worktree character to Hoshino quest areas; it did not change quest flags, generators, NPC state,
+equipment, or server settings. No attachment-node cutover was implemented.
+
+Location leads came from the community quest descriptions:
+[Hoshino Fortress Infiltration](https://dragonmoonac.com/index.php/Hoshino_Fortress_Infiltration),
+[The Risen Princess location list](https://dragonmoonac.com/index.php/The_Risen_Princess), and
+[Hoshino Must Die town coordinates](https://dragonmoonac.com/index.php/Hoshino_Must_Die).
+Command behavior was verified in local ACE: `AdvocateCommands.HandleTele` accepts cardinal world
+coordinates, and `DeveloperCommands.HandleTeleDungeonName` chooses a portal destination by
+case-insensitive name substring. Consequently destination identity was checked from the actual
+client residency rather than assumed from a wiki coordinate or dungeon search string.
+
+Two logins produced four successful location captures. The first session visited the fortress
+vicinity and Falatacot Temple, then stalled during the Hoshino Tower attempt. Its debugger HTTP
+endpoint also stopped responding; the identified diagnostic process tree was terminated. The cause
+was not established, and there is no valid Tower census. This occurred within one login, not during
+a rapid reconnect. After a several-minute gap following shutdown and the user's rate-limit warning,
+one further login succeeded without retries. That login initially entered Tower cell `0x66510103`
+successfully before visiting the two towns; the stall is not proof of a permanently broken Tower.
+
+The local ACE source exposes session/IP limits and timeout handling, but does not establish this
+live server's login cooldown. Future captures should group destinations/windows in one login,
+leave a reconnect gap, and stop on rejection rather than repeatedly retrying. The scout driver
+temporarily bounded debugger HTTP and request waits for the second session, since its existing
+outer readiness deadline could not fire while an inner debugger request remained pending.
+
+Each successful stop used release mode, `+Holtfighter Slot 1`, 1441×903 at render scale 1, fifteen
+seconds of post-ready settling, and 320 camera-only left-drag inputs followed by a two-second tail.
+The character was otherwise stationary. Renderer/V8 profiling was off. Screenshots and population
+counters were captured after the gesture; these are single scouting samples, not paired performance
+experiments or a streaming study. Counts were collected directly at their owners:
+
+- Live parts were registered at entity creation and removed at destruction.
+- A requested part remained marked throughout that entity's lifetime, including effects that had
+  ended. This sizes the proposed retain-until-teardown policy rather than only current readers.
+- Held-frame and origin-reader counts cover distinct live parts observed during the window.
+- Renderer-visible dynamic counts include held equipment and other dynamic objects, not just mobs.
+- Emitter and particle totals in the town captures come from `ParticleSystem.getDiagnostics`, not
+  renderer batch/instance counts. The first two stops recorded only submitted particle work.
+
+| Destination command | Verified player residency | Live parts / ever-requested live parts | Held-frame parts / origin-reader parts | Visible dynamic objects | Submitted particle instances |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `@tele 79.2n 40.3w` | `0x4de2ffff`, outdoor | 930 / 112 | 21 / 50 | 19 | 648 |
+| `@teledungeon Falatacot Temple` | `0x665e021e` | 748 / 163 | 27 / 12 | 12 | 271 |
+| `@tele 79.7n 41.0w` | `0x4ce3ffff`, outdoor | 2,879 / 385 | 84 / 146 | 77 | 1,947 |
+| `@tele 78.6n 40.6w` | `0x4ce10124`, inside a town building | 5,149 / 689 | 161 / 30 | 24 | 375 |
+
+The northern town (`@tele 79.7n 41.0w`) is the best visible-load candidate found. Its screenshot
+shows equipped Spectral Bushi/Samurai and active effects; the resident name census also includes
+archers, bloodmages, voidmages, Nanjou Shou-jen, bows, tachi, nekodes, daggers, and projectiles.
+The producer reported 716 live emitters across 183 owners, 287 visible and 429 hidden emitters,
+and 3,173 live particles. There were 230 distinct live parts carrying children or read for frames
+during the window. Browser frame callback mean was 5.45 ms with census instrumentation; the display
+remained near its 144 Hz cap. This is a useful harder workload, not a new attributable optimization
+result or a measured uncapped-FPS claim.
+
+The southern town is a complementary residency/occlusion case, not a stronger visible-particle
+case merely because its total is larger: 1,361 emitters across 314 owners, 66 visible / 1,295 hidden,
+and 3,414 live particles. The screenshot shows close spectral minions and spell effects inside the
+building. Callback mean was 2.03 ms. Both town captures reported a maximum of 11 emitters per owner.
+Resident totals span retained nearby content and can include content shared with the preceding
+stop; they do not describe only objects on screen or prove a retention leak.
+
+The fortress-coordinate screenshot landed beside a building on a hillside rather than in the dense
+central courtyard, and the Temple drop was a corridor beside the populated room. Those remain
+secondary scouting samples. The named Tower attempt was excluded. The generic teleport-regression
+summary for the successful town run reported `ok:false` because the first captured camera event
+was `advanced`, not its expected `reseeded`; both hops nevertheless reached `World ready`, produced
+the new camera generation and verified destination, and continued rendering through the capture.
+That summary must not be silently relabeled as a passed teleport regression test. No browser errors
+or exceptions were captured in the four completed location reports.
+
+Conclusion: use the northern town for the next attachment/presentation timing comparison, with the
+southern town as a hidden-effects and retained-binding counterexample. Attachment demand is far
+higher than in the olthoi scene. Requested nodes are still a minority of resident parts (approximately
+13.4% in both towns, 21.8% at the Temple), so on-demand attachment nodes remain plausible, but the
+olthoi ratio is not the design budget. Validate appearance replacement, active particle frames,
+held descendants, and accumulated requests against these heavier workloads before accepting a
+cutover or claiming its savings. A direct-login repeat of the northern drop would also separate its
+stable local population from cross-stop retention before making a representative benchmark claim.
+
+Artifacts: `/tmp/holtburger-hoshino-{1,2}.{json,png}` and
+`/tmp/holtburger-hoshino-town-{1,2}.{json,png}`. The character was left at the final southern-town
+drop, `0x4ce10124` (command `@tele 78.6n 40.6w`; the settled HUD rounds to 78.5N, 40.6W).
+The client is closed. All temporary instrumentation, helper modules, and scouting-driver changes
+were removed; only the investigation document remains modified. No commit was made.
+
+#### Sparse Attachment-Frame Cutover
+
+The next authorized experiment separates rigid-part pose data from scene-graph identity. The
+implementation retains every mesh part and its current `localToVisualRoot` matrix for articulated
+rendering, bounds, and exact selection. Only an actual held-item or particle-frame request creates
+a part scene node. `requestPartNode` makes that cold materialization explicit; repeated requests
+return the same node, initialized from the latest published pose even on the first request.
+
+Requested frames remain until their entity is destroyed. There is no per-frame pruning, reference
+counting, parallel dense renderer, or new streaming owner. Entity and visual roots remain in place;
+root placement, landblock/EnvCell residency, culling bounds, and held-child ancestry keep their
+existing owners. Visual-root and requested-part transforms publish together before spatially
+synchronizing held descendants. Appearance replacement keeps frame identities and rebinds their
+borrowed matrices before publication, so future animation updates cannot write through stale
+bindings. Geometry preparation no longer allocates one scene node per mesh part.
+
+Validation and measurement are separate phases. Unit coverage exercises a first request after an
+already published rotated/translated pose, stable repeated identity, subsequent pose updates,
+invalid part requests, and eviction. Existing tests cover held child placement and independent
+scale, geometry/appearance replacement during animation, selection, effects, and bounds.
+
+The live comparison uses one release-mode login with this worktree's `.dev.env` and
+`+Holtfighter Slot 1`, visiting the northern and then southern town commands above. Each destination
+settles for fifteen seconds, then alternates sparse/dense/dense/sparse/dense/sparse ten-second
+stationary windows, with three seconds excluded after each switch. Renderer and V8 profiling are
+off; publication duration uses the existing producer timer. A brief camera-only orbit follows each
+destination's timing windows, outside measurement. This is a steady-state experiment, not a
+teleport/streaming benchmark or an uncapped-FPS measurement.
+
+The dense control is temporary diagnostic materialization of every part using the new ownership
+contract, reproducing the full child-transform copying and subtree population. It is not a literal
+old-build A/B. Actual consumer requests are tracked separately, so switching back removes only
+diagnostic-only leaves and never invalidates held/particle targets. New residents inherit the
+current diagnostic mode. Population snapshots bracket every window, and raw timings and captures
+are retained under `/tmp/holtburger-sparse-{north,south}-*.json` and the corresponding `.png` files.
+The switch and all its bookkeeping were removed after capture; only sparse production behavior
+remains.
+
+Results below pool repeated windows by their actual sample counts. The first window at each
+destination is excluded as warmup; the northern first window also overlapped validation work on
+the same machine, so it is not used for the estimate. Dense windows are indices 1, 2, and 4;
+sparse windows are indices 3 and 5. Individual raw windows remain available, including the excluded
+ones. No V8 stack attribution or new GPU timing was collected in this experiment.
+
+| Steady-state measure | Northern town: dense → sparse | Southern town: dense → sparse |
+| --- | ---: | ---: |
+| Resident part nodes, observed range | 4,465–4,469 → 562–569 | 4,726–4,732 → 586–596 |
+| Publication mean, ms/frame | 0.987 → 0.734 (25.7% lower) | 0.387 → 0.302 (21.9% lower) |
+| Mean published entities/frame | 58.47 → 57.26 | 20.05 → 20.03 |
+| Publication time / published entity, µs | 16.88 → 12.81 | 19.30 → 15.08 |
+| Publication p95 within each window, ms | 2.50 → 1.90 | 3.00 → 2.20 |
+| Whole browser callback mean, ms/frame | 6.089 → 5.607 | 1.784 → 1.680 |
+| Sampled frames, dense / sparse | 4,070 / 2,849 | 4,312 / 2,881 |
+
+The frame-rate timer includes the complete publication sweep, so the normalized per-entity number
+is not an isolated cost of one entity or part. It checks whether changing cadence/population alone
+explains the result: the northern reduction remains approximately 24% after this normalization,
+and southern publication counts are nearly identical. Whole-callback savings are broader evidence,
+not an additive breakdown or proof that every saved microsecond belongs to this change.
+
+Northern snapshots still show 92–98 visible dynamic objects and 1,785–1,874 submitted particle
+instances. Southern snapshots show 15–20 visible objects and 369–378 submitted particle instances.
+Resident totals include retained nearby content; neither destination is a clean direct-login
+population census. Screenshots were inspected with buildings/trees, spectral humanoids, held
+equipment, and active effects present. Both post-measurement orbits continued rendering; animation
+frame interval p95 was 7 ms in each, with observed maxima 13.9 ms north and 7.1 ms south. All twelve
+window reports captured no browser error/exception messages. These are live rendering checks,
+not proof of every possible attachment or effect. Appearance replacement was checked by the
+asset-free tests, not by forcing live equipment/server-state changes.
+
+Conclusion: retain the narrow sparse-node cutover. It removes approximately 87% of the resident
+part scene nodes in both heavier scenarios, saves about 0.25 ms/frame of northern publication and
+0.085 ms/frame southern publication, and does not require another rendering strategy. This is a
+useful local reduction, not completion of the 200 FPS objective. Rendering/bounds still consume
+all rigid-part poses; this does not eliminate their separate costs or justify a particle rewrite.
+Revisit the remaining measured matrix before choosing another structural change.
+
+Clean-tree-of-diagnostics validation: `npm run check`, all 2,050 TypeScript tests across 269 files,
+`npm run lint:ts`, and `npm run lint:dead` passed. No Rust code changed. The added lifecycle test
+also verifies a requested frame follows root movement into another landblock. The client is closed,
+the player remains at the southern drop (`0x4ce10124`), and no commit was made.
+
+The subsequent quality pass found no production blocker. It strengthened the held-child test so
+attachment itself makes the first parent-frame request, rather than relying on an earlier explicit
+request, and replaced a test non-null assertion with an explicit fixture failure. The existing
+sparse-population and resource-lifetime audit patterns cover this change; no duplicate quality-smell
+entry was added. The reviewed cutover and accumulated investigation evidence are committed together.

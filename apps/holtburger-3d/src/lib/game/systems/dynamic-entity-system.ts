@@ -70,6 +70,12 @@ import type {
 } from "../runtime/dynamic-entity-feed";
 import type { SelectionGeometryMorphology } from "../selection/entity-interaction-shape";
 
+/** A requested authored part frame retained until its entity is destroyed. */
+interface DynamicAttachmentFrame extends SceneChildTransform {
+	/** Authored identity used to rebind the borrowed matrix after appearance replacement. */
+	readonly partIndex: number;
+}
+
 interface DynamicEntityRecord {
 	readonly rootNodeId: SceneNodeId;
 	readonly visualRootNodeId: SceneNodeId;
@@ -84,8 +90,8 @@ interface DynamicEntityRecord {
 	/** Mutable display content updated independently from immutable visual setup facts. */
 	nameplateContent: NameplateContent | null;
 	renderable: DynamicEntityRenderable;
-	/** Stable borrowed part matrices submitted together with the visual root's transform. */
-	partTransformPublication: readonly SceneChildTransform[];
+	/** Sparse attachment nodes and borrowed matrices published with the visual root atomically. */
+	attachmentFrames: DynamicAttachmentFrame[];
 	articulatedPose: ArticulatedPose;
 	animationHandle: PreparedAnimationHandle | null;
 	/**
@@ -434,31 +440,18 @@ export class DynamicEntitySystem<
 	): DynamicEntityRecord {
 		const source = resident.source;
 		const rootScale = source.scale.clone();
+		const pose = defaultPose(source.presentation);
+		const parts = createActiveParts(source.presentation, pose, rootScale);
 		const rootNodeId = this.#placements.createRoot(
 			resident.placement,
 			// The staged generation publishes conservative bounds with playback activation.
 			null,
 		);
-		const pose = defaultPose(source.presentation);
-		let parts: readonly ActiveDynamicPart[];
 		const visualRootNodeId = this.#scene.createNode({
 			localBounds: null,
 			localTransform: Mat4.identity(),
 			parentId: rootNodeId,
 		});
-		try {
-			parts = createActiveParts(
-				this.#scene,
-				visualRootNodeId,
-				source.presentation,
-				pose,
-				rootScale,
-			);
-		} catch (cause) {
-			this.#scene.destroyNode(visualRootNodeId);
-			this.#scene.destroyNode(rootNodeId);
-			throw cause;
-		}
 		const rigidPresentationBounds = staticPresentationBounds(source);
 		const record: DynamicEntityRecord = {
 			animationHandle: null,
@@ -469,10 +462,7 @@ export class DynamicEntitySystem<
 			soundTableHandle: null,
 			articulatedPose: pose,
 			renderable: { kind: "preparing", parts },
-			partTransformPublication: parts.map((part) => ({
-				nodeId: part.nodeId,
-				transform: part.localToVisualRoot,
-			})),
+			attachmentFrames: [],
 			rootNodeId,
 			rootScale,
 			source,
@@ -599,6 +589,15 @@ export class DynamicEntitySystem<
 					};
 				});
 				const renderable = prepareRenderable(parts, template);
+				// Attachment identities survive replacement, but their borrowed matrices do not.
+				const attachmentFrames = entity.attachmentFrames.map((frame) => {
+					const part = parts.find((part) => part.partIndex === frame.partIndex);
+					if (!part)
+						throw new Error(
+							`Replacement removes requested attachment part ${frame.partIndex}.`,
+						);
+					return { ...frame, transform: part.localToVisualRoot };
+				});
 				const rigidBounds = this.#presentationBoundsForSample(
 					parts,
 					entity.visualRootTransform,
@@ -611,10 +610,7 @@ export class DynamicEntitySystem<
 				stage.commit(owner.templateOwnerId);
 				entity.source = source;
 				entity.renderable = renderable;
-				entity.partTransformPublication = parts.map((part) => ({
-					nodeId: part.nodeId,
-					transform: part.localToVisualRoot,
-				}));
+				entity.attachmentFrames = attachmentFrames;
 				entity.motionPlayback = visual.motionPlayback;
 				entity.preparedAnimation = visual.animation;
 				entity.cullingBounds = visual.animation.localBounds;
@@ -623,8 +619,7 @@ export class DynamicEntitySystem<
 				entity.selectionGeometryMorphology =
 					template.selectionGeometryMorphology;
 				this.#publishCullingBounds(entity);
-				for (const part of parts)
-					this.#scene.updateLocalTransform(part.nodeId, part.localToVisualRoot);
+				this.#publishAttachmentFrames(entity, entity.visualRootTransform);
 				this.#pendingTemplateStages.delete(ownerId);
 			},
 		};
@@ -641,21 +636,55 @@ export class DynamicEntitySystem<
 	}
 
 	/**
-	 * Scene node carrying one authored part's pose, for behavior that attaches to a part.
+	 * Materialize a stable authored part frame on first request, initialized from the current pose.
 	 *
 	 * `CreateParticle` names a part index and `-1` for the whole object, so a consumer that ignores it
 	 * places every part-attached emitter at the object's origin instead of the part's — and, since the
 	 * emitter frame drives spawn rotation too, aims it with the object's frame as well.
 	 */
-	resolvePartNode(
+	requestPartNode(
 		rootNodeId: SceneNodeId,
 		partIndex: number,
 	): SceneNodeId | null {
 		const entity = this.#entities.get(rootNodeId);
 		if (!entity) return null;
-		return (
-			entity.renderable.parts.find((part) => part.partIndex === partIndex)
-				?.nodeId ?? null
+		const part = entity.renderable.parts.find(
+			(part) => part.partIndex === partIndex,
+		);
+		return part ? this.#attachmentFrame(entity, part).nodeId : null;
+	}
+
+	/** Cold attachment lookup; ordinary mesh parts need no scene node or per-frame scene copy. */
+	#attachmentFrame(
+		entity: DynamicEntityRecord,
+		part: ActiveDynamicPart,
+	): DynamicAttachmentFrame {
+		const existing = entity.attachmentFrames.find(
+			(frame) => frame.partIndex === part.partIndex,
+		);
+		if (existing) return existing;
+		const frame = {
+			partIndex: part.partIndex,
+			nodeId: this.#scene.createNode({
+				localBounds: null,
+				localTransform: part.localToVisualRoot,
+				parentId: entity.visualRootNodeId,
+			}),
+			transform: part.localToVisualRoot,
+		};
+		entity.attachmentFrames.push(frame);
+		return frame;
+	}
+
+	/** Held descendants must observe the completed root and all requested part transforms. */
+	#publishAttachmentFrames(
+		entity: DynamicEntityRecord,
+		visualRootTransform: Mat4,
+	): void {
+		this.#scene.updateLocalTransformWithChildren(
+			entity.visualRootNodeId,
+			visualRootTransform,
+			entity.attachmentFrames,
 		);
 	}
 
@@ -731,8 +760,8 @@ export class DynamicEntitySystem<
 				part.defaultScale,
 				part.localToVisualRoot,
 			);
-			this.#scene.updateLocalTransform(part.nodeId, part.localToVisualRoot);
 		}
+		this.#publishAttachmentFrames(child, child.visualRootTransform);
 		child.articulatedPose = pose;
 		const placedBounds = presentationBoundsForPose(child.source, pose);
 		child.rigidPresentationBounds = placedBounds;
@@ -747,7 +776,7 @@ export class DynamicEntitySystem<
 		}
 		this.#scene.attachToPart(
 			child.rootNodeId,
-			parentPart.nodeId,
+			this.#attachmentFrame(parent, parentPart).nodeId,
 			attachPoint.offsetTransform,
 		);
 	}
@@ -963,8 +992,8 @@ export class DynamicEntitySystem<
 				part.defaultScale,
 				part.localToVisualRoot,
 			);
-			this.#scene.updateLocalTransform(part.nodeId, part.localToVisualRoot);
 		}
+		this.#publishAttachmentFrames(entity, entity.visualRootTransform);
 		entity.rigidPresentationBounds = this.#presentationBoundsForSample(
 			entity.renderable.parts,
 			entity.visualRootTransform,
@@ -1526,11 +1555,7 @@ export class DynamicEntitySystem<
 			entity.appliedEnvelopeRadius,
 			entity.publishedPresentationBounds,
 		);
-		this.#scene.updateLocalTransformWithChildren(
-			entity.visualRootNodeId,
-			visualRootTransform,
-			entity.partTransformPublication,
-		);
+		this.#publishAttachmentFrames(entity, visualRootTransform);
 		entity.visualRootTransform.copy(visualRootTransform);
 		entity.articulatedPose = sample.articulatedPose;
 		entity.rigidPresentationBounds = rigidPresentationBounds;
@@ -1598,8 +1623,8 @@ export class DynamicEntitySystem<
 		entity.soundTableHandle?.release();
 		entity.soundTableHandle = null;
 		this.#effects.remove(entity.rootNodeId);
-		for (const part of entity.renderable.parts) {
-			this.#scene.destroyNode(part.nodeId);
+		for (const frame of entity.attachmentFrames) {
+			this.#scene.destroyNode(frame.nodeId);
 		}
 		this.#scene.destroyNode(entity.visualRootNodeId);
 		this.#placements.destroyRoot(entity.rootNodeId);
@@ -1658,58 +1683,47 @@ function presentationBoundsForPose(
 	return bounds;
 }
 
+/** Build renderer-owned rigid poses without allocating attachment scene identities. */
 function createActiveParts(
-	scene: SceneGraph,
-	visualRootNodeId: SceneNodeId,
 	presentation: ResolvedObjectPresentation,
 	pose: ArticulatedPose,
 	scale: Vec3,
 ): readonly ActiveDynamicPart[] {
 	const parts: ActiveDynamicPart[] = [];
 	const partIndices = new Set<number>();
-	try {
-		for (const part of presentation.parts) {
-			const partIndex = part.partIndex;
-			if (partIndices.has(partIndex)) {
-				throw new Error(
-					`Presentation ${presentation.id} contains duplicate part index ${partIndex}.`,
-				);
-			}
-			partIndices.add(partIndex);
-			const transform = pose.partToObjectTransforms[partIndex];
-			if (!transform)
-				throw new Error(
-					`Presentation ${presentation.id} has no pose for part ${partIndex}.`,
-				);
-			const localToVisualRoot = composeObjectPartTransform(
-				transform,
-				scale,
-				part.defaultScale,
+	for (const part of presentation.parts) {
+		const partIndex = part.partIndex;
+		if (partIndices.has(partIndex)) {
+			throw new Error(
+				`Presentation ${presentation.id} contains duplicate part index ${partIndex}.`,
 			);
-			parts.push({
-				defaultScale: part.defaultScale,
-				depthDrawUnits: [],
-				frameInstance: {
-					color: { a: 1, b: 1, g: 1, r: 1 },
-					sourceToLandblock: Mat4.zero(),
-				},
-				geometryData: null,
-				localBounds: requiredPartBounds(part.geometry.bounds, partIndex),
-				localToVisualRoot,
-				nodeId: scene.createNode({
-					localBounds: null,
-					localTransform: localToVisualRoot,
-					parentId: visualRootNodeId,
-				}),
-				partIndex,
-				// Staging-only placeholder. The required effect sample replaces it before the owner
-				// can publish, including a nonzero object-translucency baseline.
-				renderState: { translucency: 0 },
-			});
 		}
-	} catch (cause) {
-		for (const part of parts) scene.destroyNode(part.nodeId);
-		throw cause;
+		partIndices.add(partIndex);
+		const transform = pose.partToObjectTransforms[partIndex];
+		if (!transform)
+			throw new Error(
+				`Presentation ${presentation.id} has no pose for part ${partIndex}.`,
+			);
+		const localToVisualRoot = composeObjectPartTransform(
+			transform,
+			scale,
+			part.defaultScale,
+		);
+		parts.push({
+			defaultScale: part.defaultScale,
+			depthDrawUnits: [],
+			frameInstance: {
+				color: { a: 1, b: 1, g: 1, r: 1 },
+				sourceToLandblock: Mat4.zero(),
+			},
+			geometryData: null,
+			localBounds: requiredPartBounds(part.geometry.bounds, partIndex),
+			localToVisualRoot,
+			partIndex,
+			// Staging-only placeholder. The required effect sample replaces it before the owner
+			// can publish, including a nonzero object-translucency baseline.
+			renderState: { translucency: 0 },
+		});
 	}
 	return parts;
 }

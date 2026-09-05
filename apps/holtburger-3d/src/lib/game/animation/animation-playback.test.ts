@@ -11,24 +11,32 @@ import {
 	sampleAuthoredRootTransform,
 	wholeAnimationClip,
 } from "./animation-playback";
-import type { PreparedAnimation } from "./animation-asset-repository";
+import {
+	prepareAnimation,
+	type PreparedAnimation,
+} from "./animation-asset-repository";
 
 /** Frames are distinguishable by their x translation, so a sampled pose names its frame. */
-function testAnimation(frameCount: number): PreparedAnimation {
-	return {
-		authoredRootTranslates: false,
-		frameCount,
-		framesPerSecond: 30,
-		hooks: [],
-		id: "0x03000001",
-		partCount: 1,
-		partFrames: Array.from({ length: frameCount }, (_, frame) => {
-			const pose = Mat4.identity();
-			pose.m41 = frame * 10;
-			return pose;
-		}),
-		positionFrames: [],
-	};
+function testAnimation(
+	frameCount: number,
+	positionFrames: readonly Mat4[] = [],
+): PreparedAnimation {
+	return prepareAnimation(
+		{
+			frameCount,
+			hooks: [],
+			id: "0x03000001",
+			partCount: 1,
+			partFrames: Array.from({ length: frameCount }, (_, frame) => {
+				const pose = Mat4.identity();
+				pose.m41 = frame * 10;
+				return pose;
+			}),
+			positionFrames,
+		},
+		"0x03000001",
+		30,
+	);
 }
 
 describe("motion", () => {
@@ -126,10 +134,9 @@ describe("advancePlayingFrame", () => {
 describe("sampleAuthoredRootTransform", () => {
 	/** Yaw-only root frames, the shape the one archive-wide carrier actually authors. */
 	function turningRoot(frameCount: number): PreparedAnimation {
-		const animation = testAnimation(frameCount);
-		return {
-			...animation,
-			positionFrames: Array.from({ length: frameCount }, (_, frame) => {
+		return testAnimation(
+			frameCount,
+			Array.from({ length: frameCount }, (_, frame) => {
 				const pose = Mat4.identity();
 				// A distinguishable per-frame yaw; magnitude is irrelevant to the contract.
 				pose.m11 = Math.cos(frame * 0.01);
@@ -138,7 +145,7 @@ describe("sampleAuthoredRootTransform", () => {
 				pose.m33 = Math.cos(frame * 0.01);
 				return pose;
 			}),
-		};
+		);
 	}
 
 	it("returns nothing for a clip that authors no root frames", () => {
@@ -168,11 +175,9 @@ describe("sampleAuthoredRootTransform", () => {
 	});
 
 	it("refuses a translating root, which could separate a model from its collider", () => {
-		const animation = turningRoot(4);
-		const translating: PreparedAnimation = {
-			...animation,
-			authoredRootTranslates: true,
-		};
+		const root = Mat4.identity();
+		root.m41 = 1;
+		const translating = testAnimation(1, [root]);
 
 		expect(
 			sampleAuthoredRootTransform(wholeAnimationClip(translating), 0),
@@ -182,9 +187,11 @@ describe("sampleAuthoredRootTransform", () => {
 
 describe("interpolateRigidTransform", () => {
 	it("smoothly interpolates rigid translation and orientation", () => {
-		const from = Mat4.identity();
-		const to = createRotationMat4(new Quat(0, 0, 0, 1));
-		to.m41 = 10;
+		const from = { rotation: Quat.identity(), translation: new Vec3(0, 0, 0) };
+		const to = {
+			rotation: new Quat(0, 0, 0, 1),
+			translation: new Vec3(10, 0, 0),
+		};
 		const halfway = interpolateRigidTransform(from, to, 0.5);
 
 		expect(halfway.m41).toBe(5);
@@ -210,6 +217,74 @@ describe("interpolateRigidTransform", () => {
 });
 
 describe("sampleAnimationPose", () => {
+	it.each([new Vec3(1, 0, 0), new Vec3(0, 1, 0), new Vec3(0, 0, 1)])(
+		"preserves prepared rotation interpolation about %o",
+		(axis) => {
+			// Cover near-identical rotations, each matrix extraction branch, and the shortest arc
+			// across the sign seam. Expected angles describe the motion, not the implementation.
+			for (const [start, end, delta] of [
+				[0, 0.0001, 0.0001],
+				[0, Math.PI / 2, Math.PI / 2],
+				[Math.PI, Math.PI, 0],
+				[(-17 * Math.PI) / 18, (17 * Math.PI) / 18, -Math.PI / 9],
+			] as const) {
+				const rotationAt = (angle: number) =>
+					createRotationMat4(
+						rotationVectorQuaternion(
+							new Vec3(axis.x * angle, axis.y * angle, axis.z * angle),
+						),
+					);
+				const from = rotationAt(start);
+				const to = rotationAt(end);
+				from.m41 = -2;
+				from.m42 = 3;
+				from.m43 = 7;
+				to.m41 = 6;
+				to.m42 = -1;
+				to.m43 = 9;
+				const animation = prepareAnimation(
+					{
+						id: "0x03000001",
+						frameCount: 2,
+						partCount: 1,
+						partFrames: [from, to],
+						positionFrames: [],
+						hooks: [],
+					},
+					"0x03000001",
+				);
+				// Shared endpoints must stay immutable across every entity and repeated sample.
+				for (const frame of animation.partFrames) {
+					Object.freeze(frame.rotation);
+					Object.freeze(frame.translation);
+				}
+				for (const fraction of [0, 0.25, 0.5, 0.75, 1]) {
+					const expected = rotationAt(start + delta * fraction);
+					expected.m41 = -2 + 8 * fraction;
+					expected.m42 = 3 - 4 * fraction;
+					expected.m43 = 7 + 2 * fraction;
+					const sampled = sampleAnimationPose(
+						wholeAnimationClip(animation),
+						fraction,
+					)[0];
+					if (!sampled) throw new Error("Expected a sampled part.");
+					for (const point of [
+						Vec3.zero(),
+						new Vec3(1, 0, 0),
+						new Vec3(0, 1, 0),
+						new Vec3(0, 0, 1),
+					]) {
+						const actual = transformPoint3(sampled, point);
+						const wanted = transformPoint3(expected, point);
+						expect(actual.x).toBeCloseTo(wanted.x, 10);
+						expect(actual.y).toBeCloseTo(wanted.y, 10);
+						expect(actual.z).toBeCloseTo(wanted.z, 10);
+					}
+				}
+			}
+		},
+	);
+
 	it("keeps an explicit authored rate while interpolating at render cadence", () => {
 		const clip = playingClip(testAnimation(3), 0, 2, 40, "loop");
 		const halfFrame = advancePlayingFrame(
@@ -240,21 +315,7 @@ describe("sampleAnimationPose", () => {
 	});
 
 	it("ignores authored root position frames while articulated playback continues", () => {
-		const first = Mat4.identity();
-		const second = Mat4.identity();
-		second.m41 = 10;
-		const third = Mat4.identity();
-		third.m41 = 20;
-		const withoutRootFrames: PreparedAnimation = {
-			authoredRootTranslates: false,
-			frameCount: 3,
-			framesPerSecond: 30,
-			hooks: [],
-			id: "0x03000001",
-			partCount: 1,
-			partFrames: [first, second, third],
-			positionFrames: [],
-		};
+		const withoutRootFrames = testAnimation(3);
 		// Non-identity root translation and rotation per frame, mirroring a WCID 36449-style clip.
 		const halfAngle = Math.PI / 6;
 		const rootRotation = createRotationMat4(
@@ -262,10 +323,11 @@ describe("sampleAnimationPose", () => {
 		);
 		rootRotation.m41 = 7;
 		rootRotation.m42 = -3;
-		const withRootFrames: PreparedAnimation = {
-			...withoutRootFrames,
-			positionFrames: [rootRotation, rootRotation, rootRotation],
-		};
+		const withRootFrames = testAnimation(3, [
+			rootRotation,
+			rootRotation,
+			rootRotation,
+		]);
 
 		for (const framePosition of [0, 0.5, 1.25, 2.5]) {
 			expect(

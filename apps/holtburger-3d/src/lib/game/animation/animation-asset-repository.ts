@@ -8,10 +8,19 @@ import {
 	type PreparedAssetHandle,
 } from "../behavior/prepared-asset-repository";
 import type { DatAssetId } from "../game-types";
-import type { Mat4 } from "../math/types";
+import { quaternionFromRotationMat4 } from "../math/matrices";
+import { type Mat4, type Quat, Vec3 } from "../math/types";
 
 /** Retail setup-default animation rate installed by `CPartArray::InitDefaults`. */
 const STATIC_DEFAULT_ANIMATION_FRAMES_PER_SECOND = 30;
+
+/** Shared interpolation endpoints, decomposed once during asset preparation. */
+export interface PreparedAnimationFrame {
+	/** Normalized orientation in the app's render coordinate system. */
+	readonly rotation: Readonly<Quat>;
+	/** Part-to-object translation or authored root offset, never a world placement. */
+	readonly translation: Readonly<Vec3>;
+}
 
 /** Immutable prepared animation shared independently from entity playback state. */
 export interface PreparedAnimation {
@@ -20,9 +29,9 @@ export interface PreparedAnimation {
 	readonly partCount: number;
 	readonly framesPerSecond: number;
 	/** Frame-major rigid-part transforms indexed by `frame * partCount + part`. */
-	readonly partFrames: readonly Mat4[];
+	readonly partFrames: readonly PreparedAnimationFrame[];
 	/** Optional frame-major authored root offsets. */
-	readonly positionFrames: readonly Mat4[];
+	readonly positionFrames: readonly PreparedAnimationFrame[];
 	/**
 	 * Whether any authored root frame *moves* the object rather than only turning it.
 	 *
@@ -164,7 +173,15 @@ export function prepareAnimation(
 		hooks: decoded.hooks,
 		id: decoded.id,
 		partCount: decoded.partCount,
-		partFrames: decoded.partFrames,
-		positionFrames: decoded.positionFrames,
+		partFrames: decoded.partFrames.map(prepareAnimationFrame),
+		positionFrames: decoded.positionFrames.map(prepareAnimationFrame),
+	};
+}
+
+/** Preserve the decoder's coordinate conversion and the sampler's existing rotation extraction. */
+function prepareAnimationFrame(frame: Mat4): PreparedAnimationFrame {
+	return {
+		rotation: quaternionFromRotationMat4(frame),
+		translation: new Vec3(frame.m41, frame.m42, frame.m43),
 	};
 }

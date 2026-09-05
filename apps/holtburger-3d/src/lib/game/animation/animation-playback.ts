@@ -1,8 +1,8 @@
-import type { PreparedAnimation } from "./animation-asset-repository";
-import {
-	createRotationMat4,
-	quaternionFromRotationMat4,
-} from "../math/matrices";
+import type {
+	PreparedAnimation,
+	PreparedAnimationFrame,
+} from "./animation-asset-repository";
+import { createRotationMat4 } from "../math/matrices";
 import { Mat4, Quat, Vec3 } from "../math/types";
 
 /**
@@ -282,21 +282,20 @@ function normalizeClipFrame(clip: PlayingClip, framePosition: number): number {
 
 /** Interpolate translation linearly and orientation spherically between two rigid transforms. */
 export function interpolateRigidTransform(
-	from: Mat4,
-	to: Mat4,
+	from: PreparedAnimationFrame,
+	to: PreparedAnimationFrame,
 	fraction: number,
 ): Mat4 {
 	if (!Number.isFinite(fraction) || fraction < 0 || fraction > 1)
 		throw new Error("Rigid interpolation fraction must be within [0, 1].");
-	const rotation = slerpQuaternion(
-		quaternionFromRotationMat4(from),
-		quaternionFromRotationMat4(to),
-		fraction,
-	);
+	const rotation = slerpQuaternion(from.rotation, to.rotation, fraction);
 	const result = createRotationMat4(rotation);
-	result.m41 = from.m41 + (to.m41 - from.m41) * fraction;
-	result.m42 = from.m42 + (to.m42 - from.m42) * fraction;
-	result.m43 = from.m43 + (to.m43 - from.m43) * fraction;
+	result.m41 =
+		from.translation.x + (to.translation.x - from.translation.x) * fraction;
+	result.m42 =
+		from.translation.y + (to.translation.y - from.translation.y) * fraction;
+	result.m43 =
+		from.translation.z + (to.translation.z - from.translation.z) * fraction;
 	return result;
 }
 
@@ -337,7 +336,11 @@ export function multiplyQuaternion(left: Quat, right: Quat): Quat {
 	);
 }
 
-function slerpQuaternion(from: Quat, to: Quat, fraction: number): Quat {
+function slerpQuaternion(
+	from: Readonly<Quat>,
+	to: Readonly<Quat>,
+	fraction: number,
+): Quat {
 	let target = to;
 	let dot = from.w * to.w + from.x * to.x + from.y * to.y + from.z * to.z;
 	if (dot < 0) {

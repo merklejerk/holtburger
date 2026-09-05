@@ -7,7 +7,10 @@ import { describe, expect, it } from "vitest";
 import type { AdvancedAnimationFrame } from "../systems/animation-system";
 import { AnimationSystem } from "../systems/animation-system";
 import { wholeAnimationClip } from "../animation/animation-playback";
-import type { PreparedAnimation } from "../animation/animation-asset-repository";
+import {
+	prepareAnimation,
+	type PreparedAnimation,
+} from "../animation/animation-asset-repository";
 import { Mat4 } from "../math/types";
 import { AnimationPresentationScheduler } from "./animation-presentation-scheduler";
 
@@ -180,14 +183,16 @@ function advancedFrame(
 }
 
 function testAnimation(): PreparedAnimation {
-	return {
-		authoredRootTranslates: false,
-		frameCount: 1,
-		framesPerSecond: 30,
-		hooks: [],
-		id: "0x03000001",
-		partCount: 1,
-		partFrames: [Mat4.identity()],
-		positionFrames: [],
-	};
+	return prepareAnimation(
+		{
+			frameCount: 1,
+			hooks: [],
+			id: "0x03000001",
+			partCount: 1,
+			partFrames: [Mat4.identity()],
+			positionFrames: [],
+		},
+		"0x03000001",
+		30,
+	);
 }

@@ -1702,6 +1702,30 @@ when the report clearly distinguishes them.
 the observation window before exporting it, reset operands together, or label unmatched estimates
 instead of presenting them as a matched measurement.
 
+## Flattened Index Checks Permit Cross-row Aliasing
+
+**Smell:** A flattened collection lookup validates only the final offset, not whether each logical
+coordinate belongs to the row or record being addressed.
+
+**Signals:**
+
+- An index is computed as `row * stride + column` and checked only against total storage length.
+- A consumer iterates a wider schema than the producer's row width.
+- An undefined-entry check is expected to detect missing fields, but an oversized column reaches
+  a valid entry in the following row.
+
+**Possible failure:** Data from another record is accepted as the requested field. Conservative
+aggregations can silently inflate; other consumers can return plausible but incorrect results.
+
+**Questions:** Which owner establishes each coordinate's range? Can the consumer's field count
+exceed the producer's stride? Does a test include multiple rows and unequal schema widths?
+
+**Counterexamples:** Deliberate linear traversal across rows is valid when callers supply a linear
+offset rather than an independently meaningful row and column.
+
+**Possible responses:** Bound logical coordinates before flattening, restrict traversal to the
+producer's declared width, or expose a row-scoped view that preserves the missing-field boundary.
+
 ## Adding Observations
 
 An observation belongs here when it has:

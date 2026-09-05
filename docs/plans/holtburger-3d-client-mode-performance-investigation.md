@@ -3287,3 +3287,126 @@ Conclusion: retain the small plain-settings change. The expected reactive-read o
 and the profiling-off windows show lower callback cost, with the comparison limitations above.
 This is a CPU boundary cleanup, not a demonstrated 200 FPS result. Investigating prepared
 animation data remains the recommended next independent experiment; it is not implemented here.
+
+## Prepared Animation Endpoints — 2026-09-05
+
+Following user approval, replaced retained prepared animation matrices with one shared
+`PreparedAnimationFrame` representation: normalized rotation and translation. Both part frames
+and authored root frames use it. Preparation performs the same matrix rotation extraction that
+previously ran for both interpolation endpoints on every sample. The decoder, coordinate
+conversion, slerp algorithm, clip traversal, hook timing, and matrix-shaped sampled output are
+unchanged. Bounds consumers read the prepared translation directly. No alternate renderer path,
+per-entity endpoint cache, or retained duplicate prepared matrix table was introduced.
+
+The repository's existing asset handles still share preparation and control eviction. Host animation
+responses and the core authority boundary are unchanged. Decoded source matrices remain transient
+preparation inputs. Each retained endpoint carries seven numeric components instead of sixteen,
+but uses a frame object plus rotation/translation objects; this is not a measured heap-size claim.
+Asset preparation now does more cold work. Streaming performance was not measured or optimized.
+
+### Verification and Instrumented Results
+
+- Migrated test fixtures through production preparation rather than retaining matrix-shaped
+  impostors of the prepared contract. Existing coverage exercises reverse playback, looping and
+  hold seams, transitions, partial-part pose retention, root behavior, bounds, and asset sharing.
+- Added interpolation coverage for all three axes, near-identical rotations, half-turn extraction
+  branches, shortest-arc sign seams, all translation components, and repeated sampling of frozen
+  shared endpoints. The full suite passes: 2,043 tests across 269 files. Type/Svelte checks, ESLint,
+  and dead-code checks pass.
+- Three settled 10-second instrumented windows in one login used the worktree `.dev.env`,
+  +Holtfighter slot 1, parked at `0xc6a9ffff`. No player or camera input was issued. Artifacts:
+  `/tmp/holtburger-animation-on-{1,2,3}.{json,cpuprofile,png}`.
+- Compared against the prior plain-settings instrumented series, not an interleaved deterministic
+  benchmark. Same machine and interest policy: Ryzen 9 5900X / Navi 31, render scale 1,
+  buildings/terrain radius 6, EnvCells/explicit objects 1, generated objects 2. Viewport now
+  1441 × 903 versus 1442 × 904 previously. Weather and live content changed slightly: final dynamic
+  source ranges 2,167 versus 2,165. Both retained 142 visible roots, 650 static draws / 230,819
+  static triangles, 171 dynamic draws, and 46 portal scopes without truncation.
+
+| Measurement (ms/frame) | Window 1 | Window 2 | Window 3 |
+| --- | ---: | ---: | ---: |
+| Instrumented callback CPU | 5.081 | 5.007 | 5.002 |
+| Renderer CPU, within callback | 3.478 | 3.418 | 3.416 |
+| Sampled animation sampling, within callback | 0.219 | 0.225 | 0.224 |
+| Measured GPU work, separate | 1.013 | 1.008 | 1.006 |
+
+V8 animation sampling fell from 0.541–0.550 ms/frame in the prior series to 0.219–0.225 ms,
+approximately 0.32 ms lower at the median. Rotation extraction no longer appears under animation
+sampling. Approximately 0.02 ms of sampled rotation extraction remains elsewhere, primarily
+particle draw-range collection and scene rotation queries; it is not residual animation
+decomposition. Renderer work stayed near the previous 3.415–3.501 ms. The separately recorded
+static-run preparation cost also persisted at 0.179–0.184 ms, without a new renderer change.
+
+### Profiling-off Confirmation
+
+After approximately two minutes between sessions, collected three more settled 10-second
+windows with renderer CPU/GPU clocks, V8 sampling, and runtime tick profiling disabled. The
+existing callback accumulator and once-per-second diagnostic snapshots remained enabled.
+Artifacts: `/tmp/holtburger-animation-off-{1,2,3}.{json,png}`. The character and camera remained
+parked. All six new screenshots were inspected with buildings and trees visible; none of the six
+measurement reports recorded browser errors or exceptions.
+
+| Callback CPU work (ms/frame) | Window 1 | Window 2 | Window 3 | Median |
+| --- | ---: | ---: | ---: | ---: |
+| Prior plain-settings baseline | 4.937 | 4.950 | 4.944 | 4.944 |
+| Prepared animation endpoints | 4.629 | 4.634 | 4.670 | 4.634 |
+
+Observed median reduction: 0.310 ms, approximately 6.3%, consistent with the sampled animation
+reduction. This comparison uses the preceding `/tmp/holtburger-settings-after-off-*` captures,
+not a freshly repeated or interleaved old-code control. Both series used a 1441 × 903 viewport,
+140–142 final visible roots, 650 static draws / 230,819 triangles, 173–175 dynamic draws, and
+46 portal scopes without truncation. Source ranges increased by two in the new series
+(2,157–2,167 versus 2,155–2,165); weather, particles, material residency, and texture binds also
+varied. The observation is not a deterministic exact gain guarantee.
+
+New whole-window throughput remained 143.25–143.60 FPS. A callback mean below 5 ms does not
+establish 200 FPS; scheduling and browser work outside that callback remain a separate question.
+Retain the endpoint representation: the targeted repeated conversion is removed, tests preserve
+playback behavior, and both sampled attribution and profiling-off callback measurements improve.
+The temporary repeat loop was removed from the live probe. No commit was created.
+
+### Separate Pre-existing Bounds Observation
+
+Both animation bounds builders index `frameIndex * animation.partCount + part.partIndex` while
+iterating setup parts, then use an absent-entry check to skip unauthored parts. When setup part
+indices exceed the clip's part count, an offset can instead name the next frame's valid entry:
+for a one-part clip, frame 0 / setup part 1 aliases frame 1 / animation part 0. Because these
+builders union into retained static bounds, the extra sphere can inflate the conservative bound;
+it cannot remove existing coverage. The representation migration preserves this behavior.
+Record as a separate cleanup: restrict part traversal to the authored prefix before flattening,
+and test unequal row widths with multiple frames and distinguishable part bounds. Added the
+domain-independent pattern to `docs/code-quality-audit-patterns.md`; no bounds-policy fix is
+included in this timing experiment.
+
+### Follow-up: Authored-prefix Bounds Fix — 2026-09-05
+
+The user approved fixing the preceding observation. Both default-animation and motion-closure
+bounds builders now skip setup parts outside the clip's authored prefix before calculating a
+flattened frame offset. Untouched parts retain the supplied static coverage; animated parts still
+sweep every authored frame. No shared bounds abstraction or runtime playback change was needed.
+
+Strengthened both existing partial-clip tests with multiple frames and a larger unauthored part.
+Before the fix, both tests reproduced cross-row aliasing: the bound reached x=70 and expanded
+to ±20 on y/z instead of the intended x=52 / ±2 for the default-animation fixture and x=50 / 0
+for the motion-closure fixture. Both pass with the guard. The full 2,043-test suite, type/Svelte
+checks, and ESLint pass. The earlier animation timing results precede this follow-up; no additional
+performance gain is claimed for the bounds fix.
+
+A stationary live GPU smoke check using the worktree credentials and +Holtfighter at the same
+rooftop completed without browser errors or exceptions. Inspected
+`/tmp/holtburger-animation-bounds-check.png`; buildings and trees remain visible. The JSON report
+retains 650 static draws / 230,819 triangles, 46 untruncated portal scopes, and 141 visible dynamic
+roots / 2,162 ranges. This single correctness capture was not an isolated performance comparison
+(local validation work also ran during the session); its 5.294 ms callback mean does not establish
+a regression or improvement. Formatting and diff whitespace checks pass. No commit was created.
+
+### Pre-commit Quality Review — 2026-09-05
+
+Reviewed all changed production paths, migrated fixtures, regression tests, and evidence notes.
+No further production changes were warranted: preparation remains asset-owned and shared, sampled
+matrix output preserves existing consumers, and both bounds guards precede flattened indexing.
+The cross-row aliasing pattern is included in the audit worksheet. No additional domain-independent
+smell was identified during this final review. Re-ran all 2,043 tests across 269 files, type/Svelte
+checks, ESLint, dead-code checks, formatting, and diff whitespace checks successfully. Existing
+live GPU evidence above remains applicable; no new runtime changes or live login were introduced
+during the review.

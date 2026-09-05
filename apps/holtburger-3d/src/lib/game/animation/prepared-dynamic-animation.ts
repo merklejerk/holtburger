@@ -84,6 +84,8 @@ function sweepPartBounds(
 ): AABB3 {
 	const result = staticBounds.clone();
 	for (const part of parts) {
+		// An unauthored setup part retains static coverage; flattening it would alias a later frame.
+		if (part.partIndex >= animation.partCount) continue;
 		if (part.localBounds === null) continue;
 		const radius = scaledPartRadius(
 			part.localBounds,
@@ -101,9 +103,9 @@ function sweepPartBounds(
 			// Translation interpolates linearly and rigid rotation preserves this radius, so the
 			// endpoint sphere AABBs cover every slerped pose between authored frames.
 			const center = new Vec3(
-				pose.m41 * sourceScale.x,
-				pose.m42 * sourceScale.y,
-				pose.m43 * sourceScale.z,
+				pose.translation.x * sourceScale.x,
+				pose.translation.y * sourceScale.y,
+				pose.translation.z * sourceScale.z,
 			);
 			const partBounds = new AABB3(
 				new Vec3(center.x - radius, center.y - radius, center.z - radius),

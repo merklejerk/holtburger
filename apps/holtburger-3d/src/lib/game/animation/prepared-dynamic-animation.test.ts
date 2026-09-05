@@ -4,7 +4,10 @@ import { AABB3, Mat4, Vec3 } from "../math/types";
 import { createRotationMat4 } from "../math/matrices";
 import { rotationVectorQuaternion } from "./animation-playback";
 import type { ObjectVisualTemplate } from "../systems/object-visual-template-repository";
-import type { PreparedAnimation } from "./animation-asset-repository";
+import {
+	prepareAnimation,
+	type PreparedAnimation,
+} from "./animation-asset-repository";
 import { prepareDynamicAnimation } from "./prepared-dynamic-animation";
 
 describe("prepareDynamicAnimation", () => {
@@ -132,14 +135,18 @@ describe("prepareDynamicAnimation", () => {
 				...template().parts,
 				{
 					...template().parts[0]!,
+					defaultScale: new Vec3(1, 1, 1),
+					localBounds: new AABB3(new Vec3(20, 0, 0), new Vec3(20, 0, 0)),
 					partIndex: 1,
 				},
 			],
 		};
 		const staticBounds = new AABB3(new Vec3(-20, -1, -1), new Vec3(20, 1, 1));
+		const secondFrame = Mat4.identity();
+		secondFrame.m41 = 50;
 
 		const prepared = prepareDynamicAnimation(
-			animation([Mat4.identity()], []),
+			animation([Mat4.identity(), secondFrame], []),
 			partialTemplate,
 			new Vec3(1, 1, 1),
 			staticBounds,
@@ -147,7 +154,9 @@ describe("prepareDynamicAnimation", () => {
 
 		expect(prepared.kind).toBe("activatable");
 		expect(prepared.localBounds).toEqual(
-			new AABB3(new Vec3(-20, -2, -2), new Vec3(20, 2, 2)),
+			// Only the animated part's radius travels to x=50; the larger untouched part stays
+			// covered by staticBounds instead of aliasing the next frame's animated-part pose.
+			new AABB3(new Vec3(-20, -2, -2), new Vec3(52, 2, 2)),
 		);
 	});
 });
@@ -155,17 +164,20 @@ describe("prepareDynamicAnimation", () => {
 function animation(
 	partFrames: readonly Mat4[],
 	hooks: readonly DecodedAnimationHook[],
+	positionFrames: readonly Mat4[] = [],
 ): PreparedAnimation {
-	return {
-		authoredRootTranslates: false,
-		frameCount: partFrames.length,
-		framesPerSecond: 30,
-		hooks,
-		id: "0x03000001",
-		partCount: 1,
-		partFrames,
-		positionFrames: [],
-	};
+	return prepareAnimation(
+		{
+			frameCount: partFrames.length,
+			hooks,
+			id: "0x03000001",
+			partCount: 1,
+			partFrames,
+			positionFrames,
+		},
+		"0x03000001",
+		30,
+	);
 }
 
 function template(): Pick<ObjectVisualTemplate, "parts"> {
@@ -205,11 +217,7 @@ function setOmegaHook(): DecodedAnimationHook {
 describe("authored root bounds", () => {
 	it("uses a rotation-invariant envelope when the clip turns the visual root", () => {
 		const base = animation([Mat4.identity()], []);
-		const turningRoot = {
-			...base,
-			authoredRootTranslates: false,
-			positionFrames: [Mat4.identity()],
-		};
+		const turningRoot = animation([Mat4.identity()], [], [Mat4.identity()]);
 
 		const prepared = prepareDynamicAnimation(
 			turningRoot,
@@ -231,11 +239,9 @@ describe("authored root bounds", () => {
 
 	it("keeps the tight bound when the root translates, since nothing is applied", () => {
 		const base = animation([Mat4.identity()], []);
-		const translatingRoot = {
-			...base,
-			authoredRootTranslates: true,
-			positionFrames: [Mat4.identity()],
-		};
+		const root = Mat4.identity();
+		root.m41 = 1;
+		const translatingRoot = animation([Mat4.identity()], [], [root]);
 
 		expect(
 			prepareDynamicAnimation(

@@ -34,18 +34,67 @@ pub const MAXIMUM_DYNAMIC_SLICES: usize = 128;
 /// One immutable dynamic body captured at the collection's tick start.
 #[derive(Debug, Clone)]
 pub(crate) struct DynamicEpochParticipant {
+    /// Unmodified source snapshot used to validate the eventual commit.
     pub(crate) body: SpatialBody,
+    /// Query/commit input only when reconciliation changes pose; the common path needs no copy.
+    pub(crate) reconciled_body: Option<Box<SpatialBody>>,
     /// Tentative reconciliation cursor, kept inline so cloning the captured body does not allocate.
     pub(crate) reconciliation: Option<PoseReconciliationState>,
     /// Tick-start cursor used to reject a stale prepared commit.
     pub(crate) initial_reconciliation: Option<PoseReconciliationState>,
 }
 
+impl DynamicEpochParticipant {
+    /// The coherent pose and membership against which this epoch plans motion.
+    pub(crate) fn query_body(&self) -> &SpatialBody {
+        self.reconciled_body.as_deref().unwrap_or(&self.body)
+    }
+}
+
 /// One scheduled mover's trajectory inputs while every directional peer query is resolved.
 #[derive(Debug, Clone)]
 pub(crate) struct PreparedDynamicTrajectory {
     pub(crate) actuation: PhysicalBodyActuation,
-    pub(crate) environment_plan: PhysicalBodyTickCommit,
+    /// Accepted prefix for an initially blocked body; otherwise its environment-only attempt.
+    pub(crate) plan: PhysicalBodyTickCommit,
+    /// Initial contacts already resolved before any full-duration environment solve.
+    initial_contact: Option<InitialBlockingContacts>,
+}
+
+/// Tick-start blocking decision and every eligible report at that same instant.
+#[derive(Debug, Clone)]
+struct InitialBlockingContacts {
+    /// Stable earliest blocking peer, selected before trajectories exist.
+    selected: SelectedBlockingContact,
+    /// Only fraction-zero reports can survive a fraction-zero blocking contact.
+    report_touches: Vec<CollisionReportTouch>,
+}
+
+/// Prepares the motion peers will observe, resolving existing overlap before spending a full solve.
+pub(crate) fn prepare_dynamic_trajectory(
+    collision: &CollisionScene,
+    index: &DynamicShadowIndex,
+    targets: &dyn DynamicContactTargetLookup,
+    mover: &SpatialBody,
+    actuation: PhysicalBodyActuation,
+    delta_seconds: f32,
+) -> Result<PreparedDynamicTrajectory> {
+    let initial_contact = initial_blocking_contacts(collision, index, targets, mover)?;
+    let plan = match &initial_contact {
+        Some(contact) => blocking_contact_plan(
+            collision,
+            mover,
+            &actuation,
+            delta_seconds,
+            contact.selected,
+        )?,
+        None => solve_physical_body_tick(collision, mover, &actuation, delta_seconds)?,
+    };
+    Ok(PreparedDynamicTrajectory {
+        actuation,
+        plan,
+        initial_contact,
+    })
 }
 
 /// Read-only body lookup shared by ordinary epochs and sealed speculative target snapshots.
@@ -55,7 +104,7 @@ pub(crate) trait DynamicContactTargetLookup {
 
 impl DynamicContactTargetLookup for BTreeMap<SpatialBodyId, DynamicEpochParticipant> {
     fn target_body(&self, body_id: SpatialBodyId) -> Option<&SpatialBody> {
-        self.get(&body_id).map(|participant| &participant.body)
+        self.get(&body_id).map(DynamicEpochParticipant::query_body)
     }
 }
 
@@ -115,7 +164,14 @@ pub(crate) fn resolve_dynamic_contacts_for_mover(
         .trajectories
         .get(&mover_id)
         .context("dynamic mover has no prepared trajectory")?;
-    let environment_plan = &trajectory.environment_plan;
+    if let Some(contact) = &trajectory.initial_contact {
+        return Ok(DynamicContactResolution {
+            replacement_plan: None,
+            response: Some(contact.selected.response()),
+            report_touches: contact.report_touches.clone(),
+        });
+    }
+    let environment_plan = &trajectory.plan;
     let actuation = &trajectory.actuation;
     let Some(mover_dynamic) = mover
         .physical
@@ -160,19 +216,11 @@ pub(crate) fn resolve_dynamic_contacts_for_mover(
         if pair_is_filtered(mover_dynamic, peer_dynamic) {
             continue;
         }
-        let mover_report_eligible = mover_reports
-            && peer_dynamic
-                .collision
-                .dynamic_collision
-                .accepts_peer_reports;
-        let peer_report_eligible = peer_dynamic.collision.reporting.enabled
-            && mover_dynamic
-                .collision
-                .dynamic_collision
-                .accepts_peer_reports;
-        let response_eligible = mover_responds
-            && peer_dynamic.collision.dynamic_collision.target
-                == EntityCollisionParticipation::Solid;
+        let PairContactPolicy {
+            mover_report_eligible,
+            peer_report_eligible,
+            response_eligible,
+        } = PairContactPolicy::new(mover_dynamic, peer_dynamic);
         if !mover_report_eligible && !peer_report_eligible && !response_eligible {
             continue;
         }
@@ -181,10 +229,7 @@ pub(crate) fn resolve_dynamic_contacts_for_mover(
             mover,
             environment_plan,
             peer,
-            epoch
-                .trajectories
-                .get(&peer_id)
-                .map(|mover| &mover.environment_plan),
+            epoch.trajectories.get(&peer_id).map(|mover| &mover.plan),
             epoch.delta_seconds,
             anchor,
         )?;
@@ -267,17 +312,7 @@ pub(crate) fn resolve_dynamic_contacts_for_mover(
     )?;
     Ok(DynamicContactResolution {
         replacement_plan: Some(replacement_plan),
-        response: Some(DynamicResponseContact {
-            peer: selected.peer,
-            normal: selected.normal,
-            state_change: selected.clears_projectile_state.then_some(
-                DynamicBodyPhysicsStateChange {
-                    cleared: PhysicsState::MISSILE
-                        | PhysicsState::ALIGN_PATH
-                        | PhysicsState::PATH_CLIPPED,
-                },
-            ),
-        }),
+        response: Some(selected.response()),
         report_touches,
     })
 }
@@ -391,6 +426,163 @@ fn pair_is_filtered(mover: &DynamicBodyRuntimeState, peer: &DynamicBodyRuntimeSt
             && peer.collision.dynamic_collision.target == EntityCollisionParticipation::Ethereal)
 }
 
+/// Directional response and two independent report recipients for a dynamic pair.
+struct PairContactPolicy {
+    /// The mover requests reports and the peer permits being reported.
+    mover_report_eligible: bool,
+    /// The peer requests reports and the mover permits being reported.
+    peer_report_eligible: bool,
+    /// The mover accepts physical response from this solid target.
+    response_eligible: bool,
+}
+
+impl PairContactPolicy {
+    fn new(mover: &DynamicBodyRuntimeState, peer: &DynamicBodyRuntimeState) -> Self {
+        Self {
+            mover_report_eligible: mover.collision.reporting.enabled
+                && peer.collision.dynamic_collision.accepts_peer_reports,
+            peer_report_eligible: peer.collision.reporting.enabled
+                && mover.collision.dynamic_collision.accepts_peer_reports,
+            response_eligible: mover.collision.dynamic_collision.mover_accepts_response
+                && peer.collision.dynamic_collision.target == EntityCollisionParticipation::Solid,
+        }
+    }
+}
+
+/// Classifies only current overlap; future motion cannot precede a blocking contact at time zero.
+fn initial_blocking_contacts(
+    collision: &CollisionScene,
+    index: &DynamicShadowIndex,
+    targets: &dyn DynamicContactTargetLookup,
+    mover: &SpatialBody,
+) -> Result<Option<InitialBlockingContacts>> {
+    let Some(physical) = &mover.physical else {
+        return Ok(None);
+    };
+    let Some(dynamic) = &physical.dynamic else {
+        return Ok(None);
+    };
+    if !dynamic.collision.dynamic_collision.mover_accepts_response {
+        return Ok(None);
+    }
+    let anchor = Guid((mover.pose.landblock_id.0 & 0xffff_0000) | 0xffff);
+    let pose = mover
+        .pose
+        .reanchor_to_landblock_owner(anchor)
+        .context("could not reanchor initial dynamic mover")?;
+    // Query moving spheres, not target geometry: their memberships need not be identical.
+    // Recompute after reconciliation, which can change the body's facing.
+    let transit = |sphere: super::GroundedSphere| {
+        collision.transit_cell(super::CellTransitRequest {
+            previous_cell: physical.response.cell(),
+            anchor,
+            center: pose.coords + pose.rotation.rotate_vector(sphere.center),
+            radius: sphere.radius,
+        })
+    };
+    let spheres = physical.definition.spheres();
+    let mut placement = transit(spheres.primary())?;
+    if let Some(upper) = spheres.upper_constraint() {
+        placement = placement.merge_reached(transit(upper)?);
+    }
+    let extent = moving_sphere_extent(mover);
+    let expansion = Vector3::new(extent, extent, extent);
+    let mut selected = None;
+    let mut report_touches = Vec::new();
+    for peer_id in index.candidates(
+        Some(mover.id),
+        anchor,
+        pose.coords - expansion,
+        pose.coords + expansion,
+        &placement,
+    ) {
+        let Some(peer) = targets.target_body(peer_id) else {
+            continue;
+        };
+        let peer_dynamic = peer
+            .physical
+            .as_ref()
+            .and_then(|physical| physical.dynamic.as_ref())
+            .expect("dynamic index returned a target without dynamic physical state");
+        if pair_is_filtered(dynamic, peer_dynamic) {
+            continue;
+        }
+        let policy = PairContactPolicy::new(dynamic, peer_dynamic);
+        if !policy.response_eligible
+            && !policy.mover_report_eligible
+            && !policy.peer_report_eligible
+        {
+            continue;
+        }
+        let peer_pose = peer
+            .pose
+            .reanchor_to_landblock_owner(anchor)
+            .context("could not reanchor initial dynamic peer")?;
+        let Some(contact) = deepest_pair_contact(mover, pose, peer, peer_pose, anchor)? else {
+            continue;
+        };
+        if policy.mover_report_eligible {
+            report_touches.push(dynamic_report_touch(mover.id, peer_id, peer_dynamic));
+        }
+        if policy.peer_report_eligible {
+            report_touches.push(dynamic_report_touch(peer_id, mover.id, dynamic));
+        }
+        // Candidates are sorted by body identity, the same tie-break used by swept resolution.
+        if policy.response_eligible && selected.is_none() {
+            selected = Some(SelectedBlockingContact {
+                peer: peer_id,
+                fraction: 0.0,
+                normal: contact.normal,
+                clears_projectile_state: dynamic.collision.dynamic_collision.missile
+                    && peer_dynamic
+                        .collision
+                        .dynamic_collision
+                        .accepts_peer_reports,
+            });
+        }
+    }
+    Ok(selected.map(|selected| InitialBlockingContacts {
+        selected,
+        report_touches,
+    }))
+}
+
+/// Deepest directional contact at one pair of poses, shared by initial and swept queries.
+fn deepest_pair_contact(
+    mover: &SpatialBody,
+    mover_pose: WorldPosition,
+    peer: &SpatialBody,
+    peer_pose: WorldPosition,
+    anchor: Guid,
+) -> Result<Option<ShapeContact>> {
+    let shapes = placed_target_shapes(peer, peer_pose, anchor)?;
+    let mut deepest = None;
+    for sphere in mover
+        .physical
+        .as_ref()
+        .context("dynamic mover lost its physical definition")?
+        .definition
+        .spheres()
+        .iter()
+    {
+        let center = mover_pose.coords + mover_pose.rotation.rotate_vector(sphere.center);
+        for shape in &shapes {
+            if !shape.bounds.intersects_sphere(center, sphere.radius) {
+                continue;
+            }
+            for contact in shape_contacts(shape, center, sphere.radius) {
+                if deepest
+                    .as_ref()
+                    .is_none_or(|current: &ShapeContact| contact.depth > current.depth)
+                {
+                    deepest = Some(contact);
+                }
+            }
+        }
+    }
+    Ok(deepest)
+}
+
 #[derive(Debug, Clone, Copy)]
 struct SampledContact {
     fraction: f32,
@@ -405,6 +597,22 @@ struct SelectedBlockingContact {
     /// Peer surface normal used for velocity response, not positional separation.
     normal: Vector3,
     clears_projectile_state: bool,
+}
+
+impl SelectedBlockingContact {
+    fn response(self) -> DynamicResponseContact {
+        DynamicResponseContact {
+            peer: self.peer,
+            normal: self.normal,
+            state_change: self
+                .clears_projectile_state
+                .then_some(DynamicBodyPhysicsStateChange {
+                    cleared: PhysicsState::MISSILE
+                        | PhysicsState::ALIGN_PATH
+                        | PhysicsState::PATH_CLIPPED,
+                }),
+        }
+    }
 }
 
 struct PairTrajectories<'a> {
@@ -500,32 +708,8 @@ impl<'a> PairTrajectories<'a> {
             let fraction = index as f32 / slices as f32 * end_fraction;
             let mover_pose = self.mover_pose(fraction)?;
             let peer_pose = self.peer_pose(fraction)?;
-            let shapes = placed_target_shapes(self.peer, peer_pose, self.anchor)?;
-            let mut deepest = None;
-            for sphere in self
-                .mover
-                .physical
-                .as_ref()
-                .context("dynamic mover lost its physical definition")?
-                .definition
-                .spheres()
-                .iter()
-            {
-                let center = mover_pose.coords + mover_pose.rotation.rotate_vector(sphere.center);
-                for shape in &shapes {
-                    if !shape.bounds.intersects_sphere(center, sphere.radius) {
-                        continue;
-                    }
-                    for contact in shape_contacts(shape, center, sphere.radius) {
-                        if deepest
-                            .as_ref()
-                            .is_none_or(|current: &ShapeContact| contact.depth > current.depth)
-                        {
-                            deepest = Some(contact);
-                        }
-                    }
-                }
-            }
+            let deepest =
+                deepest_pair_contact(self.mover, mover_pose, self.peer, peer_pose, self.anchor)?;
             if let Some(contact) = deepest {
                 return Ok(Some(SampledContact {
                     fraction,

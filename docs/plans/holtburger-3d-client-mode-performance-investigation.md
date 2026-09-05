@@ -4351,3 +4351,72 @@ The audit worksheet records the general freshness-baseline smell and the ready-a
 All 75 content, 573 world, 343 core, and 271 host tests passed, along with warnings-as-errors Clippy
 for those crates and the debug harness. Collision-cell lookup and contact-first solving are being
 committed separately before runtime scheduling work.
+
+#### Runtime Scheduling Cutover and Debug Reprofile
+
+The solver quality pass is committed separately as `131a3a57` (owner-indexed collision cells) and
+`e9468510` (contact-first trajectories, reconciliation freshness, regression coverage, and findings).
+
+The runtime-loop implementation now provides bounded ordered command intake both when input wins
+the select and immediately before selected physics work. A batch includes its already-selected
+command and starts no more than 64 commands; after 2 ms it stops starting additional commands.
+These are intake limits, not a hard 2 ms execution bound: one command can exceed the budget, and
+the physics transaction remains non-preemptible. The prefix remains FIFO, including camera zoom
+updates, lifecycle changes, and errors. Disconnect and failure stop intake without consuming the
+following command. No queue coalescing, dedicated thread, or new solver policy was introduced.
+
+The physics timer explicitly skips obsolete deadlines. Its integration duration remains actual
+elapsed monotonic time, captured after input intake; the unnecessary float round trip was removed.
+The network maintenance timer is unchanged. An explicit executor yield follows each completed
+select turn so immediately ready awaits cannot monopolize the worker across successive turns.
+The existing independent authority and forwarding tasks, supervision, and cancellation remain intact.
+
+Verification used one debug-client login with this worktree's `.dev.env`, first character
+`+Holtfighter Slot 1`, and the player remaining in dungeon cell `0x63460369`. After 10 seconds of
+settling, the probe measured 60.081 seconds, including 2,000 automated left-drag orbit inputs over
+41.731 seconds. No player movement commands were sent. The viewport and drawing buffer were both
+1441×903 (render scale 1), with 22–28 visible dynamic entities during the orbit. Renderer/V8 profiling
+was disabled; temporary native boundary timestamps measured tick work, host-admission-to-command
+handling, and core-camera-publication-to-forwarder receipt. Tick work excludes the pre-tick input
+batch. This is a scheduling profile, not a new renderer or streaming hotspot census.
+
+Temporary same-login policy switching alternated every 15 seconds between the old one-command /
+Burst / no-explicit-yield loop and the complete new policy. Both used the committed solver changes.
+Analysis excludes the first two and last one seconds of each phase. Adjacent warm orbit samples:
+
+| Phase / policy | Mean physics work | Physics work p95 | Command wait p95 / max | Camera forwarding p95 / max |
+| --- | --- | --- | --- | --- |
+| 119242147 / new | 14.33 ms | 16.41 ms | 12.30 / 16.24 ms | 0.121 / 0.263 ms |
+| 119242148 / old | 13.60 ms | 15.57 ms | 12.10 / 15.10 ms | 0.844 / 1.917 ms |
+| 119242149 / new | 13.88 ms | 15.99 ms | 12.77 / 15.92 ms | 0.120 / 0.140 ms |
+
+Each row contains 399 measured ticks; none exceeded 30 ms. Actual dt remained approximately 30 ms.
+Unlike the earlier 31–45 ms debug captures, this post-solver scene has tick headroom under either
+scheduling policy. Therefore this capture does not independently re-prove the overload benefit of
+batching or skipping deadlines, nor attribute the cross-capture tick reduction solely to one change.
+It does show a reduction in forwarding delay from explicit yielding without a meaningful command
+latency regression. The previous overloaded scheduling experiments remain the evidence for fixing
+input starvation and timer debt; solver optimization should not be their only protection.
+
+The complete window averaged 143.72 displayed FPS under the display cap. During orbit collection,
+animation-frame gaps were 7.0 ms p95 / 20.8 ms maximum, while received camera-event gaps were
+33.6 ms p95 / 123 ms maximum. The dropped-camera-path counter rose from 39 to 41 during an old-policy
+phase and remained there; this run is not a claim of zero playback drops or universally eliminated
+stutter. There were no captured browser errors or exceptions. A reported uncapped frame-work estimate
+is not a measured attainable FPS and is not used as the result.
+
+Evidence: `/tmp/holtburger-loop-cutover-debug.json`, analyzed by
+`/tmp/holtburger-analyze-loop-cutover.mjs`. All temporary policy switches, timestamps, and orbit-probe
+edits were removed afterward. Permanent lightweight tests cover bounded intake, selected-command
+priority, queued FIFO disconnect ordering, and failure propagation without consuming later input.
+After removing the experiment, all 347 core and 271 host tests passed, as did formatting and
+warnings-as-errors Clippy for both crates across all targets.
+
+Conclusion: keep the small scheduling cutover alongside the solver improvement. Do not add a
+dedicated simulation thread or an amortized solver on the strength of this now-under-budget scene.
+Those remain possible responses to representative release overload or a demonstrated requirement
+to isolate an individually expensive tick; neither is obviated by this intake policy, and neither
+is required to explain the current capture. The subsequent quality pass confirmed the single-owner
+boundary, FIFO and lifecycle handling, elapsed-time contract, and limited intake budget without
+requiring further production changes. Tests and warnings-as-errors Clippy passed again; the runtime
+change and this follow-up are committed separately from the solver work.

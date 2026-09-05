@@ -5,8 +5,46 @@ use anyhow::Result;
 use holtburger_protocol::messages::game_action::{GameAction, JumpActionData};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::sync::mpsc::error::TryRecvError;
+use tokio::time::MissedTickBehavior;
+
+/// Bound ordered input intake without requiring the command queue to become empty.
+const COMMAND_BATCH_LIMIT: usize = 64;
+/// Stop starting more commands after this budget; an individual command is not preemptible.
+const COMMAND_BATCH_BUDGET: Duration = Duration::from_millis(2);
 
 impl ClientRuntime {
+    /// Consume the selected command first, then a bounded FIFO prefix of pending input.
+    async fn process_command_batch(&mut self, mut first: Option<ClientCommand>) -> Result<()> {
+        let started = Instant::now();
+        for _ in 0..COMMAND_BATCH_LIMIT {
+            if matches!(self.state, ClientState::Disconnected) {
+                break;
+            }
+            let command = if let Some(command) = first.take() {
+                command
+            } else {
+                let Some(receiver) = self.command_rx.as_mut() else {
+                    break;
+                };
+                match receiver.try_recv() {
+                    Ok(command) => command,
+                    Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+                }
+            };
+            if let Err(error) = self.handle_command(command).await {
+                self.set_exit_cause(ClientExitCause::RuntimeFailure);
+                self.state = ClientState::Disconnected;
+                self.send_status_event();
+                return Err(error);
+            }
+            if started.elapsed() >= COMMAND_BATCH_BUDGET {
+                break;
+            }
+        }
+        Ok(())
+    }
+
     fn should_send_keepalive_ping(&self, now: Instant) -> bool {
         matches!(self.state, ClientState::InWorld)
             && now.duration_since(self.session.last_send_time) > Duration::from_secs(5)
@@ -104,6 +142,8 @@ impl ClientRuntime {
 
         let mut physics_tick = tokio::time::interval(Duration::from_millis(PHYSICS_TICK_MS));
         let mut net_tick = tokio::time::interval(Duration::from_secs(1));
+        // Overdue slots are not extra simulation work. Advance once using actual elapsed time.
+        physics_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
         let mut last_physics_time = Instant::now();
 
         loop {
@@ -176,17 +216,17 @@ impl ClientRuntime {
                         None
                     }
                 } => {
-                    if let Err(error) = self.handle_command(cmd).await {
-                        self.set_exit_cause(ClientExitCause::RuntimeFailure);
-                        self.state = ClientState::Disconnected;
-                        self.send_status_event();
-                        return Err(error);
-                    }
+                    self.process_command_batch(Some(cmd)).await?;
                 }
                 _ = physics_tick.tick() => {
+                    // A ready physics deadline must not bypass all queued input. Preserve command
+                    // order, but leave a backlog for later turns rather than starving simulation.
+                    self.process_command_batch(None).await?;
+                    if matches!(self.state, ClientState::Disconnected) {
+                        break;
+                    }
                     let now = Instant::now();
-                    let dt = now.duration_since(last_physics_time).as_secs_f32();
-                    let dt_duration = Duration::from_secs_f32(dt.max(0.0));
+                    let dt_duration = now.duration_since(last_physics_time);
                     last_physics_time = now;
 
                     let active_world = self.activation.is_none()
@@ -373,6 +413,9 @@ impl ClientRuntime {
                     }
                 }
             }
+            // Socket/channel/timer awaits can all be immediately ready. End the executor turn
+            // explicitly so the independent event forwarder can run even under sustained load.
+            tokio::task::yield_now().await;
         }
 
         Ok(())
@@ -383,6 +426,109 @@ impl ClientRuntime {
 mod tests {
     use super::*;
     use crate::client::builder;
+
+    #[tokio::test]
+    async fn command_batch_leaves_a_bounded_fifo_backlog() {
+        let mut client = builder::build_test_client(ClientState::Connected);
+        let mut events = client.subscribe_client_view_events();
+        let (sender, receiver) = mpsc::unbounded_channel();
+        client.set_command_rx(receiver);
+        for _ in 0..COMMAND_BATCH_LIMIT {
+            sender
+                .send(ClientCommand::RequestCurrentApplicationState)
+                .unwrap();
+        }
+        // The command already removed by select counts toward the same batch limit.
+        client
+            .process_command_batch(Some(ClientCommand::RequestCurrentApplicationState))
+            .await
+            .unwrap();
+        let mut snapshots = 0;
+        while let Ok(event) = events.try_recv() {
+            if matches!(event, ClientViewEvent::ApplicationSnapshot(_)) {
+                snapshots += 1;
+            }
+        }
+        assert!((1..=COMMAND_BATCH_LIMIT).contains(&snapshots));
+        assert_eq!(
+            client.command_rx.as_ref().unwrap().len(),
+            COMMAND_BATCH_LIMIT + 1 - snapshots
+        );
+    }
+
+    #[tokio::test]
+    async fn selected_disconnect_precedes_and_preserves_queued_commands() {
+        let mut client = builder::build_test_client(ClientState::Connected);
+        let (sender, receiver) = mpsc::unbounded_channel();
+        client.set_command_rx(receiver);
+        sender
+            .send(ClientCommand::RequestCurrentApplicationState)
+            .unwrap();
+        client
+            .process_command_batch(Some(ClientCommand::Quit))
+            .await
+            .unwrap();
+        assert!(matches!(client.state, ClientState::Disconnected));
+        assert_eq!(client.command_rx.as_ref().unwrap().len(), 1);
+        assert_eq!(client.exit_cause, Some(ClientExitCause::ExplicitDisconnect));
+    }
+
+    #[tokio::test]
+    async fn queued_disconnect_preserves_the_order_of_surrounding_commands() {
+        let mut client = builder::build_test_client(ClientState::Connected);
+        let mut events = client.subscribe_client_view_events();
+        let (sender, receiver) = mpsc::unbounded_channel();
+        client.set_command_rx(receiver);
+        for command in [
+            ClientCommand::RequestCurrentApplicationState,
+            ClientCommand::Quit,
+            ClientCommand::RequestCurrentApplicationState,
+        ] {
+            sender.send(command).unwrap();
+        }
+        while !matches!(client.state, ClientState::Disconnected) {
+            client.process_command_batch(None).await.unwrap();
+        }
+        let mut snapshots = 0;
+        while let Ok(event) = events.try_recv() {
+            if matches!(event, ClientViewEvent::ApplicationSnapshot(_)) {
+                snapshots += 1;
+            }
+        }
+        assert_eq!(snapshots, 1);
+        assert_eq!(client.command_rx.as_ref().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn queued_command_failure_disconnects_without_consuming_the_next_command() {
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let (sender, receiver) = mpsc::unbounded_channel();
+        client.set_command_rx(receiver);
+        // Registration targets a different player identity than this empty world.
+        sender
+            .send(ClientCommand::StartClientCamera(
+                crate::ClientCameraStartRequest {
+                    player_guid: Guid(1),
+                    entity_generation: 1,
+                    initial_reach: 5.0,
+                    minimum_reach: 1.0,
+                    maximum_reach: 10.0,
+                    input_sequence: 1,
+                    view_direction: [0.0, 1.0, 0.0],
+                    cumulative_zoom_displacement: 0.0,
+                    projection_revision: 1,
+                    clearance_radius: 0.1,
+                },
+            ))
+            .unwrap();
+        sender
+            .send(ClientCommand::RequestCurrentApplicationState)
+            .unwrap();
+        assert!(client.process_command_batch(None).await.is_err());
+        assert!(matches!(client.state, ClientState::Disconnected));
+        assert_eq!(client.exit_cause, Some(ClientExitCause::RuntimeFailure));
+        assert_eq!(client.command_rx.as_ref().unwrap().len(), 1);
+    }
 
     #[test]
     fn keepalive_ping_requires_in_world_state() {

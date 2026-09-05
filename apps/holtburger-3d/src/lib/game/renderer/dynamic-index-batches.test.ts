@@ -57,6 +57,58 @@ function appearance(): DynamicAppearance {
 const sourceIndices = new Uint32Array([0, 1, 2, 3, 4, 5, 6, 7, 8]);
 
 describe("dynamic physical index batches", () => {
+	it.each([0x10000, 0x10100, 0x10200])(
+		"packs additive source-only flags %i across material pages without changing logical ranges",
+		(rawSurfaceFlags) => {
+			const logical = appearance();
+			const additive: DynamicAppearance = {
+				materials: logical.materials.map((material) => ({
+					...material,
+					source: { ...material.source, rawSurfaceFlags },
+				})),
+				ranges: logical.ranges.map((range) => ({
+					...range,
+					ordering: "additive",
+				})),
+			};
+			const result = compileDynamicIndexBatches(sourceIndices, additive, [
+				surface("a"),
+				surface("b"),
+				surface("a"),
+			]);
+			expect(result.batches).toHaveLength(2);
+			expect([...result.indices]).toEqual([0, 1, 2, 6, 7, 8, 3, 4, 5]);
+			expect(result.batches.map((batch) => batch.indexCount)).toEqual([6, 3]);
+			expect(result.ranges.map((range) => range.source)).toEqual(
+				additive.ranges,
+			);
+		},
+	);
+	it("keeps a non-commutative additive-phase surface between matching additive batches", () => {
+		const logical = appearance();
+		const result = compileDynamicIndexBatches(
+			sourceIndices,
+			{
+				materials: logical.materials.map((material, index) => ({
+					...material,
+					source: {
+						...material.source,
+						rawSurfaceFlags: index === 1 ? 0x10114 : 0x10100,
+					},
+				})),
+				ranges: logical.ranges.map((range) => ({
+					...range,
+					ordering: "additive",
+				})),
+			},
+			[surface("a"), surface("a"), surface("a")],
+		);
+		expect(result.batches).toHaveLength(3);
+		expect(result.indices).toEqual(sourceIndices);
+		expect(
+			result.batches.map((batch) => batch.blendPolicy.destination),
+		).toEqual(["one", "one-minus-src-alpha", "one"]);
+	});
 	it("joins non-adjacent compatible parts and retains remapped authored range order without duplicating indices", () => {
 		const logical = appearance();
 		const result = compileDynamicIndexBatches(sourceIndices, logical, [

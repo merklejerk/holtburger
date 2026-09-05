@@ -1794,6 +1794,51 @@ may already establish an adequate scheduling boundary.
 **Possible responses:** Bound intake and work per turn, yield explicitly at the owning loop boundary,
 define overdue-work policy, or isolate demonstrably non-cooperative work on a suitable worker.
 
+## Prepared State Is Keyed by Occurrence Instead of Definition
+
+**Smell:** Many occurrences of one immutable definition each own a separately prepared copy of the
+same facts, because the contract flattened definition fields into occurrence records.
+
+**Signals:** A producer already groups equivalent definitions, but consumers lose that shared
+identity. Preparation caches are keyed by individual occurrences. Hot consumers repeatedly compare
+equal prepared values structurally, and invalidation rebuilds one copy per occurrence.
+
+**Possible failure:** Preparation, retained memory and equality work scale with occurrence count
+instead of distinct definitions, even though a cache appears to eliminate repeated work.
+
+**Questions:** Which fields actually vary per occurrence? Does the producer already own an immutable
+shared definition? Can its identity survive transport? Which context or resource changes invalidate
+preparation independently of that definition?
+
+**Counterexamples:** Separate prepared values are necessary when placement, overrides, device context
+or mutable state genuinely changes the result. Equal values from independent owners need not share
+identity, so reference inequality alone may not establish semantic incompatibility.
+
+**Possible responses:** Preserve a shared definition and keep occurrence-specific facts separate;
+key preparation by that definition plus real output-shaping variants. Prefer existing lifetime and
+invalidation mechanisms over a new global interning registry.
+
+## An Offline Diagnostic Reimplements a Moving Runtime Contract
+
+**Smell:** A diagnostic approximates production preparation or execution in a separate pipeline,
+but has no maintained equivalence check or current workflow that justifies keeping it aligned.
+
+**Signals:** Runtime refactors repeatedly require incidental diagnostic repairs. The tool compiles
+but applies outdated coordinate, ordering or resource-lifetime assumptions. Its tests validate its
+own model without comparing against the production behavior it claims to describe.
+
+**Possible failure:** Plausible diagnostic reports support incorrect conclusions, while an unused
+tool imposes recurring maintenance work.
+
+**Questions:** Who currently uses the result? Which claims are verified against real execution?
+Does the tool deliberately answer a counterfactual question, or claim to reproduce current behavior?
+
+**Counterexamples:** An independent reference model can be valuable when actively used for differential
+testing. A recorder driven by the production execution function does not duplicate that function.
+
+**Possible responses:** Retire unused diagnostics and their exclusive dependencies, drive observations
+through production code, or retain an explicit model with a narrow purpose and equivalence fixtures.
+
 ## Adding Observations
 
 An observation belongs here when it has:

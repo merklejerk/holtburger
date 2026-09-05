@@ -4766,3 +4766,535 @@ attachment itself makes the first parent-frame request, rather than relying on a
 request, and replaced a test non-null assertion with an explicit fixture failure. The existing
 sparse-population and resource-lifetime audit patterns cover this change; no duplicate quality-smell
 entry was added. The reviewed cutover and accumulated investigation evidence are committed together.
+
+#### Northern Hoshino Post-Cutover CPU/GPU Matrix
+
+The sparse attachment cutover was reviewed and committed as `2171182b`. A subsequent single-login
+capture used that production code, the worktree `.dev.env`, and `+Holtfighter Slot 1`. From the saved
+southern drop, `@tele 79.7n 41.0w` reached outdoor residency `0x4ce3ffff`. No subsequent player or
+camera input was sent. Fifteen seconds of destination settling preceded five windows, each with
+another ten seconds of settling and approximately ten seconds of measurement. Windows 0 and 4
+disabled renderer/V8 profiling; windows 1–3 enabled renderer CPU/GPU timing and 100 µs V8 sampling.
+No tests or builds ran during measurement. This measures steady state, not teleport performance.
+
+Configuration: release sidecar, desktop Electron, render scale 1, 1441×903 drawing buffer and CSS
+viewport, portal rendering, default client interest settings (terrain/buildings radius 6, explicit
+objects radius 1, generated objects radius 2). The machine reports an AMD Ryzen 9 5900X and AMD Navi
+31 Radeon display adapter; no software-renderer override was used. All windows retained the same
+player/camera residency. Visible dynamic objects varied from 101–105, including held equipment;
+this is not a count of humanoids alone. Northern population also includes retained nearby content
+from the southern entry, so this is not a direct-login local census.
+
+| Whole-window measurement | Profile 1 | Profile 2 | Profile 3 |
+| --- | ---: | ---: | ---: |
+| Window duration | 10.074 s | 10.066 s | 10.071 s |
+| Browser frame samples | 1,364 | 1,391 | 1,385 |
+| Browser callback mean | 6.107 ms | 5.894 ms | 5.922 ms |
+| Renderer CPU mean, included in callback | 4.230 ms | 4.060 ms | 4.047 ms |
+| Sum of measured GPU passes | 0.856 ms | 0.857 ms | 0.865 ms |
+
+Uninstrumented callback means bracketing those captures were 5.539 and 5.586 ms. The profiled
+windows therefore should not be presented as ordinary execution cost, and this on/off sequence
+does not measure an optimization speedup. V8 inclusive attribution to the renderer was 3.972–4.152
+ms/frame, corroborating the renderer timer's approximately four milliseconds. CPU and GPU overlap;
+their totals must not be added. GPU samples complete asynchronously and can differ slightly in
+count from browser frames at the capture boundary. Runtime tick means and renderer recent p95s
+cover rolling tails, so they are not substituted for whole-window measurements here.
+
+| Boundary | Measured ms/frame across profiles | Interpretation |
+| --- | ---: | --- |
+| Renderer contribution resolution | CPU timer 0.814–0.827; V8 0.752–0.763 | Leading individual renderer preparation span. |
+| Transparent/additive submission | CPU timer 0.608–0.626 | Substantial submission work; V8 dynamic-blended draw path alone is 0.553–0.576 inclusive. |
+| Transparent classification/ordering | CPU timer 0.404–0.411; V8 enclosing phase 0.392–0.393 | Frame preparation remains material even with bounded near sorting. |
+| Frame-instance run preparation | CPU timer 0.257–0.369 | Separate from ordering; costs drift downward across repeats, so retain the spread. |
+| Opaque submission | CPU timer 0.390–0.430 | Larger than in the dungeon, but not the first representation target. |
+| Particle submission | CPU timer 0.409–0.430; V8 enclosing pass 0.418–0.432 | Real secondary CPU cost in this scene. |
+| Outdoor shadow work | CPU timer 0.357–0.365 | Relevant outdoors; absent from the earlier dungeon matrix. |
+| Scene query | CPU timer 0.158–0.165 | Smaller than contribution construction. |
+| Instance upload | CPU timer 0.110–0.113 | Not the leading cost. |
+| Dynamic presentation publication | V8 0.714–0.743 inclusive | Sparse cutover retained; this is not all removable scene synchronization. |
+| Bounds within publication | V8 0.295–0.305 inclusive | Included in the preceding row, not an additional budget. |
+| Animation sampling | V8 0.234–0.240 inclusive | Smaller than the principal renderer preparation work. |
+| Particle simulation / draw-range collection | V8 0.212–0.213 / 0.181–0.186 inclusive | Keep distinct from particle draw submission and GPU time. |
+| Particle GPU | 0.216–0.219 | Largest measured GPU pass, but not close to the CPU cost. |
+| Opaque GPU | 0.194–0.198 | Includes scene geometry; no GPU-saturation evidence. |
+| Portal composition GPU | 0.147–0.149 | Smaller than the previous orbiting dungeon case. |
+| Terrain GPU / ambient occlusion GPU | 0.091–0.092 / 0.083–0.084 | Not priority targets at this configuration. |
+
+Rows are not all additive: V8 attribution is inclusive, and some rows are children of others.
+In particular, `#drawBlendedObjects` includes frame-run preparation as well as submission; its
+0.974–1.099 ms inclusive time must not be added to those renderer phase rows. Matrix multiplication
+self time spans several callers (0.393–0.397 ms/frame) and is not a separate proposed saving.
+
+The workload matters to the interpretation. Profiling-window snapshots contained 1,579–1,614 dynamic
+draw calls, 1,222–1,249 additive object draws, 272–276 transparent object draws, and 1,748–2,181
+submitted particle instances. These categories overlap and do not form a total. The contribution
+profiler reports roughly 1,600 prepared dynamic contributions and 2,629 static contributions per
+frame, not that many entities. The final snapshots retained 2,289 transparent instances and thirteen
+transparent frame-instance runs. This is mixed scenery/entity work, not an all-dynamic instancing
+population.
+
+Read-only tracing provides a bounded next investigation:
+
+- `#resolveSceneContributions` expands retained dynamic appearance ranges into frame submissions,
+  resolves scope routing, and derives current sort facts. Its visible-presentation publication child
+  is only 0.182–0.194 ms/frame; ancestry resolution alone does not explain the whole contribution span.
+- `createObjectSubmissionPhases` partitions those and cached static contributions, constructs
+  transparent distance records, groups the far population, then flattens groups back into arrays.
+- `scheduleFrameInstanceRuns` later identifies compatible static-template runs. Its
+  `frameTemplateDrawIdentityEquals` helper is specifically a static frame-template path, not the
+  articulated dynamic draw path. Its sampled self time ranges from 0.132–0.241 ms/frame; that spread
+  is a reason to measure structural work counts rather than promise its entire cost as savings.
+
+Recommendation: census the prepared-submission boundary, including contributions, classification,
+and run formation, before changing it. Identify which fields really change with pose, opacity,
+camera distance, scope visibility, or appearance, and which stable groups are repeatedly flattened
+and reconstructed. Existing static submissions are already cached; a generic extra cache is not a
+diagnosis. A retained grouping/identity contract may remove repeated frame work, but correctness must
+preserve near transparency order, landblock offsets, scope visibility, appearance replacement, and
+resource lifetimes. Do not respond by dropping static instancing, adding multi-draw, changing visual
+quality, or introducing another renderer strategy without evidence for that specific change.
+
+No Rust timings or native CPU deltas were collected here. The previous dungeon's native headroom
+must not be relabeled as a Hoshino measurement; this capture establishes frontend priorities, not
+that Rust is free in the new scene. It supplies no new evidence for moving simulation to a thread.
+
+All five reports captured no browser errors/exceptions. The profile-3 screenshot was inspected:
+buildings, trees, spectral humanoids, held equipment, and effects remained visible. Each measured
+window nevertheless advanced the cumulative dropped-camera-path counter by one; larger increases
+occurred between profiled windows. Thus this is not a zero-drop camera claim or an input-latency
+test, and the profiler transitions are excluded from steady-state timing.
+
+Artifacts: `/tmp/holtburger-hoshino-matrix-{0,1,2,3,4}.{json,png}`, V8 captures for indices 1–3,
+and `/tmp/holtburger-hoshino-matrix-summary.{mjs,jsonl}`. The temporary capture-driver changes were
+removed. The client is closed and the character remains at the northern drop. Production code is
+unchanged since `2171182b`; only these follow-up investigation notes remain uncommitted.
+
+#### Prepared-Submission Grouping Census
+
+A subsequent single login entered the saved northern Hoshino drop directly, without teleporting,
+moving the player, or orbiting the camera. The same worktree character, release sidecar, viewport,
+render scale, and client interest settings were used. Three ten-second windows each followed ten
+seconds of settling. Renderer/V8 profiling was disabled. Temporary counters wrapped the existing
+run scheduler without changing its output. These are structural counts, not performance A/B results;
+diagnostic WeakMap identity tracking and signature construction add work.
+
+Each phase recorded input counts, static frame-template inputs, merged dynamic inputs, exact
+compatibility calls, output instance runs, and consecutive-call equality of ordered template object
+identities and run memberships. Object identity changes on recompilation count as changes even if
+geometry is visually unchanged. Empty-template phases do not establish stable dynamic membership.
+Census collection extended through screenshot capture, so its own phase-call counts, not the shorter
+browser timing-window frame count, are the denominator.
+
+| Scheduler phase | Mean inputs/call across windows | Static templates/call | Compatibility checks/call | Instance runs/call |
+| --- | ---: | ---: | ---: | ---: |
+| Opaque | 340 | 0 | 0 | 0 |
+| Far transparent | 2,532–2,545 | 2,289 | 2,288 | 13 |
+| Near transparent | 80.48–91 | 0 | 0 | 0 |
+| Additive | 1,095–1,161.72 | 0 | 0 | 0 |
+
+The far phase also contained 243–256 merged dynamic inputs per call. Near and additive inputs were
+entirely merged dynamic submissions in these captures. Opaque inputs here are the ordinary-object
+scheduler population, not the separate dynamic opaque path or all renderer opaque draws.
+
+The three windows recorded 1,435, 1,453, and 1,452 calls per phase. Far-template sequence and exact
+run membership changed only 7, 3, and 3 times between consecutive calls: 99.51%, 99.79%, and 99.79%
+of transitions were identical. Every call still rediscovered thirteen runs from 2,289 templates.
+The final renderer snapshots each reported a 183,120-byte frame-instance upload containing those
+2,289 instances. No claim is made that all upload bytes can be removed without changing buffer
+ownership and handling visibility/ordering transitions.
+
+Read-only tracing confirms the redundant representation boundary:
+
+1. `CompiledObjectDrawStore.resolveNodeSubmissions` already retains static submissions against the
+   publication; their draw constants are not being decoded from scratch each frame.
+2. `createObjectSubmissionPhases` partitions the flat population and creates camera-distance records.
+   `groupTransparentRanges` groups far candidates by cohort, then flattens those groups again.
+3. `scheduleFrameInstanceRuns` scans the flattened far sequence, compares static draw compatibility,
+   and rebuilds instance runs. Non-instanced inputs instead receive singleton wrapper records.
+4. `#prepareFrameInstanceRuns` unwraps singles, flattens instance payloads, creates range submissions,
+   and uploads them. Near/additive dynamic inputs pay the wrapper/unwrap traversal even though none
+   can form a static instance run in this workload.
+
+The general scheduler is not inherently incorrect: near order and cohort boundaries matter, and
+other scenes may contain near static templates. The issue is discarding grouping information and
+forcing every submission through instance-run discovery, not a reason to delete static instancing.
+
+| Fact | Owner/lifetime implication |
+| --- | --- |
+| Static geometry range, material bindings, source, landblock, scope, instance transform | Compile with the retained publication and resolved-resource generation. |
+| Dynamic appearance range/material definitions | Retain with appearance; replacement invalidates them. |
+| Dynamic pose, opacity, selected scopes, near/far membership, camera-depth order | Evaluate for the current frame/view; do not freeze in a static group. |
+| Anchor-relative offset | Resolve from the current view's landblock-offset map, not retained draw data. |
+
+There is a concrete invalidation wrinkle. Between first and final sampled snapshots, cumulative
+atlas-publication flush counts advanced 113→120, 124→128, and 132→135. Total compiled-entry production
+also increased while the live count remained 2,652. The runtime's `onLayoutPublished` callback calls
+`invalidateResolvedResources("atlas-publication")`; that clears static compiled submissions and
+rebuilds dynamic appearance resources. This demonstrates that compiled identity can change while
+the player is stationary. It does not prove every observed membership change was caused by an atlas
+flush, nor that these invalidations are unnecessary. Determining whether an atlas publication actually
+moved a consumed binding is a separate dependency question, not permission to suppress invalidation
+or expand this work into streaming optimization.
+
+Recommendation: a focused prepared-submission contract experiment should preserve compiled static
+cohorts through classification and run submission, and pass non-instanced work directly instead of
+wrapping it as hypothetical instance runs. Keep near-order evaluation and visibility selection live;
+honor existing publication, appearance, atlas, sampler/detail, and render-mode invalidation. Start
+with the existing pipeline and draw mechanisms, not another renderer strategy or a whole-scene
+last-frame cache. Verify moving-view near/far transitions and resource replacement before accepting
+the cutover; the fixed-view census proves repeated work here, not general cache validity or a measured
+speedup. Dynamic range expansion remains a distinct part of the contribution cost and is not solved
+merely by retaining static groups.
+
+All three reports captured no browser errors/exceptions, and the final screenshot was inspected
+with buildings, trees, equipped spectral humanoids, and active effects visible. Artifacts are
+`/tmp/holtburger-grouping-{0,1,2}.{json,png}`. The client is closed at the northern drop. All temporary
+renderer counters and driver changes were removed; production remains at `2171182b`. No commit was
+made in this follow-up.
+
+#### Moving-Camera Grouping Countercheck
+
+The user correctly challenged the stationary census: unchanged transparent order is expected with
+a fixed camera and is not evidence that frame order can be retained through movement. A subsequent
+single-login countercheck kept the character at the northern Hoshino drop and sent only left-drag
+camera inputs. It used the same worktree credentials, release sidecar, 1441×903 viewport, render scale
+1, and default client interest settings. After fifteen seconds of initial settling, each of three
+captures followed another five-second pause. Each gesture sent 320 horizontal inputs at nominal
+16 ms intervals, following a ±500-pixel sinusoidal sweep that returned to its starting coordinate.
+There were no player movement or teleport commands. Endpoint screenshots showed materially different
+views of nearby trees, buildings, equipped humanoids, and effects.
+
+Counters separately compared phase membership as a sorted multiset, ordered identity sequences,
+static-template membership/order, and exact ordered run membership. Static identities use retained
+submission references; dynamic identities use entity, retained appearance-range reference, and scope,
+not newly allocated per-frame wrapper identity. Resource recompilation can still change identities,
+so a membership change is not automatically proof of a visibility or near/far transition.
+
+| Observation | Orbit 1 | Orbit 2 | Orbit 3 |
+| --- | ---: | ---: | ---: |
+| Measured scheduler calls per phase | 1,114 | 1,103 | 1,099 |
+| Far static-template count, min–max | 303–2,364 | 303–2,364 | 303–2,364 |
+| Far instance runs, min–max | 9–15 | 9–15 | 9–15 |
+| Consecutive changes in static far membership | 74 | 74 | 73 |
+| Static far order changes with membership unchanged | 0 | 0 | 0 |
+| Near-phase order changes with membership unchanged | 40 | 34 | 45 |
+| Near-phase membership changes | 11 | 11 | 11 |
+| Static templates entering the near phase | 0 | 0 | 0 |
+
+The near phase contained dynamic merged draws. Additive order also changed with unchanged membership
+(71, 106, and 54 times), but additive input order is not evidence of camera-depth sorting: that phase
+does not use the near alpha sorter. Far full-phase membership changed more often than static-only
+membership because dynamic submissions also participate. Exact static far-run sequences changed
+whenever the observed static membership changed, not between those changes. Many renderer frames
+share a host-camera update or retain the same visible set; a high percentage of unchanged consecutive
+frames during an orbit is therefore not proof of a generally reusable whole-frame plan.
+
+Conclusion: do not cache the complete visible population or transparent order based on the stationary
+census. Camera movement materially changes the selected static population and output run count, and
+near alpha order demonstrably changes even with identical members. The narrower structural candidate
+remains compiling camera-independent compatibility/cohort facts and preserving useful group structure
+through the existing stages, while evaluating visible membership, near/far classification, near depth
+order, and resulting run boundaries for the current view. This countercheck does not measure a speedup
+or establish that such a refactor is worth its complexity.
+
+Coverage limitation: no static template entered the near phase. Thus these orbits do not validate
+static-instance near/far crossing behavior or all possible run splits. Any implementation needs a
+focused production-policy fixture with compatible static instances crossing the configured near
+boundary and interleaving with other transparent draws; a suitable live close-foliage case should
+also be checked before accepting changed runtime behavior. Do not infer that this scene's empty
+near-static population permits removing that supported case.
+
+Renderer/V8 profiling was off. Identity signatures and sorting added diagnostic work, and two
+screenshots were taken during each gesture. Observed approximately 264 ms maximum animation-frame
+intervals cannot be presented as ordinary camera performance or assigned a cause from this census.
+Structural collection stopped after mouse release, before the helper's two-second observation tail;
+the reported camera-event summary includes that tail. All three reports captured 320 inputs and no
+browser errors/exceptions. No rendering output or ordering algorithm was changed.
+
+Artifacts: `/tmp/holtburger-orbit-grouping-{0,1,2}.json` and
+`/tmp/holtburger-orbit-grouping-view-{80,240}.png` (endpoint screenshots from the final orbit).
+The client is closed at the northern drop. Temporary renderer/driver changes were removed; production
+remains at `2171182b`, with only investigation notes modified and no new commit.
+
+#### Within-Frame Group Preservation Prototype — Rejected
+
+Tried the narrow representation change suggested by the moving-camera census: preserve the
+first-seen far cohort arrays through transparent classification and instance-run scheduling instead
+of flattening them into a physical-candidate array between those stages. Current-view membership,
+near/far classification, exact near depth ordering, draw compatibility, and scope predicates remained
+unchanged. This was not a previous-frame order cache and did not introduce multi-draw.
+
+The prototype removed one flattening pass, but still mapped the retained groups to prepared values,
+examined every physical candidate for compatibility, and allocated the same final run/single
+submissions. Supporting grouped inputs propagated nested arrays through the general scheduler,
+including opaque and additive phases that did not independently need the extra structure. It did not
+solve the more substantial repeated-compatibility-work problem.
+
+Comparison used one login as `+Holtfighter Slot 1` through this worktree's `.dev.env`, at the existing
+northern Hoshino location (`0x4ce3ffff`). Release host, Electron, Ryzen 9 5900X / Radeon Navi 31,
+1441×903 viewport, render scale 1, default client interest radii, physical GPU, no player movement or
+teleports. After fifteen seconds of settling, six windows alternated baseline/prototype three times,
+with five seconds of settling after each switch. Each window used the same 320-input horizontal
+sinusoidal camera gesture, ±500 pixels at nominal 16 ms intervals, ending at the starting coordinate.
+Actual windows lasted roughly seven seconds because input delivery itself takes time. This measures
+settled scene rendering while looking around, not streaming or a stationary-camera budget.
+
+For a same-login comparison, a temporary copy of the HEAD policy and scheduling functions supplied
+the baseline. Its flat phase arrays were wrapped only at the temporary shared renderer boundary and
+unwrapped before the original scheduler; the prototype consumed groups directly. Both alternatives
+therefore executed their actual ordering and scheduling loops, with a small diagnostic selection/
+adapter overhead. This is not a comparison of two independently built production binaries.
+Renderer CPU/GPU profiling was enabled; V8 sampling was off. Profile means were reset per window and
+covered the entire gesture. The single screenshot was taken after all measured windows, avoiding the
+previous census's screenshot-induced stalls.
+
+| Mean CPU milliseconds per frame | Baseline windows | Prototype windows | Median baseline → prototype |
+| --- | --- | --- | --- |
+| Transparent ordering | 0.259 / 0.254 / 0.271 | 0.252 / 0.253 / 0.250 | 0.259 → 0.252 |
+| Instance-run preparation | 0.204 / 0.196 / 0.184 | 0.195 / 0.191 / 0.182 | 0.196 → 0.191 |
+| Sum of those two phases | 0.463 / 0.451 / 0.455 | 0.446 / 0.444 / 0.432 | 0.455 → 0.444 |
+| Renderer total | 3.267 / 3.264 / 3.293 | 3.206 / 3.188 / 3.226 | 3.267 → 3.206 |
+| Whole frame callback | 4.818 / 4.792 / 4.861 | 4.728 / 4.694 / 4.749 | 4.818 → 4.728 |
+
+Baseline frame counts were 1,074 / 1,053 / 1,082; prototype counts were 1,046 / 1,032 / 1,047.
+Mean static contributions were closely matched at 1,539–1,550 per frame across all windows;
+dynamic contributions were 1,140–1,153. GPU means ranged from 0.899 to 0.924 ms across both modes.
+All six windows captured 320 inputs and reported no browser errors/exceptions. The final screenshot
+shows the nearby equipped humanoids, particles, trees, and buildings; it is a visual sanity check,
+not exhaustive equivalence evidence. This scene still does not cover static instances entering the
+near phase.
+
+The small improvement is positive evidence, not a claim of zero effect. However, the median combined
+target-phase saving is only approximately 0.011 ms. The approximately 0.09 ms whole-callback difference
+includes changes outside those phases and cannot all be assigned to the removed flattening pass.
+Three alternating pairs in an animated live scene do not establish a general speedup of that size.
+Do not convert these instrumented callback means into a demonstrated FPS improvement or add CPU and
+GPU means together.
+
+Decision: remove the runtime prototype and temporary comparison controls. The nested-group contract
+churn is not justified by this small direct saving while all exact compatibility checks remain.
+Do not pursue another array-wrapper optimization on this evidence. A future attempt on this thread
+must remove meaningful repeated work at its owner—such as proving reusable exact compatibility facts
+for compiled static draws—without assuming that a coarse cohort key proves compatibility or retaining
+view-dependent order. That larger change is not implemented or validated by this experiment.
+
+Retained a four-case production-policy fixture covering compatible static instances moving from far
+grouping into the near phase, splitting around an intervening dynamic draw, and reversing their near
+order when camera direction reverses. Fixture distances and camera offsets scale with the configured
+near radius. The fixture passes against the original implementation; it documents supported behavior,
+not a newly fixed defect. No runtime change remains and no commit was made.
+
+Final verification: all 2,054 TypeScript tests in 269 files passed; full app type checks, ESLint,
+Knip, and `git diff --check` passed. Only the new policy fixture and accumulated investigation notes
+remain modified.
+
+Artifacts: `/tmp/holtburger-group-comparison-{0,1,2,3,4,5}.json`,
+`/tmp/holtburger-group-comparison.png`, and `/tmp/holtburger-group-comparison.log`.
+The client was closed after the comparison; no reconnect was needed.
+
+#### Publication-Local Exact Compatibility Census
+
+Investigated the user's landblock/streaming concern before introducing a compatibility registry.
+The existing `frameTemplateDrawIdentityEquals` explicitly requires equal landblocks, source,
+outdoor-shadow receiver policy, render scope, geometry key and range, plus exact resolved material/
+device compatibility. The cohort requirement remains a separate phase policy. No cross-landblock
+batching is proposed.
+
+Source tracing found an existing ownership boundary narrower than a landblock registry:
+
+- `static-object-geometry-worker.ts` already constructs source partitions from geometry identity,
+  material binding identity, ordering, retail visibility and triangle membership. Each partition is
+  realized once, but its draw-constant fields are projected into every instance template.
+- `#compileStaticNodeSubmissions` compiles each template using the individual template object as its
+  cache key. Distinct instances therefore get distinct compiled compatibility values even when their
+  source draw is identical. Those values are retained, but compared structurally again each frame.
+- `CompiledObjectDrawStore` already holds draws and publication submissions through weak keys. Atlas
+  publication, texture filtering, region detail and EnvCell mode flush the compiled values and node
+  submissions together. Eviction/replacement does not require a global strongly retained registry.
+
+A temporary shadow census tested whether an exact identity scoped to one existing static publication
+could describe the actual frame-time comparisons. During publication compilation, frame templates
+were bucketed by their existing coarse batch key and compared using the unchanged exact comparator
+to assign representative identities. Each publication had its own temporary buckets. Weakly keyed
+identities were then checked alongside the original frame-time comparator, whose original result
+continued to control rendering. The separate cohort policy was untouched. This diagnostic did not
+substitute a coarse key for an exact comparison and did not alter draw scheduling or visibility.
+
+One login, three repeated 320-input sinusoidal camera orbits, no character movement or teleport,
+same northern Hoshino scene and worktree character as the preceding experiment. Release host,
+1441×903, render scale 1, default client interest, Ryzen 9 5900X / physical Radeon Navi 31.
+Fifteen seconds initial settling and five seconds before each capture; profiling and V8 sampling
+were off. The screenshot was taken after all measured windows. This is a structural census, not
+performance evidence for the shadow implementation.
+
+| Observation | Orbit 1 | Orbit 2 | Orbit 3 |
+| --- | ---: | ---: | ---: |
+| Sampled frames | 1,001 | 997 | 1,011 |
+| Frame-time exact comparisons | 1,224,842 | 1,212,525 | 1,230,510 |
+| Compatible pairs | 1,214,241 | 1,201,985 | 1,219,810 |
+| Pairs sharing the publication-local exact identity | 1,214,241 | 1,201,985 | 1,219,810 |
+| Incorrect matches / missed matches / unassigned pairs | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 |
+| Pairs already sharing the compiled compatibility reference | 0 | 0 | 0 |
+
+All 3,667,877 observed comparisons agreed. Each orbit averaged approximately 1,216–1,224 comparisons
+per frame as visible scenery changed. No observed compatible pair needed an identity shared across
+publications. This is scene-specific evidence, not proof that independently published compatible
+draws cannot occur elsewhere.
+
+Across initial loading, settling and all captures, shadow compilation visited 37,572 template
+instances over 253 publication compilation events and found 253 exact classes. These are cumulative
+visits/rebuilds, not 37,572 distinct resident instances or 253 distinct scene publications. Every
+visited instanced publication happened to have one exact class; production must not assume that
+distribution is universal. The diagnostic made 37,319 compile-time comparisons and found at most
+one class per coarse bucket. Atlas flush totals at the ends of the windows were 117, 120 and 121,
+confirming that recompilation also occurs during this otherwise settled scene.
+
+Conclusion: a publication-local shared-source representation is worth a measured prototype. Prefer
+preserving one immutable source-draw descriptor from the worker and compiling it once, with instances
+retaining only their own placement/color/sort facts, over adding a global identity interning service
+or shipping this diagnostic comparison map. The existing weak-key cache and its invalidation events
+can own the compiled descriptor. This can reduce duplicate preparation as well as give the existing
+compatibility comparison a shared-reference fast path. Landblock, render-scope, source and shadow
+policy boundaries still need to be checked; source-descriptor equality alone does not prove those.
+
+Different descriptors must not automatically mean incompatible: separately published equivalent
+draws still require the existing exact semantics unless the producer contract proves otherwise.
+The current comparator already supports reference equality followed by structural comparison, so
+sharing its inputs need not introduce a separate renderer strategy. Near/far classification, exact
+near sorting and run splitting remain per-view operations. Preserve the boundary fixture from the
+previous experiment and test descriptor sharing across worker transport, plus fresh compiled facts
+after existing invalidations, before accepting a cutover.
+
+No speedup or improved streaming latency has been established. The promising distinction from the
+rejected array prototype is eliminating duplicated immutable draw descriptions and their repeated
+structural comparisons, not simply keeping grouping containers longer. Benchmark the actual
+representation change before keeping it; a high comparison count alone is not a frame-time saving.
+
+Artifacts: `/tmp/holtburger-identity-census-{0,1,2}.json`,
+`/tmp/holtburger-identity-census.png`, and `/tmp/holtburger-identity-census.log`.
+All three captures reported no browser errors/exceptions. Full app type checks passed with the
+diagnostic installed. The client is closed and both temporary renderer and probe edits were restored
+exactly; only the prior policy fixture and accumulated notes remain modified. No commit was made.
+
+#### Shared Static Source Draw Cutover — Retained
+
+Implemented the narrower representation change and kept it after the moving-camera comparison.
+Execution covered representation/transport, correctness, live comparison, and cleanup; the rejected
+group-array prototype remains removed.
+
+`StaticObjectInstanceDraw` now owns one prepared source partition's geometry key/range, material,
+retail visibility and cohort key. `FrameStreamedObjectInstanceTemplate` references that shared draw
+and retains its own instance transform/color and landblock-space sort facts. The geometry worker
+constructs the draw once per existing partition. Worker structured cloning preserves its shared
+reference, and hydration leaves that immutable descriptor intact while restoring per-instance math
+objects. No global registry, numeric identity allocator, cross-landblock batch or new render strategy
+was added.
+
+The renderer keys its existing `CompiledObjectDrawStore.resolveDraw` by the shared draw rather than
+the instance template. Repeated instances therefore share the same resolved compatibility object.
+The existing `areStaticObjectDrawsCompatible` reference-equality fast path now handles those pairs;
+the comparator and scheduler themselves are unchanged. Distinct descriptors still receive the full
+comparison, preserving equivalence across independently prepared definitions. Landblock, source,
+render scope, shadow policy and authored-cohort checks remain as before. Visibility, near/far policy,
+depth sorting and instance upload are unchanged. Resource invalidations clear both compiled draws and
+publication submissions through the existing weak-key cache, so no extra eviction wiring is needed.
+
+The production change is four net lines across seven non-test source/script files;
+most edits move existing facts to their actual owner and update consumers. Tests additionally check
+that repeated residents share the draw while retaining different transforms and sort identities,
+both through direct preparation and the structured-clone worker transport. Existing triangle-membership,
+material, scope-routing, near-boundary and all four compiled-cache invalidation cases remain covered.
+
+**Live comparison:** one login as the worktree's `+Holtfighter Slot 1`, unchanged northern Hoshino
+location, no movement/teleport commands. Release host, Electron, 1441×903, render scale 1, default
+client interest radii, Ryzen 9 5900X / physical Radeon Navi 31. After fifteen seconds of settling,
+six windows alternated per-instance/shared compilation. Each switch explicitly flushed compiled
+draws and node submissions, followed by five seconds of settling. The temporary control used the
+existing region-detail flush reason only to invalidate those caches; its counter increments must
+not be interpreted as six actual region changes.
+
+Both modes used the new transported descriptor shape. The baseline selected the individual template
+as the compilation key, reproducing the old per-instance resolved facts and detailed comparison work;
+the shared mode selected the descriptor. Thus this isolates renderer preparation/reuse, not worker
+serialization size or first-load performance. The temporary selector ran only during static compilation,
+not in the frame comparator. It and the forced-flush control were removed after the comparison.
+
+Each window sent the same 320-input, nominal 16 ms, ±500-pixel horizontal sinusoidal orbit, ending at
+the starting coordinate. Actual windows were 7.31–7.61 seconds. Renderer CPU/GPU profiling and V8
+sampling at 100 microseconds were enabled, with totals reset for each window. V8 attribution below
+is normalized by the window's sampled frame count and restricted to the client frame callback.
+The screenshot was captured only after all six windows.
+
+| CPU milliseconds per frame | Per-instance windows | Shared-draw windows | Median per-instance → shared |
+| --- | --- | --- | --- |
+| Instance-run preparation | 0.207 / 0.194 / 0.195 | 0.075 / 0.079 / 0.081 | 0.195 → 0.079 |
+| V8 compatibility comparator self time | 0.128 / 0.120 / 0.119 | 0.006 / 0.007 / 0.007 | 0.120 → 0.007 |
+| Renderer total | 3.308 / 3.338 / 3.397 | 3.189 / 3.146 / 3.220 | 3.338 → 3.189 |
+| Whole frame callback | 4.865 / 4.952 / 5.010 | 4.772 / 4.704 / 4.809 | 4.952 → 4.772 |
+
+Sampled frames were 1,055 / 1,081 / 1,077 for per-instance and 1,041 / 1,052 / 1,045 for shared.
+Mean static contributions were 1,535–1,558 versus 1,528–1,543; dynamic contributions were 1,130–1,153
+versus 1,141–1,153. Every final snapshot had 368 static object draws, 874,377 static object triangles
+and 2,298 submitted transparent instances. The image still shows buildings, trees, equipped humanoids
+and effects. All six windows reported no browser errors/exceptions. This is not exhaustive image
+equivalence, and this scene still relies on the synthetic policy fixture for static near/far crossings.
+
+Reported compiled-entry counts at the window ends were 3,414 / 3,414 / 3,115 versus 490 / 638 / 651.
+These counters include draws and publication submission entries since the last flush, not measured
+live heap objects or bytes. Visibility and real atlas flushes also affect their values; do not present
+the difference as an exact memory saving. It corroborates substantially less duplicate preparation.
+
+The approximately 0.117 ms median run-preparation saving (60%) is corroborated by approximately
+0.113 ms less V8 comparator self time. That is the directly supported improvement. The broader
+approximately 0.179 ms callback difference includes other work and should not all be assigned to this
+change. GPU means were 0.921–0.949 ms in the per-instance windows and 0.964–0.972 ms in the shared
+windows; no GPU improvement is claimed, and CPU/GPU spans must not be added. These instrumented,
+animated-scene results are not proof of reaching 200 FPS or improving streaming latency.
+
+Decision: retain the shared representation. Unlike the rejected array experiment, it removes
+duplicated immutable preparation and measured repeated comparison work with essentially unchanged
+runtime complexity and no new lifetime mechanism. No new streaming pass, global search or requirement
+to retain neighboring landblocks was introduced. Streaming latency remains a separate measurement.
+
+Quality notes: added the domain-independent audit pattern “Prepared State Is Keyed by Occurrence
+Instead of Definition.” An unrelated pre-existing issue was noticed while adapting the offline
+`portal-work-trace.ts` consumer: its generated-template dry workload applies `sourceToLandblock` to
+`transparentSort.center`, although that center is already landblock-space. The live renderer does not
+do this, and this experiment did not use that dry workload. Only the descriptor field accesses were
+migrated there during the prototype. The subsequent retirement below removes that diagnostic and
+its coordinate defect rather than retaining a separate fix task.
+
+Verification: all 2,055 TypeScript tests in 269 files passed; full app type checks, ESLint and Knip
+passed. Temporary controls and driver changes are removed. No commit was made; the client is closed.
+Artifacts: `/tmp/holtburger-shared-draw-{0,1,2,3,4,5}.{json,cpuprofile}`,
+`/tmp/holtburger-shared-draw.png`, `/tmp/holtburger-shared-draw.log`, and
+`/tmp/holtburger-shared-draw-summary.mjs`.
+
+#### Offline Trace Retirement and Final Quality Review
+
+At the user's request, retired the unused offline portal trace instead of repairing its divergent
+sort-center handling. Repository search found only its manual package command, dedicated dry-scheduler
+tests, and historical investigation references; current profiling uses the live client/browser harness.
+Removed the 2,770-line trace script, its 487-line dry scheduler, the scheduler's 178-line test file,
+the package command and direct `jiti` dependency. `jiti` remains transitively required by other tools;
+the lockfile change removes only this app's direct dependency declaration.
+
+Removed `check:trace` and its dedicated TypeScript configuration: all remaining TypeScript scripts
+are tests already included by `check:tests`. Made the target-byte calculator and ordering-trace type
+module-private after their only external production consumer disappeared. Their live behavior remains
+intact. Preserved the portal command recorder and its tests because they exercise the execution
+function consumed by the real WebGL executor, not a separately maintained offline scheduling model.
+Historical capture notes remain historical records, not instructions to use the retired command.
+
+Reviewed the complete pending source/test/config diff, including source-draw ownership, worker
+transport, per-instance placement and sort identity, weak cache lifetimes, invalidation, exact
+compatibility across distinct descriptors, and the deletion dependency boundary. No blocking issue
+remained. Added the domain-independent pattern “An Offline Diagnostic Reimplements a Moving Runtime
+Contract” alongside the prepared-definition identity pattern from the cutover. No additional renderer
+strategy or speculative abstraction was introduced during review.
+
+Final checks: 2,053 TypeScript tests in 268 files passed, full app type checks passed, ESLint and Knip
+passed. The two removed tests belonged exclusively to the retired dry scheduler. The six live GPU
+captures recorded above validate the retained shared-source implementation; retirement only removes
+offline code and unused exports, with no new live rendering behavior. No additional login was needed.

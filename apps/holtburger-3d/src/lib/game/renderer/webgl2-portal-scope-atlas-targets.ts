@@ -399,7 +399,7 @@ function validateTargetExtents(extents: PortalScopeAtlasTargetExtents): void {
 }
 
 /** Exact configured attachment bytes, excluding opaque driver-owned framebuffer metadata. */
-export function portalScopeAtlasTargetByteLength(
+function portalScopeAtlasTargetByteLength(
 	extents: PortalScopeAtlasTargetExtents,
 ): number {
 	const atlasPixels = extents.atlas.width * extents.atlas.height;

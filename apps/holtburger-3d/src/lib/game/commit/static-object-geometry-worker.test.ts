@@ -495,37 +495,57 @@ describe("prepareStaticObjectGeometry", () => {
 		});
 	});
 
-	it("shares one template partition geometry across repeated transparent residents", () => {
-		const first = resident(
-			"transparent-shared",
-			Mat4.identity(),
-			new Vec3(1, 1, 1),
-		);
-		const second = {
-			...first,
-			identity: { kind: "authored" as const, sourceId: "transparent-shared-b" },
-			placement: {
-				...first.placement,
-				localTransform: translation(10, 0, 0),
-			},
-		};
-		const result = prepareStaticObjectGeometry({
-			layer: LandblockLayerKind.Generated,
-			resourceNamespace: "static-install:generated-shared-template" as const,
-			source: generatedSource([first, second]),
-		});
+	it.each(["direct", "worker"] as const)(
+		"shares a source draw across repeated transparent residents via %s",
+		async (mode) => {
+			const first = resident(
+				"transparent-shared",
+				Mat4.identity(),
+				new Vec3(1, 1, 1),
+			);
+			const second = {
+				...first,
+				identity: {
+					kind: "authored" as const,
+					sourceId: "transparent-shared-b",
+				},
+				placement: {
+					...first.placement,
+					localTransform: translation(10, 0, 0),
+				},
+			};
+			const job: StaticObjectGeometryPreparationJob = {
+				layer: LandblockLayerKind.Generated,
+				resourceNamespace: "static-install:generated-shared-template",
+				source: generatedSource([first, second]),
+			};
+			const worker = new StaticObjectGeometryWorker({
+				createGeometryWorker: () => new TransferWorkerPort(),
+			});
+			const result =
+				mode === "worker"
+					? await worker.prepare(job)
+					: prepareStaticObjectGeometry(job);
+			worker.destroy();
 
-		expect(result?.geometry).toHaveLength(1);
-		expect(result?.objects[0]?.drawUnits).toEqual([]);
-		expect(result?.objects[0]?.frameStreamedInstances).toHaveLength(2);
-		const [left, right] = result?.objects[0]?.frameStreamedInstances ?? [];
-		expect(left?.geometry).toBe(right?.geometry);
-		expect(left?.cohortKey).toBe(right?.cohortKey);
-		expect(left?.transparentSort.stableId).not.toBe(
-			right?.transparentSort.stableId,
-		);
-		expect(result?.objects[0]?.bounds.max).toMatchObject({ x: 11, y: 1, z: 0 });
-	});
+			expect(result?.geometry).toHaveLength(1);
+			expect(result?.objects[0]?.drawUnits).toEqual([]);
+			expect(result?.objects[0]?.frameStreamedInstances).toHaveLength(2);
+			const [left, right] = result?.objects[0]?.frameStreamedInstances ?? [];
+			expect(left?.draw).toBeDefined();
+			expect(left?.draw).toBe(right?.draw);
+			expect(left?.instance.sourceToLandblock.m41).toBe(0);
+			expect(right?.instance.sourceToLandblock.m41).toBe(10);
+			expect(left?.transparentSort.stableId).not.toBe(
+				right?.transparentSort.stableId,
+			);
+			expect(result?.objects[0]?.bounds.max).toMatchObject({
+				x: 11,
+				y: 1,
+				z: 0,
+			});
+		},
+	);
 
 	it("includes exact triangle membership in template partition identity", () => {
 		const first = resident(
@@ -593,7 +613,7 @@ describe("prepareStaticObjectGeometry", () => {
 		expect(
 			new Set(
 				result?.objects[0]?.frameStreamedInstances.map(
-					({ cohortKey }) => cohortKey,
+					({ draw }) => draw.cohortKey,
 				),
 			).size,
 		).toBe(3);

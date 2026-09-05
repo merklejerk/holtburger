@@ -69,7 +69,7 @@ export function assembleStaticObjectArtifact(options: {
 	);
 	for (const range of geometry.objects.flatMap((object) => [
 		...object.drawUnits,
-		...object.frameStreamedInstances,
+		...object.frameStreamedInstances.map(({ draw }) => draw),
 	])) {
 		for (const texture of [
 			range.material.textures.base,

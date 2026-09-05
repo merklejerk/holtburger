@@ -126,6 +126,51 @@ describe("orderTransparentObjectRanges", () => {
 });
 
 describe("createObjectSubmissionPhases", () => {
+	it.each([
+		{ cameraOffset: -0.2, direction: 1, expected: [["a", "b"], "dynamic"] },
+		{ cameraOffset: 0, direction: 1, expected: [["b"], "dynamic", ["a"]] },
+		{ cameraOffset: 0.2, direction: 1, expected: [["b"], "dynamic", ["a"]] },
+		{ cameraOffset: 0.2, direction: -1, expected: [["a"], "dynamic", ["b"]] },
+	])(
+		"reclassifies static instances across the near boundary at $cameraOffset facing $direction",
+		({ cameraOffset, direction, expected }) => {
+			const radius = TRANSPARENT_TUNING.nearDistance;
+			const objects = [
+				{ id: "a", x: radius * 0.9, instanced: true },
+				{ id: "dynamic", x: radius * 0.95, instanced: false },
+				{ id: "b", x: radius * 1.1, instanced: true },
+			].map((value) => ({ ...value, ordering: "transparent" as const }));
+			const phases = createObjectSubmissionPhases(
+				objects,
+				(value) => ({
+					range: value,
+					stableId: value.id,
+					distanceSquared: (value.x - cameraOffset * radius) ** 2,
+				}),
+				(value) => (value.instanced ? "shared" : null),
+				(value) => direction * (value.x - cameraOffset * radius),
+			);
+			// Far cohorts may regroup; near instances must not cross an intervening dynamic draw.
+			const submissions = [
+				phases.transparent.far,
+				phases.transparent.near,
+			].flatMap((ordered) =>
+				formAdjacentObjectInstanceRuns(
+					ordered,
+					(value) => value.instanced,
+					() => true,
+				),
+			);
+			expect(
+				submissions.map((submission) =>
+					submission.kind === "single"
+						? submission.value.id
+						: submission.values.map((value) => value.id),
+				),
+			).toEqual(expected);
+		},
+	);
+
 	it("keeps a merged dynamic range between compatible generated instances after near sorting", () => {
 		const objects = [
 			{ id: "near-static", depth: 2, drawKind: "instanced" },

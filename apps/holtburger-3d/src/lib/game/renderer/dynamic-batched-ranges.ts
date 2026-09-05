@@ -4,7 +4,7 @@ import type { PreparedDynamicAppearance } from "./webgl2-dynamic-appearances";
 import { retainsRetailGeometry } from "./retail-geometry-visibility";
 
 /** Physical range ordinal supplies batch state and start; the count may span adjacent ranges. */
-interface DynamicOpaqueSpan {
+interface DynamicBatchedSpan {
 	/** First retained range in the appearance's physical index order. */
 	rangeIndex: number;
 	/** Contiguous eligible index elements sharing the first range's physical batch. */
@@ -12,16 +12,24 @@ interface DynamicOpaqueSpan {
 }
 
 /** Frame cache with reusable scalar spans; pooled entries retain no scene or GPU resources. */
-export class DynamicOpaqueRanges {
+export class DynamicBatchedRanges {
+	/** Execution phase whose eligible physical spans this cache selects. */
+	readonly #phase: "opaque" | "additive";
+
+	/** Opaque/alpha-test and additive share span selection, but never share execution state. */
+	constructor(phase: "opaque" | "additive") {
+		this.#phase = phase;
+	}
+
 	/** One result per selected root, shared by all prepared views in this frame. */
 	readonly #prepared = new Map<
 		SceneNodeId,
-		readonly Readonly<DynamicOpaqueSpan>[]
+		readonly Readonly<DynamicBatchedSpan>[]
 	>();
 	/** High-water scalar storage, selected by queried root ordinal. */
 	readonly #storage: {
-		ranges: DynamicOpaqueSpan[];
-		pool: DynamicOpaqueSpan[];
+		ranges: DynamicBatchedSpan[];
+		pool: DynamicBatchedSpan[];
 	}[] = [];
 
 	/** Expire all borrowed results after every view has finished consuming them. */
@@ -36,7 +44,7 @@ export class DynamicOpaqueRanges {
 		plan: Extract<PreparedDynamicAppearance, { kind: "drawable" }>["plan"],
 		parts: readonly Pick<ActiveDynamicPart, "frameInstance">[],
 		showRetailHiddenGeometry: boolean,
-	): readonly Readonly<DynamicOpaqueSpan>[] {
+	): readonly Readonly<DynamicBatchedSpan>[] {
 		const previous = this.#prepared.get(nodeId);
 		if (previous !== undefined) return previous;
 		let storage = this.#storage[this.#prepared.size];
@@ -57,10 +65,10 @@ export class DynamicOpaqueRanges {
 			// Match existing routing: only opaque material becomes transparent under a partial fade.
 			if (
 				opacity === 0 ||
-				!(
-					range.source.ordering === "alpha-test" ||
-					(range.source.ordering === "opaque" && opacity === 1)
-				) ||
+				!(this.#phase === "additive"
+					? range.source.ordering === "additive"
+					: range.source.ordering === "alpha-test" ||
+						(range.source.ordering === "opaque" && opacity === 1)) ||
 				!retainsRetailGeometry(
 					range.source.retailVisibility,
 					showRetailHiddenGeometry,

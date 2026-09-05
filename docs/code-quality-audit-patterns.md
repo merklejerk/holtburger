@@ -1839,6 +1839,28 @@ testing. A recorder driven by the production execution function does not duplica
 **Possible responses:** Retire unused diagnostics and their exclusive dependencies, drive observations
 through production code, or retain an explicit model with a narrow purpose and equivalence fixtures.
 
+## A Category Name Is Treated as a Behavioral Guarantee
+
+**Smell:** An optimization assumes every member of a named category shares the algebraic or
+execution property that makes the optimization safe, despite later policy resolution or overrides.
+
+**Signals:** Reordering, deduplication or parallel execution is authorized by a source label rather
+than effective behavior. Exceptions retain the original category name. Tests exercise only the
+usual category member, not a differently resolved member between otherwise compatible operations.
+
+**Possible failure:** Work crosses an ordering barrier or loses an observable effect. Conversely,
+overly broad restrictions can keep independently executable work unnecessarily fragmented.
+
+**Questions:** Does the category express a proven invariant or merely provenance? Which overrides
+change effective behavior? Must an exceptional member split surrounding optimization regions?
+
+**Counterexamples:** A closed type whose constructors enforce the required property can make the
+category itself sufficient proof. Conservative boundaries may be appropriate without workload evidence.
+
+**Possible responses:** Decide from resolved behavior at its owning boundary, preserve exceptional
+members as barriers, and test compatible operations on both sides of an exception. Name helpers for
+what they actually guarantee rather than implying all selected work is freely reorderable.
+
 ## Adding Observations
 
 An observation belongs here when it has:

@@ -5298,3 +5298,420 @@ Final checks: 2,053 TypeScript tests in 268 files passed, full app type checks p
 passed. The two removed tests belonged exclusively to the retired dry scheduler. The six live GPU
 captures recorded above validate the retained shared-source implementation; retirement only removes
 offline code and unused exports, with no new live rendering behavior. No additional login was needed.
+
+#### Hoshino Fortress 78.1N 42.2W — Settled and Direct-Login Profiles
+
+Profiled the user-requested location on `a31dff6c`, using this worktree's `.dev.env` and
+`+Holtfighter Slot 1`. Issued `@tele 78.1n 42.2w`; the server reported landblock `0x4ae1` at local
+approximately `(131.999, 11.996, 58)`, while the HUD rounded/truncated the latitude to 78.0N.
+After settling, player residency was `0x4ae1011a` and camera residency `0x4ae10118`. The screenshots
+show the interior fortress bridge, nearby Bushi Gatekeeper and Spectral Bloodmage, and repeated spell
+effects. No player movement or camera input was sent after teleporting.
+
+Configuration: release host, Electron, 1441×903 viewport, render scale 1, default client terrain/
+building/generated/explicit/EnvCell interest settings, Ryzen 9 5900X and physical Radeon Navi 31.
+The first session waited for world readiness, then fifteen seconds, and collected five roughly
+ten-second windows with two-second pauses: profiling off, on, on, on, off. The three on windows used
+renderer CPU/GPU profiling and V8 sampling at 100 microseconds; samples were reset per window.
+Screenshots were taken only after closing the measurement windows.
+
+**Do not use the first window as a settled baseline.** Its first four one-second snapshots contained
+173–175 submitted dynamic objects, about 3,522–3,536 dynamic draws and 677–682 particle batches.
+The fifth snapshot dropped to 95 objects, 1,508 dynamic draws and 343 batches. Player/camera cells,
+camera reach and selected portal-scope count remained unchanged. The mixed window averaged 6.975 ms
+of callback work with profiling off, but has no V8 attribution for its heavier segment.
+
+The drop occurred approximately 25 seconds after the teleport. The world visibility-pruning path
+(`state/liveness.rs`) uses a 25-second destruction timeout, making previous-location retention a
+plausible explanation. No entity-identity trace was captured, so timing coincidence is not proof of
+which entities were removed or whether the behavior is correct.
+
+To distinguish this from the requested converged scene, a second session logged directly into the
+persisted location after a several-minute reconnect gap. It did not teleport. Profiling began five
+seconds after world readiness and ran three ten-second on windows, then one off window. Submitted
+dynamic population remained 91–95 from the first measured window onward; the approximately doubled
+post-teleport population did not recur. The two sessions are observations of different histories,
+not a controlled performance A/B or proof that every difference is retention-related.
+
+| Mean milliseconds per frame | Post-teleport settled windows | Direct-login windows |
+| --- | --- | --- |
+| Callback, profiling off (one late window each) | 5.425 | 4.658 |
+| Callback, profiling on | 6.066 / 5.983 / 5.873 | 5.141 / 5.029 / 5.050 |
+| Renderer CPU total | 4.179 / 4.143 / 4.032 | 3.577 / 3.462 / 3.472 |
+| Scene contribution preparation, renderer CPU | 0.843–0.879 | 0.728–0.761 |
+| Dynamic presentation publication, V8 inclusive | 0.731–0.744 | 0.645–0.652 |
+| Blended-object submission, renderer CPU | 0.615–0.638 | 0.582–0.596 |
+| Particle submission, renderer CPU | 0.517–0.530 | 0.389–0.397 |
+| Opaque submission, renderer CPU | 0.488–0.509 | 0.446–0.454 |
+| Outdoor shadows, renderer CPU | 0.354–0.368 | 0.320–0.338 |
+| Transparent ordering, renderer CPU | 0.313–0.334 | 0.231–0.239 |
+| Instance-run preparation, renderer CPU | 0.087–0.088 | 0.077–0.084 |
+| GPU measured total | 0.703–0.724 | 0.607–0.635 |
+
+Rows mix named renderer spans and explicitly labeled V8 attribution; they are not all disjoint.
+In particular, bounds work is included in dynamic publication and visible-pose work is included in
+scene contribution preparation. CPU and GPU spans overlap and must not be added. No Rust stack
+profile was collected; the frontend tick profile is not Rust simulation time.
+
+The settled first-session on windows contained 94–98 submitted dynamic objects; the direct session
+contained 91–95. Counts include presented attachments and are not monster counts. Final dynamic draw
+counts were 1,564–1,577 versus 1,442–1,455. All final snapshots had 411 static draws and 583,186 static
+triangles, four selected portal scopes, twelve far instance runs and no near static instance runs.
+Snapshots contained roughly 2,486–2,969 submitted particles and 326–352 particle batches across the
+two sessions. This remains a useful attachment/effect-heavy scene, but its repeatable direct-login
+workload is substantially lighter than the initial post-teleport segment suggested.
+
+The direct-login off window produced about 143 actual capped FPS; the HUD's uncapped estimate was
+about 203. Neither that estimate nor the reciprocal of the 4.658 ms callback mean demonstrates actual
+200 FPS: IPC/event work, scheduling and GPU/compositor execution are not all inside that callback.
+
+V8 locates substantial matrix work in specific ownership boundaries rather than in animation alone.
+Post-teleport `multiplyMat4` self time was approximately 0.43 ms/frame: about 0.163–0.173 ms under
+`getVisiblePresentation`, 0.143–0.145 ms under posed bounds and 0.111–0.115 ms under scene placement
+resolution. The direct-login aggregate was approximately 0.39 ms. Direct-login bounds cost
+0.297–0.302 ms inclusive, animation sampling 0.211–0.229 ms, particle advancement 0.132–0.135 ms,
+and particle-range collection 0.167–0.169 ms. These identify places to inspect, not proof that the
+different coordinate-frame products can be collapsed or that generic matrix multiplication is the
+right optimization target.
+
+One particularly useful history-sensitive lead is particle record work. Ten one-second snapshots
+per on window averaged 88 / 126 / 96 uploaded particle-record rows after teleporting, versus
+46 / 30 / 55 after direct login, despite similar submitted particle and batch populations. These are
+sparse latest-frame samples, not whole-window row averages. Renderer particle submission cost also
+differed, as did GPU particle spans (approximately 0.284–0.290 versus 0.192–0.214 ms). More active or
+retained sources, different effect phases and update cadence remain possible explanations. There is
+not enough evidence to label this a leak, infer redundant uploads, or change lifetime policy.
+
+Conclusions and next investigation candidates:
+
+- Steady-state renderer CPU work remains much larger than measured GPU work. The previous static
+  source-draw cutover remains effective; instance-run preparation is not back at the top.
+- Before another layer micro-optimization, inspect particle source/record lifetime and upload work
+  across teleport versus direct-entry histories, correlating identities, retained/visible populations
+  and actual updated rows. Keep arrival/streaming cost separate from post-arrival retained work.
+- Dynamic pose, bounds and attachment placement remain another substantial CPU boundary. Establish
+  which composed facts are genuinely shared before attempting a representation change.
+- No new renderer freeze was observed. Camera was fixed, so this run is not camera-orbit latency
+  evidence. No implementation or retention-policy change was made.
+
+All nine windows reported no browser errors/exceptions. Temporary probe modifications were removed,
+the client is closed at the requested location, and the worktree contains only these new notes.
+Artifacts: `/tmp/holtburger-hoshino-intense-{0,1,2,3,4}.{json,png}` (V8 files for 1–3),
+`/tmp/holtburger-hoshino-direct-{0,1,2,3}.{json,png}` (V8 files for 0–2), corresponding `.log` files,
+and `/tmp/holtburger-hoshino-{intense,direct}-summary.mjs`. No commit was requested or made.
+
+#### Corrected Hoshino Courtyard — 78.2N 42.2W
+
+The user corrected the requested coordinates to `78.2N 42.2W`. The preceding indoor captures
+remain historical evidence, not measurements of this intended stress scene. Issuing
+`@tele 78.2n 42.2w` placed the player at cell `0x4AE1`, offset `(131.99902, 36, 58)`, outdoors
+in the crowded courtyard. The HUD displayed `78.1N, 42.2W`; the exact command and destination
+offset, rather than the rounded HUD label, identify this capture. Screenshots show the surrounding
+Spectral humanoids and overlapping effects. Player and camera remained outdoors in `0x4ae1ffff`.
+
+Configuration: `a31dff6c`, release host with diagnostics enabled, Electron/Vite, Ryzen 9 5900X,
+physical Radeon Navi 31 GPU, 1441 × 903 viewport, render scale 1, default client interest radii
+(terrain/building 6, explicit objects 1, generated objects 2, environment cells 1), worktree
+credentials and `+Holtfighter Slot 1`. No camera or movement input followed teleport. Camera
+reach settled at 4.5 m. All five windows shared one login.
+
+The first 10-second instrumented window began five seconds after destination readiness. An extra
+20-second pause before the next window placed the later measurements beyond the 25-second
+retention deadline. Three later instrumented windows and one profiling-disabled window followed,
+with timing reset per window. Instrumented windows included V8 sampling at 100 µs; screenshots
+were taken after timing closed. This separates early convergence from settled work, not streaming
+performance. Combat and effect phases were not deterministic.
+
+| Window | Callback mean (ms) | Renderer CPU mean (ms) | Measured GPU phases (ms) | Particle GPU (ms) |
+| --- | ---: | ---: | ---: | ---: |
+| Early convergence | 6.309 | 4.367 | 1.257 | 0.642 |
+| Settled 1 | 6.112 | 4.155 | 1.614 | 1.008 |
+| Settled 2 | 6.120 | 4.184 | 1.595 | 0.988 |
+| Settled 3 | 6.081 | 4.174 | 1.647 | 1.044 |
+| Settled, profiling disabled | 5.715 | — | — | — |
+
+CPU and GPU overlap and must not be added. The disabled window rendered 1,385 frames over
+10.075 seconds, approximately 137.5 actual FPS, not the reciprocal of callback time.
+
+Settled CPU leaders were scene-contribution resolution (0.936–0.960 ms), blended submission
+(0.681–0.684 ms), particle submission (0.467–0.479 ms), opaque submission (0.455–0.466 ms),
+outdoor shadows (0.399–0.427 ms), and blended ordering (0.327–0.335 ms). V8 located dynamic
+presentation publication at 0.749–0.752 ms inclusive; its bounds child remained around
+0.32–0.33 ms. These sampled inclusive timings are not additional disjoint renderer buckets.
+Instance-run preparation remained small at 0.087–0.097 ms, consistent with the previous cutover.
+
+One-second snapshots in the three settled instrumented windows contained 108–132 visible dynamic
+presentations (including attachments/effects, not a monster census), 1,701–1,745 dynamic draws,
+2,738–3,389 particles and 366–396 particle batches. Final snapshots consistently contained
+415 static draws, 582,671 static triangles and nine selected portal scopes. There was no sudden
+population halving like the earlier wrong-coordinate post-teleport run.
+
+Particles now account for approximately 62–63% of measured GPU phases. Their roughly 1 ms GPU
+cost is substantially larger than the earlier indoor direct-login capture's 0.192–0.214 ms,
+despite similarly sized particle populations. Different screen coverage and overdraw are plausible
+leads, not established causes: framing, effect mix and history differ. CPU still dominates the
+measured renderer work, with dynamic presentation/preparation/submission ahead of instance runs.
+The previous indoor arrival-history hypothesis does not explain this corrected scene by itself.
+
+All five windows reported no browser errors/exceptions. The client was closed and temporary probe
+edits were removed. Artifacts: `/tmp/holtburger-hoshino-782-{0,1,2,3,4}.{json,png}`, V8 profiles
+for windows 0–3, `/tmp/holtburger-hoshino-782.log` and
+`/tmp/holtburger-hoshino-782-summary.mjs`. No implementation or commit was made.
+
+#### Corrected Courtyard — Camera Zoom Comparison
+
+The user reported worse performance when zoomed out. A subsequent single-login capture used the
+same release configuration, viewport and fixed player location, with no teleport or orbit. After
+30 seconds of initial settling, requested camera reaches were 4.5 / 15 / 50 m, repeated once with
+renderer CPU/GPU profiling and V8 sampling enabled, followed by profiling-disabled 4.5 / 50 m
+windows. Each zoom had five seconds to settle before its ten-second measurement window. Zoom
+input used the existing wheel handler; no production camera policy was changed.
+
+The 50 m request did not produce a 50 m view: actual camera reach was approximately 15.07 m,
+limited by the camera's placement constraints. The 15 m request reached 15 m, and returning to
+4.5 m reached 4.5 m. All final camera and player residencies remained outdoors in `0x4ae1ffff`.
+
+| Actual reach / instrumentation | Callback mean (ms) | Renderer CPU (ms) | Measured GPU phases (ms) | Particle GPU (ms) |
+| --- | ---: | ---: | ---: | ---: |
+| 4.5 m, on, first | 6.137 | 4.234 | 1.548 | 0.935 |
+| 15 m, on, first | 6.763 | 4.640 | 0.952 | 0.240 |
+| ~15.07 m, on, first | 6.609 | 4.533 | 0.932 | 0.220 |
+| 4.5 m, on, repeat | 6.003 | 4.099 | 1.478 | 0.871 |
+| 15 m, on, repeat | 6.685 | 4.593 | 0.926 | 0.222 |
+| ~15.07 m, on, repeat | 6.731 | 4.622 | 0.940 | 0.237 |
+| 4.5 m, off | 5.573 | — | — | — |
+| ~15.07 m, off | 6.181 | — | — | — |
+
+The disabled pair confirms approximately 0.608 ms (10.9%) more callback work when zoomed out;
+actual window throughput fell from 139.7 to 131.7 FPS. This is a modest reproducible slowdown,
+not evidence of severe orbit stutter, a renderer freeze or IPC contention. Neither player motion
+nor camera orbit was tested, and live combat prevents exact identical-workload comparisons.
+
+Instrumented near-view snapshots contained 1,726–1,779 dynamic draws and 369–389 particle batches;
+farther views contained 2,025–2,067 dynamic draws and 418–458 particle batches. Static draws rose
+from 415 to 433 and selected portal scopes from nine to fifteen. More scene content is being
+prepared and submitted, even though the GPU spends less time drawing particles.
+
+For the directly reached 15 m view, scene-contribution CPU time rose from 0.936–0.963 to
+1.080–1.086 ms, blended submission from 0.675–0.689 to 0.764–0.777 ms, opaque submission from
+0.450–0.472 to 0.507–0.510 ms, and particle submission from 0.438–0.450 to 0.483–0.497 ms.
+V8 corroborated scene-contribution growth (0.868–0.887 to 1.002–1.027 ms inclusive), along with
+smaller increases in posed bounds (0.324–0.330 to 0.368–0.371 ms), animation sampling
+(0.242–0.249 to approximately 0.283–0.284 ms), and particle-range collection
+(approximately 0.203–0.204 to 0.233–0.242 ms). These are overlapping ownership spans, not
+independent costs to add together. Instance-run preparation remained approximately 0.09–0.10 ms.
+
+Conclusion: increased particle fill cost does not explain this zoom-related slowdown. Particle GPU
+time falls approximately fourfold while CPU work increases across scene preparation and submission.
+The close-up particle cost remains real but is a separate tuning dimension. The next structural
+CPU investigation should focus on the dynamic contribution/preparation contract and the number of
+submitted dynamic ranges, with this farther courtyard view as a representative workload. These
+measurements do not yet prove redundant work, justify dropping appearances/effects, or establish
+that one particular batching strategy is the solution.
+
+All eight windows reported no browser errors/exceptions. The client was closed, temporary probe
+changes were restored, and no production change or commit was made. Artifacts:
+`/tmp/holtburger-hoshino-zoom-{0,1,2,3,4,5,6,7}.{json,png}`, V8 profiles for windows 0–5,
+`/tmp/holtburger-hoshino-zoom.log`, and `/tmp/holtburger-zoom-summary.mjs`.
+
+#### Courtyard Dynamic Draw Census — Ordered Range Fragmentation
+
+The next investigation traced the production appearance, contribution and draw paths and captured
+24 individual frames in one additional release-client login. Configuration matched the preceding
+zoom comparison. After 30 seconds of initial settling, camera reach alternated 4.5 / 15 / 4.5 /
+15 m, with five seconds after each zoom and six one-second-spaced census frames per view. Player
+position and camera orbit were unchanged. Temporary one-frame hooks serialized prepared dynamic
+contributions and the actual final blended submission sequence, including shared resource identities,
+physical index intervals, part/material selectors, effective phases, blend state and portal scopes.
+These frames are workload evidence, not timing samples; serialization perturbs their CPU cost.
+
+This login had a lighter population than the preceding approximately 2,050-draw far-view profile.
+It is not an optimization result: no rendering behavior changed. The separately sampled HUD
+snapshot follows its census frame by approximately one second and need not have identical counts.
+The following counts come from the census itself, including opaque spans and ordered submissions.
+
+| Workload | Near, 12 frames | Far, 12 frames |
+| --- | ---: | ---: |
+| Dynamic color draws | 1,402–1,458 | 1,815–1,844 |
+| Opaque / alpha-test draws | 72–80 | 96–104 |
+| Additive draws | 1,003–1,047 | 1,317 |
+| Transparent draws | 327–335 | 402–429 |
+| Roots contributing color draws | 86–92 | 109–116 |
+| Distinct geometry layouts | 22–24 | 24–26 |
+| Distinct logical appearance objects | 40–42 | 42–44 |
+
+In far-view window 3, sample 3, 44 mob roots generated 1,536 of 1,828 draws (84%); the player
+generated one, and 71 `other` roots generated 291. All 1,317 additive draws belonged to mobs,
+not to the separate particle system. Mob transparent ranges accounted for another 170 draws.
+Named contributors included Spectral Archers (430 draws), Samurai (264), Bushi (220), Voidmages
+(210), Minions (172), and Bloodletting Daggers (130). The `other` class also included named weapons,
+arrows/projectiles, a door and authored landblock dynamics. The render-facing capture does not
+retain host attachment-parent relationships, so weapon names are not an exact equipped-attachment
+census and arrows cannot all be classified as flying projectiles. That distinction remains open;
+it does not affect the finding that the additive workload is overwhelmingly mob-body geometry.
+
+Those 44 mobs shared nine geometry layouts and fifteen logical appearances. The 71 other roots
+used sixteen layouts and 28 appearances. Across all contributing roots, 170 distinct serialized
+source-material descriptions were present, but ordered submissions occupied only five physical
+state combinations in this frame. Material colors, atlas rectangles and per-part transforms are
+already shader-table data; source-material diversity is not equivalent to a required draw split.
+The additive draws in the examined frame all used source-alpha / one blending.
+
+The ownership path at census capture (`a31dff6c`) was:
+
+1. A retained visual template owns immutable layout and appearance. `WebGL2DynamicAppearances`
+   compiles material tables and index organization when retained, and rebuilds on physical atlas
+   changes. The frame only looks up these resources; this is not a missing appearance cache.
+2. `getVisiblePresentation` composes current per-part transforms. The renderer shares the published
+   result per root across views within the frame, then selects render scopes and opacity routing.
+3. `DynamicOpaqueRanges` coalesces eligible physically contiguous opaque ranges. Ordered ranges
+   instead produce individual `PreparedDynamicBlended` objects, even for neighboring compatible
+   ranges. `compileDynamicIndexBatches` gives each ordered source range a separate batch record.
+4. After transparent ordering, `#drawDynamicBlended` repeats scope/lighting/state setup,
+   `#bindDynamicColor`, and one ordinary indexed draw for each such range. Pose and material tables
+   already permit different parts and logical materials inside one physical draw.
+
+Reanalysis of the preceding unmodified zoom V8 profiles locates dynamic blended execution at
+0.615–0.626 ms near and 0.697–0.715 ms at 15 m. Dynamic color binding, inclusive across its callers,
+costs 0.314–0.318 ms near and 0.360–0.377 ms far. These overlap; they are not additive budgets.
+Scene-contribution resolution remains a separate approximately 1 ms far-view boundary, and dynamic
+presentation publication approximately 0.86 ms. A draw-submission improvement cannot remove all
+of those costs or establish 200 FPS by itself.
+
+The offline conservative census scans the final blended sequence without sorting it again. A join
+requires the same root, landblock, render scope, geometry, appearance resource, program, effective
+phase, physical textures/samplers, encoding, culling, authored visibility and blend factors, plus
+immediately consecutive index intervals. Static submissions break runs. All sampled intervals
+were triangle-aligned. This does not join different entities, skip index gaps or assume additive
+blending permits arbitrary reorder. Under those constraints:
+
+- Near frames admit 657–677 fewer draws: 544–566 additive and 106–113 transparent.
+- Far frames admit 864–896 fewer draws: exactly 710 additive and 154–186 transparent, approximately
+  47–49% of all dynamic color draws in this capture.
+- The serialized final sequence does not mark the internal far/near transparency boundary. A
+  production implementation must preserve it explicitly; excluding a possible join there removes
+  at most one candidate per frame from the transparent estimate. The 710 additive joins are
+  unaffected. These are compatibility candidates, not runtime-verified merged draws.
+- Grouping all additive ranges by entity/domain/state would suggest a much larger reduction
+  (1,317 to 76 groups), but that ignores index gaps and sequence constraints. It is not the
+  proposed first experiment and is not an achievable draw-count claim for the existing buffers.
+
+Recommended next experiment: represent consecutive compatible ordered submissions as a first
+range plus an index count, borrowing the existing opaque-span concept. Coalesce only after the
+existing phase ordering, within each phase boundary, and submit one ordinary WebGL2 draw per span.
+Keep logical range identities and sort centers for transparency decisions; do not prematurely merge
+alpha geometry before sorting. Compare physical state rather than the distinct per-range batch
+object identities. Any generalized compatibility helper should be shared with appearance batching
+instead of duplicating a second list of binding rules.
+
+This experiment needs no instancing, multi-draw, index-buffer rewrite, cross-entity allocation or
+streaming-lifetime change. It leaves current appearance swaps, per-part fades, retail-hidden ranges,
+portal scopes and pose-page ownership intact. Tests should exercise index gaps, resource/domain
+boundaries, effective phase changes and preserved order. Runtime validation must compare complete
+geometry/effects and profile both zoom levels with instrumentation on/off; lower draw count alone
+does not demonstrate a worthwhile speedup. Only after this measured experiment should we consider
+changing the preparation representation to avoid constructing range-level additive work in the
+first place. Alpha sorting still legitimately consumes logical range-level facts.
+
+No implementation was made. All four windows reported no browser errors/exceptions. The client
+closed normally and all temporary production/driver hooks were restored; only this investigation
+document remains modified. Artifacts: `/tmp/holtburger-dynamic-census-{0,1,2,3}.{json,png}`,
+`/tmp/holtburger-dynamic-census.log`, and `/tmp/holtburger-dynamic-census-summary.mjs`.
+
+#### Additive Appearance Batching — Prototype and Controlled Live Result
+
+The user challenged the adjacent-only proposal: additive source contributions commute, so their
+geometry can use opaque-style physical batching without joining the opaque execution pass. That
+is the stronger opportunity. The implementation now extends the existing appearance index compiler
+and pooled frame-span selector; it does not introduce cross-entity instancing or multi-draw.
+
+Eligibility was checked against `objectBlendPolicy`, the object shader and renderer execution.
+The blend-factor type contains only source-dependent source factors. With destination `one`,
+the blend equation adds source-derived contributions. The object shader reads material/pose tables,
+lighting and visibility, not destination scene color, and additive execution retains depth testing
+with depth writes disabled. Opaque draws still execute first. Per-part alpha remains shader data,
+so a partially faded additive part does not require a separate draw.
+
+The phase label alone is insufficient: retail flag overrides can resolve an additive-labelled
+surface to alpha blending. Such a surface starts a new additive grouping segment and is not merged;
+matching additive batches cannot move across it. Reordering remains within one appearance and
+within the existing entity/domain submission boundaries. Physical material, blend, culling and
+authored visibility differences still split batches. Transparent source identities/order remain
+available for ordinary sorting and opaque-part fades.
+
+Implementation details:
+
+- `compileDynamicIndexBatches` groups eligible additive ranges into contiguous index batches at
+  appearance compilation, preserving the original logical range map and copying each index once.
+- The former opaque-only span selector became `DynamicBatchedRanges`, used with explicit opaque/additive phase
+  policies. Both use the same pooled scalar-span algorithm. Zero-opacity parts and retail-hidden
+  partitions are omitted; gaps split spans without rewriting GPU buffers. Frame reset also handles
+  new appearance resources coherently, and each root's selected spans are shared across views.
+- The renderer emits an additive submission per selected span, with an explicit index count.
+  Transparent submissions keep individual ranges and existing sorting. Additive submission still
+  uses its existing blend/depth pass. Atlas rebuilds, appearance retention, pose pages and streaming
+  lifetimes are unchanged.
+
+One release-client login compared physical batching enabled/disabled through temporary cold
+compiler controls. Each change rebuilt retained appearance resources outside measurement and waited
+five seconds. After 30 seconds of initial settling, near/far pairs were captured in both orders,
+followed by profiling-disabled near/far pairs: twelve ten-second windows total. Hardware, viewport,
+render scale, interest radii, character and player location matched the preceding courtyard captures;
+camera reach was 4.5 or 15 m, with no orbit/player input. The unbatched control uses the prototype's
+shared frame-span path with one physical batch per original additive range; it isolates batching,
+but is not an exact checkout-to-checkout comparison against `a31dff6c`.
+
+| Instrumented far-view window | Callback (ms) | Renderer CPU (ms) | Contribution preparation (ms) | Blended submission (ms) |
+| --- | ---: | ---: | ---: | ---: |
+| Unbatched, first (2) | 6.638 | 4.626 | 1.188 | 0.732 |
+| Batched, first (3) | 5.935 | 3.963 | 1.062 | 0.283 |
+| Batched, repeat (6) | 5.974 | 3.958 | 1.047 | 0.281 |
+| Unbatched, repeat (7) | 6.777 | 4.699 | 1.207 | 0.744 |
+
+Both far-view pairs reduced callback work by approximately 0.70–0.80 ms. V8 corroborates the
+boundary: dynamic blended execution fell from 0.659–0.681 to 0.242–0.246 ms inclusive;
+dynamic color binding from 0.350–0.366 to 0.153–0.160 ms; scene contribution resolution from
+1.095–1.108 to 0.964–0.966 ms. Dynamic presentation publication remained approximately
+0.78–0.79 ms. These inclusive costs overlap and must not be summed.
+
+Far-view additive draw counts were 1,280 unbatched and 73 batched, a 94% reduction. Total dynamic
+draws across one-second samples were 1,841–1,921 versus 637–672. Source-range counts overlapped
+(3,369–3,404 versus 3,373–3,441), as did visible populations and particle workloads. Every far-view
+snapshot retained 582,817 static triangles and fifteen selected portal scopes. Live combat was
+not deterministic; workload differences remain a qualification, not an optimization claim.
+
+| Profiling disabled | Unbatched callback (ms) | Batched callback (ms) | Actual unbatched / batched FPS |
+| --- | ---: | ---: | ---: |
+| 15 m | 6.053 | 5.247 | 130.3 / 141.5 |
+| 4.5 m | 5.029 | 4.594 | 142.1 / 142.8 |
+
+The far disabled pair saved 0.806 ms (13.3%) of callback work. Near CPU work also improved, but
+near throughput did not materially change. This is not a 200 FPS result or evidence that remaining
+scheduling/IPC work has been resolved. The first near instrumented control (window 0) overlapped
+tooling/warmup activity and is not used as the primary timing comparison; the reversed near pair
+showed 5.621 ms unbatched versus 5.200 ms batched. CPU/GPU costs overlap. Far measured GPU phases
+were approximately 0.92–0.95 ms unbatched versus 0.90 ms batched; particle GPU cost stayed near
+0.22–0.23 ms while blended GPU cost fell from approximately 0.052 to 0.029 ms.
+
+Inspected far screenshots retain the courtyard buildings, trees, spectral bodies and overlapping
+effects. No browser errors/exceptions occurred in any window. These are visual inspections of
+live changing combat, not pixel-identical replay proof. Focused tests cover non-adjacent additive
+packing, alpha-blended barriers, partial fades, invisible-part gaps, retail visibility and appearance
+replacement; the full TypeScript suite passes 2,056 tests in 268 files. Svelte/TypeScript checks,
+ESLint and Knip pass. No Rust code changed.
+
+Conclusion: retain the prototype for review. It realizes the large additive grouping opportunity
+and reduces both preparation and submission, while keeping baseline WebGL2 and existing ownership.
+Further work should use the new profile rather than assuming the old draw-heavy matrix remains
+unchanged. Temporary A/B controls and driver edits were removed, and the client closed normally.
+No commit was requested or made. Artifacts: `/tmp/holtburger-additive-{0..11}.{json,png}`, V8
+profiles for windows 0–7, and `/tmp/holtburger-additive-live.log`.
+
+Code-quality review before commit renamed the generalized selector to `DynamicBatchedRanges`:
+batch selection does not imply every selected range is freely reorderable. The appearance-swap
+test now replaces an additive layout with a differently phased layout, rather than merely hiding
+an equivalent replacement. Compiler tests cover all three supported additive source factors.
+The final suite passes 2,058 tests in 268 files; type checks, ESLint, Knip and changed-source
+formatting checks pass. The review changes naming, comments and tests only, so the preceding live
+GPU captures still exercise the committed rendering algorithm. A domain-independent observation
+about category labels versus behavioral guarantees was added to the code-quality audit worksheet.

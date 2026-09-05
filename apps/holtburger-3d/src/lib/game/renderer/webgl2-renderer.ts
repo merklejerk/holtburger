@@ -293,7 +293,7 @@ import {
 	WebGL2DynamicAppearances,
 	type PreparedDynamicAppearance,
 } from "./webgl2-dynamic-appearances";
-import { DynamicOpaqueRanges } from "./dynamic-opaque-ranges";
+import { DynamicBatchedRanges } from "./dynamic-batched-ranges";
 import { WebGL2DynamicPosePages } from "./webgl2-dynamic-pose-pages";
 import { DynamicDepthPreparations } from "./dynamic-depth-preparation";
 import type { DynamicLayout } from "../geometry/dynamic-layout";
@@ -647,10 +647,10 @@ interface PreparedDynamicColor {
 /** Opaque color shares contiguous spans across views of the same current entity pose. */
 interface PreparedDynamicOpaque extends PreparedDynamicColor {
 	/** Eligible physical spans borrowed until the frame's final view finishes. */
-	readonly ranges: ReturnType<DynamicOpaqueRanges["prepare"]>;
+	readonly ranges: ReturnType<DynamicBatchedRanges["prepare"]>;
 }
 
-/** One merged ordered range participates in the same far/near/additive sequence as static objects. */
+/** One transparent range or additive span in the shared far/near/additive submission sequence. */
 interface PreparedDynamicBlended extends PreparedDynamicColor {
 	/** Ordinary merged draw discriminator; never admitted into instance runs. */
 	readonly drawKind: "merged";
@@ -658,6 +658,8 @@ interface PreparedDynamicBlended extends PreparedDynamicColor {
 	readonly range: PreparedDynamicOpaque["appearance"]["plan"]["ranges"][number];
 	/** Frame-effective phase, including opaque material promoted by a part fade. */
 	readonly ordering: "transparent" | "additive";
+	/** Selected contiguous index elements; transparent ranges retain their original extent. */
+	readonly indexCount: number;
 	/** Existing source cohort and tie-break/center facts for the bounded transparency sorter. */
 	readonly transparentCohortKey: string;
 	readonly transparentSort: ObjectFrameInput["transparentSort"];
@@ -977,7 +979,9 @@ export class WebGL2Renderer implements Renderer {
 	/** One material-free geometry decision shared across selection and every mapped-shadow view. */
 	readonly #dynamicDepths: DynamicDepthPreparations;
 	/** Frame-current opaque eligibility, shared across all selected camera domains. */
-	readonly #dynamicOpaqueRanges = new DynamicOpaqueRanges();
+	readonly #dynamicOpaqueRanges = new DynamicBatchedRanges("opaque");
+	/** Additive spans share appearance batches without entering the depth-writing opaque pass. */
+	readonly #dynamicAdditiveRanges = new DynamicBatchedRanges("additive");
 	/** Unfogged plain/portal variants prepared on demand before drawing. */
 	readonly #dynamicBlendedPrograms = new Map<
 		boolean,
@@ -2121,6 +2125,7 @@ export class WebGL2Renderer implements Renderer {
 	async destroy(): Promise<void> {
 		this.#dynamicDepths.beginFrame();
 		this.#dynamicOpaqueRanges.beginFrame();
+		this.#dynamicAdditiveRanges.beginFrame();
 		if (this.#dynamicOpaqueProgram !== null)
 			this.#gl.deleteProgram(this.#dynamicOpaqueProgram.program);
 		this.#dynamicOpaqueProgram = null;
@@ -2577,27 +2582,16 @@ export class WebGL2Renderer implements Renderer {
 									ranges,
 								});
 						}
-						for (const range of appearance.plan.ranges) {
+						const appendBlended = (
+							range: PreparedDynamicBlended["range"],
+							indexCount: number,
+							ordering: PreparedDynamicBlended["ordering"],
+						): void => {
 							const part = presentation.visual.parts[range.source.partSelector];
 							if (part === undefined)
 								throw new Error(
 									"Merged ordered range references a missing part.",
 								);
-							const opacity = part.frameInstance.color.a;
-							if (
-								opacity === 0 ||
-								!retainsRetailGeometry(
-									range.source.retailVisibility,
-									frameSettings.showRetailHiddenGeometry,
-								)
-							)
-								continue;
-							const ordering =
-								range.source.ordering === "opaque" && opacity !== 1
-									? "transparent"
-									: range.source.ordering;
-							if (ordering !== "transparent" && ordering !== "additive")
-								continue;
 							const portal = portalVisibility !== null;
 							let program = this.#dynamicBlendedPrograms.get(portal);
 							if (program === undefined) {
@@ -2636,11 +2630,44 @@ export class WebGL2Renderer implements Renderer {
 									geometry,
 									appearance,
 									range,
+									indexCount,
 									ordering,
 									transparentSort,
 									program,
 									transparentCohortKey: `${presentation.landblockId}/${renderScopeKey}/${range.source.transparentSort.key}`,
 								});
+						};
+						for (const span of this.#dynamicAdditiveRanges.prepare(
+							nodeId,
+							appearance.plan,
+							presentation.visual.parts,
+							frameSettings.showRetailHiddenGeometry,
+						)) {
+							const range = appearance.plan.physicalRanges[span.rangeIndex];
+							if (range === undefined)
+								throw new Error("Additive span lost its physical range.");
+							appendBlended(range, span.indexCount, "additive");
+						}
+						for (const range of appearance.plan.ranges) {
+							const part = presentation.visual.parts[range.source.partSelector];
+							if (part === undefined)
+								throw new Error("Ordered range references a missing part.");
+							const opacity = part.frameInstance.color.a;
+							if (
+								opacity === 0 ||
+								!retainsRetailGeometry(
+									range.source.retailVisibility,
+									frameSettings.showRetailHiddenGeometry,
+								)
+							)
+								continue;
+							const ordering =
+								range.source.ordering === "opaque" && opacity !== 1
+									? "transparent"
+									: range.source.ordering;
+							if (ordering !== "transparent") continue;
+
+							appendBlended(range, range.source.indexCount, ordering);
 						}
 					}
 				}
@@ -3243,6 +3270,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#dynamicPresentations.clear();
 		this.#dynamicDepths.beginFrame();
 		this.#dynamicOpaqueRanges.beginFrame();
+		this.#dynamicAdditiveRanges.beginFrame();
 		this.#poseUploadParts.clear();
 		this.#outdoorPssmPass.beginFrame();
 		this.#selectedDynamicNodeIds.clear();
@@ -4997,7 +5025,7 @@ export class WebGL2Renderer implements Renderer {
 		}
 	}
 
-	/** Draw one merged range exactly where the shared transparent/additive ordering placed it. */
+	/** Draw one selected span exactly where the shared transparent/additive ordering placed it. */
 	#drawDynamicBlended(
 		object: PreparedDynamicBlended,
 		view: PreparedView,
@@ -5019,7 +5047,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#applyObjectLighting(program, object, shading);
 		state.applyBlend(range.batch.blendPolicy);
 		this.#bindDynamicColor(program, object, view);
-		this.#drawDynamicColorSpan(range, range.source.indexCount);
+		this.#drawDynamicColorSpan(range, object.indexCount);
 		if (object.ordering === "transparent")
 			this.#frameSelectionMetrics.submittedTransparentObjectDrawCount += 1;
 		else this.#frameSelectionMetrics.submittedAdditiveObjectDrawCount += 1;

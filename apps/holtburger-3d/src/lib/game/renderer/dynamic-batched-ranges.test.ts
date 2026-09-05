@@ -3,9 +3,9 @@ import { Mat4, Vec3 } from "../math/types";
 import type { DynamicAppearance } from "../systems/dynamic-appearance";
 import { TextureWrapMode } from "../textures/types";
 import { compileDynamicIndexBatches } from "./dynamic-index-batches";
-import { DynamicOpaqueRanges } from "./dynamic-opaque-ranges";
+import { DynamicBatchedRanges } from "./dynamic-batched-ranges";
 
-function fixture() {
+function fixture(additive = false) {
 	const appearance: DynamicAppearance = {
 		materials: [
 			{
@@ -13,7 +13,7 @@ function fixture() {
 					id: "material:opaque-test",
 					kind: "solid-color",
 					color: [1, 1, 1, 1],
-					rawSurfaceFlags: 0,
+					rawSurfaceFlags: additive ? 0x10100 : 0,
 					translucency: 0,
 					luminosity: 0,
 					diffuseScale: 1,
@@ -39,7 +39,7 @@ function fixture() {
 			materialSelector: 0,
 			indexStart: partSelector * 3,
 			indexCount: 3,
-			ordering,
+			ordering: additive ? "additive" : ordering,
 			polygon: { cullFace: "back", stippled: false },
 			retailVisibility:
 				partSelector === 2 ? "degrade-hidden" : "normally-visible",
@@ -64,10 +64,33 @@ function fixture() {
 			sourceToLandblock: Mat4.identity(),
 		},
 	}));
-	return { plan, parts, cache: new DynamicOpaqueRanges() };
+	return {
+		plan,
+		parts,
+		cache: new DynamicBatchedRanges(additive ? "additive" : "opaque"),
+	};
 }
 
-describe("DynamicOpaqueRanges", () => {
+describe("DynamicBatchedRanges", () => {
+	it("retains partial additive fades, splits hidden parts, and reselects an appearance replacement", () => {
+		const { cache, plan, parts } = fixture(true);
+		parts[0].frameInstance.color.a = 0.25;
+		parts[1].frameInstance.color.a = 0;
+		const selected = cache.prepare("scene-node:1", plan, parts, false);
+		expect(selected.map((span) => span.indexCount)).toEqual([3, 9]);
+		cache.beginFrame();
+		parts[1].frameInstance.color.a = 0.5;
+		expect(
+			cache
+				.prepare("scene-node:1", plan, parts, true)
+				.map((span) => span.indexCount),
+		).toEqual([15, 3]);
+		cache.beginFrame();
+		const replacement = fixture();
+		expect(
+			cache.prepare("scene-node:1", replacement.plan, replacement.parts, true),
+		).toEqual([{ rangeIndex: 5, indexCount: 3 }]);
+	});
 	it("keeps separately prepared roots independent until the frame ends", () => {
 		const { cache, plan, parts } = fixture();
 		const first = cache.prepare("scene-node:1", plan, parts, false);

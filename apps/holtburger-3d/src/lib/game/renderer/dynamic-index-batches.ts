@@ -27,7 +27,7 @@ interface DynamicIndexBatch<TTexture, TSampler> {
 interface DynamicIndexPlan<TTexture, TSampler> {
 	/** Every source range copied once into its selected batch; no opaque/residue duplication. */
 	readonly indices: Uint32Array;
-	/** Contiguous ordinary draws for compatible opaque/alpha-test ranges and ordered residue. */
+	/** Contiguous ordinary draws for compatible opaque/additive ranges and ordered residue. */
 	readonly batches: readonly DynamicIndexBatch<TTexture, TSampler>[];
 	/** Original appearance-range order with remapped offsets for transparent sorting and fades. */
 	readonly ranges: readonly {
@@ -52,12 +52,15 @@ export function compileDynamicIndexBatches<TTexture, TSampler>(
 		objectBlendPolicy(material.source.rawSurfaceFlags),
 	);
 	const groups: {
+		/** Non-commutative additive ranges separate reorderable additive segments. */
+		additiveSegment: number;
 		state: Omit<
 			DynamicIndexBatch<TTexture, TSampler>,
 			"indexStart" | "indexCount"
 		>;
 		ranges: { source: DynamicAppearance["ranges"][number]; ordinal: number }[];
 	}[] = [];
+	let additiveSegment = 0;
 	for (const [ordinal, range] of appearance.ranges.entries()) {
 		const surface = surfaces[range.materialSelector];
 		const blendPolicy = blendPolicies[range.materialSelector];
@@ -72,12 +75,19 @@ export function compileDynamicIndexBatches<TTexture, TSampler>(
 			retailVisibility: range.retailVisibility,
 			blendPolicy,
 		};
-		// Ordered surfaces never join non-adjacent source ranges. Frame-time ordering retains
-		// each range's identity even when an opaque batch later develops a partial part fade.
+		// Source-only factors with destination ONE commute while depth writes are disabled.
+		// Retail flag overrides can put alpha blending in the additive phase: never move an
+		// additive batch across such a range. Transparent ranges retain their source identities.
+		const additive = range.ordering === "additive";
+		const reorderableAdditive = additive && blendPolicy.destination === "one";
+		if (additive && !reorderableAdditive) additiveSegment += 1;
 		let group =
-			range.ordering === "opaque" || range.ordering === "alpha-test"
+			range.ordering === "opaque" ||
+			range.ordering === "alpha-test" ||
+			reorderableAdditive
 				? groups.find(
-						({ state: previous }) =>
+						({ state: previous, additiveSegment: segment }) =>
+							(!additive || segment === additiveSegment) &&
 							previous.ordering === state.ordering &&
 							previous.cullFace === state.cullFace &&
 							previous.retailVisibility === state.retailVisibility &&
@@ -88,7 +98,7 @@ export function compileDynamicIndexBatches<TTexture, TSampler>(
 					)
 				: undefined;
 		if (group === undefined) {
-			group = { state, ranges: [] };
+			group = { state, ranges: [], additiveSegment };
 			groups.push(group);
 		}
 		group.ranges.push({ source: range, ordinal });

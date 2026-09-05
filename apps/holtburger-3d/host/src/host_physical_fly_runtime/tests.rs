@@ -65,14 +65,14 @@ impl CollisionSource for ThinCollisionSource {
         Ok(Some(LandblockCollisionAsset {
             landblock_id,
             terrain: TerrainCollisionSurface::empty(),
-            static_geometry: LandblockColliders {
-                colliders: Vec::new(),
-                cell_volumes: if landblock_id == 0xda55_ffff {
+            static_geometry: LandblockColliders::new(
+                Vec::new(),
+                if landblock_id == 0xda55_ffff {
                     thin_viewer_volumes(false)
                 } else {
                     Vec::new()
                 },
-            },
+            ),
         }))
     }
 }
@@ -219,14 +219,14 @@ fn thin_viewer_scene(overlap_first_cell: bool) -> CollisionScene {
                 .insert(LandblockCollisionAsset {
                     landblock_id: (x << 24) | (y << 16) | 0xffff,
                     terrain: TerrainCollisionSurface::empty(),
-                    static_geometry: LandblockColliders {
-                        colliders: Vec::new(),
-                        cell_volumes: if center {
+                    static_geometry: LandblockColliders::new(
+                        Vec::new(),
+                        if center {
                             center_volumes.take().unwrap()
                         } else {
                             Vec::new()
                         },
-                    },
+                    ),
                 })
                 .unwrap();
         }

@@ -22,7 +22,7 @@ use holtburger_common::position::{
 };
 use holtburger_common::{Guid, Vector3};
 use holtburger_content::{
-    CellCollisionPortal, CellCollisionPortalTarget, CellVolume, CollisionShape,
+    CellCollisionPortal, CellCollisionPortalTarget, CellVolume, CollisionShape, LandblockColliders,
     LandblockCollisionAsset, PlacedCollider, PlacedCollisionShape, StaticColliderPlacement,
     TerrainCollisionTriangle,
 };
@@ -705,7 +705,7 @@ impl StaticShadowIndex {
                     owner.0,
                     &collider_indices,
                     &asset.static_geometry.colliders,
-                    &asset.static_geometry.cell_volumes,
+                    &asset.static_geometry,
                 )? {
                     index
                         .interior_colliders
@@ -718,7 +718,7 @@ impl StaticShadowIndex {
             for (_, collider_indices) in outdoor_groups {
                 outdoor_placements.push((owner, collider_indices));
             }
-            for volume in &asset.static_geometry.cell_volumes {
+            for volume in asset.static_geometry.cell_volumes() {
                 for portal in &volume.portals {
                     if portal.target == CellCollisionPortalTarget::Outdoor
                         && let Some(building) = portal.outdoor_building
@@ -781,7 +781,7 @@ impl StaticShadowIndex {
                     source_owner.0,
                     &collider_indices,
                     &source_asset.static_geometry.colliders,
-                    &target_asset.static_geometry.cell_volumes,
+                    &target_asset.static_geometry,
                 )? {
                     index
                         .interior_colliders
@@ -982,9 +982,8 @@ impl CollisionScene {
             .is_some_and(|asset| {
                 asset
                     .static_geometry
-                    .cell_volumes
-                    .iter()
-                    .any(|volume| u32::from(volume.cell_selector) == cell.0 & 0xffff)
+                    .cell_volume((cell.0 & 0xffff) as u16)
+                    .is_some()
             })
     }
 
@@ -1441,7 +1440,7 @@ impl CollisionScene {
                         owner: target_owner.0,
                     },
                 )?;
-                for volume in &asset.static_geometry.cell_volumes {
+                for volume in asset.static_geometry.cell_volumes() {
                     if volume.portals.iter().any(|portal| {
                         portal.target == CellCollisionPortalTarget::Outdoor
                             && parts.iter().any(|part| {
@@ -1483,9 +1482,7 @@ impl CollisionScene {
                 .ok_or(CollisionQueryError::UnavailableOwner { owner: owner.0 })?;
             let source = asset
                 .static_geometry
-                .cell_volumes
-                .iter()
-                .find(|volume| volume.cell_selector == (source_cell.0 & 0xffff) as u16)
+                .cell_volume((source_cell.0 & 0xffff) as u16)
                 .ok_or(CollisionQueryError::UnknownMotionCell {
                     cell: source_cell.0,
                 })?;
@@ -1500,14 +1497,11 @@ impl CollisionScene {
                     CellCollisionPortalTarget::Outdoor => placement.reaches_outdoors = true,
                     CellCollisionPortalTarget::EnvCell(selector) => {
                         let target_cell = Guid((owner.0 & 0xffff_0000) | u32::from(selector));
-                        let target = asset
-                            .static_geometry
-                            .cell_volumes
-                            .iter()
-                            .find(|volume| volume.cell_selector == selector)
-                            .ok_or(CollisionQueryError::UnknownMotionCell {
+                        let target = asset.static_geometry.cell_volume(selector).ok_or(
+                            CollisionQueryError::UnknownMotionCell {
                                 cell: target_cell.0,
-                            })?;
+                            },
+                        )?;
                         if !parts
                             .iter()
                             .any(|part| part_box_intersects_volume(part, anchor.0, target, owner.0))
@@ -1585,9 +1579,8 @@ impl CollisionScene {
             if let Some(asset) = self.landblocks.get(&owner)
                 && asset
                     .static_geometry
-                    .cell_volumes
-                    .iter()
-                    .any(|volume| volume.cell_selector == (previous_cell.0 & 0xffff) as u16)
+                    .cell_volume((previous_cell.0 & 0xffff) as u16)
+                    .is_some()
             {
                 let local = anchor_to_landblock(request.center, request.anchor, owner);
                 placement.reached_env_cells.push(previous_cell);
@@ -1604,7 +1597,7 @@ impl CollisionScene {
             let Some(asset) = self.landblocks.get(&owner) else {
                 continue;
             };
-            for volume in &asset.static_geometry.cell_volumes {
+            for volume in asset.static_geometry.cell_volumes() {
                 let is_outdoor_entry = volume
                     .portals
                     .iter()
@@ -1726,7 +1719,7 @@ impl CollisionScene {
                 .map(|asset| {
                     asset
                         .static_geometry
-                        .cell_volumes
+                        .cell_volumes()
                         .iter()
                         .map(|volume| volume.portals.len())
                         .sum::<usize>()
@@ -1936,7 +1929,7 @@ impl CollisionScene {
                     .flat_map(move |asset| {
                         asset
                             .static_geometry
-                            .cell_volumes
+                            .cell_volumes()
                             .iter()
                             .filter(move |volume| volume_reaches(volume, local, 0.0))
                             .map(move |volume| {
@@ -1985,9 +1978,7 @@ impl CollisionScene {
                 .ok_or(CollisionQueryError::UnknownMotionCell { cell: cell.0 })?;
             let source = asset
                 .static_geometry
-                .cell_volumes
-                .iter()
-                .find(|volume| volume.cell_selector == (cell.0 & 0xffff) as u16)
+                .cell_volume((cell.0 & 0xffff) as u16)
                 .ok_or(CollisionQueryError::UnknownMotionCell { cell: cell.0 })?;
             let local_start = source.placement.to_local_space(anchor_to_landblock(
                 segment.start,
@@ -2047,7 +2038,7 @@ impl CollisionScene {
                 };
                 let landblock_start = anchor_to_landblock(segment.start, segment.anchor, *owner);
                 let landblock_end = anchor_to_landblock(segment.end, segment.anchor, *owner);
-                for source in &asset.static_geometry.cell_volumes {
+                for source in asset.static_geometry.cell_volumes() {
                     let local_start = source.placement.to_local_space(landblock_start);
                     let local_end = source.placement.to_local_space(landblock_end);
                     for portal in &source.portals {
@@ -2127,9 +2118,7 @@ impl CollisionScene {
                     self.landblocks.get(&owner).is_some_and(|asset| {
                         asset
                             .static_geometry
-                            .cell_volumes
-                            .iter()
-                            .find(|volume| volume.cell_selector == (cell.0 & 0xffff) as u16)
+                            .cell_volume((cell.0 & 0xffff) as u16)
                             .is_some_and(|volume| {
                                 let local_start = volume.placement.to_local_space(landblock_start);
                                 let local_end = volume.placement.to_local_space(landblock_end);
@@ -2176,9 +2165,7 @@ impl CollisionScene {
             .and_then(|asset| {
                 asset
                     .static_geometry
-                    .cell_volumes
-                    .iter()
-                    .find(|volume| volume.cell_selector == (target_cell.0 & 0xffff) as u16)
+                    .cell_volume((target_cell.0 & 0xffff) as u16)
             })
             .ok_or(CollisionQueryError::UnknownMotionCell {
                 cell: target_cell.0,
@@ -2447,13 +2434,10 @@ fn static_reached_cells(
     collider_owner: u32,
     collider_indices: &[usize],
     colliders: &[PlacedCollider],
-    volumes: &[CellVolume],
+    geometry: &LandblockColliders,
 ) -> Result<Vec<u16>, CollisionSceneUpdateError> {
     let source_selector = source_cell as u16;
-    if !volumes
-        .iter()
-        .any(|volume| volume.cell_selector == source_selector)
-    {
+    if geometry.cell_volume(source_selector).is_none() {
         return Err(CollisionSceneUpdateError::MissingSourceCell {
             owner: cell_owner,
             cell: source_cell,
@@ -2465,9 +2449,8 @@ fn static_reached_cells(
     while index < reached.len() {
         let current_selector = reached[index];
         index += 1;
-        let source = volumes
-            .iter()
-            .find(|volume| volume.cell_selector == current_selector)
+        let source = geometry
+            .cell_volume(current_selector)
             .expect("reached cells are validated before insertion");
         for portal in &source.portals {
             let CellCollisionPortalTarget::EnvCell(target_selector) = portal.target else {
@@ -2476,13 +2459,12 @@ fn static_reached_cells(
             if reached.contains(&target_selector) {
                 continue;
             }
-            let target = volumes
-                .iter()
-                .find(|volume| volume.cell_selector == target_selector)
-                .ok_or(CollisionSceneUpdateError::MissingTargetCell {
+            let target = geometry.cell_volume(target_selector).ok_or(
+                CollisionSceneUpdateError::MissingTargetCell {
                     owner: cell_owner,
                     cell: (cell_owner & 0xffff_0000) | u32::from(target_selector),
-                })?;
+                },
+            )?;
             if collider_indices.iter().copied().any(|collider_index| {
                 let collider = &colliders[collider_index];
                 part_reaches_portal(collider, collider_owner, source, cell_owner, portal)
@@ -2601,9 +2583,7 @@ fn expand_reached_cells(
         }
         let Some(source) = asset
             .static_geometry
-            .cell_volumes
-            .iter()
-            .find(|volume| volume.cell_selector == (source_cell.0 & 0xffff) as u16)
+            .cell_volume((source_cell.0 & 0xffff) as u16)
         else {
             continue;
         };
@@ -2617,12 +2597,7 @@ fn expand_reached_cells(
                     }
                 }
                 CellCollisionPortalTarget::EnvCell(selector) => {
-                    let Some(target) = asset
-                        .static_geometry
-                        .cell_volumes
-                        .iter()
-                        .find(|volume| volume.cell_selector == selector)
-                    else {
+                    let Some(target) = asset.static_geometry.cell_volume(selector) else {
                         continue;
                     };
                     let target_cell =
@@ -2646,9 +2621,7 @@ fn containing_reached_cell(
     placement.reached_env_cells.iter().copied().find(|cell| {
         asset
             .static_geometry
-            .cell_volumes
-            .iter()
-            .find(|volume| volume.cell_selector == (cell.0 & 0xffff) as u16)
+            .cell_volume((cell.0 & 0xffff) as u16)
             .is_some_and(|volume| volume_reaches(volume, landblock_point, 0.0))
     })
 }
@@ -3129,10 +3102,7 @@ mod tests {
         LandblockCollisionAsset {
             landblock_id: owner.0,
             terrain: TerrainCollisionSurface::empty(),
-            static_geometry: LandblockColliders {
-                colliders,
-                cell_volumes: Vec::new(),
-            },
+            static_geometry: LandblockColliders::new(colliders, Vec::new()),
         }
     }
 
@@ -3533,10 +3503,7 @@ mod tests {
                 .insert(LandblockCollisionAsset {
                     landblock_id: owner.0,
                     terrain: TerrainCollisionSurface::empty(),
-                    static_geometry: LandblockColliders {
-                        colliders,
-                        cell_volumes: Vec::new(),
-                    },
+                    static_geometry: LandblockColliders::new(colliders, Vec::new()),
                 })
                 .unwrap();
         }
@@ -3597,10 +3564,7 @@ mod tests {
             .insert(LandblockCollisionAsset {
                 landblock_id: 0xda55_ffff,
                 terrain: TerrainCollisionSurface::empty(),
-                static_geometry: LandblockColliders {
-                    colliders,
-                    cell_volumes,
-                },
+                static_geometry: LandblockColliders::new(colliders, cell_volumes),
             })
             .unwrap();
         scene
@@ -3616,14 +3580,14 @@ mod tests {
                     .insert(LandblockCollisionAsset {
                         landblock_id: (x << 24) | (y << 16) | 0xffff,
                         terrain: TerrainCollisionSurface::empty(),
-                        static_geometry: LandblockColliders {
-                            colliders: Vec::new(),
-                            cell_volumes: if center {
+                        static_geometry: LandblockColliders::new(
+                            Vec::new(),
+                            if center {
                                 center_volumes.take().unwrap()
                             } else {
                                 Vec::new()
                             },
-                        },
+                        ),
                     })
                     .unwrap();
             }
@@ -4886,19 +4850,16 @@ mod tests {
             .insert(LandblockCollisionAsset {
                 landblock_id: source_owner.0,
                 terrain: TerrainCollisionSurface::empty(),
-                static_geometry: LandblockColliders {
-                    colliders: vec![source_collider],
-                    cell_volumes: Vec::new(),
-                },
+                static_geometry: LandblockColliders::new(vec![source_collider], Vec::new()),
             })
             .unwrap();
         scene
             .insert(LandblockCollisionAsset {
                 landblock_id: target_owner.0,
                 terrain: TerrainCollisionSurface::empty(),
-                static_geometry: LandblockColliders {
-                    colliders: Vec::new(),
-                    cell_volumes: vec![volume(
+                static_geometry: LandblockColliders::new(
+                    Vec::new(),
+                    vec![volume(
                         0x0100,
                         vec![CellCollisionPortal {
                             plane: Plane {
@@ -4913,7 +4874,7 @@ mod tests {
                             }),
                         }],
                     )],
-                },
+                ),
             })
             .unwrap();
 
@@ -4969,16 +4930,16 @@ mod tests {
                 vec![LandblockCollisionAsset {
                     landblock_id: invalid_owner.0,
                     terrain: TerrainCollisionSurface::empty(),
-                    static_geometry: LandblockColliders {
-                        colliders: vec![collider_at(
+                    static_geometry: LandblockColliders::new(
+                        vec![collider_at(
                             0.0,
                             StaticColliderPlacement::IndoorStatic {
                                 source_cell_id: 0xdb55_0100,
                                 source_index: 0,
                             },
                         )],
-                        cell_volumes: Vec::new(),
-                    },
+                        Vec::new(),
+                    ),
                 }],
                 &[original_owner],
             )

@@ -973,10 +973,7 @@ mod tests {
             .insert(LandblockCollisionAsset {
                 landblock_id: OWNER.0,
                 terrain: flat_terrain(OWNER, terrain_height),
-                static_geometry: LandblockColliders {
-                    colliders,
-                    cell_volumes: Vec::new(),
-                },
+                static_geometry: LandblockColliders::new(colliders, Vec::new()),
             })
             .unwrap();
         collision
@@ -1647,9 +1644,9 @@ mod tests {
             .insert(LandblockCollisionAsset {
                 landblock_id: OWNER.0,
                 terrain: TerrainCollisionSurface::empty(),
-                static_geometry: LandblockColliders {
-                    colliders: vec![floor],
-                    cell_volumes: vec![CellVolume {
+                static_geometry: LandblockColliders::new(
+                    vec![floor],
+                    vec![CellVolume {
                         cell_selector: cell.0 as u16,
                         placement: LandblockPlacement {
                             origin: Vector3::zero(),
@@ -1658,7 +1655,7 @@ mod tests {
                         planes: Vec::new(),
                         portals: Vec::new(),
                     }],
-                },
+                ),
             })
             .unwrap();
         let now = Instant::now();

@@ -667,7 +667,9 @@ pub struct LandblockColliders {
     ///
     /// Kept beside the colliders because they are resolved from the same authored records in the
     /// same pass, and a consumer that has one always wants the other.
-    pub cell_volumes: Vec<CellVolume>,
+    cell_volumes: Vec<CellVolume>,
+    /// First assembly-order volume for each selector, owned with the immutable cell collection.
+    cell_volume_indices: HashMap<u16, usize>,
 }
 
 /// One atomically assembled static collision product for an outdoor landblock and its interiors.
@@ -682,6 +684,34 @@ pub struct LandblockCollisionAsset {
 }
 
 impl LandblockColliders {
+    /// Builds static geometry and its selector lookup without changing assembly order.
+    pub fn new(colliders: Vec<PlacedCollider>, cell_volumes: Vec<CellVolume>) -> Self {
+        let mut cell_volume_indices = HashMap::with_capacity(cell_volumes.len());
+        for (index, volume) in cell_volumes.iter().enumerate() {
+            // Preserve the first-match semantics of authored-cell queries, including duplicates.
+            cell_volume_indices
+                .entry(volume.cell_selector)
+                .or_insert(index);
+        }
+        Self {
+            colliders,
+            cell_volumes,
+            cell_volume_indices,
+        }
+    }
+
+    /// Interior volumes in assembly order, for geometric searches rather than identity lookup.
+    pub fn cell_volumes(&self) -> &[CellVolume] {
+        &self.cell_volumes
+    }
+
+    /// Resolves an authored cell selector without scanning unrelated interior volumes.
+    pub fn cell_volume(&self, selector: u16) -> Option<&CellVolume> {
+        self.cell_volume_indices
+            .get(&selector)
+            .map(|&index| &self.cell_volumes[index])
+    }
+
     /// Absorb another assembly's colliders and cell volumes.
     ///
     /// Exists because merging by hand went wrong exactly once and silently: a caller extended
@@ -691,6 +721,12 @@ impl LandblockColliders {
     /// Every field of this type has to travel together, so the merge belongs to the type.
     fn absorb(&mut self, other: LandblockColliders) {
         self.colliders.extend(other.colliders);
+        let offset = self.cell_volumes.len();
+        for (selector, index) in other.cell_volume_indices {
+            self.cell_volume_indices
+                .entry(selector)
+                .or_insert(offset + index);
+        }
         self.cell_volumes.extend(other.cell_volumes);
     }
 }
@@ -785,10 +821,7 @@ impl LandblockColliderAssembler {
             )?;
         }
 
-        Ok(LandblockColliders {
-            colliders,
-            cell_volumes: Vec::new(),
-        })
+        Ok(LandblockColliders::new(colliders, Vec::new()))
     }
 
     /// Resolve the collision shapes of one landblock's interior cells.
@@ -977,10 +1010,7 @@ impl LandblockColliderAssembler {
             });
         }
 
-        Ok(LandblockColliders {
-            colliders,
-            cell_volumes,
-        })
+        Ok(LandblockColliders::new(colliders, cell_volumes))
     }
 }
 
@@ -1268,12 +1298,61 @@ mod tests {
     }
 
     #[test]
+    fn cell_lookup_preserves_assembly_order_and_first_selector_match() {
+        let cells = [0x0200, 0xffff, 0x0100, 0x0200]
+            .into_iter()
+            .map(|cell_selector| CellVolume {
+                cell_selector,
+                ..synthetic_cell_volume()
+            })
+            .collect();
+        let geometry = LandblockColliders::new(Vec::new(), cells);
+        assert_eq!(
+            geometry
+                .cell_volumes()
+                .iter()
+                .map(|cell| cell.cell_selector)
+                .collect::<Vec<_>>(),
+            [0x0200, 0xffff, 0x0100, 0x0200]
+        );
+        for (selector, index) in [(0x0200, 0), (0xffff, 1), (0x0100, 2)] {
+            assert!(std::ptr::eq(
+                geometry.cell_volume(selector).unwrap(),
+                &geometry.cell_volumes()[index]
+            ));
+        }
+        assert!(geometry.cell_volume(0x0101).is_none());
+        assert!(LandblockColliders::default().cell_volume(0x0100).is_none());
+    }
+
+    #[test]
+    fn absorbing_cells_offsets_new_indices_and_preserves_existing_matches() {
+        let mut geometry = LandblockColliders::new(Vec::new(), vec![synthetic_cell_volume()]);
+        geometry.absorb(LandblockColliders::new(
+            Vec::new(),
+            vec![
+                CellVolume {
+                    cell_selector: 0x0200,
+                    ..synthetic_cell_volume()
+                },
+                synthetic_cell_volume(),
+            ],
+        ));
+        assert!(std::ptr::eq(
+            geometry.cell_volume(0x0100).unwrap(),
+            &geometry.cell_volumes()[0]
+        ));
+        assert!(std::ptr::eq(
+            geometry.cell_volume(0x0200).unwrap(),
+            &geometry.cell_volumes()[1]
+        ));
+        assert_eq!(geometry.cell_volumes().len(), 3);
+    }
+
+    #[test]
     fn absorbing_an_assembly_carries_cells_as_well_as_colliders() {
         let mut outdoor = LandblockColliders::default();
-        let interior = LandblockColliders {
-            colliders: Vec::new(),
-            cell_volumes: vec![synthetic_cell_volume()],
-        };
+        let interior = LandblockColliders::new(Vec::new(), vec![synthetic_cell_volume()]);
 
         outdoor.absorb(interior);
 

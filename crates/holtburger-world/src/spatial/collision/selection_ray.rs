@@ -246,10 +246,7 @@ mod tests {
             .insert(LandblockCollisionAsset {
                 landblock_id: OWNER.0,
                 terrain: TerrainCollisionSurface::empty(),
-                static_geometry: LandblockColliders {
-                    colliders: vec![wall],
-                    cell_volumes: Vec::new(),
-                },
+                static_geometry: LandblockColliders::new(vec![wall], Vec::new()),
             })
             .unwrap();
         scene
@@ -273,9 +270,9 @@ mod tests {
             .insert(LandblockCollisionAsset {
                 landblock_id: OWNER.0,
                 terrain: TerrainCollisionSurface::empty(),
-                static_geometry: LandblockColliders {
-                    colliders: Vec::new(),
-                    cell_volumes: vec![
+                static_geometry: LandblockColliders::new(
+                    Vec::new(),
+                    vec![
                         volume(
                             0x010a,
                             vec![CellCollisionPortal {
@@ -291,7 +288,7 @@ mod tests {
                         volume(0x010b, Vec::new()),
                         volume(0x010c, Vec::new()),
                     ],
-                },
+                ),
             })
             .unwrap();
         (scene, source, target, disconnected)

@@ -5286,9 +5286,9 @@ mod physical_body_tests {
             .insert(LandblockCollisionAsset {
                 landblock_id: 0xda55_ffff,
                 terrain: TerrainCollisionSurface::empty(),
-                static_geometry: LandblockColliders {
-                    colliders: Vec::new(),
-                    cell_volumes: vec![CellVolume {
+                static_geometry: LandblockColliders::new(
+                    Vec::new(),
+                    vec![CellVolume {
                         cell_selector: 0x0100,
                         placement: LandblockPlacement {
                             origin: Vector3::zero(),
@@ -5300,7 +5300,7 @@ mod physical_body_tests {
                         }],
                         portals: Vec::new(),
                     }],
-                },
+                ),
             })
             .unwrap();
         let mut scene = SpatialScene::new();
@@ -5983,9 +5983,9 @@ mod physical_body_tests {
                     .insert(LandblockCollisionAsset {
                         landblock_id: (x << 24) | (y << 16) | 0xffff,
                         terrain: TerrainCollisionSurface::empty(),
-                        static_geometry: LandblockColliders {
-                            colliders: Vec::new(),
-                            cell_volumes: if x == 0xda && y == 0x55 {
+                        static_geometry: LandblockColliders::new(
+                            Vec::new(),
+                            if x == 0xda && y == 0x55 {
                                 center_cell
                                     .map(|cell_selector| {
                                         vec![CellVolume {
@@ -6002,7 +6002,7 @@ mod physical_body_tests {
                             } else {
                                 Vec::new()
                             },
-                        },
+                        ),
                     })
                     .unwrap();
             }
@@ -6016,9 +6016,9 @@ mod physical_body_tests {
             .insert(LandblockCollisionAsset {
                 landblock_id: 0xda55_ffff,
                 terrain: TerrainCollisionSurface::empty(),
-                static_geometry: LandblockColliders {
-                    colliders: Vec::new(),
-                    cell_volumes: vec![CellVolume {
+                static_geometry: LandblockColliders::new(
+                    Vec::new(),
+                    vec![CellVolume {
                         cell_selector: 0x0100,
                         placement: LandblockPlacement {
                             origin: Vector3::zero(),
@@ -6035,7 +6035,7 @@ mod physical_body_tests {
                             outdoor_building: None,
                         }],
                     }],
-                },
+                ),
             })
             .unwrap();
         collision
@@ -6075,9 +6075,9 @@ mod physical_body_tests {
             .insert(LandblockCollisionAsset {
                 landblock_id: 0xda55_ffff,
                 terrain: TerrainCollisionSurface::empty(),
-                static_geometry: LandblockColliders {
-                    colliders: Vec::new(),
-                    cell_volumes: vec![CellVolume {
+                static_geometry: LandblockColliders::new(
+                    Vec::new(),
+                    vec![CellVolume {
                         cell_selector: 0x0100,
                         placement: LandblockPlacement {
                             origin: Vector3::zero(),
@@ -6114,7 +6114,7 @@ mod physical_body_tests {
                             },
                         ],
                     }],
-                },
+                ),
             })
             .unwrap();
         collision
@@ -6596,9 +6596,9 @@ mod physical_body_tests {
             .insert(LandblockCollisionAsset {
                 landblock_id: 0xda55_ffff,
                 terrain: TerrainCollisionSurface::empty(),
-                static_geometry: LandblockColliders {
-                    colliders: Vec::new(),
-                    cell_volumes: vec![CellVolume {
+                static_geometry: LandblockColliders::new(
+                    Vec::new(),
+                    vec![CellVolume {
                         cell_selector: 0x0100,
                         placement: LandblockPlacement {
                             origin: Vector3::zero(),
@@ -6607,7 +6607,7 @@ mod physical_body_tests {
                         planes: Vec::new(),
                         portals: Vec::new(),
                     }],
-                },
+                ),
             })
             .unwrap();
         let now = Instant::now();
@@ -7082,9 +7082,9 @@ mod physical_body_tests {
             .insert(LandblockCollisionAsset {
                 landblock_id: 0xda55_ffff,
                 terrain: TerrainCollisionSurface::empty(),
-                static_geometry: LandblockColliders {
-                    colliders: Vec::new(),
-                    cell_volumes: vec![CellVolume {
+                static_geometry: LandblockColliders::new(
+                    Vec::new(),
+                    vec![CellVolume {
                         cell_selector: 0x0100,
                         placement: LandblockPlacement {
                             origin: Vector3::zero(),
@@ -7096,7 +7096,7 @@ mod physical_body_tests {
                         }],
                         portals: Vec::new(),
                     }],
-                },
+                ),
             })
             .unwrap();
         let now = Instant::now();
@@ -7144,9 +7144,9 @@ mod physical_body_tests {
             .insert(LandblockCollisionAsset {
                 landblock_id: 0xda55_ffff,
                 terrain: TerrainCollisionSurface::empty(),
-                static_geometry: LandblockColliders {
-                    colliders: Vec::new(),
-                    cell_volumes: vec![CellVolume {
+                static_geometry: LandblockColliders::new(
+                    Vec::new(),
+                    vec![CellVolume {
                         cell_selector: 0x0100,
                         placement: LandblockPlacement {
                             origin: Vector3::zero(),
@@ -7158,7 +7158,7 @@ mod physical_body_tests {
                         }],
                         portals: Vec::new(),
                     }],
-                },
+                ),
             })
             .unwrap();
         let now = Instant::now();

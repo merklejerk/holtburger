@@ -256,10 +256,7 @@ fn scene(colliders: Vec<PlacedCollider>) -> CollisionScene {
         .insert(LandblockCollisionAsset {
             landblock_id: LANDBLOCK,
             terrain: flat_terrain(),
-            static_geometry: LandblockColliders {
-                colliders,
-                cell_volumes: Vec::new(),
-            },
+            static_geometry: LandblockColliders::new(colliders, Vec::new()),
         })
         .unwrap();
     scene

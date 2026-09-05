@@ -82,7 +82,7 @@ fn main() -> Result<()> {
         .with_context(|| format!("CellLandblock 0x{:08X} is absent", owner.0))?;
     let center_collision = service.resolve_collision(&landblock)?;
     let center_colliders = center_collision.static_geometry.colliders.len();
-    let center_cells = center_collision.static_geometry.cell_volumes.len();
+    let center_cells = center_collision.static_geometry.cell_volumes().len();
     let mut collision = CollisionScene::new();
     insert_simulation_interest_neighborhood(&service, center_collision, &mut collision)?;
 

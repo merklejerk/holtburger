@@ -216,10 +216,7 @@ mod scenarios {
                     ),
                 })
                 .unwrap(),
-                static_geometry: LandblockColliders {
-                    colliders,
-                    cell_volumes: Vec::new(),
-                },
+                static_geometry: LandblockColliders::new(colliders, Vec::new()),
             })
             .unwrap();
         scene

@@ -237,10 +237,7 @@ fn build_scene(direct: bool) -> CollisionScene {
         .insert(LandblockCollisionAsset {
             landblock_id: LANDBLOCK,
             terrain: TerrainCollisionSurface::empty(),
-            static_geometry: LandblockColliders {
-                colliders: Vec::new(),
-                cell_volumes: vec![cell_a, cell_b],
-            },
+            static_geometry: LandblockColliders::new(Vec::new(), vec![cell_a, cell_b]),
         })
         .expect("synthetic collision asset must insert");
     // Coverage refuses to answer while any landblock the swept sphere touches is absent, so the
@@ -259,10 +256,7 @@ fn build_scene(direct: bool) -> CollisionScene {
                 .insert(LandblockCollisionAsset {
                     landblock_id: neighbour,
                     terrain: TerrainCollisionSurface::empty(),
-                    static_geometry: LandblockColliders {
-                        colliders: Vec::new(),
-                        cell_volumes: Vec::new(),
-                    },
+                    static_geometry: LandblockColliders::new(Vec::new(), Vec::new()),
                 })
                 .expect("synthetic neighbour must insert");
         }

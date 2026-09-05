@@ -235,6 +235,13 @@ The concrete code paths explain these samples:
 
 ## Phase 3: Attribute Rust Host Cost
 
+> Measurement correction (2026-09-05): the utilization estimate below was inferred from sample
+> counts and is not a valid task-clock measurement. Do not use 69–76% to prioritize host work.
+> The fresh "Rust Reprofile and Threading Assessment" below directly measures approximately
+> 6.2% of one CPU in the stationary control. The current physics interval is 30 ms (~33.3 Hz),
+> not the 30 Hz stated in these historical notes. Historical symbol observations remain leads,
+> not precise phase budgets.
+
 - [x] Record process/thread CPU while the scene is steady.
 - [x] Capture a native sample over the same duration as a browser window.
 - [x] Resolve the hottest symbols to authoritative host/session/world paths.
@@ -3452,3 +3459,125 @@ trees remained present, and no browser errors or exceptions were reported. Artif
 All 2,049 tests across 269 files pass, including affine/general corner equivalence, aliased output,
 degenerate axes, and projective rejection. Type/Svelte, ESLint, dead-code, formatting, and diff
 whitespace checks pass. No commit was created.
+
+### Rust Reprofile and Threading Assessment — 2026-09-05
+
+Measured revision `6c624adf` with the ordinary release sidecar, using the worktree credentials,
++Holtfighter Slot 1, and the original `0xc6a9ffff` rooftop. No movement, camera, selection, or chat
+input was sent. Configuration: Ryzen 9 5900X / AMD Navi 31, render scale 1, 1441×903 viewport,
+terrain/building radius 6, EnvCell/explicit radius 1, generated radius 2. Streaming performance
+was not investigated.
+
+Three approximately ten-second settled windows in one login combined V8/renderer profiling with
+499 Hz native cycle sampling. The exact host PID was resolved from the probe child process tree
+and its executable verified as this worktree's `target/release/holtburger-3d-host`. Per-thread
+`/proc` user/system time deltas, converted with the machine's 100 ticks/second, measured 520, 570,
+and 530 ms total host CPU: approximately 5.16%, 5.66%, and 5.26% of one CPU. All native captures
+reported zero lost samples. Browser callback means were 4.972, 4.916, and 4.913 ms.
+
+This contradicted the historical sample-count-derived utilization estimate, so a second login
+after a reconnect gap captured three browser-profiling-off windows with direct `perf stat`
+task-clock counters. No native call-stack sampler ran in these control windows.
+
+| Control measurement | Window 1 | Window 2 | Window 3 |
+| --- | ---: | ---: | ---: |
+| Host task-clock ms | 632.09 | 618.75 | 622.94 |
+| Native measurement wall seconds | 10.003 | 10.003 | 10.003 |
+| Host fraction of one CPU | 6.32% | 6.19% | 6.23% |
+| Summed thread CPU ms (coarse counter cross-check) | 620 | 610 | 620 |
+| Browser callback mean ms | 4.386 | 4.381 | 4.353 |
+| Browser whole-window FPS | 143.94 | 143.84 | 143.88 |
+
+The direct task-clock median is 622.94 ms / approximately ten seconds, or 6.23% of one CPU.
+The perf events were user-filtered; their zero context-switch/migration readings are not evidence
+of zero scheduling activity. Thread CPU accounting independently corroborates the utilization
+scale. The browser callback median is 4.381 ms; its reciprocal is not actual FPS. These captures
+do not establish a historical host speedup: the old utilization inference was invalid, and live
+workloads are not an interleaved control. Native/browser windows start close together but are not
+exactly coextensive; native sleep windows are ~10.003 seconds and browser windows ~10.05–10.08.
+
+#### Attribution and limits
+
+Repeated native leaf symbols still identify collision/placement work: landblock coordinate
+conversion, static sphere sweeps, transit-cell/portal tests, placed collision-shape transforms,
+Parry support-map/GJK work, and body projection. Entity projection, motion-presentation lookup,
+collection construction, hashing, and allocation also recur. Several optimized-release stacks
+terminate early, and leaf weights vary substantially between windows. Consequently these samples
+do not justify an exact collision-versus-snapshot-versus-camera phase split or a claimed saving
+from eliminating snapshots. No phase instrumentation or production Rust changes were made.
+
+Source inspection confirms that `ClientRuntime::run` still constructs full dynamic views before
+and after simulation, then builds a lookup collection and compares owned views. That redundant
+representation remains a structural cleanup candidate. It is no longer justified as a high-CPU
+priority using the old utilization figure. Low average utilization also does not rule out long
+individual ticks or queue delays; neither tail latency nor writer backpressure was measured here.
+
+#### Threading assessment
+
+- Rust already runs in a separate process from browser presentation. Moving Rust work between
+  its threads would not remove the browser's pose publication or renderer preparation costs.
+- `host/src/client_host.rs::run_client_task` polls the mutable core runtime and forwards its
+  broadcast events within one async task. Tokio can migrate that task between workers; sampled
+  work on several worker threads is not proof that one tick runs in parallel.
+- `host/src/protocol.rs::run_stdio` already owns a separate blocking writer thread. Frame
+  serialization and stdout writes run there; the producer sends typed frames through a bounded
+  synchronous channel. Another serialization thread is not warranted by this capture.
+- Collision preparation already uses blocking workers. Live simulation operates on mutable
+  world/movement state, followed by view diffing and camera advancement. Offloading individual
+  solves would require explicit immutable inputs, ordered commit semantics, and generation
+  handling; simply sharing the world behind locks would not create useful parallelism.
+- If future measurements show long simulation turns delaying command/event service, consider
+  isolating the authoritative runtime as one owner on a dedicated execution thread, or separating
+  event forwarding from simulation polling. Preserve bounded backpressure, ordered lifecycle
+  events, cancellation, and snapshot recovery. This is a latency-isolation hypothesis, not a
+  measured FPS optimization, and no implementation is authorized by this investigation.
+
+Recommendation: do not add threads for this steady-state workload now. Prioritize browser
+preparation/publication and investigation of the ~144 FPS pacing limit for the 200 FPS objective.
+Revisit Rust for measured tick-tail latency, busier scenes, or the independently worthwhile
+change-owned projection cleanup; eliminate repeated work before parallelizing it.
+
+All six screenshots were inspected with buildings and trees present and no browser errors or
+exceptions. Instrumented captures retained 142 dynamic roots / 2,163 ranges; control final
+snapshots ranged from 140–142 roots / 2,153–2,163 ranges. All retained 650 static draws / 230,819
+triangles and 46 untruncated portal scopes. Artifacts are
+`/tmp/holtburger-rust-reprofile-{1,2,3}.{json,cpuprofile,png,perf.data,perf.log,threads.json}` and
+`/tmp/holtburger-rust-control-{1,2,3}.{json,png,stat.txt,threads.json}`. Temporary probe edits were
+removed. Only this evidence document remains changed; no commit was created.
+
+### Authority / Forwarding Task Boundary — 2026-09-05
+
+The user authorized separating simulation ownership from host event forwarding while relocating
+the character for a busier-scene profile. Scope is independent task scheduling, not a dedicated
+simulation thread or parallel collision solving. The planning skill guided the boundary and
+validation sequence; no new plan file was created.
+
+`client_host::run_client_task` now supervises a separately spawned authority future and drains
+the existing broadcast stream independently. Core retains sole ownership of the mutable world,
+network semantics, command receiver, simulation, and camera advancement. The existing ordered
+command channel and bounded stdout writer queue remain unchanged. Commands are still processed
+between core turns: this does not make a synchronous simulation tick preemptible, and independent
+Tokio tasks do not promise dedicated OS threads or immunity to worker-pool exhaustion.
+
+The authority owns the sole core-event sender. Its completion or panic closes that stream;
+forwarding drains queued events before the supervisor publishes one terminal outcome. A JoinSet
+owns cancellation, so forwarding failure or supervisor cancellation requests authority abort
+instead of detaching it. As with other async cancellation, an in-progress synchronous turn must
+return before abort takes effect. Output errors propagate and are logged immediately instead of
+being silently ignored. Lag recovery continues to suppress deltas until a replacement application
+snapshot; if authority ends during recovery, its real terminal outcome owns the exit cause.
+
+Validation: all 271 host tests pass, including a two-worker test that deliberately holds the
+authority inside a synchronous turn until forwarding acknowledges its snapshot. Further tests
+cover event-before-exit order, snapshot recovery after lag, output failure cancellation, supervisor
+cancellation, and authority panic. Clippy with warnings denied, Rust formatting, and diff whitespace
+checks pass. No production core or world code changed. Live browser verification and busy-dungeon
+profiling remain pending the user's relocation; no live login was initiated during this change.
+No commit was created.
+
+Pre-commit quality review: kept immediate supervisor logging as the single owner of forwarding
+errors, removing duplicate shutdown reporting and the unnecessary retained inner result. Tightened
+terminal-event tests to check the actual shutdown/failure cause. Reviewed task ownership,
+sender-close/drain ordering, cooperative cancellation limits, lag recovery, and evidence caveats.
+Re-ran all 271 host tests, Clippy with warnings denied, formatting, and diff checks. Live dungeon
+verification remains pending; this review did not initiate a login or claim a measured latency gain.

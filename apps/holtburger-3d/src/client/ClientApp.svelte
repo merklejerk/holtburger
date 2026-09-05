@@ -106,7 +106,10 @@
 			schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
 		},
 	});
-	let frameSettings = $state<FrameSettings>({ ...CLIENT_TUNING.frameSettings });
+	// Controls replace this cold policy snapshot; frame-hot consumers must receive plain objects.
+	let frameSettings = $state.raw<FrameSettings>({
+		...CLIENT_TUNING.frameSettings,
+	});
 	let inputController: CharacterInputController | null = null;
 	let inputArbiter: ClientInputArbiter | null = null;
 	let preciseJumpSession: ClientPreciseJumpSession | null = null;

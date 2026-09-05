@@ -3129,3 +3129,161 @@ measured residual submission cost of this simpler renderer.
   documented populated multi-view invocations passed; the failed invocation is not acceptance evidence.
 - No live login, parked player/camera changes, streaming-performance work, or new rendering strategy
   was introduced during this review. The unrelated untracked Rust file remains outside this commit.
+
+## Post-cutover Steady-state Reprofile — 2026-09-05
+
+### Capture Conditions and Evidence
+
+- Excluded the initial three windows: the character had been moved, and those captures were at
+  `0x7c63ffff`. They are not comparable evidence for the parked scene.
+- After the user restored the character, captured three 10-second windows in one login, following
+  a 10-second settled-world delay. Used this worktree's `apps/holtburger-3d/.dev.env` and
+  +Holtfighter, slot 1, at the restored rooftop location `0xc6a9ffff`. No player or camera input
+  was issued. Avoided an immediate reconnect between the two sessions.
+- All three restored screenshots were inspected; buildings and trees remained visible. The
+  viewport was 1441 × 903. All sampled scene snapshots retained 142 dynamic roots and 2,157
+  source ranges; final counters reported 176 dynamic draws, 650 static draws, and 46 portal
+  scopes without truncation.
+- Artifacts: `/tmp/holtburger-reprofile-restored-20260905-{1,2,3}.json`, `.cpuprofile`, and `.png`.
+  These are temporary local artifacts, not checked-in fixtures.
+- CPU/GPU instrumentation and V8 sampling were enabled. No new instrumentation-off control was
+  collected. Treat this as a fresh post-cutover baseline, not an exactly matched historical
+  before/after comparison: static geometry counts and framing differ from earlier captures.
+
+### Measured Work
+
+Values below are milliseconds per frame, averaged within each capture. Renderer rows are nested
+inside callback CPU time; renderer subphases are nested inside renderer CPU time. GPU time is
+separate and must not be added to callback time as an estimate of frame latency.
+
+| Measurement | Window 1 | Window 2 | Window 3 |
+| --- | ---: | ---: | ---: |
+| Frame callback CPU | 5.772 | 5.724 | 5.617 |
+| Renderer CPU | 3.812 | 3.780 | 3.703 |
+| Measured GPU work | 1.027 | 1.023 | 1.019 |
+| Scene contribution resolution | 1.273 | 1.257 | 1.240 |
+| Opaque submission | 0.754 | 0.760 | 0.744 |
+| Portal planning | 0.348 | 0.346 | 0.345 |
+
+The three windows agree on the remaining CPU-heavy work. Neither these instrumented callback
+times nor their reciprocals establish uninstrumented throughput or attainment of 200 FPS.
+
+### Source-grounded Attribution and Remaining Threads
+
+1. **Reactive settings cross into the imperative renderer.** `ClientApp.svelte` owns
+   `frameSettings` with deep `$state` and passes it through `untrack` to the presentation session.
+   The session and runtime retain that object; `untrack` does not strip its proxies. Sampled
+   Svelte proxy/signal reads account for approximately 0.3 ms/frame of self-time, predominantly
+   under scene contribution resolution. This is part of the preparation cost above, not an
+   additional bucket. First candidate: test a plain settings snapshot at the cold UI-to-runtime
+   boundary, preserving settings updates without reactive reads in frame-hot rendering code.
+2. **Animation preparation retains a costly sampling representation.**
+   `animation-playback.ts::interpolateRigidTransform` extracts quaternions from both stored
+   matrices on every interpolation, then reconstructs a matrix. V8 attributes approximately
+   0.54 ms/frame to animation sampling, 0.45 ms to interpolation within it, and 0.35 ms of
+   self-time to rotation extraction. Investigate preparing interpolation-ready rotations and
+   translations once per animation asset, after auditing existing consumers and interpolation
+   semantics. These nested costs are not additive or guaranteed savings.
+3. **Pose/bounds/spatial publication remains relevant, but distinguish it from sampling.**
+   Sampled dynamic publication costs approximately 0.90–0.92 ms/frame. The runtime profiler's
+   `presentationPublish` bucket includes both animation sampling and publication; its reported
+   1.38–1.46 ms values are rolling last-60-frame means, not whole-window means. The completed
+   bounds-allocation/spatial cleanup did not eliminate the underlying publication work.
+4. **Submission is no longer primarily a dynamic-geometry problem in this scene.** Ordinary
+   static opaque drawing accounts for approximately 0.63 ms/frame of sampled inclusive time
+   within opaque submission. The evidence does not prioritize another dynamic rendering
+   strategy or multi-draw over the preparation and animation candidates above. Multi-draw
+   remains deferred.
+5. **Other threads retain their previous scope.** This browser profile does not newly attribute
+   Rust host snapshot construction or collision costs. Streaming performance remains a separate
+   effort; no streaming optimization conclusion follows from these stationary captures.
+
+Recommended next evidence: a one-change comparison for the plain-settings boundary, followed
+by a focused animation representation investigation. Preserve the complete scene and repeat
+settled windows, including instrumentation-off controls before making throughput claims.
+No optimization was implemented during this reprofile. The temporary repeated-capture loop was
+removed; these findings do not themselves authorize the next implementation.
+
+## Plain Client Frame Settings Experiment — 2026-09-05
+
+Following user approval, changed only the client settings owner from `$state<FrameSettings>`
+to `$state.raw<FrameSettings>`, with a comment documenting the plain-object handoff. The client
+already replaces the complete settings object in its control handler, and `FrameSettings` fields
+are readonly. No cloning adapter, frame-hot conversion, runtime strategy, or new owner was needed.
+The existing cold update path and initialization-only `untrack` remain unchanged. Explorer settings
+were not changed in this client-focused experiment. Svelte documents replacement-based raw state
+in its [state reference](https://svelte.dev/docs/svelte/$state#$state.raw).
+
+### Instrumentation-off Comparison
+
+Captured three 10-second settled windows per version, one login per series, with renderer CPU/GPU
+profiling, V8 sampling, and runtime tick profiling disabled. The existing callback work accumulator
+and once-per-second diagnostic snapshots remained active. Used the worktree's `.dev.env`,
++Holtfighter slot 1, and the parked rooftop `0xc6a9ffff`; no player or camera input was issued.
+Allowed approximately two minutes between sessions to avoid rapid reconnects.
+
+Hardware: Ryzen 9 5900X, AMD Navi 31 GPU. Render scale 1; interest radii: buildings/terrain 6,
+EnvCells/explicit objects 1, generated objects 2. All six screenshots were inspected, with buildings
+and trees visible. Static counts remained 650 draws / 230,819 triangles, with 46 portal scopes
+and no truncation. Dynamic counts varied from 140 to 142 visible roots and 2,155 to 2,165 source
+ranges in both series. Final dynamic draws were 169–171 before and 173–175 after; texture bind
+counts also differed. Weather changed during these live captures. The launch viewport differed
+by one pixel per dimension: 1442 × 904 before, 1441 × 903 after. These are repeated live-scene
+measurements, not a deterministic pixel-exact A/B benchmark.
+
+| Callback CPU work (ms/frame) | Window 1 | Window 2 | Window 3 | Median |
+| --- | ---: | ---: | ---: | ---: |
+| Before: deep reactive settings | 5.650 | 5.559 | 5.613 | 5.613 |
+| After: plain replacement settings | 4.937 | 4.950 | 4.944 | 4.944 |
+
+Observed median callback reduction: 0.669 ms, approximately 12%. Actual whole-window frame
+rates remained approximately 142.6–143.5 FPS across both series. A callback mean below 5 ms
+does not establish 200 FPS: callback work is not the entire frame interval. Do not attribute
+every part of the observed reduction to proxy getter self-time or dismiss the live-scene differences.
+
+Reports and screenshots: `/tmp/holtburger-settings-{before-off,after-off}-{1,2,3}.{json,png}`.
+
+### Instrumented Attribution and Verification
+
+A third login collected three instrumented 10-second windows with the changed code, then exercised
+the settings toggle outside the measurement windows. Reports, screenshots, and profiles:
+`/tmp/holtburger-settings-after-on-{1,2,3}.{json,png,cpuprofile}`. All three screenshots were
+inspected. The viewport was 1442 × 904; final counters retained 142 dynamic roots / 2,165 ranges,
+650 static draws, 171 dynamic draws, and 46 portal scopes without truncation. No browser errors
+or exceptions were recorded in the measured windows.
+
+| Instrumented measurement (ms/frame) | Window 1 | Window 2 | Window 3 |
+| --- | ---: | ---: | ---: |
+| Frame callback CPU | 5.486 | 5.364 | 5.429 |
+| Renderer CPU, within callback | 3.501 | 3.415 | 3.473 |
+| Scene contribution resolution, within renderer | 0.830 | 0.799 | 0.823 |
+| Static instance run preparation, within renderer | 0.192 | 0.187 | 0.189 |
+| Measured GPU work, separate | 1.034 | 1.036 | 1.035 |
+
+- V8 frame-rooted stacks no longer sampled Svelte proxy/signal getters in any of the three
+  changed-code windows. The earlier restored-scene profiles sampled approximately 0.3 ms/frame
+  there. Contribution resolution fell from the earlier 1.240–1.273 ms to 0.799–0.830 ms.
+  This corroborates the intended boundary improvement independently of whole-callback changes.
+- Not every renderer phase improved. Static instance run preparation increased from approximately
+  0.068 ms in the earlier profiles to 0.187–0.192 ms here; V8 attributed approximately 0.147 ms
+  of self-time to `frameTemplateDrawIdentityEquals`. No cause was established for that difference,
+  and no static-renderer change was made. Recheck it before treating it as a regression or starting
+  another optimization. The earlier instrumented series is not a newly collected interleaved A/B
+  control; live content, weather, viewport, and browser execution conditions differ.
+- Animation remains a concrete independent candidate: sampled rotation extraction stayed near
+  0.354 ms/frame, within approximately 0.54–0.55 ms of animation sampling. Dynamic publication
+  remained approximately 0.92 ms/frame. Neither was changed in this experiment.
+- Temporary cold-boundary wrappers verified that settings passed to the presentation session and
+  runtime were structured-cloneable (deep Svelte proxies would fail this check). Clicking the
+  actual UI toggle produced session values `[false, true, false]` and runtime updates
+  `[true, false]`; checkbox state and Shown/Hidden labels agreed. The performance bridge identity
+  remained unchanged, confirming the client presentation owner was not recreated. Restored the
+  toggle to off and closed the debug panel. Evidence: `/tmp/holtburger-settings-toggle-{0,1}.json`.
+- Validation: type checks and Svelte diagnostics passed without warnings; 107 client tests across
+  14 files passed, including existing settings initialization/update coverage. ESLint and dead-code
+  checks passed. Removed the temporary repeat loop and browser wrappers from the probe script.
+
+Conclusion: retain the small plain-settings change. The expected reactive-read overhead is gone,
+and the profiling-off windows show lower callback cost, with the comparison limitations above.
+This is a CPU boundary cleanup, not a demonstrated 200 FPS result. Investigating prepared
+animation data remains the recommended next independent experiment; it is not implemented here.

@@ -19,12 +19,12 @@ function fixture() {
 }
 
 describe("CharacterInputController", () => {
-	it("composes independent axes and maps Shift to walk gait", () => {
+	it("composes independent axes and selects walk gait", () => {
 		const { input } = fixture();
-		input.applyKey("w", true);
-		input.applyKey("z", true);
-		input.applyKey("d", true);
-		input.applyKey("shift", true);
+		input.applyAction("forward", true);
+		input.applyAction("strafeLeft", true);
+		input.applyAction("turnRight", true);
+		input.applyAction("walk", true);
 
 		expect(input.drive()).toEqual({
 			gait: "walk",
@@ -35,47 +35,47 @@ describe("CharacterInputController", () => {
 	});
 
 	it.each([
-		["w", "s"],
-		["z", "c"],
-		["a", "d"],
+		["forward", "backward"],
+		["strafeLeft", "strafeRight"],
+		["turnLeft", "turnRight"],
 	] as const)(
 		"uses newest-first precedence and resumes %s after releasing %s",
 		(first, second) => {
 			const { input } = fixture();
-			input.applyKey(first, true);
+			input.applyAction(first, true);
 			const firstDrive = input.drive();
-			input.applyKey(second, true);
+			input.applyAction(second, true);
 			expect(input.drive()).not.toEqual(firstDrive);
-			input.applyKey(second, false);
+			input.applyAction(second, false);
 			expect(input.drive()).toEqual(firstDrive);
 		},
 	);
 
 	it("releasing a non-head key does not replace the active command", () => {
 		const { input } = fixture();
-		input.applyKey("w", true);
-		input.applyKey("s", true);
+		input.applyAction("forward", true);
+		input.applyAction("backward", true);
 		const active = input.drive();
-		input.applyKey("w", false);
+		input.applyAction("forward", false);
 		expect(input.drive()).toEqual(active);
 	});
 
-	it("ignores keyboard repeat without changing axis precedence", () => {
+	it("ignores duplicate action presses without changing axis precedence", () => {
 		const { drives, input } = fixture();
-		input.applyKey("w", true);
-		input.applyKey("s", true);
-		input.applyKey("w", true, true);
+		input.applyAction("forward", true);
+		input.applyAction("backward", true);
+		input.applyAction("forward", true);
 		expect(input.drive().longitudinal).toBe("backward");
 		expect(drives).toHaveLength(2);
 	});
 
 	it("uses one clock calculation for tap, display, and released extent", () => {
 		const { edges, input, setNow } = fixture();
-		input.applyKey("space", true);
+		input.applyAction("jump", true);
 		expect(input.chargeExtent()).toBe(0.001);
 		setNow(1_500);
 		expect(input.chargeExtent()).toBe(0.5);
-		input.applyKey("space", false);
+		input.applyAction("jump", false);
 		expect(edges).toEqual([
 			{
 				drive: input.drive(),
@@ -94,10 +94,10 @@ describe("CharacterInputController", () => {
 
 	it("snapshots Shift walk gait into both manual jump edges", () => {
 		const { edges, input } = fixture();
-		input.applyKey("w", true);
-		input.applyKey("shift", true);
-		input.applyKey("space", true);
-		input.applyKey("space", false);
+		input.applyAction("forward", true);
+		input.applyAction("walk", true);
+		input.applyAction("jump", true);
+		input.applyAction("jump", false);
 
 		expect(edges).toMatchObject([
 			{ drive: { gait: "walk", longitudinal: "forward" }, kind: "begin-jump" },
@@ -110,16 +110,16 @@ describe("CharacterInputController", () => {
 
 	it("clamps over-full charge and ignores release without an active charge", () => {
 		const { edges, input, setNow } = fixture();
-		input.applyKey("space", false);
-		input.applyKey("space", true);
+		input.applyAction("jump", false);
+		input.applyAction("jump", true);
 		setNow(3_000);
-		input.applyKey("space", false);
+		input.applyAction("jump", false);
 		expect(edges.at(-1)).toMatchObject({ extent: 1, kind: "release-jump" });
 	});
 
 	it("recomputes an active charge from the same start when stance timing changes", () => {
 		const { input, setNow } = fixture();
-		input.applyKey("space", true);
+		input.applyAction("jump", true);
 		setNow(1_400);
 		expect(input.chargeExtent()).toBe(0.4);
 		input.setFullChargeDurationMs(800);
@@ -128,7 +128,7 @@ describe("CharacterInputController", () => {
 
 	it("cancels only the optimistic charge belonging to a rejected begin", () => {
 		const { input } = fixture();
-		input.applyKey("space", true);
+		input.applyAction("jump", true);
 		input.rejectBegin(99);
 		expect(input.chargeExtent()).not.toBeNull();
 		input.rejectBegin(0);
@@ -137,12 +137,12 @@ describe("CharacterInputController", () => {
 
 	it("focus reset clears every list and emits a sequenced reset", () => {
 		const { edges, input } = fixture();
-		input.applyKey("w", true);
-		input.applyKey("s", true);
-		input.applyKey("z", true);
-		input.applyKey("d", true);
-		input.applyKey("shift", true);
-		input.applyKey("space", true);
+		input.applyAction("forward", true);
+		input.applyAction("backward", true);
+		input.applyAction("strafeLeft", true);
+		input.applyAction("turnRight", true);
+		input.applyAction("walk", true);
+		input.applyAction("jump", true);
 		input.reset();
 
 		expect(input.drive()).toEqual({

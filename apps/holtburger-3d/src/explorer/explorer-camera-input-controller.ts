@@ -3,11 +3,16 @@ import { createCameraAxesRadians } from "../lib/game/math/camera-orientation";
 import { Vec3 } from "../lib/game/math/types";
 import { clamp, normalizeVec3, scaleVec3 } from "../lib/game/math/vector-utils";
 import { CameraLookController } from "../lib/game/controls/camera-look-controller";
-import { THIRD_PERSON_CHARACTER_CONTROL_PROFILE } from "../lib/game/controls/third-person-character-profile";
+import type { InputContext } from "../lib/input/input-context";
+import type { AppInput } from "../lib/input/app-input";
+import type { ViewportInputGate } from "../lib/input/viewport-input-gate";
+import {
+	type CharacterAction,
+	type FlyAction,
+} from "../lib/input/input-contract";
 
 type DragMode = "pan" | "rotate";
-type MovementKey =
-	"a" | "c" | "d" | "pagedown" | "pageup" | "s" | "space" | "w" | "z";
+type MovementAction = Exclude<FlyAction, "precision">;
 
 interface ActiveDrag {
 	readonly lastX: number;
@@ -43,6 +48,10 @@ export type FrontendControlScheme =
 
 export interface ExplorerCameraInputControllerOptions {
 	readonly canvas: HTMLCanvasElement;
+	/** Resolved app input policy supplied by the composition root. */
+	readonly input: AppInput;
+	/** Shared viewport availability and cancellation boundary for this mounted app. */
+	readonly inputGate: ViewportInputGate;
 	readonly onChange: (state: FreeFlyCameraState) => void;
 	/** Sends wheel translation to the current host-owned camera policy. */
 	readonly onPhysicalWheel: (localUpDistance: number) => void;
@@ -50,21 +59,20 @@ export interface ExplorerCameraInputControllerOptions {
 	readonly onPossessionOrbit: (deltaX: number, deltaY: number) => void;
 	/** Forwards wheel distance only while Explorer has delegated to possession camera policy. */
 	readonly onPossessionWheel: (localUpDistance: number) => void;
-	/** Publishes normalized raw character keys without assigning grounded semantics here. */
-	readonly onCharacterInput: (input: CharacterKeyInput) => void;
+	/** Publishes character actions without assigning grounded movement behavior here. */
+	readonly onCharacterInput: (input: CharacterActionInput) => void;
 	/** Resolves the app regime's complete keyboard-yaw rate without teaching this controller its modes. */
-	readonly keyboardYawRadiansPerSecond?: (shiftActive: boolean) => number;
+	readonly keyboardYawRadiansPerSecond?: (precisionActive: boolean) => number;
 	readonly requestAnimationFrame?: (callback: FrameRequestCallback) => number;
 	readonly cancelAnimationFrame?: (handle: number) => void;
 }
 
-/** Raw keyboard lifecycle consumed only when the app selects a character-control regime. */
-export type CharacterKeyInput =
+/** Semantic action lifecycle consumed only when the app selects a character-control regime. */
+export type CharacterActionInput =
 	| {
-			readonly key: "a" | "c" | "d" | "s" | "shift" | "space" | "w" | "z";
-			readonly kind: "key";
+			readonly action: CharacterAction;
+			readonly kind: "action";
 			readonly pressed: boolean;
-			readonly repeat: boolean;
 	  }
 	| { readonly kind: "reset" };
 
@@ -77,31 +85,58 @@ const DEFAULT_STATE: FreeFlyCameraState = {
 const CAMERA_CONTROL_TUNING = EXPLORER_TUNING.camera.controls;
 
 /**
- * Explorer-local port of the legacy fly controls: left drag rotates, middle/right drag pans,
- * wheel moves along local up, WASD-style keys fly, and Shift slows every movement.
+ * Explorer camera behavior consumes configured fly actions and viewport gestures.
+ * Grounded actions and possession orbit remain delegated to their own owners.
  */
 export class ExplorerCameraInputController {
+	readonly #input: AppInput;
+	/** All keyboard and pointer actions consult the app-owned gate. */
+	readonly #inputGate: ViewportInputGate;
+	/** Unregister this controller and cancel its input on disposal. */
+	readonly #detachInput: () => void;
 	readonly #canvas: HTMLCanvasElement;
 	readonly #onChange: (state: FreeFlyCameraState) => void;
 	readonly #onPhysicalWheel: (localUpDistance: number) => void;
 	readonly #onPossessionOrbit: (deltaX: number, deltaY: number) => void;
 	readonly #onPossessionWheel: (localUpDistance: number) => void;
-	readonly #onCharacterInput: (input: CharacterKeyInput) => void;
-	readonly #keyboardYawRadiansPerSecond: (shiftActive: boolean) => number;
+	readonly #onCharacterInput: (input: CharacterActionInput) => void;
+	readonly #keyboardYawRadiansPerSecond: (precisionActive: boolean) => number;
 	readonly #requestAnimationFrame: (callback: FrameRequestCallback) => number;
 	readonly #cancelAnimationFrame: (handle: number) => void;
-	readonly #pressedKeys = new Set<MovementKey>();
+	readonly #pressedActions = new Set<MovementAction>();
+	readonly #characterInput: InputContext<CharacterAction>;
+	readonly #flyInput: InputContext<FlyAction>;
 	#activeDrag: ActiveDrag | null = null;
 	#lastMovementAt: number | null = null;
 	#linearMovementStartedAt: number | null = null;
 	#movementFrame: number | null = null;
-	#shiftActive = false;
-	#inputEnabled = true;
+	#precisionActive = false;
 	#scheme: FrontendControlScheme = { kind: "free-fly" };
 	readonly #look = new CameraLookController(DEFAULT_STATE);
 	#state: FreeFlyCameraState = DEFAULT_STATE;
 
 	constructor(options: ExplorerCameraInputControllerOptions) {
+		this.#inputGate = options.inputGate;
+		this.#input = options.input;
+		this.#characterInput = this.#input.characterContext((action, pressed) => {
+			this.#onCharacterInput({
+				action,
+				kind: "action",
+				pressed,
+			});
+		});
+		this.#flyInput = this.#input.flyContext((action, pressed) => {
+			if (action === "precision") {
+				this.#precisionActive = pressed;
+				if (this.#scheme.kind === "physical-fly") this.#onChange(this.#state);
+				return;
+			}
+			if (pressed) this.#pressedActions.add(action);
+			else this.#pressedActions.delete(action);
+			if (this.#pressedActions.size > 0) this.#startMovement();
+			else this.#stopMovement();
+			if (this.#scheme.kind === "physical-fly") this.#onChange(this.#state);
+		});
 		this.#canvas = options.canvas;
 		this.#onChange = options.onChange;
 		this.#onPhysicalWheel = options.onPhysicalWheel;
@@ -110,9 +145,9 @@ export class ExplorerCameraInputController {
 		this.#onCharacterInput = options.onCharacterInput;
 		this.#keyboardYawRadiansPerSecond =
 			options.keyboardYawRadiansPerSecond ??
-			((shiftActive) =>
+			((precisionActive) =>
 				CAMERA_CONTROL_TUNING.keyboardYawRadiansPerSecond *
-				this.#speedMultiplier(shiftActive));
+				this.#speedMultiplier(precisionActive));
 		this.#requestAnimationFrame =
 			options.requestAnimationFrame ??
 			window.requestAnimationFrame.bind(window);
@@ -128,11 +163,12 @@ export class ExplorerCameraInputController {
 		this.#canvas.addEventListener("keydown", this.#handleKeyDown);
 		this.#canvas.addEventListener("keyup", this.#handleKeyUp);
 		this.#canvas.addEventListener("blur", this.#handleBlur);
+		this.#detachInput = this.#inputGate.attach(this.#cancelInput);
 	}
 
 	/** Replace the pose for automatic focus without marking it as user-controlled. */
 	setAutomaticPose(pose: FreeFlyCameraPose): void {
-		this.#stopMovement();
+		this.#inputGate.cancel();
 		this.#look.replace(pose);
 		this.#setState({ ...pose, hasManualControl: false });
 	}
@@ -144,7 +180,7 @@ export class ExplorerCameraInputController {
 
 	/** Seeds frontend free fly from the exact physical pose presented on the prior frame. */
 	adoptPresentedPose(pose: FreeFlyCameraPose): void {
-		this.#stopMovement();
+		this.#inputGate.cancel();
 		this.#look.replace(pose);
 		this.#state = { ...pose, hasManualControl: true };
 	}
@@ -152,20 +188,8 @@ export class ExplorerCameraInputController {
 	/** Atomically clears the outgoing owner before installing a complete input-routing scheme. */
 	setControlScheme(scheme: FrontendControlScheme): void {
 		if (this.#scheme.kind === scheme.kind) return;
-		if (this.#isCharacterScheme()) this.#onCharacterInput({ kind: "reset" });
-		this.#stopMovement();
-		this.#shiftActive = false;
+		this.#inputGate.cancel();
 		this.#scheme = scheme;
-	}
-
-	/** Withdraw every Explorer input edge while a replacement scene is installing or revealing. */
-	setInputEnabled(enabled: boolean): void {
-		if (this.#inputEnabled === enabled) return;
-		this.#inputEnabled = enabled;
-		if (enabled) return;
-		if (this.#isCharacterScheme()) this.#onCharacterInput({ kind: "reset" });
-		this.#stopMovement();
-		this.#shiftActive = false;
 	}
 
 	/** Current local input, camera basis, and precision modifier for physical-camera policy. */
@@ -184,7 +208,7 @@ export class ExplorerCameraInputController {
 				this.#scheme.kind === "physical-fly"
 					? this.#movementVector()
 					: { forward: 0, right: 0, up: 0 },
-			precision: this.#scheme.kind === "physical-fly" && this.#shiftActive,
+			precision: this.#scheme.kind === "physical-fly" && this.#precisionActive,
 		};
 	}
 
@@ -197,7 +221,7 @@ export class ExplorerCameraInputController {
 	}
 
 	dispose(): void {
-		this.#stopMovement();
+		this.#detachInput();
 		this.#canvas.removeEventListener("pointerdown", this.#handlePointerDown);
 		this.#canvas.removeEventListener("pointermove", this.#handlePointerMove);
 		this.#canvas.removeEventListener("pointerup", this.#handlePointerUp);
@@ -212,26 +236,27 @@ export class ExplorerCameraInputController {
 	}
 
 	readonly #handlePointerDown = (event: PointerEvent): void => {
-		if (!this.#inputEnabled) return;
-		if (event.button !== 0 && event.button !== 1 && event.button !== 2) return;
-		if (
-			this.#isCharacterScheme() &&
-			event.button !== THIRD_PERSON_CHARACTER_CONTROL_PROFILE.orbitPointerButton
-		)
-			return;
+		if (!this.#inputGate.allowed) return;
+		const rotate = this.#input.pointer(
+			this.#isCharacterScheme() ? "possessionOrbit" : "flyRotate",
+			event,
+		);
+		const pan =
+			!this.#isCharacterScheme() && this.#input.pointer("flyPan", event);
+		if (!rotate && !pan) return;
 		this.#canvas.focus();
 		this.#canvas.setPointerCapture(event.pointerId);
 		this.#activeDrag = {
 			lastX: event.clientX,
 			lastY: event.clientY,
-			mode: event.button === 0 ? "rotate" : "pan",
+			mode: rotate ? "rotate" : "pan",
 			pointerId: event.pointerId,
 		};
 		event.preventDefault();
 	};
 
 	readonly #handlePointerMove = (event: PointerEvent): void => {
-		if (!this.#inputEnabled) return;
+		if (!this.#inputGate.allowed) return;
 		const drag = this.#activeDrag;
 		if (!drag || drag.pointerId !== event.pointerId) return;
 		const deltaX = event.clientX - drag.lastX;
@@ -240,7 +265,10 @@ export class ExplorerCameraInputController {
 		if (deltaX === 0 && deltaY === 0) return;
 		const speed = this.#isCharacterScheme()
 			? 1
-			: this.#speedMultiplier(event.shiftKey);
+			: this.#speedMultiplier(
+					this.#precisionActive ||
+						this.#flyInput.modifierActive("precision", event),
+				);
 		if (drag.mode === "rotate") {
 			if (this.#isCharacterScheme()) {
 				this.#onPossessionOrbit(deltaX, deltaY);
@@ -279,18 +307,16 @@ export class ExplorerCameraInputController {
 	};
 
 	readonly #handlePointerUp = (event: PointerEvent): void => {
-		if (!this.#inputEnabled) return;
 		if (!this.#finishDrag(event.pointerId)) return;
 		event.preventDefault();
 	};
 
 	readonly #handlePointerCancel = (event: PointerEvent): void => {
-		if (!this.#inputEnabled) return;
 		this.#finishDrag(event.pointerId);
 	};
 
 	readonly #handleWheel = (event: WheelEvent): void => {
-		if (!this.#inputEnabled) {
+		if (!this.#inputGate.allowed) {
 			event.preventDefault();
 			return;
 		}
@@ -302,7 +328,12 @@ export class ExplorerCameraInputController {
 				CAMERA_CONTROL_TUNING.wheelDeltaClamp,
 			) *
 			CAMERA_CONTROL_TUNING.wheelLocalUpUnitsPerDelta *
-			(this.#isCharacterScheme() ? 1 : this.#speedMultiplier(event.shiftKey));
+			(this.#isCharacterScheme()
+				? 1
+				: this.#speedMultiplier(
+						this.#precisionActive ||
+							this.#flyInput.modifierActive("precision", event),
+					));
 		if (this.#scheme.kind !== "free-fly") {
 			if (distance !== 0) {
 				if (this.#isCharacterScheme()) this.#onPossessionWheel(distance);
@@ -320,71 +351,27 @@ export class ExplorerCameraInputController {
 	};
 
 	readonly #handleKeyDown = (event: KeyboardEvent): void => {
-		if (!this.#inputEnabled) {
-			event.preventDefault();
-			return;
-		}
-		this.#shiftActive = event.shiftKey;
-		const semanticKey = this.#isCharacterScheme()
-			? THIRD_PERSON_CHARACTER_CONTROL_PROFILE.characterKey(event.key)
-			: null;
-		if (semanticKey !== null) {
-			this.#onCharacterInput({
-				key: semanticKey,
-				kind: "key",
-				pressed: true,
-				repeat: event.repeat,
-			});
-		}
-		const key = this.#acceptsCameraKeys() ? movementKey(event.key) : null;
-		if (!key) {
-			if (event.key === "Shift" && this.#scheme.kind === "physical-fly")
-				this.#onChange(this.#state);
-			if (semanticKey !== null) event.preventDefault();
-			return;
-		}
-		this.#pressedKeys.add(key);
-		this.#startMovement();
-		if (this.#scheme.kind === "physical-fly") this.#onChange(this.#state);
-		event.preventDefault();
+		if (!this.#inputGate.allowed) return;
+		if (this.#activeInput().apply(event, true)) event.preventDefault();
 	};
 
 	readonly #handleKeyUp = (event: KeyboardEvent): void => {
-		if (!this.#inputEnabled) {
-			event.preventDefault();
-			return;
-		}
-		this.#shiftActive = event.key === "Shift" ? false : event.shiftKey;
-		const semanticKey = this.#isCharacterScheme()
-			? THIRD_PERSON_CHARACTER_CONTROL_PROFILE.characterKey(event.key)
-			: null;
-		if (semanticKey !== null) {
-			this.#onCharacterInput({
-				key: semanticKey,
-				kind: "key",
-				pressed: false,
-				repeat: false,
-			});
-		}
-		const key = this.#acceptsCameraKeys() ? movementKey(event.key) : null;
-		if (!key) {
-			if (event.key === "Shift" && this.#scheme.kind === "physical-fly")
-				this.#onChange(this.#state);
-			if (semanticKey !== null) event.preventDefault();
-			return;
-		}
-		this.#pressedKeys.delete(key);
-		if (this.#pressedKeys.size === 0) {
-			// Preserve the empty held set long enough for the physical adapter to send a stop intent.
-			if (this.#scheme.kind === "physical-fly") this.#onChange(this.#state);
-			this.#stopMovement();
-		} else if (this.#scheme.kind === "physical-fly") {
-			this.#onChange(this.#state);
-		}
-		event.preventDefault();
+		if (this.#activeInput().apply(event, false)) event.preventDefault();
 	};
 
+	#activeInput(): InputContext<CharacterAction> | InputContext<FlyAction> {
+		return this.#isCharacterScheme() ? this.#characterInput : this.#flyInput;
+	}
+
 	readonly #handleBlur = (): void => {
+		this.#inputGate.cancel();
+	};
+
+	readonly #cancelInput = (): void => {
+		this.#characterInput.reset();
+		this.#flyInput.reset();
+		this.#precisionActive = false;
+		if (this.#activeDrag !== null) this.#finishDrag(this.#activeDrag.pointerId);
 		if (this.#isCharacterScheme()) this.#onCharacterInput({ kind: "reset" });
 		this.#stopMovement();
 		if (this.#scheme.kind === "physical-fly") this.#onChange(this.#state);
@@ -408,24 +395,19 @@ export class ExplorerCameraInputController {
 	#stopMovement(): void {
 		if (this.#movementFrame !== null)
 			this.#cancelAnimationFrame(this.#movementFrame);
-		const drag = this.#activeDrag;
-		if (drag !== null && this.#canvas.hasPointerCapture(drag.pointerId)) {
-			this.#canvas.releasePointerCapture(drag.pointerId);
-		}
 		this.#movementFrame = null;
 		this.#lastMovementAt = null;
 		this.#linearMovementStartedAt = null;
-		this.#pressedKeys.clear();
-		this.#activeDrag = null;
+		this.#pressedActions.clear();
 	}
 
 	readonly #applyMovement = (frameAt: number): void => {
-		if (!this.#inputEnabled) return;
+		if (!this.#inputGate.allowed) return;
 		this.#movementFrame =
-			this.#pressedKeys.size === 0
+			this.#pressedActions.size === 0
 				? null
 				: this.#requestAnimationFrame(this.#applyMovement);
-		if (this.#pressedKeys.size === 0) return;
+		if (this.#pressedActions.size === 0) return;
 		const deltaSeconds =
 			this.#lastMovementAt === null
 				? 0
@@ -446,7 +428,7 @@ export class ExplorerCameraInputController {
 			const direction = localMovementDirection(this.#state, movement);
 			const speed =
 				CAMERA_CONTROL_TUNING.moveSpeed *
-				this.#speedMultiplier(this.#shiftActive) *
+				this.#speedMultiplier(this.#precisionActive) *
 				keyboardAcceleration((frameAt - this.#linearMovementStartedAt) / 1_000);
 			next = {
 				...next,
@@ -456,8 +438,8 @@ export class ExplorerCameraInputController {
 			this.#linearMovementStartedAt = null;
 		}
 		const yawDirection = this.#acceptsKeyboardYaw()
-			? (this.#pressedKeys.has("d") ? 1 : 0) -
-				(this.#pressedKeys.has("a") ? 1 : 0)
+			? (this.#pressedActions.has("turnRight") ? 1 : 0) -
+				(this.#pressedActions.has("turnLeft") ? 1 : 0)
 			: 0;
 		if (yawDirection !== 0) {
 			const look = this.#look.replace({
@@ -465,7 +447,7 @@ export class ExplorerCameraInputController {
 				yawRadians:
 					next.yawRadians +
 					yawDirection *
-						this.#keyboardYawRadiansPerSecond(this.#shiftActive) *
+						this.#keyboardYawRadiansPerSecond(this.#precisionActive) *
 						deltaSeconds,
 			});
 			next = {
@@ -479,20 +461,21 @@ export class ExplorerCameraInputController {
 	#movementVector(): CameraLocalMovement {
 		return {
 			forward:
-				(this.#pressedKeys.has("w") ? 1 : 0) -
-				(this.#pressedKeys.has("s") ? 1 : 0),
+				(this.#pressedActions.has("forward") ? 1 : 0) -
+				(this.#pressedActions.has("backward") ? 1 : 0),
 			right:
-				(this.#pressedKeys.has("c") ? 1 : 0) -
-				(this.#pressedKeys.has("z") ? 1 : 0),
+				(this.#pressedActions.has("strafeRight") ? 1 : 0) -
+				(this.#pressedActions.has("strafeLeft") ? 1 : 0),
 			up:
-				(this.#pressedKeys.has("space") || this.#pressedKeys.has("pageup")
-					? 1
-					: 0) - (this.#pressedKeys.has("pagedown") ? 1 : 0),
+				(this.#pressedActions.has("ascend") ? 1 : 0) -
+				(this.#pressedActions.has("descend") ? 1 : 0),
 		};
 	}
 
-	#speedMultiplier(isShiftActive: boolean): number {
-		return isShiftActive ? CAMERA_CONTROL_TUNING.shiftSlowMultiplier : 1;
+	#speedMultiplier(isPrecisionActive: boolean): number {
+		return isPrecisionActive
+			? CAMERA_CONTROL_TUNING.precisionSlowMultiplier
+			: 1;
 	}
 
 	#acceptsCameraKeys(): boolean {
@@ -517,13 +500,6 @@ export class ExplorerCameraInputController {
 		this.#state = state;
 		this.#onChange(state);
 	}
-}
-
-function movementKey(key: string): MovementKey | null {
-	const normalized = key.toLowerCase();
-	if (["w", "a", "s", "d", "z", "c", "pageup", "pagedown"].includes(normalized))
-		return normalized as MovementKey;
-	return key === " " ? "space" : null;
 }
 
 function cameraAxes(

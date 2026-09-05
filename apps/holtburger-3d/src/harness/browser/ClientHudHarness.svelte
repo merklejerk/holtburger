@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { provideViewportInputGate } from "../../lib/input/viewport-input-context";
+	import { probeBrowserInput } from "./input-browser-probe";
 	import { onMount } from "svelte";
 	import type { FrameRates } from "../../app/frame-rate-sampler";
 	import ClientWorldView from "../../client/ClientWorldView.svelte";
@@ -19,6 +21,7 @@
 	import type { ClientPresentationDiagnostics } from "../../client/client-presentation-session";
 	import type { ClientToast } from "../../client/client-toast-center";
 	import type { ClientTargetIndicatorFrame } from "../../client/client-target-indicator";
+	const inputGate = provideViewportInputGate();
 
 	interface ClientHudHarnessRectangle {
 		readonly height: number;
@@ -89,6 +92,8 @@
 	}
 
 	interface ClientHudHarnessApi {
+		/** Exercise overlapping modal/chat ownership while a viewport gesture is pending. */
+		readonly probeViewportBlockers: () => void;
 		readonly capture: () => ClientHudHarnessState;
 		readonly dragSurface: (
 			label: string,
@@ -634,6 +639,35 @@
 		minimapSubjectIndoor = indoor;
 	}
 
+	function probeViewportBlockers(): void {
+		const canvas = document.querySelector<HTMLCanvasElement>(".client-canvas");
+		const chat = document.querySelector<HTMLInputElement>(
+			'[aria-label="Chat message"]',
+		);
+		if (canvas === null || chat === null)
+			throw new Error("Viewport blocker probe requires canvas and chat.");
+		const closeModal = inputGate.block();
+		try {
+			chat.focus();
+			closeModal();
+			if (inputGate.allowed)
+				throw new Error("Closing a modal released chat's input blocker.");
+			canvas.dispatchEvent(
+				new PointerEvent("pointermove", {
+					clientX: 700,
+					clientY: 400,
+					pointerId: 1,
+				}),
+			);
+			canvas.focus();
+			if (!inputGate.allowed)
+				throw new Error("Leaving chat retained its input blocker.");
+		} finally {
+			closeModal();
+			canvas.focus();
+		}
+	}
+
 	function setCameraEnabled(enabled: boolean): void {
 		cameraEnabled = enabled;
 	}
@@ -675,12 +709,14 @@
 	}
 
 	onMount(() => {
+		probeBrowserInput();
 		const overlayObservation = observeMinimapOverlayArcCalls();
 		readMinimapOverlayArcCalls = overlayObservation.read;
 		const harnessGlobal = globalThis as typeof globalThis & {
 			__HOLTBURGER_3D_CLIENT_HUD_HARNESS__: ClientHudHarnessApi | undefined;
 		};
 		harnessGlobal.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__ = {
+			probeViewportBlockers,
 			capture,
 			dragSurface,
 			moveMinimapSubjectByBreadcrumbSpacing,
@@ -748,7 +784,6 @@
 	{toast}
 	chatMessages={messages}
 	onSendChat={async () => {}}
-	onChatFocusChange={() => {}}
 	onCanvas={() => {}}
 />
 

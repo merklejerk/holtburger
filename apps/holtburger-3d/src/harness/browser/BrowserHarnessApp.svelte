@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { ViewportInputGate } from "../../lib/input/viewport-input-gate";
+	import { APP_INPUT } from "../../lib/input/app-input";
 	import { onMount, tick as svelteTick } from "svelte";
 	import { PortalTransitionController } from "../../lib/client/portal-transition-controller";
 	import type { PortalTransitionPresentationReceipt } from "../../lib/client/portal-transition-presentation";
@@ -2550,11 +2552,16 @@
 			setPointerCapture() {},
 		} as unknown as HTMLCanvasElement;
 		const dispatch = (type: string, event: object) =>
-			listeners.get(type)?.({
-				preventDefault() {},
-				...event,
-			} as Event);
+			listeners.get(type)?.(
+				Object.assign(
+					new Event(type, { cancelable: true }),
+					{ getModifierState: () => false },
+					event,
+				),
+			);
 		const controller = new ExplorerCameraInputController({
+			inputGate: new ViewportInputGate(),
+			input: APP_INPUT,
 			canvas,
 			onChange() {},
 			onCharacterInput: (input) => routedCharacterInput.push(input),

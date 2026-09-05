@@ -1,5 +1,7 @@
 <script lang="ts">
-	import { tick } from "svelte";
+	import { onDestroy, tick } from "svelte";
+	import { useViewportInputGate } from "../lib/input/viewport-input-context";
+	import { APP_INPUT } from "../lib/input/app-input";
 	import ClientHudIcon from "./ClientHudIcon.svelte";
 	import {
 		CLIENT_CHAT_FILTER_TAGS,
@@ -14,11 +16,14 @@
 	interface Props {
 		readonly gameCanvas: HTMLCanvasElement | null;
 		readonly messages: readonly ClientChatLine[];
-		readonly onFocusChange: (focused: boolean) => void;
 		readonly onSend: (message: string) => Promise<void>;
 	}
 
-	const { gameCanvas, messages, onFocusChange, onSend }: Props = $props();
+	const { gameCanvas, messages, onSend }: Props = $props();
+	const inputGate = useViewportInputGate();
+	/** Focus owns this blocker until chat is left or unmounted. */
+	let releaseInputBlock: (() => void) | null = null;
+	onDestroy(() => releaseInputBlock?.());
 	type ChatFocusMode = "inactive" | "input" | "buffer" | "filters";
 
 	let inputElement = $state<HTMLInputElement | null>(null);
@@ -44,7 +49,7 @@
 
 	function handleWindowKeydown(event: KeyboardEvent): void {
 		if (focusMode !== "inactive") {
-			if (event.key === "Escape") {
+			if (APP_INPUT.shortcut("cancel", event)) {
 				event.preventDefault();
 				event.stopPropagation();
 				message = "";
@@ -52,18 +57,24 @@
 				gameCanvas?.focus();
 				return;
 			}
-			if (event.key === "PageUp" || event.key === "PageDown") {
+			if (
+				APP_INPUT.shortcut("chatPreviousPage", event) ||
+				APP_INPUT.shortcut("chatNextPage", event)
+			) {
 				event.preventDefault();
 				event.stopPropagation();
 				bufferElement?.scrollBy({
 					top:
-						(event.key === "PageUp" ? -1 : 1) *
+						(APP_INPUT.shortcut("chatPreviousPage", event) ? -1 : 1) *
 						(bufferElement.clientHeight * 0.85),
 				});
 			}
 			return;
 		}
-		if (event.key === "Enter" && document.activeElement === gameCanvas) {
+		if (
+			APP_INPUT.shortcut("chat", event) &&
+			document.activeElement === gameCanvas
+		) {
 			event.preventDefault();
 			inputElement?.focus();
 		}
@@ -89,7 +100,12 @@
 		const wasFocused = focusMode !== "inactive";
 		const isFocused = next !== "inactive";
 		focusMode = next;
-		if (wasFocused !== isFocused) onFocusChange(isFocused);
+		if (wasFocused === isFocused) return;
+		if (isFocused) releaseInputBlock = inputGate.block();
+		else {
+			releaseInputBlock?.();
+			releaseInputBlock = null;
+		}
 	}
 
 	function handleFocusOut(event: FocusEvent): void {

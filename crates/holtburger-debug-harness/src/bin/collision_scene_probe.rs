@@ -219,7 +219,7 @@ fn main() -> Result<()> {
         collision.terrain.cells.len(),
         collision.terrain.cells.len() * 2,
         collision.static_geometry.colliders.len(),
-        collision.static_geometry.cell_volumes.len(),
+        collision.static_geometry.cell_volumes().len(),
         collision.terrain.maximum_planar_shift_ratio
     );
     let cell_slope = |cell: &holtburger_content::TerrainCollisionCell| {
@@ -273,7 +273,7 @@ fn main() -> Result<()> {
         "cell_structures collidable={} inert_missing_root_bounds={} volumes={}",
         collidable_cell_structures,
         unbounded_cell_structures,
-        collision.static_geometry.cell_volumes.len()
+        collision.static_geometry.cell_volumes().len()
     );
     for collider_index in &args.describe_colliders {
         let provenance = collider_provenance

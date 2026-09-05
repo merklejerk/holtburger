@@ -1397,9 +1397,9 @@ mod tests {
             .insert(LandblockCollisionAsset {
                 landblock_id: 0x1000_ffff,
                 terrain: TerrainCollisionSurface::empty(),
-                static_geometry: LandblockColliders {
-                    colliders: Vec::new(),
-                    cell_volumes: vec![CellVolume {
+                static_geometry: LandblockColliders::new(
+                    Vec::new(),
+                    vec![CellVolume {
                         cell_selector: 0x0100,
                         placement: LandblockPlacement {
                             origin: Vector3::zero(),
@@ -1408,7 +1408,7 @@ mod tests {
                         planes: Vec::new(),
                         portals: Vec::new(),
                     }],
-                },
+                ),
             })
             .unwrap();
         let instance_sequence = client.world.player_entity().unwrap().instance_sequence();

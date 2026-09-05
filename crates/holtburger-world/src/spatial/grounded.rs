@@ -1630,10 +1630,7 @@ mod tests {
         LandblockCollisionAsset {
             landblock_id,
             terrain: TerrainCollisionSurface::empty(),
-            static_geometry: LandblockColliders {
-                colliders,
-                cell_volumes,
-            },
+            static_geometry: LandblockColliders::new(colliders, cell_volumes),
         }
     }
 
@@ -2597,10 +2594,7 @@ mod tests {
             .insert(LandblockCollisionAsset {
                 landblock_id: LANDBLOCK,
                 terrain,
-                static_geometry: LandblockColliders {
-                    colliders: vec![interior_floor],
-                    cell_volumes: vec![volume],
-                },
+                static_geometry: LandblockColliders::new(vec![interior_floor], vec![volume]),
             })
             .unwrap();
 

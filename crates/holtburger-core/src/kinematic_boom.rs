@@ -1869,10 +1869,7 @@ mod tests {
         LandblockCollisionAsset {
             landblock_id: landblock,
             terrain: flat_terrain(landblock),
-            static_geometry: LandblockColliders {
-                colliders,
-                cell_volumes: Vec::new(),
-            },
+            static_geometry: LandblockColliders::new(colliders, Vec::new()),
         }
     }
 
@@ -2503,9 +2500,9 @@ mod tests {
             .insert(LandblockCollisionAsset {
                 landblock_id: LANDBLOCK,
                 terrain: TerrainCollisionSurface::empty(),
-                static_geometry: LandblockColliders {
-                    colliders: Vec::new(),
-                    cell_volumes: vec![CellVolume {
+                static_geometry: LandblockColliders::new(
+                    Vec::new(),
+                    vec![CellVolume {
                         cell_selector: 0x0100,
                         placement: LandblockPlacement {
                             origin: Vector3::zero(),
@@ -2514,7 +2511,7 @@ mod tests {
                         planes: Vec::new(),
                         portals: Vec::new(),
                     }],
-                },
+                ),
             })
             .unwrap();
         let indoor_pose = WorldPosition {

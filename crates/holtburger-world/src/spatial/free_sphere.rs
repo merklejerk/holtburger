@@ -582,10 +582,7 @@ mod tests {
         LandblockCollisionAsset {
             landblock_id: landblock,
             terrain: flat_terrain(landblock),
-            static_geometry: LandblockColliders {
-                colliders,
-                cell_volumes,
-            },
+            static_geometry: LandblockColliders::new(colliders, cell_volumes),
         }
     }
 

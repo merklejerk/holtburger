@@ -572,10 +572,7 @@ fn portal_visible_terrain_lip_is_a_walkable_lift_not_a_placement_veto() {
                 }],
                 ..TerrainCollisionSurface::empty()
             },
-            static_geometry: LandblockColliders {
-                colliders: vec![ramp],
-                cell_volumes: vec![volume],
-            },
+            static_geometry: LandblockColliders::new(vec![ramp], vec![volume]),
         })
         .unwrap();
 
@@ -668,10 +665,7 @@ fn lowered_step_down_rebuild_reaches_horizontal_portal_support() {
         .insert(LandblockCollisionAsset {
             landblock_id: LANDBLOCK,
             terrain: TerrainCollisionSurface::empty(),
-            static_geometry: LandblockColliders {
-                colliders: vec![ramp],
-                cell_volumes: vec![volume],
-            },
+            static_geometry: LandblockColliders::new(vec![ramp], vec![volume]),
         })
         .unwrap();
 
@@ -1690,10 +1684,7 @@ fn scene_with_volumes(
         .insert(LandblockCollisionAsset {
             landblock_id: LANDBLOCK,
             terrain: TerrainCollisionSurface::empty(),
-            static_geometry: LandblockColliders {
-                colliders,
-                cell_volumes,
-            },
+            static_geometry: LandblockColliders::new(colliders, cell_volumes),
         })
         .unwrap();
     scene
@@ -1703,10 +1694,7 @@ fn artifact(landblock_id: u32, colliders: Vec<PlacedCollider>) -> LandblockColli
     LandblockCollisionAsset {
         landblock_id,
         terrain: TerrainCollisionSurface::empty(),
-        static_geometry: LandblockColliders {
-            colliders,
-            cell_volumes: Vec::new(),
-        },
+        static_geometry: LandblockColliders::new(colliders, Vec::new()),
     }
 }
 

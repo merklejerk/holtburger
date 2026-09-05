@@ -9,7 +9,6 @@ use holtburger_common::{Guid, Quaternion, Vector3};
 use holtburger_content::{CollisionShape, PlacedCollisionShape};
 
 use super::bsp_query::{ShapeContact, placed_polygon_contacts, placed_solid_contacts};
-use super::collision::anchor_point_to_cell_position;
 use super::collision_report::{
     CollisionReportClassification, CollisionReportContact, CollisionReportSource,
     CollisionReportTouch,
@@ -22,8 +21,8 @@ use super::physical_body::{
 use super::volume_query::{placed_ball_contact, placed_cylinder_contact};
 use super::{
     CollisionScene, DynamicBodyPhysicsStateChange, MotionWaypoint, MotionWaypointPlacement,
-    PhysicalBodyActuation, PhysicalBodyResponseState, PhysicalRestitution, PoseReconciliationState,
-    SpatialBody, SpatialBodyId, SpatialMembership,
+    PhysicalBodyActuation, PhysicalRestitution, PoseReconciliationState, SpatialBody,
+    SpatialBodyId, SpatialMembership,
 };
 use crate::EntityCollisionParticipation;
 
@@ -222,7 +221,7 @@ pub(crate) fn resolve_dynamic_contacts_for_mover(
         let candidate = SelectedBlockingContact {
             peer: peer_id,
             fraction: contact.fraction,
-            contact: contact.contact,
+            normal: contact.normal,
             clears_projectile_state: mover_dynamic.collision.dynamic_collision.missile
                 && peer_dynamic
                     .collision
@@ -241,13 +240,15 @@ pub(crate) fn resolve_dynamic_contacts_for_mover(
     let Some(selected) = selected else {
         let replacement_plan = (accepted_fraction < 1.0)
             .then(|| {
-                budgeted_prefix_plan(
+                let mut partial = truncated_motion_plan(
                     epoch.collision,
                     mover,
                     actuation,
                     epoch.delta_seconds,
                     accepted_fraction,
-                )
+                )?;
+                partial.motion.status = super::PhysicalBodyTickStatus::SubstepBudgetExceeded;
+                Ok::<_, anyhow::Error>(partial)
             })
             .transpose()?;
         return Ok(DynamicContactResolution {
@@ -268,7 +269,7 @@ pub(crate) fn resolve_dynamic_contacts_for_mover(
         replacement_plan: Some(replacement_plan),
         response: Some(DynamicResponseContact {
             peer: selected.peer,
-            normal: selected.contact.normal,
+            normal: selected.normal,
             state_change: selected.clears_projectile_state.then_some(
                 DynamicBodyPhysicsStateChange {
                     cleared: PhysicsState::MISSILE
@@ -393,14 +394,16 @@ fn pair_is_filtered(mover: &DynamicBodyRuntimeState, peer: &DynamicBodyRuntimeSt
 #[derive(Debug, Clone, Copy)]
 struct SampledContact {
     fraction: f32,
-    contact: ShapeContact,
+    /// Response normal selected from the deepest overlap at this sample.
+    normal: Vector3,
 }
 
 #[derive(Debug, Clone, Copy)]
 struct SelectedBlockingContact {
     peer: SpatialBodyId,
     fraction: f32,
-    contact: ShapeContact,
+    /// Peer surface normal used for velocity response, not positional separation.
+    normal: Vector3,
     clears_projectile_state: bool,
 }
 
@@ -524,7 +527,10 @@ impl<'a> PairTrajectories<'a> {
                 }
             }
             if let Some(contact) = deepest {
-                return Ok(Some(SampledContact { fraction, contact }));
+                return Ok(Some(SampledContact {
+                    fraction,
+                    normal: contact.normal,
+                }));
             }
         }
         Ok(None)
@@ -558,7 +564,8 @@ impl<'a> PairTrajectories<'a> {
     }
 }
 
-fn budgeted_prefix_plan(
+/// Solves a positive tick prefix and holds its committed endpoint for the remaining frame time.
+fn truncated_motion_plan(
     collision: &CollisionScene,
     mover: &SpatialBody,
     actuation: &PhysicalBodyActuation,
@@ -571,7 +578,10 @@ fn budgeted_prefix_plan(
         actuation,
         delta_seconds * accepted_fraction,
     )?;
-    let endpoint = partial.motion.path.final_point().center();
+    let final_point = partial.motion.path.final_point();
+    let endpoint = final_point.center();
+    let endpoint_placement =
+        MotionWaypointPlacement::Committed(final_point.placement().committed_cell());
     let mut waypoints = partial
         .motion
         .path
@@ -587,20 +597,15 @@ fn budgeted_prefix_plan(
     waypoints.push(MotionWaypoint {
         center: endpoint,
         end_fraction: accepted_fraction,
-        placement: MotionWaypointPlacement::Committed(
-            partial
-                .motion
-                .path
-                .final_point()
-                .placement()
-                .committed_cell(),
-        ),
+        placement: endpoint_placement,
     });
-    waypoints.push(MotionWaypoint {
-        center: endpoint,
-        end_fraction: 1.0,
-        placement: MotionWaypointPlacement::Traverse,
-    });
+    if accepted_fraction < 1.0 {
+        waypoints.push(MotionWaypoint {
+            center: endpoint,
+            end_fraction: 1.0,
+            placement: endpoint_placement,
+        });
+    }
     let physical = mover
         .physical
         .as_ref()
@@ -614,7 +619,6 @@ fn budgeted_prefix_plan(
         false,
     )?;
     partial.motion.path = path;
-    partial.motion.status = super::PhysicalBodyTickStatus::SubstepBudgetExceeded;
     partial.accepted_motion = super::physical_body::accepted_motion(
         mover.pose,
         partial.pose,
@@ -681,98 +685,22 @@ fn blocking_contact_plan(
     let contact_fraction = selected
         .fraction
         .max((1.0 / MAXIMUM_DYNAMIC_SLICES as f32).min(1.0));
-    let partial_seconds = delta_seconds * contact_fraction;
-    let mut partial = solve_physical_body_tick(collision, mover, actuation, partial_seconds)?;
-    let corrected = partial.motion.path.final_point().center()
-        + selected.contact.normal * selected.contact.depth;
-    let mut waypoints = partial
-        .motion
-        .path
-        .legs()
-        .iter()
-        .filter(|leg| leg.end_fraction() < 1.0)
-        .map(|leg| MotionWaypoint {
-            center: leg.end().center(),
-            end_fraction: leg.end_fraction() * contact_fraction,
-            placement: MotionWaypointPlacement::Committed(leg.end().placement().committed_cell()),
-        })
-        .collect::<Vec<_>>();
-    waypoints.push(MotionWaypoint {
-        center: corrected,
-        end_fraction: contact_fraction,
-        placement: MotionWaypointPlacement::Traverse,
-    });
-    if contact_fraction < 1.0 {
-        waypoints.push(MotionWaypoint {
-            center: corrected,
-            end_fraction: 1.0,
-            placement: MotionWaypointPlacement::Traverse,
-        });
-    }
+    // Object contact limits the mover's own motion; overlap is not permission to push it.
+    // Retail's slide response derives its offset from attempted movement, not penetration depth
+    // (CSphere::slide_sphere, acclient.c:344024-344137). Adding normal * depth here moved a
+    // stationary player through the dungeon floor after the environment solve had succeeded.
+    let mut partial =
+        truncated_motion_plan(collision, mover, actuation, delta_seconds, contact_fraction)?;
     let physical = mover
         .physical
         .as_ref()
         .context("dynamic mover lost its physical definition")?;
-    let primary = physical.definition.spheres().primary();
-    let corrected_path = trace_body_reference_path(
-        collision,
-        mover.pose,
-        physical.response.cell(),
-        primary,
-        &waypoints,
-        false,
-    )?;
-    let cell = corrected_path.final_point().placement().committed_cell();
-    let mut pose = partial.pose;
-    if let Some(cell) = cell {
-        pose = anchor_point_to_cell_position(
-            corrected_path.anchor(),
-            corrected,
-            cell,
-            partial.pose.rotation,
-        );
-    } else {
-        pose.landblock_id = partial.motion.path.anchor();
-        pose.coords = corrected;
-        pose = pose
-            .normalize_outdoor_landblock_frame()
-            .context("could not normalize dynamic contact endpoint")?;
-    }
-    partial.pose = pose;
     partial.retained_velocity = dynamic_collision_velocity(
         partial.retained_velocity,
         physical.response_policy.restitution,
-        selected.contact.normal,
+        selected.normal,
     );
-    partial.accepted_motion = super::physical_body::accepted_motion(
-        mover.pose,
-        pose,
-        (pose.global_coords() - mover.pose.global_coords()) / delta_seconds,
-        delta_seconds,
-    );
-    partial.response = response_with_cell(partial.response, cell);
-    partial.motion.path = corrected_path;
     Ok(partial)
-}
-
-fn response_with_cell(
-    response: PhysicalBodyResponseState,
-    cell: Option<Guid>,
-) -> PhysicalBodyResponseState {
-    match response {
-        PhysicalBodyResponseState::FreeSphere { .. } => {
-            PhysicalBodyResponseState::FreeSphere { cell }
-        }
-        PhysicalBodyResponseState::Grounded {
-            ground,
-            stationary_fall_frames,
-            ..
-        } => PhysicalBodyResponseState::Grounded {
-            cell,
-            ground,
-            stationary_fall_frames,
-        },
-    }
 }
 
 fn dynamic_collision_velocity(

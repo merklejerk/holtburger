@@ -1726,6 +1726,30 @@ offset rather than an independently meaningful row and column.
 **Possible responses:** Bound logical coordinates before flattening, restrict traversal to the
 producer's declared width, or expose a row-scoped view that preserves the missing-field boundary.
 
+## Post-validation Mutation Retains the Original Approval
+
+**Smell:** A later stage changes an accepted result while continuing to rely on the validation
+that applied to its earlier value.
+
+**Signals:**
+
+- An adjustment is applied after the subsystem responsible for constraints has finished.
+- Related status or ownership fields are rewritten to fit the adjusted value without checking
+  the original constraints again.
+- Each stage satisfies its own local rule, but no stage owns validity of the combined result.
+
+**Possible failure:** A locally sensible correction violates a previously established invariant,
+and downstream consumers receive an invalid result labeled as accepted.
+
+**Questions:** Which changes preserve the original proof? Is the adjustment required behavior,
+or merely a convenient heuristic? Who checks the final value against all applicable constraints?
+
+**Counterexamples:** A transformation can safely preserve approval when its invariants are proven
+to preserve the validated property, or when the changed fields are irrelevant to that property.
+
+**Possible responses:** Remove an unsupported adjustment, move required adjustments before final
+validation, or make transformations explicitly invalidate acceptance until rechecked.
+
 ## Adding Observations
 
 An observation belongs here when it has:

@@ -2071,6 +2071,7 @@ impl SpatialScene {
 #[cfg(test)]
 mod physical_body_tests {
     use super::*;
+    use crate::spatial::dynamic_contact::MAXIMUM_DYNAMIC_SLICE_DISTANCE;
     use crate::spatial::dynamic_index::target_bounds;
     use crate::{
         CollisionReportClassification, CollisionReportPhase, DynamicBodyCollisionDefinition,
@@ -5178,6 +5179,180 @@ mod physical_body_tests {
     }
 
     #[test]
+    fn contact_at_tick_end_preserves_a_complete_motion_path() {
+        let now = Instant::now();
+        let mover = SpatialBodyId::Entity(Guid(0x7000_0001));
+        let peer = SpatialBodyId::Entity(Guid(0x7000_0002));
+        let delta_seconds = 0.1;
+        let travel = MAXIMUM_DYNAMIC_SLICE_DISTANCE * 0.25;
+        let mut scene = SpatialScene::new();
+        for (id, x, velocity) in [
+            (mover, 10.0, travel / delta_seconds),
+            (peer, 11.0 + travel * 0.5, 0.0),
+        ] {
+            install_free_dynamic(
+                &mut scene,
+                id,
+                Vector3::new(x, 10.0, 10.0),
+                Vector3::new(velocity, 0.0, 0.0),
+                fallback_target(Arc::new(CollisionShape::Ball(CollisionBall {
+                    center: Vector3::zero(),
+                    radius: 0.5,
+                }))),
+                now,
+            );
+        }
+        // Less than one sampling slice of travel: the first overlap is the final sample.
+        let collision = collision_scene(None);
+        scene
+            .prepare_dynamic_entity_collection(&collision, delta_seconds, collection_actuation)
+            .unwrap();
+        let result = scene
+            .tick_prepared_dynamic_physical_body(
+                mover,
+                &collision,
+                now + Duration::from_millis(100),
+            )
+            .unwrap();
+        assert_eq!(result.dynamic_contact.unwrap().peer, peer);
+        let solved = scene.body(mover).unwrap();
+        assert_eq!(solved.pose.coords, Vector3::new(10.0 + travel, 10.0, 10.0));
+        assert!(solved.retained.velocity.x < 0.0);
+    }
+
+    #[test]
+    fn overlapping_peer_preserves_a_stationary_grounded_body_position() {
+        let now = Instant::now();
+        let mover = SpatialBodyId::LocalPlayer(Guid(0x5000_0001));
+        let peer = SpatialBodyId::Entity(Guid(0x7000_0002));
+        let mut scene = SpatialScene::new();
+        scene.register_body(SpatialBody::new(
+            mover,
+            pose(Vector3::new(10.0, 10.0, 0.005)),
+            now,
+        ));
+        scene
+            .set_dynamic_physical_body(
+                mover,
+                Some(dynamic_definition(grounded_definition(), false)),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+        // The old depth-based response to this overlap pushed the support sphere downward,
+        // just as the Olthoi contact did in the live dungeon reproduction.
+        install_free_dynamic(
+            &mut scene,
+            peer,
+            Vector3::new(10.2, 10.0, 0.8),
+            Vector3::zero(),
+            fallback_target(Arc::new(CollisionShape::Ball(CollisionBall {
+                center: Vector3::zero(),
+                radius: 0.5,
+            }))),
+            now,
+        );
+        let collision = flat_collision_scene();
+        scene
+            .prepare_dynamic_entity_collection(&collision, 0.1, collection_actuation)
+            .unwrap();
+        let result = scene
+            .tick_prepared_dynamic_physical_body(
+                mover,
+                &collision,
+                now + Duration::from_millis(100),
+            )
+            .unwrap();
+        assert_eq!(result.dynamic_contact.unwrap().peer, peer);
+        let solved = scene.body(mover).unwrap();
+        assert!(
+            solved.pose.coords.z >= 0.0,
+            "pushed below floor: {:?}",
+            solved.pose
+        );
+        assert_eq!(solved.pose.coords.x, 10.0);
+        assert_eq!(solved.pose.coords.y, 10.0);
+        assert_eq!(solved.contact, ContactState::Grounded);
+    }
+
+    #[test]
+    fn overlapping_peer_preserves_negative_coordinate_dungeon_placement() {
+        let now = Instant::now();
+        let mover = SpatialBodyId::LocalPlayer(Guid(0x5000_0001));
+        let peer = SpatialBodyId::Entity(Guid(0x7000_0002));
+        let cell = Guid(0xda55_0100);
+        let mut collision = collision_scene(None);
+        collision
+            .insert(LandblockCollisionAsset {
+                landblock_id: 0xda55_ffff,
+                terrain: TerrainCollisionSurface::empty(),
+                static_geometry: LandblockColliders {
+                    colliders: Vec::new(),
+                    cell_volumes: vec![CellVolume {
+                        cell_selector: 0x0100,
+                        placement: LandblockPlacement {
+                            origin: Vector3::zero(),
+                            orientation: Quaternion::identity(),
+                        },
+                        planes: vec![Plane {
+                            normal: Vector3::new(0.0, 0.0, 1.0),
+                            d: 0.0,
+                        }],
+                        portals: Vec::new(),
+                    }],
+                },
+            })
+            .unwrap();
+        let mut scene = SpatialScene::new();
+        for (id, z) in [(mover, 0.5), (peer, 0.6)] {
+            scene.register_body(SpatialBody::new(
+                id,
+                WorldPosition {
+                    landblock_id: cell,
+                    coords: Vector3::new(10.0, -170.0, z),
+                    rotation: Quaternion::identity(),
+                },
+                now,
+            ));
+            scene
+                .set_dynamic_physical_body(
+                    id,
+                    Some(dynamic_definition(
+                        free_definition(Vector3::zero(), 0.5),
+                        false,
+                    )),
+                    PhysicalCollisionFilter::ALL,
+                    Some(cell),
+                )
+                .unwrap();
+        }
+        let before = scene.body(mover).unwrap().pose;
+        scene
+            .prepare_dynamic_entity_collection(&collision, 0.1, collection_actuation)
+            .unwrap();
+        let result = scene
+            .tick_prepared_dynamic_physical_body(
+                mover,
+                &collision,
+                now + Duration::from_millis(100),
+            )
+            .unwrap();
+        assert_eq!(result.dynamic_contact.unwrap().peer, peer);
+        assert_eq!(scene.body(mover).unwrap().pose, before);
+        assert_eq!(
+            scene
+                .body(mover)
+                .unwrap()
+                .physical
+                .as_ref()
+                .unwrap()
+                .response
+                .cell(),
+            Some(cell)
+        );
+    }
+
+    #[test]
     fn grounded_environment_response_is_retained_when_peer_contact_truncates_the_tick() {
         let now = Instant::now();
         let mover = SpatialBodyId::Entity(Guid(0x7000_0001));
@@ -5493,10 +5668,11 @@ mod physical_body_tests {
         scene
             .prepare_dynamic_entity_collection(&collision, 1.0, collection_actuation)
             .unwrap();
-        scene
+        let result = scene
             .tick_prepared_dynamic_physical_body(mover, &collision, now + Duration::from_secs(1))
             .unwrap();
-        assert_ne!(
+        assert_eq!(result.dynamic_contact.unwrap().peer, target);
+        assert_eq!(
             scene.body(mover).unwrap().pose.coords,
             Vector3::new(0.0, 2.0, 0.0)
         );

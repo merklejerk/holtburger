@@ -3581,3 +3581,126 @@ terminal-event tests to check the actual shutdown/failure cause. Reviewed task o
 sender-close/drain ordering, cooperative cancellation limits, lag recovery, and evidence caveats.
 Re-ran all 271 host tests, Clippy with warnings denied, formatting, and diff checks. Live dungeon
 verification remains pending; this review did not initiate a login or claim a measured latency gain.
+
+### Olthoi Dungeon Freeze Reproduction — 2026-09-05
+
+The user moved +Holtfighter to an Olthoi dungeon and reported severe slowdown as enemies approach
+after login. On revision `c6c299c0`, a stationary real-GPU probe reproduced a rendering freeze.
+The user identifies this as a pre-existing intermittent bug and subsequently authorized fixing it
+because it blocks the crowd-performance investigation. Do not interpret this capture as proof
+that the task-boundary change introduced the bug, or as a completed performance diagnosis.
+
+Six consecutive approximately ten-second windows shared one login, beginning immediately after
+world readiness rather than waiting ten seconds, to capture the approach. Same machine and render
+scale as the preceding investigation; viewport 1442×904 at freeze. No movement, camera, combat,
+or selection input was sent. The first seven one-second samples resolve the player to landblock
+`0x6346ffff`, EnvCell `0x63460369`; sample eight loses the presented player origin. At approximately
+01:49:51 local time, the browser logs exactly:
+
+> Client presentation is unavailable after world handoff: The authoritative local player has no installed runtime presentation.
+
+The world image then remains frozen for all five later windows. Inspected first and last
+screenshots: a crowd of Olthoi Swarm Gardeners, Harvesters, and Nymphs surrounds the player.
+The last rendered presentation retains 22 visible dynamic roots, 37 dynamic draws, and the old
+camera presentation in `0x6346036e`. Lifecycle stays `in-world`; camera generation stays 1 and
+incoming camera sequence advances from 307 near the failure to 2172 at the end. The wire camera
+event names cell `0x6346036a`, distinct from the frozen presented camera cell. These facts rule out
+a stopped rAF loop or complete cessation of host event delivery, not every possible upstream bug.
+
+The concrete stop is `ClientPresentationSession.frame`: after confirming the authoritative player
+exists with world placement, it calls `runtime.dynamicEntityOrigin(playerGuid)`. A null origin
+sets `loading-player` and returns `rendered: false` before rendering. `dynamicEntityOrigin` checks
+the installed-presentation map and then resolves its scene node; this capture did not yet record
+which upstream retirement/realization transition lost the origin. Investigate residency/interest
+withdrawal, deferred realization wakeup, and scene-node lifetime before changing the frame guard.
+
+Important diagnostic trap: `ClientApp` increments `sampledFrameCount` and its FPS sampler on every
+callback even when presentation returns `rendered: false`. Later windows therefore report ~144
+callbacks/second and 0.020–0.028 ms callback means while the world is frozen. Renderer profiling
+has no new samples in those windows. These are not rendering throughput measurements.
+
+Rust continues working after the freeze: summed thread CPU is 1910, 1980, 1940, 1930, and 1950 ms
+per ~10.02-second later window (~19–20% of one CPU), predominantly on one worker. Native leaf
+samples identify reached-cell expansion, cell/path transit, placed-shape coordinate transforms,
+and BSP traversal. The first window includes loading and new threads and is not a steady-state
+CPU comparison. The post-freeze workload is not a valid end-to-end crowd-performance baseline.
+
+Captured artifacts: `/tmp/holtburger-olthoi-{1,2,3,4,5,6}` with `.json`, `.cpuprofile`, `.png`,
+`.perf.data`, `.perf.log`, and `.threads.json` suffixes. Reports retain once-per-second snapshots,
+redacted host logs, browser warnings, lifecycle, and camera-event summaries. Temporary repeated
+profiling edits were removed. Follow-up player-retirement diagnostics and a fix are in progress;
+the initial capture alone does not establish the root cause.
+
+#### Follow-up: Collision Separation Caused the Presentation Loss
+
+The second trace (`/tmp/holtburger-freeze-trace.{json,cpuprofile,png}`) captured the authoritative
+player placement changing from EnvCell `0x63460369`, position `(142.4561, -171.4839, 0.0050)`, to
+outdoor cell `0x63450029`, position `(143.0270, 20.7563, -0.6399)`. The negative Y coordinate is
+valid authored dungeon space, not an outdoor landblock crossing. Scene-interest reconciliation
+then withdrew the player's installed presentation and deferred it on `0x6345ffff:outdoor`, while
+the available interest still contained only `0x6346ffff` EnvCells. This explains the frame guard:
+it was reacting to a bad upstream placement, not a stopped host or WebGL failure.
+
+Targeted native contact logging established the unsafe operation. After solving environment
+collision for a partial tick, `blocking_contact_plan` added `contact.normal * contact.depth`
+directly to the body reference point. It then traced cell membership, but did not solve collision
+for that added movement. A player contact with Olthoi `0x800040a2` moved a correctly solved
+`z = 0.0050` to `z = -0.1883` (normal Z `-0.32155`, depth `0.60111`). Subsequent ticks repeatedly
+repaired floor height before another contact moved it below the floor again. A sufficiently deep
+correction can escape interior containment; placement recovery selects outdoors and coordinate
+normalization converts negative dungeon Y into the neighboring landblock. Another trace caught
+the same escape on a non-player entity. Artifacts: `/tmp/holtburger-freeze-player-contact` and
+`/tmp/holtburger-freeze-contact`, each with `.json`, `.cpuprofile`, and `.png` suffixes. These two
+short runs did not freeze the player, so the crowded login is an improved, not deterministic, repro.
+
+The user noted that retail monsters generally do not push stationary players. This changed the
+fix from validating the added displacement to removing the unsupported displacement altogether.
+Retail `CSphere::slide_sphere` (`acclient.c:344024–344137`; ACE `Physics/Sphere.cs`, `SlideSphere`)
+derives adjustments from the mover's attempted displacement. It does not establish a general
+`normal * penetration depth` push on a stationary overlapping body. Retail also revalidates
+adjusted placements before commit (`CTransition::validate_placement`, `acclient.c:301282–301304`).
+These references support removing our invented separation behavior; they do not prove complete
+retail parity for every dynamic-contact branch.
+
+Implementation removes the post-solve positional correction, its coordinate normalization, and
+its separate response-cell rewrite. Dynamic contact still truncates the mover's own attempted
+motion and applies the existing velocity/restitution and reporting behavior. Blocking contact
+and slice-budget exhaustion now share the existing prefix-plan construction, retaining the
+environment solver's endpoint and committed cell. No renderer fallback, streaming-policy change,
+additional collision-validation pass, or joint body-separation solver is added.
+
+Regression evidence: the synthetic grounded overlap failed before the fix with the body at
+`z = -0.50587`, despite its environment-solved height being `0.005`. It now retains floor height
+and horizontal position. A second synthetic regression retains an overlapping stationary body's
+negative-coordinate dungeon pose and interior cell. The rotating-target test now checks the
+accepted contact identity and stationary position instead of requiring an invented push.
+
+First post-fix real-GPU verification: one ten-second settle followed by a 60.178-second window,
+same character/dungeon, render scale 1, viewport 1443×905, no movement/camera input. All 60 samples
+retain player cell `0x63460369`; actual renderer frame counts advance from 1828 to 10336 with no
+stalled sample interval. There are 27–36 visible dynamic entities and no browser warning, error,
+or exception. Final screenshot inspected and confirms the surrounding Olthoi crowd. Artifacts:
+`/tmp/holtburger-freeze-fixed-1.{json,cpuprofile,png}`.
+
+Second verification, after a reconnect gap: another 60.178-second window after settling, viewport
+1444×906, same render scale and no input. All 60 samples retain the same interior player cell;
+actual renderer counts advance from 1830 to 10348 without a stalled sample interval. The visible
+crowd is 30–34 dynamic entities; no browser warning, error, or exception occurs. Final screenshot
+inspected. Artifacts: `/tmp/holtburger-freeze-fixed-2.{json,cpuprofile,png}`. The two successful runs
+and deterministic regressions validate the identified failure mechanism, not the absence of all
+possible renderer freezes. This is correctness evidence, not a controlled before/after
+crowd-performance comparison; the native crowd CPU investigation remains pending.
+
+Validation: 568 world tests, 343 core tests, and 271 host tests pass. Clippy passes for all three
+packages and all targets with warnings denied; formatting and diff checks pass. Temporary native
+and frontend logging and the longer probe window were removed. Selected contact results retain
+only their consumed response normal, not unused penetration depth.
+
+Pre-commit quality review: derive both terminal waypoints from the same committed endpoint fact;
+document the shared prefix helper's contract; add coverage for a blocking contact at exactly the
+tick's final sample, where no extra hold waypoint is allowed. The fixture derives its travel from
+the runtime slice-distance limit rather than relying on a copied tuning value. Final validation:
+569 world tests, 343 core tests, 271 host tests, Clippy with warnings denied, formatting, and diff
+checks. The two prior live runs remain the runtime evidence; this review sent no movement or
+camera input and initiated no additional login. Added the domain-independent post-validation
+mutation smell to `docs/code-quality-audit-patterns.md`.

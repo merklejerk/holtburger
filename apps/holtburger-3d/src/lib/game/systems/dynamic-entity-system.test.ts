@@ -41,6 +41,65 @@ import { RUNTIME_LIGHT_RANGE_SCALE } from "../environment/runtime-lights";
 import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 
 describe("DynamicEntitySystem authored ownership", () => {
+	it("initializes a late part request from the current pose and retains its frame until eviction", async () => {
+		const { system, scene } = createSystem(
+			new InlineObjectVisualTemplatePreparer(),
+			new FixtureAnimationSource(3),
+		);
+		const installation = system.replaceOwner("owner", [
+			source("late", [0, 1, 2]),
+		]);
+		await installation.ready;
+		const prepared = requiredAt(installation.getPreparedEntities(), 0);
+		commit(installation);
+		const root = requiredAt(installation.nodeIds, 0);
+		const sample = presentationSample(prepared, 0);
+		const partPose = createRotationMat4(
+			new Quat(0, 0, Math.SQRT1_2, Math.SQRT1_2),
+		);
+		partPose.m41 = 7;
+		system.publishPresentation([
+			{
+				...sample,
+				articulatedPose: {
+					authoredRootTransform: null,
+					partToObjectTransforms: [Mat4.identity(), Mat4.identity(), partPose],
+				},
+			},
+		]);
+		// The renderable pose is current before any attachment asks for a frame.
+		expect(
+			system.getVisiblePresentation(root)?.visual.parts[2]?.localToVisualRoot,
+		).toEqual(partPose);
+		expect(system.requestPartNode(root, 3)).toBeNull();
+		const frame = system.requestPartNode(root, 2);
+		if (frame === null) throw new Error("Fixture part frame was not created.");
+		expect(scene.getResolvedPlacement(frame)?.localToLandblock).toEqual(
+			partPose,
+		);
+		expect(system.requestPartNode(root, 2)).toBe(frame);
+		system.publishPresentation([sample]);
+		expect(scene.getResolvedPlacement(frame)?.localToLandblock).toEqual(
+			Mat4.identity(),
+		);
+		const rootTransform = Mat4.identity();
+		rootTransform.m41 = 3;
+		system.updatePlacement(root, {
+			envCellId: null,
+			landblockId: "0x0002ffff",
+			localTransform: rootTransform,
+			spatialMembership: { scopes: [{ kind: "outdoor" }] },
+		});
+		expect(scene.getResolvedOrigin(frame)?.landblockId).toBe("0x0002ffff");
+		expect(scene.getResolvedOrigin(frame)?.landblockOrigin).toEqual(
+			new Vec3(3, 0, 0),
+		);
+		system.removeOwner("owner");
+		expect(scene.hasNode(frame)).toBe(false);
+		expect(system.requestPartNode(root, 2)).toBeNull();
+		await system.destroy();
+	});
+
 	it("replaces appearance while preserving part targets, effects, pose, and owner siblings", async () => {
 		const { system, effects } = createSystem(
 			new InlineObjectVisualTemplatePreparer(),
@@ -58,7 +117,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 		commit(installation);
 		const root = requiredAt(installation.nodeIds, 0);
 		const sibling = requiredAt(installation.nodeIds, 1);
-		const partNode = system.resolvePartNode(root, 0);
+		const partNode = system.requestPartNode(root, 0);
 		const siblingRenderable = system.getRenderable(sibling);
 		effects.applyTransparentPart(
 			{ generation: installation.generation, targetId: behaviorTargetId(root) },
@@ -122,7 +181,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 		expect(currentPresentation?.visual.parts[0]?.frameInstance.color.a).toBe(
 			0.6,
 		);
-		expect(system.resolvePartNode(root, 0)).toBe(partNode);
+		expect(system.requestPartNode(root, 0)).toBe(partNode);
 		expect(system.getPartToObjectTransforms(root)).toBe(pose);
 		expect(system.getRenderable(sibling)).toBe(siblingRenderable);
 		expect(
@@ -321,8 +380,6 @@ describe("DynamicEntitySystem authored ownership", () => {
 		commit(child);
 		const parentRoot = requiredAt(parent.nodeIds, 0);
 		const childRoot = requiredAt(child.nodeIds, 0);
-		const parentPart = system.resolvePartNode(parentRoot, 0);
-		if (parentPart === null) throw new Error("Parent part was not installed.");
 		const publishParentPose = (x: number) => {
 			const transform = Mat4.identity();
 			transform.m41 = x;
@@ -340,7 +397,9 @@ describe("DynamicEntitySystem authored ownership", () => {
 
 		system.attachEntity(childRoot, parentRoot, "right-hand", 1);
 
-		const childPart = system.resolvePartNode(childRoot, 0);
+		const parentPart = system.requestPartNode(parentRoot, 0);
+		if (parentPart === null) throw new Error("Parent part was not installed.");
+		const childPart = system.requestPartNode(childRoot, 0);
 		if (childPart === null) throw new Error("Child part was not installed.");
 		expect(scene.getResolvedPlacement(childPart)?.localToLandblock.m41).toBe(
 			19,
@@ -404,8 +463,8 @@ describe("DynamicEntitySystem authored ownership", () => {
 		childStage.release();
 		parentStage.commit();
 		parentStage.release();
-		expect(system.resolvePartNode(parentRoot, 0)).toBe(parentPart);
-		expect(system.resolvePartNode(childRoot, 0)).toBe(childPart);
+		expect(system.requestPartNode(parentRoot, 0)).toBe(parentPart);
+		expect(system.requestPartNode(childRoot, 0)).toBe(childPart);
 		expect(
 			system.withSelectionGeometry(
 				childRoot,
@@ -1134,7 +1193,9 @@ describe("DynamicEntitySystem authored ownership", () => {
 		expect(await installation.ready).toBe("ready");
 		commit(installation);
 		const nodeId = requiredAt(installation.nodeIds, 0);
-		const partNodeId = system.resolvePartNode(nodeId, 0)!;
+		const partNodeId = system.requestPartNode(nodeId, 0);
+		if (partNodeId === null)
+			throw new Error("Scale fixture part is unavailable.");
 		const prepared = system.getPreparedAnimation(nodeId);
 		const initialCullingBounds = scene.getNode(nodeId)?.localBounds?.clone();
 		if (!initialCullingBounds) throw new Error("Entity has no culling bounds.");

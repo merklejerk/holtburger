@@ -1,7 +1,7 @@
 import type { EnvCellId, LandblockOwnerId } from "../game-types";
 import type { ObjectGeometryKey } from "../geometry/types";
 import type { AABB3, Mat4, Vec3 } from "../math/types";
-import type { SceneNodeId, SceneScope } from "../scene";
+import type { SceneScope } from "../scene";
 import type { ObjectMaterialBinding } from "../commit/artifacts";
 import type { ObjectMaterialOrdering } from "../resolution/object-material-planner";
 import type { RetailGeometryVisibility } from "../resolution/presentation";
@@ -86,8 +86,6 @@ export interface ActiveDynamicPart {
 	readonly localToVisualRoot: Mat4;
 	/** Reusable renderer-neutral instance payload rewritten from the current placement and effects. */
 	readonly frameInstance: ObjectInstanceData;
-	/** Transform-only scene node carrying the current rigid-part pose. */
-	readonly nodeId: SceneNodeId;
 	/** Authored setup part addressed by animation frame tables. */
 	readonly partIndex: number;
 	/** Current effect state, updated in place with the retained part record after sample validation. */
@@ -100,7 +98,7 @@ export type DynamicEntityRenderable = {
 	readonly parts: readonly ActiveDynamicPart[];
 } & (
 	| {
-			/** Part targets exist during preparation, but no merged visual is installed yet. */ readonly kind: "preparing";
+			/** Part pose data exists during preparation, but no merged visual is installed yet. */ readonly kind: "preparing";
 	  }
 	| {
 			/** Geometry and appearance are published atomically after resource staging succeeds. */

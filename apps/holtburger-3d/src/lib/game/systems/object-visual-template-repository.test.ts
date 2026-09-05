@@ -20,11 +20,102 @@ import {
 } from "./object-visual-template-repository";
 
 describe("ObjectVisualTemplateRepository", () => {
+	it("rolls back atlas and geometry when renderer appearance staging fails", async () => {
+		const geometry = new FixtureGeometry();
+		const atlas = new FixtureAtlas();
+		const repository = new ObjectVisualTemplateRepository(
+			geometry,
+			atlas,
+			new InlineObjectVisualTemplatePreparer(),
+			() => {
+				throw new Error("device appearance preparation failed");
+			},
+		);
+		const stage = repository.stageOwner([
+			source("failure", "appearance:device-failure"),
+		]);
+		await expect(stage.completion).rejects.toThrow(
+			"device appearance preparation failed",
+		);
+		expect(geometry.resources.size).toBe(0);
+		expect(atlas.activeOwnerCount).toBe(0);
+		expect(atlas.withdrawalCount).toBe(1);
+		stage.release();
+		await repository.destroy();
+	});
+	it("continues releasing source resources after an appearance release failure", async () => {
+		const geometry = new FixtureGeometry();
+		const atlas = new FixtureAtlas();
+		const repository = new ObjectVisualTemplateRepository(
+			geometry,
+			atlas,
+			new InlineObjectVisualTemplatePreparer(),
+			() => () => {
+				throw new Error("appearance release failed");
+			},
+		);
+		const stage = repository.stageOwner([
+			source("failure", "appearance:release-failure"),
+		]);
+		await stage.completion;
+		stage.commit("owner");
+		repository.dropOwner("owner");
+		expect(geometry.resources.size).toBe(0);
+		expect(atlas.withdrawalCount).toBe(1);
+		await expect(repository.destroy()).rejects.toThrow(
+			"visual-template resources failed to release",
+		);
+	});
+	it("keeps logical selectors distinct when equal bindings coalesce authored slots", async () => {
+		const base = source("equal-slots", "appearance:equal-slots");
+		const same = material("same");
+		const visual = {
+			...base,
+			presentation: {
+				...base.presentation,
+				parts: base.presentation.parts.map((part) => ({
+					...part,
+					materials: [same, same],
+				})),
+			},
+		};
+		const prepared = await new InlineObjectVisualTemplatePreparer().prepare(
+			visual,
+		);
+		expect(prepared.parts[0]?.drawUnits).toHaveLength(1);
+		expect(prepared.appearance.materials).toHaveLength(2);
+		expect(prepared.appearance.ranges).toMatchObject([
+			{ materialSelector: 0, indexStart: 0, indexCount: 3 },
+			{ materialSelector: 1, indexStart: 3, indexCount: 3 },
+			{ materialSelector: 0, indexStart: 6, indexCount: 3 },
+		]);
+		const changed = await new InlineObjectVisualTemplatePreparer().prepare(
+			base,
+		);
+		expect(changed.layout.key).toBe(prepared.layout.key);
+		expect(
+			changed.appearance.materials.map((binding) => binding.source.id),
+		).toEqual(["material:first", "material:second"]);
+	});
 	it("shares one in-flight preparation across owners and retains complete material ranges", async () => {
 		const geometry = new FixtureGeometry();
 		const atlas = new FixtureAtlas();
 		const preparer = new CountingPreparer();
-		const repository = createRepository(geometry, preparer, atlas);
+		let appearanceRetains = 0;
+		let appearanceReleases = 0;
+		const repository = new ObjectVisualTemplateRepository(
+			geometry,
+			atlas,
+			preparer,
+			() => {
+				expect(atlas.activeOwnerCount).toBe(1);
+				appearanceRetains += 1;
+				return () => {
+					expect(atlas.activeOwnerCount).toBe(1);
+					appearanceReleases += 1;
+				};
+			},
+		);
 		const visual = source("shared", "appearance:base");
 
 		const first = repository.stageOwner([visual]);
@@ -35,6 +126,7 @@ describe("ObjectVisualTemplateRepository", () => {
 		]);
 
 		expect(preparer.count).toBe(1);
+		expect(appearanceRetains).toBe(1);
 		expect(atlas.preparationCount).toBe(1);
 		first.commit("first");
 		second.commit("second");
@@ -47,30 +139,62 @@ describe("ObjectVisualTemplateRepository", () => {
 		expect(template?.parts[0]?.depthDrawUnits).toMatchObject([
 			{ cullFace: "back", indexCount: 9, indexStart: 0 },
 		]);
-		expect(geometry.resources.size).toBe(1);
+		if (template === undefined)
+			throw new Error("Shared template was not prepared.");
+		expect([...geometry.resources.keys()].sort()).toEqual([
+			template.layout.key,
+		]);
 		expect(atlas.activeOwnerCount).toBe(1);
 
 		repository.dropOwner("first");
-		expect(geometry.resources.size).toBe(1);
+		expect(appearanceReleases).toBe(0);
+		expect([...geometry.resources.keys()].sort()).toEqual([
+			template.layout.key,
+		]);
 		expect(atlas.activeOwnerCount).toBe(1);
 		repository.dropOwner("second");
+		expect(appearanceReleases).toBe(1);
 		expect(geometry.resources.size).toBe(0);
 		expect(atlas.activeOwnerCount).toBe(0);
 		expect(atlas.withdrawalCount).toBe(1);
 	});
 
-	it("does not alias distinct canonical appearances", async () => {
+	it("retains a shared layout until the last distinct appearance owner leaves", async () => {
 		const preparer = new CountingPreparer();
-		const repository = createRepository(new FixtureGeometry(), preparer);
+		const geometry = new FixtureGeometry();
+		const repository = createRepository(geometry, preparer);
 		const base = source("base", "appearance:base");
 		const changed = source("changed", "appearance:changed");
 
-		const staged = repository.stageOwner([base, changed]);
-		const outcome = await staged.completion;
-		staged.commit("layer");
+		const baseStage = repository.stageOwner([base]);
+		const changedStage = repository.stageOwner([changed]);
+		const [baseOutcome, changedOutcome] = await Promise.all([
+			baseStage.completion,
+			changedStage.completion,
+		]);
+		baseStage.commit("base");
+		changedStage.commit("changed");
 
 		expect(preparer.count).toBe(2);
-		expect(outcome.size).toBe(2);
+		const baseTemplate = baseOutcome.get(objectVisualTemplateKey(base));
+		const changedTemplate = changedOutcome.get(
+			objectVisualTemplateKey(changed),
+		);
+		if (baseTemplate === undefined || changedTemplate === undefined)
+			throw new Error("Appearance fixtures were not prepared.");
+		expect(baseTemplate).not.toBe(changedTemplate);
+		expect(baseTemplate.layout).toBe(changedTemplate.layout);
+		expect([...geometry.resources.keys()]).toEqual([baseTemplate.layout.key]);
+		expect(baseTemplate.parts[0]?.geometryData.positions).toBe(
+			base.presentation.parts[0]?.geometry.positions,
+		);
+		repository.dropOwner("base");
+		expect([...geometry.resources.keys()]).toEqual([
+			changedTemplate.layout.key,
+		]);
+		repository.dropOwner("changed");
+		expect(geometry.resources.size).toBe(0);
+		await repository.destroy();
 	});
 
 	it("keeps effective cull changes as material-independent depth boundaries", async () => {
@@ -95,6 +219,15 @@ describe("ObjectVisualTemplateRepository", () => {
 		expect(template.parts[0]?.depthDrawUnits).toMatchObject([
 			{ cullFace: "back", indexCount: 6, indexStart: 0 },
 			{ cullFace: "front", indexCount: 3, indexStart: 6 },
+		]);
+		expect(template.appearance.materials).toHaveLength(2);
+		expect(
+			template.appearance.materials.every((binding) => !("polygon" in binding)),
+		).toBe(true);
+		expect(template.appearance.ranges).toMatchObject([
+			{ materialSelector: 0, polygon: { cullFace: "back" } },
+			{ materialSelector: 1, polygon: { cullFace: "back" } },
+			{ materialSelector: 0, polygon: { cullFace: "front" } },
 		]);
 	});
 
@@ -290,7 +423,7 @@ describe("ObjectVisualTemplateRepository", () => {
 
 		repository.dropOwner("spawned-generation:release-failure");
 		await expect(repository.destroy()).rejects.toThrow(
-			"visual-template atlas claims failed to release",
+			"visual-template resources failed to release",
 		);
 	});
 
@@ -327,7 +460,12 @@ function createRepository(
 	preparer: ObjectVisualTemplatePreparer,
 	atlas: ObjectVisualTemplateAtlas<ObjectVisualTemplateAtlasClaim> = new FixtureAtlas(),
 ) {
-	return new ObjectVisualTemplateRepository(geometry, atlas, preparer);
+	return new ObjectVisualTemplateRepository(
+		geometry,
+		atlas,
+		preparer,
+		() => () => {},
+	);
 }
 
 function source(id: string, appearanceKey: string): DynamicPresentationSource {

@@ -17,6 +17,7 @@ import {
 import type {
 	SceneNode,
 	SceneNodeId,
+	SceneChildTransform,
 	SceneNodeInput,
 	ScenePlacement,
 	SceneEnvCellScopeInput,
@@ -324,6 +325,28 @@ export class SceneGraph {
 		}
 		node.localTransform.copy(transform);
 		this.#syncSpatialSubtree(node.id);
+	}
+
+	/** Publish one local root and direct children before synchronizing any spatial descendants. */
+	updateLocalTransformWithChildren(
+		nodeId: SceneNodeId,
+		transform: Mat4,
+		children: readonly SceneChildTransform[],
+	): void {
+		const node = this.#requireNode(nodeId);
+		if (node.parentId === null)
+			throw new Error(`Scene root ${nodeId} requires a complete placement.`);
+		// Validate the entire batch before mutation; held descendants need the finished pose.
+		for (const child of children) {
+			if (this.#requireNode(child.nodeId).parentId !== nodeId)
+				throw new Error(
+					`Scene node ${child.nodeId} is not a direct child of ${nodeId}.`,
+				);
+		}
+		node.localTransform.copy(transform);
+		for (const child of children)
+			this.#requireNode(child.nodeId).localTransform.copy(child.transform);
+		this.#syncSpatialSubtree(nodeId);
 	}
 
 	updateBounds(nodeId: SceneNodeId, localBounds: AABB3 | null): void {

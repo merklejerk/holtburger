@@ -152,6 +152,18 @@ describe("WebGL2InstanceBuffer", () => {
 			{ divisor: 1, location: 7 },
 		]);
 	});
+
+	it("retains range pointers while skipping already-configured VAO invariants", () => {
+		const fixture = fakeGl();
+		const buffer = new WebGL2InstanceBuffer(fixture.gl);
+		buffer.resetFrame(1);
+		buffer.updateRange(0, [instance(Mat4.identity(), [1, 1, 1, 1])]);
+
+		bindWebGL2ObjectInstanceRange(fixture.gl, buffer.getBinding(), 0, 1, false);
+
+		expect(fixture.attributePointers).toHaveLength(5);
+		expect(fixture.attributeDivisors).toEqual([]);
+	});
 });
 
 function instance(

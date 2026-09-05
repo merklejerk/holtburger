@@ -84,6 +84,21 @@
 	/** Imperative presentation source sampled by the radar on its own bounded cadence. */
 	let presentationSession: ClientPresentationSession | null = null;
 	let frameRateSampler: FrameRateSampler | null = null;
+
+	/** CDP-facing bridge for explicit live-client performance probes. */
+	interface ClientPerformanceProbe {
+		reset(): void;
+		setRendererProfilingEnabled(enabled: boolean): void;
+		snapshot(): {
+			readonly diagnostics: ClientPresentationDiagnostics;
+			readonly frameRates: FrameRates | null;
+			readonly meanFrameWorkMs: number | null;
+			readonly sampledFrameCount: number;
+		};
+	}
+	type ClientPerformanceWindow = Window & {
+		__holtburgerClientPerformance?: ClientPerformanceProbe;
+	};
 	const toastCenter = new ClientToastCenter({
 		durationMs: CLIENT_TOAST_DURATION_MS,
 		scheduler: {
@@ -493,6 +508,7 @@
 			hostTransport: currentTransport,
 			session: currentSession,
 			onError: reportPresentationError,
+			enablePerformanceProfiling: debugEnabled,
 		});
 		// Frame settings are cold presentation policy, not renderer identity. The control handler
 		// updates the live owner directly; this snapshot only initializes a genuinely new owner.
@@ -500,9 +516,32 @@
 		const currentFrameRateSampler = createFrameRateSampler(
 			CLIENT_TUNING.diagnostics.frameMetricsEmaWindowMs,
 		);
+		let sampledFrameWorkMs = 0;
+		let sampledFrameCount = 0;
+		const performanceProbe: ClientPerformanceProbe = {
+			reset: (): void => {
+				sampledFrameWorkMs = 0;
+				sampledFrameCount = 0;
+				presentation.resetRendererFrameProfile();
+			},
+			setRendererProfilingEnabled: (enabled): void => {
+				presentation.setRendererFrameProfilingEnabled(enabled);
+			},
+			snapshot: () => ({
+				diagnostics: presentation.readDiagnostics(),
+				frameRates: currentFrameRateSampler.readFrameRates(),
+				meanFrameWorkMs:
+					sampledFrameCount === 0
+						? null
+						: sampledFrameWorkMs / sampledFrameCount,
+				sampledFrameCount,
+			}),
+		};
 		presentationSession = presentation;
 		presentation.setSelectedEntityGuid(untrack(() => selectedEntityGuid));
 		frameRateSampler = currentFrameRateSampler;
+		(window as ClientPerformanceWindow).__holtburgerClientPerformance =
+			performanceProbe;
 		cameraController = presentation.camera;
 		reportPresentationStatus({ kind: "starting", diagnostic: null });
 
@@ -511,6 +550,8 @@
 			const frameStartedAt = performance.now();
 			const nextStatus = presentation.frame(timeMs).status;
 			const frameFinishedAt = performance.now();
+			sampledFrameWorkMs += frameFinishedAt - frameStartedAt;
+			sampledFrameCount += 1;
 			currentFrameRateSampler.recordFrame({
 				animationFrameTimeMs: timeMs,
 				startedAtMs: frameStartedAt,
@@ -544,6 +585,12 @@
 			if (cameraController === presentation.camera) cameraController = null;
 			if (presentationSession === presentation) presentationSession = null;
 			if (frameRateSampler === currentFrameRateSampler) frameRateSampler = null;
+			const performanceWindow = window as ClientPerformanceWindow;
+			if (
+				performanceWindow.__holtburgerClientPerformance === performanceProbe
+			) {
+				delete performanceWindow.__holtburgerClientPerformance;
+			}
 		};
 	});
 

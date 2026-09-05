@@ -169,6 +169,7 @@ const EMPTY_RENDERER_FRAME_FEEDBACK = {
 function testRenderer(overrides: Partial<Renderer> = {}): Renderer {
 	return {
 		clearPresentation() {},
+		retainDynamicAppearance: () => () => {},
 		async destroy() {},
 		drawFrame: () => EMPTY_RENDERER_FRAME_FEEDBACK,
 		drawPortalTransitionFrame: () => null,
@@ -234,7 +235,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 			terrainFrameInputs: 2,
 			viewCount: 1,
 			visibleDynamicEntityCount: 3,
-			visibleDynamicPartCount: 0,
+			visibleDynamicSourceRangeCount: 0,
 			testedObjectPresentationCount: 0,
 			retainedObjectPresentationCount: 0,
 			rejectedObjectPresentationCount: 0,
@@ -261,7 +262,6 @@ describe("GamePresentationRuntime view and interest control", () => {
 			submittedTransparentInstanceCount: 0,
 			submittedAdditiveObjectDrawCount: 0,
 			submittedDynamicDrawCount: 0,
-			submittedDynamicInstanceCount: 0,
 			submittedParticleBatchCount: 0,
 			submittedParticleInstanceCount: 0,
 			unresolvedParticleBatchCount: 0,
@@ -292,6 +292,10 @@ describe("GamePresentationRuntime view and interest control", () => {
 				setProfilingEnabled: setFrameProfilingEnabled,
 				resetProfile: vi.fn(),
 				snapshot: () => ({
+					dynamicResources: {
+						appearances: { indexBytes: 0, materialBytes: 0 },
+						poses: { allocatedBytes: 0, uploadedBytes: 0 },
+					},
 					compiledObjectDraws: null,
 					entityShadows: {
 						outdoorTargets: {
@@ -441,6 +445,10 @@ describe("GamePresentationRuntime view and interest control", () => {
 			},
 		});
 		expect(runtime.getRendererFrameDiagnostics()).toEqual({
+			dynamicResources: {
+				appearances: { indexBytes: 0, materialBytes: 0 },
+				poses: { allocatedBytes: 0, uploadedBytes: 0 },
+			},
 			compiledObjectDraws: null,
 			entityShadows: {
 				outdoorTargets: {
@@ -1021,111 +1029,163 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		await runtime.destroy();
 	});
 
-	it("does not start a time-zero cue particle until its drawable closure is ready", async () => {
-		const tableId = "0x34000001" as DatAssetId;
-		const scriptId = "0x33000001" as DatAssetId;
-		const emitterId = "0x32000001" as DatAssetId;
-		const meshId = "0x01000001" as DatAssetId;
-		const delayedEmitter = controlledPromise<DecodedParticleEmitterInfo>();
-		let emitterRequested = false;
-		const runtime = await buildSpawnRuntime(
-			{ load: async () => spawnedVisual() },
-			ANIMATION_SOURCE,
-			undefined,
-			{
-				destroy() {},
-				async loadPhysicsScript() {
-					return {
-						id: scriptId,
-						lengthSeconds: 0,
-						records: [
-							{
-								authoredOrder: 0,
-								emitterId: 0,
-								emitterInfoId: emitterId,
-								kind: "create-particle" as const,
-								offsetOrigin: acVector3([0, 0, 0]),
-								partIndex: -1,
-								startTime: 0,
+	it.each([-1, 0])(
+		"preserves a cue emitter on frame %s across part geometry replacement and retires it on setup replacement",
+		async (partIndex) => {
+			const tableId = "0x34000001" as DatAssetId;
+			const scriptId = "0x33000001" as DatAssetId;
+			const emitterId = "0x32000001" as DatAssetId;
+			const meshId = "0x01000001" as DatAssetId;
+			const delayedEmitter = controlledPromise<DecodedParticleEmitterInfo>();
+			let emitterRequested = false;
+			const runtime = await buildSpawnRuntime(
+				{
+					load: async (setup, appearance) => {
+						const visual = appearanceVisual(
+							appearance.paletteDid === 2 ? 2 : 1,
+						);
+						return {
+							...visual,
+							setupId: setup === 0x02000002 ? "0x02000002" : "0x02000001",
+							presentation: {
+								...visual.presentation,
+								appearanceKey: `particle-appearance:${appearance.paletteDid}`,
 							},
-						],
-					};
-				},
-			},
-			{
-				destroy() {},
-				async loadPhysicsScriptTable() {
-					return {
-						id: tableId,
-						cues: new Map([[7, [{ maximumIntensity: 1, scriptId }]]]),
-					};
-				},
-			},
-			{
-				destroy() {},
-				loadParticleEmitter: () => {
-					emitterRequested = true;
-					return delayedEmitter.promise;
-				},
-			},
-			{
-				destroy() {},
-				async loadParticleMeshes() {
-					return {
-						presentations: new Map([
-							[
-								meshId,
-								{
-									orientation: "authored" as const,
-									presentation: spawnedVisual(),
-								},
-							],
-						]),
-						textureDependencies: [],
-					};
-				},
-			},
-		);
-		const baseEntity = spawnedEntity(7, 3);
-		await runtime.replaceDynamicEntitySnapshot([
-			{
-				...baseEntity,
-				presentation: {
-					...baseEntity.presentation,
-					content: {
-						...baseEntity.presentation.content,
-						physicsEffectTableDid: Number.parseInt(tableId.slice(2), 16),
+						};
 					},
 				},
-			},
-		]);
-		runtime.playDynamicEntityScriptCue({
-			guid: 7,
-			generation: 3,
-			cue: 7,
-			intensity: 0.5,
-		});
-		await vi.waitFor(() => expect(emitterRequested).toBe(true));
-		expect(
-			runtime.getAuthoredDynamicRuntimeDiagnostics().worldScalePhysicsScripts
-				.activeOwnerCount,
-		).toBe(0);
-		delayedEmitter.resolve(particleEmitterInfo(emitterId, meshId));
-		await vi.waitFor(() =>
+				ANIMATION_SOURCE,
+				undefined,
+				{
+					destroy() {},
+					async loadPhysicsScript() {
+						return {
+							id: scriptId,
+							lengthSeconds: 0,
+							records: [
+								{
+									authoredOrder: 0,
+									emitterId: 0,
+									emitterInfoId: emitterId,
+									kind: "create-particle" as const,
+									offsetOrigin: acVector3([0, 0, 0]),
+									partIndex,
+									startTime: 0,
+								},
+							],
+						};
+					},
+				},
+				{
+					destroy() {},
+					async loadPhysicsScriptTable() {
+						return {
+							id: tableId,
+							cues: new Map([[7, [{ maximumIntensity: 1, scriptId }]]]),
+						};
+					},
+				},
+				{
+					destroy() {},
+					loadParticleEmitter: () => {
+						emitterRequested = true;
+						return delayedEmitter.promise;
+					},
+				},
+				{
+					destroy() {},
+					async loadParticleMeshes() {
+						return {
+							presentations: new Map([
+								[
+									meshId,
+									{
+										orientation: "authored" as const,
+										presentation: spawnedVisual(),
+									},
+								],
+							]),
+							textureDependencies: [],
+						};
+					},
+				},
+			);
+			const baseEntity = spawnedEntity(7, 3);
+			await runtime.replaceDynamicEntitySnapshot([
+				{
+					...baseEntity,
+					presentation: {
+						...baseEntity.presentation,
+						content: {
+							...baseEntity.presentation.content,
+							physicsEffectTableDid: Number.parseInt(tableId.slice(2), 16),
+						},
+					},
+				},
+			]);
+			runtime.playDynamicEntityScriptCue({
+				guid: 7,
+				generation: 3,
+				cue: 7,
+				intensity: 0.5,
+			});
+			await vi.waitFor(() => expect(emitterRequested).toBe(true));
 			expect(
 				runtime.getAuthoredDynamicRuntimeDiagnostics().worldScalePhysicsScripts
 					.activeOwnerCount,
-			).toBe(1),
-		);
-		setTestCamera(runtime, SPAWN_TEST_CAMERA);
+			).toBe(0);
+			delayedEmitter.resolve(particleEmitterInfo(emitterId, meshId));
+			await vi.waitFor(() =>
+				expect(
+					runtime.getAuthoredDynamicRuntimeDiagnostics()
+						.worldScalePhysicsScripts.activeOwnerCount,
+				).toBe(1),
+			);
+			setTestCamera(runtime, SPAWN_TEST_CAMERA);
 
-		runtime.render(0);
+			runtime.render(0);
 
-		expect(
-			runtime.getAuthoredDynamicRuntimeDiagnostics().particles.emitterCount,
-		).toBe(1);
-		await runtime.destroy();
-	});
+			expect(
+				runtime.getAuthoredDynamicRuntimeDiagnostics().particles.emitterCount,
+			).toBe(1);
+			const current = [...runtime.listPresentedSpawnedEntities()][0]?.view;
+			if (current === undefined)
+				throw new Error("Emitter owner was not installed.");
+			const changed = {
+				...current,
+				presentation: {
+					...current.presentation,
+					appearance: { ...current.presentation.appearance, paletteDid: 2 },
+				},
+			};
+			await runtime.upsertDynamicEntity(changed);
+			runtime.render(0.01);
+			const replacedOwner = runtime.selectedEntityPresentationState(
+				current.identity.guid,
+			);
+			if (replacedOwner.kind !== "realized")
+				throw new Error(
+					"Emitter owner disappeared during geometry replacement.",
+				);
+			expect(
+				replacedOwner.frame.localBounds.max.x -
+					replacedOwner.frame.localBounds.min.x,
+			).toBeCloseTo(4);
+			expect(
+				runtime.getAuthoredDynamicRuntimeDiagnostics().particles.emitterCount,
+			).toBe(1);
+			changed.presentation.content = {
+				...changed.presentation.content,
+				setupDid: 0x02000002,
+			};
+			expect(await runtime.upsertDynamicEntity(changed)).toBe("installed");
+			runtime.render(0.02);
+			expect(
+				runtime.getAuthoredDynamicRuntimeDiagnostics().particles.emitterCount,
+			).toBe(0);
+			await runtime.destroy();
+		},
+	);
 
 	it("keeps spawned-entity script scale world-owned at the composition seam", async () => {
 		const scriptId = "0x33000001" as DatAssetId;
@@ -1431,6 +1491,264 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		await runtime.destroy();
 	});
 
+	it.each(["palette", "texture", "part"] as const)(
+		"replaces same-generation %s appearance without restarting placement or animation",
+		async (kind) => {
+			let loads = 0;
+			const load = vi.fn(async () => appearanceVisual(loads++));
+			const runtime = await buildSpawnRuntime({ load });
+			const initial = spawnedEntity(7, 1);
+			await runtime.upsertDynamicEntity(initial);
+			const placementRevision = runtime.dynamicEntityPlacementRevision;
+			const animationBefore =
+				runtime.getAuthoredDynamicRuntimeDiagnostics().animation;
+			const changed = spawnedEntity(7, 1);
+			if (kind === "palette")
+				changed.presentation.appearance.paletteDid = 0x04000002;
+			if (kind === "texture")
+				changed.presentation.appearance.textureChanges = [
+					{
+						partIndex: 0,
+						oldTextureDid: 0x05000001,
+						newTextureDid: 0x05000002,
+					},
+				];
+			if (kind === "part")
+				changed.presentation.appearance.partChanges = [
+					{ partIndex: 0, gfxObjDid: 0x01000002 },
+				];
+			expect(await runtime.upsertDynamicEntity(changed)).toBe("installed");
+			expect(load).toHaveBeenLastCalledWith(
+				changed.presentation.content.setupDid,
+				changed.presentation.appearance,
+			);
+			expect(runtime.dynamicEntityPlacementRevision).toBe(placementRevision);
+			expect(runtime.getAuthoredDynamicRuntimeDiagnostics().animation).toEqual(
+				animationBefore,
+			);
+			const selected = runtime.selectedEntityPresentationState(7);
+			if (selected.kind !== "realized")
+				throw new Error("Replacement lost its selected entity.");
+			expect(selected.frame.localBounds.max.x).toBe(1);
+			await runtime.destroy();
+		},
+	);
+
+	it("keeps advancing animation in phase with an unchanged entity through appearance replacement", async () => {
+		const runtime = await buildSpawnRuntime(
+			{
+				load: async (_setup, appearance) => {
+					const visual = appearanceVisual(1);
+					return {
+						...visual,
+						presentation: {
+							...visual.presentation,
+							appearanceKey: `animated:${appearance.paletteDid}`,
+						},
+					};
+				},
+			},
+			{
+				...ANIMATION_SOURCE,
+				async loadAnimation(id) {
+					const partFrames = Array.from({ length: 120 }, (_, index) => {
+						const frame = Mat4.identity();
+						frame.m41 = index;
+						return frame;
+					});
+					return {
+						id,
+						frameCount: partFrames.length,
+						partCount: 1,
+						partFrames,
+						positionFrames: [],
+						hooks: [],
+					};
+				},
+			},
+		);
+		await runtime.replaceDynamicEntitySnapshot([
+			spawnedEntity(7, 1),
+			spawnedEntity(8, 1),
+		]);
+		setTestCamera(runtime, SPAWN_TEST_CAMERA);
+		const partX = (guid: number) => {
+			const selected = runtime.selectedEntityPresentationState(guid);
+			if (selected.kind !== "realized")
+				throw new Error("Animated continuity fixture lost its entity.");
+			return selected.frame.localBounds.min.x;
+		};
+		runtime.render(0);
+		const initial = partX(7);
+		const initialControl = partX(8);
+		runtime.render(0.2);
+		const before = partX(7);
+		expect(before).toBeGreaterThan(initial);
+		// Owners have deterministic, identity-derived start phases; compare their advancement.
+		expect(before - initial).toBeCloseTo(partX(8) - initialControl);
+		const changed = spawnedEntity(7, 1);
+		changed.presentation.appearance.paletteDid = 2;
+		expect(await runtime.upsertDynamicEntity(changed)).toBe("installed");
+		expect(partX(7)).toBeCloseTo(before);
+		runtime.render(0.4);
+		expect(partX(7)).toBeGreaterThan(before);
+		expect(partX(7) - initial).toBeCloseTo(partX(8) - initialControl);
+		await runtime.destroy();
+	});
+
+	it("keeps A installed when an obsolete B request completes after A is requested again", async () => {
+		const delayed = controlledPromise<DecodedStaticPresentation>();
+		const load = vi.fn((_setup, appearance) =>
+			appearance.paletteDid === 2
+				? delayed.promise
+				: Promise.resolve(appearanceVisual(0)),
+		);
+		const runtime = await buildSpawnRuntime({ load });
+		const a = spawnedEntity(7, 1);
+		await runtime.upsertDynamicEntity(a);
+		const b = spawnedEntity(7, 1);
+		b.presentation.appearance.paletteDid = 2;
+		const stale = runtime.upsertDynamicEntity(b);
+		expect(runtime.dynamicEntityOrigin(7)).not.toBeNull();
+		expect(await runtime.upsertDynamicEntity(a)).toBe("installed");
+		delayed.resolve(appearanceVisual(2));
+		expect(await stale).toBe("deferred");
+		expect(load).toHaveBeenCalledTimes(2);
+		const selected = runtime.selectedEntityPresentationState(7);
+		if (selected.kind !== "realized")
+			throw new Error("A was lost during supersession.");
+		expect(selected.frame.localBounds.max.x).toBe(0);
+		await runtime.destroy();
+	});
+
+	it("retains the newest committed appearance when replacement loads finish in reverse order", async () => {
+		const b = controlledPromise<DecodedStaticPresentation>();
+		const c = controlledPromise<DecodedStaticPresentation>();
+		const runtime = await buildSpawnRuntime({
+			load: (_setup, appearance) => {
+				if (appearance.paletteDid === 2) return b.promise;
+				if (appearance.paletteDid === 3) return c.promise;
+				return Promise.resolve(appearanceVisual(0));
+			},
+		});
+		await runtime.upsertDynamicEntity(spawnedEntity(7, 1));
+		const second = spawnedEntity(7, 1);
+		second.presentation.appearance.paletteDid = 2;
+		const third = spawnedEntity(7, 1);
+		third.presentation.appearance.paletteDid = 3;
+		const stale = runtime.upsertDynamicEntity(second);
+		const current = runtime.upsertDynamicEntity(third);
+		c.resolve(appearanceVisual(3));
+		expect(await current).toBe("installed");
+		b.resolve(appearanceVisual(2));
+		expect(await stale).toBe("deferred");
+		const selected = runtime.selectedEntityPresentationState(7);
+		if (selected.kind !== "realized")
+			throw new Error("Reversed completion removed the current appearance.");
+		expect(selected.frame.localBounds.max.x).toBe(3);
+		await runtime.destroy();
+	});
+
+	it("does not resurrect an entity deleted while its appearance is loading", async () => {
+		const delayed = controlledPromise<DecodedStaticPresentation>();
+		const runtime = await buildSpawnRuntime({
+			load: (_setup, appearance) =>
+				appearance.paletteDid === 2
+					? delayed.promise
+					: Promise.resolve(appearanceVisual(0)),
+		});
+		await runtime.upsertDynamicEntity(spawnedEntity(7, 1));
+		const changed = spawnedEntity(7, 1);
+		changed.presentation.appearance.paletteDid = 2;
+		const pending = runtime.upsertDynamicEntity(changed);
+		await runtime.replaceDynamicEntitySnapshot([]);
+		delayed.resolve(appearanceVisual(2));
+		expect(await pending).toBe("deferred");
+		expect(runtime.dynamicEntityOrigin(7)).toBeNull();
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
+		).toBe(0);
+		await runtime.destroy();
+	});
+
+	it("keeps an appearance request deferred if its residency is withdrawn while loading", async () => {
+		const delayed = controlledPromise<DecodedStaticPresentation>();
+		const runtime = await buildSpawnRuntime({
+			load: (_setup, appearance) =>
+				appearance.paletteDid === 2
+					? delayed.promise
+					: Promise.resolve(appearanceVisual(0)),
+		});
+		await runtime.upsertDynamicEntity(spawnedEntity(7, 1));
+		const changed = spawnedEntity(7, 1);
+		changed.presentation.appearance.paletteDid = 2;
+		const pending = runtime.upsertDynamicEntity(changed);
+		await activateSpawnScene(runtime, "0x0002ffff", 2);
+		delayed.resolve(appearanceVisual(2));
+		expect(await pending).toBe("deferred");
+		expect(runtime.dynamicEntityOrigin(7)).toBeNull();
+		await activateSpawnScene(runtime, "0x0001ffff", 3);
+		await vi.waitFor(() => {
+			runtime.tick();
+			const selected = runtime.selectedEntityPresentationState(7);
+			if (selected.kind !== "realized")
+				throw new Error(
+					"Returned residency has not realized its desired appearance.",
+				);
+			expect(selected.frame.localBounds.max.x).toBe(2);
+		});
+		await runtime.destroy();
+	});
+
+	it("does not report a failed requested appearance as installed merely because the old incarnation remains", async () => {
+		const runtime = await buildSpawnRuntime({
+			load: async (_setup, appearance) => {
+				if (appearance.paletteDid === 2)
+					throw new Error("replacement content unavailable");
+				return appearanceVisual(0);
+			},
+		});
+		await runtime.upsertDynamicEntity(spawnedEntity(7, 1));
+		const changed = spawnedEntity(7, 1);
+		changed.presentation.appearance.paletteDid = 2;
+		await expect(runtime.upsertDynamicEntity(changed)).rejects.toThrow();
+		expect(runtime.dynamicEntityOrigin(7)).not.toBeNull();
+		await expect(
+			runtime.reevaluateDynamicEntityEligibility(),
+		).rejects.toThrow();
+		const selected = runtime.selectedEntityPresentationState(7);
+		if (selected.kind !== "realized")
+			throw new Error("Failed replacement removed the previous visual.");
+		expect(selected.frame.localBounds.max.x).toBe(0);
+		await runtime.destroy();
+	});
+
+	it("accepts appearance changes delivered through tick updates", async () => {
+		const runtime = await buildSpawnRuntime({
+			load: async (_setup, appearance) =>
+				appearanceVisual(appearance.paletteDid === 2 ? 2 : 0),
+		});
+		await runtime.upsertDynamicEntity(spawnedEntity(7, 1));
+		const changed = spawnedEntity(7, 1);
+		changed.presentation.appearance.paletteDid = 2;
+		runtime.applyDynamicEntityTick(
+			{
+				hostTime: { seconds: 2 },
+				durationMs: 30,
+				advances: [],
+				updates: [changed],
+			},
+			1000,
+		);
+		await vi.waitFor(() => {
+			const selected = runtime.selectedEntityPresentationState(7);
+			if (selected.kind !== "realized")
+				throw new Error("Tick replacement lost its visual.");
+			expect(selected.frame.localBounds.max.x).toBe(2);
+		});
+		await runtime.destroy();
+	});
+
 	it("shares one immutable visual load while retaining independent live owners", async () => {
 		const visual = spawnedVisual();
 		const load = vi.fn(async () => visual);
@@ -1699,7 +2017,16 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 				]),
 			},
 		};
-		const runtime = await buildSpawnRuntime({ load: async () => visual });
+		const runtime = await buildSpawnRuntime({
+			load: async (setup, appearance) => ({
+				...visual,
+				setupId: setup === 0x02000002 ? "0x02000002" : "0x02000001",
+				presentation: {
+					...visual.presentation,
+					appearanceKey: `held-appearance:${appearance.paletteDid}`,
+				},
+			}),
+		});
 		const parent = spawnedEntity(20, 1, { translucency: 0.25 });
 		const child = attachedEntity(21, 1, 20);
 		child.physics.translucency = 0.75;
@@ -1730,6 +2057,38 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			throw new Error("Attached selection fixture was not realized.");
 		expect(selectedChild.frame.guid).toBe(child.identity.guid);
 		expect(selectedChild.frame.placement.localToLandblock.m41).toBeCloseTo(22);
+		const placementRevision = runtime.dynamicEntityPlacementRevision;
+		const changedParent = {
+			...parent,
+			presentation: {
+				...parent.presentation,
+				appearance: { ...parent.presentation.appearance, paletteDid: 2 },
+			},
+		};
+		await runtime.upsertDynamicEntity(changedParent);
+		expect(runtime.dynamicEntityPlacementRevision).toBe(placementRevision);
+		const retainedChild = runtime.selectedEntityPresentationState(
+			child.identity.guid,
+		);
+		if (retainedChild.kind !== "realized")
+			throw new Error("Parent appearance replacement removed its held child.");
+		expect(retainedChild.frame.placement.localToLandblock.m41).toBeCloseTo(22);
+		changedParent.presentation.content = {
+			...changedParent.presentation.content,
+			setupDid: 0x02000002,
+		};
+		expect(await runtime.upsertDynamicEntity(changedParent)).toBe("installed");
+		const reattachedChild = runtime.selectedEntityPresentationState(
+			child.identity.guid,
+		);
+		if (reattachedChild.kind !== "realized")
+			throw new Error("Setup replacement failed to reattach its held child.");
+		expect(reattachedChild.frame.placement.localToLandblock.m41).toBeCloseTo(
+			22,
+		);
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
+		).toBe(2);
 		await activateSpawnScene(runtime, "0x0002ffff", 2);
 		expect(
 			runtime.selectedEntityPresentationState(child.identity.guid),
@@ -2313,6 +2672,40 @@ function attachedEntity(
 			parent,
 			parentLocation: "right-hand",
 			placement: "right-hand-combat",
+		},
+	};
+}
+
+/** Synthetic appearance with distinct geometry bounds so tests observe installed mesh state. */
+function appearanceVisual(radius: number): DecodedStaticPresentation {
+	const base = spawnedVisual();
+	return {
+		...base,
+		presentation: {
+			...base.presentation,
+			appearanceKey: `appearance:${radius}`,
+			parts: base.presentation.parts.map((part) => ({
+				...part,
+				geometry: {
+					...part.geometry,
+					id: `geometry:appearance/${radius}` as const,
+					positions: new Float32Array([
+						-radius,
+						0,
+						0,
+						radius,
+						0,
+						0,
+						0,
+						radius,
+						0,
+					]),
+					bounds: new AABB3(
+						new Vec3(-radius, 0, 0),
+						new Vec3(radius, radius, 0),
+					),
+				},
+			})),
 		},
 	};
 }

@@ -79,35 +79,6 @@ describe("particle render routing", () => {
 		expect(routed.get("sky")).toHaveLength(1);
 	});
 
-	it("concatenates the ranges of nodes sharing one executor contribution", () => {
-		const batcher = new ParticleRenderBatcher();
-
-		const merged = batcher.mergeContribution([
-			[
-				{
-					baseSlot: 0,
-					count: 2,
-					hwGfxObjId: MESH,
-					motionType: 2,
-					frame: RECORD_FRAME,
-				},
-			],
-			[
-				{
-					baseSlot: 8,
-					count: 3,
-					hwGfxObjId: MESH,
-					motionType: 2,
-					frame: RECORD_FRAME,
-				},
-			],
-		]);
-
-		// Ranges never combine even when they would draw identically: each names its own slots.
-		expect(merged).toHaveLength(2);
-		expect(merged.map((range) => range.baseSlot)).toEqual([0, 8]);
-	});
-
 	it("releases domain scratch when topology ownership changes", () => {
 		const batcher = new ParticleRenderBatcher();
 		batcher.route(1, [source(FIRST_OWNER, 0)], () => "old-domain");

@@ -50,6 +50,11 @@
 	} from "../../lib/game/math/camera-orientation";
 	import { sceneVec3, sceneVector3 } from "../../lib/assets/ac-frame";
 	import type { Camera } from "../../lib/game/runtime/types";
+	import { probeDynamicViews } from "./dynamic-multiview-probe";
+	import { probeDynamicBlendFlags } from "./dynamic-blend-probe";
+	import { probeMixedTransparency } from "./mixed-transparency-probe";
+	import { probeDynamicDomains } from "./dynamic-domain-probe";
+	import { SyntheticCutoutTextureSource } from "./synthetic-cutout-texture";
 	import type { SceneInterestRadii } from "../../lib/game/runtime/types";
 	import {
 		createProjectionClearanceRevision,
@@ -537,6 +542,27 @@
 			readonly movedGuid: number;
 			readonly previousY: number;
 			readonly movedY: number;
+		}>;
+		/** Verify frozen multi-view publication through the production renderer. */
+		readonly probeDynamicViews: () => ReturnType<typeof probeDynamicViews>;
+		/** Compare one plural entity with each single-domain material control. */
+		readonly probeDynamicDomains: () => ReturnType<typeof probeDynamicDomains>;
+		/** Compare merged blend output with independent equations on a synthetic triangle. */
+		readonly probeDynamicBlendFlags: () => ReturnType<
+			typeof probeDynamicBlendFlags | typeof probeMixedTransparency
+		>;
+		/** Replace a synthetic entity's appearance without moving it or the camera. */
+		readonly probeSyntheticAppearanceReplacement: () => Promise<{
+			readonly beforeDataUrl: string;
+			readonly afterDataUrl: string;
+			readonly placementUnchanged: boolean;
+			readonly replacementBoundsWidth: number;
+			readonly opacityCycle: readonly {
+				readonly translucency: number;
+				readonly dataUrl: string;
+				readonly dynamicDraws: number;
+				readonly transparentDraws: number;
+			}[];
 		}>;
 		/** Select one realized entity and sample its production geometry and mask across two frames. */
 		readonly probeSpawnedEntitySelection: (
@@ -1819,6 +1845,91 @@
 		};
 	}
 
+	async function probeSyntheticAppearanceReplacement() {
+		const activeRuntime = runtime;
+		const canvas = canvasElement;
+		const current = spawnedEntities[0];
+		if (
+			!activeRuntime ||
+			!canvas ||
+			current === undefined ||
+			spawnedEntities.length !== 1
+		)
+			throw new Error(
+				"Appearance probe requires one synthetic entity and an active canvas.",
+			);
+		await waitForTwoAnimationFrames();
+		const beforeDataUrl = canvas.toDataURL("image/png");
+		const revision = activeRuntime.dynamicEntityPlacementRevision;
+		const changed: DynamicEntityView = {
+			...current,
+			presentation: {
+				...current.presentation,
+				appearance: { ...current.presentation.appearance, paletteDid: 2 },
+			},
+		};
+		const outcome = await activeRuntime.upsertDynamicEntity(changed);
+		if (outcome !== "installed")
+			throw new Error("Synthetic appearance was not installed.");
+		spawnedEntities = [changed];
+		await waitForTwoAnimationFrames();
+		const afterDataUrl = canvas.toDataURL("image/png");
+		const selected = activeRuntime.selectedEntityPresentationState(
+			current.identity.guid,
+		);
+		if (selected.kind !== "realized")
+			throw new Error("Appearance replacement lost selection geometry.");
+		const bounds = selected.frame.localBounds;
+		// Same-generation opacity crosses opaque -> ordered -> hidden -> opaque without moving.
+		const opacityCycle = [];
+		for (const translucency of [0, 0.5, 1, 0]) {
+			const faded: DynamicEntityView = {
+				...changed,
+				physics: { ...changed.physics, translucency },
+			};
+			await activeRuntime.upsertDynamicEntity(faded);
+			spawnedEntities = [faded];
+			await waitForTwoAnimationFrames();
+			const metrics =
+				activeRuntime.getRendererFrameDiagnostics()?.selectionMetrics;
+			if (metrics === undefined)
+				throw new Error("Opacity probe has no renderer diagnostics.");
+			const dynamicDraws = metrics.submittedDynamicDrawCount;
+			const transparentDraws = metrics.submittedTransparentObjectDrawCount;
+			if (
+				dynamicDraws !== (translucency === 1 ? 0 : 1) ||
+				transparentDraws !== (translucency === 0.5 ? 1 : 0)
+			) {
+				throw new Error(
+					`Merged opacity routing failed at ${translucency}: draws=${dynamicDraws}, transparent=${transparentDraws}.`,
+				);
+			}
+			opacityCycle.push({
+				translucency,
+				dataUrl: canvas.toDataURL("image/png"),
+				dynamicDraws,
+				transparentDraws,
+			});
+		}
+		if (
+			opacityCycle[0].dataUrl === opacityCycle[1].dataUrl ||
+			opacityCycle[1].dataUrl === opacityCycle[2].dataUrl ||
+			opacityCycle[0].dataUrl !== opacityCycle[3].dataUrl
+		) {
+			throw new Error(
+				"Merged opacity cycle did not change pixels and restore its original image.",
+			);
+		}
+		return {
+			opacityCycle,
+			beforeDataUrl,
+			afterDataUrl,
+			placementUnchanged:
+				revision === activeRuntime.dynamicEntityPlacementRevision,
+			replacementBoundsWidth: bounds.max.x - bounds.min.x,
+		};
+	}
+
 	function waitForTwoAnimationFrames(): Promise<void> {
 		return new Promise((resolve) =>
 			window.requestAnimationFrame(() =>
@@ -1849,7 +1960,9 @@
 		const sample = (): BrowserHarnessSpawnedSelectionSample => {
 			const state = activeRuntime.selectedEntityPresentationState(guid);
 			if (state.kind !== "realized" || state.frame.guid !== guid)
-				throw new Error(`Spawned selection target ${guid} is not realized.`);
+				throw new Error(
+					`Spawned selection target ${guid} is not realized: ${JSON.stringify(state)}.`,
+				);
 			const selected = state.frame;
 			const geometry = activeRuntime.withSpawnedEntitySelectionGeometry(
 				guid,
@@ -3357,7 +3470,11 @@
 				}
 				pipeline =
 					fixture === "blended"
-						? new SyntheticBlendedBuildingPipeline()
+						? new SyntheticBlendedBuildingPipeline(
+								await StandardCommitPipeline.build({
+									sourceBatch: landblockSource,
+								}),
+							)
 						: fixture === "instanced"
 							? new SyntheticInstancedObjectPipeline()
 							: await StandardCommitPipeline.build({
@@ -3372,7 +3489,7 @@
 						resources: device.resources,
 					},
 					pipeline,
-					contentSource,
+					new SyntheticCutoutTextureSource(contentSource),
 					contentSource,
 					contentSource,
 					contentSource,
@@ -3686,6 +3803,45 @@
 					};
 				}
 				hostGlobal.__HOLTBURGER_3D_BROWSER_HARNESS__ = {
+					probeSyntheticAppearanceReplacement,
+					probeDynamicDomains: () => {
+						const current = spawnedEntities[0];
+						if (
+							!runtime ||
+							!canvasElement ||
+							!current ||
+							spawnedEntities.length !== 1
+						)
+							throw new Error("Domain probe requires one synthetic entity.");
+						return probeDynamicDomains(
+							runtime,
+							current,
+							canvasElement,
+							frameSettings,
+						);
+					},
+					probeDynamicBlendFlags: () => {
+						const current = spawnedEntities[0];
+						if (
+							!runtime ||
+							!canvasElement ||
+							!current ||
+							spawnedEntities.length !== 1
+						)
+							throw new Error("Blend probe requires one synthetic entity.");
+						return (
+							fixture === "blended"
+								? probeMixedTransparency
+								: probeDynamicBlendFlags
+						)(runtime, current, canvasElement, frameSettings);
+					},
+					probeDynamicViews: () => {
+						if (!renderer || !canvasElement)
+							throw new Error(
+								"Multi-view probe requires an active renderer and canvas.",
+							);
+						return probeDynamicViews(renderer, canvasElement);
+					},
 					clearSceneInterest,
 					configureMap,
 					despawnExplorerEntity,
@@ -3767,6 +3923,7 @@
 							error,
 							frameSettings,
 							entityShadowResources: frameDiagnostics?.entityShadows ?? null,
+							dynamicResources: frameDiagnostics?.dynamicResources ?? null,
 							entitySelection,
 							compiledObjectDraws:
 								frameDiagnostics?.compiledObjectDraws ?? null,

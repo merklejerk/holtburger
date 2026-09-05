@@ -144,7 +144,7 @@ export class WebGL2DeviceStateApplicator {
 	applyTexture2D(
 		unit: number,
 		texture: WebGLTexture,
-		sampler: WebGLSampler,
+		sampler: WebGLSampler | null,
 	): boolean {
 		let textureBound = false;
 		if (this.#texture2DUnits.get(unit) !== texture) {

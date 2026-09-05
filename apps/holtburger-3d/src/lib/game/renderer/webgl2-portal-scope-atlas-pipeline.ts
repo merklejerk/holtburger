@@ -28,17 +28,37 @@ import {
 } from "./webgl2-portal-scope-atlas-targets";
 import { WebGL2PortalTileStateApplicator } from "./webgl2-portal-tile-state-applicator";
 
-/** Complete non-retained planning state for the current synchronous portal camera. */
+/** CPU planning state for one camera, valid until the next pipeline frame reset. */
 export interface WebGL2PortalScopeAtlasFrame extends SceneScopeSelection {
+	/** View-owned selected visibility and packed tile commands. */
 	readonly atlas: PortalScopeAtlasFrameView;
+	/** View-owned submission diagnostics populated during execution. */
 	readonly opaqueRouting: PortalScopeAtlasOpaqueRoutingFrameView;
-	readonly targets: WebGL2PortalScopeAtlasTargetSet;
 }
 
 class MutableWebGL2PortalScopeAtlasFrame implements WebGL2PortalScopeAtlasFrame {
+	/** Independent arenas prevent another camera from overwriting a prepared view. */
+	readonly planner = new PortalScopeAtlasPlanner(
+		PORTAL_RENDER_CAPACITY_POLICY.culler,
+	);
+	/** Routing state is local to this view, while device targets remain pipeline-owned. */
+	readonly router = new PortalScopeAtlasOpaqueRouter();
+	/** CPU staging only; the shared executor uploads this view when it executes. */
+	readonly stream = new PortalPropagationStreamArena(
+		PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumCrossingTriangleVertexCount,
+	);
+	/** Extents are owned by the view because tile coordinates depend on them. */
+	readonly resource = {
+		atlas: { height: 1, width: 1 },
+		drawingBuffer: { height: 1, width: 1 },
+		maximumArrivalStateCount:
+			PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
+		maximumCrossingTriangleVertexCount:
+			PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas
+				.maximumCrossingTriangleVertexCount,
+	} satisfies PortalScopeAtlasResource;
 	#atlas: PortalScopeAtlasFrameView | null = null;
 	#opaqueRouting: PortalScopeAtlasOpaqueRoutingFrameView | null = null;
-	#targets: WebGL2PortalScopeAtlasTargetSet | null = null;
 
 	get atlas(): PortalScopeAtlasFrameView {
 		return this.#require(this.#atlas);
@@ -52,10 +72,6 @@ class MutableWebGL2PortalScopeAtlasFrame implements WebGL2PortalScopeAtlasFrame 
 		return this.#require(this.#opaqueRouting);
 	}
 
-	get targets(): WebGL2PortalScopeAtlasTargetSet {
-		return this.#require(this.#targets);
-	}
-
 	scopeAt(ordinal: number): SceneScope {
 		return this.atlas.visibility.selectedScope(ordinal);
 	}
@@ -63,17 +79,14 @@ class MutableWebGL2PortalScopeAtlasFrame implements WebGL2PortalScopeAtlasFrame 
 	set(
 		atlas: PortalScopeAtlasFrameView,
 		opaqueRouting: PortalScopeAtlasOpaqueRoutingFrameView,
-		targets: WebGL2PortalScopeAtlasTargetSet,
 	): void {
 		this.#atlas = atlas;
 		this.#opaqueRouting = opaqueRouting;
-		this.#targets = targets;
 	}
 
 	clear(): void {
 		this.#atlas = null;
 		this.#opaqueRouting = null;
-		this.#targets = null;
 	}
 
 	#require<T>(value: T | null): T {
@@ -85,39 +98,23 @@ class MutableWebGL2PortalScopeAtlasFrame implements WebGL2PortalScopeAtlasFrame 
 }
 
 /**
- * Renderer-lifetime owner for the selected portal planner, fixed streams, targets, and executor.
- *
- * The mutable frame wrapper is reused. Callers must query, route, and execute it before preparing
- * another camera; retaining it would make its arena-backed scope and stream views lie.
+ * Retains independent CPU plans by view ordinal and shares GPU targets/execution across views.
+ * All cameras may be prepared first; each must finish rendering before another is activated.
  */
 export class WebGL2PortalScopeAtlasPipeline {
-	readonly #atlasExtent = { height: 1, width: 1 };
-	readonly #drawingBufferExtent = { height: 1, width: 1 };
-	readonly #extents = {
-		atlas: this.#atlasExtent,
-		drawingBuffer: this.#drawingBufferExtent,
-	};
 	readonly #executor: WebGL2PortalScopeAtlasExecutor;
 	readonly #gl: WebGL2RenderingContext;
-	readonly #planner = new PortalScopeAtlasPlanner(
-		PORTAL_RENDER_CAPACITY_POLICY.culler,
-	);
-	readonly #router = new PortalScopeAtlasOpaqueRouter();
-	readonly #stream = new PortalPropagationStreamArena(
-		PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumCrossingTriangleVertexCount,
-	);
 	readonly #targetOwner: WebGL2PortalScopeAtlasTargets;
 	readonly #tileState: WebGL2PortalTileStateApplicator;
-	readonly #resource: PortalScopeAtlasResource = {
-		atlas: this.#atlasExtent,
-		drawingBuffer: this.#drawingBufferExtent,
-		maximumArrivalStateCount:
-			PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
-		maximumCrossingTriangleVertexCount:
-			PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas
-				.maximumCrossingTriangleVertexCount,
-	};
-	readonly #frame = new MutableWebGL2PortalScopeAtlasFrame();
+	/** High-water CPU plan storage, reused only after explicit frame reset. */
+	readonly #views: MutableWebGL2PortalScopeAtlasFrame[] = [];
+	/** Number of successfully prepared views in the current frame. */
+	#viewCount = 0;
+	/** The one view currently using shared GPU resources. */
+	#active: {
+		readonly frame: MutableWebGL2PortalScopeAtlasFrame;
+		readonly targets: WebGL2PortalScopeAtlasTargetSet;
+	} | null = null;
 
 	constructor(gl: WebGL2RenderingContext) {
 		this.#gl = gl;
@@ -131,7 +128,14 @@ export class WebGL2PortalScopeAtlasPipeline {
 		);
 	}
 
-	/** Plan, pack, and prepare fixed GPU streams for one camera without retaining frame records. */
+	/** Expire prior plans while retaining their CPU arena capacity. */
+	beginFrame(): void {
+		this.#active = null;
+		for (const view of this.#views) view.clear();
+		this.#viewCount = 0;
+	}
+
+	/** Plan and pack one camera without allocating targets or issuing GPU commands. */
 	prepare(
 		topology: SceneTopologyView,
 		input: PortalScopeWindowCullInput,
@@ -140,34 +144,47 @@ export class WebGL2PortalScopeAtlasPipeline {
 		drawingBufferWidth: number,
 		drawingBufferHeight: number,
 	): WebGL2PortalScopeAtlasFrame {
-		// A failed resize or plan must not leave the previous camera's arena view apparently live.
-		this.#frame.clear();
+		let frame = this.#views[this.#viewCount];
+		if (frame === undefined) {
+			frame = new MutableWebGL2PortalScopeAtlasFrame();
+			this.#views.push(frame);
+		}
 		const scopeAtlas = PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas;
-		this.#drawingBufferExtent.width = drawingBufferWidth;
-		this.#drawingBufferExtent.height = drawingBufferHeight;
-		this.#atlasExtent.width = drawingBufferWidth * scopeAtlas.columnCount;
-		this.#atlasExtent.height = drawingBufferHeight * scopeAtlas.rowCount;
-		const targets = this.#targetOwner.resize(this.#extents);
-		const atlas = this.#planner.plan(topology, input, this.#resource);
-		this.#stream.prepare(atlas, anchorCoordinates, clipFromAnchor);
-		const opaqueRouting = this.#router.beginFrame(atlas);
-		this.#frame.set(atlas, opaqueRouting, targets);
-		return this.#frame;
+		// Replace the cold-sized extent values, keeping all arena-backed output view-local.
+		frame.resource.atlas.width = drawingBufferWidth * scopeAtlas.columnCount;
+		frame.resource.atlas.height = drawingBufferHeight * scopeAtlas.rowCount;
+		frame.resource.drawingBuffer.width = drawingBufferWidth;
+		frame.resource.drawingBuffer.height = drawingBufferHeight;
+		const atlas = frame.planner.plan(topology, input, frame.resource);
+		frame.stream.prepare(atlas, anchorCoordinates, clipFromAnchor);
+		frame.set(atlas, frame.router.beginFrame(atlas));
+		this.#viewCount += 1;
+		return frame;
 	}
 
 	/** Bind and clear the complete scope-local color/depth atlas before routed opaque draws. */
 	beginOpaqueScene(
+		prepared: WebGL2PortalScopeAtlasFrame,
 		clearColor: readonly [number, number, number, number],
-	): void {
-		const frame = this.#requireFrame();
+	): WebGL2PortalScopeAtlasTargetSet {
+		const frame = this.#views.find(
+			(view, ordinal) => ordinal < this.#viewCount && view === prepared,
+		);
+		if (frame === undefined)
+			throw new Error(
+				"Portal view is not prepared by this pipeline in the current frame.",
+			);
+		this.#active = null;
+		const targets = this.#targetOwner.resize(frame.resource);
+		this.#active = { frame, targets };
 		this.#tileState.beginFrame(frame.atlas);
 		const gl = this.#gl;
-		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, frame.targets.scene.framebuffer);
+		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, targets.scene.framebuffer);
 		gl.viewport(
 			0,
 			0,
-			frame.targets.extents.atlas.width,
-			frame.targets.extents.atlas.height,
+			targets.extents.atlas.width,
+			targets.extents.atlas.height,
 		);
 		gl.disable(gl.BLEND);
 		gl.disable(gl.SCISSOR_TEST);
@@ -177,6 +194,7 @@ export class WebGL2PortalScopeAtlasPipeline {
 		gl.clearDepth(1);
 		gl.clearColor(...clearColor);
 		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+		return targets;
 	}
 
 	/** Route the existing outdoor terrain pass once and bind its packed tile. */
@@ -184,7 +202,8 @@ export class WebGL2PortalScopeAtlasPipeline {
 		submissionCount: number,
 		clipTransform: WebGLUniformLocation,
 	): void {
-		const ordinal = this.#router.routeTerrainPass(submissionCount);
+		const ordinal =
+			this.#requireFrame().router.routeTerrainPass(submissionCount);
 		if (ordinal !== null) this.#bindTile(ordinal, clipTransform, true);
 	}
 
@@ -210,7 +229,7 @@ export class WebGL2PortalScopeAtlasPipeline {
 		clipTransformInvalidated: boolean,
 	): void {
 		this.#bindTile(
-			this.#router.routeObjectSubmission(renderScopeKey),
+			this.#requireFrame().router.routeObjectSubmission(renderScopeKey),
 			clipTransform,
 			clipTransformInvalidated,
 		);
@@ -218,31 +237,31 @@ export class WebGL2PortalScopeAtlasPipeline {
 
 	/** Propagate selected arrivals, reduce envelopes, and resolve scope-local opaque color/depth. */
 	execute(outputFramebuffer: WebGLFramebuffer | null): void {
-		const frame = this.#requireFrame();
+		const { frame, targets } = this.#requireActive();
 		this.#executor.execute({
-			outputExtent: this.#drawingBufferExtent,
+			outputExtent: frame.resource.drawingBuffer,
 			outputFramebuffer,
-			stream: this.#stream,
-			targets: frame.targets,
+			stream: frame.stream,
+			targets,
 			traversalDepth: frame.atlas.commands.traversalDepth,
 		});
 	}
 
 	/** Bind the resolved output and one immutable scope-envelope texture for deferred draws. */
 	beginDeferredScene(outputFramebuffer: WebGLFramebuffer | null): void {
-		const frame = this.#requireFrame();
+		const { frame, targets } = this.#requireActive();
 		const gl = this.#gl;
 		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, outputFramebuffer);
 		gl.viewport(
 			0,
 			0,
-			this.#drawingBufferExtent.width,
-			this.#drawingBufferExtent.height,
+			frame.resource.drawingBuffer.width,
+			frame.resource.drawingBuffer.height,
 		);
 		const unit = PORTAL_SCOPE_ATLAS_TEXTURE_UNITS.envelopeDepth;
 		gl.bindSampler(unit, null);
 		gl.activeTexture(gl.TEXTURE0 + unit);
-		gl.bindTexture(gl.TEXTURE_2D, frame.targets.envelope.depth);
+		gl.bindTexture(gl.TEXTURE_2D, targets.envelope.depth);
 		gl.activeTexture(gl.TEXTURE0);
 	}
 
@@ -263,7 +282,8 @@ export class WebGL2PortalScopeAtlasPipeline {
 	destroy(): void {
 		this.#executor.destroy();
 		this.#targetOwner.destroy();
-		this.#frame.clear();
+		this.beginFrame();
+		this.#views.length = 0;
 	}
 
 	#bindTile(
@@ -274,8 +294,13 @@ export class WebGL2PortalScopeAtlasPipeline {
 		this.#tileState.apply(ordinal, clipTransform, clipTransformInvalidated);
 	}
 
-	#requireFrame(): WebGL2PortalScopeAtlasFrame {
-		void this.#frame.atlas;
-		return this.#frame;
+	#requireFrame(): MutableWebGL2PortalScopeAtlasFrame {
+		return this.#requireActive().frame;
+	}
+
+	#requireActive() {
+		if (this.#active === null)
+			throw new Error("Portal scope-atlas pipeline has no executing view.");
+		return this.#active;
 	}
 }

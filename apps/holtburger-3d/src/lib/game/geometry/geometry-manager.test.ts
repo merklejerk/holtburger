@@ -11,9 +11,44 @@ import type {
 	TextureArrayResourceKey,
 } from "../renderer/resource-manager";
 import { GeometryManager } from "./geometry-manager";
-import { createTerrainGeometryKey } from "./types";
+import { createObjectGeometryKey, createTerrainGeometryKey } from "./types";
 
 describe("GeometryManager", () => {
+	it("shares merged layout storage across appearances and counts both selector streams", () => {
+		const resources = new FakeRendererResourceManager();
+		const geometry = new GeometryManager<string>(resources);
+		const payload = {
+			kind: "dynamic-parts" as const,
+			partCount: 1,
+			materialCount: 1,
+			positions: new Float32Array(9),
+			normals: new Float32Array(9),
+			textureCoordinates: new Float32Array(6),
+			indices: new Uint32Array([0, 1, 2]),
+			partSelectors: new Uint32Array(3),
+			materialSelectors: new Uint32Array(3),
+		};
+		const source = {
+			key: createObjectGeometryKey("dynamic-layout:test"),
+			geometry: payload,
+		};
+		geometry.replaceOwner("appearance:a", [source]);
+		geometry.replaceOwner("appearance:b", [source]);
+		expect(resources.created).toHaveLength(1);
+		const bytes =
+			payload.positions.byteLength +
+			payload.normals.byteLength +
+			payload.textureCoordinates.byteLength +
+			payload.partSelectors.byteLength +
+			payload.materialSelectors.byteLength;
+		expect(geometry.getResourceBytes()).toBe(bytes);
+		geometry.dropOwner("appearance:a");
+		expect(geometry.getResourceBytes()).toBe(bytes);
+		expect(resources.released).toHaveLength(0);
+		geometry.dropOwner("appearance:b");
+		expect(geometry.getResourceBytes()).toBe(0);
+		expect(resources.released).toHaveLength(1);
+	});
 	it("materializes one shared geometry resource and releases it after its final owner", () => {
 		const resources = new FakeRendererResourceManager();
 		const geometry = new GeometryManager<string>(resources);

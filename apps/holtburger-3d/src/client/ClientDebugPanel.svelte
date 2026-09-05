@@ -112,8 +112,8 @@
 					diagnostics.draw.visibleDynamicEntities,
 				)}
 				{@render diagnosticRow(
-					"Dynamic parts",
-					diagnostics.draw.visibleDynamicParts,
+					"Dynamic source ranges",
+					diagnostics.draw.visibleDynamicSourceRanges,
 				)}
 				{@render diagnosticRow(
 					"Object draws",

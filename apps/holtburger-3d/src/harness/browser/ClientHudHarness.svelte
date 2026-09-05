@@ -272,6 +272,9 @@
 
 	function readDiagnostics(): ClientPresentationDiagnostics | null {
 		return {
+			renderer: null,
+			residentResources: null,
+			tickProfile: null,
 			playerGuid: 0x5000_0001,
 			playerResidency: {
 				landblockId: "0xda55ffff",
@@ -330,7 +333,7 @@
 				visibleSceneEntries: 148,
 				visibleStaticNodes: 912,
 				visibleDynamicEntities: 37,
-				visibleDynamicParts: 104,
+				visibleDynamicSourceRanges: 104,
 				objectDrawCalls: 286,
 				dynamicDrawCalls: 81,
 				particleBatches: 7,

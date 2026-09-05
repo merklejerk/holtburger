@@ -2,6 +2,7 @@ import type {
 	CommitPipeline,
 	LandblockLayerCommit,
 } from "../../lib/game/commit/types";
+import type { StandardCommitPipeline } from "../../lib/game/commit/pipeline";
 import type { LandblockOwnerId } from "../../lib/game/game-types";
 import { createTranslationMat4 } from "../../lib/game/math/matrices";
 import { AABB3, Mat4, Vec3 } from "../../lib/game/math/types";
@@ -24,26 +25,45 @@ const LOCAL_BOUNDS = new AABB3(new Vec3(0, 0, 0), new Vec3(3, 5, 0));
 
 /** Closed source-first fixture used only to prove the renderer's blended building phases. */
 export class SyntheticBlendedBuildingPipeline implements CommitPipeline {
+	/** Real terrain supplies the residency authority required by synthetic dynamic roots. */
+	constructor(private readonly terrain: StandardCommitPipeline) {}
 	async prepareLandblockLayers(
 		layers: ReadonlySet<LandblockIdLayer>,
 	): Promise<readonly LandblockLayerCommit[]> {
-		return [...layers]
-			.filter(({ layer }) => layer === LandblockLayerKind.Buildings)
-			.map(({ id }) => buildingBundle(id));
+		const terrain = await this.terrain.prepareLandblockLayers(
+			new Set(
+				[...layers].filter(({ layer }) => layer === LandblockLayerKind.Terrain),
+			),
+		);
+		return [
+			...terrain,
+			...[...layers]
+				.filter(({ layer }) => layer === LandblockLayerKind.Buildings)
+				.map(({ id }) => buildingBundle(id)),
+		];
 	}
 
-	async destroy(): Promise<void> {}
+	async destroy(): Promise<void> {
+		await this.terrain.destroy();
+	}
 }
 
 function buildingBundle(landblockId: LandblockOwnerId): LandblockLayerCommit {
+	const staticResidents = MATERIAL_FLAGS.map((flags, index) =>
+		resident(landblockId, flags, index),
+	);
 	const source: ResolvedOutdoorStaticLayerSource = {
 		dynamicSources: [],
-		mapBlockers: new Map(),
+		// These display-only triangles have no physics polygons, but every source owns a map entry.
+		mapBlockers: new Map(
+			staticResidents.map((resident) => [
+				resident.presentation.sourceAssetId,
+				{ positions: new Float32Array(), indices: new Uint32Array() },
+			]),
+		),
 		kind: LandblockLayerKind.Buildings,
 		landblockId,
-		staticResidents: MATERIAL_FLAGS.map((flags, index) =>
-			resident(landblockId, flags, index),
-		),
+		staticResidents,
 	};
 	return {
 		commit: { source },

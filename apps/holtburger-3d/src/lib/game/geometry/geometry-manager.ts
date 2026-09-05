@@ -51,10 +51,17 @@ export class GeometryManager<TOwnerId extends string = string> {
 	upsertGeometry(source: GeometrySource): void {
 		if (!this.#leases.hasLease(source.key)) return;
 		if (this.#geometry.has(source.key)) return;
-		this.#geometry.set(
-			source.key,
-			this.#renderResources.createGeometry(source.geometry),
-		);
+		try {
+			this.#geometry.set(
+				source.key,
+				this.#renderResources.createGeometry(source.geometry),
+			);
+		} catch (cause) {
+			const detail = cause instanceof Error ? cause.message : String(cause);
+			throw new Error(`Geometry ${source.key} preparation failed: ${detail}`, {
+				cause,
+			});
+		}
 		this.#geometryBytes.set(source.key, geometrySourceBytes(source));
 	}
 
@@ -113,12 +120,21 @@ export class GeometryManager<TOwnerId extends string = string> {
 /** Sum the uploaded payload of one geometry source across its present attribute buffers. */
 function geometrySourceBytes(source: GeometrySource): number {
 	const geometry = source.geometry;
-	if (geometry.kind !== "object") return geometry.positions.byteLength;
-	return (
-		geometry.positions.byteLength +
-		geometry.normals.byteLength +
-		geometry.textureCoordinates.byteLength +
-		geometry.indices.byteLength +
-		(geometry.bakedLight?.byteLength ?? 0)
-	);
+	// Dynamic index buffers belong to appearance resources, not this shared vertex lease.
+	let bytes = geometry.positions.byteLength;
+	if (geometry.kind !== "dynamic-parts") bytes += geometry.indices.byteLength;
+	if (geometry.kind === "portal-aperture") return bytes;
+	bytes += geometry.normals.byteLength + geometry.textureCoordinates.byteLength;
+	switch (geometry.kind) {
+		case "terrain":
+			return bytes + geometry.terrainColorCodes.byteLength;
+		case "object":
+			return bytes + (geometry.bakedLight?.byteLength ?? 0);
+		case "dynamic-parts":
+			return (
+				bytes +
+				geometry.partSelectors.byteLength +
+				geometry.materialSelectors.byteLength
+			);
+	}
 }

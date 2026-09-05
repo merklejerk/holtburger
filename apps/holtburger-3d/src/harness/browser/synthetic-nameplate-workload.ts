@@ -1,4 +1,9 @@
 import type { DecodedStaticPresentation } from "../../lib/assets/decode-static-source-record";
+import {
+	createCutoutVisual,
+	CUTOUT_PALETTE,
+	CUTOUT_REFERENCE_PALETTE,
+} from "./synthetic-cutout-texture";
 import type {
 	SetupVisualAppearance,
 	SetupVisualSource,
@@ -28,6 +33,58 @@ export type SyntheticNameplateWorkload =
 
 const BOUNDS = new AABB3(new Vec3(-0.5, 0, -0.5), new Vec3(0.5, 2, 0.5));
 const VISUAL = createVisual();
+/** Harness-only palette selector space for production dynamic blend-state verification. */
+export const SYNTHETIC_BLEND_PALETTE_BASE = 1000;
+
+function blendVisual(flags: number): DecodedStaticPresentation {
+	if (![0, 0x10, 0x100, 0x200, 0x10000, 0x10100, 0x10200].includes(flags))
+		throw new Error(`Unsupported synthetic blend flags ${flags}.`);
+	return {
+		...VISUAL,
+		presentation: {
+			...VISUAL.presentation,
+			appearanceKey: `appearance:synthetic-blend:${flags}`,
+			parts: VISUAL.presentation.parts.map((part) => ({
+				...part,
+				materials: [
+					{
+						id: `material:synthetic-blend:${flags}` as const,
+						kind: "solid-color" as const,
+						color: [0.2, 0.4, 0.6, 0.25] as const,
+						diffuseScale: 0,
+						luminosity: 1,
+						rawSurfaceFlags: flags,
+						translucency: 0,
+					},
+				],
+			})),
+		},
+	};
+}
+
+/** Distinct geometry and color for the real-GPU appearance replacement fixture. */
+const REPLACEMENT_VISUAL: DecodedStaticPresentation = {
+	...VISUAL,
+	presentation: {
+		...VISUAL.presentation,
+		appearanceKey: "appearance:synthetic-replacement",
+		parts: VISUAL.presentation.parts.map((part) => ({
+			...part,
+			geometry: {
+				...part.geometry,
+				id: "geometry:synthetic-replacement",
+				positions: new Float32Array([-1, 0, 0, 1, 0, 0, 0, 2, 0]),
+				bounds: new AABB3(new Vec3(-1, 0, 0), new Vec3(1, 2, 0)),
+			},
+			materials: part.materials.map((material) => ({
+				...material,
+				kind: "solid-color" as const,
+				id: "material:synthetic-replacement" as const,
+				color: [0.1, 0.9, 0.15, 1] as const,
+			})),
+		})),
+	},
+};
 const WALL_VISUAL = createWallVisual();
 const SHADOW_CROWD_VISUAL = createShadowCrowdVisual();
 
@@ -39,8 +96,26 @@ export class SyntheticNameplateSetupVisualSource implements SetupVisualSource {
 		setupDid: number,
 		appearance: SetupVisualAppearance,
 	): Promise<DecodedStaticPresentation> {
+		if (
+			setupDid === SYNTHETIC_NAMEPLATE_SETUP_DID &&
+			(appearance.paletteDid === CUTOUT_PALETTE ||
+				appearance.paletteDid === CUTOUT_REFERENCE_PALETTE)
+		)
+			return Promise.resolve(
+				createCutoutVisual(
+					VISUAL,
+					appearance.paletteDid === CUTOUT_REFERENCE_PALETTE,
+				),
+			);
 		if (setupDid === SYNTHETIC_NAMEPLATE_SETUP_DID)
-			return Promise.resolve(VISUAL);
+			return Promise.resolve(
+				appearance.paletteDid !== null &&
+					appearance.paletteDid >= SYNTHETIC_BLEND_PALETTE_BASE
+					? blendVisual(appearance.paletteDid - SYNTHETIC_BLEND_PALETTE_BASE)
+					: appearance.paletteDid === 2
+						? REPLACEMENT_VISUAL
+						: VISUAL,
+			);
 		if (setupDid === SYNTHETIC_NAMEPLATE_WALL_SETUP_DID)
 			return Promise.resolve(WALL_VISUAL);
 		if (setupDid === SYNTHETIC_SHADOW_CROWD_SETUP_DID)

@@ -109,6 +109,8 @@ try {
 			nameplates: result.state.nameplates,
 			nameplateWorkload: result.nameplateWorkload,
 			nameplateLifecycle: result.nameplateLifecycle,
+			appearanceReplacement: result.appearanceReplacement,
+			materialTableProbe: result.materialTableProbe,
 			nameplateBenchmark: result.nameplateBenchmark,
 			ambientOcclusionCoverageCensus:
 				result.state.ambientOcclusionCoverageCensus,
@@ -170,6 +172,7 @@ try {
 			options.nameplateWorkload,
 			options.envCellCameraId !== null,
 			assertionState.frameSettings.nameplates.maximumVisible,
+			assertionState.frameSettings.envCellRenderMode,
 		);
 	}
 	if (options.nameplateLifecycle)
@@ -178,14 +181,14 @@ try {
 		assertTerrainGlTrace(result.state);
 	}
 	if (options.modeCycle) {
-		assertModeCycle(result.initialState, result.modeCycleStates);
+		assertModeCycle(result.modeCycleInitialState, result.modeCycleStates);
 	}
 	if (options.filteringCycle) {
 		assertFilteringCycle(result.initialState, result.filteringCycleStates);
 	}
 	if (options.entityShadowCycle) {
 		assertEntityShadowCycle(
-			result.initialState,
+			result.entityShadowCycleInitialState,
 			result.entityShadowCycleStates,
 		);
 	}
@@ -313,6 +316,10 @@ function parseArgs(args) {
 		fixture: null,
 		nameplateWorkload: null,
 		nameplateLifecycle: false,
+		appearanceReplacement: false,
+		dynamicViews: false,
+		dynamicBlendFlags: false,
+		dynamicDomains: false,
 		nameplateBenchmarkPairs: 0,
 		nameplatesDisabled: false,
 		screenshotPath: null,
@@ -913,6 +920,18 @@ function parseArgs(args) {
 			case "--nameplate-lifecycle":
 				parsed.nameplateLifecycle = true;
 				break;
+			case "--probe-dynamic-appearance":
+				parsed.appearanceReplacement = true;
+				break;
+			case "--probe-dynamic-views":
+				parsed.dynamicViews = true;
+				break;
+			case "--probe-dynamic-blend-flags":
+				parsed.dynamicBlendFlags = true;
+				break;
+			case "--probe-dynamic-domains":
+				parsed.dynamicDomains = true;
+				break;
 			case "--disable-nameplates":
 				parsed.nameplatesDisabled = true;
 				break;
@@ -1424,6 +1443,16 @@ Options:
                         Install repeated-100, unique-100, ordered-500, shadow-crowd-112x61,
                         occlusion-open/wall, or portal-open/wall/plural synthetic dynamic
                          entities through the shared runtime without requiring a catalog record.
+  --probe-dynamic-appearance
+                         Replace the occlusion-open entity appearance without moving it; save
+                         before/after images and verify bounds. Requires --screenshot.
+  --probe-dynamic-views Compare frozen single and simultaneous renderer views. Requires --screenshot.
+  --probe-dynamic-blend-flags
+                         Check cutout/blend pixels, or mixed ordering with --fixture blended.
+                         Requires --nameplate-workload occlusion-open and --screenshot.
+  --probe-dynamic-domains
+                         Compare portal-plural material draws with single-domain controls.
+                         Requires --frame-mode portal and --screenshot.
   --nameplate-lifecycle Move one unchanged same-generation target, then retire the workload and
                          assert stable rasterization plus complete texture release. Requires
                          --nameplate-workload.
@@ -1482,7 +1511,8 @@ function summarizeEntityRuntimeState(state) {
 	return {
 		currentEntityCount: summary.currentEntities.length,
 		visibleDynamicEntityCount: summary.visibleDynamicEntityCount,
-		visibleDynamicPartCount: state.metrics?.visibleDynamicPartCount ?? null,
+		visibleDynamicSourceRangeCount:
+			state.metrics?.visibleDynamicSourceRangeCount ?? null,
 		runtime: summary.runtime,
 	};
 }
@@ -1709,6 +1739,7 @@ function briefHarnessReport(result) {
 	const staticObjects = result.state.staticObjects;
 	const authoredDynamics = result.state.authoredDynamics;
 	return {
+		materialTableProbe: result.materialTableProbe,
 		authoredDynamics:
 			authoredDynamics === null
 				? null
@@ -1786,6 +1817,10 @@ function briefHarnessReport(result) {
 		// Compiled-draw occupancy is leak evidence across relocations, and its flush counts
 		// explain any recompilation, so brief mode keeps both.
 		compiledObjectDraws: result.state.compiledObjectDraws,
+		dynamicViews: result.dynamicViews,
+		dynamicBlendFlags: result.dynamicBlendFlags,
+		dynamicDomains: result.dynamicDomains,
+		dynamicResources: result.state.dynamicResources,
 		staticResourceCounts:
 			staticObjects === null
 				? null
@@ -1859,7 +1894,8 @@ function particleSaoHarnessReport(result) {
 						uploadedParticleRecordRowCount:
 							metrics.uploadedParticleRecordRowCount,
 						visibleDynamicEntityCount: metrics.visibleDynamicEntityCount,
-						visibleDynamicPartCount: metrics.visibleDynamicPartCount,
+						visibleDynamicSourceRangeCount:
+							metrics.visibleDynamicSourceRangeCount,
 					},
 		particles: result.state.authoredDynamics?.particles ?? null,
 		tickProfile: result.state.tickProfile,
@@ -1873,6 +1909,7 @@ function assertNameplateWorkload(
 	workload,
 	hasEnvCellCamera,
 	maximumVisible,
+	frameMode,
 ) {
 	if (diagnostics === null || diagnostics === undefined) {
 		throw new Error(
@@ -1891,6 +1928,11 @@ function assertNameplateWorkload(
 		eligibleCandidateCount,
 		maximumVisible,
 	);
+	// Deferred nameplates carry a draw-constant domain uniform; plural portal scopes split draws.
+	const scopeCount =
+		workload === "portal-plural" && hasEnvCellCamera && frameMode === "portal"
+			? 2
+			: 1;
 	const expected =
 		submittedCandidateCount === 0
 			? {
@@ -1907,10 +1949,8 @@ function assertNameplateWorkload(
 					liveEntryCount:
 						workload === "unique-100" ? submittedCandidateCount : 1,
 					submittedDrawCount:
-						workload === "unique-100" ? submittedCandidateCount : 1,
-					submittedInstanceCount:
-						submittedCandidateCount *
-						(workload === "portal-plural" && hasEnvCellCamera ? 2 : 1),
+						workload === "unique-100" ? submittedCandidateCount : scopeCount,
+					submittedInstanceCount: submittedCandidateCount * scopeCount,
 				};
 	const actual = {
 		budgetRejectedCandidateCount: diagnostics.budgetRejectedCandidateCount,
@@ -3422,6 +3462,8 @@ function summarizeSourceBatches(sourceBatches) {
 }
 
 function assertModeCycle(initialState, states) {
+	if (initialState === null)
+		throw new Error("Mode cycle did not capture its resource baseline.");
 	const expectedModes = ["portal", "flat", "portal", "flat"];
 	if (states.length !== expectedModes.length) {
 		throw new Error(
@@ -3512,6 +3554,10 @@ function assertFilteringCycle(initialState, states) {
 }
 
 function assertEntityShadowCycle(initialState, states) {
+	if (initialState === null)
+		throw new Error(
+			"Entity-shadow cycle did not capture its resource baseline.",
+		);
 	if (states.length !== 5) {
 		throw new Error(
 			`Entity-shadow cycle produced ${states.length} snapshots, expected 5.`,
@@ -4986,6 +5032,15 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				[0],
 			);
 		}
+		// Establish the requested mode before any probe captures evidence, not just final reporting.
+		if (!options.modeCycle && options.frameMode !== null) {
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setEnvCellRenderMode",
+				[options.frameMode],
+			);
+			await waitForFrameMode(client, options.frameMode);
+		}
 		let nameplateWorkload = null;
 		if (options.nameplateWorkload !== null) {
 			if (
@@ -5020,6 +5075,133 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
 			[],
 		);
+		let dynamicDomains = null;
+		if (options.dynamicDomains) {
+			if (
+				options.nameplateWorkload !== "portal-plural" ||
+				options.frameMode !== "portal" ||
+				options.screenshotPath === null
+			)
+				throw new Error(
+					"--probe-dynamic-domains requires portal-plural, --frame-mode portal, and --screenshot.",
+				);
+			const evidence = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.probeDynamicDomains",
+				[],
+			);
+			const results = [];
+			for (const { image, ...sample } of evidence.results) {
+				const path = `${options.screenshotPath}.domain-${sample.flags}.png`;
+				await writeFile(path, Buffer.from(image.split(",")[1], "base64"));
+				results.push({ ...sample, path });
+			}
+			dynamicDomains = { results };
+		}
+		let appearanceReplacement = null;
+		let dynamicBlendFlags = null;
+		if (options.dynamicBlendFlags) {
+			if (
+				options.nameplateWorkload !== "occlusion-open" ||
+				options.screenshotPath === null
+			)
+				throw new Error(
+					"--probe-dynamic-blend-flags requires --nameplate-workload occlusion-open and --screenshot.",
+				);
+			const evidence = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.probeDynamicBlendFlags",
+				[],
+			);
+			const results = [];
+			for (const { image, ...sample } of evidence.results) {
+				const path = `${options.screenshotPath}.blend-${options.fixture === "blended" ? sample.y : sample.flags}.png`;
+				await writeFile(path, Buffer.from(image.split(",")[1], "base64"));
+				results.push({ ...sample, path });
+			}
+			dynamicBlendFlags = { ...evidence, results };
+			if (options.fixture !== "blended") {
+				const { image, referenceImage, ...cutout } = evidence.cutout;
+				const path = `${options.screenshotPath}.cutout.png`;
+				const referencePath = `${options.screenshotPath}.cutout-reference.png`;
+				await writeFile(path, Buffer.from(image.split(",")[1], "base64"));
+				await writeFile(
+					referencePath,
+					Buffer.from(referenceImage.split(",")[1], "base64"),
+				);
+				dynamicBlendFlags = {
+					...evidence,
+					results,
+					cutout: { ...cutout, path, referencePath },
+				};
+			}
+		}
+		let dynamicViews = null;
+		if (options.dynamicViews) {
+			if (options.screenshotPath === null)
+				throw new Error("--probe-dynamic-views requires --screenshot.");
+			const samples = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.probeDynamicViews",
+				[],
+			);
+			dynamicViews = [];
+			for (const sample of samples) {
+				const report = { mode: sample.mode };
+				for (const key of ["a", "b", "ab", "ba", "aa"]) {
+					const { image, ...facts } = sample[key];
+					const path = `${options.screenshotPath}.${sample.mode}-${key}.png`;
+					await writeFile(path, Buffer.from(image.split(",")[1], "base64"));
+					report[key] = { ...facts, path };
+				}
+				dynamicViews.push(report);
+			}
+		}
+		if (options.appearanceReplacement) {
+			if (
+				options.nameplateWorkload !== "occlusion-open" ||
+				options.screenshotPath === null
+			)
+				throw new Error(
+					"--probe-dynamic-appearance requires --nameplate-workload occlusion-open and --screenshot.",
+				);
+			const evidence = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.probeSyntheticAppearanceReplacement",
+				[],
+			);
+			const beforePath = `${options.screenshotPath}.appearance-before.png`;
+			const afterPath = `${options.screenshotPath}.appearance-after.png`;
+			await writeFile(
+				beforePath,
+				Buffer.from(evidence.beforeDataUrl.split(",")[1], "base64"),
+			);
+			await writeFile(
+				afterPath,
+				Buffer.from(evidence.afterDataUrl.split(",")[1], "base64"),
+			);
+			if (
+				!evidence.placementUnchanged ||
+				evidence.replacementBoundsWidth !== 2 ||
+				evidence.beforeDataUrl === evidence.afterDataUrl
+			)
+				throw new Error(
+					"Dynamic appearance replacement did not preserve placement and change rendered geometry.",
+				);
+			appearanceReplacement = {
+				opacityCycle: await Promise.all(
+					evidence.opacityCycle.map(async ({ dataUrl, ...sample }, index) => {
+						const path = `${options.screenshotPath}.opacity-${index}.png`;
+						await writeFile(path, Buffer.from(dataUrl.split(",")[1], "base64"));
+						return { ...sample, path };
+					}),
+				),
+				beforePath,
+				afterPath,
+				placementUnchanged: evidence.placementUnchanged,
+				replacementBoundsWidth: evidence.replacementBoundsWidth,
+			};
+		}
 		let nameplateLifecycle = null;
 		if (options.nameplateLifecycle) {
 			if (options.nameplateWorkload === null)
@@ -5292,8 +5474,12 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			await placeEnvCellCamera(client, options);
 		}
 		const modeCycleStates = [];
+		// Spawns and other explicit fixture setup precede this cycle, not its ownership baseline.
+		let modeCycleInitialState = null;
 		const ambientOcclusionCycleStates = [];
 		const entityShadowCycleStates = [];
+		// Explicit fixture setup may introduce the first mapped actor after initial scene capture.
+		let entityShadowCycleInitialState = null;
 		const filteringCycleStates = [];
 		if (options.filteringCycle) {
 			const maximum =
@@ -5316,6 +5502,11 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			}
 		}
 		if (options.modeCycle) {
+			modeCycleInitialState = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
+				[],
+			);
 			for (const mode of ["portal", "flat", "portal", "flat"]) {
 				await evaluate(
 					client,
@@ -5324,13 +5515,6 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				);
 				modeCycleStates.push(await waitForFrameMode(client, mode));
 			}
-		} else if (options.frameMode !== null) {
-			await evaluate(
-				client,
-				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setEnvCellRenderMode",
-				[options.frameMode],
-			);
-			await delay(250);
 		}
 		if (options.ambientOcclusionCycle) {
 			for (const enabled of [true, false, true]) {
@@ -5357,8 +5541,13 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			await delay(250);
 		}
 		if (options.entityShadowCycle) {
+			entityShadowCycleInitialState = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
+				[],
+			);
 			const initialOutdoorTargets =
-				initialState.entityShadowResources?.outdoorTargets;
+				entityShadowCycleInitialState.entityShadowResources?.outdoorTargets;
 			if (!initialOutdoorTargets || initialOutdoorTargets.activeBytes <= 0) {
 				throw new Error(
 					"Entity-shadow cycle requires an initial frame with active outdoor shadow targets.",
@@ -5832,6 +6021,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			cpuProfile,
 			ambientOcclusionCycleStates,
 			entityShadowCycleStates,
+			entityShadowCycleInitialState,
 			entityShadowBenchmark,
 			nameplateBenchmark,
 			audioFlyby,
@@ -5859,8 +6049,21 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			initialState,
 			nameplateWorkload,
 			nameplateLifecycle,
+			appearanceReplacement,
+			dynamicViews,
+			dynamicBlendFlags,
+			dynamicDomains,
+			materialTableProbe:
+				process.env.HOLTBURGER_PROBE_MATERIAL_TABLES === "1"
+					? await evaluate(
+							client,
+							`async () => (await import('/src/harness/browser/dynamic-material-table-probe.ts')).probeDynamicMaterialTables()`,
+							[],
+						)
+					: null,
 			filteringCycleStates,
 			modeCycleStates,
+			modeCycleInitialState,
 			lifecycleState,
 			portalExecution,
 			portalTransitionLifecycle,

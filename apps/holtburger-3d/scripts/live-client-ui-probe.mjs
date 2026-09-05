@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
+import { writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 
@@ -11,12 +12,16 @@ const PASSIVE_CAMERA_INPUT_COUNT = 40;
 const PASSIVE_CAMERA_INPUT_INTERVAL_MS = 25;
 const PRECISE_JUMP_SWEEP_INPUT_COUNT = 120;
 const PRECISE_JUMP_SWEEP_INPUT_INTERVAL_MS = 5;
+const PROFILE_SETTLE_MS = 10_000;
+const PROFILE_WINDOW_MS = 10_000;
 const WORLD_READY_NOTICE = "World ready";
 
 const appRoot = resolve(fileURLToPath(new URL("../", import.meta.url)));
 const account = requiredEnvironment("HOLTBURGER_PROBE_ACCOUNT");
 const password = requiredEnvironment("HOLTBURGER_PROBE_PASSWORD");
 const mode = probeMode(process.env.HOLTBURGER_PROBE_MODE);
+const performanceInstrumentationEnabled =
+	process.env.HOLTBURGER_PROBE_PROFILE_INSTRUMENTATION !== "0";
 if (
 	mode !== "teleport" &&
 	process.env.HOLTBURGER_PROBE_TELEPORT_SEQUENCE !== undefined
@@ -44,7 +49,7 @@ const child = spawn(
 		account,
 		"--password",
 		password,
-		"--debug=true",
+		`--debug=${mode !== "profile" || performanceInstrumentationEnabled}`,
 	],
 	{
 		cwd: appRoot,
@@ -94,10 +99,17 @@ try {
 		timeoutMs,
 		"character selection",
 	);
-	await evaluate(
+	const selectedCharacter = await evaluate(
 		client,
-		`() => document.querySelector(".client-character")?.click()`,
+		`() => {
+			const character = document.querySelector(".client-character");
+			if (!character) throw new Error("No character is available for the probe.");
+			const label = character.textContent.trim();
+			character.click();
+			return label;
+		}`,
 	);
+	printReport({ selectedCharacter });
 	await evaluate(
 		client,
 		`() => [...document.querySelectorAll("button")].find((button) => button.textContent?.includes("Enter World"))?.click()`,
@@ -112,7 +124,110 @@ try {
 		throw new Error("Initial world entry did not produce a destination frame.");
 	}
 
-	if (mode === "passive-camera") {
+	if (mode === "profile") {
+		const instrumentationEnabled = performanceInstrumentationEnabled;
+		await waitFor(
+			client,
+			`() => window.__holtburgerClientPerformance !== undefined`,
+			timeoutMs,
+			"client performance bridge",
+		);
+		await delay(PROFILE_SETTLE_MS);
+		if (instrumentationEnabled) {
+			await evaluate(
+				client,
+				`() => window.__holtburgerClientPerformance.setRendererProfilingEnabled(true)`,
+			);
+			await client.send("Profiler.enable");
+			await client.send("Profiler.setSamplingInterval", { interval: 100 });
+			await client.send("Profiler.start");
+		}
+		await evaluate(
+			client,
+			`() => window.__holtburgerClientPerformance.reset()`,
+		);
+		const snapshots = [];
+		const profileStartedAt = Date.now();
+		while (Date.now() - profileStartedAt < PROFILE_WINDOW_MS) {
+			await delay(1_000);
+			snapshots.push(
+				await evaluate(
+					client,
+					`() => window.__holtburgerClientPerformance.snapshot()`,
+				),
+			);
+		}
+		// Close the frame-count and duration window together, before stopping/exporting V8's
+		// profiler can allow more frames to accumulate in the final snapshot.
+		const finalSnapshot = await evaluate(
+			client,
+			`() => window.__holtburgerClientPerformance.snapshot()`,
+		);
+		const measuredWindowMs = Date.now() - profileStartedAt;
+		let cpuProfilePath = null;
+		if (instrumentationEnabled) {
+			const { profile } = await client.send("Profiler.stop");
+			cpuProfilePath =
+				process.env.HOLTBURGER_PROBE_CPU_PROFILE ??
+				"/tmp/holtburger-client-ts.cpuprofile";
+			await writeFile(cpuProfilePath, JSON.stringify(profile));
+		}
+		let screenshotPath = null;
+		if (process.env.HOLTBURGER_PROBE_SCREENSHOT !== undefined) {
+			screenshotPath = process.env.HOLTBURGER_PROBE_SCREENSHOT;
+			await client.send("Page.enable");
+			const screenshot = await client.send("Page.captureScreenshot", {
+				format: "png",
+			});
+			await writeFile(screenshotPath, screenshot.data, "base64");
+		}
+		if (instrumentationEnabled) {
+			await evaluate(
+				client,
+				`() => window.__holtburgerClientPerformance.setRendererProfilingEnabled(false)`,
+			);
+		}
+		const report = {
+			materialTableProbe:
+				process.env.HOLTBURGER_PROBE_MATERIAL_TABLES === "1"
+					? await evaluate(
+							client,
+							`async () => (await import('/src/harness/browser/dynamic-material-table-probe.ts')).probeDynamicMaterialTables()`,
+						)
+					: null,
+			ok: true,
+			mode,
+			instrumentationEnabled,
+			cpuProfilePath,
+			selectedCharacter,
+			settleMs: PROFILE_SETTLE_MS,
+			windowMs: measuredWindowMs,
+			snapshots,
+			finalSnapshot,
+			screenshotPath,
+			consoleMessages: [...consoleMessages.values()],
+			page: await pageState(client),
+			hostOutput: redact(output).slice(-30_000),
+		};
+		const reportPath = process.env.HOLTBURGER_PROBE_REPORT;
+		if (reportPath !== undefined) {
+			await writeFile(
+				reportPath,
+				stringifyRedactedProbeReport(report, { account, password }),
+			);
+			printReport({
+				ok: true,
+				mode,
+				instrumentationEnabled,
+				cpuProfilePath,
+				reportPath,
+				windowMs: report.windowMs,
+				finalSnapshot: summarizePerformanceSnapshot(finalSnapshot),
+			});
+		} else {
+			printReport(report);
+		}
+	} else if (mode === "passive-camera") {
 		await delay(PASSIVE_CAMERA_SETTLE_MS);
 		const cameraEvidence = await capturePassiveCameraGesture(client);
 		const cameraSummary = summarizeCameraEvidence(cameraEvidence);
@@ -230,17 +345,18 @@ function requiredEnvironment(name) {
 function probeMode(value) {
 	if (value === undefined) {
 		throw new Error(
-			"HOLTBURGER_PROBE_MODE must be explicitly set to teleport, passive-camera, or precise-jump.",
+			"HOLTBURGER_PROBE_MODE must be explicitly set to teleport, passive-camera, precise-jump, or profile.",
 		);
 	}
 	const mode = value;
 	if (
 		mode !== "teleport" &&
 		mode !== "passive-camera" &&
-		mode !== "precise-jump"
+		mode !== "precise-jump" &&
+		mode !== "profile"
 	) {
 		throw new Error(
-			"HOLTBURGER_PROBE_MODE must be teleport, passive-camera, or precise-jump.",
+			"HOLTBURGER_PROBE_MODE must be teleport, passive-camera, precise-jump, or profile.",
 		);
 	}
 	return mode;
@@ -305,6 +421,24 @@ function delay(milliseconds) {
 	return new Promise((resolvePromise) =>
 		setTimeout(resolvePromise, milliseconds),
 	);
+}
+
+function summarizePerformanceSnapshot(snapshot) {
+	const profile = snapshot.diagnostics.renderer?.profile;
+	return {
+		frameRates: snapshot.frameRates,
+		meanFrameWorkMs: snapshot.meanFrameWorkMs,
+		renderedFrames: snapshot.sampledFrameCount,
+		rendererCpuMean: profile?.cpu.mean ?? null,
+		rendererGpuMean:
+			profile?.gpu.kind === "available" ? profile.gpu.mean : null,
+		runtimeTickMean: snapshot.diagnostics.tickProfile?.mean ?? null,
+		selectionMetrics: snapshot.diagnostics.renderer?.selectionMetrics ?? null,
+		dynamicResources: snapshot.diagnostics.renderer?.dynamicResources ?? null,
+		viewport: snapshot.diagnostics.viewport,
+		playerResidency: snapshot.diagnostics.playerResidency,
+		cameraResidency: snapshot.diagnostics.cameraResidency,
+	};
 }
 
 async function waitForDevToolsUrl(process_, readOutput) {

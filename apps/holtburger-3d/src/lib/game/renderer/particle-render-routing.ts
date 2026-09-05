@@ -46,8 +46,6 @@ export class ParticleRenderBatcher {
 	 */
 	readonly #rangePool: MutableParticleDrawRange[] = [];
 	#rangesUsed = 0;
-	/** Reused output for several render nodes sharing one executor contribution. */
-	readonly #mergedOutput: ParticleDrawRange[] = [];
 	/** Revision owning the domain-keyed scratch, or null before the first route. */
 	#routingRevision: number | string | null = null;
 
@@ -56,8 +54,16 @@ export class ParticleRenderBatcher {
 		this.#domainRanges.clear();
 		this.#rangePool.length = 0;
 		this.#rangesUsed = 0;
-		this.#mergedOutput.length = 0;
 		this.#routingRevision = null;
+	}
+
+	/** Expire a camera's routes while preserving capacity and releasing borrowed emitter frames. */
+	reset(): void {
+		for (const ranges of this.#domainRanges.values()) ranges.length = 0;
+		for (let index = 0; index < this.#rangesUsed; index += 1) {
+			this.#rangePool[index].frame = RELEASED_PARTICLE_FRAME;
+		}
+		this.#rangesUsed = 0;
 	}
 
 	/** Assign every source once, omitting owners unavailable to this view's render graph. */
@@ -66,12 +72,11 @@ export class ParticleRenderBatcher {
 		sources: readonly ParticleSourceRange[],
 		resolveDomain: (owner: ParticleRenderOwner) => string | null,
 	): ReadonlyMap<string, readonly ParticleDrawRange[]> {
+		this.reset();
 		if (this.#routingRevision !== routingRevision) {
 			this.#routingRevision = routingRevision;
 			this.#domainRanges.clear();
 		}
-		for (const ranges of this.#domainRanges.values()) ranges.length = 0;
-		this.#rangesUsed = 0;
 
 		for (const source of sources) {
 			const domainId = resolveDomain(source.renderOwner);
@@ -99,21 +104,7 @@ export class ParticleRenderBatcher {
 
 		return this.#domainRanges;
 	}
-
-	/**
-	 * Concatenate the ranges of several render nodes sharing one executor contribution.
-	 *
-	 * The result is consumed immediately by the draw callback and remains valid only until the next
-	 * call, matching the frame-local ranges it references.
-	 */
-	mergeContribution(
-		rangeGroups: readonly (readonly ParticleDrawRange[])[],
-	): readonly ParticleDrawRange[] {
-		if (rangeGroups.length === 1) return rangeGroups[0] ?? [];
-		this.#mergedOutput.length = 0;
-		for (const group of rangeGroups) {
-			for (const range of group) this.#mergedOutput.push(range);
-		}
-		return this.#mergedOutput;
-	}
 }
+
+/** Retired pooled ranges cannot keep an unloaded emitter's transform alive. */
+const RELEASED_PARTICLE_FRAME = { kind: "record" } as const;

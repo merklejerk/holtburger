@@ -20,7 +20,8 @@ import type {
 	GeometryResourceKey,
 	Texture2DResourceKey,
 } from "./resource-manager";
-import type { GeometryKey, ObjectGeometryKey } from "../geometry/types";
+import type { GeometryKey } from "../geometry/types";
+import { compileDynamicLayout } from "../geometry/dynamic-layout";
 import type { StaticGeometryKey } from "../systems/static-resources";
 import type {
 	EnvCellRenderable,
@@ -28,11 +29,7 @@ import type {
 } from "../commit/artifacts";
 import type { ObjectMaterialBinding } from "../commit/artifacts";
 import { TexturePurpose, TextureWrapMode } from "../textures/types";
-import { landblockVec3 } from "../../assets/ac-frame";
-import type {
-	PartVisualTemplateKey,
-	VisibleRigidPartContribution,
-} from "../systems/components";
+import type { VisibleDynamicPresentation } from "../systems/components";
 
 const VISIBLE_SCENE = {
 	entries: [],
@@ -84,7 +81,17 @@ const COLOR_ARRAY = {
 describe("RenderWorld", () => {
 	it("exposes only renderer queries over live runtime systems", () => {
 		const calls: string[] = [];
-		const dynamic = dynamicContribution();
+		const presentation: VisibleDynamicPresentation = {
+			identity: "fixture:dynamic",
+			visual: {
+				kind: "ready",
+				parts: [],
+				layout: compileDynamicLayout([]),
+				appearance: { materials: [], ranges: [] },
+			},
+			landblockId: PLACEMENT.landblockId,
+			renderScopes: [PLACEMENT.scope],
+		};
 		let selectedStaticRenderable: StaticObjectRenderable | null = null;
 		let staticCullingGroup = "buildings";
 		const world = new RenderWorld({
@@ -141,6 +148,8 @@ describe("RenderWorld", () => {
 					nodeId === "scene-node:8" ? selectedStaticRenderable : null,
 			},
 			dynamics: {
+				getVisiblePresentation: (nodeId) =>
+					nodeId === "scene-node:9" ? presentation : null,
 				getNameplatePopulationRevision: () => 0,
 				forEachNameplateVisual: () => {},
 				getNameplateFacts: () => null,
@@ -152,18 +161,6 @@ describe("RenderWorld", () => {
 					nodeId === "scene-node:9" ? AABB3.zero() : null,
 				getPublishedRigidPresentationBounds: (nodeId) =>
 					nodeId === "scene-node:9" ? RIGID_DYNAMIC_BOUNDS : null,
-				getVisibleContributions: (nodeId) => {
-					calls.push("dynamic-expand");
-					return nodeId === "scene-node:9"
-						? {
-								depth: [],
-								kind: "visible",
-								landblockId: "0x0001ffff",
-								material: [dynamic],
-								renderScopes: [{ kind: "outdoor" }],
-							}
-						: null;
-				},
 			},
 			envCells: {
 				getCellRenderable: (nodeId) =>
@@ -209,7 +206,6 @@ describe("RenderWorld", () => {
 			},
 			kind: "dynamic",
 		});
-		expect(calls).not.toContain("dynamic-expand");
 		expect(world.getEntityShadowDynamicFacts("scene-node:9")).toEqual({
 			identity: "guid:9",
 			rigidBounds: RIGID_DYNAMIC_BOUNDS,
@@ -223,20 +219,9 @@ describe("RenderWorld", () => {
 			bounds: ENV_CELL_BOUNDS,
 			scope: ENV_CELL_PLACEMENT.scope,
 		});
-		expect(world.expandDynamicContributions("scene-node:9", true)).toEqual({
-			depth: [],
-			kind: "visible",
-			landblockId: "0x0001ffff",
-			material: [dynamic],
-			renderScopes: [{ kind: "outdoor" }],
-		});
-		const translucent = dynamicContribution("transparent", 0.6);
-		expect(dynamic.drawUnit.ordering).toBe("opaque");
-		expect(translucent).toMatchObject({
-			drawUnit: { ordering: "transparent" },
-			instance: { color: { a: 0.6 } },
-			transparentSort: { stableId: "part/range" },
-		});
+		expect(world.getVisibleDynamicPresentation("scene-node:9")).toBe(
+			presentation,
+		);
 		expect(world.resolveGeometry("terrain-geometry:0001" as GeometryKey)).toBe(
 			GEOMETRY,
 		);
@@ -301,7 +286,6 @@ describe("RenderWorld", () => {
 			"scene-flat",
 			"topology",
 			"terrain",
-			"dynamic-expand",
 			"geometry",
 			"texture-2d",
 			"texture-2d",
@@ -310,34 +294,6 @@ describe("RenderWorld", () => {
 		]);
 	});
 });
-
-function dynamicContribution(
-	ordering: "opaque" | "transparent" = "opaque",
-	alpha = 1,
-): VisibleRigidPartContribution {
-	return {
-		drawUnit: {
-			batchKey: "part/range",
-			geometry: "object-geometry:fixture" as ObjectGeometryKey,
-			indexCount: 3,
-			indexStart: 0,
-			material: staticMaterial(),
-			ordering,
-			partIndex: 0,
-			retailVisibility: "normally-visible",
-			templatePartKey: "part-visual-template:fixture" as PartVisualTemplateKey,
-		},
-		instance: {
-			color: { a: alpha, b: 1, g: 1, r: 1 },
-			sourceToLandblock: Mat4.identity(),
-		},
-		ordering,
-		transparentSort:
-			ordering === "transparent"
-				? { center: landblockVec3(Vec3.zero()), stableId: "part/range" }
-				: null,
-	};
-}
 
 function staticMaterial(): ObjectMaterialBinding {
 	return {

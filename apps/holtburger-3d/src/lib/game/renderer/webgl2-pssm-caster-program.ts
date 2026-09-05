@@ -2,25 +2,30 @@ import {
 	compileWebGL2Shader,
 	requireWebGL2Uniform,
 } from "../webgl/shader-program";
+import { DYNAMIC_POSE_GLSL } from "./dynamic-pose-shader";
 
-/** Material-free attribute-instanced vertex shader for outdoor actor depth. */
-export function createPssmCasterVertexShader(): string {
+/** Material-free merged vertex shader sharing the frame's uploaded rigid poses. */
+function createPssmCasterVertexShader(): string {
 	return `#version 300 es
+precision highp float;
+precision highp int;
 layout(location = 0) in vec3 aPosition;
-layout(location = 3) in mat4 aSourceToLandblock;
+layout(location = 3) in uint aPartSelector;
+
+${DYNAMIC_POSE_GLSL}
 
 uniform mat4 uLightClip;
 uniform vec3 uLandblockOffset;
 
 void main() {
-	vec3 landblockPosition = (aSourceToLandblock * vec4(aPosition, 1.0)).xyz;
+	vec3 landblockPosition = (dynamicSourceToLandblock(aPartSelector) * vec4(aPosition, 1.0)).xyz;
 	gl_Position = uLightClip * vec4(landblockPosition + uLandblockOffset, 1.0);
 }
 `;
 }
 
 /** Empty color stage; the target framebuffer owns depth only. */
-export function createPssmCasterFragmentShader(): string {
+function createPssmCasterFragmentShader(): string {
 	return `#version 300 es
 precision highp float;
 
@@ -34,6 +39,9 @@ export interface WebGL2PssmCasterProgram {
 	readonly uniforms: {
 		readonly landblockOffset: WebGLUniformLocation;
 		readonly lightClip: WebGLUniformLocation;
+		/** Shared pose-page texture and the selected root's first row. */
+		readonly poses: WebGLUniformLocation;
+		readonly firstPoseRow: WebGLUniformLocation;
 	};
 }
 
@@ -68,6 +76,8 @@ export function createWebGL2PssmCasterProgram(
 			uniforms: {
 				landblockOffset: requireWebGL2Uniform(gl, program, "uLandblockOffset"),
 				lightClip: requireWebGL2Uniform(gl, program, "uLightClip"),
+				poses: requireWebGL2Uniform(gl, program, "uPoses"),
+				firstPoseRow: requireWebGL2Uniform(gl, program, "uFirstPoseRow"),
 			},
 		};
 	} catch (cause) {

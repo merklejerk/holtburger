@@ -129,12 +129,13 @@ export class WebGL2InstanceBuffer {
 	}
 }
 
-/** Configure every matrix/color attribute for one explicit instance-buffer range. */
+/** Configure every matrix/color pointer for one explicit instance-buffer range. */
 export function bindWebGL2ObjectInstanceRange(
 	gl: WebGL2RenderingContext,
 	binding: WebGL2InstanceBufferBinding,
 	firstInstance: number,
 	instanceCount: number,
+	configureInvariantAttributes = true,
 ): void {
 	requireNonNegativeInteger(firstInstance, "First instance");
 	requireNonNegativeInteger(instanceCount, "Instance count");
@@ -149,7 +150,7 @@ export function bindWebGL2ObjectInstanceRange(
 		column,
 		location,
 	] of OBJECT_INSTANCE_MATRIX_ATTRIBUTE_LOCATIONS.entries()) {
-		gl.enableVertexAttribArray(location);
+		if (configureInvariantAttributes) gl.enableVertexAttribArray(location);
 		gl.vertexAttribPointer(
 			location,
 			4,
@@ -158,9 +159,10 @@ export function bindWebGL2ObjectInstanceRange(
 			binding.strideBytes,
 			baseOffset + column * 4 * Float32Array.BYTES_PER_ELEMENT,
 		);
-		gl.vertexAttribDivisor(location, 1);
+		if (configureInvariantAttributes) gl.vertexAttribDivisor(location, 1);
 	}
-	gl.enableVertexAttribArray(OBJECT_INSTANCE_COLOR_ATTRIBUTE_LOCATION);
+	if (configureInvariantAttributes)
+		gl.enableVertexAttribArray(OBJECT_INSTANCE_COLOR_ATTRIBUTE_LOCATION);
 	gl.vertexAttribPointer(
 		OBJECT_INSTANCE_COLOR_ATTRIBUTE_LOCATION,
 		4,
@@ -169,7 +171,8 @@ export function bindWebGL2ObjectInstanceRange(
 		binding.strideBytes,
 		baseOffset + 16 * Float32Array.BYTES_PER_ELEMENT,
 	);
-	gl.vertexAttribDivisor(OBJECT_INSTANCE_COLOR_ATTRIBUTE_LOCATION, 1);
+	if (configureInvariantAttributes)
+		gl.vertexAttribDivisor(OBJECT_INSTANCE_COLOR_ATTRIBUTE_LOCATION, 1);
 }
 
 /** Encode typed instance facts into the single backend record layout. */

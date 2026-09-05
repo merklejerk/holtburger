@@ -4,6 +4,7 @@
 		"src/client/main.ts",
 		"src/explorer/main.ts",
 		"src/harness/browser/main.ts",
+		"src/harness/browser/dynamic-material-table-probe.ts",
 		"electron/main.ts",
 		"electron/preload.cts",
 		"forge.config.cjs",

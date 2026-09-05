@@ -126,6 +126,42 @@ describe("orderTransparentObjectRanges", () => {
 });
 
 describe("createObjectSubmissionPhases", () => {
+	it("keeps a merged dynamic range between compatible generated instances after near sorting", () => {
+		const objects = [
+			{ id: "near-static", depth: 2, drawKind: "instanced" },
+			{ id: "far-static", depth: 6, drawKind: "instanced" },
+			{ id: "dynamic", depth: 4, drawKind: "merged" },
+			{ id: "far-static-neighbor", depth: 5, drawKind: "instanced" },
+		].map((value) => ({ ...value, ordering: "transparent" as const }));
+		const phases = createObjectSubmissionPhases(
+			objects,
+			(object) => ({
+				range: object,
+				stableId: object.id,
+				distanceSquared: (TRANSPARENT_TUNING.nearDistance / 2) ** 2,
+			}),
+			() => "shared-cohort",
+			(object) => object.depth,
+		);
+		const submissions = formAdjacentObjectInstanceRuns(
+			phases.transparent.near,
+			(object) => object.drawKind === "instanced",
+			() => true,
+		);
+		expect(
+			submissions.map((submission) =>
+				submission.kind === "single"
+					? submission.value.id
+					: submission.values.map((value) => value.id),
+			),
+		).toEqual([
+			["far-static", "far-static-neighbor"],
+			"dynamic",
+			["near-static"],
+		]);
+		expect(phases.transparent.far).toEqual([]);
+	});
+
 	it("partitions one physical population and globally orders transparency", () => {
 		const sortFactCalls: string[] = [];
 		const batchCalls: string[] = [];

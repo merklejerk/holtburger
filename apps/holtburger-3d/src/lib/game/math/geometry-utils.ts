@@ -11,21 +11,22 @@ export function containsPoint(bounds: AABB3, point: Vec3): boolean {
 	);
 }
 
-/** Grow `bounds` outward by `radius` on every axis; a non-positive radius returns it unchanged. */
-export function expandBounds(bounds: AABB3, radius: number): AABB3 {
-	if (radius <= 0) return bounds;
-	return new AABB3(
-		new Vec3(
-			bounds.min.x - radius,
-			bounds.min.y - radius,
-			bounds.min.z - radius,
-		),
-		new Vec3(
-			bounds.max.x + radius,
-			bounds.max.y + radius,
-			bounds.max.z + radius,
-		),
-	);
+/** Grow bounds into optional caller storage; non-positive radii preserve the input extent. */
+export function expandBounds(
+	bounds: AABB3,
+	radius: number,
+	targetBounds?: AABB3,
+): AABB3 {
+	if (radius <= 0)
+		return targetBounds === undefined ? bounds : targetBounds.copy(bounds);
+	const target = targetBounds ?? AABB3.zero();
+	target.min.x = bounds.min.x - radius;
+	target.min.y = bounds.min.y - radius;
+	target.min.z = bounds.min.z - radius;
+	target.max.x = bounds.max.x + radius;
+	target.max.y = bounds.max.y + radius;
+	target.max.z = bounds.max.z + radius;
+	return target;
 }
 
 export function translateBounds(

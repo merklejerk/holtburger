@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { expandBounds } from "../math/geometry-utils";
 import type { AnimationAssetSource } from "../../assets/animation-asset-source";
+import { compileDynamicLayout } from "../geometry/dynamic-layout";
 import type { DecodedAnimationAsset } from "../../assets/decode-animation-record";
 import type { DatAssetId } from "../game-types";
 import { ParticleEmitterRepository } from "../behavior/particle-emitter-repository";
 import { AUTHORED_SCRIPT_FIXTURES } from "../behavior/authored-script-fixtures";
 import { PhysicsScriptRepository } from "../behavior/physics-script-repository";
 import { EffectSystem } from "./effect-system";
+import { behaviorTargetId } from "../behavior/behavior-event-router";
 import { SoundTableRepository } from "../behavior/sound-table-repository";
 import { AnimationAssetRepository } from "../animation/animation-asset-repository";
 import type { PlacedDynamicPresentationSource } from "./dynamic-presentation-source";
@@ -39,6 +41,165 @@ import { RUNTIME_LIGHT_RANGE_SCALE } from "../environment/runtime-lights";
 import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 
 describe("DynamicEntitySystem authored ownership", () => {
+	it("replaces appearance while preserving part targets, effects, pose, and owner siblings", async () => {
+		const { system, effects } = createSystem(
+			new InlineObjectVisualTemplatePreparer(),
+		);
+		const base = source("original");
+		const installation = system.replaceOwner("group", [
+			base,
+			source("sibling"),
+		]);
+		expect(
+			system.getVisiblePresentation(requiredAt(installation.nodeIds, 0)),
+		).toBeNull();
+		await installation.ready;
+		const prepared = requiredAt(installation.getPreparedEntities(), 0);
+		commit(installation);
+		const root = requiredAt(installation.nodeIds, 0);
+		const sibling = requiredAt(installation.nodeIds, 1);
+		const partNode = system.resolvePartNode(root, 0);
+		const siblingRenderable = system.getRenderable(sibling);
+		effects.applyTransparentPart(
+			{ generation: installation.generation, targetId: behaviorTargetId(root) },
+			{ partIndex: 0, start: 0.4, end: 0.4, durationSeconds: 0 },
+		);
+		const replacement = {
+			...base.source,
+			presentation: {
+				...base.source.presentation,
+				appearanceKey: "changed",
+				parts: base.source.presentation.parts.map((part) => ({
+					...part,
+					geometry: {
+						...part.geometry,
+						id: "geometry:changed" as const,
+						positions: new Float32Array([-2, 0, 0, 2, 0, 0, 0, 2, 0]),
+						bounds: new AABB3(new Vec3(-2, 0, 0), new Vec3(2, 2, 0)),
+					},
+				})),
+			},
+		};
+		const previous = system.getRenderable(root);
+		const previousPresentation = system.getVisiblePresentation(root);
+		expect(previousPresentation?.visual).toBe(previous);
+		const stage = await system.stageVisualReplacement(
+			"group",
+			root,
+			replacement,
+		);
+		expect(stage.kind).toBe("staged");
+		if (stage.kind !== "staged")
+			throw new Error("Fixture replacement requires stable part frames.");
+		expect(system.getRenderable(root)).toBe(previous);
+		expect(system.getVisiblePresentation(root)?.visual).toBe(
+			previousPresentation?.visual,
+		);
+		// A replacement must use the pose at commit, not the pose when loading began.
+		const sample = presentationSample(prepared, 0.4);
+		const advancedPart = Mat4.identity();
+		advancedPart.m41 = 5;
+		system.publishPresentation([
+			{
+				...sample,
+				articulatedPose: {
+					authoredRootTransform: null,
+					partToObjectTransforms: [advancedPart],
+				},
+			},
+		]);
+		const pose = system.getPartToObjectTransforms(root);
+		stage.commit();
+		stage.release();
+		const currentPresentation = system.getVisiblePresentation(root);
+		expect(currentPresentation?.visual).not.toBe(previousPresentation?.visual);
+		expect(currentPresentation?.visual.layout.key).not.toBe(
+			previousPresentation?.visual.layout.key,
+		);
+		expect(currentPresentation?.visual.parts[0]?.partIndex).toBe(
+			currentPresentation?.visual.layout.parts[0]?.partIndex,
+		);
+		expect(currentPresentation?.visual.parts[0]?.frameInstance.color.a).toBe(
+			0.6,
+		);
+		expect(system.resolvePartNode(root, 0)).toBe(partNode);
+		expect(system.getPartToObjectTransforms(root)).toBe(pose);
+		expect(system.getRenderable(sibling)).toBe(siblingRenderable);
+		expect(
+			effects.samplePresentation(root).partRenderStates[0]?.translucency,
+		).toBe(0.4);
+		expect(
+			system.getRenderable(root)?.parts[0]?.geometryData?.positions,
+		).toEqual(replacement.presentation.parts[0]?.geometry.positions);
+		expectBounds(
+			system.getPublishedRigidPresentationBounds(root),
+			new AABB3(new Vec3(3, 0, 0), new Vec3(7, 2, 0)),
+		);
+		system.publishPresentation([presentationSample(prepared, 1)]);
+		const hiddenPartPresentation = system.getVisiblePresentation(root);
+		expect(hiddenPartPresentation?.visual).toBe(currentPresentation?.visual);
+		expect(hiddenPartPresentation?.visual.parts).toHaveLength(1);
+		expect(hiddenPartPresentation?.visual.parts[0]?.frameInstance.color.a).toBe(
+			0,
+		);
+		await system.destroy();
+	});
+
+	it("rejects superseded and evicted visual stages without publishing their meshes", async () => {
+		const { system } = createSystem(new InlineObjectVisualTemplatePreparer());
+		const base = source("original");
+		const installation = system.replaceOwner("owner", [base]);
+		await installation.ready;
+		commit(installation);
+		const root = requiredAt(installation.nodeIds, 0);
+		const first = await system.stageVisualReplacement("owner", root, {
+			...base.source,
+			presentation: { ...base.source.presentation, appearanceKey: "first" },
+		});
+		const second = await system.stageVisualReplacement("owner", root, {
+			...base.source,
+			presentation: { ...base.source.presentation, appearanceKey: "second" },
+		});
+		if (first.kind !== "staged" || second.kind !== "staged")
+			throw new Error("Fixture stages changed topology.");
+		expect(() => first.commit()).toThrow("superseded visual replacement");
+		first.release();
+		second.commit();
+		const evicted = await system.stageVisualReplacement(
+			"owner",
+			root,
+			base.source,
+		);
+		if (evicted.kind !== "staged")
+			throw new Error("Fixture stage changed topology.");
+		system.removeOwner("owner");
+		expect(() => evicted.commit()).toThrow("superseded visual replacement");
+		evicted.release();
+		expect(system.getRenderable(root)).toBeNull();
+		await system.destroy();
+	});
+
+	it("retains the installed mesh when replacement resource preparation fails", async () => {
+		const { system, geometry } = createSystem(
+			new InlineObjectVisualTemplatePreparer(),
+		);
+		const base = source("original");
+		const installation = system.replaceOwner("owner", [base]);
+		await installation.ready;
+		commit(installation);
+		const root = requiredAt(installation.nodeIds, 0);
+		const previous = system.getRenderable(root);
+		geometry.failReplacement = true;
+		await expect(
+			system.stageVisualReplacement("owner", root, {
+				...base.source,
+				presentation: { ...base.source.presentation, appearanceKey: "failed" },
+			}),
+		).rejects.toThrow("geometry replacement failed");
+		expect(system.getRenderable(root)).toBe(previous);
+		await system.destroy();
+	});
+
 	it("reconciles installed nameplate content without replacing entity ownership", async () => {
 		const { system } = createSystem(new InlineObjectVisualTemplatePreparer());
 		const base = source("named");
@@ -103,7 +264,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 		}
 	});
 
-	it("attaches a child through the parent rigid part and the requested child pose", async () => {
+	it("keeps held-child poses and picking coherent through parent and child appearance replacement", async () => {
 		const { scene, system } = createSystem(
 			new InlineObjectVisualTemplatePreparer(),
 		);
@@ -155,18 +316,32 @@ describe("DynamicEntitySystem authored ownership", () => {
 		const child = system.replaceOwner("child", [childSource]);
 		expect(await parent.ready).toBe("ready");
 		expect(await child.ready).toBe("ready");
+		const parentPrepared = requiredAt(parent.getPreparedEntities(), 0);
 		commit(parent);
 		commit(child);
 		const parentRoot = requiredAt(parent.nodeIds, 0);
 		const childRoot = requiredAt(child.nodeIds, 0);
-		const parentPart = system.resolvePartNode(parentRoot, 0)!;
-		const animatedParentPose = Mat4.identity();
-		animatedParentPose.m41 = 3;
-		scene.updateLocalTransform(parentPart, animatedParentPose);
+		const parentPart = system.resolvePartNode(parentRoot, 0);
+		if (parentPart === null) throw new Error("Parent part was not installed.");
+		const publishParentPose = (x: number) => {
+			const transform = Mat4.identity();
+			transform.m41 = x;
+			system.publishPresentation([
+				{
+					...presentationSample(parentPrepared, 0),
+					articulatedPose: {
+						authoredRootTransform: null,
+						partToObjectTransforms: [transform],
+					},
+				},
+			]);
+		};
+		publishParentPose(3);
 
 		system.attachEntity(childRoot, parentRoot, "right-hand", 1);
 
-		const childPart = system.resolvePartNode(childRoot, 0)!;
+		const childPart = system.resolvePartNode(childRoot, 0);
+		if (childPart === null) throw new Error("Child part was not installed.");
 		expect(scene.getResolvedPlacement(childPart)?.localToLandblock.m41).toBe(
 			19,
 		);
@@ -176,8 +351,95 @@ describe("DynamicEntitySystem authored ownership", () => {
 				(geometry) => geometry.parts[0]?.sourceToLandblock.m41,
 			),
 		).toBe(19);
+		const originalChildGeometry = system.withSelectionGeometry(
+			childRoot,
+			({ parts }) => parts[0]?.geometry,
+		);
+		const replaceGeometry = (original: PlacedDynamicPresentationSource) => ({
+			...original.source,
+			presentation: {
+				...original.source.presentation,
+				appearanceKey: `${original.source.presentation.appearanceKey}:replacement`,
+				parts: original.source.presentation.parts.map((part) => ({
+					...part,
+					geometry: {
+						...part.geometry,
+						id: `${part.geometry.id}:replacement` as typeof part.geometry.id,
+						positions: new Float32Array([-2, 0, 0, 2, 0, 0, 0, 2, 0]),
+						bounds: new AABB3(new Vec3(-2, 0, 0), new Vec3(2, 2, 0)),
+					},
+				})),
+			},
+		});
+		const parentVisual = replaceGeometry(parentSource);
+		const childVisual = replaceGeometry(childSource);
+		const parentStage = await system.stageVisualReplacement(
+			"parent",
+			parentRoot,
+			parentVisual,
+		);
+		const childStage = await system.stageVisualReplacement(
+			"child",
+			childRoot,
+			childVisual,
+		);
+		if (parentStage.kind !== "staged" || childStage.kind !== "staged")
+			throw new Error(
+				"Compatible part geometry must retain attachment frames.",
+			);
+		publishParentPose(6);
+		expect(
+			system.withSelectionGeometry(
+				childRoot,
+				({ parts }) => parts[0]?.geometry,
+			),
+		).toBe(originalChildGeometry);
+		expect(
+			system.withSelectionGeometry(
+				childRoot,
+				({ parts }) => parts[0]?.sourceToLandblock.m41,
+			),
+		).toBe(22);
+		childStage.commit();
+		childStage.release();
+		parentStage.commit();
+		parentStage.release();
+		expect(system.resolvePartNode(parentRoot, 0)).toBe(parentPart);
+		expect(system.resolvePartNode(childRoot, 0)).toBe(childPart);
+		expect(
+			system.withSelectionGeometry(
+				childRoot,
+				({ parts }) => parts[0]?.geometry.positions,
+			),
+		).toBe(childVisual.presentation.parts[0]?.geometry.positions);
+		expect(
+			system.withSelectionGeometry(
+				parentRoot,
+				({ parts }) => parts[0]?.geometry.positions,
+			),
+		).toBe(parentVisual.presentation.parts[0]?.geometry.positions);
+		for (const [parentX, childX] of [
+			[6, 22],
+			[9, 25],
+		] as const) {
+			publishParentPose(parentX);
+			expect(scene.getResolvedPlacement(childPart)?.localToLandblock.m41).toBe(
+				childX,
+			);
+			expect(
+				system.getVisiblePresentation(childRoot)?.visual.parts[0]?.frameInstance
+					.sourceToLandblock.m41,
+			).toBe(childX);
+			expect(
+				system.withSelectionGeometry(
+					childRoot,
+					({ parts }) => parts[0]?.sourceToLandblock.m41,
+				),
+			).toBe(childX);
+		}
 		system.removeOwner("child");
 		system.removeOwner("parent");
+		await system.destroy();
 	});
 
 	/// A body transitions into clips it has not played, so the whole table stages before activation
@@ -340,12 +602,11 @@ describe("DynamicEntitySystem authored ownership", () => {
 		expect(await stale.ready).toBe("superseded");
 		expect(geometry.upserted).toEqual([]);
 
-		preparer.resolveNext(prepared("current"));
+		const currentTemplate = prepared("current");
+		preparer.resolveNext(currentTemplate);
 		expect(await current.ready).toBe("ready");
 		commit(current);
-		expect(geometry.upserted).toEqual([
-			createObjectGeometryKey("prepared/current"),
-		]);
+		expect(geometry.upserted).toEqual([currentTemplate.layout.key]);
 	});
 
 	it("withdraws a current owner generation whose preparation fails", async () => {
@@ -428,7 +689,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 		expect(system.getDiagnostics().animationResources.referenceCount).toBe(0);
 	});
 
-	it("emits shared batch identities with independent scaled instance transforms", async () => {
+	it("publishes shared layouts and appearances with independent reusable part poses", async () => {
 		const { scene, system } = createSystem(
 			new InlineObjectVisualTemplatePreparer(),
 		);
@@ -459,50 +720,49 @@ describe("DynamicEntitySystem authored ownership", () => {
 		commit(installation);
 		const firstNodeId = requiredAt(installation.nodeIds, 0);
 		const secondNodeId = requiredAt(installation.nodeIds, 1);
-		const materialOnly = system.getVisibleContributions(firstNodeId, false);
-		expect(materialOnly).toMatchObject({
-			depth: [],
-			kind: "visible",
-			material: [{}],
-		});
-		const first = system.getVisibleContributions(firstNodeId, true);
-		const second = system.getVisibleContributions(secondNodeId, true);
-		expect(first).toBe(materialOnly);
-		expect(first?.material).toHaveLength(1);
-		expect(first?.depth).toHaveLength(1);
-		expect(second?.material).toHaveLength(1);
-		expect(second?.depth).toHaveLength(1);
-		expect(first?.material[0]?.drawUnit.batchKey).toBe(
-			second?.material[0]?.drawUnit.batchKey,
+		const compact = system.getVisiblePresentation(firstNodeId);
+		expect(compact?.visual.layout).toBe(
+			system.getVisiblePresentation(secondNodeId)?.visual.layout,
 		);
-		expect(first).toMatchObject({
+		expect(compact).toMatchObject({
+			identity: "first",
 			landblockId: "0x0001ffff",
 			renderScopes: [{ kind: "outdoor" }],
 		});
-		expect(first?.material[0]?.instance.sourceToLandblock).toMatchObject({
+		if (compact === null)
+			throw new Error("Expected installed compact presentation.");
+		const second = system.getVisiblePresentation(secondNodeId);
+		expect(second?.visual.appearance).toBe(compact.visual.appearance);
+		const firstPart = requiredAt(compact.visual.parts, 0);
+		const secondPart = second?.visual.parts[0];
+		expect(secondPart).toBeDefined();
+		expect(secondPart?.frameInstance).not.toBe(firstPart.frameInstance);
+		expect(secondPart?.frameInstance.sourceToLandblock).not.toBe(
+			firstPart.frameInstance.sourceToLandblock,
+		);
+		expect(firstPart.frameInstance.sourceToLandblock).toMatchObject({
 			m11: 2,
 			m22: 3,
 			m33: 4,
 			m41: 12,
 		});
-		expect(second?.material[0]?.instance.sourceToLandblock).toMatchObject({
+		expect(secondPart?.frameInstance.sourceToLandblock).toMatchObject({
 			m11: 5,
 			m22: 6,
 			m33: 7,
 		});
-		const firstContribution = first?.material[0];
-		const firstDepthContribution = first?.depth[0];
-		const firstInstance = firstContribution?.instance;
-		const firstAgain = system.getVisibleContributions(firstNodeId, true);
-		expect(firstAgain).toBe(first);
-		expect(firstAgain?.material[0]).toBe(firstContribution);
-		expect(firstAgain?.depth[0]).toBe(firstDepthContribution);
-		expect(firstAgain?.material[0]?.instance).toBe(firstInstance);
-		expect(firstAgain?.depth[0]?.instance).toBe(firstInstance);
-		expect(system.getVisibleContributions(firstNodeId, false)).toMatchObject({
-			depth: [],
-			kind: "visible",
-			material: [{ instance: firstInstance }],
+		const firstAgain = system.getVisiblePresentation(firstNodeId);
+		expect(firstAgain?.visual).toBe(compact.visual);
+		expect(firstAgain?.visual.parts[0]?.frameInstance).toBe(
+			firstPart.frameInstance,
+		);
+		expect(firstAgain?.visual.parts[0]?.frameInstance.sourceToLandblock).toBe(
+			firstPart.frameInstance.sourceToLandblock,
+		);
+		expect(secondPart?.frameInstance.sourceToLandblock).toMatchObject({
+			m11: 5,
+			m22: 6,
+			m33: 7,
 		});
 		expect(
 			scene.queryFlatFrustum(
@@ -573,7 +833,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 		expect(system.getRuntimeLights()).toEqual([]);
 	});
 
-	it("publishes translucency through alpha, transparent ordering, sorting, and full suppression", async () => {
+	it("publishes independent part opacity while preserving shared appearance and cloak semantics", async () => {
 		const { system } = createSystem(new InlineObjectVisualTemplatePreparer());
 		const shared = source("shared-translucency");
 		const installation = system.replaceOwner("layer", [
@@ -594,26 +854,14 @@ describe("DynamicEntitySystem authored ownership", () => {
 
 		const firstNodeId = requiredAt(installation.nodeIds, 0);
 		const secondNodeId = requiredAt(installation.nodeIds, 1);
-		const first = system.getVisibleContributions(firstNodeId, true)
-			?.material[0];
-		const second = system.getVisibleContributions(secondNodeId, true)
-			?.material[0];
-		// A translucency ramp promotes the part into the transparent phase for this frame without
-		// rewriting its authored draw unit, whose identity consumers cache compiled facts against.
-		expect(first).toMatchObject({
-			drawUnit: { ordering: "opaque" },
-			instance: { color: { a: 0.75 } },
-			ordering: "transparent",
-		});
-		expect(first?.transparentSort).not.toBeNull();
-		expect(second).toMatchObject({
-			drawUnit: { ordering: "opaque" },
-			instance: { color: { a: 0.5 } },
-			ordering: "transparent",
-		});
-		// Both parts share one authored draw unit, so the promotion cannot have cloned it.
-		expect(first?.drawUnit).toBe(second?.drawUnit);
-		expect(first?.drawUnit.batchKey).toBe(second?.drawUnit.batchKey);
+		const first = system.getVisiblePresentation(firstNodeId);
+		const second = system.getVisiblePresentation(secondNodeId);
+		expect(first?.visual.parts[0]?.frameInstance.color.a).toBe(0.75);
+		expect(second?.visual.parts[0]?.frameInstance.color.a).toBe(0.5);
+		// Effects change dense pose payloads; authored material ordering stays immutable.
+		expect(first?.visual.appearance).toBe(second?.visual.appearance);
+		expect(first?.visual.appearance.ranges[0]?.ordering).toBe("opaque");
+		const firstPart = first?.visual.parts[0];
 		const firstOpaque = presentationSample(firstPrepared, 0);
 		expect(() =>
 			system.publishPresentation([firstOpaque, firstOpaque]),
@@ -625,23 +873,25 @@ describe("DynamicEntitySystem authored ownership", () => {
 		).toThrow("scene-node:999 does not exist");
 
 		system.publishPresentation([presentationSample(firstPrepared, 1)]);
-		expect(system.getVisibleContributions(firstNodeId, true)).toEqual({
-			depth: [],
-			kind: "hidden",
-			material: [],
-		});
+		expect(
+			system.getVisiblePresentation(firstNodeId)?.visual.parts,
+		).toHaveLength(1);
+		expect(
+			system.getVisiblePresentation(firstNodeId)?.visual.parts[0]?.frameInstance
+				.color.a,
+		).toBe(0);
 		expect(
 			system.withSelectionGeometry(firstNodeId, ({ parts }) => parts.length),
 		).toBe(0);
 
 		system.publishPresentation([presentationSample(firstPrepared, 0)]);
-		expect(
-			system.getVisibleContributions(firstNodeId, true)?.material[0],
-		).toMatchObject({
-			drawUnit: { ordering: "opaque" },
-			instance: { color: { a: 1 } },
-			transparentSort: null,
-		});
+		expect(system.getVisiblePresentation(firstNodeId)?.visual.parts[0]).toBe(
+			firstPart,
+		);
+		expect(firstPart?.frameInstance.color.a).toBe(1);
+		expect(system.getVisiblePresentation(firstNodeId)?.visual.appearance).toBe(
+			first?.visual.appearance,
+		);
 		system.updatePresentationState(firstNodeId, {
 			cloaked: false,
 			hidden: false,
@@ -649,11 +899,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 			noDraw: true,
 			translucency: 0,
 		});
-		expect(system.getVisibleContributions(firstNodeId, true)).toEqual({
-			depth: [],
-			kind: "hidden",
-			material: [],
-		});
+		expect(system.getVisiblePresentation(firstNodeId)).toBeNull();
 		expect(system.withSelectionGeometry(firstNodeId, () => true)).toBeNull();
 		system.updatePresentationState(firstNodeId, {
 			cloaked: false,
@@ -662,11 +908,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 			noDraw: false,
 			translucency: 0,
 		});
-		expect(system.getVisibleContributions(firstNodeId, true)).toEqual({
-			depth: [],
-			kind: "hidden",
-			material: [],
-		});
+		expect(system.getVisiblePresentation(firstNodeId)).toBeNull();
 
 		system.updatePresentationState(firstNodeId, {
 			cloaked: false,
@@ -686,9 +928,9 @@ describe("DynamicEntitySystem authored ownership", () => {
 		// Retail ignores later SetTranslucency writes while cloaked; it does not invent cloak alpha.
 		system.publishPresentation([presentationSample(firstPrepared, 0.8)]);
 		expect(
-			system.getVisibleContributions(firstNodeId, true)?.material[0],
+			system.getVisiblePresentation(firstNodeId)?.visual.parts[0],
 		).toMatchObject({
-			instance: { color: { a: 0.8 } },
+			frameInstance: { color: { a: 0.8 } },
 		});
 		system.updatePresentationState(firstNodeId, {
 			cloaked: false,
@@ -699,7 +941,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 		});
 		system.publishPresentation([presentationSample(firstPrepared, 0.8)]);
 		expect(
-			system.getVisibleContributions(firstNodeId, true)?.material[0]?.instance
+			system.getVisiblePresentation(firstNodeId)?.visual.parts[0]?.frameInstance
 				.color.a,
 		).toBeCloseTo(0.2);
 		expect(system.getDiagnostics()).toMatchObject({
@@ -733,12 +975,9 @@ describe("DynamicEntitySystem authored ownership", () => {
 		]);
 		installation.commit();
 
-		const initial = system.getVisibleContributions(nodeId, true)?.material[0];
-		expect(initial).toMatchObject({
-			instance: { color: { a: 0.5 } },
-			ordering: "transparent",
-		});
-		const drawUnit = initial?.drawUnit;
+		const initial = system.getVisiblePresentation(nodeId)?.visual.parts[0];
+		expect(initial?.frameInstance.color.a).toBe(0.5);
+		const visual = system.getVisiblePresentation(nodeId)?.visual;
 		const geometryUpserts = geometry.upserted.length;
 
 		system.updatePresentationState(nodeId, {
@@ -748,9 +987,10 @@ describe("DynamicEntitySystem authored ownership", () => {
 		system.publishPresentation([
 			{ ...sample, effects: effects.samplePresentation(nodeId) },
 		]);
-		const updated = system.getVisibleContributions(nodeId, true)?.material[0];
-		expect(updated?.instance.color.a).toBe(0.75);
-		expect(updated?.drawUnit).toBe(drawUnit);
+		const updated = system.getVisiblePresentation(nodeId)?.visual.parts[0];
+		expect(updated?.frameInstance.color.a).toBe(0.75);
+		expect(updated).toBe(initial);
+		expect(system.getVisiblePresentation(nodeId)?.visual).toBe(visual);
 		expect(system.getRenderable(nodeId)).not.toBeNull();
 		expect(geometry.upserted).toHaveLength(geometryUpserts);
 
@@ -772,8 +1012,8 @@ describe("DynamicEntitySystem authored ownership", () => {
 			{ ...sample, effects: effects.samplePresentation(nodeId) },
 		]);
 		expect(
-			system.getVisibleContributions(nodeId, true)?.material[0]?.instance.color
-				.a,
+			system.getVisiblePresentation(nodeId)?.visual.parts[0]?.frameInstance
+				.color.a,
 		).toBe(0.75);
 
 		system.updatePresentationState(nodeId, {
@@ -783,11 +1023,11 @@ describe("DynamicEntitySystem authored ownership", () => {
 		system.publishPresentation([
 			{ ...sample, effects: effects.samplePresentation(nodeId) },
 		]);
-		expect(system.getVisibleContributions(nodeId, true)).toEqual({
-			depth: [],
-			kind: "hidden",
-			material: [],
-		});
+		expect(system.getVisiblePresentation(nodeId)?.visual.parts).toHaveLength(1);
+		expect(
+			system.getVisiblePresentation(nodeId)?.visual.parts[0]?.frameInstance
+				.color.a,
+		).toBe(0);
 	});
 
 	it("publishes pose-local bounds without changing swept scene bounds", async () => {
@@ -943,6 +1183,10 @@ describe("DynamicEntitySystem authored ownership", () => {
 		commit(installation);
 		const nodeId = requiredAt(installation.nodeIds, 0);
 		const meshBounds = scene.getNode(nodeId)?.localBounds?.clone();
+		const retainedPoseBounds = system.getPublishedPresentationBounds(nodeId);
+		const retainedRigidBounds =
+			system.getPublishedRigidPresentationBounds(nodeId);
+		expect(retainedPoseBounds).not.toBe(retainedRigidBounds);
 		const poseBounds = system.getPublishedPresentationBounds(nodeId)?.clone();
 		const rigidBounds = system
 			.getPublishedRigidPresentationBounds(nodeId)
@@ -965,6 +1209,12 @@ describe("DynamicEntitySystem authored ownership", () => {
 
 		envelopeRadius = 5;
 		system.publishPresentation([presentationSample(prepared, 0)]);
+		expect(system.getPublishedPresentationBounds(nodeId)).toBe(
+			retainedPoseBounds,
+		);
+		expect(system.getPublishedRigidPresentationBounds(nodeId)).toBe(
+			retainedRigidBounds,
+		);
 
 		expect(scene.getNode(nodeId)?.localBounds).toEqual(
 			expandBounds(meshBounds, 5),
@@ -987,6 +1237,13 @@ describe("DynamicEntitySystem authored ownership", () => {
 			lastParticleEnvelopeQueryCount: 1,
 			lastPresentationEntityVisitCount: 1,
 		});
+		envelopeRadius = 0;
+		system.publishPresentation([presentationSample(prepared, 0)]);
+		expect(system.getPublishedPresentationBounds(nodeId)).toBe(
+			retainedPoseBounds,
+		);
+		expect(retainedPoseBounds).toEqual(rigidBounds);
+		expect(retainedRigidBounds).toEqual(rigidBounds);
 	});
 
 	it("activates a blocked visual clip as valid static presentation", async () => {
@@ -1080,6 +1337,7 @@ function createSystem(
 		geometry,
 		new ReadyTemplateAtlas(),
 		preparer,
+		() => () => {},
 	);
 	const system = new DynamicEntitySystem<string>(
 		scene,
@@ -1219,15 +1477,12 @@ function prepared(id: string): ObjectVisualTemplate {
 		positions: new Float32Array(9),
 		textureCoordinates: new Float32Array(6),
 	};
-	const geometrySource: GeometrySource = {
-		geometry: geometryData,
-		key,
-	};
 	const visualSource = source(id);
 	return {
+		layout: compileDynamicLayout(visualSource.source.presentation.parts),
+		appearance: { materials: [], ranges: [] },
 		appearanceKey: visualSource.source.presentation.appearanceKey,
 		baseBounds: AABB3.zero(),
-		geometry: [geometrySource],
 		key: objectVisualTemplateKey(visualSource.source),
 		selectionGeometryMorphology: "volumetric",
 		parts: [

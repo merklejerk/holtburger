@@ -327,27 +327,17 @@
 					<div class="ac-param-panel">
 						<div class="ac-param-row">
 							<span class="ac-param-key"
-								>Cascade queries / memberships / parts / runs</span
+								>Cascade queries / memberships / part memberships / draws</span
 							>
 							<code
 								>{profile.cpu.outdoorShadowMap.mean.cascadeQueryCount.toFixed(
 									1,
 								)} / {profile.cpu.outdoorShadowMap.mean.cascadeCandidateMembershipCount.toFixed(
 									1,
-								)} / {profile.cpu.outdoorShadowMap.mean.selectedCasterPartCount.toFixed(
+								)} / {profile.cpu.outdoorShadowMap.mean.selectedPartCascadeCount.toFixed(
 									1,
-								)} / {profile.cpu.outdoorShadowMap.mean.compatibleDepthRunCount.toFixed(
+								)} / {profile.cpu.outdoorShadowMap.mean.selectedDepthDrawCount.toFixed(
 									1,
-								)}</code
-							>
-						</div>
-						<div class="ac-param-row">
-							<span class="ac-param-key">Uploads / bytes</span>
-							<code
-								>{profile.cpu.outdoorShadowMap.mean.instanceUploadCount.toFixed(
-									1,
-								)} / {profile.cpu.outdoorShadowMap.mean.instanceUploadBytes.toFixed(
-									0,
 								)}</code
 							>
 						</div>
@@ -414,9 +404,9 @@
 					>
 				</div>
 				<div class="ac-param-row">
-					<span class="ac-param-key">Visible dynamics / parts</span>
+					<span class="ac-param-key">Visible dynamics / source ranges</span>
 					<code
-						>{metrics.visibleDynamicEntityCount} / {metrics.visibleDynamicPartCount}</code
+						>{metrics.visibleDynamicEntityCount} / {metrics.visibleDynamicSourceRangeCount}</code
 					>
 				</div>
 				<div class="ac-param-row">
@@ -506,10 +496,8 @@
 					>
 				</div>
 				<div class="ac-param-row">
-					<span class="ac-param-key">Dynamic draws / instances</span>
-					<code
-						>{metrics.submittedDynamicDrawCount} / {metrics.submittedDynamicInstanceCount}</code
-					>
+					<span class="ac-param-key">Dynamic draws</span>
+					<code>{metrics.submittedDynamicDrawCount}</code>
 				</div>
 				<div class="ac-param-row">
 					<span class="ac-param-key"

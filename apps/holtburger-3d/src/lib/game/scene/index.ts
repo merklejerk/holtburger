@@ -4,6 +4,14 @@ import type { AABB3, Mat4, Vec3 } from "../math/types";
 /** Opaque identity assigned by SceneGraph to one canonical scene node. */
 export type SceneNodeId = `scene-node:${number}`;
 
+/** Borrowed direct-child transform used for one coherent parent/child publication. */
+export interface SceneChildTransform {
+	/** Existing child whose parent must be the publication root. */
+	readonly nodeId: SceneNodeId;
+	/** Caller-owned matrix copied synchronously; the scene never retains this reference. */
+	readonly transform: Mat4;
+}
+
 /** Landblock and optional environment-cell residency of a transform tree. */
 export interface SceneResidency {
 	/** Landblock whose local coordinate frame contains the complete tree. */

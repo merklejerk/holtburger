@@ -1,5 +1,13 @@
 import type { DynamicPresentationSource } from "./dynamic-presentation-source";
 import {
+	compileDynamicAppearance,
+	type DynamicAppearance,
+} from "./dynamic-appearance";
+import {
+	compileDynamicLayout,
+	type DynamicLayout,
+} from "../geometry/dynamic-layout";
+import {
 	createObjectGeometryKey,
 	type GeometrySource,
 	type ObjectGeometryKey,
@@ -14,6 +22,7 @@ import type { AABB3, Vec3 } from "../math/types";
 import type { AssetTextureFact, AssetTextureKey } from "../textures/types";
 import type { AtlasRequirementCompletion } from "../textures/atlas/resident-texture-atlas";
 import type {
+	ObjectVisualTemplateKey,
 	PartVisualTemplateKey,
 	RigidPartDepthDrawUnit,
 	RigidPartDrawUnit,
@@ -23,19 +32,15 @@ import {
 	type SelectionGeometryMorphology,
 } from "../selection/entity-interaction-shape";
 
-declare const objectVisualTemplateKeyBrand: unique symbol;
-
-/** Canonical immutable identity of one host-resolved setup appearance. */
-export type ObjectVisualTemplateKey = `object-visual-template:${string}` & {
-	readonly [objectVisualTemplateKeyBrand]: true;
-};
-
 /** Prepared immutable visual definition shared by every matching authored resident. */
 export interface ObjectVisualTemplate {
+	/** Geometry-only merged layout for the ordinary-draw cutover, independent of appearance bindings. */
+	readonly layout: DynamicLayout;
+	/** Replaceable material records and merged-buffer ranges addressed by this layout. */
+	readonly appearance: DynamicAppearance;
 	readonly key: ObjectVisualTemplateKey;
 	readonly appearanceKey: string;
 	readonly baseBounds: AABB3 | null;
-	readonly geometry: readonly GeometrySource[];
 	readonly parts: readonly PartVisualTemplate[];
 	/** Cached dimensionality used by the runtime's particle-carrier interaction policy. */
 	readonly selectionGeometryMorphology: SelectionGeometryMorphology;
@@ -108,6 +113,8 @@ export interface ObjectVisualTemplateAtlas<
 
 /** Resource-free repository diagnostics consumed by runtime observability. */
 export interface ObjectVisualTemplateRepositoryDiagnostics {
+	/** Actual retained CPU geometry backing allocations, deduplicated by buffer identity. */
+	readonly retainedGeometryBufferBytes: number;
 	readonly failedTemplateCount: number;
 	readonly preparingTemplateCount: number;
 	readonly readyTemplateCount: number;
@@ -133,6 +140,8 @@ type TemplateState<TClaim extends ObjectVisualTemplateAtlasClaim> =
 			readonly atlasClaim: TClaim;
 			readonly kind: "ready";
 			readonly template: ObjectVisualTemplate;
+			/** Renderer-owned table/index lifetime, released before withdrawing source textures. */
+			readonly releaseAppearance: () => void;
 	  }
 	| { readonly kind: "failed"; readonly cause: unknown };
 
@@ -171,13 +180,15 @@ export class ObjectVisualTemplateRepository<
 	readonly #geometry: ObjectVisualTemplateGeometry;
 	readonly #atlas: ObjectVisualTemplateAtlas<TClaim>;
 	readonly #preparer: ObjectVisualTemplatePreparer;
+	/** Device preparation runs only after the template's atlas revision is active. */
+	readonly #retainAppearance: (template: ObjectVisualTemplate) => () => void;
 	readonly #entries = new Map<
 		ObjectVisualTemplateKey,
 		TemplateEntry<TOwnerId, TClaim>
 	>();
 	readonly #owners = new Map<TOwnerId, TemplateOwnerRecord>();
 	readonly #pendingDisposals = new Set<Promise<void>>();
-	/** Atlas cleanup failures retained for deterministic shutdown failure instead of rejection leaks. */
+	/** Resource cleanup failures retained for deterministic shutdown failure instead of rejection leaks. */
 	readonly #releaseFailures: unknown[] = [];
 	#destroyed = false;
 
@@ -185,10 +196,12 @@ export class ObjectVisualTemplateRepository<
 		geometry: ObjectVisualTemplateGeometry,
 		atlas: ObjectVisualTemplateAtlas<TClaim>,
 		preparer: ObjectVisualTemplatePreparer,
+		retainAppearance: (template: ObjectVisualTemplate) => () => void,
 	) {
 		this.#geometry = geometry;
 		this.#atlas = atlas;
 		this.#preparer = preparer;
+		this.#retainAppearance = retainAppearance;
 	}
 
 	/** Prepare and share an exact template set without changing any committed owner. */
@@ -272,8 +285,24 @@ export class ObjectVisualTemplateRepository<
 	}
 
 	getDiagnostics(): ObjectVisualTemplateRepositoryDiagnostics {
+		const geometryBuffers = new Set<ArrayBufferLike>();
+		for (const entry of this.#entries.values()) {
+			if (entry.state.kind !== "ready") continue;
+			const template = entry.state.template;
+			const geometries = [
+				template.layout.geometry,
+				...template.parts.map((part) => part.geometryData),
+			];
+			for (const geometry of geometries)
+				for (const value of Object.values(geometry))
+					if (ArrayBuffer.isView(value)) geometryBuffers.add(value.buffer);
+		}
 		const states = [...this.#entries.values()].map((entry) => entry.state.kind);
 		return {
+			retainedGeometryBufferBytes: [...geometryBuffers].reduce(
+				(bytes, buffer) => bytes + buffer.byteLength,
+				0,
+			),
 			failedTemplateCount: states.filter((state) => state === "failed").length,
 			preparingTemplateCount: states.filter((state) => state === "preparing")
 				.length,
@@ -291,7 +320,7 @@ export class ObjectVisualTemplateRepository<
 		);
 		for (const entry of this.#entries.values()) {
 			if (entry.state.kind === "ready") {
-				this.#disposeReadyEntry(entry.key, entry.state.atlasClaim);
+				this.#disposeReadyEntry(entry.key, entry.state);
 			}
 		}
 		this.#entries.clear();
@@ -301,7 +330,7 @@ export class ObjectVisualTemplateRepository<
 		if (this.#releaseFailures.length > 0) {
 			throw new AggregateError(
 				this.#releaseFailures,
-				"One or more visual-template atlas claims failed to release.",
+				"One or more visual-template resources failed to release.",
 			);
 		}
 	}
@@ -332,7 +361,7 @@ export class ObjectVisualTemplateRepository<
 		let geometryRetained = false;
 		const resourceOwner = objectVisualTemplateResourceOwnerId(entry.key);
 		try {
-			const template = await this.#preparer.prepare(source);
+			let template = await this.#preparer.prepare(source);
 			if (template.key !== entry.key) {
 				throw new Error(
 					`Visual preparer returned ${template.key} for requested ${entry.key}.`,
@@ -341,7 +370,9 @@ export class ObjectVisualTemplateRepository<
 			if (!this.#entryIsRetained(entry)) return template;
 
 			geometryRetained = true;
-			this.#geometry.replaceOwner(resourceOwner, template.geometry);
+			this.#geometry.replaceOwner(resourceOwner, [
+				{ key: template.layout.key, geometry: template.layout.geometry },
+			]);
 			atlasClaim = this.#atlas.prepareOwnerRequirements(
 				resourceOwner,
 				OBJECT_VISUAL_TEMPLATE_ATLAS_REVISION,
@@ -376,7 +407,17 @@ export class ObjectVisualTemplateRepository<
 				);
 				return template;
 			}
-			entry.state = { atlasClaim, kind: "ready", template };
+			// Ready entries already own their lifetime. Reuse their CPU layout as well as the keyed
+			// GPU allocation, without keeping an independent cache of retired wardrobe variants.
+			for (const existing of this.#entries.values()) {
+				if (existing.state.kind !== "ready") continue;
+				const layout = existing.state.template.layout;
+				if (layout.key !== template.layout.key) continue;
+				template = { ...template, layout };
+				break;
+			}
+			const releaseAppearance = this.#retainAppearance(template);
+			entry.state = { atlasClaim, kind: "ready", template, releaseAppearance };
 			return template;
 		} catch (cause) {
 			const releasedClaim = atlasClaim;
@@ -501,7 +542,7 @@ export class ObjectVisualTemplateRepository<
 			if (this.#entries.get(entry.key) !== entry) return;
 			this.#entries.delete(entry.key);
 			if (entry.state.kind === "ready") {
-				this.#disposeReadyEntry(entry.key, entry.state.atlasClaim);
+				this.#disposeReadyEntry(entry.key, entry.state);
 			}
 		}
 	}
@@ -514,9 +555,17 @@ export class ObjectVisualTemplateRepository<
 		);
 	}
 
-	#disposeReadyEntry(key: ObjectVisualTemplateKey, atlasClaim: TClaim): void {
+	#disposeReadyEntry(
+		key: ObjectVisualTemplateKey,
+		state: Extract<TemplateState<TClaim>, { kind: "ready" }>,
+	): void {
+		try {
+			state.releaseAppearance();
+		} catch (cause) {
+			this.#releaseFailures.push(cause);
+		}
 		const disposal = this.#atlas
-			.withdrawOwnerRevision(atlasClaim)
+			.withdrawOwnerRevision(state.atlasClaim)
 			.catch((cause: unknown) => {
 				this.#releaseFailures.push(cause);
 			})
@@ -552,21 +601,14 @@ function prepareObjectVisualTemplate(
 ): ObjectVisualTemplate {
 	const key = objectVisualTemplateKey(source);
 	const textureRequirements = new Map<AssetTextureKey, AssetTextureFact>();
-	const geometry = new Map<ObjectGeometryKey, GeometrySource>();
+	const cpuGeometry = new Map<ObjectGeometryKey, ObjectGeometryData>();
 	const parts = source.presentation.parts.map((part) => {
 		const geometryKey = createObjectGeometryKey(part.geometry.id);
-		let geometrySource = geometry.get(geometryKey);
-		if (geometrySource === undefined) {
-			geometrySource = {
-				geometry: objectGeometryData(part),
-				key: geometryKey,
-			};
-			geometry.set(geometryKey, geometrySource);
+		let geometryData = cpuGeometry.get(geometryKey);
+		if (geometryData === undefined) {
+			geometryData = objectGeometryData(part);
+			cpuGeometry.set(geometryKey, geometryData);
 		}
-		if (geometrySource.geometry.kind !== "object")
-			throw new Error(
-				`Dynamic part ${part.partIndex} prepared non-object geometry.`,
-			);
 		const templatePartKey = partVisualTemplateKey(key, part);
 		const ranges = resolveObjectMaterialRanges(
 			part,
@@ -588,7 +630,7 @@ function prepareObjectVisualTemplate(
 				part.retailVisibility,
 			),
 			geometry: geometryKey,
-			geometryData: geometrySource.geometry,
+			geometryData,
 			key: templatePartKey,
 			localBounds: part.geometry.bounds,
 			partIndex: part.partIndex,
@@ -603,10 +645,12 @@ function prepareObjectVisualTemplate(
 	);
 	const selectionCarrier =
 		selectionCarriers.length === 1 ? selectionCarriers[0] : undefined;
+	const layout = compileDynamicLayout(source.presentation.parts);
 	return {
+		layout,
+		appearance: compileDynamicAppearance(layout, parts),
 		appearanceKey: source.presentation.appearanceKey,
 		baseBounds: source.localBounds ?? source.presentation.selectionBounds,
-		geometry: [...geometry.values()],
 		key,
 		parts,
 		selectionGeometryMorphology:
@@ -636,7 +680,6 @@ function materialPartitions(
 		ordering: range.ordering,
 		partIndex,
 		retailVisibility,
-		templatePartKey,
 	}));
 }
 

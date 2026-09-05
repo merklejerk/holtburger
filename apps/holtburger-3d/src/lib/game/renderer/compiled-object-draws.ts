@@ -37,8 +37,8 @@ export type CompiledObjectDrawFlushReason =
 /**
  * Compiled draw facts held against the draw units that own them.
  *
- * Keys are the artifact-owned draw unit and template objects, which outlive frames and die with
- * their publication. A `WeakMap` therefore expresses the retention rule exactly: an entry becomes
+ * Keys are artifact-owned draw units and shared instance source draws, which die with their
+ * publication. A `WeakMap` therefore expresses the retention rule exactly: an entry becomes
  * collectable when the draw unit it describes is no longer reachable, so node eviction, layer
  * replacement, and appearance changes need no eviction wiring and cannot leak. Whole-store
  * invalidation is a `flush`, because every listed reason invalidates every entry at once.

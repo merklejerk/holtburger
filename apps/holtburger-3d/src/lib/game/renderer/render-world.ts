@@ -399,7 +399,7 @@ export class RenderWorld {
 			drawUnits: this.resolveStaticObjectRenderable(renderable),
 			frameStreamedInstances: renderable.frameStreamedInstances.map(
 				(template) => ({
-					geometry: this.resolveGeometry(template.geometry),
+					geometry: this.resolveGeometry(template.draw.geometry),
 					template,
 				}),
 			),

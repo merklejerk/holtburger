@@ -118,10 +118,8 @@ export interface StaticObjectDrawUnit {
 	} | null;
 }
 
-/**
- * Immutable transparent instance retained on the CPU so the renderer can order it for each view.
- */
-export interface FrameStreamedObjectInstanceTemplate {
+/** Immutable source draw shared by every instance of one prepared geometry partition. */
+export interface StaticObjectInstanceDraw {
 	/** Complete semantic cohort identity for adjacent compatible-run coalescing. */
 	readonly cohortKey: string;
 	readonly geometry: StaticGeometryKey;
@@ -130,6 +128,12 @@ export interface FrameStreamedObjectInstanceTemplate {
 	readonly material: ObjectMaterialBinding;
 	/** Retail draw eligibility shared by the source geometry partition. */
 	readonly retailVisibility: RetailGeometryVisibility;
+}
+
+/** Immutable instance placement and sort facts retained for current-view ordering. */
+export interface FrameStreamedObjectInstanceTemplate {
+	/** Shared by reference through worker transport and used as the compiled draw cache key. */
+	readonly draw: StaticObjectInstanceDraw;
 	readonly instance: ObjectInstanceData;
 	/**
 	 * Stable distance-sort facts for this instance.

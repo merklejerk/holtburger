@@ -106,13 +106,15 @@ function geometryResult(
 		strategy === "frame-streamed"
 			? [
 					{
-						cohortKey: "transparent",
-						geometry: GEOMETRY_KEY,
-						indexCount: 3,
-						indexStart: 0,
+						draw: {
+							cohortKey: "transparent",
+							geometry: GEOMETRY_KEY,
+							indexCount: 3,
+							indexStart: 0,
+							material: material(),
+							retailVisibility: "normally-visible",
+						},
 						instance: instance(),
-						material: material(),
-						retailVisibility: "normally-visible",
 						transparentSort: {
 							center: landblockVec3(Vec3.zero()),
 							stableId: "transparent:0",

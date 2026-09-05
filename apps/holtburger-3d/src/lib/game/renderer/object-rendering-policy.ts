@@ -30,7 +30,7 @@ export interface OrderedTransparentObjectRanges<T> {
 }
 
 /** Primitive CPU work performed while ordering one transparent population. */
-export interface TransparentObjectOrderingTrace {
+interface TransparentObjectOrderingTrace {
 	/** Stable cohort-key evaluations; exactly one per far physical candidate. */
 	readonly farBatchKeyEvaluationCount: number;
 	/** Far/near classifications; exactly one per physical candidate. */

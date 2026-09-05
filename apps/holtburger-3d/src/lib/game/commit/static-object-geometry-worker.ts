@@ -396,11 +396,9 @@ interface TemplateGeometryPartition {
 
 /** A template partition with its realized shared geometry and per-partition sort centre. */
 interface RealizedTemplatePartition {
-	readonly binding: ObjectMaterialBinding;
+	/** Draw constants shared by the partition's independently ordered instances. */
+	readonly draw: FrameStreamedObjectInstanceTemplate["draw"];
 	readonly center: Vec3;
-	readonly data: ObjectGeometryData;
-	readonly key: StaticGeometryKey;
-	readonly retailVisibility: ResolvedObjectPart["retailVisibility"];
 }
 
 /**
@@ -519,11 +517,15 @@ function prepareGeneratedSceneryGeometry(
 			`static-source-geometry:${partition.identity}` as StaticGeometryKey;
 		geometry.push({ geometry: data, key });
 		realized.set(partition.identity, {
-			binding: partition.binding,
+			draw: {
+				cohortKey: partition.identity,
+				geometry: key,
+				indexCount: data.indices.length,
+				indexStart: 0,
+				material: partition.binding,
+				retailVisibility: partition.retailVisibility,
+			},
 			center: sourcePartitionCenter(partition.contributions),
-			data,
-			key,
-			retailVisibility: partition.retailVisibility,
 		});
 		instancedGeometryBytes += objectGeometryBytes(data);
 	}
@@ -536,13 +538,8 @@ function prepareGeneratedSceneryGeometry(
 				);
 			}
 			return {
-				cohortKey: member.partitionIdentity,
-				geometry: partition.key,
-				indexCount: partition.data.indices.length,
-				indexStart: 0,
+				draw: partition.draw,
 				instance: member.instance,
-				material: partition.binding,
-				retailVisibility: partition.retailVisibility,
 				transparentSort: {
 					// The partition's center is shared source-local geometry, but a template's sort
 					// center must be landblock space. This instance's placement never changes, so

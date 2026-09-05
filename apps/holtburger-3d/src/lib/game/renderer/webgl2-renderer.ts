@@ -950,7 +950,7 @@ export class WebGL2Renderer implements Renderer {
 	/**
 	 * Draw facts compiled once per draw unit instead of once per frame.
 	 *
-	 * Keyed by the artifact draw units and templates themselves, so entries become collectable
+	 * Keyed by artifact draw units and shared instance source draws, so entries become collectable
 	 * with the publication that owns them; the named flushes cover the events that invalidate
 	 * every entry at once.
 	 */
@@ -3038,24 +3038,27 @@ export class WebGL2Renderer implements Renderer {
 		}
 		for (const resolved of node.frameStreamedInstances) {
 			const { template } = resolved;
+			const { draw } = template;
+			// Placement and sort facts stay per instance; immutable draw facts compile once per
+			// source partition and are invalidated with the existing publication/resource cache.
 			objects.push(
-				this.#compileStaticSubmission(template, {
+				this.#compileStaticSubmission(draw, {
 					cullFaceOverride: null,
 					drawKind: "instanced",
 					geometry: resolved.geometry,
-					indexCount: template.indexCount,
-					indexStart: template.indexStart,
+					indexCount: draw.indexCount,
+					indexStart: draw.indexStart,
 					instances: {
-						transparentCohortKey: template.cohortKey,
+						transparentCohortKey: draw.cohortKey,
 						instance: template.instance,
 						kind: "frame-template",
 					},
 					landblockId: node.placement.landblockId,
 					localToLandblock: node.placement.localToLandblock,
-					material: template.material,
+					material: draw.material,
 					ordering: "transparent",
 					receivesOutdoorPssm,
-					retailVisibility: template.retailVisibility,
+					retailVisibility: draw.retailVisibility,
 					renderScopeKey,
 					source,
 					transparentSort: template.transparentSort,

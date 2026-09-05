@@ -3704,3 +3704,650 @@ the runtime slice-distance limit rather than relying on a copied tuning value. F
 checks. The two prior live runs remain the runtime evidence; this review sent no movement or
 camera input and initiated no additional login. Added the domain-independent post-validation
 mutation smell to `docs/code-quality-audit-patterns.md`.
+
+### Swarm Camera-stutter Investigation — Initial Attempt, 2026-09-05
+
+The user reports camera-orbit stutter larger than the visible FPS dip and suspects IPC contention.
+On `ad55f115`, attempted a passive timing capture with temporary camera-sequence timestamps at
+core publication, Electron relay, and page receipt. Neither login produced a usable scene:
+the lifecycle reached `in-world`, but the page received no camera events and the camera session
+never started. The first attempt's inspected performance snapshot retained a tunnel-only entry
+frame, null player/camera residency, and a stopped camera. The second attempt timed out after
+90 seconds with no browser warning or exception and no camera generation. Correct character:
++Holtfighter Slot 1, worktree `.dev.env`. No player or camera input was sent. These are entry
+failures, not captures of the reported orbit stutter; do not infer an IPC diagnosis from them.
+
+Native sampling during the first failed entry captured 1950 ms of summed thread CPU over
+10.075 seconds, including 1930 ms on one Tokio worker and 20 ms on the output-writer thread.
+Leaf samples were predominantly reached-cell expansion, cell/path transit, and BSP/shape queries.
+Artifacts: `/tmp/holtburger-swarm-timing-1.{perf.data,perf.log,threads.json}`. These numbers describe
+the failed-entry state and are not a steady-state swarm baseline.
+
+Code trace identifies measurement boundaries, not a proven bottleneck: core produces camera paths
+after simulation/dynamic-view work on its 30 ms tick; events then cross the forwarding task,
+bounded writer queue, MessagePack pipe, Electron relay, and page receiver. Camera playback holds
+the final point once its supplied path duration expires, so delayed paths can pause camera motion
+while frames continue drawing. Frontend camera synchronization also uses a serialized promise
+chain. Measure producer intervals, producer-to-relay and relay-to-page latency, command round trips,
+and playback exhaustion during the same successful orbit before selecting a fix. The existing
+passive-camera probe's time-to-next-camera-event metric does not correlate an input with the
+particular output that consumed it and must not be described as end-to-end input latency.
+
+All temporary production and probe edits were removed. Awaiting confirmation that normal client
+entry works and permission for a short camera-only orbit capture before further reconnects.
+
+#### Successful Passive Retry
+
+After the user requested another attempt, entry succeeded. Same character and dungeon on
+`ad55f115`, real GPU, render scale 1, viewport 1442×904; ten-second settle then 40.078-second
+instrumented window. No player/camera input. All snapshots retain player EnvCell `0x63460369`,
+25–26 dynamic entities are visible, and the final screenshot confirms the Olthoi crowd. Artifacts:
+`/tmp/holtburger-swarm-timing-3.{json,cpuprofile,png}`. The report includes matched camera sequences
+with Rust publication, Electron relay, and page receipt timestamps.
+
+Restricting timing analysis to 100–39800 ms after the first collected animation frame excludes
+profiler startup and stop/export/screenshot work. For 1323 matched camera updates:
+
+- Producer interval: median 29.994 ms, p95 31.197 ms, maximum 32.438 ms.
+- Page receipt interval: median 29.6 ms, p95 32.8 ms, maximum 34.9 ms.
+- Producer-to-Electron: p95 0.416 ms, maximum 0.851 ms. Electron uses integer epoch milliseconds
+  while Rust logs epoch microseconds; slightly negative sub-millisecond deltas are quantization,
+  not negative transport time. Treat this as approximately sub-millisecond delivery.
+- Electron-to-page: median 2 ms, p95 4 ms, maximum 9 ms.
+- Animation-frame interval: median 6.9 ms, p95 7.0 ms, maximum 7.1 ms over 5716 intervals.
+- Camera dropped-path count remains 42 across all 40 snapshots; no further drops accumulate.
+
+A 328 ms page-camera gap coincides with starting the profiler, not a matching producer gap.
+The large gaps after the measurement window coincide with profiler export and screenshot capture.
+An earlier 1031 ms gap occurs around initial camera establishment, before settling. None should
+be presented as steady-state swarm stutter.
+
+Conclusion: this successful passive view does not show sustained IPC congestion or simulation
+cadence collapse. It does not reproduce or rule out the reported orbit stutter: changed input,
+command acknowledgments, motion playback, and the changing visible workload remain unmeasured.
+The next useful experiment is a camera-only orbit with those timings correlated. Temporary
+timing hooks and probe changes were removed after capture; no production fix was made.
+
+#### Camera-only Orbit Comparison
+
+A deterministic camera-only orbit resolved the discrepancy between the passive capture and the
+user's manual experience. The probe waited ten seconds after world entry, left the player at EnvCell
+`0x63460369`, and dispatched 320 left-drag movements over approximately nine seconds. The release
+host run retained 29–36 visible dynamic entities and complete dungeon geometry. Artifact:
+`/tmp/holtburger-swarm-orbit-1.json`.
+
+During the release-host orbit:
+
+- Core camera publication remained paced at a 29.965 ms median and 31.140 ms p95.
+- Page receipt remained paced at a 29.5 ms median and 32.9 ms p95.
+- Core-to-Electron delivery was 0.461 ms p95 and 0.826 ms maximum; Electron-to-page delivery was
+  4 ms p95 and 5 ms maximum.
+- Camera-command round trip was 0.4 ms median, 1.7 ms p95, and 2.2 ms maximum.
+- Render-frame interval was 6.9 ms median, 7.0 ms p95, and 7.3 ms maximum.
+- No evaluated frame exhausted its supplied camera path, and the dropped-path count remained 42.
+
+The automated release orbit and a subsequent user-controlled release-host orbit both appeared
+smooth. The manual capture recorded 1098 pressed pointer movements over 46.506 seconds. Its frame
+interval was 6.9 ms median, 7.0 ms p95, and 20.9 ms maximum; command acknowledgments were 0.3 ms
+median, 1.6 ms p95, and 6.4 ms maximum; no evaluated frame exhausted its camera path. Artifact:
+`/tmp/holtburger-swarm-manual-1.json`. This excluded a difference in synthetic versus physical
+pointer input as the explanation for the original report.
+
+The remaining launch difference was the Rust host profile: `dev:client` uses the debug host while
+`dev:client:release` uses the release host; both retain the same Vite and Electron development
+paths. Repeating the deterministic orbit under `dev:client` reproduced the reported failure with
+26 visible dynamic entities and complete dungeon geometry. Artifact:
+`/tmp/holtburger-swarm-orbit-debug-1.json`.
+
+During the debug-host orbit:
+
+- Core camera publication was still broadly paced: 30.119 ms median, 34.050 ms p95, and 36.764 ms
+  maximum over the correlated orbit interval.
+- Core-to-Electron camera delivery fell behind: 464.242 ms median, 1299.148 ms p95, and 1665.972 ms
+  maximum. The page received the delayed events in bursts, producing a 1.2 ms median receipt
+  interval but 983.8 ms p99 and 1444.5 ms maximum.
+- Electron-to-page delivery was 20 ms median, 49 ms p95, and 71 ms maximum. This secondary delay is
+  much smaller than the accumulated pre-Electron delay.
+- Render-frame interval remained 6.9 ms median and 7.0 ms p95, with a 34.7 ms maximum. The visible
+  stutter therefore does not require low renderer FPS.
+- 1435 of 1609 evaluated orbit frames had exhausted the current camera path. Those frames held the
+  endpoint until a delayed replacement arrived. Position deltas were zero at the median, 0.295 m
+  at p99, and 1.777 m maximum: the measured hold-then-jump behavior.
+- Dropped camera paths rose from 80 in the first one-second snapshot to 434 in the final snapshot;
+  the equivalent release capture remained fixed at 42.
+
+Conclusion: the debug-only camera stutter is reproduced and is not a WebGL steady-state frame-rate
+bottleneck. The core continues generating camera paths, but the debug Rust host's outbound ordered
+event path cannot keep camera delivery current under the swarm workload. Code boundaries restrict
+the large delay to core broadcast forwarding, host event projection, the bounded 256-frame writer
+queue, debug MessagePack encoding/writing, and pipe delivery before Electron dispatch. This capture
+does not distinguish those internal stages, so it does not justify naming serialization or the
+writer queue as the individual root cause yet. A native debug-host profile or low-overhead writer
+queue timing pass is the next evidence needed if debug-host responsiveness is worth optimizing.
+Release-host behavior does not make this a production steady-state renderer priority.
+
+#### Debug Camera Backlog: Scheduling Cause and Controlled Experiment
+
+Further investigation localized the delay before host event forwarding. Temporary timestamps
+measured core camera publication, receipt by the independent event-forwarding task, writer pickup,
+and completed frame writing. A wrapper also measured each poll of the simulation future: the time
+it runs before returning control to Tokio, which can include many runtime-loop iterations.
+
+The severe debug reproduction captured 650 fully matched camera events from the tail of the run:
+
+- Core publication to forwarder receipt: median 698.631 ms, p95 1561.315 ms, maximum 1825.720 ms.
+- Forwarder receipt to writer pickup: median 14.531 ms, p95 20.828 ms, maximum 23.792 ms.
+- Camera frame encoding/writing: median 0.021 ms, p95 0.040 ms, maximum 0.079 ms.
+- Simulation polls exceeding the 20 ms logging threshold: median 1537.219 ms and maximum
+  1857.903 ms across 14 measured polls in that interval.
+- Delayed camera events correlate directly with poll completion. For example, sequences 1082–1084
+  were produced within one 1722.228 ms poll and reached the forwarder 1.400–1.605 ms after it
+  returned, having waited 1024–1076 ms.
+
+Artifacts: `/tmp/holtburger-boundary-debug-2.json` and
+`/tmp/holtburger-boundary-debug-2.perf.data`. Native sampling collected 2765 samples over 20 seconds.
+The initial leaf-symbol report pointed to collision/cell traversal and iterator work. Full stack
+attribution was incomplete; do not treat this sample as a precise subsystem CPU budget. The
+subsequent experimental rebuild replaced the debug executable, so later symbolization against
+that executable is not a valid substitute for the initial report.
+
+The simulation and forwarder are already separate async tasks. That separation does not guarantee
+prompt execution: when successive timer/network/command operations remain ready, the simulation
+can run many iterations within one poll. Tokio cooperation budgets ready operations rather than
+wall-clock time. Its local LIFO scheduling also permits a newly woken task to remain unavailable
+for other workers to steal until the current task yields. The observed defect is prolonged
+simulation polling that delays forwarding, not insufficient MessagePack throughput.
+
+A temporary `tokio::task::yield_now().await` after each completed runtime-loop iteration bounded
+polling to one iteration. The first experimental orbit restored page camera receipt intervals to
+29.9 ms median, 34.3 ms p95, and 35.4 ms maximum, with dropped paths fixed at 38. However, it retained
+fewer visible entities than the preceding run, so that comparison alone was insufficient.
+
+A final 60.086-second measurement alternated the yield on/off every ten seconds within one login.
+Same +Holtfighter, worktree credentials, EnvCell `0x63460369`, real GPU, render scale 1, viewport
+1441×903. The player received no movement input; the same bounded camera orbit occurred near the
+start. Visible entities settled to 31 and stayed there throughout the later alternating phases.
+Excluding the first two seconds and final second of each phase prevents queued work at a phase
+boundary from contaminating the comparison:
+
+| Phase | Explicit yield | Matched camera events | Publication → forwarder median | p95 | Maximum |
+| --- | --- | --- | --- | --- | --- |
+| 2 | Off | 174 | 605.700 ms | 1336.575 ms | 1576.234 ms |
+| 3 | On | 213 | 0.100 ms | 0.132 ms | 0.160 ms |
+| 4 | Off | 225 | 846.028 ms | 1671.544 ms | 1917.903 ms |
+| 5 | On | 205 | 0.099 ms | 0.126 ms | 0.337 ms |
+| 6 | Off | 214 | 841.180 ms | 1658.678 ms | 1805.919 ms |
+
+The earlier enabled phase 1 likewise had a 0.196 ms maximum forwarding delay. The severe delays
+recurred in every later disabled phase and disappeared in enabled phases. Writer time remained
+below 0.1 ms in these phases. Artifact: `/tmp/holtburger-boundary-alternating-1.json`; analysis helper:
+`/tmp/holtburger-analyze-boundary.mjs`. The earlier single-run artifact is
+`/tmp/holtburger-boundary-yield-1.json`.
+
+Recommendation: make a cooperative yield after each completed core runtime-loop iteration the
+small, targeted scheduling fix. Place it outside the select branches so the enclosing loop returns
+control after each selected operation. This does not make an expensive individual collision tick
+cheaper or promise scheduler fairness, but prevents many expensive iterations from monopolizing
+one poll. A dedicated simulation thread is not required to address the demonstrated failure;
+consider that stronger isolation only if individual ticks or sustained overload warrant it.
+The earlier authority/forwarder task separation remains useful and should be retained.
+
+This was an investigation and causal experiment. All temporary timing, poll wrappers, yield
+experiments, and probe changes were removed afterward; no production fix was retained.
+
+#### Runtime Scheduling, Capacity, and Input Intake Follow-up
+
+The next investigation tested whether the explicit yield was sufficient architectural treatment.
+Four 15-second phases repeated within each login: Burst, Burst plus yield, Skip plus yield, and
+Skip. Each successful capture waited ten seconds after entry and then measured approximately
+70 seconds with five bounded camera-only orbits. No player movement was sent. Same +Holtfighter,
+worktree credentials, dungeon EnvCell `0x63460369`, real GPU, render scale 1. Visible entities
+varied with orbit and live population: roughly 25–33 in the main comparisons. Most viewports were
+1441×903; the initial ordered-batch experiment was 1442×904. This is a scheduling/overload study,
+not a streaming benchmark or a claim that separate logins have identical collision workloads.
+
+Temporary measurements recorded actual tick wall duration, scheduled-deadline lateness, elapsed
+simulation dt, broad tick-stage duration, host camera-command intake, core command handling, core
+camera publication, and forwarding-task receipt. Analysis excludes the first two seconds and
+last second of each phase. Adjacent phases can inherit queued commands, so command-latency
+differences between timer policies are not independent steady-state causal estimates.
+The shared and separate-thread experiments establish distinct boundaries rather than a
+CPU-speedup comparison.
+
+Artifacts:
+
+- `/tmp/holtburger-scheduling-shared-debug.json`
+- `/tmp/holtburger-scheduling-thread-debug.json`
+- `/tmp/holtburger-scheduling-shared-release.json`
+- `/tmp/holtburger-scheduling-batch-debug.json`
+- Analysis: `/tmp/holtburger-analyze-scheduling.mjs`
+
+The first release attempt stalled before character selection with an unresponsive debugger HTTP
+endpoint. It was terminated and excluded. The retry succeeded.
+
+The release run has substantial tick headroom in this scene. Warm phase means were 4.62–4.77 ms,
+p95 5.21–5.53 ms, and maximum 6.35 ms against the 30 ms target. No measured warm tick exceeded
+30 ms. Command intake-to-core handling remained below 5.69 ms, forwarding below 0.31 ms, and
+dropped camera paths remained fixed at 37 under all tested policies. Tick wall work occupied
+roughly 15–16% of elapsed time; this is not a process CPU-utilization measurement.
+
+Debug warm ticks instead averaged 43.22–45.42 ms in the shared-task run and 38.78–40.84 ms in the
+separate-thread run, with essentially no idle tick capacity. The broad before-state-projection /
+simulation / resulting-event stage accounted for roughly 96% of those tick durations. This stage
+measurement does not independently isolate collision from all other simulation work.
+
+| Warm experiment / phase | Mean tick work | Camera forwarding p95 | Command wait p95 | Command wait maximum |
+| --- | --- | --- | --- | --- |
+| Shared debug, Burst + yield | 45.42 ms | 0.155 ms | 1610.64 ms | 1727.95 ms |
+| Separate-thread debug, Burst + yield | 40.84 ms | 0.127 ms | 1928.56 ms | 2051.00 ms |
+| Shared release, Burst + yield | 4.77 ms | 0.052 ms | 3.78 ms | 5.69 ms |
+
+Thread isolation prevents the forwarding task from being delayed by long simulation polls:
+forwarding remained below 0.22 ms in every measured thread-run phase, even without explicit
+yielding, and dropped paths remained fixed at 39. It does not make the core consume input promptly
+or recover the debug tick budget. The experimental mechanism used a blocking worker running
+`Handle::block_on`; it is not a production thread-lifecycle implementation. In particular,
+aborting a started blocking task does not preserve the existing supervisor's cancellation
+behavior. Any real thread cutover needs explicit stop/join and failure ownership.
+
+The timer evidence distinguishes deadline debt from simulation-time accounting. With Burst,
+scheduled deadlines fell up to 6.76 seconds behind in the shared debug run. Skip kept warm
+deadline lateness below 57 ms, but debug ticks still took roughly 44–45 ms. No measured phase had
+an elapsed simulation dt below 15 ms. This is not evidence of tiny redundant catch-up steps in
+the overloaded scene. Core advances by actual elapsed wall time, not by replaying a fixed 30 ms
+for every overdue notification; clearing stale timer deadlines must preserve that elapsed-time
+contract. Skip alone also failed to prevent forwarding stalls on shared workers.
+
+Input has its own overload defect. Host command acknowledgment means admission to an unbounded
+core queue, not application by simulation. Core selects and handles one command per loop turn;
+when physics is continually ready, inexpensive camera updates compete with expensive physics
+turns. Traces show dozens of outstanding camera intents and second-scale handling delays even
+when outbound forwarding is timely. Consequently, the earlier zero-output-backlog result did not
+prove that yielding alone resolved input responsiveness.
+
+Blind latest-value coalescing is not yet a safe fix for the whole camera-intent payload.
+Direction is absolute and zoom is cumulative, but `KinematicBoomController::accept_intent`
+clamps desired reach after each zoom delta. Reversing zoom direction at a limit can produce a
+different result if intermediate updates are removed. Command order and lifecycle identities
+must remain explicit.
+
+An initial temporary ordered batch of at most 64 commands improved input latency, but its
+simulation cost was also lower (roughly 29–31 ms); that cross-login comparison is insufficient to
+attribute the improvement to batching. A same-login control fixes Skip plus yield and alternates
+only one-command versus bounded-batch intake to resolve this confound.
+
+The control completed successfully:
+`/tmp/holtburger-scheduling-batch-ab-debug.json` (1443×905, 26–32 visible entities; pass
+`batch-ab` as the final argument to the analysis helper). Tick cost is similar across adjacent
+warm phases, while command wait improves when batching is enabled:
+
+| Phase / command intake | Mean tick work | Command wait median | p95 | Maximum |
+| --- | --- | --- | --- | --- |
+| 1 / up to 64 in order | 33.30 ms | 28.55 ms | 101.77 ms | 158.70 ms |
+| 2 / one | 31.60 ms | 47.17 ms | 224.96 ms | 405.78 ms |
+| 3 / up to 64 in order | 31.25 ms | 24.38 ms | 117.40 ms | 229.89 ms |
+| 4 / one | 31.18 ms | 45.44 ms | 209.27 ms | 275.13 ms |
+
+Forwarding remained below 0.36 ms in these phases. Batching addresses part of the input backlog
+independently of forwarding, but does not guarantee prompt input: the select still arbitrates
+between ready input and expensive physics before each intake opportunity. Even the batch phases
+retain waits longer than one tick. The experimental 64-command cap is not a proposed production
+constant or a meaningful bound on CPU time for arbitrary commands. No commands were intentionally
+dropped or reordered, and disconnect handling stopped the experimental batch.
+
+The evidence now supports a small structural runtime-loop change rather than treating the
+isolated yield as the entire fix:
+
+1. Give each turn an explicit, bounded opportunity to service pending ordered input before
+   expensive due simulation work. Bound intake work so input floods cannot starve simulation;
+   preserve discrete-command order, errors, and lifecycle boundaries. Do not blindly collapse
+   camera zoom histories.
+2. Make overdue-timer policy explicit for the existing wall-time simulation contract. Discarding
+   obsolete wakeup deadlines must not discard elapsed simulation time, replace dt with a fixed
+   value, or silently change movement integration. The study supports avoiding accumulated Burst
+   deadline debt, not a blanket change to network/keepalive timers.
+3. Return control to the async executor after a bounded turn. Separate authority and forwarding
+   tasks remain appropriate; neither their separation nor operation-count cooperation alone
+   provides a wall-time latency bound.
+
+This is the recommended next implementation scope, not a fully specified phased plan. A
+dedicated simulation thread remains a valid stronger-isolation option, but the experiment shows
+that it neither solves command intake nor improves simulation capacity. Release ticks have
+substantial headroom in the measured swarm. Prefer fixing the demonstrated loop/intake semantics
+first; reconsider dedicated-thread ownership if representative release loads show expensive
+individual ticks or require isolation beyond the bounded-turn design. A thread cutover would
+still require the same input/timer decisions plus proper cancellation, stop/join, and failure
+supervision.
+
+All study hooks, timer-policy switches, thread experiments, batching experiments, and camera
+probe changes were removed after capture. Only investigation notes remain modified. No production
+fix or commit was made.
+
+#### Solver Work Census: Iteration, Repeated Queries, and Commit Boundaries
+
+The next investigation tested the hypotheses that solver inefficiency, unnecessary fidelity, and
+overly broad atomicity might require a fundamentally amortized solver. Three stationary release-host
+captures used +Holtfighter and the worktree credentials, ten-second entry settling, real GPU, render
+scale 1, viewport 1441×903, and player/camera EnvCell `0x63460369`. No player or camera input was sent.
+The scene retained roughly 34–35 visible entities, while the actual collision epoch contained
+63 participants and typically 43–45 scheduled movers. Visible renderer counts therefore understate
+the solver population.
+
+Artifacts:
+
+- `/tmp/holtburger-solver-census-release.json`: 30.064-second baseline census.
+- `/tmp/holtburger-solver-lookup-ab-release.json`: 60.125-second alternating lookup experiment.
+- `/tmp/holtburger-solver-finalization-release.json`: 30.058-second finalization/movement census.
+- `/tmp/holtburger-analyze-solver.mjs`: analysis helper; use final argument `ab` for lookup phases.
+
+Counters and per-body clocks were temporary. Every tenth epoch emitted detailed evidence;
+the baseline summary uses 84 sampled epochs within the final 25 seconds, covering 3632 body solves.
+Stage timings are instrumented observations, not an uninstrumented production benchmark. Per-body
+timings exclude their diagnostic log emission; combined stage sums exclude intervening log overhead
+where possible. Counters are carried in arrays documented below so the raw artifacts remain
+interpretable after temporary code removal.
+
+The ordinary preparation path refreshes dynamic placement, builds the target index and immutable
+tick-start population, solves all mover environment trajectories, then resolves each mover's
+directional peer contacts. It does not run an iterative whole-crowd positional-separation solver.
+Dynamic response limits a mover's own trajectory; overlap is not permission to displace it.
+After selecting an earlier contact, the implementation re-solves a positive prefix of the
+environment motion and holds the resulting endpoint for the rest of the interval.
+
+Baseline observations:
+
+- One environment solve averaged 1.071 anti-tunneling substeps. Contact passes equaled substeps
+  exactly (3890 of each across 3632 original solves). There is no expensive multi-pass static
+  convergence tail in this capture.
+- Broad phase returned 8.536 peer candidates per mover on average. Across 29,918 tested pairs,
+  dynamic narrow phase evaluated 91,888 positions, or 3.071 sample positions per pair.
+  This is already a small slice count; it is not evidence of routinely exhausting the 128-slice cap.
+- 3510 of 3632 movers (96.64%) received a replacement environment plan after dynamic contact.
+- Refresh cost averaged 0.413 ms per epoch; index/scheduling/population capture 0.066 ms;
+  environment preparation 2.775 ms; summed per-body dynamic contact resolution 3.582 ms.
+  Dynamic resolution includes the repeated environment solves.
+- Reached-cell expansion alone examined about 2.533 million cell-volume selectors per sampled tick
+  through linear searches. That count includes refresh, original environment solves, and dynamic
+  resolution, but excludes later commit work and other collision-query families.
+- Individual original environment solves averaged 62.9 microseconds (p95 120, maximum 268);
+  dynamic resolution averaged 82.8 microseconds (p95 130, maximum 274). Cost is repeated over many
+  movers rather than dominated by a single enormous body solve in this workload.
+
+An equivalent-lookup experiment alternated linear source/target cell lookup with an index every
+300 epochs, within one login. The diagnostic index preserved first-match selector semantics and
+was rebuilt lazily per asset within each epoch; it assumed neither sorted selectors nor globally
+unique selectors. It did not change contact sampling, geometry, or movement policy. A production
+index would belong to the immutable collision asset, not the temporary thread-local diagnostic
+mechanism. Excluding phase-edge epochs:
+
+| Phase | Lookup | Mean movers | Refresh + preparation + environment + dynamic work |
+| --- | --- | --- | --- |
+| 2 | Linear | 44.08 | 6.613 ms |
+| 3 | Indexed | 44.42 | 5.510 ms |
+| 4 | Linear | 42.17 | 6.558 ms |
+| 5 | Indexed | 41.92 | 5.269 ms |
+| 6 | Linear | 43.04 | 6.419 ms |
+| 7 | Indexed | 44.00 | 5.444 ms |
+
+The repeated reductions of roughly 1–1.3 ms support an avoidable lookup cost without requiring a
+fidelity tradeoff. This experiment only changed the two cell searches inside reached-cell expansion;
+it did not optimize other collision lookups.
+
+The second census also measured repeated environment solves directly. They consumed approximately
+1.90–1.97 ms per tick in the later linear phases, or 1.56–1.62 ms with indexed lookup. Roughly
+99% of selected blocking contacts were already present at fraction zero. Nevertheless,
+`blocking_contact_plan` raises the accepted fraction to at least `1 / MAXIMUM_DYNAMIC_SLICES`
+before invoking the prefix solve, so a zero-time peer overlap still triggers a second positive-dt
+environment solve.
+
+This is a concrete candidate for a contact-aware solve-order change, not proof that the second
+solve can simply be deleted. In the finalization capture, 3585 replacement plans had median
+original planned travel of 10.71 mm but median accepted travel of 0.0353 mm; 2802 (78.16%) accepted
+less than 1 mm. Some accepted substantial travel (maximum 170.54 mm), and 1158 original plans were
+already effectively stationary (travel below 0.01 mm). Preserving support, gravity, contact reporting,
+and environment-valid placement still matters even when visible travel is negligible.
+
+The same capture measured 3776 commits. Removing the prepared body and validating its currentness
+averaged approximately 0.014 ms per epoch; tentative commit preparation averaged 0.240 ms and
+publication 0.040 ms. Total commit time averaged 6.53 microseconds per body, p95 11 and maximum 37.
+These aggregate means include both lookup policies in the finalization capture. Snapshot capture
+and currentness validation are therefore not demonstrated dominant costs.
+
+Atomicity needs a more precise description than the earlier discussion:
+
+- Each body has a collision-valid provisional plan and an individual commit/currentness check.
+  Coverage failures are body-local; committing the entire crowd is not an all-or-nothing transaction.
+- The epoch imposes an all-plans-prepared-before-peer-resolution dependency and cannot finish until
+  all scheduled movers/snaps have been attempted. That creates aggregate synchronous work.
+- Per-body atomic publication can be retained while investigating incremental preparation. Spreading
+  work across ticks would additionally require explicit handling of stale inputs, peer trajectories,
+  scene changes, and collision-report lifetime completion. Relaxing atomicity alone supplies none
+  of those policies.
+
+Conclusion: the evidence supports exact structural inefficiencies and an aggregate-work scheduling
+problem more strongly than excessive iteration fidelity in this swarm. Prioritize asset-level cell
+lookup and a contact-aware strategy for existing overlaps/repeated environment solves. Keep the
+runtime input/deadline/yield work independent so improved solver speed does not merely hide its
+overload defects. If further bounding is needed, investigate per-body work scheduling while retaining
+collision-valid commits before weakening support/collision guarantees. Reducing substeps or
+amortizing iterative body separation is not supported as the primary lever by this particular census.
+Other workloads, especially fast motion and projectiles, require their own fidelity evidence.
+
+Counter-array schema, in order: grounded solves; actual grounded substeps; grounded contact passes;
+dynamic broad-phase candidates; dynamic pairs reaching sampling; sampled dynamic positions;
+pair contacts at fraction zero; all pair contacts; prefix re-solves; reached-cell expansion calls;
+reached-cell visits; required dynamic slices; examined linear-lookup selectors; prefix-solve
+microseconds; selected blocking contacts at fraction zero. The final two fields were added after
+the first census. Source/target misses were omitted by the original linear comparison counter;
+later lookup-helper measurements include misses. Do not treat it as a universal collision-query
+instruction count.
+
+All solver instrumentation, equivalent-lookup experiments, and probe edits were removed afterward.
+Only investigation notes remain modified; no solver fix or commit was retained.
+
+#### Collision-Cell Lookup Implementation and Contact-Path Follow-Up
+
+The subsequent implementation moves selector lookup into `LandblockColliders`. Construction builds
+a selector-to-offset index alongside the assembly-order cell vector. Consumers receive only a shared
+slice or an exact selector lookup; they cannot mutate selectors independently of the index. Assembly
+merge offsets the incoming indices and preserves first-match behavior. Missing selectors, unsorted
+input, duplicate selectors, empty collections, and merged collections have focused unit coverage.
+All exact selector searches in the collision scene now use this owner-produced lookup, including
+static shadow construction. Geometric searches still iterate in the original order. The index travels
+with the collision asset through landblock installation, replacement, and eviction; no tick-local
+cache, extra invalidation protocol, or streaming policy was introduced.
+
+Verification included the content/world/core library suites, focused index tests, and warnings-as-errors
+Clippy checks for those crates, the debug harness, and the 3D host. A stationary release probe used
+the worktree `.dev.env` and `+Holtfighter Slot 1`, with ten seconds settling followed by a 10.028-second
+window. Player and camera remained in `0x63460369`; the final snapshot contained 28 visible dynamic
+entities. The probe completed successfully and closed the client. Artifact:
+`/tmp/holtburger-indexed-cells-release.json`. This was a correctness smoke test, not a new matched
+solver timing comparison; the earlier alternating experiment remains the performance evidence.
+
+The repeated-solve follow-up identified two concrete dependencies that prevent a transparent early
+replacement of full plans with short blocked plans:
+
+- `prepare_dynamic_entity_collection` publishes each full environment plan to the immutable trajectory
+  map before resolving any mover. `PairTrajectories` reads that plan when the same body is another
+  mover's target. Replacing it with accepted motion changes directional contact timing and potentially
+  collision reports for other movers, even if this body's own contact was at fraction zero.
+- `solve_physical_body_tick` integrates acceleration, friction, gravity, and angular velocity for the
+  supplied interval and obtains environment-valid support/placement from that solve. A geometrically
+  shortened full-tick path is not the shorter-interval commit: ballistic displacement is quadratic in
+  time, retained velocity differs, and support may differ. A stationary endpoint alone is insufficient
+  proof that the second solve can be discarded.
+
+Consequently this patch leaves contact resolution unchanged. The next contact-aware experiment should
+make attempted versus accepted motion explicit: classify tick-start directional blocking contacts,
+then determine what trajectory other movers should observe before choosing the environment solve
+duration. Compare that policy against the existing path for moving peers, report-only contacts,
+launches/falling bodies, rotation, and stale support after scene replacement. Retain one environment-
+validated per-body commit and share the policy with sealed-snapshot prediction, which currently uses
+the same dynamic resolver. This remains structural solver work, not a reason to reduce slice caps or
+to mix runtime deadline/input/yield changes into the lookup patch.
+
+#### Contact-First Solver Experiment and Cutover
+
+The follow-up implements tick-start contact classification before environment planning. A mover
+already blocked by a solid peer receives the existing positive-prefix environment solve directly;
+the redundant full-duration solve is omitted. Its prefix-and-hold trajectory is what other movers
+observe. Bodies without an initial blocker retain full environment planning and swept peer resolution.
+This is not an iterative crowd solve: later contacts can still select replacement plans, and those
+later replacements are not propagated recursively through the collection.
+
+Initial and swept queries share directional report/response policy and deepest shape-contact logic.
+Every eligible fraction-zero report is retained, not merely the selected blocking peer's report.
+Report-only contacts do not shorten motion. Stable body identity remains the tie-break for simultaneous
+blockers. The existing minimum positive prefix, subdivision limits, restitution, and environment
+validation are unchanged. No positional separation impulse was reintroduced.
+
+Input/reconciliation preparation now finishes before trajectory construction. The target index is
+built from that prepared snapshot; a reconciliation-induced facing change refreshes its target
+membership first. Missing coverage rejects the affected body's correction without publishing that
+uncommittable corrected pose as a peer target. Ordinary collection execution and sealed-snapshot
+prediction both use `prepare_dynamic_trajectory`; no alternate prediction collision policy was added.
+
+This intentionally changes our attempted-trajectory policy, not a demonstrated retail contract.
+Retail's object queries inspect target `m_position` (`acclient.c:304706-304741`), not our collection of
+full environment attempts. That reference does not establish exact equivalence with this modern
+snapshot-based policy; correctness evidence here comes from targeted scenarios and measured comparisons.
+
+**Live experiment.** The release client used this worktree's `.dev.env`, `+Holtfighter Slot 1`, no
+camera/player input, ten seconds settling, and a sixty-second measurement window. Both policies used
+the indexed collision cells. Every 300 collection epochs the diagnostic switched between full-attempt
+planning and contact-first planning. Every tenth epoch recorded refresh, input preparation, trajectory
+construction, and dynamic resolution together, stopping before commit construction/publication. Every
+thirtieth epoch additionally evaluated the opposite policy against exactly the same prepared inputs,
+without committing the shadow result. Shadow work and logging were outside the recorded timing, though
+they still added process workload. These are stage timings, not whole simulation ticks or FPS gains.
+
+The first capture, `/tmp/holtburger-contact-first-ab-release.json`, showed a repeatable reduction but
+used a thread-local phase counter. Authority-task migration duplicated phase numbers. Its phase
+grouping is not the final comparison. The corrected capture used a process-wide epoch counter with
+thread-local policy only during the synchronous solve:
+`/tmp/holtburger-contact-first-ab2-release.json`. Excluding the first two phases and the first/last
+30 epochs of each phase:
+
+| Phase | Policy | Samples | Mean movers | Mean initially blocked | Mean preparation/resolution |
+| --- | --- | --- | --- | --- | --- |
+| 2 | Full attempts | 25 | 42.04 | Not preclassified | 3.819 ms |
+| 3 | Contact-first | 25 | 41.32 | 37.52 | 2.086 ms |
+| 4 | Full attempts | 25 | 41.28 | Not preclassified | 3.767 ms |
+| 5 | Contact-first | 25 | 42.52 | 37.72 | 2.181 ms |
+| 6 | Full attempts | 25 | 41.76 | Not preclassified | 3.835 ms |
+| 7 | Contact-first | 19 | 41.79 | 37.68 | 2.150 ms |
+
+The approximately 43% stage reduction supports retaining this change: roughly 38 initially blocked
+movers per tick avoid full-attempt preparation followed by another environment solve. Unblocked bodies
+pay for an additional initial-overlap query; this crowded scene does not establish the sparse-scene
+tradeoff or speedup in debug builds.
+
+**Behavior comparison.** Starting at epoch 600, 58 shadow epochs compared 2418 body results. Three
+endpoints differed by more than 0.01 mm, with a maximum difference of 0.009959 m. Five body report lists,
+eight dynamic response facts, and three retained velocities differed (velocity threshold 0.00001 m/s).
+There were no coarse contact-state or committed-cell differences. These counts overlap; they are not
+counts of unique affected entities. The captured differences concern entities, not the local player.
+Detailed records show contact appearance/disappearance and response-normal changes when peers expose
+shortened motion. This is evidence of a small measured behavior difference, not bit-for-bit equivalence
+or a universal safety proof. Earlier approach-to-swarm samples included a larger 0.393 m endpoint
+difference and are not hidden by the steady-state cutoff.
+
+Permanent tests cover a third body no longer reacting to a blocked peer's unperformed full attempt,
+including reversed commit order, and short-interval environment integration for falling, launching,
+supported, and replaced-support scenes through both collection execution and prediction. Existing
+dungeon-floor/negative-coordinate placement, directional reports, projectiles, and slice-budget tests
+continue to pass. Final checks passed 571 world, 343 core, and 271 host tests and warnings-as-errors
+Clippy for those crates. Temporary policy switching, shadow comparisons, and probe changes were removed.
+
+A final non-switching release smoke run completed a 10.024-second window after settling and closed
+normally: `/tmp/holtburger-contact-first-final-release.json`. The player remained in `0x63460369`;
+the passively settled camera was in `0x6346036c`. No player or camera input was sent. This final run
+also exercised the completed post-reconciliation target-index construction, added after the timing
+capture; it is correctness verification rather than another matched timing comparison.
+
+The lookup and contact-first edits remain uncommitted. Runtime input/deadline/yield work remains a
+separate outstanding structural fix; this speedup must not substitute for bounded input opportunities.
+
+#### Follow-Up: Large Approach-Phase Endpoint Difference
+
+The original corrected A/B capture recorded a 0.392578 m difference at epoch 150 for entity
+`0x8000134A`. Full-attempt planning found no blocking contact; the contact-first shadow result found
+peer `0x8000132C`. That sample also incremented the combined support-state-or-cell difference counter.
+The old record did not retain the two poses or separate those two conditions, so the exact original
+sample cannot retrospectively be classified as a support change versus a cell change.
+
+A subsequent stationary release reproduction used the old policy for actual commits and evaluated
+contact-first as an uncommitted shadow. It compared every collection during the first 400 epochs,
+then every thirtieth epoch, recording poses, separate contact states and cells, full placed paths,
+selected peers, their attempted/shortened plans, and pair sampling fractions for differences over
+5 cm or any support/cell difference. The probe used the worktree credentials, `+Holtfighter Slot 1`,
+ten seconds settling and a 20.048-second measurement window, and closed automatically. Artifact:
+`/tmp/holtburger-contact-first-repro-release.json`. Diagnostic records include world entry before
+the measurement window; this is a behavioral reproduction, not another timing benchmark.
+
+At epoch 162 it reproduced an analogous 0.384727 m endpoint difference and exposed the complete
+blocking chain:
+
+- Follower `0x800019A7` began grounded in cell `0x634602F0`, at root height -6 m. Its 30.306 ms
+  environment attempt covered approximately 52.8 cm.
+- Leader `0x80001978` had a full attempted path of approximately 21.4 cm, but already overlapped
+  blocker `0x800019A8` at time zero. Contact-first therefore supplied the leader's approximately
+  1.68 mm positive-prefix-and-hold path to other movers.
+- Against the leader's full attempt, the follower had no sampled peer contact and crossed the cell
+  boundary at fraction 0.536776, approximately 16.27 ms into the tick.
+- Against the shortened leader path, the follower contacted it at fraction 3/11, approximately
+  8.27 ms into the tick. The environment-validated shortened follower path covered approximately
+  14.4 cm and ended before the boundary.
+
+| Result | Full-attempt peers | Contact-first peers |
+| --- | --- | --- |
+| Follower endpoint cell | `0x634602F2` | `0x634602F0` |
+| Follower root height | -6 m | -6 m |
+| Follower support state | Grounded | Grounded |
+| Path recovery | None | None |
+| Peer response | None | Leader `0x80001978` |
+
+This reproduces the mechanism of a large endpoint difference accompanied by a cell difference:
+recognizing an existing blocking chain stops the follower before an ordinary portal crossing. It
+does not push the body out of the dungeon or discard floor support. It explains this newly captured
+38.5 cm case; it does not manufacture missing detail for the original 39.3 cm record.
+
+The capture contained 58 records meeting the diagnostic threshold. Four had a support-or-cell
+difference: the portal case above and three smaller support-state changes at epochs 148, 231, and
+269 (approximately 1.1, 2.5, and 3.9 cm endpoint differences respectively). Their cells were unchanged
+and their paths contained no recovery. Epoch 148 changed from a shortened airborne result to a full
+grounded result for an initially airborne body; epoch 231 removed a peer truncation on a ramp, and
+the full environment attempt ended airborne; epoch 269 changed the selected contact fraction from
+0.4 to 2/3, with the longer environment prefix ending about 5.8 mm above the old floor-level endpoint.
+These are changes in the environment result selected by the contact policy, not a new direct
+assignment of support state. Detailed geometry-level validation of every such transition remains
+outside this focused reproduction; the capture is not a general proof of support equivalence.
+
+A permanent synthetic two-cell, three-body regression test now verifies that a follower crosses
+the portal when its leader can move, but stops before it when a third body initially blocks that
+leader. It checks unchanged height and absence of recovery using asset-independent free-sphere
+fixtures; the live capture and existing grounded tests provide the complementary floor evidence.
+No production solver behavior was changed during this follow-up. Temporary reproduction code and
+probe edits were removed. All 572 world tests and warnings-as-errors world Clippy passed.
+
+Conclusion: the reproduced large discrepancy is a justified consequence of exposing the initially
+blocked leader's short motion, not grounds to restore full attempted peer motion. The original
+aggregate counter warranted investigation, but a cell change alone is not evidence of invalid
+dungeon placement. Keep the contact-first policy, with the measured behavior differences documented.
+
+#### Solver Quality Review
+
+The quality pass found that reconciliation could mutate the captured body's pose and membership,
+then use that transformed copy as the freshness baseline at commit. A contacted free body receiving
+an interpolated facing correction reproduced a false `changed after collection preparation` rejection
+when the old transformed-pose comparison was reinstated in the focused regression test.
+
+The participant now preserves its original source body. Only a pose-changing correction allocates a
+separate reconciled query/commit body; ordinary participants do not clone a second body. The target
+index and trajectory planner use the reconciled view, while commit freshness still checks the original
+source. The regression also confirms that a genuine external mutation after preparation is rejected.
+The audit worksheet records the general freshness-baseline smell and the ready-await scheduling smell.
+All 75 content, 573 world, 343 core, and 271 host tests passed, along with warnings-as-errors Clippy
+for those crates and the debug harness. Collision-cell lookup and contact-first solving are being
+committed separately before runtime scheduling work.

@@ -1750,6 +1750,50 @@ to preserve the validated property, or when the changed fields are irrelevant to
 **Possible responses:** Remove an unsupported adjustment, move required adjustments before final
 validation, or make transformations explicitly invalidate acceptance until rechecked.
 
+## Preparation Rewrites Its Freshness Baseline
+
+**Smell:** A transaction transforms its captured input, then uses that transformed value to decide
+whether the authoritative source changed while the transaction was being prepared.
+
+**Signals:** Normalization or reconciliation edits the same snapshot later compared with live state.
+An internally generated change is rejected as an external mutation. Weakening the comparison appears
+to fix the rejection but also admits genuinely stale work.
+
+**Possible failure:** Valid preparation rejects itself, or an attempted repair disables conflict
+detection for the fields the preparation changes.
+
+**Questions:** Which value records the source at admission? Which value represents planned output?
+Can both be recovered without reversing a lossy transformation? Do tests distinguish self-generated
+changes from external changes after preparation?
+
+**Counterexamples:** Transforming a copy is safe when an independent revision or immutable source
+snapshot still owns freshness validation.
+
+**Possible responses:** Preserve the original validation baseline, separate source and prepared
+values, or use an owner-issued revision that covers every relevant mutation. Copy only the exceptional
+transformed case when most preparations leave the input unchanged.
+
+## Ready Awaits Masquerade as Scheduling Boundaries
+
+**Smell:** A cooperative task relies on asynchronous calls or timer selection to relinquish execution,
+although those operations may remain immediately ready throughout an overloaded loop.
+
+**Signals:** Independent tasks stop progressing while one loop repeatedly consumes ready work.
+Every branch contains an await, yet a single task poll runs far longer than its intended work unit.
+Making one operation faster hides the starvation without changing scheduling policy.
+
+**Possible failure:** Input, publication, cancellation, or unrelated background work starves even
+when it has a separate task and needs no result from the busy loop.
+
+**Questions:** Which operations actually suspend under sustained load? What bounds one turn's work?
+Does the executor guarantee preemption, or must the application explicitly cooperate?
+
+**Counterexamples:** Preemptive execution or documented cooperative budgets in every hot dependency
+may already establish an adequate scheduling boundary.
+
+**Possible responses:** Bound intake and work per turn, yield explicitly at the owning loop boundary,
+define overdue-work policy, or isolate demonstrably non-cooperative work on a suitable worker.
+
 ## Adding Observations
 
 An observation belongs here when it has:

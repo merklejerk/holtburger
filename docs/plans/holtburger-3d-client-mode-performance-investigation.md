@@ -5715,3 +5715,190 @@ The final suite passes 2,058 tests in 268 files; type checks, ESLint, Knip and c
 formatting checks pass. The review changes naming, comments and tests only, so the preceding live
 GPU captures still exercise the committed rendering algorithm. A domain-independent observation
 about category labels versus behavioral guarantees was added to the code-quality audit worksheet.
+
+#### Post-Additive Submission Census — Multi-Draw Versus Representation
+
+At `247f8abf`, the user requested further measurements of what prevents opaque and particle
+submission from batching, following a review of WebGL2 extension options. This is measurement
+evidence, not a multi-draw implementation or a new implementation plan.
+
+One release-client login used this worktree's credentials and `+Holtfighter Slot 1`, entering the
+persisted courtyard at `0x4ae1ffff` (requested destination 78.2N 42.2W; HUD truncates to 78.1N).
+No player, orbit, zoom, teleport or settings input was issued. The camera settled at its startup
+4.5 m reach: **these are near-camera measurements, not the preceding 15 m comparison**. Hardware
+was the Ryzen 9 5900X and physical Radeon RX 7900 XT, with ANGLE reporting the radeonsi Navi 31
+OpenGL ES 3.2 backend. Viewport/drawing buffer was 1441 × 903, render scale 1, with default client
+interest radii: terrain/buildings 6, explicit objects 1, generated objects 2 and EnvCells 1.
+The context advertises `WEBGL_multi_draw`.
+
+After 30 seconds of settling, three ten-second windows captured renderer CPU/GPU phases and V8
+samples at 100 microseconds, followed by a ten-second window with both profilers disabled. Six
+separate, intercepted GL frames then recorded draw order, physical geometry/attribute bindings,
+active sampler bindings, program/uniform state, UBO bindings, fixed-function state and resource-write
+barriers. Draw interception was installed only for census frames and removed afterward. Census
+getters/stacks substantially perturb those frames; their timings and the final screenshot's FPS
+overlay are not performance evidence. During timing, only cold uniform-location lookup registration
+was intercepted. No geometry or effects were suppressed to obtain timing differences.
+
+| Fresh steady-state boundary | Three instrumented windows, ms/frame |
+| --- | ---: |
+| Frame callback | 4.987 / 4.987 / 5.038 |
+| Renderer CPU | 3.336 / 3.328 / 3.368 |
+| Opaque submission, static and dynamic | 0.471 / 0.479 / 0.476 |
+| Particle submission | 0.410 / 0.410 / 0.418 |
+| Blended submission | 0.217 / 0.214 / 0.215 |
+| Blended ordering | 0.312 / 0.313 / 0.315 |
+| Scene contribution resolution | 0.785 / 0.770 / 0.788 |
+| Sum of measured GPU phases | 1.039 / 1.065 / 1.062 |
+
+The profiling-disabled callback measured 4.627 ms, with actual throughput approximately 142.4 FPS;
+instrumented windows were approximately 142 FPS too. CPU and GPU work overlap, and reciprocal
+callback duration is not delivered FPS. This is not an optimization A/B or evidence of 200 FPS.
+Static workload was stable: 403 baked opaque draws, twelve instanced blended static draws,
+582,671 total submitted static triangles and nine selected portal scopes. Live combat changes
+dynamic and particle populations between samples.
+
+##### Exact Existing-State Compatibility
+
+Counts below preserve the captured sequence and require equal effective GL state; only indexed
+draw counts/offsets may vary. They are potential submission groups, not measured extension speedups.
+The census conservatively retains shader-active bindings even when a shader branch might not
+sample them. Global grouping counts in the raw analysis are not permission to reorder transparency.
+
+| Workload | Captured draws/frame | Adjacent identical-state groups/frame |
+| --- | ---: | ---: |
+| Static opaque | 403 | 397 |
+| Dynamic opaque | 73–78 | 69–74 |
+| Particles | 311–332 | 311–332 |
+| Dynamic blended | 366–372 | 153–160 |
+
+Static opaque and particles therefore have almost no API-only multi-draw opportunity. Dynamic
+blended geometry does have a remaining order-preserving candidate: approximately 210–215 fewer
+API submissions without changing shader data selection. Only a subset of its compatible neighbors
+also has contiguous indices, so ordinary span coalescing does not realize the entire candidate.
+However, V8 locates the whole dynamic-blended execution boundary at only 0.175–0.181 ms in this
+scene. This warrants a bounded benchmark if pursued, not a claim that multi-draw is a large win.
+
+##### Static Opaque: Material Parameters Are the Main Split
+
+The 403 static opaque draws use only 33 physical geometry/attribute configurations, thirteen
+active texture-binding combinations and three programs. Almost every adjacent draw changes
+uniform values: 396 transitions, versus 32 geometry transitions and 162 texture transitions.
+There are 89 distinct base-atlas rectangles and six palette rectangles in the frame.
+
+An offline counterfactual removes only per-material uniforms from the compatibility key:
+base/palette/detail rectangles, material kind/color, alpha test, wrapping, paletted clipping,
+luminosity and detail selection/tiling. It retains geometry, textures/samplers, landblock and local
+transforms, lighting, portal routing, program and fixed-function state. All six frames then admit
+168 adjacent groups. Crucially, **all 235 joins also have consecutive index intervals**. Removing
+every remaining uniform yields no further adjacent reduction. Pooling geometry globally is not a
+prerequisite for this candidate.
+
+This points to shader-readable per-material records for baked static geometry, analogous to the
+existing dynamic material-table approach. With an appropriate material selector in the geometry,
+the captured joins could use ordinary WebGL2 indexed draws; multi-draw is not what unlocks them.
+This is a representation change, not simply deleting uniform writes: material identity must reach
+each primitive correctly, including vertices shared by differently materialed ranges. Cold artifact
+construction, atlas relocation, detail materials and visibility/index gaps require investigation
+before implementation. Keep current publication/landblock lifetimes; these counts do not justify
+cross-landblock GPU allocation or changing streaming ownership.
+
+V8 attributes 0.414–0.419 ms inclusive to static opaque execution, including its preparation call.
+Only 0.016–0.019 ms is sampled directly in native draw entry points. Device-state-mirror JavaScript
+accounts for 0.123–0.136 ms self-time beneath this boundary, with substantial additional material
+setup in `#drawObjectRange`. The opportunity is eliminating repeated setup, not merely reducing
+the number of calls reaching `drawElements`. Native V8 entry-point samples exclude deferred
+browser/GPU-process validation and are not a hard upper bound on end-to-end draw overhead.
+
+##### Particles: Record Addressing and Upload Ownership
+
+Every particle draw selects a different `uInstanceBase`. With that selector removed from the
+offline compatibility key, 311–332 draws become 195–212 adjacent groups, without reordering or
+discarding the live emitter-frame, motion, material or portal uniforms. Very few of those neighbors
+address consecutive particle slots; ordinary instance-count extension cannot generally join them.
+The current `ParticleRenderBatcher` explicitly preserves emitter-local contiguous record ranges.
+
+Thus the structural question is how submitted instances address retained records. A dense visible
+record-index stream could potentially preserve record ownership while letting ordinary instancing
+cover multiple ranges; a multi-draw draw-record table is another option. Neither is implemented or
+proven faster. Ignoring emitter-frame uniforms produces far fewer global groups, but requires both
+additional representation changes and proof that the proposed reordering respects effective blend
+semantics. It is not a valid current batching count.
+
+V8 particle-pass execution is 0.393–0.399 ms inclusive. Native draw entry points account for only
+0.017–0.018 ms; record texture uploads account for 0.103–0.108 ms, binding entry points about
+0.047–0.049 ms, and device-state-mirror JavaScript about 0.080–0.084 ms self-time. These exclusive
+sample categories partition this boundary; do not add them to its inclusive total.
+
+A separate concrete duplication was found: the sky-particle draw and later scoped world-particle
+draw use the same `WebGL2ParticlePass`, `#particleRecords` frame and record texture. Each calls
+`WebGL2ParticleRecordStore.sync` with the same dirty range. All six captured frames issue two
+particle record `texSubImage2D` calls. V8 independently attributes approximately 0.054–0.056 ms to
+the sky upload and 0.049–0.051 ms to the scoped upload. The source confirms no record publication
+between those synchronous passes. Upload ownership should be once per published frame before its
+consumers draw, not once per pass. Avoid treating this as permission for a permanent object-identity
+cache: the mutable mirror persists across frames. The redundant call's measured cost is around
+0.05 ms here, not the entire 0.10–0.11 ms upload boundary; no cleanup A/B was performed.
+
+##### Conclusion and Artifacts
+
+The best-supported larger renderer experiment is static opaque material representation, starting
+within existing geometry/publication boundaries and reusing current material semantics. The
+particle upload duplication is a separate small ownership cleanup candidate. Particle record
+addressing is the next structural particle question; API-only multi-draw does not solve it. The
+remaining identical-state dynamic blended runs are a possible smaller extension benchmark.
+None of these observations establishes a large FPS gain without implementation and on/off timing.
+
+All timing windows and census frames reported no browser exceptions or GL errors; particle
+unresolved-batch counts were zero. The final image was inspected and retains buildings, trees,
+spectral bodies and effects. The client exited normally after the single login. Temporary driver
+and capture hooks were removed; no production rendering code changed and no commit was made.
+Artifacts: `/tmp/holtburger-submission-{0..3}.json`, V8 profiles for windows 0–2,
+`/tmp/holtburger-submission-census-{0..5}.json`, `/tmp/holtburger-submission.png`,
+`/tmp/holtburger-submission-live.log`, `/tmp/holtburger-submission-summary.{mjs,jsonl}`,
+`/tmp/holtburger-submission-attribution.mjs`, and the archived temporary measurement module and
+driver patch at `/tmp/holtburger-submission-measurement.mjs` and
+`/tmp/holtburger-submission-driver.patch`.
+
+#### Particle Record Upload Ownership — Duplicate Removed
+
+The requested fix separates frame publication from pass consumption. The renderer calls
+`WebGL2ParticlePass.beginFrame(records)` once before either rendering schedule executes. The
+first nonempty particle draw consumes that pending frame and synchronizes the record texture;
+later sky, world or additional-view draws reuse it. `ParticleDrawContext` no longer carries the
+upload input. This preserves lazy allocation/upload for empty or invisible frames and keeps upload
+cost inside the existing particle CPU/GPU profiling boundary. Each draw reports only the rows it
+actually uploaded, so the renderer's accumulated row metric no longer duplicates them either.
+
+No identity cache or permanent uploaded flag was added. Every render frame explicitly publishes
+its current input, including when the same mutable mirror and dirty-range objects are reused.
+Tests cover empty draws before consumption, both flat/scoped draw orders, next-frame changes in
+the same mirror, clean frames, texture growth, and drawing before any record frame is supplied.
+
+One follow-up release-client login verified the changed code with the same worktree credentials,
+character, persisted courtyard, startup 4.5 m camera reach, physical RX 7900 XT, 1441 × 903 viewport,
+render scale 1 and default interest radii. No player, camera or settings input was issued. After
+30 seconds settling, three ten-second instrumented windows and one profiling-disabled window
+preceded six separately intercepted census frames. **Every census frame contained one particle
+record upload instead of two**, while both sky and scoped particle programs still drew. Captures
+contained 312–321 particle draws, 2,261–2,468 submitted instances and zero unresolved batches.
+
+Particle CPU submission measured 0.383 / 0.382 / 0.387 ms; V8 particle-pass execution was
+0.359–0.365 ms inclusive, with 0.066–0.072 ms sampled in the remaining record upload. The preceding
+separate-login baseline measured 0.410–0.418 ms for particle submission and 0.103–0.108 ms in
+record uploads. These are not paired same-session A/B windows: combat, weather and unrelated
+frame work varied. In particular, current instrumented callback work was 5.173–5.203 ms, higher
+than the earlier session despite lower particle submission. Profiling-disabled callback work was
+4.678 ms at approximately 142.8 FPS. The verified claim is removal of duplicate upload work,
+not an overall FPS improvement or an exact end-to-end time saving.
+
+All windows and census frames reported no browser/GL errors. The final screenshot, taken five
+seconds after interception ended, retains buildings, trees, spectral bodies and particle effects.
+The client closed normally. Temporary capture/driver edits were removed; no extension, particle
+representation, blend policy, geometry batching, Rust code or streaming ownership changed.
+Artifacts: `/tmp/holtburger-particle-upload-{0..3}.json`, V8 profiles for windows 0–2,
+`/tmp/holtburger-particle-upload-census-{0..5}.json`, `/tmp/holtburger-particle-upload.png`,
+`/tmp/holtburger-particle-upload-live.log`, and `/tmp/holtburger-particle-upload-attribution.mjs`.
+
+Final validation passes 2,061 TypeScript tests across 268 files, Svelte/TypeScript checks, ESLint,
+Knip, changed-source formatting and `git diff --check`. No commit was requested or made.

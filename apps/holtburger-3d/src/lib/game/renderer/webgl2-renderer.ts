@@ -1622,6 +1622,7 @@ export class WebGL2Renderer implements Renderer {
 			),
 		};
 		this.#beginFrame(input.environment, shading);
+		this.#particlePass?.beginFrame(this.#particleRecords);
 		if (profile && setupStartedAt !== undefined) {
 			profile.finishCpuPhase("setup", setupStartedAt);
 		}
@@ -3478,7 +3479,6 @@ export class WebGL2Renderer implements Renderer {
 		const anchor = createLandblockWorldOrigin(view.anchorLandblockId);
 		return {
 			anchorOrigin: [anchor.x, anchor.y, anchor.z],
-			records: this.#particleRecords,
 			cameraPosition: [
 				view.cameraPosition.x,
 				view.cameraPosition.y,

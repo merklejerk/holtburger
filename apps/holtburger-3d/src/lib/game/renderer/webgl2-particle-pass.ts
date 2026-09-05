@@ -14,10 +14,10 @@ import type { TextureFilteringPolicy } from "./texture-filtering-policy";
 import type { WebGL2TextureSamplerCatalog } from "./webgl2-texture-sampler-catalog";
 import type { WebGL2DeviceStateApplicator } from "./webgl2-device-state-applicator";
 
-/** One batch's drawable mesh, already resident on the GPU. */
 /** Neutral colour for a textured mesh, which never reads the solid-colour uniform. */
 const OPAQUE_WHITE = [1, 1, 1, 1] as const;
 
+/** One batch's drawable mesh, already resident on the GPU. */
 export interface ParticleDrawGeometry {
 	readonly vertexArray: WebGLVertexArrayObject;
 	readonly indexCount: number;
@@ -56,8 +56,6 @@ export interface ParticleDrawContext {
 	readonly textureFiltering: TextureFilteringPolicy;
 	/** Global opacity scale applied to all particles in this context, in [0, 1]. Defaults to 1. */
 	readonly opacityScale?: number;
-	/** Record mirror owned by the emitter runtime; the pass uploads it, never writes it. */
-	readonly records: ParticleRecordFrame;
 }
 
 /** The emitter runtime's record storage and what changed in it since the last frame. */
@@ -108,7 +106,9 @@ export class WebGL2ParticlePass {
 	#program: WebGL2ParticleProgram | null = null;
 	#portalProgram: WebGL2ParticleProgram | null = null;
 	#records: WebGL2ParticleRecordStore | null = null;
-	/** Reused flattening scratch keeps all scoped batches in one contiguous frame upload. */
+	/** Consumed by the first nonempty draw; subsequent sky/world/view draws share its upload. */
+	#pendingFrame: ParticleRecordFrame | null = null;
+	/** Reused flattening scratch feeds every scoped batch through one draw traversal. */
 	readonly #scopedBatches: ParticleDrawRange[] = [];
 	readonly #scopedRenderScopeKeys: string[] = [];
 	#diagnostics: ParticleDrawDiagnostics = {
@@ -122,6 +122,11 @@ export class WebGL2ParticlePass {
 		resolveGeometry: (hwGfxObjId: DatAssetId) => ParticleDrawGeometry | null,
 	) {
 		this.#resolveGeometry = resolveGeometry;
+	}
+
+	/** Publish this render frame's records without allocating or uploading for an invisible frame. */
+	beginFrame(records: ParticleRecordFrame): void {
+		this.#pendingFrame = records;
 	}
 
 	draw(
@@ -190,11 +195,20 @@ export class WebGL2ParticlePass {
 			throw new Error("Particle pass cannot move between WebGL devices.");
 		}
 		this.#gl = gl;
-		const records = (this.#records ??= new WebGL2ParticleRecordStore(
-			gl,
-			PARTICLE_RECORDS_PER_ROW,
-		));
-		records.sync(context.records.data, context.records.dirtySlots);
+		let uploadedRecordRowCount = 0;
+		if (this.#pendingFrame !== null) {
+			const records = (this.#records ??= new WebGL2ParticleRecordStore(
+				gl,
+				PARTICLE_RECORDS_PER_ROW,
+			));
+			records.sync(this.#pendingFrame.data, this.#pendingFrame.dirtySlots);
+			uploadedRecordRowCount = records.uploadedRowCount;
+			this.#pendingFrame = null;
+		}
+		const records = this.#records;
+		if (records === null) {
+			throw new Error("Particle draw requires beginFrame records.");
+		}
 		const program = routing
 			? (this.#portalProgram ??= createWebGL2ParticleProgram(gl, true))
 			: (this.#program ??= createWebGL2ParticleProgram(gl));
@@ -388,7 +402,7 @@ export class WebGL2ParticlePass {
 		state.invalidate();
 		this.#diagnostics = {
 			drawnBatchCount,
-			uploadedRecordRowCount: records.uploadedRowCount,
+			uploadedRecordRowCount,
 			drawnParticleCount,
 			unresolvedBatchCount,
 		};
@@ -399,6 +413,7 @@ export class WebGL2ParticlePass {
 	}
 
 	destroy(): void {
+		this.#pendingFrame = null;
 		this.#records?.destroy();
 		this.#records = null;
 		if (this.#program) this.#gl?.deleteProgram(this.#program.program);

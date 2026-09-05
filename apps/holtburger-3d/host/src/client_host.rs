@@ -15,7 +15,7 @@ use holtburger_core::{
 use serde::Deserialize;
 use tokio::sync::{broadcast, mpsc};
 
-use crate::client_projection::project_client_event;
+use crate::client_projection::{ClientHostEvent, client_exit_requested, project_client_event};
 
 /// Character gait accepted by the renderer's held-drive controller.
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -140,84 +140,108 @@ impl ClientCharacterMotionEventRequest {
     }
 }
 
-/// Drains one core runtime and its broadcast receiver. A lagged receiver enters replacement mode
-/// and suppresses deltas until the requested application snapshot arrives.
+/// Owns independently scheduled authority and forwarding, without sharing mutable world state.
 pub async fn run_client_task(
     mut client: holtburger_core::ClientRuntime,
-    mut events: broadcast::Receiver<ClientViewEvent>,
+    events: broadcast::Receiver<ClientViewEvent>,
     command_tx: mpsc::UnboundedSender<holtburger_core::ClientCommand>,
     sink: Arc<dyn crate::host_event_sink::ClientEventSink>,
     shutdown_requested: Arc<std::sync::atomic::AtomicBool>,
-) {
-    let mut run = Box::pin(client.run());
+) -> anyhow::Result<()> {
+    supervise_client_runtime(
+        async move {
+            let result = client.run().await;
+            let (cause, diagnostic) = match result {
+                Ok(()) if shutdown_requested.load(std::sync::atomic::Ordering::Acquire) => (
+                    ClientExitCause::HostShutdown,
+                    "client host shutdown".to_string(),
+                ),
+                Ok(()) => {
+                    let cause = match client.lifecycle() {
+                        ClientLifecycleState::Exiting { cause } => cause,
+                        _ => ClientExitCause::ServerDisconnect,
+                    };
+                    (cause, "client session ended".to_string())
+                }
+                Err(error) => (ClientExitCause::RuntimeFailure, error.to_string()),
+            };
+            // Dropping the sole authority also closes its event sender. The forwarder drains
+            // that ordered stream before the supervisor publishes the terminal outcome.
+            client_exit_requested(cause, diagnostic)
+        },
+        events,
+        command_tx,
+        sink,
+    )
+    .await
+}
+
+/// The runtime future owns the event sender; completion or panic must close its stream.
+/// JoinSet aborts the authority if forwarding fails or the host cancels this supervisor.
+async fn supervise_client_runtime(
+    run: impl std::future::Future<Output = ClientHostEvent> + Send + 'static,
+    events: broadcast::Receiver<ClientViewEvent>,
+    command_tx: mpsc::UnboundedSender<holtburger_core::ClientCommand>,
+    sink: Arc<dyn crate::host_event_sink::ClientEventSink>,
+) -> anyhow::Result<()> {
+    let mut authority = tokio::task::JoinSet::new();
+    authority.spawn(run);
+    forward_client_events(events, command_tx, sink.as_ref()).await?;
+    while let Some(result) = authority.join_next().await {
+        let exit = match result {
+            Ok(exit) => exit,
+            Err(error) => client_exit_requested(ClientExitCause::RuntimeFailure, error.to_string()),
+        };
+        sink.publish_client_event(exit)?;
+    }
+    Ok(())
+}
+
+/// Preserve snapshot recovery and event order independently of the authority's tick polling.
+async fn forward_client_events(
+    mut events: broadcast::Receiver<ClientViewEvent>,
+    command_tx: mpsc::UnboundedSender<holtburger_core::ClientCommand>,
+    sink: &dyn crate::host_event_sink::ClientEventSink,
+) -> anyhow::Result<()> {
     // Core emits a few broad compatibility events while constructing its replacement level. The
     // client host publishes only the atomic application snapshot for the initial baseline.
     let mut awaiting_snapshot = true;
     let mut snapshot_request_pending = false;
 
     loop {
-        tokio::select! {
-            result = &mut run => {
-                drop(run);
-                let (cause, diagnostic) = match result {
-                    Ok(()) => {
-                        if shutdown_requested.load(std::sync::atomic::Ordering::Acquire) {
-                            (ClientExitCause::HostShutdown, "client host shutdown".to_string())
-                        } else {
-                            let lifecycle = client.lifecycle();
-                            let cause = match lifecycle {
-                                ClientLifecycleState::Exiting { cause } => cause,
-                                _ => ClientExitCause::ServerDisconnect,
-                            };
-                            (cause, "client session ended".to_string())
-                        }
-                    }
-                    Err(error) => (ClientExitCause::RuntimeFailure, error.to_string()),
-                };
-                let _ = sink.publish_client_event(crate::client_projection::client_exit_requested(cause, diagnostic));
-                break;
+        match events.recv().await {
+            Ok(event) => {
+                if awaiting_snapshot && !matches!(event, ClientViewEvent::ApplicationSnapshot(_)) {
+                    continue;
+                }
+                if matches!(event, ClientViewEvent::ApplicationSnapshot(_)) {
+                    awaiting_snapshot = false;
+                    snapshot_request_pending = false;
+                }
+                if let Some(projected) = project_client_event(event) {
+                    sink.publish_client_event(projected)?;
+                }
             }
-            event = events.recv() => {
-                match event {
-                    Ok(event) => {
-                        if awaiting_snapshot && !matches!(event, ClientViewEvent::ApplicationSnapshot(_)) {
-                            continue;
-                        }
-                        if matches!(event, ClientViewEvent::ApplicationSnapshot(_)) {
-                            awaiting_snapshot = false;
-                            snapshot_request_pending = false;
-                        }
-                        if let Some(projected) = project_client_event(event) {
-                            let _ = sink.publish_client_event(projected);
-                        }
-                    }
-                    Err(broadcast::error::RecvError::Lagged(_)) => {
-                        awaiting_snapshot = true;
-                        if !snapshot_request_pending {
-                            snapshot_request_pending = true;
-                            if command_tx
-                                .send(holtburger_core::ClientCommand::RequestCurrentApplicationState)
-                                .is_err()
-                            {
-                                let _ = sink.publish_client_event(crate::client_projection::client_exit_requested(
-                                    ClientExitCause::RuntimeFailure,
-                                    "client task stopped while requesting current state",
-                                ));
-                                break;
-                            }
-                        }
-                    }
-                    Err(broadcast::error::RecvError::Closed) => {
-                        let _ = sink.publish_client_event(crate::client_projection::client_exit_requested(
-                            ClientExitCause::RuntimeFailure,
-                            "client event publication closed",
-                        ));
+            Err(broadcast::error::RecvError::Lagged(_)) => {
+                awaiting_snapshot = true;
+                if !snapshot_request_pending {
+                    snapshot_request_pending = true;
+                    if command_tx
+                        .send(holtburger_core::ClientCommand::RequestCurrentApplicationState)
+                        .is_err()
+                    {
+                        // Authority ended before recovery could be requested. The
+                        // supervisor owns its real terminal cause, not a second exit.
                         break;
                     }
                 }
             }
+            Err(broadcast::error::RecvError::Closed) => {
+                break;
+            }
         }
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -231,6 +255,223 @@ mod tests {
         ClientApplicationSnapshot, ClientCameraIdentity, ClientCameraStartReceipt,
         ClientLifecycleState, ClientViewEvent, DynamicEntityHostTime, DynamicEntitySnapshot,
     };
+
+    /// Test-owned synchronous publication behavior, including output failure and coordination.
+    struct TestSink<F>(F);
+
+    impl<F> crate::host_event_sink::ClientEventSink for TestSink<F>
+    where
+        F: Fn(ClientHostEvent) -> anyhow::Result<()> + Send + Sync,
+    {
+        fn publish_client_event(&self, event: ClientHostEvent) -> anyhow::Result<()> {
+            (self.0)(event)
+        }
+    }
+
+    fn snapshot_event() -> ClientViewEvent {
+        ClientViewEvent::ApplicationSnapshot(ClientApplicationSnapshot {
+            lifecycle: ClientLifecycleState::InWorld,
+            local_player_guid: None,
+            server_time: None,
+            world_generation: 1,
+            world_name: None,
+            player_name: None,
+            vitals: Default::default(),
+            character_motion: None,
+            dynamic: DynamicEntitySnapshot::new(
+                DynamicEntityHostTime::new(0.0).unwrap(),
+                Vec::new(),
+            ),
+            runtime_bodies: Vec::new().into(),
+        })
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn forwards_during_a_busy_authority_turn_and_drains_before_exit() {
+        let (event_tx, events) = broadcast::channel(8);
+        let (command_tx, _commands) = mpsc::unbounded_channel();
+        let (forwarded_tx, mut forwarded) = mpsc::unbounded_channel();
+        let (progress_tx, progress) = std::sync::mpsc::channel();
+        let sink = Arc::new(TestSink(move |event| {
+            if matches!(event, ClientHostEvent::CurrentState(_)) {
+                progress_tx.send(())?;
+            }
+            forwarded_tx.send(event)?;
+            Ok(())
+        }));
+        supervise_client_runtime(
+            async move {
+                event_tx.send(snapshot_event()).unwrap();
+                // Deliberately occupy the authority worker until forwarding makes progress.
+                // The timeout is a deadlock guard, not a performance assertion.
+                progress
+                    .recv_timeout(std::time::Duration::from_secs(2))
+                    .unwrap();
+                event_tx
+                    .send(ClientViewEvent::LocalPlayerEstablished {
+                        player_guid: Guid(7),
+                    })
+                    .unwrap();
+                client_exit_requested(ClientExitCause::HostShutdown, "test shutdown")
+            },
+            events,
+            command_tx,
+            sink,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            forwarded.recv().await,
+            Some(ClientHostEvent::CurrentState(_))
+        ));
+        assert!(matches!(
+            forwarded.recv().await,
+            Some(ClientHostEvent::LocalPlayerEstablished {
+                player_guid: Guid(7)
+            })
+        ));
+        let Some(ClientHostEvent::ExitRequested(exit)) = forwarded.recv().await else {
+            panic!("missing terminal exit");
+        };
+        assert!(matches!(
+            exit.cause,
+            crate::client_projection::ClientExitCauseWire::HostShutdown
+        ));
+        assert!(forwarded.recv().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn lag_requests_one_snapshot_and_suppresses_deltas_until_replacement() {
+        let (event_tx, events) = broadcast::channel(2);
+        let (command_tx, mut commands) = mpsc::unbounded_channel();
+        let (forwarded_tx, mut forwarded) = mpsc::unbounded_channel();
+        let sink = Arc::new(TestSink(move |event| {
+            forwarded_tx.send(event)?;
+            Ok(())
+        }));
+        for _ in 0..4 {
+            event_tx
+                .send(ClientViewEvent::LocalPlayerEstablished {
+                    player_guid: Guid(1),
+                })
+                .unwrap();
+        }
+        let forwarder =
+            tokio::spawn(
+                async move { forward_client_events(events, command_tx, sink.as_ref()).await },
+            );
+        assert!(matches!(
+            commands.recv().await,
+            Some(holtburger_core::ClientCommand::RequestCurrentApplicationState)
+        ));
+        event_tx.send(snapshot_event()).unwrap();
+        assert!(matches!(
+            forwarded.recv().await,
+            Some(ClientHostEvent::CurrentState(_))
+        ));
+        event_tx
+            .send(ClientViewEvent::LocalPlayerEstablished {
+                player_guid: Guid(2),
+            })
+            .unwrap();
+        assert!(matches!(
+            forwarded.recv().await,
+            Some(ClientHostEvent::LocalPlayerEstablished {
+                player_guid: Guid(2)
+            })
+        ));
+        assert!(commands.try_recv().is_err());
+        drop(event_tx);
+        forwarder.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn sink_failure_cancels_the_owned_authority() {
+        let (event_tx, events) = broadcast::channel(2);
+        let (command_tx, _commands) = mpsc::unbounded_channel();
+        let (lifetime, dropped) = tokio::sync::oneshot::channel::<()>();
+        let sink = Arc::new(TestSink(|_| anyhow::bail!("output closed")));
+        let error = supervise_client_runtime(
+            async move {
+                let _lifetime = lifetime;
+                event_tx.send(snapshot_event()).unwrap();
+                std::future::pending::<()>().await;
+                drop(event_tx);
+                client_exit_requested(ClientExitCause::HostShutdown, "unreachable")
+            },
+            events,
+            command_tx,
+            sink,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.to_string(), "output closed");
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_secs(2), dropped)
+                .await
+                .unwrap()
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn cancelling_the_supervisor_does_not_detach_authority() {
+        let (event_tx, events) = broadcast::channel(2);
+        let (command_tx, _commands) = mpsc::unbounded_channel();
+        let (started_tx, started) = tokio::sync::oneshot::channel();
+        let (lifetime, dropped) = tokio::sync::oneshot::channel::<()>();
+        let task = tokio::spawn(supervise_client_runtime(
+            async move {
+                let _lifetime = lifetime;
+                started_tx.send(()).unwrap();
+                std::future::pending::<()>().await;
+                drop(event_tx);
+                client_exit_requested(ClientExitCause::HostShutdown, "unreachable")
+            },
+            events,
+            command_tx,
+            Arc::new(TestSink(|_| Ok(()))),
+        ));
+        started.await.unwrap();
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_secs(2), dropped)
+                .await
+                .unwrap()
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn authority_panic_publishes_one_terminal_failure() {
+        let (event_tx, events) = broadcast::channel(2);
+        let (command_tx, _commands) = mpsc::unbounded_channel();
+        let (forwarded_tx, mut forwarded) = mpsc::unbounded_channel();
+        supervise_client_runtime(
+            async move {
+                let _events = event_tx;
+                panic!("authority test failure");
+            },
+            events,
+            command_tx,
+            Arc::new(TestSink(move |event| {
+                forwarded_tx.send(event)?;
+                Ok(())
+            })),
+        )
+        .await
+        .unwrap();
+        let Some(ClientHostEvent::ExitRequested(exit)) = forwarded.recv().await else {
+            panic!("missing terminal failure");
+        };
+        assert!(exit.diagnostic.contains("authority test failure"));
+        assert!(matches!(
+            exit.cause,
+            crate::client_projection::ClientExitCauseWire::RuntimeFailure
+        ));
+        assert!(forwarded.recv().await.is_none());
+    }
 
     #[test]
     fn drive_request_maps_only_renderer_axes_into_core_intent() {

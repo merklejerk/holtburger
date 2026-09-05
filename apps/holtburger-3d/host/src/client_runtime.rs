@@ -208,7 +208,7 @@ struct ClientHostState {
     shutdown_requested: Arc<std::sync::atomic::AtomicBool>,
 }
 
-/// Client composition root. It owns exactly one core runtime/task for the lifetime of one launch.
+/// Client composition root. Its supervisor owns authority and forwarding for one launch.
 pub struct ClientHostRuntime {
     /// Static-content discovery and reusable content service shared with Explorer.
     pub content: SharedHostContent,
@@ -292,13 +292,18 @@ impl ClientHostRuntime {
         let events = client.subscribe_client_view_events();
         let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
         client.set_command_rx(command_rx);
-        let task = tokio::spawn(run_client_task(
+        let supervisor = run_client_task(
             client,
             events,
             command_tx.clone(),
             Arc::clone(&self.event_sink),
             shutdown_requested,
-        ));
+        );
+        let task = tokio::spawn(async move {
+            if let Err(error) = supervisor.await {
+                log::error!("client supervisor stopped: {error:#}");
+            }
+        });
 
         {
             let mut state = self.state.lock().await;
@@ -457,12 +462,13 @@ impl ClientHostRuntime {
             let _ = sender.send(ClientCommand::Disconnect);
         }
         if let Some(mut task) = task {
-            let completed = tokio::time::timeout(std::time::Duration::from_secs(2), &mut task)
-                .await
-                .is_ok();
-            if !completed {
-                task.abort();
-                let _ = task.await;
+            match tokio::time::timeout(std::time::Duration::from_secs(2), &mut task).await {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => log::error!("client supervisor failed: {error}"),
+                Err(_) => {
+                    task.abort();
+                    let _ = task.await;
+                }
             }
         }
     }

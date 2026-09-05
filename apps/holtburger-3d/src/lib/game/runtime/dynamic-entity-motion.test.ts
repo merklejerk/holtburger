@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { PreparedAnimation } from "../animation/animation-asset-repository";
+import { prepareAnimation } from "../animation/animation-asset-repository";
 import { Mat4 } from "../math/types";
 import type { DynamicEntityMotion } from "./dynamic-entity-feed";
 import {
@@ -7,16 +7,18 @@ import {
 	playingClipForDynamicEntityMotion,
 } from "./dynamic-entity-motion";
 
-const animation: PreparedAnimation = {
-	authoredRootTranslates: false,
-	frameCount: 32,
-	framesPerSecond: 30,
-	hooks: [],
-	id: "0x03000559",
-	partCount: 1,
-	partFrames: Array.from({ length: 32 }, () => Mat4.identity()),
-	positionFrames: [],
-};
+const animation = prepareAnimation(
+	{
+		frameCount: 32,
+		hooks: [],
+		id: "0x03000559",
+		partCount: 1,
+		partFrames: Array.from({ length: 32 }, () => Mat4.identity()),
+		positionFrames: [],
+	},
+	"0x03000559",
+	30,
+);
 
 const opening: DynamicEntityMotion = {
 	kind: "playing",

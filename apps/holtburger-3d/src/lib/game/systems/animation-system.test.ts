@@ -10,7 +10,10 @@ import {
 } from "../behavior/behavior-test-harness";
 import { describe, expect, it } from "vitest";
 import type { DecodedAnimationHook } from "../../assets/decode-animation-record";
-import type { PreparedAnimation } from "../animation/animation-asset-repository";
+import {
+	prepareAnimation,
+	type PreparedAnimation,
+} from "../animation/animation-asset-repository";
 import { playingClip } from "../animation/animation-playback";
 import { transformPoint3 } from "../math/matrices";
 import { Mat4, Vec3 } from "../math/types";
@@ -567,20 +570,22 @@ function effectsFor(system: AnimationSystem<string>): EffectSystem {
 const systemEffects = new WeakMap<AnimationSystem<string>, EffectSystem>();
 
 function testAnimation(omega = new Vec3(0, 0, 1)): PreparedAnimation {
-	return {
-		authoredRootTranslates: false,
-		frameCount: 4,
-		framesPerSecond: 30,
-		hooks: [setOmegaHook(omega), deferredEffectHook()],
-		id: "0x03000001",
-		partCount: 1,
-		partFrames: [0, 1, 2, 3].map((translation) => {
-			const transform = Mat4.identity();
-			transform.m41 = translation;
-			return transform;
-		}),
-		positionFrames: [],
-	};
+	return prepareAnimation(
+		{
+			frameCount: 4,
+			hooks: [setOmegaHook(omega), deferredEffectHook()],
+			id: "0x03000001",
+			partCount: 1,
+			partFrames: [0, 1, 2, 3].map((translation) => {
+				const transform = Mat4.identity();
+				transform.m41 = translation;
+				return transform;
+			}),
+			positionFrames: [],
+		},
+		"0x03000001",
+		30,
+	);
 }
 
 function initialPose(partCount = 1): readonly Mat4[] {
@@ -591,20 +596,22 @@ function fixedPoseAnimation(
 	id: string,
 	partTranslations: readonly number[],
 ): PreparedAnimation {
-	return {
-		authoredRootTranslates: false,
-		frameCount: 1,
-		framesPerSecond: 30,
-		hooks: [],
-		id: id as PreparedAnimation["id"],
-		partCount: partTranslations.length,
-		partFrames: partTranslations.map((translation) => {
-			const transform = Mat4.identity();
-			transform.m41 = translation;
-			return transform;
-		}),
-		positionFrames: [],
-	};
+	return prepareAnimation(
+		{
+			frameCount: 1,
+			hooks: [],
+			id: id as PreparedAnimation["id"],
+			partCount: partTranslations.length,
+			partFrames: partTranslations.map((translation) => {
+				const transform = Mat4.identity();
+				transform.m41 = translation;
+				return transform;
+			}),
+			positionFrames: [],
+		},
+		id as PreparedAnimation["id"],
+		30,
+	);
 }
 
 function requiredAt<T>(values: readonly T[], index: number): T {

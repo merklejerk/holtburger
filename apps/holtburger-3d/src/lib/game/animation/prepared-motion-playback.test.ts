@@ -4,9 +4,10 @@ import type { DecodedAnimationHook } from "../../assets/decode-animation-record"
 import type { DatAssetId } from "../game-types";
 import { AABB3, Mat4, Vec3 } from "../math/types";
 import type { ObjectVisualTemplate } from "../systems/object-visual-template-repository";
-import type {
-	PreparedAnimation,
-	PreparedMotionClosure,
+import {
+	prepareAnimation,
+	type PreparedAnimation,
+	type PreparedMotionClosure,
 } from "./animation-asset-repository";
 import { prepareMotionPlayback } from "./prepared-motion-playback";
 
@@ -29,19 +30,22 @@ function animation(
 	hooks: readonly DecodedAnimationHook[] = [],
 	partCount = 1,
 ): PreparedAnimation {
-	return {
-		frameCount: offsets.length,
-		framesPerSecond: 30,
-		hooks,
-		id: id as DatAssetId,
-		partCount,
-		partFrames: offsets.flatMap((x) => {
-			const pose = Mat4.identity();
-			pose.m41 = x;
-			return Array.from({ length: partCount }, () => pose);
-		}),
-		positionFrames: [],
-	} as unknown as PreparedAnimation;
+	return prepareAnimation(
+		{
+			frameCount: offsets.length,
+			hooks,
+			id: id as DatAssetId,
+			partCount,
+			partFrames: offsets.flatMap((x) => {
+				const pose = Mat4.identity();
+				pose.m41 = x;
+				return Array.from({ length: partCount }, () => pose);
+			}),
+			positionFrames: [],
+		},
+		id as DatAssetId,
+		30,
+	);
 }
 
 function closure(
@@ -134,15 +138,29 @@ describe("prepareMotionPlayback", () => {
 	});
 
 	it("accepts a partial clip and retains static coverage for untouched parts", () => {
+		const appearance = template(3);
+		const partialTemplate = {
+			...appearance,
+			parts: appearance.parts.map((part) => ({
+				...part,
+				localBounds:
+					part.partIndex === 0
+						? AABB3.zero()
+						: new AABB3(new Vec3(20, 0, 0), new Vec3(20, 0, 0)),
+			})),
+		};
 		const playback = prepareMotionPlayback(
-			closure([animation("0x03000001", [0, 1], [], 1)]),
-			template(3),
+			closure([animation("0x03000001", [0, 50], [], 1)]),
+			partialTemplate,
 			new Vec3(1, 1, 1),
-			staticBounds,
+			new AABB3(new Vec3(-20, 0, 0), new Vec3(20, 0, 0)),
 		);
 
 		expect(playback.clips.size).toBe(1);
-		expect(playback.localBounds.max.x).toBe(1);
+		// The next frame's translation must not be applied to an unauthored setup part.
+		expect(playback.localBounds).toEqual(
+			new AABB3(new Vec3(-20, 0, 0), new Vec3(50, 0, 0)),
+		);
 		expect(console.warn).not.toHaveBeenCalled();
 	});
 

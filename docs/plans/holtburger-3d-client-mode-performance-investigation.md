@@ -3410,3 +3410,45 @@ smell was identified during this final review. Re-ran all 2,043 tests across 269
 checks, ESLint, dead-code checks, formatting, and diff whitespace checks successfully. Existing
 live GPU evidence above remains applicable; no new runtime changes or live login were introduced
 during the review.
+
+### Affine Presentation Bounds — 2026-09-05
+
+Replaced the dynamic entity's per-part eight-corner bounds transformation with a checked affine
+center/half-extents calculation. The absolute linear basis handles rotation, nonuniform scale,
+reflection, and shear, including collapsed axes. This preserves the mathematical bounding box,
+subject to floating-point rounding; it does not substitute a looser proxy. Caller-owned output
+and input/output aliasing remain supported. Projective input fails before output mutation; the
+existing general-purpose projective transformer is unchanged.
+
+The existing shared bounds loop remains the owner for sampled poses, scale changes, and appearance
+replacement. Folding it into pose composition would duplicate its other callers or require a
+broader refactor, so that change was not included. Scene graph publication, attachments, particle
+envelopes, landblock ownership, and streaming policy are unchanged.
+
+Fresh stationary real-GPU captures used the worktree credentials and +Holtfighter Slot 1 at the
+original rooftop, `0xc6a9ffff`, with no movement or camera input. Configuration remained render
+scale 1, terrain/building radius 6, EnvCell/explicit radius 1, generated radius 2, on the Ryzen 9
+5900X / AMD Navi 31 machine. One instrumented before window and three instrumented after windows
+were each approximately ten seconds after settling; the after windows shared one login.
+
+| Per-frame measurement | Before | After 1 | After 2 | After 3 |
+| --- | ---: | ---: | ---: | ---: |
+| V8 posed-bounds inclusive ms | 0.388 | 0.294 | 0.305 | 0.305 |
+| V8 dynamic publication inclusive ms | 0.878 | 0.783 | 0.793 | 0.786 |
+| Whole callback mean ms | 5.084 | 4.948 | 4.967 | 4.949 |
+
+V8 attribution is normalized by measured frame count and restricted to the client frame stack;
+the bounds row is nested inside publication. The box-transform function itself fell from 0.197 ms
+to 0.088–0.096 ms. This supports a modest local improvement, not an established uninstrumented FPS
+gain: there was only one fresh before window, live weather varied, and viewport dimensions were
+1443×905 before versus 1444×906 after. No profiling-off confirmation was captured for this change.
+
+All captures retained 142 visible dynamic roots / 2,165 ranges, 650 static draws / 230,819 static
+triangles, and 46 untruncated portal scopes. All four screenshots were inspected: buildings and
+trees remained present, and no browser errors or exceptions were reported. Artifacts:
+`/tmp/holtburger-affine-before.{json,cpuprofile,png}` and
+`/tmp/holtburger-affine-after-{1,2,3}.{json,cpuprofile,png}`. Temporary probe repetition was removed.
+
+All 2,049 tests across 269 files pass, including affine/general corner equivalence, aliased output,
+degenerate axes, and projective rejection. Type/Svelte, ESLint, dead-code, formatting, and diff
+whitespace checks pass. No commit was created.

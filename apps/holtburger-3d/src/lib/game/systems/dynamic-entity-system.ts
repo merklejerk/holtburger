@@ -18,7 +18,7 @@ import type {
 } from "./dynamic-presentation-source";
 import type { NameplateSourceVisual } from "../renderer/nameplate-policy";
 import { AABB3, Mat4, Vec3 } from "../math/types";
-import { multiplyMat4, transformAABB3 } from "../math/matrices";
+import { multiplyMat4, transformAffineAABB3 } from "../math/matrices";
 import type { LandblockOwnerId } from "../game-types";
 import type { SceneChildTransform, SceneGraph, SceneNodeId } from "../scene";
 import type { SceneSpatialPlacement } from "../scene";
@@ -1547,7 +1547,7 @@ export class DynamicEntitySystem<
 			throw new Error("Dynamic presentation has no bounded active parts.");
 		let first = true;
 		for (const part of parts) {
-			const partBounds = transformAABB3(
+			const partBounds = transformAffineAABB3(
 				multiplyMat4(
 					rootTransform,
 					part.localToVisualRoot,

@@ -430,6 +430,63 @@ export function transformNormal3(
 	return target;
 }
 
+/** Transform an affine box through its center and absolute-basis half extents, without corner division. */
+export function transformAffineAABB3(
+	matrix: Mat4,
+	bounds: AABB3,
+	target: AABB3,
+): AABB3 {
+	if (
+		matrix.m14 !== 0 ||
+		matrix.m24 !== 0 ||
+		matrix.m34 !== 0 ||
+		matrix.m44 !== 1
+	)
+		throw new Error("Affine bounds require an affine transform.");
+	const centerX = (bounds.min.x + bounds.max.x) * 0.5;
+	const centerY = (bounds.min.y + bounds.max.y) * 0.5;
+	const centerZ = (bounds.min.z + bounds.max.z) * 0.5;
+	const extentX = (bounds.max.x - bounds.min.x) * 0.5;
+	const extentY = (bounds.max.y - bounds.min.y) * 0.5;
+	const extentZ = (bounds.max.z - bounds.min.z) * 0.5;
+	const x =
+		matrix.m11 * centerX +
+		matrix.m21 * centerY +
+		matrix.m31 * centerZ +
+		matrix.m41;
+	const y =
+		matrix.m12 * centerX +
+		matrix.m22 * centerY +
+		matrix.m32 * centerZ +
+		matrix.m42;
+	const z =
+		matrix.m13 * centerX +
+		matrix.m23 * centerY +
+		matrix.m33 * centerZ +
+		matrix.m43;
+	// Absolute basis coefficients cover rotation, reflection, nonuniform scale, and shear.
+	// Read the entire input before publishing so input and output may be the same box.
+	const ex =
+		Math.abs(matrix.m11) * extentX +
+		Math.abs(matrix.m21) * extentY +
+		Math.abs(matrix.m31) * extentZ;
+	const ey =
+		Math.abs(matrix.m12) * extentX +
+		Math.abs(matrix.m22) * extentY +
+		Math.abs(matrix.m32) * extentZ;
+	const ez =
+		Math.abs(matrix.m13) * extentX +
+		Math.abs(matrix.m23) * extentY +
+		Math.abs(matrix.m33) * extentZ;
+	target.min.x = x - ex;
+	target.min.y = y - ey;
+	target.min.z = z - ez;
+	target.max.x = x + ex;
+	target.max.y = y + ey;
+	target.max.z = z + ez;
+	return target;
+}
+
 /** Return the conservative axis-aligned bounds of one transformed local-space box. */
 export function transformAABB3(
 	matrix: Mat4,

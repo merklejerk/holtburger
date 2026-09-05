@@ -10,11 +10,64 @@ import {
 	transformNormal3,
 	transformPoint3,
 	transformAABB3,
+	transformAffineAABB3,
 	writeMat4ToFloat32Array,
 } from "./matrices";
 import { AABB3, Mat4, Quat, Vec3 } from "./types";
 
 describe("matrix composition", () => {
+	it("matches corner bounds for affine bases and supports aliased output", () => {
+		// Exercise mixed bases (including shear/reflection) and translated, non-centered boxes.
+		for (let index = 0; index < 100; index += 1) {
+			const matrix = new Mat4(
+				Math.sin(index),
+				Math.cos(index),
+				-0.5,
+				0,
+				-2,
+				Math.sin(index * 2),
+				Math.cos(index * 3),
+				0,
+				Math.cos(index * 2),
+				0.75,
+				Math.sin(index * 3),
+				0,
+				index - 50,
+				3,
+				-17,
+				1,
+			);
+			const bounds = new AABB3(new Vec3(-3, 1, -7), new Vec3(2, 4, 5));
+			const expected = transformAABB3(matrix, bounds);
+			expect(transformAffineAABB3(matrix, bounds, bounds)).toBe(bounds);
+			for (const corner of ["min", "max"] as const)
+				for (const axis of ["x", "y", "z"] as const)
+					expect(bounds[corner][axis]).toBeCloseTo(expected[corner][axis], 10);
+		}
+	});
+
+	it("transforms point bounds and collapsed axes", () => {
+		const matrix = createScaleMat4(new Vec3(0, -2, 3));
+		const point = new AABB3(new Vec3(1, 2, 3), new Vec3(1, 2, 3));
+		const output = AABB3.zero();
+		expect(transformAffineAABB3(matrix, point, output)).toBe(output);
+		expect(output).toEqual(transformAABB3(matrix, point));
+	});
+
+	it.each(["m14", "m24", "m34", "m44"] as const)(
+		"rejects a non-affine %s before mutating output",
+		(field) => {
+			const matrix = Mat4.identity();
+			matrix[field] = 0.5;
+			const bounds = new AABB3(new Vec3(-1, -2, -3), new Vec3(4, 5, 6));
+			const previous = bounds.clone();
+			expect(() => transformAffineAABB3(matrix, bounds, bounds)).toThrow(
+				"affine transform",
+			);
+			expect(bounds).toEqual(previous);
+		},
+	);
+
 	it("maps an orthographic box onto the WebGL clip cube", () => {
 		const storage = Mat4.zero();
 		const projection = createOrthographicMat4(-2, 6, -4, 2, 3, 11, storage);

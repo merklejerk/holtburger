@@ -1861,6 +1861,29 @@ category itself sufficient proof. Conservative boundaries may be appropriate wit
 members as barriers, and test compatible operations on both sides of an exception. Name helpers for
 what they actually guarantee rather than implying all selected work is freely reorderable.
 
+## Publication Events Used as Semantic Invalidation
+
+**Smell:** Every publication invalidates prepared consumers even when none of the facts those
+consumers retain changed. The event describes producer activity rather than invalidated assumptions.
+
+**Signals:** Inserting or retiring an unrelated member rebuilds all retained output; comments justify
+invalidation with an exceptional relocation while the callback runs after every update; counters show
+repeated preparation despite stable consumer inputs.
+
+**Possible failure:** Cold preparation becomes recurring runtime work, and adding more precomputed
+state amplifies unnecessary rebuilds and resource churn.
+
+**Questions:** Which retained facts changed? Can the producer report that distinction at commit?
+Does physical resource replacement invalidate consumers even when logical coordinates stay equal?
+Are removed consumers retired before ownership is released?
+
+**Counterexamples:** Broad invalidation can be appropriate when publications truly replace all
+consumer dependencies, or when proving finer invalidation costs more than rebuilding bounded data.
+
+**Possible responses:** Report semantic changes from the owner performing the publication, compare
+physical identity as well as logical values, and preserve invalidation for genuine replacement.
+Avoid introducing a general dependency graph to eliminate a small, well-bounded rebuild.
+
 ## Adding Observations
 
 An observation belongs here when it has:

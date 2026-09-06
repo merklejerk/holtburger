@@ -4929,7 +4929,7 @@ forcing every submission through instance-run discovery, not a reason to delete 
 
 There is a concrete invalidation wrinkle. Between first and final sampled snapshots, cumulative
 atlas-publication flush counts advanced 113→120, 124→128, and 132→135. Total compiled-entry production
-also increased while the live count remained 2,652. The runtime's `onLayoutPublished` callback calls
+also increased while the live count remained 2,652. The runtime's atlas-publication callback calls
 `invalidateResolvedResources("atlas-publication")`; that clears static compiled submissions and
 rebuilds dynamic appearance resources. This demonstrates that compiled identity can change while
 the player is stationary. It does not prove every observed membership change was caused by an atlas
@@ -5901,4 +5901,138 @@ Artifacts: `/tmp/holtburger-particle-upload-{0..3}.json`, V8 profiles for window
 `/tmp/holtburger-particle-upload-live.log`, and `/tmp/holtburger-particle-upload-attribution.mjs`.
 
 Final validation passes 2,061 TypeScript tests across 268 files, Svelte/TypeScript checks, ESLint,
-Knip, changed-source formatting and `git diff --check`. No commit was requested or made.
+Knip, changed-source formatting and `git diff --check`. Subsequently committed on request as
+`d7643a43` (`Upload particle records once per render frame`).
+
+#### Static Work Ahead of Time — Artifact and Invalidation Investigation
+
+The existing static path already performs substantial cold work. The static geometry worker bakes
+placements, groups triangles by logical material/visibility, sorts those groups and bakes interior
+static lighting. `CompiledObjectDrawStore` then caches publication submissions and prepared
+device/material facts. This is not a case of decoding source assets or recomputing all material
+properties each frame. Remaining hot work includes flattening visible submissions, classifying
+phases, preparing instance runs and issuing per-range uniform/state checks and draws. Visibility,
+portal constraints, camera-relative offsets, transparency ordering and outdoor lighting still have
+runtime inputs and cannot simply be baked away.
+
+##### Narrower Static Material Experiment
+
+Reanalysis of all six prior submission census frames retained detail uniforms (`uUseDetail`,
+`uDetailRect`, `uDetailTiling`) while relaxing only the eight base-surface uniforms represented by
+the existing dynamic material table. The result remains **403 static opaque draws → 168 compatible
+groups, with 235 consecutive index-range joins** in every frame. Moving detail into the table
+exposes no additional joins in this scene. Physical geometry, textures, samplers, pipeline state,
+uniform buffers and mutation barriers remain compatibility constraints; this is not permission to
+merge across visibility or publication boundaries.
+
+The non-grounding programs account for 368 draws and 223 joins; the grounding program accounts
+for 35 draws and 12 joins, matching the shell draw count. Leaving environment-cell shells unchanged
+therefore suggests a narrower **403 → 180 draw candidate**, retaining about 95% of the observed
+joins. This is a census-derived opportunity, not an implemented draw count or predicted FPS gain.
+
+The baked static-object worker already emits separate vertices for every triangle, so adding a
+logical material selector requires no further vertex duplication in that path. Selector storage is
+still an additional memory cost. Environment-cell shells use a separate shared-geometry path;
+there is no reason to expand that scope for the first experiment. Generated instancing and dynamic
+appearance rendering can also remain unchanged.
+
+The useful structural boundary is: prepare logical material selectors in the worker; resolve
+physical material rows and compatible contiguous spans when publishing/preparing device resources;
+select and submit those prepared spans during frames. Reuse material-table semantics without
+pretending static geometry is articulated: shader material storage is currently coupled to the
+pose-table transform path and would need to be separated from transform storage. Keep detail
+uniforms as group constants. Preserve landblock/publication ownership, retirement and visibility
+boundaries; no global geometry pool, streaming-policy change or GL extension is required.
+
+##### Settled Combat Still Invalidates Static Preparation
+
+A focused release-client capture used the worktree credentials and `+Holtfighter Slot 1` in the
+persisted courtyard, with 30 seconds settling followed by a 30-second profile. No player, camera or
+settings input was issued. Temporary publication diagnostics compared old and new surviving
+bindings by resource key, placement and preparation facts, rather than JavaScript object identity.
+
+The recorded census contains **30 atlas publications: 17 removal-only publications and 13
+insertion-only page patches. None rebuilt a page or changed a surviving binding.** Nevertheless,
+atlas publication unconditionally calls renderer resource invalidation, which flushes all compiled
+static submissions and rebuilds retained dynamic appearances. Between the first one-second snapshot
+and the final snapshot, 28 flushes caused 12,544 compiled-entry constructions: 28 × 448 entries.
+The census includes events before that first snapshot, so its 30 events and this counter delta
+describe slightly different intervals.
+
+The callback's comment explains invalidation in terms of compaction moving retained bindings, but
+`ResidentTextureAtlas.#publishPlan` invokes it even for metadata-only releases and in-place patches.
+A producer-owned semantic binding-change signal is a potential narrow correction. It must still
+invalidate on physical resource replacement, including patch fallback to a rebuilt page even if
+rectangles stay unchanged. Removed-binding consumer retirement must be verified before narrowing
+the callback. A compaction-only test or binding-object identity comparison would be insufficient.
+
+This is genuine redundant work, but not the primary measured cost: reattribution of the three
+earlier particle-upload profiles puts combined sampled static-node compilation and dynamic
+appearance rebuild work around 0.008–0.011 ms per frame on average, versus roughly 0.4 ms for static
+opaque submission in the earlier census session. These averages do not quantify worst-frame bursts
+or deferred native/GPU costs. The new publication diagnostic itself serializes bindings and is not
+a speed benchmark. Avoid turning this finding into a broad cache project.
+
+Indoor visibility-island indexing also has a plausible immutable topology-view cache boundary, but
+its sampled 0.006–0.008 ms per frame makes it a lower-priority thread.
+
+##### Conclusion and Validation
+
+The next substantive experiment remains baked static material tables and precompiled compatible
+spans, with shells and detail-table expansion excluded initially. Narrowing unnecessary atlas
+invalidation is supporting ownership hygiene, not a substitute for that representation experiment.
+Validate actual draw reduction, CPU/GPU timing, selector/table memory and complete scene rendering
+before adopting the representation. No new renderer implementation was made in this investigation.
+
+The focused capture reported no browser errors; its inspected screenshot retains buildings, trees,
+spectral bodies and effects. The client closed normally and temporary diagnostics were removed.
+Artifacts: `/tmp/holtburger-static-publication.{json,cpuprofile,png,log}` and
+`/tmp/holtburger-static-artifact-summary.mjs` (reanalysis of the earlier six submission captures).
+
+#### Static Preparation Cutover — Invalidation Prerequisite
+
+Execution starts with the small producer-owned invalidation correction before introducing additional
+prepared GPU resources. `AtlasPagePublication` now compares surviving bindings during the binding
+construction it already performs and returns whether their resource, rectangle or preparation facts
+changed. `ResidentTextureAtlas` invokes `onRetainedBindingsChanged` only after such a publication
+commits. New allocations and releases alone do not invalidate retained consumers; whole-page
+replacement does, even when rectangles are identical. No per-frame comparison or new metric was
+added. Existing renderer flush reasons remain valid and unchanged.
+
+The ownership check found that production static publishers synchronously remove/replace scene
+nodes before releasing obsolete atlas claims. Dynamic template disposal releases the compiled
+appearance before withdrawing its claim. Atlas claim counts retain shared bindings until the last
+owner leaves. Removed bindings therefore do not require flushing unrelated retained consumers.
+
+Focused tests cover initial publication and final removal, insertion patches and release-only
+updates, successful compaction, failed optional compaction with stable insertion, whole-page patch
+fallback with unchanged rectangles, committed-state visibility in the callback, and publication
+failure. The full 2,061-test suite, type checks, ESLint and Knip pass. The quality worksheet records
+the domain-independent smell of treating every publication as semantic invalidation.
+
+The larger material-table implementation remains pending. Its next ownership decision is explicit
+GPU resource retirement: the existing compiled static store is a `WeakMap` of CPU facts, not an
+owner that disposes material textures. The cutover must attach selector/table resources to existing
+publication or geometry ownership and release them on replacement/eviction, rather than placing
+GPU allocations in a weak cache and relying on garbage collection. Then implement the baked-only
+selectors, shared material-table shader semantics and prepared compatible spans, followed by
+same-scene CPU/GPU and image validation. Shells, transparent template instancing and streaming policy
+remain outside that representation change.
+
+Clean runtime validation used the release client, worktree credentials, `+Holtfighter Slot 1`,
+persisted courtyard `0x4ae1ffff`, 4.5 m settled camera reach, 1441 × 903 viewport and render scale 1.
+After 30 seconds settling, the 30.188-second capture recorded 15 atlas publications, including seven
+page patches, with no rebuilt pages or changed surviving bindings. Atlas-triggered flushes remained
+zero; compiled-entry and total-compilation counters both remained 490 between the first and final
+snapshots. Static submission retained 582,671 triangles. No player, camera or settings input was
+issued. The screenshot retains buildings, trees, spectral bodies and effects; browser messages
+contain only Vite connection notices, and the client closed normally. This verifies invalidation
+behavior and scene preservation, not a claimed FPS gain or a material-table implementation.
+
+An earlier run was contaminated by formatting while Vite was live: hot reload produced a presentation
+shutdown error before the measured settled window. It is not clean validation evidence. The repeat
+above ran without source writes after a login cooldown and did not reproduce that error. An initial
+sandboxed launch also exited before opening DevTools; the successful launches used approved
+out-of-sandbox execution. Temporary driver hooks were removed. Clean artifacts:
+`/tmp/holtburger-atlas-binding-clean.{json,cpuprofile,png,log}`; contaminated run:
+`/tmp/holtburger-atlas-binding-fix.{json,cpuprofile,png,log}`. Changes are not committed.

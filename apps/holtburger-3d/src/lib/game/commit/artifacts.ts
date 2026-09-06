@@ -97,6 +97,8 @@ export interface ObjectMaterialBinding {
 
 /** Baked immutable geometry selected directly by one static draw. */
 export interface StaticObjectDrawUnit {
+	/** Geometry-owned material row addressed by every vertex in this range. */
+	readonly materialSelector: number;
 	readonly geometry: StaticGeometryKey;
 	readonly indexStart: number;
 	readonly indexCount: number;

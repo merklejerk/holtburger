@@ -47,6 +47,7 @@ describe("createWebGL2ObjectProgram", () => {
 						portalVisibility,
 						outdoorPssm,
 						transformSource: "pose-table",
+						materialSource: "table",
 					});
 					expect("fogUniforms" in linked).toBe(distanceFog);
 					expect(linked.portalVisibilityUniforms !== null).toBe(
@@ -64,10 +65,50 @@ describe("createWebGL2ObjectProgram", () => {
 						),
 					).toEqual([
 						{
+							name: "uMaterials",
+							program: linked.program,
+							unit: OBJECT_TEXTURE_UNITS.materials,
+						},
+						{
 							name: "uPoses",
 							program: linked.program,
 							unit: OBJECT_TEXTURE_UNITS.poses,
 						},
+					]);
+				}
+			}
+		}
+	});
+
+	it("links static material tables with a draw-local transform across receiver variants", () => {
+		const fixture = fakeGl("uPoses");
+		for (const distanceFog of [false, true])
+			for (const portalVisibility of [false, true])
+				for (const outdoorPssm of [false, true]) {
+					const options = {
+						distanceFog,
+						portalVisibility,
+						outdoorPssm,
+						transformSource: "uniform",
+						materialSource: "table",
+					} as const;
+					const linked = createWebGL2ObjectProgram(fixture.gl, options);
+					expect(linked.uniforms.materials).toEqual({ name: "uMaterials" });
+					expect(linked.uniforms.localToLandblock).toEqual({
+						name: "uLocalToLandblock",
+					});
+					expect(linked.materialSource).toBe("table");
+					expect("fogUniforms" in linked).toBe(distanceFog);
+					expect(linked.portalVisibilityUniforms !== null).toBe(
+						portalVisibility,
+					);
+					expect(linked.outdoorPssmUniforms !== null).toBe(outdoorPssm);
+					expect(
+						fixture.samplerAssignments.filter(
+							({ program, name }) =>
+								program === linked.program && name === "uMaterials",
+						),
+					).toEqual([
 						{
 							name: "uMaterials",
 							program: linked.program,
@@ -75,8 +116,6 @@ describe("createWebGL2ObjectProgram", () => {
 						},
 					]);
 				}
-			}
-		}
 	});
 
 	it("releases the linked program when a required table binding is missing", () => {
@@ -87,6 +126,7 @@ describe("createWebGL2ObjectProgram", () => {
 				portalVisibility: false,
 				outdoorPssm: false,
 				transformSource: "pose-table",
+				materialSource: "table",
 			}),
 		).toThrow("WebGL shader is missing uniform uMaterials.");
 		expect(fixture.deletedPrograms).toEqual(fixture.programs);

@@ -47,6 +47,8 @@ export interface StaticObjectGeometryPreparationJob {
 
 /** Immutable material range emitted by the geometry worker. */
 interface BakedStaticObjectRange {
+	/** Dense row published with the geometry's vertex material selectors. */
+	readonly materialSelector: number;
 	readonly indexStart: number;
 	readonly indexCount: number;
 	readonly material: ObjectMaterialBinding;
@@ -196,8 +198,10 @@ function prepareBakedStaticObjectGeometry(
 	const textureCoordinates: number[] = [];
 	const indices: number[] = [];
 	const ranges: BakedStaticObjectRange[] = [];
+	const materialSelectors: number[] = [];
 	const bounds = emptyBounds();
 	for (const group of sortedGroups) {
+		const materialSelector = ranges.length;
 		const indexStart = indices.length;
 		const center = Vec3.zero();
 		let centerPointCount = 0;
@@ -225,6 +229,7 @@ function prepareBakedStaticObjectGeometry(
 					triangle.textureCoordinates[vertex * 2 + 1]!,
 				);
 				indices.push(index);
+				materialSelectors.push(materialSelector);
 			}
 		}
 		const transparentSort =
@@ -243,6 +248,7 @@ function prepareBakedStaticObjectGeometry(
 						stableId: group.transparentStableId,
 					};
 		ranges.push({
+			materialSelector,
 			indexCount: indices.length - indexStart,
 			indexStart,
 			material: group.binding,
@@ -255,6 +261,10 @@ function prepareBakedStaticObjectGeometry(
 	const mergedPositions = Float32Array.from(positions);
 	const mergedNormals = Float32Array.from(normals);
 	const geometry: ObjectGeometryData = {
+		materials: {
+			selectors: Uint32Array.from(materialSelectors),
+			count: ranges.length,
+		},
 		// Merged contributions are already in landblock space, which is the space the lights
 		// were placed in, so the bake needs no further transform.
 		bakedLight: bakeStaticLight(
@@ -282,6 +292,7 @@ function prepareBakedStaticObjectGeometry(
 			{
 				bounds,
 				drawUnits: ranges.map((range) => ({
+					materialSelector: range.materialSelector,
 					geometry: geometryKey,
 					indexCount: range.indexCount,
 					indexStart: range.indexStart,
@@ -297,6 +308,7 @@ function prepareBakedStaticObjectGeometry(
 		metrics: {
 			bakedDrawUnitCount: ranges.length,
 			bakedGeometryBytes:
+				materialSelectors.length * Uint32Array.BYTES_PER_ELEMENT +
 				geometry.positions.byteLength +
 				geometry.normals.byteLength +
 				geometry.textureCoordinates.byteLength +

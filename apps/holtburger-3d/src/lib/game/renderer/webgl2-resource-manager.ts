@@ -14,14 +14,22 @@ import {
 import { TexturePixelFormat } from "../textures/types";
 import {
 	DYNAMIC_PART_SELECTOR_ATTRIBUTE,
-	DYNAMIC_MATERIAL_SELECTOR_ATTRIBUTE,
+	OBJECT_MATERIAL_SELECTOR_ATTRIBUTE,
 	type RenderGeometryData,
 } from "./geometry";
 import { OBJECT_BAKED_LIGHT_ATTRIBUTE } from "./webgl2-object-program";
+import { OBJECT_MATERIAL_TEXELS } from "./object-material-table";
 import { TERRAIN_COLOR_CODE_ATTRIBUTE } from "./webgl2-terrain-program";
 
 /** WebGL draw binding retained for one semantic geometry resource. */
 export interface WebGL2GeometryBinding {
+	/** Baked material texture shares this geometry's explicit allocation and retirement lifetime. */
+	readonly staticMaterials?: {
+		/** Stable physical texture, refreshed only when compiled material bindings change. */
+		readonly texture: WebGLTexture;
+		/** Dense logical row capacity allocated with the geometry selectors. */
+		readonly rowCount: number;
+	};
 	/** Geometry attributes; dynamic draws additionally bind their appearance-owned indices. */
 	readonly vertexArray: WebGLVertexArrayObject;
 	/** Source index count; dynamic appearance ranges address their separately organized buffer. */
@@ -91,6 +99,30 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 		const resource = this.#geometry.get(key);
 		if (!resource) throw new Error(`Geometry resource ${key} does not exist.`);
 		return resource;
+	}
+
+	/** Refresh cold physical material facts without replacing the geometry-owned texture identity. */
+	updateGeometryMaterials(key: GeometryResourceKey, data: Float32Array): void {
+		const table = this.getGeometry(key).staticMaterials;
+		if (!table) throw new Error(`Geometry ${key} has no material table.`);
+		if (data.length !== table.rowCount * OBJECT_MATERIAL_TEXELS * 4)
+			throw new Error(
+				`Geometry ${key} material rows do not match its selectors.`,
+			);
+		const gl = this.#gl;
+		gl.activeTexture(gl.TEXTURE0);
+		gl.bindTexture(gl.TEXTURE_2D, table.texture);
+		gl.texSubImage2D(
+			gl.TEXTURE_2D,
+			0,
+			0,
+			0,
+			OBJECT_MATERIAL_TEXELS,
+			table.rowCount,
+			gl.RGBA,
+			gl.FLOAT,
+			data,
+		);
 	}
 
 	createTexture2D(upload: Texture2DUpload): Texture2DResourceKey {
@@ -262,6 +294,13 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 	#uploadGeometry(geometry: RenderGeometryData): WebGL2GeometryResource {
 		validateGeometry(geometry);
 		const gl = this.#gl;
+		if (geometry.kind === "object" && geometry.materials) {
+			const maximumRows: number = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+			if (geometry.materials.count > maximumRows)
+				throw new Error(
+					`Static material table requires ${geometry.materials.count} rows; device limit is ${maximumRows}.`,
+				);
+		}
 		if (geometry.kind === "dynamic-parts") {
 			// Each entity occupies whole rows in one pose page and one appearance table.
 			// Reject during staging, before any allocation can replace its installed visual.
@@ -280,6 +319,7 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 			throw new Error(`Failed to allocate ${geometry.kind} geometry.`);
 
 		const buffers: WebGLBuffer[] = [];
+		let staticMaterials: WebGL2GeometryBinding["staticMaterials"];
 		try {
 			gl.bindVertexArray(vertexArray);
 			buffers.push(uploadFloatAttribute(gl, 0, 3, geometry.positions));
@@ -311,7 +351,7 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 				buffers.push(
 					uploadIntegerAttribute(
 						gl,
-						DYNAMIC_MATERIAL_SELECTOR_ATTRIBUTE,
+						OBJECT_MATERIAL_SELECTOR_ATTRIBUTE,
 						1,
 						geometry.materialSelectors,
 					),
@@ -326,6 +366,34 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 						geometry.bakedLight,
 					),
 				);
+			}
+			if (geometry.kind === "object" && geometry.materials) {
+				const { selectors, count } = geometry.materials;
+				buffers.push(
+					uploadIntegerAttribute(
+						gl,
+						OBJECT_MATERIAL_SELECTOR_ATTRIBUTE,
+						1,
+						selectors,
+					),
+				);
+				const texture = gl.createTexture();
+				if (!texture)
+					throw new Error("Failed to allocate static material table.");
+				staticMaterials = { texture, rowCount: count };
+				gl.activeTexture(gl.TEXTURE0);
+				gl.bindTexture(gl.TEXTURE_2D, texture);
+				gl.texStorage2D(
+					gl.TEXTURE_2D,
+					1,
+					gl.RGBA32F,
+					OBJECT_MATERIAL_TEXELS,
+					count,
+				);
+				gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+				gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+				gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+				gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 			}
 			// Dynamic appearances own the sole uploaded index organization for every mesh pass.
 			// The layout retains source indices on the CPU for cold appearance compilation only.
@@ -342,6 +410,7 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 			const usesShortIndices = geometry.indices instanceof Uint16Array;
 			return {
 				buffers,
+				...(staticMaterials ? { staticMaterials } : {}),
 				indexCount: geometry.indices.length,
 				indexElementBytes: usesShortIndices ? 2 : 4,
 				indexType: usesShortIndices ? gl.UNSIGNED_SHORT : gl.UNSIGNED_INT,
@@ -349,6 +418,7 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 			};
 		} catch (error) {
 			for (const buffer of buffers) gl.deleteBuffer(buffer);
+			if (staticMaterials) gl.deleteTexture(staticMaterials.texture);
 			gl.deleteVertexArray(vertexArray);
 			throw error;
 		} finally {
@@ -435,6 +505,8 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 	}
 
 	#destroyGeometry(resource: WebGL2GeometryResource): void {
+		if (resource.staticMaterials)
+			this.#gl.deleteTexture(resource.staticMaterials.texture);
 		for (const buffer of resource.buffers) this.#gl.deleteBuffer(buffer);
 		this.#gl.deleteVertexArray(resource.vertexArray);
 	}
@@ -588,6 +660,17 @@ function validateGeometry(geometry: RenderGeometryData): void {
 		);
 	}
 	const vertexCount = geometry.positions.length / 3;
+	if (geometry.kind === "object" && geometry.materials) {
+		const { selectors, count } = geometry.materials;
+		if (!Number.isSafeInteger(count) || count <= 0)
+			throw new Error("Static material row count must be positive.");
+		if (selectors.length !== vertexCount)
+			throw new Error(
+				"Static material-selector count does not match positions.",
+			);
+		if (selectors.some((selector) => selector >= count))
+			throw new Error("Static material selector exceeds its table.");
+	}
 	if (geometry.kind === "dynamic-parts") {
 		if (geometry.partSelectors.length !== vertexCount)
 			throw new Error("Dynamic part-selector count does not match positions.");

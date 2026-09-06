@@ -5,7 +5,7 @@ import { createObjectGeometryKey } from "../geometry/types";
 import type { DynamicAppearance } from "../systems/dynamic-appearance";
 import { TextureWrapMode } from "../textures/types";
 import { WebGL2DynamicAppearances } from "./webgl2-dynamic-appearances";
-import { DYNAMIC_MATERIAL_TEXELS } from "./dynamic-material-table";
+import { OBJECT_MATERIAL_TEXELS } from "./object-material-table";
 import type { PreparedObjectSurface } from "./object-rendering-policy";
 
 const layout: DynamicLayout = {
@@ -119,7 +119,7 @@ describe("template-retained dynamic appearance resources", () => {
 			indexBytes: layout.geometry.indices.byteLength,
 			materialBytes:
 				visual.materials.length *
-				DYNAMIC_MATERIAL_TEXELS *
+				OBJECT_MATERIAL_TEXELS *
 				4 *
 				Float32Array.BYTES_PER_ELEMENT,
 		};

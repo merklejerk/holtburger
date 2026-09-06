@@ -7,9 +7,9 @@ import {
 } from "../textures/types";
 import { prepareObjectSurface } from "./object-material-preparation";
 import {
-	createDynamicMaterialTable,
-	DYNAMIC_MATERIAL_TEXELS,
-} from "./dynamic-material-table";
+	createObjectMaterialTable,
+	OBJECT_MATERIAL_TEXELS,
+} from "./object-material-table";
 
 const base = createAssetTextureKey(TexturePurpose.ObjectIndex8, "0x06000001");
 const palette = createAssetTextureKey(
@@ -39,7 +39,7 @@ function binding(): Omit<ObjectMaterialBinding, "polygon"> {
 	};
 }
 
-describe("object surface preparation and dynamic table encoding", () => {
+describe("object surface preparation and shared table encoding", () => {
 	it.each(["index8", "index16", "direct-color"] as const)(
 		"preserves %s sampling and surface policy",
 		(textureEncoding) => {
@@ -71,8 +71,8 @@ describe("object surface preparation and dynamic table encoding", () => {
 				palettedClipMap: true,
 				wrapRepeat: true,
 			});
-			const data = createDynamicMaterialTable([surface]);
-			expect(data).toHaveLength(DYNAMIC_MATERIAL_TEXELS * 4);
+			const data = createObjectMaterialTable([surface]);
+			expect(data).toHaveLength(OBJECT_MATERIAL_TEXELS * 4);
 			expect([...data.slice(0, 8)]).toEqual([1, 1, 1, 0.75, 4, 8, 16, 32]);
 			expect(data[12]).toBe(
 				{ "direct-color": 1, index8: 2, index16: 3 }[textureEncoding],
@@ -106,7 +106,7 @@ describe("object surface preparation and dynamic table encoding", () => {
 			color: [0.5, 0.25, 1, 0.25],
 		});
 		expect(surface.alphaTest).toBe(0);
-		expect([...createDynamicMaterialTable([surface]).slice(4, 13)]).toEqual(
+		expect([...createObjectMaterialTable([surface]).slice(4, 13)]).toEqual(
 			new Array(9).fill(0),
 		);
 	});
@@ -135,9 +135,9 @@ describe("object surface preparation and dynamic table encoding", () => {
 				sampler: "sampler",
 				rect: [x, 2, 3, 4],
 			}));
-		const first = createDynamicMaterialTable([prepare(1), prepare(9)]);
+		const first = createObjectMaterialTable([prepare(1), prepare(9)]);
 		expect(first[4]).toBe(1);
-		expect(first[DYNAMIC_MATERIAL_TEXELS * 4 + 4]).toBe(9);
+		expect(first[OBJECT_MATERIAL_TEXELS * 4 + 4]).toBe(9);
 		expect(first[16]).toBe(0);
 	});
 });

@@ -10,9 +10,9 @@ import {
 } from "../../lib/game/webgl/shader-program";
 import { WebGL2GpuFrameProfiler } from "../../lib/game/renderer/webgl2-gpu-frame-profiler";
 import {
-	createDynamicMaterialTable,
-	DYNAMIC_MATERIAL_TEXELS,
-} from "../../lib/game/renderer/dynamic-material-table";
+	createObjectMaterialTable,
+	OBJECT_MATERIAL_TEXELS,
+} from "../../lib/game/renderer/object-material-table";
 import type { PreparedObjectMaterial } from "../../lib/game/renderer/object-rendering-policy";
 import { compileDynamicIndexBatches } from "../../lib/game/renderer/dynamic-index-batches";
 import { WebGL2DynamicPosePages } from "../../lib/game/renderer/webgl2-dynamic-pose-pages";
@@ -202,9 +202,18 @@ export async function probeDynamicMaterialTables() {
 			portalVisibility: false,
 			outdoorPssm: false,
 			transformSource: "pose-table",
+			materialSource: "table",
+		}).program;
+		const staticTable = createWebGL2ObjectProgram(gl, {
+			distanceFog: false,
+			portalVisibility: false,
+			outdoorPssm: false,
+			transformSource: "uniform",
+			materialSource: "table",
 		}).program;
 		// Exercise every planned color-program interface, including combined portal/PSSM/fog.
 		let linkedTableVariants = 0;
+		let linkedStaticTableVariants = 0;
 		for (const fog of [false, true]) {
 			for (const portal of [false, true]) {
 				for (const pssm of [false, true]) {
@@ -213,9 +222,19 @@ export async function probeDynamicMaterialTables() {
 						portalVisibility: portal,
 						outdoorPssm: pssm,
 						transformSource: "pose-table",
+						materialSource: "table",
 					});
 					gl.deleteProgram(variant.program);
 					linkedTableVariants += 1;
+					const staticVariant = createWebGL2ObjectProgram(gl, {
+						distanceFog: fog,
+						portalVisibility: portal,
+						outdoorPssm: pssm,
+						transformSource: "uniform",
+						materialSource: "table",
+					});
+					gl.deleteProgram(staticVariant.program);
+					linkedStaticTableVariants += 1;
 				}
 			}
 		}
@@ -366,6 +385,7 @@ export async function probeDynamicMaterialTables() {
 			partOpacity: number;
 			testedPixels: number;
 		}[] = [];
+		let staticTableCases = 0;
 		const timings: {
 			strategy: "uniform" | "table" | "table-static" | "table-packed";
 			sample: Awaited<ReturnType<typeof measureSubmission>>;
@@ -459,10 +479,10 @@ export async function probeDynamicMaterialTables() {
 							physical.indices,
 							gl.STATIC_DRAW,
 						);
-						const records = createDynamicMaterialTable(surfaces);
+						const records = createObjectMaterialTable(surfaces);
 						upload(
 							OBJECT_TEXTURE_UNITS.materials,
-							DYNAMIC_MATERIAL_TEXELS,
+							OBJECT_MATERIAL_TEXELS,
 							2,
 							records,
 						);
@@ -551,6 +571,38 @@ export async function probeDynamicMaterialTables() {
 							partOpacity,
 							testedPixels: canvas.width * canvas.height,
 						});
+						if (partOpacity === 1) {
+							// Static geometry selects material rows independently of its draw transform.
+							// Keep source positions and separate transforms here to compare pixels exactly;
+							// geometry baking and range merging have their own later verification boundary.
+							const staticUniform = configure(staticTable);
+							gl.clear(gl.COLOR_BUFFER_BIT);
+							for (let part = 0; part < 2; part += 1) {
+								gl.uniformMatrix4fv(
+									staticUniform("uLocalToLandblock"),
+									false,
+									poses.subarray(part * 20, part * 20 + 16),
+								);
+								gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_INT, part * 6 * 4);
+							}
+							gl.readPixels(
+								0,
+								0,
+								canvas.width,
+								canvas.height,
+								gl.RGBA,
+								gl.UNSIGNED_BYTE,
+								actual,
+							);
+							if (gl.getError() !== gl.NO_ERROR)
+								throw new Error("Static material-table probe GL error.");
+							if (actual.some((value, index) => value !== expected[index]))
+								throw new Error(
+									`Static material-table mismatch kind=${kind} wrap=${wrap} rejection=${rejection}.`,
+								);
+							staticTableCases += 1;
+							configure(merged);
+						}
 						// Keep the established upload-isolation benchmark on its original two-row texture.
 						for (const [unit, texture] of textures.entries()) {
 							gl.activeTexture(gl.TEXTURE0 + unit);
@@ -724,6 +776,8 @@ export async function probeDynamicMaterialTables() {
 		return {
 			cases,
 			linkedTableVariants,
+			linkedStaticTableVariants,
+			staticTableCases,
 			prototypePreparationMs,
 			boundaryPoseRow: maximumRows - 2,
 			timings,

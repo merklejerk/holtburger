@@ -195,6 +195,27 @@ export function staticObjectDrawStateEquals<TGeometry, TTexture, TSampler>(
 	);
 }
 
+/** Compare draw constants when per-surface values are read from material-table rows. */
+export function staticObjectTableStateEquals<TGeometry, TTexture, TSampler>(
+	left: PreparedStaticObjectDrawCompatibility<TGeometry, TTexture, TSampler>,
+	right: PreparedStaticObjectDrawCompatibility<TGeometry, TTexture, TSampler>,
+): boolean {
+	if (
+		left.geometry !== right.geometry ||
+		left.cullFace !== right.cullFace ||
+		!preparedObjectDetailEquals(left.detail, right.detail)
+	)
+		return false;
+	const a = left.material,
+		b = right.material;
+	if (a.kind === "solid-color" || b.kind === "solid-color")
+		return a.kind === b.kind;
+	if (!preparedObjectTextureBindingEquals(a.base, b.base)) return false;
+	if (a.kind === "direct-color" || b.kind === "direct-color")
+		return a.kind === b.kind;
+	return preparedObjectTextureBindingEquals(a.palette, b.palette);
+}
+
 const SURFACE_CLIP_MAP = 0x4;
 const SURFACE_TRANSLUCENT = 0x10;
 const SURFACE_ALPHA = 0x100;

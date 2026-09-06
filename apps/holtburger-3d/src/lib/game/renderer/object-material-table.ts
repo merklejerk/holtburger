@@ -1,7 +1,7 @@
 import type { PreparedObjectSurface } from "./object-rendering-policy";
 
 /** One RGBA32F row: color, base rectangle, palette rectangle, policy, alpha threshold. */
-export const DYNAMIC_MATERIAL_TEXELS = 5;
+export const OBJECT_MATERIAL_TEXELS = 5;
 
 /** Shader encoding shared by the table producer and consumers of its material kind. */
 const MATERIAL_KIND = {
@@ -12,12 +12,12 @@ const MATERIAL_KIND = {
 } as const;
 
 /** Pack renderer-resolved surface data; physical texture bindings remain batch-owned. */
-export function createDynamicMaterialTable<TTexture, TSampler>(
+export function createObjectMaterialTable<TTexture, TSampler>(
 	surfaces: readonly PreparedObjectSurface<TTexture, TSampler>[],
 ): Float32Array {
-	const data = new Float32Array(surfaces.length * DYNAMIC_MATERIAL_TEXELS * 4);
+	const data = new Float32Array(surfaces.length * OBJECT_MATERIAL_TEXELS * 4);
 	for (const [selector, surface] of surfaces.entries()) {
-		const offset = selector * DYNAMIC_MATERIAL_TEXELS * 4;
+		const offset = selector * OBJECT_MATERIAL_TEXELS * 4;
 		const material = surface.material;
 		data.set(material.color, offset);
 		if (material.kind !== "solid-color")

@@ -242,6 +242,7 @@ describe("RenderWorld", () => {
 			drawUnits: [
 				{
 					geometry: "static-source-geometry:fixture" as StaticGeometryKey,
+					materialSelector: 0,
 					indexCount: 3,
 					indexStart: 0,
 					material: staticMaterial(),

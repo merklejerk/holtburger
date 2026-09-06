@@ -977,21 +977,26 @@ fn prepare_dynamic_entity_physical_facts(
         EdgeProtection::None
     };
     let gravity = if physics.response.gravity { -9.8 } else { 0.0 };
-    let movement = retail_grounded_body_with_policy(
-        movement_spheres,
-        edge_protection,
-        gravity,
-        response_policy,
-    )
-    .map_err(SetupPhysicalShapeError::from)
+    let movement = if setup.spheres.is_empty() {
+        holtburger_world::PhysicalBodyDefinition::fixed_position(movement_spheres)
+            .map_err(SetupPhysicalShapeError::from)
+    } else {
+        retail_grounded_body_with_policy(
+            movement_spheres,
+            edge_protection,
+            gravity,
+            response_policy,
+        )
+        .map(|profile| profile.definition)
+        .map_err(SetupPhysicalShapeError::from)
+    }
     .map_err(
         |source| DynamicEntityPhysicalPreparationError::MovementGeometry {
             wcid,
             setup_did,
             source,
         },
-    )?
-    .definition;
+    )?;
     let target_geometry = prepare_target_geometry(
         wcid,
         setup_did,

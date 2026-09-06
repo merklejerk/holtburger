@@ -838,6 +838,11 @@ fn local_player_physical_demand(physics: EffectiveEntityPhysicsState) -> LocalPh
     }
 }
 
+/// Physical candidates must wait for content preparation instead of using collision-free projection.
+pub(super) fn remote_body_requires_physics(world: &WorldState, guid: Guid) -> bool {
+    client_remote_body_target(world, guid).is_some()
+}
+
 /// Resolves complete positive physical demand from current authoritative client facts.
 fn client_remote_body_target(world: &WorldState, guid: Guid) -> Option<ClientRemoteBodyTarget> {
     let entity = world.entities.get(guid)?;

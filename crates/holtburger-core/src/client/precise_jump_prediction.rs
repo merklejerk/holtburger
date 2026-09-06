@@ -1396,7 +1396,8 @@ mod tests {
             actual_body,
             match actual_body.physical.as_ref().unwrap().definition {
                 PhysicalBodyDefinition::Grounded { spheres, .. } => spheres.support,
-                PhysicalBodyDefinition::FreeSphere { .. } => unreachable!(),
+                PhysicalBodyDefinition::FixedPosition { .. }
+                | PhysicalBodyDefinition::FreeSphere { .. } => unreachable!(),
             },
             actual_normal,
             OWNER,

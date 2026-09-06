@@ -335,8 +335,16 @@ pub fn solve_grounded(
         request.body.velocity
     };
     let accelerated = !supported || request.retain_supported_gravity;
-    let vertical_displacement = if active_velocity.z.abs() <= f32::EPSILON
-        && !(supported && request.retain_supported_gravity)
+    // Retail chooses whether to integrate position from the incoming velocity before applying
+    // SmallVelocity (acclient.c:306114-306159). A small falling velocity still gets the
+    // acceleration displacement; truncating it before this gate leaves 60 Hz bodies hovering.
+    let had_velocity = active_velocity != Vector3::zero();
+    let active_velocity = if !supported {
+        super::physical_body::canonical_retained_velocity(active_velocity)
+    } else {
+        active_velocity
+    };
+    let vertical_displacement = if !(had_velocity || supported && request.retain_supported_gravity)
     {
         0.0
     } else if accelerated {
@@ -355,6 +363,27 @@ pub fn solve_grounded(
     displacement.z = vertical_displacement;
     if let Some(support) = request.body.ground.walkable_support() {
         displacement = project_into_plane(displacement, support.normal);
+    }
+    // Retail updates velocity/rotation but skips the collision transition when the proposed
+    // origin is unchanged (CPhysicsObj::UpdateObjectInternal, acclient.c:310864-310879).
+    // In particular, a stationary gravity-free door must not acquire the floor below its pivot.
+    if displacement == Vector3::zero() {
+        let mut body = request.body;
+        body.velocity = next_velocity;
+        return Ok(GroundedOutcome::Solved {
+            motion: vec![MotionWaypoint {
+                center: start,
+                end_fraction: 1.0,
+                placement: super::collision::MotionWaypointPlacement::Committed(body.cell),
+            }],
+            body,
+            achieved_velocity: Vector3::zero(),
+            collision_normal: None,
+            substeps: 0,
+            contact_passes: 0,
+            constraint_count: 0,
+            residual_contacts: false,
+        });
     }
     let distance = displacement.length();
     let required_substeps = if distance <= f32::EPSILON {

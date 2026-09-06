@@ -117,7 +117,8 @@ pub struct AuthoritativeBodyVectors {
 pub struct RetainedBodyKinematics {
     /// World-space linear momentum used by physical integration and collision response.
     pub velocity: Vector3,
-    /// World-space linear acceleration applied to retained momentum.
+    /// World-space acceleration snapshot. A grounded solve replaces this with its own
+    /// gravity/contact result; free-flight and pose projection integrate the supplied vector.
     pub acceleration: Vector3,
     /// World-space angular velocity integrated into physical orientation.
     pub omega: Vector3,

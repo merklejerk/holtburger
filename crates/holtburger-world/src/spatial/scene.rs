@@ -239,7 +239,9 @@ fn completed_dynamic_tick_is_quiescent(
                 ..
             }
         ),
-        PhysicalBodyDefinition::Grounded { .. } | PhysicalBodyDefinition::FreeSphere { .. } => true,
+        PhysicalBodyDefinition::FixedPosition { .. }
+        | PhysicalBodyDefinition::Grounded { .. }
+        | PhysicalBodyDefinition::FreeSphere { .. } => true,
     };
     actuation_permits_settling
         && !residual_contacts
@@ -272,15 +274,13 @@ fn wake_dynamic_runtime(body: &mut SpatialBody) -> bool {
 /// Replaces a pose outside a collision solve and atomically narrows physical membership to the
 /// new resident scope. A later solve may expand that minimum membership from actual sphere reach.
 fn replace_unsolved_runtime_pose(body: &mut SpatialBody, pose: WorldPosition) {
-    body.pose = pose;
-    let resident_cell = pose.is_indoors().then_some(pose.landblock_id);
-    if body
-        .physical
-        .as_mut()
-        .is_some_and(|physical| physical.rebase_dynamic_residency(resident_cell))
+    if body.pose != pose
+        && let Some(physical) = body.physical.as_mut()
     {
-        body.contact = ContactState::Airborne;
+        physical.reset_placement(pose.is_indoors().then_some(pose.landblock_id));
+        body.contact = ContactState::Unknown;
     }
+    body.pose = pose;
 }
 
 // RETAIL DIVERGENCE: retail `CPhysicsObj::set_state` (`acclient.c:310307-310335`) reconciles only
@@ -390,6 +390,7 @@ fn reconcile_physical_body_actuation(
     };
 
     let ordinary_translation = match &actuation {
+        PhysicalBodyActuation::FixedPosition { .. } => Vector3::zero(),
         PhysicalBodyActuation::FreeFlight {
             kinematic_velocity, ..
         } => *kinematic_velocity * delta_seconds,
@@ -404,6 +405,17 @@ fn reconcile_physical_body_actuation(
     }
 
     match actuation {
+        PhysicalBodyActuation::FixedPosition { mut rotation } => {
+            // Retail still advances interpolation, but its no-sphere branch discards translation
+            // after UpdatePositionInternal (acclient.c:308292, :310930-310949).
+            if composition.source == PoseTranslationSource::Interpolation
+                && !composition.keep_heading
+                && let Some(authoritative) = body.authoritative_pose
+            {
+                rotation = authoritative.rotation;
+            }
+            Ok(PhysicalBodyActuation::FixedPosition { rotation })
+        }
         PhysicalBodyActuation::FreeFlight {
             retained_velocity, ..
         } => {
@@ -576,7 +588,7 @@ impl SpatialScene {
                         ground: GroundState::Airborne,
                         ..
                     }
-                    | super::PhysicalBodyResponseState::FreeSphere { .. } => false,
+                    | super::PhysicalBodyResponseState::Placement { .. } => false,
                 };
                 let requires_solve = match dynamic.activity {
                     DynamicBodyActivity::Active => true,
@@ -1626,6 +1638,7 @@ impl SpatialScene {
         let super::physical_body::PhysicalBodyTickCommit {
             pose,
             retained_velocity,
+            retained_acceleration,
             accepted_motion,
             contact,
             response,
@@ -1651,6 +1664,7 @@ impl SpatialScene {
         // rotate the body twice.
         tentative.pose = pose;
         tentative.retained.velocity = retained_velocity;
+        tentative.retained.acceleration = retained_acceleration;
         tentative.accepted_motion = accepted_motion;
         tentative.contact = contact;
         let physical = tentative
@@ -2436,7 +2450,7 @@ mod physical_body_tests {
                 None,
             )
             .unwrap();
-        let _ = tick_prepared_collection(&mut scene, &collision, 0.03, now);
+        acquire_support(&mut scene, &collision, body_id, now);
         assert_eq!(scene.body(body_id).unwrap().contact, ContactState::Grounded);
         assert!(scene.apply_authoritative_body_effect(
             body_id,
@@ -2477,7 +2491,7 @@ mod physical_body_tests {
     }
 
     #[test]
-    fn airborne_grounded_body_integrates_retained_acceleration_without_actor_actuation() {
+    fn grounded_body_owns_gravity_instead_of_adding_the_server_acceleration_snapshot() {
         let now = Instant::now();
         let body_id = SpatialBodyId::Entity(Guid(0x5000_0048));
         let start = pose(Vector3::new(90.0, 96.0, 10.0));
@@ -2494,13 +2508,24 @@ mod physical_body_tests {
             .unwrap();
         let body = scene.body_mut(body_id).expect("grounded body");
         body.contact = ContactState::Airborne;
-        body.retained.acceleration = Vector3::new(2.0, 0.0, 0.0);
-
-        let _ = tick_prepared_collection(&mut scene, &collision, 0.03, now);
-
+        let PhysicalBodyDefinition::Grounded { config, .. } =
+            body.physical.as_ref().unwrap().definition
+        else {
+            unreachable!()
+        };
+        body.retained.acceleration = Vector3::new(0.0, 0.0, config.gravity);
+        let dt = 0.03;
+        let _ = tick_prepared_collection(&mut scene, &collision, dt, now);
         let body = scene.body(body_id).expect("advanced grounded body");
-        assert!((body.pose.coords.x - start.coords.x - 0.0009).abs() < 0.000_01);
-        assert!((body.retained.velocity.x - 0.06).abs() < 0.000_01);
+        assert_eq!(body.pose.coords, start.coords);
+        assert_eq!(
+            body.retained.velocity,
+            Vector3::new(0.0, 0.0, config.gravity * dt)
+        );
+        assert_eq!(
+            body.retained.acceleration,
+            Vector3::new(0.0, 0.0, config.gravity)
+        );
     }
 
     #[test]
@@ -2544,9 +2569,49 @@ mod physical_body_tests {
         }
     }
 
+    fn acquire_support(
+        scene: &mut SpatialScene,
+        collision: &CollisionScene,
+        id: SpatialBodyId,
+        now: Instant,
+    ) {
+        let quantum = Duration::from_secs_f32(1.0 / 30.0);
+        for tick in 1..=30 {
+            scene
+                .tick_physical_body(
+                    id,
+                    collision,
+                    PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                    quantum.as_secs_f32(),
+                    now - Duration::from_secs(1) + quantum * tick,
+                )
+                .unwrap();
+            let body = scene.body(id).unwrap();
+            if body.contact == ContactState::Grounded
+                && (body.retained.velocity == Vector3::zero()
+                    || body
+                        .physical
+                        .as_ref()
+                        .unwrap()
+                        .response_policy
+                        .surface_motion
+                        == PhysicalSurfaceMotion::Sledding)
+            {
+                return;
+            }
+        }
+        panic!(
+            "fixture failed to reach stable support: {:?}",
+            scene.body(id)
+        );
+    }
+
     fn collection_actuation(body: &SpatialBody) -> anyhow::Result<PhysicalBodyActuation> {
         let definition = body.physical.as_ref().unwrap().definition;
         Ok(match definition {
+            PhysicalBodyDefinition::FixedPosition { .. } => PhysicalBodyActuation::FixedPosition {
+                rotation: body.pose.rotation,
+            },
             PhysicalBodyDefinition::FreeSphere { .. } => {
                 PhysicalBodyActuation::free_flight(body.retained.velocity)?
             }
@@ -3031,6 +3096,176 @@ mod physical_body_tests {
     }
 
     #[test]
+    fn fixed_position_body_preserves_authored_placement_and_remains_a_rotating_collision_target() {
+        let now = Instant::now();
+        let collision = flat_collision_scene();
+        let id = SpatialBodyId::Entity(Guid(0x7000_0100));
+        let mut scene = SpatialScene::new();
+        let initial = pose(Vector3::new(90.0, 96.0, 4.0));
+        let mut body = SpatialBody::new(id, initial, now);
+        body.retained.velocity = Vector3::new(0.0, 0.0, -1.0);
+        body.retained.acceleration = Vector3::new(0.0, 0.0, -9.8);
+        body.retained.omega = Vector3::new(0.0, 0.0, 0.5);
+        scene.register_body(body);
+        let placement = PhysicalSphereSet::new(
+            Sphere {
+                center: Vector3::new(0.0, 0.0, 0.1),
+                radius: 0.1,
+            },
+            None,
+        )
+        .unwrap();
+        let movement = PhysicalBodyDefinition::fixed_position(placement).unwrap();
+        scene
+            .set_dynamic_physical_body(
+                id,
+                Some(dynamic_definition(movement, false)),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+        let authored_rotation = Quaternion::from_heading(0.7);
+        let dt = 0.1;
+        let result = scene
+            .tick_physical_body(
+                id,
+                &collision,
+                PhysicalBodyActuation::FixedPosition {
+                    rotation: authored_rotation,
+                },
+                dt,
+                now,
+            )
+            .unwrap();
+        let body = scene.body(id).unwrap();
+        assert_eq!(body.pose.coords, initial.coords);
+        assert_eq!(
+            body.pose.rotation,
+            integrate_angular_velocity(authored_rotation, body.retained.omega, dt)
+        );
+        assert_eq!(body.retained.velocity, Vector3::zero());
+        assert_eq!(body.retained.acceleration, Vector3::zero());
+        assert_eq!(result.motion.contact_passes, 0);
+        assert_eq!(movement.uniformly_scaled(3.0).unwrap(), movement);
+
+        // The fixture stays solid even though its movement response cannot translate it.
+        let mover = SpatialBodyId::Entity(Guid(0x7000_0101));
+        install_free_dynamic(
+            &mut scene,
+            mover,
+            initial.coords - Vector3::new(2.0, 0.0, 0.0),
+            Vector3::new(20.0, 0.0, 0.0),
+            fallback_target(Arc::new(CollisionShape::Ball(CollisionBall {
+                center: Vector3::zero(),
+                radius: 0.5,
+            }))),
+            now,
+        );
+        let prepared = scene
+            .prepare_dynamic_entity_collection(&collision, dt, collection_actuation)
+            .unwrap();
+        assert!(prepared.movers.contains(&mover));
+        let hit = scene
+            .tick_prepared_dynamic_physical_body(mover, &collision, now)
+            .unwrap();
+        assert_eq!(hit.dynamic_contact.unwrap().peer, id);
+        assert_eq!(scene.body(id).unwrap().pose.coords, initial.coords);
+    }
+
+    #[test]
+    fn stationary_gravity_free_body_keeps_its_pivot_above_the_floor() {
+        let now = Instant::now();
+        let collision = flat_collision_scene();
+        let mut scene = SpatialScene::new();
+        let initial = pose(Vector3::new(90.0, 96.0, 0.0));
+        let id = scene.register_ephemeral_body(initial, now);
+        let PhysicalBodyDefinition::Grounded { mut config, .. } = grounded_definition() else {
+            unreachable!()
+        };
+        config.gravity = 0.0;
+        let spheres = PhysicalSphereSet::new(
+            Sphere {
+                center: Vector3::new(0.0, 0.0, 0.5),
+                radius: 0.1,
+            },
+            None,
+        )
+        .unwrap();
+        scene
+            .install_physical_body(
+                id,
+                PhysicalBodyDefinition::grounded(spheres, config).unwrap(),
+                PhysicalCollisionFilter::ALL,
+                stable_policy(),
+                None,
+            )
+            .unwrap();
+        let actuation = GroundedBodyActuation::coast()
+            .with_control_heading(0.5)
+            .unwrap();
+        let result = scene
+            .tick_physical_body(
+                id,
+                &collision,
+                PhysicalBodyActuation::Grounded(actuation),
+                0.1,
+                now,
+            )
+            .unwrap();
+        let body = scene.body(id).unwrap();
+        assert_eq!(body.pose.coords, initial.coords);
+        assert!((body.pose.rotation.to_heading() - 0.5).abs() < 0.000_01);
+        assert_eq!(body.retained.velocity, Vector3::zero());
+        assert_eq!(result.motion.contact_passes, 0);
+    }
+
+    #[test]
+    fn outdoor_scene_reload_discards_support_from_the_previous_position() {
+        let now = Instant::now();
+        let collision = flat_collision_scene();
+        let id = SpatialBodyId::Entity(Guid(0x7000_0100));
+        let mut scene = SpatialScene::new();
+        scene.register_body(SpatialBody::new(
+            id,
+            pose(Vector3::new(90.0, 96.0, 0.005)),
+            now,
+        ));
+        scene
+            .set_dynamic_physical_body(
+                id,
+                Some(dynamic_definition(grounded_definition(), false)),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+        acquire_support(&mut scene, &collision, id, now);
+        let authoritative = pose(Vector3::new(90.0, 96.0, 5.0));
+        scene.body_mut(id).unwrap().authoritative_pose = Some(authoritative);
+        scene.suspend_runtime_bodies(now);
+        let body = scene.body(id).unwrap();
+        assert_eq!(body.pose, authoritative);
+        assert_eq!(body.contact, ContactState::Unknown);
+        assert!(matches!(
+            body.physical.as_ref().unwrap().response,
+            PhysicalBodyResponseState::Grounded {
+                ground: GroundState::Airborne,
+                ..
+            }
+        ));
+        for tick in 1..=2 {
+            tick_prepared_collection(
+                &mut scene,
+                &collision,
+                0.1,
+                now + Duration::from_millis(tick * 100),
+            );
+        }
+        let body = scene.body(id).unwrap();
+        assert!(body.pose.coords.z < authoritative.coords.z);
+        assert_eq!(body.contact, ContactState::Airborne);
+    }
+
+    #[test]
     fn one_unchanged_supported_tick_settles_until_a_scene_owned_wake() {
         let collision = flat_collision_scene();
         let now = Instant::now();
@@ -3047,15 +3282,8 @@ mod physical_body_tests {
             )
             .unwrap();
 
-        scene
-            .tick_physical_body(
-                id,
-                &collision,
-                PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
-                0.1,
-                now + Duration::from_millis(100),
-            )
-            .unwrap();
+        acquire_support(&mut scene, &collision, id, now);
+        scene.wake_dynamic_body(id);
         assert_eq!(scene.body(id).unwrap().contact, ContactState::Grounded);
         assert_eq!(dynamic_activity(&scene, id), DynamicBodyActivity::Active);
         let supported_pose = scene.body(id).unwrap().pose;
@@ -3296,15 +3524,7 @@ mod physical_body_tests {
             )
             .unwrap();
 
-        scene
-            .tick_physical_body(
-                id,
-                &collision,
-                PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
-                0.1,
-                now + Duration::from_millis(100),
-            )
-            .unwrap();
+        acquire_support(&mut scene, &collision, id, now);
         scene.update_runtime_body_motion_state(id, Some(EntityMotionSnapshot::default()));
 
         scene
@@ -3344,6 +3564,7 @@ mod physical_body_tests {
                 None,
             )
             .unwrap();
+        acquire_support(&mut scene, &collision, id, now);
         for tick in 1..=2 {
             scene
                 .tick_physical_body(
@@ -3567,15 +3788,7 @@ mod physical_body_tests {
             )
             .unwrap();
 
-        scene
-            .tick_physical_body(
-                id,
-                &collision,
-                PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
-                0.1,
-                now + Duration::from_millis(100),
-            )
-            .unwrap();
+        acquire_support(&mut scene, &collision, id, now);
         let supported_pose = scene.body(id).unwrap().pose;
         let body = scene.body_mut(id).unwrap();
         body.retained.velocity = Vector3::new(0.2, 0.0, 0.0);
@@ -3725,8 +3938,11 @@ mod physical_body_tests {
             SpatialSampleMode::SimulatingMotionState,
         ));
         let body = scene.body(id).unwrap();
-        assert_eq!(body.spatial_membership(), wider_membership);
-        assert_eq!(body.contact, ContactState::Grounded);
+        assert_eq!(
+            body.spatial_membership(),
+            SpatialMembership::interior(initial.landblock_id)
+        );
+        assert_eq!(body.contact, ContactState::Unknown);
 
         assert!(scene.apply_runtime_body_pose(id, next, SpatialSampleMode::SimulatingMotionState,));
 
@@ -3736,7 +3952,7 @@ mod physical_body_tests {
         assert_eq!(body.retained.velocity, velocity);
         assert_eq!(body.retained.acceleration, acceleration);
         assert_eq!(body.retained.omega, omega);
-        assert_eq!(body.contact, ContactState::Airborne);
+        assert_eq!(body.contact, ContactState::Unknown);
         assert_eq!(
             body.spatial_membership(),
             crate::SpatialMembership::interior(next.landblock_id)
@@ -4958,6 +5174,8 @@ mod physical_body_tests {
             collision.missile = true;
             collision.path_clipped = true;
         }
+        // Supply real downward motion so this tick reaches the environment.
+        scene.body_mut(body_id).unwrap().retained.velocity.z = -1.0;
         let touched_at = created_at + Duration::from_millis(100);
         let reports = tick_prepared_collection(&mut scene, &collision, 0.1, touched_at);
         assert_eq!(
@@ -5298,6 +5516,10 @@ mod physical_body_tests {
                         now,
                     )
                     .unwrap();
+                if scenario != "falling" {
+                    acquire_support(&mut scene, &collision, mover, now);
+                    scene.wake_dynamic_body(mover);
+                }
                 if scenario == "replaced-support" {
                     collision = flat_collision_scene();
                 }
@@ -5648,6 +5870,8 @@ mod physical_body_tests {
             now,
         );
         let collision = flat_collision_scene();
+        acquire_support(&mut scene, &collision, mover, now);
+        scene.wake_dynamic_body(mover);
         scene
             .prepare_dynamic_entity_collection(&collision, 0.1, collection_actuation)
             .unwrap();
@@ -6352,7 +6576,7 @@ mod physical_body_tests {
         assert!(!geometry_change.response_memory_preserved);
         assert!(matches!(
             scene.body(id).unwrap().physical.as_ref().unwrap().response,
-            PhysicalBodyResponseState::FreeSphere { .. }
+            PhysicalBodyResponseState::Placement { .. }
         ));
         assert_eq!(
             scene.body(id).unwrap().retained.velocity,
@@ -6712,15 +6936,7 @@ mod physical_body_tests {
             scene
                 .install_physical_body(id, definition, PhysicalCollisionFilter::ALL, sledding, None)
                 .unwrap();
-            scene
-                .tick_physical_body(
-                    id,
-                    &collision,
-                    PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
-                    0.1,
-                    now + Duration::from_millis(100),
-                )
-                .unwrap();
+            acquire_support(&mut scene, &collision, id, now);
             assert_eq!(scene.body(id).unwrap().contact, ContactState::Grounded);
 
             scene.body_mut(id).unwrap().retained.velocity = Vector3::new(3.0, 0.0, 0.0);
@@ -6758,15 +6974,7 @@ mod physical_body_tests {
                 None,
             )
             .unwrap();
-        scene
-            .tick_physical_body(
-                id,
-                &collision,
-                PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
-                0.1,
-                now + Duration::from_millis(100),
-            )
-            .unwrap();
+        acquire_support(&mut scene, &collision, id, now);
         scene.body_mut(id).unwrap().retained.velocity = Vector3::new(3.0, 0.0, 0.0);
 
         scene
@@ -7208,6 +7416,8 @@ mod physical_body_tests {
                     None,
                 )
                 .unwrap();
+            acquire_support(&mut scene, &collision, id, now);
+            let supported = scene.body(id).unwrap().pose.coords;
             for tick in 1..=100 {
                 scene
                     .tick_physical_body(
@@ -7221,7 +7431,7 @@ mod physical_body_tests {
             }
             let body = scene.body(id).unwrap();
             assert_eq!(body.contact, ContactState::Grounded);
-            assert_eq!(body.pose.coords, start);
+            assert_eq!(body.pose.coords, supported);
             assert_eq!(body.retained.velocity, Vector3::zero());
         }
     }
@@ -7245,15 +7455,7 @@ mod physical_body_tests {
             )
             .unwrap();
 
-        scene
-            .tick_physical_body(
-                id,
-                &collision,
-                PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
-                0.1,
-                now + Duration::from_millis(100),
-            )
-            .unwrap();
+        acquire_support(&mut scene, &collision, id, now);
         let body = scene.body(id).unwrap();
         assert_eq!(body.contact, ContactState::Grounded);
         assert!((body.pose.coords.z - (start.z - TERRAIN_WATER_COLLISION_DEPTH)).abs() < 0.002);

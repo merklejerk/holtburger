@@ -60,18 +60,14 @@ fn settle_permission_projects_retail_walking_and_landing_step_down_gates() {
         // Retail's *walking* transaction gate must agree with the Walking projection exactly.
         assert_eq!(
             grounded_settle_permission(contact, launching) == SettlePermission::Walking,
-            retail_ordinary_step_down_enabled(
-                matches!(contact, ContactState::Grounded | ContactState::Unknown),
-                launching
-            ),
+            retail_ordinary_step_down_enabled(matches!(contact, ContactState::Grounded), launching),
         );
     }
 
-    // Holtburger's explicit Unknown state exists only before the first collision transaction; it
-    // must run the walking probe once so a newly registered body can classify a floor beneath it.
+    // An unclassified body has no contact proof and cannot use the walking step-down reach.
     assert_eq!(
         grounded_settle_permission(ContactState::Unknown, false),
-        SettlePermission::Walking
+        SettlePermission::Landing
     );
 }
 

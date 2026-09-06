@@ -290,6 +290,11 @@ impl GroundedBodyActuation {
 /// Response-specific one-tick actuation for a registered physical body.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PhysicalBodyActuation {
+    /// Authored absolute orientation for a body whose ordinary update preserves position.
+    FixedPosition {
+        /// Absolute authored world orientation before retained angular velocity is applied.
+        rotation: Quaternion,
+    },
     /// Unrestricted collision-aware three-dimensional physical and kinematic motion.
     FreeFlight {
         /// World-space physical velocity eligible for retention and collision response.
@@ -334,6 +339,7 @@ impl PhysicalBodyActuation {
     /// Whether this tick input contains no controller, launch, or flight work.
     pub(crate) fn permits_dynamic_settling(&self) -> bool {
         match self {
+            Self::FixedPosition { .. } => true,
             Self::FreeFlight {
                 retained_velocity,
                 kinematic_velocity,
@@ -352,8 +358,8 @@ impl PhysicalBodyActuation {
 /// Response-owned state retained with a generic body's single authoritative pose.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PhysicalBodyResponseState {
-    /// Placement state for collision-aware free three-dimensional motion.
-    FreeSphere {
+    /// Cell memory for responses without ground support (fixed position or free flight).
+    Placement {
         /// Current interior cell, or `None` while outdoors.
         cell: Option<Guid>,
     },
@@ -372,7 +378,7 @@ impl PhysicalBodyResponseState {
     /// Current response-selected interior cell, or `None` while outdoors.
     pub const fn cell(&self) -> Option<Guid> {
         match self {
-            Self::FreeSphere { cell } | Self::Grounded { cell, .. } => *cell,
+            Self::Placement { cell } | Self::Grounded { cell, .. } => *cell,
         }
     }
 }
@@ -532,23 +538,15 @@ impl PhysicalBodyState {
         state
     }
 
-    /// Rebases dynamic placement after an authoritative runtime pose changes resident cell.
-    ///
-    /// The cell selector is trusted authority, but no collision query has yet proved wider sphere
-    /// reach in the destination. Retain immutable policy and kinematics while clearing response
-    /// memory and publishing only the exact minimum membership the next ordinary solve may expand.
-    pub(crate) fn rebase_dynamic_residency(&mut self, cell: Option<Guid>) -> bool {
-        let Some(dynamic) = self.dynamic.as_mut() else {
-            return false;
-        };
-        if self.response.cell() == cell {
-            return false;
-        }
+    /// Discards contact and reached-cell memory after an authoritative placement replacement,
+    /// including moves between two outdoor points in the same landblock.
+    pub(crate) fn reset_placement(&mut self, cell: Option<Guid>) {
         self.response = initial_response(self.definition, cell);
-        dynamic.placement =
-            cell.map_or_else(SpatialMembership::outdoor, SpatialMembership::interior);
-        dynamic.wake();
-        true
+        if let Some(dynamic) = self.dynamic.as_mut() {
+            dynamic.placement =
+                cell.map_or_else(SpatialMembership::outdoor, SpatialMembership::interior);
+            dynamic.wake();
+        }
     }
 
     /// Rebuilds immutable dynamic policy from a complete state while retaining authored geometry.
@@ -568,7 +566,8 @@ impl PhysicalBodyState {
         }
         let dynamic = self.dynamic.as_ref()?;
         let movement = match dynamic.unit_movement {
-            PhysicalBodyDefinition::FreeSphere { .. } => dynamic.unit_movement,
+            PhysicalBodyDefinition::FixedPosition { .. }
+            | PhysicalBodyDefinition::FreeSphere { .. } => dynamic.unit_movement,
             PhysicalBodyDefinition::Grounded {
                 spheres,
                 mut config,
@@ -615,7 +614,10 @@ pub(crate) fn initial_response(
     cell: Option<Guid>,
 ) -> PhysicalBodyResponseState {
     match definition {
-        PhysicalBodyDefinition::FreeSphere { .. } => PhysicalBodyResponseState::FreeSphere { cell },
+        PhysicalBodyDefinition::FixedPosition { .. }
+        | PhysicalBodyDefinition::FreeSphere { .. } => {
+            PhysicalBodyResponseState::Placement { cell }
+        }
         PhysicalBodyDefinition::Grounded { .. } => PhysicalBodyResponseState::Grounded {
             cell,
             ground: GroundState::Airborne,
@@ -684,6 +686,12 @@ impl PhysicalSphereSet {
 /// policy into one of these implemented response-bearing variants.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PhysicalBodyDefinition {
+    /// No authored movement spheres: ordinary physics preserves position while rotation and
+    /// peer-target collision remain active (`CPhysicsObj::UpdateObjectInternal`, acclient.c:310930-310949).
+    FixedPosition {
+        /// Unscaled retail dummy sphere used only for placement and explicit transitions.
+        placement_sphere: GroundedSphere,
+    },
     /// Collision-aware motion in three dimensions over exactly one sphere.
     FreeSphere {
         /// Validated body-local collision sphere.
@@ -701,6 +709,13 @@ pub enum PhysicalBodyDefinition {
 }
 
 impl PhysicalBodyDefinition {
+    /// Retains placement geometry without turning a missing movement sphere into simulated motion.
+    pub fn fixed_position(spheres: PhysicalSphereSet) -> Result<Self, PhysicalBodyDefinitionError> {
+        Ok(Self::FixedPosition {
+            placement_sphere: spheres.require_single()?,
+        })
+    }
+
     /// Combines a validated single-sphere shape with free three-dimensional response.
     pub fn free_sphere(
         spheres: PhysicalSphereSet,
@@ -728,7 +743,10 @@ impl PhysicalBodyDefinition {
     /// Ordered validated spheres used by the selected response.
     pub fn spheres(self) -> PhysicalSphereSet {
         match self {
-            Self::FreeSphere { sphere, .. } => PhysicalSphereSet {
+            Self::FixedPosition {
+                placement_sphere: sphere,
+            }
+            | Self::FreeSphere { sphere, .. } => PhysicalSphereSet {
                 primary: sphere,
                 upper_constraint: None,
             },
@@ -749,13 +767,16 @@ impl PhysicalBodyDefinition {
             radius: sphere.radius * scale,
         };
         let spheres = self.spheres();
-        let scaled_spheres = PhysicalSphereSet::new(
-            scaled(spheres.primary()),
-            spheres.upper_constraint().map(scaled),
-        )?;
+        let scaled_spheres = || {
+            PhysicalSphereSet::new(
+                scaled(spheres.primary()),
+                spheres.upper_constraint().map(scaled),
+            )
+        };
         match self {
-            Self::FreeSphere { config, .. } => Self::free_sphere(scaled_spheres, config),
-            Self::Grounded { config, .. } => Self::grounded(scaled_spheres, config),
+            Self::FixedPosition { .. } => Ok(self),
+            Self::FreeSphere { config, .. } => Self::free_sphere(scaled_spheres()?, config),
+            Self::Grounded { config, .. } => Self::grounded(scaled_spheres()?, config),
         }
     }
 }
@@ -840,6 +861,8 @@ pub(super) struct PhysicalBodyTickCommit {
     pub pose: WorldPosition,
     /// Physical linear momentum retained for the next integration tick.
     pub retained_velocity: Vector3,
+    /// Response-owned acceleration: grounded gravity is derived from the committed contact.
+    pub retained_acceleration: Vector3,
     /// Observed derivative of the complete path accepted during this tick.
     pub accepted_motion: super::AcceptedBodyMotion,
     /// Coarse support state derived by the selected response.
@@ -930,8 +953,47 @@ fn solve_physical_body_response(
 ) -> Result<PhysicalBodyTickCommit> {
     match (physical.definition, &physical.response) {
         (
+            PhysicalBodyDefinition::FixedPosition { placement_sphere },
+            PhysicalBodyResponseState::Placement { cell },
+        ) => {
+            let PhysicalBodyActuation::FixedPosition { rotation } = actuation else {
+                anyhow::bail!("fixed-position body requires orientation-only actuation")
+            };
+            let mut pose = body.pose;
+            pose.rotation = *rotation;
+            let path = trace_body_reference_path(
+                scene,
+                body.pose,
+                *cell,
+                placement_sphere,
+                &[MotionWaypoint {
+                    center: body.pose.coords,
+                    end_fraction: 1.0,
+                    placement: super::MotionWaypointPlacement::Committed(*cell),
+                }],
+                false,
+            )?;
+            Ok(PhysicalBodyTickCommit {
+                pose,
+                retained_velocity: Vector3::zero(),
+                retained_acceleration: Vector3::zero(),
+                accepted_motion: accepted_motion(body.pose, pose, Vector3::zero(), delta_seconds),
+                contact: body.contact,
+                response: physical.response,
+                motion: PhysicalBodyMotion {
+                    path,
+                    status: PhysicalBodyTickStatus::Solved,
+                    constraint_count: 0,
+                    substeps: 0,
+                    contact_passes: 0,
+                },
+                static_contact_normal: None,
+                residual_contacts: false,
+            })
+        }
+        (
             PhysicalBodyDefinition::FreeSphere { sphere, config },
-            PhysicalBodyResponseState::FreeSphere { cell },
+            PhysicalBodyResponseState::Placement { cell },
         ) => {
             let PhysicalBodyActuation::FreeFlight {
                 retained_velocity,
@@ -1078,6 +1140,7 @@ fn solve_free_sphere_tick(
     Ok(PhysicalBodyTickCommit {
         pose,
         retained_velocity: velocity,
+        retained_acceleration: body.retained.acceleration,
         accepted_motion: accepted_motion(
             body.pose,
             pose,
@@ -1085,7 +1148,7 @@ fn solve_free_sphere_tick(
             delta_seconds,
         ),
         contact: ContactState::Airborne,
-        response: PhysicalBodyResponseState::FreeSphere {
+        response: PhysicalBodyResponseState::Placement {
             cell: committed_cell,
         },
         motion: PhysicalBodyMotion {
@@ -1113,16 +1176,21 @@ fn solve_grounded_body_tick(
         }
         GroundState::Airborne => true,
     };
-    let initial_retained_velocity = canonical_retained_velocity(body.retained.velocity);
-    let acceleration_step = body.retained.acceleration * delta_seconds;
-    let mut candidate_retained_velocity = initial_retained_velocity + acceleration_step * 0.5;
-    let mut retained_velocity = initial_retained_velocity + acceleration_step;
+    let initial_retained_velocity = if state.ground.walkable_support().is_some() {
+        canonical_retained_velocity(body.retained.velocity)
+    } else {
+        body.retained.velocity
+    };
+    // Grounded acceleration is derived by the response from gravity and contact, as in
+    // CPhysicsObj::calc_acceleration (acclient.c:306176-306210). The server's acceleration
+    // snapshot is not an additional force on top of that gravity.
+    let mut retained_velocity = initial_retained_velocity;
     let mut grounded_body = GroundedBody {
         pose: body.pose,
         cell: state.cell,
         // This field remains physical momentum. A kinematic drive may temporarily be supplied to
         // the solver below for first-contact path finding, but is never committed through it.
-        velocity: candidate_retained_velocity,
+        velocity: retained_velocity,
         ground: if retained_ground_is_current {
             state.ground
         } else {
@@ -1152,67 +1220,23 @@ fn solve_grounded_body_tick(
             "grounded launch requires current walkable support"
         );
         grounded_body.velocity = launch.velocity();
-        candidate_retained_velocity = launch.velocity();
         retained_velocity = launch.velocity();
         grounded_body.ground = GroundState::Airborne;
     }
-    let mut supported_velocity = match actuation.supported_motion {
-        GroundedSupportedMotion::Driven(velocity) => velocity + candidate_retained_velocity,
-        GroundedSupportedMotion::Coasting => candidate_retained_velocity,
-    };
     if let Some(support) = grounded_body.ground.walkable_support() {
-        match state.response_policy.surface_motion {
-            PhysicalSurfaceMotion::Stable => {
-                // Retail damps `m_velocityVector` before composing that physical contribution
-                // with movement-manager output (`acclient.c:306114-306153`). Controller drive is
-                // therefore not a reason to suspend friction on independently retained momentum.
-                candidate_retained_velocity = surface_friction(
-                    candidate_retained_velocity,
-                    support.normal,
-                    state.response_policy.friction,
-                    delta_seconds,
-                    PhysicalSurfaceMotion::Stable,
-                );
-                retained_velocity = surface_friction(
-                    retained_velocity,
-                    support.normal,
-                    state.response_policy.friction,
-                    delta_seconds,
-                    PhysicalSurfaceMotion::Stable,
-                );
-                grounded_body.velocity = candidate_retained_velocity;
-                supported_velocity = match actuation.supported_motion {
-                    GroundedSupportedMotion::Driven(velocity) => {
-                        velocity + candidate_retained_velocity
-                    }
-                    GroundedSupportedMotion::Coasting => candidate_retained_velocity,
-                };
-            }
-            PhysicalSurfaceMotion::Sledding => {
-                candidate_retained_velocity = surface_friction(
-                    candidate_retained_velocity,
-                    support.normal,
-                    state.response_policy.friction,
-                    delta_seconds,
-                    PhysicalSurfaceMotion::Sledding,
-                );
-                retained_velocity = surface_friction(
-                    retained_velocity,
-                    support.normal,
-                    state.response_policy.friction,
-                    delta_seconds,
-                    PhysicalSurfaceMotion::Sledding,
-                );
-                grounded_body.velocity = candidate_retained_velocity;
-                supported_velocity = match actuation.supported_motion {
-                    GroundedSupportedMotion::Driven(velocity) => {
-                        velocity + candidate_retained_velocity
-                    }
-                    GroundedSupportedMotion::Coasting => candidate_retained_velocity,
-                };
-            }
-        }
+        retained_velocity = surface_friction(
+            retained_velocity,
+            support.normal,
+            state.response_policy.friction,
+            delta_seconds,
+            state.response_policy.surface_motion,
+        );
+        grounded_body.velocity = retained_velocity;
     }
+    let supported_velocity = match actuation.supported_motion {
+        GroundedSupportedMotion::Driven(velocity) => velocity + retained_velocity,
+        GroundedSupportedMotion::Coasting => retained_velocity,
+    };
     let outcome = solve_grounded(
         scene,
         state.config,
@@ -1327,11 +1351,7 @@ fn solve_grounded_body_tick(
             physical.x -= drive.x;
             physical.y -= drive.y;
         }
-        if actuation.launch.is_none() {
-            physical + acceleration_step * 0.5
-        } else {
-            physical
-        }
+        physical
     };
     let collision_response = collision_response(CollisionResponseInput {
         incoming: physical_incoming,
@@ -1361,6 +1381,13 @@ fn solve_grounded_body_tick(
     Ok(PhysicalBodyTickCommit {
         pose,
         retained_velocity: velocity,
+        retained_acceleration: if ground.walkable_support().is_some()
+            && state.response_policy.surface_motion == PhysicalSurfaceMotion::Stable
+        {
+            Vector3::zero()
+        } else {
+            Vector3::new(0.0, 0.0, state.config.gravity)
+        },
         accepted_motion: accepted_motion(body.pose, pose, achieved_velocity, delta_seconds),
         contact: match ground {
             GroundState::Supported(_) => ContactState::Grounded,
@@ -1413,7 +1440,7 @@ pub(super) fn accepted_motion(
     super::AcceptedBodyMotion { velocity, omega }
 }
 
-fn canonical_retained_velocity(velocity: Vector3) -> Vector3 {
+pub(super) fn canonical_retained_velocity(velocity: Vector3) -> Vector3 {
     if velocity.length_squared() - RETAIL_SMALL_VELOCITY_SQUARED < RETAIL_PHYSICS_EPSILON {
         Vector3::zero()
     } else {
@@ -1426,8 +1453,8 @@ fn canonical_retained_velocity(velocity: Vector3) -> Vector3 {
 /// Retail's ordinary walking step-down requires the OBJECTINFO contact bit
 /// (`CTransition::transitional_insert`, `acclient.c:301550-301599`); every other gravity-bound
 /// transition prepares the lenient 0.04m landing step-down (`acclient.c:301563-301569`); a
-/// launch tick suppresses both until the body has left the ground. `Unknown` classifies through
-/// the walking probe so a newly registered body can acquire the floor beneath it.
+/// launch tick suppresses both until the body has left the ground. An unclassified new body
+/// has no contact proof and uses the landing allowance, never the walking step-down reach.
 pub(crate) const fn grounded_settle_permission(
     contact: ContactState,
     launching: bool,
@@ -1436,8 +1463,10 @@ pub(crate) const fn grounded_settle_permission(
         SettlePermission::Denied
     } else {
         match contact {
-            ContactState::Grounded | ContactState::Unknown => SettlePermission::Walking,
-            ContactState::Sliding | ContactState::Airborne => SettlePermission::Landing,
+            ContactState::Grounded => SettlePermission::Walking,
+            ContactState::Unknown | ContactState::Sliding | ContactState::Airborne => {
+                SettlePermission::Landing
+            }
         }
     }
 }

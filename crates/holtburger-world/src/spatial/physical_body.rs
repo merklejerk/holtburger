@@ -16,13 +16,68 @@ use super::{
     FreeSphereRequest, FreeSphereState, GroundState, GroundSupport, GroundedBody,
     GroundedBodySpheres, GroundedBudget, GroundedConfig, GroundedOutcome, GroundedRequest,
     GroundedSphere, MotionWaypoint, PlacedMotionPath, PlacedMotionPathRequest, SettlePermission,
-    SpatialBody, SpatialBodyId, SpatialMembership, solve_free_sphere, solve_grounded,
+    SpatialBody, SpatialBodyId, SpatialMembership, solve_free_sphere,
 };
 
 /// Retail's canonical velocity floor (`PhysicsGlobals.SmallVelocity`) squared.
 const RETAIL_SMALL_VELOCITY_SQUARED: f32 = 0.25 * 0.25;
 /// Retail's tolerance for the squared-speed floor and outward contact velocity.
 pub(super) const RETAIL_PHYSICS_EPSILON: f32 = 0.000_2;
+
+/// Maximum projection sweeps regardless of the number of surrounding entities.
+const MAXIMUM_MOTION_CONSTRAINT_PASSES: usize = 8;
+
+/// One world-space half-plane limiting requested translation without pushing a body.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct MotionConstraint {
+    /// Unit outward normal from the blocking surface.
+    pub normal: Vector3,
+    /// Lowest allowed normal displacement; nonpositive so holding position remains feasible.
+    pub minimum: f32,
+}
+
+/// Projects attempted translation against all accumulated entity constraints. Opposing crowd
+/// contacts can converge slowly; the bounded fallback preserves motion tangent to every blocker.
+pub(super) fn constrain_displacement(
+    mut displacement: Vector3,
+    constraints: &[MotionConstraint],
+) -> Vector3 {
+    for _ in 0..MAXIMUM_MOTION_CONSTRAINT_PASSES {
+        for constraint in constraints {
+            let correction = constraint.minimum - displacement.dot(&constraint.normal);
+            if correction > 0.0 {
+                displacement = displacement + constraint.normal * correction;
+            }
+        }
+    }
+    if constraints.iter().any(|constraint| {
+        displacement.dot(&constraint.normal) < constraint.minimum - RETAIL_PHYSICS_EPSILON
+    }) {
+        // Remove the span of the blocking normals, not every component of motion. In
+        // particular, opposing horizontal crowd contacts must not suppress gravity or a jump.
+        let mut basis = [Vector3::zero(); 3];
+        let mut rank = 0;
+        for constraint in constraints {
+            let mut axis = constraint.normal;
+            for direction in &basis[..rank] {
+                axis = axis - *direction * axis.dot(direction);
+            }
+            if axis.length_squared() > f32::EPSILON {
+                basis[rank] = axis.normalize();
+                rank += 1;
+                if rank == basis.len() {
+                    return Vector3::zero();
+                }
+            }
+        }
+        for axis in &basis[..rank] {
+            displacement = displacement - *axis * displacement.dot(axis);
+        }
+        displacement
+    } else {
+        displacement
+    }
+}
 
 /// Invalid geometry rejected before a body enters authoritative world state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
@@ -879,7 +934,9 @@ pub(super) struct PhysicalBodyTickCommit {
 
 #[derive(Debug, Clone, Copy)]
 /// Inputs retained by grounded response while a generic tick is evaluated.
-struct GroundedTickState {
+struct GroundedTickState<'a> {
+    /// Entity constraints applied to integrated translation before static collision.
+    constraints: &'a [MotionConstraint],
     /// Role-ordered support and optional upper sphere.
     spheres: GroundedBodySpheres,
     /// Finite grounded solver and response policy.
@@ -898,7 +955,9 @@ struct GroundedTickState {
 
 #[derive(Debug, Clone, Copy)]
 /// Inputs retained by free-sphere response while a generic tick is evaluated.
-struct FreeSphereTickState {
+struct FreeSphereTickState<'a> {
+    /// Entity constraints applied to integrated translation before static collision.
+    constraints: &'a [MotionConstraint],
     /// Body-local collision sphere.
     sphere: GroundedSphere,
     /// Finite free-flight solver policy.
@@ -918,6 +977,17 @@ pub(super) fn solve_physical_body_tick(
     actuation: &PhysicalBodyActuation,
     delta_seconds: f32,
 ) -> Result<PhysicalBodyTickCommit> {
+    solve_constrained_physical_body_tick(scene, body, actuation, delta_seconds, &[])
+}
+
+/// Re-solves the full physical interval with entity constraints applied before environment queries.
+pub(super) fn solve_constrained_physical_body_tick(
+    scene: &CollisionScene,
+    body: &SpatialBody,
+    actuation: &PhysicalBodyActuation,
+    delta_seconds: f32,
+    constraints: &[MotionConstraint],
+) -> Result<PhysicalBodyTickCommit> {
     ensure!(
         delta_seconds.is_finite() && delta_seconds > 0.0,
         "physical-body tick interval must be finite and positive"
@@ -926,7 +996,8 @@ pub(super) fn solve_physical_body_tick(
         .physical
         .as_ref()
         .context("spatial body has no physical definition")?;
-    let mut commit = solve_physical_body_response(scene, body, physical, actuation, delta_seconds)?;
+    let mut commit =
+        solve_physical_body_response(scene, body, physical, actuation, delta_seconds, constraints)?;
 
     // Retained physical omega rotates the *accepted world frame*, globally, after the response has
     // chosen the body's facing — retail's `Frame::grotate` on the already-composed frame
@@ -950,6 +1021,7 @@ fn solve_physical_body_response(
     physical: &PhysicalBodyState,
     actuation: &PhysicalBodyActuation,
     delta_seconds: f32,
+    constraints: &[MotionConstraint],
 ) -> Result<PhysicalBodyTickCommit> {
     match (physical.definition, &physical.response) {
         (
@@ -1006,6 +1078,7 @@ fn solve_physical_body_response(
                 scene,
                 body,
                 FreeSphereTickState {
+                    constraints,
                     sphere,
                     config,
                     response_policy: physical.response_policy,
@@ -1032,6 +1105,7 @@ fn solve_physical_body_response(
                 scene,
                 body,
                 GroundedTickState {
+                    constraints,
                     spheres,
                     config,
                     response_policy: physical.response_policy,
@@ -1051,7 +1125,7 @@ fn solve_physical_body_response(
 fn solve_free_sphere_tick(
     scene: &CollisionScene,
     body: &SpatialBody,
-    state: FreeSphereTickState,
+    state: FreeSphereTickState<'_>,
     retained_velocity: Vector3,
     kinematic_velocity: Vector3,
     delta_seconds: f32,
@@ -1071,7 +1145,10 @@ fn solve_free_sphere_tick(
                 cell: state.cell,
                 radius: state.sphere.radius,
             },
-            displacement: candidate_velocity * delta_seconds,
+            displacement: constrain_displacement(
+                candidate_velocity * delta_seconds,
+                state.constraints,
+            ),
             filter: state.collision_filter,
             query_policy: CollisionQueryPolicy::RequireCollisionCoverage,
         },
@@ -1166,7 +1243,7 @@ fn solve_free_sphere_tick(
 fn solve_grounded_body_tick(
     scene: &CollisionScene,
     body: &SpatialBody,
-    state: GroundedTickState,
+    state: GroundedTickState<'_>,
     actuation: &GroundedBodyActuation,
     delta_seconds: f32,
 ) -> Result<PhysicalBodyTickCommit> {
@@ -1237,7 +1314,7 @@ fn solve_grounded_body_tick(
         GroundedSupportedMotion::Driven(velocity) => velocity + retained_velocity,
         GroundedSupportedMotion::Coasting => retained_velocity,
     };
-    let outcome = solve_grounded(
+    let outcome = super::grounded::solve_constrained_grounded(
         scene,
         state.config,
         GroundedRequest {
@@ -1251,6 +1328,7 @@ fn solve_grounded_body_tick(
             delta_seconds,
             filter: state.collision_filter,
         },
+        state.constraints,
     )?;
     let (
         solved,
@@ -1856,6 +1934,27 @@ mod tests {
             })
             .unwrap();
         scene
+    }
+
+    #[test]
+    fn opposing_crowd_constraints_preserve_vertical_motion_when_projection_stalls() {
+        let constraints = [
+            MotionConstraint {
+                normal: Vector3::new(1.0, 0.0, 0.0),
+                minimum: 0.0,
+            },
+            MotionConstraint {
+                normal: Vector3::new(-1.0, 0.1, 0.0).normalize(),
+                minimum: 0.0,
+            },
+        ];
+        for vertical in [-0.1, 0.1] {
+            let result = constrain_displacement(Vector3::new(-1.0, -1.0, vertical), &constraints);
+            assert_eq!(result.z, vertical);
+            for constraint in &constraints {
+                assert!(result.dot(&constraint.normal) >= -RETAIL_PHYSICS_EPSILON);
+            }
+        }
     }
 
     #[test]

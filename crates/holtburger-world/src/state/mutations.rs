@@ -846,11 +846,7 @@ impl WorldState {
                 .unwrap_or_default();
         }
 
-        if let Some(entity) = self.player_entity_mut() {
-            entity.position = pos;
-        } else {
-            return None;
-        }
+        self.player_entity_mut()?.position = pos;
         let (velocity, omega) = self
             .entities
             .get(guid)

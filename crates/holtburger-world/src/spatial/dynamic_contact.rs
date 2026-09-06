@@ -15,8 +15,8 @@ use super::collision_report::{
 };
 use super::dynamic_index::{DynamicShadowIndex, EntityCollisionSnapshot, placed_target_shapes};
 use super::physical_body::{
-    DynamicBodyRuntimeState, PhysicalBodyTickCommit, solve_physical_body_tick,
-    trace_body_reference_path,
+    DynamicBodyRuntimeState, MotionConstraint, PhysicalBodyTickCommit,
+    solve_constrained_physical_body_tick, solve_physical_body_tick, trace_body_reference_path,
 };
 use super::volume_query::{placed_ball_contact, placed_cylinder_contact};
 use super::{
@@ -30,6 +30,17 @@ use crate::EntityCollisionParticipation;
 pub const MAXIMUM_DYNAMIC_SLICE_DISTANCE: f32 = 0.05;
 /// Finite per-pair narrow-phase budget selected by the R0 catalog and speed census.
 pub const MAXIMUM_DYNAMIC_SLICES: usize = 128;
+/// Additional tolerated entity contact depth beyond the geometry query's own contact epsilon.
+/// RETAIL DIVERGENCE: user-requested tolerant escape replaces unconditional object obstruction;
+/// retail selects cylinder slide/step response in acclient.c:347150-347260 and slides attempted
+/// displacement in :344024-344137. Restoring directionless overlap blocking recreates the verified
+/// escape lock. This policy covers solid ball, cylinder, and BSP entity targets; static geometry
+/// and report-touch eligibility keep their existing tolerances.
+pub const DYNAMIC_PENETRATION_TOLERANCE: f32 = 0.001;
+/// Bounds full environment re-solves when several entity surfaces constrain the same mover.
+const MAXIMUM_DYNAMIC_CONTACT_PASSES: usize = 8;
+/// Refines a sampled contact to sub-millimeter travel at the ordinary slice distance.
+const DYNAMIC_CONTACT_REFINEMENT_STEPS: usize = 10;
 
 /// One immutable dynamic body captured at the collection's tick start.
 #[derive(Debug, Clone)]
@@ -55,22 +66,14 @@ impl DynamicEpochParticipant {
 #[derive(Debug, Clone)]
 pub(crate) struct PreparedDynamicTrajectory {
     pub(crate) actuation: PhysicalBodyActuation,
-    /// Accepted prefix for an initially blocked body; otherwise its environment-only attempt.
+    /// Environment-validated motion with current inward overlaps constrained before peer queries.
     pub(crate) plan: PhysicalBodyTickCommit,
-    /// Initial contacts already resolved before any full-duration environment solve.
-    initial_contact: Option<InitialBlockingContacts>,
+    /// Inward constraints established against current overlaps before peers observe this path.
+    initial_contacts: Vec<SelectedBlockingContact>,
 }
 
-/// Tick-start blocking decision and every eligible report at that same instant.
-#[derive(Debug, Clone)]
-struct InitialBlockingContacts {
-    /// Stable earliest blocking peer, selected before trajectories exist.
-    selected: SelectedBlockingContact,
-    /// Only fraction-zero reports can survive a fraction-zero blocking contact.
-    report_touches: Vec<CollisionReportTouch>,
-}
-
-/// Prepares the motion peers will observe, resolving existing overlap before spending a full solve.
+/// Prepares one full-duration environment trajectory. Overlap alone cannot classify movement:
+/// separating and tangent motion must remain available before any blocking response is selected.
 pub(crate) fn prepare_dynamic_trajectory(
     collision: &CollisionScene,
     index: &DynamicShadowIndex,
@@ -79,21 +82,29 @@ pub(crate) fn prepare_dynamic_trajectory(
     actuation: PhysicalBodyActuation,
     delta_seconds: f32,
 ) -> Result<PreparedDynamicTrajectory> {
-    let initial_contact = initial_blocking_contacts(collision, index, targets, mover)?;
-    let plan = match &initial_contact {
-        Some(contact) => blocking_contact_plan(
+    let mut plan = solve_physical_body_tick(collision, mover, &actuation, delta_seconds)?;
+    let initial_contacts = initial_movement_contacts(collision, index, targets, mover, &plan)?;
+    if !initial_contacts.is_empty() {
+        let constraints = initial_contacts
+            .iter()
+            .map(|contact| MotionConstraint {
+                normal: contact.normal,
+                minimum: 0.0,
+            })
+            .collect::<Vec<_>>();
+        plan = solve_constrained_physical_body_tick(
             collision,
             mover,
             &actuation,
             delta_seconds,
-            contact.selected,
-        )?,
-        None => solve_physical_body_tick(collision, mover, &actuation, delta_seconds)?,
-    };
+            &constraints,
+        )?;
+        apply_contact_velocity(mover, &mut plan, &constraints)?;
+    }
     Ok(PreparedDynamicTrajectory {
         actuation,
         plan,
-        initial_contact,
+        initial_contacts,
     })
 }
 
@@ -134,10 +145,10 @@ pub(crate) struct DynamicResponseContact {
 }
 
 /// Confirmed report touches plus the optional blocking peer selected for mover response.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub(crate) struct DynamicContactResolution {
-    /// Distinct bounded-duration plan selected instead of the full environment plan.
-    pub(crate) replacement_plan: Option<PhysicalBodyTickCommit>,
+    /// Complete environment-validated path after directional entity response.
+    pub(crate) plan: PhysicalBodyTickCommit,
     pub(crate) response: Option<DynamicResponseContact>,
     pub(crate) report_touches: Vec<CollisionReportTouch>,
 }
@@ -164,21 +175,219 @@ pub(crate) fn resolve_dynamic_contacts_for_mover(
         .trajectories
         .get(&mover_id)
         .context("dynamic mover has no prepared trajectory")?;
-    if let Some(contact) = &trajectory.initial_contact {
-        return Ok(DynamicContactResolution {
-            replacement_plan: None,
-            response: Some(contact.selected.response()),
-            report_touches: contact.report_touches.clone(),
+    let mut plan = trajectory.plan.clone();
+    let mut constraints = trajectory
+        .initial_contacts
+        .iter()
+        .map(|contact| MotionConstraint {
+            normal: contact.normal,
+            minimum: 0.0,
+        })
+        .collect::<Vec<_>>();
+    let mut response = trajectory
+        .initial_contacts
+        .first()
+        .map(|contact| contact.response());
+    let mut report_touches = Vec::new();
+    for pass in 0..=MAXIMUM_DYNAMIC_CONTACT_PASSES {
+        let query = query_dynamic_contacts(epoch, mover, &plan)?;
+        // A rejected trial path cannot publish report-only triggers that the final slide avoids.
+        report_touches.clear();
+        report_touches.extend(accepted_report_touches(
+            query.report_touches,
+            query
+                .selected
+                .map_or(query.accepted_fraction, |contact| contact.fraction),
+        ));
+        let Some(contact) = query.selected else {
+            if query.accepted_fraction < 1.0 {
+                // Budget truncation is revalidated too: solving a shorter interval can change
+                // gravity/support paths, so an unchecked second solve is not an accepted prefix.
+                plan = truncated_motion_plan(
+                    epoch.collision,
+                    mover,
+                    &trajectory.actuation,
+                    epoch.delta_seconds,
+                    query.accepted_fraction,
+                    &constraints,
+                )?;
+                apply_contact_velocity(mover, &mut plan, &constraints)?;
+                let mut validation = query_dynamic_contacts(epoch, mover, &plan)?;
+                if validation.selected.is_some() || validation.accepted_fraction < 1.0 {
+                    plan = held_motion_plan(epoch.collision, mover, epoch.delta_seconds)?;
+                    validation = query_dynamic_contacts(epoch, mover, &plan)?;
+                }
+                report_touches = accepted_report_touches(
+                    validation.report_touches,
+                    validation.accepted_fraction,
+                );
+                plan.motion.status = super::PhysicalBodyTickStatus::SubstepBudgetExceeded;
+            }
+            return Ok(DynamicContactResolution {
+                plan,
+                response,
+                report_touches,
+            });
+        };
+        response.get_or_insert(contact.response());
+        let start = mover
+            .pose
+            .reanchor_to_landblock_owner(plan.motion.path.anchor())
+            .context("could not reanchor constrained mover")?;
+        let end = plan
+            .pose
+            .reanchor_to_landblock_owner(plan.motion.path.anchor())
+            .context("could not reanchor constrained endpoint")?;
+        let displacement = end.coords - start.coords;
+        let normal_travel = displacement.dot(&contact.normal);
+        if pass == MAXIMUM_DYNAMIC_CONTACT_PASSES || normal_travel >= 0.0 {
+            // Rotation or an environment-detoured path may not be expressible as a root
+            // translation constraint. Retain the previously valid pose instead of pushing it.
+            let retained_velocity = plan.retained_velocity;
+            plan = held_motion_plan(epoch.collision, mover, epoch.delta_seconds)?;
+            plan.retained_velocity = retained_velocity;
+            plan.motion.status = super::PhysicalBodyTickStatus::ContactBudgetExceeded;
+            let held = query_dynamic_contacts(epoch, mover, &plan)?;
+            report_touches = accepted_report_touches(held.report_touches, held.accepted_fraction);
+            break;
+        }
+        constraints.push(MotionConstraint {
+            normal: contact.normal,
+            minimum: normal_travel * contact.safe_fraction,
         });
+        plan = solve_constrained_physical_body_tick(
+            epoch.collision,
+            mover,
+            &trajectory.actuation,
+            epoch.delta_seconds,
+            &constraints,
+        )?;
+        apply_contact_velocity(mover, &mut plan, &constraints)?;
     }
-    let environment_plan = &trajectory.plan;
-    let actuation = &trajectory.actuation;
+    Ok(DynamicContactResolution {
+        plan,
+        response,
+        report_touches,
+    })
+}
+
+/// Velocity response stays separate from movement clipping; authored drive is never momentum.
+fn apply_contact_velocity(
+    mover: &SpatialBody,
+    plan: &mut PhysicalBodyTickCommit,
+    constraints: &[MotionConstraint],
+) -> Result<()> {
+    let restitution = mover
+        .physical
+        .as_ref()
+        .context("dynamic mover lost physical state")?
+        .response_policy
+        .restitution;
+    for constraint in constraints {
+        plan.retained_velocity =
+            dynamic_collision_velocity(plan.retained_velocity, restitution, constraint.normal);
+    }
+    Ok(())
+}
+
+/// Only existing overlaps constrain this preliminary path. A following body may use a leader's
+/// separating motion, but must not follow a leader's rejected inward motion through a crowd.
+fn initial_movement_contacts(
+    collision: &CollisionScene,
+    index: &DynamicShadowIndex,
+    targets: &dyn DynamicContactTargetLookup,
+    mover: &SpatialBody,
+    plan: &PhysicalBodyTickCommit,
+) -> Result<Vec<SelectedBlockingContact>> {
+    let physical = mover
+        .physical
+        .as_ref()
+        .context("dynamic mover lost physical state")?;
+    let Some(dynamic) = &physical.dynamic else {
+        return Ok(Vec::new());
+    };
+    let anchor = plan.motion.path.anchor();
+    let start = mover
+        .pose
+        .reanchor_to_landblock_owner(anchor)
+        .context("could not reanchor mover")?;
+    let end = plan
+        .pose
+        .reanchor_to_landblock_owner(anchor)
+        .context("could not reanchor planned mover")?;
+    let (minimum, maximum) = swept_root_bounds(&plan.motion.path, moving_sphere_extent(mover));
+    let placement = swept_mover_placement(collision, mover, plan)?;
+    let mut contacts = Vec::new();
+    for peer_id in index.candidates(Some(mover.id), anchor, minimum, maximum, &placement) {
+        let Some(peer) = targets.target_body(peer_id) else {
+            continue;
+        };
+        let peer_dynamic = peer
+            .physical
+            .as_ref()
+            .and_then(|physical| physical.dynamic.as_ref())
+            .context("indexed peer lost physical state")?;
+        if pair_is_filtered(dynamic, peer_dynamic)
+            || !PairContactPolicy::new(dynamic, peer_dynamic).response_eligible
+        {
+            continue;
+        }
+        let shapes = placed_target_shapes(peer, peer.pose, anchor)?;
+        for sphere in physical.definition.spheres().iter() {
+            let center = start.coords + start.rotation.rotate_vector(sphere.center);
+            let movement = end.coords + end.rotation.rotate_vector(sphere.center) - center;
+            for shape in &shapes {
+                if !shape.bounds.intersects_sphere(center, sphere.radius) {
+                    continue;
+                }
+                for contact in shape_contacts(shape, center, sphere.radius) {
+                    if contact.depth > DYNAMIC_PENETRATION_TOLERANCE
+                        && movement.dot(&contact.normal) < -f32::EPSILON
+                    {
+                        contacts.push(SelectedBlockingContact {
+                            peer: peer_id,
+                            fraction: 0.0,
+                            safe_fraction: 0.0,
+                            normal: contact.normal,
+                            clears_projectile_state: dynamic.collision.dynamic_collision.missile
+                                && peer_dynamic
+                                    .collision
+                                    .dynamic_collision
+                                    .accepts_peer_reports,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    Ok(contacts)
+}
+
+/// Contacts sampled from a single proposed path; reports and response remain independent.
+struct DynamicContactQuery {
+    /// Earliest movement-blocking touch, including the safe prefix before it.
+    selected: Option<SelectedBlockingContact>,
+    /// Report recipients at their first sampled touch.
+    report_touches: Vec<SampledReportTouch>,
+    /// Portion for which the narrow-phase budget established coverage.
+    accepted_fraction: f32,
+}
+
+fn query_dynamic_contacts(
+    epoch: DynamicContactEpoch<'_>,
+    mover: &SpatialBody,
+    environment_plan: &PhysicalBodyTickCommit,
+) -> Result<DynamicContactQuery> {
     let Some(mover_dynamic) = mover
         .physical
         .as_ref()
         .and_then(|physical| physical.dynamic.as_ref())
     else {
-        return Ok(DynamicContactResolution::default());
+        return Ok(DynamicContactQuery {
+            selected: None,
+            report_touches: Vec::new(),
+            accepted_fraction: 1.0,
+        });
     };
     let mover_reports = mover_dynamic.collision.reporting.enabled;
     let mover_responds = mover_dynamic
@@ -190,7 +399,11 @@ pub(crate) fn resolve_dynamic_contacts_for_mover(
         .dynamic_collision
         .accepts_peer_reports;
     if !mover_reports && !mover_responds && !mover_accepts_peer_reports {
-        return Ok(DynamicContactResolution::default());
+        return Ok(DynamicContactQuery {
+            selected: None,
+            report_touches: Vec::new(),
+            accepted_fraction: 1.0,
+        });
     }
 
     let anchor = environment_plan.motion.path.anchor();
@@ -236,36 +449,36 @@ pub(crate) fn resolve_dynamic_contacts_for_mover(
         if !pair.swept_bounds_overlap()? {
             continue;
         }
-        let relative_path_length = pair.conservative_relative_path_length()?;
-        let slice_distance = pair
-            .minimum_collision_scale()?
-            .min(MAXIMUM_DYNAMIC_SLICE_DISTANCE);
-        let required_slices = required_dynamic_slices(relative_path_length, slice_distance);
-        let evaluated_slices = required_slices.min(MAXIMUM_DYNAMIC_SLICES);
-        let evaluated_fraction = evaluated_slices as f32 / required_slices as f32;
+        let samples = pair.sample_fractions()?;
+        let evaluated_fraction = *samples
+            .last()
+            .expect("pair sampling includes its initial pose");
         accepted_fraction = accepted_fraction.min(evaluated_fraction);
-
-        let Some(contact) = pair.first_contact(evaluated_slices, evaluated_fraction)? else {
-            continue;
-        };
-        if mover_report_eligible {
-            sampled_report_touches.push(SampledReportTouch {
-                fraction: contact.fraction,
-                touch: dynamic_report_touch(mover.id, peer_id, peer_dynamic),
-            });
-        }
-        if peer_report_eligible {
-            sampled_report_touches.push(SampledReportTouch {
-                fraction: contact.fraction,
-                touch: dynamic_report_touch(peer_id, mover.id, mover_dynamic),
-            });
+        let contacts = pair.contacts(&samples)?;
+        if let Some(fraction) = contacts.touch {
+            if mover_report_eligible {
+                sampled_report_touches.push(SampledReportTouch {
+                    fraction,
+                    touch: dynamic_report_touch(mover.id, peer_id, peer_dynamic),
+                });
+            }
+            if peer_report_eligible {
+                sampled_report_touches.push(SampledReportTouch {
+                    fraction,
+                    touch: dynamic_report_touch(peer_id, mover.id, mover_dynamic),
+                });
+            }
         }
         if !response_eligible {
             continue;
         }
+        let Some(contact) = contacts.blocking else {
+            continue;
+        };
         let candidate = SelectedBlockingContact {
             peer: peer_id,
             fraction: contact.fraction,
+            safe_fraction: contact.safe_fraction,
             normal: contact.normal,
             clears_projectile_state: mover_dynamic.collision.dynamic_collision.missile
                 && peer_dynamic
@@ -281,39 +494,10 @@ pub(crate) fn resolve_dynamic_contacts_for_mover(
         }
     }
 
-    let selected = selected.filter(|contact| contact.fraction <= accepted_fraction);
-    let Some(selected) = selected else {
-        let replacement_plan = (accepted_fraction < 1.0)
-            .then(|| {
-                let mut partial = truncated_motion_plan(
-                    epoch.collision,
-                    mover,
-                    actuation,
-                    epoch.delta_seconds,
-                    accepted_fraction,
-                )?;
-                partial.motion.status = super::PhysicalBodyTickStatus::SubstepBudgetExceeded;
-                Ok::<_, anyhow::Error>(partial)
-            })
-            .transpose()?;
-        return Ok(DynamicContactResolution {
-            replacement_plan,
-            response: None,
-            report_touches: accepted_report_touches(sampled_report_touches, accepted_fraction),
-        });
-    };
-    let report_touches = accepted_report_touches(sampled_report_touches, selected.fraction);
-    let replacement_plan = blocking_contact_plan(
-        epoch.collision,
-        mover,
-        actuation,
-        epoch.delta_seconds,
-        selected,
-    )?;
-    Ok(DynamicContactResolution {
-        replacement_plan: Some(replacement_plan),
-        response: Some(selected.response()),
-        report_touches,
+    Ok(DynamicContactQuery {
+        selected: selected.filter(|contact| contact.fraction <= accepted_fraction),
+        report_touches: sampled_report_touches,
+        accepted_fraction,
     })
 }
 
@@ -449,114 +633,15 @@ impl PairContactPolicy {
     }
 }
 
-/// Classifies only current overlap; future motion cannot precede a blocking contact at time zero.
-fn initial_blocking_contacts(
-    collision: &CollisionScene,
-    index: &DynamicShadowIndex,
-    targets: &dyn DynamicContactTargetLookup,
-    mover: &SpatialBody,
-) -> Result<Option<InitialBlockingContacts>> {
-    let Some(physical) = &mover.physical else {
-        return Ok(None);
-    };
-    let Some(dynamic) = &physical.dynamic else {
-        return Ok(None);
-    };
-    if !dynamic.collision.dynamic_collision.mover_accepts_response {
-        return Ok(None);
-    }
-    let anchor = Guid((mover.pose.landblock_id.0 & 0xffff_0000) | 0xffff);
-    let pose = mover
-        .pose
-        .reanchor_to_landblock_owner(anchor)
-        .context("could not reanchor initial dynamic mover")?;
-    // Query moving spheres, not target geometry: their memberships need not be identical.
-    // Recompute after reconciliation, which can change the body's facing.
-    let transit = |sphere: super::GroundedSphere| {
-        collision.transit_cell(super::CellTransitRequest {
-            previous_cell: physical.response.cell(),
-            anchor,
-            center: pose.coords + pose.rotation.rotate_vector(sphere.center),
-            radius: sphere.radius,
-        })
-    };
-    let spheres = physical.definition.spheres();
-    let mut placement = transit(spheres.primary())?;
-    if let Some(upper) = spheres.upper_constraint() {
-        placement = placement.merge_reached(transit(upper)?);
-    }
-    let extent = moving_sphere_extent(mover);
-    let expansion = Vector3::new(extent, extent, extent);
-    let mut selected = None;
-    let mut report_touches = Vec::new();
-    for peer_id in index.candidates(
-        Some(mover.id),
-        anchor,
-        pose.coords - expansion,
-        pose.coords + expansion,
-        &placement,
-    ) {
-        let Some(peer) = targets.target_body(peer_id) else {
-            continue;
-        };
-        let peer_dynamic = peer
-            .physical
-            .as_ref()
-            .and_then(|physical| physical.dynamic.as_ref())
-            .expect("dynamic index returned a target without dynamic physical state");
-        if pair_is_filtered(dynamic, peer_dynamic) {
-            continue;
-        }
-        let policy = PairContactPolicy::new(dynamic, peer_dynamic);
-        if !policy.response_eligible
-            && !policy.mover_report_eligible
-            && !policy.peer_report_eligible
-        {
-            continue;
-        }
-        let peer_pose = peer
-            .pose
-            .reanchor_to_landblock_owner(anchor)
-            .context("could not reanchor initial dynamic peer")?;
-        let Some(contact) = deepest_pair_contact(mover, pose, peer, peer_pose, anchor)? else {
-            continue;
-        };
-        if policy.mover_report_eligible {
-            report_touches.push(dynamic_report_touch(mover.id, peer_id, peer_dynamic));
-        }
-        if policy.peer_report_eligible {
-            report_touches.push(dynamic_report_touch(peer_id, mover.id, dynamic));
-        }
-        // Candidates are sorted by body identity, the same tie-break used by swept resolution.
-        if policy.response_eligible && selected.is_none() {
-            selected = Some(SelectedBlockingContact {
-                peer: peer_id,
-                fraction: 0.0,
-                normal: contact.normal,
-                clears_projectile_state: dynamic.collision.dynamic_collision.missile
-                    && peer_dynamic
-                        .collision
-                        .dynamic_collision
-                        .accepts_peer_reports,
-            });
-        }
-    }
-    Ok(selected.map(|selected| InitialBlockingContacts {
-        selected,
-        report_touches,
-    }))
-}
-
-/// Deepest directional contact at one pair of poses, shared by initial and swept queries.
-fn deepest_pair_contact(
+/// Report eligibility needs any overlap, independently of direction or response depth.
+fn pair_overlaps(
     mover: &SpatialBody,
     mover_pose: WorldPosition,
     peer: &SpatialBody,
     peer_pose: WorldPosition,
     anchor: Guid,
-) -> Result<Option<ShapeContact>> {
+) -> Result<bool> {
     let shapes = placed_target_shapes(peer, peer_pose, anchor)?;
-    let mut deepest = None;
     for sphere in mover
         .physical
         .as_ref()
@@ -567,26 +652,73 @@ fn deepest_pair_contact(
     {
         let center = mover_pose.coords + mover_pose.rotation.rotate_vector(sphere.center);
         for shape in &shapes {
-            if !shape.bounds.intersects_sphere(center, sphere.radius) {
-                continue;
+            if shape.bounds.intersects_sphere(center, sphere.radius)
+                && !shape_contacts(shape, center, sphere.radius).is_empty()
+            {
+                return Ok(true);
             }
-            for contact in shape_contacts(shape, center, sphere.radius) {
-                if deepest
-                    .as_ref()
-                    .is_none_or(|current: &ShapeContact| contact.depth > current.depth)
-                {
-                    deepest = Some(contact);
+        }
+    }
+    Ok(false)
+}
+
+/// Independent first report touch and first movement obstruction for a directional pair.
+#[derive(Default)]
+struct PairContacts {
+    /// Overlap still reports when the mover is stationary or escaping.
+    touch: Option<f32>,
+    /// Only movement into a surface consumes motion.
+    blocking: Option<SampledBlockingContact>,
+}
+
+/// Tests each movement sphere and target shape independently. The start normal prevents an
+/// already embedded sphere from crossing a target and claiming its far side as an escape.
+/// Peer motion is held at this sample: it may obstruct movement, never push the mover.
+fn blocking_pair_contact(
+    mover: &SpatialBody,
+    previous: WorldPosition,
+    candidate: WorldPosition,
+    peer: &SpatialBody,
+    peer_pose: WorldPosition,
+    anchor: Guid,
+) -> Result<Option<ShapeContact>> {
+    let shapes = placed_target_shapes(peer, peer_pose, anchor)?;
+    for sphere in mover
+        .physical
+        .as_ref()
+        .context("dynamic mover lost physical state")?
+        .definition
+        .spheres()
+        .iter()
+    {
+        let start = previous.coords + previous.rotation.rotate_vector(sphere.center);
+        let end = candidate.coords + candidate.rotation.rotate_vector(sphere.center);
+        let movement = end - start;
+        for shape in &shapes {
+            for center in [start, end] {
+                if !shape.bounds.intersects_sphere(center, sphere.radius) {
+                    continue;
+                }
+                for contact in shape_contacts(shape, center, sphere.radius) {
+                    if contact.depth > DYNAMIC_PENETRATION_TOLERANCE
+                        && movement.dot(&contact.normal) < -f32::EPSILON
+                    {
+                        return Ok(Some(contact));
+                    }
                 }
             }
         }
     }
-    Ok(deepest)
+    Ok(None)
 }
 
 #[derive(Debug, Clone, Copy)]
-struct SampledContact {
+struct SampledBlockingContact {
+    /// First sampled touch along the proposed path.
     fraction: f32,
-    /// Response normal selected from the deepest overlap at this sample.
+    /// Last safe fraction before an inward movement exceeds tolerated penetration.
+    safe_fraction: f32,
+    /// Outward normal of the inward overlap that blocked this sample.
     normal: Vector3,
 }
 
@@ -594,6 +726,8 @@ struct SampledContact {
 struct SelectedBlockingContact {
     peer: SpatialBodyId,
     fraction: f32,
+    /// Portion of the proposed displacement permitted before this contact.
+    safe_fraction: f32,
     /// Peer surface normal used for velocity response, not positional separation.
     normal: Vector3,
     clears_projectile_state: bool,
@@ -645,18 +779,62 @@ impl<'a> PairTrajectories<'a> {
         })
     }
 
-    fn conservative_relative_path_length(&self) -> Result<f32> {
-        let mover_start = self.mover_pose(0.0)?;
-        let mover_end = self.mover_pose(1.0)?;
-        let peer_start = self.peer_pose(0.0)?;
-        let peer_end = self.peer_pose(1.0)?;
-        let relative_translation =
-            (mover_end.coords - mover_start.coords) - (peer_end.coords - peer_start.coords);
-        Ok(relative_translation.length()
-            + quaternion_angle(mover_start.rotation, mover_end.rotation)
-                * moving_sphere_extent(self.mover)
-            + quaternion_angle(peer_start.rotation, peer_end.rotation)
-                * target_furthest_extent(self.peer)?)
+    /// Subdivide every leg, including a shortened prefix followed by a hold. Endpoint distance
+    /// alone misses detours and can spend the entire sampling budget on the stationary tail.
+    fn sample_fractions(&self) -> Result<Vec<f32>> {
+        let mut boundaries = self
+            .mover_commit
+            .motion
+            .path
+            .legs()
+            .iter()
+            .map(|leg| leg.end_fraction())
+            .chain(
+                self.peer_plan
+                    .into_iter()
+                    .flat_map(|plan| plan.motion.path.legs().iter().map(|leg| leg.end_fraction())),
+            )
+            .collect::<Vec<_>>();
+        boundaries.sort_by(f32::total_cmp);
+        boundaries.dedup();
+        let scale = self
+            .minimum_collision_scale()?
+            .min(MAXIMUM_DYNAMIC_SLICE_DISTANCE);
+        let mover_extent = moving_sphere_extent(self.mover);
+        let peer_extent = target_furthest_extent(self.peer)?;
+        let mut samples = vec![0.0];
+        let mut remaining_slices = MAXIMUM_DYNAMIC_SLICES;
+        let mut start = 0.0;
+        let mut mover_start = self.mover_pose(start)?;
+        let mut peer_start = self.peer_pose(start)?;
+        for end in boundaries {
+            let mover_end = self.mover_pose(end)?;
+            let peer_end = self.peer_pose(end)?;
+            let relative =
+                (mover_end.coords - mover_start.coords) - (peer_end.coords - peer_start.coords);
+            let travel = relative.length()
+                + quaternion_angle(mover_start.rotation, mover_end.rotation) * mover_extent
+                + quaternion_angle(peer_start.rotation, peer_end.rotation) * peer_extent;
+            // A stationary tail has no new geometry to subdivide. It must not invalidate
+            // an exactly-budgeted safe prefix merely because the path also records its hold.
+            if travel == 0.0 {
+                samples.push(end);
+            } else {
+                let required = required_dynamic_slices(travel, scale);
+                let available = remaining_slices.min(required);
+                for index in 1..=available {
+                    samples.push(start + (end - start) * (index as f32 / required as f32));
+                }
+                remaining_slices -= available;
+                if available < required {
+                    break;
+                }
+            }
+            start = end;
+            mover_start = mover_end;
+            peer_start = peer_end;
+        }
+        Ok(samples)
     }
 
     fn swept_bounds_overlap(&self) -> Result<bool> {
@@ -703,21 +881,58 @@ impl<'a> PairTrajectories<'a> {
         Ok(selected)
     }
 
-    fn first_contact(&self, slices: usize, end_fraction: f32) -> Result<Option<SampledContact>> {
-        for index in 0..=slices {
-            let fraction = index as f32 / slices as f32 * end_fraction;
+    fn contacts(&self, samples: &[f32]) -> Result<PairContacts> {
+        let mut result = PairContacts::default();
+        let mut previous_fraction = 0.0;
+        let mut previous_pose = self.mover_pose(0.0)?;
+        for (index, &fraction) in samples.iter().enumerate() {
             let mover_pose = self.mover_pose(fraction)?;
             let peer_pose = self.peer_pose(fraction)?;
-            let deepest =
-                deepest_pair_contact(self.mover, mover_pose, self.peer, peer_pose, self.anchor)?;
-            if let Some(contact) = deepest {
-                return Ok(Some(SampledContact {
-                    fraction,
-                    normal: contact.normal,
-                }));
+            if result.touch.is_none()
+                && pair_overlaps(self.mover, mover_pose, self.peer, peer_pose, self.anchor)?
+            {
+                result.touch = Some(fraction);
             }
+            if index > 0
+                && let Some(contact) = blocking_pair_contact(
+                    self.mover,
+                    previous_pose,
+                    mover_pose,
+                    self.peer,
+                    peer_pose,
+                    self.anchor,
+                )?
+            {
+                let mut safe = previous_fraction;
+                let mut blocked = fraction;
+                for _ in 0..DYNAMIC_CONTACT_REFINEMENT_STEPS {
+                    let middle = (safe + blocked) * 0.5;
+                    if blocking_pair_contact(
+                        self.mover,
+                        previous_pose,
+                        self.mover_pose(middle)?,
+                        self.peer,
+                        self.peer_pose(middle)?,
+                        self.anchor,
+                    )?
+                    .is_some()
+                    {
+                        blocked = middle;
+                    } else {
+                        safe = middle;
+                    }
+                }
+                result.blocking = Some(SampledBlockingContact {
+                    fraction,
+                    safe_fraction: safe,
+                    normal: contact.normal,
+                });
+                break;
+            }
+            previous_fraction = fraction;
+            previous_pose = mover_pose;
         }
-        Ok(None)
+        Ok(result)
     }
 
     fn mover_pose(&self, fraction: f32) -> Result<WorldPosition> {
@@ -755,12 +970,14 @@ fn truncated_motion_plan(
     actuation: &PhysicalBodyActuation,
     delta_seconds: f32,
     accepted_fraction: f32,
+    constraints: &[MotionConstraint],
 ) -> Result<PhysicalBodyTickCommit> {
-    let mut partial = solve_physical_body_tick(
+    let mut partial = solve_constrained_physical_body_tick(
         collision,
         mover,
         actuation,
         delta_seconds * accepted_fraction,
+        constraints,
     )?;
     let final_point = partial.motion.path.final_point();
     let endpoint = final_point.center();
@@ -812,6 +1029,52 @@ fn truncated_motion_plan(
     Ok(partial)
 }
 
+/// A blocked path may hold its already committed pose, but may never apply an unvalidated push.
+fn held_motion_plan(
+    collision: &CollisionScene,
+    mover: &SpatialBody,
+    delta_seconds: f32,
+) -> Result<PhysicalBodyTickCommit> {
+    let physical = mover
+        .physical
+        .as_ref()
+        .context("dynamic mover lost physical state")?;
+    let path = trace_body_reference_path(
+        collision,
+        mover.pose,
+        physical.response.cell(),
+        physical.definition.spheres().primary(),
+        &[MotionWaypoint {
+            center: mover.pose.coords,
+            end_fraction: 1.0,
+            placement: MotionWaypointPlacement::Committed(physical.response.cell()),
+        }],
+        false,
+    )?;
+    Ok(PhysicalBodyTickCommit {
+        pose: mover.pose,
+        retained_velocity: Vector3::zero(),
+        retained_acceleration: mover.retained.acceleration,
+        accepted_motion: super::physical_body::accepted_motion(
+            mover.pose,
+            mover.pose,
+            Vector3::zero(),
+            delta_seconds,
+        ),
+        contact: mover.contact,
+        response: physical.response,
+        motion: super::PhysicalBodyMotion {
+            path,
+            status: super::PhysicalBodyTickStatus::Solved,
+            constraint_count: 0,
+            substeps: 0,
+            contact_passes: 0,
+        },
+        static_contact_normal: None,
+        residual_contacts: false,
+    })
+}
+
 fn swept_mover_placement(
     collision: &CollisionScene,
     mover: &SpatialBody,
@@ -857,34 +1120,6 @@ fn swept_mover_placement(
         })?);
     }
     Ok(placement)
-}
-
-fn blocking_contact_plan(
-    collision: &CollisionScene,
-    mover: &SpatialBody,
-    actuation: &PhysicalBodyActuation,
-    delta_seconds: f32,
-    selected: SelectedBlockingContact,
-) -> Result<PhysicalBodyTickCommit> {
-    let contact_fraction = selected
-        .fraction
-        .max((1.0 / MAXIMUM_DYNAMIC_SLICES as f32).min(1.0));
-    // Object contact limits the mover's own motion; overlap is not permission to push it.
-    // Retail's slide response derives its offset from attempted movement, not penetration depth
-    // (CSphere::slide_sphere, acclient.c:344024-344137). Adding normal * depth here moved a
-    // stationary player through the dungeon floor after the environment solve had succeeded.
-    let mut partial =
-        truncated_motion_plan(collision, mover, actuation, delta_seconds, contact_fraction)?;
-    let physical = mover
-        .physical
-        .as_ref()
-        .context("dynamic mover lost its physical definition")?;
-    partial.retained_velocity = dynamic_collision_velocity(
-        partial.retained_velocity,
-        physical.response_policy.restitution,
-        selected.normal,
-    );
-    Ok(partial)
 }
 
 fn dynamic_collision_velocity(

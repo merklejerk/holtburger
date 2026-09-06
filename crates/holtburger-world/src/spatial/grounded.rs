@@ -308,6 +308,16 @@ pub fn solve_grounded(
     config: GroundedConfig,
     request: GroundedRequest,
 ) -> Result<GroundedOutcome> {
+    solve_constrained_grounded(scene, config, request, &[])
+}
+
+/// Applies entity movement limits before the existing static collision and support transaction.
+pub(super) fn solve_constrained_grounded(
+    scene: &CollisionScene,
+    config: GroundedConfig,
+    request: GroundedRequest,
+    constraints: &[super::physical_body::MotionConstraint],
+) -> Result<GroundedOutcome> {
     validate(config, &request)?;
 
     let anchor = landblock_key(request.body.pose.landblock_id);
@@ -383,6 +393,7 @@ pub fn solve_grounded(
     if let Some(support) = transition_ground.walkable_support() {
         displacement = project_into_plane(displacement, support.normal);
     }
+    displacement = super::physical_body::constrain_displacement(displacement, constraints);
     // Retail updates velocity/rotation but skips the collision transition when the proposed
     // origin is unchanged. In particular, a stationary gravity-free door must not acquire the
     // floor below its pivot.

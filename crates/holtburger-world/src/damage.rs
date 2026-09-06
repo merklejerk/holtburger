@@ -19,10 +19,8 @@ pub fn compute_damage_range(
 ) -> Option<DamageRange> {
     let max_damage = if let Some(damage) = max_damage {
         damage as f64
-    } else if let Some(profile) = weapon_profile {
-        profile.damage as f64
     } else {
-        return None;
+        weapon_profile?.damage as f64
     };
 
     let variance = if let Some(v) = variance {

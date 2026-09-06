@@ -205,7 +205,11 @@ pub(super) fn tick_with_precise_jump(
             PreciseJumpTransactionRejection::LaunchRejected,
         ));
     }
-    events.extend(tick_pose_only_remote_entities(dt, world));
+    events.extend(tick_pose_only_remote_entities(
+        dt,
+        world,
+        collision.is_some(),
+    ));
     Ok(ClientSimulationTick {
         events,
         committed_jump,
@@ -495,6 +499,11 @@ fn remote_entity_actuation(
         .expect("scheduled body must retain its physical definition")
         .definition;
     match definition {
+        PhysicalBodyDefinition::FixedPosition { .. } => Ok(PhysicalBodyActuation::FixedPosition {
+            rotation: authored_offset.map_or(body.pose.rotation, |offset| {
+                body.pose.rotation.multiply(&offset.rotation)
+            }),
+        }),
         PhysicalBodyDefinition::FreeSphere { .. } => {
             let kinematic_velocity = authored_offset
                 .map(|offset| {
@@ -554,6 +563,11 @@ fn local_player_actuation(
         .expect("physical body was checked before actuation resolution")
         .definition;
     Ok(match definition {
+        PhysicalBodyDefinition::FixedPosition { .. } => PhysicalBodyActuation::FixedPosition {
+            rotation: authored_offset.map_or(body.pose.rotation, |offset| {
+                body.pose.rotation.multiply(&offset.rotation)
+            }),
+        },
         PhysicalBodyDefinition::FreeSphere { .. } => {
             let kinematic_velocity = local_drive
                 .map(|control| control.desired_world_delta / dt_secs)
@@ -601,7 +615,11 @@ fn local_player_actuation(
     })
 }
 
-fn tick_pose_only_remote_entities(dt: Duration, world: &mut WorldState) -> Vec<WorldEvent> {
+fn tick_pose_only_remote_entities(
+    dt: Duration,
+    world: &mut WorldState,
+    collision_enabled: bool,
+) -> Vec<WorldEvent> {
     let Some(request) = build_projection_request(world) else {
         return Vec::new();
     };
@@ -611,7 +629,13 @@ fn tick_pose_only_remote_entities(dt: Duration, world: &mut WorldState) -> Vec<W
             .scene
             .body(input.body_id)
             .is_some_and(|body| body.physical.is_some());
-        if physical {
+        // Content preparation is asynchronous. Until its movement geometry is known, a
+        // physical candidate cannot safely fall back to unconstrained dead reckoning.
+        let awaiting_physics = !physical
+            && collision_enabled
+            && matches!(input.body_id, SpatialBodyId::Entity(guid)
+                if super::collision::remote_body_requires_physics(world, guid));
+        if physical || awaiting_physics {
             continue;
         }
         let solved = advance_body_kinematics(&input, dt);
@@ -700,11 +724,46 @@ fn should_send_immediate_server_controlled_sync(data: &MovementEventData) -> boo
 mod tests {
     use super::*;
     use holtburger_common::position::WorldPosition;
+    use holtburger_common::properties::{
+        PhysicsState, PropertyDataId, WorldObjectPropertyAccessorsMut as _,
+    };
     use holtburger_protocol::messages::motion::{MoveToParameters, MoveToPosition, Origin};
     use holtburger_protocol::messages::{
         MotionStance, MovementEventData, MovementType, MovementTypeData,
     };
     use holtburger_world::{SpatialBodyEvent, entity::Entity};
+
+    #[test]
+    fn physical_candidate_waits_for_geometry_before_projecting_server_velocity() {
+        let mut world = WorldState::synthetic();
+        let guid = Guid(0x7000_0042);
+        let pose = WorldPosition {
+            landblock_id: Guid(0x1234_0002),
+            coords: Vector3::new(12.0, 12.0, 24.0),
+            rotation: Quaternion::identity(),
+        };
+        let mut entity = Entity::new(guid, "Fixture".to_owned(), pose);
+        entity.wcid = Some(850);
+        entity
+            .properties
+            .set_did_prop(PropertyDataId::Setup, Guid(0x0200_048a));
+        entity
+            .physics
+            .reconcile(holtburger_world::resolve_effective_entity_physics_state(
+                PhysicsState::GRAVITY,
+            ));
+        entity.velocity = Vector3::new(0.0, 0.0, -1.0);
+        world.add_entity(entity);
+        let body_id = SpatialBodyId::Entity(guid);
+        let dt = Duration::from_millis(30);
+
+        tick_pose_only_remote_entities(dt, &mut world, true);
+        assert_eq!(world.scene.body(body_id).unwrap().pose, pose);
+
+        // Clients without collision preparation retain their explicit pose-only simulation.
+        tick_pose_only_remote_entities(dt, &mut world, false);
+        assert!(world.scene.body(body_id).unwrap().pose.coords.z < pose.coords.z);
+    }
 
     #[test]
     fn applying_spatial_events_keeps_world_semantics() {

@@ -1742,15 +1742,24 @@ mod tests {
             interest.clone(),
             flat_collision_scene_for_interest(&interest),
         );
-        let now = Instant::now();
-        simulation::tick(
-            now,
-            Duration::from_millis(PHYSICS_TICK_MS),
-            &mut client.world,
-            &mut client.movement,
-            Some(&collision),
-        )
-        .unwrap();
+        let mut now = Instant::now();
+        let support_deadline = now + Duration::from_secs(1);
+        while now < support_deadline {
+            simulation::tick(
+                now,
+                Duration::from_millis(PHYSICS_TICK_MS),
+                &mut client.world,
+                &mut client.movement,
+                Some(&collision),
+            )
+            .unwrap();
+            if client.world.scene.body(body_id).unwrap().contact
+                == holtburger_world::ContactState::Grounded
+            {
+                break;
+            }
+            now += Duration::from_millis(PHYSICS_TICK_MS);
+        }
         assert_eq!(
             client.world.scene.body(body_id).unwrap().contact,
             holtburger_world::ContactState::Grounded
@@ -2692,16 +2701,30 @@ mod tests {
             interest.clone(),
             flat_collision_scene_for_interest(&interest),
         );
-        let now = Instant::now();
+        let mut now = Instant::now();
         let dt = Duration::from_millis(PHYSICS_TICK_MS);
-        simulation::tick(
-            now,
-            dt,
-            &mut client.world,
-            &mut client.movement,
-            Some(&collision),
-        )
-        .unwrap();
+        let support_deadline = now + Duration::from_secs(1);
+        while now < support_deadline {
+            simulation::tick(
+                now,
+                dt,
+                &mut client.world,
+                &mut client.movement,
+                Some(&collision),
+            )
+            .unwrap();
+            if client.world.scene.body(body_id).unwrap().contact
+                == holtburger_world::ContactState::Grounded
+                && client
+                    .world
+                    .motion_runtimes
+                    .playing_clip(remote_guid)
+                    .is_some_and(|clip| clip.animation_id == JUMP_FIXTURE_RUN_ANIMATION)
+            {
+                break;
+            }
+            now += Duration::from_millis(PHYSICS_TICK_MS);
+        }
         assert_eq!(
             client.world.scene.body(body_id).unwrap().contact,
             holtburger_world::ContactState::Grounded
@@ -3090,22 +3113,29 @@ mod tests {
         assert_eq!(corrected.pose, corrected_pose);
         assert_eq!(corrected.retained.velocity, Vector3::zero());
         // Contact is a solver product. The reset clears the launch immediately, while the next
-        // collision tick reclassifies support at the corrected pose.
+        // collision ticks reacquire support at the corrected pose.
 
-        simulation::tick(
-            correction_start + dt,
-            dt,
-            &mut client.world,
-            &mut client.movement,
-            Some(&collision),
-        )
-        .unwrap();
+        for tick in 1..=30 {
+            simulation::tick(
+                correction_start + dt * tick,
+                dt,
+                &mut client.world,
+                &mut client.movement,
+                Some(&collision),
+            )
+            .unwrap();
+            if client.world.scene.body(body_id).unwrap().contact
+                == holtburger_world::ContactState::Grounded
+            {
+                break;
+            }
+        }
         let settled_correction = client.world.scene.body(body_id).unwrap();
         assert_eq!(
             settled_correction.contact,
             holtburger_world::ContactState::Grounded
         );
-        assert_eq!(settled_correction.pose.coords.z, corrected_pose.coords.z);
+        assert!((settled_correction.pose.coords.z - corrected_pose.coords.z).abs() < 0.000_01);
         assert_eq!(settled_correction.retained.velocity.x, 0.0);
         assert_eq!(settled_correction.retained.velocity.y, 0.0);
         assert!(

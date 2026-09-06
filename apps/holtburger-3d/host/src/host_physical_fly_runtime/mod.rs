@@ -121,7 +121,8 @@ impl HostPhysicalFlyRuntime {
             holtburger_world::PhysicalBodyDefinition::FreeSphere { config, .. } => {
                 config.maximum_substep_distance * config.maximum_substeps as f32
             }
-            holtburger_world::PhysicalBodyDefinition::Grounded { .. } => {
+            holtburger_world::PhysicalBodyDefinition::FixedPosition { .. }
+            | holtburger_world::PhysicalBodyDefinition::Grounded { .. } => {
                 anyhow::bail!("physical-fly camera requires a free-sphere body response")
             }
         };

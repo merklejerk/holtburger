@@ -1294,7 +1294,8 @@ mod actuation {
     fn planar(actuation: &PhysicalBodyActuation) -> Vector3 {
         match actuation {
             PhysicalBodyActuation::Grounded(grounded) => grounded.supported_planar_velocity(),
-            PhysicalBodyActuation::FreeFlight { .. } => {
+            PhysicalBodyActuation::FixedPosition { .. }
+            | PhysicalBodyActuation::FreeFlight { .. } => {
                 panic!("authored drive builds a grounded actuation")
             }
         }
@@ -1361,7 +1362,8 @@ mod actuation {
                     "the authored rotation survives the support gate"
                 );
             }
-            PhysicalBodyActuation::FreeFlight { .. } => unreachable!(),
+            PhysicalBodyActuation::FixedPosition { .. }
+            | PhysicalBodyActuation::FreeFlight { .. } => unreachable!(),
         }
     }
 }

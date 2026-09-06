@@ -802,6 +802,9 @@ pub(crate) fn dynamic_entity_coasting_actuation(
         .context("scheduled dynamic body lost its physical definition")?
         .definition;
     match definition {
+        PhysicalBodyDefinition::FixedPosition { .. } => Ok(PhysicalBodyActuation::FixedPosition {
+            rotation: previous.pose.rotation,
+        }),
         PhysicalBodyDefinition::FreeSphere { .. } => {
             PhysicalBodyActuation::free_flight(previous.retained.velocity).map_err(Into::into)
         }

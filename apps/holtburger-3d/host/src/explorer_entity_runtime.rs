@@ -741,6 +741,13 @@ fn propose_possession_tick(
             delta_seconds,
             launch,
         )?
+    } else if matches!(
+        body.physical.as_ref().map(|physical| physical.definition),
+        Some(PhysicalBodyDefinition::FixedPosition { .. })
+    ) {
+        PhysicalBodyActuation::FixedPosition {
+            rotation: body.pose.rotation.multiply(&offset.rotation),
+        }
     } else {
         crate::host_simulation_runtime::dynamic_entity_coasting_actuation(body)?
     };
@@ -2308,7 +2315,8 @@ mod tests {
             PhysicalBodyDefinition::Grounded { config, .. } => {
                 config.maximum_substeps = maximum_substeps;
             }
-            PhysicalBodyDefinition::FreeSphere { .. } => {
+            PhysicalBodyDefinition::FixedPosition { .. }
+            | PhysicalBodyDefinition::FreeSphere { .. } => {
                 panic!("the Explorer fixture must use grounded movement")
             }
         }

@@ -377,7 +377,7 @@ export class ClientPresentationSession {
 		kind: "starting",
 		diagnostic: null,
 	};
-	/** Terminal visual failure retained so an authority grace handoff cannot reveal on a later frame. */
+	/** Terminal visual failure retained until this presentation session is replaced. */
 	#terminalPresentationError: string | null = null;
 	#destroyed = false;
 	#cameraTarget: ClientCameraTarget | null = null;
@@ -773,27 +773,19 @@ export class ClientPresentationSession {
 			return { rendered: false, status: this.#status };
 		}
 		const lifecycle = this.#session.state().lifecycle;
-		const authorityPortal = lifecycle?.kind === "portal-space";
+		const portal = lifecycle?.kind === "portal-space";
 		if (
 			lifecycle?.kind !== "entering-world" &&
 			lifecycle?.kind !== "in-world" &&
-			!authorityPortal
+			!portal
 		) {
 			this.#setStatus("stopped");
 			return { rendered: false, status: this.#status };
 		}
-		if (authorityPortal) {
+		if (portal) {
 			this.#ensurePortalTransition(owner, lifecycle);
 		}
 		const portalGeneration = this.#portalTransition.activeGeneration();
-		// Authority may enter the world after its retail completion grace while presentation is
-		// still loading. The generation-keyed presentation barrier remains active until its own
-		// neutral destination frame is acknowledged.
-		const portal =
-			authorityPortal ||
-			(portalGeneration !== null &&
-				this.#isCurrentPortalPresentation(portalGeneration) &&
-				!this.#isPortalPresentationRevealed(portalGeneration));
 		if (portal) {
 			owner.runtime.pollPortalTransitionLoading();
 		}
@@ -1560,15 +1552,6 @@ export class ClientPresentationSession {
 		);
 	}
 
-	/** Whether the generation has presented and acknowledged its neutral destination frame. */
-	#isPortalPresentationRevealed(generation: number): boolean {
-		return (
-			this.#portalSceneActivation?.kind === "accepted" &&
-			this.#portalSceneActivation.generation === generation &&
-			this.#portalSceneActivation.revealAcknowledged
-		);
-	}
-
 	#syncSceneInterest(player: DynamicEntityView): void {
 		if (player.placement.kind !== "world") {
 			this.#clearSceneDemand(this.#owner);
@@ -1635,16 +1618,6 @@ export class ClientPresentationSession {
 	): void {
 		const previous = this.#status;
 		if (previous.kind === kind && previous.diagnostic === diagnostic) return;
-		if (
-			this.#hasRenderedFrame &&
-			this.#session.state().lifecycle?.kind === "in-world" &&
-			kind === "loading-player" &&
-			(previous.kind !== kind || previous.diagnostic !== diagnostic)
-		) {
-			console.warn(
-				`Client presentation is unavailable after world handoff: ${diagnostic ?? "no diagnostic supplied"}`,
-			);
-		}
 		this.#status = { kind, diagnostic };
 	}
 

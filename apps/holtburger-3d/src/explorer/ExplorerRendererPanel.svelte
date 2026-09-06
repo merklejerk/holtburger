@@ -260,7 +260,7 @@
 		<label class="explorer-environment-field">
 			<span>Render scale</span>
 			<select
-				class="ac-control ac-control--select"
+				class="ui-input"
 				value={renderScale}
 				onchange={(event) =>
 					updateRenderScale(
@@ -279,7 +279,7 @@
 		<label class="explorer-environment-field">
 			<span>Texture filtering</span>
 			<select
-				class="ac-control ac-control--select"
+				class="ui-input"
 				disabled={maximumTextureAnisotropy === null}
 				value={textureFiltering}
 				onchange={(event) =>

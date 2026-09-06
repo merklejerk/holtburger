@@ -1956,6 +1956,30 @@ of an earlier step. Ordinary command pipelines need not have cleanup-style compl
 separate dependent phases from independent participants. Preserve errors rather than suppressing
 them to keep the loop running.
 
+## Decoration Changes the Structural Contract
+
+**Smell:** A reusable appearance treatment silently takes ownership of placement, clipping,
+stacking, or hit testing that its consumers already manage.
+
+**Signals:** Applying a visual class moves an anchored element, confines an overlay to an ancestor,
+clips focus indicators, or intercepts input. Local overrides accumulate merely to restore the
+component's previous geometry. Removing clipping to reveal decoration also disables text truncation.
+
+**Possible failure:** An appearance-only change alters interaction or layout depending on where a
+component is mounted, even though each isolated preview looks correct.
+
+**Questions:** Which structural effects accompany the decoration? Who owns each containing block,
+clipping boundary, and input region? Does the preview exercise constrained space and overlapping
+surfaces as well as the isolated component?
+
+**Counterexamples:** A layout primitive may intentionally own these properties when its contract
+makes that ownership explicit. A self-contained decorative layer can legitimately establish its
+own stacking context without changing its consumer's placement.
+
+**Possible responses:** Separate decoration from clipped content, make structural defaults yield
+to their actual owner, use platform overlay mechanisms, or test the treatment in its real nesting
+and input context rather than only a style specimen.
+
 ## Adding Observations
 
 An observation belongs here when it has:

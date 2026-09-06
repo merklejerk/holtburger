@@ -5,6 +5,7 @@ import { writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 
+import { createCdpClient } from "./cdp-client.mjs";
 import { stringifyRedactedProbeReport } from "./live-client-probe-report.mjs";
 
 const PASSIVE_CAMERA_SETTLE_MS = 3_000;
@@ -472,45 +473,6 @@ async function waitForPageWebSocketUrl(browserWebSocketUrl) {
 		}
 		await delay(100);
 	}
-}
-
-function createCdpClient(webSocketUrl) {
-	return new Promise((resolvePromise, rejectPromise) => {
-		const socket = new WebSocket(webSocketUrl);
-		let nextId = 1;
-		const listeners = new Map();
-		const pending = new Map();
-		socket.addEventListener("open", () => {
-			resolvePromise({
-				close: () => socket.close(),
-				on(method, listener) {
-					listeners.set(method, [...(listeners.get(method) ?? []), listener]);
-				},
-				send(method, params = {}) {
-					const id = nextId++;
-					socket.send(JSON.stringify({ id, method, params }));
-					return new Promise((resolveRequest, rejectRequest) => {
-						pending.set(id, { reject: rejectRequest, resolve: resolveRequest });
-					});
-				},
-			});
-		});
-		socket.addEventListener("error", rejectPromise);
-		socket.addEventListener("message", (event) => {
-			const message = JSON.parse(event.data);
-			if (!message.id) {
-				for (const listener of listeners.get(message.method) ?? []) {
-					listener(message.params);
-				}
-				return;
-			}
-			const request = pending.get(message.id);
-			if (request === undefined) return;
-			pending.delete(message.id);
-			if (message.error) request.reject(new Error(message.error.message));
-			else request.resolve(message.result);
-		});
-	});
 }
 
 async function evaluate(client_, expression) {

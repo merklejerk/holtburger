@@ -40,6 +40,7 @@
 
 <script lang="ts">
 	import { onDestroy, onMount } from "svelte";
+	import LayoutControls from "./LayoutControls.svelte";
 
 	import { trackPointerGesture } from "./pointer-gesture";
 	import { MapRenderer } from "../lib/game/map/map-renderer";
@@ -247,7 +248,7 @@
 	 * Pixel size of the map disc, which is the widget inset by the bezel on both sides.
 	 *
 	 * The drawn map is square and the disc clips it to a circle, so this is what both canvases are
-	 * sized to. The widget's own size stays the outer diameter, which the resize stud changes.
+	 * sized to. The widget's own size stays the outer diameter, which the resize control changes.
 	 */
 	function discPixelSize(): number {
 		return Math.max(1, Math.round(viewState.size * (1 - 2 * RIM_FRACTION)));
@@ -720,7 +721,8 @@
 <svelte:window onblur={cancelMinimapPan} />
 
 <section
-	class="minimap"
+	class="minimap ui-theme"
+	class:ui-layout-editable={editable}
 	style:left={`${viewState.left}px`}
 	style:top={`${viewState.top}px`}
 	style:width={`${viewState.size}px`}
@@ -729,8 +731,8 @@
 	aria-label="Minimap"
 >
 	<!--
-		The round frame owns wheel zoom, while its two dedicated studs own moving and resizing. The
-		square corners around the compass stay transparent to the scene behind.
+		The round frame owns wheel zoom. Outside it, only the layout controls take input;
+		the remaining square corners stay transparent to the scene behind.
 	-->
 	<div
 		class="minimap-frame"
@@ -788,7 +790,7 @@
 		{#if minimapDetached}
 			<button
 				type="button"
-				class="minimap-reset"
+				class="minimap-reset ui-button ui-icon-button"
 				onclick={resetMinimapPan}
 				aria-label="Re-anchor minimap"
 				title="Re-anchor minimap"
@@ -800,7 +802,7 @@
 		{/if}
 		{#if tooltip}
 			<div
-				class="minimap-tooltip"
+				class="minimap-tooltip ui-tooltip"
 				role="tooltip"
 				style:left={`${tooltip.left}px`}
 				style:top={`${tooltip.top}px`}
@@ -808,46 +810,23 @@
 				{tooltip.names.join(", ")}
 			</div>
 		{/if}
-		{#if editable}
-			<button
-				type="button"
-				class="minimap-move"
-				onpointerdown={beginDrag}
-				aria-label="Move minimap"
-			>
-				<svg class="minimap-handle-icon" viewBox="0 0 12 12" aria-hidden="true">
-					<path
-						d="M 6 1 V 11 M 1 6 H 11 M 6 1 L 4.5 2.5 M 6 1 L 7.5 2.5 M 6 11 L 4.5 9.5 M 6 11 L 7.5 9.5 M 1 6 L 2.5 4.5 M 1 6 L 2.5 7.5 M 11 6 L 9.5 4.5 M 11 6 L 9.5 7.5"
-					/>
-				</svg>
-			</button>
-			{#if resizable}
-				<button
-					type="button"
-					class="minimap-resize"
-					onpointerdown={beginResize}
-					aria-label="Resize minimap"
-				>
-					<svg
-						class="minimap-handle-icon"
-						viewBox="0 0 12 12"
-						aria-hidden="true"
-					>
-						<path
-							d="M 2 10 L 10 2 M 2 10 V 7 M 2 10 H 5 M 10 2 H 7 M 10 2 V 5"
-						/>
-					</svg>
-				</button>
-			{/if}
-		{/if}
 	</div>
-	<span bind:this={coordinatesElement} class="minimap-coordinates"></span>
+	{#if editable}
+		<LayoutControls
+			label="minimap"
+			{resizable}
+			onmove={beginDrag}
+			onresize={beginResize}
+		/>
+	{/if}
+	<span bind:this={coordinatesElement} class="minimap-coordinates ui-readout"
+	></span>
 </section>
 
 <style>
 	.minimap {
 		position: absolute;
-		/* Only the frame and its handle take input; the corners belong to the scene behind. */
+		/* Only the frame and layout controls take input; unused corners belong to the scene. */
 		pointer-events: none;
 		user-select: none;
 	}
@@ -856,19 +835,8 @@
 		position: relative;
 		width: 100%;
 		height: 100%;
-		border: var(--ac-border);
 		border-radius: 50%;
-		background:
-			radial-gradient(
-				circle at 32% 16%,
-				rgb(245 203 95 / 0.3),
-				transparent 58%
-			),
-			linear-gradient(180deg, rgb(96 60 22 / 0.94), rgb(48 34 18 / 0.98));
-		box-shadow:
-			inset 0 1px 0 rgb(245 203 95 / 0.5),
-			inset 0 -1px 0 rgb(97 68 23 / 0.78),
-			0 8px 24px rgb(0 0 0 / 0.44);
+		background: var(--ui-hud-backing);
 		pointer-events: auto;
 	}
 
@@ -877,25 +845,13 @@
 		inset: var(--map-rim);
 		overflow: hidden;
 		border-radius: 50%;
-		background: var(--ac-panel-deep);
+		background: var(--ui-color-well);
 		cursor: grab;
 		touch-action: none;
 	}
 
 	.minimap-disc:active {
 		cursor: grabbing;
-	}
-
-	/* Seats the map inside the bezel: a gold lip at the rim and a shadow cast over the edge. */
-	.minimap-disc::after {
-		content: "";
-		position: absolute;
-		inset: 0;
-		border-radius: 50%;
-		box-shadow:
-			inset 0 0 0 1px rgb(97 68 23 / 0.9),
-			inset 0 3px 10px rgb(0 0 0 / 0.55);
-		pointer-events: none;
 	}
 
 	.minimap-canvas {
@@ -920,13 +876,13 @@
 	}
 
 	.minimap-cardinal {
-		fill: var(--ac-ink);
-		font-family: var(--ac-font-serif);
+		fill: var(--ui-color-text);
+		font-family: var(--ui-font-heading);
 		font-size: 18px;
 		font-weight: bold;
 		text-anchor: middle;
 		dominant-baseline: central;
-		/* Outline first, then the letter over it, so the engraving survives the bezel gradient. */
+		/* Outline protects cardinal readability over map imagery. */
 		paint-order: stroke;
 		stroke: rgb(0 0 0 / 0.85);
 		stroke-width: 2.2px;
@@ -934,7 +890,7 @@
 	}
 
 	.minimap-cardinal-north {
-		fill: var(--ac-gold-bright);
+		fill: var(--ui-color-accent);
 	}
 
 	.minimap-free-anchor {
@@ -947,71 +903,27 @@
 		position: absolute;
 		z-index: 2;
 		max-width: 180px;
-		padding: 3px 6px;
-		border: var(--ac-border);
-		border-radius: 3px;
-		color: var(--ac-ink);
-		font-size: 12px;
 		line-height: 1.25;
 		text-align: center;
 		white-space: normal;
-		background: rgb(24 18 13 / 0.96);
-		box-shadow: 0 2px 6px rgb(0 0 0 / 0.55);
 		pointer-events: none;
 		transform: translate(-50%, calc(-100% - 8px));
 	}
 
-	.minimap-move,
-	.minimap-resize,
 	.minimap-reset {
 		position: absolute;
 		width: 20px;
 		height: 20px;
-		min-height: 0;
-		padding: 0;
-		overflow: hidden;
-		border: var(--ac-border);
 		border-radius: 50%;
-		color: rgb(245 203 95 / 0.88);
-		background: linear-gradient(
-			180deg,
-			rgb(84 52 19 / 0.98),
-			rgb(30 22 15 / 0.98)
-		);
-		box-shadow:
-			inset 0 1px 0 rgb(245 203 95 / 0.55),
-			0 2px 5px rgb(0 0 0 / 0.55);
 		transform: translate(-50%, -50%);
-	}
-
-	.minimap-move {
-		/* Opposite the resize stud, centred on the rim at 225 degrees. */
-		top: 14.645%;
-		left: 14.645%;
-		cursor: grab;
-	}
-
-	.minimap-move:active {
-		cursor: grabbing;
-	}
-
-	.minimap-resize {
-		/* Centred on the rim at 45 degrees: 50% + (50% / sqrt 2). */
-		top: 85.355%;
-		left: 85.355%;
-		cursor: nwse-resize;
-	}
-
-	.minimap-reset {
-		/* Remaining diagonal rim position, clear of the layout handles and cardinal labels. */
+		/* Top-right diagonal rim position, clear of the cardinal labels. */
 		top: 14.645%;
 		left: 85.355%;
 		cursor: pointer;
 	}
 
 	.minimap-handle-icon {
-		position: absolute;
-		inset: 3px;
+		display: block;
 		width: 12px;
 		height: 12px;
 		fill: none;
@@ -1028,16 +940,9 @@
 		left: 50%;
 		margin-top: 10px;
 		padding: 4px 10px;
-		border-radius: 6px;
-		color: var(--ac-ink);
-		font-family: var(--ac-font-ui);
-		font-size: 0.86rem;
 		font-variant-numeric: tabular-nums;
 		line-height: 1.15;
 		white-space: nowrap;
-		text-shadow: 1px 1px 0 #000;
-		background: rgb(7 6 5 / 0.55);
-		backdrop-filter: blur(6px);
 		transform: translateX(-50%);
 	}
 </style>

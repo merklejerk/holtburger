@@ -34,7 +34,7 @@
 </script>
 
 <section class="character-hud">
-	<header>
+	<header class="ui-readout">
 		{playerName ?? "Awaiting character"}
 		<span>({worldName ?? "Unknown world"})</span>
 	</header>
@@ -42,7 +42,7 @@
 		{#each bars as bar, index}
 			{@const value = vital(bar.kind)}
 			<div
-				class={`vital vital-${bar.kind}`}
+				class={`vital ui-meter ui-meter--${bar.kind}`}
 				style:height={`${16 - index * 4}px`}
 				role="meter"
 				aria-label={bar.label}
@@ -51,7 +51,7 @@
 				aria-valuenow={value?.current ?? 0}
 			>
 				<span class="vital-fill" style:width={`${fillPercent(value)}%`}></span>
-				{#if index === 0}<strong
+				{#if index === 0}<strong class="ui-readout"
 						>{value ? `${value.current} / ${value.maximum}` : "—"}</strong
 					>{/if}
 			</div>
@@ -60,7 +60,7 @@
 	<div class="conditions" aria-label="Character conditions">
 		{#each conditions as condition}
 			<div
-				class="condition"
+				class="condition ui-readout"
 				title={`${condition.label} status (stub)`}
 				aria-label={`${condition.label} status`}
 			>
@@ -77,21 +77,13 @@
 		height: 100%;
 		grid-template-rows: auto auto 1fr;
 		gap: 4px;
-		color: white;
-		font-family: var(--ac-font-ui);
-		font-size: var(--ac-panel-font-size);
-		text-shadow: 0 1px 2px #000;
 	}
-
 	header {
-		padding: 2px 5px;
-		background: linear-gradient(90deg, rgb(16 18 17 / 0.72), transparent);
+		width: fit-content;
 		font-weight: 700;
-		letter-spacing: 0.02em;
 	}
-
 	header span {
-		color: rgb(235 235 225 / 0.76);
+		color: var(--ui-color-muted);
 		font-weight: 500;
 	}
 	.vitals {
@@ -100,31 +92,19 @@
 	}
 	.vital {
 		position: relative;
-		overflow: hidden;
-		background: rgb(4 6 7 / 0.55);
-		box-shadow: 0 1px 4px rgb(0 0 0 / 0.45);
 	}
 	.vital-fill {
-		display: block;
-		height: 100%;
 		transition: width 120ms linear;
-	}
-	.vital-health .vital-fill {
-		background: #e5222a;
-	}
-	.vital-mana .vital-fill {
-		background: #218ed5;
-	}
-	.vital-stamina .vital-fill {
-		background: #e4bb39;
 	}
 	.vital strong {
 		position: absolute;
-		inset: 0;
-		display: grid;
-		place-items: center;
-		font-size: var(--ac-panel-font-size);
-		line-height: 1;
+		top: 0;
+		left: 50%;
+		transform: translateX(-50%);
+		font-size: 11px;
+		line-height: 16px;
+		padding: 0 3px;
+		white-space: nowrap;
 	}
 	.conditions {
 		display: flex;
@@ -137,9 +117,10 @@
 		width: 32px;
 		height: 32px;
 		padding: 6px;
-		border: 1px solid rgb(255 255 255 / 0.28);
-		border-radius: 50%;
-		background: rgb(15 19 18 / 0.44);
-		color: #d8eef0;
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.vital-fill {
+			transition: none;
+		}
 	}
 </style>

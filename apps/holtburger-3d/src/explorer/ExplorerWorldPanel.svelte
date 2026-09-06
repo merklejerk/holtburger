@@ -153,7 +153,7 @@
 </script>
 
 <div class="explorer-world-panel">
-	<p class="explorer-world-residency">
+	<p class="explorer-world-residency ui-well">
 		<span>Camera cell</span>
 		<strong>{cameraResidencyLabel ?? "—"}</strong>
 	</p>
@@ -163,10 +163,10 @@
 			initiallyOpen
 			disabled={!runtimeReady}
 		>
-			<label class="ac-form-field">
+			<label class="ui-label">
 				<span>Target landblock, cell, or coordinates</span>
 				<input
-					class="ac-control"
+					class="ui-input"
 					autocomplete="off"
 					bind:value={interestInput}
 					placeholder="da55, da550123, or 33.6N 40W"
@@ -188,7 +188,7 @@
 				class="explorer-lod-controls"
 				aria-label="Scene interest level of detail"
 			>
-				<p class="ac-section-label">Outdoor residency</p>
+				<p class="explorer-section-label">Outdoor residency</p>
 				<div class="explorer-lod-control">
 					<label for="explorer-residency-terrain">Terrain</label>
 					<strong>{formatResidencyRadius(radii.terrainRadius)}</strong>
@@ -259,7 +259,7 @@
 			</div>
 			<button
 				type="submit"
-				class="explorer-action"
+				class="explorer-action ui-button"
 				disabled={parsedInterest === null}
 			>
 				Request content and focus
@@ -271,10 +271,10 @@
 		title="Camera navigation"
 		disabled={!runtimeReady || cameraModePending}
 	>
-		<label class="ac-form-field">
+		<label class="ui-label">
 			<span>Position authority</span>
 			<select
-				class="ac-control ac-control--select"
+				class="ui-input"
 				value={cameraMode}
 				onchange={handleCameraModeChange}
 			>
@@ -313,7 +313,7 @@
 			<label class="explorer-environment-field">
 				<span>Day</span>
 				<input
-					class="ac-control"
+					class="ui-input"
 					min="0"
 					step="1"
 					type="number"
@@ -335,7 +335,7 @@
 			<label class="explorer-environment-field">
 				<span>Sky group</span>
 				<select
-					class="ac-control ac-control--select"
+					class="ui-input"
 					value={environmentSelection.dayGroupOverride ?? "auto"}
 					onchange={(event) =>
 						updateEnvironmentSelection("dayGroupOverride", event)}

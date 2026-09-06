@@ -227,7 +227,7 @@
 			/>
 		</label>
 
-		<p class="ac-section-label">Curves</p>
+		<p class="explorer-section-label">Curves</p>
 		<div
 			class="explorer-grade-channels"
 			role="tablist"
@@ -236,8 +236,7 @@
 			{#each COLOR_GRADE_CURVE_CHANNELS as option}
 				<button
 					type="button"
-					class="explorer-grade-channel"
-					class:active={option === channel}
+					class="explorer-grade-channel ui-button"
 					role="tab"
 					aria-selected={option === channel}
 					onclick={() => (channel = option)}
@@ -293,7 +292,7 @@
 		<div class="explorer-grade-actions">
 			<button
 				type="button"
-				class="explorer-action"
+				class="explorer-action ui-button"
 				onclick={() => {
 					copyStatus = null;
 					publish(DEFAULT_COLOR_GRADE_PARAMETERS);
@@ -301,7 +300,11 @@
 			>
 				Reset
 			</button>
-			<button type="button" class="explorer-action" onclick={copyTuning}>
+			<button
+				type="button"
+				class="explorer-action ui-button"
+				onclick={copyTuning}
+			>
 				Copy tuning
 			</button>
 		</div>
@@ -323,11 +326,6 @@
 		cursor: pointer;
 	}
 
-	.explorer-grade-channel.active {
-		font-weight: 700;
-		text-decoration: underline;
-	}
-
 	.explorer-grade-curve {
 		width: 100%;
 		aspect-ratio: 1;
@@ -342,7 +340,7 @@
 	}
 
 	.grade-field {
-		fill: rgb(0 0 0 / 0.25);
+		fill: var(--ui-color-well);
 		stroke: currentColor;
 		stroke-width: 1;
 	}

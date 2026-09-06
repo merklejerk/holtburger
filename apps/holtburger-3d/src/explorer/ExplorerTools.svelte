@@ -287,7 +287,11 @@
 	);
 </script>
 
-<aside class:expanded class="explorer-tools" aria-label="Explorer tools">
+<aside
+	class:expanded
+	class="explorer-tools ui-theme"
+	aria-label="Explorer tools"
+>
 	{#if expanded}
 		<div class="explorer-tools-expanded">
 			<div
@@ -298,8 +302,7 @@
 				{#each tabs as tab}
 					<button
 						type="button"
-						class="explorer-tab-button"
-						class:active={tab.id === activeTabId}
+						class="explorer-tab-button ui-tab"
 						role="tab"
 						aria-selected={tab.id === activeTabId}
 						aria-controls={`explorer-tab-panel-${tab.id}`}
@@ -313,10 +316,11 @@
 				{/each}
 			</div>
 
-			<div class="explorer-tools-panel ac-panel">
+			<div class="explorer-tools-panel ui-glass">
+				<header class="ui-frame">{activeTab.label}</header>
 				<button
 					type="button"
-					class="emoji-button explorer-tools-close"
+					class="explorer-tools-close ui-button"
 					aria-label="Collapse explorer tools"
 					title="Collapse explorer tools"
 					onclick={() => (expanded = false)}
@@ -326,12 +330,11 @@
 
 				<div class="explorer-tools-body">
 					<div
-						class="explorer-tab-panel ac-panel-body"
+						class="explorer-tab-panel ui-body"
 						role="tabpanel"
 						id={`explorer-tab-panel-${activeTab.id}`}
 						aria-labelledby={`explorer-tab-${activeTab.id}`}
 					>
-						<p class="ac-section-label">{activeTab.label}</p>
 						{#if activeTab.id === "world"}
 							<ExplorerWorldPanel
 								runtimeReady={runtimeReady && !cameraModePending}
@@ -426,7 +429,7 @@
 	{:else}
 		<button
 			type="button"
-			class="emoji-button explorer-tools-fab"
+			class="explorer-tools-fab ui-button"
 			aria-label="Open explorer tools"
 			title="Open explorer tools"
 			onclick={() => (expanded = true)}

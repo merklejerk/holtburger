@@ -43,13 +43,13 @@
 </script>
 
 {#snippet diagnosticRow(label: string, value: string | number)}
-	<div class="ac-param-row">
-		<dt class="ac-param-key">{label}</dt>
-		<dd><code>{value}</code></dd>
+	<div class="diagnostic-row">
+		<dt class="ui-muted">{label}</dt>
+		<dd><code class="ui-mono">{value}</code></dd>
 	</div>
 {/snippet}
 
-<div class="debug-panel-body ac-panel-body">
+<div class="debug-panel-body ui-body">
 	<ToggleField
 		checked={showRetailHiddenGeometry}
 		label="Retail-hidden geometry"
@@ -60,7 +60,7 @@
 	{#if diagnostics === null}
 		<p>Presentation unavailable.</p>
 	{:else}
-		<dl class="ac-param-panel">
+		<dl class="ui-well">
 			{@render diagnosticRow("Player", formatGuid(diagnostics.playerGuid))}
 			{@render diagnosticRow(
 				"Player residency",
@@ -142,6 +142,13 @@
 </div>
 
 <style>
+	.diagnostic-row {
+		display: grid;
+		grid-template-columns: minmax(90px, 0.8fr) minmax(0, 1.2fr);
+		gap: 6px;
+		padding: 3px 0;
+		overflow-wrap: anywhere;
+	}
 	.debug-panel-body {
 		display: grid;
 		align-content: start;

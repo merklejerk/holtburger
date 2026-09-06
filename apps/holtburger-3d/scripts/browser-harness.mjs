@@ -7,6 +7,8 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { findAvailablePort, parseVitePort } from "./dev-port.mjs";
+import { probeUiTheme } from "./ui-theme-probe.mjs";
+import { probeClientTheme } from "./client-theme-probe.mjs";
 
 const DEFAULT_CHROME_PATH = "/opt/google/chrome/chrome";
 const READY_KIND = "holtburger-3d-dev-landblock-content-host-ready";
@@ -78,9 +80,17 @@ try {
 		}
 	}
 	let report;
-	if (options.clientHud) {
+	if (options.uiTheme) {
+		report = {
+			uiTheme: result.uiTheme.evidence,
+			glRenderer: result.glRenderer,
+			viewport: result.state.viewport,
+			consoleMessages: result.consoleMessages,
+		};
+	} else if (options.clientHud) {
 		report = {
 			clientHud: result.clientHud,
+			clientTheme: result.clientTheme,
 			consoleMessages: result.consoleMessages,
 			viewport: result.state.viewport,
 		};
@@ -232,6 +242,7 @@ function parseArgs(args) {
 	const parsed = {
 		chromePath: process.env.CHROME_PATH ?? DEFAULT_CHROME_PATH,
 		clientHud: false,
+		uiTheme: false,
 		reportMode: "full",
 		landblockId: DEFAULT_LANDBLOCK_ID,
 		buildingRadius: 0,
@@ -340,6 +351,9 @@ function parseArgs(args) {
 		switch (arg) {
 			case "--client-hud":
 				parsed.clientHud = true;
+				break;
+			case "--ui-theme":
+				parsed.uiTheme = true;
 				break;
 			case "--brief":
 				parsed.reportMode = "brief";
@@ -1114,6 +1128,10 @@ function parseArgs(args) {
 			"--isolate-authored-dynamics and --exclude-authored-dynamics cannot be combined.",
 		);
 	}
+	if (parsed.uiTheme && parsed.clientHud)
+		throw new Error(
+			"--ui-theme and --client-hud select different harness compositions.",
+		);
 	if (
 		parsed.cameraLandblockId &&
 		(parsed.relocateLandblockId || parsed.relocateSequence.length > 0)
@@ -1462,6 +1480,9 @@ Options:
   --disable-nameplates   Set the nameplate budget to zero before installing the workload.
   --settle-ms <ms>      Wait after requesting scene content. Default: ${DEFAULT_SETTLE_MS}
   --measure-ms <ms>     Reset timings after settling, then measure steady-state frames.
+  --ui-theme           Review Espresso Aero over the live world, bright/dark backdrops, opaque
+                       fallback, and a texture-free fixture; verify contrast and native input.
+                       With --screenshot, also writes <path>.<variant>.png.
   --screenshot <path>   Persist the captured PNG after the harness exits.
   --client-hud          Exercise runtime/layout HUD visibility, centered drag anchoring, and
                          constrained viewport restoration using the deterministic client fixture.
@@ -4348,6 +4369,18 @@ async function runClientHudHarness({ viteUrl }) {
 		await delay(50);
 		const targetIndicatorCleared = await capture();
 
+		const theme = await probeClientTheme(
+			client,
+			evaluateExpression,
+			async (name, data) => {
+				if (options.screenshotPath)
+					await writeFile(
+						`${options.screenshotPath}.${name}.png`,
+						Buffer.from(data, "base64"),
+					);
+			},
+			viteUrl,
+		);
 		const clientHud = {
 			breadcrumbAfterDiscontinuity,
 			breadcrumbAfterIdentityChange,
@@ -4391,6 +4424,7 @@ async function runClientHudHarness({ viteUrl }) {
 			viewportSelected,
 		};
 		return {
+			clientTheme: theme,
 			cameraSweepScreenshots: {
 				constrained: constrainedScreenshot.data,
 				narrow: narrowScreenshot.data,
@@ -4895,7 +4929,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			: "&audioTrace=1";
 	const terrainGlTrace = options.traceTerrainGl ? "&traceTerrainGl=true" : "";
 	const worldMarker = options.worldMarker ? "&worldMarker=true" : "";
-	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&cameraHeight=${encodeURIComponent(options.cameraHeight)}&viewportWidth=${encodeURIComponent(options.viewportWidth)}&viewportHeight=${encodeURIComponent(options.viewportHeight)}${dynamicIsolation}${dynamicExclusion}${attachmentExclusion}${fixture}${portalTransitionCompositorDiagnostic}${portalTransitionLifecycleFixture}${timeOfDay}${dayGroup}${particleSeed}${frameIntervalMs}${captureFrame}${audioTrace}${terrainGlTrace}${worldMarker}`;
+	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&cameraHeight=${encodeURIComponent(options.cameraHeight)}&viewportWidth=${encodeURIComponent(options.viewportWidth)}&viewportHeight=${encodeURIComponent(options.viewportHeight)}${dynamicIsolation}${dynamicExclusion}${attachmentExclusion}${fixture}${portalTransitionCompositorDiagnostic}${portalTransitionLifecycleFixture}${timeOfDay}${dayGroup}${particleSeed}${frameIntervalMs}${captureFrame}${audioTrace}${terrainGlTrace}${worldMarker}${options.uiTheme ? "&ui-theme=1" : ""}`;
 	const chrome = startChild(options.chromePath, [
 		"--remote-debugging-port=0",
 		`--user-data-dir=${userDataDirectory}`,
@@ -5998,6 +6032,15 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 					],
 				)
 			: null;
+		const uiTheme = options.uiTheme
+			? await probeUiTheme(client, evaluateExpression, async (name, png) => {
+					if (options.screenshotPath)
+						await writeFile(
+							`${options.screenshotPath}.${name}.png`,
+							Buffer.from(png, "base64"),
+						);
+				})
+			: null;
 		const screenshot = portalScreenshot
 			? { data: portalScreenshot }
 			: await client.send("Page.captureScreenshot", {
@@ -6097,6 +6140,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			followFlight,
 			relocationSequence,
 			relocationState,
+			uiTheme,
 			screenshot: screenshot.data,
 			state,
 		};

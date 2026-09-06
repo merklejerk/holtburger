@@ -128,7 +128,7 @@
 	<div class="explorer-frame-actions">
 		<button
 			type="button"
-			class="explorer-action explorer-frame-profile-toggle"
+			class="explorer-action explorer-frame-profile-toggle ui-button"
 			disabled={diagnostics === null}
 			onclick={toggleProfiling}
 		>
@@ -136,7 +136,7 @@
 		</button>
 		<button
 			type="button"
-			class="explorer-action"
+			class="explorer-action ui-button"
 			disabled={diagnostics === null}
 			onclick={() => void copyReport()}
 		>
@@ -144,7 +144,7 @@
 		</button>
 		<button
 			type="button"
-			class="explorer-action"
+			class="explorer-action ui-button"
 			disabled={diagnostics === null}
 			onclick={downloadReport}
 		>
@@ -162,26 +162,26 @@
 				<p>Waiting for the first profiled frame.</p>
 			{:else}
 				<div class="explorer-frame-summary">
-					<div>
+					<div class="ui-well">
 						<span>CPU mean</span>
 						<strong>{profile.cpu.mean.totalMs.toFixed(2)} ms</strong>
 					</div>
-					<div>
+					<div class="ui-well">
 						<span>CPU p95</span>
 						<strong>{profile.cpu.p95RecentTotalMs.toFixed(2)} ms</strong>
 					</div>
-					<div>
+					<div class="ui-well">
 						<span>Latest</span>
 						<strong>{profile.cpu.latestTotalMs.toFixed(2)} ms</strong>
 					</div>
-					<div>
+					<div class="ui-well">
 						<span>Samples</span>
 						<strong>{profile.cpu.sampleCount}</strong>
 					</div>
 				</div>
 				{#if profile.gpu.kind === "available"}
-					<div class="ac-param-row">
-						<span class="ac-param-key">GPU command span</span>
+					<div class="explorer-param-row">
+						<span class="explorer-param-key">GPU command span</span>
 						<code>{profile.gpu.totalMs.toFixed(2)} ms</code>
 					</div>
 				{:else if profile.gpu.kind === "unsupported"}
@@ -197,11 +197,13 @@
 						Waiting on {profile.gpu.pendingFrameCount} GPU frame queries.
 					</p>
 				{/if}
-				<details class="explorer-frame-details">
+				<details class="explorer-frame-details ui-disclosure">
 					<summary>Phase timings</summary>
-					<div class="ac-param-panel">
-						<div class="ac-param-row">
-							<span class="ac-param-key">Candidates / selected / rejected</span>
+					<div class="explorer-param-panel">
+						<div class="explorer-param-row">
+							<span class="explorer-param-key"
+								>Candidates / selected / rejected</span
+							>
 							<code
 								>{profile.cpu.outdoorShadowMap.mean.candidateRootCount.toFixed(
 									1,
@@ -212,8 +214,10 @@
 								)}</code
 							>
 						</div>
-						<div class="ac-param-row">
-							<span class="ac-param-key">Mapped / analytic / empty views</span>
+						<div class="explorer-param-row">
+							<span class="explorer-param-key"
+								>Mapped / analytic / empty views</span
+							>
 							<code
 								>{profile.cpu.outdoorShadowMap.mean.mappedRootCount.toFixed(1)} /
 								{profile.cpu.outdoorShadowMap.mean.analyticRootCount.toFixed(1)} /
@@ -222,49 +226,49 @@
 								)}</code
 							>
 						</div>
-						<div class="ac-param-row">
-							<span class="ac-param-key">View / scene query</span>
+						<div class="explorer-param-row">
+							<span class="explorer-param-key">View / scene query</span>
 							<code
 								>{profile.cpu.mean.viewPreparationMs.toFixed(2)} / {profile.cpu.mean.sceneQueryMs.toFixed(
 									2,
 								)} ms</code
 							>
 						</div>
-						<div class="ac-param-row">
-							<span class="ac-param-key">Contribution resolve</span>
+						<div class="explorer-param-row">
+							<span class="explorer-param-key">Contribution resolve</span>
 							<code
 								>{profile.cpu.mean.sceneContributionResolutionMs.toFixed(2)} ms</code
 							>
 						</div>
-						<div class="ac-param-row">
-							<span class="ac-param-key">Portal plan / compose</span>
+						<div class="explorer-param-row">
+							<span class="explorer-param-key">Portal plan / compose</span>
 							<code
 								>{profile.cpu.mean.portalPlanningMs.toFixed(2)} / {profile.cpu.mean.portalCompositionMs.toFixed(
 									2,
 								)} ms</code
 							>
 						</div>
-						<div class="ac-param-row">
-							<span class="ac-param-key">Particle submit</span>
+						<div class="explorer-param-row">
+							<span class="explorer-param-key">Particle submit</span>
 							<code>{profile.cpu.mean.particleSubmissionMs.toFixed(2)} ms</code>
 						</div>
-						<div class="ac-param-row">
-							<span class="ac-param-key">Outdoor shadow maps</span>
+						<div class="explorer-param-row">
+							<span class="explorer-param-key">Outdoor shadow maps</span>
 							<code
 								>{profile.cpu.mean.outdoorShadowMapMs.toFixed(2)} ms CPU</code
 							>
 						</div>
 						{#if profile.gpu.kind === "available"}
-							<div class="ac-param-row">
-								<span class="ac-param-key">GPU outdoor shadow maps</span>
+							<div class="explorer-param-row">
+								<span class="explorer-param-key">GPU outdoor shadow maps</span>
 								<code>{profile.gpu.outdoorShadowMapMs.toFixed(2)} ms</code>
 							</div>
-							<div class="ac-param-row">
-								<span class="ac-param-key">GPU ambient occlusion</span>
+							<div class="explorer-param-row">
+								<span class="explorer-param-key">GPU ambient occlusion</span>
 								<code>{profile.gpu.ambientOcclusionMs.toFixed(2)} ms</code>
 							</div>
-							<div class="ac-param-row">
-								<span class="ac-param-key"
+							<div class="explorer-param-row">
+								<span class="explorer-param-key"
 									>GPU portal / opaque / present / particle</span
 								>
 								<code
@@ -275,8 +279,10 @@
 									)} ms</code
 								>
 							</div>
-							<div class="ac-param-row">
-								<span class="ac-param-key">GPU sky / terrain / blended</span>
+							<div class="explorer-param-row">
+								<span class="explorer-param-key"
+									>GPU sky / terrain / blended</span
+								>
 								<code
 									>{profile.gpu.skyMs.toFixed(2)} / {profile.gpu.terrainMs.toFixed(
 										2,
@@ -285,8 +291,8 @@
 							</div>
 						{/if}
 						{#if compiledDraws}
-							<div class="ac-param-row">
-								<span class="ac-param-key"
+							<div class="explorer-param-row">
+								<span class="explorer-param-key"
 									>Compiled draws / total / flushes</span
 								>
 								<code
@@ -295,16 +301,17 @@
 								>
 							</div>
 						{/if}
-						<div class="ac-param-row">
-							<span class="ac-param-key">Instance runs / upload</span>
+						<div class="explorer-param-row">
+							<span class="explorer-param-key">Instance runs / upload</span>
 							<code
 								>{profile.cpu.mean.instanceRunPreparationMs.toFixed(2)} / {profile.cpu.mean.instanceUploadMs.toFixed(
 									2,
 								)} ms</code
 							>
 						</div>
-						<div class="ac-param-row">
-							<span class="ac-param-key">Terrain / opaque / blended submit</span
+						<div class="explorer-param-row">
+							<span class="explorer-param-key"
+								>Terrain / opaque / blended submit</span
 							>
 							<code
 								>{profile.cpu.mean.terrainSubmissionMs.toFixed(2)} / {profile.cpu.mean.opaqueSubmissionMs.toFixed(
@@ -312,8 +319,8 @@
 								)} / {profile.cpu.mean.blendedSubmissionMs.toFixed(2)} ms</code
 							>
 						</div>
-						<div class="ac-param-row">
-							<span class="ac-param-key">Blended order / other</span>
+						<div class="explorer-param-row">
+							<span class="explorer-param-key">Blended order / other</span>
 							<code
 								>{profile.cpu.mean.blendedOrderingMs.toFixed(2)} / {profile.cpu.mean.otherMs.toFixed(
 									2,
@@ -322,11 +329,11 @@
 						</div>
 					</div>
 				</details>
-				<details class="explorer-frame-details">
+				<details class="explorer-frame-details ui-disclosure">
 					<summary>Outdoor shadow work</summary>
-					<div class="ac-param-panel">
-						<div class="ac-param-row">
-							<span class="ac-param-key"
+					<div class="explorer-param-panel">
+						<div class="explorer-param-row">
+							<span class="explorer-param-key"
 								>Cascade queries / memberships / part memberships / draws</span
 							>
 							<code
@@ -343,11 +350,11 @@
 						</div>
 					</div>
 				</details>
-				<details class="explorer-frame-details">
+				<details class="explorer-frame-details ui-disclosure">
 					<summary>Contribution preparation</summary>
-					<div class="ac-param-panel">
-						<div class="ac-param-row">
-							<span class="ac-param-key">Static / dynamic prepared</span>
+					<div class="explorer-param-panel">
+						<div class="explorer-param-row">
+							<span class="explorer-param-key">Static / dynamic prepared</span>
 							<code
 								>{profile.cpu.contribution.mean.staticObjectPreparationCount.toFixed(
 									1,
@@ -392,25 +399,27 @@
 					>
 				</div>
 			</div>
-			<div class="ac-param-panel">
-				<div class="ac-param-row">
-					<span class="ac-param-key">Views / terrain inputs</span>
+			<div class="explorer-param-panel">
+				<div class="explorer-param-row">
+					<span class="explorer-param-key">Views / terrain inputs</span>
 					<code>{metrics.viewCount} / {metrics.terrainFrameInputs}</code>
 				</div>
-				<div class="ac-param-row">
-					<span class="ac-param-key">Static layers / nodes</span>
+				<div class="explorer-param-row">
+					<span class="explorer-param-key">Static layers / nodes</span>
 					<code
 						>{metrics.visibleStaticLayerCount} / {metrics.visibleStaticNodeCount}</code
 					>
 				</div>
-				<div class="ac-param-row">
-					<span class="ac-param-key">Visible dynamics / source ranges</span>
+				<div class="explorer-param-row">
+					<span class="explorer-param-key"
+						>Visible dynamics / source ranges</span
+					>
 					<code
 						>{metrics.visibleDynamicEntityCount} / {metrics.visibleDynamicSourceRangeCount}</code
 					>
 				</div>
-				<div class="ac-param-row">
-					<span class="ac-param-key"
+				<div class="explorer-param-row">
+					<span class="explorer-param-key"
 						>Particle batches / instances / unresolved</span
 					>
 					<code
@@ -421,32 +430,34 @@
 			</div>
 		</fieldset>
 
-		<details class="explorer-frame-details">
+		<details class="explorer-frame-details ui-disclosure">
 			<summary>Nameplates</summary>
-			<div class="ac-param-panel">
-				<div class="ac-param-row">
-					<span class="ac-param-key">Eligible / budget rejected</span>
+			<div class="explorer-param-panel">
+				<div class="explorer-param-row">
+					<span class="explorer-param-key">Eligible / budget rejected</span>
 					<code
 						>{diagnostics?.nameplates.eligibleCandidateCount ?? 0} / {diagnostics
 							?.nameplates.budgetRejectedCandidateCount ?? 0}</code
 					>
 				</div>
-				<div class="ac-param-row">
-					<span class="ac-param-key">Submitted instances / draws</span>
+				<div class="explorer-param-row">
+					<span class="explorer-param-key">Submitted instances / draws</span>
 					<code
 						>{diagnostics?.nameplates.submittedInstanceCount ?? 0} / {diagnostics
 							?.nameplates.submittedDrawCount ?? 0}</code
 					>
 				</div>
-				<div class="ac-param-row">
-					<span class="ac-param-key">Live textures / cache bytes</span>
+				<div class="explorer-param-row">
+					<span class="explorer-param-key">Live textures / cache bytes</span>
 					<code
 						>{diagnostics?.nameplates.cache.liveEntryCount ?? 0} / {diagnostics
 							?.nameplates.cache.byteCount ?? 0}</code
 					>
 				</div>
-				<div class="ac-param-row">
-					<span class="ac-param-key">Rasterized / rejected / released</span>
+				<div class="explorer-param-row">
+					<span class="explorer-param-key"
+						>Rasterized / rejected / released</span
+					>
 					<code
 						>{diagnostics?.nameplates.cache.rasterizationCount ?? 0} / {diagnostics
 							?.nameplates.cache.rejectedRasterCount ?? 0} / {diagnostics
@@ -456,22 +467,26 @@
 			</div>
 		</details>
 
-		<details class="explorer-frame-details">
+		<details class="explorer-frame-details ui-disclosure">
 			<summary>Entity shadows</summary>
-			<div class="ac-param-panel">
-				<div class="ac-param-row">
-					<span class="ac-param-key">Outdoor target resolution / cascades</span>
+			<div class="explorer-param-panel">
+				<div class="explorer-param-row">
+					<span class="explorer-param-key"
+						>Outdoor target resolution / cascades</span
+					>
 					<code
 						>{shadowTargets?.resolution ?? "—"} / {shadowTargets?.cascadeCount ??
 							"—"}</code
 					>
 				</div>
-				<div class="ac-param-row">
-					<span class="ac-param-key">Outdoor target bytes</span>
+				<div class="explorer-param-row">
+					<span class="explorer-param-key">Outdoor target bytes</span>
 					<code>{shadowTargets?.activeBytes ?? 0}</code>
 				</div>
-				<div class="ac-param-row">
-					<span class="ac-param-key">Allocated / disposed generations</span>
+				<div class="explorer-param-row">
+					<span class="explorer-param-key"
+						>Allocated / disposed generations</span
+					>
 					<code
 						>{shadowTargets?.allocatedGenerationCount ?? 0} / {shadowTargets?.disposedGenerationCount ??
 							0}</code
@@ -480,27 +495,29 @@
 			</div>
 		</details>
 
-		<details class="explorer-frame-details">
+		<details class="explorer-frame-details ui-disclosure">
 			<summary>Object pipeline</summary>
-			<div class="ac-param-panel">
-				<div class="ac-param-row">
-					<span class="ac-param-key">Transparent total candidates / runs</span>
+			<div class="explorer-param-panel">
+				<div class="explorer-param-row">
+					<span class="explorer-param-key"
+						>Transparent total candidates / runs</span
+					>
 					<code
 						>{metrics.transparentObjectCandidateCount} / {metrics.transparentFrameRunCount}</code
 					>
 				</div>
-				<div class="ac-param-row">
-					<span class="ac-param-key">Transparent far / near runs</span>
+				<div class="explorer-param-row">
+					<span class="explorer-param-key">Transparent far / near runs</span>
 					<code
 						>{metrics.farTransparentFrameRunCount} / {metrics.nearTransparentFrameRunCount}</code
 					>
 				</div>
-				<div class="ac-param-row">
-					<span class="ac-param-key">Dynamic draws</span>
+				<div class="explorer-param-row">
+					<span class="explorer-param-key">Dynamic draws</span>
 					<code>{metrics.submittedDynamicDrawCount}</code>
 				</div>
-				<div class="ac-param-row">
-					<span class="ac-param-key"
+				<div class="explorer-param-row">
+					<span class="explorer-param-key"
 						>Object roots tested / retained / rejected</span
 					>
 					<code
@@ -508,20 +525,22 @@
 						/ {metrics.rejectedObjectPresentationCount}</code
 					>
 				</div>
-				<div class="ac-param-row">
-					<span class="ac-param-key">Programs / texture binds</span>
+				<div class="explorer-param-row">
+					<span class="explorer-param-key">Programs / texture binds</span>
 					<code
 						>{metrics.objectProgramChanges} / {metrics.objectTextureBinds}</code
 					>
 				</div>
-				<div class="ac-param-row">
-					<span class="ac-param-key">Instance upload count / bytes</span>
+				<div class="explorer-param-row">
+					<span class="explorer-param-key">Instance upload count / bytes</span>
 					<code
 						>{metrics.frameInstanceUploadCount} / {metrics.frameInstanceUploadBytes}</code
 					>
 				</div>
-				<div class="ac-param-row">
-					<span class="ac-param-key">Arena capacity / high water / growth</span>
+				<div class="explorer-param-row">
+					<span class="explorer-param-key"
+						>Arena capacity / high water / growth</span
+					>
 					<code
 						>{metrics.frameInstanceCapacity} / {metrics.frameInstanceViewHighWaterMark}
 						/ {metrics.frameInstanceGrowthCount}</code
@@ -530,85 +549,91 @@
 			</div>
 		</details>
 
-		<details class="explorer-frame-details">
+		<details class="explorer-frame-details ui-disclosure">
 			<summary>Portal and EnvCell</summary>
-			<div class="ac-param-panel">
-				<div class="ac-param-row">
-					<span class="ac-param-key">Mode / visible scopes</span>
+			<div class="explorer-param-panel">
+				<div class="explorer-param-row">
+					<span class="explorer-param-key">Mode / visible scopes</span>
 					<code
 						>{metrics.envCellRenderMode} / {metrics.visibleEnvCellScopeCount}</code
 					>
 				</div>
-				<div class="ac-param-row">
-					<span class="ac-param-key">Shells / residents</span>
+				<div class="explorer-param-row">
+					<span class="explorer-param-key">Shells / residents</span>
 					<code
 						>{metrics.visibleEnvCellShells} / {metrics.visibleEnvCellResidentNodes}</code
 					>
 				</div>
-				<div class="ac-param-row">
-					<span class="ac-param-key">Shell draws / triangles</span>
+				<div class="explorer-param-row">
+					<span class="explorer-param-key">Shell draws / triangles</span>
 					<code
 						>{metrics.submittedEnvCellShellDrawCount} / {metrics.submittedEnvCellShellTriangleCount}</code
 					>
 				</div>
-				<div class="ac-param-row">
-					<span class="ac-param-key">Resident draws / triangles</span>
+				<div class="explorer-param-row">
+					<span class="explorer-param-key">Resident draws / triangles</span>
 					<code
 						>{metrics.submittedEnvCellResidentDrawCount} / {metrics.submittedEnvCellResidentTriangleCount}</code
 					>
 				</div>
-				<div class="ac-param-row">
-					<span class="ac-param-key">Selected scopes / crossings</span>
+				<div class="explorer-param-row">
+					<span class="explorer-param-key">Selected scopes / crossings</span>
 					<code
 						>{metrics.portalSelectedScopeCount} / {metrics.portalSelectedCrossingCount}</code
 					>
 				</div>
-				<div class="ac-param-row">
-					<span class="ac-param-key">Cull depth / propagation draws</span>
+				<div class="explorer-param-row">
+					<span class="explorer-param-key">Cull depth / propagation draws</span>
 					<code
 						>{metrics.portalCompletedCullDepth} / {metrics.portalPropagationDrawCount}</code
 					>
 				</div>
-				<div class="ac-param-row">
-					<span class="ac-param-key">Projection work / atlas pixels</span>
+				<div class="explorer-param-row">
+					<span class="explorer-param-key">Projection work / atlas pixels</span>
 					<code
 						>{metrics.portalProjectionPrimitiveCount} / {metrics.portalAtlasTilePixelCount}</code
 					>
 				</div>
-				<div class="ac-param-row">
-					<span class="ac-param-key">Truncated views / frontier retreats</span>
+				<div class="explorer-param-row">
+					<span class="explorer-param-key"
+						>Truncated views / frontier retreats</span
+					>
 					<code
 						>{metrics.portalTruncatedViewCount} / {metrics.portalFrontierRetreatCount}</code
 					>
 				</div>
-				<div class="ac-param-row">
-					<span class="ac-param-key">Portal framebuffers / bytes</span>
+				<div class="explorer-param-row">
+					<span class="explorer-param-key">Portal framebuffers / bytes</span>
 					<code
 						>{metrics.portalFramebufferCount} / {metrics.portalTargetBytes}</code
 					>
 				</div>
-				<div class="ac-param-row">
-					<span class="ac-param-key">Flat framebuffers / bytes</span>
+				<div class="explorer-param-row">
+					<span class="explorer-param-key">Flat framebuffers / bytes</span>
 					<code
 						>{metrics.flatSceneFramebufferCount} / {metrics.flatSceneTargetBytes}</code
 					>
 				</div>
-				<div class="ac-param-row">
-					<span class="ac-param-key">Flat target allocations / disposals</span>
+				<div class="explorer-param-row">
+					<span class="explorer-param-key"
+						>Flat target allocations / disposals</span
+					>
 					<code
 						>{metrics.flatSceneAllocatedGenerationCount} / {metrics.flatSceneDisposedGenerationCount}</code
 					>
 				</div>
-				<div class="ac-param-row">
-					<span class="ac-param-key">AO bytes / allocations / disposals</span>
+				<div class="explorer-param-row">
+					<span class="explorer-param-key"
+						>AO bytes / allocations / disposals</span
+					>
 					<code
 						>{metrics.ambientOcclusion.activeBytes} / {metrics.ambientOcclusion
 							.allocatedGenerationCount} / {metrics.ambientOcclusion
 							.disposedGenerationCount}</code
 					>
 				</div>
-				<div class="ac-param-row">
-					<span class="ac-param-key">AO effective full / disabled</span>
+				<div class="explorer-param-row">
+					<span class="explorer-param-key">AO effective full / disabled</span>
 					<code
 						>{metrics.ambientOcclusion.effectiveDistanceFade
 							? `${metrics.ambientOcclusion.effectiveDistanceFade.fullStrengthUntil} / ${metrics.ambientOcclusion.effectiveDistanceFade.disabledAt}`
@@ -620,19 +645,21 @@
 	{/if}
 
 	{#if dynamics !== null}
-		<details class="explorer-frame-details">
+		<details class="explorer-frame-details ui-disclosure">
 			<summary>Runtime lifetime counters</summary>
-			<div class="ac-param-panel">
-				<div class="ac-param-row">
-					<span class="ac-param-key">Entities / templates / animations</span>
+			<div class="explorer-param-panel">
+				<div class="explorer-param-row">
+					<span class="explorer-param-key"
+						>Entities / templates / animations</span
+					>
 					<code
 						>{dynamics.dynamics.entityCount} / {dynamics.dynamics.templates
 							.templateCount} / {dynamics.dynamics.animationResources
 							.assetCount}</code
 					>
 				</div>
-				<div class="ac-param-row">
-					<span class="ac-param-key"
+				<div class="explorer-param-row">
+					<span class="explorer-param-key"
 						>Animation advance / sample / publish ms</span
 					>
 					<code
@@ -643,8 +670,8 @@
 						)}</code
 					>
 				</div>
-				<div class="ac-param-row">
-					<span class="ac-param-key"
+				<div class="explorer-param-row">
+					<span class="explorer-param-key"
 						>Commands executed / unconsumed / fallback</span
 					>
 					<code
@@ -653,8 +680,9 @@
 							.staticFallbackEntityCount}</code
 					>
 				</div>
-				<div class="ac-param-row">
-					<span class="ac-param-key">Visible / offscreen / skipped samples</span
+				<div class="explorer-param-row">
+					<span class="explorer-param-key"
+						>Visible / offscreen / skipped samples</span
 					>
 					<code
 						>{dynamics.presentationCadence.lastVisibleSampleCount} / {dynamics
@@ -662,8 +690,8 @@
 							.presentationCadence.lastSkippedSampleCount}</code
 					>
 				</div>
-				<div class="ac-param-row">
-					<span class="ac-param-key"
+				<div class="explorer-param-row">
+					<span class="explorer-param-key"
 						>Offscreen interval / visible pose age ms</span
 					>
 					<code

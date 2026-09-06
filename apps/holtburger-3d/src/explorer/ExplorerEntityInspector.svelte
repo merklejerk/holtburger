@@ -190,7 +190,7 @@
 </script>
 
 <section class="entity-inspector" aria-labelledby="selected-entity-heading">
-	<p class="ac-section-label">Selected</p>
+	<p class="explorer-section-label">Selected</p>
 	<div class="selected-heading">
 		<h3 id="selected-entity-heading">{selected.display.name}</h3>
 		<span>WCID {selected.identity.wcid}</span>
@@ -204,7 +204,7 @@
 			{#if selected.presentation.content.motionTableDid !== null}
 				<button
 					type="button"
-					class="explorer-action"
+					class="explorer-action ui-button"
 					disabled={!runtimeReady || pending !== null}
 					onclick={() =>
 						possess(
@@ -221,7 +221,7 @@
 			{/if}
 			<button
 				type="button"
-				class="explorer-action"
+				class="explorer-action ui-button"
 				disabled={!runtimeReady || pending !== null}
 				onclick={() => despawn(selected)}
 			>
@@ -239,7 +239,7 @@
 			{#if wearer !== null}
 				<button
 					type="button"
-					class="explorer-action"
+					class="explorer-action ui-button"
 					onclick={() => select(explorerEntitySelection(wearer))}
 				>
 					Select wearer
@@ -253,17 +253,19 @@
 	{/if}
 
 	<div class="entity-facts">
-		<div><span>Placement</span><strong>{selected.placement.kind}</strong></div>
-		<div>
+		<div class="ui-well">
+			<span>Placement</span><strong>{selected.placement.kind}</strong>
+		</div>
+		<div class="ui-well">
 			<span>Physical</span><strong>{selected.physics.participation}</strong>
 		</div>
 	</div>
 
 	{#if selectedIsPossessed && possession !== null && possession.guid !== null && possessionControls !== null}
-		<label class="ac-form-field">
+		<label class="ui-label">
 			<span>Stance</span>
 			<select
-				class="ac-control ac-control--select"
+				class="ui-input"
 				value={possessionControls.stance}
 				disabled={pending !== null}
 				onchange={(event) =>
@@ -276,13 +278,13 @@
 				{/each}
 			</select>
 		</label>
-		<label class="ac-form-field">
+		<label class="ui-label">
 			<span>
 				Run rate
 				<output>{possessionControls.runRateScalar.toFixed(2)}x</output>
 			</span>
 			<input
-				class="ac-control"
+				class="ui-input"
 				type="range"
 				min={possession.runRateCapability.minimum}
 				max={possession.runRateCapability.maximum}
@@ -383,10 +385,10 @@
 		gap: 8px;
 		min-width: 0;
 		padding-top: 2px;
-		border-top: 1px solid rgb(200 148 42 / 36%);
+		border-top: var(--ui-edge);
 	}
 
-	.entity-inspector .ac-section-label,
+	.entity-inspector .explorer-section-label,
 	.selected-identity,
 	.inspector-error {
 		margin: 0;
@@ -403,7 +405,7 @@
 		min-width: 0;
 		margin: 0;
 		overflow: hidden;
-		color: var(--ac-ink);
+		color: var(--ui-color-text);
 		font-size: 0.95rem;
 		text-overflow: ellipsis;
 		white-space: nowrap;
@@ -413,7 +415,7 @@
 	.selected-identity,
 	.wearer-context,
 	.inspector-error {
-		color: var(--ac-ink-muted);
+		color: var(--ui-color-muted);
 		font-size: 0.75rem;
 	}
 
@@ -430,7 +432,7 @@
 	}
 
 	.inspector-error {
-		color: #ff9c8f;
+		color: var(--ui-color-danger);
 	}
 
 	.entity-facts {
@@ -448,19 +450,17 @@
 	.entity-facts div {
 		gap: 2px;
 		padding: 6px;
-		border: 1px solid rgb(162 117 33 / 35%);
-		background: rgb(37 28 12 / 50%);
 	}
 
 	.entity-facts span,
 	.diagnostics span {
-		color: var(--ac-ink-muted);
+		color: var(--ui-color-muted);
 		font-size: 0.69rem;
 	}
 
 	.entity-facts strong {
 		overflow: hidden;
-		color: var(--ac-ink);
+		color: var(--ui-color-text);
 		font-size: 0.75rem;
 		font-weight: 400;
 		text-overflow: ellipsis;
@@ -468,12 +468,12 @@
 	}
 
 	.inspector-disclosure {
-		border-top: 1px solid rgb(162 117 33 / 28%);
+		border-top: var(--ui-edge);
 		padding-top: 6px;
 	}
 
 	.inspector-disclosure summary {
-		color: var(--ac-ink);
+		color: var(--ui-color-text);
 		cursor: pointer;
 		font-size: 0.76rem;
 	}
@@ -494,7 +494,7 @@
 
 	.diagnostics code {
 		overflow-wrap: anywhere;
-		color: var(--ac-ink);
+		color: var(--ui-color-text);
 		font-family: inherit;
 		font-size: 0.72rem;
 	}

@@ -38,8 +38,8 @@
 {#snippet entityRow(entity: DynamicEntityView, detail: string)}
 	<button
 		type="button"
-		class="explorer-selectable-row"
-		class:active={isSelected(entity)}
+		class="explorer-selectable-row ui-button"
+		aria-pressed={isSelected(entity)}
 		class:possessed={isPossessed(entity)}
 		onclick={() => select(explorerEntitySelection(entity))}
 	>
@@ -103,12 +103,12 @@
 <style>
 	.entity-note {
 		margin: 0;
-		color: var(--ac-ink-muted);
+		color: var(--ui-color-muted);
 		font-size: 0.76rem;
 	}
 
 	.invalid {
-		color: #ff9c8f;
+		color: var(--ui-color-danger);
 	}
 
 	.entity-list {
@@ -149,7 +149,7 @@
 		top: calc(-1 * var(--tree-gap));
 		bottom: 0;
 		left: 4px;
-		border-left: 1px solid rgb(162 117 33 / 45%);
+		border-left: var(--ui-edge);
 	}
 
 	.entity-child:last-child::before {
@@ -163,7 +163,7 @@
 		top: 50%;
 		left: 4px;
 		width: 7px;
-		border-top: 1px solid rgb(162 117 33 / 45%);
+		border-top: var(--ui-edge);
 	}
 
 	.explorer-selectable-row {
@@ -172,11 +172,11 @@
 	}
 
 	.explorer-selectable-row.possessed {
-		box-shadow: inset 3px 0 0 var(--ac-green);
+		box-shadow: inset 3px 0 0 var(--ui-color-success);
 	}
 
 	.possession-label {
-		color: #b9ee8c;
+		color: var(--ui-color-success);
 		font-weight: 600;
 	}
 
@@ -195,12 +195,12 @@
 	}
 
 	.explorer-selectable-row > span {
-		color: var(--ac-ink-muted);
+		color: var(--ui-color-muted);
 		font-size: 0.73rem;
 	}
 
 	.orphan .explorer-selectable-row {
-		border-color: #ff9c8f;
+		border-color: var(--ui-color-danger);
 	}
 
 	.orphan-list {

@@ -2031,7 +2031,7 @@
 	});
 </script>
 
-<div class="explorer-screen">
+<div class="explorer-screen ui-theme">
 	<canvas
 		bind:this={canvasElement}
 		class="explorer-canvas"
@@ -2041,7 +2041,7 @@
 
 	<div class="explorer-overlay">
 		{#if startupError !== null}
-			<section class="explorer-startup-error" role="alert">
+			<section class="explorer-startup-error ui-error" role="alert">
 				{startupError}
 			</section>
 		{/if}

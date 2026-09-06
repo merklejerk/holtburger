@@ -181,12 +181,12 @@
 <form class="spawn-composer" onsubmit={submit}>
 	<fieldset class="explorer-section" disabled={!enabled || busy}>
 		<legend>Spawn entity</legend>
-		<label class="ac-form-field">
+		<label class="ui-label">
 			<span>Weenie</span>
 			<div class="weenie-picker">
 				<input
 					bind:this={inputElement}
-					class="ac-control weenie-input"
+					class="ui-input weenie-input"
 					value={picker.input}
 					placeholder="Name, class, or WCID"
 					spellcheck="false"
@@ -206,20 +206,20 @@
 				{#if picker.input.length > 0}
 					<button
 						type="button"
-						class="picker-clear"
+						class="picker-clear ui-hud-button"
 						aria-label="Clear weenie"
 						title="Clear weenie"
 						onclick={clearPicker}>×</button
 					>
 				{/if}
 				{#if listOpen}
-					<ul id={LISTBOX_ID} class="weenie-results" role="listbox">
+					<ul id={LISTBOX_ID} class="weenie-results ui-well" role="listbox">
 						{#each results as result, index (`${result.wcid}-${result.className}`)}
 							<li
 								id={resultId(index)}
 								role="option"
 								aria-selected={index === highlightedIndex}
-								class:highlighted={index === highlightedIndex}
+								class="ui-option"
 								onpointerdown={(event) => {
 									event.preventDefault();
 									selectResult(result);
@@ -253,17 +253,17 @@
 		{/if}
 
 		<div class="spawn-actions">
-			<label class="ac-form-field distance-field">
+			<label class="ui-label distance-field">
 				<span>Distance</span>
 				<input
-					class="ac-control"
+					class="ui-input"
 					bind:value={distance}
 					type="number"
 					min={EXPLORER_SPAWN_DISTANCE.minimum}
 					step={EXPLORER_SPAWN_DISTANCE.step}
 				/>
 			</label>
-			<button class="explorer-action" type="submit">
+			<button class="explorer-action ui-button" type="submit">
 				{spawning ? "Spawning…" : "Spawn in front"}
 			</button>
 		</div>
@@ -301,7 +301,7 @@
 		padding: 0;
 		border: 0;
 		background: transparent;
-		color: var(--ac-ink-muted);
+		color: var(--ui-color-muted);
 		font-size: 1.1rem;
 		z-index: 2;
 	}
@@ -318,9 +318,6 @@
 		padding: 3px;
 		overflow-y: auto;
 		list-style: none;
-		border: 1px solid var(--ac-gold-bright);
-		background: var(--ac-panel-deep);
-		box-shadow: 0 8px 18px rgb(0 0 0 / 70%);
 	}
 
 	.weenie-results li {
@@ -330,11 +327,6 @@
 		padding: 6px 7px;
 		border: 1px solid transparent;
 		cursor: pointer;
-	}
-
-	.weenie-results li.highlighted {
-		border-color: var(--ac-gold-bright);
-		background: rgb(83 57 16 / 92%);
 	}
 
 	.result-heading {
@@ -355,7 +347,7 @@
 	.result-class,
 	.picker-message,
 	.picker-receipt {
-		color: var(--ac-ink-muted);
+		color: var(--ui-color-muted);
 		font-size: 0.73rem;
 	}
 
@@ -366,7 +358,7 @@
 	}
 
 	.invalid {
-		color: #ff9c8f;
+		color: var(--ui-color-danger);
 	}
 
 	.spawn-actions {

@@ -49,6 +49,7 @@
 	{#each shortcuts as shortcut}
 		<button
 			type="button"
+			class="ui-hud-button"
 			title={shortcut.icon === "debug"
 				? "Client diagnostics"
 				: `${shortcut.label} (stub)`}
@@ -76,13 +77,5 @@
 		min-width: 0;
 		min-height: 0;
 		padding: 8px;
-		border: 1px solid rgb(242 242 232 / 0.58);
-		background: rgb(20 22 21 / 0.36);
-		color: rgb(242 242 232 / 0.92);
-		box-shadow: 0 2px 8px rgb(0 0 0 / 0.25);
-	}
-	button:hover {
-		border-color: rgb(239 208 111 / 0.88);
-		background: rgb(35 35 29 / 0.62);
 	}
 </style>

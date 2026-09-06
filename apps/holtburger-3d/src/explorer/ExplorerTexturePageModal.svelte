@@ -12,12 +12,22 @@
 		readonly page: TextureAtlasPageDiagnostics;
 		/** Explicit one-off GPU copy retained only for the modal lifetime. */
 		readonly preview: Texture2DReadback;
+		/** Remove the modal and release its retained GPU readback. */
 		readonly onClose: () => void;
 	}
 
 	let { page, preview, onClose }: Props = $props();
 	const inputGate = useViewportInputGate();
-	onMount(() => inputGate.block());
+	let dialogElement: HTMLDialogElement;
+	onMount(() => {
+		// The top layer escapes backdrop-filter containing blocks and provides modal focus handling.
+		dialogElement.showModal();
+		const unblock = inputGate.block();
+		return () => {
+			dialogElement.close();
+			unblock();
+		};
+	});
 	let canvasElement: HTMLCanvasElement | null = $state(null);
 	let viewportElement: HTMLDivElement | null = $state(null);
 	let sourceCanvas: HTMLCanvasElement | null = $state(null);
@@ -64,10 +74,6 @@
 		observer.observe(viewportElement);
 		return () => observer.disconnect();
 	});
-
-	function handleWindowKeydown(event: KeyboardEvent): void {
-		if (event.key === "Escape") onClose();
-	}
 
 	function fitPage(): void {
 		const viewport = viewportElement?.getBoundingClientRect();
@@ -309,125 +315,116 @@
 	}
 </script>
 
-<svelte:window onkeydown={handleWindowKeydown} />
-
-<div class="texture-page-modal-backdrop" data-browser-display-modal>
-	<div
-		class="texture-page-modal ac-panel"
-		role="dialog"
-		aria-modal="true"
-		aria-labelledby="texture-page-modal-title"
-	>
-		<header class="texture-page-modal-header">
-			<div>
-				<p class="ac-section-label">Texture page</p>
-				<h2 id="texture-page-modal-title">{page.pageId}</h2>
-			</div>
-			<button type="button" class="emoji-button" onclick={onClose}>✕</button>
-		</header>
-
-		<div class="texture-page-modal-body">
-			<section
-				class="texture-page-modal-preview"
-				aria-label="Texture page pixel preview"
-			>
-				<div class="texture-page-modal-toolbar">
-					<span
-						>{preview.width} × {preview.height} {preview.format} readback</span
-					>
-					<label
-						><input bind:checked={boundsVisible} type="checkbox" /> Bounds</label
-					>
-					<button type="button" class="explorer-action" onclick={fitPage}
-						>Fit</button
-					>
-				</div>
-				<div
-					bind:this={viewportElement}
-					class="texture-page-modal-viewport"
-					role="application"
-					aria-label="Pan with drag, zoom with wheel, and click to select a texture placement"
-					onpointerdown={handlePointerDown}
-					onpointermove={handlePointerMove}
-					onpointerup={handlePointerUp}
-					onpointercancel={handlePointerUp}
-					onwheel={handleWheel}
-				>
-					<canvas bind:this={canvasElement}></canvas>
-				</div>
-			</section>
-
-			<aside
-				class="texture-page-modal-details"
-				aria-label="Texture page details"
-			>
-				<div class="ac-param-panel">
-					<div class="ac-param-row">
-						<span class="ac-param-key">Purpose</span><code>{page.purpose}</code>
-					</div>
-					<div class="ac-param-row">
-						<span class="ac-param-key">Byte cost</span><code
-							>{formatBytes(page.byteLength)}</code
-						>
-					</div>
-					<div class="ac-param-row">
-						<span class="ac-param-key">Resident occupancy</span><code
-							>{formatPercent(page.occupiedPixelRatio)}</code
-						>
-					</div>
-					<div class="ac-param-row">
-						<span class="ac-param-key">Allocated occupancy</span><code
-							>{formatPercent(page.allocatedPixelRatio)}</code
-						>
-					</div>
-					<div class="ac-param-row">
-						<span class="ac-param-key">Largest free rectangle</span><code
-							>{formatPercent(page.largestFreePixelRatio)}</code
-						>
-					</div>
-				</div>
-
-				<p class="ac-section-label">Placements</p>
-				<div class="explorer-selectable-list texture-page-modal-entry-list">
-					{#each page.entries as entry}
-						<button
-							type="button"
-							class:active={entry.key === selectedEntry?.key}
-							class="explorer-selectable-row"
-							onclick={() => (selectedEntryKey = entry.key)}
-						>
-							<strong>Resident</strong>
-							<span>{entry.key}</span>
-							<code>{entry.x}, {entry.y} · {entry.width} × {entry.height}</code>
-						</button>
-					{/each}
-				</div>
-
-				{#if selectedEntry}
-					<p class="texture-page-modal-selected">
-						Selected resident placement.
-					</p>
-				{/if}
-			</aside>
+<dialog
+	bind:this={dialogElement}
+	class="texture-page-modal ui-glass"
+	data-browser-display-modal
+	aria-labelledby="texture-page-modal-title"
+	onclose={onClose}
+>
+	<header class="texture-page-modal-header ui-frame">
+		<div>
+			<p class="explorer-section-label">Texture page</p>
+			<h2 id="texture-page-modal-title">{page.pageId}</h2>
 		</div>
+		<button
+			type="button"
+			class="ui-button"
+			aria-label="Close texture page"
+			onclick={() => dialogElement.close()}>✕</button
+		>
+	</header>
+
+	<div class="texture-page-modal-body ui-body">
+		<section
+			class="texture-page-modal-preview"
+			aria-label="Texture page pixel preview"
+		>
+			<div class="texture-page-modal-toolbar">
+				<span>{preview.width} × {preview.height} {preview.format} readback</span
+				>
+				<label
+					><input bind:checked={boundsVisible} type="checkbox" /> Bounds</label
+				>
+				<button
+					type="button"
+					class="explorer-action ui-button"
+					onclick={fitPage}>Fit</button
+				>
+			</div>
+			<div
+				bind:this={viewportElement}
+				class="texture-page-modal-viewport"
+				role="application"
+				aria-label="Pan with drag, zoom with wheel, and click to select a texture placement"
+				onpointerdown={handlePointerDown}
+				onpointermove={handlePointerMove}
+				onpointerup={handlePointerUp}
+				onpointercancel={handlePointerUp}
+				onwheel={handleWheel}
+			>
+				<canvas bind:this={canvasElement}></canvas>
+			</div>
+		</section>
+
+		<aside class="texture-page-modal-details" aria-label="Texture page details">
+			<div class="explorer-param-panel">
+				<div class="explorer-param-row">
+					<span class="explorer-param-key">Purpose</span><code
+						>{page.purpose}</code
+					>
+				</div>
+				<div class="explorer-param-row">
+					<span class="explorer-param-key">Byte cost</span><code
+						>{formatBytes(page.byteLength)}</code
+					>
+				</div>
+				<div class="explorer-param-row">
+					<span class="explorer-param-key">Resident occupancy</span><code
+						>{formatPercent(page.occupiedPixelRatio)}</code
+					>
+				</div>
+				<div class="explorer-param-row">
+					<span class="explorer-param-key">Allocated occupancy</span><code
+						>{formatPercent(page.allocatedPixelRatio)}</code
+					>
+				</div>
+				<div class="explorer-param-row">
+					<span class="explorer-param-key">Largest free rectangle</span><code
+						>{formatPercent(page.largestFreePixelRatio)}</code
+					>
+				</div>
+			</div>
+
+			<p class="explorer-section-label">Placements</p>
+			<div class="explorer-selectable-list texture-page-modal-entry-list">
+				{#each page.entries as entry}
+					<button
+						type="button"
+						aria-pressed={entry.key === selectedEntry?.key}
+						class="explorer-selectable-row ui-button"
+						onclick={() => (selectedEntryKey = entry.key)}
+					>
+						<strong>Resident</strong>
+						<span>{entry.key}</span>
+						<code>{entry.x}, {entry.y} · {entry.width} × {entry.height}</code>
+					</button>
+				{/each}
+			</div>
+
+			{#if selectedEntry}
+				<p class="texture-page-modal-selected">Selected resident placement.</p>
+			{/if}
+		</aside>
 	</div>
-</div>
+</dialog>
 
 <style>
-	.texture-page-modal-backdrop {
-		position: fixed;
-		inset: 0;
-		z-index: 20;
-		display: grid;
-		place-items: center;
-		padding: 24px;
-		background: rgb(0 0 0 / 70%);
-	}
 	.texture-page-modal {
 		box-sizing: border-box;
-		width: min(1180px, 100%);
+		width: min(1180px, calc(100vw - 48px));
+		padding: 0;
 		max-height: calc(100vh - 48px);
-		padding: 16px;
 		overflow: auto;
 	}
 	.texture-page-modal-header,
@@ -439,12 +436,12 @@
 	}
 	.texture-page-modal-header h2 {
 		margin: 0;
-		color: var(--ac-parchment);
+		color: var(--ui-color-text);
 		font-size: 1rem;
-		font-family: var(--ac-monospace, monospace);
+		font-family: var(--ui-font-mono);
 		overflow-wrap: anywhere;
 	}
-	.texture-page-modal-header .ac-section-label {
+	.texture-page-modal-header .explorer-section-label {
 		margin-bottom: 4px;
 	}
 	.texture-page-modal-body {
@@ -458,7 +455,7 @@
 	}
 	.texture-page-modal-toolbar {
 		margin-bottom: 8px;
-		color: var(--ac-gold-bright);
+		color: var(--ui-color-accent);
 		font-size: 0.78rem;
 	}
 	.texture-page-modal-toolbar label {
@@ -471,7 +468,7 @@
 		min-height: 360px;
 		overflow: hidden;
 		touch-action: none;
-		background: #020605;
+		background: var(--ui-color-well);
 		cursor: grab;
 	}
 	.texture-page-modal-viewport:active {
@@ -485,7 +482,7 @@
 	.texture-page-modal-details {
 		min-width: 0;
 	}
-	.texture-page-modal-details .ac-section-label {
+	.texture-page-modal-details .explorer-section-label {
 		margin: 16px 0 7px;
 	}
 	.texture-page-modal-entry-list {
@@ -497,19 +494,20 @@
 		font-size: 0.74rem;
 	}
 	.texture-page-modal-entry-list strong {
-		color: var(--ac-gold-bright);
+		color: var(--ui-color-accent);
 	}
 	.texture-page-modal-entry-list span {
 		overflow-wrap: anywhere;
-		font-family: var(--ac-monospace, monospace);
+		font-family: var(--ui-font-mono);
 	}
 	.texture-page-modal-selected {
 		margin-bottom: 0;
 		font-size: 0.8rem;
 	}
 	@media (max-width: 760px) {
-		.texture-page-modal-backdrop {
-			padding: 10px;
+		.texture-page-modal {
+			width: calc(100vw - 20px);
+			max-height: calc(100vh - 20px);
 		}
 		.texture-page-modal-body {
 			grid-template-columns: 1fr;

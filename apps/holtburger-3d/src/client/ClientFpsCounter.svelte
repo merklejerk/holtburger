@@ -33,7 +33,7 @@
 	});
 </script>
 
-<output class="client-fps-counter" aria-label="Frames per second">
+<output class="client-fps-counter ui-readout" aria-label="Frames per second">
 	{display} FPS
 </output>
 
@@ -44,19 +44,9 @@
 		height: 100%;
 		padding: 3px 6px;
 		place-items: center;
-		color: #fff;
-		font-family: var(--ac-font-ui);
-		font-size: var(--ac-panel-font-size);
 		font-variant-numeric: tabular-nums;
 		line-height: 1.2;
 		white-space: nowrap;
 		pointer-events: none;
-		background: radial-gradient(
-			ellipse at center,
-			rgb(0 0 0 / 0.58) 0,
-			rgb(0 0 0 / 0.28) 48%,
-			transparent 78%
-		);
-		text-shadow: 1px 1px 2px #000;
 	}
 </style>

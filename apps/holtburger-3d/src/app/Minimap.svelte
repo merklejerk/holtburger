@@ -61,7 +61,6 @@
 	import { formatWorldMapCoordinates } from "../lib/game/map/map-coordinates";
 	import {
 		captureMinimapGpuDrawState,
-		MINIMAP_MINIMUM_SIZE,
 		minimapViewDiameter,
 		sameMinimapGpuDrawState,
 		type MinimapFrame,
@@ -147,6 +146,10 @@
 		readonly viewState: MinimapState;
 		/** Whether shell-owned placement and sizing controls are currently available. */
 		readonly editable: boolean;
+		/** Shell-owned minimum editable diameter in CSS pixels. */
+		readonly minSize: number;
+		/** Whether editing exposes the resize handle, independently of moving. */
+		readonly resizable: boolean;
 		readonly onStateChange: (state: MinimapState) => void;
 		/** Apply one completed marker click, or clear selection for an empty click. */
 		readonly onSelectEntity: (guid: number | null) => void;
@@ -156,6 +159,8 @@
 		readFrame,
 		viewState,
 		editable,
+		minSize,
+		resizable,
 		onStateChange,
 		onSelectEntity,
 	}: Props = $props();
@@ -687,7 +692,7 @@
 				const delta = Math.max(moved.clientX - startX, moved.clientY - startY);
 				onStateChange({
 					...viewState,
-					size: Math.max(MINIMAP_MINIMUM_SIZE, Math.round(startSize + delta)),
+					size: Math.max(minSize, Math.round(startSize + delta)),
 				});
 			},
 		);
@@ -816,16 +821,24 @@
 					/>
 				</svg>
 			</button>
-			<button
-				type="button"
-				class="minimap-resize"
-				onpointerdown={beginResize}
-				aria-label="Resize minimap"
-			>
-				<svg class="minimap-handle-icon" viewBox="0 0 12 12" aria-hidden="true">
-					<path d="M 2 10 L 10 2 M 2 10 V 7 M 2 10 H 5 M 10 2 H 7 M 10 2 V 5" />
-				</svg>
-			</button>
+			{#if resizable}
+				<button
+					type="button"
+					class="minimap-resize"
+					onpointerdown={beginResize}
+					aria-label="Resize minimap"
+				>
+					<svg
+						class="minimap-handle-icon"
+						viewBox="0 0 12 12"
+						aria-hidden="true"
+					>
+						<path
+							d="M 2 10 L 10 2 M 2 10 V 7 M 2 10 H 5 M 10 2 H 7 M 10 2 V 5"
+						/>
+					</svg>
+				</button>
+			{/if}
 		{/if}
 	</div>
 	<span bind:this={coordinatesElement} class="minimap-coordinates"></span>

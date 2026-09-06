@@ -42,6 +42,23 @@ not implemented. Camera rates and sensitivity remain in the existing tuning file
 use explicit test bindings or derive expectations from defaults, so editing a default does not
 require updating tests.
 
+## Client UI defaults
+
+`src/client/client-ui-defaults.ts` owns the initial in-world HUD arrangement: named anchors,
+offsets, preferred sizes, minimum sizes, and panel resizability. Values are CSS pixels. Edge
+offsets point inward; offsets on centered axes are signed, positive right/down. The minimap uses
+a single diameter to preserve its circular shape.
+
+Sizes are ordinarily numbers. Chat height uses `{ viewportMinus, min, max }` to reserve room above
+it, while shortcut width uses `{ perShortcut }` to account for the visible button count. These
+are startup preferences, not continuously recomputed constraints. The layout resolver fits panels
+to the current viewport without discarding preferred geometry.
+
+`ClientWorldView.svelte` owns live drag/resize state, component composition, and gameplay-driven
+visibility. Diagnostics windows retain their normal border resizing. Internal component styling
+and the layout-lock button remain CSS-owned. Layout edits are not persisted yet.
+Tests exercise geometry with explicit fixtures rather than pinning the current defaults.
+
 ## Development
 
 Install Node.js 22.12 or newer, a current stable Rust toolchain, and the frontend dependencies:

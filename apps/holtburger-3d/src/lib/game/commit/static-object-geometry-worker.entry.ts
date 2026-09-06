@@ -52,5 +52,7 @@ function geometryResultTransferables(
 		geometry.normals.buffer,
 		geometry.textureCoordinates.buffer,
 		geometry.indices.buffer,
+		...(geometry.bakedLight ? [geometry.bakedLight.buffer] : []),
+		...(geometry.materials ? [geometry.materials.selectors.buffer] : []),
 	]);
 }

@@ -184,6 +184,8 @@ import {
 	type WebGL2FogInstancedObjectProgram,
 	type WebGL2InstancedObjectProgram,
 	type WebGL2ObjectProgram,
+	type WebGL2StaticTableObjectProgram,
+	type WebGL2FogStaticTableObjectProgram,
 } from "./webgl2-object-program";
 import { bindWebGL2ObjectInstanceRange } from "./webgl2-instance-buffer";
 import type { LandblockOwnerId } from "../game-types";
@@ -240,6 +242,8 @@ import {
 	type BakedDrawMergeCensus,
 } from "./baked-draw-merge-census";
 import { resolveStaticMaterialDetail } from "./static-detail-binding";
+import { createObjectMaterialTable } from "./object-material-table";
+import { compileStaticMaterialSpans } from "./static-material-spans";
 import {
 	CompiledObjectDrawStore,
 	type CompiledObjectDraw,
@@ -621,6 +625,8 @@ interface CompiledStaticNodeSubmissions {
 }
 
 type AnyObjectProgram =
+	| WebGL2StaticTableObjectProgram
+	| WebGL2FogStaticTableObjectProgram
 	| WebGL2ObjectProgram
 	| WebGL2FogObjectProgram
 	| WebGL2InstancedObjectProgram
@@ -978,6 +984,11 @@ export class WebGL2Renderer implements Renderer {
 	readonly #dynamicPosePages: WebGL2DynamicPosePages<SceneNodeId>;
 	/** One material-free geometry decision shared across selection and every mapped-shadow view. */
 	readonly #dynamicDepths: DynamicDepthPreparations;
+	/** Cold static-table shader variants keyed by fog, deferred portal visibility and PSSM. */
+	readonly #staticTablePrograms = new Map<
+		number,
+		WebGL2StaticTableObjectProgram | WebGL2FogStaticTableObjectProgram
+	>();
 	/** Frame-current opaque eligibility, shared across all selected camera domains. */
 	readonly #dynamicOpaqueRanges = new DynamicBatchedRanges("opaque");
 	/** Additive spans share appearance batches without entering the depth-writing opaque pass. */
@@ -2189,6 +2200,9 @@ export class WebGL2Renderer implements Renderer {
 		this.#portalBlendedInstancedObjectProgram = null;
 		this.#gl.deleteTexture(this.#objectFallbackBinding.texture);
 		this.#outdoorPssmReceiverPrograms.destroy();
+		for (const program of this.#staticTablePrograms.values())
+			this.#gl.deleteProgram(program.program);
+		this.#staticTablePrograms.clear();
 		this.#entityGroundingPrograms.destroy();
 		this.#outdoorPssmPass.destroy();
 		this.#frameInstances.destroy();
@@ -2566,6 +2580,7 @@ export class WebGL2Renderer implements Renderer {
 									outdoorPssm: false,
 									portalVisibility: false,
 									transformSource: "pose-table",
+									materialSource: "table",
 								},
 							);
 							const geometry = this.#resources.getGeometry(
@@ -2601,6 +2616,7 @@ export class WebGL2Renderer implements Renderer {
 									outdoorPssm: false,
 									portalVisibility: portal,
 									transformSource: "pose-table",
+									materialSource: "table",
 								});
 								this.#dynamicBlendedPrograms.set(portal, program);
 							}
@@ -3025,7 +3041,11 @@ export class WebGL2Renderer implements Renderer {
 		nodeId: SceneNodeId,
 		contribution: Extract<RenderContribution, { kind: "static-object" }>,
 	): CompiledStaticNodeSubmissions {
-		const objects: PreparedObjectFrameInput[] = [];
+		let objects: PreparedObjectFrameInput[] = [];
+		const materialRows = new Map<
+			GeometryResourceKey,
+			Map<number, PreparedObjectDrawCompatibility>
+		>();
 		const source =
 			contribution.cullingGroup === "env-cell-static-residents"
 				? "env-cell-resident"
@@ -3044,26 +3064,53 @@ export class WebGL2Renderer implements Renderer {
 		);
 		for (const resolved of node.drawUnits) {
 			const { drawUnit } = resolved;
-			objects.push(
-				this.#compileStaticSubmission(drawUnit, {
-					cullFaceOverride: null,
-					drawKind: "single",
-					geometry: resolved.geometry,
-					indexCount: drawUnit.indexCount,
-					indexStart: drawUnit.indexStart,
-					instances: null,
-					landblockId: node.placement.landblockId,
-					localToLandblock: node.placement.localToLandblock,
-					material: drawUnit.material,
-					ordering: drawUnit.ordering,
-					receivesOutdoorPssm,
-					retailVisibility: drawUnit.retailVisibility,
-					renderScopeKey,
-					source,
-					transparentSort: drawUnit.transparentSort,
-				}),
-			);
+			const object = this.#compileStaticSubmission(drawUnit, {
+				cullFaceOverride: null,
+				drawKind: "single",
+				geometry: resolved.geometry,
+				indexCount: drawUnit.indexCount,
+				indexStart: drawUnit.indexStart,
+				instances: null,
+				landblockId: node.placement.landblockId,
+				localToLandblock: node.placement.localToLandblock,
+				material: drawUnit.material,
+				ordering: drawUnit.ordering,
+				receivesOutdoorPssm,
+				retailVisibility: drawUnit.retailVisibility,
+				renderScopeKey,
+				source,
+				transparentSort: drawUnit.transparentSort,
+			});
+			objects.push(object);
+			let rows = materialRows.get(resolved.geometry);
+			if (!rows) {
+				rows = new Map();
+				materialRows.set(resolved.geometry, rows);
+			}
+			if (rows.has(drawUnit.materialSelector))
+				throw new Error("Static material row was published twice.");
+			rows.set(drawUnit.materialSelector, object.compatibility);
 		}
+		for (const [geometry, rows] of materialRows) {
+			const table = this.#resources.getGeometry(geometry).staticMaterials;
+			if (!table || rows.size !== table.rowCount)
+				throw new Error(
+					"Static publication material rows do not cover its geometry table.",
+				);
+			const surfaces = Array.from({ length: table.rowCount }, (_, selector) => {
+				const surface = rows.get(selector);
+				if (!surface)
+					throw new Error(`Static material row ${selector} is missing.`);
+				return surface;
+			});
+			this.#resources.updateGeometryMaterials(
+				geometry,
+				createObjectMaterialTable(surfaces),
+			);
+			// Cold resource uploads bind textures outside the draw-state applicator.
+			this.#deviceState.invalidate();
+		}
+		objects = compileStaticMaterialSpans(objects);
 		for (const resolved of node.frameStreamedInstances) {
 			const { template } = resolved;
 			const { draw } = template;
@@ -4996,15 +5043,21 @@ export class WebGL2Renderer implements Renderer {
 					) === true;
 				const receivesOutdoorPssm =
 					this.#activeOutdoorPssmFrame !== null && object.receivesOutdoorPssm;
-				const program = receivesIndoorGrounding
-					? this.#entityGroundingPrograms.fogged()
-					: receivesOutdoorPssm
-						? object.drawKind === "instanced"
-							? this.#outdoorPssmReceiverPrograms.foggedInstanced()
-							: this.#outdoorPssmReceiverPrograms.foggedBaked()
-						: object.drawKind === "instanced"
-							? this.#instancedObjectProgram
-							: this.#objectProgram;
+				const program = object.compatibility.geometry.staticMaterials
+					? this.#requireStaticTableProgram(
+							/* distanceFog */ true,
+							/* portalVisibility */ false,
+							receivesOutdoorPssm,
+						)
+					: receivesIndoorGrounding
+						? this.#entityGroundingPrograms.fogged()
+						: receivesOutdoorPssm
+							? object.drawKind === "instanced"
+								? this.#outdoorPssmReceiverPrograms.foggedInstanced()
+								: this.#outdoorPssmReceiverPrograms.foggedBaked()
+							: object.drawKind === "instanced"
+								? this.#instancedObjectProgram
+								: this.#objectProgram;
 				const programChanged = this.#deviceState.applyProgram(program.program);
 				if (programChanged) {
 					this.#activateObjectProgram(program, view, shading);
@@ -5098,7 +5151,13 @@ export class WebGL2Renderer implements Renderer {
 				const receivesOutdoorPssm =
 					this.#activeOutdoorPssmFrame !== null && object.receivesOutdoorPssm;
 				let program: AnyObjectProgram;
-				if (receivesIndoorGrounding) {
+				if (object.compatibility.geometry.staticMaterials) {
+					program = this.#requireStaticTableProgram(
+						/* distanceFog */ false,
+						portalPipeline !== null,
+						receivesOutdoorPssm,
+					);
+				} else if (receivesIndoorGrounding) {
 					program = this.#entityGroundingPrograms.blended(
 						portalPipeline !== null,
 					);
@@ -5169,6 +5228,30 @@ export class WebGL2Renderer implements Renderer {
 			baked: this.#portalBlendedObjectProgram,
 			instanced: this.#portalBlendedInstancedObjectProgram,
 		};
+	}
+
+	/** Shader variants are renderer-owned; material textures remain geometry-owned. */
+	#requireStaticTableProgram(
+		distanceFog: boolean,
+		portalVisibility: boolean,
+		outdoorPssm: boolean,
+	): WebGL2StaticTableObjectProgram | WebGL2FogStaticTableObjectProgram {
+		const key =
+			Number(distanceFog) |
+			(Number(portalVisibility) << 1) |
+			(Number(outdoorPssm) << 2);
+		let program = this.#staticTablePrograms.get(key);
+		if (!program) {
+			program = createWebGL2ObjectProgram(this.#gl, {
+				distanceFog,
+				portalVisibility,
+				outdoorPssm,
+				transformSource: "uniform",
+				materialSource: "table",
+			});
+			this.#staticTablePrograms.set(key, program);
+		}
+		return program;
 	}
 
 	/**
@@ -5335,51 +5418,42 @@ export class WebGL2Renderer implements Renderer {
 				landblockOffset[2],
 			),
 		);
-		this.#countUniformWrite(
-			state.applyUniform1i(
-				program.uniforms.wrapRepeat,
-				compatibility.wrapRepeat ? 1 : 0,
-			),
-		);
-		this.#countUniformWrite(
-			state.applyUniform1i(
-				program.uniforms.palettedClipMap,
-				compatibility.palettedClipMap ? 1 : 0,
-			),
-		);
-		this.#countUniformWrite(
-			state.applyUniform1f(program.uniforms.alphaTest, compatibility.alphaTest),
-		);
 		const preparedMaterial = compatibility.material;
-		if (preparedMaterial.kind === "solid-color") {
-			this.#countUniformWrite(
-				state.applyUniform1i(program.uniforms.materialKind, 0),
-			);
-			this.#countUniformWrite(
-				state.applyUniform4f(
-					program.uniforms.materialColor,
-					...preparedMaterial.color,
-				),
-			);
-		} else {
+		if (preparedMaterial.kind !== "solid-color") {
 			this.#bindPreparedObjectTexture(
 				OBJECT_TEXTURE_UNITS.base,
 				preparedMaterial.base,
 			);
+			if (preparedMaterial.kind !== "direct-color")
+				this.#bindPreparedObjectTexture(
+					OBJECT_TEXTURE_UNITS.palette,
+					preparedMaterial.palette,
+				);
+		}
+		if (program.materialSource === "table") {
+			const table = compatibility.geometry.staticMaterials;
+			if (!table)
+				throw new Error(
+					"Static table program received uniform-material geometry.",
+				);
+			state.applyTexture2D(OBJECT_TEXTURE_UNITS.materials, table.texture, null);
+		} else {
 			this.#countUniformWrite(
-				state.applyUniform4f(
-					program.uniforms.baseRect,
-					...preparedMaterial.base.rect,
+				state.applyUniform1i(
+					program.uniforms.wrapRepeat,
+					compatibility.wrapRepeat ? 1 : 0,
 				),
 			);
 			this.#countUniformWrite(
 				state.applyUniform1i(
-					program.uniforms.materialKind,
-					preparedMaterial.kind === "direct-color"
-						? 1
-						: preparedMaterial.kind === "index8"
-							? 2
-							: 3,
+					program.uniforms.palettedClipMap,
+					compatibility.palettedClipMap ? 1 : 0,
+				),
+			);
+			this.#countUniformWrite(
+				state.applyUniform1f(
+					program.uniforms.alphaTest,
+					compatibility.alphaTest,
 				),
 			);
 			this.#countUniformWrite(
@@ -5388,18 +5462,42 @@ export class WebGL2Renderer implements Renderer {
 					...preparedMaterial.color,
 				),
 			);
-			if (preparedMaterial.kind !== "direct-color") {
-				this.#bindPreparedObjectTexture(
-					OBJECT_TEXTURE_UNITS.palette,
-					preparedMaterial.palette,
+			if (preparedMaterial.kind === "solid-color") {
+				this.#countUniformWrite(
+					state.applyUniform1i(program.uniforms.materialKind, 0),
 				);
+			} else {
 				this.#countUniformWrite(
 					state.applyUniform4f(
-						program.uniforms.paletteRect,
-						...preparedMaterial.palette.rect,
+						program.uniforms.baseRect,
+						...preparedMaterial.base.rect,
 					),
 				);
+				this.#countUniformWrite(
+					state.applyUniform1i(
+						program.uniforms.materialKind,
+						preparedMaterial.kind === "direct-color"
+							? 1
+							: preparedMaterial.kind === "index8"
+								? 2
+								: 3,
+					),
+				);
+				if (preparedMaterial.kind !== "direct-color") {
+					this.#countUniformWrite(
+						state.applyUniform4f(
+							program.uniforms.paletteRect,
+							...preparedMaterial.palette.rect,
+						),
+					);
+				}
 			}
+			this.#countUniformWrite(
+				state.applyUniform1f(
+					program.uniforms.luminosity,
+					compatibility.luminosity,
+				),
+			);
 		}
 		const { detail } = compatibility;
 		if (detail) {
@@ -5418,12 +5516,6 @@ export class WebGL2Renderer implements Renderer {
 				state.applyUniform1i(program.uniforms.useDetail, 0),
 			);
 		}
-		this.#countUniformWrite(
-			state.applyUniform1f(
-				program.uniforms.luminosity,
-				compatibility.luminosity,
-			),
-		);
 		this.#frameSelectionMetrics.objectDrawCalls += 1;
 		const geometry = compatibility.geometry;
 		state.applyVertexArray(geometry.vertexArray);
@@ -5501,6 +5593,7 @@ export class WebGL2Renderer implements Renderer {
 				object.landblockId,
 				object.localToLandblock,
 				compatibility,
+				program.materialSource,
 			);
 		} else if (
 			object.drawKind === "instanced" &&

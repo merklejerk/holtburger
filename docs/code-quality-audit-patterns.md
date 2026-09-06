@@ -1884,6 +1884,30 @@ consumer dependencies, or when proving finer invalidation costs more than rebuil
 physical identity as well as logical values, and preserve invalidation for genuine replacement.
 Avoid introducing a general dependency graph to eliminate a small, well-bounded rebuild.
 
+## Garbage-Collectable Cache Mistaken for an External Resource Owner
+
+**Smell:** A cache of derived values starts retaining resources that require explicit retirement,
+but its eviction mechanism only removes language-runtime references.
+
+**Signals:** Weakly keyed entries acquire device handles, registrations or native allocations;
+replacement constructs a new entry without disposing the previous one; teardown cannot enumerate
+the resources it owns. A previously safe CPU-only memoization pattern is reused without revisiting
+its lifetime contract.
+
+**Possible failure:** Cache churn leaks external resources even though ordinary heap objects remain
+collectable. Cleanup occurs only when an unrelated context or process eventually terminates.
+
+**Questions:** Does dropping the value actually release its underlying resource? Which owner can
+observe replacement, eviction and shutdown? Can the cache borrow a handle whose existing owner
+already provides those lifecycle events?
+
+**Counterexamples:** Pure managed values need no explicit retirement. A cache may safely retain
+borrowed handles when a separate, explicit owner controls their lifetime.
+
+**Possible responses:** Keep derived caches non-owning, attach resources to an existing explicit
+owner, or provide deterministic eviction and shutdown disposal. Test replacement failure and final
+retirement as well as successful reuse; garbage collection is not a substitute for that contract.
+
 ## Adding Observations
 
 An observation belongs here when it has:

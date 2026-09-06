@@ -16,6 +16,36 @@ import {
 } from "./static-object-geometry-worker";
 
 describe("prepareStaticObjectGeometry", () => {
+	it("assigns every baked vertex to its draw unit's dense material row", () => {
+		const result = bake({
+			resourceNamespace: "static-install:material-rows" as const,
+			source: source([
+				resident("opaque", Mat4.identity(), new Vec3(1, 1, 1)),
+				resident("transparent-a", translation(2, 0, 0), new Vec3(1, 1, 1)),
+				resident("transparent-b", translation(4, 0, 0), new Vec3(1, 1, 1)),
+			]),
+		});
+		if (!result) throw new Error("Expected baked material rows");
+		const { geometry } = result.geometry[0]!;
+		if (geometry.kind !== "object" || !geometry.materials)
+			throw new Error("Expected table-backed object geometry");
+		const draws = result.objects.flatMap((object) => object.drawUnits);
+		expect(draws).toHaveLength(3);
+		expect(geometry.materials.count).toBe(draws.length);
+		expect(geometry.materials.selectors.length).toBe(
+			geometry.positions.length / 3,
+		);
+		expect(draws.map((draw) => draw.materialSelector)).toEqual([0, 1, 2]);
+		for (const draw of draws) {
+			const indices = geometry.indices.slice(
+				draw.indexStart,
+				draw.indexStart + draw.indexCount,
+			);
+			for (const index of indices)
+				expect(geometry.materials.selectors[index]).toBe(draw.materialSelector);
+		}
+	});
+
 	it("bakes transformed positions into one finite landblock-local allocation", () => {
 		const result = bake({
 			resourceNamespace: "static-install:test" as const,

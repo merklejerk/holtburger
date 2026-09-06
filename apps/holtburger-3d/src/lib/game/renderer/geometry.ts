@@ -12,6 +12,13 @@ export interface TerrainGeometryData {
 /** Object/interior attributes shared by baked, rigid, and articulated geometry. */
 export interface ObjectGeometryData {
 	readonly kind: "object";
+	/** Baked publication material rows; absent for uniform-material source geometry and shells. */
+	readonly materials?: {
+		/** Dense material-table row for each vertex. */
+		readonly selectors: Uint32Array;
+		/** Row count shared by selector validation and geometry-owned table allocation. */
+		readonly count: number;
+	};
 	readonly positions: Float32Array;
 	readonly normals: Float32Array;
 	readonly textureCoordinates: Float32Array;
@@ -31,7 +38,7 @@ export interface ObjectGeometryData {
 /** Shared source-local dynamic vertices; source indices stay CPU-side for appearance compilation. */
 export interface DynamicGeometryData extends Omit<
 	ObjectGeometryData,
-	"kind" | "bakedLight"
+	"kind" | "bakedLight" | "materials"
 > {
 	/** Source-local merged rigid parts, transformed by a shader-readable pose palette. */
 	readonly kind: "dynamic-parts";
@@ -45,9 +52,10 @@ export interface DynamicGeometryData extends Omit<
 	readonly materialSelectors: Uint32Array;
 }
 
-/** Vertex locations shared by merged geometry upload and its dynamic shader contract. */
+/** Pose selector location shared by articulated geometry upload and its shader. */
 export const DYNAMIC_PART_SELECTOR_ATTRIBUTE = 3;
-export const DYNAMIC_MATERIAL_SELECTOR_ATTRIBUTE = 4;
+/** Material selector location shared by baked and articulated table-backed shaders. */
+export const OBJECT_MATERIAL_SELECTOR_ATTRIBUTE = 4;
 
 /** Position-only geometry used for portal masking and clipping. */
 export interface PortalGeometryData {

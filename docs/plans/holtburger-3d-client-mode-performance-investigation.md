@@ -6035,4 +6035,125 @@ above ran without source writes after a login cooldown and did not reproduce tha
 sandboxed launch also exited before opening DevTools; the successful launches used approved
 out-of-sandbox execution. Temporary driver hooks were removed. Clean artifacts:
 `/tmp/holtburger-atlas-binding-clean.{json,cpuprofile,png,log}`; contaminated run:
-`/tmp/holtburger-atlas-binding-fix.{json,cpuprofile,png,log}`. Changes are not committed.
+`/tmp/holtburger-atlas-binding-fix.{json,cpuprofile,png,log}`. Subsequently committed on request as
+`ed3e87dd` (`Invalidate compiled rendering only when retained atlas bindings change`).
+
+#### Static Preparation Cutover — Shared Shader Storage Contract
+
+The next completed slice separates material addressing from vertex transforms in the shared object
+program. Table-backed materials no longer imply pose-table transforms. Articulated consumers now
+explicitly select table materials, and a static table variant uses the ordinary local-to-landblock
+uniform. Both use the same fragment material lookup, lighting, detail, fog and portal implementation;
+the dynamic-only fragment wrapper and nested fragment-selection branch were removed. The five-texel
+material record format is unchanged, and detail remains draw-constant.
+
+Admitted input combinations are expressed as a union: uniform materials with uniform or instance
+attribute transforms, and table materials with uniform or pose-table transforms. Matrix instance
+attributes occupy the material selector location, so table-backed instancing is not exposed. Static
+table results carry their material sampler and local transform without pose uniforms. Ordinary
+overloads explicitly constrain material storage, including when callers pass an options variable,
+so they cannot incorrectly describe a table program as a uniform-material result.
+
+Real-GPU verification used the offline browser harness, not a server login. On the RX 7900 XT via
+ANGLE/Vulkan, all eight static table combinations of fog/portal/PSSM linked, as did all eight
+articulated combinations. **All 16 static pixel comparisons matched the uniform reference exactly**:
+four material encodings × two wrap modes × alpha rejection on/off, each testing 2,048 pixels and two
+material rows. The existing 48 articulated cases, including part opacity and packed pose addressing,
+also passed. Browser errors and probe GL errors were zero. Static comparisons deliberately retain
+separate draw transforms: this verifies shading equivalence, not geometry baking or draw merging.
+The probe's existing `table-static` timing label describes frozen articulated pose uploads, not the
+new static shader; those timings are not evidence for this cutover's expected gain.
+
+Command: `HOLTBURGER_PROBE_MATERIAL_TABLES=1 npm run harness:browser -- --brief --gpu --measure-ms 1000
+--screenshot /tmp/holtburger-static-shader.png`. The ordinary harness context was `0xda55ffff`,
+1,280 × 720, render scale 1; its default-camera screenshot is not a representative scene-completeness
+check. Pixel equivalence is independently checked in the 64 × 32 fixture. The initial sandboxed
+content-host launch failed with `Operation not permitted`; the approved out-of-sandbox run completed.
+Artifacts: `/tmp/holtburger-static-shader.json.log` and `/tmp/holtburger-static-shader.png`.
+
+Remaining implementation: worker-owned selectors and logical rows; explicit geometry/publication
+ownership of prepared GPU material tables; cold compatible-span compilation; renderer submission
+cutover; settled-courtyard CPU/GPU, memory and complete-geometry validation. The production static
+draw path has not switched yet, so no draw reduction or FPS improvement is claimed. The planning
+skill's phased execution keeps this shader-equivalence checkpoint separate from that larger change.
+Validation passes 2,062 tests across 268 files, Svelte/TypeScript checks, ESLint, Knip, changed-source
+formatting and `git diff --check`. This shader slice is not committed.
+
+#### Static Preparation Cutover — Production Submission and Courtyard A/B
+
+The baked static path now uses the shared material table in production. The worker emits dense
+per-vertex material selectors and logical row identifiers alongside the existing index ranges.
+GPU table storage belongs to the geometry resource: replacement, eviction and renderer shutdown
+retire it explicitly. Cold publication compilation prepares physical atlas bindings, refreshes the
+existing table texture, and merges adjacent compatible opaque/alpha-test ranges. The compiled cache
+retains those spans; steady-state frames neither rebuild nor upload their material rows. Atlas
+binding invalidation still refreshes compiled facts when required.
+
+Merging stays within one publication, placement and render scope, and preserves geometry, physical
+texture/sampler, culling, detail, ordering and retail-visibility barriers. Transparent range order
+and generated transparent template instancing remain unchanged; this step does not introduce new
+additive merging. Shells keep their uniform-material path. Articulated and baked consumers share
+the material encoding and shader implementation. No GL extension, cross-landblock geometry pool,
+streaming policy change or permanent A/B rendering switch was added.
+
+Live evidence used the release client on the RX 7900 XT, worktree credentials, `+Holtfighter Slot 1`,
+persisted courtyard `0x4ae1ffff` at the requested 78.2N 42.2W spot (HUD truncates to 78.1N), viewport
+1441 × 903, render scale 1 and settled 4.5 m camera reach. No player, camera or settings input was
+issued. One login settled for 30 seconds, then alternated uniform/table/uniform/table over four
+approximately ten-second windows, warming each mode for two seconds after explicit cache
+invalidation. Both modes retained the new selector/table allocations, isolating submission and
+shader use rather than allocation or streaming cost. Renderer CPU/GPU instrumentation and V8
+sampling were enabled in every window. Sources were not edited during capture.
+
+| Metric | Uniform 1 | Table 1 | Uniform 2 | Table 2 |
+| --- | ---: | ---: | ---: | ---: |
+| Baked static opaque draws | 403 | 180 | 403 | 180 |
+| Submitted static triangles | 582,671 | 582,671 | 582,671 | 582,671 |
+| Mean frame-callback work, ms | 4.890 | 4.592 | 4.850 | 4.588 |
+| Renderer CPU total, ms | 3.241 | 2.968 | 3.225 | 2.964 |
+| Opaque CPU submission, ms | 0.471 | 0.251 | 0.453 | 0.256 |
+| V8 static opaque function, inclusive ms/frame | 0.422 | 0.200 | 0.402 | 0.210 |
+| Opaque GPU elapsed, ms | 0.1184 | 0.1248 | 0.1178 | 0.1232 |
+| Total measured GPU phases, ms | 0.925 | 0.967 | 0.911 | 0.922 |
+
+The predicted 223-draw reduction materialized in both pairs: 55.3% fewer baked static opaque draws.
+Pair-mean frame-callback work improved by 0.280 ms (5.7%), and opaque CPU submission improved by
+0.208 ms. V8 independently attributes approximately 0.207 ms/frame to the static opaque function;
+dynamic opaque, dynamic blended and particle submission remained broadly stable. The GPU tradeoff
+is approximately 0.006 ms more opaque work. Total GPU variation also includes changing live effects:
+particle GPU means were 0.341/0.375/0.326/0.333 ms. CPU and GPU overlap, and measured GPU phase totals
+are not whole-frame wall time. These captures establish a repeatable CPU saving, not an equivalent
+uncapped FPS gain or a 200-FPS result.
+
+All four captures returned GL error zero and only Vite connection notices. The inspected control and
+table screenshots retain the same buildings, trees, terrain and surrounding spectral entities;
+live particle animation and lighting differ naturally. Triangle-count equality supports unchanged
+submission but is not by itself a pixel-equivalence proof. The preceding synthetic shader fixture
+provides exact material-shading comparisons. The app exited normally.
+
+Memory accounting now includes selectors and geometry-owned tables. Their explicit payload cost is
+four bytes per baked vertex plus 80 bytes per logical material row, excluding driver padding and
+CPU object overhead. Live total geometry payload was 109.036–109.060 MB, including changing dynamic
+resources. Because the control also allocated the new representation, this A/B does **not** measure
+incremental memory against the old build. A precise retained selector/table census and a second
+representative scene remain useful follow-ups before generalizing the tradeoff; streaming latency
+remains outside this steady-state investigation.
+
+Temporary renderer toggles and driver capture edits were removed. Focused tests cover dense worker
+selector assignment, immutable span compilation and merge barriers, table update identity,
+replacement/release cleanup and allocation failure. Validation passes 2,077 tests across 269 files,
+Svelte/TypeScript checks, ESLint, Knip, changed-source formatting and `git diff --check`.
+The shader and production cutover are uncommitted. Local capture artifacts are
+`/tmp/holtburger-static-cutover-{0,1,2,3}.{json,cpuprofile,png}` and
+`/tmp/holtburger-static-cutover-live.log`.
+
+Pre-commit quality review moved static device-limit validation ahead of geometry allocation,
+consolidated the common uniform color write and duplicate imports, annotated positional shader
+flags without introducing per-draw options allocations, and completed shared-table test vocabulary.
+Additional tests cover oversized tables, incomplete cold uploads and idempotent shutdown disposal.
+The audit worksheet records why garbage-collectable derived caches cannot own resources requiring
+explicit retirement. Validation passes 2,080 tests, type checks, ESLint, Knip and diff/format checks.
+The real-GPU material fixture was rerun after review: eight static and eight articulated variants
+linked, all 16 static and 48 articulated pixel cases passed, and the harness exited successfully.
+Artifact: `/tmp/holtburger-static-quality-gpu.log`. This offline fixture is correctness evidence,
+not an additional performance measurement; the live A/B above remains the timing evidence.

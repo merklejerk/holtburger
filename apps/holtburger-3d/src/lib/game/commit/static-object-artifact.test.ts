@@ -143,6 +143,7 @@ function geometryResult(
 
 function drawUnit(): StaticObjectDrawUnit {
 	return {
+		materialSelector: 0,
 		geometry: GEOMETRY_KEY,
 		indexCount: 3,
 		indexStart: 0,

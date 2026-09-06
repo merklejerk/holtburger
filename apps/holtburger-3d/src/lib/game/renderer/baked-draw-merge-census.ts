@@ -1,7 +1,10 @@
 import type { Mat4 } from "../math/types";
 import { mat4ToFloat32Array } from "../math/matrices";
 import type { PreparedStaticObjectDrawCompatibility } from "./object-rendering-policy";
-import { staticObjectDrawStateEquals } from "./object-rendering-policy";
+import {
+	staticObjectDrawStateEquals,
+	staticObjectTableStateEquals,
+} from "./object-rendering-policy";
 
 /** Components in the `localToLandblock` transform each baked draw uploads. */
 const MAT4_COMPONENTS = 16;
@@ -59,6 +62,8 @@ export interface BakedDrawMergeCensus {
 
 /** One draw retained verbatim so every ceiling is computed from a single traversal's evidence. */
 interface RecordedDraw {
+	/** Table-backed draws retain their geometry-owned table as an additional binding boundary. */
+	readonly materialSource: "uniform" | "table";
 	readonly compatibility: PreparedStaticObjectDrawCompatibility<
 		unknown,
 		unknown,
@@ -87,8 +92,10 @@ export class BakedDrawMergeCensusCollector {
 			unknown,
 			unknown
 		>,
+		materialSource: "uniform" | "table" = "uniform",
 	): void {
 		this.#draws.push({
+			materialSource,
 			compatibility,
 			geometry: compatibility.geometry,
 			landblockId,
@@ -124,21 +131,25 @@ export class BakedDrawMergeCensusCollector {
 	}
 }
 
+/** Table rows belong to geometry; cross-geometry merges would also require table remapping. */
+function drawStateEquals(left: RecordedDraw, right: RecordedDraw): boolean {
+	return (
+		left.materialSource === right.materialSource &&
+		(left.materialSource === "table"
+			? staticObjectTableStateEquals
+			: staticObjectDrawStateEquals)(left.compatibility, right.compatibility)
+	);
+}
+
 /**
  * Count maximal runs of state-equal draws in submission order.
- *
- * Only the immediately preceding draw is compared, because that is what the device state cache
- * sees: a draw whose state matches one from earlier in the frame still re-uploads if anything came
- * between them.
+ * Only the immediately preceding draw is compared, matching device-state cache behavior.
  */
 function countStateRunsInDrawOrder(draws: readonly RecordedDraw[]): number {
 	let runs = 0;
 	let previous: RecordedDraw | undefined;
 	for (const draw of draws) {
-		if (
-			previous === undefined ||
-			!staticObjectDrawStateEquals(previous.compatibility, draw.compatibility)
-		) {
+		if (previous === undefined || !drawStateEquals(previous, draw)) {
 			runs += 1;
 		}
 		previous = draw;
@@ -169,10 +180,7 @@ function countMergedRanges(
 		const bucket = buckets.find(
 			([representative]) =>
 				representative !== undefined &&
-				staticObjectDrawStateEquals(
-					representative.compatibility,
-					draw.compatibility,
-				) &&
+				drawStateEquals(representative, draw) &&
 				(!requireSharedTransform ||
 					transformEquals(representative.transform, draw.transform)),
 		);

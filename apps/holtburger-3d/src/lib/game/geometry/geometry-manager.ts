@@ -1,4 +1,5 @@
 import { LeaseRegistry } from "../ownership";
+import { OBJECT_MATERIAL_TEXELS } from "../renderer/object-material-table";
 import type {
 	GeometryResourceKey,
 	RendererResourceManager,
@@ -81,11 +82,10 @@ export class GeometryManager<TOwnerId extends string = string> {
 	}
 
 	/**
-	 * Vertex and index payload bytes across every device-backed geometry.
+	 * Vertex, index and geometry-owned material-table bytes across device-backed geometry.
 	 *
-	 * Counts the CPU-side source payload that was uploaded, which is what a change to geometry
-	 * partitioning moves. Driver-side padding and any resource the device allocates on top of the
-	 * payload are not visible here.
+	 * Counts uploaded source payloads and allocated static material rows. Driver-side padding
+	 * and resources outside geometry ownership are not visible here.
 	 */
 	getResourceBytes(): number {
 		let bytes = 0;
@@ -129,7 +129,17 @@ function geometrySourceBytes(source: GeometrySource): number {
 		case "terrain":
 			return bytes + geometry.terrainColorCodes.byteLength;
 		case "object":
-			return bytes + (geometry.bakedLight?.byteLength ?? 0);
+			return (
+				bytes +
+				(geometry.bakedLight?.byteLength ?? 0) +
+				(geometry.materials
+					? geometry.materials.selectors.byteLength +
+						geometry.materials.count *
+							OBJECT_MATERIAL_TEXELS *
+							4 *
+							Float32Array.BYTES_PER_ELEMENT
+					: 0)
+			);
 		case "dynamic-parts":
 			return (
 				bytes +

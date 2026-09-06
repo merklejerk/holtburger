@@ -2,9 +2,9 @@ import type { DynamicLayout } from "../geometry/dynamic-layout";
 import type { DynamicAppearance } from "../systems/dynamic-appearance";
 import { compileDynamicIndexBatches } from "./dynamic-index-batches";
 import {
-	createDynamicMaterialTable,
-	DYNAMIC_MATERIAL_TEXELS,
-} from "./dynamic-material-table";
+	createObjectMaterialTable,
+	OBJECT_MATERIAL_TEXELS,
+} from "./object-material-table";
 import type { PreparedObjectSurface } from "./object-rendering-policy";
 
 /** Physical resources and draw plan for one retained appearance, or explicit empty geometry. */
@@ -117,7 +117,7 @@ export class WebGL2DynamicAppearances {
 			indexBytes += entry.resource.plan.indices.byteLength;
 			materialBytes +=
 				appearance.materials.length *
-				DYNAMIC_MATERIAL_TEXELS *
+				OBJECT_MATERIAL_TEXELS *
 				4 *
 				Float32Array.BYTES_PER_ELEMENT;
 		}
@@ -154,7 +154,7 @@ export class WebGL2DynamicAppearances {
 			appearance,
 			surfaces,
 		);
-		const data = createDynamicMaterialTable(surfaces);
+		const data = createObjectMaterialTable(surfaces);
 		const gl = this.#gl;
 		const table = gl.createTexture();
 		const indexBuffer = gl.createBuffer();
@@ -176,7 +176,7 @@ export class WebGL2DynamicAppearances {
 				gl.TEXTURE_2D,
 				0,
 				gl.RGBA32F,
-				DYNAMIC_MATERIAL_TEXELS,
+				OBJECT_MATERIAL_TEXELS,
 				surfaces.length,
 				0,
 				gl.RGBA,

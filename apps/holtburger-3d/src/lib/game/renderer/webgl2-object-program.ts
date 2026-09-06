@@ -1,4 +1,5 @@
 import { DYNAMIC_POSE_GLSL } from "./dynamic-pose-shader";
+import { OBJECT_MATERIAL_SELECTOR_ATTRIBUTE } from "./geometry";
 import {
 	linkWebGL2Program,
 	requireWebGL2Uniform,
@@ -33,6 +34,9 @@ import {
 export type ObjectVertexTransformSource =
 	"uniform" | "attribute" | "pose-table";
 
+/** Material addressing is independent of how vertices obtain their transforms. */
+type ObjectMaterialSource = "uniform" | "table";
+
 /** Optional analytic receiver mode compiled only for authored EnvCell shell geometry. */
 export type ObjectGroundingMode = "none" | "env-cell-shell";
 
@@ -62,6 +66,7 @@ export function createObjectVertexShader(
 	transformSource: ObjectVertexTransformSource = "uniform",
 	outdoorPssm = false,
 	groundingMode: ObjectGroundingMode = "none",
+	materialSource: ObjectMaterialSource = "uniform",
 ): string {
 	const fogDeclarations = distanceFog
 		? `
@@ -75,8 +80,6 @@ out float vViewerDistance;`
 		transformSource === "pose-table"
 			? `
 layout(location = 3) in uint aPart;
-layout(location = 4) in uint aMaterial;
-flat out highp int vMaterial;
 ${DYNAMIC_POSE_GLSL}`
 			: transformSource === "attribute"
 				? `
@@ -149,6 +152,7 @@ uniform vec3 uLandblockOffset;
 // (1, 1, 0, 0); the viewport supplies the tile's hard raster boundary in portal mode.
 uniform vec4 uClipTransform;
 ${transformDeclarations}
+${materialSource === "table" ? `layout(location = ${OBJECT_MATERIAL_SELECTOR_ATTRIBUTE}) in uint aMaterial;\nflat out highp int vMaterial;` : ""}
 ${fogDeclarations}
 
 ${WEBGL2_SCENE_LIGHTING_GLSL}
@@ -160,7 +164,8 @@ ${pssmDeclarations}
 ${groundingDeclarations}
 
 void main() {
-	${transformSource === "pose-table" ? "mat4 sourceToLandblock = dynamicSourceToLandblock(aPart);\n\tvMaterial = int(aMaterial);" : ""}
+	${transformSource === "pose-table" ? "mat4 sourceToLandblock = dynamicSourceToLandblock(aPart);" : ""}
+	${materialSource === "table" ? "vMaterial = int(aMaterial);" : ""}
 	vec3 landblockPosition = (${transform} * vec4(aPosition, 1.0)).xyz;
 	vec3 anchoredPosition = landblockPosition + uLandblockOffset;
 	vTextureCoordinate = aTextureCoordinate;
@@ -203,21 +208,6 @@ export function createPortalObjectFragmentShader(
 		true,
 		outdoorPssm,
 		groundingMode,
-	);
-}
-
-/** Merged dynamic materials retain the ordinary object sampling, lighting, and portal rules. */
-function createDynamicObjectFragmentShader(
-	distanceFog: boolean,
-	portalVisibility: boolean,
-	outdoorPssm: boolean,
-): string {
-	return createObjectFragmentShaderVariant(
-		distanceFog,
-		portalVisibility,
-		outdoorPssm,
-		"none",
-		true,
 	);
 }
 
@@ -500,6 +490,7 @@ interface WebGL2ObjectProgramCommon {
 
 /** Ordinary materials supply these values per draw rather than through a selector table. */
 interface WebGL2ObjectProgramBase extends WebGL2ObjectProgramCommon {
+	readonly materialSource: "uniform";
 	readonly uniforms: WebGL2ObjectProgramCommon["uniforms"] & {
 		readonly alphaTest: WebGLUniformLocation;
 		readonly baseRect: WebGLUniformLocation;
@@ -512,17 +503,38 @@ interface WebGL2ObjectProgramBase extends WebGL2ObjectProgramCommon {
 	};
 }
 
-/** Merged dynamic meshes supply matrices/colors and appearance values through separate tables. */
-export interface WebGL2DynamicObjectProgram extends WebGL2ObjectProgramCommon {
-	readonly transformSource: "pose-table";
+/** Material-table bindings shared by static and articulated shading. */
+interface WebGL2TableObjectProgramBase extends WebGL2ObjectProgramCommon {
+	readonly materialSource: "table";
 	readonly uniforms: WebGL2ObjectProgramCommon["uniforms"] & {
+		/** Cold material-table sampler, initialized once when the program is linked. */
+		readonly materials: WebGLUniformLocation;
+	};
+}
+
+/** Articulated transforms and material addressing use independent tables. */
+export interface WebGL2DynamicObjectProgram extends WebGL2TableObjectProgramBase {
+	readonly transformSource: "pose-table";
+	readonly uniforms: WebGL2TableObjectProgramBase["uniforms"] & {
 		/** Pose page sampler, initialized once when the program is linked. */
 		readonly poses: WebGLUniformLocation;
 		/** First row of the whole entity in its frame's pose page. */
 		readonly firstPoseRow: WebGLUniformLocation;
-		/** Cold material-table sampler, initialized once when the program is linked. */
-		readonly materials: WebGLUniformLocation;
 	};
+}
+
+/** Static material selectors require no pose page or per-vertex transform selector. */
+export interface WebGL2StaticTableObjectProgram extends WebGL2TableObjectProgramBase {
+	readonly transformSource: "uniform";
+	readonly uniforms: WebGL2TableObjectProgramBase["uniforms"] & {
+		/** Publication-local transform shared by every material range in the draw. */
+		readonly localToLandblock: WebGLUniformLocation;
+	};
+}
+
+/** Static table shading retains the same distance-fog contract as ordinary objects. */
+export interface WebGL2FogStaticTableObjectProgram extends WebGL2StaticTableObjectProgram {
+	readonly fogUniforms: WebGL2FogObjectProgram["fogUniforms"];
 }
 
 /** Fogged merged color shares the ordinary distance-fog binding contract. */
@@ -564,8 +576,18 @@ interface WebGL2ObjectProgramOptions {
 	readonly groundingMode: ObjectGroundingMode;
 	readonly outdoorPssm: boolean;
 	readonly portalVisibility: boolean;
-	readonly transformSource: ObjectVertexTransformSource;
 }
+
+/** Admitted storage combinations: matrix instance attributes occupy the material selector slot. */
+type WebGL2ObjectInputs =
+	| {
+			readonly materialSource?: "uniform";
+			readonly transformSource?: "uniform" | "attribute";
+	  }
+	| {
+			readonly materialSource: "table";
+			readonly transformSource: "uniform" | "pose-table";
+	  };
 
 /** Compile the default fogged baked object-material program. */
 export function createWebGL2ObjectProgram(
@@ -579,6 +601,7 @@ export function createWebGL2ObjectProgram(
 		readonly groundingMode?: ObjectGroundingMode;
 		readonly outdoorPssm?: boolean;
 		readonly portalVisibility?: false;
+		readonly materialSource?: "uniform";
 		readonly transformSource?: "uniform";
 	},
 ): WebGL2FogObjectProgram;
@@ -590,6 +613,7 @@ export function createWebGL2ObjectProgram(
 		readonly groundingMode?: ObjectGroundingMode;
 		readonly outdoorPssm?: boolean;
 		readonly portalVisibility?: false;
+		readonly materialSource?: "uniform";
 		readonly transformSource?: "uniform";
 	},
 ): WebGL2ObjectProgram;
@@ -600,6 +624,7 @@ export function createWebGL2ObjectProgram(
 		readonly distanceFog: true;
 		readonly outdoorPssm?: boolean;
 		readonly portalVisibility?: false;
+		readonly materialSource?: "uniform";
 		readonly transformSource: "attribute";
 	},
 ): WebGL2FogInstancedObjectProgram;
@@ -610,6 +635,7 @@ export function createWebGL2ObjectProgram(
 		readonly distanceFog: false;
 		readonly outdoorPssm?: boolean;
 		readonly portalVisibility?: false;
+		readonly materialSource?: "uniform";
 		readonly transformSource: "attribute";
 	},
 ): WebGL2InstancedObjectProgram;
@@ -621,6 +647,7 @@ export function createWebGL2ObjectProgram(
 		readonly groundingMode?: ObjectGroundingMode;
 		readonly outdoorPssm?: boolean;
 		readonly portalVisibility: true;
+		readonly materialSource?: "uniform";
 		readonly transformSource?: "uniform";
 	},
 ): WebGL2ObjectProgram;
@@ -631,6 +658,7 @@ export function createWebGL2ObjectProgram(
 		readonly distanceFog: false;
 		readonly outdoorPssm?: boolean;
 		readonly portalVisibility: true;
+		readonly materialSource?: "uniform";
 		readonly transformSource: "attribute";
 	},
 ): WebGL2InstancedObjectProgram;
@@ -642,23 +670,38 @@ export function createWebGL2ObjectProgram(
 		readonly outdoorPssm: boolean;
 		readonly portalVisibility: boolean;
 		readonly transformSource: "pose-table";
+		readonly materialSource: "table";
 	},
 ): WebGL2DynamicObjectProgram | WebGL2FogDynamicObjectProgram;
+/** Compile table-backed static shading without an articulated pose contract. */
 export function createWebGL2ObjectProgram(
 	gl: WebGL2RenderingContext,
-	options: Partial<WebGL2ObjectProgramOptions> = {},
+	options: {
+		readonly distanceFog: boolean;
+		readonly outdoorPssm: boolean;
+		readonly portalVisibility: boolean;
+		readonly transformSource: "uniform";
+		readonly materialSource: "table";
+	},
+): WebGL2StaticTableObjectProgram | WebGL2FogStaticTableObjectProgram;
+export function createWebGL2ObjectProgram(
+	gl: WebGL2RenderingContext,
+	options: Partial<WebGL2ObjectProgramOptions> & WebGL2ObjectInputs = {},
 ):
 	| WebGL2ObjectProgram
 	| WebGL2FogObjectProgram
 	| WebGL2InstancedObjectProgram
 	| WebGL2FogInstancedObjectProgram
 	| WebGL2DynamicObjectProgram
-	| WebGL2FogDynamicObjectProgram {
+	| WebGL2FogDynamicObjectProgram
+	| WebGL2StaticTableObjectProgram
+	| WebGL2FogStaticTableObjectProgram {
 	const distanceFog = options.distanceFog ?? true;
 	const portalVisibility = options.portalVisibility ?? false;
 	const outdoorPssm = options.outdoorPssm ?? false;
 	const groundingMode = options.groundingMode ?? "none";
 	const transformSource = options.transformSource ?? "uniform";
+	const materialSource = options.materialSource ?? "uniform";
 	if (
 		groundingMode === "env-cell-shell" &&
 		(outdoorPssm || transformSource !== "uniform")
@@ -675,20 +718,15 @@ export function createWebGL2ObjectProgram(
 			transformSource,
 			outdoorPssm,
 			groundingMode,
+			materialSource,
 		),
-		transformSource === "pose-table"
-			? createDynamicObjectFragmentShader(
-					distanceFog,
-					portalVisibility,
-					outdoorPssm,
-				)
-			: portalVisibility
-				? createPortalObjectFragmentShader(
-						distanceFog,
-						outdoorPssm,
-						groundingMode,
-					)
-				: createObjectFragmentShader(distanceFog, outdoorPssm, groundingMode),
+		createObjectFragmentShaderVariant(
+			distanceFog,
+			portalVisibility,
+			outdoorPssm,
+			groundingMode,
+			materialSource === "table",
+		),
 	);
 	try {
 		const uniforms: WebGL2ObjectProgramCommon["uniforms"] = {
@@ -758,22 +796,40 @@ export function createWebGL2ObjectProgram(
 		let objectProgram:
 			| WebGL2ObjectProgram
 			| WebGL2InstancedObjectProgram
-			| WebGL2DynamicObjectProgram;
-		if (transformSource === "pose-table") {
-			const poses = requireWebGL2Uniform(gl, program, "uPoses");
+			| WebGL2DynamicObjectProgram
+			| WebGL2StaticTableObjectProgram;
+		if (options.materialSource === "table") {
 			const materials = requireWebGL2Uniform(gl, program, "uMaterials");
-			gl.uniform1i(poses, OBJECT_TEXTURE_UNITS.poses);
 			gl.uniform1i(materials, OBJECT_TEXTURE_UNITS.materials);
-			objectProgram = {
-				...common,
-				transformSource,
-				uniforms: {
-					...uniforms,
-					poses,
-					materials,
-					firstPoseRow: requireWebGL2Uniform(gl, program, "uFirstPoseRow"),
-				},
-			};
+			const tableUniforms = { ...uniforms, materials };
+			if (options.transformSource === "pose-table") {
+				const poses = requireWebGL2Uniform(gl, program, "uPoses");
+				gl.uniform1i(poses, OBJECT_TEXTURE_UNITS.poses);
+				objectProgram = {
+					...common,
+					transformSource: options.transformSource,
+					materialSource: options.materialSource,
+					uniforms: {
+						...tableUniforms,
+						poses,
+						firstPoseRow: requireWebGL2Uniform(gl, program, "uFirstPoseRow"),
+					},
+				};
+			} else {
+				objectProgram = {
+					...common,
+					transformSource: options.transformSource,
+					materialSource: options.materialSource,
+					uniforms: {
+						...tableUniforms,
+						localToLandblock: requireWebGL2Uniform(
+							gl,
+							program,
+							"uLocalToLandblock",
+						),
+					},
+				};
+			}
 		} else {
 			const materialUniforms = {
 				...uniforms,
@@ -787,10 +843,11 @@ export function createWebGL2ObjectProgram(
 				wrapRepeat: requireWebGL2Uniform(gl, program, "uWrapRepeat"),
 			};
 			objectProgram =
-				transformSource === "uniform"
+				options.transformSource !== "attribute"
 					? {
 							...common,
-							transformSource,
+							transformSource: "uniform",
+							materialSource: "uniform",
 							uniforms: {
 								...materialUniforms,
 								localToLandblock: requireWebGL2Uniform(
@@ -800,7 +857,12 @@ export function createWebGL2ObjectProgram(
 								),
 							},
 						}
-					: { ...common, transformSource, uniforms: materialUniforms };
+					: {
+							...common,
+							transformSource: options.transformSource,
+							materialSource: "uniform",
+							uniforms: materialUniforms,
+						};
 		}
 		if (!distanceFog) return objectProgram;
 		return {

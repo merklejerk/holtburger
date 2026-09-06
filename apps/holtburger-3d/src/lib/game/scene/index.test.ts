@@ -520,6 +520,7 @@ describe("SceneGraph", () => {
 	it("returns every AABB candidate with its exact containment verdict", () => {
 		const scene = new SceneGraph();
 		for (const [envCellId, containmentPlanes] of [
+			["0x01020003", null],
 			["0x01020002", new Float32Array([-1, 0, 0, 0])],
 			["0x01020001", new Float32Array([1, 0, 0, 0])],
 		] as const) {
@@ -544,6 +545,7 @@ describe("SceneGraph", () => {
 			new Vec3(20, 5, -20),
 		);
 
+		expect(scene.queryEnvCellPointContainment("0x01020003", point)).toBe(false);
 		expect(scene.queryWorldPointResidencyCandidates(point)).toEqual({
 			envCells: [
 				{

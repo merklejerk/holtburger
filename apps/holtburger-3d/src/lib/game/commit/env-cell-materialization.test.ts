@@ -29,6 +29,61 @@ const SHARED_MATERIAL = material();
 const STATIC_PRESENTATION = presentation();
 
 describe("planEnvCellMaterialization", () => {
+	it("retains a non-rendering cell scope and residents without creating a shell", () => {
+		const original = cell("0x00010100", Mat4.identity(), [
+			resident("static", "0x00010100", STATIC_PRESENTATION),
+		]);
+		const empty = {
+			...original,
+			landblockBounds: null,
+			structure: {
+				...original.structure,
+				geometry: {
+					...original.structure.geometry,
+					bounds: null,
+					positions: new Float32Array(),
+					normals: new Float32Array(),
+					indices: new Uint32Array(),
+					textureCoordinates: new Float32Array(),
+					materialSlotIndices: new Uint16Array(),
+					materialWrapModes: new Uint8Array(),
+					materialSideKinds: new Uint8Array(),
+					materialSideTypes: new Uint8Array(),
+					materialStippling: new Uint8Array(),
+				},
+			},
+		};
+		const plan = planEnvCellMaterialization(
+			layer([empty, cell("0x00010101", Mat4.identity(), [])]),
+		);
+		expect(plan.shells.map((shell) => shell.envCellId)).toEqual(["0x00010101"]);
+		expect(plan.shellGeometries).toHaveLength(1);
+		expect(plan.scopes).toHaveLength(2);
+		expect(plan.scopes[0]).toMatchObject({
+			landblockBounds: null,
+			containmentPlanes: null,
+		});
+		expect(plan.scopes[1]?.containmentPlanes).toBeNull();
+		expect(plan.residentJobs[0]?.source.staticResidents).toHaveLength(1);
+	});
+
+	it("rejects a rendered shell with missing bounds", () => {
+		const original = cell("0x00010100", Mat4.identity(), []);
+		expect(() =>
+			planEnvCellMaterialization(
+				layer([
+					{
+						...original,
+						structure: {
+							...original.structure,
+							geometry: { ...original.structure.geometry, bounds: null },
+						},
+					},
+				]),
+			),
+		).toThrow("shell has triangles but no local bounds");
+	});
+
 	it("moves structures independently while preserving authored landblock resident placements", () => {
 		const structure = cell("0x00010100", cellTransform(10), [
 			resident("shared", "0x00010100", STATIC_PRESENTATION),

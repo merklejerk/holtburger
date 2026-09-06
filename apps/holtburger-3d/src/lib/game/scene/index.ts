@@ -43,8 +43,8 @@ export interface SceneEnvCellScopeInput {
 	readonly scope: Extract<SceneScope, { readonly kind: "env-cell" }>;
 	/** Conservative extent already expressed in the containing landblock frame. */
 	readonly landblockBounds: AABB3 | null;
-	/** Positive-child Cell BSP plane chain encoded as normalized [nx, ny, nz, d] tuples. */
-	readonly containmentPlanes: Float32Array;
+	/** Normalized Cell BSP planes, or null when the cell cannot own point residency. */
+	readonly containmentPlanes: Float32Array | null;
 	/** Cell structure-local transform into the containing landblock frame. */
 	readonly structureToLandblock: Mat4;
 	/** Render-scheduling component joined only through proven depth-continuous seams. */

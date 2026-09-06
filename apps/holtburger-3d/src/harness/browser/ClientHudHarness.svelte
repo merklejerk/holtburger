@@ -2,7 +2,12 @@
 	import { provideViewportInputGate } from "../../lib/input/viewport-input-context";
 	import { probeBrowserInput } from "./input-browser-probe";
 	import { onMount } from "svelte";
+	import { applyUiTheme } from "../../app/ui-theme";
+	import { ESPRESSO_AERO } from "../../app/themes/espresso-aero";
+	import { hexRgb } from "../../lib/frontend-color";
 	import type { FrameRates } from "../../app/frame-rate-sampler";
+	import ClientCharacterSelect from "../../client/ClientCharacterSelect.svelte";
+	import type { ClientLifecycleUiState } from "../../client/client-lifecycle-state";
 	import ClientWorldView from "../../client/ClientWorldView.svelte";
 	import type {
 		ClientChatErrorMessage,
@@ -91,7 +96,62 @@
 		}[];
 	}
 
+	/** Cold character-selection fixture exercises production controls without a live server. */
+	let previewCharacters = $state(false);
+	let entryPending = $state(false);
+	let characterState = $state<
+		Extract<ClientLifecycleUiState, { kind: "character-selection" }>
+	>({
+		kind: "character-selection",
+		selectedGuid: null,
+		characters: [
+			{ guid: 1, name: "Wayfarer", slot: 0, deleteTime: 0 },
+			{ guid: 2, name: "Lantern Keeper", slot: 1, deleteTime: 0 },
+		],
+	});
+	/** Test a live theme change against existing DOM and layout ownership. */
+	async function probeThemeApplication() {
+		const canvas = document.querySelector(".client-canvas");
+		const before = capture().surfaces;
+		try {
+			applyUiTheme(
+				document.documentElement,
+				{
+					...ESPRESSO_AERO,
+					id: "client-probe",
+					color: { ...ESPRESSO_AERO.color, accent: hexRgb("#bbddff") },
+				},
+				{ reducedTransparency: true },
+			);
+			await new Promise<void>((resolve) =>
+				requestAnimationFrame(() => resolve()),
+			);
+			const panel = document.querySelector(".hud-window");
+			if (panel === null)
+				throw new Error("Theme probe requires an open diagnostic window.");
+			const stable =
+				canvas === document.querySelector(".client-canvas") &&
+				JSON.stringify(before) === JSON.stringify(capture().surfaces);
+			const opaque = getComputedStyle(panel).backdropFilter === "none";
+			if (!stable || !opaque)
+				throw new Error(
+					"Client theme application changed layout/identity or retained filtering.",
+				);
+			return {
+				identityAndLayoutPreserved: stable,
+				reducedTransparency: opaque,
+			};
+		} finally {
+			applyUiTheme(document.documentElement, ESPRESSO_AERO, {
+				reducedTransparency: false,
+			});
+		}
+	}
 	interface ClientHudHarnessApi {
+		/** Verify style updates without replacing world presentation or HUD placement. */
+		readonly probeThemeApplication: typeof probeThemeApplication;
+		/** Show production character selection for the theme probe. */
+		readonly previewCharacterSelection: () => void;
 		/** Exercise overlapping modal/chat ownership while a viewport gesture is pending. */
 		readonly probeViewportBlockers: () => void;
 		readonly capture: () => ClientHudHarnessState;
@@ -395,7 +455,7 @@
 		const moveHandles = Object.fromEntries(
 			Object.keys(surfaces).flatMap((label) => {
 				const handle = surface(label).querySelector<HTMLElement>(
-					".hud-panel-move, .minimap-move, .hud-window-titlebar",
+					".layout-move, .hud-window-titlebar",
 				);
 				return handle === null ? [] : [[label, rectangle(handle)]];
 			}),
@@ -574,7 +634,7 @@
 	function dragSurface(label: string, deltaX: number, deltaY: number): void {
 		const target = surface(label);
 		const handle = target.querySelector<HTMLElement>(
-			".hud-panel-move, .minimap-move, .hud-window-titlebar",
+			".layout-move, .hud-window-titlebar",
 		);
 		if (handle === null)
 			throw new Error(`Client HUD surface has no move handle: ${label}.`);
@@ -716,6 +776,10 @@
 			__HOLTBURGER_3D_CLIENT_HUD_HARNESS__: ClientHudHarnessApi | undefined;
 		};
 		harnessGlobal.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__ = {
+			probeThemeApplication,
+			previewCharacterSelection: () => {
+				previewCharacters = true;
+			},
 			probeViewportBlockers,
 			capture,
 			dragSurface,
@@ -787,7 +851,45 @@
 	onCanvas={() => {}}
 />
 
+{#if previewCharacters}
+	<div class="character-preview ui-theme">
+		<section class="ui-glass">
+			<header class="ui-frame">Asheron’s Call</header>
+			<div class="ui-body">
+				<ClientCharacterSelect
+					state={characterState}
+					{entryPending}
+					onChoose={(guid) =>
+						(characterState = { ...characterState, selectedGuid: guid })}
+					onEnter={() => {
+						entryPending = true;
+					}}
+					onDisconnect={() => {
+						previewCharacters = false;
+					}}
+				/>
+			</div>
+		</section>
+	</div>
+{/if}
+
 <style>
+	.character-preview {
+		position: fixed;
+		inset: 0;
+		z-index: 50;
+		display: grid;
+		place-items: start center;
+		padding: 32px;
+		background: var(--ui-color-well);
+	}
+	.character-preview section {
+		width: min(100%, 640px);
+	}
+	.character-preview .ui-body {
+		display: grid;
+		gap: 12px;
+	}
 	:global(body) {
 		margin: 0;
 		overflow: hidden;

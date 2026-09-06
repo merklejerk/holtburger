@@ -19,7 +19,7 @@
 	}: Props = $props();
 </script>
 
-<details class="explorer-control-group" open={initiallyOpen}>
+<details class="explorer-control-group ui-disclosure" open={initiallyOpen}>
 	<summary>{title}</summary>
 	<fieldset {disabled}>
 		<legend class="sr-only">{title}</legend>

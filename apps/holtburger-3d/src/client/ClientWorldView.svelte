@@ -308,7 +308,7 @@
 
 <main
 	bind:this={worldElement}
-	class="client-world"
+	class="client-world ui-theme"
 	aria-label="Holtburger client world"
 >
 	<canvas
@@ -333,7 +333,7 @@
 	/>
 	<button
 		type="button"
-		class="client-ui-lock"
+		class="client-ui-lock ui-hud-button"
 		class:client-ui-unlocked={hudMode === "layout"}
 		aria-label={hudMode === "runtime" ? "Unlock UI layout" : "Lock UI layout"}
 		aria-pressed={hudMode === "layout"}
@@ -498,7 +498,7 @@
 		position: fixed;
 		inset: 0;
 		overflow: hidden;
-		background: #080706;
+		background: var(--ui-color-well);
 	}
 
 	.client-canvas {
@@ -528,15 +528,9 @@
 		height: 28px;
 		min-height: 0;
 		padding: 5px;
-		border: 1px solid rgb(230 230 215 / 0.28);
-		border-radius: 50%;
-		background: rgb(20 22 21 / 0.36);
-		color: rgb(235 232 219 / 0.72);
 	}
 
 	.client-ui-unlocked {
-		border-color: rgb(239 208 111 / 0.82);
-		color: #efd06f;
-		background: rgb(45 38 22 / 0.72);
+		color: var(--ui-color-focus);
 	}
 </style>

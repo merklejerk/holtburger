@@ -187,8 +187,8 @@
 		{#each CLIENT_CHAT_FILTER_TAGS as tag}
 			<button
 				type="button"
+				class="ui-hud-button"
 				aria-pressed={enabledTags.includes(tag)}
-				class:active={enabledTags.includes(tag)}
 				onfocus={() => transitionFocus("filters")}
 				onblur={handleFocusOut}
 				onclick={() => toggleTag(tag)}
@@ -205,6 +205,7 @@
 		}}
 	>
 		<input
+			class="ui-input ui-hud-input"
 			bind:this={inputElement}
 			bind:value={message}
 			readonly={sending}
@@ -215,7 +216,7 @@
 		/>
 		<button
 			type="button"
-			class="chat-channel"
+			class="chat-channel ui-hud-button"
 			tabindex="-1"
 			title="Speech channel"
 			aria-label="Speech channel"
@@ -232,37 +233,24 @@
 		box-sizing: border-box;
 		height: 100%;
 		grid-template-rows: minmax(0, 1fr) auto auto auto;
-		color: white;
-		font: var(--ac-panel-font-size) / 1.25 var(--ac-font-ui);
+		color: var(--ui-color-text);
+		font: inherit;
+		line-height: 1.25;
 		pointer-events: none;
-		text-shadow: 0 1px 2px #000;
+		text-shadow: 0 1px 2px var(--ui-color-shadow);
 		user-select: none;
 	}
 	.chat-filters {
 		display: flex;
 		gap: 2px;
 		padding: 0 3px 3px;
-		background: rgb(13 15 15 / 0.56);
+		background: var(--ui-hud-backing);
 		pointer-events: auto;
 		user-select: auto;
 	}
 	.chat-filters button {
 		min-height: 22px;
 		padding: 2px 8px;
-		border: 1px solid rgb(230 230 220 / 0.22);
-		background: rgb(20 22 21 / 0.44);
-		color: rgb(235 238 231 / 0.7);
-		font: inherit;
-	}
-	.chat-filters button:hover,
-	.chat-filters button:focus-visible {
-		border-color: rgb(239 208 111 / 0.56);
-		outline: none;
-	}
-	.chat-filters button.active {
-		border-color: rgb(239 208 111 / 0.7);
-		background: rgb(87 67 25 / 0.56);
-		color: #f3dc8c;
 	}
 	.chat-focused {
 		pointer-events: auto;
@@ -274,8 +262,8 @@
 		padding: 42% 8px 8px;
 		background: linear-gradient(
 			to top,
-			rgb(12 14 15 / 0.5),
-			rgb(12 14 15 / 0.24) 55%,
+			var(--ui-hud-backing),
+			color-mix(in srgb, var(--ui-hud-backing) 48%, transparent) 55%,
 			transparent
 		);
 		mask-image: linear-gradient(to bottom, transparent, #000 34%, #000);
@@ -285,23 +273,20 @@
 	.chat-buffer::-webkit-scrollbar {
 		width: 5px;
 	}
-	.chat-buffer::-webkit-scrollbar-track {
-		background: transparent;
-	}
+	.chat-buffer::-webkit-scrollbar-track,
 	.chat-buffer::-webkit-scrollbar-thumb {
-		border-radius: 999px;
 		background: transparent;
 	}
 	.chat-focused .chat-buffer {
-		background: rgb(12 14 15 / 0.5);
+		background: var(--ui-hud-backing);
 		mask-image: none;
-		scrollbar-color: rgb(230 230 220 / 0.24) transparent;
+		scrollbar-color: var(--ui-color-border) transparent;
 	}
 	.chat-focused .chat-buffer::-webkit-scrollbar-thumb {
-		background: rgb(230 230 220 / 0.24);
+		background: var(--ui-color-border);
 	}
 	.chat-focused .chat-buffer::-webkit-scrollbar-thumb:hover {
-		background: rgb(239 208 111 / 0.38);
+		background: var(--ui-color-accent);
 	}
 	p {
 		margin: 0 0 5px;
@@ -314,51 +299,51 @@
 		font-weight: 700;
 	}
 	p strong {
-		color: rgb(235 238 231 / 0.82);
+		color: var(--ui-color-muted);
 		font-weight: 700;
 	}
 	.chat-tone-system {
-		color: #9fc9e9;
+		color: var(--ui-color-mana);
 	}
 	.chat-tone-tell {
-		color: #f09bea;
+		color: var(--ui-color-chatTell);
 	}
 	.chat-tone-emote,
 	.chat-tone-party {
-		color: #cfdcc1;
+		color: var(--ui-color-success);
 	}
 	.chat-emote {
 		font-style: italic;
 	}
 	.chat-tone-npc {
-		color: #f2bd7f;
+		color: var(--ui-color-accent);
 	}
 	.chat-tone-error {
-		color: #ff8177;
+		color: var(--ui-color-danger);
 	}
 	.chat-tone-combat {
-		color: #ff938b;
+		color: var(--ui-color-health);
 	}
 	.chat-tone-guild {
-		color: #8edbe6;
+		color: var(--ui-color-chatGuild);
 	}
 	.chat-tone-trade {
-		color: #f4d878;
+		color: var(--ui-color-warning);
 	}
 	.chat-tone-society {
-		color: #8dafff;
+		color: var(--ui-color-chatSociety);
 	}
 	.chat-failure {
 		padding: 3px 7px;
-		background: rgb(90 20 18 / 0.75);
-		color: #ffd9d3;
+		background: var(--ui-color-well);
+		color: var(--ui-color-danger);
 	}
 	form {
 		display: grid;
 		grid-template-columns: minmax(0, 1fr) 28px;
 		gap: 3px;
 		padding: 3px;
-		background: rgb(13 15 15 / 0.56);
+		background: var(--ui-hud-backing);
 		pointer-events: auto;
 		user-select: auto;
 	}
@@ -367,22 +352,11 @@
 		width: 100%;
 		height: 25px;
 		padding: 2px 6px;
-		border: 1px solid rgb(230 230 220 / 0.38);
-		background: rgb(8 9 9 / 0.52);
-		color: white;
-		outline: none;
-	}
-	input:focus {
-		border-color: rgb(239 208 111 / 0.82);
-		box-shadow: 0 0 0 1px rgb(239 208 111 / 0.18);
 	}
 	.chat-channel {
 		width: 28px;
 		height: 25px;
 		min-height: 0;
 		padding: 5px;
-		border: 1px solid rgb(230 230 220 / 0.3);
-		background: rgb(20 22 21 / 0.52);
-		color: #eee;
 	}
 </style>

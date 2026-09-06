@@ -88,10 +88,13 @@
 </script>
 
 {#if smoothedMetrics !== null}
-	<aside class="frame-metrics-overlay" aria-label="Frame metrics">
-		{displayFps} fps | tick {formatMs(smoothedMetrics.tickMs)} ms | update+draw {formatMs(
-			smoothedMetrics.updateFrameMs,
-		)} ms | frame {formatMs(smoothedMetrics.frameMs)} ms
+	<aside class="frame-metrics-overlay ui-readout" aria-label="Frame metrics">
+		<span>
+			{displayFps} fps | tick {formatMs(smoothedMetrics.tickMs)} ms | update+draw
+			{formatMs(smoothedMetrics.updateFrameMs)} ms | frame {formatMs(
+				smoothedMetrics.frameMs,
+			)} ms
+		</span>
 	</aside>
 {/if}
 
@@ -103,15 +106,14 @@
 		z-index: 2;
 		max-width: calc(100vw - 24px);
 		padding: 3px 6px;
-		overflow: hidden;
-		color: #fff;
-		font-family: var(--ac-font-ui);
-		font-size: var(--ac-panel-font-size);
 		font-variant-numeric: tabular-nums;
 		line-height: 1.2;
 		white-space: nowrap;
+	}
+	/* Clip long readouts without clipping their owner's feathered backing. */
+	.frame-metrics-overlay span {
+		display: block;
+		overflow: hidden;
 		text-overflow: ellipsis;
-		background: rgb(0 0 0 / 0.58);
-		text-shadow: 1px 1px 0 #000;
 	}
 </style>

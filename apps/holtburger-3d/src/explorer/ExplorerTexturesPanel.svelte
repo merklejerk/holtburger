@@ -157,71 +157,71 @@
 			resident bindings. Page pixels are not retained after upload.
 		</p>
 
-		<div class="ac-param-panel explorer-texture-totals">
-			<div class="ac-param-row">
-				<span class="ac-param-key">Page memory</span>
+		<div class="explorer-param-panel explorer-texture-totals">
+			<div class="explorer-param-row">
+				<span class="explorer-param-key">Page memory</span>
 				<code
 					>{formatBytes(diagnostics.texture.activeAtlasPageBytes)} active · {formatBytes(
 						diagnostics.texture.peakAtlasPageBytes,
 					)} peak</code
 				>
 			</div>
-			<div class="ac-param-row">
-				<span class="ac-param-key">Avoided preparations</span>
+			<div class="explorer-param-row">
+				<span class="explorer-param-key">Avoided preparations</span>
 				<code>{diagnostics.texture.avoidedAtlasPreparations}</code>
 			</div>
-			<div class="ac-param-row">
-				<span class="ac-param-key">Hole reuses</span>
+			<div class="explorer-param-row">
+				<span class="explorer-param-key">Hole reuses</span>
 				<code>{diagnostics.texture.reusedAtlasInsertions}</code>
 			</div>
-			<div class="ac-param-row">
-				<span class="ac-param-key">Compactions</span>
+			<div class="explorer-param-row">
+				<span class="explorer-param-key">Compactions</span>
 				<code
 					>{diagnostics.texture.acceptedAtlasCompactions}/{diagnostics.texture
 						.attemptedAtlasCompactions}</code
 				>
 			</div>
-			<div class="ac-param-row">
-				<span class="ac-param-key">Compaction fallbacks</span>
+			<div class="explorer-param-row">
+				<span class="explorer-param-key">Compaction fallbacks</span>
 				<code>{diagnostics.texture.failedAtlasCompactions}</code>
 			</div>
-			<div class="ac-param-row">
-				<span class="ac-param-key">In-place patches</span>
+			<div class="explorer-param-row">
+				<span class="explorer-param-key">In-place patches</span>
 				<code
 					>{diagnostics.texture.patchedAtlasPages} pages · {formatBytes(
 						diagnostics.texture.patchedAtlasRegionBytes,
 					)}</code
 				>
 			</div>
-			<div class="ac-param-row">
-				<span class="ac-param-key">Metadata-only updates</span>
+			<div class="explorer-param-row">
+				<span class="explorer-param-key">Metadata-only updates</span>
 				<code>{diagnostics.texture.metadataOnlyAtlasPageUpdates}</code>
 			</div>
-			<div class="ac-param-row">
-				<span class="ac-param-key">Patch fallbacks</span>
+			<div class="explorer-param-row">
+				<span class="explorer-param-key">Patch fallbacks</span>
 				<code>{diagnostics.texture.atlasPatchFallbacks}</code>
 			</div>
-			<div class="ac-param-row">
-				<span class="ac-param-key">Page traffic</span>
+			<div class="explorer-param-row">
+				<span class="explorer-param-key">Page traffic</span>
 				<code
 					>{diagnostics.texture.uploadedAtlasPages} uploaded · {diagnostics
 						.texture.releasedAtlasPages} released</code
 				>
 			</div>
-			<div class="ac-param-row">
-				<span class="ac-param-key">Page traffic bytes</span>
+			<div class="explorer-param-row">
+				<span class="explorer-param-key">Page traffic bytes</span>
 				<code
 					>{formatBytes(diagnostics.texture.uploadedAtlasPageBytes)} uploaded · {formatBytes(
 						diagnostics.texture.releasedAtlasPageBytes,
 					)} released</code
 				>
 			</div>
-			<div class="ac-param-row">
-				<span class="ac-param-key">Worker source copies</span>
+			<div class="explorer-param-row">
+				<span class="explorer-param-key">Worker source copies</span>
 				<code>{formatBytes(diagnostics.texture.copiedAtlasSourceBytes)}</code>
 			</div>
-			<div class="ac-param-row">
-				<span class="ac-param-key">Publication work</span>
+			<div class="explorer-param-row">
+				<span class="explorer-param-key">Publication work</span>
 				<code
 					>{formatDuration(diagnostics.texture.atlasPublicationDurationMs)} total
 					· {formatDuration(
@@ -229,55 +229,55 @@
 					)} longest</code
 				>
 			</div>
-			<div class="ac-param-row">
-				<span class="ac-param-key">Discarded / failed plans</span>
+			<div class="explorer-param-row">
+				<span class="explorer-param-key">Discarded / failed plans</span>
 				<code
 					>{diagnostics.texture.staleAtlasTransactions} stale · {diagnostics
 						.texture.failedAtlasTransactions} failed</code
 				>
 			</div>
-			<div class="ac-param-row">
-				<span class="ac-param-key">Layout worker</span>
+			<div class="explorer-param-row">
+				<span class="explorer-param-key">Layout worker</span>
 				<code>{formatWorker(diagnostics.texture.atlasLayoutWorker)}</code>
 			</div>
-			<div class="ac-param-row">
-				<span class="ac-param-key">Page-build workers</span>
+			<div class="explorer-param-row">
+				<span class="explorer-param-key">Page-build workers</span>
 				<code>{formatWorker(diagnostics.texture.atlasPageBuildWorker)}</code>
 			</div>
-			<div class="ac-param-row">
-				<span class="ac-param-key">Requirement collection</span>
+			<div class="explorer-param-row">
+				<span class="explorer-param-key">Requirement collection</span>
 				<code
 					>{diagnostics.textureFactCollectionCount} runs · {formatDuration(
 						diagnostics.textureFactCollectionDurationMs,
 					)}</code
 				>
 			</div>
-			<div class="ac-param-row">
-				<span class="ac-param-key">Resident sources</span>
+			<div class="explorer-param-row">
+				<span class="explorer-param-key">Resident sources</span>
 				<code>{diagnostics.texture.residentSourceCount}</code>
 			</div>
-			<div class="ac-param-row">
-				<span class="ac-param-key">Source memory</span>
+			<div class="explorer-param-row">
+				<span class="explorer-param-key">Source memory</span>
 				<code>{formatBytes(diagnostics.texture.residentSourceBytes)}</code>
 			</div>
-			<div class="ac-param-row">
-				<span class="ac-param-key">Pending requirements</span>
+			<div class="explorer-param-row">
+				<span class="explorer-param-key">Pending requirements</span>
 				<code>{diagnostics.texture.pendingAtlasRequirements}</code>
 			</div>
 		</div>
 
 		<div class="explorer-texture-controls">
-			<label class="ac-form-field">
+			<label class="ui-label">
 				<span>Filter page ID</span>
 				<input
-					class="ac-control"
+					class="ui-input"
 					bind:value={query}
 					placeholder="Any word in the page ID"
 				/>
 			</label>
 			<button
 				type="button"
-				class="emoji-button explorer-texture-sort"
+				class="explorer-texture-sort ui-button"
 				aria-label={`Sort pages by ${sortDescription}; cycle sort mode`}
 				title={`Sort: ${sortDescription}. Click to cycle.`}
 				onclick={cycleSort}
@@ -294,7 +294,7 @@
 				aria-label="Packed texture pages"
 			>
 				{#each filteredPages as page}
-					<article class="explorer-data-row explorer-texture-page-row">
+					<article class="explorer-data-row explorer-texture-page-row ui-well">
 						<div class="explorer-texture-page-content">
 							<strong class="explorer-texture-page-name">{page.pageId}</strong>
 							<span>{page.purpose}</span>
@@ -309,7 +309,7 @@
 						</div>
 						<button
 							type="button"
-							class="emoji-button explorer-texture-inspect"
+							class="explorer-texture-inspect ui-button"
 							aria-label={`Inspect ${page.pageId}`}
 							title="Inspect page pixels"
 							onclick={() => openInspector(page)}
@@ -370,17 +370,17 @@
 	}
 
 	.explorer-texture-page-name {
-		color: var(--ac-gold-bright);
-		font-family: var(--ac-monospace, monospace);
+		color: var(--ui-color-accent);
+		font-family: var(--ui-font-mono);
 		overflow-wrap: anywhere;
 	}
 
 	.explorer-texture-sort,
 	.explorer-texture-inspect {
-		font-family: var(--ac-font-ui);
+		font-family: var(--ui-font-body);
 	}
 
 	.explorer-texture-readback-error {
-		color: #ffbf9b;
+		color: var(--ui-color-danger);
 	}
 </style>

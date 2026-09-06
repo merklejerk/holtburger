@@ -89,13 +89,9 @@
 	}
 </script>
 
-<label class="ac-form-field">
+<label class="ui-label">
 	<span>Entity shadows</span>
-	<select
-		class="ac-control ac-control--select"
-		value={settings.mode}
-		onchange={updateMode}
-	>
+	<select class="ui-input" value={settings.mode} onchange={updateMode}>
 		<option value="none">None</option>
 		<option value="simple">Simple</option>
 		<option value="shadow-maps">Shadow maps</option>
@@ -105,9 +101,9 @@
 {#if settings.mode === "shadow-maps"}
 	<ExplorerControlGroup title="Outdoor PSSM">
 		<div class="shadow-grid">
-			<label class="ac-form-field"
+			<label class="ui-label"
 				><span>Selected roots (N)</span><input
-					class="ac-control"
+					class="ui-input"
 					min="1"
 					max={MAX_OUTDOOR_SHADOW_SELECTED_ROOTS}
 					step="1"
@@ -117,9 +113,9 @@
 						updateCasterBudget("maximumSelectedRoots", event)}
 				/></label
 			>
-			<label class="ac-form-field"
+			<label class="ui-label"
 				><span>Mapped roots (M)</span><input
-					class="ac-control"
+					class="ui-input"
 					min="0"
 					max={settings.casterBudget.maximumSelectedRoots}
 					step="1"
@@ -128,10 +124,10 @@
 					onchange={(event) => updateCasterBudget("maximumMappedRoots", event)}
 				/></label
 			>
-			<label class="ac-form-field">
+			<label class="ui-label">
 				<span>Cascades</span>
 				<select
-					class="ac-control ac-control--select"
+					class="ui-input"
 					value={settings.pssm.cascadeCount}
 					onchange={(event) => updatePssm("cascadeCount", event)}
 				>
@@ -140,10 +136,10 @@
 					{/each}
 				</select>
 			</label>
-			<label class="ac-form-field">
+			<label class="ui-label">
 				<span>Map resolution</span>
 				<select
-					class="ac-control ac-control--select"
+					class="ui-input"
 					value={settings.pssm.mapResolution}
 					onchange={(event) => updatePssm("mapResolution", event)}
 				>
@@ -152,9 +148,9 @@
 					{/each}
 				</select>
 			</label>
-			<label class="ac-form-field"
+			<label class="ui-label"
 				><span>Maximum distance</span><input
-					class="ac-control"
+					class="ui-input"
 					min="1"
 					max="2048"
 					step="1"
@@ -163,9 +159,9 @@
 					onchange={(event) => updatePssm("maximumDistance", event)}
 				/></label
 			>
-			<label class="ac-form-field"
+			<label class="ui-label"
 				><span>Split lambda</span><input
-					class="ac-control"
+					class="ui-input"
 					min="0"
 					max="1"
 					step="0.01"
@@ -174,9 +170,9 @@
 					onchange={(event) => updatePssm("splitLambda", event)}
 				/></label
 			>
-			<label class="ac-form-field"
+			<label class="ui-label"
 				><span>Blend fraction</span><input
-					class="ac-control"
+					class="ui-input"
 					min="0"
 					max="0.5"
 					step="0.01"
@@ -185,10 +181,10 @@
 					onchange={(event) => updatePssm("transitionFraction", event)}
 				/></label
 			>
-			<label class="ac-form-field">
+			<label class="ui-label">
 				<span>PCF radius</span>
 				<select
-					class="ac-control ac-control--select"
+					class="ui-input"
 					value={settings.pssm.pcfRadius}
 					onchange={(event) => updatePssm("pcfRadius", event)}
 				>
@@ -197,9 +193,9 @@
 					>
 				</select>
 			</label>
-			<label class="ac-form-field"
+			<label class="ui-label"
 				><span>Strength</span><input
-					class="ac-control"
+					class="ui-input"
 					min="0"
 					max="1"
 					step="0.01"
@@ -208,9 +204,9 @@
 					onchange={(event) => updatePssm("strength", event)}
 				/></label
 			>
-			<label class="ac-form-field"
+			<label class="ui-label"
 				><span>Receiver depth bias</span><input
-					class="ac-control"
+					class="ui-input"
 					min="0"
 					max="0.05"
 					step="0.0001"
@@ -219,9 +215,9 @@
 					onchange={(event) => updatePssm("receiverDepthBias", event)}
 				/></label
 			>
-			<label class="ac-form-field"
+			<label class="ui-label"
 				><span>Normal offset bias</span><input
-					class="ac-control"
+					class="ui-input"
 					min="0"
 					max="4"
 					step="0.01"
@@ -230,9 +226,9 @@
 					onchange={(event) => updatePssm("normalOffsetBias", event)}
 				/></label
 			>
-			<label class="ac-form-field"
+			<label class="ui-label"
 				><span>Caster slope bias</span><input
-					class="ac-control"
+					class="ui-input"
 					min="0"
 					max="8"
 					step="0.1"
@@ -241,9 +237,9 @@
 					onchange={(event) => updatePssm("casterPolygonOffsetFactor", event)}
 				/></label
 			>
-			<label class="ac-form-field"
+			<label class="ui-label"
 				><span>Caster unit bias</span><input
-					class="ac-control"
+					class="ui-input"
 					min="0"
 					max="16"
 					step="0.1"
@@ -259,9 +255,9 @@
 {#if settings.mode !== "none"}
 	<ExplorerControlGroup title="Outdoor projection">
 		<div class="shadow-grid">
-			<label class="ac-form-field"
+			<label class="ui-label"
 				><span>Minimum light elevation</span><input
-					class="ac-control"
+					class="ui-input"
 					min="0"
 					max="90"
 					step="1"
@@ -271,9 +267,9 @@
 						updateProjection("minimumLightElevationDegrees", event)}
 				/></label
 			>
-			<label class="ac-form-field"
+			<label class="ui-label"
 				><span>Maximum caster height</span><input
-					class="ac-control"
+					class="ui-input"
 					min="0.1"
 					max="64"
 					step="0.1"
@@ -282,9 +278,9 @@
 					onchange={(event) => updateProjection("maximumCasterHeight", event)}
 				/></label
 			>
-			<label class="ac-form-field"
+			<label class="ui-label"
 				><span>Maximum cast length</span><input
-					class="ac-control"
+					class="ui-input"
 					min="0.1"
 					max="512"
 					step="1"
@@ -298,9 +294,9 @@
 
 	<ExplorerControlGroup title="Outdoor analytic shadows">
 		<div class="shadow-grid">
-			<label class="ac-form-field"
+			<label class="ui-label"
 				><span>Strength</span><input
-					class="ac-control"
+					class="ui-input"
 					min="0"
 					max="1"
 					step="0.01"
@@ -309,9 +305,9 @@
 					onchange={(event) => updateOutdoorDirectional("strength", event)}
 				/></label
 			>
-			<label class="ac-form-field"
+			<label class="ui-label"
 				><span>Radius scale</span><input
-					class="ac-control"
+					class="ui-input"
 					min="0.1"
 					max="4"
 					step="0.05"
@@ -320,9 +316,9 @@
 					onchange={(event) => updateOutdoorDirectional("radiusScale", event)}
 				/></label
 			>
-			<label class="ac-form-field"
+			<label class="ui-label"
 				><span>Softness</span><input
-					class="ac-control"
+					class="ui-input"
 					min="0.01"
 					max="1"
 					step="0.01"
@@ -331,9 +327,9 @@
 					onchange={(event) => updateOutdoorDirectional("softness", event)}
 				/></label
 			>
-			<label class="ac-form-field"
+			<label class="ui-label"
 				><span>Maximum receiver drop</span><input
-					class="ac-control"
+					class="ui-input"
 					min="0.01"
 					max="16"
 					step="0.05"
@@ -343,9 +339,9 @@
 						updateOutdoorDirectional("maximumReceiverDrop", event)}
 				/></label
 			>
-			<label class="ac-form-field"
+			<label class="ui-label"
 				><span>Minimum up-facing</span><input
-					class="ac-control"
+					class="ui-input"
 					min="0"
 					max={settings.outdoorDirectional.fullStrengthUpFacing - 0.01}
 					step="0.01"
@@ -355,9 +351,9 @@
 						updateOutdoorDirectional("minimumUpFacing", event)}
 				/></label
 			>
-			<label class="ac-form-field"
+			<label class="ui-label"
 				><span>Full-strength up-facing</span><input
-					class="ac-control"
+					class="ui-input"
 					min={settings.outdoorDirectional.minimumUpFacing + 0.01}
 					max="1"
 					step="0.01"
@@ -367,9 +363,9 @@
 						updateOutdoorDirectional("fullStrengthUpFacing", event)}
 				/></label
 			>
-			<label class="ac-form-field"
+			<label class="ui-label"
 				><span>Contact bias</span><input
-					class="ac-control"
+					class="ui-input"
 					min="0"
 					max="1"
 					step="0.01"
@@ -378,9 +374,9 @@
 					onchange={(event) => updateOutdoorDirectional("contactBias", event)}
 				/></label
 			>
-			<label class="ac-form-field"
+			<label class="ui-label"
 				><span>Tail strength</span><input
-					class="ac-control"
+					class="ui-input"
 					min="0"
 					max="1"
 					step="0.01"
@@ -394,9 +390,9 @@
 
 	<ExplorerControlGroup title="Indoor grounding">
 		<div class="shadow-grid">
-			<label class="ac-form-field"
+			<label class="ui-label"
 				><span>Strength</span><input
-					class="ac-control"
+					class="ui-input"
 					min="0"
 					max="1"
 					step="0.01"
@@ -405,9 +401,9 @@
 					onchange={(event) => updateGrounding("strength", event)}
 				/></label
 			>
-			<label class="ac-form-field"
+			<label class="ui-label"
 				><span>Radius scale</span><input
-					class="ac-control"
+					class="ui-input"
 					min="0.1"
 					max="4"
 					step="0.05"
@@ -416,9 +412,9 @@
 					onchange={(event) => updateGrounding("radiusScale", event)}
 				/></label
 			>
-			<label class="ac-form-field"
+			<label class="ui-label"
 				><span>Softness</span><input
-					class="ac-control"
+					class="ui-input"
 					min="0.01"
 					max="1"
 					step="0.01"
@@ -427,9 +423,9 @@
 					onchange={(event) => updateGrounding("softness", event)}
 				/></label
 			>
-			<label class="ac-form-field"
+			<label class="ui-label"
 				><span>Drop spread</span><input
-					class="ac-control"
+					class="ui-input"
 					min="0"
 					max="2"
 					step="0.05"
@@ -438,9 +434,9 @@
 					onchange={(event) => updateGrounding("dropSpread", event)}
 				/></label
 			>
-			<label class="ac-form-field"
+			<label class="ui-label"
 				><span>Maximum drop</span><input
-					class="ac-control"
+					class="ui-input"
 					min="0.01"
 					max="16"
 					step="0.05"
@@ -449,9 +445,9 @@
 					onchange={(event) => updateGrounding("maximumDrop", event)}
 				/></label
 			>
-			<label class="ac-form-field"
+			<label class="ui-label"
 				><span>Minimum up-facing</span><input
-					class="ac-control"
+					class="ui-input"
 					min="0"
 					max={settings.indoorGrounding.fullStrengthUpFacing - 0.01}
 					step="0.01"
@@ -460,9 +456,9 @@
 					onchange={(event) => updateGrounding("minimumUpFacing", event)}
 				/></label
 			>
-			<label class="ac-form-field"
+			<label class="ui-label"
 				><span>Full-strength up-facing</span><input
-					class="ac-control"
+					class="ui-input"
 					min={settings.indoorGrounding.minimumUpFacing + 0.01}
 					max="1"
 					step="0.01"
@@ -471,9 +467,9 @@
 					onchange={(event) => updateGrounding("fullStrengthUpFacing", event)}
 				/></label
 			>
-			<label class="ac-form-field"
+			<label class="ui-label"
 				><span>Contact bias</span><input
-					class="ac-control"
+					class="ui-input"
 					min="0"
 					max="1"
 					step="0.01"

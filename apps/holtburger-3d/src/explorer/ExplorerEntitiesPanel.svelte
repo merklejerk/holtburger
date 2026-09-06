@@ -212,7 +212,7 @@
 	{/if}
 
 	<div class="population-heading">
-		<p class="ac-section-label">Current entities</p>
+		<p class="explorer-section-label">Current entities</p>
 		<span>{entities.length}</span>
 	</div>
 	<ExplorerEntityList
@@ -262,7 +262,7 @@
 	}
 
 	.entities-header p,
-	.population-heading .ac-section-label,
+	.population-heading .explorer-section-label,
 	.panel-note {
 		margin: 0;
 	}
@@ -271,7 +271,7 @@
 	.panel-note,
 	.population-heading span {
 		min-width: 0;
-		color: var(--ac-ink-muted);
+		color: var(--ui-color-muted);
 		font-size: 0.76rem;
 	}
 
@@ -282,11 +282,11 @@
 	}
 
 	.entities-header strong {
-		color: var(--ac-ink);
+		color: var(--ui-color-text);
 		font-weight: 500;
 	}
 
 	.invalid {
-		color: #ff9c8f;
+		color: var(--ui-color-danger);
 	}
 </style>

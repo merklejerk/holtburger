@@ -1,5 +1,4 @@
-import "../app/theme.css";
-import "../app/ui.css";
+import "../app/base.css";
 import ClientApp from "./ClientApp.svelte";
 import { mountEntry } from "../app/mount";
 

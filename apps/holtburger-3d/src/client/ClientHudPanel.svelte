@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onDestroy, type Snippet } from "svelte";
+	import LayoutControls from "../app/LayoutControls.svelte";
 	import { trackPointerGesture } from "../app/pointer-gesture";
 	import {
 		anchorClientHudPlacement,
@@ -110,7 +111,7 @@
 
 <section
 	class="hud-panel"
-	class:hud-panel-editable={editable}
+	class:ui-layout-editable={editable}
 	style:left={`${resolved.left}px`}
 	style:top={`${resolved.top}px`}
 	style:width={`${resolved.width}px`}
@@ -124,20 +125,12 @@
 		{@render children()}
 	</div>
 	{#if editable}
-		<button
-			type="button"
-			class="hud-panel-handle hud-panel-move"
-			onpointerdown={beginDrag}
-			aria-label={`Move ${label}`}>✥</button
-		>
-		{#if resizable}
-			<button
-				type="button"
-				class="hud-panel-handle hud-panel-resize"
-				onpointerdown={beginResize}
-				aria-label={`Resize ${label}`}>↘</button
-			>
-		{/if}
+		<LayoutControls
+			{label}
+			{resizable}
+			onmove={beginDrag}
+			onresize={beginResize}
+		/>
 	{/if}
 </section>
 
@@ -157,38 +150,5 @@
 
 	.hud-panel-content-passthrough {
 		pointer-events: none;
-	}
-
-	.hud-panel-editable {
-		outline: 1px dashed rgb(244 203 97 / 0.65);
-		outline-offset: 3px;
-	}
-
-	.hud-panel-handle {
-		position: absolute;
-		z-index: 2;
-		width: 22px;
-		height: 22px;
-		min-height: 0;
-		padding: 0;
-		border: 1px solid rgb(211 169 68 / 0.9);
-		border-radius: 50%;
-		background: rgb(20 18 14 / 0.92);
-		color: #f2ce70;
-		font-size: 13px;
-		line-height: 20px;
-		pointer-events: auto;
-	}
-
-	.hud-panel-move {
-		top: 2px;
-		left: 2px;
-		cursor: grab;
-	}
-
-	.hud-panel-resize {
-		right: 2px;
-		bottom: 2px;
-		cursor: nwse-resize;
 	}
 </style>

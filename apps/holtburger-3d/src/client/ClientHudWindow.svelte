@@ -124,7 +124,7 @@
 </script>
 
 <section
-	class="hud-window ac-panel"
+	class="hud-window ui-glass"
 	style:left={`${resolved.left}px`}
 	style:top={`${resolved.top}px`}
 	style:width={`${resolved.width}px`}
@@ -132,7 +132,7 @@
 	aria-label={title}
 >
 	<header
-		class="hud-window-titlebar ac-titlebar"
+		class="hud-window-titlebar ui-frame"
 		role="group"
 		aria-label={`${title} window controls`}
 		onpointerdown={beginDrag}
@@ -140,7 +140,7 @@
 		<span>{title}</span>
 		<button
 			type="button"
-			class="emoji-button hud-window-close"
+			class="ui-button hud-window-close"
 			aria-label={`Close ${title}`}
 			onpointerdown={(event) => event.stopPropagation()}
 			onclick={onClose}>×</button
@@ -167,6 +167,8 @@
 	}
 
 	.hud-window-titlebar {
+		display: flex;
+		align-items: center;
 		justify-content: space-between;
 		cursor: move;
 		touch-action: none;

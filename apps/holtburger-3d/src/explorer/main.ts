@@ -1,5 +1,4 @@
-import "../app/theme.css";
-import "../app/ui.css";
+import "../app/base.css";
 import "./explorer.css";
 import ExplorerApp from "./ExplorerApp.svelte";
 import { mountEntry } from "../app/mount";

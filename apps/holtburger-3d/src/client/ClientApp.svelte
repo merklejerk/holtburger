@@ -740,17 +740,17 @@
 		onCanvas={(canvas) => (canvasElement = canvas)}
 	/>
 {:else}
-	<main class="client-screen" aria-label="Holtburger client">
-		<section class="client-panel ac-panel">
-			<header class="ac-titlebar">
+	<main class="client-screen ui-theme" aria-label="Holtburger client">
+		<section class="client-panel ui-glass">
+			<header class="ui-frame">
 				<span>Client</span>
 			</header>
 
-			<div class="client-panel-body ac-panel-body">
-				<p class="ac-section-label">Holtburger 3D Client</p>
+			<div class="client-panel-body ui-body">
+				<p class="ui-muted">Holtburger 3D Client</p>
 				{#if startupError !== null}
 					<h1>Client unavailable</h1>
-					<p class="client-status client-status-error" role="alert">
+					<p class="client-status ui-error" role="alert">
 						{startupError}
 					</p>
 				{:else if commandFailure !== null}
@@ -802,46 +802,14 @@
 		min-height: 100vh;
 		place-items: start center;
 		padding: clamp(16px, 5vw, 48px);
-		background:
-			linear-gradient(rgb(7 6 5 / 0.82), rgb(7 6 5 / 0.9)),
-			repeating-linear-gradient(
-				135deg,
-				rgb(201 183 132 / 0.035) 0,
-				rgb(201 183 132 / 0.035) 1px,
-				transparent 1px,
-				transparent 5px
-			),
-			radial-gradient(
-				circle at 24% 18%,
-				rgb(112 78 28 / 0.28),
-				transparent 18rem
-			),
-			radial-gradient(
-				circle at 78% 76%,
-				rgb(52 75 29 / 0.18),
-				transparent 22rem
-			),
-			var(--ac-panel-deep);
+		background: var(--ui-color-well);
 	}
-
 	.client-panel {
 		width: min(100%, 640px);
 	}
-
 	.client-panel-body {
 		display: grid;
-		gap: 16px;
-		padding: clamp(18px, 4vw, 32px);
-	}
-
-	.client-panel-body .ac-section-label {
-		margin-bottom: -4px;
-	}
-
-	.client-status-error {
-		padding: 10px;
-		border: 1px solid rgb(179 41 27 / 0.9);
-		background: rgb(65 14 11 / 0.72);
-		color: var(--ac-ink);
+		gap: 12px;
+		padding: clamp(12px, 3vw, 24px);
 	}
 </style>

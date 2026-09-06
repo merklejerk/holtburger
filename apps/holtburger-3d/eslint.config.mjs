@@ -76,4 +76,13 @@ export default tseslint.config(
 			"@typescript-eslint/no-require-imports": "off",
 		},
 	},
+	{
+		// These functions are serialized and executed in the browser by CDP.
+		files: [
+			"scripts/ui-theme-probe.mjs",
+			"scripts/client-theme-probe.mjs",
+			"scripts/explorer-theme-probe.mjs",
+		],
+		languageOptions: { globals: globals.browser },
+	},
 );

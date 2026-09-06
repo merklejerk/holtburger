@@ -59,6 +59,18 @@ visibility. Diagnostics windows retain their normal border resizing. Internal co
 and the layout-lock button remain CSS-owned. Layout edits are not persisted yet.
 Tests exercise geometry with explicit fixtures rather than pinning the current defaults.
 
+## UI themes
+
+Both modes use **Espresso Aero** from `src/app/themes/espresso-aero.ts`: charcoal
+glass, ivory text, flat brass controls, and a narrow walnut window-header detail.
+Shared recipes own materials and interaction states; component CSS owns layout.
+HUDs stay compact and borderless. Theme application updates CSS variables without
+recreating runtime owners. Reduced transparency is an explicit presentation
+preference; per-install persistence and an editor remain deferred.
+
+See the [UI style guide](UI_STYLE_GUIDE.md) for configuration, recipes, extension
+rules, semantic visualization exceptions, accessibility, and browser verification.
+
 ## Development
 
 Install Node.js 22.12 or newer, a current stable Rust toolchain, and the frontend dependencies:

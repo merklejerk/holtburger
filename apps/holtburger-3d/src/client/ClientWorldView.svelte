@@ -3,13 +3,10 @@
 	import { observeViewportWindowFocus } from "../lib/input/viewport-input-gate";
 	import { APP_INPUT } from "../lib/input/app-input";
 	import { onMount, untrack } from "svelte";
+	import { CLIENT_UI_DEFAULTS } from "./client-ui-defaults";
 	import Minimap from "../app/Minimap.svelte";
 	import type { FrameRates } from "../app/frame-rate-sampler";
-	import {
-		MINIMAP_MINIMUM_SIZE,
-		type MinimapFrame,
-		type MinimapState,
-	} from "../app/minimap-frame";
+	import type { MinimapFrame, MinimapState } from "../app/minimap-frame";
 	import { MAP_DEFAULT_VIEW_DIAMETERS } from "../lib/game/map/map-appearance";
 	import ClientCharacterHud from "./ClientCharacterHud.svelte";
 	import ClientJumpPowerBar from "./ClientJumpPowerBar.svelte";
@@ -21,7 +18,9 @@
 	import ClientHudIcon from "./ClientHudIcon.svelte";
 	import ClientHudPanel from "./ClientHudPanel.svelte";
 	import ClientSelectedEntityHud from "./ClientSelectedEntityHud.svelte";
-	import ClientShortcutDock from "./ClientShortcutDock.svelte";
+	import ClientShortcutDock, {
+		createClientShortcuts,
+	} from "./ClientShortcutDock.svelte";
 	import ClientToastOverlay from "./ClientToastOverlay.svelte";
 	import ClientTargetIndicator from "./ClientTargetIndicator.svelte";
 	import type { ClientTargetIndicatorFrame } from "./client-target-indicator";
@@ -30,10 +29,7 @@
 	import { CLIENT_TUNING } from "./client-tuning";
 	import {
 		anchorClientHudPlacement,
-		CLIENT_FPS_PANEL_SIZE,
-		CLIENT_JUMP_POWER_PANEL_SIZE,
-		CLIENT_TOAST_PANEL_SIZE,
-		createDefaultClientHudLayout,
+		createClientHudLayout,
 		resolveClientHudSquarePlacement,
 		type ClientHudViewport,
 	} from "./client-hud-layout";
@@ -123,9 +119,13 @@
 	let worldElement = $state<HTMLElement | null>(null);
 	let viewport = $state<ClientHudViewport>(initialViewport);
 	// The launch capability is immutable; snapshotting it avoids resetting edited HUD layout.
-	const initialShortcutCount = untrack(() => (debugEnabled ? 8 : 7));
+	const shortcuts = untrack(() => createClientShortcuts(debugEnabled));
 	let hudLayout = $state(
-		createDefaultClientHudLayout(initialViewport, initialShortcutCount),
+		createClientHudLayout(
+			CLIENT_UI_DEFAULTS,
+			initialViewport,
+			shortcuts.length,
+		),
 	);
 	let mapViewDiameters = $state<MinimapState["viewDiameters"]>({
 		...MAP_DEFAULT_VIEW_DIAMETERS,
@@ -134,7 +134,7 @@
 		resolveClientHudSquarePlacement(
 			hudLayout.minimap,
 			viewport,
-			MINIMAP_MINIMUM_SIZE,
+			CLIENT_UI_DEFAULTS.minimap.minSize,
 		),
 	);
 	const minimap = $derived<MinimapState>({
@@ -345,6 +345,8 @@
 	<Minimap
 		readFrame={readMinimapFrame}
 		viewState={minimap}
+		minSize={CLIENT_UI_DEFAULTS.minimap.minSize}
+		resizable={CLIENT_UI_DEFAULTS.minimap.resizable}
 		editable={hudMode === "layout"}
 		onStateChange={updateMinimap}
 		{onSelectEntity}
@@ -353,9 +355,9 @@
 		label="Character HUD"
 		placement={hudLayout.character}
 		editable={hudMode === "layout"}
-		minWidth={250}
-		minHeight={116}
-		resizable={true}
+		minWidth={CLIENT_UI_DEFAULTS.character.minSize.width}
+		minHeight={CLIENT_UI_DEFAULTS.character.minSize.height}
+		resizable={CLIENT_UI_DEFAULTS.character.resizable}
 		contentHitTesting="surface"
 		{viewport}
 		onPlacementChange={(character) => (hudLayout = { ...hudLayout, character })}
@@ -367,9 +369,9 @@
 			label="Jump power"
 			placement={hudLayout.jumpPower}
 			editable={hudMode === "layout"}
-			minWidth={CLIENT_JUMP_POWER_PANEL_SIZE.width}
-			minHeight={CLIENT_JUMP_POWER_PANEL_SIZE.height}
-			resizable={false}
+			minWidth={CLIENT_UI_DEFAULTS.jumpPower.minSize.width}
+			minHeight={CLIENT_UI_DEFAULTS.jumpPower.minSize.height}
+			resizable={CLIENT_UI_DEFAULTS.jumpPower.resizable}
 			contentHitTesting="surface"
 			{viewport}
 			onPlacementChange={(jumpPower) =>
@@ -389,9 +391,9 @@
 			label="Notifications"
 			placement={hudLayout.toast}
 			editable={hudMode === "layout"}
-			minWidth={200}
-			minHeight={CLIENT_TOAST_PANEL_SIZE.height}
-			resizable={false}
+			minWidth={CLIENT_UI_DEFAULTS.toast.minSize.width}
+			minHeight={CLIENT_UI_DEFAULTS.toast.minSize.height}
+			resizable={CLIENT_UI_DEFAULTS.toast.resizable}
 			contentHitTesting="descendants"
 			{viewport}
 			onPlacementChange={(toastPlacement) =>
@@ -409,9 +411,9 @@
 		label="Chat"
 		placement={hudLayout.chat}
 		editable={hudMode === "layout"}
-		minWidth={280}
-		minHeight={240}
-		resizable={true}
+		minWidth={CLIENT_UI_DEFAULTS.chat.minSize.width}
+		minHeight={CLIENT_UI_DEFAULTS.chat.minSize.height}
+		resizable={CLIENT_UI_DEFAULTS.chat.resizable}
 		contentHitTesting="descendants"
 		{viewport}
 		onPlacementChange={(chat) => (hudLayout = { ...hudLayout, chat })}
@@ -426,9 +428,9 @@
 		label="Frame rate"
 		placement={hudLayout.frameRate}
 		editable={hudMode === "layout"}
-		minWidth={CLIENT_FPS_PANEL_SIZE.width}
-		minHeight={24}
-		resizable={false}
+		minWidth={CLIENT_UI_DEFAULTS.frameRate.minSize.width}
+		minHeight={CLIENT_UI_DEFAULTS.frameRate.minSize.height}
+		resizable={CLIENT_UI_DEFAULTS.frameRate.resizable}
 		contentHitTesting="descendants"
 		{viewport}
 		onPlacementChange={(frameRate) => (hudLayout = { ...hudLayout, frameRate })}
@@ -440,9 +442,9 @@
 			label="Selected entity"
 			placement={hudLayout.selectedEntity}
 			editable={hudMode === "layout"}
-			minWidth={240}
-			minHeight={64}
-			resizable={false}
+			minWidth={CLIENT_UI_DEFAULTS.selectedEntity.minSize.width}
+			minHeight={CLIENT_UI_DEFAULTS.selectedEntity.minSize.height}
+			resizable={CLIENT_UI_DEFAULTS.selectedEntity.resizable}
 			contentHitTesting="descendants"
 			{viewport}
 			onPlacementChange={(selectedEntity) =>
@@ -458,15 +460,15 @@
 		label="Game shortcuts"
 		placement={hudLayout.shortcuts}
 		editable={hudMode === "layout"}
-		minWidth={280}
-		minHeight={36}
-		resizable={true}
+		minWidth={CLIENT_UI_DEFAULTS.shortcuts.minSize.width}
+		minHeight={CLIENT_UI_DEFAULTS.shortcuts.minSize.height}
+		resizable={CLIENT_UI_DEFAULTS.shortcuts.resizable}
 		contentHitTesting="surface"
 		{viewport}
 		onPlacementChange={(shortcuts) => (hudLayout = { ...hudLayout, shortcuts })}
 	>
 		<ClientShortcutDock
-			{debugEnabled}
+			{shortcuts}
 			{debugOpen}
 			onDebug={() => (debugOpen = !debugOpen)}
 		/>
@@ -475,8 +477,8 @@
 		<ClientHudWindow
 			title="Client diagnostics"
 			placement={hudLayout.diagnostics}
-			minWidth={280}
-			minHeight={220}
+			minWidth={CLIENT_UI_DEFAULTS.diagnostics.minSize.width}
+			minHeight={CLIENT_UI_DEFAULTS.diagnostics.minSize.height}
 			{viewport}
 			onClose={() => (debugOpen = false)}
 			onPlacementChange={(diagnostics) =>

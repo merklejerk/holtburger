@@ -2056,6 +2056,8 @@
 				readFrame={readMinimapFrame}
 				viewState={minimap}
 				editable={true}
+				minSize={140}
+				resizable={true}
 				onStateChange={(next) => {
 					minimap = next;
 				}}

@@ -1,20 +1,15 @@
-<script lang="ts">
-	import ClientHudIcon, {
-		type ClientHudIconName,
-	} from "./ClientHudIcon.svelte";
+<script lang="ts" module>
+	import type { ClientHudIconName } from "./ClientHudIcon.svelte";
 
-	interface Props {
-		readonly debugEnabled: boolean;
-		readonly debugOpen: boolean;
-		readonly onDebug: () => void;
+	/** One displayed game-panel shortcut, shared by sizing and rendering. */
+	interface ClientShortcut {
+		/** Glyph identifying the panel and its current action. */
+		readonly icon: ClientHudIconName;
+		/** Accessible panel name. */
+		readonly label: string;
 	}
 
-	const { debugEnabled, debugOpen, onDebug }: Props = $props();
-
-	const standardShortcuts: readonly {
-		icon: ClientHudIconName;
-		label: string;
-	}[] = [
+	const standardShortcuts: readonly ClientShortcut[] = [
 		{ icon: "inventory", label: "Inventory" },
 		{ icon: "training", label: "Training" },
 		{ icon: "spells", label: "Spells" },
@@ -23,11 +18,27 @@
 		{ icon: "journal", label: "Journal" },
 		{ icon: "settings", label: "Settings" },
 	];
-	const shortcuts = $derived(
-		debugEnabled
+	/** Choose the launch-capability-specific list once for layout and the dock. */
+	export function createClientShortcuts(
+		debugEnabled: boolean,
+	): readonly ClientShortcut[] {
+		return debugEnabled
 			? [...standardShortcuts, { icon: "debug" as const, label: "Debug" }]
-			: standardShortcuts,
-	);
+			: standardShortcuts;
+	}
+</script>
+
+<script lang="ts">
+	import ClientHudIcon from "./ClientHudIcon.svelte";
+
+	interface Props {
+		/** The same visible list used to determine the initial dock width. */
+		readonly shortcuts: readonly ClientShortcut[];
+		readonly debugOpen: boolean;
+		readonly onDebug: () => void;
+	}
+
+	const { shortcuts, debugOpen, onDebug }: Props = $props();
 </script>
 
 <nav

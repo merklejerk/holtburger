@@ -2,72 +2,106 @@ import { describe, expect, it } from "vitest";
 
 import {
 	anchorClientHudPlacement,
-	CLIENT_FPS_PANEL_SIZE,
-	CLIENT_SELECTED_ENTITY_PANEL_SIZE,
-	createDefaultClientHudLayout,
+	createClientHudLayout,
+	createClientHudPanelPlacement,
 	resizeClientPanelRectangle,
 	resolveClientHudPlacement,
 	resolveClientHudSquarePlacement,
 } from "./client-hud-layout";
 
+import { CLIENT_UI_DEFAULTS } from "./client-ui-defaults";
+
 const PANEL_MINIMUM = { width: 280, height: 240 };
 
 describe("client HUD layout", () => {
-	it("anchors the default surfaces to their intended content edges", () => {
-		const layout = createDefaultClientHudLayout(
-			{ width: 1_344, height: 820 },
-			8,
+	it("builds each configured surface through the placement resolver", () => {
+		const viewport = { width: 1344, height: 820 };
+		const shortcutCount = 8;
+		const layout = createClientHudLayout(
+			CLIENT_UI_DEFAULTS,
+			viewport,
+			shortcutCount,
 		);
-
-		expect(layout.character).toMatchObject({
-			horizontal: { alignment: "start", offset: 16 },
-			vertical: { alignment: "start", offset: 16 },
-		});
-		expect(layout.chat).toMatchObject({
-			horizontal: { alignment: "start", offset: 16 },
-			vertical: { alignment: "end", offset: 16 },
-		});
-		expect(layout.frameRate).toEqual({
-			horizontal: { alignment: "center", offset: 0 },
-			vertical: { alignment: "start", offset: 8 },
-			preferredWidth: CLIENT_FPS_PANEL_SIZE.width,
-			preferredHeight: CLIENT_FPS_PANEL_SIZE.height,
-		});
-		expect(layout.shortcuts).toMatchObject({
-			horizontal: { alignment: "end", offset: 16 },
-			vertical: { alignment: "end", offset: 16 },
-		});
-		expect(layout.selectedEntity).toEqual({
-			horizontal: { alignment: "center", offset: 0 },
-			vertical: { alignment: "start", offset: 42 },
-			preferredWidth: CLIENT_SELECTED_ENTITY_PANEL_SIZE.width,
-			preferredHeight: CLIENT_SELECTED_ENTITY_PANEL_SIZE.height,
-		});
-		expect(layout.minimap).toMatchObject({
-			horizontal: { alignment: "end", offset: 48 },
-			vertical: { alignment: "start", offset: 16 },
-		});
-		expect(layout.toast).toMatchObject({
-			horizontal: { alignment: "center", offset: 0 },
-			vertical: { alignment: "end", offset: 48 },
-		});
-		expect(layout.jumpPower).toMatchObject({
-			horizontal: { alignment: "center", offset: 0 },
-			vertical: { alignment: "end", offset: 72 },
-		});
-		expect(layout.diagnostics).toMatchObject({
-			horizontal: { alignment: "end", offset: 16 },
-			vertical: { alignment: "start", offset: 260 },
-		});
+		for (const key of Object.keys(layout) as (keyof typeof layout)[]) {
+			const panel = CLIENT_UI_DEFAULTS[key];
+			const size =
+				typeof panel.size === "number"
+					? { width: panel.size, height: panel.size }
+					: panel.size;
+			expect(layout[key]).toEqual(
+				createClientHudPanelPlacement(
+					{ ...panel, size },
+					viewport,
+					shortcutCount,
+				),
+			);
+		}
 	});
 
+	it.each([
+		["top-left", "start", "start"],
+		["top-center", "center", "start"],
+		["top-right", "end", "start"],
+		["center-left", "start", "center"],
+		["center", "center", "center"],
+		["center-right", "end", "center"],
+		["bottom-left", "start", "end"],
+		["bottom-center", "center", "end"],
+		["bottom-right", "end", "end"],
+	] as const)(
+		"translates %s without changing signed offsets or fixed sizes",
+		(anchor, horizontal, vertical) => {
+			expect(
+				createClientHudPanelPlacement(
+					{
+						anchor,
+						offset: { x: -12, y: 23 },
+						size: { width: 310, height: 170 },
+					},
+					{ width: 1000, height: 800 },
+					7,
+				),
+			).toEqual({
+				horizontal: { alignment: horizontal, offset: -12 },
+				vertical: { alignment: vertical, offset: 23 },
+				preferredWidth: 310,
+				preferredHeight: 170,
+			});
+		},
+	);
+
+	it.each([
+		[200, 3, 150, 120],
+		[500, 5, 250, 400],
+		[900, 8, 400, 600],
+	])(
+		"resolves bounded viewport height and per-shortcut width at height %s",
+		(height, count, width, expectedHeight) => {
+			const placement = createClientHudPanelPlacement(
+				{
+					anchor: "bottom-left",
+					offset: { x: 10, y: 10 },
+					size: {
+						width: { perShortcut: 50 },
+						height: { viewportMinus: 100, min: 120, max: 600 },
+					},
+				},
+				{ width: 1000, height },
+				count,
+			);
+			expect(placement.preferredWidth).toBe(width);
+			expect(placement.preferredHeight).toBe(expectedHeight);
+		},
+	);
+
 	it("keeps an edge-anchored panel inside a shrinking viewport", () => {
-		const layout = createDefaultClientHudLayout(
-			{ width: 1_344, height: 820 },
-			8,
-		);
 		const resolved = resolveClientHudPlacement(
-			layout.shortcuts,
+			{
+				horizontal: { alignment: "end", offset: 16 },
+				vertical: { alignment: "end", offset: 16 },
+				preferredWidth: 336,
+				preferredHeight: 42,
+			},
 			{ width: 300, height: 100 },
 			{ width: 280, height: 36 },
 		);
@@ -76,17 +110,22 @@ describe("client HUD layout", () => {
 	});
 
 	it("temporarily relaxes preferred dimensions and restores them when space returns", () => {
-		const layout = createDefaultClientHudLayout(
-			{ width: 1_344, height: 820 },
+		const placement = createClientHudPanelPlacement(
+			{
+				anchor: "bottom-left",
+				offset: { x: 16, y: 16 },
+				size: { width: 400, height: 450 },
+			},
+			{ width: 1344, height: 820 },
 			8,
 		);
 		const compact = resolveClientHudPlacement(
-			layout.chat,
+			placement,
 			{ width: 360, height: 300 },
 			PANEL_MINIMUM,
 		);
 		const restored = resolveClientHudPlacement(
-			layout.chat,
+			placement,
 			{ width: 1_344, height: 820 },
 			PANEL_MINIMUM,
 		);

@@ -1,3 +1,5 @@
+import type { ClientUiDefaults, ClientUiPanel } from "./client-ui-contract";
+
 /** Viewport reference point that owns one axis of a HUD surface's canonical offset. */
 type ClientHudAxisAlignment = "start" | "center" | "end";
 
@@ -36,35 +38,10 @@ export interface ClientPanelResizeEdges {
 	readonly vertical?: "top" | "bottom";
 }
 
-export interface ClientHudLayout {
-	readonly character: ClientHudPlacement;
-	readonly chat: ClientHudPlacement;
-	readonly diagnostics: ClientHudPlacement;
-	readonly frameRate: ClientHudPlacement;
-	readonly jumpPower: ClientHudPlacement;
-	readonly minimap: ClientHudPlacement;
-	readonly selectedEntity: ClientHudPlacement;
-	readonly shortcuts: ClientHudPlacement;
-	readonly toast: ClientHudPlacement;
-}
-
-/** Fixed footprint reserved for the capped/uncapped frame-rate pair and its unit label. */
-export const CLIENT_FPS_PANEL_SIZE = { width: 120, height: 26 } as const;
-
-/** Fixed first-cut footprint for the selected-entity action and health surface. */
-export const CLIENT_SELECTED_ENTITY_PANEL_SIZE = {
-	width: 360,
-	height: 72,
-} as const;
-
-/** Fixed layout footprint for the centered jump-charge control. */
-export const CLIENT_JUMP_POWER_PANEL_SIZE = { width: 38, height: 132 } as const;
-
-/** Default and preferred diameter of the client radar. */
-const CLIENT_MINIMAP_SIZE = 220;
-
-/** Bounded notification lane; individual toast content remains centered within it. */
-export const CLIENT_TOAST_PANEL_SIZE = { width: 420, height: 64 } as const;
+/** Live geometry for exactly the surfaces declared by the UI contract. */
+export type ClientHudLayout = {
+	readonly [Surface in keyof ClientUiDefaults]: ClientHudPlacement;
+};
 
 interface PreferredClientHudExtent {
 	readonly width: number;
@@ -268,74 +245,59 @@ export function resizeClientPanelRectangle(
 	return { left, top, width, height };
 }
 
-/** Build the first-cut HUD arrangement from the current viewport. */
-export function createDefaultClientHudLayout(
+/** Resolve declarative startup geometry; subsequent edits retain canonical axis anchors. */
+export function createClientHudLayout(
+	defaults: ClientUiDefaults,
 	viewport: ClientHudViewport,
 	shortcutCount: number,
 ): ClientHudLayout {
-	const margin = 16;
-	const centeredTopMargin = 8;
-	const centeredTopGap = 8;
-	const shortcutWidth = shortcutCount * 42;
-	const chatHeight = Math.min(450, Math.max(260, viewport.height - 188));
+	const place = (panel: Pick<ClientUiPanel, "anchor" | "offset" | "size">) =>
+		createClientHudPanelPlacement(panel, viewport, shortcutCount);
 	return {
-		character: {
-			horizontal: { alignment: "start", offset: margin },
-			vertical: { alignment: "start", offset: margin },
-			preferredWidth: 340,
-			preferredHeight: 132,
-		},
-		chat: {
-			horizontal: { alignment: "start", offset: margin },
-			vertical: { alignment: "end", offset: margin },
-			preferredWidth: 400,
-			preferredHeight: chatHeight,
-		},
-		diagnostics: {
-			horizontal: { alignment: "end", offset: margin },
-			vertical: { alignment: "start", offset: 260 },
-			preferredWidth: 330,
-			preferredHeight: 310,
-		},
-		frameRate: {
-			horizontal: { alignment: "center", offset: 0 },
-			vertical: { alignment: "start", offset: centeredTopMargin },
-			preferredWidth: CLIENT_FPS_PANEL_SIZE.width,
-			preferredHeight: CLIENT_FPS_PANEL_SIZE.height,
-		},
-		jumpPower: {
-			horizontal: { alignment: "center", offset: 0 },
-			vertical: { alignment: "end", offset: 72 },
-			preferredWidth: CLIENT_JUMP_POWER_PANEL_SIZE.width,
-			preferredHeight: CLIENT_JUMP_POWER_PANEL_SIZE.height,
-		},
-		minimap: {
-			horizontal: { alignment: "end", offset: margin + 32 },
-			vertical: { alignment: "start", offset: margin },
-			preferredWidth: CLIENT_MINIMAP_SIZE,
-			preferredHeight: CLIENT_MINIMAP_SIZE,
-		},
-		shortcuts: {
-			horizontal: { alignment: "end", offset: margin },
-			vertical: { alignment: "end", offset: margin },
-			preferredWidth: shortcutWidth,
-			preferredHeight: 42,
-		},
-		selectedEntity: {
-			horizontal: { alignment: "center", offset: 0 },
-			vertical: {
-				alignment: "start",
-				offset:
-					centeredTopMargin + CLIENT_FPS_PANEL_SIZE.height + centeredTopGap,
-			},
-			preferredWidth: CLIENT_SELECTED_ENTITY_PANEL_SIZE.width,
-			preferredHeight: CLIENT_SELECTED_ENTITY_PANEL_SIZE.height,
-		},
-		toast: {
-			horizontal: { alignment: "center", offset: 0 },
-			vertical: { alignment: "end", offset: 48 },
-			preferredWidth: CLIENT_TOAST_PANEL_SIZE.width,
-			preferredHeight: CLIENT_TOAST_PANEL_SIZE.height,
-		},
+		character: place(defaults.character),
+		chat: place(defaults.chat),
+		diagnostics: place(defaults.diagnostics),
+		frameRate: place(defaults.frameRate),
+		jumpPower: place(defaults.jumpPower),
+		minimap: place({
+			...defaults.minimap,
+			size: { width: defaults.minimap.size, height: defaults.minimap.size },
+		}),
+		selectedEntity: place(defaults.selectedEntity),
+		shortcuts: place(defaults.shortcuts),
+		toast: place(defaults.toast),
 	};
 }
+
+/** Translate authored placement and the two supported contextual sizes into runtime geometry. */
+export function createClientHudPanelPlacement(
+	panel: Pick<ClientUiPanel, "anchor" | "offset" | "size">,
+	viewport: ClientHudViewport,
+	shortcutCount: number,
+): ClientHudPlacement {
+	const [vertical, horizontal] = ANCHOR_AXES[panel.anchor];
+	const { width, height } = panel.size;
+	return {
+		horizontal: { alignment: horizontal, offset: panel.offset.x },
+		vertical: { alignment: vertical, offset: panel.offset.y },
+		preferredWidth:
+			typeof width === "number" ? width : width.perShortcut * shortcutCount,
+		preferredHeight:
+			typeof height === "number"
+				? height
+				: clamp(viewport.height - height.viewportMinus, height.min, height.max),
+	};
+}
+
+/** Named authoring anchors map to the existing vertical/horizontal drag representation. */
+const ANCHOR_AXES = {
+	"top-left": ["start", "start"],
+	"top-center": ["start", "center"],
+	"top-right": ["start", "end"],
+	"center-left": ["center", "start"],
+	center: ["center", "center"],
+	"center-right": ["center", "end"],
+	"bottom-left": ["end", "start"],
+	"bottom-center": ["end", "center"],
+	"bottom-right": ["end", "end"],
+} as const;

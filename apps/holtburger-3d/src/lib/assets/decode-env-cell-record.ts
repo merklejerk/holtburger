@@ -33,9 +33,9 @@ import {
 import { acFrameTransform, renderScale } from "./ac-frame";
 
 const MAGIC = "HBEC";
-// v4 added the derived overhead-map floor sections (mapFloorPositions/mapFloorIndices and each
-// structure's mapFloor ranges).
-export const ENV_CELL_RECORD_VERSION = 4;
+// v5 packs cellBounds only for structures with a non-null render-geometry bound.
+// Non-rendering cells retain their topology without synthetic shell extents.
+export const ENV_CELL_RECORD_VERSION = 5;
 const VERSION = ENV_CELL_RECORD_VERSION;
 const HEADER_LENGTH = 16;
 const datId = z.string().regex(/^0x[0-9a-f]{8}$/i);
@@ -546,7 +546,6 @@ function decodeCellArrays(
 			sections,
 			"cellBounds",
 			Float32Array,
-			cellCount * 6,
 		),
 		surfaceRanges: readWhole(
 			response,
@@ -736,13 +735,26 @@ function decodeCells(
 		manifest.residents.length,
 		"resident",
 	);
-	return Array.from({ length: manifest.cellCount }, (_, cellIndex) => {
+	let boundsOffset = 0;
+	const cells = Array.from({ length: manifest.cellCount }, (_, cellIndex) => {
 		const id = datIdFromU32(arrays.cellIds[cellIndex]!) as EnvCellId;
 		const visibilityIslandOrdinal = arrays.islandIndices[cellIndex]!;
 		const structure = structures[arrays.structureIndices[cellIndex]!];
 		if (!structure) {
 			throw new Error(`EnvCell ${id} references an invalid structure index.`);
 		}
+		// Bounds are packed only for cells whose structure has a render shell.
+		if (
+			structure.geometry.bounds !== null &&
+			boundsOffset + 6 > arrays.bounds.length
+		) {
+			throw new Error(`EnvCell ${id} shell is missing its bounds.`);
+		}
+		const landblockBounds =
+			structure.geometry.bounds === null
+				? null
+				: boundsFromArray(arrays.bounds, boundsOffset);
+		if (landblockBounds !== null) boundsOffset += 6;
 		const cellMaterials = rangedValues(
 			arrays.surfaceRanges,
 			cellIndex,
@@ -818,7 +830,7 @@ function decodeCells(
 				envCellId: id,
 				localTransform: acFrameTransform(cellFrame, [1, 1, 1]),
 			},
-			landblockBounds: boundsFromArray(arrays.bounds, cellIndex * 6),
+			landblockBounds,
 			materials: cellMaterials,
 			residents,
 			potentiallyVisibleEnvCellIds: new Set(
@@ -830,6 +842,10 @@ function decodeCells(
 			),
 		};
 	});
+	if (boundsOffset !== arrays.bounds.length) {
+		throw new Error("EnvCell shell bounds do not cover the bounds section.");
+	}
+	return cells;
 }
 
 function decodeApertures(

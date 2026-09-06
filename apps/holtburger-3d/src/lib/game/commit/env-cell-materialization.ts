@@ -60,16 +60,17 @@ interface EnvCellShellMaterializationPlan {
 	/** Host-derived overhead-map floor for this cell's structure, in the same local frame. */
 	readonly mapFloor: ResolvedMapSurface;
 	readonly structureLocalBounds: AABB3;
-	readonly landblockBounds: AABB3;
 	readonly materialRanges: readonly EnvCellShellMaterialRange[];
 }
 
 /** Query and topology facts retained for one exact EnvCell scope. */
 interface EnvCellScopeMaterializationPlan {
 	readonly scope: Extract<SceneScope, { readonly kind: "env-cell" }>;
-	readonly landblockBounds: AABB3;
+	/** Shell extent, absent for a non-rendering cell. */
+	readonly landblockBounds: AABB3 | null;
 	readonly structureToLandblock: ScenePlacement["localTransform"];
-	readonly containmentPlanes: Float32Array;
+	/** Null when retail excludes the cell from point residency because it has no portals. */
+	readonly containmentPlanes: Float32Array | null;
 	readonly potentiallyVisibleEnvCellIds: ReadonlySet<EnvCellId>;
 	/** Authored SeenOutside flag, which decides whether a camera inside forces interior ambient. */
 	readonly seenOutside: boolean;
@@ -161,50 +162,57 @@ export function planEnvCellMaterialization(
 		assertCellIdentity(source.landblockId, cell);
 		const geometry = cell.structure.geometry;
 		const structureLocalBounds = geometry.bounds;
-		if (structureLocalBounds === null) {
-			throw new Error(`EnvCell ${cell.id} shell geometry has no local bounds.`);
-		}
 		if (cell.materials.length !== cell.structure.surfaceSlotCount) {
 			throw new Error(
 				`EnvCell ${cell.id} material count does not match its structure slots.`,
 			);
 		}
-		// Baked lighting is per cell, so shell geometry is keyed per cell rather than shared by
-		// CellStruct identity. Structures are tiny (median 10 vertices, max 113 across the whole
-		// archive), so the duplication is far cheaper than splicing per-cell color streams onto
-		// shared buffers.
-		const bakedLight = bakeStaticLight(
-			cell.structure.geometry.positions,
-			cell.structure.geometry.normals,
-			cell.structureToLandblock.localTransform,
-			landblockLights,
-		);
-		const geometryKey = createObjectGeometryKey(
-			`${cell.structure.geometry.id}/cell:${cell.id}`,
-		);
-		// The compacted index buffer is planned with the ranges that address it, so the two cannot
-		// disagree about triangle order.
-		const { indices, ranges: materialRanges } = planShellDraws(
-			cell,
-			shellTextureRequirements,
-			shellMaterialIds,
-		);
-		if (!shellGeometries.has(geometryKey)) {
-			shellGeometries.set(geometryKey, {
-				key: geometryKey,
-				geometry: objectGeometry(cell.structure.geometry, bakedLight, indices),
+		if (structureLocalBounds === null) {
+			if (geometry.indices.length > 0) {
+				throw new Error(
+					`EnvCell ${cell.id} shell has triangles but no local bounds.`,
+				);
+			}
+			console.warn(
+				`EnvCell ${cell.id} has no renderable shell; retaining its scope without a shell draw.`,
+			);
+		} else {
+			// Baked lighting is per cell, so shell geometry is keyed per cell rather than shared by
+			// CellStruct identity. Structures are tiny (median 10 vertices, max 113 across the whole
+			// archive), so the duplication is far cheaper than splicing per-cell color streams onto
+			// shared buffers.
+			const bakedLight = bakeStaticLight(
+				geometry.positions,
+				geometry.normals,
+				cell.structureToLandblock.localTransform,
+				landblockLights,
+			);
+			const geometryKey = createObjectGeometryKey(
+				`${geometry.id}/cell:${cell.id}`,
+			);
+			// The compacted index buffer is planned with the ranges that address it, so the two cannot
+			// disagree about triangle order.
+			const { indices, ranges: materialRanges } = planShellDraws(
+				cell,
+				shellTextureRequirements,
+				shellMaterialIds,
+			);
+			if (!shellGeometries.has(geometryKey)) {
+				shellGeometries.set(geometryKey, {
+					key: geometryKey,
+					geometry: objectGeometry(geometry, bakedLight, indices),
+				});
+			}
+			shellMaterialRangeCount += materialRanges.length;
+			shells.push({
+				envCellId: cell.id,
+				geometry: geometryKey,
+				placement: cell.structureToLandblock,
+				mapFloor: cell.structure.mapFloor,
+				structureLocalBounds,
+				materialRanges,
 			});
 		}
-		shellMaterialRangeCount += materialRanges.length;
-		shells.push({
-			envCellId: cell.id,
-			geometry: geometryKey,
-			placement: cell.structureToLandblock,
-			mapFloor: cell.structure.mapFloor,
-			structureLocalBounds,
-			landblockBounds: cell.landblockBounds,
-			materialRanges,
-		});
 		scopes.push({
 			scope: {
 				kind: "env-cell",
@@ -213,7 +221,12 @@ export function planEnvCellMaterialization(
 			},
 			landblockBounds: cell.landblockBounds,
 			structureToLandblock: cell.structureToLandblock.localTransform,
-			containmentPlanes: cell.structure.containmentPlanes,
+			// Retail CEnvCell::point_in_cell rejects a missing portal array (acclient.c:333826).
+			// Portal-less visible cells still render; they cannot own fallback point residency.
+			containmentPlanes:
+				cell.structure.portalPolygons.length === 0
+					? null
+					: cell.structure.containmentPlanes,
 			potentiallyVisibleEnvCellIds: cell.potentiallyVisibleEnvCellIds,
 			seenOutside: (cell.flags & ENV_CELL_SEEN_OUTSIDE_FLAG) !== 0,
 			visibilityIslandOrdinal: cell.visibilityIslandOrdinal,

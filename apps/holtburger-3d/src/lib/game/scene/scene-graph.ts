@@ -375,7 +375,10 @@ export class SceneGraph {
 
 	upsertEnvCellScope(input: SceneEnvCellScopeInput): void {
 		this.#envCellScopes.set(input.scope.envCellId, {
-			containmentPlanes: new Float32Array(input.containmentPlanes),
+			containmentPlanes:
+				input.containmentPlanes === null
+					? null
+					: new Float32Array(input.containmentPlanes),
 			landblockBounds: input.landblockBounds?.clone() ?? null,
 			potentiallyVisibleEnvCellIds: new Set(input.potentiallyVisibleEnvCellIds),
 			scope: { ...input.scope },
@@ -585,7 +588,7 @@ export class SceneGraph {
 			scope,
 			structureToLandblock,
 		} of this.#envCellScopes.values()) {
-			if (landblockBounds === null) continue;
+			if (landblockBounds === null || containmentPlanes === null) continue;
 			let localPoint = localPoints.get(scope.landblockId);
 			if (!localPoint) {
 				const origin = createLandblockWorldOrigin(scope.landblockId);
@@ -622,7 +625,9 @@ export class SceneGraph {
 		point: Vec3,
 	): boolean | null {
 		const cell = this.#envCellScopes.get(envCellId);
-		if (!cell?.landblockBounds) return null;
+		if (!cell) return null;
+		if (cell.containmentPlanes === null) return false;
+		if (cell.landblockBounds === null) return null;
 		const origin = createLandblockWorldOrigin(cell.scope.landblockId);
 		const localPoint = new Vec3(
 			point.x - origin.x,

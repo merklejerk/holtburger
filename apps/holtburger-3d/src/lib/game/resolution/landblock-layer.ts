@@ -157,8 +157,8 @@ export interface ResolvedEnvCellPresentation {
 	readonly structure: ResolvedCellStructure;
 	/** Structure-local transform into the containing landblock. */
 	readonly structureToLandblock: ScenePlacement;
-	/** Conservative cell extent already expressed in the containing landblock. */
-	readonly landblockBounds: AABB3;
+	/** Shell extent in the containing landblock, absent for a non-rendering cell. */
+	readonly landblockBounds: AABB3 | null;
 	readonly materials: readonly ResolvedMaterial[];
 	readonly residents: readonly ResolvedEnvCellResidentSource[];
 	readonly potentiallyVisibleEnvCellIds: ReadonlySet<EnvCellId>;

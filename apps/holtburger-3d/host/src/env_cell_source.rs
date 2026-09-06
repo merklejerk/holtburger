@@ -38,7 +38,7 @@ use crate::portal_visibility::{
 use crate::source_projection::{dat_id, render_aabb_json};
 
 pub(crate) const ENV_CELL_RECORD_MAGIC: &[u8; 4] = b"HBEC";
-const ENV_CELL_RECORD_VERSION: u16 = 4;
+const ENV_CELL_RECORD_VERSION: u16 = 5;
 const ENV_CELL_RECORD_HEADER_LENGTH: usize = 16;
 
 /// Placement-rotation tolerance for the map-floor up-axis invariant.
@@ -247,21 +247,23 @@ pub(crate) async fn serialize_env_cell_source_record(
             .flat_map(|cell| placement_values(cell.source.placement)),
     )?;
 
+    // Empty shells have no extent. Keep their cells and topology, and encode bounds only for
+    // structures with render geometry, in cell order (the geometry contract supplies presence).
     let cell_bounds = prepared_cells
         .iter()
         .map(|cell| {
-            let bounds = cell.projection.shell.bounds.with_context(|| {
-                format!(
-                    "EnvCell 0x{:08X} shell has no finite bounds",
-                    cell.source.env_cell_id
-                )
-            })?;
-            Ok(transform_render_bounds(bounds, cell.source.placement))
+            cell.projection
+                .shell
+                .bounds
+                .map(|bounds| transform_render_bounds(bounds, cell.source.placement))
         })
-        .collect::<Result<Vec<_>>>()?;
+        .collect::<Vec<_>>();
     writer.append_f32(
         "cellBounds",
-        cell_bounds.iter().flat_map(|bounds| bounds_values(*bounds)),
+        cell_bounds
+            .iter()
+            .flatten()
+            .flat_map(|bounds| bounds_values(*bounds)),
     )?;
 
     let mut surface_ids = Vec::new();
@@ -727,7 +729,7 @@ struct InternalRelationshipContext<'a> {
     cell_indices: &'a HashMap<u32, usize>,
     aperture_indices_by_cell_polygon: &'a HashMap<(u32, u16), usize>,
     apertures: &'a [PortalAperture],
-    cell_bounds: &'a [RenderAabb],
+    cell_bounds: &'a [Option<RenderAabb>],
 }
 
 fn classify_internal_relationship(
@@ -755,8 +757,8 @@ fn classify_internal_relationship(
         target_aperture: &context.apertures[target_aperture_index],
         source_accepted_side: accepted_plane_side(portal.flags),
         target_accepted_side: accepted_plane_side(target_portal.flags),
-        source_cell_bounds: Some(context.cell_bounds[source_cell_index]),
-        target_cell_bounds: Some(context.cell_bounds[target_cell_index]),
+        source_cell_bounds: context.cell_bounds[source_cell_index],
+        target_cell_bounds: context.cell_bounds[target_cell_index],
     });
     Ok(match classification {
         IndoorSeamClassification::DepthContinuous => CrossingRelationship::IndoorDepthContinuous {

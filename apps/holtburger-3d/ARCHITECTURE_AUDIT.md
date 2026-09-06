@@ -80,7 +80,7 @@ commit, revision, owner, publication, and eviction lifecycle.
 | Boundary                                              | Owned invariant                                                                                                                                         |
 | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `host/src/landblock_source_batch.rs`                  | One cumulative, requested-layer host acquisition with explicit requested/unrequested projections.                                                       |
-| `host/src/env_cell_source.rs`                         | HBEC v2 projection of CellStruct shells, materials, residents, containment, authored apertures, effective visibility apertures, and directed crossings. |
+| `host/src/env_cell_source.rs`                         | HBEC v5 projection of CellStruct shells, materials, residents, containment, authored apertures, effective visibility apertures, and directed crossings. |
 | `host/src/cell_struct_projection.rs`                  | One generalized polygon projection for visible sides, material-free apertures, and the normalized positive-child Cell BSP containment chain.            |
 | `src/lib/assets/decode-env-cell-record.ts`            | Strict, versioned, independently decodable browser boundary; malformed identity, ranges, topology, or geometry fail loudly.                             |
 | `game/commit/env-cell-materialization.ts`             | Renderer-neutral shell, scope, aperture, crossing, and per-cell resident work; no scene or GPU ownership.                                               |
@@ -115,7 +115,7 @@ sequenceDiagram
     Interest->>Pipeline: landblock + EnvCells revision
     Pipeline->>Host: HBLB request including EnvCells
     Host->>Host: resolve interior, CellStructs, materials, residents, portals
-    Host-->>Decoder: HBEC v2 record
+    Host-->>Decoder: HBEC v5 record
     Decoder-->>Planner: ResolvedEnvCellLayerSource
     Planner->>Planner: shells + scopes + crossings + per-cell resident jobs
     Realizer->>Realizer: prepare shared static geometry and atlas requirements
@@ -392,7 +392,9 @@ imports shared behavior through an outdoor-owned module.
 - The old object-only detail owner is gone. Active-region static detail owns building,
   environment, and object roles as one generation.
 - Apertures have `PortalGeometryKey`/`PortalDrawUnit` resources and no textured material ranges.
-- HBEC has one live version, v2. No v1 decoder or compatibility path remains.
+- HBEC has one live version, v5. Cell bounds are packed only for cells whose structure has
+  render geometry; non-rendering cells retain their scope without shell bounds or shell draws.
+  No older decoder or compatibility path remains.
 - Paired renderer apertures, stencil labels, and domain-owned contribution schedules are absent
   from production and tests.
 - `visibilityProvenance` is source-validation evidence. Runtime diagnostics aggregate the resulting

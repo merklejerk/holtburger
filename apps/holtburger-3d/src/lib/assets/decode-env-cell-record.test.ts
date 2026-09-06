@@ -9,6 +9,46 @@ const CELL_ID = 0x00010100;
 const SURFACE_ID = 0x08000001;
 
 describe("decodeEnvCellRecord", () => {
+	it("decodes packed bounds while retaining empty cells", () => {
+		const source = decodeEnvCellRecord(
+			envCellRecord(
+				{
+					cellIds: [CELL_ID, CELL_ID + 1],
+					cellFlags: [0, 0],
+					cellAuthoredIds: [0x100, 0x101],
+					cellStructureIndices: [0, 1],
+					cellIslandIndices: [0, 1],
+					cellPlacements: [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+					cellSurfaceRanges: [0, 0, 0, 1],
+					cellVisibleRanges: [0, 0, 0, 0],
+					cellResidentRanges: [0, 0, 0, 0],
+				},
+				undefined,
+				true,
+			),
+			LAND_BLOCK_ID,
+		);
+		expect(source?.cells).toHaveLength(2);
+		expect(source?.cells[0]?.landblockBounds).toBeNull();
+		expect(source?.cells[1]?.landblockBounds?.max).toMatchObject({
+			x: 1,
+			y: 1,
+			z: 1,
+		});
+	});
+
+	it("rejects missing or unclaimed shell bounds", () => {
+		expect(() =>
+			decodeEnvCellRecord(envCellRecord({ cellBounds: [] }), LAND_BLOCK_ID),
+		).toThrow("shell is missing its bounds");
+		expect(() =>
+			decodeEnvCellRecord(
+				envCellRecord({ cellBounds: [0, 0, 0, 1, 1, 1, 2] }),
+				LAND_BLOCK_ID,
+			),
+		).toThrow("do not cover the bounds section");
+	});
+
 	it("rejects an out-of-range map-floor index", () => {
 		expect(() =>
 			decodeEnvCellRecord(
@@ -136,6 +176,7 @@ interface MutableManifest {
 function envCellRecord(
 	overrides: SectionOverrides = {},
 	mutateManifest?: (manifest: MutableManifest) => void,
+	prependEmptyCell = false,
 ): Uint8Array {
 	const sectionInputs: ReadonlyArray<
 		readonly [string, ScalarType, SectionValues]
@@ -185,45 +226,74 @@ function envCellRecord(
 	);
 	const manifest = baseManifest("present");
 	manifest.cellCount = 1;
-	manifest.structures = [
-		{
-			id: "cell-struct:0d000001/0001",
-			environmentId: "0x0d000001",
-			localSelector: 1,
-			geometry: {
-				id: "geometry:cell-struct/0d000001/0001",
-				sourceAssetId: "cell-struct/0d000001/0001",
-				vertexCount: 3,
-				positionOffset: 0,
-				normalOffset: 0,
-				textureCoordinateOffset: 0,
-				indexOffset: 0,
-				indexCount: 3,
-				materialSlotOffset: 0,
-				materialSlotCount: 1,
-				materialWrapModeOffset: 0,
-				materialWrapModeCount: 1,
-				materialSideKindOffset: 0,
-				materialSideKindCount: 1,
-				materialSideTypeOffset: 0,
-				materialSideTypeCount: 1,
-				materialStipplingOffset: 0,
-				materialStipplingCount: 1,
-				rejectedDegenerateTriangles: [],
-				bounds: { min: [0, 0, 0], max: [1, 1, 0] },
-			},
-			surfaceSlotCount: 1,
-			containmentPlaneOffset: 0,
-			containmentPlaneCount: 1,
+	const structure = {
+		id: "cell-struct:0d000001/0001",
+		environmentId: "0x0d000001",
+		localSelector: 1,
+		geometry: {
+			id: "geometry:cell-struct/0d000001/0001",
+			sourceAssetId: "cell-struct/0d000001/0001",
+			vertexCount: 3,
+			positionOffset: 0,
+			normalOffset: 0,
+			textureCoordinateOffset: 0,
+			indexOffset: 0,
+			indexCount: 3,
+			materialSlotOffset: 0,
+			materialSlotCount: 1,
+			materialWrapModeOffset: 0,
+			materialWrapModeCount: 1,
+			materialSideKindOffset: 0,
+			materialSideKindCount: 1,
+			materialSideTypeOffset: 0,
+			materialSideTypeCount: 1,
+			materialStipplingOffset: 0,
+			materialStipplingCount: 1,
+			rejectedDegenerateTriangles: [],
+			bounds: { min: [0, 0, 0], max: [1, 1, 0] },
+		},
+		surfaceSlotCount: 1,
+		containmentPlaneOffset: 0,
+		containmentPlaneCount: 1,
+		mapFloor: {
+			positionOffset: 0,
+			vertexCount: 3,
+			indexOffset: 0,
+			indexCount: 3,
+		},
+		portalPolygons: [],
+	};
+	manifest.structures = [structure];
+	if (prependEmptyCell) {
+		manifest.cellCount = 2;
+		manifest.structures.unshift({
+			...structure,
+			id: "cell-struct:0d000001/0000",
+			localSelector: 0,
+			surfaceSlotCount: 0,
+			containmentPlaneCount: 0,
 			mapFloor: {
 				positionOffset: 0,
-				vertexCount: 3,
+				vertexCount: 0,
 				indexOffset: 0,
-				indexCount: 3,
+				indexCount: 0,
 			},
-			portalPolygons: [],
-		},
-	];
+			geometry: {
+				...structure.geometry,
+				id: "geometry:cell-struct/0d000001/0000",
+				sourceAssetId: "cell-struct/0d000001/0000",
+				vertexCount: 0,
+				indexCount: 0,
+				materialSlotCount: 0,
+				materialWrapModeCount: 0,
+				materialSideKindCount: 0,
+				materialSideTypeCount: 0,
+				materialStipplingCount: 0,
+				bounds: null,
+			},
+		});
+	}
+
 	manifest.materials = [
 		{
 			id: "surface/08000001",

@@ -158,6 +158,8 @@ describe("ClientPresentationSession", () => {
 		});
 		expect(runtime.clearPresentationCount).toBe(1);
 		expect(runtime.portalTransitions.at(-1)).toBeUndefined();
+		expect(presentation.frame(10_000).status.kind).toBe("error");
+		expect(transport.acknowledgedWorldReveals).toEqual([]);
 		await presentation.destroy();
 	});
 
@@ -504,7 +506,7 @@ describe("ClientPresentationSession", () => {
 		await presentation.destroy();
 	});
 
-	it("keeps the portal presentation active across authority grace until neutral handoff", async () => {
+	it("waits for delayed destination loading before acknowledging reveal", async () => {
 		const playerGuid = 0x0101_0001;
 		const transport = new FakeClientTransport({
 			...currentState(playerGuid),
@@ -527,7 +529,6 @@ describe("ClientPresentationSession", () => {
 		await presentation.start();
 		presentation.frame(1_000);
 		await vi.waitFor(() => expect(runtime.sceneRequests).toHaveLength(1));
-		transport.emit("client-lifecycle-changed", { kind: "in-world" });
 
 		expect(presentation.frame(8_016)).toMatchObject({
 			rendered: true,
@@ -556,6 +557,8 @@ describe("ClientPresentationSession", () => {
 		await vi.waitFor(() =>
 			expect(transport.acknowledgedWorldReveals).toEqual([4]),
 		);
+
+		transport.emit("client-lifecycle-changed", { kind: "in-world" });
 
 		expect(presentation.frame(10_016)).toMatchObject({
 			rendered: true,

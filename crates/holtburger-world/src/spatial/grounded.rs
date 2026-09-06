@@ -353,15 +353,39 @@ pub fn solve_grounded(
     } else {
         active_velocity.z * request.delta_seconds
     };
-    let next_velocity = if accelerated {
-        active_velocity + Vector3::new(0.0, 0.0, config.gravity * request.delta_seconds)
+    // Authored walking contributes displacement, never physical momentum. Keep it out of
+    // contact eligibility and the returned velocity even when this transition leaves support
+    // (CPhysicsObj::UpdatePositionInternal, acclient.c:308275-308304).
+    let physical_velocity = if supported {
+        request.body.velocity
     } else {
         active_velocity
     };
+    let next_velocity = if accelerated {
+        physical_velocity + Vector3::new(0.0, 0.0, config.gravity * request.delta_seconds)
+    } else {
+        physical_velocity
+    };
 
+    // Retail checks the integrated physical velocity against the previous contact before
+    // granting a transition contact/walkable state (check_contact, acclient.c:305016-305028;
+    // get_object_info, :307403-307421). Otherwise outward momentum can skip friction forever
+    // while support projection and walking step-down keep pinning the body to the slope.
+    let releases_contact = request.body.ground.contact_plane().is_some_and(|support| {
+        next_velocity.dot(&support.normal) > super::physical_body::RETAIL_PHYSICS_EPSILON
+    });
+    let (transition_ground, settle) = if releases_contact {
+        let settle = match request.settle {
+            SettlePermission::Walking => SettlePermission::Landing,
+            other => other,
+        };
+        (GroundState::Airborne, settle)
+    } else {
+        (request.body.ground, request.settle)
+    };
     let mut displacement = active_velocity * request.delta_seconds;
     displacement.z = vertical_displacement;
-    if let Some(support) = request.body.ground.walkable_support() {
+    if let Some(support) = transition_ground.walkable_support() {
         displacement = project_into_plane(displacement, support.normal);
     }
     // Retail updates velocity/rotation but skips the collision transition when the proposed
@@ -395,6 +419,7 @@ pub fn solve_grounded(
     let evaluated_substeps = required_substeps.min(config.maximum_substeps);
     let mut body = request.body;
     body.velocity = next_velocity;
+    body.ground = transition_ground;
     // Retail carries one collision normal into the next substep, then clears it before collision
     // is recomputed (`acclient.c:301897-301919`). Keeping an arbitrary plane set for the whole
     // solve wedges finite walls and stair risers long after their authored geometry has ended.
@@ -555,7 +580,7 @@ pub fn solve_grounded(
                 support,
             })
         } else {
-            match request.settle {
+            match settle {
                 // Retail reaches its ordinary step-down branch only while OBJECTINFO state
                 // retains contact (`CTransition::transitional_insert`, acclient.c:301550-301599).
                 // Running the full walking probe after `LeaveGround` snaps an upward launch back
@@ -1312,6 +1337,7 @@ fn validate(config: GroundedConfig, request: &GroundedRequest) -> Result<()> {
 mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
+    use std::time::{Duration, Instant};
 
     use holtburger_common::{Plane, Quaternion, Sphere};
     use holtburger_content::{
@@ -1323,6 +1349,12 @@ mod tests {
     use holtburger_dat::physics::{BspLeaf, BspNode};
 
     use super::*;
+    use crate::{
+        ContactState, GroundedBodyActuation, PhysicalBodyActuation, PhysicalBodyDefinition,
+        PhysicalBodyResponsePolicy, PhysicalBodyResponseState, PhysicalCollisionFilter,
+        PhysicalElasticity, PhysicalFriction, PhysicalRestitution, PhysicalSphereSet,
+        PhysicalSurfaceMotion, SpatialScene,
+    };
 
     const LANDBLOCK: u32 = 0xda55_ffff;
     const EAST: u32 = 0xdb55_ffff;
@@ -1993,6 +2025,150 @@ mod tests {
         assert!((moved.pose.coords - Vector3::new(23.0, 24.0, 0.0)).length() < EPSILON);
         assert!((achieved - Vector3::new(3.0, 4.0, 0.0)).length() < EPSILON);
         assert!(moved.ground.walkable_support().is_some());
+    }
+
+    #[test]
+    fn released_slope_momentum_lands_and_decays_to_rest() {
+        let shallow = ramp(2, 20.0, 80.0, 10.0, 30.0, 30.0);
+        let normal = shallow.shape.as_bsp().unwrap().polygons[&2].normal;
+        let collision = scene(vec![shallow]);
+        let start = Vector3::new(
+            60.0,
+            20.0,
+            20.0 + lower_sphere().radius / normal.z - lower_sphere().center.z,
+        );
+        let mut scene = SpatialScene::default();
+        let now = Instant::now();
+        let id = scene.register_ephemeral_body(pose(start), now);
+        scene
+            .install_physical_body(
+                id,
+                PhysicalBodyDefinition::grounded(
+                    PhysicalSphereSet::new(
+                        Sphere {
+                            center: lower_sphere().center,
+                            radius: lower_sphere().radius,
+                        },
+                        None,
+                    )
+                    .unwrap(),
+                    config(),
+                )
+                .unwrap(),
+                PhysicalCollisionFilter::ALL,
+                PhysicalBodyResponsePolicy {
+                    restitution: PhysicalRestitution::Elastic(
+                        PhysicalElasticity::new(0.05).unwrap(),
+                    ),
+                    friction: PhysicalFriction::DEFAULT,
+                    surface_motion: PhysicalSurfaceMotion::Stable,
+                    align_path: false,
+                },
+                None,
+            )
+            .unwrap();
+        let body = scene.body_mut(id).unwrap();
+        body.contact = ContactState::Grounded;
+        body.retained.velocity = Vector3::new(-3.6, 0.0, 0.0);
+        body.physical.as_mut().unwrap().response = PhysicalBodyResponseState::Grounded {
+            cell: None,
+            ground: GroundState::Supported(GroundSupport {
+                normal,
+                proof: collision.owner_proof(Guid(LANDBLOCK)).unwrap(),
+            }),
+            stationary_fall_frames: 0,
+        };
+        let tick_duration = Duration::from_millis(30);
+        for tick in 1..=200 {
+            scene
+                .tick_physical_body(
+                    id,
+                    &collision,
+                    PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                    tick_duration.as_secs_f32(),
+                    now + tick_duration * tick,
+                )
+                .unwrap();
+        }
+        let settled = scene.body(id).unwrap();
+        assert_eq!(settled.contact, ContactState::Grounded);
+        assert_eq!(settled.retained.velocity, Vector3::zero());
+        assert_eq!(settled.accepted_motion.velocity, Vector3::zero());
+    }
+
+    #[test]
+    fn outward_momentum_leaves_a_ramp_while_authored_walking_stays_on_it() {
+        let shallow = ramp(2, 20.0, 40.0, 10.0, 30.0, 10.0);
+        let normal = shallow.shape.as_bsp().unwrap().polygons[&2].normal;
+        let scene = scene(vec![shallow]);
+        let start = Vector3::new(
+            30.0,
+            20.0,
+            5.0 + lower_sphere().radius / normal.z - lower_sphere().center.z,
+        );
+        let downhill = Vector3::new(-4.0, 0.0, 0.0);
+        for physical_velocity in [Vector3::zero(), downhill] {
+            let mut initial = body(start, Some(normal));
+            initial.velocity = physical_velocity;
+            let (moved, _) = solved(solve(&scene, initial, pair(), downhill, 0.1));
+            assert_eq!(moved.velocity, physical_velocity);
+            if physical_velocity == Vector3::zero() {
+                assert!(moved.ground.walkable_support().is_some());
+                assert!(moved.pose.coords.z < start.z);
+            } else {
+                assert_eq!(moved.ground, GroundState::Airborne);
+                // Gravity was zero on the incoming walkable support; it starts next tick.
+                assert!((moved.pose.coords - (start + downhill * 0.1)).length() < EPSILON);
+            }
+        }
+    }
+
+    #[test]
+    fn tangential_and_inward_momentum_preserve_ramp_contact() {
+        let shallow = ramp(2, 20.0, 40.0, 10.0, 30.0, 10.0);
+        let normal = shallow.shape.as_bsp().unwrap().polygons[&2].normal;
+        let scene = scene(vec![shallow]);
+        let start = Vector3::new(
+            30.0,
+            20.0,
+            5.0 + lower_sphere().radius / normal.z - lower_sphere().center.z,
+        );
+        for velocity in [Vector3::new(0.0, 2.0, 0.0), Vector3::new(4.0, 0.0, 0.0)] {
+            let mut initial = body(start, Some(normal));
+            initial.velocity = velocity;
+            let (moved, _) = solved(solve(&scene, initial, pair(), velocity, 0.1));
+            assert!(moved.ground.walkable_support().is_some());
+            assert_eq!(moved.velocity, velocity);
+        }
+    }
+
+    #[test]
+    fn separating_slide_retains_gravity_while_leaving_contact() {
+        let steep = ramp(2, 20.0, 40.0, 10.0, 30.0, 30.0);
+        let normal = steep.shape.as_bsp().unwrap().polygons[&2].normal;
+        let scene = scene(vec![steep]);
+        let start = Vector3::new(
+            30.0,
+            20.0,
+            15.0 + lower_sphere().radius / normal.z - lower_sphere().center.z,
+        );
+        let mut initial = body(start, Some(normal));
+        initial.ground = GroundState::Sliding(initial.ground.contact_plane().unwrap());
+        initial.velocity = Vector3::new(-4.0, 0.0, 0.0);
+        let delta_seconds = 0.1;
+        let expected_x = start.x + initial.velocity.x * delta_seconds;
+        let expected_velocity =
+            initial.velocity + Vector3::new(0.0, 0.0, config().gravity * delta_seconds);
+        let (moved, _) = solved(solve(
+            &scene,
+            initial,
+            pair(),
+            Vector3::zero(),
+            delta_seconds,
+        ));
+        assert_eq!(moved.ground, GroundState::Airborne);
+        assert_eq!(moved.velocity, expected_velocity);
+        assert!((moved.pose.coords.x - expected_x).abs() < EPSILON);
     }
 
     #[test]

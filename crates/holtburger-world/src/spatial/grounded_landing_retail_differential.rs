@@ -389,7 +389,7 @@ mod scenarios {
     /// once gravity closes the 0.04m reach — a brief, bounded airborne gap, with no bespoke
     /// crest mechanism.
     #[test]
-    fn crest_walk_off_transitions_supported_to_sliding_through_a_bounded_airborne_gap() {
+    fn crest_walk_off_drops_authored_translation_before_landing_on_slide() {
         let scene = ramp_scene(60.0, 30.0);
         // Settle onto the plateau first.
         let mut walker = body(
@@ -403,14 +403,16 @@ mod scenarios {
         assert!(matches!(walker.ground, GroundState::Supported(_)));
 
         // Walk east over the crest at x = 96.
-        let mut airborne_gap = 0usize;
         let mut left_plateau = false;
         for _ in 0..90 {
             walker = tick(&scene, walker, Vector3::new(4.0, 0.0, 0.0));
             match walker.ground {
                 GroundState::Airborne => {
                     left_plateau = true;
-                    airborne_gap += 1;
+                    // Authored translation is not physical momentum. Retail discards further
+                    // walking translation off support (acclient.c:308284-308297).
+                    assert_eq!(walker.velocity.x, 0.0);
+                    assert_eq!(walker.velocity.y, 0.0);
                 }
                 GroundState::Sliding(_) => break,
                 GroundState::Supported(_) => assert!(
@@ -423,14 +425,7 @@ mod scenarios {
             matches!(walker.ground, GroundState::Sliding(_)),
             "walker never entered the slide past the crest"
         );
-        // The gap is real and geometry-dependent: the ballistic body keeps its 4 m/s walk
-        // velocity, and the face recedes at slope 30/24 per meter east, so gravity overtakes at
-        // t ≈ 2·v·slope/g ≈ 1.0s (~31 ticks at 30 Hz). Retail's ballistics are identical; the
-        // bound only guards against the slide never acquiring or acquiring implausibly early.
-        assert!(
-            (25..=40).contains(&airborne_gap),
-            "crest airborne gap outside the ballistic catch-up bound: {airborne_gap} ticks"
-        );
+        assert!(left_plateau, "walking step-down skipped the airborne gap");
     }
 
     /// A ball flank between the thresholds lands as a slide with the radial contact plane — the

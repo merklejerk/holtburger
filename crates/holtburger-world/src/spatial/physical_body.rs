@@ -21,8 +21,8 @@ use super::{
 
 /// Retail's canonical velocity floor (`PhysicsGlobals.SmallVelocity`) squared.
 const RETAIL_SMALL_VELOCITY_SQUARED: f32 = 0.25 * 0.25;
-/// Retail compares the squared speed to the floor with its ordinary physics epsilon.
-const RETAIL_PHYSICS_EPSILON: f32 = 0.000_2;
+/// Retail's tolerance for the squared-speed floor and outward contact velocity.
+pub(super) const RETAIL_PHYSICS_EPSILON: f32 = 0.000_2;
 
 /// Invalid geometry rejected before a body enters authoritative world state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
@@ -1338,21 +1338,16 @@ fn solve_grounded_body_tick(
     let continuous_stable_support = state.ground.walkable_support().is_some()
         && solved.ground.walkable_support().is_some()
         && state.response_policy.surface_motion == PhysicalSurfaceMotion::Stable;
-    let physical_incoming = if continuous_stable_support {
-        retained_velocity
-    } else {
-        // Ballistic integration applies gravity to the retained vector inside `solve_grounded`.
-        // Remove any temporary first-contact drive that was supplied only to discover support.
-        let mut physical = solved.velocity;
-        if body.contact == ContactState::Unknown
-            && state.ground.walkable_support().is_none()
-            && let GroundedSupportedMotion::Driven(drive) = actuation.supported_motion
-        {
-            physical.x -= drive.x;
-            physical.y -= drive.y;
-        }
-        physical
-    };
+    // The solver returns physical momentum independently of supported drive. Remove only the
+    // temporary first-contact drive supplied above to discover support for an unclassified body.
+    let mut physical_incoming = solved.velocity;
+    if body.contact == ContactState::Unknown
+        && state.ground.walkable_support().is_none()
+        && let GroundedSupportedMotion::Driven(drive) = actuation.supported_motion
+    {
+        physical_incoming.x -= drive.x;
+        physical_incoming.y -= drive.y;
+    }
     let collision_response = collision_response(CollisionResponseInput {
         incoming: physical_incoming,
         restitution: state.response_policy.restitution,

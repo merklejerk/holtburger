@@ -143,8 +143,10 @@ export class AtlasPagePublication {
 	 * The page set, binding table, and resource releases still swap atomically. Level-zero
 	 * texels for patched pages land before that swap, in regions the currently published
 	 * layout does not reference, so no reader can observe them until the swap commits.
+	 * Returns whether an already-published, surviving binding changed. New claims have no
+	 * cached consumers yet; withdrawn claims retire their consumers before releasing ownership.
 	 */
-	publish(plan: StableAtlasLayoutPlan, payloads: AtlasPagePayloads): void {
+	publish(plan: StableAtlasLayoutPlan, payloads: AtlasPagePayloads): boolean {
 		const startedAt = performance.now();
 		try {
 			// Patches run before any resource is created so a failed region write leaves both the
@@ -154,12 +156,15 @@ export class AtlasPagePublication {
 			const created = this.#createResources(plan, payloads.built);
 			const oldPages = this.#currentPurposePages(plan.purpose);
 			const nextPages = this.#nextPages(plan, created, oldPages);
-			const nextBindings = this.#nextBindings(plan, nextPages, oldPages);
+			const { bindings, retainedBindingsChanged } = this.#nextBindings(
+				plan,
+				nextPages,
+				oldPages,
+			);
 			this.#pages.clear();
 			for (const [pageId, page] of nextPages) this.#pages.set(pageId, page);
 			this.#bindings.clear();
-			for (const [key, binding] of nextBindings)
-				this.#bindings.set(key, binding);
+			for (const [key, binding] of bindings) this.#bindings.set(key, binding);
 			this.#peakPageBytes = Math.max(
 				this.#peakPageBytes,
 				this.#activePageBytes(),
@@ -169,6 +174,7 @@ export class AtlasPagePublication {
 			// not work that landed, and the caller's rebuild fallback will overwrite them.
 			this.#patchedPageCount += payloads.patched.length;
 			this.#patchedRegionBytes += patchedRegionBytes;
+			return retainedBindingsChanged;
 		} finally {
 			const durationMs = performance.now() - startedAt;
 			this.#publicationDurationMs += durationMs;
@@ -273,22 +279,33 @@ export class AtlasPagePublication {
 		plan: StableAtlasLayoutPlan,
 		nextPages: ReadonlyMap<AtlasPageId, PublishedAtlasPage>,
 		oldPages: readonly PublishedAtlasPage[],
-	): Map<AssetTextureKey, TextureAtlasBinding> {
+	): {
+		/** Complete binding snapshot committed by the publication. */
+		readonly bindings: Map<AssetTextureKey, TextureAtlasBinding>;
+		/** Semantic changes requiring consumers to resolve retained bindings again. */
+		readonly retainedBindingsChanged: boolean;
+	} {
 		const oldResources = new Set(oldPages.map((page) => page.resource));
 		const nextBindings = new Map(this.#bindings);
+		let retainedBindingsChanged = false;
 		for (const [key, binding] of nextBindings) {
 			if (oldResources.has(binding.resource)) nextBindings.delete(key);
 		}
 		for (const page of plan.pages) {
 			const resource = nextPages.get(page.pageId)!.resource;
 			for (const placement of page.placements) {
-				nextBindings.set(placement.key, {
+				const binding: TextureAtlasBinding = {
 					placement: texturePlacement(page.purpose, placement),
 					resource,
-				});
+				};
+				const previous = this.#bindings.get(placement.key);
+				if (previous && !sameBinding(previous, binding)) {
+					retainedBindingsChanged = true;
+				}
+				nextBindings.set(placement.key, binding);
 			}
 		}
-		return nextBindings;
+		return { bindings: nextBindings, retainedBindingsChanged };
 	}
 
 	#releaseSupersededPages(
@@ -332,6 +349,24 @@ export class AtlasPagePublication {
 		this.#releasedPageCount += 1;
 		this.#releasedPageBytes += pageByteLength(page.purpose, this.#pageSize);
 	}
+}
+
+/** Resource replacement invalidates cached device handles even when the rectangle stays put. */
+function sameBinding(
+	left: TextureAtlasBinding,
+	right: TextureAtlasBinding,
+): boolean {
+	const a = left.placement;
+	const b = right.placement;
+	return (
+		left.resource === right.resource &&
+		a.bounds.min.x === b.bounds.min.x &&
+		a.bounds.min.y === b.bounds.min.y &&
+		a.bounds.max.x === b.bounds.max.x &&
+		a.bounds.max.y === b.bounds.max.y &&
+		a.preparation.gutterPixels === b.preparation.gutterPixels &&
+		a.preparation.wrap === b.preparation.wrap
+	);
 }
 
 function pageDiagnostics(

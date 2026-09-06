@@ -1162,10 +1162,10 @@ export class GamePresentationRuntime {
 							workerCount: 2,
 						}),
 						renderResources,
-						// Compaction can move a retained placement, so anything holding a resolved
-						// atlas rect re-resolves it. The renderer may not exist yet during early
+						// Changed retained resources or placements invalidate compiled bindings.
+						// The renderer may not exist yet during early
 						// content load; it holds nothing to invalidate until it does.
-						onLayoutPublished: () =>
+						onRetainedBindingsChanged: () =>
 							this.#renderer?.invalidateResolvedResources?.(
 								"atlas-publication",
 							),

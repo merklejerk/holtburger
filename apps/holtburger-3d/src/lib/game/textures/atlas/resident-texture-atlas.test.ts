@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { SceneInterestRevision } from "../../runtime/scene-availability";
 import type { RenderGeometryData } from "../../renderer/geometry";
 import type {
@@ -259,9 +259,11 @@ describe("ResidentTextureAtlas", () => {
 
 	it("publishes and releases a physical page without transferring its retained source", async () => {
 		const resources = new FixtureRendererResources();
+		const onRetainedBindingsChanged = vi.fn();
 		const atlas = new ResidentTextureAtlas<"building">(
 			new ImmediatePreparer(),
 			{
+				onRetainedBindingsChanged,
 				layoutPlanner: new SizedLayoutPlanner(FIXTURE_PAGE_SIZE),
 				pageBuilder: new FixturePageBuilder(),
 				pageSize: FIXTURE_PAGE_SIZE,
@@ -322,6 +324,7 @@ describe("ResidentTextureAtlas", () => {
 		});
 
 		await atlas.withdrawOwnerRevision(handle);
+		expect(onRetainedBindingsChanged).not.toHaveBeenCalled();
 		expect(atlas.getAtlasBinding(DIRECT_COLOR.key)).toBeNull();
 		expect(resources.released).toEqual([binding!.resource]);
 		expect(atlas.getDiagnostics()).toMatchObject({
@@ -383,11 +386,13 @@ describe("ResidentTextureAtlas", () => {
 		expect(atlas.getAtlasPageDiagnostics()[0]!.pageId).not.toBe(firstPageId);
 	});
 
-	it("skips the page rebuild for a release-only change and rebuilds on a later insert", async () => {
+	it("preserves retained bindings across releases and insertion patches", async () => {
 		const resources = new FixtureRendererResources();
+		const onRetainedBindingsChanged = vi.fn();
 		const atlas = new ResidentTextureAtlas<"first" | "second" | "third">(
 			new ImmediatePreparer(),
 			{
+				onRetainedBindingsChanged,
 				layoutPlanner: new SizedLayoutPlanner(FIXTURE_PAGE_SIZE),
 				pageBuilder: new FixturePageBuilder(),
 				pageSize: FIXTURE_PAGE_SIZE,
@@ -398,6 +403,7 @@ describe("ResidentTextureAtlas", () => {
 			INDEX8,
 		]);
 		await first.completion;
+		const originalBinding = atlas.getAtlasBinding(INDEX8.key);
 		const second = atlas.prepareOwnerRequirements("second", revision(1), [
 			SECOND_INDEX8,
 		]);
@@ -437,6 +443,8 @@ describe("ResidentTextureAtlas", () => {
 			metadataOnlyPageUpdateCount: 1,
 			patchedPageCount: patchedPagesBeforeRelease + 1,
 		});
+		expect(atlas.getAtlasBinding(INDEX8.key)).toEqual(originalBinding);
+		expect(onRetainedBindingsChanged).not.toHaveBeenCalled();
 	});
 
 	it("patches a page to exactly the pixels a whole-page rebuild produces", async () => {
@@ -492,9 +500,13 @@ describe("ResidentTextureAtlas", () => {
 	it("republishes whole pages when a patch cannot be built", async () => {
 		const pageBuilder = new FailingPatchPageBuilder();
 		const resources = new FixtureRendererResources();
+		const onRetainedBindingsChanged = vi.fn(() =>
+			atlas.getAtlasBinding(INDEX8.key),
+		);
 		const atlas = new ResidentTextureAtlas<"first" | "second">(
 			new ImmediatePreparer(),
 			{
+				onRetainedBindingsChanged,
 				layoutPlanner: new SizedLayoutPlanner(FIXTURE_PAGE_SIZE),
 				pageBuilder,
 				pageSize: FIXTURE_PAGE_SIZE,
@@ -506,6 +518,7 @@ describe("ResidentTextureAtlas", () => {
 		]);
 		await first.completion;
 		const originalResource = atlas.getAtlasBinding(INDEX8.key)!.resource;
+		const originalPlacement = atlas.getAtlasBinding(INDEX8.key)!.placement;
 
 		const second = atlas.prepareOwnerRequirements("second", revision(1), [
 			SECOND_INDEX8,
@@ -524,6 +537,14 @@ describe("ResidentTextureAtlas", () => {
 			rebuiltResource,
 		);
 		expect(resources.released).toContain(originalResource);
+		expect(atlas.getAtlasBinding(INDEX8.key)!.placement).toEqual(
+			originalPlacement,
+		);
+		expect(onRetainedBindingsChanged).toHaveBeenCalledTimes(1);
+		// Consumers observe the committed replacement, never the obsolete physical handle.
+		expect(onRetainedBindingsChanged).toHaveReturnedWith(
+			atlas.getAtlasBinding(INDEX8.key),
+		);
 	});
 
 	it("does not plan a compaction for a layout that cannot occupy fewer pages", async () => {
@@ -556,9 +577,11 @@ describe("ResidentTextureAtlas", () => {
 
 	it("accepts a bounded compaction only when it eliminates a page", async () => {
 		const resources = new FixtureRendererResources();
+		const onRetainedBindingsChanged = vi.fn();
 		const atlas = new ResidentTextureAtlas<"first" | "second">(
 			new ImmediatePreparer(),
 			{
+				onRetainedBindingsChanged,
 				layoutPlanner: new FragmentingLayoutPlanner(),
 				pageBuilder: new FixturePageBuilder(),
 				pageSize: FIXTURE_PAGE_SIZE,
@@ -578,6 +601,7 @@ describe("ResidentTextureAtlas", () => {
 		expect(atlas.getAtlasBinding(INDEX8.key)).not.toBeNull();
 		expect(atlas.getAtlasBinding(SECOND_INDEX8.key)).not.toBeNull();
 		expect(resources.released).toEqual(["texture-2d-resource:0"]);
+		expect(onRetainedBindingsChanged).toHaveBeenCalledTimes(1);
 		expect(atlas.getDiagnostics()).toMatchObject({
 			acceptedCompactionCount: 1,
 			eliminatedPageCount: 1,
@@ -586,9 +610,11 @@ describe("ResidentTextureAtlas", () => {
 	});
 
 	it("falls back to stable insertion when optional compaction page building fails", async () => {
+		const onRetainedBindingsChanged = vi.fn();
 		const atlas = new ResidentTextureAtlas<"first" | "second">(
 			new ImmediatePreparer(),
 			{
+				onRetainedBindingsChanged,
 				layoutPlanner: new FragmentingLayoutPlanner(),
 				pageBuilder: new FailingCompactPageBuilder(),
 				pageSize: FIXTURE_PAGE_SIZE,
@@ -608,13 +634,16 @@ describe("ResidentTextureAtlas", () => {
 		expect(atlas.getAtlasBinding(INDEX8.key)).not.toBeNull();
 		expect(atlas.getAtlasBinding(SECOND_INDEX8.key)).not.toBeNull();
 		expect(atlas.getDiagnostics().failedCompactionCount).toBe(1);
+		expect(onRetainedBindingsChanged).not.toHaveBeenCalled();
 	});
 
 	it("rolls back all new resources when a multi-page publication fails", async () => {
 		const resources = new FixtureRendererResources(2);
+		const onRetainedBindingsChanged = vi.fn();
 		const atlas = new ResidentTextureAtlas<"building">(
 			new ImmediatePreparer(),
 			{
+				onRetainedBindingsChanged,
 				layoutPlanner: new SizedLayoutPlanner(FIXTURE_PAGE_SIZE),
 				pageBuilder: new FixturePageBuilder(),
 				pageSize: FIXTURE_PAGE_SIZE,
@@ -638,6 +667,7 @@ describe("ResidentTextureAtlas", () => {
 			releasedPageCount: 1,
 			uploadedPageCount: 1,
 		});
+		expect(onRetainedBindingsChanged).not.toHaveBeenCalled();
 	});
 
 	it("rejects a stale layout result without publishing its withdrawn requirement", async () => {

@@ -22,8 +22,8 @@ export interface CompiledObjectDraw<TCompatibility> {
  * Each value names a real event that can invalidate compiled facts, and exists so a flush is
  * always attributable in diagnostics rather than appearing as unexplained recompilation:
  *
- * - `atlas-publication` — a texture atlas published a new layout. The stable planner never moves a
- *   retained placement, but compaction does, so cached atlas rects can no longer be trusted.
+ * - `atlas-publication` — a texture atlas changed a surviving binding's physical resource or
+ *   placement. In-place insertions and releases that preserve surviving bindings do not flush.
  * - `texture-filtering` — the frontend changed filtering policy, which selects samplers.
  * - `region-static-detail` — the active region's static detail bindings changed.
  * - `env-cell-render-mode` — flat and portal modes disagree about the shell cull-face override.

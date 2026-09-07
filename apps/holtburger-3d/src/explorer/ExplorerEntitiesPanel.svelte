@@ -244,49 +244,51 @@
 </div>
 
 <style>
-	.entities-panel {
-		display: grid;
-		gap: 11px;
-		min-width: 0;
-	}
+	@layer components {
+		.entities-panel {
+			display: grid;
+			gap: 11px;
+			min-width: 0;
+		}
 
-	.population-heading {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto;
-		gap: 8px;
-		align-items: center;
-	}
+		.population-heading {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: 8px;
+			align-items: center;
+		}
 
-	.entities-header {
-		min-width: 0;
-	}
+		.entities-header {
+			min-width: 0;
+		}
 
-	.entities-header p,
-	.population-heading .explorer-section-label,
-	.panel-note {
-		margin: 0;
-	}
+		.entities-header p,
+		.population-heading .explorer-section-label,
+		.panel-note {
+			margin: 0;
+		}
 
-	.entities-header p,
-	.panel-note,
-	.population-heading span {
-		min-width: 0;
-		color: var(--ui-color-muted);
-		font-size: 0.76rem;
-	}
+		.entities-header p,
+		.panel-note,
+		.population-heading span {
+			min-width: 0;
+			color: var(--ui-color-muted);
+			font-size: 0.76rem;
+		}
 
-	.entities-header p {
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
+		.entities-header p {
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
 
-	.entities-header strong {
-		color: var(--ui-color-text);
-		font-weight: 500;
-	}
+		.entities-header strong {
+			color: var(--ui-color-text);
+			font-weight: 500;
+		}
 
-	.invalid {
-		color: var(--ui-color-danger);
+		.invalid {
+			color: var(--ui-color-danger);
+		}
 	}
 </style>

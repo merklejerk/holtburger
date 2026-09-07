@@ -81,14 +81,16 @@
 </svg>
 
 <style>
-	svg {
-		display: block;
-		width: 100%;
-		height: 100%;
-		fill: none;
-		stroke: currentcolor;
-		stroke-width: 1.7;
-		stroke-linecap: round;
-		stroke-linejoin: round;
+	@layer components {
+		svg {
+			display: block;
+			width: 100%;
+			height: 100%;
+			fill: none;
+			stroke: currentcolor;
+			stroke-width: 1.7;
+			stroke-linecap: round;
+			stroke-linejoin: round;
+		}
 	}
 </style>

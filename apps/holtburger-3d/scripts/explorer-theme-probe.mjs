@@ -73,18 +73,22 @@ const waitFor = async (predicate, description) => {
 	}
 	throw new Error("Timed out waiting for " + description);
 };
-const configureTransparency = (reduced) =>
-	read(async (reduced) => {
-		const { applyUiTheme } = await import(
+const configureOverride = (opaque) =>
+	read(async (opaque) => {
+		const { defaultUiThemeUrl } = await import(
 			new URL("/src/app/ui-theme.ts", location.origin).href
 		);
-		const { ESPRESSO_AERO } = await import(
-			new URL("/src/app/themes/espresso-aero.ts", location.origin).href
+		const { uiThemes } = await import(
+			new URL("/src/app/mount.ts", location.origin).href
 		);
-		applyUiTheme(document.documentElement, ESPRESSO_AERO, {
-			reducedTransparency: reduced,
-		});
-	}, reduced);
+		await uiThemes.replace(
+			defaultUiThemeUrl,
+			opaque
+				? new URL("/src/harness/browser/themes/opaque.css", location.origin)
+						.href
+				: null,
+		);
+	}, opaque);
 
 try {
 	client.on("Runtime.exceptionThrown", (event) =>
@@ -146,7 +150,8 @@ try {
 			renderer: debug
 				? gl.getParameter(debug.UNMASKED_RENDERER_WEBGL)
 				: gl.getParameter(gl.RENDERER),
-			theme: document.documentElement.dataset.uiTheme,
+			theme: document.querySelector('link[rel="stylesheet"][media="all"]')
+				?.href,
 			frame: frame.toJSON(),
 		};
 	});
@@ -197,7 +202,7 @@ try {
 			document.querySelector("dialog:modal"),
 			"::backdrop",
 		).backgroundColor,
-		filters: [...document.querySelectorAll(".ui-glass")].map(
+		filters: [...document.querySelectorAll(".ui-panel")].map(
 			(element) => getComputedStyle(element).backdropFilter,
 		),
 	}));
@@ -238,11 +243,11 @@ try {
 	});
 	const samples = [];
 	for (let repetition = 0; repetition < 5; repetition++) {
-		// Alternate order to avoid billing a monotonic thermal change entirely to one preference.
-		for (const reduced of repetition % 2 === 0
+		// Alternate order to avoid billing a monotonic thermal change entirely to one stylesheet selection.
+		for (const opaqueOverride of repetition % 2 === 0
 			? [false, true]
 			: [true, false]) {
-			await configureTransparency(reduced);
+			await configureOverride(opaqueOverride);
 			await delay(500);
 			await click(".explorer-frame-profile-toggle");
 			await click(".explorer-frame-profile-toggle");
@@ -290,7 +295,7 @@ try {
 			stopTrace();
 			if (workload === "modal") {
 				await capture(
-					`modal-sample-${repetition}-${reduced ? "opaque" : "glass"}`,
+					`modal-sample-${repetition}-${opaqueOverride ? "opaque" : "glass"}`,
 				);
 				await click('button[aria-label="Close texture page"]');
 				await tab("frame");
@@ -303,23 +308,29 @@ try {
 					value - before.metrics.find((entry) => entry.name === name).value,
 				]),
 			);
-			const sample = { repetition, reduced, frames, metricDelta, report };
+			const sample = {
+				repetition,
+				opaqueOverride,
+				frames,
+				metricDelta,
+				report,
+			};
 			samples.push(sample);
 			await writeFile(
-				`${outputPrefix}.trace-${repetition}-${reduced ? "opaque" : "glass"}.json`,
+				`${outputPrefix}.trace-${repetition}-${opaqueOverride ? "opaque" : "glass"}.json`,
 				JSON.stringify({ traceEvents }),
 			);
 			console.log(
 				JSON.stringify({
 					repetition,
-					reduced,
+					opaqueOverride,
 					frames: frames.length,
 					taskSeconds: metricDelta.TaskDuration,
 				}),
 			);
 		}
 	}
-	await configureTransparency(false);
+	await configureOverride(false);
 	await capture("frame-profile");
 	const preserved = await read(
 		() =>
@@ -355,7 +366,7 @@ try {
 	console.log("Explorer theme evidence: " + outputPrefix);
 } finally {
 	try {
-		await configureTransparency(false);
+		await configureOverride(false);
 		await read(() => {
 			if (globalThis.__explorerThemeClipboardWrite)
 				navigator.clipboard.writeText =

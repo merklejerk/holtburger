@@ -31,24 +31,26 @@
 {/if}
 
 <style>
-	.layout-handle {
-		position: absolute;
-		z-index: 2;
-		width: 22px;
-		height: 22px;
-		pointer-events: auto;
-	}
-	.layout-move {
-		top: 2px;
-		left: 2px;
-		cursor: grab;
-	}
-	.layout-move:active {
-		cursor: grabbing;
-	}
-	.layout-resize {
-		right: 2px;
-		bottom: 2px;
-		cursor: nwse-resize;
+	@layer components {
+		.layout-handle {
+			position: absolute;
+			z-index: 2;
+			width: 22px;
+			height: 22px;
+			pointer-events: auto;
+		}
+		.layout-move {
+			top: 2px;
+			left: 2px;
+			cursor: grab;
+		}
+		.layout-move:active {
+			cursor: grabbing;
+		}
+		.layout-resize {
+			right: 2px;
+			bottom: 2px;
+			cursor: nwse-resize;
+		}
 	}
 </style>

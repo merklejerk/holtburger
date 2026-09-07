@@ -277,99 +277,101 @@
 </form>
 
 <style>
-	.spawn-composer,
-	.spawn-composer fieldset {
-		min-width: 0;
-	}
+	@layer components {
+		.spawn-composer,
+		.spawn-composer fieldset {
+			min-width: 0;
+		}
 
-	.weenie-picker {
-		position: relative;
-		min-width: 0;
-	}
+		.weenie-picker {
+			position: relative;
+			min-width: 0;
+		}
 
-	.weenie-input {
-		width: 100%;
-		padding-right: 30px;
-	}
+		.weenie-input {
+			width: 100%;
+			padding-right: 30px;
+		}
 
-	.picker-clear {
-		position: absolute;
-		top: 2px;
-		right: 2px;
-		width: 25px;
-		min-height: 24px;
-		padding: 0;
-		border: 0;
-		background: transparent;
-		color: var(--ui-color-muted);
-		font-size: 1.1rem;
-		z-index: 2;
-	}
+		.picker-clear {
+			position: absolute;
+			top: 2px;
+			right: 2px;
+			width: 25px;
+			min-height: 24px;
+			padding: 0;
+			border: 0;
+			background: transparent;
+			color: var(--ui-color-muted);
+			font-size: 1.1rem;
+			z-index: 2;
+		}
 
-	.weenie-results {
-		position: absolute;
-		top: calc(100% + 3px);
-		left: 0;
-		right: 0;
-		z-index: 5;
-		display: grid;
-		max-height: min(260px, 42dvh);
-		margin: 0;
-		padding: 3px;
-		overflow-y: auto;
-		list-style: none;
-	}
+		.weenie-results {
+			position: absolute;
+			top: calc(100% + 3px);
+			left: 0;
+			right: 0;
+			z-index: 5;
+			display: grid;
+			max-height: min(260px, 42dvh);
+			margin: 0;
+			padding: 3px;
+			overflow-y: auto;
+			list-style: none;
+		}
 
-	.weenie-results li {
-		display: grid;
-		gap: 2px;
-		min-width: 0;
-		padding: 6px 7px;
-		border: 1px solid transparent;
-		cursor: pointer;
-	}
+		.weenie-results li {
+			display: grid;
+			gap: 2px;
+			min-width: 0;
+			padding: 6px 7px;
+			border: 1px solid transparent;
+			cursor: pointer;
+		}
 
-	.result-heading {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto;
-		gap: 8px;
-		align-items: baseline;
-	}
+		.result-heading {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: 8px;
+			align-items: baseline;
+		}
 
-	.result-heading strong,
-	.result-class {
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
+		.result-heading strong,
+		.result-class {
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
 
-	.result-heading span,
-	.result-class,
-	.picker-message,
-	.picker-receipt {
-		color: var(--ui-color-muted);
-		font-size: 0.73rem;
-	}
+		.result-heading span,
+		.result-class,
+		.picker-message,
+		.picker-receipt {
+			color: var(--ui-color-muted);
+			font-size: 0.73rem;
+		}
 
-	.picker-message,
-	.picker-receipt {
-		margin: 5px 0 0;
-		overflow-wrap: anywhere;
-	}
+		.picker-message,
+		.picker-receipt {
+			margin: 5px 0 0;
+			overflow-wrap: anywhere;
+		}
 
-	.invalid {
-		color: var(--ui-color-danger);
-	}
+		.invalid {
+			color: var(--ui-color-danger);
+		}
 
-	.spawn-actions {
-		display: grid;
-		grid-template-columns: minmax(0, 7rem) minmax(0, 1fr);
-		gap: 8px;
-		align-items: end;
-		margin-top: 9px;
-	}
+		.spawn-actions {
+			display: grid;
+			grid-template-columns: minmax(0, 7rem) minmax(0, 1fr);
+			gap: 8px;
+			align-items: end;
+			margin-top: 9px;
+		}
 
-	.spawn-actions button {
-		width: 100%;
+		.spawn-actions button {
+			width: 100%;
+		}
 	}
 </style>

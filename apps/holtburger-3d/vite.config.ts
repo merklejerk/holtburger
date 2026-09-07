@@ -8,6 +8,8 @@ const rootDir = fileURLToPath(new URL(".", import.meta.url));
 // https://vite.dev/config/
 export default defineConfig({
 	plugins: [svelte()],
+	// Electron loads built entries from disk; assets must resolve beside those entries.
+	base: "./",
 	build: {
 		rolldownOptions: {
 			input: {

@@ -1,0 +1,86 @@
+/* Holtburger Standard: the app-owned default theme. */
+@layer theme {
+	:root {
+		--ui-color-text: #f4f0e5;
+		--ui-color-muted: #e5ddcb;
+		--ui-color-surface: #242522;
+		--ui-color-well: #362e2a;
+		--ui-color-control: #645631;
+		--holtburger-header-stripe-color: #60432d;
+		--ui-color-border: #c7ba91;
+		--ui-color-highlight: #f2dfa9;
+		--ui-color-shadow: #0d0806;
+		--ui-color-accent: #e6cd8b;
+		--ui-color-active: #c2ffd9;
+		--ui-color-focus: #fff1cc;
+		--ui-color-danger: #ffac9c;
+		--ui-color-warning: #efc46f;
+		--ui-color-success: #bfd398;
+		/* Independent chat colors, initially matching this theme’s existing appearance. */
+		--ui-chat-system-text: #66aaff;
+		--ui-chat-npc-text: #e6cd8b;
+		--ui-chat-error-text: #ffac9c;
+		--ui-chat-combat-text: #ff4444;
+		--ui-chat-trade-text: #efc46f;
+		--ui-chat-emote-text: #bfd398;
+		--ui-chat-party-text: #bfd398;
+		--ui-chat-tell-text: #f0b1e5;
+		--ui-chat-guild-text: #9bdddc;
+		--ui-chat-society-text: #b1c3ff;
+		--ui-color-health: #ff4444;
+		--ui-color-stamina: #dfbd63;
+		--ui-color-mana: #66aaff;
+		--ui-font-body: Arial, Helvetica, sans-serif;
+		--ui-font-heading: Georgia, "Times New Roman", serif;
+		--ui-font-mono: "Courier New", monospace;
+		--ui-radius-surface: 3px;
+		--ui-radius-control: 2px;
+		--holtburger-header-grain-opacity: 0.16;
+		--ui-backdrop-filter: blur(12px);
+		--ui-input-background: #362e2a;
+		/* Full CSS shadow value, shared by panels and the default tooltip recipe. */
+		--ui-surface-shadow: 0 2px 6px #0d080629;
+		--ui-button-background-color: #823a16;
+	}
+	/* Component properties stay the same across states; selectors choose their values.
+	   Equal state specificity lets later hover/press rules provide interaction feedback. */
+	.ui-theme :is(.ui-button, .ui-tab):where(:hover:not(:disabled)) {
+		--ui-button-background-color: color-mix(
+			in srgb,
+			var(--ui-color-control) 88%,
+			var(--ui-color-highlight)
+		);
+	}
+	.ui-theme :is(.ui-button, .ui-tab):where(:active:not(:disabled)) {
+		--ui-button-background-color: var(--ui-color-well);
+	}
+
+	@supports (backdrop-filter: blur(1px)) {
+		:root {
+			--ui-surface-opacity: 0.74;
+		}
+	}
+
+	.ui-theme .ui-frame {
+		/* Restrict the decorative background to the header’s top edge. */
+		background:
+			repeating-linear-gradient(
+					2deg,
+					transparent 0 3px,
+					color-mix(
+							in srgb,
+							var(--ui-color-shadow)
+								calc(var(--holtburger-header-grain-opacity) * 100%),
+							transparent
+						)
+						4px,
+					transparent 6px 9px
+				)
+				top / 100% 3px no-repeat,
+			linear-gradient(
+					var(--holtburger-header-stripe-color),
+					var(--holtburger-header-stripe-color)
+				)
+				top / 100% 3px no-repeat;
+	}
+}

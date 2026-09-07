@@ -483,16 +483,18 @@
 {/if}
 
 <style>
-	.shadow-grid {
-		display: grid;
-		gap: 0.45rem;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-	}
+	@layer components {
+		.shadow-grid {
+			display: grid;
+			gap: 0.45rem;
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
 
-	.shadow-grid input,
-	.shadow-grid select {
-		box-sizing: border-box;
-		min-width: 0;
-		width: 100%;
+		.shadow-grid input,
+		.shadow-grid select {
+			box-sizing: border-box;
+			min-width: 0;
+			width: 100%;
+		}
 	}
 </style>

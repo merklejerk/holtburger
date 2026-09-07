@@ -1,0 +1,21 @@
+/* Independent replacement: intentionally does not import Holtburger Standard. */
+@layer theme {
+	:root {
+		--ui-color-surface: #172530;
+		--ui-color-well: #101a23;
+		--ui-color-control: #304553;
+		--ui-color-accent: #a2d7e9;
+		--ui-color-border: #a2bac7;
+	}
+	.ui-panel {
+		border-style: dashed;
+		box-shadow: none;
+	}
+	.ui-frame {
+		background: none;
+	}
+	.ui-button {
+		border-radius: 8px;
+		font-style: italic;
+	}
+}

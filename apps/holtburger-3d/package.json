@@ -12,6 +12,7 @@
 		"dev": "npm run dev:client",
 		"dev:explorer": "npm run build:electron:main && node scripts/electron-dev-entry.mjs explorer",
 		"dev:client": "npm run build:electron:main && node scripts/electron-dev-entry.mjs client",
+		"dev:ui": "npm run dev:vite -- --open /harness/browser/?ui-showcase=1",
 		"dev:vite": "vite --host 127.0.0.1 --port 0 --strictPort",
 		"dev:vite:explorer": "node scripts/vite-dev-entry.mjs explorer",
 		"dev:vite:client": "node scripts/vite-dev-entry.mjs client",

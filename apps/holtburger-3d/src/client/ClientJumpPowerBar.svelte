@@ -53,7 +53,7 @@
 	<div class="jump-power" aria-label="Jump charge">
 		<div
 			bind:this={trackElement}
-			class="jump-power-track"
+			class="jump-power-track ui-hud-surface"
 			role="progressbar"
 			aria-label="Jump"
 			aria-valuemin="0"
@@ -75,31 +75,33 @@
 {/if}
 
 <style>
-	.jump-power {
-		width: 100%;
-		height: 100%;
-		padding: 4px;
-		display: flex;
-		flex-direction: column;
-		gap: 5px;
-		align-items: center;
-	}
-	.jump-power-track {
-		position: relative;
-		width: 12px;
-		height: 88px;
-		background: var(--ui-hud-backing);
-		overflow: hidden;
-	}
-	.jump-precise {
-		width: 28px;
-		height: 28px;
-		padding: 5px;
-	}
-	.jump-power-fill {
-		position: absolute;
-		bottom: 0;
-		width: 100%;
-		background: var(--ui-color-accent);
+	@layer components {
+		.jump-power {
+			width: 100%;
+			height: 100%;
+			padding: 4px;
+			display: flex;
+			flex-direction: column;
+			gap: 5px;
+			align-items: center;
+		}
+		.jump-power-track {
+			position: relative;
+			width: 12px;
+			height: 88px;
+			background: var(--_ui-hud-background-color);
+			overflow: hidden;
+		}
+		.jump-precise {
+			width: 28px;
+			height: 28px;
+			padding: 5px;
+		}
+		.jump-power-fill {
+			position: absolute;
+			bottom: 0;
+			width: 100%;
+			background: var(--ui-color-accent);
+		}
 	}
 </style>

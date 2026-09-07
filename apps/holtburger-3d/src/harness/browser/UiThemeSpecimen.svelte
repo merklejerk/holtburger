@@ -1,11 +1,11 @@
 <script lang="ts">
 	import { onMount, onDestroy, tick } from "svelte";
 	import LayoutHandleIcon from "../../app/LayoutHandleIcon.svelte";
-	import { ESPRESSO_AERO } from "../../app/themes/espresso-aero";
-	import { applyUiTheme } from "../../app/ui-theme";
-	import { hexRgb } from "../../lib/frontend-color";
+	import { defaultUiThemeUrl } from "../../app/ui-theme";
+	import { uiThemes } from "../../app/mount";
+	import steelUrl from "./themes/steel.css?url&no-inline";
+	import opaqueUrl from "./themes/opaque.css?url&no-inline";
 	import { trackPointerGesture } from "../../app/pointer-gesture";
-	import type { UiTheme } from "../../app/ui-theme-contract";
 	import { CLIENT_UI_DEFAULTS } from "../../client/client-ui-defaults";
 	import {
 		createClientHudLayout,
@@ -14,30 +14,13 @@
 	import ClientHudIcon, {
 		type ClientHudIconName,
 	} from "../../client/ClientHudIcon.svelte";
-	import "../../app/ui-theme-recipes.css";
+	import "../../app/ui-base.css";
 
-	/** Harness-only alternate palette proves the complete-configuration and grain-free paths. */
-	const steel: UiTheme = {
-		...ESPRESSO_AERO,
-		id: "specimen-steel",
-		name: "Texture-free fixture",
-		color: {
-			...ESPRESSO_AERO.color,
-			surface: hexRgb("#172530"),
-			well: hexRgb("#101a23"),
-			control: hexRgb("#304553"),
-			frame: hexRgb("#263e4a"),
-			accent: hexRgb("#a2d7e9"),
-			border: hexRgb("#a2bac7"),
-		},
-		material: { ...ESPRESSO_AERO.material, grain: 0 },
-	};
 	/** Cold specimen controls; none participate in the world renderer's lifecycle. */
 	let background = $state("world");
-	let reducedTransparency = $state(false);
+	let opaqueOverride = $state(false);
 	let alternate = $state(false);
 
-	let selected = $state(true);
 	let channel = $state("Local");
 	/** Representative client shortcuts share their count with layout sizing. */
 	const shortcuts = [
@@ -75,10 +58,11 @@
 	}
 	let cancelGesture: (() => void) | null = null;
 
-	function updateTheme(): void {
-		applyUiTheme(root, alternate ? steel : ESPRESSO_AERO, {
-			reducedTransparency,
-		});
+	function updateTheme(): Promise<void> {
+		return uiThemes.replace(
+			alternate ? steelUrl : defaultUiThemeUrl,
+			opaqueOverride ? opaqueUrl : null,
+		);
 	}
 	/** Exercise the same pointer-gesture ownership as the production HUD without reactive pointer state. */
 	function beginWindowGesture(
@@ -113,58 +97,83 @@
 	}
 	onDestroy(() => cancelGesture?.());
 	onMount(() => {
-		updateTheme();
 		/** Harness commands change only cold appearance state and wait for DOM publication. */
 		const api = {
-			verifyApplication() {
-				const target = document.createElement("section");
-				target.style.width = "123px";
-				const child = document.createElement("input");
-				target.append(child);
-				document.body.append(target);
+			async verifyApplication() {
+				const child = root.querySelector("input");
+				const before = root.style.cssText;
+				const panel = root.querySelector(".ui-panel");
+				const button = root.querySelector(".ui-button");
+				const frame = root.querySelector(".ui-frame");
+				if (!child || !panel || !button || !frame)
+					throw new Error("Missing theme fixture controls.");
+				const inputValue = child.value;
 				try {
-					applyUiTheme(target, ESPRESSO_AERO, { reducedTransparency: false });
-					const before = target.style.cssText;
+					await uiThemes.replace(steelUrl, null);
+					if (
+						getComputedStyle(panel).borderStyle !== "dashed" ||
+						getComputedStyle(frame).backgroundImage !== "none"
+					)
+						throw new Error("Replacement retained default theme decoration.");
+					await uiThemes.replace(steelUrl, opaqueUrl);
+					if (getComputedStyle(button).borderRadius !== "11px")
+						throw new Error("Override did not win.");
+					await uiThemes.replace(steelUrl, null);
+					if (getComputedStyle(button).borderRadius !== "8px")
+						throw new Error("Override removal did not restore theme.");
+					const missingUrl = URL.createObjectURL(
+						new Blob([""], { type: "text/css" }),
+					);
+					URL.revokeObjectURL(missingUrl);
 					let rejected = false;
 					try {
-						applyUiTheme(
-							target,
-							{
-								...ESPRESSO_AERO,
-								radius: { ...ESPRESSO_AERO.radius, surface: -1 },
-							},
-							{ reducedTransparency: false },
-						);
+						await uiThemes.replace(defaultUiThemeUrl, missingUrl);
 					} catch (error) {
 						if (
 							!(error instanceof Error) ||
-							!error.message.includes("radius.surface")
+							!error.message.includes(missingUrl)
 						)
 							throw error;
 						rejected = true;
 					}
-					if (!rejected || target.style.cssText !== before)
-						throw new Error("Invalid theme application was not atomic.");
-					applyUiTheme(target, ESPRESSO_AERO, { reducedTransparency: true });
-					if (target.firstChild !== child || target.style.width !== "123px")
-						throw new Error("Theme application replaced unrelated DOM state.");
+					if (!rejected)
+						throw new Error("Invalid stylesheet load was accepted.");
+					if (getComputedStyle(button).borderRadius !== "8px")
+						throw new Error("Failed load replaced active theme.");
+					if (
+						root.querySelector("input") !== child ||
+						root.style.cssText !== before ||
+						child.value !== inputValue
+					)
+						throw new Error("Theme replaced DOM state.");
+					// Concurrent callers finish in request order, including after a rejected load.
+					await Promise.all([
+						uiThemes.replace(steelUrl, opaqueUrl),
+						uiThemes.replace(steelUrl, null),
+					]);
+					if (getComputedStyle(button).borderRadius !== "8px")
+						throw new Error("Queued theme selection finished out of order.");
 					return {
-						invalidRejectedBeforeMutation: true,
+						queuedSelection: true,
+						replacement: true,
+						overrideRemoval: true,
+						failedLoadPreservedTheme: true,
 						identityPreserved: true,
 					};
 				} finally {
-					target.remove();
+					await uiThemes.dispose();
+					await uiThemes.replace(defaultUiThemeUrl, null);
 				}
 			},
 			async configure(next: {
 				background: string;
-				reducedTransparency: boolean;
+				opaqueOverride: boolean;
 				alternate: boolean;
 			}) {
 				background = next.background;
-				reducedTransparency = next.reducedTransparency;
+				opaqueOverride = next.opaqueOverride;
 				alternate = next.alternate;
-				updateTheme();
+				await updateTheme();
 				await tick();
 			},
 		};
@@ -183,7 +192,7 @@
 	<section class="hud character" style={placement("character")}>
 		<div class="ui-readout identity">
 			<strong>Wayfarer</strong>
-			<span class="ui-muted" data-contrast="secondary glass">(Dereth)</span>
+			<span class="ui-muted" data-contrast="secondary text">(Dereth)</span>
 		</div>
 		<div class="vitals">
 			{#each [{ role: "health", label: "Health", value: 82, height: 16 }, { role: "mana", label: "Mana", value: 91, height: 12 }, { role: "stamina", label: "Stamina", value: 65, height: 8 }] as vital}
@@ -205,18 +214,18 @@
 				</div>
 			{/each}
 		</div>
-		<div class="conditions">
+		<div class="conditions ui-hud-group">
 			{#each ["buffed", "debuffed", "encumbered", "sick"] as const as name}
 				<span class="ui-readout" title={name}><ClientHudIcon {name} /></span>
 			{/each}
 		</div>
 	</section>
 	<section class="hud target" style={placement("selectedEntity")}>
-		<div class="target-row">
+		<div class="target-row ui-hud-group">
 			<button class="ui-hud-button" title="Interact" aria-label="Interact"
 				><ClientHudIcon name="interact" /></button
 			>
-			<strong class="ui-readout" data-contrast="target">Drudge Prowler</strong>
+			<strong data-contrast="target">Drudge Prowler</strong>
 			<button class="ui-hud-button" title="Examine" aria-label="Examine"
 				><ClientHudIcon name="examine" /></button
 			>
@@ -236,7 +245,7 @@
 		<span class="ui-readout" data-contrast="frame rate">120 fps</span>
 	</div>
 	<aside class="specimen-settings ui-well">
-		<strong>{alternate ? steel.name : ESPRESSO_AERO.name}</strong><span
+		<strong>{alternate ? "Steel fixture" : "Holtburger Standard"}</strong><span
 			class="ui-muted">HUD material study</span
 		>
 		<label class="settings-row"
@@ -249,24 +258,24 @@
 		<div class="button-row">
 			<button
 				class="ui-button"
-				aria-pressed={reducedTransparency}
-				onclick={() => {
-					reducedTransparency = !reducedTransparency;
-					updateTheme();
-				}}>Opaque</button
+				aria-pressed={opaqueOverride}
+				onclick={async () => {
+					opaqueOverride = !opaqueOverride;
+					await updateTheme();
+				}}>Opaque override</button
 			>
 			<button
 				class="ui-button"
 				aria-pressed={alternate}
-				onclick={() => {
+				onclick={async () => {
 					alternate = !alternate;
-					updateTheme();
-				}}>Texture-free</button
+					await updateTheme();
+				}}>Steel theme</button
 			>
 		</div>
 		<span class="ui-muted">Specimen controls · not saved</span>
 	</aside>
-	<section class="ui-glass hud controls" style={placement("diagnostics")}>
+	<section class="ui-panel hud controls" style={placement("diagnostics")}>
 		<header class="ui-frame title-row">
 			<h3>Control states</h3>
 			<span class="ui-muted">Specimen</span>
@@ -277,11 +286,7 @@
 					class="ui-button"
 					data-hover>Hover</button
 				><button class="ui-button" data-pressed>Pressed</button>
-				<button
-					class="ui-button"
-					aria-pressed={selected}
-					onclick={() => (selected = !selected)}>✓ Selected</button
-				><button class="ui-button" disabled data-contrast="disabled"
+				<button class="ui-button" disabled data-contrast="disabled"
 					>Disabled</button
 				><button class="ui-button" data-focus>Focus</button>
 			</div>
@@ -316,7 +321,7 @@
 		</div>
 	</section>
 	<section class="hud chat-overlay" style={placement("chat")}>
-		<div class="chat-lines">
+		<div class="chat-lines ui-hud-surface">
 			<p class="ui-muted">[20:41] You have entered Yaraq.</p>
 			<p data-contrast="chat">[20:42] A traveler says, “Room by the fire?”</p>
 			<p class="ui-success">[20:42] Your fellowship has been formed.</p>
@@ -327,11 +332,11 @@
 					: "[20:44] The lanterns sway in the breeze."}
 			</p>
 		</div>
-		<div class="chat-filters">
+		<div class="chat-filters ui-hud-surface">
 			<div class="ui-tabs" role="tablist" aria-label="Chat channel">
 				{#each ["Local", "Allegiance", "Tells"] as name}
 					<button
-						class="ui-hud-button"
+						class="ui-tab"
 						role="tab"
 						aria-selected={channel === name}
 						onclick={() => (channel = name)}>{name}</button
@@ -340,7 +345,7 @@
 			</div>
 		</div>
 		<form
-			class="chat-entry"
+			class="chat-entry ui-hud-surface"
 			onsubmit={(event) => {
 				event.preventDefault();
 				sent = true;
@@ -376,7 +381,7 @@
 			>
 		{/each}
 	</nav>
-	<section class="ui-glass overlap-window" data-overlap>
+	<section class="ui-panel overlap-window" data-overlap>
 		<header
 			class="ui-frame"
 			role="toolbar"
@@ -388,7 +393,7 @@
 		</header>
 		<div class="ui-body stack">
 			<p data-contrast="overlap">
-				Walnut edges. Smoked glass.<br />The world takes the space.
+				Field notes stay close.<br />The world takes the space.
 			</p>
 			<button class="ui-button" data-overlap-button>Keep exploring</button>
 		</div>
@@ -410,211 +415,216 @@
 </main>
 
 <style>
-	.specimen {
-		position: fixed;
-		inset: 0;
-		z-index: 40;
-		pointer-events: none;
-	}
-	.specimen[data-background="bright"] {
-		background: #fff8e8;
-	}
-	.specimen[data-background="dark"] {
-		background: #080b10;
-	}
-	.hud {
-		position: absolute;
-		pointer-events: auto;
-		box-sizing: border-box;
-	}
+	@layer components {
+		.specimen {
+			position: fixed;
+			inset: 0;
+			z-index: 40;
+			pointer-events: none;
+		}
+		.specimen[data-background="bright"] {
+			background: #fff8e8;
+		}
+		.specimen[data-background="dark"] {
+			background: #080b10;
+		}
+		.hud {
+			position: absolute;
+			pointer-events: auto;
+			box-sizing: border-box;
+		}
 
-	.identity {
-		width: fit-content;
-		margin-bottom: 4px;
-	}
-	.title-row,
-	.button-row {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 6px;
-	}
-	.vitals {
-		display: grid;
-		gap: 2px;
-	}
-	.vitals .ui-meter {
-		position: relative;
-	}
-	.health-value {
-		position: absolute;
-		top: 0;
-		left: 50%;
-		transform: translateX(-50%);
-		padding: 0 3px;
-		font-size: 11px;
-		line-height: 16px;
-	}
-	.conditions {
-		display: flex;
-		gap: 6px;
-		margin-top: 6px;
-	}
-	.conditions .ui-readout {
-		padding: 3px;
-		opacity: 0.7;
-	}
-	.conditions :global(svg) {
-		width: 16px;
-		height: 16px;
-	}
-	.target-row {
-		display: grid;
-		grid-template-columns: 24px 1fr 24px;
-		align-items: center;
-		gap: 4px;
-	}
-	.target-row strong {
-		text-align: center;
-	}
-	.target .ui-meter {
-		height: 5px;
-		margin-top: 3px;
-	}
-	.fps {
-		text-align: center;
-		font-size: 12px;
-	}
-	.specimen-settings {
-		position: absolute;
-		right: 48px;
-		top: 16px;
-		width: 220px;
-		display: grid;
-		gap: 6px;
-		pointer-events: auto;
-		font-size: 12px;
-	}
-	.settings-row,
-	.field-row {
-		display: grid;
-		grid-template-columns: 52px 1fr;
-		gap: 6px;
-		align-items: center;
-	}
-	.stack {
-		display: grid;
-		gap: 6px;
-	}
-	.state-grid {
-		display: grid;
-		grid-template-columns: repeat(3, 1fr);
-		gap: 6px;
-	}
-	.statuses {
-		line-height: 1.5;
-	}
+		.identity {
+			width: fit-content;
+			margin-bottom: 4px;
+		}
+		.title-row,
+		.button-row {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 6px;
+		}
+		.vitals {
+			display: grid;
+			gap: 2px;
+		}
+		.vitals .ui-meter {
+			position: relative;
+		}
+		.health-value {
+			position: absolute;
+			top: 0;
+			left: 50%;
+			transform: translateX(-50%);
+			padding: 0 3px;
+			font-size: var(--ui-font-size-micro);
+			line-height: 16px;
+		}
+		.conditions {
+			display: flex;
+			gap: 6px;
+			margin-top: 6px;
+			width: fit-content;
+		}
+		.conditions .ui-readout {
+			padding: 3px;
+			opacity: 0.7;
+		}
+		.conditions :global(svg) {
+			width: 16px;
+			height: 16px;
+		}
+		.target-row {
+			display: grid;
+			grid-template-columns: 24px 1fr 24px;
+			align-items: center;
+			gap: 4px;
+		}
+		.target-row strong {
+			text-align: center;
+		}
+		.target .ui-meter {
+			height: 5px;
+			margin-top: 3px;
+		}
+		.fps {
+			text-align: center;
+			font-size: var(--ui-font-size-caption);
+		}
+		.specimen-settings {
+			position: absolute;
+			right: 48px;
+			top: 16px;
+			width: 220px;
+			display: grid;
+			gap: 6px;
+			pointer-events: auto;
+			font-size: var(--ui-font-size-caption);
+		}
+		.settings-row,
+		.field-row {
+			display: grid;
+			grid-template-columns: 52px 1fr;
+			gap: 6px;
+			align-items: center;
+		}
+		.stack {
+			display: grid;
+			gap: 6px;
+		}
+		.state-grid {
+			display: grid;
+			grid-template-columns: repeat(3, 1fr);
+			gap: 6px;
+		}
+		.statuses {
+			line-height: 1.5;
+		}
 
-	.chat-overlay {
-		display: flex;
-		flex-direction: column;
-		pointer-events: none;
-	}
-	.chat-lines p {
-		pointer-events: auto;
-	}
-	.chat-lines {
-		flex: 1;
-		min-height: 0;
-		overflow: auto;
-		display: flex;
-		flex-direction: column;
-		justify-content: end;
-		padding: 8px;
-		line-height: 1.5;
-		background: linear-gradient(
-			to bottom,
-			transparent,
-			var(--ui-hud-backing) 60%
-		);
-		text-shadow: 0 1px 2px var(--ui-color-shadow);
-	}
-	.chat-overlay:focus-within .chat-lines {
-		background: var(--ui-hud-backing);
-	}
-	.chat-filters {
-		padding: 0 3px;
-		background: var(--ui-hud-backing);
-		pointer-events: auto;
-	}
-	.chat-filters .ui-tabs {
-		padding: 0;
-		gap: 2px;
-	}
-	.chat-entry {
-		display: grid;
-		grid-template-columns: 1fr 26px;
-		gap: 3px;
-		padding: 3px;
-		background: var(--ui-hud-backing);
-		pointer-events: auto;
-	}
-	.chat-entry :global(svg) {
-		width: 16px;
-		height: 16px;
-	}
-	.notification {
-		display: grid;
-		place-content: center;
-		pointer-events: none;
-	}
-	.notification .ui-readout {
-		pointer-events: auto;
-	}
-	.shortcuts {
-		display: flex;
-		gap: 5px;
-		align-items: end;
-	}
-	.shortcuts .ui-hud-button {
-		flex: 1;
-		min-width: 0;
-		padding: 6px;
-	}
-	.shortcuts :global(svg) {
-		width: 22px;
-		height: 22px;
-	}
-	.overlap-window {
-		position: absolute;
-		left: calc(100% - 530px);
-		top: 140px;
-		width: 240px;
-		height: 142px;
-		min-width: 220px;
-		min-height: 140px;
-		pointer-events: auto;
-	}
-	.overlap-window header {
-		cursor: move;
-		touch-action: none;
-	}
-	.overlap-window .ui-body {
-		padding-right: 40px;
-	}
-	.specimen-resize {
-		width: 22px;
-		height: 22px;
-		position: absolute;
-		bottom: 8px;
-		right: 8px;
-		cursor: nwse-resize;
-		touch-action: none;
-	}
-	.specimen-tooltip {
-		pointer-events: auto;
-		position: absolute;
-		left: calc(50% - 94px);
-		top: 122px;
+		.chat-overlay {
+			display: flex;
+			flex-direction: column;
+			pointer-events: none;
+		}
+		.chat-lines p {
+			pointer-events: auto;
+		}
+		.chat-lines {
+			flex: 1;
+			min-height: 0;
+			overflow: auto;
+			display: flex;
+			flex-direction: column;
+			justify-content: end;
+			padding: 8px;
+			line-height: 1.5;
+			background: linear-gradient(
+				to bottom,
+				transparent,
+				var(--_ui-hud-background-color) 60%
+			);
+			mask-image: linear-gradient(to bottom, transparent, black 34%, black);
+			text-shadow: 0 1px 2px var(--ui-color-shadow);
+		}
+		.chat-overlay:focus-within .chat-lines {
+			mask-image: none;
+			background: var(--_ui-hud-background-color);
+		}
+		.chat-filters {
+			padding: 0 3px;
+			background: var(--_ui-hud-background-color);
+			pointer-events: auto;
+		}
+		.chat-filters .ui-tabs {
+			padding: 0;
+			gap: 2px;
+		}
+		.chat-entry {
+			display: grid;
+			grid-template-columns: 1fr 26px;
+			gap: 3px;
+			padding: 3px;
+			background: var(--_ui-hud-background-color);
+			pointer-events: auto;
+		}
+		.chat-entry :global(svg) {
+			width: 16px;
+			height: 16px;
+		}
+		.notification {
+			display: grid;
+			place-content: center;
+			pointer-events: none;
+		}
+		.notification .ui-readout {
+			pointer-events: auto;
+		}
+		.shortcuts {
+			display: flex;
+			gap: 5px;
+			align-items: end;
+		}
+		.shortcuts .ui-hud-button {
+			flex: 1;
+			min-width: 0;
+			padding: 6px;
+		}
+		.shortcuts :global(svg) {
+			width: 22px;
+			height: 22px;
+		}
+		.overlap-window {
+			position: absolute;
+			left: calc(100% - 530px);
+			top: 140px;
+			width: 240px;
+			height: 142px;
+			min-width: 220px;
+			min-height: 140px;
+			pointer-events: auto;
+		}
+		.overlap-window header {
+			cursor: move;
+			touch-action: none;
+		}
+		.overlap-window .ui-body {
+			padding-right: 40px;
+		}
+		.specimen-resize {
+			width: 22px;
+			height: 22px;
+			position: absolute;
+			bottom: 8px;
+			right: 8px;
+			cursor: nwse-resize;
+			touch-action: none;
+		}
+		.specimen-tooltip {
+			pointer-events: auto;
+			position: absolute;
+			left: calc(50% - 94px);
+			top: 122px;
+		}
 	}
 </style>

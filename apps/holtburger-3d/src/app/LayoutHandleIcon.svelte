@@ -14,15 +14,17 @@
 </svg>
 
 <style>
-	svg {
-		display: block;
-		width: 12px;
-		height: 12px;
-		fill: none;
-		stroke: currentcolor;
-		stroke-linecap: round;
-		stroke-linejoin: round;
-		stroke-width: 1.35;
-		pointer-events: none;
+	@layer components {
+		svg {
+			display: block;
+			width: 12px;
+			height: 12px;
+			fill: none;
+			stroke: currentcolor;
+			stroke-linecap: round;
+			stroke-linejoin: round;
+			stroke-width: 1.35;
+			pointer-events: none;
+		}
 	}
 </style>

@@ -1,0 +1,457 @@
+@layer base {
+	:root {
+		/* Component tokens are optional: resolve their palette defaults at the consumer. */
+		--ui-backdrop-filter: none;
+		/* Tint opacity for default panel/HUD backgrounds; explicit backgrounds bypass it. */
+		--ui-surface-opacity: 1;
+		--ui-color-text: #f4f0e5;
+		--ui-color-muted: #e5ddcb;
+		--ui-color-surface: #242424;
+		--ui-color-well: #181818;
+		--ui-color-control: #444444;
+		--ui-color-border: #b8b8b8;
+		--ui-color-highlight: #f2dfa9;
+		--ui-color-shadow: #0d0806;
+		--ui-color-accent: #c8d8ef;
+		/* Foreground color for controls in an active/open state. */
+		--ui-color-active: #90cdd1;
+		--ui-color-focus: #fff1cc;
+		--ui-color-danger: #ffac9c;
+		--ui-color-warning: #efc46f;
+		--ui-color-success: #bfd398;
+		/* Chat category colors are independent of vital bars and status feedback. */
+		--ui-chat-system-text: #87bddd;
+		--ui-chat-npc-text: #c8d8ef;
+		--ui-chat-error-text: #ffac9c;
+		--ui-chat-combat-text: #dc796a;
+		--ui-chat-trade-text: #efc46f;
+		--ui-chat-emote-text: #bfd398;
+		--ui-chat-party-text: #bfd398;
+		--ui-chat-tell-text: #f0b1e5;
+		--ui-chat-guild-text: #9bdddc;
+		--ui-chat-society-text: #b1c3ff;
+		--ui-color-health: #dc796a;
+		--ui-color-stamina: #dfbd63;
+		--ui-color-mana: #87bddd;
+		--ui-font-body: Arial, Helvetica, sans-serif;
+		--ui-font-heading: Georgia, "Times New Roman", serif;
+		--ui-font-mono: "Courier New", monospace;
+		--ui-font-size-body: 13px;
+		--ui-font-size-heading-1: 20px;
+		--ui-font-size-heading-2: 16px;
+		--ui-font-size-heading-3: 14px;
+		--ui-font-size-caption: 12px;
+		--ui-font-size-micro: 11px;
+		--ui-line-height-body: 1.35;
+		--ui-line-height-heading: 1.25;
+		--ui-radius-surface: 3px;
+		--ui-radius-control: 2px;
+		/* Shared easing for small interactive embellishments. */
+		--ui-easing: cubic-bezier(0.238, 0.55, 0.546, 1.361);
+		--ui-hud-background-color: #00000044;
+	}
+	@supports (backdrop-filter: blur(1px)) {
+		.ui-theme .ui-panel {
+			backdrop-filter: var(--ui-backdrop-filter);
+		}
+		/* Filter the owning backing, keeping foreground text and glyphs sharp. */
+		.ui-theme :is(.ui-hud-surface, .ui-meter),
+		.ui-theme :is(.ui-readout, .ui-hud-group, .ui-hud-button)::before {
+			backdrop-filter: var(--ui-backdrop-filter);
+		}
+	}
+	/* A nested surface reuses the ancestor's backdrop; modal dialogs escape that composition. */
+	.ui-theme
+		:is(.ui-panel, .ui-hud-surface, .ui-meter)
+		:is(.ui-panel:not(:modal), .ui-hud-surface, .ui-meter),
+	.ui-theme
+		:is(.ui-panel, .ui-hud-surface, .ui-meter)
+		:is(.ui-readout, .ui-hud-group, .ui-hud-button)::before {
+		backdrop-filter: none;
+	}
+
+	/* Resolve the tint on each owning surface, after its local palette overrides.
+	   Components reuse this private color for flat fills and chat gradients. */
+	.ui-theme
+		:is(
+			.ui-hud-surface,
+			.ui-meter,
+			.ui-readout,
+			.ui-hud-group,
+			.ui-hud-button
+		) {
+		--_ui-hud-background-color: var(
+			--ui-hud-background-color,
+			color-mix(
+				in srgb,
+				var(--ui-color-surface) calc(var(--ui-surface-opacity) * 100%),
+				transparent
+			)
+		);
+	}
+
+	/* Shared appearance recipes for both app entries and isolated diagnostic roots. */
+	.ui-theme {
+		color: var(--ui-color-text);
+		font: var(--ui-font-size-body) / var(--ui-line-height-body)
+			var(--ui-font-body);
+		color-scheme: dark;
+	}
+
+	.ui-theme :where(h1, h2, h3, p) {
+		margin: 0;
+	}
+	.ui-theme :where(h1, h2, h3) {
+		color: var(--ui-color-text);
+		font-family: var(--ui-font-heading);
+		font-weight: 400;
+		text-shadow: none;
+		letter-spacing: normal;
+		line-height: var(--ui-line-height-heading);
+	}
+	.ui-theme h1 {
+		font-size: var(--ui-font-size-heading-1);
+	}
+	.ui-theme h2 {
+		font-size: var(--ui-font-size-heading-2);
+	}
+	.ui-theme h3 {
+		font-size: var(--ui-font-size-heading-3);
+	}
+	.ui-theme .ui-muted {
+		color: var(--ui-color-muted);
+	}
+	.ui-theme .ui-mono {
+		font-family: var(--ui-font-mono);
+		font-variant-numeric: tabular-nums;
+	}
+
+	/* Opaque is the baseline. Feature support opts into transparency, never the reverse. */
+	.ui-theme .ui-panel {
+		border: 1px solid var(--ui-color-border);
+		border-radius: var(--ui-radius-surface);
+		background: var(
+			--ui-panel-background,
+			color-mix(
+				in srgb,
+				var(--ui-color-surface) calc(var(--ui-surface-opacity) * 100%),
+				transparent
+			)
+		);
+		box-shadow: var(--ui-surface-shadow, none);
+	}
+	.ui-theme .ui-panel .ui-panel:not(:modal) {
+		background: var(--ui-panel-background, var(--ui-color-surface));
+	}
+	.ui-theme .ui-frame {
+		padding: 4px 8px;
+		border-radius: var(--ui-radius-surface) var(--ui-radius-surface) 0 0;
+		border-bottom: 1px solid var(--ui-color-border);
+
+		box-shadow: none;
+	}
+	.ui-theme .ui-body {
+		padding: 8px;
+	}
+	.ui-theme .ui-well {
+		background: var(--ui-color-well);
+		border: 1px solid var(--ui-color-border);
+		border-radius: var(--ui-radius-control);
+		padding: 6px;
+		box-shadow: none;
+	}
+
+	.ui-theme .ui-button,
+	.ui-theme .ui-tab {
+		min-height: 24px;
+		padding: 2px 7px;
+		border: 1px solid var(--ui-button-border-color, var(--ui-color-border));
+		border-radius: var(--ui-radius-control);
+		background: var(--ui-button-background-color, var(--ui-color-control));
+		box-shadow: none;
+		color: var(--ui-color-text);
+		font: inherit;
+		text-shadow: none;
+		cursor: pointer;
+		transition:
+			color 100ms,
+			border-color 100ms;
+	}
+	.ui-theme .ui-layout-editable {
+		outline: 1px dashed var(--ui-color-accent);
+		outline-offset: 3px;
+	}
+	/* Compact icon controls center independently of font metrics and text-button padding. */
+	.ui-theme .ui-button.ui-icon-button {
+		display: grid;
+		place-items: center;
+		min-height: 0;
+		padding: 0;
+	}
+	/* State rules change defaults, not the property vocabulary. Explicit component
+	   variables are consumed in every state; themes select their values with CSS. */
+	.ui-theme
+		:is(.ui-button, .ui-tab):where(
+			[aria-selected="true"]:not(:disabled),
+			[aria-pressed="true"]:not(:disabled)
+		) {
+		border-color: var(--ui-button-border-color, var(--ui-color-accent));
+	}
+	.ui-theme :is(.ui-button, .ui-tab):where(:hover:not(:disabled)) {
+		border-color: var(--ui-button-border-color, var(--ui-color-accent));
+		background: var(
+			--ui-button-background-color,
+			color-mix(in srgb, var(--ui-color-control) 88%, var(--ui-color-highlight))
+		);
+	}
+	.ui-theme :is(.ui-button, .ui-tab):where(:active:not(:disabled)) {
+		background: var(--ui-button-background-color, var(--ui-color-well));
+	}
+	.ui-theme :is(.ui-button, .ui-tab):where(:disabled) {
+		color: var(--ui-color-muted);
+		background: hsl(
+			from var(--ui-button-background-color, var(--ui-color-surface)) h
+				calc(s * 0.1) l
+		);
+		cursor: not-allowed;
+		opacity: 1;
+	}
+	.ui-theme .ui-option {
+		color: var(--ui-color-text);
+		background: var(--ui-option-background, transparent);
+		border-color: var(--ui-option-border-color, var(--ui-color-border));
+	}
+	.ui-theme .ui-option:where([aria-selected="true"]) {
+		background: var(--ui-option-background, var(--ui-color-control));
+		border-color: var(--ui-option-border-color, var(--ui-color-accent));
+	}
+	.ui-theme .ui-input {
+		width: 100%;
+		min-height: 24px;
+		padding: 2px 6px;
+		border: 1px solid var(--ui-input-border-color, var(--ui-color-border));
+		border-radius: var(--ui-radius-control);
+		background: var(--ui-input-background, var(--ui-color-well));
+		color: var(--ui-color-text);
+		box-shadow: none;
+		font: inherit;
+	}
+	.ui-theme .ui-input::placeholder {
+		color: var(--ui-color-muted);
+		opacity: 1;
+	}
+	/* Chat editing is a transparent HUD input, not a recessed window field. */
+	.ui-theme .ui-input.ui-hud-input {
+		border: 0;
+		border-radius: 0;
+		background: var(--ui-input-background, transparent);
+		box-shadow: none;
+	}
+	.ui-theme .ui-input:disabled {
+		color: var(--ui-color-muted);
+		cursor: not-allowed;
+	}
+	.ui-theme .ui-input[aria-invalid="true"] {
+		border-color: var(--ui-input-border-color, var(--ui-color-danger));
+	}
+	.ui-theme :is(.ui-button, .ui-tab, .ui-option, .ui-input):focus-visible {
+		outline: 2px solid var(--ui-color-focus);
+		outline-offset: 2px;
+	}
+	.ui-theme .ui-label {
+		display: grid;
+		gap: 4px;
+		min-width: 0;
+	}
+	/* Native controls retain browser behavior; only their shared color/focus changes. */
+	.ui-theme input:is([type="range"], [type="checkbox"]) {
+		accent-color: var(--ui-color-accent);
+	}
+	.ui-theme
+		:is(input[type="range"], input[type="checkbox"], summary):focus-visible {
+		outline: 2px solid var(--ui-color-focus);
+		outline-offset: 2px;
+	}
+	.ui-theme input[type="range"]:disabled {
+		cursor: not-allowed;
+	}
+	.ui-theme .ui-disclosure {
+		border-top: 1px solid var(--ui-color-border);
+	}
+	.ui-theme .ui-disclosure > summary {
+		color: var(--ui-color-accent);
+		cursor: pointer;
+		font-family: var(--ui-font-heading);
+	}
+	.ui-theme dialog::backdrop {
+		background: color-mix(in srgb, var(--ui-color-shadow) 70%, transparent);
+	}
+	.ui-theme .ui-tabs {
+		display: flex;
+		gap: 4px;
+		padding-bottom: 4px;
+	}
+	.ui-theme .ui-tab {
+		border-radius: var(--ui-radius-control) var(--ui-radius-control) 0 0;
+	}
+
+	.ui-theme .ui-meter {
+		height: 12px;
+		overflow: hidden;
+		border: 0;
+		border-radius: 0;
+		background: var(--_ui-hud-background-color);
+		box-shadow: none;
+	}
+
+	/* Backing for HUD readouts, grouped content, and icon actions. */
+	.ui-theme :where(.ui-readout, .ui-hud-group, .ui-hud-button) {
+		/* Decoration needs a containing block, but component-owned placement must win. */
+		position: relative;
+	}
+	.ui-theme .ui-readout,
+	.ui-theme .ui-hud-button {
+		isolation: isolate;
+		background: transparent;
+		color: var(--ui-color-text);
+		border: 0;
+		border-radius: 0;
+		box-shadow: none;
+		padding: 2px 5px;
+		font: inherit;
+		text-shadow: 0 1px 2px var(--ui-color-shadow);
+	}
+	.ui-theme .ui-readout {
+		padding-inline: calc(14px + 5px);
+	}
+	.ui-theme .ui-hud-group {
+		isolation: isolate;
+		background: transparent;
+		color: var(--ui-color-text);
+		padding-inline: 14px;
+		text-shadow: 0 1px 2px var(--ui-color-shadow);
+	}
+	/* Feather the backing so fading edges never wash out content.
+	   Readouts and groups keep the horizontal fade inside their owner. */
+	.ui-theme .ui-readout::before,
+	.ui-theme .ui-hud-group::before,
+	.ui-theme .ui-hud-button::before {
+		content: "";
+		position: absolute;
+		inset: -6px -14px;
+		z-index: -1;
+		pointer-events: none;
+		background: var(--_ui-hud-background-color);
+		/* Mask both the tint and its backdrop filter so blur follows the feathered edges. */
+		mask-image: linear-gradient(
+			to right,
+			transparent,
+			black 14px,
+			black calc(100% - 14px),
+			transparent 100%
+		);
+		mask-composite: intersect;
+	}
+	.ui-theme :is(.ui-readout, .ui-hud-group)::before {
+		inset-block: 0;
+		inset-inline: 0;
+		mask-image: linear-gradient(
+			to right,
+			transparent 0,
+			black 14px,
+			black calc(100% - 14px),
+			transparent 100%
+		);
+	}
+
+	/* A group owns one backing; child readouts and actions only provide content and state. */
+	.ui-theme .ui-hud-group > :is(.ui-readout, .ui-hud-button)::before {
+		content: none;
+	}
+	.ui-theme .ui-hud-button::before {
+		background: var(
+			--ui-hud-button-background,
+			var(--_ui-hud-background-color)
+		);
+		inset: -6px;
+		mask-image: radial-gradient(ellipse, black 45%, transparent 75%);
+	}
+	.ui-theme .ui-hud-button {
+		color: var(--ui-color-text);
+		box-shadow: inset 0 -1px var(--ui-hud-button-indicator-color, transparent);
+		min-height: 24px;
+		cursor: pointer;
+	}
+	.ui-theme .ui-hud-button:where([aria-pressed="true"]:not(:disabled)) {
+		color: var(--ui-color-active);
+	}
+	.ui-theme .ui-hud-button:where(:hover:not(:disabled)) {
+		color: var(--ui-color-highlight);
+	}
+	.ui-theme .ui-hud-button:where(:active:not(:disabled)) {
+		color: var(--ui-color-text);
+	}
+	.ui-theme .ui-hud-button svg {
+		transition: transform 0.25s var(--ui-easing);
+	}
+	.ui-theme .ui-hud-button:where(:hover:not(:disabled)) svg {
+		transform: scale(1.5);
+	}
+	.ui-theme .ui-hud-button:where(:disabled) {
+		color: var(--ui-color-muted);
+		box-shadow: inset 0 -1px var(--ui-hud-button-indicator-color, transparent);
+		cursor: not-allowed;
+		opacity: 1;
+	}
+	.ui-theme .ui-error {
+		padding: 8px;
+		border-left: 2px solid var(--ui-color-danger);
+		background: var(--ui-color-well);
+		color: var(--ui-color-danger);
+	}
+	.ui-theme .ui-hud-button:focus-visible {
+		outline: 2px solid var(--ui-color-focus);
+		outline-offset: 2px;
+	}
+	.ui-theme .ui-meter > span {
+		display: block;
+		height: 100%;
+		background: var(--ui-meter-fill);
+	}
+	.ui-theme .ui-meter--health {
+		--ui-meter-fill: var(--ui-color-health);
+	}
+	.ui-theme .ui-meter--stamina {
+		--ui-meter-fill: var(--ui-color-stamina);
+	}
+	.ui-theme .ui-meter--mana {
+		--ui-meter-fill: var(--ui-color-mana);
+	}
+	.ui-theme .ui-danger {
+		color: var(--ui-color-danger);
+	}
+	.ui-theme .ui-warning {
+		color: var(--ui-color-warning);
+	}
+	.ui-theme .ui-success {
+		color: var(--ui-color-success);
+	}
+	.ui-theme .ui-tooltip {
+		padding: 3px 6px;
+		border: 1px solid var(--ui-color-border);
+		border-radius: var(--ui-radius-control);
+		background: var(--ui-color-well);
+		box-shadow: var(--ui-surface-shadow, none);
+		color: var(--ui-color-text);
+		font-size: var(--ui-font-size-caption);
+	}
+	.ui-theme .jump-power-track {
+		border: 1px solid var(--ui-color-border);
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.ui-theme :is(.ui-button, .ui-tab),
+		.ui-theme .ui-hud-button svg {
+			transition: none;
+		}
+	}
+}

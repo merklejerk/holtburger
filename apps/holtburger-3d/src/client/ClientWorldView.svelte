@@ -334,7 +334,6 @@
 	<button
 		type="button"
 		class="client-ui-lock ui-hud-button"
-		class:client-ui-unlocked={hudMode === "layout"}
 		aria-label={hudMode === "runtime" ? "Unlock UI layout" : "Lock UI layout"}
 		aria-pressed={hudMode === "layout"}
 		title={hudMode === "runtime" ? "Unlock UI layout" : "Lock UI layout"}
@@ -494,43 +493,41 @@
 </main>
 
 <style>
-	.client-world {
-		position: fixed;
-		inset: 0;
-		overflow: hidden;
-		background: var(--ui-color-well);
-	}
+	@layer components {
+		.client-world {
+			position: fixed;
+			inset: 0;
+			overflow: hidden;
+			background: var(--ui-color-well);
+		}
 
-	.client-canvas {
-		display: block;
-		width: 100%;
-		height: 100%;
-		min-height: 320px;
-		cursor: grab;
-		outline: none;
-		touch-action: none;
-	}
+		.client-canvas {
+			display: block;
+			width: 100%;
+			height: 100%;
+			min-height: 320px;
+			cursor: grab;
+			outline: none;
+			touch-action: none;
+		}
 
-	.client-canvas.client-canvas-entity-hovered {
-		cursor: pointer;
-	}
+		.client-canvas.client-canvas-entity-hovered {
+			cursor: pointer;
+		}
 
-	.client-canvas:active {
-		cursor: grabbing;
-	}
+		.client-canvas:active {
+			cursor: grabbing;
+		}
 
-	.client-ui-lock {
-		position: fixed;
-		top: 8px;
-		right: 8px;
-		z-index: 5;
-		width: 28px;
-		height: 28px;
-		min-height: 0;
-		padding: 5px;
-	}
-
-	.client-ui-unlocked {
-		color: var(--ui-color-focus);
+		.client-ui-lock {
+			position: fixed;
+			top: 8px;
+			right: 8px;
+			z-index: 5;
+			width: 28px;
+			height: 28px;
+			min-height: 0;
+			padding: 5px;
+		}
 	}
 </style>

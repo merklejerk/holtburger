@@ -124,7 +124,7 @@
 </script>
 
 <section
-	class="hud-window ui-glass"
+	class="hud-window ui-panel"
 	style:left={`${resolved.left}px`}
 	style:top={`${resolved.top}px`}
 	style:width={`${resolved.width}px`}
@@ -157,111 +157,113 @@
 </section>
 
 <style>
-	.hud-window {
-		position: absolute;
-		z-index: 4;
-		display: grid;
-		grid-template-rows: auto minmax(0, 1fr);
-		overflow: visible;
-		user-select: none;
-	}
+	@layer components {
+		.hud-window {
+			position: absolute;
+			z-index: 4;
+			display: grid;
+			grid-template-rows: auto minmax(0, 1fr);
+			overflow: visible;
+			user-select: none;
+		}
 
-	.hud-window-titlebar {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		cursor: move;
-		touch-action: none;
-	}
+		.hud-window-titlebar {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			cursor: move;
+			touch-action: none;
+		}
 
-	.hud-window-titlebar:active {
-		cursor: grabbing;
-	}
+		.hud-window-titlebar:active {
+			cursor: grabbing;
+		}
 
-	.hud-window-close {
-		width: 28px;
-		height: 26px;
-		min-height: 26px;
-		margin-right: 2px;
-		cursor: pointer;
-	}
+		.hud-window-close {
+			width: 28px;
+			height: 26px;
+			min-height: 26px;
+			margin-right: 2px;
+			cursor: pointer;
+		}
 
-	.hud-window-content {
-		min-width: 0;
-		min-height: 0;
-		overflow: hidden;
-		user-select: text;
-	}
+		.hud-window-content {
+			min-width: 0;
+			min-height: 0;
+			overflow: hidden;
+			user-select: text;
+		}
 
-	.hud-window-resize {
-		position: absolute;
-		z-index: 2;
-		touch-action: none;
-	}
+		.hud-window-resize {
+			position: absolute;
+			z-index: 2;
+			touch-action: none;
+		}
 
-	.hud-window-resize-top,
-	.hud-window-resize-bottom {
-		left: 8px;
-		width: calc(100% - 16px);
-		height: 8px;
-	}
+		.hud-window-resize-top,
+		.hud-window-resize-bottom {
+			left: 8px;
+			width: calc(100% - 16px);
+			height: 8px;
+		}
 
-	.hud-window-resize-left,
-	.hud-window-resize-right {
-		top: 8px;
-		width: 8px;
-		height: calc(100% - 16px);
-	}
+		.hud-window-resize-left,
+		.hud-window-resize-right {
+			top: 8px;
+			width: 8px;
+			height: calc(100% - 16px);
+		}
 
-	.hud-window-resize-top {
-		top: 0;
-		cursor: ns-resize;
-	}
+		.hud-window-resize-top {
+			top: 0;
+			cursor: ns-resize;
+		}
 
-	.hud-window-resize-right {
-		right: 0;
-		cursor: ew-resize;
-	}
+		.hud-window-resize-right {
+			right: 0;
+			cursor: ew-resize;
+		}
 
-	.hud-window-resize-bottom {
-		bottom: 0;
-		cursor: ns-resize;
-	}
+		.hud-window-resize-bottom {
+			bottom: 0;
+			cursor: ns-resize;
+		}
 
-	.hud-window-resize-left {
-		left: 0;
-		cursor: ew-resize;
-	}
+		.hud-window-resize-left {
+			left: 0;
+			cursor: ew-resize;
+		}
 
-	.hud-window-resize-top-left,
-	.hud-window-resize-top-right,
-	.hud-window-resize-bottom-right,
-	.hud-window-resize-bottom-left {
-		width: 12px;
-		height: 12px;
-	}
+		.hud-window-resize-top-left,
+		.hud-window-resize-top-right,
+		.hud-window-resize-bottom-right,
+		.hud-window-resize-bottom-left {
+			width: 12px;
+			height: 12px;
+		}
 
-	.hud-window-resize-top-left {
-		top: 0;
-		left: 0;
-		cursor: nwse-resize;
-	}
+		.hud-window-resize-top-left {
+			top: 0;
+			left: 0;
+			cursor: nwse-resize;
+		}
 
-	.hud-window-resize-top-right {
-		top: 0;
-		right: 0;
-		cursor: nesw-resize;
-	}
+		.hud-window-resize-top-right {
+			top: 0;
+			right: 0;
+			cursor: nesw-resize;
+		}
 
-	.hud-window-resize-bottom-right {
-		right: 0;
-		bottom: 0;
-		cursor: nwse-resize;
-	}
+		.hud-window-resize-bottom-right {
+			right: 0;
+			bottom: 0;
+			cursor: nwse-resize;
+		}
 
-	.hud-window-resize-bottom-left {
-		bottom: 0;
-		left: 0;
-		cursor: nesw-resize;
+		.hud-window-resize-bottom-left {
+			bottom: 0;
+			left: 0;
+			cursor: nesw-resize;
+		}
 	}
 </style>

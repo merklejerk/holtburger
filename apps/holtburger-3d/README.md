@@ -61,12 +61,17 @@ Tests exercise geometry with explicit fixtures rather than pinning the current d
 
 ## UI themes
 
-Both modes use **Espresso Aero** from `src/app/themes/espresso-aero.ts`: charcoal
-glass, ivory text, flat brass controls, and a narrow walnut window-header detail.
-Shared recipes own materials and interaction states; component CSS owns layout.
-HUDs stay compact and borderless. Theme application updates CSS variables without
-recreating runtime owners. Reduced transparency is an explicit presentation
-preference; per-install persistence and an editor remain deferred.
+Both modes use **Holtburger Standard** from
+`src/app/themes/holtburger-standard.css`. Its appearance is owned by that stylesheet
+and can evolve freely.
+CSS themes can replace variables and styling rules; component CSS owns layout.
+Default and custom stylesheets use the same
+loader, with an optional override sheet, without recreating runtime owners.
+User-file discovery, saved selection, and an editor remain deferred.
+
+For lightweight theme iteration, run `npm run dev:ui` from this directory. It opens
+real production HUD components with fixture data and no world renderer or Rust host.
+Edit the theme CSS and click **Reload theme** to preserve the current UI state.
 
 See the [UI style guide](UI_STYLE_GUIDE.md) for configuration, recipes, extension
 rules, semantic visualization exceptions, accessibility, and browser verification.

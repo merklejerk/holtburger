@@ -1,5 +1,4 @@
 <script lang="ts">
-	import BrowserHarnessApp from "./BrowserHarnessApp.svelte";
 	import UiThemeSpecimen from "./UiThemeSpecimen.svelte";
 
 	// Standalone manual preview needs no assets; the automated harness supplies a live world.
@@ -8,5 +7,6 @@
 	);
 </script>
 
-{#if hasWorld}<BrowserHarnessApp />{/if}
+{#if hasWorld}{#await import("./BrowserHarnessApp.svelte") then module}<module.default
+		/>{/await}{/if}
 <UiThemeSpecimen />

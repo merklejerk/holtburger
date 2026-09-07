@@ -50,49 +50,51 @@
 </div>
 
 <style>
-	.target-indicator {
-		position: absolute;
-		top: 0;
-		left: 0;
-		z-index: 3;
-		width: var(--target-size);
-		height: var(--target-size);
-		pointer-events: none;
-		transform-origin: center;
-		will-change: transform;
-		filter: drop-shadow(0 0 var(--target-glow-blur) var(--target-glow));
-	}
+	@layer components {
+		.target-indicator {
+			position: absolute;
+			top: 0;
+			left: 0;
+			z-index: 3;
+			width: var(--target-size);
+			height: var(--target-size);
+			pointer-events: none;
+			transform-origin: center;
+			will-change: transform;
+			filter: drop-shadow(0 0 var(--target-glow-blur) var(--target-glow));
+		}
 
-	.target-indicator svg {
-		display: block;
-		width: 100%;
-		height: 100%;
-		overflow: visible;
-	}
+		.target-indicator svg {
+			display: block;
+			width: 100%;
+			height: 100%;
+			overflow: visible;
+		}
 
-	.target-indicator__glass {
-		fill: var(--target-fill);
-		stroke: var(--target-outline);
-		stroke-width: var(--target-outline-width);
-		stroke-linejoin: round;
-		paint-order: stroke fill;
-	}
+		.target-indicator__glass {
+			fill: var(--target-fill);
+			stroke: var(--target-outline);
+			stroke-width: var(--target-outline-width);
+			stroke-linejoin: round;
+			paint-order: stroke fill;
+		}
 
-	.target-indicator__facet {
-		fill: var(--target-outline);
-		fill-opacity: 0.16;
-		stroke: none;
-	}
+		.target-indicator__facet {
+			fill: var(--target-outline);
+			fill-opacity: 0.16;
+			stroke: none;
+		}
 
-	.selection-announcement {
-		position: absolute;
-		width: 1px;
-		height: 1px;
-		padding: 0;
-		margin: -1px;
-		overflow: hidden;
-		clip: rect(0, 0, 0, 0);
-		white-space: nowrap;
-		border: 0;
+		.selection-announcement {
+			position: absolute;
+			width: 1px;
+			height: 1px;
+			padding: 0;
+			margin: -1px;
+			overflow: hidden;
+			clip: rect(0, 0, 0, 0);
+			white-space: nowrap;
+			border: 0;
+		}
 	}
 </style>

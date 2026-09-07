@@ -38,15 +38,17 @@
 </output>
 
 <style>
-	.client-fps-counter {
-		display: grid;
-		width: 100%;
-		height: 100%;
-		padding: 3px 6px;
-		place-items: center;
-		font-variant-numeric: tabular-nums;
-		line-height: 1.2;
-		white-space: nowrap;
-		pointer-events: none;
+	@layer components {
+		.client-fps-counter {
+			display: grid;
+			width: 100%;
+			height: 100%;
+			padding-block: 3px;
+			place-items: center;
+			font-variant-numeric: tabular-nums;
+			line-height: 1.2;
+			white-space: nowrap;
+			pointer-events: none;
+		}
 	}
 </style>

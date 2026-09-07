@@ -14,7 +14,7 @@ export async function probeUiTheme(client, evaluateExpression, saveScreenshot) {
 		).data;
 	const configure = async (
 		background,
-		reducedTransparency = false,
+		opaqueOverride = false,
 		alternate = false,
 	) => {
 		await read(
@@ -27,12 +27,13 @@ export async function probeUiTheme(client, evaluateExpression, saveScreenshot) {
 				for (const animation of document.getAnimations())
 					if (animation instanceof CSSTransition) animation.finish();
 			},
-			{ background, reducedTransparency, alternate },
+			{ background, opaqueOverride, alternate },
 		);
 	};
 	const application = await read(() =>
 		window.__UI_THEME_SPECIMEN__.verifyApplication(),
 	);
+
 	await client.send("DOM.enable");
 	await client.send("CSS.enable");
 	const { root } = await client.send("DOM.getDocument");
@@ -44,6 +45,170 @@ export async function probeUiTheme(client, evaluateExpression, saveScreenshot) {
 		if (!nodeId) throw new Error(`Missing theme specimen control: ${selector}`);
 		await client.send("CSS.forcePseudoState", { nodeId, forcedPseudoClasses });
 	};
+	const controlColors = await (async () => {
+		await read(() => {
+			const fixture = document.createElement("div");
+			fixture.id = "theme-token-probe";
+			fixture.className = "ui-theme";
+			fixture.style.cssText =
+				"position:fixed;left:-2000px;top:0;--ui-color-text:rgb(11,22,33);--ui-color-control:rgb(22,33,44);--ui-color-accent:rgb(33,44,55);--ui-color-border:rgb(44,55,66);--ui-color-well:rgb(55,66,77);--ui-button-background-color:initial;--ui-button-border-color:initial;--ui-input-background:initial";
+			fixture.innerHTML = `<button id="token-button" class="ui-button">Button</button>
+				<button id="token-toggle" class="ui-button" aria-pressed="true">Toggle</button>
+				<button id="token-tab" class="ui-tab" aria-selected="true">Tab</button>
+				<div id="token-option" class="ui-option" aria-selected="true">Option</div>
+				<button id="token-hud" class="ui-hud-button">HUD icon</button>
+				<div class="shortcut-dock"><button id="token-dock" class="ui-hud-button" aria-pressed="true">Open panel</button></div>
+				<input id="token-input" class="ui-input" placeholder="Placeholder">
+				<div id="token-panel" class="ui-panel">Panel</div>`;
+			for (const control of fixture.querySelectorAll("*"))
+				control.style.transition = "none";
+			document.body.append(fixture);
+		});
+		const expect = async (checks) =>
+			read((checks) => {
+				for (const [selector, property, expected, pseudo] of checks) {
+					const actual = getComputedStyle(
+						document.querySelector(selector),
+						pseudo,
+					).getPropertyValue(
+						property.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`),
+					);
+					if (actual !== expected)
+						throw new Error(
+							`${selector}${pseudo || ""} ${property}: expected ${expected}, got ${actual}`,
+						);
+				}
+			}, checks);
+		try {
+			await expect([
+				["#token-button", "color", "rgb(11, 22, 33)"],
+				["#token-button", "backgroundColor", "rgb(22, 33, 44)"],
+				["#token-hud", "color", "rgb(11, 22, 33)"],
+				["#token-panel", "borderTopColor", "rgb(44, 55, 66)"],
+				["#token-input", "backgroundColor", "rgb(55, 66, 77)"],
+			]);
+			await read(() => {
+				const style = document.createElement("style");
+				// These are actual author-facing selectors, not a parallel state-token API.
+				style.textContent = `@layer overrides {
+					#theme-token-probe :is(.ui-button, .ui-tab) { color: rgb(12,23,34); --ui-button-background-color: rgb(23,34,45); }
+					#theme-token-probe :is(.ui-button, .ui-tab):where([aria-pressed="true"], [aria-selected="true"]) { --ui-button-background-color: rgb(45,56,67); }
+					#theme-token-probe :is(.ui-button, .ui-tab):where(:hover:not(:disabled)) { --ui-button-background-color: rgb(56,67,78); }
+					#theme-token-probe :is(.ui-button, .ui-tab):where(:active:not(:disabled)) { --ui-button-background-color: rgb(67,78,89); }
+					#theme-token-probe :is(.ui-button, .ui-tab):where(:disabled) { --ui-button-background-color: rgb(78,89,90); }
+					#theme-token-probe .ui-option { --ui-option-background: rgb(89,90,101); }
+					#theme-token-probe .ui-hud-button { color: rgb(90,101,112); --ui-hud-button-background: rgb(101,112,123); }
+					#theme-token-probe .shortcut-dock .ui-hud-button[aria-pressed="true"] { color: rgb(112,123,134); --ui-hud-button-background: rgb(123,134,145); --ui-hud-button-indicator-color: transparent; }
+					#theme-token-probe .shortcut-dock .ui-hud-button:hover:not(:disabled) { color: rgb(134,145,156); --ui-hud-button-background: rgb(145,156,167); }
+					#theme-token-probe .shortcut-dock .ui-hud-button:active:not(:disabled) { --ui-hud-button-background: rgb(156,167,178); }
+					#theme-token-probe .shortcut-dock .ui-hud-button:disabled { color: rgb(167,178,189); }
+					#theme-token-probe .ui-input { color: rgb(178,189,190); --ui-input-background: rgb(189,190,201); }
+					#theme-token-probe .ui-input::placeholder { color: rgb(190,201,212); }
+					#theme-token-probe .ui-input[aria-invalid="true"] { --ui-input-border-color: rgb(201,212,223); }
+					#theme-token-probe .ui-panel { --ui-panel-background: rgb(212,223,234); --ui-surface-shadow: none; }
+				}`;
+				document.querySelector("#theme-token-probe").append(style);
+			});
+			await expect([
+				["#token-button", "color", "rgb(12, 23, 34)"],
+				["#token-button", "backgroundColor", "rgb(23, 34, 45)"],
+				["#token-toggle", "backgroundColor", "rgb(45, 56, 67)"],
+				["#token-tab", "backgroundColor", "rgb(45, 56, 67)"],
+				["#token-option", "backgroundColor", "rgb(89, 90, 101)"],
+				["#token-hud", "backgroundColor", "rgb(101, 112, 123)", "::before"],
+				["#token-dock", "color", "rgb(112, 123, 134)"],
+				["#token-dock", "backgroundColor", "rgba(0, 0, 0, 0)"],
+				["#token-dock", "backgroundColor", "rgb(123, 134, 145)", "::before"],
+				["#token-input", "color", "rgb(178, 189, 190)"],
+				["#token-input", "backgroundColor", "rgb(189, 190, 201)"],
+				["#token-input", "color", "rgb(190, 201, 212)", "::placeholder"],
+				["#token-panel", "backgroundColor", "rgb(212, 223, 234)"],
+				["#token-panel", "boxShadow", "none"],
+			]);
+			await force("#token-toggle", ["hover"]);
+			await force("#token-dock", ["hover"]);
+			await expect([
+				["#token-toggle", "backgroundColor", "rgb(56, 67, 78)"],
+				["#token-dock", "color", "rgb(134, 145, 156)"],
+				["#token-dock", "backgroundColor", "rgb(145, 156, 167)", "::before"],
+			]);
+			await force("#token-toggle", ["hover", "active"]);
+			await force("#token-dock", ["hover", "active"]);
+			await expect([
+				["#token-toggle", "backgroundColor", "rgb(67, 78, 89)"],
+				["#token-dock", "backgroundColor", "rgb(156, 167, 178)", "::before"],
+			]);
+			await read(() => {
+				document.querySelector("#token-toggle").disabled = true;
+				document.querySelector("#token-dock").disabled = true;
+				document
+					.querySelector("#token-input")
+					.setAttribute("aria-invalid", "true");
+			});
+			await expect([
+				["#token-toggle", "--ui-button-background-color", "rgb(78,89,90)"],
+				["#token-dock", "color", "rgb(167, 178, 189)"],
+				["#token-input", "borderTopColor", "rgb(201, 212, 223)"],
+			]);
+			return {
+				scopedPalette: true,
+				stateSelectors: true,
+				independentControls: true,
+				inputSelectors: true,
+				backgroundValues: true,
+			};
+		} finally {
+			await read(() => document.querySelector("#theme-token-probe").remove());
+		}
+	})();
+
+	const backdrop = await read(() => {
+		const root = document.documentElement;
+		const before = root.style.cssText;
+		const panel = document.querySelector(".ui-panel");
+		const readout = document.querySelector(".ui-readout");
+		const hudGroup = document.querySelector(".ui-hud-group");
+		const meter = document.querySelector(".ui-meter");
+		const chat = document.querySelector(".chat-lines");
+		if (!panel || !readout || !hudGroup || !meter || !chat)
+			throw new Error("Missing backdrop specimen surfaces.");
+		const nested = document.createElement("span");
+		nested.className = "ui-readout";
+		chat.append(nested);
+		const hudFilters = () => [
+			getComputedStyle(readout, "::before").backdropFilter,
+			getComputedStyle(hudGroup, "::before").backdropFilter,
+			getComputedStyle(meter).backdropFilter,
+			getComputedStyle(chat).backdropFilter,
+		];
+		try {
+			root.style.setProperty("--ui-backdrop-filter", "blur(3px)");
+			if (
+				getComputedStyle(panel).backdropFilter !== "blur(3px)" ||
+				hudFilters().some((value) => value !== "blur(3px)")
+			)
+				throw new Error(
+					"Shared backdrop did not reach panels and HUD backings.",
+				);
+			const style = document.createElement("style");
+			style.id = "hud-filter-probe";
+			style.textContent =
+				"@layer overrides { .ui-theme :is(.ui-readout, .ui-hud-group, .ui-hud-button, .ui-hud-surface, .ui-meter) { --ui-backdrop-filter: blur(7px); } }";
+			document.head.append(style);
+			if (
+				getComputedStyle(panel).backdropFilter !== "blur(3px)" ||
+				hudFilters().some((value) => value !== "blur(7px)")
+			)
+				throw new Error("HUD-only backdrop override did not stay HUD-local.");
+			if (getComputedStyle(nested, "::before").backdropFilter !== "none")
+				throw new Error("Nested HUD decoration compounded filtering.");
+			return { shared: true, hudOverride: true, nested: true };
+		} finally {
+			root.style.cssText = before;
+			document.querySelector("#hud-filter-probe")?.remove();
+			nested.remove();
+		}
+	});
 	// Simultaneous state sheet uses actual recipe pseudo-selectors, not lookalike specimen classes.
 	await force("[data-hover]", ["hover"]);
 	await force("[data-pressed]", ["active"]);
@@ -89,19 +254,22 @@ export async function probeUiTheme(client, evaluateExpression, saveScreenshot) {
 			camera.pitchDegrees,
 		);
 	}, motion.camera);
-	for (const [name, background, reduced, alternate] of [
+	for (const [name, background, opaqueOverride, alternate] of [
 		["world", "world", false, false],
 		["bright", "bright", false, false],
 		["dark", "dark", false, false],
 		["opaque", "bright", true, false],
-		["texture-free", "world", false, true],
+		["steel", "world", false, true],
 	]) {
-		await configure(background, reduced, alternate);
+		await configure(background, opaqueOverride, alternate);
 		await saveScreenshot(name, await capture());
 		const samples = await read(() => {
 			const texts = [...document.querySelectorAll("[data-contrast]")].map(
 				(element) => {
-					const box = element.getBoundingClientRect(),
+					// Sample behind the text, excluding decorative borders and rounded corners.
+					const range = document.createRange();
+					range.selectNodeContents(element);
+					const box = range.getBoundingClientRect(),
 						style = getComputedStyle(element);
 					return {
 						role: element.dataset.contrast,
@@ -351,7 +519,7 @@ export async function probeUiTheme(client, evaluateExpression, saveScreenshot) {
 	});
 	if (!overlap)
 		throw new Error(
-			"Overlapping glass intercepted the front window's control.",
+			"An overlapping panel intercepted the front window's control.",
 		);
 	const resizeBefore = await read(() => {
 		const box = document
@@ -397,7 +565,7 @@ export async function probeUiTheme(client, evaluateExpression, saveScreenshot) {
 		resizeAfter.height <= resizeBefore.height
 	)
 		throw new Error(
-			`The glass specimen's pointer resize handle did not resize its window: ${JSON.stringify({ resizeBefore, resizeAfter })}`,
+			`The panel specimen's pointer resize handle did not resize its window: ${JSON.stringify({ resizeBefore, resizeAfter })}`,
 		);
 	await force("[data-resize]", ["focus-visible"]);
 	const focusContainment = await read(() => {
@@ -414,9 +582,7 @@ export async function probeUiTheme(client, evaluateExpression, saveScreenshot) {
 		);
 	});
 	if (!focusContainment)
-		throw new Error(
-			"The resizable glass surface clips its handle's focus ring.",
-		);
+		throw new Error("The resizable panel clips its handle's focus ring.");
 	await force("[data-resize]", []);
 	await client.send("Emulation.setEmulatedMedia", {
 		features: [{ name: "prefers-reduced-motion", value: "reduce" }],
@@ -429,16 +595,23 @@ export async function probeUiTheme(client, evaluateExpression, saveScreenshot) {
 	if (transition !== "0s")
 		throw new Error("Reduced motion did not disable control transitions.");
 	await configure("world", true);
-	const reduced = await read(
-		() => getComputedStyle(document.querySelector(".ui-glass")).backdropFilter,
+	const opaque = await read(
+		() => getComputedStyle(document.querySelector(".ui-panel")).backdropFilter,
 	);
-	if (reduced !== "none")
-		throw new Error("Reduced transparency retained a backdrop filter.");
+	if (opaque !== "none")
+		throw new Error("Opaque override retained a backdrop filter.");
 	await configure("world");
 	const fallback = await read(() => {
 		// Exercise the real baseline declarations by removing only the feature-supported enhancement.
 		const removed = [];
-		for (const sheet of document.styleSheets) {
+		const containers = [];
+		const visit = (sheet) => {
+			containers.push(sheet);
+			for (const rule of sheet.cssRules)
+				if (rule instanceof CSSLayerBlockRule) visit(rule);
+		};
+		for (const sheet of document.styleSheets) visit(sheet);
+		for (const sheet of containers) {
 			for (let i = sheet.cssRules.length - 1; i >= 0; i--) {
 				const rule = sheet.cssRules[i];
 				if (
@@ -452,7 +625,7 @@ export async function probeUiTheme(client, evaluateExpression, saveScreenshot) {
 		}
 		if (!removed.length)
 			throw new Error("No backdrop enhancement found to exercise fallback.");
-		const style = getComputedStyle(document.querySelector(".ui-glass"));
+		const style = getComputedStyle(document.querySelector(".ui-panel"));
 		const result = {
 			filter: style.backdropFilter,
 			background: style.backgroundColor,
@@ -475,6 +648,8 @@ export async function probeUiTheme(client, evaluateExpression, saveScreenshot) {
 	return {
 		evidence: {
 			application,
+			backdrop,
+			controlColors,
 			motion,
 			contrast,
 			focus,
@@ -483,7 +658,7 @@ export async function probeUiTheme(client, evaluateExpression, saveScreenshot) {
 			drag: { before, after },
 			resize: { before: resizeBefore, after: resizeAfter },
 			overlap,
-			reduced,
+			opaque,
 			transition,
 			fallback,
 		},

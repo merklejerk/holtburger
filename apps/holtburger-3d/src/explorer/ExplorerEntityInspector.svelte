@@ -380,128 +380,130 @@
 </section>
 
 <style>
-	.entity-inspector {
-		display: grid;
-		gap: 8px;
-		min-width: 0;
-		padding-top: 2px;
-		border-top: var(--ui-edge);
-	}
+	@layer components {
+		.entity-inspector {
+			display: grid;
+			gap: 8px;
+			min-width: 0;
+			padding-top: 2px;
+			border-top: 1px solid var(--ui-color-border);
+		}
 
-	.entity-inspector .explorer-section-label,
-	.selected-identity,
-	.inspector-error {
-		margin: 0;
-	}
+		.entity-inspector .explorer-section-label,
+		.selected-identity,
+		.inspector-error {
+			margin: 0;
+		}
 
-	.selected-heading {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto;
-		gap: 8px;
-		align-items: baseline;
-	}
+		.selected-heading {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: 8px;
+			align-items: baseline;
+		}
 
-	.selected-heading h3 {
-		min-width: 0;
-		margin: 0;
-		overflow: hidden;
-		color: var(--ui-color-text);
-		font-size: 0.95rem;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
+		.selected-heading h3 {
+			min-width: 0;
+			margin: 0;
+			overflow: hidden;
+			color: var(--ui-color-text);
+			font-size: 0.95rem;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
 
-	.selected-heading span,
-	.selected-identity,
-	.wearer-context,
-	.inspector-error {
-		color: var(--ui-color-muted);
-		font-size: 0.75rem;
-	}
+		.selected-heading span,
+		.selected-identity,
+		.wearer-context,
+		.inspector-error {
+			color: var(--ui-color-muted);
+			font-size: 0.75rem;
+		}
 
-	.selected-actions,
-	.wearer-context {
-		display: flex;
-		gap: 8px;
-		align-items: center;
-		justify-content: space-between;
-	}
+		.selected-actions,
+		.wearer-context {
+			display: flex;
+			gap: 8px;
+			align-items: center;
+			justify-content: space-between;
+		}
 
-	.selected-actions .explorer-action {
-		flex: 1 1 0;
-	}
+		.selected-actions .explorer-action {
+			flex: 1 1 0;
+		}
 
-	.inspector-error {
-		color: var(--ui-color-danger);
-	}
+		.inspector-error {
+			color: var(--ui-color-danger);
+		}
 
-	.entity-facts {
-		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
-		gap: 5px;
-	}
-
-	.entity-facts div,
-	.diagnostics div {
-		display: grid;
-		min-width: 0;
-	}
-
-	.entity-facts div {
-		gap: 2px;
-		padding: 6px;
-	}
-
-	.entity-facts span,
-	.diagnostics span {
-		color: var(--ui-color-muted);
-		font-size: 0.69rem;
-	}
-
-	.entity-facts strong {
-		overflow: hidden;
-		color: var(--ui-color-text);
-		font-size: 0.75rem;
-		font-weight: 400;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.inspector-disclosure {
-		border-top: var(--ui-edge);
-		padding-top: 6px;
-	}
-
-	.inspector-disclosure summary {
-		color: var(--ui-color-text);
-		cursor: pointer;
-		font-size: 0.76rem;
-	}
-
-	.inspector-disclosure > :not(summary) {
-		margin-top: 7px;
-	}
-
-	.diagnostics {
-		display: grid;
-		gap: 6px;
-	}
-
-	.diagnostics div {
-		grid-template-columns: minmax(6rem, 0.35fr) minmax(0, 1fr);
-		gap: 8px;
-	}
-
-	.diagnostics code {
-		overflow-wrap: anywhere;
-		color: var(--ui-color-text);
-		font-family: inherit;
-		font-size: 0.72rem;
-	}
-
-	@media (max-width: 370px) {
 		.entity-facts {
-			grid-template-columns: minmax(0, 1fr);
+			display: grid;
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+			gap: 5px;
+		}
+
+		.entity-facts div,
+		.diagnostics div {
+			display: grid;
+			min-width: 0;
+		}
+
+		.entity-facts div {
+			gap: 2px;
+			padding: 6px;
+		}
+
+		.entity-facts span,
+		.diagnostics span {
+			color: var(--ui-color-muted);
+			font-size: 0.69rem;
+		}
+
+		.entity-facts strong {
+			overflow: hidden;
+			color: var(--ui-color-text);
+			font-size: 0.75rem;
+			font-weight: 400;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.inspector-disclosure {
+			border-top: 1px solid var(--ui-color-border);
+			padding-top: 6px;
+		}
+
+		.inspector-disclosure summary {
+			color: var(--ui-color-text);
+			cursor: pointer;
+			font-size: 0.76rem;
+		}
+
+		.inspector-disclosure > :not(summary) {
+			margin-top: 7px;
+		}
+
+		.diagnostics {
+			display: grid;
+			gap: 6px;
+		}
+
+		.diagnostics div {
+			grid-template-columns: minmax(6rem, 0.35fr) minmax(0, 1fr);
+			gap: 8px;
+		}
+
+		.diagnostics code {
+			overflow-wrap: anywhere;
+			color: var(--ui-color-text);
+			font-family: inherit;
+			font-size: 0.72rem;
+		}
+
+		@media (max-width: 370px) {
+			.entity-facts {
+				grid-template-columns: minmax(0, 1fr);
+			}
 		}
 	}
 </style>

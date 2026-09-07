@@ -735,7 +735,7 @@
 		the remaining square corners stay transparent to the scene behind.
 	-->
 	<div
-		class="minimap-frame"
+		class="minimap-frame ui-hud-surface"
 		role="toolbar"
 		aria-label="Minimap frame"
 		tabindex="-1"
@@ -824,125 +824,127 @@
 </section>
 
 <style>
-	.minimap {
-		position: absolute;
-		/* Only the frame and layout controls take input; unused corners belong to the scene. */
-		pointer-events: none;
-		user-select: none;
-	}
+	@layer components {
+		.minimap {
+			position: absolute;
+			/* Only the frame and layout controls take input; unused corners belong to the scene. */
+			pointer-events: none;
+			user-select: none;
+		}
 
-	.minimap-frame {
-		position: relative;
-		width: 100%;
-		height: 100%;
-		border-radius: 50%;
-		background: var(--ui-hud-backing);
-		pointer-events: auto;
-	}
+		.minimap-frame {
+			position: relative;
+			width: 100%;
+			height: 100%;
+			border-radius: 50%;
+			background: var(--_ui-hud-background-color);
+			pointer-events: auto;
+		}
 
-	.minimap-disc {
-		position: absolute;
-		inset: var(--map-rim);
-		overflow: hidden;
-		border-radius: 50%;
-		background: var(--ui-color-well);
-		cursor: grab;
-		touch-action: none;
-	}
+		.minimap-disc {
+			position: absolute;
+			inset: var(--map-rim);
+			overflow: hidden;
+			border-radius: 50%;
+			background: var(--ui-color-well);
+			cursor: grab;
+			touch-action: none;
+		}
 
-	.minimap-disc:active {
-		cursor: grabbing;
-	}
+		.minimap-disc:active {
+			cursor: grabbing;
+		}
 
-	.minimap-canvas {
-		position: absolute;
-		inset: 0;
-		width: 100%;
-		height: 100%;
-	}
+		.minimap-canvas {
+			position: absolute;
+			inset: 0;
+			width: 100%;
+			height: 100%;
+		}
 
-	.minimap-compass {
-		position: absolute;
-		inset: 0;
-		width: 100%;
-		height: 100%;
-		/* Cardinal letters are drawn past the viewBox on purpose; see CARDINAL_RADIUS. */
-		overflow: visible;
-		pointer-events: none;
-	}
+		.minimap-compass {
+			position: absolute;
+			inset: 0;
+			width: 100%;
+			height: 100%;
+			/* Cardinal letters are drawn past the viewBox on purpose; see CARDINAL_RADIUS. */
+			overflow: visible;
+			pointer-events: none;
+		}
 
-	.minimap-cone {
-		fill: rgb(230 230 245 / 0.12);
-	}
+		.minimap-cone {
+			fill: rgb(230 230 245 / 0.12);
+		}
 
-	.minimap-cardinal {
-		fill: var(--ui-color-text);
-		font-family: var(--ui-font-heading);
-		font-size: 18px;
-		font-weight: bold;
-		text-anchor: middle;
-		dominant-baseline: central;
-		/* Outline protects cardinal readability over map imagery. */
-		paint-order: stroke;
-		stroke: rgb(0 0 0 / 0.85);
-		stroke-width: 2.2px;
-		filter: drop-shadow(0 1px 0 rgb(0 0 0 / 0.9));
-	}
+		.minimap-cardinal {
+			fill: var(--ui-color-text);
+			font-family: var(--ui-font-heading);
+			font-size: 18px;
+			font-weight: bold;
+			text-anchor: middle;
+			dominant-baseline: central;
+			/* Outline protects cardinal readability over map imagery. */
+			paint-order: stroke;
+			stroke: rgb(0 0 0 / 0.85);
+			stroke-width: 2.2px;
+			filter: drop-shadow(0 1px 0 rgb(0 0 0 / 0.9));
+		}
 
-	.minimap-cardinal-north {
-		fill: var(--ui-color-accent);
-	}
+		.minimap-cardinal-north {
+			fill: var(--ui-color-accent);
+		}
 
-	.minimap-free-anchor {
-		fill: rgb(150 220 150 / 0.95);
-		stroke: rgb(0 0 0 / 0.7);
-		stroke-width: 1;
-	}
+		.minimap-free-anchor {
+			fill: rgb(150 220 150 / 0.95);
+			stroke: rgb(0 0 0 / 0.7);
+			stroke-width: 1;
+		}
 
-	.minimap-tooltip {
-		position: absolute;
-		z-index: 2;
-		max-width: 180px;
-		line-height: 1.25;
-		text-align: center;
-		white-space: normal;
-		pointer-events: none;
-		transform: translate(-50%, calc(-100% - 8px));
-	}
+		.minimap-tooltip {
+			position: absolute;
+			z-index: 2;
+			max-width: 180px;
+			line-height: 1.25;
+			text-align: center;
+			white-space: normal;
+			pointer-events: none;
+			transform: translate(-50%, calc(-100% - 8px));
+		}
 
-	.minimap-reset {
-		position: absolute;
-		width: 20px;
-		height: 20px;
-		border-radius: 50%;
-		transform: translate(-50%, -50%);
-		/* Top-right diagonal rim position, clear of the cardinal labels. */
-		top: 14.645%;
-		left: 85.355%;
-		cursor: pointer;
-	}
+		.minimap-reset {
+			position: absolute;
+			width: 20px;
+			height: 20px;
+			border-radius: 50%;
+			transform: translate(-50%, -50%);
+			/* Top-right diagonal rim position, clear of the cardinal labels. */
+			top: 14.645%;
+			left: 85.355%;
+			cursor: pointer;
+		}
 
-	.minimap-handle-icon {
-		display: block;
-		width: 12px;
-		height: 12px;
-		fill: none;
-		stroke: currentcolor;
-		stroke-linecap: round;
-		stroke-linejoin: round;
-		stroke-width: 1.35;
-		pointer-events: none;
-	}
+		.minimap-handle-icon {
+			display: block;
+			width: 12px;
+			height: 12px;
+			fill: none;
+			stroke: currentcolor;
+			stroke-linecap: round;
+			stroke-linejoin: round;
+			stroke-width: 1.35;
+			pointer-events: none;
+		}
 
-	.minimap-coordinates {
-		position: absolute;
-		top: 100%;
-		left: 50%;
-		margin-top: 10px;
-		padding: 4px 10px;
-		font-variant-numeric: tabular-nums;
-		line-height: 1.15;
-		white-space: nowrap;
-		transform: translateX(-50%);
+		.minimap-coordinates {
+			position: absolute;
+			top: 100%;
+			left: 50%;
+			margin-top: 10px;
+			padding: 4px 10px;
+			font-variant-numeric: tabular-nums;
+			line-height: 1.15;
+			white-space: nowrap;
+			transform: translateX(-50%);
+		}
 	}
 </style>

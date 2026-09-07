@@ -317,7 +317,7 @@
 
 <dialog
 	bind:this={dialogElement}
-	class="texture-page-modal ui-glass"
+	class="texture-page-modal ui-panel"
 	data-browser-display-modal
 	aria-labelledby="texture-page-modal-title"
 	onclose={onClose}
@@ -420,101 +420,103 @@
 </dialog>
 
 <style>
-	.texture-page-modal {
-		box-sizing: border-box;
-		width: min(1180px, calc(100vw - 48px));
-		padding: 0;
-		max-height: calc(100vh - 48px);
-		overflow: auto;
-	}
-	.texture-page-modal-header,
-	.texture-page-modal-toolbar {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 12px;
-	}
-	.texture-page-modal-header h2 {
-		margin: 0;
-		color: var(--ui-color-text);
-		font-size: 1rem;
-		font-family: var(--ui-font-mono);
-		overflow-wrap: anywhere;
-	}
-	.texture-page-modal-header .explorer-section-label {
-		margin-bottom: 4px;
-	}
-	.texture-page-modal-body {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) minmax(245px, 330px);
-		gap: 16px;
-		margin-top: 16px;
-	}
-	.texture-page-modal-preview {
-		min-width: 0;
-	}
-	.texture-page-modal-toolbar {
-		margin-bottom: 8px;
-		color: var(--ui-color-accent);
-		font-size: 0.78rem;
-	}
-	.texture-page-modal-toolbar label {
-		display: flex;
-		align-items: center;
-		gap: 4px;
-	}
-	.texture-page-modal-viewport {
-		height: min(68vh, 700px);
-		min-height: 360px;
-		overflow: hidden;
-		touch-action: none;
-		background: var(--ui-color-well);
-		cursor: grab;
-	}
-	.texture-page-modal-viewport:active {
-		cursor: grabbing;
-	}
-	.texture-page-modal-viewport canvas {
-		display: block;
-		width: 100%;
-		height: 100%;
-	}
-	.texture-page-modal-details {
-		min-width: 0;
-	}
-	.texture-page-modal-details .explorer-section-label {
-		margin: 16px 0 7px;
-	}
-	.texture-page-modal-entry-list {
-		max-height: 360px;
-		overflow: auto;
-	}
-	.texture-page-modal-entry-list button {
-		gap: 3px;
-		font-size: 0.74rem;
-	}
-	.texture-page-modal-entry-list strong {
-		color: var(--ui-color-accent);
-	}
-	.texture-page-modal-entry-list span {
-		overflow-wrap: anywhere;
-		font-family: var(--ui-font-mono);
-	}
-	.texture-page-modal-selected {
-		margin-bottom: 0;
-		font-size: 0.8rem;
-	}
-	@media (max-width: 760px) {
+	@layer components {
 		.texture-page-modal {
-			width: calc(100vw - 20px);
-			max-height: calc(100vh - 20px);
+			box-sizing: border-box;
+			width: min(1180px, calc(100vw - 48px));
+			padding: 0;
+			max-height: calc(100vh - 48px);
+			overflow: auto;
+		}
+		.texture-page-modal-header,
+		.texture-page-modal-toolbar {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 12px;
+		}
+		.texture-page-modal-header h2 {
+			margin: 0;
+			color: var(--ui-color-text);
+			font-size: 1rem;
+			font-family: var(--ui-font-mono);
+			overflow-wrap: anywhere;
+		}
+		.texture-page-modal-header .explorer-section-label {
+			margin-bottom: 4px;
 		}
 		.texture-page-modal-body {
-			grid-template-columns: 1fr;
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) minmax(245px, 330px);
+			gap: 16px;
+			margin-top: 16px;
+		}
+		.texture-page-modal-preview {
+			min-width: 0;
+		}
+		.texture-page-modal-toolbar {
+			margin-bottom: 8px;
+			color: var(--ui-color-accent);
+			font-size: 0.78rem;
+		}
+		.texture-page-modal-toolbar label {
+			display: flex;
+			align-items: center;
+			gap: 4px;
 		}
 		.texture-page-modal-viewport {
-			height: 48vh;
-			min-height: 280px;
+			height: min(68vh, 700px);
+			min-height: 360px;
+			overflow: hidden;
+			touch-action: none;
+			background: var(--ui-color-well);
+			cursor: grab;
+		}
+		.texture-page-modal-viewport:active {
+			cursor: grabbing;
+		}
+		.texture-page-modal-viewport canvas {
+			display: block;
+			width: 100%;
+			height: 100%;
+		}
+		.texture-page-modal-details {
+			min-width: 0;
+		}
+		.texture-page-modal-details .explorer-section-label {
+			margin: 16px 0 7px;
+		}
+		.texture-page-modal-entry-list {
+			max-height: 360px;
+			overflow: auto;
+		}
+		.texture-page-modal-entry-list button {
+			gap: 3px;
+			font-size: 0.74rem;
+		}
+		.texture-page-modal-entry-list strong {
+			color: var(--ui-color-accent);
+		}
+		.texture-page-modal-entry-list span {
+			overflow-wrap: anywhere;
+			font-family: var(--ui-font-mono);
+		}
+		.texture-page-modal-selected {
+			margin-bottom: 0;
+			font-size: 0.8rem;
+		}
+		@media (max-width: 760px) {
+			.texture-page-modal {
+				width: calc(100vw - 20px);
+				max-height: calc(100vh - 20px);
+			}
+			.texture-page-modal-body {
+				grid-template-columns: 1fr;
+			}
+			.texture-page-modal-viewport {
+				height: 48vh;
+				min-height: 280px;
+			}
 		}
 	}
 </style>

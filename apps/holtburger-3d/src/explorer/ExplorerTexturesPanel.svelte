@@ -337,50 +337,52 @@
 {/if}
 
 <style>
-	.explorer-textures-summary {
-		margin-top: 0;
-	}
+	@layer components {
+		.explorer-textures-summary {
+			margin-top: 0;
+		}
 
-	.explorer-texture-controls {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto;
-		gap: 8px;
-		align-items: end;
-		margin: 14px 0;
-	}
+		.explorer-texture-controls {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: 8px;
+			align-items: end;
+			margin: 14px 0;
+		}
 
-	.explorer-texture-pages {
-		display: grid;
-		gap: 4px;
-		max-height: 235px;
-		overflow: auto;
-	}
+		.explorer-texture-pages {
+			display: grid;
+			gap: 4px;
+			max-height: 235px;
+			overflow: auto;
+		}
 
-	.explorer-texture-page-row {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto;
-		gap: 8px;
-		font-size: 0.75rem;
-	}
+		.explorer-texture-page-row {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: 8px;
+			font-size: 0.75rem;
+		}
 
-	.explorer-texture-page-content {
-		display: grid;
-		gap: 3px;
-		min-width: 0;
-	}
+		.explorer-texture-page-content {
+			display: grid;
+			gap: 3px;
+			min-width: 0;
+		}
 
-	.explorer-texture-page-name {
-		color: var(--ui-color-accent);
-		font-family: var(--ui-font-mono);
-		overflow-wrap: anywhere;
-	}
+		.explorer-texture-page-name {
+			color: var(--ui-color-accent);
+			font-family: var(--ui-font-mono);
+			overflow-wrap: anywhere;
+		}
 
-	.explorer-texture-sort,
-	.explorer-texture-inspect {
-		font-family: var(--ui-font-body);
-	}
+		.explorer-texture-sort,
+		.explorer-texture-inspect {
+			font-family: var(--ui-font-body);
+		}
 
-	.explorer-texture-readback-error {
-		color: var(--ui-color-danger);
+		.explorer-texture-readback-error {
+			color: var(--ui-color-danger);
+		}
 	}
 </style>

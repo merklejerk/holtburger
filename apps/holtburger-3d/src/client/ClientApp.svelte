@@ -741,7 +741,7 @@
 	/>
 {:else}
 	<main class="client-screen ui-theme" aria-label="Holtburger client">
-		<section class="client-panel ui-glass">
+		<section class="client-panel ui-panel">
 			<header class="ui-frame">
 				<span>Client</span>
 			</header>
@@ -797,19 +797,21 @@
 {/if}
 
 <style>
-	.client-screen {
-		display: grid;
-		min-height: 100vh;
-		place-items: start center;
-		padding: clamp(16px, 5vw, 48px);
-		background: var(--ui-color-well);
-	}
-	.client-panel {
-		width: min(100%, 640px);
-	}
-	.client-panel-body {
-		display: grid;
-		gap: 12px;
-		padding: clamp(12px, 3vw, 24px);
+	@layer components {
+		.client-screen {
+			display: grid;
+			min-height: 100vh;
+			place-items: start center;
+			padding: clamp(16px, 5vw, 48px);
+			background: var(--ui-color-well);
+		}
+		.client-panel {
+			width: min(100%, 640px);
+		}
+		.client-panel-body {
+			display: grid;
+			gap: 12px;
+			padding: clamp(12px, 3vw, 24px);
+		}
 	}
 </style>

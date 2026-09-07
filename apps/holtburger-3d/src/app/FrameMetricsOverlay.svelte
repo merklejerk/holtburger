@@ -99,21 +99,23 @@
 {/if}
 
 <style>
-	.frame-metrics-overlay {
-		position: absolute;
-		left: 12px;
-		bottom: 12px;
-		z-index: 2;
-		max-width: calc(100vw - 24px);
-		padding: 3px 6px;
-		font-variant-numeric: tabular-nums;
-		line-height: 1.2;
-		white-space: nowrap;
-	}
-	/* Clip long readouts without clipping their owner's feathered backing. */
-	.frame-metrics-overlay span {
-		display: block;
-		overflow: hidden;
-		text-overflow: ellipsis;
+	@layer components {
+		.frame-metrics-overlay {
+			position: absolute;
+			left: 12px;
+			bottom: 12px;
+			z-index: 2;
+			max-width: calc(100vw - 24px);
+			padding: 3px 6px;
+			font-variant-numeric: tabular-nums;
+			line-height: 1.2;
+			white-space: nowrap;
+		}
+		/* Clip long readouts without clipping their owner's feathered backing. */
+		.frame-metrics-overlay span {
+			display: block;
+			overflow: hidden;
+			text-overflow: ellipsis;
+		}
 	}
 </style>

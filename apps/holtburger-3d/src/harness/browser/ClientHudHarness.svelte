@@ -2,9 +2,9 @@
 	import { provideViewportInputGate } from "../../lib/input/viewport-input-context";
 	import { probeBrowserInput } from "./input-browser-probe";
 	import { onMount } from "svelte";
-	import { applyUiTheme } from "../../app/ui-theme";
-	import { ESPRESSO_AERO } from "../../app/themes/espresso-aero";
-	import { hexRgb } from "../../lib/frontend-color";
+	import { defaultUiThemeUrl } from "../../app/ui-theme";
+	import { uiThemes } from "../../app/mount";
+	import opaqueUrl from "./themes/opaque.css?url&no-inline";
 	import type { FrameRates } from "../../app/frame-rate-sampler";
 	import ClientCharacterSelect from "../../client/ClientCharacterSelect.svelte";
 	import type { ClientLifecycleUiState } from "../../client/client-lifecycle-state";
@@ -113,16 +113,17 @@
 	async function probeThemeApplication() {
 		const canvas = document.querySelector(".client-canvas");
 		const before = capture().surfaces;
+		const chat = document.querySelector(".chat-buffer");
+		if (chat === null)
+			throw new Error("Theme probe requires the chat backing.");
+		const expectedBackdrop = getComputedStyle(document.documentElement)
+			.getPropertyValue("--ui-backdrop-filter")
+			.trim();
+		if (getComputedStyle(chat).backdropFilter !== expectedBackdrop)
+			throw new Error("Client chat did not consume the HUD backdrop.");
+
 		try {
-			applyUiTheme(
-				document.documentElement,
-				{
-					...ESPRESSO_AERO,
-					id: "client-probe",
-					color: { ...ESPRESSO_AERO.color, accent: hexRgb("#bbddff") },
-				},
-				{ reducedTransparency: true },
-			);
+			await uiThemes.replace(defaultUiThemeUrl, opaqueUrl);
 			await new Promise<void>((resolve) =>
 				requestAnimationFrame(() => resolve()),
 			);
@@ -132,19 +133,19 @@
 			const stable =
 				canvas === document.querySelector(".client-canvas") &&
 				JSON.stringify(before) === JSON.stringify(capture().surfaces);
-			const opaque = getComputedStyle(panel).backdropFilter === "none";
+			const opaque =
+				getComputedStyle(panel).backdropFilter === "none" &&
+				getComputedStyle(chat).backdropFilter === "none";
 			if (!stable || !opaque)
 				throw new Error(
 					"Client theme application changed layout/identity or retained filtering.",
 				);
 			return {
 				identityAndLayoutPreserved: stable,
-				reducedTransparency: opaque,
+				opaqueOverride: opaque,
 			};
 		} finally {
-			applyUiTheme(document.documentElement, ESPRESSO_AERO, {
-				reducedTransparency: false,
-			});
+			await uiThemes.replace(defaultUiThemeUrl, null);
 		}
 	}
 	interface ClientHudHarnessApi {
@@ -853,7 +854,7 @@
 
 {#if previewCharacters}
 	<div class="character-preview ui-theme">
-		<section class="ui-glass">
+		<section class="ui-panel">
 			<header class="ui-frame">Asheron’s Call</header>
 			<div class="ui-body">
 				<ClientCharacterSelect
@@ -874,35 +875,37 @@
 {/if}
 
 <style>
-	.character-preview {
-		position: fixed;
-		inset: 0;
-		z-index: 50;
-		display: grid;
-		place-items: start center;
-		padding: 32px;
-		background: var(--ui-color-well);
-	}
-	.character-preview section {
-		width: min(100%, 640px);
-	}
-	.character-preview .ui-body {
-		display: grid;
-		gap: 12px;
-	}
-	:global(body) {
-		margin: 0;
-		overflow: hidden;
-	}
-	:global(.client-canvas) {
-		background:
-			linear-gradient(rgb(80 45 50 / 0.12), rgb(28 20 18 / 0.1)),
-			radial-gradient(
-				circle at 55% 78%,
-				#b58c68,
-				#624d42 45%,
-				#27343a 78%,
-				#aab8b5
-			);
+	@layer components {
+		.character-preview {
+			position: fixed;
+			inset: 0;
+			z-index: 50;
+			display: grid;
+			place-items: start center;
+			padding: 32px;
+			background: var(--ui-color-well);
+		}
+		.character-preview section {
+			width: min(100%, 640px);
+		}
+		.character-preview .ui-body {
+			display: grid;
+			gap: 12px;
+		}
+		:global(body) {
+			margin: 0;
+			overflow: hidden;
+		}
+		:global(.client-canvas) {
+			background:
+				linear-gradient(rgb(80 45 50 / 0.12), rgb(28 20 18 / 0.1)),
+				radial-gradient(
+					circle at 55% 78%,
+					#b58c68,
+					#624d42 45%,
+					#27343a 78%,
+					#aab8b5
+				);
+		}
 	}
 </style>

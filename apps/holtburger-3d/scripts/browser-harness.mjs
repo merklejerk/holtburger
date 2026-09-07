@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { findAvailablePort, parseVitePort } from "./dev-port.mjs";
+import { probeUiShowcase } from "./ui-showcase-probe.mjs";
 import { probeUiTheme } from "./ui-theme-probe.mjs";
 import { probeClientTheme } from "./client-theme-probe.mjs";
 
@@ -52,11 +53,13 @@ const children = [];
 const tempDirectories = [];
 
 try {
-	const contentHostUrl = options.clientHud ? null : await startContentHost();
+	const contentHostUrl =
+		options.clientHud || options.uiShowcase ? null : await startContentHost();
 	const viteUrl = await startViteServer(options.vitePort);
-	const result = options.clientHud
-		? await runClientHudHarness({ viteUrl })
-		: await runHarness({ contentHostUrl, viteUrl });
+	const result =
+		options.clientHud || options.uiShowcase
+			? await runStandaloneUiHarness({ viteUrl })
+			: await runHarness({ contentHostUrl, viteUrl });
 	const browserErrors = result.consoleMessages.filter(
 		({ level }) => level === "error" || level === "exception",
 	);
@@ -80,7 +83,12 @@ try {
 		}
 	}
 	let report;
-	if (options.uiTheme) {
+	if (options.uiShowcase) {
+		report = {
+			uiShowcase: result.uiShowcase,
+			consoleMessages: result.consoleMessages,
+		};
+	} else if (options.uiTheme) {
 		report = {
 			uiTheme: result.uiTheme.evidence,
 			glRenderer: result.glRenderer,
@@ -162,7 +170,7 @@ try {
 		};
 	}
 	process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
-	if (result.state.error) {
+	if (!options.uiShowcase && result.state.error) {
 		throw new Error(
 			`Browser harness reported startup failure: ${result.state.error}`,
 		);
@@ -242,6 +250,7 @@ function parseArgs(args) {
 	const parsed = {
 		chromePath: process.env.CHROME_PATH ?? DEFAULT_CHROME_PATH,
 		clientHud: false,
+		uiShowcase: false,
 		uiTheme: false,
 		reportMode: "full",
 		landblockId: DEFAULT_LANDBLOCK_ID,
@@ -349,6 +358,9 @@ function parseArgs(args) {
 	for (let index = 0; index < args.length; index += 1) {
 		const arg = args[index];
 		switch (arg) {
+			case "--ui-showcase":
+				parsed.uiShowcase = true;
+				break;
 			case "--client-hud":
 				parsed.clientHud = true;
 				break;
@@ -1128,9 +1140,12 @@ function parseArgs(args) {
 			"--isolate-authored-dynamics and --exclude-authored-dynamics cannot be combined.",
 		);
 	}
-	if (parsed.uiTheme && parsed.clientHud)
+	if (
+		[parsed.uiTheme, parsed.clientHud, parsed.uiShowcase].filter(Boolean)
+			.length > 1
+	)
 		throw new Error(
-			"--ui-theme and --client-hud select different harness compositions.",
+			"Choose one of --ui-theme, --client-hud, or --ui-showcase.",
 		);
 	if (
 		parsed.cameraLandblockId &&
@@ -1480,10 +1495,11 @@ Options:
   --disable-nameplates   Set the nameplate budget to zero before installing the workload.
   --settle-ms <ms>      Wait after requesting scene content. Default: ${DEFAULT_SETTLE_MS}
   --measure-ms <ms>     Reset timings after settling, then measure steady-state frames.
-  --ui-theme           Review Espresso Aero over the live world, bright/dark backdrops, opaque
-                       fallback, and a texture-free fixture; verify contrast and native input.
+  --ui-theme           Review CSS themes over the live world, bright/dark backdrops, override
+                       removal, filter fallback, and a replacement fixture; verify contrast and input.
                        With --screenshot, also writes <path>.<variant>.png.
   --screenshot <path>   Persist the captured PNG after the harness exits.
+  --ui-showcase        Verify the production UI showcase and theme reload without a content host.
   --client-hud          Exercise runtime/layout HUD visibility, centered drag anchoring, and
                          constrained viewport restoration using the deterministic client fixture.
   --relocate-sequence <hex,hex,...>
@@ -3830,13 +3846,13 @@ async function placeEnvCellCamera(client, options) {
 	);
 }
 
-/** Exercise the production client HUD shell without starting a gameplay presentation runtime. */
-async function runClientHudHarness({ viteUrl }) {
+/** Launch standalone UI compositions without starting a content host or gameplay runtime. */
+async function runStandaloneUiHarness({ viteUrl }) {
 	const userDataDirectory = await mkdtemp(
 		join(tmpdir(), "holtburger-3d-client-hud-harness-"),
 	);
 	tempDirectories.push(userDataDirectory);
-	const pageUrl = `${viteUrl}/harness/browser/?client-hud=1`;
+	const pageUrl = `${viteUrl}/harness/browser/?${options.uiShowcase ? "ui-showcase" : "client-hud"}=1`;
 	const chrome = startChild(options.chromePath, [
 		"--remote-debugging-port=0",
 		`--user-data-dir=${userDataDirectory}`,
@@ -3873,6 +3889,14 @@ async function runClientHudHarness({ viteUrl }) {
 			});
 		});
 		await client.send("Runtime.enable");
+		if (options.uiShowcase) {
+			const uiShowcase = await probeUiShowcase(client, evaluateExpression);
+			const { data: screenshot } = await client.send("Page.captureScreenshot", {
+				format: "png",
+				captureBeyondViewport: false,
+			});
+			return { uiShowcase, screenshot, consoleMessages };
+		}
 		await waitForClientHudHarnessApi(client);
 		const capture = () =>
 			evaluate(

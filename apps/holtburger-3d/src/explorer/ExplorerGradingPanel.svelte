@@ -315,59 +315,61 @@
 </div>
 
 <style>
-	.explorer-grade-channels {
-		display: flex;
-		gap: 0.25rem;
-	}
+	@layer components {
+		.explorer-grade-channels {
+			display: flex;
+			gap: 0.25rem;
+		}
 
-	.explorer-grade-channel {
-		flex: 1;
-		text-transform: capitalize;
-		cursor: pointer;
-	}
+		.explorer-grade-channel {
+			flex: 1;
+			text-transform: capitalize;
+			cursor: pointer;
+		}
 
-	.explorer-grade-curve {
-		width: 100%;
-		aspect-ratio: 1;
-		touch-action: none;
-		cursor: crosshair;
-	}
+		.explorer-grade-curve {
+			width: 100%;
+			aspect-ratio: 1;
+			touch-action: none;
+			cursor: crosshair;
+		}
 
-	/* An SVG is not a form control, so the surrounding disabled fieldset does not reach it. */
-	.explorer-grade-curve.disabled {
-		pointer-events: none;
-		opacity: 0.45;
-	}
+		/* An SVG is not a form control, so the surrounding disabled fieldset does not reach it. */
+		.explorer-grade-curve.disabled {
+			pointer-events: none;
+			opacity: 0.45;
+		}
 
-	.grade-field {
-		fill: var(--ui-color-well);
-		stroke: currentColor;
-		stroke-width: 1;
-	}
+		.grade-field {
+			fill: var(--ui-color-well);
+			stroke: currentColor;
+			stroke-width: 1;
+		}
 
-	.grade-identity {
-		stroke: currentColor;
-		stroke-width: 1;
-		stroke-dasharray: 4 4;
-		opacity: 0.4;
-	}
+		.grade-identity {
+			stroke: currentColor;
+			stroke-width: 1;
+			stroke-dasharray: 4 4;
+			opacity: 0.4;
+		}
 
-	.grade-curve {
-		fill: none;
-		stroke: currentColor;
-		stroke-width: 2;
-	}
+		.grade-curve {
+			fill: none;
+			stroke: currentColor;
+			stroke-width: 2;
+		}
 
-	.grade-point {
-		fill: currentColor;
-	}
+		.grade-point {
+			fill: currentColor;
+		}
 
-	.grade-point.dragging {
-		r: 6;
-	}
+		.grade-point.dragging {
+			r: 6;
+		}
 
-	.explorer-grade-actions {
-		display: flex;
-		gap: 0.5rem;
+		.explorer-grade-actions {
+			display: flex;
+			gap: 0.5rem;
+		}
 	}
 </style>

@@ -36,7 +36,7 @@
 </script>
 
 <section class="selected-entity" aria-label={`Selected entity: ${displayName}`}>
-	<div class="selected-entity__heading">
+	<div class="selected-entity__heading ui-hud-group">
 		<button
 			class="ui-hud-button"
 			type="button"
@@ -45,9 +45,7 @@
 		>
 			<ClientHudIcon name="interact" />
 		</button>
-		<strong class="ui-readout" title={displayName}
-			><span>{displayName}</span></strong
-		>
+		<strong title={displayName}><span>{displayName}</span></strong>
 		<button
 			class="ui-hud-button"
 			type="button"
@@ -57,56 +55,58 @@
 			<ClientHudIcon name="examine" />
 		</button>
 	</div>
-	<div class="selected-entity__health" aria-hidden="true">
+	<div class="selected-entity__health ui-hud-surface" aria-hidden="true">
 		<div class="selected-entity__health-fill"></div>
 	</div>
 </section>
 
 <style>
-	.selected-entity {
-		display: grid;
-		box-sizing: border-box;
-		width: 100%;
-		height: 100%;
-		grid-template-rows: 24px 5px;
-		gap: 3px;
-	}
-	.selected-entity__heading {
-		display: grid;
-		grid-template-columns: 24px minmax(0, 1fr) 24px;
-		gap: 4px;
-		align-items: center;
-	}
-	.selected-entity__heading strong {
-		font-weight: 600;
-		text-align: center;
-		white-space: nowrap;
-		min-width: 0;
-	}
-	.selected-entity__heading strong span {
-		display: block;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-	.selected-entity__heading button {
-		display: grid;
-		width: 24px;
-		height: 24px;
-		padding: 4px;
-		place-items: center;
-		pointer-events: auto;
-	}
-	.selected-entity__heading button :global(svg) {
-		width: 16px;
-		height: 16px;
-	}
-	.selected-entity__health {
-		overflow: hidden;
-		background: var(--ui-hud-backing);
-	}
-	.selected-entity__health-fill {
-		width: 68%;
-		height: 100%;
-		background: var(--ui-color-health);
+	@layer components {
+		.selected-entity {
+			display: grid;
+			box-sizing: border-box;
+			width: 100%;
+			height: 100%;
+			grid-template-rows: 24px 5px;
+			gap: 3px;
+		}
+		.selected-entity__heading {
+			display: grid;
+			grid-template-columns: 24px minmax(0, 1fr) 24px;
+			gap: 4px;
+			align-items: center;
+		}
+		.selected-entity__heading strong {
+			font-weight: 600;
+			text-align: center;
+			white-space: nowrap;
+			min-width: 0;
+		}
+		.selected-entity__heading strong span {
+			display: block;
+			overflow: hidden;
+			text-overflow: ellipsis;
+		}
+		.selected-entity__heading button {
+			display: grid;
+			width: 24px;
+			height: 24px;
+			padding: 4px;
+			place-items: center;
+			pointer-events: auto;
+		}
+		.selected-entity__heading button :global(svg) {
+			width: 16px;
+			height: 16px;
+		}
+		.selected-entity__health {
+			overflow: hidden;
+			background: var(--_ui-hud-background-color);
+		}
+		.selected-entity__health-fill {
+			width: 68%;
+			height: 100%;
+			background: var(--ui-color-health);
+		}
 	}
 </style>

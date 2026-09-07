@@ -142,29 +142,31 @@
 </div>
 
 <style>
-	.diagnostic-row {
-		display: grid;
-		grid-template-columns: minmax(90px, 0.8fr) minmax(0, 1.2fr);
-		gap: 6px;
-		padding: 3px 0;
-		overflow-wrap: anywhere;
-	}
-	.debug-panel-body {
-		display: grid;
-		align-content: start;
-		gap: 12px;
-		height: 100%;
-		min-height: 0;
-		overflow: auto;
-	}
-	dl {
-		margin: 0;
-	}
-	dd {
-		min-width: 0;
-		margin: 0;
-	}
-	p {
-		margin: 0;
+	@layer components {
+		.diagnostic-row {
+			display: grid;
+			grid-template-columns: minmax(90px, 0.8fr) minmax(0, 1.2fr);
+			gap: 6px;
+			padding: 3px 0;
+			overflow-wrap: anywhere;
+		}
+		.debug-panel-body {
+			display: grid;
+			align-content: start;
+			gap: 12px;
+			height: 100%;
+			min-height: 0;
+			overflow: auto;
+		}
+		dl {
+			margin: 0;
+		}
+		dd {
+			min-width: 0;
+			margin: 0;
+		}
+		p {
+			margin: 0;
+		}
 	}
 </style>

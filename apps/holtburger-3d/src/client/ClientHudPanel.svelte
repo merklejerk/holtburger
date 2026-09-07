@@ -135,20 +135,22 @@
 </section>
 
 <style>
-	.hud-panel {
-		position: absolute;
-		z-index: 3;
-		pointer-events: none;
-		user-select: none;
-	}
+	@layer components {
+		.hud-panel {
+			position: absolute;
+			z-index: 3;
+			pointer-events: none;
+			user-select: none;
+		}
 
-	.hud-panel-content {
-		width: 100%;
-		height: 100%;
-		pointer-events: auto;
-	}
+		.hud-panel-content {
+			width: 100%;
+			height: 100%;
+			pointer-events: auto;
+		}
 
-	.hud-panel-content-passthrough {
-		pointer-events: none;
+		.hud-panel-content-passthrough {
+			pointer-events: none;
+		}
 	}
 </style>

@@ -32,23 +32,25 @@
 </label>
 
 <style>
-	.toggle-field {
-		display: grid;
-		grid-template-columns: 15px minmax(0, 1fr) auto;
-		gap: 7px;
-		align-items: center;
-		min-height: 25px;
-		padding: 3px 5px;
-	}
-	input {
-		width: 15px;
-		height: 15px;
-		padding: 0;
-		margin: 0;
-		cursor: pointer;
-	}
-	strong {
-		color: var(--ui-color-muted);
-		font-weight: 400;
+	@layer components {
+		.toggle-field {
+			display: grid;
+			grid-template-columns: 15px minmax(0, 1fr) auto;
+			gap: 7px;
+			align-items: center;
+			min-height: 25px;
+			padding: 3px 5px;
+		}
+		input {
+			width: 15px;
+			height: 15px;
+			padding: 0;
+			margin: 0;
+			cursor: pointer;
+		}
+		strong {
+			color: var(--ui-color-muted);
+			font-weight: 400;
+		}
 	}
 </style>

@@ -1,188 +1,311 @@
-# UI themes and Espresso Aero
+# CSS UI themes
 
-Both client and Explorer use one app-local appearance contract. Theme data changes
-colors and materials; component CSS owns arrangement. Renderer and host lifetimes
-do not depend on theme changes.
+Client and Explorer share document-wide CSS themes. Components own arrangement and
+interaction; themes own appearance. Renderer and host lifetimes do not depend on
+stylesheet changes.
 
 ## Edit points
 
-| Concern                                                   | Owner                              |
-| --------------------------------------------------------- | ---------------------------------- |
-| Default palette, fonts, radii, material strengths         | `src/app/themes/espresso-aero.ts`  |
-| Complete configuration and preference types               | `src/app/ui-theme-contract.ts`     |
-| Pure CSS-variable projection and explicit DOM application | `src/app/ui-theme.ts`              |
-| Shared materials and control states                       | `src/app/ui-theme-recipes.css`     |
-| Browser reset                                             | `src/app/base.css`                 |
-| Initial client HUD arrangement                            | `src/client/client-ui-defaults.ts` |
-| Explorer tool layout and diagnostic row density           | `src/explorer/explorer.css`        |
+| Concern                                   | Owner                                    |
+| ----------------------------------------- | ---------------------------------------- |
+| Holtburger Standard colors and decoration | `src/app/themes/holtburger-standard.css` |
+| Neutral tokens and shared control states  | `src/app/ui-base.css`                    |
+| Stylesheet loading and replacement        | `src/app/ui-theme.ts`                    |
+| Startup selection                         | `src/app/mount.ts`                       |
+| Browser defaults and cascade order        | `src/app/base.css`                       |
+| Initial client HUD arrangement            | `src/client/client-ui-defaults.ts`       |
+| Explorer layout                           | `src/explorer/explorer.css`              |
 
-The shared `mountEntry` publishes Espresso Aero on `document.documentElement`
-before mounting either application. It marks `#app` with `ui-theme`; isolated
-diagnostic roots may carry the same scope class. Theme-specific names belong only
-in theme data and documentation, not component classes.
+`mountEntry` loads the selected theme before mounting Svelte. Its optional URL
+arguments select a replacement theme and an override sheet; the defaults select
+Holtburger Standard with no override. Both bundled and caller-supplied stylesheets use
+this same loader. There is no theme picker or saved selection yet.
 
-The stable default identifier is `espresso-aero`; its display name is
-**Espresso Aero**. Edit the exported definition directly for app defaults.
-The contract contains 20 opaque color roles, three font stacks, two corner radii,
-and five material parameters. Colors use the existing `hexRgb` constructor.
-Numeric strengths must be finite and within 0–1; dimensions must be finite and
-nonnegative. Projection validates these before mutating the root.
+## Authoring a replacement or override
 
-## Visual direction
+The cascade order is `base, components, theme, overrides`. Svelte styles and
+Explorer layout live in `components`. A replacement stylesheet uses `@layer theme`;
+a small override uses `@layer overrides`. Follow that convention: unlayered rules
+outrank ordinary layered rules, and `!important` reverses layer precedence.
+Neither is necessary for supported customization.
 
-Espresso Aero is flat warm charcoal glass, ivory text, muted brass controls, and a
-narrow walnut header detail. Warmth comes from accents rather than brown-filled
-surfaces. It borrows a glass finish, not desktop-window proportions.
+A replacement starts from the neutral base and does not inherit Holtburger Standard.
+Tokens belong on `:root`; styling hooks are ordinary classes under `.ui-theme`.
+For example, a replacement can change materials as well as palette:
 
-- Actual windows and inspectors get glass, a thin edge, and a restrained shadow.
-  Their headers carry a 3px walnut strip; wood never fills a reading area.
-- Window controls are flat brass. Hover lightens them, pressing darkens them,
-  and selection adds an underline. No bevels or glossy meter fills.
-- HUDs remain information over the game: borderless, compact, and mostly unpainted.
-  Readout backings fade horizontally and vertically beyond their text; glyph
-  controls have small radial backings. Empty layout space stays transparent.
-- Character vitals keep their descending bar heights. Targets keep a name,
-  glyph actions, and a thin health bar. Chat fades into the scene and keeps its
-  quiet filters/input at the bottom. Shortcuts are an unenclosed glyph row.
-- Default body text is 13px sans-serif. Headings use a restrained serif;
-  diagnostic values may use tabular monospace. Remove unnecessary labels and
-  padding before shrinking text.
-
-Layout dimensions are not theme fields. Shared controls start at 24px high,
-with small gaps, 2–7px control padding, and 8px window-body padding. Components
-may adapt geometry to their actual function, but must not recreate materials.
-Existing HUD rectangles describe layout and hit-testing allocations, not painted
-panels.
-
-## Recipe vocabulary
-
-Recipes are ordinary classes, not component wrappers or a UI framework.
-
-| Recipe                                                         | Use                                                 |
-| -------------------------------------------------------------- | --------------------------------------------------- |
-| `ui-glass`                                                     | Owning window/inspector surface                     |
-| `ui-frame`, `ui-body`                                          | Window header finish and compact content padding    |
-| `ui-well`                                                      | Opaque reading/data area within a window            |
-| `ui-button`, `ui-tab`                                          | Flat window buttons and tabs                        |
-| `ui-input`, `ui-label`                                         | Inputs/selects and local form-field grouping        |
-| `ui-hud-input` with `ui-input`                                 | Transparent chat entry, not a window well           |
-| `ui-hud-button`, `ui-readout`                                  | Compact glyph controls and text over the game       |
-| `ui-meter` with health/stamina/mana modifier                   | Solid vital fills                                   |
-| `ui-disclosure`                                                | Compact expandable diagnostic group                 |
-| `ui-option`                                                    | Selected autocomplete result, using `aria-selected` |
-| `ui-error`, `ui-tooltip`                                       | Error surface and compact tooltip                   |
-| `ui-muted`, `ui-mono`, `ui-danger`, `ui-warning`, `ui-success` | Text roles                                          |
-
-Example window structure:
-
-```html
-<section class="ui-glass">
-	<header class="ui-frame">Diagnostics</header>
-	<div class="ui-body">
-		<button class="ui-button" aria-pressed="true">Profiling</button>
-	</div>
-</section>
+```css
+@layer theme {
+	:root {
+		--ui-color-surface: #172530;
+		--ui-color-control: #304553;
+		--ui-color-accent: #a2d7e9;
+		--ui-font-heading: Arial, sans-serif;
+	}
+	.ui-theme .ui-panel {
+		background: var(--ui-color-surface);
+		border-style: dashed;
+		box-shadow: none;
+	}
+	.ui-theme .ui-button {
+		border-radius: 8px;
+	}
+}
 ```
 
-Use actual `disabled`, `aria-pressed`, or `aria-selected` state rather than
-parallel styling-only active flags. Keep selection distinct from keyboard focus.
-Native checkboxes/ranges share the accent and focus rules; do not rebuild their
-behavior or draw a second metallic slider system.
+An override may change a single token or an entire appearance rule:
 
-Shared readout decoration uses low-specificity relative positioning so local
-absolute/fixed placement wins. Its pseudo-elements are non-interactive and stay
-behind their owner. Decorative effects must not own pointer routing. Clip overflowing
-text inside the readout rather than clipping its feathered decoration.
+```css
+@layer overrides {
+	.ui-theme .ui-panel {
+		background: var(--ui-color-surface);
+		backdrop-filter: none;
+	}
+}
+```
 
-`LayoutControls.svelte` owns the shared move/resize corner buttons for HUD panels
-and the minimap. Their owners provide the gesture handlers and use
-`ui-layout-editable` for the edit outline. Keep map-specific square resizing in
-the minimap rather than adding it to the shared controls.
-
-## Transparency, focus, and motion
-
-The explicit `UiThemePreferences.reducedTransparency` preference forces surface
-opacity to 1 and turns backdrop filtering off. It does not flatten useful HUD
-edge fades into large rectangles. The unsupported-filter baseline is opaque;
-feature detection enhances it with transparency. Zero blur produces `none`,
-not a zero-radius filter that still creates a containing block.
-
-Apply changes through the cold, injected seam:
+Load a selection through the app-owned loader:
 
 ```ts
-applyUiTheme(document.documentElement, completeTheme, {
-	reducedTransparency: true,
-});
+import { uiThemes } from "./src/app/mount";
+
+await uiThemes.replace(themeUrl, overrideUrl); // null means no override
 ```
 
-This updates variables in place. Do not put theme state into renderer/session
-construction effects, frame loops, or network projections.
+Requests are serialized. Both sheets load before publication; a resource failure
+rejects the request and preserves the previous selection. Removing an override or
+replacing a theme removes its stylesheet rather than retaining its declarations.
+CSS syntax and property values follow browser parsing rules; successful loading
+does not certify that every declaration is valid. The loader does not sanitize CSS.
+`createUiThemeLoader(document)` provides an independent owner for isolated documents;
+`dispose()` releases its sheets after pending requests finish.
 
-Filter once per owning surface. Nested ordinary glass surfaces use an opaque
-well-like presentation without another filter. True modal dialogs use native
-`showModal()`: the browser top layer escapes filtered ancestor containing blocks.
-DOM ancestry alone does not describe a top-layer dialog's compositing ancestry.
-Let the browser close the connected dialog and restore focus before removing the
-component. A modal still owns an independent viewport-input-gate blocker.
+Use URLs that the current app document can load. Relative `url(...)` and CSS imports
+resolve from the stylesheet location, so distribute images/fonts beside the sheet.
+Bundled Holtburger Standard is imported as a Vite asset URL, including in built entries.
+User-file discovery and an Electron file-serving policy remain separate work;
+a filesystem path is not automatically a browser-loadable URL.
 
-Reduced motion disables control transitions; never animate blur or layout.
-Project specimen targets are 4.5:1 for informational text and 3:1 for essential
-boundaries/focus against adjacent composited colors. Disabled text remains
-readable. A different user palette needs fresh contrast checks; type safety cannot
-prove visual accessibility.
+## Tokens and styling hooks
 
-## Extension rules and exceptions
+Palette and font defaults live on `:root` in `ui-base.css`. Component variables are
+optional: recipes resolve their defaults at the styled element. A component property
+has the same name in every state; use CSS selectors to change its value for hover,
+physical press, selection, an open panel, or disabled controls.
 
-Add a role only for a named consumer that genuinely needs independent control.
-Do not add per-component token registries, arbitrary CSS objects, fallback aliases,
-or a theme framework. A shared recipe must own its state treatment, not merely
-rename scattered color literals.
+| Variables                                                                                                                                                   | Accepted values and consumers                                                                                                         |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `--ui-color-text`, `--ui-color-muted`, `--ui-color-surface`, `--ui-color-well`, `--ui-color-control`                                                        | Palette colors for text, secondary text, surfaces, recessed areas, and controls.                                                      |
+| `--ui-color-border`, `--ui-color-highlight`, `--ui-color-shadow`, `--ui-color-accent`, `--ui-color-focus`                                                   | Palette colors for borders, highlights, decorative shadows, accents, and keyboard focus.                                              |
+| `--ui-color-active`                                                                                                                                         | Foreground color for active or open HUD controls.                                                                                     |
+| `--ui-color-danger`, `--ui-color-warning`, `--ui-color-success`                                                                                             | Status-feedback colors.                                                                                                               |
+| `--ui-color-health`, `--ui-color-stamina`, `--ui-color-mana`                                                                                                | Vital-bar colors, independent of chat.                                                                                                |
+| `--ui-font-body`, `--ui-font-heading`, `--ui-font-mono`                                                                                                     | CSS font-family lists.                                                                                                                |
+| `--ui-font-size-body`, `--ui-font-size-heading-1`, `--ui-font-size-heading-2`, `--ui-font-size-heading-3`, `--ui-font-size-caption`, `--ui-font-size-micro` | Semantic font sizes for shared body, headings, captions, and compact HUD text.                                                        |
+| `--ui-line-height-body`, `--ui-line-height-heading`                                                                                                         | Unitless line heights for shared body and heading text.                                                                               |
+| `--ui-radius-surface`, `--ui-radius-control`                                                                                                                | CSS lengths.                                                                                                                          |
+| `--ui-panel-background`                                                                                                                                     | Full CSS background for panels. Defaults to the surface palette color with surface opacity; nested panels default to opaque.          |
+| `--ui-surface-shadow`                                                                                                                                       | Full CSS box-shadow for panels and tooltips, including `none`.                                                                        |
+| `--ui-hud-background-color`                                                                                                                                 | CSS color for HUD backings and chat's color-based fade. Defaults to the surface palette color with surface opacity.                   |
+| `--ui-surface-opacity`                                                                                                                                      | Number from 0 to 1 applied to default panel/HUD tints. Explicit backgrounds bypass it.                                                |
+| `--ui-backdrop-filter`                                                                                                                                      | CSS backdrop-filter value, including `none`. Shared by panels and HUDs; scope it with selectors for different treatments.             |
+| `--ui-easing`                                                                                                                                               | CSS easing function for small interactive motion details.                                                                             |
+| `--ui-button-background-color`, `--ui-button-border-color`                                                                                                  | Background color and border color for text buttons and tabs. Disabled buttons desaturate the background color.                        |
+| `--ui-hud-button-background`, `--ui-hud-button-indicator-color`                                                                                             | Optional full background for an icon's feathered backing (shared HUD tint by default), and underline color.                           |
+| `--ui-option-background`, `--ui-option-border-color`                                                                                                        | Full background and border color for `ui-option` list rows. Rows implemented as `ui-button` use button properties.                    |
+| `--ui-input-background`, `--ui-input-border-color`                                                                                                          | Full background and border color for inputs. Use `::placeholder`, `:disabled`, and `[aria-invalid="true"]` for text and state colors. |
 
-Component-local CSS may retain dimensions, grids, clipping, scrolling, text
-wrapping, semantic role mappings, and purpose-specific visualization. Legitimate
-exceptions include:
+Chat retains independent `--ui-chat-<category>-text` colors for `system`, `npc`,
+`error`, `combat`, `trade`, `emote`, `party`, `tell`, `guild`, and `society`.
+Ordinary speech inherits the chat's text color. These are data categories, not
+interaction states.
 
-- Chat classification remains in `client-chat-policy.ts`; CSS maps its roles to
-  theme colors without classifying messages again.
-- Map terrain, blips, view cones, and high-contrast SVG visualization strokes
-  remain map-owned. DOM minimap controls and coordinate text are themed.
-- Texture atlas checkerboards, bounds, selected placements, and preview pixels
-  remain diagnostic visualization. The surrounding modal is themed.
-- Color-grading curve/channel visualization remains grading-owned.
-- World nameplates, selection outlines, particles, portals, lighting, and scene
-  colors remain renderer/game tuning, not UI appearance.
-- Black in an alpha mask is opacity information, not a competing text/surface
-  color. Transparent decorative borders and geometry likewise are not palette roles.
+Variables ending in `-background` accept gradients or `none`. The button background
+color is also used in disabled-state color arithmetic. Color variables accept alpha and
+`transparent`; `none` is not a color. The HUD indicator is an underline, separate
+from text-control borders. Variables beginning `--_ui-` are private implementation
+details, not theme controls.
 
-The walnut detail is original procedural CSS, not a borrowed image. Grain strength
-zero gives a texture-free frame; there are no theme bitmap assets or remote fonts.
+For example, inside Holtburger Standard's existing `@layer theme` block:
 
-## Verification and future settings
+```css
+.ui-button {
+	--ui-button-background-color: #343c45;
+}
+.ui-button:hover:not(:disabled) {
+	--ui-button-background-color: #455362;
+}
+.ui-button:active:not(:disabled) {
+	--ui-button-background-color: #202933;
+}
+.shortcut-dock .ui-hud-button[aria-pressed="true"] {
+	--ui-hud-button-background: none;
+	--ui-hud-button-indicator-color: #8fc5ff;
+}
+.shortcut-dock .ui-hud-button:hover:not(:disabled) {
+	--ui-hud-button-background: #456789;
+}
+.shortcut-dock .ui-hud-button:active:not(:disabled) {
+	--ui-hud-button-background: #805c20;
+}
+.ui-input::placeholder {
+	color: #9ca9b6;
+}
+.ui-tooltip {
+	--ui-surface-shadow: none;
+}
+```
 
-Use `npm run test:ts -- src/app/ui-theme.test.ts` for projection invariants.
-Tests use explicit fixture values, never freeze the current default palette.
-Run the normal type/Svelte, ESLint, Knip, and formatting checks too.
+Normal CSS cascade rules apply: a declaration on the button takes precedence over
+one inherited from a container or `:root`. Within a layer, specificity and then source
+order decide competing selectors. Put your rules after the defaults, and use equally
+specific state selectors (or `:where()` states) when source order should decide.
+The default theme uses selected/checked, then hover, then physical-press order.
+Disabled controls are excluded from its interaction selectors.
 
-The browser specimen is diagnostic infrastructure:
+Palette fallbacks still resolve locally when a component property is unset. Use the
+palette tokens for shared text and state colors, then scope ordinary `color` rules to
+an individual control when it needs an exception.
+
+Holtburger Standard additionally owns `--holtburger-header-stripe-color` (color) and
+`--holtburger-header-grain-opacity` (0–1), limited to its decorative header strip.
+Replacement themes need not implement them. Use ordinary CSS for other styling;
+a property does not need a variable for every state or component instance.
+
+| Hook                                                           | Role                                                       |
+| -------------------------------------------------------------- | ---------------------------------------------------------- |
+| `ui-hud-surface`                                               | HUD backing on an element itself (chat, meters, map frame) |
+| `ui-panel`                                                     | Window, inspector, or dialog surface                       |
+| `ui-frame`, `ui-body`                                          | Panel header and content                                   |
+| `ui-well`                                                      | Reading/editing area                                       |
+| `ui-button`, `ui-tab`                                          | Buttons and tabs                                           |
+| `ui-input`, `ui-label`                                         | Inputs/selects and field grouping                          |
+| `ui-hud-input`                                                 | HUD chat entry, combined with `ui-input`                   |
+| `ui-hud-button`, `ui-readout`, `ui-hud-group`                  | HUD icon actions, readouts, and shared HUD backings        |
+| `ui-meter`, `ui-meter--health/stamina/mana`                    | Vital meters                                               |
+| `ui-disclosure`, `ui-option`                                   | Expandable groups and selectable results                   |
+| `ui-error`, `ui-tooltip`                                       | Errors and tooltips                                        |
+| `ui-muted`, `ui-mono`, `ui-danger`, `ui-warning`, `ui-success` | Text roles                                                 |
+| `ui-layout-editable`, `ui-icon-button`, `ui-tabs`              | Edit outline, icon controls, tab groups                    |
+
+Use actual `disabled`, `aria-pressed`, `aria-selected`, and `aria-invalid` states.
+Keep keyboard focus distinct from selection. Native range and checkbox controls
+retain their behavior. Theme authors should preserve visible focus and readable
+contrast and respect the existing reduced-motion styling.
+
+Selected tabs/options use `aria-selected="true"`; toggle buttons and the showcase's
+page buttons use `aria-pressed="true"`. Dock buttons use that same accessible toggle
+state to indicate an open panel. Physical pointer press is `:active`.
+
+HUD icon backgrounds affect their feathered `::before` backing, keeping the button
+itself transparent. `ui-hud-group` owns one shared backing for adjacent HUD content;
+child readouts and icon buttons remain transparent inside it. Use `ui-button` or `ui-tab`
+for text controls even when they live in the HUD; reserve `ui-hud-button` for icon actions.
+Recipes consume the same component
+properties in every state and supply palette-based defaults when those properties
+are unset. The theme chooses state colors through CSS selectors.
+
+## Ownership and theme behavior
+
+Components retain grids, positioning, scrolling, clipping, pointer routing, and
+purpose-specific visualization. Inline panel rectangles belong to layout state.
+Themes can change appearance and control spacing, but arbitrary CSS can disrupt
+layout; cascade layers are an authoring convention, not isolation or enforcement.
+
+Map terrain/blips, texture checkerboards, grading plots, world nameplates, selection
+outlines, lighting, and scene colors remain visualization-owned. Chat classification
+remains in client policy; CSS consumes its semantic roles.
+
+Holtburger Standard is the bundled default, with no fixed aesthetic contract.
+Edit its stylesheet freely; the shared hooks and loader do not prescribe its look.
+
+If a theme uses backdrop filtering, provide an opaque fallback when unsupported.
+Avoid compounding filters on ordinary nested panels. Native modal dialogs can own
+an independent filter because the browser top layer escapes ancestor composition.
+
+## Backdrop controls
+
+Set `--ui-backdrop-filter` on `:root` for shared filtering, or on specific surfaces
+for local filtering. It accepts `none` or filter functions such as `blur(12px)`.
+For example, a HUD-only treatment uses the same property:
+
+```css
+.ui-theme
+	:is(.ui-readout, .ui-hud-group, .ui-hud-button, .ui-hud-surface, .ui-meter) {
+	--ui-backdrop-filter: blur(8px);
+}
+```
+
+Filters apply to readout/button backing pseudo-elements and to
+group backings and `ui-hud-surface`/`ui-meter` backings. Nested backings do not compound
+filtering. Readout, group, and button masks feather the tint and filter together.
+
+`--ui-hud-background-color` controls the shared HUD tint independently of filtering.
+`--ui-hud-button-background` accepts a full background for icon backings specifically;
+when unset, icon buttons use the shared HUD tint. Use `ui-hud-group` when adjacent icons
+or readouts should share one feathered backdrop instead of rendering separate backings.
+
+## Interactive production-component showcase
+
+From `apps/holtburger-3d`, run:
 
 ```sh
-npm run harness:browser -- --ui-theme --gpu --viewport-width 1280 --viewport-height 807 --building-radius 1 --camera-height 28 --camera-pitch -15 --camera-yaw 35 --settle-ms 2000 --screenshot /tmp/espresso-aero.png
-npm run harness:browser -- --client-hud --brief --screenshot /tmp/espresso-client.png
+npm run dev:ui
 ```
 
-For native Explorer tabs/modal checks and repeated transparency measurements,
-launch `HOLTBURGER_ELECTRON_REMOTE_DEBUGGING_PORT=0 npm run dev:explorer`, then run
-`npm run probe:explorer:theme -- <printed CDP port> /tmp/espresso-explorer`.
-It uses local content, not a game server. It changes the diagnostic scene/control
-state and temporarily intercepts the report export instead of writing the clipboard.
-The probe restores the default theme and clipboard implementation when finished.
-Append `modal` after the output prefix to measure the settled full-size texture
-dialog instead of the Frame panel. Its browser/compositor window is modal-only;
-the renderer aggregate is exported after dismissal and includes surrounding frames.
-Do not edit application source during a browser capture.
+This opens `/harness/browser/?ui-showcase=1` in your browser. It mounts the real
+character HUD, target HUD, chat, FPS readout, jump meter, shortcut dock, toast,
+HUD layout wrappers, and draggable/resizable window. Window pages include real
+character selection and the diagnostics panel's unavailable state, plus basic
+control-state samples. Chat sends append local fixture messages; no server is
+contacted. Actions that are unfinished in production remain unfinished here.
 
-The alternate specimen fixture proves complete-theme injection without shipping
-a second product theme. Per-install persistence, override precedence, import/export,
-untrusted-data validation, and an in-app editor remain future work. Resolve those
-settings into one complete theme plus explicit preferences before application;
-components should not learn where the configuration came from.
+Character selection uses `ui-option` list rows with one Tab stop. Arrow keys,
+Home/End, and typing a name move selection without entering the world. **Enter World**
+is the separate action; double-clicking a row is its mouse shortcut. Selection is
+locked while entry is pending.
+
+The Backdrop selector offers checkerboard, fine grid, diagonal stripes, a sky/ground
+gradient, and bright/dark backgrounds. **Custom color** exposes a live viewport color
+picker and retains your color when switching backgrounds. Choose **Local image** to load a game screenshot
+from your computer; it fills the viewport with proportional cropping and stays in
+the browser. Background changes preserve component state. The showcase groups HUD
+readouts beside chat and the component window, with a reserved area for theme controls.
+Narrow viewports stack the specimens in a scrollable column. Production HUD move/resize
+handles start hidden; **Unlock UI layout** reveals them and **Lock UI layout** hides them again. Fixed-size components retain their
+production resize constraints. **Reset layout** restores the showcase arrangement.
+The Debug shortcut reopens a
+closed showcase window.
+
+Save `src/app/themes/holtburger-standard.css`, then click **Reload theme**. Reload
+requests fresh stylesheet URLs without remounting components, preserving drafts,
+selection, and window placement. A failed load leaves the previous theme active
+and displays an error. Theme asset updates are accepted at the Vite module boundary
+so edits do not trigger a full-page reload. Changes to component source still use
+Svelte's normal development behavior.
+
+The route loads its composition lazily. It does not load world/presentation owners,
+create a canvas, or start a content host. A few shared tuning-policy modules and
+the components' bounded UI sampling timers are still used. The GPU-backed minimap
+and rendered world remain covered by the client/browser harness, not this showcase.
+
+The older `?ui-theme=1` recipe specimen remains a separate diagnostic for controlled
+contrast and material tests; it is not the production-component showcase.
+
+## Verification
+
+Run the normal Svelte/TypeScript, ESLint, Knip, formatting, and build checks. The
+browser specimen tests independent replacement, override precedence/removal,
+resource failure recovery, queued selections, DOM identity, interaction, contrast, and filter fallback.
+Its Steel and opaque stylesheets are diagnostic fixtures, not shipped selections.
+
+```sh
+npm run harness:browser -- --ui-showcase --screenshot /tmp/ui-showcase.png
+npm run harness:browser -- --ui-theme --gpu --viewport-width 1280 --viewport-height 807 --building-radius 1 --camera-height 28 --camera-pitch -15 --camera-yaw 35 --settle-ms 2000 --screenshot /tmp/css-themes.png
+npm run harness:browser -- --client-hud --brief --screenshot /tmp/css-client.png
+```
+
+For native Explorer checks, launch
+`HOLTBURGER_ELECTRON_REMOTE_DEBUGGING_PORT=0 npm run dev:explorer`, then run
+`npm run probe:explorer:theme -- <printed CDP port> /tmp/css-explorer`.
+Append `modal` to measure the texture dialog. This uses local content and changes
+diagnostic controls; it restores the default theme when finished.

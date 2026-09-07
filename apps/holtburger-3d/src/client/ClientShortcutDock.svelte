@@ -65,17 +65,19 @@
 </nav>
 
 <style>
-	.shortcut-dock {
-		display: grid;
-		box-sizing: border-box;
-		width: 100%;
-		height: 100%;
-		grid-template-columns: repeat(var(--shortcut-count), minmax(0, 1fr));
-		gap: 5px;
-	}
-	button {
-		min-width: 0;
-		min-height: 0;
-		padding: 8px;
+	@layer components {
+		.shortcut-dock {
+			display: grid;
+			box-sizing: border-box;
+			width: 100%;
+			height: 100%;
+			grid-template-columns: repeat(var(--shortcut-count), minmax(0, 1fr));
+			gap: 5px;
+		}
+		button {
+			min-width: 0;
+			min-height: 0;
+			padding: 8px;
+		}
 	}
 </style>

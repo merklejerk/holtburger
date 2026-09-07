@@ -1,52 +1,74 @@
-import type { UiTheme, UiThemePreferences } from "./ui-theme-contract";
+// Keep this as a file: the production CSP does not permit data-URL stylesheets.
+import holtburgerStandardUrl from "./themes/holtburger-standard.css?url&no-inline";
 
-/** Project the finite theme contract into CSS without reading or mutating the DOM. */
-export function uiThemeProperties(
-	theme: UiTheme,
-	preferences: UiThemePreferences,
-): Readonly<Record<string, string>> {
-	const properties: Record<string, string> = {};
-	for (const [role, color] of Object.entries(theme.color))
-		properties[`--ui-color-${role}`] = color;
-	for (const [role, font] of Object.entries(theme.font))
-		properties[`--ui-font-${role}`] = font;
-	for (const [role, radius] of Object.entries(theme.radius))
-		properties[`--ui-radius-${role}`] =
-			`${nonnegative(`radius.${role}`, radius)}px`;
-	const { blur, ...strengths } = theme.material;
-	nonnegative("material.blur", blur);
-	for (const [role, value] of Object.entries(strengths)) {
-		const validated = nonnegative(`material.${role}`, value);
-		if (validated > 1) throw new Error(`material.${role} must not exceed 1.`);
-		properties[`--ui-material-${role}`] = String(validated);
-	}
-	if (preferences.reducedTransparency) {
-		properties["--ui-material-opacity"] = "1";
-	}
-	// Recipes can choose the opaque path without relying on blur(0px), which still creates a filter.
-	properties["--ui-backdrop"] =
-		preferences.reducedTransparency || blur === 0
-			? "none"
-			: `blur(${theme.material.blur}px)`;
-	return properties;
+// Appearance is published by the stylesheet loader. Absorb asset-module updates so
+// editing the theme in Vite does not reload the page and discard component state.
+if (import.meta.hot) {
+	import.meta.hot.accept(
+		"./themes/holtburger-standard.css?url&no-inline",
+		() => {},
+	);
 }
 
-/** Apply a complete theme to its owner's root, preserving unrelated inline styles and DOM identity. */
-export function applyUiTheme(
-	root: HTMLElement,
-	theme: UiTheme,
-	preferences: UiThemePreferences,
-): void {
-	// Validate the complete projection before publishing any change.
-	const properties = uiThemeProperties(theme, preferences);
-	for (const [name, value] of Object.entries(properties))
-		root.style.setProperty(name, value);
-	root.dataset.uiTheme = theme.id;
-}
+/** Bundled themes and caller-supplied themes use the same stylesheet URL boundary. */
+export const defaultUiThemeUrl = holtburgerStandardUrl;
 
-/** Reject authored dimensions/strengths that CSS could silently discard or clamp. */
-function nonnegative(name: string, value: number): number {
-	if (!Number.isFinite(value) || value < 0)
-		throw new Error(`${name} must be finite and nonnegative.`);
-	return value;
+/** Document-owned stylesheets; switching appearance never owns component lifetime. */
+export function createUiThemeLoader(owner: Document) {
+	let active: HTMLLinkElement[] = [];
+	let queue = Promise.resolve();
+
+	/** Stage a stylesheet without applying it until the complete selection has loaded. */
+	function load(url: string): Promise<HTMLLinkElement> {
+		return new Promise((resolve, reject) => {
+			const link = owner.createElement("link");
+			link.rel = "stylesheet";
+			link.media = "not all";
+			link.href = url;
+			link.onload = () => {
+				link.onload = null;
+				link.onerror = null;
+				resolve(link);
+			};
+			link.onerror = () => {
+				link.remove();
+				reject(new Error(`Could not load UI stylesheet: ${url}`));
+			};
+			owner.head.append(link);
+		});
+	}
+
+	return {
+		/** Replace the whole selection atomically; null removes the optional override. */
+		replace(themeUrl: string, overrideUrl: string | null): Promise<void> {
+			const update = async () => {
+				const staged: HTMLLinkElement[] = [];
+				try {
+					staged.push(await load(themeUrl));
+					if (overrideUrl !== null) staged.push(await load(overrideUrl));
+				} catch (error) {
+					for (const link of staged) link.remove();
+					throw error;
+				}
+				for (const link of staged) link.media = "all";
+				for (const link of active) link.remove();
+				active = staged;
+			};
+			const result = queue.then(update);
+			// A failed request is reported to its caller but must not poison subsequent selections.
+			queue = result.then(
+				() => {},
+				() => {},
+			);
+			return result;
+		},
+		/** Release styles after previously requested updates finish. */
+		dispose(): Promise<void> {
+			queue = queue.then(() => {
+				for (const link of active) link.remove();
+				active = [];
+			});
+			return queue;
+		},
+	};
 }

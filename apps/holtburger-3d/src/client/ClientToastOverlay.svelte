@@ -42,25 +42,27 @@
 </div>
 
 <style>
-	.client-toast-overlay {
-		display: grid;
-		width: 100%;
-		height: 100%;
-		padding-inline: min(24px, 5vw);
-		place-items: center;
-		pointer-events: none;
-	}
-	.client-toast {
-		width: fit-content;
-		max-width: 100%;
-		margin: 0 auto;
-		padding: 5px 10px;
-		text-align: center;
-	}
-	.client-toast-warning {
-		color: var(--ui-color-warning);
-	}
-	.client-toast-preview {
-		color: var(--ui-color-muted);
+	@layer components {
+		.client-toast-overlay {
+			display: grid;
+			width: 100%;
+			height: 100%;
+			padding-inline: min(24px, 5vw);
+			place-items: center;
+			pointer-events: none;
+		}
+		.client-toast {
+			width: fit-content;
+			max-width: 100%;
+			margin: 0 auto;
+			padding-block: 5px;
+			text-align: center;
+		}
+		.client-toast-warning {
+			color: var(--ui-color-warning);
+		}
+		.client-toast-preview {
+			color: var(--ui-color-muted);
+		}
 	}
 </style>

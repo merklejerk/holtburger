@@ -4107,18 +4107,20 @@
 ></canvas>
 
 <style>
-	:global(body) {
-		margin: 0;
-		overflow: hidden;
-	}
+	@layer components {
+		:global(body) {
+			margin: 0;
+			overflow: hidden;
+		}
 
-	canvas {
-		display: block;
-	}
+		canvas {
+			display: block;
+		}
 
-	canvas.map {
-		position: absolute;
-		top: 0;
-		left: 0;
+		canvas.map {
+			position: absolute;
+			top: 0;
+			left: 0;
+		}
 	}
 </style>

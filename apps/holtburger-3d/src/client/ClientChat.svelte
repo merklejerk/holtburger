@@ -149,7 +149,7 @@
 <section class="chat-panel" class:chat-focused={focusMode !== "inactive"}>
 	<div
 		bind:this={bufferElement}
-		class="chat-buffer"
+		class="chat-buffer ui-hud-surface"
 		tabindex="-1"
 		role="log"
 		aria-live="polite"
@@ -180,14 +180,14 @@
 	</div>
 	<div
 		bind:this={filtersElement}
-		class="chat-filters"
+		class="chat-filters ui-hud-surface"
 		role="group"
 		aria-label="Message filters"
 	>
 		{#each CLIENT_CHAT_FILTER_TAGS as tag}
 			<button
 				type="button"
-				class="ui-hud-button"
+				class="ui-button"
 				aria-pressed={enabledTags.includes(tag)}
 				onfocus={() => transitionFocus("filters")}
 				onblur={handleFocusOut}
@@ -199,6 +199,7 @@
 	</div>
 	{#if failure}<div class="chat-failure" role="alert">{failure}</div>{/if}
 	<form
+		class="ui-hud-surface"
 		onsubmit={(event) => {
 			event.preventDefault();
 			void submit();
@@ -228,135 +229,146 @@
 </section>
 
 <style>
-	.chat-panel {
-		display: grid;
-		box-sizing: border-box;
-		height: 100%;
-		grid-template-rows: minmax(0, 1fr) auto auto auto;
-		color: var(--ui-color-text);
-		font: inherit;
-		line-height: 1.25;
-		pointer-events: none;
-		text-shadow: 0 1px 2px var(--ui-color-shadow);
-		user-select: none;
-	}
-	.chat-filters {
-		display: flex;
-		gap: 2px;
-		padding: 0 3px 3px;
-		background: var(--ui-hud-backing);
-		pointer-events: auto;
-		user-select: auto;
-	}
-	.chat-filters button {
-		min-height: 22px;
-		padding: 2px 8px;
-	}
-	.chat-focused {
-		pointer-events: auto;
-		user-select: text;
-	}
-	.chat-buffer {
-		min-height: 0;
-		overflow: hidden auto;
-		padding: 42% 8px 8px;
-		background: linear-gradient(
-			to top,
-			var(--ui-hud-backing),
-			color-mix(in srgb, var(--ui-hud-backing) 48%, transparent) 55%,
-			transparent
-		);
-		mask-image: linear-gradient(to bottom, transparent, #000 34%, #000);
-		scrollbar-width: thin;
-		scrollbar-color: transparent transparent;
-	}
-	.chat-buffer::-webkit-scrollbar {
-		width: 5px;
-	}
-	.chat-buffer::-webkit-scrollbar-track,
-	.chat-buffer::-webkit-scrollbar-thumb {
-		background: transparent;
-	}
-	.chat-focused .chat-buffer {
-		background: var(--ui-hud-backing);
-		mask-image: none;
-		scrollbar-color: var(--ui-color-border) transparent;
-	}
-	.chat-focused .chat-buffer::-webkit-scrollbar-thumb {
-		background: var(--ui-color-border);
-	}
-	.chat-focused .chat-buffer::-webkit-scrollbar-thumb:hover {
-		background: var(--ui-color-accent);
-	}
-	p {
-		margin: 0 0 5px;
-	}
-	.chat-message {
-		white-space: pre-wrap;
-		overflow-wrap: anywhere;
-	}
-	.chat-emphasized .chat-message {
-		font-weight: 700;
-	}
-	p strong {
-		color: var(--ui-color-muted);
-		font-weight: 700;
-	}
-	.chat-tone-system {
-		color: var(--ui-color-mana);
-	}
-	.chat-tone-tell {
-		color: var(--ui-color-chatTell);
-	}
-	.chat-tone-emote,
-	.chat-tone-party {
-		color: var(--ui-color-success);
-	}
-	.chat-emote {
-		font-style: italic;
-	}
-	.chat-tone-npc {
-		color: var(--ui-color-accent);
-	}
-	.chat-tone-error {
-		color: var(--ui-color-danger);
-	}
-	.chat-tone-combat {
-		color: var(--ui-color-health);
-	}
-	.chat-tone-guild {
-		color: var(--ui-color-chatGuild);
-	}
-	.chat-tone-trade {
-		color: var(--ui-color-warning);
-	}
-	.chat-tone-society {
-		color: var(--ui-color-chatSociety);
-	}
-	.chat-failure {
-		padding: 3px 7px;
-		background: var(--ui-color-well);
-		color: var(--ui-color-danger);
-	}
-	form {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) 28px;
-		gap: 3px;
-		padding: 3px;
-		background: var(--ui-hud-backing);
-		pointer-events: auto;
-		user-select: auto;
-	}
-	input {
-		box-sizing: border-box;
-		width: 100%;
-		height: 25px;
-		padding: 2px 6px;
-	}
-	.chat-channel {
-		width: 28px;
-		height: 25px;
-		min-height: 0;
-		padding: 5px;
+	@layer components {
+		.chat-panel {
+			display: grid;
+			box-sizing: border-box;
+			height: 100%;
+			grid-template-rows: minmax(0, 1fr) auto auto auto;
+			color: var(--ui-color-text);
+			font: inherit;
+			line-height: 1.25;
+			pointer-events: none;
+			text-shadow: 0 1px 2px var(--ui-color-shadow);
+			user-select: none;
+		}
+		.chat-filters {
+			display: flex;
+			gap: 2px;
+			padding: 0 3px 3px;
+			background: var(--_ui-hud-background-color);
+			pointer-events: auto;
+			user-select: auto;
+		}
+		.chat-filters button {
+			min-height: 22px;
+			padding: 2px 8px;
+		}
+		.chat-focused {
+			pointer-events: auto;
+			user-select: text;
+		}
+		.chat-buffer {
+			min-height: 0;
+			overflow: hidden auto;
+			padding: 8px;
+			background: linear-gradient(
+				to top,
+				var(--_ui-hud-background-color),
+				color-mix(in srgb, var(--_ui-hud-background-color) 48%, transparent) 55%,
+				transparent
+			);
+			mask-image: linear-gradient(to bottom, transparent, #000 34%, #000);
+			scrollbar-width: thin;
+			scrollbar-color: transparent transparent;
+		}
+		.chat-buffer::before {
+			/* Keep faded leading space inside the scroll area. Percentage padding would
+			   use the panel's width and overflow the grid row in wide, short layouts. */
+			content: "";
+			display: block;
+			height: 42%;
+		}
+		.chat-buffer::-webkit-scrollbar {
+			width: 5px;
+		}
+		.chat-buffer::-webkit-scrollbar-track,
+		.chat-buffer::-webkit-scrollbar-thumb {
+			background: transparent;
+		}
+		.chat-focused .chat-buffer {
+			background: var(--_ui-hud-background-color);
+			mask-image: none;
+			scrollbar-color: var(--ui-color-border) transparent;
+		}
+		.chat-focused .chat-buffer::-webkit-scrollbar-thumb {
+			background: var(--ui-color-border);
+		}
+		.chat-focused .chat-buffer::-webkit-scrollbar-thumb:hover {
+			background: var(--ui-color-accent);
+		}
+		p {
+			margin: 0 0 5px;
+		}
+		.chat-message {
+			white-space: pre-wrap;
+			overflow-wrap: anywhere;
+		}
+		.chat-emphasized .chat-message {
+			font-weight: 700;
+		}
+		p strong {
+			color: var(--ui-color-muted);
+			font-weight: 700;
+		}
+		.chat-tone-system {
+			color: var(--ui-chat-system-text);
+		}
+		.chat-tone-tell {
+			color: var(--ui-chat-tell-text);
+		}
+		.chat-tone-emote {
+			color: var(--ui-chat-emote-text);
+		}
+		.chat-tone-party {
+			color: var(--ui-chat-party-text);
+		}
+		.chat-emote {
+			font-style: italic;
+		}
+		.chat-tone-npc {
+			color: var(--ui-chat-npc-text);
+		}
+		.chat-tone-error {
+			color: var(--ui-chat-error-text);
+		}
+		.chat-tone-combat {
+			color: var(--ui-chat-combat-text);
+		}
+		.chat-tone-guild {
+			color: var(--ui-chat-guild-text);
+		}
+		.chat-tone-trade {
+			color: var(--ui-chat-trade-text);
+		}
+		.chat-tone-society {
+			color: var(--ui-chat-society-text);
+		}
+		.chat-failure {
+			padding: 3px 7px;
+			background: var(--ui-color-well);
+			color: var(--ui-color-danger);
+		}
+		form {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) 28px;
+			gap: 3px;
+			padding: 3px;
+			background: var(--_ui-hud-background-color);
+			pointer-events: auto;
+			user-select: auto;
+		}
+		input {
+			box-sizing: border-box;
+			width: 100%;
+			height: 25px;
+			padding: 2px 6px;
+		}
+		.chat-channel {
+			width: 28px;
+			height: 25px;
+			min-height: 0;
+			padding: 5px;
+		}
 	}
 </style>

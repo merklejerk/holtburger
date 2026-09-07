@@ -316,7 +316,7 @@
 				{/each}
 			</div>
 
-			<div class="explorer-tools-panel ui-glass">
+			<div class="explorer-tools-panel ui-panel">
 				<header class="ui-frame">{activeTab.label}</header>
 				<button
 					type="button"

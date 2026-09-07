@@ -120,6 +120,23 @@ export async function probeClientTheme(
 		await new Promise((resolve) => requestAnimationFrame(resolve));
 		if (!enter.disabled || !enter.textContent.includes("Entering"))
 			throw new Error("Character entry did not publish its pending state.");
+		const selected = document.querySelector(
+			'.client-character[aria-selected="true"]',
+		);
+		const other = [...document.querySelectorAll(".client-character")].find(
+			(option) => option !== selected,
+		);
+		other.click();
+		other.focus();
+		other.dispatchEvent(
+			new KeyboardEvent("keydown", { key: "End", bubbles: true }),
+		);
+		await new Promise((resolve) => requestAnimationFrame(resolve));
+		if (
+			document.querySelector('.client-character[aria-selected="true"]') !==
+			selected
+		)
+			throw new Error("Pending character entry allowed selection to change.");
 	});
 	// Exercise the actual startup/error shell without opening a live server connection.
 	await client.send("Page.enable");

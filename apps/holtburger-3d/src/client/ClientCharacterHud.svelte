@@ -57,10 +57,10 @@
 			</div>
 		{/each}
 	</div>
-	<div class="conditions" aria-label="Character conditions">
+	<div class="conditions ui-hud-group" aria-label="Character conditions">
 		{#each conditions as condition}
 			<div
-				class="condition ui-readout"
+				class="condition"
 				title={`${condition.label} status (stub)`}
 				aria-label={`${condition.label} status`}
 			>
@@ -71,56 +71,63 @@
 </section>
 
 <style>
-	.character-hud {
-		display: grid;
-		box-sizing: border-box;
-		height: 100%;
-		grid-template-rows: auto auto 1fr;
-		gap: 4px;
-	}
-	header {
-		width: fit-content;
-		font-weight: 700;
-	}
-	header span {
-		color: var(--ui-color-muted);
-		font-weight: 500;
-	}
-	.vitals {
-		display: grid;
-		gap: 2px;
-	}
-	.vital {
-		position: relative;
-	}
-	.vital-fill {
-		transition: width 120ms linear;
-	}
-	.vital strong {
-		position: absolute;
-		top: 0;
-		left: 50%;
-		transform: translateX(-50%);
-		font-size: 11px;
-		line-height: 16px;
-		padding: 0 3px;
-		white-space: nowrap;
-	}
-	.conditions {
-		display: flex;
-		align-items: end;
-		gap: 10px;
-		padding: 4px 6px 0;
-	}
-	.condition {
-		box-sizing: border-box;
-		width: 32px;
-		height: 32px;
-		padding: 6px;
-	}
-	@media (prefers-reduced-motion: reduce) {
+	@layer components {
+		.character-hud {
+			display: grid;
+			box-sizing: border-box;
+			height: 100%;
+			grid-template-rows: auto auto 1fr;
+			gap: 4px;
+		}
+		header {
+			width: fit-content;
+			font-weight: 700;
+		}
+		header span {
+			color: var(--ui-color-muted);
+			font-weight: 500;
+		}
+		.vitals {
+			display: grid;
+			gap: 2px;
+		}
+		.vital {
+			position: relative;
+		}
 		.vital-fill {
-			transition: none;
+			transition: width 120ms linear;
+		}
+		.vital strong {
+			position: absolute;
+			top: 0;
+			left: 50%;
+			transform: translateX(-50%);
+			font-size: var(--ui-font-size-micro);
+			line-height: 16px;
+			padding-block: 0;
+			padding-inline: calc(14px + 3px);
+			white-space: nowrap;
+		}
+		.conditions {
+			display: flex;
+			align-items: end;
+			align-self: start;
+			gap: 10px;
+			justify-self: start;
+			height: fit-content;
+			width: fit-content;
+			padding-block: 4px 0;
+		}
+		.condition {
+			box-sizing: border-box;
+			width: 32px;
+			height: 32px;
+			padding: 6px;
+		}
+		@media (prefers-reduced-motion: reduce) {
+			.vital-fill {
+				transition: none;
+			}
 		}
 	}
 </style>

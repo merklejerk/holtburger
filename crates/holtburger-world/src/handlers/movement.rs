@@ -125,10 +125,14 @@ pub(crate) fn handle_message(
                 }
                 _ => None,
             };
-            state.admit_entity_sticky_target(guid, sticky_target);
             report_unsupported_interpreted_commands(state, guid, snapshot);
             report_rejected_motion_actions(guid, rejected_actions);
-            state.enqueue_entity_motion_actions(guid, actions);
+            if is_local && data.is_autonomous {
+                // Local prediction already owns playback; an admitted echo only renews sticky.
+                state.admit_entity_sticky_target(guid, sticky_target);
+            } else {
+                state.accept_entity_motion(guid, snapshot, actions, sticky_target);
+            }
 
             if motion_changed {
                 publish_entity_motion_update(state, guid, snapshot, events);

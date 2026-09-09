@@ -176,6 +176,45 @@ impl PlayingMotionClip {
 }
 
 impl BodyMotionRuntime {
+    /// Establishes an already-existing state without playing its entry transitions.
+    pub fn establish(table: &MotionSequenceTable, order: MotionOrder) -> Self {
+        let mut runtime = Self::new(table);
+        runtime.select_order(table, order, false);
+        runtime.sequence.remove_transition_prefix();
+        runtime
+    }
+
+    /// Applies a fresh accepted state before its action batch, without advancing time.
+    /// Unlike continuous selection, every accepted Dead command interrupts pending playback.
+    pub fn accept_order(&mut self, table: &MotionSequenceTable, order: MotionOrder) {
+        self.bind_table(table);
+        self.select_order(table, order, true);
+    }
+
+    /// Selects style before interruption, matching CMotionInterp::apply_interpreted_movement.
+    fn select_order(&mut self, table: &MotionSequenceTable, order: MotionOrder, admitted: bool) {
+        let style = select_order_style(table, &mut self.state, &mut self.sequence, order);
+        if admitted
+            && order
+                .forward
+                .is_some_and(|(command, _)| command == MotionCommand::DEAD)
+        {
+            // acclient.c:330249 clears links before Dead; HandleEnterWorld (317294) drains
+            // all pending actions without executing skipped frames. MotionDone (329942)
+            // also retires the associated sticky target.
+            self.sequence.remove_transition_prefix();
+            if self.action_count() != 0 {
+                self.sticky.complete_action();
+            }
+            self.active_action = None;
+            self.action_queue.clear();
+        }
+        self.steady_order = order;
+        self.unmodelled = apply_order_channels(table, &mut self.state, &mut self.sequence, order);
+        self.unmodelled.style = style;
+        self.resolve_locomotion_policy(table);
+    }
+
     /// Starts one isolated body at the table's authored default state.
     pub fn new(table: &MotionSequenceTable) -> Self {
         let mut runtime = Self {
@@ -208,6 +247,17 @@ impl BodyMotionRuntime {
     ) -> &SequenceTick {
         let previous_unmodelled = self.unmodelled;
         self.drive(table, order, quantum);
+        self.report_selection(table, guid, previous_unmodelled);
+        &self.tick
+    }
+
+    /// Receipt and continuous resolution share one diagnostic path without masking receipt failures.
+    fn report_selection(
+        &mut self,
+        table: &MotionSequenceTable,
+        guid: Guid,
+        previous_unmodelled: UnmodelledMotionChannels,
+    ) {
         for action in std::mem::take(&mut self.rejected_actions) {
             log::warn!(
                 "body 0x{guid:08X} motion table 0x{:08X} cannot route admitted action 0x{:08X} in style 0x{:08X} from substate 0x{:08X} (source {:?}, action sequence {})",
@@ -227,7 +277,6 @@ impl BodyMotionRuntime {
                 self.state.style.raw(),
             );
         }
-        &self.tick
     }
 
     /// Table selection resets playback, but an admitted directive belongs to the entity.
@@ -235,7 +284,7 @@ impl BodyMotionRuntime {
         if self.motion_table_id != table.id {
             let remote = self.remote_motion;
             let sticky = self.sticky;
-            *self = Self::new(table);
+            *self = Self::establish(table, self.steady_order);
             self.remote_motion = remote;
             self.sticky = sticky;
         }
@@ -301,7 +350,7 @@ impl BodyMotionRuntime {
             &mut locomotion.sequence,
             order,
         );
-        locomotion.sequence.select_cyclic_presentation();
+        locomotion.sequence.remove_transition_prefix();
         locomotion.sequence.advance_presentation(quantum);
         unmodelled == UnmodelledMotionChannels::default()
     }
@@ -375,13 +424,11 @@ impl BodyMotionRuntime {
         {
             self.retained_run_rate_multiplier = Some(speed);
         }
-        self.steady_order = order;
         // Retail applies steady commands to the same sequence even while an action owns its
         // non-cyclic prefix. Selection replaces only the cyclic return suffix, so a stance or
         // locomotion update retargets the action's authored return without restarting it
         // (`CMotionTable::GetObjectSequence`, `acclient.c:324230-324400`).
-        self.unmodelled = apply_order(table, &mut self.state, &mut self.sequence, order);
-        self.resolve_locomotion_policy(table);
+        self.select_order(table, order, false);
         if self.active_action.is_none() {
             self.start_next_action(table);
         }
@@ -624,13 +671,33 @@ fn apply_order(
     sequence: &mut MotionSequenceRuntime,
     order: MotionOrder,
 ) -> UnmodelledMotionChannels {
-    let mut unmodelled = UnmodelledMotionChannels::default();
+    let style = select_order_style(table, state, sequence, order);
+    let mut unmodelled = apply_order_channels(table, state, sequence, order);
+    unmodelled.style = style;
+    unmodelled
+}
+
+fn select_order_style(
+    table: &MotionSequenceTable,
+    state: &mut MotionState,
+    sequence: &mut MotionSequenceRuntime,
+    order: MotionOrder,
+) -> Option<MotionCommand> {
     if let Some(style) = order.style
         && !select_motion(table, state, sequence, style, 1.0).is_modelled()
     {
-        unmodelled.style = Some(style);
+        return Some(style);
     }
+    None
+}
 
+fn apply_order_channels(
+    table: &MotionSequenceTable,
+    state: &mut MotionState,
+    sequence: &mut MotionSequenceRuntime,
+    order: MotionOrder,
+) -> UnmodelledMotionChannels {
+    let mut unmodelled = UnmodelledMotionChannels::default();
     match order.forward {
         Some((command, speed)) => {
             if !select_motion(table, state, sequence, command, speed).is_modelled() {

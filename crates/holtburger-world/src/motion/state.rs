@@ -139,6 +139,9 @@ impl MotionCommand {
         Some(Self((u32::from(*prefix) << 16) | u32::from(index)))
     }
 
+    /// Explicit death substate; admitted commands interrupt pending transitions.
+    pub const DEAD: Self = Self(0x4000_0011);
+
     /// Canonical forward substate selected for walking and reversed for backward movement.
     pub const WALK_FORWARD: Self = Self(0x4500_0005);
     /// Canonical backwards-walking substate.
@@ -243,6 +246,13 @@ impl MotionOrder {
         mut self,
         presentation: CharacterMotionPresentation,
     ) -> Self {
+        // Retail contact_allows_move explicitly permits Dead (acclient.c:330154).
+        // Support observations cannot replace this authored state with Falling or Ready.
+        if let Some((command, _)) = self.forward
+            && command.raw() == MotionCommand::DEAD.raw()
+        {
+            return self;
+        }
         match presentation {
             CharacterMotionPresentation::Grounded => {}
             CharacterMotionPresentation::Ready => {

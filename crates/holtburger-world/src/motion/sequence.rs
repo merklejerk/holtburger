@@ -440,9 +440,10 @@ impl MotionSequenceRuntime {
         self.first_cyclic = Some(first_cyclic - drop);
     }
 
-    /// Keeps visual locomotion in its cyclic tail; ordinary playback owns one-shot transitions.
-    /// No departed-frame hooks or root motion are consumed by this presentation-only operation.
-    pub(super) fn select_cyclic_presentation(&mut self) {
+    /// Retains the authored destination without traversing skipped hooks or root motion.
+    /// Retail `CSequence::remove_all_link_animations` (acclient.c:326503) uses this for
+    /// initial placement and interrupted motion. Visual locomotion likewise needs only the tail.
+    pub(super) fn remove_transition_prefix(&mut self) {
         let (Some(current), Some(first_cyclic)) = (self.current, self.first_cyclic) else {
             return;
         };

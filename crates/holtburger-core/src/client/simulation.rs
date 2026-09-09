@@ -139,12 +139,19 @@ pub(super) fn tick_with_precise_jump(
     // drive advances its world-owned cursor explicitly below; excluding it here prevents that
     // same cursor from first advancing from a stale authoritative snapshot.
     let local_guid = world.player.guid;
-    let excluded = (movement.drives_local_authored_playback_this_tick()
-        || world.has_authored_motion_actions(local_guid))
+    // Authoritative death retires manual playback priority. The world advances its animation
+    // while the existing death projection rules suppress physical root actuation.
+    let local_dead = world
+        .player_entity()
+        .and_then(|entity| entity.network_motion.snapshot())
+        .is_some_and(|snapshot| snapshot.indicates_death_motion());
+    let excluded = (!local_dead
+        && (movement.drives_local_authored_playback_this_tick()
+            || world.has_authored_motion_actions(local_guid)))
     .then_some(local_guid)
     .filter(|guid| !guid.is_null());
     let mut authored_ticks = world.advance_authored_motion_except(dt, excluded);
-    let authored_tick = if collision.is_some() {
+    let authored_tick = if collision.is_some() && !local_dead {
         movement.advance_local_authored_motion(world, dt)?
     } else {
         None

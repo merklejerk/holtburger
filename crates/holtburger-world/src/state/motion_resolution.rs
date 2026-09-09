@@ -381,8 +381,13 @@ impl WorldState {
         else {
             return;
         };
-        self.motion_runtimes
-            .drive(table, guid, MotionOrder::from_snapshot(snapshot), 0.0);
+        self.motion_runtimes.replace_body(
+            guid,
+            crate::motion::BodyMotionRuntime::establish(
+                table,
+                MotionOrder::from_snapshot(snapshot),
+            ),
+        );
     }
 
     pub fn resolve_player_motion_table_profile(
@@ -517,47 +522,53 @@ impl WorldState {
             .admit_sticky_target(table, guid, target, std::time::Instant::now());
     }
 
-    /// Offers freshly admitted transient edges to the body's sole authored runtime queue.
-    pub(crate) fn enqueue_entity_motion_actions(
+    /// Applies one accepted remote state and its action batch to the sole playback owner.
+    pub(crate) fn accept_entity_motion(
         &mut self,
         guid: Guid,
+        snapshot: EntityMotionSnapshot,
         actions: impl IntoIterator<Item = crate::entity::EntityMotionAction>,
+        sticky_target: Option<Guid>,
     ) {
         let Some(source) = self.motion_table_source_for_guid(guid) else {
-            for action in actions {
-                log::warn!(
-                    "body 0x{guid:08X} has no motion table for admitted action 0x{:08X} (source {:?}, action sequence {})",
-                    action.command.raw(),
-                    action.source,
-                    action.action_sequence,
-                );
-            }
+            log::warn!("body 0x{guid:08X} cannot apply admitted motion: no motion table source");
             return;
         };
         let motion_table_id = motion_table_id_for_source(source);
         let Some(table) = self.motion_sequences.table(motion_table_id) else {
-            for action in actions {
-                log::warn!(
-                    "body 0x{guid:08X} resolved missing motion table 0x{motion_table_id:08X} for admitted action 0x{:08X} (source {:?}, action sequence {})",
-                    action.command.raw(),
-                    action.source,
-                    action.action_sequence,
-                );
-            }
+            log::warn!(
+                "body 0x{guid:08X} cannot apply admitted motion: table 0x{motion_table_id:08X} is absent from content"
+            );
             return;
         };
-        for action in actions {
-            if self.motion_runtimes.enqueue_action(table, guid, action)
-                == crate::motion::MotionActionEnqueueOutcome::Overflow
-            {
-                log::warn!(
-                    "body 0x{guid:08X} motion table 0x{motion_table_id:08X} rejected action 0x{:08X}: retail six-action queue is full (source {:?}, action sequence {})",
-                    action.command.raw(),
-                    action.source,
-                    action.action_sequence,
-                );
-            }
-        }
+        let Some(input) = self.remote_motion_input(guid, snapshot) else {
+            return;
+        };
+        self.motion_runtimes
+            .accept_remote(table, guid, input, actions, sticky_target);
+    }
+
+    /// Captures source facts consistently for packet admission and continuous resolution.
+    fn remote_motion_input(
+        &self,
+        guid: Guid,
+        snapshot: EntityMotionSnapshot,
+    ) -> Option<RemoteMotionInput> {
+        let entity = self.entities.get(guid)?;
+        let body = self
+            .runtime_body_id_for_guid(guid)
+            .and_then(|id| self.scene.body(id));
+        Some(RemoteMotionInput {
+            snapshot,
+            pose: body.map_or(entity.position, SpatialBody::authored_source_pose),
+            contact: body.map_or(ContactState::Unknown, |body| body.contact),
+            target: snapshot
+                .directive
+                .and_then(|directive| directive.target_guid())
+                .and_then(|target| self.server_directed_target(target)),
+            frame_policy: body.map_or(RemoteFramePolicy::Body, SpatialBody::remote_frame_policy),
+            omega: body.map_or(entity.omega, |body| body.nominal.omega),
+        })
     }
 
     /// Whether the local adapter must advance this body's sole authored cursor for an action.
@@ -693,31 +704,11 @@ impl WorldState {
                     return None;
                 }
                 let snapshot = entity.network_motion.snapshot()?;
-                if snapshot
-                    .motion_command()
-                    .is_some_and(InterpretedMotionCommand::is_dead)
-                {
-                    return None;
-                }
                 let source = self.motion_table_source_for_guid(entity.guid)?;
-                let body = self
-                    .runtime_body_id_for_guid(entity.guid)
-                    .and_then(|body_id| self.scene.body(body_id));
                 Some((
                     entity.guid,
                     motion_table_id_for_source(source),
-                    RemoteMotionInput {
-                        snapshot,
-                        pose: body.map_or(entity.position, SpatialBody::authored_source_pose),
-                        contact: body.map_or(ContactState::Unknown, |body| body.contact),
-                        target: snapshot
-                            .directive
-                            .and_then(|directive| directive.target_guid())
-                            .and_then(|target| self.server_directed_target(target)),
-                        frame_policy: body
-                            .map_or(RemoteFramePolicy::Body, SpatialBody::remote_frame_policy),
-                        omega: body.map_or(entity.omega, |body| body.nominal.omega),
-                    },
+                    self.remote_motion_input(entity.guid, snapshot)?,
                 ))
             })
             .collect();

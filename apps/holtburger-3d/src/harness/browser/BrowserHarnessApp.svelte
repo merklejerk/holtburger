@@ -134,6 +134,7 @@
 	} from "../../explorer/explorer-entity-commands";
 	import type {
 		DynamicEntityEvent,
+		DynamicEntityMotion,
 		DynamicEntityView,
 	} from "../../lib/game/runtime/dynamic-entity-feed";
 	import {
@@ -385,6 +386,14 @@
 	}
 
 	interface BrowserHarnessApi {
+		/** Replay world-produced motion and lifecycle identity on a catalog-backed camera anchor. */
+		readonly applyDeathMotionSample: (
+			sample: {
+				readonly guid: number;
+				readonly motion: DynamicEntityMotion;
+				readonly fresh: boolean;
+			} | null,
+		) => Promise<string>;
 		/** Resolve one target and request its exact shared scene-interest policy. */
 		readonly requestSceneInterest: (
 			landblockId: string,
@@ -3810,6 +3819,41 @@
 					};
 				}
 				hostGlobal.__HOLTBURGER_3D_BROWSER_HARNESS__ = {
+					applyDeathMotionSample: async (sample) => {
+						const captureCanvas = canvasElement;
+						if (!captureCanvas)
+							throw new Error("Death motion probe requires a canvas.");
+						if (!runtime)
+							throw new Error("Death motion probe requires a runtime.");
+						const anchor = spawnedEntities[0];
+						if (!anchor || spawnedEntities.length !== 1)
+							throw new Error(
+								"Death motion probe requires one catalog-backed anchor.",
+							);
+						if (sample === null) {
+							await runtime.replaceDynamicEntitySnapshot(spawnedEntities);
+						} else {
+							if (sample.fresh) await runtime.replaceDynamicEntitySnapshot([]);
+							await runtime.replaceDynamicEntitySnapshot([
+								{
+									...anchor,
+									identity: { ...anchor.identity, guid: sample.guid },
+									motion: sample.motion,
+								},
+							]);
+						}
+						// Capture the first rendered frame, before a delayed screenshot could hide
+						// an upright initialization flash. The main render callback is already queued.
+						return new Promise<string>((resolve) =>
+							window.requestAnimationFrame(() => {
+								resolve(
+									captureCanvas
+										.toDataURL("image/png")
+										.slice("data:image/png;base64,".length),
+								);
+							}),
+						);
+					},
 					probeSyntheticAppearanceReplacement,
 					probeDynamicDomains: () => {
 						const current = spawnedEntities[0];

@@ -1,7 +1,7 @@
 //! Remote command progress and its frame belong to the same owner as authored playback.
 
 use super::{BodyMotionRuntime, MotionRuntimeRegistry};
-use crate::entity::{EntityMotionDirective, EntityMotionSnapshot};
+use crate::entity::{EntityMotionAction, EntityMotionDirective, EntityMotionSnapshot};
 use crate::motion::{
     CharacterMotionPresentation, MotionOrder, SequenceTick, ServerDirectedMotionResolution,
     ServerDirectedMotionState, ServerDirectedTarget, begin_server_directed_motion,
@@ -149,6 +149,42 @@ impl RemoteMotionState {
 }
 
 impl MotionRuntimeRegistry {
+    /// Applies one accepted packet in order, before any later packet or positive-duration tick.
+    pub(crate) fn accept_remote(
+        &mut self,
+        table: &MotionSequenceTable,
+        guid: Guid,
+        input: RemoteMotionInput,
+        actions: impl IntoIterator<Item = EntityMotionAction>,
+        sticky_target: Option<Guid>,
+    ) {
+        let runtime = self
+            .bodies
+            .entry(guid)
+            .or_insert_with(|| BodyMotionRuntime::new(table));
+        runtime.bind_table(table);
+        let remote = runtime
+            .remote_motion
+            .get_or_insert_with(|| RemoteMotionState::new(input.pose.rotation));
+        let order = remote.order(guid, input, &mut runtime.sticky);
+        let previous_unmodelled = runtime.unmodelled;
+        runtime.accept_order(table, order);
+        for action in actions {
+            if runtime.enqueue_action(action) == super::MotionActionEnqueueOutcome::Overflow {
+                log::warn!(
+                    "body 0x{guid:08X} rejected action 0x{:08X}: retail six-action queue is full",
+                    action.command.raw()
+                );
+            }
+        }
+        runtime.drive(table, order, 0.0);
+        runtime.report_selection(table, guid, previous_unmodelled);
+        // Retail move_to_interpreted_state applies motion before re-establishing packet sticky.
+        runtime
+            .sticky
+            .admit(sticky_target, std::time::Instant::now());
+    }
+
     /// Interpret and advance remote intent through the same playback owner as local commands.
     pub(crate) fn drive_remote(
         &mut self,

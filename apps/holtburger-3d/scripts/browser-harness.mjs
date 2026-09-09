@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { existsSync } from "node:fs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { decode } from "@msgpack/msgpack";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
@@ -276,6 +277,7 @@ function parseArgs(args) {
 		excludeSpawnedAttachments: false,
 		spawnedSelectionProbe: false,
 		spawnWcid: null,
+		deathMotionFixture: null,
 		entityShowcaseCount: 0,
 		entityPairWcid: null,
 		entityPairTargetWcid: null,
@@ -463,6 +465,9 @@ function parseArgs(args) {
 				break;
 			case "--spawn-wcid":
 				parsed.spawnWcid = requireValue(args, ++index, arg);
+				break;
+			case "--death-motion-fixture":
+				parsed.deathMotionFixture = requireValue(args, ++index, arg);
 				break;
 			case "--spawned-selection-probe":
 				parsed.spawnedSelectionProbe = true;
@@ -1225,6 +1230,16 @@ function parseArgs(args) {
 	if (parsed.spawnSimulated && parsed.spawnWcid === null) {
 		throw new Error("--spawn-simulated requires --spawn-wcid.");
 	}
+	if (
+		parsed.deathMotionFixture !== null &&
+		(Number(parsed.spawnWcid) !== 192 ||
+			parsed.entityShowcaseCount !== 0 ||
+			parsed.screenshotPath === null)
+	) {
+		throw new Error(
+			"--death-motion-fixture requires --spawn-wcid 192, --screenshot, and no entity showcase.",
+		);
+	}
 	if (parsed.possessionScenario && parsed.spawnWcid === null) {
 		throw new Error("--possession-scenario requires --spawn-wcid.");
 	}
@@ -1344,6 +1359,9 @@ Options:
                          Harness-only A/B: realize a spawned wearer without its attached children.
   --spawn-wcid <id>     Spawn one decimal or 0x WCID through the real catalog host, capture it,
                          then exact-despawn it and assert shared-runtime resource cleanup.
+  --death-motion-fixture <path>
+                        Replay death_motion_fixture MessagePack on --spawn-wcid 192; requires
+                        --screenshot and writes one adjacent screenshot per lifecycle sample.
   --spawned-selection-probe
                         Select every entity produced by --spawn-wcid through the production runtime.
                         With --spawn-simulated, first activate a short authored locomotion clip.
@@ -5331,6 +5349,35 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
 				[],
 			);
+			if (options.deathMotionFixture !== null) {
+				if (options.screenshotPath === null)
+					throw new Error("--death-motion-fixture requires --screenshot.");
+				const samples = decode(await readFile(options.deathMotionFixture));
+				for (const sample of samples) {
+					const firstFrame = await evaluate(
+						client,
+						"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.applyDeathMotionSample",
+						[sample],
+					);
+					await writeFile(
+						`${options.screenshotPath}.${sample.label}.first.png`,
+						Buffer.from(firstFrame, "base64"),
+					);
+					await delay(sample.wait_ms);
+					const capture = await client.send("Page.captureScreenshot", {
+						format: "png",
+					});
+					await writeFile(
+						`${options.screenshotPath}.${sample.label}.png`,
+						Buffer.from(capture.data, "base64"),
+					);
+				}
+				await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.applyDeathMotionSample",
+					[null],
+				);
+			}
 			if (options.possessionScenario) {
 				possessionScenario = await runPossessionScenario(
 					client,

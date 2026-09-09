@@ -31,6 +31,37 @@ use std::io::{Cursor, Read};
 
 const FIXTURE_MOTION_TABLE_ID: u32 = 0x0900_0020;
 
+#[test]
+fn dead_authority_advances_once_despite_held_manual_drive() {
+    let mut world = WorldState::synthetic();
+    let guid = Guid(0x7000_0001);
+    let pose = WorldPosition::default();
+    world.seed_local_player_entity(guid, "Death fixture", pose);
+    let velocity = Vector3::new(2.0, 0.0, 0.0);
+    world.set_motion_sequences(explicit_motion_catalog(
+        FIXTURE_MOTION_TABLE_ID,
+        MotionStance::NonCombat as u32,
+        [FixtureCycle::moving(MotionCommand::DEAD.raw(), velocity)],
+        [],
+    ));
+    let entity = world.player_entity_mut().unwrap();
+    entity.set_did_prop(PropertyDataId::MotionTable, Guid(FIXTURE_MOTION_TABLE_ID));
+    entity.network_motion = EntityNetworkMotion::Initialized(EntityMotionSnapshot {
+        current_style: Some(MotionStance::NonCombat),
+        forward_command: Some(InterpretedMotionCommand::DEAD),
+        ..Default::default()
+    });
+    let mut movement = MovementSystem::new();
+    movement.acquire_manual_control(None);
+    assert!(movement.drives_local_authored_playback_this_tick());
+    let dt = Duration::from_millis(30);
+    crate::client::simulation::tick(Instant::now(), dt, &mut world, &mut movement, None).unwrap();
+    let runtime = world.motion_runtimes.get(guid).unwrap();
+    assert_eq!(runtime.state().substate, MotionCommand::DEAD);
+    assert!((runtime.tick().offset.translation.x - velocity.x * dt.as_secs_f32()).abs() < 0.0001);
+    assert_eq!(world.local_player_runtime_pose(), Some(pose));
+}
+
 fn seed_player_run_rate_scalar(world: &mut WorldState, run_skill: u32) -> f32 {
     world.player.attributes.insert(
         AttributeType::StrengthAttr,

@@ -17,6 +17,7 @@
 	import ClientFpsCounter from "./ClientFpsCounter.svelte";
 	import ClientHudIcon from "./ClientHudIcon.svelte";
 	import ClientHudPanel from "./ClientHudPanel.svelte";
+	import type { ClientSelectedEntityDisplay } from "./client-entity-interactions";
 	import ClientSelectedEntityHud from "./ClientSelectedEntityHud.svelte";
 	import ClientShortcutDock, {
 		createClientShortcuts,
@@ -47,7 +48,9 @@
 		readonly readMinimapFrame: () => MinimapFrame;
 		readonly readDiagnostics: () => ClientPresentationDiagnostics | null;
 		readonly readFrameRates: () => FrameRates | null;
-		readonly readSelectedEntityName: () => string | null;
+		readonly readSelectedEntityDisplay: () => ClientSelectedEntityDisplay;
+		/** Use the currently selected entity through the session-owned interaction controller. */
+		readonly onInteractEntity: () => void;
 		readonly readTargetIndicatorFrame: () => ClientTargetIndicatorFrame | null;
 		readonly selectedEntityGuid: number | null;
 		readonly hoveredEntityGuid: number | null;
@@ -78,7 +81,8 @@
 		readMinimapFrame,
 		readDiagnostics,
 		readFrameRates,
-		readSelectedEntityName,
+		readSelectedEntityDisplay,
+		onInteractEntity,
 		readTargetIndicatorFrame,
 		selectedEntityGuid,
 		hoveredEntityGuid,
@@ -451,7 +455,8 @@
 		>
 			<ClientSelectedEntityHud
 				selectedGuid={selectedEntityGuid}
-				readSelectedName={readSelectedEntityName}
+				readSelectedDisplay={readSelectedEntityDisplay}
+				onInteract={onInteractEntity}
 			/>
 		</ClientHudPanel>
 	{/if}

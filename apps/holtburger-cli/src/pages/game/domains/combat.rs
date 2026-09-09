@@ -106,7 +106,9 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
                 state.data.combat_runtime.note_action_result(reason);
             }
         }
-        ClientViewEvent::ServerMessage { message, .. }
+        ClientViewEvent::TransientString { message }
+        | ClientViewEvent::PopupString { message }
+        | ClientViewEvent::ServerMessage { message, .. }
             if combat_model::combat_feedback_context_active(state) =>
         {
             state.data.combat_runtime.note_server_message(message);
@@ -202,6 +204,9 @@ fn start_explicit_attack(state: &mut GameState, target_guid: Guid) -> UpdateResu
         .data
         .combat_runtime
         .begin_explicit_engagement(target_guid, desired_mode);
+    if desired_mode == CombatMode::Melee {
+        state.runtime.navigation.begin_combat_navigation();
+    }
     state.data.combat_runtime.arm_attack_drive();
     result.request_redraw(RedrawPriority::Immediate);
 

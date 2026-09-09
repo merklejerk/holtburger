@@ -8,8 +8,8 @@ use crossterm::{
 use holtburger_cli::pages;
 use holtburger_cli::state::{AppState, NetStats, QueuedScriptStartup};
 use holtburger_cli::types::{AppEvent, ChatMessageTags, Page, RedrawPriority, UpdateResult};
-use holtburger_cli::utils::format_action_result_message;
 use holtburger_content::{ContentDecodeCache, ContentRepository};
+use holtburger_core::errors::format_action_result_message;
 use holtburger_core::errors::is_actually_weenie_error;
 use holtburger_core::{
     ActionResultReason, ClientCommand, ClientRuntime, ClientRuntimeBuilder, ClientState,

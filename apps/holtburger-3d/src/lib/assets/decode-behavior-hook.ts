@@ -64,6 +64,10 @@ export const behaviorHookPayloadSchema = z.discriminatedUnion("kind", [
 		soundType: z.number().int().nonnegative(),
 	}),
 	z.object({
+		kind: z.literal("sound"),
+		soundId: datId,
+	}),
+	z.object({
 		durationSeconds: finiteNumber,
 		end: finiteNumber.positive(),
 		kind: z.literal("scale"),
@@ -111,6 +115,7 @@ const TYPED_PAYLOAD_KIND_BY_HOOK_TYPE = new Map<
 	number,
 	BehaviorHookPayload["kind"]
 >([
+	[1, "sound"],
 	[2, "sound-table"],
 	[3, "attack"],
 	[5, "replace-object"],
@@ -206,6 +211,10 @@ export function decodeBehaviorCommand(
 			};
 		case "sound-table":
 			return { kind: "sound-table", soundType: payload.soundType };
+		case "sound":
+			// Retail's two-argument `PlaySoundA` carries no priority, probability, or
+			// volume: the wave always plays at full volume when the hook fires.
+			return { kind: "sound", soundId: payload.soundId };
 		case "sound-tweaked":
 			// `unused` is deliberately dropped: retail parses and discards it, so carrying it
 			// forward would invite a consumer to read a field with no meaning.

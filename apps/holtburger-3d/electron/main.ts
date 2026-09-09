@@ -107,11 +107,7 @@ function hostEnvironment(): NodeJS.ProcessEnv {
 	return environment;
 }
 
-async function startHost(
-	window: BrowserWindow,
-	mode: HostMode,
-	clientStartup?: ClientLaunchConfiguration,
-): Promise<void> {
+async function startHost(window: BrowserWindow, mode: HostMode): Promise<void> {
 	const child = spawn(hostBinaryPath(), [`--mode=${mode}`], {
 		env: hostEnvironment(),
 		stdio: "pipe",
@@ -160,18 +156,7 @@ async function startHost(
 				window.webContents.send("host:event", { event, payload });
 		});
 	}
-	// Resolve before the private client launch follow-up so an early renderer request waits for a
-	// selected, fully negotiated host rather than observing an empty/global allowlist.
 	hostReady.resolve(client);
-	if (mode === "client" && clientStartup !== undefined) {
-		try {
-			await client.startClient(clientStartup);
-		} finally {
-			// The encoded request has been handed to the sidecar; do not retain the password in
-			// Electron's entry state after the one launch attempt.
-			clientStartup.password = "";
-		}
-	}
 }
 
 function isHostCommandName(
@@ -188,7 +173,12 @@ function isHostCommandArguments(value: unknown): value is HostCommandArguments {
 	);
 }
 
-function installIpcBridge(window: BrowserWindow, mode: HostMode): void {
+function installIpcBridge(
+	window: BrowserWindow,
+	mode: HostMode,
+	startup: ClientLaunchConfiguration | undefined,
+): void {
+	let clientLaunch: Promise<void> | undefined;
 	const applicationContents = window.webContents;
 	ipcMain.handle("host:invoke", async (event, request: unknown) => {
 		if (
@@ -217,6 +207,18 @@ function installIpcBridge(window: BrowserWindow, mode: HostMode): void {
 		if (!isHostCommandArguments(args))
 			throw new Error("host command arguments must be an object");
 		const client = await hostReady.promise;
+		// The lifecycle owner installs all event listeners before its first snapshot request.
+		// Launch here so login popups cannot arrive while the renderer is still loading.
+		if (
+			request.command === "request_client_current_state" &&
+			startup !== undefined
+		) {
+			clientLaunch ??= client.startClient(startup).catch((error: unknown) => {
+				reportFatalError("Holtburger client failed to start", error);
+				throw error;
+			});
+			await clientLaunch;
+		}
 		return client.invoke(request.command, args);
 	});
 }
@@ -348,9 +350,9 @@ app.whenReady().then(async () => {
 	}
 	Menu.setApplicationMenu(null);
 	const window = createWindow(entry);
-	installIpcBridge(window, entry.mode);
+	installIpcBridge(window, entry.mode, entry.clientStartup);
 	try {
-		await startHost(window, entry.mode, entry.clientStartup);
+		await startHost(window, entry.mode);
 		await loadEntry(window, entry.path, entry.mode);
 	} catch (error) {
 		hostReady.reject(error);

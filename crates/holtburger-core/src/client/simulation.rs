@@ -766,15 +766,8 @@ pub(super) async fn handle_server_controlled_movement(
         data.movement_type,
         data.server_control_sequence
     );
-    movement.note_server_controlled_movement_started();
-
-    let Some(motion) = build_server_controlled_motion(data, world) else {
-        movement.clear_server_controlled_motion();
-        return Ok(Vec::new());
-    };
-    movement.set_server_controlled_motion(motion);
-    let now = Instant::now();
-    movement.arm_autonomous_position_heartbeat_schedule(now, world);
+    let motion = build_server_controlled_motion(data, world);
+    movement.admit_server_controlled_motion(motion, Instant::now(), world);
     Ok(Vec::new())
 }
 

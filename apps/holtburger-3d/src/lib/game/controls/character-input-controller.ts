@@ -7,6 +7,9 @@ export interface CharacterDrive {
 	readonly turn: "left" | "right" | null;
 }
 
+/** Whether a drive command acquires movement or only reconciles held input. */
+export type CharacterDriveIntent = "acquire" | "synchronize";
+
 /** Non-coalescible lifecycle edge sent in frontend order. */
 export type CharacterInputEdge =
 	| {
@@ -30,7 +33,10 @@ interface CharacterInputControllerOptions {
 	readonly fullChargeDurationMs: number;
 	/** Injectable monotonic clock. */
 	readonly now: () => number;
-	readonly onDrive: (drive: CharacterDrive) => void;
+	readonly onDrive: (
+		drive: CharacterDrive,
+		intent: CharacterDriveIntent,
+	) => void;
 	readonly onEdge: (edge: CharacterInputEdge) => void;
 }
 
@@ -51,7 +57,10 @@ const MINIMUM_RETAIL_JUMP_EXTENT = 0.001;
 export class CharacterInputController {
 	#fullChargeDurationMs: number;
 	readonly #now: () => number;
-	readonly #onDrive: (drive: CharacterDrive) => void;
+	readonly #onDrive: (
+		drive: CharacterDrive,
+		intent: CharacterDriveIntent,
+	) => void;
 	readonly #onEdge: (edge: CharacterInputEdge) => void;
 	readonly #held = new Set<CharacterAction>();
 	readonly #longitudinal: CharacterAction[] = [];
@@ -77,6 +86,19 @@ export class CharacterInputController {
 
 	/** Applies one action edge; action-repeat cannot rewrite newest-first precedence. */
 	applyAction(action: CharacterAction, pressed: boolean): void {
+		this.#applyAction(action, pressed, pressed ? "acquire" : "synchronize");
+	}
+
+	/** Restores a held drive action without manufacturing a new movement acquisition. */
+	restoreHeldAction(action: Exclude<CharacterAction, "jump">): void {
+		this.#applyAction(action, true, "synchronize");
+	}
+
+	#applyAction(
+		action: CharacterAction,
+		pressed: boolean,
+		intent: CharacterDriveIntent,
+	): void {
 		if (pressed) {
 			if (this.#held.has(action)) return;
 			this.#held.add(action);
@@ -85,7 +107,7 @@ export class CharacterInputController {
 				return;
 			}
 			this.#axisFor(action)?.unshift(action);
-			this.#onDrive(this.drive());
+			this.#onDrive(this.drive(), intent);
 			return;
 		}
 
@@ -96,7 +118,7 @@ export class CharacterInputController {
 		}
 		const axis = this.#axisFor(action);
 		if (axis !== null) axis.splice(axis.indexOf(action), 1);
-		this.#onDrive(this.drive());
+		this.#onDrive(this.drive(), intent);
 	}
 
 	/** Latest semantic snapshot, composed independently across all three axes. */
@@ -148,7 +170,6 @@ export class CharacterInputController {
 	/** Clears held state and emits one ordered ownership-reset edge. */
 	reset(): void {
 		this.#clear();
-		this.#onDrive(this.drive());
 		this.#onEdge({ kind: "reset", sequence: this.#nextSequence() });
 	}
 

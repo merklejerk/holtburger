@@ -1,6 +1,8 @@
 use holtburger_common::position::{METERS_PER_LANDBLOCK, WorldPosition};
 use holtburger_common::{Guid, Vector3};
-use holtburger_core::client::movement_types::{AutonomousDriveIntent, Gait, PlayerDriveIntent};
+use holtburger_core::client::movement_types::{
+    AutonomousDriveIntent, ClientDirectedCommand, Gait, PlayerDriveIntent,
+};
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_world::{
     SelfMovementKinematics, SpatialEntitySample, project_pose_forward_distance,
@@ -188,7 +190,8 @@ impl NavigationDriveBlockReason {
 pub struct TuiNavigation {
     active: ActiveNavigation,
     drive_active: bool,
-    pending_start_snap_heading: Option<f32>,
+    /// Only a new navigation engagement may acquire movement control.
+    needs_acquisition: bool,
     last_drive_block_reason: Option<NavigationDriveBlockReason>,
     default_approach_distance: f32,
     default_follow_distance: f32,
@@ -200,7 +203,7 @@ impl Default for TuiNavigation {
         Self {
             active: ActiveNavigation::Idle,
             drive_active: false,
-            pending_start_snap_heading: None,
+            needs_acquisition: false,
             last_drive_block_reason: None,
             default_approach_distance: DEFAULT_APPROACH_DISTANCE,
             default_follow_distance: DEFAULT_FOLLOW_DISTANCE,
@@ -210,9 +213,13 @@ impl Default for TuiNavigation {
 }
 
 impl TuiNavigation {
+    /// An explicit attack authorizes acquisition; recurring combat snapshots only steer it.
+    pub(crate) fn begin_combat_navigation(&mut self) {
+        self.needs_acquisition = true;
+    }
+
     fn clear_drive_active(&mut self) {
         self.drive_active = false;
-        self.pending_start_snap_heading = None;
     }
 
     fn sync_input(&self, now: Instant, snapshot: NavigationSnapshot) -> NavigationSyncInput {
@@ -285,7 +292,9 @@ impl TuiNavigation {
             NavigationInput::Cancel => {
                 self.clear_navigation();
                 NavigationUpdate {
-                    drive_command: self.stop_drive_command(),
+                    drive_command: Some(PlayerDriveIntent::ClientDirected(
+                        ClientDirectedCommand::Release,
+                    )),
                     interaction_change: self
                         .clear_finished_interaction(mode_before, self.navigation_mode()),
                 }
@@ -293,7 +302,9 @@ impl TuiNavigation {
             NavigationInput::ForcedReposition => {
                 self.handle_forced_reposition();
                 NavigationUpdate {
-                    drive_command: self.stop_drive_command(),
+                    drive_command: Some(PlayerDriveIntent::ClientDirected(
+                        ClientDirectedCommand::Release,
+                    )),
                     interaction_change: self
                         .clear_finished_interaction(mode_before, self.navigation_mode()),
                 }
@@ -301,7 +312,9 @@ impl TuiNavigation {
             NavigationInput::TeleportStarted => {
                 self.handle_teleport_start();
                 NavigationUpdate {
-                    drive_command: self.stop_drive_command(),
+                    drive_command: Some(PlayerDriveIntent::ClientDirected(
+                        ClientDirectedCommand::Release,
+                    )),
                     interaction_change: self
                         .clear_finished_interaction(mode_before, self.navigation_mode()),
                 }
@@ -349,7 +362,8 @@ impl TuiNavigation {
             target.0,
             arrival_distance
         );
-        self.pending_start_snap_heading = None;
+
+        self.needs_acquisition = true;
         self.active = ActiveNavigation::Approach {
             target_guid: target,
             arrival_distance,
@@ -372,7 +386,8 @@ impl TuiNavigation {
             target.0,
             arrival_distance
         );
-        self.pending_start_snap_heading = None;
+
+        self.needs_acquisition = true;
         self.active = ActiveNavigation::Follow {
             target_guid: target,
             arrival_distance,
@@ -400,7 +415,8 @@ impl TuiNavigation {
             distance_m,
             target_pose
         );
-        self.pending_start_snap_heading = None;
+
+        self.needs_acquisition = true;
         self.active = ActiveNavigation::Scoot {
             target_pose,
             arrival_distance: SCOOT_ARRIVAL_DEADBAND_M,
@@ -411,7 +427,7 @@ impl TuiNavigation {
         if !matches!(self.active, ActiveNavigation::Idle) {
             log::info!("tui navigation: clearing active navigation mode");
         }
-        self.pending_start_snap_heading = None;
+
         self.active = ActiveNavigation::Idle;
     }
 
@@ -620,7 +636,11 @@ impl TuiNavigation {
             self.active = ActiveNavigation::Idle;
             if self.drive_active {
                 self.clear_drive_active();
-                return Some(PlayerDriveIntent::ArriveAtPose { pose: target_pose });
+                return Some(PlayerDriveIntent::ClientDirected(
+                    ClientDirectedCommand::Settle {
+                        pose: Some(target_pose),
+                    },
+                ));
             }
         }
 
@@ -670,8 +690,11 @@ impl TuiNavigation {
     ) -> Option<PlayerDriveIntent> {
         match self.active_drive_intent_result(input, dt) {
             Ok(intent) => {
-                if let Some(command) = self.snap_facing_before_first_drive(input, intent) {
-                    return Some(command);
+                let acquire = std::mem::take(&mut self.needs_acquisition);
+                if acquire && let Some(heading) = Self::initial_facing(input, intent) {
+                    return Some(PlayerDriveIntent::ClientDirected(
+                        ClientDirectedCommand::AcquireFacing { heading },
+                    ));
                 }
 
                 if let Some(reason) = self.last_drive_block_reason.take() {
@@ -680,9 +703,13 @@ impl TuiNavigation {
                         reason.label()
                     );
                 }
-                self.pending_start_snap_heading = None;
+
                 self.drive_active = true;
-                Some(PlayerDriveIntent::Autonomous(intent))
+                Some(PlayerDriveIntent::ClientDirected(if acquire {
+                    ClientDirectedCommand::Acquire(intent)
+                } else {
+                    ClientDirectedCommand::Update(intent)
+                }))
             }
             Err(reason) => {
                 self.note_drive_blocked(reason);
@@ -691,41 +718,12 @@ impl TuiNavigation {
         }
     }
 
-    fn snap_facing_before_first_drive(
-        &mut self,
-        input: &NavigationSyncInput,
-        intent: AutonomousDriveIntent,
-    ) -> Option<PlayerDriveIntent> {
-        if self.drive_active {
-            self.pending_start_snap_heading = None;
-            return None;
-        }
-
+    fn initial_facing(input: &NavigationSyncInput, intent: AutonomousDriveIntent) -> Option<f32> {
         let player_position = input.player_position?;
         let desired_heading = intent.desired_heading?;
         let current_heading = player_position.rotation.to_heading();
         let heading_delta = signed_heading_delta(current_heading, desired_heading).abs();
-
-        if heading_delta <= START_DRIVE_SNAP_THRESHOLD_RAD {
-            self.pending_start_snap_heading = None;
-            return None;
-        }
-
-        if self
-            .pending_start_snap_heading
-            .is_some_and(|pending_heading| {
-                signed_heading_delta(pending_heading, desired_heading).abs()
-                    <= START_DRIVE_SNAP_THRESHOLD_RAD
-            })
-        {
-            self.pending_start_snap_heading = None;
-            return None;
-        }
-
-        self.pending_start_snap_heading = Some(desired_heading);
-        Some(PlayerDriveIntent::SnapFacing {
-            heading: desired_heading,
-        })
+        (heading_delta > START_DRIVE_SNAP_THRESHOLD_RAD).then_some(desired_heading)
     }
 
     fn note_drive_blocked(&mut self, reason: NavigationDriveBlockReason) {
@@ -746,15 +744,15 @@ impl TuiNavigation {
         }
 
         self.clear_drive_active();
-        Some(PlayerDriveIntent::Stop)
+        Some(PlayerDriveIntent::ClientDirected(
+            ClientDirectedCommand::Settle { pose: None },
+        ))
     }
 
     fn arrival_drive_command(&self, input: &NavigationSyncInput) -> PlayerDriveIntent {
-        input
-            .arrival_pose()
-            .map_or(PlayerDriveIntent::Stop, |pose| {
-                PlayerDriveIntent::ArriveAtPose { pose }
-            })
+        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Settle {
+            pose: input.arrival_pose(),
+        })
     }
 
     fn clear_finished_interaction(
@@ -1026,9 +1024,11 @@ mod tests {
 
         assert_eq!(
             first_tick.drive_command,
-            Some(PlayerDriveIntent::SnapFacing {
-                heading: 180.0_f32.to_radians(),
-            })
+            Some(PlayerDriveIntent::ClientDirected(
+                ClientDirectedCommand::AcquireFacing {
+                    heading: 180.0_f32.to_radians(),
+                }
+            ))
         );
         assert!(!navigation.drive_active);
 
@@ -1045,7 +1045,9 @@ mod tests {
 
         assert!(matches!(
             second_tick.drive_command,
-            Some(PlayerDriveIntent::Autonomous(_))
+            Some(PlayerDriveIntent::ClientDirected(
+                ClientDirectedCommand::Update(_)
+            ))
         ));
         assert!(navigation.drive_active);
     }
@@ -1083,7 +1085,9 @@ mod tests {
 
         assert!(matches!(
             tick.drive_command,
-            Some(PlayerDriveIntent::Autonomous(_))
+            Some(PlayerDriveIntent::ClientDirected(
+                ClientDirectedCommand::Acquire(_)
+            ))
         ));
         assert!(navigation.drive_active);
     }
@@ -1208,9 +1212,11 @@ mod tests {
 
         assert_eq!(
             update.drive_command,
-            Some(PlayerDriveIntent::ArriveAtPose {
-                pose: world_position(0.0, 0.0, 4.5),
-            })
+            Some(PlayerDriveIntent::ClientDirected(
+                ClientDirectedCommand::Settle {
+                    pose: Some(world_position(0.0, 0.0, 4.5))
+                }
+            ))
         );
         assert!(!navigation.drive_active);
     }
@@ -1262,9 +1268,11 @@ mod tests {
 
         assert_eq!(
             update.drive_command,
-            Some(PlayerDriveIntent::ArriveAtPose {
-                pose: world_position(0.0, 0.0, 4.5),
-            })
+            Some(PlayerDriveIntent::ClientDirected(
+                ClientDirectedCommand::Settle {
+                    pose: Some(world_position(0.0, 0.0, 4.5))
+                }
+            ))
         );
         assert!(!navigation.drive_active);
         assert_eq!(navigation.navigation_mode(), None);
@@ -1298,7 +1306,11 @@ mod tests {
 
         assert_eq!(
             update.drive_command,
-            Some(PlayerDriveIntent::ArriveAtPose { pose: target_pose })
+            Some(PlayerDriveIntent::ClientDirected(
+                ClientDirectedCommand::Settle {
+                    pose: Some(target_pose)
+                }
+            ))
         );
         assert!(!navigation.drive_active);
         assert!(navigation.navigation_mode().is_none());
@@ -1336,9 +1348,16 @@ mod tests {
 
         assert_eq!(
             update.drive_command,
-            Some(PlayerDriveIntent::ArriveAtPose {
-                pose: world_position_with_heading(0.0, 0.0, 7.0, 180.0_f32.to_radians()),
-            })
+            Some(PlayerDriveIntent::ClientDirected(
+                ClientDirectedCommand::Settle {
+                    pose: Some(world_position_with_heading(
+                        0.0,
+                        0.0,
+                        7.0,
+                        180.0_f32.to_radians()
+                    ))
+                }
+            ))
         );
         assert!(matches!(
             navigation.active,
@@ -1362,7 +1381,9 @@ mod tests {
 
         assert!(matches!(
             next_update.drive_command,
-            Some(PlayerDriveIntent::Autonomous(_))
+            Some(PlayerDriveIntent::ClientDirected(
+                ClientDirectedCommand::Acquire(_) | ClientDirectedCommand::Update(_)
+            ))
         ));
     }
 
@@ -1405,13 +1426,15 @@ mod tests {
 
         assert_eq!(
             update.drive_command,
-            Some(PlayerDriveIntent::ArriveAtPose {
-                pose: WorldPosition {
-                    landblock_id: Guid(0x3419_0003),
-                    coords: Vector3::new(0.05, 58.299316, 13.145146),
-                    rotation: Quaternion::from_heading(180.0_f32.to_radians()),
-                },
-            })
+            Some(PlayerDriveIntent::ClientDirected(
+                ClientDirectedCommand::Settle {
+                    pose: Some(WorldPosition {
+                        landblock_id: Guid(0x3419_0003),
+                        coords: Vector3::new(0.05, 58.299316, 13.145146),
+                        rotation: Quaternion::from_heading(180.0_f32.to_radians()),
+                    })
+                }
+            ))
         );
     }
 
@@ -1448,12 +1471,55 @@ mod tests {
             ),
         );
 
-        assert_eq!(update.drive_command, Some(PlayerDriveIntent::Stop));
+        assert_eq!(
+            update.drive_command,
+            Some(PlayerDriveIntent::ClientDirected(
+                ClientDirectedCommand::Release
+            ))
+        );
         assert_eq!(
             update.interaction_change,
             NavigationInteractionChange::Set(None)
         );
         assert_eq!(navigation.navigation_mode(), None);
+    }
+
+    #[test]
+    fn combat_projection_gaps_do_not_reacquire_movement() {
+        let mut navigation = TuiNavigation::default();
+        let target = Guid(0x5000_0042);
+        let input = sync_input(
+            Instant::now(),
+            Some(world_position(0.0, 0.0, 0.0)),
+            Some(target_sample(target, world_position(6.0, 0.0, 0.0))),
+            Some(test_self_movement_kinematics(1.0, 2.0, 1.5)),
+            Some(4.5),
+        );
+        let request = Some(CombatNavigationRequest {
+            target_guid: target,
+            mode: CombatMode::Melee,
+        });
+        navigation.begin_combat_navigation();
+        navigation.sync_sticky_melee(request, &input);
+        assert!(navigation.needs_acquisition);
+        navigation.emit_drive_or_stop(&input, Duration::from_millis(16));
+        assert!(!navigation.needs_acquisition);
+        navigation.sync_sticky_melee(None, &input);
+        navigation.sync_sticky_melee(request, &input);
+        assert!(!navigation.needs_acquisition);
+        assert!(matches!(
+            navigation.emit_drive_or_stop(&input, Duration::from_millis(16)),
+            Some(PlayerDriveIntent::ClientDirected(
+                ClientDirectedCommand::Update(_)
+            ))
+        ));
+        navigation.begin_combat_navigation();
+        assert!(matches!(
+            navigation.emit_drive_or_stop(&input, Duration::from_millis(16)),
+            Some(PlayerDriveIntent::ClientDirected(
+                ClientDirectedCommand::Acquire(_) | ClientDirectedCommand::AcquireFacing { .. }
+            ))
+        ));
     }
 
     #[test]
@@ -1507,7 +1573,9 @@ mod tests {
 
         assert!(matches!(
             slipped.drive_command,
-            Some(PlayerDriveIntent::Autonomous(_))
+            Some(PlayerDriveIntent::ClientDirected(
+                ClientDirectedCommand::Acquire(_) | ClientDirectedCommand::Update(_)
+            ))
         ));
         assert!(matches!(
             navigation.active,
@@ -1584,7 +1652,11 @@ mod tests {
 
         assert!(matches!(
             update.drive_command,
-            Some(PlayerDriveIntent::Autonomous(_)) | Some(PlayerDriveIntent::SnapFacing { .. })
+            Some(PlayerDriveIntent::ClientDirected(
+                ClientDirectedCommand::Acquire(_) | ClientDirectedCommand::Update(_)
+            )) | Some(PlayerDriveIntent::ClientDirected(
+                ClientDirectedCommand::AcquireFacing { .. }
+            ))
         ));
         assert!(matches!(
             navigation.active,

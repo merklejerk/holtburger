@@ -1,6 +1,8 @@
 import {
 	decodeClientCurrentState,
 	decodeClientDynamicScriptCue,
+	decodeClientDynamicSoundCue,
+	type ClientDynamicSoundCue,
 	decodeClientLocalPlayerEstablished,
 	decodeClientCameraStartReceipt,
 	decodeClientCameraTick,
@@ -22,7 +24,14 @@ import {
 	decodeClientWorldName,
 	decodeClientPlayerEntered,
 	decodeClientVitals,
+	decodeClientEntityHealth,
+	type ClientEntityHealth,
 	decodeClientChatMessage,
+	decodeClientActionFeedback,
+	decodeClientServerText,
+	decodeClientConfirmationUpdated,
+	type ClientConfirmation,
+	type ClientActionFeedback,
 	type ClientCurrentState,
 	type ClientDynamicScriptCue,
 	type ClientCameraIdentity,
@@ -69,6 +78,9 @@ type ClientCommandName = Extract<
 	| "replace_client_drive"
 	| "queue_client_character_motion_event"
 	| "send_client_chat"
+	| "query_client_entity_health"
+	| "use_client_entity"
+	| "respond_to_client_confirmation"
 	| "start_client_camera"
 	| "set_client_camera_intent"
 	| "set_client_camera_clearance"
@@ -94,9 +106,15 @@ type ClientEventName = Extract<
 	| "client-world-name-updated"
 	| "client-player-entered"
 	| "client-player-vitals-updated"
+	| "client-entity-health-updated"
 	| "client-chat-message"
+	| "client-transient-string"
+	| "client-popup-string"
+	| "client-confirmation-updated"
+	| "client-action-feedback"
 	| "client-dynamic-entity"
 	| "client-dynamic-script-cue"
+	| "client-dynamic-sound-cue"
 	| "client-camera-started"
 	| "client-camera"
 	| "client-presentation-discontinuity"
@@ -125,11 +143,18 @@ export interface ClientLifecycleSessionState {
 	readonly playerName: string | null;
 	readonly vitals: readonly ClientVital[];
 	readonly characterMotion: ClientCharacterMotionCapabilities | null;
+	/** Current server question, retained independently of presentation mounts. */
+	readonly activeConfirmation: ClientConfirmation | null;
 	readonly exit: ClientExitRequested | null;
 }
 
 /** One accepted authority update delivered to app-local lifecycle consumers. */
 export type ClientLifecycleSessionEvent =
+	| { readonly type: "dynamic-sound-cue"; readonly cue: ClientDynamicSoundCue }
+	| {
+			readonly type: "confirmation";
+			readonly confirmation: ClientConfirmation | null;
+	  }
 	| { readonly type: "current-state"; readonly state: ClientCurrentState }
 	| { readonly type: "lifecycle"; readonly lifecycle: ClientLifecycle }
 	| {
@@ -160,7 +185,17 @@ export type ClientLifecycleSessionEvent =
 	| { readonly type: "world-name"; readonly name: string }
 	| { readonly type: "player-entered"; readonly player: ClientPlayerEntered }
 	| { readonly type: "vitals"; readonly vitals: readonly ClientVital[] }
+	| { readonly type: "entity-health"; readonly health: ClientEntityHealth }
 	| { readonly type: "chat"; readonly message: ClientChatMessage }
+	| {
+			/** Server notice or popup; presentation owns dismissal and expiry. */
+			readonly type: "transient-string" | "popup-string";
+			readonly message: string;
+	  }
+	| {
+			readonly type: "action-feedback";
+			readonly feedback: ClientActionFeedback;
+	  }
 	| { readonly type: "dynamic"; readonly event: DynamicEntityEvent }
 	| {
 			readonly type: "dynamic-script-cue";
@@ -289,6 +324,29 @@ export class ClientLifecycleSession {
 		await this.#transport.invoke("queue_client_character_motion_event", {
 			request: validated,
 		});
+	}
+
+	/** Replace the server health subscription; null means explicit deselection. */
+	async queryEntityHealth(guid: number | null): Promise<void> {
+		await this.#transport.invoke("query_client_entity_health", {
+			guid: guid ?? 0,
+		});
+	}
+
+	/** Queue the exact displayed response; the confirmation update acknowledges core submission. */
+	async respondToConfirmation(
+		requestId: string,
+		accepted: boolean,
+	): Promise<void> {
+		await this.#transport.invoke("respond_to_client_confirmation", {
+			request_id: requestId,
+			accepted,
+		});
+	}
+
+	/** Use one selected entity through core's existing interaction command. */
+	async useEntity(guid: number): Promise<void> {
+		await this.#transport.invoke("use_client_entity", { guid });
 	}
 
 	/** Send one ordinary local-speech message. */
@@ -435,8 +493,54 @@ export class ClientLifecycleSession {
 				),
 			);
 			unlisteners.push(
+				await this.#transport.listen(
+					"client-entity-health-updated",
+					(payload) =>
+						this.#emit({
+							type: "entity-health",
+							health: decodeClientEntityHealth(payload),
+						}),
+				),
+			);
+			unlisteners.push(
+				await this.#transport.listen("client-action-feedback", (payload) =>
+					this.#emit({
+						type: "action-feedback",
+						feedback: decodeClientActionFeedback(payload),
+					}),
+				),
+			);
+			unlisteners.push(
+				await this.#transport.listen(
+					"client-confirmation-updated",
+					(payload) => {
+						const { confirmation } = decodeClientConfirmationUpdated(payload);
+						this.#state = { ...this.#state, activeConfirmation: confirmation };
+						this.#emit({ type: "confirmation", confirmation });
+					},
+				),
+			);
+			for (const type of ["transient-string", "popup-string"] as const) {
+				unlisteners.push(
+					await this.#transport.listen(`client-${type}`, (payload) =>
+						this.#emit({
+							type,
+							message: decodeClientServerText(payload).message,
+						}),
+					),
+				);
+			}
+			unlisteners.push(
 				await this.#transport.listen("client-chat-message", (payload) =>
 					this.#receiveChat(payload),
+				),
+			);
+			unlisteners.push(
+				await this.#transport.listen("client-dynamic-sound-cue", (payload) =>
+					this.#emit({
+						type: "dynamic-sound-cue",
+						cue: decodeClientDynamicSoundCue(payload),
+					}),
 				),
 			);
 			unlisteners.push(
@@ -490,6 +594,7 @@ export class ClientLifecycleSession {
 			playerName: state.playerName,
 			vitals: state.vitals,
 			characterMotion: state.characterMotion,
+			activeConfirmation: state.activeConfirmation,
 			exit: null,
 		};
 		const dynamic: DynamicEntityEvent = {
@@ -518,6 +623,8 @@ export class ClientLifecycleSession {
 		this.#state = {
 			...this.#state,
 			lifecycle,
+			activeConfirmation:
+				lifecycle.kind === "exiting" ? null : this.#state.activeConfirmation,
 			worldGeneration:
 				lifecycle.kind === "portal-space"
 					? lifecycle.worldGeneration
@@ -627,7 +734,7 @@ export class ClientLifecycleSession {
 	#receiveExit(payload: unknown): void {
 		const exit = decodeClientExitRequested(payload);
 		const lifecycle: ClientLifecycle = { kind: "exiting", cause: exit.cause };
-		this.#state = { ...this.#state, lifecycle, exit };
+		this.#state = { ...this.#state, lifecycle, exit, activeConfirmation: null };
 		this.#emit({ type: "lifecycle", lifecycle });
 		this.#emit({ type: "exit-requested", exit });
 	}
@@ -647,6 +754,7 @@ function emptyState(): ClientLifecycleSessionState {
 		playerName: null,
 		vitals: [],
 		characterMotion: null,
+		activeConfirmation: null,
 		exit: null,
 	};
 }

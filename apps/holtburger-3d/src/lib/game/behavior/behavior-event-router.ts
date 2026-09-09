@@ -281,6 +281,20 @@ export class BehaviorEventRouter {
 				return "executed";
 			}
 
+			case "sound": {
+				// Same catch-up suppression as the tweaked arm: a direct wave is equally
+				// ephemeral. Retail's two-argument hook carries no probability or volume, so
+				// the wave always plays at full volume when the hook fires.
+				if (mode === "initial-state") return "suppressed-initial-state";
+				const outcome = this.#consumers.audio.playSound(target, {
+					probability: 1,
+					soundId: command.soundId,
+					volume: 1,
+				});
+				if (outcome === "unprepared") return "no-consumer";
+				return "executed";
+			}
+
 			case "sound-table": {
 				if (mode === "initial-state") return "suppressed-initial-state";
 				const outcome = this.#consumers.audio.playSoundTableKey(

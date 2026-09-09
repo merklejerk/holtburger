@@ -4282,6 +4282,11 @@ async function runStandaloneUiHarness({ viteUrl }) {
 		await dispatchPrimaryGesture(gestureBaseline.gameCanvas, [{ x: 2, y: 1 }]);
 		await delay(50);
 		const viewportSelected = await capture();
+		viewportSelected.interactions = await evaluate(
+			client,
+			"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeSelectedInteractions",
+			[],
+		);
 		await dispatchPrimaryGesture(viewportSelected.gameCanvas, [
 			{ x: 2, y: 1 },
 			{ x: 8, y: 5 },
@@ -4501,7 +4506,7 @@ function assertClientHudHarness(evidence) {
 	if (
 		evidence.runtime.selectedEntityHud !== null ||
 		evidence.layout.selectedEntityHud?.name !== "Selected Entity" ||
-		evidence.layout.selectedEntityHud.actionsDisabled !== true ||
+		evidence.layout.selectedEntityHud.interactDisabled !== true ||
 		Math.abs(
 			selectedEntityPlacement.left +
 				selectedEntityPlacement.width / 2 -
@@ -4512,15 +4517,15 @@ function assertClientHudHarness(evidence) {
 			8
 	) {
 		throw new Error(
-			`Client HUD selected-entity surface did not preserve its preview, stub, or default placement contract: ${JSON.stringify(evidence.layout)}.`,
+			`Client HUD selected-entity surface did not preserve its preview or default placement contract: ${JSON.stringify(evidence.layout)}.`,
 		);
 	}
 	if (
 		evidence.viewportSelected.selectedEntityHud?.name !== "Drudge" ||
-		evidence.viewportSelected.selectedEntityHud.actionsDisabled !== true
+		evidence.viewportSelected.selectedEntityHud.interactDisabled !== false
 	) {
 		throw new Error(
-			`Client HUD selected-entity surface did not present the selected display value with inert actions: ${JSON.stringify(evidence.viewportSelected)}.`,
+			`Client HUD selected-entity surface did not present the selected display value with an enabled interaction: ${JSON.stringify(evidence.viewportSelected)}.`,
 		);
 	}
 	if (

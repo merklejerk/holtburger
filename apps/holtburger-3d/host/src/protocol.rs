@@ -112,11 +112,32 @@ pub enum HostEvent {
         player_guid: holtburger_common::Guid,
         name: String,
     },
+    /// Entity identity and its latest server-reported health fraction.
+    ClientEntityHealthUpdated {
+        guid: holtburger_common::Guid,
+        #[serde(rename = "healthFraction")]
+        health_fraction: f32,
+    },
     ClientPlayerVitalsUpdated {
         vitals: Vec<crate::client_projection::ClientVitalWire>,
     },
+    /// Brief server notice; text is preserved verbatim.
+    ClientTransientString {
+        message: String,
+    },
+    /// Explicitly dismissible server message.
+    ClientPopupString {
+        message: String,
+    },
+    /// Current server question or its cancellation.
+    ClientConfirmationUpdated {
+        confirmation: Option<crate::client_projection::ClientConfirmation>,
+    },
+    ClientActionFeedback(crate::client_projection::ClientActionFeedback),
     ClientChatMessage(crate::client_projection::ClientChatMessageWire),
     ClientDynamicEntity(holtburger_core::DynamicEntityEvent),
+    /// Server positional effect with source and world generation.
+    ClientDynamicSoundCue(holtburger_core::ClientDynamicSoundCue),
     ClientDynamicScriptCue(holtburger_core::ClientDynamicScriptCue),
     ClientCamera(holtburger_core::ClientCameraTick),
     ClientCameraStarted(holtburger_core::ClientCameraStartReceipt),
@@ -369,14 +390,36 @@ impl ClientEventSink for StdioEventSink {
             crate::client_projection::ClientHostEvent::PlayerEntered { player_guid, name } => {
                 HostEvent::ClientPlayerEntered { player_guid, name }
             }
+            crate::client_projection::ClientHostEvent::EntityHealthUpdated {
+                guid,
+                health_fraction,
+            } => HostEvent::ClientEntityHealthUpdated {
+                guid,
+                health_fraction,
+            },
             crate::client_projection::ClientHostEvent::PlayerVitalsUpdated { vitals } => {
                 HostEvent::ClientPlayerVitalsUpdated { vitals }
+            }
+            crate::client_projection::ClientHostEvent::TransientString { message } => {
+                HostEvent::ClientTransientString { message }
+            }
+            crate::client_projection::ClientHostEvent::PopupString { message } => {
+                HostEvent::ClientPopupString { message }
+            }
+            crate::client_projection::ClientHostEvent::ConfirmationUpdated { confirmation } => {
+                HostEvent::ClientConfirmationUpdated { confirmation }
+            }
+            crate::client_projection::ClientHostEvent::ActionFeedback(feedback) => {
+                HostEvent::ClientActionFeedback(feedback)
             }
             crate::client_projection::ClientHostEvent::ChatMessage(message) => {
                 HostEvent::ClientChatMessage(message)
             }
             crate::client_projection::ClientHostEvent::DynamicEntity(event) => {
                 HostEvent::ClientDynamicEntity(event)
+            }
+            crate::client_projection::ClientHostEvent::DynamicSoundCue(cue) => {
+                HostEvent::ClientDynamicSoundCue(cue)
             }
             crate::client_projection::ClientHostEvent::DynamicScriptCue(cue) => {
                 HostEvent::ClientDynamicScriptCue(cue)
@@ -802,6 +845,32 @@ mod tests {
             panic!("client chat did not decode into the client inventory");
         };
         assert_eq!(message, "Hello world");
+    }
+
+    #[test]
+    fn entity_interaction_commands_decode_into_the_client_inventory() {
+        for (command, guid) in [
+            ("query_client_entity_health", 7),
+            ("query_client_entity_health", 0),
+            ("use_client_entity", 7),
+        ] {
+            let decoded: HostCommand =
+                serde_json::from_value(serde_json::json!({ "command": command, "guid": guid }))
+                    .unwrap();
+            match (command, decoded) {
+                (
+                    "query_client_entity_health",
+                    HostCommand::Client(ClientHostCommand::QueryClientEntityHealth {
+                        guid: decoded,
+                    }),
+                ) => assert_eq!(decoded.0, guid),
+                (
+                    "use_client_entity",
+                    HostCommand::Client(ClientHostCommand::UseClientEntity { guid: decoded }),
+                ) => assert_eq!(decoded.0, guid),
+                _ => panic!("interaction did not decode into the client inventory"),
+            }
+        }
     }
 
     #[test]

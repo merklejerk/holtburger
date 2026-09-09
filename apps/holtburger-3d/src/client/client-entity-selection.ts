@@ -168,6 +168,19 @@ export class ClientEntitySelection {
 
 	#receive(event: ClientLifecycleSessionEvent): void {
 		if (this.#destroyed) return;
+		const lifecycle =
+			event.type === "current-state"
+				? event.state.lifecycle
+				: event.type === "lifecycle"
+					? event.lifecycle
+					: null;
+		if (lifecycle !== null && lifecycle.kind !== "in-world") {
+			this.#pendingSelection = null;
+			this.#pendingHover = null;
+			this.#publish(null);
+			this.#publishHover(null);
+			return;
+		}
 		if (event.type === "entity-selection-query-result") {
 			if (event.result.sequence === this.#pendingSelection?.sequence) {
 				this.#receiveSelectionQueryResult(event.result);

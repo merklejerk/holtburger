@@ -53,6 +53,7 @@ pub enum FellowshipActivity {
 pub enum WorldEvent {
     EntitySpawned(Box<Entity>),
     EntityReplaced(Box<Entity>),
+    /// An accepted health observation, including unchanged responses to a fresh health query.
     EntityHealthUpdated {
         guid: Guid,
         health_fraction: f32,

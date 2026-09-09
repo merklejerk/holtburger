@@ -2,23 +2,55 @@ import { describe, expect, it, vi } from "vitest";
 import {
 	CharacterInputController,
 	type CharacterDrive,
+	type CharacterDriveIntent,
 	type CharacterInputEdge,
 } from "./character-input-controller";
 
 function fixture() {
 	let now = 1_000;
 	const drives: CharacterDrive[] = [];
+	const intents: CharacterDriveIntent[] = [];
 	const edges: CharacterInputEdge[] = [];
 	const input = new CharacterInputController({
 		fullChargeDurationMs: 1_000,
 		now: () => now,
-		onDrive: (drive) => drives.push(drive),
+		onDrive: (drive, intent) => {
+			drives.push(drive);
+			intents.push(intent);
+		},
 		onEdge: (edge) => edges.push(edge),
 	});
-	return { drives, edges, input, setNow: (value: number) => (now = value) };
+	return {
+		drives,
+		intents,
+		edges,
+		input,
+		setNow: (value: number) => (now = value),
+	};
 }
 
 describe("CharacterInputController", () => {
+	it("preserves acquisition versus synchronization independently of drive contents", () => {
+		const { input, drives, intents, edges } = fixture();
+		input.applyAction("forward", true);
+		input.applyAction("forward", true);
+		input.applyAction("walk", true);
+		input.applyAction("walk", false);
+		input.applyAction("forward", false);
+		input.restoreHeldAction("forward");
+		expect(intents).toEqual([
+			"acquire",
+			"acquire",
+			"synchronize",
+			"synchronize",
+			"synchronize",
+		]);
+		expect(drives[0]).toEqual(drives[4]);
+		input.reset();
+		expect(intents).toHaveLength(5);
+		expect(edges.at(-1)?.kind).toBe("reset");
+	});
+
 	it("composes independent axes and selects walk gait", () => {
 		const { input } = fixture();
 		input.applyAction("forward", true);

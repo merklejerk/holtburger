@@ -194,19 +194,25 @@ describe("wireCommand", () => {
 		expect(
 			wireCommand("replace_client_drive", {
 				request: {
-					gait: "run",
-					longitudinal: "forward",
-					lateral: "right",
-					turning: null,
+					kind: "acquire",
+					drive: {
+						gait: "run",
+						longitudinal: "forward",
+						lateral: "right",
+						turning: null,
+					},
 				},
 			}),
 		).toEqual({
 			command: "replace_client_drive",
 			request: {
-				gait: "run",
-				longitudinal: "forward",
-				lateral: "right",
-				turning: null,
+				kind: "acquire",
+				drive: {
+					gait: "run",
+					longitudinal: "forward",
+					lateral: "right",
+					turning: null,
+				},
 			},
 		});
 		expect(

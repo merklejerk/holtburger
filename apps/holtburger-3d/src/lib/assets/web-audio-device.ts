@@ -55,7 +55,8 @@ export class WebAudioDevice implements AudioDevice {
 	readonly #buffers = new Map<DatAssetId, AudioBuffer>();
 	/** Decoder-ready payload sizes retained alongside the corresponding Web Audio buffers. */
 	readonly #bufferSourceBytes = new Map<DatAssetId, number>();
-	readonly #pending = new Set<DatAssetId>();
+	/** Concurrent callers share decoder completion, not just an in-flight marker. */
+	readonly #pending = new Map<DatAssetId, Promise<void>>();
 	#destroyed = false;
 
 	constructor(
@@ -93,10 +94,7 @@ export class WebAudioDevice implements AudioDevice {
 	): AudioVoice | null {
 		if (this.#destroyed) return null;
 		const buffer = this.#buffers.get(soundId);
-		if (!buffer) {
-			void this.#prepare(soundId);
-			return null;
-		}
+		if (!buffer) return null;
 		const source = this.#context.createBufferSource();
 		source.buffer = buffer;
 		const gainNode = this.#context.createGain();
@@ -181,8 +179,15 @@ export class WebAudioDevice implements AudioDevice {
 	}
 
 	/** Decode one sound, resolving exactly when `playOneShot` will accept it. */
-	async prepare(soundId: DatAssetId): Promise<void> {
-		await this.#prepare(soundId);
+	prepare(soundId: DatAssetId): Promise<void> {
+		if (this.#destroyed || this.#buffers.has(soundId)) return Promise.resolve();
+		const pending = this.#pending.get(soundId);
+		if (pending !== undefined) return pending;
+		const preparation = this.#decode(soundId).finally(() =>
+			this.#pending.delete(soundId),
+		);
+		this.#pending.set(soundId, preparation);
+		return preparation;
 	}
 
 	getPreparedSourceBytes(soundId: DatAssetId): number | null {
@@ -198,19 +203,14 @@ export class WebAudioDevice implements AudioDevice {
 		this.#source.destroy();
 	}
 
-	async #prepare(soundId: DatAssetId): Promise<void> {
-		if (this.#destroyed) return;
-		if (this.#buffers.has(soundId) || this.#pending.has(soundId)) return;
-		this.#pending.add(soundId);
-		try {
-			const bytes = await this.#source.loadAudio(soundId);
-			const buffer = await this.#context.decodeAudioData(bytes);
-			if (!this.#destroyed) {
-				this.#buffers.set(soundId, buffer);
-				this.#bufferSourceBytes.set(soundId, bytes.byteLength);
-			}
-		} finally {
-			this.#pending.delete(soundId);
+	async #decode(soundId: DatAssetId): Promise<void> {
+		const bytes = await this.#source.loadAudio(soundId);
+		// decodeAudioData transfers its input buffer, so measure before it is detached.
+		const sourceByteLength = bytes.byteLength;
+		const buffer = await this.#context.decodeAudioData(bytes);
+		if (!this.#destroyed) {
+			this.#buffers.set(soundId, buffer);
+			this.#bufferSourceBytes.set(soundId, sourceByteLength);
 		}
 	}
 }

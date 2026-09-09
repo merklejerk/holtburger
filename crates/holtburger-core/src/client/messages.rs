@@ -198,7 +198,7 @@ impl ClientRuntime {
                     _ => None,
                 };
                 if let Some(guid) = created_guid {
-                    self.replay_dynamic_script_cues(guid)?;
+                    self.replay_entity_cues(guid)?;
                 }
             }
 
@@ -242,6 +242,13 @@ impl ClientRuntime {
             let _ = self
                 .client_view_event_tx
                 .send(ClientViewEvent::WorldNameUpdated(data.name.clone()));
+        }
+
+        // A deletion can retire a missing-object placeholder before a create ever arrives.
+        if let GameMessage::ObjectDelete(data) = &message
+            && self.world.entities.get(data.guid).is_none()
+        {
+            self.entity_cue_inbox.remove(data.guid);
         }
 
         // Pass to world state for tracking positioning and spawning
@@ -349,18 +356,17 @@ impl ClientRuntime {
                 GameEvent::PopupString(data) => {
                     let _ = self
                         .client_view_event_tx
-                        .send(ClientViewEvent::ServerMessage {
+                        .send(ClientViewEvent::PopupString {
                             message: data.message.clone(),
-                            chat_type: (ChatMessageType::System as u32).into(),
                         });
                     Ok(())
                 }
                 GameEvent::CharacterConfirmationRequest(data) => {
-                    self.active_confirmation = Some(ActiveCharacterConfirmation {
-                        confirmation_type: data.confirmation_type,
-                        context: data.context,
-                        text: data.text.clone(),
-                    });
+                    self.active_confirmation = Some(ActiveCharacterConfirmation::received(
+                        data.confirmation_type,
+                        data.context,
+                        data.text.clone(),
+                    ));
                     self.emit_active_character_confirmation_updated();
                     Ok(())
                 }
@@ -392,9 +398,8 @@ impl ClientRuntime {
                 GameEvent::CommunicationTransientString(data) => {
                     let _ = self
                         .client_view_event_tx
-                        .send(ClientViewEvent::ServerMessage {
+                        .send(ClientViewEvent::TransientString {
                             message: data.message.clone(),
-                            chat_type: (ChatMessageType::System as u32).into(),
                         });
                     Ok(())
                 }
@@ -637,9 +642,20 @@ impl ClientRuntime {
             GameMessage::PrivateUpdatePropertyInt(_) | GameMessage::PublicUpdatePropertyInt(_) => {
                 Ok(())
             }
-            GameMessage::PlayScript(data) => {
-                self.route_dynamic_script_cue(data.target, data.script_cue, data.intensity)
-            }
+            GameMessage::PlaySound(data) => self.route_entity_cue(
+                data.target,
+                super::entity_cues::PendingEntityCue::Sound {
+                    sound_id: data.sound_id,
+                    volume: data.volume,
+                },
+            ),
+            GameMessage::PlayScript(data) => self.route_entity_cue(
+                data.target,
+                super::entity_cues::PendingEntityCue::Script {
+                    cue: data.script_cue,
+                    intensity: data.intensity,
+                },
+            ),
             GameMessage::GameAction(data) => self.handle_game_action(&data.action).await,
             GameMessage::ServerMessage(data) => {
                 let _ = self
@@ -1285,6 +1301,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn server_text_preserves_channel_and_verbatim_content() {
+        let mut client = build_test_client();
+        let mut events = client.subscribe_client_view_events();
+        let message = "  The door is locked!\nTry another entrance.  ".to_string();
+        for (sequence, event) in [
+            GameEvent::CommunicationTransientString(Box::new(
+                CommunicationTransientStringEventData {
+                    message: message.clone(),
+                },
+            )),
+            GameEvent::PopupString(Box::new(PopupStringEventData {
+                message: message.clone(),
+            })),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let encoded = encode_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
+                target: Guid::NULL,
+                sequence: sequence as u32,
+                event,
+            })));
+            client.handle_message(&encoded).await.unwrap();
+        }
+        assert!(
+            matches!(events.try_recv().unwrap(), ClientViewEvent::TransientString { message: text } if text == message)
+        );
+        assert!(
+            matches!(events.try_recv().unwrap(), ClientViewEvent::PopupString { message: text } if text == message)
+        );
+        assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test]
     async fn test_confirmation_request_projects_active_confirmation_state() {
         let mut client = build_test_client();
         let mut events = client.subscribe_client_view_events();
@@ -1337,6 +1387,7 @@ mod tests {
         let mut client = build_test_client();
         let mut events = client.subscribe_client_view_events();
         client.active_confirmation = Some(ActiveCharacterConfirmation {
+            request_id: 1,
             confirmation_type: ConfirmationType::CraftInteraction,
             context: 0xDEADBEEF,
             text: "Craft this item?".to_string(),
@@ -1376,6 +1427,7 @@ mod tests {
     async fn test_confirmation_done_does_not_auto_respond_for_fellowship() {
         let mut client = build_test_client();
         client.active_confirmation = Some(ActiveCharacterConfirmation {
+            request_id: 1,
             confirmation_type: ConfirmationType::Fellowship,
             context: 0xDEADBEEF,
             text: "Join fellowship?".to_string(),

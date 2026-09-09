@@ -90,7 +90,9 @@ impl ClientRuntime {
         teleport_batch: bool,
     ) {
         match event {
+            WorldEvent::EntityDespawned { guid, .. } => self.entity_cue_inbox.remove(*guid),
             WorldEvent::RuntimeBodiesReset { .. } => {
+                self.entity_cue_inbox.clear();
                 self.movement.clear_server_controlled_motion();
                 self.reset_camera();
                 if let Some(coordinator) = self.collision_coordinator.as_mut() {
@@ -185,7 +187,7 @@ impl ClientRuntime {
                     }
 
                     self.poll_busy_timeout(now);
-                    self.dynamic_script_inbox.expire(now);
+                    self.entity_cue_inbox.expire(now);
                 }
                 res = self.session.recv_message() => {
                     use holtburger_session::SessionEvent;

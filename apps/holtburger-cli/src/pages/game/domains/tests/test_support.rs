@@ -1,4 +1,5 @@
 use super::*;
+use holtburger_core::client::movement_types::ClientDirectedCommand;
 use holtburger_core::client::movement_types::PlayerDriveIntent;
 
 pub(super) fn apply_queued_ui_action(state: &mut GameState, action: AppUiAction) -> UpdateResult {
@@ -66,9 +67,7 @@ pub(super) fn is_navigation_movement_command(command: &ClientCommand) -> bool {
 pub(super) fn is_navigation_drive_command(command: &ClientCommand) -> bool {
     matches!(
         command,
-        ClientCommand::DriveSelf(PlayerDriveIntent::Autonomous(_))
-            | ClientCommand::DriveSelf(PlayerDriveIntent::ArriveAtPose { .. })
-            | ClientCommand::DriveSelf(PlayerDriveIntent::Stop)
+        ClientCommand::DriveSelf(PlayerDriveIntent::ClientDirected(_))
     )
 }
 
@@ -76,23 +75,31 @@ pub(super) fn has_autonomous_navigation_command(result: &UpdateResult) -> bool {
     result.commands.iter().any(|command| {
         matches!(
             command,
-            ClientCommand::DriveSelf(PlayerDriveIntent::Autonomous(_))
+            ClientCommand::DriveSelf(PlayerDriveIntent::ClientDirected(
+                ClientDirectedCommand::Acquire(_) | ClientDirectedCommand::Update(_)
+            ))
         )
     })
 }
 
 pub(super) fn has_stop_navigation_command(result: &UpdateResult) -> bool {
-    result
-        .commands
-        .iter()
-        .any(|command| matches!(command, ClientCommand::DriveSelf(PlayerDriveIntent::Stop)))
+    result.commands.iter().any(|command| {
+        matches!(
+            command,
+            ClientCommand::DriveSelf(PlayerDriveIntent::ClientDirected(
+                ClientDirectedCommand::Settle { pose: None } | ClientDirectedCommand::Release
+            ))
+        )
+    })
 }
 
 pub(super) fn has_arrival_navigation_command(result: &UpdateResult) -> bool {
     result.commands.iter().any(|command| {
         matches!(
             command,
-            ClientCommand::DriveSelf(PlayerDriveIntent::ArriveAtPose { .. })
+            ClientCommand::DriveSelf(PlayerDriveIntent::ClientDirected(
+                ClientDirectedCommand::Settle { pose: Some(_) }
+            ))
         )
     })
 }

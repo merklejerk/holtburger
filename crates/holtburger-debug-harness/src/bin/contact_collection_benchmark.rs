@@ -152,11 +152,13 @@ fn crowd(
             movement: profile.definition,
             response_policy: profile.response_policy,
             entity_collision: DynamicBodyCollisionDefinition {
+                player_collision: None,
                 contact_response: holtburger_world::EntityContactResponse::Character(
                     holtburger_world::EntityIntegrationEligibility::Eligible,
                 ),
                 target_geometry: geometry,
                 dynamic_collision: EntityDynamicCollisionPolicy {
+                    is_static: false,
                     target: EntityCollisionParticipation::Solid,
                     mover_accepts_response: true,
                     accepts_peer_reports: true,

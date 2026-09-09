@@ -3635,6 +3635,7 @@ fn set_state_dynamic_definition() -> crate::DynamicPhysicalBodyConfiguration {
         movement,
         response_policy,
         entity_collision: crate::DynamicBodyCollisionDefinition {
+            player_collision: None,
             contact_response: crate::spatial::EntityContactResponse::Character(
                 crate::EntityIntegrationEligibility::Eligible,
             ),
@@ -3649,6 +3650,7 @@ fn set_state_dynamic_definition() -> crate::DynamicPhysicalBodyConfiguration {
                 fallback_scale: ColliderScale::uniform(1.0).unwrap(),
             }),
             dynamic_collision: crate::EntityDynamicCollisionPolicy {
+                is_static: false,
                 target: crate::EntityCollisionParticipation::Solid,
                 mover_accepts_response: true,
                 accepts_peer_reports: true,
@@ -5592,4 +5594,156 @@ fn sticky_preparation_samples_scaled_setup_clearance_heading_and_target_loss() {
         world.motion_runtimes.get(actor).unwrap().sticky_target(),
         None
     );
+}
+
+#[test]
+fn pk_messages_refresh_installed_identity_without_changing_body_state() {
+    use holtburger_common::properties::ObjectDescriptionFlag as Flags;
+    use holtburger_protocol::messages::object::messages::properties::UpdatePropertyInt;
+    for local in [false, true] {
+        let mut state = WorldState::synthetic();
+        let guid = Guid(0x5000_0101);
+        if local {
+            state.player.guid = guid;
+        }
+        let mut entity = Entity::new(
+            guid,
+            "Player".into(),
+            WorldPosition {
+                landblock_id: Guid(0xda55_0020),
+                coords: Vector3::new(90.0, 96.0, 1.0),
+                rotation: Quaternion::identity(),
+            },
+        );
+        entity.flags = Flags::PLAYER;
+        state.add_entity(entity);
+        let id = state.runtime_body_id_for_guid(guid).unwrap();
+        state
+            .scene
+            .set_dynamic_physical_body(
+                id,
+                Some(set_state_dynamic_definition()),
+                crate::PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+        state.synchronize_entity_contact_status(guid);
+        let before = state.scene.body(id).unwrap().clone();
+        for (sequence, value, flags) in [
+            (1, 4, Flags::PLAYER | Flags::PLAYER_KILLER),
+            (2, 0x40, Flags::PLAYER | Flags::PK_LITE_STATUS),
+            (3, 1, Flags::PLAYER),
+        ] {
+            let message = if local {
+                GameMessage::PrivateUpdatePropertyInt(Box::new(UpdatePropertyInt {
+                    sequence,
+                    guid: Guid::NULL,
+                    property: PropertyInt::PlayerKillerStatus as u32,
+                    value,
+                }))
+            } else {
+                GameMessage::PublicUpdatePropertyInt(Box::new(UpdatePropertyInt {
+                    sequence,
+                    guid,
+                    property: PropertyInt::PlayerKillerStatus as u32,
+                    value,
+                }))
+            };
+            state.handle_message(&message);
+            let mut expected = before.clone();
+            let expected_dynamic = expected
+                .physical
+                .as_mut()
+                .unwrap()
+                .dynamic
+                .as_mut()
+                .unwrap();
+            expected_dynamic.collision.player_collision =
+                crate::PlayerCollisionStatus::from_description(flags);
+            assert_eq!(state.scene.body(id).unwrap(), &expected);
+            assert!(Arc::ptr_eq(
+                &before
+                    .physical
+                    .as_ref()
+                    .unwrap()
+                    .dynamic
+                    .as_ref()
+                    .unwrap()
+                    .collision
+                    .target_geometry,
+                &state
+                    .scene
+                    .body(id)
+                    .unwrap()
+                    .physical
+                    .as_ref()
+                    .unwrap()
+                    .dynamic
+                    .as_ref()
+                    .unwrap()
+                    .collision
+                    .target_geometry,
+            ));
+            let refreshed = state
+                .scene
+                .body(id)
+                .unwrap()
+                .physical
+                .as_ref()
+                .unwrap()
+                .dynamic_configuration_for_state(
+                    crate::resolve_effective_entity_physics_state(PhysicsState::ETHEREAL),
+                    set_state_dynamic_definition().demand(),
+                )
+                .unwrap();
+            assert_eq!(
+                refreshed.definition().entity_collision.player_collision,
+                crate::PlayerCollisionStatus::from_description(flags)
+            );
+        }
+    }
+}
+
+#[test]
+fn update_object_recreates_description_and_can_introduce_an_unknown_object() {
+    use holtburger_common::properties::ObjectDescriptionFlag as Flags;
+    for local in [false, true] {
+        let mut state = WorldState::synthetic();
+        let guid = Guid(0x5000_0102);
+        if local {
+            state.player.guid = guid;
+        }
+        let mut description = ObjectDescriptionData::with_guid(guid);
+        description.public_weenie_desc.obj_desc_flags = Flags::PLAYER | Flags::PLAYER_KILLER;
+        description.public_weenie_desc.name = Some("First".into());
+        let events =
+            state.handle_message(&GameMessage::UpdateObject(Box::new(description.clone())));
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, WorldEvent::EntitySpawned(_)))
+        );
+        state
+            .entities
+            .get_mut(guid)
+            .unwrap()
+            .set_property(PropertyUpdate::Int(PropertyInt::PlayerKillerStatus, 0x40));
+        description.public_weenie_desc.obj_desc_flags = Flags::PLAYER;
+        description.public_weenie_desc.name = Some("Refreshed".into());
+        let events = state.handle_message(&GameMessage::UpdateObject(Box::new(description)));
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, WorldEvent::EntityReplaced(_)))
+        );
+        let entity = state.entities.get(guid).unwrap();
+        assert_eq!(entity.flags, Flags::PLAYER);
+        assert_eq!(entity.name(), "Refreshed");
+        assert_eq!(
+            entity
+                .properties
+                .get_int_prop(PropertyInt::PlayerKillerStatus),
+            None
+        );
+    }
 }

@@ -43,11 +43,12 @@ pub use entity_appearance::{
 };
 pub use entity_physics::{
     DEFAULT_ENTITY_PHYSICS_STATE, EffectiveEntityPhysicsState, EntityCollisionParticipation,
-    EntityCollisionReportPolicy, EntityDynamicCollisionPolicy, EntityIntegrationEligibility,
-    EntityPhysicsPresentation, EntityPhysicsResponse, EntityPhysicsRuntimeState,
-    EntityPhysicsSetupFacts, EntityPhysicsStateInput, EntityPhysicsStateOverrides,
-    LocalIntegrationDemand, LocalPhysicalDemand, LocalTargetDemand,
-    calculate_effective_entity_physics_state, resolve_effective_entity_physics_state,
+    EntityCollisionReportPolicy, EntityContactInteraction, EntityDynamicCollisionPolicy,
+    EntityIntegrationEligibility, EntityPhysicsPresentation, EntityPhysicsResponse,
+    EntityPhysicsRuntimeState, EntityPhysicsSetupFacts, EntityPhysicsStateInput,
+    EntityPhysicsStateOverrides, LocalIntegrationDemand, LocalPhysicalDemand, LocalTargetDemand,
+    PlayerCollisionStatus, calculate_effective_entity_physics_state,
+    resolve_effective_entity_physics_state,
 };
 pub use entity_scale::{EntityScaleError, EntityScaleState, EntityScaleUpdate};
 pub use events::{DerivedStatsData, FellowshipActivity, PlayerInfoData, WorldEvent};

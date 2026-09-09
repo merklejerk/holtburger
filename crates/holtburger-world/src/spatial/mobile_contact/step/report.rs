@@ -8,7 +8,6 @@ use holtburger_common::{Guid, Vector3};
 use holtburger_content::PlacedCollisionShape;
 
 use super::ContactBodyUpdate;
-use crate::EntityCollisionParticipation;
 use crate::spatial::collision::{PlacedMotionPath, sphere_path_touches_shape};
 use crate::spatial::collision_report::dynamic_report_touch;
 use crate::spatial::dynamic_index::{
@@ -208,9 +207,11 @@ pub(super) fn collect_traversal_report_touches(
             let peer = prepared
                 .get(&peer_id)
                 .context("report index returned an unprepared target")?;
-            if dynamic.collision.dynamic_collision.missile
-                && peer.dynamic.collision.dynamic_collision.target
-                    == EntityCollisionParticipation::Ethereal
+            if dynamic.collision.dynamic_collision.contact_with(
+                peer.dynamic.collision.dynamic_collision,
+                dynamic.collision.player_collision,
+                peer.dynamic.collision.player_collision,
+            ) == crate::EntityContactInteraction::Ignored
             {
                 continue;
             }

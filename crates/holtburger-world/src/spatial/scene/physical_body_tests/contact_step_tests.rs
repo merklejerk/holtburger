@@ -5793,3 +5793,122 @@ fn sustained_mobile_resistance_is_slow_and_stable_across_tick_rates() {
             < crate::spatial::mobile_contact::MOBILE_CONTACT_TOLERANCE_METERS * 2.0
     );
 }
+
+#[test]
+fn player_exemptions_remove_physical_resistance_and_report_touches() {
+    use holtburger_common::properties::ObjectDescriptionFlag as Flags;
+    for hard_peer in [false, true] {
+        for pk in [false, true] {
+            let collision = flat_collision_scene();
+            let now = Instant::now();
+            let mut scene = SpatialScene::new();
+            let player = SpatialBodyId::LocalPlayer(Guid(1));
+            let peer = SpatialBodyId::Entity(Guid(2));
+            let speed = 1.0;
+            for (id, x) in [(player, 90.0), (peer, 90.9)] {
+                scene.register_body(SpatialBody::new(id, pose(Vector3::new(x, 96.0, 2.0)), now));
+                scene
+                    .set_dynamic_physical_body(
+                        id,
+                        Some(dynamic_definition(
+                            free_definition(Vector3::zero(), 0.5),
+                            false,
+                        )),
+                        PhysicalCollisionFilter::ALL,
+                        None,
+                    )
+                    .unwrap();
+                let flags = Flags::PLAYER
+                    | if pk {
+                        Flags::PLAYER_KILLER
+                    } else {
+                        Flags::empty()
+                    };
+                scene.set_player_collision_status(
+                    id,
+                    crate::PlayerCollisionStatus::from_description(flags),
+                );
+                let body = scene.body_mut(id).unwrap();
+                if id == player {
+                    body.retained.velocity = Vector3::new(speed, 0.0, 0.0);
+                }
+                let dynamic = body.physical.as_mut().unwrap().dynamic.as_mut().unwrap();
+                dynamic.collision.reporting.enabled = true;
+                if hard_peer && id == peer {
+                    dynamic.demand.integration = LocalIntegrationDemand::Excluded;
+                }
+            }
+            let bodies = [
+                scene.body(player).unwrap().clone(),
+                scene.body(peer).unwrap().clone(),
+            ];
+            let result = crate::spatial::advance_body_contact_collection(
+                &collision,
+                &bodies,
+                Guid(0xda55_ffff),
+                MOBILE_CONTACT_TICK_SECONDS,
+                |_, _, _| ContactStepActuation::ballistic(Vector3::zero()),
+            )
+            .unwrap();
+            let moved = result
+                .bodies
+                .iter()
+                .find(|body| body.body_id == player)
+                .unwrap();
+            if pk {
+                assert!(moved.displacement.x < speed * MOBILE_CONTACT_TICK_SECONDS);
+                assert!(!result.report_touches.is_empty());
+                scene
+                    .collision_reports
+                    .commit_touches(&result.report_touches, now);
+                for id in [player, peer] {
+                    scene.set_player_collision_status(
+                        id,
+                        crate::PlayerCollisionStatus::from_description(Flags::PLAYER),
+                    );
+                }
+                let exempt = [
+                    scene.body(player).unwrap().clone(),
+                    scene.body(peer).unwrap().clone(),
+                ];
+                let next = crate::spatial::advance_body_contact_collection(
+                    &collision,
+                    &exempt,
+                    Guid(0xda55_ffff),
+                    MOBILE_CONTACT_TICK_SECONDS,
+                    |_, _, _| ContactStepActuation::ballistic(Vector3::zero()),
+                )
+                .unwrap();
+                assert!(next.report_touches.is_empty());
+                let expired = scene
+                    .collision_reports
+                    .expire(
+                        now + crate::spatial::collision_report::COLLISION_REPORT_EXPIRY
+                            + Duration::from_nanos(1),
+                    )
+                    .unwrap();
+                assert_eq!(expired.len(), result.report_touches.len());
+                assert!(
+                    expired
+                        .iter()
+                        .all(|report| report.phase == crate::CollisionReportPhase::Ended)
+                );
+            } else {
+                assert!(
+                    (moved.displacement.x - speed * MOBILE_CONTACT_TICK_SECONDS).abs()
+                        < CONTACT_EPSILON
+                );
+                assert_eq!(moved.velocity, Vector3::new(speed, 0.0, 0.0));
+                assert!(result.report_touches.is_empty());
+                if !hard_peer {
+                    let peer = result
+                        .bodies
+                        .iter()
+                        .find(|body| body.body_id == peer)
+                        .unwrap();
+                    assert_eq!(peer.displacement, Vector3::zero());
+                }
+            }
+        }
+    }
+}

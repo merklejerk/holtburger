@@ -95,6 +95,10 @@ impl EntityContactResponse {
 /// Entity-specific prepared collision facts retained beside generic response memory.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DynamicBodyCollisionDefinition {
+    /// Public player-pair status; absent for non-player and Explorer-authored bodies.
+    /// Content preparation leaves identity unbound; client installation joins current world status,
+    /// and subsequent physics-state reconfiguration preserves it.
+    pub player_collision: Option<crate::PlayerCollisionStatus>,
     /// Type/state-owned contact response, independent from ordinary integration demand.
     pub contact_response: EntityContactResponse,
     /// Shared stable target branches prepared once from immutable content.
@@ -269,6 +273,7 @@ mod tests {
                 align_path: false,
             },
             entity_collision: DynamicBodyCollisionDefinition {
+                player_collision: None,
                 contact_response: crate::spatial::EntityContactResponse::Character(
                     crate::EntityIntegrationEligibility::Eligible,
                 ),
@@ -280,6 +285,7 @@ mod tests {
                     fallback_scale: ColliderScale::uniform(1.0).unwrap(),
                 }),
                 dynamic_collision: crate::EntityDynamicCollisionPolicy {
+                    is_static: false,
                     target: crate::EntityCollisionParticipation::Suppressed,
                     mover_accepts_response: false,
                     accepts_peer_reports: false,

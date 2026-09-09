@@ -554,6 +554,22 @@ impl SpatialScene {
         self.collision_reports.force_end_for_recipient(body_id)
     }
 
+    /// Refreshes public contact identity without invalidating geometry or accepted motion.
+    pub fn set_player_collision_status(
+        &mut self,
+        body_id: SpatialBodyId,
+        status: Option<crate::PlayerCollisionStatus>,
+    ) {
+        if let Some(dynamic) = self
+            .body_store
+            .body_mut(body_id)
+            .and_then(|body| body.physical.as_mut())
+            .and_then(|physical| physical.dynamic.as_mut())
+        {
+            dynamic.collision.player_collision = status;
+        }
+    }
+
     /// Reactivates one dynamic body without changing semantic or physical policy.
     pub fn wake_dynamic_body(&mut self, body_id: SpatialBodyId) -> bool {
         self.body_store
@@ -2116,11 +2132,13 @@ mod physical_body_tests {
                     ..stable_policy()
                 },
                 entity_collision: DynamicBodyCollisionDefinition {
+                    player_collision: None,
                     contact_response: crate::spatial::EntityContactResponse::Character(
                         crate::EntityIntegrationEligibility::Eligible,
                     ),
                     target_geometry: Arc::new(target_geometry),
                     dynamic_collision: EntityDynamicCollisionPolicy {
+                        is_static: false,
                         target: EntityCollisionParticipation::Solid,
                         mover_accepts_response: true,
                         accepts_peer_reports: true,
@@ -2585,6 +2603,14 @@ mod physical_body_tests {
             )
             .unwrap();
 
+        assert!(scene.dynamic_body_overlaps_peer(object).unwrap());
+        let player = crate::PlayerCollisionStatus::from_description(
+            holtburger_common::properties::ObjectDescriptionFlag::PLAYER,
+        );
+        scene.set_player_collision_status(object, player);
+        scene.set_player_collision_status(peer, player);
+        assert!(!scene.dynamic_body_overlaps_peer(object).unwrap());
+        scene.set_player_collision_status(object, None);
         assert!(scene.dynamic_body_overlaps_peer(object).unwrap());
 
         assert!(scene.apply_runtime_body_pose(

@@ -21,7 +21,10 @@ pub(crate) fn handle_message(
             state.apply_object_visual_description(data, events);
             true
         }
-        GameMessage::ObjectCreate(data) => {
+        // Retail HandleUpdateObject forces HandleCreateObject recreation
+        // (acclient.c:140101,139601), matching this replacement/admission path.
+        // Semantic-only property updates use their own mutation path and keep motion.
+        GameMessage::ObjectCreate(data) | GameMessage::UpdateObject(data) => {
             let entity_name = data
                 .public_weenie_desc
                 .name

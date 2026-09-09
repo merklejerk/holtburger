@@ -146,9 +146,11 @@ mod tests {
     fn target(id: u32, center: Vector3) -> SweepTarget {
         SweepTarget {
             contact: ContactParticipant {
+                player_collision: None,
                 body_id: SpatialBodyId::Entity(Guid(id)),
                 target_demand: LocalTargetDemand::Retained,
                 policy: EntityDynamicCollisionPolicy {
+                    is_static: false,
                     target: EntityCollisionParticipation::Solid,
                     mover_accepts_response: true,
                     accepts_peer_reports: true,

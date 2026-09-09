@@ -257,6 +257,8 @@ struct PreparedBodyContact<'a> {
 /// Source facts retained while a mobile working shape changes during contact passes.
 #[derive(Debug, Clone)]
 struct ContactParticipant {
+    /// Normalized public identity, independent from state-derived physics policy.
+    player_collision: Option<crate::PlayerCollisionStatus>,
     /// Canonical identity used for stable pair order, hard queries, and publication.
     body_id: SpatialBodyId,
     /// Whether the producer retains this body as a target for other movers.
@@ -307,6 +309,7 @@ impl<'a> PreparedBodyContact<'a> {
                     return Ok(None);
                 }
                 ContactParticipant {
+                    player_collision: dynamic.collision.player_collision,
                     body_id: body.id,
                     target_demand: dynamic.demand.target,
                     policy: dynamic.collision.dynamic_collision,
@@ -317,9 +320,11 @@ impl<'a> PreparedBodyContact<'a> {
             // Movement-only bodies have no authored peer geometry or report owner. Their
             // response cell seeds the same checked sphere traversal used by entity movers.
             None => ContactParticipant {
+                player_collision: None,
                 body_id: body.id,
                 target_demand: LocalTargetDemand::Absent,
                 policy: EntityDynamicCollisionPolicy {
+                    is_static: false,
                     target: crate::EntityCollisionParticipation::Suppressed,
                     mover_accepts_response: true,
                     accepts_peer_reports: false,
@@ -426,7 +431,10 @@ impl ContactParticipant {
     fn receives_response_from(&self, peer: &Self) -> bool {
         self.body_id != peer.body_id
             && peer.target_demand == LocalTargetDemand::Retained
-            && self.policy.accepts_response_from(peer.policy)
+            && self
+                .policy
+                .contact_with(peer.policy, self.player_collision, peer.player_collision)
+                == crate::EntityContactInteraction::Blocking
     }
 }
 
@@ -532,9 +540,11 @@ mod tests {
     #[test]
     fn pair_filter_preserves_directional_response_and_reached_domains() {
         let mut first = ContactParticipant {
+            player_collision: None,
             body_id: SpatialBodyId::Entity(Guid(1)),
             target_demand: LocalTargetDemand::Retained,
             policy: EntityDynamicCollisionPolicy {
+                is_static: false,
                 target: crate::EntityCollisionParticipation::Solid,
                 mover_accepts_response: false,
                 accepts_peer_reports: true,

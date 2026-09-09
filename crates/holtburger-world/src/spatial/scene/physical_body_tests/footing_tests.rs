@@ -1227,3 +1227,35 @@ fn nominal_slope_drive_matches_unobstructed_supported_travel() {
         }
     }
 }
+
+#[test]
+fn player_pair_exemption_revokes_hard_body_support() {
+    use holtburger_common::properties::ObjectDescriptionFlag as Flags;
+    for pk in [false, true] {
+        let now = Instant::now();
+        let (mut scene, collision, rider, platform) = hard_top_fixture(now);
+        let flags = Flags::PLAYER
+            | if pk {
+                Flags::PLAYER_KILLER
+            } else {
+                Flags::empty()
+            };
+        for id in [rider, platform] {
+            scene.set_player_collision_status(
+                id,
+                crate::PlayerCollisionStatus::from_description(flags),
+            );
+        }
+        tick_collection(
+            &mut scene,
+            &collision,
+            MOBILE_CONTACT_TICK_SECONDS,
+            now + Duration::from_secs(1),
+        );
+        let body = scene.body(rider).unwrap();
+        assert_eq!(body.contact == ContactState::Airborne, !pk);
+        if !pk {
+            assert!(body.retained.velocity.z < 0.0);
+        }
+    }
+}

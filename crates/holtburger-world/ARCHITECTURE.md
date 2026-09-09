@@ -562,3 +562,34 @@ priority. Commanded gait can therefore continue against a wall, ledge, or resist
 Release/expiry returns to observed locomotion. Remote entities retain observed travel; free-flight
 bodies do not request character presentation. This changes neither root motion nor hook advancement,
 physical velocity, collision admission, or the number of playback cursors.
+
+### Entity contact eligibility
+
+`EntityDynamicCollisionPolicy::contact_with` resolves each directed pair as ignored,
+observable, or blocking before geometry queries. Physical response (including hard support,
+resistance, separation, and recovery) requires blocking; reports also admit observable contacts,
+subject to existing report permissions. Solidification checks the prospective solid policy.
+
+`PlayerCollisionStatus` is normalized from public description flags and retained independently
+from physics-state policy. Ordinary players ignore one another; matching PK or PKLite flags, or
+an impenetrable player, permit collision. `Entity::set_property` applies retail's complete PK
+flag replacement for admitted `PlayerKillerStatus` updates. World mutation updates installed
+contact identity without changing geometry, motion, or sampling. Client body installation joins
+current identity after asynchronous content preparation, so in-flight status updates are not lost.
+Physics-state reconfiguration preserves this identity. Explorer-authored objects carry no public
+player identity; possession alone does not turn a creature into a network player.
+
+Authored staticness is distinct from sleeping, frozen, or excluded integration. An ethereal mover
+can be obstructed by solid static targets but not non-static targets. Ethereal targets remain
+observable and nonblocking; suppressed and missile targets are excluded. No nonzero client
+`OBJECTINFO::targetID` producer was found in the available retail decompile: projectile filtering
+implements the demonstrated untargeted case, without inferring targets from attacks or pursuit.
+Mob/mob overlap relaxation remains the accepted approximate model, independent from eligibility.
+
+Full `UpdateObject` messages follow the existing create/replacement lifecycle, matching retail's
+explicit force-recreate operation (`acclient.c:140101,139601`). They may introduce an unknown
+object and replace an existing description. They are not semantic-only updates and need not
+preserve motion. PK property updates do preserve it. Property ordering and deletion admission
+remain owned by the existing transport/world lifecycle; this policy adds no independent sequence
+tracking. Once a pair becomes exempt it produces no fresh touches; existing collision reports
+end through the established expiry rule.

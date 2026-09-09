@@ -1023,6 +1023,7 @@ fn prepare_dynamic_entity_physical_facts(
         movement,
         response_policy,
         entity_collision: DynamicBodyCollisionDefinition {
+            player_collision: None,
             contact_response: if is_contact_character {
                 holtburger_world::EntityContactResponse::Character(physics.integration_eligibility)
             } else {
@@ -1792,6 +1793,7 @@ mod tests {
             movement: profile.definition,
             response_policy: profile.response_policy,
             entity_collision: DynamicBodyCollisionDefinition {
+                player_collision: None,
                 contact_response: holtburger_world::EntityContactResponse::Character(
                     holtburger_world::EntityIntegrationEligibility::Eligible,
                 ),
@@ -1806,6 +1808,7 @@ mod tests {
                     fallback_scale: ColliderScale::uniform(1.0).unwrap(),
                 }),
                 dynamic_collision: holtburger_world::EntityDynamicCollisionPolicy {
+                    is_static: false,
                     target: EntityCollisionParticipation::Solid,
                     mover_accepts_response: true,
                     accepts_peer_reports: true,

@@ -1426,6 +1426,19 @@ impl WorldState {
         }
     }
 
+    /// Joins current public collision identity to an installed body without changing its
+    /// geometry, motion, or sampling. Called after installation and admitted PK updates.
+    pub fn synchronize_entity_contact_status(&mut self, guid: Guid) {
+        let Some(entity) = self.entities.get(guid) else {
+            return;
+        };
+        let status = crate::PlayerCollisionStatus::from_description(entity.flags);
+        let Some(body_id) = self.runtime_body_id_for_guid(guid) else {
+            return;
+        };
+        self.scene.set_player_collision_status(body_id, status);
+    }
+
     pub(crate) fn apply_property_update_to_target(
         &mut self,
         guid: Guid,
@@ -1449,6 +1462,12 @@ impl WorldState {
                 .find(|item| item.guid == target_guid)
         {
             item.set_property(update.clone());
+        }
+        if matches!(
+            update,
+            PropertyUpdate::Int(PropertyInt::PlayerKillerStatus, _)
+        ) {
+            self.synchronize_entity_contact_status(target_guid);
         }
         if scale_changed {
             self.synchronize_entity_body_scale(target_guid);

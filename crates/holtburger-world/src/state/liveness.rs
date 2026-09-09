@@ -586,6 +586,11 @@ impl WorldState {
         if self.reconcile_entity_delete_after_create(guid) {
             EntityCreateDisposition::DeleteRequested
         } else {
+            let snapshot = self
+                .entities
+                .get(guid)
+                .and_then(|entity| entity.network_motion.snapshot());
+            self.reset_authored_motion(guid, snapshot);
             EntityCreateDisposition::Active
         }
     }

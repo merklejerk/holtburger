@@ -1,5 +1,7 @@
 use super::registry::RETAIL_RUN_FORWARD_BASE_SPEED_MPS;
 use super::*;
+#[path = "tests/death_lifecycle.rs"]
+mod death_lifecycle;
 use crate::entity::{
     EntityMotionAction, EntityMotionActionSource, EntityMotionAdmission, EntityMotionSnapshot,
     OrderedMotionScalar,

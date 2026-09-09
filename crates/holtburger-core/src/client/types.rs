@@ -360,6 +360,8 @@ pub struct ClientApplicationSnapshot {
     pub vitals: HashMap<VitalType, Vital>,
     /// Current renderer-consumed jump timing, absent until authoritative capability is complete.
     pub character_motion: Option<ClientCharacterMotionCapabilities>,
+    /// Pending server interaction; recoverable independently of world presentation.
+    pub active_confirmation: Option<ActiveCharacterConfirmation>,
     /// Complete focused dynamic-entity replacement level.
     pub dynamic: DynamicEntitySnapshot,
     /// Broad runtime-body replacement retained for authority-facing clients such as the TUI.
@@ -460,11 +462,40 @@ pub struct PlayerCharacterOptions {
     pub options2: CharacterOptions2,
 }
 
+/// One pending server request and the receipt that authorizes answering this occurrence.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActiveCharacterConfirmation {
+    /// Process-unique receipt, independent of reusable server type/context pairs.
+    pub request_id: u64,
+    /// Wire confirmation family required by the response.
     pub confirmation_type: ConfirmationType,
+    /// Server-issued context echoed unchanged in the response.
     pub context: u32,
+    /// Server-authored question presented to the player.
     pub text: String,
+}
+
+impl ActiveCharacterConfirmation {
+    /// Receipts survive world resets and cannot collide across runtimes in this process.
+    pub(super) fn received(
+        confirmation_type: ConfirmationType,
+        context: u32,
+        text: String,
+    ) -> Self {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT_RECEIPT: AtomicU64 = AtomicU64::new(1);
+        let request_id = NEXT_RECEIPT
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+                value.checked_add(1)
+            })
+            .expect("confirmation receipt space exhausted");
+        Self {
+            request_id,
+            confirmation_type,
+            context,
+            text,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -484,6 +515,22 @@ pub enum BusyOperationResult {
         parameter: Option<String>,
     },
     TimedOut,
+}
+
+/// Server effect sound bound to both the source incarnation and world lifetime.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientDynamicSoundCue {
+    /// Emitting object's authoritative identity.
+    pub guid: Guid,
+    /// Instance sequence resolved when the source is admitted.
+    pub generation: u64,
+    /// World discontinuity generation; old-world sounds are never replayed in the next world.
+    pub world_generation: u64,
+    /// Key in the emitting object's sound table, not an audio asset DID.
+    pub sound_id: u32,
+    /// Explicit gain supplied by the packet, replacing the table candidate's authored gain.
+    pub volume: f32,
 }
 
 /// One transient high-level script cue bound to the exact entity generation that received it.
@@ -612,6 +659,10 @@ pub enum ClientViewEvent {
     DynamicEntity(DynamicEntityEvent),
     /// Transient presentation input; intentionally absent from replacement snapshots.
     DynamicScriptCue(ClientDynamicScriptCue),
+    /// Transient positional sound; never replayed from application snapshots.
+    DynamicSoundCue(ClientDynamicSoundCue),
+    /// Cached local feedback for a successfully submitted Use, not its server outcome.
+    EntityUseFeedback(holtburger_world::interaction::EntityUseFeedback),
     /// Client-owned collision-safe camera placement, published after the matching entity advance.
     Camera(crate::client::ClientCameraTick),
     /// Receipt for a newly registered client camera generation.
@@ -669,6 +720,16 @@ pub enum ClientViewEvent {
         target: Guid,
         mana: f32,
         success: u32,
+    },
+    /// Brief server notice, distinct from ordinary chat.
+    TransientString {
+        /// Unmodified server-provided text.
+        message: String,
+    },
+    /// Server text requiring explicit presentation dismissal.
+    PopupString {
+        /// Unmodified server-provided text.
+        message: String,
     },
     ServerMessage {
         message: String,
@@ -906,6 +967,8 @@ pub enum ClientCommand {
         player_name: String,
     },
     RespondToConfirmation {
+        /// Receipt of the displayed request; never answer a replacement implicitly.
+        request_id: u64,
         accepted: bool,
     },
     SetCombatMode(CombatMode),

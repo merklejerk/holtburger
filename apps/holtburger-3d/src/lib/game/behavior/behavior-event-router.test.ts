@@ -137,6 +137,27 @@ describe("BehaviorEventRouter", () => {
 		);
 	});
 
+	it("plays a direct-wave Sound hook at full volume without a roll", () => {
+		const { audio, router } = build();
+		const command: PreparedBehaviorCommand = {
+			kind: "sound",
+			soundId: "0x0a0003b6",
+		};
+
+		expect(router.dispatch(command, TARGET, PROVENANCE, "initial-state")).toBe(
+			"suppressed-initial-state",
+		);
+		audio.playSound.mockReturnValue("played");
+		expect(router.dispatch(command, TARGET, PROVENANCE, "live")).toBe(
+			"executed",
+		);
+		expect(audio.playSound).toHaveBeenCalledWith(TARGET, {
+			probability: 1,
+			soundId: "0x0a0003b6",
+			volume: 1,
+		});
+	});
+
 	it("routes particle creation and folds it when replayed", () => {
 		const { particles, router } = build();
 		const command: PreparedBehaviorCommand = {

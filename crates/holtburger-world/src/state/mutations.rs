@@ -1114,9 +1114,9 @@ impl WorldState {
             }
         }
 
-        if let Some(entity) = self.entities.get_mut(guid)
-            && entity.health_fraction != Some(health_fraction)
-        {
+        if let Some(entity) = self.entities.get_mut(guid) {
+            // QueryHealth also starts a subscription. Its response must reach a newly selected
+            // target's consumer even when the world already holds the same health fraction.
             entity.health_fraction = Some(health_fraction);
             events.push(WorldEvent::EntityHealthUpdated {
                 guid,

@@ -1,4 +1,10 @@
 <script lang="ts">
+	import ClientMessageDialog from "./ClientMessageDialog.svelte";
+	import ClientToastOverlay from "./ClientToastOverlay.svelte";
+	import {
+		ClientDialogs,
+		type ClientDialogPresentation,
+	} from "./client-dialogs";
 	import { provideViewportInputGate } from "../lib/input/viewport-input-context";
 	import { APP_INPUT, isEditingInput } from "../lib/input/app-input";
 	import { onMount, untrack } from "svelte";
@@ -11,6 +17,7 @@
 	import {
 		CharacterInputController,
 		type CharacterDrive,
+		type CharacterDriveIntent,
 		type CharacterInputEdge,
 	} from "../lib/game/controls/character-input-controller";
 	import { CLIENT_TUNING } from "./client-tuning";
@@ -29,6 +36,10 @@
 	} from "./client-presentation-session";
 	import { clientDebugEnabled } from "./client-debug";
 	import ClientCharacterSelect from "./ClientCharacterSelect.svelte";
+	import {
+		ClientEntityInteractions,
+		type ClientSelectedEntityDisplay,
+	} from "./client-entity-interactions";
 	import ClientWorldView from "./ClientWorldView.svelte";
 	import type { MinimapFrame } from "../app/minimap-frame";
 	import type {
@@ -75,6 +86,8 @@
 	let characterMotion = $state<ClientCharacterMotionCapabilities | null>(null);
 	let activeJumpBeginSequence = $state<number | null>(null);
 	let toast = $state<ClientToast | null>(null);
+	let dialogPresentation = $state<ClientDialogPresentation | null>(null);
+	let dialogs: ClientDialogs | null = null;
 	let chatMessages = $state<readonly ClientChatLine[]>([]);
 	let nextChatMessageId = 1;
 	const MAXIMUM_CHAT_LINES = 250;
@@ -130,6 +143,7 @@
 	});
 	let preciseJumpSession: ClientPreciseJumpSession | null = null;
 	let entitySelection: ClientEntitySelection | null = null;
+	let entityInteractions: ClientEntityInteractions | null = null;
 	let selectedEntityGuid = $state<number | null>(null);
 	let hoveredEntityGuid = $state<number | null>(null);
 	let preciseJumpActive = $state(false);
@@ -146,6 +160,9 @@
 		edge: CharacterInputEdge,
 		active: () => boolean,
 	): void {
+		if (edge.kind === "reset") {
+			cameraController?.setTranslationIntent(false, performance.now());
+		}
 		if (edge.kind === "begin-jump") {
 			activeJumpBeginSequence = edge.sequence;
 		} else {
@@ -192,6 +209,7 @@
 	function replaceClientDrive(
 		currentSession: ClientLifecycleSession,
 		drive: CharacterDrive,
+		intent: CharacterDriveIntent,
 		active: () => boolean,
 	): void {
 		cameraController?.setTranslationIntent(
@@ -201,10 +219,13 @@
 			performance.now(),
 		);
 		const request: ClientDriveRequest = {
-			gait: drive.gait,
-			longitudinal: drive.longitudinal,
-			lateral: drive.lateral,
-			turning: drive.turn,
+			kind: intent,
+			drive: {
+				gait: drive.gait,
+				longitudinal: drive.longitudinal,
+				lateral: drive.lateral,
+				turning: drive.turn,
+			},
 		};
 		inputDispatch = inputDispatch
 			.then(() => currentSession.replaceDrive(request))
@@ -243,6 +264,12 @@
 					inputController?.setFullChargeDurationMs(
 						event.capabilities.fullChargeDurationMs,
 					);
+				return;
+			case "transient-string":
+				toastCenter.publish({ message: event.message, tone: "status" });
+				return;
+			case "action-feedback":
+				toastCenter.publish(event.feedback);
 				return;
 			case "character-motion-feedback":
 				if (event.feedback.outcome.kind === "rejected") {
@@ -445,8 +472,11 @@
 		return presentationSession?.readTargetIndicatorFrame() ?? null;
 	}
 
-	function readSelectedEntityName(): string | null {
-		return presentationSession?.readSelectedEntityName() ?? null;
+	function readSelectedEntityDisplay(): ClientSelectedEntityDisplay {
+		return {
+			name: presentationSession?.readSelectedEntityName() ?? null,
+			healthFraction: entityInteractions?.healthFraction() ?? null,
+		};
 	}
 
 	function setShowRetailHiddenGeometry(visible: boolean): void {
@@ -613,7 +643,8 @@
 			fullChargeDurationMs:
 				initialCharacterMotion?.fullChargeDurationMs ?? 1000,
 			now: () => performance.now(),
-			onDrive: (drive) => replaceClientDrive(currentSession, drive, isActive),
+			onDrive: (drive, intent) =>
+				replaceClientDrive(currentSession, drive, intent, isActive),
 			onEdge: (edge) =>
 				queueCharacterMotionEdge(currentSession, edge, isActive),
 		});
@@ -658,6 +689,11 @@
 			hostClientLifecycleTransport(transport),
 		);
 		session = owner;
+		const dialogOwner = new ClientDialogs(owner);
+		dialogs = dialogOwner;
+		const unsubscribeDialogs = dialogOwner.subscribe(
+			(value) => (dialogPresentation = value),
+		);
 		const unsubscribe = owner.subscribe(receive);
 		const precise = new ClientPreciseJumpSession(owner, (error) => {
 			commandFailure = diagnostic(error);
@@ -669,6 +705,12 @@
 			onSelectionSubmissionFailed: appendChatError,
 		});
 		entitySelection = selection;
+		const interactions = new ClientEntityInteractions({
+			selection,
+			lifecycle: owner,
+			onFailure: appendChatError,
+		});
+		entityInteractions = interactions;
 		const unsubscribeSelection = selection.subscribe((guid) => {
 			selectedEntityGuid = guid;
 			presentationSession?.setSelectedEntityGuid(guid);
@@ -687,11 +729,16 @@
 		});
 
 		return () => {
+			dialogOwner.destroy();
+			unsubscribeDialogs();
+			dialogs = null;
 			unsubscribeToast();
 			toastCenter.destroy();
 			unsubscribePrecise();
 			unsubscribeSelection();
 			unsubscribeHover();
+			interactions.destroy();
+			if (entityInteractions === interactions) entityInteractions = null;
 			selection.destroy();
 			if (entitySelection === selection) entitySelection = null;
 			precise.destroy();
@@ -706,6 +753,19 @@
 
 <svelte:window onkeydown={handleWindowKeydown} onkeyup={handleWindowKeyup} />
 
+{#if dialogPresentation !== null}
+	<ClientMessageDialog
+		presentation={dialogPresentation}
+		onDismiss={(id) => dialogs?.dismissPopup(id)}
+		onRespond={(id, accepted) => {
+			void dialogs?.respond(id, accepted);
+		}}
+	/>
+{/if}
+{#if !usesWorldPresentation}
+	<ClientToastOverlay {toast} previewMessage={null} />
+{/if}
+
 {#if usesWorldPresentation && startupError === null && commandFailure === null}
 	<ClientWorldView
 		cameraController={lifecycle.kind === "in-world" ? cameraController : null}
@@ -714,7 +774,8 @@
 		{readDiagnostics}
 		{readFrameRates}
 		{readTargetIndicatorFrame}
-		{readSelectedEntityName}
+		{readSelectedEntityDisplay}
+		onInteractEntity={() => entityInteractions?.interact()}
 		{selectedEntityGuid}
 		{hoveredEntityGuid}
 		showRetailHiddenGeometry={frameSettings.showRetailHiddenGeometry}

@@ -184,6 +184,7 @@ function currentState(): ClientCurrentState {
 		playerName: "Drudge",
 		vitals: [],
 		characterMotion: null,
+		activeConfirmation: null,
 		dynamic: {
 			hostTime: { seconds: 10 },
 			entities: [

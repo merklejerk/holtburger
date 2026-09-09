@@ -1067,7 +1067,9 @@ async function main() {
 			const runDrivePhase = async (label, request, durationMilliseconds) => {
 				const before = actorPhaseSample(latestEntities.get(playerGuid));
 				const commandStart = performance.now();
-				await invokeMovement("replace_client_drive", { request });
+				await invokeMovement("replace_client_drive", {
+					request: { kind: "acquire", drive: request },
+				});
 				const commandLatencyMs = performance.now() - commandStart;
 				await delay(durationMilliseconds);
 				const after = actorPhaseSample(latestEntities.get(playerGuid));
@@ -1230,7 +1232,9 @@ async function main() {
 						`jump release was rejected: ${committed.outcome.reason ?? "unknown"}`,
 					);
 				}
-				await invokeMovement("replace_client_drive", { request: idleDrive });
+				await invokeMovement("replace_client_drive", {
+					request: { kind: "synchronize", drive: idleDrive },
+				});
 				const trajectory = [];
 				for (let elapsed = 0; elapsed <= 5_000; elapsed += 50) {
 					const sample = actorPhaseSample(latestEntities.get(playerGuid));
@@ -1321,10 +1325,13 @@ async function main() {
 			if (driveError === null) {
 				await invokeMovement("replace_client_drive", {
 					request: {
-						gait: "walk",
-						longitudinal: null,
-						lateral: null,
-						turning: null,
+						kind: "synchronize",
+						drive: {
+							gait: "walk",
+							longitudinal: null,
+							lateral: null,
+							turning: null,
+						},
 					},
 				}).catch(() => undefined);
 			}

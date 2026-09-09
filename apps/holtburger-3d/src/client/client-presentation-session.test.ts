@@ -1,3 +1,4 @@
+import { SHARED_FRONTEND_TUNING } from "../lib/frontend-tuning";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ActiveRegionSource } from "../lib/assets/active-region-source";
@@ -16,6 +17,7 @@ import type {
 	ClientCameraTick,
 	ClientCurrentState,
 	ClientDynamicScriptCue,
+	ClientDynamicSoundCue,
 } from "./client-host-contract";
 import type { ClientPresentationRuntime } from "./client-presentation-session";
 import type { SceneInterestRequest } from "../lib/game/runtime/scene-interest";
@@ -69,6 +71,83 @@ describe("resolveClientEnvironmentSelection", () => {
 });
 
 describe("ClientPresentationSession", () => {
+	it("expires construction-stage sounds while retaining fresh repeated cues", async () => {
+		const playerGuid = 0x0101_0001;
+		const transport = new FakeClientTransport(currentState(playerGuid));
+		const lifecycle = new ClientLifecycleSession(transport);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		const owner = fakeOwner(runtime, activeRegion());
+		const ready = controlledPromise<typeof owner>();
+		const clock = vi.spyOn(performance, "now").mockReturnValue(0);
+		const presentation = new ClientPresentationSession({
+			canvas: fakeCanvas(),
+			hostTransport: {} as never,
+			session: lifecycle,
+			ownerFactory: () => ready.promise,
+		});
+		try {
+			const started = presentation.start();
+			const cue = {
+				guid: playerGuid,
+				generation: view(playerGuid).generation,
+				worldGeneration: 1,
+				soundId: 0x94,
+				volume: 0.8,
+			};
+			transport.emit("client-dynamic-sound-cue", cue);
+			clock.mockReturnValue(
+				SHARED_FRONTEND_TUNING.audio.maximumWarmupReplaySeconds * 2_000,
+			);
+			transport.emit("client-dynamic-sound-cue", cue);
+			transport.emit("client-dynamic-sound-cue", cue);
+			expect(runtime.dynamicSoundCues).toHaveLength(0);
+			ready.resolve(owner);
+			await started;
+			expect(runtime.dynamicSoundCues).toEqual([cue, cue]);
+		} finally {
+			ready.resolve(owner);
+			await presentation.destroy();
+			lifecycle.stop();
+			clock.mockRestore();
+		}
+	});
+
+	it("delivers sound cues imperatively and rejects a prior world's packets", async () => {
+		const playerGuid = 0x0101_0001;
+		const transport = new FakeClientTransport(currentState(playerGuid));
+		const lifecycle = new ClientLifecycleSession(transport);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		const presentation = new ClientPresentationSession({
+			canvas: fakeCanvas(),
+			hostTransport: {} as never,
+			session: lifecycle,
+			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+		});
+		await presentation.start();
+		const cue = {
+			guid: playerGuid,
+			generation: 4,
+			worldGeneration: 1,
+			soundId: 0x94,
+			volume: 0.8,
+		};
+		transport.emit("client-dynamic-sound-cue", cue);
+		expect(runtime.dynamicSoundCues).toEqual([cue]);
+		transport.emit("client-presentation-discontinuity", {
+			kind: "forced-reposition",
+			worldGeneration: 2,
+		});
+		expect(runtime.clearedCueCount).toBe(1);
+		transport.emit("client-dynamic-sound-cue", cue);
+		expect(runtime.dynamicSoundCues).toEqual([cue]);
+		transport.emit("client-dynamic-sound-cue", { ...cue, worldGeneration: 2 });
+		expect(runtime.dynamicSoundCues).toHaveLength(2);
+		await presentation.destroy();
+		lifecycle.stop();
+	});
+
 	it("forwards a generation-qualified script cue to the presentation runtime", async () => {
 		const playerGuid = 0x0101_0001;
 		const transport = new FakeClientTransport(currentState(playerGuid));
@@ -1139,6 +1218,8 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 	upserted: DynamicEntityView[] = [];
 	removed: Array<{ guid: number; generation: number }> = [];
 	dynamicScriptCues: ClientDynamicScriptCue[] = [];
+	dynamicSoundCues: ClientDynamicSoundCue[] = [];
+	clearedCueCount = 0;
 	eligibilityReevaluationCount = 0;
 	advances: Array<{ batch: DynamicEntityTickBatch; receivedAtMs: number }> = [];
 	sceneRequests: SceneInterestRequest[] = [];
@@ -1227,6 +1308,13 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 		this.removed.push({ generation, guid });
 		if (this.#desired.get(guid)?.generation === generation)
 			this.#desired.delete(guid);
+	}
+
+	playDynamicEntitySoundCue(cue: ClientDynamicSoundCue): void {
+		this.dynamicSoundCues.push(cue);
+	}
+	clearDynamicEntityCues(): void {
+		this.clearedCueCount += 1;
 	}
 
 	playDynamicEntityScriptCue(cue: ClientDynamicScriptCue): void {
@@ -1519,6 +1607,7 @@ function currentState(playerGuid: number): ClientCurrentState {
 		playerName: "Player",
 		vitals: [],
 		characterMotion: null,
+		activeConfirmation: null,
 		dynamic: {
 			hostTime: { seconds: 75 },
 			entities: [view(playerGuid, landblockId)],

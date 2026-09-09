@@ -40,6 +40,30 @@ describe("PhysicsScriptRepository", () => {
 		handle.release();
 	});
 
+	it("retains direct-wave dependencies from sound hooks", async () => {
+		const repository = new PhysicsScriptRepository({
+			async loadPhysicsScript(id) {
+				return {
+					id,
+					lengthSeconds: 0,
+					records: [
+						{
+							kind: "sound",
+							soundId: "0x0a0003b6",
+							startTime: 0,
+							authoredOrder: 0,
+						},
+					],
+				};
+			},
+			destroy() {},
+		});
+		const handle = await repository.acquire("0x33000001");
+		expect(handle.asset.dependencies.soundIds).toEqual(["0x0a0003b6"]);
+		handle.release();
+		repository.destroy();
+	});
+
 	it("prepares a self-cycling script exactly once and keeps its cyclic runtime edge", async () => {
 		const source = new FixtureScriptSource();
 		const repository = new PhysicsScriptRepository(source);

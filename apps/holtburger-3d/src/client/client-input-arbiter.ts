@@ -4,7 +4,10 @@ import type { CharacterAction } from "../lib/input/input-contract";
 
 /** Owns the handoff between ordinary character input and client-local precise-jump input. */
 export class ClientInputArbiter {
-	readonly #ordinary: Pick<CharacterInputController, "applyAction" | "reset">;
+	readonly #ordinary: Pick<
+		CharacterInputController,
+		"applyAction" | "restoreHeldAction" | "reset"
+	>;
 	readonly #onEnter: () => void;
 	readonly #onActivate: () => void;
 	readonly #onCancel: () => void;
@@ -13,7 +16,10 @@ export class ClientInputArbiter {
 	#suppressJumpUntilRelease = false;
 
 	constructor(options: {
-		readonly ordinary: Pick<CharacterInputController, "applyAction" | "reset">;
+		readonly ordinary: Pick<
+			CharacterInputController,
+			"applyAction" | "restoreHeldAction" | "reset"
+		>;
 		readonly onEnter: () => void;
 		readonly onActivate: () => void;
 		readonly onCancel: () => void;
@@ -79,7 +85,7 @@ export class ClientInputArbiter {
 		this.#precise = false;
 		this.#ordinary.reset();
 		for (const action of this.#held) {
-			if (action !== "jump") this.#ordinary.applyAction(action, true);
+			if (action !== "jump") this.#ordinary.restoreHeldAction(action);
 		}
 	}
 

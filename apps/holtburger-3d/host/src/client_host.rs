@@ -49,11 +49,10 @@ pub enum ClientDriveTurning {
     Right,
 }
 
-/// Minimal client drive replacement. Protocol cadence, sequence numbers, and movement caps stay
-/// inside core's `MovementSystem`.
+/// Held semantic axes shared by drive commands and jump lifecycle snapshots.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ClientDriveRequest {
+pub struct ClientDriveSnapshot {
     /// Walk/run gait retained even while both movement axes are neutral.
     pub gait: ClientDriveGait,
     /// Optional forward/backward held axis.
@@ -64,7 +63,7 @@ pub struct ClientDriveRequest {
     pub turning: Option<ClientDriveTurning>,
 }
 
-impl ClientDriveRequest {
+impl ClientDriveSnapshot {
     fn into_drive(self) -> CharacterDrive {
         CharacterDrive {
             gait: match self.gait {
@@ -86,9 +85,24 @@ impl ClientDriveRequest {
             turn_rate_scalar: None,
         }
     }
+}
 
+/// Semantic movement-command intent; the adapter never infers acquisition from axis values.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum ClientDriveRequest {
+    /// Explicitly acquire player-controlled movement.
+    Acquire { drive: ClientDriveSnapshot },
+    /// Reconcile held controls without taking movement ownership.
+    Synchronize { drive: ClientDriveSnapshot },
+}
+
+impl ClientDriveRequest {
     pub fn into_intent(self) -> PlayerDriveIntent {
-        PlayerDriveIntent::ManualHeld(self.into_drive())
+        match self {
+            Self::Acquire { drive } => PlayerDriveIntent::ManualHeld(drive.into_drive()),
+            Self::Synchronize { drive } => PlayerDriveIntent::SynchronizeHeld(drive.into_drive()),
+        }
     }
 }
 
@@ -98,11 +112,11 @@ impl ClientDriveRequest {
 pub enum ClientCharacterMotionEventRequest {
     BeginJump {
         sequence: u64,
-        drive: ClientDriveRequest,
+        drive: ClientDriveSnapshot,
     },
     ReleaseJump {
         sequence: u64,
-        drive: ClientDriveRequest,
+        drive: ClientDriveSnapshot,
         extent: f32,
     },
     Reset {
@@ -278,6 +292,7 @@ mod tests {
             player_name: None,
             vitals: Default::default(),
             character_motion: None,
+            active_confirmation: None,
             dynamic: DynamicEntitySnapshot::new(
                 DynamicEntityHostTime::new(0.0).unwrap(),
                 Vec::new(),
@@ -476,10 +491,13 @@ mod tests {
     #[test]
     fn drive_request_maps_only_renderer_axes_into_core_intent() {
         let request: ClientDriveRequest = serde_json::from_value(serde_json::json!({
+            "kind": "acquire",
+            "drive": {
             "gait": "run",
             "longitudinal": "backward",
             "lateral": "right",
             "turning": "left",
+            }
         }))
         .expect("drive request should decode");
 
@@ -495,13 +513,24 @@ mod tests {
         );
         assert!(
             serde_json::from_value::<ClientDriveRequest>(serde_json::json!({
-                "gait": "run",
-                "longitudinal": null,
-                "lateral": null,
-                "turning": null,
+                "kind": "acquire",
+                "drive": {"gait": "run", "longitudinal": null, "lateral": null, "turning": null},
                 "extra": true,
             }))
             .is_err()
+        );
+    }
+
+    #[test]
+    fn drive_request_preserves_passive_synchronization_for_non_neutral_input() {
+        let request: ClientDriveRequest = serde_json::from_value(serde_json::json!({
+            "kind": "synchronize",
+            "drive": { "gait": "run", "longitudinal": "forward", "lateral": null, "turning": null }
+        }))
+        .unwrap();
+        assert_eq!(
+            request.into_intent(),
+            PlayerDriveIntent::SynchronizeHeld(CharacterDrive::builder().run().forward().build())
         );
     }
 
@@ -623,6 +652,7 @@ mod tests {
             player_name: Some("Mira".to_string()),
             vitals: std::collections::HashMap::new(),
             character_motion: None,
+            active_confirmation: None,
             dynamic: DynamicEntitySnapshot::new(
                 DynamicEntityHostTime::new(22.0).unwrap(),
                 Vec::new(),

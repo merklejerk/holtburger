@@ -337,7 +337,11 @@
 				/>{/snippet}
 			{#snippet target()}<ClientSelectedEntityHud
 					selectedGuid={1}
-					readSelectedName={() => "Drudge Prowler"}
+					readSelectedDisplay={() => ({
+						name: "Drudge Prowler",
+						healthFraction: 0.68,
+					})}
+					onInteract={() => {}}
 				/>{/snippet}
 			{#snippet chat()}<ClientChat
 					gameCanvas={null}

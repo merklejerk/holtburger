@@ -197,11 +197,9 @@ export interface DynamicOwnerInstallation {
 	release(): void;
 }
 
-/** Runtime activation facts for one fully prepared but unpublished dynamic entity. */
-/** One resident's complete behavior staging: its script closure and every emitter it can reach. */
-/** Everything one entity needs to commit, resolved before any of it is applied. */
+/** Independently authored sound table and optional script/emitter assets staged before commit. */
 interface StagedBehaviorAssets {
-	readonly closure: PreparedPhysicsScriptClosure;
+	readonly closure: PreparedPhysicsScriptClosure | null;
 	readonly emitterHandles: PreparedAssetHandle<PreparedParticleEmitter>[];
 	readonly soundTableHandle: PreparedAssetHandle<DecodedSoundTable> | null;
 }
@@ -1246,15 +1244,15 @@ export class DynamicEntitySystem<
 	 */
 	async #stageBehaviorAssets(
 		entity: DynamicEntityRecord,
-	): Promise<StagedBehaviorAssets | null> {
+	): Promise<StagedBehaviorAssets> {
 		const scriptId = entity.source.behavior.physicsScriptId;
-		if (scriptId === null) return null;
-		const closure = await this.#scripts.acquireClosure(scriptId);
+		const closure =
+			scriptId === null ? null : await this.#scripts.acquireClosure(scriptId);
 		const emitterHandles: PreparedAssetHandle<PreparedParticleEmitter>[] = [];
 		let soundTableHandle: PreparedAssetHandle<DecodedSoundTable> | null = null;
 		try {
 			const emitterIds = new Set(
-				[...closure.scripts.values()].flatMap(
+				[...(closure?.scripts.values() ?? [])].flatMap(
 					(script) => script.dependencies.emitterInfoIds,
 				),
 			);
@@ -1271,7 +1269,7 @@ export class DynamicEntitySystem<
 		} catch (cause) {
 			soundTableHandle?.release();
 			for (const handle of emitterHandles) handle.release();
-			closure.release();
+			closure?.release();
 			throw cause;
 		}
 		return { closure, emitterHandles, soundTableHandle };
@@ -1284,24 +1282,24 @@ export class DynamicEntitySystem<
 		preparation: StagedObjectVisualTemplateOwner<TTemplateOwnerId>,
 		templateOwnerId: TTemplateOwnerId,
 		animationPreparations: readonly Promise<PreparedAnimationHandle | null>[],
-		scriptPreparations: readonly Promise<StagedBehaviorAssets | null>[],
+		behaviorPreparations: readonly Promise<StagedBehaviorAssets>[],
 		motionPreparations: readonly Promise<PreparedMotionClosure | null>[],
 	): Promise<"ready" | "superseded"> {
 		// Settled separately rather than in one array so each lane keeps its own result type; a
 		// single `allSettled` would widen them into a union the release paths cannot discriminate.
-		const [templateResult, animationResults, scriptResults, motionResults] =
+		const [templateResult, animationResults, behaviorResults, motionResults] =
 			await Promise.all([
 				Promise.allSettled([preparation.completion]).then(
 					(results) => results[0]!,
 				),
 				Promise.allSettled(animationPreparations),
-				Promise.allSettled(scriptPreparations),
+				Promise.allSettled(behaviorPreparations),
 				Promise.allSettled(motionPreparations),
 			]);
 		const settled = [
 			templateResult,
 			...animationResults,
-			...scriptResults,
+			...behaviorResults,
 			...motionResults,
 		];
 		// Everything acquired must be releasable on any failure path, including a closure whose
@@ -1311,10 +1309,8 @@ export class DynamicEntitySystem<
 				? [result.value]
 				: [],
 		);
-		const acquiredBehaviorAssets = scriptResults.flatMap((result) =>
-			result.status === "fulfilled" && result.value !== null
-				? [result.value]
-				: [],
+		const acquiredBehaviorAssets = behaviorResults.flatMap((result) =>
+			result.status === "fulfilled" ? [result.value] : [],
 		);
 		const acquiredMotionClosures = motionResults.flatMap((result) =>
 			result.status === "fulfilled" && result.value !== null
@@ -1323,7 +1319,7 @@ export class DynamicEntitySystem<
 		);
 		const releaseBehaviorAssets = () => {
 			for (const staged of acquiredBehaviorAssets) {
-				staged.closure.release();
+				staged.closure?.release();
 				staged.soundTableHandle?.release();
 				for (const handle of staged.emitterHandles) handle.release();
 			}
@@ -1366,10 +1362,10 @@ export class DynamicEntitySystem<
 						`Animation for ${entity.source.identity} settled without a result.`,
 					);
 				}
-				const scriptResult = scriptResults[index];
-				if (scriptResult?.status !== "fulfilled") {
+				const behaviorResult = behaviorResults[index];
+				if (behaviorResult?.status !== "fulfilled") {
 					throw new Error(
-						`Script closure for ${entity.source.identity} settled without a result.`,
+						`Behavior assets for ${entity.source.identity} settled without a result.`,
 					);
 				}
 				const motionResult = motionResults[index];
@@ -1394,9 +1390,9 @@ export class DynamicEntitySystem<
 					),
 					selectionGeometryMorphology: template.selectionGeometryMorphology,
 					effectPartCount: template.parts.length,
-					emitterHandles: scriptResult.value?.emitterHandles ?? [],
-					soundTableHandle: scriptResult.value?.soundTableHandle ?? null,
-					scriptClosure: scriptResult.value?.closure ?? null,
+					emitterHandles: behaviorResult.value.emitterHandles,
+					soundTableHandle: behaviorResult.value.soundTableHandle,
+					scriptClosure: behaviorResult.value.closure,
 					motionClosure: motionResult.value,
 				};
 			});

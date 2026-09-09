@@ -420,6 +420,22 @@ export interface DynamicEntityScriptCue {
 	readonly intensity: number;
 }
 
+/** Transient sound-table input admitted to an exact entity incarnation. */
+export interface DynamicEntitySoundCue {
+	readonly guid: number;
+	readonly generation: number;
+	readonly soundId: number;
+	readonly volume: number;
+}
+
+/** Shared preparation order for the two actual server-cue consumers. */
+type DynamicEntityCue =
+	| ({ readonly kind: "script" } & DynamicEntityScriptCue)
+	| ({
+			readonly kind: "sound";
+			readonly expiresAtMs: number;
+	  } & DynamicEntitySoundCue);
+
 interface DynamicCueAssets {
 	readonly closure: PreparedPhysicsScriptClosure;
 	readonly emitterHandles: readonly PreparedAssetHandle<PreparedParticleEmitter>[];
@@ -730,10 +746,13 @@ export class GamePresentationRuntime {
 		ReadonlySet<BehaviorTargetId>
 	>();
 	/** High-level cues waiting for their exact entity generation to be visually realized. */
-	readonly #pendingDynamicScriptCues = new Map<
-		number,
-		DynamicEntityScriptCue[]
-	>();
+	readonly #pendingDynamicEntityCues = new Map<number, DynamicEntityCue[]>();
+	/** Discontinuities invalidate asynchronous cue preparation and cold sound replay. */
+	#entityCueEpoch = 0;
+	/** Missing source table/key differs from AudioSystem's intentional probability/mute outcomes. */
+	#unpreparedServerSoundCount = 0;
+	/** Cues whose source preparation outlived the existing audio warmup window. */
+	#expiredServerSoundCount = 0;
 	/** Additional live-cue assets retained until their dynamic owner generation retires. */
 	readonly #dynamicCueAssets = new Map<DynamicOwnerId, DynamicCueAssets[]>();
 	/** Per-GUID ordered preparation tails joined during shutdown and rechecked before activation. */
@@ -893,30 +912,41 @@ export class GamePresentationRuntime {
 				});
 				return outcome === "played" ? "played" : "suppressed";
 			},
-			playSoundTableKey: (target, soundType) => {
-				if (!this.#audioListenerEnabled) return "suppressed";
-				const table = this.#targetSoundTables.get(target.targetId);
-				const candidates = table?.entries.get(soundType);
-				// A missing table/key and a candidate that deliberately stays silent differ in
-				// diagnostics even though both are visual no-ops.
-				if (!candidates) return "unprepared";
-				const candidate = selectSoundCandidate(candidates, Math.random());
-				if (!candidate) return "unprepared";
-				const origin = this.#originOf(target);
-				if (origin === null) return "unprepared";
-				const outcome = this.#audio.trigger({
-					category: "effect",
-					probability: candidate.probability,
-					soundId: candidate.soundId,
-					source: {
-						mode: "world",
-						position: origin,
-						volume: candidate.volume,
-					},
-				});
-				return outcome === "played" ? "played" : "suppressed";
-			},
+			playSoundTableKey: (target, soundType) =>
+				this.#playSoundTableKey(target, soundType, null),
 		};
+	}
+
+	/** Resolve authored choice/probability once; packet sounds supply their own gain source. */
+	#playSoundTableKey(
+		target: Parameters<BehaviorConsumers["audio"]["playSoundTableKey"]>[0],
+		soundType: number,
+		packet: {
+			readonly volume: number;
+			readonly canReplay: () => boolean;
+		} | null,
+	): ReturnType<BehaviorConsumers["audio"]["playSoundTableKey"]> {
+		if (!this.#audioListenerEnabled) return "suppressed";
+		const candidates = this.#targetSoundTables
+			.get(target.targetId)
+			?.entries.get(soundType);
+		if (!candidates) return "unprepared";
+		const candidate = selectSoundCandidate(candidates, Math.random());
+		if (!candidate) return "unprepared";
+		const origin = this.#originOf(target);
+		if (origin === null) return "unprepared";
+		const outcome = this.#audio.trigger({
+			category: "effect",
+			probability: candidate.probability,
+			soundId: candidate.soundId,
+			source: {
+				mode: "world",
+				position: origin,
+				volume: packet === null ? candidate.volume : packet.volume,
+			},
+			canReplay: packet === null ? undefined : packet.canReplay,
+		});
+		return outcome === "played" ? "played" : "suppressed";
 	}
 
 	/** Shared particle sink; particles stay browser-owned for every script population. */
@@ -1641,8 +1671,8 @@ export class GamePresentationRuntime {
 				);
 			requested.set(guid, entity);
 		}
-		for (const guid of this.#pendingDynamicScriptCues.keys())
-			this.#retainPendingDynamicScriptCues(
+		for (const guid of this.#pendingDynamicEntityCues.keys())
+			this.#retainPendingDynamicEntityCues(
 				guid,
 				requested.get(guid)?.generation,
 			);
@@ -1693,9 +1723,14 @@ export class GamePresentationRuntime {
 	removeDynamicEntity(guid: number, generation: number): void {
 		if (this.#destroyed)
 			throw new Error("Cannot remove a dynamic entity after runtime shutdown.");
+		const pending = this.#pendingDynamicEntityCues.get(guid);
+		if (pending !== undefined) {
+			const retained = pending.filter((cue) => cue.generation !== generation);
+			if (retained.length === 0) this.#pendingDynamicEntityCues.delete(guid);
+			else this.#pendingDynamicEntityCues.set(guid, retained);
+		}
 		const desired = this.#spawnedDesiredEntities.get(guid);
 		if (desired?.entity.generation !== generation) return;
-		this.#pendingDynamicScriptCues.delete(guid);
 		this.#retireDynamicPresentationTree(guid);
 		this.#forgetDesiredDynamicEntity(guid, "release-visual");
 		for (const childGuid of this.#spawnedDesiredChildren.get(guid) ?? []) {
@@ -1725,41 +1760,118 @@ export class GamePresentationRuntime {
 		) {
 			throw new Error("Dynamic script cue is outside its typed domain.");
 		}
+		this.#queueDynamicEntityCue({ kind: "script", ...cue });
+	}
+
+	/** Send server effects through the same entity readiness/order path as script cues. */
+	playDynamicEntitySoundCue(
+		cue: DynamicEntitySoundCue,
+		receivedAtMs: number,
+	): void {
+		if (this.#destroyed)
+			throw new Error(
+				"Cannot play a dynamic sound cue after runtime shutdown.",
+			);
+		if (
+			!Number.isInteger(cue.guid) ||
+			cue.guid < 0 ||
+			!Number.isInteger(cue.generation) ||
+			cue.generation < 0 ||
+			!Number.isInteger(cue.soundId) ||
+			cue.soundId < 0 ||
+			!Number.isFinite(cue.volume) ||
+			cue.volume < 0
+		)
+			throw new Error("Dynamic sound cue is outside its typed domain.");
+		this.#queueDynamicEntityCue({
+			kind: "sound",
+			...cue,
+			expiresAtMs:
+				receivedAtMs +
+				SHARED_FRONTEND_TUNING.audio.maximumWarmupReplaySeconds * 1_000,
+		});
+	}
+
+	/** Stop old-world cue work without replacing the presentation runtime. */
+	clearDynamicEntityCues(): void {
+		this.#entityCueEpoch += 1;
+		this.#pendingDynamicEntityCues.clear();
+	}
+
+	#queueDynamicEntityCue(cue: DynamicEntityCue): void {
 		const desired = this.#spawnedDesiredEntities.get(cue.guid);
 		if (desired !== undefined && desired.entity.generation !== cue.generation)
 			return;
-		const pending = this.#pendingDynamicScriptCues.get(cue.guid) ?? [];
+		const pending = (this.#pendingDynamicEntityCues.get(cue.guid) ?? []).filter(
+			(pending) => this.#isEntityCueTimely(pending),
+		);
+		if (!this.#isEntityCueTimely(cue)) return;
 		pending.push(cue);
-		this.#pendingDynamicScriptCues.set(cue.guid, pending);
-		this.#drainDynamicScriptCues(cue.guid);
+		this.#pendingDynamicEntityCues.set(cue.guid, pending);
+		this.#drainDynamicEntityCues(cue.guid);
+	}
+
+	#isEntityCueTimely(cue: DynamicEntityCue): boolean {
+		if (cue.kind === "script" || performance.now() <= cue.expiresAtMs)
+			return true;
+		this.#expiredServerSoundCount += 1;
+		return false;
 	}
 
 	/** Discard queued cues that cannot belong to the named desired generation. */
-	#retainPendingDynamicScriptCues(
+	#retainPendingDynamicEntityCues(
 		guid: number,
 		generation: number | undefined,
 	): void {
-		const pending = this.#pendingDynamicScriptCues.get(guid);
+		const pending = this.#pendingDynamicEntityCues.get(guid);
 		if (pending === undefined) return;
 		const retained = pending.filter((cue) => cue.generation === generation);
-		if (retained.length === 0) this.#pendingDynamicScriptCues.delete(guid);
-		else this.#pendingDynamicScriptCues.set(guid, retained);
+		if (retained.length === 0) this.#pendingDynamicEntityCues.delete(guid);
+		else this.#pendingDynamicEntityCues.set(guid, retained);
 	}
 
 	/** Start queued cue preparation only after its exact visual target is installed. */
-	#drainDynamicScriptCues(guid: number): void {
+	#drainDynamicEntityCues(guid: number): void {
 		const installed = this.#spawnedPresentations.get(guid);
 		if (installed === undefined) return;
-		const queued = this.#pendingDynamicScriptCues.get(guid);
+		const queued = this.#pendingDynamicEntityCues.get(guid);
 		if (queued === undefined) return;
 		const current = queued.filter(
 			(cue) => cue.generation === installed.generation,
 		);
-		this.#pendingDynamicScriptCues.delete(guid);
+		const epoch = this.#entityCueEpoch;
+		this.#pendingDynamicEntityCues.delete(guid);
 		let tail = this.#dynamicCuePreparations.get(guid) ?? Promise.resolve();
 		for (const cue of current) {
 			tail = tail
-				.then(() => this.#prepareDynamicScriptCue(installed, cue))
+				.then(() => {
+					if (
+						epoch !== this.#entityCueEpoch ||
+						this.#spawnedPresentations.get(guid) !== installed ||
+						!this.#isEntityCueTimely(cue)
+					)
+						return;
+					if (cue.kind === "script")
+						return this.#prepareDynamicScriptCue(installed, cue, epoch);
+					// acclient.c:366946: explicit packet volume replaces stdata.volume_; selection and
+					// probability still come from the sound table. Liveness also gates cold-buffer replay.
+					const outcome = this.#playSoundTableKey(
+						{
+							targetId: behaviorTargetId(installed.nodeId),
+							generation: installed.behaviorGeneration,
+						},
+						cue.soundId,
+						{
+							volume: cue.volume,
+							canReplay: () =>
+								epoch === this.#entityCueEpoch &&
+								this.#spawnedPresentations.get(guid) === installed &&
+								this.#audioListenerEnabled &&
+								this.#isEntityCueTimely(cue),
+						},
+					);
+					if (outcome === "unprepared") this.#unpreparedServerSoundCount += 1;
+				})
 				.catch((error: unknown) => {
 					this.#dynamicRealizationFailures.push(error);
 				});
@@ -1768,7 +1880,7 @@ export class GamePresentationRuntime {
 		void tail.finally(() => {
 			if (this.#dynamicCuePreparations.get(guid) !== tail) return;
 			this.#dynamicCuePreparations.delete(guid);
-			this.#drainDynamicScriptCues(guid);
+			this.#drainDynamicEntityCues(guid);
 		});
 	}
 
@@ -1776,6 +1888,7 @@ export class GamePresentationRuntime {
 	async #prepareDynamicScriptCue(
 		installed: DynamicEntityPresentationRecord,
 		cue: DynamicEntityScriptCue,
+		epoch: number,
 	): Promise<void> {
 		const tableId = installed.physicsScriptTableId;
 		if (tableId === null) return;
@@ -1806,6 +1919,7 @@ export class GamePresentationRuntime {
 			// 10,743 CreateParticle hooks at time zero, so starting at readiness preserves the common
 			// effect while accepting host/browser activation skew.
 			if (
+				epoch !== this.#entityCueEpoch ||
 				current !== installed ||
 				current.generation !== cue.generation ||
 				!this.#worldScalePhysicsScriptSystem.appendRoot(
@@ -1977,7 +2091,7 @@ export class GamePresentationRuntime {
 			);
 		}
 		const sameGeneration = previous?.entity.generation === entity.generation;
-		this.#retainPendingDynamicScriptCues(guid, entity.generation);
+		this.#retainPendingDynamicEntityCues(guid, entity.generation);
 		const attachmentTopologyChanged =
 			previous !== undefined &&
 			previous.placementIdentity !== placementIdentity &&
@@ -2409,7 +2523,7 @@ export class GamePresentationRuntime {
 			visualKey: record.visualKey,
 		};
 		this.#spawnedPresentations.set(guid, installed);
-		this.#drainDynamicScriptCues(guid);
+		this.#drainDynamicEntityCues(guid);
 		if (entity.placement.kind === "attached") {
 			const parent = this.#spawnedPresentations.get(entity.placement.parent);
 			if (!parent) {
@@ -3208,6 +3322,10 @@ export class GamePresentationRuntime {
 		return {
 			animation: this.#animation.getDiagnostics(),
 			audio: this.#audio.getDiagnostics(),
+			serverSound: {
+				unpreparedCount: this.#unpreparedServerSoundCount,
+				expiredCount: this.#expiredServerSoundCount,
+			},
 			ambient: this.#ambient.getDiagnostics(),
 			ambientBakes: this.#ambientBakes.getDiagnostics(),
 			dynamics: this.#dynamics.getDiagnostics(),
@@ -3690,7 +3808,7 @@ export class GamePresentationRuntime {
 			this.#forgetDesiredDynamicEntity(guid, "release-visual");
 		this.#spawnedVisuals.clear();
 		this.#spawnedVisualKeys.clear();
-		this.#pendingDynamicScriptCues.clear();
+		this.#pendingDynamicEntityCues.clear();
 		this.#destroyed = true;
 		this.#sceneInterestCoordinator.destroy();
 		this.#commitArtifacts.length = 0;
@@ -3714,6 +3832,8 @@ export class GamePresentationRuntime {
 		this.#worldScalePhysicsScriptSystem.destroy();
 		this.#audio.destroy();
 		this.#skyScripts.destroy();
+		// Dynamic residents own emitter and sound-table handles; release them before their repositories.
+		await this.#dynamics.destroy();
 		this.#particleEmitters.destroy();
 		for (const handle of this.#ambientSoundTableHandles.values()) {
 			handle.release();
@@ -3724,7 +3844,6 @@ export class GamePresentationRuntime {
 		this.#physicsScriptTables.destroy();
 		this.#particleMeshes.destroy();
 		this.#targetSoundTables.clear();
-		await this.#dynamics.destroy();
 		this.#physicsScripts.destroy();
 		this.#envCells.destroy();
 		await this.#terrain.destroy();

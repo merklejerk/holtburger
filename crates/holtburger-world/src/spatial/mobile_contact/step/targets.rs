@@ -28,13 +28,23 @@ impl HardTargets {
             bodies.len() < u32::MAX as usize,
             "too many hard targets for spatial index"
         );
-        let index = Bvh::from_iter(
-            BvhBuildStrategy::Binned,
-            bodies
-                .iter()
-                .enumerate()
-                .filter_map(|(slot, body)| bounds(body).map(|bounds| (slot, bounds))),
-        );
+        let leaves = bodies
+            .iter()
+            .enumerate()
+            .filter_map(|(slot, body)| bounds(body).map(|bounds| (slot, bounds)))
+            .collect::<Vec<_>>();
+        // Parry 0.30.2's bulk constructor indexes slots 0/1 for one/two leaves,
+        // even when filtering empty geometry left different IDs. Incremental insertion
+        // preserves sparse IDs; keep the binned bulk builder for larger target sets.
+        let index = if leaves.len() <= 2 {
+            let mut index = Bvh::new();
+            for (slot, bounds) in leaves {
+                index.insert(bounds, slot as u32);
+            }
+            index
+        } else {
+            Bvh::from_iter(BvhBuildStrategy::Binned, leaves)
+        };
         let slots = bodies
             .iter()
             .enumerate()
@@ -177,6 +187,71 @@ mod tests {
                 .unwrap(),
             ],
         }
+    }
+
+    #[test]
+    fn sparse_targets_preserve_identity_through_construction_motion_and_append() {
+        for occupied in [vec![], vec![1], vec![0, 2], vec![1, 3], vec![0, 2, 3]] {
+            let bodies = (0..4)
+                .map(|slot| {
+                    let mut body = target(4 - slot, Vector3::zero());
+                    if !occupied.contains(&slot) {
+                        body.shapes.clear();
+                    }
+                    body
+                })
+                .collect();
+            let mut targets = HardTargets::new(bodies).unwrap();
+            let mut expected = occupied
+                .iter()
+                .map(|slot| SpatialBodyId::Entity(Guid(4 - slot)))
+                .collect::<Vec<_>>();
+            expected.sort_unstable();
+            assert_candidates(&targets, Vector3::zero(), &expected);
+
+            // Populate a previously empty slot, then move it without changing its identity.
+            targets.replace(target(3, Vector3::zero())).unwrap();
+            let moved = Vector3::new(10.0, 0.0, 0.0);
+            targets.replace(target(3, moved)).unwrap();
+            expected.retain(|id| *id != SpatialBodyId::Entity(Guid(3)));
+            assert_candidates(&targets, Vector3::zero(), &expected);
+            assert_candidates(&targets, moved, &[SpatialBodyId::Entity(Guid(3))]);
+
+            // Appending a lower identity must preserve query ordering and existing slots.
+            targets.push(target(0, moved)).unwrap();
+            assert_candidates(
+                &targets,
+                moved,
+                &[
+                    SpatialBodyId::Entity(Guid(0)),
+                    SpatialBodyId::Entity(Guid(3)),
+                ],
+            );
+            targets.replace(target(3, Vector3::zero())).unwrap();
+            expected.push(SpatialBodyId::Entity(Guid(3)));
+            expected.sort_unstable();
+            assert_candidates(&targets, Vector3::zero(), &expected);
+            assert_candidates(&targets, moved, &[SpatialBodyId::Entity(Guid(0))]);
+        }
+        assert_candidates(&HardTargets::new(vec![]).unwrap(), Vector3::zero(), &[]);
+    }
+
+    fn assert_candidates(targets: &HardTargets, center: Vector3, expected: &[SpatialBodyId]) {
+        let identities = |body: &SweepTarget| body.contact.body_id;
+        assert_eq!(
+            targets
+                .sphere_candidates(center, 0.5)
+                .map(identities)
+                .collect::<Vec<_>>(),
+            expected
+        );
+        assert_eq!(
+            targets
+                .support_candidates(center, 0.5)
+                .map(identities)
+                .collect::<Vec<_>>(),
+            expected
+        );
     }
 
     #[test]

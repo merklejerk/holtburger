@@ -62,6 +62,7 @@ describe("client lifecycle reducer", () => {
 			state,
 			authority({ kind: "character-selection", characters }),
 		);
+		expect(state).toMatchObject({ selectedGuid: characters[0].guid });
 		state = reduceClientLifecycleUiState(state, { type: "select", guid: 8 });
 
 		expect(state).toEqual({
@@ -73,7 +74,7 @@ describe("client lifecycle reducer", () => {
 		expect(state).toMatchObject({ selectedGuid: 8 });
 	});
 
-	it("preserves a valid selection across refreshed character lists and clears stale identity", () => {
+	it("preserves a valid selection across refreshed character lists and replaces stale identity with the first available character", () => {
 		let state = reduceClientLifecycleUiState(
 			initialClientLifecycleUiState(),
 			authority({ kind: "character-selection", characters }),
@@ -89,6 +90,12 @@ describe("client lifecycle reducer", () => {
 			type: "authority",
 			lifecycle: { kind: "character-selection", characters: [characters[1]] },
 		});
+		expect(state).toMatchObject({ selectedGuid: characters[1].guid });
+
+		state = reduceClientLifecycleUiState(
+			state,
+			authority({ kind: "character-selection", characters: [] }),
+		);
 		expect(state).toMatchObject({ selectedGuid: null });
 	});
 

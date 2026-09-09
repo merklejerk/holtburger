@@ -1,5 +1,8 @@
 //! Client-composition adapter into the shared focused dynamic-entity projection.
 
+use super::simulation::ClientBodyMotion;
+use anyhow::Context;
+
 use holtburger_common::Guid;
 use holtburger_common::properties::{
     PropertyFloat, PropertyInt, PropertyString, WorldObjectExt as _,
@@ -201,11 +204,8 @@ impl ClientRuntime {
         after: Vec<crate::DynamicEntityView>,
         host_time: DynamicEntityHostTime,
         duration_ms: f64,
-        placement_kind_overrides: &std::collections::HashMap<
-            Guid,
-            DynamicEntityPlacementAdvanceKind,
-        >,
-    ) -> Option<DynamicEntityEvent> {
+        body_motions: &std::collections::HashMap<Guid, ClientBodyMotion>,
+    ) -> anyhow::Result<Option<DynamicEntityEvent>> {
         let before_by_guid = before
             .into_iter()
             .map(|entity| (entity.identity.guid, entity))
@@ -217,7 +217,10 @@ impl ClientRuntime {
             let Some(previous) = before_by_guid.get(&entity.identity.guid) else {
                 continue;
             };
-            if previous.generation != entity.generation || previous == &entity {
+            let motion = body_motions.get(&entity.identity.guid);
+            let traversed = matches!(motion, Some(ClientBodyMotion::Physical(path))
+                if path.legs().iter().any(|leg| leg.end() != path.initial()));
+            if previous.generation != entity.generation || previous == &entity && !traversed {
                 continue;
             }
 
@@ -240,33 +243,52 @@ impl ClientRuntime {
                 continue;
             };
 
-            if previous_pose == current_pose && previous_membership == current_membership {
+            // Collision residency can refresh membership without integrating this body.
+            if previous_pose == current_pose && !traversed {
                 updates.push(Box::new(entity));
                 continue;
             }
 
-            let initial = DynamicEntityPathPoint {
-                pose: *previous_pose,
-                spatial_membership: previous_membership.clone(),
+            // Only pose-only movement and snaps need an endpoint approximation.
+            let endpoint_path = || DynamicEntityPlacedPath {
+                initial: DynamicEntityPathPoint {
+                    pose: *previous_pose,
+                    spatial_membership: previous_membership.clone(),
+                },
+                legs: vec![DynamicEntityPathLeg {
+                    end_fraction: 1.0,
+                    end: DynamicEntityPathPoint {
+                        pose: *current_pose,
+                        spatial_membership: current_membership.clone(),
+                    },
+                }],
             };
-            let end = DynamicEntityPathPoint {
-                pose: *current_pose,
-                spatial_membership: current_membership.clone(),
-            };
-
+            let (kind, path) =
+                match motion.with_context(|| format!(
+                    "changed entity placement has no simulation outcome: guid={:#010x}; previous_pose={previous_pose:?}; current_pose={current_pose:?}; previous_membership={previous_membership:?}; current_membership={current_membership:?}",
+                    entity.identity.guid.0,
+                ))? {
+                    ClientBodyMotion::Physical(path) => (
+                        DynamicEntityPlacementAdvanceKind::Integrated,
+                        DynamicEntityPlacedPath::from_motion(
+                            path,
+                            previous_pose.rotation,
+                            current_pose.rotation,
+                        )?,
+                    ),
+                    ClientBodyMotion::PoseOnly => (
+                        DynamicEntityPlacementAdvanceKind::Integrated,
+                        endpoint_path(),
+                    ),
+                    ClientBodyMotion::CorrectionSnap => (
+                        DynamicEntityPlacementAdvanceKind::CorrectionSnap,
+                        endpoint_path(),
+                    ),
+                };
             advances.push(DynamicEntityAdvance {
                 entity: Box::new(entity),
-                kind: placement_kind_overrides
-                    .get(&previous.identity.guid)
-                    .copied()
-                    .unwrap_or(DynamicEntityPlacementAdvanceKind::Integrated),
-                path: DynamicEntityPlacedPath {
-                    initial,
-                    legs: vec![DynamicEntityPathLeg {
-                        end_fraction: 1.0,
-                        end,
-                    }],
-                },
+                kind,
+                path,
             });
         }
 
@@ -279,8 +301,10 @@ impl ClientRuntime {
         } else {
             duration_ms
         };
-        DynamicEntityTickBatch::new(host_time, duration_ms, advances, updates)
-            .map(|batch| DynamicEntityEvent::Ticked { batch })
+        Ok(
+            DynamicEntityTickBatch::new(host_time, duration_ms, advances, updates)
+                .map(|batch| DynamicEntityEvent::Ticked { batch }),
+        )
     }
 }
 
@@ -816,14 +840,25 @@ mod tests {
         let before = client.current_dynamic_entity_views();
         let _ = client.world.set_local_player_runtime_pose(end);
         let after = client.current_dynamic_entity_views();
+        let missing = client
+            .dynamic_entity_tick_event(
+                before.clone(),
+                after.clone(),
+                DynamicEntityHostTime::new(12.5).unwrap(),
+                30.0,
+                &Default::default(),
+            )
+            .unwrap_err();
+        assert!(missing.to_string().contains("no simulation outcome"));
         let event = client
             .dynamic_entity_tick_event(
                 before,
                 after,
                 DynamicEntityHostTime::new(12.5).expect("test host time is valid"),
                 30.0,
-                &Default::default(),
+                &std::collections::HashMap::from([(guid, ClientBodyMotion::PoseOnly)]),
             )
+            .unwrap()
             .expect("changed world placement should produce one advance");
 
         let DynamicEntityEvent::Ticked { batch } = event else {
@@ -917,10 +952,7 @@ mod tests {
         client.world.add_entity(projectable_entity(guid, start));
         let before = client.current_dynamic_entity_views();
         client.world.set_local_player_runtime_pose(end);
-        let kinds = std::collections::HashMap::from([(
-            guid,
-            DynamicEntityPlacementAdvanceKind::CorrectionSnap,
-        )]);
+        let kinds = std::collections::HashMap::from([(guid, ClientBodyMotion::CorrectionSnap)]);
 
         let event = client
             .dynamic_entity_tick_event(
@@ -930,6 +962,7 @@ mod tests {
                 30.0,
                 &kinds,
             )
+            .unwrap()
             .expect("correction snap should produce one advance");
         let DynamicEntityEvent::Ticked { batch } = event else {
             panic!("expected a tick event");
@@ -968,6 +1001,7 @@ mod tests {
                 30.0,
                 &Default::default(),
             )
+            .unwrap()
             .expect("path-stable contact change should produce one update");
 
         let DynamicEntityEvent::Ticked { batch } = event else {
@@ -1003,6 +1037,7 @@ mod tests {
                     30.0,
                     &Default::default(),
                 )
+                .unwrap()
                 .is_none()
         );
     }

@@ -119,6 +119,13 @@ pub(crate) fn handle_message(
                 } => (snapshot, motion_changed, actions, rejected_actions),
             };
 
+            let sticky_target = match &data.data {
+                holtburger_protocol::messages::MovementTypeData::Invalid(motion) => {
+                    motion.sticky_object
+                }
+                _ => None,
+            };
+            state.admit_entity_sticky_target(guid, sticky_target);
             report_unsupported_interpreted_commands(state, guid, snapshot);
             report_rejected_motion_actions(guid, rejected_actions);
             state.enqueue_entity_motion_actions(guid, actions);

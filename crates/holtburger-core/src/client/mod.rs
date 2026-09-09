@@ -11,6 +11,7 @@ use tokio::sync::{broadcast, mpsc};
 
 mod builder;
 mod camera;
+mod camera_service;
 pub mod character_axes;
 pub mod character_jump;
 pub mod character_kinematics;
@@ -35,6 +36,7 @@ pub mod selection_query;
 mod simulation;
 pub mod types;
 pub use builder::ClientRuntimeBuilder;
+use camera::ClientCameraSettlement;
 pub use camera::{
     ClientCameraClearance, ClientCameraClearanceRequest, ClientCameraCollisionProof,
     ClientCameraDiagnostics, ClientCameraFailureReason, ClientCameraIdentity,
@@ -42,7 +44,8 @@ pub use camera::{
     ClientCameraStartRequest, ClientCameraTargetSphereRole, ClientCameraTick,
     ClientCameraUpdateReceipt,
 };
-use camera::{ClientCameraRuntime, ClientCameraSettlement};
+pub use camera_service::ClientCameraInputHandle;
+use camera_service::ClientCameraService;
 use character_selection::CharacterSelectionState;
 use movement::MovementSystem;
 pub use precise_jump_runtime::{
@@ -111,8 +114,8 @@ pub struct ClientRuntime {
     /// One generation-scoped replacement transition. `None` means the active scene is continuous
     /// (or the client has not selected a character yet).
     activation: Option<ClientWorldActivationRuntime>,
-    /// Client-local camera boom advanced inside the same authority clock as entity presentation.
-    camera: ClientCameraRuntime,
+    /// Independently serviced camera consuming immutable authority publications.
+    camera: ClientCameraService,
     /// Replaceable speculative aim work and ordered precise-jump commit state.
     precise_jump: precise_jump_runtime::PreciseJumpRuntime,
     character_selection: CharacterSelectionState,
@@ -402,10 +405,12 @@ impl ClientRuntime {
                 .collision_coordinator
                 .as_ref()
                 .map(collision::ClientCollisionCoordinator::snapshot);
-            match self
-                .camera
-                .settle_for_activation(&self.world, collision_snapshot.as_deref())?
-            {
+            let camera_input = camera::ClientCameraSceneInput::capture(
+                &self.world,
+                collision_snapshot.as_deref(),
+                None,
+            );
+            match self.camera.settle_for_activation(&camera_input)? {
                 ClientCameraSettlement::Pending => {}
                 ClientCameraSettlement::Settled(tick) => {
                     self.emit_camera_event(tick);
@@ -614,6 +619,11 @@ impl ClientRuntime {
 
     pub fn subscribe_client_view_events(&self) -> broadcast::Receiver<ClientViewEvent> {
         self.client_view_event_tx.subscribe()
+    }
+
+    /// Direct camera input bypasses the entity simulation command queue.
+    pub fn camera_input_handle(&self) -> ClientCameraInputHandle {
+        self.camera.input_handle()
     }
 
     pub fn set_command_rx(&mut self, rx: mpsc::UnboundedReceiver<ClientCommand>) {
@@ -1437,7 +1447,11 @@ mod tests {
             movement,
             response_policy,
             entity_collision: DynamicBodyCollisionDefinition {
+                contact_response: holtburger_world::EntityContactResponse::Character(
+                    holtburger_world::EntityIntegrationEligibility::Eligible,
+                ),
                 target_geometry: Arc::new(PreparedEntityTargetGeometry {
+                    setup_radius: 0.5,
                     physics_bsp_parts: Vec::new(),
                     fallback_setup_did: 0,
                     fallback_shapes: Vec::new(),
@@ -2036,7 +2050,8 @@ mod tests {
                 .motion_runtimes
                 .playing_clip(guid)
                 .map(|clip| clip.animation_id),
-            Some(JUMP_FIXTURE_RUN_ANIMATION)
+            Some(JUMP_FIXTURE_RUN_ANIMATION),
+            "fractional run-frame movement must already produce locomotion presentation"
         );
 
         client
@@ -2515,6 +2530,7 @@ mod tests {
                 30.0,
                 &Default::default(),
             )
+            .unwrap()
             .expect("clip-only change must publish a path-stable update");
         let DynamicEntityEvent::Ticked { batch } = event else {
             panic!("expected a dynamic entity tick");
@@ -2919,9 +2935,10 @@ mod tests {
             client
                 .world
                 .motion_runtimes
-                .playing_clip(remote_guid)
-                .map(|clip| clip.animation_id),
-            Some(JUMP_FIXTURE_STAND_ANIMATION),
+                .state(remote_guid)
+                .unwrap()
+                .substate,
+            holtburger_world::motion::MotionCommand(FIXTURE_STAND_COMMAND),
             "the next launch must begin from initialized style-zero idle authority"
         );
 
@@ -3668,6 +3685,242 @@ mod tests {
                 ..
             } if *event_id == body_id
         )));
+    }
+
+    #[test]
+    fn stationary_nonintegrating_body_publishes_refreshed_cell_membership() {
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let guid = Guid(0x0102_0304);
+        let pose = WorldPosition {
+            landblock_id: Guid(0x1000_0100),
+            coords: Vector3::new(12.0, 12.0, 1.0),
+            rotation: Quaternion::identity(),
+        };
+        client.world.seed_local_player_entity(guid, "Player", pose);
+        let entity = client.world.entities.get_mut(guid).unwrap();
+        entity.wcid = Some(42);
+        entity.set_did_prop(PropertyDataId::Setup, Guid(0x0200_0001));
+        let body_id = SpatialBodyId::LocalPlayer(guid);
+        let definition = stable_dynamic_body_definition().definition().clone();
+        client
+            .world
+            .scene
+            .set_dynamic_physical_body(
+                body_id,
+                Some(
+                    DynamicPhysicalBodyConfiguration::new(
+                        definition,
+                        LocalPhysicalDemand {
+                            target: LocalTargetDemand::Retained,
+                            integration: LocalIntegrationDemand::Excluded,
+                        },
+                    )
+                    .unwrap(),
+                ),
+                PhysicalCollisionFilter::ALL,
+                Some(pose.landblock_id),
+            )
+            .unwrap();
+        let before = client.current_dynamic_entity_views();
+        let before_membership = client
+            .world
+            .scene
+            .body(body_id)
+            .unwrap()
+            .spatial_membership();
+        let mut scene = CollisionScene::new();
+        scene
+            .insert(LandblockCollisionAsset {
+                landblock_id: 0x1000_ffff,
+                terrain: TerrainCollisionSurface::empty(),
+                static_geometry: LandblockColliders::new(
+                    Vec::new(),
+                    vec![holtburger_content::CellVolume {
+                        cell_selector: 0x0100,
+                        placement: holtburger_content::LandblockPlacement {
+                            origin: Vector3::zero(),
+                            orientation: Quaternion::identity(),
+                        },
+                        planes: Vec::new(),
+                        portals: vec![holtburger_content::CellCollisionPortal {
+                            plane: holtburger_common::Plane {
+                                normal: Vector3::new(1.0, 0.0, 0.0),
+                                d: -12.0,
+                            },
+                            positive_side: true,
+                            target: holtburger_content::CellCollisionPortalTarget::Outdoor,
+                            outdoor_building: None,
+                        }],
+                    }],
+                ),
+            })
+            .unwrap();
+        let interest =
+            SimulationSceneInterest::prefetch_neighborhood(pose, CLIENT_COLLISION_OWNER_RADIUS)
+                .unwrap();
+        let collision = collision_snapshot(interest, scene);
+        let tick = simulation::tick(
+            Instant::now(),
+            Duration::from_millis(PHYSICS_TICK_MS),
+            &mut client.world,
+            &mut client.movement,
+            Some(&collision),
+        )
+        .unwrap();
+        assert!(
+            tick.body_motions.is_empty(),
+            "excluded body must not integrate"
+        );
+        let body = client.world.scene.body(body_id).unwrap();
+        assert_eq!(body.pose, pose);
+        assert_ne!(body.spatial_membership(), before_membership);
+        let event = client
+            .dynamic_entity_tick_event(
+                before,
+                client.current_dynamic_entity_views(),
+                DynamicEntityHostTime::new(1.0).unwrap(),
+                30.0,
+                &tick.body_motions,
+            )
+            .unwrap()
+            .unwrap();
+        let DynamicEntityEvent::Ticked { batch } = event else {
+            panic!("expected a membership update")
+        };
+        assert!(batch.advances.is_empty());
+        assert_eq!(batch.updates.len(), 1);
+        let crate::DynamicEntityPlacementView::World {
+            pose: published,
+            spatial_membership,
+            ..
+        } = &batch.updates[0].placement
+        else {
+            panic!("expected world placement")
+        };
+        assert_eq!(*published, pose);
+        assert_eq!(
+            spatial_membership.reached_env_cell_ids,
+            vec![pose.landblock_id]
+        );
+    }
+
+    /// Runs real free-body integration into a floor, producing a bent accepted route.
+    pub(super) fn floor_contact_publication() -> (
+        ClientRuntime,
+        SimulationSceneSnapshot,
+        crate::DynamicEntityTickBatch,
+    ) {
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let guid = Guid(0x0102_0304);
+        let pose = WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            coords: Vector3::new(12.0, 12.0, 0.55),
+            rotation: Quaternion::identity(),
+        };
+        client.world.seed_local_player_entity(guid, "Player", pose);
+        client
+            .world
+            .entities
+            .get_mut(guid)
+            .unwrap()
+            .set_did_prop(PropertyDataId::Setup, Guid(0x0200_0001));
+        client.world.entities.get_mut(guid).unwrap().wcid = Some(42);
+        let body_id = SpatialBodyId::LocalPlayer(guid);
+        let definition = PhysicalBodyDefinition::free_sphere(
+            PhysicalSphereSet::new(
+                holtburger_common::Sphere {
+                    center: Vector3::zero(),
+                    radius: 0.5,
+                },
+                None,
+            )
+            .unwrap(),
+            FreeSphereConfig {
+                maximum_substep_distance: 0.25,
+                maximum_substeps: 32,
+                maximum_contact_passes: 8,
+                separation_epsilon: 0.0005,
+            },
+        )
+        .unwrap();
+        client
+            .world
+            .scene
+            .set_dynamic_physical_body(
+                body_id,
+                Some(dynamic_definition(
+                    definition,
+                    PhysicalBodyResponsePolicy {
+                        restitution: PhysicalRestitution::Elastic(PhysicalElasticity::MAXIMUM),
+                        friction: PhysicalFriction::new(0.0).unwrap(),
+                        surface_motion: PhysicalSurfaceMotion::Stable,
+                        align_path: false,
+                    },
+                )),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+        let mut body = client.world.scene.body(body_id).unwrap().clone();
+        body.retained.velocity = Vector3::new(3.0, 0.0, -4.0);
+        client.world.scene.update_body(body).unwrap();
+        let interest =
+            SimulationSceneInterest::prefetch_neighborhood(pose, CLIENT_COLLISION_OWNER_RADIUS)
+                .unwrap();
+        let collision = collision_snapshot(
+            interest.clone(),
+            flat_collision_scene_for_interest(&interest),
+        );
+        let before = client.current_dynamic_entity_views();
+        let dt = Duration::from_millis(PHYSICS_TICK_MS);
+        let tick = simulation::tick(
+            Instant::now(),
+            dt,
+            &mut client.world,
+            &mut client.movement,
+            Some(&collision),
+        )
+        .unwrap();
+        let simulation::ClientBodyMotion::Physical(accepted) = &tick.body_motions[&guid] else {
+            panic!("expected a physical route")
+        };
+        assert!(
+            accepted.legs().len() > 1,
+            "fixture must exercise intermediate geometry"
+        );
+        let event = client
+            .dynamic_entity_tick_event(
+                before,
+                client.current_dynamic_entity_views(),
+                DynamicEntityHostTime::new(1.0).unwrap(),
+                dt.as_secs_f64() * 1000.0,
+                &tick.body_motions,
+            )
+            .unwrap()
+            .unwrap();
+        let crate::DynamicEntityEvent::Ticked { batch } = event else {
+            panic!("expected physical publication")
+        };
+        let path = &batch.advances[0].path;
+        assert_eq!(path.legs.len(), accepted.legs().len());
+        for (published, solved) in path.legs.iter().zip(accepted.legs()) {
+            assert_eq!(published.end_fraction, solved.end_fraction());
+            assert_eq!(published.end.pose.coords, solved.end().center());
+            assert_eq!(
+                published.end.spatial_membership,
+                crate::DynamicEntitySpatialMembership::from(solved.end().placement())
+            );
+        }
+        let intermediate = &path.legs[0];
+        let endpoint = path.legs.last().unwrap().end.pose.coords;
+        let chord = pose.coords + (endpoint - pose.coords) * intermediate.end_fraction;
+        assert!(
+            (intermediate.end.pose.coords - chord).length() > 0.001,
+            "endpoint-only publication must fail this fixture"
+        );
+        let wire = serde_json::to_string(&batch).unwrap();
+        let batch: crate::DynamicEntityTickBatch = serde_json::from_str(&wire).unwrap();
+        (client, collision, batch)
     }
 
     #[tokio::test]

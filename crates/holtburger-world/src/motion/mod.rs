@@ -15,6 +15,7 @@ mod tests;
 
 mod actuation;
 mod directed;
+mod observed;
 mod registry;
 mod selection;
 mod sequence;
@@ -35,10 +36,16 @@ pub use directed::{
     ServerDirectedMotionStep, ServerDirectedTarget, begin_server_directed_motion,
     resolve_server_directed_motion,
 };
+pub use observed::{
+    LocomotionPresentationSource, OBSERVED_ANGULAR_IDLE_RATE_RADIANS,
+    OBSERVED_LINEAR_IDLE_SPEED_MPS, OBSERVED_RUN_SPEED_MPS, OBSERVED_TURN_RATE_RADIANS,
+    OBSERVED_WALK_SPEED_MPS, observed_locomotion_order,
+};
 pub use registry::{
     BodyMotionRuntime, MotionActionEnqueueOutcome, MotionPresentation, MotionRuntimeRegistry,
-    PlayingMotionClip, SettledMotionPose,
+    PlayingMotionClip, RemoteMotionSample, SettledMotionPose,
 };
+pub(crate) use registry::{RemoteFramePolicy, RemoteMotionInput};
 pub use selection::{
     ActionSelectionOutcome, MotionSelectionOutcome, select_action, select_motion,
     set_default_state, stop_completely, stop_motion,

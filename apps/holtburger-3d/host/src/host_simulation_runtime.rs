@@ -18,13 +18,12 @@ use holtburger_core::{
     set_dynamic_entity_physical_configuration,
 };
 use holtburger_world::{
-    CollisionQueryError, CollisionReportOutcome, CollisionScene, DynamicBodyKinematics,
-    DynamicBodyRelocationOutcome, DynamicPhysicalBodyConfiguration, DynamicPhysicalBodyDefinition,
-    EffectiveEntityPhysicsState, GroundedBodyActuation, LocalPhysicalDemand, PhysicalBodyActuation,
-    PhysicalBodyDefinition, PhysicalBodyResponsePolicy, PhysicalBodySceneResidency,
-    PhysicalBodyTickResult, PhysicalCollisionFilter, PlacedMotionPath, PlacementRecovery,
-    RuntimeSpatialBodyView, SpatialBody, SpatialBodyId, SpatialScene,
-    physical_body_scene_residency,
+    CollisionReportOutcome, CollisionScene, DynamicBodyKinematics, DynamicBodyRelocationOutcome,
+    DynamicPhysicalBodyConfiguration, DynamicPhysicalBodyDefinition, EffectiveEntityPhysicsState,
+    GroundedBodyActuation, LocalPhysicalDemand, PhysicalBodyActuation, PhysicalBodyDefinition,
+    PhysicalBodyResponsePolicy, PhysicalBodySceneResidency, PhysicalBodyTickResult,
+    PhysicalCollisionFilter, PlacedMotionPath, PlacementRecovery, RuntimeSpatialBodyView,
+    SpatialBody, SpatialBodyId, SpatialScene, physical_body_scene_residency,
 };
 use serde::{Deserialize, Serialize};
 
@@ -129,9 +128,9 @@ pub struct HostPhysicalBodySceneSnapshot {
     pub scene_residency: PhysicalBodySceneResidency,
 }
 
-/// One non-committing collection member paired with its sampled immutable scene.
+/// A body whose collection step reached unavailable coverage, paired with its query scene.
 pub struct HostPhysicalBodyCoverageRejection {
-    /// Complete unchanged body state from the collection epoch.
+    /// Current canonical body, including any accepted prefix before coverage ran out.
     pub body: SpatialBody,
     /// First normalized owner required by the body's actual transaction.
     pub owner: Guid,
@@ -139,10 +138,26 @@ pub struct HostPhysicalBodyCoverageRejection {
     pub collision: Arc<CollisionScene>,
 }
 
+/// Accepted entity collection publication; direct explorer probes retain their transaction result.
+pub struct HostDynamicBodyTick {
+    /// Canonical state before collection actuation.
+    pub previous: SpatialBody,
+    /// Canonical final state, shared with subsequent collision queries.
+    pub current: SpatialBody,
+    /// Accepted root travel and placement for delivery and follow-camera sampling.
+    pub path: PlacedMotionPath,
+    /// Supported visual travel, including horizontal separation but excluding lifts and air travel.
+    pub supported_motion: holtburger_world::AcceptedBodyMotion,
+    /// Collision-owned local effective-state change, if any.
+    pub dynamic_state_change: Option<holtburger_world::DynamicBodyPhysicsStateChange>,
+    /// Immutable collision snapshot that proved the movement.
+    pub collision: Arc<CollisionScene>,
+}
+
 /// One committed collection epoch with body motion and report edges kept orthogonal.
 pub struct HostDynamicEntityCollectionTick {
-    /// Stable-ID directional body commits accepted during this epoch.
-    pub bodies: Vec<HostPhysicalBodyTick>,
+    /// Stable-ID body publications from one bounded collection.
+    pub bodies: Vec<HostDynamicBodyTick>,
     /// Body-local coverage rejections that did not prevent independent commits.
     pub coverage_rejections: Vec<HostPhysicalBodyCoverageRejection>,
     /// First-touch and end edges; silent refreshes are intentionally absent.
@@ -411,99 +426,90 @@ impl HostSimulationRuntime {
         )
     }
 
-    /// Advances every state-eligible dynamic entity in one locked collection epoch.
-    ///
-    /// Identity order and body facts are captured before the first solve. Each accepted solve
-    /// commits independently, while every body observes the same immutable static-collision scene.
-    /// The later peer-collision phase can consume this same tick-start snapshot without changing
-    /// registry ownership or introducing a whole-world rollback transaction.
-    /// `actuation_for` chooses each scheduled body's drive for this tick. Callers that have nothing
-    /// to say pass `dynamic_entity_coasting_actuation`; a possessed body's authored offset arrives
-    /// this way rather than through registry state the simulation would have to know about.
+    /// Advances explorer actors through the shared bounded collection. These local actors have
+    /// authored or autonomous input with contact-return capture disabled. Server-driven fixed
+    /// snaps and checked reference recovery are unsupported here and return an explicit error.
+    /// Like other publication errors, that error does not roll back the scene commit.
     pub fn tick_dynamic_entity_collection(
         &self,
         delta_seconds: f32,
         now: std::time::Instant,
-        mut actuation_for: impl FnMut(&SpatialBody) -> Result<PhysicalBodyActuation>,
+        mut input_for: impl FnMut(&SpatialBody) -> Result<holtburger_world::PhysicalBodyInput>,
     ) -> Result<HostDynamicEntityCollectionTick> {
         let mut state = self.state.lock().expect("host simulation lock poisoned");
         let scene = state.residency.snapshot().scene.clone();
-        let prepared = state.bodies.prepare_dynamic_entity_collection(
-            &scene,
-            delta_seconds,
-            &mut actuation_for,
-        )?;
-        let mut coverage_rejections = prepared
+        let mut previous = std::collections::BTreeMap::new();
+        let collection =
+            state
+                .bodies
+                .advance_dynamic_entity_collection(&scene, delta_seconds, now, |body| {
+                    previous.insert(body.id, body.clone());
+                    input_for(body)
+                })?;
+        let mut ticks = Vec::with_capacity(collection.outcomes.len());
+        for outcome in collection.outcomes {
+            let update = match outcome {
+                holtburger_world::DynamicEntityBodyOutcome::Integrated(update) => update,
+                holtburger_world::DynamicEntityBodyOutcome::FixedPlacement(id) => {
+                    anyhow::bail!("Explorer collection cannot publish an authority snap for {id:?}")
+                }
+                holtburger_world::DynamicEntityBodyOutcome::RecoveredPlacement(id) => {
+                    anyhow::bail!(
+                        "Explorer collection cannot reset a remote recovery source for {id:?}"
+                    )
+                }
+            };
+            let previous = previous
+                .remove(&update.body_id)
+                .context("collection publication lost its captured body")?;
+            let current = state
+                .bodies
+                .body(update.body_id)
+                .cloned()
+                .context("collection publication lost its canonical body")?;
+            let settled = |body: &SpatialBody| {
+                body.physical
+                    .as_ref()
+                    .is_some_and(|physical| physical.is_settled())
+            };
+            if settled(&previous) && settled(&current) {
+                continue;
+            }
+            let path = update.path;
+            if path.has_recovery() {
+                report_placed_motion_recoveries(
+                    &format!("physical body {:?}", update.body_id),
+                    &path,
+                );
+            }
+            ticks.push(HostDynamicBodyTick {
+                previous,
+                current,
+                path,
+                supported_motion: update.supported_motion,
+                dynamic_state_change: update.dynamic_state_change,
+                collision: Arc::clone(&scene),
+            });
+        }
+        let coverage_rejections = collection
             .coverage_rejections
             .into_iter()
-            .map(|rejection| HostPhysicalBodyCoverageRejection {
-                // The rejection envelope outlives this lock while the unchanged canonical body
-                // remains registered for a later retry.
-                body: state
-                    .bodies
-                    .body(rejection.body_id)
-                    .cloned()
-                    .expect("coverage-rejected body vanished while collection lock was held"),
-                owner: rejection.owner,
-                collision: Arc::clone(&scene),
-            })
-            .collect::<Vec<_>>();
-        let mut ticks = Vec::with_capacity(prepared.movers.len());
-        for body_id in prepared.movers {
-            // The host result owns both temporal levels; the scene must simultaneously retain the
-            // canonical current level for subsequent body commits and queries.
-            let previous = state
-                .bodies
-                .body(body_id)
-                .cloned()
-                .expect("scheduled dynamic body vanished while collection lock was held");
-            let solved = state
-                .bodies
-                .tick_prepared_dynamic_physical_body(body_id, &scene, now)
-                .map(|result| {
-                    report_body_placement_recoveries(body_id, &result);
-                    let current = state
+            .map(|rejection| {
+                Ok(HostPhysicalBodyCoverageRejection {
+                    body: state
                         .bodies
-                        .body(body_id)
+                        .body(rejection.body_id)
                         .cloned()
-                        .expect("physical body vanished during a locked host collection tick");
-                    HostPhysicalBodyTick {
-                        previous,
-                        current,
-                        result,
-                        collision: Arc::clone(&scene),
-                    }
-                });
-            match solved {
-                Ok(tick) => ticks.push(tick),
-                Err(error) => {
-                    let Some(CollisionQueryError::UnavailableOwner { owner }) =
-                        error.downcast_ref::<CollisionQueryError>()
-                    else {
-                        return Err(error);
-                    };
-                    coverage_rejections.push(HostPhysicalBodyCoverageRejection {
-                        body: state
-                            .bodies
-                            .body(body_id)
-                            .cloned()
-                            .expect("coverage-rejected body vanished after its tentative solve"),
-                        owner: Guid(*owner),
-                        collision: Arc::clone(&scene),
-                    });
-                }
-            }
-        }
-        coverage_rejections.sort_by_key(|rejection| rejection.body.id);
-        let mut collision_reports = ticks
-            .iter()
-            .flat_map(|tick| tick.result.collision_reports.iter().copied())
-            .collect::<Vec<_>>();
-        collision_reports.extend(state.bodies.finish_dynamic_entity_collection(now)?);
+                        .context("coverage-rejected body disappeared")?,
+                    owner: rejection.owner,
+                    collision: Arc::clone(&scene),
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
         Ok(HostDynamicEntityCollectionTick {
             bodies: ticks,
             coverage_rejections,
-            collision_reports,
+            collision_reports: collection.collision_reports,
         })
     }
 
@@ -770,7 +776,7 @@ fn tick_body_transaction<T>(
     let (result, accepted) = state.bodies.tick_physical_body_transaction(
         body_id,
         &scene,
-        actuation,
+        holtburger_world::PhysicalBodyInput::autonomous(actuation),
         delta_seconds,
         now,
         accept_tick,
@@ -803,6 +809,7 @@ pub(crate) fn dynamic_entity_coasting_actuation(
         .definition;
     match definition {
         PhysicalBodyDefinition::FixedPosition { .. } => Ok(PhysicalBodyActuation::FixedPosition {
+            translation: holtburger_common::Vector3::zero(),
             rotation: previous.pose.rotation,
         }),
         PhysicalBodyDefinition::FreeSphere { .. } => {

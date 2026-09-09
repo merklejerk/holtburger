@@ -595,16 +595,18 @@ function dynamicVisualKey(entity: DynamicEntityView): string {
 
 /** Exact scene-spatial placement used to avoid kinematic-level upserts clearing an active path. */
 function dynamicPlacementIdentity(entity: DynamicEntityView): string {
-	return dynamicPathIdentity(entity);
-}
-
-/** Placement facts whose change requires a scene path rather than a level-only tick update. */
-function dynamicPathIdentity(entity: DynamicEntityView): string {
 	return entity.placement.kind === "world"
 		? JSON.stringify({
 				pose: entity.placement.pose,
 				spatialMembership: entity.placement.spatialMembership,
 			})
+		: JSON.stringify(entity.placement);
+}
+
+/** Pose changes require travel; membership can refresh independently while a body is stationary. */
+function dynamicPathIdentity(entity: DynamicEntityView): string {
+	return entity.placement.kind === "world"
+		? JSON.stringify(entity.placement.pose)
 		: JSON.stringify(entity.placement);
 }
 
@@ -2222,9 +2224,17 @@ export class GamePresentationRuntime {
 					`Dynamic entity ${formatDynamicGuid(guid)} received a path-changing tick update without an advance.`,
 				);
 			}
+			const membershipChanged =
+				previous.placementIdentity !== dynamicPlacementIdentity(entity);
 			const desired = this.#acceptDynamicTickEntity(entity, previous);
 			const installed = this.#spawnedPresentations.get(guid);
 			if (installed?.generation !== entity.generation) continue;
+			if (membershipChanged && entity.placement.kind === "world") {
+				this.#dynamics.refreshPlacementMembership(
+					installed.nodeId,
+					entity.placement,
+				);
+			}
 			this.#applySpawnedPresentationState(installed, entity);
 			installed.placementIdentity = desired.placementIdentity;
 		}
@@ -2285,15 +2295,20 @@ export class GamePresentationRuntime {
 			return;
 		}
 		const clip = playingClipForDynamicEntityMotion(animation, motion);
-		this.#animation.playClip(
-			installed.ownerId,
-			{
-				generation: installed.behaviorGeneration,
-				targetId: behaviorTargetId(installed.nodeId),
-			},
-			clip,
-			this.#dynamics.getPartToObjectTransforms(installed.nodeId),
-		);
+		const target = {
+			generation: installed.behaviorGeneration,
+			targetId: behaviorTargetId(installed.nodeId),
+		};
+		if (update === "retime") {
+			this.#animation.setPlaybackRate(target, clip.framesPerSecond);
+		} else {
+			this.#animation.playClip(
+				installed.ownerId,
+				target,
+				clip,
+				this.#dynamics.getPartToObjectTransforms(installed.nodeId),
+			);
+		}
 		installed.motionState = { level: motion, playback: "installed" };
 	}
 

@@ -34,7 +34,7 @@ pub(crate) fn handle_message(
                 entity_name,
                 data.pos.unwrap_or_default(),
             );
-            entity.apply_description(data);
+            let sticky_target = entity.apply_description(data);
 
             let guid = entity.guid;
             let create_disposition = state.upsert_entity_from_create(entity, events);
@@ -42,6 +42,7 @@ pub(crate) fn handle_message(
                 state.update_player_inventory_recursive(guid, false);
                 return true;
             }
+            state.admit_entity_sticky_target(guid, sticky_target);
             state.retain_announced_children(guid, data.children.as_deref(), events);
             state.resolve_pending_child_link(guid, data.animation_frame.unwrap_or(0), events);
             if guid != state.player.guid

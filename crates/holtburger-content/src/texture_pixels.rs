@@ -40,7 +40,7 @@ pub(crate) fn decode_render_surface_pixels(
     match (output_format, render_surface.format) {
         (TexturePixelFormat::Rgba8, PixelFormatId::A8R8G8B8) => {
             let mut pixels = Vec::with_capacity(render_surface.source_data.len());
-            for source in render_surface.source_data.chunks_exact(4) {
+            for source in render_surface.source_data.as_chunks::<4>().0 {
                 // DAT stores direct 32-bit colors in little-endian BGRA byte order.
                 pixels.extend_from_slice(&[source[2], source[1], source[0], source[3]]);
             }

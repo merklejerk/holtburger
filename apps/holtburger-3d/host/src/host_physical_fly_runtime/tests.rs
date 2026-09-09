@@ -506,8 +506,12 @@ fn fixed_tick_publishes_the_complete_accepted_motion() {
     assert_eq!(path.initial.residency.landblock_id, "0xda55ffff");
     assert_eq!(path.initial.residency.env_cell_id, None);
     assert!((path.initial.origin[0] - 96.0).abs() < 0.001);
-    assert_eq!(path.legs.len(), 1);
-    assert_eq!(path.legs[0].end_fraction, 1.0);
+    assert_eq!(path.legs.last().unwrap().end_fraction, 1.0);
+    assert!(
+        path.legs
+            .windows(2)
+            .all(|legs| legs[0].end_fraction < legs[1].end_fraction)
+    );
     assert!((final_path_point(&path).origin[0] - 96.1).abs() < 0.001);
     assert_eq!(source.loaded.lock().unwrap().len(), 25);
 }

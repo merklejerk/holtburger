@@ -70,11 +70,8 @@ export interface PhysicalFlyStatus {
 	readonly tick: PhysicalFlyTickStatus | "awaiting-first-path";
 	readonly cellId: EnvCellId | null;
 	readonly groundState: PhysicalFlyGroundState;
-	readonly constraintCount: number;
 	readonly droppedPaths: number;
 	readonly sceneResidency: PhysicalFlySceneResidency | null;
-	readonly substeps: number;
-	readonly contactPasses: number;
 	readonly solveDurationMs: number;
 }
 
@@ -226,11 +223,8 @@ export class PhysicalFlySession {
 			tick: latest?.status ?? "awaiting-first-path",
 			cellId: latest?.legs.at(-1)?.end.residency.envCellId ?? null,
 			groundState: latest?.groundState ?? "unknown",
-			constraintCount: latest?.constraintCount ?? 0,
 			droppedPaths: this.#droppedPaths,
 			sceneResidency: latest?.sceneResidency ?? null,
-			substeps: latest?.substeps ?? 0,
-			contactPasses: latest?.contactPasses ?? 0,
 			solveDurationMs: latest?.solveDurationMs ?? 0,
 		};
 	}

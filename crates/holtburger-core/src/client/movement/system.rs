@@ -374,6 +374,22 @@ impl MovementSystem {
         self.queued_drive_commands.push(command);
     }
 
+    /// Resolves local support and standing-charge presentation for authored and observed playback.
+    pub(crate) fn character_presentation(
+        &self,
+        contact: ContactState,
+    ) -> CharacterMotionPresentation {
+        if contact == ContactState::Unknown {
+            CharacterMotionPresentation::StanceDefault
+        } else {
+            CharacterMotionPresentation::resolve(
+                contact,
+                false,
+                self.character_motion.is_standing_long_jump(),
+            )
+        }
+    }
+
     pub(crate) fn enqueue_character_motion_event(&mut self, event: SequencedCharacterMotionEvent) {
         self.queued_character_motion_events.push(event);
     }
@@ -530,6 +546,8 @@ impl MovementSystem {
 
         let queued = std::mem::take(&mut self.queued_drive_commands);
         if !queued.is_empty() {
+            // Explicit replacement input cancels sticky pursuit; ordinary playback ticks do not.
+            world.admit_entity_sticky_target(world.player.guid, None);
             log::info!(
                 "movement: ingesting {} queued drive commands at tick {:?}: {:?}",
                 queued.len(),
@@ -740,6 +758,52 @@ impl MovementSystem {
         })
     }
 
+    /// Resolves current local locomotion intent for presentation before collisions clip travel.
+    /// Explicit server control suppresses held local input; stop/expiry produces no override.
+    pub(crate) fn local_locomotion_order(&self, world: &WorldState) -> Result<Option<MotionOrder>> {
+        if self.has_server_controlled_motion() || world.player.guid.is_null() {
+            return Ok(None);
+        }
+        let state = match self.active_drive.map(|drive| drive.intent) {
+            Some(ActiveDriveIntent::Manual) => self.character_motion.effective_drive(),
+            Some(ActiveDriveIntent::Autonomous(intent)) => {
+                let Some(state) = Self::autonomous_wire_motion_state(world, intent) else {
+                    return Ok(None);
+                };
+                state
+            }
+            None => return Ok(None),
+        };
+        if state.is_stationary() {
+            return Ok(None);
+        }
+        let run_rate = world
+            .player_run_rate()
+            .ok_or_else(|| anyhow::anyhow!("local locomotion run-rate is unavailable"))?;
+        Self::local_drive_order(world, state, run_rate).map(|(_, order)| Some(order))
+    }
+
+    /// Shared command-to-table mapping for authored manual motion and local visual locomotion.
+    fn local_drive_order(
+        world: &WorldState,
+        state: CharacterDrive,
+        run_rate: f32,
+    ) -> Result<(MotionCommand, MotionOrder)> {
+        let resolution = world
+            .resolve_player_motion_table_profile()
+            .map_err(|error| anyhow::anyhow!("local motion table unavailable: {error}"))?;
+        let stance = world
+            .player_entity()
+            .and_then(|entity| entity.network_motion.snapshot())
+            .and_then(|snapshot| snapshot.current_style)
+            .or(world.player.last_server_motion_style)
+            .map(|style| MotionCommand(style as u32))
+            .unwrap_or(MotionCommand(resolution.movement_profile.stance));
+        let order = crate::motion_order_for_drive(state, run_rate, stance)
+            .map_err(|error| anyhow::anyhow!("local motion order invalid: {error}"))?;
+        Ok((stance, order))
+    }
+
     /// Advances the held local drive's authored motion once and returns that complete tick.
     ///
     /// Local prediction begins immediately while the authoritative snapshot may arrive later, but
@@ -788,7 +852,10 @@ impl MovementSystem {
                     self.server_controlled_motion = Some(step.state);
                     step.order
                 }
-                ServerDirectedMotionResolution::Complete => {
+                ServerDirectedMotionResolution::Complete { sticky_target } => {
+                    if let Some(target) = sticky_target {
+                        world.admit_entity_sticky_target(guid, Some(target));
+                    }
                     log::info!("movement: completed server-directed motion");
                     self.server_controlled_motion = None;
                     terminal_order
@@ -841,32 +908,13 @@ impl MovementSystem {
             _ => return Ok(None),
         };
 
-        let resolution = world
-            .resolve_player_motion_table_profile()
-            .map_err(|error| anyhow::anyhow!("manual local motion table unavailable: {error}"))?;
-        let stance = world
-            .player_entity()
-            .and_then(|entity| entity.network_motion.snapshot())
-            .and_then(|snapshot| snapshot.current_style)
-            .or(world.player.last_server_motion_style)
-            .map(|style| MotionCommand(style as u32))
-            .unwrap_or(MotionCommand(resolution.movement_profile.stance));
-        let mut order = crate::motion_order_for_drive(state, run_rate, stance)
-            .map_err(|error| anyhow::anyhow!("manual local motion order invalid: {error}"))?;
+        let (stance, mut order) = Self::local_drive_order(world, state, run_rate)?;
         let body_id = SpatialBodyId::LocalPlayer(guid);
         let contact = world
             .runtime_body_view(body_id)
             .map(|body| body.contact)
             .unwrap_or(ContactState::Unknown);
-        let presentation = if contact == ContactState::Unknown {
-            CharacterMotionPresentation::StanceDefault
-        } else {
-            CharacterMotionPresentation::resolve(
-                contact,
-                false,
-                self.character_motion.is_standing_long_jump(),
-            )
-        };
+        let presentation = self.character_presentation(contact);
         let required_command = match presentation {
             CharacterMotionPresentation::Ready => Some(MotionCommand::READY),
             CharacterMotionPresentation::Falling => Some(MotionCommand::FALLING),

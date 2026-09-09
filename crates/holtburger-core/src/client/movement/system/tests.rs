@@ -2019,3 +2019,66 @@ async fn stop_without_active_drive_keeps_autonomous_position_heartbeat_armed() {
 
     assert!(movement.next_autonomous_position_heartbeat_at.is_some());
 }
+
+#[test]
+fn local_visual_intent_preserves_channels_and_ends_on_stop_or_expiry() {
+    let mut world = WorldState::synthetic();
+    let guid = Guid(0x0102_3390);
+    world.player.guid = guid;
+    seed_local_player(
+        &mut world,
+        guid,
+        WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            ..WorldPosition::default()
+        },
+    );
+    seed_authored_manual_motion_world(&mut world, guid);
+    let mut movement = MovementSystem::new();
+    let now = Instant::now();
+    for drive in [
+        CharacterDrive::builder().run().forward().build(),
+        CharacterDrive::builder()
+            .walk()
+            .backstep()
+            .strafe_left()
+            .turn_right()
+            .build(),
+    ] {
+        install_manual_drive(&mut movement, drive, Some(now));
+        let order = movement.local_locomotion_order(&world).unwrap().unwrap();
+        let expected = crate::motion_order_for_drive(
+            drive,
+            world.player_run_rate().unwrap(),
+            MotionCommand(MotionStance::NonCombat as u32),
+        )
+        .unwrap();
+        assert_eq!(order, expected);
+        movement.expire_active_drive(now);
+        assert!(movement.local_locomotion_order(&world).unwrap().is_none());
+    }
+    movement.ingest_drive_command(
+        QueuedDriveCommand::Autonomous(AutonomousDriveIntent {
+            desired_world_delta: Vector3::new(1.0, 0.0, 0.0),
+            desired_heading: None,
+            target_hint: None,
+            gait: Gait::Run,
+            force_grounded: true,
+        }),
+        now,
+    );
+    assert_eq!(
+        movement
+            .local_locomotion_order(&world)
+            .unwrap()
+            .unwrap()
+            .forward
+            .unwrap()
+            .0,
+        MotionCommand::RUN_FORWARD
+    );
+    movement.ingest_drive_command(QueuedDriveCommand::Stop, now);
+    assert!(movement.local_locomotion_order(&world).unwrap().is_none());
+    install_manual_drive(&mut movement, CharacterDrive::default(), None);
+    assert!(movement.local_locomotion_order(&world).unwrap().is_none());
+}

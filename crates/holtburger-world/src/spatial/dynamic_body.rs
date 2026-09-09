@@ -41,6 +41,8 @@ impl PartialEq for PreparedEntityBspPart {
 /// Both retail target branches retained so a complete live state replacement is reversible.
 #[derive(Debug, Clone)]
 pub struct PreparedEntityTargetGeometry {
+    /// Authored setup radius at scale one, used for target-directed melee clearance.
+    pub setup_radius: f32,
     /// Actual appearance-substituted BSP parts used when `HasPhysicsBSP` is set.
     pub physics_bsp_parts: Vec<PreparedEntityBspPart>,
     /// Immutable SetupModel identity that owns the ordered fallback volumes.
@@ -53,7 +55,8 @@ pub struct PreparedEntityTargetGeometry {
 
 impl PartialEq for PreparedEntityTargetGeometry {
     fn eq(&self, other: &Self) -> bool {
-        self.physics_bsp_parts == other.physics_bsp_parts
+        self.setup_radius == other.setup_radius
+            && self.physics_bsp_parts == other.physics_bsp_parts
             && self.fallback_scale == other.fallback_scale
             && self.fallback_setup_did == other.fallback_setup_did
             && self.fallback_shapes.len() == other.fallback_shapes.len()
@@ -62,9 +65,38 @@ impl PartialEq for PreparedEntityTargetGeometry {
     }
 }
 
+/// Gameplay identity joined to its current physical movement permission, independently of sleep.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntityContactResponse {
+    /// Doors, scenery, and items retain authored hard target geometry even while animated.
+    Obstacle,
+    /// Character identity survives freezing so a later state replacement can restore yielding.
+    Character(crate::EntityIntegrationEligibility),
+}
+
+impl EntityContactResponse {
+    /// Replaces physical restrictions without losing the body's gameplay identity.
+    pub fn with_physics(self, state: crate::EffectiveEntityPhysicsState) -> Self {
+        match self {
+            Self::Obstacle => Self::Obstacle,
+            Self::Character(_) => Self::Character(state.integration_eligibility),
+        }
+    }
+
+    /// Scheduling and current velocity do not grant or revoke character yielding.
+    pub fn yields(self) -> bool {
+        matches!(
+            self,
+            Self::Character(crate::EntityIntegrationEligibility::Eligible)
+        )
+    }
+}
+
 /// Entity-specific prepared collision facts retained beside generic response memory.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DynamicBodyCollisionDefinition {
+    /// Type/state-owned contact response, independent from ordinary integration demand.
+    pub contact_response: EntityContactResponse,
     /// Shared stable target branches prepared once from immutable content.
     pub target_geometry: Arc<PreparedEntityTargetGeometry>,
     /// State-derived directional peer collision policy.
@@ -176,6 +208,7 @@ mod tests {
     #[test]
     fn prepared_geometry_equality_uses_immutable_content_identity_not_arc_identity() {
         let left = PreparedEntityTargetGeometry {
+            setup_radius: 0.5,
             physics_bsp_parts: vec![PreparedEntityBspPart {
                 part_index: 0,
                 gfx_obj_did: 0x0100_0001,
@@ -189,6 +222,7 @@ mod tests {
             fallback_scale: ColliderScale::uniform(1.0).unwrap(),
         };
         let right = PreparedEntityTargetGeometry {
+            setup_radius: 0.5,
             physics_bsp_parts: vec![PreparedEntityBspPart {
                 shape: ball_shape(),
                 ..left.physics_bsp_parts[0].clone()
@@ -235,7 +269,11 @@ mod tests {
                 align_path: false,
             },
             entity_collision: DynamicBodyCollisionDefinition {
+                contact_response: crate::spatial::EntityContactResponse::Character(
+                    crate::EntityIntegrationEligibility::Eligible,
+                ),
                 target_geometry: Arc::new(PreparedEntityTargetGeometry {
+                    setup_radius: 0.5,
                     physics_bsp_parts: Vec::new(),
                     fallback_setup_did: 0,
                     fallback_shapes: Vec::new(),

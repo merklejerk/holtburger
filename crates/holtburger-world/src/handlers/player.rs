@@ -21,7 +21,7 @@ pub(crate) fn handle_message(
                 }
 
                 if let Some(current_style) = EntityMotionSnapshot::from_object_description(data)
-                    .and_then(|snapshot| snapshot.current_style)
+                    .and_then(|(snapshot, _)| snapshot.current_style)
                 {
                     state
                         .player

@@ -52,6 +52,8 @@ pub struct ClientPlayerIdentity {
 /// Reusable entity facts captured before content preparation leaves the simulation thread.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClientEntityBodyFacts {
+    /// Gameplay character identity used by physical preparation, never inferred from animation.
+    pub is_contact_character: bool,
     /// Server-assigned entity identity.
     pub guid: Guid,
     /// Server instance sequence captured with the definition facts.
@@ -83,7 +85,8 @@ impl ClientEntityBodyFacts {
 
     /// Equality of content-backed facts, excluding live semantic physics state.
     fn preparation_eq(&self, other: &Self) -> bool {
-        self.guid == other.guid
+        self.is_contact_character == other.is_contact_character
+            && self.guid == other.guid
             && self.instance_sequence == other.instance_sequence
             && self.wcid == other.wcid
             && self.appearance == other.appearance
@@ -125,6 +128,21 @@ pub fn client_entity_body_facts(
         .ok_or(ClientEntityBodyFactsError::MissingSetup)?;
 
     Ok(ClientEntityBodyFacts {
+        is_contact_character: guid == world.player.guid
+            || entity
+                .flags
+                .contains(holtburger_common::properties::ObjectDescriptionFlag::PLAYER)
+            || (!entity.flags.intersects(
+                holtburger_common::properties::ObjectDescriptionFlag::DOOR
+                    | holtburger_common::properties::ObjectDescriptionFlag::CORPSE
+                    | holtburger_common::properties::ObjectDescriptionFlag::VENDOR,
+            ) && entity
+                .properties
+                .get_int_prop(holtburger_common::properties::PropertyInt::ItemType)
+                .is_some_and(|bits| {
+                    holtburger_common::properties::ItemType::from_bits_retain(bits as u32)
+                        .contains(holtburger_common::properties::ItemType::CREATURE)
+                })),
         guid: entity.guid,
         instance_sequence: entity.instance_sequence(),
         wcid,
@@ -183,6 +201,7 @@ impl ClientCollisionSource for ContentClientCollisionSource {
     fn prepare_body(&self, facts: ClientEntityBodyFacts) -> Result<DynamicPhysicalBodyDefinition> {
         crate::prepare_dynamic_entity_physical_definition(
             crate::DynamicEntityPhysicalPreparationInput {
+                is_contact_character: facts.is_contact_character,
                 wcid: facts.wcid,
                 setup_did: facts.setup_did,
                 appearance: facts.appearance,
@@ -910,7 +929,8 @@ fn client_remote_body_target(world: &WorldState, guid: Guid) -> Option<ClientRem
     } else {
         LocalTargetDemand::Absent
     };
-    let has_integration_work = facts.physics.response.gravity
+    let has_integration_work = facts.is_contact_character
+        || facts.physics.response.gravity
         || facts.physics.dynamic_collision.missile
         || world.body_has_simulatable_projection_basis(body_id)
         || body.has_pose_reconciliation_work();
@@ -1156,7 +1176,11 @@ mod tests {
                     align_path: false,
                 },
                 entity_collision: DynamicBodyCollisionDefinition {
+                    contact_response: holtburger_world::EntityContactResponse::Character(
+                        holtburger_world::EntityIntegrationEligibility::Eligible,
+                    ),
                     target_geometry: Arc::new(holtburger_world::PreparedEntityTargetGeometry {
+                        setup_radius: 0.5,
                         physics_bsp_parts: Vec::new(),
                         fallback_setup_did: 0,
                         fallback_shapes: Vec::new(),
@@ -1251,6 +1275,48 @@ mod tests {
             ));
         entity.velocity = velocity;
         client_remote_body_target(&world, guid).map(|target| target.demand)
+    }
+
+    #[test]
+    fn character_identity_keeps_zero_gravity_rest_mobile_without_promoting_obstacles() {
+        use holtburger_common::properties::{ItemType, ObjectDescriptionFlag, PropertyInt};
+        for (flags, item_type, character) in [
+            (ObjectDescriptionFlag::PLAYER, ItemType::empty(), true),
+            (ObjectDescriptionFlag::ATTACKABLE, ItemType::CREATURE, true),
+            (ObjectDescriptionFlag::DOOR, ItemType::CREATURE, false),
+            (ObjectDescriptionFlag::CORPSE, ItemType::CREATURE, false),
+            (ObjectDescriptionFlag::VENDOR, ItemType::CREATURE, false),
+            (ObjectDescriptionFlag::empty(), ItemType::MISC, false),
+        ] {
+            let mut world = WorldState::synthetic();
+            let guid = Guid(0x7000_0042);
+            world.add_entity(holtburger_world::entity::Entity::new(
+                guid,
+                "Fixture".to_owned(),
+                position(0x1234_0002),
+            ));
+            facts(&mut world, guid);
+            let entity = world.entities.get_mut(guid).unwrap();
+            entity.flags = flags;
+            entity
+                .properties
+                .set_int_prop(PropertyInt::ItemType, item_type.bits() as i32);
+            entity
+                .physics
+                .reconcile(holtburger_world::resolve_effective_entity_physics_state(
+                    PhysicsState::empty(),
+                ));
+            let target = client_remote_body_target(&world, guid).unwrap();
+            assert_eq!(target.facts.is_contact_character, character);
+            assert_eq!(
+                target.demand.integration,
+                if character {
+                    LocalIntegrationDemand::Eligible
+                } else {
+                    LocalIntegrationDemand::Excluded
+                }
+            );
+        }
     }
 
     #[test]

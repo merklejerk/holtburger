@@ -115,10 +115,6 @@ impl Default for PhysicalFlyIntent {
 pub enum PhysicalFlyTickStatus {
     /// The solver committed an accepted pose against the installed collision snapshot.
     Solved,
-    /// The request exceeded its bounded anti-tunneling budget.
-    SubstepBudgetExceeded,
-    /// Contact separation did not converge inside the bounded pass budget.
-    ContactBudgetExceeded,
 }
 
 /// Non-gating residency of the physical body's final primary-sphere owner.
@@ -205,18 +201,12 @@ pub struct PhysicalFlyMotionPath {
     pub initial: PhysicalFlyPathPoint,
     /// Non-empty accepted motion and placement transitions through the fixed tick.
     pub legs: Vec<PhysicalFlyPathLeg>,
-    /// Solver completion or finite-budget result.
+    /// Confirms publication of an accepted physical path.
     pub status: PhysicalFlyTickStatus,
     /// Installed collision residency, independent from solver completion.
     pub scene_residency: PhysicalFlySceneResidency,
     /// Ground classification committed by the latest solve.
     pub ground_state: PhysicalFlyGroundState,
-    /// Distinct non-walkable planes encountered during the latest grounded solve.
-    pub constraint_count: usize,
-    /// Collision substeps consumed by this tick.
-    pub substeps: usize,
-    /// Contact-separation passes consumed by this tick.
-    pub contact_passes: usize,
     /// Host wall time spent solving the body and portal-transiting the viewer for this tick.
     pub solve_duration_ms: f64,
 }

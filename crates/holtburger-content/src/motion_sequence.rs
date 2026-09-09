@@ -171,6 +171,14 @@ impl MotionSequenceTable {
         self.cycles.get(&MotionTable::cycle_key(style, command))
     }
 
+    /// Whether a command resolves to the style's default cycle key, ignoring dispatch flags
+    /// that are not part of cycle identity. Presentation uses this to recognize ordinary idle.
+    pub fn is_default_cycle(&self, style: u32, command: u32) -> bool {
+        self.style_defaults.get(&style).is_some_and(|default| {
+            MotionTable::cycle_key(style, *default) == MotionTable::cycle_key(style, command)
+        })
+    }
+
     /// Additive modifier for one style and command.
     pub fn modifier(&self, style: u32, command: u32) -> Option<&MotionSequence> {
         self.modifiers.get(&MotionTable::cycle_key(style, command))

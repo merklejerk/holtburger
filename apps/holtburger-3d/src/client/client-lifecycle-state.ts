@@ -96,6 +96,8 @@ function fromAuthorityLifecycle(
 			: lifecycle;
 	}
 
+	// Preserve a valid choice on refresh; otherwise select the first available character.
+	const firstCharacter = lifecycle.characters[0];
 	const selectedGuid =
 		previous.kind === "character-selection" &&
 		previous.selectedGuid !== null &&
@@ -103,6 +105,8 @@ function fromAuthorityLifecycle(
 			(character) => character.guid === previous.selectedGuid,
 		)
 			? previous.selectedGuid
-			: null;
+			: firstCharacter === undefined
+				? null
+				: firstCharacter.guid;
 	return { ...lifecycle, selectedGuid };
 }

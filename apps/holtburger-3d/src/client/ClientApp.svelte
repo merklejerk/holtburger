@@ -796,25 +796,8 @@
 	</main>
 {/if}
 
-{#if lifecycle.kind === "entering-world" || lifecycle.kind === "portal-space"}
-	<button
-		type="button"
-		class="client-loading-disconnect ui-button"
-		onclick={disconnect}
-	>
-		Disconnect
-	</button>
-{/if}
-
 <style>
 	@layer components {
-		.client-loading-disconnect {
-			position: fixed;
-			top: 48px;
-			left: 50%;
-			transform: translateX(-50%);
-			z-index: 10;
-		}
 		.client-screen {
 			display: grid;
 			min-height: 100vh;

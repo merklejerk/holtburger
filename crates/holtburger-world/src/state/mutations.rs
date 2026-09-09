@@ -4,11 +4,12 @@ use crate::context::WorldContextExt;
 use crate::entity::{EntityMotionSnapshot, EntityNetworkMotion};
 use crate::spatial::{
     AuthoritativeBodyVectors, AuthoritativePoseEffect, AuthoritativePoseResetCause, ContactState,
-    PhysicalBodyTickResult, RETAIL_INTERPOLATION_SNAP_DISTANCE_M, RuntimeBodyResetCause,
-    RuntimeSpatialBodyView, SolvedBodyKinematics, SpatialBodyEvent, SpatialBodyId,
-    SpatialSampleMode, SpatialSamplingConfig,
+    RETAIL_INTERPOLATION_SNAP_DISTANCE_M, RuntimeBodyResetCause, RuntimeSpatialBodyView,
+    SolvedBodyKinematics, SpatialBodyEvent, SpatialBodyId, SpatialSampleMode,
+    SpatialSamplingConfig,
 };
 use crate::state::types::PendingChildLink;
+use anyhow::Context;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_common::{ParentLocation, Placement};
@@ -65,8 +66,13 @@ impl WorldState {
         }
 
         let vectors = self.authoritative_body_vectors(guid, velocity, omega);
-        self.scene
-            .apply_authoritative_body_effect(body_id, effect, vectors, Instant::now())
+        let applied =
+            self.scene
+                .apply_authoritative_body_effect(body_id, effect, vectors, Instant::now());
+        if applied && matches!(body_id, SpatialBodyId::Entity(_)) {
+            self.motion_runtimes.apply_remote_pose_effect(guid, effect);
+        }
+        applied
     }
 
     pub(crate) fn initialize_authoritative_body(
@@ -402,37 +408,63 @@ impl WorldState {
         }]
     }
 
-    /// Emits world semantics for a transaction already committed by `SpatialScene`.
-    ///
-    /// Unlike `apply_solved_body_kinematics`, this seam never writes pose or kinematics back into
-    /// the scene. The scene transaction is the sole physical commit; the world layer only projects
-    /// its canonical post-commit view into existing events.
-    pub fn apply_physical_body_tick_result(
+    /// Reanchors remote command continuation after a checked local recovery, preserving actions.
+    pub fn apply_recovered_body(
         &mut self,
         body_id: SpatialBodyId,
-        _result: &PhysicalBodyTickResult,
-    ) -> Vec<WorldEvent> {
-        if self.scene.body(body_id).is_none() {
-            return Vec::new();
-        }
+    ) -> anyhow::Result<Vec<WorldEvent>> {
+        let guid = body_id
+            .authoritative_guid()
+            .context("recovery body requires an entity")?;
+        let pose = self
+            .scene
+            .body(body_id)
+            .context("recovered body disappeared")?
+            .pose;
+        self.motion_runtimes.apply_remote_pose_effect(
+            guid,
+            AuthoritativePoseEffect::Reset {
+                pose,
+                cause: AuthoritativePoseResetCause::ForcedReposition,
+            },
+        );
+        Ok(vec![WorldEvent::RuntimeBodyAdvanced {
+            body_id,
+            kind: crate::spatial::RuntimeBodyAdvanceKind::CorrectionSnap,
+        }])
+    }
 
+    /// Projects an already-published physical body into runtime and player-walkability events.
+    /// Canonical pose and kinematics remain owned by the scene's collection publication.
+    pub fn apply_integrated_body(
+        &mut self,
+        update: &crate::spatial::DynamicEntityBodyTick,
+    ) -> anyhow::Result<Vec<WorldEvent>> {
+        let body_id = update.body_id;
+        anyhow::ensure!(
+            self.scene.body(body_id).is_some(),
+            "integrated body {body_id:?} is absent at projection"
+        );
         let mut events = Vec::new();
+        if let Some(change) = update.dynamic_state_change {
+            let guid = body_id.authoritative_guid().ok_or_else(|| {
+                anyhow::anyhow!("impact body {body_id:?} has no authoritative entity")
+            })?;
+            let entity = self
+                .entities
+                .get_mut(guid)
+                .ok_or_else(|| anyhow::anyhow!("impact body {body_id:?} outlived its entity"))?;
+            entity.physics.clear_after_collision(change.cleared);
+            events.push(WorldEvent::RuntimeBodyChanged { body_id });
+        }
         events.push(WorldEvent::RuntimeBodyAdvanced {
             body_id,
             kind: crate::spatial::RuntimeBodyAdvanceKind::Integrated,
         });
         if matches!(body_id, SpatialBodyId::LocalPlayer(_)) {
-            let contact = self
-                .scene
-                .body(body_id)
-                .map(|body| body.contact)
-                .expect("body existence was checked before projecting physical tick");
-            self.emit_player_walkability_change(contact, &mut events);
+            self.emit_player_walkability_change(update.current_contact, &mut events);
         }
-        // `_result` is intentionally accepted here even though its collision reports and scene
-        // residency have no pre-existing client world event contract. They remain available to
-        // the transaction caller for diagnostics without manufacturing a new wire event.
-        events
+        Ok(events)
     }
 
     pub fn apply_spatial_body_event(&mut self, event: &SpatialBodyEvent) -> Vec<WorldEvent> {
@@ -765,7 +797,27 @@ impl WorldState {
             velocity_event = Some((entity.velocity, entity.omega));
         }
 
+        let nominal_sample = pos_pack
+            .velocity
+            .or_else(|| {
+                pos_pack
+                    .flags
+                    .contains(UpdatePositionFlag::HAS_CONTACT)
+                    .then_some(Vector3::zero())
+            })
+            .map(|velocity| AuthoritativeBodyVectors {
+                velocity,
+                acceleration: entity.acceleration,
+                omega: entity.omega,
+            });
         self.emit_entity_pose_effect(guid, effect, pos_pack.teleport_sequence, events);
+        // Presence is the packet edge, including an explicit zero identical to the last sample.
+        // Replaying the entity's cached vector on every pose update would restart its decay.
+        if let Some(vectors) = nominal_sample
+            && let Some(body_id) = self.authoritative_body_id_for_guid(guid)
+        {
+            self.scene.replace_nominal_body_vectors(body_id, vectors);
+        }
         if let Some((velocity, omega)) = velocity_event {
             events.push(WorldEvent::EntityVectorUpdated {
                 guid,
@@ -846,11 +898,7 @@ impl WorldState {
                 .unwrap_or_default();
         }
 
-        if let Some(entity) = self.player_entity_mut() {
-            entity.position = pos;
-        } else {
-            return None;
-        }
+        self.player_entity_mut()?.position = pos;
         let (velocity, omega) = self
             .entities
             .get(guid)
@@ -1378,6 +1426,19 @@ impl WorldState {
         }
     }
 
+    /// Joins current public collision identity to an installed body without changing its
+    /// geometry, motion, or sampling. Called after installation and admitted PK updates.
+    pub fn synchronize_entity_contact_status(&mut self, guid: Guid) {
+        let Some(entity) = self.entities.get(guid) else {
+            return;
+        };
+        let status = crate::PlayerCollisionStatus::from_description(entity.flags);
+        let Some(body_id) = self.runtime_body_id_for_guid(guid) else {
+            return;
+        };
+        self.scene.set_player_collision_status(body_id, status);
+    }
+
     pub(crate) fn apply_property_update_to_target(
         &mut self,
         guid: Guid,
@@ -1401,6 +1462,12 @@ impl WorldState {
                 .find(|item| item.guid == target_guid)
         {
             item.set_property(update.clone());
+        }
+        if matches!(
+            update,
+            PropertyUpdate::Int(PropertyInt::PlayerKillerStatus, _)
+        ) {
+            self.synchronize_entity_contact_status(target_guid);
         }
         if scale_changed {
             self.synchronize_entity_body_scale(target_guid);

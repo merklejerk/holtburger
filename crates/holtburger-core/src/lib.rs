@@ -7,6 +7,7 @@ pub mod dynamic_scale_scripts;
 pub mod errors;
 pub mod kinematic_boom;
 pub mod physical_body_definition;
+pub mod placed_motion;
 pub mod simulation_scene;
 pub mod soul_emote_motion;
 
@@ -71,9 +72,9 @@ pub use client::types::{
 pub use client::{
     ClientCameraClearance, ClientCameraClearanceRequest, ClientCameraCollisionProof,
     ClientCameraDiagnostics, ClientCameraFailureReason, ClientCameraIdentity,
-    ClientCameraIntentRequest, ClientCameraReseedReason, ClientCameraStartReceipt,
-    ClientCameraStartRequest, ClientCameraTargetSphereRole, ClientCameraTick,
-    ClientCameraUpdateReceipt, PreciseJumpActionSequence, PreciseJumpAimRequest,
+    ClientCameraInputHandle, ClientCameraIntentRequest, ClientCameraReseedReason,
+    ClientCameraStartReceipt, ClientCameraStartRequest, ClientCameraTargetSphereRole,
+    ClientCameraTick, ClientCameraUpdateReceipt, PreciseJumpActionSequence, PreciseJumpAimRequest,
     PreciseJumpAimSequence, PreciseJumpCancelRequest, PreciseJumpCommitRequest,
     PreciseJumpEvaluation, PreciseJumpEvaluationId, PreciseJumpEvaluationStatus,
     PreciseJumpTargetView, PreciseJumpTransactionFeedback, PreciseJumpTransactionOutcome,

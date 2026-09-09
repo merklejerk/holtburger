@@ -1,12 +1,15 @@
 //! Source-neutral frontend projection and dynamic-entity delivery values.
 
+use crate::placed_motion::{interpolate_rotation, present_placed_motion_pose};
+use anyhow::Result;
 use holtburger_common::position::WorldPosition;
-use holtburger_common::{Guid, ParentLocation, Placement};
+use holtburger_common::{Guid, ParentLocation, Placement, Quaternion};
 use holtburger_world::motion::{MotionClipCompletion, MotionPresentation};
 use holtburger_world::{
     ContactState, EffectiveEntityPhysicsState, EntityAppearance, EntityPlacement,
     PhysicalBodyParticipation, SpatialSampleMode,
 };
+use holtburger_world::{PlacedMotionPath, PlacedMotionPoint};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -302,6 +305,49 @@ pub struct DynamicEntityPlacedPath {
     pub legs: Vec<DynamicEntityPathLeg>,
 }
 
+impl DynamicEntityPlacedPath {
+    /// Projects every accepted physical boundary, preserving placement and the shared
+    /// shortest-arc endpoint rotation interpolation used by both client adapters.
+    pub fn from_motion(
+        path: &PlacedMotionPath,
+        previous_rotation: Quaternion,
+        current_rotation: Quaternion,
+    ) -> Result<DynamicEntityPlacedPath> {
+        Ok(DynamicEntityPlacedPath {
+            initial: serialize_entity_path_point(path, path.initial(), previous_rotation)?,
+            legs: path
+                .legs()
+                .iter()
+                .map(|leg| {
+                    Ok(DynamicEntityPathLeg {
+                        end_fraction: leg.end_fraction(),
+                        end: serialize_entity_path_point(
+                            path,
+                            leg.end(),
+                            interpolate_rotation(
+                                previous_rotation,
+                                current_rotation,
+                                leg.end_fraction(),
+                            )?,
+                        )?,
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?,
+        })
+    }
+}
+
+fn serialize_entity_path_point(
+    path: &PlacedMotionPath,
+    point: &PlacedMotionPoint,
+    rotation: Quaternion,
+) -> Result<DynamicEntityPathPoint> {
+    Ok(DynamicEntityPathPoint {
+        pose: present_placed_motion_pose(path, point, rotation)?,
+        spatial_membership: DynamicEntitySpatialMembership::from(point.placement()),
+    })
+}
+
 /// One changed current entity plus the path that produced its accepted placement.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -393,7 +439,7 @@ pub struct DynamicEntityTickBatch {
     pub duration_ms: f64,
     /// Entities whose accepted root path changed, in stable GUID order.
     pub advances: Vec<DynamicEntityAdvance>,
-    /// Path-stable entities whose remaining frontend-reconstructible level changed.
+    /// Pose-stable entity levels, including membership refreshes without physical travel.
     pub updates: Vec<Box<DynamicEntityView>>,
 }
 

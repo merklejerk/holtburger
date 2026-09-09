@@ -455,7 +455,9 @@ impl EntityMotionSnapshot {
         snapshot
     }
 
-    pub(crate) fn from_object_description(data: &ObjectDescriptionData) -> Option<Self> {
+    pub(crate) fn from_object_description(
+        data: &ObjectDescriptionData,
+    ) -> Option<(Self, Option<Guid>)> {
         let movement_data = data.movement_data.as_deref()?;
         let mut offset = 0;
         let movement_type_raw = u8::unpack(movement_data, &mut offset)?;
@@ -486,19 +488,26 @@ impl EntityMotionSnapshot {
             ),
         };
 
-        Some(Self::from_movement_event(
-            &MovementEventData {
-                guid: data.public_weenie_desc.guid,
-                object_instance_sequence: data.sequences[OBJECT_INSTANCE_SEQUENCE_INDEX],
-                movement_sequence: 0,
-                server_control_sequence: data.sequences[OBJECT_SERVER_CONTROL_SEQUENCE_INDEX],
-                is_autonomous: data.autonomous_movement.unwrap_or(false),
-                movement_type,
-                motion_flags,
-                current_style,
-                data: payload,
-            },
-            None,
+        let sticky_target = match &payload {
+            MovementTypeData::Invalid(motion) => motion.sticky_object,
+            _ => None,
+        };
+        Some((
+            Self::from_movement_event(
+                &MovementEventData {
+                    guid: data.public_weenie_desc.guid,
+                    object_instance_sequence: data.sequences[OBJECT_INSTANCE_SEQUENCE_INDEX],
+                    movement_sequence: 0,
+                    server_control_sequence: data.sequences[OBJECT_SERVER_CONTROL_SEQUENCE_INDEX],
+                    is_autonomous: data.autonomous_movement.unwrap_or(false),
+                    movement_type,
+                    motion_flags,
+                    current_style,
+                    data: payload,
+                },
+                None,
+            ),
+            sticky_target,
         ))
     }
 
@@ -524,6 +533,32 @@ mod tests {
         InterpretedMotionCommand, InterpretedMotionState, MotionItem, MovementInvalid,
         MovementStateFlags, MovementType,
     };
+
+    #[test]
+    fn initial_description_returns_sticky_target_with_the_decoded_motion() {
+        use holtburger_protocol::messages::movement::MovementType;
+        use holtburger_protocol::messages::movement::messages::motion::MovementInvalid;
+        use holtburger_protocol::traits::ProtocolPack;
+        let target = Guid(2);
+        let mut movement = vec![MovementType::Invalid as u8, 1];
+        0u16.pack(&mut movement);
+        MovementInvalid {
+            sticky_object: Some(target),
+            ..Default::default()
+        }
+        .pack(&mut movement);
+        let description =
+            holtburger_protocol::messages::object::messages::description::ObjectDescriptionData {
+                movement_data: Some(movement),
+                ..Default::default()
+            };
+        let (snapshot, sticky) =
+            super::EntityMotionSnapshot::from_object_description(&description).unwrap();
+        assert_eq!(sticky, Some(target));
+        let mut entity = Entity::new(Guid(1), "actor".into(), Default::default());
+        assert_eq!(entity.apply_description(&description), Some(target));
+        assert_eq!(entity.network_motion.snapshot(), Some(snapshot));
+    }
 
     #[test]
     fn omitted_interpreted_style_uses_retail_noncombat_default() {
@@ -1485,6 +1520,21 @@ impl Entity {
     }
 
     pub fn set_property(&mut self, update: PropertyUpdate) {
+        // PublicWeenieDesc::SetPlayerKillerStatus (acclient.c:449427) replaces all three
+        // status flags. Apply at mutation time so a later description can supersede them.
+        if let PropertyUpdate::Int(PropertyInt::PlayerKillerStatus, status) = &update {
+            self.flags.remove(
+                ObjectDescriptionFlag::PLAYER_KILLER
+                    | ObjectDescriptionFlag::PK_LITE_STATUS
+                    | ObjectDescriptionFlag::FREE_PK_STATUS,
+            );
+            self.flags.insert(match *status {
+                4 => ObjectDescriptionFlag::PLAYER_KILLER,
+                0x40 => ObjectDescriptionFlag::PK_LITE_STATUS,
+                0x20 => ObjectDescriptionFlag::FREE_PK_STATUS,
+                _ => ObjectDescriptionFlag::empty(),
+            });
+        }
         let scale_update = match &update {
             PropertyUpdate::Float(PropertyFloat::DefaultScale, value) => Some(*value as f32),
             _ => None,
@@ -1529,7 +1579,8 @@ impl Entity {
         self.set_iid_prop(PropertyInstanceId::Wielder, val.unwrap_or(Guid::NULL))
     }
 
-    pub fn apply_description(&mut self, data: &ObjectDescriptionData) {
+    /// Hydrate description facts and return its decoded sticky target for one-time world admission.
+    pub fn apply_description(&mut self, data: &ObjectDescriptionData) -> Option<Guid> {
         self.wcid = Some(data.public_weenie_desc.wcid);
         self.flags = data.public_weenie_desc.obj_desc_flags;
         self.weenie_flags = data.public_weenie_desc.weenie_flags;
@@ -1577,10 +1628,11 @@ impl Entity {
             self.autonomous_movement = val;
         }
 
-        self.network_motion = EntityMotionSnapshot::from_object_description(data).map_or(
-            EntityNetworkMotion::Uninitialized,
-            EntityNetworkMotion::Initialized,
-        );
+        let description_motion = EntityMotionSnapshot::from_object_description(data);
+        self.network_motion = description_motion
+            .map_or(EntityNetworkMotion::Uninitialized, |(snapshot, _)| {
+                EntityNetworkMotion::Initialized(snapshot)
+            });
 
         // Hydrate properties from the description (using common mapping logic)
         self.properties.hydrate_from_odd(data);
@@ -1594,6 +1646,7 @@ impl Entity {
                 self.guid
             );
         }
+        description_motion.and_then(|(_, target)| target)
     }
 
     pub fn new(guid: Guid, name: String, position: WorldPosition) -> Self {
@@ -1711,5 +1764,28 @@ impl EntityManager {
 
     pub fn remove(&mut self, guid: impl Into<Guid>) -> Option<Entity> {
         self.entities.remove(&guid.into())
+    }
+}
+
+#[cfg(test)]
+mod collision_status_tests {
+    use super::*;
+
+    #[test]
+    fn pk_updates_replace_status_flags_without_erasing_identity() {
+        let mut entity = Entity::new(Guid(1), "Player".into(), WorldPosition::default());
+        let identity = ObjectDescriptionFlag::PLAYER | ObjectDescriptionFlag::ATTACKABLE;
+        entity.flags = identity;
+        for (status, expected) in [
+            (4, ObjectDescriptionFlag::PLAYER_KILLER),
+            (0x40, ObjectDescriptionFlag::PK_LITE_STATUS),
+            (0x20, ObjectDescriptionFlag::FREE_PK_STATUS),
+            (1, ObjectDescriptionFlag::empty()),
+            (4, ObjectDescriptionFlag::PLAYER_KILLER),
+            (0, ObjectDescriptionFlag::empty()),
+        ] {
+            entity.set_property(PropertyUpdate::Int(PropertyInt::PlayerKillerStatus, status));
+            assert_eq!(entity.flags, identity | expected);
+        }
     }
 }

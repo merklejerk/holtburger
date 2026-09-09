@@ -5,6 +5,7 @@ use crate::entity::{
     OrderedMotionScalar,
 };
 use crate::spatial::ContactState;
+use holtburger_common::properties::WorldObjectPropertyAccessorsMut;
 use holtburger_common::{Quaternion, RigidTransform, Vector3};
 use holtburger_content::{MotionHookDirection, MotionSequenceCatalog, MotionSequenceTable};
 use holtburger_dat::file_type::animation::AnimationFlags;
@@ -237,6 +238,18 @@ fn catalog_with_combat_default(combat_default: u32) -> MotionSequenceCatalog {
 
 /// Builds the shared table fixture with independently selectable resting motion facts.
 fn catalog_with_defaults(combat_default: u32, stand_framerate: f32) -> MotionSequenceCatalog {
+    catalog_with_action_animation(
+        combat_default,
+        stand_framerate,
+        animation(ACTION_ANIM, 4, 0.25),
+    )
+}
+
+fn catalog_with_action_animation(
+    combat_default: u32,
+    stand_framerate: f32,
+    action_animation: Animation,
+) -> MotionSequenceCatalog {
     let mut cycles = HashMap::new();
     cycles.insert(
         MotionTable::cycle_key(STYLE, STAND),
@@ -321,7 +334,7 @@ fn catalog_with_defaults(combat_default: u32, stand_framerate: f32) -> MotionSeq
             animation(RUN_ANIM, 4, 2.0),
             animation(LINK_ANIM, 2, 0.5),
             hook_animation(),
-            animation(ACTION_ANIM, 4, 0.25),
+            action_animation,
         ],
         [],
     )
@@ -1008,10 +1021,9 @@ fn stopping_completely_clears_modifiers_and_the_substate() {
     assert_eq!(body.sequence.omega(), Vector3::zero());
 }
 
-/// The core of the plan: a tick's authored contribution is the ordered composition of the frames it
-/// departed, not a sampled velocity.
+/// Whole-frame advancement retains the authored endpoint.
 #[test]
-fn a_tick_composes_exactly_the_frames_it_departed() {
+fn a_whole_frame_reaches_its_authored_endpoint() {
     let catalog = catalog();
     let table = catalog.table(0x0900_0001).expect("table");
     let mut body = standing(table);
@@ -1027,6 +1039,89 @@ fn a_tick_composes_exactly_the_frames_it_departed() {
     assert_eq!(tick.offset.translation, Vector3::new(0.0, 1.0, 0.0));
     assert_eq!(body.sequence.frame_number(), 1.0);
     assert!(tick.hooks.is_empty());
+}
+
+/// Low-rate content must request movement between hook departures, including explicit velocity.
+#[test]
+fn fractional_frames_supply_continuous_motion_without_early_hooks() {
+    let catalog = catalog();
+    let table = catalog.table(0x0900_0001).expect("table");
+    let mut sequence = MotionSequenceRuntime::new();
+    let hooked = table.cycle(STYLE, HOOKED).expect("hooked cycle");
+    sequence.append(SequenceNode::install(&hooked.clips[0], 1.0));
+    sequence.set_physics(Vector3::new(2.0, 0.0, 0.0), Vector3::zero());
+    let mut hooks = Vec::new();
+    for index in 0..16 {
+        let tick = sequence.advance(1.0 / 32.0);
+        assert!((tick.offset.translation.x - 2.0 / 32.0).abs() < 1e-6);
+        if index < 15 {
+            assert!(tick.hooks.is_empty());
+        }
+        hooks.extend(tick.hooks);
+    }
+    assert_eq!(hooks.len(), 1);
+    assert_eq!(hooks[0].hook.frame, 1);
+
+    let mut walk = MotionSequenceRuntime::new();
+    walk.append(SequenceNode::install(
+        &table.cycle(STYLE, WALK).expect("walk").clips[0],
+        1.0,
+    ));
+    for _ in 0..16 {
+        let tick = walk.advance(1.0 / 32.0);
+        assert!((tick.offset.translation.y - 4.0 / 32.0).abs() < 1e-6);
+    }
+}
+
+/// Splitting a turning frame must preserve its endpoint, including clip wraps and reverse travel.
+#[test]
+fn fractional_turning_frames_preserve_composition_and_hook_order() {
+    let mut turning = hook_animation();
+    for (index, frame) in turning.pos_frames.iter_mut().enumerate() {
+        frame.origin = Vector3::new(index as f32 * 0.25, 1.0, 0.0);
+        frame.orientation = Quaternion::from_heading((90.0 + index as f32 * 12.0).to_radians());
+    }
+    let table = MotionTable {
+        id: 0x0900_0001,
+        default_style: STYLE,
+        style_defaults: HashMap::from([(STYLE, HOOKED)]),
+        cycles: HashMap::from([(
+            MotionTable::cycle_key(STYLE, HOOKED),
+            motion(vec![clip(HOOK_ANIM, 4.0)], None, None),
+        )]),
+        modifiers: HashMap::new(),
+        links: HashMap::new(),
+    };
+    let catalog = MotionSequenceCatalog::assemble([table], [turning], []).expect("turning fixture");
+    let clip = &catalog
+        .table(0x0900_0001)
+        .expect("table")
+        .cycle(STYLE, HOOKED)
+        .expect("cycle")
+        .clips[0];
+    for speed in [1.0, -1.0] {
+        let mut whole = MotionSequenceRuntime::new();
+        whole.append(SequenceNode::install(clip, speed));
+        whole.set_physics(Vector3::new(0.5, 0.0, 0.0), Vector3::new(0.0, 0.0, 0.3));
+        let mut split = whole.clone();
+        let expected = whole.advance(1.25);
+        let mut accumulated = RigidTransform::identity();
+        let mut hooks = Vec::new();
+        for _ in 0..40 {
+            let tick = split.advance(1.0 / 32.0);
+            accumulated = accumulated.combine(&tick.offset);
+            hooks.extend(tick.hooks);
+        }
+        assert!((accumulated.translation - expected.offset.translation).length() < 1e-4);
+        let axis = Vector3::new(1.0, 0.0, 0.0);
+        assert!(
+            (accumulated.rotation.rotate_vector(axis)
+                - expected.offset.rotation.rotate_vector(axis))
+            .length()
+                < 1e-4
+        );
+        assert_eq!(hooks, expected.hooks);
+    }
 }
 
 #[test]
@@ -1277,6 +1372,95 @@ fn a_walk_cycle_travels_the_measured_content_walk_speed() {
         error < 0.02,
         "authored walk travelled {travelled} m/s against content's {MEASURED_WALK_SPEED} m/s"
     );
+}
+
+/// Independent straight-line rate oracle: ACE MotionTable.add_motion scales frame rate and
+/// explicit velocity by command speed; Sequence.apply_physics integrates the latter over time;
+/// PhysicsObj.UpdatePositionInternal scales their sum once. Uniform root frames make retail's
+/// boundary substitution immaterial. Fractional movement is our intentional continuous sampling.
+#[test]
+fn ordinary_motion_rates_match_reference_across_speed_scale_and_tick_size() {
+    const ROOT_STEP: f32 = 0.125;
+    const FRAME_RATE: f32 = 16.0;
+    const EXPLICIT_SPEED: f32 = 0.75;
+    let table = MotionTable {
+        id: 0x0900_0001,
+        default_style: STYLE,
+        style_defaults: HashMap::from([(STYLE, STAND)]),
+        cycles: HashMap::from([
+            (
+                MotionTable::cycle_key(STYLE, STAND),
+                motion(vec![clip(STAND_ANIM, FRAME_RATE)], None, None),
+            ),
+            (
+                MotionTable::cycle_key(STYLE, WALK),
+                motion(vec![clip(WALK_ANIM, FRAME_RATE)], None, None),
+            ),
+            (
+                MotionTable::cycle_key(STYLE, RUN),
+                motion(
+                    vec![clip(RUN_ANIM, FRAME_RATE)],
+                    Some(Vector3::new(EXPLICIT_SPEED, 0.0, 0.0)),
+                    None,
+                ),
+            ),
+        ]),
+        modifiers: HashMap::new(),
+        links: HashMap::new(),
+    };
+    let catalog = MotionSequenceCatalog::assemble(
+        [table],
+        [
+            animation(STAND_ANIM, 8, 0.0),
+            animation(WALK_ANIM, 8, ROOT_STEP),
+            animation(RUN_ANIM, 8, ROOT_STEP),
+        ],
+        [],
+    )
+    .expect("uniform rate fixture");
+    let table = catalog.table(0x0900_0001).expect("table");
+    for scale in [1.0, 1.2] {
+        for ticks_per_second in [30, 60, 144] {
+            let mut body = standing(table);
+            // Exercise both re-rating an existing cycle and replacing it, including a full stop.
+            for (command, rate) in [
+                (WALK, 0.5),
+                (WALK, 1.0),
+                (RUN, 2.0),
+                (RUN, 0.75),
+                (STAND, 1.0),
+                (WALK, 1.5),
+            ] {
+                select_motion(
+                    table,
+                    &mut body.state,
+                    &mut body.sequence,
+                    MotionCommand(command),
+                    rate,
+                );
+                let mut travelled = Vector3::zero();
+                for _ in 0..ticks_per_second {
+                    let tick = body.sequence.advance(1.0 / ticks_per_second as f32);
+                    travelled = travelled
+                        + crate::gate_authored_offset(tick.offset, ContactState::Grounded, scale)
+                            .translation;
+                }
+                let expected = Vector3::new(
+                    if command == RUN { EXPLICIT_SPEED } else { 0.0 },
+                    if command == STAND {
+                        0.0
+                    } else {
+                        ROOT_STEP * FRAME_RATE
+                    },
+                    0.0,
+                ) * (rate * scale);
+                assert!(
+                    (travelled - expected).length() < 0.0001,
+                    "command={command:#x}, rate={rate}, scale={scale}, ticks={ticks_per_second}: {travelled:?} != {expected:?}"
+                );
+            }
+        }
+    }
 }
 
 mod actuation {
@@ -1589,6 +1773,30 @@ mod playing_clip {
             (measured_rate - EXPECTED_METRES_PER_SECOND).abs() / EXPECTED_METRES_PER_SECOND < 0.01,
             "sustained sidestep measured {measured_rate}m/s instead of {EXPECTED_METRES_PER_SECOND}m/s"
         );
+        let authored_tick = registry.get(guid).unwrap().tick().clone();
+        let observed = observed_locomotion_order(
+            table,
+            MotionCommand(STYLE),
+            crate::spatial::AcceptedBodyMotion {
+                velocity: Vector3::new(OBSERVED_WALK_SPEED_MPS * 2.0, 0.0, 0.0),
+                omega: Vector3::zero(),
+            },
+            Quaternion::identity(),
+            CharacterMotionPresentation::Grounded,
+            1.0,
+        )
+        .unwrap();
+        assert_eq!(observed.sidestep, Some((MotionCommand::SIDESTEP, 2.0)));
+        assert!(registry.present_locomotion(table, guid, observed, 1.0));
+        assert_eq!(
+            registry.playing_clip(guid).unwrap().animation_id,
+            SIDESTEP_ANIM
+        );
+        assert_eq!(
+            registry.playing_clip(guid).unwrap().framerate,
+            FRAMERATE * 2.0
+        );
+        assert_eq!(registry.get(guid).unwrap().tick(), &authored_tick);
     }
 }
 
@@ -1610,5 +1818,785 @@ fn the_reachable_set_spans_cycles_modifiers_and_links() {
     assert!(
         reachable.windows(2).all(|pair| pair[0] < pair[1]),
         "the set is deduplicated and ordered, so staging is deterministic"
+    );
+}
+
+#[test]
+fn observed_locomotion_cannot_replace_actions_or_change_authored_ticks() {
+    let catalog = catalog();
+    let table = catalog.table(0x0900_0001).unwrap();
+    let mut nominal = BodyMotionRuntime::new(table);
+    let mut observed = nominal.clone();
+    let walking = MotionOrder {
+        forward: Some((MotionCommand(WALK), 1.0)),
+        ..MotionOrder::default()
+    };
+    assert!(observed.present_locomotion(table, walking, 1.5));
+    assert_eq!(observed.playing_clip().unwrap().animation_id, WALK_ANIM);
+    assert_eq!(observed.tick(), nominal.tick());
+    assert_eq!(observed.state().substate, nominal.state().substate);
+    assert_eq!(
+        observed.sequence().frame_number(),
+        nominal.sequence().frame_number()
+    );
+
+    nominal.enqueue_action(action(1));
+    observed.enqueue_action(action(1));
+    let mut completed = false;
+    for quantum in [0.25, 0.25, 0.75] {
+        let expected = nominal
+            .drive(table, MotionOrder::default(), quantum)
+            .clone();
+        let actual = observed
+            .drive(table, MotionOrder::default(), quantum)
+            .clone();
+        assert_eq!(actual, expected);
+        assert!(observed.present_locomotion(table, walking, quantum));
+        assert_eq!(observed.tick(), &expected);
+        assert_eq!(observed.active_action(), nominal.active_action());
+        if observed.active_action().is_some() {
+            assert_eq!(observed.playing_clip().unwrap().animation_id, ACTION_ANIM);
+        } else {
+            completed |= actual.action_completed;
+            assert_eq!(observed.playing_clip().unwrap().animation_id, WALK_ANIM);
+        }
+    }
+    assert!(
+        completed,
+        "fixture did not cross the action return boundary"
+    );
+    assert_eq!(nominal.playing_clip().unwrap().animation_id, STAND_ANIM);
+    // Not every explicit animation is a queued action: a steady special pose also wins.
+    let explicit = MotionOrder {
+        forward: Some((MotionCommand(HOOKED), 1.0)),
+        ..MotionOrder::default()
+    };
+    nominal.drive(table, explicit, 0.25);
+    observed.drive(table, explicit, 0.25);
+    assert!(observed.active_action().is_none());
+    assert!(observed.present_locomotion(table, walking, 0.25));
+    assert_eq!(
+        observed.motion_presentation(),
+        nominal.motion_presentation()
+    );
+    assert_eq!(observed.tick(), nominal.tick());
+    // Dispatch flags can differ while selecting the same idle cycle; that still permits walking.
+    let ready = MotionOrder {
+        forward: Some((MotionCommand::READY, 1.0)),
+        ..MotionOrder::default()
+    };
+    nominal.drive(table, ready, 0.0);
+    observed.drive(table, ready, 0.0);
+    assert!(observed.present_locomotion(table, walking, 0.0));
+    assert_eq!(observed.playing_clip().unwrap().animation_id, WALK_ANIM);
+    assert_eq!(observed.tick(), nominal.tick());
+}
+
+#[test]
+fn missing_falling_content_keeps_resolved_locomotion_presentation() {
+    let catalog = catalog();
+    let table = catalog.table(0x0900_0001).unwrap();
+    let mut runtime = BodyMotionRuntime::new(table);
+    let running = MotionOrder {
+        forward: Some((MotionCommand::RUN_FORWARD, 1.0)),
+        ..MotionOrder::default()
+    };
+    runtime.drive(table, running, 1.0);
+    assert_eq!(runtime.state().substate, MotionCommand::RUN_FORWARD);
+    assert!(runtime.present_locomotion(table, MotionOrder::default(), 0.0));
+    assert_eq!(runtime.playing_clip().unwrap().animation_id, STAND_ANIM);
+    let unsupported = running.with_character_presentation(CharacterMotionPresentation::Falling);
+    runtime.drive(table, unsupported, 0.0);
+    assert!(
+        table
+            .cycle(runtime.state().style.raw(), MotionCommand::FALLING.raw())
+            .is_none()
+    );
+    assert_eq!(runtime.state().substate, MotionCommand::RUN_FORWARD);
+    assert_eq!(runtime.playing_clip().unwrap().animation_id, STAND_ANIM);
+}
+
+#[test]
+fn visual_cursor_shares_hooked_clip_timing_without_authoring_a_tick() {
+    let catalog = catalog();
+    let table = catalog.table(0x0900_0001).unwrap();
+    let mut body = standing(table);
+    assert!(
+        select_motion(
+            table,
+            &mut body.state,
+            &mut body.sequence,
+            MotionCommand(HOOKED),
+            1.0
+        )
+        .is_modelled()
+    );
+    let mut visual = body.sequence.clone();
+    let mut fired = 0;
+    for quantum in [0.125, 0.375, 0.75, -0.25] {
+        let tick = body.sequence.advance(quantum);
+        fired += tick.hooks.len();
+        visual.advance_presentation(quantum);
+        assert_eq!(visual.frame_number(), body.sequence.frame_number());
+        assert_eq!(animation_ids(&visual), animation_ids(&body.sequence));
+        assert_eq!(
+            visual.current_clip().map(|clip| clip.node.animation().id),
+            body.sequence
+                .current_clip()
+                .map(|clip| clip.node.animation().id)
+        );
+    }
+    assert!(fired > 0, "fixture did not exercise authored hooks");
+}
+
+#[test]
+fn observed_motion_selects_available_gaits_in_body_space() {
+    let catalog = catalog();
+    let table = catalog.table(0x0900_0001).unwrap();
+    let orientation = Quaternion::from_axis_angle(Vector3::new(0.0, 0.0, 1.0), 0.7).unwrap();
+    for (local, scale, command, rate) in [
+        (
+            Vector3::new(0.0, OBSERVED_WALK_SPEED_MPS, 0.0),
+            1.0,
+            MotionCommand::WALK_FORWARD,
+            1.0,
+        ),
+        (
+            Vector3::new(0.0, OBSERVED_RUN_SPEED_MPS * 2.0, 0.0),
+            1.0,
+            MotionCommand::RUN_FORWARD,
+            2.0,
+        ),
+        (
+            Vector3::new(0.0, -OBSERVED_WALK_SPEED_MPS, 0.0),
+            1.0,
+            MotionCommand::WALK_FORWARD,
+            -1.0,
+        ),
+        (
+            Vector3::new(OBSERVED_WALK_SPEED_MPS, 0.0, 0.0),
+            1.0,
+            MotionCommand::WALK_FORWARD,
+            1.0,
+        ),
+        (
+            Vector3::new(0.0, OBSERVED_WALK_SPEED_MPS * 2.0, 0.0),
+            2.0,
+            MotionCommand::WALK_FORWARD,
+            1.0,
+        ),
+    ] {
+        let motion = crate::spatial::AcceptedBodyMotion {
+            velocity: orientation.rotate_vector(local),
+            omega: Vector3::zero(),
+        };
+        let order = observed_locomotion_order(
+            table,
+            MotionCommand(STYLE),
+            motion,
+            orientation,
+            CharacterMotionPresentation::Grounded,
+            scale,
+        )
+        .unwrap();
+        let (selected, speed) = order.forward.unwrap();
+        assert_eq!(selected, command);
+        assert!((speed - rate).abs() < 0.0001);
+        assert!(order.sidestep.is_none());
+        let mut runtime = BodyMotionRuntime::new(table);
+        assert!(runtime.present_locomotion(table, order, 0.0));
+    }
+}
+
+#[test]
+fn observed_motion_preserves_support_and_uses_only_visible_turn_cycles() {
+    let catalog = catalog();
+    let table = catalog.table(0x0900_0001).unwrap();
+    let motion = crate::spatial::AcceptedBodyMotion {
+        velocity: Vector3::zero(),
+        omega: Vector3::new(0.0, 0.0, -OBSERVED_TURN_RATE_RADIANS),
+    };
+    let standing = observed_locomotion_order(
+        table,
+        MotionCommand(STYLE),
+        motion,
+        Quaternion::identity(),
+        CharacterMotionPresentation::Grounded,
+        1.0,
+    )
+    .unwrap();
+    assert_eq!(standing.turn, Some((MotionCommand::TURN_RIGHT, 1.0)));
+    let mut runtime = BodyMotionRuntime::new(table);
+    assert!(runtime.present_locomotion(table, standing, 0.0));
+    let moving = crate::spatial::AcceptedBodyMotion {
+        velocity: Vector3::new(0.0, OBSERVED_WALK_SPEED_MPS, 0.0),
+        ..motion
+    };
+    let walking = observed_locomotion_order(
+        table,
+        MotionCommand(STYLE),
+        moving,
+        Quaternion::identity(),
+        CharacterMotionPresentation::Grounded,
+        1.0,
+    )
+    .unwrap();
+    assert_eq!(walking.forward, Some((MotionCommand::WALK_FORWARD, 1.0)));
+    assert!(walking.turn.is_none());
+    for presentation in [
+        CharacterMotionPresentation::Ready,
+        CharacterMotionPresentation::Falling,
+        CharacterMotionPresentation::StanceDefault,
+    ] {
+        // Ready shares the fixture's default cycle key; missing Falling chooses the default.
+        let order = observed_locomotion_order(
+            table,
+            MotionCommand(STYLE),
+            moving,
+            Quaternion::identity(),
+            presentation,
+            1.0,
+        )
+        .unwrap();
+        assert_eq!(
+            order.forward,
+            match presentation {
+                CharacterMotionPresentation::Ready => Some((MotionCommand::READY, 1.0)),
+                _ => None,
+            }
+        );
+        assert!(order.sidestep.is_none());
+        assert!(order.turn.is_none());
+        assert!(runtime.present_locomotion(table, order, 0.0));
+    }
+    let unavailable = observed_locomotion_order(
+        table,
+        MotionCommand(COMBAT_STYLE),
+        moving,
+        Quaternion::identity(),
+        CharacterMotionPresentation::Grounded,
+        1.0,
+    )
+    .unwrap();
+    assert!(unavailable.forward.is_none());
+    let settling = crate::spatial::AcceptedBodyMotion {
+        velocity: Vector3::new(0.0, OBSERVED_LINEAR_IDLE_SPEED_MPS * 0.5, 0.0),
+        omega: Vector3::new(0.0, 0.0, OBSERVED_ANGULAR_IDLE_RATE_RADIANS * 0.5),
+    };
+    let idle = observed_locomotion_order(
+        table,
+        MotionCommand(STYLE),
+        settling,
+        Quaternion::identity(),
+        CharacterMotionPresentation::Grounded,
+        1.0,
+    )
+    .unwrap();
+    assert!(idle.forward.is_none() && idle.sidestep.is_none() && idle.turn.is_none());
+}
+
+#[test]
+fn retiring_observations_preserves_authored_cursor_actions_and_ticks() {
+    let catalog = catalog();
+    let table = catalog.table(0x0900_0001).unwrap();
+    let retained = holtburger_common::Guid(1);
+    let retired = holtburger_common::Guid(2);
+    let mut registry = MotionRuntimeRegistry::new();
+    let walking = MotionOrder {
+        forward: Some((MotionCommand(WALK), 1.0)),
+        ..MotionOrder::default()
+    };
+    for guid in [retained, retired] {
+        registry.drive(table, guid, MotionOrder::default(), 0.0);
+        assert!(registry.present_locomotion(table, guid, walking, 1.5));
+        registry.enqueue_action(table, guid, action(1));
+        registry.drive(table, guid, MotionOrder::default(), 0.25);
+    }
+    let before = registry.get(retired).unwrap().clone();
+    registry.retain_locomotion_presentation(|guid| guid == retained);
+    let after = registry.get(retired).unwrap();
+    assert_eq!(after.tick(), before.tick());
+    assert_eq!(
+        after.sequence().frame_number(),
+        before.sequence().frame_number()
+    );
+    assert_eq!(after.active_action(), before.active_action());
+    assert_eq!(after.action_count(), before.action_count());
+    assert_eq!(
+        registry.playing_clip(retired).unwrap().animation_id,
+        ACTION_ANIM
+    );
+    let expected = registry
+        .drive(table, retained, MotionOrder::default(), 1.0)
+        .clone();
+    let actual = registry
+        .drive(table, retired, MotionOrder::default(), 1.0)
+        .clone();
+    assert_eq!(actual, expected);
+    assert!(actual.action_completed);
+    assert_eq!(
+        registry.playing_clip(retained).unwrap().animation_id,
+        WALK_ANIM
+    );
+    assert_eq!(
+        registry.playing_clip(retired).unwrap().animation_id,
+        STAND_ANIM
+    );
+    assert_eq!(registry.len(), 2);
+}
+
+#[test]
+fn world_locomotion_sources_preserve_physics_and_action_priority() {
+    let mut world = crate::WorldState::synthetic();
+    world.set_motion_sequences(catalog());
+    let catalog = catalog();
+    let table = catalog.table(0x0900_0001).unwrap();
+    let guid = holtburger_common::Guid(1);
+    let body_id = crate::SpatialBodyId::Entity(guid);
+    let pose = holtburger_common::position::WorldPosition {
+        rotation: Quaternion::from_axis_angle(
+            Vector3::new(0.0, 0.0, 1.0),
+            std::f32::consts::FRAC_PI_2,
+        )
+        .unwrap(),
+        ..Default::default()
+    };
+    // Authority still faces forward; observed travel must use the published physical facing.
+    let mut entity = crate::entity::Entity::new(
+        guid,
+        "Walker".to_owned(),
+        holtburger_common::position::WorldPosition::default(),
+    );
+    entity.properties.set_did_prop(
+        holtburger_common::properties::PropertyDataId::MotionTable,
+        holtburger_common::Guid(table.id),
+    );
+    world.entities.insert(entity);
+    world.scene.apply_authoritative_body_effect(
+        body_id,
+        crate::AuthoritativePoseEffect::Initialize { pose },
+        crate::AuthoritativeBodyVectors {
+            velocity: Vector3::zero(),
+            acceleration: Vector3::zero(),
+            omega: Vector3::zero(),
+        },
+        std::time::Instant::now(),
+    );
+    world
+        .motion_runtimes
+        .drive(table, guid, MotionOrder::default(), 0.0);
+    let observed = crate::spatial::AcceptedBodyMotion {
+        velocity: pose
+            .rotation
+            .rotate_vector(Vector3::new(0.0, OBSERVED_WALK_SPEED_MPS, 0.0)),
+        omega: Vector3::zero(),
+    };
+    world
+        .present_character_locomotion(
+            body_id,
+            LocomotionPresentationSource::Observed(observed),
+            CharacterMotionPresentation::Grounded,
+            std::time::Duration::from_secs_f32(1.5),
+        )
+        .unwrap();
+    assert_eq!(
+        world
+            .motion_runtimes
+            .playing_clip(guid)
+            .unwrap()
+            .animation_id,
+        WALK_ANIM
+    );
+    // Zero physical travel under an active command must keep cycling for many loops,
+    // without adding motion to the body or advancing the authored root/hook cursor.
+    let commanded = LocomotionPresentationSource::Command(MotionOrder {
+        style: Some(MotionCommand(STYLE)),
+        forward: Some((MotionCommand(RUN), 1.0)),
+        ..MotionOrder::default()
+    });
+    let before = world.scene.body(body_id).unwrap().clone();
+    let authored_before = world.motion_runtimes.get(guid).unwrap().tick().clone();
+    for _ in 0..40 {
+        world
+            .present_character_locomotion(
+                body_id,
+                commanded,
+                CharacterMotionPresentation::Grounded,
+                std::time::Duration::from_millis(125),
+            )
+            .unwrap();
+        let clip = world.motion_runtimes.playing_clip(guid).unwrap();
+        assert_eq!(clip.animation_id, RUN_ANIM);
+        assert!(clip.framerate > 0.0);
+        assert_eq!(clip.completion, MotionClipCompletion::Loop);
+    }
+    assert_eq!(world.scene.body(body_id).unwrap().pose, before.pose);
+    assert_eq!(world.scene.body(body_id).unwrap().retained, before.retained);
+    assert_eq!(
+        world.motion_runtimes.get(guid).unwrap().tick(),
+        &authored_before
+    );
+    // Charge/falling override commanded running, including the existing missing-cycle
+    // stance fallback. Releasing intent with zero accepted motion also presents idle.
+    for presentation in [
+        CharacterMotionPresentation::Ready,
+        CharacterMotionPresentation::Falling,
+    ] {
+        world
+            .present_character_locomotion(
+                body_id,
+                commanded,
+                presentation,
+                std::time::Duration::from_millis(125),
+            )
+            .unwrap();
+        assert_eq!(
+            world
+                .motion_runtimes
+                .playing_clip(guid)
+                .unwrap()
+                .animation_id,
+            STAND_ANIM
+        );
+    }
+    world
+        .present_character_locomotion(
+            body_id,
+            LocomotionPresentationSource::Observed(crate::spatial::AcceptedBodyMotion::default()),
+            CharacterMotionPresentation::Grounded,
+            std::time::Duration::from_millis(125),
+        )
+        .unwrap();
+    assert_eq!(
+        world
+            .motion_runtimes
+            .playing_clip(guid)
+            .unwrap()
+            .animation_id,
+        STAND_ANIM
+    );
+    world.motion_runtimes.enqueue_action(table, guid, action(1));
+    let authored = world
+        .motion_runtimes
+        .drive(table, guid, MotionOrder::default(), 0.25)
+        .clone();
+    world
+        .present_character_locomotion(
+            body_id,
+            commanded,
+            CharacterMotionPresentation::Ready,
+            std::time::Duration::from_secs_f32(0.25),
+        )
+        .unwrap();
+    assert_eq!(
+        world
+            .motion_runtimes
+            .playing_clip(guid)
+            .unwrap()
+            .animation_id,
+        ACTION_ANIM
+    );
+    assert_eq!(world.motion_runtimes.get(guid).unwrap().tick(), &authored);
+}
+
+#[test]
+fn remote_source_heading_follows_authority_and_commands_not_body_return() {
+    use crate::motion::RemoteMotionInput;
+    use crate::spatial::{AuthoritativePoseEffect, MOBILE_CONTACT_TICK_SECONDS};
+    use holtburger_common::position::WorldPosition;
+    let catalog = catalog();
+    let table = catalog.table(0x0900_0001).unwrap();
+    let guid = holtburger_common::Guid(1);
+    let mut runtime = MotionRuntimeRegistry::new();
+    let mut pose = WorldPosition {
+        landblock_id: holtburger_common::Guid(0xda55_ffff),
+        coords: Vector3::zero(),
+        rotation: Quaternion::identity(),
+    };
+    let snapshot = EntityMotionSnapshot::default();
+    runtime.drive_remote(
+        table,
+        guid,
+        RemoteMotionInput {
+            frame_policy: crate::motion::RemoteFramePolicy::Command,
+            snapshot,
+            pose,
+            contact: ContactState::Grounded,
+            target: None,
+            omega: Vector3::zero(),
+        },
+        MOBILE_CONTACT_TICK_SECONDS,
+    );
+    let source = runtime
+        .get(guid)
+        .unwrap()
+        .remote_motion_sample()
+        .unwrap()
+        .rotation;
+    pose.rotation =
+        Quaternion::from_axis_angle(Vector3::new(0.0, 0.0, 1.0), std::f32::consts::PI).unwrap();
+    for _ in 0..30 {
+        runtime.drive_remote(
+            table,
+            guid,
+            RemoteMotionInput {
+                frame_policy: crate::motion::RemoteFramePolicy::Command,
+                snapshot,
+                pose,
+                contact: ContactState::Grounded,
+                target: None,
+                omega: Vector3::zero(),
+            },
+            MOBILE_CONTACT_TICK_SECONDS,
+        );
+        let sample = runtime.get(guid).unwrap().remote_motion_sample().unwrap();
+        assert_eq!(sample.rotation, source);
+    }
+    runtime.apply_remote_pose_effect(
+        guid,
+        AuthoritativePoseEffect::Interpolate {
+            pose,
+            keep_heading: false,
+            adjusted_max_speed_mps: None,
+        },
+    );
+    let authority = pose.rotation;
+    let omega = Vector3::new(0.0, 0.0, 0.5);
+    for tick in 0..30 {
+        if tick == 15 {
+            runtime.apply_remote_pose_effect(
+                guid,
+                AuthoritativePoseEffect::Interpolate {
+                    pose,
+                    keep_heading: true,
+                    adjusted_max_speed_mps: None,
+                },
+            );
+        }
+        runtime.drive_remote(
+            table,
+            guid,
+            RemoteMotionInput {
+                frame_policy: crate::motion::RemoteFramePolicy::Command,
+                snapshot,
+                pose,
+                contact: ContactState::Grounded,
+                target: None,
+                omega,
+            },
+            MOBILE_CONTACT_TICK_SECONDS,
+        );
+        let sample = runtime.get(guid).unwrap().remote_motion_sample().unwrap();
+        let expected = crate::spatial::integrate_angular_velocity(
+            authority,
+            omega,
+            tick as f32 * MOBILE_CONTACT_TICK_SECONDS,
+        );
+        assert!(
+            (sample.rotation.rotate_vector(Vector3::new(0.0, 1.0, 0.0))
+                - expected.rotate_vector(Vector3::new(0.0, 1.0, 0.0)))
+            .length()
+                < 0.0001
+        );
+    }
+    // Local control relinquishes remote autonomy through its own explicit entry point.
+    runtime.drive(
+        table,
+        guid,
+        MotionOrder::default(),
+        MOBILE_CONTACT_TICK_SECONDS,
+    );
+    assert!(runtime.get(guid).unwrap().remote_motion_sample().is_none());
+}
+
+#[test]
+fn remote_action_interval_keeps_root_motion_after_completion() {
+    use crate::motion::RemoteMotionInput;
+    use crate::spatial::MOBILE_CONTACT_TICK_SECONDS;
+    use holtburger_common::position::WorldPosition;
+    let mut action_animation = animation(ACTION_ANIM, 4, 0.25);
+    action_animation.part_frames[1].hooks.push(AnimationHook {
+        hook_type: 6,
+        direction: 1,
+        payload: AnimationHookPayload::Ethereal(EtherealHookPayload { ethereal: true }),
+    });
+    let catalog = catalog_with_action_animation(STAND, 10.0, action_animation);
+    let table = catalog.table(0x0900_0001).unwrap();
+    let guid = holtburger_common::Guid(1);
+    let pose = WorldPosition {
+        landblock_id: holtburger_common::Guid(0xda55_ffff),
+        coords: Vector3::zero(),
+        rotation: Quaternion::identity(),
+    };
+    let mut registry = MotionRuntimeRegistry::new();
+    registry.enqueue_action(table, guid, action(1));
+    registry.admit_sticky_target(
+        table,
+        guid,
+        Some(holtburger_common::Guid(2)),
+        std::time::Instant::now(),
+    );
+    let mut completed = false;
+    let mut fired_hooks = 0;
+    for _ in 0..120 {
+        let tick = registry
+            .drive_remote(
+                table,
+                guid,
+                RemoteMotionInput {
+                    frame_policy: crate::motion::RemoteFramePolicy::Command,
+                    snapshot: EntityMotionSnapshot::default(),
+                    pose,
+                    contact: ContactState::Grounded,
+                    target: None,
+                    omega: Vector3::zero(),
+                },
+                MOBILE_CONTACT_TICK_SECONDS,
+            )
+            .clone();
+        fired_hooks += tick.hooks.len();
+        let sample = registry.get(guid).unwrap().remote_motion_sample().unwrap();
+        assert_eq!(
+            registry.get(guid).unwrap().sticky_target(),
+            (!completed).then_some(holtburger_common::Guid(2))
+        );
+        if tick.action_completed {
+            assert!(
+                tick.offset.translation.length() > 0.0,
+                "completion fixture must include action travel in its final interval"
+            );
+            assert_eq!(sample.offset, Some(tick.offset));
+            completed = true;
+        }
+        registry.present_locomotion(
+            table,
+            guid,
+            MotionOrder {
+                forward: Some((MotionCommand::WALK_FORWARD, 1.0)),
+                ..MotionOrder::default()
+            },
+            MOBILE_CONTACT_TICK_SECONDS,
+        );
+        assert_eq!(
+            registry.get(guid).unwrap().remote_motion_sample(),
+            Some(sample)
+        );
+    }
+    assert!(completed);
+    assert_eq!(
+        fired_hooks, 1,
+        "sticky action and observed presentation must not replay hooks"
+    );
+}
+
+#[test]
+fn zero_time_selection_preserves_sticky_interval_until_explicit_cancellation() {
+    let catalog = catalog();
+    let table = catalog.table(0x0900_0001).unwrap();
+    let guid = holtburger_common::Guid(1);
+    let target = holtburger_common::Guid(2);
+    let mut registry = MotionRuntimeRegistry::new();
+    registry.admit_sticky_target(table, guid, Some(target), std::time::Instant::now());
+    registry.drive(
+        table,
+        guid,
+        MotionOrder::default(),
+        crate::spatial::MOBILE_CONTACT_TICK_SECONDS,
+    );
+    assert_eq!(registry.get(guid).unwrap().sticky_target(), Some(target));
+    registry.drive(table, guid, MotionOrder::default(), 0.0);
+    assert_eq!(registry.get(guid).unwrap().sticky_target(), Some(target));
+    registry.cancel_sticky_target(guid);
+    assert_eq!(registry.get(guid).unwrap().sticky_target(), None);
+}
+
+#[test]
+fn sticky_command_heading_survives_cancellation_and_ordinary_playback() {
+    let catalog = catalog();
+    let table = catalog.table(0x0900_0001).unwrap();
+    let guid = holtburger_common::Guid(1);
+    let mut registry = MotionRuntimeRegistry::new();
+    let input = || RemoteMotionInput {
+        frame_policy: RemoteFramePolicy::Command,
+        snapshot: EntityMotionSnapshot::default(),
+        pose: holtburger_common::position::WorldPosition {
+            landblock_id: holtburger_common::Guid(0xda55_0100),
+            coords: Vector3::zero(),
+            rotation: Quaternion::identity(),
+        },
+        contact: ContactState::Grounded,
+        target: None,
+        omega: Vector3::zero(),
+    };
+    registry.drive_remote(
+        table,
+        guid,
+        input(),
+        crate::spatial::MOBILE_CONTACT_TICK_SECONDS,
+    );
+    registry.admit_sticky_target(
+        table,
+        guid,
+        Some(holtburger_common::Guid(2)),
+        std::time::Instant::now(),
+    );
+    let heading = 1.2;
+    registry.retain_sticky_heading(guid, heading);
+    registry.cancel_sticky_target(guid);
+    registry.drive_remote(
+        table,
+        guid,
+        input(),
+        crate::spatial::MOBILE_CONTACT_TICK_SECONDS,
+    );
+    assert_eq!(
+        registry
+            .get(guid)
+            .unwrap()
+            .remote_motion_sample()
+            .unwrap()
+            .rotation,
+        Quaternion::from_heading(heading)
+    );
+}
+
+/// Recovery resets source continuation and publishes a snap without restarting authored actions.
+#[test]
+fn recovered_body_publication_preserves_action_and_playback_phase() {
+    let catalog = catalog();
+    let table = catalog.table(0x0900_0001).unwrap();
+    let guid = holtburger_common::Guid(0x5000_0001);
+    let mut world = crate::WorldState::synthetic();
+    let pose = holtburger_common::position::WorldPosition {
+        landblock_id: holtburger_common::Guid(0x1234_ffff),
+        coords: Vector3::new(10.0, 20.0, 0.0),
+        rotation: Quaternion::identity(),
+    };
+    let id = crate::SpatialBodyId::Entity(guid);
+    world
+        .scene
+        .register_body(crate::SpatialBody::new(id, pose, std::time::Instant::now()));
+    world.motion_runtimes.enqueue_action(table, guid, action(1));
+    world.motion_runtimes.drive(
+        table,
+        guid,
+        MotionOrder {
+            style: Some(MotionCommand(STYLE)),
+            ..MotionOrder::default()
+        },
+        0.05,
+    );
+    let before = world.motion_runtimes.get(guid).unwrap();
+    let active = before.active_action();
+    assert!(active.is_some());
+    let frame = before.sequence().frame_number();
+    let clip = before.playing_clip();
+    let events = world.apply_recovered_body(id).unwrap();
+    let after = world.motion_runtimes.get(guid).unwrap();
+    assert_eq!(after.active_action(), active);
+    assert_eq!(after.sequence().frame_number(), frame);
+    assert_eq!(after.playing_clip(), clip);
+    assert!(
+        matches!(events.as_slice(), [crate::WorldEvent::RuntimeBodyAdvanced { body_id, kind: crate::RuntimeBodyAdvanceKind::CorrectionSnap }] if *body_id == id)
     );
 }

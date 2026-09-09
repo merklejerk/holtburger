@@ -1444,13 +1444,19 @@ mod tests {
             movement,
             response_policy,
             entity_collision: DynamicBodyCollisionDefinition {
+                player_collision: None,
+                contact_response: holtburger_world::EntityContactResponse::Character(
+                    holtburger_world::EntityIntegrationEligibility::Eligible,
+                ),
                 target_geometry: Arc::new(PreparedEntityTargetGeometry {
+                    setup_radius: 0.5,
                     physics_bsp_parts: Vec::new(),
                     fallback_setup_did: 0x0200_0001,
                     fallback_shapes: Vec::new(),
                     fallback_scale: ColliderScale::uniform(1.0).unwrap(),
                 }),
                 dynamic_collision: EntityDynamicCollisionPolicy {
+                    is_static: false,
                     target: EntityCollisionParticipation::Solid,
                     mover_accepts_response: true,
                     accepts_peer_reports: true,

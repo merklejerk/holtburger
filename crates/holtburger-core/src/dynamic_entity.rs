@@ -309,6 +309,8 @@ pub struct DynamicEntityDefinitionInput {
 /// Immutable definition facts sufficient to prepare physical geometry and response policy.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DynamicEntityPhysicalPreparationInput {
+    /// Gameplay character identity; animation activity and physics scheduling are unrelated.
+    pub is_contact_character: bool,
     /// Weenie class identity retained in preparation errors.
     pub wcid: u32,
     /// Setup resource owning movement and target geometry.
@@ -885,6 +887,14 @@ pub fn prepare_dynamic_entity_physics(
 ) -> Result<DynamicPhysicalBodyDefinition, DynamicEntityPhysicalPreparationError> {
     prepare_dynamic_entity_physical_facts(
         DynamicEntityPhysicalFacts {
+            is_contact_character: matches!(
+                definition.identity.weenie_type,
+                WeenieType::Creature
+                    | WeenieType::Cow
+                    | WeenieType::AI
+                    | WeenieType::Pet
+                    | WeenieType::CombatPet
+            ),
             wcid: definition.identity.wcid,
             setup_did: definition.content.setup_did,
             appearance: &definition.appearance,
@@ -915,6 +925,7 @@ pub fn prepare_dynamic_entity_physical_definition(
         .unwrap_or(PhysicalElasticity::DEFAULT);
     prepare_dynamic_entity_physical_facts(
         DynamicEntityPhysicalFacts {
+            is_contact_character: input.is_contact_character,
             wcid: input.wcid,
             setup_did: input.setup_did,
             appearance: &input.appearance,
@@ -927,6 +938,7 @@ pub fn prepare_dynamic_entity_physical_definition(
 }
 
 struct DynamicEntityPhysicalFacts<'a> {
+    is_contact_character: bool,
     wcid: u32,
     setup_did: u32,
     appearance: &'a EntityAppearance,
@@ -940,6 +952,7 @@ fn prepare_dynamic_entity_physical_facts(
     content: &ContentRepository,
 ) -> Result<DynamicPhysicalBodyDefinition, DynamicEntityPhysicalPreparationError> {
     let DynamicEntityPhysicalFacts {
+        is_contact_character,
         wcid,
         setup_did,
         appearance,
@@ -1010,6 +1023,12 @@ fn prepare_dynamic_entity_physical_facts(
         movement,
         response_policy,
         entity_collision: DynamicBodyCollisionDefinition {
+            player_collision: None,
+            contact_response: if is_contact_character {
+                holtburger_world::EntityContactResponse::Character(physics.integration_eligibility)
+            } else {
+                holtburger_world::EntityContactResponse::Obstacle
+            },
             target_geometry: Arc::new(target_geometry),
             dynamic_collision: physics.dynamic_collision,
             reporting: physics.reporting,
@@ -1225,6 +1244,7 @@ fn prepare_target_geometry(
         })?;
 
     Ok(PreparedEntityTargetGeometry {
+        setup_radius: setup.radius,
         physics_bsp_parts,
         fallback_setup_did: setup_did,
         fallback_shapes,
@@ -1773,7 +1793,12 @@ mod tests {
             movement: profile.definition,
             response_policy: profile.response_policy,
             entity_collision: DynamicBodyCollisionDefinition {
+                player_collision: None,
+                contact_response: holtburger_world::EntityContactResponse::Character(
+                    holtburger_world::EntityIntegrationEligibility::Eligible,
+                ),
                 target_geometry: Arc::new(PreparedEntityTargetGeometry {
+                    setup_radius: 0.5,
                     physics_bsp_parts: Vec::new(),
                     fallback_setup_did: 0x0200_0001,
                     fallback_shapes: vec![Arc::new(CollisionShape::Ball(CollisionBall {
@@ -1783,6 +1808,7 @@ mod tests {
                     fallback_scale: ColliderScale::uniform(1.0).unwrap(),
                 }),
                 dynamic_collision: holtburger_world::EntityDynamicCollisionPolicy {
+                    is_static: false,
                     target: EntityCollisionParticipation::Solid,
                     mover_accepts_response: true,
                     accepts_peer_reports: true,
@@ -1944,23 +1970,18 @@ mod tests {
                     .unwrap();
             }
         }
-        let prepared = scene
-            .prepare_dynamic_entity_collection(&collision, 0.1, |_| {
-                Ok(PhysicalBodyActuation::Grounded(
-                    GroundedBodyActuation::coast(),
+        let touched_at = created_at + std::time::Duration::from_millis(100);
+        let collection = scene
+            .advance_dynamic_entity_collection(&collision, 0.1, touched_at, |_| {
+                Ok(holtburger_world::PhysicalBodyInput::referenced(
+                    PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                    holtburger_world::PhysicalReferenceInput::body(None),
+                    true,
                 ))
             })
             .unwrap();
-        assert!(prepared.coverage_rejections.is_empty());
-        let touched_at = created_at + std::time::Duration::from_millis(100);
-        let mut started = Vec::new();
-        for body_id in prepared.movers {
-            let result = scene
-                .tick_prepared_dynamic_physical_body(body_id, &collision, touched_at)
-                .unwrap();
-            started.extend(result.collision_reports);
-        }
-        started.extend(scene.finish_dynamic_entity_collection(touched_at).unwrap());
+        assert!(collection.coverage_rejections.is_empty());
+        let started = collection.collision_reports;
         assert_eq!(started.len(), 2);
 
         let mut despawn_scene = scene.clone();

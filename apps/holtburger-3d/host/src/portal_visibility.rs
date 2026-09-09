@@ -702,7 +702,9 @@ mod tests {
     fn assert_area(aperture: &PortalAperture, expected: f32) {
         let area = aperture
             .triangle_indices
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|triangle| {
                 let a = aperture.positions[triangle[0] as usize];
                 let b = aperture.positions[triangle[1] as usize];

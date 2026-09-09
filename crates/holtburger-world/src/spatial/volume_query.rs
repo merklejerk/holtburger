@@ -1,11 +1,11 @@
-//! Sphere contacts against one placed setup collision volume.
+//! Sphere contacts against placed authored collision geometry.
 //!
 //! Retail's volume solids are square-edged Minkowski approximations, not rounded ones: a cylsphere
 //! obstructs exactly the region `xy_distance <= R + r - ε` and `z ∈ [-(r - ε), H + r - ε]` around
 //! its low point (`CCylSphere::collides_with_sphere`, `acclient.c:346572-346580`), and a collision
 //! sphere obstructs the ball of radius `R + r - ε` (`CSphere::intersects_sphere`,
 //! `acclient.c:344292-344350`). A body dropping past a cylinder rim misses it entirely rather
-//! than grazing a rounded lip, so no edge support feature exists for volumes.
+//! than grazing a rounded lip, so volume support uses the authored cap rather than rounded rim tangency.
 //!
 //! Retail resolves collision responses inside its transition machine using the pre-move center
 //! (`CCylSphere::normal_of_collision`, `acclient.c:346715`: radial wall normal when that center is
@@ -15,10 +15,78 @@
 //! by the side the body is closest to leaving. Cone normals at rims are deliberately never
 //! produced, matching retail's binary structure.
 
+use super::SupportFeature;
 use holtburger_common::Vector3;
-use holtburger_content::{CollisionBall, CollisionCylinder, PlacedCollisionShape};
+use holtburger_content::{CollisionBall, CollisionCylinder, CollisionShape, PlacedCollisionShape};
 
-use super::bsp_query::{CONTACT_EPSILON, ShapeContact, ShapeSupport, ShapeSupportFeature};
+use super::bsp_query::{
+    CONTACT_EPSILON, ShapeContact, ShapeSupport, placed_polygon_contacts, placed_solid_contacts,
+};
+
+/// Source-neutral support geometry shared by world colliders and prepared hard entities.
+pub(crate) fn placed_shape_supports(
+    shape: &PlacedCollisionShape,
+    center: Vector3,
+    radius: f32,
+    maximum_drop: f32,
+    maximum_rise: f32,
+) -> Vec<ShapeSupport> {
+    // Footing is a vertical column. The shape query owns height admission; sphere/box
+    // distance would incorrectly reject sloped rims and expanded cap corners.
+    let minimum = shape.bounds.minimum();
+    let maximum = shape.bounds.maximum();
+    let reach = radius + CONTACT_EPSILON;
+    if center.x + reach < minimum.x
+        || center.x - reach > maximum.x
+        || center.y + reach < minimum.y
+        || center.y - reach > maximum.y
+    {
+        return Vec::new();
+    }
+    match &*shape.shape {
+        CollisionShape::Bsp(solid) => super::bsp_query::placed_supports(
+            shape,
+            solid,
+            center,
+            radius,
+            maximum_drop,
+            maximum_rise,
+        ),
+        CollisionShape::Cylinder(cylinder) => {
+            placed_cylinder_support(shape, cylinder, center, radius, maximum_drop, maximum_rise)
+                .into_iter()
+                .collect()
+        }
+        CollisionShape::Ball(ball) => {
+            placed_ball_support(shape, ball, center, radius, maximum_drop, maximum_rise)
+                .into_iter()
+                .collect()
+        }
+    }
+}
+
+/// Source-neutral sphere contact against authored BSP or setup-volume geometry.
+pub(crate) fn placed_shape_contacts(
+    shape: &PlacedCollisionShape,
+    center: Vector3,
+    radius: f32,
+) -> Vec<ShapeContact> {
+    super::physics_work::record_shape_query();
+    match &*shape.shape {
+        CollisionShape::Bsp(solid) => placed_solid_contacts(shape, solid, center, radius, true)
+            .into_iter()
+            .chain(placed_polygon_contacts(shape, solid, center, radius))
+            .collect(),
+        CollisionShape::Cylinder(cylinder) => {
+            placed_cylinder_contact(shape, cylinder, center, radius)
+                .into_iter()
+                .collect()
+        }
+        CollisionShape::Ball(ball) => placed_ball_contact(shape, ball, center, radius)
+            .into_iter()
+            .collect(),
+    }
+}
 
 /// One placed cylsphere in landblock space.
 ///
@@ -85,6 +153,55 @@ pub(super) fn placed_ball_contact(
     radius: f32,
 ) -> Option<ShapeContact> {
     ball_contact(placed_ball(collider, ball), center, radius)
+}
+
+/// Stable initial contact at the caller-selected query radius; this does not add a tolerance.
+/// A tangent cast's iterative penetration normal can be poorly conditioned; the volume's
+/// analytic closest point supplies a stable normal before attempting future impact geometry.
+pub(super) fn placed_volume_sweep_contact(
+    collider: &PlacedCollisionShape,
+    center: Vector3,
+    radius: f32,
+) -> Option<ShapeContact> {
+    match &*collider.shape {
+        CollisionShape::Bsp(_) => None, // BSP polygons have their own oriented-plane admission.
+        CollisionShape::Ball(ball) => {
+            // The caller owns the query radius (hard admission or report geometry). Cancel
+            // the overlap query's shrink without adding another initial-contact band.
+            ball_contact(
+                placed_ball(collider, ball),
+                center,
+                radius + CONTACT_EPSILON,
+            )
+        }
+        CollisionShape::Cylinder(cylinder) => {
+            let cylinder = placed_cylinder(collider, cylinder);
+            let relative = center - cylinder.low;
+            let radial = Vector3::new(relative.x, relative.y, 0.0);
+            let radial_distance = radial.length();
+            let closest_radial = if radial_distance > cylinder.radius {
+                radial * (cylinder.radius / radial_distance)
+            } else {
+                radial
+            };
+            let closest =
+                closest_radial + Vector3::new(0.0, 0.0, relative.z.clamp(0.0, cylinder.height));
+            let outward = relative - closest;
+            let distance = outward.length();
+            if distance > radius {
+                None
+            } else if distance > CONTACT_EPSILON {
+                Some(ShapeContact {
+                    normal: outward / distance,
+                    depth: (radius - distance).max(0.0),
+                })
+            } else {
+                // Inside the cylinder, choose its nearest exit face using the existing volume
+                // contact rule. Outside it, the closest point above preserves rounded sweep rims.
+                cylinder_contact(cylinder, center, radius + CONTACT_EPSILON)
+            }
+        }
+    }
 }
 
 fn cylinder_contact(
@@ -221,7 +338,7 @@ fn cylinder_support(
     Some(ShapeSupport {
         normal: Vector3::new(0.0, 0.0, 1.0),
         height_delta,
-        feature: ShapeSupportFeature::Surface,
+        feature: radial_support_feature(displacement, cylinder.radius),
     })
 }
 
@@ -255,8 +372,20 @@ fn ball_support(
         // (`acclient.c:343736` normalizes `disp` by the un-shrunk radius sum).
         normal: (rest_center - ball.center) / rest_distance,
         height_delta,
-        feature: ShapeSupportFeature::Surface,
+        feature: radial_support_feature(center - ball.center, ball.radius),
     })
+}
+
+/// Preserve radial edge guidance with accepted volume support, as for polygon overhangs.
+fn radial_support_feature(displacement: Vector3, radius: f32) -> SupportFeature {
+    let horizontal = Vector3::new(displacement.x, displacement.y, 0.0);
+    if horizontal.length_squared() <= radius * radius {
+        SupportFeature::Surface
+    } else {
+        SupportFeature::Overhang {
+            inward_normal: horizontal.normalize() * -1.0,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -378,7 +507,7 @@ mod tests {
             volume_support(&collider, Vector3::new(100.2, 100.0, 14.0), 0.5, 1.5, 0.6).unwrap();
         assert_eq!(support.normal, Vector3::new(0.0, 0.0, 1.0));
         assert!((support.height_delta - (13.5 - 14.0)).abs() < 1e-6);
-        assert!(matches!(support.feature, ShapeSupportFeature::Surface));
+        assert!(matches!(support.feature, SupportFeature::Surface));
     }
 
     /// Retail's square-edged solid: a drop just outside the shrunk radius sum finds nothing —
@@ -408,7 +537,7 @@ mod tests {
         assert!((support.height_delta - (11.2 - 12.0)).abs() < 1e-5);
         // Normal leans outward on the flank; z-component is 1.2 / 1.5.
         assert!((support.normal.z - 0.8).abs() < 1e-5);
-        assert!(matches!(support.feature, ShapeSupportFeature::Surface));
+        assert!(matches!(support.feature, SupportFeature::Surface));
     }
 
     #[test]

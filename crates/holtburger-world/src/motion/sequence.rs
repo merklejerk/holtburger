@@ -1,15 +1,42 @@
 //! The running sequence: which clips are installed, where the cursor is, and what one tick of
 //! elapsed time contributes.
 //!
-//! This is retail's `CSequence` (`acclient.c:326110-327216`), ported as a value the caller owns
+//! Based on retail's `CSequence` (`acclient.c:326110-327216`), with continuously sampled movement
+//! for the compliant motor rather than retail's whole-frame impulses. The caller owns this value
 //! rather than a service. Advancement is a method on that value and returns what the tick produced;
 //! nothing here caches, records history, or reaches back into content.
 
-use holtburger_common::{RigidTransform, Vector3};
+use holtburger_common::{Quaternion, RigidTransform, Vector3};
 use holtburger_content::{MotionClip, MotionHook, MotionHookDirection};
 use std::sync::Arc;
 
 use super::{MotionAnimationRef, MotionCommand};
+
+/// Samples a straight translation and shortest rotation arc in the interval's starting frame.
+/// Consecutive intervals compose to the full transform, including when the frame turns.
+/// Shared by authored playback and the physical reference's substep sampling.
+fn authored_motion_interval(offset: RigidTransform, start: f32, end: f32) -> RigidTransform {
+    let rotation = glam::Quat::from_xyzw(
+        offset.rotation.x,
+        offset.rotation.y,
+        offset.rotation.z,
+        offset.rotation.w,
+    );
+    let first = glam::Quat::IDENTITY.slerp(rotation, start);
+    let last = glam::Quat::IDENTITY.slerp(rotation, end);
+    let delta = first.inverse() * last;
+    let travel = offset.translation * (end - start);
+    let local = first.inverse() * glam::Vec3::new(travel.x, travel.y, travel.z);
+    RigidTransform {
+        translation: Vector3::new(local.x, local.y, local.z),
+        rotation: Quaternion {
+            w: delta.w,
+            x: delta.x,
+            y: delta.y,
+            z: delta.z,
+        },
+    }
+}
 
 /// Smallest framerate retail treats as advancing the cursor (`acclient.c:327122`).
 ///
@@ -141,11 +168,8 @@ pub struct FiredMotionHook {
 /// What one tick of sequence advancement produced.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SequenceTick {
-    /// The tick's authored contribution as one exactly-composed rigid offset.
-    ///
-    /// Retail composes every departed frame plus the motion-data physics slice into a single
-    /// `Frame` before applying it once (`acclient.c:308262-308298`), so this is the whole authored
-    /// contribution rather than a sample of it.
+    /// The tick's continuously sampled authored movement, composed in traversal order.
+    /// Root movement advances within frames; hooks and action completion remain discrete.
     pub offset: RigidTransform,
     /// Simulation hooks the departed frames fired, in departure order.
     ///
@@ -416,6 +440,19 @@ impl MotionSequenceRuntime {
         self.first_cyclic = Some(first_cyclic - drop);
     }
 
+    /// Keeps visual locomotion in its cyclic tail; ordinary playback owns one-shot transitions.
+    /// No departed-frame hooks or root motion are consumed by this presentation-only operation.
+    pub(super) fn select_cyclic_presentation(&mut self) {
+        let (Some(current), Some(first_cyclic)) = (self.current, self.first_cyclic) else {
+            return;
+        };
+        if current < first_cyclic {
+            self.current = Some(first_cyclic);
+            self.frame_number = self.nodes[first_cyclic].starting_frame();
+        }
+        self.drop_departed_transitions();
+    }
+
     /// Removes the looping tail, leaving only transition clips.
     ///
     /// If the cursor was inside the tail it falls back to the last surviving transition clip at that
@@ -449,14 +486,21 @@ impl MotionSequenceRuntime {
             return tick;
         }
 
-        self.advance_within_clip(quantum, &mut tick);
+        self.advance_within_clip(quantum, Some(&mut tick));
         self.drop_departed_transitions();
         tick
     }
 
+    /// Advances a visual-only cursor without reading root frames, generating hooks, or applying
+    /// motion-data physics. Clip timing and boundary traversal are shared with authored playback.
+    pub(super) fn advance_presentation(&mut self, quantum: f32) {
+        self.advance_within_clip(quantum, None);
+        self.drop_departed_transitions();
+    }
+
     /// Retail's `CSequence::update_internal` (`acclient.c:327102-327215`), iterated rather than
     /// recursed: crossing a clip boundary carries proportional leftover time into the next clip.
-    fn advance_within_clip(&mut self, mut quantum: f32, tick: &mut SequenceTick) {
+    fn advance_within_clip(&mut self, mut quantum: f32, mut tick: Option<&mut SequenceTick>) {
         // Retail recurses once per boundary crossed. The bound exists because a zero-length window
         // at a nonzero rate would otherwise carry leftover time forever.
         const MAX_BOUNDARIES_PER_TICK: usize = 64;
@@ -468,8 +512,19 @@ impl MotionSequenceRuntime {
             let node = self.nodes[current].clone();
             let framerate = node.framerate;
             let frametime = framerate * quantum;
-            let mut last_frame = self.frame_number.floor() as i32;
+            let first_frame = self.frame_number;
+            let mut last_frame = first_frame.floor() as i32;
             self.frame_number += frametime;
+            if let Some(tick) = tick.as_deref_mut() {
+                self.sample_movement(
+                    &node,
+                    first_frame,
+                    self.frame_number
+                        .clamp(node.low_frame as f32, node.high_frame as f32 + 1.0),
+                    quantum,
+                    tick,
+                );
+            }
 
             let mut leftover = 0.0f32;
             let mut clip_done = false;
@@ -483,9 +538,11 @@ impl MotionSequenceRuntime {
                     self.frame_number = node.high_frame as f32;
                     clip_done = true;
                 }
-                while self.frame_number.floor() > last_frame as f32 {
-                    self.depart_frame(&node, last_frame, quantum, tick, true);
-                    last_frame += 1;
+                if let Some(tick) = tick.as_deref_mut() {
+                    while self.frame_number.floor() > last_frame as f32 {
+                        Self::depart_frame(&node, last_frame, tick, true);
+                        last_frame += 1;
+                    }
                 }
             } else if frametime < 0.0 {
                 if (node.low_frame as f32) > self.frame_number.floor() {
@@ -496,46 +553,82 @@ impl MotionSequenceRuntime {
                     self.frame_number = node.low_frame as f32;
                     clip_done = true;
                 }
-                while self.frame_number.floor() < last_frame as f32 {
-                    self.depart_frame(&node, last_frame, quantum, tick, false);
-                    last_frame -= 1;
+                if let Some(tick) = tick.as_deref_mut() {
+                    while self.frame_number.floor() < last_frame as f32 {
+                        Self::depart_frame(&node, last_frame, tick, false);
+                        last_frame -= 1;
+                    }
                 }
-            } else if quantum.abs() > FRAMERATE_EPSILON {
+            } else if quantum.abs() > FRAMERATE_EPSILON
+                && let Some(tick) = tick.as_deref_mut()
+            {
                 tick.offset = self.apply_physics(tick.offset, quantum, quantum);
             }
 
             if !clip_done {
                 return;
             }
-            self.advance_to_next_clip(quantum, tick);
+            self.advance_to_next_clip(quantum, tick.as_deref_mut());
             quantum = leftover;
         }
     }
 
-    /// Composes one departed frame's authored offset and its share of the motion-data physics.
-    ///
-    /// The physics slice is one frame's worth of time — `1/framerate` — signed by the tick's
-    /// direction, so an entity moving under explicit velocity travels the same distance whether the
-    /// clip is fast or slow.
-    fn depart_frame(
+    /// Supplies movement throughout each frame instead of presenting the motor with impulses.
+    /// Each directed frame has one local movement transform, including its explicit physics slice.
+    /// Sampling relative endpoints avoids repeatedly rotating a fraction of its translation.
+    fn sample_movement(
         &self,
         node: &SequenceNode,
-        frame: i32,
+        mut start: f32,
+        end: f32,
         quantum: f32,
         tick: &mut SequenceTick,
-        forward: bool,
     ) {
-        if let Some(authored) = node.root_offset(frame) {
-            tick.offset = if forward {
-                tick.offset.combine(&authored)
+        if start == end || !node.is_advancing() {
+            return;
+        }
+        let forward = end > start;
+        while if forward { start < end } else { start > end } {
+            let frame = if forward {
+                start.floor()
             } else {
-                tick.offset.subtract(&authored)
+                start.ceil() - 1.0
             };
+            let next = if forward {
+                end.min(frame + 1.0)
+            } else {
+                end.max(frame)
+            };
+            let (first, last) = if forward {
+                (start - frame, next - frame)
+            } else {
+                (frame + 1.0 - start, frame + 1.0 - next)
+            };
+            let authored = node
+                .root_offset(frame as i32)
+                .unwrap_or_else(RigidTransform::identity);
+            let directed = if forward {
+                authored
+            } else {
+                RigidTransform::identity().subtract(&authored)
+            };
+            let sample = |phase| {
+                self.apply_physics(
+                    authored_motion_interval(directed, 0.0, phase),
+                    phase / node.framerate,
+                    quantum,
+                )
+            };
+            let interval = RigidTransform::identity()
+                .subtract(&sample(first))
+                .combine(&sample(last));
+            tick.offset = tick.offset.combine(&interval);
+            start = next;
         }
-        if node.framerate.abs() > FRAMERATE_EPSILON {
-            tick.offset = self.apply_physics(tick.offset, 1.0 / node.framerate, quantum);
-        }
+    }
 
+    /// Fires simulation effects only when the frame departs; movement has already been sampled.
+    fn depart_frame(node: &SequenceNode, frame: i32, tick: &mut SequenceTick, forward: bool) {
         let direction = if forward {
             MotionHookDirection::Forward
         } else {
@@ -550,28 +643,29 @@ impl MotionSequenceRuntime {
     /// conditionally composes the successor's entry frame (`acclient.c:326991-327021`). On ordinary
     /// forward playback that skips the leaving clip's terminal frame and composes the successor's
     /// entry frame both here and again when it departs (`:327150-327160`). We instead depart the
-    /// terminal frame exactly once and merely position the cursor on entry. Besides making every
-    /// root frame contribute once, this fires terminal-frame hooks instead of silently skipping
+    /// terminal frame's hooks exactly once and merely position the cursor on entry. Continuous
+    /// movement sampling honors its complete root interval. This fires terminal hooks instead of silently skipping
     /// them. A 2026-08-21 archive census of 26,421 directly-authored internal and cyclic boundaries
     /// found no translation change at half, at most 1.54 cm at p95 and 5.10 cm at p99, with a 2.01 m
     /// maximum; 77 boundaries changed rotation, with a 3.90-degree maximum. The larger outliers are
     /// authored terminal strides that retail replaces with the next entry frame, so preserving the
     /// defect is less natural than honoring the complete root track.
-    fn advance_to_next_clip(&mut self, quantum: f32, tick: &mut SequenceTick) {
+    fn advance_to_next_clip(&mut self, quantum: f32, tick: Option<&mut SequenceTick>) {
         let Some(current) = self.current else {
             return;
         };
         let leaving = self.nodes[current].clone();
         let forward = quantum >= 0.0;
         let frame_forward = leaving.framerate * quantum > 0.0;
-        self.depart_frame(
-            &leaving,
-            self.frame_number.floor() as i32,
-            quantum,
-            tick,
-            frame_forward,
-        );
-        tick.action_completed |= leaving.action_completion;
+        if let Some(tick) = tick {
+            Self::depart_frame(
+                &leaving,
+                self.frame_number.floor() as i32,
+                tick,
+                frame_forward,
+            );
+            tick.action_completed |= leaving.action_completion;
+        }
 
         let next = if forward {
             if current + 1 < self.nodes.len() {

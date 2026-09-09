@@ -3,14 +3,12 @@ use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion};
 use holtburger_world::{
     ChildSpatialBody, ChildSpatialBodyDefinition, ChildSpatialBodyWaypoint, CollisionScene,
-    PhysicalBodySceneResidency, PhysicalBodyTickStatus as GenericPhysicalBodyTickStatus,
-    PlacedMotionPath, PlacedMotionPoint,
+    PhysicalBodySceneResidency, PlacedMotionPath, PlacedMotionPoint,
 };
 
 use crate::host_simulation_runtime::{HostPhysicalBodyTick, report_placed_motion_recoveries};
-use crate::placed_motion_presentation::{
-    landblock_key, present_placed_motion_point, reanchor_point, scene_point_to_pose,
-};
+use crate::placed_motion_presentation::scene_point_to_pose;
+use holtburger_core::placed_motion::{landblock_key, present_placed_motion_point, reanchor_point};
 
 use super::{
     ActivePhysicalFly, PhysicalFlyPathLeg, PhysicalFlyPathPoint, PhysicalFlyResidency,
@@ -32,9 +30,6 @@ pub(super) struct PreparedPhysicalFlyPresentation {
     pub(super) status: PhysicalFlyTickStatus,
     pub(super) scene_residency: PhysicalFlySceneResidency,
     pub(super) ground_state: super::contract::PhysicalFlyGroundState,
-    pub(super) constraint_count: usize,
-    pub(super) substeps: usize,
-    pub(super) contact_passes: usize,
 }
 
 pub(super) fn prepare_physical_fly_presentation(
@@ -67,12 +62,9 @@ pub(super) fn prepare_physical_fly_presentation(
         initial,
         legs,
         viewer,
-        status: physical_fly_tick_status(motion.status),
+        status: PhysicalFlyTickStatus::Solved,
         scene_residency: physical_fly_scene_residency(solved.result.scene_residency),
         ground_state: solved.current.contact.into(),
-        constraint_count: motion.constraint_count,
-        substeps: motion.substeps,
-        contact_passes: motion.contact_passes,
     })
 }
 
@@ -216,18 +208,6 @@ fn placed_point_pose(path: &PlacedMotionPath, point: &PlacedMotionPoint) -> Resu
         pose.landblock_id = cell;
     }
     Ok(pose)
-}
-
-fn physical_fly_tick_status(status: GenericPhysicalBodyTickStatus) -> PhysicalFlyTickStatus {
-    match status {
-        GenericPhysicalBodyTickStatus::Solved => PhysicalFlyTickStatus::Solved,
-        GenericPhysicalBodyTickStatus::SubstepBudgetExceeded => {
-            PhysicalFlyTickStatus::SubstepBudgetExceeded
-        }
-        GenericPhysicalBodyTickStatus::ContactBudgetExceeded => {
-            PhysicalFlyTickStatus::ContactBudgetExceeded
-        }
-    }
 }
 
 fn physical_fly_scene_residency(

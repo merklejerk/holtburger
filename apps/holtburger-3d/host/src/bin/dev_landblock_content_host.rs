@@ -457,10 +457,12 @@ async fn handle_connection(mut stream: TcpStream, state: &DevHostState) -> anyho
                     .iter()
                     .flat_map(|tick| tick.possession_event_outcomes.iter().copied())
                     .collect();
-                let boom = state.boom.advance(&ticks, duration.as_secs_f32())?;
-                let envelope = state
-                    .delivery
-                    .fixed_tick_envelope(ticks.ticks, boom, duration)?;
+                state.boom.publish_target(&ticks);
+                let boom = state.boom.advance(duration.as_secs_f32(), Ok)?;
+                let envelope =
+                    state
+                        .delivery
+                        .publish_fixed_tick(ticks.ticks, boom, duration, Ok)?;
                 Ok(ExplorerPossessionTickResponse { envelope, outcomes })
             });
             match result {
@@ -497,10 +499,11 @@ async fn handle_connection(mut stream: TcpStream, state: &DevHostState) -> anyho
                 let ticks = state
                     .runtime
                     .tick_physical_collection(duration.as_secs_f32(), Instant::now())?;
-                let boom = state.boom.advance(&ticks, duration.as_secs_f32())?;
+                state.boom.publish_target(&ticks);
+                let boom = state.boom.advance(duration.as_secs_f32(), Ok)?;
                 state
                     .delivery
-                    .fixed_tick_envelope(ticks.ticks, boom, duration)
+                    .publish_fixed_tick(ticks.ticks, boom, duration, Ok)
             });
             match result {
                 Ok(event) => {

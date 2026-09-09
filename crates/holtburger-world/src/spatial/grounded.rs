@@ -9,7 +9,7 @@ use super::collision::CollisionOwnerProof;
 use super::collision::{
     CellTransitRequest, CollisionScene, GroundedObstruction, GroundedObstructionRequest,
     MotionWaypoint, MovementRestrictionRequest, PlacementRequest, PlacementRestrictionRequest,
-    SpatialMembership, SphereSweep, StaticContact, SupportContact, SupportFeature, SupportRequest,
+    SpatialMembership, SphereSweep, StaticContact, SupportFeature, SupportRequest,
     anchor_point_to_cell_position, anchor_point_to_outdoor_position, landblock_key,
     separating_displacement,
 };
@@ -91,16 +91,21 @@ pub struct GroundedBodySpheres {
 pub struct GroundSupport {
     /// Authored outward-facing unit normal.
     pub normal: Vector3,
-    /// Exact static owner product that proved this support.
-    pub proof: super::CollisionOwnerProof,
+    /// Footprint classification retained for bounded edge guidance.
+    pub feature: SupportFeature,
+    /// World proof or hard entity identity controlling support revalidation.
+    pub source: super::SupportSource,
 }
 
 #[cfg(test)]
 impl GroundSupport {
     pub(crate) const fn fixture(normal: Vector3) -> Self {
         Self {
+            feature: SupportFeature::Surface,
             normal,
-            proof: CollisionOwnerProof::fixture(Guid(0xda55_ffff)),
+            source: crate::spatial::SupportSource::World(CollisionOwnerProof::fixture(Guid(
+                0xda55_ffff,
+            ))),
         }
     }
 }
@@ -143,9 +148,7 @@ impl GroundState {
 
     /// The settle transaction a non-launching tick of this resolved state permits.
     ///
-    /// Launch ticks and the not-yet-classified lifecycle state are owned by
-    /// `grounded_settle_permission`, which projects from `ContactState`; this is the resolved
-    /// counterpart every request builder over a solved body should use.
+    /// Launch suppression belongs to the caller; this projects an already resolved support state.
     pub fn settle_permission(self) -> SettlePermission {
         match self {
             Self::Supported(_) => SettlePermission::Walking,
@@ -312,172 +315,231 @@ pub fn solve_grounded(
     config: GroundedConfig,
     request: GroundedRequest,
 ) -> Result<GroundedOutcome> {
-    validate(config, &request)?;
+    GroundedMotion::prepare(scene, config, request, Vector3::zero())?.solve()
+}
 
-    let anchor = landblock_key(request.body.pose.landblock_id);
-    let start = request.body.pose.coords;
-    let reference_pose = request.body.pose;
-    let context = GroundedSolveContext {
-        scene,
-        config,
-        anchor,
-        pose: reference_pose,
-        spheres: request.spheres,
-        filter: request.filter,
-    };
-    let supported = request.body.ground.walkable_support().is_some();
-    // Airborne and sliding bodies are ballistic: retail keeps gravity and skips friction for any
-    // state other than `Contact && OnWalkable` (`acclient.c:306176`, `:304541`). Sledding
-    // likewise retains canonical velocity while supported.
-    let active_velocity = if supported && !request.retain_supported_gravity {
-        request.supported_velocity
-    } else {
-        request.body.velocity
-    };
-    let accelerated = !supported || request.retain_supported_gravity;
-    // Retail chooses whether to integrate position from the incoming velocity before applying
-    // SmallVelocity (acclient.c:306114-306159). A small falling velocity still gets the
-    // acceleration displacement; truncating it before this gate leaves 60 Hz bodies hovering.
-    let had_velocity = active_velocity != Vector3::zero();
-    let active_velocity = if !supported {
-        super::physical_body::canonical_retained_velocity(active_velocity)
-    } else {
-        active_velocity
-    };
-    let vertical_displacement = if !(had_velocity || supported && request.retain_supported_gravity)
-    {
-        0.0
-    } else if accelerated {
-        active_velocity.z * request.delta_seconds
-            + 0.5 * config.gravity * request.delta_seconds * request.delta_seconds
-    } else {
-        active_velocity.z * request.delta_seconds
-    };
-    // Authored walking contributes displacement, never physical momentum. Keep it out of
-    // contact eligibility and the returned velocity even when this transition leaves support
-    // (CPhysicsObj::UpdatePositionInternal, acclient.c:308275-308304).
-    let physical_velocity = if supported {
-        request.body.velocity
-    } else {
-        active_velocity
-    };
-    let next_velocity = if accelerated {
-        physical_velocity + Vector3::new(0.0, 0.0, config.gravity * request.delta_seconds)
-    } else {
-        physical_velocity
-    };
+/// Resumable geometry for one grounded request whose velocity has already been integrated.
+/// Support and sliding evolve per accepted step; outer-tick physical response stays with the caller.
+#[derive(Clone)]
+pub(super) struct GroundedMotion<'a> {
+    /// Fixed anchor and collision inputs shared by the geometric steps.
+    context: GroundedSolveContext<'a>,
+    /// Latest accepted placement, support, and once-integrated velocity.
+    body: GroundedBody,
+    /// Accepted center in the original anchor's coordinates.
+    current: Vector3,
+    /// Once-integrated requested translation, consumed by the geometric driver.
+    displacement: Vector3,
+    /// Accepted geometric endpoints, before any stationary remainder is appended.
+    motion: Vec<MotionWaypoint>,
+    /// Retail carries one normal into the next step, then recomputes it (acclient.c:301897–301919).
+    sliding_normal: Option<Vector3>,
+    /// Distinct diagnostic planes; these never feed motion constraints.
+    encountered_constraints: Vec<Vector3>,
+    /// Contact passes spent across geometric steps.
+    contact_passes: usize,
+    /// Strongest response normal opposing the original active velocity.
+    collision_normal: Option<Vector3>,
+    /// Outer-tick velocity used to select the response normal.
+    active_velocity: Vector3,
+    /// Outer-tick permission for walking step-down or landing.
+    settle: SettlePermission,
+    /// Outer-tick duration used to report achieved velocity.
+    delta_seconds: f32,
+}
 
-    // Retail checks the integrated physical velocity against the previous contact before
-    // granting a transition contact/walkable state (check_contact, acclient.c:305016-305028;
-    // get_object_info, :307403-307421). Otherwise outward momentum can skip friction forever
-    // while support projection and walking step-down keep pinning the body to the slope.
-    let releases_contact = request.body.ground.contact_plane().is_some_and(|support| {
-        next_velocity.dot(&support.normal) > super::physical_body::RETAIL_PHYSICS_EPSILON
-    });
-    let (transition_ground, settle) = if releases_contact {
-        let settle = match request.settle {
-            SettlePermission::Walking => SettlePermission::Landing,
-            other => other,
+impl<'a> GroundedMotion<'a> {
+    pub(super) fn prepare(
+        scene: &'a CollisionScene,
+        config: GroundedConfig,
+        request: GroundedRequest,
+        correction_displacement: Vector3,
+    ) -> Result<Self> {
+        validate(config, &request)?;
+
+        let anchor = landblock_key(request.body.pose.landblock_id);
+        let start = request.body.pose.coords;
+        let reference_pose = request.body.pose;
+        let context = GroundedSolveContext {
+            scene,
+            config,
+            anchor,
+            pose: reference_pose,
+            spheres: request.spheres,
+            filter: request.filter,
         };
-        (GroundState::Airborne, settle)
-    } else {
-        (request.body.ground, request.settle)
-    };
-    let mut displacement = active_velocity * request.delta_seconds;
-    displacement.z = vertical_displacement;
-    if let Some(support) = transition_ground.walkable_support() {
-        displacement = project_into_plane(displacement, support.normal);
-    }
-    // Retail updates velocity/rotation but skips the collision transition when the proposed
-    // origin is unchanged (CPhysicsObj::UpdateObjectInternal, acclient.c:310864-310879).
-    // In particular, a stationary gravity-free door must not acquire the floor below its pivot.
-    if displacement == Vector3::zero() {
+        let supported = request.body.ground.walkable_support().is_some();
+        // Airborne and sliding bodies are ballistic: retail keeps gravity and skips friction for any
+        // state other than `Contact && OnWalkable` (`acclient.c:306176`, `:304541`). Sledding
+        // likewise retains canonical velocity while supported.
+        let active_velocity = if supported && !request.retain_supported_gravity {
+            request.supported_velocity
+        } else {
+            request.body.velocity
+        };
+        let accelerated = !supported || request.retain_supported_gravity;
+        // Retail chooses whether to integrate position from the incoming velocity before applying
+        // SmallVelocity (acclient.c:306114-306159). A small falling velocity still gets the
+        // acceleration displacement; truncating it before this gate leaves 60 Hz bodies hovering.
+        let had_velocity = active_velocity != Vector3::zero();
+        let active_velocity = if !supported {
+            super::physical_body::canonical_retained_velocity(active_velocity)
+        } else {
+            active_velocity
+        };
+        let vertical_displacement =
+            if !(had_velocity || supported && request.retain_supported_gravity) {
+                0.0
+            } else if accelerated {
+                active_velocity.z * request.delta_seconds
+                    + 0.5 * config.gravity * request.delta_seconds * request.delta_seconds
+            } else {
+                active_velocity.z * request.delta_seconds
+            };
+        // Authored walking contributes displacement, never physical momentum. Keep it out of
+        // contact eligibility and the returned velocity even when this transition leaves support
+        // (CPhysicsObj::UpdatePositionInternal, acclient.c:308275-308304).
+        let physical_velocity = if supported {
+            request.body.velocity
+        } else {
+            active_velocity
+        };
+        let next_velocity = if accelerated {
+            physical_velocity + Vector3::new(0.0, 0.0, config.gravity * request.delta_seconds)
+        } else {
+            physical_velocity
+        };
+
+        // Retail checks the integrated physical velocity against the previous contact before
+        // granting a transition contact/walkable state (check_contact, acclient.c:305016-305028;
+        // get_object_info, :307403-307421). Otherwise outward momentum can skip friction forever
+        // while support projection and walking step-down keep pinning the body to the slope.
+        let releases_contact = request.body.ground.contact_plane().is_some_and(|support| {
+            next_velocity.dot(&support.normal) > super::physical_body::RETAIL_PHYSICS_EPSILON
+        });
+        let (transition_ground, settle) = if releases_contact {
+            let settle = match request.settle {
+                SettlePermission::Walking => SettlePermission::Landing,
+                other => other,
+            };
+            (GroundState::Airborne, settle)
+        } else {
+            (request.body.ground, request.settle)
+        };
+        let mut displacement = active_velocity * request.delta_seconds;
+        displacement.z = vertical_displacement;
+        if let Some(support) = transition_ground.walkable_support() {
+            displacement = project_into_plane(displacement, support.normal);
+        }
+        displacement = displacement + correction_displacement;
         let mut body = request.body;
         body.velocity = next_velocity;
-        return Ok(GroundedOutcome::Solved {
-            motion: vec![MotionWaypoint {
-                center: start,
-                end_fraction: 1.0,
-                placement: super::collision::MotionWaypointPlacement::Committed(body.cell),
-            }],
+        if displacement != Vector3::zero() {
+            body.ground = transition_ground;
+        }
+        Ok(Self {
+            context,
             body,
-            achieved_velocity: Vector3::zero(),
-            collision_normal: None,
-            substeps: 0,
+            current: start,
+            displacement,
+            motion: Vec::new(),
+            sliding_normal: None,
+            encountered_constraints: Vec::new(),
             contact_passes: 0,
-            constraint_count: 0,
-            residual_contacts: false,
-        });
+            collision_normal: None,
+            active_velocity,
+            settle,
+            delta_seconds: request.delta_seconds,
+        })
     }
-    let distance = displacement.length();
-    let required_substeps = if distance <= f32::EPSILON {
-        1
-    } else {
-        (distance / config.maximum_substep_distance).ceil() as usize
-    };
-    let substep = displacement / required_substeps as f32;
-    let evaluated_substeps = required_substeps.min(config.maximum_substeps);
-    let mut body = request.body;
-    body.velocity = next_velocity;
-    body.ground = transition_ground;
-    // Retail carries one collision normal into the next substep, then clears it before collision
-    // is recomputed (`acclient.c:301897-301919`). Keeping an arbitrary plane set for the whole
-    // solve wedges finite walls and stair risers long after their authored geometry has ended.
-    let mut sliding_normal = None;
-    // Diagnostics retain distinct planes encountered by this solve, but never feed motion.
-    let mut encountered_constraints = Vec::new();
-    let mut current = start;
-    let mut motion = Vec::with_capacity(evaluated_substeps + 1);
-    let mut contact_passes = 0;
-    let mut collision_normal = None;
 
-    'substeps: for completed_substeps in 0..evaluated_substeps {
-        let prior_ground = body.ground;
+    pub(super) fn solve(mut self) -> Result<GroundedOutcome> {
+        // Retail skips collision transitions for an unchanged origin (acclient.c:310864–310879).
+        // A stationary gravity-free door must not acquire the floor below its pivot.
+        if self.displacement == Vector3::zero() {
+            return self.finish(false);
+        }
+        let distance = self.displacement.length();
+        let required_substeps = if distance <= f32::EPSILON {
+            1
+        } else {
+            (distance / self.context.config.maximum_substep_distance).ceil() as usize
+        };
+        let substep = self.displacement / required_substeps as f32;
+        let evaluated_substeps = required_substeps.min(self.context.config.maximum_substeps);
+        self.motion.reserve(evaluated_substeps + 1);
+        for completed_substeps in 0..evaluated_substeps {
+            let end_fraction = (completed_substeps + 1) as f32 / required_substeps as f32;
+            self.advance(substep, end_fraction)?;
+        }
+        self.finish(evaluated_substeps < required_substeps)
+    }
+
+    /// Advances geometry without replaying launch, gravity, friction, or response-frame accounting.
+    pub(super) fn advance(&mut self, substep: Vector3, end_fraction: f32) -> Result<()> {
+        super::physics_work::record_environment_step();
+        let context = self.context;
+        let GroundedSolveContext {
+            scene,
+            config,
+            anchor,
+            pose: reference_pose,
+            ..
+        } = context;
+        let prior_ground = self.body.ground;
         let prior_support = prior_ground.walkable_support();
-        let mut constrained_substep = apply_sliding_normal(substep, sliding_normal.take());
+        let mut constrained_substep = apply_sliding_normal(substep, self.sliding_normal.take());
         let MovementCandidate {
             center: mut candidate,
             placement: mut candidate_placement,
             contacts: mut role_contacts,
-        } = movement_candidate(context, &body, current, constrained_substep)?;
+        } = movement_candidate(context, &self.body, self.current, constrained_substep)?;
         let mut contacted_walkable_support =
             has_walkable_support_contact(&role_contacts, config.walkable_normal_z);
         let mut lower_step_retried = false;
 
         for _ in 0..config.maximum_contact_passes {
-            contact_passes += 1;
+            self.contact_passes += 1;
             contacted_walkable_support |=
                 has_walkable_support_contact(&role_contacts, config.walkable_normal_z);
             if role_contacts.iter().all(|entry| entry.contacts.is_empty()) {
                 break;
             }
 
-            remember_collision_normal(&mut collision_normal, &role_contacts, active_velocity);
+            remember_collision_normal(
+                &mut self.collision_normal,
+                &role_contacts,
+                self.active_velocity,
+            );
 
             let lower_blocked = role_contacts
                 .iter()
                 .any(|entry| entry.role == SphereRole::Support && !entry.contacts.is_empty());
             if lower_blocked
                 && !lower_step_retried
-                && body.ground.walkable_support().is_some()
+                && self.body.ground.walkable_support().is_some()
                 && config.step_up_height > 0.0
             {
-                if let Some(stepped) = step_up_candidate(context, &body, current, candidate)? {
-                    current = stepped.body_center;
-                    body.cell = stepped.placement.committed_cell();
-                    body.pose = pose_for_commit(
+                if let Some(stepped) =
+                    step_up_candidate(context, &self.body, self.current, candidate)?
+                {
+                    self.current = stepped.body_center;
+                    self.body.cell = stepped.placement.committed_cell();
+                    self.body.pose = pose_for_commit(
                         anchor,
-                        current,
+                        self.current,
                         reference_pose,
                         stepped.placement.committed_cell(),
                     );
-                    body.ground = GroundState::Supported(stepped.support);
-                    motion.push(MotionWaypoint {
-                        center: current,
-                        end_fraction: (completed_substeps + 1) as f32 / required_substeps as f32,
-                        placement: super::collision::MotionWaypointPlacement::Committed(body.cell),
+                    self.body.ground = GroundState::Supported(stepped.support);
+                    self.motion.push(MotionWaypoint {
+                        center: self.current,
+                        end_fraction,
+                        placement: super::collision::MotionWaypointPlacement::Committed(
+                            self.body.cell,
+                        ),
                     });
-                    continue 'substeps;
+                    return Ok(());
                 }
 
                 let mut retry_normal = None;
@@ -494,18 +556,19 @@ pub fn solve_grounded(
                 // aggregate endpoint solver needs this ordering only when the failed trial also
                 // selected another containing cell; ordinary same-cell walls retain radial
                 // separation so their exact tangent remains stable.
-                if candidate_placement.committed_cell() != body.cell
+                if candidate_placement.committed_cell() != self.body.cell
                     && retry_substep != constrained_substep
                 {
                     remember_encountered_constraints(
-                        &mut encountered_constraints,
+                        &mut self.encountered_constraints,
                         &role_contacts,
                         config.walkable_normal_z,
                     );
-                    sliding_normal = retry_normal;
+                    self.sliding_normal = retry_normal;
                     lower_step_retried = true;
                     constrained_substep = retry_substep;
-                    let retry = movement_candidate(context, &body, current, retry_substep)?;
+                    let retry =
+                        movement_candidate(context, &self.body, self.current, retry_substep)?;
                     candidate = retry.center;
                     candidate_placement = retry.placement;
                     role_contacts = retry.contacts;
@@ -514,12 +577,12 @@ pub fn solve_grounded(
             }
 
             remember_encountered_constraints(
-                &mut encountered_constraints,
+                &mut self.encountered_constraints,
                 &role_contacts,
                 config.walkable_normal_z,
             );
             remember_next_sliding_normal(
-                &mut sliding_normal,
+                &mut self.sliding_normal,
                 &role_contacts,
                 config.walkable_normal_z,
                 constrained_substep,
@@ -537,9 +600,9 @@ pub fn solve_grounded(
             candidate_placement = transit_pair(
                 scene,
                 anchor,
-                &body,
+                &self.body,
                 reference_pose,
-                request.spheres,
+                context.spheres,
                 candidate,
             )?;
             role_contacts = placement_contacts(
@@ -547,9 +610,9 @@ pub fn solve_grounded(
                 anchor,
                 candidate,
                 reference_pose,
-                request.spheres,
+                context.spheres,
                 &candidate_placement,
-                request.filter,
+                context.filter,
             )?;
             if role_contacts.iter().all(|entry| entry.contacts.is_empty()) {
                 break;
@@ -570,35 +633,38 @@ pub fn solve_grounded(
         // the body; both changes require ordinary support validation below.
         let stationary_support = prior_support.filter(|_| {
             constrained_substep.length_squared() <= f32::EPSILON
-                && (candidate - current).length_squared() <= f32::EPSILON
-                && body.cell == candidate_placement.committed_cell()
+                && (candidate - self.current).length_squared() <= f32::EPSILON
+                && self.body.cell == candidate_placement.committed_cell()
         });
         let settle_result = if let Some(support) = stationary_support {
             SettleResult::Supported(SupportedPlacement {
-                body_center: current,
+                body_center: self.current,
                 placement: candidate_placement.clone(),
                 support,
             })
         } else {
-            match settle {
+            match self.settle {
                 // Retail reaches its ordinary step-down branch only while OBJECTINFO state
                 // retains contact (`CTransition::transitional_insert`, acclient.c:301550-301599).
                 // Running the full walking probe after `LeaveGround` snaps an upward launch back
                 // to the floor.
-                SettlePermission::Walking => {
-                    step_down_candidate(context, &body, candidate, candidate_placement.clone())?
-                }
+                SettlePermission::Walking => step_down_candidate(
+                    context,
+                    &self.body,
+                    candidate,
+                    candidate_placement.clone(),
+                )?,
                 // A body without walkable support runs retail's lenient 0.04m landing step-down
                 // every transition (`acclient.c:301563-301569`).
                 SettlePermission::Landing => {
-                    landing_candidate(context, &body, candidate, candidate_placement.clone())?
+                    landing_candidate(context, &self.body, candidate, candidate_placement.clone())?
                 }
                 SettlePermission::Denied if contacted_walkable_support => {
                     // A launch sweep that actually struck a walkable lower contact may acquire
                     // that exact surface, but it does not inherit any step-down reach.
                     settle_candidate(
                         context,
-                        &body,
+                        &self.body,
                         candidate,
                         candidate_placement.clone(),
                         config.separation_epsilon * 2.0,
@@ -611,18 +677,18 @@ pub fn solve_grounded(
         match settle_result {
             SettleResult::Supported(settled) => {
                 remember_support_collision_normal(
-                    &mut collision_normal,
+                    &mut self.collision_normal,
                     settled.support.normal,
-                    active_velocity,
+                    self.active_velocity,
                 );
                 candidate = settled.body_center;
                 candidate_placement = settled.placement;
-                body.ground = GroundState::Supported(settled.support);
+                self.body.ground = GroundState::Supported(settled.support);
             }
             SettleResult::Sliding(settled) => {
                 candidate = settled.body_center;
                 candidate_placement = settled.placement;
-                body.ground = GroundState::Sliding(settled.support);
+                self.body.ground = GroundState::Sliding(settled.support);
             }
             result @ (SettleResult::Edge { .. } | SettleResult::Unsupported)
                 if config.edge_protection == EdgeProtection::Creature =>
@@ -641,31 +707,31 @@ pub fn solve_grounded(
                     };
                     match edge_slide_candidate(
                         context,
-                        &body,
-                        current,
+                        &self.body,
+                        self.current,
                         constrained_substep,
                         inward_normal,
                     )? {
                         Some(slid) => {
                             candidate = slid.body_center;
                             candidate_placement = slid.placement;
-                            body.ground = GroundState::Supported(slid.support);
+                            self.body.ground = GroundState::Supported(slid.support);
                         }
                         None => {
-                            candidate = current;
+                            candidate = self.current;
                             candidate_placement = transit_pair(
                                 scene,
                                 anchor,
-                                &body,
+                                &self.body,
                                 reference_pose,
-                                request.spheres,
-                                current,
+                                context.spheres,
+                                self.current,
                             )?;
-                            body.ground = GroundState::Supported(prior_support);
+                            self.body.ground = GroundState::Supported(prior_support);
                         }
                     }
                 } else {
-                    body.ground = GroundState::Airborne;
+                    self.body.ground = GroundState::Airborne;
                 }
             }
             SettleResult::Edge { .. } | SettleResult::Unsupported => {
@@ -674,73 +740,96 @@ pub fn solve_grounded(
                 // (`CPhysicsObj::SetPositionInternal`, acclient.c:310697-310719); the lenient
                 // landing rules apply only from the next transition. A crest walk-off therefore
                 // passes through a brief genuine airborne gap before the slide acquires.
-                body.ground = GroundState::Airborne;
+                self.body.ground = GroundState::Airborne;
             }
         }
 
-        current = candidate;
-        body.cell = candidate_placement.committed_cell();
-        body.pose = pose_for_commit(
+        self.current = candidate;
+        self.body.cell = candidate_placement.committed_cell();
+        self.body.pose = pose_for_commit(
             anchor,
-            current,
+            self.current,
             reference_pose,
             candidate_placement.committed_cell(),
         );
-        motion.push(MotionWaypoint {
-            center: current,
-            end_fraction: (completed_substeps + 1) as f32 / required_substeps as f32,
-            placement: super::collision::MotionWaypointPlacement::Committed(body.cell),
+        self.motion.push(MotionWaypoint {
+            center: self.current,
+            end_fraction,
+            placement: super::collision::MotionWaypointPlacement::Committed(self.body.cell),
         });
+        Ok(())
     }
 
-    let final_placement = transit_pair(
-        scene,
-        anchor,
-        &body,
-        reference_pose,
-        request.spheres,
-        current,
-    )?;
-    let residual_contacts = placement_contacts(
-        scene,
-        anchor,
-        current,
-        reference_pose,
-        request.spheres,
-        &final_placement,
-        request.filter,
-    )?
-    .iter()
-    .any(|entry| !entry.contacts.is_empty());
-    let achieved_velocity = (current - start) / request.delta_seconds;
-    if evaluated_substeps < required_substeps {
-        motion.push(MotionWaypoint {
-            center: current,
-            end_fraction: 1.0,
-            placement: super::collision::MotionWaypointPlacement::Committed(body.cell),
-        });
-        Ok(GroundedOutcome::BudgetExceeded {
-            achieved_velocity,
-            collision_normal,
-            body,
-            motion,
-            budget: GroundedBudget::Substeps,
-            substeps: evaluated_substeps,
-            contact_passes,
-            constraint_count: encountered_constraints.len(),
-            residual_contacts,
-        })
-    } else {
-        Ok(GroundedOutcome::Solved {
-            achieved_velocity,
-            collision_normal,
-            body,
-            motion,
-            substeps: required_substeps,
-            contact_passes,
-            constraint_count: encountered_constraints.len(),
-            residual_contacts,
-        })
+    pub(super) fn finish(mut self, budget_exceeded: bool) -> Result<GroundedOutcome> {
+        if self.displacement == Vector3::zero() && self.motion.is_empty() {
+            return Ok(GroundedOutcome::Solved {
+                motion: vec![MotionWaypoint {
+                    center: self.current,
+                    end_fraction: 1.0,
+                    placement: super::collision::MotionWaypointPlacement::Committed(self.body.cell),
+                }],
+                body: self.body,
+                achieved_velocity: Vector3::zero(),
+                collision_normal: None,
+                substeps: 0,
+                contact_passes: 0,
+                constraint_count: 0,
+                residual_contacts: false,
+            });
+        }
+        let context = self.context;
+        let GroundedSolveContext {
+            scene,
+            anchor,
+            pose: reference_pose,
+            ..
+        } = context;
+        let substeps = self.motion.len();
+        let final_placement = transit_pair(
+            scene,
+            anchor,
+            &self.body,
+            reference_pose,
+            context.spheres,
+            self.current,
+        )?;
+        let residual_contacts = placement_contacts(
+            scene,
+            anchor,
+            self.current,
+            reference_pose,
+            context.spheres,
+            &final_placement,
+            context.filter,
+        )?
+        .iter()
+        .any(|entry| !entry.contacts.is_empty());
+        let achieved_velocity = (self.current - context.pose.coords) / self.delta_seconds;
+        super::free_sphere::close_partial_motion(&mut self.motion, self.current, self.body.cell);
+        if budget_exceeded {
+            Ok(GroundedOutcome::BudgetExceeded {
+                achieved_velocity,
+                collision_normal: self.collision_normal,
+                body: self.body,
+                motion: self.motion,
+                budget: GroundedBudget::Substeps,
+                substeps,
+                contact_passes: self.contact_passes,
+                constraint_count: self.encountered_constraints.len(),
+                residual_contacts,
+            })
+        } else {
+            Ok(GroundedOutcome::Solved {
+                achieved_velocity,
+                collision_normal: self.collision_normal,
+                body: self.body,
+                motion: self.motion,
+                substeps,
+                contact_passes: self.contact_passes,
+                constraint_count: self.encountered_constraints.len(),
+                residual_contacts,
+            })
+        }
     }
 }
 
@@ -817,40 +906,21 @@ fn settle_candidate(
         maximum_rise: maximum_drop * 0.1,
         placement: &support_placement,
     })?;
-    let mut surface: Option<SupportContact> = None;
-    let mut edge: Option<SupportContact> = None;
-    for support in supports
+    let support = supports
         .into_iter()
         .filter(|contact| contact.normal.z >= acceptance_normal_z)
-    {
-        match support.feature {
-            SupportFeature::Surface
-                if surface
-                    .as_ref()
-                    .is_none_or(|current| support.height_delta > current.height_delta) =>
+        .max_by(|a, b| a.height_delta.total_cmp(&b.height_delta));
+    let Some(support) = support else {
+        return Ok(
+            match body
+                .ground
+                .walkable_support()
+                .and_then(|s| s.feature.inward_normal())
             {
-                surface = Some(support);
-            }
-            SupportFeature::Edge { .. }
-                if edge
-                    .as_ref()
-                    .is_none_or(|current| support.height_delta > current.height_delta) =>
-            {
-                edge = Some(support);
-            }
-            _ => {}
-        }
-    }
-    let Some(support) = surface else {
-        return Ok(match edge {
-            Some(support) => {
-                let SupportFeature::Edge { inward_normal } = support.feature else {
-                    unreachable!();
-                };
-                SettleResult::Edge { inward_normal }
-            }
-            None => SettleResult::Unsupported,
-        });
+                Some(inward_normal) => SettleResult::Edge { inward_normal },
+                None => SettleResult::Unsupported,
+            },
+        );
     };
     let settled = candidate + Vector3::new(0.0, 0.0, support.height_delta);
     let settled_cells = transit_pair(
@@ -871,23 +941,6 @@ fn settle_candidate(
         context.filter,
     )?;
     if confirmation.iter().any(|entry| !entry.contacts.is_empty()) {
-        // Retail's single mutable step-down transaction can retain horizontal progress while a
-        // reached lower face is still momentarily occluded by the finite edge being left. Preserve
-        // that bridge at the candidate elevation only when the same bounded query proved a real
-        // surface below. Edge reach by itself must not become ratcheting support.
-        if let Some(edge) = edge {
-            return Ok(classified_settle(
-                context,
-                SupportedPlacement {
-                    body_center: candidate,
-                    placement: candidate_placement,
-                    support: GroundSupport {
-                        normal: edge.normal,
-                        proof: edge.proof,
-                    },
-                },
-            ));
-        }
         return Ok(SettleResult::Unsupported);
     }
     Ok(classified_settle(
@@ -897,7 +950,8 @@ fn settle_candidate(
             placement: settled_cells,
             support: GroundSupport {
                 normal: support.normal,
-                proof: support.proof,
+                feature: support.feature,
+                source: support.source,
             },
         },
     ))
@@ -1422,8 +1476,11 @@ mod tests {
             velocity: Vector3::zero(),
             ground: match support {
                 Some(normal) => GroundState::Supported(GroundSupport {
+                    feature: crate::spatial::SupportFeature::Surface,
                     normal,
-                    proof: CollisionOwnerProof::fixture(Guid(LANDBLOCK)),
+                    source: crate::spatial::SupportSource::World(CollisionOwnerProof::fixture(
+                        Guid(LANDBLOCK),
+                    )),
                 }),
                 None => GroundState::Airborne,
             },
@@ -2073,8 +2130,11 @@ mod tests {
         body.physical.as_mut().unwrap().response = PhysicalBodyResponseState::Grounded {
             cell: None,
             ground: GroundState::Supported(GroundSupport {
+                feature: crate::spatial::SupportFeature::Surface,
                 normal,
-                proof: collision.owner_proof(Guid(LANDBLOCK)).unwrap(),
+                source: crate::spatial::SupportSource::World(
+                    collision.owner_proof(Guid(LANDBLOCK)).unwrap(),
+                ),
             }),
             stationary_fall_frames: 0,
         };
@@ -2084,14 +2144,22 @@ mod tests {
                 .tick_physical_body(
                     id,
                     &collision,
-                    PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                    crate::spatial::PhysicalBodyInput::autonomous(PhysicalBodyActuation::Grounded(
+                        GroundedBodyActuation::coast(),
+                    )),
                     tick_duration.as_secs_f32(),
                     now + tick_duration * tick,
                 )
                 .unwrap();
         }
         let settled = scene.body(id).unwrap();
-        assert_eq!(settled.contact, ContactState::Grounded);
+        assert_eq!(
+            settled.contact,
+            ContactState::Grounded,
+            "pose {:?}, velocity {:?}",
+            settled.pose,
+            settled.retained.velocity
+        );
         assert_eq!(settled.retained.velocity, Vector3::zero());
         assert_eq!(settled.accepted_motion.velocity, Vector3::zero());
     }

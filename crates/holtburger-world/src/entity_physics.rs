@@ -1,6 +1,6 @@
 //! Source-neutral interpretation of complete entity physics-state replacements.
 
-use holtburger_common::properties::PhysicsState;
+use holtburger_common::properties::{ObjectDescriptionFlag, PhysicsState};
 
 /// ACE's physics state when a template has no explicit `PropertyInt::PhysicsState`.
 ///
@@ -84,19 +84,95 @@ pub enum EntityCollisionParticipation {
     Solid,
 }
 
+/// Public player collision status, independent from physics-state hooks and geometry.
+/// The private mask preserves simultaneous wire flags without exposing unrelated description bits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlayerCollisionStatus(ObjectDescriptionFlag);
+
+impl PlayerCollisionStatus {
+    /// Non-player descriptions have no player-pair exemption.
+    pub fn from_description(flags: ObjectDescriptionFlag) -> Option<Self> {
+        flags
+            .contains(ObjectDescriptionFlag::PLAYER)
+            .then_some(Self(
+                flags
+                    & (ObjectDescriptionFlag::PLAYER_KILLER
+                        | ObjectDescriptionFlag::PK_LITE_STATUS
+                        | ObjectDescriptionFlag::FREE_PK_STATUS),
+            ))
+    }
+
+    /// Retail FindObjCollisions (acclient.c:304666): matching PK classes or either
+    /// impenetrable player disable the ordinary player/player exemption.
+    fn blocks(self, peer: Self) -> bool {
+        (self.0 | peer.0).contains(ObjectDescriptionFlag::FREE_PK_STATUS)
+            || (self.0 & peer.0).intersects(
+                ObjectDescriptionFlag::PLAYER_KILLER | ObjectDescriptionFlag::PK_LITE_STATUS,
+            )
+    }
+}
+
+/// Whether player identity exempts this pair from collision queries and reports.
+fn players_ignore_contact(
+    first: Option<PlayerCollisionStatus>,
+    second: Option<PlayerCollisionStatus>,
+) -> bool {
+    matches!((first, second), (Some(first), Some(second)) if !first.blocks(second))
+}
+
 /// State-derived dynamic collision decisions, independent from target geometry availability.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EntityDynamicCollisionPolicy {
+    /// Authored Static bit; sleeping and integration exclusion do not imply staticness.
+    pub is_static: bool,
     /// Whether this entity can be selected as a peer target.
     pub target: EntityCollisionParticipation,
     /// Whether this entity accepts response when acting as the directional mover.
     pub mover_accepts_response: bool,
     /// Whether a peer may retain a collision report naming this entity.
     pub accepts_peer_reports: bool,
-    /// Missile filtering is a distinct pair predicate with live target/category inputs.
+    /// Missile classification used by the shared directional contact filter.
     pub missile: bool,
     /// Retained projectile path marker cleared by an accepted missile collision.
     pub path_clipped: bool,
+}
+
+/// Directional outcome of the complete semantic pair filter, before geometry or report permissions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntityContactInteraction {
+    /// Skip pair geometry, including contact observations.
+    Ignored,
+    /// Contact can be observed but cannot obstruct this mover.
+    Observable,
+    /// The target may obstruct this mover and contact can be observed.
+    Blocking,
+}
+
+impl EntityDynamicCollisionPolicy {
+    /// Resolves pair semantics once for physical response, reporting, and prospective solidification.
+    /// Residency and geometry availability remain preparation-owned. Client projectile targets have
+    /// no proven nonzero producer, so only the demonstrated untargeted missile exclusions apply.
+    pub fn contact_with(
+        self,
+        target: Self,
+        player: Option<PlayerCollisionStatus>,
+        target_player: Option<PlayerCollisionStatus>,
+    ) -> EntityContactInteraction {
+        if players_ignore_contact(player, target_player)
+            || target.target == EntityCollisionParticipation::Suppressed
+            || target.missile
+            || (self.missile && target.target == EntityCollisionParticipation::Ethereal)
+        {
+            EntityContactInteraction::Ignored
+        } else if self.mover_accepts_response
+            && target.target == EntityCollisionParticipation::Solid
+            && (self.target != EntityCollisionParticipation::Ethereal || target.is_static)
+        {
+            EntityContactInteraction::Blocking
+        } else {
+            EntityContactInteraction::Observable
+        }
+    }
 }
 
 /// Complete state-derived response policy before authored coefficients and geometry are joined.
@@ -208,6 +284,18 @@ impl EntityPhysicsRuntimeState {
         self.authoritative
     }
 
+    /// Latest server classification survives local impact retirement until a complete state update.
+    pub const fn is_authoritative_projectile(self) -> bool {
+        self.authoritative.dynamic_collision.missile
+    }
+
+    /// Publishes a local collision consequence without rewriting the last server state.
+    pub(crate) fn clear_after_collision(&mut self, cleared: PhysicsState) {
+        let mut semantic = self.effective.semantic;
+        semantic.remove(cleared);
+        self.effective = resolve_effective_entity_physics_state(semantic);
+    }
+
     /// Single collision and presentation state consumed by downstream systems.
     pub const fn effective(self) -> EffectiveEntityPhysicsState {
         self.effective
@@ -226,10 +314,12 @@ impl EntityPhysicsRuntimeState {
 
     /// Applies an unobstructed authored replacement for the `Ethereal` bit.
     pub fn apply_authored_ethereal(&mut self, ethereal: bool) {
-        let mut semantic = self.authoritative.semantic;
+        let mut semantic = self.effective.semantic;
         semantic.set(PhysicsState::ETHEREAL, ethereal);
         self.effective = resolve_effective_entity_physics_state(semantic);
-        self.authored_transition = if self.effective == self.authoritative {
+        self.authored_transition = if self.effective.semantic.contains(PhysicsState::ETHEREAL)
+            == self.authoritative.semantic.contains(PhysicsState::ETHEREAL)
+        {
             AuthoredEtherealTransition::Reconciled
         } else {
             AuthoredEtherealTransition::Predicted { ethereal }
@@ -238,7 +328,7 @@ impl EntityPhysicsRuntimeState {
 
     /// Keeps the entity ethereal until a later collision-free retry can make it solid.
     pub fn defer_authored_solidification(&mut self) {
-        let mut semantic = self.authoritative.semantic;
+        let mut semantic = self.effective.semantic;
         semantic.insert(PhysicsState::ETHEREAL);
         self.effective = resolve_effective_entity_physics_state(semantic);
         self.authored_transition = AuthoredEtherealTransition::PendingSolidification;
@@ -383,6 +473,7 @@ pub fn resolve_effective_entity_physics_state(
         unsupported_gameplay: semantic & PhysicsState::SCRIPTED_COLLISION,
         integration_eligibility,
         dynamic_collision: EntityDynamicCollisionPolicy {
+            is_static: semantic.contains(PhysicsState::STATIC),
             target,
             mover_accepts_response: !hidden && !ignore_collisions,
             accepts_peer_reports: !hidden && !ignore_collisions,
@@ -414,6 +505,33 @@ pub fn resolve_effective_entity_physics_state(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn impact_retirement_survives_authored_ethereal_changes_until_server_reconciliation() {
+        let flags = PhysicsState::MISSILE | PhysicsState::ALIGN_PATH | PhysicsState::PATH_CLIPPED;
+        let authoritative = resolve_effective_entity_physics_state(flags);
+        let mut state = EntityPhysicsRuntimeState::reconciled(authoritative);
+        state.clear_after_collision(flags);
+        assert_eq!(state.authoritative(), authoritative);
+        for ethereal in [true, false] {
+            state.apply_authored_ethereal(ethereal);
+            assert!(!state.effective().dynamic_collision.missile);
+            assert_eq!(
+                state.effective().semantic.contains(PhysicsState::ETHEREAL),
+                ethereal
+            );
+        }
+        assert_eq!(
+            state.authored_transition(),
+            AuthoredEtherealTransition::Reconciled
+        );
+        state.defer_authored_solidification();
+        assert!(!state.effective().dynamic_collision.missile);
+        assert!(state.has_pending_solidification());
+        state.reconcile(authoritative);
+        assert_eq!(state.effective(), authoritative);
+        assert!(!state.has_pending_solidification());
+    }
 
     #[test]
     fn authored_ethereal_prediction_is_separate_and_reconciled_by_server_state() {
@@ -652,5 +770,92 @@ mod tests {
                 requires_body
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod contact_eligibility_tests {
+    use super::*;
+
+    #[test]
+    fn player_matrix_is_symmetric_and_excludes_only_player_pairs() {
+        let statuses = [
+            ObjectDescriptionFlag::empty(),
+            ObjectDescriptionFlag::PLAYER_KILLER,
+            ObjectDescriptionFlag::PK_LITE_STATUS,
+            ObjectDescriptionFlag::FREE_PK_STATUS,
+        ]
+        .map(|flags| {
+            PlayerCollisionStatus::from_description(flags | ObjectDescriptionFlag::PLAYER)
+        });
+        let blocks = [
+            [false, false, false, true],
+            [false, true, false, true],
+            [false, false, true, true],
+            [true, true, true, true],
+        ];
+        let solid = resolve_effective_entity_physics_state(PhysicsState::empty()).dynamic_collision;
+        for (i, first) in statuses.into_iter().enumerate() {
+            for (j, second) in statuses.into_iter().enumerate() {
+                assert_eq!(
+                    solid.contact_with(solid, first, second) == EntityContactInteraction::Blocking,
+                    blocks[i][j]
+                );
+            }
+            assert_eq!(
+                solid.contact_with(solid, first, None),
+                EntityContactInteraction::Blocking
+            );
+            assert_eq!(
+                solid.contact_with(solid, None, first),
+                EntityContactInteraction::Blocking
+            );
+        }
+    }
+
+    #[test]
+    fn ethereal_response_distinguishes_authored_static_from_frozen() {
+        let ethereal =
+            resolve_effective_entity_physics_state(PhysicsState::ETHEREAL).dynamic_collision;
+        for (flags, responds) in [
+            (PhysicsState::empty(), false),
+            (PhysicsState::FROZEN, false),
+            (PhysicsState::STATIC, true),
+        ] {
+            let solid = resolve_effective_entity_physics_state(flags).dynamic_collision;
+            assert_eq!(
+                ethereal.contact_with(solid, None, None) == EntityContactInteraction::Blocking,
+                responds
+            );
+            assert_eq!(
+                solid.contact_with(ethereal, None, None),
+                EntityContactInteraction::Observable
+            );
+            // Ordinary ethereal contacts remain observable despite not blocking.
+        }
+    }
+
+    #[test]
+    fn missile_query_exclusions_are_directional() {
+        let policy = |flags| resolve_effective_entity_physics_state(flags).dynamic_collision;
+        let missile = policy(PhysicsState::MISSILE);
+        let solid = policy(PhysicsState::empty());
+        let ethereal = policy(PhysicsState::ETHEREAL);
+        assert_eq!(
+            solid.contact_with(missile, None, None),
+            EntityContactInteraction::Ignored
+        );
+        assert_eq!(
+            missile.contact_with(missile, None, None),
+            EntityContactInteraction::Ignored
+        );
+        assert_eq!(
+            missile.contact_with(ethereal, None, None),
+            EntityContactInteraction::Ignored
+        );
+        assert_eq!(
+            missile.contact_with(solid, None, None),
+            EntityContactInteraction::Blocking
+        );
     }
 }

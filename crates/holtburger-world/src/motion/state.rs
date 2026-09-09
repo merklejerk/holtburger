@@ -1,9 +1,9 @@
 //! What a body is currently doing: the style it is in, the substate playing under that style, and
 //! the modifiers layered on top.
 //!
-//! Retail's `MotionState` (`acclient.c:327700-327730`). Actions are deliberately absent: retail
-//! queues them on the same struct, but nothing in this codebase issues an action yet, and a queue
-//! with no producer would be a field nothing fills.
+//! Retail's `MotionState` (`acclient.c:327700-327730`). Transient action ownership lives in
+//! `BodyMotionRuntime`; this selection state is shared by ordinary authored playback and the
+//! separate body-observed locomotion cursor.
 
 use crate::entity::{EntityMotionSnapshot, OrderedMotionScalar};
 use crate::spatial::ContactState;

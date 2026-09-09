@@ -1,27 +1,23 @@
 //! Narrow Explorer adapter from current registry/body facts to the shared focused view feed.
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::time::Instant;
 
 use anyhow::{Result, anyhow, ensure};
-use holtburger_common::position::WorldPosition;
-use holtburger_common::{Guid, Quaternion};
+use holtburger_common::Guid;
 use holtburger_core::{
     DynamicEntityAdvance, DynamicEntityEvent, DynamicEntityHostTime, DynamicEntityPathLeg,
     DynamicEntityPathPoint, DynamicEntityPlacedPath, DynamicEntityPlacementAdvanceKind,
-    DynamicEntitySnapshot, DynamicEntitySpatialMembership, DynamicEntityTickBatch,
-    DynamicEntityView, DynamicEntityViewSource, project_dynamic_entity_view,
+    DynamicEntitySnapshot, DynamicEntityTickBatch, DynamicEntityView, DynamicEntityViewSource,
+    project_dynamic_entity_view,
 };
-use holtburger_world::{PlacedMotionPath, PlacedMotionPoint};
 use serde::Serialize;
 
 use crate::explorer_entity_runtime::{
     ExplorerEntityPhysicalTick, ExplorerEntityRuntime, ExplorerEntityRuntimeError,
 };
 use crate::host_kinematic_boom_runtime::HostKinematicBoomTick;
-use crate::placed_motion_presentation::{interpolate_rotation, present_placed_motion_pose};
 
 /// One host event name for snapshots and incremental entity changes.
 pub const EXPLORER_DYNAMIC_ENTITY_EVENT: &str = "explorer-dynamic-entity";
@@ -49,7 +45,8 @@ pub struct ExplorerEntityDelivery {
     // Snapshot capture and mutation publication share this gate so a delta cannot overtake the
     // snapshot that is supposed to establish its baseline. It retains no event or recovery state.
     publication: Mutex<()>,
-    next_fixed_tick_epoch: AtomicU64,
+    /// Serializes epoch issuance through actual fixed-tick delivery, independently of physics.
+    next_fixed_tick_epoch: Mutex<u64>,
 }
 
 impl ExplorerEntityDelivery {
@@ -59,7 +56,7 @@ impl ExplorerEntityDelivery {
             origin: Instant::now(),
             entities,
             publication: Mutex::new(()),
-            next_fixed_tick_epoch: AtomicU64::new(1),
+            next_fixed_tick_epoch: Mutex::new(1),
         }
     }
 
@@ -117,34 +114,40 @@ impl ExplorerEntityDelivery {
         })
     }
 
-    /// Builds one atomic app-local delivery seam for entity and boom presentation.
-    pub fn fixed_tick_envelope(
+    /// Orders epoch issuance and delivery together. Projection happens before the short send gate;
+    /// camera-only callers never take the entity mutation/snapshot gate.
+    /// The callback must finish delivery before returning and must not reenter this method.
+    pub fn publish_fixed_tick<T>(
         &self,
         ticks: Vec<ExplorerEntityPhysicalTick>,
         boom: Option<HostKinematicBoomTick>,
         duration: Duration,
-    ) -> Result<Option<ExplorerFixedTickEnvelope>> {
+        publish: impl FnOnce(ExplorerFixedTickEnvelope) -> Result<T>,
+    ) -> Result<Option<T>> {
         ensure!(
             duration.as_secs_f64().is_finite() && !duration.is_zero(),
             "Explorer fixed-tick duration must be positive and finite"
         );
-        let epoch = self
-            .next_fixed_tick_epoch
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |next| {
-                next.checked_add(1)
-            })
-            .map_err(|_| anyhow!("Explorer fixed-tick epoch exhausted"))?;
         let entity_advances = project_entity_advances(ticks)?;
         if entity_advances.is_empty() && boom.is_none() {
             return Ok(None);
         }
-        Ok(Some(ExplorerFixedTickEnvelope {
+        let mut next_epoch = self
+            .next_fixed_tick_epoch
+            .lock()
+            .expect("Explorer fixed-tick publication lock poisoned");
+        let epoch = *next_epoch;
+        *next_epoch = epoch
+            .checked_add(1)
+            .ok_or_else(|| anyhow!("Explorer fixed-tick epoch exhausted"))?;
+        publish(ExplorerFixedTickEnvelope {
             epoch,
             host_time: self.host_time(),
             duration_ms: duration.as_secs_f64() * 1_000.0,
             entity_advances,
             boom,
-        }))
+        })
+        .map(Some)
     }
 
     /// Builds one correction-only snap batch after a discontinuous relocation commits.
@@ -209,10 +212,10 @@ fn project_entity_advances(
         .into_iter()
         .filter(|tick| tick.publish)
         .map(|tick| {
-            let path = serialize_entity_path(
-                &tick.solved.result.motion.path,
-                tick.solved.previous.pose,
-                tick.solved.current.pose,
+            let path = DynamicEntityPlacedPath::from_motion(
+                &tick.solved.path,
+                tick.solved.previous.pose.rotation,
+                tick.solved.current.pose.rotation,
             )?;
             Ok(DynamicEntityAdvance {
                 entity: Box::new(project_dynamic_entity_view(
@@ -228,45 +231,6 @@ fn project_entity_advances(
             })
         })
         .collect()
-}
-
-fn serialize_entity_path(
-    path: &PlacedMotionPath,
-    previous: WorldPosition,
-    current: WorldPosition,
-) -> Result<DynamicEntityPlacedPath> {
-    Ok(DynamicEntityPlacedPath {
-        initial: serialize_entity_path_point(path, path.initial(), previous.rotation)?,
-        legs: path
-            .legs()
-            .iter()
-            .map(|leg| {
-                Ok(DynamicEntityPathLeg {
-                    end_fraction: leg.end_fraction(),
-                    end: serialize_entity_path_point(
-                        path,
-                        leg.end(),
-                        interpolate_rotation(
-                            previous.rotation,
-                            current.rotation,
-                            leg.end_fraction(),
-                        )?,
-                    )?,
-                })
-            })
-            .collect::<Result<Vec<_>>>()?,
-    })
-}
-
-fn serialize_entity_path_point(
-    path: &PlacedMotionPath,
-    point: &PlacedMotionPoint,
-    rotation: Quaternion,
-) -> Result<DynamicEntityPathPoint> {
-    Ok(DynamicEntityPathPoint {
-        pose: present_placed_motion_pose(path, point, rotation)?,
-        spatial_membership: DynamicEntitySpatialMembership::from(point.placement()),
-    })
 }
 
 #[cfg(test)]
@@ -301,6 +265,132 @@ mod tests {
                     .expect("standard Explorer possession profile is valid"),
             ),
         )))
+    }
+
+    /// A valid stationary camera-only payload for exercising delivery without simulation assets.
+    fn camera_tick() -> HostKinematicBoomTick {
+        use crate::host_kinematic_boom_runtime::{
+            HostKinematicBoomFailureReason, HostKinematicBoomIdentity, HostKinematicBoomPathLeg,
+            HostKinematicBoomPathPoint, HostKinematicBoomPlacedPath,
+            HostKinematicBoomTargetSphereRole, HostKinematicBoomWorldPoint,
+        };
+        let point = HostKinematicBoomWorldPoint {
+            landblock_id: Guid(0xda55_0001),
+            coords: holtburger_common::Vector3::zero(),
+        };
+        let point = HostKinematicBoomPathPoint {
+            position: point,
+            visual_pivot: point,
+        };
+        HostKinematicBoomTick::Fallback {
+            identity: HostKinematicBoomIdentity {
+                guid: Guid(1),
+                entity_generation: 1,
+                possession_generation: 1,
+                boom_generation: 1,
+            },
+            sequence: 1,
+            target_sphere_role: HostKinematicBoomTargetSphereRole::Primary,
+            desired_reach: 1.0,
+            path: HostKinematicBoomPlacedPath {
+                initial: point,
+                legs: vec![HostKinematicBoomPathLeg {
+                    end_fraction: 1.0,
+                    end: point,
+                }],
+            },
+            reason: HostKinematicBoomFailureReason::TargetContract,
+            diagnostics: holtburger_core::KinematicBoomDiagnostics::default().into(),
+        }
+    }
+
+    #[test]
+    fn camera_delivery_progresses_while_entity_work_holds_its_gate() {
+        let delivery = delivery();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let (sent_tx, sent_rx) = mpsc::channel();
+        let entity_delivery = Arc::clone(&delivery);
+        let delayed = thread::spawn(move || {
+            entity_delivery.with_ordered_publication(|| {
+                entered_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+            });
+        });
+        entered_rx.recv().unwrap();
+        let camera = thread::spawn(move || {
+            delivery
+                .publish_fixed_tick(
+                    Vec::new(),
+                    Some(camera_tick()),
+                    Duration::from_millis(16),
+                    |envelope| {
+                        sent_tx.send(envelope.epoch).unwrap();
+                        Ok(())
+                    },
+                )
+                .unwrap();
+        });
+        let result = sent_rx.recv_timeout(Duration::from_secs(2));
+        // Release even on failure so a lock regression cannot leave either test thread blocked.
+        release_tx.send(()).unwrap();
+        delayed.join().unwrap();
+        camera.join().unwrap();
+        assert_eq!(result.unwrap(), 1);
+    }
+
+    #[test]
+    fn a_delayed_sink_cannot_be_overtaken_by_a_later_epoch() {
+        let delivery = delivery();
+        let order = Arc::new(Mutex::new(Vec::new()));
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let first_delivery = Arc::clone(&delivery);
+        let first_order = Arc::clone(&order);
+        let first = thread::spawn(move || {
+            first_delivery
+                .publish_fixed_tick(
+                    Vec::new(),
+                    Some(camera_tick()),
+                    Duration::from_millis(16),
+                    |envelope| {
+                        entered_tx.send(()).unwrap();
+                        release_rx.recv().unwrap();
+                        first_order.lock().unwrap().push(envelope.epoch);
+                        Ok(())
+                    },
+                )
+                .unwrap();
+        });
+        entered_rx.recv().unwrap();
+        let (attempted_tx, attempted_rx) = mpsc::channel();
+        let (sent_tx, sent_rx) = mpsc::channel();
+        let second_order = Arc::clone(&order);
+        let second = thread::spawn(move || {
+            attempted_tx.send(()).unwrap();
+            delivery
+                .publish_fixed_tick(
+                    Vec::new(),
+                    Some(camera_tick()),
+                    Duration::from_millis(16),
+                    |envelope| {
+                        second_order.lock().unwrap().push(envelope.epoch);
+                        sent_tx.send(()).unwrap();
+                        Ok(())
+                    },
+                )
+                .unwrap();
+        });
+        attempted_rx.recv().unwrap();
+        let overtook = sent_rx.recv_timeout(Duration::from_millis(50)).is_ok();
+        release_tx.send(()).unwrap();
+        first.join().unwrap();
+        second.join().unwrap();
+        assert!(
+            !overtook,
+            "a later epoch reached the sink while the first send was pending"
+        );
+        assert_eq!(*order.lock().unwrap(), [1, 2]);
     }
 
     #[test]

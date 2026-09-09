@@ -1,6 +1,7 @@
 //! Explorer-owned possession policy resolved against target motion-table capabilities.
 
 use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
 
 use holtburger_common::RigidTransform;
 use holtburger_content::{MotionSequence, MotionSequenceTable};
@@ -506,9 +507,32 @@ impl PossessionLifecycleEvent {
     }
 }
 
+/// Revocable permission for camera work belonging to one possession. No body state is shared.
+#[derive(Debug, Clone)]
+pub(crate) struct PossessionLifetime(Arc<Mutex<bool>>);
+
+impl PossessionLifetime {
+    fn new() -> Self {
+        Self(Arc::new(Mutex::new(true)))
+    }
+
+    /// Retirement waits for a current camera operation, never for a physical collection.
+    pub(crate) fn retire(&self) {
+        *self.0.lock().expect("possession lifetime poisoned") = false;
+    }
+
+    /// Keeps retirement ordered after the complete operation, including its event delivery.
+    pub(crate) fn while_live<T>(&self, operation: impl FnOnce() -> T) -> Option<T> {
+        let live = self.0.lock().expect("possession lifetime poisoned");
+        if *live { Some(operation()) } else { None }
+    }
+}
+
 /// One exact entity/possession ownership epoch and all controller-owned state.
 #[derive(Debug, Clone)]
 pub struct ActivePossession {
+    /// Shared only with the possession camera; proposal clones retain the same lifetime.
+    pub(crate) lifetime: PossessionLifetime,
     /// Exact possessed entity identity.
     pub guid: holtburger_common::Guid,
     /// Entity lifecycle generation this possession is allowed to mutate.
@@ -552,6 +576,7 @@ impl ActivePossession {
         let kinematics = profile.initial_kinematics()?;
         let intent = resolve_intent(0, initial.style, drive, initial, kinematics)?;
         Ok(Self {
+            lifetime: PossessionLifetime::new(),
             guid,
             entity_generation,
             generation,

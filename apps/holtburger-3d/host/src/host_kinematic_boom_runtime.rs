@@ -1,6 +1,8 @@
 //! Explorer-local lifecycle and transport adapter for the shared kinematic boom controller.
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, ensure};
 use holtburger_common::position::WorldPosition;
@@ -22,7 +24,7 @@ use crate::explorer_entity_runtime::{
     ExplorerPossessedBodyEpoch,
 };
 use crate::host_simulation_runtime::HostSimulationRuntime;
-use crate::placed_motion_presentation::{
+use holtburger_core::placed_motion::{
     interpolate_rotation, landblock_key, present_placed_motion_pose, reanchor_point,
 };
 
@@ -385,12 +387,64 @@ pub enum HostKinematicBoomTick {
     },
 }
 
+/// Validated target travel with one normalized endpoint, consumed once by camera advancement.
+struct PublishedTargetPath {
+    /// Nonempty samples ending at fraction one; mutation stays inside this path owner.
+    samples: Vec<KinematicBoomTargetSample>,
+}
+
+impl PublishedTargetPath {
+    fn new(samples: Vec<KinematicBoomTargetSample>) -> Result<Self> {
+        ensure!(
+            samples
+                .last()
+                .is_some_and(|sample| sample.end_fraction == 1.0),
+            "possessed target path must be nonempty and normalized"
+        );
+        Ok(Self { samples })
+    }
+
+    fn stationary(visual_pivot: WorldPosition, target_seed: KinematicBoomTargetSeed) -> Self {
+        Self {
+            samples: vec![KinematicBoomTargetSample {
+                end_fraction: 1.0,
+                visual_pivot,
+                target_seed,
+            }],
+        }
+    }
+
+    fn retain_endpoint(&mut self) {
+        // Construction proves an endpoint exists. Rotation preserves it without copying
+        // it into independently retained state or rediscovering it after each camera tick.
+        self.samples.rotate_right(1);
+        self.samples.truncate(1);
+    }
+}
+
+/// Latest target proof, independent of camera cadence. Failure replaces stale usable input.
+enum PublishedBoomTarget {
+    /// Prepared target travel; after advancement only its stationary endpoint remains.
+    Ready {
+        /// Immutable topology that proved the target samples.
+        collision: Arc<holtburger_world::CollisionScene>,
+        /// Nonempty normalized path, produced by the target adapters or registration seed.
+        samples: PublishedTargetPath,
+        /// Coverage gap retained in every camera result until a newer publication repairs it.
+        unavailable_owner: Option<Guid>,
+    },
+    /// Invalid target input holds the controller until a valid publication replaces it.
+    Failed(KinematicBoomDiagnostics),
+}
+
 struct ActiveHostKinematicBoom {
     /// Exact boom and target lifecycle tuple.
     identity: HostKinematicBoomIdentity,
+    /// Explicit authority permission, revoked without waiting for another target publication.
+    lifetime: crate::explorer_possession_control::PossessionLifetime,
     /// Shared deterministic controller state.
     controller: KinematicBoomController,
-    /// Last host-authored fixed-tick result sequence.
+    /// Last host-authored camera result sequence.
     sequence: u64,
     /// Sphere role selected from the latest accepted body definition.
     target_sphere_role: HostKinematicBoomTargetSphereRole,
@@ -401,6 +455,8 @@ struct ActiveHostKinematicBoom {
     pivot_offset: Vector3,
     /// Parent-driven target sphere whose topology is reconciled by the shared spatial solver.
     target_body: ChildSpatialBody,
+    /// Target publication belongs to this exact camera generation and retires with it.
+    target: PublishedBoomTarget,
 }
 
 #[derive(Default)]
@@ -437,6 +493,63 @@ impl HostKinematicBoomRuntime {
         })
     }
 
+    /// Services the camera on its own thread; crowd work cannot occupy its clock.
+    pub fn spawn(
+        self: &Arc<Self>,
+        delivery: Arc<crate::explorer_entity_delivery::ExplorerEntityDelivery>,
+        sink: Arc<dyn crate::explorer_entity_simulation::DynamicEntityEventSink>,
+    ) -> Result<HostKinematicBoomWorker> {
+        let camera = Arc::clone(self);
+        let (stop, stopped) = mpsc::channel();
+        let thread = thread::Builder::new()
+            .name("explorer-camera".into())
+            .spawn(move || {
+                let interval = Duration::from_millis(16);
+                let mut previous = Instant::now();
+                loop {
+                    match stopped.recv_timeout(interval.saturating_sub(previous.elapsed())) {
+                        Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                        Err(mpsc::RecvTimeoutError::Timeout) => {}
+                    }
+                    let now = Instant::now();
+                    let duration = now.duration_since(previous);
+                    previous = now;
+                    let result = camera.advance(duration.as_secs_f32(), |tick| {
+                        delivery.publish_fixed_tick(
+                            Vec::new(),
+                            Some(tick),
+                            duration,
+                            |envelope| {
+                                // Accepted camera state survives a transport failure, just like body state.
+                                if let Err(error) = sink.publish(envelope) {
+                                    eprintln!(
+                                        "failed to publish Explorer camera envelope: {error:#}"
+                                    );
+                                }
+                                Ok(())
+                            },
+                        )?;
+                        Ok(())
+                    });
+                    if let Err(error) = result {
+                        eprintln!("Explorer camera stopped after a terminal tick error: {error:#}");
+                        break;
+                    }
+                }
+                camera
+                    .state
+                    .lock()
+                    .expect("kinematic boom lock poisoned")
+                    .active = None;
+            })
+            .context("starting Explorer camera worker")?;
+        Ok(HostKinematicBoomWorker {
+            stop,
+            thread: Mutex::new(Some(thread)),
+            camera: Arc::clone(self),
+        })
+    }
+
     /// Composes a runtime with an explicit validated profile for finite-work recovery tests.
     #[cfg(test)]
     pub(crate) fn with_profile(
@@ -462,10 +575,10 @@ impl HostKinematicBoomRuntime {
             entity_generation: request.entity_generation,
             possession_generation: request.possession_generation,
         };
-        ensure!(
-            self.entities.has_possession(possession),
-            "kinematic boom start targets a stale possession"
-        );
+        let lifetime = self
+            .entities
+            .possession_lifetime(possession)
+            .context("kinematic boom start targets a stale possession")?;
         let target = self
             .simulation
             .physical_body_scene_snapshot(holtburger_world::SpatialBodyId::Entity(request.guid))
@@ -498,46 +611,56 @@ camera pivot rests on its collision geometry alone",
         let pivot_offset = resolve_camera_pivot_offset(selected.center, body_height);
         let visual_pivot = visual_pivot(body.pose, pivot_offset);
         let mut state = self.state.lock().expect("kinematic boom lock poisoned");
-        state.next_generation = state
-            .next_generation
-            .checked_add(1)
-            .context("kinematic boom generation exhausted")?;
-        let identity = HostKinematicBoomIdentity {
-            boom_generation: state.next_generation,
-            possession_generation: request.possession_generation,
-            guid: request.guid,
-            entity_generation: request.entity_generation,
-        };
-        let profile = self
-            .profile
-            .with_reach_limits(request.minimum_reach, request.maximum_reach)?;
-        let controller = KinematicBoomController::new(
-            profile,
-            visual_pivot,
-            seed,
-            KinematicBoomClearance {
-                revision: request.projection_revision,
-                radius: request.clearance_radius,
-            },
-            request.initial_reach,
-            intent(
-                request.input_sequence,
-                request.view_direction,
-                request.cumulative_zoom_displacement,
-            ),
-        )?;
-        state.active = Some(ActiveHostKinematicBoom {
-            identity,
-            controller,
-            sequence: 0,
-            target_sphere_role: selected.role,
-            pivot_offset,
-            target_body,
-        });
-        Ok(HostKinematicBoomStartReceipt { identity })
+        lifetime
+            .while_live(|| {
+                state.next_generation = state
+                    .next_generation
+                    .checked_add(1)
+                    .context("kinematic boom generation exhausted")?;
+                let identity = HostKinematicBoomIdentity {
+                    boom_generation: state.next_generation,
+                    possession_generation: request.possession_generation,
+                    guid: request.guid,
+                    entity_generation: request.entity_generation,
+                };
+                let profile = self
+                    .profile
+                    .with_reach_limits(request.minimum_reach, request.maximum_reach)?;
+                let controller = KinematicBoomController::new(
+                    profile,
+                    visual_pivot,
+                    seed,
+                    KinematicBoomClearance {
+                        revision: request.projection_revision,
+                        radius: request.clearance_radius,
+                    },
+                    request.initial_reach,
+                    intent(
+                        request.input_sequence,
+                        request.view_direction,
+                        request.cumulative_zoom_displacement,
+                    ),
+                )?;
+                state.active = Some(ActiveHostKinematicBoom {
+                    identity,
+                    lifetime: lifetime.clone(),
+                    controller,
+                    sequence: 0,
+                    target_sphere_role: selected.role,
+                    pivot_offset,
+                    target_body,
+                    target: PublishedBoomTarget::Ready {
+                        collision,
+                        samples: PublishedTargetPath::stationary(visual_pivot, seed),
+                        unavailable_owner: None,
+                    },
+                });
+                Ok(HostKinematicBoomStartReceipt { identity })
+            })
+            .context("kinematic boom possession retired during registration")?
     }
 
-    /// Replaces semantic intent for the next fixed advancement.
+    /// Replaces semantic intent for the next camera advancement.
     pub fn set_intent(
         &self,
         request: HostKinematicBoomIntentRequest,
@@ -549,16 +672,23 @@ camera pivot rests on its collision geometry alone",
         if active.identity != request.identity {
             return Ok(HostKinematicBoomUpdateReceipt::IgnoredStale);
         }
-        match active.controller.accept_intent(intent(
-            request.input_sequence,
-            request.view_direction,
-            request.cumulative_zoom_displacement,
-        ))? {
-            KinematicBoomUpdateAcceptance::Accepted => Ok(HostKinematicBoomUpdateReceipt::Accepted),
-            KinematicBoomUpdateAcceptance::Stale => {
-                Ok(HostKinematicBoomUpdateReceipt::IgnoredStale)
-            }
-        }
+        let lifetime = active.lifetime.clone();
+        lifetime
+            .while_live(|| {
+                match active.controller.accept_intent(intent(
+                    request.input_sequence,
+                    request.view_direction,
+                    request.cumulative_zoom_displacement,
+                ))? {
+                    KinematicBoomUpdateAcceptance::Accepted => {
+                        Ok(HostKinematicBoomUpdateReceipt::Accepted)
+                    }
+                    KinematicBoomUpdateAcceptance::Stale => {
+                        Ok(HostKinematicBoomUpdateReceipt::IgnoredStale)
+                    }
+                }
+            })
+            .unwrap_or(Ok(HostKinematicBoomUpdateReceipt::IgnoredStale))
     }
 
     /// Replaces the pending projection clearance without disturbing semantic orbit/zoom input.
@@ -573,17 +703,24 @@ camera pivot rests on its collision geometry alone",
         if active.identity != request.identity {
             return Ok(HostKinematicBoomUpdateReceipt::IgnoredStale);
         }
-        match active
-            .controller
-            .request_clearance(KinematicBoomClearance {
-                revision: request.projection_revision,
-                radius: request.clearance_radius,
-            })? {
-            KinematicBoomUpdateAcceptance::Accepted => Ok(HostKinematicBoomUpdateReceipt::Accepted),
-            KinematicBoomUpdateAcceptance::Stale => {
-                Ok(HostKinematicBoomUpdateReceipt::IgnoredStale)
-            }
-        }
+        let lifetime = active.lifetime.clone();
+        lifetime
+            .while_live(|| {
+                match active
+                    .controller
+                    .request_clearance(KinematicBoomClearance {
+                        revision: request.projection_revision,
+                        radius: request.clearance_radius,
+                    })? {
+                    KinematicBoomUpdateAcceptance::Accepted => {
+                        Ok(HostKinematicBoomUpdateReceipt::Accepted)
+                    }
+                    KinematicBoomUpdateAcceptance::Stale => {
+                        Ok(HostKinematicBoomUpdateReceipt::IgnoredStale)
+                    }
+                }
+            })
+            .unwrap_or(Ok(HostKinematicBoomUpdateReceipt::IgnoredStale))
     }
 
     /// Stops exactly one boom generation; a replacement survives a stale stop.
@@ -601,24 +738,15 @@ camera pivot rests on its collision geometry alone",
         }
     }
 
-    /// Advances immediately after the target collection transaction using its exact collision epoch.
-    pub fn advance(
-        &self,
-        collection: &ExplorerEntityCollectionTick,
-        duration_seconds: f32,
-    ) -> Result<Option<HostKinematicBoomTick>> {
+    /// Publishes target travel and topology after the body transaction, without advancing camera time.
+    pub fn publish_target(&self, collection: &ExplorerEntityCollectionTick) {
         let mut state = self.state.lock().expect("kinematic boom lock poisoned");
-        let Some(identity) = state.active.as_ref().map(|active| active.identity) else {
-            return Ok(None);
+        let Some(active) = state.active.as_mut() else {
+            return;
         };
-        if collection.possession != Some(identity.possession()) {
-            state.active = None;
-            return Ok(None);
+        if collection.possession != Some(active.identity.possession()) {
+            return;
         }
-        let active = state
-            .active
-            .as_mut()
-            .expect("current possession retained its active boom");
         let target_tick = collection.ticks.iter().find(|tick| {
             tick.solved.current.id == holtburger_world::SpatialBodyId::Entity(active.identity.guid)
         });
@@ -637,12 +765,9 @@ camera pivot rests on its collision geometry alone",
                     ),
                     Err(error) => {
                         eprintln!("kinematic boom target adaptation failed: {error:#}");
-                        let tick = project_hold(
-                            active,
-                            HostKinematicBoomFailureReason::TargetContract,
-                            KinematicBoomDiagnostics::default(),
-                        );
-                        return Ok(Some(tick));
+                        active.target =
+                            PublishedBoomTarget::Failed(KinematicBoomDiagnostics::default());
+                        return;
                     }
                 }
             } else if let Some(rejection) = coverage_rejection {
@@ -661,56 +786,134 @@ camera pivot rests on its collision geometry alone",
                     ),
                     Err(error) => {
                         eprintln!("kinematic boom stationary target adaptation failed: {error:#}");
-                        let tick = project_hold(
-                            active,
-                            HostKinematicBoomFailureReason::TargetContract,
-                            KinematicBoomDiagnostics {
-                                collision_proof: KinematicBoomCollisionProof::Uncovered {
-                                    owner: rejection.owner,
-                                },
-                                ..KinematicBoomDiagnostics::default()
+                        active.target = PublishedBoomTarget::Failed(KinematicBoomDiagnostics {
+                            collision_proof: KinematicBoomCollisionProof::Uncovered {
+                                owner: rejection.owner,
                             },
-                        );
-                        return Ok(Some(tick));
+                            ..KinematicBoomDiagnostics::default()
+                        });
+                        return;
                     }
                 }
             } else {
                 eprintln!("kinematic boom target is absent from its current possession collection");
-                let tick = project_hold(
-                    active,
-                    HostKinematicBoomFailureReason::TargetContract,
-                    KinematicBoomDiagnostics::default(),
-                );
-                return Ok(Some(tick));
+                active.target = PublishedBoomTarget::Failed(KinematicBoomDiagnostics::default());
+                return;
             };
         // Child placement follows the accepted parent solve independently from whether the boom
         // can advance its own collision response this tick.
         active.target_sphere_role = selected;
         active.target_body = target_body;
-        let initial_visual_pivot = active.controller.visual_pivot();
-        let mut outcome = match active
-            .controller
-            .advance(&collision, duration_seconds, &samples)
-        {
-            Ok(outcome) => outcome,
-            Err(error) => {
-                eprintln!("kinematic boom controller input failed: {error:#}");
-                let tick = project_hold(
-                    active,
-                    HostKinematicBoomFailureReason::ControllerInput,
-                    KinematicBoomDiagnostics::default(),
-                );
-                return Ok(Some(tick));
-            }
+        active.target = PublishedBoomTarget::Ready {
+            collision,
+            samples,
+            unavailable_owner,
         };
-        if let Some(owner) = unavailable_owner {
-            mark_outcome_uncovered(&mut outcome, owner);
+    }
+
+    /// Advances against the latest publication only; no entity registry or simulation lock is taken.
+    /// Published travel is consumed once, including on controller failure, then held at its endpoint.
+    /// Push callers finish delivery in the callback, under camera and possession-lifetime locks.
+    /// The callback must not acquire the entity registry or reenter this camera.
+    pub fn advance<T>(
+        &self,
+        duration_seconds: f32,
+        publish: impl FnOnce(HostKinematicBoomTick) -> Result<T>,
+    ) -> Result<Option<T>> {
+        let mut state = self.state.lock().expect("kinematic boom lock poisoned");
+        let Some(active) = state.active.as_mut() else {
+            return Ok(None);
+        };
+        let lifetime = active.lifetime.clone();
+        match lifetime.while_live(|| publish(advance_camera(active, duration_seconds)).map(Some)) {
+            Some(result) => result,
+            None => {
+                state.active = None;
+                Ok(None)
+            }
         }
-        let tick = project_outcome(active, initial_visual_pivot, outcome);
-        Ok(Some(tick))
     }
 }
 
+/// Owned camera worker; explicit shutdown and drop both join before retiring cached state.
+pub struct HostKinematicBoomWorker {
+    /// Wakes the worker immediately, including when it is waiting for its next interval.
+    stop: mpsc::Sender<()>,
+    /// Taken once so explicit shutdown and drop share one cancellation path.
+    thread: Mutex<Option<JoinHandle<()>>>,
+    /// Retires input and target state before shutdown returns.
+    camera: Arc<HostKinematicBoomRuntime>,
+}
+
+impl HostKinematicBoomWorker {
+    pub fn shutdown(&self) {
+        let _ = self.stop.send(());
+        if let Some(thread) = self
+            .thread
+            .lock()
+            .expect("camera worker lock poisoned")
+            .take()
+            && thread.join().is_err()
+        {
+            log::error!("Explorer camera worker panicked");
+        }
+        // Teardown after a panic must retire input without triggering a second panic.
+        self.camera
+            .state
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .active = None;
+    }
+}
+
+impl Drop for HostKinematicBoomWorker {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
+fn advance_camera(
+    active: &mut ActiveHostKinematicBoom,
+    duration_seconds: f32,
+) -> HostKinematicBoomTick {
+    let (collision, samples, unavailable_owner) = match &mut active.target {
+        PublishedBoomTarget::Ready {
+            collision,
+            samples,
+            unavailable_owner,
+        } => (collision, samples, unavailable_owner),
+        PublishedBoomTarget::Failed(diagnostics) => {
+            let diagnostics = *diagnostics;
+            return project_hold(
+                active,
+                HostKinematicBoomFailureReason::TargetContract,
+                diagnostics,
+            );
+        }
+    };
+    let unavailable_owner = *unavailable_owner;
+    let initial_visual_pivot = active.controller.visual_pivot();
+    let result = active
+        .controller
+        .advance(collision, duration_seconds, &samples.samples);
+    samples.retain_endpoint();
+    let mut outcome = match result {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            eprintln!("kinematic boom controller input failed: {error:#}");
+            let tick = project_hold(
+                active,
+                HostKinematicBoomFailureReason::ControllerInput,
+                KinematicBoomDiagnostics::default(),
+            );
+            return tick;
+        }
+    };
+    if let Some(owner) = unavailable_owner {
+        mark_outcome_uncovered(&mut outcome, owner);
+    }
+    project_outcome(active, initial_visual_pivot, outcome)
+}
 fn mark_outcome_uncovered(outcome: &mut KinematicBoomOutcome, candidate: Guid) {
     let diagnostics = match outcome {
         KinematicBoomOutcome::Advanced { diagnostics, .. }
@@ -905,7 +1108,7 @@ fn target_samples(
     previous_target_body: &ChildSpatialBody,
     pivot_offset: Vector3,
 ) -> Result<(
-    Vec<KinematicBoomTargetSample>,
+    PublishedTargetPath,
     HostKinematicBoomTargetSphereRole,
     ChildSpatialBody,
 )> {
@@ -916,7 +1119,7 @@ fn target_samples(
     } else {
         ChildSpatialBody::new(definition, tick.solved.previous.pose)
     };
-    let parent_path = &tick.solved.result.motion.path;
+    let parent_path = &tick.solved.path;
     let parent_waypoints = parent_path
         .legs()
         .iter()
@@ -959,13 +1162,11 @@ fn target_samples(
             },
         });
     }
-    ensure!(
-        samples
-            .last()
-            .is_some_and(|sample| sample.end_fraction == 1.0),
-        "possessed target path must be nonempty and normalized"
-    );
-    Ok((samples, selected.role, target_body))
+    Ok((
+        PublishedTargetPath::new(samples)?,
+        selected.role,
+        target_body,
+    ))
 }
 
 fn stationary_target_samples(
@@ -974,7 +1175,7 @@ fn stationary_target_samples(
     previous_target_body: &ChildSpatialBody,
     pivot_offset: Vector3,
 ) -> Result<(
-    Vec<KinematicBoomTargetSample>,
+    PublishedTargetPath,
     HostKinematicBoomTargetSphereRole,
     ChildSpatialBody,
 )> {
@@ -987,11 +1188,7 @@ fn stationary_target_samples(
     };
     let target_seed = stationary_target_seed(scene, body.pose, &mut target_body)?;
     Ok((
-        vec![KinematicBoomTargetSample {
-            end_fraction: 1.0,
-            visual_pivot: visual_pivot(body.pose, pivot_offset),
-            target_seed,
-        }],
+        PublishedTargetPath::stationary(visual_pivot(body.pose, pivot_offset), target_seed),
         selected.role,
         target_body,
     ))
@@ -1023,7 +1220,7 @@ fn interpolate_parent_pose(
     tick: &ExplorerEntityPhysicalTick,
     fraction: f32,
 ) -> Result<WorldPosition> {
-    let path = &tick.solved.result.motion.path;
+    let path = &tick.solved.path;
     let rotation = interpolate_rotation(
         tick.solved.previous.pose.rotation,
         tick.solved.current.pose.rotation,

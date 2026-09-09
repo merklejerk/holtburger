@@ -3,18 +3,16 @@ use crate::entity::{
     EntityMotionSnapshot,
 };
 use crate::motion::{
-    CharacterMotionPresentation, MotionCommand, MotionOrder, MotionRuntimeRegistry, SequenceTick,
-    ServerDirectedMotionResolution, ServerDirectedTarget, begin_server_directed_motion,
-    resolve_server_directed_motion,
+    CharacterMotionPresentation, LocomotionPresentationSource, MotionCommand, MotionOrder,
+    MotionRuntimeRegistry, RemoteFramePolicy, RemoteMotionInput, RemoteMotionSample, SequenceTick,
+    ServerDirectedTarget, observed_locomotion_order,
 };
 use crate::spatial::{
-    ContactState, RetainedBodyKinematics, SolveBodyInput, SpatialBody, SpatialBodyId,
-    SpatialSampleMode,
+    ContactState, DynamicBodyActivity, PhysicalBodyDefinition, RetainedBodyKinematics,
+    SolveBodyInput, SpatialBody, SpatialBodyId, SpatialSampleMode,
 };
 use crate::state::WorldState;
-use crate::state::types::RetainedServerDirectedMotion;
-use crate::{PhysicalBodyReconfiguration, WorldEvent};
-use holtburger_common::position::WorldPosition;
+use crate::{LocalIntegrationDemand, PhysicalBodyReconfiguration, WorldEvent};
 use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_common::{Guid, RigidTransform, Vector3};
 use holtburger_content::{MotionHookEffect, MotionSequence, MotionSequenceTable};
@@ -35,6 +33,18 @@ impl<'a> BodyProjectionResolver<'a> {
             entities,
             motion_runtimes,
         }
+    }
+
+    /// Remote source sample, including command orientation even on a motionless interval.
+    pub fn remote_motion_sample(&self, guid: Guid) -> Option<RemoteMotionSample> {
+        let snapshot = self.entities.get(guid)?.network_motion.snapshot()?;
+        if snapshot
+            .motion_command()
+            .is_some_and(InterpretedMotionCommand::is_dead)
+        {
+            return None;
+        }
+        self.motion_runtimes.get(guid)?.remote_motion_sample()
     }
 
     /// Resolves one captured body's current authority and authored-playback contribution.
@@ -177,7 +187,181 @@ pub enum LocalAuthoredMotionActionError {
     QueueOverflow { guid: u32 },
 }
 
+/// Retail cylinder-to-cylinder sticky gap (acclient.c:371427-371508).
+pub(crate) const STICKY_TARGET_CLEARANCE_M: f32 = 0.3;
+
 impl WorldState {
+    /// Sample explicit sticky commands before the collection mutates any target pose.
+    /// This transient map is consumed once by physical input preparation, never by contact passes.
+    pub fn prepare_sticky_body_targets(
+        &mut self,
+    ) -> std::collections::HashMap<Guid, crate::spatial::StickyBodyTarget> {
+        let mut targets = std::collections::HashMap::new();
+        for entity in self.entities.iter() {
+            let guid = entity.guid;
+            let Some(runtime) = self.motion_runtimes.get(guid) else {
+                continue;
+            };
+            let Some(target_guid) = runtime.sticky_target() else {
+                continue;
+            };
+            let speed_mps = runtime.sticky_speed_mps();
+            let Some(target_body) = self.scene.body_for_guid(target_guid) else {
+                self.motion_runtimes.cancel_sticky_target(guid);
+                continue;
+            };
+            let Some(actor) = self.scene.body_for_guid(guid) else {
+                continue;
+            };
+            // Fixed/passive bodies and airborne motion retain their existing physical policy.
+            // Re-evaluate after authored hooks, which can change the actor's role this interval.
+            if actor.remote_frame_policy() != RemoteFramePolicy::Command
+                || actor.contact != ContactState::Grounded
+            {
+                continue;
+            }
+            let Some(actor_dynamic) = actor
+                .physical
+                .as_ref()
+                .and_then(|physical| physical.dynamic.as_ref())
+            else {
+                continue;
+            };
+            let Some(target_dynamic) = target_body
+                .physical
+                .as_ref()
+                .and_then(|physical| physical.dynamic.as_ref())
+            else {
+                continue;
+            };
+            if actor_dynamic.demand.integration != LocalIntegrationDemand::Eligible
+                || actor_dynamic.activity == DynamicBodyActivity::Suspended
+            {
+                continue;
+            }
+            let bearing = target_body.pose.global_coords() - actor.pose.global_coords();
+            let heading = if bearing.x != 0.0 || bearing.y != 0.0 {
+                actor.pose.heading_to(&target_body.pose)
+            } else {
+                actor.pose.rotation.to_heading()
+            };
+            let target = crate::spatial::StickyBodyTarget {
+                position: target_body.pose,
+                clearance: actor_dynamic.collision.target_geometry.setup_radius
+                    * actor_dynamic.object_scale
+                    + target_dynamic.collision.target_geometry.setup_radius
+                        * target_dynamic.object_scale
+                    + STICKY_TARGET_CLEARANCE_M,
+                speed_mps,
+                heading,
+            };
+            let body_id = actor.id;
+            self.motion_runtimes.retain_sticky_heading(guid, heading);
+            self.scene.wake_dynamic_body(body_id);
+            targets.insert(guid, target);
+        }
+        targets
+    }
+
+    /// Retains locomotion presentation only while this authority can publish local character motion.
+    /// Run before authored advancement so leaving physics reveals the uninterrupted authored cursor.
+    pub fn retain_locomotion_presentation(&mut self, collision_enabled: bool) {
+        let scene = &self.scene;
+        let entities = &self.entities;
+        self.motion_runtimes.retain_locomotion_presentation(|guid| {
+            if !collision_enabled {
+                return false;
+            }
+            let Some(entity) = entities.get(guid) else {
+                return false;
+            };
+            if entity.physics.is_authoritative_projectile() {
+                return false;
+            }
+            if entity
+                .network_motion
+                .snapshot()
+                .and_then(|snapshot| snapshot.motion_command())
+                .is_some_and(InterpretedMotionCommand::is_dead)
+            {
+                return false;
+            }
+            scene
+                .body_for_guid(guid)
+                .and_then(|body| body.physical.as_ref())
+                .is_some_and(|physical| {
+                    matches!(physical.definition, PhysicalBodyDefinition::Grounded { .. })
+                        && physical.dynamic.as_ref().is_some_and(|dynamic| {
+                            dynamic.demand.integration == LocalIntegrationDemand::Eligible
+                                && dynamic.activity != DynamicBodyActivity::Suspended
+                                && !dynamic.collision.dynamic_collision.missile
+                        })
+                })
+        });
+    }
+
+    /// Presents accepted travel or explicit controller intent after canonical body publication.
+    /// Neither source changes authored playback, hook delivery, or physical motion.
+    /// The controller supplies support/charge priority; the existing runtime owns action priority.
+    /// Missing motion content or authored playback leaves presentation with its existing owner.
+    /// Unsupported channels are best-effort; success does not promise every channel was modelled.
+    pub fn present_character_locomotion(
+        &mut self,
+        body_id: SpatialBodyId,
+        source: LocomotionPresentationSource,
+        presentation: CharacterMotionPresentation,
+        elapsed: Duration,
+    ) -> anyhow::Result<()> {
+        let guid = body_id.authoritative_guid().ok_or_else(|| {
+            anyhow::anyhow!("observed character body {body_id:?} has no authoritative entity")
+        })?;
+        let body = self.scene.body(body_id).ok_or_else(|| {
+            anyhow::anyhow!("observed character body {body_id:?} has not been published")
+        })?;
+        let entity = self.entities.get(guid).ok_or_else(|| {
+            anyhow::anyhow!("observed character body {body_id:?} outlived its entity")
+        })?;
+        if entity.physics.is_authoritative_projectile() {
+            return Ok(());
+        }
+        let Some(table_id) = self.effective_motion_table_id_for_guid(guid) else {
+            return Ok(());
+        };
+        let Some(table) = self.motion_sequences.table(table_id) else {
+            return Ok(());
+        };
+        let Some(authored) = self.motion_runtimes.state(guid) else {
+            return Ok(());
+        };
+        let order = match source {
+            LocomotionPresentationSource::Observed(motion) => observed_locomotion_order(
+                table,
+                authored.style,
+                motion,
+                body.pose.rotation,
+                presentation,
+                entity.scale.effective(),
+            )?,
+            LocomotionPresentationSource::Command(order)
+                if presentation == CharacterMotionPresentation::Grounded =>
+            {
+                order
+            }
+            LocomotionPresentationSource::Command(_) => observed_locomotion_order(
+                table,
+                authored.style,
+                crate::spatial::AcceptedBodyMotion::default(),
+                body.pose.rotation,
+                presentation,
+                entity.scale.effective(),
+            )?,
+        };
+        // Visual playback is best-effort: supported channels survive an unmodelled channel.
+        self.motion_runtimes
+            .present_locomotion(table, guid, order, elapsed.as_secs_f32());
+        Ok(())
+    }
+
     /// Rebuilds one body's authored playback from a discontinuity-safe motion snapshot.
     pub(crate) fn reset_authored_motion(
         &mut self,
@@ -309,6 +493,28 @@ impl WorldState {
             });
         }
         Ok(())
+    }
+
+    /// Fresh accepted movement renews/cancels sticky intent even when presentation is unchanged.
+    /// Missing executable content follows the existing action-admission policy: never replay later.
+    pub fn admit_entity_sticky_target(&mut self, guid: Guid, target: Option<Guid>) {
+        if target.is_none() {
+            self.motion_runtimes.cancel_sticky_target(guid);
+            return;
+        }
+        let table = self.motion_table_source_for_guid(guid).and_then(|source| {
+            self.motion_sequences
+                .table(motion_table_id_for_source(source))
+        });
+        let Some(table) = table else {
+            self.motion_runtimes.cancel_sticky_target(guid);
+            log::warn!(
+                "body 0x{guid:08X} cannot admit sticky target without executable motion content"
+            );
+            return;
+        };
+        self.motion_runtimes
+            .admit_sticky_target(table, guid, target, std::time::Instant::now());
     }
 
     /// Offers freshly admitted transient edges to the body's sole authored runtime queue.
@@ -479,7 +685,7 @@ impl WorldState {
 
         // Collected first because driving playback needs the contract, the registry, and the entity
         // set at once, and only the registry is mutated.
-        let driving: Vec<(Guid, u32, EntityMotionSnapshot, WorldPosition, ContactState)> = self
+        let driving: Vec<(Guid, u32, RemoteMotionInput)> = self
             .entities
             .iter()
             .filter_map(|entity| {
@@ -500,9 +706,18 @@ impl WorldState {
                 Some((
                     entity.guid,
                     motion_table_id_for_source(source),
-                    snapshot,
-                    body.map_or(entity.position, |body| body.pose),
-                    body.map_or(ContactState::Unknown, |body| body.contact),
+                    RemoteMotionInput {
+                        snapshot,
+                        pose: body.map_or(entity.position, SpatialBody::authored_source_pose),
+                        contact: body.map_or(ContactState::Unknown, |body| body.contact),
+                        target: snapshot
+                            .directive
+                            .and_then(|directive| directive.target_guid())
+                            .and_then(|target| self.server_directed_target(target)),
+                        frame_policy: body
+                            .map_or(RemoteFramePolicy::Body, SpatialBody::remote_frame_policy),
+                        omega: body.map_or(entity.omega, |body| body.nominal.omega),
+                    },
                 ))
             })
             .collect();
@@ -514,12 +729,9 @@ impl WorldState {
             self.entities.iter().map(|entity| entity.guid).collect();
         self.motion_runtimes
             .retain_bodies(|guid| live.contains(&guid));
-        self.server_directed_motion
-            .retain(|guid, _| live.contains(guid));
 
         let mut ticks = Vec::with_capacity(driving.len());
-        for (guid, motion_table_id, snapshot, pose, contact) in driving {
-            let order = self.resolve_remote_motion_order(guid, snapshot, pose, contact);
+        for (guid, motion_table_id, input) in driving {
             let Some(table) = self.motion_sequences.table(motion_table_id) else {
                 continue;
             };
@@ -527,7 +739,7 @@ impl WorldState {
                 guid,
                 tick: self
                     .motion_runtimes
-                    .drive(table, guid, order, quantum)
+                    .drive_remote(table, guid, input, quantum)
                     .clone(),
             });
         }
@@ -620,11 +832,10 @@ impl WorldState {
     /// The zero quantum changes the selected sequence without double-advancing the tick. Remote
     /// root actuation already consumed the offset selected from the pre-solve support state.
     pub fn reconcile_authored_motion_support(&mut self, guid: Guid, contact: ContactState) {
-        let Some(snapshot) = self
-            .entities
-            .get(guid)
-            .and_then(|entity| entity.network_motion.snapshot())
-        else {
+        let Some(entity) = self.entities.get(guid) else {
+            return;
+        };
+        let Some(snapshot) = entity.network_motion.snapshot() else {
             return;
         };
         if snapshot
@@ -636,24 +847,34 @@ impl WorldState {
         let Some(source) = self.motion_table_source_for_guid(guid) else {
             return;
         };
-        let pose = self
+        let body = self
             .runtime_body_id_for_guid(guid)
-            .and_then(|body_id| self.scene.body(body_id))
-            .map_or_else(
-                || self.entities.get(guid).map(|entity| entity.position),
-                |body| Some(body.pose),
-            );
-        let Some(pose) = pose else {
-            return;
-        };
-        let order = self.resolve_remote_motion_order(guid, snapshot, pose, contact);
+            .and_then(|body_id| self.scene.body(body_id));
+        let frame_policy = body.map_or(RemoteFramePolicy::Body, SpatialBody::remote_frame_policy);
+        let pose = body.map_or(entity.position, |body| body.pose);
+        let target = snapshot
+            .directive
+            .and_then(|directive| directive.target_guid())
+            .and_then(|target| self.server_directed_target(target));
         let Some(table) = self
             .motion_sequences
             .table(motion_table_id_for_source(source))
         else {
             return;
         };
-        self.motion_runtimes.drive(table, guid, order, 0.0);
+        self.motion_runtimes.drive_remote(
+            table,
+            guid,
+            RemoteMotionInput {
+                snapshot,
+                pose,
+                contact,
+                target,
+                omega: Vector3::zero(),
+                frame_policy,
+            },
+            0.0,
+        );
     }
 
     /// Samples the current target facts used by retail object-directed movement.
@@ -665,81 +886,6 @@ impl WorldState {
             .map_or(entity.position, |body| body.pose);
         let use_radius = entity.use_radius().unwrap_or(0.0) as f32;
         ServerDirectedTarget::new(pose, use_radius)
-    }
-
-    fn resolve_remote_motion_order(
-        &mut self,
-        guid: Guid,
-        snapshot: EntityMotionSnapshot,
-        current_pose: WorldPosition,
-        contact: ContactState,
-    ) -> MotionOrder {
-        let steady_order = MotionOrder::from_snapshot(snapshot);
-        let Some(directive) = snapshot.directive else {
-            self.server_directed_motion.remove(&guid);
-            return support_presented_snapshot_order(snapshot, contact);
-        };
-
-        let retained = self.server_directed_motion.remove(&guid);
-        let state = match retained {
-            Some(retained) if retained.directive == directive => retained.state,
-            _ => {
-                let target = directive
-                    .target_guid()
-                    .and_then(|target| self.server_directed_target(target));
-                Some(begin_server_directed_motion(
-                    directive,
-                    current_pose,
-                    target,
-                ))
-            }
-        };
-        let Some(state) = state else {
-            self.server_directed_motion.insert(
-                guid,
-                RetainedServerDirectedMotion {
-                    directive,
-                    state: None,
-                },
-            );
-            return support_presented_snapshot_order(snapshot, contact);
-        };
-        let target = state
-            .target_guid()
-            .and_then(|target| self.server_directed_target(target));
-        match resolve_server_directed_motion(state, steady_order, current_pose, contact, target) {
-            ServerDirectedMotionResolution::Active(step) => {
-                self.server_directed_motion.insert(
-                    guid,
-                    RetainedServerDirectedMotion {
-                        directive,
-                        state: Some(step.state),
-                    },
-                );
-                step.order
-            }
-            ServerDirectedMotionResolution::Complete => {
-                self.server_directed_motion.insert(
-                    guid,
-                    RetainedServerDirectedMotion {
-                        directive,
-                        state: None,
-                    },
-                );
-                support_presented_snapshot_order(snapshot, contact)
-            }
-            ServerDirectedMotionResolution::Failed(failure) => {
-                log::warn!("entity 0x{guid:08X} server-directed motion failed: {failure:?}");
-                self.server_directed_motion.insert(
-                    guid,
-                    RetainedServerDirectedMotion {
-                        directive,
-                        state: None,
-                    },
-                );
-                support_presented_snapshot_order(snapshot, contact)
-            }
-        }
     }
 
     /// Resolves the motion table every playback and presentation consumer must use for an entity.
@@ -783,14 +929,6 @@ impl WorldState {
             movement_profile: MotionTableMovementProfile::reduce(table, motion_table_id, stance),
         })
     }
-}
-
-fn support_presented_snapshot_order(
-    snapshot: EntityMotionSnapshot,
-    contact: ContactState,
-) -> MotionOrder {
-    MotionOrder::from_snapshot(snapshot)
-        .with_character_presentation(CharacterMotionPresentation::resolve(contact, false, false))
 }
 
 /// Velocity-grade summary of the four movement commands for one table and stance.

@@ -4,14 +4,57 @@
 //! `InterpolationManager::adjust_offset` may replace translation, then
 //! `ConstraintManager::adjust_offset` damps the survivor (`acclient.c:371277-371292`). Authority
 //! adapters decide whether a received pose confirms, interpolates, snaps, or resets; this module
-//! only executes the selected spatial mechanics.
+//! only executes the selected spatial mechanics. Mobile physical bodies instead compose bounded
+//! additive correction with ordinary motion and let collision determine accepted progress.
+
+pub(super) mod recovery;
 
 use super::ContactState;
-use holtburger_common::Vector3;
 use holtburger_common::position::WorldPosition;
+use holtburger_common::{Guid, Vector3};
+
+/// Coordinates a physical return motor can correct; steering and completion share this domain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PhysicalReferenceDomain {
+    /// RETAIL DIVERGENCE: retail tests full target distance (acclient.c:372039-372045).
+    /// Grounded navigation owns height; restoring 3D completion leaves the two-step round-trip
+    /// fixture correcting forever after a 0.6 m ascent. A different solid floor at the same XY
+    /// is deliberately not repaired. The asset-free stair/slope cases cover the known failure;
+    /// no census of multilevel placements has been performed.
+    Horizontal,
+    /// Free-flight return can correct all three coordinates.
+    Spatial,
+}
+
+impl PhysicalReferenceDomain {
+    /// Derives motor authority from the installed response, not its current grounded/falling pose.
+    pub(crate) fn for_definition(definition: super::PhysicalBodyDefinition) -> Self {
+        match definition {
+            super::PhysicalBodyDefinition::Grounded { .. } => Self::Horizontal,
+            _ => Self::Spatial,
+        }
+    }
+
+    /// Keeps the position type's local-coordinate precision when measuring completion.
+    fn distance(self, mut first: WorldPosition, mut second: WorldPosition) -> f32 {
+        first.coords = self.project(first.coords);
+        second.coords = self.project(second.coords);
+        first.distance_to(&second)
+    }
+
+    /// Restricts a displacement or relative velocity to coordinates controlled by the motor.
+    pub(crate) fn project(self, delta: Vector3) -> Vector3 {
+        match self {
+            Self::Horizontal => Vector3::new(delta.x, delta.y, 0.0),
+            Self::Spatial => delta,
+        }
+    }
+}
 
 /// Distance below which retail completes an interpolation node (`acclient.c:372039-372045`).
 pub const RETAIL_INTERPOLATION_TARGET_THRESHOLD_M: f32 = 0.05;
+/// Remote supported characters ignore positional error until it exceeds this distance.
+pub const PHYSICAL_RETURN_START_THRESHOLD_M: f32 = 0.20;
 /// Generic remote distance at which retail directly places instead of interpolating
 /// (`acclient.c:311507-311521`).
 pub const RETAIL_INTERPOLATION_SNAP_DISTANCE_M: f32 = 96.0;
@@ -65,7 +108,7 @@ pub enum AuthoritativePoseEffect {
     },
     /// Record authority and schedule an ordinary far correction for the next fixed tick.
     Snap {
-        /// Producer-authoritative pose installed at the fixed-tick boundary.
+        /// Producer-authoritative target: mobile bodies correct through collision; pose-only bodies place.
         pose: WorldPosition,
     },
     /// Establish a discontinuous authority epoch and install its pose immediately.
@@ -180,13 +223,353 @@ struct ConfirmedTravelConstraint {
     maximum_distance: f32,
 }
 
+/// One moving reference, separate from the body's canonical collision/presentation pose.
+///
+/// RETAIL DIVERGENCE: explicitly requested local displacement replaces physical interpolation
+/// takeover and failed-node placement (`acclient.c:371277-371292,372070-372097,371736-371832`).
+/// Restoring placement would move correcting mobs through the player. The synthetic 200-tick
+/// blocked-return case covers repeated packets and later release; admission covers mobile
+/// grounded and free-sphere bodies, while fixed-position/pose-only projection stays separate.
+/// This changes client collision positions intentionally; server gameplay remains authoritative.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct PhysicalCorrection {
+    /// Accepted-progress watchdog; survives equivalent authority updates.
+    recovery: Option<recovery::RecoveryObservation>,
+    /// Whether this reference is continuously corrected or uses supported-character hysteresis.
+    activity: PhysicalReturnActivity,
+    /// Reference position in its original landblock frame; it need not be a placed body.
+    reference: WorldPosition,
+    /// Fresh authority facing, consumed by one accepted physical tick independently
+    /// of position return. Later ordinary turning must not replay this old facing.
+    pending_heading: Option<holtburger_common::Quaternion>,
+}
+
+/// Positional work is independent of retaining a reference and pending authority heading.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum PhysicalReturnActivity {
+    /// Existing flight/passive correction without a positional start band.
+    Continuous,
+    /// Preserve ordinary prediction and accumulated error without driving return.
+    Watching,
+    /// Return until position and relative velocity satisfy the completion band.
+    Returning,
+}
+
+impl PhysicalCorrection {
+    /// Measures same-instant error in the body's frame, then advances only nominal travel.
+    fn advance_reference(
+        &mut self,
+        current: WorldPosition,
+        ordinary: Vector3,
+    ) -> anyhow::Result<Vector3> {
+        let anchor = Guid(current.landblock_id.0 | 0xffff);
+        let error = self.reference.reanchor_to_landblock_owner(anchor)?.coords - current.coords;
+        self.reference.coords = self.reference.coords + ordinary;
+        Ok(error)
+    }
+}
+
+/// Reconciliation policy selected once at the physical/pose-only admission boundary.
+/// Remote physical correction never inherits the local player's confirmed-travel budget.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct PoseReconciliationState {
+    /// Mutually exclusive correction implementations; reset replaces the whole mode.
+    mode: ReconciliationMode,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+enum ReconciliationMode {
+    /// No pending reconciliation work or confirmation budget.
+    #[default]
+    Empty,
+    /// Existing confirmation and pose-only retail projection mechanics.
+    Retail(RetailPoseReconciliationState),
+    /// Collision-respecting correction for a mobile physical body.
+    Physical(PhysicalCorrection),
+}
+
+impl PoseReconciliationState {
+    /// Discards all temporal state at an authority discontinuity.
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    /// Preserves the local player's confirmed-travel behavior.
+    pub fn confirm(&mut self, confirmed: WorldPosition, current: WorldPosition) {
+        let mut state = RetailPoseReconciliationState::default();
+        state.confirm(confirmed, current);
+        self.mode = ReconciliationMode::Retail(state);
+    }
+
+    /// Installs the existing pose-only interpolation policy.
+    pub fn interpolate(
+        &mut self,
+        target: WorldPosition,
+        current: WorldPosition,
+        keep_heading: bool,
+        adjusted_max_speed_mps: Option<f32>,
+    ) {
+        let mut state = RetailPoseReconciliationState::default();
+        state.interpolate(target, current, keep_heading, adjusted_max_speed_mps);
+        self.mode = ReconciliationMode::Retail(state);
+    }
+
+    /// Replaces only the reference when authority updates a mobile physical body.
+    pub(crate) fn correct(&mut self, reference: WorldPosition, keep_heading: bool) {
+        let activity = match self.mode {
+            ReconciliationMode::Physical(target) => target.activity,
+            _ => PhysicalReturnActivity::Continuous,
+        };
+        let recovery = match self.mode {
+            ReconciliationMode::Physical(target) => target.recovery,
+            _ => None,
+        };
+        self.mode = ReconciliationMode::Physical(PhysicalCorrection {
+            recovery,
+            activity,
+            reference,
+            pending_heading: (!keep_heading).then_some(reference.rotation),
+        });
+    }
+
+    /// Captures the nominal origin before a remote mobile can receive contact displacement.
+    /// Existing authority targets survive subsequent contact; local confirmation and pose-only
+    /// interpolation must be classified by the caller instead of being silently overwritten.
+    pub(crate) fn begin_contact_return(&mut self, current: WorldPosition) -> anyhow::Result<()> {
+        match self.mode {
+            ReconciliationMode::Empty => self.correct(current, true),
+            ReconciliationMode::Physical(_) => {}
+            ReconciliationMode::Retail(_) => {
+                anyhow::bail!(
+                    "contact return cannot replace local confirmation or pose-only reconciliation"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// Reclassifies pending remote work when physics is installed or removed. A confirmation
+    /// without a remote target keeps its local-player travel budget across that change.
+    pub(crate) fn set_mobile_physical(&mut self, mobile: bool, current: WorldPosition) {
+        match self.mode {
+            ReconciliationMode::Retail(state) if mobile => {
+                if let Some(target) = state.interpolation {
+                    self.correct(target.pose, target.keep_heading);
+                } else if let Some(target) = state.pending_snap {
+                    self.correct(target, false);
+                }
+            }
+            ReconciliationMode::Physical(target) if !mobile => {
+                let mut reference = target.reference;
+                if let Some(heading) = target.pending_heading {
+                    reference.rotation = heading;
+                }
+                // A role change must not resurrect a heading already consumed by physics.
+                self.interpolate(reference, current, target.pending_heading.is_none(), None);
+            }
+            _ => {}
+        }
+    }
+
+    /// Independent reference position and admitted authority heading. Only free flight evolves
+    /// this orientation as a nominal movement frame; grounded travel uses the prepared source frame.
+    pub(crate) fn physical_reference(&self) -> anyhow::Result<WorldPosition> {
+        match self.mode {
+            ReconciliationMode::Physical(target) => Ok(target.reference),
+            _ => anyhow::bail!("physical reference requested outside physical reconciliation"),
+        }
+    }
+
+    /// Initial source playback may precede the first physical admission of an authority heading.
+    /// Existing source timelines consume pose events directly and never poll this pending value.
+    pub(crate) fn pending_correction_heading(&self) -> Option<holtburger_common::Quaternion> {
+        match self.mode {
+            ReconciliationMode::Physical(target) => target.pending_heading,
+            _ => None,
+        }
+    }
+
+    /// Takes fresh authority facing once; ordinary turning owns subsequent ticks even
+    /// while position return remains active. This mutates the transaction's working
+    /// correction state, so a rejected transaction does not consume the update.
+    pub(crate) fn take_correction_heading(&mut self) -> Option<holtburger_common::Quaternion> {
+        match &mut self.mode {
+            ReconciliationMode::Physical(target) => target.pending_heading.take(),
+            _ => None,
+        }
+    }
+
+    /// Whether ordinary physical motion must advance a retained reference this tick.
+    pub(crate) fn has_physical_correction(&self) -> bool {
+        matches!(self.mode, ReconciliationMode::Physical(_))
+    }
+
+    /// Advances a physical reference from independent nominal travel and returns pre-step error.
+    /// The response adapter consumes the error; callers must not add it directly to the body's pose.
+    /// Translation is world-aligned, so it does not inherit the physical body's corrected heading.
+    pub fn advance_return_reference(
+        &mut self,
+        current: WorldPosition,
+        ordinary: Vector3,
+    ) -> anyhow::Result<Vector3> {
+        match &mut self.mode {
+            ReconciliationMode::Physical(target) => target.advance_reference(current, ordinary),
+            _ => anyhow::bail!("return advancement requires a physical reference"),
+        }
+    }
+
+    /// Select positional return without dropping a dormant reference or an authority heading.
+    /// Called on the transaction copy after current support and ordinary error are resolved.
+    pub(crate) fn select_return_error(&mut self, error: Vector3, hysteresis: bool) -> Vector3 {
+        let ReconciliationMode::Physical(target) = &mut self.mode else {
+            unreachable!("return selection requires an admitted physical reference");
+        };
+        target.activity = match (hysteresis, target.activity) {
+            (false, _) => PhysicalReturnActivity::Continuous,
+            (true, PhysicalReturnActivity::Returning) => PhysicalReturnActivity::Returning,
+            (true, _) if error.length() > PHYSICAL_RETURN_START_THRESHOLD_M => {
+                PhysicalReturnActivity::Returning
+            }
+            (true, _) => PhysicalReturnActivity::Watching,
+        };
+        if target.activity == PhysicalReturnActivity::Watching {
+            Vector3::zero()
+        } else {
+            error
+        }
+    }
+
+    /// Advances free-flight nominal orientation. Grounded authority heading stays an admitted
+    /// target and is never advanced by ordinary body turning.
+    pub(crate) fn advance_flight_reference_heading(
+        &mut self,
+        rotation: holtburger_common::Quaternion,
+    ) {
+        if let ReconciliationMode::Physical(target) = &mut self.mode {
+            target.reference.rotation = rotation;
+        }
+    }
+
+    /// Settle return after accepted position and relative velocity enter the completion band.
+    /// Relative velocity is actual continuation minus independent nominal continuation, never a
+    /// derivative of geometric separation. Supported hysteresis retains a dormant reference;
+    /// continuous correction releases it. Proximity alone cannot retire a still-braking motor.
+    pub fn finish_physical_tick(
+        &mut self,
+        accepted: WorldPosition,
+        relative_velocity: Vector3,
+        domain: PhysicalReferenceDomain,
+    ) {
+        if let ReconciliationMode::Physical(target) = &mut self.mode {
+            let distance = domain.distance(target.reference, accepted);
+            let settled = distance <= RETAIL_INTERPOLATION_TARGET_THRESHOLD_M
+                && domain.project(relative_velocity).length()
+                    <= super::PHYSICAL_RETURN_GAIN * RETAIL_INTERPOLATION_TARGET_THRESHOLD_M;
+            match target.activity {
+                PhysicalReturnActivity::Continuous if settled => {
+                    self.mode = ReconciliationMode::Empty
+                }
+                PhysicalReturnActivity::Returning if settled => {
+                    target.activity = PhysicalReturnActivity::Watching;
+                }
+                // Sleeping bodies still publish contact displacement. Crossing the start band
+                // wakes return on the next tick without forgetting earlier small displacements.
+                PhysicalReturnActivity::Watching
+                    if distance > PHYSICAL_RETURN_START_THRESHOLD_M =>
+                {
+                    target.activity = PhysicalReturnActivity::Returning;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Schedules placement only for pose-only consumers.
+    pub fn schedule_snap(&mut self, target: WorldPosition) {
+        let mut state = RetailPoseReconciliationState::default();
+        state.schedule_snap(target);
+        self.mode = ReconciliationMode::Retail(state);
+    }
+
+    /// Takes a pose-only placement once at the tick boundary.
+    pub fn take_pending_snap(&mut self) -> Option<WorldPosition> {
+        match &mut self.mode {
+            ReconciliationMode::Retail(state) => state.take_pending_snap(),
+            _ => None,
+        }
+    }
+
+    /// Pending movement work keeps a blocked correction eligible for a later tick.
+    pub fn has_projection_work(&self) -> bool {
+        match self.mode {
+            ReconciliationMode::Empty => false,
+            ReconciliationMode::Retail(state) => state.has_projection_work(),
+            ReconciliationMode::Physical(target) => {
+                target.activity != PhysicalReturnActivity::Watching
+                    || target.pending_heading.is_some()
+            }
+        }
+    }
+
+    /// Whether the owner can release its reconciliation allocation.
+    pub fn is_empty(&self) -> bool {
+        match self.mode {
+            ReconciliationMode::Empty => true,
+            ReconciliationMode::Retail(state) => state.is_empty(),
+            ReconciliationMode::Physical(_) => false,
+        }
+    }
+
+    /// Applies confirmation damping; physical correction is composed after ordinary prediction.
+    pub fn compose_translation(
+        &mut self,
+        current: WorldPosition,
+        contact: ContactState,
+        ordinary_translation: Vector3,
+        quantum: f32,
+    ) -> PoseReconciliationComposition {
+        match &mut self.mode {
+            ReconciliationMode::Retail(state) => {
+                state.compose_translation(current, contact, ordinary_translation, quantum)
+            }
+            _ => PoseReconciliationComposition {
+                translation: ordinary_translation,
+                source: PoseTranslationSource::Ordinary,
+                keep_heading: false,
+            },
+        }
+    }
+
+    /// Executes pose-only interpolation using its received contact evidence.
+    pub fn compose_pose_only_translation(
+        &mut self,
+        current: WorldPosition,
+        ordinary_translation: Vector3,
+        quantum: f32,
+    ) -> PoseReconciliationComposition {
+        match &mut self.mode {
+            ReconciliationMode::Retail(state) => {
+                state.compose_pose_only_translation(current, ordinary_translation, quantum)
+            }
+            ReconciliationMode::Empty => PoseReconciliationComposition {
+                translation: ordinary_translation,
+                source: PoseTranslationSource::Ordinary,
+                keep_heading: false,
+            },
+            ReconciliationMode::Physical(_) => {
+                panic!("physical correction requires a collision solve")
+            }
+        }
+    }
+}
+
 /// Body-owned temporal state for authoritative pose reconciliation.
 ///
 /// The interpolation target and confirmed-travel constraint transition together on every received
 /// pose effect. A reset clears the complete composite, preventing temporal state from crossing an
 /// authority discontinuity.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub struct PoseReconciliationState {
+struct RetailPoseReconciliationState {
     /// Target that may replace ordinary translation while contacted.
     interpolation: Option<InterpolationTarget>,
     /// Confirmation budget that modifies whichever translation basis survives.
@@ -199,12 +582,7 @@ pub struct PoseReconciliationState {
     received_contact: bool,
 }
 
-impl PoseReconciliationState {
-    /// Clears every temporal fact at an initialization or authority discontinuity.
-    pub fn reset(&mut self) {
-        *self = Self::default();
-    }
-
+impl RetailPoseReconciliationState {
     /// Applies a confirmation without granting interpolation ownership of translation.
     pub fn confirm(&mut self, confirmed: WorldPosition, current: WorldPosition) {
         self.interpolation = None;
@@ -458,6 +836,212 @@ mod tests {
     }
 
     #[test]
+    fn supported_hysteresis_preserves_reference_and_heading_across_small_updates() {
+        let mut state = PoseReconciliationState::default();
+        let origin = position(0.0);
+        state.correct(origin, true);
+        let small = PHYSICAL_RETURN_START_THRESHOLD_M * 0.5;
+        assert_eq!(
+            state.select_return_error(Vector3::new(small, 0.0, 0.0), true),
+            Vector3::zero()
+        );
+        assert!(!state.has_projection_work());
+        assert!(!state.is_empty());
+        // Accepted small displacements accumulate against the original reference even asleep.
+        state.finish_physical_tick(
+            position(small),
+            Vector3::zero(),
+            PhysicalReferenceDomain::Horizontal,
+        );
+        assert!(!state.has_projection_work());
+        state.finish_physical_tick(
+            position(PHYSICAL_RETURN_START_THRESHOLD_M * 1.5),
+            Vector3::zero(),
+            PhysicalReferenceDomain::Horizontal,
+        );
+        assert!(state.has_projection_work());
+        // Once returning, a fresh packet inside the start band cannot stop the return early.
+        let target = position(small);
+        state.correct(target, false);
+        let error = state
+            .advance_return_reference(origin, Vector3::zero())
+            .unwrap();
+        assert_eq!(state.select_return_error(error, true), error);
+        assert_eq!(state.take_correction_heading(), Some(target.rotation));
+        assert_eq!(state.take_correction_heading(), None);
+        state.finish_physical_tick(target, Vector3::zero(), PhysicalReferenceDomain::Horizontal);
+        assert!(!state.has_projection_work());
+        assert_eq!(state.physical_reference().unwrap(), target);
+        // Heading alone wakes its one-shot consumption, not positional return.
+        state.correct(target, false);
+        assert!(state.has_projection_work());
+        assert_eq!(
+            state.select_return_error(Vector3::zero(), true),
+            Vector3::zero()
+        );
+        state.take_correction_heading();
+        assert!(!state.has_projection_work());
+        // Flight resumes the preexisting continuous correction policy.
+        assert_eq!(
+            state.select_return_error(Vector3::new(small, 0.0, 0.0), false),
+            Vector3::new(small, 0.0, 0.0)
+        );
+        assert!(state.has_projection_work());
+    }
+
+    #[test]
+    fn authority_heading_lifetime_survives_physical_role_changes() {
+        for consumed in [false, true] {
+            let mut state = PoseReconciliationState::default();
+            let mut target = position(10.0);
+            target.rotation = Quaternion::from_heading(1.0);
+            state.correct(target, false);
+            if consumed {
+                assert_eq!(state.take_correction_heading(), Some(target.rotation));
+            }
+            state.set_mobile_physical(false, position(0.0));
+            state.set_mobile_physical(true, position(0.0));
+            assert_eq!(state.physical_reference().unwrap().coords, target.coords);
+            assert_eq!(
+                state.take_correction_heading(),
+                (!consumed).then_some(target.rotation)
+            );
+            assert_eq!(state.take_correction_heading(), None);
+            // A fresh packet renews the heading request even while position return persists.
+            target.rotation = Quaternion::from_heading(2.0);
+            state.correct(target, false);
+            assert_eq!(state.take_correction_heading(), Some(target.rotation));
+        }
+    }
+
+    #[test]
+    fn contact_capture_preserves_authority_and_rejects_confirmation() {
+        let mut state = PoseReconciliationState::default();
+        state.correct(position(10.0), false);
+        state.begin_contact_return(position(1.0)).unwrap();
+        assert_eq!(state.physical_reference().unwrap(), position(10.0));
+        assert_eq!(
+            state.take_correction_heading(),
+            Some(position(10.0).rotation)
+        );
+        assert_eq!(state.take_correction_heading(), None);
+        state.confirm(position(2.0), position(3.0));
+        let confirmed = state;
+        assert!(state.begin_contact_return(position(4.0)).is_err());
+        assert_eq!(state, confirmed);
+    }
+
+    #[test]
+    fn moving_reference_follows_walking_turning_and_vertical_motion_once() {
+        let separation = RETAIL_INTERPOLATION_TARGET_THRESHOLD_M * 8.0;
+        let mut state = PoseReconciliationState::default();
+        let mut current = position(0.0);
+        state.correct(position(separation), true);
+        // Reference ownership is arithmetic only; the contact motor owns all actual correction.
+        for ordinary in [
+            Vector3::new(0.0, 0.2, 0.0),
+            Vector3::new(-0.2, 0.0, 0.0),
+            Vector3::new(0.0, 0.0, -0.2),
+            Vector3::zero(),
+        ] {
+            let error = state.advance_return_reference(current, ordinary).unwrap();
+            assert!((error - Vector3::new(separation, 0.0, 0.0)).length() < 0.0001);
+            current.coords = current.coords + ordinary;
+            state.finish_physical_tick(current, Vector3::zero(), PhysicalReferenceDomain::Spatial);
+            assert!(state.has_physical_correction());
+        }
+        current.coords.x += separation;
+        state.finish_physical_tick(current, Vector3::zero(), PhysicalReferenceDomain::Spatial);
+        assert!(state.is_empty());
+    }
+
+    #[test]
+    fn reference_completion_waits_for_relative_velocity_to_settle() {
+        let mut state = PoseReconciliationState::default();
+        let target = position(0.0);
+        state.correct(target, false);
+        let speed_tolerance =
+            super::super::PHYSICAL_RETURN_GAIN * RETAIL_INTERPOLATION_TARGET_THRESHOLD_M;
+        state.finish_physical_tick(
+            target,
+            Vector3::new(2.0 * speed_tolerance, 0.0, 0.0),
+            PhysicalReferenceDomain::Spatial,
+        );
+        assert!(state.has_physical_correction());
+        // Completion is based on motion relative to the reference, so the caller subtracts
+        // ordinary travel even when both the target and body are moving quickly together.
+        state.finish_physical_tick(target, Vector3::zero(), PhysicalReferenceDomain::Spatial);
+        assert!(state.is_empty());
+    }
+
+    #[test]
+    fn blocked_correction_retains_work_until_accepted_motion_reaches_reference() {
+        let mut state = PoseReconciliationState::default();
+        let current = position(0.0);
+        let distance = super::super::PHYSICAL_RETURN_START_THRESHOLD_M * 10.0;
+        state.correct(position(distance), false);
+        for _ in 0..200 {
+            let correction = state
+                .advance_return_reference(current, Vector3::zero())
+                .unwrap();
+            assert_eq!(correction, Vector3::new(distance, 0.0, 0.0));
+            state.finish_physical_tick(current, Vector3::zero(), PhysicalReferenceDomain::Spatial);
+            assert!(state.has_projection_work());
+            assert_eq!(state.take_pending_snap(), None);
+        }
+        state.finish_physical_tick(
+            position(distance),
+            Vector3::zero(),
+            PhysicalReferenceDomain::Spatial,
+        );
+        assert!(state.is_empty());
+    }
+
+    #[test]
+    fn physical_packet_replaces_reference_without_preserving_confirmation_damping() {
+        let mut state = PoseReconciliationState::default();
+        state.confirm(position(-100.0), position(0.0));
+        state.correct(position(2.0), false);
+        let ordinary = Vector3::new(0.0, 1.0, 0.0);
+        assert_eq!(
+            state
+                .compose_translation(position(0.0), ContactState::Grounded, ordinary, 0.1)
+                .translation,
+            ordinary
+        );
+        state
+            .advance_return_reference(position(0.0), ordinary)
+            .unwrap();
+        state.correct(position(-2.0), false);
+        let correction = state
+            .advance_return_reference(position(0.0), Vector3::zero())
+            .unwrap();
+        assert_eq!(correction, Vector3::new(-2.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn physical_reference_preserves_small_motion_at_large_world_coordinates() {
+        let current = WorldPosition {
+            landblock_id: Guid(0xfefe_0001),
+            ..position(0.0)
+        };
+        let mut target = current;
+        target.coords.x += RETAIL_INTERPOLATION_TARGET_THRESHOLD_M * 2.0;
+        let mut state = PoseReconciliationState::default();
+        state.correct(target, true);
+        let ordinary = Vector3::new(0.0003, 0.0, 0.0);
+        for _ in 0..100 {
+            state.advance_return_reference(current, ordinary).unwrap();
+        }
+        let ReconciliationMode::Physical(reference) = state.mode else {
+            panic!("blocked reference remains active")
+        };
+        assert!(
+            (reference.reference.coords.x - target.coords.x - ordinary.x * 100.0).abs() < 0.00001
+        );
+    }
+
+    #[test]
     fn confirmation_preserves_ordinary_translation_below_free_distance() {
         let mut state = PoseReconciliationState::default();
         state.confirm(position(0.0), position(1.0));
@@ -576,5 +1160,24 @@ mod tests {
         assert_eq!(retail_interpolated_speed(Some(4.0)), 8.0);
         assert_eq!(retail_interpolated_speed(Some(f32::NAN)), 7.5);
         assert_eq!(retail_interpolated_speed(None), 7.5);
+    }
+    #[test]
+    fn physical_return_completion_uses_the_motor_coordinate_domain() {
+        for domain in [
+            PhysicalReferenceDomain::Horizontal,
+            PhysicalReferenceDomain::Spatial,
+        ] {
+            let mut target = position(0.0);
+            target.coords.z = RETAIL_INTERPOLATION_TARGET_THRESHOLD_M * 2.0;
+            let mut state = PoseReconciliationState::default();
+            state.correct(target, true);
+            state.finish_physical_tick(position(0.0), Vector3::zero(), domain);
+            assert_eq!(
+                state.has_physical_correction(),
+                domain == PhysicalReferenceDomain::Spatial
+            );
+            state.finish_physical_tick(target, Vector3::zero(), domain);
+            assert!(!state.has_physical_correction());
+        }
     }
 }

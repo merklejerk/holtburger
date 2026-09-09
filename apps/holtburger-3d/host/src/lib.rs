@@ -1187,7 +1187,9 @@ fn mean_rgb_rgba8(width: u32, height: u32, pixels: &[u8]) -> Result<[f32; 3]> {
     mean_rgb_from_rgba8_texels(
         texel_count,
         pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .map(|texel| [texel[0], texel[1], texel[2], texel[3]]),
     )
 }
@@ -1286,12 +1288,21 @@ fn serialize_terrain_source_binary(
             match section.name {
                 "heightIndices" => target.copy_from_slice(&terrain.height_indices),
                 "resolvedHeights" => {
-                    for (chunk, height) in target.chunks_exact_mut(4).zip(&terrain.heights) {
+                    for (chunk, height) in target
+                        .as_chunks_mut::<4>()
+                        .0
+                        .iter_mut()
+                        .zip(&terrain.heights)
+                    {
                         chunk.copy_from_slice(&height.to_le_bytes());
                     }
                 }
                 "terrainSamples" => {
-                    for (chunk, sample) in target.chunks_exact_mut(2).zip(&terrain.terrain_samples)
+                    for (chunk, sample) in target
+                        .as_chunks_mut::<2>()
+                        .0
+                        .iter_mut()
+                        .zip(&terrain.terrain_samples)
                     {
                         chunk.copy_from_slice(&sample.to_le_bytes());
                     }

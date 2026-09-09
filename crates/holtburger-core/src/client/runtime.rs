@@ -1,6 +1,5 @@
 use super::*;
 use crate::DynamicEntityEvent;
-use crate::DynamicEntityPlacementAdvanceKind;
 use anyhow::Result;
 use holtburger_protocol::messages::game_action::{GameAction, JumpActionData};
 use std::sync::Arc;
@@ -139,6 +138,7 @@ impl ClientRuntime {
 
     pub async fn run(&mut self) -> Result<()> {
         self.send_status_event();
+        let mut camera_worker = self.camera.spawn(self.client_view_event_tx.clone())?;
 
         let mut physics_tick = tokio::time::interval(Duration::from_millis(PHYSICS_TICK_MS));
         let mut net_tick = tokio::time::interval(Duration::from_secs(1));
@@ -152,6 +152,12 @@ impl ClientRuntime {
             }
 
             tokio::select! {
+                error = camera_worker.failure() => {
+                    self.set_exit_cause(ClientExitCause::RuntimeFailure);
+                    self.state = ClientState::Disconnected;
+                    self.send_status_event();
+                    return Err(error);
+                }
                 _ = net_tick.tick() => {
                     let now = Instant::now();
 
@@ -294,7 +300,7 @@ impl ClientRuntime {
                         .collision_coordinator
                         .as_ref()
                         .map(super::collision::ClientCollisionCoordinator::snapshot);
-                    let mut placement_kind_overrides = std::collections::HashMap::new();
+                    let mut body_motions = std::collections::HashMap::new();
                     if active_world {
                         let prepared_precise_jump = match self.precise_jump.prepare_queued_commit(
                             self.world_generation,
@@ -322,25 +328,13 @@ impl ClientRuntime {
                         ).inspect_err(|_| {
                             self.set_exit_cause(ClientExitCause::RuntimeFailure);
                         })?;
+                        body_motions = simulation_tick.body_motions;
                         let mut advanced_runtime_bodies = Vec::new();
                         for event in simulation_tick.events {
-                            if let WorldEvent::RuntimeBodyAdvanced { body_id, kind } = event {
-                                if let Some(guid) = body_id.authoritative_guid() {
-                                    placement_kind_overrides.insert(
-                                        guid,
-                                        match kind {
-                                            holtburger_world::RuntimeBodyAdvanceKind::Integrated => {
-                                                DynamicEntityPlacementAdvanceKind::Integrated
-                                            }
-                                            holtburger_world::RuntimeBodyAdvanceKind::CorrectionSnap => {
-                                                DynamicEntityPlacementAdvanceKind::CorrectionSnap
-                                            }
-                                        },
-                                    );
-                                }
-                                if let Some(body) = self.world.runtime_body_view(body_id) {
-                                    advanced_runtime_bodies.push(body);
-                                }
+                            if let WorldEvent::RuntimeBodyAdvanced { body_id, .. } = event
+                                && let Some(body) = self.world.runtime_body_view(body_id)
+                            {
+                                advanced_runtime_bodies.push(body);
                             }
                             self.handle_runtime_world_event(&event);
                         }
@@ -385,8 +379,8 @@ impl ClientRuntime {
                             self.current_dynamic_entity_views(),
                             self.dynamic_entity_host_time(),
                             dt_duration.as_secs_f64() * 1_000.0,
-                            &placement_kind_overrides,
-                        )
+                            &body_motions,
+                        )?
                     } else {
                         None
                     };
@@ -394,22 +388,18 @@ impl ClientRuntime {
                         DynamicEntityEvent::Ticked { batch } => Some(batch),
                         _ => None,
                     });
-                    let camera_tick = if active_world {
-                        self.advance_camera(
-                            collision_snapshot.as_deref(),
-                            dynamic_batch,
-                            dt_duration,
-                        )?
-                    } else {
-                        None
-                    };
+                    let camera_input = active_world.then(|| {
+                        camera::ClientCameraSceneInput::capture(
+                            &self.world, collision_snapshot.as_deref(), dynamic_batch,
+                        )
+                    });
                     if let Some(event) = dynamic_event {
                         let _ = self
                             .client_view_event_tx
                             .send(ClientViewEvent::DynamicEntity(event));
                     }
-                    if let Some(tick) = camera_tick {
-                        self.emit_camera_event(tick);
+                    if let Some(input) = camera_input {
+                        self.camera.publish_active_world(input);
                     }
                 }
             }

@@ -157,24 +157,46 @@ existing implicit `tick()` policy:
   gravity, support, walkability, step, slope, or ledge behavior and never runs implicitly from
   `tick()`. Registered physical-fly bodies and unregistered kinematic controllers call it
   explicitly; the solver neither owns their lifecycle nor distinguishes their purpose.
-- `solve_grounded` is a separate bounded response over one required lower/support sphere and one
-  optional upper/constraint sphere. It alone owns gravity, walkability, the committed ground
-  state, one next-substep sliding normal, and achieved velocity. A solve-local set counts distinct
-  encountered planes for diagnostics but cannot influence motion. The upper sphere participates in
-  obstruction and placement but cannot become support or choose the committed cell.
-- The ground state is retail's two-threshold model: a walking body settles through the ordinary
-  step-down against the strict walkable threshold, while a body without walkable support runs the
-  lenient 0.04m landing probe (cos-85° acceptance) every tick. A landing between the thresholds
-  commits `GroundState::Sliding` — the contact plane is retained for classification and reporting
-  while motion stays ballistic (gravity retained, no friction), mirroring retail's
-  `Contact && !OnWalkable` transients. The walking threshold is re-derived from the committed
-  contact plane, so slides settle to walkable support where the surface flattens and release to
-  airborne when the plane falls out of the landing probe's reach.
-- Grounded step-up and step-down are separate, non-recursive operations over a shared vertical
-  settle/placement primitive. A raised candidate is confirmed against both spheres before commit;
-  a failed candidate cannot leak pose or contact state.
-- Finite support may carry an inward boundary normal. Creature edge protection consumes it to
-  preserve elevation and tangent motion, while unprotected response accepts the unsupported pose.
+- The production contact step owns gravity, walkability, grounded motion, and final support
+  classification over one lower/support sphere and one optional upper/constraint sphere.
+  `solve_grounded` remains a standalone diagnostic primitive. The upper sphere constrains
+  clearance but cannot supply support or choose the committed cell.
+- Polygon footing uses a full lower-sphere-radius horizontal disk against the finite face's XY
+  footprint. The plane supplies resting height and slope classification; vertical adjustment cannot
+  change footprint admission. Cylinder caps and balls retain their shape-specific resting heights.
+  World colliders and prepared hard entities use one placed-shape support query. Yielding mobile
+  bodies do not provide standing support.
+- Support preparation can recover an overlapping body upward within its authored step-up height
+  before selecting the grounded motor. Candidate selection chooses the highest admissible standing
+  target before applying confirmation tolerance, so a lower nearby plane cannot hide higher ground.
+  Upward recovery requires walkable support and full-body swept clearance; ordinary downward landing
+  retains its separate slope threshold. Geometric candidate selection does not reject velocity:
+  supported walking transfers to the new plane and projects its velocity after clearance. Airborne
+  acquisition/landing and pure confirmation reject separating normal velocity. This prevents a
+  slope-normal change at a polygon seam from being treated as a launch. World-Z ascent alone does
+  not distinguish departure from uphill approach. Recovery and endpoint settling share geometry.
+  Recovery is a geometric adjustment: it creates no timed locomotion, upward momentum, or landing
+  impact. Final support confirmation cannot move the body. A subsequent stair's height is measured
+  from recovered footing; there is no tick-wide cumulative upward-displacement budget.
+  Retail/ACE terrain uses the vertical sphere bottom (`acclient.c:302787-302841`); our nominal full
+  sphere can therefore rest slightly higher than the independent authoritative reference.
+- Current-pose support confirmation permits only contact-tolerance height error. Walking step-down
+  and the lenient landing probe may search farther, but any adjustment requires full-body hard
+  clearance. Walking and landing retain their separate normal thresholds; a steep admitted plane
+  publishes `GroundState::Sliding` while motion remains ballistic.
+- Retained support identifies either immutable world content or a hard entity. World owner proofs
+  validate unchanged cached footing; entity support is re-queried against current prepared targets,
+  including for sleeping bodies. This uses ordinary support queries, not a platform lifecycle or
+  carrying system. Source loss can wake gravity; no platform velocity is inherited.
+- Step-up, step-down, and ordinary settling share the same support predicate. One private stair
+  alternative is hard-swept before commit; a failed alternative cannot leak pose or contact state.
+  Creature edge protection restores prior valid footing and attempts one tangent derived from its
+  retained inward footprint normal. It may hold at rounded outer corners. Grounded ordinary and
+  corrective navigation share this protection; launches have already released walkable support.
+  `advance_hard_motion` owns route acceptance and final ground classification. Settlement returns
+  unchanged, unsupported, or settled footing (including an accepted rebound), rather than clearing
+  the body's ground state to signal a failed candidate. The same saved-footing snapshot restores
+  rejected alternatives. Final observational confirmation cannot move a body back to a floor.
 - Grounded cell transit queries both spheres through the previous-cell/portal-neighbor rule, but the
   lower sphere alone selects the committed cell. Back-face polygons produce approach-side contacts;
   no retail transition flag is retained when sphere role already determines the response.
@@ -191,17 +213,93 @@ existing implicit `tick()` policy:
   continuous-support restitution, and selects the retail speed/slope friction branches. Nonzero
   velocity supplies Sledding facing after ordinary control; `AlignPath` displacement-facing runs
   later and supersedes it. These are generic body semantics, not character-controller modes.
-- `SpatialBody::retained` is the only future physical-integration authority. Authored playback,
-  reconciliation, and controller drive contribute one-tick kinematic displacement; the accepted
-  path is reduced separately into `SpatialBody::accepted_motion` for observation and never feeds a
-  later solve. This mirrors retail's independent `m_velocityVector` and `cached_velocity` roles
-  (`acclient.c:306094-306172, 306864-306923, 310862-310927`). Grounded actuation may carry one
-  resolved launch and one control heading, but it cannot retain a competing fall velocity or replay
-  a launch on later ticks. Collision response mutates retained physical velocity only.
-- Dynamic peer planned motion participates in relative swept-contact detection, but retail's
-  response reflects or zeros only the mover's own physical velocity; peer velocity is never added
-  to the committed mover (`acclient.c:309982-310051`). Contact can block or clip a mover without
-  transferring locomotion momentum to a stationary actor.
+- Hard sweeps share one fixed geometric contact band through their query radius; registered
+  radii and support footprints remain nominal. The band is bounded by `CONTACT_EPSILON`, not a
+  fresh per-move allowance. Stable initial normals do not enlarge this admission boundary.
+  Selected support keeps its computed height correction, and settling checks any represented
+  correction against hard geometry before publishing it. Exact represented rest needs no extra
+  sweep. Triangle faces and cylinder cap interiors use exact plane impact times; finite edges
+  and other curved contacts retain continuous shape casts.
+- `SpatialBody::retained` owns physical continuation. Grounded input drives a bounded velocity
+  motor; free-flight authored travel remains a separately swept kinematic contribution. An
+  admitted launch replaces velocity once. Accepted timed motion is reduced into observation
+  fields and never becomes another physical input. Positional contact correction consumes travel
+  allowance but creates no velocity.
+- Scene collection publication gives each committed body one `DynamicEntityBodyOutcome`: integrated
+  motion, a fixed authority placement, or checked recovery. Recovery replaces its provisional
+  integrated result. Integrated results carry the accepted root path and final support/presentation
+  facts while the scene owns both physical endpoints. Collision reports and missing coverage remain
+  orthogonal: an accepted prefix can coexist with a coverage rejection. Client projection handles
+  each disposition; Explorer explicitly rejects authority snaps and remote recovery, which its
+  authored/autonomous input producer does not support.
+- `spatial/mobile_contact` advances a private collection once per admitted tick. Non-yielding
+  authored targets advance first. Yielding bodies then prepare intent once; supported stable
+  characters limit inward walking against relative mobile sphere paths before ordinary hard
+  navigation. Each body shares one `MOBILE_PUSH_THROUGH_SPEED * dt` allowance across contacts,
+  independently of separation mobility. Free tangential/outward travel survives; conservative
+  crowd clipping and optimistic neighbor escape can leave residual overlap without feedback solves.
+  World geometry and effectively immovable entity shapes retain final swept authority. Mobile pairs use
+  movement-sphere endpoint overlap with tolerance and fixed local passes. The passes update tentative
+  positions within each body's cumulative allowance; one combined corrective navigation operation
+  then checks the result against hard geometry. Closing mobile contacts brake only each body's own inward normal velocity; no participant receives another body's momentum. Mobile response permission is explicit and carries a separation weight: zero weight still participates in inward braking; absent permission retains nonyielding hard-target behavior. Player mobility is 0.01 versus an ordinary
+  peer's 1.0, biasing unconstrained separation one-hundred-to-one toward the peer. Repeated separation can still move the player without momentum. Opposing corrections may cancel, residual overlap is valid, and fast mobile
+  crossings are deliberately not exhaustive. Projectiles retain swept impact against accepted
+  crowd endpoints. No recursive pushing or crowd-wide convergence is required.
+- Stable characters follow supported ordinary command velocity directly, plus proportional
+  reference return. Zero ordinary input stops horizontal motion, including externally supplied
+  velocity; no extra acceleration ramp creates startup lag behind nominal travel. Contacts act
+  through movement admission and subsequent overlap response. Return tapers near its
+  target, without a separate acceleration ramp or retained correction velocity. Passive objects
+  and sledding retain their coast drag/rate-limited motors; airborne motion and launches retain
+  existing force paths. Prepared actuation carries the character/passive drive policy; no persistent
+  stop flag or additional wake permission is introduced.
+- Each displaced body can retain an independent authoritative reference. Collision-free nominal
+  vectors belong to the body, survive correction completion and physical reconfiguration, and advance
+  cumulatively with admitted ticks. Fresh vector messages reseed them; position packets replace them
+  only when they explicitly carry or clear velocity. Pose-only retargeting preserves continuation.
+  Interpreted remote characters share one source frame between actual ordinary movement and
+  nominal travel. `BodyMotionRuntime` retains that command orientation across positional return
+  completion and content rebinding. Return translation never changes command heading. Local,
+  passive, fixed, free-flight, and pose-only sources keep their existing body/frame contracts.
+  Fresh authority events update source orientation once at admission; the physical authority
+  heading remains a one-shot transactional request. Commands can keep requesting an unfulfilled
+  heading after hard clipping, but physical angular work remains bounded with no queued rotations.
+  Tick inputs carry authored travel rather than replaying cached server vectors. Supported nominal
+  travel uses the same prepared tangent plane as actual travel, including on slopes. Grounded return
+  steers and completes in horizontal coordinates; navigation owns height and can descend stairs.
+  A different solid floor at the same XY is an accepted unrecoverable case for this motor. Free-flight
+  return retains full 3D steering and completion. Bounded return steers the actual body through
+  its existing response adapter. Grounded return uses the supported motor; free-flight return
+  contributes swept kinematic travel without becoming retained physical velocity. Scene publication
+  commits body and reference continuation together. Remote supported characters begin return beyond
+  `PHYSICAL_RETURN_START_THRESHOLD_M` (20 cm) and stop within the existing 5 cm band once relative
+  velocity settles. A dormant reference continues to remember accumulated error, but does not keep
+  the body awake; accepted contact displacement can activate return for the following tick. Fresh
+  heading requests remain independent of positional inactivity. Flight/passive correction retains
+  its continuous policy and releases its reference on completion.
+  Remote character recovery observes accepted progress toward the latest server pose separately
+  from that predicted reference. Two simulated seconds without 5 cm of net improvement permit a
+  checked placement attempt; repeated equivalent packets do not renew the window. Sticky intent
+  (including unavailable target geometry) and direct player contact clear the observation. Failed
+  or uncovered placements wait another full window. Destination validation reuses bounded support
+  acquisition and directionless hard-geometry clearance, without sweeping the old route. A
+  successful relocation retains checked cell membership, clears obsolete response/reference state
+  and report lifetimes, and publishes `CorrectionSnap`; authored actions remain intact. The local
+  player, autonomous inputs, and non-character bodies do not use this recovery policy.
+  `spatial/body_movement.rs` prepares ordinary prediction and contact actuation once for both
+  returning and uncorrected bodies. One transient `ResolvedAuthoredMotion` supplies the world
+  velocity shared by actual and grounded nominal preparation; only free-flight reference
+  prediction also consumes the source-local offset through its independent orientation. It owns supported and free-flight return-rate policy;
+  `PHYSICAL_RETURN_GAIN` scales error directly, without a fixed speed ceiling. The contact kernel
+  accepts the resolved supported drive or free-flight travel bias without choosing reference speed.
+  Local confirmation still constrains its admitted command through the existing confirmation adapter.
+  Commands and fresh authority own remote heading during both motion and rest. Return adds
+  bounded translation without turning the body or delaying travel for facing alignment. Observed
+  locomotion selects forward/backward/sideways gait relative to the accepted heading; missing side
+  content can still slide. Attacks, emotes, transitions and explicit poses retain playback priority,
+  while return translation continues underneath. An action's root contribution survives completion
+  inside the sample even when the resulting clip is stationary. Observed playback cannot alter
+  that source sample or emit authored physics hooks.
 
 Collision integration uses an anchor landblock's local coordinates across one solve. It does not
 accumulate large absolute-world `f32` coordinates; doing so produced measurable centimeter-scale
@@ -215,28 +313,51 @@ Dynamic entities extend the same scene without a second store or solver:
   `SpatialBody::physical` is optional collision/physics state, and `set_dynamic_physical_body`
   adds, removes, or reconfigures it reversibly. Removing physical allocation never retires the
   pose body, and compatible movement geometry preserves contact/placement response memory.
-- An attached entity instead carries `EntityPlacement::Attached(PhysicsAttachment)` and has no
-  `SpatialBody`: its parent GUID, named holding location, and own placement pose delegate transform
-  authority to the parent's part hierarchy. `EntityPlacement::World(W)` carries the complete
-  layer-specific motion composite, so velocity/contact/sampling facts cannot coexist with an
-  attachment.
+- Attachments delegate independent placement and collision authority to the parent. The client
+  keeps a parent-derived canonical pose record for shared world consumers, while
+  `delegate_attached_entity_position` removes independent dynamic physics. Presentation retains
+  `EntityPlacement::Attached(PhysicsAttachment)` with parent GUID, holding location, and local
+  placement for part-hierarchy composition. An attached pose record is not an independent mover
+  or collision target.
 - `SpatialScene` owns every derived membership. Coarse landblock membership and the dynamic
   shadow index are updated inside registration, pose commit, physical-state replacement,
   relocation, and removal, so no caller choreographs a second index and no `entity_poses` mirror
   exists.
-- Producer-owned integration demand and solver-owned activity are separate. A body settles after
-  one completed accepted tick with canonical zero retained vectors, no controller, launch,
-  authored-root, reconciliation, residual-contact, response, or path work. Only a gravity-bearing
-  grounded body additionally requires stable supported ground; a zero-gravity grounded-shaped or
-  free-flight body can quiesce while airborne when it has no work. Settling skips integration and
-  mover-side queries only: pose, target-index membership, target geometry, report lifetimes, and
-  presentation all remain live, and every state-changing input wakes the body explicitly.
-- Dynamic peers are discovered through the same spatial domains as static collision — global 24 m
-  outdoor cells and exact reached EnvCells — queried once over full swept conservative bounds so a
-  fast or cell-crossing mover cannot miss a target. Each directional pair then proves contact with
-  bounded adaptive slices of both bodies' planned transforms sampled from one immutable tick-start
-  snapshot; an over-budget solve is an error that rejects before any pose, response, or report
-  commits.
+- Producer-owned integration demand and solver-owned activity are separate. Quiet supported
+  grounded bodies and eligible force-free flight bodies may settle when their input, reference,
+  pose change, and retained vectors permit it. Settled mobile bodies keep contact mobility;
+  contact displacement wakes ordinary integration on the next tick. Residency refresh owns
+  suspension, and new producer work explicitly wakes a body. Target geometry, report lifetimes,
+  and presentation remain independent of ordinary integration scheduling.
+- Prepared `EntityContactResponse` keeps gameplay character identity separate from scheduling.
+  Eligible characters yield; obstacles retain hard geometry even with ordinary movement input.
+  Freezing restricts character response reversibly. Fixed-position geometry and explicitly excluded
+  integration remain hard. Client characters retain eligibility at rest, with activity owning sleep.
+  Admitted nonyielding movement advances first and places its authored target at the accepted pose;
+  characters then advance against it. Only yielding bodies enter compliant pair correction.
+- Fixed-body authored root translation is explicit placement, not retained velocity. The world
+  input boundary composes reference root motion once, traverses cell membership, and publishes
+  accepted displacement with a normalized root pose. Producers scale local root translation before
+  submission; this placement does not grant contact mobility.
+- Hard targets retain authored geometry. Mobile response uses prepared movement spheres and
+  reached-domain filtering. Observational entity reports query the existing global 24 m outdoor
+  cell / EnvCell index once per mover's aggregate accepted tick extent, then test individual
+  accepted segments against frozen peer shapes. Aggregate domain membership does not grant a
+  segment contact in an unrelated cell. Reports include initial overlap and crossed stationary
+  triggers, but do not negotiate response or reject a whole crowd for unresolved mobile overlap.
+- Contact solving owns a tick-local `HardTargets` collection with a Parry bounding-box tree.
+  Private contact preparation carries installed physics and a borrowed hard/mobile/absent target
+  classification through working motion; geometry consumers do not recover it from general bodies.
+  Accepted hard-body movement updates its geometry and leaf together; projectile targets append
+  accepted mobile endpoints. Spatial candidate selection is independent of cell membership so
+  portal crossings cannot lose targets before the exact sweep discovers reached cells. Support
+  uses a conservative vertical column; exact shapes retain height admission. Queries restore
+  identity order for deterministic hit ties. Mobile separation separately reuses one pair list
+  expanded by each body's cumulative correction allowance across its fixed passes.
+- Collection finalization owns accepted continuation, return progress and sleep state on private
+  body copies. After ordinary publication, one recovery operation owns destination checking,
+  relocation/report consequences and replacement of the ordinary result with a discontinuity.
+  Fixed placement still precedes the mobile snapshot; this is not a whole-tick rollback transaction.
 - Target geometry follows retail's branch order — physics BSP, otherwise all cylspheres, otherwise
   all ordinary spheres — and is distinct from the movement spheres used for the mover's own query.
 - `collision_report.rs` retains only the directional contact state required for correct lifecycle
@@ -268,14 +389,21 @@ than as a service. Nothing here caches, records history, or reaches back into co
 - `selection.rs` ports retail's motion selection, including link resolution and `re_modify`, while
   deliberately replaying every active modifier once instead of reproducing retail's head-only
   replay defect. The divergence marker there carries the citation and content census.
-- `MotionRuntimeRegistry` holds the sole per-body playback cursor for one authority, and
-  `actuation.rs` converts that cursor's exact tick offset into the solver's drive basis. Cursor
+- `MotionRuntimeRegistry` owns per-body authored playback, retained remote directive progress,
+  and an optional locomotion presentation cursor. The world supplies current body/target facts to
+  directive reduction instead of maintaining a second command-state map. Content rebinding resets
+  playback while preserving remote command progress and orientation; entity/runtime reset clears
+  them together. Separate local and remote entry points select source ownership before advancing
+  the same authored cursor. Only authored playback supplies root offsets and simulation hooks.
+  Observed locomotion consumes supported movement after final horizontal contact separation,
+  excluding airborne travel and stair lifts. The shared selector preserves action, explicit-pose,
+  and one-shot priority; observed gait cannot feed physics or hide an active action. Authored cursor
   lifetime follows entity lifetime. `EntityNetworkMotion::Uninitialized` means that generation has
   supplied no order; `Initialized` includes idle and therefore actively retires a previous cycle.
   A locally predicted order may still precede its server echo without making absence mean stop.
 
-Playback is _not_ frontend animation. Only simulation-relevant facts live here; articulated part
-frames never enter this crate.
+Playback supplies shared authored motion semantics and body-observed clip selection. Articulated
+part-frame evaluation and rendering remain frontend responsibilities.
 
 ### Lifecycle / retention helpers
 
@@ -420,3 +548,48 @@ When introducing a new tracked domain:
 - **`holtburger-common`**: GUIDs, math, positions, properties, shared traits.
 - **`holtburger-protocol`**: decoded message/event types.
 - **`holtburger-dat`**: DAT-backed lookup tables and resource providers.
+
+
+Explicit `StickToObject` intent is owned by the existing body motion runtime alongside action lifetime. Fresh accepted network commands and successful Sticky MoveTo completion admit it; snapshot sampling does not renew it. Before physical collection, world samples target pose, scaled authored setup radii, pursuit rate and actor-to-target heading once. Target loss cancels the intent. Supported eligible character bodies use that request through ordinary hard navigation and contacts; fixed/passive/airborne bodies retain their existing motion policy. The same prepared heading updates the command timeline, so ending pursuit does not restore an obsolete heading. Positional reconciliation remains translation-only.
+
+Sticky ordinary translation is derived from the independent reference origin and shared by nominal prediction and actual actuation. Computing it from a blocked actual body would advance the reference indefinitely. Attack playback and hooks continue independently while sticky replaces horizontal authored travel. Remote actor skill data is not generally available, so the source uses the retained run multiplier (initially one) for unadjusted pursuit capacity, rather than the attack playback rate. Small supported-remote return errors use a retained 20 cm start / 5 cm stop band; dormant references do not prevent settling.
+
+Local controlled-character locomotion may use an explicit `LocomotionPresentationSource::Command`
+instead of accepted supported travel. Core resolves manual/autonomous drive channels through the
+same command-to-motion-order mapping as manual authored playback. It samples the visual order before
+collision admission; world applies final support/charge selection and existing action/transition
+priority. Commanded gait can therefore continue against a wall, ledge, or resisting mobile body.
+Release/expiry returns to observed locomotion. Remote entities retain observed travel; free-flight
+bodies do not request character presentation. This changes neither root motion nor hook advancement,
+physical velocity, collision admission, or the number of playback cursors.
+
+### Entity contact eligibility
+
+`EntityDynamicCollisionPolicy::contact_with` resolves each directed pair as ignored,
+observable, or blocking before geometry queries. Physical response (including hard support,
+resistance, separation, and recovery) requires blocking; reports also admit observable contacts,
+subject to existing report permissions. Solidification checks the prospective solid policy.
+
+`PlayerCollisionStatus` is normalized from public description flags and retained independently
+from physics-state policy. Ordinary players ignore one another; matching PK or PKLite flags, or
+an impenetrable player, permit collision. `Entity::set_property` applies retail's complete PK
+flag replacement for admitted `PlayerKillerStatus` updates. World mutation updates installed
+contact identity without changing geometry, motion, or sampling. Client body installation joins
+current identity after asynchronous content preparation, so in-flight status updates are not lost.
+Physics-state reconfiguration preserves this identity. Explorer-authored objects carry no public
+player identity; possession alone does not turn a creature into a network player.
+
+Authored staticness is distinct from sleeping, frozen, or excluded integration. An ethereal mover
+can be obstructed by solid static targets but not non-static targets. Ethereal targets remain
+observable and nonblocking; suppressed and missile targets are excluded. No nonzero client
+`OBJECTINFO::targetID` producer was found in the available retail decompile: projectile filtering
+implements the demonstrated untargeted case, without inferring targets from attacks or pursuit.
+Mob/mob overlap relaxation remains the accepted approximate model, independent from eligibility.
+
+Full `UpdateObject` messages follow the existing create/replacement lifecycle, matching retail's
+explicit force-recreate operation (`acclient.c:140101,139601`). They may introduce an unknown
+object and replace an existing description. They are not semantic-only updates and need not
+preserve motion. PK property updates do preserve it. Property ordering and deletion admission
+remain owned by the existing transport/world lifecycle; this policy adds no independent sequence
+tracking. Once a pair becomes exempt it produces no fresh touches; existing collision reports
+end through the established expiry rule.

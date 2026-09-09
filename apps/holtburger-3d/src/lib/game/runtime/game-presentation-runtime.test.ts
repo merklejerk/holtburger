@@ -1327,6 +1327,29 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		);
 		expect(runtime.dynamicEntityPlacementRevision).toBe(placementRevision);
 
+		const refreshed = spawnedEntity(7, 1);
+		if (refreshed.placement.kind !== "world")
+			throw new Error("Fixture needs world placement.");
+		refreshed.placement.spatialMembership.reachedEnvCellIds = [
+			cellId(0x00010100),
+		];
+		const origin = runtime.dynamicEntityOrigin(refreshed.identity.guid);
+		runtime.applyDynamicEntityTick(
+			{
+				hostTime: { seconds: 2.5 },
+				durationMs: 30,
+				advances: [],
+				updates: [refreshed],
+			},
+			1015,
+		);
+		expect(runtime.dynamicEntityOrigin(refreshed.identity.guid)).toEqual(
+			origin,
+		);
+		expect(runtime.dynamicEntityPlacementRevision).toBeGreaterThan(
+			placementRevision,
+		);
+
 		const invalid = spawnedEntity(7, 1);
 		if (invalid.placement.kind !== "world")
 			throw new Error("Invalid update fixture lost world placement.");

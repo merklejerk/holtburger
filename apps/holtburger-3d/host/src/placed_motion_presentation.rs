@@ -2,21 +2,9 @@
 
 use anyhow::{Result, ensure};
 use holtburger_common::position::{
-    MAX_OUTDOOR_LANDBLOCK_AXIS, METERS_PER_LANDBLOCK, WorldPosition, outdoor_landblock_owner_at,
+    MAX_OUTDOOR_LANDBLOCK_AXIS, METERS_PER_LANDBLOCK, WorldPosition,
 };
 use holtburger_common::{Guid, Quaternion, Vector3};
-use holtburger_world::{PlacedMotionPath, PlacedMotionPoint};
-
-/// One placed point expressed in the local coordinates of its authoritative outdoor owner.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct PresentedPlacedMotionPoint {
-    /// Normalized outdoor landblock owner of `coords`.
-    pub owner: Guid,
-    /// Exact committed EnvCell, or `None` while outdoors.
-    pub cell: Option<Guid>,
-    /// Point reanchored from the path frame into `owner`'s local AC axes.
-    pub coords: Vector3,
-}
 
 /// Converts one canonical scene point into an outdoor-anchored world pose.
 ///
@@ -58,118 +46,4 @@ pub fn scene_direction_to_ac(direction: [f32; 3]) -> Result<Vector3> {
         "scene direction must be finite"
     );
     Ok(Vector3::new(direction[0], -direction[2], direction[1]))
-}
-
-/// Projects one collision-placed point without re-running portal traversal in a presentation adapter.
-pub fn present_placed_motion_point(
-    anchor: Guid,
-    point: &PlacedMotionPoint,
-) -> Result<PresentedPlacedMotionPoint> {
-    ensure!(
-        point.center().x.is_finite()
-            && point.center().y.is_finite()
-            && point.center().z.is_finite(),
-        "placed-motion point position must be finite"
-    );
-    let cell = point.placement().committed_cell();
-    let owner = cell
-        .map(landblock_key)
-        .or_else(|| outdoor_landblock_owner_at(landblock_key(anchor), point.center()))
-        .unwrap_or_else(|| landblock_key(anchor));
-    Ok(PresentedPlacedMotionPoint {
-        owner,
-        cell,
-        coords: reanchor_point(point.center(), landblock_key(anchor), owner),
-    })
-}
-
-/// Projects one placed path point into a complete authoritative world pose.
-pub fn present_placed_motion_pose(
-    path: &PlacedMotionPath,
-    point: &PlacedMotionPoint,
-    rotation: Quaternion,
-) -> Result<WorldPosition> {
-    let presented = present_placed_motion_point(path.anchor(), point)?;
-    let mut pose = WorldPosition {
-        landblock_id: Guid(presented.owner.0 & 0xffff_0000),
-        coords: presented.coords,
-        rotation,
-    }
-    .normalize_outdoor_cell();
-    if let Some(cell) = presented.cell {
-        pose.landblock_id = cell;
-    }
-    Ok(pose)
-}
-
-/// Shortest-arc normalized interpolation for a host-authored path rotation boundary.
-pub fn interpolate_rotation(
-    start: Quaternion,
-    mut end: Quaternion,
-    fraction: f32,
-) -> Result<Quaternion> {
-    ensure!(
-        fraction.is_finite() && (0.0..=1.0).contains(&fraction),
-        "placed-motion rotation fraction must be finite and normalized"
-    );
-    let dot = start.w * end.w + start.x * end.x + start.y * end.y + start.z * end.z;
-    if dot < 0.0 {
-        end = Quaternion {
-            w: -end.w,
-            x: -end.x,
-            y: -end.y,
-            z: -end.z,
-        };
-    }
-    let candidate = Quaternion {
-        w: start.w + (end.w - start.w) * fraction,
-        x: start.x + (end.x - start.x) * fraction,
-        y: start.y + (end.y - start.y) * fraction,
-        z: start.z + (end.z - start.z) * fraction,
-    };
-    let length = (candidate.w * candidate.w
-        + candidate.x * candidate.x
-        + candidate.y * candidate.y
-        + candidate.z * candidate.z)
-        .sqrt();
-    ensure!(
-        length.is_finite() && length > f32::EPSILON,
-        "placed-motion rotation must be finite and nonzero"
-    );
-    Ok(Quaternion {
-        w: candidate.w / length,
-        x: candidate.x / length,
-        y: candidate.y / length,
-        z: candidate.z / length,
-    })
-}
-
-/// Project one collision-normalized pose without re-running cell containment or portal traversal.
-pub fn present_world_position(
-    pose: WorldPosition,
-    cell: Option<Guid>,
-) -> PresentedPlacedMotionPoint {
-    PresentedPlacedMotionPoint {
-        owner: landblock_key(pose.landblock_id),
-        cell,
-        coords: pose.coords,
-    }
-}
-
-/// Reanchors one landblock-local point without changing its AC axes.
-pub fn reanchor_point(point: Vector3, source_owner: Guid, target_owner: Guid) -> Vector3 {
-    let source_x = ((source_owner.0 >> 24) & 0xff) as i32;
-    let source_y = ((source_owner.0 >> 16) & 0xff) as i32;
-    let target_x = ((target_owner.0 >> 24) & 0xff) as i32;
-    let target_y = ((target_owner.0 >> 16) & 0xff) as i32;
-    Vector3::new(
-        point.x + (source_x - target_x) as f32 * METERS_PER_LANDBLOCK,
-        point.y + (source_y - target_y) as f32 * METERS_PER_LANDBLOCK,
-        point.z,
-    )
-}
-
-/// Normalizes any outdoor-cell or EnvCell selector to its collision-product owner.
-pub const fn landblock_key(id: Guid) -> Guid {
-    Guid((id.0 & 0xffff_0000) | 0xffff)
 }

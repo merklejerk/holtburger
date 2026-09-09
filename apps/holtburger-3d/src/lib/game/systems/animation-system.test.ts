@@ -368,6 +368,32 @@ describe("AnimationSystem", () => {
 		expect(sparse.getDiagnostics().lastSampledPresentationCount).toBe(1);
 	});
 
+	it("keeps traversing and looping while speed updates arrive every frame", () => {
+		const effects = new EffectSystem();
+		const system = buildAnimationSystemOver(effects);
+		const target = testTarget("scene-node:1");
+		installEffectState(effects, target.targetId);
+		system.playClip(
+			"owner",
+			target,
+			playingClip(testAnimation(Vec3.zero()), 0, 3, 30, "loop"),
+			initialPose(),
+		);
+		advanceAndSample(system, 0);
+		let expectedFrame = 0;
+		let speed = 30;
+		for (let frame = 1; frame <= 60; frame += 1) {
+			expectedFrame = (expectedFrame + speed / 60) % 4;
+			const sample = requiredAt(advanceAndSample(system, frame / 60), 0);
+			expect(sample.articulatedPose.partToObjectTransforms[0]?.m41).toBeCloseTo(
+				Math.min(expectedFrame, 3),
+				5,
+			);
+			speed = frame % 2 === 0 ? 30 : 30.01;
+			system.setPlaybackRate(target, speed);
+		}
+	});
+
 	it("installs a first clip onto a node that activated without playback", () => {
 		const effects = new EffectSystem();
 		const system = buildAnimationSystemOver(effects);

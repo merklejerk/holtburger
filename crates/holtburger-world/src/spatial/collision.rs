@@ -3,6 +3,7 @@
 mod entity_surface_ray;
 mod selection_ray;
 mod static_sphere_sweep;
+pub(crate) use static_sphere_sweep::sphere_path_touches_shape;
 mod static_surface_ray;
 
 pub use entity_surface_ray::{CollisionSurfaceRayHit, EntitySurfaceRayHit};
@@ -10,7 +11,10 @@ pub use selection_ray::{
     AvailableEntitySelectionCandidates, EntitySelectionCandidateResult, EntitySelectionQueryError,
     EntitySelectionRayRequest, EntitySelectionUnavailable,
 };
-pub use static_sphere_sweep::{StaticSphereSweepHit, StaticSphereSweepRequest};
+pub use static_sphere_sweep::{
+    HardEntityShape, HardSphereSweep, HardSphereSweepHit, StaticSphereSweepHit,
+    StaticSphereSweepRequest,
+};
 pub use static_surface_ray::{StaticSurfaceRayHit, StaticSurfaceRayRequest};
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -29,14 +33,11 @@ use holtburger_content::{
 use thiserror::Error;
 
 use super::bsp_query::{
-    ShapeSupportFeature, placed_polygon_contacts, placed_polygon_obstructions,
-    placed_solid_contacts, placed_supports, support_on_polygon,
+    placed_polygon_contacts, placed_polygon_obstructions, placed_solid_contacts, support_on_polygon,
 };
 use super::cell_index::{GlobalCellRange, OUTDOOR_CELL_METERS};
-use super::volume_query::{
-    placed_ball_contact, placed_ball_support, placed_cylinder_contact, placed_cylinder_support,
-};
-use super::{PhysicalCollisionExclusions, PhysicalCollisionFilter};
+use super::volume_query::{placed_ball_contact, placed_cylinder_contact};
+use super::{ContactMotionSegment, PhysicalCollisionExclusions, PhysicalCollisionFilter};
 
 const CELL_PLANE_TOLERANCE: f32 = 0.000_2;
 static NEXT_COLLISION_SCENE_LINEAGE: AtomicU64 = AtomicU64::new(1);
@@ -69,7 +70,7 @@ pub enum CollisionQueryError {
     #[error("placed-motion waypoint fraction must be finite")]
     NonFiniteMotionFraction,
     /// A waypoint fraction does not lie inside the normalized fixed-tick interval.
-    #[error("placed-motion waypoint fraction must be greater than zero and at most one")]
+    #[error("placed-motion waypoint fraction must be between zero and one")]
     MotionFractionOutOfRange,
     /// Waypoint fractions do not advance strictly through the fixed tick.
     #[error("placed-motion waypoint fractions must be strictly increasing")]
@@ -170,14 +171,23 @@ pub struct GroundedObstruction {
 /// One source surface reachable by lowering a sphere vertically.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SupportContact {
-    /// Exact owner product that supplied this support.
-    pub proof: CollisionOwnerProof,
+    /// Source that must remain valid while the accepted support is retained.
+    pub source: SupportSource,
     /// Authored outward-facing unit normal.
     pub normal: Vector3,
     /// Signed vertical correction from the requested center to tangency; positive rises.
     pub height_delta: f32,
     /// Authored feature reached by the bounded vertical probe.
     pub feature: SupportFeature,
+}
+
+/// Retained support provenance; entity identity always requires geometric revalidation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SupportSource {
+    /// Immutable world product whose revision proves unchanged support geometry.
+    World(CollisionOwnerProof),
+    /// Hard body to re-query in the current prepared collection, never a cached validity proof.
+    Entity(super::SpatialBodyId),
 }
 
 /// Opaque owner-scoped identity of one installed immutable collision product.
@@ -212,20 +222,21 @@ impl CollisionOwnerProof {
 /// Authored surface feature reached by a support query.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SupportFeature {
-    /// The finite polygon accepts an ordinary adjustment to its authored plane.
+    /// The footprint center lies within the authored surface.
     Surface,
-    /// The sphere reaches a finite edge but cannot adjust to the polygon plane.
-    Edge {
-        /// Horizontal normal pointing back across the reached edge.
+    /// The finite footing allowance reaches the surface outside its central region.
+    Overhang {
+        /// Horizontal normal pointing toward the interior of the valid footprint.
         inward_normal: Vector3,
     },
 }
 
-impl From<ShapeSupportFeature> for SupportFeature {
-    fn from(feature: ShapeSupportFeature) -> Self {
-        match feature {
-            ShapeSupportFeature::Surface => Self::Surface,
-            ShapeSupportFeature::Edge { inward_normal } => Self::Edge { inward_normal },
+impl SupportFeature {
+    /// Direction available for one bounded edge-guard tangent attempt from valid footing.
+    pub(crate) fn inward_normal(self) -> Option<Vector3> {
+        match self {
+            Self::Surface => None,
+            Self::Overhang { inward_normal } => Some(inward_normal),
         }
     }
 }
@@ -426,7 +437,8 @@ pub struct CellTransitRequest {
 pub struct MotionWaypoint {
     /// Anchor-local sphere center at this accepted endpoint.
     pub center: Vector3,
-    /// Strictly increasing completion fraction in `(0, 1]`; the final waypoint must be `1`.
+    /// Strictly increasing completion fraction in `[0, 1]`; the final waypoint must be `1`.
+    /// An initial zero-time waypoint carries positional correction before timed travel.
     pub end_fraction: f32,
     /// Whether traversal derives this endpoint's cell or preserves a solver commitment.
     pub placement: MotionWaypointPlacement,
@@ -530,6 +542,95 @@ pub struct PlacedMotionPath {
 }
 
 impl PlacedMotionPath {
+    /// Projects accepted movement-sphere segments into a canonical body-root publication path.
+    /// Placement proofs survive projection; angular chords never translate the root. Gaps hold
+    /// position, and zero-time adjustments retain only their final placement at that instant.
+    pub(crate) fn from_contact_motion(
+        previous: &super::SpatialBody,
+        current: &super::SpatialBody,
+        motion: &[super::ContactMotionSegment],
+    ) -> anyhow::Result<Self> {
+        let physical = previous
+            .physical
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("contact path source has no physics"))?;
+        let first = motion.iter().find_map(ContactMotionSegment::path);
+        let anchor = first.map_or(landblock_key(previous.pose.landblock_id), |path| {
+            path.primary().anchor()
+        });
+        let start = previous.pose.reanchor_to_landblock_owner(anchor)?.coords;
+        let initial = match first {
+            Some(path) => PlacedMotionPoint {
+                center: start,
+                ..path.primary().initial().clone()
+            },
+            None => PlacedMotionPoint {
+                center: start,
+                placement: match physical.response.cell() {
+                    Some(cell) => SpatialMembership::interior(cell),
+                    None => SpatialMembership::outdoor(),
+                },
+                recovery: None,
+            },
+        };
+        let mut result = Self {
+            anchor,
+            initial,
+            legs: Vec::new(),
+        };
+        let mut rotation = previous.pose.rotation;
+        let mut root = start;
+        for segment in motion {
+            let Some(path) = segment.path() else {
+                continue;
+            };
+            anyhow::ensure!(
+                path.primary().anchor() == anchor,
+                "contact path changed its query frame"
+            );
+            let start_fraction = segment.start_fraction();
+            let end_fraction = segment.end_fraction();
+            let previous_point = result
+                .legs
+                .last()
+                .map_or(&result.initial, |leg| &leg.end)
+                .clone();
+            let previous_fraction = result.legs.last().map_or(0.0, |leg| leg.end_fraction);
+            if start_fraction > previous_fraction {
+                append_motion_leg(&mut result, start_fraction, previous_point);
+            }
+            let offset = rotation.rotate_vector(physical.definition.spheres().primary().center);
+            let rotating = matches!(segment, ContactMotionSegment::Rotation { .. });
+            for leg in path.primary().legs() {
+                if !rotating {
+                    root = leg.end.center - offset;
+                }
+                append_motion_leg(
+                    &mut result,
+                    start_fraction + (end_fraction - start_fraction) * leg.end_fraction,
+                    PlacedMotionPoint {
+                        center: root,
+                        ..leg.end.clone()
+                    },
+                );
+            }
+            if let ContactMotionSegment::Rotation {
+                rotation: accepted, ..
+            } = segment
+            {
+                rotation = *accepted;
+            }
+        }
+        let mut final_point = result
+            .legs
+            .last()
+            .map_or(&result.initial, |leg| &leg.end)
+            .clone();
+        final_point.center = current.pose.reanchor_to_landblock_owner(anchor)?.coords;
+        append_motion_leg(&mut result, 1.0, final_point);
+        Ok(result)
+    }
+
     /// Normalized landblock frame shared by every retained point.
     pub fn anchor(&self) -> Guid {
         self.anchor
@@ -575,6 +676,58 @@ impl PlacedMotionPath {
             start = leg.end.center;
         }
         Some(self.final_point().center)
+    }
+
+    /// Retains an accepted subinterval with its existing placement proofs, normalized to [0, 1].
+    /// Consumers can retain geometric travel up to an earlier obstruction without repeating
+    /// topology traversal. These normalized fractions do not determine physical elapsed time.
+    pub(crate) fn interval(&self, start: f32, end: f32) -> anyhow::Result<Self> {
+        anyhow::ensure!(
+            start.is_finite() && end.is_finite() && 0.0 <= start && start < end && end <= 1.0,
+            "placed-motion interval must satisfy 0 <= start < end <= 1"
+        );
+        let point_at = |fraction: f32| {
+            let mut previous = &self.initial;
+            let mut previous_fraction = 0.0;
+            for leg in &self.legs {
+                if fraction == previous_fraction {
+                    return previous.clone();
+                }
+                if fraction == leg.end_fraction {
+                    return leg.end.clone();
+                }
+                if fraction < leg.end_fraction {
+                    let local =
+                        (fraction - previous_fraction) / (leg.end_fraction - previous_fraction);
+                    return PlacedMotionPoint {
+                        center: previous.center + (leg.end.center - previous.center) * local,
+                        placement: previous.placement.clone(),
+                        recovery: None,
+                    };
+                }
+                previous = &leg.end;
+                previous_fraction = leg.end_fraction;
+            }
+            unreachable!("validated normalized fraction belongs to the complete placed-motion path")
+        };
+        let mut legs = self
+            .legs
+            .iter()
+            .filter(|leg| start < leg.end_fraction && leg.end_fraction < end)
+            .map(|leg| PlacedMotionLeg {
+                end_fraction: (leg.end_fraction - start) / (end - start),
+                end: leg.end.clone(),
+            })
+            .collect::<Vec<_>>();
+        legs.push(PlacedMotionLeg {
+            end_fraction: 1.0,
+            end: point_at(end),
+        });
+        Ok(Self {
+            anchor: self.anchor,
+            initial: point_at(start),
+            legs,
+        })
     }
 
     /// Whether any point required exceptional placement repair.
@@ -854,6 +1007,8 @@ pub struct CollisionScene {
     owner_revisions: HashMap<Guid, u64>,
     next_owner_revision: u64,
     shadows: StaticShadowIndex,
+    /// Snapshot-owned portal count bounds traversal without rescanning resident cells per segment.
+    motion_transition_limit: usize,
 }
 
 impl Default for CollisionScene {
@@ -866,6 +1021,7 @@ impl Default for CollisionScene {
             owner_revisions: HashMap::new(),
             next_owner_revision: 0,
             shadows: StaticShadowIndex::default(),
+            motion_transition_limit: 1,
         }
     }
 }
@@ -912,6 +1068,7 @@ impl CollisionScene {
                 owner_revisions: self.owner_revisions.clone(),
                 next_owner_revision: self.next_owner_revision,
                 shadows: self.shadows.clone(),
+                motion_transition_limit: self.motion_transition_limit,
             });
         }
 
@@ -952,12 +1109,19 @@ impl CollisionScene {
             owner_revisions.insert(owner, next_owner_revision);
         }
         let shadows = StaticShadowIndex::compile(&landblocks)?;
+        let motion_transition_limit = landblocks
+            .values()
+            .flat_map(|asset| asset.static_geometry.cell_volumes())
+            .map(|volume| volume.portals.len())
+            .sum::<usize>()
+            .max(1);
         Ok(Self {
             lineage: self.lineage,
             landblocks,
             owner_revisions,
             next_owner_revision,
             shadows,
+            motion_transition_limit,
         })
     }
 
@@ -1317,12 +1481,14 @@ impl CollisionScene {
                             request.maximum_rise,
                         ) {
                             supports.push(SupportContact {
-                                proof: self
-                                    .owner_proof(*owner)
-                                    .expect("selected terrain owner must have a product revision"),
+                                source: SupportSource::World(
+                                    self.owner_proof(*owner).expect(
+                                        "selected terrain owner must have a product revision",
+                                    ),
+                                ),
                                 normal: support.normal,
                                 height_delta: support.height_delta,
-                                feature: support.feature.into(),
+                                feature: support.feature,
                             });
                         }
                     }
@@ -1331,65 +1497,32 @@ impl CollisionScene {
         }
         let query_cells =
             GlobalCellRange::from_sphere(request.anchor, request.center, request.radius);
-        let vertical_reach = request.radius + request.maximum_drop.max(request.maximum_rise);
         for selected in self.selected_colliders(query_cells, request.placement) {
             let reference = selected.reference;
             let collider = &self.landblocks[&reference.owner].static_geometry.colliders
                 [reference.collider_index];
             let local_center = anchor_to_landblock(request.center, request.anchor, reference.owner);
-            if !collider
-                .bounds
-                .intersects_sphere(local_center, vertical_reach)
-            {
-                continue;
-            }
             // One contract mapping for every shape's supports.
             let mut push = |support: super::bsp_query::ShapeSupport| {
                 supports.push(SupportContact {
-                    proof: self
-                        .owner_proof(reference.owner)
-                        .expect("selected collider owner must have a product revision"),
+                    source: SupportSource::World(
+                        self.owner_proof(reference.owner)
+                            .expect("selected collider owner must have a product revision"),
+                    ),
                     normal: support.normal,
                     height_delta: support.height_delta,
-                    feature: support.feature.into(),
+                    feature: support.feature,
                 });
             };
-            match &*collider.shape {
-                CollisionShape::Bsp(solid) => placed_supports(
-                    collider,
-                    solid,
-                    local_center,
-                    request.radius,
-                    request.maximum_drop,
-                    request.maximum_rise,
-                )
-                .into_iter()
-                .for_each(&mut push),
-                CollisionShape::Cylinder(cylinder) => {
-                    if let Some(support) = placed_cylinder_support(
-                        collider,
-                        cylinder,
-                        local_center,
-                        request.radius,
-                        request.maximum_drop,
-                        request.maximum_rise,
-                    ) {
-                        push(support);
-                    }
-                }
-                CollisionShape::Ball(ball) => {
-                    if let Some(support) = placed_ball_support(
-                        collider,
-                        ball,
-                        local_center,
-                        request.radius,
-                        request.maximum_drop,
-                        request.maximum_rise,
-                    ) {
-                        push(support);
-                    }
-                }
-            }
+            super::volume_query::placed_shape_supports(
+                collider,
+                local_center,
+                request.radius,
+                request.maximum_drop,
+                request.maximum_rise,
+            )
+            .into_iter()
+            .for_each(&mut push);
         }
         Ok(supports)
     }
@@ -1713,19 +1846,6 @@ impl CollisionScene {
             };
             validate_sweep_radius(sweep, allow_zero_radius)?;
             let touched = touched_landblocks(sweep);
-            let transition_limit = self
-                .landblocks
-                .values()
-                .map(|asset| {
-                    asset
-                        .static_geometry
-                        .cell_volumes()
-                        .iter()
-                        .map(|volume| volume.portals.len())
-                        .sum::<usize>()
-                })
-                .sum::<usize>()
-                .max(1);
             let mut transition_count = 0;
             let mut cursor = 0.0;
             let segment = PlacementMotionSegment {
@@ -1739,7 +1859,7 @@ impl CollisionScene {
                 self.next_placement_transition(segment, cursor, current_cell)?
             {
                 transition_count += 1;
-                if transition_count > transition_limit {
+                if transition_count > self.motion_transition_limit {
                     return Err(CollisionQueryError::MotionTransitionLimitExceeded);
                 }
                 let center =
@@ -2741,20 +2861,20 @@ fn validate_motion_waypoints(waypoints: &[MotionWaypoint]) -> Result<(), Collisi
     if waypoints.is_empty() {
         return Err(CollisionQueryError::EmptyMotionPath);
     }
-    let mut previous = 0.0;
+    let mut previous = None;
     for waypoint in waypoints {
         if !waypoint.end_fraction.is_finite() {
             return Err(CollisionQueryError::NonFiniteMotionFraction);
         }
-        if waypoint.end_fraction <= 0.0 || waypoint.end_fraction > 1.0 {
+        if waypoint.end_fraction < 0.0 || waypoint.end_fraction > 1.0 {
             return Err(CollisionQueryError::MotionFractionOutOfRange);
         }
-        if waypoint.end_fraction <= previous {
+        if previous.is_some_and(|previous| waypoint.end_fraction <= previous) {
             return Err(CollisionQueryError::NonIncreasingMotionFraction);
         }
-        previous = waypoint.end_fraction;
+        previous = Some(waypoint.end_fraction);
     }
-    if previous != 1.0 {
+    if previous != Some(1.0) {
         return Err(CollisionQueryError::IncompleteMotionPath);
     }
     Ok(())
@@ -3195,7 +3315,138 @@ mod tests {
                 0.5,
             );
             assert!((hit.time_of_impact - 0.35).abs() < 0.000_1, "{hit:?}");
+            assert!(hit.normal.x < -0.99, "{hit:?}");
         }
+    }
+
+    #[test]
+    fn hard_sphere_sweep_selects_entity_before_world_obstruction() {
+        let owner = Guid(0xda55_ffff);
+        let shape = Arc::new(CollisionShape::Ball(CollisionBall {
+            center: Vector3::zero(),
+            radius: 1.0,
+        }));
+        let placement = |x| LandblockPlacement {
+            origin: Vector3::new(x, 10.0, 10.0),
+            orientation: Quaternion::identity(),
+        };
+        let wall = PlacedCollider::new(
+            shape.clone(),
+            placement(5.0),
+            ColliderScale::uniform(1.0).unwrap(),
+            StaticColliderPlacement::OutdoorExplicit { source_index: 0 },
+        )
+        .unwrap();
+        let entity =
+            PlacedCollisionShape::new(shape, placement(3.0), ColliderScale::uniform(1.0).unwrap())
+                .unwrap();
+        let mut scene = CollisionScene::new();
+        scene.insert(outdoor_asset(owner, vec![wall])).unwrap();
+        scene
+            .insert(outdoor_asset(Guid(0xd955_ffff), Vec::new()))
+            .unwrap();
+        let membership = SpatialMembership::outdoor();
+        let body_id = crate::SpatialBodyId::Entity(Guid(42));
+        let request = StaticSphereSweepRequest {
+            anchor: owner,
+            start: Vector3::new(0.0, 10.0, 10.0),
+            end: Vector3::new(10.0, 10.0, 10.0),
+            previous_cell: None,
+            radius: 0.5,
+            filter: PhysicalCollisionFilter::ALL,
+        };
+        let hit = scene
+            .sweep_hard_sphere(
+                request,
+                [HardEntityShape {
+                    body_id,
+                    shape: &entity,
+                    membership: &membership,
+                }],
+            )
+            .unwrap()
+            .hit
+            .unwrap();
+        let HardSphereSweepHit::Entity {
+            body_id: actual_id,
+            hit,
+        } = hit
+        else {
+            panic!("nearer hard entity did not supply the obstruction");
+        };
+        assert_eq!(actual_id, body_id);
+        assert!((hit.time_of_impact - 0.15).abs() < 0.0001);
+        assert!(hit.normal.x < -0.99);
+        let world = scene.sweep_hard_sphere(request, []).unwrap().hit.unwrap();
+        assert!(matches!(world, HardSphereSweepHit::World(_)));
+        assert!((world.contact().time_of_impact - 0.35).abs() < 0.0001);
+    }
+
+    #[test]
+    fn hard_sphere_sweep_allows_tangent_and_separating_motion_on_entity_support() {
+        let owner = Guid(0xda55_ffff);
+        let support = PlacedCollisionShape::new(
+            Arc::new(CollisionShape::Cylinder(CollisionCylinder {
+                low_point: Vector3::zero(),
+                radius: 3.0,
+                height: 1.0,
+            })),
+            LandblockPlacement {
+                origin: Vector3::new(10.0, 10.0, 0.0),
+                orientation: Quaternion::identity(),
+            },
+            ColliderScale::uniform(1.0).unwrap(),
+        )
+        .unwrap();
+        let mut scene = CollisionScene::new();
+        scene.insert(outdoor_asset(owner, Vec::new())).unwrap();
+        let membership = SpatialMembership::outdoor();
+        let body_id = crate::SpatialBodyId::Entity(Guid(42));
+        let start = Vector3::new(10.0, 10.0, 1.5);
+        let request = |end| StaticSphereSweepRequest {
+            anchor: owner,
+            start,
+            end,
+            previous_cell: None,
+            radius: 0.5,
+            filter: PhysicalCollisionFilter::ALL,
+        };
+        for end in [
+            start + Vector3::new(1.0, 0.0, 0.0),
+            start + Vector3::new(0.0, 0.0, 1.0),
+        ] {
+            let hit = scene
+                .sweep_hard_sphere(
+                    request(end),
+                    [HardEntityShape {
+                        body_id,
+                        shape: &support,
+                        membership: &membership,
+                    }],
+                )
+                .unwrap();
+            assert!(
+                hit.hit.is_none(),
+                "permitted support motion was blocked: {hit:?}"
+            );
+        }
+        let hit = scene
+            .sweep_hard_sphere(
+                request(start - Vector3::new(0.0, 0.0, 0.1)),
+                [HardEntityShape {
+                    body_id,
+                    shape: &support,
+                    membership: &membership,
+                }],
+            )
+            .unwrap()
+            .hit
+            .unwrap();
+        assert!(
+            (hit.contact().time_of_impact * 0.1 - crate::spatial::bsp_query::CONTACT_EPSILON).abs()
+                < 1e-6
+        );
+        assert!(hit.contact().normal.z > 0.99, "{hit:?}");
     }
 
     #[test]
@@ -4899,7 +5150,10 @@ mod tests {
             })
             .unwrap();
         assert_eq!(supports.len(), 1);
-        assert_eq!(supports[0].proof, scene.owner_proof(source_owner).unwrap());
+        assert_eq!(
+            supports[0].source,
+            SupportSource::World(scene.owner_proof(source_owner).unwrap())
+        );
 
         scene.remove(source_owner);
         assert!(

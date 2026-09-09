@@ -1,4 +1,5 @@
 import type { AABB3 } from "../math/types";
+import { dynamicEntityPlacementFromPoint } from "../runtime/dynamic-entity-presentation";
 import { evaluateHostDynamicEntityPath } from "../motion/host-dynamic-entity-path";
 import type {
 	DynamicEntityAdvance,
@@ -50,6 +51,28 @@ export class DynamicEntityPlacementSystem {
 		this.#activePaths.delete(nodeId);
 		this.#scene.updateRootSpatialPlacement(nodeId, placement);
 		this.#markChanged();
+	}
+
+	/** Refresh the canonical endpoint's membership without interrupting accepted travel. */
+	refreshMembership(
+		nodeId: SceneNodeId,
+		point: DynamicEntityAdvance["path"]["initial"],
+	): void {
+		this.#requireRoot(nodeId);
+		const active = this.#activePaths.get(nodeId);
+		if (active) {
+			// The level producer guarantees an unchanged canonical pose. Earlier path legs
+			// retain their placement proofs; the refreshed membership applies at arrival.
+			const legs = active.advance.path.legs.map((leg, index, all) =>
+				index === all.length - 1 ? { ...leg, end: point } : leg,
+			);
+			this.#activePaths.set(nodeId, {
+				...active,
+				advance: { ...active.advance, path: { ...active.advance.path, legs } },
+			});
+			return;
+		}
+		this.updateRoot(nodeId, dynamicEntityPlacementFromPoint(point));
 	}
 
 	/** Replace transient playback with one newer host-accepted path or discontinuous correction. */

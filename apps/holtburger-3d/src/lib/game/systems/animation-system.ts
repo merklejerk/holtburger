@@ -108,6 +108,29 @@ export class AnimationSystem<TOwnerId extends string> {
 		return record?.target.generation === target.generation;
 	}
 
+	/** Change an installed clip's cadence without restarting its phase or clock. */
+	setPlaybackRate(target: BehaviorTarget, framesPerSecond: number): void {
+		if (!Number.isFinite(framesPerSecond))
+			throw new Error("Animation playback rate must be finite.");
+		const nodeId = requireSceneNodeId(target.targetId, "AnimationSystem");
+		const record = this.#records.get(nodeId);
+		if (!record || record.target.generation !== target.generation)
+			throw new Error(
+				`Animation rate update has no matching playback for ${nodeId}.`,
+			);
+		// Consume the already-sampled fraction at the old rate before changing cadence.
+		const advance = advancePlayingFrame(
+			record.clip,
+			record.framePosition,
+			record.fractionalSeconds,
+		);
+		record.framePosition = advance.framePosition;
+		record.fractionalSeconds = 0;
+		this.#dispatchDepartedFrames(record, advance.departedFrames, "live");
+		record.clip = { ...record.clip, framesPerSecond };
+		this.#latestAdvancedFrame = null;
+	}
+
 	/**
 	 * Install or replace the clip one node plays, entering at the clip's own starting frame.
 	 *

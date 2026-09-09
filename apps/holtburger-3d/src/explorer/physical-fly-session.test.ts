@@ -39,9 +39,6 @@ function path(
 		status: "solved",
 		sceneResidency: { state: "resident" },
 		groundState: "airborne",
-		constraintCount: 0,
-		substeps: 1,
-		contactPasses: 1,
 		solveDurationMs: 0.1,
 		...overrides,
 	};

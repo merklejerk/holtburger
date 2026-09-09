@@ -21,7 +21,10 @@ pub(crate) fn handle_message(
             state.apply_object_visual_description(data, events);
             true
         }
-        GameMessage::ObjectCreate(data) => {
+        // Retail HandleUpdateObject forces HandleCreateObject recreation
+        // (acclient.c:140101,139601), matching this replacement/admission path.
+        // Semantic-only property updates use their own mutation path and keep motion.
+        GameMessage::ObjectCreate(data) | GameMessage::UpdateObject(data) => {
             let entity_name = data
                 .public_weenie_desc
                 .name
@@ -34,7 +37,7 @@ pub(crate) fn handle_message(
                 entity_name,
                 data.pos.unwrap_or_default(),
             );
-            entity.apply_description(data);
+            let sticky_target = entity.apply_description(data);
 
             let guid = entity.guid;
             let create_disposition = state.upsert_entity_from_create(entity, events);
@@ -42,6 +45,7 @@ pub(crate) fn handle_message(
                 state.update_player_inventory_recursive(guid, false);
                 return true;
             }
+            state.admit_entity_sticky_target(guid, sticky_target);
             state.retain_announced_children(guid, data.children.as_deref(), events);
             state.resolve_pending_child_link(guid, data.animation_frame.unwrap_or(0), events);
             if guid != state.player.guid

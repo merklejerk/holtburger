@@ -210,7 +210,7 @@ const possessionMotionProbe = z
 		guid: unsigned32,
 		modifiers: z.array(possessionActiveMotionProbe),
 		motion: dynamicEntityMotionSchema.nullable(),
-		physicalStatus: z.enum(["solved", "substep-budget-exceeded"]).nullable(),
+		physicalStatus: z.literal("solved").nullable(),
 		possessionGeneration: generation,
 		requestedRunRate: z.number().finite(),
 		style: unsigned32,

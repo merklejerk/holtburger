@@ -40,6 +40,15 @@ export type PreparedBehaviorCommand =
 			readonly soundType: number;
 	  }
 	| {
+			readonly kind: "sound";
+			/**
+			 * Direct wave DID retail plays at the owner's position through the two-argument
+			 * `PlaySoundA`: always full volume, never a probability roll. Door swings, monster
+			 * vocalizations, and other motion-synced sounds ride animation frames this way.
+			 */
+			readonly soundId: DatAssetId;
+	  }
+	| {
 			readonly kind: "sound-tweaked";
 			readonly soundId: DatAssetId;
 			/** Play chance rolled at trigger time; retail reads this float, not the next one. */

@@ -22,7 +22,7 @@ pub mod combat_feedback;
 mod commands;
 mod dynamic_entity_view;
 pub mod dynamic_scale;
-mod dynamic_script;
+mod entity_cues;
 mod messages;
 mod movement;
 pub mod movement_types;
@@ -105,8 +105,8 @@ pub struct ClientRuntime {
     collision_coordinator: Option<collision::ClientCollisionCoordinator>,
     /// Prepares direct scale timelines off-turn and joins them to exact entity instances.
     dynamic_scale_coordinator: Option<dynamic_scale::ClientDynamicScaleCoordinator>,
-    /// Retains raw script cues that precede entity creation for both script consumers.
-    dynamic_script_inbox: dynamic_script::ClientDynamicScriptInbox,
+    /// Retains ordered script and sound cues that precede entity creation.
+    entity_cue_inbox: entity_cues::ClientEntityCueInbox,
     /// Resolves immutable visual profiles off-turn and publishes exact-generation envelopes.
     selection_envelope_coordinator: Option<selection_envelope::ClientSelectionEnvelopeCoordinator>,
     /// Whether the selected composition owns an asynchronous destination reveal product.
@@ -223,6 +223,7 @@ impl ClientRuntime {
                 .map(|entity| entity.name().to_string()),
             vitals: self.world.player.vitals.clone(),
             character_motion: self.character_motion_capabilities(),
+            active_confirmation: self.active_confirmation.clone(),
             dynamic: DynamicEntitySnapshot::new(
                 self.dynamic_entity_host_time(),
                 self.current_dynamic_entity_views(),
@@ -630,7 +631,17 @@ impl ClientRuntime {
         self.command_rx = Some(rx);
     }
 
-    fn send_status_event(&self) {
+    fn send_status_event(&mut self) {
+        // Portal transitions retain answerable requests; leaving the character/session retires them.
+        if matches!(
+            self.state,
+            ClientState::Disconnected | ClientState::CharacterSelection(_)
+        ) {
+            self.entity_cue_inbox.clear();
+            if self.active_confirmation.take().is_some() {
+                self.emit_active_character_confirmation_updated();
+            }
+        }
         let _ = self
             .client_view_event_tx
             .send(ClientViewEvent::StatusUpdate {
@@ -3362,17 +3373,21 @@ mod tests {
             .seed_local_player_entity(guid, "Player", player_pose);
 
         client.movement.enqueue_drive_intent(
-            movement_types::PlayerDriveIntent::Autonomous(movement_types::AutonomousDriveIntent {
-                desired_world_delta: Vector3::new(3.0, 4.0, 0.0),
-                desired_heading: Some(1.5),
-                target_hint: Some(WorldPosition {
-                    landblock_id: Guid(0x1000_0100),
-                    coords: Vector3::new(30.0, 40.0, 0.0),
-                    rotation: Quaternion::identity(),
-                }),
-                gait: movement_types::Gait::Run,
-                force_grounded: true,
-            }),
+            movement_types::PlayerDriveIntent::ClientDirected(
+                crate::client::movement_types::ClientDirectedCommand::Acquire(
+                    movement_types::AutonomousDriveIntent {
+                        desired_world_delta: Vector3::new(3.0, 4.0, 0.0),
+                        desired_heading: Some(1.5),
+                        target_hint: Some(WorldPosition {
+                            landblock_id: Guid(0x1000_0100),
+                            coords: Vector3::new(30.0, 40.0, 0.0),
+                            rotation: Quaternion::identity(),
+                        }),
+                        gait: movement_types::Gait::Run,
+                        force_grounded: true,
+                    },
+                ),
+            ),
             now,
         );
 
@@ -3643,13 +3658,17 @@ mod tests {
         let collision = collision_snapshot(interest, scene);
 
         client.movement.enqueue_drive_intent(
-            movement_types::PlayerDriveIntent::Autonomous(movement_types::AutonomousDriveIntent {
-                desired_world_delta: Vector3::new(1.0, 0.0, 0.0),
-                desired_heading: Some(0.0),
-                target_hint: None,
-                gait: movement_types::Gait::Run,
-                force_grounded: true,
-            }),
+            movement_types::PlayerDriveIntent::ClientDirected(
+                crate::client::movement_types::ClientDirectedCommand::Acquire(
+                    movement_types::AutonomousDriveIntent {
+                        desired_world_delta: Vector3::new(1.0, 0.0, 0.0),
+                        desired_heading: Some(0.0),
+                        target_hint: None,
+                        gait: movement_types::Gait::Run,
+                        force_grounded: true,
+                    },
+                ),
+            ),
             now,
         );
         client

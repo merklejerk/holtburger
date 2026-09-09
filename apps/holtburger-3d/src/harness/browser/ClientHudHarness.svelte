@@ -1,7 +1,17 @@
 <script lang="ts">
+	import { probeClientAudio } from "./client-audio-probe";
+	import ClientMessageDialog from "../../client/ClientMessageDialog.svelte";
+	import {
+		ClientDialogs,
+		type ClientDialogPresentation,
+	} from "../../client/client-dialogs";
 	import { provideViewportInputGate } from "../../lib/input/viewport-input-context";
 	import { probeBrowserInput } from "./input-browser-probe";
-	import { onMount } from "svelte";
+	import { onMount, tick } from "svelte";
+	import { ClientEntityInteractions } from "../../client/client-entity-interactions";
+	import { ClientEntitySelection } from "../../client/client-entity-selection";
+	import { ClientLifecycleSession } from "../../client/client-lifecycle-session";
+	import { CLIENT_TUNING } from "../../client/client-tuning";
 	import { defaultUiThemeUrl } from "../../app/ui-theme";
 	import { uiThemes } from "../../app/mount";
 	import opaqueUrl from "./themes/opaque.css?url&no-inline";
@@ -24,7 +34,11 @@
 		MINIMAP_BREADCRUMB_POLICY,
 	} from "../../app/minimap-tuning";
 	import type { ClientPresentationDiagnostics } from "../../client/client-presentation-session";
-	import type { ClientToast } from "../../client/client-toast-center";
+	import {
+		ClientToastCenter,
+		CLIENT_TOAST_DURATION_MS,
+		type ClientToast,
+	} from "../../client/client-toast-center";
 	import type { ClientTargetIndicatorFrame } from "../../client/client-target-indicator";
 	const inputGate = provideViewportInputGate();
 
@@ -69,7 +83,7 @@
 		readonly selectedGuid: number | null;
 		readonly selectionAnnouncement: string;
 		readonly selectedEntityHud: null | {
-			readonly actionsDisabled: boolean;
+			readonly interactDisabled: boolean;
 			readonly name: string;
 		};
 		readonly targetIndicator: null | {
@@ -151,6 +165,8 @@
 	interface ClientHudHarnessApi {
 		/** Verify style updates without replacing world presentation or HUD placement. */
 		readonly probeThemeApplication: typeof probeThemeApplication;
+		/** Exercise health presentation and use dispatch through production session owners. */
+		readonly probeSelectedInteractions: typeof probeSelectedInteractions;
 		/** Show production character selection for the theme probe. */
 		readonly previewCharacterSelection: () => void;
 		/** Exercise overlapping modal/chat ownership while a viewport gesture is pending. */
@@ -210,6 +226,302 @@
 	let preciseJumpActive = $state(false);
 	let cameraEnabled = $state(true);
 	let selectedGuid = $state<number | null>(null);
+	const interactionHandlers = new Map<string, (payload: unknown) => void>();
+	const interactionCommands: {
+		command: string;
+		args: Record<string, unknown> | undefined;
+	}[] = [];
+	const interactionLifecycle = new ClientLifecycleSession({
+		listen: async (event, handler) => {
+			interactionHandlers.set(event, handler);
+			return () => {
+				interactionHandlers.delete(event);
+			};
+		},
+		invoke: async (command, args) => {
+			interactionCommands.push({ command, args });
+			if (command === "request_client_current_state")
+				emitInteractionEvent("client-lifecycle-changed", { kind: "in-world" });
+		},
+	});
+	const selection = new ClientEntitySelection({
+		lifecycle: interactionLifecycle,
+		presentation: () => null,
+	});
+	const interactions = new ClientEntityInteractions({
+		selection,
+		lifecycle: interactionLifecycle,
+		onFailure: (error) => {
+			throw error;
+		},
+	});
+	const unsubscribeSelection = selection.subscribe((guid) => {
+		selectedGuid = guid;
+	});
+
+	function emitInteractionEvent(event: string, payload: unknown): void {
+		const handler = interactionHandlers.get(event);
+		if (handler === undefined)
+			throw new Error(`Missing interaction listener: ${event}`);
+		handler(payload);
+	}
+
+	let dialogPresentation = $state<ClientDialogPresentation | null>(null);
+	let dialogOwner: ClientDialogs | null = null;
+
+	async function probeDialogs() {
+		const owner = new ClientDialogs(interactionLifecycle);
+		dialogOwner = owner;
+		const unsubscribe = owner.subscribe((value) => {
+			dialogPresentation = value;
+		});
+		const canvas = document.querySelector<HTMLCanvasElement>(".client-canvas");
+		if (canvas === null)
+			throw new Error("Dialog probe requires the viewport canvas.");
+		canvas.focus();
+		const previousFocus = document.activeElement;
+		const startCommands = interactionCommands.length;
+		const longMessage = Array.from(
+			{ length: 120 },
+			(_, index) => `Server notice line ${index + 1}`,
+		).join("\n");
+		try {
+			emitInteractionEvent("client-lifecycle-changed", {
+				kind: "character-selection",
+				characters: [],
+			});
+			emitInteractionEvent("client-popup-string", { message: longMessage });
+			await tick();
+			const modal = document.querySelector<HTMLDialogElement>(
+				".client-message-dialog",
+			);
+			if (
+				modal === null ||
+				!modal.open ||
+				inputGate.allowed ||
+				!modal.contains(document.activeElement)
+			)
+				throw new Error("Pre-world popup did not acquire modal focus/input.");
+			if (
+				modal.scrollHeight <= modal.clientHeight ||
+				modal.getBoundingClientRect().height > window.innerHeight
+			)
+				throw new Error("Long popup is not scrollable within the viewport.");
+			emitInteractionEvent("client-confirmation-updated", {
+				confirmation: { requestId: "100", text: "Accept request A?" },
+			});
+			await tick();
+			const accept = Array.from(modal.querySelectorAll("button")).find(
+				(button) => button.textContent === "Accept",
+			);
+			if (accept === undefined)
+				throw new Error("Confirmation did not take popup priority.");
+			accept.click();
+			await tick();
+			if (!accept.disabled)
+				throw new Error("Pending confirmation remained submittable.");
+			await owner.respond("100", true);
+			emitInteractionEvent("client-confirmation-updated", {
+				confirmation: { requestId: "101", text: "Accept request B?" },
+			});
+			await owner.respond("100", false);
+			await tick();
+			modal.dispatchEvent(new Event("cancel", { cancelable: true }));
+			await tick();
+			const responses = interactionCommands
+				.slice(startCommands)
+				.filter((entry) => entry.command === "respond_to_client_confirmation");
+			if (
+				JSON.stringify(responses.map((entry) => entry.args)) !==
+				JSON.stringify([
+					{ request_id: "100", accepted: true },
+					{ request_id: "101", accepted: false },
+				])
+			)
+				throw new Error(
+					"Confirmation responses lost identity or duplicated submission.",
+				);
+			emitInteractionEvent("client-confirmation-updated", {
+				confirmation: null,
+			});
+			await tick();
+			if (!modal.textContent?.includes("Server notice line 120"))
+				throw new Error("Confirmation discarded the waiting popup.");
+			modal.dispatchEvent(new Event("cancel", { cancelable: true }));
+			await tick();
+			if (
+				!inputGate.allowed ||
+				document.querySelector(".client-message-dialog") !== null ||
+				document.activeElement !== previousFocus
+			)
+				throw new Error(
+					`Popup dismissal did not release focus/input: allowed=${inputGate.allowed}, modal=${document.querySelector(".client-message-dialog") !== null}, focus=${document.activeElement?.tagName}, expected=${previousFocus?.tagName}.`,
+				);
+			emitInteractionEvent("client-popup-string", {
+				message: "Pending at disconnect",
+			});
+			await tick();
+			emitInteractionEvent("client-lifecycle-changed", {
+				kind: "exiting",
+				cause: "server-disconnect",
+			});
+			await tick();
+			if (
+				!inputGate.allowed ||
+				document.querySelector(".client-message-dialog") !== null
+			)
+				throw new Error("Disconnect leaked dialog ownership.");
+			return {
+				preWorld: true,
+				longTextScrollable: true,
+				exactResponses: responses,
+				focusRestored: true,
+				disconnectCleared: true,
+			};
+		} finally {
+			owner.destroy();
+			unsubscribe();
+			dialogOwner = null;
+			emitInteractionEvent("client-lifecycle-changed", { kind: "in-world" });
+			await tick();
+		}
+	}
+
+	async function probeActionFeedback() {
+		const previousToast = toast;
+		const center = new ClientToastCenter({
+			durationMs: CLIENT_TOAST_DURATION_MS,
+			scheduler: {
+				cancel: (handle) => window.clearTimeout(handle),
+				schedule: (callback, delay) => window.setTimeout(callback, delay),
+			},
+		});
+		const unsubscribeToast = center.subscribe((next) => {
+			toast = next;
+		});
+		const unsubscribeFeedback = interactionLifecycle.subscribe((event) => {
+			if (event.type === "action-feedback") center.publish(event.feedback);
+			if (event.type === "transient-string")
+				center.publish({ message: event.message, tone: "status" });
+		});
+		const notices = [
+			"You're too busy!",
+			"Use timed out waiting for the server.",
+		];
+		try {
+			for (const message of notices) {
+				emitInteractionEvent("client-action-feedback", {
+					message,
+					tone: "warning",
+				});
+				await tick();
+				const notice = Array.from(
+					document.querySelectorAll(".client-toast"),
+				).find((element) => element.textContent?.trim() === message);
+				if (
+					notice?.getAttribute("role") !== "alert" ||
+					!notice.classList.contains("client-toast-warning")
+				) {
+					throw new Error("Action feedback did not reach the warning toast.");
+				}
+			}
+			emitInteractionEvent("client-transient-string", {
+				message: "The door is locked!",
+			});
+			await tick();
+			const transient = Array.from(
+				document.querySelectorAll(".client-toast"),
+			).find(
+				(element) => element.textContent?.trim() === "The door is locked!",
+			);
+			if (transient?.getAttribute("role") !== "status")
+				throw new Error("Server transient did not reach the notice surface.");
+			return {
+				messages: notices,
+				role: "alert",
+				transient: "The door is locked!",
+			};
+		} finally {
+			unsubscribeFeedback();
+			unsubscribeToast();
+			center.destroy();
+			toast = previousToast;
+			await tick();
+		}
+	}
+
+	async function probeSelectedInteractions() {
+		const target = selection.selectedGuid();
+		if (target === null)
+			throw new Error("Interaction probe requires a selected entity.");
+		const meter = document.querySelector(
+			'[aria-label="Selected entity health"]',
+		);
+		const button = document.querySelector<HTMLButtonElement>(
+			'button[aria-label="Interact"]',
+		);
+		if (meter === null || button === null)
+			throw new Error("Selected entity controls are missing.");
+		const unknown = meter.getAttribute("aria-valuetext");
+		emitInteractionEvent("client-entity-health-updated", {
+			guid: target,
+			healthFraction: 0.35,
+		});
+		emitInteractionEvent("client-entity-health-updated", {
+			guid: target + 1,
+			healthFraction: 0.9,
+		});
+		await new Promise((resolve) =>
+			window.setTimeout(
+				resolve,
+				CLIENT_TUNING.selectedEntityHud.displayIntervalMs * 2,
+			),
+		);
+		const health = meter.getAttribute("aria-valuenow");
+		button.click();
+		await tick();
+		const use = interactionCommands.at(-1);
+		if (
+			unknown !== "Unknown" ||
+			health !== "35" ||
+			use?.command !== "use_client_entity" ||
+			use.args?.guid !== target
+		) {
+			throw new Error(
+				"Selected entity health or use dispatch did not match the selected target.",
+			);
+		}
+		// Reselect the same mob with unchanged server health after the HUD has unmounted.
+		selection.select(null);
+		await tick();
+		selection.select(target);
+		await tick();
+		emitInteractionEvent("client-entity-health-updated", {
+			guid: target,
+			healthFraction: 0.35,
+		});
+		await new Promise((resolve) =>
+			window.setTimeout(
+				resolve,
+				CLIENT_TUNING.selectedEntityHud.displayIntervalMs * 2,
+			),
+		);
+		const reselectedHealth = document
+			.querySelector('[aria-label="Selected entity health"]')
+			?.getAttribute("aria-valuenow");
+		if (reselectedHealth !== health)
+			throw new Error("Reselection lost unchanged entity health.");
+		return {
+			unknown,
+			health,
+			reselectedHealth,
+			actionFeedback: await probeActionFeedback(),
+			dialogs: await probeDialogs(),
+			audio: await probeClientAudio(),
+			use,
+			commands: [...interactionCommands],
+		};
+	}
 	let hoveredGuid = $state<number | null>(null);
 	let hoverHitEnabled = true;
 	let targetIndicatorFrame: ClientTargetIndicatorFrame | null = null;
@@ -472,7 +784,9 @@
 		);
 		const selectedEntityHud =
 			document.querySelector<HTMLElement>(".selected-entity");
-		const selectedEntityActions = selectedEntityHud?.querySelectorAll("button");
+		const interactButton = selectedEntityHud?.querySelector<HTMLButtonElement>(
+			'button[aria-label="Interact"]',
+		);
 		const minimapOverlayCanvas = document.querySelector<HTMLElement>(
 			".minimap-overlay-canvas",
 		);
@@ -510,11 +824,7 @@
 				selectedEntityHud === null
 					? null
 					: {
-							actionsDisabled:
-								selectedEntityActions?.length === 2 &&
-								Array.from(selectedEntityActions).every(
-									(action) => action.disabled,
-								),
+							interactDisabled: interactButton?.disabled === true,
 							name:
 								selectedEntityHud
 									.querySelector("strong")
@@ -744,7 +1054,7 @@
 	}
 
 	function selectEntity(guid: number | null): void {
-		selectedGuid = guid;
+		selection.select(guid);
 		selectionEvents.push(guid);
 	}
 
@@ -756,7 +1066,7 @@
 		minimapSubjectWorldX = 100;
 		minimapSubjectGuid = 1;
 		minimapSubjectIndoor = false;
-		selectedGuid = null;
+		selection.select(null);
 		hoveredGuid = null;
 		hoverHitEnabled = true;
 		targetIndicatorFrame = null;
@@ -771,6 +1081,7 @@
 
 	onMount(() => {
 		probeBrowserInput();
+		void interactionLifecycle.start();
 		const overlayObservation = observeMinimapOverlayArcCalls();
 		readMinimapOverlayArcCalls = overlayObservation.read;
 		const harnessGlobal = globalThis as typeof globalThis & {
@@ -778,6 +1089,7 @@
 		};
 		harnessGlobal.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__ = {
 			probeThemeApplication,
+			probeSelectedInteractions,
 			previewCharacterSelection: () => {
 				previewCharacters = true;
 			},
@@ -798,12 +1110,26 @@
 			toggleMode,
 		};
 		return () => {
+			interactions.destroy();
+			unsubscribeSelection();
+			selection.destroy();
+			interactionLifecycle.stop();
 			overlayObservation.restore();
 			readMinimapOverlayArcCalls = () => 0;
 			harnessGlobal.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__ = undefined;
 		};
 	});
 </script>
+
+{#if dialogPresentation !== null}
+	<ClientMessageDialog
+		presentation={dialogPresentation}
+		onDismiss={(id) => dialogOwner?.dismissPopup(id)}
+		onRespond={(id, accepted) => {
+			void dialogOwner?.respond(id, accepted);
+		}}
+	/>
+{/if}
 
 <ClientWorldView
 	cameraController={cameraEnabled ? cameraController : null}
@@ -832,7 +1158,11 @@
 	{readDiagnostics}
 	{readFrameRates}
 	readTargetIndicatorFrame={() => targetIndicatorFrame}
-	readSelectedEntityName={() => (selectedGuid === null ? null : "Drudge")}
+	readSelectedEntityDisplay={() => ({
+		name: selectedGuid === null ? null : "Drudge",
+		healthFraction: interactions.healthFraction(),
+	})}
+	onInteractEntity={() => interactions.interact()}
 	selectedEntityGuid={selectedGuid}
 	hoveredEntityGuid={hoveredGuid}
 	showRetailHiddenGeometry={false}

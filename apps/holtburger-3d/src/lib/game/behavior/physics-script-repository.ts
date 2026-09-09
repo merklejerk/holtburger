@@ -151,7 +151,8 @@ function collectDependencies(
 		if (record.kind === "call-pes") scriptIds.add(record.scriptId);
 		if (record.kind === "create-particle")
 			emitterInfoIds.add(record.emitterInfoId);
-		if (record.kind === "sound-tweaked") soundIds.add(record.soundId);
+		if (record.kind === "sound" || record.kind === "sound-tweaked")
+			soundIds.add(record.soundId);
 	}
 	return {
 		emitterInfoIds: [...emitterInfoIds],

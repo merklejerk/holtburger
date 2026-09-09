@@ -181,17 +181,34 @@ impl CharacterDriveBuilder {
     }
 }
 
+/// Ordered commands from the frontend's client-directed movement controller.
+/// Acquisition is explicit; later updates and cleanup only apply while that source owns control.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ClientDirectedCommand {
+    /// Acquire and begin displacement immediately.
+    Acquire(AutonomousDriveIntent),
+    /// Acquire with an initial facing correction before the first displacement update.
+    AcquireFacing { heading: f32 },
+    /// Supply displacement for one simulation tick without reacquiring control.
+    Update(AutonomousDriveIntent),
+    /// Stop displacement, optionally settle the arrival pose, and retain controller ownership.
+    Settle { pose: Option<WorldPosition> },
+    /// Finish the controller; cannot stop a different movement source.
+    Release,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PlayerDriveIntent {
+    /// Explicitly acquires manual control with the supplied held drive.
     ManualHeld(CharacterDrive),
+    /// Updates held input without taking control from a server directive or another controller.
+    SynchronizeHeld(CharacterDrive),
     ManualPulse {
         state: CharacterDrive,
         duration: Duration,
     },
-    Autonomous(AutonomousDriveIntent),
-    ArriveAtPose {
-        pose: WorldPosition,
-    },
+    /// Scoped lifecycle of client-generated steering.
+    ClientDirected(ClientDirectedCommand),
     SnapFacing {
         heading: f32,
     },
@@ -343,27 +360,5 @@ mod tests {
         );
         assert_eq!(intent.gait, Gait::Run);
         assert!(intent.force_grounded);
-    }
-
-    #[test]
-    fn player_drive_intent_can_wrap_autonomous_drive() {
-        let intent = PlayerDriveIntent::Autonomous(AutonomousDriveIntent {
-            desired_world_delta: Vector3::new(0.0, 1.0, 0.0),
-            desired_heading: None,
-            target_hint: None,
-            gait: Gait::Walk,
-            force_grounded: false,
-        });
-
-        assert!(matches!(
-            intent,
-            PlayerDriveIntent::Autonomous(AutonomousDriveIntent {
-                desired_world_delta,
-                desired_heading: None,
-                target_hint: None,
-                gait: Gait::Walk,
-                force_grounded: false,
-            }) if desired_world_delta == Vector3::new(0.0, 1.0, 0.0)
-        ));
     }
 }

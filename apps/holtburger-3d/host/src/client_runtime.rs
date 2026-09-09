@@ -144,6 +144,19 @@ pub enum ClientHostCommand {
     QueueClientCharacterMotionEvent {
         request: crate::client_host::ClientCharacterMotionEventRequest,
     },
+    /// Replace the server health subscription; null GUID cancels it.
+    QueryClientEntityHealth {
+        guid: holtburger_common::Guid,
+    },
+    /// Use the selected world object through core's existing busy-operation behavior.
+    UseClientEntity {
+        guid: holtburger_common::Guid,
+    },
+    /// Answer exactly the confirmation occurrence displayed by the renderer.
+    RespondToClientConfirmation {
+        request_id: String,
+        accepted: bool,
+    },
     SendClientChat {
         message: String,
     },
@@ -188,6 +201,9 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "replace_client_drive",
     "queue_client_character_motion_event",
     "send_client_chat",
+    "query_client_entity_health",
+    "use_client_entity",
+    "respond_to_client_confirmation",
     "start_client_camera",
     "set_client_camera_intent",
     "set_client_camera_clearance",
@@ -523,6 +539,30 @@ pub async fn dispatch_client(
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),
+        QueryClientEntityHealth { guid } => runtime
+            .send_command(ClientCommand::QueryHealth(guid))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        UseClientEntity { guid } => runtime
+            .send_command(ClientCommand::Use(guid))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        RespondToClientConfirmation {
+            request_id,
+            accepted,
+        } => {
+            let request_id = request_id.parse::<u64>().map_err(application_error)?;
+            runtime
+                .send_command(ClientCommand::RespondToConfirmation {
+                    request_id,
+                    accepted,
+                })
+                .await
+                .map(|()| HostResponse::Unit)
+                .map_err(application_error)
+        }
         SendClientChat { message } => runtime
             .send_chat(message)
             .await

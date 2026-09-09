@@ -80,6 +80,7 @@ pub enum AnimationHookPayload {
     TransparentPart(TransparentPartHookPayload),
     TextureVelocity(TextureVelocityHookPayload),
     TextureVelocityPart(TextureVelocityPartHookPayload),
+    Sound(SoundHookPayload),
     SoundTable(SoundTableHookPayload),
     Scale(ScaleHookPayload),
     CreateParticle(CreateParticleHookPayload),
@@ -126,6 +127,16 @@ pub struct ReplaceObjectHookPayload {
     pub part_index: u16,
     /// Full `GfxObj` file id, unpacked from the wire's known-type-relative encoding.
     pub gfx_obj_id: u32,
+}
+
+/// Direct wave DID retail plays at the owner's position (`SoundHook::UnPack` reads one
+/// dword into `gid_`, `SoundHook::Execute` plays it through the two-argument `PlaySoundA`,
+/// `acclient.c:328499-328501,329362-329369`). Door swings, monster vocalizations, and other
+/// motion-synced sounds ride animation frames this way rather than as server messages.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SoundHookPayload {
+    /// Wave file DID, played with retail's default priority, probability, and volume.
+    pub sound_id: u32,
 }
 
 /// Sound-type key resolved against the owning object's installed `SoundTable`.
@@ -246,7 +257,9 @@ impl AnimationHook {
 
         let payload = match hook_type {
             0 => AnimationHookPayload::NoPayload, // NoOp
-            1 => AnimationHookPayload::Raw(read_exact_payload(reader, 4)?), // Sound (Id)
+            1 => AnimationHookPayload::Sound(SoundHookPayload {
+                sound_id: u32::read_le(reader)?,
+            }),
             2 => AnimationHookPayload::SoundTable(SoundTableHookPayload {
                 sound_type: u32::read_le(reader)?,
             }),
@@ -369,6 +382,7 @@ impl AnimationHookPayload {
                 payload.u_speed.write_le(writer)?;
                 payload.v_speed.write_le(writer)
             }
+            Self::Sound(payload) => payload.sound_id.write_le(writer),
             Self::SoundTable(payload) => payload.sound_type.write_le(writer),
             Self::Scale(payload) => {
                 payload.end.write_le(writer)?;
@@ -1062,6 +1076,25 @@ mod tests {
             AnimationHookPayload::ReplaceObject(ReplaceObjectHookPayload {
                 part_index: 9,
                 gfx_obj_id: 0x0101_2345,
+            })
+        );
+    }
+
+    #[test]
+    fn animation_hook_sound_reads_direct_wave_did() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&0i32.to_le_bytes());
+        bytes.extend_from_slice(&0x0A00_03B6u32.to_le_bytes());
+
+        let hook = round_trip_hook(bytes, "sound hook should parse");
+
+        assert_eq!(hook.hook_type, 1);
+        assert!(!hook.is_simulation_relevant());
+        assert_eq!(
+            hook.payload,
+            AnimationHookPayload::Sound(SoundHookPayload {
+                sound_id: 0x0A00_03B6,
             })
         );
     }

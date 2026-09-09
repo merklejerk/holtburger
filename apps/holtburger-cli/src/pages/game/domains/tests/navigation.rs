@@ -1,5 +1,6 @@
 use super::test_support::*;
 use super::*;
+use holtburger_core::client::movement_types::ClientDirectedCommand;
 use holtburger_core::client::movement_types::PlayerDriveIntent;
 
 #[test]
@@ -208,7 +209,7 @@ fn handle_tick_emits_autonomous_drive_for_active_approach() {
     assert!(result.commands.iter().any(|command| {
         matches!(
             command,
-            ClientCommand::DriveSelf(PlayerDriveIntent::Autonomous(intent))
+            ClientCommand::DriveSelf(PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Acquire(intent) | ClientDirectedCommand::Update(intent)))
                 if intent.force_grounded
                     && intent.desired_heading == Some(180.0f32.to_radians())
                     && intent.desired_world_delta.x > 0.0

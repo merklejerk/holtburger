@@ -201,7 +201,7 @@ impl ClientRuntimeBuilder {
             dynamic_scale_coordinator: self
                 .dynamic_scale_source
                 .map(super::dynamic_scale::ClientDynamicScaleCoordinator::new),
-            dynamic_script_inbox: super::dynamic_script::ClientDynamicScriptInbox::default(),
+            entity_cue_inbox: super::entity_cues::ClientEntityCueInbox::default(),
             selection_envelope_coordinator: self
                 .selection_envelope_source
                 .map(super::selection_envelope::ClientSelectionEnvelopeCoordinator::new),
@@ -238,7 +238,7 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> ClientRuntime {
         movement: MovementSystem::new(),
         collision_coordinator: None,
         dynamic_scale_coordinator: None,
-        dynamic_script_inbox: super::dynamic_script::ClientDynamicScriptInbox::default(),
+        entity_cue_inbox: super::entity_cues::ClientEntityCueInbox::default(),
         selection_envelope_coordinator: None,
         requires_external_world_reveal: false,
         activation: None,

@@ -468,8 +468,18 @@ impl ClientRuntime {
                 if !self.arm_busy_operation(BusyOperationKind::Use) {
                     return Ok(());
                 }
+                let feedback =
+                    holtburger_world::interaction::describe_entity_use(&self.world, guid);
+                // Retail submits Use before local feedback (acclient.c:414515). Cached lock state
+                // must never suppress the wire command or imply a server-side activation failure.
                 self.send_game_action(GameAction::Use(Box::new(UseActionData { guid })))
-                    .await
+                    .await?;
+                if let Some(feedback) = feedback {
+                    let _ = self
+                        .client_view_event_tx
+                        .send(super::ClientViewEvent::EntityUseFeedback(feedback));
+                }
+                Ok(())
             }
             ClientCommand::UseWithTarget { item, target } => {
                 log::info!(">>> Using: 0x{:08X} on 0x{:08X}", item, target);
@@ -718,14 +728,22 @@ impl ClientRuntime {
                 self.send_game_action(GameAction::EnterPkLite(Box::new(EnterPkLiteActionData)))
                     .await
             }
-            ClientCommand::RespondToConfirmation { accepted } => {
-                let Some(confirmation) = self.active_confirmation.clone() else {
+            ClientCommand::RespondToConfirmation {
+                request_id,
+                accepted,
+            } => {
+                let Some(confirmation) = self
+                    .active_confirmation
+                    .clone()
+                    .filter(|request| request.request_id == request_id)
+                else {
                     self.emit_action_result(
                         ActionResultSource::Client,
                         ActionResultReason::General(
-                            "No active confirmation request to answer.".to_string(),
+                            "That confirmation request is no longer active.".to_string(),
                         ),
                     );
+                    self.emit_active_character_confirmation_updated();
                     return Ok(());
                 };
 
@@ -1391,6 +1409,7 @@ mod tests {
     };
     use holtburger_world::RuntimeBodyResetCause;
     use holtburger_world::WorldState;
+    use holtburger_world::entity::Entity;
     use holtburger_world::spell::{MagicSchool, SpellCatalog, SpellExtrasInfo, SpellInfo};
     use holtburger_world::state::motion_resolution::test_support::explicit_motion_catalog;
     use holtburger_world::state::{
@@ -1765,17 +1784,120 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn locked_container_feedback_follows_use_without_suppressing_the_wire_command() {
+        let mut client = build_test_client();
+        let guid = Guid(7);
+        let mut entity = Entity::new(guid, "Locked chest".into(), WorldPosition::default());
+        entity
+            .flags
+            .insert(holtburger_common::properties::ObjectDescriptionFlag::REQUIRES_PACK_SLOT);
+        client.world.add_entity(entity);
+        let mut events = client.subscribe_client_view_events();
+        client
+            .handle_command(ClientCommand::Use(guid))
+            .await
+            .unwrap();
+        assert_eq!(client.session.game_action_sequence, 1);
+        assert!(
+            std::iter::from_fn(|| events.try_recv().ok()).any(|event| matches!(
+                event,
+                ClientViewEvent::EntityUseFeedback(
+                    holtburger_world::interaction::EntityUseFeedback::Using {
+                        locked_container: true,
+                        ..
+                    }
+                )
+            ))
+        );
+        // Existing busy admission owns repeat rejection; it must not manufacture another local use.
+        client
+            .handle_command(ClientCommand::Use(guid))
+            .await
+            .unwrap();
+        assert_eq!(client.session.game_action_sequence, 1);
+        assert!(
+            !std::iter::from_fn(|| events.try_recv().ok())
+                .any(|event| matches!(event, ClientViewEvent::EntityUseFeedback(_)))
+        );
+    }
+
+    #[tokio::test]
+    async fn confirmation_receipts_reject_repeated_context_and_recover_exact_request() {
+        for accepted in [false, true] {
+            let mut client = build_test_client();
+            let old =
+                ActiveCharacterConfirmation::received(ConfirmationType::YesNo, 7, "Old?".into());
+            let current =
+                ActiveCharacterConfirmation::received(ConfirmationType::YesNo, 7, "New?".into());
+            assert_ne!(old.request_id, current.request_id);
+            client.active_confirmation = Some(current.clone());
+            assert_eq!(
+                client.application_snapshot().active_confirmation,
+                Some(current.clone())
+            );
+            client
+                .handle_command(ClientCommand::RespondToConfirmation {
+                    request_id: old.request_id,
+                    accepted,
+                })
+                .await
+                .unwrap();
+            assert_eq!(client.session.game_action_sequence, 0);
+            assert_eq!(client.active_confirmation, Some(current.clone()));
+            client
+                .handle_command(ClientCommand::RespondToConfirmation {
+                    request_id: current.request_id,
+                    accepted,
+                })
+                .await
+                .unwrap();
+            assert_eq!(client.session.game_action_sequence, 1);
+            assert!(client.application_snapshot().active_confirmation.is_none());
+            // Duplicate UI submission cannot send the answer twice.
+            client
+                .handle_command(ClientCommand::RespondToConfirmation {
+                    request_id: current.request_id,
+                    accepted,
+                })
+                .await
+                .unwrap();
+            assert_eq!(client.session.game_action_sequence, 1);
+        }
+    }
+
+    #[test]
+    fn confirmations_retire_on_disconnect_but_survive_in_world_status() {
+        let mut client = build_test_client();
+        let confirmation =
+            ActiveCharacterConfirmation::received(ConfirmationType::YesNo, 7, "Proceed?".into());
+        client.active_confirmation = Some(confirmation.clone());
+        client.state = ClientState::InWorld;
+        client.send_status_event();
+        assert_eq!(
+            client.application_snapshot().active_confirmation,
+            Some(confirmation)
+        );
+        client.state = ClientState::Disconnected;
+        client.send_status_event();
+        assert!(client.application_snapshot().active_confirmation.is_none());
+    }
+
+    #[tokio::test]
     async fn respond_to_confirmation_uses_active_confirmation_state() {
         let mut client = build_test_client();
         let mut events = client.subscribe_client_view_events();
         client.active_confirmation = Some(ActiveCharacterConfirmation {
+            request_id: 1,
             confirmation_type: ConfirmationType::CraftInteraction,
             context: 0xDEADBEEF,
             text: "Craft this item?".to_string(),
         });
 
         client
-            .handle_command(ClientCommand::RespondToConfirmation { accepted: true })
+            .handle_command(ClientCommand::RespondToConfirmation {
+                request_id: 1,
+                accepted: true,
+            })
             .await
             .unwrap();
 
@@ -2050,7 +2172,10 @@ mod tests {
         let mut view_events = client.subscribe_client_view_events();
 
         client
-            .handle_command(ClientCommand::RespondToConfirmation { accepted: true })
+            .handle_command(ClientCommand::RespondToConfirmation {
+                request_id: 1,
+                accepted: true,
+            })
             .await
             .unwrap();
 
@@ -2061,7 +2186,7 @@ mod tests {
                 assert_eq!(
                     reason,
                     ActionResultReason::General(
-                        "No active confirmation request to answer.".to_string(),
+                        "That confirmation request is no longer active.".to_string(),
                     )
                 );
                 saw_result = true;

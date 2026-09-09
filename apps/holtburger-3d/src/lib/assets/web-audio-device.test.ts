@@ -84,12 +84,12 @@ function fakeSource(): AudioAssetSource & { loads: DatAssetId[] } {
 }
 
 describe("WebAudioDevice", () => {
-	it("skips an undecoded sound and starts its decode for later", async () => {
+	it("refuses an undecoded sound until the audio owner prepares it", async () => {
 		const { context, started } = fakeContext();
 		const source = fakeSource();
 		const device = new WebAudioDevice(context, source, SMOOTHING, LINEAR);
 
-		// Playing an ambient one-shot late is worse than not playing it, so the first call skips.
+		// The audio owner decides whether and when to replay a cold sound.
 		expect(device.playOneShot(SOUND, 1, 0)).toBeNull();
 		expect(started).toHaveLength(0);
 
@@ -97,6 +97,31 @@ describe("WebAudioDevice", () => {
 		expect(device.getPreparedSourceBytes?.(SOUND)).toBe(8);
 		expect(device.playOneShot(SOUND, 1, 0)).not.toBeNull();
 		expect(started).toHaveLength(1);
+	});
+
+	it("keeps every concurrent prepare pending until decoding completes", async () => {
+		const { context, started } = fakeContext();
+		let complete: (bytes: ArrayBuffer) => void = () => {
+			throw new Error("Decode gate not initialized");
+		};
+		const bytes = new Promise<ArrayBuffer>((resolve) => {
+			complete = resolve;
+		});
+		const device = new WebAudioDevice(
+			context,
+			{ destroy() {}, loadAudio: () => bytes },
+			SMOOTHING,
+			LINEAR,
+		);
+		const first = device.prepare(SOUND);
+		const second = device.prepare(SOUND);
+		expect(second).toBe(first);
+		expect(device.playOneShot(SOUND, 1, 0)).toBeNull();
+		complete(new ArrayBuffer(8));
+		await second;
+		expect(device.playOneShot(SOUND, 1, 0)).not.toBeNull();
+		expect(started).toHaveLength(1);
+		device.destroy();
 	});
 
 	it("decodes each sound exactly once across concurrent requests", async () => {

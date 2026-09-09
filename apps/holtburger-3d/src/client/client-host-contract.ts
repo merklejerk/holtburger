@@ -11,6 +11,48 @@ import {
 const guid = z.number().int().nonnegative().max(0xffff_ffff);
 const finiteNumber = z.number().finite();
 
+/** Server-authored text shared by notice and popup payloads, preserved verbatim. */
+const serverTextSchema = z.object({ message: z.string() }).strict();
+export type ClientServerText = z.infer<typeof serverTextSchema>;
+
+export function decodeClientServerText(value: unknown): ClientServerText {
+	return serverTextSchema.parse(value);
+}
+
+const actionFeedbackSchema = z
+	.object({
+		/** Human-readable result, formatted by the host using shared game-message semantics. */
+		message: z.string().trim().min(1),
+		/** Urgency consumed by the existing toast component. */
+		tone: z.enum(["status", "warning"]),
+	})
+	.strict();
+
+/** Ephemeral action feedback without protocol types or frontend timer identity. */
+export type ClientActionFeedback = z.infer<typeof actionFeedbackSchema>;
+
+export function decodeClientActionFeedback(
+	value: unknown,
+): ClientActionFeedback {
+	return actionFeedbackSchema.parse(value);
+}
+
+const entityHealthSchema = z
+	.object({
+		/** Entity whose health changed; the server does not echo selection revisions. */
+		guid,
+		/** Latest health fraction reported by the server. */
+		healthFraction: finiteNumber,
+	})
+	.strict();
+
+/** Health update forwarded independently of the renderer's selected identity. */
+export type ClientEntityHealth = z.infer<typeof entityHealthSchema>;
+
+export function decodeClientEntityHealth(value: unknown): ClientEntityHealth {
+	return entityHealthSchema.parse(value);
+}
+
 const vitalSchema = z
 	.object({
 		kind: z.enum(["health", "stamina", "mana"]),
@@ -156,6 +198,26 @@ const clientCharacterMotionFeedbackSchema = z
 	})
 	.strict();
 
+/** Opaque core receipt plus the exact server question. */
+const confirmationSchema = z
+	.object({
+		requestId: z
+			.string()
+			.regex(/^[1-9][0-9]*$/)
+			.refine((value) => BigInt(value) <= 0xffff_ffff_ffff_ffffn),
+		text: z.string(),
+	})
+	.strict();
+export type ClientConfirmation = z.infer<typeof confirmationSchema>;
+const confirmationUpdatedSchema = z
+	.object({ confirmation: confirmationSchema.nullable() })
+	.strict();
+export function decodeClientConfirmationUpdated(value: unknown): {
+	readonly confirmation: ClientConfirmation | null;
+} {
+	return confirmationUpdatedSchema.parse(value);
+}
+
 const currentStateSchema = z
 	.object({
 		lifecycle: lifecycleSchema,
@@ -166,6 +228,7 @@ const currentStateSchema = z
 		playerName: z.string().nullable(),
 		vitals: z.array(vitalSchema),
 		characterMotion: clientCharacterMotionCapabilitiesSchema.nullable(),
+		activeConfirmation: confirmationSchema.nullable(),
 		dynamic: z.unknown(),
 	})
 	.strict();
@@ -181,6 +244,23 @@ const localPlayerEstablishedSchema = z.object({ playerGuid: guid }).strict();
 const playerEnteredSchema = z
 	.object({ playerGuid: guid, name: z.string() })
 	.strict();
+
+/** Ephemeral effect cue, admitted by core to an exact source and world lifetime. */
+const dynamicSoundCueSchema = z
+	.object({
+		guid,
+		generation: z.number().int().nonnegative(),
+		worldGeneration: z.number().int().nonnegative(),
+		soundId: guid,
+		volume: finiteNumber.nonnegative(),
+	})
+	.strict();
+export type ClientDynamicSoundCue = z.infer<typeof dynamicSoundCueSchema>;
+export function decodeClientDynamicSoundCue(
+	value: unknown,
+): ClientDynamicSoundCue {
+	return dynamicSoundCueSchema.parse(value);
+}
 
 const dynamicScriptCueSchema = z
 	.object({
@@ -198,7 +278,7 @@ const exitRequestedSchema = z
 	})
 	.strict();
 
-const clientDriveRequestSchema = z
+const clientDriveSnapshotSchema = z
 	.object({
 		gait: z.enum(["walk", "run"]),
 		longitudinal: z.enum(["forward", "backward"]).nullable(),
@@ -207,19 +287,26 @@ const clientDriveRequestSchema = z
 	})
 	.strict();
 
+const clientDriveRequestSchema = z
+	.object({
+		kind: z.enum(["acquire", "synchronize"]),
+		drive: clientDriveSnapshotSchema,
+	})
+	.strict();
+
 const clientCharacterMotionEventRequestSchema = z.discriminatedUnion("kind", [
 	z
 		.object({
 			kind: z.literal("begin-jump"),
 			sequence: z.number().int().nonnegative().safe(),
-			drive: clientDriveRequestSchema,
+			drive: clientDriveSnapshotSchema,
 		})
 		.strict(),
 	z
 		.object({
 			kind: z.literal("release-jump"),
 			sequence: z.number().int().nonnegative().safe(),
-			drive: clientDriveRequestSchema,
+			drive: clientDriveSnapshotSchema,
 			extent: finiteNumber.min(0.001).max(1),
 		})
 		.strict(),

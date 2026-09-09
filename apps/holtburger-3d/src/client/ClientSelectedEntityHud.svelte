@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, untrack } from "svelte";
 
+	import type { ClientSelectedEntityDisplay } from "./client-entity-interactions";
 	import ClientHudIcon from "./ClientHudIcon.svelte";
 	import { CLIENT_TUNING } from "./client-tuning";
 
@@ -8,24 +9,40 @@
 		/** Cold selection identity controlling whether the runtime surface is present. */
 		readonly selectedGuid: number | null;
 		/** Bounded display read kept separate from frame-hot target projection. */
-		readonly readSelectedName: () => string | null;
+		readonly readSelectedDisplay: () => ClientSelectedEntityDisplay;
+		/** Forward the button edge to the session-owned interaction controller. */
+		readonly onInteract: () => void;
 	}
 
-	const { selectedGuid, readSelectedName }: Props = $props();
-	let selectedName = $state<string | null>(null);
-	const displayName = $derived(selectedName ?? "Selected Entity");
+	const { selectedGuid, readSelectedDisplay, onInteract }: Props = $props();
+	let display = $state<ClientSelectedEntityDisplay>({
+		name: null,
+		healthFraction: null,
+	});
+	const displayName = $derived(display.name ?? "Selected Entity");
+	const healthPercent = $derived(
+		display.healthFraction === null
+			? null
+			: Math.max(0, Math.min(100, display.healthFraction * 100)),
+	);
 
 	$effect(() => {
 		const guid = selectedGuid;
 		// Selection identity is cold UI state; the runtime lookup must not own this effect's lifecycle.
 		untrack(() => {
-			selectedName = guid === null ? null : readSelectedName();
+			display =
+				guid === null
+					? { name: null, healthFraction: null }
+					: readSelectedDisplay();
 		});
 	});
 
 	onMount(() => {
 		const sample = (): void => {
-			selectedName = selectedGuid === null ? null : readSelectedName();
+			display =
+				selectedGuid === null
+					? { name: null, healthFraction: null }
+					: readSelectedDisplay();
 		};
 		const interval = window.setInterval(
 			sample,
@@ -40,8 +57,9 @@
 		<button
 			class="ui-hud-button"
 			type="button"
-			disabled
-			aria-label="Interact (not yet available)"
+			disabled={selectedGuid === null}
+			onclick={onInteract}
+			aria-label="Interact"
 		>
 			<ClientHudIcon name="interact" />
 		</button>
@@ -55,8 +73,21 @@
 			<ClientHudIcon name="examine" />
 		</button>
 	</div>
-	<div class="selected-entity__health ui-hud-surface" aria-hidden="true">
-		<div class="selected-entity__health-fill"></div>
+	<div
+		class="selected-entity__health ui-hud-surface"
+		role="meter"
+		aria-label="Selected entity health"
+		aria-valuemin="0"
+		aria-valuemax="100"
+		aria-valuenow={healthPercent ?? undefined}
+		aria-valuetext={healthPercent === null
+			? "Unknown"
+			: `${Math.round(healthPercent)}%`}
+	>
+		{#if healthPercent !== null}<div
+				class="selected-entity__health-fill"
+				style:width={`${healthPercent}%`}
+			></div>{/if}
 	</div>
 </section>
 
@@ -104,7 +135,6 @@
 			background: var(--_ui-hud-background-color);
 		}
 		.selected-entity__health-fill {
-			width: 68%;
 			height: 100%;
 			background: var(--ui-color-health);
 		}

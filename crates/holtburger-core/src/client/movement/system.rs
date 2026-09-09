@@ -10,8 +10,8 @@ use crate::client::character_motion::{
     SequencedCharacterMotionEvent,
 };
 use crate::client::movement_types::{
-    AutonomousDriveIntent, CharacterDrive, LongitudinalMotion, MotionStyle, MovementPacketMetadata,
-    PlayerDriveIntent, Turn,
+    AutonomousDriveIntent, CharacterDrive, ClientDirectedCommand, LongitudinalMotion, MotionStyle,
+    MovementPacketMetadata, PlayerDriveIntent, Turn,
 };
 use crate::client::types::{
     ClientCharacterMotionFeedback, ClientCharacterMotionOutcome, ClientCharacterMotionRejection,
@@ -169,22 +169,22 @@ impl MovementSequenceDiagnostics {
 
 pub(crate) struct MovementSystem {
     sequence_diagnostics: MovementSequenceDiagnostics,
-    queued_drive_commands: Vec<QueuedDriveCommand>,
-    queued_character_motion_events: Vec<SequencedCharacterMotionEvent>,
+    /// Drive and jump lifecycle commands retain their shared admission order.
+    queued_control_commands: Vec<QueuedControlCommand>,
     character_motion: CharacterMotionController,
     pending_jump_attempt: Option<PendingJumpAttempt>,
     character_motion_feedback: Vec<ClientCharacterMotionFeedback>,
     pending_transient_motion: Option<TransientMotionIntent>,
     pending_arrival_pose: Option<holtburger_common::position::WorldPosition>,
     pending_snap_facing: Option<f32>,
-    active_drive: Option<ActiveDriveState>,
+    /// Sole selected source of local locomotion; absence leaves authoritative playback in charge.
+    active_movement: Option<ActiveMovement>,
     /// One local authored stop order awaiting the simulation tick that owns cursor advancement.
     pending_manual_playback_stop: bool,
-    server_motion_active: bool,
-    last_server_motion_intent: Option<ServerMotionIntent>,
-    suppress_frontend_autonomous_once: bool,
-    /// Active non-autonomous command, including its command-specific projection and completion.
-    server_controlled_motion: Option<ServerDirectedMotionState>,
+    /// Last successfully published movement, independent of the selected simulation source.
+    published_motion: Option<PublishedMotion>,
+    /// A local takeover must reach ACE even when its drive equals the last published drive.
+    movement_publication_required: bool,
     next_autonomous_position_heartbeat_at: Option<Instant>,
 }
 
@@ -195,54 +195,37 @@ pub(crate) struct PendingJumpAttempt {
     pub attempt: JumpAttempt,
 }
 
+/// Ordered input to the movement owner; category must never reorder lifecycle edges.
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum QueuedDriveCommand {
-    ManualSet(CharacterDrive),
-    ManualPulse {
-        state: CharacterDrive,
-        duration: Duration,
-    },
-    Autonomous(AutonomousDriveIntent),
+enum QueuedControlCommand {
+    Drive(PlayerDriveIntent),
+    /// Non-locomotion animation action admitted in the same input order.
     Transient(TransientMotionIntent),
-    ArriveAtPose {
-        pose: holtburger_common::position::WorldPosition,
-    },
-    SnapFacing {
-        heading: f32,
-    },
-    Stop,
+    CharacterMotion(SequencedCharacterMotionEvent),
+    /// Server admission carries target facts captured before later world mutations.
+    ServerDirective(Option<ServerDirectedMotionState>),
+}
+
+/// A selected movement source owns only the data needed by its execution mechanism.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ActiveMovement {
+    /// Held drive lives in the character controller; only a manual pulse has an expiry.
+    Manual { until: Option<Instant> },
+    /// Client-produced displacement for the current simulation tick.
+    ClientDirected(Option<AutonomousDriveIntent>),
+    /// Server approach/turn state, including its receipt-time target facts and progress.
+    ServerDirected(ServerDirectedMotionState),
+}
+
+/// A transient publication invalidates drive deduplication without inventing a drive snapshot.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum PublishedMotion {
+    Drive(PublishedDrive),
+    Transient,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum ActiveDriveIntent {
-    Manual,
-    Autonomous(AutonomousDriveIntent),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct ActiveDriveState {
-    intent: ActiveDriveIntent,
-    until: Option<Instant>,
-}
-
-impl ActiveDriveState {
-    fn manual(until: Option<Instant>) -> Self {
-        Self {
-            intent: ActiveDriveIntent::Manual,
-            until,
-        }
-    }
-
-    fn autonomous(intent: AutonomousDriveIntent) -> Self {
-        Self {
-            intent: ActiveDriveIntent::Autonomous(intent),
-            until: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct ServerMotionIntent {
+struct PublishedDrive {
     state: CharacterDrive,
     motion_style: MotionStyle,
 }
@@ -253,8 +236,8 @@ struct TransientMotionIntent {
     motion_style: MotionStyle,
 }
 
-fn server_motion_intent(state: CharacterDrive, motion_style: MotionStyle) -> ServerMotionIntent {
-    ServerMotionIntent {
+fn published_drive(state: CharacterDrive, motion_style: MotionStyle) -> PublishedDrive {
+    PublishedDrive {
         state,
         motion_style,
     }
@@ -264,36 +247,53 @@ impl MovementSystem {
     pub(crate) fn new() -> Self {
         Self {
             sequence_diagnostics: MovementSequenceDiagnostics::default(),
-            queued_drive_commands: Vec::new(),
-            queued_character_motion_events: Vec::new(),
+            queued_control_commands: Vec::new(),
             character_motion: CharacterMotionController::new(),
             pending_jump_attempt: None,
             character_motion_feedback: Vec::new(),
             pending_transient_motion: None,
             pending_arrival_pose: None,
             pending_snap_facing: None,
-            active_drive: None,
+            active_movement: None,
             pending_manual_playback_stop: false,
-            server_motion_active: false,
-            last_server_motion_intent: None,
-            suppress_frontend_autonomous_once: false,
-            server_controlled_motion: None,
+            published_motion: None,
+            movement_publication_required: false,
             next_autonomous_position_heartbeat_at: None,
         }
     }
 
-    pub(crate) fn note_server_controlled_movement_started(&mut self) {
-        self.suppress_frontend_autonomous_once = true;
-        self.pending_manual_playback_stop = false;
+    /// Admit server control after earlier input, before packet-scoped view publication.
+    /// Reduction is immediate so simulation cannot observe the displaced local source; wire
+    /// publication remains tick-owned and superseded local effects are discarded here.
+    pub(crate) fn admit_server_controlled_motion(
+        &mut self,
+        motion: Option<ServerDirectedMotionState>,
+        now: Instant,
+        world: &mut WorldState,
+    ) {
+        self.queued_control_commands
+            .push(QueuedControlCommand::ServerDirective(motion));
+        self.process_control_commands(now, world);
+        if motion.is_some() {
+            self.refresh_autonomous_position_heartbeat_schedule(now, world);
+        }
     }
 
-    pub(crate) fn set_server_controlled_motion(&mut self, motion: ServerDirectedMotionState) {
-        self.server_controlled_motion = Some(motion);
+    fn select_server_directive(&mut self, motion: Option<ServerDirectedMotionState>) {
+        self.active_movement = motion.map(ActiveMovement::ServerDirected);
+        self.movement_publication_required = false;
+        self.character_motion.cancel_charge();
+        self.pending_jump_attempt = None;
+        self.pending_transient_motion = None;
+        self.pending_arrival_pose = None;
+        self.pending_snap_facing = None;
         self.pending_manual_playback_stop = false;
     }
 
     pub(crate) fn clear_server_controlled_motion(&mut self) {
-        self.server_controlled_motion = None;
+        if self.has_server_controlled_motion() {
+            self.active_movement = None;
+        }
     }
 
     /// Retires every movement product owned by the current world-placement epoch.
@@ -303,31 +303,23 @@ impl MovementSystem {
     /// after that rejection boundary. Protocol sequence diagnostics intentionally survive because
     /// the connected session and its server-authored ordering epochs remain continuous.
     pub(crate) fn retire_movement_epoch(&mut self) {
-        self.queued_drive_commands.clear();
-        self.queued_character_motion_events.clear();
+        self.queued_control_commands.clear();
         self.character_motion.clear();
         self.pending_jump_attempt = None;
         self.character_motion_feedback.clear();
         self.pending_transient_motion = None;
         self.pending_arrival_pose = None;
         self.pending_snap_facing = None;
-        self.active_drive = None;
+        self.active_movement = None;
         self.pending_manual_playback_stop = false;
-        self.server_motion_active = false;
-        self.last_server_motion_intent = None;
-        self.suppress_frontend_autonomous_once = false;
+        self.published_motion = None;
+        self.movement_publication_required = false;
         self.clear_server_controlled_motion();
         self.clear_autonomous_position_heartbeat_schedule();
     }
 
     pub(crate) fn has_active_manual_drive(&self) -> bool {
-        matches!(
-            self.active_drive,
-            Some(ActiveDriveState {
-                intent: ActiveDriveIntent::Manual,
-                ..
-            })
-        ) && !self.has_server_controlled_motion()
+        matches!(self.active_movement, Some(ActiveMovement::Manual { .. }))
     }
 
     /// Whether the local adapter, rather than the authoritative snapshot scan, drives this tick.
@@ -338,19 +330,14 @@ impl MovementSystem {
     }
 
     pub(crate) fn has_server_controlled_motion(&self) -> bool {
-        self.server_controlled_motion.is_some()
+        matches!(
+            self.active_movement,
+            Some(ActiveMovement::ServerDirected(_))
+        )
     }
 
     fn clear_autonomous_position_heartbeat_schedule(&mut self) {
         self.next_autonomous_position_heartbeat_at = None;
-    }
-
-    pub(crate) fn arm_autonomous_position_heartbeat_schedule(
-        &mut self,
-        now: Instant,
-        world: &WorldState,
-    ) {
-        self.refresh_autonomous_position_heartbeat_schedule(now, world);
     }
 
     fn refresh_autonomous_position_heartbeat_schedule(&mut self, now: Instant, world: &WorldState) {
@@ -360,18 +347,8 @@ impl MovementSystem {
 
     pub(crate) fn enqueue_drive_intent(&mut self, intent: PlayerDriveIntent, now: Instant) {
         let _ = now;
-        let command = match intent {
-            PlayerDriveIntent::ManualHeld(state) => QueuedDriveCommand::ManualSet(state),
-            PlayerDriveIntent::ManualPulse { state, duration } => {
-                QueuedDriveCommand::ManualPulse { state, duration }
-            }
-            PlayerDriveIntent::Autonomous(intent) => QueuedDriveCommand::Autonomous(intent),
-            PlayerDriveIntent::ArriveAtPose { pose } => QueuedDriveCommand::ArriveAtPose { pose },
-            PlayerDriveIntent::SnapFacing { heading } => QueuedDriveCommand::SnapFacing { heading },
-            PlayerDriveIntent::Stop => QueuedDriveCommand::Stop,
-        };
-
-        self.queued_drive_commands.push(command);
+        self.queued_control_commands
+            .push(QueuedControlCommand::Drive(intent));
     }
 
     /// Resolves local support and standing-charge presentation for authored and observed playback.
@@ -391,7 +368,8 @@ impl MovementSystem {
     }
 
     pub(crate) fn enqueue_character_motion_event(&mut self, event: SequencedCharacterMotionEvent) {
-        self.queued_character_motion_events.push(event);
+        self.queued_control_commands
+            .push(QueuedControlCommand::CharacterMotion(event));
     }
 
     pub(crate) fn enqueue_transient_motion(
@@ -399,82 +377,114 @@ impl MovementSystem {
         command: InterpretedMotionCommand,
         motion_style: MotionStyle,
     ) {
-        self.queued_drive_commands
-            .push(QueuedDriveCommand::Transient(TransientMotionIntent {
+        self.queued_control_commands
+            .push(QueuedControlCommand::Transient(TransientMotionIntent {
                 command,
                 motion_style,
             }));
     }
 
-    fn ingest_drive_command(&mut self, command: QueuedDriveCommand, now: Instant) {
-        let had_manual_drive = matches!(
-            self.active_drive,
-            Some(ActiveDriveState {
-                intent: ActiveDriveIntent::Manual,
-                ..
-            })
-        );
+    /// A semantic acquisition replaces the selected source and owns its mandatory notification.
+    fn acquire_manual_control(&mut self, until: Option<Instant>) {
+        self.movement_publication_required |= self.has_server_controlled_motion();
+        self.active_movement = Some(ActiveMovement::Manual { until });
+        self.pending_arrival_pose = None;
+        self.pending_snap_facing = None;
+        self.pending_manual_playback_stop = false;
+    }
+
+    fn ingest_drive_intent(&mut self, command: PlayerDriveIntent, now: Instant) {
+        let had_manual_drive = matches!(self.active_movement, Some(ActiveMovement::Manual { .. }));
         match command {
-            QueuedDriveCommand::ManualSet(state) => {
+            PlayerDriveIntent::SynchronizeHeld(state) => {
                 self.character_motion.replace_drive(state);
-                self.active_drive = Some(ActiveDriveState::manual(None));
-                self.pending_manual_playback_stop = false;
             }
-            QueuedDriveCommand::ManualPulse { state, duration } => {
+            PlayerDriveIntent::ManualHeld(state) => {
                 self.character_motion.replace_drive(state);
-                self.active_drive = Some(ActiveDriveState::manual(Some(now + duration)));
-                self.pending_manual_playback_stop = false;
+                self.acquire_manual_control(None);
             }
-            QueuedDriveCommand::Autonomous(intent) => {
-                self.character_motion.clear();
-                self.pending_jump_attempt = None;
-                self.active_drive = Some(ActiveDriveState::autonomous(intent));
-                self.pending_manual_playback_stop = false;
+            PlayerDriveIntent::ManualPulse { state, duration } => {
+                self.character_motion.replace_drive(state);
+                self.acquire_manual_control(Some(now + duration));
             }
-            QueuedDriveCommand::Transient(intent) => {
-                self.pending_transient_motion = Some(intent);
+            PlayerDriveIntent::ClientDirected(command) => {
+                self.ingest_client_directed_command(command)
             }
-            QueuedDriveCommand::ArriveAtPose { pose } => {
-                self.character_motion.clear();
-                self.pending_jump_attempt = None;
-                self.pending_arrival_pose = Some(pose);
-                self.active_drive = None;
-                self.pending_manual_playback_stop |= had_manual_drive;
-            }
-            QueuedDriveCommand::SnapFacing { heading } => {
+            PlayerDriveIntent::SnapFacing { heading } => {
+                if self.has_server_controlled_motion() {
+                    self.character_motion.release_input();
+                    self.acquire_manual_control(None);
+                }
                 self.pending_snap_facing = Some(heading);
             }
-            QueuedDriveCommand::Stop => {
-                self.character_motion.clear();
+            PlayerDriveIntent::Stop => {
+                let had_server_directive = self.has_server_controlled_motion();
+                self.movement_publication_required |= had_server_directive;
+                self.pending_manual_playback_stop |= had_server_directive;
+                self.pending_transient_motion = None;
+                self.character_motion.release_input();
                 self.pending_jump_attempt = None;
                 self.pending_arrival_pose = None;
                 self.pending_snap_facing = None;
-                self.active_drive = None;
+                self.active_movement = None;
                 self.pending_manual_playback_stop |= had_manual_drive;
             }
         }
     }
 
-    fn expire_active_drive(&mut self, now: Instant) {
-        if self
-            .active_drive
-            .is_some_and(|active| matches!(active.intent, ActiveDriveIntent::Autonomous(_)))
-        {
-            self.active_drive = None;
+    fn ingest_client_directed_command(&mut self, command: ClientDirectedCommand) {
+        match command {
+            ClientDirectedCommand::Acquire(_) | ClientDirectedCommand::AcquireFacing { .. } => {
+                self.movement_publication_required |= self.has_server_controlled_motion();
+                self.character_motion.release_input();
+                self.pending_jump_attempt = None;
+                self.pending_arrival_pose = None;
+                self.pending_snap_facing = None;
+                self.pending_transient_motion = None;
+                self.pending_manual_playback_stop = self.has_server_controlled_motion();
+            }
+            _ if !matches!(
+                self.active_movement,
+                Some(ActiveMovement::ClientDirected(_))
+            ) =>
+            {
+                return;
+            }
+            _ => {}
         }
+        match command {
+            ClientDirectedCommand::Acquire(intent) | ClientDirectedCommand::Update(intent) => {
+                self.active_movement = Some(ActiveMovement::ClientDirected(Some(intent)));
+                self.pending_arrival_pose = None;
+            }
+            ClientDirectedCommand::AcquireFacing { heading } => {
+                self.active_movement = Some(ActiveMovement::ClientDirected(None));
+                self.pending_snap_facing = Some(heading);
+            }
+            ClientDirectedCommand::Settle { pose } => {
+                self.active_movement = Some(ActiveMovement::ClientDirected(None));
+                self.pending_arrival_pose = pose;
+                self.movement_publication_required |= self.published_motion.is_some();
+            }
+            ClientDirectedCommand::Release => {
+                self.active_movement = None;
+                self.pending_arrival_pose = None;
+                self.pending_snap_facing = None;
+                self.movement_publication_required |= self.published_motion.is_some();
+            }
+        }
+    }
 
-        let Some(active) = self.active_drive else {
-            return;
-        };
-
-        if active.until.is_some_and(|until| now >= until) {
-            log::info!(
-                "movement: expiring active drive {:?} at tick {:?}",
-                active.intent,
-                now,
-            );
-            self.active_drive = None;
-            self.pending_manual_playback_stop = matches!(active.intent, ActiveDriveIntent::Manual);
+    fn expire_active_movement(&mut self, now: Instant) {
+        match self.active_movement {
+            Some(ActiveMovement::ClientDirected(_)) => {
+                self.active_movement = Some(ActiveMovement::ClientDirected(None));
+            }
+            Some(ActiveMovement::Manual { until: Some(until) }) if now >= until => {
+                self.active_movement = None;
+                self.pending_manual_playback_stop = true;
+            }
+            _ => {}
         }
     }
 
@@ -534,50 +544,12 @@ impl MovementSystem {
         world: &mut WorldState,
         session: &mut Session,
     ) -> Result<Vec<WorldEvent>> {
-        let had_active_manual_motion = matches!(
-            self.active_drive,
-            Some(ActiveDriveState {
-                intent: ActiveDriveIntent::Manual,
-                ..
-            })
-        );
+        let had_active_manual_motion =
+            matches!(self.active_movement, Some(ActiveMovement::Manual { .. }));
 
-        self.expire_active_drive(now);
+        self.expire_active_movement(now);
 
-        let queued = std::mem::take(&mut self.queued_drive_commands);
-        if !queued.is_empty() {
-            // Explicit replacement input cancels sticky pursuit; ordinary playback ticks do not.
-            world.admit_entity_sticky_target(world.player.guid, None);
-            log::info!(
-                "movement: ingesting {} queued drive commands at tick {:?}: {:?}",
-                queued.len(),
-                now,
-                queued,
-            );
-        }
-        let explicit_stop_requested = queued
-            .iter()
-            .any(|command| matches!(command, QueuedDriveCommand::Stop));
-        for command in queued {
-            self.ingest_drive_command(command, now);
-        }
-        self.process_character_motion_events(world);
-
-        if self.suppress_frontend_autonomous_once
-            && matches!(
-                self.active_drive,
-                Some(ActiveDriveState {
-                    intent: ActiveDriveIntent::Autonomous(_),
-                    ..
-                })
-            )
-        {
-            log::info!(
-                "movement: suppressing frontend autonomous wire motion during server-controlled movement"
-            );
-            self.active_drive = None;
-        }
-        self.suppress_frontend_autonomous_once = false;
+        let explicit_stop_requested = self.process_control_commands(now, world);
 
         let mut events = Vec::new();
         if let Some(pose) = self.pending_arrival_pose.take() {
@@ -614,8 +586,8 @@ impl MovementSystem {
         };
 
         if !transient_sent {
-            match self.active_drive.map(|active| active.intent) {
-                Some(ActiveDriveIntent::Manual) => events.extend(
+            match self.active_movement {
+                Some(ActiveMovement::Manual { .. }) => events.extend(
                     self.execute_motion_state_at(
                         self.character_motion.effective_drive(),
                         world,
@@ -624,11 +596,15 @@ impl MovementSystem {
                     )
                     .await?,
                 ),
-                Some(ActiveDriveIntent::Autonomous(intent)) => events.extend(
+                Some(ActiveMovement::ClientDirected(Some(intent))) => events.extend(
                     self.execute_autonomous_drive_intent(intent, world, session, now)
                         .await?,
                 ),
-                None if had_active_manual_motion || explicit_stop_requested => {
+                None | Some(ActiveMovement::ClientDirected(None))
+                    if had_active_manual_motion
+                        || explicit_stop_requested
+                        || self.movement_publication_required =>
+                {
                     events.extend(
                         self.execute_stop_at(
                             now,
@@ -640,7 +616,9 @@ impl MovementSystem {
                         .await?,
                     );
                 }
-                None => {}
+                None
+                | Some(ActiveMovement::ClientDirected(None))
+                | Some(ActiveMovement::ServerDirected(_)) => {}
             }
         }
 
@@ -656,48 +634,89 @@ impl MovementSystem {
         Ok(events)
     }
 
-    fn process_character_motion_events(&mut self, world: &WorldState) {
-        for input in std::mem::take(&mut self.queued_character_motion_events) {
-            let readiness = self.character_motion_readiness(world);
-            let result = self.character_motion.apply_event(input, readiness);
-            if matches!(result, CharacterMotionEventResult::IgnoredStale { .. }) {
-                continue;
+    /// Reduce commands in producer order before publishing the resulting drive.
+    fn process_control_commands(&mut self, now: Instant, world: &mut WorldState) -> bool {
+        let mut explicit_stop_requested = false;
+        for command in std::mem::take(&mut self.queued_control_commands) {
+            match command {
+                QueuedControlCommand::Drive(command) => {
+                    if matches!(
+                        command,
+                        PlayerDriveIntent::ManualHeld(_)
+                            | PlayerDriveIntent::ManualPulse { .. }
+                            | PlayerDriveIntent::Stop
+                            | PlayerDriveIntent::SnapFacing { .. }
+                    ) || matches!(
+                        command,
+                        PlayerDriveIntent::ClientDirected(
+                            ClientDirectedCommand::Acquire(_)
+                                | ClientDirectedCommand::AcquireFacing { .. }
+                        )
+                    ) {
+                        world.admit_entity_sticky_target(world.player.guid, None);
+                    }
+                    explicit_stop_requested |= matches!(command, PlayerDriveIntent::Stop);
+                    self.ingest_drive_intent(command, now);
+                }
+                QueuedControlCommand::Transient(intent) => {
+                    world.admit_entity_sticky_target(world.player.guid, None);
+                    self.pending_transient_motion = Some(intent);
+                }
+                QueuedControlCommand::CharacterMotion(input) => {
+                    self.process_character_motion_event(input, world);
+                }
+                QueuedControlCommand::ServerDirective(motion) => {
+                    self.select_server_directive(motion);
+                    explicit_stop_requested = false;
+                }
             }
+        }
+        explicit_stop_requested
+    }
 
-            let reset = matches!(input.event, CharacterMotionEvent::Reset);
-            if reset {
-                let had_manual_drive = matches!(
-                    self.active_drive,
-                    Some(ActiveDriveState {
-                        intent: ActiveDriveIntent::Manual,
-                        ..
-                    })
+    fn process_character_motion_event(
+        &mut self,
+        input: SequencedCharacterMotionEvent,
+        world: &mut WorldState,
+    ) {
+        let readiness = self.character_motion_readiness(world);
+        let result = self.character_motion.apply_event(input, readiness);
+        if matches!(result, CharacterMotionEventResult::IgnoredStale { .. }) {
+            return;
+        }
+
+        let reset = matches!(input.event, CharacterMotionEvent::Reset);
+        if reset {
+            let had_manual_drive =
+                matches!(self.active_movement, Some(ActiveMovement::Manual { .. }));
+            if had_manual_drive {
+                self.active_movement = None;
+                self.pending_manual_playback_stop = true;
+            }
+            self.pending_jump_attempt = None;
+        } else if matches!(result, CharacterMotionEventResult::ChargeAccepted) {
+            // Retail takes control before attempting the jump (`acclient.c:681765,682148`).
+            // A stale/repeated begin or rejected release cannot independently acquire control.
+            self.acquire_manual_control(None);
+            world.admit_entity_sticky_target(world.player.guid, None);
+        }
+        match result {
+            CharacterMotionEventResult::JumpReleased(attempt) => {
+                assert!(
+                    self.pending_jump_attempt.is_none(),
+                    "accepted jump release replaced an unresolved jump attempt"
                 );
-                self.active_drive = None;
-                self.pending_manual_playback_stop |= had_manual_drive;
-                self.pending_jump_attempt = None;
-            } else {
-                self.active_drive = Some(ActiveDriveState::manual(None));
-                self.pending_manual_playback_stop = false;
+                self.pending_jump_attempt = Some(PendingJumpAttempt {
+                    sequence: input.sequence,
+                    attempt,
+                });
             }
-            match result {
-                CharacterMotionEventResult::JumpReleased(attempt) => {
-                    assert!(
-                        self.pending_jump_attempt.is_none(),
-                        "accepted jump release replaced an unresolved jump attempt"
-                    );
-                    self.pending_jump_attempt = Some(PendingJumpAttempt {
-                        sequence: input.sequence,
-                        attempt,
-                    });
-                }
-                CharacterMotionEventResult::IgnoredStale { .. } => {
-                    unreachable!("stale character-motion events return before side effects")
-                }
-                result => self
-                    .character_motion_feedback
-                    .push(client_character_motion_feedback(input.sequence, result)),
+            CharacterMotionEventResult::IgnoredStale { .. } => {
+                unreachable!("stale character-motion events return before side effects")
             }
+            result => self
+                .character_motion_feedback
+                .push(client_character_motion_feedback(input.sequence, result)),
         }
     }
 
@@ -740,9 +759,9 @@ impl MovementSystem {
 
         let body_id = SpatialBodyId::LocalPlayer(world.player.guid);
 
-        let intent = match self.active_drive?.intent {
-            ActiveDriveIntent::Autonomous(intent) => intent,
-            ActiveDriveIntent::Manual => return None,
+        let intent = match self.active_movement? {
+            ActiveMovement::ClientDirected(intent) => intent?,
+            ActiveMovement::Manual { .. } | ActiveMovement::ServerDirected(_) => return None,
         };
 
         Some(LocalDriveControl {
@@ -764,15 +783,17 @@ impl MovementSystem {
         if self.has_server_controlled_motion() || world.player.guid.is_null() {
             return Ok(None);
         }
-        let state = match self.active_drive.map(|drive| drive.intent) {
-            Some(ActiveDriveIntent::Manual) => self.character_motion.effective_drive(),
-            Some(ActiveDriveIntent::Autonomous(intent)) => {
+        let state = match self.active_movement {
+            Some(ActiveMovement::Manual { .. }) => self.character_motion.effective_drive(),
+            Some(ActiveMovement::ClientDirected(Some(intent))) => {
                 let Some(state) = Self::autonomous_wire_motion_state(world, intent) else {
                     return Ok(None);
                 };
                 state
             }
-            None => return Ok(None),
+            None
+            | Some(ActiveMovement::ClientDirected(None))
+            | Some(ActiveMovement::ServerDirected(_)) => return Ok(None),
         };
         if state.is_stationary() {
             return Ok(None);
@@ -819,7 +840,7 @@ impl MovementSystem {
         if guid == Guid::NULL {
             return Ok(None);
         }
-        if let Some(state) = self.server_controlled_motion {
+        if let Some(ActiveMovement::ServerDirected(state)) = self.active_movement {
             let Some(current_pose) = world.local_player_runtime_pose() else {
                 return Ok(None);
             };
@@ -849,7 +870,7 @@ impl MovementSystem {
                 target,
             ) {
                 ServerDirectedMotionResolution::Active(step) => {
-                    self.server_controlled_motion = Some(step.state);
+                    self.active_movement = Some(ActiveMovement::ServerDirected(step.state));
                     step.order
                 }
                 ServerDirectedMotionResolution::Complete { sticky_target } => {
@@ -857,12 +878,12 @@ impl MovementSystem {
                         world.admit_entity_sticky_target(guid, Some(target));
                     }
                     log::info!("movement: completed server-directed motion");
-                    self.server_controlled_motion = None;
+                    self.active_movement = None;
                     terminal_order
                 }
                 ServerDirectedMotionResolution::Failed(failure) => {
                     log::warn!("movement: server-directed motion failed: {failure:?}");
-                    self.server_controlled_motion = None;
+                    self.active_movement = None;
                     terminal_order
                 }
             };
@@ -892,11 +913,8 @@ impl MovementSystem {
                 })?;
             return Ok(Some(tick));
         }
-        let (state, run_rate) = match self.active_drive {
-            Some(ActiveDriveState {
-                intent: ActiveDriveIntent::Manual,
-                ..
-            }) => {
+        let (state, run_rate) = match self.active_movement {
+            Some(ActiveMovement::Manual { .. }) => {
                 let run_rate = world
                     .player_run_rate()
                     .ok_or_else(|| anyhow::anyhow!("manual local run-rate is unavailable"))?;
@@ -965,22 +983,21 @@ impl MovementSystem {
     }
 
     fn should_send_stop_pulse(&self) -> bool {
-        self.server_motion_active
+        self.movement_publication_required || self.published_motion.is_some()
     }
 
-    fn note_server_motion_sent(&mut self, intent: ServerMotionIntent) {
-        self.server_motion_active = true;
-        self.last_server_motion_intent = Some(intent);
+    fn note_drive_published(&mut self, intent: PublishedDrive) {
+        self.published_motion = Some(PublishedMotion::Drive(intent));
+        self.movement_publication_required = false;
     }
 
     fn note_transient_motion_sent(&mut self) {
-        self.server_motion_active = true;
-        self.last_server_motion_intent = None;
+        self.published_motion = Some(PublishedMotion::Transient);
     }
 
-    fn note_server_motion_cleared(&mut self) {
-        self.server_motion_active = false;
-        self.last_server_motion_intent = None;
+    fn note_stop_published(&mut self) {
+        self.published_motion = None;
+        self.movement_publication_required = false;
     }
 
     async fn execute_motion_state_at(
@@ -1012,16 +1029,16 @@ impl MovementSystem {
 
         if self.should_send_stop_pulse() {
             log::info!(
-                "movement: sending stop pulse (had_active_local_motion={}, server_motion_active={})",
+                "movement: sending stop pulse (had_active_local_motion={}, published_motion_active={})",
                 had_active_local_motion,
-                self.server_motion_active,
+                self.published_motion.is_some(),
             );
             Self::send_stop_pulse(world, session, metadata).await?;
             if had_active_local_motion {
                 self.send_autonomous_position_sync(now, world, session, metadata)
                     .await?;
             }
-            self.note_server_motion_cleared();
+            self.note_stop_published();
         }
 
         Ok(state_events)
@@ -1040,7 +1057,7 @@ impl MovementSystem {
         if self.should_send_motion_state_pulse(state, metadata.motion_style) {
             log::info!("movement: sending resolved motion pulse state={:?}", state);
             Self::send_motion_state_pulse(world, session, state, metadata).await?;
-            self.note_server_motion_sent(server_motion_intent(state, metadata.motion_style));
+            self.note_drive_published(published_drive(state, metadata.motion_style));
         }
 
         Ok(state_events)
@@ -1123,7 +1140,7 @@ impl MovementSystem {
             .await?;
 
         Self::send_stop_pulse(world, session, metadata).await?;
-        self.note_server_motion_cleared();
+        self.note_stop_published();
 
         Ok(world_events)
     }
@@ -1227,11 +1244,11 @@ impl MovementSystem {
         state: CharacterDrive,
         motion_style: MotionStyle,
     ) -> bool {
-        if !self.server_motion_active {
+        if self.movement_publication_required || self.published_motion.is_none() {
             return true;
         }
 
-        self.last_server_motion_intent != Some(server_motion_intent(state, motion_style))
+        self.published_motion != Some(PublishedMotion::Drive(published_drive(state, motion_style)))
     }
 
     async fn send_motion_state_pulse(

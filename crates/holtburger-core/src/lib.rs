@@ -65,9 +65,9 @@ pub use client::types::{
     ActionResultReason, ActionResultSource, ActiveCharacterConfirmation, BusyOperationKind,
     BusyOperationResult, ClientApplicationSnapshot, ClientCharacterMotionCapabilities,
     ClientCharacterMotionFeedback, ClientCharacterMotionOutcome, ClientCharacterMotionRejection,
-    ClientCharacterSummary, ClientCommand, ClientDynamicScriptCue, ClientExitCause,
-    ClientLifecycleState, ClientPresentationDiscontinuityKind, ClientState, ClientViewEvent,
-    ClientWorldActivationCause, PlayerCharacterOptions, RetryState,
+    ClientCharacterSummary, ClientCommand, ClientDynamicScriptCue, ClientDynamicSoundCue,
+    ClientExitCause, ClientLifecycleState, ClientPresentationDiscontinuityKind, ClientState,
+    ClientViewEvent, ClientWorldActivationCause, PlayerCharacterOptions, RetryState,
 };
 pub use client::{
     ClientCameraClearance, ClientCameraClearanceRequest, ClientCameraCollisionProof,

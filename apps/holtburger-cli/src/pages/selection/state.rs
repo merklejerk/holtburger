@@ -7,7 +7,7 @@ use crate::components::text_input::SingleLineTextInput;
 use crate::pages::selection::creation::{CharacterCreationState, format_creation_errors};
 use crate::state::{EventContext, TickContext};
 use crate::types::{AppAction, AppUiAction, ChatMessageTags, UpdateResult};
-use crate::utils::format_action_result_message;
+use holtburger_core::errors::format_action_result_message;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CharacterScreen {

@@ -148,6 +148,8 @@ export interface AudioTrigger {
 	readonly source: AudioPlacementSource;
 	/** Selects which user volume scales this sound; retail's `is_ambient` as a name rather than a flag. */
 	readonly category: AudioCategory;
+	/** Producer lifetime check used only before replaying a cold buffer; playing voices keep their sampled origin. */
+	readonly canReplay?: () => boolean;
 }
 
 export type AudioTriggerOutcome =
@@ -409,7 +411,7 @@ export class AudioSystem {
 	 */
 	#warmAndReplay(trigger: AudioTrigger, triggeredAt: number): void {
 		void this.#device.prepare(trigger.soundId).then(() => {
-			if (this.#destroyed) return;
+			if (this.#destroyed || trigger.canReplay?.() === false) return;
 			if (this.#clock() - triggeredAt > this.#maximumWarmupReplaySeconds) {
 				this.#warmupExpiredCount += 1;
 				return;

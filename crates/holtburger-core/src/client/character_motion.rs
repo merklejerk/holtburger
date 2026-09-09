@@ -289,6 +289,17 @@ impl CharacterMotionController {
         }
     }
 
+    /// Retires charging when another source takes control, preserving held input and ordering.
+    pub fn cancel_charge(&mut self) {
+        self.phase = CharacterMotionPhase::Idle;
+    }
+
+    /// Releases held input without admitting delayed lifecycle edges from before this release.
+    pub fn release_input(&mut self) {
+        self.drive = CharacterDrive::default();
+        self.cancel_charge();
+    }
+
     /// Clears input ownership, including the sequence epoch.
     pub fn clear(&mut self) {
         *self = Self::default();

@@ -11,6 +11,10 @@ class FakeOrdinaryInput {
 		this.calls.push(`${action}:${down ? "down" : "up"}`);
 	}
 
+	restoreHeldAction(action: Exclude<CharacterAction, "jump">): void {
+		this.calls.push(`${action}:restore`);
+	}
+
 	reset(): void {
 		this.calls.push("reset");
 	}
@@ -100,7 +104,7 @@ describe("ClientInputArbiter", () => {
 
 		arbiter.deactivate();
 
-		expect(ordinary.calls).toEqual(["reset", "forward:down"]);
+		expect(ordinary.calls).toEqual(["reset", "forward:restore"]);
 	});
 
 	it("hard-cancels on focus loss without replaying held actions", () => {

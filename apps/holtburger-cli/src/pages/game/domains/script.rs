@@ -302,9 +302,12 @@ impl GameState {
             }),
             ScriptIntent::Unequip { guid } => Ok(AppAction::Unequip { guid }),
             ScriptIntent::RespondToConfirmation { accepted } => {
-                if view.active_confirmation.is_some() {
+                if let Some(confirmation) = &view.active_confirmation {
                     return Ok(AppAction::SendCommands {
-                        commands: vec![ClientCommand::RespondToConfirmation { accepted }],
+                        commands: vec![ClientCommand::RespondToConfirmation {
+                            request_id: confirmation.request_id,
+                            accepted,
+                        }],
                     });
                 }
 

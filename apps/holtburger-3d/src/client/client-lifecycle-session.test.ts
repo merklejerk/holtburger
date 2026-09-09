@@ -62,13 +62,48 @@ class FakeClientTransport implements ClientLifecycleTransport {
 }
 
 describe("ClientLifecycleSession", () => {
+	it("delivers validated action feedback and detaches its listener on stop", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const feedback: unknown[] = [];
+		session.subscribe((event) => {
+			if (event.type === "action-feedback") feedback.push(event.feedback);
+		});
+		await session.start();
+		transport.emit("client-action-feedback", {
+			message: "You're too busy!",
+			tone: "warning",
+		});
+		expect(feedback).toEqual([
+			{ message: "You're too busy!", tone: "warning" },
+		]);
+		expect(() =>
+			transport.emit("client-action-feedback", {
+				message: "",
+				tone: "warning",
+			}),
+		).toThrow();
+		expect(() =>
+			transport.emit("client-action-feedback", {
+				message: "Invalid tone",
+				tone: "fatal",
+			}),
+		).toThrow();
+		session.stop();
+		transport.emit("client-action-feedback", {
+			message: "Late",
+			tone: "warning",
+		});
+		expect(feedback).toHaveLength(1);
+	});
+
 	it("installs every listener before requesting the initial replacement state", async () => {
 		const transport = new FakeClientTransport();
 		const session = new ClientLifecycleSession(transport);
 
 		await session.start();
 
-		expect(transport.calls.slice(0, 20)).toEqual([
+		expect(transport.calls).toEqual([
 			"listen:client-dynamic-entity",
 			"listen:client-current-state",
 			"listen:client-lifecycle-changed",
@@ -82,7 +117,13 @@ describe("ClientLifecycleSession", () => {
 			"listen:client-world-name-updated",
 			"listen:client-player-entered",
 			"listen:client-player-vitals-updated",
+			"listen:client-entity-health-updated",
+			"listen:client-action-feedback",
+			"listen:client-confirmation-updated",
+			"listen:client-transient-string",
+			"listen:client-popup-string",
 			"listen:client-chat-message",
+			"listen:client-dynamic-sound-cue",
 			"listen:client-dynamic-script-cue",
 			"listen:client-presentation-discontinuity",
 			"listen:client-camera-started",
@@ -349,18 +390,24 @@ describe("ClientLifecycleSession", () => {
 		const session = new ClientLifecycleSession(transport);
 
 		await session.replaceDrive({
-			gait: "run",
-			longitudinal: "forward",
-			lateral: "left",
-			turning: null,
+			kind: "acquire",
+			drive: {
+				gait: "run",
+				longitudinal: "forward",
+				lateral: "left",
+				turning: null,
+			},
 		});
 		expect(transport.calls).toEqual(["invoke:replace_client_drive"]);
 		await expect(
 			session.replaceDrive({
-				gait: "sprint",
-				longitudinal: null,
-				lateral: null,
-				turning: null,
+				kind: "acquire",
+				drive: {
+					gait: "sprint",
+					longitudinal: null,
+					lateral: null,
+					turning: null,
+				},
 			} as never),
 		).rejects.toThrow();
 		expect(transport.calls).toHaveLength(1);
@@ -455,6 +502,7 @@ function currentState(playerGuid: number): ClientCurrentState {
 		playerName: "Drudge",
 		vitals: [],
 		characterMotion: null,
+		activeConfirmation: null,
 		dynamic: {
 			hostTime: { seconds: 10 },
 			entities: [view(playerGuid)],

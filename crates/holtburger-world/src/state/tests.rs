@@ -1694,7 +1694,7 @@ fn test_remote_autonomous_position_emits_forced_reposition_even_without_sequence
 }
 
 #[test]
-fn test_update_health_updates_target_entity_fraction_and_emits_replace() {
+fn health_responses_publish_even_when_reselection_returns_unchanged_health() {
     let mut state = WorldState::synthetic();
     let guid = Guid(0x60000001);
     state.add_entity(Entity::new(
@@ -1703,31 +1703,41 @@ fn test_update_health_updates_target_entity_fraction_and_emits_replace() {
         WorldPosition::default(),
     ));
 
-    let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
-        target: guid,
-        sequence: 1,
-        event: GameEvent::UpdateHealth(Box::new(UpdateHealthEventData {
+    // Each query starts a fresh frontend subscription, even if the cached world value is unchanged.
+    for (sequence, health) in (1..).zip([0.5, 0.5, 0.25, 0.0, 0.0]) {
+        let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
             target: guid,
-            health: 0.5,
-        })),
-    }));
+            sequence,
+            event: GameEvent::UpdateHealth(Box::new(UpdateHealthEventData {
+                target: guid,
+                health,
+            })),
+        }));
+        let events = state.handle_message(&msg);
 
-    let events = state.handle_message(&msg);
-
-    assert_eq!(
-        state
-            .entities
-            .get(guid)
-            .and_then(|entity| entity.health_fraction),
-        Some(0.5)
-    );
-    assert!(events.iter().any(|event| matches!(
-        event,
-        WorldEvent::EntityHealthUpdated {
-            guid: event_guid,
-            health_fraction,
-        } if *event_guid == guid && *health_fraction == 0.5
-    )));
+        assert_eq!(
+            state
+                .entities
+                .get(guid)
+                .and_then(|entity| entity.health_fraction),
+            Some(health)
+        );
+        let health_updates: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                WorldEvent::EntityHealthUpdated {
+                    guid,
+                    health_fraction,
+                } => Some((*guid, *health_fraction)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            health_updates,
+            vec![(guid, health)],
+            "health response {sequence} must reach consumers"
+        );
+    }
 }
 
 #[test]

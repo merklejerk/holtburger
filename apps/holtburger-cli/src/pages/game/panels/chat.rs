@@ -117,6 +117,18 @@ impl ChatState {
                 };
                 self.log_with_channel(None, chat_tags, msg.clone(), false);
             }
+            ClientViewEvent::EntityUseFeedback(feedback) => {
+                let (progress, detail) =
+                    holtburger_core::errors::format_entity_use_feedback(feedback);
+                self.log(ChatMessageTags::system(), progress);
+                if let Some(message) = detail {
+                    self.log(ChatMessageTags::system(), message);
+                }
+            }
+            ClientViewEvent::TransientString { message }
+            | ClientViewEvent::PopupString { message } => {
+                self.log(ChatMessageTags::system(), message.clone());
+            }
             ClientViewEvent::ServerMessage { message, chat_type } => {
                 self.log(chat_message_tags(*chat_type), message.clone());
             }

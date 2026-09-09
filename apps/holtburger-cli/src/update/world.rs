@@ -3,7 +3,7 @@ use crate::pages::selection::{CharacterDashboardEntry, SelectionState};
 use crate::state::AppState;
 use crate::state::EventContext;
 use crate::types::{Page, UpdateResult};
-use crate::utils::format_action_result_message;
+use holtburger_core::errors::format_action_result_message;
 use holtburger_core::{ActionResultReason, ClientCommand, ClientState, ClientViewEvent};
 use holtburger_protocol::errors::CharacterError;
 
@@ -141,6 +141,8 @@ impl AppState {
                 | ClientViewEvent::StatusUpdate { .. }
                 | ClientViewEvent::ActionResult { .. }
                 | ClientViewEvent::LogMessage(_)
+                | ClientViewEvent::TransientString { .. }
+                | ClientViewEvent::PopupString { .. }
                 | ClientViewEvent::ServerMessage { .. }
                 | ClientViewEvent::Chat { .. }
                 | ClientViewEvent::ChannelMessage { .. }

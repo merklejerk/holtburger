@@ -849,7 +849,10 @@ fn map_chat_channel(kind: ChatChannelKind) -> ScriptChatChannelKind {
 
 pub(crate) fn script_event_from_view_event(event: &ClientViewEvent) -> Option<ScriptEvent> {
     match event {
-        ClientViewEvent::LogMessage(message) | ClientViewEvent::ServerMessage { message, .. } => {
+        ClientViewEvent::LogMessage(message)
+        | ClientViewEvent::TransientString { message }
+        | ClientViewEvent::PopupString { message }
+        | ClientViewEvent::ServerMessage { message, .. } => {
             Some(ScriptEvent::ChatMessage(ScriptChatEvent {
                 channel: ScriptChatChannelKind::System,
                 sender: None,

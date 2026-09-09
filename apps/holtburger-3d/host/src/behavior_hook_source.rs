@@ -9,7 +9,7 @@ use anyhow::{Result, ensure};
 use holtburger_dat::file_type::setup_model::{
     AnimationHook, AnimationHookPayload, AttackConeHookPayload, CallPesHookPayload,
     CreateParticleHookPayload, EtherealHookPayload, ReplaceObjectHookPayload, ScaleHookPayload,
-    SoundTableHookPayload, SoundTweakedHookPayload, TextureVelocityHookPayload,
+    SoundHookPayload, SoundTableHookPayload, SoundTweakedHookPayload, TextureVelocityHookPayload,
     TextureVelocityPartHookPayload, TransparentPartHookPayload,
 };
 use serde::Serialize;
@@ -78,6 +78,10 @@ pub(crate) enum BehaviorHookPayloadManifest {
     },
     SoundTable {
         sound_type: u32,
+    },
+    /// Direct wave DID retail plays at the owner's position (`SoundHook::Execute`).
+    Sound {
+        sound_id: String,
     },
     Scale {
         end: f32,
@@ -220,6 +224,11 @@ pub(crate) fn behavior_hook_payload(
         AnimationHookPayload::SoundTable(SoundTableHookPayload { sound_type }) => {
             BehaviorHookPayloadManifest::SoundTable {
                 sound_type: *sound_type,
+            }
+        }
+        AnimationHookPayload::Sound(SoundHookPayload { sound_id }) => {
+            BehaviorHookPayloadManifest::Sound {
+                sound_id: dat_id(*sound_id),
             }
         }
         AnimationHookPayload::Scale(ScaleHookPayload {
@@ -381,5 +390,24 @@ mod tests {
             panic!("attack hook projected as a different payload kind");
         };
         assert_eq!(part_index, 22);
+    }
+
+    #[test]
+    fn sound_hook_projects_direct_wave_did() {
+        let hook = AnimationHook {
+            hook_type: 1,
+            direction: 0,
+            payload: AnimationHookPayload::Sound(SoundHookPayload {
+                sound_id: 0x0A00_03B6,
+            }),
+        };
+
+        let payload = behavior_hook_payload(&hook, PartIndexScope::Known(2), &mut Vec::new())
+            .expect("sound hook should project");
+
+        let BehaviorHookPayloadManifest::Sound { sound_id } = payload else {
+            panic!("sound hook projected as a different payload kind");
+        };
+        assert_eq!(sound_id, "0x0a0003b6");
     }
 }

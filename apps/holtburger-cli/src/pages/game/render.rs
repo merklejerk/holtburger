@@ -219,6 +219,7 @@ mod tests {
         let mut state = GameState::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
         state.data = GameData::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
         state.view.active_confirmation = Some(ActiveCharacterConfirmation {
+            request_id: 1,
             confirmation_type: ConfirmationType::CraftInteraction,
             context: 12,
             text: "Chance of success is 75%. Continue?".to_string(),
@@ -252,6 +253,7 @@ mod tests {
     #[test]
     fn fellowship_confirmation_body_expands_inviter_name() {
         let text = confirmation_body_text(&ActiveCharacterConfirmation {
+            request_id: 1,
             confirmation_type: ConfirmationType::Fellowship,
             context: 99,
             text: "Bestie".to_string(),
@@ -268,6 +270,7 @@ mod tests {
         let mut state = GameState::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
         state.data = GameData::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
         state.view.active_confirmation = Some(ActiveCharacterConfirmation {
+            request_id: 1,
             confirmation_type: ConfirmationType::Fellowship,
             context: 12,
             text: "Bestie".to_string(),

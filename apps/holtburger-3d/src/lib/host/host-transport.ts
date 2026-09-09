@@ -6,6 +6,7 @@ import type { HostPhysicalFlyPath } from "../game/motion/host-physical-fly-path"
 import type {
 	ClientCurrentState,
 	ClientDynamicScriptCue,
+	ClientDynamicSoundCue,
 	ClientExitRequested,
 	ClientLifecycle,
 	ClientLocalPlayerEstablished,
@@ -15,6 +16,10 @@ import type {
 	ClientChatMessage,
 	ClientPlayerEntered,
 	ClientVital,
+	ClientActionFeedback,
+	ClientServerText,
+	ClientConfirmation,
+	ClientEntityHealth,
 	ClientCharacterMotionCapabilities,
 	ClientCharacterMotionFeedback,
 	ClientPreciseJumpEvaluation,
@@ -74,6 +79,9 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"replace_client_drive",
 	"queue_client_character_motion_event",
 	"send_client_chat",
+	"query_client_entity_health",
+	"use_client_entity",
+	"respond_to_client_confirmation",
 	"start_client_camera",
 	"set_client_camera_intent",
 	"set_client_camera_clearance",
@@ -134,9 +142,15 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-world-name-updated",
 	"client-player-entered",
 	"client-player-vitals-updated",
+	"client-entity-health-updated",
 	"client-chat-message",
+	"client-action-feedback",
+	"client-transient-string",
+	"client-popup-string",
+	"client-confirmation-updated",
 	"client-dynamic-entity",
 	"client-dynamic-script-cue",
+	"client-dynamic-sound-cue",
 	"client-camera-started",
 	"client-camera",
 	"client-presentation-discontinuity",
@@ -201,8 +215,16 @@ export interface HostEventPayloadMap {
 		vitals: ClientVital[];
 	};
 	"client-chat-message": ClientChatMessage;
+	"client-action-feedback": ClientActionFeedback;
+	"client-transient-string": ClientServerText;
+	"client-popup-string": ClientServerText;
+	"client-confirmation-updated": {
+		readonly confirmation: ClientConfirmation | null;
+	};
+	"client-entity-health-updated": ClientEntityHealth;
 	"client-dynamic-entity": DynamicEntityEvent;
 	"client-dynamic-script-cue": ClientDynamicScriptCue;
+	"client-dynamic-sound-cue": ClientDynamicSoundCue;
 	"client-camera-started": ClientCameraStartReceipt;
 	"client-camera": ClientCameraTick;
 	"client-presentation-discontinuity": ClientPresentationDiscontinuity;

@@ -109,6 +109,7 @@ fn projected_fellowship_state_updates_game_data() {
 fn accepted_fellowship_invite_opens_party_tab_on_next_state_update() {
     let mut state = GameState::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
     state.view.active_confirmation = Some(ActiveCharacterConfirmation {
+        request_id: 1,
         confirmation_type: ConfirmationType::Fellowship,
         context: 42,
         text: "Leader".to_string(),
@@ -120,7 +121,10 @@ fn accepted_fellowship_invite_opens_party_tab_on_next_state_update() {
     assert!(accept_result.commands.iter().any(|command| {
         matches!(
             command,
-            ClientCommand::RespondToConfirmation { accepted: true }
+            ClientCommand::RespondToConfirmation {
+                request_id: 1,
+                accepted: true
+            }
         )
     }));
 

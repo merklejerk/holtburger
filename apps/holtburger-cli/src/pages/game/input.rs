@@ -477,9 +477,10 @@ impl GameState {
 
         let mut result = UpdateResult::new();
         if let Some(accepted) = accepted {
-            result
-                .commands
-                .push(ClientCommand::RespondToConfirmation { accepted });
+            result.commands.push(ClientCommand::RespondToConfirmation {
+                request_id: confirmation.request_id,
+                accepted,
+            });
             if accepted && confirmation.confirmation_type == ConfirmationType::Fellowship {
                 self.mark_fellowship_invite_accepted();
             }
@@ -700,6 +701,7 @@ mod tests {
         state.view.focused_pane = FocusedPane::Input;
         state.chat_input.input.set_text("/options list");
         state.view.active_confirmation = Some(ActiveCharacterConfirmation {
+            request_id: 1,
             confirmation_type: ConfirmationType::CraftInteraction,
             context: 42,
             text: "Proceed with crafting?".to_string(),
@@ -711,7 +713,10 @@ mod tests {
         assert!(result.commands.iter().any(|command| {
             matches!(
                 command,
-                ClientCommand::RespondToConfirmation { accepted: true }
+                ClientCommand::RespondToConfirmation {
+                    request_id: 1,
+                    accepted: true
+                }
             )
         }));
         assert!(result.actions.is_empty());
@@ -856,6 +861,7 @@ mod tests {
         });
         state.data.combat_mode = CombatMode::Melee;
         state.view.active_confirmation = Some(ActiveCharacterConfirmation {
+            request_id: 1,
             confirmation_type: ConfirmationType::CraftInteraction,
             context: 99,
             text: "Proceed with crafting?".to_string(),
@@ -867,7 +873,10 @@ mod tests {
         assert!(result.commands.iter().any(|command| {
             matches!(
                 command,
-                ClientCommand::RespondToConfirmation { accepted: false }
+                ClientCommand::RespondToConfirmation {
+                    request_id: 1,
+                    accepted: false
+                }
             )
         }));
         assert!(state.view.active_interaction.is_some());
@@ -880,6 +889,7 @@ mod tests {
         state.view.focused_pane = FocusedPane::Input;
         state.chat_input.input.set_text("hello");
         state.view.active_confirmation = Some(ActiveCharacterConfirmation {
+            request_id: 1,
             confirmation_type: ConfirmationType::CraftInteraction,
             context: 123,
             text: "Proceed with crafting?".to_string(),

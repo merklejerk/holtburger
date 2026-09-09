@@ -4,14 +4,19 @@ use std::collections::HashMap;
 
 use holtburger_common::{Guid, stats::VitalType};
 use holtburger_core::client::types::{ChatChannelKind, ChatSpeakerKind, CombatFeedback};
+use holtburger_core::errors::{
+    format_action_result_message, format_entity_use_feedback, is_actually_weenie_error,
+};
+use holtburger_core::{ActionResultReason, BusyOperationKind, BusyOperationResult};
 use holtburger_core::{
     ClientApplicationSnapshot, ClientCameraStartReceipt, ClientCameraTick,
     ClientCharacterMotionCapabilities, ClientCharacterMotionFeedback, ClientCharacterMotionOutcome,
-    ClientCharacterMotionRejection, ClientDynamicScriptCue, ClientExitCause, ClientLifecycleState,
-    ClientViewEvent, ClientWorldActivationCause, DynamicEntityEvent, PreciseJumpEvaluation,
-    PreciseJumpEvaluationStatus, PreciseJumpTransactionFeedback, PreciseJumpTransactionOutcome,
-    PreciseJumpTransactionRejection, combat_feedback_message,
+    ClientCharacterMotionRejection, ClientDynamicScriptCue, ClientDynamicSoundCue, ClientExitCause,
+    ClientLifecycleState, ClientViewEvent, ClientWorldActivationCause, DynamicEntityEvent,
+    PreciseJumpEvaluation, PreciseJumpEvaluationStatus, PreciseJumpTransactionFeedback,
+    PreciseJumpTransactionOutcome, PreciseJumpTransactionRejection, combat_feedback_message,
 };
+use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::{ChatMessageType, ChatMessageTypeId};
 use holtburger_world::stats::Vital;
 use serde::Serialize;
@@ -22,6 +27,43 @@ pub enum ClientVitalKind {
     Health,
     Stamina,
     Mana,
+}
+
+/// App-owned urgency for ephemeral action feedback.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClientActionFeedbackTone {
+    Status,
+    Warning,
+}
+
+/// Human-readable action result; protocol errors stop at the host boundary.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientActionFeedback {
+    /// Shared formatted message, including any server-supplied parameter.
+    pub message: String,
+    /// Presentation urgency chosen by the app's host projection.
+    pub tone: ClientActionFeedbackTone,
+}
+
+/// Recoverable question; the renderer echoes only its opaque receipt when answering.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientConfirmation {
+    /// Decimal receipt preserves all u64 bits across JavaScript.
+    pub request_id: String,
+    /// Server-authored question, without protocol-specific confirmation families.
+    pub text: String,
+}
+
+impl From<&holtburger_core::ActiveCharacterConfirmation> for ClientConfirmation {
+    fn from(value: &holtburger_core::ActiveCharacterConfirmation) -> Self {
+        Self {
+            request_id: value.request_id.to_string(),
+            text: value.text.clone(),
+        }
+    }
 }
 
 /// One local-player vital level, projected without exposing world stat internals.
@@ -213,6 +255,8 @@ pub struct ClientCurrentState {
     pub vitals: Vec<ClientVitalWire>,
     /// Current jump charge timing, absent until core has complete authority facts.
     pub character_motion: Option<ClientCharacterMotionCapabilitiesWire>,
+    /// Pending interaction, recovered with the application snapshot.
+    pub active_confirmation: Option<ClientConfirmation>,
     /// Complete focused dynamic-entity replacement level.
     pub dynamic: holtburger_core::DynamicEntitySnapshot,
 }
@@ -540,14 +584,44 @@ pub enum ClientHostEvent {
     PreciseJumpEvaluation(ClientPreciseJumpEvaluationWire),
     PreciseJumpTransactionFeedback(ClientPreciseJumpTransactionFeedbackWire),
     EntitySelectionQueryResult(ClientEntitySelectionQueryResultWire),
-    LocalPlayerEstablished { player_guid: Guid },
-    ServerTimeUpdated { time: f64 },
-    WorldNameUpdated { name: String },
-    PlayerEntered { player_guid: Guid, name: String },
-    PlayerVitalsUpdated { vitals: Vec<ClientVitalWire> },
+    LocalPlayerEstablished {
+        player_guid: Guid,
+    },
+    ServerTimeUpdated {
+        time: f64,
+    },
+    WorldNameUpdated {
+        name: String,
+    },
+    PlayerEntered {
+        player_guid: Guid,
+        name: String,
+    },
+    PlayerVitalsUpdated {
+        vitals: Vec<ClientVitalWire>,
+    },
+    /// Server-reported health for an entity, independent of frontend selection.
+    EntityHealthUpdated {
+        guid: Guid,
+        health_fraction: f32,
+    },
+    /// Brief server text for app-owned notice presentation.
+    TransientString {
+        message: String,
+    },
+    /// Server text retained until the user dismisses its dialog.
+    PopupString {
+        message: String,
+    },
+    /// Replacement pending confirmation, including explicit cancellation.
+    ConfirmationUpdated {
+        confirmation: Option<ClientConfirmation>,
+    },
+    ActionFeedback(ClientActionFeedback),
     ChatMessage(ClientChatMessageWire),
     DynamicEntity(DynamicEntityEvent),
     DynamicScriptCue(ClientDynamicScriptCue),
+    DynamicSoundCue(ClientDynamicSoundCue),
     Camera(ClientCameraTick),
     CameraStarted(ClientCameraStartReceipt),
     PresentationDiscontinuity(ClientPresentationDiscontinuity),
@@ -698,6 +772,7 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
             player_name: snapshot.player_name.clone(),
             vitals: project_vitals(&snapshot.vitals),
             character_motion: snapshot.character_motion.map(Into::into),
+            active_confirmation: snapshot.active_confirmation.as_ref().map(Into::into),
             dynamic: snapshot.dynamic.clone(),
         }
     }
@@ -738,11 +813,72 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
             player_guid: guid,
             name,
         }),
+        ClientViewEvent::EntityHealthUpdated {
+            guid,
+            health_fraction,
+        } => Some(ClientHostEvent::EntityHealthUpdated {
+            guid,
+            health_fraction,
+        }),
         ClientViewEvent::PlayerVitalsUpdated { vitals } => {
             Some(ClientHostEvent::PlayerVitalsUpdated {
                 vitals: project_vitals(&vitals),
             })
         }
+        ClientViewEvent::ActionResult { reason, .. } => {
+            if matches!(reason, ActionResultReason::Weenie(WeenieError::None, _)) {
+                return None;
+            }
+            let tone = match &reason {
+                ActionResultReason::Weenie(error, _) if !is_actually_weenie_error(*error) => {
+                    ClientActionFeedbackTone::Status
+                }
+                _ => ClientActionFeedbackTone::Warning,
+            };
+            Some(ClientHostEvent::ActionFeedback(ClientActionFeedback {
+                message: format_action_result_message(&reason),
+                tone,
+            }))
+        }
+        // Completed errors already arrive through ActionResult; only timeout needs its own notice.
+        ClientViewEvent::BusyOperationFinished {
+            operation,
+            result: BusyOperationResult::TimedOut,
+        } => {
+            let operation = match operation {
+                BusyOperationKind::Use => "Use",
+                BusyOperationKind::UseWithTarget => "Use with target",
+                BusyOperationKind::Salvage => "Salvage",
+                BusyOperationKind::SpellCast => "Spell cast",
+                BusyOperationKind::Buy => "Purchase",
+                BusyOperationKind::Sell => "Sale",
+            };
+            Some(ClientHostEvent::ActionFeedback(ClientActionFeedback {
+                message: format!("{operation} timed out waiting for the server."),
+                tone: ClientActionFeedbackTone::Warning,
+            }))
+        }
+        ClientViewEvent::EntityUseFeedback(feedback) => {
+            let (progress, detail) = format_entity_use_feedback(&feedback);
+            // The app's latest-wins toast favors the specific notice from this same use attempt.
+            let (message, tone) = match detail {
+                Some(message) => (message, ClientActionFeedbackTone::Warning),
+                None => (progress, ClientActionFeedbackTone::Status),
+            };
+            Some(ClientHostEvent::ActionFeedback(ClientActionFeedback {
+                message,
+                tone,
+            }))
+        }
+        ClientViewEvent::ActiveCharacterConfirmationUpdated { confirmation } => {
+            Some(ClientHostEvent::ConfirmationUpdated {
+                confirmation: confirmation.as_ref().map(Into::into),
+            })
+        }
+        ClientViewEvent::TransientString { message } => {
+            Some(ClientHostEvent::TransientString { message })
+        }
+        ClientViewEvent::PopupString { message } => Some(ClientHostEvent::PopupString { message }),
         ClientViewEvent::ServerMessage { message, chat_type } => Some(
             ClientHostEvent::ChatMessage(project_server_message(message, chat_type)),
         ),
@@ -793,6 +929,7 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
             project_combat_feedback(feedback).map(ClientHostEvent::ChatMessage)
         }
         ClientViewEvent::DynamicEntity(event) => Some(ClientHostEvent::DynamicEntity(event)),
+        ClientViewEvent::DynamicSoundCue(cue) => Some(ClientHostEvent::DynamicSoundCue(cue)),
         ClientViewEvent::DynamicScriptCue(cue) => Some(ClientHostEvent::DynamicScriptCue(cue)),
         ClientViewEvent::Camera(tick) => Some(ClientHostEvent::Camera(tick)),
         ClientViewEvent::CameraStarted(receipt) => Some(ClientHostEvent::CameraStarted(receipt)),
@@ -864,10 +1001,199 @@ pub fn client_exit_requested(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::host_event_sink::ClientEventSink;
+    use crate::protocol::{ProtocolFrame, StdioEventSink};
     use holtburger_common::properties::DamageType;
     use holtburger_core::client::types::ChatSpeaker;
     use holtburger_protocol::messages::ChatMessageType;
     use holtburger_protocol::messages::combat::AttackConditions;
+
+    #[test]
+    fn local_use_prefers_specific_container_notice_without_calling_generic_use_a_failure() {
+        use holtburger_world::interaction::EntityUseFeedback;
+        for (feedback, expected, warning) in [
+            (
+                EntityUseFeedback::Using {
+                    name: "Chest".into(),
+                    locked_container: true,
+                },
+                "The Chest is locked",
+                true,
+            ),
+            (
+                EntityUseFeedback::Using {
+                    name: "Door".into(),
+                    locked_container: false,
+                },
+                "Using the Door",
+                false,
+            ),
+            (
+                EntityUseFeedback::Approaching {
+                    name: "Drudge".into(),
+                },
+                "Approaching Drudge",
+                false,
+            ),
+        ] {
+            let Some(ClientHostEvent::ActionFeedback(result)) =
+                project_client_event(ClientViewEvent::EntityUseFeedback(feedback))
+            else {
+                panic!("Missing use notice");
+            };
+            assert_eq!(result.message, expected);
+            assert_eq!(
+                matches!(result.tone, ClientActionFeedbackTone::Warning),
+                warning
+            );
+        }
+    }
+
+    #[test]
+    fn server_text_channels_and_confirmation_receipts_survive_host_projection() {
+        for (event, name) in [
+            (
+                ClientViewEvent::TransientString {
+                    message: "  Locked!\nTry again.  ".into(),
+                },
+                "client-transient-string",
+            ),
+            (
+                ClientViewEvent::PopupString {
+                    message: "  Locked!\nTry again.  ".into(),
+                },
+                "client-popup-string",
+            ),
+        ] {
+            let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+            StdioEventSink::new(sender)
+                .publish_client_event(project_client_event(event).unwrap())
+                .unwrap();
+            let ProtocolFrame::Event { event: projected } = receiver.recv().unwrap() else {
+                panic!("Expected event");
+            };
+            assert_eq!(
+                serde_json::to_value(projected).unwrap(),
+                serde_json::json!({
+                    "event": name, "payload": { "message": "  Locked!\nTry again.  " }
+                })
+            );
+        }
+        let event = ClientViewEvent::ActiveCharacterConfirmationUpdated {
+            confirmation: Some(holtburger_core::ActiveCharacterConfirmation {
+                request_id: u64::MAX,
+                confirmation_type: holtburger_common::ConfirmationType::YesNo,
+                context: 7,
+                text: "Proceed?".into(),
+            }),
+        };
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        StdioEventSink::new(sender)
+            .publish_client_event(project_client_event(event).unwrap())
+            .unwrap();
+        let ProtocolFrame::Event { event: projected } = receiver.recv().unwrap() else {
+            panic!("Expected event");
+        };
+        assert_eq!(
+            serde_json::to_value(projected).unwrap(),
+            serde_json::json!({
+                "event": "client-confirmation-updated", "payload": { "confirmation": { "requestId": u64::MAX.to_string(), "text": "Proceed?" } }
+            })
+        );
+    }
+
+    #[test]
+    fn action_feedback_preserves_error_parameters_and_severity() {
+        for (reason, message, tone) in [
+            (
+                ActionResultReason::Weenie(WeenieError::YoureTooBusy, None),
+                "You're too busy!",
+                "warning",
+            ),
+            (
+                ActionResultReason::Weenie(
+                    WeenieError::IsTooBusyToAcceptGifts,
+                    Some("Drudge".into()),
+                ),
+                "Drudge is too busy to accept gifts right now.",
+                "warning",
+            ),
+            (
+                ActionResultReason::Weenie(WeenieError::ITeleported, None),
+                "I teleported.",
+                "status",
+            ),
+        ] {
+            let projected = project_client_event(ClientViewEvent::ActionResult {
+                source: holtburger_core::ActionResultSource::Wire,
+                reason,
+            })
+            .expect("action feedback must reach the renderer");
+            let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+            StdioEventSink::new(sender)
+                .publish_client_event(projected)
+                .unwrap();
+            let ProtocolFrame::Event { event } = receiver.recv().unwrap() else {
+                panic!("action feedback must be an event");
+            };
+            assert_eq!(
+                serde_json::to_value(event).unwrap(),
+                serde_json::json!({
+                    "event": "client-action-feedback", "payload": { "message": message, "tone": tone }
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn use_timeout_warns_without_duplicating_completed_action_errors() {
+        let Some(ClientHostEvent::ActionFeedback(feedback)) =
+            project_client_event(ClientViewEvent::BusyOperationFinished {
+                operation: BusyOperationKind::Use,
+                result: BusyOperationResult::TimedOut,
+            })
+        else {
+            panic!("use timeout must reach the renderer");
+        };
+        assert_eq!(feedback.message, "Use timed out waiting for the server.");
+        assert!(matches!(feedback.tone, ClientActionFeedbackTone::Warning));
+        for error in [WeenieError::None, WeenieError::YoureTooBusy] {
+            assert!(
+                project_client_event(ClientViewEvent::BusyOperationFinished {
+                    operation: BusyOperationKind::Use,
+                    result: BusyOperationResult::Completed {
+                        error,
+                        parameter: None
+                    },
+                })
+                .is_none()
+            );
+        }
+    }
+
+    #[test]
+    fn entity_health_reaches_the_renderer_with_identity_and_fraction() {
+        let projected = project_client_event(ClientViewEvent::EntityHealthUpdated {
+            guid: Guid(7),
+            health_fraction: 0.5,
+        })
+        .expect("entity health must reach the host");
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        StdioEventSink::new(sender)
+            .publish_client_event(projected)
+            .unwrap();
+        let ProtocolFrame::Event { event } = receiver.recv().unwrap() else {
+            panic!("entity health must be published as an event");
+        };
+        let wire = serde_json::to_value(event).unwrap();
+        assert_eq!(
+            wire,
+            serde_json::json!({
+                "event": "client-entity-health-updated",
+                "payload": { "guid": 7, "healthFraction": 0.5 }
+            })
+        );
+    }
 
     #[test]
     fn dynamic_script_cue_retains_generation_and_authored_values() {

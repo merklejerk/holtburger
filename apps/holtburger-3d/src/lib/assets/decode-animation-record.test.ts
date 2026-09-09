@@ -120,14 +120,31 @@ describe("decodeAnimationRecord", () => {
 		).toThrow("hook type 7 requires transparent-part payload");
 	});
 
+	it("decodes a direct-wave Sound hook instead of deferring it as raw", () => {
+		const decoded = decodeAnimationRecord(
+			animationResponse("sound", {
+				hookType: 1,
+				payload: { kind: "sound", soundId: "0x0a0003b6" },
+			}),
+			"0x03000001",
+		);
+
+		expect(decoded.hooks[0]).toMatchObject({
+			kind: "sound",
+			soundId: "0x0a0003b6",
+		});
+	});
+
 	it("preserves genuinely deferred raw payloads and validates their section bounds", () => {
-		const payloadBytes = Uint8Array.from([1, 2, 3, 4]);
+		const payloadBytes = Uint8Array.from([
+			1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+		]);
 		const decoded = decodeAnimationRecord(
 			animationResponse(
-				"sound",
+				"luminous",
 				{
-					hookType: 1,
-					payload: { byteLength: 4, byteOffset: 0, kind: "raw" },
+					hookType: 8,
+					payload: { byteLength: 12, byteOffset: 0, kind: "raw" },
 				},
 				payloadBytes,
 			),
@@ -135,17 +152,17 @@ describe("decodeAnimationRecord", () => {
 		);
 
 		expect(decoded.hooks[0]).toMatchObject({
-			command: "sound",
+			command: "luminous",
 			kind: "unimplemented",
 			payload: { bytes: payloadBytes, kind: "raw" },
 		});
 		expect(() =>
 			decodeAnimationRecord(
 				animationResponse(
-					"sound",
+					"luminous",
 					{
-						hookType: 1,
-						payload: { byteLength: 5, byteOffset: 0, kind: "raw" },
+						hookType: 8,
+						payload: { byteLength: 13, byteOffset: 0, kind: "raw" },
 					},
 					payloadBytes,
 				),

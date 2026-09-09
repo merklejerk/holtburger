@@ -1,3 +1,4 @@
+import { SHARED_FRONTEND_TUNING } from "../lib/frontend-tuning";
 import {
 	acVector3,
 	acVectorToRender,
@@ -63,6 +64,7 @@ import type {
 	ClientCurrentState,
 	ClientCameraTick,
 	ClientDynamicScriptCue,
+	ClientDynamicSoundCue,
 	ClientLifecycle,
 	ClientPresentationDiscontinuity,
 	ClientEntitySelectionQueryRequest,
@@ -254,6 +256,11 @@ export interface ClientPresentationRuntime extends MapTerrainSource {
 	): Promise<DynamicEntityRealizationDisposition>;
 	removeDynamicEntity(guid: number, generation: number): void;
 	playDynamicEntityScriptCue(cue: ClientDynamicScriptCue): void;
+	playDynamicEntitySoundCue(
+		cue: ClientDynamicSoundCue,
+		receivedAtMs: number,
+	): void;
+	clearDynamicEntityCues(): void;
 	reevaluateDynamicEntityEligibility(): Promise<DynamicEntityRealizationResults>;
 	applyDynamicEntityTick(
 		batch: DynamicEntityTickBatch,
@@ -341,6 +348,20 @@ export interface ClientPresentationSessionDependencies {
 	readonly enablePerformanceProfiling?: boolean;
 }
 
+/** Cue staging only while the asynchronous presentation owner is being constructed. */
+type PendingPresentationCue =
+	| {
+			readonly kind: "script";
+			readonly worldGeneration: number;
+			readonly cue: ClientDynamicScriptCue;
+	  }
+	| {
+			readonly kind: "sound";
+			readonly worldGeneration: number;
+			readonly receivedAtMs: number;
+			readonly cue: ClientDynamicSoundCue;
+	  };
+
 /**
  * Bridges one client authority session into the shared renderer runtime.
  *
@@ -352,6 +373,7 @@ export interface ClientPresentationSessionDependencies {
 export class ClientPresentationSession {
 	readonly camera: ClientPresentationCameraController;
 	readonly #session: ClientLifecycleSession;
+	readonly #pendingEntityCues: PendingPresentationCue[] = [];
 	readonly #canvas: HTMLCanvasElement;
 	readonly #hostTransport: HostTransport;
 	readonly #onError: (error: unknown) => void;
@@ -1013,6 +1035,7 @@ export class ClientPresentationSession {
 		});
 		const owner = this.#owner;
 		this.#owner = null;
+		this.#pendingEntityCues.length = 0;
 		if (owner !== null)
 			await attempt("presentation-owner", () => owner.destroy());
 		this.#status = { kind: "stopped", diagnostic: null };
@@ -1065,6 +1088,15 @@ export class ClientPresentationSession {
 			await this.#requestDynamicSnapshotReplacement(
 				this.#session.mirror.entities(),
 			);
+			for (const pending of this.#pendingEntityCues.splice(0)) {
+				if (
+					this.#session.mirror.entity(
+						pending.cue.guid,
+						pending.cue.generation,
+					) !== null
+				)
+					this.#deliverEntityCue(pending);
+			}
 		} catch (error) {
 			if (this.#destroyed && isPresentationCancellation(error)) return;
 			this.#reportError(error);
@@ -1086,8 +1118,20 @@ export class ClientPresentationSession {
 			case "dynamic":
 				this.#receiveDynamic(event.event);
 				return;
+			case "dynamic-sound-cue":
+				this.#deliverEntityCue({
+					kind: "sound",
+					worldGeneration: event.cue.worldGeneration,
+					receivedAtMs: performance.now(),
+					cue: event.cue,
+				});
+				return;
 			case "dynamic-script-cue":
-				this.#owner?.runtime.playDynamicEntityScriptCue(event.cue);
+				this.#deliverEntityCue({
+					kind: "script",
+					worldGeneration: this.#session.state().worldGeneration,
+					cue: event.cue,
+				});
 				return;
 			case "server-time":
 				this.#applyServerEnvironment(event.time);
@@ -1154,11 +1198,53 @@ export class ClientPresentationSession {
 				}
 				return;
 			case "removed":
+				for (
+					let index = this.#pendingEntityCues.length - 1;
+					index >= 0;
+					index -= 1
+				) {
+					const pending = this.#pendingEntityCues[index];
+					if (
+						pending?.cue.guid === event.guid &&
+						pending.cue.generation === event.generation
+					)
+						this.#pendingEntityCues.splice(index, 1);
+				}
 				if (event.guid === this.#playerGuid)
 					this.#invalidatePlayerPresentationConvergence();
 				this.#owner?.runtime.removeDynamicEntity(event.guid, event.generation);
 				return;
 		}
+	}
+
+	#deliverEntityCue(pending: PendingPresentationCue): void {
+		if (
+			this.#destroyed ||
+			pending.worldGeneration !== this.#session.state().worldGeneration
+		)
+			return;
+		const runtime = this.#owner?.runtime;
+		if (runtime === undefined) {
+			// Construction can outlast audio warmup. Retain only the existing replay window,
+			// without introducing a second timer or accumulating already expired sounds.
+			const oldestReceipt =
+				performance.now() -
+				SHARED_FRONTEND_TUNING.audio.maximumWarmupReplaySeconds * 1_000;
+			for (
+				let index = this.#pendingEntityCues.length - 1;
+				index >= 0;
+				index -= 1
+			) {
+				const queued = this.#pendingEntityCues[index];
+				if (queued.kind === "sound" && queued.receivedAtMs < oldestReceipt)
+					this.#pendingEntityCues.splice(index, 1);
+			}
+			this.#pendingEntityCues.push(pending);
+			return;
+		}
+		if (pending.kind === "script")
+			runtime.playDynamicEntityScriptCue(pending.cue);
+		else runtime.playDynamicEntitySoundCue(pending.cue, pending.receivedAtMs);
 	}
 
 	#receivePresentationDiscontinuity(
@@ -1177,6 +1263,8 @@ export class ClientPresentationSession {
 		this.#owner?.runtime.clearSceneInterest();
 		// The host's next reset/teleport batch owns placement invalidation. This edge only drops
 		// frontend demand/camera history; no canonical pose is manufactured here.
+		this.#pendingEntityCues.length = 0;
+		this.#owner?.runtime.clearDynamicEntityCues();
 		void discontinuity;
 	}
 

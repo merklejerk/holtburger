@@ -1,4 +1,5 @@
-import { acVector3, sceneVec3 } from "../../assets/ac-frame";
+import { acVector3, sceneVec3, sceneVector3 } from "../../assets/ac-frame";
+import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import { describe, expect, it, vi } from "vitest";
 import type { TexturePixelSource } from "../../assets/texture-pixel-source";
 import type { AnimationAssetSource } from "../../assets/animation-asset-source";
@@ -833,6 +834,184 @@ describe("GamePresentationRuntime view and interest control", () => {
 
 		await runtime.destroy();
 	});
+});
+
+/** Synthetic sound source exercises production table resolution and audio placement without DAT files. */
+async function buildSoundRuntime(
+	audioDevice: GamePresentationRuntimeDependencies["audioDevice"],
+) {
+	const soundId = "0x0a000001" as DatAssetId;
+	const tableId = "0x20000001" as DatAssetId;
+	const entity = spawnedEntity(7, 3);
+	const visual = spawnedVisual();
+	const runtime = await buildGamePresentationRuntimeForTest(
+		{ buildRenderer: async () => testRenderer(), resources: TEST_RESOURCES },
+		{
+			async prepareLandblockLayers(layers) {
+				return [...layers].map(({ id }) => terrainArtifact(id));
+			},
+		},
+		new EchoTexturePixelSource(),
+		ANIMATION_SOURCE,
+		PHYSICS_SCRIPT_SOURCE,
+		audioDevice,
+		PARTICLE_EMITTER_SOURCE,
+		{
+			destroy() {},
+			async loadSoundTable(id) {
+				if (id !== tableId) throw new Error(`Unexpected sound table ${id}`);
+				return {
+					id,
+					entries: new Map([
+						[0x94, [{ soundId, probability: 1, volume: 0.1 }]],
+						[0x95, [{ soundId, probability: 0, volume: 1 }]],
+					]),
+				};
+			},
+		},
+		PARTICLE_MESH_SOURCE,
+		{
+			load: async () => ({
+				...visual,
+				behavior: { ...visual.behavior, soundTableId: tableId },
+			}),
+		},
+	);
+	await activateSpawnScene(runtime, "0x0001ffff", 1);
+	await runtime.upsertDynamicEntity(entity);
+	const origin = runtime.dynamicEntityOrigin(7);
+	if (origin === null) throw new Error("Sound fixture has no realized source");
+	const block = createLandblockWorldOrigin(origin.landblockId);
+	runtime.setAudioListener({
+		envCellId: null,
+		rotation: Quat.identity(),
+		position: sceneVector3([
+			origin.landblockOrigin.x + block.x,
+			origin.landblockOrigin.y + block.y,
+			origin.landblockOrigin.z + block.z,
+		]),
+	});
+	return { runtime, entity, soundId };
+}
+
+async function settleSoundCues(): Promise<void> {
+	// Drain ordered preparation continuations; no wall-clock/asset dependency is involved.
+	await new Promise<void>((resolve) => setTimeout(resolve, 0));
+}
+
+describe("GamePresentationRuntime server sounds", () => {
+	it("uses packet gain, authored probability, positional playback, and effects muting", async () => {
+		const playOneShot = vi.fn<
+			GamePresentationRuntimeDependencies["audioDevice"]["playOneShot"]
+		>(() => ({ stop() {}, setPlacement() {}, finished: false }));
+		const { runtime, soundId } = await buildSoundRuntime({
+			playOneShot,
+			prepare: async () => {},
+		});
+		const cue = { guid: 7, generation: 3, soundId: 0x94, volume: 0.8 };
+		runtime.playDynamicEntitySoundCue(cue, performance.now());
+		runtime.playDynamicEntitySoundCue(cue, performance.now());
+		await settleSoundCues();
+		expect(playOneShot).toHaveBeenCalledTimes(2);
+		expect(playOneShot).toHaveBeenLastCalledWith(
+			soundId,
+			expect.any(Number),
+			0,
+		);
+		const firstCall = playOneShot.mock.calls[0];
+		if (firstCall === undefined) throw new Error("Expected sound playback");
+		const gain = firstCall[1];
+		// The colocated source has no distance attenuation; authored 0.1 must not multiply 0.8.
+		expect(gain).toBeGreaterThan(0.5);
+		runtime.playDynamicEntitySoundCue(
+			{ ...cue, soundId: 0x95 },
+			performance.now(),
+		);
+		await settleSoundCues();
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().audio
+				.lostProbabilityRollCount,
+		).toBe(1);
+		runtime.setAudioSettings({ effectVolume: 0, ambientVolume: 1 });
+		runtime.playDynamicEntitySoundCue(cue, performance.now());
+		await settleSoundCues();
+		expect(playOneShot).toHaveBeenCalledTimes(2);
+		runtime.setAudioSettings({ effectVolume: 1, ambientVolume: 1 });
+		runtime.playDynamicEntitySoundCue(
+			cue,
+			performance.now() -
+				(SHARED_FRONTEND_TUNING.audio.maximumWarmupReplaySeconds + 1) * 1_000,
+		);
+		await settleSoundCues();
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().serverSound.expiredCount,
+		).toBe(1);
+		runtime.playDynamicEntitySoundCue(
+			{ ...cue, soundId: 0x96 },
+			performance.now(),
+		);
+		await settleSoundCues();
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().serverSound
+				.unpreparedCount,
+		).toBe(1);
+		await runtime.destroy();
+	});
+
+	it("queues until source realization and rejects retired generations", async () => {
+		const playOneShot = vi.fn<
+			GamePresentationRuntimeDependencies["audioDevice"]["playOneShot"]
+		>(() => ({ stop() {}, setPlacement() {}, finished: false }));
+		const { runtime, entity } = await buildSoundRuntime({
+			playOneShot,
+			prepare: async () => {},
+		});
+		runtime.removeDynamicEntity(7, 3);
+		runtime.playDynamicEntitySoundCue(
+			{ guid: 7, generation: 4, soundId: 0x94, volume: 1 },
+			performance.now(),
+		);
+		await settleSoundCues();
+		expect(playOneShot).not.toHaveBeenCalled();
+		await runtime.upsertDynamicEntity({ ...entity, generation: 4 });
+		await settleSoundCues();
+		expect(playOneShot).toHaveBeenCalledTimes(1);
+		runtime.playDynamicEntitySoundCue(
+			{ guid: 7, generation: 3, soundId: 0x94, volume: 1 },
+			performance.now(),
+		);
+		await settleSoundCues();
+		expect(playOneShot).toHaveBeenCalledTimes(1);
+		await runtime.destroy();
+	});
+
+	it.each(["removal", "world-reset"] as const)(
+		"prevents cold sound replay after %s",
+		async (retirement) => {
+			const prepared = controlledPromise<void>();
+			let ready = false;
+			const playOneShot = vi.fn(() =>
+				ready ? { stop() {}, setPlacement() {}, finished: false } : null,
+			);
+			const { runtime } = await buildSoundRuntime({
+				playOneShot,
+				prepare: () => prepared.promise,
+			});
+			runtime.playDynamicEntitySoundCue(
+				{ guid: 7, generation: 3, soundId: 0x94, volume: 1 },
+				performance.now(),
+			);
+			await settleSoundCues();
+			expect(playOneShot).toHaveBeenCalledTimes(1);
+			if (retirement === "removal") runtime.removeDynamicEntity(7, 3);
+			else runtime.clearDynamicEntityCues();
+			ready = true;
+			prepared.resolve();
+			await settleSoundCues();
+			expect(playOneShot).toHaveBeenCalledTimes(1);
+			await runtime.destroy();
+		},
+	);
 });
 
 describe("GamePresentationRuntime dynamic-entity presentation", () => {

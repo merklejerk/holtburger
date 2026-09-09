@@ -1,7 +1,7 @@
 use super::*;
-use crate::utils::format_action_result_message;
 use holtburger_core::ActionResultReason;
 use holtburger_core::client::types::CombatFeedback;
+use holtburger_core::errors::format_action_result_message;
 use holtburger_core::errors::is_actually_weenie_error;
 
 pub(super) fn reduce_action(_state: &mut GameState, action: AppAction) -> UpdateResult {

@@ -543,6 +543,8 @@ async function main() {
 	const characterMotionFeedback = [];
 	let characterMotionCapabilities = null;
 	let jump = null;
+	// Keep attempted-jump footing even when release is rejected before a trajectory exists.
+	const jumpObservations = [];
 	let preciseJump = null;
 	const terminalEvents = [];
 	const latestEntities = new Map();
@@ -1061,14 +1063,18 @@ async function main() {
 					],
 				};
 			}
+			await delay(5_000);
 			const runDrivePhase = async (label, request, durationMilliseconds) => {
 				const before = actorPhaseSample(latestEntities.get(playerGuid));
+				const commandStart = performance.now();
 				await invokeMovement("replace_client_drive", { request });
+				const commandLatencyMs = performance.now() - commandStart;
 				await delay(durationMilliseconds);
 				const after = actorPhaseSample(latestEntities.get(playerGuid));
 				drivePhases.push({
 					label,
 					durationMilliseconds,
+					commandLatencyMs,
 					displacement:
 						before === null || after === null
 							? null
@@ -1159,6 +1165,10 @@ async function main() {
 					lateral: "right",
 					turning: null,
 				};
+				jumpObservations.push({
+					stage: "before-charge",
+					sample: actorPhaseSample(latestEntities.get(playerGuid)),
+				});
 				const beginSequence = 10_000;
 				const releaseSequence = beginSequence + 1;
 				const acceptedPromise = waiter.wait(
@@ -1191,6 +1201,7 @@ async function main() {
 					),
 				);
 				const beforeJump = actorPhaseSample(latestEntities.get(playerGuid));
+				jumpObservations.push({ stage: "before-release", sample: beforeJump });
 				const committedPromise = waiter.wait(
 					"client-character-motion-feedback",
 					(payload) =>
@@ -1210,6 +1221,10 @@ async function main() {
 					},
 				});
 				const committed = await committedPromise;
+				jumpObservations.push({
+					stage: "release-feedback",
+					sample: actorPhaseSample(latestEntities.get(playerGuid)),
+				});
 				if (committed.outcome.kind !== "jump-committed") {
 					throw new Error(
 						`jump release was rejected: ${committed.outcome.reason ?? "unknown"}`,
@@ -1342,6 +1357,7 @@ async function main() {
 			characterMotionCapabilities,
 			characterMotionFeedback,
 			jump,
+			jumpObservations,
 			preciseJump,
 			discontinuityCount: discontinuities.length,
 			terminalEvents,
@@ -1363,6 +1379,7 @@ async function main() {
 			characterMotionCapabilities,
 			characterMotionFeedback,
 			jump,
+			jumpObservations,
 			preciseJump,
 			census: census.toJSON(),
 		};

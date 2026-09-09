@@ -1144,13 +1144,50 @@ fn remote_creature_directive_uses_shared_authored_root_and_retires_to_default() 
         state.motion_runtimes.state(guid).unwrap().substate,
         crate::motion::MotionCommand(FIXTURE_STAND_COMMAND),
     );
+    // Displacement after completion must not restart the same retained directive.
+    assert!(state.scene.apply_runtime_body_pose(
+        body_id,
+        start,
+        SpatialSampleMode::SimulatingMotionState,
+    ));
+    state.advance_authored_motion(Duration::from_millis(100));
     assert_eq!(
-        state
-            .server_directed_motion
-            .get(&guid)
-            .expect("retained packet directive should keep a terminal lifecycle marker")
-            .state,
-        None,
+        state.motion_runtimes.state(guid).unwrap().substate,
+        crate::motion::MotionCommand(FIXTURE_STAND_COMMAND)
+    );
+
+    // Rebinding content changes playback, not the lifetime of an admitted entity command.
+    let rebound_table_id = motion_table_id + 1;
+    state.set_motion_sequences(test_motion_catalog(rebound_table_id));
+    state
+        .entities
+        .get_mut(guid)
+        .unwrap()
+        .properties
+        .set_did_prop(
+            holtburger_common::properties::PropertyDataId::MotionTable,
+            Guid(rebound_table_id),
+        );
+    state.advance_authored_motion(Duration::from_millis(100));
+    assert_eq!(
+        state.motion_runtimes.state(guid).unwrap().substate,
+        crate::motion::MotionCommand(FIXTURE_STAND_COMMAND)
+    );
+
+    // A fresh wire identity must start the command again from that same pose.
+    let entity = state.entities.get_mut(guid).unwrap();
+    let EntityNetworkMotion::Initialized(snapshot) = &mut entity.network_motion else {
+        panic!("fixture has an initialized motion snapshot");
+    };
+    let Some(EntityMotionDirective::MoveToPosition { admission, .. }) = &mut snapshot.directive
+    else {
+        panic!("fixture has a MoveTo directive");
+    };
+    admission.movement_sequence += 1;
+    state.advance_authored_motion(Duration::from_millis(100));
+    assert_eq!(
+        state.motion_runtimes.state(guid).unwrap().substate,
+        crate::motion::MotionCommand::RUN_FORWARD
     );
 }
 
@@ -3390,6 +3427,36 @@ fn non_contact_remote_position_advances_only_sequence_then_contact_updates_vecto
         .body(SpatialBodyId::Entity(guid))
         .expect("remote body should remain present after grounded snap");
     assert_eq!(body.retained.velocity, Vector3::zero());
+    assert_eq!(body.nominal.velocity, Vector3::zero());
+    // A repeated contact sample must clear locally evolved nominal velocity even when the
+    // cached server velocity is already zero; value inequality is not packet freshness.
+    state
+        .scene
+        .body_mut(SpatialBodyId::Entity(guid))
+        .unwrap()
+        .nominal
+        .velocity = Vector3::new(1.0, 0.0, 0.0);
+    let contacted_pose = state.entities.get(guid).unwrap().position;
+    assert!(state.apply_entity_position_pack(
+        guid,
+        &PositionPack {
+            pos: contacted_pose,
+            instance_sequence: 88,
+            position_sequence: 287,
+            flags: UpdatePositionFlag::HAS_CONTACT,
+            ..PositionPack::default()
+        },
+        &mut Vec::new()
+    ));
+    assert_eq!(
+        state
+            .scene
+            .body(SpatialBodyId::Entity(guid))
+            .unwrap()
+            .nominal
+            .velocity,
+        Vector3::zero()
+    );
     assert!(grounded_events.iter().any(|event| matches!(
         event,
         WorldEvent::EntityVectorUpdated {
@@ -3568,7 +3635,12 @@ fn set_state_dynamic_definition() -> crate::DynamicPhysicalBodyConfiguration {
         movement,
         response_policy,
         entity_collision: crate::DynamicBodyCollisionDefinition {
+            player_collision: None,
+            contact_response: crate::spatial::EntityContactResponse::Character(
+                crate::EntityIntegrationEligibility::Eligible,
+            ),
             target_geometry: Arc::new(crate::PreparedEntityTargetGeometry {
+                setup_radius: 0.5,
                 physics_bsp_parts: Vec::new(),
                 fallback_setup_did: 0x0200_0001,
                 fallback_shapes: vec![Arc::new(CollisionShape::Ball(CollisionBall {
@@ -3578,6 +3650,7 @@ fn set_state_dynamic_definition() -> crate::DynamicPhysicalBodyConfiguration {
                 fallback_scale: ColliderScale::uniform(1.0).unwrap(),
             }),
             dynamic_collision: crate::EntityDynamicCollisionPolicy {
+                is_static: false,
                 target: crate::EntityCollisionParticipation::Solid,
                 mover_accepts_response: true,
                 accepts_peer_reports: true,
@@ -5403,4 +5476,274 @@ fn an_attachment_whose_parent_is_gone_does_not_retain_the_child() {
         .expect("entity exists");
 
     assert!(!retention.has_parent_owner);
+}
+
+#[test]
+fn sticky_preparation_samples_scaled_setup_clearance_heading_and_target_loss() {
+    let mut world = WorldState::synthetic();
+    let actor = Guid(0x7000_0201);
+    let target = Guid(0x7000_0202);
+    let actor_radius = 0.8;
+    let target_radius = 1.1;
+    let actor_scale = 2.0;
+    let target_scale = 3.0;
+    for (guid, x, radius, scale) in [
+        (actor, 10.0, actor_radius, actor_scale),
+        (target, 20.0, target_radius, target_scale),
+    ] {
+        world.add_entity(Entity::new(
+            guid,
+            "Sticky fixture".into(),
+            WorldPosition {
+                landblock_id: Guid(0xda55_0100),
+                coords: Vector3::new(x, 10.0, 0.0),
+                rotation: Quaternion::from_heading(0.7),
+            },
+        ));
+        let base = set_state_dynamic_definition();
+        let mut definition = base.definition().clone();
+        definition.movement = crate::PhysicalBodyDefinition::grounded(
+            definition.movement.spheres(),
+            crate::GroundedConfig {
+                gravity: -9.8,
+                walkable_normal_z: crate::spatial::RETAIL_WALKABLE_NORMAL_Z,
+                landing_normal_z: crate::spatial::RETAIL_LANDING_NORMAL_Z,
+                airborne_step_down_height: crate::spatial::RETAIL_AIRBORNE_STEP_DOWN_HEIGHT,
+                step_up_height: 0.6,
+                step_down_height: 1.5,
+                edge_protection: crate::EdgeProtection::Creature,
+                maximum_substep_distance: 0.25,
+                maximum_substeps: 32,
+                maximum_contact_passes: 8,
+                separation_epsilon: 0.0005,
+            },
+        )
+        .unwrap();
+        Arc::make_mut(&mut definition.entity_collision.target_geometry).setup_radius = radius;
+        world
+            .scene
+            .set_dynamic_physical_body(
+                SpatialBodyId::Entity(guid),
+                Some(
+                    crate::DynamicPhysicalBodyConfiguration::with_object_scale(
+                        definition,
+                        base.demand(),
+                        scale,
+                    )
+                    .unwrap(),
+                ),
+                crate::PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+        world
+            .scene
+            .body_mut(SpatialBodyId::Entity(guid))
+            .unwrap()
+            .contact = ContactState::Grounded;
+    }
+    let catalog = test_motion_catalog(0x0900_0001);
+    let table = catalog.table(0x0900_0001).unwrap();
+    world
+        .motion_runtimes
+        .admit_sticky_target(table, actor, Some(target), Instant::now());
+    world.motion_runtimes.drive(
+        table,
+        actor,
+        crate::motion::MotionOrder::default(),
+        crate::spatial::MOBILE_CONTACT_TICK_SECONDS,
+    );
+    let samples = world.prepare_sticky_body_targets();
+    let sample = samples.get(&actor).unwrap();
+    assert!(
+        (sample.clearance
+            - (actor_radius * actor_scale
+                + target_radius * target_scale
+                + super::motion_resolution::STICKY_TARGET_CLEARANCE_M))
+            .abs()
+            < 1e-5
+    );
+    let actor_pose = world.scene.body_for_guid(actor).unwrap().pose;
+    assert_eq!(sample.heading, actor_pose.heading_to(&sample.position));
+    // Airborne movement keeps its existing source, without cancelling a still-live command.
+    world
+        .scene
+        .body_mut(SpatialBodyId::Entity(actor))
+        .unwrap()
+        .contact = ContactState::Airborne;
+    assert!(world.prepare_sticky_body_targets().is_empty());
+    assert_eq!(
+        world.motion_runtimes.get(actor).unwrap().sticky_target(),
+        Some(target)
+    );
+    world
+        .scene
+        .body_mut(SpatialBodyId::Entity(actor))
+        .unwrap()
+        .contact = ContactState::Grounded;
+    // Height alone supplies no facing direction. Test the producer, not a prefilled heading.
+    let target_body = world.scene.body_mut(SpatialBodyId::Entity(target)).unwrap();
+    target_body.pose.coords = actor_pose.coords + Vector3::new(0.0, 0.0, 5.0);
+    assert_eq!(
+        world.prepare_sticky_body_targets()[&actor].heading,
+        actor_pose.rotation.to_heading()
+    );
+    world.scene.remove_body(SpatialBodyId::Entity(target));
+    assert!(world.prepare_sticky_body_targets().is_empty());
+    assert_eq!(
+        world.motion_runtimes.get(actor).unwrap().sticky_target(),
+        None
+    );
+}
+
+#[test]
+fn pk_messages_refresh_installed_identity_without_changing_body_state() {
+    use holtburger_common::properties::ObjectDescriptionFlag as Flags;
+    use holtburger_protocol::messages::object::messages::properties::UpdatePropertyInt;
+    for local in [false, true] {
+        let mut state = WorldState::synthetic();
+        let guid = Guid(0x5000_0101);
+        if local {
+            state.player.guid = guid;
+        }
+        let mut entity = Entity::new(
+            guid,
+            "Player".into(),
+            WorldPosition {
+                landblock_id: Guid(0xda55_0020),
+                coords: Vector3::new(90.0, 96.0, 1.0),
+                rotation: Quaternion::identity(),
+            },
+        );
+        entity.flags = Flags::PLAYER;
+        state.add_entity(entity);
+        let id = state.runtime_body_id_for_guid(guid).unwrap();
+        state
+            .scene
+            .set_dynamic_physical_body(
+                id,
+                Some(set_state_dynamic_definition()),
+                crate::PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+        state.synchronize_entity_contact_status(guid);
+        let before = state.scene.body(id).unwrap().clone();
+        for (sequence, value, flags) in [
+            (1, 4, Flags::PLAYER | Flags::PLAYER_KILLER),
+            (2, 0x40, Flags::PLAYER | Flags::PK_LITE_STATUS),
+            (3, 1, Flags::PLAYER),
+        ] {
+            let message = if local {
+                GameMessage::PrivateUpdatePropertyInt(Box::new(UpdatePropertyInt {
+                    sequence,
+                    guid: Guid::NULL,
+                    property: PropertyInt::PlayerKillerStatus as u32,
+                    value,
+                }))
+            } else {
+                GameMessage::PublicUpdatePropertyInt(Box::new(UpdatePropertyInt {
+                    sequence,
+                    guid,
+                    property: PropertyInt::PlayerKillerStatus as u32,
+                    value,
+                }))
+            };
+            state.handle_message(&message);
+            let mut expected = before.clone();
+            let expected_dynamic = expected
+                .physical
+                .as_mut()
+                .unwrap()
+                .dynamic
+                .as_mut()
+                .unwrap();
+            expected_dynamic.collision.player_collision =
+                crate::PlayerCollisionStatus::from_description(flags);
+            assert_eq!(state.scene.body(id).unwrap(), &expected);
+            assert!(Arc::ptr_eq(
+                &before
+                    .physical
+                    .as_ref()
+                    .unwrap()
+                    .dynamic
+                    .as_ref()
+                    .unwrap()
+                    .collision
+                    .target_geometry,
+                &state
+                    .scene
+                    .body(id)
+                    .unwrap()
+                    .physical
+                    .as_ref()
+                    .unwrap()
+                    .dynamic
+                    .as_ref()
+                    .unwrap()
+                    .collision
+                    .target_geometry,
+            ));
+            let refreshed = state
+                .scene
+                .body(id)
+                .unwrap()
+                .physical
+                .as_ref()
+                .unwrap()
+                .dynamic_configuration_for_state(
+                    crate::resolve_effective_entity_physics_state(PhysicsState::ETHEREAL),
+                    set_state_dynamic_definition().demand(),
+                )
+                .unwrap();
+            assert_eq!(
+                refreshed.definition().entity_collision.player_collision,
+                crate::PlayerCollisionStatus::from_description(flags)
+            );
+        }
+    }
+}
+
+#[test]
+fn update_object_recreates_description_and_can_introduce_an_unknown_object() {
+    use holtburger_common::properties::ObjectDescriptionFlag as Flags;
+    for local in [false, true] {
+        let mut state = WorldState::synthetic();
+        let guid = Guid(0x5000_0102);
+        if local {
+            state.player.guid = guid;
+        }
+        let mut description = ObjectDescriptionData::with_guid(guid);
+        description.public_weenie_desc.obj_desc_flags = Flags::PLAYER | Flags::PLAYER_KILLER;
+        description.public_weenie_desc.name = Some("First".into());
+        let events =
+            state.handle_message(&GameMessage::UpdateObject(Box::new(description.clone())));
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, WorldEvent::EntitySpawned(_)))
+        );
+        state
+            .entities
+            .get_mut(guid)
+            .unwrap()
+            .set_property(PropertyUpdate::Int(PropertyInt::PlayerKillerStatus, 0x40));
+        description.public_weenie_desc.obj_desc_flags = Flags::PLAYER;
+        description.public_weenie_desc.name = Some("Refreshed".into());
+        let events = state.handle_message(&GameMessage::UpdateObject(Box::new(description)));
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, WorldEvent::EntityReplaced(_)))
+        );
+        let entity = state.entities.get(guid).unwrap();
+        assert_eq!(entity.flags, Flags::PLAYER);
+        assert_eq!(entity.name(), "Refreshed");
+        assert_eq!(
+            entity
+                .properties
+                .get_int_prop(PropertyInt::PlayerKillerStatus),
+            None
+        );
+    }
 }

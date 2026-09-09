@@ -12,7 +12,7 @@ pub(crate) fn handle_message(
     events: &mut Vec<WorldEvent>,
 ) -> bool {
     match message {
-        GameMessage::ObjectCreate(data) => {
+        GameMessage::ObjectCreate(data) | GameMessage::UpdateObject(data) => {
             if data.public_weenie_desc.guid == state.player.guid
                 && state.player.guid != holtburger_common::Guid::NULL
             {
@@ -21,7 +21,7 @@ pub(crate) fn handle_message(
                 }
 
                 if let Some(current_style) = EntityMotionSnapshot::from_object_description(data)
-                    .and_then(|snapshot| snapshot.current_style)
+                    .and_then(|(snapshot, _)| snapshot.current_style)
                 {
                     state
                         .player

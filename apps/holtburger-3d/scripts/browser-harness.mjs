@@ -2808,7 +2808,15 @@ async function runPossessionScenario(
 	}
 
 	await setDrive(drive());
-	await advance(1);
+	// A released motor brakes over time. Measure pure turning only after that
+	// physical continuation has stopped, rather than attributing it to turn input.
+	let stopped = await advance(1);
+	for (let tick = 1; tick < transitionTimeoutTicks; tick += 1) {
+		if (stopped.probe?.effectivePlanarSpeed === 0) break;
+		stopped = await advance(1);
+	}
+	if (stopped.probe?.effectivePlanarSpeed !== 0)
+		throw new Error("Released possession movement did not brake to rest.");
 	const turnStart = current;
 	await setDrive(drive(null, "left"));
 	const left = await advance(4);

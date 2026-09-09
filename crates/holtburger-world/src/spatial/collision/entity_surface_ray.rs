@@ -145,7 +145,14 @@ impl CollisionScene {
             let body = entities
                 .body(body_id)
                 .context("dynamic target index returned a missing entity")?;
-            for shape in placed_target_shapes(body, body.pose, request.anchor)? {
+            for shape in placed_target_shapes(
+                body.physical
+                    .as_ref()
+                    .and_then(|physical| physical.dynamic.as_ref())
+                    .context("prepared target lost dynamic physics")?,
+                body.pose,
+                request.anchor,
+            )? {
                 let Some(hit) = cast_placed_collision_shape(
                     &ray,
                     request.maximum_distance,

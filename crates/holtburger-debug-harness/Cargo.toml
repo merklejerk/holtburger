@@ -22,3 +22,11 @@ holtburger-protocol.workspace = true
 holtburger-weenie-catalog.workspace = true
 serde.workspace = true
 rmp-serde = "1.3.1"
+
+[[bin]]
+name = "contact_collection_benchmark"
+path = "src/bin/contact_collection_benchmark.rs"
+required-features = ["physics-profiling"]
+
+[features]
+physics-profiling = ["holtburger-world/physics-profiling"]

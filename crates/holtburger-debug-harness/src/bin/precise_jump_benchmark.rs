@@ -117,6 +117,7 @@ fn main() -> Result<()> {
     let analytic_timer = Instant::now();
     for _ in 0..args.iterations {
         black_box(generate_precise_jump_candidates(
+            holtburger_core::client::precise_jump_prediction::PRECISE_JUMP_FIXED_TICK,
             &capabilities,
             profile.definition,
             0.0,
@@ -214,10 +215,13 @@ fn player_scene(
         unreachable!("grounded definition must own grounded response")
     };
     *ground = GroundState::Supported(GroundSupport {
+        feature: holtburger_world::SupportFeature::Surface,
         normal: Vector3::new(0.0, 0.0, 1.0),
-        proof: collision
-            .owner_proof(owner)
-            .context("benchmark owner has no collision proof")?,
+        source: holtburger_world::SupportSource::World(
+            collision
+                .owner_proof(owner)
+                .context("benchmark owner has no collision proof")?,
+        ),
     });
     scene.register_body(body);
     Ok((scene, body_id))

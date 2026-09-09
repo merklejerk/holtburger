@@ -38,9 +38,9 @@ use crate::host_simulation_runtime::CollisionSource;
 #[cfg(test)]
 use crate::host_fixed_tick_runtime::HOST_FIXED_TICK_HZ as HOST_TICK_HZ;
 #[cfg(test)]
-use crate::placed_motion_presentation::landblock_key;
-#[cfg(test)]
 use crate::placed_motion_presentation::scene_point_to_pose;
+#[cfg(test)]
+use holtburger_core::placed_motion::landblock_key;
 
 /// Event carrying one authoritative fixed-tick placed-motion path.
 pub const EXPLORER_PHYSICAL_FLY_MOTION_EVENT: &str = "explorer-physical-fly-motion";
@@ -334,9 +334,6 @@ impl HostPhysicalFlyRuntime {
             status,
             scene_residency,
             ground_state,
-            constraint_count,
-            substeps,
-            contact_passes,
         } = presentation;
         state.active = Some(ActivePhysicalFly {
             body_id: previous.body_id,
@@ -355,9 +352,6 @@ impl HostPhysicalFlyRuntime {
             status,
             scene_residency,
             ground_state,
-            constraint_count,
-            substeps,
-            contact_passes,
             solve_duration_ms,
         };
         Ok(Some(path))

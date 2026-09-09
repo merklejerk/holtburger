@@ -69,6 +69,54 @@ describe("DynamicEntityPlacementSystem", () => {
 		expect(() => placements.destroyRoot(root)).toThrow("does not own root");
 	});
 
+	it("refreshes stationary membership without interrupting an earlier accepted path", () => {
+		const scene = new SceneGraph();
+		const placements = new DynamicEntityPlacementSystem(scene);
+		const root = placements.createRoot(
+			{
+				envCellId: null,
+				landblockId: "0x0102ffff",
+				localTransform: Mat4.identity(),
+				spatialMembership: { scopes: [{ kind: "outdoor" }] },
+			},
+			null,
+		);
+		const moving = advance(0, 10);
+		placements.applyPath(root, moving, 100, 1000);
+		placements.advance(1050);
+		const endpoint = moving.path.legs[moving.path.legs.length - 1].end;
+		const refreshed = {
+			...endpoint,
+			spatialMembership: {
+				reachesOutdoors: true,
+				reachedEnvCellIds: [cellId(0x01020100)],
+			},
+		};
+		placements.refreshMembership(root, refreshed);
+		expect(scene.getResolvedPlacement(root)?.localToLandblock.m41).toBe(5);
+		placements.advance(1075);
+		expect(scene.getResolvedPlacement(root)?.localToLandblock.m41).toBe(7.5);
+		placements.advance(1100);
+		expect(scene.getResolvedPlacement(root)?.localToLandblock.m41).toBe(10);
+		expect(scene.getNode(root)).toMatchObject({
+			spatialMembership: {
+				scopes: [
+					{ kind: "outdoor" },
+					{
+						kind: "env-cell",
+						envCellId: "0x01020100",
+						landblockId: "0x0102ffff",
+					},
+				],
+			},
+		});
+		placements.refreshMembership(root, endpoint);
+		expect(scene.getResolvedPlacement(root)?.localToLandblock.m41).toBe(10);
+		expect(scene.getNode(root)).toMatchObject({
+			spatialMembership: { scopes: [{ kind: "outdoor" }] },
+		});
+	});
+
 	it("evaluates integrated paths at frame cadence and clears them on direct correction", () => {
 		const scene = new SceneGraph();
 		const placements = new DynamicEntityPlacementSystem(scene);

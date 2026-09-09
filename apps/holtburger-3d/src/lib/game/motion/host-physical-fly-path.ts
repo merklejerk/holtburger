@@ -13,9 +13,8 @@ import {
 	validateHostPlacedPath,
 } from "./host-placed-path";
 
-/** Solver completion or finite-budget result for one fixed host tick. */
-export type PhysicalFlyTickStatus =
-	"solved" | "substep-budget-exceeded" | "contact-budget-exceeded";
+/** Confirms publication of an accepted physical path. */
+export type PhysicalFlyTickStatus = "solved";
 
 /** Non-gating residency of the final primary-sphere collision owner. */
 export type PhysicalFlySceneResidency =
@@ -55,12 +54,6 @@ export interface HostPhysicalFlyPath extends HostPlacedPath<HostPhysicalFlyPathP
 	readonly sceneResidency: PhysicalFlySceneResidency;
 	/** Ground classification committed by the latest solve. */
 	readonly groundState: PhysicalFlyGroundState;
-	/** Distinct collision constraints encountered during the latest solve. */
-	readonly constraintCount: number;
-	/** Collision substeps consumed by this tick. */
-	readonly substeps: number;
-	/** Contact-separation passes consumed by this tick. */
-	readonly contactPasses: number;
 	/** Host wall time spent solving the body and portal-transiting its viewer. */
 	readonly solveDurationMs: number;
 }

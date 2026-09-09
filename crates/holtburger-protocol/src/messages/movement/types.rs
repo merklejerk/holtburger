@@ -287,11 +287,7 @@ impl ProtocolUnpack for InterpretedMotionState {
 
         let mut commands = Vec::new();
         for _ in 0..num_commands {
-            if let Some(cmd) = MotionItem::unpack(data, offset) {
-                commands.push(cmd);
-            } else {
-                return None;
-            }
+            commands.push(MotionItem::unpack(data, offset)?);
         }
 
         // Align

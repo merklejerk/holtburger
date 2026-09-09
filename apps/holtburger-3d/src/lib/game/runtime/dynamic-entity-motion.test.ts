@@ -30,6 +30,22 @@ const opening: DynamicEntityMotion = {
 };
 
 describe("dynamic entity motion presentation", () => {
+	it("retimes an installed cycle when only its speed changes", () => {
+		const running = { ...opening, completion: "loop" as const };
+		expect(
+			classifyDynamicEntityMotionUpdate(
+				{ level: running, playback: "installed" },
+				{ ...running, framerate: running.framerate + 0.001 },
+			),
+		).toBe("retime");
+		expect(
+			classifyDynamicEntityMotionUpdate(
+				{ level: running, playback: "unplayable" },
+				{ ...running, framerate: running.framerate + 0.001 },
+			),
+		).toBe("install");
+	});
+
 	it("turns a settled level into one exact stationary frame", () => {
 		const clip = playingClipForDynamicEntityMotion(animation, {
 			kind: "settled",

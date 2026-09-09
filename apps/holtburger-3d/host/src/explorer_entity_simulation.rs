@@ -48,7 +48,7 @@ impl ExplorerEntitySimulation {
 
 impl HostFixedTickParticipant for ExplorerEntitySimulation {
     fn fixed_tick(&self, delta: Duration) -> anyhow::Result<HostFixedTickDisposition> {
-        let (envelope, outcomes) = self.delivery.with_ordered_publication(|| {
+        self.delivery.with_ordered_publication(|| {
             let collection = self
                 .entities
                 .tick_physical_collection(delta.as_secs_f32(), Instant::now())?;
@@ -57,26 +57,22 @@ impl HostFixedTickParticipant for ExplorerEntitySimulation {
                 .iter()
                 .flat_map(|tick| tick.possession_event_outcomes.iter().copied())
                 .collect();
-            let boom = self.boom.advance(&collection, delta.as_secs_f32())?;
-            Ok::<_, anyhow::Error>((
-                self.delivery
-                    .fixed_tick_envelope(collection.ticks, boom, delta)?,
-                outcomes,
-            ))
+            self.boom.publish_target(&collection);
+            self.delivery
+                .publish_fixed_tick(collection.ticks, None, delta, |envelope| {
+                    // A delivery failure does not roll back accepted physics or unregister simulation.
+                    if let Err(error) = self.sink.publish(envelope) {
+                        eprintln!("failed to publish Explorer fixed-tick envelope: {error:#}");
+                    }
+                    Ok(())
+                })?;
+            if !outcomes.is_empty()
+                && let Err(error) = self.sink.publish_possession_outcomes(outcomes)
+            {
+                eprintln!("failed to publish Explorer possession outcomes: {error:#}");
+            }
+            Ok::<_, anyhow::Error>(())
         })?;
-        if let Some(envelope) = envelope
-            && let Err(error) = self.sink.publish(envelope)
-        {
-            // Accepted solver state is authoritative even if no listener receives this delta. A
-            // later focused snapshot reconstructs it, so publication failure must not unregister
-            // the collection participant or manufacture rollback state.
-            eprintln!("failed to publish Explorer fixed-tick envelope: {error:#}");
-        }
-        if !outcomes.is_empty()
-            && let Err(error) = self.sink.publish_possession_outcomes(outcomes)
-        {
-            eprintln!("failed to publish Explorer possession outcomes: {error:#}");
-        }
         Ok(HostFixedTickDisposition::Continue)
     }
 
@@ -369,7 +365,11 @@ mod tests {
             movement,
             response_policy,
             entity_collision: DynamicBodyCollisionDefinition {
+                contact_response: holtburger_world::EntityContactResponse::Character(
+                    holtburger_world::EntityIntegrationEligibility::Eligible,
+                ),
                 target_geometry: Arc::new(PreparedEntityTargetGeometry {
+                    setup_radius: 0.5,
                     physics_bsp_parts: Vec::new(),
                     fallback_setup_did: 0x0200_0001,
                     fallback_shapes: Vec::new(),

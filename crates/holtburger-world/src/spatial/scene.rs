@@ -1,32 +1,32 @@
 #[cfg(test)]
+use super::dynamic_index::DynamicShadowIndex;
+mod contact_collection;
+
+#[cfg(test)]
 use super::PhysicalCollisionFilter;
 use super::collision::CollisionQueryError;
 use super::collision_report::{
     CollisionReportContact, CollisionReportLifetimes, CollisionReportOutcome,
     CollisionReportSource, CollisionReportTouch,
 };
-use super::dynamic_contact::{
-    DynamicContactEpoch, DynamicContactResolution, DynamicEpochParticipant, DynamicResponseContact,
-    current_dynamic_peer_overlap, prepare_dynamic_trajectory, resolve_dynamic_contacts,
-    resolve_dynamic_contacts_for_mover,
-};
 use super::dynamic_index::{
-    DynamicShadowIndex, EntityCollisionProof, EntityCollisionSnapshot, placed_target_shapes,
+    EntityCollisionProof, EntityCollisionSnapshot, current_entity_peer_overlap,
+    placed_target_shapes,
 };
 #[cfg(test)]
 use super::{
-    AcceptedBodyMotion, RETAIL_AIRBORNE_STEP_DOWN_HEIGHT, RETAIL_LANDING_NORMAL_Z,
-    RetainedBodyKinematics, SolveBodyInput,
+    AcceptedBodyMotion, PhysicalReferenceInput, RETAIL_AIRBORNE_STEP_DOWN_HEIGHT,
+    RETAIL_LANDING_NORMAL_Z, RetainedBodyKinematics, SolveBodyInput,
 };
 use super::{
     AuthoritativeBodyVectors, AuthoritativePoseEffect, AuthoritativePoseResetCause, CollisionScene,
     ContactState, DynamicBodyActivity, DynamicBodyKinematics, DynamicPhysicalBodyConfiguration,
-    DynamicPhysicalBodyDefinition, GroundState, GroundedBodyActuation, PhysicalBodyActuation,
-    PhysicalBodyDefinition, PhysicalBodyParticipation, PhysicalBodyReconfiguration,
+    DynamicPhysicalBodyDefinition, GroundState, PhysicalBodyActuation, PhysicalBodyDefinition,
+    PhysicalBodyInput, PhysicalBodyParticipation, PhysicalBodyReconfiguration,
     PhysicalBodyReconfigurationOutcome, PhysicalBodyState, PhysicalBodyTickResult,
-    PhysicalBodyTickStatus, PoseReconciliationState, PoseTranslationSource, RuntimeBodyAdvanceKind,
-    RuntimeSpatialBodyView, SolvedBodyKinematics, SpatialBody, SpatialBodyId, SpatialMembership,
-    SpatialSampleMode, SpatialSamplingConfig,
+    PoseReconciliationState, PoseTranslationSource, RuntimeBodyAdvanceKind, RuntimeSpatialBodyView,
+    SolvedBodyKinematics, SpatialBody, SpatialBodyId, SpatialMembership, SpatialSampleMode,
+    SpatialSamplingConfig,
     dead_reckoning::{project_pose_by_offset, sample_mode_for_projection_state},
     physical_body::{
         physical_body_scene_residency, resolve_physical_body_placement, solve_physical_body_tick,
@@ -62,7 +62,7 @@ fn resolve_dynamic_body_placement(
     }
 
     let anchor = Guid((body.pose.landblock_id.0 & 0xffff_0000) | 0xffff);
-    let parts = placed_target_shapes(body, body.pose, anchor)?;
+    let parts = placed_target_shapes(dynamic, body.pose, anchor)?;
     Ok(collision.part_box_membership(anchor, &parts, movement.committed_cell())?)
 }
 
@@ -85,57 +85,63 @@ pub struct DynamicBodyRelocationOutcome {
 /// One scheduled body whose current transaction cannot prove required static coverage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DynamicEntityCollectionCoverageRejection {
-    /// Stable body identity rejected without mutation.
+    /// Stable body identity; an accepted prefix may already have been committed.
     pub body_id: SpatialBodyId,
     /// First normalized collision owner required by the body's actual query.
     pub owner: Guid,
 }
 
-/// Complete preparation of one collection epoch with body-local coverage consequences.
-pub struct PreparedDynamicEntityCollection {
-    /// Stable IDs whose environment-only plans are ready in the scene-owned epoch.
-    pub movers: Vec<SpatialBodyId>,
-    /// Stable IDs whose pending ordinary correction snap is ready for fixed-tick installation.
-    pub correction_snaps: Vec<SpatialBodyId>,
-    /// Scheduled bodies rejected without preventing independent movers from committing.
-    pub coverage_rejections: Vec<DynamicEntityCollectionCoverageRejection>,
+/// One committed body result, with the prior contact needed by presentation reconciliation.
+pub struct DynamicEntityBodyTick {
+    /// Canonical body whose final state is already published.
+    pub body_id: SpatialBodyId,
+    /// Contact before this collection, sampled by its mutation owner.
+    pub previous_contact: ContactState,
+    /// Final contact committed by the collection, used for support and animation transitions.
+    pub current_contact: ContactState,
+    /// Whether the installed movement definition uses character locomotion presentation.
+    pub is_character: bool,
+    /// Net canonical root translation over this collection, in world-aligned meters.
+    pub displacement: Vector3,
+    /// Accepted collision consequence for the entity's effective physics state.
+    pub dynamic_state_change: Option<super::DynamicBodyPhysicsStateChange>,
+    /// Supported visual travel, including accepted horizontal separation but excluding lifts
+    /// and airborne travel. This observation is never physical continuation velocity.
+    pub supported_motion: super::AcceptedBodyMotion,
+    /// A supported launch was admitted during this collection, for packet/feedback publication.
+    pub launch_admitted: bool,
+    /// Accepted timed geometry, retained for host path publication without another solve.
+    pub path: super::PlacedMotionPath,
 }
 
-/// One invariant-bearing dynamic collection epoch retained until every mover is attempted.
-#[derive(Debug, Clone)]
-struct PreparedDynamicEntityEpoch {
-    /// Stable tick-start body levels retained for exact pre-commit currentness checks.
-    participants: BTreeMap<SpatialBodyId, DynamicEpochParticipant>,
-    /// Stable ordered mover plans and peer consequences not yet attempted.
-    movers: BTreeMap<SpatialBodyId, PreparedDynamicMover>,
-    /// Pending snap targets captured from the same tick-start body population as movers.
-    correction_snaps: BTreeMap<SpatialBodyId, WorldPosition>,
-    /// Body-local preparation failures retained with the epoch that produced them.
-    coverage_rejections: Vec<DynamicEntityCollectionCoverageRejection>,
+/// Mutually exclusive placement consequence for one committed body.
+pub enum DynamicEntityBodyOutcome {
+    /// Ordinary accepted movement with its full physical route and presentation facts.
+    Integrated(DynamicEntityBodyTick),
+    /// Fixed-body authority placement; publish a snap without resetting remote motion sources.
+    FixedPlacement(SpatialBodyId),
+    /// Checked return to reference; publish a snap and reset the remote continuation source.
+    RecoveredPlacement(SpatialBodyId),
 }
 
-/// One mover's fully resolved plan ready to move into canonical finalization.
-#[derive(Debug, Clone)]
-struct PreparedDynamicMover {
-    /// Full-duration environment plan or the distinct bounded plan selected by peer response.
-    plan: super::physical_body::PhysicalBodyTickCommit,
-    /// Existing derived work fact consumed by the dynamic settling decision.
-    actuation_permits_settling: bool,
-    /// Optional peer whose accepted response wakes it after this commit.
-    response: Option<DynamicResponseContact>,
-    /// Directional report touches confirmed within the selected plan duration.
-    report_touches: Vec<CollisionReportTouch>,
-}
-
-impl PreparedDynamicEntityEpoch {
-    /// Copy the small host-facing schedule while retaining all solver inputs in the epoch.
-    fn collection(&self) -> PreparedDynamicEntityCollection {
-        PreparedDynamicEntityCollection {
-            movers: self.movers.keys().copied().collect(),
-            correction_snaps: self.correction_snaps.keys().copied().collect(),
-            coverage_rejections: self.coverage_rejections.clone(),
+impl DynamicEntityBodyOutcome {
+    /// Stable identity shared by all placement dispositions.
+    pub fn body_id(&self) -> SpatialBodyId {
+        match self {
+            Self::Integrated(tick) => tick.body_id,
+            Self::FixedPlacement(id) | Self::RecoveredPlacement(id) => *id,
         }
     }
+}
+
+/// Complete collection publication; callers never interleave work between body commits.
+pub struct DynamicEntityCollectionTick {
+    /// One explicit disposition per committed body. Recovery replaces ordinary movement.
+    pub outcomes: Vec<DynamicEntityBodyOutcome>,
+    /// Collision lifecycle events aggregated after all body publications and final expiry.
+    pub collision_reports: Vec<CollisionReportOutcome>,
+    /// Bodies lacking required coverage, without invalidating independent body results.
+    pub coverage_rejections: Vec<DynamicEntityCollectionCoverageRejection>,
 }
 
 impl Default for SpatialBodyStore {
@@ -202,7 +208,7 @@ fn coarse_membership_owner(pose: WorldPosition) -> Option<Guid> {
     (pose.landblock_id != Guid::NULL).then_some(Guid((pose.landblock_id.0 & 0xffff_0000) | 0xffff))
 }
 
-pub(super) fn integrate_angular_velocity(
+pub(crate) fn integrate_angular_velocity(
     rotation: Quaternion,
     omega: Vector3,
     delta_seconds: f32,
@@ -220,7 +226,6 @@ fn completed_dynamic_tick_is_quiescent(
     previous_response: &super::PhysicalBodyResponseState,
     result: &PhysicalBodyTickResult,
     actuation_permits_settling: bool,
-    residual_contacts: bool,
 ) -> bool {
     let Some(physical) = body.physical.as_ref() else {
         return false;
@@ -244,8 +249,6 @@ fn completed_dynamic_tick_is_quiescent(
         | PhysicalBodyDefinition::FreeSphere { .. } => true,
     };
     actuation_permits_settling
-        && !residual_contacts
-        && result.motion.status == PhysicalBodyTickStatus::Solved
         && body.retained.velocity == Vector3::zero()
         && body.retained.acceleration == Vector3::zero()
         && body.retained.omega == Vector3::zero()
@@ -271,8 +274,56 @@ fn wake_dynamic_runtime(body: &mut SpatialBody) -> bool {
     true
 }
 
-/// Replaces a pose outside a collision solve and atomically narrows physical membership to the
-/// new resident scope. A later solve may expand that minimum membership from actual sphere reach.
+/// Prepares relocation privately so checked recovery can reject without mutating the scene.
+fn relocated_dynamic_body(
+    source: &SpatialBody,
+    pose: WorldPosition,
+    now: Instant,
+) -> Option<SpatialBody> {
+    let mut body = source.clone();
+    if let Some(physical) = body.physical.as_ref() {
+        let entity_collision = physical.dynamic.as_ref()?.collision.clone();
+        let demand = physical.dynamic.as_ref()?.demand;
+        let definition = DynamicPhysicalBodyConfiguration::new(
+            DynamicPhysicalBodyDefinition {
+                movement: physical.definition,
+                response_policy: physical.response_policy,
+                entity_collision,
+            },
+            demand,
+        )
+        .expect("installed dynamic body must retain non-empty local demand");
+        body.physical = Some(PhysicalBodyState::new_dynamic(
+            definition,
+            physical.collision_filter,
+            pose.is_indoors().then_some(pose.landblock_id),
+        ));
+    }
+    body.authoritative_pose = Some(pose);
+    body.pose = pose;
+    // A discontinuous placement retires the old destination as well as its motion history.
+    body.reconciliation = None;
+    body.retained = super::RetainedBodyKinematics::default();
+    body.nominal = AuthoritativeBodyVectors::default();
+    body.accepted_motion = super::AcceptedBodyMotion::default();
+    body.motion_state = None;
+    body.contact = if body.physical.is_some() {
+        ContactState::Airborne
+    } else {
+        ContactState::Unknown
+    };
+    body.sampling.mode = if body.physical.is_some() {
+        SpatialSampleMode::SimulatingVelocity
+    } else {
+        SpatialSampleMode::AuthoritativeOnly
+    };
+    body.sampling.last_authoritative_update = now;
+    body.sampling.last_derived_at = now;
+    Some(body)
+}
+
+/// Replaces a pose outside a collision solve and narrows membership to the new resident scope.
+/// A later solve may expand that minimum membership from actual sphere reach.
 fn replace_unsolved_runtime_pose(body: &mut SpatialBody, pose: WorldPosition) {
     if body.pose != pose
         && let Some(physical) = body.physical.as_mut()
@@ -349,7 +400,7 @@ fn dynamic_report_source_compatible(
 struct PhysicalBodyTickRequest<'a> {
     body_id: SpatialBodyId,
     collision: &'a CollisionScene,
-    actuation: PhysicalBodyActuation,
+    input: PhysicalBodyInput,
     delta_seconds: f32,
     now: Instant,
 }
@@ -357,10 +408,8 @@ struct PhysicalBodyTickRequest<'a> {
 /// Complete tentative consequence shared by callback and prepared-plan finalization paths.
 struct TentativePhysicalBodyTick {
     body: SpatialBody,
-    reconciliation: Option<PoseReconciliationState>,
     result: PhysicalBodyTickResult,
     report_touches: Vec<CollisionReportTouch>,
-    wake_peer: Option<SpatialBodyId>,
 }
 
 /// One solved body plus the derived consequences required for tentative publication.
@@ -369,103 +418,18 @@ struct PhysicalBodyCommitInput {
     reconciliation: Option<PoseReconciliationState>,
     commit: super::physical_body::PhysicalBodyTickCommit,
     actuation_permits_settling: bool,
-    dynamic_response: Option<DynamicResponseContact>,
-    report_touches: Vec<CollisionReportTouch>,
 }
 
-/// Composes one actor adapter's ordinary physical input through body-owned pose reconciliation.
-///
-/// The prepared participant is the body that will be committed after solving, so advancing the
-/// reconciliation cursor here neither mutates packet-time placement nor requires a second body
-/// scan. Launch remains an ordinary actor input, retained acceleration remains body-owned, and
-/// reconciliation owns only the tick translation and interpolation heading policy.
-fn reconcile_physical_body_actuation(
-    body: &mut SpatialBody,
-    reconciliation: &mut Option<PoseReconciliationState>,
-    actuation: PhysicalBodyActuation,
-    delta_seconds: f32,
-) -> anyhow::Result<PhysicalBodyActuation> {
-    let Some(state) = reconciliation.as_mut() else {
-        return Ok(actuation);
-    };
-
-    let ordinary_translation = match &actuation {
-        PhysicalBodyActuation::FixedPosition { .. } => Vector3::zero(),
-        PhysicalBodyActuation::FreeFlight {
-            kinematic_velocity, ..
-        } => *kinematic_velocity * delta_seconds,
-        PhysicalBodyActuation::Grounded(grounded) => {
-            grounded.supported_planar_velocity() * delta_seconds
-        }
-    };
-    let composition =
-        state.compose_translation(body.pose, body.contact, ordinary_translation, delta_seconds);
-    if state.is_empty() {
-        *reconciliation = None;
-    }
-
-    match actuation {
-        PhysicalBodyActuation::FixedPosition { mut rotation } => {
-            // Retail still advances interpolation, but its no-sphere branch discards translation
-            // after UpdatePositionInternal (acclient.c:308292, :310930-310949).
-            if composition.source == PoseTranslationSource::Interpolation
-                && !composition.keep_heading
-                && let Some(authoritative) = body.authoritative_pose
-            {
-                rotation = authoritative.rotation;
-            }
-            Ok(PhysicalBodyActuation::FixedPosition { rotation })
-        }
-        PhysicalBodyActuation::FreeFlight {
-            retained_velocity, ..
-        } => {
-            if matches!(composition.source, PoseTranslationSource::Interpolation)
-                && !composition.keep_heading
-                && let Some(authoritative) = body.authoritative_pose
-            {
-                body.pose.rotation = authoritative.rotation;
-            }
-            Ok(PhysicalBodyActuation::free_flight_with_kinematic_velocity(
-                retained_velocity,
-                composition.translation / delta_seconds,
-            )?)
-        }
-        PhysicalBodyActuation::Grounded(grounded) => {
-            let original_heading = grounded.control_heading();
-            let launch = grounded.launch().copied();
-            let ordinary_drive = grounded.supported_planar_velocity() != Vector3::zero();
-            let should_drive = ordinary_drive
-                || composition.source == PoseTranslationSource::Interpolation
-                || composition.translation != ordinary_translation;
-            let mut corrected = if should_drive {
-                GroundedBodyActuation::drive(Vector3::new(
-                    composition.translation.x / delta_seconds,
-                    composition.translation.y / delta_seconds,
-                    0.0,
-                ))?
-            } else {
-                GroundedBodyActuation::coast()
-            };
-            let heading = match composition.source {
-                // Retail zeros only the interpolation offset's heading when MoveTo owns yaw;
-                // the ordinary authored turn still rotates the object
-                // (`InterpolationManager::adjust_offset`, acclient.c:372078-372092).
-                PoseTranslationSource::Interpolation if composition.keep_heading => {
-                    original_heading
-                }
-                PoseTranslationSource::Interpolation => body
-                    .authoritative_pose
-                    .map(|target| target.rotation.to_heading()),
-                PoseTranslationSource::Ordinary => original_heading,
-            };
-            if let Some(heading) = heading {
-                corrected = corrected.with_control_heading(heading)?;
-            }
-            if let Some(launch) = launch {
-                corrected = corrected.with_launch(launch);
-            }
-            Ok(PhysicalBodyActuation::Grounded(corrected))
-        }
+/// Physics hydration changes which reconciliation implementation owns a retained remote sample.
+fn reclassify_body_reconciliation(body: &mut SpatialBody) {
+    let mobile = body.physical.as_ref().is_some_and(|physical| {
+        !matches!(
+            physical.definition,
+            PhysicalBodyDefinition::FixedPosition { .. }
+        )
+    });
+    if let Some(state) = body.reconciliation.as_mut() {
+        state.set_mobile_physical(mobile, body.pose);
     }
 }
 
@@ -474,7 +438,6 @@ pub struct SpatialScene {
     landblock_map: HashMap<Guid, HashSet<Guid>>,
     body_store: SpatialBodyStore,
     /// Complete dynamic solver epoch, absent between collection preparation and finish boundaries.
-    dynamic_epoch: Option<PreparedDynamicEntityEpoch>,
     /// Minimal directional state required to distinguish report starts, refreshes, and ends.
     collision_reports: CollisionReportLifetimes,
 }
@@ -490,7 +453,6 @@ impl SpatialScene {
         Self {
             landblock_map: HashMap::new(),
             body_store: SpatialBodyStore::default(),
-            dynamic_epoch: None,
             collision_reports: CollisionReportLifetimes::default(),
         }
     }
@@ -517,7 +479,7 @@ impl SpatialScene {
             .body_store
             .body(body_id)
             .context("solidifying body is not registered")?;
-        current_dynamic_peer_overlap(object, self.body_store.bodies.values())
+        current_entity_peer_overlap(object, self.body_store.bodies.values())
     }
 
     pub fn body(&self, body_id: SpatialBodyId) -> Option<&SpatialBody> {
@@ -565,307 +527,15 @@ impl SpatialScene {
         body_ids
     }
 
-    fn scheduled_dynamic_entity_ids_for_scene(
-        &self,
-        collision: &CollisionScene,
-    ) -> Vec<SpatialBodyId> {
-        let mut body_ids = self
-            .body_store
-            .bodies
-            .values()
-            .filter_map(|body| {
-                if matches!(body.id, SpatialBodyId::Ephemeral(_)) {
-                    return None;
-                }
-                let physical = body.physical.as_ref()?;
-                let dynamic = physical.dynamic.as_ref()?;
-                let stale_support = match physical.response {
-                    super::PhysicalBodyResponseState::Grounded {
-                        ground: GroundState::Supported(support) | GroundState::Sliding(support),
-                        ..
-                    } => !collision.proves(support.proof),
-                    super::PhysicalBodyResponseState::Grounded {
-                        ground: GroundState::Airborne,
-                        ..
-                    }
-                    | super::PhysicalBodyResponseState::Placement { .. } => false,
-                };
-                let requires_solve = match dynamic.activity {
-                    DynamicBodyActivity::Active => true,
-                    DynamicBodyActivity::Settled => stale_support,
-                    DynamicBodyActivity::Suspended => false,
-                };
-                (dynamic.demand.integration == LocalIntegrationDemand::Eligible && requires_solve)
-                    .then_some(body.id)
-            })
-            .collect::<Vec<_>>();
-        body_ids.sort_unstable();
-        body_ids
-    }
-
-    /// Rebuilds exact tick-start target membership and returns the stable active mover scan.
-    pub fn prepare_dynamic_entity_collection(
+    /// Advances and publishes one bounded contact collection.
+    pub fn advance_dynamic_entity_collection(
         &mut self,
         collision: &CollisionScene,
         delta_seconds: f32,
-        mut actuation_for: impl FnMut(&SpatialBody) -> anyhow::Result<PhysicalBodyActuation>,
-    ) -> anyhow::Result<PreparedDynamicEntityCollection> {
-        anyhow::ensure!(
-            self.dynamic_epoch.is_none(),
-            "dynamic collection preparation started before the active epoch finished"
-        );
-        anyhow::ensure!(
-            delta_seconds.is_finite() && delta_seconds > 0.0,
-            "dynamic collection interval must be finite and positive"
-        );
-        let mut dynamic_body_ids = self
-            .body_store
-            .bodies
-            .values()
-            .filter(|body| {
-                body.physical
-                    .as_ref()
-                    .and_then(|physical| physical.dynamic.as_ref())
-                    .is_some()
-            })
-            .map(|body| body.id)
-            .collect::<Vec<_>>();
-        dynamic_body_ids.sort_unstable();
-        let mut rejected_body_ids = HashSet::new();
-        let mut coverage_rejections = Vec::new();
-        for body_id in dynamic_body_ids {
-            if let Err(error) = self.refresh_dynamic_body_placement(body_id, collision) {
-                let Some(CollisionQueryError::UnavailableOwner { owner }) =
-                    error.downcast_ref::<CollisionQueryError>()
-                else {
-                    return Err(error);
-                };
-                rejected_body_ids.insert(body_id);
-                coverage_rejections.push(DynamicEntityCollectionCoverageRejection {
-                    body_id,
-                    owner: Guid(*owner),
-                });
-            }
-        }
-        let scheduled = self
-            .scheduled_dynamic_entity_ids_for_scene(collision)
-            .into_iter()
-            .filter(|body_id| !rejected_body_ids.contains(body_id))
-            .collect::<Vec<_>>();
-        let mut participants = BTreeMap::new();
-        for body in self.body_store.bodies.values_mut().filter(|body| {
-            body.physical
-                .as_ref()
-                .and_then(|physical| physical.dynamic.as_ref())
-                .is_some()
-        }) {
-            // Canonical bodies remain installed while every directional query reads this immutable
-            // tick start. Temporarily taking the optional box lets the body clone omit a per-tick
-            // heap allocation; the canonical allocation is restored before the next body is read.
-            let retained_reconciliation = body.reconciliation.take();
-            let reconciliation = retained_reconciliation.as_deref().copied();
-            let captured = body.clone();
-            body.reconciliation = retained_reconciliation;
-            participants.insert(
-                body.id,
-                DynamicEpochParticipant {
-                    body: captured,
-                    reconciled_body: None,
-                    reconciliation,
-                    initial_reconciliation: reconciliation,
-                },
-            );
-        }
-        let mut actuations = BTreeMap::new();
-        let mut correction_snaps = BTreeMap::new();
-        for body_id in scheduled {
-            let participant = participants
-                .get_mut(&body_id)
-                .expect("scheduled body must belong to the prepared population");
-            if let Some(target) = participant
-                .reconciliation
-                .as_mut()
-                .and_then(PoseReconciliationState::take_pending_snap)
-            {
-                if participant
-                    .reconciliation
-                    .is_some_and(|state| state.is_empty())
-                {
-                    participant.reconciliation = None;
-                }
-                correction_snaps.insert(body_id, target);
-                continue;
-            }
-            let actuation = actuation_for(&participant.body)?;
-            let prior_pose = participant.body.pose;
-            let actuation = reconcile_physical_body_actuation(
-                &mut participant.body,
-                &mut participant.reconciliation,
-                actuation,
-                delta_seconds,
-            )?;
-            if participant.body.pose != prior_pose {
-                let mut reconciled = participant.body.clone();
-                participant.body.pose = prior_pose;
-                let seed_cell = reconciled
-                    .physical
-                    .as_ref()
-                    .expect("scheduled body is physical")
-                    .response
-                    .cell();
-                match resolve_dynamic_body_placement(collision, &reconciled, seed_cell) {
-                    Ok(placement) => {
-                        reconciled
-                            .physical
-                            .as_mut()
-                            .and_then(|physical| physical.dynamic.as_mut())
-                            .expect("scheduled body is dynamic")
-                            .placement = placement;
-                    }
-                    Err(error) => match error.downcast_ref::<CollisionQueryError>() {
-                        Some(CollisionQueryError::UnavailableOwner { owner }) => {
-                            // An uncommittable correction must not become another body's target pose.
-                            coverage_rejections.push(DynamicEntityCollectionCoverageRejection {
-                                body_id,
-                                owner: Guid(*owner),
-                            });
-                            continue;
-                        }
-                        Some(_) | None => return Err(error),
-                    },
-                }
-                participant.reconciled_body = Some(Box::new(reconciled));
-            }
-            actuations.insert(body_id, actuation);
-        }
-        // Reconciliation may change facing. Resolve every input before any contact query so all
-        // movers observe one coherent snapshot rather than a body-order-dependent mixture.
-        let next = DynamicShadowIndex::compile(
-            participants
-                .values()
-                .map(DynamicEpochParticipant::query_body),
-        )?;
-        let mut trajectories = BTreeMap::new();
-        for (body_id, actuation) in actuations {
-            let participant = &participants[&body_id];
-            let trajectory = match prepare_dynamic_trajectory(
-                collision,
-                &next,
-                &participants,
-                participant.query_body(),
-                actuation,
-                delta_seconds,
-            ) {
-                Ok(trajectory) => trajectory,
-                Err(error) => match error.downcast_ref::<CollisionQueryError>() {
-                    Some(CollisionQueryError::UnavailableOwner { owner }) => {
-                        coverage_rejections.push(DynamicEntityCollectionCoverageRejection {
-                            body_id,
-                            owner: Guid(*owner),
-                        });
-                        continue;
-                    }
-                    Some(_) | None => return Err(error),
-                },
-            };
-            trajectories.insert(body_id, trajectory);
-        }
-        let mut resolutions = BTreeMap::new();
-        let contact_epoch = DynamicContactEpoch {
-            collision,
-            index: &next,
-            targets: &participants,
-            trajectories: &trajectories,
-            delta_seconds,
-        };
-        for body_id in trajectories.keys() {
-            match resolve_dynamic_contacts(contact_epoch, *body_id) {
-                Ok(resolution) => {
-                    resolutions.insert(*body_id, resolution);
-                }
-                Err(error) => match error.downcast_ref::<CollisionQueryError>() {
-                    Some(CollisionQueryError::UnavailableOwner { owner }) => {
-                        coverage_rejections.push(DynamicEntityCollectionCoverageRejection {
-                            body_id: *body_id,
-                            owner: Guid(*owner),
-                        });
-                    }
-                    Some(_) | None => return Err(error),
-                },
-            }
-        }
-        let movers = trajectories
-            .into_iter()
-            .filter_map(|(body_id, trajectory)| {
-                let DynamicContactResolution {
-                    plan,
-                    response,
-                    report_touches,
-                } = resolutions.remove(&body_id)?;
-                Some((
-                    body_id,
-                    PreparedDynamicMover {
-                        plan,
-                        actuation_permits_settling: trajectory.actuation.permits_dynamic_settling(),
-                        response,
-                        report_touches,
-                    },
-                ))
-            })
-            .collect();
-        coverage_rejections.sort_by_key(|rejection| rejection.body_id);
-        let epoch = PreparedDynamicEntityEpoch {
-            participants,
-            movers,
-            correction_snaps,
-            coverage_rejections,
-        };
-        let collection = epoch.collection();
-        self.dynamic_epoch = Some(epoch);
-        Ok(collection)
-    }
-
-    /// Queries the active epoch's target index for focused broad-phase tests.
-    #[cfg(test)]
-    fn dynamic_candidates_for_extent(
-        &self,
-        mover: SpatialBodyId,
-        anchor: Guid,
-        minimum: Vector3,
-        maximum: Vector3,
-        placement: &super::SpatialMembership,
-    ) -> anyhow::Result<Vec<SpatialBodyId>> {
-        let epoch = self
-            .dynamic_epoch
-            .as_ref()
-            .context("dynamic candidate query requested without an active prepared epoch")?;
-        let targets = DynamicShadowIndex::compile(
-            epoch
-                .participants
-                .values()
-                .map(DynamicEpochParticipant::query_body),
-        )?;
-        Ok(targets.candidates(Some(mover), anchor, minimum, maximum, placement))
-    }
-
-    /// Ends naturally expired report lifetimes after all movers in one collection were attempted.
-    ///
-    /// Hosts must call this even when the prepared mover list is empty so settled bodies do not
-    /// freeze report time merely because integration was skipped.
-    pub fn finish_dynamic_entity_collection(
-        &mut self,
         now: Instant,
-    ) -> anyhow::Result<Vec<CollisionReportOutcome>> {
-        let epoch = self
-            .dynamic_epoch
-            .as_ref()
-            .context("dynamic collection finished without an active prepared epoch")?;
-        anyhow::ensure!(
-            epoch.movers.is_empty() && epoch.correction_snaps.is_empty(),
-            "dynamic collection finished before every prepared body was attempted"
-        );
-        self.dynamic_epoch = None;
-        self.collision_reports.expire(now)
+        input_for: impl FnMut(&SpatialBody) -> anyhow::Result<PhysicalBodyInput>,
+    ) -> anyhow::Result<DynamicEntityCollectionTick> {
+        self.advance_contact_entity_collection(collision, delta_seconds, now, input_for)
     }
 
     /// Forces balanced ends for every directional lifetime involving one retiring body.
@@ -989,6 +659,7 @@ impl SpatialScene {
             response_policy,
             retained_cell,
         ));
+        reclassify_body_reconciliation(body);
         Some(())
     }
 
@@ -1089,6 +760,7 @@ impl SpatialScene {
         let dynamic_source_compatible =
             dynamic_report_source_compatible(previous_for_reports.as_ref(), next.as_ref());
         body.physical = next;
+        reclassify_body_reconciliation(body);
         let collision_reports = self.collision_reports.force_end_where(|contact| {
             if contact.recipient == body_id {
                 match contact.source {
@@ -1200,6 +872,11 @@ impl SpatialScene {
             .expect("dynamic definition produced generic physical state")
             .placement = retained_placement;
         body.physical = Some(replacement);
+        body.nominal = AuthoritativeBodyVectors {
+            velocity: kinematics.velocity(),
+            acceleration: kinematics.acceleration(),
+            omega: kinematics.omega(),
+        };
         body.retained = super::RetainedBodyKinematics {
             velocity: kinematics.velocity(),
             acceleration: kinematics.acceleration(),
@@ -1219,50 +896,21 @@ impl SpatialScene {
         pose: WorldPosition,
         now: Instant,
     ) -> Option<DynamicBodyRelocationOutcome> {
-        let mut body = self.body_store.body(body_id)?.clone();
-        if let Some(physical) = body.physical.as_ref() {
-            let entity_collision = physical.dynamic.as_ref()?.collision.clone();
-            let demand = physical.dynamic.as_ref()?.demand;
-            let definition = DynamicPhysicalBodyConfiguration::new(
-                DynamicPhysicalBodyDefinition {
-                    movement: physical.definition,
-                    response_policy: physical.response_policy,
-                    entity_collision,
-                },
-                demand,
-            )
-            .expect("installed dynamic body must retain non-empty local demand");
-            body.physical = Some(PhysicalBodyState::new_dynamic(
-                definition,
-                physical.collision_filter,
-                pose.is_indoors().then_some(pose.landblock_id),
-            ));
-        }
-        body.authoritative_pose = Some(pose);
-        body.pose = pose;
-        body.retained = super::RetainedBodyKinematics::default();
-        body.accepted_motion = super::AcceptedBodyMotion::default();
-        body.motion_state = None;
-        body.contact = if body.physical.is_some() {
-            ContactState::Airborne
-        } else {
-            ContactState::Unknown
-        };
-        body.sampling.mode = if body.physical.is_some() {
-            SpatialSampleMode::SimulatingVelocity
-        } else {
-            SpatialSampleMode::AuthoritativeOnly
-        };
-        body.sampling.last_authoritative_update = now;
-        body.sampling.last_derived_at = now;
+        let body = relocated_dynamic_body(self.body_store.body(body_id)?, pose, now)?;
+        Some(self.publish_dynamic_relocation(body))
+    }
+
+    /// Publishes an already-prepared relocation and retires its old collision report lifetimes.
+    fn publish_dynamic_relocation(&mut self, body: SpatialBody) -> DynamicBodyRelocationOutcome {
+        let body_id = body.id;
         let view = body.runtime_view();
         self.update_body(body)
             .expect("prevalidated dynamic body vanished during relocation");
         let collision_reports = self.force_end_collision_reports_for_body(body_id);
-        Some(DynamicBodyRelocationOutcome {
+        DynamicBodyRelocationOutcome {
             body: view,
             collision_reports,
-        })
+        }
     }
 
     /// Re-derives one dynamic body's exact static-collision domains at its current pose.
@@ -1319,14 +967,14 @@ impl SpatialScene {
         &mut self,
         body_id: SpatialBodyId,
         collision: &CollisionScene,
-        actuation: PhysicalBodyActuation,
+        input: PhysicalBodyInput,
         delta_seconds: f32,
         now: Instant,
     ) -> anyhow::Result<PhysicalBodyTickResult> {
         self.tick_physical_body_transaction(
             body_id,
             collision,
-            actuation,
+            input,
             delta_seconds,
             now,
             |_, _| Ok(()),
@@ -1334,10 +982,9 @@ impl SpatialScene {
         .map(|(result, ())| result)
     }
 
-    /// Advances one mover against installed environment plus a sealed, non-integrated entity set.
-    ///
-    /// Peer poses and physical state remain immutable. This is the bounded prediction counterpart
-    /// to the ordinary collection epoch, not an alternate authoritative simulation path.
+    /// Advances a speculative mover against immutable authored entity surfaces using the common
+    /// contact step. Only the mover is published; peers, report lifetimes, and authority stay intact.
+    /// Frozen peers are hard sweep targets, an intentional prediction approximation.
     pub fn tick_physical_body_against_entity_snapshot(
         &mut self,
         body_id: SpatialBodyId,
@@ -1346,52 +993,90 @@ impl SpatialScene {
         actuation: PhysicalBodyActuation,
         delta_seconds: f32,
         now: Instant,
-    ) -> anyhow::Result<PhysicalBodyTickResult> {
-        let (body, reconciliation) = {
-            let body = self
-                .body_store
-                .body_mut(body_id)
-                .ok_or_else(|| anyhow::anyhow!("physical body {body_id:?} is not registered"))?;
-            let retained_reconciliation = body.reconciliation.take();
-            let reconciliation = retained_reconciliation.as_deref().copied();
-            let captured = body.clone();
-            body.reconciliation = retained_reconciliation;
-            (captured, reconciliation)
-        };
-        let actuation_permits_settling = actuation.permits_dynamic_settling();
-        let trajectory = prepare_dynamic_trajectory(
+    ) -> anyhow::Result<super::ContactBodyUpdate> {
+        let mut mover = self
+            .body_store
+            .body(body_id)
+            .cloned()
+            .context("prediction body is not registered")?;
+        let physical = mover
+            .physical
+            .as_mut()
+            .context("prediction body has no physics")?;
+        anyhow::ensure!(
+            !matches!(
+                physical.definition,
+                PhysicalBodyDefinition::FixedPosition { .. }
+            ),
+            "prediction requires a mobile body"
+        );
+        if let Some(dynamic) = &mut physical.dynamic {
+            dynamic.activity = DynamicBodyActivity::Active;
+            dynamic.demand.integration = LocalIntegrationDemand::Eligible;
+        }
+        if let PhysicalBodyActuation::FreeFlight {
+            retained_velocity, ..
+        } = &actuation
+        {
+            mover.retained.velocity = *retained_velocity;
+        }
+        let mut bodies = targets
+            .targets
+            .values()
+            .filter(|peer| peer.id != body_id)
+            .cloned()
+            .collect::<Vec<_>>();
+        for peer in &mut bodies {
+            peer.physical
+                .as_mut()
+                .and_then(|physical| physical.dynamic.as_mut())
+                .context("sealed entity target lost its dynamic state")?
+                .demand
+                .integration = LocalIntegrationDemand::Excluded;
+        }
+        let anchor = Guid((mover.pose.landblock_id.0 & 0xffff_0000) | 0xffff);
+        bodies.push(mover);
+        let mut result = super::mobile_contact::advance_body_contact_collection_without_reports(
             collision,
-            &targets.index,
-            targets,
-            &body,
-            actuation,
+            &bodies,
+            anchor,
             delta_seconds,
-        )?;
-        let mut trajectories = BTreeMap::new();
-        trajectories.insert(body_id, trajectory);
-        let resolution = resolve_dynamic_contacts_for_mover(
-            DynamicContactEpoch {
-                collision,
-                index: &targets.index,
-                targets,
-                trajectories: &trajectories,
-                delta_seconds,
+            |body, ground, interval| {
+                anyhow::ensure!(
+                    body.id == body_id,
+                    "frozen prediction peer entered integration"
+                );
+                actuation.contact_step_input(
+                    body.physical
+                        .as_ref()
+                        .ok_or_else(|| anyhow::anyhow!("contact input requires body physics"))?,
+                    body.pose.rotation,
+                    body.retained.acceleration,
+                    ground,
+                    None,
+                    interval,
+                )
             },
-            &body,
         )?;
-        let tentative = self.prepare_physical_body_commit(
-            collision,
-            PhysicalBodyCommitInput {
-                body,
-                reconciliation,
-                commit: resolution.plan,
-                actuation_permits_settling,
-                dynamic_response: resolution.response,
-                report_touches: resolution.report_touches,
-            },
-            now,
-        )?;
-        Ok(self.publish_physical_body_commit(tentative, now))
+        anyhow::ensure!(
+            result.bodies.len() == 1,
+            "prediction must produce exactly one mover"
+        );
+        let update = result
+            .bodies
+            .pop()
+            .context("prediction lost its mover result")?;
+        let mut body = self
+            .body_store
+            .body(body_id)
+            .cloned()
+            .context("prediction body disappeared")?;
+        update.apply_physical_state(&mut body)?;
+        body.sampling.mode = SpatialSampleMode::SimulatingVelocity;
+        body.sampling.last_derived_at = now;
+        self.update_body(body)
+            .context("prediction body disappeared during publication")?;
+        Ok(update)
     }
 
     /// Solves one body provisionally and commits it only after its consumer accepts the result.
@@ -1402,7 +1087,7 @@ impl SpatialScene {
         &mut self,
         body_id: SpatialBodyId,
         collision: &CollisionScene,
-        actuation: PhysicalBodyActuation,
+        input: PhysicalBodyInput,
         delta_seconds: f32,
         now: Instant,
         accept: impl FnOnce(&SpatialBody, &PhysicalBodyTickResult) -> anyhow::Result<T>,
@@ -1411,119 +1096,12 @@ impl SpatialScene {
             PhysicalBodyTickRequest {
                 body_id,
                 collision,
-                actuation,
+                input,
                 delta_seconds,
                 now,
             },
             accept,
         )
-    }
-
-    /// Commits one mover whose environment and peer plans were sealed during epoch preparation.
-    pub fn tick_prepared_dynamic_physical_body(
-        &mut self,
-        body_id: SpatialBodyId,
-        collision: &CollisionScene,
-        now: Instant,
-    ) -> anyhow::Result<PhysicalBodyTickResult> {
-        let (prepared, captured, reconciled_body, reconciliation, initial_reconciliation) = {
-            let epoch = self
-                .dynamic_epoch
-                .as_mut()
-                .context("prepared dynamic body tick requested without an active epoch")?;
-            let prepared = epoch.movers.remove(&body_id).with_context(|| {
-                format!("dynamic body {body_id:?} was not pending in the prepared epoch")
-            })?;
-            let captured = epoch
-                .participants
-                .remove(&body_id)
-                .context("prepared dynamic mover has no tick-start participant")?;
-            (
-                prepared,
-                captured.body,
-                captured.reconciled_body,
-                captured.reconciliation,
-                captured.initial_reconciliation,
-            )
-        };
-        let current = self
-            .body_store
-            .body(body_id)
-            .context("prepared dynamic mover vanished before finalization")?;
-        anyhow::ensure!(
-            current.pose == captured.pose
-                && current.retained == captured.retained
-                && current.accepted_motion == captured.accepted_motion
-                && current.reconciliation.as_deref() == initial_reconciliation.as_ref()
-                && current.physical == captured.physical,
-            "dynamic body {body_id:?} changed after collection preparation"
-        );
-        let tentative = self.prepare_physical_body_commit(
-            collision,
-            PhysicalBodyCommitInput {
-                body: reconciled_body.map(|body| *body).unwrap_or(captured),
-                reconciliation,
-                commit: prepared.plan,
-                actuation_permits_settling: prepared.actuation_permits_settling,
-                dynamic_response: prepared.response,
-                report_touches: prepared.report_touches,
-            },
-            now,
-        )?;
-        Ok(self.publish_physical_body_commit(tentative, now))
-    }
-
-    /// Installs one prepared ordinary correction snap without treating it as an authority reset.
-    pub fn tick_prepared_dynamic_correction_snap(
-        &mut self,
-        body_id: SpatialBodyId,
-        now: Instant,
-    ) -> anyhow::Result<RuntimeSpatialBodyView> {
-        let (target, captured, reconciliation, initial_reconciliation) = {
-            let epoch = self
-                .dynamic_epoch
-                .as_mut()
-                .context("prepared correction snap requested without an active epoch")?;
-            let target = epoch.correction_snaps.remove(&body_id).with_context(|| {
-                format!("dynamic body {body_id:?} had no prepared correction snap")
-            })?;
-            let captured = epoch
-                .participants
-                .remove(&body_id)
-                .context("prepared correction snap has no tick-start participant")?;
-            (
-                target,
-                captured.body,
-                captured.reconciliation,
-                captured.initial_reconciliation,
-            )
-        };
-        let current = self
-            .body_store
-            .body(body_id)
-            .context("prepared correction snap body vanished before finalization")?;
-        anyhow::ensure!(
-            current.pose == captured.pose
-                && current.retained == captured.retained
-                && current.accepted_motion == captured.accepted_motion
-                && current.reconciliation.as_deref() == initial_reconciliation.as_ref()
-                && current.physical == captured.physical,
-            "dynamic body {body_id:?} changed after correction-snap preparation"
-        );
-
-        self.relocate_dynamic_body(body_id, target, now)
-            .context("prepared correction snap body could not be relocated")?;
-        let body = self
-            .body_store
-            .body_mut(body_id)
-            .expect("relocated correction-snap body must remain registered");
-        body.retained = captured.retained;
-        body.accepted_motion = super::AcceptedBodyMotion::default();
-        body.motion_state = captured.motion_state;
-        body.reconciliation = reconciliation.map(Box::new);
-        body.sampling.mode = captured.sampling.mode;
-        wake_dynamic_runtime(body);
-        Ok(body.runtime_view())
     }
 
     fn tick_physical_body_transaction_inner<T>(
@@ -1534,23 +1112,60 @@ impl SpatialScene {
         let PhysicalBodyTickRequest {
             body_id,
             collision,
-            actuation,
+            input,
             delta_seconds,
             now,
         } = request;
-        let (body, reconciliation) = {
-            let body = self
-                .body_store
-                .body_mut(body_id)
-                .ok_or_else(|| anyhow::anyhow!("physical body {body_id:?} is not registered"))?;
-            let retained_reconciliation = body.reconciliation.take();
-            let reconciliation = retained_reconciliation.as_deref().copied();
-            let captured = body.clone();
-            body.reconciliation = retained_reconciliation;
-            (captured, reconciliation)
-        };
-        let actuation_permits_settling = actuation.permits_dynamic_settling();
-        let commit = solve_physical_body_tick(collision, &body, &actuation, delta_seconds)?;
+        let mut body = self
+            .body_store
+            .body(body_id)
+            .cloned()
+            .with_context(|| format!("physical body {body_id:?} is not registered"))?;
+        let mut reconciliation = body.reconciliation.as_deref().copied();
+        input.prepare(&mut body, &mut reconciliation)?;
+        let mut actuation = input.placement_actuation(&body);
+        if let PhysicalBodyActuation::FixedPosition { rotation, .. } = &mut actuation
+            && let Some(state) = reconciliation.as_mut()
+        {
+            let composition =
+                state.compose_translation(body.pose, body.contact, Vector3::zero(), delta_seconds);
+            // Fixed-position authority can select heading but cannot author mobile travel.
+            if composition.source == PoseTranslationSource::Interpolation
+                && !composition.keep_heading
+                && let Some(authoritative) = body.authoritative_pose
+            {
+                *rotation = authoritative.rotation;
+            }
+        }
+        let actuation_permits_settling = input.permits_dynamic_settling();
+        let mut nominal_velocity = body.nominal.velocity;
+        let commit = solve_physical_body_tick(
+            collision,
+            &body,
+            &actuation,
+            delta_seconds,
+            |body, ground, interval| {
+                let step = input.step(body, ground, interval, &mut reconciliation)?;
+                nominal_velocity = step.nominal_velocity;
+                Ok(step.actuation)
+            },
+        )?;
+        body.nominal.velocity = nominal_velocity;
+        if commit.dynamic_state_change.is_some() {
+            reconciliation = None;
+        } else if let Some(state) = reconciliation.as_mut() {
+            state.finish_physical_tick(
+                commit.pose,
+                commit.retained_velocity - nominal_velocity,
+                super::PhysicalReferenceDomain::for_definition(
+                    body.physical
+                        .as_ref()
+                        .context("physical commit lost its definition")?
+                        .definition,
+                ),
+            );
+        }
+        reconciliation = reconciliation.filter(|state| !state.is_empty());
         let tentative = self.prepare_physical_body_commit(
             collision,
             PhysicalBodyCommitInput {
@@ -1558,8 +1173,6 @@ impl SpatialScene {
                 reconciliation,
                 commit,
                 actuation_permits_settling,
-                dynamic_response: None,
-                report_touches: Vec::new(),
             },
             now,
         )?;
@@ -1579,9 +1192,8 @@ impl SpatialScene {
             reconciliation,
             commit,
             actuation_permits_settling,
-            dynamic_response,
-            mut report_touches,
         } = input;
+        let mut report_touches = Vec::new();
         let body_id = body.id;
         let definition = body
             .physical
@@ -1611,25 +1223,6 @@ impl SpatialScene {
         let collision_reports = self
             .collision_reports
             .preview_touches(&report_touches, now)?;
-        let dynamic_contact = dynamic_response.map(|response| super::DynamicBodyContact {
-            peer: response.peer,
-            normal: response.normal,
-        });
-        let projectile_state_change = dynamic_response
-            .and_then(|response| response.state_change)
-            .or_else(|| {
-                let dynamic = body
-                    .physical
-                    .as_ref()
-                    .and_then(|physical| physical.dynamic.as_ref())?;
-                (commit.static_contact_normal.is_some()
-                    && dynamic.collision.dynamic_collision.missile)
-                    .then_some(super::DynamicBodyPhysicsStateChange {
-                        cleared: holtburger_common::properties::PhysicsState::MISSILE
-                            | holtburger_common::properties::PhysicsState::ALIGN_PATH
-                            | holtburger_common::properties::PhysicsState::PATH_CLIPPED,
-                    })
-            });
         let super::physical_body::PhysicalBodyTickCommit {
             pose,
             retained_velocity,
@@ -1639,7 +1232,7 @@ impl SpatialScene {
             response,
             motion,
             static_contact_normal,
-            residual_contacts,
+            dynamic_state_change,
         } = commit;
         let result = PhysicalBodyTickResult {
             motion,
@@ -1649,10 +1242,9 @@ impl SpatialScene {
                 definition,
                 response.cell(),
             ),
-            dynamic_state_change: projectile_state_change,
+            dynamic_state_change,
             collision_reports,
             static_contact_normal,
-            dynamic_contact,
         };
         let mut tentative = body;
         // The accepted pose is already final, physical omega included; re-integrating it here would
@@ -1681,7 +1273,6 @@ impl SpatialScene {
             &previous_response,
             &result,
             actuation_permits_settling,
-            residual_contacts,
         );
         if tentative
             .physical
@@ -1711,12 +1302,17 @@ impl SpatialScene {
         }
         tentative.sampling.mode = SpatialSampleMode::SimulatingVelocity;
         tentative.sampling.last_derived_at = now;
+        match reconciliation {
+            Some(state) => match tentative.reconciliation.as_mut() {
+                Some(retained) => **retained = state,
+                None => tentative.reconciliation = Some(Box::new(state)),
+            },
+            None => tentative.reconciliation = None,
+        }
         Ok(TentativePhysicalBodyTick {
             body: tentative,
-            reconciliation,
             result,
             report_touches,
-            wake_peer: dynamic_response.map(|response| response.peer),
         })
     }
 
@@ -1726,31 +1322,13 @@ impl SpatialScene {
         now: Instant,
     ) -> PhysicalBodyTickResult {
         let TentativePhysicalBodyTick {
-            mut body,
-            reconciliation,
+            body,
             result,
             report_touches,
-            wake_peer,
         } = tentative;
-        let reusable = self
-            .body_store
-            .body_mut(body.id)
-            .and_then(|current| current.reconciliation.take());
-        body.reconciliation = match reconciliation {
-            Some(state) => {
-                let mut allocation =
-                    reusable.unwrap_or_else(|| Box::new(PoseReconciliationState::default()));
-                *allocation = state;
-                Some(allocation)
-            }
-            None => None,
-        };
         self.update_body(body)
             .expect("physical body vanished during single-threaded solve");
         self.collision_reports.commit_touches(&report_touches, now);
-        if let Some(peer) = wake_peer {
-            self.wake_dynamic_body(peer);
-        }
         result
     }
 
@@ -1783,22 +1361,39 @@ impl SpatialScene {
             }
         };
 
-        if matches!(
-            effect,
-            AuthoritativePoseEffect::Initialize { .. } | AuthoritativePoseEffect::Reset { .. }
-        ) {
-            // A reset establishes a new temporal origin, so no plan captured before it remains
-            // eligible for commit. A later collection operation fails loudly until preparation.
-            self.dynamic_epoch = None;
-        }
-
         body.authoritative_pose = Some(pose);
-        if !matches!(effect, AuthoritativePoseEffect::Confirm { .. }) {
-            body.retained = vectors.into();
-        }
         body.sampling.last_authoritative_update = now;
         body.sampling.last_derived_at = now;
+        let mobile_physical = body.physical.as_ref().is_some_and(|physical| {
+            !matches!(
+                physical.definition,
+                PhysicalBodyDefinition::FixedPosition { .. }
+            )
+        });
+        // Routine mobile pose samples retarget the reference without erasing contact/motor
+        // continuation. Explicit vector messages and discontinuous initialization remain replacements.
+        let preserves_continuation = matches!(effect, AuthoritativePoseEffect::Confirm { .. })
+            || mobile_physical
+                && matches!(
+                    effect,
+                    AuthoritativePoseEffect::Interpolate { .. }
+                        | AuthoritativePoseEffect::Snap { .. }
+                );
+        if !preserves_continuation {
+            body.retained = vectors.into();
+            body.nominal = vectors;
+        }
         match effect {
+            AuthoritativePoseEffect::Interpolate { keep_heading, .. } if mobile_physical => {
+                body.reconciliation
+                    .get_or_insert_with(|| Box::new(PoseReconciliationState::default()))
+                    .correct(pose, keep_heading);
+            }
+            AuthoritativePoseEffect::Snap { .. } if mobile_physical => {
+                body.reconciliation
+                    .get_or_insert_with(|| Box::new(PoseReconciliationState::default()))
+                    .correct(pose, false);
+            }
             AuthoritativePoseEffect::Initialize { .. } => {
                 replace_unsolved_runtime_pose(&mut body, pose);
                 body.accepted_motion = super::AcceptedBodyMotion::default();
@@ -1828,6 +1423,7 @@ impl SpatialScene {
             AuthoritativePoseEffect::Reset { cause, .. } => {
                 replace_unsolved_runtime_pose(&mut body, pose);
                 body.retained = super::RetainedBodyKinematics::default();
+                body.nominal = AuthoritativeBodyVectors::default();
                 body.accepted_motion = super::AcceptedBodyMotion::default();
                 body.motion_state = None;
                 body.reconciliation = None;
@@ -1845,7 +1441,12 @@ impl SpatialScene {
         true
     }
 
-    /// Replaces producer-authored vectors without changing pose or reconciliation state.
+    /// Applies a dedicated vector update without changing pose or the correction reference.
+    /// This is an explicit physical velocity replacement, not a routine position sample:
+    /// ACE sends it for player jumps, projectile stops, and its developer velocity command
+    /// (`Player.cs:954`, `SpellProjectile.cs:238`, `DeveloperCommands.cs:3153`). Retail likewise
+    /// calls `set_velocity` directly from `SmartBox::DoVectorUpdate` (`acclient.c:137314–137338`).
+    /// Keep this edge distinct from nominal position-packet vectors when replacing the driver.
     pub fn apply_authoritative_body_vectors(
         &mut self,
         body_id: SpatialBodyId,
@@ -1856,8 +1457,25 @@ impl SpatialScene {
             return false;
         };
         body.retained = vectors.into();
+        body.nominal = vectors;
         body.motion_state = None;
         body.sampling.last_authoritative_update = now;
+        wake_dynamic_runtime(body);
+        true
+    }
+
+    /// Replaces a position packet's explicit nominal vectors without erasing actual contact
+    /// response. Call only when the packet contains a vector or explicitly clears it on contact;
+    /// an ordinary pose-only retarget is not a new velocity sample.
+    pub(crate) fn replace_nominal_body_vectors(
+        &mut self,
+        body_id: SpatialBodyId,
+        vectors: AuthoritativeBodyVectors,
+    ) -> bool {
+        let Some(body) = self.body_store.body_mut(body_id) else {
+            return false;
+        };
+        body.nominal = vectors;
         wake_dynamic_runtime(body);
         true
     }
@@ -2047,8 +1665,6 @@ impl SpatialScene {
     }
 
     pub fn suspend_runtime_bodies(&mut self, now: Instant) {
-        // Suspension invalidates every captured participant and prepared plan as one unit.
-        self.dynamic_epoch = None;
         let body_ids = self.body_store.bodies.keys().copied().collect::<Vec<_>>();
         for body_id in body_ids {
             let mut body = self
@@ -2120,8 +1736,6 @@ impl SpatialScene {
 #[cfg(test)]
 mod physical_body_tests {
     use super::*;
-    use crate::spatial::dynamic_contact::MAXIMUM_DYNAMIC_SLICE_DISTANCE;
-    use crate::spatial::dynamic_index::target_bounds;
     use crate::{
         CollisionReportClassification, CollisionReportPhase, DynamicBodyCollisionDefinition,
         DynamicPhysicalBodyConfiguration, DynamicPhysicalBodyDefinition, EdgeProtection,
@@ -2129,9 +1743,9 @@ mod physical_body_tests {
         FreeSphereConfig, GroundSupport, GroundedBodyActuation, GroundedConfig, GroundedLaunch,
         LocalIntegrationDemand, LocalPhysicalDemand, LocalTargetDemand, PhysicalBodyDefinition,
         PhysicalBodyResponsePolicy, PhysicalBodyResponseState, PhysicalBodySceneResidency,
-        PhysicalBodyTickStatus, PhysicalElasticity, PhysicalFriction, PhysicalRestitution,
-        PhysicalSphereSet, PhysicalSurfaceMotion, PreparedEntityBspPart,
-        PreparedEntityTargetGeometry, RETAIL_WALKABLE_NORMAL_Z, SpatialMembership,
+        PhysicalElasticity, PhysicalFriction, PhysicalRestitution, PhysicalSphereSet,
+        PhysicalSurfaceMotion, PreparedEntityBspPart, PreparedEntityTargetGeometry,
+        RETAIL_WALKABLE_NORMAL_Z, SpatialMembership,
     };
     use holtburger_common::properties::PhysicsState;
     use holtburger_common::{Plane, Quaternion, Sphere};
@@ -2207,138 +1821,7 @@ mod physical_body_tests {
         .unwrap()
     }
 
-    fn confirmed_reconciliation_body(contact: ContactState) -> SpatialBody {
-        let confirmed = pose(Vector3::zero());
-        let current = pose(Vector3::new(20.0, 0.0, 0.0));
-        let mut body = SpatialBody::new(
-            SpatialBodyId::Entity(Guid(0x5000_0042)),
-            current,
-            Instant::now(),
-        );
-        body.contact = contact;
-        let mut reconciliation = PoseReconciliationState::default();
-        reconciliation.confirm(confirmed, current);
-        body.reconciliation = Some(Box::new(reconciliation));
-        body
-    }
-
-    fn reconcile_test_body_actuation(
-        body: &mut SpatialBody,
-        actuation: PhysicalBodyActuation,
-        delta_seconds: f32,
-    ) -> anyhow::Result<PhysicalBodyActuation> {
-        let mut reconciliation = body.reconciliation.take().map(|state| *state);
-        let result =
-            reconcile_physical_body_actuation(body, &mut reconciliation, actuation, delta_seconds);
-        body.reconciliation = reconciliation.map(Box::new);
-        result
-    }
-
-    #[test]
-    fn physical_preparation_dampens_confirmed_travel_without_owning_ordinary_drive() {
-        for contact in [ContactState::Grounded, ContactState::Sliding] {
-            let mut body = confirmed_reconciliation_body(contact);
-            let ordinary =
-                PhysicalBodyActuation::grounded_drive(Vector3::new(4.0, 0.0, 0.0)).unwrap();
-
-            let composed = reconcile_test_body_actuation(&mut body, ordinary, 1.0).unwrap();
-            let PhysicalBodyActuation::Grounded(composed) = composed else {
-                panic!("grounded reconciliation must preserve the physical response variant");
-            };
-
-            assert_eq!(
-                composed.supported_planar_velocity(),
-                Vector3::new(3.0, 0.0, 0.0)
-            );
-            assert!(body.reconciliation.is_some());
-        }
-    }
-
-    #[test]
-    fn physical_and_pose_only_interpolation_compose_the_same_pre_collision_delta() {
-        let now = Instant::now();
-        let current = pose(Vector3::zero());
-        let target = pose(Vector3::new(2.0, 0.0, 0.0));
-        let mut physical = SpatialBody::new(SpatialBodyId::Entity(Guid(0x5000_0043)), current, now);
-        physical.authoritative_pose = Some(target);
-        physical.contact = ContactState::Grounded;
-        let mut reconciliation = PoseReconciliationState::default();
-        reconciliation.interpolate(target, current, false, None);
-        physical.reconciliation = Some(Box::new(reconciliation));
-        let actuation = reconcile_test_body_actuation(
-            &mut physical,
-            PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
-            0.03,
-        )
-        .unwrap();
-        let PhysicalBodyActuation::Grounded(actuation) = actuation else {
-            panic!("grounded interpolation must preserve the physical response variant");
-        };
-        let physical_delta = actuation.supported_planar_velocity() * 0.03;
-
-        let pose_only_id = SpatialBodyId::Entity(Guid(0x5000_0044));
-        let mut pose_only = SpatialBody::new(pose_only_id, current, now);
-        pose_only.authoritative_pose = Some(target);
-        pose_only.contact = ContactState::Grounded;
-        let mut reconciliation = PoseReconciliationState::default();
-        reconciliation.interpolate(target, current, false, None);
-        pose_only.reconciliation = Some(Box::new(reconciliation));
-        let mut scene = SpatialScene::new();
-        scene.register_body(pose_only);
-        let ordinary = SolvedBodyKinematics {
-            body_id: pose_only_id,
-            pose: current,
-            accepted_motion: AcceptedBodyMotion::default(),
-            retained: RetainedBodyKinematics::default(),
-            contact: ContactState::Grounded,
-            projection_state: None,
-        };
-        let (solved, kind) = scene
-            .reconcile_pose_only_body_kinematics(ordinary, 0.03)
-            .unwrap();
-        assert_eq!(kind, RuntimeBodyAdvanceKind::Integrated);
-        let pose_only_delta = solved.pose.global_coords() - current.global_coords();
-        assert!(
-            (physical_delta - pose_only_delta).length() < 0.002,
-            "coordinate re-anchoring may quantize the equivalent delta by less than 2 mm"
-        );
-    }
-
-    #[test]
-    fn grounded_interpolation_preserves_authored_heading_only_when_retail_keeps_heading() {
-        let current = pose(Vector3::zero());
-        let authored_heading = 0.75;
-        let mut target = pose(Vector3::new(2.0, 0.0, 0.0));
-        target.rotation = Quaternion::from_heading(1.5);
-
-        for (keep_heading, expected_heading) in [
-            (true, authored_heading),
-            (false, target.rotation.to_heading()),
-        ] {
-            let mut body = SpatialBody::new(
-                SpatialBodyId::Entity(Guid(0x5000_0045)),
-                current,
-                Instant::now(),
-            );
-            body.authoritative_pose = Some(target);
-            body.contact = ContactState::Grounded;
-            let mut reconciliation = PoseReconciliationState::default();
-            reconciliation.interpolate(target, current, keep_heading, None);
-            body.reconciliation = Some(Box::new(reconciliation));
-            let ordinary = PhysicalBodyActuation::Grounded(
-                GroundedBodyActuation::coast()
-                    .with_control_heading(authored_heading)
-                    .expect("fixture heading is finite"),
-            );
-
-            let composed = reconcile_test_body_actuation(&mut body, ordinary, 0.03)
-                .expect("interpolation actuation should compose");
-            let PhysicalBodyActuation::Grounded(composed) = composed else {
-                panic!("grounded reconciliation must preserve the physical response variant");
-            };
-            assert_eq!(composed.control_heading(), Some(expected_heading));
-        }
-    }
+    const CONTACT_INTERVAL: f32 = super::super::MOBILE_CONTACT_TICK_SECONDS;
 
     fn tick_pose_only_body(scene: &mut SpatialScene, body_id: SpatialBodyId, delta_seconds: f32) {
         let body = scene.body(body_id).expect("pose-only body").clone();
@@ -2430,11 +1913,18 @@ mod physical_body_tests {
     }
 
     #[test]
-    fn grounded_interpolation_reaches_target_without_retaining_correction_momentum() {
+    fn grounded_return_brakes_before_becoming_dormant() {
         let now = Instant::now();
         let body_id = SpatialBodyId::Entity(Guid(0x5000_0047));
         let start = pose(Vector3::new(90.0, 96.0, 0.005));
-        let target = pose(Vector3::new(90.1, 96.0, 0.005));
+        let target = pose(
+            start.coords
+                + Vector3::new(
+                    super::super::PHYSICAL_RETURN_START_THRESHOLD_M * 2.0,
+                    0.0,
+                    0.0,
+                ),
+        );
         let collision = flat_collision_scene();
         let mut scene = SpatialScene::new();
         scene.register_body(SpatialBody::new(body_id, start, now));
@@ -2463,27 +1953,23 @@ mod physical_body_tests {
             now,
         ));
 
-        let _ = tick_prepared_collection(
-            &mut scene,
-            &collision,
-            0.03,
-            now + Duration::from_millis(30),
-        );
+        let dt = 0.03;
+        for tick in 1..=140 {
+            tick_collection(
+                &mut scene,
+                &collision,
+                dt,
+                now + Duration::from_secs_f32(tick as f32 * dt),
+            );
+        }
         let corrected = scene.body(body_id).unwrap();
-        assert!(corrected.pose.distance_to(&target) < 0.002);
-        assert_eq!(corrected.retained.velocity, Vector3::zero());
-        let corrected_pose = corrected.pose;
-
-        let _ = tick_prepared_collection(
-            &mut scene,
-            &collision,
-            0.03,
-            now + Duration::from_millis(60),
+        assert!(
+            corrected.pose.distance_to(&target)
+                <= super::super::RETAIL_INTERPOLATION_TARGET_THRESHOLD_M
         );
-        let idle = scene.body(body_id).unwrap();
-        assert_eq!(idle.pose, corrected_pose);
-        assert_eq!(idle.retained.velocity, Vector3::zero());
-        assert_eq!(idle.accepted_motion, AcceptedBodyMotion::default());
+        assert!(!corrected.has_pose_reconciliation_work());
+        assert_eq!(corrected.retained.velocity, Vector3::zero());
+        assert_eq!(corrected.accepted_motion, AcceptedBodyMotion::default());
     }
 
     #[test]
@@ -2511,9 +1997,12 @@ mod physical_body_tests {
         };
         body.retained.acceleration = Vector3::new(0.0, 0.0, config.gravity);
         let dt = 0.03;
-        let _ = tick_prepared_collection(&mut scene, &collision, dt, now);
+        let _ = tick_collection(&mut scene, &collision, dt, now);
         let body = scene.body(body_id).expect("advanced grounded body");
-        assert_eq!(body.pose.coords, start.coords);
+        let count = (dt / super::super::MOBILE_CONTACT_TICK_SECONDS).ceil();
+        let h = dt / count;
+        let expected_drop = config.gravity * h * h * count * (count + 1.0) / 2.0;
+        assert!((body.pose.coords.z - start.coords.z - expected_drop).abs() < 0.0001);
         assert_eq!(
             body.retained.velocity,
             Vector3::new(0.0, 0.0, config.gravity * dt)
@@ -2522,34 +2011,6 @@ mod physical_body_tests {
             body.retained.acceleration,
             Vector3::new(0.0, 0.0, config.gravity)
         );
-    }
-
-    #[test]
-    fn unsupported_confirmed_travel_accumulates_without_damping() {
-        for contact in [ContactState::Airborne, ContactState::Unknown] {
-            let mut body = confirmed_reconciliation_body(contact);
-            let ordinary =
-                PhysicalBodyActuation::grounded_drive(Vector3::new(4.0, 0.0, 0.0)).unwrap();
-
-            let first = reconcile_test_body_actuation(&mut body, ordinary.clone(), 1.0).unwrap();
-            let PhysicalBodyActuation::Grounded(first) = first else {
-                panic!("grounded reconciliation must preserve the physical response variant");
-            };
-            assert_eq!(
-                first.supported_planar_velocity(),
-                Vector3::new(4.0, 0.0, 0.0)
-            );
-
-            body.contact = ContactState::Grounded;
-            let second = reconcile_test_body_actuation(&mut body, ordinary, 1.0).unwrap();
-            let PhysicalBodyActuation::Grounded(second) = second else {
-                panic!("grounded reconciliation must preserve the physical response variant");
-            };
-            assert_eq!(
-                second.supported_planar_velocity(),
-                Vector3::new(2.6, 0.0, 0.0)
-            );
-        }
     }
 
     fn grounded_definition_with_spheres(spheres: PhysicalSphereSet) -> PhysicalBodyDefinition {
@@ -2577,7 +2038,9 @@ mod physical_body_tests {
                 .tick_physical_body(
                     id,
                     collision,
-                    PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                    crate::spatial::PhysicalBodyInput::autonomous(PhysicalBodyActuation::Grounded(
+                        GroundedBodyActuation::coast(),
+                    )),
                     quantum.as_secs_f32(),
                     now - Duration::from_secs(1) + quantum * tick,
                 )
@@ -2606,6 +2069,7 @@ mod physical_body_tests {
         let definition = body.physical.as_ref().unwrap().definition;
         Ok(match definition {
             PhysicalBodyDefinition::FixedPosition { .. } => PhysicalBodyActuation::FixedPosition {
+                translation: Vector3::zero(),
                 rotation: body.pose.rotation,
             },
             PhysicalBodyDefinition::FreeSphere { .. } => {
@@ -2625,6 +2089,7 @@ mod physical_body_tests {
             movement,
             align_path,
             PreparedEntityTargetGeometry {
+                setup_radius: 0.5,
                 physics_bsp_parts: Vec::new(),
                 fallback_setup_did: 0x0200_0001,
                 fallback_shapes: vec![Arc::new(CollisionShape::Ball(CollisionBall {
@@ -2651,6 +2116,9 @@ mod physical_body_tests {
                     ..stable_policy()
                 },
                 entity_collision: DynamicBodyCollisionDefinition {
+                    contact_response: crate::spatial::EntityContactResponse::Character(
+                        crate::EntityIntegrationEligibility::Eligible,
+                    ),
                     target_geometry: Arc::new(target_geometry),
                     dynamic_collision: EntityDynamicCollisionPolicy {
                         target: EntityCollisionParticipation::Solid,
@@ -2734,25 +2202,10 @@ mod physical_body_tests {
 
     fn fallback_target(shape: Arc<CollisionShape>) -> PreparedEntityTargetGeometry {
         PreparedEntityTargetGeometry {
+            setup_radius: 0.5,
             physics_bsp_parts: Vec::new(),
             fallback_setup_did: 0x0200_0001,
             fallback_shapes: vec![shape],
-            fallback_scale: ColliderScale::uniform(1.0).unwrap(),
-        }
-    }
-
-    fn bsp_target(shape: Arc<CollisionShape>) -> PreparedEntityTargetGeometry {
-        PreparedEntityTargetGeometry {
-            physics_bsp_parts: vec![PreparedEntityBspPart {
-                part_index: 0,
-                gfx_obj_did: 0x0100_0001,
-                local_origin: Vector3::zero(),
-                local_orientation: Quaternion::identity(),
-                scale: ColliderScale::uniform(1.0).unwrap(),
-                shape,
-            }],
-            fallback_setup_did: 0x0200_0001,
-            fallback_shapes: Vec::new(),
             fallback_scale: ColliderScale::uniform(1.0).unwrap(),
         }
     }
@@ -2803,24 +2256,285 @@ mod physical_body_tests {
         scene.body_mut(body_id).unwrap().retained.velocity = velocity;
     }
 
-    fn tick_prepared_collection(
+    #[test]
+    fn collection_preserves_missing_env_cell_until_topology_returns() {
+        let now = Instant::now();
+        let cell = Guid(0xda55_0100);
+        let id = SpatialBodyId::Entity(Guid(0x7000_0100));
+        let mut scene = SpatialScene::new();
+        scene.register_body(SpatialBody::new(
+            id,
+            WorldPosition {
+                landblock_id: cell,
+                ..pose(Vector3::new(96.0, 96.0, 20.0))
+            },
+            now,
+        ));
+        scene
+            .set_dynamic_physical_body(
+                id,
+                Some(dynamic_definition(
+                    free_definition(Vector3::zero(), 0.25),
+                    false,
+                )),
+                PhysicalCollisionFilter::ALL,
+                Some(cell),
+            )
+            .unwrap();
+
+        let absent = scene
+            .advance_dynamic_entity_collection(&CollisionScene::new(), 0.03, now, collection_input)
+            .unwrap();
+        assert!(absent.outcomes.is_empty());
+        assert!(absent.coverage_rejections.is_empty());
+        assert_eq!(dynamic_activity(&scene, id), DynamicBodyActivity::Suspended);
+        let retained = scene.body(id).unwrap().pose;
+        scene.apply_runtime_body_pose(id, retained, SpatialSampleMode::AuthoritativeOnly);
+        assert_eq!(dynamic_activity(&scene, id), DynamicBodyActivity::Suspended);
+        let restored = scene
+            .advance_dynamic_entity_collection(
+                &collision_scene(Some(0x0100)),
+                0.03,
+                now + Duration::from_millis(30),
+                collection_input,
+            )
+            .unwrap();
+        assert_eq!(restored.outcomes.len(), 1);
+        assert_eq!(restored.outcomes[0].body_id(), id);
+        assert_eq!(scene.body(id).unwrap().pose, retained);
+        assert_ne!(dynamic_activity(&scene, id), DynamicBodyActivity::Suspended);
+    }
+
+    #[test]
+    fn collection_refreshes_stale_support_without_disturbing_an_untouched_sleeper() {
+        let collision = flat_collision_scene();
+        let now = Instant::now();
+        let id = SpatialBodyId::Entity(Guid(0x7000_0001));
+        let mut scene = SpatialScene::new();
+        scene.register_body(SpatialBody::new(
+            id,
+            pose(Vector3::new(90.0, 96.0, 0.005)),
+            now,
+        ));
+        scene
+            .set_dynamic_physical_body(
+                id,
+                Some(dynamic_definition(grounded_definition(), false)),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+        acquire_support(&mut scene, &collision, id, now);
+        tick_collection(&mut scene, &collision, 0.03, now);
+        assert_eq!(dynamic_activity(&scene, id), DynamicBodyActivity::Settled);
+        let prior = scene.body(id).unwrap().clone();
+        let unrelated = collision
+            .staged_residency_change(
+                vec![LandblockCollisionAsset {
+                    landblock_id: 0x1000_ffff,
+                    terrain: TerrainCollisionSurface::empty(),
+                    static_geometry: LandblockColliders::default(),
+                }],
+                &[],
+            )
+            .unwrap();
+        tick_collection(
+            &mut scene,
+            &unrelated,
+            0.03,
+            now + Duration::from_millis(30),
+        );
+        let unchanged = scene.body(id).unwrap();
+        assert_eq!(unchanged.pose, prior.pose);
+        assert_eq!(unchanged.physical, prior.physical);
+        assert!(!unchanged.has_pose_reconciliation_work());
+        let replaced = unrelated
+            .staged_residency_change(vec![flat_collision_asset(0)], &[])
+            .unwrap();
+        tick_collection(&mut scene, &replaced, 0.03, now + Duration::from_millis(60));
+        let physical = scene.body(id).unwrap().physical.as_ref().unwrap();
+        let support = physical.response.ground().walkable_support().unwrap();
+        let crate::spatial::SupportSource::World(proof) = support.source else {
+            panic!("terrain fixture must retain world support");
+        };
+        assert!(replaced.proves(proof));
+        assert!(!unrelated.proves(proof));
+        let evicted = replaced
+            .staged_residency_change(Vec::new(), &[Guid(0xda55_ffff)])
+            .unwrap();
+        let rejected = scene
+            .advance_dynamic_entity_collection(
+                &evicted,
+                0.03,
+                now + Duration::from_millis(90),
+                collection_input,
+            )
+            .unwrap();
+        assert_eq!(
+            rejected.coverage_rejections,
+            [DynamicEntityCollectionCoverageRejection {
+                body_id: id,
+                owner: Guid(0xda55_ffff)
+            }]
+        );
+        assert!(rejected.outcomes.is_empty());
+        assert_eq!(scene.body(id).unwrap().pose, prior.pose);
+        tick_collection(
+            &mut scene,
+            &replaced,
+            0.03,
+            now + Duration::from_millis(120),
+        );
+        assert_eq!(scene.body(id).unwrap().contact, ContactState::Grounded);
+    }
+
+    #[test]
+    fn fixed_position_body_preserves_authored_placement_and_remains_a_rotating_collision_target() {
+        let now = Instant::now();
+        let collision = flat_collision_scene();
+        let id = SpatialBodyId::Entity(Guid(0x7000_0100));
+        let mut scene = SpatialScene::new();
+        let initial = pose(Vector3::new(90.0, 96.0, 4.0));
+        let mut body = SpatialBody::new(id, initial, now);
+        body.retained.velocity = Vector3::new(0.0, 0.0, -1.0);
+        body.retained.acceleration = Vector3::new(0.0, 0.0, -9.8);
+        body.retained.omega = Vector3::new(0.0, 0.0, 0.5);
+        scene.register_body(body);
+        let placement = PhysicalSphereSet::new(
+            Sphere {
+                center: Vector3::new(0.0, 0.0, 0.1),
+                radius: 0.1,
+            },
+            None,
+        )
+        .unwrap();
+        let movement = PhysicalBodyDefinition::fixed_position(placement).unwrap();
+        scene
+            .set_dynamic_physical_body(
+                id,
+                Some(dynamic_definition(movement, false)),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+        let authored_heading = 0.7;
+        let authored_rotation = Quaternion::from_heading(authored_heading);
+        let dt = 0.1;
+        scene
+            .tick_physical_body(
+                id,
+                &collision,
+                crate::spatial::PhysicalBodyInput::autonomous(
+                    PhysicalBodyActuation::FixedPosition {
+                        translation: Vector3::zero(),
+                        rotation: authored_rotation,
+                    },
+                ),
+                dt,
+                now,
+            )
+            .unwrap();
+        let body = scene.body(id).unwrap();
+        assert_eq!(body.pose.coords, initial.coords);
+        assert_eq!(
+            body.pose.rotation,
+            integrate_angular_velocity(authored_rotation, body.retained.omega, dt)
+        );
+        // AC heading is clockwise from north; physical yaw is counterclockwise from east.
+        let expected_yaw_rate =
+            (std::f32::consts::FRAC_PI_2 - authored_heading) / dt + body.retained.omega.z;
+        assert!((body.accepted_motion.omega.z - expected_yaw_rate).abs() < 0.00001);
+        assert_eq!(body.retained.velocity, Vector3::zero());
+        assert_eq!(body.retained.acceleration, Vector3::zero());
+        assert_eq!(movement.uniformly_scaled(3.0).unwrap(), movement);
+
+        // A fixed actor's near authority update retains placement semantics even when the
+        // producer permits contact return for its ordinary remote entities.
+        let held_rotation = scene.body(id).unwrap().pose.rotation;
+        let mut authority = initial;
+        authority.coords.x += 0.2;
+        authority.rotation = Quaternion::from_heading(1.2);
+        assert!(scene.apply_authoritative_body_effect(
+            id,
+            AuthoritativePoseEffect::Interpolate {
+                pose: authority,
+                keep_heading: false,
+                adjusted_max_speed_mps: None
+            },
+            AuthoritativeBodyVectors {
+                velocity: Vector3::zero(),
+                acceleration: Vector3::zero(),
+                omega: Vector3::zero()
+            },
+            now,
+        ));
+        let input = collection_input(scene.body(id).unwrap()).unwrap();
+        scene
+            .tick_physical_body(id, &collision, input, dt, now)
+            .unwrap();
+        let updated = scene.body(id).unwrap();
+        assert_eq!(updated.pose.coords, initial.coords);
+        // This unsupported fixed actor retains the existing contacted-interpolation gate.
+        assert_eq!(updated.pose.rotation, held_rotation);
+        assert!(
+            !updated
+                .reconciliation
+                .as_ref()
+                .is_some_and(|state| state.has_physical_correction())
+        );
+
+        // The fixture stays solid even though its movement response cannot translate it.
+        let mover = SpatialBodyId::Entity(Guid(0x7000_0101));
+        install_free_dynamic(
+            &mut scene,
+            mover,
+            initial.coords - Vector3::new(2.0, 0.0, 0.0),
+            Vector3::new(20.0, 0.0, 0.0),
+            fallback_target(Arc::new(CollisionShape::Ball(CollisionBall {
+                center: Vector3::zero(),
+                radius: 0.5,
+            }))),
+            now,
+        );
+        for tick in 1..=4 {
+            scene
+                .advance_dynamic_entity_collection(
+                    &collision,
+                    0.03,
+                    now + Duration::from_millis(tick * 30),
+                    collection_input,
+                )
+                .unwrap();
+        }
+        assert_eq!(scene.body(id).unwrap().pose.coords, initial.coords);
+        let stopped = scene.body(mover).unwrap();
+        assert!(stopped.pose.coords.x < initial.coords.x);
+        assert!(
+            stopped.retained.velocity.x < 20.0,
+            "fixed authored target did not constrain flight"
+        );
+    }
+
+    /// These scene fixtures use a stationary authority reference; physical continuation stays
+    /// separate and moving-authority scenarios supply their own explicit producer input.
+    fn collection_input(body: &SpatialBody) -> anyhow::Result<PhysicalBodyInput> {
+        Ok(PhysicalBodyInput::referenced(
+            collection_actuation(body)?,
+            PhysicalReferenceInput::body(None),
+            true,
+        ))
+    }
+
+    fn tick_collection(
         scene: &mut SpatialScene,
         collision: &CollisionScene,
         delta_seconds: f32,
         now: Instant,
     ) -> Vec<CollisionReportOutcome> {
-        let prepared = scene
-            .prepare_dynamic_entity_collection(collision, delta_seconds, collection_actuation)
-            .unwrap();
-        let mut reports = Vec::new();
-        for body_id in prepared.movers {
-            let result = scene
-                .tick_prepared_dynamic_physical_body(body_id, collision, now)
-                .unwrap();
-            reports.extend(result.collision_reports);
-        }
-        reports.extend(scene.finish_dynamic_entity_collection(now).unwrap());
-        reports
+        scene
+            .advance_dynamic_entity_collection(collision, delta_seconds, now, collection_input)
+            .unwrap()
+            .collision_reports
     }
 
     fn dynamic_activity(scene: &SpatialScene, body_id: SpatialBodyId) -> DynamicBodyActivity {
@@ -2837,7 +2551,7 @@ mod physical_body_tests {
     }
 
     #[test]
-    fn ethereal_solidification_queries_only_current_dynamic_peer_overlap() {
+    fn ethereal_solidification_queries_only_current_entity_peer_overlap() {
         let now = Instant::now();
         let object = SpatialBodyId::Entity(Guid(0x7000_1001));
         let peer = SpatialBodyId::LocalPlayer(Guid(0x5000_1002));
@@ -2936,6 +2650,8 @@ mod physical_body_tests {
             [eligible_low, eligible_high]
         );
     }
+
+    mod contact_step_tests;
 
     #[test]
     fn target_and_integration_demand_drive_independent_scene_membership() {
@@ -3092,83 +2808,6 @@ mod physical_body_tests {
     }
 
     #[test]
-    fn fixed_position_body_preserves_authored_placement_and_remains_a_rotating_collision_target() {
-        let now = Instant::now();
-        let collision = flat_collision_scene();
-        let id = SpatialBodyId::Entity(Guid(0x7000_0100));
-        let mut scene = SpatialScene::new();
-        let initial = pose(Vector3::new(90.0, 96.0, 4.0));
-        let mut body = SpatialBody::new(id, initial, now);
-        body.retained.velocity = Vector3::new(0.0, 0.0, -1.0);
-        body.retained.acceleration = Vector3::new(0.0, 0.0, -9.8);
-        body.retained.omega = Vector3::new(0.0, 0.0, 0.5);
-        scene.register_body(body);
-        let placement = PhysicalSphereSet::new(
-            Sphere {
-                center: Vector3::new(0.0, 0.0, 0.1),
-                radius: 0.1,
-            },
-            None,
-        )
-        .unwrap();
-        let movement = PhysicalBodyDefinition::fixed_position(placement).unwrap();
-        scene
-            .set_dynamic_physical_body(
-                id,
-                Some(dynamic_definition(movement, false)),
-                PhysicalCollisionFilter::ALL,
-                None,
-            )
-            .unwrap();
-        let authored_rotation = Quaternion::from_heading(0.7);
-        let dt = 0.1;
-        let result = scene
-            .tick_physical_body(
-                id,
-                &collision,
-                PhysicalBodyActuation::FixedPosition {
-                    rotation: authored_rotation,
-                },
-                dt,
-                now,
-            )
-            .unwrap();
-        let body = scene.body(id).unwrap();
-        assert_eq!(body.pose.coords, initial.coords);
-        assert_eq!(
-            body.pose.rotation,
-            integrate_angular_velocity(authored_rotation, body.retained.omega, dt)
-        );
-        assert_eq!(body.retained.velocity, Vector3::zero());
-        assert_eq!(body.retained.acceleration, Vector3::zero());
-        assert_eq!(result.motion.contact_passes, 0);
-        assert_eq!(movement.uniformly_scaled(3.0).unwrap(), movement);
-
-        // The fixture stays solid even though its movement response cannot translate it.
-        let mover = SpatialBodyId::Entity(Guid(0x7000_0101));
-        install_free_dynamic(
-            &mut scene,
-            mover,
-            initial.coords - Vector3::new(2.0, 0.0, 0.0),
-            Vector3::new(20.0, 0.0, 0.0),
-            fallback_target(Arc::new(CollisionShape::Ball(CollisionBall {
-                center: Vector3::zero(),
-                radius: 0.5,
-            }))),
-            now,
-        );
-        let prepared = scene
-            .prepare_dynamic_entity_collection(&collision, dt, collection_actuation)
-            .unwrap();
-        assert!(prepared.movers.contains(&mover));
-        let hit = scene
-            .tick_prepared_dynamic_physical_body(mover, &collision, now)
-            .unwrap();
-        assert_eq!(hit.dynamic_contact.unwrap().peer, id);
-        assert_eq!(scene.body(id).unwrap().pose.coords, initial.coords);
-    }
-
-    #[test]
     fn stationary_gravity_free_body_keeps_its_pivot_above_the_floor() {
         let now = Instant::now();
         let collision = flat_collision_scene();
@@ -3199,11 +2838,13 @@ mod physical_body_tests {
         let actuation = GroundedBodyActuation::coast()
             .with_control_heading(0.5)
             .unwrap();
-        let result = scene
+        scene
             .tick_physical_body(
                 id,
                 &collision,
-                PhysicalBodyActuation::Grounded(actuation),
+                crate::spatial::PhysicalBodyInput::autonomous(PhysicalBodyActuation::Grounded(
+                    actuation,
+                )),
                 0.1,
                 now,
             )
@@ -3212,7 +2853,6 @@ mod physical_body_tests {
         assert_eq!(body.pose.coords, initial.coords);
         assert!((body.pose.rotation.to_heading() - 0.5).abs() < 0.000_01);
         assert_eq!(body.retained.velocity, Vector3::zero());
-        assert_eq!(result.motion.contact_passes, 0);
     }
 
     #[test]
@@ -3249,7 +2889,7 @@ mod physical_body_tests {
             }
         ));
         for tick in 1..=2 {
-            tick_prepared_collection(
+            tick_collection(
                 &mut scene,
                 &collision,
                 0.1,
@@ -3284,11 +2924,13 @@ mod physical_body_tests {
         assert_eq!(dynamic_activity(&scene, id), DynamicBodyActivity::Active);
         let supported_pose = scene.body(id).unwrap().pose;
 
-        let stable_result = scene
+        scene
             .tick_physical_body(
                 id,
                 &collision,
-                PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                crate::spatial::PhysicalBodyInput::autonomous(PhysicalBodyActuation::Grounded(
+                    GroundedBodyActuation::coast(),
+                )),
                 0.1,
                 now + Duration::from_millis(200),
             )
@@ -3296,22 +2938,6 @@ mod physical_body_tests {
         assert_eq!(dynamic_activity(&scene, id), DynamicBodyActivity::Settled);
         assert!(scene.scheduled_dynamic_entity_ids().is_empty());
         assert_eq!(scene.body(id).unwrap().pose, supported_pose);
-        let settled = scene.body(id).unwrap();
-        let settled_response = &settled.physical.as_ref().unwrap().response;
-        assert!(completed_dynamic_tick_is_quiescent(
-            settled,
-            settled_response,
-            &stable_result,
-            true,
-            false,
-        ));
-        assert!(!completed_dynamic_tick_is_quiescent(
-            settled,
-            settled_response,
-            &stable_result,
-            true,
-            true,
-        ));
         assert!(
             scene
                 .get_in_landblock(Guid(0xda55_ffff))
@@ -3324,7 +2950,9 @@ mod physical_body_tests {
             .tick_physical_body(
                 id,
                 &collision,
-                PhysicalBodyActuation::grounded_drive(Vector3::zero()).unwrap(),
+                crate::spatial::PhysicalBodyInput::autonomous(
+                    PhysicalBodyActuation::grounded_drive(Vector3::zero()).unwrap(),
+                ),
                 0.1,
                 now + Duration::from_millis(300),
             )
@@ -3355,17 +2983,18 @@ mod physical_body_tests {
             )
             .unwrap();
 
-        let result = scene
+        scene
             .tick_physical_body(
                 id,
                 &collision,
-                PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                crate::spatial::PhysicalBodyInput::autonomous(PhysicalBodyActuation::Grounded(
+                    GroundedBodyActuation::coast(),
+                )),
                 0.1,
                 now + Duration::from_millis(100),
             )
             .unwrap();
 
-        assert_eq!(result.motion.status, PhysicalBodyTickStatus::Solved);
         assert_eq!(scene.body(id).unwrap().contact, ContactState::Airborne);
         assert_eq!(dynamic_activity(&scene, id), DynamicBodyActivity::Settled);
         assert!(scene.scheduled_dynamic_entity_ids().is_empty());
@@ -3395,7 +3024,9 @@ mod physical_body_tests {
             .tick_physical_body(
                 id,
                 &collision,
-                PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                crate::spatial::PhysicalBodyInput::autonomous(PhysicalBodyActuation::Grounded(
+                    GroundedBodyActuation::coast(),
+                )),
                 0.1,
                 now + Duration::from_millis(100),
             )
@@ -3428,7 +3059,9 @@ mod physical_body_tests {
             .tick_physical_body(
                 id,
                 &collision,
-                PhysicalBodyActuation::free_flight(Vector3::zero()).unwrap(),
+                crate::spatial::PhysicalBodyInput::autonomous(
+                    PhysicalBodyActuation::free_flight(Vector3::zero()).unwrap(),
+                ),
                 0.1,
                 now + Duration::from_millis(100),
             )
@@ -3455,15 +3088,105 @@ mod physical_body_tests {
     }
 
     #[test]
-    fn physical_correction_snap_waits_for_and_commits_at_collection_boundary() {
+    fn repeated_authority_updates_preserve_continuation_during_compliant_contact() {
         let collision = flat_collision_scene();
         let now = Instant::now();
-        let id = SpatialBodyId::Entity(Guid(0x7000_0011));
-        let start = pose(Vector3::new(90.0, 96.0, 0.005));
-        let target = pose(Vector3::new(100.0, 96.0, 0.005));
-        let retained_velocity = Vector3::new(1.0, 0.0, 0.0);
+        let remote = SpatialBodyId::Entity(Guid(0x7000_0012));
+        let player = SpatialBodyId::LocalPlayer(Guid(0x7000_0013));
         let mut scene = SpatialScene::new();
-        scene.register_body(SpatialBody::new(id, start, now));
+        let start = Vector3::new(90.0, 96.0, 10.0);
+        for (id, coords) in [
+            (remote, start),
+            (player, start + Vector3::new(1.0, 0.0, 0.0)),
+        ] {
+            install_free_dynamic(
+                &mut scene,
+                id,
+                coords,
+                Vector3::zero(),
+                fallback_target(Arc::new(CollisionShape::Ball(CollisionBall {
+                    center: Vector3::zero(),
+                    radius: 0.5,
+                }))),
+                now,
+            );
+        }
+        tick_collection(&mut scene, &collision, 0.1, now);
+        let player_pose = scene.body(player).unwrap().pose;
+        let target = pose(start + Vector3::new(2.0, 0.0, 0.0));
+        for tick in 1..=200 {
+            let at = now + Duration::from_millis(tick * 100);
+            if tick % 3 == 1 {
+                let before = scene.body(remote).unwrap().pose;
+                let continuation = scene.body(remote).unwrap().retained;
+                assert!(scene.apply_authoritative_body_effect(
+                    remote,
+                    AuthoritativePoseEffect::Interpolate {
+                        pose: target,
+                        keep_heading: true,
+                        adjusted_max_speed_mps: None
+                    },
+                    AuthoritativeBodyVectors {
+                        velocity: Vector3::new(99.0, 0.0, 0.0),
+                        acceleration: Vector3::zero(),
+                        omega: Vector3::zero()
+                    },
+                    at
+                ));
+                assert_eq!(scene.body(remote).unwrap().pose, before);
+                assert_eq!(scene.body(remote).unwrap().retained, continuation);
+            }
+            tick_collection(&mut scene, &collision, 0.1, at);
+            assert!(
+                scene.body(player).unwrap().pose.coords.x
+                    >= scene.body(remote).unwrap().pose.coords.x,
+                "bounded ordinary return crossed the peer"
+            );
+        }
+        assert!(
+            scene.body(player).unwrap().pose.coords.x > player_pose.coords.x,
+            "finite player mobility must permit displacement"
+        );
+        scene.remove_body(player).unwrap();
+        let dt = super::super::MOBILE_CONTACT_TICK_SECONDS;
+        let distance = scene.body(remote).unwrap().pose.distance_to(&target);
+        let tolerance = super::super::RETAIL_INTERPOLATION_TARGET_THRESHOLD_M;
+        let return_seconds = (distance / tolerance).max(1.0).ln()
+            / -(1.0 - super::super::PHYSICAL_RETURN_GAIN * dt).ln()
+            * dt;
+        let return_ticks = (return_seconds / dt).ceil() as u64 + 2;
+        for tick in 1..=return_ticks {
+            tick_collection(
+                &mut scene,
+                &collision,
+                dt,
+                now + Duration::from_secs(20) + Duration::from_secs_f32(tick as f32 * dt),
+            );
+        }
+        let returned = scene.body(remote).unwrap();
+        assert!(
+            returned.pose.distance_to(&target)
+                <= super::super::RETAIL_INTERPOLATION_TARGET_THRESHOLD_M
+        );
+        assert!(!returned.has_pose_reconciliation_state());
+        assert_eq!(returned.retained.velocity, Vector3::zero());
+        assert_eq!(
+            dynamic_activity(&scene, remote),
+            DynamicBodyActivity::Settled
+        );
+    }
+
+    #[test]
+    fn grounded_correction_preserves_ballistic_momentum_and_cannot_cross_the_floor() {
+        let collision = flat_collision_scene();
+        let now = Instant::now();
+        let id = SpatialBodyId::Entity(Guid(0x7000_0015));
+        let mut scene = SpatialScene::new();
+        scene.register_body(SpatialBody::new(
+            id,
+            pose(Vector3::new(90.0, 96.0, 10.0)),
+            now,
+        ));
         scene
             .set_dynamic_physical_body(
                 id,
@@ -3472,35 +3195,176 @@ mod physical_body_tests {
                 None,
             )
             .unwrap();
-        assert!(scene.apply_authoritative_body_effect(
+        scene.body_mut(id).unwrap().contact = ContactState::Airborne;
+        scene.body_mut(id).unwrap().retained.velocity = Vector3::new(0.0, 0.0, -1.0);
+        let mut baseline = scene.clone();
+        let mut target = scene.body(id).unwrap().pose;
+        target.coords.z += 2.0;
+        scene.apply_authoritative_body_effect(
             id,
-            AuthoritativePoseEffect::Snap { pose: target },
+            AuthoritativePoseEffect::Interpolate {
+                pose: target,
+                keep_heading: true,
+                adjusted_max_speed_mps: None,
+            },
             AuthoritativeBodyVectors {
-                velocity: retained_velocity,
+                velocity: Vector3::new(0.0, 0.0, -1.0),
                 acceleration: Vector3::zero(),
                 omega: Vector3::zero(),
             },
             now,
-        ));
-        assert_eq!(scene.body(id).unwrap().pose, start);
+        );
+        let dt = 0.1;
+        tick_collection(&mut scene, &collision, dt, now);
+        tick_collection(&mut baseline, &collision, dt, now);
+        let ordinary = baseline.body(id).unwrap();
+        let corrected = scene.body(id).unwrap();
+        assert_eq!(corrected.retained, ordinary.retained);
+        assert_eq!(
+            corrected.pose, ordinary.pose,
+            "airborne return must not add steering"
+        );
 
-        let prepared = scene
-            .prepare_dynamic_entity_collection(&collision, 0.03, collection_actuation)
-            .unwrap();
-        assert!(prepared.movers.is_empty());
-        assert_eq!(prepared.correction_snaps, vec![id]);
-        assert_eq!(scene.body(id).unwrap().pose, start);
+        // At the same XY on another floor, grounded return completes without altering support.
+        scene.apply_authoritative_body_effect(
+            id,
+            AuthoritativePoseEffect::Reset {
+                pose: pose(Vector3::new(90.0, 96.0, 0.005)),
+                cause: AuthoritativePoseResetCause::Teleport,
+            },
+            AuthoritativeBodyVectors {
+                velocity: Vector3::zero(),
+                acceleration: Vector3::zero(),
+                omega: Vector3::zero(),
+            },
+            now,
+        );
+        acquire_support(&mut scene, &collision, id, now);
+        let supported = scene.body(id).unwrap().pose;
+        target = supported;
+        target.coords.z -= 1.0;
+        scene.apply_authoritative_body_effect(
+            id,
+            AuthoritativePoseEffect::Interpolate {
+                pose: target,
+                keep_heading: true,
+                adjusted_max_speed_mps: None,
+            },
+            AuthoritativeBodyVectors {
+                velocity: Vector3::zero(),
+                acceleration: Vector3::zero(),
+                omega: Vector3::zero(),
+            },
+            now,
+        );
+        for tick in 1..=30 {
+            tick_collection(
+                &mut scene,
+                &collision,
+                dt,
+                now + Duration::from_millis(tick * 100),
+            );
+            let body = scene.body(id).unwrap();
+            assert!(
+                body.pose.coords.z
+                    >= supported.coords.z - crate::spatial::bsp_query::CONTACT_EPSILON
+            );
+            assert!(!body.has_pose_reconciliation_work());
+        }
+    }
 
-        let view = scene
-            .tick_prepared_dynamic_correction_snap(id, now + Duration::from_millis(30))
-            .unwrap();
-        assert_eq!(view.runtime_pose, target);
-        assert_eq!(view.velocity, Vector3::zero());
-        assert_eq!(scene.body(id).unwrap().retained.velocity, retained_velocity);
-        assert!(!scene.body(id).unwrap().has_pose_reconciliation_state());
+    #[test]
+    fn physical_return_is_blocked_by_a_static_wall_without_stalled_placement() {
+        let now = Instant::now();
+        let (mut scene, mut collision, policy) = grounded_pair_fixture(false, now);
+        let target = policy.1;
+        let mut asset = flat_collision_asset(0);
+        asset.static_geometry = LandblockColliders::new(
+            vec![
+                PlacedCollider::new(
+                    polygon_wall_shape(),
+                    LandblockPlacement {
+                        origin: Vector3::new(10.8, 11.0, 2.0),
+                        orientation: Quaternion::identity(),
+                    },
+                    ColliderScale::uniform(1.0).unwrap(),
+                    StaticColliderPlacement::OutdoorExplicit { source_index: 0 },
+                )
+                .unwrap(),
+            ],
+            Vec::new(),
+        );
+        collision.insert(asset).unwrap();
+        let mut reference = scene.body(target).unwrap().pose;
+        reference.coords.x += 2.0;
+        scene.apply_authoritative_body_effect(
+            target,
+            AuthoritativePoseEffect::Interpolate {
+                pose: reference,
+                keep_heading: true,
+                adjusted_max_speed_mps: None,
+            },
+            AuthoritativeBodyVectors {
+                velocity: Vector3::zero(),
+                acceleration: Vector3::zero(),
+                omega: Vector3::zero(),
+            },
+            now,
+        );
+        for tick in 1..=30 {
+            tick_collection(
+                &mut scene,
+                &collision,
+                0.1,
+                now + Duration::from_millis(tick * 100),
+            );
+            let body = scene.body(target).unwrap();
+            assert!(body.pose.coords.x <= 10.33);
+            assert!(body.pose.coords.z >= 0.0);
+            assert!(body.has_pose_reconciliation_work());
+        }
+        assert!(scene.body(target).unwrap().pose.coords.x > 10.1);
+    }
+
+    #[test]
+    fn hydration_reclassifies_pending_remote_placement_before_mobile_simulation() {
+        let now = Instant::now();
+        let mut scene = SpatialScene::new();
+        let id = SpatialBodyId::Entity(Guid(0x7000_0014));
+        let start = pose(Vector3::new(90.0, 96.0, 10.0));
+        let target = pose(Vector3::new(100.0, 96.0, 10.0));
+        scene.register_body(SpatialBody::new(id, start, now));
+        scene.apply_authoritative_body_effect(
+            id,
+            AuthoritativePoseEffect::Snap { pose: target },
+            AuthoritativeBodyVectors {
+                velocity: Vector3::zero(),
+                acceleration: Vector3::zero(),
+                omega: Vector3::zero(),
+            },
+            now,
+        );
         scene
-            .finish_dynamic_entity_collection(now + Duration::from_millis(30))
+            .set_dynamic_physical_body(
+                id,
+                Some(dynamic_definition(
+                    free_definition(Vector3::zero(), 0.5),
+                    false,
+                )),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
             .unwrap();
+        let collision = flat_collision_scene();
+        tick_collection(&mut scene, &collision, 0.1, now);
+        let body = scene.body(id).unwrap();
+        assert!(body.pose.coords.x > start.coords.x && body.pose.coords.x < target.coords.x);
+        assert!(body.has_pose_reconciliation_work());
+        scene
+            .set_dynamic_physical_body(id, None, PhysicalCollisionFilter::ALL, None)
+            .unwrap();
+        tick_pose_only_body(&mut scene, id, 0.1);
+        assert!(scene.body(id).unwrap().pose.coords.x < target.coords.x);
     }
 
     #[test]
@@ -3527,7 +3391,9 @@ mod physical_body_tests {
             .tick_physical_body(
                 id,
                 &collision,
-                PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                crate::spatial::PhysicalBodyInput::autonomous(PhysicalBodyActuation::Grounded(
+                    GroundedBodyActuation::coast(),
+                )),
                 0.1,
                 now + Duration::from_millis(200),
             )
@@ -3539,229 +3405,6 @@ mod physical_body_tests {
             scene.body(id).unwrap().motion_state,
             Some(EntityMotionSnapshot::default())
         );
-    }
-
-    #[test]
-    fn scene_publication_lazily_schedules_only_stale_static_support() {
-        let collision = flat_collision_scene();
-        let now = Instant::now();
-        let id = SpatialBodyId::Entity(Guid(0x7000_0001));
-        let mut scene = SpatialScene::new();
-        scene.register_body(SpatialBody::new(
-            id,
-            pose(Vector3::new(90.0, 96.0, 0.005)),
-            now,
-        ));
-        scene
-            .set_dynamic_physical_body(
-                id,
-                Some(dynamic_definition(grounded_definition(), false)),
-                PhysicalCollisionFilter::ALL,
-                None,
-            )
-            .unwrap();
-        acquire_support(&mut scene, &collision, id, now);
-        for tick in 1..=2 {
-            scene
-                .tick_physical_body(
-                    id,
-                    &collision,
-                    PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
-                    0.1,
-                    now + Duration::from_millis(tick * 100),
-                )
-                .unwrap();
-        }
-        assert_eq!(dynamic_activity(&scene, id), DynamicBodyActivity::Settled);
-        let settled = scene.body(id).unwrap().clone();
-
-        let unrelated = collision
-            .staged_residency_change(
-                vec![LandblockCollisionAsset {
-                    landblock_id: 0x1000_ffff,
-                    terrain: TerrainCollisionSurface::empty(),
-                    static_geometry: LandblockColliders::default(),
-                }],
-                &[],
-            )
-            .unwrap();
-        let unchanged = scene
-            .prepare_dynamic_entity_collection(&unrelated, 0.1, |_| {
-                Ok(PhysicalBodyActuation::Grounded(
-                    GroundedBodyActuation::coast(),
-                ))
-            })
-            .unwrap();
-        assert!(unchanged.movers.is_empty());
-        assert!(unchanged.coverage_rejections.is_empty());
-        assert_eq!(scene.body(id).unwrap(), &settled);
-        scene
-            .finish_dynamic_entity_collection(now + Duration::from_millis(200))
-            .unwrap();
-
-        let replaced = unrelated
-            .staged_residency_change(vec![flat_collision_asset(0)], &[])
-            .unwrap();
-        let mut replaced_scene = scene.clone();
-        let stale = replaced_scene
-            .prepare_dynamic_entity_collection(&replaced, 0.1, |_| {
-                Ok(PhysicalBodyActuation::Grounded(
-                    GroundedBodyActuation::coast(),
-                ))
-            })
-            .unwrap();
-        assert_eq!(stale.movers.len(), 1);
-        assert_eq!(stale.movers[0], id);
-        assert_eq!(replaced_scene.body(id).unwrap(), &settled);
-
-        let evicted = unrelated
-            .staged_residency_change(Vec::new(), &[Guid(0xda55_ffff)])
-            .unwrap();
-        let rejected = scene
-            .prepare_dynamic_entity_collection(&evicted, 0.1, |_| {
-                Ok(PhysicalBodyActuation::Grounded(
-                    GroundedBodyActuation::coast(),
-                ))
-            })
-            .unwrap();
-        assert!(rejected.movers.is_empty());
-        assert_eq!(
-            rejected.coverage_rejections,
-            [DynamicEntityCollectionCoverageRejection {
-                body_id: id,
-                owner: Guid(0xda55_ffff),
-            }]
-        );
-        assert_eq!(scene.body(id).unwrap(), &settled);
-        scene
-            .finish_dynamic_entity_collection(now + Duration::from_millis(200))
-            .unwrap();
-
-        let reintroduced = evicted
-            .staged_residency_change(vec![flat_collision_asset(0)], &[])
-            .unwrap();
-        let prepared = scene
-            .prepare_dynamic_entity_collection(&reintroduced, 0.1, |_| {
-                Ok(PhysicalBodyActuation::Grounded(
-                    GroundedBodyActuation::coast(),
-                ))
-            })
-            .unwrap();
-        let body_id = prepared.movers.into_iter().next().unwrap();
-        scene
-            .tick_prepared_dynamic_physical_body(
-                body_id,
-                &reintroduced,
-                now + Duration::from_millis(300),
-            )
-            .unwrap();
-        scene
-            .finish_dynamic_entity_collection(now + Duration::from_millis(300))
-            .unwrap();
-    }
-
-    #[test]
-    fn missing_retained_env_cell_suspends_collection_until_topology_returns() {
-        let now = Instant::now();
-        let cell = Guid(0xda55_0100);
-        let id = SpatialBodyId::Entity(Guid(0x7000_0100));
-        let mut scene = SpatialScene::new();
-        scene.register_body(SpatialBody::new(
-            id,
-            WorldPosition {
-                landblock_id: cell,
-                ..pose(Vector3::new(96.0, 96.0, 20.0))
-            },
-            now,
-        ));
-        scene
-            .set_dynamic_physical_body(
-                id,
-                Some(dynamic_definition(
-                    free_definition(Vector3::zero(), 0.25),
-                    false,
-                )),
-                PhysicalCollisionFilter::ALL,
-                Some(cell),
-            )
-            .unwrap();
-
-        let absent = scene
-            .prepare_dynamic_entity_collection(&CollisionScene::new(), 0.1, collection_actuation)
-            .unwrap();
-        assert!(absent.movers.is_empty());
-        assert!(absent.coverage_rejections.is_empty());
-        assert_eq!(dynamic_activity(&scene, id), DynamicBodyActivity::Suspended);
-        let retained_pose = scene.body(id).unwrap().pose;
-        scene.apply_runtime_body_pose(id, retained_pose, SpatialSampleMode::AuthoritativeOnly);
-        assert_eq!(dynamic_activity(&scene, id), DynamicBodyActivity::Suspended);
-        scene
-            .finish_dynamic_entity_collection(now + Duration::from_millis(100))
-            .unwrap();
-
-        let collision = collision_scene(Some(0x0100));
-        let prepared = scene
-            .prepare_dynamic_entity_collection(&collision, 0.1, collection_actuation)
-            .unwrap();
-        assert_eq!(prepared.movers.len(), 1);
-        assert_eq!(dynamic_activity(&scene, id), DynamicBodyActivity::Active);
-        let body_id = prepared.movers.into_iter().next().unwrap();
-        scene
-            .tick_prepared_dynamic_physical_body(
-                body_id,
-                &collision,
-                now + Duration::from_millis(200),
-            )
-            .unwrap();
-        scene
-            .finish_dynamic_entity_collection(now + Duration::from_millis(200))
-            .unwrap();
-    }
-
-    #[test]
-    fn missing_retained_env_cell_suspends_body_with_stale_ground_support() {
-        let now = Instant::now();
-        let cell = Guid(0xda55_0100);
-        let id = SpatialBodyId::Entity(Guid(0x7000_0100));
-        let collision = collision_scene(Some(0x0100));
-        let mut scene = SpatialScene::new();
-        scene.register_body(SpatialBody::new(
-            id,
-            WorldPosition {
-                landblock_id: cell,
-                ..pose(Vector3::new(96.0, 96.0, 20.0))
-            },
-            now,
-        ));
-        scene
-            .set_dynamic_physical_body(
-                id,
-                Some(dynamic_definition(grounded_definition(), false)),
-                PhysicalCollisionFilter::ALL,
-                Some(cell),
-            )
-            .unwrap();
-        let stored = scene.body_mut(id).unwrap();
-        stored.contact = ContactState::Grounded;
-        let PhysicalBodyResponseState::Grounded { ground, .. } =
-            &mut stored.physical.as_mut().unwrap().response
-        else {
-            panic!("grounded definition produced non-grounded response state")
-        };
-        *ground = GroundState::Supported(GroundSupport {
-            normal: Vector3::new(0.0, 0.0, 1.0),
-            proof: collision.owner_proof(Guid(0xda55_ffff)).unwrap(),
-        });
-
-        let prepared = scene
-            .prepare_dynamic_entity_collection(&CollisionScene::new(), 0.1, collection_actuation)
-            .unwrap();
-
-        assert!(prepared.movers.is_empty());
-        assert_eq!(dynamic_activity(&scene, id), DynamicBodyActivity::Suspended);
-        scene
-            .finish_dynamic_entity_collection(now + Duration::from_millis(100))
-            .unwrap();
     }
 
     #[test]
@@ -3793,7 +3436,9 @@ mod physical_body_tests {
             .tick_physical_body(
                 id,
                 &collision,
-                PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                crate::spatial::PhysicalBodyInput::autonomous(PhysicalBodyActuation::Grounded(
+                    GroundedBodyActuation::coast(),
+                )),
                 0.1,
                 now + Duration::from_millis(200),
             )
@@ -4014,6 +3659,7 @@ mod physical_body_tests {
                     free_definition(Vector3::zero(), 0.1),
                     false,
                     PreparedEntityTargetGeometry {
+                        setup_radius: 0.5,
                         physics_bsp_parts: vec![PreparedEntityBspPart {
                             part_index: 0,
                             gfx_obj_did: 0x0100_0001,
@@ -4042,89 +3688,6 @@ mod physical_body_tests {
 
         assert!(placement.reaches_outdoors());
         assert_eq!(placement.reached_env_cells(), &[cell]);
-    }
-
-    #[test]
-    fn object_scale_reuses_unit_geometry_and_refreshes_portal_membership() {
-        let cell = Guid(0xda55_0100);
-        let now = Instant::now();
-        let body_id = SpatialBodyId::Entity(Guid(0x7000_0001));
-        let target_geometry = PreparedEntityTargetGeometry {
-            physics_bsp_parts: vec![PreparedEntityBspPart {
-                part_index: 0,
-                gfx_obj_did: 0x0100_0001,
-                local_origin: Vector3::new(0.2, 0.0, 0.0),
-                local_orientation: Quaternion::identity(),
-                scale: ColliderScale::uniform(2.0).unwrap(),
-                shape: bsp_shape(Vector3::zero(), 0.05),
-            }],
-            fallback_setup_did: 0x0200_0001,
-            fallback_shapes: Vec::new(),
-            fallback_scale: ColliderScale::uniform(1.0).unwrap(),
-        };
-        let configuration = dynamic_definition_with_geometry(
-            free_definition(Vector3::zero(), 0.1),
-            false,
-            target_geometry,
-            true,
-        );
-        let mut scene = SpatialScene::new();
-        scene.register_body(SpatialBody::new(
-            body_id,
-            WorldPosition {
-                landblock_id: cell,
-                ..pose(Vector3::new(-1.0, 0.0, 0.0))
-            },
-            now,
-        ));
-        scene
-            .set_dynamic_physical_body(
-                body_id,
-                Some(configuration),
-                PhysicalCollisionFilter::ALL,
-                Some(cell),
-            )
-            .unwrap();
-
-        let retained_geometry = Arc::clone(
-            &scene
-                .body(body_id)
-                .unwrap()
-                .physical
-                .as_ref()
-                .unwrap()
-                .dynamic
-                .as_ref()
-                .unwrap()
-                .collision
-                .target_geometry,
-        );
-        scene.set_dynamic_body_object_scale(body_id, 4.0).unwrap();
-
-        let body = scene.body(body_id).unwrap();
-        let physical = body.physical.as_ref().unwrap();
-        let dynamic = physical.dynamic.as_ref().unwrap();
-        assert_eq!(dynamic.unit_movement.spheres().primary().radius, 0.1);
-        assert_eq!(physical.definition.spheres().primary().radius, 0.4);
-        assert!(Arc::ptr_eq(
-            &retained_geometry,
-            &dynamic.collision.target_geometry
-        ));
-        let bounds = target_bounds(body).unwrap();
-        assert_eq!(bounds.len(), 1);
-        assert!((bounds[0].minimum().x - -0.6).abs() < 0.000_01);
-        assert!((bounds[0].maximum().x - 0.2).abs() < 0.000_01);
-
-        scene
-            .prepare_dynamic_entity_collection(
-                &portal_collision_scene(),
-                0.03,
-                collection_actuation,
-            )
-            .unwrap();
-        let membership = scene.body(body_id).unwrap().spatial_membership();
-        assert!(membership.reaches_outdoors());
-        assert_eq!(membership.reached_env_cells(), &[cell]);
     }
 
     #[test]
@@ -4177,259 +3740,6 @@ mod physical_body_tests {
     }
 
     #[test]
-    fn three_hundred_body_scan_skips_settled_bodies_without_losing_stable_order() {
-        let now = Instant::now();
-        let mut scene = SpatialScene::new();
-        for offset in (0..300_u32).rev() {
-            let id = SpatialBodyId::Entity(Guid(0x7000_0000 + offset));
-            scene.register_body(SpatialBody::new(id, pose(Vector3::zero()), now));
-            scene
-                .set_dynamic_physical_body(
-                    id,
-                    Some(dynamic_definition(grounded_definition(), false)),
-                    PhysicalCollisionFilter::ALL,
-                    None,
-                )
-                .unwrap();
-            if offset % 2 == 0 {
-                scene
-                    .body_mut(id)
-                    .unwrap()
-                    .physical
-                    .as_mut()
-                    .unwrap()
-                    .dynamic
-                    .as_mut()
-                    .unwrap()
-                    .activity = DynamicBodyActivity::Settled;
-            }
-        }
-
-        let scheduled = scene
-            .prepare_dynamic_entity_collection(
-                &collision_scene(None),
-                1.0 / 30.0,
-                collection_actuation,
-            )
-            .unwrap()
-            .movers
-            .into_iter()
-            .collect::<Vec<_>>();
-        assert_eq!(scheduled.len(), 150);
-        assert!(scheduled.windows(2).all(|pair| pair[0] < pair[1]));
-        assert!(scheduled.iter().all(|body_id| {
-            let SpatialBodyId::Entity(guid) = body_id else {
-                return false;
-            };
-            guid.0 % 2 == 1
-        }));
-        assert_eq!(scene.iter_runtime_body_views().count(), 300);
-        assert_eq!(
-            scene
-                .dynamic_candidates_for_extent(
-                    SpatialBodyId::Ephemeral(999),
-                    Guid(0xda55_ffff),
-                    Vector3::new(-1.0, -1.0, -1.0),
-                    Vector3::new(1.0, 1.0, 1.0),
-                    &crate::SpatialMembership::outdoor(),
-                )
-                .unwrap()
-                .len(),
-            300
-        );
-    }
-
-    #[test]
-    fn dynamic_epoch_requires_one_complete_prepare_attempt_finish_lifecycle() {
-        let collision = flat_collision_scene();
-        let now = Instant::now();
-        let id = SpatialBodyId::Entity(Guid(0x7000_0001));
-        let mut scene = SpatialScene::new();
-        scene.register_body(SpatialBody::new(
-            id,
-            pose(Vector3::new(96.0, 96.0, 0.005)),
-            now,
-        ));
-        scene
-            .set_dynamic_physical_body(
-                id,
-                Some(dynamic_definition(grounded_definition(), false)),
-                PhysicalCollisionFilter::ALL,
-                None,
-            )
-            .unwrap();
-
-        let prepared = scene
-            .prepare_dynamic_entity_collection(&collision, 0.1, collection_actuation)
-            .unwrap();
-        assert_eq!(prepared.movers, [id]);
-        assert!(
-            scene
-                .prepare_dynamic_entity_collection(&collision, 0.1, collection_actuation)
-                .is_err()
-        );
-        assert!(scene.finish_dynamic_entity_collection(now).is_err());
-
-        scene
-            .tick_prepared_dynamic_physical_body(id, &collision, now + Duration::from_millis(100))
-            .unwrap();
-        scene
-            .finish_dynamic_entity_collection(now + Duration::from_millis(100))
-            .unwrap();
-        assert!(
-            scene
-                .finish_dynamic_entity_collection(now + Duration::from_millis(100))
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn runtime_suspension_invalidates_the_complete_dynamic_epoch() {
-        let collision = flat_collision_scene();
-        let now = Instant::now();
-        let id = SpatialBodyId::Entity(Guid(0x7000_0001));
-        let mut scene = SpatialScene::new();
-        scene.register_body(SpatialBody::new(
-            id,
-            pose(Vector3::new(96.0, 96.0, 0.005)),
-            now,
-        ));
-        scene
-            .set_dynamic_physical_body(
-                id,
-                Some(dynamic_definition(grounded_definition(), false)),
-                PhysicalCollisionFilter::ALL,
-                None,
-            )
-            .unwrap();
-        scene
-            .prepare_dynamic_entity_collection(&collision, 0.1, collection_actuation)
-            .unwrap();
-
-        scene.suspend_runtime_bodies(now + Duration::from_millis(50));
-
-        assert!(
-            scene
-                .tick_prepared_dynamic_physical_body(
-                    id,
-                    &collision,
-                    now + Duration::from_millis(100)
-                )
-                .is_err()
-        );
-        assert!(
-            scene
-                .finish_dynamic_entity_collection(now + Duration::from_millis(100))
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn dynamic_outdoor_shadows_cross_landblocks_and_exclude_non_entity_bodies() {
-        let now = Instant::now();
-        let target = SpatialBodyId::Entity(Guid(0x7000_0001));
-        let camera = SpatialBodyId::Ephemeral(1);
-        let mut scene = SpatialScene::new();
-        for body_id in [target, camera] {
-            scene.register_body(SpatialBody::new(
-                body_id,
-                pose(Vector3::new(191.75, 12.0, 1.0)),
-                now,
-            ));
-            scene
-                .set_dynamic_physical_body(
-                    body_id,
-                    Some(dynamic_definition(grounded_definition(), false)),
-                    PhysicalCollisionFilter::ALL,
-                    None,
-                )
-                .unwrap();
-        }
-        scene
-            .body_mut(target)
-            .unwrap()
-            .physical
-            .as_mut()
-            .unwrap()
-            .dynamic
-            .as_mut()
-            .unwrap()
-            .activity = DynamicBodyActivity::Settled;
-
-        scene
-            .prepare_dynamic_entity_collection(
-                &collision_scene(None),
-                1.0 / 30.0,
-                collection_actuation,
-            )
-            .unwrap();
-        assert_eq!(
-            scene
-                .dynamic_candidates_for_extent(
-                    SpatialBodyId::Entity(Guid(0x7000_0099)),
-                    Guid(0xdb55_ffff),
-                    Vector3::new(0.0, 11.0, 0.0),
-                    Vector3::new(1.0, 13.0, 2.0),
-                    &crate::SpatialMembership::outdoor(),
-                )
-                .unwrap(),
-            [target]
-        );
-    }
-
-    #[test]
-    fn fifty_body_bucket_uses_full_swept_bounds_for_provisional_discovery() {
-        let now = Instant::now();
-        let mut scene = SpatialScene::new();
-        for offset in 0..50_u32 {
-            let id = SpatialBodyId::Entity(Guid(0x7000_0000 + offset));
-            scene.register_body(SpatialBody::new(
-                id,
-                pose(Vector3::new(offset as f32 * 2.0, 12.0, 1.0)),
-                now,
-            ));
-            scene
-                .set_dynamic_physical_body(
-                    id,
-                    Some(dynamic_definition(grounded_definition(), false)),
-                    PhysicalCollisionFilter::ALL,
-                    None,
-                )
-                .unwrap();
-        }
-        scene
-            .prepare_dynamic_entity_collection(
-                &collision_scene(None),
-                1.0 / 30.0,
-                collection_actuation,
-            )
-            .unwrap();
-
-        let initial_cell_only = scene
-            .dynamic_candidates_for_extent(
-                SpatialBodyId::Ephemeral(999),
-                Guid(0xda55_ffff),
-                Vector3::new(0.0, 11.0, 0.0),
-                Vector3::new(1.0, 13.0, 2.0),
-                &crate::SpatialMembership::outdoor(),
-            )
-            .unwrap();
-        let full_sweep = scene
-            .dynamic_candidates_for_extent(
-                SpatialBodyId::Ephemeral(999),
-                Guid(0xda55_ffff),
-                Vector3::new(0.0, 11.0, 0.0),
-                Vector3::new(99.0, 13.0, 2.0),
-                &crate::SpatialMembership::outdoor(),
-            )
-            .unwrap();
-
-        assert!(initial_cell_only.len() < 50);
-        assert_eq!(full_sweep.len(), 50);
-        assert!(full_sweep.windows(2).all(|pair| pair[0] < pair[1]));
-    }
-
-    #[test]
     fn dynamic_interior_membership_and_target_branch_bounds_are_exact() {
         let now = Instant::now();
         let bsp_id = SpatialBodyId::Entity(Guid(0x7000_0001));
@@ -4447,6 +3757,7 @@ mod physical_body_tests {
                     grounded_definition(),
                     false,
                     PreparedEntityTargetGeometry {
+                        setup_radius: 0.5,
                         physics_bsp_parts: vec![PreparedEntityBspPart {
                             part_index: 0,
                             gfx_obj_did: 0x0100_0001,
@@ -4492,6 +3803,7 @@ mod physical_body_tests {
                     grounded_definition(),
                     false,
                     PreparedEntityTargetGeometry {
+                        setup_radius: 0.5,
                         physics_bsp_parts: Vec::new(),
                         fallback_setup_did: 0x0200_0002,
                         fallback_shapes: vec![Arc::new(CollisionShape::Cylinder(
@@ -4533,282 +3845,32 @@ mod physical_body_tests {
                 .is_empty()
         );
 
-        let bsp_bounds =
-            crate::spatial::dynamic_index::target_bounds(scene.body(bsp_id).unwrap()).unwrap()[0];
+        let bsp = scene.body(bsp_id).unwrap();
+        let bsp_bounds = placed_target_shapes(
+            bsp.physical.as_ref().unwrap().dynamic.as_ref().unwrap(),
+            bsp.pose,
+            Guid(bsp.pose.landblock_id.0 | 0xffff),
+        )
+        .unwrap()[0]
+            .bounds;
         assert_eq!(bsp_bounds.minimum(), Vector3::new(13.0, 18.0, 28.0));
         assert_eq!(bsp_bounds.maximum(), Vector3::new(17.0, 22.0, 32.0));
-        let cylinder_bounds =
-            crate::spatial::dynamic_index::target_bounds(scene.body(cylinder_id).unwrap()).unwrap()
-                [0];
+        let cylinder = scene.body(cylinder_id).unwrap();
+        let cylinder_bounds = placed_target_shapes(
+            cylinder
+                .physical
+                .as_ref()
+                .unwrap()
+                .dynamic
+                .as_ref()
+                .unwrap(),
+            cylinder.pose,
+            Guid(cylinder.pose.landblock_id.0 | 0xffff),
+        )
+        .unwrap()[0]
+            .bounds;
         assert_eq!(cylinder_bounds.minimum(), Vector3::new(38.5, 50.0, 64.5));
         assert_eq!(cylinder_bounds.maximum(), Vector3::new(44.5, 56.0, 70.5));
-    }
-
-    #[test]
-    fn directional_dynamic_contact_blocks_ball_cylinder_and_physics_bsp_targets() {
-        let branches = [
-            fallback_target(Arc::new(CollisionShape::Ball(CollisionBall {
-                center: Vector3::zero(),
-                radius: 0.5,
-            }))),
-            fallback_target(Arc::new(CollisionShape::Cylinder(CollisionCylinder {
-                low_point: Vector3::new(0.0, 0.0, -1.0),
-                radius: 0.5,
-                height: 2.0,
-            }))),
-            bsp_target(polygon_wall_shape()),
-        ];
-        for target_geometry in branches {
-            let now = Instant::now();
-            let mover = SpatialBodyId::Entity(Guid(0x7000_0001));
-            let target = SpatialBodyId::Entity(Guid(0x7000_0002));
-            let mut scene = SpatialScene::new();
-            install_free_dynamic(
-                &mut scene,
-                mover,
-                Vector3::zero(),
-                Vector3::new(10.0, 0.0, 0.0),
-                fallback_target(Arc::new(CollisionShape::Ball(CollisionBall {
-                    center: Vector3::zero(),
-                    radius: 0.5,
-                }))),
-                now,
-            );
-            install_free_dynamic(
-                &mut scene,
-                target,
-                Vector3::new(1.2, 0.0, 0.0),
-                Vector3::zero(),
-                target_geometry,
-                now,
-            );
-            let collision = collision_scene(None);
-            let prepared = scene
-                .prepare_dynamic_entity_collection(&collision, 0.1, collection_actuation)
-                .unwrap();
-            assert!(prepared.movers.contains(&mover));
-            scene
-                .tick_prepared_dynamic_physical_body(
-                    mover,
-                    &collision,
-                    now + Duration::from_millis(100),
-                )
-                .unwrap();
-            let solved = scene.body(mover).unwrap();
-            assert!(solved.pose.coords.x < 0.8, "branch tunneled: {solved:?}");
-            assert!(
-                solved.retained.velocity.x < 0.0,
-                "branch did not respond: {solved:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn ignore_collisions_is_mover_side_only_and_preserves_target_solidity() {
-        let now = Instant::now();
-        let mover = SpatialBodyId::Entity(Guid(0x7000_0001));
-        let target = SpatialBodyId::Entity(Guid(0x7000_0002));
-        let geometry = || {
-            fallback_target(Arc::new(CollisionShape::Ball(CollisionBall {
-                center: Vector3::zero(),
-                radius: 0.5,
-            })))
-        };
-        let install_pair = |scene: &mut SpatialScene| {
-            install_free_dynamic(
-                scene,
-                mover,
-                Vector3::zero(),
-                Vector3::new(10.0, 0.0, 0.0),
-                geometry(),
-                now,
-            );
-            install_free_dynamic(
-                scene,
-                target,
-                Vector3::new(1.2, 0.0, 0.0),
-                Vector3::zero(),
-                geometry(),
-                now,
-            );
-        };
-        let ignored =
-            crate::resolve_effective_entity_physics_state(PhysicsState::IGNORE_COLLISIONS)
-                .dynamic_collision;
-        assert_eq!(ignored.target, EntityCollisionParticipation::Solid);
-        assert!(!ignored.mover_accepts_response);
-
-        let collision = collision_scene(None);
-        let mut ignored_mover_scene = SpatialScene::new();
-        install_pair(&mut ignored_mover_scene);
-        ignored_mover_scene
-            .body_mut(mover)
-            .unwrap()
-            .physical
-            .as_mut()
-            .unwrap()
-            .dynamic
-            .as_mut()
-            .unwrap()
-            .collision
-            .dynamic_collision = ignored;
-        ignored_mover_scene
-            .prepare_dynamic_entity_collection(&collision, 0.1, collection_actuation)
-            .unwrap();
-        ignored_mover_scene
-            .tick_prepared_dynamic_physical_body(
-                mover,
-                &collision,
-                now + Duration::from_millis(100),
-            )
-            .unwrap();
-        assert!(ignored_mover_scene.body(mover).unwrap().pose.coords.x > 0.9);
-
-        let mut ignored_target_scene = SpatialScene::new();
-        install_pair(&mut ignored_target_scene);
-        ignored_target_scene
-            .body_mut(target)
-            .unwrap()
-            .physical
-            .as_mut()
-            .unwrap()
-            .dynamic
-            .as_mut()
-            .unwrap()
-            .collision
-            .dynamic_collision = ignored;
-        ignored_target_scene
-            .prepare_dynamic_entity_collection(&collision, 0.1, collection_actuation)
-            .unwrap();
-        ignored_target_scene
-            .tick_prepared_dynamic_physical_body(
-                mover,
-                &collision,
-                now + Duration::from_millis(100),
-            )
-            .unwrap();
-        assert!(ignored_target_scene.body(mover).unwrap().pose.coords.x < 0.8);
-    }
-
-    #[test]
-    fn ethereal_report_only_target_does_not_block_the_mover() {
-        let now = Instant::now();
-        let mover = SpatialBodyId::Entity(Guid(0x7000_0001));
-        let target = SpatialBodyId::Entity(Guid(0x7000_0002));
-        let geometry = fallback_target(Arc::new(CollisionShape::Ball(CollisionBall {
-            center: Vector3::zero(),
-            radius: 0.5,
-        })));
-        let mut scene = SpatialScene::new();
-        install_free_dynamic(
-            &mut scene,
-            mover,
-            Vector3::zero(),
-            Vector3::new(10.0, 0.0, 0.0),
-            geometry.clone(),
-            now,
-        );
-        install_free_dynamic(
-            &mut scene,
-            target,
-            Vector3::new(1.2, 0.0, 0.0),
-            Vector3::zero(),
-            geometry,
-            now,
-        );
-        scene
-            .body_mut(target)
-            .unwrap()
-            .physical
-            .as_mut()
-            .unwrap()
-            .dynamic
-            .as_mut()
-            .unwrap()
-            .collision
-            .dynamic_collision
-            .target = EntityCollisionParticipation::Ethereal;
-        let collision = collision_scene(None);
-        scene
-            .prepare_dynamic_entity_collection(&collision, 0.1, collection_actuation)
-            .unwrap();
-        scene
-            .tick_prepared_dynamic_physical_body(
-                mover,
-                &collision,
-                now + Duration::from_millis(100),
-            )
-            .unwrap();
-        assert!((scene.body(mover).unwrap().pose.coords.x - 1.0).abs() < 0.000_1);
-        assert_eq!(scene.body(mover).unwrap().retained.velocity.x, 10.0);
-    }
-
-    #[test]
-    fn response_only_pair_blocks_without_requiring_collision_reporting() {
-        let now = Instant::now();
-        let mover = SpatialBodyId::Entity(Guid(0x7000_0001));
-        let target = SpatialBodyId::Entity(Guid(0x7000_0002));
-        let geometry = || {
-            fallback_target(Arc::new(CollisionShape::Ball(CollisionBall {
-                center: Vector3::zero(),
-                radius: 0.5,
-            })))
-        };
-        let mut scene = SpatialScene::new();
-        install_free_dynamic(
-            &mut scene,
-            mover,
-            Vector3::zero(),
-            Vector3::new(10.0, 0.0, 0.0),
-            geometry(),
-            now,
-        );
-        install_free_dynamic(
-            &mut scene,
-            target,
-            Vector3::new(1.2, 0.0, 0.0),
-            Vector3::zero(),
-            geometry(),
-            now,
-        );
-        scene
-            .body_mut(mover)
-            .unwrap()
-            .physical
-            .as_mut()
-            .unwrap()
-            .dynamic
-            .as_mut()
-            .unwrap()
-            .collision
-            .reporting
-            .enabled = false;
-        scene
-            .body_mut(target)
-            .unwrap()
-            .physical
-            .as_mut()
-            .unwrap()
-            .dynamic
-            .as_mut()
-            .unwrap()
-            .collision
-            .reporting
-            .enabled = false;
-        let collision = collision_scene(None);
-        scene
-            .prepare_dynamic_entity_collection(&collision, 0.1, collection_actuation)
-            .unwrap();
-        let result = scene
-            .tick_prepared_dynamic_physical_body(
-                mover,
-                &collision,
-                now + Duration::from_millis(100),
-            )
-            .unwrap();
-        assert!(scene.body(mover).unwrap().retained.velocity.x < 0.0);
-        assert!(result.dynamic_state_change.is_none());
-        assert!(result.collision_reports.is_empty());
     }
 
     /// Complete state replacement is reversible mid-contact. Removing a peer's solid participation
@@ -4844,11 +3906,11 @@ mod physical_body_tests {
         );
         let collision = collision_scene(None);
 
-        // The solid peer blocks and reverses the mover.
-        let blocked = tick_prepared_collection(&mut scene, &collision, 0.1, now);
+        // The solid mobile peer shares closing velocity with the mover.
+        let blocked = tick_collection(&mut scene, &collision, 0.1, now);
         assert!(
-            scene.body(mover).unwrap().retained.velocity.x < 0.0,
-            "a solid peer must reverse the mover before replacement"
+            scene.body(mover).unwrap().retained.velocity.x < 10.0,
+            "a solid peer must reduce closing velocity before replacement"
         );
         assert!(!blocked.is_empty(), "the blocking touch must report");
 
@@ -4892,7 +3954,7 @@ mod physical_body_tests {
                 now + Duration::from_millis(100),
             )
             .unwrap();
-        tick_prepared_collection(
+        tick_collection(
             &mut scene,
             &collision,
             0.1,
@@ -4902,106 +3964,6 @@ mod physical_body_tests {
             scene.body(mover).unwrap().retained.velocity.x > 0.0,
             "an ethereal peer must not reverse the mover after contact-time replacement"
         );
-    }
-
-    #[test]
-    fn target_only_peer_starts_both_report_directions_and_expires_without_integration() {
-        let created_at = Instant::now();
-        let touched_at = created_at + Duration::from_millis(100);
-        let mover = SpatialBodyId::Entity(Guid(0x7000_0001));
-        let peer = SpatialBodyId::Entity(Guid(0x7000_0002));
-        let geometry = || {
-            fallback_target(Arc::new(CollisionShape::Ball(CollisionBall {
-                center: Vector3::zero(),
-                radius: 0.5,
-            })))
-        };
-        let mut scene = SpatialScene::new();
-        for body_id in [mover, peer] {
-            install_free_dynamic(
-                &mut scene,
-                body_id,
-                Vector3::zero(),
-                Vector3::zero(),
-                geometry(),
-                created_at,
-            );
-            let dynamic = scene
-                .body_mut(body_id)
-                .unwrap()
-                .physical
-                .as_mut()
-                .unwrap()
-                .dynamic
-                .as_mut()
-                .unwrap();
-            dynamic.collision.dynamic_collision.mover_accepts_response = false;
-        }
-        let physical = scene.body(peer).unwrap().physical.as_ref().unwrap();
-        let target_only = dynamic_configuration_with_demand(
-            DynamicPhysicalBodyDefinition {
-                movement: physical.definition,
-                response_policy: physical.response_policy,
-                entity_collision: physical.dynamic.as_ref().unwrap().collision.clone(),
-            },
-            LocalPhysicalDemand {
-                target: LocalTargetDemand::Retained,
-                integration: LocalIntegrationDemand::Excluded,
-            },
-        );
-        scene
-            .set_dynamic_physical_body(peer, Some(target_only), PhysicalCollisionFilter::ALL, None)
-            .unwrap();
-        assert_eq!(dynamic_activity(&scene, peer), DynamicBodyActivity::Settled);
-        assert_eq!(scene.scheduled_dynamic_entity_ids(), [mover]);
-
-        let reports = tick_prepared_collection(&mut scene, &collision_scene(None), 0.1, touched_at);
-        assert_eq!(reports.len(), 2);
-        assert!(
-            reports
-                .iter()
-                .all(|report| report.phase == CollisionReportPhase::Started)
-        );
-        assert_eq!(scene.active_collision_report_count(), 2);
-
-        scene
-            .body_mut(mover)
-            .unwrap()
-            .physical
-            .as_mut()
-            .unwrap()
-            .dynamic
-            .as_mut()
-            .unwrap()
-            .activity = DynamicBodyActivity::Settled;
-        assert!(
-            scene
-                .prepare_dynamic_entity_collection(
-                    &collision_scene(None),
-                    0.1,
-                    collection_actuation
-                )
-                .unwrap()
-                .movers
-                .is_empty()
-        );
-        assert!(
-            scene
-                .finish_dynamic_entity_collection(touched_at + Duration::from_secs(1))
-                .unwrap()
-                .is_empty()
-        );
-        let ended = scene
-            .collision_reports
-            .expire(touched_at + Duration::from_secs(1) + Duration::from_nanos(1))
-            .unwrap();
-        assert_eq!(ended.len(), 2);
-        assert!(
-            ended
-                .iter()
-                .all(|report| report.phase == CollisionReportPhase::Ended)
-        );
-        assert_eq!(scene.active_collision_report_count(), 0);
     }
 
     #[test]
@@ -5045,9 +4007,23 @@ mod physical_body_tests {
         peer_dynamic.collision.dynamic_collision.target = EntityCollisionParticipation::Ethereal;
         peer_dynamic.activity = DynamicBodyActivity::Settled;
 
-        let reports = tick_prepared_collection(&mut scene, &collision_scene(None), 0.1, touched_at);
+        let reports = scene
+            .advance_dynamic_entity_collection(&collision_scene(None), 0.1, touched_at, |body| {
+                let mut input = collection_input(body)?;
+                if body.id == mover {
+                    input = PhysicalBodyInput::referenced(
+                        input.actuation,
+                        PhysicalReferenceInput::body(None),
+                        true,
+                    );
+                }
+                Ok(input)
+            })
+            .unwrap()
+            .collision_reports;
         assert_eq!(reports.len(), 2);
-        assert!((scene.body(mover).unwrap().pose.coords.x - 1.0).abs() < 0.000_1);
+        let admitted = super::super::MOBILE_CONTACT_TICK_SECONDS;
+        assert!((scene.body(mover).unwrap().pose.coords.x - 10.0 * admitted).abs() < 0.000_1);
 
         let ended = scene
             .collision_reports
@@ -5104,7 +4080,7 @@ mod physical_body_tests {
         peer_dynamic.collision.reporting.as_environment = true;
         peer_dynamic.activity = DynamicBodyActivity::Settled;
 
-        let started = tick_prepared_collection(
+        let started = tick_collection(
             &mut scene,
             &collision_scene(None),
             0.1,
@@ -5137,93 +4113,6 @@ mod physical_body_tests {
                 .all(|report| report.phase == CollisionReportPhase::Ended)
         );
         assert_eq!(scene.active_collision_report_count(), 0);
-    }
-
-    #[test]
-    fn grounded_static_environment_contact_has_balanced_lifetime() {
-        let created_at = Instant::now();
-        let body_id = SpatialBodyId::Entity(Guid(0x7000_0001));
-        let collision = flat_collision_scene();
-        let mut scene = SpatialScene::new();
-        scene.register_body(SpatialBody::new(
-            body_id,
-            pose(Vector3::new(10.0, 10.0, 0.0)),
-            created_at,
-        ));
-        scene
-            .set_dynamic_physical_body(
-                body_id,
-                Some(dynamic_definition(grounded_definition(), false)),
-                PhysicalCollisionFilter::ALL,
-                None,
-            )
-            .unwrap();
-        {
-            let physical = scene.body_mut(body_id).unwrap().physical.as_mut().unwrap();
-            physical.response_policy.align_path = true;
-            let collision = &mut physical
-                .dynamic
-                .as_mut()
-                .unwrap()
-                .collision
-                .dynamic_collision;
-            collision.missile = true;
-            collision.path_clipped = true;
-        }
-        // Supply real downward motion so this tick reaches the environment.
-        scene.body_mut(body_id).unwrap().retained.velocity.z = -1.0;
-        let touched_at = created_at + Duration::from_millis(100);
-        let reports = tick_prepared_collection(&mut scene, &collision, 0.1, touched_at);
-        assert_eq!(
-            reports,
-            vec![CollisionReportOutcome {
-                contact: CollisionReportContact {
-                    recipient: body_id,
-                    source: CollisionReportSource::StaticEnvironment,
-                },
-                phase: CollisionReportPhase::Started,
-            }]
-        );
-        let physical = scene.body(body_id).unwrap().physical.as_ref().unwrap();
-        assert!(!physical.response_policy.align_path);
-        assert!(
-            !physical
-                .dynamic
-                .as_ref()
-                .unwrap()
-                .collision
-                .dynamic_collision
-                .missile
-        );
-        assert!(
-            !physical
-                .dynamic
-                .as_ref()
-                .unwrap()
-                .collision
-                .dynamic_collision
-                .path_clipped
-        );
-        scene
-            .body_mut(body_id)
-            .unwrap()
-            .physical
-            .as_mut()
-            .unwrap()
-            .dynamic
-            .as_mut()
-            .unwrap()
-            .activity = DynamicBodyActivity::Settled;
-        scene
-            .prepare_dynamic_entity_collection(&collision, 0.1, collection_actuation)
-            .unwrap();
-        let ended = scene
-            .finish_dynamic_entity_collection(
-                touched_at + Duration::from_secs(1) + Duration::from_nanos(1),
-            )
-            .unwrap();
-        assert_eq!(ended.len(), 1);
-        assert_eq!(ended[0].phase, CollisionReportPhase::Ended);
     }
 
     #[test]
@@ -5273,7 +4162,7 @@ mod physical_body_tests {
         let collision = collision_scene(None);
         let first_touch = created_at + Duration::from_millis(100);
         assert_eq!(
-            tick_prepared_collection(&mut scene, &collision, 0.1, first_touch).len(),
+            tick_collection(&mut scene, &collision, 0.1, first_touch).len(),
             2
         );
 
@@ -5332,7 +4221,7 @@ mod physical_body_tests {
         assert!(restored_outcome.collision_reports.is_empty());
         assert_eq!(scene.active_collision_report_count(), 1);
 
-        let restarted = tick_prepared_collection(
+        let restarted = tick_collection(
             &mut scene,
             &collision,
             0.1,
@@ -5344,1314 +4233,141 @@ mod physical_body_tests {
         assert_eq!(scene.active_collision_report_count(), 2);
     }
 
-    #[test]
-    fn targetless_fast_missile_hits_small_target_and_clears_projectile_state() {
-        let now = Instant::now();
-        let mover = SpatialBodyId::Entity(Guid(0x7000_0001));
-        let target = SpatialBodyId::Entity(Guid(0x7000_0002));
-        let geometry = || {
-            fallback_target(Arc::new(CollisionShape::Ball(CollisionBall {
-                center: Vector3::zero(),
-                radius: 0.05,
-            })))
-        };
-        let mut scene = SpatialScene::new();
-        install_free_dynamic_with_radius(
-            &mut scene,
-            mover,
-            Vector3::zero(),
-            Vector3::new(50.0, 0.0, 0.0),
-            0.05,
-            geometry(),
-            now,
-        );
-        install_free_dynamic_with_radius(
-            &mut scene,
-            target,
-            Vector3::new(1.0, 0.0, 0.0),
-            Vector3::zero(),
-            0.05,
-            geometry(),
-            now,
-        );
-        {
-            let physical = scene.body_mut(mover).unwrap().physical.as_mut().unwrap();
-            physical.response_policy.restitution = PhysicalRestitution::Inelastic;
-            physical.response_policy.align_path = true;
-            let policy = &mut physical
-                .dynamic
-                .as_mut()
-                .unwrap()
-                .collision
-                .dynamic_collision;
-            policy.missile = true;
-            policy.path_clipped = true;
-        }
-        let collision = collision_scene(None);
-        let delta_seconds = 1.0 / 30.0;
-        scene
-            .prepare_dynamic_entity_collection(&collision, delta_seconds, collection_actuation)
-            .unwrap();
-        let result = scene
-            .tick_prepared_dynamic_physical_body(
-                mover,
-                &collision,
-                now + Duration::from_secs_f32(delta_seconds),
-            )
-            .unwrap();
-        assert_eq!(
-            scene.body(mover).unwrap().retained.velocity,
-            Vector3::zero()
-        );
-        assert!(scene.body(mover).unwrap().pose.coords.x < 1.0);
-        assert_eq!(
-            result.dynamic_state_change.unwrap().cleared,
-            holtburger_common::properties::PhysicsState::MISSILE
-                | holtburger_common::properties::PhysicsState::ALIGN_PATH
-                | holtburger_common::properties::PhysicsState::PATH_CLIPPED
-        );
-        let physical = scene.body(mover).unwrap().physical.as_ref().unwrap();
-        assert!(!physical.response_policy.align_path);
-        assert!(
-            !physical
-                .dynamic
-                .as_ref()
-                .unwrap()
-                .collision
-                .dynamic_collision
-                .missile
-        );
-        assert!(
-            !physical
-                .dynamic
-                .as_ref()
-                .unwrap()
-                .collision
-                .dynamic_collision
-                .path_clipped
-        );
-    }
-
-    /// Grounded player and stationary cylinder targets, independent of external DAT assets.
-    fn grounded_contact_fixture(
-        offsets: &[Vector3],
+    fn grounded_pair_fixture(
+        pinned: bool,
         now: Instant,
-    ) -> (SpatialScene, CollisionScene, SpatialBodyId) {
-        let mover = SpatialBodyId::LocalPlayer(Guid(0x7000_0001));
+    ) -> (SpatialScene, CollisionScene, (SpatialBodyId, SpatialBodyId)) {
         let collision = flat_collision_scene();
         let mut scene = SpatialScene::new();
-        scene.register_body(SpatialBody::new(
-            mover,
-            pose(Vector3::new(10.0, 10.0, 0.005)),
-            now,
-        ));
-        scene
-            .set_dynamic_physical_body(
-                mover,
-                Some(dynamic_definition(grounded_definition(), false)),
-                PhysicalCollisionFilter::ALL,
-                None,
-            )
-            .unwrap();
-        acquire_support(&mut scene, &collision, mover, now);
-        for (index, offset) in offsets.iter().enumerate() {
-            let peer = SpatialBodyId::Entity(Guid(0x7100_0000 + index as u32));
-            install_free_dynamic(
-                &mut scene,
-                peer,
-                Vector3::new(10.0, 10.0, 0.0) + *offset,
-                Vector3::zero(),
-                fallback_target(Arc::new(CollisionShape::Cylinder(CollisionCylinder {
-                    low_point: Vector3::zero(),
-                    radius: 0.5,
-                    height: 2.0,
-                }))),
-                now,
-            );
-            scene
-                .body_mut(peer)
-                .unwrap()
-                .physical
-                .as_mut()
-                .unwrap()
-                .dynamic
-                .as_mut()
-                .unwrap()
-                .demand
-                .integration = LocalIntegrationDemand::Excluded;
-        }
-        (scene, collision, mover)
-    }
-
-    #[test]
-    fn grounded_entity_overlap_allows_escape_and_tangent_motion_without_inward_creep() {
-        for prediction in [false, true] {
-            for (drive, expected) in [
-                (Vector3::new(-2.0, 0.0, 0.0), Vector3::new(-0.2, 0.0, 0.0)),
-                (Vector3::new(0.0, 2.0, 0.0), Vector3::new(0.0, 0.2, 0.0)),
-                (Vector3::new(2.0, 2.0, 0.0), Vector3::new(0.0, 0.2, 0.0)),
-                (Vector3::new(2.0, 0.0, 0.0), Vector3::zero()),
-                // The endpoint would be beyond the cylinder: escape cannot mean crossing it.
-                (Vector3::new(20.0, 0.0, 0.0), Vector3::zero()),
-            ] {
-                let now = Instant::now();
-                let (mut scene, collision, mover) =
-                    grounded_contact_fixture(&[Vector3::new(0.95, 0.0, 0.0)], now);
-                let targets = scene.entity_collision_snapshot().unwrap();
-                let start = scene.body(mover).unwrap().pose.coords;
-                for tick in 1..=4 {
-                    let actuation = PhysicalBodyActuation::Grounded(
-                        GroundedBodyActuation::drive(drive).unwrap(),
-                    );
-                    let at = now + Duration::from_millis(tick * 100);
-                    let result = if prediction {
-                        scene
-                            .tick_physical_body_against_entity_snapshot(
-                                mover, &collision, &targets, actuation, 0.1, at,
-                            )
-                            .unwrap()
-                    } else {
-                        scene.wake_dynamic_body(mover);
-                        scene
-                            .prepare_dynamic_entity_collection(&collision, 0.1, |_| {
-                                Ok(actuation.clone())
-                            })
-                            .unwrap();
-                        let result = scene
-                            .tick_prepared_dynamic_physical_body(mover, &collision, at)
-                            .unwrap();
-                        scene.finish_dynamic_entity_collection(at).unwrap();
-                        result
-                    };
-                    let actual = scene.body(mover).unwrap().pose.coords - start;
-                    // Diagonal input can resume inward travel after it rounds the cylinder.
-                    if tick == 1 || drive.y == 0.0 {
-                        assert!(
-                            (actual - expected * tick as f32).length() < 0.0001,
-                            "prediction={prediction}, drive={drive:?}, tick={tick}: {actual:?}"
-                        );
-                    }
-                    assert_eq!(result.motion.status, PhysicalBodyTickStatus::Solved);
-                    assert!((actual.z).abs() < 0.0001);
-                }
+        let source = SpatialBodyId::LocalPlayer(Guid(0x7200_0001));
+        let target = SpatialBodyId::Entity(Guid(0x7200_0002));
+        let blocker = SpatialBodyId::Entity(Guid(0x7200_0003));
+        for (id, y) in [(source, 10.0), (target, 10.98), (blocker, 11.96)] {
+            if id == blocker && !pinned {
+                continue;
             }
-        }
-    }
-
-    #[test]
-    fn crowd_escape_respects_every_blocker_and_contact_tolerance_does_not_accumulate() {
-        let now = Instant::now();
-        let tolerance = super::super::dynamic_contact::DYNAMIC_PENETRATION_TOLERANCE;
-        for closed in [false, true] {
-            let mut offsets = vec![
-                Vector3::new(0.95, 0.0, 0.0),
-                Vector3::new(-0.95, 0.0, 0.0),
-                Vector3::new(0.0, 0.95, 0.0),
-            ];
-            if closed {
-                offsets.push(Vector3::new(0.0, -0.95, 0.0));
-            }
-            let (mut scene, collision, mover) = grounded_contact_fixture(&offsets, now);
-            let targets = scene.entity_collision_snapshot().unwrap();
-            scene
-                .tick_physical_body_against_entity_snapshot(
-                    mover,
-                    &collision,
-                    &targets,
-                    PhysicalBodyActuation::grounded_drive(Vector3::new(2.0, -2.0, 0.0)).unwrap(),
-                    0.1,
-                    now,
-                )
-                .unwrap();
-            let actual = scene.body(mover).unwrap().pose.coords;
-            assert!((actual.x - 10.0).abs() < tolerance);
-            assert!((actual.y - if closed { 10.0 } else { 9.8 }).abs() < tolerance);
-        }
-        // Escape from the overlapping cylinder is still blocked by another body behind us.
-        let (mut scene, collision, mover) = grounded_contact_fixture(
-            &[Vector3::new(0.95, 0.0, 0.0), Vector3::new(-1.1, 0.0, 0.0)],
-            now,
-        );
-        let targets = scene.entity_collision_snapshot().unwrap();
-        let mut contact_x: Option<f32> = None;
-        for tick in 1..=30 {
-            scene
-                .tick_physical_body_against_entity_snapshot(
-                    mover,
-                    &collision,
-                    &targets,
-                    PhysicalBodyActuation::grounded_drive(Vector3::new(-2.0, 0.0, 0.0)).unwrap(),
-                    0.1,
-                    now + Duration::from_millis(tick * 100),
-                )
-                .unwrap();
-            let x = scene.body(mover).unwrap().pose.coords.x;
-            assert!(
-                x < 9.9
-                    && x > 9.88 - tolerance - super::super::physical_body::RETAIL_PHYSICS_EPSILON,
-                "tick={tick}, x={x}"
-            );
-            if let Some(first) = contact_x {
-                assert!((x - first).abs() < tolerance);
-            } else {
-                contact_x = Some(x);
-            }
-        }
-    }
-
-    #[test]
-    fn sliding_along_an_entity_remains_bounded_by_static_walls_and_floor() {
-        let now = Instant::now();
-        let (mut scene, mut collision, mover) =
-            grounded_contact_fixture(&[Vector3::new(0.0, 0.95, 0.0)], now);
-        let mut asset = flat_collision_asset(0);
-        asset.static_geometry = LandblockColliders::new(
-            vec![
-                PlacedCollider::new(
-                    polygon_wall_shape(),
-                    LandblockPlacement {
-                        origin: Vector3::new(10.8, 10.0, 2.0),
-                        orientation: Quaternion::identity(),
-                    },
-                    ColliderScale::uniform(1.0).unwrap(),
-                    StaticColliderPlacement::OutdoorExplicit { source_index: 0 },
-                )
-                .unwrap(),
-            ],
-            Vec::new(),
-        );
-        collision.insert(asset).unwrap();
-        let now = now + Duration::from_secs(1);
-        acquire_support(&mut scene, &collision, mover, now);
-        let targets = scene.entity_collision_snapshot().unwrap();
-        for tick in 1..=3 {
-            scene
-                .tick_physical_body_against_entity_snapshot(
-                    mover,
-                    &collision,
-                    &targets,
-                    PhysicalBodyActuation::grounded_drive(Vector3::new(2.0, 2.0, 0.0)).unwrap(),
-                    0.3,
-                    now + Duration::from_millis(tick * 300),
-                )
-                .unwrap();
-            let position = scene.body(mover).unwrap().pose.coords;
-            assert!(position.x > 10.1 && position.x < 10.33, "{position:?}");
-            assert!((position.y - 10.0).abs() < 0.001, "{position:?}");
-            assert!(position.z >= 0.0 && position.z < 0.01, "{position:?}");
-        }
-    }
-
-    #[test]
-    fn contact_at_tick_end_limits_penetration_and_preserves_a_complete_motion_path() {
-        let now = Instant::now();
-        let mover = SpatialBodyId::Entity(Guid(0x7000_0001));
-        let peer = SpatialBodyId::Entity(Guid(0x7000_0002));
-        let delta_seconds = 0.1;
-        let travel = MAXIMUM_DYNAMIC_SLICE_DISTANCE * 0.25;
-        let mut scene = SpatialScene::new();
-        for (id, x, velocity) in [
-            (mover, 10.0, travel / delta_seconds),
-            (peer, 11.0 + travel * 0.5, 0.0),
-        ] {
-            install_free_dynamic(
-                &mut scene,
-                id,
-                Vector3::new(x, 10.0, 10.0),
-                Vector3::new(velocity, 0.0, 0.0),
-                fallback_target(Arc::new(CollisionShape::Ball(CollisionBall {
-                    center: Vector3::zero(),
-                    radius: 0.5,
-                }))),
-                now,
-            );
-        }
-        // Less than one sampling slice of travel: the first overlap is the final sample.
-        let collision = collision_scene(None);
-        scene
-            .prepare_dynamic_entity_collection(&collision, delta_seconds, collection_actuation)
-            .unwrap();
-        let result = scene
-            .tick_prepared_dynamic_physical_body(
-                mover,
-                &collision,
-                now + Duration::from_millis(100),
-            )
-            .unwrap();
-        assert_eq!(result.dynamic_contact.unwrap().peer, peer);
-        let solved = scene.body(mover).unwrap();
-        let separation = scene.body(peer).unwrap().pose.coords.x - solved.pose.coords.x;
-        assert!(
-            separation
-                >= 1.0
-                    - super::super::dynamic_contact::DYNAMIC_PENETRATION_TOLERANCE
-                    - super::super::physical_body::RETAIL_PHYSICS_EPSILON
-        );
-        assert!(solved.pose.coords.x > 10.0);
-        assert_eq!(
-            result.motion.path.final_point().center(),
-            solved.pose.coords
-        );
-        assert!(solved.retained.velocity.x < 0.0);
-    }
-
-    #[test]
-    fn initial_overlap_preserves_environment_integration_in_collection_and_prediction() {
-        // A side contact must not shorten gravity, support classification, launch, or rotation.
-        for scenario in ["falling", "launch", "supported", "replaced-support"] {
-            for prediction in [false, true] {
-                let now = Instant::now();
-                let mover = SpatialBodyId::Entity(Guid(0x7000_0001));
-                let peer = SpatialBodyId::Entity(Guid(0x7000_0002));
-                let dt = 0.1;
-                let mut collision = flat_collision_scene();
-                let mut scene = SpatialScene::new();
-                scene.register_body(SpatialBody::new(
-                    mover,
-                    pose(Vector3::new(
-                        10.0,
-                        10.0,
-                        if scenario == "falling" { 5.0 } else { 0.005 },
-                    )),
-                    now,
-                ));
-                scene
-                    .set_dynamic_physical_body(
-                        mover,
-                        Some(dynamic_definition(grounded_definition(), false)),
-                        PhysicalCollisionFilter::ALL,
-                        None,
-                    )
-                    .unwrap();
-                scene
-                    .tick_physical_body(
-                        mover,
-                        &collision,
-                        PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
-                        dt,
-                        now,
-                    )
-                    .unwrap();
-                if scenario != "falling" {
-                    acquire_support(&mut scene, &collision, mover, now);
-                    scene.wake_dynamic_body(mover);
-                }
-                if scenario == "replaced-support" {
-                    collision = flat_collision_scene();
-                }
-                let body = scene.body_mut(mover).unwrap();
-                body.retained.acceleration = Vector3::new(2.0, 0.0, 0.0);
-                body.retained.omega = Vector3::new(0.0, 0.0, 1.0);
-                let peer_position = body.pose.coords + Vector3::new(0.95, 0.0, 0.0);
-                let actuation = PhysicalBodyActuation::Grounded(if scenario == "launch" {
-                    GroundedBodyActuation::coast()
-                        .with_launch(GroundedLaunch::new(Vector3::new(0.0, 0.0, 5.0)).unwrap())
-                } else {
-                    GroundedBodyActuation::coast()
-                });
-                let expected = solve_physical_body_tick(
-                    &collision,
-                    scene.body(mover).unwrap(),
-                    &actuation,
-                    dt,
-                )
-                .unwrap();
-                install_free_dynamic(
-                    &mut scene,
-                    peer,
-                    peer_position,
-                    Vector3::zero(),
-                    fallback_target(Arc::new(CollisionShape::Cylinder(CollisionCylinder {
-                        low_point: Vector3::new(0.0, 0.0, -10.0),
-                        radius: 0.5,
-                        height: 20.0,
-                    }))),
-                    now,
-                );
-                let result = if prediction {
-                    let targets = scene.entity_collision_snapshot().unwrap();
-                    scene
-                        .tick_physical_body_against_entity_snapshot(
-                            mover,
-                            &collision,
-                            &targets,
-                            actuation,
-                            dt,
-                            now + Duration::from_secs_f32(dt),
-                        )
-                        .unwrap()
-                } else {
-                    scene
-                        .prepare_dynamic_entity_collection(&collision, dt, |body| {
-                            if body.id == mover {
-                                Ok(actuation.clone())
-                            } else {
-                                collection_actuation(body)
-                            }
-                        })
-                        .unwrap();
-                    scene
-                        .tick_prepared_dynamic_physical_body(
-                            mover,
-                            &collision,
-                            now + Duration::from_secs_f32(dt),
-                        )
-                        .unwrap()
-                };
-                assert!(!result.collision_reports.is_empty());
-                let body = scene.body(mover).unwrap();
-                assert_eq!(
-                    body.pose, expected.pose,
-                    "{scenario}, prediction={prediction}"
-                );
-                assert_eq!(
-                    body.contact, expected.contact,
-                    "{scenario}, prediction={prediction}"
-                );
-                assert_eq!(
-                    body.physical.as_ref().unwrap().response,
-                    expected.response,
-                    "{scenario}, prediction={prediction}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn reconciled_facing_keeps_the_original_commit_validation_snapshot() {
-        let now = Instant::now();
-        let mover = SpatialBodyId::Entity(Guid(0x7000_0001));
-        let collision = collision_scene(None);
-        for external_change in [false, true] {
-            let mut scene = SpatialScene::new();
-            install_free_dynamic(
-                &mut scene,
-                mover,
-                Vector3::new(10.0, 10.0, 3.0),
-                Vector3::zero(),
-                fallback_target(Arc::new(CollisionShape::Ball(CollisionBall {
-                    center: Vector3::zero(),
-                    radius: 0.5,
-                }))),
-                now,
-            );
-            let target = WorldPosition {
-                coords: Vector3::new(10.1, 10.0, 3.0),
-                rotation: Quaternion::from_heading(1.0),
-                ..scene.body(mover).unwrap().pose
-            };
-            scene.body_mut(mover).unwrap().contact = ContactState::Grounded;
-            scene.apply_authoritative_body_effect(
-                mover,
-                AuthoritativePoseEffect::Interpolate {
-                    pose: target,
-                    keep_heading: false,
-                    adjusted_max_speed_mps: None,
-                },
-                AuthoritativeBodyVectors {
-                    velocity: Vector3::zero(),
-                    acceleration: Vector3::zero(),
-                    omega: Vector3::zero(),
-                },
-                now,
-            );
-            scene
-                .prepare_dynamic_entity_collection(&collision, 0.03, collection_actuation)
-                .unwrap();
-            assert_ne!(scene.body(mover).unwrap().pose.rotation, target.rotation);
-            if external_change {
-                scene.body_mut(mover).unwrap().retained.velocity.x = 1.0;
-            }
-            let result = scene.tick_prepared_dynamic_physical_body(
-                mover,
-                &collision,
-                now + Duration::from_millis(30),
-            );
-            if external_change {
-                assert!(
-                    result
-                        .unwrap_err()
-                        .to_string()
-                        .contains("changed after collection preparation")
-                );
-            } else {
-                result.unwrap();
-                assert_eq!(scene.body(mover).unwrap().pose.rotation, target.rotation);
-            }
-        }
-    }
-
-    #[test]
-    fn blocking_chain_stops_a_follower_before_a_cell_portal() {
-        let now = Instant::now();
-        let follower = SpatialBodyId::Entity(Guid(0x7000_0001));
-        let leader = SpatialBodyId::Entity(Guid(0x7000_0002));
-        let blocker = SpatialBodyId::Entity(Guid(0x7000_0003));
-        let cell_before = Guid(0xda55_0100);
-        let cell_after = Guid(0xda55_0101);
-        let boundary_x = 11.2;
-        let dt = 0.2;
-        let mut collision = CollisionScene::new();
-        collision
-            .insert(LandblockCollisionAsset {
-                landblock_id: 0xda55_ffff,
-                terrain: TerrainCollisionSurface::empty(),
-                static_geometry: LandblockColliders::new(
-                    Vec::new(),
-                    [
-                        (cell_before, cell_after, 1.0),
-                        (cell_after, cell_before, -1.0),
-                    ]
-                    .into_iter()
-                    .map(|(cell, target, direction)| CellVolume {
-                        cell_selector: cell.0 as u16,
-                        placement: LandblockPlacement {
-                            origin: Vector3::zero(),
-                            orientation: Quaternion::identity(),
-                        },
-                        planes: vec![Plane {
-                            normal: Vector3::new(-direction, 0.0, 0.0),
-                            d: direction * boundary_x,
-                        }],
-                        portals: vec![CellCollisionPortal {
-                            plane: Plane {
-                                normal: Vector3::new(direction, 0.0, 0.0),
-                                d: -direction * boundary_x,
-                            },
-                            positive_side: true,
-                            target: CellCollisionPortalTarget::EnvCell(target.0 as u16),
-                            outdoor_building: None,
-                        }],
-                    })
-                    .collect(),
-                ),
-            })
-            .unwrap();
-
-        for leader_is_blocked in [false, true] {
-            let mut scene = SpatialScene::new();
-            for (id, x, speed) in [
-                (follower, 10.0, 10.0),
-                (leader, 12.0, 10.0),
-                (blocker, 12.5, 0.0),
-            ] {
-                if id == blocker && !leader_is_blocked {
-                    continue;
-                }
-                let cell = if x < boundary_x {
-                    cell_before
-                } else {
-                    cell_after
-                };
-                scene.register_body(SpatialBody::new(
-                    id,
-                    WorldPosition {
-                        landblock_id: cell,
-                        coords: Vector3::new(x, -170.0, 3.0),
-                        rotation: Quaternion::identity(),
-                    },
-                    now,
-                ));
-                scene
-                    .set_dynamic_physical_body(
-                        id,
-                        Some(dynamic_definition(
-                            free_definition(Vector3::zero(), 0.5),
-                            false,
-                        )),
-                        PhysicalCollisionFilter::ALL,
-                        Some(cell),
-                    )
-                    .unwrap();
-                scene.body_mut(id).unwrap().retained.velocity = Vector3::new(speed, 0.0, 0.0);
-            }
-            scene
-                .prepare_dynamic_entity_collection(&collision, dt, collection_actuation)
-                .unwrap();
-            let result = scene
-                .tick_prepared_dynamic_physical_body(
-                    follower,
-                    &collision,
-                    now + Duration::from_secs_f32(dt),
-                )
-                .unwrap();
-            let solved = scene.body(follower).unwrap();
-            assert!(!result.motion.path.has_recovery());
-            assert_eq!(solved.pose.coords.z, 3.0);
-            if leader_is_blocked {
-                assert_eq!(result.dynamic_contact.unwrap().peer, leader);
-                assert!(solved.pose.coords.x < boundary_x);
-                assert_eq!(
-                    solved.physical.as_ref().unwrap().response.cell(),
-                    Some(cell_before)
-                );
-            } else {
-                assert!(result.dynamic_contact.is_none());
-                assert!(solved.pose.coords.x > boundary_x);
-                assert_eq!(
-                    solved.physical.as_ref().unwrap().response.cell(),
-                    Some(cell_after)
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn inward_blocked_peer_exposes_its_constrained_motion_to_other_movers() {
-        let now = Instant::now();
-        let blocker = SpatialBodyId::Entity(Guid(0x7000_0001));
-        let blocked = SpatialBodyId::Entity(Guid(0x7000_0002));
-        let observer = SpatialBodyId::Entity(Guid(0x7000_0003));
-        let collision = collision_scene(None);
-        let dt = 0.2;
-        for order in [[observer, blocked, blocker], [blocker, blocked, observer]] {
-            let mut scene = SpatialScene::new();
-            for (id, x, speed) in [
-                (blocker, 10.5, 0.0),
-                (blocked, 10.0, 10.0),
-                (observer, 12.0, 0.0),
-            ] {
-                install_free_dynamic(
-                    &mut scene,
-                    id,
-                    Vector3::new(x, 10.0, 3.0),
-                    Vector3::new(speed, 0.0, 0.0),
-                    fallback_target(Arc::new(CollisionShape::Ball(CollisionBall {
-                        center: Vector3::zero(),
-                        radius: 0.5,
-                    }))),
-                    now,
-                );
-            }
-            scene
-                .prepare_dynamic_entity_collection(&collision, dt, collection_actuation)
-                .unwrap();
-            for id in order {
-                let result = scene
-                    .tick_prepared_dynamic_physical_body(
-                        id,
-                        &collision,
-                        now + Duration::from_secs_f32(dt),
-                    )
-                    .unwrap();
-                if id == observer {
-                    // The blocked body's full attempted path would reach this observer. Its actual
-                    // constrained motion does not, so neither a physical response nor a report is due.
-                    assert!(result.dynamic_contact.is_none());
-                    assert!(result.collision_reports.is_empty());
-                }
-                if id == blocked {
-                    assert_eq!(result.dynamic_contact.unwrap().peer, blocker);
-                }
-            }
-            assert_eq!(scene.body(blocked).unwrap().pose.coords.x, 10.0);
-            assert_eq!(scene.body(observer).unwrap().pose.coords.x, 12.0);
-            scene
-                .finish_dynamic_entity_collection(now + Duration::from_secs_f32(dt))
-                .unwrap();
-        }
-    }
-
-    #[test]
-    fn overlapping_peer_preserves_a_stationary_grounded_body_position() {
-        let now = Instant::now();
-        let mover = SpatialBodyId::LocalPlayer(Guid(0x5000_0001));
-        let peer = SpatialBodyId::Entity(Guid(0x7000_0002));
-        let mut scene = SpatialScene::new();
-        scene.register_body(SpatialBody::new(
-            mover,
-            pose(Vector3::new(10.0, 10.0, 0.005)),
-            now,
-        ));
-        scene
-            .set_dynamic_physical_body(
-                mover,
-                Some(dynamic_definition(grounded_definition(), false)),
-                PhysicalCollisionFilter::ALL,
-                None,
-            )
-            .unwrap();
-        // The old depth-based response to this overlap pushed the support sphere downward,
-        // just as the Olthoi contact did in the live dungeon reproduction.
-        install_free_dynamic(
-            &mut scene,
-            peer,
-            Vector3::new(10.2, 10.0, 0.8),
-            Vector3::zero(),
-            fallback_target(Arc::new(CollisionShape::Ball(CollisionBall {
-                center: Vector3::zero(),
-                radius: 0.5,
-            }))),
-            now,
-        );
-        let collision = flat_collision_scene();
-        acquire_support(&mut scene, &collision, mover, now);
-        scene.wake_dynamic_body(mover);
-        scene
-            .prepare_dynamic_entity_collection(&collision, 0.1, collection_actuation)
-            .unwrap();
-        let result = scene
-            .tick_prepared_dynamic_physical_body(
-                mover,
-                &collision,
-                now + Duration::from_millis(100),
-            )
-            .unwrap();
-        assert!(!result.collision_reports.is_empty());
-        let solved = scene.body(mover).unwrap();
-        assert!(
-            solved.pose.coords.z >= 0.0,
-            "pushed below floor: {:?}",
-            solved.pose
-        );
-        assert_eq!(solved.pose.coords.x, 10.0);
-        assert_eq!(solved.pose.coords.y, 10.0);
-        assert_eq!(solved.contact, ContactState::Grounded);
-    }
-
-    #[test]
-    fn overlapping_peer_preserves_negative_coordinate_dungeon_placement() {
-        let now = Instant::now();
-        let mover = SpatialBodyId::LocalPlayer(Guid(0x5000_0001));
-        let peer = SpatialBodyId::Entity(Guid(0x7000_0002));
-        let cell = Guid(0xda55_0100);
-        let mut collision = collision_scene(None);
-        collision
-            .insert(LandblockCollisionAsset {
-                landblock_id: 0xda55_ffff,
-                terrain: TerrainCollisionSurface::empty(),
-                static_geometry: LandblockColliders::new(
-                    Vec::new(),
-                    vec![CellVolume {
-                        cell_selector: 0x0100,
-                        placement: LandblockPlacement {
-                            origin: Vector3::zero(),
-                            orientation: Quaternion::identity(),
-                        },
-                        planes: vec![Plane {
-                            normal: Vector3::new(0.0, 0.0, 1.0),
-                            d: 0.0,
-                        }],
-                        portals: Vec::new(),
-                    }],
-                ),
-            })
-            .unwrap();
-        let mut scene = SpatialScene::new();
-        for (id, z) in [(mover, 0.5), (peer, 0.6)] {
             scene.register_body(SpatialBody::new(
                 id,
-                WorldPosition {
-                    landblock_id: cell,
-                    coords: Vector3::new(10.0, -170.0, z),
-                    rotation: Quaternion::identity(),
-                },
+                pose(Vector3::new(10.0, y, 0.005)),
                 now,
             ));
             scene
                 .set_dynamic_physical_body(
                     id,
-                    Some(dynamic_definition(
-                        free_definition(Vector3::zero(), 0.5),
-                        false,
-                    )),
-                    PhysicalCollisionFilter::ALL,
-                    Some(cell),
-                )
-                .unwrap();
-        }
-        let before = scene.body(mover).unwrap().pose;
-        scene
-            .prepare_dynamic_entity_collection(&collision, 0.1, collection_actuation)
-            .unwrap();
-        let result = scene
-            .tick_prepared_dynamic_physical_body(
-                mover,
-                &collision,
-                now + Duration::from_millis(100),
-            )
-            .unwrap();
-        assert!(!result.collision_reports.is_empty());
-        assert_eq!(scene.body(mover).unwrap().pose, before);
-        assert_eq!(
-            scene
-                .body(mover)
-                .unwrap()
-                .physical
-                .as_ref()
-                .unwrap()
-                .response
-                .cell(),
-            Some(cell)
-        );
-    }
-
-    #[test]
-    fn grounded_environment_response_is_retained_when_peer_contact_constrains_motion() {
-        let now = Instant::now();
-        let mover = SpatialBodyId::Entity(Guid(0x7000_0001));
-        let target = SpatialBodyId::Entity(Guid(0x7000_0002));
-        let geometry = || {
-            fallback_target(Arc::new(CollisionShape::Ball(CollisionBall {
-                center: Vector3::new(0.0, 0.0, 0.475),
-                radius: 0.48,
-            })))
-        };
-        let mut scene = SpatialScene::new();
-        for (body_id, x, velocity) in [
-            (mover, 10.0, Vector3::new(10.0, 0.0, 0.0)),
-            (target, 11.2, Vector3::zero()),
-        ] {
-            scene.register_body(SpatialBody::new(
-                body_id,
-                pose(Vector3::new(x, 10.0, 0.0)),
-                now,
-            ));
-            scene
-                .set_dynamic_physical_body(
-                    body_id,
                     Some(dynamic_definition_with_geometry(
                         grounded_definition(),
                         false,
-                        geometry(),
+                        fallback_target(Arc::new(CollisionShape::Cylinder(CollisionCylinder {
+                            low_point: Vector3::zero(),
+                            radius: 0.5,
+                            height: 2.0,
+                        }))),
                         false,
                     )),
                     PhysicalCollisionFilter::ALL,
                     None,
                 )
                 .unwrap();
-            scene.body_mut(body_id).unwrap().retained.velocity = velocity;
+            acquire_support(&mut scene, &collision, id, now);
         }
-        let collision = flat_collision_scene();
-        scene
-            .prepare_dynamic_entity_collection(&collision, 0.1, collection_actuation)
-            .unwrap();
-        scene
-            .tick_prepared_dynamic_physical_body(
-                mover,
-                &collision,
-                now + Duration::from_millis(100),
-            )
-            .unwrap();
-        let solved = scene.body(mover).unwrap();
-        assert_eq!(solved.contact, ContactState::Grounded);
-        assert!(matches!(
-            solved.physical.as_ref().unwrap().response,
-            PhysicalBodyResponseState::Grounded {
-                ground: GroundState::Supported(_),
-                ..
-            }
-        ));
-        assert!(solved.pose.coords.x < 10.8);
-        assert!(solved.retained.velocity.x < 0.0);
+        (scene, collision, (source, target))
     }
 
     #[test]
-    fn equal_fraction_contacts_choose_stable_peer_and_wake_only_that_settled_target() {
+    fn frozen_prediction_matches_collection_hard_contact_without_mutating_the_peer() {
         let now = Instant::now();
-        let low = SpatialBodyId::Entity(Guid(0x7000_0001));
-        let high = SpatialBodyId::Entity(Guid(0x7000_0002));
-        let mover = SpatialBodyId::Entity(Guid(0x7000_0003));
-        let geometry = || {
-            fallback_target(Arc::new(CollisionShape::Ball(CollisionBall {
-                center: Vector3::zero(),
-                radius: 0.5,
-            })))
-        };
-        let mut scene = SpatialScene::new();
-        install_free_dynamic(
-            &mut scene,
-            mover,
-            Vector3::zero(),
-            Vector3::new(10.0, 0.0, 0.0),
-            geometry(),
-            now,
-        );
-        for target in [high, low] {
-            install_free_dynamic(
-                &mut scene,
-                target,
-                Vector3::new(1.2, 0.0, 0.0),
-                Vector3::zero(),
-                geometry(),
-                now,
-            );
-            scene
-                .body_mut(target)
-                .unwrap()
-                .physical
-                .as_mut()
-                .unwrap()
-                .dynamic
-                .as_mut()
-                .unwrap()
-                .activity = DynamicBodyActivity::Settled;
-        }
-        let collision = collision_scene(None);
-        scene
-            .prepare_dynamic_entity_collection(&collision, 0.1, collection_actuation)
+        let (mut prediction, collision, (mover, peer)) = grounded_pair_fixture(false, now);
+        prediction.body_mut(mover).unwrap().retained.velocity = Vector3::new(0.0, 4.0, 0.0);
+        let mut peer_pose = prediction.body(peer).unwrap().pose;
+        peer_pose.coords.y += 0.12;
+        prediction
+            .relocate_dynamic_body(peer, peer_pose, now)
             .unwrap();
-        scene
-            .tick_prepared_dynamic_physical_body(
-                mover,
-                &collision,
-                now + Duration::from_millis(100),
-            )
-            .unwrap();
-        assert_eq!(dynamic_activity(&scene, low), DynamicBodyActivity::Active);
-        assert_eq!(dynamic_activity(&scene, high), DynamicBodyActivity::Settled);
-    }
-
-    #[test]
-    fn report_touches_beyond_the_selected_blocking_contact_are_not_published() {
-        let now = Instant::now();
-        let mover = SpatialBodyId::Entity(Guid(0x7000_0001));
-        let near = SpatialBodyId::Entity(Guid(0x7000_0002));
-        let far = SpatialBodyId::Entity(Guid(0x7000_0003));
-        let geometry = || {
-            fallback_target(Arc::new(CollisionShape::Ball(CollisionBall {
-                center: Vector3::zero(),
-                radius: 0.5,
-            })))
-        };
-        let mut scene = SpatialScene::new();
-        install_free_dynamic(
-            &mut scene,
-            mover,
-            Vector3::zero(),
-            Vector3::new(10.0, 0.0, 0.0),
-            geometry(),
-            now,
-        );
-        for (body_id, x) in [(near, 1.2), (far, 1.8)] {
-            install_free_dynamic(
-                &mut scene,
-                body_id,
-                Vector3::new(x, 0.0, 0.0),
-                Vector3::zero(),
-                geometry(),
-                now,
-            );
-            let dynamic = scene
-                .body_mut(body_id)
-                .unwrap()
-                .physical
-                .as_mut()
-                .unwrap()
-                .dynamic
-                .as_mut()
-                .unwrap();
-            dynamic.collision.reporting.enabled = false;
-            dynamic.activity = DynamicBodyActivity::Settled;
-        }
-        let collision = collision_scene(None);
-        scene
-            .prepare_dynamic_entity_collection(&collision, 0.1, collection_actuation)
-            .unwrap();
-        let result = scene
-            .tick_prepared_dynamic_physical_body(
-                mover,
-                &collision,
-                now + Duration::from_millis(100),
-            )
-            .unwrap();
-        assert_eq!(result.collision_reports.len(), 1);
-        assert_eq!(
-            result.collision_reports[0].contact.source,
-            CollisionReportSource::DynamicBody {
-                peer: near,
-                classification: CollisionReportClassification::Object,
-            }
-        );
-        assert_eq!(dynamic_activity(&scene, near), DynamicBodyActivity::Active);
-        assert_eq!(dynamic_activity(&scene, far), DynamicBodyActivity::Settled);
-    }
-
-    #[test]
-    fn opposing_movers_use_the_same_tick_start_trajectories_for_directional_response() {
-        let now = Instant::now();
-        let left = SpatialBodyId::Entity(Guid(0x7000_0001));
-        let right = SpatialBodyId::Entity(Guid(0x7000_0002));
-        let geometry = || {
-            fallback_target(Arc::new(CollisionShape::Ball(CollisionBall {
-                center: Vector3::zero(),
-                radius: 0.5,
-            })))
-        };
-        let mut scene = SpatialScene::new();
-        install_free_dynamic(
-            &mut scene,
-            left,
-            Vector3::zero(),
-            Vector3::new(10.0, 0.0, 0.0),
-            geometry(),
-            now,
-        );
-        install_free_dynamic(
-            &mut scene,
-            right,
-            Vector3::new(2.0, 0.0, 0.0),
-            Vector3::new(-10.0, 0.0, 0.0),
-            geometry(),
-            now,
-        );
-        let collision = collision_scene(None);
-        let prepared = scene
-            .prepare_dynamic_entity_collection(&collision, 0.1, collection_actuation)
-            .unwrap();
-        for body_id in [left, right] {
-            assert!(prepared.movers.contains(&body_id));
-            scene
-                .tick_prepared_dynamic_physical_body(
-                    body_id,
-                    &collision,
-                    now + Duration::from_millis(100),
-                )
-                .unwrap();
-        }
-        assert!(scene.body(left).unwrap().retained.velocity.x < 0.0);
-        assert!(scene.body(right).unwrap().retained.velocity.x > 0.0);
-        assert!(scene.body(left).unwrap().pose.coords.x < scene.body(right).unwrap().pose.coords.x);
-    }
-
-    #[test]
-    fn moving_peer_blocks_without_transferring_its_velocity_to_a_stationary_mover() {
-        let now = Instant::now();
-        let stationary = SpatialBodyId::Entity(Guid(0x7000_0011));
-        let moving = SpatialBodyId::Entity(Guid(0x7000_0012));
-        let geometry = || {
-            fallback_target(Arc::new(CollisionShape::Ball(CollisionBall {
-                center: Vector3::zero(),
-                radius: 0.5,
-            })))
-        };
-        let mut scene = SpatialScene::new();
-        install_free_dynamic(
-            &mut scene,
-            stationary,
-            Vector3::zero(),
-            Vector3::zero(),
-            geometry(),
-            now,
-        );
-        install_free_dynamic(
-            &mut scene,
-            moving,
-            Vector3::new(2.0, 0.0, 0.0),
-            Vector3::new(-10.0, 0.0, 0.0),
-            geometry(),
-            now,
-        );
-        let collision = collision_scene(None);
-        let prepared = scene
-            .prepare_dynamic_entity_collection(&collision, 0.2, collection_actuation)
-            .unwrap();
-        for body_id in [stationary, moving] {
-            assert!(prepared.movers.contains(&body_id));
-            scene
-                .tick_prepared_dynamic_physical_body(
-                    body_id,
-                    &collision,
-                    now + Duration::from_millis(200),
-                )
-                .unwrap();
-        }
-
-        assert_eq!(
-            scene.body(stationary).unwrap().retained.velocity,
-            Vector3::zero()
-        );
-        assert!(scene.body(moving).unwrap().retained.velocity.x > 0.0);
-        assert!(
-            scene.body(stationary).unwrap().pose.global_coords().x
-                < scene.body(moving).unwrap().pose.global_coords().x
-        );
-    }
-
-    #[test]
-    fn rotating_offset_target_is_sampled_at_intermediate_orientations() {
-        let now = Instant::now();
-        let mover = SpatialBodyId::Entity(Guid(0x7000_0001));
-        let target = SpatialBodyId::Entity(Guid(0x7000_0002));
-        let mut scene = SpatialScene::new();
-        install_free_dynamic(
-            &mut scene,
-            mover,
-            Vector3::new(0.0, 2.0, 0.0),
-            Vector3::zero(),
-            fallback_target(Arc::new(CollisionShape::Ball(CollisionBall {
-                center: Vector3::zero(),
-                radius: 0.5,
-            }))),
-            now,
-        );
-        install_free_dynamic(
-            &mut scene,
-            target,
-            Vector3::zero(),
-            Vector3::zero(),
-            fallback_target(Arc::new(CollisionShape::Ball(CollisionBall {
-                center: Vector3::new(2.0, 0.0, 0.0),
-                radius: 0.5,
-            }))),
-            now,
-        );
-        scene.body_mut(target).unwrap().retained.omega =
-            Vector3::new(0.0, 0.0, std::f32::consts::FRAC_PI_2);
-        let collision = collision_scene(None);
-        scene
-            .prepare_dynamic_entity_collection(&collision, 1.0, collection_actuation)
-            .unwrap();
-        let result = scene
-            .tick_prepared_dynamic_physical_body(mover, &collision, now + Duration::from_secs(1))
-            .unwrap();
-        assert!(!result.collision_reports.is_empty());
-        assert_eq!(
-            scene.body(mover).unwrap().pose.coords,
-            Vector3::new(0.0, 2.0, 0.0)
-        );
-    }
-
-    #[test]
-    fn budget_limited_slide_retains_the_initial_contact_velocity_response() {
-        let now = Instant::now();
-        let mover = SpatialBodyId::Entity(Guid(0x7000_0001));
-        let peer = SpatialBodyId::Entity(Guid(0x7000_0002));
-        let collision = collision_scene(None);
-        let mut scene = SpatialScene::new();
-        let travel = MAXIMUM_DYNAMIC_SLICE_DISTANCE
-            * (super::super::dynamic_contact::MAXIMUM_DYNAMIC_SLICES + 12) as f32;
-        install_free_dynamic(
-            &mut scene,
-            mover,
-            Vector3::new(10.0, 10.0, 10.0),
-            Vector3::new(2.0, travel, 0.0),
-            fallback_target(Arc::new(CollisionShape::Ball(CollisionBall {
-                center: Vector3::zero(),
-                radius: 0.5,
-            }))),
-            now,
-        );
-        // Isolate the dynamic sampling budget from environment subdivision in this empty scene.
-        let PhysicalBodyDefinition::FreeSphere { config, .. } = &mut scene
-            .body_mut(mover)
+        let peer_before = prediction.body(peer).unwrap().clone();
+        let targets = prediction.entity_collision_snapshot().unwrap();
+        let mut collection = prediction.clone();
+        collection
+            .body_mut(peer)
             .unwrap()
             .physical
             .as_mut()
             .unwrap()
-            .definition
-        else {
-            unreachable!()
-        };
-        config.maximum_substep_distance = travel * 2.0;
-        install_free_dynamic(
-            &mut scene,
-            peer,
-            Vector3::new(10.95, 10.0, 0.0),
-            Vector3::zero(),
-            fallback_target(Arc::new(CollisionShape::Cylinder(CollisionCylinder {
-                low_point: Vector3::zero(),
-                radius: 0.5,
-                height: 20.0,
-            }))),
-            now,
-        );
-        let targets = scene.entity_collision_snapshot().unwrap();
-        let result = scene
+            .dynamic
+            .as_mut()
+            .unwrap()
+            .demand
+            .integration = LocalIntegrationDemand::Excluded;
+        let actuation = PhysicalBodyActuation::grounded_drive(Vector3::new(0.0, 4.0, 0.0)).unwrap();
+        let quantum = super::super::MOBILE_CONTACT_TICK_SECONDS;
+        let result = prediction
             .tick_physical_body_against_entity_snapshot(
                 mover,
                 &collision,
                 &targets,
-                PhysicalBodyActuation::free_flight(Vector3::new(2.0, travel, 0.0)).unwrap(),
-                1.0,
+                actuation.clone(),
+                quantum,
                 now,
             )
             .unwrap();
-        let body = scene.body(mover).unwrap();
-        assert_eq!(
-            result.motion.status,
-            PhysicalBodyTickStatus::SubstepBudgetExceeded
-        );
-        assert_eq!(body.pose.coords.x, 10.0);
-        assert!(body.pose.coords.y > 10.0);
-        assert!(
-            body.retained.velocity.x < 0.0,
-            "inward momentum survived the budget re-solve"
-        );
-        assert_eq!(body.retained.velocity.y, travel);
+        collection
+            .advance_dynamic_entity_collection(&collision, quantum, now, |body| {
+                let mut input = collection_input(body)?;
+                input.actuation = actuation.clone();
+                Ok(input)
+            })
+            .unwrap();
+        assert_eq!(prediction.body(peer).unwrap(), &peer_before);
+        assert_eq!(targets.body(peer).unwrap(), &peer_before);
+        assert!(result.motion.iter().any(|segment| matches!(segment,
+            super::super::ContactMotionSegment::Impact {
+                hit: super::super::HardSphereSweepHit::Entity { body_id, .. }, ..
+            } if *body_id == peer
+        )));
+        let predicted = prediction.body(mover).unwrap();
+        let actual = collection.body(mover).unwrap();
+        assert_eq!(predicted.pose, actual.pose);
+        assert_eq!(predicted.retained.velocity, actual.retained.velocity);
+        assert_eq!(predicted.contact, actual.contact);
     }
 
     #[test]
-    fn over_budget_pair_commits_the_directional_movers_evaluated_prefix() {
+    fn stale_support_is_reproved_before_character_drive() {
         let now = Instant::now();
-        let mover = SpatialBodyId::Entity(Guid(0x7000_0001));
-        let target = SpatialBodyId::Entity(Guid(0x7000_0002));
-        let unrelated = SpatialBodyId::Entity(Guid(0x7000_0003));
-        let geometry = || {
-            fallback_target(Arc::new(CollisionShape::Ball(CollisionBall {
-                center: Vector3::zero(),
-                radius: 0.5,
-            })))
-        };
-        let mut scene = SpatialScene::new();
-        install_free_dynamic(
-            &mut scene,
-            mover,
-            Vector3::zero(),
-            Vector3::new(7.0, 0.0, 0.0),
-            geometry(),
-            now,
+        let (mut scene, mut collision, policy) = grounded_pair_fixture(false, now);
+        scene.body_mut(policy.0).unwrap().contact = ContactState::Unknown;
+        // Replacing the owner invalidates the old support proof before first-contact drive.
+        collision.insert(flat_collision_asset(0)).unwrap();
+        let body = scene.body(policy.0).unwrap();
+        let actuation = PhysicalBodyActuation::grounded_drive(Vector3::new(2.0, 0.0, 0.0)).unwrap();
+        let result = super::super::physical_body::solve_physical_body_tick(
+            &collision,
+            body,
+            &actuation,
+            0.1,
+            |body, ground, interval| {
+                actuation.contact_step_input(
+                    body.physical
+                        .as_ref()
+                        .ok_or_else(|| anyhow::anyhow!("contact input requires body physics"))?,
+                    body.pose.rotation,
+                    body.retained.acceleration,
+                    ground,
+                    None,
+                    interval,
+                )
+            },
+        )
+        .unwrap();
+        assert!(result.pose.coords.x > body.pose.coords.x);
+        assert!(result.retained_velocity.x > 0.0);
+        assert!(
+            (result.retained_velocity.x - 2.0).abs() < super::super::bsp_query::CONTACT_EPSILON
         );
-        install_free_dynamic(
-            &mut scene,
-            target,
-            Vector3::new(7.8, 0.0, 0.0),
-            Vector3::zero(),
-            geometry(),
-            now,
-        );
-        install_free_dynamic(
-            &mut scene,
-            unrelated,
-            Vector3::new(0.0, 10.0, 0.0),
-            Vector3::new(1.0, 0.0, 0.0),
-            geometry(),
-            now,
-        );
-        let collision = collision_scene(None);
-        let prepared = scene
-            .prepare_dynamic_entity_collection(&collision, 1.0, collection_actuation)
-            .unwrap();
-        assert!(prepared.movers.contains(&mover));
-        assert!(prepared.movers.contains(&unrelated));
-        let result = scene
-            .tick_prepared_dynamic_physical_body(mover, &collision, now + Duration::from_secs(1))
-            .unwrap();
-        assert_eq!(
-            result.motion.status,
-            PhysicalBodyTickStatus::SubstepBudgetExceeded
-        );
-        assert_eq!(
-            scene.body(mover).unwrap().pose.coords,
-            Vector3::new(6.4, 0.0, 0.0)
-        );
-        assert_eq!(
-            scene.body(mover).unwrap().retained.velocity,
-            Vector3::new(7.0, 0.0, 0.0)
-        );
-        assert_eq!(scene.active_collision_report_count(), 0);
-        scene
-            .tick_prepared_dynamic_physical_body(
-                unrelated,
-                &collision,
-                now + Duration::from_secs(1),
-            )
-            .unwrap();
-        assert_eq!(
-            scene.body(unrelated).unwrap().pose.coords,
-            Vector3::new(1.0, 10.0, 0.0)
-        );
+        assert_eq!(result.retained_velocity.y, 0.0);
     }
+
+    #[cfg(feature = "physics-profiling")]
+    mod connected_crowd_benchmark;
 
     #[test]
     fn dynamic_kinematics_replace_response_memory_and_integrate_world_axis_rotation() {
@@ -6717,12 +4433,14 @@ mod physical_body_tests {
             .tick_physical_body(
                 id,
                 &collision_scene(None),
-                PhysicalBodyActuation::free_flight(Vector3::new(1.0, 0.0, 0.0)).unwrap(),
+                crate::spatial::PhysicalBodyInput::autonomous(
+                    PhysicalBodyActuation::free_flight(Vector3::new(1.0, 0.0, 0.0)).unwrap(),
+                ),
                 0.25,
                 now + Duration::from_millis(250),
             )
             .unwrap();
-        let expected = Quaternion::from_axis_angle(omega, std::f32::consts::FRAC_PI_2)
+        let expected = Quaternion::from_axis_angle(omega, omega.length() * CONTACT_INTERVAL)
             .unwrap()
             .multiply(&initial_rotation);
         let actual = scene.body(id).unwrap().pose.rotation;
@@ -6773,6 +4491,10 @@ mod physical_body_tests {
             rotation: Quaternion::identity(),
         };
 
+        let mut correction = PoseReconciliationState::default();
+        correction.correct(pose(Vector3::new(50.0, 20.0, 30.0)), false);
+        scene.body_mut(id).unwrap().reconciliation = Some(Box::new(correction));
+
         let relocated = scene
             .relocate_dynamic_body(id, relocated_pose, now + Duration::from_secs(1))
             .unwrap();
@@ -6782,6 +4504,7 @@ mod physical_body_tests {
         assert_eq!(relocated.body.acceleration, Vector3::zero());
         assert_eq!(relocated.body.omega, Vector3::zero());
         assert_eq!(relocated.body.contact, ContactState::Airborne);
+        assert!(scene.body(id).unwrap().reconciliation.is_none());
         assert!(
             !scene
                 .get_in_landblock(Guid(0xda55_ffff))
@@ -7140,7 +4863,9 @@ mod physical_body_tests {
             .tick_physical_body_transaction(
                 id,
                 &collision,
-                PhysicalBodyActuation::free_flight(Vector3::new(3.0, 0.0, 0.0)).unwrap(),
+                crate::spatial::PhysicalBodyInput::autonomous(
+                    PhysicalBodyActuation::free_flight(Vector3::new(3.0, 0.0, 0.0)).unwrap(),
+                ),
                 0.1,
                 now + Duration::from_millis(100),
                 |_, _| -> anyhow::Result<()> { anyhow::bail!("adapter rejected presentation") },
@@ -7149,6 +4874,51 @@ mod physical_body_tests {
 
         assert_eq!(error.to_string(), "adapter rejected presentation");
         assert_eq!(scene.body(id).unwrap(), &before);
+    }
+
+    #[test]
+    fn direct_return_uses_independent_input_and_rolls_back_reference_with_the_body() {
+        let now = Instant::now();
+        let (mut scene, collision, (_, id)) = grounded_pair_fixture(false, now);
+        let start = scene.body(id).unwrap().pose;
+        let mut reference = start;
+        reference.coords.x += 1.0;
+        let mut reconciliation = PoseReconciliationState::default();
+        reconciliation.correct(reference, false);
+        scene.body_mut(id).unwrap().reconciliation = Some(Box::new(reconciliation));
+        let before = scene.body(id).unwrap().clone();
+        let mut input = collection_input(&before).unwrap();
+        input.actuation =
+            PhysicalBodyActuation::grounded_drive(Vector3::new(0.0, 2.0, 0.0)).unwrap();
+        let inspect = |body: &SpatialBody| {
+            assert!(body.pose.coords.x > start.coords.x);
+            assert!(body.pose.coords.y > start.coords.y);
+            let advanced = body
+                .reconciliation
+                .as_ref()
+                .unwrap()
+                .physical_reference()
+                .unwrap();
+            assert!((advanced.coords.y - reference.coords.y - 2.0 * CONTACT_INTERVAL).abs() < 1e-5);
+            assert!((advanced.coords.x - reference.coords.x).abs() < 1e-5);
+        };
+        let rejected = scene.tick_physical_body_transaction(
+            id,
+            &collision,
+            input.clone(),
+            1.0,
+            now,
+            |body, _| -> anyhow::Result<()> {
+                inspect(body);
+                anyhow::bail!("consumer veto")
+            },
+        );
+        assert_eq!(rejected.unwrap_err().to_string(), "consumer veto");
+        assert_eq!(scene.body(id).unwrap(), &before);
+        scene
+            .tick_physical_body(id, &collision, input, 1.0, now)
+            .unwrap();
+        inspect(scene.body(id).unwrap());
     }
 
     /// The server contact projection must not overwrite a locally solved ground state; routing
@@ -7228,22 +4998,28 @@ mod physical_body_tests {
                 .tick_physical_body(
                     id,
                     &collision,
-                    PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                    crate::spatial::PhysicalBodyInput::autonomous(PhysicalBodyActuation::Grounded(
+                        GroundedBodyActuation::coast(),
+                    )),
                     0.1,
                     now + Duration::from_millis(200),
                 )
                 .unwrap();
             let solved = scene.body(id).unwrap();
-            let expected_horizontal_velocity = 3.0 * (1.0_f32 - 0.95).powf(0.1);
-            assert!((solved.retained.velocity.x - expected_horizontal_velocity).abs() < 0.000_1);
-            assert!((solved.retained.velocity.z + 0.98).abs() < 0.000_1);
+            let expected_horizontal_velocity = 3.0 * (1.0_f32 - 0.95).powf(CONTACT_INTERVAL);
+            assert!(
+                (solved.retained.velocity.x - expected_horizontal_velocity).abs() < 0.000_1,
+                "actual {:?}, expected {expected_horizontal_velocity}",
+                solved.retained.velocity
+            );
+            assert!((solved.retained.acceleration.z + 9.8).abs() < 0.000_1);
             assert_eq!(solved.contact, ContactState::Grounded);
             assert!(solved.pose.coords.x > start.x);
         }
     }
 
     #[test]
-    fn stable_support_damps_retained_momentum_while_controller_drive_is_active() {
+    fn supported_motor_brakes_toward_the_controller_speed() {
         let collision = flat_collision_scene();
         let now = Instant::now();
         let mut scene = SpatialScene::new();
@@ -7265,16 +5041,24 @@ mod physical_body_tests {
             .tick_physical_body(
                 id,
                 &collision,
-                PhysicalBodyActuation::grounded_drive(Vector3::new(2.0, 0.0, 0.0)).unwrap(),
+                crate::spatial::PhysicalBodyInput::autonomous(
+                    PhysicalBodyActuation::grounded_drive(Vector3::new(2.0, 0.0, 0.0)).unwrap(),
+                ),
                 0.1,
                 now + Duration::from_millis(200),
             )
             .unwrap();
 
         let solved = scene.body(id).unwrap();
-        let expected_retained = 3.0 * (1.0_f32 - 0.95).powf(0.1);
+        let expected_retained =
+            3.0 - (super::super::PASSIVE_MOTOR_BRAKING * CONTACT_INTERVAL).min(1.0);
         assert!((solved.retained.velocity.x - expected_retained).abs() < 0.000_1);
-        assert!((solved.accepted_motion.velocity.x - (2.0 + expected_retained)).abs() < 0.000_1);
+        // Observed speed is reconstructed from f32 world-coordinate travel.
+        // Compare its displacement using the same spatial tolerance as collision queries.
+        assert!(
+            ((solved.accepted_motion.velocity.x - expected_retained) * CONTACT_INTERVAL).abs()
+                <= crate::spatial::bsp_query::CONTACT_EPSILON
+        );
     }
 
     #[test]
@@ -7298,7 +5082,9 @@ mod physical_body_tests {
             .tick_physical_body(
                 id,
                 &collision,
-                PhysicalBodyActuation::grounded_drive(Vector3::new(3.0, 0.0, 0.0)).unwrap(),
+                crate::spatial::PhysicalBodyInput::autonomous(
+                    PhysicalBodyActuation::grounded_drive(Vector3::new(3.0, 0.0, 0.0)).unwrap(),
+                ),
                 0.1,
                 now + Duration::from_millis(100),
             )
@@ -7306,9 +5092,14 @@ mod physical_body_tests {
 
         let solved = scene.body(id).unwrap();
         assert_eq!(solved.contact, ContactState::Grounded);
-        assert!((solved.pose.coords.x - (start.x + 0.3)).abs() < 0.000_1);
-        assert!((solved.accepted_motion.velocity.x - 3.0).abs() < 0.000_1);
-        assert_eq!(solved.retained.velocity, Vector3::new(0.0, 0.0, -0.98));
+        assert!(solved.pose.coords.x > start.x);
+        assert!(solved.pose.coords.x - start.x <= 3.0 * CONTACT_INTERVAL);
+        assert!(solved.retained.velocity.x > 0.0);
+        assert!(
+            solved.retained.velocity.x
+                <= super::super::PASSIVE_MOTOR_ACCELERATION * CONTACT_INTERVAL
+        );
+        assert_eq!(solved.retained.acceleration, Vector3::zero());
     }
 
     #[test]
@@ -7333,8 +5124,14 @@ mod physical_body_tests {
 
         for (index, (restitution, expected_velocity)) in cases.into_iter().enumerate() {
             let mut scene = SpatialScene::new();
-            let id = scene
-                .register_ephemeral_body(pose(Vector3::new(80.0 + index as f32, 96.0, 2.0)), now);
+            let id = scene.register_ephemeral_body(
+                pose(Vector3::new(
+                    80.0 + index as f32,
+                    96.0,
+                    0.25 + 10.0 * CONTACT_INTERVAL,
+                )),
+                now,
+            );
             let policy = PhysicalBodyResponsePolicy {
                 restitution,
                 ..stable_policy()
@@ -7352,7 +5149,9 @@ mod physical_body_tests {
                 .tick_physical_body(
                     id,
                     &collision,
-                    PhysicalBodyActuation::free_flight(Vector3::new(3.0, 0.0, -20.0)).unwrap(),
+                    crate::spatial::PhysicalBodyInput::autonomous(
+                        PhysicalBodyActuation::free_flight(Vector3::new(3.0, 0.0, -20.0)).unwrap(),
+                    ),
                     0.1,
                     now + Duration::from_millis(100),
                 )
@@ -7384,7 +5183,9 @@ mod physical_body_tests {
             .tick_physical_body(
                 id,
                 &CollisionScene::new(),
-                PhysicalBodyActuation::free_flight(Vector3::new(1.0, 0.0, 0.0)).unwrap(),
+                crate::spatial::PhysicalBodyInput::autonomous(
+                    PhysicalBodyActuation::free_flight(Vector3::new(1.0, 0.0, 0.0)).unwrap(),
+                ),
                 1.0,
                 now + Duration::from_secs(10),
             )
@@ -7396,82 +5197,19 @@ mod physical_body_tests {
         );
         assert_eq!(scene.body(id).unwrap(), &before);
 
-        let result = scene
+        scene
             .tick_physical_body(
                 id,
                 &collision_scene(None),
-                PhysicalBodyActuation::free_flight(Vector3::new(1.0, 0.0, 0.0)).unwrap(),
+                crate::spatial::PhysicalBodyInput::autonomous(
+                    PhysicalBodyActuation::free_flight(Vector3::new(1.0, 0.0, 0.0)).unwrap(),
+                ),
                 1.0,
                 now + Duration::from_secs(11),
             )
             .unwrap();
-        assert_eq!(result.motion.status, PhysicalBodyTickStatus::Solved);
-        assert!((scene.body(id).unwrap().pose.coords.x - 97.0).abs() < 0.000_1);
-    }
-
-    #[test]
-    fn two_bodies_resolve_coverage_independently_against_one_scene_snapshot() {
-        let now = Instant::now();
-        let collision = collision_scene(None);
-        let mut scene = SpatialScene::new();
-        let resident_id = SpatialBodyId::Entity(Guid(0x7000_0001));
-        let uncovered_id = SpatialBodyId::Entity(Guid(0x7000_0002));
-        scene.register_body(SpatialBody::new(
-            resident_id,
-            pose(Vector3::new(96.0, 96.0, 20.0)),
-            now,
-        ));
-        scene.register_body(SpatialBody::new(
-            uncovered_id,
-            WorldPosition {
-                landblock_id: Guid(0xe055_0020),
-                ..pose(Vector3::new(96.0, 96.0, 20.0))
-            },
-            now,
-        ));
-        for body_id in [resident_id, uncovered_id] {
-            scene
-                .set_dynamic_physical_body(
-                    body_id,
-                    Some(dynamic_definition(
-                        free_definition(Vector3::zero(), 0.25),
-                        false,
-                    )),
-                    PhysicalCollisionFilter::ALL,
-                    None,
-                )
-                .unwrap();
-        }
-        let uncovered_before = scene.body(uncovered_id).unwrap().clone();
-        let prepared = scene
-            .prepare_dynamic_entity_collection(&collision, 1.0, |_| {
-                PhysicalBodyActuation::free_flight(Vector3::new(1.0, 0.0, 0.0)).map_err(Into::into)
-            })
-            .unwrap();
-        assert_eq!(prepared.movers.len(), 1);
-        assert_eq!(prepared.movers[0], resident_id);
-        assert_eq!(
-            prepared.coverage_rejections,
-            [DynamicEntityCollectionCoverageRejection {
-                body_id: uncovered_id,
-                owner: Guid(0xe055_ffff),
-            }]
-        );
-
-        let body_id = prepared.movers.into_iter().next().unwrap();
-        let solved = scene
-            .tick_prepared_dynamic_physical_body(body_id, &collision, now + Duration::from_secs(1))
-            .unwrap();
-        scene
-            .finish_dynamic_entity_collection(now + Duration::from_secs(1))
-            .unwrap();
-
-        assert_eq!(solved.motion.status, PhysicalBodyTickStatus::Solved);
-        assert!((scene.body(resident_id).unwrap().pose.coords.x - 97.0).abs() < 0.000_1);
-        assert_eq!(scene.body(uncovered_id).unwrap(), &uncovered_before);
-        assert_eq!(
-            dynamic_activity(&scene, uncovered_id),
-            DynamicBodyActivity::Active
+        assert!(
+            (scene.body(id).unwrap().pose.coords.x - (96.0 + CONTACT_INTERVAL)).abs() < 0.000_1
         );
     }
 
@@ -7521,7 +5259,9 @@ mod physical_body_tests {
             .tick_physical_body(
                 id,
                 &collision,
-                PhysicalBodyActuation::free_flight(Vector3::zero()).unwrap(),
+                crate::spatial::PhysicalBodyInput::autonomous(
+                    PhysicalBodyActuation::free_flight(Vector3::zero()).unwrap(),
+                ),
                 0.1,
                 now + Duration::from_millis(100),
             )
@@ -7570,7 +5310,14 @@ mod physical_body_tests {
             .tick_physical_body(
                 id,
                 &collision,
-                PhysicalBodyActuation::free_flight(Vector3::new(1.0, 0.0, 0.0)).unwrap(),
+                crate::spatial::PhysicalBodyInput::autonomous(
+                    PhysicalBodyActuation::free_flight(Vector3::new(
+                        1.0 / CONTACT_INTERVAL,
+                        0.0,
+                        0.0,
+                    ))
+                    .unwrap(),
+                ),
                 1.0,
                 now + Duration::from_secs(1),
             )
@@ -7589,7 +5336,14 @@ mod physical_body_tests {
             .tick_physical_body(
                 id,
                 &collision,
-                PhysicalBodyActuation::free_flight(Vector3::new(-1.0, 0.0, 0.0)).unwrap(),
+                crate::spatial::PhysicalBodyInput::autonomous(
+                    PhysicalBodyActuation::free_flight(Vector3::new(
+                        -1.0 / CONTACT_INTERVAL,
+                        0.0,
+                        0.0,
+                    ))
+                    .unwrap(),
+                ),
                 1.0,
                 now + Duration::from_secs(2),
             )
@@ -7628,8 +5382,11 @@ mod physical_body_tests {
             panic!("grounded definition produced non-grounded response state")
         };
         *ground = GroundState::Supported(GroundSupport {
+            feature: crate::spatial::SupportFeature::Surface,
             normal: Vector3::new(0.0, 0.0, 1.0),
-            proof: collision.owner_proof(Guid(0xda55_ffff)).unwrap(),
+            source: crate::spatial::SupportSource::World(
+                collision.owner_proof(Guid(0xda55_ffff)).unwrap(),
+            ),
         });
 
         let launch = GroundedLaunch::new(Vector3::new(2.0, 3.0, 5.0)).unwrap();
@@ -7640,32 +5397,43 @@ mod physical_body_tests {
             .tick_physical_body(
                 id,
                 &collision,
-                PhysicalBodyActuation::Grounded(actuation),
+                crate::spatial::PhysicalBodyInput::autonomous(PhysicalBodyActuation::Grounded(
+                    actuation,
+                )),
                 0.1,
                 now + Duration::from_millis(100),
             )
             .unwrap();
         let launched = scene.body(id).unwrap();
         assert_eq!(launched.contact, ContactState::Airborne);
-        assert!((launched.retained.velocity - Vector3::new(2.0, 3.0, 4.02)).length() < 0.000_1);
+        assert!(
+            (launched.retained.velocity - Vector3::new(2.0, 3.0, 5.0 - 9.8 * CONTACT_INTERVAL))
+                .length()
+                < 0.000_1
+        );
 
         let airborne_heading = 1.25;
         scene
             .tick_physical_body(
                 id,
                 &collision,
-                PhysicalBodyActuation::Grounded(
+                crate::spatial::PhysicalBodyInput::autonomous(PhysicalBodyActuation::Grounded(
                     GroundedBodyActuation::drive(Vector3::new(100.0, 0.0, 0.0))
                         .unwrap()
                         .with_control_heading(airborne_heading)
                         .unwrap(),
-                ),
+                )),
                 0.1,
                 now + Duration::from_millis(200),
             )
             .unwrap();
         let airborne = scene.body(id).unwrap();
-        assert!((airborne.retained.velocity - Vector3::new(2.0, 3.0, 3.04)).length() < 0.000_1);
+        assert!(
+            (airborne.retained.velocity
+                - Vector3::new(2.0, 3.0, 5.0 - 9.8 * CONTACT_INTERVAL * 2.0))
+            .length()
+                < 0.000_1
+        );
         assert!((airborne.pose.rotation.to_heading() - airborne_heading).abs() < 0.000_1);
     }
 
@@ -7707,7 +5475,9 @@ mod physical_body_tests {
                     .tick_physical_body(
                         id,
                         &collision,
-                        PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                        crate::spatial::PhysicalBodyInput::autonomous(
+                            PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                        ),
                         0.1,
                         now + Duration::from_millis(tick * 100),
                     )
@@ -7765,13 +5535,14 @@ mod physical_body_tests {
             .tick_physical_body(
                 id,
                 &collision,
-                PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                crate::spatial::PhysicalBodyInput::autonomous(PhysicalBodyActuation::Grounded(
+                    GroundedBodyActuation::coast(),
+                )),
                 0.1,
                 now + Duration::from_millis(100),
             )
             .unwrap();
         assert_eq!(result.scene_residency, PhysicalBodySceneResidency::Resident);
-        assert_eq!(result.motion.status, PhysicalBodyTickStatus::Solved);
     }
 
     #[test]
@@ -7780,7 +5551,7 @@ mod physical_body_tests {
         collision.insert(flat_collision_asset(0)).unwrap();
         let now = Instant::now();
         let mut scene = SpatialScene::new();
-        let id = scene.register_ephemeral_body(pose(Vector3::new(191.0, 96.0, 0.005)), now);
+        let id = scene.register_ephemeral_body(pose(Vector3::new(191.9, 96.0, 0.005)), now);
         scene
             .install_physical_body(
                 id,
@@ -7799,8 +5570,11 @@ mod physical_body_tests {
             panic!("grounded definition produced non-grounded response state")
         };
         *ground = GroundState::Supported(GroundSupport {
+            feature: crate::spatial::SupportFeature::Surface,
             normal: Vector3::new(0.0, 0.0, 1.0),
-            proof: collision.owner_proof(Guid(0xda55_ffff)).unwrap(),
+            source: crate::spatial::SupportSource::World(
+                collision.owner_proof(Guid(0xda55_ffff)).unwrap(),
+            ),
         });
         let launch = GroundedLaunch::new(Vector3::new(8.0, 0.0, 6.0)).unwrap();
         let actuation = GroundedBodyActuation::drive(Vector3::zero())
@@ -7811,7 +5585,9 @@ mod physical_body_tests {
             .tick_physical_body(
                 id,
                 &collision,
-                PhysicalBodyActuation::Grounded(actuation),
+                crate::spatial::PhysicalBodyInput::autonomous(PhysicalBodyActuation::Grounded(
+                    actuation,
+                )),
                 0.1,
                 now + Duration::from_millis(100),
             )
@@ -7848,7 +5624,9 @@ mod physical_body_tests {
             .tick_physical_body(
                 id,
                 &CollisionScene::new(),
-                PhysicalBodyActuation::free_flight(Vector3::new(1.0, 0.0, 0.0)).unwrap(),
+                crate::spatial::PhysicalBodyInput::autonomous(
+                    PhysicalBodyActuation::free_flight(Vector3::new(1.0, 0.0, 0.0)).unwrap(),
+                ),
                 0.1,
                 now + Duration::from_millis(100),
             )
@@ -7881,7 +5659,14 @@ mod physical_body_tests {
             .tick_physical_body(
                 id,
                 &collision,
-                PhysicalBodyActuation::free_flight(Vector3::new(2.0, 0.0, 0.0)).unwrap(),
+                crate::spatial::PhysicalBodyInput::autonomous(
+                    PhysicalBodyActuation::free_flight(Vector3::new(
+                        0.2 / CONTACT_INTERVAL,
+                        0.0,
+                        0.0,
+                    ))
+                    .unwrap(),
+                ),
                 0.1,
                 now + Duration::from_millis(100),
             )
@@ -7926,7 +5711,14 @@ mod physical_body_tests {
             .tick_physical_body(
                 id,
                 &collision,
-                PhysicalBodyActuation::free_flight(Vector3::new(0.6, 0.0, 0.0)).unwrap(),
+                crate::spatial::PhysicalBodyInput::autonomous(
+                    PhysicalBodyActuation::free_flight(Vector3::new(
+                        0.6 / CONTACT_INTERVAL,
+                        0.0,
+                        0.0,
+                    ))
+                    .unwrap(),
+                ),
                 1.0,
                 now + Duration::from_secs(1),
             )
@@ -8003,7 +5795,14 @@ mod physical_body_tests {
             .tick_physical_body(
                 id,
                 &collision,
-                PhysicalBodyActuation::free_flight(Vector3::new(0.4, 0.0, 0.0)).unwrap(),
+                crate::spatial::PhysicalBodyInput::autonomous(
+                    PhysicalBodyActuation::free_flight(Vector3::new(
+                        0.4 / CONTACT_INTERVAL,
+                        0.0,
+                        0.0,
+                    ))
+                    .unwrap(),
+                ),
                 1.0,
                 now + Duration::from_secs(1),
             )
@@ -8012,13 +5811,13 @@ mod physical_body_tests {
         let committed = scene.body(id).unwrap();
 
         assert_eq!(motion.path.final_point().placement().committed_cell(), None);
-        assert!(motion.path.final_point().recovery().is_some());
+        assert!(motion.path.has_recovery());
         assert!(!committed.pose.is_indoors());
         assert_eq!(committed.physical.as_ref().unwrap().response.cell(), None);
     }
 
     #[test]
-    fn budget_limited_body_commits_safe_prefix_with_placement_recovery() {
+    fn admitted_body_motion_commits_with_placement_recovery() {
         let cell = Guid(0xda55_0100);
         let mut collision = collision_scene(None);
         collision
@@ -8066,7 +5865,9 @@ mod physical_body_tests {
             .tick_physical_body(
                 id,
                 &collision,
-                PhysicalBodyActuation::free_flight(Vector3::new(100.0, 0.0, 0.0)).unwrap(),
+                crate::spatial::PhysicalBodyInput::autonomous(
+                    PhysicalBodyActuation::free_flight(Vector3::new(100.0, 0.0, 0.0)).unwrap(),
+                ),
                 1.0,
                 now + Duration::from_secs(1),
             )
@@ -8074,9 +5875,12 @@ mod physical_body_tests {
         let motion = result.motion;
         let committed = scene.body(id).unwrap();
 
-        assert_eq!(motion.status, PhysicalBodyTickStatus::SubstepBudgetExceeded);
         assert!(motion.path.has_recovery());
-        assert_eq!(committed.pose.coords, start + Vector3::new(8.0, 0.0, 0.0));
+        let admitted = super::super::MOBILE_CONTACT_TICK_SECONDS;
+        assert!(
+            (committed.pose.coords - start - Vector3::new(100.0 * admitted, 0.0, 0.0)).length()
+                < 1e-4
+        );
         assert!(!committed.pose.is_indoors());
         assert_eq!(committed.physical.as_ref().unwrap().response.cell(), None);
     }

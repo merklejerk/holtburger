@@ -50,6 +50,13 @@ transport, pointer gesture, or presentation clock. Applications adapt their acto
 samples, advance the controller on their chosen fixed timeline, and publish the resulting
 collision-safe camera path with authoritative residency.
 
+The client composition services this controller in `client/camera_service.rs` on a dedicated
+worker against the latest immutable query input. Camera input and lifecycle serialization do not
+acquire the world lock used for crowd simulation. World lifecycle explicitly permits or suspends
+ordinary servicing; snapshot presence controls query availability, not permission. Reset retires
+registration, placement, and input together, and worker shutdown joins before releasing retained
+handles. Explorer's worker and possession permissions belong to its app-local host composition.
+
 Camera clearance is independent of the target seed. The controller retains a latest requested
 projection revision/radius and an optional committed revision/radius. Shrinks commit before the
 next ordinary solve; growth first finds a directionlessly separated candidate, reaches it under the
@@ -130,6 +137,12 @@ The `MovementSystem` runs on the shared fixed 30ms client physics cadence. It in
 Today, this module owns resolved motion expiry, edge-based movement packet emission, stop-pulse obligations, snap-facing execution, and server-directed `MoveTo`/`TurnTo` command lifecycle. A classified `ServerControlledMotion` retains command ownership and its target; it does not retain contact or physical velocity. Each tick samples the world-owned runtime body: heading remains eligible while unsupported, MoveTo translation and distance completion require `Grounded`, and TurnTo completes from normalized heading agreement. This matches retail's separate turn/translation nodes and contact-gated MoveTo progress (`acclient.c:331901-332108`, `325850-325904`) while leaving the ballistic vector in `SpatialBody::retained` untouched.
 
 Packet-scoped self authority policy separately selects a world-owned position confirmation or explicit reset. Local authored input advances the same world-owned `MotionRuntimeRegistry` cursor consumed by presentation and root actuation. `SpatialBody` reconciliation composes with that ordinary drive inside the shared spatial tick. Reusable approach behavior lives in [src/client/controllers/approach_target.rs](src/client/controllers/approach_target.rs), and navigation translates those controller outputs into resolved `MovementCommand` values before crossing into the movement executor.
+
+The client admits physical elapsed time before authored advancement and hook consumption. One
+producer sample feeds each body's ordinary actuation and independent reference for the admitted
+tick. After the world publishes accepted body state, core forwards supported timed motion or
+explicit local drive intent to locomotion presentation, and canonical body changes to movement/render
+consumers. Visual locomotion never supplies root motion or hooks to a later tick.
 
 Server-authored actions do not create another controller. World admission emits transient action
 edges separately from the retained steady order, and the same `MotionRuntimeRegistry` used by bulk
@@ -266,6 +279,16 @@ assembled its facts, and it never claims producer authority.
   no semantic motion object. For client entities it carries the world-resolved effective motion
   table identity needed to prepare the projected clip; world roots remain solver-owned while
   attached roots inherit transform authority from their parent.
+- Client simulation carries a `ClientBodyMotion` for each simulated movement: physical motion owns
+  an accepted `PlacedMotionPath`, pose-only projection explicitly permits endpoint interpolation,
+  and correction snaps have no transit. Publication cannot infer pose-only movement from a missing
+  physical route. `DynamicEntityPlacedPath::from_motion` is shared with Explorer and preserves every
+  accepted boundary and membership; its separate endpoint rotations retain shortest-arc normalized
+  interpolation. Camera waypoints and frontend placement consume that same published route.
+- Stationary room-membership refreshes are pose-stable tick updates and need no movement result.
+  The frontend distinguishes pose changes from membership changes: it updates an idle root directly,
+  or refreshes the endpoint of an earlier still-playing path without replacing its timing or animation.
+  Earlier path legs retain their placement proofs until arrival.
 - Client fixed ticks publish one per-body placement consequence. Integrated bodies retain the
   ordinary host duration; an ordinary far correction uses `CorrectionSnap`, clears frontend path
   interpolation immediately, and does not increment generation or masquerade as teleport/reset.
@@ -295,3 +318,10 @@ or stateful simulation owner exists.
 - **`holtburger-world`**: The World State graph and entity tracking.
 - **`holtburger-protocol`**: Binary packet structures.
 - **`holtburger-dat`**: File access (DATs).
+
+For controlled grounded characters, simulation samples an optional local locomotion order before
+solving, using resolved manual/autonomous intent rather than raw keys or accepted velocity. It
+supplies that order only to the local body's presentation; remotes continue to supply accepted
+supported motion. World owns support/charge/action precedence. Intent ends on stop or expiry, with
+no separate presentation lease or retained controller flag. Free-flight transactions skip this
+character-only preparation and do not acquire motion-table/run-stat requirements.

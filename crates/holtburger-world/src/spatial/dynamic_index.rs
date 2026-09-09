@@ -6,9 +6,11 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Vector3};
-use holtburger_content::{ColliderScale, CollisionBox, LandblockPlacement, PlacedCollisionShape};
+use holtburger_content::{ColliderScale, LandblockPlacement, PlacedCollisionShape};
 
 use super::cell_index::GlobalCellRange;
+use super::physical_body::DynamicBodyRuntimeState;
+use super::volume_query::placed_shape_contacts;
 use super::{DynamicBodyActivity, SpatialBody, SpatialBodyId, SpatialMembership};
 use crate::{EntityCollisionParticipation, LocalTargetDemand, PreparedEntityTargetGeometry};
 
@@ -82,54 +84,56 @@ pub(crate) struct DynamicShadowIndex {
 impl DynamicShadowIndex {
     /// Rebuilds one immutable tick-start index from the canonical body population.
     pub(crate) fn compile<'a>(bodies: impl IntoIterator<Item = &'a SpatialBody>) -> Result<Self> {
-        let mut index = Self::default();
-        let mut bodies = bodies.into_iter().collect::<Vec<_>>();
-        bodies.sort_unstable_by_key(|body| body.id);
-        for body in bodies {
-            if !matches!(body.id, SpatialBodyId::Entity(_)) {
-                continue;
-            }
-            let Some(dynamic) = body
-                .physical
-                .as_ref()
-                .and_then(|physical| physical.dynamic.as_ref())
-            else {
-                continue;
-            };
-            if dynamic.activity == DynamicBodyActivity::Suspended {
-                continue;
-            }
-            if dynamic.demand.target != LocalTargetDemand::Retained {
-                continue;
-            }
-            if dynamic.collision.dynamic_collision.target
-                == EntityCollisionParticipation::Suppressed
-                || dynamic.collision.dynamic_collision.missile
-            {
-                continue;
-            }
-            let bounds = target_bounds(body).with_context(|| {
-                format!("could not place dynamic target geometry for {:?}", body.id)
-            })?;
-            if bounds.is_empty() {
-                continue;
-            }
-            if dynamic.placement.reaches_outdoors() {
+        let prepared = bodies
+            .into_iter()
+            .filter_map(|body| indexed_dynamic_body(body).map(|dynamic| (body, dynamic)))
+            .map(|(body, dynamic)| {
                 let anchor = owner(body.pose);
-                for bounds in &bounds {
+                Ok((
+                    body.id,
+                    &dynamic.placement,
+                    anchor,
+                    placed_target_shapes(dynamic, body.pose, anchor)?,
+                ))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Self::compile_prepared(prepared.iter().map(
+            |(id, placement, anchor, shapes)| (*id, *placement, *anchor, shapes.as_slice()),
+        )))
+    }
+
+    /// Indexes already-admitted targets from their current membership and placed geometry.
+    /// The preparation owner resolves participation; indexing never recovers body physics.
+    pub(crate) fn compile_prepared<'a>(
+        bodies: impl IntoIterator<
+            Item = (
+                SpatialBodyId,
+                &'a SpatialMembership,
+                Guid,
+                &'a [PlacedCollisionShape],
+            ),
+        >,
+    ) -> Self {
+        let mut index = Self::default();
+        for (id, placement, anchor, shapes) in bodies {
+            if shapes.is_empty() {
+                continue;
+            }
+            if placement.reaches_outdoors() {
+                for shape in shapes {
                     for cell in GlobalCellRange::from_local_extent(
                         anchor,
-                        bounds.minimum(),
-                        bounds.maximum(),
+                        shape.bounds.minimum(),
+                        shape.bounds.maximum(),
                     )
                     .cells()
                     {
-                        index.outdoor_cells.entry(cell).or_default().push(body.id);
+                        index.outdoor_cells.entry(cell).or_default().push(id);
                     }
                 }
             }
-            for cell in dynamic.placement.reached_env_cells() {
-                index.interior_cells.entry(*cell).or_default().push(body.id);
+            for cell in placement.reached_env_cells() {
+                index.interior_cells.entry(*cell).or_default().push(id);
             }
         }
         for bodies in index
@@ -140,7 +144,7 @@ impl DynamicShadowIndex {
             bodies.sort_unstable();
             bodies.dedup();
         }
-        Ok(index)
+        index
     }
 
     /// Returns stable, deduplicated candidates from swept outdoor cells and provisional EnvCells.
@@ -174,6 +178,26 @@ impl DynamicShadowIndex {
     }
 }
 
+/// Local-player and remote targets share the live collision index; ephemeral probes do not.
+pub(crate) fn indexed_dynamic_body(
+    body: &SpatialBody,
+) -> Option<&super::physical_body::DynamicBodyRuntimeState> {
+    let dynamic = body.physical.as_ref()?.dynamic.as_ref()?;
+    dynamic_target_is_indexed(body.id, dynamic).then_some(dynamic)
+}
+
+/// Shared admission for canonical bodies and prepared substep report views.
+pub(crate) fn dynamic_target_is_indexed(
+    id: SpatialBodyId,
+    dynamic: &DynamicBodyRuntimeState,
+) -> bool {
+    !matches!(id, SpatialBodyId::Ephemeral(_))
+        && dynamic.activity != DynamicBodyActivity::Suspended
+        && dynamic.demand.target == LocalTargetDemand::Retained
+        && dynamic.collision.dynamic_collision.target != EntityCollisionParticipation::Suppressed
+        && !dynamic.collision.dynamic_collision.missile
+}
+
 fn selectable_target_proof(body: &SpatialBody) -> Option<EntityCollisionProof> {
     let dynamic = body.physical.as_ref()?.dynamic.as_ref()?;
     if !matches!(body.id, SpatialBodyId::Entity(_))
@@ -193,25 +217,12 @@ fn selectable_target_proof(body: &SpatialBody) -> Option<EntityCollisionProof> {
     })
 }
 
-/// Current conservative bounds for the effective target-geometry branch.
-pub(crate) fn target_bounds(body: &SpatialBody) -> Result<Vec<CollisionBox>> {
-    Ok(placed_target_shapes(body, body.pose, owner(body.pose))?
-        .into_iter()
-        .map(|shape| shape.bounds)
-        .collect())
-}
-
 /// Places the effective target branch in one caller-selected landblock frame.
 pub(crate) fn placed_target_shapes(
-    body: &SpatialBody,
+    dynamic: &DynamicBodyRuntimeState,
     pose: WorldPosition,
     anchor: Guid,
 ) -> Result<Vec<PlacedCollisionShape>> {
-    let dynamic = body
-        .physical
-        .as_ref()
-        .and_then(|physical| physical.dynamic.as_ref())
-        .context("body has no dynamic physical state")?;
     let geometry = &dynamic.collision.target_geometry;
     let object_scale = dynamic.object_scale;
     let root = root_placement(
@@ -263,4 +274,67 @@ fn compose_part(
         origin: root.origin + root.orientation.rotate_vector(local_origin),
         orientation: root.orientation.multiply(&local_orientation),
     }
+}
+
+/// Retail calls `check_collision(peer, object)` for each other unparented object in the object's
+/// shadow cells (`acclient.c:308394-308444,333172-333189`). The peer therefore supplies movement
+/// spheres and `object` supplies target geometry; no static scene query or sweep participates.
+pub(crate) fn current_entity_peer_overlap<'a>(
+    object: &SpatialBody,
+    peers: impl IntoIterator<Item = &'a SpatialBody>,
+) -> Result<bool> {
+    let object_dynamic = object
+        .physical
+        .as_ref()
+        .and_then(|physical| physical.dynamic.as_ref())
+        .context("solidifying object has no dynamic physical state")?;
+    let anchor = Guid((object.pose.landblock_id.0 & 0xffff_0000) | 0xffff);
+    let object_shapes = placed_target_shapes(object_dynamic, object.pose, anchor)?;
+    if object_shapes.is_empty() {
+        return Ok(false);
+    }
+
+    for peer in peers {
+        if peer.id == object.id {
+            continue;
+        }
+        let Some(peer_physical) = peer.physical.as_ref() else {
+            continue;
+        };
+        let Some(peer_dynamic) = peer_physical.dynamic.as_ref() else {
+            continue;
+        };
+        if peer_dynamic.activity == super::DynamicBodyActivity::Suspended
+            || !object_dynamic
+                .placement
+                .intersects_reached(&peer_dynamic.placement)
+            || !peer_dynamic
+                .collision
+                .dynamic_collision
+                .mover_accepts_response
+            || pair_is_filtered(peer_dynamic, object_dynamic)
+        {
+            continue;
+        }
+        let peer_pose = peer
+            .pose
+            .reanchor_to_landblock_owner(anchor)
+            .context("could not reanchor solidification peer")?;
+        for sphere in peer_physical.definition.spheres().iter() {
+            let center = peer_pose.coords + peer_pose.rotation.rotate_vector(sphere.center);
+            if object_shapes.iter().any(|shape| {
+                shape.bounds.intersects_sphere(center, sphere.radius)
+                    && !placed_shape_contacts(shape, center, sphere.radius).is_empty()
+            }) {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+fn pair_is_filtered(mover: &DynamicBodyRuntimeState, peer: &DynamicBodyRuntimeState) -> bool {
+    peer.collision.dynamic_collision.missile
+        || (mover.collision.dynamic_collision.missile
+            && peer.collision.dynamic_collision.target == EntityCollisionParticipation::Ethereal)
 }

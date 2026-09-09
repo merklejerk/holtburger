@@ -204,6 +204,8 @@ struct ClientHostState {
     started: bool,
     accepting: bool,
     command_tx: Option<tokio::sync::mpsc::UnboundedSender<ClientCommand>>,
+    /// Direct orbit/projection endpoint, independent of the world command queue.
+    camera_input: Option<holtburger_core::ClientCameraInputHandle>,
     task: Option<tokio::task::JoinHandle<()>>,
     shutdown_requested: Arc<std::sync::atomic::AtomicBool>,
 }
@@ -226,6 +228,7 @@ impl ClientHostRuntime {
                 started: false,
                 accepting: true,
                 command_tx: None,
+                camera_input: None,
                 task: None,
                 shutdown_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             }),
@@ -290,6 +293,7 @@ impl ClientHostRuntime {
         // Subscribe before either startup command is queued so no status, snapshot, or login
         // transition can be lost between core construction and task publication.
         let events = client.subscribe_client_view_events();
+        let camera_input = client.camera_input_handle();
         let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
         client.set_command_rx(command_rx);
         let supervisor = run_client_task(
@@ -308,6 +312,7 @@ impl ClientHostRuntime {
         {
             let mut state = self.state.lock().await;
             state.command_tx = Some(command_tx.clone());
+            state.camera_input = Some(camera_input);
             state.task = Some(task);
         }
 
@@ -362,6 +367,17 @@ impl ClientHostRuntime {
             .await
     }
 
+    async fn camera_input(&self) -> Result<holtburger_core::ClientCameraInputHandle> {
+        let state = self.state.lock().await;
+        if !state.accepting {
+            bail!("client host is shutting down");
+        }
+        state
+            .camera_input
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("client has not been started"))
+    }
+
     pub async fn start_camera(
         &self,
         request: holtburger_core::ClientCameraStartRequest,
@@ -375,17 +391,16 @@ impl ClientHostRuntime {
         &self,
         request: holtburger_core::ClientCameraIntentRequest,
     ) -> Result<()> {
-        self.send_command(ClientCommand::SetClientCameraIntent(request))
-            .await
-            .map(|_| ())
+        self.camera_input().await?.set_intent(request).map(|_| ())
     }
 
     pub async fn set_camera_clearance(
         &self,
         request: holtburger_core::ClientCameraClearanceRequest,
     ) -> Result<()> {
-        self.send_command(ClientCommand::SetClientCameraClearance(request))
-            .await
+        self.camera_input()
+            .await?
+            .set_clearance(request)
             .map(|_| ())
     }
 
@@ -456,6 +471,7 @@ impl ClientHostRuntime {
             state
                 .shutdown_requested
                 .store(true, std::sync::atomic::Ordering::Release);
+            state.camera_input = None;
             (state.command_tx.take(), state.task.take())
         };
         if let Some(sender) = sender {

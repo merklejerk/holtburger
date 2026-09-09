@@ -1,83 +1,27 @@
 //! Validated physical-body geometry and response definitions shared by every body source.
 
+use super::body_movement::ResolvedAuthoredMotion;
 use anyhow::{Context, Result, ensure};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::position::outdoor_landblock_owner_at;
 use holtburger_common::properties::PhysicsState;
-use holtburger_common::{Guid, Quaternion, Sphere, Vector3};
+use holtburger_common::{Guid, Quaternion, RigidTransform, Sphere, Vector3};
 use thiserror::Error;
 
 use crate::{EffectiveEntityPhysicsState, LocalIntegrationDemand, LocalPhysicalDemand};
 
 use super::{
-    CellTransitRequest, CollisionQueryError, CollisionQueryPolicy, CollisionReportOutcome,
-    CollisionScene, ContactState, DynamicBodyCollisionDefinition, DynamicPhysicalBodyConfiguration,
-    DynamicPhysicalBodyDefinition, FreeSphereBudget, FreeSphereConfig, FreeSphereOutcome,
-    FreeSphereRequest, FreeSphereState, GroundState, GroundSupport, GroundedBody,
-    GroundedBodySpheres, GroundedBudget, GroundedConfig, GroundedOutcome, GroundedRequest,
-    GroundedSphere, MotionWaypoint, PlacedMotionPath, PlacedMotionPathRequest, SettlePermission,
-    SpatialBody, SpatialBodyId, SpatialMembership, solve_free_sphere,
+    CellTransitRequest, CollisionQueryError, CollisionReportOutcome, CollisionScene, ContactState,
+    DynamicBodyCollisionDefinition, DynamicPhysicalBodyConfiguration,
+    DynamicPhysicalBodyDefinition, FreeSphereConfig, GroundState, GroundedBodySpheres,
+    GroundedConfig, GroundedSphere, MotionWaypoint, PlacedMotionPath, PlacedMotionPathRequest,
+    SpatialBody, SpatialMembership,
 };
 
 /// Retail's canonical velocity floor (`PhysicsGlobals.SmallVelocity`) squared.
 const RETAIL_SMALL_VELOCITY_SQUARED: f32 = 0.25 * 0.25;
 /// Retail's tolerance for the squared-speed floor and outward contact velocity.
 pub(super) const RETAIL_PHYSICS_EPSILON: f32 = 0.000_2;
-
-/// Maximum projection sweeps regardless of the number of surrounding entities.
-const MAXIMUM_MOTION_CONSTRAINT_PASSES: usize = 8;
-
-/// One world-space half-plane limiting requested translation without pushing a body.
-#[derive(Debug, Clone, Copy)]
-pub(super) struct MotionConstraint {
-    /// Unit outward normal from the blocking surface.
-    pub normal: Vector3,
-    /// Lowest allowed normal displacement; nonpositive so holding position remains feasible.
-    pub minimum: f32,
-}
-
-/// Projects attempted translation against all accumulated entity constraints. Opposing crowd
-/// contacts can converge slowly; the bounded fallback preserves motion tangent to every blocker.
-pub(super) fn constrain_displacement(
-    mut displacement: Vector3,
-    constraints: &[MotionConstraint],
-) -> Vector3 {
-    for _ in 0..MAXIMUM_MOTION_CONSTRAINT_PASSES {
-        for constraint in constraints {
-            let correction = constraint.minimum - displacement.dot(&constraint.normal);
-            if correction > 0.0 {
-                displacement = displacement + constraint.normal * correction;
-            }
-        }
-    }
-    if constraints.iter().any(|constraint| {
-        displacement.dot(&constraint.normal) < constraint.minimum - RETAIL_PHYSICS_EPSILON
-    }) {
-        // Remove the span of the blocking normals, not every component of motion. In
-        // particular, opposing horizontal crowd contacts must not suppress gravity or a jump.
-        let mut basis = [Vector3::zero(); 3];
-        let mut rank = 0;
-        for constraint in constraints {
-            let mut axis = constraint.normal;
-            for direction in &basis[..rank] {
-                axis = axis - *direction * axis.dot(direction);
-            }
-            if axis.length_squared() > f32::EPSILON {
-                basis[rank] = axis.normalize();
-                rank += 1;
-                if rank == basis.len() {
-                    return Vector3::zero();
-                }
-            }
-        }
-        for axis in &basis[..rank] {
-            displacement = displacement - *axis * displacement.dot(axis);
-        }
-        displacement
-    } else {
-        displacement
-    }
-}
 
 /// Invalid geometry rejected before a body enters authoritative world state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
@@ -283,6 +227,24 @@ enum GroundedSupportedMotion {
 }
 
 impl GroundedBodyActuation {
+    /// Stable characters actively stop when no authored/controller travel is supplied.
+    /// RETAIL DIVERGENCE: retail composes authored travel separately from physical velocity
+    /// (acclient.c:308262-308298,306094-306172). We intentionally stop external horizontal
+    /// velocity too; restoring passive drag here restores idle character sliding because
+    /// our motor retains one actual velocity. The synthetic local/remote, character/passive,
+    /// three-speed matrix covers this policy; the earlier 43,913-template classification census
+    /// sized the character/obstacle roles, not every possible externally driven trajectory.
+    /// Passive bodies and sledding retain coast drag; launch/airborne admission remain separate.
+    fn resolved_supported_motion(&self, physical: &PhysicalBodyState) -> GroundedSupportedMotion {
+        if matches!(self.supported_motion, GroundedSupportedMotion::Coasting)
+            && physical.has_direct_character_drive()
+        {
+            GroundedSupportedMotion::Driven(Vector3::zero())
+        } else {
+            self.supported_motion
+        }
+    }
+
     pub fn drive(
         supported_planar_velocity: Vector3,
     ) -> std::result::Result<Self, PhysicalBodyActuationError> {
@@ -319,6 +281,33 @@ impl GroundedBodyActuation {
         }
     }
 
+    /// Resolves supported drive versus ballistic gravity for one contact tick.
+    /// The collection supplies launch only once; heading accompanies linear input for angular admission.
+    /// Positional authority return is supplied separately through the bounded contact motor.
+    pub fn contact_step_input(
+        &self,
+        ground: GroundState,
+        config: GroundedConfig,
+        policy: PhysicalBodyResponsePolicy,
+    ) -> Result<super::ContactStepActuation> {
+        let supported = ground.walkable_support();
+        let input = if let (Some(_), Some(launch)) = (supported, self.launch) {
+            super::ContactStepActuation::launching(Vector3::new(0.0, 0.0, config.gravity), launch)?
+        } else {
+            let acceleration = grounded_acceleration(ground, config, policy);
+            match (supported, self.supported_motion) {
+                (Some(support), GroundedSupportedMotion::Driven(target)) => {
+                    super::ContactStepActuation::driven(acceleration, target, support.normal)
+                }
+                _ => super::ContactStepActuation::ballistic(acceleration),
+            }?
+        };
+        match self.control_heading {
+            Some(heading) => input.with_control_heading(heading),
+            None => Ok(input),
+        }
+    }
+
     /// Absolute world heading this actuation asks the body to face, if it asks at all.
     pub fn control_heading(&self) -> Option<f32> {
         self.control_heading
@@ -345,8 +334,10 @@ impl GroundedBodyActuation {
 /// Response-specific one-tick actuation for a registered physical body.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PhysicalBodyActuation {
-    /// Authored absolute orientation for a body whose ordinary update preserves position.
+    /// Authored placement for a body without force-driven translation.
     FixedPosition {
+        /// Explicit authored root displacement in world axes; never retained as velocity.
+        translation: Vector3,
         /// Absolute authored world orientation before retained angular velocity is applied.
         rotation: Quaternion,
     },
@@ -391,10 +382,80 @@ impl PhysicalBodyActuation {
         )?))
     }
 
+    /// Resolves one interval of sampled mobile input against the current physical frame/support.
+    /// Authored travel is already scaled, gated, and subdivided by the collection. Its local
+    /// frame is independent of the nominal reference frame used by reference prediction.
+    /// Free physical velocity must be seeded once before the collection, never replaced here:
+    /// subsequent ticks continue the body's accepted contact response.
+    pub fn contact_step_input(
+        &self,
+        physical: &PhysicalBodyState,
+        rotation: Quaternion,
+        acceleration: Vector3,
+        ground: GroundState,
+        authored: Option<RigidTransform>,
+        delta_seconds: f32,
+    ) -> Result<super::ContactStepActuation> {
+        ensure!(
+            delta_seconds.is_finite() && delta_seconds > 0.0,
+            "contact input duration must be finite and positive"
+        );
+        let authored =
+            authored.map(|offset| ResolvedAuthoredMotion::project(offset, rotation, delta_seconds));
+        self.contact_step_from_authored(physical, acceleration, ground, authored)
+    }
+
+    /// Consumes the movement owner's projected source instead of rebuilding its world frame.
+    pub(super) fn contact_step_from_authored(
+        &self,
+        physical: &PhysicalBodyState,
+        acceleration: Vector3,
+        ground: GroundState,
+        authored: Option<ResolvedAuthoredMotion>,
+    ) -> Result<super::ContactStepActuation> {
+        let heading = authored.map(|motion| motion.heading);
+        match (physical.definition, self) {
+            (
+                PhysicalBodyDefinition::FreeSphere { .. },
+                Self::FreeFlight {
+                    kinematic_velocity, ..
+                },
+            ) => {
+                let travel = authored.map_or(*kinematic_velocity, |motion| motion.velocity);
+                let input = super::ContactStepActuation::free_flight(acceleration, travel)?;
+                match heading {
+                    Some(heading) => input.with_control_heading(heading),
+                    None => Ok(input),
+                }
+            }
+            (PhysicalBodyDefinition::Grounded { config, .. }, Self::Grounded(sampled)) => {
+                let mut input = sampled.clone();
+                input.supported_motion = sampled.resolved_supported_motion(physical);
+                if let Some(motion) = authored {
+                    let travel = motion.velocity;
+                    input.supported_motion =
+                        GroundedSupportedMotion::Driven(Vector3::new(travel.x, travel.y, 0.0));
+                    input.control_heading = heading;
+                }
+                let actuation =
+                    input.contact_step_input(ground, config, physical.response_policy)?;
+                if physical.has_direct_character_drive() {
+                    Ok(actuation.with_direct_character_drive())
+                } else {
+                    Ok(actuation)
+                }
+            }
+            (PhysicalBodyDefinition::FixedPosition { .. }, _) => {
+                anyhow::bail!("fixed position requires placement instead of contact actuation")
+            }
+            _ => anyhow::bail!("contact actuation does not match the physical definition"),
+        }
+    }
+
     /// Whether this tick input contains no controller, launch, or flight work.
     pub(crate) fn permits_dynamic_settling(&self) -> bool {
         match self {
-            Self::FixedPosition { .. } => true,
+            Self::FixedPosition { translation, .. } => *translation == Vector3::zero(),
             Self::FreeFlight {
                 retained_velocity,
                 kinematic_velocity,
@@ -430,6 +491,14 @@ pub enum PhysicalBodyResponseState {
 }
 
 impl PhysicalBodyResponseState {
+    /// Response-owned support; placement-only bodies have no grounded support.
+    pub const fn ground(&self) -> GroundState {
+        match self {
+            Self::Grounded { ground, .. } => *ground,
+            Self::Placement { .. } => GroundState::Airborne,
+        }
+    }
+
     /// Current response-selected interior cell, or `None` while outdoors.
     pub const fn cell(&self) -> Option<Guid> {
         match self {
@@ -444,7 +513,7 @@ pub(crate) enum DynamicBodyActivity {
     /// The collection participant must attempt this body's next eligible solve.
     Active,
     /// A completed tick proved no retained, authored, reconciliation, contact, or response work.
-    /// Gravity-bearing grounded bodies additionally retain a valid stable-support proof.
+    /// Gravity-bearing grounded bodies additionally retain stable support for the next step to validate.
     Settled,
     /// The body's retained collision topology is not in the current scene snapshot.
     ///
@@ -545,6 +614,24 @@ pub struct PhysicalBodyReconfigurationOutcome {
 }
 
 impl PhysicalBodyState {
+    /// Stable characters follow commanded tangent speed; passive bodies and sledding keep motors.
+    pub(super) fn has_direct_character_drive(&self) -> bool {
+        self.response_policy.surface_motion == PhysicalSurfaceMotion::Stable
+            && self.dynamic.as_ref().is_some_and(|dynamic| {
+                matches!(
+                    dynamic.collision.contact_response,
+                    super::EntityContactResponse::Character(_)
+                )
+            })
+    }
+
+    /// Whether the solver has settled this entity; movement-only bodies never enter that lifecycle.
+    pub fn is_settled(&self) -> bool {
+        self.dynamic
+            .as_ref()
+            .is_some_and(|dynamic| dynamic.activity == DynamicBodyActivity::Settled)
+    }
+
     /// Builds response memory whose variant is guaranteed to match the definition.
     pub fn new(
         definition: PhysicalBodyDefinition,
@@ -646,6 +733,7 @@ impl PhysicalBodyState {
             surface_motion: PhysicalSurfaceMotion::Stable,
             align_path: state.response.align_path,
         };
+        entity_collision.contact_response = entity_collision.contact_response.with_physics(state);
         entity_collision.dynamic_collision = state.dynamic_collision;
         entity_collision.reporting = state.reporting;
         entity_collision.uses_physics_bsp = state.uses_physics_bsp;
@@ -836,30 +924,11 @@ impl PhysicalBodyDefinition {
     }
 }
 
-/// Result category for one generic physical-body fixed tick.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PhysicalBodyTickStatus {
-    /// Collision response accepted and committed the tick.
-    Solved,
-    /// Anti-tunneling subdivision exceeded the configured finite budget.
-    SubstepBudgetExceeded,
-    /// Contact separation exceeded the configured finite pass budget.
-    ContactBudgetExceeded,
-}
-
 /// One source-neutral placed body-reference path produced by the generic simulator.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PhysicalBodyMotion {
     /// Body-reference geometry paired with support-sphere placement transitions.
     pub path: PlacedMotionPath,
-    /// Result category for this fixed tick.
-    pub status: PhysicalBodyTickStatus,
-    /// Distinct non-walkable planes encountered by grounded response.
-    pub constraint_count: usize,
-    /// Collision substeps consumed by the solve.
-    pub substeps: usize,
-    /// Contact-separation passes consumed by the solve.
-    pub contact_passes: usize,
 }
 
 /// Residency of the final primary-sphere owner in the installed collision snapshot.
@@ -883,30 +952,28 @@ pub struct PhysicalBodyTickResult {
     pub motion: PhysicalBodyMotion,
     /// Non-gating final primary-sphere collision residency.
     pub scene_residency: PhysicalBodySceneResidency,
-    /// Named semantic consequence committed with a confirmed dynamic-body impact.
+    /// Named effective-state consequence committed with a confirmed dynamic-body impact.
     pub dynamic_state_change: Option<DynamicBodyPhysicsStateChange>,
     /// First-touch report edges committed by this body transaction; refreshes remain silent.
     pub collision_reports: Vec<CollisionReportOutcome>,
     /// Strongest accepted static-environment contact normal for this tick, if any.
     pub static_contact_normal: Option<Vector3>,
-    /// Blocking entity contact selected by the ordinary directional peer solver, if any.
-    pub dynamic_contact: Option<DynamicBodyContact>,
 }
 
-/// Solver-owned blocking entity fact independent from optional collision-report policy.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct DynamicBodyContact {
-    /// Entity body that supplied the accepted blocking surface.
-    pub peer: SpatialBodyId,
-    /// Outward unit normal from the peer surface toward the mover.
-    pub normal: Vector3,
-}
-
-/// Source-neutral complete-state mutation a producer applies to its semantic authority.
+/// Source-neutral collision mutation applied to effective state without rewriting server authority.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DynamicBodyPhysicsStateChange {
     /// Physics-state bits cleared by the accepted collision consequence.
     pub cleared: PhysicsState,
+}
+
+impl DynamicBodyPhysicsStateChange {
+    /// Existing accepted-impact retirement shared by physical and entity-state publication.
+    pub(crate) fn projectile_impact() -> Self {
+        Self {
+            cleared: PhysicsState::MISSILE | PhysicsState::ALIGN_PATH | PhysicsState::PATH_CLIPPED,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -928,46 +995,8 @@ pub(super) struct PhysicalBodyTickCommit {
     pub motion: PhysicalBodyMotion,
     /// Strongest accepted static-environment contact normal for this tick, if any.
     pub static_contact_normal: Option<Vector3>,
-    /// Whether the final accepted placement still requires bounded contact correction.
-    pub residual_contacts: bool,
-}
-
-#[derive(Debug, Clone, Copy)]
-/// Inputs retained by grounded response while a generic tick is evaluated.
-struct GroundedTickState<'a> {
-    /// Entity constraints applied to integrated translation before static collision.
-    constraints: &'a [MotionConstraint],
-    /// Role-ordered support and optional upper sphere.
-    spheres: GroundedBodySpheres,
-    /// Finite grounded solver and response policy.
-    config: GroundedConfig,
-    /// Retained mutable contact and facing response.
-    response_policy: PhysicalBodyResponsePolicy,
-    /// Body-owned optional collision-domain exclusions.
-    collision_filter: PhysicalCollisionFilter,
-    /// Prior support-sphere interior cell.
-    cell: Option<Guid>,
-    /// Prior committed walkable support.
-    ground: GroundState,
-    /// Prior stationary-fall transition stage.
-    stationary_fall_frames: u8,
-}
-
-#[derive(Debug, Clone, Copy)]
-/// Inputs retained by free-sphere response while a generic tick is evaluated.
-struct FreeSphereTickState<'a> {
-    /// Entity constraints applied to integrated translation before static collision.
-    constraints: &'a [MotionConstraint],
-    /// Body-local collision sphere.
-    sphere: GroundedSphere,
-    /// Finite free-flight solver policy.
-    config: FreeSphereConfig,
-    /// Retained mutable collision and facing response.
-    response_policy: PhysicalBodyResponsePolicy,
-    /// Body-owned optional collision-domain exclusions.
-    collision_filter: PhysicalCollisionFilter,
-    /// Prior sphere-center interior cell.
-    cell: Option<Guid>,
+    /// Effective-state consequence observed by the common step before projectile retirement.
+    pub dynamic_state_change: Option<DynamicBodyPhysicsStateChange>,
 }
 
 /// Solves one registered body without mutating the canonical store until every query completes.
@@ -976,17 +1005,7 @@ pub(super) fn solve_physical_body_tick(
     body: &SpatialBody,
     actuation: &PhysicalBodyActuation,
     delta_seconds: f32,
-) -> Result<PhysicalBodyTickCommit> {
-    solve_constrained_physical_body_tick(scene, body, actuation, delta_seconds, &[])
-}
-
-/// Re-solves the full physical interval with entity constraints applied before environment queries.
-pub(super) fn solve_constrained_physical_body_tick(
-    scene: &CollisionScene,
-    body: &SpatialBody,
-    actuation: &PhysicalBodyActuation,
-    delta_seconds: f32,
-    constraints: &[MotionConstraint],
+    input_for: impl FnMut(&SpatialBody, GroundState, f32) -> Result<super::ContactStepActuation>,
 ) -> Result<PhysicalBodyTickCommit> {
     ensure!(
         delta_seconds.is_finite() && delta_seconds > 0.0,
@@ -996,492 +1015,253 @@ pub(super) fn solve_constrained_physical_body_tick(
         .physical
         .as_ref()
         .context("spatial body has no physical definition")?;
-    let mut commit =
-        solve_physical_body_response(scene, body, physical, actuation, delta_seconds, constraints)?;
-
-    // Retained physical omega rotates the *accepted world frame*, globally, after the response has
-    // chosen the body's facing — retail's `Frame::grotate` on the already-composed frame
-    // (`acclient.c:306106-306153`). Authored rotation is the opposite case and has already been
-    // applied locally, as the body's control heading.
-    //
-    // Derived here so the accepted pose is final. Both the scene commit and dynamic contact used to
-    // re-integrate it from retained omega themselves, which made the tick's end orientation a fact
-    // computed in three places.
-    commit.pose.rotation = super::scene::integrate_angular_velocity(
-        commit.pose.rotation,
-        body.retained.omega,
+    if let PhysicalBodyDefinition::FixedPosition { placement_sphere } = physical.definition {
+        return solve_fixed_position_tick(
+            scene,
+            body,
+            physical,
+            actuation,
+            delta_seconds,
+            placement_sphere,
+        );
+    }
+    let mut moving = body.clone();
+    if let Some(dynamic) = moving
+        .physical
+        .as_mut()
+        .and_then(|state| state.dynamic.as_mut())
+    {
+        dynamic.activity = super::DynamicBodyActivity::Active;
+        dynamic.demand.integration = LocalIntegrationDemand::Eligible;
+    }
+    let mut collection = super::mobile_contact::advance_body_contact_collection_without_reports(
+        scene,
+        &[moving],
+        Guid(body.pose.landblock_id.0 | 0xffff),
         delta_seconds,
+        input_for,
+    )?;
+    ensure!(
+        collection.bodies.len() == 1,
+        "single-body solve must produce one result"
     );
-    Ok(commit)
+    let update = collection
+        .bodies
+        .pop()
+        .context("single-body solve lost its result")?;
+    if let Some(owner) = update.unavailable_owner {
+        // Direct probes are atomic transactions. Their caller can load missing coverage and
+        // retry; unlike a crowd collection, they do not publish a partial-coverage result.
+        return Err(CollisionQueryError::UnavailableOwner { owner: owner.0 }.into());
+    }
+    let mut current = body.clone();
+    update.apply_physical_state(&mut current)?;
+    let path = PlacedMotionPath::from_contact_motion(body, &current, &update.motion)?;
+    let static_contact_normal = update
+        .motion
+        .iter()
+        .filter_map(|segment| match segment {
+            super::ContactMotionSegment::Impact {
+                hit: super::HardSphereSweepHit::World(hit),
+                ..
+            } => Some(hit.normal),
+            _ => None,
+        })
+        .max_by(|a, b| a.z.total_cmp(&b.z))
+        .or_else(|| update.ground.contact_plane().map(|support| support.normal));
+    let response = current
+        .physical
+        .as_ref()
+        .context("solved body lost physics")?
+        .response;
+    Ok(PhysicalBodyTickCommit {
+        pose: current.pose,
+        retained_velocity: current.retained.velocity,
+        retained_acceleration: current.retained.acceleration,
+        accepted_motion: current.accepted_motion,
+        contact: current.contact,
+        response,
+        motion: PhysicalBodyMotion { path },
+        static_contact_normal,
+        dynamic_state_change: update
+            .projectile_impact
+            .map(|_| DynamicBodyPhysicsStateChange::projectile_impact()),
+    })
 }
 
-fn solve_physical_body_response(
+/// Applies explicit authored placement without entering the force/contact-response solver.
+fn solve_fixed_position_tick(
     scene: &CollisionScene,
     body: &SpatialBody,
     physical: &PhysicalBodyState,
     actuation: &PhysicalBodyActuation,
     delta_seconds: f32,
-    constraints: &[MotionConstraint],
+    placement_sphere: GroundedSphere,
 ) -> Result<PhysicalBodyTickCommit> {
-    match (physical.definition, &physical.response) {
-        (
-            PhysicalBodyDefinition::FixedPosition { placement_sphere },
-            PhysicalBodyResponseState::Placement { cell },
-        ) => {
-            let PhysicalBodyActuation::FixedPosition { rotation } = actuation else {
-                anyhow::bail!("fixed-position body requires orientation-only actuation")
-            };
-            let mut pose = body.pose;
-            pose.rotation = *rotation;
-            let path = trace_body_reference_path(
-                scene,
-                body.pose,
-                *cell,
-                placement_sphere,
-                &[MotionWaypoint {
-                    center: body.pose.coords,
-                    end_fraction: 1.0,
-                    placement: super::MotionWaypointPlacement::Committed(*cell),
-                }],
-                false,
-            )?;
-            Ok(PhysicalBodyTickCommit {
-                pose,
-                retained_velocity: Vector3::zero(),
-                retained_acceleration: Vector3::zero(),
-                accepted_motion: accepted_motion(body.pose, pose, Vector3::zero(), delta_seconds),
-                contact: body.contact,
-                response: physical.response,
-                motion: PhysicalBodyMotion {
-                    path,
-                    status: PhysicalBodyTickStatus::Solved,
-                    constraint_count: 0,
-                    substeps: 0,
-                    contact_passes: 0,
-                },
-                static_contact_normal: None,
-                residual_contacts: false,
-            })
-        }
-        (
-            PhysicalBodyDefinition::FreeSphere { sphere, config },
-            PhysicalBodyResponseState::Placement { cell },
-        ) => {
-            let PhysicalBodyActuation::FreeFlight {
-                retained_velocity,
-                kinematic_velocity,
-            } = actuation
-            else {
-                anyhow::bail!("grounded actuation cannot drive a free-sphere physical body")
-            };
-            solve_free_sphere_tick(
-                scene,
-                body,
-                FreeSphereTickState {
-                    constraints,
-                    sphere,
-                    config,
-                    response_policy: physical.response_policy,
-                    collision_filter: physical.collision_filter,
-                    cell: *cell,
-                },
-                *retained_velocity,
-                *kinematic_velocity,
-                delta_seconds,
-            )
-        }
-        (
-            PhysicalBodyDefinition::Grounded { spheres, config },
-            PhysicalBodyResponseState::Grounded {
-                cell,
-                ground,
-                stationary_fall_frames,
-            },
-        ) => {
-            let PhysicalBodyActuation::Grounded(actuation) = actuation else {
-                anyhow::bail!("free-flight actuation cannot drive a grounded physical body")
-            };
-            solve_grounded_body_tick(
-                scene,
-                body,
-                GroundedTickState {
-                    constraints,
-                    spheres,
-                    config,
-                    response_policy: physical.response_policy,
-                    collision_filter: physical.collision_filter,
-                    cell: *cell,
-                    ground: *ground,
-                    stationary_fall_frames: *stationary_fall_frames,
-                },
-                actuation,
-                delta_seconds,
-            )
-        }
-        _ => anyhow::bail!("physical body definition and response state variants diverged"),
-    }
-}
-
-fn solve_free_sphere_tick(
-    scene: &CollisionScene,
-    body: &SpatialBody,
-    state: FreeSphereTickState<'_>,
-    retained_velocity: Vector3,
-    kinematic_velocity: Vector3,
-    delta_seconds: f32,
-) -> Result<PhysicalBodyTickCommit> {
-    let offset = body.pose.rotation.rotate_vector(state.sphere.center);
-    let integrated_velocity = retained_velocity + body.retained.acceleration * delta_seconds;
-    let candidate_velocity =
-        retained_velocity + body.retained.acceleration * (0.5 * delta_seconds) + kinematic_velocity;
-    let mut sphere_pose = body.pose;
-    sphere_pose.coords = sphere_pose.coords + offset;
-    let outcome = solve_free_sphere(
-        scene,
-        state.config,
-        FreeSphereRequest {
-            body: FreeSphereState {
-                pose: sphere_pose,
-                cell: state.cell,
-                radius: state.sphere.radius,
-            },
-            displacement: constrain_displacement(
-                candidate_velocity * delta_seconds,
-                state.constraints,
-            ),
-            filter: state.collision_filter,
-            query_policy: CollisionQueryPolicy::RequireCollisionCoverage,
-        },
-    )?;
-    let (solved, achieved_displacement, collision_normal, motion, substeps, contact_passes, status) =
-        match outcome {
-            FreeSphereOutcome::Solved {
-                body: solved,
-                achieved_displacement,
-                collision_normal,
-                motion,
-                substeps,
-                contact_passes,
-                ..
-            } => (
-                solved,
-                achieved_displacement,
-                collision_normal,
-                motion,
-                substeps,
-                contact_passes,
-                PhysicalBodyTickStatus::Solved,
-            ),
-            FreeSphereOutcome::BudgetExceeded {
-                body: solved,
-                achieved_displacement,
-                collision_normal,
-                motion,
-                budget,
-                substeps,
-                contact_passes,
-                ..
-            } => (
-                solved,
-                achieved_displacement,
-                collision_normal,
-                motion,
-                substeps,
-                contact_passes,
-                free_budget_status(budget),
-            ),
-        };
-    let path =
-        trace_body_reference_path(scene, body.pose, state.cell, state.sphere, &motion, true)?;
-    let committed_cell = path.final_point().placement().committed_cell();
-    ensure!(
-        committed_cell == solved.cell || path.has_recovery(),
-        "free-sphere placed path ended in {committed_cell:?}, but collision response committed {:?}",
-        solved.cell
-    );
-    let mut pose = body_reference_pose(solved.pose, committed_cell, offset)?;
-    let velocity = collision_response(CollisionResponseInput {
-        incoming: integrated_velocity,
-        restitution: state.response_policy.restitution,
-        collision_normal,
-        current_support_normal: None,
-        stationary_fall_frames: 0,
-    })
-    .velocity;
-    apply_automatic_facing(
-        &mut pose,
-        achieved_displacement,
-        velocity,
-        state.response_policy,
-    );
+    let PhysicalBodyResponseState::Placement { cell } = &physical.response else {
+        anyhow::bail!("fixed-position body requires placement response");
+    };
+    let PhysicalBodyActuation::FixedPosition {
+        translation,
+        rotation,
+    } = actuation
+    else {
+        anyhow::bail!("fixed-position body requires authored placement actuation")
+    };
+    let mut pose = body.pose;
+    pose.coords = pose.coords + *translation;
+    pose.rotation =
+        super::scene::integrate_angular_velocity(*rotation, body.retained.omega, delta_seconds);
+    let offset = body.pose.rotation.rotate_vector(placement_sphere.center);
+    let center = body.pose.coords + offset;
+    let path = scene
+        .transit_motion_path(PlacedMotionPathRequest {
+            previous_cell: *cell,
+            anchor: Guid(body.pose.landblock_id.0 | 0xffff),
+            start: center,
+            radius: placement_sphere.radius,
+            waypoints: &[MotionWaypoint {
+                center: center + *translation,
+                end_fraction: 1.0,
+                placement: super::MotionWaypointPlacement::Traverse,
+            }],
+        })?
+        .translated(offset * -1.0);
+    let cell = path.final_point().placement().committed_cell();
+    pose = place_body_pose(pose, cell)?;
     Ok(PhysicalBodyTickCommit {
         pose,
-        retained_velocity: velocity,
-        retained_acceleration: body.retained.acceleration,
-        accepted_motion: accepted_motion(
-            body.pose,
-            pose,
-            achieved_displacement / delta_seconds,
-            delta_seconds,
-        ),
-        contact: ContactState::Airborne,
-        response: PhysicalBodyResponseState::Placement {
-            cell: committed_cell,
-        },
-        motion: PhysicalBodyMotion {
-            path,
-            status,
-            constraint_count: 0,
-            substeps,
-            contact_passes,
-        },
-        static_contact_normal: collision_normal,
-        residual_contacts: false,
+        retained_velocity: Vector3::zero(),
+        retained_acceleration: Vector3::zero(),
+        accepted_motion: accepted_motion(body.pose, pose, Vector3::zero(), delta_seconds),
+        contact: body.contact,
+        response: PhysicalBodyResponseState::Placement { cell },
+        motion: PhysicalBodyMotion { path },
+        static_contact_normal: None,
+        dynamic_state_change: None,
     })
 }
 
-fn solve_grounded_body_tick(
-    scene: &CollisionScene,
-    body: &SpatialBody,
-    state: GroundedTickState<'_>,
-    actuation: &GroundedBodyActuation,
+/// Collision-free continuation of independent authority and ordinary authored input.
+pub(super) struct PredictedReferenceMotion {
+    /// Nominal continuation compared with actual velocity when deciding return completion.
+    pub continuation_velocity: Vector3,
+    /// Ordinary reference travel, excluding contact correction.
+    pub displacement: Vector3,
+    /// Free-flight reference orientation after ordinary motion; grounded facing belongs to the body.
+    pub flight_rotation: Option<Quaternion>,
+}
+
+/// Advances an independent ordinary reference without collision response.
+pub(super) fn predict_reference_motion(
+    body: &super::SpatialBody,
+    actuation: &PhysicalBodyActuation,
     delta_seconds: f32,
-) -> Result<PhysicalBodyTickCommit> {
-    let retained_ground_is_current = match state.ground {
-        GroundState::Supported(support) | GroundState::Sliding(support) => {
-            scene.proves(support.proof)
+    nominal: super::AuthoritativeBodyVectors,
+    authored: Option<ResolvedAuthoredMotion>,
+    reference: WorldPosition,
+    ground: GroundState,
+) -> Result<PredictedReferenceMotion> {
+    let physical = body
+        .physical
+        .as_ref()
+        .context("reference prediction requires body physics")?;
+    let (velocity, displacement, flight_rotation) = match (physical.definition, actuation) {
+        (
+            PhysicalBodyDefinition::FreeSphere { .. },
+            PhysicalBodyActuation::FreeFlight {
+                kinematic_velocity, ..
+            },
+        ) => {
+            let velocity = nominal.velocity + nominal.acceleration * delta_seconds;
+            let travel = authored.map_or(*kinematic_velocity * delta_seconds, |motion| {
+                reference
+                    .rotation
+                    .rotate_vector(motion.source_offset.translation)
+            });
+            let displacement = velocity * delta_seconds + travel;
+            let heading = authored.map(|motion| {
+                reference
+                    .rotation
+                    .multiply(&motion.source_offset.rotation)
+                    .to_heading()
+            });
+            let rotation = resolve_body_facing(
+                reference.rotation,
+                displacement,
+                velocity,
+                physical.response_policy,
+                heading,
+            );
+            let rotation =
+                super::scene::integrate_angular_velocity(rotation, nominal.omega, delta_seconds);
+            (velocity, displacement, Some(rotation))
         }
-        GroundState::Airborne => true,
+        (
+            PhysicalBodyDefinition::Grounded { config, .. },
+            PhysicalBodyActuation::Grounded(input),
+        ) => {
+            let ground = if physical
+                .dynamic
+                .as_ref()
+                .is_some_and(|dynamic| dynamic.collision.dynamic_collision.missile)
+            {
+                GroundState::Airborne
+            } else {
+                ground
+            };
+            let support = ground.walkable_support();
+            // A nominal command is the requested travel, not another acceleration-limited
+            // physical motor starting again from the last packet's velocity every tick.
+            let mut velocity = match (
+                support,
+                input.launch,
+                authored,
+                input.resolved_supported_motion(physical),
+            ) {
+                (Some(_), Some(launch), _, _) => launch.velocity(),
+                (Some(_), None, Some(motion), _) => {
+                    let travel = motion.velocity;
+                    Vector3::new(travel.x, travel.y, 0.0)
+                }
+                (Some(_), None, None, GroundedSupportedMotion::Driven(target)) => target,
+                (Some(support), None, None, GroundedSupportedMotion::Coasting) => surface_friction(
+                    canonical_retained_velocity(nominal.velocity),
+                    support.normal,
+                    physical.response_policy.friction,
+                    delta_seconds,
+                    physical.response_policy.surface_motion,
+                ),
+                (None, _, _, _) => nominal.velocity,
+            };
+            if support.is_none()
+                || input.launch.is_some()
+                || physical_surface_retains_gravity(physical.response_policy.surface_motion)
+            {
+                velocity.z += config.gravity * delta_seconds;
+            }
+            // Actual supported travel is tangent to this same prepared plane. Leaving nominal
+            // drive horizontal makes the reference outrun the body and invent correction on slopes.
+            // Launch explicitly leaves support and must retain its outward velocity.
+            if input.launch.is_none()
+                && let Some(support) = support
+            {
+                velocity = velocity - support.normal * velocity.dot(&support.normal);
+            }
+            // Pursuit commands are chosen in the actual body's frame. Grounded reference
+            // position follows that intent; it must not simulate another character's facing.
+            (velocity, velocity * delta_seconds, None)
+        }
+        (PhysicalBodyDefinition::FixedPosition { .. }, _) => {
+            anyhow::bail!("fixed body cannot predict a mobile correction reference")
+        }
+        _ => anyhow::bail!("reference actuation does not match the physical definition"),
     };
-    let initial_retained_velocity = if state.ground.walkable_support().is_some() {
-        canonical_retained_velocity(body.retained.velocity)
-    } else {
-        body.retained.velocity
-    };
-    // Grounded acceleration is derived by the response from gravity and contact, as in
-    // CPhysicsObj::calc_acceleration (acclient.c:306176-306210). The server's acceleration
-    // snapshot is not an additional force on top of that gravity.
-    let mut retained_velocity = initial_retained_velocity;
-    let mut grounded_body = GroundedBody {
-        pose: body.pose,
-        cell: state.cell,
-        // This field remains physical momentum. A kinematic drive may temporarily be supplied to
-        // the solver below for first-contact path finding, but is never committed through it.
-        velocity: retained_velocity,
-        ground: if retained_ground_is_current {
-            state.ground
-        } else {
-            GroundState::Airborne
-        },
-    };
-    // A newly installed grounded body has not yet had a collision transaction classify its
-    // contact. Let explicit planar drive participate in that first transaction so a body placed
-    // on a floor does not discard one tick of input. Once a solve commits `Airborne`, canonical
-    // velocity remains ballistic and later drive cannot steer it.
-    if body.contact == ContactState::Unknown
-        && grounded_body.ground.walkable_support().is_none()
-        && let GroundedSupportedMotion::Driven(velocity) = actuation.supported_motion
-    {
-        grounded_body.velocity.x += velocity.x;
-        grounded_body.velocity.y += velocity.y;
-    }
-    let retained_contact = if retained_ground_is_current {
-        body.contact
-    } else {
-        ContactState::Airborne
-    };
-    let settle = grounded_settle_permission(retained_contact, actuation.launch.is_some());
-    if let Some(launch) = actuation.launch.as_ref() {
-        ensure!(
-            grounded_body.ground.walkable_support().is_some(),
-            "grounded launch requires current walkable support"
-        );
-        grounded_body.velocity = launch.velocity();
-        retained_velocity = launch.velocity();
-        grounded_body.ground = GroundState::Airborne;
-    }
-    if let Some(support) = grounded_body.ground.walkable_support() {
-        retained_velocity = surface_friction(
-            retained_velocity,
-            support.normal,
-            state.response_policy.friction,
-            delta_seconds,
-            state.response_policy.surface_motion,
-        );
-        grounded_body.velocity = retained_velocity;
-    }
-    let supported_velocity = match actuation.supported_motion {
-        GroundedSupportedMotion::Driven(velocity) => velocity + retained_velocity,
-        GroundedSupportedMotion::Coasting => retained_velocity,
-    };
-    let outcome = super::grounded::solve_constrained_grounded(
-        scene,
-        state.config,
-        GroundedRequest {
-            body: grounded_body,
-            spheres: state.spheres,
-            supported_velocity,
-            settle,
-            retain_supported_gravity: physical_surface_retains_gravity(
-                state.response_policy.surface_motion,
-            ),
-            delta_seconds,
-            filter: state.collision_filter,
-        },
-        state.constraints,
-    )?;
-    let (
-        solved,
-        achieved_velocity,
-        collision_normal,
-        motion,
-        substeps,
-        contact_passes,
-        constraint_count,
-        residual_contacts,
-        status,
-    ) = match outcome {
-        GroundedOutcome::Solved {
-            body,
-            achieved_velocity,
-            collision_normal,
-            motion,
-            substeps,
-            contact_passes,
-            constraint_count,
-            residual_contacts,
-        } => (
-            body,
-            achieved_velocity,
-            collision_normal,
-            motion,
-            substeps,
-            contact_passes,
-            constraint_count,
-            residual_contacts,
-            PhysicalBodyTickStatus::Solved,
-        ),
-        GroundedOutcome::BudgetExceeded {
-            body,
-            achieved_velocity,
-            collision_normal,
-            motion,
-            budget,
-            substeps,
-            contact_passes,
-            constraint_count,
-            residual_contacts,
-        } => (
-            body,
-            achieved_velocity,
-            collision_normal,
-            motion,
-            substeps,
-            contact_passes,
-            constraint_count,
-            residual_contacts,
-            grounded_budget_status(budget),
-        ),
-    };
-    let path = trace_body_reference_path(
-        scene,
-        body.pose,
-        state.cell,
-        state.spheres.support,
-        &motion,
-        false,
-    )?;
-    let committed_cell = path.final_point().placement().committed_cell();
-    let recovered = path.has_recovery();
-    ensure!(
-        committed_cell == solved.cell || recovered,
-        "grounded placed path ended in {committed_cell:?}, but collision response committed {:?}",
-        solved.cell
-    );
-    let mut pose = body_reference_pose(solved.pose, committed_cell, Vector3::zero())?;
-    // Ground identity belongs to the collision domain that produced it. A recovered placement
-    // deliberately drops that memory so the next ordinary tick reacquires it.
-    let mut ground = if recovered {
-        GroundState::Airborne
-    } else {
-        solved.ground
-    };
-    let stationary_fall_frames = next_stationary_fall_frames(
-        state.stationary_fall_frames,
-        state.ground.walkable_support(),
-        ground.walkable_support(),
-        collision_normal,
-        achieved_velocity,
-    );
-    let continuous_stable_support = state.ground.walkable_support().is_some()
-        && solved.ground.walkable_support().is_some()
-        && state.response_policy.surface_motion == PhysicalSurfaceMotion::Stable;
-    // The solver returns physical momentum independently of supported drive. Remove only the
-    // temporary first-contact drive supplied above to discover support for an unclassified body.
-    let mut physical_incoming = solved.velocity;
-    if body.contact == ContactState::Unknown
-        && state.ground.walkable_support().is_none()
-        && let GroundedSupportedMotion::Driven(drive) = actuation.supported_motion
-    {
-        physical_incoming.x -= drive.x;
-        physical_incoming.y -= drive.y;
-    }
-    let collision_response = collision_response(CollisionResponseInput {
-        incoming: physical_incoming,
-        restitution: state.response_policy.restitution,
-        // Retail suppresses restitution entirely while ordinary walkable support continues. The
-        // accepted path may still be clipped, but that must not rewrite or separate retained
-        // physical momentum (`CPhysicsObj::handle_all_collisions`, acclient.c:309982-310051).
-        collision_normal: (!continuous_stable_support)
-            .then_some(collision_normal)
-            .flatten(),
-        current_support_normal: (!continuous_stable_support)
-            .then(|| ground.walkable_support().map(|current| current.normal))
-            .flatten(),
-        stationary_fall_frames,
-    });
-    if collision_response.separates_from_support {
-        ground = GroundState::Airborne;
-    }
-    let velocity = collision_response.velocity;
-    apply_grounded_facing(
-        &mut pose,
-        achieved_velocity * delta_seconds,
-        velocity,
-        state.response_policy,
-        actuation.control_heading,
-    );
-    Ok(PhysicalBodyTickCommit {
-        pose,
-        retained_velocity: velocity,
-        retained_acceleration: if ground.walkable_support().is_some()
-            && state.response_policy.surface_motion == PhysicalSurfaceMotion::Stable
-        {
-            Vector3::zero()
-        } else {
-            Vector3::new(0.0, 0.0, state.config.gravity)
-        },
-        accepted_motion: accepted_motion(body.pose, pose, achieved_velocity, delta_seconds),
-        contact: match ground {
-            GroundState::Supported(_) => ContactState::Grounded,
-            GroundState::Sliding(_) => ContactState::Sliding,
-            GroundState::Airborne => ContactState::Airborne,
-        },
-        response: PhysicalBodyResponseState::Grounded {
-            cell: committed_cell,
-            ground,
-            stationary_fall_frames,
-        },
-        motion: PhysicalBodyMotion {
-            path,
-            status,
-            constraint_count,
-            substeps,
-            contact_passes,
-        },
-        static_contact_normal: collision_normal
-            .or_else(|| ground.contact_plane().map(|support| support.normal)),
-        residual_contacts,
+    validate_finite_velocity(displacement)?;
+    Ok(PredictedReferenceMotion {
+        continuation_velocity: velocity,
+        displacement,
+        flight_rotation,
     })
 }
 
@@ -1521,161 +1301,49 @@ pub(super) fn canonical_retained_velocity(velocity: Vector3) -> Vector3 {
     }
 }
 
-/// Projects retained generic contact into retail's per-transition settle eligibility.
-///
-/// Retail's ordinary walking step-down requires the OBJECTINFO contact bit
-/// (`CTransition::transitional_insert`, `acclient.c:301550-301599`); every other gravity-bound
-/// transition prepares the lenient 0.04m landing step-down (`acclient.c:301563-301569`); a
-/// launch tick suppresses both until the body has left the ground. An unclassified new body
-/// has no contact proof and uses the landing allowance, never the walking step-down reach.
-pub(crate) const fn grounded_settle_permission(
-    contact: ContactState,
-    launching: bool,
-) -> SettlePermission {
-    if launching {
-        SettlePermission::Denied
+/// Response-owned acceleration at the accepted support, shared by input and publication.
+pub(super) fn grounded_acceleration(
+    ground: GroundState,
+    config: GroundedConfig,
+    policy: PhysicalBodyResponsePolicy,
+) -> Vector3 {
+    if ground.walkable_support().is_some() && policy.surface_motion == PhysicalSurfaceMotion::Stable
+    {
+        Vector3::zero()
     } else {
-        match contact {
-            ContactState::Grounded => SettlePermission::Walking,
-            ContactState::Unknown | ContactState::Sliding | ContactState::Airborne => {
-                SettlePermission::Landing
-            }
-        }
+        Vector3::new(0.0, 0.0, config.gravity)
     }
 }
 
-pub(super) fn trace_body_reference_path(
-    scene: &CollisionScene,
-    initial_pose: WorldPosition,
-    previous_cell: Option<Guid>,
-    primary: GroundedSphere,
-    motion: &[MotionWaypoint],
-    motion_is_sphere_center: bool,
-) -> Result<PlacedMotionPath> {
-    let anchor = Guid((initial_pose.landblock_id.0 & 0xffff_0000) | 0xffff);
-    let offset = initial_pose.rotation.rotate_vector(primary.center);
-    let sphere_motion = if motion_is_sphere_center {
-        motion.to_vec()
-    } else {
-        motion
-            .iter()
-            .map(|waypoint| MotionWaypoint {
-                center: waypoint.center + offset,
-                end_fraction: waypoint.end_fraction,
-                placement: waypoint.placement,
-            })
-            .collect()
-    };
-    Ok(scene
-        .transit_motion_path(PlacedMotionPathRequest {
-            previous_cell,
-            anchor,
-            start: initial_pose.coords + offset,
-            radius: primary.radius,
-            waypoints: &sphere_motion,
-        })?
-        .translated(offset * -1.0))
-}
-
-fn body_reference_pose(
-    mut sphere_pose: WorldPosition,
-    cell: Option<Guid>,
-    offset: Vector3,
-) -> Result<WorldPosition> {
-    sphere_pose.coords = sphere_pose.coords - offset;
-    if let Some(cell) = cell {
-        sphere_pose.landblock_id = cell;
-        return Ok(sphere_pose);
-    }
-    sphere_pose
-        .normalize_outdoor_landblock_frame()
-        .context("could not reanchor solved body reference")
-}
-
-fn free_budget_status(budget: FreeSphereBudget) -> PhysicalBodyTickStatus {
-    match budget {
-        FreeSphereBudget::Substeps => PhysicalBodyTickStatus::SubstepBudgetExceeded,
-        FreeSphereBudget::Contacts => PhysicalBodyTickStatus::ContactBudgetExceeded,
-    }
-}
-
-fn grounded_budget_status(budget: GroundedBudget) -> PhysicalBodyTickStatus {
-    match budget {
-        GroundedBudget::Substeps => PhysicalBodyTickStatus::SubstepBudgetExceeded,
-    }
-}
-
-const MAXIMUM_BOUNCE_STATIONARY_FALL_FRAMES: u8 = 1;
 const SLEDDING_STOP_SPEED_SQUARED: f32 = 1.5625;
 const SLEDDING_FAST_SPEED_SQUARED: f32 = 6.25;
 const SLEDDING_SLOPE_NORMAL_Z: f32 = 0.984_807_7;
 const SLEDDING_SLOPE_FRICTION: f32 = 0.2;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-/// Canonical velocity and its support consequence from one collision response.
-struct CollisionResponse {
-    /// Velocity retained after stable support, restitution, or stationary-fall handling.
-    velocity: Vector3,
-    /// Whether the resolved velocity deliberately leaves the current walkable support.
-    separates_from_support: bool,
-}
-
-#[derive(Debug, Clone, Copy)]
-/// Complete collision and support facts consumed by one canonical response decision.
-struct CollisionResponseInput {
-    /// Velocity entering restitution handling.
-    incoming: Vector3,
-    /// Authored body restitution behavior.
-    restitution: PhysicalRestitution,
-    /// Most relevant impact normal produced by the collision transaction.
-    collision_normal: Option<Vector3>,
-    /// Current support normal, independently from whether an impact normal was produced.
-    current_support_normal: Option<Vector3>,
-    /// Retail's repeated stationary-fall escalation stage.
-    stationary_fall_frames: u8,
-}
-
 fn physical_surface_retains_gravity(surface_motion: PhysicalSurfaceMotion) -> bool {
     surface_motion == PhysicalSurfaceMotion::Sledding
 }
 
-fn collision_response(input: CollisionResponseInput) -> CollisionResponse {
-    let CollisionResponseInput {
-        incoming,
-        restitution,
-        collision_normal,
-        current_support_normal,
-        stationary_fall_frames,
-    } = input;
-    if stationary_fall_frames > MAXIMUM_BOUNCE_STATIONARY_FALL_FRAMES {
-        return CollisionResponse {
-            velocity: Vector3::zero(),
-            separates_from_support: false,
-        };
-    }
-    let velocity = if let Some(normal) = collision_normal {
-        match restitution {
-            PhysicalRestitution::Inelastic => Vector3::zero(),
-            PhysicalRestitution::Elastic(elasticity) => {
-                let impact_speed = incoming.dot(&normal);
-                if impact_speed >= 0.0 {
-                    incoming
-                } else {
-                    incoming + normal * -(impact_speed * (elasticity.get() + 1.0))
-                }
+/// Shared authored impact response for ordinary and one-way projectile contacts.
+pub(super) fn impact_velocity(
+    incoming: Vector3,
+    normal: Vector3,
+    restitution: PhysicalRestitution,
+) -> Vector3 {
+    match restitution {
+        PhysicalRestitution::Inelastic => Vector3::zero(),
+        PhysicalRestitution::Elastic(elasticity) => {
+            let impact_speed = incoming.dot(&normal);
+            if impact_speed >= 0.0 {
+                incoming
+            } else {
+                incoming + normal * -(impact_speed * (elasticity.get() + 1.0))
             }
         }
-    } else {
-        incoming
-    };
-    CollisionResponse {
-        velocity,
-        separates_from_support: current_support_normal
-            .is_some_and(|normal| velocity.dot(&normal) > 0.0),
     }
 }
 
-fn surface_friction(
+pub(super) fn surface_friction(
     incoming: Vector3,
     normal: Vector3,
     authored_friction: PhysicalFriction,
@@ -1702,30 +1370,14 @@ fn surface_friction(
     projected * (1.0 - friction).powf(quantum)
 }
 
-fn next_stationary_fall_frames(
-    previous: u8,
-    previous_support: Option<GroundSupport>,
-    current_support: Option<GroundSupport>,
-    collision_normal: Option<Vector3>,
-    achieved_velocity: Vector3,
-) -> u8 {
-    let remained_stationary_fall = previous_support.is_none()
-        && current_support.is_none()
-        && collision_normal.is_some()
-        && achieved_velocity.length_squared() <= f32::EPSILON;
-    if remained_stationary_fall {
-        previous.saturating_add(1).min(3)
-    } else {
-        0
-    }
-}
-
-fn apply_automatic_facing(
-    pose: &mut WorldPosition,
+/// Resolves authored alignment and controller heading after accepted movement.
+pub(super) fn resolve_body_facing(
+    current: Quaternion,
     displacement: Vector3,
     velocity: Vector3,
     policy: PhysicalBodyResponsePolicy,
-) {
+    control_heading: Option<f32>,
+) -> Quaternion {
     let heading = if policy.align_path && displacement.length_squared() > f32::EPSILON {
         Some(Vector3::zero().heading_to(&displacement))
     } else if policy.surface_motion == PhysicalSurfaceMotion::Sledding
@@ -1733,25 +1385,9 @@ fn apply_automatic_facing(
     {
         Some(Vector3::zero().heading_to(&velocity))
     } else {
-        None
+        control_heading
     };
-    if let Some(heading) = heading {
-        pose.rotation = Quaternion::from_heading(heading);
-    }
-}
-
-/// Applies character control first, then retail's later body-policy facing overrides.
-fn apply_grounded_facing(
-    pose: &mut WorldPosition,
-    displacement: Vector3,
-    velocity: Vector3,
-    policy: PhysicalBodyResponsePolicy,
-    control_heading: Option<f32>,
-) {
-    if let Some(heading) = control_heading {
-        pose.rotation = Quaternion::from_heading(heading);
-    }
-    apply_automatic_facing(pose, displacement, velocity, policy);
+    heading.map_or(current, Quaternion::from_heading)
 }
 
 fn validate_physical_fly_config(
@@ -1799,6 +1435,21 @@ fn validate_finite_velocity(
     } else {
         Err(PhysicalBodyActuationError::NonFiniteVelocity)
     }
+}
+
+/// Re-expresses a root pose in its accepted cell without changing the world-space point.
+pub(crate) fn place_body_pose(
+    mut pose: WorldPosition,
+    cell: Option<Guid>,
+) -> Result<WorldPosition> {
+    let owner = Guid((cell.unwrap_or(pose.landblock_id).0 & 0xffff_0000) | 0xffff);
+    pose = pose.reanchor_to_landblock_owner(owner)?;
+    if let Some(cell) = cell {
+        pose.landblock_id = cell;
+    } else {
+        pose = pose.normalize_outdoor_landblock_frame()?;
+    }
+    Ok(pose)
 }
 
 /// Derives non-gating collision residency from the final primary-sphere owner exactly once.
@@ -1937,27 +1588,6 @@ mod tests {
     }
 
     #[test]
-    fn opposing_crowd_constraints_preserve_vertical_motion_when_projection_stalls() {
-        let constraints = [
-            MotionConstraint {
-                normal: Vector3::new(1.0, 0.0, 0.0),
-                minimum: 0.0,
-            },
-            MotionConstraint {
-                normal: Vector3::new(-1.0, 0.1, 0.0).normalize(),
-                minimum: 0.0,
-            },
-        ];
-        for vertical in [-0.1, 0.1] {
-            let result = constrain_displacement(Vector3::new(-1.0, -1.0, vertical), &constraints);
-            assert_eq!(result.z, vertical);
-            for constraint in &constraints {
-                assert!(result.dot(&constraint.normal) >= -RETAIL_PHYSICS_EPSILON);
-            }
-        }
-    }
-
-    #[test]
     fn definitions_preserve_parameterized_geometry_and_response_roles() {
         let single = PhysicalSphereSet::new(sphere(0.2, 0.3), None).unwrap();
         assert_eq!(
@@ -2031,13 +1661,27 @@ mod tests {
             &body,
             &PhysicalBodyActuation::free_flight(Vector3::zero()).unwrap(),
             0.5,
+            |body, ground, interval| {
+                PhysicalBodyActuation::free_flight(Vector3::zero())
+                    .unwrap()
+                    .contact_step_input(
+                        body.physical.as_ref().ok_or_else(|| {
+                            anyhow::anyhow!("contact input requires body physics")
+                        })?,
+                        body.pose.rotation,
+                        body.retained.acceleration,
+                        ground,
+                        None,
+                        interval,
+                    )
+            },
         )
         .expect("a free sphere in an empty scene solves");
 
         let expected = super::super::scene::integrate_angular_velocity(
             Quaternion::identity(),
             body.retained.omega,
-            0.5,
+            super::super::MOBILE_CONTACT_TICK_SECONDS,
         );
         assert!((commit.pose.rotation.w - expected.w).abs() < 1e-6);
         assert!((commit.pose.rotation.z - expected.z).abs() < 1e-6);
@@ -2131,8 +1775,8 @@ mod tests {
             surface_motion: PhysicalSurfaceMotion::Sledding,
             align_path: true,
         };
-        apply_grounded_facing(
-            &mut pose,
+        pose.rotation = resolve_body_facing(
+            pose.rotation,
             Vector3::new(0.0, 2.0, 0.0),
             Vector3::new(-2.0, 0.0, 0.0),
             policy,
@@ -2141,8 +1785,8 @@ mod tests {
         assert!((pose.rotation.to_heading() - 90.0_f32.to_radians()).abs() < 0.000_01);
 
         policy.align_path = false;
-        apply_grounded_facing(
-            &mut pose,
+        pose.rotation = resolve_body_facing(
+            pose.rotation,
             Vector3::zero(),
             Vector3::new(-2.0, 0.0, 0.0),
             policy,
@@ -2151,8 +1795,8 @@ mod tests {
         assert!(pose.rotation.to_heading().abs() < 0.000_01);
 
         policy.surface_motion = PhysicalSurfaceMotion::Stable;
-        apply_grounded_facing(
-            &mut pose,
+        pose.rotation = resolve_body_facing(
+            pose.rotation,
             Vector3::zero(),
             Vector3::new(-2.0, 0.0, 0.0),
             policy,

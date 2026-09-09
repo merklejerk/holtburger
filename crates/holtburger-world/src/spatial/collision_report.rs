@@ -5,7 +5,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Result, ensure};
 
-use super::SpatialBodyId;
+use super::{SpatialBodyId, physical_body::DynamicBodyRuntimeState};
+use crate::EntityCollisionParticipation;
 
 /// Retail's strict object-contact expiry interval.
 pub const COLLISION_REPORT_EXPIRY: Duration = Duration::from_secs(1);
@@ -62,9 +63,34 @@ pub struct CollisionReportOutcome {
 
 /// One exact narrow-phase observation prepared before its owning body transaction commits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct CollisionReportTouch {
-    pub(crate) contact: CollisionReportContact,
-    pub(crate) source_is_ethereal: bool,
+pub struct CollisionReportTouch {
+    /// Directional recipient and source of the observed contact.
+    pub contact: CollisionReportContact,
+    /// Ethereal source observations expire on the next positive unrefreshed interval.
+    pub source_is_ethereal: bool,
+}
+
+/// Derives source classification once for either solver's accepted dynamic contact.
+pub(crate) fn dynamic_report_touch(
+    recipient: SpatialBodyId,
+    peer: SpatialBodyId,
+    source: &DynamicBodyRuntimeState,
+) -> CollisionReportTouch {
+    CollisionReportTouch {
+        contact: CollisionReportContact {
+            recipient,
+            source: CollisionReportSource::DynamicBody {
+                peer,
+                classification: if source.collision.reporting.as_environment {
+                    CollisionReportClassification::Environment
+                } else {
+                    CollisionReportClassification::Object
+                },
+            },
+        },
+        source_is_ethereal: source.collision.dynamic_collision.target
+            == EntityCollisionParticipation::Ethereal,
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

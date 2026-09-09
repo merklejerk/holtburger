@@ -951,6 +951,16 @@ export class DynamicEntitySystem<
 		this.#placements.updateRoot(nodeId, placement);
 	}
 
+	/** Apply a pose-stable membership refresh without replacing movement or animation. */
+	refreshPlacementMembership(
+		nodeId: SceneNodeId,
+		point: DynamicEntityAdvance["path"]["initial"],
+	): void {
+		if (!this.#entities.has(nodeId))
+			throw new Error(`Dynamic entity ${nodeId} does not exist.`);
+		this.#placements.refreshMembership(nodeId, point);
+	}
+
 	/** Apply one host-accepted transient path through the sole dynamic-root placement owner. */
 	updatePlacementPath(
 		nodeId: SceneNodeId,

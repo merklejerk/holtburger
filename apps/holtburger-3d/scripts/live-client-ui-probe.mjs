@@ -8,7 +8,7 @@ import { resolve } from "node:path";
 import { createCdpClient } from "./cdp-client.mjs";
 import { stringifyRedactedProbeReport } from "./live-client-probe-report.mjs";
 
-const PASSIVE_CAMERA_SETTLE_MS = 3_000;
+const PASSIVE_CAMERA_SETTLE_MS = 5_000;
 const PASSIVE_CAMERA_INPUT_COUNT = 40;
 const PASSIVE_CAMERA_INPUT_INTERVAL_MS = 25;
 const PRECISE_JUMP_SWEEP_INPUT_COUNT = 120;
@@ -42,7 +42,7 @@ const child = spawn(
 	process.platform === "win32" ? "npm.cmd" : "npm",
 	[
 		"run",
-		mode === "teleport" ? "dev:client" : "dev:client:release",
+		"dev:client",
 		"--",
 		"--vite-port",
 		"1432",
@@ -173,15 +173,7 @@ try {
 				"/tmp/holtburger-client-ts.cpuprofile";
 			await writeFile(cpuProfilePath, JSON.stringify(profile));
 		}
-		let screenshotPath = null;
-		if (process.env.HOLTBURGER_PROBE_SCREENSHOT !== undefined) {
-			screenshotPath = process.env.HOLTBURGER_PROBE_SCREENSHOT;
-			await client.send("Page.enable");
-			const screenshot = await client.send("Page.captureScreenshot", {
-				format: "png",
-			});
-			await writeFile(screenshotPath, screenshot.data, "base64");
-		}
+		const screenshotPath = await captureScreenshot(client);
 		if (instrumentationEnabled) {
 			await evaluate(
 				client,
@@ -232,6 +224,7 @@ try {
 		await delay(PASSIVE_CAMERA_SETTLE_MS);
 		const cameraEvidence = await capturePassiveCameraGesture(client);
 		const cameraSummary = summarizeCameraEvidence(cameraEvidence);
+		const screenshotPath = await captureScreenshot(client);
 		const captureComplete =
 			cameraSummary.inputEventCount === PASSIVE_CAMERA_INPUT_COUNT &&
 			cameraSummary.cameraEventCount > 0 &&
@@ -242,6 +235,7 @@ try {
 			commands: [],
 			teleports: [],
 			cameraEvidence: cameraSummary,
+			screenshotPath,
 			consoleMessages: [...consoleMessages.values()],
 			page: await pageState(client),
 			hostOutput: redact(output).slice(-30_000),
@@ -331,9 +325,33 @@ try {
 	});
 	process.exitCode = 1;
 } finally {
+	if (client !== undefined) {
+		try {
+			await evaluate(
+				client,
+				`async () => window.holtburgerHost.invoke("disconnect_client")`,
+			);
+			printReport({ cleanup: "disconnected" });
+		} catch (error) {
+			printReport({ cleanupError: safeError(error) });
+			process.exitCode = 1;
+		}
+	}
 	client?.close();
 	if (child.exitCode === null && child.signalCode === null)
 		child.kill("SIGTERM");
+}
+
+// Both camera and profiling probes can retain the rendered frame they measured.
+async function captureScreenshot(client_) {
+	const path = process.env.HOLTBURGER_PROBE_SCREENSHOT;
+	if (path === undefined) return null;
+	await client_.send("Page.enable");
+	const screenshot = await client_.send("Page.captureScreenshot", {
+		format: "png",
+	});
+	await writeFile(path, screenshot.data, "base64");
+	return path;
 }
 
 function requiredEnvironment(name) {
@@ -529,6 +547,7 @@ async function installEvidenceCollector(client_) {
 					clearance: tick.clearance ?? null,
 					initialLandblockId: tick.path.initial.position.landblockId,
 					finalLandblockId: pathEnd.landblockId,
+					position: pathEnd,
 				};
 				evidence.camera = summary;
 				const generation = evidence.cameraGenerations.find(
@@ -754,7 +773,8 @@ function summarizeCameraEvidence(evidence) {
 		inputEventCount: evidence.inputEvents.length,
 		cameraIntervalMs: distribution(cameraIntervals),
 		animationFrameIntervalMs: distribution(animationFrameIntervals),
-		inputToCameraMs: distribution(inputLatencies),
+		// This measures the next publication, not a causal acknowledgement of orbit input.
+		inputToNextCameraEventMs: distribution(inputLatencies),
 	};
 }
 

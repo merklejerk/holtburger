@@ -467,7 +467,7 @@ describe("possession", () => {
 			effectivePlanarSpeed: 7.68,
 			guid: 0xf0000001,
 			modifiers: [],
-			physicalStatus: "substep-budget-exceeded",
+			physicalStatus: "solved",
 			possessionGeneration: 9,
 			requestedRunRate: 10,
 			style: 0x8000003d,
@@ -476,7 +476,7 @@ describe("possession", () => {
 		const session = new ExplorerDynamicEntitySession(transport);
 
 		expect(await session.possessionMotionProbe()).toMatchObject({
-			physicalStatus: "substep-budget-exceeded",
+			physicalStatus: "solved",
 			requestedRunRate: 10,
 		});
 	});

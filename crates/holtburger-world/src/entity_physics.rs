@@ -99,6 +99,16 @@ pub struct EntityDynamicCollisionPolicy {
     pub path_clipped: bool,
 }
 
+impl EntityDynamicCollisionPolicy {
+    /// Whether this mover accepts physical response from the target's collision surface.
+    /// Target residency/demand is owned by scene preparation, independently of these semantics.
+    pub const fn accepts_response_from(self, target: Self) -> bool {
+        self.mover_accepts_response
+            && matches!(target.target, EntityCollisionParticipation::Solid)
+            && !target.missile
+    }
+}
+
 /// Complete state-derived response policy before authored coefficients and geometry are joined.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EntityPhysicsResponse {
@@ -208,6 +218,18 @@ impl EntityPhysicsRuntimeState {
         self.authoritative
     }
 
+    /// Latest server classification survives local impact retirement until a complete state update.
+    pub const fn is_authoritative_projectile(self) -> bool {
+        self.authoritative.dynamic_collision.missile
+    }
+
+    /// Publishes a local collision consequence without rewriting the last server state.
+    pub(crate) fn clear_after_collision(&mut self, cleared: PhysicsState) {
+        let mut semantic = self.effective.semantic;
+        semantic.remove(cleared);
+        self.effective = resolve_effective_entity_physics_state(semantic);
+    }
+
     /// Single collision and presentation state consumed by downstream systems.
     pub const fn effective(self) -> EffectiveEntityPhysicsState {
         self.effective
@@ -226,10 +248,12 @@ impl EntityPhysicsRuntimeState {
 
     /// Applies an unobstructed authored replacement for the `Ethereal` bit.
     pub fn apply_authored_ethereal(&mut self, ethereal: bool) {
-        let mut semantic = self.authoritative.semantic;
+        let mut semantic = self.effective.semantic;
         semantic.set(PhysicsState::ETHEREAL, ethereal);
         self.effective = resolve_effective_entity_physics_state(semantic);
-        self.authored_transition = if self.effective == self.authoritative {
+        self.authored_transition = if self.effective.semantic.contains(PhysicsState::ETHEREAL)
+            == self.authoritative.semantic.contains(PhysicsState::ETHEREAL)
+        {
             AuthoredEtherealTransition::Reconciled
         } else {
             AuthoredEtherealTransition::Predicted { ethereal }
@@ -238,7 +262,7 @@ impl EntityPhysicsRuntimeState {
 
     /// Keeps the entity ethereal until a later collision-free retry can make it solid.
     pub fn defer_authored_solidification(&mut self) {
-        let mut semantic = self.authoritative.semantic;
+        let mut semantic = self.effective.semantic;
         semantic.insert(PhysicsState::ETHEREAL);
         self.effective = resolve_effective_entity_physics_state(semantic);
         self.authored_transition = AuthoredEtherealTransition::PendingSolidification;
@@ -414,6 +438,33 @@ pub fn resolve_effective_entity_physics_state(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn impact_retirement_survives_authored_ethereal_changes_until_server_reconciliation() {
+        let flags = PhysicsState::MISSILE | PhysicsState::ALIGN_PATH | PhysicsState::PATH_CLIPPED;
+        let authoritative = resolve_effective_entity_physics_state(flags);
+        let mut state = EntityPhysicsRuntimeState::reconciled(authoritative);
+        state.clear_after_collision(flags);
+        assert_eq!(state.authoritative(), authoritative);
+        for ethereal in [true, false] {
+            state.apply_authored_ethereal(ethereal);
+            assert!(!state.effective().dynamic_collision.missile);
+            assert_eq!(
+                state.effective().semantic.contains(PhysicsState::ETHEREAL),
+                ethereal
+            );
+        }
+        assert_eq!(
+            state.authored_transition(),
+            AuthoredEtherealTransition::Reconciled
+        );
+        state.defer_authored_solidification();
+        assert!(!state.effective().dynamic_collision.missile);
+        assert!(state.has_pending_solidification());
+        state.reconcile(authoritative);
+        assert_eq!(state.effective(), authoritative);
+        assert!(!state.has_pending_solidification());
+    }
 
     #[test]
     fn authored_ethereal_prediction_is_separate_and_reconciled_by_server_state() {

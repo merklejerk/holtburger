@@ -1668,6 +1668,7 @@ dependencies = [
  "log",
  "rand 0.10.0",
  "serde",
+ "serde_json",
  "strum 0.28.0",
  "strum_macros 0.28.0",
  "tempfile",

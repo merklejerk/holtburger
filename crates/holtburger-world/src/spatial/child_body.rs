@@ -52,7 +52,8 @@ impl ChildSpatialBodyDefinition {
 pub struct ChildSpatialBodyWaypoint {
     /// Parent pose accepted at this boundary.
     pub parent_pose: WorldPosition,
-    /// Strictly increasing normalized completion fraction in `(0, 1]`.
+    /// Strictly increasing normalized completion fraction in `[0, 1]`.
+    /// A first waypoint at zero carries an instantaneous parent correction.
     pub end_fraction: f32,
 }
 
@@ -191,5 +192,34 @@ mod tests {
         assert_eq!(path.initial().center(), Vector3::new(191.0, 96.0, 5.5));
         assert_eq!(path.final_point().center(), Vector3::new(193.0, 96.0, 5.5));
         assert_eq!(child.committed_cell(), None);
+    }
+    #[test]
+    fn child_preserves_parent_correction_before_timed_travel() {
+        let initial = pose(0xda55_0020, Vector3::new(96.0, 96.0, 4.0));
+        let definition = ChildSpatialBodyDefinition::new(Vector3::new(0.0, 0.0, 1.5), 0.3).unwrap();
+        let mut child = ChildSpatialBody::new(definition, initial);
+        let path = child
+            .reconcile_parent_path(
+                &CollisionScene::new(),
+                initial,
+                &[
+                    ChildSpatialBodyWaypoint {
+                        parent_pose: pose(0xda55_0020, Vector3::new(96.5, 96.0, 4.0)),
+                        end_fraction: 0.0,
+                    },
+                    ChildSpatialBodyWaypoint {
+                        parent_pose: pose(0xda55_0020, Vector3::new(96.5, 97.0, 4.0)),
+                        end_fraction: 1.0,
+                    },
+                ],
+            )
+            .unwrap();
+        assert_eq!(path.initial().center(), Vector3::new(96.0, 96.0, 5.5));
+        assert_eq!(path.legs()[0].end_fraction(), 0.0);
+        assert_eq!(path.legs()[0].end().center(), Vector3::new(96.5, 96.0, 5.5));
+        assert_eq!(
+            path.center_at_fraction(0.5),
+            Some(Vector3::new(96.5, 96.5, 5.5))
+        );
     }
 }

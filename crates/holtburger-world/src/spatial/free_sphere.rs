@@ -129,78 +129,139 @@ pub fn solve_free_sphere(
     config: FreeSphereConfig,
     request: FreeSphereRequest,
 ) -> Result<FreeSphereOutcome> {
-    validate(config, request.body.radius, request.displacement)?;
-    let anchor = landblock_key(request.body.pose.landblock_id);
-    let start = request.body.pose.coords;
-    let distance = request.displacement.length();
-    let required_substeps = if distance <= f32::EPSILON {
-        1
-    } else {
-        (distance / config.maximum_substep_distance).ceil() as usize
-    };
-    let substep = request.displacement / required_substeps as f32;
-    let evaluated_substeps = required_substeps.min(config.maximum_substeps);
-    let mut body = request.body;
-    let mut current = start;
-    let mut motion = Vec::with_capacity(evaluated_substeps + 1);
-    let mut contact_passes = 0usize;
-    let mut collision_normal = None;
-    let mut unavailable_owner = None;
-    for completed_substeps in 0..evaluated_substeps {
-        let mut candidate = current + substep;
-        let mut candidate_placement = transit(
+    FreeSphereMotion::prepare(scene, config, request)?.solve()
+}
+
+/// Accepted geometric progress within one already-integrated displacement request.
+/// Force integration and physical response remain outside this cursor.
+#[derive(Clone)]
+pub(super) struct FreeSphereMotion<'a> {
+    /// Immutable environment used for every interval.
+    scene: &'a CollisionScene,
+    /// Contact and geometric work limits for this solve.
+    config: FreeSphereConfig,
+    /// Original pose, collision policy, and direction used to choose the response normal.
+    request: FreeSphereRequest,
+    /// Fixed coordinate anchor, retained across normalized cell/landblock commits.
+    anchor: Guid,
+    /// Latest accepted body placement.
+    body: FreeSphereState,
+    /// Latest accepted center in the original anchor's coordinates.
+    current: Vector3,
+    /// Accepted endpoints; a stationary remainder is appended only when finishing.
+    motion: Vec<MotionWaypoint>,
+    /// Contact passes spent, including an unsuccessful interval.
+    contact_passes: usize,
+    /// Strongest contact opposing the original requested displacement.
+    collision_normal: Option<Vector3>,
+    /// First unavailable owner observed under the explicitly uncovered policy.
+    unavailable_owner: Option<Guid>,
+}
+
+impl<'a> FreeSphereMotion<'a> {
+    pub(super) fn prepare(
+        scene: &'a CollisionScene,
+        config: FreeSphereConfig,
+        request: FreeSphereRequest,
+    ) -> Result<Self> {
+        validate(config, request.body.radius, request.displacement)?;
+        Ok(Self {
             scene,
-            anchor,
-            body,
+            config,
+            request,
+            anchor: landblock_key(request.body.pose.landblock_id),
+            body: request.body,
+            current: request.body.pose.coords,
+            motion: Vec::new(),
+            contact_passes: 0,
+            collision_normal: None,
+            unavailable_owner: None,
+        })
+    }
+
+    pub(super) fn solve(mut self) -> Result<FreeSphereOutcome> {
+        let distance = self.request.displacement.length();
+        let required_substeps = if distance <= f32::EPSILON {
+            1
+        } else {
+            (distance / self.config.maximum_substep_distance).ceil() as usize
+        };
+        let substep = self.request.displacement / required_substeps as f32;
+        let evaluated_substeps = required_substeps.min(self.config.maximum_substeps);
+        self.motion.reserve(evaluated_substeps + 1);
+        for completed_substeps in 0..evaluated_substeps {
+            let end_fraction = (completed_substeps + 1) as f32 / required_substeps as f32;
+            if !self.advance(substep, end_fraction)? {
+                return Ok(self.finish(Some(FreeSphereBudget::Contacts)));
+            }
+        }
+        Ok(self
+            .finish((evaluated_substeps < required_substeps).then_some(FreeSphereBudget::Substeps)))
+    }
+
+    /// Evaluates one geometric interval and commits it only after contact separation converges.
+    /// False leaves the preceding accepted placement/path intact; spent work is still recorded.
+    pub(super) fn advance(&mut self, displacement: Vector3, end_fraction: f32) -> Result<bool> {
+        super::physics_work::record_environment_step();
+        let mut candidate = self.current + displacement;
+        let mut candidate_placement = transit(
+            self.scene,
+            self.anchor,
+            self.body,
             candidate,
-            request.query_policy,
-            &mut unavailable_owner,
+            self.request.query_policy,
+            &mut self.unavailable_owner,
         )?;
         let mut converged = false;
         let sweep = SphereSweep {
-            anchor,
-            start: current,
+            anchor: self.anchor,
+            start: self.current,
             end: candidate,
-            radius: body.radius,
+            radius: self.body.radius,
         };
         let mut contacts = movement_contacts(
-            scene,
+            self.scene,
             sweep,
             &candidate_placement,
-            request.filter,
-            request.query_policy,
-            &mut unavailable_owner,
+            self.request.filter,
+            self.request.query_policy,
+            &mut self.unavailable_owner,
         )?;
 
-        for _ in 0..config.maximum_contact_passes {
-            contact_passes += 1;
+        for _ in 0..self.config.maximum_contact_passes {
+            self.contact_passes += 1;
             if contacts.is_empty() {
                 converged = true;
                 break;
             }
 
-            remember_collision_normal(&mut collision_normal, &contacts, request.displacement);
+            remember_collision_normal(
+                &mut self.collision_normal,
+                &contacts,
+                self.request.displacement,
+            );
 
-            candidate = candidate + separating_displacement(&contacts, config.separation_epsilon);
+            candidate =
+                candidate + separating_displacement(&contacts, self.config.separation_epsilon);
             candidate_placement = transit(
-                scene,
-                anchor,
-                body,
+                self.scene,
+                self.anchor,
+                self.body,
                 candidate,
-                request.query_policy,
-                &mut unavailable_owner,
+                self.request.query_policy,
+                &mut self.unavailable_owner,
             )?;
             contacts = placement_contacts(
-                scene,
+                self.scene,
                 PlacementRequest {
-                    anchor,
+                    anchor: self.anchor,
                     center: candidate,
-                    radius: body.radius,
+                    radius: self.body.radius,
                     placement: &candidate_placement,
                 },
-                request.filter,
-                request.query_policy,
-                &mut unavailable_owner,
+                self.request.filter,
+                self.request.query_policy,
+                &mut self.unavailable_owner,
             )?;
             if contacts.is_empty() {
                 converged = true;
@@ -209,57 +270,51 @@ pub fn solve_free_sphere(
         }
 
         if !converged {
-            close_partial_motion(&mut motion, current, body.cell);
-            return Ok(FreeSphereOutcome::BudgetExceeded {
-                body,
-                achieved_displacement: current - start,
-                collision_normal,
-                motion,
-                budget: FreeSphereBudget::Contacts,
-                substeps: completed_substeps,
-                contact_passes,
-                unavailable_owner,
-            });
+            return Ok(false);
         }
 
-        current = candidate;
-        body.cell = candidate_placement.committed_cell();
-        body.pose = pose_for_commit(
-            anchor,
-            current,
-            request.body.pose,
-            candidate_placement.committed_cell(),
+        self.current = candidate;
+        self.body.cell = candidate_placement.committed_cell();
+        self.body.pose = pose_for_commit(
+            self.anchor,
+            self.current,
+            self.request.body.pose,
+            self.body.cell,
         );
-        motion.push(MotionWaypoint {
-            center: current,
-            end_fraction: (completed_substeps + 1) as f32 / required_substeps as f32,
-            placement: super::collision::MotionWaypointPlacement::Committed(body.cell),
+        self.motion.push(MotionWaypoint {
+            center: self.current,
+            end_fraction,
+            placement: super::collision::MotionWaypointPlacement::Committed(self.body.cell),
         });
+        Ok(true)
     }
 
-    if evaluated_substeps < required_substeps {
-        close_partial_motion(&mut motion, current, body.cell);
-        return Ok(FreeSphereOutcome::BudgetExceeded {
-            body,
-            achieved_displacement: current - start,
-            collision_normal,
-            motion,
-            budget: FreeSphereBudget::Substeps,
-            substeps: evaluated_substeps,
-            contact_passes,
-            unavailable_owner,
-        });
+    pub(super) fn finish(mut self, budget: Option<FreeSphereBudget>) -> FreeSphereOutcome {
+        let substeps = self.motion.len();
+        let achieved_displacement = self.current - self.request.body.pose.coords;
+        close_partial_motion(&mut self.motion, self.current, self.body.cell);
+        match budget {
+            Some(budget) => FreeSphereOutcome::BudgetExceeded {
+                body: self.body,
+                achieved_displacement,
+                collision_normal: self.collision_normal,
+                motion: self.motion,
+                budget,
+                substeps,
+                contact_passes: self.contact_passes,
+                unavailable_owner: self.unavailable_owner,
+            },
+            None => FreeSphereOutcome::Solved {
+                body: self.body,
+                achieved_displacement,
+                collision_normal: self.collision_normal,
+                motion: self.motion,
+                substeps,
+                contact_passes: self.contact_passes,
+                unavailable_owner: self.unavailable_owner,
+            },
+        }
     }
-
-    Ok(FreeSphereOutcome::Solved {
-        body,
-        achieved_displacement: current - start,
-        collision_normal,
-        motion,
-        substeps: required_substeps,
-        contact_passes,
-        unavailable_owner,
-    })
 }
 
 /// Separates a stationary sphere using undirected placement contacts and a finite pass budget.
@@ -351,7 +406,11 @@ pub fn settle_free_sphere_with_policy(
 }
 
 /// Closes a partial solve's normalized tick without inventing unevaluated geometry.
-fn close_partial_motion(motion: &mut Vec<MotionWaypoint>, center: Vector3, cell: Option<Guid>) {
+pub(super) fn close_partial_motion(
+    motion: &mut Vec<MotionWaypoint>,
+    center: Vector3,
+    cell: Option<Guid>,
+) {
     if motion
         .last()
         .is_some_and(|waypoint| waypoint.end_fraction == 1.0)

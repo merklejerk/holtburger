@@ -1,5 +1,4 @@
-use crate::entity::EntityMotionDirective;
-use crate::motion::{MotionRuntimeRegistry, ServerDirectedMotionState};
+use crate::motion::MotionRuntimeRegistry;
 use holtburger_common::properties::{
     EnchantmentTypeFlags, EquipMask, PropertyFloat, PropertyInt, PropertyInt64, PropertyString,
     WorldObjectExt as _, WorldObjectPropertyAccessors, WorldObjectPropertyAccessorsMut,
@@ -38,15 +37,6 @@ pub(crate) struct PendingChildLink {
     pub(crate) location: ParentLocation,
 }
 
-/// Directive identity paired with its active or terminal pure-reducer state.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct RetainedServerDirectedMotion {
-    /// Network directive whose identity controls reducer lifetime.
-    pub directive: EntityMotionDirective,
-    /// Successor state, or `None` after the retained directive completed or failed.
-    pub state: Option<ServerDirectedMotionState>,
-}
-
 /// The authoritative state of the game world.
 ///
 /// `WorldState` owns entity/spatial/trade/vendor state plus the invariants that tie those systems
@@ -78,9 +68,6 @@ pub struct WorldState {
     /// Advanced once per tick by `advance_authored_motion`; the solver basis reads the result
     /// rather than producing it.
     pub motion_runtimes: MotionRuntimeRegistry,
-    /// Active or terminal reducer state for each retained remote server directive.
-    pub(crate) server_directed_motion:
-        std::collections::HashMap<Guid, RetainedServerDirectedMotion>,
     pub scene: SpatialScene,
     pub vendor: Option<VendorState>,
     pub fellowship: Option<FellowshipState>,
@@ -416,7 +403,6 @@ impl WorldState {
             soul_emote_catalog: Arc::clone(&bootstrap.soul_emote_catalog),
             motion_sequences: Arc::clone(&bootstrap.motion_sequences),
             motion_runtimes: MotionRuntimeRegistry::new(),
-            server_directed_motion: std::collections::HashMap::new(),
             scene: SpatialScene::new(),
             vendor: None,
             fellowship: None,
@@ -468,7 +454,6 @@ impl WorldState {
         let guid = guid.into();
         if let Some(entity) = self.entities.remove(guid) {
             self.motion_runtimes.forget(guid);
-            self.server_directed_motion.remove(&guid);
             self.retire_authoritative_body_for_guid(guid);
             self.entity_lifecycle.clear(guid);
             // Pending links live only as long as the entities at either end of them.

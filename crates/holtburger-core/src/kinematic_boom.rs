@@ -1,5 +1,6 @@
 //! Stateful host-side third-person boom behavior over world-owned static collision.
 
+use crate::placed_motion::present_placed_motion_pose;
 use anyhow::{Result, ensure};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion, Vector3};
@@ -158,7 +159,12 @@ pub fn serialize_kinematic_boom_path(
 ) -> Result<KinematicBoomPlacedPath> {
     Ok(KinematicBoomPlacedPath {
         initial: KinematicBoomPathPoint {
-            position: present_placed_motion_pose(path, path.initial())?.into(),
+            position: present_placed_motion_pose(
+                path,
+                path.initial(),
+                holtburger_common::Quaternion::identity(),
+            )?
+            .into(),
             visual_pivot: initial_visual_pivot.into(),
         },
         legs: path
@@ -168,7 +174,12 @@ pub fn serialize_kinematic_boom_path(
                 Ok(KinematicBoomPathLeg {
                     end_fraction: leg.end_fraction(),
                     end: KinematicBoomPathPoint {
-                        position: present_placed_motion_pose(path, leg.end())?.into(),
+                        position: present_placed_motion_pose(
+                            path,
+                            leg.end(),
+                            holtburger_common::Quaternion::identity(),
+                        )?
+                        .into(),
                         visual_pivot: interpolate_visual_pivot(
                             initial_visual_pivot,
                             final_visual_pivot,
@@ -197,32 +208,6 @@ pub fn stationary_kinematic_boom_path(
             end: point,
         }],
     }
-}
-
-pub(crate) fn present_placed_motion_pose(
-    path: &PlacedMotionPath,
-    point: &holtburger_world::PlacedMotionPoint,
-) -> Result<WorldPosition> {
-    let cell = point.placement().committed_cell();
-    let owner = cell
-        .map(landblock_key)
-        .or_else(|| {
-            holtburger_common::position::outdoor_landblock_owner_at(
-                landblock_key(path.anchor()),
-                point.center(),
-            )
-        })
-        .unwrap_or_else(|| landblock_key(path.anchor()));
-    let mut pose = WorldPosition {
-        landblock_id: Guid(owner.0 & 0xffff_0000),
-        coords: reanchor_point(point.center(), landblock_key(path.anchor()), owner),
-        rotation: holtburger_common::Quaternion::identity(),
-    }
-    .normalize_outdoor_cell();
-    if let Some(cell) = cell {
-        pose.landblock_id = cell;
-    }
-    Ok(pose)
 }
 
 fn interpolate_visual_pivot(

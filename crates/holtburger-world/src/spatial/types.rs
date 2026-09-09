@@ -1,7 +1,8 @@
 use super::PhysicalBodyState;
 use crate::entity::EntityMotionSnapshot;
+use anyhow::Context;
 use holtburger_common::position::WorldPosition;
-use holtburger_common::{Guid, RigidTransform, Vector3};
+use holtburger_common::{Guid, Quaternion, RigidTransform, Vector3};
 use std::cmp::Ordering;
 use std::time::{Duration, Instant};
 
@@ -102,7 +103,7 @@ pub enum SelfPlayerDriveProjectionState {
 }
 
 /// One complete producer-authoritative vector replacement.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct AuthoritativeBodyVectors {
     /// Producer-authoritative world-space linear velocity.
     pub velocity: Vector3,
@@ -110,6 +111,172 @@ pub struct AuthoritativeBodyVectors {
     pub acceleration: Vector3,
     /// Producer-authoritative world-space angular velocity.
     pub omega: Vector3,
+}
+
+/// One producer sample shared by physical actuation and independent reference prediction.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PhysicalBodyInput {
+    /// Whether a remote body may capture a return target from contact alone. Server-classified
+    /// projectiles stay excluded after local impact clears their current collision flags.
+    capture_contact_return: bool,
+    /// Source-owned suspension survives unavailable target geometry; consumed by recovery admission.
+    pub(super) recovery_suspended: bool,
+    /// Controller/response command for the actual body, sampled once per admitted collection.
+    pub actuation: super::PhysicalBodyActuation,
+    /// Independent authority/authored travel; absent when an autonomous input supplies neither.
+    pub(super) reference: Option<PhysicalReferenceInput>,
+}
+
+/// One resolved ordinary/reconciled movement request and its independent nominal continuation.
+pub struct PreparedBodyMovement {
+    /// Actual forces, motor target or kinematic flight travel, launch, and heading for the step.
+    pub actuation: super::ContactStepActuation,
+    /// Nominal continuation rate: character drive includes authored travel; free flight excludes
+    /// its non-retained kinematic travel. Compare this with actual retained velocity at completion.
+    pub nominal_velocity: Vector3,
+}
+
+impl PhysicalBodyInput {
+    /// Autonomous input has no server reference to restore after contact.
+    pub fn autonomous(actuation: super::PhysicalBodyActuation) -> Self {
+        Self {
+            capture_contact_return: false,
+            recovery_suspended: true,
+            actuation,
+            reference: None,
+        }
+    }
+
+    /// Supplies independent reference motion, with an explicit policy for contact-only capture.
+    /// Requiring the reference here prevents a capture request without its prediction input.
+    pub fn referenced(
+        actuation: super::PhysicalBodyActuation,
+        reference: PhysicalReferenceInput,
+        capture_contact_return: bool,
+    ) -> Self {
+        Self {
+            actuation,
+            reference: Some(reference),
+            recovery_suspended: matches!(reference, PhysicalReferenceInput::Sticky(_)),
+            capture_contact_return,
+        }
+    }
+
+    /// Suppresses placement recovery while a source command owns pursuit, including intervals
+    /// where unavailable target geometry makes its physical input fall back to ordinary motion.
+    pub fn suspend_recovery(mut self) -> Self {
+        self.recovery_suspended = true;
+        self
+    }
+
+    /// Composes fixed-body authored root motion once at the body boundary.
+    /// Other response modes consume this same sample through their admitted tick.
+    pub(crate) fn placement_actuation(&self, body: &SpatialBody) -> super::PhysicalBodyActuation {
+        let mut actuation = self.actuation.clone();
+        if let super::PhysicalBodyActuation::FixedPosition {
+            translation,
+            rotation,
+        } = &mut actuation
+            && let Some(offset) = self
+                .reference
+                .and_then(PhysicalReferenceInput::authored_offset)
+        {
+            *translation = *translation + body.pose.rotation.rotate_vector(offset.translation);
+            *rotation = rotation.multiply(&offset.rotation);
+        }
+        actuation
+    }
+
+    /// The complete ordinary input owns wake/settle eligibility, including authored travel.
+    /// An authored sample retains its playback-driven activity even when its current offset is
+    /// stationary; callers must not reconstruct a redundant driven target to keep it awake.
+    pub(crate) fn permits_dynamic_settling(&self) -> bool {
+        self.actuation.permits_dynamic_settling()
+            && self
+                .reference
+                .is_none_or(PhysicalReferenceInput::permits_settling)
+    }
+
+    /// Captures an eligible contact-return reference and seeds explicit free-flight continuation.
+    /// This mutates only the scene's private working copy, never authority or the canonical body.
+    pub(crate) fn prepare(
+        &self,
+        body: &mut SpatialBody,
+        reconciliation: &mut Option<super::PoseReconciliationState>,
+    ) -> anyhow::Result<()> {
+        let wake = !self.permits_dynamic_settling() || body.has_pose_reconciliation_work();
+        let physical = body
+            .physical
+            .as_mut()
+            .context("physical input requires body physics")?;
+        let definition = physical.definition;
+        // Direct ephemeral queries legitimately have no dynamic lifecycle. Collection bodies do;
+        // fresh input wakes them before the kernel chooses which bodies receive ordinary forces.
+        if wake && let Some(dynamic) = physical.dynamic.as_mut() {
+            dynamic.wake();
+        }
+        if matches!(body.id, SpatialBodyId::Entity(_))
+            && self.capture_contact_return
+            && !matches!(
+                definition,
+                super::PhysicalBodyDefinition::FixedPosition { .. }
+            )
+        {
+            reconciliation
+                .get_or_insert_with(super::PoseReconciliationState::default)
+                .begin_contact_return(body.pose)?;
+        }
+        if let super::PhysicalBodyActuation::FreeFlight {
+            retained_velocity, ..
+        } = self.actuation
+        {
+            body.retained.velocity = retained_velocity;
+        }
+        Ok(())
+    }
+}
+
+/// Independent ordinary movement source; sticky targeting replaces authored physical travel.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PhysicalReferenceInput {
+    /// Ordinary playback with an explicit local or remote frame.
+    Authored {
+        /// Scaled/gated ordinary offset, never observed locomotion.
+        offset: Option<RigidTransform>,
+        /// Remote command orientation; local input uses the actual body frame.
+        rotation: Option<Quaternion>,
+    },
+    /// Prepared target command in physical world units, never scaled again as an animation offset.
+    Sticky(super::StickyBodyTarget),
+}
+
+impl PhysicalReferenceInput {
+    /// Ordinary input whose controller uses the actual body's frame.
+    pub fn body(offset: Option<RigidTransform>) -> Self {
+        Self::Authored {
+            offset,
+            rotation: None,
+        }
+    }
+
+    /// Interpreted remote input after scaling/gating the source offset.
+    pub fn remote(offset: Option<RigidTransform>, rotation: Quaternion) -> Self {
+        Self::Authored {
+            offset,
+            rotation: Some(rotation),
+        }
+    }
+
+    pub(crate) fn authored_offset(self) -> Option<RigidTransform> {
+        match self {
+            Self::Authored { offset, .. } => offset,
+            Self::Sticky(_) => None,
+        }
+    }
+
+    fn permits_settling(self) -> bool {
+        matches!(self, Self::Authored { offset: None, .. })
+    }
 }
 
 /// Physical vectors retained across ticks and integrated independently from authored motion.
@@ -284,6 +451,10 @@ pub struct SpatialBody {
     pub id: SpatialBodyId,
     pub authoritative_pose: Option<WorldPosition>,
     pub pose: WorldPosition,
+    /// Collision-free continuation seeded by fresh authority, never by accepted body motion.
+    /// Survives correction completion and physical-definition changes; pose-only bodies retain
+    /// it for later physical admission without integrating a second projection timeline.
+    pub(crate) nominal: AuthoritativeBodyVectors,
     /// Physical vectors retained for future integration and collision response.
     pub retained: RetainedBodyKinematics,
     /// Observed derivative of the latest accepted path; never a future integration basis.
@@ -303,6 +474,7 @@ impl SpatialBody {
             id,
             authoritative_pose: Some(pose),
             pose,
+            nominal: AuthoritativeBodyVectors::default(),
             retained: RetainedBodyKinematics::default(),
             accepted_motion: AcceptedBodyMotion::default(),
             motion_state: None,
@@ -318,6 +490,7 @@ impl SpatialBody {
             id,
             authoritative_pose: None,
             pose,
+            nominal: AuthoritativeBodyVectors::default(),
             retained: RetainedBodyKinematics::default(),
             accepted_motion: AcceptedBodyMotion::default(),
             motion_state: None,
@@ -325,6 +498,35 @@ impl SpatialBody {
             sampling: SpatialSamplingState::authoritative(now),
             reconciliation: None,
             physical: None,
+        }
+    }
+
+    /// Source frame policy follows the prepared physical role, not animation availability.
+    pub(crate) fn remote_frame_policy(&self) -> crate::motion::RemoteFramePolicy {
+        if self.physical.as_ref().is_some_and(|physical| {
+            physical.has_direct_character_drive()
+                && matches!(
+                    physical.definition,
+                    super::PhysicalBodyDefinition::Grounded { .. }
+                )
+        }) {
+            crate::motion::RemoteFramePolicy::Command
+        } else {
+            crate::motion::RemoteFramePolicy::Body
+        }
+    }
+
+    /// Initial source pose for remote playback. Only a newly installed source uses this heading;
+    /// its retained command frame subsequently follows ordinary source motion and fresh events.
+    pub(crate) fn authored_source_pose(&self) -> WorldPosition {
+        let rotation = self
+            .reconciliation
+            .as_deref()
+            .and_then(super::PoseReconciliationState::pending_correction_heading)
+            .unwrap_or(self.pose.rotation);
+        WorldPosition {
+            rotation,
+            ..self.pose
         }
     }
 

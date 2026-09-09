@@ -37,15 +37,28 @@ function path(
 		status: "solved",
 		sceneResidency: { state: "resident" },
 		groundState: "airborne",
-		constraintCount: 0,
-		substeps: 1,
-		contactPasses: 1,
 		solveDurationMs: 0.1,
 		...overrides,
 	};
 }
 
 describe("evaluateHostPhysicalFlyPath", () => {
+	it("applies an initial correction before interpolating timed movement", () => {
+		const base = path();
+		const corrected = path({
+			legs: [
+				{ endFraction: 0, end: { ...base.initial, origin: [11, 20, 30] } },
+				{ endFraction: 1, end: { ...base.initial, origin: [11, 22, 30] } },
+			],
+		});
+		const initial = evaluateHostPhysicalFlyPath(base, 0).position;
+		const atStart = evaluateHostPhysicalFlyPath(corrected, 0).position;
+		const halfway = evaluateHostPhysicalFlyPath(corrected, 50).position;
+		expect(atStart.x).toBe(initial.x + 1);
+		expect(halfway.x).toBe(atStart.x);
+		expect(halfway.z).toBe(atStart.z - 1);
+	});
+
 	it("interpolates da55 landblock-local AC motion in canonical scene space", () => {
 		const placement = evaluateHostPhysicalFlyPath(
 			path({

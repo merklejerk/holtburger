@@ -16,6 +16,7 @@ const CAN_WALK: u32 = 0x0000_0001;
 const CAN_RUN: u32 = 0x0000_0002;
 const CAN_CHARGE: u32 = 0x0000_0010;
 const USE_FINAL_HEADING: u32 = 0x0000_0040;
+const STICKY: u32 = 0x0000_0080;
 const MOVE_AWAY: u32 = 0x0000_0100;
 const MOVE_TOWARDS: u32 = 0x0000_0200;
 const STOP_COMPLETELY: u32 = 0x0001_0000;
@@ -193,7 +194,10 @@ pub enum ServerDirectedMotionResolution {
     /// The directive remains active for another tick.
     Active(ServerDirectedMotionStep),
     /// All translation and final-heading nodes completed.
-    Complete,
+    Complete {
+        /// Successful object movement can hand off to sticky targeting exactly once.
+        sticky_target: Option<Guid>,
+    },
     /// The directive failed for one explicit retail-owned reason.
     Failed(ServerDirectedMotionFailure),
 }
@@ -290,6 +294,16 @@ pub fn resolve_server_directed_motion(
     }
 }
 
+/// Retail MoveTo completion transfers Sticky object targets after all movement nodes finish
+/// (acclient.c:331674-331688; ACE MoveToManager.BeginNextNode). Position fallback has no object.
+fn complete_move(state: MoveToState) -> ServerDirectedMotionResolution {
+    let sticky_target = match state.target {
+        MoveToTarget::Object { guid, .. } if state.params.flags & STICKY != 0 => Some(guid),
+        _ => None,
+    };
+    ServerDirectedMotionResolution::Complete { sticky_target }
+}
+
 fn resolve_move_to(
     mut state: MoveToState,
     steady_order: MotionOrder,
@@ -377,7 +391,7 @@ fn resolve_move_to(
             }
             MoveToPhase::FinalTurn { progress } => {
                 if state.params.flags & USE_FINAL_HEADING == 0 {
-                    return ServerDirectedMotionResolution::Complete;
+                    return complete_move(state);
                 }
                 let desired_heading = final_move_heading(
                     state.params,
@@ -392,7 +406,7 @@ fn resolve_move_to(
                     false,
                     progress,
                 ) else {
-                    return ServerDirectedMotionResolution::Complete;
+                    return complete_move(state);
                 };
                 state.phase = MoveToPhase::FinalTurn {
                     progress: Some(progress),
@@ -439,7 +453,9 @@ fn resolve_turn_to(
         false,
         state.progress,
     ) else {
-        return ServerDirectedMotionResolution::Complete;
+        return ServerDirectedMotionResolution::Complete {
+            sticky_target: None,
+        };
     };
     state.progress = Some(progress);
     let base = if state.stop_completely {
@@ -752,6 +768,79 @@ mod tests {
     }
 
     #[test]
+    fn completed_object_move_hands_off_sticky_only_for_a_resolved_object() {
+        let current = position(0.0, 0.0, 0.0);
+        let target = ServerDirectedTarget::new(position(0.0, 1.0, 0.0), 0.0).unwrap();
+        let guid = Guid(2);
+        for resolved in [false, true] {
+            for sticky in [false, true] {
+                let directive = EntityMotionDirective::MoveToObject {
+                    admission: admission(),
+                    target: guid,
+                    fallback_target: target_position(0.0, 1.0),
+                    params: move_params(CAN_WALK | MOVE_TOWARDS | if sticky { STICKY } else { 0 }),
+                    run_rate: scalar(1.0),
+                };
+                let target = resolved.then_some(target);
+                let state = begin_server_directed_motion(directive, current, target);
+                assert_eq!(
+                    resolve_server_directed_motion(
+                        state,
+                        steady(),
+                        current,
+                        ContactState::Grounded,
+                        target
+                    ),
+                    ServerDirectedMotionResolution::Complete {
+                        sticky_target: (resolved && sticky).then_some(guid)
+                    }
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn sticky_handoff_waits_for_final_heading() {
+        let current = position(0.0, 0.0, 0.0);
+        let target = ServerDirectedTarget::new(position(0.0, 1.0, 0.0), 0.0).unwrap();
+        let guid = Guid(2);
+        let directive = EntityMotionDirective::MoveToObject {
+            admission: admission(),
+            target: guid,
+            fallback_target: target_position(0.0, 1.0),
+            params: move_params(CAN_WALK | MOVE_TOWARDS | STICKY | USE_FINAL_HEADING),
+            run_rate: scalar(1.0),
+        };
+        let state = begin_server_directed_motion(directive, current, Some(target));
+        let ServerDirectedMotionResolution::Active(turn) = resolve_server_directed_motion(
+            state,
+            steady(),
+            current,
+            ContactState::Grounded,
+            Some(target),
+        ) else {
+            panic!("arrival must finish the requested turn before sticky handoff");
+        };
+        assert!(turn.order.turn.is_some());
+        assert_eq!(
+            resolve_server_directed_motion(
+                turn.state,
+                steady(),
+                position(
+                    0.0,
+                    0.0,
+                    current.heading_to(&target.pose).to_degrees() + 90.0
+                ),
+                ContactState::Grounded,
+                Some(target)
+            ),
+            ServerDirectedMotionResolution::Complete {
+                sticky_target: Some(guid)
+            }
+        );
+    }
+
+    #[test]
     fn move_to_turns_first_then_selects_retail_walk_run_threshold() {
         let directive = EntityMotionDirective::MoveToPosition {
             admission: admission(),
@@ -827,7 +916,9 @@ mod tests {
         );
         assert_eq!(
             resolve_server_directed_motion(state, steady(), current, ContactState::Grounded, None,),
-            ServerDirectedMotionResolution::Complete
+            ServerDirectedMotionResolution::Complete {
+                sticky_target: None
+            }
         );
     }
 
@@ -873,7 +964,9 @@ mod tests {
                 ContactState::Grounded,
                 None,
             ),
-            ServerDirectedMotionResolution::Complete
+            ServerDirectedMotionResolution::Complete {
+                sticky_target: None
+            }
         );
     }
 
@@ -1040,7 +1133,9 @@ mod tests {
                 ContactState::Grounded,
                 None,
             ),
-            ServerDirectedMotionResolution::Complete,
+            ServerDirectedMotionResolution::Complete {
+                sticky_target: None
+            },
         );
     }
 
@@ -1085,7 +1180,9 @@ mod tests {
                 ContactState::Grounded,
                 None,
             ),
-            ServerDirectedMotionResolution::Complete,
+            ServerDirectedMotionResolution::Complete {
+                sticky_target: None
+            },
         );
     }
 }

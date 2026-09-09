@@ -3,6 +3,7 @@
 use holtburger_common::Vector3;
 use holtburger_world::PhysicalBodyDefinition;
 use holtburger_world::state::SelfJumpCapabilities;
+use std::time::Duration;
 use thiserror::Error;
 
 use super::character_jump::{CharacterJumpReadiness, character_jump_vertical_velocity};
@@ -93,11 +94,6 @@ impl PreciseJumpCapabilityEnvelope {
     pub const fn landing_tolerance(self) -> PreciseJumpLandingTolerance {
         self.landing_tolerance
     }
-
-    fn contains_planar_velocity(self, planar_velocity: Vector3) -> bool {
-        Vector3::new(planar_velocity.x, planar_velocity.y, 0.0).length()
-            <= self.maximum_planar_speed + ENVELOPE_TOLERANCE
-    }
 }
 
 /// One analytically valid arc in deterministic adaptive-search order.
@@ -160,12 +156,16 @@ pub enum PreciseJumpCandidateRejection {
     InvalidCapabilities,
     #[error("precise-jump heading must be finite")]
     InvalidHeading,
+    #[error("precise-jump integration step must be positive and fit one physical tick")]
+    InvalidIntegrationStep,
     #[error("the target lies outside the character's jump envelope")]
     TargetOutsideEnvelope,
 }
 
 /// Generates a minimum-first, fixed-budget dyadic arc search for collision-backed prediction.
+/// `integration_step` must match the validating body's admitted semi-implicit tick interval.
 pub fn generate_precise_jump_candidates(
+    integration_step: Duration,
     capabilities: &SelfJumpCapabilities,
     definition: PhysicalBodyDefinition,
     heading: f32,
@@ -173,6 +173,11 @@ pub fn generate_precise_jump_candidates(
     displacement: PreciseJumpWorldDisplacement,
     budget: PreciseJumpCandidateBudget,
 ) -> Result<PreciseJumpCandidateSet, PreciseJumpCandidateRejection> {
+    if integration_step.is_zero()
+        || integration_step.as_secs_f32() > holtburger_world::MOBILE_CONTACT_TICK_SECONDS
+    {
+        return Err(PreciseJumpCandidateRejection::InvalidIntegrationStep);
+    }
     require_supported(readiness)?;
     if capabilities.is_overburdened() {
         return Err(PreciseJumpCandidateRejection::Overburdened);
@@ -192,6 +197,9 @@ pub fn generate_precise_jump_candidates(
     if !gravity.is_finite() || gravity <= 0.0 {
         return Err(PreciseJumpCandidateRejection::InvalidCapabilities);
     }
+    // Semi-implicit gravity samples z(n*h) = (v_z - g*h/2)*t - g*t²/2.
+    // Invert that curve without changing the capability-resolved launch velocity.
+    let gravity_bias = 0.5 * gravity * integration_step.as_secs_f32();
     let envelope = capability_envelope(kinematics, spheres.support.radius);
     let world_displacement = displacement.get();
     let minimum_planar_time = minimum_planar_time(world_displacement, envelope);
@@ -200,24 +208,34 @@ pub fn generate_precise_jump_candidates(
         gravity,
         world_displacement.z,
         minimum_planar_time,
+        gravity_bias,
     )?;
     let extents = adaptive_extents(minimum_extent, budget)?;
     let mut candidates = Vec::with_capacity(extents.len());
     for extent in extents {
         let vertical_velocity = character_jump_vertical_velocity(kinematics, extent);
-        let discriminant =
-            vertical_velocity * vertical_velocity - 2.0 * gravity * world_displacement.z;
+        let curve_velocity = vertical_velocity - gravity_bias;
+        let discriminant = curve_velocity * curve_velocity - 2.0 * gravity * world_displacement.z;
         if discriminant < 0.0 {
             continue;
         }
-        let flight_duration_seconds = (vertical_velocity + discriminant.max(0.0).sqrt()) / gravity;
-        let world_planar_velocity = Vector3::new(
+        let flight_duration_seconds = (curve_velocity + discriminant.max(0.0).sqrt()) / gravity;
+        let mut world_planar_velocity = Vector3::new(
             world_displacement.x / flight_duration_seconds,
             world_displacement.y / flight_duration_seconds,
             0.0,
         );
-        if !envelope.contains_planar_velocity(world_planar_velocity) {
-            continue;
+        let planar_speed = world_planar_velocity.length();
+        if planar_speed > envelope.maximum_planar_speed {
+            // A legal maximum-speed launch may reach the already-authorized landing
+            // neighborhood even when its center is just beyond exact point reach.
+            let shortfall =
+                (planar_speed - envelope.maximum_planar_speed) * flight_duration_seconds;
+            if shortfall > envelope.landing_tolerance.support_sphere_radius + ENVELOPE_TOLERANCE {
+                continue;
+            }
+            world_planar_velocity =
+                world_planar_velocity * (envelope.maximum_planar_speed / planar_speed);
         }
         let local_planar_velocity = local_planar_vector(world_planar_velocity, heading);
         candidates.push(PreciseJumpLaunchCandidate {
@@ -283,6 +301,7 @@ fn minimum_extent(
     gravity: f32,
     vertical_displacement: f32,
     minimum_planar_time: f32,
+    gravity_bias: f32,
 ) -> Result<JumpExtent, PreciseJumpCandidateRejection> {
     let vertical_reach_speed = (2.0 * gravity * vertical_displacement).max(0.0).sqrt();
     let planar_time_speed = if minimum_planar_time > f32::EPSILON {
@@ -291,7 +310,8 @@ fn minimum_extent(
         0.0
     };
     let floor_speed = character_jump_vertical_velocity(kinematics, JumpExtent::MINIMUM);
-    let required_speed = floor_speed.max(vertical_reach_speed).max(planar_time_speed);
+    let required_speed =
+        floor_speed.max(vertical_reach_speed.max(planar_time_speed) + gravity_bias);
     let required_extent = if required_speed <= floor_speed + ENVELOPE_TOLERANCE {
         JumpExtent::MINIMUM.get()
     } else {
@@ -299,9 +319,8 @@ fn minimum_extent(
             / (RETAIL_DOUBLE_GRAVITY * kinematics.full_extent_jump_height()))
         .max(JumpExtent::MINIMUM.get())
     };
-    if required_extent > JumpExtent::MAXIMUM.get() + ENVELOPE_TOLERANCE {
-        return Err(PreciseJumpCandidateRejection::TargetOutsideEnvelope);
-    }
+    // If exact point reach exceeds maximum charge, still evaluate that legal charge.
+    // Candidate construction decides whether it reaches the existing landing neighborhood.
     JumpExtent::new(required_extent.min(JumpExtent::MAXIMUM.get()))
         .map_err(|_| PreciseJumpCandidateRejection::TargetOutsideEnvelope)
 }
@@ -427,6 +446,7 @@ mod tests {
         count: usize,
     ) -> Result<PreciseJumpCandidateSet, PreciseJumpCandidateRejection> {
         generate_precise_jump_candidates(
+            super::super::precise_jump_prediction::PRECISE_JUMP_FIXED_TICK,
             &capabilities(1.0, 4.2125, 0.0),
             body(),
             0.0,
@@ -456,6 +476,7 @@ mod tests {
         assert_eq!(envelope.landing_tolerance().support_sphere_radius(), 0.48);
 
         let fast = generate_precise_jump_candidates(
+            super::super::precise_jump_prediction::PRECISE_JUMP_FIXED_TICK,
             &capabilities(3.0, 4.2125, 0.0),
             body(),
             0.0,
@@ -481,6 +502,7 @@ mod tests {
         let mut expected_extents: Option<Vec<f32>> = None;
         for (heading, displacement) in cases {
             let set = generate_precise_jump_candidates(
+                super::super::precise_jump_prediction::PRECISE_JUMP_FIXED_TICK,
                 &capabilities(1.0, 4.2125, 0.0),
                 body(),
                 heading,
@@ -492,11 +514,13 @@ mod tests {
             let envelope = set.envelope();
             let candidates = set.candidates();
             assert_eq!(candidates.len(), 5);
-            assert!(
-                candidates
-                    .iter()
-                    .all(|candidate| envelope.contains_planar_velocity(candidate.world_velocity()))
-            );
+            assert!(candidates.iter().all(|candidate| {
+                candidate
+                    .world_velocity()
+                    .x
+                    .hypot(candidate.world_velocity().y)
+                    <= envelope.maximum_planar_speed() + ENVELOPE_TOLERANCE
+            }));
             let extents = candidates
                 .iter()
                 .map(|candidate| candidate.extent().get())
@@ -565,9 +589,22 @@ mod tests {
             let set = candidates(displacement, 3).unwrap();
             for candidate in set.candidates() {
                 let time = candidate.flight_duration_seconds();
-                let z = candidate.world_velocity().z * time - 0.5 * 9.8 * time * time;
+                let z = (candidate.world_velocity().z
+                    - 0.5
+                        * 9.8
+                        * super::super::precise_jump_prediction::PRECISE_JUMP_FIXED_TICK
+                            .as_secs_f32())
+                    * time
+                    - 0.5 * 9.8 * time * time;
                 assert!((z - displacement.z).abs() < 0.000_1, "{candidate:?}");
-                assert!(candidate.world_velocity().z - 9.8 * time <= ENVELOPE_TOLERANCE);
+                assert!(
+                    candidate.world_velocity().z
+                        - 9.8
+                            * (time + 0.5
+                                * super::super::precise_jump_prediction::PRECISE_JUMP_FIXED_TICK
+                                    .as_secs_f32())
+                        <= ENVELOPE_TOLERANCE
+                );
             }
         }
     }
@@ -580,6 +617,7 @@ mod tests {
         );
         let solve = |capabilities: SelfJumpCapabilities, readiness| {
             generate_precise_jump_candidates(
+                super::super::precise_jump_prediction::PRECISE_JUMP_FIXED_TICK,
                 &capabilities,
                 body(),
                 0.0,
@@ -635,6 +673,7 @@ mod tests {
     fn heading_only_converts_world_trajectory_to_body_local_wire_velocity() {
         let heading = std::f32::consts::FRAC_PI_4;
         let set = generate_precise_jump_candidates(
+            super::super::precise_jump_prediction::PRECISE_JUMP_FIXED_TICK,
             &capabilities(1.0, 4.2125, 0.0),
             body(),
             heading,

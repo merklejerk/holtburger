@@ -117,7 +117,9 @@ fn decode_direct_color(surface: &RenderSurface) -> Result<Vec<u8>> {
             require_uncompressed_length(surface, surface.format)?;
             Ok(surface
                 .source_data
-                .chunks_exact(3)
+                .as_chunks::<3>()
+                .0
+                .iter()
                 .flat_map(|pixel| [pixel[2], pixel[1], pixel[0], 255])
                 .collect())
         }
@@ -125,7 +127,9 @@ fn decode_direct_color(surface: &RenderSurface) -> Result<Vec<u8>> {
             require_uncompressed_length(surface, surface.format)?;
             Ok(surface
                 .source_data
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .flat_map(|pixel| [pixel[2], pixel[1], pixel[0], pixel[3]])
                 .collect())
         }
@@ -133,7 +137,9 @@ fn decode_direct_color(surface: &RenderSurface) -> Result<Vec<u8>> {
             require_uncompressed_length(surface, surface.format)?;
             Ok(surface
                 .source_data
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .flat_map(|pixel| [pixel[2], pixel[1], pixel[0], 255])
                 .collect())
         }
@@ -141,7 +147,9 @@ fn decode_direct_color(surface: &RenderSurface) -> Result<Vec<u8>> {
             require_uncompressed_length(surface, surface.format)?;
             Ok(surface
                 .source_data
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .flat_map(|pixel| {
                     let value = u16::from_le_bytes([pixel[0], pixel[1]]);
                     [
@@ -157,7 +165,9 @@ fn decode_direct_color(surface: &RenderSurface) -> Result<Vec<u8>> {
             require_uncompressed_length(surface, surface.format)?;
             Ok(surface
                 .source_data
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .flat_map(|pixel| {
                     let value = u16::from_le_bytes([pixel[0], pixel[1]]);
                     [

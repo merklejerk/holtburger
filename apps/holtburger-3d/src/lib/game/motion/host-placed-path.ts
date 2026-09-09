@@ -75,15 +75,16 @@ export function validateHostPlacedPathShape<Point>(
 	if (path.legs.length === 0) {
 		throw new Error("Host placed path must contain at least one leg.");
 	}
-	let previous = 0;
+	let previous: number | undefined;
 	for (const leg of path.legs) {
 		if (
 			!Number.isFinite(leg.endFraction) ||
-			leg.endFraction <= previous ||
+			leg.endFraction < 0 ||
+			(previous !== undefined && leg.endFraction <= previous) ||
 			leg.endFraction > 1
 		) {
 			throw new Error(
-				"Host placed-path fractions must increase through (0, 1].",
+				"Host placed-path fractions must increase through [0, 1].",
 			);
 		}
 		previous = leg.endFraction;

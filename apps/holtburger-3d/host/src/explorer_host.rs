@@ -145,6 +145,8 @@ pub struct ExplorerHostRuntime {
     pub kinematic_boom_runtime: Arc<HostKinematicBoomRuntime>,
     /// Shared fixed-tick scheduler.
     pub fixed_tick_runtime: Arc<HostFixedTickRuntime>,
+    /// Independently serviced possession camera, joined before the transport shuts down.
+    camera_worker: crate::host_kinematic_boom_runtime::HostKinematicBoomWorker,
     /// Host-owned physical-flight runtime.
     pub physical_fly_runtime: Arc<HostPhysicalFlyRuntime>,
     pub(crate) event_sink: Arc<dyn ExplorerEventSink>,
@@ -214,6 +216,8 @@ impl ExplorerHostRuntime {
                 ),
             ),
         );
+        let camera_worker = kinematic_boom_runtime
+            .spawn(Arc::clone(&explorer_entity_delivery), dynamic_event_sink)?;
         fixed_tick_runtime.spawn();
         Ok(Self {
             content,
@@ -224,6 +228,7 @@ impl ExplorerHostRuntime {
             explorer_entity_delivery,
             kinematic_boom_runtime,
             fixed_tick_runtime,
+            camera_worker,
             physical_fly_runtime,
             event_sink,
             physical_event_sink,
@@ -256,6 +261,7 @@ impl ExplorerHostRuntime {
     /// Stops host-owned background work before the sidecar closes its protocol writer.
     pub fn shutdown(&self) {
         self.fixed_tick_runtime.stop();
+        self.camera_worker.shutdown();
     }
 
     /// Publishes an Explorer-owned dynamic projection through the shell sink.
@@ -287,12 +293,12 @@ pub async fn dispatch_explorer(
                 .and_then(encode_json)
         }
         RequestExplorerDynamicEntitySnapshot => {
-            let event = runtime
-                .explorer_entity_delivery
-                .with_ordered_publication(|| runtime.explorer_entity_delivery.snapshot_event())
-                .map_err(application_error)?;
             runtime
-                .publish_dynamic_entity(event)
+                .explorer_entity_delivery
+                .with_ordered_publication(|| {
+                    let event = runtime.explorer_entity_delivery.snapshot_event()?;
+                    runtime.publish_dynamic_entity(event)
+                })
                 .map_err(application_error)?;
             Ok(HostResponse::Unit)
         }
@@ -302,6 +308,7 @@ pub async fn dispatch_explorer(
         SpawnExplorerEntity { request } => {
             let driver = Arc::clone(&runtime.explorer_entity_driver);
             let delivery = Arc::clone(&runtime.explorer_entity_delivery);
+            let sink = Arc::clone(&runtime.event_sink);
             let receipt = tokio::task::spawn_blocking(move || {
                 delivery.with_ordered_publication(|| {
                     let outcome = driver.spawn_by_wcid(request)?;
@@ -310,42 +317,40 @@ pub async fn dispatch_explorer(
                         generation: outcome.instance.generation,
                     };
                     let event = delivery.snapshot_event()?;
-                    Ok::<_, anyhow::Error>((receipt, event))
+                    sink.publish_dynamic_entity(event)?;
+                    Ok::<_, anyhow::Error>(receipt)
                 })
             })
             .await
             .map_err(application_error)?
             .map_err(application_error)?;
-            runtime
-                .publish_dynamic_entity(receipt.1)
-                .map_err(application_error)?;
-            encode_json(receipt.0)
+            encode_json(receipt)
         }
         DespawnExplorerEntity { guid, generation } => {
             let driver = Arc::clone(&runtime.explorer_entity_driver);
             let delivery = Arc::clone(&runtime.explorer_entity_delivery);
-            let (receipt, event) = tokio::task::spawn_blocking(move || {
+            let sink = Arc::clone(&runtime.event_sink);
+            let receipt = tokio::task::spawn_blocking(move || {
                 delivery.with_ordered_publication(|| {
                     let outcome = driver.despawn(guid, generation)?;
                     let receipt = ExplorerEntityMutationReceipt {
                         guid,
                         generation: outcome.instance.generation,
                     };
-                    Ok::<_, anyhow::Error>((receipt, delivery.snapshot_event()?))
+                    sink.publish_dynamic_entity(delivery.snapshot_event()?)?;
+                    Ok::<_, anyhow::Error>(receipt)
                 })
             })
             .await
             .map_err(application_error)?
             .map_err(application_error)?;
-            runtime
-                .publish_dynamic_entity(event)
-                .map_err(application_error)?;
             encode_json(receipt)
         }
         ReplaceExplorerEntityPhysicsState { request } => {
             let driver = Arc::clone(&runtime.explorer_entity_driver);
             let delivery = Arc::clone(&runtime.explorer_entity_delivery);
-            let (receipt, event) = tokio::task::spawn_blocking(move || {
+            let sink = Arc::clone(&runtime.event_sink);
+            let receipt = tokio::task::spawn_blocking(move || {
                 delivery.with_ordered_publication(|| {
                     let outcome = driver.replace_physics_state(
                         request.guid,
@@ -359,44 +364,42 @@ pub async fn dispatch_explorer(
                         guid: request.guid,
                         generation: outcome.instance.generation,
                     };
-                    Ok::<_, anyhow::Error>((receipt, delivery.upserted(receipt.guid)?))
+                    sink.publish_dynamic_entity(delivery.upserted(receipt.guid)?)?;
+                    Ok::<_, anyhow::Error>(receipt)
                 })
             })
             .await
             .map_err(application_error)?
             .map_err(application_error)?;
-            runtime
-                .publish_dynamic_entity(event)
-                .map_err(application_error)?;
             encode_json(receipt)
         }
         LaunchExplorerEntity { request } => {
             let guid = request.guid;
             let driver = Arc::clone(&runtime.explorer_entity_driver);
             let delivery = Arc::clone(&runtime.explorer_entity_delivery);
-            let (receipt, event) = tokio::task::spawn_blocking(move || {
+            let sink = Arc::clone(&runtime.event_sink);
+            let receipt = tokio::task::spawn_blocking(move || {
                 delivery.with_ordered_publication(|| {
                     let outcome = driver.launch(request)?;
                     let receipt = ExplorerEntityMutationReceipt {
                         guid,
                         generation: outcome.instance.generation,
                     };
-                    Ok::<_, anyhow::Error>((receipt, delivery.upserted(receipt.guid)?))
+                    sink.publish_dynamic_entity(delivery.upserted(receipt.guid)?)?;
+                    Ok::<_, anyhow::Error>(receipt)
                 })
             })
             .await
             .map_err(application_error)?
             .map_err(application_error)?;
-            runtime
-                .publish_dynamic_entity(event)
-                .map_err(application_error)?;
             encode_json(receipt)
         }
         RelocateExplorerEntity { request } => {
             let guid = request.guid;
             let driver = Arc::clone(&runtime.explorer_entity_driver);
             let delivery = Arc::clone(&runtime.explorer_entity_delivery);
-            let (receipt, event) = tokio::task::spawn_blocking(move || {
+            let sink = Arc::clone(&runtime.event_sink);
+            let receipt = tokio::task::spawn_blocking(move || {
                 delivery.with_ordered_publication(|| {
                     let kind = request.kind.advance_kind();
                     let outcome = driver.relocate(request)?;
@@ -404,32 +407,28 @@ pub async fn dispatch_explorer(
                         guid,
                         generation: outcome.instance.generation,
                     };
-                    Ok::<_, anyhow::Error>((receipt, delivery.corrected(receipt.guid, kind)?))
+                    sink.publish_dynamic_entity(delivery.corrected(receipt.guid, kind)?)?;
+                    Ok::<_, anyhow::Error>(receipt)
                 })
             })
             .await
             .map_err(application_error)?
             .map_err(application_error)?;
-            runtime
-                .publish_dynamic_entity(event)
-                .map_err(application_error)?;
             encode_json(receipt)
         }
         ResetExplorerEntities => {
             let driver = Arc::clone(&runtime.explorer_entity_driver);
             let delivery = Arc::clone(&runtime.explorer_entity_delivery);
-            let event = tokio::task::spawn_blocking(move || {
+            let sink = Arc::clone(&runtime.event_sink);
+            tokio::task::spawn_blocking(move || {
                 delivery.with_ordered_publication(|| {
                     driver.reset().map_err(|error| anyhow::anyhow!("{error}"))?;
-                    Ok::<_, anyhow::Error>(delivery.snapshot_event()?)
+                    sink.publish_dynamic_entity(delivery.snapshot_event()?)
                 })
             })
             .await
             .map_err(application_error)?
             .map_err(application_error)?;
-            runtime
-                .publish_dynamic_entity(event)
-                .map_err(application_error)?;
             Ok(HostResponse::Unit)
         }
         PossessExplorerEntity { request } => {

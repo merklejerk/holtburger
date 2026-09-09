@@ -77,7 +77,7 @@ impl WeenieCatalog {
             }
         })?;
         let mut index = Vec::with_capacity(header.record_count as usize);
-        for bytes in index_bytes.chunks_exact(INDEX_ENTRY_LENGTH) {
+        for bytes in index_bytes.as_chunks::<INDEX_ENTRY_LENGTH>().0 {
             index.push(
                 IndexEntry::decode(bytes).map_err(|error| corrupt(&path, error.to_string()))?,
             );

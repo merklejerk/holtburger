@@ -11,6 +11,8 @@ use holtburger_common::{Plane, Sphere, Vector3};
 use holtburger_content::{BspSolid, CollisionPolygon, PlacedCollisionShape};
 use holtburger_dat::physics::BspNode;
 
+use super::SupportFeature;
+
 /// Retail's contact epsilon, shared by the BSP and volume narrow phases. The decompile prints it
 /// as `0.00019999999`, the shortest decimal form of the same f32 bit pattern (0x3951B717) this
 /// literal produces — they are one constant (`acclient.c:346579`, `:344345`, `:347138`).
@@ -33,19 +35,7 @@ pub struct ShapeSupport {
     /// Signed vertical correction from the requested center to tangency; positive rises.
     pub height_delta: f32,
     /// Authored feature reached by the bounded vertical probe.
-    pub feature: ShapeSupportFeature,
-}
-
-/// Authored polygon feature reached by a support probe.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum ShapeSupportFeature {
-    /// The finite polygon accepts an ordinary adjustment to its authored plane.
-    Surface,
-    /// The sphere reaches a finite edge but cannot adjust to the polygon plane.
-    Edge {
-        /// Horizontal normal pointing back across the reached edge.
-        inward_normal: Vector3,
-    },
+    pub feature: SupportFeature,
 }
 
 /// Two-sided polygon obstruction used only by grounded response routing.
@@ -89,10 +79,8 @@ pub fn placed_polygon_contacts(
     visit_polygon_leaves(
         &solid.bsp,
         solid,
-        collider,
-        center,
-        radius,
-        &mut |polygon| {
+        &|node| node_bounds_reach(node, collider, center, radius),
+        &mut |_, polygon| {
             let vertices = polygon
                 .vertices
                 .iter()
@@ -129,10 +117,8 @@ pub fn placed_polygon_obstructions(
     visit_polygon_leaves(
         &solid.bsp,
         solid,
-        collider,
-        center,
-        radius,
-        &mut |polygon| {
+        &|node| node_bounds_reach(node, collider, center, radius),
+        &mut |_, polygon| {
             let vertices = polygon
                 .vertices
                 .iter()
@@ -171,10 +157,15 @@ pub fn placed_supports(
     visit_polygon_leaves(
         &solid.bsp,
         solid,
-        collider,
-        center,
-        radius + maximum_drop.max(maximum_rise),
-        &mut |polygon| {
+        &|node| {
+            node_bounds(node).is_none_or(|bounds| {
+                let bounds = transformed_sphere(bounds, collider);
+                let delta = bounds.center - center;
+                delta.x * delta.x + delta.y * delta.y
+                    <= (bounds.radius + radius + CONTACT_EPSILON).powi(2)
+            })
+        },
+        &mut |_, polygon| {
             let vertices = polygon
                 .vertices
                 .iter()
@@ -299,34 +290,50 @@ fn descend(
     }
 }
 
-fn visit_polygon_leaves(
-    node: &BspNode,
+/// Stable polygon candidates for a sphere enclosing a query's complete swept volume.
+/// Shared leaf references are deduplicated before expensive shape casts.
+pub(super) fn sphere_polygon_candidates(
     solid: &BspSolid,
     collider: &PlacedCollisionShape,
     center: Vector3,
     radius: f32,
-    found: &mut impl FnMut(&CollisionPolygon),
+) -> Vec<u16> {
+    let mut ids = Vec::new();
+    visit_polygon_leaves(
+        &solid.bsp,
+        solid,
+        &|node| node_bounds_reach(node, collider, center, radius),
+        &mut |id, _| ids.push(id),
+    );
+    ids.sort_unstable();
+    ids.dedup();
+    ids
+}
+
+fn visit_polygon_leaves(
+    node: &BspNode,
+    solid: &BspSolid,
+    intersects: &impl Fn(&BspNode) -> bool,
+    found: &mut impl FnMut(u16, &CollisionPolygon),
 ) {
-    if !node_bounds_reach(node, collider, center, radius) {
+    if !intersects(node) {
         return;
     }
     match node {
         BspNode::Leaf(leaf) => {
-            for polygon in leaf
-                .poly_ids
-                .iter()
-                .filter_map(|polygon_id| solid.polygons.get(polygon_id))
-            {
-                found(polygon);
+            for id in &leaf.poly_ids {
+                if let Some(polygon) = solid.polygons.get(id) {
+                    found(*id, polygon);
+                }
             }
         }
         BspNode::Port(portal) => {
-            visit_polygon_leaves(&portal.pos, solid, collider, center, radius, found);
-            visit_polygon_leaves(&portal.neg, solid, collider, center, radius, found);
+            visit_polygon_leaves(&portal.pos, solid, intersects, found);
+            visit_polygon_leaves(&portal.neg, solid, intersects, found);
         }
         BspNode::Internal(internal) => {
             for branch in [&internal.pos, &internal.neg].into_iter().flatten() {
-                visit_polygon_leaves(branch, solid, collider, center, radius, found);
+                visit_polygon_leaves(branch, solid, intersects, found);
             }
         }
     }
@@ -338,12 +345,17 @@ fn node_bounds_reach(
     center: Vector3,
     radius: f32,
 ) -> bool {
-    let bounds = match node {
+    node_bounds(node)
+        .is_none_or(|bounds| transformed_sphere(bounds, collider).intersects(&center, radius))
+}
+
+/// Optional authored bounds; absence requires visiting the branch.
+fn node_bounds(node: &BspNode) -> Option<Sphere> {
+    match node {
         BspNode::Port(portal) => portal.sphere,
         BspNode::Leaf(leaf) => leaf.sphere,
         BspNode::Internal(internal) => internal.sphere,
-    };
-    bounds.is_none_or(|bounds| transformed_sphere(bounds, collider).intersects(&center, radius))
+    }
 }
 
 fn transformed_sphere(bounds: Sphere, collider: &PlacedCollisionShape) -> Sphere {
@@ -428,63 +440,13 @@ pub(super) fn support_on_polygon(
     if vertices.len() < 3 || normal.z <= CONTACT_EPSILON {
         return None;
     }
-    let distance = normal.dot(&center) + plane_d;
-    let face_height_delta = (radius - distance) / normal.z;
-    let adjustment_in_range = face_height_delta >= -maximum_drop - CONTACT_EPSILON
-        && face_height_delta <= maximum_rise + CONTACT_EPSILON;
-    let mut minimum_support = None;
-    if adjustment_in_range {
-        // Retail's step-down transaction also lifts a lower sphere already below a newly visible
-        // walkable plane (`OBJECTINFO::validate_walkable`, acclient.c:302813-302835). Portal lips
-        // expose this path when outdoor terrain enters the body-wide collision cell array.
-        let tangent_center = center + Vector3::new(0.0, 0.0, face_height_delta);
-        let contact_point = tangent_center - normal * radius;
-        if (0..vertices.len()).all(|index| {
-            let start = vertices[index];
-            let end = vertices[(index + 1) % vertices.len()];
-            (contact_point - start).dot(&normal.cross(&(end - start))) >= -CONTACT_EPSILON
-        }) {
-            // Boundary points remain surface support. Otherwise shared polygon and terrain-triangle
-            // seams would masquerade as precipices; the crossed-edge path begins only after the
-            // adjusted contact point leaves the finite face.
-            minimum_support = Some((face_height_delta, ShapeSupportFeature::Surface));
-        }
+    let height_delta = (radius - normal.dot(&center) - plane_d) / normal.z;
+    if height_delta < -maximum_drop - CONTACT_EPSILON
+        || height_delta > maximum_rise + CONTACT_EPSILON
+    {
+        return None;
     }
-
-    if !matches!(minimum_support, Some((_, ShapeSupportFeature::Surface))) {
-        for index in 0..vertices.len() {
-            let start = vertices[index];
-            let end = vertices[(index + 1) % vertices.len()];
-            if let Some(drop) = vertical_capsule_hit(center, start, end, radius, maximum_drop) {
-                let hit_center = center - Vector3::new(0.0, 0.0, drop);
-                if normal.dot(&hit_center) + plane_d >= -CONTACT_EPSILON {
-                    let closest = closest_point_on_segment(hit_center, start, end);
-                    let outward =
-                        Vector3::new(hit_center.x - closest.x, hit_center.y - closest.y, 0.0);
-                    let Some(inward_normal) = (outward.length_squared() > CONTACT_EPSILON.powi(2))
-                        .then(|| outward.normalize() * -1.0)
-                    else {
-                        continue;
-                    };
-                    // An edge intersection may still be a valid ordinary walkable transaction.
-                    // Retail moves that candidate to the authored polygon plane; only a zero plane
-                    // adjustment remains a crossed-edge precipice candidate
-                    // (`CPolygon::adjust_sphere_to_plane`, acclient.c:344680-344734).
-                    let (height_delta, feature) =
-                        if adjustment_in_range && face_height_delta.abs() > CONTACT_EPSILON {
-                            (face_height_delta, ShapeSupportFeature::Surface)
-                        } else {
-                            (-drop, ShapeSupportFeature::Edge { inward_normal })
-                        };
-                    if minimum_support.is_none_or(|(current, _)| height_delta > current) {
-                        minimum_support = Some((height_delta, feature));
-                    }
-                }
-            }
-        }
-    }
-
-    let (height_delta, feature) = minimum_support?;
+    let feature = polygon_footprint(vertices, center, radius)?;
     Some(ShapeSupport {
         normal,
         height_delta,
@@ -492,71 +454,41 @@ pub(super) fn support_on_polygon(
     })
 }
 
-fn vertical_capsule_hit(
-    center: Vector3,
-    start: Vector3,
-    end: Vector3,
-    radius: f32,
-    maximum_drop: f32,
-) -> Option<f32> {
-    let edge = end - start;
-    let edge_length_squared = edge.length_squared();
-    if edge_length_squared <= f32::EPSILON {
-        return vertical_sphere_hit(center, start, radius, maximum_drop);
-    }
-    let velocity = Vector3::new(0.0, 0.0, -1.0);
-    let relative = center - start;
-    let along_start = relative.dot(&edge) / edge_length_squared;
-    let along_velocity = velocity.dot(&edge) / edge_length_squared;
-    let perpendicular_start = relative - edge * along_start;
-    let perpendicular_velocity = velocity - edge * along_velocity;
-    let mut earliest = quadratic_first_hit(
-        perpendicular_velocity.length_squared(),
-        2.0 * perpendicular_start.dot(&perpendicular_velocity),
-        perpendicular_start.length_squared() - radius * radius,
-        maximum_drop,
-    )
-    .filter(|drop| {
-        let along = along_start + along_velocity * *drop;
-        (-CONTACT_EPSILON..=1.0 + CONTACT_EPSILON).contains(&along)
-    });
-    for endpoint in [start, end] {
-        if let Some(drop) = vertical_sphere_hit(center, endpoint, radius, maximum_drop) {
-            earliest = Some(earliest.map_or(drop, |current| current.min(drop)));
+/// Horizontal footing is invariant under applying a candidate's vertical adjustment.
+/// RETAIL DIVERGENCE: `acclient.c:345329–345510,302082–302090` checks a projected
+/// polygon footprint, ordinarily with half-radius. We use a full-radius horizontal disk
+/// consistently for standing and stair entry; restoring the narrower/transient rules can
+/// strand the first bounded stair step. The asset-free footing gate covers seams, corners,
+/// slopes and a 0.3m stair. The template/setup census covers preparation, not every authored
+/// stair or ledge; full support-geometry coverage is not claimed.
+fn polygon_footprint(vertices: &[Vector3], center: Vector3, radius: f32) -> Option<SupportFeature> {
+    let horizontal = |v: Vector3| Vector3::new(v.x, v.y, 0.0);
+    let point = horizontal(center);
+    let mut inside = true;
+    let mut nearest = None::<Vector3>;
+    for (index, start) in vertices.iter().enumerate() {
+        let start = horizontal(*start);
+        let end = horizontal(vertices[(index + 1) % vertices.len()]);
+        let edge = end - start;
+        let length = edge.length();
+        if length <= CONTACT_EPSILON {
+            continue;
+        }
+        let inward = Vector3::new(-edge.y, edge.x, 0.0) / length;
+        inside &= (point - start).dot(&inward) >= -CONTACT_EPSILON;
+        let offset = closest_point_on_segment(point, start, end) - point;
+        if nearest.is_none_or(|old| offset.length_squared() < old.length_squared()) {
+            nearest = Some(offset);
         }
     }
-    earliest
-}
-
-fn vertical_sphere_hit(
-    center: Vector3,
-    point: Vector3,
-    radius: f32,
-    maximum_drop: f32,
-) -> Option<f32> {
-    let relative = center - point;
-    quadratic_first_hit(
-        1.0,
-        -2.0 * relative.z,
-        relative.length_squared() - radius * radius,
-        maximum_drop,
-    )
-}
-
-fn quadratic_first_hit(a: f32, b: f32, c: f32, maximum: f32) -> Option<f32> {
-    if a <= f32::EPSILON {
-        return None;
+    let offset = nearest?;
+    if inside {
+        return Some(SupportFeature::Surface);
     }
-    let discriminant = b * b - 4.0 * a * c;
-    if discriminant < 0.0 {
-        return None;
-    }
-    let root = discriminant.sqrt();
-    [(-b - root) / (2.0 * a), (-b + root) / (2.0 * a)]
-        .into_iter()
-        .filter(|value| *value >= -CONTACT_EPSILON && *value <= maximum + CONTACT_EPSILON)
-        .map(|value| value.max(0.0))
-        .min_by(f32::total_cmp)
+    let distance = offset.length();
+    (distance <= radius + CONTACT_EPSILON).then(|| SupportFeature::Overhang {
+        inward_normal: offset / distance,
+    })
 }
 
 fn closest_point_on_segment(point: Vector3, start: Vector3, end: Vector3) -> Vector3 {

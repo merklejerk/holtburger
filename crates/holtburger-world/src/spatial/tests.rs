@@ -371,8 +371,10 @@ fn spatial_scene_transaction_commits_only_after_acceptance() {
         .tick_physical_body_transaction(
             body_id,
             &empty_collision(Guid(0x0102_FFFF)),
-            PhysicalBodyActuation::free_flight(Vector3::new(2.0, 0.0, 0.0))
-                .expect("test velocity should be finite"),
+            crate::spatial::PhysicalBodyInput::autonomous(
+                PhysicalBodyActuation::free_flight(Vector3::new(2.0, 0.0, 0.0))
+                    .expect("test velocity should be finite"),
+            ),
             1.0,
             now + Duration::from_secs(1),
             |body, result| {
@@ -385,7 +387,8 @@ fn spatial_scene_transaction_commits_only_after_acceptance() {
         .expect("transaction should solve against resident empty collision");
 
     assert_eq!(callback_pose.0, scene.body(body_id).unwrap().pose);
-    assert_eq!(callback_pose.0.coords.x, 12.0);
+    let admitted = super::MOBILE_CONTACT_TICK_SECONDS;
+    assert!((callback_pose.0.coords.x - (pose.coords.x + 2.0 * admitted)).abs() < 1e-5);
     assert_eq!(result.motion.path.initial().center(), pose.coords);
 }
 

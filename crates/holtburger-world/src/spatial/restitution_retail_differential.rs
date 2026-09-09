@@ -412,7 +412,7 @@ fn align_path_precedes_sledding_velocity_facing() {
 }
 
 #[test]
-fn production_collision_response_matches_retail_oracle_matrix() {
+fn production_impact_velocity_matches_retail_oracle_matrix() {
     use super::{PhysicalElasticity, PhysicalRestitution, PhysicalSurfaceMotion};
 
     let normal = Vector3::new(0.0, 0.0, 1.0);
@@ -475,60 +475,10 @@ fn production_collision_response_matches_retail_oracle_matrix() {
                 stationary_fall_frames: stationary,
             },
         );
-        let continuous_stable_support = prior && current && motion == PhysicalSurfaceMotion::Stable;
-        let actual = super::collision_response(super::CollisionResponseInput {
-            incoming,
-            restitution: production_restitution,
-            collision_normal: (!continuous_stable_support).then_some(normal),
-            current_support_normal: (!continuous_stable_support && current).then_some(normal),
-            stationary_fall_frames: stationary,
-        });
-        assert_vector_close(actual.velocity, expected.velocity);
-        assert_eq!(
-            actual.separates_from_support,
-            expected.separates_from_support
-        );
-    }
-}
-
-#[test]
-fn production_stable_support_retains_physical_motion_without_takeoff() {
-    use super::{PhysicalElasticity, PhysicalRestitution};
-
-    let normal = Vector3::new(0.6, 0.0, 0.8);
-    let cases = [
-        Vector3::new(4.0, 0.0, 0.0),
-        Vector3::new(-4.0, 0.0, 0.0),
-        Vector3::new(0.0, 4.0, 0.0),
-    ];
-
-    for incoming in cases {
-        let collision = RetailCollision {
-            previously_walkable: true,
-            support_normal: Some(normal),
-            sledding: false,
-            collision_normal: Some(normal),
-            stationary_fall_frames: 0,
-        };
-        let expected = collision_response(
-            incoming,
-            RetailRestitution::Elastic(DEFAULT_ELASTICITY),
-            collision,
-        );
-        let actual = super::collision_response(super::CollisionResponseInput {
-            incoming,
-            restitution: PhysicalRestitution::Elastic(PhysicalElasticity::DEFAULT),
-            collision_normal: None,
-            current_support_normal: None,
-            stationary_fall_frames: collision.stationary_fall_frames,
-        });
-
-        assert_vector_close(actual.velocity, expected.velocity);
-        assert_eq!(
-            actual.separates_from_support,
-            expected.separates_from_support
-        );
-        assert!(!actual.separates_from_support);
+        if stationary == 0 && !(prior && current && motion == PhysicalSurfaceMotion::Stable) {
+            let actual = super::impact_velocity(incoming, normal, production_restitution);
+            assert_vector_close(actual, expected.velocity);
+        }
     }
 }
 

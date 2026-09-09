@@ -1,9 +1,17 @@
-//! Per-body authored-motion playback, owned by the authority that spawned the body.
+//! Per-body authored playback and visual locomotion, owned by the authority that spawned the body.
 //!
 //! Sequence resolution is stateless, but playback is not: a cursor has to survive between ticks or
 //! every tick would restart the animation. That state lives here rather than on the entity, so a
 //! client `WorldState` and an Explorer registry can each own their own playback without sharing a
 //! table — which is what keeps them separate semantic authorities.
+
+mod remote;
+mod sticky;
+pub use remote::RemoteMotionSample;
+use remote::RemoteMotionState;
+pub(crate) use remote::{RemoteFramePolicy, RemoteMotionInput};
+use std::time::Instant;
+use sticky::StickyMotion;
 
 use crate::entity::EntityMotionAction;
 use holtburger_common::{Guid, RigidTransform};
@@ -23,14 +31,22 @@ use super::state::{MotionCommand, MotionOrder, MotionState};
 /// (`acclient.c:329811-329837,329866-329872`).
 pub(super) const RETAIL_RUN_FORWARD_BASE_SPEED_MPS: f32 = 4.0;
 
-/// One body's playback: what it is doing, where the cursor is, and what the last tick contributed.
+/// One body's ordinary playback and effects, with optional independent locomotion presentation.
 #[derive(Debug, Clone)]
 pub struct BodyMotionRuntime {
     /// Table this playback was built against. A body that changes tables starts over, because its
     /// substate and cursor mean nothing in a table that does not define them.
     motion_table_id: u32,
+    /// Remote directive progress shares the body lifetime with command playback.
+    remote_motion: Option<RemoteMotionState>,
+    /// Explicit target lifetime shared by local and remote authored playback.
+    sticky: StickyMotion,
     state: MotionState,
     sequence: MotionSequenceRuntime,
+    /// Optional visual locomotion; it cannot own actions or contribute physics/hooks.
+    locomotion: Option<LocomotionPlayback>,
+    /// Whether the selected ordinary state permits locomotion presentation.
+    allows_locomotion_presentation: bool,
     /// Contribution the most recent tick produced, held for the solver to read the way a body holds
     /// the velocity its last tick achieved.
     tick: SequenceTick,
@@ -47,6 +63,15 @@ pub struct BodyMotionRuntime {
     active_action: Option<EntityMotionAction>,
     /// Fresh selector rejections awaiting body-context reporting by the registry owner.
     rejected_actions: Vec<EntityMotionAction>,
+}
+
+/// Presentation-only selection and cursor; action ownership remains in `BodyMotionRuntime`.
+#[derive(Debug, Clone)]
+struct LocomotionPlayback {
+    /// Selected locomotion channels, independent of the ordinary command state.
+    state: MotionState,
+    /// Visual cursor advanced without authored contributions.
+    sequence: MotionSequenceRuntime,
 }
 
 /// Result of offering one transient edge to retail's six-action runtime bound.
@@ -119,7 +144,7 @@ pub struct SettledMotionPose {
     pub frame: i32,
 }
 
-/// Current presentation level derived from the authoritative motion cursor.
+/// Current presentation level selected from host-owned authored or locomotion playback.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MotionPresentation {
     /// An advancing clip whose phase remains presentation-owned.
@@ -155,8 +180,12 @@ impl BodyMotionRuntime {
     pub fn new(table: &MotionSequenceTable) -> Self {
         let mut runtime = Self {
             motion_table_id: table.id,
+            remote_motion: None,
+            sticky: StickyMotion::default(),
             state: MotionState::default(),
             sequence: MotionSequenceRuntime::new(),
+            locomotion: None,
+            allows_locomotion_presentation: true,
             tick: SequenceTick::identity(),
             retained_run_rate_multiplier: None,
             unmodelled: UnmodelledMotionChannels::default(),
@@ -169,25 +198,112 @@ impl BodyMotionRuntime {
         runtime
     }
 
+    /// Advance one source order and report selection failures with its registry identity.
+    fn drive_for_guid(
+        &mut self,
+        table: &MotionSequenceTable,
+        guid: Guid,
+        order: MotionOrder,
+        quantum: f32,
+    ) -> &SequenceTick {
+        let previous_unmodelled = self.unmodelled;
+        self.drive(table, order, quantum);
+        for action in std::mem::take(&mut self.rejected_actions) {
+            log::warn!(
+                "body 0x{guid:08X} motion table 0x{:08X} cannot route admitted action 0x{:08X} in style 0x{:08X} from substate 0x{:08X} (source {:?}, action sequence {})",
+                table.id,
+                action.command.raw(),
+                self.state.style.raw(),
+                self.state.substate.raw(),
+                action.source,
+                action.action_sequence,
+            );
+        }
+        for (channel, command) in self.unmodelled.newly_present_since(previous_unmodelled) {
+            log::warn!(
+                "body 0x{guid:08X} motion table 0x{:08X} cannot play admitted {channel} command 0x{:08X} in style 0x{:08X}",
+                table.id,
+                command.raw(),
+                self.state.style.raw(),
+            );
+        }
+        &self.tick
+    }
+
+    /// Table selection resets playback, but an admitted directive belongs to the entity.
+    fn bind_table(&mut self, table: &MotionSequenceTable) {
+        if self.motion_table_id != table.id {
+            let remote = self.remote_motion;
+            let sticky = self.sticky;
+            *self = Self::new(table);
+            self.remote_motion = remote;
+            self.sticky = sticky;
+        }
+    }
+
     /// The clip this body is playing, for a frontend to render.
     ///
     /// `None` means the body has no clip installed at all, which is a body that does not animate
     /// rather than one whose animation is unknown.
     pub fn playing_clip(&self) -> Option<PlayingMotionClip> {
-        self.sequence.current_clip().map(PlayingMotionClip::of)
+        self.presentation_sequence()
+            .current_clip()
+            .map(PlayingMotionClip::of)
     }
 
-    /// Current lossless presentation level without projecting a hot cursor for moving clips.
+    /// Current lossless presentation level, with active actions taking priority over locomotion.
     pub fn motion_presentation(&self) -> Option<MotionPresentation> {
-        let current = self.sequence.current_clip()?;
+        let sequence = self.presentation_sequence();
+        let current = sequence.current_clip()?;
         if current.node.is_advancing() {
             Some(MotionPresentation::Playing(PlayingMotionClip::of(current)))
         } else {
             Some(MotionPresentation::Settled(SettledMotionPose {
                 animation_id: current.node.animation().id,
-                frame: self.sequence.current_frame(),
+                frame: sequence.current_frame(),
             }))
         }
+    }
+
+    /// Actions, authored one-shot transitions, and explicit poses take priority over locomotion.
+    fn presentation_sequence(&self) -> &MotionSequenceRuntime {
+        match (&self.active_action, &self.locomotion) {
+            (None, Some(locomotion))
+                if self.allows_locomotion_presentation
+                    && (!self.sequence.has_clips() || self.sequence.is_cyclic()) =>
+            {
+                &locomotion.sequence
+            }
+            _ => &self.sequence,
+        }
+    }
+
+    /// Advances visual locomotion without changing commanded playback or its last tick.
+    /// Returns whether every requested channel was modelled by the table. Active actions remain
+    /// visible until their selector-owned boundary completes; explicit non-locomotion commands
+    /// likewise retain authored presentation. The caller owns support/charge selection.
+    pub fn present_locomotion(
+        &mut self,
+        table: &MotionSequenceTable,
+        order: MotionOrder,
+        quantum: f32,
+    ) -> bool {
+        self.bind_table(table);
+        let locomotion = self.locomotion.get_or_insert_with(|| {
+            let mut state = MotionState::default();
+            let mut sequence = MotionSequenceRuntime::new();
+            set_default_state(table, &mut state, &mut sequence);
+            LocomotionPlayback { state, sequence }
+        });
+        let unmodelled = apply_order(
+            table,
+            &mut locomotion.state,
+            &mut locomotion.sequence,
+            order,
+        );
+        locomotion.sequence.select_cyclic_presentation();
+        locomotion.sequence.advance_presentation(quantum);
+        unmodelled == UnmodelledMotionChannels::default()
     }
 
     pub fn state(&self) -> &MotionState {
@@ -200,6 +316,11 @@ impl BodyMotionRuntime {
 
     pub fn tick(&self) -> &SequenceTick {
         &self.tick
+    }
+
+    /// Explicit target contributing to the last positive-duration source interval.
+    pub fn sticky_target(&self) -> Option<Guid> {
+        self.sticky.sampled_target()
     }
 
     /// Currently playing transient edge, if one owns the sequence.
@@ -222,6 +343,13 @@ impl BodyMotionRuntime {
         MotionActionEnqueueOutcome::Queued
     }
 
+    /// Sticky uses unadjusted run capacity, not an attack/current playback speed.
+    /// Retail starts my_run_rate at one and uses it when actor skill data is unavailable
+    /// (acclient.c:329792-329808; ACE MotionInterp constructor and get_max_speed).
+    pub(crate) fn sticky_speed_mps(&self) -> f32 {
+        self.retained_run_rate_multiplier.unwrap_or(1.0) * RETAIL_RUN_FORWARD_BASE_SPEED_MPS * 5.0
+    }
+
     /// Returns retail's adjusted maximum interpolation speed for this playback, when usable.
     pub fn adjusted_max_speed_mps(&self) -> Option<f32> {
         let multiplier = if self.state.substate == MotionCommand::RUN_FORWARD
@@ -241,9 +369,7 @@ impl BodyMotionRuntime {
         order: MotionOrder,
         quantum: f32,
     ) -> &SequenceTick {
-        if self.motion_table_id != table.id {
-            *self = Self::new(table);
-        }
+        self.bind_table(table);
         if let Some((MotionCommand::RUN_FORWARD, speed)) = order.forward
             && valid_speed_multiplier(speed)
         {
@@ -255,11 +381,17 @@ impl BodyMotionRuntime {
         // locomotion update retargets the action's authored return without restarting it
         // (`CMotionTable::GetObjectSequence`, `acclient.c:324230-324400`).
         self.unmodelled = apply_order(table, &mut self.state, &mut self.sequence, order);
+        self.resolve_locomotion_policy(table);
         if self.active_action.is_none() {
             self.start_next_action(table);
         }
+        if quantum > 0.0 {
+            self.sticky.begin_interval(Instant::now());
+        }
+        let contributes_motion = self.sequence.contributes_motion();
         self.tick = self.sequence.advance(quantum);
         if self.tick.action_completed {
+            self.sticky.complete_action();
             self.active_action = None;
             self.unmodelled = apply_order(
                 table,
@@ -267,9 +399,29 @@ impl BodyMotionRuntime {
                 &mut self.sequence,
                 self.steady_order,
             );
+            self.resolve_locomotion_policy(table);
             self.start_next_action(table);
         }
+        let contributes_motion = contributes_motion || self.sequence.contributes_motion();
+        if let Some(remote) = &mut self.remote_motion {
+            remote.sample(self.tick.offset, contributes_motion, quantum);
+        }
         &self.tick
+    }
+
+    /// Presentation permission comes from resolved content, never root-offset magnitude.
+    fn resolve_locomotion_policy(&mut self, table: &MotionSequenceTable) {
+        self.allows_locomotion_presentation = table
+            .is_default_cycle(self.state.style.raw(), self.state.substate.raw())
+            || matches!(
+                self.state.substate,
+                MotionCommand::WALK_FORWARD
+                    | MotionCommand::WALK_BACKWARDS
+                    | MotionCommand::RUN_FORWARD
+                    | MotionCommand::SIDESTEP
+                    | MotionCommand::TURN_LEFT
+                    | MotionCommand::TURN_RIGHT
+            );
     }
 
     fn start_next_action(&mut self, table: &MotionSequenceTable) {
@@ -303,6 +455,36 @@ pub struct MotionRuntimeRegistry {
 }
 
 impl MotionRuntimeRegistry {
+    /// Apply one admitted command's sticky target independently of visible motion changes.
+    pub fn admit_sticky_target(
+        &mut self,
+        table: &MotionSequenceTable,
+        guid: Guid,
+        target: Option<Guid>,
+        now: Instant,
+    ) {
+        let runtime = self
+            .bodies
+            .entry(guid)
+            .or_insert_with(|| BodyMotionRuntime::new(table));
+        runtime.bind_table(table);
+        runtime.sticky.admit(target, now);
+    }
+
+    /// Preserve explicit target-facing source intent beyond the interval's sticky lifetime.
+    pub(crate) fn retain_sticky_heading(&mut self, guid: Guid, heading: f32) {
+        if let Some(runtime) = self.bodies.get_mut(&guid) {
+            runtime.retain_sticky_heading(heading);
+        }
+    }
+
+    /// Explicit command cancellation also invalidates a sample not yet consumed by physics.
+    pub fn cancel_sticky_target(&mut self, guid: Guid) {
+        if let Some(runtime) = self.bodies.get_mut(&guid) {
+            runtime.sticky = StickyMotion::default();
+        }
+    }
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -325,7 +507,7 @@ impl MotionRuntimeRegistry {
             .and_then(BodyMotionRuntime::motion_presentation)
     }
 
-    /// Current semantic playback state for diagnostics owned by the producer registry.
+    /// Ordinary command playback state for diagnostics, independent of visual locomotion.
     pub fn state(&self, guid: Guid) -> Option<&MotionState> {
         self.bodies.get(&guid).map(|runtime| runtime.state())
     }
@@ -351,6 +533,23 @@ impl MotionRuntimeRegistry {
         self.bodies.insert(guid, runtime);
     }
 
+    /// Relinquishes visual locomotion ownership without resetting ordinary playback or actions.
+    /// Authorities retain observations only while their local physical presentation is active.
+    pub fn retain_locomotion_presentation(&mut self, keep: impl Fn(Guid) -> bool) {
+        for (guid, runtime) in &mut self.bodies {
+            if runtime.locomotion.is_some() && !keep(*guid) {
+                runtime.locomotion = None;
+            }
+        }
+    }
+
+    /// Retires one locomotion presentation while preserving commanded playback and actions.
+    pub fn clear_locomotion_presentation(&mut self, guid: Guid) {
+        if let Some(runtime) = self.bodies.get_mut(&guid) {
+            runtime.locomotion = None;
+        }
+    }
+
     pub fn retain_bodies(&mut self, keep: impl Fn(Guid) -> bool) {
         self.bodies.retain(|guid, _| keep(*guid));
     }
@@ -374,10 +573,24 @@ impl MotionRuntimeRegistry {
             .bodies
             .entry(guid)
             .or_insert_with(|| BodyMotionRuntime::new(table));
-        if runtime.motion_table_id != table.id {
-            *runtime = BodyMotionRuntime::new(table);
-        }
+        runtime.bind_table(table);
         runtime.enqueue_action(action)
+    }
+
+    /// Updates the independent visual locomotion cursor after physical motion has been published.
+    /// Returns channel-modelling completeness for callers that need it. Best-effort visual
+    /// adapters may ignore it: an unmodelled channel does not undo supported playback.
+    pub fn present_locomotion(
+        &mut self,
+        table: &MotionSequenceTable,
+        guid: Guid,
+        order: MotionOrder,
+        quantum: f32,
+    ) -> bool {
+        self.bodies
+            .entry(guid)
+            .or_insert_with(|| BodyMotionRuntime::new(table))
+            .present_locomotion(table, order, quantum)
     }
 
     /// Brings one body's playback in line with its order, then advances it by the tick.
@@ -396,28 +609,8 @@ impl MotionRuntimeRegistry {
             .bodies
             .entry(guid)
             .or_insert_with(|| BodyMotionRuntime::new(table));
-        let previous_unmodelled = runtime.unmodelled;
-        runtime.drive(table, order, quantum);
-        for action in std::mem::take(&mut runtime.rejected_actions) {
-            log::warn!(
-                "body 0x{guid:08X} motion table 0x{:08X} cannot route admitted action 0x{:08X} in style 0x{:08X} from substate 0x{:08X} (source {:?}, action sequence {})",
-                table.id,
-                action.command.raw(),
-                runtime.state.style.raw(),
-                runtime.state.substate.raw(),
-                action.source,
-                action.action_sequence,
-            );
-        }
-        for (channel, command) in runtime.unmodelled.newly_present_since(previous_unmodelled) {
-            log::warn!(
-                "body 0x{guid:08X} motion table 0x{:08X} cannot play admitted {channel} command 0x{:08X} in style 0x{:08X}",
-                table.id,
-                command.raw(),
-                runtime.state.style.raw(),
-            );
-        }
-        &runtime.tick
+        runtime.remote_motion = None;
+        runtime.drive_for_guid(table, guid, order, quantum)
     }
 }
 

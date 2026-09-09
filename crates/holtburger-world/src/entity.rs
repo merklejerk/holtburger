@@ -1518,6 +1518,21 @@ impl Entity {
     }
 
     pub fn set_property(&mut self, update: PropertyUpdate) {
+        // Retail player killer status assignment replaces all three status flags. Apply at
+        // mutation time so a later description can supersede them.
+        if let PropertyUpdate::Int(PropertyInt::PlayerKillerStatus, status) = &update {
+            self.flags.remove(
+                ObjectDescriptionFlag::PLAYER_KILLER
+                    | ObjectDescriptionFlag::PK_LITE_STATUS
+                    | ObjectDescriptionFlag::FREE_PK_STATUS,
+            );
+            self.flags.insert(match *status {
+                4 => ObjectDescriptionFlag::PLAYER_KILLER,
+                0x40 => ObjectDescriptionFlag::PK_LITE_STATUS,
+                0x20 => ObjectDescriptionFlag::FREE_PK_STATUS,
+                _ => ObjectDescriptionFlag::empty(),
+            });
+        }
         let scale_update = match &update {
             PropertyUpdate::Float(PropertyFloat::DefaultScale, value) => Some(*value as f32),
             _ => None,
@@ -1747,5 +1762,28 @@ impl EntityManager {
 
     pub fn remove(&mut self, guid: impl Into<Guid>) -> Option<Entity> {
         self.entities.remove(&guid.into())
+    }
+}
+
+#[cfg(test)]
+mod collision_status_tests {
+    use super::*;
+
+    #[test]
+    fn pk_updates_replace_status_flags_without_erasing_identity() {
+        let mut entity = Entity::new(Guid(1), "Player".into(), WorldPosition::default());
+        let identity = ObjectDescriptionFlag::PLAYER | ObjectDescriptionFlag::ATTACKABLE;
+        entity.flags = identity;
+        for (status, expected) in [
+            (4, ObjectDescriptionFlag::PLAYER_KILLER),
+            (0x40, ObjectDescriptionFlag::PK_LITE_STATUS),
+            (0x20, ObjectDescriptionFlag::FREE_PK_STATUS),
+            (1, ObjectDescriptionFlag::empty()),
+            (4, ObjectDescriptionFlag::PLAYER_KILLER),
+            (0, ObjectDescriptionFlag::empty()),
+        ] {
+            entity.set_property(PropertyUpdate::Int(PropertyInt::PlayerKillerStatus, status));
+            assert_eq!(entity.flags, identity | expected);
+        }
     }
 }

@@ -536,6 +536,7 @@ impl ClientCollisionCoordinator {
                         self.body_target = None;
                         continue;
                     };
+                    world.synchronize_entity_contact_status(completion.target.player.guid);
                     self.body_readiness = ClientBodyReadiness::Ready {
                         player: completion.target.player,
                     };
@@ -599,6 +600,7 @@ impl ClientCollisionCoordinator {
                         ) else {
                             continue;
                         };
+                        world.synchronize_entity_contact_status(current.guid);
                         self.remote_bodies
                             .get_mut(&target.body_id)
                             .expect("matching remote demand vanished during installation")
@@ -1176,6 +1178,7 @@ mod tests {
                     align_path: false,
                 },
                 entity_collision: DynamicBodyCollisionDefinition {
+                    player_collision: None,
                     contact_response: holtburger_world::EntityContactResponse::Character(
                         holtburger_world::EntityIntegrationEligibility::Eligible,
                     ),
@@ -1187,6 +1190,7 @@ mod tests {
                         fallback_scale: holtburger_content::ColliderScale::uniform(1.0).unwrap(),
                     }),
                     dynamic_collision: EntityDynamicCollisionPolicy {
+                        is_static: false,
                         target: holtburger_world::EntityCollisionParticipation::Solid,
                         mover_accepts_response: true,
                         accepts_peer_reports: true,
@@ -1677,6 +1681,8 @@ mod tests {
         let requested = position(0x1234_0001);
         world.seed_local_player_entity(guid, "Player", requested);
         facts(&mut world, guid);
+        world.entities.get_mut(guid).unwrap().flags =
+            holtburger_common::properties::ObjectDescriptionFlag::PLAYER;
         let (started_tx, started_rx) = std::sync::mpsc::sync_channel(0);
         let (release_tx, release_rx) = std::sync::mpsc::sync_channel(0);
         let source = Arc::new(FakeSource {
@@ -1696,6 +1702,12 @@ mod tests {
         let live = position(0x1234_0002);
         world.entities.get_mut(guid).unwrap().position = live;
         assert!(!world.set_local_player_runtime_pose(live).is_empty());
+        world.entities.get_mut(guid).unwrap().set_property(
+            holtburger_common::properties::PropertyUpdate::Int(
+                holtburger_common::properties::PropertyInt::PlayerKillerStatus,
+                4,
+            ),
+        );
         release_tx.send(()).unwrap();
         wait_for_readiness(&mut coordinator, &mut world, |readiness| {
             matches!(readiness, ClientBodyReadiness::Ready { .. })
@@ -1707,7 +1719,19 @@ mod tests {
             .body(SpatialBodyId::LocalPlayer(guid))
             .expect("live local-player body must remain registered");
         assert_eq!(body.pose, live);
-        assert!(body.physical.is_some());
+        let physics = world.entities.get(guid).unwrap().physics.effective();
+        let retained = body
+            .physical
+            .as_ref()
+            .unwrap()
+            .dynamic_configuration_for_state(physics, local_player_physical_demand(physics))
+            .unwrap();
+        assert_eq!(
+            retained.definition().entity_collision.player_collision,
+            holtburger_world::PlayerCollisionStatus::from_description(
+                world.entities.get(guid).unwrap().flags
+            ),
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

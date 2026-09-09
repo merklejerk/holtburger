@@ -288,6 +288,10 @@ pub(crate) fn current_entity_peer_overlap<'a>(
         .as_ref()
         .and_then(|physical| physical.dynamic.as_ref())
         .context("solidifying object has no dynamic physical state")?;
+    // Test the requested solid state; current ethereal participation must not make
+    // solidification automatically succeed (retail checks peers before committing it).
+    let mut prospective = object_dynamic.collision.dynamic_collision;
+    prospective.target = EntityCollisionParticipation::Solid;
     let anchor = Guid((object.pose.landblock_id.0 & 0xffff_0000) | 0xffff);
     let object_shapes = placed_target_shapes(object_dynamic, object.pose, anchor)?;
     if object_shapes.is_empty() {
@@ -308,11 +312,11 @@ pub(crate) fn current_entity_peer_overlap<'a>(
             || !object_dynamic
                 .placement
                 .intersects_reached(&peer_dynamic.placement)
-            || !peer_dynamic
-                .collision
-                .dynamic_collision
-                .mover_accepts_response
-            || pair_is_filtered(peer_dynamic, object_dynamic)
+            || peer_dynamic.collision.dynamic_collision.contact_with(
+                prospective,
+                peer_dynamic.collision.player_collision,
+                object_dynamic.collision.player_collision,
+            ) != crate::EntityContactInteraction::Blocking
         {
             continue;
         }
@@ -331,10 +335,4 @@ pub(crate) fn current_entity_peer_overlap<'a>(
         }
     }
     Ok(false)
-}
-
-fn pair_is_filtered(mover: &DynamicBodyRuntimeState, peer: &DynamicBodyRuntimeState) -> bool {
-    peer.collision.dynamic_collision.missile
-        || (mover.collision.dynamic_collision.missile
-            && peer.collision.dynamic_collision.target == EntityCollisionParticipation::Ethereal)
 }

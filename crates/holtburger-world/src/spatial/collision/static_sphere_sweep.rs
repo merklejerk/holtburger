@@ -25,8 +25,8 @@ pub struct StaticSphereSweepRequest {
     pub anchor: Guid,
     /// Sphere center at normalized time zero.
     pub start: Vector3,
-    /// Sphere center at normalized time one.
-    pub end: Vector3,
+    /// Authoritative travel; retaining it avoids subtracting rounded endpoint coordinates.
+    pub displacement: Vector3,
     /// Previously committed EnvCell, or `None` outdoors.
     pub previous_cell: Option<Guid>,
     /// Positive nominal sphere radius. Hard admission permits only the fixed contact band;
@@ -34,6 +34,13 @@ pub struct StaticSphereSweepRequest {
     pub radius: f32,
     /// Optional collision-domain exclusions owned by the querying body.
     pub filter: PhysicalCollisionFilter,
+}
+
+impl StaticSphereSweepRequest {
+    /// Endpoint used for spatial selection and committed placement.
+    pub fn end(self) -> Vector3 {
+        self.start + self.displacement
+    }
 }
 
 /// Earliest static obstruction reached by one continuous sphere displacement.
@@ -134,7 +141,7 @@ impl CollisionScene {
         let traced = self.trace_static_sphere(request)?;
         let mut earliest = traced.hit.map(HardSphereSweepHit::World);
         let ball = Ball::new(request.radius);
-        let moving = MovingSphereCast::new(&ball, request.start, request.end);
+        let moving = MovingSphereCast::new(&ball, request.start, request.displacement);
         for HardEntityShape {
             body_id,
             shape,
@@ -180,7 +187,7 @@ impl CollisionScene {
         fraction: f32,
         policy: CollisionQueryPolicy,
     ) -> Result<UncoveredCollisionQuery<PlacedMotionPath>, CollisionQueryError> {
-        let end = request.start + (request.end - request.start) * fraction;
+        let end = request.start + request.displacement * fraction;
         let path = self.transit_motion_path(PlacedMotionPathRequest {
             anchor: request.anchor,
             previous_cell: request.previous_cell,
@@ -328,11 +335,11 @@ impl CollisionScene {
         let sweep = SphereSweep {
             anchor: request.anchor,
             start: request.start,
-            end: request.end,
+            end: request.end(),
             radius: request.radius,
         };
         validate_sweep(sweep)?;
-        let displacement = request.end - request.start;
+        let displacement = request.displacement;
 
         let swept_placement = self.sweep_candidate_membership(sweep, request.previous_cell)?;
 
@@ -347,7 +354,7 @@ impl CollisionScene {
         }
 
         let moving_ball = Ball::new(request.radius);
-        let narrow_phase = MovingSphereCast::new(&moving_ball, request.start, request.end);
+        let narrow_phase = MovingSphereCast::new(&moving_ball, request.start, request.displacement);
         let mut earliest = None;
 
         if swept_placement.reaches_outdoors() {
@@ -356,7 +363,7 @@ impl CollisionScene {
                     continue;
                 };
                 let center = point_between_landblocks(
-                    (request.start + request.end) * 0.5,
+                    request.start + request.displacement * 0.5,
                     request.anchor.0,
                     owner.0,
                 );
@@ -394,7 +401,7 @@ impl CollisionScene {
                 .filter
                 .excludes(PhysicalCollisionExclusions::ENTIRELY_WATER_BARRIER)
         {
-            update_water_restriction_hit(self, sweep, &touched, &mut earliest);
+            update_water_restriction_hit(self, sweep, displacement, &touched, &mut earliest);
         }
 
         Ok(StaticSphereTrace {
@@ -476,7 +483,7 @@ pub(crate) fn sphere_path_touches_shape(
                 return Ok((end - start).dot(&contact.normal) < 0.0);
             }
             let horizontal_end = Vector3::new(end.x, end.y, start.z);
-            MovingSphereCast::new(&ball, start, horizontal_end).update_shape_hit(
+            MovingSphereCast::new(&ball, start, horizontal_end - start).update_shape_hit(
                 &Ball::new(cylinder.radius * scale),
                 Pose::from_translation(parry_vector(Vector3::new(low.x, low.y, start.z))),
                 &mut hit,
@@ -484,14 +491,13 @@ pub(crate) fn sphere_path_touches_shape(
             return Ok(hit.is_some());
         }
     }
-    let cast = MovingSphereCast::new(&ball, start, end);
+    let cast = MovingSphereCast::new(&ball, start, end - start);
     cast.update_collider_hit(shape, anchor, anchor, &mut hit)?;
     Ok(hit.is_some())
 }
 
 impl MovingSphereCast {
-    fn new(ball: &Ball, start: Vector3, end: Vector3) -> Self {
-        let displacement = end - start;
+    fn new(ball: &Ball, start: Vector3, displacement: Vector3) -> Self {
         Self {
             ball: Ball::new(hard_contact_radius(ball.radius)),
             pose: Pose::from_translation(parry_vector(start)),
@@ -828,6 +834,7 @@ pub(super) fn swept_query_cells(sweep: SphereSweep) -> GlobalCellRange {
 fn update_water_restriction_hit(
     scene: &CollisionScene,
     sweep: SphereSweep,
+    displacement: Vector3,
     touched: &[Guid],
     earliest: &mut Option<StaticSphereSweepHit>,
 ) {
@@ -844,7 +851,7 @@ fn update_water_restriction_hit(
         {
             continue;
         }
-        if let Some(hit) = landblock_entry_hit(local_start, sweep.end - sweep.start) {
+        if let Some(hit) = landblock_entry_hit(local_start, displacement) {
             update_earliest(earliest, hit);
         }
     }
@@ -918,6 +925,36 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
+    fn wall_tangent_is_admitted_without_endpoint_rounding() {
+        // Recorded coordinate scale and wall orientation. The stored endpoint loses
+        // the exact tangent even though the original displacement is perpendicular.
+        let start = Vector3::new(96.07037, 94.91852, 1.0);
+        let normal = Vector3::new(-0.8660254, -0.5, 0.0);
+        let tangent = Vector3::new(-0.5, 0.8660254, 0.0);
+        let origin = Vector3::new(96.0, 96.0, 0.0);
+        let vertices = [
+            origin - tangent * 4.0,
+            origin + tangent * 4.0,
+            origin + Vector3::new(0.0, 0.0, 8.0),
+        ];
+        let ball = Ball::new(0.48);
+        assert_eq!(tangent.dot(&normal), 0.0);
+        let rounded = start + tangent - start;
+        assert!(rounded.dot(&normal) < 0.0);
+        let mut hit = None;
+        MovingSphereCast::new(&ball, start, tangent)
+            .update_triangle_hit(vertices, normal, &mut hit)
+            .unwrap();
+        assert!(hit.is_none(), "wall rejected tangent travel: {hit:?}");
+
+        // A real inward component must still collide with the same finite wall.
+        MovingSphereCast::new(&ball, start, tangent - normal * 0.01)
+            .update_triangle_hit(vertices, normal, &mut hit)
+            .unwrap();
+        assert!(hit.is_some(), "wall admitted inward travel");
+    }
+
+    #[test]
     fn tolerated_floor_tangency_does_not_hide_a_crossed_wall() {
         let radius = 0.5;
         let ball = Ball::new(radius);
@@ -927,7 +964,7 @@ mod tests {
             0.0,
             radius - crate::spatial::bsp_query::CONTACT_EPSILON * 0.5,
         );
-        let moving = MovingSphereCast::new(&ball, start, end);
+        let moving = MovingSphereCast::new(&ball, start, end - start);
         let mut hit = None;
         moving
             .update_triangle_hit(
@@ -976,7 +1013,7 @@ mod tests {
         let mut contacts = 0;
         for _ in 0..1024 {
             let mut hit = None;
-            MovingSphereCast::new(&ball, center, center + movement)
+            MovingSphereCast::new(&ball, center, movement)
                 .update_triangle_hit(vertices, normal, &mut hit)
                 .unwrap();
             contacts += usize::from(hit.is_some());
@@ -1026,7 +1063,7 @@ mod tests {
                 Vector3::new(0.0, 0.0, -crate::spatial::bsp_query::CONTACT_EPSILON * 0.25);
             for _ in 0..1024 {
                 let mut hit = None;
-                MovingSphereCast::new(&ball, center, center + movement)
+                MovingSphereCast::new(&ball, center, movement)
                     .update_collider_hit(&shape, anchor, anchor, &mut hit)
                     .unwrap();
                 center = center + movement * hit.map_or(1.0, |hit| hit.time_of_impact);
@@ -1044,7 +1081,7 @@ mod tests {
             let inward = Vector3::new(-crate::spatial::bsp_query::CONTACT_EPSILON * 0.25, 0.0, 0.0);
             for _ in 0..1024 {
                 let mut hit = None;
-                MovingSphereCast::new(&ball, side, side + inward)
+                MovingSphereCast::new(&ball, side, inward)
                     .update_collider_hit(&shape, anchor, anchor, &mut hit)
                     .unwrap();
                 side = side + inward * hit.map_or(1.0, |hit| hit.time_of_impact);
@@ -1055,7 +1092,7 @@ mod tests {
             }
             let start = Vector3::new(0.0, 0.0, top + radius);
             let mut hit = None;
-            MovingSphereCast::new(&ball, start, start + Vector3::new(1.0, 0.0, 0.0))
+            MovingSphereCast::new(&ball, start, Vector3::new(1.0, 0.0, 0.0))
                 .update_collider_hit(&shape, anchor, anchor, &mut hit)
                 .unwrap();
             assert!(hit.is_none(), "nominal tangent was blocked: {hit:?}");
@@ -1079,7 +1116,7 @@ mod tests {
             let start = Vector3::new(0.0, 0.5, start_height);
             let end = Vector3::new(0.0, 0.5, end_height);
             let mut hit = None;
-            MovingSphereCast::new(&ball, start, end)
+            MovingSphereCast::new(&ball, start, end - start)
                 .update_triangle_hit(vertices, normal, &mut hit)
                 .unwrap();
             assert_eq!(
@@ -1130,7 +1167,7 @@ mod tests {
                 // admission allowance. Repetition must not refill that allowance.
                 let end = Vector3::new(center.x.next_down(), center.y, center.z);
                 let mut hit = None;
-                MovingSphereCast::new(&Ball::new(radius), center, end)
+                MovingSphereCast::new(&Ball::new(radius), center, end - center)
                     .update_collider_hit(&shape, anchor, anchor, &mut hit)
                     .unwrap();
                 blocked += usize::from(hit.is_some());
@@ -1167,7 +1204,7 @@ mod tests {
         let request = Vector3::new(0.06, 0.015, 0.0);
         let tangent = request - contact.normal * request.dot(&contact.normal);
         let end = start + tangent;
-        let moving = MovingSphereCast::new(&Ball::new(0.48), start, end);
+        let moving = MovingSphereCast::new(&Ball::new(0.48), start, end - start);
         // This is the stalled production corner: endpoint rounding turns the
         // projected tangent slightly inward, despite a clear route around the side.
         assert!(moving.displacement.dot(&contact.normal) < 0.0);
@@ -1211,7 +1248,7 @@ mod tests {
         ] {
             assert!(sphere_path_touches_shape(&shape, start, end, ball.radius, anchor).unwrap());
             let mut hit = None;
-            MovingSphereCast::new(&ball, start, end)
+            MovingSphereCast::new(&ball, start, end - start)
                 .update_collider_hit(&shape, anchor, anchor, &mut hit)
                 .unwrap();
             let hit = hit.expect("the path crosses the cylinder surface");

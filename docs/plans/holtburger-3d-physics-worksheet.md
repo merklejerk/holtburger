@@ -361,6 +361,74 @@ Session-local evidence: `/tmp/holtburger-hallway-passive.json`, `/tmp/holtburger
 
 The original diagnosis runs moved the character. At that stage, the last observed pose after the return run was: `(467.2666, -366.6013, -17.995)` in `0x001e0126`, facing approximately north. Diagnostic clients disconnected after each capture.
 
+## 3. Angled movement sticks against walls
+
+- Reported: 2026-09-10.
+- Status: **Resolved**. The user confirmed the movement-vector change fixes the observed behavior and authorized closing this issue.
+- Symptom: Running obliquely into obstacles frequently stops the character instead of preserving lateral wall sliding. The user reports retail preserves the lateral component except for a directly perpendicular approach.
+
+### Diagnosis
+
+**The shared hard-collision sweep can mistake a projected wall tangent for another inward impact because its endpoints round in the stored coordinate frame.** Repeated zero-time impacts consume all three slide continuations and leave the character stationary. This reproduces through the production scene contact path against one flat polygon wall, without networking, portals, ramps, or other bodies. The exact wall observed by the user has not been captured; the synthetic case proves an independently sufficient cause of the reported symptom.
+
+The active path is `mobile_contact/step.rs::advance_hard_candidate`, not the older standalone grounded solver. It already removes inward velocity and spends the remaining time sliding. `sweep_body_motion` checks both body spheres. `collision/static_sphere_sweep.rs::MovingSphereCast::new` reconstructs travel by subtracting stored endpoints; `update_triangle_hit` treats any negative normal approach as collision-eligible. At an existing wall contact, the tiny inward component created by that rounding can produce another immediate hit even though the intended motion is tangent.
+
+Recorded 30-degree wall case:
+
+- Wall normal: `(-0.8660254, -0.5, 0)`.
+- Intended tangent for a remaining tick: `(-0.0075, 0.012990382, 0)`; its normal dot product is approximately `-4.66e-10`.
+- Reconstructed sweep chord: `(-0.007499695, 0.012992859, 0)`; its normal approach is approximately `-1.50e-6` m.
+- Starting plane distance: `0.47979707` m versus query radius `0.4798` m. The few micrometres of rounded overlap plus rounded inward travel repeatedly yield time of impact zero.
+- All three continuation attempts hit the same normal; subsequent ticks repeat the stopped state. Increasing the retry count would not correct this geometric classification.
+
+### Reproduction and scope
+
+A temporary asset-free diagnostic used `SpatialScene::advance_dynamic_entity_collection`, a grounded character, a flat floor, and the existing finite polygon-wall fixture. It rotated the wall, starting placement, and requested drive together, preserving the same relative approach: 2 m/s into the wall and 0.5 m/s along it. Each run lasted 60 ticks of 0.03 seconds; unconstrained lateral travel is 0.9 m. Wall rotation below is orientation in the coordinate frame, **not** a change in the relative approach angle.
+
+| Wall rotation | Accepted lateral travel |
+| --- | --- |
+| 0 degrees | 0.86367 m |
+| 15 degrees | 0.89996 m |
+| 30 degrees | 0.02822 m |
+| 45 degrees | 0.07498 m |
+| 60 degrees | 0.90017 m |
+| 75 degrees | 0.01500 m |
+| 90 degrees | 0.86367 m |
+| 135 degrees | 0.89985 m |
+
+This is a general numerical weakness in polygon contact admission, not a special dungeon configuration or a missing wall-slide feature. Orientation and position affect representable endpoint rounding, explaining why equivalent approaches can behave differently. The evidence does not establish that every obstacle class has this defect. The same narrow-phase module already handles a related projected-tangent rounding case for convex volume contacts using a bounded whole-chord penetration check; polygon triangles do not have that treatment. Existing axis-aligned wall and cylinder sliding tests therefore do not cover this failure.
+
+Scope clarification: the reproduction wall was explicitly placed as `StaticColliderPlacement::OutdoorExplicit`, not an EnvCell structure. Building shells, outdoor static objects, and cell structures selected by `CollisionScene` share `MovingSphereCast::update_collider_hit`; BSP polygon shapes then share `sweep_polygon` and `update_triangle_hit`. Thus buildings and other static polygon geometry are within the affected implementation scope. Hard entity BSP shapes also call this same collider narrow phase, and terrain calls the triangle routine directly. Shared code establishes exposure, not a reproduced failure for every content category; balls and cylinders take different shape-specific paths. Validation must include outdoor buildings and static objects as well as indoor walls.
+
+### Final fix and live confirmation
+
+Preserve the requested displacement through the hard-sphere sweep instead of converting it to an endpoint and reconstructing it by subtraction. `StaticSphereSweepRequest` now owns `start` plus `displacement`; `end()` is derived for spatial selection and placement. `sweep_motion_sphere` passes the actual requested movement. Narrow-phase collision, accepted-prefix construction, terrain candidate midpoint, and water-entry restriction checks consume that displacement directly. Camera clearance also passes its existing ray directly. Accepted-path report queries derive displacement from their actual path endpoints at their own boundary.
+
+The user tested the worktree change and reported “seems good now,” then authorized closing the issue. This supports resolving the reported symptom with the narrower fix. No new tolerance, contact-boundary solver, persistent manifold, or body-placement refactor is part of this change. The worksheet remains open for subsequent issues.
+
+Retail retains a horizontal sliding normal (`acclient.c:300478-300493`) and projects movement along its intersection with the supporting plane (`acclient.c:300623-300668`). Preserving the already-computed slide removes a lossy internal conversion; it does not introduce a new retail response policy.
+
+### Review and verification
+
+The final quality review covers the movement producer, public sweep contract and constructors, static/entity narrow phase, accepted-prefix and topology boundary, terrain selection, water restriction entry, camera-clearance caller, endpoint-based report queries, and migrated tests. Existing contact bands, collision response, impact timing, coverage policy, and crate ownership remain intact. The retained change avoids parallel endpoint/displacement state and adds no new subsystem.
+
+Final validation: **378 core and 725 world tests passed (1,103 total)**, plus doctests; core/world/3D-host all-target clippy passed with warnings denied; formatting and diff checks passed. The focused collision regression admits a tangent whose rounded endpoint would imply inward movement and still blocks genuine inward travel. Review removed the remaining camera-clearance endpoint round trip; no blocking design findings remain in the reviewed scope. Logs: `/tmp/wall-closeout-tests.txt` and `/tmp/wall-closeout-clippy.txt`. User verification covers the reported live behavior, not every geometry or character configuration.
+
+### Separate finding and superseded exploration
+
+The earlier investigation explored bounded contact allowances, conservative stopping distance, and a richer contact-boundary solver. The first two failed sustained-motion or existing physics checks and were removed. An isolated 2-D structural prototype passed 768 synthetic cases but did not establish a need for that machinery in the reported live case. The broader solver proposal is **superseded for this issue**, not pending implementation work.
+
+A synthetic offset-body counterexample also showed that independently translating cached sphere centers and body roots can rebuild a sphere 7.62939453125 micrometres beyond its previously accepted center on the next tick. This is a confirmed arithmetic discrepancy, but its connection to the user's character or an observable remaining defect is **unproven**. Calling pose-owned placement a prerequisite for this fix was stronger than the evidence justified. Do not expand this resolved issue into a movement/stairs/rotation refactor without a separate behavioral reproduction.
+
+The possible follow-up direction, if such a reproduction is found, is to validate the exact root/orientation and derived sphere geometry that will be published. It is a separate concern, not a blocker to closing this issue.
+
+Session-local diagnostic artifacts remain available:
+
+- Original wall captures: `/tmp/holtburger-wall-angle-results.txt`, `/tmp/holtburger-wall-contact-trace.txt`, `/tmp/holtburger-wall-cast-trace.txt`.
+- Rejected experiments: `/tmp/wall-prototype-bound.txt`, `/tmp/wall-prototype-matrix.txt`, `/tmp/wall-prototype-world-tests.txt`.
+- Isolated structural prototype: `/tmp/wall-structural-prototype.py`, `/tmp/wall-structural-results-final.json`.
+- Offset-body arithmetic reproduction: `/tmp/wall-root-publication-repro.py`, `/tmp/wall-root-publication-repro.json`.
+
 ## Issue queue
 
 Awaiting subsequent user reports. Worksheet remains open after individual issues are resolved.

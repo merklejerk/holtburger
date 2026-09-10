@@ -1698,7 +1698,7 @@ mod tests {
                     .sweep_static_sphere(holtburger_world::StaticSphereSweepRequest {
                         anchor: OWNER,
                         start: Vector3::new(120.0, 96.0, 2.5),
-                        end: Vector3::new(114.0, 96.0, 2.5),
+                        displacement: Vector3::new(-6.0, 0.0, 0.0),
                         previous_cell: None,
                         radius: 0.48,
                         filter: PhysicalCollisionFilter::ALL,

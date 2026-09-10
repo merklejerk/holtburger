@@ -3314,7 +3314,7 @@ mod tests {
             .sweep_static_sphere(StaticSphereSweepRequest {
                 anchor: owner,
                 start,
-                end,
+                displacement: end - start,
                 previous_cell: None,
                 radius,
                 filter: PhysicalCollisionFilter::ALL,
@@ -3352,7 +3352,7 @@ mod tests {
         let request = StaticSphereSweepRequest {
             anchor: Guid(0xda55_ffff),
             start: center + Vector3::new(0.0, 0.0, 1.0),
-            end: center + Vector3::new(0.0, 0.0, -1.0),
+            displacement: Vector3::new(0.0, 0.0, -2.0),
             previous_cell: Some(cell),
             radius: 0.5,
             filter: PhysicalCollisionFilter::ALL,
@@ -3374,7 +3374,7 @@ mod tests {
         let request = StaticSphereSweepRequest {
             anchor: owner,
             start: Vector3::new(20.0, 20.0, 10.0),
-            end: Vector3::new(300.0, 20.0, 10.0),
+            displacement: Vector3::new(280.0, 0.0, 0.0),
             previous_cell: None,
             radius: 0.5,
             filter: PhysicalCollisionFilter::ALL,
@@ -3396,7 +3396,7 @@ mod tests {
         };
         let before = scene(vec![blocker(50.0)], Vec::new());
         let hit = before.sweep_static_sphere(request).unwrap().unwrap();
-        let accepted = request.start + (request.end - request.start) * hit.time_of_impact;
+        let accepted = request.start + request.displacement * hit.time_of_impact;
         assert!(accepted.x < METERS_PER_LANDBLOCK);
 
         let after = scene(vec![blocker(250.0)], Vec::new());
@@ -3456,7 +3456,7 @@ mod tests {
                 StaticSphereSweepRequest {
                     anchor: Guid(0xda55_ffff),
                     start: Vector3::new(20.0, 20.0, 10.0),
-                    end: Vector3::new(boundary + 1.0, 20.0, 10.0),
+                    displacement: Vector3::new(boundary + 1.0 - 20.0, 0.0, 0.0),
                     previous_cell: Some(Guid(0xda55_0100)),
                     radius: 0.5,
                     filter: PhysicalCollisionFilter::ALL,
@@ -3493,7 +3493,7 @@ mod tests {
         let request = |x| StaticSphereSweepRequest {
             anchor: owner,
             start: Vector3::new(boundary - 2.0, 20.0, 10.0),
-            end: Vector3::new(x, 20.0, 10.0),
+            displacement: Vector3::new(x - (boundary - 2.0), 0.0, 0.0),
             previous_cell: Some(cell),
             radius: 0.5,
             filter: PhysicalCollisionFilter::ALL,
@@ -3533,7 +3533,7 @@ mod tests {
             .sweep_hard_sphere(
                 StaticSphereSweepRequest {
                     start: exit.path.final_point().center(),
-                    end: request(boundary - 2.0).end,
+                    displacement: request(boundary - 2.0).end() - exit.path.final_point().center(),
                     previous_cell: None,
                     ..request(boundary - 2.0)
                 },
@@ -3554,7 +3554,7 @@ mod tests {
         let request = StaticSphereSweepRequest {
             anchor: owner,
             start: Vector3::new(20.0, 20.0, 1.0),
-            end: Vector3::new(21.0, 20.0, 1.0),
+            displacement: Vector3::new(1.0, 0.0, 0.0),
             previous_cell: None,
             radius: 0.25,
             filter: PhysicalCollisionFilter::ALL,
@@ -3652,7 +3652,7 @@ mod tests {
         let request = StaticSphereSweepRequest {
             anchor: owner,
             start: Vector3::new(0.0, 10.0, 10.0),
-            end: Vector3::new(10.0, 10.0, 10.0),
+            displacement: Vector3::new(10.0, 0.0, 0.0),
             previous_cell: None,
             radius: 0.5,
             filter: PhysicalCollisionFilter::ALL,
@@ -3708,7 +3708,7 @@ mod tests {
         let request = |end| StaticSphereSweepRequest {
             anchor: owner,
             start,
-            end,
+            displacement: end - start,
             previous_cell: None,
             radius: 0.5,
             filter: PhysicalCollisionFilter::ALL,

@@ -1401,13 +1401,12 @@ impl KinematicBoomController {
                 unavailable_owner: None,
             });
         }
-        let requested_end = seed_pose.coords + ray;
         let hit = scene
             .sweep_static_sphere_with_policy(
                 StaticSphereSweepRequest {
                     anchor,
                     start: seed_pose.coords,
-                    end: requested_end,
+                    displacement: ray,
                     previous_cell: seed.cell,
                     radius: clearance_radius,
                     filter: PhysicalCollisionFilter::ALL,

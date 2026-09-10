@@ -1547,7 +1547,7 @@ fn sweep_motion_sphere(
         StaticSphereSweepRequest {
             anchor,
             start: sphere.center,
-            end: sphere.center + requested,
+            displacement: requested,
             previous_cell: contact.membership.committed_cell(),
             radius: sphere.radius,
             filter: contact.filter,

@@ -57,6 +57,7 @@ function fixture() {
 		],
 	);
 	const parts = [1, 0.4, 1, 1].map((a) => ({
+		renderState: { translucency: 0, textureVelocity: [0, 0] as const },
 		frameInstance: {
 			color: { a, r: 1, g: 1, b: 1 },
 			sourceToLandblock: Mat4.identity(),

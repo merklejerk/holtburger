@@ -29,6 +29,7 @@ export function createDynamicDepthTestFixture(
 		},
 		parts: [
 			{
+				renderState: { translucency: 0, textureVelocity: [0, 0] },
 				frameInstance: {
 					color: { a: 1, b: 1, g: 1, r: 1 },
 					sourceToLandblock: Mat4.identity(),

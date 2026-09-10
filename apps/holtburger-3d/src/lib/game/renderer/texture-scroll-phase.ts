@@ -1,23 +1,17 @@
 /**
- * Derive the UV scroll phase for one authored rate.
+ * Derive a looping U/V cursor from the shared presentation clock, in CPU double precision.
+ * Equal rates remain synchronized across independently activated objects and all frame views.
  *
- * Retail accumulates instead (`CPhysics::UpdateTexVelocity`, acclient.c:299999, adds `rate * dt`
- * per frame and wraps at 1) into a registry keyed by GfxObj DataID, which is what keeps every
- * instance of a tiled flowing surface in phase at its seams. Deriving from a shared clock
- * reproduces that seam synchronization by arithmetic identity — two draws with the same rate are
- * always in lockstep — while keeping the renderer free of mutable per-frame state.
+ * RETAIL DIVERGENCE: acclient.c:299999 integrates rates from activation; :300193 retains phase
+ * on a rate change and freezes the mesh when stopping. Our absolute-time cursor joins the
+ * current phase on activation, may jump on rate changes, and resets a zero-rate axis to zero.
+ * Restoring integration would require phase history and activation/lifetime bookkeeping.
+ * Census 2026-09-10: all 11 script hooks author constant positive rates; zero animation and
+ * part-scoped hooks. Sky layers also use this helper, including negative authored rates.
+ * Wrapping the offset before clamped sampling deliberately makes its cursor periodic too.
  *
- * The one precondition is that each scrolling texture's rate is constant for the session, since
- * `fract(r × t)` equals `fract(∫r dt)` only for constant `r`. Verified 2026-08-06 across the whole
- * archive: no GfxObj DataID is authored two distinct script-driven rates. The absolute phase origin
- * differs from retail's (its accumulators start at first activation) but is unobservable for a
- * looping scroll; only relative phase between same-texture instances is visible, and that matches.
- *
- * Computed in f64 before the result reaches an f32 uniform, because `rate × t` degrades in f32 over
- * a multi-hour session and would visibly quantize the scroll.
- *
- * Shared by the sky pass and the authored `TextureVelocity` effect consumer; neither derives its
- * own.
+ * The product is computed in f64 before conversion to GPU f32, avoiding long-session f32
+ * multiplication jitter. Call once per selected part/frame, not per view or shader vertex.
  */
 export function textureScrollPhase(
 	velocity: readonly [number, number],

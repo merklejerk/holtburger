@@ -1,3 +1,6 @@
+import { EffectSystem } from "../../lib/game/systems/effect-system";
+import { behaviorTargetId } from "../../lib/game/behavior/behavior-event-router";
+import type { ActiveDynamicPart } from "../../lib/game/systems/components";
 import {
 	createObjectFragmentShader,
 	createObjectVertexShader,
@@ -15,7 +18,10 @@ import {
 } from "../../lib/game/renderer/object-material-table";
 import type { PreparedObjectMaterial } from "../../lib/game/renderer/object-rendering-policy";
 import { compileDynamicIndexBatches } from "../../lib/game/renderer/dynamic-index-batches";
-import { WebGL2DynamicPosePages } from "../../lib/game/renderer/webgl2-dynamic-pose-pages";
+import {
+	DYNAMIC_POSE_TEXELS,
+	WebGL2DynamicPosePages,
+} from "../../lib/game/renderer/webgl2-dynamic-pose-pages";
 import { Mat4, Vec3 } from "../../lib/game/math/types";
 import { mat4ToFloat32Array } from "../../lib/game/math/matrices";
 import type { PreparedObjectSurface } from "../../lib/game/renderer/object-rendering-policy";
@@ -184,12 +190,17 @@ export async function probeDynamicMaterialTables() {
 		let referenceVertex = replaceDeclaration(
 			createObjectVertexShader(false),
 			"uniform mat4 uLocalToLandblock;",
-			"uniform mat4 uLocalToLandblock;\nuniform vec4 uPartColor;",
+			"uniform mat4 uLocalToLandblock;\nuniform vec4 uPartColor;\nuniform vec2 uTextureOffset;",
 		);
 		referenceVertex = replaceDeclaration(
 			referenceVertex,
 			"vInstanceColor = vec4(1.0);",
 			"vInstanceColor = uPartColor;",
+		);
+		referenceVertex = replaceDeclaration(
+			referenceVertex,
+			"vTextureOffset = vec2(0.0);",
+			"vTextureOffset = uTextureOffset;",
 		);
 		const reference = linkWebGL2Program(
 			gl,
@@ -241,7 +252,14 @@ export async function probeDynamicMaterialTables() {
 		const identity = new Float32Array([
 			1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1,
 		]);
-		const primaryPart = {
+		const primaryPart: Pick<
+			ActiveDynamicPart,
+			"renderState" | "frameInstance"
+		> = {
+			renderState: {
+				translucency: 0,
+				textureVelocity: [0, 0],
+			},
 			frameInstance: {
 				sourceToLandblock: new Mat4(
 					0.4,
@@ -264,7 +282,14 @@ export async function probeDynamicMaterialTables() {
 				color: { r: 1, g: 1, b: 1, a: 1 },
 			},
 		};
-		const secondaryPart = {
+		const secondaryPart: Pick<
+			ActiveDynamicPart,
+			"renderState" | "frameInstance"
+		> = {
+			renderState: {
+				translucency: 0,
+				textureVelocity: [0, 0],
+			},
 			frameInstance: {
 				sourceToLandblock: new Mat4(
 					0.3,
@@ -287,15 +312,27 @@ export async function probeDynamicMaterialTables() {
 				color: { r: 1, g: 1, b: 1, a: 1 },
 			},
 		};
+		const effects = new EffectSystem();
+		const nodeId = "scene-node:1" as const;
+		const target = { targetId: behaviorTargetId(nodeId), generation: 1 };
+		effects.install(nodeId, 2, 0);
 		const packedEntities = new Map([
-			["padding", [primaryPart]],
+			[
+				"padding",
+				[
+					{
+						...primaryPart,
+						renderState: { translucency: 0, textureVelocity: [0, 0] as const },
+					},
+				],
+			],
 			["fixture", [primaryPart, secondaryPart]],
 		]);
 		const poses = new Float32Array([
 			...mat4ToFloat32Array(primaryPart.frameInstance.sourceToLandblock),
-			...[1, 1, 1, 1],
+			...[1, 1, 1, 1, 0, 0, 0, 0],
 			...mat4ToFloat32Array(secondaryPart.frameInstance.sourceToLandblock),
-			...[1, 1, 1, 1],
+			...[1, 1, 1, 1, 0, 0, 0, 0],
 		]);
 		const buffer = (target: number, data: Float32Array | Uint32Array) => {
 			const resource = gl.createBuffer();
@@ -359,8 +396,16 @@ export async function probeDynamicMaterialTables() {
 				data,
 			);
 		};
-		upload(2, 1, 1, new Uint8Array([255, 255, 255, 255]));
-		upload(OBJECT_TEXTURE_UNITS.poses, 5, 2, poses);
+		upload(
+			2,
+			2,
+			2,
+			new Uint8Array([
+				255, 100, 100, 255, 100, 255, 100, 255, 100, 100, 255, 255, 255, 255,
+				255, 255,
+			]),
+		);
+		upload(OBJECT_TEXTURE_UNITS.poses, DYNAMIC_POSE_TEXELS, 2, poses);
 		const configure = (program: WebGLProgram) => {
 			gl.useProgram(program);
 			const uniform = (name: string) => requireWebGL2Uniform(gl, program, name);
@@ -374,12 +419,17 @@ export async function probeDynamicMaterialTables() {
 			gl.uniform1i(uniform("uBase"), 0);
 			gl.uniform1i(uniform("uPalette"), 1);
 			gl.uniform1i(uniform("uDetail"), 2);
+			gl.uniform1i(uniform("uUseDetail"), 1);
+			gl.uniform4f(uniform("uDetailRect"), 0, 0, 1, 1);
+			gl.uniform1f(uniform("uDetailTiling"), 3);
 			return uniform;
 		};
 		gl.viewport(0, 0, canvas.width, canvas.height);
 		const prototypePreparationMs = performance.now() - preparationStarted;
 		const cases: {
 			kind: number;
+			clockSeconds: number;
+			textureScenario: string;
 			wrap: number;
 			rejection: boolean;
 			partOpacity: number;
@@ -390,201 +440,261 @@ export async function probeDynamicMaterialTables() {
 			strategy: "uniform" | "table" | "table-static" | "table-packed";
 			sample: Awaited<ReturnType<typeof measureSubmission>>;
 		}[] = [];
-		for (const [materialKind, kind] of [
-			["solid-color", 0],
-			["direct-color", 1],
-			["index8", 2],
-			["index16", 3],
-		] as const)
-			for (const wrap of [0, 1])
-				for (const rejection of [false, true])
-					for (const partOpacity of [1, 0.35, 0]) {
-						poses[19] = partOpacity;
-						primaryPart.frameInstance.color.a = partOpacity;
-						upload(OBJECT_TEXTURE_UNITS.poses, 5, 2, poses);
-						if (partOpacity === 0.35) {
-							gl.enable(gl.BLEND);
-							gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-						} else gl.disable(gl.BLEND);
-						// Two atlas rectangles exercise table-selected addressing; index16 uses a nonzero high byte.
-						const index = kind === 3 && !rejection ? 258 : 2;
-						const base = new Uint8Array(128 * 64 * 4);
-						for (let y = 0; y < 64; y += 1)
-							for (let x = 0; x < 128; x += 1) {
-								const checker = (Math.floor(x / 4) + Math.floor(y / 4)) % 2;
-								const encoded = index + checker;
-								base.set(
-									kind === 1
-										? [
-												checker * 200 + 20,
-												(1 - checker) * 170 + 40,
-												x + 50,
-												255,
-											]
-										: [encoded % 256, Math.floor(encoded / 256), 0, 255],
-									(y * 128 + x) * 4,
+		// Literal expected offsets make the rendered reference independent of production phase math.
+		for (const scenario of [
+			{
+				name: "activation",
+				time: 2,
+				rates: [
+					[0.125, 0.25],
+					[-0.0625, 0],
+				],
+				offsets: [
+					[0.25, 0.5],
+					[0.875, 0],
+				],
+			},
+			{
+				name: "equal-rates",
+				time: 3,
+				rates: [
+					[0.125, 0.25],
+					[0.125, 0.25],
+				],
+				offsets: [
+					[0.375, 0.75],
+					[0.375, 0.75],
+				],
+			},
+			{
+				name: "rate-change",
+				time: 3,
+				rates: [
+					[0.25, 0.125],
+					[-0.125, 0],
+				],
+				offsets: [
+					[0.75, 0.375],
+					[0.625, 0],
+				],
+			},
+			{
+				name: "reload",
+				time: 3,
+				rates: [
+					[0.125, 0.25],
+					[-0.0625, 0],
+				],
+				offsets: [
+					[0.375, 0.75],
+					[0.8125, 0],
+				],
+			},
+			{
+				name: "stop",
+				time: 3,
+				rates: [
+					[0, 0],
+					[0, 0],
+				],
+				offsets: [
+					[0, 0],
+					[0, 0],
+				],
+			},
+		] as const) {
+			const clockSeconds = scenario.time;
+			if (scenario.name === "reload") {
+				effects.remove(nodeId);
+				effects.install(nodeId, 2, 0);
+				posePages.destroy();
+			}
+			effects.applyTextureVelocity(target, {
+				kind: "texture-velocity",
+				uSpeed: scenario.rates[0][0],
+				vSpeed: scenario.rates[0][1],
+			});
+			effects.applyTextureVelocity(target, {
+				kind: "texture-velocity-part",
+				partIndex: 1,
+				uSpeed: scenario.rates[1][0],
+				vSpeed: scenario.rates[1][1],
+			});
+			const sample = effects.samplePresentation(nodeId);
+			const first = sample.partRenderStates[0];
+			const second = sample.partRenderStates[1];
+			if (!first || !second)
+				throw new Error("Texture probe lost its two effect parts.");
+			primaryPart.renderState = first;
+			secondaryPart.renderState = second;
+			for (const [materialKind, kind] of [
+				["solid-color", 0],
+				["direct-color", 1],
+				["index8", 2],
+				["index16", 3],
+			] as const)
+				for (const wrap of [0, 1])
+					for (const rejection of [false, true])
+						for (const partOpacity of [1, 0.35, 0]) {
+							poses.set(scenario.offsets[0], 20);
+							poses.set(scenario.offsets[1], DYNAMIC_POSE_TEXELS * 4 + 20);
+							poses[19] = partOpacity;
+							primaryPart.frameInstance.color.a = partOpacity;
+							upload(OBJECT_TEXTURE_UNITS.poses, DYNAMIC_POSE_TEXELS, 2, poses);
+							if (partOpacity === 0.35) {
+								gl.enable(gl.BLEND);
+								gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+							} else gl.disable(gl.BLEND);
+							// Two atlas rectangles exercise table-selected addressing; index16 uses a nonzero high byte.
+							const index = kind === 3 && !rejection ? 258 : 2;
+							const base = new Uint8Array(128 * 64 * 4);
+							for (let y = 0; y < 64; y += 1)
+								for (let x = 0; x < 128; x += 1) {
+									const checker = (Math.floor(x / 4) + Math.floor(y / 4)) % 2;
+									const encoded = index + checker;
+									base.set(
+										kind === 1
+											? [
+													checker * 200 + 20,
+													(1 - checker) * 170 + 40,
+													x + 50,
+													255,
+												]
+											: [encoded % 256, Math.floor(encoded / 256), 0, 255],
+										(y * 128 + x) * 4,
+									);
+								}
+							upload(0, 128, 64, base);
+							gl.texParameteri(
+								gl.TEXTURE_2D,
+								gl.TEXTURE_MIN_FILTER,
+								kind === 1 ? gl.LINEAR_MIPMAP_LINEAR : gl.NEAREST,
+							);
+							gl.texParameteri(
+								gl.TEXTURE_2D,
+								gl.TEXTURE_MAG_FILTER,
+								kind === 1 ? gl.LINEAR : gl.NEAREST,
+							);
+							if (kind === 1) gl.generateMipmap(gl.TEXTURE_2D);
+							const palette = new Uint8Array(512 * 4);
+							palette.set([220, 40, 80, 255], index * 4);
+							palette.set([20, 210, 130, 255], (index + 1) * 4);
+							upload(1, 256, 2, palette);
+							const surfaces = [
+								{
+									material: probeMaterial(
+										materialKind,
+										[1, 0.5, 0.7, rejection && kind < 2 ? 0.25 : 1],
+										0,
+									),
+									wrapRepeat: wrap === 1,
+									palettedClipMap: rejection,
+									luminosity: 0.1,
+									alphaTest: 0.5,
+								},
+								{
+									material: probeMaterial(materialKind, [0.5, 1, 0.7, 1], 64),
+									wrapRepeat: wrap === 0,
+									palettedClipMap: false,
+									luminosity: 0.2,
+									alphaTest: 0.5,
+								},
+							];
+							const physical = compileDynamicIndexBatches(
+								sourceIndices,
+								probeAppearance(surfaces),
+								surfaces,
+							);
+							if (
+								physical.batches.length !== 1 ||
+								physical.indices.length !== sourceIndices.length
+							)
+								throw new Error(
+									"Probe materials did not compile to one lossless physical batch.",
 								);
-							}
-						upload(0, 128, 64, base);
-						gl.texParameteri(
-							gl.TEXTURE_2D,
-							gl.TEXTURE_MIN_FILTER,
-							kind === 1 ? gl.LINEAR_MIPMAP_LINEAR : gl.NEAREST,
-						);
-						gl.texParameteri(
-							gl.TEXTURE_2D,
-							gl.TEXTURE_MAG_FILTER,
-							kind === 1 ? gl.LINEAR : gl.NEAREST,
-						);
-						if (kind === 1) gl.generateMipmap(gl.TEXTURE_2D);
-						const palette = new Uint8Array(512 * 4);
-						palette.set([220, 40, 80, 255], index * 4);
-						palette.set([20, 210, 130, 255], (index + 1) * 4);
-						upload(1, 256, 2, palette);
-						const surfaces = [
-							{
-								material: probeMaterial(
-									materialKind,
-									[1, 0.5, 0.7, rejection && kind < 2 ? 0.25 : 1],
-									0,
-								),
-								wrapRepeat: wrap === 1,
-								palettedClipMap: rejection,
-								luminosity: 0.1,
-								alphaTest: 0.5,
-							},
-							{
-								material: probeMaterial(materialKind, [0.5, 1, 0.7, 1], 64),
-								wrapRepeat: wrap === 0,
-								palettedClipMap: false,
-								luminosity: 0.2,
-								alphaTest: 0.5,
-							},
-						];
-						const physical = compileDynamicIndexBatches(
-							sourceIndices,
-							probeAppearance(surfaces),
-							surfaces,
-						);
-						if (
-							physical.batches.length !== 1 ||
-							physical.indices.length !== sourceIndices.length
-						)
-							throw new Error(
-								"Probe materials did not compile to one lossless physical batch.",
+							gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+							gl.bufferData(
+								gl.ELEMENT_ARRAY_BUFFER,
+								physical.indices,
+								gl.STATIC_DRAW,
 							);
-						gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
-						gl.bufferData(
-							gl.ELEMENT_ARRAY_BUFFER,
-							physical.indices,
-							gl.STATIC_DRAW,
-						);
-						const records = createObjectMaterialTable(surfaces);
-						upload(
-							OBJECT_TEXTURE_UNITS.materials,
-							OBJECT_MATERIAL_TEXELS,
-							2,
-							records,
-						);
-						const uniform = configure(reference);
-						gl.clear(gl.COLOR_BUFFER_BIT);
-						for (let part = 0; part < 2; part += 1) {
-							if (poses[part * 20 + 19] === 0) continue;
-							const offset = part * 20;
-							gl.uniformMatrix4fv(
-								uniform("uLocalToLandblock"),
-								false,
-								poses.subarray(part * 20, part * 20 + 16),
+							const records = createObjectMaterialTable(surfaces);
+							upload(
+								OBJECT_TEXTURE_UNITS.materials,
+								OBJECT_MATERIAL_TEXELS,
+								2,
+								records,
 							);
-							gl.uniform4fv(
-								uniform("uPartColor"),
-								poses.subarray(part * 20 + 16, part * 20 + 20),
-							);
-							gl.uniform4fv(
-								uniform("uMaterialColor"),
-								records.subarray(offset, offset + 4),
-							);
-							gl.uniform4fv(
-								uniform("uBaseRect"),
-								records.subarray(offset + 4, offset + 8),
-							);
-							gl.uniform4fv(
-								uniform("uPaletteRect"),
-								records.subarray(offset + 8, offset + 12),
-							);
-							gl.uniform1i(uniform("uMaterialKind"), kind);
-							gl.uniform1i(uniform("uWrapRepeat"), records[offset + 13]);
-							gl.uniform1i(uniform("uPalettedClipMap"), records[offset + 14]);
-							gl.uniform1f(uniform("uLuminosity"), records[offset + 15]);
-							gl.uniform1f(uniform("uAlphaTest"), 0.5);
-							gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_INT, part * 6 * 4);
-						}
-						const expected = new Uint8Array(canvas.width * canvas.height * 4);
-						gl.readPixels(
-							0,
-							0,
-							canvas.width,
-							canvas.height,
-							gl.RGBA,
-							gl.UNSIGNED_BYTE,
-							expected,
-						);
-						posePages.upload(packedEntities);
-						// Uploads use texture unit zero. Restore the fixture's sampled bindings explicitly.
-						for (const [unit, texture] of textures.entries()) {
-							gl.activeTexture(gl.TEXTURE0 + unit);
-							gl.bindTexture(gl.TEXTURE_2D, texture);
-						}
-						const packed = posePages.get("fixture");
-						gl.activeTexture(gl.TEXTURE0 + OBJECT_TEXTURE_UNITS.poses);
-						gl.bindTexture(gl.TEXTURE_2D, packed.texture);
-						const mergedUniform = configure(merged);
-						gl.uniform1i(mergedUniform("uFirstPoseRow"), packed.firstRow);
-						gl.clear(gl.COLOR_BUFFER_BIT);
-						gl.drawElements(gl.TRIANGLES, 12, gl.UNSIGNED_INT, 0);
-						const actual = new Uint8Array(expected.length);
-						gl.readPixels(
-							0,
-							0,
-							canvas.width,
-							canvas.height,
-							gl.RGBA,
-							gl.UNSIGNED_BYTE,
-							actual,
-						);
-						const error = gl.getError();
-						if (error !== gl.NO_ERROR)
-							throw new Error(`Material-table probe GL error ${error}.`);
-						if (!expected.some((value) => value !== 0))
-							throw new Error("Reference probe rendered no pixels.");
-						const mismatch = actual.findIndex(
-							(value, index) => value !== expected[index],
-						);
-						if (mismatch !== -1)
-							throw new Error(
-								`Material-table mismatch kind=${kind} wrap=${wrap} byte=${mismatch}: ${actual[mismatch]} != ${expected[mismatch]}.`,
-							);
-						cases.push({
-							kind,
-							wrap,
-							rejection,
-							partOpacity,
-							testedPixels: canvas.width * canvas.height,
-						});
-						if (partOpacity === 1) {
-							// Static geometry selects material rows independently of its draw transform.
-							// Keep source positions and separate transforms here to compare pixels exactly;
-							// geometry baking and range merging have their own later verification boundary.
-							const staticUniform = configure(staticTable);
+							const uniform = configure(reference);
 							gl.clear(gl.COLOR_BUFFER_BIT);
 							for (let part = 0; part < 2; part += 1) {
-								gl.uniformMatrix4fv(
-									staticUniform("uLocalToLandblock"),
-									false,
-									poses.subarray(part * 20, part * 20 + 16),
+								if (poses[part * DYNAMIC_POSE_TEXELS * 4 + 19] === 0) continue;
+								const offset = part * OBJECT_MATERIAL_TEXELS * 4;
+								gl.uniform2fv(
+									uniform("uTextureOffset"),
+									poses.subarray(
+										part * DYNAMIC_POSE_TEXELS * 4 + 20,
+										part * DYNAMIC_POSE_TEXELS * 4 + 22,
+									),
 								);
+								gl.uniformMatrix4fv(
+									uniform("uLocalToLandblock"),
+									false,
+									poses.subarray(
+										part * DYNAMIC_POSE_TEXELS * 4,
+										part * DYNAMIC_POSE_TEXELS * 4 + 16,
+									),
+								);
+								gl.uniform4fv(
+									uniform("uPartColor"),
+									poses.subarray(
+										part * DYNAMIC_POSE_TEXELS * 4 + 16,
+										part * DYNAMIC_POSE_TEXELS * 4 + 20,
+									),
+								);
+								gl.uniform4fv(
+									uniform("uMaterialColor"),
+									records.subarray(offset, offset + 4),
+								);
+								gl.uniform4fv(
+									uniform("uBaseRect"),
+									records.subarray(offset + 4, offset + 8),
+								);
+								gl.uniform4fv(
+									uniform("uPaletteRect"),
+									records.subarray(offset + 8, offset + 12),
+								);
+								gl.uniform1i(uniform("uMaterialKind"), kind);
+								gl.uniform1i(uniform("uWrapRepeat"), records[offset + 13]);
+								gl.uniform1i(uniform("uPalettedClipMap"), records[offset + 14]);
+								gl.uniform1f(uniform("uLuminosity"), records[offset + 15]);
+								gl.uniform1f(uniform("uAlphaTest"), 0.5);
 								gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_INT, part * 6 * 4);
 							}
+							const expected = new Uint8Array(canvas.width * canvas.height * 4);
+							gl.readPixels(
+								0,
+								0,
+								canvas.width,
+								canvas.height,
+								gl.RGBA,
+								gl.UNSIGNED_BYTE,
+								expected,
+							);
+							posePages.upload(packedEntities, clockSeconds);
+							// Uploads use texture unit zero. Restore the fixture's sampled bindings explicitly.
+							for (const [unit, texture] of textures.entries()) {
+								gl.activeTexture(gl.TEXTURE0 + unit);
+								gl.bindTexture(gl.TEXTURE_2D, texture);
+							}
+							const packed = posePages.get("fixture");
+							gl.activeTexture(gl.TEXTURE0 + OBJECT_TEXTURE_UNITS.poses);
+							gl.bindTexture(gl.TEXTURE_2D, packed.texture);
+							const mergedUniform = configure(merged);
+							gl.uniform1i(mergedUniform("uFirstPoseRow"), packed.firstRow);
+							gl.clear(gl.COLOR_BUFFER_BIT);
+							gl.drawElements(gl.TRIANGLES, 12, gl.UNSIGNED_INT, 0);
+							const actual = new Uint8Array(expected.length);
 							gl.readPixels(
 								0,
 								0,
@@ -594,146 +704,226 @@ export async function probeDynamicMaterialTables() {
 								gl.UNSIGNED_BYTE,
 								actual,
 							);
-							if (gl.getError() !== gl.NO_ERROR)
-								throw new Error("Static material-table probe GL error.");
-							if (actual.some((value, index) => value !== expected[index]))
-								throw new Error(
-									`Static material-table mismatch kind=${kind} wrap=${wrap} rejection=${rejection}.`,
-								);
-							staticTableCases += 1;
-							configure(merged);
-						}
-						// Keep the established upload-isolation benchmark on its original two-row texture.
-						for (const [unit, texture] of textures.entries()) {
-							gl.activeTexture(gl.TEXTURE0 + unit);
-							gl.bindTexture(gl.TEXTURE_2D, texture);
-						}
-						gl.uniform1i(mergedUniform("uFirstPoseRow"), 0);
-						if (kind === 3 && wrap === 1 && !rejection && partOpacity === 1) {
-							// Pre-resolve locations and typed-array views: do not bill shader discovery or
-							// transient view allocation to the per-part reference submission.
-							const names = [
-								"uLocalToLandblock",
-								"uMaterialColor",
-								"uBaseRect",
-								"uPaletteRect",
-								"uWrapRepeat",
-								"uPalettedClipMap",
-								"uLuminosity",
-							] as const;
-							const locations = Object.fromEntries(
-								names.map((name) => [name, uniform(name)]),
+							const error = gl.getError();
+							if (error !== gl.NO_ERROR)
+								throw new Error(`Material-table probe GL error ${error}.`);
+							if (!expected.some((value) => value !== 0))
+								throw new Error("Reference probe rendered no pixels.");
+							const mismatch = actual.findIndex(
+								(value, index) => value !== expected[index],
 							);
-							const referenceParts = [0, 1].map((part) => ({
-								pose: poses.subarray(part * 20, part * 20 + 16),
-								color: records.subarray(part * 20, part * 20 + 4),
-								base: records.subarray(part * 20 + 4, part * 20 + 8),
-								palette: records.subarray(part * 20 + 8, part * 20 + 12),
-								wrap: records[part * 20 + 13],
-								clip: records[part * 20 + 14],
-								luminosity: records[part * 20 + 15],
-								offset: part * 6 * Uint32Array.BYTES_PER_ELEMENT,
-							}));
-							const referenceSubmit = () => {
-								for (const part of referenceParts) {
+							if (mismatch !== -1)
+								throw new Error(
+									`Material-table mismatch kind=${kind} wrap=${wrap} byte=${mismatch}: ${actual[mismatch]} != ${expected[mismatch]}.`,
+								);
+							cases.push({
+								textureScenario: scenario.name,
+								clockSeconds,
+								kind,
+								wrap,
+								rejection,
+								partOpacity,
+								testedPixels: canvas.width * canvas.height,
+							});
+							if (partOpacity === 1 && scenario.name === "stop") {
+								// Static geometry selects material rows independently of its draw transform.
+								// Keep source positions and separate transforms here to compare pixels exactly;
+								// geometry baking and range merging have their own later verification boundary.
+								const staticUniform = configure(staticTable);
+								gl.clear(gl.COLOR_BUFFER_BIT);
+								for (let part = 0; part < 2; part += 1) {
 									gl.uniformMatrix4fv(
-										locations.uLocalToLandblock,
+										staticUniform("uLocalToLandblock"),
 										false,
-										part.pose,
+										poses.subarray(
+											part * DYNAMIC_POSE_TEXELS * 4,
+											part * DYNAMIC_POSE_TEXELS * 4 + 16,
+										),
 									);
-									gl.uniform4fv(locations.uMaterialColor, part.color);
-									gl.uniform4fv(locations.uBaseRect, part.base);
-									gl.uniform4fv(locations.uPaletteRect, part.palette);
-									gl.uniform1i(locations.uWrapRepeat, part.wrap);
-									gl.uniform1i(locations.uPalettedClipMap, part.clip);
-									gl.uniform1f(locations.uLuminosity, part.luminosity);
 									gl.drawElements(
 										gl.TRIANGLES,
 										6,
 										gl.UNSIGNED_INT,
-										part.offset,
+										part * 6 * 4,
 									);
 								}
-							};
-							const tableSubmit = () => {
-								// Pose upload remains frame work; immutable material records do not.
-								gl.texSubImage2D(
-									gl.TEXTURE_2D,
+								gl.readPixels(
 									0,
 									0,
-									0,
-									5,
-									2,
+									canvas.width,
+									canvas.height,
 									gl.RGBA,
-									gl.FLOAT,
+									gl.UNSIGNED_BYTE,
+									actual,
+								);
+								if (gl.getError() !== gl.NO_ERROR)
+									throw new Error("Static material-table probe GL error.");
+								if (actual.some((value, index) => value !== expected[index]))
+									throw new Error(
+										`Static material-table mismatch kind=${kind} wrap=${wrap} rejection=${rejection}.`,
+									);
+								staticTableCases += 1;
+								configure(merged);
+							}
+							// Keep the established upload-isolation benchmark on its original two-row texture.
+							for (const [unit, texture] of textures.entries()) {
+								gl.activeTexture(gl.TEXTURE0 + unit);
+								gl.bindTexture(gl.TEXTURE_2D, texture);
+							}
+							gl.uniform1i(mergedUniform("uFirstPoseRow"), 0);
+							if (
+								kind === 3 &&
+								wrap === 1 &&
+								!rejection &&
+								partOpacity === 1 &&
+								scenario.name === "stop"
+							) {
+								// Pre-resolve locations and typed-array views: do not bill shader discovery or
+								// transient view allocation to the per-part reference submission.
+								const names = [
+									"uLocalToLandblock",
+									"uMaterialColor",
+									"uBaseRect",
+									"uPaletteRect",
+									"uWrapRepeat",
+									"uPalettedClipMap",
+									"uLuminosity",
+								] as const;
+								const locations = Object.fromEntries(
+									names.map((name) => [name, uniform(name)]),
+								);
+								const referenceParts = [0, 1].map((part) => ({
+									pose: poses.subarray(
+										part * DYNAMIC_POSE_TEXELS * 4,
+										part * DYNAMIC_POSE_TEXELS * 4 + 16,
+									),
+									color: records.subarray(
+										part * OBJECT_MATERIAL_TEXELS * 4,
+										part * OBJECT_MATERIAL_TEXELS * 4 + 4,
+									),
+									base: records.subarray(
+										part * OBJECT_MATERIAL_TEXELS * 4 + 4,
+										part * OBJECT_MATERIAL_TEXELS * 4 + 8,
+									),
+									palette: records.subarray(
+										part * OBJECT_MATERIAL_TEXELS * 4 + 8,
+										part * OBJECT_MATERIAL_TEXELS * 4 + 12,
+									),
+									wrap: records[part * OBJECT_MATERIAL_TEXELS * 4 + 13],
+									clip: records[part * OBJECT_MATERIAL_TEXELS * 4 + 14],
+									luminosity: records[part * OBJECT_MATERIAL_TEXELS * 4 + 15],
+									offset: part * 6 * Uint32Array.BYTES_PER_ELEMENT,
+								}));
+								const referenceSubmit = () => {
+									for (const part of referenceParts) {
+										gl.uniformMatrix4fv(
+											locations.uLocalToLandblock,
+											false,
+											part.pose,
+										);
+										gl.uniform4fv(locations.uMaterialColor, part.color);
+										gl.uniform4fv(locations.uBaseRect, part.base);
+										gl.uniform4fv(locations.uPaletteRect, part.palette);
+										gl.uniform1i(locations.uWrapRepeat, part.wrap);
+										gl.uniform1i(locations.uPalettedClipMap, part.clip);
+										gl.uniform1f(locations.uLuminosity, part.luminosity);
+										gl.drawElements(
+											gl.TRIANGLES,
+											6,
+											gl.UNSIGNED_INT,
+											part.offset,
+										);
+									}
+								};
+								const tableSubmit = () => {
+									// Pose upload remains frame work; immutable material records do not.
+									gl.texSubImage2D(
+										gl.TEXTURE_2D,
+										0,
+										0,
+										0,
+										DYNAMIC_POSE_TEXELS,
+										2,
+										gl.RGBA,
+										gl.FLOAT,
+										poses,
+									);
+									gl.drawElements(gl.TRIANGLES, 12, gl.UNSIGNED_INT, 0);
+								};
+								for (let sample = 0; sample < 3; sample += 1) {
+									configure(reference);
+									timings.push({
+										strategy: "uniform",
+										sample: await measureSubmission(gl, referenceSubmit),
+									});
+									configure(merged);
+									gl.activeTexture(gl.TEXTURE0 + OBJECT_TEXTURE_UNITS.poses);
+									timings.push({
+										strategy: "table",
+										sample: await measureSubmission(gl, tableSubmit),
+									});
+									timings.push({
+										strategy: "table-static",
+										sample: await measureSubmission(gl, () =>
+											gl.drawElements(gl.TRIANGLES, 12, gl.UNSIGNED_INT, 0),
+										),
+									});
+								}
+								// Pack distinct entity rows and upload before any draw consumes them. This
+								// isolates streaming upload hazards from vertex/fragment table lookup cost.
+								const packed = new Float32Array(
+									poses.length * SUBMISSION_REPETITIONS,
+								);
+								for (
+									let entity = 0;
+									entity < SUBMISSION_REPETITIONS;
+									entity += 1
+								)
+									packed.set(poses, entity * poses.length);
+								upload(
+									OBJECT_TEXTURE_UNITS.poses,
+									DYNAMIC_POSE_TEXELS,
+									2 * SUBMISSION_REPETITIONS,
+									packed,
+								);
+								const poseOffset = requireWebGL2Uniform(
+									gl,
+									merged,
+									"uFirstPoseRow",
+								);
+								let entity = 0;
+								for (let sample = 0; sample < 3; sample += 1) {
+									timings.push({
+										strategy: "table-packed",
+										sample: await measureSubmission(gl, () => {
+											if (entity === 0)
+												gl.texSubImage2D(
+													gl.TEXTURE_2D,
+													0,
+													0,
+													0,
+													DYNAMIC_POSE_TEXELS,
+													2 * SUBMISSION_REPETITIONS,
+													gl.RGBA,
+													gl.FLOAT,
+													packed,
+												);
+											gl.uniform1i(poseOffset, entity * 2);
+											gl.drawElements(gl.TRIANGLES, 12, gl.UNSIGNED_INT, 0);
+											entity = (entity + 1) % SUBMISSION_REPETITIONS;
+										}),
+									});
+								}
+								gl.uniform1i(poseOffset, 0);
+								upload(
+									OBJECT_TEXTURE_UNITS.poses,
+									DYNAMIC_POSE_TEXELS,
+									2,
 									poses,
 								);
-								gl.drawElements(gl.TRIANGLES, 12, gl.UNSIGNED_INT, 0);
-							};
-							for (let sample = 0; sample < 3; sample += 1) {
-								configure(reference);
-								timings.push({
-									strategy: "uniform",
-									sample: await measureSubmission(gl, referenceSubmit),
-								});
-								configure(merged);
-								gl.activeTexture(gl.TEXTURE0 + OBJECT_TEXTURE_UNITS.poses);
-								timings.push({
-									strategy: "table",
-									sample: await measureSubmission(gl, tableSubmit),
-								});
-								timings.push({
-									strategy: "table-static",
-									sample: await measureSubmission(gl, () =>
-										gl.drawElements(gl.TRIANGLES, 12, gl.UNSIGNED_INT, 0),
-									),
-								});
 							}
-							// Pack distinct entity rows and upload before any draw consumes them. This
-							// isolates streaming upload hazards from vertex/fragment table lookup cost.
-							const packed = new Float32Array(
-								poses.length * SUBMISSION_REPETITIONS,
-							);
-							for (let entity = 0; entity < SUBMISSION_REPETITIONS; entity += 1)
-								packed.set(poses, entity * poses.length);
-							upload(
-								OBJECT_TEXTURE_UNITS.poses,
-								5,
-								2 * SUBMISSION_REPETITIONS,
-								packed,
-							);
-							const poseOffset = requireWebGL2Uniform(
-								gl,
-								merged,
-								"uFirstPoseRow",
-							);
-							let entity = 0;
-							for (let sample = 0; sample < 3; sample += 1) {
-								timings.push({
-									strategy: "table-packed",
-									sample: await measureSubmission(gl, () => {
-										if (entity === 0)
-											gl.texSubImage2D(
-												gl.TEXTURE_2D,
-												0,
-												0,
-												0,
-												5,
-												2 * SUBMISSION_REPETITIONS,
-												gl.RGBA,
-												gl.FLOAT,
-												packed,
-											);
-										gl.uniform1i(poseOffset, entity * 2);
-										gl.drawElements(gl.TRIANGLES, 12, gl.UNSIGNED_INT, 0);
-										entity = (entity + 1) % SUBMISSION_REPETITIONS;
-									}),
-								});
-							}
-							gl.uniform1i(poseOffset, 0);
-							upload(OBJECT_TEXTURE_UNITS.poses, 5, 2, poses);
 						}
-					}
+		}
 		// Exercise a packed entity at the device's last legal rows, independently of the
 		// small content fixtures. Capacity limits must be queried, not copied from this GPU.
 		const maximumRows = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
@@ -747,9 +937,16 @@ export async function probeDynamicMaterialTables() {
 			gl.UNSIGNED_BYTE,
 			boundaryReference,
 		);
-		const boundaryPoses = new Float32Array(maximumRows * 20);
-		boundaryPoses.set(poses, (maximumRows - 2) * 20);
-		upload(OBJECT_TEXTURE_UNITS.poses, 5, maximumRows, boundaryPoses);
+		const boundaryPoses = new Float32Array(
+			maximumRows * DYNAMIC_POSE_TEXELS * 4,
+		);
+		boundaryPoses.set(poses, (maximumRows - 2) * DYNAMIC_POSE_TEXELS * 4);
+		upload(
+			OBJECT_TEXTURE_UNITS.poses,
+			DYNAMIC_POSE_TEXELS,
+			maximumRows,
+			boundaryPoses,
+		);
 		gl.uniform1i(
 			requireWebGL2Uniform(gl, merged, "uFirstPoseRow"),
 			maximumRows - 2,
@@ -782,7 +979,8 @@ export async function probeDynamicMaterialTables() {
 			boundaryPoseRow: maximumRows - 2,
 			timings,
 			poseBytes: poses.byteLength,
-			materialBytes: 2 * 20 * 4,
+			materialBytes:
+				2 * OBJECT_MATERIAL_TEXELS * 4 * Float32Array.BYTES_PER_ELEMENT,
 			maxTextureSize: gl.getParameter(gl.MAX_TEXTURE_SIZE),
 			maxVertexTextureUnits: gl.getParameter(gl.MAX_VERTEX_TEXTURE_IMAGE_UNITS),
 			maxFragmentTextureUnits: gl.getParameter(gl.MAX_TEXTURE_IMAGE_UNITS),

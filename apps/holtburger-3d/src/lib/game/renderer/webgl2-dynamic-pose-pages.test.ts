@@ -15,6 +15,7 @@ function parts(count: number) {
 		matrix.m33 = 4;
 		matrix.m41 = index + 10;
 		return {
+			renderState: { translucency: 0, textureVelocity: [0, 0] as const },
 			frameInstance: {
 				sourceToLandblock: matrix,
 				color: { r: 0.25, g: 0.5, b: 1, a: index === 0 ? 0 : 0.75 },
@@ -58,6 +59,36 @@ function setup() {
 }
 
 describe("packed dynamic pose pages", () => {
+	it("samples independent part rates against one clock and refreshes phase without changing poses", () => {
+		const { gl, pages } = setup();
+		const moving = parts(2).map((part, index) => ({
+			...part,
+			renderState: {
+				translucency: 0,
+				textureVelocity: [index === 0 ? 0.25 : -0.125, 0] as readonly [
+					number,
+					number,
+				],
+			},
+		}));
+		const entities = new Map([
+			["moving", moving],
+			["stationary", parts(1)],
+		]);
+		pages.upload(entities, 2);
+		const data = gl.texSubImage2D.mock.lastCall?.[8] as Float32Array;
+		const stride = DYNAMIC_POSE_TEXELS * 4;
+		expect(data[20]).toBe(0.5);
+		expect(data[stride + 20]).toBe(0.75);
+		expect(data[2 * stride + 20]).toBe(0);
+		pages.upload(entities, 3);
+		expect(data[20]).toBe(0.75);
+		expect(data[stride + 20]).toBe(0.625);
+		expect(pages.getResourceUsage().uploadedBytes).toBe(
+			3 * stride * Float32Array.BYTES_PER_ELEMENT,
+		);
+	});
+
 	it("keeps entities whole across pages, including an exact last-row fit", () => {
 		const { gl, pages } = setup();
 		pages.upload(
@@ -66,6 +97,7 @@ describe("packed dynamic pose pages", () => {
 				["b", parts(5)],
 				["c", parts(3)],
 			]),
+			0,
 		);
 		expect(pages.get("a").firstRow).toBe(0);
 		expect(pages.get("b").firstRow).toBe(0);
@@ -82,7 +114,7 @@ describe("packed dynamic pose pages", () => {
 	});
 	it("writes column-major nonuniform transforms and zero/full part modifiers", () => {
 		const { gl, pages } = setup();
-		pages.upload(new Map([["pose", parts(2)]]));
+		pages.upload(new Map([["pose", parts(2)]]), 0);
 		const data = gl.texSubImage2D.mock.lastCall?.[8] as Float32Array;
 		expect([...data.slice(0, 16)]).toEqual([
 			2, 0, 0, 0, 0, 3, 0, 0, 0, 0, 4, 0, 10, 0, 0, 1,
@@ -98,6 +130,7 @@ describe("packed dynamic pose pages", () => {
 				["a", parts(PAGE_ROWS)],
 				["b", parts(1)],
 			]),
+			0,
 		);
 		const firstPage = pages.get("a").texture;
 		const rowBytes = DYNAMIC_POSE_TEXELS * 4 * Float32Array.BYTES_PER_ELEMENT;
@@ -106,7 +139,7 @@ describe("packed dynamic pose pages", () => {
 			uploadedBytes: (PAGE_ROWS + 1) * rowBytes,
 		});
 		gl.texSubImage2D.mockClear();
-		pages.upload(new Map([["c", parts(2)]]));
+		pages.upload(new Map([["c", parts(2)]]), 0);
 		expect(pages.get("c").texture).toBe(firstPage);
 		expect(gl.texStorage2D).toHaveBeenCalledTimes(2);
 		expect(gl.texSubImage2D).toHaveBeenCalledTimes(1);
@@ -116,7 +149,7 @@ describe("packed dynamic pose pages", () => {
 			allocatedBytes: 2 * PAGE_ROWS * rowBytes,
 			uploadedBytes: 2 * rowBytes,
 		});
-		pages.upload(new Map());
+		pages.upload(new Map(), 0);
 		expect(pages.getResourceUsage()).toEqual({
 			allocatedBytes: 2 * PAGE_ROWS * rowBytes,
 			uploadedBytes: 0,
@@ -130,7 +163,7 @@ describe("packed dynamic pose pages", () => {
 	it("rejects a single oversized entity before allocating a page", () => {
 		const { gl, pages } = setup();
 		expect(() =>
-			pages.upload(new Map([["oversized", parts(PAGE_ROWS + 1)]])),
+			pages.upload(new Map([["oversized", parts(PAGE_ROWS + 1)]]), 0),
 		).toThrow(
 			`requires ${PAGE_ROWS + 1} pose rows; device limit is ${PAGE_ROWS}`,
 		);
@@ -138,7 +171,7 @@ describe("packed dynamic pose pages", () => {
 	});
 	it("does not allocate or upload for empty selections", () => {
 		const { gl, pages } = setup();
-		pages.upload(new Map([["empty", []]]));
+		pages.upload(new Map([["empty", []]]), 0);
 		expect(gl.createTexture).not.toHaveBeenCalled();
 		expect(gl.texSubImage2D).not.toHaveBeenCalled();
 		expect(() => pages.get("empty")).toThrow("not included in the pose upload");
@@ -146,7 +179,7 @@ describe("packed dynamic pose pages", () => {
 	it("propagates page allocation failure without publishing an address", () => {
 		const { gl, pages } = setup();
 		gl.createTexture.mockReturnValueOnce(null);
-		expect(() => pages.upload(new Map([["a", parts(1)]]))).toThrow(
+		expect(() => pages.upload(new Map([["a", parts(1)]]), 0)).toThrow(
 			"Failed to allocate",
 		);
 		expect(() => pages.get("a")).toThrow("not included in the pose upload");

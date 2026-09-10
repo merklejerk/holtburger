@@ -69,7 +69,11 @@ export async function probeClientAudio() {
 						throw new Error("Unexpected sound-table hook");
 					},
 				},
-				effects: { applySetOmega() {}, applyTransparentPart() {} },
+				effects: {
+					applySetOmega() {},
+					applyTransparentPart() {},
+					applyTextureVelocity() {},
+				},
 				scale: { applyScale: () => "executed" },
 				particles: {
 					createEmitter: () => "unprepared",

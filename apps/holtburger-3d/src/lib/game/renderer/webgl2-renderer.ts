@@ -951,7 +951,7 @@ export class WebGL2Renderer implements Renderer {
 	/** Lazy sky variant routing celestial and weather geometry into the packed outdoor tile. */
 	#portalAtlasSkyProgram: WebGL2SkyProgram | null = null;
 	/** Shared clock seconds for the current frame, driving derived texture-velocity phase. */
-	#skyClockSeconds = 0;
+	#frameClockSeconds = 0;
 	readonly #offsetScratch = new Vec3(0, 0, 0);
 	/**
 	 * Draw facts compiled once per draw unit instead of once per frame.
@@ -1007,7 +1007,7 @@ export class WebGL2Renderer implements Renderer {
 	/** Only roots selected by a merged draw consumer require GPU pose rows. */
 	readonly #poseUploadParts = new Map<
 		SceneNodeId,
-		readonly Pick<ActiveDynamicPart, "frameInstance">[]
+		readonly Pick<ActiveDynamicPart, "frameInstance" | "renderState">[]
 	>();
 	readonly #resources: WebGL2ResourceManager;
 	readonly #textureSamplers: WebGL2TextureSamplerCatalog;
@@ -1531,7 +1531,7 @@ export class WebGL2Renderer implements Renderer {
 			}
 			this.#compiledEnvCellRenderMode = input.frameSettings.envCellRenderMode;
 		}
-		this.#skyClockSeconds = input.timeSeconds;
+		this.#frameClockSeconds = input.timeSeconds;
 		this.#frameWorldIndicator = input.worldIndicator ?? null;
 		this.#frameSelectionTarget = input.selectionTarget;
 		this.#frameViewerEntityIdentity = input.viewerEntityIdentity;
@@ -1660,7 +1660,10 @@ export class WebGL2Renderer implements Renderer {
 				);
 				return { view: { ...geometry, ...contributions }, shadows };
 			});
-			this.#dynamicPosePages.upload(this.#poseUploadParts);
+			this.#dynamicPosePages.upload(
+				this.#poseUploadParts,
+				this.#frameClockSeconds,
+			);
 			for (const plan of plans) {
 				this.#executeOutdoorShadows(plan.shadows, profile);
 				this.#drawFlatView(
@@ -1700,7 +1703,10 @@ export class WebGL2Renderer implements Renderer {
 					pipeline,
 				);
 			});
-			this.#dynamicPosePages.upload(this.#poseUploadParts);
+			this.#dynamicPosePages.upload(
+				this.#poseUploadParts,
+				this.#frameClockSeconds,
+			);
 			for (const plan of plans) {
 				this.#executePortalScopeAtlasFrame(
 					plan,
@@ -1925,7 +1931,10 @@ export class WebGL2Renderer implements Renderer {
 			null,
 			null,
 		);
-		this.#dynamicPosePages.upload(this.#poseUploadParts);
+		this.#dynamicPosePages.upload(
+			this.#poseUploadParts,
+			this.#frameClockSeconds,
+		);
 		this.#executePortalScopeAtlasFrame(
 			plan,
 			[
@@ -2048,7 +2057,7 @@ export class WebGL2Renderer implements Renderer {
 					view,
 					skyBatches,
 					profile,
-					this.#skyClockSeconds *
+					this.#frameClockSeconds *
 						SHARED_FRONTEND_TUNING.rendering.skyParticles.speedMultiplier,
 					SHARED_FRONTEND_TUNING.rendering.skyParticles.opacityScale,
 				);
@@ -3485,7 +3494,7 @@ export class WebGL2Renderer implements Renderer {
 		}
 		pass.draw(
 			{
-				clockSeconds: this.#skyClockSeconds,
+				clockSeconds: this.#frameClockSeconds,
 				gl: this.#gl,
 				matrixScratch: this.#skyMatrixScratch,
 				program,
@@ -3596,7 +3605,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#executeParticlePass(profile, (pass) => {
 			const context = this.#createParticleDrawContext(
 				view,
-				this.#skyClockSeconds,
+				this.#frameClockSeconds,
 				1.0,
 			);
 			pass.drawScoped(context, particlesByScope, portalPipeline);
@@ -3624,7 +3633,7 @@ export class WebGL2Renderer implements Renderer {
 					view,
 					view.skyParticles,
 					profile,
-					this.#skyClockSeconds *
+					this.#frameClockSeconds *
 						SHARED_FRONTEND_TUNING.rendering.skyParticles.speedMultiplier,
 					SHARED_FRONTEND_TUNING.rendering.skyParticles.opacityScale,
 				);
@@ -3663,7 +3672,7 @@ export class WebGL2Renderer implements Renderer {
 			view,
 			view.particles,
 			profile,
-			this.#skyClockSeconds,
+			this.#frameClockSeconds,
 			1.0,
 		);
 		this.#drawNameplates(view, null);
@@ -4116,7 +4125,7 @@ export class WebGL2Renderer implements Renderer {
 				this.#frameEntitySelectionOutline,
 				this.#renderScale,
 				selectionMask,
-				this.#skyClockSeconds,
+				this.#frameClockSeconds,
 			);
 		} finally {
 			presentationGpu?.finish();
